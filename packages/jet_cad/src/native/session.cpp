@@ -250,6 +250,24 @@ json Session::execute(const json& cmd) {
     result = json{{"surfaceId",
                    requireViewer().resize(w, h,
                                           cmd.at("pixelRatio").get<double>())}};
+  } else if (name == "pick") {
+    // Non-mutating: never touches bodies_, so it's deliberately absent from
+    // kMutating — a pick must not force a redisplay/redraw.
+    auto hit = requireViewer().pick(cmd.at("x").get<double>(),
+                                    cmd.at("y").get<double>(),
+                                    cmd.at("filter").get<std::string>(),
+                                    bodies_);
+    result = hit.has_value()
+                 ? json{{"hit",
+                        {{"entity", hit->entity}, {"body", hit->body}}}}
+                 : json{{"hit", nullptr}};
+  } else if (name == "setSelection") {
+    // Non-mutating for the same reason as pick: selection state lives on
+    // the AIS context, not bodies_; the highlight becomes visible on the
+    // next renderFrame (damage-driven), never drawn here.
+    requireViewer().setSelection(
+        cmd.at("ids").get<std::vector<std::string>>(), bodies_);
+    result = json::object();
   }
   else throw CommandError("unknown command: " + name);
 

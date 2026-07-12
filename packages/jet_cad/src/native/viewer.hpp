@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -47,8 +48,35 @@ class Viewer {
   // new surface id.
   uint32_t resize(int widthPx, int heightPx, double pixelRatio);
 
+  // Native pick + selection (Task 5). Neither draws — highlight/detection
+  // changes become visible only on the next render().
+  struct PickHit {
+    std::string entity;
+    std::string body;
+  };
+
+  // x/y are physical framebuffer pixels, origin top-left (matches
+  // AIS_InteractiveContext::MoveTo's view-pixel convention). Returns
+  // std::nullopt on a miss; throws CommandError for an unknown filter or if
+  // a detected subshape can't be mapped back to a session id (lineage bug).
+  std::optional<PickHit> pick(double x, double y, const std::string& filter,
+                              const std::map<std::string, Body>& bodies);
+  // Replaces the whole selection; empty ids clears it. Validates every id
+  // before touching AIS state so an unknown id fails atomically.
+  void setSelection(const std::vector<std::string>& ids,
+                    const std::map<std::string, Body>& bodies);
+
  private:
   void bindViewToSurface();
+  // Activates `mode` as the sole selection mode on every displayed object
+  // (no-op if already active). Selection owners for a mode are (re)computed
+  // by AIS_InteractiveContext::Activate, so this must run before any code
+  // that inspects an object's owners for that mode.
+  void activateSelectionMode(int mode);
+  // Finds the body id whose displayed AIS_Shape IS `object`; throws
+  // CommandError if `object` isn't one of ours (should not happen: only
+  // tracked AIS_Shapes are ever displayed in this context).
+  std::string bodyIdOfAis(const Handle(AIS_InteractiveObject)& object) const;
 
   struct Displayed {
     Handle(AIS_Shape) ais;
@@ -63,6 +91,9 @@ class Viewer {
   Handle(AIS_InteractiveContext) context_;
   std::map<std::string, Displayed> displayed_;
   double pixelRatio_ = 1.0;
+  // Selection mode currently activated on every displayed object; 0 (whole
+  // shape) both by default and via syncBodies' initial Display() call.
+  int activeMode_ = 0;
 };
 
 }  // namespace jetcad

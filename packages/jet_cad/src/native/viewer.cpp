@@ -10,11 +10,44 @@
 #include <V3d_DirectionalLight.hxx>
 #include <gp_Dir.hxx>
 
+#include <SelectMgr_EntityOwner.hxx>
+#include <SelectMgr_IndexedMapOfOwner.hxx>
+#include <StdSelect_BRepOwner.hxx>
+#include <TopAbs_ShapeEnum.hxx>
+
 #include <stdexcept>
 
 #include "session.hpp"
 
 namespace jetcad {
+
+namespace {
+
+// Maps a pick "filter" JSON string to the AIS_Shape selection mode that
+// exposes the matching subshape kind. Mode 0 is AIS_Shape's whole-shape
+// ("neutral point") selection mode.
+int selectionModeFor(const std::string& filter) {
+  if (filter == "body") return 0;
+  if (filter == "face") return AIS_Shape::SelectionMode(TopAbs_FACE);
+  if (filter == "edge") return AIS_Shape::SelectionMode(TopAbs_EDGE);
+  if (filter == "vertex") return AIS_Shape::SelectionMode(TopAbs_VERTEX);
+  throw CommandError("unknown pick filter: " + filter);
+}
+
+// Maps a session entity id's kind prefix (contractual: b/f/e/v) to the
+// selection mode that would have produced an owner for it.
+int selectionModeForId(const std::string& id) {
+  if (id.empty()) throw CommandError("empty entity id");
+  switch (id[0]) {
+    case 'b': return 0;
+    case 'f': return AIS_Shape::SelectionMode(TopAbs_FACE);
+    case 'e': return AIS_Shape::SelectionMode(TopAbs_EDGE);
+    case 'v': return AIS_Shape::SelectionMode(TopAbs_VERTEX);
+    default: throw CommandError("unrecognized entity id: " + id);
+  }
+}
+
+}  // namespace
 
 Viewer::Viewer(int widthPx, int heightPx, double pixelRatio)
     : pixelRatio_(pixelRatio) {
@@ -119,7 +152,12 @@ void Viewer::syncBodies(const std::map<std::string, Body>& bodies) {
     auto it = displayed_.find(id);
     if (it == displayed_.end()) {
       Handle(AIS_Shape) ais = new AIS_Shape(body.shape);
-      context_->Display(ais, AIS_Shaded, /*selection mode*/ 0,
+      // Newly displayed shapes join with whatever selection mode is
+      // currently active session-wide, not a hardcoded 0 — otherwise a body
+      // added after a pick/setSelection call switched activeMode_ (e.g. to
+      // "face") would silently be unselectable in that mode until the next
+      // mode switch flips it back.
+      context_->Display(ais, AIS_Shaded, /*selection mode*/ activeMode_,
                         /*update viewer*/ false);
       displayed_.emplace(id, Displayed{ais, body.shape});
     } else if (!it->second.shape.IsSame(body.shape)) {
@@ -201,6 +239,145 @@ uint32_t Viewer::resize(int widthPx, int heightPx, double pixelRatio) {
   bindViewToSurface();
   pixelRatio_ = pixelRatio;
   return surfaceId;
+}
+
+void Viewer::activateSelectionMode(int mode) {
+  if (mode == activeMode_) return;
+  for (auto& [id, displayed] : displayed_) {
+    context_->Deactivate(displayed.ais);
+    context_->Activate(displayed.ais, mode);
+  }
+  activeMode_ = mode;
+}
+
+std::string Viewer::bodyIdOfAis(
+    const Handle(AIS_InteractiveObject)& object) const {
+  for (const auto& [id, displayed] : displayed_) {
+    if (displayed.ais == object) return id;
+  }
+  throw CommandError("detected object is not a tracked body");
+}
+
+std::optional<Viewer::PickHit> Viewer::pick(
+    double x, double y, const std::string& filter,
+    const std::map<std::string, Body>& bodies) {
+  gl_->makeCurrent();
+  activateSelectionMode(selectionModeFor(filter));
+  // theToRedrawOnUpdate=false: dynamic-highlight redraw is irrelevant here
+  // (this is an offscreen headless probe, not an interactive cursor move),
+  // and render() is the only place that ever draws.
+  context_->MoveTo(static_cast<int>(x), static_cast<int>(y), view_,
+                   /*theToRedrawOnUpdate*/ false);
+  if (!context_->HasDetected()) return std::nullopt;
+
+  Handle(SelectMgr_EntityOwner) owner = context_->DetectedOwner();
+  Handle(AIS_InteractiveObject) object =
+      Handle(AIS_InteractiveObject)::DownCast(owner->Selectable());
+  const std::string bodyId = bodyIdOfAis(object);
+  if (filter == "body") return PickHit{bodyId, bodyId};
+
+  // Subshape filters must resolve to a session id or throw — never guess by
+  // falling back to a body-level hit; an unmapped detected subshape is a
+  // lineage bug (the AIS display list should always mirror bodies_).
+  Handle(StdSelect_BRepOwner) brepOwner =
+      Handle(StdSelect_BRepOwner)::DownCast(owner);
+  if (brepOwner.IsNull() || !brepOwner->HasShape()) {
+    throw CommandError(
+        "picked subshape has no owner shape (lineage bug)");
+  }
+  const TopoDS_Shape& sub = brepOwner->Shape();
+  const Body& body = bodies.at(bodyId);
+  const auto* list = filter == "face"   ? &body.faces
+                     : filter == "edge" ? &body.edges
+                                        : &body.vertices;
+  for (const auto& [subId, shape] : *list) {
+    if (shape.IsSame(sub)) return PickHit{subId, bodyId};
+  }
+  throw CommandError("picked subshape has no session id (lineage bug)");
+}
+
+void Viewer::setSelection(const std::vector<std::string>& ids,
+                          const std::map<std::string, Body>& bodies) {
+  gl_->makeCurrent();
+
+  // Resolve every id to its owning body + target shape + selection mode
+  // FIRST: an unknown id must not partially apply the selection.
+  struct Target {
+    std::string bodyId;
+    TopoDS_Shape shape;
+    int mode;
+  };
+  std::vector<Target> targets;
+  targets.reserve(ids.size());
+  for (const auto& id : ids) {
+    const int mode = selectionModeForId(id);
+    if (mode == 0) {
+      auto it = bodies.find(id);
+      if (it == bodies.end() || displayed_.find(id) == displayed_.end()) {
+        throw CommandError("unknown body id: " + id);
+      }
+      targets.push_back({id, it->second.shape, 0});
+      continue;
+    }
+    bool found = false;
+    for (const auto& [bodyId, body] : bodies) {
+      const auto* list = id[0] == 'f'   ? &body.faces
+                         : id[0] == 'e' ? &body.edges
+                                        : &body.vertices;
+      for (const auto& [subId, shape] : *list) {
+        if (subId == id) {
+          targets.push_back({bodyId, shape, mode});
+          found = true;
+          break;
+        }
+      }
+      if (found) break;
+    }
+    if (!found) throw CommandError("unknown entity id: " + id);
+  }
+
+  context_->ClearSelected(false);
+  for (const auto& target : targets) {
+    auto dit = displayed_.find(target.bodyId);
+    if (dit == displayed_.end()) {
+      // Resolved against `bodies` above but not currently displayed — the
+      // AIS list should always mirror bodies_ (syncBodies runs after every
+      // mutating command), so this would itself be a lineage bug.
+      throw CommandError("body not displayed: " + target.bodyId);
+    }
+    // Activating (re)computes/attaches this mode's selection owners on
+    // every displayed object, matching the mode we're about to search.
+    activateSelectionMode(target.mode);
+
+    Handle(SelectMgr_IndexedMapOfOwner) owners =
+        new SelectMgr_IndexedMapOfOwner();
+    context_->EntityOwners(owners, dit->second.ais, target.mode);
+
+    bool selected = false;
+    if (target.mode == 0) {
+      // Whole-shape mode: there is exactly one owner for the object; no
+      // subshape IsSame match is meaningful (or needed).
+      if (owners->Extent() >= 1) {
+        context_->AddOrRemoveSelected(owners->FindKey(1), false);
+        selected = true;
+      }
+    } else {
+      for (int i = 1; i <= owners->Extent(); ++i) {
+        Handle(StdSelect_BRepOwner) brepOwner =
+            Handle(StdSelect_BRepOwner)::DownCast(owners->FindKey(i));
+        if (!brepOwner.IsNull() && brepOwner->HasShape() &&
+            brepOwner->Shape().IsSame(target.shape)) {
+          context_->AddOrRemoveSelected(owners->FindKey(i), false);
+          selected = true;
+          break;
+        }
+      }
+    }
+    if (!selected) {
+      context_->ClearSelected(false);
+      throw CommandError("no selectable owner for id");
+    }
+  }
 }
 
 }  // namespace jetcad
