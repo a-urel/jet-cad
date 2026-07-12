@@ -1,92 +1,49 @@
 # jet_cad
 
-A new Flutter FFI plugin project.
+A headless-first CAD engine and viewport package for Flutter, built on Open
+CASCADE Technology (OCCT).
 
-## Getting Started
+## Status
 
-This project is a starting point for a Flutter
-[FFI plugin](https://flutter.dev/to/ffi-package),
-a specialized package that includes native code directly invoked with Dart FFI.
+This is Plan 1: the pure-Dart CAD document layer only. `jet_cad` currently
+ships:
 
-## Project structure
+- Typed entity ids and a semantic `Entity`/`EntityKind` model
+- A sealed `Operation` hierarchy (make box, extrude, boolean, fillet,
+  transform, STEP import/export) with JSON round-tripping
+- `CadDocument`: an operation timeline with bounded undo/redo and a
+  `DocChange` event stream
+- Versioned JSON persistence (`CadDocumentCodec`)
+- An abstract `KernelBridge` contract plus `FakeKernelBridge`, an in-memory
+  implementation for tests and for consumers who want to exercise document
+  logic without a native build
 
-This template uses the following structure:
+There is no native geometry kernel or viewport yet — every modeling
+operation is routed through `KernelBridge`, and `FakeKernelBridge` tracks
+topology counts only, not real geometry.
 
-* `src`: Contains the native source code, and a CmakeFile.txt file for building
-  that source code into a dynamic library.
+## Usage
 
-* `lib`: Contains the Dart code that defines the API of the plugin, and which
-  calls into the native code using `dart:ffi`.
+```dart
+import 'package:jet_cad/jet_cad.dart';
 
-* platform folders (`android`, `ios`, `windows`, etc.): Contains the build files
-  for building and bundling the native code library with the platform application.
+Future<void> main() async {
+  final doc = await CadDocument.create(FakeKernelBridge());
 
-## Building and bundling native code
+  final box = await doc.makeBox(const Vec3(10, 10, 10));
+  final other = await doc.makeBox(const Vec3(4, 4, 4));
+  await doc.booleanCombine(box, other, BoolOp.cut);
 
-The `pubspec.yaml` specifies FFI plugins as follows:
+  await doc.undo(); // back to the two separate boxes
+  await doc.redo(); // forward to the cut result again
 
-```yaml
-  plugin:
-    platforms:
-      some_platform:
-        ffiPlugin: true
+  final json = CadDocumentCodec.encode(doc);
+  await doc.dispose();
+}
 ```
 
-This configuration invokes the native build for the various target platforms
-and bundles the binaries in Flutter applications using these FFI plugins.
+## Roadmap
 
-This can be combined with dartPluginClass, such as when FFI is used for the
-implementation of one platform in a federated plugin:
-
-```yaml
-  plugin:
-    implements: some_other_plugin
-    platforms:
-      some_platform:
-        dartPluginClass: SomeClass
-        ffiPlugin: true
-```
-
-A plugin can have both FFI and method channels:
-
-```yaml
-  plugin:
-    platforms:
-      some_platform:
-        pluginClass: SomeName
-        ffiPlugin: true
-```
-
-The native build systems that are invoked by FFI (and method channel) plugins are:
-
-* For Android: Gradle, which invokes the Android NDK for native builds.
-  * See the documentation in android/build.gradle.
-* For iOS and MacOS: Xcode, via CocoaPods.
-  * See the documentation in ios/jet_cad.podspec.
-  * See the documentation in macos/jet_cad.podspec.
-* For Linux and Windows: CMake.
-  * See the documentation in linux/CMakeLists.txt.
-  * See the documentation in windows/CMakeLists.txt.
-
-## Binding to native code
-
-To use the native code, bindings in Dart are needed.
-To avoid writing these by hand, they are generated from the header file
-(`src/jet_cad.h`) by `package:ffigen`.
-Regenerate the bindings by running `dart run ffigen --config ffigen.yaml`.
-
-## Invoking native code
-
-Very short-running native functions can be directly invoked from any isolate.
-For example, see `sum` in `lib/jet_cad.dart`.
-
-Longer-running functions should be invoked on a helper isolate to avoid
-dropping frames in Flutter applications.
-For example, see `sumAsync` in `lib/jet_cad.dart`.
-
-## Flutter help
-
-For help getting started with Flutter, view our
-[online documentation](https://docs.flutter.dev), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
-
+The native OCCT-backed `KernelBridge` implementation (FFI) and the Flutter
+viewport widget arrive in later milestones. Until then, `jet_cad` is usable
+as a standalone document/undo-timeline library over `FakeKernelBridge`.
