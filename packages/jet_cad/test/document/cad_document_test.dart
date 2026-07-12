@@ -66,6 +66,14 @@ void main() {
     expect(doc.entities.containsKey(body), isTrue);
   });
 
+  test('fillet with no edges throws ArgumentError and mutates nothing',
+      () async {
+    await doc.makeBox(const Vec3(1, 1, 1));
+    await expectLater(doc.fillet(const [], 0.2), throwsArgumentError);
+    expect(doc.operations, hasLength(1));
+    expect(doc.head, 1);
+  });
+
   test('unknown input id throws ArgumentError and mutates nothing', () async {
     await expectLater(
       doc.extrude(const FaceId('nope'), 5),

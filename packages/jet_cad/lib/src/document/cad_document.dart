@@ -198,6 +198,9 @@ class CadDocument {
   }
 
   Future<List<FaceId>> fillet(List<EdgeId> edges, double radius) async {
+    if (edges.isEmpty) {
+      throw ArgumentError('fillet needs at least one edge');
+    }
     for (final e in edges) {
       _requireEntity(e);
     }
