@@ -33,4 +33,17 @@ void main() {
     });
     expect(restored.remap.mapping, isEmpty);
   });
+
+  test('PickResult JSON round-trips and equates', () {
+    const result = PickResult(entity: EntityId('f3'), body: BodyId('b1'));
+    final restored = PickResult.fromJson(result.toJson());
+    expect(restored, result);
+    expect(restored.hashCode, result.hashCode);
+    expect(restored.entity, const EntityId('f3'));
+    expect(restored.body, const BodyId('b1'));
+  });
+
+  test('TextureTarget is a RenderTarget', () {
+    expect(const TextureTarget(), isA<RenderTarget>());
+  });
 }

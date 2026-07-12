@@ -41,6 +41,45 @@ final class HeadlessTarget extends RenderTarget {
   const HeadlessTarget();
 }
 
+/// Render target for sessions that composite into a platform texture.
+///
+/// Dimensions are not part of the target: the first
+/// [KernelBridge.resizeViewport] call establishes the real surface size
+/// (layout is not known at session-creation time).
+final class TextureTarget extends RenderTarget {
+  const TextureTarget();
+}
+
+/// What a [KernelBridge.pick] may hit.
+enum PickFilter { body, face, edge, vertex }
+
+/// A successful pick: the picked entity and the body that owns it.
+///
+/// For [PickFilter.body] picks, [entity] equals [body].
+class PickResult {
+  final EntityId entity;
+  final BodyId body;
+
+  const PickResult({required this.entity, required this.body});
+
+  factory PickResult.fromJson(Map<String, Object?> json) => PickResult(
+        entity: EntityId(json['entity']! as String),
+        body: BodyId(json['body']! as String),
+      );
+
+  Map<String, Object?> toJson() => {'entity': entity.value, 'body': body.value};
+
+  @override
+  bool operator ==(Object other) =>
+      other is PickResult && other.entity == entity && other.body == body;
+
+  @override
+  int get hashCode => Object.hash(entity, body);
+
+  @override
+  String toString() => 'PickResult(${entity.value} of ${body.value})';
+}
+
 /// Opaque whole-session geometry dump (BREP data + id map in the real shim).
 class KernelSnapshot {
   final Uint8List bytes;

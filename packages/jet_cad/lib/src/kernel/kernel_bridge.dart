@@ -52,4 +52,46 @@ abstract interface class KernelBridge {
 
   Future<KernelSnapshot> saveSnapshot(SessionHandle session);
   Future<void> restoreSession(SessionHandle session, KernelSnapshot snapshot);
+
+  // Viewer/pick/selection methods (Plan 3). All coordinates are PHYSICAL
+  // pixels, origin top-left; logical->physical conversion (x devicePixelRatio)
+  // is the ViewportController's job, not the bridge's. Every method here
+  // throws KernelException on a headless (viewer not initialized) or unknown
+  // session, or on a kernel-side failure.
+
+  /// Resizes the viewport framebuffer to physical [widthPx]x[heightPx] and
+  /// records [pixelRatio]. Reallocates the platform surface — returns the NEW
+  /// surface id; the compositor-side texture must be re-wrapped after this.
+  Future<int> resizeViewport(
+      SessionHandle session, int widthPx, int heightPx, double pixelRatio);
+
+  /// Draws one frame into the viewport surface. The only draw trigger —
+  /// callers own damage tracking (render after command/camera/selection
+  /// changes, never per-vsync).
+  Future<void> renderFrame(SessionHandle session);
+
+  /// Anchors an orbit gesture at physical pixel ([xPx], [yPx]).
+  Future<void> orbitStart(SessionHandle session, double xPx, double yPx);
+
+  /// Continues the orbit anchored by [orbitStart] to ([xPx], [yPx]).
+  Future<void> orbit(SessionHandle session, double xPx, double yPx);
+
+  /// Pans the camera by ([dxPx], [dyPx]) physical pixels (+y = down).
+  Future<void> pan(SessionHandle session, double dxPx, double dyPx);
+
+  /// Scales the view by [factor] (> 1 zooms in). Throws on factor <= 0.
+  Future<void> zoom(SessionHandle session, double factor);
+
+  /// Frames all displayed bodies.
+  Future<void> fitAll(SessionHandle session);
+
+  /// Picks the topmost entity matching [filter] at ([xPx], [yPx]) physical
+  /// pixels. Returns null when nothing is hit.
+  Future<PickResult?> pick(
+      SessionHandle session, double xPx, double yPx, PickFilter filter);
+
+  /// Replaces the highlighted selection (empty list clears). Atomic: an
+  /// unknown id throws and leaves the previous selection untouched.
+  /// Selection is view state — never part of the document or undo.
+  Future<void> setSelection(SessionHandle session, List<EntityId> ids);
 }

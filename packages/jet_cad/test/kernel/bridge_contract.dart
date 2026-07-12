@@ -155,4 +155,71 @@ void runKernelBridgeContract(KernelBridge Function() createBridge) {
       throwsA(anyOf(isA<KernelException>(), isA<StateError>())),
     );
   });
+
+  test('contract: viewer methods on a headless session throw', () async {
+    await expectLater(
+        bridge.renderFrame(session), throwsA(isA<KernelException>()));
+    await expectLater(bridge.fitAll(session), throwsA(isA<KernelException>()));
+    await expectLater(bridge.resizeViewport(session, 64, 64, 1.0),
+        throwsA(isA<KernelException>()));
+    await expectLater(
+        bridge.orbitStart(session, 0, 0), throwsA(isA<KernelException>()));
+    await expectLater(
+        bridge.pan(session, 1, 1), throwsA(isA<KernelException>()));
+    await expectLater(bridge.zoom(session, 2), throwsA(isA<KernelException>()));
+    await expectLater(bridge.pick(session, 0, 0, PickFilter.body),
+        throwsA(isA<KernelException>()));
+    await expectLater(bridge.setSelection(session, const []),
+        throwsA(isA<KernelException>()));
+  });
+
+  test('contract: texture session renders, resizes, and picks empty scene',
+      () async {
+    final s = await bridge.createSession(const TextureTarget());
+    try {
+      final surfaceId = await bridge.resizeViewport(s, 128, 128, 1.0);
+      expect(surfaceId, greaterThan(0));
+      await bridge.renderFrame(s);
+      final resized = await bridge.resizeViewport(s, 256, 128, 2.0);
+      expect(resized, isNot(surfaceId),
+          reason: 'resize reallocates the surface');
+      await bridge.renderFrame(s);
+      expect(await bridge.pick(s, 64, 64, PickFilter.body), isNull,
+          reason: 'empty scene picks nothing');
+    } finally {
+      await bridge.disposeSession(s);
+    }
+  });
+
+  test('contract: camera commands accept a fitted scene', () async {
+    final s = await bridge.createSession(const TextureTarget());
+    try {
+      await bridge.resizeViewport(s, 128, 128, 1.0);
+      await bridge.makeBox(s, const Vec3(10, 10, 10));
+      await bridge.fitAll(s);
+      await bridge.orbitStart(s, 64, 64);
+      await bridge.orbit(s, 80, 70);
+      await bridge.pan(s, 5, -5);
+      await bridge.zoom(s, 1.25);
+      await bridge.renderFrame(s);
+    } finally {
+      await bridge.disposeSession(s);
+    }
+  });
+
+  test('contract: setSelection validates ids atomically', () async {
+    final s = await bridge.createSession(const TextureTarget());
+    try {
+      await bridge.resizeViewport(s, 128, 128, 1.0);
+      final box = await bridge.makeBox(s, const Vec3(10, 10, 10));
+      await bridge.setSelection(s, [box.body]);
+      await bridge.setSelection(s, const []);
+      await expectLater(
+        bridge.setSelection(s, [box.body, const EntityId('zz-unknown')]),
+        throwsA(isA<KernelException>()),
+      );
+    } finally {
+      await bridge.disposeSession(s);
+    }
+  });
 }

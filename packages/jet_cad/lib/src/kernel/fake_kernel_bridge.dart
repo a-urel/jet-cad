@@ -25,6 +25,19 @@ class FakeKernelBridge implements KernelBridge {
   /// Number of live sessions (test observability).
   int get liveSessionCount => _sessions.length;
 
+  /// Viewer observability for widget/controller tests.
+  int renderFrameCount = 0;
+  final List<String> cameraLog = [];
+  final List<(int, int, double)> viewportSizes = [];
+  final List<List<String>> selectionLog = [];
+
+  /// Returned by [pick] when the session has bodies. Tests set this to
+  /// script hits; null means "miss".
+  PickResult? nextPickResult;
+
+  final Set<int> _textureSessions = {};
+  int _surfaceCounter = 0;
+
   String _next(String prefix) => '$prefix${++_idCounter}';
 
   void _absorbIds(Iterable<String> ids) {
@@ -68,12 +81,16 @@ class FakeKernelBridge implements KernelBridge {
   Future<SessionHandle> createSession(RenderTarget target) async {
     final handle = ++_sessionCounter;
     _sessions[handle] = {};
+    if (target is TextureTarget) {
+      _textureSessions.add(handle);
+    }
     return SessionHandle(handle);
   }
 
   @override
   Future<void> disposeSession(SessionHandle session) async {
     _sessions.remove(session.value);
+    _textureSessions.remove(session.value);
   }
 
   @override
@@ -296,6 +313,85 @@ class FakeKernelBridge implements KernelBridge {
       allIds.addAll(body.subshapes);
     }
     _absorbIds(allIds);
+  }
+
+  void _requireViewer(SessionHandle session) {
+    _session(session); // validates the session exists
+    if (!_textureSessions.contains(session.value)) {
+      throw const KernelException('viewer not initialized');
+    }
+  }
+
+  @override
+  Future<int> resizeViewport(SessionHandle session, int widthPx, int heightPx,
+      double pixelRatio) async {
+    _requireViewer(session);
+    if (widthPx <= 0 || heightPx <= 0) {
+      throw const KernelException('viewport size must be positive');
+    }
+    viewportSizes.add((widthPx, heightPx, pixelRatio));
+    return ++_surfaceCounter;
+  }
+
+  @override
+  Future<void> renderFrame(SessionHandle session) async {
+    _requireViewer(session);
+    renderFrameCount++;
+  }
+
+  @override
+  Future<void> orbitStart(SessionHandle session, double xPx, double yPx) async {
+    _requireViewer(session);
+    cameraLog.add('orbitStart $xPx $yPx');
+  }
+
+  @override
+  Future<void> orbit(SessionHandle session, double xPx, double yPx) async {
+    _requireViewer(session);
+    cameraLog.add('orbit $xPx $yPx');
+  }
+
+  @override
+  Future<void> pan(SessionHandle session, double dxPx, double dyPx) async {
+    _requireViewer(session);
+    cameraLog.add('pan $dxPx $dyPx');
+  }
+
+  @override
+  Future<void> zoom(SessionHandle session, double factor) async {
+    _requireViewer(session);
+    if (factor <= 0) {
+      throw const KernelException('zoom factor must be positive');
+    }
+    cameraLog.add('zoom $factor');
+  }
+
+  @override
+  Future<void> fitAll(SessionHandle session) async {
+    _requireViewer(session);
+    cameraLog.add('fitAll');
+  }
+
+  @override
+  Future<PickResult?> pick(
+      SessionHandle session, double xPx, double yPx, PickFilter filter) async {
+    _requireViewer(session);
+    if (_session(session).isEmpty) return null;
+    return nextPickResult;
+  }
+
+  @override
+  Future<void> setSelection(SessionHandle session, List<EntityId> ids) async {
+    _requireViewer(session);
+    final bodies = _session(session);
+    for (final id in ids) {
+      final known = bodies.containsKey(id.value) ||
+          bodies.values.any((b) => b.subshapes.contains(id.value));
+      if (!known) {
+        throw KernelException('unknown entity id: ${id.value}');
+      }
+    }
+    selectionLog.add([for (final id in ids) id.value]);
   }
 }
 

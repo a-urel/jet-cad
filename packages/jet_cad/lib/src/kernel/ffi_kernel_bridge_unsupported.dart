@@ -92,6 +92,41 @@ class FfiKernelBridge implements KernelBridge {
   Future<void> restoreSession(SessionHandle session, KernelSnapshot snapshot) =>
       _unsupported();
 
+  @override
+  Future<int> resizeViewport(SessionHandle session, int widthPx, int heightPx,
+          double pixelRatio) =>
+      _unsupported();
+
+  @override
+  Future<void> renderFrame(SessionHandle session) => _unsupported();
+
+  @override
+  Future<void> orbitStart(SessionHandle session, double xPx, double yPx) =>
+      _unsupported();
+
+  @override
+  Future<void> orbit(SessionHandle session, double xPx, double yPx) =>
+      _unsupported();
+
+  @override
+  Future<void> pan(SessionHandle session, double dxPx, double dyPx) =>
+      _unsupported();
+
+  @override
+  Future<void> zoom(SessionHandle session, double factor) => _unsupported();
+
+  @override
+  Future<void> fitAll(SessionHandle session) => _unsupported();
+
+  @override
+  Future<PickResult?> pick(
+          SessionHandle session, double xPx, double yPx, PickFilter filter) =>
+      _unsupported();
+
+  @override
+  Future<void> setSelection(SessionHandle session, List<EntityId> ids) =>
+      _unsupported();
+
   Future<Map<String, Object?>> debugExecute(
           SessionHandle session, Map<String, Object?> command) =>
       _unsupported();

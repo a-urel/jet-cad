@@ -101,6 +101,11 @@ class FfiKernelBridge implements KernelBridge {
     return job;
   }
 
+  /// Like [_run], but discards the result — for commands whose envelope
+  /// carries no payload.
+  Future<void> _runVoid(SessionHandle session, Map<String, Object?> cmd) =>
+      _run(session, cmd);
+
   @override
   Future<SessionHandle> createSession(RenderTarget target) async {
     // _worker() must stay the first expression: an async body runs
@@ -108,7 +113,18 @@ class FfiKernelBridge implements KernelBridge {
     // admission-time shutdown check (see _worker).
     final worker = await _worker();
     final handle = await worker.request('createSession', 0, null) as int;
-    return SessionHandle(handle);
+    final session = SessionHandle(handle);
+    if (target is TextureTarget) {
+      // Real dimensions arrive with the first resizeViewport (layout-time);
+      // 32x32 placeholder keeps initViewer's size check honest.
+      await _run(session, {
+        'cmd': 'initViewer',
+        'width': 32,
+        'height': 32,
+        'pixelRatio': 1.0,
+      });
+    }
+    return session;
   }
 
   @override
@@ -273,5 +289,62 @@ class FfiKernelBridge implements KernelBridge {
       await _run(s, {
         'cmd': 'restoreSession',
         'dataB64': base64Encode(snapshot.bytes),
+      });
+
+  @override
+  Future<int> resizeViewport(SessionHandle session, int widthPx, int heightPx,
+      double pixelRatio) async {
+    final result = await _run(session, {
+      'cmd': 'resizeViewport',
+      'width': widthPx,
+      'height': heightPx,
+      'pixelRatio': pixelRatio,
+    });
+    return result['surfaceId']! as int;
+  }
+
+  @override
+  Future<void> renderFrame(SessionHandle session) =>
+      _runVoid(session, {'cmd': 'renderFrame'});
+
+  @override
+  Future<void> orbitStart(SessionHandle session, double xPx, double yPx) =>
+      _runVoid(session, {'cmd': 'cameraOrbitStart', 'x': xPx, 'y': yPx});
+
+  @override
+  Future<void> orbit(SessionHandle session, double xPx, double yPx) =>
+      _runVoid(session, {'cmd': 'cameraOrbit', 'x': xPx, 'y': yPx});
+
+  @override
+  Future<void> pan(SessionHandle session, double dxPx, double dyPx) =>
+      _runVoid(session, {'cmd': 'cameraPan', 'dx': dxPx, 'dy': dyPx});
+
+  @override
+  Future<void> zoom(SessionHandle session, double factor) =>
+      _runVoid(session, {'cmd': 'cameraZoom', 'factor': factor});
+
+  @override
+  Future<void> fitAll(SessionHandle session) =>
+      _runVoid(session, {'cmd': 'cameraFit'});
+
+  @override
+  Future<PickResult?> pick(
+      SessionHandle session, double xPx, double yPx, PickFilter filter) async {
+    final result = await _run(session, {
+      'cmd': 'pick',
+      'x': xPx,
+      'y': yPx,
+      'filter': filter.name,
+    });
+    final hit = result['hit'];
+    if (hit == null) return null;
+    return PickResult.fromJson((hit as Map).cast<String, Object?>());
+  }
+
+  @override
+  Future<void> setSelection(SessionHandle session, List<EntityId> ids) =>
+      _runVoid(session, {
+        'cmd': 'setSelection',
+        'ids': [for (final id in ids) id.value],
       });
 }

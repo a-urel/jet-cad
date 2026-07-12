@@ -38,8 +38,9 @@ class CadDocument {
   final StreamController<DocChange> _changes =
       StreamController<DocChange>.broadcast();
 
-  static Future<CadDocument> create(KernelBridge bridge) async {
-    final session = await bridge.createSession(const HeadlessTarget());
+  static Future<CadDocument> create(KernelBridge bridge,
+      {RenderTarget target = const HeadlessTarget()}) async {
+    final session = await bridge.createSession(target);
     final versions = await bridge.versionInfo();
     return CadDocument._(bridge, session, versions);
   }
@@ -66,7 +67,8 @@ class CadDocument {
   /// load followed by new operations (e.g. two entities named "Box 1" in the
   /// same document). Ids stay unique regardless — names are cosmetic only.
   static Future<CadDocument> load(
-      Map<String, Object?> json, KernelBridge bridge) async {
+      Map<String, Object?> json, KernelBridge bridge,
+      {RenderTarget target = const HeadlessTarget()}) async {
     final schema = json['schemaVersion'];
     if (schema != CadDocumentCodec.schemaVersion) {
       throw FormatException('unsupported schema version: $schema');
@@ -90,7 +92,7 @@ class CadDocument {
           'head ($headJson) out of range for ${opsJson.length} ops');
     }
 
-    final doc = await create(bridge);
+    final doc = await create(bridge, target: target);
     try {
       var i = 0;
       for (final e in entitiesJson) {
@@ -158,6 +160,14 @@ class CadDocument {
       _head < _ops.length && _undoRecords.containsKey(_ops[_head].id);
   Stream<DocChange> get changes => _changes.stream;
   KernelVersionInfo get kernelVersions => _versions;
+
+  /// The kernel session this document owns. For viewport wiring
+  /// (camera/pick/selection); geometry mutations must keep flowing through
+  /// the document's own methods so the op log stays authoritative.
+  SessionHandle get session => _session;
+
+  /// The bridge this document talks to. Same caveat as [session].
+  KernelBridge get bridge => _bridge;
 
   Future<void> dispose() async {
     await _bridge.disposeSession(_session);

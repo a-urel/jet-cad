@@ -186,4 +186,14 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test('create passes the render target through to the bridge', () async {
+    final fake = FakeKernelBridge();
+    final doc = await CadDocument.create(fake, target: const TextureTarget());
+    await fake.renderFrame(doc.session);
+    expect(fake.renderFrameCount, 1,
+        reason: 'session must be a texture session');
+    expect(doc.bridge, same(fake));
+    doc.dispose();
+  });
 }

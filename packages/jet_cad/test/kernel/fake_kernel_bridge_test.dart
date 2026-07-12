@@ -85,4 +85,28 @@ void main() {
       throwsA(isA<KernelException>()),
     );
   });
+
+  test('fake exposes viewer observability for widget tests', () async {
+    final fake = FakeKernelBridge();
+    final s = await fake.createSession(const TextureTarget());
+    await fake.resizeViewport(s, 100, 50, 2.0);
+    await fake.renderFrame(s);
+    await fake.orbitStart(s, 1, 2);
+    await fake.orbit(s, 3, 4);
+    await fake.fitAll(s);
+    expect(fake.renderFrameCount, 1);
+    expect(fake.viewportSizes, [(100, 50, 2.0)]);
+    expect(fake.cameraLog, ['orbitStart 1.0 2.0', 'orbit 3.0 4.0', 'fitAll']);
+
+    expect(await fake.pick(s, 5, 5, PickFilter.body), isNull,
+        reason: 'no bodies yet');
+    final box = await fake.makeBox(s, const Vec3(1, 1, 1));
+    fake.nextPickResult = PickResult(entity: box.body, body: box.body);
+    final hit = await fake.pick(s, 5, 5, PickFilter.body);
+    expect(hit?.body, box.body);
+
+    await fake.setSelection(s, [box.body]);
+    expect(fake.selectionLog.last, [box.body.value]);
+    await fake.disposeSession(s);
+  });
 }
