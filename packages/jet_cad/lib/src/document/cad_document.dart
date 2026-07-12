@@ -375,17 +375,35 @@ class CadDocument {
       for (final id in removed)
         if (_entities[id] != null) id: _entities[id]!,
     };
+    // The real kernel's fillet doesn't just create new faces — it also
+    // introduces new edges and vertices where the rounded surface meets the
+    // rest of the body. Kernel subshapes without a matching Entity are
+    // unselectable, so all three kinds must be materialized here.
     final added = <EntityId, Entity>{
       for (final f in result.faces)
         f: Entity(
             id: f, kind: EntityKind.face, name: 'Face', parent: result.body),
+      for (final e in result.edges)
+        e: Entity(
+            id: e, kind: EntityKind.edge, name: 'Edge', parent: result.body),
+      for (final v in result.vertices)
+        v: Entity(
+            id: v,
+            kind: EntityKind.vertex,
+            name: 'Vertex',
+            parent: result.body),
     };
     _commit(
       FilletOp(
         id: _newOpId(),
         edges: edges,
         radius: radius,
-        outputs: [result.body, ...result.faces],
+        outputs: [
+          result.body,
+          ...result.faces,
+          ...result.edges,
+          ...result.vertices,
+        ],
         remap: result.remap,
       ),
       UndoRecord(

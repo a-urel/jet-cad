@@ -66,6 +66,35 @@ void main() {
     expect(doc.entities.containsKey(body), isTrue);
   });
 
+  test(
+      'fillet result ids (faces, and all op outputs) resolve to real '
+      'entities', () async {
+    await doc.makeBox(const Vec3(1, 1, 1));
+    final edge = doc.entities.values
+        .firstWhere((e) => e.kind == EntityKind.edge)
+        .id as EdgeId;
+
+    final newFaces = await doc.fillet([edge], 0.2);
+
+    for (final f in newFaces) {
+      expect(doc.entities.containsKey(f), isTrue,
+          reason: 'every returned face id must be a real entity');
+    }
+    final op = doc.operations.last as FilletOp;
+    // The kernel's fillet introduces new edges/vertices too (see
+    // FakeKernelBridge.fillet), not just faces — outputs must carry all of
+    // them or a bare `body + faces` count here would let a regression that
+    // silently drops edges/vertices from outputs go unnoticed.
+    expect(op.outputs.length, greaterThan(1 + newFaces.length),
+        reason: 'op.outputs must include the new edges/vertices, not just '
+            'body + faces');
+    for (final id in op.outputs) {
+      expect(doc.entities.containsKey(id), isTrue,
+          reason: 'every op output id (incl. new edges/vertices) must be a '
+              'real entity');
+    }
+  });
+
   test('fillet with no edges throws ArgumentError and mutates nothing',
       () async {
     await doc.makeBox(const Vec3(1, 1, 1));

@@ -31,6 +31,9 @@ abstract interface class KernelBridge {
       SessionHandle session, BodyId a, BodyId b, BoolOp op);
   Future<CreateResult> fillet(
       SessionHandle session, List<EdgeId> edges, double radius);
+
+  /// Matrix must be rigid (rotation + translation). Implementations reject
+  /// scale/shear/reflection with [KernelException].
   Future<void> transform(
       SessionHandle session, List<BodyId> bodies, Matrix4 matrix);
 

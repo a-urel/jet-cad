@@ -68,6 +68,35 @@ void runKernelBridgeContract(KernelBridge Function() createBridge) {
     expect(r.faces, isNotEmpty);
   });
 
+  test('contract: fillet result subshapes are consistent', () async {
+    final box = await bridge.makeBox(session, const Vec3(10, 10, 10));
+    final edge = box.edges.first;
+    final r = await bridge.fillet(session, [edge], 0.5);
+    expect(r.faces, isNotEmpty);
+    // Everything the kernel reports as newly created/present in the result
+    // must be a live subshape, not something the remap says was consumed:
+    // no id returned in faces/edges/vertices should also be a remap key
+    // (a remap key names an OLD id that no longer resolves).
+    final resultIds = <EntityId>{...r.faces, ...r.edges, ...r.vertices};
+    for (final id in resultIds) {
+      expect(r.remap.mapping.keys, isNot(contains(id)));
+    }
+  });
+
+  test('contract: rigid transform succeeds; scale is rejected', () async {
+    final box = await bridge.makeBox(session, const Vec3(1, 1, 1));
+    // Pure translation: rigid, must succeed.
+    final translation = Matrix4.identity()
+      ..translateByVector3(Vector3(5, 0, 0));
+    await bridge.transform(session, [box.body], translation);
+    // Anisotropic scale diag(2,1,1): not rigid, must be rejected.
+    final scale = Matrix4.identity()..scaleByVector3(Vector3(2, 1, 1));
+    await expectLater(
+      bridge.transform(session, [box.body], scale),
+      throwsA(isA<KernelException>()),
+    );
+  });
+
   test('contract: snapshotBodies/restoreBodies is id-preserving', () async {
     final box = await bridge.makeBox(session, const Vec3(1, 1, 1));
     final snap = await bridge.snapshotBodies(session, [box.body]);

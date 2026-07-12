@@ -147,18 +147,33 @@ class FakeKernelBridge implements KernelBridge {
     }
     final mapping = <EntityId, List<EntityId>>{};
     final newFaces = <String>[];
+    final newEdges = <String>[];
+    final newVertices = <String>[];
     for (final e in edges) {
       owner.edges.remove(e.value);
       final face = _next('f');
       owner.faces.add(face);
       newFaces.add(face);
+      // The real kernel's fillet also introduces new edges and vertices
+      // where the rounded surface meets the rest of the body (two of each,
+      // typically, for a single filleted edge on a box). Model that here
+      // so the fake doesn't mask the divergence from callers relying on a
+      // faces-only result.
+      for (var i = 0; i < 2; i++) {
+        final newEdge = _next('e');
+        owner.edges.add(newEdge);
+        newEdges.add(newEdge);
+        final newVertex = _next('v');
+        owner.vertices.add(newVertex);
+        newVertices.add(newVertex);
+      }
       mapping[EntityId(e.value)] = [EntityId(face)];
     }
     return CreateResult(
       body: BodyId(owner.id),
       faces: [for (final f in newFaces) FaceId(f)],
-      edges: const [],
-      vertices: const [],
+      edges: [for (final e in newEdges) EdgeId(e)],
+      vertices: [for (final v in newVertices) VertexId(v)],
       remap: IdRemap(mapping),
     );
   }
@@ -170,8 +185,43 @@ class FakeKernelBridge implements KernelBridge {
     for (final b in bodies) {
       _body(all, b);
     }
+    _requireRigid(matrix);
     transformLog.add(matrix.clone());
     // The fake tracks no coordinates; validation is the whole job.
+  }
+
+  /// Mirrors the native shim's raw-matrix orthonormality check (session.cpp
+  /// `transform`): columns of the 3x3 linear part must be unit length and
+  /// mutually orthogonal within [kRigidTolerance], with a positive
+  /// determinant (reflections rejected). Matrix4.storage is column-major, so
+  /// columns 0/1/2 of the linear part sit at offsets [0,1,2], [4,5,6],
+  /// [8,9,10].
+  static const double _kRigidTolerance = 1e-6;
+
+  void _requireRigid(Matrix4 matrix) {
+    final s = matrix.storage;
+    final c = [
+      [s[0], s[1], s[2]],
+      [s[4], s[5], s[6]],
+      [s[8], s[9], s[10]],
+    ];
+    double dot(int i, int j) =>
+        c[i][0] * c[j][0] + c[i][1] * c[j][1] + c[i][2] * c[j][2];
+    var rigid = true;
+    for (var i = 0; i < 3 && rigid; i++) {
+      if ((dot(i, i) - 1.0).abs() > _kRigidTolerance) rigid = false;
+      for (var j = i + 1; j < 3 && rigid; j++) {
+        if (dot(i, j).abs() > _kRigidTolerance) rigid = false;
+      }
+    }
+    final det = c[0][0] * (c[1][1] * c[2][2] - c[1][2] * c[2][1]) -
+        c[0][1] * (c[1][0] * c[2][2] - c[1][2] * c[2][0]) +
+        c[0][2] * (c[1][0] * c[2][1] - c[1][1] * c[2][0]);
+    if (!rigid || det <= 0) {
+      throw const KernelException(
+          'transform must be rigid (rotation+translation); '
+          'scaling/shear/reflection unsupported in v1');
+    }
   }
 
   @override

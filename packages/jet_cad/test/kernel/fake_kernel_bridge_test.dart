@@ -43,12 +43,16 @@ void main() {
     );
   });
 
-  test('fillet replaces edges with new faces on the same body', () async {
+  test(
+      'fillet replaces edges with new faces on the same body, plus new '
+      'edges and vertices from the rounded surface', () async {
     final box = await bridge.makeBox(session, const Vec3(1, 1, 1));
     final edge = box.edges.first;
     final r = await bridge.fillet(session, [edge], 0.1);
     expect(r.body, box.body);
     expect(r.faces, hasLength(1));
+    expect(r.edges, hasLength(2));
+    expect(r.vertices, hasLength(2));
     expect(r.remap.mapping[edge], hasLength(1));
   });
 
