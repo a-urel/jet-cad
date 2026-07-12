@@ -93,6 +93,38 @@ class _HarnessPageState extends State<HarnessPage> {
     ];
   }
 
+  /// Stepped viewport-navigation tools for the status bar. Each maps a single
+  /// press to a fixed increment of the gesture the viewport already supports.
+  List<RibbonTool> _navTools(ViewportController controller) {
+    const step = 40.0;
+    void orbit(Offset delta) => _guard(() async {
+          await controller.orbitStart(Offset.zero);
+          await controller.orbitTo(delta);
+        });
+    return [
+      RibbonTool('Zoom out', LucideIcons.zoomOut,
+          onPressed: () => _guard(() => controller.zoomBy(0.8))),
+      RibbonTool('Zoom in', LucideIcons.zoomIn,
+          onPressed: () => _guard(() => controller.zoomBy(1.25))),
+      RibbonTool('Rotate CCW', LucideIcons.rotateCcw,
+          onPressed: () => orbit(const Offset(-step, 0))),
+      RibbonTool('Rotate CW', LucideIcons.rotateCw,
+          onPressed: () => orbit(const Offset(step, 0))),
+      RibbonTool('Pan left', LucideIcons.arrowLeft,
+          onPressed: () =>
+              _guard(() => controller.panBy(const Offset(-step, 0)))),
+      RibbonTool('Pan up', LucideIcons.arrowUp,
+          onPressed: () =>
+              _guard(() => controller.panBy(const Offset(0, -step)))),
+      RibbonTool('Pan down', LucideIcons.arrowDown,
+          onPressed: () =>
+              _guard(() => controller.panBy(const Offset(0, step)))),
+      RibbonTool('Pan right', LucideIcons.arrowRight,
+          onPressed: () =>
+              _guard(() => controller.panBy(const Offset(step, 0)))),
+    ];
+  }
+
   List<RibbonTab> _tabs(CadDocument doc, ViewportController controller) {
     void addBox() => _guard(() async {
           await doc.makeBox(const Vec3(40, 30, 20));
@@ -184,6 +216,7 @@ class _HarnessPageState extends State<HarnessPage> {
           StatusBar(
             status: _status,
             selection: _selection.map((e) => e.value).toList(),
+            navTools: _navTools(controller),
           ),
         ],
       );
