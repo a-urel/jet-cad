@@ -53,6 +53,13 @@ class GlContext {
   // Flushes GL work so IOSurface consumers (Metal/CoreVideo) observe it.
   virtual void flush() = 0;
 
+  // Drains the GL error queue (glGetError until GL_NO_ERROR). OpenGL
+  // errors are sticky: an illegal call anywhere earlier stays pending
+  // until read, and whoever polls glGetError() next gets blamed for it.
+  // Call before handing control to code that self-checks its GL calls
+  // (OCCT's viewer does after buffer/texture creation).
+  virtual void drainErrors() = 0;
+
   // Reads RGBA pixels from the surface FBO; rows are bottom-up exactly as
   // glReadPixels returns them.
   virtual std::vector<uint8_t> readPixels(int x, int y, int w, int h) = 0;

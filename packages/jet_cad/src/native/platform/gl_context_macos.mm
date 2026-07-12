@@ -25,24 +25,21 @@ namespace {
 class CglContext final : public GlContext {
  public:
   CglContext() {
-    // NOT requesting kCGLPFAOpenGLProfile/kCGLOGLPVersion_3_2_Core (Plan 3
-    // Task 3 finding): OCCT's macOS Cocoa glue (OpenGl_Window_1.mm) hardcodes
-    // isCoreProfile=false whenever an external rendering context is supplied
-    // to V3d_View::SetWindow, and OpenGl_Context::init() unconditionally
-    // queries the legacy-only GL_MAX_CLIP_PLANES enum on desktop GL — illegal
-    // in a real Core Profile context, which is silently tolerated as a
-    // "sticky" GL_INVALID_ENUM by most native drivers but corrupts later,
-    // unrelated calls (texture/VBO creation, all failing with
-    // GL_INVALID_OPERATION) under macOS's OpenGL-on-Metal translation layer
-    // used on this hardware ("4.1 Metal - 90.5", confirmed via a standalone
-    // repro). Omitting the profile attribute yields CGL's default Legacy
-    // (2.1) profile, where GL_MAX_CLIP_PLANES is valid — confirmed via the
-    // same repro (GL_MAX_CLIP_PLANES=6, no error) — and which also matches
-    // what OCCT's external-context code path already assumes, so there is no
-    // profile mismatch. OCCT's shader/VBO/FBO rendering (GLSL, ARB_vertex_
-    // buffer_object, ARB_framebuffer_object) all predate GL 3.2 core and are
-    // available as extensions under this Legacy/Metal-backed 2.1 context.
+    // Core 3.2 profile (Plan 3 Task 3 finding — read with Viewer::render's
+    // drainErrors note): OCCT 7.9.3's OpenGl_Context::init() unconditionally
+    // queries the legacy-only GL_MAX_CLIP_PLANES enum on desktop GL, which
+    // is illegal in Core Profile and leaves a STICKY GL_INVALID_ENUM
+    // pending (confirmed via standalone repro on this "4.1 Metal" driver).
+    // OpenGL errors persist until glGetError() reads them, so whoever polls
+    // next gets blamed — OCCT's own post-glBufferData check misattributed
+    // the stale error and wrongly discarded the shaded geometry's VBO.
+    // The Viewer drains the error queue before each Redraw (the only place
+    // OCCT self-checks uploads), which makes Core Profile fully usable and
+    // preferable to the Legacy fallback (Core is what ANGLE/EGL will expect
+    // later, and matches the GL the rest of this file already targets).
     CGLPixelFormatAttribute attrs[] = {
+        kCGLPFAOpenGLProfile,
+        (CGLPixelFormatAttribute)kCGLOGLPVersion_3_2_Core,
         kCGLPFAColorSize, (CGLPixelFormatAttribute)24,
         kCGLPFAAlphaSize, (CGLPixelFormatAttribute)8,
         kCGLPFADepthSize, (CGLPixelFormatAttribute)24,
@@ -182,6 +179,12 @@ class CglContext final : public GlContext {
   void* nativeContext() override { return (void*)nsContext_; }
 
   void flush() override { glFlush(); }
+
+  void drainErrors() override {
+    makeCurrent();
+    while (glGetError() != GL_NO_ERROR) {
+    }
+  }
 
   std::vector<uint8_t> readPixels(int x, int y, int w, int h) override {
     makeCurrent();

@@ -60,6 +60,28 @@ TEST(ViewerTest, DisplayedBoxChangesCenterPixels) {
   jc_dispose_session(s);
 }
 
+TEST(ViewerTest, FittedBoxFacesAreLitDifferently) {
+  uint64_t s = jc_create_session();
+  initViewer(s, 128);
+  makeBox(s, 50, 50, 50);
+  execOk(s, {{"cmd", "cameraFit"}});
+  execOk(s, {{"cmd", "renderFrame"}});
+  std::vector<uint8_t> rgba = readAll(s, 128);
+  // The default V3d camera shows the cube corner-on: in bottom-up GL rows
+  // the top face fills the upper region and the side faces the lower
+  // region. Both sample points sit well inside the fitted silhouette
+  // (measured from the rendered output). Differently-angled faces under
+  // the default lights MUST differ in brightness; an unlit flat fill
+  // renders them identical.
+  auto sideFace = pixelAt(rgba, 128, 40, 48);  // lower-left side face
+  auto topFace = pixelAt(rgba, 128, 64, 96);   // top face
+  std::array<uint8_t, 3> sideRgb = {sideFace[0], sideFace[1], sideFace[2]};
+  std::array<uint8_t, 3> topRgb = {topFace[0], topFace[1], topFace[2]};
+  EXPECT_NE(sideRgb, topRgb)
+      << "two differently-angled faces must be lit differently";
+  jc_dispose_session(s);
+}
+
 TEST(ViewerTest, DeleteRemovesBodyFromDisplay) {
   uint64_t s = jc_create_session();
   initViewer(s, 128);

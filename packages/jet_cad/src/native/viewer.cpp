@@ -6,6 +6,9 @@
 #include <OpenGl_Context.hxx>
 #include <OpenGl_FrameBuffer.hxx>
 #include <Quantity_Color.hxx>
+#include <V3d_AmbientLight.hxx>
+#include <V3d_DirectionalLight.hxx>
+#include <gp_Dir.hxx>
 
 #include <stdexcept>
 
@@ -39,7 +42,22 @@ Viewer::Viewer(int widthPx, int heightPx, double pixelRatio)
   }
 
   viewer_ = new V3d_Viewer(driver_);
-  viewer_->SetDefaultLights();
+  // NOT SetDefaultLights(): that installs a HEADLIGHT (confirmed in OCCT
+  // 7.9.3 V3d_Viewer.cxx — SetHeadlight(true)), i.e. a directional light
+  // aligned with the camera view axis. The default V3d camera looks down
+  // the cube's body diagonal, and all three visible faces of an
+  // axis-aligned box make EQUAL angles with that diagonal — a headlight
+  // therefore lights all three faces identically and the box renders as a
+  // uniform flat fill (measured: every silhouette pixel identical). Use a
+  // fixed world-space directional light instead, with distinct |x|,|y|,|z|
+  // components so any axis-aligned face trio gets distinct diffuse terms
+  // (all positive against the default view's +X/-Y/+Z faces, so no face
+  // goes ambient-black), plus ambient fill.
+  Handle(V3d_DirectionalLight) sun =
+      new V3d_DirectionalLight(gp_Dir(-0.3, 0.5, -0.81), Quantity_NOC_WHITE);
+  Handle(V3d_AmbientLight) ambient = new V3d_AmbientLight(Quantity_NOC_WHITE);
+  viewer_->AddLight(sun);
+  viewer_->AddLight(ambient);
   viewer_->SetLightOn();
 
   view_ = viewer_->CreateView();
@@ -49,13 +67,11 @@ Viewer::Viewer(int widthPx, int heightPx, double pixelRatio)
   // That internal FBO ("fbo0_main") failed to allocate in this offscreen
   // context (GL_INVALID_OPERATION creating a GL_SRGB8_ALPHA8 2D texture —
   // logged via OCCT's Messenger as "Main FBO ... initialization has
-  // failed"), and the degraded fallback path produced a visibly wrong
-  // render (flat unlit shape, black background instead of the configured
-  // color) even though the coarse pixel-diff gtests still passed. Per
-  // Graphic3d_CView::SetImmediateModeDrawToFront's own doc comment, FALSE
-  // is "especially useful for view dump because the dump image is read
-  // from the back buffer" — exactly this offscreen readPixels() use case —
-  // and disabling it removes the internal FBO's trigger condition entirely
+  // failed" on every frame). Per Graphic3d_CView::
+  // SetImmediateModeDrawToFront's own doc comment, FALSE is "especially
+  // useful for view dump because the dump image is read from the back
+  // buffer" — exactly this offscreen readPixels() use case — and disabling
+  // it removes the internal FBO's trigger condition entirely
   // (OpenGl_View::Render), so drawing goes straight into our SetFBO() below.
   view_->View()->SetImmediateModeDrawToFront(false);
   window_ = new Aspect_NeutralWindow();
@@ -124,6 +140,19 @@ void Viewer::syncBodies(const std::map<std::string, Body>& bodies) {
 
 void Viewer::render() {
   gl_->makeCurrent();
+  // Drain stale GL errors before handing control to OCCT. GL errors are
+  // sticky (pending until glGetError() reads them) and OCCT 7.9.3's own
+  // init/probe code leaves illegal-enum errors queued (e.g. its
+  // unconditional GL_MAX_CLIP_PLANES query, illegal in Core Profile).
+  // OCCT self-checks its uploads during Redraw with glGetError(); with a
+  // stale error pending it misattributes the failure and silently discards
+  // freshly-built VBOs ("VBO creation for Primitive Array has failed ...
+  // Out of memory?"), degrading rendering. Draining here — measured as the
+  // single sufficient point; constructor-time drains were neither needed
+  // nor enough on their own — guarantees Redraw starts with a clean error
+  // queue. See gl_context_macos.mm's pixel-format note for the Core
+  // Profile half of this story.
+  gl_->drainErrors();
   view_->Invalidate();
   view_->Redraw();
   gl_->flush();
