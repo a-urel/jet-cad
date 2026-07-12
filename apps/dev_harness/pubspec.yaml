@@ -1,0 +1,18 @@
+name: jet_cad_dev_harness
+description: Throwaway dev harness for manual jet_cad viewport verification.
+publish_to: none
+version: 0.0.1
+resolution: workspace
+
+environment:
+  sdk: ^3.5.0
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  jet_cad:
+    path: ../../packages/jet_cad
+
+flutter:
+  uses-material-design: true

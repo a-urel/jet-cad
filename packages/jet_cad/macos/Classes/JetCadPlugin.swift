@@ -116,12 +116,18 @@ public class JetCadPlugin: NSObject, FlutterPlugin {
 
   private static func wrapSurface(_ surfaceId: UInt32) -> CVPixelBuffer? {
     guard let surface = IOSurfaceLookup(surfaceId) else { return nil }
-    var buffer: CVPixelBuffer?
+    // CoreVideo's C signature (CVPixelBufferRef * pixelBufferOut) lacks the
+    // ownership annotations ClangImporter needs to bridge it directly to
+    // `CVPixelBuffer?`; it imports the out-param as `Unmanaged<CVPixelBuffer>?`
+    // instead. `takeRetainedValue()` matches the header's "new pixel buffer
+    // returned here" contract (a +1 we now own).
+    var unmanagedBuffer: Unmanaged<CVPixelBuffer>?
     let attrs: [CFString: Any] = [
       kCVPixelBufferMetalCompatibilityKey: true
     ]
     let status = CVPixelBufferCreateWithIOSurface(
-      kCFAllocatorDefault, surface, attrs as CFDictionary, &buffer)
-    return status == kCVReturnSuccess ? buffer : nil
+      kCFAllocatorDefault, surface, attrs as CFDictionary, &unmanagedBuffer)
+    guard status == kCVReturnSuccess, let unmanagedBuffer else { return nil }
+    return unmanagedBuffer.takeRetainedValue()
   }
 }
