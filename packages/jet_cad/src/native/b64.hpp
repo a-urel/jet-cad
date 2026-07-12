@@ -49,14 +49,22 @@ inline std::string b64decode(const std::string& in) {
   std::string out;
   out.reserve(in.size() / 4 * 3);
   for (size_t i = 0; i < in.size(); i += 4) {
+    const bool last_group = (i + 4 == in.size());
     int a = val(in[i]), b = val(in[i + 1]);
     if (a < 0 || b < 0) throw std::runtime_error("bad base64 char");
     out += (char)((a << 2) | (b >> 4));
-    if (in[i + 2] != '=') {
+    if (in[i + 2] == '=') {
+      // "xx==" is the only legal form once position 2 is padding, and
+      // padding is only legal in the final group.
+      if (in[i + 3] != '=' || !last_group)
+        throw std::runtime_error("bad base64 padding");
+    } else {
       int c = val(in[i + 2]);
       if (c < 0) throw std::runtime_error("bad base64 char");
       out += (char)(((b & 15) << 4) | (c >> 2));
-      if (in[i + 3] != '=') {
+      if (in[i + 3] == '=') {
+        if (!last_group) throw std::runtime_error("bad base64 padding");
+      } else {
         int d = val(in[i + 3]);
         if (d < 0) throw std::runtime_error("bad base64 char");
         out += (char)(((c & 3) << 6) | d);

@@ -11,8 +11,11 @@ using json = nlohmann::json;
 
 namespace {
 
+// Returns nullptr if allocation fails; jc_execute / jc_version propagate
+// that nullptr to the caller (documented in jet_cad_native.h).
 const char* mallocString(const std::string& s) {
   char* out = static_cast<char*>(std::malloc(s.size() + 1));
+  if (out == nullptr) return nullptr;
   std::memcpy(out, s.c_str(), s.size() + 1);
   return out;
 }

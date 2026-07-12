@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "../b64.hpp"
 #include "../include/jet_cad_native.h"
 
 using json = nlohmann::json;
@@ -20,4 +21,18 @@ TEST(Smoke, ExecuteReturnsEnvelope) {
   auto env = json::parse(raw);
   jc_free(raw);
   EXPECT_FALSE(env.at("ok").get<bool>());
+}
+
+TEST(Base64, RoundTripAndPaddingEdges) {
+  using jetcad::b64decode;
+  using jetcad::b64encode;
+  for (const std::string s : {std::string(""), std::string("a"),
+                              std::string("ab"), std::string("abc"),
+                              std::string("hello world"),
+                              std::string("\x00\xff\x10", 3)}) {
+    EXPECT_EQ(b64decode(b64encode(s)), s);
+  }
+  EXPECT_THROW(b64decode("AB=C"), std::runtime_error);
+  EXPECT_THROW(b64decode("A"), std::runtime_error);
+  EXPECT_THROW(b64decode("!!!!"), std::runtime_error);
 }

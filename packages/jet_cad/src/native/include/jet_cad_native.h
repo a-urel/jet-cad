@@ -23,10 +23,14 @@ JC_EXPORT void jc_dispose_session(uint64_t session);
  * Executes one JSON command against a session. Returns a malloc'd UTF-8
  * JSON envelope: {"ok":true,"result":...} or {"ok":false,"error":"..."}.
  * Never throws / crashes across this boundary. Free with jc_free.
+ * Returns NULL only on allocation failure.
  */
 JC_EXPORT const char* jc_execute(uint64_t session, const char* command_json);
 
-/* Returns malloc'd {"kernelVersion":...,"occtVersion":...}. Free with jc_free. */
+/*
+ * Returns malloc'd {"kernelVersion":...,"occtVersion":...}. Free with jc_free.
+ * Returns NULL only on allocation failure.
+ */
 JC_EXPORT const char* jc_version(void);
 
 JC_EXPORT void jc_free(const char* ptr);
