@@ -67,4 +67,23 @@ void main() {
     await tester.pump();
     expect(decorative, 'Extrude');
   });
+
+  testWidgets('initialTab selects that tab instead of the first',
+      (tester) async {
+    await tester.pumpWidget(host(const CadRibbon(
+      tabs: [
+        RibbonTab('File', [
+          RibbonGroup('Document', [RibbonTool('New', LucideIcons.file)]),
+        ]),
+        RibbonTab('Model', [
+          RibbonGroup('Primitives', [RibbonTool('Box', LucideIcons.box)]),
+        ]),
+      ],
+      initialTab: 'Model',
+    )));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Primitives'), findsOneWidget);
+    expect(find.text('Document'), findsNothing);
+  });
 }

@@ -165,6 +165,7 @@ class _HarnessPageState extends State<HarnessPage> {
           CadRibbon(
             tabs: _tabs(doc, controller),
             quickActions: _quickActions(doc, controller),
+            initialTab: 'Model',
           ),
           Expanded(child: JetCadViewport(controller: controller)),
           StatusBar(

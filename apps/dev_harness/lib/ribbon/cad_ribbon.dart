@@ -14,18 +14,21 @@ class CadRibbon extends StatefulWidget {
     required this.tabs,
     this.quickActions = const [],
     this.onDecorative,
+    this.initialTab,
   });
 
   final List<RibbonTab> tabs;
   final List<RibbonTool> quickActions;
   final void Function(String toolLabel)? onDecorative;
+  final String? initialTab;
 
   @override
   State<CadRibbon> createState() => _CadRibbonState();
 }
 
 class _CadRibbonState extends State<CadRibbon> {
-  late String _selected = widget.tabs.isEmpty ? '' : widget.tabs.first.title;
+  late String _selected =
+      widget.initialTab ?? (widget.tabs.isEmpty ? '' : widget.tabs.first.title);
 
   void _handle(BuildContext context, RibbonTool tool) {
     final onPressed = tool.onPressed;
