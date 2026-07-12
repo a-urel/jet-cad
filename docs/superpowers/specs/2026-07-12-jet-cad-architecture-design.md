@@ -312,7 +312,7 @@ navigation, click selection with highlight.
 
 | Risk | Mitigation |
 |---|---|
-| Texture interop plumbing per platform | Windows first (cleanest external-texture path via ANGLE/D3D11), then macOS, then Linux; context creation isolated per platform |
+| Texture interop plumbing per platform | macOS first (primary dev machine — daily iteration; CGL → IOSurface), then Windows (ANGLE/D3D11), then Linux; context creation isolated per platform |
 | Apple removes OpenGL in a future macOS | Context-creation module isolation keeps ANGLE swap-in a contained change |
 | OCCT binary size (~30–60 MB) | Strip unused OCCT toolkits at build; document size honestly |
 | Sub-entity id stability after booleans | Subshape UUIDs + remap tables from every op; full persistent naming deferred |
