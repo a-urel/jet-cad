@@ -1,0 +1,6 @@
+name: jet_cad_workspace
+publish_to: none
+environment:
+  sdk: ^3.5.0
+workspace:
+  - packages/jet_cad
