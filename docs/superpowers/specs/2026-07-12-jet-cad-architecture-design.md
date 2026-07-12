@@ -1,7 +1,7 @@
 # jet-cad Architecture Design
 
 **Date:** 2026-07-12
-**Status:** Approved (brainstorming phase)
+**Status:** Approved — Architecture v1.0 (frozen; evolves only on concrete implementation findings)
 
 ## Summary
 
@@ -11,6 +11,14 @@ full editor from the package's public API. The package is headless-first: it
 ships the engine and a viewport widget, not opinionated UI, so it can serve
 ERP, BIM, PLM, and custom applications. A separate optional `jet_cad_editor`
 package may later provide a batteries-included editor.
+
+## Non-goals
+
+JetCAD is not intended to compete with FreeCAD or commercial CAD systems in
+its initial releases. The primary goal is a reusable Flutter-native CAD SDK
+and viewport that can be embedded into other applications. Advanced features
+such as assemblies, constraints, parametric editing, drafting, CAM, and
+photorealistic rendering are intentionally deferred.
 
 ## Decisions
 
@@ -77,6 +85,10 @@ permits a future WASM backend without public API changes.
 Coarse, asynchronous command API. Entity ids cross the boundary; geometry never
 does.
 
+**Session ownership (contractual):** one `CadDocument` owns exactly one kernel
+session. Sessions are never shared between documents; closing the document
+disposes the session.
+
 ```dart
 abstract interface class KernelBridge {
   Future<SessionHandle> createSession(RenderTarget target);
@@ -109,11 +121,13 @@ Key contract decisions:
 - **Ids, not native handles.** The C++ session keeps `map<uint64, TopoDS_Shape>`.
   Dart never owns native pointers, so there are no finalizer or lifetime bugs.
   Deletion is an explicit command.
-- **Stable sub-entity ids.** Every subshape (face, edge, vertex) gets a
-  kernel-generated UUID at creation — never an index like (bodyId, faceIndex),
-  which shuffles after boolean operations. Every modeling operation returns an
-  id remap table (old UUID → new UUIDs) that the document applies. The kernel
-  derives remaps from OCCT's built-in operation history
+- **Stable sub-entity ids.** Every exposed entity (body, face, edge, vertex)
+  is assigned a stable application identifier (UUID) managed by the session
+  layer — OCCT itself has no identity facility; the shim generates and owns
+  the mapping. Never an index like (bodyId, faceIndex), which shuffles after
+  boolean operations. Every modeling operation returns an id remap table
+  (old UUID → new UUIDs) that the document applies. The session derives
+  remaps from OCCT's built-in operation history
   (`Generated`/`Modified`/`IsDeleted` maps on `BRepBuilderAPI`/`BRepAlgoAPI`
   operations). This is a deliberate down-payment on the persistent-naming
   problem; the full solution is deferred to the parametric phase.
@@ -126,6 +140,19 @@ Key contract decisions:
   bridge throws typed `KernelException`; the document layer decides rollback.
 - **Async everywhere**, so the future WASM/web-worker backend needs no API
   change.
+
+### API evolution notes (not frozen)
+
+- The per-operation bridge methods (`makeBox`, `extrude`, …) are the v1 shape,
+  not a permanent contract. As the operation set grows (sweep, loft, shell,
+  draft, mirror, pattern, offset, split), the bridge is expected to migrate to
+  a generic `execute(KernelCommand)` dispatch — better for versioning than a
+  new abstract method per release. Public `CadDocument` methods stay ergonomic
+  either way.
+- The kernel is not assumed to be the lowest semantic layer forever. A future
+  sketch/constraint-solver stage will sit between the document and the kernel;
+  nothing today should be named or coupled as if geometry commands always
+  originate directly from the document.
 
 ## Viewport and rendering
 
@@ -201,17 +228,33 @@ sealed class Operation {            // MakeBox, Extrude, Boolean, Fillet, Import
 - **History-ready payoff:** `ops` + params is exactly the input a parametric
   rebuild needs. V1 records the graph but never exposes editing it.
 - **Persistence:** native format is the operation list + `head` + entity
-  metadata as versioned JSON (schema-version field from day 1), plus a
-  geometry cache blob: a `KernelSnapshot` containing BREP dumps and the
-  UUID ↔ shape id map. STEP import/export via the kernel is interchange only,
-  not the document format.
+  metadata as versioned JSON, plus a geometry cache blob: a `KernelSnapshot`
+  containing BREP dumps and the UUID ↔ shape id map. The header records
+  `schema-version`, `kernel-version` (shim), and `occt-version` from day 1 —
+  cheap now, essential for migrations later. STEP import/export via the kernel
+  is interchange only, not the document format.
 - **Session reconstruction:** opening a file creates a fresh kernel session and
   calls `restoreSession(snapshot)` — shapes and id maps load directly, no op
   replay needed. If the cache blob is missing or corrupt, fallback is replaying
   `ops[0..head)` through the bridge. The same contract serves crash recovery
   and, later, collaborative sync and background regeneration.
-- **Reactivity:** the document exposes `Stream<DocChange>`; the viewport and
-  user UI (trees, inspectors) subscribe. No widget rebuilds on kernel ticks.
+- **Reactivity:** the document exposes `Stream<DocChange>` with typed events
+  from day one — no string matching:
+
+  ```dart
+  sealed class DocChange {}
+  class EntitiesAdded implements DocChange { ... }
+  class EntitiesRemoved implements DocChange { ... }
+  class OperationCommitted implements DocChange { ... }
+  class UndoPerformed implements DocChange { ... }
+  class RedoPerformed implements DocChange { ... }
+  class DocumentLoaded implements DocChange { ... }
+  ```
+
+  The viewport and user UI (trees, inspectors) subscribe. No widget rebuilds on
+  kernel ticks. `SelectionChanged` is deliberately *not* a `DocChange`:
+  selection is view state, so it is emitted by the `ViewportController`'s own
+  stream.
 
 ## Error handling
 
