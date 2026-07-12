@@ -15,7 +15,7 @@ void main() {
     final session = await bridge.createSession(const HeadlessTarget());
     final result = await bridge.debugExecute(
       session,
-      {'cmd': 'debugInitTexture', 'width': 32, 'height': 32},
+      {'cmd': 'initViewer', 'width': 32, 'height': 32, 'pixelRatio': 1.0},
     );
     expect(result['surfaceId'], isA<int>());
     expect(result['surfaceId'], greaterThan(0));

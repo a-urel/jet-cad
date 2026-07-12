@@ -10,7 +10,7 @@
 #include <TopoDS_Shape.hxx>
 #include <nlohmann/json.hpp>
 
-#include "platform/gl_context.hpp"
+#include "viewer.hpp"
 
 namespace jetcad {
 
@@ -45,9 +45,11 @@ class Session {
   json saveSnapshot(const json&);     // Task 6
   json restoreSession(const json&);   // Task 6
 
-  json cmdDebugInitTexture(const json& cmd);
-  json cmdDebugRenderTestPattern();
+  json cmdInitViewer(const json& cmd);
+  json cmdRenderFrame();
+  json cmdCameraFit();
   json cmdDebugReadPixels(const json& cmd);
+  Viewer& requireViewer();
 
   std::string nextId(const char* prefix);
   Body& requireBody(const std::string& id);
@@ -77,8 +79,7 @@ class Session {
   uint64_t counter_ = 0;
   std::map<std::string, Body> bodies_;
 
-  // Spike-only GL context; replaced by the Viewer in Plan 3 Task 3.
-  std::unique_ptr<GlContext> spikeGl_;
+  std::unique_ptr<Viewer> viewer_;
 };
 
 }  // namespace jetcad

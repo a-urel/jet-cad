@@ -2,11 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:jet_cad/jet_cad.dart';
 
-/// Spike harness: proves shim-rendered IOSurface pixels composite in Flutter.
-///
-/// Expected on screen (after the flipY wrapper): red top-left, green
-/// top-right, blue bottom-left, white bottom-right. If the quadrants land
-/// elsewhere, the orientation finding in the plan/ledger must be corrected.
+/// Dev harness: proves the real OCCT V3d/AIS viewer renders a shaded box
+/// into the shim's IOSurface framebuffer and composites in Flutter.
 void main() {
   runApp(const MaterialApp(home: SpikePage()));
 }
@@ -42,12 +39,21 @@ class _SpikePageState extends State<SpikePage> {
       }
       final bridge = FfiKernelBridge(libPath);
       final session = await bridge.createSession(const HeadlessTarget());
-      final init = await bridge.debugExecute(
-          session, {'cmd': 'debugInitTexture', 'width': 512, 'height': 512});
+      final init = await bridge.debugExecute(session, {
+        'cmd': 'initViewer',
+        'width': 512,
+        'height': 512,
+        'pixelRatio': 1.0,
+      });
       final surfaceId = init['surfaceId'] as int;
       final textureId = await _channel
           .invokeMethod<int>('registerTexture', {'surfaceId': surfaceId});
-      await bridge.debugExecute(session, {'cmd': 'debugRenderTestPattern'});
+      await bridge.debugExecute(session, {
+        'cmd': 'makeBox',
+        'size': [50.0, 50.0, 50.0]
+      });
+      await bridge.debugExecute(session, {'cmd': 'cameraFit'});
+      await bridge.debugExecute(session, {'cmd': 'renderFrame'});
       await _channel.invokeMethod<void>('frameReady', {'textureId': textureId});
       setState(() {
         _bridge = bridge;
@@ -72,7 +78,7 @@ class _SpikePageState extends State<SpikePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('jet_cad spike — $_status')),
+      appBar: AppBar(title: Text('jet_cad viewer — $_status')),
       body: Center(
         child: _textureId == null
             ? const CircularProgressIndicator()

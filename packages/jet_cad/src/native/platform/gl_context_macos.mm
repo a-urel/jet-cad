@@ -9,6 +9,12 @@
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
 #include <OpenGL/CGLIOSurface.h>
+// NSOpenGLContext: OCCT's Aspect_RenderingContext is NSOpenGLContext* on
+// desktop macOS (Aspect_RenderingContext.hxx), and OCCT calls Cocoa methods
+// on it directly. GL_SILENCE_DEPRECATION (above) also silences AppKit's
+// NSOpenGLContext deprecation warnings (see NSOpenGL.h's NS_OPENGL_*_DEPRECATED
+// macros), matching OCCT's own Cocoa glue (OpenGl_Context_1.mm).
+#include <Cocoa/Cocoa.h>
 
 #include <stdexcept>
 #include <string>
@@ -19,9 +25,24 @@ namespace {
 class CglContext final : public GlContext {
  public:
   CglContext() {
+    // NOT requesting kCGLPFAOpenGLProfile/kCGLOGLPVersion_3_2_Core (Plan 3
+    // Task 3 finding): OCCT's macOS Cocoa glue (OpenGl_Window_1.mm) hardcodes
+    // isCoreProfile=false whenever an external rendering context is supplied
+    // to V3d_View::SetWindow, and OpenGl_Context::init() unconditionally
+    // queries the legacy-only GL_MAX_CLIP_PLANES enum on desktop GL — illegal
+    // in a real Core Profile context, which is silently tolerated as a
+    // "sticky" GL_INVALID_ENUM by most native drivers but corrupts later,
+    // unrelated calls (texture/VBO creation, all failing with
+    // GL_INVALID_OPERATION) under macOS's OpenGL-on-Metal translation layer
+    // used on this hardware ("4.1 Metal - 90.5", confirmed via a standalone
+    // repro). Omitting the profile attribute yields CGL's default Legacy
+    // (2.1) profile, where GL_MAX_CLIP_PLANES is valid — confirmed via the
+    // same repro (GL_MAX_CLIP_PLANES=6, no error) — and which also matches
+    // what OCCT's external-context code path already assumes, so there is no
+    // profile mismatch. OCCT's shader/VBO/FBO rendering (GLSL, ARB_vertex_
+    // buffer_object, ARB_framebuffer_object) all predate GL 3.2 core and are
+    // available as extensions under this Legacy/Metal-backed 2.1 context.
     CGLPixelFormatAttribute attrs[] = {
-        kCGLPFAOpenGLProfile,
-        (CGLPixelFormatAttribute)kCGLOGLPVersion_3_2_Core,
         kCGLPFAColorSize, (CGLPixelFormatAttribute)24,
         kCGLPFAAlphaSize, (CGLPixelFormatAttribute)8,
         kCGLPFADepthSize, (CGLPixelFormatAttribute)24,
@@ -41,6 +62,20 @@ class CglContext final : public GlContext {
       throw std::runtime_error("CGLCreateContext failed: " +
                                std::string(CGLErrorString(err)));
     }
+    // Wrap the SAME CGL context in an NSOpenGLContext: OCCT's
+    // Aspect_RenderingContext is NSOpenGLContext* on desktop macOS and it
+    // invokes Objective-C methods on it (-makeCurrentContext, -flushBuffer);
+    // a raw CGLContextObj reinterpreted as that type would crash. Per Apple
+    // docs -initWithCGLContextObj: adopts the given context as-is (it does
+    // not create a new/shared one), so all GL objects (textures, FBOs)
+    // created via our own raw CGL calls remain valid through this wrapper.
+    nsContext_ = [[NSOpenGLContext alloc] initWithCGLContextObj:context_];
+    if (nsContext_ == nil) {
+      CGLDestroyContext(context_);
+      context_ = nullptr;
+      throw std::runtime_error(
+          "NSOpenGLContext initWithCGLContextObj failed");
+    }
     makeCurrent();
   }
 
@@ -48,14 +83,26 @@ class CglContext final : public GlContext {
     if (context_ != nullptr) {
       CGLSetCurrentContext(context_);
       destroySurfaceFramebuffer();
-      CGLSetCurrentContext(nullptr);
+      if (nsContext_ != nil) {
+        [NSOpenGLContext clearCurrentContext];
+        [nsContext_ release];
+        nsContext_ = nil;
+      } else {
+        CGLSetCurrentContext(nullptr);
+      }
       CGLDestroyContext(context_);
     }
   }
 
   void makeCurrent() override {
-    if (CGLSetCurrentContext(context_) != kCGLNoError) {
-      throw std::runtime_error("CGLSetCurrentContext failed");
+    // Routed through the NSOpenGLContext wrapper (not raw
+    // CGLSetCurrentContext) so Cocoa's own "current context" bookkeeping
+    // (+[NSOpenGLContext currentContext], consulted by some OCCT code
+    // paths) stays consistent with what is actually current at the CGL
+    // level.
+    [nsContext_ makeCurrentContext];
+    if (CGLGetCurrentContext() != context_) {
+      throw std::runtime_error("NSOpenGLContext makeCurrentContext failed");
     }
   }
 
@@ -132,7 +179,7 @@ class CglContext final : public GlContext {
   int width() const override { return width_; }
   int height() const override { return height_; }
 
-  void* nativeContext() override { return context_; }
+  void* nativeContext() override { return (void*)nsContext_; }
 
   void flush() override { glFlush(); }
 
@@ -143,28 +190,6 @@ class CglContext final : public GlContext {
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
     return rgba;
-  }
-
-  void renderTestPattern() override {
-    makeCurrent();
-    bindSurfaceFramebuffer();
-    glViewport(0, 0, width_, height_);
-    glEnable(GL_SCISSOR_TEST);
-    const int hw = width_ / 2;
-    const int hh = height_ / 2;
-    auto clearRect = [&](int x, int y, int w, int h, float r, float g,
-                         float b) {
-      glScissor(x, y, w, h);
-      glClearColor(r, g, b, 1.0f);
-      glClear(GL_COLOR_BUFFER_BIT);
-    };
-    // GL origin is bottom-left.
-    clearRect(0, 0, hw, hh, 0.f, 0.f, 1.f);        // bottom-left: blue
-    clearRect(hw, 0, hw, hh, 1.f, 1.f, 1.f);       // bottom-right: white
-    clearRect(0, hh, hw, hh, 1.f, 0.f, 0.f);       // top-left: red
-    clearRect(hw, hh, hw, hh, 0.f, 1.f, 0.f);      // top-right: green
-    glDisable(GL_SCISSOR_TEST);
-    flush();
   }
 
  private:
@@ -190,6 +215,7 @@ class CglContext final : public GlContext {
   }
 
   CGLContextObj context_ = nullptr;
+  NSOpenGLContext* nsContext_ = nil;
   IOSurfaceRef surface_ = nullptr;
   GLuint colorTexture_ = 0;
   GLuint depthStencil_ = 0;

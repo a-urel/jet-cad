@@ -201,22 +201,39 @@ json Session::deleteBodies(const json& cmd) {
 
 json Session::execute(const json& cmd) {
   const std::string name = cmd.at("cmd").get<std::string>();
-  if (name == "makeBox") return makeBox(cmd);
-  if (name == "extrude") return extrude(cmd);
-  if (name == "boolean") return booleanOp(cmd);
-  if (name == "fillet") return fillet(cmd);
-  if (name == "transform") return transform(cmd);
-  if (name == "importStep") return importStep(cmd);
-  if (name == "exportStep") return exportStep(cmd);
-  if (name == "snapshotBodies") return snapshotBodies(cmd);
-  if (name == "restoreBodies") return restoreBodies(cmd);
-  if (name == "deleteBodies") return deleteBodies(cmd);
-  if (name == "saveSnapshot") return saveSnapshot(cmd);
-  if (name == "restoreSession") return restoreSession(cmd);
-  if (name == "debugInitTexture") return cmdDebugInitTexture(cmd);
-  if (name == "debugRenderTestPattern") return cmdDebugRenderTestPattern();
-  if (name == "debugReadPixels") return cmdDebugReadPixels(cmd);
-  throw CommandError("unknown command: " + name);
+
+  // After any of these succeed with an active viewer, the AIS display list
+  // must match bodies_ (Plan 3 Task 3 auto-sync contract) — ONE hook below,
+  // not one call per handler.
+  static const std::set<std::string> kMutating = {
+      "makeBox",       "extrude",      "boolean",
+      "fillet",        "transform",    "importStep",
+      "restoreBodies", "deleteBodies", "restoreSession",
+  };
+
+  json result;
+  if (name == "makeBox") result = makeBox(cmd);
+  else if (name == "extrude") result = extrude(cmd);
+  else if (name == "boolean") result = booleanOp(cmd);
+  else if (name == "fillet") result = fillet(cmd);
+  else if (name == "transform") result = transform(cmd);
+  else if (name == "importStep") result = importStep(cmd);
+  else if (name == "exportStep") result = exportStep(cmd);
+  else if (name == "snapshotBodies") result = snapshotBodies(cmd);
+  else if (name == "restoreBodies") result = restoreBodies(cmd);
+  else if (name == "deleteBodies") result = deleteBodies(cmd);
+  else if (name == "saveSnapshot") result = saveSnapshot(cmd);
+  else if (name == "restoreSession") result = restoreSession(cmd);
+  else if (name == "initViewer") result = cmdInitViewer(cmd);
+  else if (name == "renderFrame") result = cmdRenderFrame();
+  else if (name == "cameraFit") result = cmdCameraFit();
+  else if (name == "debugReadPixels") result = cmdDebugReadPixels(cmd);
+  else throw CommandError("unknown command: " + name);
+
+  if (viewer_ && kMutating.count(name) > 0) {
+    viewer_->syncBodies(bodies_);
+  }
+  return result;
 }
 
 json Session::booleanOp(const json& cmd) {
@@ -643,38 +660,47 @@ json Session::exportStep(const json& cmd) {
   return json{{"dataB64", b64encode(bytes)}};
 }
 
-json Session::cmdDebugInitTexture(const json& cmd) {
-  if (spikeGl_) throw CommandError("texture already initialized");
+json Session::cmdInitViewer(const json& cmd) {
+  if (viewer_) throw CommandError("viewer already initialized");
   const int width = cmd.at("width").get<int>();
   const int height = cmd.at("height").get<int>();
-  try {
-    spikeGl_ = GlContext::create();
-    const uint32_t surfaceId = spikeGl_->createSurfaceFramebuffer(width, height);
-    return json{{"surfaceId", surfaceId}};
-  } catch (const std::runtime_error& e) {
-    spikeGl_.reset();
-    throw CommandError(e.what());
+  const double pixelRatio = cmd.at("pixelRatio").get<double>();
+  if (width <= 0 || height <= 0) {
+    throw CommandError("viewer size must be positive");
   }
+  viewer_ = std::make_unique<Viewer>(width, height, pixelRatio);
+  viewer_->syncBodies(bodies_);
+  return json{{"surfaceId", viewer_->surfaceId()}};
 }
 
-json Session::cmdDebugRenderTestPattern() {
-  if (!spikeGl_) throw CommandError("texture not initialized");
-  spikeGl_->renderTestPattern();
+json Session::cmdRenderFrame() {
+  requireViewer().render();
+  return json::object();
+}
+
+json Session::cmdCameraFit() {
+  requireViewer().fitAll();
   return json::object();
 }
 
 json Session::cmdDebugReadPixels(const json& cmd) {
-  if (!spikeGl_) throw CommandError("texture not initialized");
+  Viewer& viewer = requireViewer();
   const int x = cmd.at("x").get<int>();
   const int y = cmd.at("y").get<int>();
   const int w = cmd.at("width").get<int>();
   const int h = cmd.at("height").get<int>();
-  if (w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > spikeGl_->width() ||
-      y + h > spikeGl_->height()) {
+  if (w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > viewer.width() ||
+      y + h > viewer.height()) {
     throw CommandError("readPixels rectangle out of bounds");
   }
-  std::vector<uint8_t> rgba = spikeGl_->readPixels(x, y, w, h);
-  return json{{"width", w}, {"height", h}, {"rgbaBase64", b64encode(rgba)}};
+  return json{{"width", w},
+              {"height", h},
+              {"rgbaBase64", b64encode(viewer.readPixels(x, y, w, h))}};
+}
+
+Viewer& Session::requireViewer() {
+  if (!viewer_) throw CommandError("viewer not initialized");
+  return *viewer_;
 }
 
 }  // namespace jetcad

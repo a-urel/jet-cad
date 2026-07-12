@@ -38,8 +38,16 @@ class GlContext {
   virtual int width() const = 0;
   virtual int height() const = 0;
 
-  // The native context handle (CGLContextObj on macOS), passed to OCCT as
-  // Aspect_RenderingContext. Opaque to callers.
+  // Native rendering context handle for OCCT's Aspect_RenderingContext.
+  // NOT simply the raw CGLContextObj on macOS: Aspect_RenderingContext.hxx
+  // typedefs this to NSOpenGLContext* on desktop macOS, and OCCT calls
+  // Objective-C methods on it directly (-makeCurrentContext, -flushBuffer —
+  // confirmed against OCCT 7.9.3's OpenGl_Context_1.mm), so handing it a
+  // raw CGLContextObj would crash. Implementations must return a real
+  // NSOpenGLContext* wrapping the same underlying CGL context used
+  // elsewhere in this interface, so GL objects created on one side (e.g.
+  // the surface FBO) are visible to callers using the other. Opaque to
+  // callers other than the OCCT viewer wiring.
   virtual void* nativeContext() = 0;
 
   // Flushes GL work so IOSurface consumers (Metal/CoreVideo) observe it.
@@ -48,10 +56,6 @@ class GlContext {
   // Reads RGBA pixels from the surface FBO; rows are bottom-up exactly as
   // glReadPixels returns them.
   virtual std::vector<uint8_t> readPixels(int x, int y, int w, int h) = 0;
-
-  // Spike helper, removed with the spike (Plan 3 Task 3): fills the surface
-  // FBO with an orientation-asymmetric quadrant test pattern.
-  virtual void renderTestPattern() = 0;
 };
 
 }  // namespace jetcad

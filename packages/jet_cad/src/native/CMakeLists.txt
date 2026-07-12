@@ -15,6 +15,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 add_library(jet_cad_native SHARED
   api.cpp
   session.cpp
+  viewer.cpp
 )
 target_include_directories(jet_cad_native PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(jet_cad_native PRIVATE nlohmann_json::nlohmann_json)
@@ -25,13 +26,20 @@ if(APPLE)
   target_link_libraries(jet_cad_native PRIVATE
     "-framework CoreFoundation"
     "-framework IOSurface"
-    "-framework OpenGL")
+    "-framework OpenGL"
+    # AppKit/NSOpenGLContext: OCCT's Aspect_RenderingContext is NSOpenGLContext*
+    # on desktop macOS (Aspect_RenderingContext.hxx); gl_context_macos.mm wraps
+    # our CGL context in one so OCCT's Cocoa-level calls stay valid. See viewer
+    # Task 3 report for details.
+    "-framework Cocoa")
 endif()
 
 # OCCT toolkits. 7.8+ renamed STEP toolkits (TKSTEP -> TKDESTEP); support both.
+# TKService/TKV3d/TKOpenGl added in Plan 3 Task 3 for the V3d/AIS viewer.
 set(JET_CAD_OCCT_LIBS
   TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo
-  TKPrim TKBO TKFillet TKShHealing TKXSBase)
+  TKPrim TKBO TKFillet TKShHealing TKXSBase
+  TKService TKV3d TKOpenGl)
 if(TARGET TKDESTEP)
   list(APPEND JET_CAD_OCCT_LIBS TKDESTEP)
 else()
@@ -52,7 +60,7 @@ if(JET_CAD_BUILD_TESTS)
     tests/boolean_test.cpp
     tests/modeling_test.cpp
     tests/persistence_test.cpp
-    tests/texture_spike_test.cpp
+    tests/viewer_test.cpp
   )
   # session.hpp/session_test.cpp include and call into OCCT directly
   # (TopoDS_Shape, BRepPrimAPI_MakeBox, BRepGProp, ...). jet_cad_native's
