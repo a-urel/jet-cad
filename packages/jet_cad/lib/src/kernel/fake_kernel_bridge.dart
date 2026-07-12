@@ -24,6 +24,16 @@ class FakeKernelBridge implements KernelBridge {
 
   String _next(String prefix) => '$prefix${++_idCounter}';
 
+  void _absorbIds(Iterable<String> ids) {
+    for (final id in ids) {
+      final digits = RegExp(r'\d+$').firstMatch(id)?.group(0);
+      if (digits != null) {
+        final n = int.parse(digits);
+        if (n > _idCounter) _idCounter = n;
+      }
+    }
+  }
+
   Map<String, _FakeBody> _session(SessionHandle s) =>
       _sessions[s.value] ??
       (throw KernelException('unknown session: ${s.value}'));
@@ -195,10 +205,14 @@ class FakeKernelBridge implements KernelBridge {
       SessionHandle session, KernelSnapshot snapshot) async {
     final bodies = _session(session);
     final dump = jsonDecode(utf8.decode(snapshot.bytes)) as List;
+    final allIds = <String>[];
     for (final entry in dump) {
       final body = _FakeBody.fromJson((entry as Map).cast<String, Object?>());
       bodies[body.id] = body; // id-preserving by construction
+      allIds.add(body.id);
+      allIds.addAll(body.subshapes);
     }
+    _absorbIds(allIds);
   }
 
   @override
@@ -221,10 +235,14 @@ class FakeKernelBridge implements KernelBridge {
       SessionHandle session, KernelSnapshot snapshot) async {
     final bodies = _session(session)..clear();
     final dump = jsonDecode(utf8.decode(snapshot.bytes)) as List;
+    final allIds = <String>[];
     for (final entry in dump) {
       final body = _FakeBody.fromJson((entry as Map).cast<String, Object?>());
       bodies[body.id] = body;
+      allIds.add(body.id);
+      allIds.addAll(body.subshapes);
     }
+    _absorbIds(allIds);
   }
 }
 
