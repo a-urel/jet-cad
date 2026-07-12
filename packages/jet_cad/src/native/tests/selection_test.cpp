@@ -87,6 +87,26 @@ TEST(SelectionTest, SetSelectionHighlightChangesPixels) {
   jc_dispose_session(s);
 }
 
+TEST(SelectionTest, SetSelectionWithDuplicateIdsSelectsOnce) {
+  uint64_t s = jc_create_session();
+  initViewer(s, 128);
+  json box = makeBox(s, 50, 50, 50);
+  std::string bodyId = box.at("body").get<std::string>();
+  execOk(s, {{"cmd", "cameraFit"}});
+  execOk(s, {{"cmd", "renderFrame"}});
+  auto unselected = readAll(s, 128);
+  // AIS_InteractiveContext::AddOrRemoveSelected is a TOGGLE, not an
+  // idempotent select: without dedup a repeated id selects then
+  // immediately deselects, silently ending up UNSELECTED despite the {}
+  // success — violating "replaces the whole selection with these ids".
+  execOk(s, {{"cmd", "setSelection"},
+             {"ids", json::array({bodyId, bodyId})}});
+  execOk(s, {{"cmd", "renderFrame"}});
+  EXPECT_NE(unselected, readAll(s, 128))
+      << "duplicate ids must still leave the body selected/highlighted";
+  jc_dispose_session(s);
+}
+
 TEST(SelectionTest, SetSelectionUnknownIdFailsAtomically) {
   uint64_t s = jc_create_session();
   initViewer(s, 128);

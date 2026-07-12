@@ -15,6 +15,7 @@
 #include <StdSelect_BRepOwner.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 
+#include <set>
 #include <stdexcept>
 
 #include "session.hpp"
@@ -301,22 +302,32 @@ void Viewer::setSelection(const std::vector<std::string>& ids,
   gl_->makeCurrent();
 
   // Resolve every id to its owning body + target shape + selection mode
-  // FIRST: an unknown id must not partially apply the selection.
+  // FIRST: an unknown id must not partially apply the selection. ALL
+  // validation (including the displayed_ membership checks) lives in this
+  // loop so nothing below it can throw after ClearSelected has already
+  // wiped the previous selection.
   struct Target {
+    std::string id;  // as given, for error messages
     std::string bodyId;
     TopoDS_Shape shape;
     int mode;
   };
   std::vector<Target> targets;
   targets.reserve(ids.size());
+  std::set<std::string> seen;
   for (const auto& id : ids) {
     const int mode = selectionModeForId(id);
+    // Dedupe, keeping first-occurrence order: AddOrRemoveSelected is a
+    // TOGGLE (per OCCT docs), so applying a repeated id twice would select
+    // then immediately deselect it — the duplicate must simply be dropped
+    // for "replace the selection with these ids" semantics to hold.
+    if (!seen.insert(id).second) continue;
     if (mode == 0) {
       auto it = bodies.find(id);
       if (it == bodies.end() || displayed_.find(id) == displayed_.end()) {
         throw CommandError("unknown body id: " + id);
       }
-      targets.push_back({id, it->second.shape, 0});
+      targets.push_back({id, id, it->second.shape, 0});
       continue;
     }
     bool found = false;
@@ -326,7 +337,13 @@ void Viewer::setSelection(const std::vector<std::string>& ids,
                                         : &body.vertices;
       for (const auto& [subId, shape] : *list) {
         if (subId == id) {
-          targets.push_back({bodyId, shape, mode});
+          if (displayed_.find(bodyId) == displayed_.end()) {
+            // Resolved against `bodies` but its body isn't displayed — the
+            // AIS list should always mirror bodies_ (syncBodies runs after
+            // every mutating command), so this would be a lineage bug.
+            throw CommandError("body not displayed: " + bodyId);
+          }
+          targets.push_back({id, bodyId, shape, mode});
           found = true;
           break;
         }
@@ -338,20 +355,14 @@ void Viewer::setSelection(const std::vector<std::string>& ids,
 
   context_->ClearSelected(false);
   for (const auto& target : targets) {
-    auto dit = displayed_.find(target.bodyId);
-    if (dit == displayed_.end()) {
-      // Resolved against `bodies` above but not currently displayed — the
-      // AIS list should always mirror bodies_ (syncBodies runs after every
-      // mutating command), so this would itself be a lineage bug.
-      throw CommandError("body not displayed: " + target.bodyId);
-    }
     // Activating (re)computes/attaches this mode's selection owners on
     // every displayed object, matching the mode we're about to search.
     activateSelectionMode(target.mode);
 
     Handle(SelectMgr_IndexedMapOfOwner) owners =
         new SelectMgr_IndexedMapOfOwner();
-    context_->EntityOwners(owners, dit->second.ais, target.mode);
+    context_->EntityOwners(owners, displayed_.at(target.bodyId).ais,
+                           target.mode);
 
     bool selected = false;
     if (target.mode == 0) {
@@ -375,7 +386,7 @@ void Viewer::setSelection(const std::vector<std::string>& ids,
     }
     if (!selected) {
       context_->ClearSelected(false);
-      throw CommandError("no selectable owner for id");
+      throw CommandError("no selectable owner for id: " + target.id);
     }
   }
 }
