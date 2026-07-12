@@ -41,8 +41,7 @@ void main() {
   });
 
   test('TransformOp preserves the matrix', () {
-    final m = Matrix4.identity()
-        ..translateByVector3(Vector3(5.0, 0.0, 0.0));
+    final m = Matrix4.identity()..translateByVector3(Vector3(5.0, 0.0, 0.0));
     final op = TransformOp(
       id: const OpId(3),
       bodies: const [BodyId('b1')],
@@ -64,6 +63,44 @@ void main() {
     );
     final restored = Operation.fromJson(op.toJson()) as ImportStepOp;
     expect(restored.stepBytes, bytes);
+  });
+
+  test('ExtrudeOp round-trips through encoded JSON string', () {
+    final op = ExtrudeOp(
+      id: const OpId(5),
+      face: const FaceId('f9'),
+      depth: 12.5,
+      outputs: const [BodyId('b2')],
+      remap: IdRemap.empty,
+    );
+    final restored = Operation.fromJson(
+      (jsonDecode(jsonEncode(op.toJson())) as Map).cast<String, Object?>(),
+    ) as ExtrudeOp;
+    expect(restored.face, const FaceId('f9'));
+    expect(restored.depth, 12.5);
+    expect(restored.inputs, const [FaceId('f9')]);
+    expect(restored.outputs, const [BodyId('b2')]);
+  });
+
+  test('FilletOp round-trips through encoded JSON string', () {
+    final op = FilletOp(
+      id: const OpId(6),
+      edges: const [EdgeId('e1'), EdgeId('e2')],
+      radius: 0.5,
+      outputs: const [BodyId('b1')],
+      remap: const IdRemap({
+        EntityId('e1'): [EntityId('f7')],
+      }),
+    );
+    final restored = Operation.fromJson(
+      (jsonDecode(jsonEncode(op.toJson())) as Map).cast<String, Object?>(),
+    ) as FilletOp;
+    expect(restored.edges, const [EdgeId('e1'), EdgeId('e2')]);
+    expect(restored.radius, 0.5);
+    expect(
+      restored.remap.mapping[const EntityId('e1')],
+      const [EntityId('f7')],
+    );
   });
 
   test('unknown operation type throws FormatException', () {
