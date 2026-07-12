@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -110,5 +111,14 @@ void main() {
     final step = await doc.exportStep([c]);
     expect(step, isNotEmpty);
     await doc.dispose();
+  });
+
+  test('commands enqueued after disposeSession throw StateError', () async {
+    unawaited(bridge.disposeSession(session));
+    await expectLater(
+      bridge.makeBox(session, const Vec3(1, 1, 1)),
+      throwsStateError,
+    );
+    // tearDown disposes again; disposeSession is idempotent (no-op).
   });
 }

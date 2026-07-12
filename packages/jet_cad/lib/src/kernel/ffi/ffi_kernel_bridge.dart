@@ -47,8 +47,17 @@ class FfiKernelBridge implements KernelBridge {
   final NativeBindings _bindings;
   final Map<int, Future<void>> _queues = {};
 
+  /// Sessions whose [disposeSession] has been invoked (possibly still
+  /// awaiting in-flight commands). Commands enqueued after that point get
+  /// a fast, typed rejection instead of racing the native dispose and
+  /// surfacing a confusing kernel "unknown session" error.
+  final Set<int> _disposing = {};
+
   Future<Map<String, Object?>> _run(
       SessionHandle session, Map<String, Object?> cmd) {
+    if (_disposing.contains(session.value)) {
+      throw StateError('session is disposed');
+    }
     // Copied to a local: the closure below runs via Isolate.run, which
     // rejects any captured variable that (transitively) isn't sendable.
     // Capturing `this.libraryPath` directly would drag `this` — and with
@@ -77,6 +86,12 @@ class FfiKernelBridge implements KernelBridge {
 
   @override
   Future<void> disposeSession(SessionHandle session) async {
+    // Idempotent: a second call while (or after) the first is disposing
+    // is a no-op. The synchronous add-before-await means any command
+    // enqueued after this call starts is rejected by _run, while commands
+    // already in the queue complete before the native dispose below.
+    if (_disposing.contains(session.value)) return;
+    _disposing.add(session.value);
     await (_queues[session.value] ?? Future<void>.value());
     _queues.remove(session.value);
     _bindings.disposeSession(session.value);

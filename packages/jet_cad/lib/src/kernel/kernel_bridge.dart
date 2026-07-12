@@ -17,7 +17,11 @@ import 'kernel_types.dart';
 /// evolve into a generic execute(KernelCommand) dispatcher before v1.0.
 abstract interface class KernelBridge {
   Future<SessionHandle> createSession(RenderTarget target);
+
+  /// After disposeSession is invoked, further commands on that session
+  /// throw; in-flight commands complete first.
   Future<void> disposeSession(SessionHandle session);
+
   Future<KernelVersionInfo> versionInfo();
 
   Future<CreateResult> makeBox(SessionHandle session, Vec3 size);
