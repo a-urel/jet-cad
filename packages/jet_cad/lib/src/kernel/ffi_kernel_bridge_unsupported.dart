@@ -95,4 +95,6 @@ class FfiKernelBridge implements KernelBridge {
   Future<Map<String, Object?>> debugExecute(
           SessionHandle session, Map<String, Object?> command) =>
       _unsupported();
+
+  Future<void> shutdown() => _unsupported();
 }

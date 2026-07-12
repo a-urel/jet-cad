@@ -135,4 +135,24 @@ void runKernelBridgeContract(KernelBridge Function() createBridge) {
     await bridge.deleteBodies(session, [box.body]);
     await bridge.deleteBodies(session, [box.body]); // no throw
   });
+
+  test('contract: fillet mints non-empty edges and vertices', () async {
+    final box = await bridge.makeBox(session, const Vec3(10, 10, 10));
+    final result = await bridge.fillet(session, [box.edges.first], 1.0);
+    expect(result.edges, isNotEmpty,
+        reason: 'fillet creates new arc edges on the rounded surface');
+    expect(result.vertices, isNotEmpty,
+        reason: 'fillet creates new vertices on the rounded surface');
+  });
+
+  test('contract: concurrent disposeSession calls both complete', () async {
+    final s = await bridge.createSession(const HeadlessTarget());
+    final first = bridge.disposeSession(s);
+    final second = bridge.disposeSession(s);
+    await Future.wait([first, second]);
+    await expectLater(
+      bridge.makeBox(s, const Vec3(1, 1, 1)),
+      throwsA(anyOf(isA<KernelException>(), isA<StateError>())),
+    );
+  });
 }

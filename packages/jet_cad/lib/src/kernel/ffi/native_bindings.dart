@@ -10,8 +10,9 @@ typedef _ExecuteC = ffi.Pointer<Utf8> Function(ffi.Uint64, ffi.Pointer<Utf8>);
 typedef _VersionC = ffi.Pointer<Utf8> Function();
 typedef _FreeC = ffi.Void Function(ffi.Pointer<Utf8>);
 
-/// Raw synchronous bindings to libjet_cad_native. Blocking — only call
-/// from a worker isolate (FfiKernelBridge wraps every call in Isolate.run).
+/// Raw synchronous bindings to libjet_cad_native. Blocking — only call from
+/// a worker isolate ([FfiWorker] constructs exactly one instance inside its
+/// long-lived isolate; FfiKernelBridge never touches this directly).
 class NativeBindings {
   NativeBindings(String libraryPath)
       : _lib = ffi.DynamicLibrary.open(libraryPath) {

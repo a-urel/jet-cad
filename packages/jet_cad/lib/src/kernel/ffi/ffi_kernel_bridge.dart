@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:vector_math/vector_math_64.dart';
@@ -8,21 +7,17 @@ import 'package:vector_math/vector_math_64.dart';
 import '../../document/entity.dart';
 import '../kernel_bridge.dart';
 import '../kernel_types.dart';
-import 'native_bindings.dart';
-
-/// Top-level so Isolate.run can invoke it with only sendable captures.
-String _executeInIsolate((String, int, String) args) {
-  final (libPath, session, cmd) = args;
-  return NativeBindings(libPath).execute(session, cmd);
-}
+import 'ffi_worker.dart';
 
 /// [KernelBridge] backed by the OCCT shim (libjet_cad_native).
 ///
-/// Every command runs the blocking native call in a worker isolate and is
-/// serialized per session (one command in flight — OCCT sessions are not
-/// thread-safe). Error envelopes surface as [KernelException].
+/// Every command runs on one long-lived worker isolate (dlopen'd once,
+/// lazily spawned on first use) and is serialized per session (one command
+/// in flight — OCCT sessions are not thread-safe). The worker isolate is
+/// also the stable home thread for the upcoming GL context. Error envelopes
+/// surface as [KernelException].
 class FfiKernelBridge implements KernelBridge {
-  FfiKernelBridge(this.libraryPath) : _bindings = NativeBindings(libraryPath);
+  FfiKernelBridge(this.libraryPath);
 
   factory FfiKernelBridge.auto() {
     final path = locateLibrary();
@@ -44,7 +39,6 @@ class FfiKernelBridge implements KernelBridge {
   }
 
   final String libraryPath;
-  final NativeBindings _bindings;
 
   // Entries are removed once a session's dispose completes (see
   // disposeSession below), so this stays bounded by concurrently *live*
@@ -63,20 +57,31 @@ class FfiKernelBridge implements KernelBridge {
   /// acceptable for a per-process handle count, revisit if that changes.
   final Set<int> _disposing = {};
 
+  /// In-flight (and, once completed, terminal) dispose futures keyed by
+  /// session. Lets a second concurrent [disposeSession] call join the same
+  /// dispose instead of racing it or silently no-op-ing before completion.
+  final Map<int, Future<void>> _disposals = {};
+
+  Future<FfiWorker>? _workerFuture;
+  bool _shutdownRequested = false;
+
+  Future<FfiWorker> _worker() {
+    if (_shutdownRequested) {
+      throw StateError('FfiKernelBridge is shut down');
+    }
+    return _workerFuture ??= FfiWorker.spawn(libraryPath);
+  }
+
   Future<Map<String, Object?>> _run(
       SessionHandle session, Map<String, Object?> cmd) {
     if (_disposing.contains(session.value)) {
       throw StateError('session is disposed');
     }
-    // Copied to a local: the closure below runs via Isolate.run, which
-    // rejects any captured variable that (transitively) isn't sendable.
-    // Capturing `this.libraryPath` directly would drag `this` — and with
-    // it `_bindings`, which holds a DynamicLibrary — into the closure.
-    final path = libraryPath;
     final prev = _queues[session.value] ?? Future<void>.value();
     final job = prev.then((_) async {
-      final raw = await Isolate.run(
-          () => _executeInIsolate((path, session.value, jsonEncode(cmd))));
+      final worker = await _worker();
+      final raw = await worker.request(
+          'execute', session.value, jsonEncode(cmd)) as String;
       final envelope = (jsonDecode(raw) as Map).cast<String, Object?>();
       if (envelope['ok'] != true) {
         throw KernelException(envelope['error']?.toString() ?? 'unknown');
@@ -91,29 +96,61 @@ class FfiKernelBridge implements KernelBridge {
   }
 
   @override
-  Future<SessionHandle> createSession(RenderTarget target) async =>
-      SessionHandle(_bindings.createSession());
+  Future<SessionHandle> createSession(RenderTarget target) async {
+    final worker = await _worker();
+    final handle = await worker.request('createSession', 0, null) as int;
+    return SessionHandle(handle);
+  }
 
   @override
-  Future<void> disposeSession(SessionHandle session) async {
-    // Idempotent: a second call while (or after) the first is disposing
-    // is a no-op. The synchronous add-before-await means any command
+  Future<void> disposeSession(SessionHandle session) {
+    // Joining semantics (Plan 2 carry-over): a dispose in flight is THE
+    // dispose — every caller awaits the same future; afterwards it is a
+    // completed no-op.
+    final existing = _disposals[session.value];
+    if (existing != null) return existing;
+    if (_disposing.contains(session.value)) return Future.value();
+    final future = _disposeImpl(session);
+    _disposals[session.value] = future;
+    return future;
+  }
+
+  Future<void> _disposeImpl(SessionHandle session) async {
+    // Idempotent: the synchronous add-before-await means any command
     // enqueued after this call starts is rejected by _run, while commands
     // already in the queue complete before the native dispose below.
-    if (_disposing.contains(session.value)) return;
     _disposing.add(session.value);
-    await (_queues[session.value] ?? Future<void>.value());
+    await (_queues[session.value] ?? Future<void>.value())
+        .catchError((_) => null);
+    final worker = await _worker();
+    await worker.request('disposeSession', session.value, null);
     _queues.remove(session.value);
-    _bindings.disposeSession(session.value);
   }
 
   @override
   Future<KernelVersionInfo> versionInfo() async {
-    final v = (jsonDecode(_bindings.version()) as Map).cast<String, Object?>();
+    final worker = await _worker();
+    final raw = await worker.request('version', 0, null) as String;
+    final v = (jsonDecode(raw) as Map).cast<String, Object?>();
     return KernelVersionInfo(
       kernelVersion: v['kernelVersion']! as String,
       occtVersion: v['occtVersion']! as String,
     );
+  }
+
+  /// Shuts down the worker isolate. FFI-specific lifecycle (not part of
+  /// [KernelBridge]): awaits in-flight per-session command queues, then
+  /// shuts the worker down. Any command issued after this call throws
+  /// [StateError]. Idempotent.
+  Future<void> shutdown() async {
+    if (_shutdownRequested) return;
+    _shutdownRequested = true;
+    final workerFuture = _workerFuture;
+    if (workerFuture == null) return;
+    final worker = await workerFuture;
+    await Future.wait(
+        _queues.values.map((f) => f.catchError((_) => null)).toList());
+    await worker.shutdown();
   }
 
   Future<CreateResult> _create(
