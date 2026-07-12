@@ -106,6 +106,15 @@ class FfiKernelBridge implements KernelBridge {
   Future<void> _runVoid(SessionHandle session, Map<String, Object?> cmd) =>
       _run(session, cmd);
 
+  /// Creates a native session, optionally initializing its viewer.
+  ///
+  /// Cleanup contract: if the [TextureTarget] branch's `initViewer` call
+  /// fails, the native `Session` was already minted (by the preceding
+  /// `createSession` worker request) but its handle would otherwise never
+  /// reach the caller — nothing could ever dispose it, leaking it for the
+  /// life of the process. On that failure this method disposes the session
+  /// itself (best-effort — a disposal error is swallowed) and rethrows the
+  /// original `initViewer` error.
   @override
   Future<SessionHandle> createSession(RenderTarget target) async {
     // _worker() must stay the first expression: an async body runs
@@ -117,12 +126,23 @@ class FfiKernelBridge implements KernelBridge {
     if (target is TextureTarget) {
       // Real dimensions arrive with the first resizeViewport (layout-time);
       // 32x32 placeholder keeps initViewer's size check honest.
-      await _run(session, {
-        'cmd': 'initViewer',
-        'width': 32,
-        'height': 32,
-        'pixelRatio': 1.0,
-      });
+      try {
+        await _run(session, {
+          'cmd': 'initViewer',
+          'width': 32,
+          'height': 32,
+          'pixelRatio': 1.0,
+        });
+      } catch (e) {
+        // See the cleanup contract above: the handle never reaches the
+        // caller on this path, so this is the only chance to release it.
+        try {
+          await disposeSession(session);
+        } catch (_) {
+          // Best-effort: the original initViewer failure is what matters.
+        }
+        rethrow;
+      }
     }
     return session;
   }

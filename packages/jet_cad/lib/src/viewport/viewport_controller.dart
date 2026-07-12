@@ -22,12 +22,32 @@ class SelectionChanged {
 /// Damage model: a frame is drawn only on document changes, camera changes,
 /// selection changes, or resize — never per-vsync. [textureId] flips from
 /// null once the platform texture is registered ([notifyListeners]).
+///
+/// Error posture: [handleLayout] drives attach and resize through
+/// fire-and-forget futures (the widget's layout callback has no return path
+/// to await them), and the document-change listener that feeds
+/// [requestRender] is itself a fire-and-forget stream callback. A bridge
+/// failure on any of those paths is reported to [FlutterError.onError] (via
+/// [FlutterError.reportError]) rather than left to throw into the enclosing
+/// zone unhandled — the controller's internal guards (`_attaching`,
+/// `_rendering`) are still reset afterward, so it stays usable, but the
+/// caller gets no typed signal on this path. A richer error stream is
+/// planned. Directly-awaited APIs ([orbitStart], [orbitTo], [panBy],
+/// [zoomBy], [fitAll], [selectAt], [setSelection]) are unaffected by this:
+/// callers await them and see failures as ordinary thrown errors.
 class ViewportController extends ChangeNotifier {
   ViewportController({
     required this.document,
     TextureBinding binding = const TextureBinding(),
   }) : _binding = binding {
-    _docSubscription = document.changes.listen((_) => requestRender());
+    _docSubscription = document.changes.listen((_) {
+      requestRender().catchError((Object error, StackTrace stackTrace) {
+        _reportBridgeError(
+            'document-change listener (ViewportController.requestRender)',
+            error,
+            stackTrace);
+      });
+    });
   }
 
   static const Duration _resizeDebounce = Duration(milliseconds: 100);
@@ -66,6 +86,14 @@ class ViewportController extends ChangeNotifier {
       return;
     }
     if (logicalSize == _appliedLogicalSize && devicePixelRatio == _dpr) {
+      // A layout that lands back on the already-applied size cancels any
+      // resize still pending from an earlier, since-abandoned layout —
+      // otherwise the debounce timer fires later and reallocates the
+      // viewport to that stale size while the widget is laid out at this
+      // one (stretched frame, misaligned picks).
+      _resizeTimer?.cancel();
+      _resizeTimer = null;
+      _pendingLogicalSize = null;
       return;
     }
     _pendingLogicalSize = logicalSize;
@@ -76,26 +104,31 @@ class ViewportController extends ChangeNotifier {
 
   Future<void> _attach(Size logicalSize, double devicePixelRatio) async {
     try {
-      _dpr = devicePixelRatio;
-      _appliedLogicalSize = logicalSize;
-      final surfaceId = await document.bridge.resizeViewport(
-        document.session,
-        (logicalSize.width * devicePixelRatio).round(),
-        (logicalSize.height * devicePixelRatio).round(),
-        devicePixelRatio,
-      );
-      final textureId = await _binding.registerTexture(surfaceId);
-      if (_disposed) {
-        await _binding.unregisterTexture(textureId);
-        return;
+      try {
+        _dpr = devicePixelRatio;
+        _appliedLogicalSize = logicalSize;
+        final surfaceId = await document.bridge.resizeViewport(
+          document.session,
+          (logicalSize.width * devicePixelRatio).round(),
+          (logicalSize.height * devicePixelRatio).round(),
+          devicePixelRatio,
+        );
+        final textureId = await _binding.registerTexture(surfaceId);
+        if (_disposed) {
+          await _binding.unregisterTexture(textureId);
+          return;
+        }
+        _textureId = textureId;
+        await document.bridge.fitAll(document.session);
+        await requestRender();
+        // Re-check: dispose() may have landed while awaiting fitAll/render;
+        // notifying a disposed ChangeNotifier throws in debug builds.
+        if (_disposed) return;
+        notifyListeners();
+      } catch (error, stackTrace) {
+        _reportBridgeError(
+            'attach (resize + register + fit + render)', error, stackTrace);
       }
-      _textureId = textureId;
-      await document.bridge.fitAll(document.session);
-      await requestRender();
-      // Re-check: dispose() may have landed while awaiting fitAll/render;
-      // notifying a disposed ChangeNotifier throws in debug builds.
-      if (_disposed) return;
-      notifyListeners();
     } finally {
       _attaching = false;
     }
@@ -105,17 +138,35 @@ class ViewportController extends ChangeNotifier {
     final logicalSize = _pendingLogicalSize;
     final textureId = _textureId;
     if (_disposed || logicalSize == null || textureId == null) return;
-    _appliedLogicalSize = logicalSize;
-    _dpr = _pendingDpr;
-    final surfaceId = await document.bridge.resizeViewport(
-      document.session,
-      (logicalSize.width * _dpr).round(),
-      (logicalSize.height * _dpr).round(),
-      _dpr,
-    );
-    if (_disposed) return;
-    await _binding.updateSurface(textureId, surfaceId);
-    await requestRender();
+    try {
+      _appliedLogicalSize = logicalSize;
+      _dpr = _pendingDpr;
+      final surfaceId = await document.bridge.resizeViewport(
+        document.session,
+        (logicalSize.width * _dpr).round(),
+        (logicalSize.height * _dpr).round(),
+        _dpr,
+      );
+      if (_disposed) return;
+      await _binding.updateSurface(textureId, surfaceId);
+      await requestRender();
+    } catch (error, stackTrace) {
+      _reportBridgeError(
+          'resize (reallocate + update surface + render)', error, stackTrace);
+    }
+  }
+
+  /// Routes a bridge/binding failure from a fire-and-forget path (attach,
+  /// resize, or the document-change render listener) to
+  /// [FlutterError.onError] instead of letting it escape as an unhandled
+  /// zone error. See the class-level "Error posture" doc comment.
+  void _reportBridgeError(String context, Object error, StackTrace stackTrace) {
+    FlutterError.reportError(FlutterErrorDetails(
+      exception: error,
+      stack: stackTrace,
+      library: 'jet_cad viewport',
+      context: ErrorDescription(context),
+    ));
   }
 
   /// Renders one frame and signals the compositor. Coalescing: calls that

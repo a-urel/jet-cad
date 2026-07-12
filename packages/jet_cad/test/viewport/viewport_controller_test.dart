@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad/jet_cad.dart';
 
@@ -58,6 +59,24 @@ void main() {
         reason: 'intermediate 210 width never reaches the bridge');
     expect(binding.log, contains('update 7 2'));
     expect(fake.renderFrameCount, 2);
+  });
+
+  testWidgets(
+      'reverting to the applied size before the debounce fires cancels the '
+      'pending resize', (tester) async {
+    controller.handleLayout(const Size(200, 100), 2.0);
+    await tester.pumpAndSettle();
+    controller.handleLayout(const Size(300, 150), 2.0);
+    await tester.pump(const Duration(milliseconds: 30));
+    controller.handleLayout(const Size(200, 100), 2.0);
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pumpAndSettle();
+    expect(fake.viewportSizes, [(400, 200, 2.0)],
+        reason: 'a layout that reverts to the already-applied size before '
+            'the debounce timer fires must cancel the pending resize, not '
+            'reallocate to the abandoned intermediate size 100ms later');
+    expect(binding.log.where((e) => e.startsWith('update')), isEmpty,
+        reason: 'no updateSurface should follow a cancelled resize');
   });
 
   testWidgets('document changes trigger damage renders', (tester) async {
@@ -175,6 +194,35 @@ void main() {
     await gatedDoc.dispose();
   });
 
+  testWidgets(
+      'attach failures are reported to FlutterError.onError, not thrown into '
+      'the zone', (tester) async {
+    final failingFake = _FitAllThrowsFakeBridge();
+    final failingDoc =
+        await CadDocument.create(failingFake, target: const TextureTarget());
+    final failingBinding = FakeBinding();
+    final failingController =
+        ViewportController(document: failingDoc, binding: failingBinding);
+
+    final originalOnError = FlutterError.onError;
+    FlutterErrorDetails? captured;
+    FlutterError.onError = (details) {
+      captured ??= details;
+    };
+    try {
+      failingController.handleLayout(const Size(100, 100), 1.0);
+      await tester.pumpAndSettle();
+    } finally {
+      FlutterError.onError = originalOnError;
+    }
+
+    expect(captured, isNotNull,
+        reason: 'the bridge failure must reach FlutterError.onError');
+    expect(captured!.exception, isA<StateError>());
+    expect(() => failingController.dispose(), returnsNormally);
+    await failingDoc.dispose();
+  });
+
   testWidgets('dispose during setSelection never adds to the closed stream',
       (tester) async {
     final gate = Completer<void>();
@@ -227,5 +275,15 @@ class _GatedFakeBridge extends FakeKernelBridge {
       await gate;
     }
     await super.setSelection(session, ids);
+  }
+}
+
+/// [FakeKernelBridge] whose fitAll always fails, simulating a bridge failure
+/// mid-attach so the controller's error-routing posture can be exercised
+/// deterministically.
+class _FitAllThrowsFakeBridge extends FakeKernelBridge {
+  @override
+  Future<void> fitAll(SessionHandle session) async {
+    throw StateError('fitAll boom');
   }
 }
