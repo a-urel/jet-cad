@@ -18,8 +18,9 @@ package may later provide a batteries-included editor.
 |---|---|
 | Widget scope | Full solid modeling (create + edit) |
 | Kernel | OCCT — only mature OSS B-rep kernel; LGPL 2.1 with exception |
-| Platforms v1 | Desktop (macOS/Windows/Linux) + Mobile (iOS/Android) |
-| Web | Deferred; architecture web-ready from day 1 (OCCT Emscripten/WebGL path) |
+| Platforms v1 | Desktop only (Windows/macOS/Linux) |
+| Mobile | Deferred until viewport stabilizes; FFI path already supports it |
+| Web | Deferred; the architecture permits a future WebAssembly backend without changing the public Dart API (OCCT Emscripten/WebGL path) |
 | Rendering | OCCT's own AIS/V3d viewer, composited via Flutter external texture |
 | Modeling paradigm | Direct modeling in v1; document stores operation graph so parametric history can be added without format break |
 | Package boundary | Viewport widget + headless document/controller API; no built-in toolbars or panels |
@@ -69,7 +70,7 @@ JetCadViewport (widget)     CadDocument (pure Dart: entities, op graph, undo)
 
 Hard rule: nothing above `KernelBridge` may import `dart:ffi`. The document
 layer is pure Dart and unit-testable without a native build. This rule is what
-makes "web later" real rather than aspirational.
+permits a future WASM backend without public API changes.
 
 ## KernelBridge contract
 
@@ -96,6 +97,10 @@ abstract interface class KernelBridge {
   // io
   Future<List<BodyId>> importStep(SessionHandle s, Uint8List bytes);
   Future<Uint8List> exportStep(SessionHandle s, List<BodyId> ids);
+
+  // session persistence — kernel state reconstruction
+  Future<KernelSnapshot> saveSnapshot(SessionHandle s);          // BREP dump + id map
+  Future<void> restoreSession(SessionHandle s, KernelSnapshot snapshot);
 }
 ```
 
@@ -104,10 +109,13 @@ Key contract decisions:
 - **Ids, not native handles.** The C++ session keeps `map<uint64, TopoDS_Shape>`.
   Dart never owns native pointers, so there are no finalizer or lifetime bugs.
   Deletion is an explicit command.
-- **Stable sub-entity ids.** A `FaceId` of the form (bodyId, faceIndex) is
-  fragile: indices shuffle after boolean operations. Rule for v1: every
-  modeling operation returns an id remap table (old id → new id) that the
-  document applies. This is a deliberate down-payment on the persistent-naming
+- **Stable sub-entity ids.** Every subshape (face, edge, vertex) gets a
+  kernel-generated UUID at creation — never an index like (bodyId, faceIndex),
+  which shuffles after boolean operations. Every modeling operation returns an
+  id remap table (old UUID → new UUIDs) that the document applies. The kernel
+  derives remaps from OCCT's built-in operation history
+  (`Generated`/`Modified`/`IsDeleted` maps on `BRepBuilderAPI`/`BRepAlgoAPI`
+  operations). This is a deliberate down-payment on the persistent-naming
   problem; the full solution is deferred to the parametric phase.
 - **Threading.** OCCT boolean operations can take seconds. All commands run on
   a dedicated native worker thread; FFI calls return immediately and complete
@@ -126,15 +134,17 @@ renders offscreen into a GPU surface that Flutter composites.
 
 | Platform | Texture path |
 |---|---|
-| Android | GL ES → `SurfaceTexture` (standard external-texture route) |
-| iOS/macOS | GL ES via ANGLE → Metal-backed `IOSurface`/`CVPixelBuffer` |
-| Windows | GL ES via ANGLE → D3D11 texture shared via DXGI handle |
-| Linux | EGL offscreen FBO → embedder GL texture |
+| Windows (v1) | GL ES via ANGLE → D3D11 texture shared via DXGI handle (native Windows GL drivers are unreliable) |
+| macOS (v1) | Native OpenGL (CGL) → `IOSurface`-backed FBO → Metal texture. Deprecated but present and stable; avoids shipping ANGLE |
+| Linux (v1) | EGL offscreen FBO → embedder GL texture |
+| Android (later) | GL ES → `SurfaceTexture` (standard external-texture route) |
+| iOS (later) | Native GL ES via `CVOpenGLESTextureCache`, or ANGLE — decided at mobile phase |
 | Web (later) | OCCT Emscripten renders to WebGL canvas via `HtmlElementView`; no texture bridge |
 
-The shim has a single GL ES 3.0 code path everywhere; ANGLE translates to
-Metal/D3D on Apple/Windows. This sidesteps Apple's OpenGL deprecation now
-rather than later, and avoids four divergent context-creation paths.
+OCCT abstracts desktop GL vs GL ES internally, so the shim's rendering code is
+shared; only context creation differs per platform. Context creation lives in
+one isolated module per platform so that swapping macOS to ANGLE later (if
+Apple removes OpenGL) is a contained change, not a rewrite.
 
 Interaction:
 
@@ -142,7 +152,7 @@ Interaction:
   camera. Hover/click → `pick()`; AIS handles selection highlighting natively.
 - **Damage-driven redraw:** render only on command completion, camera change,
   or selection change — not every vsync. CAD viewports idle most of the time;
-  battery and thermals matter on mobile.
+  battery and thermals matter on laptops now and mobile later.
 - Resize and `devicePixelRatio` changes reallocate the texture, debounced.
 
 ## Document model (pure Dart)
@@ -150,8 +160,8 @@ Interaction:
 ```dart
 class CadDocument {
   Map<EntityId, Entity> entities;   // bodies, face/edge refs, materials, names
-  List<Operation> opLog;            // append-only op graph — the history-ready part
-  UndoStack undo;
+  List<Operation> ops;              // immutable operations, ordered
+  int head;                         // timeline position: ops[0..head) are applied
 }
 
 sealed class Operation {            // MakeBox, Extrude, Boolean, Fillet, ImportStep…
@@ -163,18 +173,43 @@ sealed class Operation {            // MakeBox, Extrude, Boolean, Fillet, Import
 }
 ```
 
+- **Timeline, not append-only log.** Operations are immutable; document state
+  is defined by `ops[0..head)`. Undo decrements `head`, redo increments it.
+  A new operation while `head < ops.length` truncates the redo branch (linear
+  history in v1). This keeps replay deterministic: the applied state is always
+  a prefix of the operation list.
 - **Command flow:** app calls `doc.extrude(face, 10)` → document appends an
-  `Operation`, sends the bridge command, applies the id remap on completion,
-  and notifies listeners. The viewport is already updated on the AIS side.
-- **Undo (v1):** inverse operations where cheap; otherwise kernel shape
-  snapshots via OCCT `BRepTools` binary dump, bounded stack (N=50). The
-  parametric phase later replaces this with replay-from-graph.
-- **History-ready payoff:** `opLog` + params is exactly the input a parametric
+  `Operation` (truncating any redo branch), sends the bridge command, applies
+  the id remap on completion, advances `head`, and notifies listeners. The
+  viewport is already updated on the AIS side.
+- **Undo strategy is explicit per operation type** so memory usage stays
+  predictable:
+
+  | Operation type | Undo strategy |
+  |---|---|
+  | Move/Transform | Inverse operation |
+  | Boolean | Kernel snapshot (`BRepTools` binary dump of affected bodies) |
+  | Fillet | Kernel snapshot |
+  | Extrude/MakeBox | Delete created entities |
+  | Import STEP | Delete created entities |
+
+  Snapshot stack is bounded (N=50 undo steps); beyond that, oldest snapshots
+  are dropped and those steps become un-undoable. Selection is transient view
+  state, not a document mutation — it never enters the operation list and is
+  not undoable. The parametric phase later replaces snapshots with
+  replay-from-graph.
+- **History-ready payoff:** `ops` + params is exactly the input a parametric
   rebuild needs. V1 records the graph but never exposes editing it.
-- **Persistence:** native format is the op log + entity metadata as versioned
-  JSON (schema-version field from day 1), plus an optional geometry cache blob
-  (BREP dump) so opening a file does not require full replay. STEP
-  import/export via the kernel is interchange only, not the document format.
+- **Persistence:** native format is the operation list + `head` + entity
+  metadata as versioned JSON (schema-version field from day 1), plus a
+  geometry cache blob: a `KernelSnapshot` containing BREP dumps and the
+  UUID ↔ shape id map. STEP import/export via the kernel is interchange only,
+  not the document format.
+- **Session reconstruction:** opening a file creates a fresh kernel session and
+  calls `restoreSession(snapshot)` — shapes and id maps load directly, no op
+  replay needed. If the cache blob is missing or corrupt, fallback is replaying
+  `ops[0..head)` through the bridge. The same contract serves crash recovery
+  and, later, collaborative sync and background regeneration.
 - **Reactivity:** the document exposes `Stream<DocChange>`; the viewport and
   user UI (trees, inspectors) subscribe. No widget rebuilds on kernel ticks.
 
@@ -213,19 +248,24 @@ navigation, click selection with highlight.
 
 ## Out of scope for v1
 
-- Web backend (architecture ready; implementation deferred)
+- Mobile (iOS/Android) — deferred until desktop viewport stabilizes; touch CAD
+  UX is its own design project. FFI architecture already supports it.
+- Web backend — the architecture permits a WASM backend without public API
+  changes; implementation is a major separate effort.
 - Parametric history editing (graph is recorded, not editable)
 - `jet_cad_editor` batteries-included UI package
 - 2D drafting/DXF
 - Kernel process sandboxing
 - Assemblies/constraints
+- Selection undo (selection is transient view state, never in the op list)
 
 ## Key risks
 
 | Risk | Mitigation |
 |---|---|
-| Texture interop plumbing per platform | ANGLE single GL path; Android first (simplest route), then others |
-| OCCT binary size (~30–60 MB mobile) | Strip unused OCCT toolkits at build; document size honestly |
-| Sub-entity id stability after booleans | Id remap tables from every op; full persistent naming deferred |
+| Texture interop plumbing per platform | Windows first (cleanest external-texture path via ANGLE/D3D11), then macOS, then Linux; context creation isolated per platform |
+| Apple removes OpenGL in a future macOS | Context-creation module isolation keeps ANGLE swap-in a contained change |
+| OCCT binary size (~30–60 MB) | Strip unused OCCT toolkits at build; document size honestly |
+| Sub-entity id stability after booleans | Subshape UUIDs + remap tables from every op; full persistent naming deferred |
 | flutter plugin_ffi + custom texture complexity | Spike per platform before committing milestone dates |
 | OCCT crashes in-process | Catch OCCT exceptions in shim; sandbox out of scope v1 (documented) |
