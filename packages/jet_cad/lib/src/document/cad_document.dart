@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:vector_math/vector_math_64.dart';
@@ -43,12 +44,18 @@ class CadDocument {
     return CadDocument._(bridge, session, versions);
   }
 
-  /// Restores document state from [CadDocumentCodec.encode] output.
+  /// Restores document state from [CadDocumentCodec.encode] (or [save])
+  /// output.
   ///
-  /// v1 restores the semantic document only. Kernel geometry reconstruction
-  /// (restoreSession with a real KernelSnapshot blob, or replay of
-  /// ops[0..head) as fallback) is wired when the FFI backend lands.
-  /// Pre-load operations are not undoable.
+  /// When a `geometry` blob is present (written by [save]), the kernel
+  /// session is restored from it via `restoreSession` — ids line up with the
+  /// stored entities by the id-preserving restore contract. When absent and
+  /// there are ops to replay, v1 has no fallback (true op replay is a
+  /// parametric-phase feature) and this throws [StateError]. When absent
+  /// with no ops, an empty document is returned unchanged.
+  ///
+  /// Pre-load operations are not undoable: [UndoRecord]s are in-memory only
+  /// and don't survive persistence.
   ///
   /// Does not emit DocumentLoaded: no listener can exist before this factory
   /// returns. The event type is reserved for future non-factory load paths
@@ -79,20 +86,59 @@ class CadDocument {
     }
 
     final doc = await create(bridge);
-    for (final e in entitiesJson) {
-      final entity = Entity.fromJson((e as Map).cast<String, Object?>());
-      doc._entities[entity.id] = entity;
+    try {
+      var i = 0;
+      for (final e in entitiesJson) {
+        try {
+          final entity = Entity.fromJson((e as Map).cast<String, Object?>());
+          doc._entities[entity.id] = entity;
+        } catch (err) {
+          throw FormatException(
+              'corrupt document: bad entity at index $i: $err');
+        }
+        i++;
+      }
+      i = 0;
+      var maxOpId = 0;
+      for (final o in opsJson) {
+        try {
+          final op = Operation.fromJson((o as Map).cast<String, Object?>());
+          doc._ops.add(op);
+          if (op.id.value > maxOpId) maxOpId = op.id.value;
+        } catch (err) {
+          throw FormatException('corrupt document: bad op at index $i: $err');
+        }
+        i++;
+      }
+      doc._head = headJson;
+      doc._undoFloor = doc._head;
+      doc._nextOpId = maxOpId + 1;
+
+      final geometry = json['geometry'];
+      if (geometry != null) {
+        await bridge.restoreSession(
+            doc._session, KernelSnapshot(base64Decode(geometry as String)));
+      } else if (doc._ops.isNotEmpty) {
+        throw StateError(
+            'document has no geometry blob; op replay is not supported in '
+            'v1 (save() embeds geometry — use it)');
+      }
+      return doc;
+    } catch (_) {
+      await doc.dispose();
+      rethrow;
     }
-    var maxOpId = 0;
-    for (final o in opsJson) {
-      final op = Operation.fromJson((o as Map).cast<String, Object?>());
-      doc._ops.add(op);
-      if (op.id.value > maxOpId) maxOpId = op.id.value;
-    }
-    doc._head = headJson;
-    doc._undoFloor = doc._head;
-    doc._nextOpId = maxOpId + 1;
-    return doc;
+  }
+
+  /// Full persisted form: document state plus the kernel geometry blob.
+  /// Pass the result to [load] to restore both the document and the kernel
+  /// session that produced it.
+  Future<Map<String, Object?>> save() async {
+    final snapshot = await _bridge.saveSnapshot(_session);
+    return {
+      ...CadDocumentCodec.encode(this),
+      'geometry': base64Encode(snapshot.bytes),
+    };
   }
 
   Map<EntityId, Entity> get entities => UnmodifiableMapView(_entities);

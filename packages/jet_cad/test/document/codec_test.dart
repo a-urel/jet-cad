@@ -14,8 +14,8 @@ void main() {
     await doc.booleanCombine(a, b, BoolOp.fuse);
     await doc.undo(); // head = 2 of 3
 
-    final json = jsonDecode(jsonEncode(CadDocumentCodec.encode(doc)))
-        as Map<String, Object?>;
+    final json =
+        jsonDecode(jsonEncode(await doc.save())) as Map<String, Object?>;
     expect(json['schemaVersion'], 1);
     expect(json['kernelVersion'], 'fake-1.0');
     expect(json['occtVersion'], 'none');
@@ -33,7 +33,7 @@ void main() {
   test('load continues numbering ops', () async {
     final doc = await CadDocument.create(FakeKernelBridge());
     await doc.makeBox(const Vec3(1, 1, 1));
-    final json = CadDocumentCodec.encode(doc);
+    final json = await doc.save();
 
     final restored = await CadDocument.load(json, FakeKernelBridge());
     await restored.makeBox(const Vec3(2, 2, 2));
@@ -58,8 +58,8 @@ void main() {
     await doc.makeBox(const Vec3(1, 1, 1));
     await doc.makeBox(const Vec3(2, 2, 2));
     await doc.undo(); // head = 1 of 2
-    final json = jsonDecode(jsonEncode(CadDocumentCodec.encode(doc)))
-        as Map<String, Object?>;
+    final json =
+        jsonDecode(jsonEncode(await doc.save())) as Map<String, Object?>;
 
     final restored = await CadDocument.load(json, FakeKernelBridge());
     expect(restored.canRedo, isFalse);
@@ -86,6 +86,45 @@ void main() {
         FakeKernelBridge(),
       ),
       throwsFormatException,
+    );
+  });
+
+  test('save() embeds geometry; load restores the kernel session', () async {
+    final doc = await CadDocument.create(FakeKernelBridge());
+    final a = await doc.makeBox(const Vec3(1, 1, 1));
+    final json = await doc.save();
+    expect(json['geometry'], isNotNull);
+
+    final restored = await CadDocument.load(json, FakeKernelBridge());
+    // Kernel state restored: exportStep works for the stored body id.
+    expect(await restored.exportStep([a]), isNotEmpty);
+    await doc.dispose();
+    await restored.dispose();
+  });
+
+  test('load without geometry but with ops throws StateError', () async {
+    final doc = await CadDocument.create(FakeKernelBridge());
+    await doc.makeBox(const Vec3(1, 1, 1));
+    final json = CadDocumentCodec.encode(doc); // no geometry
+    await expectLater(
+      CadDocument.load(json, FakeKernelBridge()),
+      throwsStateError,
+    );
+    await doc.dispose();
+  });
+
+  test('corrupt op entry is a FormatException with index context', () async {
+    await expectLater(
+      CadDocument.load({
+        'schemaVersion': 1,
+        'kernelVersion': 'x',
+        'occtVersion': 'x',
+        'head': 0,
+        'ops': [42],
+        'entities': <Object?>[],
+      }, FakeKernelBridge()),
+      throwsA(isA<FormatException>()
+          .having((e) => e.message, 'message', contains('index 0'))),
     );
   });
 }

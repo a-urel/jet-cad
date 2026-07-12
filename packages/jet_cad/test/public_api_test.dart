@@ -11,7 +11,7 @@ void main() {
         [c], Matrix4.identity()..translateByVector3(Vector3(1.0, 0.0, 0.0)));
     await doc.undo();
     await doc.redo();
-    final json = CadDocumentCodec.encode(doc);
+    final json = await doc.save();
     final restored = await CadDocument.load(json, FakeKernelBridge());
     expect(restored.head, doc.head);
     await doc.dispose();

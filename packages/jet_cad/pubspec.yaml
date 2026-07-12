@@ -1,6 +1,6 @@
 name: jet_cad
 description: A headless-first CAD engine and viewport widget for Flutter, built on Open CASCADE Technology.
-version: 0.1.0
+version: 0.2.0
 homepage:
 resolution: workspace
 
