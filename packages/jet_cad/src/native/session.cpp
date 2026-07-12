@@ -1,14 +1,23 @@
 #include "session.hpp"
 
+#include <cmath>
 #include <memory>
 
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_BooleanOperation.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
+#include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 
 namespace jetcad {
 
@@ -199,10 +208,192 @@ json Session::booleanOp(const json& cmd) {
   return out;
 }
 
-// Stubs replaced by Tasks 5-6; keep the linker happy and honest.
-json Session::extrude(const json&) { throw CommandError("not implemented: extrude"); }
-json Session::fillet(const json&) { throw CommandError("not implemented: fillet"); }
-json Session::transform(const json&) { throw CommandError("not implemented: transform"); }
+json Session::extrude(const json& cmd) {
+  const std::string faceId = cmd.at("face");
+  double depth = cmd.at("depth");
+  if (depth == 0) throw CommandError("extrude depth must be non-zero");
+  const TopoDS_Shape& faceShape = requireSubshape(TopAbs_FACE, faceId);
+  TopoDS_Face face = TopoDS::Face(faceShape);
+
+  BRepAdaptor_Surface surf(face);
+  double u = (surf.FirstUParameter() + surf.LastUParameter()) / 2.0;
+  double v = (surf.FirstVParameter() + surf.LastVParameter()) / 2.0;
+  gp_Pnt p;
+  gp_Vec d1u, d1v;
+  surf.D1(u, v, p, d1u, d1v);
+  gp_Vec normal = d1u.Crossed(d1v);
+  if (normal.Magnitude() < 1e-12) {
+    throw CommandError("cannot compute face normal");
+  }
+  if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+  normal.Normalize();
+  normal.Multiply(depth);
+
+  BRepPrimAPI_MakePrism prism(face, normal);
+  if (!prism.IsDone()) throw CommandError("extrude failed");
+  return registerBody(prism.Shape());
+}
+
+json Session::fillet(const json& cmd) {
+  const auto& edgeIds = cmd.at("edges");
+  double radius = cmd.at("radius");
+  if (edgeIds.empty()) throw CommandError("fillet needs at least one edge");
+  if (radius <= 0) throw CommandError("fillet radius must be positive");
+
+  const std::string bodyId =
+      bodyIdOwningSubshape(TopAbs_EDGE, edgeIds[0].get<std::string>());
+  for (const auto& e : edgeIds) {
+    if (bodyIdOwningSubshape(TopAbs_EDGE, e.get<std::string>()) != bodyId) {
+      throw CommandError("fillet edges must belong to a single body");
+    }
+  }
+  Body old = bodies_.at(bodyId);  // copy for lineage lookup
+
+  BRepFilletAPI_MakeFillet make(old.shape);
+  std::vector<std::pair<std::string, TopoDS_Shape>> filleted;
+  for (const auto& e : edgeIds) {
+    const std::string id = e.get<std::string>();
+    for (const auto& [subId, shape] : old.edges) {
+      if (subId == id) {
+        make.Add(radius, TopoDS::Edge(shape));
+        filleted.emplace_back(subId, shape);
+      }
+    }
+  }
+  make.Build();
+  if (!make.IsDone()) throw CommandError("fillet failed (radius too large?)");
+  TopoDS_Shape newShape = make.Shape();
+
+  // Rebuild the body under the SAME id, carrying ids forward:
+  // - subshape survives (IsSame) or is Modified(old)  -> keeps old id
+  // - otherwise                                       -> fresh id (reported)
+  Body rebuilt;
+  rebuilt.shape = newShape;
+  json newFaces = json::array(), newEdges = json::array(),
+       newVertices = json::array();
+  auto carry = [&](TopAbs_ShapeEnum kind,
+                   const std::vector<std::pair<std::string, TopoDS_Shape>>&
+                       olds,
+                   std::vector<std::pair<std::string, TopoDS_Shape>>& dest,
+                   json& reportNew, const char* prefix) {
+    for (const auto& shape : enumerate(newShape, kind)) {
+      std::string carried;
+      for (const auto& [oldId, oldShape] : olds) {
+        if (shape.IsSame(oldShape)) { carried = oldId; break; }
+        const auto& mods = make.Modified(oldShape);
+        for (const auto& m : mods) {
+          if (shape.IsSame(m)) { carried = oldId; break; }
+        }
+        if (!carried.empty()) break;
+      }
+      if (carried.empty()) {
+        carried = nextId(prefix);
+        reportNew.push_back(carried);
+      }
+      dest.emplace_back(carried, shape);
+    }
+  };
+  carry(TopAbs_FACE, old.faces, rebuilt.faces, newFaces, "f");
+  carry(TopAbs_EDGE, old.edges, rebuilt.edges, newEdges, "e");
+  carry(TopAbs_VERTEX, old.vertices, rebuilt.vertices, newVertices, "v");
+
+  // Remap: filleted edges -> the faces Generated from them; every other
+  // old subshape that no longer exists -> [].
+  json remap = json::object();
+  auto stillPresent = [&](TopAbs_ShapeEnum kind, const std::string& id) {
+    const auto& list = kind == TopAbs_FACE   ? rebuilt.faces
+                       : kind == TopAbs_EDGE ? rebuilt.edges
+                                             : rebuilt.vertices;
+    for (const auto& [subId, s] : list) {
+      if (subId == id) return true;
+    }
+    return false;
+  };
+  for (const auto& [edgeId, edgeShape] : filleted) {
+    json targets = json::array();
+    const auto& generated = make.Generated(edgeShape);
+    for (const auto& g : generated) {
+      auto id = idOfShape(rebuilt, TopAbs_FACE, g);
+      if (!id.empty()) targets.push_back(id);
+    }
+    remap[edgeId] = targets;
+  }
+  auto dropVanished = [&](TopAbs_ShapeEnum kind,
+                          const std::vector<
+                              std::pair<std::string, TopoDS_Shape>>& olds) {
+    for (const auto& [oldId, s] : olds) {
+      if (!stillPresent(kind, oldId) && !remap.contains(oldId)) {
+        remap[oldId] = json::array();
+      }
+    }
+  };
+  dropVanished(TopAbs_FACE, old.faces);
+  dropVanished(TopAbs_EDGE, old.edges);
+  dropVanished(TopAbs_VERTEX, old.vertices);
+
+  bodies_[bodyId] = std::move(rebuilt);
+  return json{{"body", bodyId},
+              {"faces", newFaces},
+              {"edges", newEdges},
+              {"vertices", newVertices},
+              {"remap", remap}};
+}
+
+json Session::transform(const json& cmd) {
+  const auto& m = cmd.at("matrix");
+  if (m.size() != 16) throw CommandError("matrix must have 16 values");
+  gp_Trsf trsf;
+  try {
+    // Column-major input -> gp_Trsf row-major 3x4.
+    trsf.SetValues(m[0], m[4], m[8], m[12],
+                   m[1], m[5], m[9], m[13],
+                   m[2], m[6], m[10], m[14]);
+  } catch (const Standard_Failure&) {
+    throw CommandError(
+        "transform must be rigid (rotation+translation); scaling/shear "
+        "unsupported in v1");
+  }
+  // SetValues only rejects a singular (zero-determinant) input; a
+  // non-uniform scale or shear matrix has nonzero determinant, so it slips
+  // through silently orthogonalized into a rotation plus a single uniform
+  // ScaleFactor() (OCCT 7.9.3, measured). Reject that case explicitly so
+  // "must be rigid" is actually enforced, not just documented.
+  if (std::abs(trsf.ScaleFactor() - 1.0) > 1e-9 || trsf.IsNegative()) {
+    throw CommandError(
+        "transform must be rigid (rotation+translation); scaling/shear "
+        "unsupported in v1");
+  }
+  for (const auto& idJson : cmd.at("bodies")) {
+    requireBody(idJson.get<std::string>());
+  }
+  for (const auto& idJson : cmd.at("bodies")) {
+    Body& body = bodies_.at(idJson.get<std::string>());
+    Body moved;
+    BRepBuilderAPI_Transform mover(body.shape, trsf, /*Copy=*/false);
+    moved.shape = mover.Shape();
+    // Same TShape tree, same enumeration order: transfer ids positionally.
+    auto transfer = [&](TopAbs_ShapeEnum kind,
+                        const std::vector<
+                            std::pair<std::string, TopoDS_Shape>>& olds,
+                        std::vector<std::pair<std::string, TopoDS_Shape>>&
+                            dest) {
+      auto shapes = enumerate(moved.shape, kind);
+      if (shapes.size() != olds.size()) {
+        throw CommandError("internal: transform changed topology");
+      }
+      for (size_t i = 0; i < shapes.size(); ++i) {
+        dest.emplace_back(olds[i].first, shapes[i]);
+      }
+    };
+    transfer(TopAbs_FACE, body.faces, moved.faces);
+    transfer(TopAbs_EDGE, body.edges, moved.edges);
+    transfer(TopAbs_VERTEX, body.vertices, moved.vertices);
+    body = std::move(moved);
+  }
+  return json::object();
+}
+
+// Stubs replaced by Task 6.
 json Session::importStep(const json&) { throw CommandError("not implemented: importStep"); }
 json Session::exportStep(const json&) { throw CommandError("not implemented: exportStep"); }
 json Session::snapshotBodies(const json&) { throw CommandError("not implemented: snapshotBodies"); }
