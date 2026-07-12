@@ -83,6 +83,57 @@ void main() {
     expect(doc.entities, isEmpty);
   });
 
+  test('wrong-kind entity id throws ArgumentError', () async {
+    final body = await doc.makeBox(const Vec3(1, 1, 1));
+    // body.value names a real entity, but of kind body, not edge.
+    await expectLater(
+      doc.fillet([EdgeId(body.value)], 0.2),
+      throwsArgumentError,
+    );
+  });
+
+  test('fillet edges from two different bodies throws ArgumentError', () async {
+    final bodyA = await doc.makeBox(const Vec3(1, 1, 1));
+    final edgeA = doc.entities.values
+        .firstWhere((e) => e.kind == EntityKind.edge && e.parent == bodyA)
+        .id as EdgeId;
+    final bodyB = await doc.makeBox(const Vec3(2, 2, 2));
+    final edgeB = doc.entities.values
+        .firstWhere((e) => e.kind == EntityKind.edge && e.parent == bodyB)
+        .id as EdgeId;
+
+    await expectLater(
+      doc.fillet([edgeA, edgeB], 0.2),
+      throwsArgumentError,
+    );
+  });
+
+  test('booleanCombine rejects identical operands', () async {
+    final a = await doc.makeBox(const Vec3(1, 1, 1));
+    await expectLater(
+      doc.booleanCombine(a, a, BoolOp.fuse),
+      throwsArgumentError,
+    );
+  });
+
+  test('booleanCombine emits removed, added, then committed in order',
+      () async {
+    final a = await doc.makeBox(const Vec3(1, 1, 1));
+    final b = await doc.makeBox(const Vec3(2, 2, 2));
+
+    final events = <DocChange>[];
+    final sub = doc.changes.listen(events.add);
+
+    await doc.booleanCombine(a, b, BoolOp.fuse);
+    await Future<void>.delayed(Duration.zero);
+
+    final last3 = events.sublist(events.length - 3);
+    expect(last3[0], isA<EntitiesRemoved>());
+    expect(last3[1], isA<EntitiesAdded>());
+    expect(last3[2], isA<OperationCommitted>());
+    await sub.cancel();
+  });
+
   test('kernel failure surfaces as KernelException and mutates nothing',
       () async {
     await expectLater(
@@ -98,5 +149,12 @@ void main() {
     final body = await doc.makeBox(const Vec3(1, 1, 1));
     final bytes = await doc.exportStep([body]);
     expect(bytes, isNotEmpty);
+  });
+
+  test('exportStep with unknown body throws ArgumentError, not sync', () async {
+    await expectLater(
+      doc.exportStep([const BodyId('nope')]),
+      throwsArgumentError,
+    );
   });
 }

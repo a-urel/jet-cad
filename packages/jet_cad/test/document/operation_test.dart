@@ -97,6 +97,7 @@ void main() {
     ) as FilletOp;
     expect(restored.edges, const [EdgeId('e1'), EdgeId('e2')]);
     expect(restored.radius, 0.5);
+    expect(restored.inputs, const [EdgeId('e1'), EdgeId('e2')]);
     expect(
       restored.remap.mapping[const EntityId('e1')],
       const [EntityId('f7')],

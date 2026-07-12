@@ -62,6 +62,10 @@ void main() {
     final product = bridge.transformLog[1] * m as Matrix4;
     expect(product.isIdentity(), isTrue,
         reason: 'undo must apply the inverse of the original matrix');
+
+    await doc.redo();
+    expect(bridge.transformLog, hasLength(3));
+    expect(bridge.transformLog[2].storage, m.storage);
   });
 
   test('new command after undo truncates the redo branch', () async {

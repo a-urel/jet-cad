@@ -35,6 +35,9 @@ abstract interface class KernelBridge {
 
   Future<Uint8List> snapshotBodies(SessionHandle session, List<BodyId> bodies);
   Future<void> restoreBodies(SessionHandle session, Uint8List snapshot);
+
+  /// Idempotent: deleting an unknown id is a silent no-op (undo paths may
+  /// delete already-gone bodies). Implementations must preserve this.
   Future<void> deleteBodies(SessionHandle session, List<BodyId> bodies);
 
   Future<KernelSnapshot> saveSnapshot(SessionHandle session);
