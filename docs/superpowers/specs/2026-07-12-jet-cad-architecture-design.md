@@ -25,7 +25,7 @@ photorealistic rendering are intentionally deferred.
 | Question | Decision |
 |---|---|
 | Widget scope | Full solid modeling (create + edit) |
-| Kernel | OCCT — only mature OSS B-rep kernel; LGPL 2.1 with exception |
+| Kernel | OCCT — only mature OSS B-rep kernel; distributed under LGPL 2.1 with the Open CASCADE Exception (third-party license; JetCAD itself remains Apache 2.0) |
 | Platforms v1 | Desktop only (Windows/macOS/Linux) |
 | Mobile | Deferred until viewport stabilizes; FFI path already supports it |
 | Web | Deferred; the architecture permits a future WebAssembly backend without changing the public Dart API (OCCT Emscripten/WebGL path) |
@@ -40,7 +40,9 @@ Alternatives considered and rejected: Fornjot and truck (Rust B-rep kernels,
 years from fillet/STEP maturity), CGAL (mesh processing, not B-rep CAD),
 Parasolid/ACIS (commercial licensing incompatible with an OSS package). OCCT
 provides modeling, STEP/IGES exchange, tessellation, and an interactive viewer
-(AIS) in one library.
+(AIS) in one library. OCCT is distributed under the GNU LGPL v2.1 with the
+Open CASCADE Exception; it remains a third-party dependency with its own
+license, independent of JetCAD's Apache 2.0 license.
 
 ## Architecture
 
@@ -281,7 +283,11 @@ OCCT + shim are prebuilt per platform and published as GitHub release
 artifacts. Package build hooks (CMake `FetchContent`, Gradle, CocoaPods
 `prepare_command`) download them at consumer build time, pinned by checksum.
 This keeps the pub.dev package under the 100 MB limit and consumers never
-compile OCCT.
+compile OCCT. The OCCT license texts (LGPL v2.1 with the Open CASCADE
+Exception) are distributed alongside the prebuilt binaries (e.g. under
+`LICENSES/` or `THIRD_PARTY.md` in the release artifacts); OCCT's license
+applies to those binaries only and does not affect JetCAD's own Apache 2.0
+license.
 
 ## Demo app scope (v1)
 
