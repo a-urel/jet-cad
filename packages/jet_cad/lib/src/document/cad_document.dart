@@ -5,6 +5,7 @@ import 'package:vector_math/vector_math_64.dart';
 
 import '../kernel/kernel_bridge.dart';
 import '../kernel/kernel_types.dart';
+import 'codec.dart';
 import 'doc_change.dart';
 import 'entity.dart';
 import 'operation.dart';
@@ -39,6 +40,36 @@ class CadDocument {
     final session = await bridge.createSession(const HeadlessTarget());
     final versions = await bridge.versionInfo();
     return CadDocument._(bridge, session, versions);
+  }
+
+  /// Restores document state from [CadDocumentCodec.encode] output.
+  ///
+  /// v1 restores the semantic document only. Kernel geometry reconstruction
+  /// (restoreSession with a real KernelSnapshot blob, or replay of
+  /// ops[0..head) as fallback) is wired when the FFI backend lands.
+  /// Pre-load operations are not undoable.
+  static Future<CadDocument> load(
+      Map<String, Object?> json, KernelBridge bridge) async {
+    final schema = json['schemaVersion'];
+    if (schema != CadDocumentCodec.schemaVersion) {
+      throw FormatException('unsupported schema version: $schema');
+    }
+    final doc = await create(bridge);
+    for (final e in json['entities']! as List) {
+      final entity = Entity.fromJson((e as Map).cast<String, Object?>());
+      doc._entities[entity.id] = entity;
+    }
+    var maxOpId = 0;
+    for (final o in json['ops']! as List) {
+      final op = Operation.fromJson((o as Map).cast<String, Object?>());
+      doc._ops.add(op);
+      if (op.id.value > maxOpId) maxOpId = op.id.value;
+    }
+    doc._head = json['head']! as int;
+    doc._undoFloor = doc._head;
+    doc._nextOpId = maxOpId + 1;
+    doc._changes.add(const DocumentLoaded());
+    return doc;
   }
 
   Map<EntityId, Entity> get entities => Map.unmodifiable(_entities);
