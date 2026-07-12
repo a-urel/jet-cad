@@ -127,4 +127,20 @@ void main() {
           .having((e) => e.message, 'message', contains('index 0'))),
     );
   });
+
+  test('failed load disposes the created session (no leak)', () async {
+    final bridge = FakeKernelBridge();
+    await expectLater(
+      CadDocument.load({
+        'schemaVersion': 1,
+        'kernelVersion': 'x',
+        'occtVersion': 'x',
+        'head': 0,
+        'ops': [42],
+        'entities': <Object?>[],
+      }, bridge),
+      throwsFormatException,
+    );
+    expect(bridge.liveSessionCount, 0);
+  });
 }

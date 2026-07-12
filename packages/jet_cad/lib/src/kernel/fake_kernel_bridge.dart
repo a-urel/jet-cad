@@ -22,6 +22,9 @@ class FakeKernelBridge implements KernelBridge {
   /// tests assert what actually reached the kernel (e.g. undo's inverse).
   final List<Matrix4> transformLog = [];
 
+  /// Number of live sessions (test observability).
+  int get liveSessionCount => _sessions.length;
+
   String _next(String prefix) => '$prefix${++_idCounter}';
 
   void _absorbIds(Iterable<String> ids) {

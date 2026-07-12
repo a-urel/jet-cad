@@ -22,7 +22,7 @@ void main() {
     expect(await restored.exportStep([c]), isNotEmpty);
     // Continue editing on restored geometry: new ids must not collide.
     final d = await restored.makeBox(const Vec3(1, 1, 1));
-    expect(restored.entities[d], isNotNull);
+    expect(<BodyId>[a, b, c], isNot(contains(d)));
     final e = await restored.booleanCombine(c, d, BoolOp.fuse);
     expect(await restored.exportStep([e]), isNotEmpty);
     await restored.dispose();

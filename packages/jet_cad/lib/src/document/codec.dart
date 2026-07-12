@@ -5,6 +5,10 @@ import 'cad_document.dart';
 class CadDocumentCodec {
   static const int schemaVersion = 1;
 
+  /// Callers persisting a document with operations should use
+  /// [CadDocument.save], which embeds the kernel geometry blob; a
+  /// geometry-less payload for a non-empty document fails at load time
+  /// with StateError.
   static Map<String, Object?> encode(CadDocument doc) => {
         'schemaVersion': schemaVersion,
         'kernelVersion': doc.kernelVersions.kernelVersion,
