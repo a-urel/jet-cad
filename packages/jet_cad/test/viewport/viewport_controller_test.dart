@@ -151,4 +151,81 @@ void main() {
     await tester.pumpAndSettle();
     expect(fake.renderFrameCount, count, reason: 'no renders after dispose');
   });
+
+  testWidgets('dispose during attach never notifies after dispose',
+      (tester) async {
+    final gate = Completer<void>();
+    final gatedFake = _GatedFakeBridge()..fitAllGate = gate.future;
+    final gatedDoc =
+        await CadDocument.create(gatedFake, target: const TextureTarget());
+    final gatedBinding = FakeBinding();
+    final gatedController =
+        ViewportController(document: gatedDoc, binding: gatedBinding);
+
+    gatedController.handleLayout(const Size(100, 100), 1.0);
+    await tester.pump();
+    expect(gatedFake.cameraLog, isEmpty, reason: 'attach parked on fitAll');
+    gatedController.dispose();
+    gate.complete();
+    await tester.pumpAndSettle();
+    // The resumed _attach must not call notifyListeners() on the disposed
+    // notifier — that throws FlutterError in debug builds and fails this
+    // test as an unhandled exception.
+    expect(gatedBinding.log, contains('unregister 7'));
+    await gatedDoc.dispose();
+  });
+
+  testWidgets('dispose during setSelection never adds to the closed stream',
+      (tester) async {
+    final gate = Completer<void>();
+    final gatedFake = _GatedFakeBridge()..setSelectionGate = gate.future;
+    final gatedDoc =
+        await CadDocument.create(gatedFake, target: const TextureTarget());
+    final gatedController =
+        ViewportController(document: gatedDoc, binding: FakeBinding());
+    gatedController.handleLayout(const Size(100, 100), 1.0);
+    await tester.pumpAndSettle();
+    final bodyId = await gatedDoc.makeBox(const Vec3(1, 1, 1));
+
+    Object? caught;
+    final pending = gatedController.setSelection({bodyId}).catchError((
+      Object e,
+    ) {
+      caught = e;
+    });
+    await tester.pump();
+    gatedController.dispose();
+    gate.complete();
+    await tester.pumpAndSettle();
+    await pending;
+    expect(caught, isNull,
+        reason: 'resumed setSelection must not add to the closed selection '
+            'stream (StateError even in release builds)');
+    await gatedDoc.dispose();
+  });
+}
+
+/// [FakeKernelBridge] whose fitAll/setSelection park on a test-controlled
+/// gate, pinning dispose-during-await races deterministically.
+class _GatedFakeBridge extends FakeKernelBridge {
+  Future<void>? fitAllGate;
+  Future<void>? setSelectionGate;
+
+  @override
+  Future<void> fitAll(SessionHandle session) async {
+    final gate = fitAllGate;
+    if (gate != null) {
+      await gate;
+    }
+    await super.fitAll(session);
+  }
+
+  @override
+  Future<void> setSelection(SessionHandle session, List<EntityId> ids) async {
+    final gate = setSelectionGate;
+    if (gate != null) {
+      await gate;
+    }
+    await super.setSelection(session, ids);
+  }
 }

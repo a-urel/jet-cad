@@ -92,6 +92,9 @@ class ViewportController extends ChangeNotifier {
       _textureId = textureId;
       await document.bridge.fitAll(document.session);
       await requestRender();
+      // Re-check: dispose() may have landed while awaiting fitAll/render;
+      // notifying a disposed ChangeNotifier throws in debug builds.
+      if (_disposed) return;
       notifyListeners();
     } finally {
       _attaching = false;
@@ -191,6 +194,9 @@ class ViewportController extends ChangeNotifier {
     _selection = Set.of(ids);
     await document.bridge.setSelection(document.session, _selection.toList());
     await requestRender();
+    // Re-check: dispose() may have landed during the awaits and closed the
+    // stream; add() on a closed controller throws even in release builds.
+    if (_disposed) return;
     _selectionController.add(SelectionChanged(selection));
   }
 
