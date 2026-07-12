@@ -3,6 +3,7 @@
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 
+#include "../b64.hpp"
 #include "../session.hpp"
 
 using jetcad::Session;
@@ -44,6 +45,35 @@ TEST(Snapshots, SessionSaveRestoreRoundTrip) {
   auto c = box(fresh, 3, 3, 3);
   EXPECT_NE(c.at("body"), a.at("body"));
   EXPECT_NE(c.at("body"), b.at("body"));
+}
+
+TEST(Snapshots, CorruptRestoreSessionLeavesStateIntact) {
+  // Build a two-body payload whose SECOND entry has corrupt BREP. The donor
+  // makes three boxes and deletes the first so its surviving body ids sit
+  // past the target session's ids: ids are deterministic per session, so
+  // without the shift the donor's valid first entry would collide with the
+  // target's box id and a partial (non-atomic) restore could masquerade as
+  // intact state.
+  Session donor;
+  auto d0 = box(donor, 1, 1, 1);
+  box(donor, 1, 1, 1);
+  box(donor, 2, 2, 2);
+  donor.execute({{"cmd", "deleteBodies"}, {"bodies", {d0.at("body")}}});
+  auto save = donor.execute({{"cmd", "saveSnapshot"}});
+  auto snapshot =
+      json::parse(jetcad::b64decode(save.at("dataB64").get<std::string>()));
+  ASSERT_EQ(snapshot.at("bodies").size(), 2u);
+  snapshot["bodies"][1]["brepB64"] = "AAAA";  // valid base64, corrupt BREP
+  const std::string corrupt = jetcad::b64encode(snapshot.dump());
+
+  Session s;
+  auto a = box(s, 3, 4, 5);
+  const std::string bodyId = a.at("body");
+  EXPECT_THROW(s.execute({{"cmd", "restoreSession"}, {"dataB64", corrupt}}),
+               jetcad::CommandError);
+  // All-or-nothing: the pre-restore body must survive a failed restore.
+  auto step = s.execute({{"cmd", "exportStep"}, {"bodies", {bodyId}}});
+  EXPECT_FALSE(step.at("dataB64").get<std::string>().empty());
 }
 
 TEST(Step, ExportImportRoundTrip) {

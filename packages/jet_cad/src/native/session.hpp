@@ -55,6 +55,18 @@ class Session {
   // json {body, faces, edges, vertices, remap:{}}.
   json registerBody(const TopoDS_Shape& shape);
 
+  // Fully-parsed snapshotBodies payload plus the max numeric id suffix
+  // seen across every body/subshape id in it.
+  struct ParsedBodies {
+    std::map<std::string, Body> bodies;
+    uint64_t maxId = 0;
+  };
+  // Parses a snapshotBodies dump into a complete ParsedBodies WITHOUT
+  // touching session state; throws CommandError on any malformed entry.
+  // Restore paths must merge/swap only after the whole payload has parsed
+  // so a corrupt payload leaves the session untouched (all-or-nothing).
+  static ParsedBodies parseBodiesDump(const json& dump);
+
   uint64_t counter_ = 0;
   std::map<std::string, Body> bodies_;
 };

@@ -90,8 +90,14 @@ uint64_t maxNumericSuffix(const nlohmann::json& ids) {
     const std::string id = idJson.get<std::string>();
     size_t digits = id.find_first_of("0123456789");
     if (digits != std::string::npos) {
-      maxSeen = std::max(maxSeen,
-                         (uint64_t)std::stoull(id.substr(digits)));
+      try {
+        maxSeen = std::max(maxSeen,
+                           (uint64_t)std::stoull(id.substr(digits)));
+      } catch (const std::exception&) {
+        // std::out_of_range for absurdly long digit runs; the substring
+        // starts with a digit so invalid_argument cannot happen.
+        throw CommandError("corrupt snapshot: bad id");
+      }
     }
   }
   return maxSeen;
@@ -512,8 +518,8 @@ json Session::snapshotBodies(const json& cmd) {
   return json{{"dataB64", b64encode(dump.dump())}};
 }
 
-json Session::restoreBodies(const json& cmd) {
-  auto dump = json::parse(b64decode(cmd.at("dataB64").get<std::string>()));
+Session::ParsedBodies Session::parseBodiesDump(const json& dump) {
+  ParsedBodies parsed;
   for (const auto& entry : dump) {
     Body body;
     body.shape = brepFromString(b64decode(entry.at("brepB64")));
@@ -527,15 +533,28 @@ json Session::restoreBodies(const json& cmd) {
       for (size_t i = 0; i < shapes.size(); ++i) {
         dest.emplace_back(ids[i].get<std::string>(), shapes[i]);
       }
-      counter_ = std::max(counter_, maxNumericSuffix(ids));
+      parsed.maxId = std::max(parsed.maxId, maxNumericSuffix(ids));
     };
     zip("faces", TopAbs_FACE, body.faces);
     zip("edges", TopAbs_EDGE, body.edges);
     zip("vertices", TopAbs_VERTEX, body.vertices);
     const std::string id = entry.at("id");
-    counter_ = std::max(counter_, maxNumericSuffix(json::array({id})));
+    parsed.maxId =
+        std::max(parsed.maxId, maxNumericSuffix(json::array({id})));
+    parsed.bodies[id] = std::move(body);
+  }
+  return parsed;
+}
+
+json Session::restoreBodies(const json& cmd) {
+  auto dump = json::parse(b64decode(cmd.at("dataB64").get<std::string>()));
+  // Parse the entire payload before touching session state: a corrupt
+  // entry must leave the session exactly as it was (all-or-nothing).
+  ParsedBodies parsed = parseBodiesDump(dump);
+  for (auto& [id, body] : parsed.bodies) {
     bodies_[id] = std::move(body);
   }
+  counter_ = std::max(counter_, parsed.maxId);
   return json::object();
 }
 
@@ -556,10 +575,13 @@ json Session::saveSnapshot(const json&) {
 json Session::restoreSession(const json& cmd) {
   auto snapshot =
       json::parse(b64decode(cmd.at("dataB64").get<std::string>()));
-  bodies_.clear();
-  restoreBodies({{"cmd", "restoreBodies"},
-                 {"dataB64", b64encode(snapshot.at("bodies").dump())}});
-  counter_ = std::max(counter_, snapshot.at("counter").get<uint64_t>());
+  // Parse everything (bodies AND counter) before mutating: a corrupt
+  // payload must not clear the session (all-or-nothing; the document-load
+  // path depends on this). Swap-in replaces clear-then-fill.
+  ParsedBodies parsed = parseBodiesDump(snapshot.at("bodies"));
+  const uint64_t saved = snapshot.at("counter").get<uint64_t>();
+  bodies_ = std::move(parsed.bodies);
+  counter_ = std::max(counter_, std::max(parsed.maxId, saved));
   return json::object();
 }
 
