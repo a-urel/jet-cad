@@ -84,4 +84,19 @@ TEST(Transform, PreservesIdsRejectsScale) {
                           {"bodies", {a.at("body")}},
                           {"matrix", scale}}),
                jetcad::CommandError);
+  // Shear (column-major m[4]=1: linear part rows [[1,1,0],[0,1,0],[0,0,1]],
+  // x' = x + y) has det 1 and would survive a ScaleFactor()-only check;
+  // must be rejected.
+  json shear = {1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  EXPECT_THROW(s.execute({{"cmd", "transform"},
+                          {"bodies", {a.at("body")}},
+                          {"matrix", shear}}),
+               jetcad::CommandError);
+  // Volume-preserving anisotropic scale diag(4, 0.5, 0.5): det 1, non-rigid;
+  // must be rejected.
+  json aniso = {4, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 1};
+  EXPECT_THROW(s.execute({{"cmd", "transform"},
+                          {"bodies", {a.at("body")}},
+                          {"matrix", aniso}}),
+               jetcad::CommandError);
 }

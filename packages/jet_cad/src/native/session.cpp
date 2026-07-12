@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <memory>
+#include <set>
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_BooleanOperation.hxx>
@@ -276,9 +277,14 @@ json Session::fillet(const json& cmd) {
                        olds,
                    std::vector<std::pair<std::string, TopoDS_Shape>>& dest,
                    json& reportNew, const char* prefix) {
+    // Modified(old) may map ONE old subshape to SEVERAL new ones (a face
+    // split by the fillet). Only the first match keeps the old id; the
+    // rest get fresh ids, or lookups by id would hit the wrong shape.
+    std::set<std::string> consumed;
     for (const auto& shape : enumerate(newShape, kind)) {
       std::string carried;
       for (const auto& [oldId, oldShape] : olds) {
+        if (consumed.count(oldId)) continue;
         if (shape.IsSame(oldShape)) { carried = oldId; break; }
         const auto& mods = make.Modified(oldShape);
         for (const auto& m : mods) {
@@ -289,6 +295,8 @@ json Session::fillet(const json& cmd) {
       if (carried.empty()) {
         carried = nextId(prefix);
         reportNew.push_back(carried);
+      } else {
+        consumed.insert(carried);
       }
       dest.emplace_back(carried, shape);
     }
@@ -342,6 +350,46 @@ json Session::fillet(const json& cmd) {
 json Session::transform(const json& cmd) {
   const auto& m = cmd.at("matrix");
   if (m.size() != 16) throw CommandError("matrix must have 16 values");
+  // Rigidity check on the RAW column-major 3x3 linear part, BEFORE
+  // gp_Trsf::SetValues. SetValues only rejects singular input and silently
+  // orthogonalizes everything else (OCCT 7.9.3, measured); checking
+  // ScaleFactor() afterwards is insufficient because shear and
+  // volume-preserving anisotropic scale (e.g. diag(4,0.5,0.5)) keep
+  // det = 1 and come out with ScaleFactor() == 1, their distortion
+  // silently discarded. Rigid <=> columns orthonormal and det > 0
+  // (reflections rejected). Tolerance 1e-6: loose enough for rigid
+  // matrices that round-tripped through float32 upstream, tight enough
+  // to reject real distortion.
+  {
+    auto mv = [&](int i) { return m[i].get<double>(); };
+    const double c[3][3] = {
+        {mv(0), mv(1), mv(2)},   // column 0
+        {mv(4), mv(5), mv(6)},   // column 1
+        {mv(8), mv(9), mv(10)},  // column 2
+    };
+    auto dot = [&](int i, int j) {
+      return c[i][0] * c[j][0] + c[i][1] * c[j][1] + c[i][2] * c[j][2];
+    };
+    constexpr double kTol = 1e-6;
+    bool rigid = true;
+    for (int i = 0; i < 3 && rigid; ++i) {
+      if (std::abs(dot(i, i) - 1.0) > kTol) rigid = false;
+      for (int j = i + 1; j < 3 && rigid; ++j) {
+        if (std::abs(dot(i, j)) > kTol) rigid = false;
+      }
+    }
+    // det with the columns laid out as rows equals det of the linear part
+    // (det A == det A^T); > 0 for proper rotations, < 0 for reflections.
+    const double det =
+        c[0][0] * (c[1][1] * c[2][2] - c[1][2] * c[2][1]) -
+        c[0][1] * (c[1][0] * c[2][2] - c[1][2] * c[2][0]) +
+        c[0][2] * (c[1][0] * c[2][1] - c[1][1] * c[2][0]);
+    if (!rigid || det <= 0) {
+      throw CommandError(
+          "transform must be rigid (rotation+translation); "
+          "scaling/shear/reflection unsupported in v1");
+    }
+  }
   gp_Trsf trsf;
   try {
     // Column-major input -> gp_Trsf row-major 3x4.
@@ -349,19 +397,11 @@ json Session::transform(const json& cmd) {
                    m[1], m[5], m[9], m[13],
                    m[2], m[6], m[10], m[14]);
   } catch (const Standard_Failure&) {
+    // Unreachable after the orthonormality check (det ~ 1); kept as a
+    // defensive belt around OCCT.
     throw CommandError(
-        "transform must be rigid (rotation+translation); scaling/shear "
-        "unsupported in v1");
-  }
-  // SetValues only rejects a singular (zero-determinant) input; a
-  // non-uniform scale or shear matrix has nonzero determinant, so it slips
-  // through silently orthogonalized into a rotation plus a single uniform
-  // ScaleFactor() (OCCT 7.9.3, measured). Reject that case explicitly so
-  // "must be rigid" is actually enforced, not just documented.
-  if (std::abs(trsf.ScaleFactor() - 1.0) > 1e-9 || trsf.IsNegative()) {
-    throw CommandError(
-        "transform must be rigid (rotation+translation); scaling/shear "
-        "unsupported in v1");
+        "transform must be rigid (rotation+translation); "
+        "scaling/shear/reflection unsupported in v1");
   }
   for (const auto& idJson : cmd.at("bodies")) {
     requireBody(idJson.get<std::string>());
