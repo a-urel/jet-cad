@@ -1,3 +1,20 @@
+## 0.3.0
+
+- `JetCadViewport` widget + `ViewportController`: OCCT AIS/V3d offscreen
+  rendering composited as a Flutter external texture on macOS (CGL →
+  IOSurface → CVPixelBuffer), damage-driven redraw, debounced resize.
+- Navigation: orbit / pan / zoom / fit. Click pick with body/face/edge/
+  vertex filters; selection highlight; `SelectionChanged` stream on the
+  controller (selection is view state — never in the document or undo).
+- `KernelBridge` grows viewer methods (`resizeViewport`, `renderFrame`,
+  camera, `pick`, `setSelection`) + `TextureTarget`; implemented by fake
+  and FFI bridges, covered by the shared contract suite.
+- `FfiKernelBridge` now runs on one long-lived worker isolate per bridge
+  (was: Isolate.run + dlopen per command); new `shutdown()`. Concurrent
+  `disposeSession` calls join the in-flight dispose.
+- `CadDocument.create/load` accept a `RenderTarget`; documents expose
+  `session`/`bridge` for viewport wiring.
+
 ## 0.2.0
 
 - Native FFI/OCCT backend (`FfiKernelBridge`): per-session command queue, real

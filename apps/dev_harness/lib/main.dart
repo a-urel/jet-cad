@@ -1,27 +1,25 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:jet_cad/jet_cad.dart';
 
-/// Dev harness: proves the real OCCT V3d/AIS viewer renders a shaded box
-/// into the shim's IOSurface framebuffer and composites in Flutter.
+/// Dev harness: manual verification of the jet_cad viewport.
+/// Public package API only — if something here needs an import from
+/// package:jet_cad/src/..., the package surface is wrong.
 void main() {
-  runApp(const MaterialApp(home: SpikePage()));
+  runApp(const MaterialApp(home: HarnessPage()));
 }
 
-class SpikePage extends StatefulWidget {
-  const SpikePage({super.key});
+class HarnessPage extends StatefulWidget {
+  const HarnessPage({super.key});
 
   @override
-  State<SpikePage> createState() => _SpikePageState();
+  State<HarnessPage> createState() => _HarnessPageState();
 }
 
-class _SpikePageState extends State<SpikePage> {
-  static const _channel = MethodChannel('jet_cad/texture');
-
-  FfiKernelBridge? _bridge;
-  SessionHandle? _session;
-  int? _textureId;
+class _HarnessPageState extends State<HarnessPage> {
+  CadDocument? _doc;
+  ViewportController? _controller;
   String _status = 'starting…';
+  Set<EntityId> _selection = const {};
 
   @override
   void initState() {
@@ -34,32 +32,19 @@ class _SpikePageState extends State<SpikePage> {
       final libPath = FfiKernelBridge.locateLibrary();
       if (libPath == null) {
         setState(() => _status =
-            'native lib not found — run tool/run_harness.sh from repo root');
+            'native lib not found — run packages/jet_cad/tool/run_harness.sh');
         return;
       }
       final bridge = FfiKernelBridge(libPath);
-      final session = await bridge.createSession(const HeadlessTarget());
-      final init = await bridge.debugExecute(session, {
-        'cmd': 'initViewer',
-        'width': 512,
-        'height': 512,
-        'pixelRatio': 1.0,
-      });
-      final surfaceId = init['surfaceId'] as int;
-      final textureId = await _channel
-          .invokeMethod<int>('registerTexture', {'surfaceId': surfaceId});
-      await bridge.debugExecute(session, {
-        'cmd': 'makeBox',
-        'size': [50.0, 50.0, 50.0]
-      });
-      await bridge.debugExecute(session, {'cmd': 'cameraFit'});
-      await bridge.debugExecute(session, {'cmd': 'renderFrame'});
-      await _channel.invokeMethod<void>('frameReady', {'textureId': textureId});
+      final doc =
+          await CadDocument.create(bridge, target: const TextureTarget());
+      final controller = ViewportController(document: doc);
+      controller.selectionChanges
+          .listen((event) => setState(() => _selection = event.selection));
       setState(() {
-        _bridge = bridge;
-        _session = session;
-        _textureId = textureId;
-        _status = 'texture $textureId on IOSurface $surfaceId';
+        _doc = doc;
+        _controller = controller;
+        _status = 'ready';
       });
     } catch (e) {
       setState(() => _status = 'FAILED: $e');
@@ -68,30 +53,62 @@ class _SpikePageState extends State<SpikePage> {
 
   @override
   void dispose() {
-    final session = _session;
-    if (session != null) {
-      _bridge?.disposeSession(session);
-    }
+    _controller?.dispose();
+    _doc?.dispose();
     super.dispose();
+  }
+
+  Future<void> _guard(Future<void> Function() action) async {
+    try {
+      await action();
+      setState(() => _status = 'ready');
+    } catch (e) {
+      setState(() => _status = '$e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final doc = _doc;
+    final controller = _controller;
+    final selection = _selection.map((e) => e.value).join(', ');
     return Scaffold(
-      appBar: AppBar(title: Text('jet_cad viewer — $_status')),
-      body: Center(
-        child: _textureId == null
-            ? const CircularProgressIndicator()
-            : SizedBox(
-                width: 512,
-                height: 512,
-                // GL rows are bottom-up; flip so GL "top" renders at the top.
-                child: Transform.flip(
-                  flipY: true,
-                  child: Texture(textureId: _textureId!),
+      appBar: AppBar(title: Text('jet_cad harness — $_status')),
+      body: doc == null || controller == null
+          ? Center(child: Text(_status))
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      FilledButton(
+                        onPressed: () => _guard(() async {
+                          await doc.makeBox(const Vec3(40, 30, 20));
+                          await controller.fitAll();
+                        }),
+                        child: const Text('Add box'),
+                      ),
+                      FilledButton(
+                        onPressed: () => _guard(doc.undo),
+                        child: const Text('Undo'),
+                      ),
+                      FilledButton(
+                        onPressed: () => _guard(doc.redo),
+                        child: const Text('Redo'),
+                      ),
+                      FilledButton(
+                        onPressed: () => _guard(controller.fitAll),
+                        child: const Text('Fit'),
+                      ),
+                      Text('selection: ${selection.isEmpty ? '—' : selection}'),
+                    ],
+                  ),
                 ),
-              ),
-      ),
+                Expanded(child: JetCadViewport(controller: controller)),
+              ],
+            ),
     );
   }
 }

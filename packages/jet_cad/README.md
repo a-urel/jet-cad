@@ -5,22 +5,22 @@ CASCADE Technology (OCCT).
 
 ## Status
 
-This is Plan 1: the pure-Dart CAD document layer only. `jet_cad` currently
-ships:
+`jet_cad` currently ships:
 
 - Typed entity ids and a semantic `Entity`/`EntityKind` model
 - A sealed `Operation` hierarchy (make box, extrude, boolean, fillet,
   transform, STEP import/export) with JSON round-tripping
 - `CadDocument`: an operation timeline with bounded undo/redo and a
   `DocChange` event stream
-- Versioned JSON persistence (`CadDocumentCodec`)
-- An abstract `KernelBridge` contract plus `FakeKernelBridge`, an in-memory
-  implementation for tests and for consumers who want to exercise document
-  logic without a native build
-
-There is no native geometry kernel or viewport yet — every modeling
-operation is routed through `KernelBridge`, and `FakeKernelBridge` tracks
-topology counts only, not real geometry.
+- Versioned JSON persistence (`CadDocumentCodec`), including a kernel
+  geometry blob so a loaded document has real, editable geometry
+- An abstract `KernelBridge` contract with two implementations:
+  `FakeKernelBridge`, an in-memory stand-in for tests (topology counts
+  only, not real geometry), and `FfiKernelBridge`, backed by a real Open
+  CASCADE session over FFI
+- `JetCadViewport` + `ViewportController`: an interactive macOS viewport
+  (camera navigation, click pick, selection highlight) over the same
+  `KernelBridge` contract — see [Viewport (macOS)](#viewport-macos) below
 
 ## Usage
 
@@ -42,11 +42,34 @@ Future<void> main() async {
 }
 ```
 
+## Viewport (macOS)
+
+```dart
+final bridge = FfiKernelBridge.auto();
+final doc = await CadDocument.create(bridge, target: const TextureTarget());
+final controller = ViewportController(document: doc);
+
+// In your widget tree:
+JetCadViewport(controller: controller)
+
+// Navigation: left-drag orbit, right-drag pan, scroll zoom.
+controller.selectionChanges.listen((e) => print('selected: ${e.selection}'));
+await doc.makeBox(const Vec3(40, 30, 20));
+await controller.fitAll();
+```
+
+Rendering is damage-driven (frames draw only on document/camera/selection
+changes) via OCCT's AIS/V3d viewer composited as a Flutter external texture
+(IOSurface). macOS only for now; Windows/Linux follow the same
+`KernelBridge` contract in later milestones. Selection is view state — it
+never enters the document or undo history.
+
 ## Roadmap
 
-The native OCCT-backed `KernelBridge` implementation (FFI) and the Flutter
-viewport widget arrive in later milestones. Until then, `jet_cad` is usable
-as a standalone document/undo-timeline library over `FakeKernelBridge`.
+`jet_cad` is usable today as a document/undo-timeline library with real
+OCCT geometry (`FfiKernelBridge`) and an interactive macOS viewport. Still
+ahead: a full demo app, Windows/Linux viewport texture paths, and binary
+distribution of the native library and Flutter plugin.
 
 ## Native development
 
