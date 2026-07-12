@@ -1,5 +1,4 @@
-import 'dart:typed_data';
-
+import '../kernel/kernel_types.dart';
 import 'entity.dart';
 
 /// Everything needed to walk one operation backward or forward again.
@@ -11,9 +10,9 @@ import 'entity.dart';
 /// Snapshots are id-preserving, which is what makes redo safe: restored
 /// bodies keep the ids that later operations reference.
 class UndoRecord {
-  final Uint8List? preSnapshot;
+  final KernelSnapshot? preSnapshot;
   final List<BodyId> preBodies;
-  final Uint8List? postSnapshot;
+  final KernelSnapshot? postSnapshot;
   final List<BodyId> postBodies;
   final Map<EntityId, Entity> entitiesBefore;
   final Map<EntityId, Entity> entitiesAfter;

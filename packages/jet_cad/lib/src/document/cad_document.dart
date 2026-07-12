@@ -109,6 +109,28 @@ class CadDocument {
     await _changes.close();
   }
 
+  /// Snapshot after a mutating kernel call; if the snapshot itself fails,
+  /// roll the kernel back (best effort) so kernel and document never
+  /// diverge, then rethrow.
+  Future<KernelSnapshot> _snapshotOrCompensate(
+    List<BodyId> bodies, {
+    required Future<void> Function() compensate,
+  }) async {
+    try {
+      return await _bridge.snapshotBodies(_session, bodies);
+    } catch (_) {
+      try {
+        await compensate();
+      } catch (_) {
+        // Best effort: the original error is the one that matters.
+      }
+      rethrow;
+    }
+  }
+
+  /// Whole-session kernel snapshot. Used by persistence (Task 9) and tests.
+  Future<KernelSnapshot> debugSaveSnapshot() => _bridge.saveSnapshot(_session);
+
   OpId _newOpId() => OpId(_nextOpId++);
 
   String _nextName(String base) {
@@ -186,7 +208,10 @@ class CadDocument {
 
   Future<BodyId> makeBox(Vec3 size) async {
     final result = await _bridge.makeBox(_session, size);
-    final post = await _bridge.snapshotBodies(_session, [result.body]);
+    final post = await _snapshotOrCompensate(
+      [result.body],
+      compensate: () => _bridge.deleteBodies(_session, [result.body]),
+    );
     final added = _entitiesFor(result, _nextName('Box'));
     _commit(
       MakeBoxOp(
@@ -209,7 +234,10 @@ class CadDocument {
   Future<BodyId> extrude(FaceId face, double depth) async {
     _requireEntity(face, EntityKind.face);
     final result = await _bridge.extrude(_session, face, depth);
-    final post = await _bridge.snapshotBodies(_session, [result.body]);
+    final post = await _snapshotOrCompensate(
+      [result.body],
+      compensate: () => _bridge.deleteBodies(_session, [result.body]),
+    );
     final added = _entitiesFor(result, _nextName('Extrude'));
     _commit(
       ExtrudeOp(
@@ -238,7 +266,13 @@ class CadDocument {
     }
     final pre = await _bridge.snapshotBodies(_session, [a, b]);
     final result = await _bridge.booleanOp(_session, a, b, op);
-    final post = await _bridge.snapshotBodies(_session, [result.body]);
+    final post = await _snapshotOrCompensate(
+      [result.body],
+      compensate: () async {
+        await _bridge.deleteBodies(_session, [result.body]);
+        await _bridge.restoreBodies(_session, pre);
+      },
+    );
     final removed = result.remap.mapping.keys.toList();
     final before = <EntityId, Entity>{
       for (final id in removed)
@@ -283,7 +317,13 @@ class CadDocument {
     }
     final pre = await _bridge.snapshotBodies(_session, [body]);
     final result = await _bridge.fillet(_session, edges, radius);
-    final post = await _bridge.snapshotBodies(_session, [result.body]);
+    final post = await _snapshotOrCompensate(
+      [result.body],
+      compensate: () async {
+        await _bridge.deleteBodies(_session, [result.body]);
+        await _bridge.restoreBodies(_session, pre);
+      },
+    );
     final removed = result.remap.mapping.keys.toList();
     final before = <EntityId, Entity>{
       for (final id in removed)
@@ -341,7 +381,10 @@ class CadDocument {
   Future<List<BodyId>> importStep(Uint8List bytes) async {
     final results = await _bridge.importStep(_session, bytes);
     final bodyIds = [for (final r in results) r.body];
-    final post = await _bridge.snapshotBodies(_session, bodyIds);
+    final post = await _snapshotOrCompensate(
+      bodyIds,
+      compensate: () => _bridge.deleteBodies(_session, bodyIds),
+    );
     final added = <EntityId, Entity>{
       for (final r in results) ..._entitiesFor(r, _nextName('Import')),
     };

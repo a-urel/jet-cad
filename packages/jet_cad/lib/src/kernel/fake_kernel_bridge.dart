@@ -183,17 +183,18 @@ class FakeKernelBridge implements KernelBridge {
   }
 
   @override
-  Future<Uint8List> snapshotBodies(
+  Future<KernelSnapshot> snapshotBodies(
       SessionHandle session, List<BodyId> bodies) async {
     final all = _session(session);
     final dump = [for (final b in bodies) _body(all, b).toJson()];
-    return Uint8List.fromList(utf8.encode(jsonEncode(dump)));
+    return KernelSnapshot(Uint8List.fromList(utf8.encode(jsonEncode(dump))));
   }
 
   @override
-  Future<void> restoreBodies(SessionHandle session, Uint8List snapshot) async {
+  Future<void> restoreBodies(
+      SessionHandle session, KernelSnapshot snapshot) async {
     final bodies = _session(session);
-    final dump = jsonDecode(utf8.decode(snapshot)) as List;
+    final dump = jsonDecode(utf8.decode(snapshot.bytes)) as List;
     for (final entry in dump) {
       final body = _FakeBody.fromJson((entry as Map).cast<String, Object?>());
       bodies[body.id] = body; // id-preserving by construction

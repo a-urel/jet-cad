@@ -83,4 +83,24 @@ class CreateResult {
     required this.vertices,
     this.remap = IdRemap.empty,
   });
+
+  Map<String, Object?> toJson() => {
+        'body': body.value,
+        'faces': [for (final f in faces) f.value],
+        'edges': [for (final e in edges) e.value],
+        'vertices': [for (final v in vertices) v.value],
+        'remap': remap.toJson(),
+      };
+
+  factory CreateResult.fromJson(Map<String, Object?> json) => CreateResult(
+        body: BodyId(json['body']! as String),
+        faces: [for (final f in json['faces']! as List) FaceId(f as String)],
+        edges: [for (final e in json['edges']! as List) EdgeId(e as String)],
+        vertices: [
+          for (final v in json['vertices']! as List) VertexId(v as String),
+        ],
+        remap: json['remap'] == null
+            ? IdRemap.empty
+            : IdRemap.fromJson((json['remap']! as Map).cast<String, Object?>()),
+      );
 }
