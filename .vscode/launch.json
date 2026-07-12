@@ -1,0 +1,62 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "jet-cad",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "dev_harness",
+            "cwd": "apps/dev_harness",
+            "request": "launch",
+            "type": "dart",
+            "env": {
+                "JET_CAD_NATIVE_LIB": "${workspaceFolder}/packages/jet_cad/build/native/libjet_cad_native.dylib"
+            }
+        },
+        {
+            "name": "dev_harness (profile mode)",
+            "cwd": "apps/dev_harness",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile",
+            "env": {
+                "JET_CAD_NATIVE_LIB": "${workspaceFolder}/packages/jet_cad/build/native/libjet_cad_native.dylib"
+            }
+        },
+        {
+            "name": "dev_harness (release mode)",
+            "cwd": "apps/dev_harness",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release",
+            "env": {
+                "JET_CAD_NATIVE_LIB": "${workspaceFolder}/packages/jet_cad/build/native/libjet_cad_native.dylib"
+            }
+        },
+        {
+            "name": "jet_cad",
+            "cwd": "packages/jet_cad",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "jet_cad (profile mode)",
+            "cwd": "packages/jet_cad",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "jet_cad (release mode)",
+            "cwd": "packages/jet_cad",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        }
+    ]
+}
