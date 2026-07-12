@@ -7,7 +7,7 @@ class StatusBar extends StatelessWidget {
   const StatusBar({super.key, required this.status, required this.selection});
 
   final String status;
-  final List<int> selection;
+  final List<String> selection;
 
   @override
   Widget build(BuildContext context) {

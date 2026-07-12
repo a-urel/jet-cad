@@ -22,7 +22,7 @@ void main() {
 
   testWidgets('joins selection ids', (tester) async {
     await tester.pumpWidget(
-        host(const StatusBar(status: 'ready', selection: [12, 13])));
+        host(const StatusBar(status: 'ready', selection: ['12', '13'])));
     await tester.pumpAndSettle();
     expect(find.textContaining('12, 13'), findsOneWidget);
   });
