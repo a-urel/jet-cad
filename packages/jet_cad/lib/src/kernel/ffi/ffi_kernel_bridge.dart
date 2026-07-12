@@ -45,12 +45,22 @@ class FfiKernelBridge implements KernelBridge {
 
   final String libraryPath;
   final NativeBindings _bindings;
+
+  // Entries are removed once a session's dispose completes (see
+  // disposeSession below), so this stays bounded by concurrently *live*
+  // sessions, not lifetime session count.
   final Map<int, Future<void>> _queues = {};
 
   /// Sessions whose [disposeSession] has been invoked (possibly still
   /// awaiting in-flight commands). Commands enqueued after that point get
   /// a fast, typed rejection instead of racing the native dispose and
   /// surfacing a confusing kernel "unknown session" error.
+  ///
+  /// Unlike [_queues], entries here are never removed: this grows by one
+  /// int per disposed session for the lifetime of the bridge instance.
+  /// Bounded by session churn (a long-lived app creating/disposing many
+  /// sessions over its lifetime), not by concurrently live sessions —
+  /// acceptable for a per-process handle count, revisit if that changes.
   final Set<int> _disposing = {};
 
   Future<Map<String, Object?>> _run(
@@ -132,10 +142,15 @@ class FfiKernelBridge implements KernelBridge {
         'radius': radius,
       });
 
+  // transform/restoreBodies/deleteBodies/restoreSession are marked `async`
+  // (not a bare `=> _run(...)` pass-through) so the synchronous
+  // "session is disposed" StateError that `_run` can throw before its first
+  // await arrives to callers as a failed Future, matching every other
+  // method on this bridge instead of surfacing as a synchronous throw.
   @override
   Future<void> transform(
-          SessionHandle s, List<BodyId> bodies, Matrix4 matrix) =>
-      _run(s, {
+          SessionHandle s, List<BodyId> bodies, Matrix4 matrix) async =>
+      await _run(s, {
         'cmd': 'transform',
         'bodies': [for (final b in bodies) b.value],
         'matrix': matrix.storage.toList(),
@@ -172,14 +187,15 @@ class FfiKernelBridge implements KernelBridge {
   }
 
   @override
-  Future<void> restoreBodies(SessionHandle s, KernelSnapshot snapshot) =>
-      _run(s, {
+  Future<void> restoreBodies(SessionHandle s, KernelSnapshot snapshot) async =>
+      await _run(s, {
         'cmd': 'restoreBodies',
         'dataB64': base64Encode(snapshot.bytes),
       });
 
   @override
-  Future<void> deleteBodies(SessionHandle s, List<BodyId> bodies) => _run(s, {
+  Future<void> deleteBodies(SessionHandle s, List<BodyId> bodies) async =>
+      await _run(s, {
         'cmd': 'deleteBodies',
         'bodies': [for (final b in bodies) b.value],
       });
@@ -191,8 +207,8 @@ class FfiKernelBridge implements KernelBridge {
   }
 
   @override
-  Future<void> restoreSession(SessionHandle s, KernelSnapshot snapshot) =>
-      _run(s, {
+  Future<void> restoreSession(SessionHandle s, KernelSnapshot snapshot) async =>
+      await _run(s, {
         'cmd': 'restoreSession',
         'dataB64': base64Encode(snapshot.bytes),
       });

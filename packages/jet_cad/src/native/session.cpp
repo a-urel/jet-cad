@@ -473,8 +473,17 @@ json Session::transform(const json& cmd) {
   for (const auto& idJson : cmd.at("bodies")) {
     requireBody(idJson.get<std::string>());
   }
+  // Parse-fully-then-mutate: build every moved Body into a local vector
+  // first, and only swap them into bodies_ once ALL of them succeed. A
+  // mid-list failure (e.g. "internal: transform changed topology" on the
+  // Nth body) must not leave bodies 0..N-1 already moved while the rest
+  // are untouched — same invariant restoreBodies/restoreSession enforce
+  // for their own multi-entry payloads.
+  std::vector<std::pair<std::string, Body>> movedBodies;
+  movedBodies.reserve(cmd.at("bodies").size());
   for (const auto& idJson : cmd.at("bodies")) {
-    Body& body = bodies_.at(idJson.get<std::string>());
+    const std::string id = idJson.get<std::string>();
+    const Body& body = bodies_.at(id);
     Body moved;
     BRepBuilderAPI_Transform mover(body.shape, trsf, /*Copy=*/false);
     moved.shape = mover.Shape();
@@ -495,7 +504,10 @@ json Session::transform(const json& cmd) {
     transfer(TopAbs_FACE, body.faces, moved.faces);
     transfer(TopAbs_EDGE, body.edges, moved.edges);
     transfer(TopAbs_VERTEX, body.vertices, moved.vertices);
-    body = std::move(moved);
+    movedBodies.emplace_back(id, std::move(moved));
+  }
+  for (auto& [id, moved] : movedBodies) {
+    bodies_[id] = std::move(moved);
   }
   return json::object();
 }
@@ -616,7 +628,9 @@ json Session::exportStep(const json& cmd) {
   }
   TempFileGuard tmp{tempStepPath()};
   STEPControl_Writer writer;
-  writer.Transfer(compound, STEPControl_AsIs);
+  if (writer.Transfer(compound, STEPControl_AsIs) != IFSelect_RetDone) {
+    throw CommandError("STEP transfer failed");
+  }
   if (writer.Write(tmp.path.string().c_str()) != IFSelect_RetDone) {
     throw CommandError("STEP write failed");
   }

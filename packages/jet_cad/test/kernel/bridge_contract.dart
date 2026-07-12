@@ -97,6 +97,15 @@ void runKernelBridgeContract(KernelBridge Function() createBridge) {
     );
   });
 
+  test('contract: boolean common produces a result body', () async {
+    final a = await bridge.makeBox(session, const Vec3(2, 2, 2));
+    final b = await bridge.makeBox(session, const Vec3(2, 2, 2));
+    final c = await bridge.booleanOp(session, a.body, b.body, BoolOp.common);
+    expect(c.body.value, isNotEmpty);
+    expect(c.remap.mapping[a.body], isNotEmpty);
+    expect(c.remap.mapping[b.body], isNotEmpty);
+  });
+
   test('contract: snapshotBodies/restoreBodies is id-preserving', () async {
     final box = await bridge.makeBox(session, const Vec3(1, 1, 1));
     final snap = await bridge.snapshotBodies(session, [box.body]);

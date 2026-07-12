@@ -40,6 +40,8 @@ abstract interface class KernelBridge {
   Future<List<CreateResult>> importStep(SessionHandle session, Uint8List bytes);
   Future<Uint8List> exportStep(SessionHandle session, List<BodyId> bodies);
 
+  /// [KernelSnapshot] is THE opaque snapshot type at both granularities
+  /// (bodies and whole session); id-preserving on restore.
   Future<KernelSnapshot> snapshotBodies(
       SessionHandle session, List<BodyId> bodies);
   Future<void> restoreBodies(SessionHandle session, KernelSnapshot snapshot);

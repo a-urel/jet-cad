@@ -2,6 +2,8 @@ import 'dart:ffi' as ffi;
 
 import 'package:ffi/ffi.dart';
 
+import '../kernel_types.dart';
+
 typedef _CreateSessionC = ffi.Uint64 Function();
 typedef _DisposeSessionC = ffi.Void Function(ffi.Uint64);
 typedef _ExecuteC = ffi.Pointer<Utf8> Function(ffi.Uint64, ffi.Pointer<Utf8>);
@@ -37,6 +39,14 @@ class NativeBindings {
   void disposeSession(int session) => _disposeSession(session);
 
   String _takeString(ffi.Pointer<Utf8> ptr) {
+    // jc_execute/jc_version return nullptr on allocation failure (documented
+    // in jet_cad_native.h); surface that as a typed exception instead of
+    // crashing on toDartString(). Pointer.address == 0 rather than
+    // `ptr == ffi.nullptr`: both work for a real Pointer<Utf8>, but address
+    // comparison is the unambiguous, allocation-free check.
+    if (ptr.address == 0) {
+      throw const KernelException('native allocation failure');
+    }
     try {
       return ptr.toDartString();
     } finally {

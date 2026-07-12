@@ -60,6 +60,11 @@ class CadDocument {
   /// Does not emit DocumentLoaded: no listener can exist before this factory
   /// returns. The event type is reserved for future non-factory load paths
   /// (Plan 2 restoreSession wiring).
+  ///
+  /// Display-name counters ([_nameCounters], used to mint "Box 1", "Box 2",
+  /// ...) are NOT rebuilt from the loaded entities: names may repeat after a
+  /// load followed by new operations (e.g. two entities named "Box 1" in the
+  /// same document). Ids stay unique regardless — names are cosmetic only.
   static Future<CadDocument> load(
       Map<String, Object?> json, KernelBridge bridge) async {
     final schema = json['schemaVersion'];
@@ -116,8 +121,12 @@ class CadDocument {
 
       final geometry = json['geometry'];
       if (geometry != null) {
+        if (geometry is! String) {
+          throw FormatException(
+              'corrupt document: geometry must be a base64 string');
+        }
         await bridge.restoreSession(
-            doc._session, KernelSnapshot(base64Decode(geometry as String)));
+            doc._session, KernelSnapshot(base64Decode(geometry)));
       } else if (doc._ops.isNotEmpty) {
         throw StateError(
             'document has no geometry blob; op replay is not supported in '

@@ -7,7 +7,9 @@ import 'package:jet_cad/jet_cad.dart';
 void main() {
   final libPath = FfiKernelBridge.locateLibrary();
   if (libPath == null) {
-    test('SKIPPED: native library not built (tool/build_native.sh)', () {});
+    test('SKIPPED: native library not built (tool/build_native.sh)', () {
+      markTestSkipped('native library not built');
+    });
     return;
   }
 

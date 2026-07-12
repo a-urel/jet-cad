@@ -39,7 +39,6 @@ void main() {
     );
     expect(doc.operations, isEmpty);
     expect(doc.entities, isEmpty);
-    bridge.allowedSnapshots = 1000;
     expect(await _kernelBodyCount(bridge, doc), 0,
         reason: 'created body must be compensated away');
     await doc.dispose();
@@ -60,10 +59,33 @@ void main() {
     expect(doc.entities.containsKey(a), isTrue);
     expect(doc.entities.containsKey(b), isTrue);
     expect(doc.head, 2);
-    bridge.allowedSnapshots = 1000;
     expect(await _kernelBodyCount(bridge, doc), 2,
         reason: 'a and b restored, boolean result deleted');
     final step = await doc.exportStep([a, b]);
+    expect(step, isNotEmpty);
+    await doc.dispose();
+  });
+
+  test('fillet compensates when post-snapshot fails: kernel and doc restored',
+      () async {
+    // Allowed: 1 post-snapshot for the makeBox call, 1 pre-snapshot for the
+    // fillet; the fillet's post-snapshot (3rd call) fails.
+    final bridge = _SnapshotFailingBridge(2);
+    final doc = await CadDocument.create(bridge);
+    final body = await doc.makeBox(const Vec3(1, 1, 1));
+    final edge = doc.entities.values
+        .firstWhere((e) => e.kind == EntityKind.edge)
+        .id as EdgeId;
+    await expectLater(
+      doc.fillet([edge], 0.2),
+      throwsA(isA<KernelException>()),
+    );
+    expect(doc.operations, hasLength(1), reason: 'fillet op never committed');
+    expect(doc.entities.containsKey(edge), isTrue,
+        reason: 'doc unchanged: original edge entity still present');
+    expect(await _kernelBodyCount(bridge, doc), 1,
+        reason: 'fillet result deleted, original body restored');
+    final step = await doc.exportStep([body]);
     expect(step, isNotEmpty);
     await doc.dispose();
   });
