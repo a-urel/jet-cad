@@ -18,6 +18,10 @@ class FakeKernelBridge implements KernelBridge {
   int _sessionCounter = 0;
   final Map<int, Map<String, _FakeBody>> _sessions = {};
 
+  /// Every matrix passed to [transform], in call order. Lets document-layer
+  /// tests assert what actually reached the kernel (e.g. undo's inverse).
+  final List<Matrix4> transformLog = [];
+
   String _next(String prefix) => '$prefix${++_idCounter}';
 
   Map<String, _FakeBody> _session(SessionHandle s) =>
@@ -153,6 +157,7 @@ class FakeKernelBridge implements KernelBridge {
     for (final b in bodies) {
       _body(all, b);
     }
+    transformLog.add(matrix.clone());
     // The fake tracks no coordinates; validation is the whole job.
   }
 

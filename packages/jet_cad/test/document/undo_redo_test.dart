@@ -5,10 +5,12 @@ import 'package:jet_cad/src/kernel/kernel_types.dart';
 import 'package:vector_math/vector_math_64.dart';
 
 void main() {
+  late FakeKernelBridge bridge;
   late CadDocument doc;
 
   setUp(() async {
-    doc = await CadDocument.create(FakeKernelBridge());
+    bridge = FakeKernelBridge();
+    doc = await CadDocument.create(bridge);
   });
 
   tearDown(() => doc.dispose());
@@ -56,6 +58,10 @@ void main() {
     expect(doc.head, 1);
     expect(doc.entities.containsKey(body), isTrue,
         reason: 'transform undo never touches entities');
+    expect(bridge.transformLog, hasLength(2));
+    final product = bridge.transformLog[1] * m as Matrix4;
+    expect(product.isIdentity(), isTrue,
+        reason: 'undo must apply the inverse of the original matrix');
   });
 
   test('new command after undo truncates the redo branch', () async {
