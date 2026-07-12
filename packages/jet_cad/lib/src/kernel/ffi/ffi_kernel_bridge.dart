@@ -65,6 +65,11 @@ class FfiKernelBridge implements KernelBridge {
   Future<FfiWorker>? _workerFuture;
   bool _shutdownRequested = false;
 
+  /// The shutdown gate. MUST be called synchronously at admission time —
+  /// when the public method is invoked — never from inside a queued
+  /// continuation: work admitted before [shutdown] drains (shutdown awaits
+  /// it); only work arriving after throws. A continuation re-consulting
+  /// this after the flag flipped would reject already-admitted work.
   Future<FfiWorker> _worker() {
     if (_shutdownRequested) {
       throw StateError('FfiKernelBridge is shut down');
@@ -77,9 +82,10 @@ class FfiKernelBridge implements KernelBridge {
     if (_disposing.contains(session.value)) {
       throw StateError('session is disposed');
     }
+    final workerFuture = _worker(); // admission-time capture (see _worker)
     final prev = _queues[session.value] ?? Future<void>.value();
     final job = prev.then((_) async {
-      final worker = await _worker();
+      final worker = await workerFuture;
       final raw = await worker.request(
           'execute', session.value, jsonEncode(cmd)) as String;
       final envelope = (jsonDecode(raw) as Map).cast<String, Object?>();
@@ -97,6 +103,9 @@ class FfiKernelBridge implements KernelBridge {
 
   @override
   Future<SessionHandle> createSession(RenderTarget target) async {
+    // _worker() must stay the first expression: an async body runs
+    // synchronously until its first suspension, so this is an
+    // admission-time shutdown check (see _worker).
     final worker = await _worker();
     final handle = await worker.request('createSession', 0, null) as int;
     return SessionHandle(handle);
@@ -109,7 +118,6 @@ class FfiKernelBridge implements KernelBridge {
     // completed no-op.
     final existing = _disposals[session.value];
     if (existing != null) return existing;
-    if (_disposing.contains(session.value)) return Future.value();
     final future = _disposeImpl(session);
     _disposals[session.value] = future;
     return future;
@@ -120,15 +128,17 @@ class FfiKernelBridge implements KernelBridge {
     // enqueued after this call starts is rejected by _run, while commands
     // already in the queue complete before the native dispose below.
     _disposing.add(session.value);
+    final workerFuture = _worker(); // admission-time capture (see _worker)
     await (_queues[session.value] ?? Future<void>.value())
         .catchError((_) => null);
-    final worker = await _worker();
+    final worker = await workerFuture;
     await worker.request('disposeSession', session.value, null);
     _queues.remove(session.value);
   }
 
   @override
   Future<KernelVersionInfo> versionInfo() async {
+    // _worker() first for the same admission-time reason as createSession.
     final worker = await _worker();
     final raw = await worker.request('version', 0, null) as String;
     final v = (jsonDecode(raw) as Map).cast<String, Object?>();
@@ -139,17 +149,24 @@ class FfiKernelBridge implements KernelBridge {
   }
 
   /// Shuts down the worker isolate. FFI-specific lifecycle (not part of
-  /// [KernelBridge]): awaits in-flight per-session command queues, then
-  /// shuts the worker down. Any command issued after this call throws
-  /// [StateError]. Idempotent.
+  /// [KernelBridge]): drains work admitted before this call — queued
+  /// commands AND in-flight disposals — then shuts the worker down. Any
+  /// command issued after this call throws [StateError]. Idempotent.
   Future<void> shutdown() async {
     if (_shutdownRequested) return;
     _shutdownRequested = true;
     final workerFuture = _workerFuture;
     if (workerFuture == null) return;
     final worker = await workerFuture;
-    await Future.wait(
-        _queues.values.map((f) => f.catchError((_) => null)).toList());
+    // Snapshot both maps: admission is synchronous, so everything admitted
+    // before this call is already present; nothing new can be admitted
+    // (_worker throws once _shutdownRequested is set). Disposals are
+    // tracked separately from _queues and must drain too, or the native
+    // session release racing worker.shutdown() would be dropped (leak).
+    await Future.wait([
+      for (final f in _queues.values) f.catchError((_) => null),
+      for (final f in _disposals.values) f.catchError((_) => null),
+    ]);
     await worker.shutdown();
   }
 

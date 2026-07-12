@@ -45,6 +45,28 @@ void main() {
     await bridge.shutdown();
   });
 
+  test('shutdown drains a command admitted before it', () async {
+    final bridge = FfiKernelBridge(libPath);
+    final session = await bridge.createSession(const HeadlessTarget());
+    // Admitted (queued) but not awaited: its continuation reaches the
+    // worker on a later microtask turn, after shutdown() set its flag.
+    final pending = bridge.makeBox(session, const Vec3(1, 1, 1));
+    await bridge.shutdown();
+    final result = await pending;
+    expect(result.faces, isNotEmpty,
+        reason: 'work admitted before shutdown() must drain, not reject');
+  });
+
+  test('shutdown drains a dispose admitted before it', () async {
+    final bridge = FfiKernelBridge(libPath);
+    final session = await bridge.createSession(const HeadlessTarget());
+    final pending = bridge.disposeSession(session);
+    await bridge.shutdown();
+    // Must complete: rejecting here means the native session was never
+    // released (resource leak), not just a surprising error.
+    await pending;
+  });
+
   test('parallel sessions on one worker stay isolated', () async {
     final bridge = FfiKernelBridge(libPath);
     final a = await bridge.createSession(const HeadlessTarget());
