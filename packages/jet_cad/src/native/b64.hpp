@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace jetcad {
 
@@ -72,6 +73,22 @@ inline std::string b64decode(const std::string& in) {
     }
   }
   return out;
+}
+
+// Byte-vector overload (true overload: distinct parameter type from the
+// std::string version above, so this is not a return-type-only overload,
+// which C++ disallows). Used by binary payloads such as raw RGBA pixels.
+inline std::string b64encode(const std::vector<uint8_t>& in) {
+  return b64encode(std::string(reinterpret_cast<const char*>(in.data()),
+                               in.size()));
+}
+
+// Decodes into a byte vector. Named distinctly from b64decode (which
+// returns std::string) because C++ cannot overload on return type alone
+// when the parameter type is identical.
+inline std::vector<uint8_t> b64decodeBytes(const std::string& in) {
+  const std::string bytes = b64decode(in);
+  return std::vector<uint8_t>(bytes.begin(), bytes.end());
 }
 
 }  // namespace jetcad

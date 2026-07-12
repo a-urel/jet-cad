@@ -120,6 +120,14 @@ class FfiKernelBridge implements KernelBridge {
           SessionHandle s, Map<String, Object?> cmd) async =>
       CreateResult.fromJson(await _run(s, cmd));
 
+  /// Runs a raw JSON command against [session].
+  ///
+  /// Dev-harness and test hook only: production callers use the typed
+  /// [KernelBridge] methods. Queued per session like every other command.
+  Future<Map<String, Object?>> debugExecute(
+          SessionHandle session, Map<String, Object?> command) =>
+      _run(session, command);
+
   @override
   Future<CreateResult> makeBox(SessionHandle s, Vec3 size) =>
       _create(s, {'cmd': 'makeBox', 'size': size.toJson()});

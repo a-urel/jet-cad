@@ -41,7 +41,7 @@ flutter:
       linux:
         ffiPlugin: true
       macos:
-        ffiPlugin: true
+        pluginClass: JetCadPlugin
       windows:
         ffiPlugin: true
 

@@ -40,3 +40,11 @@ TEST(Base64, RoundTripAndPaddingEdges) {
   EXPECT_THROW(b64decode("AB==AAAA"), std::runtime_error);
   EXPECT_THROW(b64decode("ABC=AAAA"), std::runtime_error);
 }
+
+TEST(Base64, ByteVectorOverloadRoundTrips) {
+  using jetcad::b64decodeBytes;
+  using jetcad::b64encode;
+  const std::vector<uint8_t> bytes = {0x00, 0xff, 0x10, 0x7f, 0x80};
+  EXPECT_EQ(b64decodeBytes(b64encode(bytes)), bytes);
+  EXPECT_TRUE(b64decodeBytes(b64encode(std::vector<uint8_t>{})).empty());
+}

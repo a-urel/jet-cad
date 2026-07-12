@@ -213,6 +213,9 @@ json Session::execute(const json& cmd) {
   if (name == "deleteBodies") return deleteBodies(cmd);
   if (name == "saveSnapshot") return saveSnapshot(cmd);
   if (name == "restoreSession") return restoreSession(cmd);
+  if (name == "debugInitTexture") return cmdDebugInitTexture(cmd);
+  if (name == "debugRenderTestPattern") return cmdDebugRenderTestPattern();
+  if (name == "debugReadPixels") return cmdDebugReadPixels(cmd);
   throw CommandError("unknown command: " + name);
 }
 
@@ -638,6 +641,40 @@ json Session::exportStep(const json& cmd) {
   std::string bytes((std::istreambuf_iterator<char>(in)),
                     std::istreambuf_iterator<char>());
   return json{{"dataB64", b64encode(bytes)}};
+}
+
+json Session::cmdDebugInitTexture(const json& cmd) {
+  if (spikeGl_) throw CommandError("texture already initialized");
+  const int width = cmd.at("width").get<int>();
+  const int height = cmd.at("height").get<int>();
+  try {
+    spikeGl_ = GlContext::create();
+    const uint32_t surfaceId = spikeGl_->createSurfaceFramebuffer(width, height);
+    return json{{"surfaceId", surfaceId}};
+  } catch (const std::runtime_error& e) {
+    spikeGl_.reset();
+    throw CommandError(e.what());
+  }
+}
+
+json Session::cmdDebugRenderTestPattern() {
+  if (!spikeGl_) throw CommandError("texture not initialized");
+  spikeGl_->renderTestPattern();
+  return json::object();
+}
+
+json Session::cmdDebugReadPixels(const json& cmd) {
+  if (!spikeGl_) throw CommandError("texture not initialized");
+  const int x = cmd.at("x").get<int>();
+  const int y = cmd.at("y").get<int>();
+  const int w = cmd.at("width").get<int>();
+  const int h = cmd.at("height").get<int>();
+  if (w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > spikeGl_->width() ||
+      y + h > spikeGl_->height()) {
+    throw CommandError("readPixels rectangle out of bounds");
+  }
+  std::vector<uint8_t> rgba = spikeGl_->readPixels(x, y, w, h);
+  return json{{"width", w}, {"height", h}, {"rgbaBase64", b64encode(rgba)}};
 }
 
 }  // namespace jetcad

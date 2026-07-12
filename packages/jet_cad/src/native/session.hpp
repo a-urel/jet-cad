@@ -2,12 +2,15 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopoDS_Shape.hxx>
 #include <nlohmann/json.hpp>
+
+#include "platform/gl_context.hpp"
 
 namespace jetcad {
 
@@ -42,6 +45,10 @@ class Session {
   json saveSnapshot(const json&);     // Task 6
   json restoreSession(const json&);   // Task 6
 
+  json cmdDebugInitTexture(const json& cmd);
+  json cmdDebugRenderTestPattern();
+  json cmdDebugReadPixels(const json& cmd);
+
   std::string nextId(const char* prefix);
   Body& requireBody(const std::string& id);
   std::string bodyIdOwningSubshape(TopAbs_ShapeEnum kind,
@@ -69,6 +76,9 @@ class Session {
 
   uint64_t counter_ = 0;
   std::map<std::string, Body> bodies_;
+
+  // Spike-only GL context; replaced by the Viewer in Plan 3 Task 3.
+  std::unique_ptr<GlContext> spikeGl_;
 };
 
 }  // namespace jetcad

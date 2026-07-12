@@ -91,4 +91,8 @@ class FfiKernelBridge implements KernelBridge {
   @override
   Future<void> restoreSession(SessionHandle session, KernelSnapshot snapshot) =>
       _unsupported();
+
+  Future<Map<String, Object?>> debugExecute(
+          SessionHandle session, Map<String, Object?> command) =>
+      _unsupported();
 }

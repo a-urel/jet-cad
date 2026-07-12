@@ -19,6 +19,15 @@ add_library(jet_cad_native SHARED
 target_include_directories(jet_cad_native PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(jet_cad_native PRIVATE nlohmann_json::nlohmann_json)
 
+if(APPLE)
+  enable_language(OBJCXX)
+  target_sources(jet_cad_native PRIVATE platform/gl_context_macos.mm)
+  target_link_libraries(jet_cad_native PRIVATE
+    "-framework CoreFoundation"
+    "-framework IOSurface"
+    "-framework OpenGL")
+endif()
+
 # OCCT toolkits. 7.8+ renamed STEP toolkits (TKSTEP -> TKDESTEP); support both.
 set(JET_CAD_OCCT_LIBS
   TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo
@@ -43,6 +52,7 @@ if(JET_CAD_BUILD_TESTS)
     tests/boolean_test.cpp
     tests/modeling_test.cpp
     tests/persistence_test.cpp
+    tests/texture_spike_test.cpp
   )
   # session.hpp/session_test.cpp include and call into OCCT directly
   # (TopoDS_Shape, BRepPrimAPI_MakeBox, BRepGProp, ...). jet_cad_native's
