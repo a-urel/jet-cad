@@ -13,6 +13,11 @@ dependencies:
     sdk: flutter
   jet_cad:
     path: ../../packages/jet_cad
+  shadcn_ui: ^0.55.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
 
 flutter:
   uses-material-design: true
