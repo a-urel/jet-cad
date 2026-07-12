@@ -40,6 +40,7 @@ if(JET_CAD_BUILD_TESTS)
   add_executable(jet_cad_native_tests
     tests/smoke_test.cpp
     tests/session_test.cpp
+    tests/boolean_test.cpp
   )
   # session.hpp/session_test.cpp include and call into OCCT directly
   # (TopoDS_Shape, BRepPrimAPI_MakeBox, BRepGProp, ...). jet_cad_native's

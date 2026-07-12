@@ -1,10 +1,32 @@
 #include "session.hpp"
 
+#include <memory>
+
+#include <BRepAlgoAPI_BooleanOperation.hxx>
+#include <BRepAlgoAPI_Common.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 
 namespace jetcad {
+
+namespace {
+
+// Finds the id assigned to `shape` in a freshly registered body, or "".
+std::string idOfShape(const Body& body, TopAbs_ShapeEnum kind,
+                      const TopoDS_Shape& shape) {
+  const auto& list = kind == TopAbs_FACE   ? body.faces
+                     : kind == TopAbs_EDGE ? body.edges
+                                           : body.vertices;
+  for (const auto& [id, s] : list) {
+    if (s.IsSame(shape)) return id;
+  }
+  return {};
+}
+
+}  // namespace
 
 std::string Session::nextId(const char* prefix) {
   return std::string(prefix) + std::to_string(++counter_);
@@ -117,9 +139,68 @@ json Session::execute(const json& cmd) {
   throw CommandError("unknown command: " + name);
 }
 
-// Stubs replaced by Tasks 4-6; keep the linker happy and honest.
+json Session::booleanOp(const json& cmd) {
+  const std::string aId = cmd.at("a"), bId = cmd.at("b");
+  if (aId == bId) throw CommandError("boolean operands must be distinct");
+  Body a = requireBody(aId);  // copies: we erase before registering result
+  Body b = requireBody(bId);
+  const std::string op = cmd.at("op");
+
+  std::unique_ptr<BRepAlgoAPI_BooleanOperation> algo;
+  if (op == "fuse") {
+    algo = std::make_unique<BRepAlgoAPI_Fuse>(a.shape, b.shape);
+  } else if (op == "cut") {
+    algo = std::make_unique<BRepAlgoAPI_Cut>(a.shape, b.shape);
+  } else if (op == "common") {
+    algo = std::make_unique<BRepAlgoAPI_Common>(a.shape, b.shape);
+  } else {
+    throw CommandError("unknown boolean op: " + op);
+  }
+  if (!algo->IsDone()) throw CommandError("boolean operation failed");
+  TopoDS_Shape result = algo->Shape();
+  if (result.IsNull()) throw CommandError("boolean produced empty result");
+
+  bodies_.erase(aId);
+  bodies_.erase(bId);
+  json out = registerBody(result);
+  const Body& newBody = bodies_.at(out.at("body").get<std::string>());
+
+  json remap = json::object();
+  remap[aId] = json::array({out.at("body")});
+  remap[bId] = json::array({out.at("body")});
+  auto mapOld = [&](TopAbs_ShapeEnum kind,
+                    const std::vector<std::pair<std::string, TopoDS_Shape>>&
+                        olds) {
+    for (const auto& [oldId, oldShape] : olds) {
+      json targets = json::array();
+      if (!algo->IsDeleted(oldShape)) {
+        const auto& mods = algo->Modified(oldShape);
+        if (!mods.IsEmpty()) {
+          for (const auto& m : mods) {
+            auto id = idOfShape(newBody, kind, m);
+            if (!id.empty()) targets.push_back(id);
+          }
+        } else {
+          // Survived unmodified: geometry identical, but ids are fresh in
+          // v1 (boolean consumes inputs wholesale). Map to the new id.
+          auto id = idOfShape(newBody, kind, oldShape);
+          if (!id.empty()) targets.push_back(id);
+        }
+      }
+      remap[oldId] = targets;
+    }
+  };
+  for (const Body* src : {&a, &b}) {
+    mapOld(TopAbs_FACE, src->faces);
+    mapOld(TopAbs_EDGE, src->edges);
+    mapOld(TopAbs_VERTEX, src->vertices);
+  }
+  out["remap"] = remap;
+  return out;
+}
+
+// Stubs replaced by Tasks 5-6; keep the linker happy and honest.
 json Session::extrude(const json&) { throw CommandError("not implemented: extrude"); }
-json Session::booleanOp(const json&) { throw CommandError("not implemented: boolean"); }
 json Session::fillet(const json&) { throw CommandError("not implemented: fillet"); }
 json Session::transform(const json&) { throw CommandError("not implemented: transform"); }
 json Session::importStep(const json&) { throw CommandError("not implemented: importStep"); }
