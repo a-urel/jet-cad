@@ -8,8 +8,20 @@
 
 **Tech Stack:** Flutter ≥ 3.24 / Dart ≥ 3.5 (pub workspaces, extension types), `vector_math` for `Matrix4`, `flutter_test`. No melos yet (pub workspace suffices; add melos only when cross-package scripts appear). No `dart:ffi` anywhere in this plan.
 
+> **Plan authority:** this plan is authoritative for sequencing and interface
+> contracts, not for exact code. If implementation reveals a cleaner shape,
+> simplify — and update the task's Interfaces block to match.
+
 ## Global Constraints
 
+- **Definition of Done (every task):** `flutter analyze` clean, `flutter test`
+  green (full suite, not just the new file), `dart format lib test` produces no
+  diff, no `TODO` comments introduced, and the public API surface changes only
+  when the task's Interfaces block says so.
+- **Public APIs are provisional until Plan 3 completes** — don't preserve a
+  pre-viewport API out of inertia.
+- Every plan/milestone keeps at least one test importing only
+  `package:jet_cad/jet_cad.dart` (public-API-only), guarding export regressions.
 - Dart SDK floor `^3.5.0`, Flutter floor `3.24.0` (workspace + extension-type support).
 - Nothing above `KernelBridge` may import `dart:ffi` (spec hard rule). Plan 1 imports it nowhere.
 - Package ships engine + viewport only; no opinionated UI (spec package boundary).
@@ -813,8 +825,9 @@ import 'kernel_types.dart';
 /// [restoreBodies] and [restoreSession] id-preserving: a snapshot restores
 /// entities under the exact ids it was taken with. Undo/redo depends on it.
 ///
-/// Viewer, pick, and selection methods are added in the viewport phase; the
-/// spec marks this interface as not frozen.
+/// This interface is intentionally not frozen. Viewer, pick, and selection
+/// methods arrive in the viewport phase, and the per-operation methods may
+/// evolve into a generic execute(KernelCommand) dispatcher before v1.0.
 abstract interface class KernelBridge {
   Future<SessionHandle> createSession(RenderTarget target);
   Future<void> disposeSession(SessionHandle session);
@@ -1431,13 +1444,13 @@ class CadDocument {
   }
 
   void _enforceUndoBound() {
-    while (_undoRecords.length > maxUndoDepth) {
-      final applied = _ops.take(_head).where(
-          (op) => _undoRecords.containsKey(op.id));
-      if (applied.isEmpty) break;
-      final oldest = applied.first;
-      _undoRecords.remove(oldest.id);
-      _undoFloor = _ops.indexOf(oldest) + 1;
+    // Called right after commit, so any redo-branch records were already
+    // dropped by truncation: every record belongs to ops[_undoFloor.._head).
+    // Evicting from the floor is therefore O(1) — never scan _ops here
+    // (a scan makes every commit O(n) and the timeline O(n^2)).
+    while (_undoRecords.length > maxUndoDepth && _undoFloor < _head) {
+      _undoRecords.remove(_ops[_undoFloor].id);
+      _undoFloor++;
     }
   }
 
@@ -1718,6 +1731,33 @@ void main() {
     expect(doc.head, 2);
   });
 
+  test('chained booleans remap across generations (A -> C -> D)', () async {
+    final a = await doc.makeBox(const Vec3(1, 1, 1));
+    final b = await doc.makeBox(const Vec3(2, 2, 2));
+    final c = await doc.booleanCombine(a, b, BoolOp.fuse);
+    final e = await doc.makeBox(const Vec3(3, 3, 3));
+    final d = await doc.booleanCombine(c, e, BoolOp.cut);
+
+    expect(doc.entities.containsKey(d), isTrue);
+    expect(doc.entities.containsKey(c), isFalse);
+    expect(doc.entities.containsKey(a), isFalse);
+
+    await doc.undo(); // back to C + E
+    expect(doc.entities.containsKey(c), isTrue);
+    expect(doc.entities.containsKey(e), isTrue);
+    expect(doc.entities.containsKey(d), isFalse);
+
+    await doc.undo(); // undoes makeBox E
+    expect(doc.entities.containsKey(e), isFalse);
+    expect(doc.entities.containsKey(c), isTrue);
+
+    await doc.redo();
+    await doc.redo(); // forward to D again
+    expect(doc.entities.containsKey(d), isTrue,
+        reason: 'redo across generations needs id-preserving restore');
+    expect(doc.entities.containsKey(c), isFalse);
+  });
+
   test('undo depth is bounded at maxUndoDepth', () async {
     for (var i = 0; i < CadDocument.maxUndoDepth + 5; i++) {
       await doc.makeBox(const Vec3(1, 1, 1));
@@ -1806,7 +1846,7 @@ Append inside `class CadDocument` (after `exportStep`):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `flutter test test/document/undo_redo_test.dart`
-Expected: PASS (5 tests). Also run the full suite: `flutter test` — all previous tests still pass.
+Expected: PASS (6 tests). Also run the full suite: `flutter test` — all previous tests still pass.
 
 - [ ] **Step 5: Commit**
 
@@ -1968,11 +2008,12 @@ git add packages/jet_cad && git commit -m "feat: versioned JSON persistence with
 
 ---
 
-### Task 8: Public API surface
+### Task 8: Public API surface + stress test
 
 **Files:**
 - Modify: `packages/jet_cad/lib/jet_cad.dart`
 - Test: `packages/jet_cad/test/public_api_test.dart`
+- Test: `packages/jet_cad/test/document/stress_test.dart`
 
 **Interfaces:**
 - Consumes: everything above.
@@ -2032,18 +2073,44 @@ export 'src/kernel/kernel_bridge.dart' show KernelBridge;
 export 'src/kernel/kernel_types.dart';
 ```
 
-- [ ] **Step 4: Run test + analyze to verify**
+- [ ] **Step 4: Add the stress test**
 
-```bash
-flutter test && flutter analyze
+`packages/jet_cad/test/document/stress_test.dart` (public-API-only import;
+guards against accidental O(n²) in the timeline — document models rot that
+way. The generous wall-clock bound is a smoke alarm, not a benchmark):
+
+```dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad/jet_cad.dart';
+
+void main() {
+  test('5000 operations do not blow up quadratically', () async {
+    final doc = await CadDocument.create(FakeKernelBridge());
+    final stopwatch = Stopwatch()..start();
+    for (var i = 0; i < 5000; i++) {
+      await doc.makeBox(const Vec3(1, 1, 1));
+    }
+    stopwatch.stop();
+    expect(doc.operations, hasLength(5000));
+    expect(doc.entities, hasLength(5000 * 27));
+    expect(stopwatch.elapsed, lessThan(const Duration(seconds: 10)));
+    await doc.dispose();
+  }, timeout: const Timeout(Duration(minutes: 2)));
+}
 ```
 
-Expected: all tests PASS, `No issues found!`
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run tests + analyze + format to verify**
 
 ```bash
-git add packages/jet_cad && git commit -m "feat: public API exports for the document layer"
+flutter test && flutter analyze && dart format --set-exit-if-changed lib test
+```
+
+Expected: all tests PASS, `No issues found!`, no format diff.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/jet_cad && git commit -m "feat: public API exports and timeline stress test"
 ```
 
 ---
