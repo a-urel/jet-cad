@@ -38,6 +38,7 @@ The riskiest plumbing, isolated from OCCT entirely: prove that pixels drawn by r
 - Modify: `packages/jet_cad/src/native/CMakeLists.txt`
 - Modify: `packages/jet_cad/src/native/session.hpp`
 - Modify: `packages/jet_cad/src/native/session.cpp`
+- Create: `packages/jet_cad/src/native/tests/support.hpp` (shared test helpers)
 - Create: `packages/jet_cad/src/native/tests/texture_spike_test.cpp`
 - Create: `packages/jet_cad/macos/Classes/JetCadPlugin.swift`
 - Modify: `packages/jet_cad/pubspec.yaml` (macos: `pluginClass: JetCadPlugin`)
@@ -351,15 +352,18 @@ if(APPLE)
 endif()
 ```
 
-- [ ] **Step 4: Write the failing gtest for the spike commands**
+- [ ] **Step 4: Write the shared test helpers + failing gtest for the spike commands**
 
-`packages/jet_cad/src/native/tests/texture_spike_test.cpp`:
+`packages/jet_cad/src/native/tests/support.hpp` (shared by all viewer-era test files; Tasks 3–5 extend it):
 
 ```cpp
+#pragma once
+
 #include <gtest/gtest.h>
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -367,29 +371,44 @@ endif()
 #include "../include/jet_cad_native.h"
 #include "../b64.hpp"
 
+namespace jetcad::test {
+
 using json = nlohmann::json;
 
-namespace {
-
-json exec(uint64_t session, const json& cmd) {
+inline json exec(uint64_t session, const json& cmd) {
   const char* raw = jc_execute(session, cmd.dump().c_str());
   json envelope = json::parse(raw);
   jc_free(raw);
   return envelope;
 }
 
-json execOk(uint64_t session, const json& cmd) {
+inline json execOk(uint64_t session, const json& cmd) {
   json envelope = exec(session, cmd);
   EXPECT_TRUE(envelope.at("ok").get<bool>()) << envelope.dump();
   return envelope.at("result");
 }
 
 // Returns the RGBA quad at pixel (x, y) with rows bottom-up (GL order).
-std::array<uint8_t, 4> pixelAt(const std::vector<uint8_t>& rgba, int width,
-                               int x, int y) {
+inline std::array<uint8_t, 4> pixelAt(const std::vector<uint8_t>& rgba,
+                                      int width, int x, int y) {
   const size_t offset = (static_cast<size_t>(y) * width + x) * 4;
   return {rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]};
 }
+
+}  // namespace jetcad::test
+```
+
+`packages/jet_cad/src/native/tests/texture_spike_test.cpp`:
+
+```cpp
+#include "support.hpp"
+
+namespace {
+
+using jetcad::test::exec;
+using jetcad::test::execOk;
+using jetcad::test::pixelAt;
+using json = nlohmann::json;
 
 TEST(TextureSpikeTest, InitTextureReturnsSurfaceId) {
   uint64_t s = jc_create_session();
@@ -1387,45 +1406,10 @@ The real OCCT viewer replaces the spike's raw-GL debris. `Session` gains an opti
 
 - [ ] **Step 1: Write the failing viewer gtests**
 
-`packages/jet_cad/src/native/tests/viewer_test.cpp` (the `exec`/`execOk`/`pixelAt` helpers move here verbatim from the deleted spike test):
+Extend `packages/jet_cad/src/native/tests/support.hpp` with viewer helpers (inside `namespace jetcad::test`):
 
 ```cpp
-#include <gtest/gtest.h>
-
-#include <nlohmann/json.hpp>
-
-#include <array>
-#include <cstdint>
-#include <string>
-#include <vector>
-
-#include "../include/jet_cad_native.h"
-#include "../b64.hpp"
-
-using json = nlohmann::json;
-
-namespace {
-
-json exec(uint64_t session, const json& cmd) {
-  const char* raw = jc_execute(session, cmd.dump().c_str());
-  json envelope = json::parse(raw);
-  jc_free(raw);
-  return envelope;
-}
-
-json execOk(uint64_t session, const json& cmd) {
-  json envelope = exec(session, cmd);
-  EXPECT_TRUE(envelope.at("ok").get<bool>()) << envelope.dump();
-  return envelope.at("result");
-}
-
-std::array<uint8_t, 4> pixelAt(const std::vector<uint8_t>& rgba, int width,
-                               int x, int y) {
-  const size_t offset = (static_cast<size_t>(y) * width + x) * 4;
-  return {rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]};
-}
-
-std::array<uint8_t, 4> centerPixel(uint64_t session, int size) {
+inline std::array<uint8_t, 4> centerPixel(uint64_t session, int size) {
   json result = execOk(session, {{"cmd", "debugReadPixels"},
                                  {"x", size / 2},
                                  {"y", size / 2},
@@ -1436,7 +1420,7 @@ std::array<uint8_t, 4> centerPixel(uint64_t session, int size) {
   return {rgba[0], rgba[1], rgba[2], rgba[3]};
 }
 
-void initViewer(uint64_t session, int size) {
+inline void initViewer(uint64_t session, int size) {
   json result = execOk(session, {{"cmd", "initViewer"},
                                  {"width", size},
                                  {"height", size},
@@ -1444,10 +1428,30 @@ void initViewer(uint64_t session, int size) {
   EXPECT_GT(result.at("surfaceId").get<uint32_t>(), 0u);
 }
 
-json makeBox(uint64_t session, double x, double y, double z) {
+inline json makeBox(uint64_t session, double x, double y, double z) {
   return execOk(session,
                 {{"cmd", "makeBox"}, {"x", x}, {"y", y}, {"z", z}});
 }
+
+inline std::vector<uint8_t> readAll(uint64_t session, int size) {
+  json result = execOk(session, {{"cmd", "debugReadPixels"},
+                                 {"x", 0},
+                                 {"y", 0},
+                                 {"width", size},
+                                 {"height", size}});
+  return jetcad::b64decode(result.at("rgbaBase64").get<std::string>());
+}
+```
+
+`packages/jet_cad/src/native/tests/viewer_test.cpp`:
+
+```cpp
+#include "support.hpp"
+
+namespace {
+
+using namespace jetcad::test;
+using json = nlohmann::json;
 
 TEST(ViewerTest, InitViewerTwiceFails) {
   uint64_t s = jc_create_session();
@@ -1925,21 +1929,15 @@ Gesture-shaped camera commands (OCCT's `StartRotation`/`Rotation` pair maps 1:1 
 
 - [ ] **Step 1: Write the failing camera gtests**
 
-`packages/jet_cad/src/native/tests/camera_test.cpp` (same helper block as viewer_test.cpp — `exec`, `execOk`, `centerPixel`, `initViewer`, `makeBox`; copy it verbatim, it is deliberately duplicated per file to keep tests standalone):
+`packages/jet_cad/src/native/tests/camera_test.cpp` (helpers come from `support.hpp`):
 
 ```cpp
-// ... helper block from viewer_test.cpp ...
+#include "support.hpp"
 
 namespace {
 
-std::vector<uint8_t> readAll(uint64_t session, int size) {
-  json result = execOk(session, {{"cmd", "debugReadPixels"},
-                                 {"x", 0},
-                                 {"y", 0},
-                                 {"width", size},
-                                 {"height", size}});
-  return jetcad::b64decode(result.at("rgbaBase64").get<std::string>());
-}
+using namespace jetcad::test;
+using json = nlohmann::json;
 
 TEST(CameraTest, OrbitChangesTheImage) {
   uint64_t s = jc_create_session();
@@ -2177,12 +2175,17 @@ AIS subshape picking: filter-driven selection modes, detected owner mapped back 
 
 - [ ] **Step 1: Write the failing selection gtests**
 
-`packages/jet_cad/src/native/tests/selection_test.cpp` (same standalone helper block again):
+`packages/jet_cad/src/native/tests/selection_test.cpp` (helpers from `support.hpp`):
 
 ```cpp
-// ... helper block (exec/execOk/pixelAt/centerPixel/initViewer/makeBox/readAll) ...
+#include "support.hpp"
+
+#include <algorithm>
 
 namespace {
+
+using namespace jetcad::test;
+using json = nlohmann::json;
 
 json pick(uint64_t s, int x, int y, const std::string& filter) {
   return execOk(
