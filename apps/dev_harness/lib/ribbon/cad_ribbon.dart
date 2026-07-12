@@ -112,13 +112,18 @@ class _CadRibbonState extends State<CadRibbon> {
         RibbonGroup('Edit', widget.quickActions),
       ...tab.groups,
     ];
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Padding(
-        padding: const EdgeInsets.only(top: 2),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [for (final g in groups) _group(context, g)],
+    // ShadTabs stacks the bar and content in a center-aligned Column, so a
+    // content row narrower than the window floats to the middle. Pin it left.
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [for (final g in groups) _group(context, g)],
+          ),
         ),
       ),
     );
@@ -133,6 +138,7 @@ class _CadRibbonState extends State<CadRibbon> {
         // Content-size the tabs and cluster them left instead of stretching
         // each one to fill the bar (the non-scrollable default).
         scrollable: true,
+        tabBarAlignment: Alignment.centerLeft,
         onChanged: (v) => setState(() => _selected = v),
         tabs: [
           for (final tab in widget.tabs)
