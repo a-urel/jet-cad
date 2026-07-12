@@ -1,8 +1,14 @@
 #include "session.hpp"
 
+#include <atomic>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <set>
+#include <sstream>
+
+#include <unistd.h>  // POSIX getpid; on Windows use _getpid from <process.h> (Plan 5 concern).
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_BooleanOperation.hxx>
@@ -13,12 +19,21 @@
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
+#include <IFSelect_ReturnStatus.hxx>
+#include <STEPControl_Reader.hxx>
+#include <STEPControl_StepModelType.hxx>
+#include <STEPControl_Writer.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
+
+#include "b64.hpp"
 
 namespace jetcad {
 
@@ -34,6 +49,52 @@ std::string idOfShape(const Body& body, TopAbs_ShapeEnum kind,
     if (s.IsSame(shape)) return id;
   }
   return {};
+}
+
+std::string brepToString(const TopoDS_Shape& shape) {
+  std::ostringstream out;
+  BRepTools::Write(shape, out);
+  return out.str();
+}
+
+TopoDS_Shape brepFromString(const std::string& data) {
+  std::istringstream in(data);
+  TopoDS_Shape shape;
+  BRep_Builder builder;
+  BRepTools::Read(shape, in, builder);
+  if (shape.IsNull()) throw CommandError("corrupt BREP payload");
+  return shape;
+}
+
+// Unique temp path; STEP translators are file-based across OCCT versions.
+std::filesystem::path tempStepPath() {
+  static std::atomic<uint64_t> counter{0};
+  auto name = "jet_cad_" + std::to_string(::getpid()) + "_" +
+              std::to_string(++counter) + ".step";
+  return std::filesystem::temp_directory_path() / name;
+}
+
+struct TempFileGuard {
+  std::filesystem::path path;
+  ~TempFileGuard() {
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+  }
+};
+
+// Bumps the id counter past any numeric suffix in restored ids so a
+// restored snapshot never collides with future fresh ids.
+uint64_t maxNumericSuffix(const nlohmann::json& ids) {
+  uint64_t maxSeen = 0;
+  for (const auto& idJson : ids) {
+    const std::string id = idJson.get<std::string>();
+    size_t digits = id.find_first_of("0123456789");
+    if (digits != std::string::npos) {
+      maxSeen = std::max(maxSeen,
+                         (uint64_t)std::stoull(id.substr(digits)));
+    }
+  }
+  return maxSeen;
 }
 
 }  // namespace
@@ -433,12 +494,114 @@ json Session::transform(const json& cmd) {
   return json::object();
 }
 
-// Stubs replaced by Task 6.
-json Session::importStep(const json&) { throw CommandError("not implemented: importStep"); }
-json Session::exportStep(const json&) { throw CommandError("not implemented: exportStep"); }
-json Session::snapshotBodies(const json&) { throw CommandError("not implemented: snapshotBodies"); }
-json Session::restoreBodies(const json&) { throw CommandError("not implemented: restoreBodies"); }
-json Session::saveSnapshot(const json&) { throw CommandError("not implemented: saveSnapshot"); }
-json Session::restoreSession(const json&) { throw CommandError("not implemented: restoreSession"); }
+json Session::snapshotBodies(const json& cmd) {
+  json dump = json::array();
+  for (const auto& idJson : cmd.at("bodies")) {
+    const std::string id = idJson.get<std::string>();
+    const Body& body = requireBody(id);
+    json entry = {{"id", id}, {"brepB64", b64encode(brepToString(body.shape))}};
+    for (auto [key, list] : {std::pair{"faces", &body.faces},
+                             {"edges", &body.edges},
+                             {"vertices", &body.vertices}}) {
+      json ids = json::array();
+      for (const auto& [subId, s] : *list) ids.push_back(subId);
+      entry[key] = ids;
+    }
+    dump.push_back(entry);
+  }
+  return json{{"dataB64", b64encode(dump.dump())}};
+}
+
+json Session::restoreBodies(const json& cmd) {
+  auto dump = json::parse(b64decode(cmd.at("dataB64").get<std::string>()));
+  for (const auto& entry : dump) {
+    Body body;
+    body.shape = brepFromString(b64decode(entry.at("brepB64")));
+    auto zip = [&](const char* key, TopAbs_ShapeEnum kind,
+                   std::vector<std::pair<std::string, TopoDS_Shape>>& dest) {
+      auto shapes = enumerate(body.shape, kind);
+      const auto& ids = entry.at(key);
+      if (ids.size() != shapes.size()) {
+        throw CommandError("snapshot id/topology mismatch");
+      }
+      for (size_t i = 0; i < shapes.size(); ++i) {
+        dest.emplace_back(ids[i].get<std::string>(), shapes[i]);
+      }
+      counter_ = std::max(counter_, maxNumericSuffix(ids));
+    };
+    zip("faces", TopAbs_FACE, body.faces);
+    zip("edges", TopAbs_EDGE, body.edges);
+    zip("vertices", TopAbs_VERTEX, body.vertices);
+    const std::string id = entry.at("id");
+    counter_ = std::max(counter_, maxNumericSuffix(json::array({id})));
+    bodies_[id] = std::move(body);
+  }
+  return json::object();
+}
+
+json Session::saveSnapshot(const json&) {
+  json allIds = json::array();
+  for (const auto& [id, body] : bodies_) allIds.push_back(id);
+  json bodiesDump =
+      json::parse(b64decode(snapshotBodies({{"cmd", "snapshotBodies"},
+                                            {"bodies", allIds}})
+                                .at("dataB64")
+                                .get<std::string>()));
+  return json{{"dataB64",
+               b64encode(json{{"counter", counter_},
+                              {"bodies", bodiesDump}}
+                             .dump())}};
+}
+
+json Session::restoreSession(const json& cmd) {
+  auto snapshot =
+      json::parse(b64decode(cmd.at("dataB64").get<std::string>()));
+  bodies_.clear();
+  restoreBodies({{"cmd", "restoreBodies"},
+                 {"dataB64", b64encode(snapshot.at("bodies").dump())}});
+  counter_ = std::max(counter_, snapshot.at("counter").get<uint64_t>());
+  return json::object();
+}
+
+json Session::importStep(const json& cmd) {
+  const std::string bytes = b64decode(cmd.at("dataB64").get<std::string>());
+  if (bytes.empty()) throw CommandError("empty STEP payload");
+  TempFileGuard tmp{tempStepPath()};
+  {
+    std::ofstream out(tmp.path, std::ios::binary);
+    out.write(bytes.data(), (std::streamsize)bytes.size());
+  }
+  STEPControl_Reader reader;
+  if (reader.ReadFile(tmp.path.string().c_str()) != IFSelect_RetDone) {
+    throw CommandError("STEP parse failed");
+  }
+  reader.TransferRoots();
+  json results = json::array();
+  for (int i = 1; i <= reader.NbShapes(); ++i) {
+    TopoDS_Shape shape = reader.Shape(i);
+    if (!shape.IsNull()) results.push_back(registerBody(shape));
+  }
+  if (results.empty()) throw CommandError("STEP contained no shapes");
+  return json{{"bodies", results}};
+}
+
+json Session::exportStep(const json& cmd) {
+  TopoDS_Compound compound;
+  BRep_Builder builder;
+  builder.MakeCompound(compound);
+  for (const auto& idJson : cmd.at("bodies")) {
+    builder.Add(compound, requireBody(idJson.get<std::string>()).shape);
+  }
+  TempFileGuard tmp{tempStepPath()};
+  STEPControl_Writer writer;
+  writer.Transfer(compound, STEPControl_AsIs);
+  if (writer.Write(tmp.path.string().c_str()) != IFSelect_RetDone) {
+    throw CommandError("STEP write failed");
+  }
+  std::ifstream in(tmp.path, std::ios::binary);
+  std::string bytes((std::istreambuf_iterator<char>(in)),
+                    std::istreambuf_iterator<char>());
+  return json{{"dataB64", b64encode(bytes)}};
+}
 
 }  // namespace jetcad
