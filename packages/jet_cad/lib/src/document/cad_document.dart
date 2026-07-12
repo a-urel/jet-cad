@@ -293,4 +293,62 @@ class CadDocument {
     }
     return _bridge.exportStep(_session, bodies);
   }
+
+  Future<void> undo() async {
+    if (!canUndo) {
+      throw StateError('nothing to undo');
+    }
+    final op = _ops[_head - 1];
+    final record = _undoRecords[op.id]!;
+    if (op is TransformOp) {
+      await _bridge.transform(_session, op.bodies, Matrix4.inverted(op.matrix));
+    } else {
+      if (record.postBodies.isNotEmpty) {
+        await _bridge.deleteBodies(_session, record.postBodies);
+      }
+      if (record.preSnapshot != null) {
+        await _bridge.restoreBodies(_session, record.preSnapshot!);
+      }
+    }
+    final removed = record.entitiesAfter.keys.toList();
+    for (final id in removed) {
+      _entities.remove(id);
+    }
+    _entities.addAll(record.entitiesBefore);
+    _head--;
+    if (removed.isNotEmpty) _changes.add(EntitiesRemoved(removed));
+    if (record.entitiesBefore.isNotEmpty) {
+      _changes.add(EntitiesAdded(record.entitiesBefore.keys.toList()));
+    }
+    _changes.add(UndoPerformed(op));
+  }
+
+  Future<void> redo() async {
+    if (!canRedo) {
+      throw StateError('nothing to redo');
+    }
+    final op = _ops[_head];
+    final record = _undoRecords[op.id]!;
+    if (op is TransformOp) {
+      await _bridge.transform(_session, op.bodies, op.matrix);
+    } else {
+      if (record.preBodies.isNotEmpty) {
+        await _bridge.deleteBodies(_session, record.preBodies);
+      }
+      if (record.postSnapshot != null) {
+        await _bridge.restoreBodies(_session, record.postSnapshot!);
+      }
+    }
+    final removed = record.entitiesBefore.keys.toList();
+    for (final id in removed) {
+      _entities.remove(id);
+    }
+    _entities.addAll(record.entitiesAfter);
+    _head++;
+    if (removed.isNotEmpty) _changes.add(EntitiesRemoved(removed));
+    if (record.entitiesAfter.isNotEmpty) {
+      _changes.add(EntitiesAdded(record.entitiesAfter.keys.toList()));
+    }
+    _changes.add(RedoPerformed(op));
+  }
 }
