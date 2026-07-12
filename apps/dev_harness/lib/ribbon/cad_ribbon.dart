@@ -3,8 +3,9 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'ribbon_model.dart';
 
-/// Presentational CAD ribbon: a persistent quick-access strip (live actions)
-/// above a [ShadTabs] bar whose selected tab shows titled groups of tools.
+/// Presentational CAD ribbon: a left-aligned [ShadTabs] bar whose selected tab
+/// shows titled groups of tools. [quickActions] render as a leading "Edit"
+/// group, present on every tab.
 ///
 /// Live tools carry a [RibbonTool.onPressed]; decorative tools do not — tapping
 /// one calls [onDecorative] if provided, else shows a "not implemented" toast.
@@ -51,7 +52,7 @@ class _CadRibbonState extends State<CadRibbon> {
 
   Widget _toolButton(BuildContext context, RibbonTool tool) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 1),
       child: ShadButton.ghost(
         // The default regular-size button clamps its content to a fixed
         // height sized for a single line, which clips this two-line
@@ -60,14 +61,15 @@ class _CadRibbonState extends State<CadRibbon> {
         // is 0, we set maxHeight to infinity to allow the button to size
         // itself based on its child").
         height: 0,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
         onPressed: () => _handle(context, tool),
         child: SizedBox(
-          width: 56,
+          width: 48,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(tool.icon, size: 18),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               Text(
                 tool.label,
                 style: const TextStyle(fontSize: 11),
@@ -84,9 +86,9 @@ class _CadRibbonState extends State<CadRibbon> {
 
   Widget _group(BuildContext context, RibbonGroup group) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 2),
       child: ShadCard(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.fromLTRB(6, 4, 6, 2),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -94,7 +96,7 @@ class _CadRibbonState extends State<CadRibbon> {
               mainAxisSize: MainAxisSize.min,
               children: [for (final t in group.tools) _toolButton(context, t)],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 2),
             Text(group.title, style: const TextStyle(fontSize: 10)),
           ],
         ),
@@ -103,13 +105,20 @@ class _CadRibbonState extends State<CadRibbon> {
   }
 
   Widget _tabContent(BuildContext context, RibbonTab tab) {
+    // Quick actions (undo/redo/fit) lead every tab as an "Edit" group so they
+    // stay reachable regardless of the active tab.
+    final groups = <RibbonGroup>[
+      if (widget.quickActions.isNotEmpty)
+        RibbonGroup('Edit', widget.quickActions),
+      ...tab.groups,
+    ];
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.only(top: 2),
         child: Row(
           mainAxisSize: MainAxisSize.min,
-          children: [for (final g in tab.groups) _group(context, g)],
+          children: [for (final g in groups) _group(context, g)],
         ),
       ),
     );
@@ -117,44 +126,23 @@ class _CadRibbonState extends State<CadRibbon> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (widget.quickActions.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final a in widget.quickActions)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: ShadButton.ghost(
-                      onPressed: () => _handle(context, a),
-                      leading: Icon(a.icon, size: 16),
-                      child: Text(a.label),
-                    ),
-                  ),
-              ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: ShadTabs<String>(
+        value: _selected,
+        // Content-size the tabs and cluster them left instead of stretching
+        // each one to fill the bar (the non-scrollable default).
+        scrollable: true,
+        onChanged: (v) => setState(() => _selected = v),
+        tabs: [
+          for (final tab in widget.tabs)
+            ShadTab<String>(
+              value: tab.title,
+              content: _tabContent(context, tab),
+              child: Text(tab.title),
             ),
-          ),
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: ShadTabs<String>(
-            value: _selected,
-            onChanged: (v) => setState(() => _selected = v),
-            tabs: [
-              for (final tab in widget.tabs)
-                ShadTab<String>(
-                  value: tab.title,
-                  content: _tabContent(context, tab),
-                  child: Text(tab.title),
-                ),
-            ],
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
