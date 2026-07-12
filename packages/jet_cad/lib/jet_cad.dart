@@ -12,5 +12,6 @@ export 'src/document/doc_change.dart';
 export 'src/document/entity.dart';
 export 'src/document/operation.dart';
 export 'src/kernel/fake_kernel_bridge.dart' show FakeKernelBridge;
+export 'src/kernel/ffi_kernel_bridge_export.dart' show FfiKernelBridge;
 export 'src/kernel/kernel_bridge.dart' show KernelBridge;
 export 'src/kernel/kernel_types.dart';
