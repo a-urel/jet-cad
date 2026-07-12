@@ -34,6 +34,7 @@ class _HarnessPageState extends State<HarnessPage> {
     try {
       final libPath = FfiKernelBridge.locateLibrary();
       if (libPath == null) {
+        if (!mounted) return;
         setState(() => _status =
             'native lib not found — run packages/jet_cad/tool/run_harness.sh');
         return;
@@ -42,14 +43,24 @@ class _HarnessPageState extends State<HarnessPage> {
       final doc =
           await CadDocument.create(bridge, target: const TextureTarget());
       final controller = ViewportController(document: doc);
-      controller.selectionChanges
-          .listen((event) => setState(() => _selection = event.selection));
+      controller.selectionChanges.listen((event) {
+        if (!mounted) return;
+        setState(() => _selection = event.selection);
+      });
+      // Disposed mid-await: dispose() only frees the stored fields, so the
+      // just-created session would leak its native handle. Free it here.
+      if (!mounted) {
+        controller.dispose();
+        doc.dispose();
+        return;
+      }
       setState(() {
         _doc = doc;
         _controller = controller;
         _status = 'ready';
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _status = 'FAILED: $e');
     }
   }
@@ -64,8 +75,10 @@ class _HarnessPageState extends State<HarnessPage> {
   Future<void> _guard(Future<void> Function() action) async {
     try {
       await action();
+      if (!mounted) return;
       setState(() => _status = 'ready');
     } catch (e) {
+      if (!mounted) return;
       setState(() => _status = '$e');
     }
   }
