@@ -47,3 +47,31 @@ Future<void> main() async {
 The native OCCT-backed `KernelBridge` implementation (FFI) and the Flutter
 viewport widget arrive in later milestones. Until then, `jet_cad` is usable
 as a standalone document/undo-timeline library over `FakeKernelBridge`.
+
+## Native development
+
+`src/native/` is a standalone CMake project that builds the OCCT-backed
+`jet_cad_native` C ABI library and its GoogleTest smoke suite. It is not
+wired into the Flutter plugin platform builds yet (that lands in a later
+plan) — it exists so the native toolchain can be built and tested on its
+own.
+
+Prerequisites (macOS, via Homebrew):
+
+```bash
+brew install opencascade cmake ninja
+```
+
+Build the library and run its tests:
+
+```bash
+packages/jet_cad/tool/build_native.sh
+```
+
+This configures CMake (locating OCCT via `find_package(OpenCASCADE)`),
+builds `build/native/libjet_cad_native.{dylib|so}`, and runs the GoogleTest
+suite via `ctest`.
+
+The pure-Dart test suite (`flutter test`) never needs any of this — it runs
+entirely against `FakeKernelBridge` and has no dependency on OCCT, CMake, or
+the native build.
