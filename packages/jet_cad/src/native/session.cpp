@@ -228,6 +228,29 @@ json Session::execute(const json& cmd) {
   else if (name == "renderFrame") result = cmdRenderFrame();
   else if (name == "cameraFit") result = cmdCameraFit();
   else if (name == "debugReadPixels") result = cmdDebugReadPixels(cmd);
+  else if (name == "cameraOrbitStart") {
+    requireViewer().orbitStart(cmd.at("x").get<double>(),
+                               cmd.at("y").get<double>());
+    result = json::object();
+  } else if (name == "cameraOrbit") {
+    requireViewer().orbit(cmd.at("x").get<double>(),
+                          cmd.at("y").get<double>());
+    result = json::object();
+  } else if (name == "cameraPan") {
+    requireViewer().pan(cmd.at("dx").get<double>(),
+                        cmd.at("dy").get<double>());
+    result = json::object();
+  } else if (name == "cameraZoom") {
+    requireViewer().zoom(cmd.at("factor").get<double>());
+    result = json::object();
+  } else if (name == "resizeViewport") {
+    const int w = cmd.at("width").get<int>();
+    const int h = cmd.at("height").get<int>();
+    if (w <= 0 || h <= 0) throw CommandError("viewport size must be positive");
+    result = json{{"surfaceId",
+                   requireViewer().resize(w, h,
+                                          cmd.at("pixelRatio").get<double>())}};
+  }
   else throw CommandError("unknown command: " + name);
 
   if (viewer_ && kMutating.count(name) > 0) {

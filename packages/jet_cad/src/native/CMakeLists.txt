@@ -61,6 +61,7 @@ if(JET_CAD_BUILD_TESTS)
     tests/modeling_test.cpp
     tests/persistence_test.cpp
     tests/viewer_test.cpp
+    tests/camera_test.cpp
   )
   # session.hpp/session_test.cpp include and call into OCCT directly
   # (TopoDS_Shape, BRepPrimAPI_MakeBox, BRepGProp, ...). jet_cad_native's

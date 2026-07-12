@@ -37,6 +37,16 @@ class Viewer {
   void fitAll();
   std::vector<uint8_t> readPixels(int x, int y, int w, int h);
 
+  // Camera navigation — view state only, never synced/serialized.
+  void orbitStart(double x, double y);
+  void orbit(double x, double y);
+  void pan(double dx, double dy);
+  void zoom(double factor);
+  // Reallocates the IOSurface at the new pixel size (fresh surface id every
+  // call), resizes the neutral window/view and re-wraps the FBO. Returns the
+  // new surface id.
+  uint32_t resize(int widthPx, int heightPx, double pixelRatio);
+
  private:
   void bindViewToSurface();
 

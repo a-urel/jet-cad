@@ -108,7 +108,23 @@ class CglContext final : public GlContext {
       throw std::runtime_error("surface size must be positive");
     }
     makeCurrent();
-    destroySurfaceFramebuffer();
+    destroyGlObjectsKeepSurface();
+    // Keep the OUTGOING IOSurface reference alive until this call returns
+    // (success or throw): IOSurfaceCreate() below is otherwise free to hand
+    // back the very id we just freed — measured two createSurfaceFramebuffer()
+    // calls in immediate succession (as resizeViewport does) yielding an
+    // IDENTICAL IOSurfaceID, which breaks the "fresh surface id every call"
+    // contract resizeViewport depends on. Holding a reference to the old
+    // surface across the new IOSurfaceCreate() call guarantees the ids
+    // cannot collide.
+    IOSurfaceRef previousSurface = surface_;
+    surface_ = nullptr;
+    struct ScopedRelease {
+      IOSurfaceRef ref;
+      ~ScopedRelease() {
+        if (ref != nullptr) CFRelease(ref);
+      }
+    } previousSurfaceGuard{previousSurface};
 
     const int kBytesPerElement = 4;
     CFMutableDictionaryRef props = CFDictionaryCreateMutable(
@@ -196,7 +212,11 @@ class CglContext final : public GlContext {
   }
 
  private:
-  void destroySurfaceFramebuffer() {
+  // Deletes the GL-side objects (texture/depth-stencil/FBO) but deliberately
+  // leaves surface_ untouched — used by createSurfaceFramebuffer(), which
+  // manages the IOSurface's lifetime itself so it can keep the outgoing
+  // surface alive across the new IOSurfaceCreate() call (see there).
+  void destroyGlObjectsKeepSurface() {
     if (framebuffer_ != 0) {
       glDeleteFramebuffers(1, &framebuffer_);
       framebuffer_ = 0;
@@ -209,6 +229,12 @@ class CglContext final : public GlContext {
       glDeleteTextures(1, &colorTexture_);
       colorTexture_ = 0;
     }
+  }
+
+  // Full teardown, including the IOSurface itself — only safe when nothing
+  // still needs the old surface (i.e. final context destruction).
+  void destroySurfaceFramebuffer() {
+    destroyGlObjectsKeepSurface();
     if (surface_ != nullptr) {
       CFRelease(surface_);
       surface_ = nullptr;

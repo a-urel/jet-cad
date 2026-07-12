@@ -168,4 +168,39 @@ std::vector<uint8_t> Viewer::readPixels(int x, int y, int w, int h) {
   return gl_->readPixels(x, y, w, h);
 }
 
+void Viewer::orbitStart(double x, double y) {
+  gl_->makeCurrent();
+  view_->StartRotation(static_cast<int>(x), static_cast<int>(y));
+}
+
+void Viewer::orbit(double x, double y) {
+  gl_->makeCurrent();
+  view_->Rotation(static_cast<int>(x), static_cast<int>(y));
+}
+
+void Viewer::pan(double dx, double dy) {
+  gl_->makeCurrent();
+  // OCCT pans in view coordinates (+Y up); our deltas arrive in physical
+  // framebuffer/screen coordinates (+Y down, origin top-left) — hence the
+  // sign flip so a positive dy (drag toward the bottom of the screen) pans
+  // the view content the same direction the gesture moved it on screen.
+  view_->Pan(static_cast<int>(dx), static_cast<int>(-dy));
+}
+
+void Viewer::zoom(double factor) {
+  if (factor <= 0.0) throw CommandError("zoom factor must be positive");
+  gl_->makeCurrent();
+  view_->SetZoom(factor);
+}
+
+uint32_t Viewer::resize(int widthPx, int heightPx, double pixelRatio) {
+  gl_->makeCurrent();
+  const uint32_t surfaceId = gl_->createSurfaceFramebuffer(widthPx, heightPx);
+  window_->SetSize(widthPx, heightPx);
+  view_->MustBeResized();
+  bindViewToSurface();
+  pixelRatio_ = pixelRatio;
+  return surfaceId;
+}
+
 }  // namespace jetcad
