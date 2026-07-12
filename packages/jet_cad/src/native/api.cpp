@@ -32,11 +32,15 @@ const char* errorEnvelope(const std::string& message) {
 
 struct SessionEntry {
   std::unique_ptr<jetcad::Session> session = std::make_unique<jetcad::Session>();
-  std::mutex mutex;  // insurance; Dart already serializes per session
+  // Serializes execute (insurance; Dart already serializes per session).
+  // Lifetime guarantee: jc_execute copies the registry's shared_ptr before
+  // locking, so the entry outlives any in-flight execute via shared_ptr
+  // even if jc_dispose_session erases the map entry concurrently.
+  std::mutex mutex;
 };
 
 std::mutex g_registryMutex;
-std::map<uint64_t, std::unique_ptr<SessionEntry>> g_sessions;
+std::map<uint64_t, std::shared_ptr<SessionEntry>> g_sessions;
 uint64_t g_nextHandle = 0;
 
 }  // namespace
@@ -46,7 +50,7 @@ extern "C" {
 uint64_t jc_create_session(void) {
   std::lock_guard<std::mutex> lock(g_registryMutex);
   uint64_t handle = ++g_nextHandle;
-  g_sessions[handle] = std::make_unique<SessionEntry>();
+  g_sessions[handle] = std::make_shared<SessionEntry>();
   return handle;
 }
 
@@ -56,11 +60,11 @@ void jc_dispose_session(uint64_t session) {
 }
 
 const char* jc_execute(uint64_t session, const char* command_json) {
-  SessionEntry* entry = nullptr;
+  std::shared_ptr<SessionEntry> entry;
   {
     std::lock_guard<std::mutex> lock(g_registryMutex);
     auto it = g_sessions.find(session);
-    if (it != g_sessions.end()) entry = it->second.get();
+    if (it != g_sessions.end()) entry = it->second;
   }
   if (entry == nullptr) return errorEnvelope("unknown session");
   try {
