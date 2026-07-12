@@ -2,10 +2,16 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <string>
 
+#include <Standard_Failure.hxx>
 #include <Standard_Version.hxx>
 #include <nlohmann/json.hpp>
+
+#include "session.hpp"
 
 using json = nlohmann::json;
 
@@ -24,16 +30,52 @@ const char* errorEnvelope(const std::string& message) {
   return mallocString(json{{"ok", false}, {"error", message}}.dump());
 }
 
+struct SessionEntry {
+  std::unique_ptr<jetcad::Session> session = std::make_unique<jetcad::Session>();
+  std::mutex mutex;  // insurance; Dart already serializes per session
+};
+
+std::mutex g_registryMutex;
+std::map<uint64_t, std::unique_ptr<SessionEntry>> g_sessions;
+uint64_t g_nextHandle = 0;
+
 }  // namespace
 
 extern "C" {
 
-uint64_t jc_create_session(void) { return 0; /* Task 3 */ }
+uint64_t jc_create_session(void) {
+  std::lock_guard<std::mutex> lock(g_registryMutex);
+  uint64_t handle = ++g_nextHandle;
+  g_sessions[handle] = std::make_unique<SessionEntry>();
+  return handle;
+}
 
-void jc_dispose_session(uint64_t) { /* Task 3 */ }
+void jc_dispose_session(uint64_t session) {
+  std::lock_guard<std::mutex> lock(g_registryMutex);
+  g_sessions.erase(session);
+}
 
-const char* jc_execute(uint64_t, const char*) {
-  return errorEnvelope("no commands implemented yet");
+const char* jc_execute(uint64_t session, const char* command_json) {
+  SessionEntry* entry = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_registryMutex);
+    auto it = g_sessions.find(session);
+    if (it != g_sessions.end()) entry = it->second.get();
+  }
+  if (entry == nullptr) return errorEnvelope("unknown session");
+  try {
+    std::lock_guard<std::mutex> lock(entry->mutex);
+    auto cmd = json::parse(command_json);
+    auto result = entry->session->execute(cmd);
+    return mallocString(json{{"ok", true}, {"result", result}}.dump());
+  } catch (const Standard_Failure& e) {
+    const char* msg = e.GetMessageString();
+    return errorEnvelope(std::string("OCCT: ") + (msg ? msg : "failure"));
+  } catch (const std::exception& e) {
+    return errorEnvelope(e.what());
+  } catch (...) {
+    return errorEnvelope("unknown native error");
+  }
 }
 
 const char* jc_version(void) {

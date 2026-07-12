@@ -14,7 +14,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 
 add_library(jet_cad_native SHARED
   api.cpp
-  # session.cpp added in Task 3
+  session.cpp
 )
 target_include_directories(jet_cad_native PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(jet_cad_native PRIVATE nlohmann_json::nlohmann_json)
@@ -39,10 +39,15 @@ if(JET_CAD_BUILD_TESTS)
   enable_testing()
   add_executable(jet_cad_native_tests
     tests/smoke_test.cpp
-    # tests/session_test.cpp added in Task 3
+    tests/session_test.cpp
   )
+  # session.hpp/session_test.cpp include and call into OCCT directly
+  # (TopoDS_Shape, BRepPrimAPI_MakeBox, BRepGProp, ...). jet_cad_native's
+  # OCCT include dir and libs are PRIVATE, so neither propagates to this
+  # target via target_link_libraries below. Add both explicitly.
+  target_include_directories(jet_cad_native_tests PRIVATE ${OpenCASCADE_INCLUDE_DIR})
   target_link_libraries(jet_cad_native_tests PRIVATE
-    jet_cad_native nlohmann_json::nlohmann_json GTest::gtest_main)
+    jet_cad_native ${JET_CAD_OCCT_LIBS} nlohmann_json::nlohmann_json GTest::gtest_main)
   include(GoogleTest)
   # DISCOVERY_TIMEOUT: the test binary links ~24 OCCT shared libraries;
   # the first (cold) launch pays dyld/codesign verification overhead on

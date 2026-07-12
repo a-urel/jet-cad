@@ -35,4 +35,8 @@ TEST(Base64, RoundTripAndPaddingEdges) {
   EXPECT_THROW(b64decode("AB=C"), std::runtime_error);
   EXPECT_THROW(b64decode("A"), std::runtime_error);
   EXPECT_THROW(b64decode("!!!!"), std::runtime_error);
+  // Mid-stream padding regression pins (reviewer carry-over from Task 2):
+  // '=' must only appear in the final 4-char group.
+  EXPECT_THROW(b64decode("AB==AAAA"), std::runtime_error);
+  EXPECT_THROW(b64decode("ABC=AAAA"), std::runtime_error);
 }
