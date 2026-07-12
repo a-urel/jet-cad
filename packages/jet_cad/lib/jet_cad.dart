@@ -15,3 +15,6 @@ export 'src/kernel/fake_kernel_bridge.dart' show FakeKernelBridge;
 export 'src/kernel/ffi_kernel_bridge_export.dart' show FfiKernelBridge;
 export 'src/kernel/kernel_bridge.dart' show KernelBridge;
 export 'src/kernel/kernel_types.dart';
+export 'src/viewport/jet_cad_viewport.dart' show JetCadViewport;
+export 'src/viewport/viewport_controller.dart'
+    show SelectionChanged, ViewportController;

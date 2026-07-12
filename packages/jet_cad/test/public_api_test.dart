@@ -16,5 +16,11 @@ void main() {
     expect(restored.head, doc.head);
     await doc.dispose();
     await restored.dispose();
+
+    // Viewport surface (Plan 3): widget + controller + selection event only —
+    // TextureBinding stays internal.
+    expect(JetCadViewport, isNotNull);
+    expect(ViewportController, isNotNull);
+    expect(SelectionChanged, isNotNull);
   });
 }
