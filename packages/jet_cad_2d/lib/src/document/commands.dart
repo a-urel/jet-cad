@@ -12,6 +12,16 @@ import 'node.dart';
 /// whatever the store hands back, and the stored record is rewritten to match.
 /// Passing a stale index through would silently bind an entity to the wrong
 /// geometry.
+///
+/// The duplicate-handle check runs **before** the geometry slot is allocated,
+/// and that order is the whole point of it. [EntityStore.add] rejects a handle
+/// it already holds, so allocating first meant a rejected add left a live,
+/// unreferenced geometry slot behind — which `purge()` then keeps forever,
+/// because a live slot is by definition not garbage. Repeating the rejected
+/// call leaked one slot per attempt. It also broke [DraftCommand.apply]'s
+/// contract that a command "must either complete fully or leave the target
+/// unmutated", which [CommandDispatcher.undo] cites as its justification for
+/// restoring a history entry whose replay threw.
 class AddEntityCommand extends DraftCommand {
   final EntityRecord record;
   final GeometryPayload payload;
@@ -26,6 +36,9 @@ class AddEntityCommand extends DraftCommand {
 
   @override
   CommandResult apply(CommandTarget target) {
+    if (target.entities.containsHandle(record.handle)) {
+      throw DuplicateHandleError(record.handle);
+    }
     final geomIndex = target.geometry.add(payload);
     target.entities.add(record.copyWith(geomIndex: geomIndex));
     target.handleSeed.raiseTo(record.handle);
@@ -44,6 +57,11 @@ class AddEntityCommand extends DraftCommand {
 /// record is rewritten to point at whichever geometry slot it gets. Both
 /// reads happen before either store is mutated, so a live record and its
 /// geometry are always what gets captured into the inverse.
+///
+/// That ordering is also what makes this apply all-or-nothing: every way it
+/// can fail — an unknown handle, a dead geometry slot — fails during the
+/// reads. `geometry.remove` afterwards cannot throw, because the `read`
+/// above already proved that slot live.
 class RemoveEntityCommand extends DraftCommand {
   final Handle handle;
 
@@ -80,6 +98,10 @@ class RemoveEntityCommand extends DraftCommand {
 /// of their own, so moving an instance and editing coordinates are already
 /// distinct operations. That separation is what lets a point-of-sale runtime
 /// move a table but not draw a wall.
+///
+/// All-or-nothing: the missing-node check runs before anything is written, and
+/// [DocumentTree.replaceNode] runs its own cycle guard before it touches
+/// `_nodes`.
 class TransformNodeCommand extends DraftCommand {
   final Handle handle;
   final Transform2 transform;
@@ -182,6 +204,11 @@ class RemoveNodeCommand extends DraftCommand {
 /// carrying that value — so attach, detach, and replace all reverse
 /// correctly, including detaching something that was never there, which
 /// simply round-trips null-to-null.
+///
+/// All-or-nothing: the one failure mode, an unregistered component type,
+/// throws out of [ComponentRegistry.attach]'s own lookup before any store is
+/// written, and `detach` on an unregistered type is a no-op rather than a
+/// partial write.
 class SetComponentCommand<T extends Component> extends DraftCommand {
   final Handle handle;
   final T? value;

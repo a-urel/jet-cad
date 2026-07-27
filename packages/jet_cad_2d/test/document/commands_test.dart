@@ -81,6 +81,40 @@ void main() {
     );
   });
 
+  test('a rejected AddEntityCommand leaks no geometry slot', () {
+    final target = TestTarget();
+    final dispatcher = CommandDispatcher(target: target);
+    final handle = target.handleSeed.next();
+    dispatcher.execute(AddEntityCommand(
+      record: recordFor(handle, target.rootHandle),
+      payload: line(0, 0, 1, 1),
+    ));
+
+    // Four attempts, not one: the leak was one slot per rejected call, so a
+    // single attempt could not tell "one orphan" from "the entity's own
+    // slot". The counts must not drift at all.
+    for (var attempt = 1; attempt <= 4; attempt++) {
+      expect(
+        () => dispatcher.execute(AddEntityCommand(
+          record: recordFor(handle, target.rootHandle),
+          payload: line(2, 2, 3, 3),
+        )),
+        throwsA(isA<DuplicateHandleError>()),
+        reason: 'attempt $attempt duplicates a live handle',
+      );
+      // An orphaned geometry slot is *live*, so purge() would keep it for the
+      // life of the document rather than reclaim it.
+      expect(target.geometry.liveCount, 1, reason: 'after attempt $attempt');
+      expect(target.entities.liveCount, 1, reason: 'after attempt $attempt');
+    }
+
+    // History matches what actually mutated: one add, and nothing else.
+    dispatcher.undo();
+    expect(dispatcher.canUndo, isFalse);
+    expect(target.geometry.liveCount, 0);
+    expect(target.entities.liveCount, 0);
+  });
+
   test('undo of an add removes both the record and the geometry', () {
     final target = TestTarget();
     final dispatcher = CommandDispatcher(target: target);
