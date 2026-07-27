@@ -5677,7 +5677,15 @@ class CommandDispatcher {
   void undo() {
     if (!_history.canUndo) return;
     final inverse = _history.takeUndo();
-    _require(inverse);
+    try {
+      _require(inverse);
+    } catch (_) {
+      // Restore the popped entry. Checking after the pop and not putting it
+      // back means a single denied undo silently and permanently strands
+      // that edit — it is gone from both stacks with nothing reported.
+      _history.pushUndoOnly(inverse);
+      rethrow;
+    }
     final result = inverse.apply(target);
     _history.pushRedo(result.inverse);
     _changes.add(CommandUndone(label: inverse.label, touched: result.touched));
@@ -5686,7 +5694,12 @@ class CommandDispatcher {
   void redo() {
     if (!_history.canRedo) return;
     final inverse = _history.takeRedo();
-    _require(inverse);
+    try {
+      _require(inverse);
+    } catch (_) {
+      _history.pushRedo(inverse);
+      rethrow;
+    }
     final result = inverse.apply(target);
     _history.pushUndoOnly(result.inverse);
     _changes.add(CommandRedone(label: inverse.label, touched: result.touched));
