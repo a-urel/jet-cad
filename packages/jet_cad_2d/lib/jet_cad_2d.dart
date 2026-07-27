@@ -9,6 +9,7 @@ export 'src/core/diagnostic.dart';
 export 'src/core/handle.dart';
 export 'src/core/list_equality.dart';
 export 'src/core/tolerance.dart';
+export 'src/document/node.dart';
 export 'src/document/style.dart';
 export 'src/document/tables.dart';
 export 'src/geometry/aabb2.dart';
