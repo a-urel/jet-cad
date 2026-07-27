@@ -268,7 +268,7 @@ void main() {
       children: const [],
     );
     expect(() => dispatcher.execute(AddNodeCommand(replacement)),
-        throwsA(isA<StateError>()));
+        throwsA(isA<DuplicateHandleError>()));
 
     // Nothing moved, and the rejected command left no history behind.
     expect(target.tree[group]!.transform.transformPoint(Vector2.zero()),

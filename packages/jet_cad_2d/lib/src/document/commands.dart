@@ -166,7 +166,7 @@ class AddNodeCommand extends DraftCommand {
   @override
   CommandResult apply(CommandTarget target) {
     if (target.tree[node.handle] != null) {
-      throw StateError('node ${node.handle.toHex()} is already in the tree');
+      throw DuplicateHandleError(node.handle);
     }
     target.tree.addNode(node);
     target.handleSeed.raiseTo(node.handle);
