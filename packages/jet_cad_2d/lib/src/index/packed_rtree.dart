@@ -45,6 +45,18 @@ class PackedRTree {
   ///
   /// [itemBoxes] holds `minX, minY, maxX, maxY` per item; [itemPayloads] one
   /// integer per item. Both are copied, so the caller may reuse its buffers.
+  ///
+  /// Payloads must be unique. [markDead] and [isDead] resolve a payload to
+  /// an item through a map that is last-write-wins, so a duplicate payload
+  /// leaves its earlier occurrence permanently un-killable — [isDead]
+  /// reports the later item's state for both. Checked with an assert, not a
+  /// thrown error, since the cost of verifying it is proportional to
+  /// [itemCount] and callers (unique entity slots and handles) already
+  /// guarantee it.
+  ///
+  /// [itemPayloads] is stored in a [Uint32List]; a payload above
+  /// `0xFFFFFFFF` truncates silently to its low 32 bits rather than being
+  /// rejected.
   factory PackedRTree.build(
       int itemCount, Float64List itemBoxes, Uint32List itemPayloads) {
     if (itemCount == 0) return PackedRTree.empty();
@@ -60,7 +72,16 @@ class PackedRTree {
 
     final leafCount = (itemCount + kNodeCapacity - 1) ~/ kNodeCapacity;
     final stripCount = _isqrt(leafCount).clamp(1, leafCount);
-    final perStrip = (itemCount + stripCount - 1) ~/ stripCount;
+    // Rounded up to a whole number of leaves. Leaves are fixed
+    // kNodeCapacity-item chunks of `order`; if perStrip weren't a multiple
+    // of kNodeCapacity, one leaf at every strip boundary would straddle two
+    // strips, mixing the max-Y items of one strip with the min-Y items of
+    // the next. That leaf's box balloons into a near-full-height sliver
+    // that almost every query at that X has to open — the same items are
+    // still found, but far more nodes are visited to find them.
+    final rawPerStrip = (itemCount + stripCount - 1) ~/ stripCount;
+    final perStrip =
+        ((rawPerStrip + kNodeCapacity - 1) ~/ kNodeCapacity) * kNodeCapacity;
 
     for (var start = 0; start < itemCount; start += perStrip) {
       final end = (start + perStrip).clamp(0, itemCount);
@@ -97,6 +118,10 @@ class PackedRTree {
       payloads[i] = itemPayloads[src];
       payloadToItem[itemPayloads[src]] = i;
     }
+    assert(
+        payloadToItem.length == itemCount,
+        'PackedRTree.build requires unique payloads: got $itemCount items '
+        'but only ${payloadToItem.length} distinct payload(s).');
     levelEnd[0] = itemCount;
 
     // Each higher level unions groups of kNodeCapacity children.
@@ -169,12 +194,6 @@ class PackedRTree {
   void search(double minX, double minY, double maxX, double maxY,
       void Function(int payload) visit) {
     if (itemCount == 0) return;
-    if (itemCount == 1) {
-      if (_overlaps(0, minX, minY, maxX, maxY) && !_isDeadItem(0)) {
-        visit(_payloads[0]);
-      }
-      return;
-    }
 
     var depth = 0;
     // Root is the single node of the top level.
