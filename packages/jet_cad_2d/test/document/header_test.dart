@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
@@ -50,5 +52,43 @@ void main() {
     // must not gain a synthesized importedExtents on the way through JSON.
     final decoded = DocumentHeader.fromJson(DocumentHeader().toJson());
     expect(decoded.importedExtents, isNull);
+  });
+
+  test('a non-finite importedExtents is dropped rather than emitted', () {
+    // Aabb2.empty() is the package's own factory and importedExtents is a
+    // public settable field, so `header.importedExtents = doc.extents` on an
+    // empty document — or a DXF importer reading an absent $EXTMIN/$EXTMAX —
+    // lands an inverted-infinity box here directly.
+    for (final box in [
+      Aabb2.empty(),
+      Aabb2.raw(0, 0, double.infinity, double.infinity),
+      Aabb2.raw(double.nan, 0, 1, 1),
+    ]) {
+      final header = DocumentHeader()..importedExtents = box;
+      expect(header.toJson()['importedExtents'], isNull, reason: '$box');
+      // The real symptom: jsonEncode has no representation for these.
+      expect(() => jsonEncode(header.toJson()), returnsNormally,
+          reason: '$box');
+      // Symmetric on the way back in, so what is loaded is what a save would
+      // write: a file naming a non-finite box yields null, not that box.
+      expect(
+        DocumentHeader.fromJson({
+          'units': 'unitless',
+          'scale': 1.0,
+          'importedExtents': box.toJson(),
+          'customVariables': const <String, Object?>{},
+        }).importedExtents,
+        isNull,
+        reason: '$box',
+      );
+    }
+  });
+
+  test('a whole empty document still encodes', () {
+    final doc = DraftDocument.empty();
+    doc.header.importedExtents = doc.extents; // Aabb2.empty()
+    expect(() => DraftDocumentCodec.encodeToString(doc), returnsNormally);
+    final loaded = DraftDocumentCodec.decode(DraftDocumentCodec.encode(doc));
+    expect(loaded.header.importedExtents, isNull);
   });
 }
