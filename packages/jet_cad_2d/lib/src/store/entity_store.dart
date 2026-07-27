@@ -92,6 +92,15 @@ class EntityRecord {
       );
 
   /// Key order is fixed, because serialization must be byte-deterministic.
+  ///
+  /// [geomIndex] is deliberately **not** written. It is a slot in the geometry
+  /// store, and slots are never persisted: a slot depends on allocation
+  /// history, so a document with a hole in it would encode one set of indices
+  /// and the same document reloaded — which reallocates densely — would encode
+  /// another. That breaks the `save(load(save(d))) == save(d)` determinism
+  /// guarantee outright. The codec stores each payload inline next to its
+  /// record and re-points the record at whichever slot the payload lands in on
+  /// load, so nothing downstream needs the number.
   Map<String, Object?> toJson() => {
         'handle': handle.toJson(),
         'owner': owner.toJson(),
@@ -99,13 +108,18 @@ class EntityRecord {
         'layer': layer.toJson(),
         'linetype': linetype.toJson(),
         'linetypeScale': linetypeScale,
-        'geomIndex': geomIndex,
         'color': encodeColor(color),
         'lineweight': lineweight,
         'transparency': transparency,
         'flags': flags,
       };
 
+  /// [geomIndex] is always 0 on the way back in, whether or not the source
+  /// names one. Files written before `geomIndex` was dropped from [toJson] do
+  /// carry it, and that stored value is deliberately discarded rather than
+  /// honoured: it describes the allocation history of the store that saved it,
+  /// which has nothing to do with the store loading it. The caller re-points
+  /// the record with [copyWith] at the slot its geometry actually receives.
   static EntityRecord fromJson(Object? json) {
     if (json is! Map) {
       throw FormatException('EntityRecord expects an object, got: $json');
@@ -117,7 +131,7 @@ class EntityRecord {
       layer: Handle.fromJson(json['layer']),
       linetype: Handle.fromJson(json['linetype']),
       linetypeScale: (json['linetypeScale']! as num).toDouble(),
-      geomIndex: json['geomIndex']! as int,
+      geomIndex: 0,
       color: decodeColor(json['color']! as int),
       lineweight: json['lineweight']! as int,
       transparency: json['transparency']! as int,

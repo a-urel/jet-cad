@@ -123,9 +123,22 @@ void main() {
     expect(store.slotOf(const Handle(2)), isNull);
   });
 
-  test('record json round-trips', () {
+  test('record json round-trips every persisted field', () {
     final record = lineRecord(0x2A).copyWith(color: const IndexedColor(7));
     expect(EntityRecord.fromJson(record.toJson()), record);
+  });
+
+  test('geomIndex is neither written nor read back', () {
+    // A slot is not durable state: it depends on allocation history, so
+    // persisting it would make the same document encode differently before
+    // and after a delete.
+    final record = lineRecord(0x2A, geomIndex: 7);
+    final json = record.toJson();
+    expect(json.containsKey('geomIndex'), isFalse);
+    expect(EntityRecord.fromJson(json).geomIndex, 0);
+    // An older file still carries the field; the value is discarded, not
+    // honoured, because it describes the store that wrote it.
+    expect(EntityRecord.fromJson({...json, 'geomIndex': 7}).geomIndex, 0);
   });
 
   test('record json emits keys in a stable order', () {
@@ -136,7 +149,6 @@ void main() {
       'layer',
       'linetype',
       'linetypeScale',
-      'geomIndex',
       'color',
       'lineweight',
       'transparency',
