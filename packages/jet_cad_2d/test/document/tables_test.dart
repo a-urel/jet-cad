@@ -162,5 +162,47 @@ void main() {
       expect(DimStyleRecord.fromJson(record.toJson()), record);
       expect(record.opaque['dimtxt'], 2.5);
     });
+
+    test(
+        'two DimStyleRecords with same-length, different-content opaque '
+        'maps hash differently', () {
+      // The hash must be derived from opaque's contents, not just its
+      // length, or unequal records collide.
+      const a = DimStyleRecord(
+        handle: Handle(23),
+        name: 'ISO-25',
+        opaque: {'dimtxt': 2.5, 'dimclrd': 256},
+      );
+      const b = DimStyleRecord(
+        handle: Handle(23),
+        name: 'ISO-25',
+        opaque: {'dimtxt': 9.9, 'dimclrd': 1},
+      );
+      expect(a == b, isFalse);
+      expect(a.hashCode == b.hashCode, isFalse);
+    });
+
+    test('TextStyleRecord json round-trips, including an SHX-sourced style',
+        () {
+      // isShx + a non-empty shxFileName is the field combination most
+      // likely to be dropped by a careless codec, and it's what has to
+      // survive for an SHX text style to be preserved.
+      const record = TextStyleRecord(
+        handle: Handle(24),
+        name: 'ROMANS',
+        fontFamily: 'Roboto',
+        widthFactor: 0.85,
+        obliqueAngle: 0.1,
+        fixedHeight: 2.5,
+        isShx: true,
+        shxFileName: 'romans.shx',
+      );
+      expect(TextStyleRecord.fromJson(record.toJson()), record);
+    });
+
+    test('AppIdRecord json round-trips', () {
+      const record = AppIdRecord(handle: Handle(25), name: 'ACAD');
+      expect(AppIdRecord.fromJson(record.toJson()), record);
+    });
   });
 }

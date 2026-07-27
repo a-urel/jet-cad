@@ -430,7 +430,16 @@ class DimStyleRecord implements TableRecord {
   }
 
   @override
-  int get hashCode => Object.hash(handle, name, opaque.length);
+  int get hashCode => Object.hash(
+        handle,
+        name,
+        // Sorted key/value pairs, same basis as toJson's sorted traversal, so
+        // the hash is order-independent and matches _sameOpaque's semantics.
+        Object.hashAll([
+          for (final key in opaque.keys.toList()..sort())
+            Object.hash(key, opaque[key]),
+        ]),
+      );
 }
 
 @immutable
@@ -473,7 +482,9 @@ class DocumentTables {
   ///
   /// BYLAYER and BYBLOCK are real linetype records rather than magic values, so
   /// the entity linetype column needs no sentinels; layer 0 must exist because
-  /// it carries the block-inheritance rule.
+  /// it carries the block-inheritance rule. The order records are added in
+  /// below is arbitrary: `TableSection.add` does no cross-table referential
+  /// validation, so nothing here depends on linetypes preceding the layer.
   factory DocumentTables.standard() {
     final tables = DocumentTables();
     tables.linetypes
