@@ -100,7 +100,10 @@ class DocumentTree {
   /// - **Containment edges written through the definition API.** [addDefinition]
   ///   and [replaceDefinition] are unguarded, so
   ///   `replaceDefinition(def.copyWith(children: [...]))` can list an instance
-  ///   that closes a cycle and no exception is raised.
+  ///   that closes a cycle and no exception is raised. They do preserve a link
+  ///   [addNode] already made — see [_relinkDefinition] — but that recovery
+  ///   only appends what the incoming `children` omitted; it does not check,
+  ///   remove, or reject an entry the incoming list already names.
   /// - **Containment edges written by rewriting [GroupNode.children] directly**
   ///   through [replaceNode]. This method syncs the `children` side from the
   ///   `parent` side, never the reverse, so a caller that hands over a group
@@ -116,9 +119,22 @@ class DocumentTree {
   /// re-parenting or grouping must run its own check before rewriting a
   /// `children` list or a `parent` pointer — this method cannot do it for them,
   /// because it never sees that edit.
+  ///
+  /// Also unlinks from the *previous* parent when [node] overwrites a handle
+  /// already in the tree under a different one — the same treatment
+  /// [replaceNode] documents, and for the same reason: without it, the old
+  /// container keeps its entry and the handle ends up listed under two
+  /// containers at once, which [DraftDocument._boundsOfContainer] then
+  /// double-counts and serialization emits as a dangling child. The previous
+  /// parent must be read before the overwrite — it is the only record of
+  /// which container currently lists this handle.
   void addNode(Node node) {
     _guardCycle(node);
+    final previousParent = _nodes[node.handle]?.parent;
     _nodes[node.handle] = node;
+    if (previousParent != null && previousParent != node.parent) {
+      _unlink(node.handle, previousParent);
+    }
     _link(node.handle, node.parent);
   }
 
@@ -126,8 +142,8 @@ class DocumentTree {
   /// when it intends to call [repairCycles] afterwards — a file may legitimately
   /// contain a cycle that has to be diagnosed rather than rejected mid-parse.
   ///
-  /// It deliberately does **not** [_link] either, which is the one place the
-  /// `parent`/`children` invariant is not maintained. An importer rebuilds both
+  /// It deliberately does **not** [_link] either — the one node-adding entry
+  /// point where that step is intentionally skipped. An importer rebuilds both
   /// sides from the file verbatim, and a file whose two sides disagree is
   /// exactly what [repairCycles] and structural validation exist to see;
   /// synthesising the missing `children` entry here would erase that evidence
@@ -135,6 +151,16 @@ class DocumentTree {
   /// [_dropInstance] unlists from the container the *scan walked*, so a
   /// fabricated entry under the container `parent` merely claimed would survive
   /// the drop as a dangling reference that serialization would then emit.
+  ///
+  /// This is not the only way the two sides can end up disagreeing — see the
+  /// "what is **not** guaranteed" list on [addNode] for the others, which are
+  /// about a container's own `children` being installed or rewritten with
+  /// entries that do not match any node's `parent`, rather than about a
+  /// missing link. The invariant [addNode], [replaceNode], [removeNode],
+  /// [addDefinition] and [replaceDefinition] maintain is narrower than "the
+  /// two sides always agree": it is "a link one of them established is never
+  /// silently dropped by another". [addNodeUnchecked] is the only entry point
+  /// that does not even try.
   void addNodeUnchecked(Node node) => _nodes[node.handle] = node;
 
   /// Replaces a node, re-listing it under a new parent when `parent` changed.
@@ -158,11 +184,28 @@ class DocumentTree {
     if (node != null) _unlink(handle, node.parent);
   }
 
-  void addDefinition(Definition definition) =>
-      _definitions[definition.handle] = definition;
+  /// Installs [definition], then re-establishes any link [addNode] or
+  /// [replaceNode] already made that the incoming `children` omitted.
+  ///
+  /// Without the second step this would clobber the invariant [_link] exists
+  /// to maintain: `_definitions[handle] = definition` is a wholesale
+  /// overwrite, so a caller handing over a `Definition` whose `children`
+  /// predates an already-linked node — built by hand, or read from a codec
+  /// that constructs the record before its children arrive — would silently
+  /// erase every link `addNode` made, restoring the empty-`children` state
+  /// that let a command-built cycle through before `fb32258`. See
+  /// [_relinkDefinition] for what "re-establish" does and does not mean.
+  void addDefinition(Definition definition) {
+    _definitions[definition.handle] = definition;
+    _relinkDefinition(definition.handle);
+  }
 
-  void replaceDefinition(Definition definition) =>
-      _definitions[definition.handle] = definition;
+  /// See [addDefinition]: the same wholesale-overwrite hazard applies to a
+  /// replacement, and the same recovery step follows it.
+  void replaceDefinition(Definition definition) {
+    _definitions[definition.handle] = definition;
+    _relinkDefinition(definition.handle);
+  }
 
   void removeDefinition(Handle handle) => _definitions.remove(handle);
 
@@ -481,6 +524,38 @@ class DocumentTree {
   /// children, and that is the right outcome: the graph is already malformed,
   /// and this keeps both representations saying so. [ancestorsOf] and the
   /// reachability walks each raise [NodeCycleError] on it either way.
+  /// Appends every node already in the tree whose `parent` names
+  /// [definitionHandle] but whose handle the definition's own `children` list
+  /// does not contain — the recovery step [addDefinition] and
+  /// [replaceDefinition] need after their wholesale overwrite, so a stale or
+  /// hand-built `children` cannot erase a link [addNode] already made.
+  ///
+  /// Only appends; it never removes an incoming entry, even one whose named
+  /// node disagrees with it or is not in the tree at all. A `children` list
+  /// read from a file may legitimately name a node that has not been added
+  /// yet — the codec constructs a definition before the nodes that fill it,
+  /// same as it does for a [GroupNode] — and stripping that entry here would
+  /// destroy exactly the ordering the file described, in the same situation
+  /// [_link] already treats as "not added yet", not "wrong". A recovered
+  /// handle is appended after the incoming order for the same reason
+  /// [_link]'s append is order-preserving: `children` order is draw order,
+  /// and the incoming order — the file's own, when there is one — is
+  /// authoritative over the order this scan happens to visit `_nodes` in.
+  void _relinkDefinition(Handle definitionHandle) {
+    final definition = _definitions[definitionHandle];
+    if (definition == null) return;
+    final existing = definition.children.toSet();
+    final recovered = [
+      for (final node in _nodes.values)
+        if (node.parent == definitionHandle && !existing.contains(node.handle))
+          node.handle,
+    ]..sort((a, b) => a.value.compareTo(b.value));
+    if (recovered.isEmpty) return;
+    _definitions[definitionHandle] = definition.copyWith(
+      children: [...definition.children, ...recovered],
+    );
+  }
+
   void _link(Handle handle, Handle parent) {
     final node = _nodes[parent];
     if (node is GroupNode) {

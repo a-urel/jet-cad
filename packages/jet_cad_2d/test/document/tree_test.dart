@@ -487,5 +487,40 @@ void main() {
       expect(tree[const Handle(10)], isNotNull);
       expect(tree[const Handle(999)], isNull);
     });
+
+    test(
+        'replaceDefinition with a stale children list does not erase a link '
+        'addNode already made', () {
+      // A caller — the next task's codec, in particular — may hand
+      // replaceDefinition a Definition record built before addNode linked its
+      // children. A wholesale `_definitions[handle] = definition` would erase
+      // that link and restore the empty-`children` state that let a
+      // command-built cycle through before the parent/children sync fix.
+      final tree = emptyTree();
+      tree.addDefinition(definitionWith(200, const []));
+      tree.addNode(instanceIn(10, 200, 200 + 1));
+      expect(tree.definition(const Handle(200))!.children, [const Handle(10)]);
+
+      // Replace with a record whose `children` predates that link.
+      tree.replaceDefinition(definitionWith(200, const []));
+
+      expect(tree.definition(const Handle(200))!.children, [const Handle(10)]);
+    });
+
+    test('addNode re-adding a node under a new parent unlinks the old one', () {
+      // addNode overwrites `_nodes[handle]` unconditionally. If the handle was
+      // already listed under a different parent, that old parent must lose
+      // its entry or the handle ends up listed under two containers at once.
+      final tree = emptyTree()..addDefinition(definitionWith(200, const []));
+      tree.addNode(groupIn(10, 100, const []));
+      tree.addNode(groupIn(11, 100, const []));
+      tree.addNode(instanceIn(21, 10, 200)); // under group 10
+
+      tree.addNode(instanceIn(21, 11, 200)); // re-added under group 11
+
+      expect((tree[const Handle(10)]! as GroupNode).children, isEmpty);
+      expect(
+          (tree[const Handle(11)]! as GroupNode).children, [const Handle(21)]);
+    });
   });
 }

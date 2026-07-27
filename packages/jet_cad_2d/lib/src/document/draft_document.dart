@@ -38,7 +38,17 @@ class DraftDocument implements CommandTarget {
 
   final DocumentHeader header;
   final RawDataStore rawData;
-  TextMeasurer textMeasurer;
+
+  /// `final`, not a plain mutable field: `entityBounds` reads this to compute
+  /// `extents`, and `extents` caches that result in `_extentsCache` until
+  /// [invalidateDerived] runs. A reassignable field would let a caller change
+  /// what `entityBounds` returns without touching the cache, so `extents`
+  /// would keep serving a box computed with the previous measurer. The brief
+  /// only ever passes this as a constructor parameter, so fixing it at
+  /// construction costs nothing a caller needs and removes the stale-cache
+  /// hazard by construction rather than relying on every future writer to
+  /// remember to invalidate.
+  final TextMeasurer textMeasurer;
 
   late final CommandDispatcher commands;
 
