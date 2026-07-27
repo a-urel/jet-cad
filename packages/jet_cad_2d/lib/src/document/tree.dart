@@ -554,6 +554,21 @@ class DocumentTree {
   /// children, and that is the right outcome: the graph is already malformed,
   /// and this keeps both representations saying so. [ancestorsOf] and the
   /// reachability walks each raise [NodeCycleError] on it either way.
+  void _link(Handle handle, Handle parent) {
+    final node = _nodes[parent];
+    if (node is GroupNode) {
+      if (node.children.contains(handle)) return;
+      _nodes[parent] = node.copyWith(children: [...node.children, handle]);
+      return;
+    }
+    final definition = _definitions[parent];
+    if (definition != null) {
+      if (definition.children.contains(handle)) return;
+      _definitions[parent] =
+          definition.copyWith(children: [...definition.children, handle]);
+    }
+  }
+
   /// Appends every node already in the tree whose `parent` names
   /// [definitionHandle] but whose handle the definition's own `children` list
   /// does not contain — the recovery step [addDefinition] and
@@ -584,21 +599,6 @@ class DocumentTree {
     _definitions[definitionHandle] = definition.copyWith(
       children: [...definition.children, ...recovered],
     );
-  }
-
-  void _link(Handle handle, Handle parent) {
-    final node = _nodes[parent];
-    if (node is GroupNode) {
-      if (node.children.contains(handle)) return;
-      _nodes[parent] = node.copyWith(children: [...node.children, handle]);
-      return;
-    }
-    final definition = _definitions[parent];
-    if (definition != null) {
-      if (definition.children.contains(handle)) return;
-      _definitions[parent] =
-          definition.copyWith(children: [...definition.children, handle]);
-    }
   }
 
   /// Unlists [handle] from [parent]. The mirror of [_link], and likewise a
