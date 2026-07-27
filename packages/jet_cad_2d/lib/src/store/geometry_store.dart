@@ -89,8 +89,6 @@ class GeometryStore {
 
   int get liveCount => _slots.liveCount;
 
-  Iterable<int> get liveSlots => _slots.liveSlots;
-
   int add(GeometryPayload payload) {
     final slot = _slots.allocate();
     final stored = GeometryPayload(
