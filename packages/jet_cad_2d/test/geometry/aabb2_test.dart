@@ -67,4 +67,15 @@ void main() {
     expect(Aabb2.fromJson(box.toJson()).max, Vector2(3, 4));
     expect(Aabb2.fromJson(Aabb2.empty().toJson()).isEmpty, isTrue);
   });
+
+  test('box is immutable even though Vector2 getters are mutable', () {
+    // Aabb2 stores doubles internally, so mutating the Vector2 from a getter
+    // does not affect the cached box — critical for spatial index integrity.
+    final box = Aabb2(Vector2(1, 2), Vector2(3, 4));
+    final minVector = box.min;
+    minVector.x = 999;
+    minVector.y = 888;
+    expect(box.min.x, 1);
+    expect(box.min.y, 2);
+  });
 }

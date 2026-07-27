@@ -10,6 +10,11 @@ Vector2 closestPointOnSegment(Vector2 p, Vector2 a, Vector2 b) {
   final abx = b.x - a.x;
   final aby = b.y - a.y;
   final lengthSq = abx * abx + aby * aby;
+  // Exact on purpose: this guards only against dividing by literal zero.
+  // A merely tiny lengthSq is already safe — t comes out huge and the
+  // clamp below pins it to an endpoint, which is the correct closest
+  // point on a near-degenerate segment. A tolerance here would instead
+  // misclassify short-but-real segments as points.
   if (lengthSq == 0.0) return a.clone();
   var t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lengthSq;
   t = t.clamp(0.0, 1.0);
