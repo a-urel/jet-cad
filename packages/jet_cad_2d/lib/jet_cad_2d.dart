@@ -5,4 +5,4 @@
 /// own packages and use only this package's public API.
 library;
 
-// Exports are added by later tasks as each unit lands.
+export 'src/core/handle.dart';
