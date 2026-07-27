@@ -339,4 +339,153 @@ void main() {
       expect(tree.repairCycles(), isEmpty);
     }, timeout: const Timeout(Duration(seconds: 5)));
   });
+
+  // `parent` and `children` are dual representations of one containment edge.
+  // Writers used to maintain only `parent` while every reachability walk read
+  // `children`, so a document built the way commands actually build one had an
+  // empty `children` everywhere and the cycle guard saw an empty graph.
+  group('parent/children sync', () {
+    test('a definition cycle built entirely through commands is rejected', () {
+      final doc = DraftDocument.empty();
+      final defA = doc.handleSeed.next();
+      final defB = doc.handleSeed.next();
+      doc.tree.addDefinition(Definition(
+          handle: defA,
+          name: 'A',
+          basePoint: Vector2.zero(),
+          children: const []));
+      doc.tree.addDefinition(Definition(
+          handle: defB,
+          name: 'B',
+          basePoint: Vector2.zero(),
+          children: const []));
+
+      // A contains an instance of B.
+      doc.commands.execute(AddNodeCommand(InstanceNode(
+        handle: doc.handleSeed.next(),
+        parent: defA,
+        transform: Transform2.identity(),
+        definition: defB,
+        layer: ReservedHandles.layerZero,
+      )));
+
+      // B contains an instance of A — this closes A -> B -> A.
+      expect(
+        () => doc.commands.execute(AddNodeCommand(InstanceNode(
+          handle: doc.handleSeed.next(),
+          parent: defB,
+          transform: Transform2.identity(),
+          definition: defA,
+          layer: ReservedHandles.layerZero,
+        ))),
+        throwsA(isA<CycleDetectedError>()),
+      );
+
+      // Pins the sync itself, not just the symptom: the guard can only see the
+      // cycle because the first command linked its node into defA's children.
+      expect(doc.tree.definition(defA)!.children, isNotEmpty);
+    });
+
+    test('addNode links the new node into its parent group', () {
+      final tree = emptyTree()..addDefinition(definitionWith(200, const []));
+      tree.addNode(instanceIn(10, 100, 200));
+      expect(
+          (tree[const Handle(100)]! as GroupNode).children, [const Handle(10)]);
+    });
+
+    test('addNode links the new node into its parent definition', () {
+      final tree = emptyTree()..addDefinition(definitionWith(200, const []));
+      tree.addNode(instanceIn(10, 200, 200 + 1));
+      expect(tree.definition(const Handle(200))!.children, [const Handle(10)]);
+    });
+
+    test('linking is idempotent and preserves an existing position', () {
+      // The importer and the codec add nodes whose parents already list them,
+      // read verbatim from the file. Appending unconditionally would duplicate
+      // the entry and reorder draw order.
+      final tree = emptyTree();
+      tree.addDefinition(definitionWith(200, const []));
+      tree.addNode(groupIn(10, 100, const [21, 22, 23]));
+      tree.addNode(instanceIn(21, 10, 200));
+      tree.addNode(instanceIn(23, 10, 200));
+      tree.addNode(instanceIn(22, 10, 200));
+      expect((tree[const Handle(10)]! as GroupNode).children,
+          [const Handle(21), const Handle(22), const Handle(23)]);
+    });
+
+    test('a genuinely new node appends after the existing children', () {
+      final tree = emptyTree()..addDefinition(definitionWith(200, const []));
+      tree.addNode(groupIn(10, 100, const [21]));
+      tree.addNode(instanceIn(21, 10, 200));
+      tree.addNode(instanceIn(22, 10, 200));
+      expect((tree[const Handle(10)]! as GroupNode).children,
+          [const Handle(21), const Handle(22)]);
+    });
+
+    test('removeNode unlinks the node from its parent', () {
+      final tree = emptyTree()..addDefinition(definitionWith(200, const []));
+      tree.addNode(instanceIn(10, 100, 200));
+      tree.addNode(instanceIn(11, 100, 200));
+      tree.removeNode(const Handle(10));
+      expect(
+          (tree[const Handle(100)]! as GroupNode).children, [const Handle(11)]);
+    });
+
+    test('removeNode unlinks from a parent definition too', () {
+      final tree = emptyTree()..addDefinition(definitionWith(200, const []));
+      tree.addDefinition(definitionWith(201, const []));
+      tree.addNode(instanceIn(10, 200, 201));
+      expect(tree.definition(const Handle(200))!.children, [const Handle(10)]);
+      tree.removeNode(const Handle(10));
+      expect(tree.definition(const Handle(200))!.children, isEmpty);
+    });
+
+    test('replaceNode with a changed parent moves the child across', () {
+      final tree = emptyTree()..addDefinition(definitionWith(200, const []));
+      tree.addNode(groupIn(10, 100, const []));
+      tree.addNode(instanceIn(11, 100, 200));
+      tree.replaceNode(instanceIn(11, 10, 200));
+      expect(
+          (tree[const Handle(100)]! as GroupNode).children, [const Handle(10)]);
+      expect(
+          (tree[const Handle(10)]! as GroupNode).children, [const Handle(11)]);
+    });
+
+    test('replaceNode that keeps the parent keeps the position', () {
+      final tree = emptyTree()..addDefinition(definitionWith(200, const []));
+      tree.addNode(instanceIn(10, 100, 200));
+      tree.addNode(instanceIn(11, 100, 200));
+      tree.replaceNode(instanceIn(10, 100, 200).copyWith(visible: false));
+      expect((tree[const Handle(100)]! as GroupNode).children,
+          [const Handle(10), const Handle(11)]);
+    });
+
+    test(
+        'addNodeUnchecked does not link, so a file\'s own disagreement '
+        'survives to be repaired', () {
+      // The importer reconstructs both sides from the file. Fabricating a
+      // `children` entry here would hide the very disagreement repairCycles
+      // exists to see — and would leave the fabricated entry dangling after
+      // the offending node is dropped from the container the scan walked.
+      final tree = emptyTree();
+      tree.addDefinition(definitionWith(200, const [Handle(21)]));
+      tree.addNodeUnchecked(groupIn(21, 200, const [22]));
+      tree.addNodeUnchecked(instanceIn(22, 100, 200)); // parent lies
+
+      expect((tree[const Handle(100)]! as GroupNode).children, isEmpty);
+      expect(tree.repairCycles(), hasLength(1));
+      expect((tree[const Handle(100)]! as GroupNode).children, isEmpty,
+          reason: 'no fabricated child may be left dangling by the repair');
+    });
+
+    test('a parent absent from the tree is a no-op, not an error', () {
+      // A node may legitimately be added before its parent: an importer or a
+      // paste can emit children first. addNode cannot tell "not added yet"
+      // from "will never exist", so it refuses neither.
+      final tree = emptyTree()..addDefinition(definitionWith(200, const []));
+      tree.addNode(instanceIn(10, 999, 200));
+      expect(tree[const Handle(10)], isNotNull);
+      expect(tree[const Handle(999)], isNull);
+    });
+  });
 }

@@ -172,10 +172,9 @@ class DraftDocument implements CommandTarget {
           box = box.union(_boundsOfContainer(definition, visiting, memo)
               .transformedBy(transform));
         case null:
-          // Unreachable in practice: every handle _childrenOf yields comes
-          // from tree.nodes, so tree[child] is never null. Kept rather than
-          // asserted, so a future _childrenOf that once again mixes in
-          // entity handles fails safe instead of throwing here.
+          // A `children` list may name a leaf entity as well as a node — a
+          // definition's children routinely do — and those are accounted for
+          // by the entity scan above, not here.
           break;
       }
     }
@@ -185,22 +184,19 @@ class DraftDocument implements CommandTarget {
     return box;
   }
 
-  /// Nodes placed directly inside [container].
+  /// What [container] holds, in the order it holds it.
   ///
-  /// Found by each node's own `parent` pointer, not by a container's
-  /// `children`/`Definition.children` list. [AddNodeCommand] (see
-  /// `commands.dart`) only inserts into the tree's node map and sets the new
-  /// node's `parent` — it never appends to the parent's `children` list, so
-  /// that list stays exactly as constructed and drifts from reality on every
-  /// command-driven insert. `DocumentTree` itself documents `parent` and
-  /// `children` as dual, independently-writable representations of the same
-  /// edge; the `children` list is what the *cycle-detection* walks read, but
-  /// `parent` is what this engine's commands actually maintain, so it is the
-  /// only source that is current for a live, mutated document. This works
-  /// uniformly for the root, a group, or a definition, because a node's
-  /// `parent` may point at any of the three.
-  List<Handle> _childrenOf(Handle container) => [
-        for (final node in tree.nodes)
-          if (node.parent == container) node.handle,
-      ];
+  /// Reads the container's own `children` list. `DocumentTree` maintains that
+  /// list on every add, replace and remove, so it is current for a live,
+  /// mutated document and not only for one built by hand. It is also the same
+  /// list the cycle-detection walks read, so extents and the cycle guard now
+  /// agree on what containment means — and it is ordered, which a scan over
+  /// every node keyed on `parent` was not.
+  ///
+  /// A group and a definition are both containers here, because a node's
+  /// `parent` may name either; the root is just the outermost group.
+  List<Handle> _childrenOf(Handle container) => switch (tree[container]) {
+        GroupNode(:final children) => children,
+        _ => tree.definition(container)?.children ?? const [],
+      };
 }

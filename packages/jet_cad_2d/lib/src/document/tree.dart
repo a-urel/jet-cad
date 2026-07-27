@@ -83,13 +83,17 @@ class DocumentTree {
   }
 
   /// Adds a node, rejecting anything that would close a definition cycle
-  /// *through this node's own instance edge*. Nothing is mutated when it
-  /// throws.
+  /// *through this node's own instance edge*, and listing it in its parent's
+  /// `children`. Nothing is mutated when it throws.
   ///
   /// What is guaranteed: an [InstanceNode] added or replaced here can never
   /// make its enclosing definition reach itself. Placing the check on the tree
   /// rather than in each command means no command that creates an instance can
-  /// close that kind of cycle by forgetting to ask.
+  /// close that kind of cycle by forgetting to ask. The guard is only able to
+  /// see anything because of the `children` maintenance described on [_link]:
+  /// the guard reads `parent` pointers, but the reachability walk it calls
+  /// reads `children`, so a writer that maintained only `parent` would hand the
+  /// walk an empty graph and every cycle would be accepted.
   ///
   /// What is **not** guaranteed, and must not be read into the above:
   ///
@@ -97,12 +101,12 @@ class DocumentTree {
   ///   and [replaceDefinition] are unguarded, so
   ///   `replaceDefinition(def.copyWith(children: [...]))` can list an instance
   ///   that closes a cycle and no exception is raised.
-  /// - **Containment edges written through [GroupNode.children].** The guard
-  ///   reads `parent` pointers while the reachability walks read `children`
-  ///   lists. Those are dual representations of one edge and only the `parent`
-  ///   side is checked here, so a node whose two sides disagree — or a group
-  ///   re-parented under its own descendant — passes the guard. The walks now
-  ///   throw [NodeCycleError] on such a graph instead of hanging, but that is
+  /// - **Containment edges written by rewriting [GroupNode.children] directly**
+  ///   through [replaceNode]. This method syncs the `children` side from the
+  ///   `parent` side, never the reverse, so a caller that hands over a group
+  ///   whose `children` it rewrote by hand — or that re-parents a group under
+  ///   its own descendant — still passes the guard. The walks throw
+  ///   [NodeCycleError] on such a graph instead of hanging, but that is
   ///   detection at use, not prevention at write.
   /// - **[addNodeUnchecked]**, by construction.
   ///
@@ -115,19 +119,44 @@ class DocumentTree {
   void addNode(Node node) {
     _guardCycle(node);
     _nodes[node.handle] = node;
+    _link(node.handle, node.parent);
   }
 
   /// Adds without the cycle check. Only an importer should use this, and only
   /// when it intends to call [repairCycles] afterwards — a file may legitimately
   /// contain a cycle that has to be diagnosed rather than rejected mid-parse.
+  ///
+  /// It deliberately does **not** [_link] either, which is the one place the
+  /// `parent`/`children` invariant is not maintained. An importer rebuilds both
+  /// sides from the file verbatim, and a file whose two sides disagree is
+  /// exactly what [repairCycles] and structural validation exist to see;
+  /// synthesising the missing `children` entry here would erase that evidence
+  /// before either could read it. It would also actively corrupt the repair:
+  /// [_dropInstance] unlists from the container the *scan walked*, so a
+  /// fabricated entry under the container `parent` merely claimed would survive
+  /// the drop as a dangling reference that serialization would then emit.
   void addNodeUnchecked(Node node) => _nodes[node.handle] = node;
 
+  /// Replaces a node, re-listing it under a new parent when `parent` changed.
+  ///
+  /// Reads the outgoing node's `parent` before overwriting it: that is the only
+  /// record of which container currently lists this handle, and unlinking after
+  /// the overwrite would unlink from the new parent and leave the old one
+  /// naming a node it no longer holds.
   void replaceNode(Node node) {
     _guardCycle(node);
+    final previousParent = _nodes[node.handle]?.parent;
     _nodes[node.handle] = node;
+    if (previousParent != null && previousParent != node.parent) {
+      _unlink(node.handle, previousParent);
+    }
+    _link(node.handle, node.parent);
   }
 
-  void removeNode(Handle handle) => _nodes.remove(handle);
+  void removeNode(Handle handle) {
+    final node = _nodes.remove(handle);
+    if (node != null) _unlink(handle, node.parent);
+  }
 
   void addDefinition(Definition definition) =>
       _definitions[definition.handle] = definition;
@@ -422,6 +451,71 @@ class DocumentTree {
       _definitions[definition.handle] = definition.copyWith(
         children: _withoutAll(definition.children, node.handle),
       );
+    }
+  }
+
+  /// Lists [handle] among [parent]'s children, if it is not listed already.
+  ///
+  /// **The append must be conditional, not unconditional.** `children` is
+  /// written twice by design: the file names it, and every insert here derives
+  /// it from `parent`. The importer and the codec construct a container with
+  /// its `children` already populated and *then* add the child nodes, so an
+  /// unconditional append would give every loaded document a duplicate entry
+  /// per child — each one drawn twice, walked twice by the reachability
+  /// scans, and emitted twice on the next save. Being idempotent is what lets
+  /// the two writers coexist without either having to know about the other.
+  ///
+  /// For the same reason a handle already listed keeps its position rather than
+  /// being moved to the end: for a [GroupNode], `children` order *is* draw
+  /// order, and it is the file's order that is authoritative, not the order the
+  /// loader happened to visit the nodes in.
+  ///
+  /// A [parent] that is neither a container node nor a definition is a no-op.
+  /// That covers [Handle.none] at the root, and it covers a node added before
+  /// its own parent — an importer or a paste may legitimately emit children
+  /// first. This method cannot distinguish "not added yet" from "never will
+  /// be", so it refuses neither; an orphaned `parent` is structural
+  /// validation's finding to report, with the whole file in hand.
+  ///
+  /// A node that names itself as its parent does get listed among its own
+  /// children, and that is the right outcome: the graph is already malformed,
+  /// and this keeps both representations saying so. [ancestorsOf] and the
+  /// reachability walks each raise [NodeCycleError] on it either way.
+  void _link(Handle handle, Handle parent) {
+    final node = _nodes[parent];
+    if (node is GroupNode) {
+      if (node.children.contains(handle)) return;
+      _nodes[parent] = node.copyWith(children: [...node.children, handle]);
+      return;
+    }
+    final definition = _definitions[parent];
+    if (definition != null) {
+      if (definition.children.contains(handle)) return;
+      _definitions[parent] =
+          definition.copyWith(children: [...definition.children, handle]);
+    }
+  }
+
+  /// Unlists [handle] from [parent]. The mirror of [_link], and likewise a
+  /// no-op when [parent] holds no children list.
+  ///
+  /// Distinct from [_dropInstance], which unlists from the container a *scan*
+  /// walked through rather than the one `parent` names, for a malformed tree in
+  /// which those differ. The two never contend: [_dropInstance] removes from
+  /// `_nodes` itself and never calls [removeNode], and [_withoutAll] makes both
+  /// paths tolerant of a handle that is already absent.
+  void _unlink(Handle handle, Handle parent) {
+    final node = _nodes[parent];
+    if (node is GroupNode) {
+      if (!node.children.contains(handle)) return;
+      _nodes[parent] =
+          node.copyWith(children: _withoutAll(node.children, handle));
+      return;
+    }
+    final definition = _definitions[parent];
+    if (definition != null && definition.children.contains(handle)) {
+      _definitions[parent] = definition.copyWith(
+          children: _withoutAll(definition.children, handle));
     }
   }
 

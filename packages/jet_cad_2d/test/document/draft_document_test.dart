@@ -99,6 +99,53 @@ void main() {
     expect(doc.extents.max, Vector2(106, 6));
   });
 
+  test('extents follow a node through a nested group, a remove and an undo',
+      () {
+    // Extents read the containers' `children` lists, which only a maintained
+    // parent/children sync keeps current: the group is empty when it is added
+    // and gains its child on the next command.
+    final doc = DraftDocument.empty();
+    final group = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(GroupNode(
+      handle: group,
+      parent: doc.rootHandle,
+      transform: Transform2.translation(50, 0),
+      children: const [],
+    )));
+
+    final defHandle = doc.handleSeed.next();
+    final entityHandle = doc.handleSeed.next();
+    doc.tree.addDefinition(Definition(
+      handle: defHandle,
+      name: 'Unit',
+      basePoint: Vector2.zero(),
+      children: [entityHandle],
+    ));
+    doc.commands.execute(AddEntityCommand(
+      record: lineRecord(entityHandle, defHandle),
+      payload: line(0, 0, 2, 2),
+    ));
+
+    final instance = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: instance,
+      parent: group,
+      transform: Transform2.identity(),
+      definition: defHandle,
+      layer: ReservedHandles.layerZero,
+    )));
+    expect(doc.extents.min, Vector2(50, 0));
+    expect(doc.extents.max, Vector2(52, 2));
+
+    // Removing unlinks it, so the group contributes nothing.
+    doc.commands.execute(RemoveNodeCommand(instance));
+    expect(doc.extents.isEmpty, isTrue);
+
+    // Undo re-adds through AddNodeCommand, which links it back.
+    doc.commands.undo();
+    expect(doc.extents.max, Vector2(52, 2));
+  });
+
   test('definitionBounds is computed once and reused across instances', () {
     final doc = DraftDocument.empty();
     final defHandle = doc.handleSeed.next();
