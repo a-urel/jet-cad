@@ -1,7 +1,7 @@
 # jet_cad_2d Architecture Design
 
 **Date:** 2026-07-27
-**Status:** Approved — Architecture v1.1 (frozen; evolves only on concrete implementation findings)
+**Status:** Approved — Architecture v1.2 (frozen; evolves only on concrete implementation findings)
 
 ## Summary
 
@@ -91,6 +91,8 @@ be assumed by implementation work under this one.
 | Entity records | Columnar (structure-of-arrays), including tier-1 style; `Entity` is a view |
 | Layers | Orthogonal to the tree, with DXF `BYLAYER` / `BYBLOCK` inheritance |
 | Style resolution | Explicit `StyleResolver` producing a value-equal `StyleContext`; it is the picture-cache key |
+| Cache invalidation | Two channels: `documentRevision` (global, rare) and per-instance `overrideChanges` (local, frequent) — runtime state never invalidates globally |
+| Derived vs stored | Explicit split; extents, resolved style, world transforms and text layout are derived and never persisted |
 | Render precision | World coordinates rebased to a local origin before reaching `Canvas` (Skia is float32) |
 | Extensibility | Data-only components in sparse, type-keyed stores |
 | Widget shape | One primitive (`DraftCanvas`) plus thin presets (`DraftViewer`, `DraftDesigner`) |
@@ -114,8 +116,16 @@ jet-cad/  (pub workspace)
 │   ├── jet_cad_2d_ifc/        # future — IFC plan-only import adapter
 │   └── jet_cad/               # 3D/OCCT — frozen at 0.3.0, archived
 └── apps/
-    └── jet_cad_2d_harness/    # development app: tool palette, panels (never shipped in a package)
+    ├── dev_harness/           # existing 3D harness — stays with the frozen package
+    └── jet_cad_2d_harness/    # new: tool palette, panels (never shipped in a package)
 ```
+
+The 2D harness is **greenfield**, not a retarget of `apps/dev_harness`. That app
+is wired to the 3D session, texture viewport and controller, none of which
+survive here. Its shadcn ribbon shell
+([2026-07-12-harness-shadcn-ribbon-design.md](2026-07-12-harness-shadcn-ribbon-design.md))
+is UI-only and is a **source to copy from**, not a dependency — Plan 4 is sized
+on the assumption that the shell is lifted and the rest is written.
 
 Dependency direction is one-way: `jet_cad_2d ← jet_cad_2d_flutter`, and each
 format adapter depends on `jet_cad_2d`. Nothing depends on a format adapter
@@ -150,15 +160,23 @@ handle and an implicit zero would both appear and diverge.
 `int`s. Codecs must wrap explicitly at the boundary; the type gives static
 safety, never a runtime check.
 
-**Web constraint:** under `dart2js`, `int` is a JS number with 53 bits of
-integer precision. Real DXF handles stay far below that, but import must
-range-check and fail loudly rather than silently truncate.
+**The handle space is 32-bit.** This is a document invariant on every platform,
+not a web quirk: entity columns store handles in `Uint32List` (see *Entity
+records*), so 2^32 is the ceiling everywhere. Long-lived drawings do exceed it,
+so import range-checks against 32 bits and fails loudly rather than truncating.
+The escape hatch is **handle-space compaction on import** — renumber into a
+dense range — which is safe precisely because `OriginComponent` preserves each
+original identifier for export.
+
+The `dart2js` 53-bit integer limit is therefore not the binding constraint, but
+it is another reason no code may assume 64-bit handles.
 
 #### Structure
 
 ```
 DraftDocument
-  header       units ($INSUNITS), scale, handseed, extents, custom variables
+  header       units ($INSUNITS), scale, handseed, custom variables,
+               importedExtents (opaque, round-trip only — never recomputed)
   tables       layers · linetypes · textStyles · dimStyles · patterns · appIds
   definitions  Handle → Definition      (block prototypes)
   root         GroupNode                (model space)
@@ -166,9 +184,37 @@ DraftDocument
   entities     EntityStore              (columnar leaf records, incl. tier-1 style)
   geometry     GeometryStore            (columnar coordinates)
   components   ComponentRegistry        (sparse, type-keyed)
-  rawTags      Handle → List<RawTag>    (preserve-unknown slot)
+  rawTags      Handle → Map<SourceKind, Object?>   (preserve-unknown slot, opaque)
   schemaVersion
 ```
+
+The preserve-unknown slot is an **opaque per-source blob**, not a list of DXF
+group codes. Its payload shape is owned entirely by the adapter that produced
+it; the engine only stores, serializes and returns it. Naming it `RawTag` would
+have put a DXF concept in the core document.
+
+#### Derived versus stored
+
+Every value in the document is one or the other, and the distinction is load-
+bearing rather than descriptive: derived state that leaks into stored bytes
+breaks determinism, and derived state that leaks into a document-level revision
+counter breaks caching.
+
+| Stored | Derived — never persisted, never versioned |
+|---|---|
+| header, tables, definitions, nodes, entity records, geometry, components, `rawTags` | working extents |
+| `importedExtents` — preserved verbatim from an imported file for round-trip, never recomputed from geometry | world transforms and their cache |
+| | spatial index |
+| | resolved style (`StyleContext`, `ResolvedStyle`) |
+| | runtime style overrides |
+| | text layout boxes |
+
+Working extents are recomputed on load and after edits. They are not persisted
+because a text entity's contribution comes from a platform- and font-dependent
+layout, so persisting them would make the same document serialize differently on
+two machines — defeating both the determinism guarantee and the round-trip
+property test. `importedExtents` is a separate, opaque header value that exists
+only so `$EXTMIN`/`$EXTMAX` survive a round-trip unchanged.
 
 #### Transforms
 
@@ -215,7 +261,10 @@ final class Definition {
 Containers are objects; leaves are not (see *Entity records*).
 
 `Definition` is a reusable prototype subtree; `InstanceNode` references one.
-Nested instances are permitted; **cycle detection is required**.
+Nested instances are permitted; **cycle detection is required**, with defined
+behavior: a command that would close a cycle is rejected with a typed error and
+mutates nothing; an import that contains one emits a `Diagnostic` and drops the
+offending nested instance rather than failing the whole file.
 
 This pair is the same concept as Unity's prefab/instance and as DXF's
 BLOCK/INSERT — and, as the mapping table below shows, as IFC's type/occurrence.
@@ -260,6 +309,10 @@ class EntityStore {
 One object per entity contradicts the structure-of-arrays claim at the scale the
 validation gate targets, so the entity record itself is columnar, not only its
 geometry. Tier-1 style is then simply more columns.
+
+The `owner`, `layer` and `linetype` columns hold **handles**, not slots — the
+targets are nodes and table records that live outside this store. That is the
+concrete reason the handle space is capped at 32 bits.
 
 Style must live here rather than in components: components are the *extension*
 mechanism, and these are native DXF fields required for lossless round-trip.
@@ -312,6 +365,11 @@ Rules:
 
 - **Data only, never behavior.** The document must stay serializable,
   deterministic and undoable; behavior lives in application-side systems.
+- **Immutable, value-equal, stable key order.** Value-diff undo has to compare
+  and restore component state, and deterministic serialization requires
+  `toJson` to emit keys in a fixed order. `StyleContext` carries the same
+  requirement for a different reason (it is a cache key); this one exists for
+  undo and byte-determinism.
 - Attach to nodes and entities alike — one handle space, one mechanism.
 - Components are stored in sparse type-keyed stores, *not* on each entity. This
   keeps entity records lean at scale and makes the runtime's core query —
@@ -325,24 +383,31 @@ Application-domain concepts (table, zone, seat count) are components and block
 attributes. **The engine defines no domain types.** Runtime state (occupied,
 reserved) is not in the document at all; it is supplied to the view layer.
 
-#### Geometry store and index lifetime
+#### Slot lifetime — one contract for both columnar stores
 
 Leaf coordinates live in typed arrays grouped by kind; the entity record holds
 only `geomIndex`. The frozen decision is columnar storage with index-only entity
 records; the exact packing is an implementation detail.
 
-**Index lifetime is not an implementation detail.** Without a rule here, the
-`IdRemap` problem rejected for the 3D document reappears one layer down.
+**Slot lifetime is not an implementation detail.** Without a rule here, the
+`IdRemap` problem rejected for the 3D document reappears one layer down. The
+same three rules govern **both** `GeometryStore`'s `geomIndex` and
+`EntityStore`'s `slotOf` — delete and undo churn them identically, so an
+invariant applied to one and not the other simply leaks.
 
-1. `geomIndex` values are opaque and may change **only** inside a command that
-   also rewrites every entity record referencing them. No ambient compaction,
-   ever — not on delete, not on load, not on idle.
+1. Slot values are opaque and may change **only** inside a command that also
+   rewrites every reference to them. No ambient compaction, ever — not on
+   delete, not on load, not on idle.
 2. Deletion returns the slot to a free list. The inverse command carries the
-   **geometry payload**, not the index, so undo may legitimately restore into a
-   different slot and update the entity record accordingly.
+   **payload** (geometry, or the full entity record), not the slot, so undo may
+   legitimately restore into a different slot and update every referencing
+   record accordingly.
 3. Compaction exists only as an explicit `purge()` maintenance operation. It
    rewrites all references and **clears the undo stack**. It is not a command
    and is not undoable.
+
+Column growth follows the same discipline: arrays grow by reallocation, and a
+grow never reorders live slots.
 
 #### Change and undo
 
@@ -465,14 +530,23 @@ viewer as well as the designer.
 #### Queries
 
 ```dart
-Iterable<Handle> entitiesInRect(Aabb2 world);           // render culling
-bool             pickInto(Vector2 world, double radius, HitPath out);
-void             snapInto(Vector2 world, double radius, SnapMask mask, SnapResult out);
-Iterable<Handle> withComponent<T extends Component>();  // runtime lookup
+// Per-frame path — allocation-free, same budget as snap
+void forEachInRect(Aabb2 world, void Function(int slot) visit);   // render culling
+bool pickInto(Vector2 world, double radius, HitPath out);
+void snapInto(Vector2 world, double radius, SnapMask mask, SnapResult out);
+
+// Non-frame callers — convenience, allocation permitted
+Iterable<Handle> entitiesInRect(Aabb2 world);
+Iterable<Handle> withComponent<T extends Component>();
 Iterable<Handle> onLayer(Handle layer);
 Iterable<Handle> instancesOf(Handle definition);
 Iterable<Handle> attributesOf(Handle instance);
 ```
+
+Culling runs at the same rate as snapping, so it carries the same
+zero-allocation budget and the same shape: a visitor callback over slots, with
+no iterator object and no boxing. The `Iterable` form remains for tools,
+adapters and tests, which are not on the frame path.
 
 #### No topology
 
@@ -570,9 +644,17 @@ abstract class StyleResolver {
   /// Concrete paint for one entity under a context.
   ResolvedStyle styleFor(Handle entity, StyleContext ctx);
 
-  /// Monotonic. Bumped whenever any resolution would change — a layer edit,
-  /// a runtime state change. Invalidates every picture cache entry.
-  int get revision;
+  /// Monotonic. Bumped ONLY by document-level style edits — a layer colour,
+  /// a linetype table record. Invalidates every cached picture.
+  int get documentRevision;
+
+  /// Instances whose style is overridden by application runtime state.
+  /// Excluded from the static tile cache; drawn in the per-instance pass.
+  Set<Handle> get overriddenInstances;
+
+  /// Which instances changed override. Repaints those instances only —
+  /// it must never touch documentRevision.
+  Stream<Set<Handle>> get overrideChanges;
 }
 ```
 
@@ -586,22 +668,49 @@ application runtime override                  ← highest: "occupied table is re
       else default
 ```
 
-**Cache contract.** The definition picture cache is keyed by
-`(definition, StyleContext, zoomBand, revision)` — never by definition alone.
-In a repetitive plan the distinct contexts collapse to a handful (one per table
-color, times one per runtime status), so the sharing win survives; a plan with
-five statuses and three table colors yields at most fifteen pictures per
-definition, not five hundred.
+**Two invalidation channels, deliberately separate.** A single revision counter
+covering both document edits and runtime state would make the primary workload
+pathological: one table going occupied would rebuild every tile and every
+definition picture in the drawing. Runtime override is per-instance and
+highest-priority, so it must not be a global channel.
+
+- `documentRevision` — layer and style-table edits. Global invalidation. Rare.
+- `overrideChanges` — runtime state. Changes only which `StyleContext` those
+  instances resolve to, so an affected table swaps to a *different, already
+  cached* picture. Zero tiles invalidated, zero pictures rebuilt.
+
+For that to hold, instances in `overriddenInstances` must be excluded from the
+static tile cache and drawn in the per-instance pass — the same treatment, and
+the same reason, as ATTRIB text.
+
+**Cache key.** The definition picture cache is keyed by
+`(definition, StyleContext, scaleBand, documentRevision)` — never by definition
+alone.
+
+**`scaleBand` is a band of the composed world→screen scale**, not of camera zoom:
+camera scale × the accumulated scale of every ancestor × this instance's own
+scale. It has to be, because a definition picture bakes concrete stroke widths
+and dash lengths, and both are **paper-space** quantities that must stay
+constant on screen. A picture recorded once and replayed under a 0.1× instance
+and a 10× instance would render wall thicknesses differing by 100×. Stroke
+widths and dash lengths are therefore baked pre-divided by the band's
+representative scale, so replay yields the correct paper-space result.
+
+**Anisotropy policy.** Under non-uniform instance scale there is no single
+correct stroke width. The representative scale is `sqrt(|det|)` — the geometric
+mean — while the ratio of the transform's singular values stays within a
+threshold. Beyond that threshold the instance bypasses the definition cache and
+draws directly with exact per-axis handling. Bounded and declared, rather than
+silently wrong on mirrored or stretched blocks.
 
 **Declared degeneration.** If `contextFor` returns a distinct context per
-instance — every table a unique color — the cache would grow one entry per
-instance. The renderer detects this by bounding entries per definition; past the
-bound, those instances bypass the definition cache and draw directly. Bounded
-and declared rather than silently unbounded.
+instance — every table a unique colour — the cache would grow one entry per
+instance. The renderer bounds entries per definition; past the bound, those
+instances bypass the definition cache and draw directly.
 
-Per-instance *content* — ATTRIB text — never enters a definition picture at all,
-regardless of context, because it differs per instance by definition. It is
-drawn in the per-instance pass.
+**Never in a definition picture, under any key:** per-instance *content*
+(ATTRIB text) and instances carrying a runtime override. Both differ per
+instance by construction.
 
 #### Coordinate rebasing — Float64 model, float32 raster
 
@@ -616,6 +725,13 @@ The renderer therefore never hands absolute world coordinates to `Canvas`:
   for tile cache entries, the definition's base point for definition pictures.
 - `CameraController` holds the world→screen transform in `Float64` and
   subtracts the rebase origin before the residual reaches the float32 matrix.
+- **The whole chain composes in `Float64`, and exactly one residual matrix
+  reaches `Canvas` per draw.** Instance transforms are never pushed as separate
+  `canvas.transform` calls stacked on the camera: an instance placed at world
+  4.5e6 carries that magnitude in its own `e`/`f`, so pushing it independently
+  would feed the absolute coordinate straight back into the float32 matrix and
+  undo the rebase. `camera ∘ ancestors ∘ instance ∘ rebase` is multiplied out in
+  `Float64` and the result — small numbers — is what gets pushed.
 - `ViewportTransform.worldToScreen` / `screenToWorld` perform the offset in
   `Float64`.
 
@@ -633,13 +749,15 @@ A single world→screen affine carrying pan, zoom and optional rotation, held in
 Mirroring the spatial index:
 
 1. **Definition cache** — a definition is recorded into a `Picture` per
-   `(StyleContext, zoomBand, revision)`; instances sharing a key replay one
-   picture under their own transform.
+   `(StyleContext, scaleBand, documentRevision)`; instances sharing a key replay
+   one picture under their own composed transform.
 2. **Tile cache** — static root-level geometry is recorded into world-space
    tiles, each around its own rebase origin. Panning replays tiles; crossing a
-   zoom band or a `revision` bump invalidates them.
+   scale band or a `documentRevision` bump invalidates them. Instances in
+   `overriddenInstances` and all ATTRIB text are excluded from tiles, so runtime
+   state changes never invalidate one.
 
-Culling uses `entitiesInRect` against the visible world rectangle.
+Culling uses `forEachInRect` against the visible world rectangle.
 
 Geometry is drawn under the camera transform; screen-space decorations (handles,
 snap markers, selection) are drawn in a separate pass at constant pixel size.
@@ -670,21 +788,28 @@ numbers and room labels are what the user reads.
   Text metrics therefore must be available to the engine, not only the renderer;
   the engine holds a measurement interface that the Flutter layer implements.
 - **SHX.** Mapped to TTF, declared lossy for display, preserved for round-trip.
+- **Mirrored blocks.** Negative instance scale is explicitly supported, so text
+  inside such a block is transformed into unreadable mirrored glyphs unless the
+  renderer counter-transforms it. **v1 renders text faithfully mirrored**,
+  matching the transform the file specifies. Whether to match AutoCAD's own
+  convention instead is deferred until the real-file corpus exists to check it
+  against; guessing at it now would be unverifiable either way.
 
 Plan 3 owns all of the above.
 
 #### Damage model
 
 Repaint on events, never per vsync. Triggers: `DocChange`, camera change,
-selection change, `StyleResolver.revision` bump, tool state change. A CAD
-viewport is idle most of the time.
+selection change, `documentRevision` bump, `overrideChanges` (repainting the
+per-instance pass only), tool state change. A CAD viewport is idle most of the
+time.
 
 #### Draw order
 
 ```
-tile / geometry cache        static, rebased
-definition pictures          per (StyleContext, zoomBand)
-per-instance content         ATTRIB text and anything else instance-specific
+tile / geometry cache        static, rebased, excludes overridden instances
+definition pictures          per (StyleContext, scaleBand, documentRevision)
+per-instance pass            ATTRIB text, runtime-overridden instances
 entity under active edit     live, outside the cache
 selection highlight, handles screen space
 snap indicators              screen space, whenever a tool requests snapping
@@ -853,6 +978,17 @@ class ExportResult {
   final Uint8List bytes;
   final List<Diagnostic> lossy;         // everything not representable
 }
+
+/// Lives in the core package, not in an adapter: the engine itself raises
+/// diagnostics (cycle detection, degraded fills), and every adapter reuses
+/// the same type. Delivered in Plan 1.
+class Diagnostic {
+  final DiagnosticSeverity severity;    // info | warning | loss | error
+  final String code;                    // stable, machine-matchable
+  final String message;
+  final List<Handle> handles;           // what it concerns; may be empty
+  final String? sourceLocation;         // adapter-defined (line, offset, …)
+}
 ```
 
 Three frozen rules:
@@ -861,7 +997,9 @@ Three frozen rules:
    internals. This is what allows them to live in separate packages.
 2. **The engine names no format.** The string `dxf` or `ifc` does not appear in
    `jet_cad_2d`, with two deliberate exceptions: the `OriginComponent.source`
-   enum and `GroupNode.exportAsDxfGroup`.
+   enum and `GroupNode.exportAsDxfGroup`. The preserve-unknown slot is *not* a
+   third exception — it holds an opaque blob keyed by `SourceKind`, whose
+   payload shape the engine never inspects.
 3. **Loss is declared, not discovered.** Every exporter enumerates what it could
    not represent. Silent data loss is a defect.
 
@@ -949,10 +1087,15 @@ Recorded here so they are not rediscovered:
 | round-trip property: `doc → save → load → structural equality` | codec integrity |
 | serialization idempotence: `save(load(save(d))) == save(d)` | deterministic output |
 | migration fixtures, one document per historical version | backward compatibility |
-| unknown-preservation: injected foreign field / component / tag survives | the recurring invariant |
-| geometry index lifetime: delete → undo → redo → reference integrity | the `geomIndex` rules |
-| large-coordinate golden (document near 4.5e6) | coordinate rebasing |
+| unknown-preservation: injected foreign field / component / blob survives | the recurring invariant |
+| slot lifetime: delete → undo → redo → reference integrity, both stores | the shared slot rules |
+| extents determinism: same document serialized on two font configurations | derived-versus-stored |
+| large-coordinate golden (document near 4.5e6, including a nested instance placed there) | coordinate rebasing through the whole chain |
 | style-context cache: same definition under N contexts renders N distinct results | the cache key contract |
+| runtime override isolation: one instance's state change invalidates no tile and rebuilds no picture | the two-channel split |
+| paper-space invariance: same definition instanced at 0.1× and 10× renders identical stroke width | `scaleBand` and pre-divided stroke baking |
+| inheritance conformance: layer-0 and BYBLOCK resolved through two levels of nesting | the layer/style model contract |
+| cycle detection: command rejected and document unmutated; import diagnosed and recovered | the stated cycle behavior |
 | query benchmark at 50k / 500k entities (Plan 2) | spatial index scale |
 | frame-time benchmark at 50k / 500k entities (Plan 3) | rendering scale |
 | (format plans) **real-file corpus** — AutoCAD, BricsCAD, QCAD, LibreCAD, Revit exports | conformance to reality |
@@ -971,7 +1114,7 @@ tests use `flutter_test`; rendering goldens are limited to the widget package.
 
 | Plan | Scope |
 |---|---|
-| **1** | Handles, document, tree, `Transform2`, columnar entity and geometry stores with index lifetime rules, components with the `Type`/`typeId` registry, layer and style tables, tolerance and geometry primitives, command/undo/`DocChange`, minimal JSON codec |
+| **1** | Handles, document, tree, `Transform2`, columnar entity and geometry stores with the shared slot-lifetime rules, derived-versus-stored split, components with the `Type`/`typeId` registry, `Diagnostic`, layer and style tables, tolerance and geometry primitives, command/undo/`DocChange`, minimal JSON codec |
 | **2** | Two-level spatial index, hit-testing and `HitPath`, snap engine with the zero-allocation query API, query set, **query-throughput benchmark** |
 | **3** | Camera and coordinate rebasing, `StyleResolver` and the picture-cache contract, definition and tile caches, text, fills/patterns/dashes/lineweight, damage model, `DraftCanvas`, **frame-time benchmark** |
 | **4** | `InteractionTool`, `SelectionController`, `DraftPermissions`, `ViewportTransform` and `overlayBuilder`, geometric tool set, `DraftViewer`/`DraftDesigner` presets, harness |
@@ -984,13 +1127,32 @@ Flutter `Canvas` performance at scale is this architecture's largest unvalidated
 technical assumption. It is measured in two stages, because the two halves of it
 become measurable at different times:
 
-- **End of Plan 2 — query throughput.** `entitiesInRect`, `pick` and `snap`
+- **End of Plan 2 — query throughput.** `forEachInRect`, `pick` and `snap`
   against generated 50k and 500k entity documents, with no painting. This
   measures the spatial index, which is complete at that point. It deliberately
   does not measure rendering.
+
+  | Measurement | Threshold | Verdict if missed |
+  |---|---|---|
+  | `forEachInRect` returning ~2k visible entities from 500k | < 2 ms | **fail** — index design returns to Plan 2 |
+  | `pick` at 500k | < 1 ms | **fail** |
+  | `snap` at 500k, all kinds enabled | < 1 ms, zero allocation | **fail** |
+
 - **End of Plan 3 — frame time.** Pan and zoom on the same documents with the
   definition and tile caches active. This is the gate on the actual assumption,
-  and it is the one that can send the rendering design back.
+  and the one that can send the rendering design back.
+
+  | Document | Threshold | Verdict if missed |
+  |---|---|---|
+  | 50k entities, at large world coordinates | p95 frame < 16.6 ms (60fps) sustained | **fail** — blocks Plan 4; render design reopens |
+  | 500k entities | p95 frame < 33 ms (30fps) | **informational** — does not block, but caps the documented supported scale and is recorded in the README |
+  | one runtime override toggled per frame, 50k document | no tile invalidation, no picture rebuild | **fail** — the two-channel split is not working |
+
+The 50k figure is the product requirement: an authored floor plan. The 500k
+figure is the imported-architectural-drawing stretch, which is why it is
+declared informational rather than pretended to be a gate — a soft number that
+cannot fail anything is not a gate, and calling it one would be dishonest about
+what blocks what.
 
 Neither gate may be deferred into Plan 4. The cost of reversing the render
 design grows sharply once interaction is built on it.
@@ -1018,7 +1180,7 @@ attribute text on each → save and reload → sustain 60fps pan/zoom on a
 | Flutter `Canvas` insufficient at 500k entities | Plan 3 frame-time gate (Plan 2 gate covers the index half) |
 | Style contexts fail to collapse, so definition caching degenerates | Plan 3 — per-definition entry bound with declared bypass |
 | Paragraph layout cost dominates on text-heavy plans | Plan 3 — layout cache keyed by string/style/height band |
-| Web `int` is 53-bit; handle overflow | Plan 1 — range check on import |
+| Handle space is 32-bit (columns are `Uint32List`); long-lived drawings exceed it | Plan 1 — range check plus handle-space compaction on import, made safe by `OriginComponent` |
 | Flutter has no dash API; written by hand | Plan 3 task |
 | The assumption that AutoCAD preserves foreign XDATA is unverified | DXF plan — real-file corpus |
 | Hatch pattern generation cost at large scales | Plan 3 — picture cache; shader fast path held in reserve |
