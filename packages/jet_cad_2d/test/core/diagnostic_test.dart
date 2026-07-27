@@ -48,7 +48,8 @@ void main() {
       message: 'm',
       handles: [Handle(3)],
     );
-    expect(d.toJson().keys.toList(), ['severity', 'code', 'message', 'handles']);
+    expect(
+        d.toJson().keys.toList(), ['severity', 'code', 'message', 'handles']);
     expect(d.toJson()['handles'], [3]);
   });
 }

@@ -19,8 +19,10 @@ void main() {
     test('rejects values above the 32-bit ceiling', () {
       // The ceiling is a document invariant, not a web quirk: entity columns
       // are Uint32List on every platform.
-      expect(() => Handle.parseHex('100000000'), throwsA(isA<HandleRangeError>()));
-      expect(() => Handle.checked(kMaxHandle + 1), throwsA(isA<HandleRangeError>()));
+      expect(
+          () => Handle.parseHex('100000000'), throwsA(isA<HandleRangeError>()));
+      expect(() => Handle.checked(kMaxHandle + 1),
+          throwsA(isA<HandleRangeError>()));
       expect(Handle.checked(kMaxHandle), const Handle(kMaxHandle));
     });
 

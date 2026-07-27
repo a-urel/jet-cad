@@ -10,14 +10,17 @@ void main() {
   test('identity leaves points untouched', () {
     final id = Transform2.identity();
     expect(id.isIdentity, isTrue);
-    expect(t.eqPoint(id.transformPoint(Vector2(3, -7)), Vector2(3, -7)), isTrue);
+    expect(
+        t.eqPoint(id.transformPoint(Vector2(3, -7)), Vector2(3, -7)), isTrue);
   });
 
   test('translation moves points but not directions', () {
     final tr = Transform2.translation(10, 20);
-    expect(t.eqPoint(tr.transformPoint(Vector2(1, 2)), Vector2(11, 22)), isTrue);
+    expect(
+        t.eqPoint(tr.transformPoint(Vector2(1, 2)), Vector2(11, 22)), isTrue);
     // A direction has no position, so translation must not affect it.
-    expect(t.eqPoint(tr.transformDirection(Vector2(1, 2)), Vector2(1, 2)), isTrue);
+    expect(
+        t.eqPoint(tr.transformDirection(Vector2(1, 2)), Vector2(1, 2)), isTrue);
   });
 
   test('rotation by a quarter turn maps +x to +y', () {
@@ -29,7 +32,8 @@ void main() {
 
   test('negative scale mirrors and flips the determinant sign', () {
     final mirror = Transform2.scale(-1, 1);
-    expect(t.eqPoint(mirror.transformPoint(Vector2(2, 3)), Vector2(-2, 3)), isTrue);
+    expect(t.eqPoint(mirror.transformPoint(Vector2(2, 3)), Vector2(-2, 3)),
+        isTrue);
     expect(mirror.determinant, lessThan(0));
   });
 
@@ -38,12 +42,14 @@ void main() {
     // parent.multiply(child) is the child's transform in the parent's space.
     final scaleThenMove =
         Transform2.translation(10, 0).multiply(Transform2.scale(2, 2));
-    expect(t.eqPoint(scaleThenMove.transformPoint(Vector2(1, 0)), Vector2(12, 0)),
+    expect(
+        t.eqPoint(scaleThenMove.transformPoint(Vector2(1, 0)), Vector2(12, 0)),
         isTrue);
 
     final moveThenScale =
         Transform2.scale(2, 2).multiply(Transform2.translation(10, 0));
-    expect(t.eqPoint(moveThenScale.transformPoint(Vector2(1, 0)), Vector2(22, 0)),
+    expect(
+        t.eqPoint(moveThenScale.transformPoint(Vector2(1, 0)), Vector2(22, 0)),
         isTrue);
   });
 
@@ -58,7 +64,8 @@ void main() {
   });
 
   test('invert throws on a singular transform rather than producing NaN', () {
-    expect(Transform2.scale(0, 5).invert, throwsA(isA<SingularTransformError>()));
+    expect(
+        Transform2.scale(0, 5).invert, throwsA(isA<SingularTransformError>()));
   });
 
   test('scaleMagnitude is the geometric mean of the axis scales', () {

@@ -30,8 +30,7 @@ class SlotAllocator {
 
   int get liveCount => _live.length - _free.length;
 
-  bool isLive(int slot) =>
-      slot >= 0 && slot < _live.length && _live[slot];
+  bool isLive(int slot) => slot >= 0 && slot < _live.length && _live[slot];
 
   /// Live slots in ascending order. Ascending rather than insertion or hash
   /// order because every query built on a store must be stably ordered.

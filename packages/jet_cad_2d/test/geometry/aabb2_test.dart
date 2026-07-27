@@ -5,7 +5,8 @@ import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 void main() {
-  test('empty absorbs the first point instead of stretching from the origin', () {
+  test('empty absorbs the first point instead of stretching from the origin',
+      () {
     // A zero-initialised box would silently include (0,0) and inflate every
     // extent computation on a drawing that sits far from the origin.
     final box = Aabb2.empty().expandedToPoint(Vector2(4.5e6, -3.2e6));
@@ -16,7 +17,8 @@ void main() {
   });
 
   test('fromPoints bounds every point', () {
-    final box = Aabb2.fromPoints([Vector2(1, 5), Vector2(-3, 2), Vector2(0, 9)]);
+    final box =
+        Aabb2.fromPoints([Vector2(1, 5), Vector2(-3, 2), Vector2(0, 9)]);
     expect(box.min, Vector2(-3, 2));
     expect(box.max, Vector2(1, 9));
     expect(box.center, Vector2(-1, 5.5));

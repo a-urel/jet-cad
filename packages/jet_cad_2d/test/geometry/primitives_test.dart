@@ -45,12 +45,12 @@ void main() {
       // Collinear overlap has no single intersection point; callers that need
       // the overlap interval ask a different question.
       expect(
-          segmentIntersection(
-              Vector2(0, 0), Vector2(10, 0), Vector2(0, 1), Vector2(10, 1), tol),
+          segmentIntersection(Vector2(0, 0), Vector2(10, 0), Vector2(0, 1),
+              Vector2(10, 1), tol),
           isNull);
       expect(
-          segmentIntersection(
-              Vector2(0, 0), Vector2(10, 0), Vector2(5, 0), Vector2(15, 0), tol),
+          segmentIntersection(Vector2(0, 0), Vector2(10, 0), Vector2(5, 0),
+              Vector2(15, 0), tol),
           isNull);
     });
 

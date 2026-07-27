@@ -21,7 +21,8 @@ void main() {
 
   test('works across list implementations with the same elements', () {
     // Float64List is a List<double>; the geometry payload compares these.
-    expect(listEquals<double>(Float64List.fromList([1, 2]), [1.0, 2.0]), isTrue);
+    expect(
+        listEquals<double>(Float64List.fromList([1, 2]), [1.0, 2.0]), isTrue);
   });
 
   test('uses element equality, so value types compare by value', () {
