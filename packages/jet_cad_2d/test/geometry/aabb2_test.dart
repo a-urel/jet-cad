@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:jet_cad_2d/jet_cad_2d.dart' hide Aabb2;
-import 'package:jet_cad_2d/src/geometry/aabb2.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
