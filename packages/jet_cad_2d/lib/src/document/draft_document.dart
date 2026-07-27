@@ -246,9 +246,9 @@ class DraftDocument implements CommandTarget {
   /// orders child nodes.
   ///
   /// A `children` entry naming no node in the tree is skipped rather than
-  /// treated as a leaf — this is how leaf handles in older files are
-  /// tolerated. [DraftDocumentCodec] applies the same filter on the way out,
-  /// so they are never written back.
+  /// treated as a leaf — this is [DocumentTree.childNodesOf], which is how
+  /// leaf handles in older files are tolerated. [DraftDocumentCodec] applies
+  /// the same filter on the way out, so they are never written back.
   ///
   /// A group and a definition are both containers here, because a node's
   /// `parent` may name either; the root is just the outermost group.
@@ -258,12 +258,9 @@ class DraftDocument implements CommandTarget {
   ) =>
       (
         leafSlots: leavesByOwner[container] ?? const <int>[],
-        childNodes: [
-          for (final child in switch (tree[container]) {
-            GroupNode(:final children) => children,
-            _ => tree.definition(container)?.children ?? const <Handle>[],
-          })
-            if (tree[child] != null) child,
-        ],
+        childNodes: tree.childNodesOf(switch (tree[container]) {
+          GroupNode(:final children) => children,
+          _ => tree.definition(container)?.children ?? const <Handle>[],
+        }),
       );
 }

@@ -82,6 +82,30 @@ class DocumentTree {
     return [for (final h in handles) _definitions[h]!];
   }
 
+  /// [children] with every handle that does not resolve to a node in this
+  /// tree removed.
+  ///
+  /// A container's `children` holds child **nodes** only: [EntityRecord.owner]
+  /// is the one authoritative statement of which container holds a leaf, so a
+  /// leaf handle listed here would be an unsynced second copy of it. Older
+  /// files — and anything read from a DXF BLOCK — do name leaf handles there,
+  /// and they are tolerated in memory; this is the filter that keeps them from
+  /// being mistaken for nodes wherever `children` is walked.
+  ///
+  /// A handle naming neither a node nor a leaf is dropped by the same rule —
+  /// [_link] deliberately tolerates a `children` entry for a node "not added
+  /// yet", but once the whole tree is in hand (serialization, bounds) there is
+  /// nothing left to wait for: such an entry is dangling.
+  ///
+  /// Entries resolving to a node keep their existing order; everything else is
+  /// dropped. One shared predicate rather than a private copy at each call
+  /// site, because the two copies drifting apart is exactly the hazard the
+  /// leaf-containment fix removed one level down.
+  List<Handle> childNodesOf(List<Handle> children) => [
+        for (final child in children)
+          if (_nodes.containsKey(child)) child,
+      ];
+
   /// Adds a node, rejecting anything that would close a definition cycle
   /// *through this node's own instance edge*, and listing it in its parent's
   /// `children`. Nothing is mutated when it throws.
