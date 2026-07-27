@@ -134,18 +134,62 @@ void main() {
 
   test('a stored geomIndex in an older file is discarded, not honoured', () {
     // Files written before the field was dropped still carry it. Honouring it
-    // would bind the record to a slot in the *saving* store's numbering.
-    final json = DraftDocumentCodec.encode(sampleDocument());
-    final record = ((json['entities']! as List).single as Map)['record']!
-        as Map<String, Object?>;
-    record['geomIndex'] = 97;
+    // would bind the record to a slot in the *saving* store's numbering
+    // instead of the *loading* store's.
+    //
+    // A one-entity document cannot tell "discarded" from "honoured" apart:
+    // with a single slot, allocation order and the stored value agree either
+    // way. Three entities with stored indices that could not be the
+    // allocation-order slots — 7, 9, 3 in the file, against the 0, 1, 2 the
+    // loader actually assigns — make the two behaviours diverge, and each
+    // entity carries its own distinguishing geometry so a wrong pairing shows
+    // up as the wrong point, not just a wrong number.
+    final doc = DraftDocument.empty();
+    final handles = [for (var i = 0; i < 3; i++) doc.handleSeed.next()];
+    for (var i = 0; i < handles.length; i++) {
+      doc.commands.execute(AddEntityCommand(
+        record: EntityRecord(
+          handle: handles[i],
+          owner: doc.rootHandle,
+          kind: EntityKind.line,
+          layer: ReservedHandles.layerZero,
+          linetype: ReservedHandles.byLayerLinetype,
+          linetypeScale: 1.0,
+          geomIndex: 0,
+          color: const ByLayerColor(),
+          lineweight: kByLayer,
+          transparency: kByLayer,
+          flags: 0,
+        ),
+        payload: GeometryPayload(
+          coords: Float64List.fromList([i * 10.0, 0, i * 10.0 + 1, 1]),
+          scalars: Float64List(0),
+        ),
+      ));
+    }
+
+    final json = DraftDocumentCodec.encode(doc);
+    final entities = (json['entities']! as List).cast<Map<String, Object?>>();
+    const storedIndices = [7, 9, 3];
+    for (var i = 0; i < entities.length; i++) {
+      (entities[i]['record']! as Map<String, Object?>)['geomIndex'] =
+          storedIndices[i];
+    }
 
     final loaded = DraftDocumentCodec.decode(json);
-    final slot = loaded.entities.liveSlots.single;
-    expect(loaded.entities.geomIndexAt(slot), 0,
-        reason: 'the payload landed in slot 0 of a fresh geometry store');
-    expect(loaded.geometry.read(loaded.entities.geomIndexAt(slot)).pointAt(1),
-        Vector2(1, 1));
+    expect(loaded.entities.liveSlots.toList(), [0, 1, 2],
+        reason: 'slots follow allocation order, not the stored indices');
+    for (var i = 0; i < handles.length; i++) {
+      final slot = loaded.entities.slotOf(handles[i])!;
+      expect(slot, i,
+          reason: 'entity $i lands in the slot allocation order gives it, '
+              'not stored index ${storedIndices[i]}');
+      expect(
+        loaded.geometry.read(loaded.entities.geomIndexAt(slot)).pointAt(1),
+        Vector2(i * 10.0 + 1, 1),
+        reason: 'entity $i must resolve to its own payload',
+      );
+    }
   });
 
   test('serialization is idempotent, which is the determinism guarantee', () {
