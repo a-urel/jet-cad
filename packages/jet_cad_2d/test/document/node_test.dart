@@ -22,6 +22,22 @@ void main() {
       expect(group.children, [const Handle(11), const Handle(12)]);
     });
 
+    test(
+        'children is defensively copied, so mutating the caller\'s list '
+        'after construction cannot corrupt the node', () {
+      final source = [const Handle(11), const Handle(12)];
+      final mutableGroup = GroupNode(
+        handle: const Handle(40),
+        parent: Handle.none,
+        transform: Transform2.identity(),
+        children: source,
+      );
+      source.add(const Handle(99));
+      expect(mutableGroup.children, [const Handle(11), const Handle(12)]);
+      expect(() => mutableGroup.children.add(const Handle(13)),
+          throwsUnsupportedError);
+    });
+
     test('copyWith replaces one field and leaves the rest', () {
       final hidden = group.copyWith(visible: false);
       expect(hidden.visible, isFalse);
@@ -92,6 +108,22 @@ void main() {
 
     test('carries a base point, which insertion alignment depends on', () {
       expect(definition.basePoint, Vector2(0.5, 0.25));
+    });
+
+    test(
+        'children is defensively copied, so mutating the caller\'s list '
+        'after construction cannot corrupt the definition', () {
+      final source = [const Handle(31), const Handle(32)];
+      final mutableDefinition = Definition(
+        handle: const Handle(50),
+        name: 'Mutable',
+        basePoint: Vector2(0, 0),
+        children: source,
+      );
+      source.add(const Handle(99));
+      expect(mutableDefinition.children, [const Handle(31), const Handle(32)]);
+      expect(() => mutableDefinition.children.add(const Handle(13)),
+          throwsUnsupportedError);
     });
 
     test('is not a Node — a prototype has no parent and no transform', () {

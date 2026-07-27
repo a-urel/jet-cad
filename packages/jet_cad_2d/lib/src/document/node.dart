@@ -55,14 +55,18 @@ final class GroupNode extends Node {
   final List<Handle> children;
   final bool exportAsDxfGroup;
 
-  const GroupNode({
+  /// Wraps [children] with [List.unmodifiable]: the caller's growable list is
+  /// mutable in the same way [Vector2] is, so without a defensive copy a
+  /// caller that keeps a reference to the list it passed could mutate a
+  /// supposedly-immutable node afterward, silently corrupting the tree.
+  GroupNode({
     required super.handle,
     required super.parent,
     required super.transform,
-    required this.children,
+    required List<Handle> children,
     super.visible = true,
     this.exportAsDxfGroup = false,
-  });
+  }) : children = List.unmodifiable(children);
 
   GroupNode copyWith({
     Handle? handle,
@@ -204,8 +208,13 @@ final class InstanceNode extends Node {
 /// Not a [Node]: a prototype is not placed, so it has no parent and no
 /// transform. [basePoint] is DXF's block base point; insertion alignment is
 /// wrong without it.
+///
+/// `final`, not just `class`: [operator ==] tests `other is Definition`, and
+/// without `final` a subclass carrying extra state could compare equal to a
+/// base instance holding different data — a Liskov violation of exactly the
+/// value-equality guarantee this type exists to provide.
 @immutable
-class Definition {
+final class Definition {
   final Handle handle;
   final String name;
   final Vector2 basePoint;
@@ -217,14 +226,19 @@ class Definition {
   final bool isXref;
   final String xrefPath;
 
+  /// Clones [basePoint] and wraps [children] with [List.unmodifiable]: both
+  /// [Vector2] and a growable [List] are mutable, so without a defensive copy
+  /// a caller that keeps a reference to what it passed could mutate a
+  /// supposedly-immutable definition afterward, silently corrupting the tree.
   Definition({
     required this.handle,
     required this.name,
     required Vector2 basePoint,
-    required this.children,
+    required List<Handle> children,
     this.isXref = false,
     this.xrefPath = '',
-  }) : basePoint = basePoint.clone();
+  })  : basePoint = basePoint.clone(),
+        children = List.unmodifiable(children);
 
   Definition copyWith({
     Handle? handle,
