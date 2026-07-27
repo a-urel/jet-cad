@@ -155,6 +155,13 @@ void main() {
     // between, both entities would land back exactly where they started
     // regardless of removal order — which would pass even against an
     // inverse that carried slot numbers instead of payloads.
+    //
+    // "Nothing else claims a freed slot" is only ever true within one undo
+    // history. `CommandDispatcher` is exported and `DraftDocument implements
+    // CommandTarget`, so a second dispatcher over the same target allocates
+    // through ordinary commands that this dispatcher's history cannot see or
+    // reverse. The direct store write below is the shortest stand-in for
+    // that, not the only way to reach it.
     final fillerGeom = target.geometry.add(line(5, 5, 6, 6));
     target.entities.add(recordFor(target.handleSeed.next(), target.rootHandle)
         .copyWith(geomIndex: fillerGeom));

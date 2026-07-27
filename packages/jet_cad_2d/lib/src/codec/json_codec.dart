@@ -114,8 +114,12 @@ class DraftDocumentCodec {
     int undoLimit = 200,
     List<Diagnostic>? diagnostics,
   }) {
+    // Both ends, not just the future one. A declared `0`, or a negative
+    // version, is not a document this package ever wrote; accepting it would
+    // parse the file as v1 and only fail — if at all — somewhere deeper in,
+    // with a FormatException that names a field rather than the version.
     final version = json['schemaVersion'];
-    if (version is! int || version > kSchemaVersion) {
+    if (version is! int || version < 1 || version > kSchemaVersion) {
       throw SchemaVersionError(version);
     }
 
@@ -182,6 +186,13 @@ class DraftDocumentCodec {
 
   static void _loadTables(DraftDocument doc, Object? json) {
     final tables = (json! as Map).cast<String, Object?>();
+    // **Not** dead defensive code, whatever it looks like: `decode` starts
+    // from `DraftDocument.empty()`, which is not empty. It seeds layer 0 at
+    // handle 1, linetypes 2-4 and text style 5. Without these clears the
+    // file's own copies of those records collide with the seeded ones and
+    // this method throws DuplicateHandleError — on the ByLayer linetype at
+    // handle 2, since linetypes load first — for every real document. Do not
+    // "simplify" them away.
     doc.tables.layers.clear();
     doc.tables.linetypes.clear();
     doc.tables.textStyles.clear();
@@ -227,6 +238,11 @@ class DraftDocumentCodec {
   /// forward into its own `diagnostics` out-parameter.
   static List<Diagnostic> _loadTree(
       DraftDocument doc, Map<String, Object?> json) {
+    // **Not** dead defensive code, for the same reason as in `_loadTables`:
+    // `DraftDocument.empty()` seeds a synthetic root node at handle 17.
+    // Without this clear that node survives into the loaded document — the
+    // file's own root is a different handle, so nothing overwrites it — and
+    // the next save emits a stray root nobody asked for. Do not remove it.
     doc.tree.clear();
     for (final d in json['definitions']! as List) {
       final definition = Definition.fromJson(d);
@@ -246,6 +262,11 @@ class DraftDocumentCodec {
   }
 
   static void _loadEntities(DraftDocument doc, Object? json) {
+    // These two, unlike the clears in `_loadTables` and `_loadTree`, really
+    // are redundant today: `DraftDocument.empty()` seeds no entities and no
+    // geometry, so both stores are already empty here. They are kept so that
+    // all three loaders start from the same stated precondition rather than
+    // each depending on a different reading of what "empty" means.
     doc.entities.clear();
     doc.geometry.clear();
     for (final e in json! as List) {

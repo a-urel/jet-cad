@@ -132,7 +132,17 @@ class DraftDocument implements CommandTarget {
   ///
   /// Not a command and not undoable: slot values change, so no recorded inverse
   /// could be replayed against the new numbering.
+  ///
+  /// Refuses to run after [dispose] — and refuses *before* mutating anything,
+  /// which is the whole point of the check. `commands.notifyPurged()` at the
+  /// end throws `StateError` on the closed stream controller, so without this
+  /// guard a caller saw an exception, reasonably concluded nothing had
+  /// happened, and was wrong: both stores had already been compacted and every
+  /// slot renumbered. `execute`, `undo` and `redo` guard the same way.
   void purge() {
+    if (commands.isDisposed) {
+      throw StateError('DraftDocument.purge() after dispose()');
+    }
     final geometryRemap = geometry.purge();
     for (final slot in entities.liveSlots.toList()) {
       final record = entities.read(slot);

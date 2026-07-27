@@ -135,6 +135,12 @@ class CommandDispatcher {
 
   Future<void> dispose() => _changes.close();
 
+  /// Whether [dispose] has run. Anything that mutates the target and then
+  /// notifies — [DraftDocument.purge] is the one such operation that is not a
+  /// command — must consult this *before* it mutates, for the reason given on
+  /// [_checkNotDisposed].
+  bool get isDisposed => _changes.isClosed;
+
   void _require(DraftCommand command) {
     if (!permissions.allows(command.capability)) {
       throw PermissionDeniedError(command.capability, command.label);
@@ -147,7 +153,7 @@ class CommandDispatcher {
   /// state on a dispatcher the caller believes is inert, and surfacing only
   /// an opaque `StateError` from the stream rather than from this contract.
   void _checkNotDisposed() {
-    if (_changes.isClosed) {
+    if (isDisposed) {
       throw StateError('CommandDispatcher used after dispose()');
     }
   }

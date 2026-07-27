@@ -94,6 +94,19 @@ void main() {
     );
   });
 
+  test('refuses a schema version below the first one that ever existed', () {
+    // A file declaring 0 or a negative version is not one this package wrote.
+    // Parsing it as v1 would fail — if at all — much deeper in, with a
+    // FormatException naming some field rather than the version.
+    for (final version in [0, -1]) {
+      final json = DraftDocumentCodec.encode(DraftDocument.empty())
+        ..['schemaVersion'] = version;
+      expect(() => DraftDocumentCodec.decode(json),
+          throwsA(isA<SchemaVersionError>()),
+          reason: 'schemaVersion $version');
+    }
+  });
+
   test('round-trips a document structurally', () {
     final source = sampleDocument();
     final loaded = DraftDocumentCodec.decode(DraftDocumentCodec.encode(source));

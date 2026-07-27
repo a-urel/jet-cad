@@ -338,6 +338,31 @@ void main() {
         reason: 'purge is not undoable, so history cannot survive it');
   });
 
+  test('purge after dispose refuses before it renumbers anything', () async {
+    // notifyPurged() throws on the closed controller, so an unguarded purge
+    // compacted both stores and cleared history and *then* handed the caller
+    // an exception — who would reasonably conclude nothing had happened.
+    final doc = DraftDocument.empty();
+    final a = doc.handleSeed.next();
+    final b = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+        record: lineRecord(a, doc.rootHandle), payload: line(0, 0, 1, 1)));
+    doc.commands.execute(AddEntityCommand(
+        record: lineRecord(b, doc.rootHandle), payload: line(5, 5, 6, 6)));
+    doc.commands.execute(RemoveEntityCommand(a));
+
+    final slotBefore = doc.entities.slotOf(b)!;
+    expect(slotBefore, isNot(0),
+        reason: 'sanity: b sits above a hole, so a purge would move it');
+
+    await doc.dispose();
+    expect(doc.purge, throwsStateError);
+
+    // Nothing was renumbered, so the caller's conclusion is now correct.
+    expect(doc.entities.slotOf(b), slotBefore);
+    expect(doc.geometry.liveCount, 1);
+  });
+
   test('purge emits DocumentPurged', () async {
     final doc = DraftDocument.empty();
     final events = <DocChange>[];

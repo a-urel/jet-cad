@@ -31,15 +31,22 @@ GeometryPayload at(double x) => GeometryPayload(
 /// allocator's free list is a stack, and undo is by construction a perfect
 /// inverse of every command it replays, so a fully-undone sequence always
 /// lands every entity back on the exact slot it started from, no matter what
-/// order the removes happened in or what else was interleaved and later
-/// undone in turn. An implementation whose inverse commands carried slot
-/// numbers instead of payloads would pass that shape of test too. To
-/// actually exercise the rule, the first test below claims a freed slot
-/// through a write that never goes through the dispatcher at all — a direct
-/// store write standing in for any allocation this undo session does not
-/// own — so that when the dispatcher later restores something, the slot it
-/// used to have is provably no longer available and the record's rewritten
-/// geomIndex is what has to carry the day.
+/// order the removes happened in.
+///
+/// That holds **within a single undo history**, and only there. It is not a
+/// property of commands: `DraftDocument implements CommandTarget` and
+/// `CommandDispatcher` is exported, so a second dispatcher over the same
+/// target is an ordinary command-level route whose allocations the first
+/// dispatcher's history knows nothing about — the interleaving below is a
+/// direct store write only because that is the shortest stand-in for it.
+///
+/// An implementation whose inverse commands carried slot numbers instead of
+/// payloads would pass the naive shape of test. To actually exercise the
+/// rule, the first test below claims a freed slot through a write that never
+/// goes through the dispatcher at all — standing in for any allocation this
+/// undo session does not own — so that when the dispatcher later restores
+/// something, the slot it used to have is provably no longer available and
+/// the record's rewritten geomIndex is what has to carry the day.
 void main() {
   test('undo restores through freshly-claimed slots, not merely mirrored ones',
       () {
