@@ -38,10 +38,24 @@ void main() {
 
   test('reports a root that names no node', () {
     final doc = DraftDocument.empty();
+    final oldRoot = doc.rootHandle;
     doc.tree.setRoot(const Handle(999));
 
-    final codes = [for (final d in doc.validate()) d.code];
-    expect(codes, contains(ValidationCodes.rootMissing));
+    // Asserting the full list, not just `contains(rootMissing)`: setRoot
+    // does not touch the old root node, which is still in the tree with
+    // parent Handle.none and nothing listing it — so it legitimately also
+    // trips parentChildMismatch. A `contains` assertion would not notice if
+    // the intended rootMissing diagnostic regressed as long as some other
+    // diagnostic happened to still contain the code.
+    final result = doc.validate();
+    expect([
+      for (final d in result) d.code
+    ], [
+      ValidationCodes.rootMissing,
+      ValidationCodes.parentChildMismatch,
+    ]);
+    expect(result[0].handles, [const Handle(999)]);
+    expect(result[1].handles, [oldRoot, Handle.none]);
   });
 
   test('reports an entity whose owner names no container', () {
@@ -72,7 +86,11 @@ void main() {
 
   test('reports parent and children disagreeing', () {
     final doc = DraftDocument.empty();
-    // The node says its parent is 100; 100 does not list it.
+    // Neither node is linked by addNodeUnchecked: 100 says its parent is the
+    // root, but the root's own `children` was never updated to list it, and
+    // likewise 101 says its parent is 100 while 100's `children` stays [].
+    // That is two mismatches, not one — asserted as the full list below, so
+    // a regression that drops either one cannot hide behind `contains`.
     doc.tree.addNodeUnchecked(GroupNode(
       handle: const Handle(100),
       parent: doc.rootHandle,
@@ -86,8 +104,15 @@ void main() {
       children: const [],
     ));
 
-    final codes = [for (final d in doc.validate()) d.code];
-    expect(codes, contains(ValidationCodes.parentChildMismatch));
+    final result = doc.validate();
+    expect([
+      for (final d in result) d.code
+    ], [
+      ValidationCodes.parentChildMismatch,
+      ValidationCodes.parentChildMismatch,
+    ]);
+    expect(result[0].handles, [const Handle(100), doc.rootHandle]);
+    expect(result[1].handles, [const Handle(101), const Handle(100)]);
   });
 
   test('reports a group cycle rather than hanging', () {
@@ -149,6 +174,136 @@ void main() {
     expect(codes, contains(ValidationCodes.definitionCycle));
   }, timeout: const Timeout(Duration(seconds: 5)));
 
+  test(
+      'does not throw when a group cycle sits inside a definition reachable '
+      'from another definition', () {
+    // Regression for a NodeCycleError that used to escape validate()
+    // uncaught. D contains an instance of E; E contains group A, which
+    // contains group B, which contains group A again — a group `children`
+    // cycle nested inside E's subtree. Checking whether E reaches D walks
+    // into that cycle via tree.definitionReaches, which is documented to
+    // throw NodeCycleError rather than report on a group cycle. Before the
+    // fix, that exception propagated straight out of validate(), discarding
+    // the tree.cycle diagnostic step 5 had already collected for the same
+    // cycle. validate() must return normally and must still report it.
+    final doc = DraftDocument.empty();
+    const defD = Handle(200);
+    const defE = Handle(201);
+    const instanceOfE = Handle(300);
+    const groupA = Handle(400);
+    const groupB = Handle(401);
+
+    doc.tree.addDefinition(Definition(
+      handle: defD,
+      name: 'D',
+      basePoint: Vector2.zero(),
+      children: const [instanceOfE],
+    ));
+    doc.tree.addNodeUnchecked(InstanceNode(
+      handle: instanceOfE,
+      parent: defD,
+      transform: Transform2.identity(),
+      definition: defE,
+      layer: ReservedHandles.layerZero,
+    ));
+    doc.tree.addDefinition(Definition(
+      handle: defE,
+      name: 'E',
+      basePoint: Vector2.zero(),
+      children: const [groupA],
+    ));
+    doc.tree.addNodeUnchecked(GroupNode(
+      handle: groupA,
+      parent: defE,
+      transform: Transform2.identity(),
+      children: const [groupB],
+    ));
+    doc.tree.addNodeUnchecked(GroupNode(
+      handle: groupB,
+      parent: groupA,
+      transform: Transform2.identity(),
+      children: const [groupA],
+    ));
+
+    // The call itself must not throw.
+    final result = doc.validate();
+    final codes = [for (final d in result) d.code];
+    expect(codes, contains(ValidationCodes.cycle));
+  }, timeout: const Timeout(Duration(seconds: 5)));
+
+  test('reports a definition cycle through every shared edge, not just one',
+      () {
+    // A has two instance children: one of B, one of C. B's own instance
+    // reaches back to A, and so does C's — two distinct cycles (A<->B and
+    // A<->C) that share the definition A. A caller that repairs only
+    // whichever edge is reported first and re-validates must still see the
+    // other one on the very next call, not discover it a pass later.
+    final doc = DraftDocument.empty();
+    const defA = Handle(200);
+    const defB = Handle(201);
+    const defC = Handle(202);
+    const instAtoB = Handle(300);
+    const instAtoC = Handle(301);
+    const instBtoA = Handle(302);
+    const instCtoA = Handle(303);
+
+    doc.tree.addDefinition(Definition(
+      handle: defA,
+      name: 'A',
+      basePoint: Vector2.zero(),
+      children: const [instAtoB, instAtoC],
+    ));
+    doc.tree.addDefinition(Definition(
+      handle: defB,
+      name: 'B',
+      basePoint: Vector2.zero(),
+      children: const [instBtoA],
+    ));
+    doc.tree.addDefinition(Definition(
+      handle: defC,
+      name: 'C',
+      basePoint: Vector2.zero(),
+      children: const [instCtoA],
+    ));
+    doc.tree.addNodeUnchecked(InstanceNode(
+      handle: instAtoB,
+      parent: defA,
+      transform: Transform2.identity(),
+      definition: defB,
+      layer: ReservedHandles.layerZero,
+    ));
+    doc.tree.addNodeUnchecked(InstanceNode(
+      handle: instAtoC,
+      parent: defA,
+      transform: Transform2.identity(),
+      definition: defC,
+      layer: ReservedHandles.layerZero,
+    ));
+    doc.tree.addNodeUnchecked(InstanceNode(
+      handle: instBtoA,
+      parent: defB,
+      transform: Transform2.identity(),
+      definition: defA,
+      layer: ReservedHandles.layerZero,
+    ));
+    doc.tree.addNodeUnchecked(InstanceNode(
+      handle: instCtoA,
+      parent: defC,
+      transform: Transform2.identity(),
+      definition: defA,
+      layer: ReservedHandles.layerZero,
+    ));
+
+    final cycles = doc
+        .validate()
+        .where((d) => d.code == ValidationCodes.definitionCycle)
+        .toList();
+    expect(cycles.any((d) => d.handles.contains(defB)), isTrue,
+        reason: 'the A<->B cycle must be reported');
+    expect(cycles.any((d) => d.handles.contains(defC)), isTrue,
+        reason: 'the A<->C cycle must be reported');
+  }, timeout: const Timeout(Duration(seconds: 5)));
+
   test('reports a leaf handle sitting in a children list', () {
     final doc = DraftDocument.empty();
     final entityHandle = doc.handleSeed.next();
@@ -167,27 +322,55 @@ void main() {
     expect(codes, contains(ValidationCodes.leafInChildren));
   });
 
-  test('diagnostics come back in a stable order across runs', () {
-    DraftDocument broken() {
-      final doc = DraftDocument.empty();
-      doc.entities.add(line(const Handle(500), const Handle(4242)));
-      doc.entities.add(line(const Handle(501), const Handle(4243)));
-      doc.tree.addNodeUnchecked(GroupNode(
-        handle: const Handle(100),
-        parent: doc.rootHandle,
-        transform: Transform2.identity(),
-        children: const [Handle(777)],
-      ));
-      return doc;
-    }
+  test('diagnostics come back in ascending-handle order, not insertion order',
+      () {
+    final doc = DraftDocument.empty();
+    // Added out of ascending order on purpose — 103, then 101, then 102 —
+    // so a pass would prove the order is a property of the handles, not an
+    // accident of the order addNodeUnchecked happened to be called in.
+    doc.tree.addNodeUnchecked(GroupNode(
+      handle: const Handle(103),
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      children: const [Handle(973)],
+    ));
+    doc.tree.addNodeUnchecked(GroupNode(
+      handle: const Handle(101),
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      children: const [Handle(971)],
+    ));
+    doc.tree.addNodeUnchecked(GroupNode(
+      handle: const Handle(102),
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      children: const [Handle(972)],
+    ));
 
-    final first = [
-      for (final d in broken().validate()) '${d.code}:${d.handles}'
-    ];
-    final second = [
-      for (final d in broken().validate()) '${d.code}:${d.handles}'
-    ];
-    expect(first, equals(second));
-    expect(first, isNotEmpty);
+    final result = doc.validate();
+
+    // Each group's dangling child is reported first, in ascending container
+    // order (101, 102, 103); each group also mismatches the root, which was
+    // never updated to list it, reported next in the same ascending order.
+    expect([
+      for (final d in result) d.code
+    ], [
+      ValidationCodes.danglingChild,
+      ValidationCodes.danglingChild,
+      ValidationCodes.danglingChild,
+      ValidationCodes.parentChildMismatch,
+      ValidationCodes.parentChildMismatch,
+      ValidationCodes.parentChildMismatch,
+    ]);
+    expect([
+      for (final d in result) d.handles
+    ], [
+      [const Handle(101), const Handle(971)],
+      [const Handle(102), const Handle(972)],
+      [const Handle(103), const Handle(973)],
+      [const Handle(101), doc.rootHandle],
+      [const Handle(102), doc.rootHandle],
+      [const Handle(103), doc.rootHandle],
+    ]);
   });
 }

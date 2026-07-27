@@ -2,6 +2,7 @@ import '../core/diagnostic.dart';
 import '../core/handle.dart';
 import 'draft_document.dart';
 import 'node.dart';
+import 'tree.dart';
 
 /// The codes [DocumentValidation.validate] can emit.
 ///
@@ -89,6 +90,19 @@ extension DocumentValidation on DraftDocument {
               'Container ${entry.key.value} lists entity ${child.value} as a '
               'child node. Leaf containment is EntityRecord.owner.',
               [entry.key, child]));
+        } else if (tree.definition(child) != null) {
+          // Resolves to something — a definition — just not to a node. A
+          // definition cannot be placed directly; only an InstanceNode that
+          // references it can be. Still `danglingChild`: the fault is the
+          // same shape ("this children entry cannot be drawn as listed"),
+          // and the seven codes are fixed, but the message must not claim
+          // the handle resolves to nothing when it resolves to a definition.
+          out.add(error(
+              ValidationCodes.danglingChild,
+              'Container ${entry.key.value} lists ${child.value}, which is '
+              'a definition, not a node. A definition cannot be placed '
+              'directly; only an InstanceNode referencing it can be.',
+              [entry.key, child]));
         } else {
           out.add(error(
               ValidationCodes.danglingChild,
@@ -107,13 +121,23 @@ extension DocumentValidation on DraftDocument {
             ValidationCodes.parentChildMismatch,
             'Node ${node.handle.value} names parent ${node.parent.value} but '
             'is listed by ${listed?.value}.',
-            [node.handle, node.parent]));
+            [node.handle, node.parent, if (listed != null) listed]));
       }
     }
 
     // 5. Group cycles. White/grey/black DFS: a grey node reached again is a
     //    back edge. This must not use `ancestorsOf`, which throws rather than
     //    reporting, and must not recurse — a cycle would blow the stack.
+    //
+    //    This walks `children` only, deliberately: `parent` is not walked
+    //    here, so a cycle that exists purely as a `parent`-pointer loop with
+    //    no matching `children` entries is not found by this DFS. It does
+    //    not go unreported — a `parent` chain that no `children` list agrees
+    //    with is exactly what the parentChildMismatch loop above already
+    //    catches, for every node on such a loop. Do not "fix" this into
+    //    walking `parent` as well: `ancestorsOf`, which does walk `parent`,
+    //    is the thing this method exists to avoid, precisely because it
+    //    throws on a loop instead of reporting one.
     const white = 0, grey = 1, black = 2;
     final colour = <Handle, int>{};
     for (final start in childrenOf.keys) {
@@ -155,26 +179,45 @@ extension DocumentValidation on DraftDocument {
     }
 
     // 6. Definition cycles: an instance inside definition D that reaches D.
-    // `reported` tracks definitions already flagged so a cyclic definition
-    // graph cannot make `tree.definitionReaches` loop forever here: once a
-    // definition has been reported, every other instance reaching the same
-    // cycle is skipped rather than re-walked.
-    final reportedDefinitions = <Handle>{};
+    //
+    // No "already reported" skip-set here: `tree.definitionReaches` carries
+    // its own `visited` set (see tree.dart) and provably terminates on any
+    // definition graph, cyclic or not, so nothing here needs to bound it.
+    // Skipping a definition once one cycle involving it is found would also
+    // be wrong, not just unnecessary: the same definition can sit on two
+    // distinct cycles through two different instances — the common shape
+    // for a repeatedly-instanced block — and a caller repairing only the
+    // first-found edge deserves to see the second one immediately rather
+    // than on a second pass.
     for (final definition in tree.definitions) {
-      if (reportedDefinitions.contains(definition.handle)) continue;
       for (final child in definition.children) {
         final node = tree[child];
         if (node is! InstanceNode) continue;
-        if (reportedDefinitions.contains(node.definition)) continue;
-        if (node.definition == definition.handle ||
-            tree.definitionReaches(node.definition, definition.handle)) {
-          reportedDefinitions.add(definition.handle);
+        var reachesOwner = node.definition == definition.handle;
+        if (!reachesOwner) {
+          try {
+            reachesOwner =
+                tree.definitionReaches(node.definition, definition.handle);
+          } on NodeCycleError {
+            // definitionReaches walks group `children` while looking for an
+            // instance of the target definition, and is documented to throw
+            // NodeCycleError — not report — when that walk re-enters a
+            // group already open on it. Step 5 above has already reported
+            // that same group cycle as `tree.cycle`; without this catch the
+            // exception would propagate out of validate() and discard every
+            // diagnostic already collected in `out`, which is exactly the
+            // "throws instead of reports" failure this method exists to
+            // avoid. Do not change definitionReaches — other code depends
+            // on it throwing here.
+            continue;
+          }
+        }
+        if (reachesOwner) {
           out.add(error(
               ValidationCodes.definitionCycle,
               'Definition ${definition.handle.value} contains instance '
               '${child.value} of ${node.definition.value}, which reaches it.',
               [definition.handle, child, node.definition]));
-          break;
         }
       }
     }
