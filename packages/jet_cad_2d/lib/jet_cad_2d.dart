@@ -13,6 +13,7 @@ export 'src/document/command.dart';
 export 'src/document/commands.dart';
 export 'src/document/component.dart';
 export 'src/document/doc_change.dart';
+export 'src/document/draft_document.dart';
 export 'src/document/extents.dart';
 export 'src/document/header.dart';
 export 'src/document/node.dart';
