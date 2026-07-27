@@ -9,4 +9,6 @@ export 'src/core/diagnostic.dart';
 export 'src/core/handle.dart';
 export 'src/core/list_equality.dart';
 export 'src/core/tolerance.dart';
+export 'src/geometry/aabb2.dart';
+export 'src/geometry/primitives.dart';
 export 'src/geometry/transform2.dart';

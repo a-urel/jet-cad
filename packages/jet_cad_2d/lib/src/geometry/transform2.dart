@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:meta/meta.dart';
-import 'package:vector_math/vector_math_64.dart';
+import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import '../core/tolerance.dart';
 
