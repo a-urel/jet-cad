@@ -10,6 +10,7 @@ export 'src/core/handle.dart';
 export 'src/core/list_equality.dart';
 export 'src/core/tolerance.dart';
 export 'src/document/command.dart';
+export 'src/document/commands.dart';
 export 'src/document/component.dart';
 export 'src/document/doc_change.dart';
 export 'src/document/node.dart';
