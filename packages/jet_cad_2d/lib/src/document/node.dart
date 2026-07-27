@@ -52,7 +52,22 @@ sealed class Node {
 /// read on import sets [exportAsDxfGroup] so a file that arrived with GROUPs
 /// leaves with GROUPs.
 final class GroupNode extends Node {
+  /// Child **nodes** only — never leaf entities.
+  ///
+  /// Which container holds a leaf is said once, by [EntityRecord.owner], and
+  /// that is the authoritative answer. Listing a leaf here too would be a
+  /// second copy of the same fact with nothing keeping the two in step:
+  /// [AddEntityCommand] sets `owner` and does not link, [RemoveEntityCommand]
+  /// removes the record and does not unlist, and the codec used to write
+  /// whichever version the file happened to carry.
+  ///
+  /// Older files do name leaf handles here and are tolerated — a handle that
+  /// is not a node is skipped wherever this list is walked — but nothing
+  /// writes one, and a save does not emit one.
+  ///
+  /// Order is draw order, and it is the file's order when there is one.
   final List<Handle> children;
+
   final bool exportAsDxfGroup;
 
   /// Wraps [children] with [List.unmodifiable]: the caller's growable list is
@@ -218,6 +233,12 @@ final class Definition {
   final Handle handle;
   final String name;
   final Vector2 basePoint;
+
+  /// Child **nodes** only — never leaf entities; see [GroupNode.children],
+  /// which carries the same contract for the same reason. A DXF BLOCK lists
+  /// its entities, and a definition read from one therefore arrives with leaf
+  /// handles in here; they are tolerated on the way in and are not written
+  /// back out.
   final List<Handle> children;
 
   /// True when this block names an external drawing. Xref resolution is a

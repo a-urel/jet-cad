@@ -125,8 +125,8 @@ class DraftDocument implements CommandTarget {
   ///
   /// Computed once per definition and reused by every instance — the same
   /// sharing the spatial index and the picture cache rely on in later plans.
-  Aabb2 definitionBounds(Handle definition) =>
-      _boundsOfContainer(definition, <Handle>{}, <Handle, Aabb2>{});
+  Aabb2 definitionBounds(Handle definition) => _boundsOfContainer(
+      definition, <Handle>{}, <Handle, Aabb2>{}, _leavesByOwner());
 
   /// Compacts both columnar stores and clears history.
   ///
@@ -148,9 +148,27 @@ class DraftDocument implements CommandTarget {
 
   Future<void> dispose() => commands.dispose();
 
-  Aabb2 _computeExtents() {
-    final memo = <Handle, Aabb2>{};
-    return _boundsOfContainer(tree.root, <Handle>{}, memo);
+  Aabb2 _computeExtents() => _boundsOfContainer(
+      tree.root, <Handle>{}, <Handle, Aabb2>{}, _leavesByOwner());
+
+  /// Every live entity slot bucketed by its owner, ascending within a bucket.
+  ///
+  /// Built once per bounds computation and threaded down the recursion. The
+  /// previous shape asked "which live entities does *this* container own?"
+  /// once per container by scanning the whole entity store and filtering on
+  /// `ownerAt`, which made a full recompute O(containers x entities): 400
+  /// groups over 8000 entities measured 90 ms, and `invalidateDerived()` fires
+  /// on every command. One bucketing pass makes the walk linear in entities,
+  /// which is what a million-entity document requires. The result is identical
+  /// either way — this is the same filter, evaluated once instead of once per
+  /// container.
+  Map<Handle, List<int>> _leavesByOwner() {
+    final byOwner = <Handle, List<int>>{};
+    // `liveSlots` yields ascending slots, so each bucket is ascending too.
+    for (final slot in entities.liveSlots) {
+      (byOwner[entities.ownerAt(slot)] ??= <int>[]).add(slot);
+    }
+    return byOwner;
   }
 
   /// Union of everything a container holds, expressed in that container's own
@@ -159,6 +177,7 @@ class DraftDocument implements CommandTarget {
     Handle container,
     Set<Handle> visiting,
     Map<Handle, Aabb2> memo,
+    Map<Handle, List<int>> leavesByOwner,
   ) {
     final cached = memo[container];
     if (cached != null) return cached;
@@ -166,10 +185,10 @@ class DraftDocument implements CommandTarget {
     // keeps a malformed in-memory tree from recursing forever.
     if (!visiting.add(container)) return Aabb2.empty();
 
+    final held = _childrenOf(container, leavesByOwner);
     var box = Aabb2.empty();
 
-    for (final slot in entities.liveSlots) {
-      if (entities.ownerAt(slot) != container) continue;
+    for (final slot in held.leafSlots) {
       final record = entities.read(slot);
       box = box.union(entityBounds(
         kind: record.kind,
@@ -179,20 +198,16 @@ class DraftDocument implements CommandTarget {
       ));
     }
 
-    for (final child in _childrenOf(container)) {
-      final node = tree[child];
-      switch (node) {
+    for (final child in held.childNodes) {
+      switch (tree[child]!) {
         case GroupNode(:final transform):
-          box = box.union(_boundsOfContainer(child, visiting, memo)
-              .transformedBy(transform));
+          box = box.union(
+              _boundsOfContainer(child, visiting, memo, leavesByOwner)
+                  .transformedBy(transform));
         case InstanceNode(:final definition, :final transform):
-          box = box.union(_boundsOfContainer(definition, visiting, memo)
-              .transformedBy(transform));
-        case null:
-          // A `children` list may name a leaf entity as well as a node — a
-          // definition's children routinely do — and those are accounted for
-          // by the entity scan above, not here.
-          break;
+          box = box.union(
+              _boundsOfContainer(definition, visiting, memo, leavesByOwner)
+                  .transformedBy(transform));
       }
     }
 
@@ -201,19 +216,44 @@ class DraftDocument implements CommandTarget {
     return box;
   }
 
-  /// What [container] holds, in the order it holds it.
+  /// What [container] holds: its leaf entities, and its child nodes.
   ///
-  /// Reads the container's own `children` list. `DocumentTree` maintains that
-  /// list on every add, replace and remove, so it is current for a live,
-  /// mutated document and not only for one built by hand. It is also the same
-  /// list the cycle-detection walks read, so extents and the cycle guard now
-  /// agree on what containment means — and it is ordered, which a scan over
-  /// every node keyed on `parent` was not.
+  /// Leaf containment is stated exactly once, by [EntityRecord.owner], and
+  /// that statement is authoritative. Leaves are therefore found by owner —
+  /// through the [leavesByOwner] buckets — and never by reading a `children`
+  /// list, which holds child **nodes** only. The two used to be independent
+  /// copies of the same fact with nothing syncing them: [AddEntityCommand]
+  /// sets `owner` and does not link, so a command-built definition reported no
+  /// children while its own entities named it as owner, while a file-loaded
+  /// one listed them; and [RemoveEntityCommand] does not unlist, so a loaded
+  /// container kept a dangling child that every later save re-emitted.
+  ///
+  /// Leaves come back in ascending **slot** order. That is insertion order
+  /// within a session and file order after a load, but it is emphatically not
+  /// an explicit z-order and nothing may treat it as one: a leaf's slot moves
+  /// under `purge()` and under undo, neither of which is a reordering anyone
+  /// asked for. Only [GroupNode.children] carries a deliberate order, and it
+  /// orders child nodes.
+  ///
+  /// A `children` entry naming no node in the tree is skipped rather than
+  /// treated as a leaf — this is how leaf handles in older files are
+  /// tolerated. [DraftDocumentCodec] applies the same filter on the way out,
+  /// so they are never written back.
   ///
   /// A group and a definition are both containers here, because a node's
   /// `parent` may name either; the root is just the outermost group.
-  List<Handle> _childrenOf(Handle container) => switch (tree[container]) {
-        GroupNode(:final children) => children,
-        _ => tree.definition(container)?.children ?? const [],
-      };
+  ({List<int> leafSlots, List<Handle> childNodes}) _childrenOf(
+    Handle container,
+    Map<Handle, List<int>> leavesByOwner,
+  ) =>
+      (
+        leafSlots: leavesByOwner[container] ?? const <int>[],
+        childNodes: [
+          for (final child in switch (tree[container]) {
+            GroupNode(:final children) => children,
+            _ => tree.definition(container)?.children ?? const <Handle>[],
+          })
+            if (tree[child] != null) child,
+        ],
+      );
 }

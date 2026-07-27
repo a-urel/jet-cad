@@ -49,9 +49,19 @@ class DraftDocumentCodec {
           ],
           'appIds': [for (final r in doc.tables.appIds.records) r.toJson()],
         },
-        'definitions': [for (final d in doc.tree.definitions) d.toJson()],
+        'definitions': [
+          for (final d in doc.tree.definitions)
+            d.copyWith(children: _childNodesOf(doc, d.children)).toJson(),
+        ],
         'root': doc.rootHandle.toJson(),
-        'nodes': [for (final n in doc.tree.nodes) n.toJson()],
+        'nodes': [
+          for (final n in doc.tree.nodes)
+            switch (n) {
+              GroupNode() =>
+                n.copyWith(children: _childNodesOf(doc, n.children)).toJson(),
+              InstanceNode() => n.toJson(),
+            },
+        ],
         'entities': [
           // Ascending slot order, which is ascending insertion order and is
           // stable across a save/load cycle.
@@ -71,6 +81,26 @@ class DraftDocumentCodec {
       };
 
   static String encodeToString(DraftDocument doc) => jsonEncode(encode(doc));
+
+  /// [children] with every handle that is not a node in [doc] removed.
+  ///
+  /// A container's `children` holds child **nodes** only:
+  /// [EntityRecord.owner] is the one authoritative statement of which
+  /// container holds a leaf, so a leaf handle listed here would be an unsynced
+  /// second copy of it. Older files — and anything read from a DXF BLOCK — do
+  /// name leaf handles there, and they are tolerated in memory; this is what
+  /// "not re-emitted" means.
+  ///
+  /// A handle naming neither a node nor a leaf is dropped by the same rule.
+  /// [DocumentTree._link] deliberately tolerates a `children` entry for a node
+  /// "not added yet", but at encode time the whole document is in hand and
+  /// there is nothing left to wait for: such an entry is dangling, and writing
+  /// it back would preserve it for the life of the file.
+  static List<Handle> _childNodesOf(DraftDocument doc, List<Handle> children) =>
+      [
+        for (final child in children)
+          if (doc.tree[child] != null) child,
+      ];
 
   /// [diagnostics], when supplied, receives every diagnostic import produces —
   /// currently only [DocumentTree.repairCycles]'s reports of a dropped

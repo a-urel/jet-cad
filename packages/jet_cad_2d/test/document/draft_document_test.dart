@@ -75,7 +75,9 @@ void main() {
       handle: defHandle,
       name: 'Unit',
       basePoint: Vector2.zero(),
-      children: [entityHandle],
+      // `children` holds child nodes only; the entity below states its own
+      // containment through EntityRecord.owner, which is authoritative.
+      children: const [],
     ));
     doc.commands.execute(AddEntityCommand(
       record: lineRecord(entityHandle, defHandle),
@@ -119,7 +121,7 @@ void main() {
       handle: defHandle,
       name: 'Unit',
       basePoint: Vector2.zero(),
-      children: [entityHandle],
+      children: const [],
     ));
     doc.commands.execute(AddEntityCommand(
       record: lineRecord(entityHandle, defHandle),
@@ -154,7 +156,7 @@ void main() {
       handle: defHandle,
       name: 'Unit',
       basePoint: Vector2.zero(),
-      children: [entityHandle],
+      children: const [],
     ));
     doc.commands.execute(AddEntityCommand(
       record: lineRecord(entityHandle, defHandle),
@@ -162,6 +164,155 @@ void main() {
     ));
     expect(doc.definitionBounds(defHandle).max, Vector2(2, 2));
     expect(doc.definitionBounds(defHandle).max, Vector2(2, 2));
+  });
+
+  test('a command-built container and a file-loaded one hold the same leaves',
+      () {
+    // Two routes to one document. The command route sets EntityRecord.owner
+    // and never touches `children`. The file route arrives with the leaf
+    // handles listed in `children` too, which is what every older writer —
+    // and every DXF BLOCK — puts there. `owner` is the single source of
+    // truth, so the two must agree on what the container holds.
+    final doc = DraftDocument.empty();
+    final innerDef = doc.handleSeed.next();
+    final outerDef = doc.handleSeed.next();
+    for (final (handle, name) in [(innerDef, 'Inner'), (outerDef, 'Outer')]) {
+      doc.tree.addDefinition(Definition(
+        handle: handle,
+        name: name,
+        basePoint: Vector2.zero(),
+        children: const [],
+      ));
+    }
+
+    final innerLeaf = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+      record: lineRecord(innerLeaf, innerDef),
+      payload: line(0, 0, 1, 1),
+    ));
+
+    // Two leaves *and* a child node under the outer definition, so the two
+    // kinds of containment cannot be mistaken for one another, and the leaves
+    // sit on either side of the node in the older file's ordering.
+    final leafA = doc.handleSeed.next();
+    final leafB = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+      record: lineRecord(leafA, outerDef),
+      payload: line(0, 0, 2, 2),
+    ));
+    doc.commands.execute(AddEntityCommand(
+      record: lineRecord(leafB, outerDef),
+      payload: line(-4, -4, -3, -3),
+    ));
+    final instance = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: instance,
+      parent: outerDef,
+      transform: Transform2.translation(10, 0),
+      definition: innerDef,
+      layer: ReservedHandles.layerZero,
+    )));
+
+    expect(doc.tree.definition(outerDef)!.children, [instance],
+        reason: 'children lists the child node, and neither leaf');
+    // leafB down to (-4,-4), leafA up to (2,2), the instance out to (11,1).
+    expect(doc.definitionBounds(outerDef).toJson(), [-4.0, -4.0, 11.0, 2.0]);
+
+    // The same document as an older writer would have saved it.
+    final json = DraftDocumentCodec.encode(doc);
+    final outer = (json['definitions']! as List)
+        .cast<Map<String, Object?>>()
+        .firstWhere((d) => d['handle'] == outerDef.value);
+    outer['children'] = [leafA.value, instance.value, leafB.value];
+
+    final loaded = DraftDocumentCodec.decode(json);
+
+    // Same leaves: the leaf handles in `children` are ignored, not counted a
+    // second time and not mistaken for nodes.
+    expect(loaded.definitionBounds(outerDef).toJson(),
+        doc.definitionBounds(outerDef).toJson());
+    expect(loaded.definitionBounds(innerDef).toJson(),
+        doc.definitionBounds(innerDef).toJson());
+    // And not re-emitted, so the disagreement does not outlive the load.
+    expect(DraftDocumentCodec.encodeToString(loaded),
+        DraftDocumentCodec.encodeToString(doc));
+
+    // RemoveEntityCommand has nothing to unlist, and needs nothing to unlist:
+    // deleting a leaf that the older file also named in `children` leaves no
+    // dangling handle for the next save to carry forward.
+    loaded.commands.execute(RemoveEntityCommand(leafA));
+    final resaved = (DraftDocumentCodec.encode(loaded)['definitions']! as List)
+        .cast<Map<String, Object?>>()
+        .firstWhere((d) => d['handle'] == outerDef.value);
+    expect(resaved['children'], [instance.value]);
+  });
+
+  test('extents cost scales with entities, not containers x entities', () {
+    // _boundsOfContainer used to answer "which live entities does *this*
+    // container own?" by scanning every live entity slot and filtering on
+    // ownerAt — once per container, so a recompute was O(containers x
+    // entities), and invalidateDerived() fires on every command.
+    //
+    // Same entity count both times, twenty times the containers. Under the
+    // per-container scan the second document costs twenty times the first;
+    // under one bucketing pass it costs the same, because the extra work is
+    // only the extra containers themselves.
+    DraftDocument documentWith(int containerCount) {
+      final doc = DraftDocument.empty();
+      final groups = [
+        for (var i = 0; i < containerCount; i++) doc.handleSeed.next(),
+      ];
+      for (final group in groups) {
+        doc.tree.addNode(GroupNode(
+          handle: group,
+          parent: doc.rootHandle,
+          transform: Transform2.identity(),
+          children: const [],
+        ));
+      }
+      // Written straight to the stores: 20k dispatched commands would time
+      // the dispatcher, and what is under test is the bounds walk.
+      for (var i = 0; i < 20000; i++) {
+        final geomIndex = doc.geometry.add(line(0, 0, i.toDouble(), 1));
+        doc.entities.add(lineRecord(
+          doc.handleSeed.next(),
+          groups[i % groups.length],
+        ).copyWith(geomIndex: geomIndex));
+      }
+      doc.invalidateDerived();
+      return doc;
+    }
+
+    int fastestRecomputeMicros(DraftDocument doc) {
+      var best = -1;
+      for (var run = 0; run < 5; run++) {
+        doc.invalidateDerived();
+        final watch = Stopwatch()..start();
+        final box = doc.extents;
+        watch.stop();
+        expect(box.max, Vector2(19999, 1), reason: 'sanity: same box each way');
+        if (best < 0 || watch.elapsedMicroseconds < best) {
+          best = watch.elapsedMicroseconds;
+        }
+      }
+      return best;
+    }
+
+    final few = documentWith(20);
+    final many = documentWith(400);
+    // Warm both before timing either, so JIT does not land on one of them.
+    fastestRecomputeMicros(few);
+    fastestRecomputeMicros(many);
+
+    final fewMicros = fastestRecomputeMicros(few);
+    final manyMicros = fastestRecomputeMicros(many);
+
+    // Twenty times the containers; a factor of six is a wide margin around
+    // "no growth" that a twenty-fold one cannot fit inside.
+    expect(manyMicros, lessThan(fewMicros * 6),
+        reason:
+            '20 containers took ${fewMicros}us and 400 took ${manyMicros}us '
+            'over the same 20000 entities');
   });
 
   test('purge compacts both stores, rewrites geomIndex, and clears history',

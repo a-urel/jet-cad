@@ -17,7 +17,9 @@ DraftDocument sampleDocument() {
     handle: defHandle,
     name: 'Table-4Seat',
     basePoint: Vector2(0.5, 0.5),
-    children: [defEntity],
+    // Child nodes only. The entity below states that this definition holds it
+    // through EntityRecord.owner, which is the authoritative side.
+    children: const [],
   ));
   doc.commands.execute(AddEntityCommand(
     record: EntityRecord(
