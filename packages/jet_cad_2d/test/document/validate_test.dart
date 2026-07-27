@@ -72,7 +72,11 @@ void main() {
 
   test('reports a children entry that resolves to nothing', () {
     final doc = DraftDocument.empty();
-    // addNodeUnchecked skips linking, so `children` is authored directly here.
+    // addNodeUnchecked skips linking, so `children` is authored directly
+    // here — which also means 100 is never linked into the root's own
+    // `children`, so a parentChildMismatch is legitimately expected too.
+    // Asserted as the full ordered list, not `contains`, so an extra or
+    // changed diagnostic cannot slip past unnoticed.
     doc.tree.addNodeUnchecked(GroupNode(
       handle: const Handle(100),
       parent: doc.rootHandle,
@@ -80,8 +84,15 @@ void main() {
       children: const [Handle(777)],
     ));
 
-    final codes = [for (final d in doc.validate()) d.code];
-    expect(codes, contains(ValidationCodes.danglingChild));
+    final result = doc.validate();
+    expect([
+      for (final d in result) d.code
+    ], [
+      ValidationCodes.danglingChild,
+      ValidationCodes.parentChildMismatch,
+    ]);
+    expect(result[0].handles, [const Handle(100), const Handle(777)]);
+    expect(result[1].handles, [const Handle(100), doc.rootHandle]);
   });
 
   test('reports parent and children disagreeing', () {
@@ -113,6 +124,52 @@ void main() {
     ]);
     expect(result[0].handles, [const Handle(100), doc.rootHandle]);
     expect(result[1].handles, [const Handle(101), const Handle(100)]);
+  });
+
+  test(
+      'a parent/children mismatch names the actual lister, not just the '
+      'claimed parent', () {
+    // 102 names 100 (P) as its parent, but a different container, 101 (Q),
+    // is the one that actually lists it — the three-way disagreement the
+    // `if (listed != null) listed` element on parentChildMismatch exists
+    // for. Every other mismatch fixture in this file happens to produce
+    // `listed == null` (nobody lists the node at all), which would leave
+    // that element permanently untested without this case.
+    final doc = DraftDocument.empty();
+    doc.tree.addNodeUnchecked(GroupNode(
+      handle: const Handle(100), // P
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      children: const [],
+    ));
+    doc.tree.addNodeUnchecked(GroupNode(
+      handle: const Handle(101), // Q
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      children: const [Handle(102)],
+    ));
+    doc.tree.addNodeUnchecked(GroupNode(
+      handle: const Handle(102),
+      parent: const Handle(100), // claims P
+      transform: Transform2.identity(),
+      children: const [],
+    ));
+
+    final result = doc.validate();
+    // P and Q are themselves unlinked from the root (same shape as every
+    // other addNodeUnchecked fixture in this file), so both also trip a
+    // two-element mismatch; only 102's is three-element.
+    expect([
+      for (final d in result) d.code
+    ], [
+      ValidationCodes.parentChildMismatch,
+      ValidationCodes.parentChildMismatch,
+      ValidationCodes.parentChildMismatch,
+    ]);
+    expect(result[0].handles, [const Handle(100), doc.rootHandle]);
+    expect(result[1].handles, [const Handle(101), doc.rootHandle]);
+    expect(result[2].handles,
+        [const Handle(102), const Handle(100), const Handle(101)]);
   });
 
   test('reports a group cycle rather than hanging', () {
@@ -311,6 +368,10 @@ void main() {
       record: line(entityHandle, doc.rootHandle),
       payload: segment(0, 0, 1, 1),
     ));
+    // As above: addNodeUnchecked leaves 100 unlinked from the root's own
+    // `children`, so a parentChildMismatch is expected alongside
+    // leafInChildren. Full ordered list, not `contains`, for the same
+    // reason.
     doc.tree.addNodeUnchecked(GroupNode(
       handle: const Handle(100),
       parent: doc.rootHandle,
@@ -318,8 +379,15 @@ void main() {
       children: [entityHandle],
     ));
 
-    final codes = [for (final d in doc.validate()) d.code];
-    expect(codes, contains(ValidationCodes.leafInChildren));
+    final result = doc.validate();
+    expect([
+      for (final d in result) d.code
+    ], [
+      ValidationCodes.leafInChildren,
+      ValidationCodes.parentChildMismatch,
+    ]);
+    expect(result[0].handles, [const Handle(100), entityHandle]);
+    expect(result[1].handles, [const Handle(100), doc.rootHandle]);
   });
 
   test('diagnostics come back in ascending-handle order, not insertion order',
