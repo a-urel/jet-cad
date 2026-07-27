@@ -66,6 +66,43 @@ class ThrowingCommand extends DraftCommand {
   CommandResult apply(CommandTarget t) => throw StateError('boom');
 }
 
+/// Applies cleanly (so it lands on the undo stack via `execute`), but hands
+/// back a [ThrowingCommand] as its inverse — so replaying it via `undo()`
+/// throws.
+class FlakyInverseCommand extends DraftCommand {
+  @override
+  Capability get capability => Capability.geometry;
+  @override
+  String get label => 'flaky-inverse';
+  @override
+  CommandResult apply(CommandTarget t) =>
+      CommandResult(inverse: ThrowingCommand(), touched: const {});
+}
+
+/// Applies cleanly and its inverse ([FlakyUndoStep]) also applies cleanly,
+/// but *that* inverse is a [ThrowingCommand] — so the entry only misbehaves
+/// two levels deep: `undo()` succeeds, and it's the subsequent `redo()` that
+/// throws.
+class FlakyRedoCommand extends DraftCommand {
+  @override
+  Capability get capability => Capability.geometry;
+  @override
+  String get label => 'flaky-redo';
+  @override
+  CommandResult apply(CommandTarget t) =>
+      CommandResult(inverse: FlakyUndoStep(), touched: const {});
+}
+
+class FlakyUndoStep extends DraftCommand {
+  @override
+  Capability get capability => Capability.geometry;
+  @override
+  String get label => 'flaky-undo-step';
+  @override
+  CommandResult apply(CommandTarget t) =>
+      CommandResult(inverse: ThrowingCommand(), touched: const {});
+}
+
 void main() {
   setUp(() => CounterCommand.applied = 0);
 
@@ -201,6 +238,139 @@ void main() {
       expect(events.last, isA<DocumentLoaded>());
       expect(dispatcher.canUndo, isFalse);
       unawaited(sub.cancel());
+    });
+
+    test('notifyPurged emits DocumentPurged and clears history', () async {
+      final dispatcher = CommandDispatcher(target: FakeTarget());
+      final events = <DocChange>[];
+      final sub = dispatcher.changes.listen(events.add);
+      dispatcher.execute(CounterCommand(Capability.geometry, const Handle(1)));
+      dispatcher.notifyPurged();
+      await Future<void>.delayed(Duration.zero);
+      expect(events.last, isA<DocumentPurged>());
+      expect(dispatcher.canUndo, isFalse);
+      unawaited(sub.cancel());
+    });
+
+    test(
+        'a denied undo does not strand the entry; it is still undoable once '
+        'permission is restored', () {
+      final dispatcher = CommandDispatcher(target: FakeTarget());
+      dispatcher.execute(CounterCommand(Capability.geometry, const Handle(1)));
+
+      dispatcher.permissions = DraftPermissions.runtime; // denies geometry
+      expect(dispatcher.undo, throwsA(isA<PermissionDeniedError>()));
+      expect(dispatcher.canUndo, isTrue,
+          reason: 'a denied undo must not discard the entry');
+
+      dispatcher.permissions = DraftPermissions.all;
+      dispatcher.undo(); // now succeeds against the same entry
+      expect(dispatcher.canUndo, isFalse);
+      expect(dispatcher.canRedo, isTrue);
+    });
+
+    test(
+        'a denied redo does not strand the entry; it is still redoable once '
+        'permission is restored', () {
+      final dispatcher = CommandDispatcher(target: FakeTarget());
+      dispatcher.execute(CounterCommand(Capability.geometry, const Handle(1)));
+      dispatcher.undo();
+      expect(dispatcher.canRedo, isTrue);
+
+      dispatcher.permissions = DraftPermissions.runtime; // denies geometry
+      expect(dispatcher.redo, throwsA(isA<PermissionDeniedError>()));
+      expect(dispatcher.canRedo, isTrue,
+          reason: 'a denied redo must not discard the entry');
+
+      dispatcher.permissions = DraftPermissions.all;
+      dispatcher.redo(); // now succeeds against the same entry
+      expect(dispatcher.canRedo, isFalse);
+      expect(dispatcher.canUndo, isTrue);
+    });
+
+    test(
+        'an inverse whose apply throws during undo does not strand the '
+        'entry', () {
+      // This is the FIX 1 path: DraftCommand.apply's contract says a command
+      // "must either complete fully or leave the target unmutated", so a
+      // throwing inverse means nothing was mutated and the popped entry is
+      // still valid to retry.
+      final dispatcher = CommandDispatcher(target: FakeTarget());
+      dispatcher.execute(FlakyInverseCommand());
+      expect(dispatcher.canUndo, isTrue);
+
+      expect(dispatcher.undo, throwsStateError);
+      expect(dispatcher.canUndo, isTrue,
+          reason: 'a throwing inverse must not strand the entry');
+      // Still there to retry (and still throws, since the inverse itself is
+      // unconditionally broken — "retryable" means not silently lost, not
+      // that a retry must succeed).
+      expect(dispatcher.undo, throwsStateError);
+    });
+
+    test(
+        'an inverse whose apply throws during redo does not strand the '
+        'entry', () {
+      // Symmetric case for the redo() half of the FIX 1 path.
+      final dispatcher = CommandDispatcher(target: FakeTarget());
+      dispatcher.execute(FlakyRedoCommand());
+      dispatcher.undo();
+      expect(dispatcher.canRedo, isTrue);
+
+      expect(dispatcher.redo, throwsStateError);
+      expect(dispatcher.canRedo, isTrue,
+          reason: 'a throwing inverse must not strand the entry');
+      expect(dispatcher.redo, throwsStateError);
+    });
+
+    test('redo does not exhaust early when more than one redo is pending', () {
+      // The brief's own warning: redo() uses pushUndoOnly rather than push
+      // precisely because push clears the redo stack. With two undone
+      // commands, the redo stack holds two entries; if redo() used push, the
+      // first redo() would wipe the second pending entry as a side effect,
+      // and a second redo() would silently no-op instead of succeeding.
+      final dispatcher = CommandDispatcher(target: FakeTarget());
+      dispatcher.execute(CounterCommand(Capability.geometry, const Handle(1)));
+      dispatcher.execute(CounterCommand(Capability.geometry, const Handle(2)));
+      dispatcher.undo();
+      dispatcher.undo();
+      expect(dispatcher.canRedo, isTrue);
+
+      dispatcher.redo();
+      expect(dispatcher.canRedo, isTrue,
+          reason: 'a second redo must still be pending after the first');
+      final appliedBeforeSecondRedo = CounterCommand.applied;
+      dispatcher.redo();
+      expect(CounterCommand.applied, appliedBeforeSecondRedo + 1,
+          reason: 'the second redo must actually run, not no-op');
+      expect(dispatcher.canRedo, isFalse);
+      expect(dispatcher.canUndo, isTrue);
+    });
+
+    test('execute after dispose throws and does not mutate the target',
+        () async {
+      final target = FakeTarget();
+      final dispatcher = CommandDispatcher(target: target);
+      await dispatcher.dispose();
+
+      expect(
+        () => dispatcher
+            .execute(CounterCommand(Capability.geometry, const Handle(1))),
+        throwsStateError,
+      );
+      expect(CounterCommand.applied, 0);
+      expect(target.invalidations, 0);
+    });
+
+    test('undo after dispose throws without mutating the target', () async {
+      final target = FakeTarget();
+      final dispatcher = CommandDispatcher(target: target);
+      dispatcher.execute(CounterCommand(Capability.geometry, const Handle(1)));
+      final appliedBeforeDispose = CounterCommand.applied;
+      await dispatcher.dispose();
+
+      expect(dispatcher.undo, throwsStateError);
+      expect(CounterCommand.applied, appliedBeforeDispose);
     });
   });
 }

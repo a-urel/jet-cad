@@ -65,6 +65,7 @@ class CommandDispatcher {
   bool get canRedo => _history.canRedo;
 
   void execute(DraftCommand command) {
+    _checkNotDisposed();
     _require(command);
     // The inverse is pushed only after apply returns, so a command that
     // throws leaves no history behind: history matches what actually
@@ -75,36 +76,44 @@ class CommandDispatcher {
   }
 
   void undo() {
+    _checkNotDisposed();
     if (!_history.canUndo) return;
     final inverse = _history.takeUndo();
+    final CommandResult result;
     try {
       _require(inverse);
+      result = inverse.apply(target);
     } catch (_) {
-      // A denied permission check must not silently discard the entry: put
-      // it back exactly where it came from so a later permission grant (or a
-      // caller that catches and retries) can still undo it. Without this,
-      // the popped command would vanish from both stacks — a single denied
-      // undo would permanently and silently strand that edit.
+      // Neither a denied permission check nor a failing replay may silently
+      // discard the entry: put it back exactly where it came from so a later
+      // permission grant, or a caller that catches and retries, can still
+      // undo it. DraftCommand.apply's own contract says a command "must
+      // either complete fully or leave the target unmutated" — so a throwing
+      // inverse means nothing was mutated, and restoring the entry is safe.
+      // Without this, the popped command would vanish from both stacks — a
+      // single denied or failing undo would permanently and silently strand
+      // that edit.
       _history.pushUndoOnly(inverse);
       rethrow;
     }
-    final result = inverse.apply(target);
     _history.pushRedo(result.inverse);
     _changes.add(CommandUndone(label: inverse.label, touched: result.touched));
   }
 
   void redo() {
+    _checkNotDisposed();
     if (!_history.canRedo) return;
     final inverse = _history.takeRedo();
+    final CommandResult result;
     try {
       _require(inverse);
+      result = inverse.apply(target);
     } catch (_) {
       // Same reasoning as in undo(): restore to the redo stack it was popped
       // from, not the undo stack.
       _history.pushRedo(inverse);
       rethrow;
     }
-    final result = inverse.apply(target);
     _history.pushUndoOnly(result.inverse);
     _changes.add(CommandRedone(label: inverse.label, touched: result.touched));
   }
@@ -129,6 +138,17 @@ class CommandDispatcher {
   void _require(DraftCommand command) {
     if (!permissions.allows(command.capability)) {
       throw PermissionDeniedError(command.capability, command.label);
+    }
+  }
+
+  /// Guards against mutating the target or history after [dispose]: without
+  /// this, `execute`/`undo`/`redo` would run `apply` and update `_history`
+  /// before `_changes.add` (on the now-closed controller) throws — mutating
+  /// state on a dispatcher the caller believes is inert, and surfacing only
+  /// an opaque `StateError` from the stream rather than from this contract.
+  void _checkNotDisposed() {
+    if (_changes.isClosed) {
+      throw StateError('CommandDispatcher used after dispose()');
     }
   }
 }
