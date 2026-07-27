@@ -44,6 +44,14 @@ class Transform2 {
     return Transform2(cos, sin, -sin, cos, 0, 0);
   }
 
+  /// True only for a bit-exact identity.
+  ///
+  /// Deliberately not tolerance-based: this is a cheap fast-path guard, not
+  /// an equality decision. A near-identity answering `false` costs one
+  /// redundant multiply; there is no answer it can get dangerously wrong.
+  /// A tolerance-based version could report identity for a sub-tolerance
+  /// transform, and a fast path would then skip it — silently discarding a
+  /// real transform. For semantic comparison use `equals(other, tolerance)`.
   bool get isIdentity =>
       a == 1 && b == 0 && c == 0 && d == 1 && e == 0 && f == 0;
 

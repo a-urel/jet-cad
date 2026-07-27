@@ -85,4 +85,30 @@ void main() {
     expect(m.toJson(), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     expect(Transform2.fromJson(m.toJson()).equals(m, t), isTrue);
   });
+
+  test('isIdentity is false for plainly non-identity transforms', () {
+    expect(Transform2.translation(1, 0).isIdentity, isFalse);
+    expect(Transform2.translation(0, 1).isIdentity, isFalse);
+    expect(Transform2.scale(2, 2).isIdentity, isFalse);
+    expect(Transform2.rotation(0.01).isIdentity, isFalse);
+  });
+
+  test(
+      'isIdentity is false for mathematically-identity but bit-inexact composed transform',
+      () {
+    // Composing rotations by pi/4 four times to get 2*pi, then inverse pi rotation,
+    // should be mathematically identity. But rotating by pi/4 involves irrational
+    // values (sin/cos), and accumulated floating-point error prevents exact identity.
+    // isIdentity must answer false to preserve the fast-path contract: answering true
+    // would cause a fast path to skip this transform, silently discarding the rounding
+    // error. equals() with tolerance must answer true to show they are equal
+    // within tolerance.
+    final composed = Transform2.rotation(math.pi / 4)
+        .multiply(Transform2.rotation(math.pi / 4))
+        .multiply(Transform2.rotation(math.pi / 4))
+        .multiply(Transform2.rotation(math.pi / 4))
+        .multiply(Transform2.rotation(-math.pi));
+    expect(composed.isIdentity, isFalse);
+    expect(composed.equals(Transform2.identity(), t), isTrue);
+  });
 }
