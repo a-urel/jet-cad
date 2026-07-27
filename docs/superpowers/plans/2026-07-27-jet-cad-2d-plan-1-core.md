@@ -82,12 +82,13 @@ packages/jet_cad_2d/
 - Create: `packages/jet_cad_2d/README.md`
 - Create: `packages/jet_cad_2d/CHANGELOG.md`
 - Create: `packages/jet_cad_2d/lib/jet_cad_2d.dart`
-- Create: `packages/jet_cad_2d/test/scaffold_test.dart`
 - Modify: `pubspec.yaml` (root workspace list)
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: a workspace package named `jet_cad_2d` where `dart test` runs green. Every later task adds files under this package.
+- Produces: a workspace package named `jet_cad_2d` that resolves and analyzes clean. Every later task adds files under this package.
+
+**No test in this task.** A scaffold has no behaviour to assert, and a test whose only assertion is a tautology is a defect, not a smoke test. `dart pub get` proves the workspace wiring and `dart analyze` proves the package compiles; the first `dart test` run happens in Task 2, against real behaviour.
 
 - [ ] **Step 1: Create the package pubspec**
 
@@ -206,47 +207,19 @@ Create `packages/jet_cad_2d/CHANGELOG.md`:
   commands, JSON codec.
 ```
 
-- [ ] **Step 7: Write the scaffold test**
-
-Create `packages/jet_cad_2d/test/scaffold_test.dart`:
-
-```dart
-import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:test/test.dart';
-
-void main() {
-  test('package imports and the test runner works', () {
-    // Importing the barrel is the assertion: it proves the package resolves
-    // under the workspace and that `dart test` is wired up.
-    expect(1 + 1, 2);
-  });
-}
-```
-
-- [ ] **Step 8: Run the test**
+- [ ] **Step 7: Verify the package resolves and analyzes clean**
 
 ```bash
-cd packages/jet_cad_2d && dart test && cd ../..
+cd packages/jet_cad_2d && dart pub get && dart analyze && cd ../..
 ```
 
-Expected: `All tests passed!` — one test.
+Expected: dependencies resolve, then `No issues found!`.
 
-If it fails with `Target of URI doesn't exist: 'package:jet_cad_2d/jet_cad_2d.dart'`, the workspace edit in Step 2 did not take effect; run `dart pub get` from the repository root and retry.
+If `dart pub get` reports that `jet_cad_2d` is not a workspace member, the root
+`pubspec.yaml` edit in Step 2 did not take effect; re-apply it and run
+`dart pub get` from the repository root.
 
-- [ ] **Step 9: Verify the analyzer is clean**
-
-```bash
-cd packages/jet_cad_2d && dart analyze && cd ../..
-```
-
-Expected: `No issues found!`
-
-The unused `jet_cad_2d.dart` import in the test is intentional and must not
-trigger `unused_import`, because the import *is* the test. If the analyzer flags
-it, add `// ignore: unused_import` above the import line with a comment saying
-why.
-
-- [ ] **Step 10: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add packages/jet_cad_2d pubspec.yaml pubspec.lock
@@ -601,22 +574,89 @@ git commit -m "feat(jet_cad_2d): absolute geometric tolerance"
 
 ---
 
-### Task 4: Diagnostic
+### Task 4: Diagnostic and list equality
 
 **Files:**
+- Create: `packages/jet_cad_2d/lib/src/core/list_equality.dart`
 - Create: `packages/jet_cad_2d/lib/src/core/diagnostic.dart`
+- Create: `packages/jet_cad_2d/test/core/list_equality_test.dart`
 - Create: `packages/jet_cad_2d/test/core/diagnostic_test.dart`
 - Modify: `packages/jet_cad_2d/lib/jet_cad_2d.dart`
 
 **Interfaces:**
 - Consumes: `Handle` (Task 2).
 - Produces:
+  - `bool listEquals<T>(List<T> a, List<T> b)` in `list_equality.dart`.
   - `enum DiagnosticSeverity { info, warning, loss, error }`
   - `class Diagnostic` with `const Diagnostic({required DiagnosticSeverity severity, required String code, required String message, List<Handle> handles, String? sourceLocation})`, value equality, and `Map<String, Object?> toJson()`.
 
+`listEquals` lands here because `Diagnostic` is its first consumer, but it is
+shared: **Tasks 8, 11 and 12 use it too, and must not write their own copy.**
+Every value type in this package compares a list field in its `operator ==`, and
+five private near-duplicates of the same four lines is the kind of thing a
+reviewer flags and a refactor gets wrong in one place.
+
 `Diagnostic` lives in the core package rather than in an adapter because the engine itself raises them — cycle detection on import, degraded fills — and every adapter reuses the type.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test for list equality**
+
+Create `packages/jet_cad_2d/test/core/list_equality_test.dart`:
+
+```dart
+import 'dart:typed_data';
+
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('compares element-wise', () {
+    expect(listEquals([1, 2, 3], [1, 2, 3]), isTrue);
+    expect(listEquals([1, 2, 3], [1, 2, 4]), isFalse);
+  });
+
+  test('differing lengths are unequal', () {
+    expect(listEquals([1, 2], [1, 2, 3]), isFalse);
+    expect(listEquals(<int>[], <int>[]), isTrue);
+  });
+
+  test('identical instances short-circuit', () {
+    final list = [1, 2, 3];
+    expect(listEquals(list, list), isTrue);
+  });
+
+  test('works across list implementations with the same elements', () {
+    // Float64List is a List<double>; the geometry payload compares these.
+    expect(listEquals<double>(Float64List.fromList([1, 2]), [1.0, 2.0]), isTrue);
+  });
+
+  test('uses element equality, so value types compare by value', () {
+    expect(listEquals([const Handle(1)], [const Handle(1)]), isTrue);
+  });
+}
+```
+
+- [ ] **Step 2: Implement list equality**
+
+Create `packages/jet_cad_2d/lib/src/core/list_equality.dart`:
+
+```dart
+/// Element-wise list comparison, used by every value type in this package that
+/// holds a list field.
+///
+/// One shared helper rather than a private copy per file: the bodies would be
+/// identical, and a fix applied to four of five copies is worse than no helper
+/// at all.
+bool listEquals<T>(List<T> a, List<T> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+```
+
+- [ ] **Step 3: Write the failing test for Diagnostic**
 
 Create `packages/jet_cad_2d/test/core/diagnostic_test.dart`:
 
@@ -677,15 +717,16 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 4: Run both tests to verify they fail**
 
 ```bash
-cd packages/jet_cad_2d && dart test test/core/diagnostic_test.dart && cd ../..
+cd packages/jet_cad_2d && dart test test/core/ && cd ../..
 ```
 
-Expected: compile failure — `Undefined name 'Diagnostic'`.
+Expected: `list_equality_test.dart` passes (Step 2 already implemented it);
+`diagnostic_test.dart` fails to compile — `Undefined name 'Diagnostic'`.
 
-- [ ] **Step 3: Write the implementation**
+- [ ] **Step 5: Write the implementation**
 
 Create `packages/jet_cad_2d/lib/src/core/diagnostic.dart`:
 
@@ -693,6 +734,7 @@ Create `packages/jet_cad_2d/lib/src/core/diagnostic.dart`:
 import 'package:meta/meta.dart';
 
 import 'handle.dart';
+import 'list_equality.dart';
 
 enum DiagnosticSeverity {
   /// Informational; nothing was changed or dropped.
@@ -755,15 +797,7 @@ class Diagnostic {
       other.code == code &&
       other.message == message &&
       other.sourceLocation == sourceLocation &&
-      _sameHandles(other.handles, handles);
-
-  static bool _sameHandles(List<Handle> a, List<Handle> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
+      listEquals(other.handles, handles);
 
   @override
   int get hashCode => Object.hash(
@@ -779,15 +813,16 @@ class Diagnostic {
 }
 ```
 
-- [ ] **Step 4: Export it from the barrel**
+- [ ] **Step 6: Export both from the barrel**
 
 Add to `packages/jet_cad_2d/lib/jet_cad_2d.dart`:
 
 ```dart
 export 'src/core/diagnostic.dart';
+export 'src/core/list_equality.dart';
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 7: Run the tests to verify they pass**
 
 ```bash
 cd packages/jet_cad_2d && dart test && dart analyze && cd ../..
@@ -795,11 +830,11 @@ cd packages/jet_cad_2d && dart test && dart analyze && cd ../..
 
 Expected: all tests pass, `No issues found!`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add packages/jet_cad_2d
-git commit -m "feat(jet_cad_2d): Diagnostic shared by the engine and adapters"
+git commit -m "feat(jet_cad_2d): Diagnostic and shared list equality"
 ```
 
 ---
@@ -1799,7 +1834,7 @@ git commit -m "feat(jet_cad_2d): SlotAllocator owning the shared slot lifetime r
 - Modify: `packages/jet_cad_2d/lib/jet_cad_2d.dart`
 
 **Interfaces:**
-- Consumes: `SlotAllocator` (Task 7), `Transform2` (Task 5), `Aabb2` (Task 6).
+- Consumes: `SlotAllocator` (Task 7), `Transform2` (Task 5), `Aabb2` (Task 6), `listEquals` (Task 4).
 - Produces:
   - `class GeometryPayload` — `Float64List coords`, `Float64List scalars`, `int get pointCount`, `Vector2 pointAt(int)`, `GeometryPayload transformedBy(Transform2)`, value equality, `Map<String, Object?> toJson()`, `static GeometryPayload fromJson(Object?)`.
   - `class GeometryStore` — `int add(GeometryPayload)`, `GeometryPayload read(int slot)`, `void remove(int slot)`, `void replace(int slot, GeometryPayload)`, `Aabb2 pointBounds(int slot)`, `int get liveCount`, `List<int> purge()`, `void clear()`.
@@ -1952,6 +1987,7 @@ import 'dart:typed_data';
 import 'package:meta/meta.dart';
 import 'package:vector_math/vector_math_64.dart';
 
+import '../core/list_equality.dart';
 import '../geometry/aabb2.dart';
 import '../geometry/transform2.dart';
 import 'slot_allocator.dart';
@@ -2018,16 +2054,8 @@ class GeometryPayload {
   @override
   bool operator ==(Object other) =>
       other is GeometryPayload &&
-      _sameDoubles(other.coords, coords) &&
-      _sameDoubles(other.scalars, scalars);
-
-  static bool _sameDoubles(Float64List a, Float64List b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
+      listEquals<double>(other.coords, coords) &&
+      listEquals<double>(other.scalars, scalars);
 
   @override
   int get hashCode =>
@@ -2957,7 +2985,7 @@ git commit -m "feat(jet_cad_2d): columnar EntityStore with tier-1 style columns"
 - Modify: `packages/jet_cad_2d/lib/jet_cad_2d.dart`
 
 **Interfaces:**
-- Consumes: `Handle`, `DraftColor`, `ReservedHandles`, `kByLayer`, `kLineweightDefault`.
+- Consumes: `Handle`, `DraftColor`, `ReservedHandles`, `kByLayer`, `kLineweightDefault`, `listEquals` (Task 4).
 - Produces:
   - `abstract class TableRecord` — `Handle get handle`, `String get name`, `Map<String, Object?> toJson()`.
   - `class TableSection<T extends TableRecord>` — `void add(T)`, `T? operator [](Handle)`, `T? byName(String)`, `Iterable<T> get records` (ascending handle), `void remove(Handle)`, `bool contains(Handle)`, `int get length`.
@@ -3155,6 +3183,7 @@ Create `packages/jet_cad_2d/lib/src/document/tables.dart`:
 import 'package:meta/meta.dart';
 
 import '../core/handle.dart';
+import '../core/list_equality.dart';
 import '../store/entity_store.dart' show DuplicateHandleError;
 import 'style.dart';
 
@@ -3312,15 +3341,7 @@ class DashPattern {
   bool operator ==(Object other) =>
       other is DashPattern &&
       other.totalLength == totalLength &&
-      _sameDoubles(other.dashes, dashes);
-
-  static bool _sameDoubles(List<double> a, List<double> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
+      listEquals(other.dashes, dashes);
 
   @override
   int get hashCode => Object.hash(Object.hashAll(dashes), totalLength);
@@ -3488,7 +3509,7 @@ class PatternLine {
       other.baseY == baseY &&
       other.deltaX == deltaX &&
       other.deltaY == deltaY &&
-      DashPattern._sameDoubles(other.dashes, dashes);
+      listEquals(other.dashes, dashes);
 
   @override
   int get hashCode => Object.hash(
@@ -3530,15 +3551,7 @@ class PatternRecord implements TableRecord {
       other is PatternRecord &&
       other.handle == handle &&
       other.name == name &&
-      _sameLines(other.lines, lines);
-
-  static bool _sameLines(List<PatternLine> a, List<PatternLine> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
+      listEquals(other.lines, lines);
 
   @override
   int get hashCode => Object.hash(handle, name, Object.hashAll(lines));
@@ -3695,8 +3708,6 @@ cd packages/jet_cad_2d && dart test && dart analyze && cd ../..
 
 Expected: all tests pass, `No issues found!`.
 
-`DashPattern._sameDoubles` is referenced from `PatternLine`, which is in the same library file, so the private access is legal. If the analyzer objects, promote it to a private top-level function `bool _sameDoubles(List<double>, List<double>)` and call it from both.
-
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -3714,7 +3725,7 @@ git commit -m "feat(jet_cad_2d): document tables with reserved standard records"
 - Modify: `packages/jet_cad_2d/lib/jet_cad_2d.dart`
 
 **Interfaces:**
-- Consumes: `Handle`, `Transform2`.
+- Consumes: `Handle`, `Transform2`, `Tolerance`, `listEquals` (Task 4).
 - Produces:
   - `sealed class Node` — `Handle get handle`, `Handle get parent`, `Transform2 get transform`, `bool get visible`, `Map<String, Object?> toJson()`, `static Node fromJson(Object?)`.
   - `final class GroupNode extends Node` — plus `List<Handle> children`, `bool exportAsDxfGroup`, `GroupNode copyWith({...})`.
@@ -3860,16 +3871,9 @@ import 'package:meta/meta.dart';
 import 'package:vector_math/vector_math_64.dart';
 
 import '../core/handle.dart';
+import '../core/list_equality.dart';
 import '../core/tolerance.dart';
 import '../geometry/transform2.dart';
-
-bool _sameHandles(List<Handle> a, List<Handle> b) {
-  if (a.length != b.length) return false;
-  for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return false;
-  }
-  return true;
-}
 
 /// A container in the scene tree.
 ///
@@ -3976,7 +3980,7 @@ final class GroupNode extends Node {
       other.transform.equals(transform, const Tolerance(linear: 0, angular: 0)) &&
       other.visible == visible &&
       other.exportAsDxfGroup == exportAsDxfGroup &&
-      _sameHandles(other.children, children);
+      listEquals(other.children, children);
 
   @override
   int get hashCode => Object.hash(handle, parent, visible, exportAsDxfGroup,
@@ -4138,7 +4142,7 @@ class Definition {
       other.basePoint == basePoint &&
       other.isXref == isXref &&
       other.xrefPath == xrefPath &&
-      _sameHandles(other.children, children);
+      listEquals(other.children, children);
 
   @override
   int get hashCode => Object.hash(
