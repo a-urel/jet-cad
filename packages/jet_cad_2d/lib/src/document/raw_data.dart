@@ -22,10 +22,25 @@ class RawDataStore {
   void set(Handle handle, SourceKind source, Object? payload) =>
       (_byHandle[handle] ??= {})[source] = payload;
 
+  /// Returns the payload stored for [handle]/[source], or `null` if absent.
+  ///
+  /// The payload is returned by reference, not copied: this store never
+  /// inspects it, so it has no way to clone it and no reason to. Treat the
+  /// returned value as immutable. Mutating it in place mutates the store
+  /// directly, bypassing [set]/[remove], and — because [toJson] walks the
+  /// payload when serializing — will silently change what a later save
+  /// writes.
   Object? get(Handle handle, SourceKind source) => _byHandle[handle]?[source];
 
-  /// A read-only view: callers must go through [set]/[remove] to mutate this
-  /// store, so its per-handle sources cannot go out of sync with [handles].
+  /// A read-only view of the source map for [handle]: callers must go
+  /// through [set]/[remove] to add, remove, or reassign a [SourceKind] entry,
+  /// so the map's *keys* cannot go out of sync with [handles].
+  ///
+  /// That protection is structural only. The map's *values* — the payloads —
+  /// are the same shared references [get] returns, not copies: this store
+  /// never inspects them, so it does not copy them in on [set] or out here.
+  /// Treat a payload obtained through this map as immutable for the same
+  /// reason documented on [get].
   Map<SourceKind, Object?> allFor(Handle handle) =>
       Map.unmodifiable(_byHandle[handle] ?? const {});
 

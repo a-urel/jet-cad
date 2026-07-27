@@ -58,10 +58,20 @@ void main() {
   });
 
   test(
-      'allFor returns a read-only view, so a caller cannot corrupt the '
-      'store without going through set/remove', () {
+      'allFor returns a read-only view, so a caller cannot add, remove or '
+      'reassign a source entry without going through set/remove', () {
     final raw = RawDataStore()..set(const Handle(1), SourceKind.dxf, {'a': 1});
     final view = raw.allFor(const Handle(1));
     expect(() => view[SourceKind.ifc] = 'x', throwsUnsupportedError);
+  });
+
+  test(
+      'payloads are shared by design: mutating a payload obtained via get '
+      'mutates the store, because this store never copies opaque blobs '
+      'in or out', () {
+    final raw = RawDataStore()..set(const Handle(1), SourceKind.dxf, {'70': 1});
+    final payload = raw.get(const Handle(1), SourceKind.dxf)! as Map;
+    payload['70'] = 999;
+    expect((raw.get(const Handle(1), SourceKind.dxf)! as Map)['70'], 999);
   });
 }
