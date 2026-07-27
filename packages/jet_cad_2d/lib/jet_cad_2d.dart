@@ -12,6 +12,7 @@ export 'src/core/tolerance.dart';
 export 'src/document/node.dart';
 export 'src/document/style.dart';
 export 'src/document/tables.dart';
+export 'src/document/tree.dart';
 export 'src/geometry/aabb2.dart';
 export 'src/geometry/primitives.dart';
 export 'src/geometry/transform2.dart';
