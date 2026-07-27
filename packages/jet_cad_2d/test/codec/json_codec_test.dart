@@ -52,6 +52,13 @@ DraftDocument sampleDocument() {
     const OriginComponent(source: SourceKind.dxf, id: '2A'),
   ));
   doc.rawData.set(instance, SourceKind.dxf, {'1001': 'ACME', '1000': 'x'});
+  // A component type this build has never heard of — preserve-unknown layer
+  // 2. Nested so a shallow copy could not fake byte-identical round-tripping.
+  doc.components.attachUnknown(instance, {
+    'typeId': 'acme.plumbing',
+    'diameter': 32,
+    'nested': {'a': 1},
+  });
   return doc;
 }
 
@@ -159,5 +166,108 @@ void main() {
   test('encodeToString produces parseable canonical JSON', () {
     final text = DraftDocumentCodec.encodeToString(sampleDocument());
     expect(jsonDecode(text), isA<Map<String, Object?>>());
+  });
+
+  test('an unknown component payload round-trips byte-identical', () {
+    final json = DraftDocumentCodec.encode(sampleDocument());
+    final components = (json['components']! as Map).cast<String, Object?>();
+    final byHandle =
+        (components['acme.plumbing']! as Map).cast<String, Object?>();
+    final payload = byHandle.values.single as Map;
+    // The typeId is the map key one layer up; embedding it in the payload
+    // too would break byte-identity on a second round-trip.
+    expect(payload.containsKey('typeId'), isFalse);
+    expect(payload['diameter'], 32);
+    expect((payload['nested']! as Map)['a'], 1);
+
+    final loaded = DraftDocumentCodec.decode(json);
+    final instance = loaded.tree.nodes.whereType<InstanceNode>().single.handle;
+    final preserved = loaded.components.unknownOf(instance);
+    expect(preserved, hasLength(1));
+    expect(preserved.single['typeId'], 'acme.plumbing');
+    expect(preserved.single['diameter'], 32);
+    expect((preserved.single['nested']! as Map)['a'], 1);
+
+    // Byte-identical on a second encode, not just structurally similar.
+    expect(DraftDocumentCodec.encode(loaded)['components'], json['components']);
+  });
+
+  test(
+      'decode raises the handle seed above every handle actually read, not '
+      'just the declared seed', () {
+    final source = sampleDocument();
+    // The document's own seed already equals the highest handle anywhere in
+    // it: every handle here was minted by sequential doc.handleSeed.next()
+    // calls, so this is the actual maximum, not a hardcoded stand-in for it.
+    final maxHandleInDocument = source.handleSeed.current.value;
+    final json = DraftDocumentCodec.encode(source);
+    // Simulate a hand-edited or truncated file whose declared seed
+    // undercounts what the file actually contains.
+    json['handleSeed'] = 1;
+
+    final loaded = DraftDocumentCodec.decode(json);
+    expect(loaded.handleSeed.next().value, greaterThan(maxHandleInDocument));
+  });
+
+  test(
+      'decode repairs a definition cycle and reports it only when a '
+      'diagnostics list is passed', () {
+    // Two definitions built by hand rather than through commands: the live
+    // API rejects a cycle on the way in, so the only way to exercise import's
+    // recovery path is to construct the file directly, the way a corrupted or
+    // hand-edited document would arrive.
+    final json = DraftDocumentCodec.encode(DraftDocument.empty());
+    const defA = Handle(500);
+    const defB = Handle(501);
+    const nodeA = Handle(502);
+    const nodeB = Handle(503);
+
+    json['definitions'] = [
+      Definition(
+        handle: defA,
+        name: 'A',
+        basePoint: Vector2.zero(),
+        children: const [nodeA],
+      ).toJson(),
+      Definition(
+        handle: defB,
+        name: 'B',
+        basePoint: Vector2.zero(),
+        children: const [nodeB],
+      ).toJson(),
+    ];
+    json['nodes'] = [
+      ...(json['nodes']! as List),
+      InstanceNode(
+        handle: nodeA,
+        parent: defA,
+        transform: Transform2.identity(),
+        definition: defB,
+        layer: ReservedHandles.layerZero,
+      ).toJson(),
+      InstanceNode(
+        handle: nodeB,
+        parent: defB,
+        transform: Transform2.identity(),
+        definition: defA,
+        layer: ReservedHandles.layerZero,
+      ).toJson(),
+    ];
+
+    final diagnostics = <Diagnostic>[];
+    final loaded = DraftDocumentCodec.decode(json, diagnostics: diagnostics);
+
+    expect(diagnostics, hasLength(1));
+    expect(diagnostics.single.code, 'tree.cycle_dropped');
+    // Names the back edge that closed the cycle: the dropped instance, the
+    // definition its container names, and the definition it pointed at.
+    expect(diagnostics.single.handles, [nodeB, defB, defA]);
+    // The cycle is broken, not merely detected: defB no longer instances
+    // anything, so walking from either definition now terminates.
+    expect(loaded.tree.definition(defB)!.children, isEmpty);
+
+    // The repair itself happens whether or not the caller asks to be told.
+    final loadedWithoutDiagnostics = DraftDocumentCodec.decode(json);
+    expect(loadedWithoutDiagnostics.tree.definition(defB)!.children, isEmpty);
   });
 }

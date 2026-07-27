@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../core/diagnostic.dart';
 import '../core/handle.dart';
 import '../document/command.dart';
 import '../document/draft_document.dart';
@@ -71,11 +72,17 @@ class DraftDocumentCodec {
 
   static String encodeToString(DraftDocument doc) => jsonEncode(encode(doc));
 
+  /// [diagnostics], when supplied, receives every diagnostic import produces —
+  /// currently only [DocumentTree.repairCycles]'s reports of a dropped
+  /// definition-cycle back edge. The repair itself always happens; passing no
+  /// list only means the caller is not told what was dropped, so a caller that
+  /// needs to surface data loss to a user must pass one.
   static DraftDocument decode(
     Map<String, Object?> json, {
     TextMeasurer measurer = const InsertionPointMeasurer(),
     DraftPermissions permissions = DraftPermissions.all,
     int undoLimit = 200,
+    List<Diagnostic>? diagnostics,
   }) {
     final version = json['schemaVersion'];
     if (version is! int || version > kSchemaVersion) {
@@ -94,12 +101,21 @@ class DraftDocumentCodec {
 
     _loadHeader(doc, json['header']);
     _loadTables(doc, json['tables']);
-    _loadTree(doc, json);
+    // Not `diagnostics?.addAll(_loadTree(...))`: `?.` short-circuits on the
+    // *receiver*, so with no diagnostics list that would skip calling
+    // _loadTree entirely rather than merely skip recording its result.
+    final treeDiagnostics = _loadTree(doc, json);
+    diagnostics?.addAll(treeDiagnostics);
     _loadEntities(doc, json['entities']);
 
     doc.components
         .loadJson((json['components']! as Map).cast<String, Object?>());
     doc.rawData.loadJson((json['rawData']! as Map).cast<String, Object?>());
+    // The file's declared seed is a floor, not the sole source of truth: every
+    // handle actually read above raises the seed as it is read (see
+    // _loadTables, _loadTree, _loadEntities), so a file whose declared seed
+    // undercounts what it actually contains still cannot reissue a live
+    // handle.
     doc.handleSeed.raiseTo(Handle.fromJson(json['handleSeed']));
 
     doc.invalidateDerived();
@@ -114,12 +130,14 @@ class DraftDocumentCodec {
     TextMeasurer measurer = const InsertionPointMeasurer(),
     DraftPermissions permissions = DraftPermissions.all,
     int undoLimit = 200,
+    List<Diagnostic>? diagnostics,
   }) =>
       decode(
         (jsonDecode(source) as Map).cast<String, Object?>(),
         measurer: measurer,
         permissions: permissions,
         undoLimit: undoLimit,
+        diagnostics: diagnostics,
       );
 
   static void _loadHeader(DraftDocument doc, Object? json) {
@@ -141,43 +159,60 @@ class DraftDocumentCodec {
     doc.tables.dimStyles.clear();
     doc.tables.appIds.clear();
     for (final r in tables['linetypes']! as List) {
-      doc.tables.linetypes
-          .add(LinetypeRecord.fromJson((r as Map).cast<String, Object?>()));
+      final record =
+          LinetypeRecord.fromJson((r as Map).cast<String, Object?>());
+      doc.tables.linetypes.add(record);
+      doc.handleSeed.raiseTo(record.handle);
     }
     for (final r in tables['layers']! as List) {
-      doc.tables.layers
-          .add(LayerRecord.fromJson((r as Map).cast<String, Object?>()));
+      final record = LayerRecord.fromJson((r as Map).cast<String, Object?>());
+      doc.tables.layers.add(record);
+      doc.handleSeed.raiseTo(record.handle);
     }
     for (final r in tables['textStyles']! as List) {
-      doc.tables.textStyles
-          .add(TextStyleRecord.fromJson((r as Map).cast<String, Object?>()));
+      final record =
+          TextStyleRecord.fromJson((r as Map).cast<String, Object?>());
+      doc.tables.textStyles.add(record);
+      doc.handleSeed.raiseTo(record.handle);
     }
     for (final r in tables['patterns']! as List) {
-      doc.tables.patterns
-          .add(PatternRecord.fromJson((r as Map).cast<String, Object?>()));
+      final record = PatternRecord.fromJson((r as Map).cast<String, Object?>());
+      doc.tables.patterns.add(record);
+      doc.handleSeed.raiseTo(record.handle);
     }
     for (final r in tables['dimStyles']! as List) {
-      doc.tables.dimStyles
-          .add(DimStyleRecord.fromJson((r as Map).cast<String, Object?>()));
+      final record =
+          DimStyleRecord.fromJson((r as Map).cast<String, Object?>());
+      doc.tables.dimStyles.add(record);
+      doc.handleSeed.raiseTo(record.handle);
     }
     for (final r in tables['appIds']! as List) {
-      doc.tables.appIds
-          .add(AppIdRecord.fromJson((r as Map).cast<String, Object?>()));
+      final record = AppIdRecord.fromJson((r as Map).cast<String, Object?>());
+      doc.tables.appIds.add(record);
+      doc.handleSeed.raiseTo(record.handle);
     }
   }
 
-  static void _loadTree(DraftDocument doc, Map<String, Object?> json) {
+  /// Returns whatever [DocumentTree.repairCycles] reported, for the caller to
+  /// forward into its own `diagnostics` out-parameter.
+  static List<Diagnostic> _loadTree(
+      DraftDocument doc, Map<String, Object?> json) {
     doc.tree.clear();
     for (final d in json['definitions']! as List) {
-      doc.tree.addDefinition(Definition.fromJson(d));
+      final definition = Definition.fromJson(d);
+      doc.tree.addDefinition(definition);
+      doc.handleSeed.raiseTo(definition.handle);
     }
     // Unchecked, then repaired: a file may contain a cycle, and import
     // diagnoses and recovers rather than failing mid-parse.
     for (final n in json['nodes']! as List) {
-      doc.tree.addNodeUnchecked(Node.fromJson(n));
+      final node = Node.fromJson(n);
+      doc.tree.addNodeUnchecked(node);
+      doc.handleSeed.raiseTo(node.handle);
     }
-    doc.tree.repairCycles();
+    final diagnostics = doc.tree.repairCycles();
     doc.tree.setRoot(Handle.fromJson(json['root']));
+    return diagnostics;
   }
 
   static void _loadEntities(DraftDocument doc, Object? json) {
@@ -191,6 +226,7 @@ class DraftDocumentCodec {
       // what the restored record points at.
       final geomIndex = doc.geometry.add(payload);
       doc.entities.add(record.copyWith(geomIndex: geomIndex));
+      doc.handleSeed.raiseTo(record.handle);
     }
   }
 }
