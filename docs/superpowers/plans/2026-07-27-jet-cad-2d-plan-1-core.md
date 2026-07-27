@@ -240,7 +240,7 @@ git commit -m "feat(jet_cad_2d): package scaffold and workspace wiring"
 - Produces:
   - `extension type const Handle(int value)` with `Handle.none`, `bool get isNone`, `String toHex()`, `static Handle parseHex(String)`, `static Handle fromJson(Object? json)`, `int toJson()`.
   - `const int kMaxHandle = 0xFFFFFFFF;`
-  - `class HandleRangeError implements Exception` with `final int value;`
+  - `class HandleRangeError implements Exception` with `final Object? value;` — `Object?` rather than `int` because `parseHex` records a `String` and `fromJson` records an arbitrary JSON value.
   - `class HandleSeed` with `Handle next()`, `Handle get current`, `void raiseTo(Handle)`.
 
 Every later task uses `Handle` for identity and `HandleSeed` for allocation.
