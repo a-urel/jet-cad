@@ -4562,16 +4562,11 @@ class DocumentTree {
   /// instance of [target].
   bool definitionReaches(Handle from, Handle target) {
     final visited = <Handle>{};
-    bool walkDefinition(Handle definitionHandle) {
-      if (!visited.add(definitionHandle)) return false;
-      final def = _definitions[definitionHandle];
-      if (def == null) return false;
-      for (final child in def.children) {
-        if (walkNode(child, walkDefinition)) return true;
-      }
-      return false;
-    }
-
+    // walkNode is declared FIRST: Dart does not hoist local function
+    // declarations, so referencing walkNode from walkDefinition before its
+    // declaration is a compile error ("Local variable can't be referenced
+    // before it is declared"). The mutual recursion is closed by passing the
+    // definition-walker in as `into` rather than calling it by name.
     bool walkNode(Handle nodeHandle, bool Function(Handle) into) {
       final node = _nodes[nodeHandle];
       switch (node) {
@@ -4586,6 +4581,19 @@ class DocumentTree {
         case null:
           return false; // an entity handle, not a node
       }
+    }
+
+    // `visited` makes an already-expanded definition terminate immediately.
+    // Without it a legitimately shared but acyclic definition graph is
+    // re-walked exponentially, and a cyclic one never terminates.
+    bool walkDefinition(Handle definitionHandle) {
+      if (!visited.add(definitionHandle)) return false;
+      final def = _definitions[definitionHandle];
+      if (def == null) return false;
+      for (final child in def.children) {
+        if (walkNode(child, walkDefinition)) return true;
+      }
+      return false;
     }
 
     return walkDefinition(from);
@@ -4604,35 +4612,37 @@ class DocumentTree {
   /// reference. Each drop is reported.
   List<Diagnostic> repairCycles() {
     final diagnostics = <Diagnostic>[];
-    var changed = true;
-    while (changed) {
-      changed = false;
-      for (final definitionHandle in _definitions.keys.toList()
-        ..sort((a, b) => a.value.compareTo(b.value))) {
-        for (final node in nodes) {
-          if (node is! InstanceNode) continue;
-          final owner = _enclosingDefinitionOf(node.handle);
-          if (owner != definitionHandle) continue;
-          if (owner == node.definition ||
-              definitionReaches(node.definition, owner)) {
-            _dropInstance(node, owner);
-            diagnostics.add(Diagnostic(
-              severity: DiagnosticSeverity.warning,
-              code: 'tree.cycle_dropped',
-              message: 'Dropped instance ${node.handle.toHex()}: definition '
-                  '${owner.toHex()} cannot contain '
-                  '${node.definition.toHex()}.',
-              handles: [node.handle, owner, node.definition],
-            ));
-            changed = true;
-            break;
-          }
-        }
-        if (changed) break;
-      }
+    // Find the BACK edge — the reference that closes the cycle — not the first
+    // edge encountered walking definitions in handle order. Scanning in handle
+    // order drops the forward edge instead, which removes a legitimate
+    // reference and leaves the offending one in place.
+    //
+    // Each pass drops exactly one instance and then rescans from scratch, so
+    // the scan never walks a collection it is mutating. Every pass removes a
+    // node, so the loop is bounded by the node count and converges; on a clean
+    // tree the first scan finds nothing and the result is empty.
+    for (var edge = _findBackEdge(); edge != null; edge = _findBackEdge()) {
+      final (:instance, :owner) = edge;
+      _dropInstance(instance);
+      diagnostics.add(Diagnostic(
+        severity: DiagnosticSeverity.warning,
+        code: 'tree.cycle_dropped',
+        message: 'Dropped instance ${instance.handle.toHex()}: definition '
+            '${owner.toHex()} cannot contain '
+            '${instance.definition.toHex()}.',
+        handles: [instance.handle, owner, instance.definition],
+      ));
     }
     return diagnostics;
   }
+
+  /// Returns the instance whose reference closes a definition cycle, or null.
+  ///
+  /// Implemented as a white/grey/black depth-first search over the definition
+  /// graph: an edge into a *grey* definition is a back edge, and the instance
+  /// carrying it is the one to drop. See the shipped implementation in
+  /// `lib/src/document/tree.dart` for the full walk.
+  ({InstanceNode instance, Handle owner})? _findBackEdge() { /* see source */ }
 
   void clear() {
     _nodes.clear();
@@ -4641,8 +4651,11 @@ class DocumentTree {
 
   /// The definition that ultimately owns [handle], or [Handle.none] if the node
   /// hangs off the root instead.
-  Handle _enclosingDefinitionOf(Handle handle) {
-    var current = _nodes[handle]?.parent ?? Handle.none;
+  /// Walks up from [start] — a node's declared PARENT, never its own handle.
+  /// On [addNode] the node is not in the tree yet, so starting from its handle
+  /// finds nothing and the caller's guard silently passes.
+  Handle _enclosingDefinitionAbove(Handle start) {
+    var current = start;
     while (!current.isNone) {
       if (_definitions.containsKey(current)) return current;
       final parent = _nodes[current];
@@ -4654,11 +4667,11 @@ class DocumentTree {
 
   void _guardCycle(Node node) {
     if (node is! InstanceNode) return;
-    // A node parented directly by a definition is owned by it; otherwise walk
-    // up to find the enclosing definition, if any.
-    final owner = _definitions.containsKey(node.parent)
-        ? node.parent
-        : _enclosingDefinitionOf(node.handle);
+    // Walk up from the node's declared PARENT, not from the node's own handle:
+    // on addNode the node is not in the tree yet, so a lookup keyed on its
+    // handle finds nothing and the guard silently skips the check for every
+    // instance nested in a group inside a definition.
+    final owner = _enclosingDefinitionAbove(node.parent);
     if (owner.isNone) return; // placed under the root: never a cycle
     if (owner == node.definition || definitionReaches(node.definition, owner)) {
       throw CycleDetectedError(owner, node.definition);
