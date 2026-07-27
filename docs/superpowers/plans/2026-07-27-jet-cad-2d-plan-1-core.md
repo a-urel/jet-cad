@@ -6237,7 +6237,7 @@ git commit -m "feat(jet_cad_2d): entity, node, transform and component commands"
   - `enum DrawingUnits { unitless, millimeters, centimeters, meters, inches, feet }`
   - `class DocumentHeader` — `DrawingUnits units`, `double scale`, `Aabb2? importedExtents`, `Map<String, Object?> customVariables`; `toJson`/`fromJson` with sorted custom variables.
   - `class RawDataStore` — `void set(Handle, SourceKind, Object?)`, `Object? get(Handle, SourceKind)`, `Map<SourceKind, Object?> allFor(Handle)`, `void remove(Handle)`, `Iterable<Handle> get handles`, `Map<String, Object?> toJson()`, `void loadJson(Map<String, Object?>)`, `bool get isEmpty`, `void clear()`.
-  - `abstract class TextMeasurer` with `Aabb2 measure(String text, Handle style, double height, Vector2 insertion)`; and `class InsertionPointMeasurer implements TextMeasurer`.
+  - `abstract class TextMeasurer` with `Aabb2 measure({required String text, required Handle style, required double height, required Vector2 insertion})` — named parameters, matching the Step 5 code; and `class InsertionPointMeasurer implements TextMeasurer`.
   - `Aabb2 entityBounds({required EntityKind kind, required GeometryPayload payload, required TextMeasurer measurer, required Handle textStyle, String text = ''})`.
 
 **`importedExtents` versus working extents.** `importedExtents` is stored: an opaque value preserved so `$EXTMIN`/`$EXTMAX` survive a round-trip unchanged. Working extents are derived, recomputed, and never persisted — a text entity's contribution comes from a font-dependent layout, so persisting them would make the same document serialize differently on two machines.
@@ -6251,7 +6251,8 @@ Create `packages/jet_cad_2d/test/document/header_test.dart`:
 ```dart
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
-import 'package:vector_math/vector_math_64.dart';
+// hide Aabb2: vector_math_64 exports its own, colliding with ours.
+import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 void main() {
   test('defaults to unitless with unit scale and no imported extents', () {
@@ -6525,8 +6526,12 @@ class RawDataStore {
 
   Object? get(Handle handle, SourceKind source) => _byHandle[handle]?[source];
 
+  /// Read-only. Returning the live inner map would let a caller mutate stored
+  /// data behind [set] and [remove] — the same aliasing defect as returning a
+  /// mutable `Vector2` or a growable children list, which this package has now
+  /// hit three times.
   Map<SourceKind, Object?> allFor(Handle handle) =>
-      _byHandle[handle] ?? const {};
+      Map.unmodifiable(_byHandle[handle] ?? const {});
 
   void remove(Handle handle) => _byHandle.remove(handle);
 
