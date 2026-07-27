@@ -2400,7 +2400,10 @@ DraftColor decodeColor(int encoded) {
   if (encoded == kByLayer) return const ByLayerColor();
   if (encoded == kByBlock) return const ByBlockColor();
   if (encoded >= 1 && encoded <= 255) return IndexedColor(encoded);
-  if (encoded & _kTrueColorTag != 0) {
+  // Range check, not `encoded & _kTrueColorTag != 0`: under two's complement
+  // every negative int has bit 24 set, so the bitwise form would classify
+  // decodeColor(-99) as a true colour instead of rejecting it.
+  if (encoded >= _kTrueColorTag && encoded <= (_kTrueColorTag | 0xFFFFFF)) {
     return TrueColor(encoded & 0xFFFFFF);
   }
   throw ArgumentError.value(encoded, 'encoded', 'not a colour encoding');
