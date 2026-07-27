@@ -1,3 +1,6 @@
+/// Exception thrown when a slot operation violates the slot lifetime invariants.
+///
+/// Thrown by [free] when the slot is out of range or already free.
 class SlotStateError implements Exception {
   final int slot;
   final String message;
@@ -30,10 +33,15 @@ class SlotAllocator {
 
   int get liveCount => _live.length - _free.length;
 
+  /// Tests whether a slot is live. Returns false for out-of-range slots; this is
+  /// a total predicate and does not throw, in contrast to [free].
   bool isLive(int slot) => slot >= 0 && slot < _live.length && _live[slot];
 
   /// Live slots in ascending order. Ascending rather than insertion or hash
   /// order because every query built on a store must be stably ordered.
+  ///
+  /// This is a lazy generator over mutable state. Callers that mutate (allocate,
+  /// free, or compact) during iteration must materialize first with [toList].
   Iterable<int> get liveSlots sync* {
     for (var i = 0; i < _live.length; i++) {
       if (_live[i]) yield i;

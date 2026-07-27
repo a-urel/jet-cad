@@ -38,6 +38,17 @@ void main() {
     expect(slots.liveSlots.toList(), [0, 2, 4]);
   });
 
+  test('isLive is total and returns false outside the valid range', () {
+    // isLive does not throw for out-of-range slots, unlike free.
+    final slots = SlotAllocator();
+    slots.allocate();
+    slots.allocate();
+    slots.allocate();
+    expect(slots.isLive(-1), isFalse);
+    expect(slots.isLive(slots.capacity), isFalse);
+    expect(slots.isLive(999), isFalse);
+  });
+
   test('rejects double free and out-of-range free', () {
     final slots = SlotAllocator();
     slots.allocate();
