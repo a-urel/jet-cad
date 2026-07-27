@@ -4891,7 +4891,7 @@ void main() {
     test('round-trips through the document format', () {
       final source = ComponentRegistry()..registerBuiltIns();
       source.attach(const Handle(10),
-          const OriginComponent(source: SourceKind.ifc, id: '3xY7$0abcd'));
+          const OriginComponent(source: SourceKind.ifc, id: '3xY7\$0abcd'));
       final loaded = ComponentRegistry()..registerBuiltIns();
       loaded.loadJson(source.toJson());
       final origin = loaded.get<OriginComponent>(const Handle(10))!;
@@ -5047,7 +5047,16 @@ class ComponentRegistry {
     for (final handle in unknownHandles) {
       for (final payload in _unknown[handle]!) {
         final typeId = payload['typeId']! as String;
-        (byTypeId[typeId] ??= {})[handle.value.toString()] = payload;
+        // Strip typeId from the WRITTEN form: the enclosing map key already
+        // names the type, and the registered branch's toJson() never embeds
+        // it. Writing it here makes a round-trip through a registry that
+        // lacks the type non-byte-identical — the second emission carries a
+        // typeId the first did not. `unknownOf` keeps the stored copy intact.
+        final withoutTypeId = {
+          for (final e in payload.entries)
+            if (e.key != 'typeId') e.key: e.value,
+        };
+        (byTypeId[typeId] ??= {})[handle.value.toString()] = withoutTypeId;
       }
     }
 
