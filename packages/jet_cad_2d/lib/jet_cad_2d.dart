@@ -6,3 +6,4 @@
 library;
 
 export 'src/core/handle.dart';
+export 'src/core/tolerance.dart';
