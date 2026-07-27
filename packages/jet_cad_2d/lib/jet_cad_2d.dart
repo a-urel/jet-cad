@@ -5,6 +5,8 @@
 /// own packages and use only this package's public API.
 library;
 
+export 'src/codec/json_codec.dart';
+export 'src/codec/schema_version.dart';
 export 'src/core/diagnostic.dart';
 export 'src/core/handle.dart';
 export 'src/core/list_equality.dart';

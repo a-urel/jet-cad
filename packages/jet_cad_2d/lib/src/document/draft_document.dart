@@ -39,6 +39,13 @@ class DraftDocument implements CommandTarget {
   final DocumentHeader header;
   final RawDataStore rawData;
 
+  /// Top-level document fields written by a newer version of this package.
+  ///
+  /// Preserved verbatim and written back unchanged: no layer discards data it
+  /// does not understand, and a document edited by an older build must not lose
+  /// what a newer one wrote.
+  final Map<String, Object?> unknownDocumentFields = {};
+
   /// `final`, not a plain mutable field: `entityBounds` reads this to compute
   /// `extents`, and `extents` caches that result in `_extentsCache` until
   /// [invalidateDerived] runs. A reassignable field would let a caller change

@@ -56,7 +56,7 @@ typedef _BackEdge = ({InstanceNode instance, Handle owner, Handle container});
 class DocumentTree {
   final Map<Handle, Node> _nodes = {};
   final Map<Handle, Definition> _definitions = {};
-  final Handle _root;
+  Handle _root;
 
   DocumentTree({required GroupNode rootNode}) : _root = rootNode.handle {
     _nodes[rootNode.handle] = rootNode;
@@ -354,6 +354,12 @@ class DocumentTree {
     _nodes.clear();
     _definitions.clear();
   }
+
+  /// Re-points the tree at a root that was just loaded.
+  ///
+  /// Only the codec uses this: a live document's root never changes, which is
+  /// why it is not a command.
+  void setRoot(Handle handle) => _root = handle;
 
   /// The first instance reference that points back at a definition already open
   /// on the walk, together with the definition that owns that instance and the
