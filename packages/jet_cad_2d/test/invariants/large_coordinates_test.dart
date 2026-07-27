@@ -26,10 +26,17 @@ void main() {
       basePoint: Vector2.zero(),
       children: const [],
     ));
+    // The group's transform is a translation *composed with* a non-uniform
+    // scale, not a bare translation: translation alone is commutative, so a
+    // group-then-instance composition would produce the same numeric result
+    // as an instance-then-group composition, and a test built on it could
+    // not tell "argument applied first" (Transform2.multiply's documented
+    // order) from its reverse. The scale makes composition order observable.
     doc.tree.addNode(GroupNode(
       handle: group,
       parent: doc.rootHandle,
-      transform: Transform2.translation(siteX, siteY),
+      transform:
+          Transform2.translation(siteX, siteY).multiply(Transform2.scale(2, 4)),
       children: [instance],
     ));
     doc.tree.addNode(InstanceNode(
@@ -43,8 +50,8 @@ void main() {
     final point = doc.tree
         .accumulatedTransform(instance)
         .transformPoint(Vector2(0.0625, 0.0625));
-    expect(point.x, siteX + 0.1875);
-    expect(point.y, siteY + 0.3125);
+    expect(point.x, siteX + 0.375);
+    expect(point.y, siteY + 1.25);
   });
 
   test('extents at site-plan magnitudes keep sub-millimetre detail', () {

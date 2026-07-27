@@ -107,15 +107,34 @@ void main() {
     dispatcher.execute(AddEntityCommand(
         record: recordFor(second, target.rootHandle),
         payload: line(9, 9, 8, 8)));
+    final firstOriginalSlot = target.entities.slotOf(first)!;
+    final secondOriginalSlot = target.entities.slotOf(second)!;
 
     dispatcher.execute(RemoveEntityCommand(first));
     dispatcher.execute(RemoveEntityCommand(second));
+
+    // A fresh allocation written directly to the stores — outside this
+    // dispatcher's history, and so never itself reversible by it —
+    // permanently claims the slot the removes just freed. A "remove N, undo
+    // N" round trip alone cannot prove this: undo is a perfect inverse of
+    // every command it replays, so with nothing claiming the freed slots in
+    // between, both entities would land back exactly where they started
+    // regardless of removal order — which would pass even against an
+    // inverse that carried slot numbers instead of payloads.
+    final fillerGeom = target.geometry.add(line(5, 5, 6, 6));
+    target.entities.add(recordFor(target.handleSeed.next(), target.rootHandle)
+        .copyWith(geomIndex: fillerGeom));
+
     dispatcher.undo(); // restores `second`
     dispatcher.undo(); // restores `first`
 
-    // Both are back with their own geometry, whatever slots they landed in.
     final firstSlot = target.entities.slotOf(first)!;
     final secondSlot = target.entities.slotOf(second)!;
+    expect(firstSlot, isNot(firstOriginalSlot),
+        reason: 'first was restored into a claimed slot, not its own');
+    expect(secondSlot, isNot(secondOriginalSlot),
+        reason: 'second was restored into a claimed slot, not its own');
+    // Both are back with their own geometry, whatever slots they landed in.
     expect(
         target.geometry.read(target.entities.geomIndexAt(firstSlot)).pointAt(0),
         Vector2(0, 0));
