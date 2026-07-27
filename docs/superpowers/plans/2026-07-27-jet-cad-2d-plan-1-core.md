@@ -17,7 +17,7 @@ Every task's requirements implicitly include this section. Values are copied ver
 - **No Flutter dependency in `jet_cad_2d`.** Tests run under `dart test`, never `flutter test`. A `flutter` import anywhere in `lib/` is a defect.
 - **No FFI, no native build, no format names.** The strings `dxf` and `ifc` may appear in `jet_cad_2d` only as (a) the `SourceKind` enum and (b) `GroupNode.exportAsDxfGroup`. Nowhere else.
 - **The handle space is 32-bit.** Entity columns are `Uint32List`; `2^32 - 1` is the ceiling on every platform. `Handle.none == Handle(0)` is the absent value. Fields never use `Handle?`.
-- **`==` on doubles is prohibited.** Comparisons go through `Tolerance`.
+- **`==` on doubles is prohibited** for equality *decisions*. Comparisons go through `Tolerance`. One deliberate exception, documented at its definition: `Transform2.isIdentity` is a bit-exact fast-path guard rather than an equality decision — its false negatives cost a redundant multiply, and it cannot produce a false positive. Any other exact double comparison is a defect.
 - **Coordinates are `Float64` in document units.** Screen coordinates never enter the model.
 - **Slot lifetime rules apply to both `GeometryStore` and `EntityStore`:** (1) slots change only inside a command that rewrites every reference; no ambient compaction, ever. (2) Deletion frees the slot to a free list; the inverse command carries the *payload*, not the slot. (3) Compaction exists only as an explicit `purge()` that rewrites all references and clears the undo stack — not a command, not undoable.
 - **Derived state is never persisted and never versioned:** working extents, world transforms, spatial index, resolved style, runtime overrides, text layout boxes. `importedExtents` is a *separate*, opaque, round-trip-only header value.
@@ -1006,6 +1006,14 @@ class Transform2 {
     return Transform2(cos, sin, -sin, cos, 0, 0);
   }
 
+  /// True only for a bit-exact identity.
+  ///
+  /// Deliberately not tolerance-based: this is a cheap fast-path guard, not
+  /// an equality decision. A near-identity answering `false` costs one
+  /// redundant multiply; there is no answer it can get dangerously wrong.
+  /// A tolerance-based version could report identity for a sub-tolerance
+  /// transform, and a fast path would then skip it — silently discarding a
+  /// real transform. For semantic comparison use `equals(other, tolerance)`.
   bool get isIdentity =>
       a == 1 && b == 0 && c == 0 && d == 1 && e == 0 && f == 0;
 
