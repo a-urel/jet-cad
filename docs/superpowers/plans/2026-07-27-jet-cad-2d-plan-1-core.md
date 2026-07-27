@@ -4086,7 +4086,7 @@ final class InstanceNode extends Node {
 /// transform. [basePoint] is DXF's block base point; insertion alignment is
 /// wrong without it.
 @immutable
-class Definition {
+final class Definition {
   final Handle handle;
   final String name;
   final Vector2 basePoint;
