@@ -20,6 +20,13 @@ Definition definitionWith(int handle, List<Handle> children) => Definition(
       children: children,
     );
 
+GroupNode groupIn(int handle, int parent, List<int> children) => GroupNode(
+      handle: Handle(handle),
+      parent: Handle(parent),
+      transform: Transform2.identity(),
+      children: [for (final c in children) Handle(c)],
+    );
+
 InstanceNode instanceIn(int handle, int parent, int definition) => InstanceNode(
       handle: Handle(handle),
       parent: Handle(parent),
@@ -234,5 +241,102 @@ void main() {
       expect(tree.definition(const Handle(201))!.children, isEmpty);
       expect(tree.repairCycles(), isEmpty);
     });
+
+    test('repairCycles cleans the container it walked, not node.parent', () {
+      // The malformed case repairCycles exists for: `parent` and `children`
+      // disagree. Group 21 is what actually lists the instance; the instance
+      // claims the root as its parent. Cleaning the parent side would leave 21
+      // still naming a node that no longer exists, and serialization would
+      // then emit a dangling child reference.
+      final tree = emptyTree();
+      tree.addDefinition(definitionWith(200, const [Handle(21)]));
+      tree.addNodeUnchecked(groupIn(21, 200, const [22]));
+      tree.addNodeUnchecked(
+          instanceIn(22, 100, 200)); // parent lies: 100, not 21
+
+      expect(tree.repairCycles(), hasLength(1));
+      expect(tree[const Handle(22)], isNull);
+      expect((tree[const Handle(21)]! as GroupNode).children, isEmpty);
+    });
+
+    test('repairCycles unlists a duplicated child handle completely', () {
+      // A malformed file can name the same child twice; removing only the
+      // first occurrence leaves a reference to a dropped node behind.
+      final tree = emptyTree();
+      tree.addDefinition(definitionWith(200, const [Handle(21)]));
+      tree.addNodeUnchecked(groupIn(21, 200, const [22, 22]));
+      tree.addNodeUnchecked(instanceIn(22, 21, 200));
+
+      expect(tree.repairCycles(), hasLength(1));
+      expect((tree[const Handle(21)]! as GroupNode).children, isEmpty);
+    });
+  });
+
+  // A cycle among *containers* is a different fault from a cycle among
+  // definitions, and the ordinary checked API admits one: `_guardCycle` only
+  // inspects instance nodes, so nothing stops two groups from being made each
+  // other's parent, or each other's child. Both used to run away — the parent
+  // form as an unbounded loop growing a list, the children form as unbounded
+  // recursion. Each test is bounded so a regression fails fast instead of
+  // stalling the suite.
+  group('node graph cycles', () {
+    test('a parent cycle throws rather than looping forever', () {
+      final tree = emptyTree();
+      // Both accepted by the fully-checked API: neither is an InstanceNode.
+      tree.addNode(groupIn(10, 11, const []));
+      tree.addNode(groupIn(11, 10, const []));
+
+      expect(() => tree.ancestorsOf(const Handle(10)),
+          throwsA(isA<NodeCycleError>()));
+      expect(() => tree.accumulatedTransform(const Handle(10)),
+          throwsA(isA<NodeCycleError>()));
+    }, timeout: const Timeout(Duration(seconds: 5)));
+
+    test('a self-parent throws rather than looping forever', () {
+      final tree = emptyTree()..addNode(groupIn(10, 10, const []));
+      expect(() => tree.ancestorsOf(const Handle(10)),
+          throwsA(isA<NodeCycleError>()));
+    }, timeout: const Timeout(Duration(seconds: 5)));
+
+    test('a children cycle throws rather than recursing forever', () {
+      // Parent pointers are consistent here, so only the children edge loops.
+      final tree = emptyTree();
+      tree.addDefinition(definitionWith(200, const [Handle(10)]));
+      tree.addDefinition(definitionWith(201, const []));
+      tree.addNode(groupIn(10, 200, const [11]));
+      tree.addNode(groupIn(11, 10, const [10])); // closes the loop
+
+      expect(() => tree.definitionReaches(const Handle(200), const Handle(201)),
+          throwsA(isA<NodeCycleError>()));
+      // The repair scan walks children too, and is bounded the same way.
+      expect(() => tree.repairCycles(), throwsA(isA<NodeCycleError>()));
+    }, timeout: const Timeout(Duration(seconds: 5)));
+
+    test('the error names the handle the walk looped back on', () {
+      final tree = emptyTree();
+      tree.addDefinition(definitionWith(200, const [Handle(10)]));
+      tree.addNode(groupIn(10, 200, const [11]));
+      tree.addNode(groupIn(11, 10, const [10]));
+
+      expect(
+          () => tree.definitionReaches(const Handle(200), const Handle(999)),
+          throwsA(isA<NodeCycleError>()
+              .having((e) => e.handle, 'handle', const Handle(10))));
+    }, timeout: const Timeout(Duration(seconds: 5)));
+
+    test('a handle listed under two groups is a duplicate, not a cycle', () {
+      // The walks use an on-path set, not a seen-ever set: re-entering a group
+      // that is no longer open is a repeated reference and must stay legal.
+      final tree = emptyTree();
+      tree.addDefinition(definitionWith(200, const [Handle(10), Handle(11)]));
+      tree.addDefinition(definitionWith(201, const []));
+      tree.addNode(groupIn(10, 200, const [12]));
+      tree.addNode(groupIn(11, 200, const [12]));
+      tree.addNode(instanceIn(12, 10, 201));
+
+      expect(
+          tree.definitionReaches(const Handle(200), const Handle(201)), isTrue);
+      expect(tree.repairCycles(), isEmpty);
+    }, timeout: const Timeout(Duration(seconds: 5)));
   });
 }
