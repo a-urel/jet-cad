@@ -229,6 +229,52 @@ void main() {
         throwsA(isA<PermissionDeniedError>()));
   });
 
+  test('AddNodeCommand refuses a handle already in the tree', () {
+    final target = TestTarget();
+    final dispatcher = CommandDispatcher(target: target);
+    final group = target.handleSeed.next();
+    final child = target.handleSeed.next();
+
+    dispatcher.execute(AddNodeCommand(GroupNode(
+      handle: group,
+      parent: target.rootHandle,
+      transform: Transform2.translation(5, 0),
+      children: const [],
+    )));
+    dispatcher.execute(AddNodeCommand(GroupNode(
+      handle: child,
+      parent: group,
+      transform: Transform2.identity(),
+      children: const [],
+    )));
+    expect((target.tree[group]! as GroupNode).children, [child]);
+
+    // DocumentTree.addNode does support overwriting a handle it holds. The
+    // command cannot: its inverse is RemoveNodeCommand, which deletes rather
+    // than restores, so an accepted overwrite would silently discard this
+    // group's transform and its child list, and undo would then remove the
+    // handle outright and orphan `child`. Three states, none the original.
+    final replacement = GroupNode(
+      handle: group,
+      parent: target.rootHandle,
+      transform: Transform2.identity(),
+      children: const [],
+    );
+    expect(() => dispatcher.execute(AddNodeCommand(replacement)),
+        throwsA(isA<StateError>()));
+
+    // Nothing moved, and the rejected command left no history behind.
+    expect(target.tree[group]!.transform.transformPoint(Vector2.zero()),
+        Vector2(5, 0));
+    expect((target.tree[group]! as GroupNode).children, [child]);
+
+    dispatcher.undo(); // undoes the *child*, not the rejected overwrite
+    expect(target.tree[child], isNull);
+    expect(target.tree[group], isNotNull);
+    expect(target.tree[group]!.transform.transformPoint(Vector2.zero()),
+        Vector2(5, 0));
+  });
+
   test('SetComponentCommand attaches, detaches, and reverses both', () {
     final target = TestTarget();
     final dispatcher = CommandDispatcher(target: target);

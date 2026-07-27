@@ -107,8 +107,21 @@ class ComponentRegistry {
   void attachUnknown(Handle handle, Map<String, Object?> json) =>
       _unknown.putIfAbsent(handle, () => []).add(json);
 
+  /// The unknown-component payloads recorded for [handle], oldest first.
+  ///
+  /// The **list** is a read-only view: handing back the store's own growable
+  /// list let a caller `clear()` it and delete an entire handle's worth of
+  /// preserve-unknown data with no call to [attachUnknown] or [clear] and no
+  /// way for the store to notice — the next save simply wrote nothing.
+  ///
+  /// The **payloads** inside it are the same references the store holds, not
+  /// copies, exactly as documented on [RawDataStore.get]: this registry never
+  /// inspects an unknown payload, so it has no way to clone one and no reason
+  /// to. Treat a payload obtained here as immutable. Mutating one in place
+  /// mutates what a later save writes, which is the one thing
+  /// preserve-unknown exists to prevent.
   List<Map<String, Object?>> unknownOf(Handle handle) =>
-      _unknown[handle] ?? const [];
+      List.unmodifiable(_unknown[handle] ?? const []);
 
   /// Shape: `{ typeId: { handleDecimal: payload } }`.
   ///

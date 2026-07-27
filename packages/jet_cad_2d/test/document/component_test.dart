@@ -95,6 +95,26 @@ void main() {
     expect(loaded.toJson(), json);
   });
 
+  test('unknownOf hands back a read-only list, not the store itself', () {
+    // The list used to be the store's own growable one, so a caller could
+    // delete an entire handle's worth of preserve-unknown data without going
+    // through attachUnknown or clear, and without the store noticing.
+    final registry = ComponentRegistry()
+      ..attachUnknown(const Handle(10), {'typeId': 'com.x.thing', 'v': 1})
+      ..attachUnknown(const Handle(10), {'typeId': 'com.x.other', 'v': 2});
+    final before = registry.toJson();
+
+    final view = registry.unknownOf(const Handle(10));
+    expect(view, hasLength(2));
+    expect(() => view.clear(), throwsUnsupportedError);
+    expect(
+        () => view.add({'typeId': 'com.x.smuggled'}), throwsUnsupportedError);
+    expect(() => view.removeLast(), throwsUnsupportedError);
+
+    expect(registry.unknownOf(const Handle(10)), hasLength(2));
+    expect(registry.toJson(), before);
+  });
+
   test('a registered component round-trips through json', () {
     final source = registryWithSeating()
       ..attach(

@@ -133,14 +133,25 @@ class TransformNodeCommand extends DraftCommand {
   }
 }
 
-/// Adds a node to the scene tree.
+/// Inserts a node into the scene tree.
 ///
-/// Relies on [DocumentTree.addNode] rejecting anything that would close a
-/// definition cycle *before* mutating: a second check here would be
+/// **Insert, never overwrite.** [DocumentTree.addNode] deliberately supports
+/// overwriting a handle it already holds — it unlinks from the previous parent
+/// to do so — but a command cannot, because its inverse is
+/// [RemoveNodeCommand], which deletes. An overwrite would leave three distinct
+/// states and none of them the original: apply silently discarded the previous
+/// node's transform and `children`, `apply` completed fully so `undo`'s
+/// restore-on-throw safety net never engaged, and undoing then *removed* the
+/// handle rather than putting the previous node back — orphaning every child
+/// that still named it as parent. Carrying the previous node in the inverse
+/// would fix the reversal but not the silent loss, so the handle is rejected
+/// instead.
+///
+/// Otherwise relies on [DocumentTree.addNode] rejecting anything that would
+/// close a definition cycle *before* mutating: a second check here would be
 /// redundant, and duplicating the guard is exactly how the two copies drift
-/// apart later. A rejected `addNode` call throws before this command returns
-/// its inverse, so the dispatcher never pushes history for it — a rejected
-/// command leaves no history.
+/// apart later. Both this check and that one throw before the command returns
+/// its inverse, so the dispatcher never pushes history for a rejected command.
 class AddNodeCommand extends DraftCommand {
   final Node node;
 
@@ -154,6 +165,9 @@ class AddNodeCommand extends DraftCommand {
 
   @override
   CommandResult apply(CommandTarget target) {
+    if (target.tree[node.handle] != null) {
+      throw StateError('node ${node.handle.toHex()} is already in the tree');
+    }
     target.tree.addNode(node);
     target.handleSeed.raiseTo(node.handle);
     target.invalidateDerived();
