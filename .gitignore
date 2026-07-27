@@ -7,6 +7,10 @@
 .buildlog/
 .history
 
+# Isolated workspaces and agent scratch
+.worktrees/
+.superpowers/sdd/
+
 
 
 # Flutter repo-specific
