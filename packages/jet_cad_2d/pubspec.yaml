@@ -1,0 +1,16 @@
+name: jet_cad_2d
+description: >-
+  Pure-Dart 2D CAD engine and document model. Independent of the jet_cad 3D
+  package — no OCCT, no FFI, no native build, no Flutter dependency.
+version: 0.1.0
+repository: https://github.com/ahmeturel/jet-cad
+resolution: workspace
+
+environment:
+  sdk: ^3.5.0
+dependencies:
+  meta: ^1.18.0
+  vector_math: ^2.2.0
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.31.0

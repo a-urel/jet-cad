@@ -4,4 +4,5 @@ environment:
   sdk: ^3.5.0
 workspace:
   - packages/jet_cad
+  - packages/jet_cad_2d
   - apps/dev_harness
