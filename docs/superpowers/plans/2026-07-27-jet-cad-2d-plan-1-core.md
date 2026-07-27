@@ -5677,8 +5677,15 @@ class CommandDispatcher {
   void undo() {
     if (!_history.canUndo) return;
     final inverse = _history.takeUndo();
+    final CommandResult result;
     try {
       _require(inverse);
+      // apply is inside the try too. DraftCommand's contract is that a
+      // command either completes fully or leaves the target unmutated, so a
+      // throwing inverse means nothing changed — restoring the entry keeps
+      // it retryable. Leaving apply outside reproduces the very defect this
+      // block exists to fix, just via a different trigger.
+      result = inverse.apply(target);
     } catch (_) {
       // Restore the popped entry. Checking after the pop and not putting it
       // back means a single denied undo silently and permanently strands
@@ -5686,7 +5693,6 @@ class CommandDispatcher {
       _history.pushUndoOnly(inverse);
       rethrow;
     }
-    final result = inverse.apply(target);
     _history.pushRedo(result.inverse);
     _changes.add(CommandUndone(label: inverse.label, touched: result.touched));
   }
@@ -5694,13 +5700,14 @@ class CommandDispatcher {
   void redo() {
     if (!_history.canRedo) return;
     final inverse = _history.takeRedo();
+    final CommandResult result;
     try {
       _require(inverse);
+      result = inverse.apply(target);
     } catch (_) {
       _history.pushRedo(inverse);
       rethrow;
     }
-    final result = inverse.apply(target);
     _history.pushUndoOnly(result.inverse);
     _changes.add(CommandRedone(label: inverse.label, touched: result.touched));
   }
