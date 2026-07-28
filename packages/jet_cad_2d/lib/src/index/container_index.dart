@@ -243,6 +243,36 @@ class ContainerIndex {
     return _instanceTransforms[at];
   }
 
-  /// Marks a leaf slot as superseded by a dirty entry.
+  /// The indexed box of [slot], or null if this container does not hold it —
+  /// **including when it holds a dead entry for it.**
+  ///
+  /// Reads the tree's stored box rather than recomputing from geometry: the
+  /// point of the comparison is "does what is indexed still match the
+  /// document", so recomputing both sides would compare a value to itself.
+  ///
+  /// Returning null for a dead item is load-bearing, not tidiness. Remove
+  /// marks the tree entry dead; undo then restores the entity to the same slot
+  /// with the same box. If this returned the still-stored box, reconciliation
+  /// would compare equal, return early without dirtying, and leave the dead
+  /// bit set — and the entity would be permanently invisible to every query,
+  /// with no error anywhere.
+  Aabb2? boxOfLeaf(int slot) => _leaves.boxOfPayload(slot);
+
+  bool containsLeaf(int slot) => _leaves.boxOfPayload(slot) != null;
+
+  /// Un-marks a leaf, for the restore half of remove-then-undo.
+  void markLeafAlive(int slot) => _leaves.markAlive(slot);
+
+  /// Whether the tree holds an entry for [slot] at all, alive or dead.
+  ///
+  /// Distinct from [containsLeaf], which answers "is there a usable box" and
+  /// so is false for a dead entry. Reconciliation needs both questions.
+  bool containsLeafSlot(int slot) => _leaves.holdsPayload(slot);
+
+  /// The stored box of a dead entry, so reconciliation can decide whether a
+  /// restored entity is going back exactly where it was.
+  Aabb2? boxOfDeadLeaf(int slot) => _leaves.boxIgnoringDead(slot);
+
+  /// Marks a leaf slot as superseded by a dirty entry, or removed.
   void markLeafDead(int slot) => _leaves.markDead(slot);
 }

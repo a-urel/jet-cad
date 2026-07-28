@@ -242,6 +242,37 @@ class PackedRTree {
     return _isDeadItem(item);
   }
 
+  /// The stored box of [payload], or null when this tree has no such item —
+  /// or holds one that is dead.
+  ///
+  /// A dead item is one the document no longer agrees with, so reporting its
+  /// stale box to a caller asking "what is indexed for this payload?" would be
+  /// answering a different question.
+  Aabb2? boxOfPayload(int payload) {
+    final item = _payloadToItem[payload];
+    if (item == null || _isDeadItem(item)) return null;
+    return Aabb2.raw(_boxes[item * 4], _boxes[item * 4 + 1],
+        _boxes[item * 4 + 2], _boxes[item * 4 + 3]);
+  }
+
+  void markAlive(int payload) {
+    final item = _payloadToItem[payload];
+    if (item == null) return;
+    _dead[item >> 6] &= ~(1 << (item & 63));
+  }
+
+  /// Whether this tree holds an entry for [payload] at all, alive or dead.
+  bool holdsPayload(int payload) => _payloadToItem.containsKey(payload);
+
+  /// The stored box even for a dead item, for the one caller that needs to
+  /// ask whether a revived entity is going back exactly where it was.
+  Aabb2? boxIgnoringDead(int payload) {
+    final item = _payloadToItem[payload];
+    if (item == null) return null;
+    return Aabb2.raw(_boxes[item * 4], _boxes[item * 4 + 1],
+        _boxes[item * 4 + 2], _boxes[item * 4 + 3]);
+  }
+
   void clearDead() {
     for (var i = 0; i < _dead.length; i++) {
       _dead[i] = 0;

@@ -95,6 +95,18 @@ void main() {
     expect(hits(tree, -1, -1, 100, 100), hasLength(100));
   });
 
+  test('a dead item has no box, and markAlive restores it', () {
+    final tree = gridTree(100);
+    expect(tree.boxOfPayload(42), isNotNull);
+    tree.markDead(42);
+    expect(tree.boxOfPayload(42), isNull,
+        reason: 'a stale box for a dead item is how remove-then-undo loses '
+            'an entity forever');
+    tree.markAlive(42);
+    expect(tree.boxOfPayload(42), isNotNull);
+    expect(tree.isDead(42), isFalse);
+  });
+
   // SKIPPED, deliberately: the measurement below is a stub that always
   // returns 0, so this assertion passes against any implementation. A test
   // that silently measures nothing is worse than no test — it reads as
