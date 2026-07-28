@@ -409,8 +409,24 @@ class SpatialIndex {
   /// `pickInto`'s descent before this method existed and stays true now that
   /// `snapInto` shares it too; sharing the walk means `snapInto` does not
   /// add a *second*, independent occurrence of the same cost elsewhere in
-  /// this file. Left for Task 17's allocation harness, per that task's own
+  /// this file. Measured, not eliminated, by Task 17's allocation harness
+  /// (`test/invariants/query_allocation_test.dart`), per that task's own
   /// scope.
+  ///
+  /// **A second, smaller cost of the same shape:** `toWorld.multiply(...)`
+  /// below allocates one [Transform2] per *instance actually recursed into*
+  /// — [Transform2] is immutable, same as [Aabb2], so composing a transform
+  /// can only ever hand back a fresh one. This is bounded by nesting depth
+  /// times branching, not by candidate or leaf count, the same shape as the
+  /// closure-pair cost above and unlike the per-candidate cost the harness's
+  /// tight zero-allocation assertion actually targets — see that harness's
+  /// own file comment for why a root-only fixture cannot see either of these
+  /// two costs and why a nested one is required to catch them. Eliminating
+  /// it would mean threading `toWorld` through this recursion as six raw
+  /// doubles instead of a [Transform2], the same shape [_considerLeaf]
+  /// already uses for its own per-candidate transform math; left for a
+  /// future task rather than done here, since it touches this method's
+  /// signature and every call site of it.
   void _descend(
     ContainerIndex index,
     Transform2 toWorld,
@@ -443,10 +459,37 @@ class SpatialIndex {
     // always contains the mapped-up box of the leaf inside it, so a query
     // that reaches the leaf's own box necessarily reaches every instance box
     // on the way down to it.
-    final localQuery = Aabb2(
-      Vector2(world.x - broadRadius, world.y - broadRadius),
-      Vector2(world.x + broadRadius, world.y + broadRadius),
-    ).transformedBy(toLocal);
+    //
+    // Built from raw doubles, not `Aabb2(Vector2, Vector2).transformedBy(...)`:
+    // that reads better but was measured (Task 17's allocation harness) to
+    // allocate roughly ten `Vector2`/`Aabb2` objects per call -- the four
+    // corners as `Vector2`s, `Aabb2.fromPoints`' intermediate `List`, and one
+    // `Aabb2.raw` per fold step of `expandedToPoint`. Since this runs once per
+    // *recursion level*, not once per candidate, every one of those was a real
+    // steady-state allocation scaling with how deep a pick or snap descends
+    // through nested instances. All four corners of the widened world square
+    // are still transformed and bounded -- same conservative-under-rotation
+    // contract as [Aabb2.transformedBy] -- just with the min/max fold done
+    // over plain doubles instead of immutable objects, the same style
+    // [_considerLeaf] already uses for its own per-candidate transform math.
+    final wMinX = world.x - broadRadius, wMinY = world.y - broadRadius;
+    final wMaxX = world.x + broadRadius, wMaxY = world.y + broadRadius;
+    final la = toLocal.a, lb = toLocal.b, lc = toLocal.c;
+    final ld = toLocal.d, le = toLocal.e, lf = toLocal.f;
+    var qMinX = la * wMinX + lc * wMinY + le;
+    var qMinY = lb * wMinX + ld * wMinY + lf;
+    var qMaxX = qMinX, qMaxY = qMinY;
+    for (var i = 1; i < 4; i++) {
+      final cx = (i & 1) == 0 ? wMinX : wMaxX;
+      final cy = (i & 2) == 0 ? wMinY : wMaxY;
+      final lx = la * cx + lc * cy + le;
+      final ly = lb * cx + ld * cy + lf;
+      if (lx < qMinX) qMinX = lx;
+      if (lx > qMaxX) qMaxX = lx;
+      if (ly < qMinY) qMinY = ly;
+      if (ly > qMaxY) qMaxY = ly;
+    }
+    final localQuery = Aabb2.raw(qMinX, qMinY, qMaxX, qMaxY);
 
     index.searchLeaves(localQuery, (slot) {
       if (!_filters.acceptsEntity(slot, filter)) return;

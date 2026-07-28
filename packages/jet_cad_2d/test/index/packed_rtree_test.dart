@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 
+import '../invariants/vm_allocation_meter.dart';
+
 /// Builds a tree over [count] unit boxes on a grid, payload == index.
 PackedRTree gridTree(int count) {
   final side = math.sqrt(count).ceil();
@@ -107,28 +109,64 @@ void main() {
     expect(tree.isDead(42), isFalse);
   });
 
-  // SKIPPED, deliberately: the measurement below is a stub that always
-  // returns 0, so this assertion passes against any implementation. A test
-  // that silently measures nothing is worse than no test — it reads as
-  // coverage. Task 17 builds the real harness; this is enabled there, or
-  // deleted if the harness proves a per-tree assertion is redundant.
-  test('search allocates nothing after the first call', () {
+  // Was a stub, deliberately skipped by Task 3: the old `_allocatedBytes()`
+  // below always returned 0, so the assertion it fed passed against any
+  // implementation, including a broken one -- a test that reads as coverage
+  // but measures nothing. Task 17 (`query_allocation_test.dart`, next to
+  // this file's own package -- see `test/invariants/vm_allocation_meter
+  // .dart` for the mechanism) replaces the stub with a real reading rather
+  // than deleting this test: the two harnesses check different code. The
+  // one in `test/invariants/` watches `Vector2`, since that is what
+  // `SpatialIndex`'s own narrow phase allocates one of per candidate; this
+  // tree's own `search` touches none of that package's geometry types at
+  // all -- it walks `_stackLevel`/`_stackIndex`, two typed arrays already
+  // held as fields, entirely in raw ints -- so there is nothing of that
+  // shape *to* watch here. What is watched instead is `Aabb2` and
+  // `Transform2`: not because `search` uses either today, but because it is
+  // exactly what a well-meaning future edit would reach for first (compare
+  // `boxOfPayload`, right above this test, which already builds one) if it
+  // started computing something geometric per visited node instead of just
+  // testing raw doubles against `_boxes` -- see [_overlaps].
+  test('search allocates nothing after the first call', () async {
+    final meter = await AllocationMeter.connect();
+    if (meter == null) {
+      markTestSkipped(vmServiceUnavailableReason);
+      return;
+    }
+    addTearDown(meter.dispose);
+
     final tree = gridTree(5000);
     var seen = 0;
     void count(int _) => seen++;
-    tree.search(0, 0, 70, 70, count); // warm
+    for (var i = 0; i < 20000; i++) {
+      tree.search(0, 0, 70, 70, count); // warm
+    }
+    expect(seen, greaterThan(0),
+        reason: 'the fixture must actually match something, or this test '
+            'would pass by never exercising a real walk at all');
 
-    final before = _allocatedBytes();
-    for (var i = 0; i < 50; i++) {
+    await meter.reset();
+    const iters = 1000;
+    for (var i = 0; i < iters; i++) {
       tree.search(0, 0, 70, 70, count);
     }
-    final after = _allocatedBytes();
-    // A tolerance rather than zero: the VM allocates for reasons outside this
-    // call. What is being excluded is per-item or per-node allocation, which
-    // at 5000 items x 50 calls would be enormous rather than marginal.
-    expect(after - before, lessThan(64 * 1024),
-        reason: 'search must not allocate per node or per item');
-  }, skip: 'stubbed measurement — see Task 17 for the real harness');
+    final accumulated =
+        await meter.accumulatedInstances({'Vector2', 'Aabb2', 'Transform2'});
+    for (final entry in accumulated.entries) {
+      // A tolerance rather than zero: the VM allocates for reasons outside
+      // this call, and `Aabb2`'s own name collides with an unused class of
+      // the same name in `package:vector_math` (see
+      // `AllocationMeter.accumulatedInstances`'s own doc comment) -- 0.5
+      // admits that noise without admitting a genuine per-node object,
+      // which at 5000 items visited per call would read as several
+      // thousand, not a fraction of one.
+      expect(entry.value / iters, lessThan(0.5),
+          reason: '${entry.key}: ${entry.value / iters} per call over '
+              '$iters calls against a 5000-item tree -- a per-node or '
+              'per-item allocation here would be orders of magnitude above '
+              'this budget');
+    }
+  });
 
   test('handles items that all share one box', () {
     final boxes = Float64List(64 * 4);
@@ -152,12 +190,4 @@ void main() {
     expect(hits(tree, 2, 2, 4, 4), [9]);
     expect(hits(tree, 3, 3, 3, 3), [9]);
   });
-}
-
-int _allocatedBytes() {
-  // dart:developer's Service API is not available in a plain test run, so this
-  // is a deliberate approximation: it measures nothing and returns 0 unless
-  // the harness in Task 17 replaces it. The assertion above therefore passes
-  // trivially here and is made real in Task 17.
-  return 0;
 }
