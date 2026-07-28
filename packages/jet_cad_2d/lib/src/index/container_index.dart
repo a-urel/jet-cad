@@ -83,58 +83,76 @@ class ContainerIndex {
       return const [];
     }
 
+    // Memoized per definition, not per instance: [DraftDocument.definitionBounds]
+    // recomputes `leavesByOwner()` — a full entity-store scan — on every
+    // call, so calling it once per instance makes a build over N instances of
+    // one shared definition O(N x entities) instead of O(entities). A build
+    // over 500 instances of an 8000-leaf definition measured ~5.7s uncached
+    // versus a few ms cached; see task-5-report.md.
+    final definitionBoundsCache = <Handle, Aabb2>{};
+    Aabb2 boundsOfDefinition(Handle def) =>
+        definitionBoundsCache[def] ??= doc.definitionBounds(def);
+
     // Explicit stack rather than recursion: a malformed tree must not blow
     // the Dart stack, and `validate()` reports tree.cycle for exactly that.
     //
-    // `seen` alone already makes a *cyclic* graph terminate — each handle can
-    // be pushed at most once, ever — so `maxDepth` is a second, independent
-    // guard against a *legitimately deep* (but acyclic) chain of nested
-    // groups blowing the stack. It must therefore cap actual path depth, not
-    // the number of items momentarily pending on the stack: a container with
-    // many sibling groups pushes many entries in one pass before any of them
-    // is popped, and bounding on `stack.length` would silently drop the
-    // siblings past the cap even though the tree is only one level deep. Each
-    // stack entry below carries its own depth for exactly this reason.
-    const maxDepth = 256;
-    final stack = <(Handle, Transform2, int)>[
-      (container, Transform2.identity(), 0),
-    ];
+    // No depth cap. `seen` below already bounds the walk to at most one push
+    // per node — that is what actually prevents a cyclic graph from hanging
+    // the build, since the stack is heap-allocated, not the Dart call stack,
+    // so there is nothing a numeric depth limit would protect against that
+    // `seen` does not already cover. A cap here would only ever silently
+    // truncate a legitimately deep — or legitimately wide, since many
+    // siblings are pending on the stack at once before any of them pops —
+    // and otherwise acyclic tree, which is strictly worse than the hang it
+    // would claim to prevent.
+    final stack = <(Handle, Transform2)>[(container, Transform2.identity())];
     final seen = <Handle>{container};
 
     while (stack.isNotEmpty) {
-      final (current, acc, depth) = stack.removeLast();
+      final (current, acc) = stack.removeLast();
 
       for (final slot in leavesByOwner[current] ?? const <int>[]) {
         addLeaf(slot, acc);
       }
 
       for (final child in childNodesOf(current)) {
+        // `seen` also deduplicates a `children` list that names the same
+        // child twice — tolerated on import (see
+        // `DocumentTree._withoutAll`'s doc comment) but fatal to
+        // `PackedRTree.build`, which requires unique payloads, if left
+        // unguarded here.
+        if (!seen.add(child)) continue;
         final node = doc.tree[child];
         switch (node) {
           case GroupNode(:final transform):
             // Flattened: recurse with the composed transform. `acc` is
             // applied second, so acc.multiply(transform) maps child space to
             // container space.
-            if (seen.add(child) && depth + 1 < maxDepth) {
-              stack.add((child, acc.multiply(transform), depth + 1));
-            }
+            stack.add((child, acc.multiply(transform)));
           case InstanceNode(:final definition, :final transform):
             final composed = acc.multiply(transform);
             final instanceBox =
-                doc.definitionBounds(definition).transformedBy(composed);
+                boundsOfDefinition(definition).transformedBy(composed);
             instanceHandles.add(child);
             instanceTransforms.add(composed);
             addBox(instanceBoxes, instanceBox);
             bounds = bounds.union(instanceBox);
 
             // Attributes belong to the INSERT, not to the definition: an
-            // ATTRIB entity's owner is the instance node, and its
-            // coordinates are already in the instance's placed position.
-            // They are indexed into THIS container rather than into the
-            // definition's index, because they differ per instance — that is
-            // the whole point of an attribute. Missing this step leaves
-            // every attribute in no index at all, unpickable and
-            // unsnappable, while `attributesOf` still reports them.
+            // ATTRIB entity's owner is the instance node, and per
+            // `EntityRecord.owner`'s governing rule ("leaf coordinates are
+            // expressed in the owner's space") its coordinates are
+            // instance-*local*, exactly like any other leaf owned by this
+            // node — not already placed. They must therefore be transformed
+            // by `composed`, the same as every other leaf this container
+            // owns, which is what makes them differ per placement; sharing
+            // one untransformed box across every instance, or dropping them
+            // because `leavesByOwner[current]` alone never reaches a slot
+            // owned by the instance, are the two ways to get this wrong. A
+            // DXF importer must convert ATTRIB coordinates into
+            // instance-local space on import — DXF stores them already
+            // placed in world space, and re-using that value verbatim here
+            // would double-apply the INSERT transform.
             for (final slot in leavesByOwner[child] ?? const <int>[]) {
               addLeaf(slot, composed);
             }
@@ -163,17 +181,17 @@ class ContainerIndex {
 
   /// Every live entity slot bucketed by its owner, ascending within a bucket.
   ///
-  /// Leaf containment is stated exactly once, by `EntityRecord.owner`, and
-  /// that statement is authoritative. Never read leaves out of a `children`
+  /// Delegates to [DraftDocument.leavesByOwner] rather than keeping an
+  /// independent copy of the bucketing loop: leaf containment is stated
+  /// exactly once, by `EntityRecord.owner`, and that statement's one
+  /// implementation lives on the document, which is also what
+  /// `definitionBounds` and `extents` use. This static wrapper exists only
+  /// so every call site in this file and its tests can write
+  /// `ContainerIndex.leavesByOwner(doc)` uniformly, matching the shape the
+  /// rest of this class's API uses. Never read leaves out of a `children`
   /// list — `children` holds child nodes only.
-  static Map<Handle, List<int>> leavesByOwner(DraftDocument doc) {
-    final byOwner = <Handle, List<int>>{};
-    // liveSlots yields ascending slots, so each bucket is ascending too.
-    for (final slot in doc.entities.liveSlots) {
-      (byOwner[doc.entities.ownerAt(slot)] ??= <int>[]).add(slot);
-    }
-    return byOwner;
-  }
+  static Map<Handle, List<int>> leavesByOwner(DraftDocument doc) =>
+      doc.leavesByOwner();
 
   final Handle container;
   final PackedRTree _leaves;

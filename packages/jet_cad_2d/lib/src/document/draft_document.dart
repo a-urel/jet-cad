@@ -125,8 +125,14 @@ class DraftDocument implements CommandTarget {
   ///
   /// Computed once per definition and reused by every instance — the same
   /// sharing the spatial index and the picture cache rely on in later plans.
+  ///
+  /// A caller building many of these in one pass — [ContainerIndex.build]
+  /// over every instance of a shared definition, for instance — should call
+  /// [leavesByOwner] once itself and memoize the result per definition
+  /// handle rather than calling this repeatedly: each call here recomputes
+  /// [leavesByOwner] from scratch, which is a full entity-store scan.
   Aabb2 definitionBounds(Handle definition) => _boundsOfContainer(
-      definition, <Handle>{}, <Handle, Aabb2>{}, _leavesByOwner());
+      definition, <Handle>{}, <Handle, Aabb2>{}, leavesByOwner());
 
   /// Compacts both columnar stores and clears history.
   ///
@@ -159,7 +165,7 @@ class DraftDocument implements CommandTarget {
   Future<void> dispose() => commands.dispose();
 
   Aabb2 _computeExtents() => _boundsOfContainer(
-      tree.root, <Handle>{}, <Handle, Aabb2>{}, _leavesByOwner());
+      tree.root, <Handle>{}, <Handle, Aabb2>{}, leavesByOwner());
 
   /// Every live entity slot bucketed by its owner, ascending within a bucket.
   ///
@@ -172,7 +178,11 @@ class DraftDocument implements CommandTarget {
   /// which is what a million-entity document requires. The result is identical
   /// either way — this is the same filter, evaluated once instead of once per
   /// container.
-  Map<Handle, List<int>> _leavesByOwner() {
+  ///
+  /// Leaf containment is stated exactly once here, by [EntityRecord.owner] —
+  /// [ContainerIndex.leavesByOwner] delegates to this rather than keeping an
+  /// independent copy of the same loop, so the statement stays singular.
+  Map<Handle, List<int>> leavesByOwner() {
     final byOwner = <Handle, List<int>>{};
     // `liveSlots` yields ascending slots, so each bucket is ascending too.
     for (final slot in entities.liveSlots) {
