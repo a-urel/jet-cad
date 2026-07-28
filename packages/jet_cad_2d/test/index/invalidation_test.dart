@@ -380,4 +380,60 @@ void main() {
     expect(index.rootIndex.dirty.length, lessThanOrEqualTo(threshold),
         reason: 'a rebuild folds the dirty list into the tree');
   });
+
+  test('a reused slot does not inherit the removed leaf\'s group transform',
+      () {
+    // Slots are recycled from a LIFO free list, so the very next entity added
+    // after a removal lands on the freed slot. `ContainerIndex` keys its
+    // composed group transforms by slot, so if a removed leaf's matrix
+    // outlives it, the unrelated entity that claims the slot is measured in
+    // the removed leaf's space -- found by the broad phase at its own
+    // coordinates, then narrow-phased a hundred units away.
+    //
+    // Two lines guard this: `forgetLeaf` on the removal path, and
+    // `noteLeaf`'s clear-when-identity on the add path. Deleting *either*
+    // alone still passes; deleting both together used to pass too, which is
+    // what this test exists to stop.
+    final doc = DraftDocument.empty();
+    const group = Handle(700);
+    doc.commands.execute(AddNodeCommand(
+      GroupNode(
+        handle: group,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(100, 100),
+        children: const [],
+      ),
+    ));
+    final inGroup = addLine(doc, group, 0, 0, 1, 0);
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final slot = doc.entities.slotOf(inGroup)!;
+    expect(index.rootIndex.transformOfLeaf(slot), isNotNull,
+        reason: 'the fixture must actually put a transform on this slot');
+
+    final rebuildsBefore = index.rebuildCount;
+    doc.commands.execute(RemoveEntityCommand(inGroup));
+    final reuser = addLine(doc, doc.rootHandle, 0, 0, 1, 0);
+
+    expect(doc.entities.slotOf(reuser), slot,
+        reason: 'the fixture must actually reuse the freed slot');
+    expect(index.rebuildCount, rebuildsBefore,
+        reason: 'this must exercise the dirty overlay, not a rebuild');
+
+    final hit = HitPath();
+    expect(
+      index.pickInto(Vector2(0.5, 0), 0.25, const QueryFilter.all(), hit),
+      isTrue,
+      reason: 'a root-owned entity must be measured in root space, not in '
+          'the space of whatever used to hold its slot',
+    );
+    expect(hit.entity, reuser);
+
+    expect(
+      index.pickInto(Vector2(100.5, 100), 0.25, const QueryFilter.all(), hit),
+      isFalse,
+      reason: 'nothing is drawn where the removed leaf used to be',
+    );
+  });
 }
