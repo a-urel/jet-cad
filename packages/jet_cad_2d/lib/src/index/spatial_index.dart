@@ -714,9 +714,17 @@ class SpatialIndex {
   /// [SnapResult]'s doc comment. Unlike [pickInto], this returns `void`;
   /// callers read [SnapResult.found] rather than a return value.
   ///
-  /// **A snap query allocates nothing** in steady state, once every scratch
-  /// buffer it touches has grown to the deepest nesting and largest
-  /// candidate set any query has reached -- it runs at pointer-move rate.
+  /// **A snap query allocates nothing per candidate** in steady state, once
+  /// every scratch buffer it touches has grown to the deepest nesting and
+  /// largest candidate set any query has reached -- it runs at pointer-move
+  /// rate. **Per *descent level* is a different claim, and a weaker one:**
+  /// this shares [_descend], which allocates a closure pair on every
+  /// recursive call, so a snap that descends N levels of instance nesting
+  /// still allocates on the order of 2N closures however warm the buffers
+  /// are. That cost is inherited, not introduced here, and is carried
+  /// against the allocation harness that measures it; do not read the
+  /// sentence above as a stronger guarantee than [_descend] actually
+  /// provides.
   /// No entity filter is accepted (unlike [pickInto]): snapping considers
   /// every entity, so this passes `const QueryFilter.all()` through to
   /// [_descend], which short-circuits on `isPassthrough` without touching

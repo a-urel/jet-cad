@@ -430,4 +430,57 @@ void main() {
     expect(result.point, Vector2.zero());
     expect(result.chainLength, 0);
   });
+
+  test(
+      'two coincident leaves under the SAME instance: the greater leaf '
+      'handle wins', () {
+    // The fourth and last term of the snap ordering (kind, distance,
+    // root-level ancestor, leaf handle) is only reachable when the first
+    // three all tie. Two *root-level* entities can never tie on the third,
+    // because a root-level leaf stands in as its own root-level ancestor,
+    // so the existing coincident-lines test stops at term three and the
+    // leaf fallback goes unexercised -- mutating `handle.value >` to `<`
+    // left the whole snap suite green. Reaching both leaves through one
+    // shared instance makes their ancestor handles equal, which is the only
+    // shape that forces the comparison down to the leaf.
+    //
+    // This mirrors the equivalent fixture in pick_test.dart; snapInto and
+    // pickInto implement the same tie-break and each needs its own pin.
+    final doc = DraftDocument.empty();
+    const def = Handle(200);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'T',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    final lower = addEntity(doc, def, EntityKind.line, [0, 0, 10, 0], []);
+    final upper = addEntity(doc, def, EntityKind.line, [0, 0, 10, 0], []);
+    expect(upper.value, greaterThan(lower.value),
+        reason: 'the fixture is only meaningful if the second entity really '
+            'does have the greater handle');
+    doc.commands.execute(AddNodeCommand(
+      InstanceNode(
+        handle: const Handle(400),
+        parent: doc.rootHandle,
+        transform: Transform2.identity(),
+        definition: def,
+        layer: ReservedHandles.layerZero,
+      ),
+    ));
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    // Query the shared endpoint at the origin: identical kind (endpoint),
+    // identical distance (zero), identical ancestor (the one instance).
+    final out = SnapResult();
+    index.snapInto(Vector2.zero(), 0.5, SnapMask.cheap, out);
+    expect(out.found, isTrue);
+    expect(out.kind, SnapKind.endpoint);
+    expect(out.entity, upper,
+        reason: 'with kind, distance and root-level ancestor all equal, the '
+            'greater leaf handle wins -- draw order is ascending handle '
+            'value, so the greater handle is drawn last and is on top');
+  });
 }
