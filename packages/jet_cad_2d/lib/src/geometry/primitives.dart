@@ -38,12 +38,12 @@ double distancePointToSegment(Vector2 p, Vector2 a, Vector2 b) =>
 /// caller-owned `out` and uses a fixed internal tolerance, for `snapInto`'s
 /// zero-allocation, pointer-move-rate intersection candidate search. Both
 /// are exported, unprefixed, from the same `jet_cad_2d.dart` barrel, so the
-/// two cannot share a name: verified experimentally that `dart analyze`
-/// does not flag two same-named top-level functions exported from sibling
-/// library files as an ambiguous export -- it silently resolves an
-/// unqualified call to just one of them, which is a worse failure mode than
-/// a compile error and the actual reason this rename exists, not merely
-/// tidiness.
+/// two cannot share a name: with both declared `segmentIntersection`,
+/// `dart analyze` reports a hard `ambiguous_export` error on the barrel's
+/// own export directive, plus an `ambiguous_import` error at every
+/// unqualified call site in this package (`SpatialIndex._considerIntersections`
+/// is one). The rename was forced, not a style preference -- the collision
+/// does not compile.
 Vector2? segmentIntersectionTol(
   Vector2 p1,
   Vector2 p2,

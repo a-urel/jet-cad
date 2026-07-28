@@ -209,6 +209,85 @@ void main() {
 
   // --- beyond the brief's verbatim tests -----------------------------
 
+  group('nearest and perpendicular on a circle or arc', () {
+    // The brief's verbatim tests only exercise a straight line. nearest and
+    // perpendicular were extended here to circles and arcs too, for
+    // consistency with every other kind in this class (all four entity
+    // shapes), so they need the same standard of proof: a fixture that
+    // distinguishes the correct answer from the obvious wrong one, not a
+    // fixture symmetric enough to hide it.
+
+    test('nearest snaps to the near side of a circle, not the far side', () {
+      // Query point off any axis of symmetry -- direction (3/5, 4/5) from
+      // the centre, not aligned with x or y -- so a foot mistakenly
+      // projected to the *far* side of the rim lands somewhere clearly
+      // different from the correct near-side foot, not merely swapped with
+      // it by symmetry.
+      final doc = DraftDocument.empty();
+      addCircle(doc, [2, 3], 5);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+
+      final out = SnapResult();
+      // Query at (8, 11): 10 units from the centre along (3/5, 4/5). Near
+      // foot (5, 7) is 5 units away; far foot (-1, -1) is 15 units away.
+      index.snapInto(
+          Vector2(8, 11), 6.0, const SnapMask(0).with_(SnapKind.nearest), out);
+
+      expect(out.found, isTrue);
+      expect(out.kind, SnapKind.nearest);
+      expect(out.point.x, closeTo(5, 1e-9));
+      expect(out.point.y, closeTo(7, 1e-9));
+    });
+
+    test('perpendicular on a circle is the same near-side foot as nearest', () {
+      final doc = DraftDocument.empty();
+      addCircle(doc, [2, 3], 5);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+
+      final out = SnapResult();
+      index.snapInto(Vector2(8, 11), 6.0,
+          const SnapMask(0).with_(SnapKind.perpendicular), out);
+
+      expect(out.found, isTrue);
+      expect(out.kind, SnapKind.perpendicular);
+      expect(out.point.x, closeTo(5, 1e-9));
+      expect(out.point.y, closeTo(7, 1e-9));
+    });
+
+    test(
+        'off-sweep nearest/perpendicular on an arc clamps to the nearer '
+        'endpoint, not the farther one', () {
+      // A 10-to-70-degree arc, radius 10 at the origin -- deliberately not
+      // symmetric about the query direction, so the two endpoints sit at
+      // very different distances from the query point (about 2.77 and
+      // 12.72) rather than a tie a "pick either endpoint" bug could hide
+      // behind.
+      final doc = DraftDocument.empty();
+      addArc(doc, [0, 0], 10, 10 * math.pi / 180, 60 * math.pi / 180);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+
+      final out = SnapResult();
+      // Query at (12, 0) -- angle 0 from the centre, off the arc's
+      // 10-to-70-degree sweep. Distance to the start endpoint (~9.85, 1.74)
+      // is ~2.77; distance to the end endpoint (~3.42, 9.40) is ~12.72. A
+      // radius of 3.5 reaches the near endpoint but not the far one, so
+      // clamping to the wrong endpoint would report no hit at all rather
+      // than merely the wrong point.
+      index.snapInto(
+          Vector2(12, 0), 3.5, const SnapMask(0).with_(SnapKind.nearest), out);
+
+      expect(out.found, isTrue,
+          reason: 'clamping to the farther endpoint would put the '
+              'candidate outside the 3.5 search radius entirely');
+      expect(out.kind, SnapKind.nearest);
+      expect(out.point.x, closeTo(10 * math.cos(10 * math.pi / 180), 1e-9));
+      expect(out.point.y, closeTo(10 * math.sin(10 * math.pi / 180), 1e-9));
+    });
+  });
+
   group('tangent', () {
     test('snaps to a tangent point on a circle, radius load-bearing', () {
       // Deliberately not a unit circle at an axis-aligned point: both a and
