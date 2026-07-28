@@ -227,4 +227,63 @@ void main() {
       expect(out.x, 42);
     });
   });
+
+  group('projectOntoSegment', () {
+    test('returns null for a degenerate zero-length segment', () {
+      final out = Vector2.zero();
+      expect(
+          projectOntoSegment(Vector2(3, 4), Vector2(5, 5), Vector2(5, 5), out),
+          isNull);
+    });
+  });
+
+  group('segmentIntersection', () {
+    test(
+        'rejects a near-parallel pair even though the parameter range '
+        'check alone would accept it', () {
+      // Two long, converging segments: direction (1000, 0) and direction
+      // (1000, 1e-7), offset so the geometric crossing genuinely falls at
+      // t = u = 0.5 -- well inside both segments, so this is not the
+      // "infinite lines cross outside the segments" case the range check
+      // already handles. sin(angle) between the two directions is about
+      // 1e-10, below Tolerance.standard.angular (1e-9), so the near-parallel
+      // guard is the only thing standing between this pair and a reported
+      // hit.
+      //
+      // The reported point at that exact t is not itself absurd -- it lands
+      // at (500, 0), an entirely unremarkable coordinate for this fixture.
+      // That is the point: the danger here is not that this one answer is
+      // wrong, it is that the answer is arbitrarily sensitive to a change
+      // in either direction far too small to matter for anything else,
+      // which is exactly what an ordinary drawing edit produces. A snap
+      // target that unstable is worse than no snap at all.
+      final out = Vector2.zero();
+      final hit = segmentIntersection(Vector2(0, 0), Vector2(1000, 0),
+          Vector2(0, -5e-8), Vector2(1000, 5e-8), out);
+      expect(hit, isNull,
+          reason: 'sin(angle) ~= 1e-10 is below Tolerance.standard.angular, '
+              'so this pair must be rejected as near-parallel even though '
+              't and u both land inside [0, 1]');
+    });
+
+    test('accepts a shallow but clearly non-parallel crossing', () {
+      // A sanity check that the near-parallel guard is not simply
+      // rejecting every shallow angle: sin(angle) here is about 1e-3, far
+      // above the threshold, so this must be found.
+      final out = Vector2.zero();
+      final hit = segmentIntersection(Vector2(0, 0), Vector2(1000, 0),
+          Vector2(0, -0.5), Vector2(1000, 0.5), out);
+      expect(hit, isNotNull);
+      expect(out.x, closeTo(500, 1e-6));
+      expect(out.y, closeTo(0, 1e-9));
+    });
+
+    test('returns null for a degenerate zero-length input segment', () {
+      final out = Vector2.zero();
+      expect(
+          segmentIntersection(Vector2(0, 0), Vector2(0, 0), Vector2(-1, -1),
+              Vector2(1, 1), out),
+          isNull);
+    });
+  });
 }

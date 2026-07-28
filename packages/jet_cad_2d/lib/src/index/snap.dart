@@ -10,14 +10,16 @@ import '../core/handle.dart';
 /// a midpoint, and both beat `nearest`. Reordering this enum changes snapping
 /// behaviour, which is why the order is stated rather than incidental.
 ///
-/// Only `endpoint` through `insertion` (the "cheap" kinds, constant cost per
-/// entity) are produced by [SpatialIndex.snapInto] today —
-/// `perpendicular`, `tangent` and `intersection` all need a second entity or
-/// a reference point this call does not have, and `nearest` needs the
-/// projection [distanceToPolyline] et al. already compute but this method
-/// does not yet surface as a candidate point. They exist in the enum now so
-/// [SnapMask] and priority ordering are stable across the tasks that add
-/// them.
+/// `endpoint` through `insertion` are the "cheap" kinds ([SnapMask.cheap]):
+/// constant cost per entity, needing nothing but the entity's own stored
+/// geometry. `perpendicular`, `tangent`, `intersection` and `nearest` are
+/// the "moderate" kinds: each needs either a second entity (`intersection`,
+/// pairwise over the candidates in the query rectangle) or a per-candidate
+/// projection against the query point itself (`perpendicular`, `tangent`,
+/// `nearest`). All nine are produced by [SpatialIndex.snapInto] — see its
+/// own doc comment for what each of the moderate kinds actually computes
+/// and why `tangent` uses the query point as its own reference rather than
+/// a caller-supplied one.
 enum SnapKind {
   endpoint,
   midpoint,

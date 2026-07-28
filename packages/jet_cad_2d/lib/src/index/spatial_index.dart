@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import '../core/handle.dart';
+import '../core/tolerance.dart';
 import '../document/doc_change.dart';
 import '../document/draft_document.dart';
 import '../document/extents.dart';
@@ -35,6 +36,26 @@ class QueryReentrancyError implements Exception {
       'QueryReentrancyError: $what is not permitted inside a query visitor. '
       'Collect the results first, then act on them.';
 }
+
+/// The most candidates an intersection snap will consider.
+///
+/// Pairwise testing is quadratic, so an uncapped version degrades without
+/// bound on a dense drawing: 64 candidates is already `64 * 63 / 2 = 2016`
+/// pair tests, once per pointer move. The number is declared here, as a
+/// named constant, rather than invented inline, so it is testable and
+/// tunable rather than buried in [SpatialIndex._considerIntersections].
+///
+/// **The cap is disclosed, not silent.** [SnapResult] carries no "some
+/// candidates were dropped" flag, and that is a deliberate choice, not an
+/// oversight: [SpatialIndex._considerIntersections] always takes exactly
+/// the entities with the [kIntersectionCandidateCap] lowest handle values
+/// among those the query rectangle touches — a fixed, documented,
+/// deterministic rule, not "whatever the R-tree happened to visit first".
+/// A caller that needs to know a rectangle holds more line-like entities
+/// than that already has [SpatialIndex.forEachInRect] to count them
+/// directly, so a second reporting mechanism here would just be a second,
+/// redundant way to ask the same question.
+const int kIntersectionCandidateCap = 64;
 
 /// Every [ContainerIndex] in a document, kept current against its changes.
 ///
@@ -291,6 +312,32 @@ class SpatialIndex {
   double _bestSnapDist = double.infinity;
   int _bestSnapEntity = 0;
   int _bestSnapRoot = 0;
+
+  /// Segment endpoints and the projected-point `out` for
+  /// [projectOntoSegment], reused across every `nearest`/`perpendicular`
+  /// candidate of every snap. Same zero-allocation reasoning as
+  /// [_scratchA]/[_scratchB] above, and deliberately not those two fields:
+  /// this class's not-reentrant contract means pick and snap never run at
+  /// the same time, so sharing would not be *unsafe*, but [_scratchA]'s own
+  /// doc comment says "every pick" — reusing it here for snapping would
+  /// make that comment inaccurate rather than save anything real.
+  final Vector2 _snapSegA = Vector2.zero();
+  final Vector2 _snapSegB = Vector2.zero();
+  final Vector2 _snapProjection = Vector2.zero();
+
+  /// The two tangent points [_tangentPoints] computes, reused across every
+  /// `tangent` candidate of every snap. Same reasoning as [_snapSegA] et al.
+  final Vector2 _snapTangentA = Vector2.zero();
+  final Vector2 _snapTangentB = Vector2.zero();
+
+  /// Segment endpoints and the crossing-point `out` for [segmentIntersection]
+  /// in [_considerIntersections], reused across every pair of every
+  /// intersection snap.
+  final Vector2 _isectA1 = Vector2.zero();
+  final Vector2 _isectA2 = Vector2.zero();
+  final Vector2 _isectB1 = Vector2.zero();
+  final Vector2 _isectB2 = Vector2.zero();
+  final Vector2 _isectOut = Vector2.zero();
 
   /// Finds the topmost entity within [radius] of [world], descending into
   /// every instance the query touches and reporting the full path down to
@@ -704,10 +751,17 @@ class SpatialIndex {
   /// same "ascending handle value is draw order, so the later one drawn
   /// wins" convention [_considerLeaf] uses for [pickInto].
   ///
-  /// Only the "cheap" kinds ([SnapMask.cheap]) are actually produced today,
-  /// regardless of what [mask] requests -- see the doc comment on
-  /// [SnapKind] for why the other kinds exist in the enum but are not yet
-  /// generated here.
+  /// Every [SnapKind] is produced now. `nearest` and `perpendicular` are the
+  /// same foot-of-the-projection point on a straight segment (or the same
+  /// radial foot on a circle or arc), offered under both kinds so that
+  /// [_considerSnapCandidate]'s priority comparison decides which survives
+  /// when both are requested. `tangent` uses [world] itself as the external
+  /// point for the classical two-tangent-lines construction -- see
+  /// [_tangentPoints]'s doc comment for why, since this method has no
+  /// separate "point I am drawing from" parameter. `intersection` is
+  /// handled separately by [_considerIntersections], root-level entities
+  /// only -- see its doc comment for the scope and the ordering guarantee
+  /// on [kIntersectionCandidateCap].
   ///
   /// **No-hit contract:** [out] is reset unconditionally at the start of
   /// *every* call, the same way [pickInto] resets [HitPath] -- see
@@ -749,9 +803,104 @@ class SpatialIndex {
       _bestSnapRoot = 0;
       _descend(root, Transform2.identity(), world, radius,
           const QueryFilter.all(), 0, null, mask, out);
+      if (mask.has(SnapKind.intersection)) {
+        _considerIntersections(world, radius, out);
+      }
       out.found = _bestSnapKind != null;
     } finally {
       _endQuery();
+    }
+  }
+
+  /// Considers every pairwise crossing among the root-level line and
+  /// polyline entities within [radius] of [world], among the
+  /// [kIntersectionCandidateCap] with the lowest handle values, feeding each
+  /// crossing found through [_considerSnapCandidate] exactly as any other
+  /// snap candidate.
+  ///
+  /// **Root-level only, deliberately** -- the same restriction
+  /// [forEachInRect]'s doc comment states and for the same reason: this
+  /// reuses [forEachInRect]'s exact broad-phase shape (root container,
+  /// world-space query rectangle, [_scratch] as the result buffer, sorted
+  /// by handle) rather than [_descend]'s instance-aware walk, so a leaf
+  /// inside an instance is never a candidate here. Only
+  /// [EntityKind.line] and [EntityKind.polyline] segments are tested; a
+  /// circle or arc is never an intersection candidate for this task.
+  ///
+  /// **The [kIntersectionCandidateCap] lowest handles, not the first
+  /// [kIntersectionCandidateCap] visited.** [ContainerIndex.searchLeaves]
+  /// visits in R-tree packing order, which has no defined relationship to
+  /// handle order -- capping in visit order would make a truncated result
+  /// depend on how the tree happens to be packed today, and change the next
+  /// time it is rebuilt even though nothing the user drew changed. Sorting
+  /// first, exactly as [forEachInRect] already does for its own ascending-
+  /// handle-order guarantee, is what keeps the cap deterministic.
+  ///
+  /// Quadratic in the candidate count -- up to `kIntersectionCandidateCap *
+  /// (kIntersectionCandidateCap - 1) / 2` segment-pair tests, times each
+  /// pair's own segment count -- which is exactly the cost
+  /// [kIntersectionCandidateCap]'s doc comment bounds.
+  void _considerIntersections(Vector2 world, double radius, SnapResult out) {
+    final root = rootIndex;
+    final localQuery = Aabb2(
+      Vector2(world.x - radius, world.y - radius),
+      Vector2(world.x + radius, world.y + radius),
+    );
+    _scratch.reset();
+    root.searchLeaves(localQuery, (slot) {
+      final kind = document.entities.kindAt(slot);
+      if (kind == EntityKind.line || kind == EntityKind.polyline) {
+        _scratch.add(slot);
+      }
+    });
+    _scratch.sortByHandle(document.entities);
+
+    final n = _scratch.length < kIntersectionCandidateCap
+        ? _scratch.length
+        : kIntersectionCandidateCap;
+
+    for (var i = 0; i < n; i++) {
+      final slotA = _scratch[i];
+      final payloadA =
+          document.geometry.peek(document.entities.geomIndexAt(slotA));
+      final countA = payloadA.pointCount;
+      if (countA < 2) continue;
+      final coordsA = payloadA.coords;
+
+      for (var j = i + 1; j < n; j++) {
+        final slotB = _scratch[j];
+        final payloadB =
+            document.geometry.peek(document.entities.geomIndexAt(slotB));
+        final countB = payloadB.pointCount;
+        if (countB < 2) continue;
+        final coordsB = payloadB.coords;
+
+        // SnapResult.entity names whichever of the pair was drawn later
+        // (the greater handle) -- an intersection point genuinely belongs
+        // to both entities equally, so this is a naming convention, not a
+        // correctness question, and it is the same "ascending handle is
+        // draw order, later one wins" convention [_considerSnapCandidate]
+        // already uses to break a tie elsewhere in this class.
+        final handleA = document.entities.handleAt(slotA);
+        final handleB = document.entities.handleAt(slotB);
+        final winningSlot = handleA.value > handleB.value ? slotA : slotB;
+
+        for (var sa = 0; sa + 1 < countA; sa++) {
+          _isectA1.setValues(coordsA[sa * 2], coordsA[sa * 2 + 1]);
+          _isectA2.setValues(coordsA[sa * 2 + 2], coordsA[sa * 2 + 3]);
+          for (var sb = 0; sb + 1 < countB; sb++) {
+            _isectB1.setValues(coordsB[sb * 2], coordsB[sb * 2 + 1]);
+            _isectB2.setValues(coordsB[sb * 2 + 2], coordsB[sb * 2 + 3]);
+            final hit = segmentIntersection(
+                _isectA1, _isectA2, _isectB1, _isectB2, _isectOut);
+            if (hit == null) continue;
+            final dx = world.x - hit.x, dy = world.y - hit.y;
+            if (math.sqrt(dx * dx + dy * dy) > radius) continue;
+            _considerSnapCandidate(SnapKind.intersection, hit.x, hit.y, world,
+                radius, winningSlot, 0, out);
+          }
+        }
+      }
     }
   }
 
@@ -812,13 +961,50 @@ class SpatialIndex {
                 tb * mx + td * my + tf, world, radius, slot, depth, out);
           }
         }
+        if (mask.has(SnapKind.nearest) || mask.has(SnapKind.perpendicular)) {
+          // Transformed to world space *before* projecting -- the same
+          // never-the-other-way-round rule [_considerLeaf]'s doc comment
+          // states, and for the same reason: projecting in local space and
+          // then transforming the result would not be the closest point
+          // under a non-uniform or mirrored instance scale.
+          for (var i = 0; i + 1 < count; i++) {
+            final wax = ta * coords[i * 2] + tc * coords[i * 2 + 1] + te;
+            final way = tb * coords[i * 2] + td * coords[i * 2 + 1] + tf;
+            final wbx = ta * coords[i * 2 + 2] + tc * coords[i * 2 + 3] + te;
+            final wby = tb * coords[i * 2 + 2] + td * coords[i * 2 + 3] + tf;
+            _snapSegA.setValues(wax, way);
+            _snapSegB.setValues(wbx, wby);
+            final foot = projectOntoSegment(
+                world, _snapSegA, _snapSegB, _snapProjection);
+            if (foot == null) continue; // degenerate zero-length segment
+            // nearest and perpendicular are the same foot on a straight
+            // segment -- see [projectOntoSegment]'s doc comment -- so both
+            // candidates are offered here and [_considerSnapCandidate]'s
+            // kind-first comparison decides which (if either) survives.
+            if (mask.has(SnapKind.perpendicular)) {
+              _considerSnapCandidate(SnapKind.perpendicular, foot.x, foot.y,
+                  world, radius, slot, depth, out);
+            }
+            if (mask.has(SnapKind.nearest)) {
+              _considerSnapCandidate(SnapKind.nearest, foot.x, foot.y, world,
+                  radius, slot, depth, out);
+            }
+          }
+        }
 
       case EntityKind.circle:
         final cx = coords[0], cy = coords[1];
         final r = payload.scalars[0];
+        final wcx = ta * cx + tc * cy + te, wcy = tb * cx + td * cy + tf;
+        // scaleMagnitude, not the raw local radius -- same reasoning as
+        // [_considerLeaf]'s circle case: this package avoids ellipse math,
+        // so a non-uniform instance scale is approximated by the
+        // geometric-mean radius, exact under any uniform scale, rotation,
+        // translation or mirror.
+        final worldRadius = r * toWorld.scaleMagnitude;
         if (mask.has(SnapKind.center)) {
-          _considerSnapCandidate(SnapKind.center, ta * cx + tc * cy + te,
-              tb * cx + td * cy + tf, world, radius, slot, depth, out);
+          _considerSnapCandidate(
+              SnapKind.center, wcx, wcy, world, radius, slot, depth, out);
         }
         if (mask.has(SnapKind.quadrant)) {
           for (var q = 0; q < 4; q++) {
@@ -828,6 +1014,26 @@ class SpatialIndex {
             _considerSnapCandidate(SnapKind.quadrant, ta * lx + tc * ly + te,
                 tb * lx + td * ly + tf, world, radius, slot, depth, out);
           }
+        }
+        if (mask.has(SnapKind.nearest) || mask.has(SnapKind.perpendicular)) {
+          final rim = _footOnRim(world, wcx, wcy, worldRadius);
+          if (rim != null) {
+            if (mask.has(SnapKind.perpendicular)) {
+              _considerSnapCandidate(SnapKind.perpendicular, rim.x, rim.y,
+                  world, radius, slot, depth, out);
+            }
+            if (mask.has(SnapKind.nearest)) {
+              _considerSnapCandidate(SnapKind.nearest, rim.x, rim.y, world,
+                  radius, slot, depth, out);
+            }
+          }
+        }
+        if (mask.has(SnapKind.tangent) &&
+            _tangentPoints(world.x, world.y, wcx, wcy, worldRadius)) {
+          _considerSnapCandidate(SnapKind.tangent, _snapTangentA.x,
+              _snapTangentA.y, world, radius, slot, depth, out);
+          _considerSnapCandidate(SnapKind.tangent, _snapTangentB.x,
+              _snapTangentB.y, world, radius, slot, depth, out);
         }
 
       case EntityKind.arc:
@@ -873,6 +1079,60 @@ class SpatialIndex {
                 tb * lx + td * ly + tf, world, radius, slot, depth, out);
           }
         }
+        if (mask.has(SnapKind.nearest) ||
+            mask.has(SnapKind.perpendicular) ||
+            mask.has(SnapKind.tangent)) {
+          final wcx = ta * cx + tc * cy + te, wcy = tb * cx + td * cy + tf;
+          final worldRadius = r * toWorld.scaleMagnitude;
+          // World start angle and sweep, exactly [_considerLeaf]'s arc
+          // derivation: the start point transformed gives the world-space
+          // start angle directly -- exact under rotation and mirroring,
+          // without assuming which axis a mirror flips -- and a negative
+          // determinant reverses the sweep's turning sense.
+          final slx = cx + r * math.cos(startAngle);
+          final sly = cy + r * math.sin(startAngle);
+          final wslx = ta * slx + tc * sly + te,
+              wsly = tb * slx + td * sly + tf;
+          final worldStartAngle = math.atan2(wsly - wcy, wslx - wcx);
+          final worldSweep = toWorld.determinant < 0 ? -sweep : sweep;
+
+          if (mask.has(SnapKind.nearest) || mask.has(SnapKind.perpendicular)) {
+            final foot = _footOnArc(
+                world, wcx, wcy, worldRadius, worldStartAngle, worldSweep);
+            if (foot != null) {
+              if (mask.has(SnapKind.perpendicular)) {
+                _considerSnapCandidate(SnapKind.perpendicular, foot.x, foot.y,
+                    world, radius, slot, depth, out);
+              }
+              if (mask.has(SnapKind.nearest)) {
+                _considerSnapCandidate(SnapKind.nearest, foot.x, foot.y, world,
+                    radius, slot, depth, out);
+              }
+            }
+          }
+          if (mask.has(SnapKind.tangent) &&
+              _tangentPoints(world.x, world.y, wcx, wcy, worldRadius)) {
+            // Unlike the circle case, a tangent candidate on an arc must
+            // also fall inside the sweep -- the same "does the drawn curve
+            // actually pass through here" rule [quadrant] enforces above,
+            // checked against the *world* angle since [_snapTangentA]/
+            // [_snapTangentB] are already world-space points here.
+            if (angleInSweep(
+                math.atan2(_snapTangentA.y - wcy, _snapTangentA.x - wcx),
+                worldStartAngle,
+                worldSweep)) {
+              _considerSnapCandidate(SnapKind.tangent, _snapTangentA.x,
+                  _snapTangentA.y, world, radius, slot, depth, out);
+            }
+            if (angleInSweep(
+                math.atan2(_snapTangentB.y - wcy, _snapTangentB.x - wcx),
+                worldStartAngle,
+                worldSweep)) {
+              _considerSnapCandidate(SnapKind.tangent, _snapTangentB.x,
+                  _snapTangentB.y, world, radius, slot, depth, out);
+            }
+          }
+        }
 
       case EntityKind.text:
       case EntityKind.attrib:
@@ -881,6 +1141,115 @@ class SpatialIndex {
         _considerSnapCandidate(SnapKind.insertion, ta * lx + tc * ly + te,
             tb * lx + td * ly + tf, world, radius, slot, depth, out);
     }
+  }
+
+  /// The point on a circle's rim nearest [world], via [_snapProjection] --
+  /// the radial projection of [world] through the world-space centre
+  /// ([cx],[cy]), at [worldRadius]. Never null in practice for a circle
+  /// with a positive radius, but returns null rather than dividing by zero
+  /// when [world] sits exactly on the centre, where "the nearest point on
+  /// the rim" has no single answer -- every point on the rim is equally
+  /// near.
+  Vector2? _footOnRim(Vector2 world, double cx, double cy, double worldRadius) {
+    final dx = world.x - cx, dy = world.y - cy;
+    final centreDist = math.sqrt(dx * dx + dy * dy);
+    if (centreDist == 0.0) return null;
+    _snapProjection
+      ..x = cx + dx / centreDist * worldRadius
+      ..y = cy + dy / centreDist * worldRadius;
+    return _snapProjection;
+  }
+
+  /// [_footOnRim]'s sibling for an arc: the radial foot when [world]'s
+  /// direction from the centre falls inside the sweep, otherwise the
+  /// *nearer* of the two arc endpoints -- an arc does not draw its full
+  /// rim, so a foot outside the sweep is not a point the drawn curve
+  /// contains, exactly the distinction [distanceToArc] draws for `pickInto`
+  /// and [angleInSweep]'s quadrant check draws above. All angles here are
+  /// world-space, matching [worldStartAngle]/[worldSweep] as computed by
+  /// the caller.
+  Vector2? _footOnArc(Vector2 world, double cx, double cy, double worldRadius,
+      double worldStartAngle, double worldSweep) {
+    final dx = world.x - cx, dy = world.y - cy;
+    final centreDist = math.sqrt(dx * dx + dy * dy);
+    if (centreDist != 0.0 &&
+        angleInSweep(math.atan2(dy, dx), worldStartAngle, worldSweep)) {
+      _snapProjection
+        ..x = cx + dx / centreDist * worldRadius
+        ..y = cy + dy / centreDist * worldRadius;
+      return _snapProjection;
+    }
+
+    final endAngle = worldStartAngle + worldSweep;
+    final eax = cx + worldRadius * math.cos(worldStartAngle);
+    final eay = cy + worldRadius * math.sin(worldStartAngle);
+    final ebx = cx + worldRadius * math.cos(endAngle);
+    final eby = cy + worldRadius * math.sin(endAngle);
+    final da =
+        (world.x - eax) * (world.x - eax) + (world.y - eay) * (world.y - eay);
+    final db =
+        (world.x - ebx) * (world.x - ebx) + (world.y - eby) * (world.y - eby);
+    if (da <= db) {
+      _snapProjection
+        ..x = eax
+        ..y = eay;
+    } else {
+      _snapProjection
+        ..x = ebx
+        ..y = eby;
+    }
+    return _snapProjection;
+  }
+
+  /// Writes the two points where a line from [px],[py] would be tangent to
+  /// a circle centred at [cx],[cy] with radius [r], into [_snapTangentA]
+  /// and [_snapTangentB]. Returns false, leaving both scratch points
+  /// untouched, when there is no real tangent to find.
+  ///
+  /// This is the classical two-tangent-lines-from-an-external-point
+  /// construction, using [world] itself as that external point: `snapInto`
+  /// has no separate "line I am drawing from" parameter (see [SnapKind]'s
+  /// own doc comment on why `tangent` is one of the kinds that would
+  /// normally want a second entity or reference point this call does not
+  /// have), so the query point plays that role directly. The distance from
+  /// [world] to either result is the tangent length
+  /// `sqrt(d^2 - r^2)`, not zero, so this kind only actually reports a hit
+  /// once the query point is already close to the circle -- it converges to
+  /// [_footOnRim]'s answer as [world] approaches the rim, which is the
+  /// honest behaviour for a from-point this method does not otherwise have.
+  ///
+  /// `a` (distance from the centre to the foot of the chord, along the
+  /// centre-to-[world] direction) and `h` (the chord's half-length) are
+  /// each `r`-dependent in a way that does not cancel out -- `a = r*r/d`,
+  /// `h = r*sqrt(d*d - r*r)/d` -- so a circle's radius genuinely changes
+  /// where the tangent points land, not merely how far out they sit.
+  ///
+  /// **Inside-vs-on-the-rim is a `Tolerance` decision.** A discriminant
+  /// (`d*d - r*r`) that is genuinely negative means [world] is inside the
+  /// circle, where no real tangent line exists, and this returns false. A
+  /// discriminant that is negative only by a sliver no larger than
+  /// [Tolerance.standard.linear] squared is treated as exactly zero instead
+  /// of rejected outright: that is the "query point is numerically right on
+  /// the rim" case, and rejecting it outright would make the tangent kind
+  /// flicker in and out as floating-point noise pushes the same on-rim
+  /// point a hair to either side of the boundary.
+  bool _tangentPoints(double px, double py, double cx, double cy, double r) {
+    final dx = px - cx, dy = py - cy;
+    final d2 = dx * dx + dy * dy;
+    final linearTol = Tolerance.standard.linear;
+    final discriminant = d2 - r * r;
+    if (discriminant < -(linearTol * linearTol)) return false;
+    final clampedDiscriminant = discriminant < 0.0 ? 0.0 : discriminant;
+    final d = math.sqrt(d2);
+    if (d == 0.0) return false; // world sits on the centre: no direction
+    final ux = dx / d, uy = dy / d;
+    final a = r * r / d;
+    final h = r * math.sqrt(clampedDiscriminant) / d;
+    final fx = cx + a * ux, fy = cy + a * uy;
+    final perpX = -uy, perpY = ux;
+    _snapTangentA.setValues(fx + h * perpX, fy + h * perpY);
+    _snapTangentB.setValues(fx - h * perpX, fy - h * perpY);
+    return true;
   }
 
   /// Measures one world-space candidate point and, if it both lies within
