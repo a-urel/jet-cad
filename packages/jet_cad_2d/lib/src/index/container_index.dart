@@ -97,15 +97,25 @@ class ContainerIndex {
       return const [];
     }
 
-    // Memoized per definition, not per instance: [DraftDocument.definitionBounds]
-    // recomputes `leavesByOwner()` — a full entity-store scan — on every
-    // call, so calling it once per instance makes a build over N instances of
-    // one shared definition O(N x entities) instead of O(entities). A build
-    // over 500 instances of an 8000-leaf definition measured ~5.7s uncached
-    // versus a few ms cached; see task-5-report.md.
+    // Memoized per definition, not per instance: calling
+    // [DraftDocument.definitionBounds] once per instance makes a build over N
+    // instances of one shared definition O(N x entities) instead of
+    // O(entities). A build over 500 instances of an 8000-leaf definition
+    // measured ~5.7s uncached versus a few ms cached; see task-5-report.md.
+    //
+    // [leavesByOwner] — the map this factory was already handed, shared
+    // across every container built in this pass — is threaded through to
+    // [DraftDocument.definitionBounds] rather than left to its default of
+    // recomputing its own. Without this, a build over many *distinct*
+    // definitions is still O(definitions x entities): the cache above stops
+    // a repeated definition from paying twice, but the first call for each
+    // definition still cost a full entity-store scan on its own. Task 18's
+    // benchmark measured this directly: 2,000 definitions over 32,000
+    // entities took multiple seconds before this line was added — see
+    // task-18-report.md for the before/after numbers.
     final definitionBoundsCache = <Handle, Aabb2>{};
     Aabb2 boundsOfDefinition(Handle def) =>
-        definitionBoundsCache[def] ??= doc.definitionBounds(def);
+        definitionBoundsCache[def] ??= doc.definitionBounds(def, leavesByOwner);
 
     // Explicit stack rather than recursion: a malformed tree must not blow
     // the Dart stack, and `validate()` reports tree.cycle for exactly that.
