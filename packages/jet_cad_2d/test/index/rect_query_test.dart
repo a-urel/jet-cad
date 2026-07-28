@@ -51,6 +51,41 @@ void main() {
             List<Handle>.of(seen)..sort((a, b) => a.value.compareTo(b.value))));
   });
 
+  test(
+      'sorts by handle, not slot, when a removal makes them disagree '
+      '(the headline guarantee, not just QueryScratch.sortByHandle in '
+      'isolation)', () {
+    final doc = DraftDocument.empty();
+    // The first test above never removes anything, so slot order and handle
+    // order coincide there and a plain numeric-slot sort would pass it too.
+    // This fixture forces disagreement: remove the middle entity, then add a
+    // new one, which reuses the freed slot while taking a larger handle —
+    // see SlotAllocator's LIFO free list.
+    final a = addLine(doc, doc.rootHandle, 0, 0);
+    final b = addLine(doc, doc.rootHandle, 0, 0);
+    final c = addLine(doc, doc.rootHandle, 0, 0);
+    doc.commands.execute(RemoveEntityCommand(b));
+    final d = addLine(doc, doc.rootHandle, 0, 0); // reuses b's slot
+
+    final slotC = doc.entities.slotOf(c)!;
+    final slotD = doc.entities.slotOf(d)!;
+    expect(slotD, lessThan(slotC),
+        reason: 'the fixture is only meaningful if slot order disagrees '
+            'with handle order');
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final seen = <Handle>[];
+    index.forEachInRect(rect(-10, -10, 10, 10), const QueryFilter.all(),
+        (slot) => seen.add(doc.entities.handleAt(slot)));
+
+    expect(seen, [a, c, d],
+        reason: 'a query that sorted the raw Int32List of slots instead of '
+            'the entity handles would put d (slot $slotD) before c '
+            '(slot $slotC)');
+  });
+
   test('does NOT descend into instances', () {
     final doc = DraftDocument.empty();
     const def = Handle(200);
@@ -231,6 +266,83 @@ void main() {
     index.forEachInRect(
         Aabb2.empty(), const QueryFilter.all(), (_) => visits++);
     expect(visits, 0);
+  });
+
+  test('an empty rect on a disposed index still throws, like a non-empty one',
+      () {
+    final doc = DraftDocument.empty();
+    addLine(doc, doc.rootHandle, 0, 0);
+    final index = SpatialIndex(doc);
+    index.dispose();
+
+    expect(
+        () =>
+            index.forEachInRect(Aabb2.empty(), const QueryFilter.all(), (_) {}),
+        throwsStateError,
+        reason: 'the empty-rect early return must not run before the '
+            'disposed check, or a disposed index would answer silently for '
+            'an empty rect while throwing for every other rect');
+    expect(
+        () => index.forEachInstanceInRect(
+            Aabb2.empty(), const QueryFilter.all(), (_) {}),
+        throwsStateError);
+  });
+
+  test('the instance scratch does not shrink between queries', () {
+    final doc = DraftDocument.empty();
+    const def = Handle(200);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'T',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    addLine(doc, def, 0, 0);
+    // More than QueryScratch's default initial capacity (1024), so the
+    // buffer must grow past its starting size at least once.
+    for (var i = 0; i < 1500; i++) {
+      doc.commands.execute(AddNodeCommand(
+        InstanceNode(
+          handle: Handle(10000 + i),
+          parent: doc.rootHandle,
+          transform: Transform2.translation(i * 0.001, 0),
+          definition: def,
+          layer: ReservedHandles.layerZero,
+        ),
+      ));
+    }
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    index.forEachInstanceInRect(
+        rect(-10, -10, 10, 10), const QueryFilter.all(), (_) {});
+    final grown = index.instanceScratchCapacity;
+    expect(grown, greaterThanOrEqualTo(1500));
+
+    index.forEachInstanceInRect(
+        rect(-10, -10, 10, 10), const QueryFilter.all(), (_) {});
+    expect(index.instanceScratchCapacity, grown,
+        reason: 'a List.clear()-backed buffer would shrink to empty here '
+            'and regrow on every subsequent query');
+  });
+
+  test('the entity scratch does not shrink between queries', () {
+    final doc = DraftDocument.empty();
+    for (var i = 0; i < 1500; i++) {
+      addLine(doc, doc.rootHandle, i * 0.001, 0);
+    }
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    index.forEachInRect(
+        rect(-10, -10, 10, 10), const QueryFilter.all(), (_) {});
+    final grown = index.entityScratchCapacity;
+    expect(grown, greaterThanOrEqualTo(1500));
+
+    index.forEachInRect(
+        rect(-10, -10, 10, 10), const QueryFilter.all(), (_) {});
+    expect(index.entityScratchCapacity, grown,
+        reason: 'reset() must not shrink, or every query would regrow');
   });
 
   test('a slot that is both in the tree and dirty is reported once', () {

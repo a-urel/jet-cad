@@ -37,6 +37,29 @@ void main() {
         reason: 'reset must not shrink, or every query would regrow');
   });
 
+  test('a zero initial capacity is usable, not a trap', () {
+    // The doubling growth strategy in add() cannot recover from a starting
+    // capacity of 0 (0 * 2 stays 0), so an unclamped constructor would build
+    // successfully and then throw RangeError on the very first add.
+    final scratch = QueryScratch(0);
+    expect(scratch.capacity, greaterThanOrEqualTo(1));
+    scratch.add(7);
+    expect(scratch.length, 1);
+    expect(scratch[0], 7);
+  });
+
+  test('operator[] rejects an index at or past the live length', () {
+    final scratch = QueryScratch()..add(42);
+    expect(() => scratch[1], throwsRangeError,
+        reason: 'index 1 is inside capacity but past length');
+
+    scratch.reset();
+    expect(() => scratch[0], throwsRangeError,
+        reason: 'reset rewinds length without clearing the backing array, '
+            'so slot 0 still physically holds the old value 42 — reading it '
+            'must fail rather than silently return stale data');
+  });
+
   test('sortByHandle orders slots by their entity handle, not by slot', () {
     final doc = DraftDocument.empty();
     // Deliberately add so that slot order and handle order disagree: remove
@@ -90,6 +113,30 @@ void main() {
     scratch.add(doc.entities.slotOf(h)!);
     scratch.sortByHandle(doc.entities);
     expect(scratch.length, 1);
+  });
+
+  test('sortByValue orders raw values ascending, insertion-sort path', () {
+    final scratch = QueryScratch()
+      ..add(30)
+      ..add(10)
+      ..add(20);
+    scratch.sortByValue();
+    expect([scratch[0], scratch[1], scratch[2]], [10, 20, 30]);
+  });
+
+  test('sortByValue orders raw values ascending, heapsort path', () {
+    // 60 elements, descending, forces the >32 heapsort branch — the same
+    // shape used to pin sortByHandle's heapsort above, but for the sibling
+    // method forEachInstanceInRect actually calls: nothing else in this
+    // package exercises sortByValue's heap past the 32-element threshold.
+    final values = [for (var i = 59; i >= 0; i--) i];
+    final scratch = QueryScratch();
+    for (final v in values) {
+      scratch.add(v);
+    }
+    scratch.sortByValue();
+    expect([for (var i = 0; i < scratch.length; i++) scratch[i]],
+        [for (var i = 0; i < 60; i++) i]);
   });
 }
 

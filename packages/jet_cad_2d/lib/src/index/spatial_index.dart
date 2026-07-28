@@ -49,8 +49,27 @@ class SpatialIndex {
   int get containerCount => _byContainer.length;
 
   final QueryScratch _scratch = QueryScratch();
-  final List<Handle> _instanceScratch = <Handle>[];
+
+  /// A [QueryScratch], not a `List<Handle>`: `List.clear()` is not a cheap
+  /// length reset in the Dart VM — it shrinks the backing array to empty
+  /// once it has held anything, so every subsequent query regrows it from
+  /// scratch. That is precisely the allocation [QueryScratch.reset] exists to
+  /// avoid, so this buffer gets the same treatment even though its entries
+  /// are instance [Handle.value]s rather than entity slots — see
+  /// [QueryScratch.sortByValue], the sibling of [QueryScratch.sortByHandle]
+  /// for a buffer that is already keyed by its own stored value.
+  final QueryScratch _instanceScratch = QueryScratch();
+
   late final FilterEvaluator _filters = FilterEvaluator(document);
+
+  /// The live capacity of the entity-query scratch buffer. Test-visible for
+  /// the same reason as [rebuildCount]: the load-bearing guarantee is that a
+  /// warmed query never regrows it.
+  int get entityScratchCapacity => _scratch.capacity;
+
+  /// The live capacity of the instance-query scratch buffer. Same reasoning
+  /// as [entityScratchCapacity].
+  int get instanceScratchCapacity => _instanceScratch.capacity;
 
   /// Visits the slot of every root-level leaf whose box overlaps [world],
   /// in ascending handle order.
@@ -60,11 +79,18 @@ class SpatialIndex {
   /// instances apart — and the renderer does not want that, since it replays
   /// one cached picture per instance. Use [forEachInstanceInRect] for those,
   /// and `pickInto` when you need to descend.
+  ///
+  /// **Not reentrant.** Both rect queries share this index's scratch
+  /// buffers; calling either one again from inside [visit] corrupts the
+  /// outer call's in-progress buffer and silently truncates its results. A
+  /// future task adds an explicit guard for this; until then, do not query
+  /// from inside a query's callback.
   void forEachInRect(
       Aabb2 world, QueryFilter filter, void Function(int slot) visit) {
+    final root = rootIndex; // throws if disposed, even for an empty rect
     if (world.isEmpty) return;
     _scratch.reset();
-    rootIndex.searchLeaves(world, (slot) {
+    root.searchLeaves(world, (slot) {
       if (_filters.acceptsEntity(slot, filter)) _scratch.add(slot);
     });
     _scratch.sortByHandle(document.entities);
@@ -74,16 +100,22 @@ class SpatialIndex {
   }
 
   /// Visits every root-level instance whose box overlaps [world], ascending.
+  ///
+  /// See [forEachInRect]'s doc comment: the same not-reentrant caveat
+  /// applies here too, since both methods share this index's scratch state.
   void forEachInstanceInRect(
       Aabb2 world, QueryFilter filter, void Function(Handle instance) visit) {
+    final root = rootIndex; // throws if disposed, even for an empty rect
     if (world.isEmpty) return;
-    _instanceScratch.clear();
-    rootIndex.searchInstances(world, (node) {
-      if (_filters.acceptsNode(node, filter)) _instanceScratch.add(node);
+    _instanceScratch.reset();
+    root.searchInstances(world, (node) {
+      if (_filters.acceptsNode(node, filter)) {
+        _instanceScratch.add(node.value);
+      }
     });
-    _instanceScratch.sort((a, b) => a.value.compareTo(b.value));
-    for (final node in _instanceScratch) {
-      visit(node);
+    _instanceScratch.sortByValue();
+    for (var i = 0; i < _instanceScratch.length; i++) {
+      visit(Handle(_instanceScratch[i]));
     }
   }
 
