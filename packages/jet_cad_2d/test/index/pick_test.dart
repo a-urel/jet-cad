@@ -585,7 +585,16 @@ void main() {
     expect(hit.entity, leaf,
         reason: 'truncation must never change which leaf was hit');
     expect(hit.truncated, isTrue);
-    expect(hit.chainLength, lessThanOrEqualTo(2));
+    expect(hit.chainLength, 2);
+    // *Which* two survive is the whole claim in this test's name, and it was
+    // unpinned: asserting only the flag and the length leaves "truncates
+    // from the root" and "truncates from the leaf" indistinguishable. The
+    // full root-first path here is 500, 303, 302, 301, so keeping the
+    // deepest two means the pair nearest the leaf.
+    expect([hit.chain[0], hit.chain[1]], [302, 301],
+        reason: 'truncation drops from the ROOT end; the surviving entries '
+            'must be the instances nearest the leaf, so that chain and '
+            'HitPath.entity still describe the same place');
   });
 
   test('a chain that fits the buffer exactly is not marked truncated', () {

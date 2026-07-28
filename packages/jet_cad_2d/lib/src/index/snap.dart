@@ -16,10 +16,10 @@ import '../core/handle.dart';
 /// the "moderate" kinds: each needs either a second entity (`intersection`,
 /// pairwise over the candidates in the query rectangle) or a per-candidate
 /// projection against the query point itself (`perpendicular`, `tangent`,
-/// `nearest`). All nine are produced by [SpatialIndex.snapInto] — see its
-/// own doc comment for what each of the moderate kinds actually computes
-/// and why `tangent` uses the query point as its own reference rather than
-/// a caller-supplied one.
+/// `nearest`). **All nine are produced by [SpatialIndex.snapInto]** — see
+/// its own doc comment for what each of the moderate kinds actually
+/// computes and why `tangent` uses the query point as its own reference
+/// rather than a caller-supplied one. There is no unimplemented kind.
 enum SnapKind {
   endpoint,
   midpoint,
@@ -52,8 +52,9 @@ extension type const SnapMask(int bits) {
   /// than silently going stale.
   static const SnapMask cheap = SnapMask(0x1F); // endpoint..insertion
 
-  /// Every kind, including the ones [SpatialIndex.snapInto] does not
-  /// implement yet — see the caveat on [SnapKind] itself.
+  /// Every kind. [SpatialIndex.snapInto] produces all of them — see
+  /// [SnapKind]'s own doc comment; there is no unimplemented kind for this
+  /// mask to be a promise about.
   static const SnapMask all = SnapMask(0x1FF);
 
   bool has(SnapKind kind) => bits & (1 << kind.index) != 0;
@@ -93,9 +94,25 @@ class SnapResult {
   final Uint32List chain;
   int chainLength = 0;
 
+  /// Whether the real path to [entity] was deeper than [chain] could hold,
+  /// so that entries were dropped from the **root** end.
+  ///
+  /// The same flag, with the same meaning, as [HitPath.truncated], and here
+  /// for the same reason: a cap is a design decision only when the caller
+  /// can tell it fired. Without this, a snap through five instances into a
+  /// `SnapResult(2)` reported a two-long chain indistinguishable from a
+  /// genuinely two-deep hit, and a caller walking that chain from the root
+  /// would resolve the wrong node.
+  ///
+  /// Dropping from the root end, not the leaf end, is what keeps [entity]
+  /// and the innermost instances correct — see
+  /// `SpatialIndex._writeSnapChain`.
+  bool truncated = false;
+
   void reset() {
     found = false;
     chainLength = 0;
+    truncated = false;
     entity = const Handle(0);
     // Clear kind and point for the same reason HitPath.reset does: a stale
     // snap kind or point from the previous query is plausible-looking and

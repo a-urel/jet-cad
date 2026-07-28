@@ -16,10 +16,25 @@ import 'packed_rtree.dart';
 /// The spatial index of one indexed container — the document root, or a
 /// definition.
 ///
-/// Holds two trees, not one: leaves keyed by entity slot, and instances keyed
-/// by node handle. Two trees rather than one tagged tree because the callers
-/// differ — culling wants leaves and instances separately, and a tagged tree
-/// would make every visitor branch on the tag.
+/// Holds three trees, not one: leaves keyed by entity slot, instances keyed
+/// by node handle, and the **snap centres** of arcs and circles, also keyed
+/// by entity slot. Separate trees rather than one tagged tree because the
+/// callers differ — culling wants leaves and instances separately, and a
+/// tagged tree would make every visitor branch on the tag.
+///
+/// **Why centres get a tree of their own.** An arc's box bounds its drawn
+/// *sweep*, which need not contain its own centre — a 10° arc's box is a
+/// sliver a full radius away from it — and `snapInto` offers that centre as
+/// a [SnapKind.center] candidate. So the leaf tree's boxes do not cover
+/// everything the snap narrow phase measures. Widening the *query* to
+/// compensate was measured at 500,000 entities to cost roughly 87% of a
+/// default (`SnapMask.cheap`) snap: one large narrow-sweep arc anywhere in a
+/// container widened every centre-including query in it by that arc's
+/// radius. Indexing the centres themselves puts each one exactly where it
+/// is, and the query stays tight. Deliberately **not** folded into
+/// [_leaves]: those boxes are what `forEachInRect` and `pickInto` report
+/// against, and a point entry per arc would put snap-only data on the
+/// hit-test path.
 ///
 /// **Groups are flattened.** A group is a one-off: it is not shared, so a
 /// per-group index buys no reuse while costing a recursion level on every
@@ -31,10 +46,12 @@ class ContainerIndex {
     this.container,
     this._leaves,
     this._instances,
+    this._snapCentres,
     this._instanceHandles,
     this._instanceTransforms,
     this._leafTransforms,
     this._ownSlack,
+    this._ownSnapCentreReach,
     this.bounds,
   ) : dirty = DirtyList();
 
@@ -55,6 +72,10 @@ class ContainerIndex {
     final instanceBoxes = <double>[];
     final instanceTransforms = <Transform2>[];
     final leafTransforms = <int, Transform2>{};
+    // Parallel arrays, one entry per arc or circle leaf: the slot, and its
+    // centre already composed into this container's own space.
+    final centreSlots = <int>[];
+    final centreCoords = <double>[];
     var ownSlack = NarrowPhaseSlack.none;
     var bounds = Aabb2.empty();
 
@@ -85,6 +106,13 @@ class ContainerIndex {
       if (!composed.isIdentity) leafTransforms[slot] = composed;
       ownSlack = ownSlack.union(
           NarrowPhaseSlack.ofLeaf(record.kind, payload, composed, leafBox));
+      final centre = snapCentreOfLeaf(record.kind, payload, composed);
+      if (centre != null) {
+        centreSlots.add(slot);
+        centreCoords
+          ..add(centre.$1)
+          ..add(centre.$2);
+      }
     }
 
     List<Handle> childNodesOf(Handle c) {
@@ -186,15 +214,31 @@ class ContainerIndex {
       }
     }
 
+    // Measured against the *finished* [bounds], which is why it happens here
+    // and not inside `addLeaf`: what a parent container needs to know is how
+    // far outside this container's own bound — the very box its instances
+    // are indexed by — a snap centre inside it can lie. See
+    // [ownSnapCentreReach].
+    var centreReach = 0.0;
+    if (!bounds.isEmpty) {
+      for (var i = 0; i < centreSlots.length; i++) {
+        final d = _distanceToBox(
+            bounds, centreCoords[i * 2], centreCoords[i * 2 + 1]);
+        if (d > centreReach) centreReach = d;
+      }
+    }
+
     return ContainerIndex._(
       container,
       _treeOf(leafSlots.length, leafBoxes, Uint32List.fromList(leafSlots)),
       _treeOf(instanceHandles.length, instanceBoxes,
           Uint32List.fromList([for (final h in instanceHandles) h.value])),
+      _centreTreeOf(centreSlots, centreCoords),
       instanceHandles,
       instanceTransforms,
       leafTransforms,
       ownSlack,
+      centreReach,
       bounds,
     );
   }
@@ -204,6 +248,25 @@ class ContainerIndex {
       count == 0
           ? PackedRTree.empty()
           : PackedRTree.build(count, Float64List.fromList(boxes), payloads);
+
+  /// The snap-centre tree: one **degenerate** (point) box per arc or circle,
+  /// payload the leaf's slot.
+  ///
+  /// A zero-area box is exactly right here rather than a compromise: a
+  /// centre is a point, `PackedRTree`'s overlap test is inclusive, and the
+  /// STR packing sorts by box centre, which for a point is the point.
+  static PackedRTree _centreTreeOf(List<int> slots, List<double> coords) {
+    if (slots.isEmpty) return PackedRTree.empty();
+    final boxes = Float64List(slots.length * 4);
+    for (var i = 0; i < slots.length; i++) {
+      final cx = coords[i * 2], cy = coords[i * 2 + 1];
+      boxes[i * 4] = cx;
+      boxes[i * 4 + 1] = cy;
+      boxes[i * 4 + 2] = cx;
+      boxes[i * 4 + 3] = cy;
+    }
+    return PackedRTree.build(slots.length, boxes, Uint32List.fromList(slots));
+  }
 
   /// Every live entity slot bucketed by its owner, ascending within a bucket.
   ///
@@ -222,6 +285,18 @@ class ContainerIndex {
   final Handle container;
   final PackedRTree _leaves;
   final PackedRTree _instances;
+
+  /// The centres of this container's own arcs and circles, as points, keyed
+  /// by the same slot [_leaves] uses — see the class doc for why they are
+  /// indexed at all and why they are not in [_leaves].
+  ///
+  /// Kept in lockstep with [_leaves] by [markLeafDead] and [markLeafAlive],
+  /// which touch both trees in one call so no caller can revive a leaf and
+  /// leave its centre buried. The dirty overlay in front of it is [dirty]
+  /// itself, which records a centre alongside every box; there is
+  /// deliberately no second dirty list.
+  final PackedRTree _snapCentres;
+
   final List<Handle> _instanceHandles;
   final List<Transform2> _instanceTransforms;
 
@@ -257,6 +332,27 @@ class ContainerIndex {
   /// broad-phase candidates, where a stale-but-smaller one would drop hits.
   NarrowPhaseSlack _ownSlack;
 
+  /// How far outside this container's own [bounds] a snap centre of one of
+  /// its own leaves lies — zero for the overwhelming majority of documents,
+  /// since a circle's centre is always inside its box and most arcs sit
+  /// among other geometry that covers theirs.
+  ///
+  /// **Who reads this, and why it is not a query margin here.** This
+  /// container's own centres are indexed exactly, in [_snapCentres], so a
+  /// query into *this* container never needs widening. What still does is
+  /// the step *into* an instance one level up: a parent indexes this
+  /// container by its [bounds] transformed, and `forEachInstanceInRect`
+  /// reports against that same box, so it may not be grown to swallow a
+  /// stray centre. [SpatialIndex] lifts this number up through each
+  /// instance transform instead and widens only the instance search by it —
+  /// the compensation that remains is therefore proportional to how far a
+  /// centre escapes its *definition*, not to the largest arc radius in the
+  /// document.
+  ///
+  /// Not final, and only ever grows, for the same reason as [_ownSlack]:
+  /// see [noteLeaf].
+  double _ownSnapCentreReach;
+
   /// The union of everything this container holds, in its own space.
   final Aabb2 bounds;
 
@@ -264,6 +360,11 @@ class ContainerIndex {
 
   int get leafCount => _leaves.itemCount;
   int get instanceCount => _instances.itemCount;
+
+  /// How many arc/circle centres the built tree holds. Test-visible for the
+  /// same reason as [leafCount]: it is what distinguishes "the centre tree
+  /// was populated" from "the query happened to find it another way".
+  int get snapCentreCount => _snapCentres.itemCount;
 
   /// Above this many dirty entries the tree is rebuilt.
   ///
@@ -283,8 +384,59 @@ class ContainerIndex {
   /// responsible for doing so.
   void searchLeaves(Aabb2 local, void Function(int slot) visit) {
     if (local.isEmpty) return;
-    _leaves.search(local.minX, local.minY, local.maxX, local.maxY, visit);
-    dirty.search(local.minX, local.minY, local.maxX, local.maxY, visit);
+    searchLeavesRaw(local.minX, local.minY, local.maxX, local.maxY, visit);
+  }
+
+  /// [searchLeaves] over a rectangle held as four loose doubles.
+  ///
+  /// Exists for one reason: [Aabb2] is immutable, so a caller on the
+  /// zero-allocation frame path that builds its query rectangle from scratch
+  /// on every call — `SpatialIndex._considerIntersections` does, once per
+  /// `snapInto` — allocates one box per call just to hand four numbers over.
+  /// Callers that already hold an [Aabb2] should keep using [searchLeaves];
+  /// this is not the preferred spelling, it is the escape hatch for the
+  /// frame path.
+  void searchLeavesRaw(double minX, double minY, double maxX, double maxY,
+      void Function(int slot) visit) {
+    if (minX > maxX || minY > maxY) return;
+    _leaves.search(minX, minY, maxX, maxY, visit);
+    dirty.search(minX, minY, maxX, maxY, visit);
+  }
+
+  /// Visits the slot of every arc or circle whose **centre** lies inside
+  /// [local], expressed in this container's own space.
+  ///
+  /// The sibling of [searchLeaves], and deliberately a separate call rather
+  /// than an extra flag on it: `forEachInRect` and `pickInto` must not see
+  /// these entries at all, and only a snap whose mask includes
+  /// [SnapKind.center] pays for this walk.
+  ///
+  /// Dirty entries are visited too, from the same [dirty] list that backs
+  /// [searchLeaves] — see [DirtyList.searchCentres].
+  void searchSnapCentres(Aabb2 local, void Function(int slot) visit) {
+    if (local.isEmpty) return;
+    _snapCentres.search(local.minX, local.minY, local.maxX, local.maxY, visit);
+    dirty.searchCentres(local.minX, local.minY, local.maxX, local.maxY, visit);
+  }
+
+  /// [searchLeaves] and [searchSnapCentres] over one query, sharing a single
+  /// pass over [dirty].
+  ///
+  /// The two trees are still walked separately — they are separate trees —
+  /// but the dirty overlay in front of them is one linear array, and a snap
+  /// that wants both answers would otherwise scan it end to end twice. See
+  /// [DirtyList.searchBoxesAndCentres].
+  void searchLeavesAndSnapCentres(
+    Aabb2 local,
+    void Function(int slot) visitLeaf,
+    void Function(int slot) visitCentre,
+  ) {
+    if (local.isEmpty) return;
+    _leaves.search(local.minX, local.minY, local.maxX, local.maxY, visitLeaf);
+    _snapCentres.search(
+        local.minX, local.minY, local.maxX, local.maxY, visitCentre);
+    dirty.searchBoxesAndCentres(
+        local.minX, local.minY, local.maxX, local.maxY, visitLeaf, visitCentre);
   }
 
   void searchInstances(Aabb2 local, void Function(Handle node) visit) {
@@ -330,6 +482,9 @@ class ContainerIndex {
   /// see [NarrowPhaseSlack.through].
   NarrowPhaseSlack get ownNarrowPhaseSlack => _ownSlack;
 
+  /// See [_ownSnapCentreReach].
+  double get ownSnapCentreReach => _ownSnapCentreReach;
+
   /// Records the container-space transform and narrow-phase slack of a leaf
   /// that has just been re-derived by reconciliation.
   ///
@@ -351,6 +506,18 @@ class ContainerIndex {
     }
     _ownSlack = _ownSlack.union(
         NarrowPhaseSlack.ofLeaf(kind, payload, composed, boxInContainerSpace));
+    // The centre half of the same "only ever grows between rebuilds" rule.
+    // The dirty overlay can introduce a centre further outside [bounds] than
+    // anything the last build saw — an arc dragged away from the rest of a
+    // definition's geometry — and a parent that never hears about it stops
+    // descending into the instance that holds it. Dropping this line leaves
+    // that arc correctly indexed, correctly transformed, and its centre
+    // unsnappable through every instance of its definition.
+    final centre = snapCentreOfLeaf(kind, payload, composed);
+    if (centre != null && !bounds.isEmpty) {
+      final reach = _distanceToBox(bounds, centre.$1, centre.$2);
+      if (reach > _ownSnapCentreReach) _ownSnapCentreReach = reach;
+    }
   }
 
   /// Forgets [slot]'s composed transform, for an entity that has been
@@ -378,7 +545,14 @@ class ContainerIndex {
   Aabb2? boxOfLeaf(int slot) => _leaves.boxOfPayload(slot);
 
   /// Un-marks a leaf, for the restore half of remove-then-undo.
-  void markLeafAlive(int slot) => _leaves.markAlive(slot);
+  ///
+  /// Revives the centre entry in the same call. Splitting the two would let
+  /// an undone arc come back visible to `pickInto` and still have no
+  /// snappable centre, with nothing anywhere reporting a disagreement.
+  void markLeafAlive(int slot) {
+    _leaves.markAlive(slot);
+    _snapCentres.markAlive(slot);
+  }
 
   /// Whether the tree holds an entry for [slot] at all, alive or dead.
   ///
@@ -392,7 +566,66 @@ class ContainerIndex {
   Aabb2? boxOfDeadLeaf(int slot) => _leaves.boxIgnoringDead(slot);
 
   /// Marks a leaf slot as superseded by a dirty entry, or removed.
-  void markLeafDead(int slot) => _leaves.markDead(slot);
+  ///
+  /// Kills the centre entry in the same call, the counterpart of
+  /// [markLeafAlive]. Without it a moved or deleted arc keeps offering its
+  /// *old* centre as a snap candidate for as long as the tree stands, on top
+  /// of the new one the dirty overlay supplies — a stale hit, not a missed
+  /// one, which is the harder kind to notice.
+  ///
+  /// A slot with no centre entry — every kind but arc and circle — costs a
+  /// failed map lookup and nothing else; [PackedRTree.markDead] ignores a
+  /// payload it does not hold.
+  void markLeafDead(int slot) {
+    _leaves.markDead(slot);
+    _snapCentres.markDead(slot);
+  }
+
+  /// Whether the centre this container has stored for [slot] is exactly
+  /// ([centreX], [centreY]) — or, when those are [DirtyList.noCentre], that
+  /// it has no stored centre for [slot] at all.
+  ///
+  /// Reads the stored value **including a dead entry**, because the one
+  /// caller is `SpatialIndex._reconcileEntity`, which asks this question on
+  /// both its live-and-unchanged path and its revive-a-dead-entry path and
+  /// wants the same answer from each.
+  ///
+  /// This exists because an arc's centre is a fact about it that its indexed
+  /// box does not imply: an arc can be edited so that its box comes out
+  /// bit-identical while its centre moves (centre `(0,0)`, r 1, sweeping the
+  /// first quadrant, and centre `(1,1)`, r 1, sweeping the third, both bound
+  /// exactly `(0,0)..(1,1)`). Comparing boxes alone would call that edit
+  /// unchanged and leave the old centre indexed.
+  bool storedSnapCentreMatches(int slot, double centreX, double centreY) {
+    final stored = _snapCentres.boxIgnoringDead(slot);
+    if (centreX.isNaN || centreY.isNaN) return stored == null;
+    return stored != null && stored.minX == centreX && stored.minY == centreY;
+  }
+}
+
+/// The centre a leaf offers as a `SnapKind.center` snap candidate, in the
+/// space [composed] maps its stored coordinates into — or null for a kind
+/// that offers none.
+///
+/// Arcs and circles only. Every other kind's snap candidates are corners,
+/// midpoints and projections of geometry its own box already contains, so
+/// there is nothing to index separately for them.
+///
+/// Null, not a NaN pair, for a payload whose centre does not come out
+/// finite: `PackedRTree.build` sorts by box centre, and a NaN would make
+/// that comparison meaningless for every other item in the same tree.
+(double, double)? snapCentreOfLeaf(
+  EntityKind kind,
+  GeometryPayload payload,
+  Transform2 composed,
+) {
+  if (kind != EntityKind.circle && kind != EntityKind.arc) return null;
+  if (payload.coords.length < 2) return null;
+  final lx = payload.coords[0], ly = payload.coords[1];
+  final cx = composed.a * lx + composed.c * ly + composed.e;
+  final cy = composed.b * lx + composed.d * ly + composed.f;
+  if (!cx.isFinite || !cy.isFinite) return null;
+  return (cx, cy);
 }
 
 /// How far outside a leaf's own indexed box the pick/snap **narrow** phase
@@ -401,18 +634,15 @@ class ContainerIndex {
 /// **The invariant this exists to restore:** a broad phase must never be
 /// tighter than the region the narrow phase it feeds will test — the rule
 /// [Aabb2.transformedBy]'s own doc comment states. For every entity kind but
-/// two, the narrow phase measures the entity's exact geometry, which its
-/// indexed box contains by construction, and this is zero. The two
-/// exceptions are both round:
+/// one, the narrow phase measures the entity's exact geometry, which its
+/// indexed box contains by construction, and this is zero. The exception is
+/// round:
 ///
-/// * A **circle** under a non-conformal transform becomes an ellipse, and
-///   `SpatialIndex._considerLeaf` deliberately approximates it by the circle
-///   of radius `r * scaleMagnitude` (the geometric mean of the axis scales)
-///   rather than doing ellipse math. That circle pokes out of the exact
-///   ellipse's box along the ellipse's short axis.
-/// * An **arc**'s centre is a `SnapKind.center` candidate, and an arc's box
-///   bounds the drawn sweep, which need not contain its own centre at all —
-///   a 10° arc's box is a sliver a full radius away from it.
+/// * A **circle or arc** under a non-conformal transform becomes an ellipse,
+///   and `SpatialIndex._considerLeaf` deliberately approximates it by the
+///   circle of radius `r * scaleMagnitude` (the geometric mean of the axis
+///   scales) rather than doing ellipse math. That circle pokes out of the
+///   exact ellipse's box along the ellipse's short axis.
 ///
 /// The fix is deliberately **not** to widen the stored boxes. Those boxes
 /// are what `forEachInRect` and `forEachInstanceInRect` report against, and
@@ -425,32 +655,36 @@ class ContainerIndex {
 /// box means, and costs nothing at all for a document whose leaves are all
 /// straight or whose transforms are all conformal.
 ///
-/// Three channels rather than one, because the two exceptions have different
-/// audiences and very different costs:
+/// **What this deliberately no longer covers: the arc centre.** An arc's box
+/// bounds the drawn sweep and need not contain its own centre — a 10° arc's
+/// box is a sliver a full radius away from it — and `snapInto` offers that
+/// centre as a `SnapKind.center` candidate. This class used to carry a third
+/// channel for that, adding roughly the arc's radius to every
+/// centre-including snap query in the container. Measured at 500,000
+/// entities that term was about 87% of the cost of a default
+/// (`SnapMask.cheap`) snap, because it is a *per-container union*: one large
+/// narrow-sweep arc widened every such query, not only the queries near it.
+/// The centre is now indexed where it actually is, in
+/// [ContainerIndex.searchSnapCentres], and no query is widened for it. What
+/// is left of the compensation is
+/// [ContainerIndex.ownSnapCentreReach] — applied only to the *instance*
+/// search, and proportional to how far a centre escapes its own definition's
+/// bound rather than to the largest radius in the drawing.
 ///
-/// * [pick] — needed by [SpatialIndex.pickInto] and by every snap kind
-///   except `center`. Zero unless a round leaf sits under a non-conformal
-///   transform, which is the rare case.
-/// * [snap] — [pick] plus the arc-centre term, needed only when a snap
-///   query's mask includes [SnapKind.center]. Kept apart so a *pick* never
-///   pays for a snap-only candidate: a drawing with one 5000-unit arc would
-///   otherwise widen every pick to the whole drawing. **For snapping itself
-///   this is an accepted cost, not an avoided one** — `SnapMask.cheap`
-///   includes `center`, so the default snap path does pay it, and a document
-///   with one very large arc widens every such snap by roughly that arc's
-///   radius. There is no way around it that keeps the centre snappable: the
-///   centre genuinely is a candidate point and it genuinely is outside the
-///   arc's own bound. Narrowing it would mean indexing arc centres
-///   separately, which buys a second structure to maintain for one snap
-///   kind.
+/// Two channels rather than one, because the sharp bound and the
+/// survives-anything bound have different audiences:
+///
+/// * [pick] — the margin every pick and every snap widens its broad phase
+///   by. Zero unless a round leaf sits under a non-conformal transform,
+///   which is the rare case.
 /// * [crude] — the bound that stays valid under **any** further transform,
 ///   `approximating radius + distance from centre to box`. Used when lifting
 ///   a definition's slack through a non-conformal instance, where the
-///   sharper channels' assumptions no longer hold; see [through].
+///   sharper channel's assumptions no longer hold; see [through].
 class NarrowPhaseSlack {
-  const NarrowPhaseSlack(this.pick, this.snap, this.crude);
+  const NarrowPhaseSlack(this.pick, this.crude);
 
-  static const NarrowPhaseSlack none = NarrowPhaseSlack(0, 0, 0);
+  static const NarrowPhaseSlack none = NarrowPhaseSlack(0, 0);
 
   /// How much of [crude] an anisotropy of [k] is charged for.
   ///
@@ -536,20 +770,21 @@ class NarrowPhaseSlack {
       // out by no more than the difference. The centre of a circle is always
       // inside its own box, so there is no centre term.
       final tight = k.isFinite ? rho * (1.0 - 1.0 / math.sqrt(k)) : crude;
-      return NarrowPhaseSlack(tight, tight, crude);
+      return NarrowPhaseSlack(tight, crude);
     }
 
-    final fraction = deviationFraction(k);
-    final rim = crude * fraction;
-    final centre = centreGap + rho * fraction;
-    return NarrowPhaseSlack(rim, rim > centre ? rim : centre, crude);
+    // The rim term only. The arc *centre* used to be bounded here too, by
+    // `centreGap + rho * fraction`; it is indexed as its own point now (see
+    // this class's doc comment and [ContainerIndex.searchSnapCentres]), so
+    // there is nothing left for a query margin to reach.
+    final rim = crude * deviationFraction(k);
+    return NarrowPhaseSlack(rim, crude);
   }
 
   /// The larger of each channel — the slack of a set of leaves is the worst
   /// of them, since the query is widened once for all of them.
   NarrowPhaseSlack union(NarrowPhaseSlack other) => NarrowPhaseSlack(
         pick > other.pick ? pick : other.pick,
-        snap > other.snap ? snap : other.snap,
         crude > other.crude ? crude : other.crude,
       );
 
@@ -576,25 +811,19 @@ class NarrowPhaseSlack {
     final compounded = crude * deviationFraction(k);
     return NarrowPhaseSlack(
       sigmaMax * (pick + compounded),
-      sigmaMax * (snap + compounded),
       sigmaMax * crude,
     );
   }
 
-  /// The margin a pick, or a snap that cannot produce a `center` candidate,
-  /// must widen its broad phase by.
+  /// The margin a pick or a snap must widen its broad phase by.
   final double pick;
-
-  /// The margin a snap whose mask includes `center` must widen its broad
-  /// phase by.
-  final double snap;
 
   /// The margin that stays valid however the leaves below are transformed
   /// afterwards. Never used as a query margin directly — only by [through].
   final double crude;
 
   @override
-  String toString() => 'NarrowPhaseSlack($pick, $snap, $crude)';
+  String toString() => 'NarrowPhaseSlack($pick, $crude)';
 }
 
 /// Euclidean distance from ([x], [y]) to the nearest point of [box], zero

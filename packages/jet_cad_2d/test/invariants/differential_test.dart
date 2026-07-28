@@ -173,7 +173,13 @@ void main() {
         for (var trial = 0; trial < 200; trial++) {
           final point = _randomPoint(rng, fresh.doc.extents);
           for (final mask in [SnapMask.cheap, SnapMask.all]) {
-            fresh.index.snapInto(point, 2.0, mask, out);
+            // `QueryFilter.all()` explicitly, not `snapInto`'s default:
+            // `referenceSnap` applies no visibility or lock filtering at
+            // all, so this is what makes the two sides answer the *same*
+            // question rather than agreeing because no corpus fixture
+            // happens to hide anything.
+            fresh.index.snapInto(point, 2.0, mask, out,
+                filter: const QueryFilter.all());
             final expected = referenceSnap(fresh.doc, point, 2.0, mask, leaves);
 
             final reason = '${fixture.name} trial $trial at $point '

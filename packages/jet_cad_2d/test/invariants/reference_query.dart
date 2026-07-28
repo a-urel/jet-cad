@@ -674,10 +674,12 @@ Vector2? _footOnArc(
 
 /// Every pairwise crossing among root-level line/polyline entities within
 /// [radius] of [world], among the [kIntersectionCandidateCap] entities with
-/// the *lowest handle values* touching the query square -- the same
+/// the *greatest handle values* touching the query square -- the same
 /// deterministic cap `SpatialIndex._considerIntersections` documents,
-/// re-implemented here (sort by handle, then cap) rather than trusted by
-/// agreement.
+/// re-implemented here (sort by handle, then take the tail) rather than
+/// trusted by agreement. Greatest, not lowest: ascending handle value is
+/// draw order, and the cap keeps the most recently drawn entities, matching
+/// every other later-drawn-wins rule in the snap engine.
 void _considerIntersections(
   DraftDocument doc,
   Vector2 world,
@@ -714,14 +716,16 @@ void _considerIntersections(
   final n = candidates.length < kIntersectionCandidateCap
       ? candidates.length
       : kIntersectionCandidateCap;
+  final first = candidates.length - n;
+  final end = candidates.length;
 
-  for (var i = 0; i < n; i++) {
+  for (var i = first; i < end; i++) {
     final (handleA, slotA, toRootA) = candidates[i];
     final payloadA = doc.geometry.peek(doc.entities.geomIndexAt(slotA));
     final countA = payloadA.pointCount;
     if (countA < 2) continue;
 
-    for (var j = i + 1; j < n; j++) {
+    for (var j = i + 1; j < end; j++) {
       final (handleB, slotB, toRootB) = candidates[j];
       final payloadB = doc.geometry.peek(doc.entities.geomIndexAt(slotB));
       final countB = payloadB.pointCount;

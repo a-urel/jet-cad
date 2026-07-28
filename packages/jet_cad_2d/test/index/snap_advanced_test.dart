@@ -411,46 +411,112 @@ void main() {
   });
 
   test(
-      'the intersection cap selects the lowest handles, not whichever the '
-      'R-tree visits first', () {
-    // 70 lines, added in ascending-handle order with ascending X position
-    // (handle N sits at X = (N-1)*10). Handles 1..64 are short, mutually
-    // parallel (non-crossing) vertical bars. Handles 65 and 66 are the only
-    // crossing pair, placed at the high-X end -- outside the 64 lowest
-    // handles. A correct cap (ascending handle order) never considers
-    // handles 65/66 at all, so no crossing is found. A cap that instead
-    // takes the first kIntersectionCandidateCap entities in R-tree visit
-    // order is not handle-ordered, and for this exact layout (verified
-    // against the real PackedRTree, which packs leaves by ascending centre
-    // X and then visits children highest-index-first) visits in roughly
-    // *descending* handle order -- so it would include handles 65 and 66
-    // and report a hit.
+      'an intersection near the edge of the radius is still found, though '
+      'neither segment passes near the query point', () {
+    // `_considerIntersections` discards, before the quadratic pair loop, any
+    // segment further from the query point than the radius -- sound, because
+    // an accepted crossing lies *on* the segment and within the radius, so a
+    // segment further away than that cannot produce one.
+    //
+    // This fixture is what stops that pre-filter from being tightened into a
+    // wrong one. Two segments cross at (0, 0.9), which is 0.9 of the way to
+    // the radius from the query point at the origin, but they run at +/-45
+    // degrees through it, so each segment's own closest approach to the
+    // query point is 0.9 * sin(45) ~= 0.636 -- comfortably inside the radius
+    // and comfortably outside any fraction of it. A pre-filter using
+    // anything smaller than the full radius drops both segments and reports
+    // no intersection at all.
     final doc = DraftDocument.empty();
-    const n = 70;
-    for (var i = 0; i < n; i++) {
-      final x = i * 10.0;
-      if (i == 64) {
-        // First half of the crossing pair (handle 65): rises left to right.
-        addLine(doc, [x, -5, x + 10, 5]);
-      } else if (i == 65) {
-        // Second half (handle 66): falls left to right over the same span,
-        // so the two actually cross at their shared midpoint.
-        addLine(doc, [x - 10, 5, x, -5]);
-      } else {
-        addLine(doc, [x, -1, x, 1]);
-      }
-    }
+    addLine(doc, [-2, -1.1, 2, 2.9]); // through (0, 0.9), slope +1
+    addLine(doc, [-2, 2.9, 2, -1.1]); // through (0, 0.9), slope -1
     final index = SpatialIndex(doc);
     addTearDown(index.dispose);
 
     final out = SnapResult();
-    index.snapInto(Vector2((n - 1) * 5.0, 0), (n - 1) * 5.0 + 10,
+    index.snapInto(Vector2(0, 0), 1.0,
         const SnapMask(0).with_(SnapKind.intersection), out);
-    expect(out.found, isFalse,
-        reason: 'the only crossing pair sits outside the 64 lowest '
-            'handles, and the cap must be chosen by handle, not by '
-            'traversal order');
+    expect(out.found, isTrue,
+        reason: 'the crossing is 0.9 from the query point, inside the radius '
+            'of 1.0');
+    expect(out.kind, SnapKind.intersection);
+    expect(out.point.x, closeTo(0, 1e-9));
+    expect(out.point.y, closeTo(0.9, 1e-9));
   });
+
+  test(
+      'the intersection cap keeps the greatest handles, not the lowest and '
+      'not whichever the R-tree visits first', () {
+    // `_cappedIntersectionDocument` builds 70 lines in ascending-handle
+    // order at ascending X: mutually parallel, non-crossing vertical bars
+    // except for one crossing pair, whose position in handle order the
+    // caller chooses. 70 is past `kIntersectionCandidateCap` of 64, so six
+    // entities are always dropped and *which* six is the whole question.
+    //
+    // This pins the rule in both directions at once, which is what makes it
+    // catch a reverted sort as well as an unordered one:
+    //
+    // * the pair at the **lowest** handles must be dropped -- it is outside
+    //   the 64 greatest, so no crossing is reported;
+    // * the pair at the **greatest** handles must be kept.
+    //
+    // A cap that took the 64 *lowest* handles (the behaviour this replaced)
+    // fails both expectations, not one. A cap that took entities in R-tree
+    // visit order fails too: that order is not handle-ordered at all, and
+    // for this layout (the tree packs leaves by ascending centre X, then
+    // visits children highest-index-first) runs roughly *descending* by
+    // handle, which would keep the low pair the first expectation forbids.
+    const n = 70;
+    // Well past the widest line span, so every one of the 70 lines is inside
+    // the query rectangle and the cap is genuinely the thing selecting.
+    const radius = 1000.0;
+    const mask = SnapMask(0);
+    final intersectionOnly = mask.with_(SnapKind.intersection);
+
+    final lowDoc = _cappedIntersectionDocument(n, 0);
+    final lowIndex = SpatialIndex(lowDoc);
+    addTearDown(lowIndex.dispose);
+    final lowOut = SnapResult();
+    lowIndex.snapInto(Vector2(5, 0), radius, intersectionOnly, lowOut);
+    expect(lowOut.found, isFalse,
+        reason: 'the only crossing pair sits at the two LOWEST handles, '
+            'which the cap must discard: ascending handle value is draw '
+            'order, and the cap keeps the most recently drawn entities');
+
+    final highDoc = _cappedIntersectionDocument(n, n - 2);
+    final highIndex = SpatialIndex(highDoc);
+    addTearDown(highIndex.dispose);
+    final highOut = SnapResult();
+    highIndex.snapInto(
+        Vector2((n - 2) * 10.0 + 5, 0), radius, intersectionOnly, highOut);
+    expect(highOut.found, isTrue,
+        reason: 'the only crossing pair sits at the two GREATEST handles, '
+            'which the cap must keep');
+    expect(highOut.kind, SnapKind.intersection);
+    expect(highOut.point.x, closeTo((n - 2) * 10.0 + 5, 1e-9));
+    expect(highOut.point.y, closeTo(0, 1e-9));
+  });
+}
+
+/// [n] root-level lines in ascending-handle order, at ascending X, of which
+/// exactly one pair crosses: the lines at indices [crossingAt] and
+/// [crossingAt] + 1, which meet at `(crossingAt * 10 + 5, 0)`.
+///
+/// Every other line is a short vertical bar at its own X, so no two of them
+/// touch, and the crossing pair's 10-unit span reaches no bar's X either --
+/// the two X positions inside that span belong to the pair itself.
+DraftDocument _cappedIntersectionDocument(int n, int crossingAt) {
+  final doc = DraftDocument.empty();
+  for (var i = 0; i < n; i++) {
+    final x = i * 10.0;
+    if (i == crossingAt) {
+      addLine(doc, [x, -5, x + 10, 5]); // rises left to right
+    } else if (i == crossingAt + 1) {
+      addLine(doc, [x - 10, 5, x, -5]); // falls over the same span
+    } else {
+      addLine(doc, [x, -1, x, 1]);
+    }
+  }
+  return doc;
 }
 
 double _tangentLengthForTest(

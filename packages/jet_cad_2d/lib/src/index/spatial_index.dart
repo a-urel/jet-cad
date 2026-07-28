@@ -16,6 +16,7 @@ import '../geometry/primitives.dart';
 import '../geometry/transform2.dart';
 import '../store/entity_store.dart';
 import 'container_index.dart';
+import 'dirty_list.dart';
 import 'hit.dart';
 import 'query_filter.dart';
 import 'query_scratch.dart';
@@ -48,14 +49,35 @@ class QueryReentrancyError implements Exception {
 /// **The cap is disclosed, not silent.** [SnapResult] carries no "some
 /// candidates were dropped" flag, and that is a deliberate choice, not an
 /// oversight: [SpatialIndex._considerIntersections] always takes exactly
-/// the entities with the [kIntersectionCandidateCap] lowest handle values
-/// among those the query rectangle touches — a fixed, documented,
+/// the entities with the [kIntersectionCandidateCap] **greatest** handle
+/// values among those the query rectangle touches — a fixed, documented,
 /// deterministic rule, not "whatever the R-tree happened to visit first".
 /// A caller that needs to know a rectangle holds more line-like entities
 /// than that already has [SpatialIndex.forEachInRect] to count them
 /// directly, so a second reporting mechanism here would just be a second,
 /// redundant way to ask the same question.
+///
+/// **Greatest, not lowest.** Ascending handle value is draw order
+/// throughout this package, and every other decision the snap engine makes
+/// on a tie — [SpatialIndex._considerSnapCandidate]'s root and leaf terms,
+/// [SpatialIndex._considerLeaf]'s, and the `winningSlot` naming rule inside
+/// `_considerIntersections` itself — resolves in favour of the *later*
+/// drawn entity. Capping from the low end contradicted all of them, and did
+/// so where it is least acceptable: in a dense area the entity dropped from
+/// intersection snapping was the one the user had just drawn.
 const int kIntersectionCandidateCap = 64;
+
+/// The bits of the snap kinds [SpatialIndex._considerSnapLeaf] actually
+/// produces — every kind except `center`, which comes from
+/// [ContainerIndex.searchSnapCentres], and `intersection`, which
+/// [SpatialIndex._considerIntersections] handles on its own root-level walk.
+///
+/// A snap whose mask has none of these bits can skip the leaf walk entirely.
+/// `final`, not `const`: an enum's `.index` is not a constant expression, and
+/// hard-coding the two literals here is exactly the staleness
+/// [SnapMask.cheap]'s doc comment describes guarding against.
+final int _kLeafProducedSnapKinds = SnapMask.all.bits &
+    ~((1 << SnapKind.center.index) | (1 << SnapKind.intersection.index));
 
 /// Every [ContainerIndex] in a document, kept current against its changes.
 ///
@@ -367,17 +389,9 @@ class SpatialIndex {
       _bestKind = null;
       _bestEntity = 0;
       _bestRoot = 0;
-      _descend(
-          root,
-          Transform2.identity(),
-          world,
-          radius,
-          radius + _broadPhaseMargin().pick,
-          filter,
-          0,
-          out,
-          SnapMask.none,
-          null);
+      final broad = radius + _broadPhaseMargin().pick;
+      _descend(root, Transform2.identity(), world, radius, broad, broad, filter,
+          0, out, SnapMask.none, null);
       return _bestKind != null;
     } finally {
       _endQuery();
@@ -402,10 +416,13 @@ class SpatialIndex {
   /// every shallow test, and risks exactly that corruption the moment two
   /// instances at the same depth are found before either is recursed into.
   ///
-  /// **Inherited, not fixed, cost:** the `searchLeaves`/`searchInstances`
-  /// calls below each pass a closure literal that captures this call's
-  /// locals, and a fresh pair is allocated on *every* recursive call — one
-  /// per level of nesting a query descends through. That was true of
+  /// **Inherited, not fixed, cost:** the leaf, snap-centre and instance
+  /// visitors below are each a closure over this call's locals, and a fresh
+  /// set is allocated on *every* recursive call — one per level of nesting a
+  /// query descends through. (Three now rather than two: `visitSnapCentre`
+  /// is declared unconditionally so the fused and unfused search calls can
+  /// share it, and a closure costs far less than the second full scan of the
+  /// dirty overlay that fusing avoids.) That was true of
   /// `pickInto`'s descent before this method existed and stays true now that
   /// `snapInto` shares it too; sharing the walk means `snapInto` does not
   /// add a *second*, independent occurrence of the same cost elsewhere in
@@ -433,6 +450,7 @@ class SpatialIndex {
     Vector2 world,
     double radius,
     double broadRadius,
+    double instanceRadius,
     QueryFilter filter,
     int depth,
     HitPath? pickOut,
@@ -460,77 +478,62 @@ class SpatialIndex {
     // that reaches the leaf's own box necessarily reaches every instance box
     // on the way down to it.
     //
-    // Built from raw doubles, not `Aabb2(Vector2, Vector2).transformedBy(...)`:
-    // that reads better but was measured (Task 17's allocation harness) to
-    // allocate roughly ten `Vector2`/`Aabb2` objects per call -- the four
-    // corners as `Vector2`s, `Aabb2.fromPoints`' intermediate `List`, and one
-    // `Aabb2.raw` per fold step of `expandedToPoint`. Since this runs once per
-    // *recursion level*, not once per candidate, every one of those was a real
-    // steady-state allocation scaling with how deep a pick or snap descends
-    // through nested instances. All four corners of the widened world square
-    // are still transformed and bounded -- same conservative-under-rotation
-    // contract as [Aabb2.transformedBy] -- just with the min/max fold done
-    // over plain doubles instead of immutable objects, the same style
-    // [_considerLeaf] already uses for its own per-candidate transform math.
-    final wMinX = world.x - broadRadius, wMinY = world.y - broadRadius;
-    final wMaxX = world.x + broadRadius, wMaxY = world.y + broadRadius;
-    final la = toLocal.a, lb = toLocal.b, lc = toLocal.c;
-    final ld = toLocal.d, le = toLocal.e, lf = toLocal.f;
-    var qMinX = la * wMinX + lc * wMinY + le;
-    var qMinY = lb * wMinX + ld * wMinY + lf;
-    var qMaxX = qMinX, qMaxY = qMinY;
-    for (var i = 1; i < 4; i++) {
-      final cx = (i & 1) == 0 ? wMinX : wMaxX;
-      final cy = (i & 2) == 0 ? wMinY : wMaxY;
-      final lx = la * cx + lc * cy + le;
-      final ly = lb * cx + ld * cy + lf;
-      if (lx < qMinX) qMinX = lx;
-      if (lx > qMaxX) qMaxX = lx;
-      if (ly < qMinY) qMinY = ly;
-      if (ly > qMaxY) qMaxY = ly;
-    }
-    final localQuery = Aabb2.raw(qMinX, qMinY, qMaxX, qMaxY);
+    final localQuery = _localQueryBox(toLocal, world, broadRadius);
+    // A second, wider box for the instance search *only*, and only when the
+    // two radii actually differ -- see [_centreDescentMargin] for the one
+    // thing that widens it. Reusing `localQuery` when they agree, which is
+    // the overwhelmingly common case, is what keeps this method's
+    // one-`Aabb2`-per-recursion-level allocation profile intact; the
+    // allocation harness budgets that per level.
+    final instanceQuery = instanceRadius == broadRadius
+        ? localQuery
+        : _localQueryBox(toLocal, world, instanceRadius);
 
-    index.searchLeaves(localQuery, (slot) {
+    void visitLeaf(int slot) {
       if (!_filters.acceptsEntity(slot, filter)) return;
-      // A leaf reached through a flattened GroupNode carries that group's
-      // composed transform (null when there is none, which is the common
-      // case); the narrow phase needs toWorld-after-group, since the leaf's
-      // stored coordinates are in the group's space, not the container's.
-      // Composed into six loose doubles rather than a Transform2: this runs
-      // once per candidate, and allocating a matrix here is exactly what
-      // pickInto's and snapInto's zero-allocation guarantee forbids. The
-      // argument order matches Transform2.multiply -- the group is applied
-      // first, then toWorld -- so this is toWorld.multiply(group) written
-      // out.
-      final group = index.transformOfLeaf(slot);
-      final double ta, tb, tc, td, te, tf;
-      if (group == null) {
-        ta = toWorld.a;
-        tb = toWorld.b;
-        tc = toWorld.c;
-        td = toWorld.d;
-        te = toWorld.e;
-        tf = toWorld.f;
-      } else {
-        ta = toWorld.a * group.a + toWorld.c * group.b;
-        tb = toWorld.b * group.a + toWorld.d * group.b;
-        tc = toWorld.a * group.c + toWorld.c * group.d;
-        td = toWorld.b * group.c + toWorld.d * group.d;
-        te = toWorld.a * group.e + toWorld.c * group.f + toWorld.e;
-        tf = toWorld.b * group.e + toWorld.d * group.f + toWorld.f;
-      }
+      _composeLeafTransform(toWorld, index.transformOfLeaf(slot));
       if (pickOut != null) {
-        _considerLeaf(
-            slot, ta, tb, tc, td, te, tf, world, radius, depth, pickOut);
+        _considerLeaf(slot, _lta, _ltb, _ltc, _ltd, _lte, _ltf, world, radius,
+            depth, pickOut);
       } else {
-        _considerSnapLeaf(slot, ta, tb, tc, td, te, tf, world, radius, snapMask,
-            depth, snapOut!);
+        _considerSnapLeaf(slot, _lta, _ltb, _ltc, _ltd, _lte, _ltf, world,
+            radius, snapMask, depth, snapOut!);
       }
-    });
+    }
+
+    // The `center` candidates, from their own tree and under the *same*
+    // tight box -- never a widened one. This walk is why the box above no
+    // longer has to reach an arc's centre from the arc's own sliver of a
+    // bound.
+    void visitSnapCentre(int slot) {
+      if (!_filters.acceptsEntity(slot, filter)) return;
+      _composeLeafTransform(toWorld, index.transformOfLeaf(slot));
+      _considerSnapCentre(slot, _lta, _ltb, _ltc, _ltd, _lte, _ltf, world,
+          radius, depth, snapOut!);
+    }
+
+    // A snap for `center` alone has nothing to ask of the leaf walk: every
+    // other kind's candidates come from [_considerSnapLeaf], and `center`'s
+    // now come from the centre tree. Skipping it is what makes a centre-only
+    // mask cheap rather than merely correct.
+    final leafWalkWanted =
+        pickOut != null || (snapMask.bits & _kLeafProducedSnapKinds) != 0;
+    final centreWalkWanted = snapOut != null && snapMask.has(SnapKind.center);
+
+    // Fused when both are wanted -- which is every default snap, since
+    // `SnapMask.cheap` includes `center` -- so the dirty overlay in front of
+    // the two trees is scanned once rather than twice. See
+    // [ContainerIndex.searchLeavesAndSnapCentres].
+    if (leafWalkWanted && centreWalkWanted) {
+      index.searchLeavesAndSnapCentres(localQuery, visitLeaf, visitSnapCentre);
+    } else if (leafWalkWanted) {
+      index.searchLeaves(localQuery, visitLeaf);
+    } else if (centreWalkWanted) {
+      index.searchSnapCentres(localQuery, visitSnapCentre);
+    }
 
     final level = _scratchForDepth(depth)..reset();
-    index.searchInstances(localQuery, (node) {
+    index.searchInstances(instanceQuery, (node) {
       if (_filters.acceptsNode(node, filter)) level.add(node.value);
     });
 
@@ -567,9 +570,87 @@ class SpatialIndex {
       // toWorld-after-instance, never the reverse -- reversing it would
       // silently misplace every entity behind a rotated or scaled instance.
       final composed = toWorld.multiply(index.transformOfInstance(node));
-      _descend(child, composed, world, radius, broadRadius, filter, depth + 1,
-          pickOut, snapMask, snapOut);
+      _descend(child, composed, world, radius, broadRadius, instanceRadius,
+          filter, depth + 1, pickOut, snapMask, snapOut);
     }
+  }
+
+  /// The AABB, in the local space [toLocal] maps world space into, of the
+  /// world square centred on [world] with half-size [halfSize].
+  ///
+  /// Built from raw doubles, not `Aabb2(Vector2, Vector2).transformedBy(...)`:
+  /// that reads better but was measured (Task 17's allocation harness) to
+  /// allocate roughly ten `Vector2`/`Aabb2` objects per call -- the four
+  /// corners as `Vector2`s, `Aabb2.fromPoints`' intermediate `List`, and one
+  /// `Aabb2.raw` per fold step of `expandedToPoint`. Since this runs once (or,
+  /// when the instance search needs a wider box, twice) per *recursion level*,
+  /// not once per candidate, every one of those was a real steady-state
+  /// allocation scaling with how deep a pick or snap descends through nested
+  /// instances. All four corners of the square are still transformed and
+  /// bounded -- same conservative-under-rotation contract as
+  /// [Aabb2.transformedBy] -- just with the min/max fold done over plain
+  /// doubles instead of immutable objects, the same style [_considerLeaf]
+  /// already uses for its own per-candidate transform math.
+  ///
+  /// A plain method with no captures, so calling it allocates nothing beyond
+  /// the one `Aabb2` it returns -- see [_beginQuery]'s doc comment on why a
+  /// closure would not do.
+  Aabb2 _localQueryBox(Transform2 toLocal, Vector2 world, double halfSize) {
+    final wMinX = world.x - halfSize, wMinY = world.y - halfSize;
+    final wMaxX = world.x + halfSize, wMaxY = world.y + halfSize;
+    final la = toLocal.a, lb = toLocal.b, lc = toLocal.c;
+    final ld = toLocal.d, le = toLocal.e, lf = toLocal.f;
+    var qMinX = la * wMinX + lc * wMinY + le;
+    var qMinY = lb * wMinX + ld * wMinY + lf;
+    var qMaxX = qMinX, qMaxY = qMinY;
+    for (var i = 1; i < 4; i++) {
+      final cx = (i & 1) == 0 ? wMinX : wMaxX;
+      final cy = (i & 2) == 0 ? wMinY : wMaxY;
+      final lx = la * cx + lc * cy + le;
+      final ly = lb * cx + ld * cy + lf;
+      if (lx < qMinX) qMinX = lx;
+      if (lx > qMaxX) qMaxX = lx;
+      if (ly < qMinY) qMinY = ly;
+      if (ly > qMaxY) qMaxY = ly;
+    }
+    return Aabb2.raw(qMinX, qMinY, qMaxX, qMaxY);
+  }
+
+  /// The six coefficients of the last transform [_composeLeafTransform]
+  /// built, read straight back by [_descend]'s two visitors.
+  ///
+  /// Fields rather than a returned record or `Transform2`: this is computed
+  /// once per *candidate*, and either of those would allocate one object per
+  /// candidate -- exactly what `pickInto`'s and `snapInto`'s zero-allocation
+  /// guarantee forbids. They are read immediately and passed **by value**
+  /// into the `_consider*` methods, so nothing downstream depends on them
+  /// surviving another candidate.
+  double _lta = 0, _ltb = 0, _ltc = 0, _ltd = 0, _lte = 0, _ltf = 0;
+
+  /// Composes [toWorld] after [group] into [_lta]..[_ltf].
+  ///
+  /// A leaf reached through a flattened GroupNode carries that group's
+  /// composed transform ([group] is null when there is none, which is the
+  /// common case); the narrow phase needs toWorld-after-group, since the
+  /// leaf's stored coordinates are in the group's space, not the container's.
+  /// The argument order matches [Transform2.multiply] -- the group is applied
+  /// first, then toWorld -- so this is `toWorld.multiply(group)` written out.
+  void _composeLeafTransform(Transform2 toWorld, Transform2? group) {
+    if (group == null) {
+      _lta = toWorld.a;
+      _ltb = toWorld.b;
+      _ltc = toWorld.c;
+      _ltd = toWorld.d;
+      _lte = toWorld.e;
+      _ltf = toWorld.f;
+      return;
+    }
+    _lta = toWorld.a * group.a + toWorld.c * group.b;
+    _ltb = toWorld.b * group.a + toWorld.d * group.b;
+    _ltc = toWorld.a * group.c + toWorld.c * group.d;
+    _ltd = toWorld.b * group.c + toWorld.d * group.d;
+    _lte = toWorld.a * group.e + toWorld.c * group.f + toWorld.e;
+    _ltf = toWorld.b * group.e + toWorld.d * group.f + toWorld.f;
   }
 
   /// Measures one candidate leaf in world space and, if it is the best hit
@@ -882,10 +963,19 @@ class SpatialIndex {
   /// against the allocation harness that measures it; do not read the
   /// sentence above as a stronger guarantee than [_descend] actually
   /// provides.
-  /// No entity filter is accepted (unlike [pickInto]): snapping considers
-  /// every entity, so this passes `const QueryFilter.all()` through to
-  /// [_descend], which short-circuits on `isPassthrough` without touching
-  /// [FilterEvaluator].
+  /// **[filter] defaults to [QueryFilter.rendering], not
+  /// [QueryFilter.all].** Snapping to geometry on a hidden layer is a bug,
+  /// not a feature: the user cannot see the thing the cursor jumped to.
+  /// This method previously accepted no filter at all and hard-coded
+  /// `QueryFilter.all()`, which made it the one frame-path query that
+  /// ignored visibility while its sibling [pickInto] honoured it.
+  ///
+  /// Not [QueryFilter.picking], which also excludes *locked* geometry: a
+  /// locked layer still draws, and snapping to something you can see but
+  /// not select is ordinary CAD behaviour — it is how you draw *relative*
+  /// to a locked reference. Visibility and selectability are different
+  /// questions and this is the one where they part company; pass
+  /// [QueryFilter.picking] explicitly if a caller wants both.
   ///
   /// Descends into instances and shares [pickInto]'s descent (see
   /// [_descend]'s doc comment for what "shares" means here and what it does
@@ -893,7 +983,8 @@ class SpatialIndex {
   ///
   /// **Not reentrant.** Shares this index's scratch state with every other
   /// query; see [forEachInRect]'s doc comment.
-  void snapInto(Vector2 world, double radius, SnapMask mask, SnapResult out) {
+  void snapInto(Vector2 world, double radius, SnapMask mask, SnapResult out,
+      {QueryFilter filter = const QueryFilter.rendering()}) {
     final root = rootIndex; // throws if disposed
     _beginQuery();
     // Guard body inlined, not passed to a closure-taking helper -- see the
@@ -904,17 +995,19 @@ class SpatialIndex {
       _bestSnapDist = double.infinity;
       _bestSnapEntity = 0;
       _bestSnapRoot = 0;
-      // The `center` channel only when the mask can actually produce a
-      // centre candidate: an arc's centre is the one snap point that lies
-      // outside the arc's own indexed box, and charging every snap for it
-      // would widen the broad phase by an arc radius for masks that can
-      // never return one. See [NarrowPhaseSlack].
-      final slack = _broadPhaseMargin();
-      final margin = mask.has(SnapKind.center) ? slack.snap : slack.pick;
-      _descend(root, Transform2.identity(), world, radius, radius + margin,
-          const QueryFilter.all(), 0, null, mask, out);
+      // The leaf and centre searches use the *tight* margin -- the same one
+      // a pick uses. An arc's centre no longer needs reaching from the arc's
+      // own box; it is indexed where it is. See [NarrowPhaseSlack] for what
+      // is left in this channel and why.
+      final broad = radius + _broadPhaseMargin().pick;
+      // Only the instance search is widened, and only for a mask that can
+      // actually produce a centre candidate -- see [_centreDescentMargin].
+      final instanceRadius =
+          mask.has(SnapKind.center) ? broad + _centreDescentMargin() : broad;
+      _descend(root, Transform2.identity(), world, radius, broad,
+          instanceRadius, filter, 0, null, mask, out);
       if (mask.has(SnapKind.intersection)) {
-        _considerIntersections(world, radius, out);
+        _considerIntersections(world, radius, filter, out);
       }
       out.found = _bestSnapKind != null;
     } finally {
@@ -924,7 +1017,7 @@ class SpatialIndex {
 
   /// Considers every pairwise crossing among the root-level line and
   /// polyline entities within [radius] of [world], among the
-  /// [kIntersectionCandidateCap] with the lowest handle values, feeding each
+  /// [kIntersectionCandidateCap] with the greatest handle values, feeding each
   /// crossing found through [_considerSnapCandidate] exactly as any other
   /// snap candidate.
   ///
@@ -937,52 +1030,75 @@ class SpatialIndex {
   /// [EntityKind.line] and [EntityKind.polyline] segments are tested; a
   /// circle or arc is never an intersection candidate for this task.
   ///
-  /// **The [kIntersectionCandidateCap] lowest handles, not the first
+  /// **The [kIntersectionCandidateCap] greatest handles, not the first
   /// [kIntersectionCandidateCap] visited.** [ContainerIndex.searchLeaves]
   /// visits in R-tree packing order, which has no defined relationship to
   /// handle order -- capping in visit order would make a truncated result
   /// depend on how the tree happens to be packed today, and change the next
   /// time it is rebuilt even though nothing the user drew changed. Sorting
   /// first, exactly as [forEachInRect] already does for its own ascending-
-  /// handle-order guarantee, is what keeps the cap deterministic.
+  /// handle-order guarantee, is what keeps the cap deterministic; the *tail*
+  /// of that ascending sort is what makes it keep the newest work rather
+  /// than the oldest. See [kIntersectionCandidateCap]'s own doc comment.
   ///
   /// Quadratic in the candidate count -- up to `kIntersectionCandidateCap *
-  /// (kIntersectionCandidateCap - 1) / 2` segment-pair tests, times each
-  /// pair's own segment count -- which is exactly the cost
-  /// [kIntersectionCandidateCap]'s doc comment bounds.
-  void _considerIntersections(Vector2 world, double radius, SnapResult out) {
+  /// (kIntersectionCandidateCap - 1) / 2` pairs -- times each pair's own
+  /// count of segments *near the query point*, which [_collectNearSegments]
+  /// establishes in one linear pass beforehand. The cap bounds entities, not
+  /// segments, so without that pass a cap-ful of six-point polylines cost
+  /// twenty-five times a cap-ful of two-point lines for the same rectangle.
+  void _considerIntersections(
+      Vector2 world, double radius, QueryFilter filter, SnapResult out) {
     final root = rootIndex;
-    final localQuery = Aabb2(
-      Vector2(world.x - radius, world.y - radius),
-      Vector2(world.x + radius, world.y + radius),
-    );
+    // Four loose doubles, not an `Aabb2`: this method runs once per
+    // `snapInto` on the frame path, and [Aabb2] is immutable, so building
+    // one here was one guaranteed allocation per call -- flat, not
+    // depth-bound. It is the same construction [_descend] documents having
+    // removed from its own hot path for the same reason; the lesson was
+    // applied there and, until now, not to its sibling here.
+    final qMinX = world.x - radius, qMinY = world.y - radius;
+    final qMaxX = world.x + radius, qMaxY = world.y + radius;
     _scratch.reset();
-    root.searchLeaves(localQuery, (slot) {
+    root.searchLeavesRaw(qMinX, qMinY, qMaxX, qMaxY, (slot) {
       final kind = document.entities.kindAt(slot);
-      if (kind == EntityKind.line || kind == EntityKind.polyline) {
-        _scratch.add(slot);
-      }
+      if (kind != EntityKind.line && kind != EntityKind.polyline) return;
+      // The same filter the rest of the snap honours -- an intersection
+      // between two lines on a hidden layer is no more snappable than
+      // either line is on its own.
+      if (!_filters.acceptsEntity(slot, filter)) return;
+      _scratch.add(slot);
     });
     _scratch.sortByHandle(document.entities);
 
     final n = _scratch.length < kIntersectionCandidateCap
         ? _scratch.length
         : kIntersectionCandidateCap;
+    // The *tail* of an ascending sort: the entities with the
+    // [kIntersectionCandidateCap] **greatest** handle values. See this
+    // method's doc comment -- keeping the lowest handles would drop exactly
+    // the line the user drew most recently, and it contradicted the
+    // later-drawn-wins rule the tie-break twenty lines below applies to the
+    // very same pair.
+    final first = _scratch.length - n;
+    final end = _scratch.length;
+    _collectNearSegments(world, radius, first, end);
 
-    for (var i = 0; i < n; i++) {
+    for (var i = first; i < end; i++) {
+      final aFrom = _nearSegmentStart[i - first];
+      final aTo = _nearSegmentStart[i - first + 1];
+      if (aFrom == aTo) continue;
       final slotA = _scratch[i];
       final payloadA =
           document.geometry.peek(document.entities.geomIndexAt(slotA));
-      final countA = payloadA.pointCount;
-      if (countA < 2) continue;
       final coordsA = payloadA.coords;
 
-      for (var j = i + 1; j < n; j++) {
+      for (var j = i + 1; j < end; j++) {
+        final bFrom = _nearSegmentStart[j - first];
+        final bTo = _nearSegmentStart[j - first + 1];
+        if (bFrom == bTo) continue;
         final slotB = _scratch[j];
         final payloadB =
             document.geometry.peek(document.entities.geomIndexAt(slotB));
-        final countB = payloadB.pointCount;
-        if (countB < 2) continue;
         final coordsB = payloadB.coords;
 
         // SnapResult.entity names whichever of the pair was drawn later
@@ -995,10 +1111,12 @@ class SpatialIndex {
         final handleB = document.entities.handleAt(slotB);
         final winningSlot = handleA.value > handleB.value ? slotA : slotB;
 
-        for (var sa = 0; sa + 1 < countA; sa++) {
+        for (var p = aFrom; p < aTo; p++) {
+          final sa = _nearSegment[p];
           _isectA1.setValues(coordsA[sa * 2], coordsA[sa * 2 + 1]);
           _isectA2.setValues(coordsA[sa * 2 + 2], coordsA[sa * 2 + 3]);
-          for (var sb = 0; sb + 1 < countB; sb++) {
+          for (var q = bFrom; q < bTo; q++) {
+            final sb = _nearSegment[q];
             _isectB1.setValues(coordsB[sb * 2], coordsB[sb * 2 + 1]);
             _isectB2.setValues(coordsB[sb * 2 + 2], coordsB[sb * 2 + 3]);
             final hit = segmentIntersection(
@@ -1012,6 +1130,61 @@ class SpatialIndex {
         }
       }
     }
+  }
+
+  /// Segment indices, per intersection candidate, of the segments that come
+  /// within the query radius. [_nearSegmentStart] holds one offset per
+  /// candidate plus a final end marker, so candidate `k`'s segments are
+  /// `_nearSegment[_nearSegmentStart[k] .. _nearSegmentStart[k + 1])`.
+  ///
+  /// Grow-once scratch, never `clear()`ed, for the same reason as every
+  /// other buffer in this class.
+  Int32List _nearSegmentStart = Int32List(kIntersectionCandidateCap + 1);
+  Int32List _nearSegment = Int32List(64);
+
+  /// Records, for each intersection candidate in `_scratch[from..to)`, which
+  /// of its segments come within [radius] of [world].
+  ///
+  /// **This changes no result, only the work.** An accepted crossing lies on
+  /// both segments and within [radius] of [world], so each of those segments
+  /// is itself within [radius] of [world]; a segment further away than that
+  /// cannot contribute one. Skipping those turns the pairwise loop from
+  /// "every segment of A against every segment of B" into "every *near*
+  /// segment against every near segment", and the pairs are still visited in
+  /// the same ascending order, so even a degenerate tie between two crossings
+  /// of the same pair resolves the way it did before.
+  ///
+  /// It is worth doing because the cap selects *entities*, not segments. A
+  /// polyline is admitted because its own bound overlaps the query square,
+  /// which says nothing about its individual segments: on a floor plan whose
+  /// polyline segments run hundreds of units, one segment of a six-point
+  /// polyline may be near the cursor and the other four nowhere near it,
+  /// while the quadratic loop tested all of them against all of the other
+  /// candidate's.
+  void _collectNearSegments(Vector2 world, double radius, int from, int to) {
+    final count = to - from;
+    if (_nearSegmentStart.length < count + 1) {
+      _nearSegmentStart = Int32List(count + 1);
+    }
+    var written = 0;
+    for (var k = 0; k < count; k++) {
+      _nearSegmentStart[k] = written;
+      final payload = document.geometry
+          .peek(document.entities.geomIndexAt(_scratch[from + k]));
+      final coords = payload.coords;
+      final points = payload.pointCount;
+      for (var s = 0; s + 1 < points; s++) {
+        _isectA1.setValues(coords[s * 2], coords[s * 2 + 1]);
+        _isectA2.setValues(coords[s * 2 + 2], coords[s * 2 + 3]);
+        if (distanceToSegment(world, _isectA1, _isectA2) > radius) continue;
+        if (written == _nearSegment.length) {
+          _nearSegment = Int32List(_nearSegment.length * 2)
+            ..setRange(0, written, _nearSegment);
+        }
+        _nearSegment[written++] = s;
+      }
+    }
+    _nearSegmentStart[count] = written;
   }
 
   /// Generates every cheap-kind candidate point of one leaf, in world space,
@@ -1114,10 +1287,12 @@ class SpatialIndex {
         // geometric-mean radius, exact under any uniform scale, rotation,
         // translation or mirror.
         final worldRadius = r * _scaleMagnitudeOf(ta, tb, tc, td);
-        if (mask.has(SnapKind.center)) {
-          _considerSnapCandidate(
-              SnapKind.center, wcx, wcy, world, radius, slot, depth, out);
-        }
+        // No `center` candidate here, deliberately: it comes from
+        // [_considerSnapCentre], fed by the container's own centre tree. A
+        // circle's centre *is* inside its box, so this one could safely have
+        // stayed -- it is here for the arc's sake that both go through one
+        // path, so "where does a centre candidate come from" has a single
+        // answer rather than two that must be kept in step.
         if (mask.has(SnapKind.quadrant)) {
           for (var q = 0; q < 4; q++) {
             final angle = q * (math.pi / 2);
@@ -1171,10 +1346,10 @@ class SpatialIndex {
           _considerSnapCandidate(SnapKind.midpoint, ta * lx + tc * ly + te,
               tb * lx + td * ly + tf, world, radius, slot, depth, out);
         }
-        if (mask.has(SnapKind.center)) {
-          _considerSnapCandidate(SnapKind.center, ta * cx + tc * cy + te,
-              tb * cx + td * cy + tf, world, radius, slot, depth, out);
-        }
+        // No `center` candidate here -- see the circle case above. For an
+        // arc it is not merely tidiness: the arc's box need not contain its
+        // centre at all, so reaching it from this walk is what used to force
+        // every centre-including snap query to be widened by an arc radius.
         if (mask.has(SnapKind.quadrant)) {
           // "Quadrants inside the sweep only": a quadrant point that the
           // arc's own curve never passes through is not a snap candidate --
@@ -1253,6 +1428,42 @@ class SpatialIndex {
         _considerSnapCandidate(SnapKind.insertion, ta * lx + tc * ly + te,
             tb * lx + td * ly + tf, world, radius, slot, depth, out);
     }
+  }
+
+  /// Offers one arc's or circle's centre as a [SnapKind.center] candidate.
+  ///
+  /// The counterpart of [_considerSnapLeaf] for the one snap kind that comes
+  /// from [ContainerIndex.searchSnapCentres] instead of from the leaf tree.
+  /// The world transform arrives as its six raw coefficients for the same
+  /// zero-allocation reason [_considerLeaf]'s doc comment gives, and the
+  /// centre is transformed to world space before being measured -- an affine
+  /// map carries a point to the right place under any scale or mirroring, so
+  /// unlike a radius there is nothing here to approximate.
+  ///
+  /// The kind check is not redundant with what the tree holds: a slot whose
+  /// entity has since changed kind keeps its tree entry until the next
+  /// rebuild (marked dead, so ordinarily unreachable), and this is one line
+  /// against a candidate computed from the wrong two scalars.
+  void _considerSnapCentre(
+    int slot,
+    double ta,
+    double tb,
+    double tc,
+    double td,
+    double te,
+    double tf,
+    Vector2 world,
+    double radius,
+    int depth,
+    SnapResult out,
+  ) {
+    final kind = document.entities.kindAt(slot);
+    if (kind != EntityKind.circle && kind != EntityKind.arc) return;
+    final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
+    if (payload.pointCount == 0) return;
+    final cx = payload.coords[0], cy = payload.coords[1];
+    _considerSnapCandidate(SnapKind.center, ta * cx + tc * cy + te,
+        tb * cx + td * cy + tf, world, radius, slot, depth, out);
   }
 
   /// The point on a circle's rim nearest [world], via [_snapProjection] --
@@ -1419,11 +1630,17 @@ class SpatialIndex {
   /// [SnapResult] sibling of [_writeChain].
   ///
   /// When the path is deeper than [out]'s capacity, keeps the **deepest**
-  /// entries and drops from the root end, exactly as [_writeChain] does,
-  /// for the same reason: that is what keeps [SnapResult.entity] correct no
-  /// matter how deep the chain above it goes. Unlike [HitPath],
-  /// [SnapResult] has no `truncated` flag to set -- that is the interface
-  /// this task specifies, not an oversight here.
+  /// entries -- the ones nearest the leaf -- and drops from the root end,
+  /// exactly as [_writeChain] does, for the same reason: that is what keeps
+  /// [SnapResult.entity] and the innermost instances correct no matter how
+  /// deep the chain above them goes. Dropping from the *leaf* end instead
+  /// would report an outer instance where the caller expects the one the
+  /// hit is actually inside, and would do so silently.
+  ///
+  /// [SnapResult.truncated] is set when that happens, the same way
+  /// [_writeChain] sets [HitPath.truncated]. It used to have no flag at
+  /// all, which made "the chain is short because the path is short" and
+  /// "the chain is short because it was cut" the same observation.
   void _writeSnapChain(SnapResult out, int depth) {
     final capacity = out.chain.length;
     if (depth <= capacity) {
@@ -1431,12 +1648,14 @@ class SpatialIndex {
         out.chain[i] = _instancePath[i];
       }
       out.chainLength = depth;
+      out.truncated = false;
     } else {
       final drop = depth - capacity;
       for (var i = 0; i < capacity; i++) {
         out.chain[i] = _instancePath[drop + i];
       }
       out.chainLength = capacity;
+      out.truncated = true;
     }
   }
 
@@ -1506,6 +1725,106 @@ class SpatialIndex {
     return slack;
   }
 
+  /// The cached instance-search widening, or null when it must be
+  /// recomputed. See [_centreDescentMargin].
+  double? _centreMargin;
+
+  /// How much wider than its own radius a `center`-including snap must
+  /// search **for instances**, so that it descends into every instance whose
+  /// contents hold a snap centre the query could reach.
+  ///
+  /// **Why anything is still widened at all.** A container's own arc and
+  /// circle centres are indexed exactly, by
+  /// [ContainerIndex.searchSnapCentres], so no leaf is missed by a tight
+  /// query. What a tight query *can* miss is the step into an instance: a
+  /// parent indexes a definition by that definition's own bound, and an
+  /// arc's centre can lie outside it — a definition holding nothing but one
+  /// narrow-sweep arc has a bound a full radius away from the centre that
+  /// arc offers. Growing the instance box to swallow it is not available:
+  /// that box is what [forEachInstanceInRect] reports against, and its
+  /// meaning is the document's, not this index's.
+  ///
+  /// **How much smaller this is than what it replaced.** The margin removed
+  /// from [NarrowPhaseSlack] was a union over every arc in the document, so
+  /// one big arc anywhere widened every centre-including query. This is a
+  /// union over how far a centre escapes *its own definition's bound*, lifted
+  /// through the instance transforms above it — zero for a definition whose
+  /// arcs sit among its other geometry, which is the ordinary case, and zero
+  /// for a document with no instances at all however many arcs it has.
+  ///
+  /// One number for the whole document applied to the world square, for
+  /// exactly the reason [_broadPhaseMargin]'s doc comment gives: the
+  /// recursion below already lifts every deeper definition's reach up
+  /// through the transforms above it, so the root's value bounds what any
+  /// level needs.
+  double _centreDescentMargin() {
+    final cached = _centreMargin;
+    if (cached != null) return cached;
+    final memo = <Handle, double>{};
+    final open = <Handle>{};
+    final root = _byContainer[document.rootHandle];
+    var margin = 0.0;
+    if (root != null) {
+      // The root's *own* reach is deliberately excluded: root-level centres
+      // are in the root's own centre tree, reached by the tight query. Only
+      // what is below an instance needs compensating for.
+      for (var i = 0; i < root.instanceCount; i++) {
+        final node = document.tree[root.instanceHandleAt(i)];
+        if (node is! InstanceNode) continue;
+        final below = _centreReach(node.definition, memo, open);
+        if (below == 0.0) continue;
+        final lifted = _sigmaMaxOf(root.instanceTransformAt(i)) * below;
+        if (lifted > margin) margin = lifted;
+      }
+    }
+    return _centreMargin = margin;
+  }
+
+  /// The largest distance, in [container]'s own space, by which a snap centre
+  /// reachable from it lies outside [ContainerIndex.bounds] — its own leaves'
+  /// centres, and every definition below it lifted through the instance
+  /// transform on the way up.
+  ///
+  /// `open` is a cycle guard, not an optimisation, exactly as in
+  /// [_reachableSlack].
+  double _centreReach(
+      Handle container, Map<Handle, double> memo, Set<Handle> open) {
+    final done = memo[container];
+    if (done != null) return done;
+    final index = _byContainer[container];
+    if (index == null) return 0.0;
+    if (!open.add(container)) return 0.0;
+
+    var reach = index.ownSnapCentreReach;
+    for (var i = 0; i < index.instanceCount; i++) {
+      final node = document.tree[index.instanceHandleAt(i)];
+      if (node is! InstanceNode) continue;
+      final below = _centreReach(node.definition, memo, open);
+      if (below == 0.0) continue;
+      // An instance's box is contained in this container's own bound, so a
+      // centre `below` outside the definition's bound is at most
+      // `sigmaMax * below` outside *this* container's bound too.
+      final lifted = _sigmaMaxOf(index.instanceTransformAt(i)) * below;
+      if (lifted > reach) reach = lifted;
+    }
+
+    open.remove(container);
+    memo[container] = reach;
+    return reach;
+  }
+
+  /// The larger singular value of [edge] — the most a distance can grow
+  /// across it. Zero for a singular or non-finite edge, which [_descend]
+  /// cannot invert and therefore never descends through, so there is nothing
+  /// below it to keep reachable. The same derivation
+  /// [NarrowPhaseSlack.through] uses.
+  static double _sigmaMaxOf(Transform2 edge) {
+    final k = edge.anisotropyRatio;
+    if (!k.isFinite) return 0.0;
+    final sigmaMax = edge.scaleMagnitude * math.sqrt(k);
+    return sigmaMax.isFinite ? sigmaMax : 0.0;
+  }
+
   int _rebuildCount = 0;
   int _dirtyCount = 0;
 
@@ -1536,6 +1855,7 @@ class SpatialIndex {
   void rebuildAll() {
     _rebuildCount++;
     _margin = null;
+    _centreMargin = null;
     final byOwner = ContainerIndex.leavesByOwner(document);
     _byContainer
       ..clear()
@@ -1581,6 +1901,7 @@ class SpatialIndex {
     }
     _rebuildCount++;
     _margin = null;
+    _centreMargin = null;
     final byOwner = ContainerIndex.leavesByOwner(document);
     _byContainer[container] =
         ContainerIndex.build(document, container, byOwner);
@@ -1613,12 +1934,14 @@ class SpatialIndex {
 
   /// Re-derives the box of every touched handle and dirties what moved.
   void _reconcile(Set<Handle> touched) {
-    // Any edit at all can change the broad-phase margin — a circle's radius,
-    // a group's transform, a new arc. Dropping the cached value here rather
-    // than trying to work out whether this particular edit moved it keeps
-    // the one rule "recompute after any change", and the recompute is a walk
+    // Any edit at all can change either margin — a circle's radius, a
+    // group's transform, a new arc, an arc inside a definition dragged clear
+    // of everything else in it. Dropping both cached values here rather than
+    // trying to work out whether this particular edit moved either keeps the
+    // one rule "recompute after any change", and each recompute is a walk
     // over containers and instance nodes, not over entities.
     _margin = null;
+    _centreMargin = null;
     if (touched.isEmpty) {
       // Defensive, not currently reachable: every `DraftCommand.apply` in
       // this package returns a non-empty `touched` (see `commands.dart`),
@@ -1772,8 +2095,20 @@ class SpatialIndex {
     // just a fill.
     index.noteLeaf(slot, composed, record.kind, payload, expected);
 
+    // The snap centre this entity now offers, in the same container space as
+    // `expected`, or `DirtyList.noCentre` for a kind that offers none. It is
+    // carried through every branch below because it is a second fact about
+    // the entity that its box does not imply — see
+    // [ContainerIndex.storedSnapCentreMatches] for the arc edit that keeps a
+    // box bit-identical while moving its centre.
+    final centre = snapCentreOfLeaf(record.kind, payload, composed);
+    final centreX = centre == null ? DirtyList.noCentre : centre.$1;
+    final centreY = centre == null ? DirtyList.noCentre : centre.$2;
+
     final indexed = index.boxOfLeaf(slot);
-    if (indexed != null && _sameBox(indexed, expected)) {
+    if (indexed != null &&
+        _sameBox(indexed, expected) &&
+        index.storedSnapCentreMatches(slot, centreX, centreY)) {
       // Live, indexed, and unchanged.
       //
       // `index.dirty.remove(slot)` here is defensive, not currently
@@ -1795,7 +2130,9 @@ class SpatialIndex {
     // bit set by the remove would never clear.
     if (indexed == null && index.containsLeafSlot(slot)) {
       final revived = index.boxOfDeadLeaf(slot);
-      if (revived != null && _sameBox(revived, expected)) {
+      if (revived != null &&
+          _sameBox(revived, expected) &&
+          index.storedSnapCentreMatches(slot, centreX, centreY)) {
         index.markLeafAlive(slot);
         index.dirty.remove(slot);
         return;
@@ -1803,7 +2140,7 @@ class SpatialIndex {
     }
 
     index.markLeafDead(slot);
-    index.dirty.put(slot, expected);
+    index.dirty.put(slot, expected, centreX, centreY);
     _dirtyCount++;
   }
 

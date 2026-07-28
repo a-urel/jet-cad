@@ -134,14 +134,38 @@ const _depthBoundClasses = {'Aabb2', 'Transform2'};
 /// Per-class ceilings for [_depthBoundClasses], on this file's own
 /// three-instance-deep, 64-candidate fixture (`_deepNestedDocument`).
 ///
-/// Measured directly, across repeated runs on this machine: roughly
-/// 3.2-4.5 `Aabb2` and 6-8 `Transform2` per call in steady state -- `Aabb2`
-/// is one widened query box per recursion level (four containers on this
-/// fixture's path: root, D1, D2, D3); `Transform2` is one `toWorld.invert()`
-/// per level (four) plus one `toWorld.multiply(...)` per instance actually
-/// descended into (three), for seven, matching the high end of the measured
-/// range. The budgets below sit at roughly 1.6-2.3x that measured cost --
-/// comfortable headroom for ordinary run-to-run noise.
+/// Measured directly on this machine, by setting each budget to a value
+/// nothing can pass and reading the number the failure reports back:
+///
+/// | | `pickInto` | `snapInto` |
+/// |---|---|---|
+/// | `Aabb2` | 4.004 | 0.484 |
+/// | `Transform2` | 7.007 | 0.836 |
+///
+/// `pickInto`'s numbers are the derivation exactly: `Aabb2` is one widened
+/// query box per recursion level (four containers on this fixture's path:
+/// root, D1, D2, D3); `Transform2` is one `toWorld.invert()` per level
+/// (four) plus one `toWorld.multiply(...)` per instance actually descended
+/// into (three), for seven. The budgets below sit at roughly 1.4-1.7x that.
+///
+/// **`snapInto` reads an order of magnitude lower than `pickInto` for the
+/// same walk, and that is a profiler artefact, not a saving.** The two share
+/// `_descend` and construct the same objects at the same points; the
+/// difference appeared when the query-box construction moved into
+/// `_localQueryBox` and the snap path started handing the box to a fused
+/// search, which evidently lets the VM scalar-replace what it could not
+/// before. It is the same class of mis-attribution this file already records
+/// under "what is not confirmed by mutation" below -- the profiler is
+/// trustworthy for catching an order-of-magnitude regression and is not a
+/// precise object counter. Do not read `snapInto`'s 0.484 as a guarantee.
+///
+/// **These numbers moved once already, for a real reason.** `snapInto`
+/// previously measured 5.004 `Aabb2`/call: four depth-bound boxes plus one
+/// flat per-call box built by `_considerIntersections`, which is now built
+/// from four loose doubles instead. An earlier version of this doc comment
+/// claimed "roughly 3.2-4.5 `Aabb2`" and was outside its own stated range
+/// for that method the whole time, because nothing re-measured it after the
+/// intersection pass was added.
 ///
 /// **What this budget is, and is not, confirmed to catch.** A regression
 /// that turns either cost from depth-bound into candidate-bound -- the
