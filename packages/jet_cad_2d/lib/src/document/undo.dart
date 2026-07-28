@@ -79,6 +79,15 @@ class CommandDispatcher {
   /// stated here instead.
   void Function(DocChange change)? onAfterMutate;
 
+  /// Called before `execute`, `undo` and `redo` mutate anything.
+  ///
+  /// Exists so a derived structure that is mid-walk can refuse the mutation:
+  /// changing the document inside a query visitor changes the structure being
+  /// walked. Nullable and settable rather than a direct dependency, because
+  /// this layer must not import the index — the dependency runs the other
+  /// way.
+  void Function()? onBeforeMutate;
+
   CommandDispatcher({
     required this.target,
     this.permissions = DraftPermissions.all,
@@ -91,6 +100,7 @@ class CommandDispatcher {
   bool get canRedo => _history.canRedo;
 
   void execute(DraftCommand command) {
+    onBeforeMutate?.call();
     _checkNotDisposed();
     _require(command);
     // The inverse is pushed only after apply returns, so a command that
@@ -105,6 +115,7 @@ class CommandDispatcher {
   }
 
   void undo() {
+    onBeforeMutate?.call();
     _checkNotDisposed();
     if (!_history.canUndo) return;
     final inverse = _history.takeUndo();
@@ -132,6 +143,7 @@ class CommandDispatcher {
   }
 
   void redo() {
+    onBeforeMutate?.call();
     _checkNotDisposed();
     if (!_history.canRedo) return;
     final inverse = _history.takeRedo();

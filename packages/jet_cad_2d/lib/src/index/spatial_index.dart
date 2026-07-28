@@ -9,6 +9,22 @@ import 'container_index.dart';
 import 'query_filter.dart';
 import 'query_scratch.dart';
 
+/// Thrown when a query runs inside another query's visitor, or when the
+/// document is mutated inside one.
+///
+/// Both corrupt the walk. The index owns a single reusable scratch stack —
+/// that is what makes a query allocation-free — so a nested query overwrites
+/// the outer one's state, and a mutation changes the structure being walked
+/// underneath it.
+class QueryReentrancyError implements Exception {
+  const QueryReentrancyError(this.what);
+  final String what;
+  @override
+  String toString() =>
+      'QueryReentrancyError: $what is not permitted inside a query visitor. '
+      'Collect the results first, then act on them.';
+}
+
 /// Every [ContainerIndex] in a document, kept current against its changes.
 ///
 /// One index per indexed container: the tree root, plus every definition —
@@ -31,11 +47,67 @@ class SpatialIndex {
     // current turn and a query issued right after an edit would quietly
     // return the old answer.
     document.commands.onAfterMutate = _onChange;
+    // Same reasoning as the reentrancy guard below: mutating the document
+    // from inside a query visitor changes the structure being walked
+    // underneath it, and is the likelier and less expected of the two
+    // mistakes a caller can make — nothing about a `void Function(int
+    // slot)` visitor suggests that mutating is forbidden.
+    document.commands.onBeforeMutate = _guardMutation;
   }
 
   final DraftDocument document;
   final Map<Handle, ContainerIndex> _byContainer = <Handle, ContainerIndex>{};
   bool _disposed = false;
+
+  /// Set for the duration of a query walk; see [_beginQuery] and [_endQuery].
+  bool _inQuery = false;
+
+  /// Installed as [CommandDispatcher.onBeforeMutate]. A tear-off, not an
+  /// inline closure literal: [dispose] must be able to tell *this* index's
+  /// hook apart from another index's over the same document, and two
+  /// tear-offs of the same instance method on the same receiver compare
+  /// `==` — see the identical reasoning on [_onChange] and [dispose] below.
+  /// A closure allocated fresh at construction time would not have that
+  /// property.
+  void _guardMutation() {
+    if (_inQuery) throw const QueryReentrancyError('mutating the document');
+  }
+
+  /// Raises the reentrancy flag for the duration of a query walk, throwing
+  /// if one is already raised.
+  ///
+  /// **Not a closure-taking `_guarded(body)` helper**, deliberately: an
+  /// earlier version of this guard wrapped each query's body in a closure
+  /// literal passed to a shared helper. That reads well, but a closure
+  /// literal captures its enclosing scope — here, `this` plus whichever of
+  /// `world`, `filter` and `visit` the body touches — into a freshly
+  /// allocated context and Closure object on *every call*. `forEachInRect`
+  /// and `forEachInstanceInRect` are both named in this package's
+  /// zero-allocation-on-the-frame-path constraint, so that per-call
+  /// allocation is exactly what it forbids — the same class of cost the
+  /// constraint already rejects `List.sublist` for elsewhere in this index.
+  ///
+  /// [_beginQuery] and [_endQuery] are plain instance methods with no
+  /// parameters and nothing to capture, so calling them allocates nothing;
+  /// the `try`/`finally` itself lives directly in each query method's body
+  /// (see [forEachInRect] and [forEachInstanceInRect]) rather than inside a
+  /// helper that would need a closure to reach it. If a future query
+  /// method (`pickInto`, `snapInto`) wants to share this shape, copy the
+  /// `_beginQuery(); try { ... } finally { _endQuery(); }` pattern rather
+  /// than reintroducing a closure-taking wrapper — do not "clean this up"
+  /// back into one.
+  void _beginQuery() {
+    if (_inQuery) throw const QueryReentrancyError('a nested query');
+    _inQuery = true;
+  }
+
+  /// Lowers the reentrancy flag. Always called from a `finally`, never a
+  /// trailing statement: a visitor that throws — or an exception the walk
+  /// itself raises, independent of the visitor — must not leave the index
+  /// permanently unqueryable.
+  void _endQuery() {
+    _inQuery = false;
+  }
 
   ContainerIndex? indexFor(Handle container) => _byContainer[container];
 
@@ -81,21 +153,31 @@ class SpatialIndex {
   /// and `pickInto` when you need to descend.
   ///
   /// **Not reentrant.** Both rect queries share this index's scratch
-  /// buffers; calling either one again from inside [visit] corrupts the
-  /// outer call's in-progress buffer and silently truncates its results. A
-  /// future task adds an explicit guard for this; until then, do not query
-  /// from inside a query's callback.
+  /// buffers; calling either one again from inside [visit] — or mutating the
+  /// document from inside it — throws [QueryReentrancyError] rather than
+  /// corrupting the outer call's in-progress buffer or silently truncating
+  /// its results.
   void forEachInRect(
       Aabb2 world, QueryFilter filter, void Function(int slot) visit) {
     final root = rootIndex; // throws if disposed, even for an empty rect
     if (world.isEmpty) return;
-    _scratch.reset();
-    root.searchLeaves(world, (slot) {
-      if (_filters.acceptsEntity(slot, filter)) _scratch.add(slot);
-    });
-    _scratch.sortByHandle(document.entities);
-    for (var i = 0; i < _scratch.length; i++) {
-      visit(_scratch[i]);
+    _beginQuery();
+    // Guard body inlined rather than passed as a closure to a shared
+    // helper — see the doc comment on [_beginQuery] for why: a closure
+    // literal here would capture `this`, `root`, `filter` and `visit` into
+    // a fresh allocation on every call, which this method's zero-allocation
+    // frame-path guarantee forbids.
+    try {
+      _scratch.reset();
+      root.searchLeaves(world, (slot) {
+        if (_filters.acceptsEntity(slot, filter)) _scratch.add(slot);
+      });
+      _scratch.sortByHandle(document.entities);
+      for (var i = 0; i < _scratch.length; i++) {
+        visit(_scratch[i]);
+      }
+    } finally {
+      _endQuery();
     }
   }
 
@@ -107,15 +189,23 @@ class SpatialIndex {
       Aabb2 world, QueryFilter filter, void Function(Handle instance) visit) {
     final root = rootIndex; // throws if disposed, even for an empty rect
     if (world.isEmpty) return;
-    _instanceScratch.reset();
-    root.searchInstances(world, (node) {
-      if (_filters.acceptsNode(node, filter)) {
-        _instanceScratch.add(node.value);
+    _beginQuery();
+    // Same reasoning as [forEachInRect]: the guard is inlined, not passed
+    // as a closure to a shared helper, so this method allocates nothing per
+    // call beyond what the walk itself already needs.
+    try {
+      _instanceScratch.reset();
+      root.searchInstances(world, (node) {
+        if (_filters.acceptsNode(node, filter)) {
+          _instanceScratch.add(node.value);
+        }
+      });
+      _instanceScratch.sortByValue();
+      for (var i = 0; i < _instanceScratch.length; i++) {
+        visit(Handle(_instanceScratch[i]));
       }
-    });
-    _instanceScratch.sortByValue();
-    for (var i = 0; i < _instanceScratch.length; i++) {
-      visit(Handle(_instanceScratch[i]));
+    } finally {
+      _endQuery();
     }
   }
 
@@ -478,6 +568,14 @@ class SpatialIndex {
     // itself on every future load and purge for the document's lifetime.
     if (document.commands.onAfterMutate == _onChange) {
       document.commands.onAfterMutate = null;
+    }
+    // Same reasoning, same `==` comparison, for the mutation guard: without
+    // this a disposed index would keep refusing every mutation on the
+    // document for the rest of its lifetime, since [_guardMutation] would
+    // stay installed even though nothing can query this index to be
+    // corrupted by one anymore.
+    if (document.commands.onBeforeMutate == _guardMutation) {
+      document.commands.onBeforeMutate = null;
     }
     _byContainer.clear();
     _disposed = true;

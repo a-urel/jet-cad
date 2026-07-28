@@ -158,6 +158,17 @@ void main() {
     expect(doc.commands.onAfterMutate, isNull,
         reason: 'a disposed index must stop being driven by every future '
             'mutation on the document, not just stop being queried');
+    // Same reasoning as above, for the reentrancy guard's hook: dispose()
+    // compares with `==`, not `identical`, precisely because two tear-offs
+    // of the same instance method are `==` but never `identical`. A
+    // regression to `identical` here would make this comparison always
+    // false and leave the hook attached forever — silently, since nothing
+    // observable breaks until a second index is installed over the same
+    // document — which is exactly the failure mode this assertion exists to
+    // catch.
+    expect(doc.commands.onBeforeMutate, isNull,
+        reason: 'a disposed index must stop guarding every future mutation '
+            'on the document too, not just stop rebuilding itself');
     expect(index.dispose, returnsNormally);
   });
 
