@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -904,5 +905,145 @@ void main() {
     expect(index.pickInto(Vector2(9.5, 0), 0.5, const QueryFilter.all(), hit),
         isTrue,
         reason: 'instance 3 sits at x = 9 and still holds the original line');
+  });
+  test('rebuildContainer keeps the placement map pointing at live containers',
+      () {
+    // `rebuildContainer` replaces a `ContainerIndex` outright while
+    // `_placedBy` holds those objects, so without re-deriving the map every
+    // placement still names the discarded one -- and growing an instance box
+    // grows a tree nothing queries. Reachable through public API alone, and
+    // it silently reinstates the exact bug the growth path exists to fix.
+    final doc = DraftDocument.empty();
+    const def = Handle(970);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'AfterRebuild',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    addLine(doc, def, 0, 0, 1, 0);
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: const Handle(971),
+      parent: doc.rootHandle,
+      transform: Transform2.translation(7, 3),
+      definition: def,
+      layer: ReservedHandles.layerZero,
+    )));
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    index.rebuildContainer(doc.rootHandle);
+
+    final added = addLine(doc, def, 100, 100, 101, 100);
+
+    final instances = <Handle>[];
+    index.forEachInstanceInRect(Aabb2(Vector2(106, 102), Vector2(109, 104)),
+        const QueryFilter.all(), instances.add);
+    expect(instances, [const Handle(971)]);
+
+    final hit = HitPath();
+    expect(
+        index.pickInto(Vector2(107.5, 103), 0.5, const QueryFilter.all(), hit),
+        isTrue);
+    expect(hit.entity, added);
+  });
+
+  test('growth composes the full instance transform, not just its translation',
+      () {
+    // Every other fixture here places the grown definition at a pure
+    // translation, three of them at the literal identity, so a lift that
+    // dropped the rotation and scale entirely would pass all of them. A
+    // rotation composed with a non-uniform scale has no such excuse: the
+    // grown corner lands somewhere a translation-only lift cannot put it.
+    final doc = DraftDocument.empty();
+    const def = Handle(980);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'Skewed',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    addLine(doc, def, 0, 0, 1, 0);
+    // Rotate a quarter turn, then scale x by 3 and y by 1/2, then move.
+    final placement = Transform2.translation(200, 50)
+        .multiply(Transform2.scale(3, 0.5))
+        .multiply(Transform2.rotation(math.pi / 2));
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: const Handle(981),
+      parent: doc.rootHandle,
+      transform: placement,
+      definition: def,
+      layer: ReservedHandles.layerZero,
+    )));
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final rebuildsBefore = index.rebuildCount;
+
+    final added = addLine(doc, def, 40, 0, 40, 10);
+    expect(index.rebuildCount, rebuildsBefore);
+
+    // Where the new segment's midpoint actually lands, computed through the
+    // same transform the document applies -- not restated as a literal, so
+    // the expectation cannot drift from the fixture.
+    final world = placement.transformPoint(Vector2(40, 5));
+    final hit = HitPath();
+    expect(index.pickInto(world, 0.5, const QueryFilter.all(), hit), isTrue,
+        reason: 'a translation-only lift puts the grown box at (240, 55) and '
+            'nowhere near $world');
+    expect(hit.entity, added);
+    expect(hit.chain[0], const Handle(981));
+  });
+
+  test('growth uses the composed transform of an instance under a group', () {
+    // The instance's own `transform` is *not* the transform its contents
+    // reach the container by: a group in between contributes its own, and
+    // `ContainerIndex` composes the two. Recording the node's local transform
+    // in the placement map instead of the composed one is invisible whenever
+    // the instance hangs directly off the root -- which, until this fixture,
+    // every one of them did.
+    final doc = DraftDocument.empty();
+    const def = Handle(990);
+    const group = Handle(991);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'UnderGroup',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    addLine(doc, def, 0, 0, 1, 0);
+    final groupTransform = Transform2.translation(1000, 2000)
+        .multiply(Transform2.rotation(math.pi / 2));
+    doc.commands.execute(AddNodeCommand(GroupNode(
+      handle: group,
+      parent: doc.rootHandle,
+      transform: groupTransform,
+      children: const [],
+    )));
+    final instanceTransform = Transform2.translation(5, 7);
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: const Handle(992),
+      parent: group,
+      transform: instanceTransform,
+      definition: def,
+      layer: ReservedHandles.layerZero,
+    )));
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final rebuildsBefore = index.rebuildCount;
+
+    final added = addLine(doc, def, 300, 0, 300, 20);
+    expect(index.rebuildCount, rebuildsBefore);
+
+    final composed = groupTransform.multiply(instanceTransform);
+    final world = composed.transformPoint(Vector2(300, 10));
+    final hit = HitPath();
+    expect(index.pickInto(world, 0.5, const QueryFilter.all(), hit), isTrue,
+        reason: "using the instance node's own local transform instead of the "
+            'composed one leaves the grown box 1000 units and a quarter turn '
+            'away from $world');
+    expect(hit.entity, added);
   });
 }

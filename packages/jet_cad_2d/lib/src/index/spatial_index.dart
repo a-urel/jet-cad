@@ -2542,6 +2542,12 @@ class SpatialIndex {
       document.commands.onBeforeMutate = null;
     }
     _byContainer.clear();
+    // Cleared alongside it, not left behind: every entry holds a
+    // [ContainerIndex], which owns three `PackedRTree`s and a `DirtyList`, so
+    // a `_placedBy` that outlived `_byContainer` would keep the whole index
+    // alive one placement at a time after this object was meant to be done
+    // with it.
+    _placedBy.clear();
     _disposed = true;
   }
 }
