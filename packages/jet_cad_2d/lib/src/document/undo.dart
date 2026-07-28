@@ -64,6 +64,19 @@ class CommandDispatcher {
   ///
   /// Nullable and settable rather than a direct dependency, because this layer
   /// must not import the index — the dependency runs the other way.
+  ///
+  /// **Must not throw.** Unlike [changes] — an async broadcast controller
+  /// whose listeners run outside this call stack and so can never make
+  /// `execute`/`undo`/`redo` itself fail — this callback runs synchronously,
+  /// inline, after the mutation and the history push have both already
+  /// happened. A throwing callback therefore propagates out of
+  /// `execute`/`undo`/`redo` with the mutation and the history change both
+  /// already standing: the caller sees an exception and reasonably concludes
+  /// nothing happened, exactly the hazard [_checkNotDisposed] and
+  /// [DraftDocument.purge]'s own guard exist to close elsewhere. A reader-only
+  /// callback (recomputing a derived index, say) should never throw in the
+  /// first place; this is not a contract this dispatcher can enforce, so it is
+  /// stated here instead.
   void Function(DocChange change)? onAfterMutate;
 
   CommandDispatcher({

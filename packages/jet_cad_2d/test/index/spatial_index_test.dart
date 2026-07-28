@@ -146,9 +146,82 @@ void main() {
     expect(index.indexFor(const Handle(200)), isNull);
   });
 
-  test('dispose is idempotent', () {
+  test('dispose detaches the hook and is idempotent', () {
+    final doc = DraftDocument.empty();
+    final index = SpatialIndex(doc);
+
+    index.dispose();
+
+    // This is the assertion that actually exercises what dispose() exists
+    // to do: `returnsNormally` alone cannot fail for the reason a leaked
+    // hook would fail, since a leaked hook is silent, not throwing.
+    expect(doc.commands.onAfterMutate, isNull,
+        reason: 'a disposed index must stop being driven by every future '
+            'mutation on the document, not just stop being queried');
+    expect(index.dispose, returnsNormally);
+  });
+
+  test('a DocumentPurged event rebuilds the index via the synchronous hook',
+      () {
+    final doc = DraftDocument.empty();
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    expect(index.rootIndex.leafCount, 0);
+
+    addLine(doc, doc.rootHandle, 0, 0, 1, 1);
+    addLine(doc, doc.rootHandle, 1, 1, 2, 2);
+    expect(index.rootIndex.leafCount, 0,
+        reason: 'CommandApplied is not consumed by this task; Task 7 adds '
+            'that path, so the index is deliberately stale here');
+
+    doc.purge();
+
+    expect(index.rootIndex.leafCount, 2,
+        reason: 'DocumentPurged must reach the index through onAfterMutate, '
+            'the same hook execute() uses, not only the async changes '
+            'stream');
+  });
+
+  test('a DocumentLoaded event rebuilds the index via the synchronous hook',
+      () {
+    final doc = DraftDocument.empty();
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    expect(index.containerCount, 1);
+
+    // Added directly on the tree, bypassing the index entirely, so the only
+    // way the index can possibly know about it is the notifyLoaded() call
+    // below reaching onAfterMutate.
+    doc.tree.addDefinition(Definition(
+      handle: const Handle(200),
+      name: 'Late',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    doc.commands.notifyLoaded();
+
+    expect(index.containerCount, 2,
+        reason: 'DocumentLoaded must reach the index through onAfterMutate');
+    expect(index.indexFor(const Handle(200)), isNotNull);
+  });
+
+  test('rebuildContainer refuses a handle that is not an indexed container',
+      () {
+    final doc = DraftDocument.empty();
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    expect(
+        () => index.rebuildContainer(const Handle(999)), throwsArgumentError);
+    expect(index.indexFor(const Handle(999)), isNull,
+        reason: 'a rejected call must not leave a phantom entry behind');
+    expect(index.containerCount, 1);
+  });
+
+  test('rootIndex after dispose throws a diagnosable StateError', () {
     final doc = DraftDocument.empty();
     final index = SpatialIndex(doc)..dispose();
-    expect(index.dispose, returnsNormally);
+
+    expect(() => index.rootIndex, throwsA(isA<StateError>()));
   });
 }
