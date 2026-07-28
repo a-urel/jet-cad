@@ -238,8 +238,11 @@ class ContainerIndex {
   /// reachable through its instances.
   ///
   /// Not final: the dirty overlay can introduce a leaf whose slack exceeds
-  /// what the last build saw (a circle whose radius grew), and
-  /// [noteDirtyLeaf] folds that in. It only ever grows between rebuilds,
+  /// what the last build saw (a circle whose radius grew, or a circle added
+  /// to a group after the index was built), and [noteLeaf] folds that in —
+  /// dropping that one line leaves such a circle correctly indexed,
+  /// correctly transformed and still unpickable in the gap between its exact
+  /// bound and its approximated radius. It only ever grows between rebuilds,
   /// which is the conservative direction — a stale-but-larger slack costs
   /// broad-phase candidates, where a stale-but-smaller one would drop hits.
   NarrowPhaseSlack _ownSlack;
@@ -421,7 +424,15 @@ class ContainerIndex {
 /// * [snap] — [pick] plus the arc-centre term, needed only when a snap
 ///   query's mask includes [SnapKind.center]. Kept apart so a *pick* never
 ///   pays for a snap-only candidate: a drawing with one 5000-unit arc would
-///   otherwise widen every pick to the whole drawing.
+///   otherwise widen every pick to the whole drawing. **For snapping itself
+///   this is an accepted cost, not an avoided one** — `SnapMask.cheap`
+///   includes `center`, so the default snap path does pay it, and a document
+///   with one very large arc widens every such snap by roughly that arc's
+///   radius. There is no way around it that keeps the centre snappable: the
+///   centre genuinely is a candidate point and it genuinely is outside the
+///   arc's own bound. Narrowing it would mean indexing arc centres
+///   separately, which buys a second structure to maintain for one snap
+///   kind.
 /// * [crude] — the bound that stays valid under **any** further transform,
 ///   `approximating radius + distance from centre to box`. Used when lifting
 ///   a definition's slack through a non-conformal instance, where the
@@ -446,10 +457,20 @@ class NarrowPhaseSlack {
   /// arc additionally has its angles distorted, by at most
   /// `atan(sqrt(k)) - atan(1/sqrt(k))` radians, and the two effects are
   /// bounded together here by `4 * (sqrt(k) - 1)` rather than by adding two
-  /// separate closed forms — which stays above their sum by a comfortable
-  /// margin over the whole range where it is below `1` (at the tightest,
-  /// `k = 1.2`, the sum is `0.19` against this bound's `0.24`), and is
-  /// clamped at `1` where the crude bound takes over and is exact regardless.
+  /// separate closed forms.
+  ///
+  /// **The headroom that buys, measured rather than asserted:** the bound
+  /// stays at least **2x** the two effects' sum over the entire range where
+  /// it is active — `2.005x` as `k` approaches 1, where both terms go as
+  /// `eps/2` and the ratio is therefore tightest, rising to `2.34x` at
+  /// `k = 1.5625`, where `4 * (sqrt(k) - 1)` reaches 1 and the clamp hands
+  /// over to the crude bound, which is rigorous for any `k`. (A worked
+  /// example, since "at least 2x" is easy to misread as the margin rather
+  /// than the ratio: at `k = 1.2` the sum is `0.181` against this bound's
+  /// `0.382`.) A search over `k` from `1 + 1e-7` to 1000, including sweeps
+  /// placed at and just inside quadrant boundaries and a hill-climb
+  /// maximising the ratio per `k`, found no configuration where the bound is
+  /// exceeded.
   static double deviationFraction(double k) {
     if (!k.isFinite) return 1.0;
     final f = 4.0 * (math.sqrt(k) - 1.0);

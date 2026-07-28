@@ -766,6 +766,71 @@ void main() {
     expect(hit.kind, HitKind.edge);
   });
 
+  test('composes a group under a definition as toWorld-after-group', () {
+    // The composition ORDER, which every other group test here is blind to:
+    // they all hang their group off the root, where `toWorld` is the
+    // identity and multiplying by it commutes, so a transposed composition
+    // passes them all. This one puts a non-commuting group transform under a
+    // non-identity `toWorld`.
+    //
+    // rotation(pi/2) carries the line (0,0)->(1,0) to (0,0)->(0,1) in the
+    // definition, and the instance then translates it to (100,0)->(100,1).
+    // Transposed -- translate first, then rotate -- it would land at
+    // (0,100)->(0,101) instead, which is what the two picks below tell
+    // apart.
+    final doc = DraftDocument.empty();
+    const def = Handle(400);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'RotatedGroup',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    const group = Handle(401);
+    doc.commands.execute(AddNodeCommand(
+      GroupNode(
+        handle: group,
+        parent: def,
+        transform: Transform2.rotation(math.pi / 2),
+        children: const [],
+      ),
+    ));
+    final line = addEntity(doc, group, EntityKind.line, [0, 0, 1, 0], []);
+    doc.commands.execute(AddNodeCommand(
+      InstanceNode(
+        handle: const Handle(402),
+        parent: doc.rootHandle,
+        transform: Transform2.translation(100, 0),
+        definition: def,
+        layer: ReservedHandles.layerZero,
+      ),
+    ));
+
+    // The broad phase composes in the same order and has always been right,
+    // so this pins the geometry the narrow phase must agree with.
+    expect(doc.extents.minX, closeTo(100, 1e-9));
+    expect(doc.extents.maxX, closeTo(100, 1e-9));
+    expect(doc.extents.minY, closeTo(0, 1e-9));
+    expect(doc.extents.maxY, closeTo(1, 1e-9));
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    expect(
+      index.pickInto(Vector2(100, 0.5), 0.2, const QueryFilter.all(), hit),
+      isTrue,
+      reason: 'the group is applied first and toWorld second, so the line is '
+          'at x=100 -- transposing the two puts it at y=100 instead',
+    );
+    expect(hit.entity, line);
+    expect(
+      index.pickInto(Vector2(0, 100.5), 0.2, const QueryFilter.all(), hit),
+      isFalse,
+      reason: 'and nothing is at the transposed location',
+    );
+  });
+
   test('picks a group-owned leaf that arrived through the dirty overlay', () {
     // The same group transform, but reaching the index by the incremental
     // route rather than by a build: an entity added after the index exists
@@ -830,6 +895,93 @@ void main() {
     // approximating circle the narrow phase measures against reaches
     // 2 * sqrt(10).
     expect(doc.extents.maxX, closeTo(4.0, 1e-9));
+
+    final hit = HitPath();
+    expect(
+      index.pickInto(Vector2(5.5, 0), 1.0, const QueryFilter.all(), hit),
+      isTrue,
+    );
+    expect(hit.entity, circle);
+    expect(hit.kind, HitKind.edge);
+  });
+
+  test(
+      'a circle added to a non-uniform group after the index exists is '
+      'still pickable in the approximation gap', () {
+    // The dirty-overlay sibling of the test above, and the *slack* half of
+    // reconciliation rather than the transform half: the broad-phase margin
+    // is a maximum over the leaves the index knows about, so a round leaf
+    // that arrives after the build has to be folded into it. Without that,
+    // this circle is indexed and transformed correctly and still unpickable
+    // in the gap between its exact bound and its approximated radius.
+    final doc = DraftDocument.empty();
+    const group = Handle(500);
+    doc.commands.execute(AddNodeCommand(
+      GroupNode(
+        handle: group,
+        parent: doc.rootHandle,
+        transform: Transform2.scale(2, 5),
+        children: const [],
+      ),
+    ));
+    addEntity(doc, group, EntityKind.line, [0, 0, 1, 1], []);
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final rebuildsBefore = index.rebuildCount;
+
+    final circle = addEntity(doc, group, EntityKind.circle, [0, 0], [2.0]);
+
+    expect(index.rebuildCount, rebuildsBefore,
+        reason: 'this must exercise the dirty overlay, not a rebuild');
+
+    final hit = HitPath();
+    expect(
+      index.pickInto(Vector2(5.5, 0), 1.0, const QueryFilter.all(), hit),
+      isTrue,
+    );
+    expect(hit.entity, circle);
+    expect(hit.kind, HitKind.edge);
+  });
+
+  test(
+      'a circle added inside a definition after the index exists is still '
+      'pickable through a non-uniform instance', () {
+    // The same slack half, one container deeper: the margin the *root*
+    // query is widened by is lifted from the definition's own slack through
+    // the instance transform, so a round leaf reconciled into the
+    // definition's dirty overlay has to reach that lift too.
+    //
+    // The definition already spans [-2, 2] in both axes before the circle is
+    // added, so the instance box stored in the root stays adequate and this
+    // test is about the margin rather than about stale instance bounds.
+    final doc = DraftDocument.empty();
+    const def = Handle(600);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'GrowsACircle',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    addEntity(doc, def, EntityKind.line, [-2, -2, 2, 2], []);
+    doc.commands.execute(AddNodeCommand(
+      InstanceNode(
+        handle: const Handle(601),
+        parent: doc.rootHandle,
+        transform: Transform2.scale(2, 5),
+        definition: def,
+        layer: ReservedHandles.layerZero,
+      ),
+    ));
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final rebuildsBefore = index.rebuildCount;
+
+    final circle = addEntity(doc, def, EntityKind.circle, [0, 0], [2.0]);
+
+    expect(index.rebuildCount, rebuildsBefore,
+        reason: 'this must exercise the dirty overlay, not a rebuild');
 
     final hit = HitPath();
     expect(
