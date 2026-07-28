@@ -54,6 +54,23 @@
 //    this suite can afford to run. The fix is the same one as above: name a
 //    small set of classes the code path is not expected to touch, and sum
 //    only those.
+// 3. **`getAllocationProfile` without `reset` is not a repeatable snapshot
+//    read.** Calling it a second time, with no work done in between, was
+//    measured to report near-zero for every class -- as if the *first* call
+//    had silently re-based the "since reset" baseline to itself. Confirmed
+//    directly with an order-swap: whichever of two back-to-back reads runs
+//    first sees the true accumulated count; whichever runs second reads
+//    near-zero, regardless of which named classes either one asks about.
+//    This was the actual cause of what first looked like several different,
+//    increasingly strange escape-analysis failures while calibrating a
+//    depth-bound budget for `pickInto`/`snapInto` in the task-17 report's
+//    round-2 section -- every mutation *had* materialized correctly (and
+//    was confirmed to, via a debug read of the mutated value itself), but
+//    the *second* of two `accumulatedInstances` calls made against the same
+//    `reset` epoch was reading a baseline the first call had already reset
+//    out from under it. [accumulatedInstances] enforces this at runtime
+//    (see its own doc comment) rather than leaving it as a trap the next
+//    caller has to already know about.
 //
 // **What a clean reading here proves, and what it does not:** a near-zero
 // count for a named class means the JIT, for *this* run, on *this* machine,
@@ -84,6 +101,12 @@ class AllocationMeter {
 
   final vm_service.VmService _service;
   final String _isolateId;
+
+  /// Guards against the trap documented in this file's failure mode 3:
+  /// a second [accumulatedInstances] call against the same [reset] epoch
+  /// silently reads near-zero rather than the true count. Set by
+  /// [accumulatedInstances], cleared by [reset].
+  bool _consumedSinceReset = false;
 
   static Future<AllocationMeter?> connect() async {
     try {
@@ -147,6 +170,7 @@ class AllocationMeter {
   Future<void> reset() async {
     await _service.getAllocationProfile(_isolateId, gc: true);
     await _service.getAllocationProfile(_isolateId, reset: true);
+    _consumedSinceReset = false;
   }
 
   /// Instances accumulated since the last [reset], per name in
@@ -159,9 +183,30 @@ class AllocationMeter {
   /// are expected to sit at zero on every path this file measures, so
   /// summing them is harmless when the reading is clean and conservative
   /// (counts, rather than hides, a hit) when it is not.
+  ///
+  /// **Call this at most once per [reset].** A second call against the
+  /// same epoch was measured to read near-zero for every class rather than
+  /// the true accumulated count -- see this file's doc comment, failure
+  /// mode 3. Enforced here rather than left as a trap: a caller that needs
+  /// several classes' worth of budgets after one measured loop must request
+  /// the union of every class it cares about in a single call, then apply
+  /// different thresholds to the entries of the one returned map -- see
+  /// `query_allocation_test.dart`'s `pickInto`/`snapInto` tests for the
+  /// pattern.
   Future<Map<String, int>> accumulatedInstances(
     Set<String> classNames,
   ) async {
+    if (_consumedSinceReset) {
+      throw StateError(
+        'AllocationMeter.accumulatedInstances() was already called once '
+        'since the last reset() -- a second call in the same epoch reads '
+        'near-zero instead of the true accumulated count (see this file\'s '
+        'doc comment, failure mode 3), so this would silently produce a '
+        'false pass rather than a real measurement. Request every class '
+        'this measurement needs in one call instead.',
+      );
+    }
+    _consumedSinceReset = true;
     final profile = await _service.getAllocationProfile(_isolateId);
     final out = <String, int>{for (final name in classNames) name: 0};
     for (final member

@@ -23,27 +23,62 @@
 // measurement" is checked by the test itself rather than inferred from
 // having warmed "enough".
 //
-// **What is asserted, and what it deliberately is not:** each test watches
-// `Vector2` -- the class [SpatialIndex._considerLeaf], `_considerSnapLeaf`
-// and `_considerSnapCandidate` construct one of *per candidate* for the
-// narrow-phase distance math (see `_scratchA`/`_scratchB` and friends in
-// `spatial_index.dart`), and the class this file's own mutation table
-// confirms a deliberately-reintroduced per-candidate allocation shows up in
-// cleanly. It is **not** watching `Transform2`: `pickInto` and `snapInto`
-// share `_descend`, whose own doc comment documents two costs bounded by
-// nesting *depth* rather than candidate count -- a closure pair per
-// recursion level (pre-existing, from Task 12) and one `Transform2` per
-// instance actually descended into (found and left undone by this task; see
-// the task-17 report for why eliminating it needs a signature change out of
-// this task's scope). Watching `Transform2` here would fail a correct
+// **What is asserted, and what it deliberately is not.** Every test watches
+// [_candidateScalingClasses] at a tight, near-zero budget
+// ([_perCallBudget]): `Vector2` is the class [SpatialIndex._considerLeaf],
+// `_considerSnapLeaf` and `_considerSnapCandidate` construct one of *per
+// candidate* for the narrow-phase distance math (see
+// `_scratchA`/`_scratchB` and friends in `spatial_index.dart`), and `Aabb2`
+// is the other half of the exact bug class this task found and fixed in
+// `SpatialIndex._descend` (see below) -- watching one without the other,
+// after finding a bug that produced both, would be an unexplained gap, not
+// a decision. Neither is expected to appear at all on `forEachInRect`'s or
+// `forEachInstanceInRect`'s call path, since neither of those two descends
+// into an instance; both are measured near zero there (see the task-17
+// report's round-2 section for the numbers).
+//
+// `pickInto` and `snapInto` do **not** use [_candidateScalingClasses] for
+// `Aabb2`, and do not use it at all for `Transform2`. Both share `_descend`,
+// whose own doc comment documents two *pre-existing* costs bounded by
+// nesting **depth** (times branching), not by candidate count: one `Aabb2`
+// per recursion level (the widened local query box `_descend` builds before
+// inverting -- `searchLeaves`/`searchInstances` take an `Aabb2` throughout
+// this package, so removing this last one would mean widening that API,
+// out of this task's scope) and one `Transform2` per instance actually
+// descended into (`toWorld.multiply(...)` -- `Transform2` is immutable, so
+// composing one can only ever hand back a fresh object; a pre-existing
+// closure-pair cost, from Task 12, is the same shape and already documented
+// there). Watching either at [_perCallBudget] would fail a correct
 // three-level-deep pick for a reason unrelated to what this file exists to
 // catch -- a per-*candidate* allocation, the kind that scales with document
-// size rather than with how deep one instance happens to be nested inside
-// another. A clean reading proves the JIT observed no such per-candidate
-// `Vector2` on this run, on this machine; it does not prove the same holds
-// under AOT, nor that no allocation of some entirely different, unwatched
-// class occurred -- see `vm_allocation_meter.dart`'s file comment for the
-// full statement of that caveat.
+// size, not with how deep one instance happens to be nested inside another.
+//
+// That is an argument for *tolerating* the cost, not a license to leave it
+// unbounded: [_depthBoundClasses] gives both a real ceiling, watched by the
+// `pickInto`/`snapInto` tests at [_depthBoundBudgets] instead of
+// [_perCallBudget] -- wide enough to comfortably admit the current, measured
+// cost. **This ceiling is not confirmed, by mutation, to catch a doubling
+// of either class.** Attempting that mutation is what found the trap
+// documented on `AllocationMeter.accumulatedInstances` (a second read per
+// reset epoch silently returns near-zero) -- fixing it stopped the ceiling
+// from reading a false near-zero unconditionally, but a *separate* effect
+// remained: a genuine, ground-truth-counter-confirmed second Transform2
+// construction placed in the same hot loop as the pre-existing one was
+// only partially visible to the profiler (roughly +1 per call measured,
+// against +3 confirmed by an independent execution counter, for a
+// mutation placed to run three times per call). See
+// [_depthBoundBudgets]'s own doc comment and the task-17 report's round-2
+// section for the numbers and what this does and does not mean for the
+// budget below. The budget is real and admits the true, measured cost; it
+// is not proven, the way this file's four candidate-scaling assertions are
+// proven by mutation, to fail on a doubling specifically.
+//
+// A clean reading proves the JIT observed no such per-candidate `Vector2`
+// or `Aabb2` on this run, on this machine, and no more than the documented,
+// bounded depth cost of either on `pickInto`/`snapInto`; it does not prove
+// the same holds under AOT, nor that no allocation of some entirely
+// different, unwatched class occurred -- see `vm_allocation_meter.dart`'s
+// file comment for the full statement of that caveat.
 //
 // **Runtime added:** roughly 1-2 seconds when the VM service is reachable
 // (four allocation tests, each warming ~20,000 calls and timing 1,000 more,
@@ -61,17 +96,79 @@ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import 'vm_allocation_meter.dart';
 
-/// The one class every test in this file watches. See the file doc comment
-/// for why `Vector2` alone, and not `Transform2` or a generic collection
-/// class such as `List`.
-const _watchedClasses = {'Vector2'};
+/// Watched by `forEachInRect` and `forEachInstanceInRect`, at
+/// [_perCallBudget]: the shape of a per-*candidate* allocation. See the
+/// file doc comment for why `Vector2` and `Aabb2`, and not `Transform2` or
+/// a generic collection class such as `List`.
+///
+/// **Not used by `pickInto`/`snapInto`**, which watch
+/// [_recursiveCandidateScalingClasses] (`Vector2` alone) at the same tight
+/// budget instead: both share `SpatialIndex._descend`, which allocates one
+/// `Aabb2` per recursion level regardless of candidate count (see
+/// [_depthBoundClasses]) -- including `Aabb2` here for those two methods
+/// would fail a correct three-level-deep pick on the pre-existing,
+/// depth-bound cost, not on a per-candidate regression.
+const _candidateScalingClasses = {'Vector2', 'Aabb2'};
+
+/// Watched by `pickInto`/`snapInto` at [_perCallBudget] -- see
+/// [_candidateScalingClasses]'s own doc comment for why those two use this
+/// narrower set instead of it.
+const _recursiveCandidateScalingClasses = {'Vector2'};
 
 /// A per-call instance count admitting real JIT/VM-service noise (measured
-/// at roughly 0.02 `Vector2` per call on this machine, an order of magnitude
-/// below this) but not a per-candidate or per-call object: even the smallest
-/// fixture in this file has enough candidates that a genuine violation shows
-/// up at 1 or more per call, not a fraction of one.
+/// at roughly 0.02 `Vector2` and 0.002 `Aabb2` per call on this machine,
+/// well over an order of magnitude below this) but not a per-candidate or
+/// per-call object: even the smallest fixture in this file has enough
+/// candidates that a genuine violation shows up at 1 or more per call, not
+/// a fraction of one.
 const double _perCallBudget = 0.5;
+
+/// Watched only by the `pickInto`/`snapInto` tests, at [_depthBoundBudgets]
+/// rather than [_perCallBudget] -- see the file doc comment for why `Aabb2`
+/// and `Transform2` are real, pre-existing, depth-bound (not
+/// candidate-bound) costs of `SpatialIndex._descend` on those two methods
+/// specifically, not a per-candidate allocation this file's tight budget
+/// targets elsewhere.
+const _depthBoundClasses = {'Aabb2', 'Transform2'};
+
+/// Per-class ceilings for [_depthBoundClasses], on this file's own
+/// three-instance-deep, 64-candidate fixture (`_deepNestedDocument`).
+///
+/// Measured directly, across repeated runs on this machine: roughly
+/// 3.2-4.5 `Aabb2` and 6-8 `Transform2` per call in steady state -- `Aabb2`
+/// is one widened query box per recursion level (four containers on this
+/// fixture's path: root, D1, D2, D3); `Transform2` is one `toWorld.invert()`
+/// per level (four) plus one `toWorld.multiply(...)` per instance actually
+/// descended into (three), for seven, matching the high end of the measured
+/// range. The budgets below sit at roughly 1.6-2.3x that measured cost --
+/// comfortable headroom for ordinary run-to-run noise.
+///
+/// **What this budget is, and is not, confirmed to catch.** A regression
+/// that turns either cost from depth-bound into candidate-bound -- the
+/// realistic failure mode, and the one this budget exists for -- is
+/// *expected* to read in the dozens or hundreds per call against a
+/// 64-candidate fixture, far past either ceiling, by the same reasoning
+/// this file's four candidate-scaling mutations demonstrate directly (see
+/// the task-17 report's mutation table). That expectation is **not**
+/// itself confirmed by a mutation placed at this exact depth-bound site,
+/// for the same reason the doubling attempt below was inconclusive: this
+/// investigation found that a *second* allocation of an already-counted
+/// class, placed in the same hot loop as the first, can be undercounted by
+/// this profiler. A per-candidate mutation here was not separately tried
+/// to rule that out. What is **not** confirmed by mutation is a clean
+/// doubling of either class specifically: attempting that (see the
+/// task-17 report's round-2 section) surfaced a real trap in
+/// `AllocationMeter.accumulatedInstances` (now fixed -- see its own doc
+/// comment) and, after fixing it, a second effect that was not: a second
+/// `Transform2` construction added to the same hot loop as the pre-existing
+/// one, confirmed by an independent execution counter to run three times
+/// per call, showed up in the allocation profile as only roughly one extra
+/// instance per call, not three. The object was genuinely constructed each
+/// time (confirmed by reading it back) but the profiler did not attribute
+/// all of it. This budget is real and the measured baseline is real;
+/// "doubles the per-level cost specifically" is not a mutation this file's
+/// table can honestly claim to have caught.
+const _depthBoundBudgets = {'Aabb2': 7.0, 'Transform2': 10.0};
 
 /// A document of [count] line entities on a grid near the origin, root
 /// level only. Matches the task-17 brief's own `largeDocument` fixture,
@@ -298,7 +395,7 @@ void main() {
     for (var i = 0; i < iters; i++) {
       index.forEachInRect(rect, const QueryFilter.rendering(), visit);
     }
-    final accumulated = await m.accumulatedInstances(_watchedClasses);
+    final accumulated = await m.accumulatedInstances(_candidateScalingClasses);
 
     expect(index.entityScratchCapacity, capacityBefore,
         reason: 'steady state is a checked precondition here: the scratch '
@@ -343,7 +440,7 @@ void main() {
     for (var i = 0; i < iters; i++) {
       index.forEachInstanceInRect(rect, const QueryFilter.rendering(), visit);
     }
-    final accumulated = await m.accumulatedInstances(_watchedClasses);
+    final accumulated = await m.accumulatedInstances(_candidateScalingClasses);
 
     expect(index.instanceScratchCapacity, capacityBefore,
         reason: 'steady state is a checked precondition here: the scratch '
@@ -384,7 +481,12 @@ void main() {
       index.pickInto(
           fixture.point, fixture.radius, const QueryFilter.picking(), hit);
     }
-    final accumulated = await m.accumulatedInstances(_watchedClasses);
+    // One combined call, not two: AllocationMeter.accumulatedInstances can
+    // only be called once per reset() epoch -- see its own doc comment.
+    // Every class this test needs a reading for, candidate-scaling and
+    // depth-bound alike, is requested together here.
+    final counts = await m.accumulatedInstances(
+        {..._recursiveCandidateScalingClasses, ..._depthBoundClasses});
 
     // No entityScratchCapacity/instanceScratchCapacity assertion here,
     // unlike the two tests above: pickInto's own per-recursion-level scratch
@@ -393,12 +495,22 @@ void main() {
     // scratch regrow" is not a checked precondition this test can state for
     // pickInto the way it can for the two rect queries above -- an honest
     // gap, not an oversight; see the task-17 report.
-    for (final entry in accumulated.entries) {
-      expect(entry.value / iters, lessThan(_perCallBudget),
-          reason: '${entry.key}: ${entry.value / iters} per call over '
-              '$iters calls, against a fixture with 64 leaf candidates -- a '
-              'per-candidate allocation here would be two orders of '
-              'magnitude above this budget, not a fraction of an instance');
+    for (final name in _recursiveCandidateScalingClasses) {
+      final value = counts[name]!;
+      expect(value / iters, lessThan(_perCallBudget),
+          reason: '$name: ${value / iters} per call over $iters calls, '
+              'against a fixture with 64 leaf candidates -- a per-candidate '
+              'allocation here would be two orders of magnitude above this '
+              'budget, not a fraction of an instance');
+    }
+    for (final name in _depthBoundClasses) {
+      final value = counts[name]!;
+      expect(value / iters, lessThan(_depthBoundBudgets[name]!),
+          reason: '$name: ${value / iters} per call over $iters calls -- '
+              'bounded, not zero-budgeted, because this is the depth-bound '
+              'cost SpatialIndex._descend documents, not a per-candidate '
+              'one; see this file\'s own doc comment and _depthBoundBudgets '
+              'for the reasoning and the numbers');
     }
   });
 
@@ -427,14 +539,24 @@ void main() {
     for (var i = 0; i < iters; i++) {
       index.snapInto(fixture.point, fixture.radius, SnapMask.all, out);
     }
-    final accumulated = await m.accumulatedInstances(_watchedClasses);
+    // One combined call, not two -- see the pickInto test above.
+    final counts = await m.accumulatedInstances(
+        {..._recursiveCandidateScalingClasses, ..._depthBoundClasses});
 
-    for (final entry in accumulated.entries) {
-      expect(entry.value / iters, lessThan(_perCallBudget),
-          reason: '${entry.key}: ${entry.value / iters} per call over '
-              '$iters calls -- SnapMask.all is the strictest mask, enabling '
-              'the pairwise intersection pass on top of every per-candidate '
-              'channel pickInto also runs');
+    for (final name in _recursiveCandidateScalingClasses) {
+      final value = counts[name]!;
+      expect(value / iters, lessThan(_perCallBudget),
+          reason: '$name: ${value / iters} per call over $iters calls -- '
+              'SnapMask.all is the strictest mask, enabling the pairwise '
+              'intersection pass on top of every per-candidate channel '
+              'pickInto also runs');
+    }
+    for (final name in _depthBoundClasses) {
+      final value = counts[name]!;
+      expect(value / iters, lessThan(_depthBoundBudgets[name]!),
+          reason: '$name: ${value / iters} per call over $iters calls -- '
+              'bounded, not zero-budgeted; same reasoning as the pickInto '
+              'test above');
     }
   });
 
