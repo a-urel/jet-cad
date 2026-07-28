@@ -297,3 +297,145 @@ are at their plan values. The remaining failure is a scan whose length that
 first constant sets, so lowering it *would* move the number — which is
 exactly why it was left alone: that would trade query time for rebuild
 frequency without anyone having decided to.
+
+---
+
+## Final state — after the blocker fixes
+
+Branch at `14afae6`. 599 tests passing, 0 skipped.
+
+Five of six rows pass with margin. The sixth, `snap at dirty threshold`, is
+**genuinely marginal and does not reliably pass**. Three consecutive runs on
+the same tree:
+
+| Run | p50 | p95 | Verdict |
+|---|---|---|---|
+| 1 | 0.895 ms | 1.153 ms | FAIL |
+| 2 | 0.772 ms | 0.938 ms | PASS |
+| 3 | 0.866 ms | 1.073 ms | FAIL |
+
+p50 clears the 1 ms budget every time; p95 straddles it. Machine run-to-run
+spread on this hardware is roughly ±15%, which is the same order as the
+distance to the threshold — so a single green run on this row means nothing,
+and this file records the distribution rather than a lucky sample.
+
+### What that row is actually waiting on
+
+Not snap. The arc-centre redesign removed that cost entirely (`center` went
+from ~0.57 ms to 0.002 ms). What remains is the **dirty overlay: a linear scan
+of 24,984 entries**. Every query pays one pass; `snap` pays two — the fused
+leaf-and-centre search plus a second inside `_considerIntersections`. Per-pass
+cost measured at ~0.21 ms, which matches the gap exactly.
+
+`forEachInRect` carries the identical cost and passes only because its budget
+is 2 ms rather than 1 ms.
+
+An identified partial fix — reusing `_descend`'s depth-0 walk for intersection
+candidates — was measured to land at ~0.9–1.0 ms, still marginal, and is
+conditional on `NarrowPhaseSlack.pick == 0`. It was deliberately not taken:
+shaving a constant until one row complies is not the same as fixing the linear
+scan, and the scan is the real answer.
+
+**This is an open design question, not a tuning knob.** The dirty overlay is
+linear by construction; at the rebuild threshold it is 5% of the document
+scanned on every query at pointer-move rate.
+
+## Post-drag drift — the regression that the fresh-index gate could not see
+
+The fix that carried a definition's growth into the boxes placing it made three
+structures grow monotonically with no path back. The gate cannot observe this:
+`query_throughput.dart` queries a freshly built index, so it structurally never
+sees the state an editing gesture creates.
+
+Measured on one out-and-back drag inside a definition, `rebuildCount` still 1:
+
+| Placements | Drag distance | Instances reported over empty space | `pickInto` there |
+|---|---|---|---|
+| 300 | 500 | 152 → **0** | 31.80 → 1.31 µs |
+| 300 | 1000 | 300 → **0** | 77.42 → 1.76 µs |
+| 3000 | 1000 | 3000 → **0** | 3755.09 → **11.97 µs** |
+
+Before the fix, one ordinary gesture cost 3.75 ms per pick over a region
+containing no geometry — 23% of a 16 ms frame — permanently, with no rebuild
+ever triggering.
+
+Edit side after the fix: an interior drag is unchanged (3.69 µs at 300
+placements, 2.90 µs at 3000); a bound-moving drag now pays both directions,
+67 µs at 300 and 535 µs at 3000, against 32/261 µs for growth alone.
+
+**Lesson for the gate itself:** every row here measures a fresh index. A
+benchmark that only ever measures the state a document is in least often will
+miss a regression of this size. The dirty-threshold rows exist for exactly this
+reason and still were not enough — they fill the dirty list, but they do not
+*drag* anything.
+
+---
+
+## Ruling: the marginal row is accepted, deliberately
+
+**Decision (human, 2026-07-29): accept `snap at dirty threshold` as it stands.
+The dirty overlay's scaling becomes an open item for Plan 3, to be settled with
+a measurement rather than now.**
+
+### What is being accepted
+
+Five of six gated rows pass with margin. The sixth clears its 1 ms budget on
+p50 in every run (0.77–0.90 ms) and straddles it on p95 (0.938–1.153 ms across
+three consecutive runs on an idle machine with ~±15% spread).
+
+### Why this is defensible and not a rounding-down
+
+The failure is at the **stress target, not the product's workload.** At 50,000
+entities the same row measures **0.238 ms** — under a quarter of the budget.
+A restaurant floor plan, which is what this engine exists to serve, is
+thousands of entities, not hundreds of thousands. The 500k figure was set as a
+ceiling for opening DWG-scale files, and it is the only place the row fails.
+
+### What is actually wrong, so a later reader does not have to re-derive it
+
+The overlay itself is well designed: `DirtyList.put` is slot-keyed
+replace-in-place, so a 200-sample drag leaves **one** entry rather than 200 —
+without that, a drag would trip the rebuild threshold during exactly the burst
+the structure exists to absorb. `search` is a flat loop over a `Float64List`,
+allocation-free and cache-friendly.
+
+The flaw is the **threshold**, not the scan:
+
+```dart
+int get rebuildThreshold => math.max(64, (leafCount * 0.05).floor());
+```
+
+It is a *fraction of document size*, so the overlay's per-query cost grows
+linearly with the document — 2,500 entries at 50k, 25,000 at 500k, 250,000 at
+5M. That partly defeats the point of a logarithmic index: the R-tree gives
+`O(log n + k)` and the overlay takes back `O(n/20)`. Past some size the overlay
+costs more than the tree it fronts.
+
+`snapInto` pays the scan **twice** — once in `searchLeavesAndSnapCentres` and
+again in `_considerIntersections`' `searchLeavesRaw`. At ~0.21 ms per pass that
+is ~0.42 ms, which matches the entire gap between snap fresh (0.48 ms) and snap
+at threshold (0.82–0.90 ms). `forEachInRect` carries one pass of the same cost
+and passes only because its budget is 2 ms rather than 1 ms.
+
+### Options for Plan 3, with the reason none was taken now
+
+- **A. Bound the threshold absolutely** — `min(max(64, n * 0.05), ~2000)`. Caps
+  the scan; costs more rebuilds on large documents. Needs a measurement of what
+  a 500k STR-pack rebuild costs and how often an editing session would trigger
+  one. Trades a query cliff for a possible rebuild stall.
+- **B. Index the overlay** — a small secondary structure, `O(d)` to
+  `O(log d + k)`. The overlay is small and changes constantly, so it would be
+  rebuilt continuously; the net gain is unclear.
+- **C. Incremental rebuild** — repack a slice of the tree per frame so the
+  overlay never grows large. Best behaviour, most work.
+- **D. True incremental insertion** — a classic node-splitting R-tree instead
+  of STR-packing, removing the overlay entirely. Largest change, and it gives
+  up STR's query quality.
+
+**Why not now:** choosing between A and C requires knowing whether a rebuild
+stall is worse than the scan, and that cannot be answered without a real render
+loop under a real editing session. Task 1's render spike produces exactly that
+measurement. Picking A today would lock in a trade-off before seeing the
+failure mode it introduces.
+
+**Carried to Plan 3:** measure the overlay under the render spike, then choose.
