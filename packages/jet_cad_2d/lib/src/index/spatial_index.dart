@@ -79,6 +79,23 @@ const int kIntersectionCandidateCap = 64;
 final int _kLeafProducedSnapKinds = SnapMask.all.bits &
     ~((1 << SnapKind.center.index) | (1 << SnapKind.intersection.index));
 
+/// One placement of a definition: the container that places it, the instance
+/// node that does the placing, and that node's composed transform into the
+/// container's own space.
+///
+/// A class rather than a record because [SpatialIndex._placedBy] holds these
+/// in long-lived lists rebuilt only when a [ContainerIndex] is replaced —
+/// there is nothing per-query or per-edit about them — and a named type is
+/// what lets [SpatialIndex._growPlacements] read as prose. The [transform] is
+/// the one [ContainerIndex] already owns, shared rather than copied.
+class _Placement {
+  const _Placement(this.container, this.node, this.transform);
+
+  final ContainerIndex container;
+  final Handle node;
+  final Transform2 transform;
+}
+
 /// Every [ContainerIndex] in a document, kept current against its changes.
 ///
 /// One index per indexed container: the tree root, plus every definition —
@@ -93,6 +110,15 @@ final int _kLeafProducedSnapKinds = SnapMask.all.bits &
 /// leaves a stale entry that [rebuildContainer] would reject and only
 /// [rebuildAll] clears. A future plan that turns definition mutation into
 /// commands removes this caveat along with the gap it names.
+///
+/// **Editing a definition's *contents*, on the other hand, is fully
+/// incremental.** An instance is indexed in its placing container by the
+/// definition's bound, so an entity added to a definition has to widen every
+/// box that places it or no query ever steps in far enough to find it — see
+/// [_placedBy] and [_growPlacements] for how that is done without a rebuild
+/// and without walking every container. Growth propagates; *shrinkage* does
+/// not, so a bound stays an upper bound until the next rebuild, exactly as
+/// [ContainerIndex.bounds] and [ContainerIndex.ownNarrowPhaseSlack] do.
 class SpatialIndex {
   SpatialIndex(this.document) {
     rebuildAll();
@@ -111,6 +137,25 @@ class SpatialIndex {
 
   final DraftDocument document;
   final Map<Handle, ContainerIndex> _byContainer = <Handle, ContainerIndex>{};
+
+  /// Every place a definition is placed, keyed by definition handle — the
+  /// reverse of the `instance -> definition` edge the tree already carries.
+  ///
+  /// Rebuilt wholesale by [_rebuildPlacements] whenever any [ContainerIndex]
+  /// is replaced, so an entry can never name a container object that is no
+  /// longer in [_byContainer].
+  ///
+  /// **Why it exists.** An instance is indexed by its definition's bound, and
+  /// that bound is derived once, in the placing container's build. Adding an
+  /// entity to a definition dirties one leaf inside the *definition's* index
+  /// and touches nothing above it, so every box that places that definition
+  /// silently keeps describing it as it was. Reconciliation already knows
+  /// which definition it is editing; what it did not have, and this supplies,
+  /// is a way to get from there to the containers that place it without
+  /// walking every container in the document on every edit. See
+  /// [_growPlacements].
+  final Map<Handle, List<_Placement>> _placedBy = <Handle, List<_Placement>>{};
+
   bool _disposed = false;
 
   /// Set for the duration of a query walk; see [_beginQuery] and [_endQuery].
@@ -1896,6 +1941,88 @@ class SpatialIndex {
     // observable effect yet; it is the conservative default for when one
     // does.
     _filters.invalidate();
+    _rebuildPlacements();
+  }
+
+  /// Re-derives [_placedBy] from the containers currently indexed.
+  ///
+  /// Wholesale, not patched, and called from both [rebuildAll] and
+  /// [rebuildContainer]: the entries hold [ContainerIndex] *objects*, and a
+  /// rebuild replaces one outright, so a patched map would keep handing out
+  /// the discarded instance. It costs one pass over the instance nodes of
+  /// every container — instances, not entities, so it is a small fraction of
+  /// the build it follows in [rebuildAll], and in [rebuildContainer] it is
+  /// bounded by how many placements the whole document has rather than by
+  /// how big the rebuilt container is.
+  void _rebuildPlacements() {
+    _placedBy.clear();
+    for (final index in _byContainer.values) {
+      for (var i = 0; i < index.instanceCount; i++) {
+        final node = index.instanceHandleAt(i);
+        final tree = document.tree[node];
+        if (tree is! InstanceNode) continue;
+        (_placedBy[tree.definition] ??= <_Placement>[])
+            .add(_Placement(index, node, index.instanceTransformAt(i)));
+      }
+    }
+  }
+
+  /// Re-derives the indexed box of every instance of [definition] from
+  /// [definitionBounds] — the definition's own, freshly grown bound — and
+  /// repeats upwards for any container whose own bound that widening grew.
+  ///
+  /// This is what makes "add an entity to a block definition" visible. The
+  /// entity itself lands on the definition's own dirty overlay, correctly —
+  /// but a query only ever reaches that overlay by first stepping through an
+  /// instance box in the container above, and that box was derived from the
+  /// definition's bound at the placing container's build time. One entry on
+  /// a dirty list is far below the rebuild floor of 64, so nothing rebuilt,
+  /// and `forEachInstanceInRect`, `pickInto` and `snapInto` all reported
+  /// nothing over geometry `DraftDocument.extents` could see perfectly well.
+  ///
+  /// **The whole bound, not the one leaf that escaped it.** An instance box
+  /// means "this definition's bound, transformed" — that is what
+  /// `ContainerIndex.build` stores, what [forEachInstanceInRect] reports
+  /// against, and what the centre-descent margin measures a stray snap centre
+  /// against. Growing it by the escaping leaf's own box instead would leave
+  /// it merely *large enough*, and no longer that box, since the axis-aligned
+  /// bound of a rotated union is not the union of the rotated bounds.
+  ///
+  /// **What it costs.** One iteration per placement of [definition], and only
+  /// on an edit that actually escapes the definition's current bound —
+  /// [ContainerIndex.noteLeaf] reports that in O(1), and the overwhelmingly
+  /// common edit, which stays inside, never gets here at all. Each iteration
+  /// is one box transform and an O(tree depth) walk up the instance tree (see
+  /// [PackedRTree.growBox]), and stops early when the stored box already
+  /// covers the new one. A definition placed 300 times therefore costs 300
+  /// cheap iterations on the frames of a drag that is pushing the definition
+  /// outwards, and nothing on any other frame.
+  ///
+  /// **[budget], not a step cap.** A definition can appear at most once on
+  /// any acyclic chain of containers, so the number of indexed containers
+  /// bounds the legitimate depth exactly; this can only fire on a cyclic
+  /// definition graph, which is refused on write and which this merely has to
+  /// terminate on rather than answer well. It is a counter instead of a
+  /// `Set<Handle>` because the alternative would allocate on an edit path
+  /// that a drag walks every frame.
+  void _growPlacements(Handle definition, Aabb2 definitionBounds, int budget) {
+    if (budget <= 0 || definitionBounds.isEmpty) return;
+    final places = _placedBy[definition];
+    if (places == null) return;
+    for (final place in places) {
+      // The same `transformedBy` that derived the box in the first place, in
+      // `ContainerIndex.build`'s INSERT case — a second way of mapping a box
+      // through a transform would be a second chance to disagree with it.
+      final lifted = definitionBounds.transformedBy(place.transform);
+      if (place.container.growInstanceBox(place.node, lifted)) {
+        // Growing an instance box grows its container's own bound too, so a
+        // definition nested inside another definition carries on upwards.
+        // Gated on the growth actually happening, which is what makes the
+        // ordinary case one level deep rather than a walk to the root.
+        _growPlacements(
+            place.container.container, place.container.bounds, budget - 1);
+      }
+    }
   }
 
   /// Rebuilds one container, leaving the rest alone.
@@ -1921,6 +2048,11 @@ class SpatialIndex {
     final byOwner = ContainerIndex.leavesByOwner(document);
     _byContainer[container] =
         ContainerIndex.build(document, container, byOwner);
+    // The rebuilt container is a different object, and [_placedBy] holds
+    // objects: without this, every placement recorded for a definition this
+    // container places would still point at the discarded one, and growing
+    // an instance box would grow a tree nothing queries.
+    _rebuildPlacements();
   }
 
   /// **Re-derive and compare**, not a typed change kind.
@@ -2109,7 +2241,19 @@ class SpatialIndex {
     // at all and be measured in the wrong space. `noteLeaf` clears the entry
     // when the composed transform is the identity, so this is a set, not
     // just a fill.
-    index.noteLeaf(slot, composed, record.kind, payload, expected);
+    //
+    // The return value says whether this leaf pushed the container's own
+    // bound outwards. When it did, and the container is a definition, every
+    // instance box that places it was derived from the smaller bound and no
+    // longer covers the definition's contents — see [_growPlacements] for
+    // what that used to hide. Checked before the unchanged/revive shortcuts
+    // below for the same reason `noteLeaf` itself is: a leaf whose box is
+    // unchanged still has to be accounted for the first time this index sees
+    // it through the overlay.
+    if (index.noteLeaf(slot, composed, record.kind, payload, expected) &&
+        index.container != document.rootHandle) {
+      _growPlacements(index.container, index.bounds, _byContainer.length);
+    }
 
     // The snap centre this entity now offers, in the same container space as
     // `expected`, or `DirtyList.noCentre` for a kind that offers none. It is

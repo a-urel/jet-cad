@@ -255,6 +255,62 @@ class PackedRTree {
         _boxes[item * 4 + 2], _boxes[item * 4 + 3]);
   }
 
+  /// Enlarges [payload]'s stored box to also contain the given rectangle,
+  /// carrying the growth up to every ancestor node. Returns whether anything
+  /// actually changed.
+  ///
+  /// **The one mutation a packed tree can accept.** Insertion is not
+  /// supported and never will be (see this class's own doc comment), but
+  /// growing an existing box needs no rebalancing and cannot break the
+  /// search: every node's box is an upper bound on its subtree's, so
+  /// enlarging one only ever makes [search] open more nodes. The result stays
+  /// a correct broad phase — it can report more false positives, never fewer
+  /// true ones. Shrinking would be the unsafe direction and is deliberately
+  /// not offered.
+  ///
+  /// O(depth), not O(items): the packed layout puts the parent of the k-th
+  /// node of a level at index `k ~/ kNodeCapacity` of the next one, so the
+  /// walk up is arithmetic, and it stops the moment a node already contains
+  /// the rectangle — at which point every node above it does too.
+  ///
+  /// Callers: `ContainerIndex.growInstanceBox`, for the instance box of a
+  /// definition whose contents have grown since the box was derived.
+  bool growBox(
+      int payload, double minX, double minY, double maxX, double maxY) {
+    final item = _payloadToItem[payload];
+    if (item == null) return false;
+
+    var grew = false;
+    var level = 0;
+    var node = item;
+    while (true) {
+      var changed = false;
+      if (minX < _boxes[node * 4]) {
+        _boxes[node * 4] = minX;
+        changed = true;
+      }
+      if (minY < _boxes[node * 4 + 1]) {
+        _boxes[node * 4 + 1] = minY;
+        changed = true;
+      }
+      if (maxX > _boxes[node * 4 + 2]) {
+        _boxes[node * 4 + 2] = maxX;
+        changed = true;
+      }
+      if (maxY > _boxes[node * 4 + 3]) {
+        _boxes[node * 4 + 3] = maxY;
+        changed = true;
+      }
+      if (!changed) break;
+      grew = true;
+      if (level >= _levelEnd.length - 1) break; // the root has no parent
+      final selfBase = level == 0 ? 0 : _levelEnd[level - 1];
+      node = _levelEnd[level] + (node - selfBase) ~/ kNodeCapacity;
+      level++;
+    }
+    return grew;
+  }
+
   void markAlive(int payload) {
     final item = _payloadToItem[payload];
     if (item == null) return;

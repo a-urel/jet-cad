@@ -190,4 +190,63 @@ void main() {
     expect(hits(tree, 2, 2, 4, 4), [9]);
     expect(hits(tree, 3, 3, 3, 3), [9]);
   });
+
+  // --- growBox ---------------------------------------------------------
+  //
+  // The one mutation a packed tree accepts. It exists so an instance box can
+  // follow its definition outwards without a rebuild; what has to hold is
+  // that the *ancestors* follow too, since `search` never opens a node whose
+  // own box misses the query.
+
+  test('growBox makes an enlarged item findable through its ancestors', () {
+    // 1000 items forces a tree several levels deep, so an implementation
+    // that widened only the leaf's own box would be caught here and not by a
+    // one-level fixture.
+    final tree = gridTree(1000);
+    expect(hits(tree, 500, 500, 501, 501), isEmpty);
+
+    expect(tree.growBox(7, 500, 500, 501, 501), isTrue);
+
+    expect(hits(tree, 500, 500, 501, 501), [7],
+        reason: 'every node on the path to the root has to have grown, or '
+            'the search never reaches the item at all');
+    expect(hits(tree, 0, 0, 1e9, 1e9), hasLength(1000),
+        reason: 'growing one box must not lose any other');
+  });
+
+  test('growBox keeps the original extent as well as the new one', () {
+    final tree = gridTree(64);
+    expect(hits(tree, 3, 3, 3.2, 3.2), isNotEmpty);
+    final payload = hits(tree, 3, 3, 3.2, 3.2).first;
+
+    tree.growBox(payload, -100, -100, -99, -99);
+
+    expect(hits(tree, -100, -100, -99, -99), contains(payload));
+    expect(hits(tree, 3, 3, 3.2, 3.2), contains(payload),
+        reason: 'growing is a union, not a replacement');
+  });
+
+  test('growBox reports false when the stored box already covers it', () {
+    final tree = gridTree(64);
+    // Item 5 of an 8-wide grid sits at [5, 0] .. [5.5, 0.5].
+    expect(tree.growBox(5, 5.1, 0.1, 5.2, 0.2), isFalse,
+        reason: 'the caller uses this to decide whether to keep propagating '
+            'upwards, so "no change" has to be distinguishable');
+  });
+
+  test('growBox is a no-op for a payload the tree does not hold', () {
+    final tree = gridTree(16);
+    expect(tree.growBox(999, -50, -50, 50, 50), isFalse);
+    expect(hits(tree, -50, -50, -40, -40), isEmpty);
+  });
+
+  test('growBox on a single-item tree still works', () {
+    // The degenerate shape: one item is also the root, so the walk up has to
+    // terminate on the very first node rather than index past the level
+    // table.
+    final tree = gridTree(1);
+    expect(tree.growBox(0, 20, 20, 21, 21), isTrue);
+    expect(hits(tree, 20, 20, 21, 21), [0]);
+    expect(tree.bounds.maxX, 21.0);
+  });
 }

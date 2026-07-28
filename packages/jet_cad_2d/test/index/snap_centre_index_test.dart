@@ -420,17 +420,29 @@ void main() {
           reason: 'the fixture must start with nothing to compensate for, so '
               'the assertion below can only pass if the *edit* updated it');
 
-      // Move the arc far outside the definition's bound. The instance box in
-      // the root is not rebuilt by this, so reaching the new centre depends
-      // entirely on `noteLeaf` having grown the definition's centre reach.
+      // Replace it with an arc whose *drawn sliver* still sits well inside
+      // the definition's bound while its centre is 4500 units outside it: a
+      // 0.02-radian sweep of a radius-5000 circle centred at (-5000, 0)
+      // draws from (0, 0) to about (-1, 100).
+      //
+      // The escaping centre, and not an escaping box, is the whole point.
+      // A leaf whose *box* leaves the bound grows the bound, and with it
+      // every instance box that places this definition (see
+      // `SpatialIndex._growPlacements`), so the parent would reach the new
+      // centre for a reason that has nothing to do with the centre reach.
+      // Here the bound does not move at all, and reaching the centre depends
+      // entirely on `noteLeaf` having folded it into that reach.
       doc.commands.execute(RemoveEntityCommand(arc));
-      final moved = _addArc(doc, def, 5000, 0, 10.0, 0.1, 0.2);
+      final moved = _addArc(doc, def, -5000, 0, 5000.0, 0, 0.02);
+      expect(index.indexFor(def)!.bounds.minX, -500.0,
+          reason: "the replacement's box must stay inside the bound, or this "
+              'tests instance-box growth instead of the centre reach');
       expect(index.indexFor(def)!.ownSnapCentreReach, greaterThan(4000.0),
           reason: 'noteLeaf must fold the reconciled leaf centre into the '
               "container's own reach");
 
       final out = SnapResult();
-      index.snapInto(Vector2(15000, 10000), 5.0, centreOnly, out);
+      index.snapInto(Vector2(5000, 10000), 5.0, centreOnly, out);
       expect(out.found, isTrue);
       expect(out.entity, moved);
     });

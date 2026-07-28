@@ -410,6 +410,52 @@ CorpusDocument _largeCoordinates() => CorpusDocument('largeCoordinates', () {
       return doc;
     });
 
+/// A definition whose contents grow *after* the index over it was built.
+///
+/// The row this corpus was missing, and the one that made "add an entity to a
+/// block definition" invisible through every instance: the entity lands on
+/// the definition's own dirty overlay -- one entry, far below the rebuild
+/// floor of 64 -- while every instance box that places that definition still
+/// describes it as it was, so no query ever steps in far enough to see it.
+/// `sharedDefinition` above cannot catch it, because its definition is
+/// complete before the index exists.
+///
+/// Both new entities sit well outside the definition's original bound of
+/// [0, 1]^2, and the arc is there so the snap trials exercise a centre that
+/// only became reachable because the instance boxes grew.
+CorpusDocument _definitionGrownAfterBuild() => CorpusDocument(
+      'definitionGrownAfterBuild',
+      () {
+        final doc = DraftDocument.empty();
+        final def = _addDefinition(doc, name: 'Grown');
+        _addEntity(doc,
+            owner: def, kind: EntityKind.line, coords: [0, 0, 1, 1]);
+        for (final offset in const [0.0, 50.0, 100.0]) {
+          _addInstance(doc,
+              parent: doc.rootHandle,
+              definition: def,
+              transform: Transform2.translation(offset, offset));
+        }
+        return doc;
+      },
+      primeIndex: (doc, index) {
+        final def =
+            doc.tree.definitions.firstWhere((d) => d.name == 'Grown').handle;
+        final before = index.rebuildCount;
+        _addEntity(doc,
+            owner: def, kind: EntityKind.line, coords: [20, 20, 21, 21]);
+        _addEntity(doc,
+            owner: def,
+            kind: EntityKind.arc,
+            coords: [-15, -15],
+            scalars: [4.0, 0.1, 0.3]);
+        expect(index.rebuildCount, before,
+            reason: 'this row is about reconciliation reaching the instance '
+                'boxes; a rebuild would re-derive them for its own reasons '
+                'and the row would prove nothing');
+      },
+    );
+
 CorpusDocument _sharedDefinition() => CorpusDocument('sharedDefinition', () {
       final doc = DraftDocument.empty();
       final def = _addDefinition(doc, name: 'Shared');
@@ -705,6 +751,7 @@ List<CorpusDocument> buildCorpus() => [
       _rotated(),
       _largeCoordinates(),
       _sharedDefinition(),
+      _definitionGrownAfterBuild(),
       _dirtyUnderThreshold(),
       _dirtyOverThreshold(),
       _afterPurge(),

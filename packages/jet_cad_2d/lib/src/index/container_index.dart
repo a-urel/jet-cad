@@ -52,7 +52,7 @@ class ContainerIndex {
     this._leafTransforms,
     this._ownSlack,
     this._ownSnapCentreReach,
-    this.bounds,
+    this._bounds,
   ) : dirty = DirtyList();
 
   /// Builds the index for [container].
@@ -354,7 +354,27 @@ class ContainerIndex {
   double _ownSnapCentreReach;
 
   /// The union of everything this container holds, in its own space.
-  final Aabb2 bounds;
+  ///
+  /// **Maintained across reconciliation, not merely set at build time**, and
+  /// it only ever *grows* between rebuilds — the same conservative direction,
+  /// and for the same reason, as [_ownSlack] and [_ownSnapCentreReach]. A
+  /// leaf that moves outward through [noteLeaf], and an instance whose
+  /// definition grew through [growInstanceBox], both widen it; a leaf that
+  /// moves back inward, or is removed, does not narrow it again, because
+  /// that would mean rescanning every leaf on every edit to find the new
+  /// maximum. So this is an upper bound on the container's contents, exact
+  /// immediately after a rebuild and never smaller than the truth in
+  /// between.
+  ///
+  /// It used to be `final`, which made it a *lower* bound instead: an entity
+  /// added at (500, 500) to a document that correctly found it left this
+  /// still reading the box the last build saw, with no caveat here saying
+  /// so. That is the unsafe direction — [SpatialIndex] reads it to decide
+  /// whether a leaf has escaped its definition and the placing containers'
+  /// instance boxes need widening, and a bound that is too small says "still
+  /// inside" about geometry that is not.
+  Aabb2 get bounds => _bounds;
+  Aabb2 _bounds;
 
   final DirtyList dirty;
 
@@ -486,13 +506,20 @@ class ContainerIndex {
   double get ownSnapCentreReach => _ownSnapCentreReach;
 
   /// Records the container-space transform and narrow-phase slack of a leaf
-  /// that has just been re-derived by reconciliation.
+  /// that has just been re-derived by reconciliation, folds its box into
+  /// [bounds], and reports **whether [bounds] had to grow to hold it**.
   ///
   /// Called for every live leaf reconciliation, not only the ones that dirty
   /// something: [transformOfLeaf] must answer for a leaf whose owning group
   /// changed even when its box happens to be unchanged, and the slack only
   /// grows, so folding an unchanged leaf in again is a no-op.
-  void noteLeaf(
+  ///
+  /// The return value is what makes propagating growth affordable. A leaf
+  /// that stays inside this container's existing bound cannot have invalidated
+  /// any instance box above it, so `false` — the overwhelmingly common answer,
+  /// since most edits happen well inside a drawing — lets [SpatialIndex] skip
+  /// the walk over everything that places this container entirely.
+  bool noteLeaf(
     int slot,
     Transform2 composed,
     EntityKind kind,
@@ -506,6 +533,17 @@ class ContainerIndex {
     }
     _ownSlack = _ownSlack.union(
         NarrowPhaseSlack.ofLeaf(kind, payload, composed, boxInContainerSpace));
+
+    // Before the centre reach below, not after: that reach is measured
+    // against [bounds], and what a parent indexes this container by is a box
+    // that covers the *new* bound (see [growInstanceBox]). Measuring against
+    // the pre-edit bound would charge for a distance the parent's box has
+    // already swallowed.
+    final grownBounds = boxInContainerSpace.isEmpty
+        ? _bounds
+        : _bounds.union(boxInContainerSpace);
+    final grew = !_sameBox(grownBounds, _bounds);
+    _bounds = grownBounds;
     // The centre half of the same "only ever grows between rebuilds" rule.
     // The dirty overlay can introduce a centre further outside [bounds] than
     // anything the last build saw — an arc dragged away from the rest of a
@@ -518,7 +556,43 @@ class ContainerIndex {
       final reach = _distanceToBox(bounds, centre.$1, centre.$2);
       if (reach > _ownSnapCentreReach) _ownSnapCentreReach = reach;
     }
+    return grew;
   }
+
+  /// Enlarges the indexed box of the instance node [node] so that it also
+  /// contains [box], expressed in this container's own space, and folds the
+  /// same growth into [bounds]. Returns whether anything actually changed.
+  ///
+  /// **Why an instance box ever needs this.** A parent indexes an instance by
+  /// its definition's bound, derived once, at the parent's build time. Adding
+  /// an entity to that definition afterwards dirties a leaf inside the
+  /// *definition's* index and nothing else — one entry, far below the rebuild
+  /// floor of 64 — so without this the box the parent holds still describes
+  /// the definition as it was, and every query that has to step through it to
+  /// reach the new entity stops at the door.
+  ///
+  /// Growing rather than re-deriving is deliberate, and matches how every
+  /// other cross-rebuild value in this class behaves: re-deriving would mean
+  /// recomputing the whole definition's bound on every edit inside it, while
+  /// growing is O(tree depth) and errs towards a box that is too large, which
+  /// costs broad-phase candidates instead of dropping hits.
+  bool growInstanceBox(Handle node, Aabb2 box) {
+    if (box.isEmpty) return false;
+    final grew =
+        _instances.growBox(node.value, box.minX, box.minY, box.maxX, box.maxY);
+    if (grew) _bounds = _bounds.union(box);
+    return grew;
+  }
+
+  /// Deliberately exact `==`, not a tolerance: this asks "did the stored
+  /// bound change at all", a stored-value question, exactly like
+  /// `SpatialIndex._sameBox`. A tolerance here would let a real escape past
+  /// the containment test that gates propagating growth upwards.
+  static bool _sameBox(Aabb2 a, Aabb2 b) =>
+      a.minX == b.minX &&
+      a.minY == b.minY &&
+      a.maxX == b.maxX &&
+      a.maxY == b.maxY;
 
   /// Forgets [slot]'s composed transform, for an entity that has been
   /// removed from this container.
@@ -526,7 +600,8 @@ class ContainerIndex {
   /// The slack is deliberately *not* lowered: it is a maximum over leaves,
   /// recomputing it would mean rescanning every leaf on every removal, and
   /// leaving it high only costs broad-phase candidates until the next
-  /// rebuild.
+  /// rebuild. [bounds] is not lowered either, for the same reason and with
+  /// the same consequence.
   void forgetLeaf(int slot) => _leafTransforms.remove(slot);
 
   /// The indexed box of [slot], or null if this container does not hold it —

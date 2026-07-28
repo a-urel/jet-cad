@@ -585,4 +585,245 @@ void main() {
     expect(hit.entity, circle);
     expect(hit.kind, HitKind.edge);
   });
+
+  // --- growing a definition after the index exists ----------------------
+  //
+  // An instance is indexed by its definition's bound, derived once, when the
+  // *placing* container was built. Adding an entity to that definition
+  // dirties one leaf inside the definition's own index -- far below the
+  // rebuild floor of 64 -- and touches nothing above it. Until
+  // `SpatialIndex._growPlacements` existed, every instance box therefore went
+  // on describing the definition as it was, and the new entity was invisible
+  // to `forEachInstanceInRect`, `pickInto` and `snapInto` alike while
+  // `DraftDocument.extents` reported it perfectly well.
+
+  test('an entity added to a definition is visible through its instance', () {
+    final doc = DraftDocument.empty();
+    const def = Handle(900);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'Grows',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    addLine(doc, def, 0, 0, 1, 0);
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: const Handle(901),
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      definition: def,
+      layer: ReservedHandles.layerZero,
+    )));
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final rebuildsBefore = index.rebuildCount;
+
+    final added = addLine(doc, def, 100, 100, 101, 100);
+
+    expect(index.rebuildCount, rebuildsBefore,
+        reason: 'one add must not rebuild; the whole failure lived in the '
+            'gap between one dirty entry and the rebuild threshold');
+    expect(doc.extents.maxX, closeTo(101.0, 1e-9),
+        reason: 'the document can see it, which is what made the index '
+            'losing it so quiet');
+
+    final over = Aabb2(Vector2(99, 99), Vector2(102, 101));
+    final instances = <Handle>[];
+    index.forEachInstanceInRect(over, const QueryFilter.all(), instances.add);
+    expect(instances, [const Handle(901)],
+        reason: 'the renderer culls with this: an instance box that does not '
+            'cover its definition draws nothing over the new geometry');
+
+    final hit = HitPath();
+    expect(
+        index.pickInto(Vector2(100.5, 100), 0.5, const QueryFilter.all(), hit),
+        isTrue);
+    expect(hit.entity, added);
+
+    final snap = SnapResult();
+    index.snapInto(Vector2(100, 100), 0.5, SnapMask.cheap, snap);
+    expect(snap.found, isTrue);
+    expect(snap.entity, added);
+  });
+
+  test('growing a definition reaches every one of its placements', () {
+    final doc = DraftDocument.empty();
+    const def = Handle(910);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'GrowsEverywhere',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    addLine(doc, def, 0, 0, 1, 0);
+    for (var i = 0; i < 4; i++) {
+      doc.commands.execute(AddNodeCommand(InstanceNode(
+        handle: Handle(920 + i),
+        parent: doc.rootHandle,
+        transform: Transform2.translation(i * 1000.0, 0),
+        definition: def,
+        layer: ReservedHandles.layerZero,
+      )));
+    }
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final rebuildsBefore = index.rebuildCount;
+
+    addLine(doc, def, 100, 100, 101, 100);
+    expect(index.rebuildCount, rebuildsBefore);
+
+    for (var i = 0; i < 4; i++) {
+      final hit = HitPath();
+      expect(
+        index.pickInto(Vector2(i * 1000.0 + 100.5, 100), 0.5,
+            const QueryFilter.all(), hit),
+        isTrue,
+        reason: 'placement $i must see the growth too -- fixing only the '
+            'first placement would pass a single-instance test',
+      );
+      expect(hit.chainLength, 1);
+      expect(hit.chain[0], Handle(920 + i));
+    }
+  });
+
+  test('growth carries through a definition nested inside a definition', () {
+    // Inner is placed by Outer, Outer is placed by the root. Growing Inner
+    // grows Outer's instance box for it, which grows Outer's own bound,
+    // which has to grow the root's instance box for Outer in turn.
+    final doc = DraftDocument.empty();
+    const inner = Handle(930);
+    const outer = Handle(931);
+    for (final (handle, name) in const [(inner, 'Inner'), (outer, 'Outer')]) {
+      doc.tree.addDefinition(Definition(
+        handle: handle,
+        name: name,
+        basePoint: Vector2.zero(),
+        children: const [],
+      ));
+    }
+    addLine(doc, inner, 0, 0, 1, 0);
+    addLine(doc, outer, 0, 0, 1, 0);
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: const Handle(932),
+      parent: outer,
+      transform: Transform2.translation(10, 0),
+      definition: inner,
+      layer: ReservedHandles.layerZero,
+    )));
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: const Handle(933),
+      parent: doc.rootHandle,
+      transform: Transform2.translation(0, 500),
+      definition: outer,
+      layer: ReservedHandles.layerZero,
+    )));
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final rebuildsBefore = index.rebuildCount;
+
+    final added = addLine(doc, inner, 200, 200, 201, 200);
+    expect(index.rebuildCount, rebuildsBefore);
+
+    final hit = HitPath();
+    expect(
+      index.pickInto(Vector2(210.5, 700), 0.5, const QueryFilter.all(), hit),
+      isTrue,
+      reason: 'stopping after one level up leaves the root still holding the '
+          "pre-growth box for Outer's instance",
+    );
+    expect(hit.entity, added);
+    expect(hit.chainLength, 2);
+    expect(hit.chain[0], const Handle(933));
+    expect(hit.chain[1], const Handle(932));
+  });
+
+  test('an instance of an untouched definition is not widened', () {
+    // The other direction: growth is targeted, not a blanket widening of
+    // every instance box in the document.
+    final doc = DraftDocument.empty();
+    const grown = Handle(940);
+    const still = Handle(941);
+    for (final (handle, name) in const [(grown, 'Grown'), (still, 'Still')]) {
+      doc.tree.addDefinition(Definition(
+        handle: handle,
+        name: name,
+        basePoint: Vector2.zero(),
+        children: const [],
+      ));
+    }
+    addLine(doc, grown, 0, 0, 1, 0);
+    addLine(doc, still, 0, 0, 1, 0);
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: const Handle(942),
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      definition: grown,
+      layer: ReservedHandles.layerZero,
+    )));
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: const Handle(943),
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      definition: still,
+      layer: ReservedHandles.layerZero,
+    )));
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    addLine(doc, grown, 100, 100, 101, 100);
+
+    final instances = <Handle>[];
+    index.forEachInstanceInRect(Aabb2(Vector2(99, 99), Vector2(102, 101)),
+        const QueryFilter.all(), instances.add);
+    expect(instances, [const Handle(942)],
+        reason: 'only the definition that actually grew reaches out here');
+  });
+
+  test('ContainerIndex.bounds tracks an entity added on the dirty path', () {
+    // `bounds` is public and documented as the union of everything the
+    // container holds. It used to be `final`, set once in `build`, so it
+    // stayed at the pre-edit box while every query found the new entity
+    // perfectly well -- a lower bound wearing the label of an exact one.
+    // `benchmark/query_throughput.dart` derives its query rects from it.
+    final doc = DraftDocument.empty();
+    addLine(doc, doc.rootHandle, 0, 0, 1, 1);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    expect(index.rootIndex.bounds.maxX, closeTo(1.0, 1e-9));
+
+    final rebuildsBefore = index.rebuildCount;
+    addLine(doc, doc.rootHandle, 500, 500, 501, 501);
+
+    expect(index.rebuildCount, rebuildsBefore,
+        reason: 'a rebuild would re-derive bounds for its own reasons');
+    expect(index.rootIndex.bounds.maxX, closeTo(501.0, 1e-9));
+    expect(index.rootIndex.bounds.maxY, closeTo(501.0, 1e-9));
+  });
+
+  test('ContainerIndex.bounds does not shrink again, as documented', () {
+    // The stated limit of the guarantee above, pinned rather than left to
+    // prose: `bounds` only ever grows between rebuilds, because narrowing it
+    // would mean rescanning every leaf on every edit. Too large costs
+    // broad-phase candidates; too small would drop hits.
+    final doc = DraftDocument.empty();
+    addLine(doc, doc.rootHandle, 0, 0, 1, 1);
+    final far = addLine(doc, doc.rootHandle, 500, 500, 501, 501);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    expect(index.rootIndex.bounds.maxX, closeTo(501.0, 1e-9));
+
+    final rebuildsBefore = index.rebuildCount;
+    doc.commands.execute(RemoveEntityCommand(far));
+
+    expect(index.rebuildCount, rebuildsBefore);
+    expect(index.rootIndex.bounds.maxX, closeTo(501.0, 1e-9),
+        reason: 'an upper bound, not an exact one, between rebuilds');
+    index.rebuildAll();
+    expect(index.rootIndex.bounds.maxX, closeTo(1.0, 1e-9),
+        reason: 'and exact again immediately after a rebuild');
+  });
 }
