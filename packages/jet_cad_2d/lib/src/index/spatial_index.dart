@@ -648,7 +648,7 @@ class SpatialIndex {
         out.chain[i] = _instancePath[drop + i];
       }
       out.chainLength = capacity;
-      // out.truncated = true; // mutated out
+      out.truncated = true;
     }
   }
 
