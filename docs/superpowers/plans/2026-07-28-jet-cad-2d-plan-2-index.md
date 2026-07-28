@@ -5153,7 +5153,8 @@ space, and keeps the best candidate:
       if (_filters.acceptsNode(node, filter)) level.add(node);
     });
 
-    for (final node = 0; false;) {}   // placeholder removed below
+    // Recursion happens HERE, after the visitor above has closed — never
+    // inside it. See _descentScratch.
     for (var i = 0; i < level.length; i++) {
       final node = level[i];
       final resolved = document.tree[node];
@@ -5225,10 +5226,13 @@ measuring — never the other way round — and checks in priority order:
 nearest the leaf — drops from the root end, and sets `out.truncated`. Truncating
 from the root is what keeps the leaf hit correct.
 
-**Delete the `for (final node = 0; false;) {}` line above** — it is a
-deliberate leftover marking where a reviewer should check that the collect-then-
-recurse split was actually made, rather than the recursion being folded back
-into the `searchInstances` visitor where it reads more naturally and is wrong.
+**The collect-then-recurse split is the thing to check in review.** Folding the
+recursion back into the `searchInstances` visitor reads more naturally, passes
+every shallow test, and is wrong: it re-enters the R-tree's own traversal stack
+while that walk is still in progress. The public reentrancy guard does not cover
+it, because this is all inside one public call. It would surface only on a
+document with instances nested deep enough for the inner walk to overwrite the
+outer one's state — which is why the differential corpus requires three levels.
 
 - [ ] **Step 5: Run the tests**
 

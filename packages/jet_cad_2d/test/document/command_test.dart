@@ -143,6 +143,42 @@ void main() {
       unawaited(sub.cancel());
     });
 
+    test(
+        'onAfterMutate fires synchronously for every mutation, unlike the '
+        'changes stream', () {
+      final target = FakeTarget();
+      final dispatcher = CommandDispatcher(target: target);
+      final syncSeen = <DocChange>[];
+      final asyncSeen = <DocChange>[];
+      dispatcher.onAfterMutate = syncSeen.add;
+      final sub = dispatcher.changes.listen(asyncSeen.add);
+
+      // One of each of the five events _changes.add ever publishes, so a
+      // dropped call at any one of execute/undo/redo/notifyLoaded/
+      // notifyPurged makes this list wrong rather than merely one test short.
+      dispatcher.execute(CounterCommand(Capability.geometry, const Handle(1)));
+      dispatcher.undo();
+      dispatcher.redo();
+      dispatcher.notifyLoaded();
+      dispatcher.notifyPurged();
+
+      expect(
+        syncSeen.map((e) => e.runtimeType).toList(),
+        [
+          CommandApplied,
+          CommandUndone,
+          CommandRedone,
+          DocumentLoaded,
+          DocumentPurged,
+        ],
+        reason: 'the index must be current for the very next statement '
+            'after every kind of mutation, not just execute',
+      );
+      expect(asyncSeen, isEmpty,
+          reason: 'the stream is a broadcast controller');
+      unawaited(sub.cancel());
+    });
+
     test('rejects a command the permissions forbid, without applying it', () {
       final target = FakeTarget();
       final dispatcher = CommandDispatcher(

@@ -53,6 +53,41 @@ class CommandDispatcher {
 
   DraftPermissions permissions;
 
+  /// Called synchronously, after a mutation has been applied and before
+  /// `execute`/`undo`/`redo` returns.
+  ///
+  /// Derived structures that must be correct for the *next statement* — the
+  /// spatial index above all — use this rather than [changes], which is an
+  /// asynchronous broadcast stream and therefore fires a microtask too late.
+  /// The stream remains the right channel for UI, where that latency is
+  /// invisible.
+  ///
+  /// Nullable and settable rather than a direct dependency, because this layer
+  /// must not import the index — the dependency runs the other way.
+  ///
+  /// **Must not throw.** Unlike [changes] — an async broadcast controller
+  /// whose listeners run outside this call stack and so can never make
+  /// `execute`/`undo`/`redo` itself fail — this callback runs synchronously,
+  /// inline, after the mutation and the history push have both already
+  /// happened. A throwing callback therefore propagates out of
+  /// `execute`/`undo`/`redo` with the mutation and the history change both
+  /// already standing: the caller sees an exception and reasonably concludes
+  /// nothing happened, exactly the hazard [_checkNotDisposed] and
+  /// [DraftDocument.purge]'s own guard exist to close elsewhere. A reader-only
+  /// callback (recomputing a derived index, say) should never throw in the
+  /// first place; this is not a contract this dispatcher can enforce, so it is
+  /// stated here instead.
+  void Function(DocChange change)? onAfterMutate;
+
+  /// Called before `execute`, `undo` and `redo` mutate anything.
+  ///
+  /// Exists so a derived structure that is mid-walk can refuse the mutation:
+  /// changing the document inside a query visitor changes the structure being
+  /// walked. Nullable and settable rather than a direct dependency, because
+  /// this layer must not import the index — the dependency runs the other
+  /// way.
+  void Function()? onBeforeMutate;
+
   CommandDispatcher({
     required this.target,
     this.permissions = DraftPermissions.all,
@@ -65,6 +100,7 @@ class CommandDispatcher {
   bool get canRedo => _history.canRedo;
 
   void execute(DraftCommand command) {
+    onBeforeMutate?.call();
     _checkNotDisposed();
     _require(command);
     // The inverse is pushed only after apply returns, so a command that
@@ -72,10 +108,14 @@ class CommandDispatcher {
     // mutated the target, never what merely attempted to.
     final result = command.apply(target);
     _history.push(result.inverse);
-    _changes.add(CommandApplied(label: command.label, touched: result.touched));
+    final change =
+        CommandApplied(label: command.label, touched: result.touched);
+    _changes.add(change);
+    onAfterMutate?.call(change);
   }
 
   void undo() {
+    onBeforeMutate?.call();
     _checkNotDisposed();
     if (!_history.canUndo) return;
     final inverse = _history.takeUndo();
@@ -97,10 +137,13 @@ class CommandDispatcher {
       rethrow;
     }
     _history.pushRedo(result.inverse);
-    _changes.add(CommandUndone(label: inverse.label, touched: result.touched));
+    final change = CommandUndone(label: inverse.label, touched: result.touched);
+    _changes.add(change);
+    onAfterMutate?.call(change);
   }
 
   void redo() {
+    onBeforeMutate?.call();
     _checkNotDisposed();
     if (!_history.canRedo) return;
     final inverse = _history.takeRedo();
@@ -115,20 +158,26 @@ class CommandDispatcher {
       rethrow;
     }
     _history.pushUndoOnly(result.inverse);
-    _changes.add(CommandRedone(label: inverse.label, touched: result.touched));
+    final change = CommandRedone(label: inverse.label, touched: result.touched);
+    _changes.add(change);
+    onAfterMutate?.call(change);
   }
 
   /// The whole document was replaced; history no longer applies to it.
   void notifyLoaded() {
     _history.clear();
-    _changes.add(const DocumentLoaded());
+    const change = DocumentLoaded();
+    _changes.add(change);
+    onAfterMutate?.call(change);
   }
 
   /// Slots were compacted. Every slot-keyed derived structure is invalid and
   /// history cannot be replayed against the new numbering.
   void notifyPurged() {
     _history.clear();
-    _changes.add(const DocumentPurged());
+    const change = DocumentPurged();
+    _changes.add(change);
+    onAfterMutate?.call(change);
   }
 
   void clearHistory() => _history.clear();
