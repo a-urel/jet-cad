@@ -53,6 +53,19 @@ class CommandDispatcher {
 
   DraftPermissions permissions;
 
+  /// Called synchronously, after a mutation has been applied and before
+  /// `execute`/`undo`/`redo` returns.
+  ///
+  /// Derived structures that must be correct for the *next statement* — the
+  /// spatial index above all — use this rather than [changes], which is an
+  /// asynchronous broadcast stream and therefore fires a microtask too late.
+  /// The stream remains the right channel for UI, where that latency is
+  /// invisible.
+  ///
+  /// Nullable and settable rather than a direct dependency, because this layer
+  /// must not import the index — the dependency runs the other way.
+  void Function(DocChange change)? onAfterMutate;
+
   CommandDispatcher({
     required this.target,
     this.permissions = DraftPermissions.all,
@@ -72,7 +85,10 @@ class CommandDispatcher {
     // mutated the target, never what merely attempted to.
     final result = command.apply(target);
     _history.push(result.inverse);
-    _changes.add(CommandApplied(label: command.label, touched: result.touched));
+    final change =
+        CommandApplied(label: command.label, touched: result.touched);
+    _changes.add(change);
+    onAfterMutate?.call(change);
   }
 
   void undo() {
@@ -97,7 +113,9 @@ class CommandDispatcher {
       rethrow;
     }
     _history.pushRedo(result.inverse);
-    _changes.add(CommandUndone(label: inverse.label, touched: result.touched));
+    final change = CommandUndone(label: inverse.label, touched: result.touched);
+    _changes.add(change);
+    onAfterMutate?.call(change);
   }
 
   void redo() {
@@ -115,20 +133,26 @@ class CommandDispatcher {
       rethrow;
     }
     _history.pushUndoOnly(result.inverse);
-    _changes.add(CommandRedone(label: inverse.label, touched: result.touched));
+    final change = CommandRedone(label: inverse.label, touched: result.touched);
+    _changes.add(change);
+    onAfterMutate?.call(change);
   }
 
   /// The whole document was replaced; history no longer applies to it.
   void notifyLoaded() {
     _history.clear();
-    _changes.add(const DocumentLoaded());
+    const change = DocumentLoaded();
+    _changes.add(change);
+    onAfterMutate?.call(change);
   }
 
   /// Slots were compacted. Every slot-keyed derived structure is invalid and
   /// history cannot be replayed against the new numbering.
   void notifyPurged() {
     _history.clear();
-    _changes.add(const DocumentPurged());
+    const change = DocumentPurged();
+    _changes.add(change);
+    onAfterMutate?.call(change);
   }
 
   void clearHistory() => _history.clear();

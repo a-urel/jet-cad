@@ -143,6 +143,22 @@ void main() {
       unawaited(sub.cancel());
     });
 
+    test('onAfterMutate fires synchronously, unlike the changes stream', () {
+      final target = FakeTarget();
+      final dispatcher = CommandDispatcher(target: target);
+      final syncSeen = <DocChange>[];
+      final asyncSeen = <DocChange>[];
+      dispatcher.onAfterMutate = syncSeen.add;
+      dispatcher.changes.listen(asyncSeen.add);
+
+      dispatcher.execute(CounterCommand(Capability.geometry, const Handle(1)));
+
+      expect(syncSeen, hasLength(1),
+          reason: 'the index must be current for the very next statement');
+      expect(asyncSeen, isEmpty,
+          reason: 'the stream is a broadcast controller');
+    });
+
     test('rejects a command the permissions forbid, without applying it', () {
       final target = FakeTarget();
       final dispatcher = CommandDispatcher(
