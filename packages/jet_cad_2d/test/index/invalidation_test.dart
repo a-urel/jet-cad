@@ -45,6 +45,60 @@ Handle addLine(DraftDocument doc, Handle owner, double x1, double y1, double x2,
   return handle;
 }
 
+/// A group scaled (2, 5) holding a line, plus a warm broad-phase margin.
+///
+/// The group's anisotropy is what makes the margin non-zero once anything
+/// round is inside it; the line is what makes the index non-empty while
+/// the margin is still zero, so the warming query caches a zero.
+({DraftDocument doc, SpatialIndex index, Handle group}) _warmedNonUniform() {
+  final doc = DraftDocument.empty();
+  const group = Handle(800);
+  doc.commands.execute(AddNodeCommand(
+    GroupNode(
+      handle: group,
+      parent: doc.rootHandle,
+      transform: Transform2.scale(2, 5),
+      children: const [],
+    ),
+  ));
+  addLine(doc, group, 0, 0, 1, 1);
+
+  final index = SpatialIndex(doc);
+  final hit = HitPath();
+  index.pickInto(Vector2(0, 0), 1.0, const QueryFilter.all(), hit);
+  return (doc: doc, index: index, group: group);
+}
+
+/// A circle of radius 2 at the group's local origin.
+///
+/// Under the (2, 5) scale its indexed box stops at x = 4, while the narrow
+/// phase measures against the geometric-mean radius `2 * sqrt(10)`, about
+/// 6.32. So x = 5.5 is inside the approximated circle and outside the
+/// indexed box: reachable only if the query was widened by the margin.
+Handle _addGapCircle(DraftDocument doc, Handle owner) {
+  final handle = doc.handleSeed.next();
+  doc.commands.execute(AddEntityCommand(
+    record: EntityRecord(
+      handle: handle,
+      owner: owner,
+      kind: EntityKind.circle,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.byLayerLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: const ByLayerColor(),
+      lineweight: kByLayer,
+      transparency: kByLayer,
+      flags: 0,
+    ),
+    payload: GeometryPayload(
+      coords: Float64List.fromList([0, 0]),
+      scalars: Float64List.fromList([2.0]),
+    ),
+  ));
+  return handle;
+}
+
 void main() {
   test('adding an entity dirties it without a full rebuild', () {
     final doc = DraftDocument.empty();
@@ -435,5 +489,100 @@ void main() {
       isFalse,
       reason: 'nothing is drawn where the removed leaf used to be',
     );
+  });
+
+  // --- the cached broad-phase margin ----------------------------------
+  //
+  // `SpatialIndex._margin` caches the document-wide narrow-phase slack --
+  // how much wider than its own radius a pick must search so its broad phase
+  // is never tighter than what its narrow phase would accept. It is non-zero
+  // only where a circle or an arc sits under a non-conformal transform, and
+  // it is dropped in exactly two places: `_reconcile` and `rebuildContainer`.
+  // Deleting *either* line left all 567 tests green, because every existing
+  // margin test built its fixture and then queried once -- with a null cache
+  // there is nothing stale to read. These two warm the cache first, which is
+  // the only state in which the invalidation is observable at all.
+  //
+  // The failure this guards is the hit-*dropping* direction: a stale margin
+  // of zero leaves a round leaf correctly indexed, correctly transformed and
+  // unpickable in the gap between its exact bound and its approximated
+  // radius.
+
+  test('_reconcile drops the cached broad-phase margin', () {
+    final fixture = _warmedNonUniform();
+    addTearDown(fixture.index.dispose);
+    final index = fixture.index;
+    final rebuildsBefore = index.rebuildCount;
+
+    final circle = _addGapCircle(fixture.doc, fixture.group);
+
+    expect(index.rebuildCount, rebuildsBefore,
+        reason: 'this must exercise reconciliation, not a rebuild -- a '
+            'rebuild would drop the margin for its own reasons');
+
+    final hit = HitPath();
+    expect(
+      index.pickInto(Vector2(5.5, 0), 1.0, const QueryFilter.all(), hit),
+      isTrue,
+      reason: 'the margin cached by the warming query predates this circle, '
+          'so reconciliation has to drop it or the broad phase never reaches '
+          'x = 5.5',
+    );
+    expect(hit.entity, circle);
+    expect(hit.kind, HitKind.edge);
+  });
+
+  test('rebuildContainer drops the cached broad-phase margin', () {
+    // The other path, reached the only way it can be reached on its own: a
+    // change the index was never told about, followed by an explicit
+    // `rebuildContainer`. Along the command path `_reconcile` has already
+    // dropped the margin before it ever calls `rebuildContainer`, so the two
+    // lines are redundant there and only this shape separates them.
+    //
+    // Writing straight to the stores stands in for any allocation this
+    // index's change hook does not own -- a bulk import, or a second
+    // `SpatialIndex` over the same document, which takes the hook over (see
+    // `SpatialIndex.dispose`). `slot_lifetime_test.dart` uses the same
+    // stand-in for the same reason.
+    final fixture = _warmedNonUniform();
+    addTearDown(fixture.index.dispose);
+    final doc = fixture.doc;
+    final index = fixture.index;
+    final rebuildsBefore = index.rebuildCount;
+
+    final circle = doc.handleSeed.next();
+    final geomIndex = doc.geometry.add(GeometryPayload(
+      coords: Float64List.fromList([0, 0]),
+      scalars: Float64List.fromList([2.0]),
+    ));
+    doc.entities.add(EntityRecord(
+      handle: circle,
+      owner: fixture.group,
+      kind: EntityKind.circle,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.byLayerLinetype,
+      linetypeScale: 1.0,
+      geomIndex: geomIndex,
+      color: const ByLayerColor(),
+      lineweight: kByLayer,
+      transparency: kByLayer,
+      flags: 0,
+    ));
+
+    index.rebuildContainer(doc.rootHandle);
+
+    expect(index.rebuildCount, rebuildsBefore + 1,
+        reason: 'exactly one container was rebuilt -- a rebuildAll here '
+            'would drop the margin for its own reasons and prove nothing');
+
+    final hit = HitPath();
+    expect(
+      index.pickInto(Vector2(5.5, 0), 1.0, const QueryFilter.all(), hit),
+      isTrue,
+      reason: 'the rebuilt container knows its own slack, but the query is '
+          'widened by the document-wide cache, which predates this circle',
+    );
+    expect(hit.entity, circle);
+    expect(hit.kind, HitKind.edge);
   });
 }
