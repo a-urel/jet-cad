@@ -32,7 +32,14 @@ class HitPath {
 
   int chainLength = 0;
   Handle entity = const Handle(0);
-  Vector2 worldPoint = Vector2.zero();
+
+  /// `final`, and never reassigned: `pickInto` resets this object at the
+  /// start of every call, so a `worldPoint = Vector2.zero()` in [reset]
+  /// would allocate a fresh vector per pick — on a method the
+  /// zero-allocation frame-path constraint names by name. The buffer is
+  /// written in place with `setValues`/`setZero` instead, which is also why
+  /// a caller must not hold onto this vector across calls.
+  final Vector2 worldPoint = Vector2.zero();
   HitKind kind = HitKind.edge;
 
   /// The chain was deeper than [chain] and was cut from the root end.
@@ -51,6 +58,6 @@ class HitPath {
     // never read it on a miss — but one that does not gets the *previous*
     // pick's location, which looks entirely plausible and is the worst kind
     // of stale value.
-    worldPoint = Vector2.zero();
+    worldPoint.setZero();
   }
 }

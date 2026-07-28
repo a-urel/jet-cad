@@ -11,12 +11,14 @@ import '../document/node.dart';
 import '../document/style.dart';
 import '../geometry/aabb2.dart';
 import '../geometry/distance.dart';
+import '../geometry/primitives.dart';
 import '../geometry/transform2.dart';
 import '../store/entity_store.dart';
 import 'container_index.dart';
 import 'hit.dart';
 import 'query_filter.dart';
 import 'query_scratch.dart';
+import 'snap.dart';
 
 /// Thrown when a query runs inside another query's visitor, or when the
 /// document is mutated inside one.
@@ -280,6 +282,16 @@ class SpatialIndex {
     return _levelScratch[depth];
   }
 
+  // --- snapInto --------------------------------------------------------
+
+  /// Best-so-far for the snap in progress, held as fields for the same
+  /// zero-allocation reason as [_bestKind] et al. above -- see
+  /// [_considerSnapCandidate]'s doc comment for the comparison these back.
+  SnapKind? _bestSnapKind;
+  double _bestSnapDist = double.infinity;
+  int _bestSnapEntity = 0;
+  int _bestSnapRoot = 0;
+
   /// Finds the topmost entity within [radius] of [world], descending into
   /// every instance the query touches and reporting the full path down to
   /// the leaf.
@@ -308,7 +320,8 @@ class SpatialIndex {
       _bestKind = null;
       _bestEntity = 0;
       _bestRoot = 0;
-      _pickIn(root, Transform2.identity(), world, radius, filter, 0, out);
+      _descend(root, Transform2.identity(), world, radius, filter, 0, out,
+          SnapMask.none, null);
       return _bestKind != null;
     } finally {
       _endQuery();
@@ -316,7 +329,12 @@ class SpatialIndex {
   }
 
   /// Searches one container, then recurses into whichever of its instances
-  /// the query touches.
+  /// the query touches. Shared by [pickInto] and [snapInto]: exactly one of
+  /// [pickOut] / [snapOut] is non-null, and that is what selects which of
+  /// [_considerLeaf] / [_considerSnapLeaf] runs for each candidate leaf --
+  /// a plain branch on an already-in-hand field, not a closure, so sharing
+  /// this walk adds no allocation of its own. [snapMask] is only meaningful
+  /// when [snapOut] is non-null.
   ///
   /// **Collects instances into [_scratchForDepth], then recurses after the
   /// visitor has closed — never inside it.** [ContainerIndex.searchInstances]
@@ -327,14 +345,26 @@ class SpatialIndex {
   /// walk. Recursing straight into the visitor reads more naturally, passes
   /// every shallow test, and risks exactly that corruption the moment two
   /// instances at the same depth are found before either is recursed into.
-  void _pickIn(
+  ///
+  /// **Inherited, not fixed, cost:** the `searchLeaves`/`searchInstances`
+  /// calls below each pass a closure literal that captures this call's
+  /// locals, and a fresh pair is allocated on *every* recursive call — one
+  /// per level of nesting a query descends through. That was true of
+  /// `pickInto`'s descent before this method existed and stays true now that
+  /// `snapInto` shares it too; sharing the walk means `snapInto` does not
+  /// add a *second*, independent occurrence of the same cost elsewhere in
+  /// this file. Left for Task 17's allocation harness, per that task's own
+  /// scope.
+  void _descend(
     ContainerIndex index,
     Transform2 toWorld,
     Vector2 world,
     double radius,
     QueryFilter filter,
     int depth,
-    HitPath out,
+    HitPath? pickOut,
+    SnapMask snapMask,
+    SnapResult? snapOut,
   ) {
     _ensurePathCapacity(depth);
     _containerPath[depth] = index.container.value;
@@ -355,7 +385,12 @@ class SpatialIndex {
 
     index.searchLeaves(localQuery, (slot) {
       if (_filters.acceptsEntity(slot, filter)) {
-        _considerLeaf(slot, toWorld, world, radius, depth, out);
+        if (pickOut != null) {
+          _considerLeaf(slot, toWorld, world, radius, depth, pickOut);
+        } else {
+          _considerSnapLeaf(
+              slot, toWorld, world, radius, snapMask, depth, snapOut!);
+        }
       }
     });
 
@@ -397,7 +432,8 @@ class SpatialIndex {
       // toWorld-after-instance, never the reverse -- reversing it would
       // silently misplace every entity behind a rotated or scaled instance.
       final composed = toWorld.multiply(index.transformOfInstance(node));
-      _pickIn(child, composed, world, radius, filter, depth + 1, out);
+      _descend(child, composed, world, radius, filter, depth + 1, pickOut,
+          snapMask, snapOut);
     }
   }
 
@@ -649,6 +685,269 @@ class SpatialIndex {
       }
       out.chainLength = capacity;
       out.truncated = true;
+    }
+  }
+
+  /// Finds the single best snap candidate within [radius] of [world], among
+  /// the kinds in [mask].
+  ///
+  /// One candidate wins, ordered by `(kind priority, distance)`. **Kind
+  /// dominates unconditionally**: the comparison in
+  /// [_considerSnapCandidate] checks kind before it ever looks at distance,
+  /// so a far endpoint inside the radius beats a near midpoint even though
+  /// the midpoint is closer -- declaration order in [SnapKind] is priority,
+  /// full stop, not merely a tie-break between otherwise-equal distances.
+  /// Distance only decides between two candidates that already tied on
+  /// kind, and on a full tie (same kind, bit-exact same distance) the
+  /// candidate whose root-level ancestor has the greater handle wins, and
+  /// only when *that* also ties does the leaf's own handle decide -- the
+  /// same "ascending handle value is draw order, so the later one drawn
+  /// wins" convention [_considerLeaf] uses for [pickInto].
+  ///
+  /// Only the "cheap" kinds ([SnapMask.cheap]) are actually produced today,
+  /// regardless of what [mask] requests -- see the doc comment on
+  /// [SnapKind] for why the other kinds exist in the enum but are not yet
+  /// generated here.
+  ///
+  /// **No-hit contract:** [out] is reset unconditionally at the start of
+  /// *every* call, the same way [pickInto] resets [HitPath] -- see
+  /// [SnapResult]'s doc comment. Unlike [pickInto], this returns `void`;
+  /// callers read [SnapResult.found] rather than a return value.
+  ///
+  /// **A snap query allocates nothing** in steady state, once every scratch
+  /// buffer it touches has grown to the deepest nesting and largest
+  /// candidate set any query has reached -- it runs at pointer-move rate.
+  /// No entity filter is accepted (unlike [pickInto]): snapping considers
+  /// every entity, so this passes `const QueryFilter.all()` through to
+  /// [_descend], which short-circuits on `isPassthrough` without touching
+  /// [FilterEvaluator].
+  ///
+  /// Descends into instances and shares [pickInto]'s descent (see
+  /// [_descend]'s doc comment for what "shares" means here and what it does
+  /// and does not inherit).
+  ///
+  /// **Not reentrant.** Shares this index's scratch state with every other
+  /// query; see [forEachInRect]'s doc comment.
+  void snapInto(Vector2 world, double radius, SnapMask mask, SnapResult out) {
+    final root = rootIndex; // throws if disposed
+    _beginQuery();
+    // Guard body inlined, not passed to a closure-taking helper -- see the
+    // doc comment on [_beginQuery].
+    try {
+      out.reset();
+      _bestSnapKind = null;
+      _bestSnapDist = double.infinity;
+      _bestSnapEntity = 0;
+      _bestSnapRoot = 0;
+      _descend(root, Transform2.identity(), world, radius,
+          const QueryFilter.all(), 0, null, mask, out);
+      out.found = _bestSnapKind != null;
+    } finally {
+      _endQuery();
+    }
+  }
+
+  /// Generates every cheap-kind candidate point of one leaf, in world space,
+  /// and measures each against the snap in progress.
+  ///
+  /// Every candidate here is a single point, computed in **local** space and
+  /// transformed to world with the raw `a..f` coefficients **before** being
+  /// measured -- never the other way round. Transforming a point is nothing
+  /// more than the affine map itself, so (unlike [_considerLeaf]'s
+  /// circle/arc cases) no radius-scaling trick is needed to stay exact under
+  /// a non-uniform or mirrored instance scale: there is no curve here to
+  /// distort, only points, and an affine map carries a point to the right
+  /// place regardless of scale or mirroring.
+  ///
+  /// A candidate whose kind bit is unset in [mask] is never generated, not
+  /// generated-then-discarded: cheaper, and it means [_considerSnapCandidate]
+  /// never has to re-check the mask itself.
+  void _considerSnapLeaf(
+    int slot,
+    Transform2 toWorld,
+    Vector2 world,
+    double radius,
+    SnapMask mask,
+    int depth,
+    SnapResult out,
+  ) {
+    final kind = document.entities.kindAt(slot);
+    final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
+    final coords = payload.coords;
+    final count = payload.pointCount;
+    if (count == 0) return;
+
+    final ta = toWorld.a, tb = toWorld.b, tc = toWorld.c, td = toWorld.d;
+    final te = toWorld.e, tf = toWorld.f;
+
+    switch (kind) {
+      case EntityKind.point:
+        if (!mask.has(SnapKind.endpoint)) return;
+        final lx = coords[0], ly = coords[1];
+        _considerSnapCandidate(SnapKind.endpoint, ta * lx + tc * ly + te,
+            tb * lx + td * ly + tf, world, radius, slot, depth, out);
+
+      case EntityKind.line:
+      case EntityKind.polyline:
+        if (mask.has(SnapKind.endpoint)) {
+          for (var i = 0; i < count; i++) {
+            final lx = coords[i * 2], ly = coords[i * 2 + 1];
+            _considerSnapCandidate(SnapKind.endpoint, ta * lx + tc * ly + te,
+                tb * lx + td * ly + tf, world, radius, slot, depth, out);
+          }
+        }
+        if (mask.has(SnapKind.midpoint)) {
+          for (var i = 0; i + 1 < count; i++) {
+            final mx = (coords[i * 2] + coords[i * 2 + 2]) / 2;
+            final my = (coords[i * 2 + 1] + coords[i * 2 + 3]) / 2;
+            _considerSnapCandidate(SnapKind.midpoint, ta * mx + tc * my + te,
+                tb * mx + td * my + tf, world, radius, slot, depth, out);
+          }
+        }
+
+      case EntityKind.circle:
+        final cx = coords[0], cy = coords[1];
+        final r = payload.scalars[0];
+        if (mask.has(SnapKind.center)) {
+          _considerSnapCandidate(SnapKind.center, ta * cx + tc * cy + te,
+              tb * cx + td * cy + tf, world, radius, slot, depth, out);
+        }
+        if (mask.has(SnapKind.quadrant)) {
+          for (var q = 0; q < 4; q++) {
+            final angle = q * (math.pi / 2);
+            final lx = cx + r * math.cos(angle);
+            final ly = cy + r * math.sin(angle);
+            _considerSnapCandidate(SnapKind.quadrant, ta * lx + tc * ly + te,
+                tb * lx + td * ly + tf, world, radius, slot, depth, out);
+          }
+        }
+
+      case EntityKind.arc:
+        final cx = coords[0], cy = coords[1];
+        final r = payload.scalars[0];
+        final startAngle = payload.scalars[1];
+        final sweep = payload.scalars[2];
+        if (mask.has(SnapKind.endpoint)) {
+          final slx = cx + r * math.cos(startAngle);
+          final sly = cy + r * math.sin(startAngle);
+          _considerSnapCandidate(SnapKind.endpoint, ta * slx + tc * sly + te,
+              tb * slx + td * sly + tf, world, radius, slot, depth, out);
+          final endAngle = startAngle + sweep;
+          final elx = cx + r * math.cos(endAngle);
+          final ely = cy + r * math.sin(endAngle);
+          _considerSnapCandidate(SnapKind.endpoint, ta * elx + tc * ely + te,
+              tb * elx + td * ely + tf, world, radius, slot, depth, out);
+        }
+        if (mask.has(SnapKind.midpoint)) {
+          final midAngle = startAngle + sweep / 2;
+          final lx = cx + r * math.cos(midAngle);
+          final ly = cy + r * math.sin(midAngle);
+          _considerSnapCandidate(SnapKind.midpoint, ta * lx + tc * ly + te,
+              tb * lx + td * ly + tf, world, radius, slot, depth, out);
+        }
+        if (mask.has(SnapKind.center)) {
+          _considerSnapCandidate(SnapKind.center, ta * cx + tc * cy + te,
+              tb * cx + td * cy + tf, world, radius, slot, depth, out);
+        }
+        if (mask.has(SnapKind.quadrant)) {
+          // "Quadrants inside the sweep only": a quadrant point that the
+          // arc's own curve never passes through is not a snap candidate --
+          // unlike the circle case above, an arc does not draw its full
+          // rim. [angleInSweep] is evaluated on the *local* start angle and
+          // sweep, since sweep containment is a fact about the arc's own
+          // data and does not depend on how it is later transformed.
+          for (var q = 0; q < 4; q++) {
+            final angle = q * (math.pi / 2);
+            if (!angleInSweep(angle, startAngle, sweep)) continue;
+            final lx = cx + r * math.cos(angle);
+            final ly = cy + r * math.sin(angle);
+            _considerSnapCandidate(SnapKind.quadrant, ta * lx + tc * ly + te,
+                tb * lx + td * ly + tf, world, radius, slot, depth, out);
+          }
+        }
+
+      case EntityKind.text:
+      case EntityKind.attrib:
+        if (!mask.has(SnapKind.insertion)) return;
+        final lx = coords[0], ly = coords[1];
+        _considerSnapCandidate(SnapKind.insertion, ta * lx + tc * ly + te,
+            tb * lx + td * ly + tf, world, radius, slot, depth, out);
+    }
+  }
+
+  /// Measures one world-space candidate point and, if it both lies within
+  /// [radius] and beats the snap in progress, updates the running best and
+  /// writes it into [out].
+  ///
+  /// The comparison is `(kind.index, distance)` lexicographic, with a
+  /// deterministic tie-break -- see [snapInto]'s doc comment for the full
+  /// ordering this implements and why. The kind term is compared on its own
+  /// first (`kindIndex < _bestSnapKind!.index`), independent of distance, so
+  /// nothing about the distance terms further down can ever let a
+  /// lower-priority kind beat a higher-priority one.
+  void _considerSnapCandidate(
+    SnapKind kind,
+    double wx,
+    double wy,
+    Vector2 world,
+    double radius,
+    int slot,
+    int depth,
+    SnapResult out,
+  ) {
+    final dx = world.x - wx, dy = world.y - wy;
+    final dist = math.sqrt(dx * dx + dy * dy);
+    if (dist > radius) return;
+
+    final handle = document.entities.handleAt(slot);
+    // Same reasoning as [_considerLeaf]'s effectiveRoot: a root-level leaf
+    // stands in for its own root-level ancestor.
+    final effectiveRoot = depth == 0 ? handle.value : _instancePath[0];
+
+    final kindIndex = kind.index;
+    final better = _bestSnapKind == null ||
+        kindIndex < _bestSnapKind!.index ||
+        (kindIndex == _bestSnapKind!.index &&
+            (dist < _bestSnapDist ||
+                (dist == _bestSnapDist &&
+                    (effectiveRoot > _bestSnapRoot ||
+                        (effectiveRoot == _bestSnapRoot &&
+                            handle.value > _bestSnapEntity)))));
+    if (!better) return;
+
+    _bestSnapKind = kind;
+    _bestSnapDist = dist;
+    _bestSnapEntity = handle.value;
+    _bestSnapRoot = effectiveRoot;
+
+    out.entity = handle;
+    out.kind = kind;
+    out.point.setValues(wx, wy);
+    _writeSnapChain(out, depth);
+  }
+
+  /// Copies the current descent path into [out.chain], root first -- the
+  /// [SnapResult] sibling of [_writeChain].
+  ///
+  /// When the path is deeper than [out]'s capacity, keeps the **deepest**
+  /// entries and drops from the root end, exactly as [_writeChain] does,
+  /// for the same reason: that is what keeps [SnapResult.entity] correct no
+  /// matter how deep the chain above it goes. Unlike [HitPath],
+  /// [SnapResult] has no `truncated` flag to set -- that is the interface
+  /// this task specifies, not an oversight here.
+  void _writeSnapChain(SnapResult out, int depth) {
+    final capacity = out.chain.length;
+    if (depth <= capacity) {
+      for (var i = 0; i < depth; i++) {
+        out.chain[i] = _instancePath[i];
+      }
+      out.chainLength = depth;
+    } else {
+      final drop = depth - capacity;
+      for (var i = 0; i < capacity; i++) {
+        out.chain[i] = _instancePath[drop + i];
+      }
+      out.chainLength = capacity;
     }
   }
 

@@ -657,8 +657,10 @@ void main() {
       ..entity = const Handle(42)
       ..kind = HitKind.fill
       ..truncated = true
-      ..worldPoint = Vector2(3, 4)
       ..chainLength = 5;
+    // In place, not a reassignment: `worldPoint` is final so that `reset()`
+    // cannot allocate a fresh vector on every pick.
+    hit.worldPoint.setValues(3, 4);
 
     hit.reset();
 
