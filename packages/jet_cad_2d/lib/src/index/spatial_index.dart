@@ -1,11 +1,20 @@
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+
 import '../core/handle.dart';
 import '../document/doc_change.dart';
 import '../document/draft_document.dart';
 import '../document/extents.dart';
+import '../document/node.dart';
 import '../document/style.dart';
 import '../geometry/aabb2.dart';
+import '../geometry/distance.dart';
 import '../geometry/transform2.dart';
+import '../store/entity_store.dart';
 import 'container_index.dart';
+import 'hit.dart';
 import 'query_filter.dart';
 import 'query_scratch.dart';
 
@@ -206,6 +215,440 @@ class SpatialIndex {
       }
     } finally {
       _endQuery();
+    }
+  }
+
+  // --- pickInto ------------------------------------------------------
+
+  /// Best-so-far for the pick in progress, held as fields rather than
+  /// threaded through the recursion or returned as a record: a record
+  /// carrying a `Vector2` field would allocate one per candidate, exactly
+  /// what this method's zero-allocation guarantee forbids. `_bestEntity` and
+  /// `_bestRoot` are raw handle values, not [Handle]s, purely so the
+  /// tie-break comparisons below read as plain integer comparisons.
+  HitKind? _bestKind;
+  int _bestEntity = 0;
+  int _bestRoot = 0;
+
+  /// Scratch endpoints for [distanceToSegment] and centres for
+  /// [distanceToCircle]/[distanceToArc], reused across every candidate of
+  /// every pick. Mutated with [Vector2.setValues], never replaced: replacing
+  /// either with a fresh `Vector2` would be exactly the per-candidate
+  /// allocation the zero-allocation guarantee on [pickInto] forbids.
+  final Vector2 _scratchA = Vector2.zero();
+  final Vector2 _scratchB = Vector2.zero();
+
+  /// The instance handle taken to reach each depth of the current descent,
+  /// root first. Copied into [HitPath.chain] by [_writeChain] when a new
+  /// best candidate is found. Grows, never shrinks, like every other scratch
+  /// in this class.
+  Uint32List _instancePath = Uint32List(16);
+
+  /// The container (root or definition) being searched at each depth of the
+  /// current descent. Exists only to make [_pickIn]'s cycle guard an O(depth)
+  /// scratch scan instead of a `Set<Handle>` allocated per pick.
+  Uint32List _containerPath = Uint32List(16);
+
+  void _ensurePathCapacity(int depth) {
+    if (depth < _instancePath.length) return;
+    var capacity = _instancePath.length;
+    while (capacity <= depth) {
+      capacity *= 2;
+    }
+    final growIn = Uint32List(capacity)..setAll(0, _instancePath);
+    final growContainer = Uint32List(capacity)..setAll(0, _containerPath);
+    _instancePath = growIn;
+    _containerPath = growContainer;
+  }
+
+  /// One reusable instance-collection buffer per recursion depth, so a pick
+  /// through nested instances allocates nothing once the deepest level any
+  /// pick has reached is warmed.
+  ///
+  /// A [QueryScratch] per level, not a `List<Handle>`: the same
+  /// `List.clear()`-regrows-every-time hazard [_instanceScratch]'s doc
+  /// comment describes applies here too, once per nesting level instead of
+  /// once per query. The outer `List<QueryScratch>` itself only grows the
+  /// first time a pick reaches a new maximum depth, which is the same
+  /// grows-once shape as every other scratch buffer in this class.
+  final List<QueryScratch> _levelScratch = <QueryScratch>[];
+
+  QueryScratch _scratchForDepth(int depth) {
+    while (_levelScratch.length <= depth) {
+      _levelScratch.add(QueryScratch());
+    }
+    return _levelScratch[depth];
+  }
+
+  /// Finds the topmost entity within [radius] of [world], descending into
+  /// every instance the query touches and reporting the full path down to
+  /// the leaf.
+  ///
+  /// **No-hit contract:** returns `false` on a miss, and [out] is left
+  /// exactly as [HitPath.reset] leaves it — `chainLength` zero, `entity`
+  /// [Handle.none], `worldPoint` the origin, `kind` [HitKind.edge],
+  /// `truncated` false. [out] is reset unconditionally at the start of
+  /// *every* call, not only on a miss, so a caller that forgets to check the
+  /// boolean result can never mistake a previous pick's hit for this one's.
+  ///
+  /// Descends into instances, unlike [forEachInRect] — a pick wants the
+  /// leaf, and [HitPath.chain] records which instance it was reached
+  /// through, which is exactly what [forEachInRect] deliberately does not
+  /// report.
+  ///
+  /// **Not reentrant.** Shares this index's scratch state with every other
+  /// query; see [forEachInRect]'s doc comment for why.
+  bool pickInto(Vector2 world, double radius, QueryFilter filter, HitPath out) {
+    final root = rootIndex; // throws if disposed
+    _beginQuery();
+    // Guard body inlined, not passed to a closure-taking helper -- see the
+    // doc comment on [_beginQuery].
+    try {
+      out.reset();
+      _bestKind = null;
+      _bestEntity = 0;
+      _bestRoot = 0;
+      _pickIn(root, Transform2.identity(), world, radius, filter, 0, out);
+      return _bestKind != null;
+    } finally {
+      _endQuery();
+    }
+  }
+
+  /// Searches one container, then recurses into whichever of its instances
+  /// the query touches.
+  ///
+  /// **Collects instances into [_scratchForDepth], then recurses after the
+  /// visitor has closed — never inside it.** [ContainerIndex.searchInstances]
+  /// walks its `PackedRTree`'s own traversal stack; that stack is a field on
+  /// the tree object, reused across calls for the same reason every other
+  /// scratch in this class is, and `PackedRTree.search`'s own doc comment
+  /// says plainly that calling it again from inside its visitor corrupts the
+  /// walk. Recursing straight into the visitor reads more naturally, passes
+  /// every shallow test, and risks exactly that corruption the moment two
+  /// instances at the same depth are found before either is recursed into.
+  void _pickIn(
+    ContainerIndex index,
+    Transform2 toWorld,
+    Vector2 world,
+    double radius,
+    QueryFilter filter,
+    int depth,
+    HitPath out,
+  ) {
+    _ensurePathCapacity(depth);
+    _containerPath[depth] = index.container.value;
+
+    final Transform2 toLocal;
+    try {
+      toLocal = toWorld.invert();
+    } on SingularTransformError {
+      // A singular transform collapses this container's geometry to
+      // nothing in world space: there is nothing to hit and nothing to
+      // report.
+      return;
+    }
+    final localQuery = Aabb2(
+      Vector2(world.x - radius, world.y - radius),
+      Vector2(world.x + radius, world.y + radius),
+    ).transformedBy(toLocal);
+
+    index.searchLeaves(localQuery, (slot) {
+      if (_filters.acceptsEntity(slot, filter)) {
+        _considerLeaf(slot, toWorld, world, radius, depth, out);
+      }
+    });
+
+    final level = _scratchForDepth(depth)..reset();
+    index.searchInstances(localQuery, (node) {
+      if (_filters.acceptsNode(node, filter)) level.add(node.value);
+    });
+
+    for (var i = 0; i < level.length; i++) {
+      final node = Handle(level[i]);
+      final resolved = document.tree[node];
+      if (resolved is! InstanceNode) continue;
+      final child = _byContainer[resolved.definition];
+      if (child == null) continue;
+
+      // Cycle guard: never re-enter a container already open on this path.
+      // A well-formed document cannot reach this -- AddNodeCommand's own
+      // cycle check refuses to create a definition cycle in the first
+      // place -- but a `seen`-style check costs little and turns a
+      // hypothetical malformed graph into "this branch reports nothing
+      // further" rather than a hang, the same trade [ContainerIndex.build]
+      // makes with its own `seen` set. A scratch array rather than a
+      // `Set<Handle>`: a fresh `Set` would allocate on every recursive
+      // step, which this method's zero-allocation guarantee forbids.
+      var cyclic = false;
+      for (var d = 0; d <= depth; d++) {
+        if (_containerPath[d] == child.container.value) {
+          cyclic = true;
+          break;
+        }
+      }
+      if (cyclic) continue;
+
+      _instancePath[depth] = node.value;
+      // The instance's transform is already composed to this container's
+      // space by ContainerIndex.build, since any groups between them were
+      // flattened; toWorld then lifts it the rest of the way. The argument
+      // to multiply is applied first (see Transform2.multiply), so this is
+      // toWorld-after-instance, never the reverse -- reversing it would
+      // silently misplace every entity behind a rotated or scaled instance.
+      final composed = toWorld.multiply(index.transformOfInstance(node));
+      _pickIn(child, composed, world, radius, filter, depth + 1, out);
+    }
+  }
+
+  /// Measures one candidate leaf in world space and, if it is the best hit
+  /// found so far this pick, writes it into [out].
+  ///
+  /// Every point and segment is transformed into world space with [toWorld]
+  /// **before** measuring -- never the other way round, which is what lets
+  /// this stay exact under a mirrored or non-uniformly scaled instance
+  /// without any ellipse math. Priority within one entity is checked in the
+  /// fixed order vertex, then edge, then fill: a click near a line's
+  /// endpoint means the endpoint, even though it is also on the line.
+  ///
+  /// Deliberately not delegated to [distanceToPolyline], [insideClosedPolyline]
+  /// or [nearestVertexDistance]: each takes a [GeometryPayload] in the query's
+  /// own space, and building a world-space payload per candidate would
+  /// allocate a `Float64List` (or a `GeometryPayload` wrapping one) on every
+  /// call -- exactly what this method's zero-allocation guarantee forbids.
+  /// The transform is fused into each loop below instead, using raw doubles
+  /// so nothing but the two hoisted scratch vectors above is ever touched.
+  /// [distanceToSegment], [distanceToCircle] and [distanceToArc] take
+  /// individual `Vector2` arguments rather than a payload, so those three
+  /// are reused directly against the hoisted scratch vectors.
+  void _considerLeaf(
+    int slot,
+    Transform2 toWorld,
+    Vector2 world,
+    double radius,
+    int depth,
+    HitPath out,
+  ) {
+    final kind = document.entities.kindAt(slot);
+    final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
+    final coords = payload.coords;
+    final count = payload.pointCount;
+    if (count == 0) return;
+
+    final ta = toWorld.a, tb = toWorld.b, tc = toWorld.c, td = toWorld.d;
+    final te = toWorld.e, tf = toWorld.f;
+
+    HitKind? foundKind;
+    var foundX = 0.0, foundY = 0.0;
+
+    switch (kind) {
+      case EntityKind.point:
+      case EntityKind.text:
+      case EntityKind.attrib:
+        // The only geometric feature is the anchor point -- the insertion
+        // point for text/attrib, the point itself for a point entity --
+        // treated as a vertex, since that is the one feature there is to
+        // grab.
+        final lx = coords[0], ly = coords[1];
+        final wx = ta * lx + tc * ly + te, wy = tb * lx + td * ly + tf;
+        final dx = world.x - wx, dy = world.y - wy;
+        if (math.sqrt(dx * dx + dy * dy) <= radius) {
+          foundKind = HitKind.vertex;
+          foundX = wx;
+          foundY = wy;
+        }
+
+      case EntityKind.line:
+      case EntityKind.polyline:
+        var bestVertexDist = double.infinity;
+        var bestVertexX = 0.0, bestVertexY = 0.0;
+        for (var i = 0; i < count; i++) {
+          final lx = coords[i * 2], ly = coords[i * 2 + 1];
+          final wx = ta * lx + tc * ly + te, wy = tb * lx + td * ly + tf;
+          final dx = world.x - wx, dy = world.y - wy;
+          final dist = math.sqrt(dx * dx + dy * dy);
+          if (dist < bestVertexDist) {
+            bestVertexDist = dist;
+            bestVertexX = wx;
+            bestVertexY = wy;
+          }
+        }
+        if (bestVertexDist <= radius) {
+          foundKind = HitKind.vertex;
+          foundX = bestVertexX;
+          foundY = bestVertexY;
+        } else if (count >= 2) {
+          var bestEdgeDist = double.infinity;
+          var bestEdgeX = 0.0, bestEdgeY = 0.0;
+          for (var i = 0; i + 1 < count; i++) {
+            final wax = ta * coords[i * 2] + tc * coords[i * 2 + 1] + te;
+            final way = tb * coords[i * 2] + td * coords[i * 2 + 1] + tf;
+            final wbx = ta * coords[i * 2 + 2] + tc * coords[i * 2 + 3] + te;
+            final wby = tb * coords[i * 2 + 2] + td * coords[i * 2 + 3] + tf;
+            _scratchA.setValues(wax, way);
+            _scratchB.setValues(wbx, wby);
+            final dist = distanceToSegment(world, _scratchA, _scratchB);
+            if (dist < bestEdgeDist) {
+              bestEdgeDist = dist;
+              final abx = wbx - wax, aby = wby - way;
+              final lenSq = abx * abx + aby * aby;
+              if (lenSq == 0.0) {
+                bestEdgeX = wax;
+                bestEdgeY = way;
+              } else {
+                var tt =
+                    ((world.x - wax) * abx + (world.y - way) * aby) / lenSq;
+                if (tt < 0.0) {
+                  tt = 0.0;
+                } else if (tt > 1.0) {
+                  tt = 1.0;
+                }
+                bestEdgeX = wax + tt * abx;
+                bestEdgeY = way + tt * aby;
+              }
+            }
+          }
+          if (bestEdgeDist <= radius) {
+            foundKind = HitKind.edge;
+            foundX = bestEdgeX;
+            foundY = bestEdgeY;
+          } else if (kind == EntityKind.polyline &&
+              count >= 3 &&
+              // Closed, not merely convex: fill only applies when the
+              // stored points already close the loop. Exact comparison,
+              // not a tolerance -- this is "does the data say closed", the
+              // same kind of stored-value question `_sameBox` answers
+              // exactly elsewhere in this file.
+              coords[0] == coords[(count - 1) * 2] &&
+              coords[1] == coords[(count - 1) * 2 + 1] &&
+              _insideWorldPolygon(
+                  coords, count, ta, tb, tc, td, te, tf, world)) {
+            foundKind = HitKind.fill;
+            foundX = world.x;
+            foundY = world.y;
+          }
+        }
+
+      case EntityKind.circle:
+        final lx = coords[0], ly = coords[1];
+        final wx = ta * lx + tc * ly + te, wy = tb * lx + td * ly + tf;
+        // scaleMagnitude, not the raw local radius: under a non-uniform
+        // instance scale a circle becomes an ellipse in world space, and
+        // this package deliberately avoids ellipse math (see distance.dart's
+        // file doc). The geometric-mean radius is exact under any uniform
+        // scale, rotation, translation or mirror, and an honest
+        // approximation otherwise.
+        final worldRadius = payload.scalars[0] * toWorld.scaleMagnitude;
+        _scratchA.setValues(wx, wy);
+        final rim = distanceToCircle(world, _scratchA, worldRadius);
+        final dx = world.x - wx, dy = world.y - wy;
+        final centreDist = math.sqrt(dx * dx + dy * dy);
+        if (rim <= radius) {
+          foundKind = HitKind.edge;
+          if (centreDist == 0.0) {
+            foundX = wx + worldRadius;
+            foundY = wy;
+          } else {
+            foundX = wx + dx / centreDist * worldRadius;
+            foundY = wy + dy / centreDist * worldRadius;
+          }
+        } else if (centreDist < worldRadius) {
+          foundKind = HitKind.fill;
+          foundX = world.x;
+          foundY = world.y;
+        }
+
+      case EntityKind.arc:
+        final lx = coords[0], ly = coords[1];
+        final wx = ta * lx + tc * ly + te, wy = tb * lx + td * ly + tf;
+        final localRadius = payload.scalars[0];
+        final worldRadius = localRadius * toWorld.scaleMagnitude;
+        final startAngle = payload.scalars[1];
+        final sweep = payload.scalars[2];
+        // The start point, transformed, gives the world-space start angle
+        // directly -- exact under rotation and mirroring alike, without
+        // assuming which axis a mirror flips. A negative determinant
+        // reverses the sweep's turning sense, the same test
+        // [Transform2.anisotropyRatio]'s doc comment uses for "how far from
+        // conformal".
+        final slx = lx + localRadius * math.cos(startAngle);
+        final sly = ly + localRadius * math.sin(startAngle);
+        final wslx = ta * slx + tc * sly + te, wsly = tb * slx + td * sly + tf;
+        final worldStartAngle = math.atan2(wsly - wy, wslx - wx);
+        final worldSweep = toWorld.determinant < 0 ? -sweep : sweep;
+        _scratchA.setValues(wx, wy);
+        final dist = distanceToArc(
+            world, _scratchA, worldRadius, worldStartAngle, worldSweep);
+        if (dist <= radius) {
+          foundKind = HitKind.edge;
+          final dx = world.x - wx, dy = world.y - wy;
+          final centreDist = math.sqrt(dx * dx + dy * dy);
+          if (centreDist == 0.0) {
+            foundX = wx + worldRadius;
+            foundY = wy;
+          } else {
+            foundX = wx + dx / centreDist * worldRadius;
+            foundY = wy + dy / centreDist * worldRadius;
+          }
+        }
+    }
+
+    if (foundKind == null) return;
+
+    final handle = document.entities.handleAt(slot);
+    // A root-level leaf's own handle stands in for its "root-level
+    // ancestor": it has no enclosing instance, and draw order among
+    // root-level things is exactly their own ascending handle order, so
+    // treating it as its own ancestor is what keeps this comparison
+    // consistent with a leaf reached through an instance. Defaulting a
+    // root-level leaf to handle 0 instead would make it lose every tie
+    // against *any* instanced content, regardless of which was actually
+    // drawn later.
+    final effectiveRoot = depth == 0 ? handle.value : _instancePath[0];
+
+    // Kind first: any vertex hit outranks any edge hit outranks any fill
+    // hit, full stop -- see this method's doc comment on priority. Only
+    // once kind ties does the tie-break in the class doc apply: greater
+    // root-level ancestor handle wins, and only when *that* also ties does
+    // the leaf's own handle decide.
+    final better = _bestKind == null ||
+        foundKind.index < _bestKind!.index ||
+        (foundKind == _bestKind &&
+            (effectiveRoot > _bestRoot ||
+                (effectiveRoot == _bestRoot && handle.value > _bestEntity)));
+    if (!better) return;
+
+    _bestKind = foundKind;
+    _bestEntity = handle.value;
+    _bestRoot = effectiveRoot;
+
+    out.entity = handle;
+    out.kind = foundKind;
+    out.worldPoint.setValues(foundX, foundY);
+    _writeChain(out, depth);
+  }
+
+  /// Copies the current descent path into [out.chain], root first.
+  ///
+  /// When the path is deeper than [out]'s capacity, keeps the **deepest**
+  /// entries -- the ones nearest the leaf -- and drops from the root end,
+  /// setting [HitPath.truncated]. Truncating from the root is what keeps
+  /// [HitPath.entity] correct no matter how deep the chain above it goes.
+  void _writeChain(HitPath out, int depth) {
+    final capacity = out.chain.length;
+    if (depth <= capacity) {
+      for (var i = 0; i < depth; i++) {
+        out.chain[i] = _instancePath[i];
+      }
+      out.chainLength = depth;
+      out.truncated = false;
+    } else {
+      final drop = depth - capacity;
+      for (var i = 0; i < capacity; i++) {
+        out.chain[i] = _instancePath[drop + i];
+      }
+      out.chainLength = capacity;
+      out.truncated = true;
     }
   }
 
@@ -580,4 +1023,39 @@ class SpatialIndex {
     _byContainer.clear();
     _disposed = true;
   }
+}
+
+/// Even-odd ray cast, fused with the world transform.
+///
+/// The same algorithm as [insideClosedPolyline], transforming each vertex
+/// into world space with the raw `a..f` coefficients as it goes rather than
+/// through a materialised world-space [GeometryPayload] -- see
+/// [SpatialIndex._considerLeaf]'s doc comment for why. A top-level function,
+/// not a method: it captures nothing but its arguments, so it allocates no
+/// closure and needs no `this`.
+bool _insideWorldPolygon(
+  Float64List coords,
+  int count,
+  double a,
+  double b,
+  double c,
+  double d,
+  double e,
+  double f,
+  Vector2 world,
+) {
+  var inside = false;
+  var jx = a * coords[(count - 1) * 2] + c * coords[(count - 1) * 2 + 1] + e;
+  var jy = b * coords[(count - 1) * 2] + d * coords[(count - 1) * 2 + 1] + f;
+  for (var i = 0; i < count; i++) {
+    final xi = a * coords[i * 2] + c * coords[i * 2 + 1] + e;
+    final yi = b * coords[i * 2] + d * coords[i * 2 + 1] + f;
+    if ((yi > world.y) != (jy > world.y) &&
+        world.x < (jx - xi) * (world.y - yi) / (jy - yi) + xi) {
+      inside = !inside;
+    }
+    jx = xi;
+    jy = yi;
+  }
+  return inside;
 }
