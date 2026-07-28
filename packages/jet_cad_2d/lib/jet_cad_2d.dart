@@ -31,6 +31,7 @@ export 'src/geometry/distance.dart';
 export 'src/geometry/primitives.dart';
 export 'src/geometry/transform2.dart';
 export 'src/index/container_index.dart';
+export 'src/index/convenience_queries.dart';
 export 'src/index/dirty_list.dart';
 export 'src/index/hit.dart';
 export 'src/index/packed_rtree.dart';
