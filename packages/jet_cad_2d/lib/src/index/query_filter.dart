@@ -40,6 +40,17 @@ final class QueryFilter {
 /// per-layer and per-container answers are memoised. The cache must be dropped
 /// whenever a layer record or a node's visibility changes; [invalidate] is that
 /// hook.
+///
+/// No command in `commands.dart` can currently cause that staleness:
+/// [AddNodeCommand] refuses to overwrite an existing handle, [TransformNodeCommand]
+/// rewrites only `transform`, and nothing rewrites [Node.visible] or a
+/// [LayerRecord]'s `visible`/`locked` at all — table records go in only through
+/// [DocumentTables], which this plan has not yet given a mutating command
+/// either. So today, [invalidate] has no caller and every cache this class
+/// builds is correct for the document's whole lifetime. **This is a fact about
+/// today's command set, not a guarantee [FilterEvaluator] enforces** — the next
+/// command that can flip a node's or a layer's visibility or lock state must
+/// call [invalidate] itself; nothing here will notice on its own.
 class FilterEvaluator {
   FilterEvaluator(this.document);
 

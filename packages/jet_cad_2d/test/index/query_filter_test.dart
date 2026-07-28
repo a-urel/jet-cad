@@ -30,6 +30,29 @@ int addOn(DraftDocument doc, Handle owner, Handle layer) {
   return doc.entities.slotOf(handle)!;
 }
 
+/// Chains [depth] nested [GroupNode]s under the document root, each parented
+/// to the previous, and returns the innermost one. Only the outermost node's
+/// visibility is controlled by [outermostVisible] — every other level stays
+/// visible, so a hidden outermost ancestor is the only thing that can make a
+/// leaf beneath the chain fail `visibleOnly`. [depth] is chosen by callers to
+/// sit past any plausible numeric step cap a walk up the chain might carry.
+Handle buildChain(DraftDocument doc, int depth,
+    {required bool outermostVisible}) {
+  var parent = doc.rootHandle;
+  for (var i = 0; i < depth; i++) {
+    final handle = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(GroupNode(
+      handle: handle,
+      parent: parent,
+      transform: Transform2.identity(),
+      children: const [],
+      visible: i == 0 ? outermostVisible : true,
+    )));
+    parent = handle;
+  }
+  return parent;
+}
+
 void main() {
   test('the three presets differ in exactly the documented way', () {
     const all = QueryFilter.all();
@@ -134,6 +157,83 @@ void main() {
 
     expect(
         evaluator.acceptsEntity(slot, const QueryFilter.rendering()), isFalse);
+  });
+
+  test(
+      'a leaf beneath 300 ancestors stays hidden when the outermost is '
+      'hidden, past any plausible depth cap', () {
+    final doc = DraftDocument.empty();
+    final innermost = buildChain(doc, 300, outermostVisible: false);
+    final slot = addOn(doc, innermost, ReservedHandles.layerZero);
+    final evaluator = FilterEvaluator(doc);
+
+    expect(
+        evaluator.acceptsEntity(slot, const QueryFilter.rendering()), isFalse,
+        reason: 'the outermost of 300 ancestors is hidden; a walk that gives '
+            'up before reaching it would wrongly report this leaf visible');
+  });
+
+  test('a leaf beneath 300 all-visible ancestors is visible', () {
+    final doc = DraftDocument.empty();
+    final innermost = buildChain(doc, 300, outermostVisible: true);
+    final slot = addOn(doc, innermost, ReservedHandles.layerZero);
+    final evaluator = FilterEvaluator(doc);
+
+    expect(evaluator.acceptsEntity(slot, const QueryFilter.rendering()), isTrue,
+        reason: 'pairs with the hidden-outermost case above: a walk that '
+            'gives up too eagerly and defaults to hidden must not fail this '
+            'one');
+  });
+
+  test(
+      'a genuine parent cycle terminates and answers, from inside it and '
+      'from outside it', () {
+    final doc = DraftDocument.empty();
+    const a = Handle(300);
+    const b = Handle(301);
+    const c = Handle(302);
+
+    doc.commands.execute(AddNodeCommand(GroupNode(
+      handle: a,
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      children: const [],
+    )));
+    doc.commands.execute(AddNodeCommand(GroupNode(
+      handle: b,
+      parent: a,
+      transform: Transform2.identity(),
+      children: const [],
+    )));
+    // Close the loop directly on the tree: A -> B -> A. No re-parent command
+    // exists yet, so this is the only way to build the malformed graph
+    // validate() exists to catch — and exactly what a parent-chain walk must
+    // survive rather than hang on.
+    doc.tree.replaceNode(GroupNode(
+      handle: a,
+      parent: b,
+      transform: Transform2.identity(),
+      children: const [],
+    ));
+    // A third node outside the cycle whose own parent chain leads into it.
+    doc.commands.execute(AddNodeCommand(GroupNode(
+      handle: c,
+      parent: a,
+      transform: Transform2.identity(),
+      children: const [],
+    )));
+
+    final insideSlot = addOn(doc, a, ReservedHandles.layerZero);
+    final outsideSlot = addOn(doc, c, ReservedHandles.layerZero);
+    final evaluator = FilterEvaluator(doc);
+
+    expect(evaluator.acceptsEntity(insideSlot, const QueryFilter.rendering()),
+        isTrue,
+        reason: 'nothing on the cycle is hidden, and a cycle must not hang '
+            'the query');
+    expect(evaluator.acceptsEntity(outsideSlot, const QueryFilter.rendering()),
+        isTrue,
+        reason: 'walking in from outside the cycle must terminate too');
   });
 
   test('acceptsNode applies the same rules to an instance', () {
