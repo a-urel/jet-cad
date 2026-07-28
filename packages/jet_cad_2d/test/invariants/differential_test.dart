@@ -158,6 +158,13 @@ void main() {
             if (expected != null) {
               expect(hit.entity, expected.entity, reason: reason);
               expect(hit.kind, expected.kind, reason: reason);
+              // The point too, not just entity and kind. Comparing only the
+              // latter two is how an arc's `worldPoint` stayed a radial
+              // projection with no sweep check across the whole corpus while
+              // the snap half of this file had compared coordinates all
+              // along.
+              _expectClose(hit.worldPoint.x, expected.point.x, reason);
+              _expectClose(hit.worldPoint.y, expected.point.y, reason);
             }
           }
         }

@@ -256,9 +256,17 @@ List<Handle> referenceInstancesInRect(
 /// unconditionally), and only on a kind tie does the root-level ancestor's
 /// handle decide, and only on *that* tie does the leaf's own handle decide.
 /// There is deliberately no distance term — a click's "which vertex/edge/
-/// fill wins within one entity" is already resolved by [_hitKindOf]; across
+/// fill wins within one entity" is already resolved by [_hitAtOf]; across
 /// entities, later-drawn (greater handle) wins a tie, not nearer.
-({Handle entity, HitKind kind})? referencePick(
+///
+/// **The [point] is part of the answer, not decoration.** It used to be
+/// absent, so `differential_test.dart` could only compare entity and kind
+/// while its `snapInto` sibling compared coordinates — and an arc whose
+/// reported `HitPath.worldPoint` was a radial projection with no sweep
+/// check went unnoticed through the whole corpus. What the two sides must
+/// agree on is the point [HitPath.worldPoint] carries: the feature that was
+/// hit, not the query point.
+({Handle entity, HitKind kind, Vector2 point})? referencePick(
   DraftDocument doc,
   Vector2 world,
   double radius,
@@ -266,26 +274,33 @@ List<Handle> referenceInstancesInRect(
   List<LeafCandidate> leaves,
 ) {
   final evaluator = FilterEvaluator(doc);
-  ({Handle entity, HitKind kind, Handle root})? best;
+  ({Handle entity, HitKind kind, Vector2 point, Handle root})? best;
 
   for (final candidate in leaves) {
     if (!evaluator.acceptsEntity(candidate.slot, filter)) continue;
 
-    final kind = _hitKindOf(doc, candidate, world, radius);
-    if (kind == null) continue;
+    final hit = _hitAtOf(doc, candidate, world, radius);
+    if (hit == null) continue;
 
     final handle = doc.entities.handleAt(candidate.slot);
     if (best == null ||
-        kind.index < best.kind.index ||
-        (kind == best.kind &&
+        hit.kind.index < best.kind.index ||
+        (hit.kind == best.kind &&
             (candidate.root.value > best.root.value ||
                 (candidate.root == best.root &&
                     handle.value > best.entity.value)))) {
-      best = (entity: handle, kind: kind, root: candidate.root);
+      best = (
+        entity: handle,
+        kind: hit.kind,
+        point: hit.point,
+        root: candidate.root
+      );
     }
   }
 
-  return best == null ? null : (entity: best.entity, kind: best.kind);
+  return best == null
+      ? null
+      : (entity: best.entity, kind: best.kind, point: best.point);
 }
 
 /// The winning snap candidate, or null. [leaves] is [allLeavesInWorld] for
@@ -351,10 +366,19 @@ List<Handle> referenceInstancesInRect(
 }
 
 /// Measures one candidate leaf in world space and returns the highest-
-/// priority [HitKind] within [radius], or null. Checked in the fixed order
-/// vertex, then edge, then fill — mirroring `SpatialIndex._considerLeaf`'s
-/// doc comment, written out again independently rather than shared.
-HitKind? _hitKindOf(
+/// priority [HitKind] within [radius] **and the point that hit reports**, or
+/// null. Checked in the fixed order vertex, then edge, then fill — mirroring
+/// `SpatialIndex._considerLeaf`'s doc comment, written out again
+/// independently rather than shared.
+///
+/// The point is computed here the obvious way — nearest vertex, clamped foot
+/// on the nearest segment, radial projection onto a rim, the query point
+/// itself for a fill — with no help from `lib/src/index/`. Within one leaf
+/// the *first* of several equally near features wins, matching
+/// `_considerLeaf`'s strict `<` comparisons; a `<=` there would silently
+/// prefer the last, which is a real difference on a polyline whose vertices
+/// coincide.
+({HitKind kind, Vector2 point})? _hitAtOf(
   DraftDocument doc,
   LeafCandidate candidate,
   Vector2 world,
@@ -371,7 +395,9 @@ HitKind? _hitKindOf(
     case EntityKind.text:
     case EntityKind.attrib:
       final p = toWorld.transformPoint(payload.pointAt(0));
-      return world.distanceTo(p) <= radius ? HitKind.vertex : null;
+      return world.distanceTo(p) <= radius
+          ? (kind: HitKind.vertex, point: p)
+          : null;
 
     case EntityKind.line:
     case EntityKind.polyline:
@@ -380,19 +406,30 @@ HitKind? _hitKindOf(
           toWorld.transformPoint(payload.pointAt(i)),
       ];
       var bestVertex = double.infinity;
+      var bestVertexPoint = worldPts[0];
       for (final p in worldPts) {
         final d = world.distanceTo(p);
-        if (d < bestVertex) bestVertex = d;
+        if (d < bestVertex) {
+          bestVertex = d;
+          bestVertexPoint = p;
+        }
       }
-      if (bestVertex <= radius) return HitKind.vertex;
+      if (bestVertex <= radius) {
+        return (kind: HitKind.vertex, point: bestVertexPoint);
+      }
       if (count < 2) return null;
 
       var bestEdge = double.infinity;
+      var bestEdgePoint = worldPts[0];
       for (var i = 0; i + 1 < count; i++) {
         final d = distanceToSegment(world, worldPts[i], worldPts[i + 1]);
-        if (d < bestEdge) bestEdge = d;
+        if (d < bestEdge) {
+          bestEdge = d;
+          bestEdgePoint =
+              _clampedFootOnSegment(world, worldPts[i], worldPts[i + 1]);
+        }
       }
-      if (bestEdge <= radius) return HitKind.edge;
+      if (bestEdge <= radius) return (kind: HitKind.edge, point: bestEdgePoint);
 
       if (record.kind == EntityKind.polyline &&
           count >= 3 &&
@@ -404,7 +441,9 @@ HitKind? _hitKindOf(
           payload.coords[0] == payload.coords[(count - 1) * 2] &&
           payload.coords[1] == payload.coords[(count - 1) * 2 + 1] &&
           _insideWorldPolygon(worldPts, world)) {
-        return HitKind.fill;
+        // A fill hit has no feature of its own to report, so the query point
+        // stands in for it -- the same convention `_considerLeaf` uses.
+        return (kind: HitKind.fill, point: world);
       }
       return null;
 
@@ -412,8 +451,20 @@ HitKind? _hitKindOf(
       final centre = toWorld.transformPoint(payload.pointAt(0));
       final worldRadius = payload.scalars[0] * toWorld.scaleMagnitude;
       final rim = distanceToCircle(world, centre, worldRadius);
-      if (rim <= radius) return HitKind.edge;
-      if (world.distanceTo(centre) < worldRadius) return HitKind.fill;
+      final centreDist = world.distanceTo(centre);
+      if (rim <= radius) {
+        // Dead centre has no single nearest rim point; both sides answer
+        // "the one at angle zero" by convention, the same way they agree on
+        // any other tie-break here.
+        final point = centreDist == 0.0
+            ? Vector2(centre.x + worldRadius, centre.y)
+            : Vector2(
+                centre.x + (world.x - centre.x) / centreDist * worldRadius,
+                centre.y + (world.y - centre.y) / centreDist * worldRadius,
+              );
+        return (kind: HitKind.edge, point: point);
+      }
+      if (centreDist < worldRadius) return (kind: HitKind.fill, point: world);
       return null;
 
     case EntityKind.arc:
@@ -433,8 +484,58 @@ HitKind? _hitKindOf(
       final worldSweep = toWorld.determinant < 0 ? -sweep : sweep;
       final d = distanceToArc(
           world, centre, worldRadius, worldStartAngle, worldSweep);
-      return d <= radius ? HitKind.edge : null;
+      if (d > radius) return null;
+      return (
+        kind: HitKind.edge,
+        point: _footOnWorldArc(
+            world, centre, worldRadius, worldStartAngle, worldSweep),
+      );
   }
+}
+
+/// The point of `[a], [b]` nearest [world], clamped to the segment.
+///
+/// Written out rather than calling `projectOntoSegment`: that function is
+/// what the implementation itself uses for its `nearest`/`perpendicular`
+/// snap candidates, and a pick's edge point has to be derived here from the
+/// definition of "closest point on a segment", not from the same code.
+Vector2 _clampedFootOnSegment(Vector2 world, Vector2 a, Vector2 b) {
+  final abx = b.x - a.x, aby = b.y - a.y;
+  final lenSq = abx * abx + aby * aby;
+  if (lenSq == 0.0) return a;
+  var t = ((world.x - a.x) * abx + (world.y - a.y) * aby) / lenSq;
+  if (t < 0.0) {
+    t = 0.0;
+  } else if (t > 1.0) {
+    t = 1.0;
+  }
+  return Vector2(a.x + t * abx, a.y + t * aby);
+}
+
+/// The point of a *drawn* arc nearest [world]: the radial projection when
+/// [world]'s direction from the centre falls inside the sweep, otherwise the
+/// nearer endpoint.
+///
+/// An arc is not a circle. Projecting radially with no sweep check returns a
+/// point the curve never passes through, which is exactly the disagreement
+/// between `pickInto` and `snapInto` this oracle was extended to catch.
+Vector2 _footOnWorldArc(Vector2 world, Vector2 centre, double worldRadius,
+    double worldStartAngle, double worldSweep) {
+  final dx = world.x - centre.x, dy = world.y - centre.y;
+  final centreDist = math.sqrt(dx * dx + dy * dy);
+  if (centreDist != 0.0 &&
+      angleInSweep(math.atan2(dy, dx), worldStartAngle, worldSweep)) {
+    return Vector2(centre.x + dx / centreDist * worldRadius,
+        centre.y + dy / centreDist * worldRadius);
+  }
+  final endAngle = worldStartAngle + worldSweep;
+  final start = Vector2(centre.x + worldRadius * math.cos(worldStartAngle),
+      centre.y + worldRadius * math.sin(worldStartAngle));
+  final end = Vector2(centre.x + worldRadius * math.cos(endAngle),
+      centre.y + worldRadius * math.sin(endAngle));
+  return world.distanceToSquared(start) <= world.distanceToSquared(end)
+      ? start
+      : end;
 }
 
 /// Even-odd ray cast over already-world-space points. The same standard

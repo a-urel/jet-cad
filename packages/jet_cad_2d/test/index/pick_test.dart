@@ -1000,4 +1000,120 @@ void main() {
     expect(hit.entity, circle);
     expect(hit.kind, HitKind.edge);
   });
+
+  // --- arcs -----------------------------------------------------------
+  //
+  // `pickInto` had no arc coverage here at all, which is how a `worldPoint`
+  // that ignored the sweep entirely survived: the hit *test* uses
+  // `distanceToArc` and was always right, so an arc-free pick suite could
+  // not tell the reported point apart from the query's own verdict.
+
+  test('picks an arc by its drawn sweep', () {
+    final doc = DraftDocument.empty();
+    final arc = addEntity(
+        doc, doc.rootHandle, EntityKind.arc, [0, 0], [10, 0, math.pi / 2]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    expect(index.pickInto(Vector2(7.5, 7.5), 1.0, const QueryFilter.all(), hit),
+        isTrue);
+    expect(hit.entity, arc);
+    expect(hit.kind, HitKind.edge);
+    // Inside the sweep, so the reported point is the radial foot: 45
+    // degrees out at the arc's own radius.
+    expect(hit.worldPoint.x, closeTo(10 / math.sqrt2, 1e-9));
+    expect(hit.worldPoint.y, closeTo(10 / math.sqrt2, 1e-9));
+  });
+
+  test('misses an arc off its sweep even though the full circle would hit', () {
+    final doc = DraftDocument.empty();
+    addEntity(
+        doc, doc.rootHandle, EntityKind.arc, [0, 0], [10, 0, math.pi / 2]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    expect(index.pickInto(Vector2(-10, 0), 1.0, const QueryFilter.all(), hit),
+        isFalse,
+        reason: 'a point on the circle but off the sweep is not on the arc');
+  });
+
+  test('an arc hit past its end reports the endpoint, not a point off the arc',
+      () {
+    final doc = DraftDocument.empty();
+    final arc = addEntity(
+        doc, doc.rootHandle, EntityKind.arc, [0, 0], [10, 0, math.pi / 2]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    // (10, -1) is one unit past the start endpoint (10, 0), measured along
+    // the circle it is at angle -0.0997 rad -- outside the sweep [0, pi/2].
+    expect(index.pickInto(Vector2(10, -1), 2.0, const QueryFilter.all(), hit),
+        isTrue);
+    expect(hit.entity, arc);
+    expect(hit.kind, HitKind.edge);
+
+    final angle = math.atan2(hit.worldPoint.y, hit.worldPoint.x);
+    expect(angle, greaterThanOrEqualTo(-1e-12),
+        reason: 'the reported point must lie on the drawn sweep [0, pi/2], '
+            'not on the part of the circle the arc never draws');
+    expect(angle, lessThanOrEqualTo(math.pi / 2 + 1e-12));
+    expect(hit.worldPoint.x, closeTo(10, 1e-9));
+    expect(hit.worldPoint.y, closeTo(0, 1e-9));
+  });
+
+  test('pick and snap agree on the point of an arc near its endpoint', () {
+    final doc = DraftDocument.empty();
+    addEntity(
+        doc, doc.rootHandle, EntityKind.arc, [0, 0], [10, 0, math.pi / 2]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    expect(index.pickInto(Vector2(10, -1), 2.0, const QueryFilter.all(), hit),
+        isTrue);
+
+    final snap = SnapResult();
+    index.snapInto(Vector2(10, -1), 2.0, SnapMask.all, snap);
+    expect(snap.found, isTrue);
+    expect(snap.kind, SnapKind.endpoint,
+        reason: 'the arc endpoint is the nearest snappable feature here');
+    expect(hit.worldPoint.x, closeTo(snap.point.x, 1e-9));
+    expect(hit.worldPoint.y, closeTo(snap.point.y, 1e-9));
+  });
+
+  test('an arc under a mirroring instance still reports a point on its sweep',
+      () {
+    final doc = DraftDocument.empty();
+    final def = doc.handleSeed.next();
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'ArcDef',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    addEntity(doc, def, EntityKind.arc, [0, 0], [10, 0, math.pi / 2]);
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: doc.handleSeed.next(),
+      parent: doc.rootHandle,
+      // Mirrors about the Y axis: the drawn sweep becomes [pi/2, pi].
+      transform: Transform2.scale(-1, 1),
+      definition: def,
+      layer: ReservedHandles.layerZero,
+    )));
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    expect(index.pickInto(Vector2(-10, -1), 2.0, const QueryFilter.all(), hit),
+        isTrue);
+    expect(hit.kind, HitKind.edge);
+    final angle = math.atan2(hit.worldPoint.y, hit.worldPoint.x);
+    expect(angle, greaterThanOrEqualTo(math.pi / 2 - 1e-12),
+        reason: 'the mirrored sweep is [pi/2, pi]');
+    expect(angle, lessThanOrEqualTo(math.pi + 1e-12));
+  });
 }

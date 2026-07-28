@@ -848,15 +848,19 @@ class SpatialIndex {
             world, _scratchA, worldRadius, worldStartAngle, worldSweep);
         if (dist <= radius) {
           foundKind = HitKind.edge;
-          final dx = world.x - wx, dy = world.y - wy;
-          final centreDist = math.sqrt(dx * dx + dy * dy);
-          if (centreDist == 0.0) {
-            foundX = wx + worldRadius;
-            foundY = wy;
-          } else {
-            foundX = wx + dx / centreDist * worldRadius;
-            foundY = wy + dy / centreDist * worldRadius;
-          }
+          // [_footOnArc], not a bare radial projection: an arc draws only
+          // its sweep, so when the nearest point of the drawn curve is an
+          // endpoint the radial foot is not on the arc at all. The hit
+          // *test* above has always known that -- [distanceToArc] measures
+          // to the endpoints outside the sweep -- but the reported point did
+          // not, so a pick just past an arc's end answered `true` with a
+          // `worldPoint` off the curve. Sharing [_footOnArc] with
+          // [_considerSnapLeaf] is what keeps pick and snap agreeing on what
+          // "the point on an arc" means.
+          final foot = _footOnArc(world, wx, wy, worldRadius, worldStartAngle,
+              worldSweep, _scratchB);
+          foundX = foot.x;
+          foundY = foot.y;
         }
     }
 
@@ -1384,17 +1388,15 @@ class SpatialIndex {
           final worldSweep = ta * td - tb * tc < 0 ? -sweep : sweep;
 
           if (mask.has(SnapKind.nearest) || mask.has(SnapKind.perpendicular)) {
-            final foot = _footOnArc(
-                world, wcx, wcy, worldRadius, worldStartAngle, worldSweep);
-            if (foot != null) {
-              if (mask.has(SnapKind.perpendicular)) {
-                _considerSnapCandidate(SnapKind.perpendicular, foot.x, foot.y,
-                    world, radius, slot, depth, out);
-              }
-              if (mask.has(SnapKind.nearest)) {
-                _considerSnapCandidate(SnapKind.nearest, foot.x, foot.y, world,
-                    radius, slot, depth, out);
-              }
+            final foot = _footOnArc(world, wcx, wcy, worldRadius,
+                worldStartAngle, worldSweep, _snapProjection);
+            if (mask.has(SnapKind.perpendicular)) {
+              _considerSnapCandidate(SnapKind.perpendicular, foot.x, foot.y,
+                  world, radius, slot, depth, out);
+            }
+            if (mask.has(SnapKind.nearest)) {
+              _considerSnapCandidate(SnapKind.nearest, foot.x, foot.y, world,
+                  radius, slot, depth, out);
             }
           }
           if (mask.has(SnapKind.tangent) &&
@@ -1491,16 +1493,30 @@ class SpatialIndex {
   /// and [angleInSweep]'s quadrant check draws above. All angles here are
   /// world-space, matching [worldStartAngle]/[worldSweep] as computed by
   /// the caller.
-  Vector2? _footOnArc(Vector2 world, double cx, double cy, double worldRadius,
-      double worldStartAngle, double worldSweep) {
+  ///
+  /// The answer is written into [into] and returned, never allocated: the
+  /// two callers own different scratch points -- [_considerSnapLeaf] passes
+  /// [_snapProjection], [_considerLeaf] passes [_scratchB] -- because
+  /// nothing should have to reason about whether the pick path and the snap
+  /// path may share one buffer. Returning a fresh `Vector2` instead would be
+  /// one allocation per candidate arc, which both paths' zero-allocation
+  /// guarantee forbids.
+  ///
+  /// **Both [pickInto] and [snapInto] go through here**, so "the point on an
+  /// arc" means the same thing to each. It did not always: `_considerLeaf`
+  /// used to project radially with no sweep check at all, so a pick near an
+  /// arc's endpoint reported a `worldPoint` off the drawn curve while
+  /// `snapInto`, on the very same arc, reported the endpoint.
+  Vector2 _footOnArc(Vector2 world, double cx, double cy, double worldRadius,
+      double worldStartAngle, double worldSweep, Vector2 into) {
     final dx = world.x - cx, dy = world.y - cy;
     final centreDist = math.sqrt(dx * dx + dy * dy);
     if (centreDist != 0.0 &&
         angleInSweep(math.atan2(dy, dx), worldStartAngle, worldSweep)) {
-      _snapProjection
+      into
         ..x = cx + dx / centreDist * worldRadius
         ..y = cy + dy / centreDist * worldRadius;
-      return _snapProjection;
+      return into;
     }
 
     final endAngle = worldStartAngle + worldSweep;
@@ -1513,15 +1529,15 @@ class SpatialIndex {
     final db =
         (world.x - ebx) * (world.x - ebx) + (world.y - eby) * (world.y - eby);
     if (da <= db) {
-      _snapProjection
+      into
         ..x = eax
         ..y = eay;
     } else {
-      _snapProjection
+      into
         ..x = ebx
         ..y = eby;
     }
-    return _snapProjection;
+    return into;
   }
 
   /// Writes the two points where a line from [px],[py] would be tangent to
