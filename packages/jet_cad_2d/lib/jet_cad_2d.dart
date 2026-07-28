@@ -33,6 +33,7 @@ export 'src/index/container_index.dart';
 export 'src/index/dirty_list.dart';
 export 'src/index/packed_rtree.dart';
 export 'src/index/query_filter.dart';
+export 'src/index/query_scratch.dart';
 export 'src/index/spatial_index.dart';
 export 'src/store/entity_store.dart';
 export 'src/store/geometry_store.dart';

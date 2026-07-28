@@ -248,12 +248,14 @@ class DraftDocument implements CommandTarget {
   /// one listed them; and [RemoveEntityCommand] does not unlist, so a loaded
   /// container kept a dangling child that every later save re-emitted.
   ///
-  /// Leaves come back in ascending **slot** order. That is insertion order
-  /// within a session and file order after a load, but it is emphatically not
-  /// an explicit z-order and nothing may treat it as one: a leaf's slot moves
-  /// under `purge()` and under undo, neither of which is a reordering anyone
-  /// asked for. Only [GroupNode.children] carries a deliberate order, and it
-  /// orders child nodes.
+  /// Leaves come back in ascending **slot** order, which is an implementation
+  /// detail of this walk and not an ordering anyone may rely on: a slot moves
+  /// under `purge()` and under undo. **Draw order is ascending handle value**,
+  /// which is stable across undo, save, load and purge, and is what every
+  /// query returns and what hit-test ties break on. A caller that needs draw
+  /// order must sort by handle — `SpatialIndex` does this for its callers.
+  /// Only [GroupNode.children] carries a deliberate order, and it orders
+  /// child nodes.
   ///
   /// A `children` entry naming no node in the tree is skipped rather than
   /// treated as a leaf — this is [DocumentTree.childNodesOf], which is how

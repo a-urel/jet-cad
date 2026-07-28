@@ -6,6 +6,8 @@ import '../document/style.dart';
 import '../geometry/aabb2.dart';
 import '../geometry/transform2.dart';
 import 'container_index.dart';
+import 'query_filter.dart';
+import 'query_scratch.dart';
 
 /// Every [ContainerIndex] in a document, kept current against its changes.
 ///
@@ -45,6 +47,45 @@ class SpatialIndex {
   }
 
   int get containerCount => _byContainer.length;
+
+  final QueryScratch _scratch = QueryScratch();
+  final List<Handle> _instanceScratch = <Handle>[];
+  late final FilterEvaluator _filters = FilterEvaluator(document);
+
+  /// Visits the slot of every root-level leaf whose box overlaps [world],
+  /// in ascending handle order.
+  ///
+  /// **Does not descend into instances.** A shared definition's entities would
+  /// otherwise be reported once per instance, with no way to tell the
+  /// instances apart — and the renderer does not want that, since it replays
+  /// one cached picture per instance. Use [forEachInstanceInRect] for those,
+  /// and `pickInto` when you need to descend.
+  void forEachInRect(
+      Aabb2 world, QueryFilter filter, void Function(int slot) visit) {
+    if (world.isEmpty) return;
+    _scratch.reset();
+    rootIndex.searchLeaves(world, (slot) {
+      if (_filters.acceptsEntity(slot, filter)) _scratch.add(slot);
+    });
+    _scratch.sortByHandle(document.entities);
+    for (var i = 0; i < _scratch.length; i++) {
+      visit(_scratch[i]);
+    }
+  }
+
+  /// Visits every root-level instance whose box overlaps [world], ascending.
+  void forEachInstanceInRect(
+      Aabb2 world, QueryFilter filter, void Function(Handle instance) visit) {
+    if (world.isEmpty) return;
+    _instanceScratch.clear();
+    rootIndex.searchInstances(world, (node) {
+      if (_filters.acceptsNode(node, filter)) _instanceScratch.add(node);
+    });
+    _instanceScratch.sort((a, b) => a.value.compareTo(b.value));
+    for (final node in _instanceScratch) {
+      visit(node);
+    }
+  }
 
   int _rebuildCount = 0;
   int _dirtyCount = 0;
@@ -92,6 +133,13 @@ class SpatialIndex {
     for (final slot in document.entities.liveSlots) {
       _lastKnownSlot[document.entities.handleAt(slot)] = slot;
     }
+    // A rebuild also follows a layer edit or a load, either of which may
+    // change what a cached visibility answer means for a handle that is
+    // reused. No shipped command can flip a layer's or node's visibility
+    // today — see [FilterEvaluator]'s own doc comment — so this has no
+    // observable effect yet; it is the conservative default for when one
+    // does.
+    _filters.invalidate();
   }
 
   /// Rebuilds one container, leaving the rest alone.
