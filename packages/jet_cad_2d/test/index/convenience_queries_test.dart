@@ -49,6 +49,43 @@ void main() {
     expect(viaCallback.toSet(), handles.toSet());
   });
 
+  test('entitiesInRect forwards the filter it was given', () {
+    // `entitiesInRect` is pure delegation to `forEachInRect`, which is exactly
+    // the shape a dropped or hard-coded argument hides in: every assertion
+    // that only compares the two against each other still passes when the
+    // wrapper substitutes `QueryFilter.all()` for the caller's filter,
+    // because both sides then use the same wrong value. This asserts the
+    // filter's *effect* instead, so the two filters must disagree on the
+    // same document.
+    final doc = DraftDocument.empty();
+    const hiddenLayer = Handle(60);
+    doc.tables.layers.add(LayerRecord(
+      handle: hiddenLayer,
+      name: 'Hidden',
+      color: const IndexedColor(3),
+      linetype: ReservedHandles.continuousLinetype,
+      lineweight: kLineweightDefault,
+      transparency: 0,
+      visible: false,
+      locked: false,
+    ));
+    final visible =
+        addOn(doc, doc.rootHandle, ReservedHandles.layerZero, EntityKind.line);
+    final hidden = addOn(doc, doc.rootHandle, hiddenLayer, EntityKind.line);
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final rect = Aabb2(Vector2(-1, -1), Vector2(5, 5));
+
+    expect(index.entitiesInRect(rect, const QueryFilter.all()).toList(),
+        [visible, hidden],
+        reason: 'QueryFilter.all() keeps the entity on the hidden layer');
+    expect(index.entitiesInRect(rect, const QueryFilter.rendering()).toList(),
+        [visible],
+        reason: 'QueryFilter.rendering() drops it -- if this returns both, '
+            'the wrapper is not passing the caller\'s filter through');
+  });
+
   test('onLayer returns only that layer, ascending', () {
     final doc = DraftDocument.empty();
     const other = Handle(60);
