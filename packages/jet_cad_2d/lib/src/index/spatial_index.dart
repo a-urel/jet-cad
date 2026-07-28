@@ -367,8 +367,17 @@ class SpatialIndex {
       _bestKind = null;
       _bestEntity = 0;
       _bestRoot = 0;
-      _descend(root, Transform2.identity(), world, radius, filter, 0, out,
-          SnapMask.none, null);
+      _descend(
+          root,
+          Transform2.identity(),
+          world,
+          radius,
+          radius + _broadPhaseMargin().pick,
+          filter,
+          0,
+          out,
+          SnapMask.none,
+          null);
       return _bestKind != null;
     } finally {
       _endQuery();
@@ -407,6 +416,7 @@ class SpatialIndex {
     Transform2 toWorld,
     Vector2 world,
     double radius,
+    double broadRadius,
     QueryFilter filter,
     int depth,
     HitPath? pickOut,
@@ -425,19 +435,54 @@ class SpatialIndex {
       // report.
       return;
     }
+    // [broadRadius], not [radius]: the broad phase must cover every point
+    // the narrow phase would accept, and for a circle or an arc that region
+    // is not the entity's own indexed box -- see [_broadPhaseMargin] and
+    // [NarrowPhaseSlack]. Widening the world square before inverting is what
+    // makes one margin correct at every depth: an ancestor's instance box
+    // always contains the mapped-up box of the leaf inside it, so a query
+    // that reaches the leaf's own box necessarily reaches every instance box
+    // on the way down to it.
     final localQuery = Aabb2(
-      Vector2(world.x - radius, world.y - radius),
-      Vector2(world.x + radius, world.y + radius),
+      Vector2(world.x - broadRadius, world.y - broadRadius),
+      Vector2(world.x + broadRadius, world.y + broadRadius),
     ).transformedBy(toLocal);
 
     index.searchLeaves(localQuery, (slot) {
-      if (_filters.acceptsEntity(slot, filter)) {
-        if (pickOut != null) {
-          _considerLeaf(slot, toWorld, world, radius, depth, pickOut);
-        } else {
-          _considerSnapLeaf(
-              slot, toWorld, world, radius, snapMask, depth, snapOut!);
-        }
+      if (!_filters.acceptsEntity(slot, filter)) return;
+      // A leaf reached through a flattened GroupNode carries that group's
+      // composed transform (null when there is none, which is the common
+      // case); the narrow phase needs toWorld-after-group, since the leaf's
+      // stored coordinates are in the group's space, not the container's.
+      // Composed into six loose doubles rather than a Transform2: this runs
+      // once per candidate, and allocating a matrix here is exactly what
+      // pickInto's and snapInto's zero-allocation guarantee forbids. The
+      // argument order matches Transform2.multiply -- the group is applied
+      // first, then toWorld -- so this is toWorld.multiply(group) written
+      // out.
+      final group = index.transformOfLeaf(slot);
+      final double ta, tb, tc, td, te, tf;
+      if (group == null) {
+        ta = toWorld.a;
+        tb = toWorld.b;
+        tc = toWorld.c;
+        td = toWorld.d;
+        te = toWorld.e;
+        tf = toWorld.f;
+      } else {
+        ta = toWorld.a * group.a + toWorld.c * group.b;
+        tb = toWorld.b * group.a + toWorld.d * group.b;
+        tc = toWorld.a * group.c + toWorld.c * group.d;
+        td = toWorld.b * group.c + toWorld.d * group.d;
+        te = toWorld.a * group.e + toWorld.c * group.f + toWorld.e;
+        tf = toWorld.b * group.e + toWorld.d * group.f + toWorld.f;
+      }
+      if (pickOut != null) {
+        _considerLeaf(
+            slot, ta, tb, tc, td, te, tf, world, radius, depth, pickOut);
+      } else {
+        _considerSnapLeaf(slot, ta, tb, tc, td, te, tf, world, radius, snapMask,
+            depth, snapOut!);
       }
     });
 
@@ -479,15 +524,24 @@ class SpatialIndex {
       // toWorld-after-instance, never the reverse -- reversing it would
       // silently misplace every entity behind a rotated or scaled instance.
       final composed = toWorld.multiply(index.transformOfInstance(node));
-      _descend(child, composed, world, radius, filter, depth + 1, pickOut,
-          snapMask, snapOut);
+      _descend(child, composed, world, radius, broadRadius, filter, depth + 1,
+          pickOut, snapMask, snapOut);
     }
   }
 
   /// Measures one candidate leaf in world space and, if it is the best hit
   /// found so far this pick, writes it into [out].
   ///
-  /// Every point and segment is transformed into world space with [toWorld]
+  /// The world transform arrives as its six raw coefficients rather than as
+  /// a [Transform2], because [_descend] must compose the container's own
+  /// transform with the leaf's flattened-group transform for every candidate
+  /// (see [ContainerIndex.transformOfLeaf]) and building a `Transform2` to
+  /// hold the product would allocate one matrix per candidate — exactly what
+  /// this method's zero-allocation guarantee forbids. The coefficients are
+  /// passed by value, so nothing here depends on a shared scratch matrix
+  /// staying untouched for the duration of the call.
+  ///
+  /// Every point and segment is transformed into world space with them
   /// **before** measuring -- never the other way round, which is what lets
   /// this stay exact under a mirrored or non-uniformly scaled instance
   /// without any ellipse math. Priority within one entity is checked in the
@@ -506,7 +560,12 @@ class SpatialIndex {
   /// are reused directly against the hoisted scratch vectors.
   void _considerLeaf(
     int slot,
-    Transform2 toWorld,
+    double ta,
+    double tb,
+    double tc,
+    double td,
+    double te,
+    double tf,
     Vector2 world,
     double radius,
     int depth,
@@ -517,9 +576,6 @@ class SpatialIndex {
     final coords = payload.coords;
     final count = payload.pointCount;
     if (count == 0) return;
-
-    final ta = toWorld.a, tb = toWorld.b, tc = toWorld.c, td = toWorld.d;
-    final te = toWorld.e, tf = toWorld.f;
 
     HitKind? foundKind;
     var foundX = 0.0, foundY = 0.0;
@@ -620,8 +676,12 @@ class SpatialIndex {
         // this package deliberately avoids ellipse math (see distance.dart's
         // file doc). The geometric-mean radius is exact under any uniform
         // scale, rotation, translation or mirror, and an honest
-        // approximation otherwise.
-        final worldRadius = payload.scalars[0] * toWorld.scaleMagnitude;
+        // approximation otherwise. Where that approximation reaches outside
+        // this leaf's own indexed box, the broad phase that fed this
+        // candidate has already been widened to compensate -- see
+        // [NarrowPhaseSlack], which is derived from this very formula.
+        final worldRadius =
+            payload.scalars[0] * _scaleMagnitudeOf(ta, tb, tc, td);
         _scratchA.setValues(wx, wy);
         final rim = distanceToCircle(world, _scratchA, worldRadius);
         final dx = world.x - wx, dy = world.y - wy;
@@ -645,7 +705,7 @@ class SpatialIndex {
         final lx = coords[0], ly = coords[1];
         final wx = ta * lx + tc * ly + te, wy = tb * lx + td * ly + tf;
         final localRadius = payload.scalars[0];
-        final worldRadius = localRadius * toWorld.scaleMagnitude;
+        final worldRadius = localRadius * _scaleMagnitudeOf(ta, tb, tc, td);
         final startAngle = payload.scalars[1];
         final sweep = payload.scalars[2];
         // The start point, transformed, gives the world-space start angle
@@ -658,7 +718,7 @@ class SpatialIndex {
         final sly = ly + localRadius * math.sin(startAngle);
         final wslx = ta * slx + tc * sly + te, wsly = tb * slx + td * sly + tf;
         final worldStartAngle = math.atan2(wsly - wy, wslx - wx);
-        final worldSweep = toWorld.determinant < 0 ? -sweep : sweep;
+        final worldSweep = ta * td - tb * tc < 0 ? -sweep : sweep;
         _scratchA.setValues(wx, wy);
         final dist = distanceToArc(
             world, _scratchA, worldRadius, worldStartAngle, worldSweep);
@@ -801,7 +861,14 @@ class SpatialIndex {
       _bestSnapDist = double.infinity;
       _bestSnapEntity = 0;
       _bestSnapRoot = 0;
-      _descend(root, Transform2.identity(), world, radius,
+      // The `center` channel only when the mask can actually produce a
+      // centre candidate: an arc's centre is the one snap point that lies
+      // outside the arc's own indexed box, and charging every snap for it
+      // would widen the broad phase by an arc radius for masks that can
+      // never return one. See [NarrowPhaseSlack].
+      final slack = _broadPhaseMargin();
+      final margin = mask.has(SnapKind.center) ? slack.snap : slack.pick;
+      _descend(root, Transform2.identity(), world, radius, radius + margin,
           const QueryFilter.all(), 0, null, mask, out);
       if (mask.has(SnapKind.intersection)) {
         _considerIntersections(world, radius, out);
@@ -921,7 +988,12 @@ class SpatialIndex {
   /// never has to re-check the mask itself.
   void _considerSnapLeaf(
     int slot,
-    Transform2 toWorld,
+    double ta,
+    double tb,
+    double tc,
+    double td,
+    double te,
+    double tf,
     Vector2 world,
     double radius,
     SnapMask mask,
@@ -933,9 +1005,6 @@ class SpatialIndex {
     final coords = payload.coords;
     final count = payload.pointCount;
     if (count == 0) return;
-
-    final ta = toWorld.a, tb = toWorld.b, tc = toWorld.c, td = toWorld.d;
-    final te = toWorld.e, tf = toWorld.f;
 
     switch (kind) {
       case EntityKind.point:
@@ -1001,7 +1070,7 @@ class SpatialIndex {
         // so a non-uniform instance scale is approximated by the
         // geometric-mean radius, exact under any uniform scale, rotation,
         // translation or mirror.
-        final worldRadius = r * toWorld.scaleMagnitude;
+        final worldRadius = r * _scaleMagnitudeOf(ta, tb, tc, td);
         if (mask.has(SnapKind.center)) {
           _considerSnapCandidate(
               SnapKind.center, wcx, wcy, world, radius, slot, depth, out);
@@ -1083,7 +1152,7 @@ class SpatialIndex {
             mask.has(SnapKind.perpendicular) ||
             mask.has(SnapKind.tangent)) {
           final wcx = ta * cx + tc * cy + te, wcy = tb * cx + td * cy + tf;
-          final worldRadius = r * toWorld.scaleMagnitude;
+          final worldRadius = r * _scaleMagnitudeOf(ta, tb, tc, td);
           // World start angle and sweep, exactly [_considerLeaf]'s arc
           // derivation: the start point transformed gives the world-space
           // start angle directly -- exact under rotation and mirroring,
@@ -1094,7 +1163,7 @@ class SpatialIndex {
           final wslx = ta * slx + tc * sly + te,
               wsly = tb * slx + td * sly + tf;
           final worldStartAngle = math.atan2(wsly - wcy, wslx - wcx);
-          final worldSweep = toWorld.determinant < 0 ? -sweep : sweep;
+          final worldSweep = ta * td - tb * tc < 0 ? -sweep : sweep;
 
           if (mask.has(SnapKind.nearest) || mask.has(SnapKind.perpendicular)) {
             final foot = _footOnArc(
@@ -1328,6 +1397,72 @@ class SpatialIndex {
     }
   }
 
+  /// The cached whole-document broad-phase margin, or null when it must be
+  /// recomputed. See [_broadPhaseMargin].
+  NarrowPhaseSlack? _margin;
+
+  /// How much wider than its own radius a pick or a snap must search, so
+  /// that its broad phase is never tighter than the region its narrow phase
+  /// would accept.
+  ///
+  /// **Why one number for the whole document, applied to the world square,
+  /// rather than a per-container one applied per level:** an instance's box
+  /// always contains the box of every leaf underneath it, mapped up into the
+  /// same space. So a query region that reaches a leaf's own box necessarily
+  /// also reaches the instance box of every container between it and the
+  /// root — the deepest test is the binding one, and widening the world
+  /// square once, before [_descend] inverts it per level, covers all of them.
+  /// A per-level margin would have to re-derive the same thing at every
+  /// level and get the compounding right; this cannot get it wrong.
+  ///
+  /// Zero for the documents that overwhelmingly matter: it is non-zero only
+  /// when a circle or an arc sits under a non-conformal transform, or (for
+  /// the `center` channel) when the document contains an arc at all. See
+  /// [NarrowPhaseSlack] for what each channel bounds and why.
+  ///
+  /// Cached because it walks every container and every instance node, and
+  /// recomputing it per pointer move would put that walk on the frame path.
+  /// It allocates on a cold call (the memo and cycle-guard sets); queries
+  /// are allocation-free in steady state, which is after the first query
+  /// following a rebuild — the same "grows once, then free" shape as every
+  /// scratch buffer in this class.
+  NarrowPhaseSlack _broadPhaseMargin() => _margin ??= _reachableSlack(
+      document.rootHandle, <Handle, NarrowPhaseSlack>{}, <Handle>{});
+
+  /// [container]'s own slack, unioned with every definition reachable
+  /// through its instances, lifted through each instance transform on the
+  /// way up.
+  ///
+  /// `open` is a cycle guard, not an optimisation: a definition cycle is
+  /// refused on write by `AddNodeCommand`, and this only has to stop a
+  /// malformed graph from recursing forever rather than produce a meaningful
+  /// answer for one — the same trade [ContainerIndex.build]'s own `seen` set
+  /// makes.
+  NarrowPhaseSlack _reachableSlack(
+    Handle container,
+    Map<Handle, NarrowPhaseSlack> memo,
+    Set<Handle> open,
+  ) {
+    final done = memo[container];
+    if (done != null) return done;
+    final index = _byContainer[container];
+    if (index == null) return NarrowPhaseSlack.none;
+    if (!open.add(container)) return NarrowPhaseSlack.none;
+
+    var slack = index.ownNarrowPhaseSlack;
+    for (var i = 0; i < index.instanceCount; i++) {
+      final node = document.tree[index.instanceHandleAt(i)];
+      if (node is! InstanceNode) continue;
+      final below = _reachableSlack(node.definition, memo, open);
+      if (below.crude == 0.0) continue; // nothing round down there
+      slack = slack.union(below.through(index.instanceTransformAt(i)));
+    }
+
+    open.remove(container);
+    memo[container] = slack;
+    return slack;
+  }
+
   int _rebuildCount = 0;
   int _dirtyCount = 0;
 
@@ -1357,6 +1492,7 @@ class SpatialIndex {
   /// O(containers x entities).
   void rebuildAll() {
     _rebuildCount++;
+    _margin = null;
     final byOwner = ContainerIndex.leavesByOwner(document);
     _byContainer
       ..clear()
@@ -1401,6 +1537,7 @@ class SpatialIndex {
       );
     }
     _rebuildCount++;
+    _margin = null;
     final byOwner = ContainerIndex.leavesByOwner(document);
     _byContainer[container] =
         ContainerIndex.build(document, container, byOwner);
@@ -1433,6 +1570,12 @@ class SpatialIndex {
 
   /// Re-derives the box of every touched handle and dirties what moved.
   void _reconcile(Set<Handle> touched) {
+    // Any edit at all can change the broad-phase margin — a circle's radius,
+    // a group's transform, a new arc. Dropping the cached value here rather
+    // than trying to work out whether this particular edit moved it keeps
+    // the one rule "recompute after any change", and the recompute is a walk
+    // over containers and instance nodes, not over entities.
+    _margin = null;
     if (touched.isEmpty) {
       // Defensive, not currently reachable: every `DraftCommand.apply` in
       // this package returns a non-empty `touched` (see `commands.dart`),
@@ -1535,6 +1678,13 @@ class SpatialIndex {
       for (final index in _byContainer.values) {
         index.markLeafDead(last);
         index.dirty.remove(last);
+        // And its composed group transform, so a later entity that reuses
+        // this slot cannot inherit it. Every path that puts a live entity in
+        // a slot goes through `noteLeaf` below, which sets or clears the
+        // entry outright, so this is belt-and-braces rather than the only
+        // guard — but a stale matrix here would misplace an unrelated
+        // entity, which is worth two lines to make impossible.
+        index.forgetLeaf(last);
       }
       _lastKnownSlot.remove(handle);
       return;
@@ -1555,9 +1705,10 @@ class SpatialIndex {
     }
 
     final record = document.entities.read(slot);
+    final payload = document.geometry.read(record.geomIndex);
     final current = entityBounds(
       kind: record.kind,
-      payload: document.geometry.read(record.geomIndex),
+      payload: payload,
       measurer: document.textMeasurer,
       textStyle: ReservedHandles.standardTextStyle,
     );
@@ -1568,6 +1719,15 @@ class SpatialIndex {
     // unchanged.
     final composed = _groupTransformOf(owner, index.container);
     final expected = current.transformedBy(composed);
+
+    // Before any of the unchanged/revive shortcuts below: the narrow phase
+    // reads this per leaf, and an entity whose box happens to be unchanged
+    // can still need it — a fresh index has it from `ContainerIndex.build`,
+    // but a leaf that arrives through the dirty overlay would have no entry
+    // at all and be measured in the wrong space. `noteLeaf` clears the entry
+    // when the composed transform is the identity, so this is a set, not
+    // just a fill.
+    index.noteLeaf(slot, composed, record.kind, payload, expected);
 
     final indexed = index.boxOfLeaf(slot);
     if (indexed != null && _sameBox(indexed, expected)) {
@@ -1700,6 +1860,22 @@ class SpatialIndex {
     _disposed = true;
   }
 }
+
+/// [Transform2.scaleMagnitude] for a transform held as loose coefficients.
+///
+/// The narrow phase composes the container transform with a leaf's
+/// flattened-group transform into six doubles rather than a [Transform2]
+/// object (see [SpatialIndex._considerLeaf]), so the two places that need the
+/// representative scale of that product compute it here instead of reaching
+/// for the getter. Same formula, `sqrt(|det|)`, deliberately: a second,
+/// differently-rounded definition of "the scale of a transform" would make a
+/// circle's picked radius disagree with the broad-phase margin derived from
+/// it in [NarrowPhaseSlack].
+///
+/// A top-level function, not a method: it captures nothing but its
+/// arguments, exactly like [_insideWorldPolygon] below.
+double _scaleMagnitudeOf(double a, double b, double c, double d) =>
+    math.sqrt((a * d - b * c).abs());
 
 /// Even-odd ray cast, fused with the world transform.
 ///

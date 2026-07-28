@@ -483,4 +483,65 @@ void main() {
             'greater leaf handle wins -- draw order is ascending handle '
             'value, so the greater handle is drawn last and is on top');
   });
+
+  test('snaps to a leaf owned by a transformed group', () {
+    // The snap sibling of pick_test.dart's group test: `_considerSnapLeaf`
+    // received the same container-level transform, so a group's leaves were
+    // unsnappable at every point, not merely mismeasured.
+    final doc = DraftDocument.empty();
+    const group = Handle(100);
+    doc.commands.execute(AddNodeCommand(
+      GroupNode(
+        handle: group,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(100, 0),
+        children: const [],
+      ),
+    ));
+    final handle = addEntity(doc, group, EntityKind.line, [0, 0, 2, 0], []);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final out = SnapResult();
+    index.snapInto(Vector2(102.1, 0), 0.5, SnapMask.cheap, out);
+    expect(out.found, isTrue,
+        reason: "the group's transform must reach the snap narrow phase");
+    expect(out.kind, SnapKind.endpoint);
+    expect(out.entity, handle);
+    expect(out.point.x, closeTo(102, 1e-9));
+    expect(out.point.y, closeTo(0, 1e-9));
+
+    index.snapInto(Vector2(2.1, 0), 0.5, SnapMask.cheap, out);
+    expect(out.found, isFalse,
+        reason: 'and it must not be snappable at its raw local coordinates');
+  });
+
+  test("snaps to an arc's centre, which lies outside the arc's own bound", () {
+    // An arc's indexed box bounds the drawn sweep. A short arc's box is a
+    // sliver a full radius away from its own centre -- and the centre is a
+    // `SnapKind.center` candidate. The broad phase must therefore reach
+    // further than the box for a snap that can produce one, or the centre of
+    // every arc that does not sweep past a quadrant is unsnappable.
+    final doc = DraftDocument.empty();
+    final arc =
+        addEntity(doc, doc.rootHandle, EntityKind.arc, [0, 0], [5, 0.2, 0.4]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    // Pin that the fixture really does place the centre outside the bound,
+    // so this test cannot quietly stop testing anything.
+    final bound = doc.extents;
+    expect(bound.containsPoint(Vector2.zero()), isFalse,
+        reason: "this arc's own bound must exclude its centre");
+
+    final out = SnapResult();
+    index.snapInto(Vector2(0.2, 0.1), 0.5, SnapMask.cheap, out);
+    expect(out.found, isTrue,
+        reason: 'the broad phase must never be tighter than the region the '
+            'narrow phase tests, and the narrow phase offers this centre');
+    expect(out.kind, SnapKind.center);
+    expect(out.entity, arc);
+    expect(out.point.x, closeTo(0, 1e-9));
+    expect(out.point.y, closeTo(0, 1e-9));
+  });
 }

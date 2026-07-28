@@ -86,52 +86,6 @@ void _expectClose(double actual, double expected, String reason) {
   expect(actual, closeTo(expected, scale * 1e-6), reason: reason);
 }
 
-/// Real, confirmed, reproduced bugs in `SpatialIndex` that this differential
-/// test found — not bugs in this test suite. Keyed by `'<fixture>:<query>'`.
-///
-/// Skipped here, with the reason inline, rather than fixed silently or
-/// hidden by weakening the corpus or the assertion: full reproduction,
-/// root-cause analysis, and a fix direction are in
-/// `.superpowers/sdd/2026-07-28-jet-cad-2d-plan-2-index/task-16-report.md`.
-/// Un-skipping one of these must be step one of landing its fix — that is
-/// the whole point of leaving the check itself untouched.
-const Map<String, String> _knownIndexBugs = {
-  'groupsInDefinitions:pick': 'BUG (see task-16 report, "Bug 1: group '
-      'transform dropped in narrow phase"): SpatialIndex._descend passes '
-      "the container-level toWorld straight to _considerLeaf for every "
-      'leaf ContainerIndex.searchLeaves finds, but a leaf owned by a '
-      "flattened GroupNode needs that group's own composed transform "
-      'applied on top of toWorld too. ContainerIndex.build computes that '
-      'composed transform to build the broad-phase box and then discards '
-      'it, so narrow phase silently substitutes the container transform '
-      'alone — reproduced directly: an entity owned by a translated '
-      'GroupNode becomes unpickable at both its true (translated) location '
-      'and its raw local coordinates.',
-  'groupsInDefinitions:snap': 'BUG: same root cause as the pick skip above '
-      '— _considerSnapLeaf receives the same unmodified container-level '
-      'toWorld. See task-16 report, "Bug 1".',
-  'nonUniformScale:pick': 'BUG (see task-16 report, "Bug 2: broad phase '
-      'tighter than the narrow-phase circle approximation"): the '
-      'broad-phase box for a circle/arc under a non-conformal instance '
-      'transform is the box of the *exact* transformed shape, which can be '
-      'tighter — in the short axis — than the narrow phase\'s own '
-      'scaleMagnitude-approximated circle. A query landing in the gap '
-      'between the two is dropped by broad phase before the narrow-phase '
-      'test that would have accepted it ever runs — reproduced directly '
-      'with a scale(2,5) circle.',
-  'nonUniformScale:snap': 'BUG: same root cause as the pick skip above. '
-      'See task-16 report, "Bug 2".',
-  'mirrored:snap': "BUG: same root cause as nonUniformScale's skip above — "
-      'a negative-determinant scale is non-conformal in the sense that '
-      "matters here whenever its magnitude is non-uniform too, and this "
-      "fixture's arc geometry exposes it on the snap query's fixed seed "
-      '(mirrored\'s *pick* query does not hit the gap with its own fixed '
-      'seed, but is exposed to the same bug — see the task-16 report for '
-      'why it is deliberately left unskipped rather than pre-emptively '
-      'skipped for a failure it does not currently exhibit). See task-16 '
-      'report, "Bug 2".',
-};
-
 void main() {
   for (final fixture in buildCorpus()) {
     group(fixture.name, () {
@@ -207,7 +161,7 @@ void main() {
             }
           }
         }
-      }, skip: _knownIndexBugs['${fixture.name}:pick']);
+      });
 
       test('snap matches brute force over 200 random points', () {
         final fresh = _fresh(fixture);
@@ -233,7 +187,7 @@ void main() {
             }
           }
         }
-      }, skip: _knownIndexBugs['${fixture.name}:snap']);
+      });
     });
   }
 }

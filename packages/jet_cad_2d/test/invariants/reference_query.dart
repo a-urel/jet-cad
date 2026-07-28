@@ -160,6 +160,24 @@ List<LeafCandidate> allLeavesInWorld(DraftDocument doc) {
               depth + 1);
         case InstanceNode(:final definition):
           final composed = toWorld.multiply(node.transform);
+          // Leaves whose owner is the *instance node itself* — an ATTRIB
+          // belongs to the INSERT, not to the definition (see
+          // `EntityRecord.owner`), so `byOwner` files it under the node
+          // handle and the `byOwner[container]` loop above, which only ever
+          // sees containers, never reaches it. Its coordinates are
+          // instance-local, exactly like any other leaf this node owns, so
+          // it takes `composed` — the same transform the definition's own
+          // leaves take, and the same one `toRootSpace` gives it in
+          // [referenceEntitiesInRect]. It stays at *this* level's
+          // `rootAncestor`, not `newRoot`: it is not inside the definition,
+          // so a root-level INSERT's attribute is root-level content and
+          // stands in for its own root-level ancestor.
+          for (final slot in byOwner[childHandle] ?? const <int>[]) {
+            final root = rootAncestor.isNone
+                ? doc.entities.handleAt(slot)
+                : rootAncestor;
+            out.add((slot: slot, toWorld: composed, root: root));
+          }
           final newRoot = rootAncestor.isNone ? childHandle : rootAncestor;
           walk(definition, composed, newRoot, depth + 1);
       }

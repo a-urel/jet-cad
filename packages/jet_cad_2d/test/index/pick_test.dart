@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -669,5 +670,173 @@ void main() {
     expect(hit.truncated, isFalse);
     expect(hit.worldPoint, Vector2.zero());
     expect(hit.chainLength, 0);
+  });
+
+  test('picks a leaf owned by a transformed group, at the group location', () {
+    // Nothing else in pick_test.dart or snap_test.dart builds a GroupNode at
+    // all, which is how a flattened group's transform came to be composed
+    // into the broad-phase box and dropped everywhere else: the leaf was
+    // correctly *found* by forEachInRect and unpickable at every point.
+    final doc = DraftDocument.empty();
+    const group = Handle(100);
+    doc.commands.execute(AddNodeCommand(
+      GroupNode(
+        handle: group,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(100, 0),
+        children: const [],
+      ),
+    ));
+    final handle = addEntity(doc, group, EntityKind.line, [0, 0, 1, 1], []);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    // The broad phase always got this right -- it is the narrow phase this
+    // pins.
+    final seen = <int>[];
+    index.forEachInRect(Aabb2(Vector2(99, -1), Vector2(102, 2)),
+        const QueryFilter.all(), seen.add);
+    expect(seen, hasLength(1), reason: 'broad phase has always found this');
+
+    final hit = HitPath();
+    expect(
+      index.pickInto(Vector2(100.5, 0.5), 0.6, const QueryFilter.all(), hit),
+      isTrue,
+      reason: "the group's transform must reach the narrow phase, not only "
+          'the box',
+    );
+    expect(hit.entity, handle);
+    expect(hit.kind, HitKind.edge);
+    expect(hit.worldPoint.x, closeTo(100.5, 1e-9));
+
+    expect(
+      index.pickInto(Vector2(0.5, 0.5), 0.6, const QueryFilter.all(), hit),
+      isFalse,
+      reason: 'and it must not be pickable at its raw local coordinates',
+    );
+  });
+
+  test('picks a circle at its approximated radius under a non-uniform scale',
+      () {
+    // A circle under scale(2,5) is an ellipse with semi-axes 4 and 10, but
+    // the narrow phase deliberately approximates it by the circle of radius
+    // r * scaleMagnitude = 2 * sqrt(10) ~= 6.3246 (see distance.dart: this
+    // package does no ellipse math). The exact ellipse's box only reaches
+    // x = 4, so a query out at x = 5.5 -- squarely between the two -- was
+    // rejected by the broad phase before the narrow phase, which accepts it,
+    // ever ran.
+    final doc = DraftDocument.empty();
+    const def = Handle(200);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'NonUniform',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    final circle = addEntity(doc, def, EntityKind.circle, [0, 0], [2.0]);
+    doc.commands.execute(AddNodeCommand(
+      InstanceNode(
+        handle: const Handle(201),
+        parent: doc.rootHandle,
+        transform: Transform2.scale(2, 5),
+        definition: def,
+        layer: ReservedHandles.layerZero,
+      ),
+    ));
+
+    final approximated = 2.0 * math.sqrt(10.0);
+    expect(approximated, greaterThan(4.0),
+        reason: 'the approximating circle must stick out past the exact '
+            "ellipse's x extent of 4, or this test pins nothing");
+    expect((5.5 - approximated).abs(), lessThan(1.0),
+        reason: 'the query point must be a hit under the narrow phase\'s own '
+            'formula');
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    expect(
+      index.pickInto(Vector2(5.5, 0), 1.0, const QueryFilter.all(), hit),
+      isTrue,
+      reason: 'the broad phase must never be tighter than the region the '
+          'narrow phase tests',
+    );
+    expect(hit.entity, circle);
+    expect(hit.kind, HitKind.edge);
+  });
+
+  test('picks a group-owned leaf that arrived through the dirty overlay', () {
+    // The same group transform, but reaching the index by the incremental
+    // route rather than by a build: an entity added after the index exists
+    // is reconciled into the dirty overlay, not packed into the tree. Its
+    // composed group transform has to be recorded there too, or a leaf is
+    // pickable before an edit and unpickable after one.
+    final doc = DraftDocument.empty();
+    const group = Handle(100);
+    doc.commands.execute(AddNodeCommand(
+      GroupNode(
+        handle: group,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(100, 0),
+        children: const [],
+      ),
+    ));
+    addEntity(doc, group, EntityKind.line, [0, 0, 1, 1], []);
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final rebuildsBefore = index.rebuildCount;
+
+    final late_ = addEntity(doc, group, EntityKind.line, [0, 4, 1, 5], []);
+
+    expect(index.rebuildCount, rebuildsBefore,
+        reason: 'this must exercise the dirty overlay, not a rebuild that '
+            'would quietly re-derive everything from ContainerIndex.build');
+    expect(index.indexFor(doc.rootHandle)!.dirty.length, 1);
+
+    final hit = HitPath();
+    expect(
+      index.pickInto(Vector2(100.5, 4.5), 0.6, const QueryFilter.all(), hit),
+      isTrue,
+    );
+    expect(hit.entity, late_);
+  });
+
+  test('picks a circle at its approximated radius under a non-uniform group',
+      () {
+    // The same boundary as the test above, but with the non-uniform scale on
+    // a flattened *group* rather than on an instance. The two reach the
+    // narrow phase by different routes -- a group's transform is composed
+    // into the leaf's own indexed box, an instance's is applied at descent
+    // time -- so the broad phase has to account for them separately, and a
+    // fix that only handled the instance route would pass the test above and
+    // fail this one.
+    final doc = DraftDocument.empty();
+    const group = Handle(300);
+    doc.commands.execute(AddNodeCommand(
+      GroupNode(
+        handle: group,
+        parent: doc.rootHandle,
+        transform: Transform2.scale(2, 5),
+        children: const [],
+      ),
+    ));
+    final circle = addEntity(doc, group, EntityKind.circle, [0, 0], [2.0]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    // The exact bound of the transformed shape stops at x = 4; the
+    // approximating circle the narrow phase measures against reaches
+    // 2 * sqrt(10).
+    expect(doc.extents.maxX, closeTo(4.0, 1e-9));
+
+    final hit = HitPath();
+    expect(
+      index.pickInto(Vector2(5.5, 0), 1.0, const QueryFilter.all(), hit),
+      isTrue,
+    );
+    expect(hit.entity, circle);
+    expect(hit.kind, HitKind.edge);
   });
 }
