@@ -30,7 +30,21 @@ double distancePointToSegment(Vector2 p, Vector2 a, Vector2 b) =>
 /// no single intersection point, and a caller that needs the overlap interval
 /// is asking a different question and gets a different function when one is
 /// needed. Touching endpoints do intersect.
-Vector2? segmentIntersection(
+///
+/// **Named `...Tol`, not `segmentIntersection`**, to avoid colliding with
+/// `distance.dart`'s [segmentIntersection] of the same arity: this one
+/// allocates a fresh [Vector2] per call and takes an explicit [Tolerance],
+/// for general callers off the frame path; that one writes through a
+/// caller-owned `out` and uses a fixed internal tolerance, for `snapInto`'s
+/// zero-allocation, pointer-move-rate intersection candidate search. Both
+/// are exported, unprefixed, from the same `jet_cad_2d.dart` barrel, so the
+/// two cannot share a name: with both declared `segmentIntersection`,
+/// `dart analyze` reports a hard `ambiguous_export` error on the barrel's
+/// own export directive, plus an `ambiguous_import` error at every
+/// unqualified call site in this package (`SpatialIndex._considerIntersections`
+/// is one). The rename was forced, not a style preference -- the collision
+/// does not compile.
+Vector2? segmentIntersectionTol(
   Vector2 p1,
   Vector2 p2,
   Vector2 q1,

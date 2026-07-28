@@ -569,10 +569,12 @@ void main() {
     // this assertion fail — that off-by-one was found while implementing
     // this test; see task-5-report.md.
     for (var slot = 0; slot < 200; slot++) {
-      index.dirty.put(slot, box(0, 0, 1, 1));
+      index.dirty
+          .put(slot, box(0, 0, 1, 1), DirtyList.noCentre, DirtyList.noCentre);
     }
     expect(index.needsRebuild, isFalse, reason: 'threshold is exclusive');
-    index.dirty.put(200, box(0, 0, 1, 1));
+    index.dirty
+        .put(200, box(0, 0, 1, 1), DirtyList.noCentre, DirtyList.noCentre);
     expect(index.needsRebuild, isTrue);
   });
 

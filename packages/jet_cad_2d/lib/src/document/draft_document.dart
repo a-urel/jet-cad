@@ -126,13 +126,26 @@ class DraftDocument implements CommandTarget {
   /// Computed once per definition and reused by every instance — the same
   /// sharing the spatial index and the picture cache rely on in later plans.
   ///
-  /// A caller building many of these in one pass — [ContainerIndex.build]
-  /// over every instance of a shared definition, for instance — should call
-  /// [leavesByOwner] once itself and memoize the result per definition
-  /// handle rather than calling this repeatedly: each call here recomputes
-  /// [leavesByOwner] from scratch, which is a full entity-store scan.
-  Aabb2 definitionBounds(Handle definition) => _boundsOfContainer(
-      definition, <Handle>{}, <Handle, Aabb2>{}, leavesByOwner());
+  /// [leavesByOwner], when supplied, is used in place of recomputing
+  /// [DraftDocument.leavesByOwner] — a full entity-store scan. **A caller
+  /// building many of these in one pass must pass it.**
+  /// [ContainerIndex.build] already holds one such map, shared across every
+  /// container built in that pass; without threading it through here, a
+  /// document with many *distinct* definitions pays a full entity-store scan
+  /// once per definition even though [ContainerIndex.build]'s own
+  /// `definitionBoundsCache` already stops it from paying twice for the
+  /// *same* definition. Task 18's benchmark measured this: 2,000 definitions
+  /// over 32,000 entities took multiple seconds before this parameter was
+  /// threaded through, against ~1.4s to build the default 500k-entity,
+  /// 20-definition benchmark document — the defect scales with definition
+  /// *count*, not entity count, and the gate's own default fixture is too
+  /// small to see it. Left optional, not required, because a caller asking
+  /// for one definition's bounds in isolation has no such map to share and
+  /// should not have to build one just to call this.
+  Aabb2 definitionBounds(Handle definition,
+          [Map<Handle, List<int>>? leavesByOwner]) =>
+      _boundsOfContainer(definition, <Handle>{}, <Handle, Aabb2>{},
+          leavesByOwner ?? this.leavesByOwner());
 
   /// Compacts both columnar stores and clears history.
   ///

@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 
+import '../invariants/vm_allocation_meter.dart';
+
 /// Builds a tree over [count] unit boxes on a grid, payload == index.
 PackedRTree gridTree(int count) {
   final side = math.sqrt(count).ceil();
@@ -107,28 +109,64 @@ void main() {
     expect(tree.isDead(42), isFalse);
   });
 
-  // SKIPPED, deliberately: the measurement below is a stub that always
-  // returns 0, so this assertion passes against any implementation. A test
-  // that silently measures nothing is worse than no test — it reads as
-  // coverage. Task 17 builds the real harness; this is enabled there, or
-  // deleted if the harness proves a per-tree assertion is redundant.
-  test('search allocates nothing after the first call', () {
+  // Was a stub, deliberately skipped by Task 3: the old `_allocatedBytes()`
+  // below always returned 0, so the assertion it fed passed against any
+  // implementation, including a broken one -- a test that reads as coverage
+  // but measures nothing. Task 17 (`query_allocation_test.dart`, next to
+  // this file's own package -- see `test/invariants/vm_allocation_meter
+  // .dart` for the mechanism) replaces the stub with a real reading rather
+  // than deleting this test: the two harnesses check different code. The
+  // one in `test/invariants/` watches `Vector2`, since that is what
+  // `SpatialIndex`'s own narrow phase allocates one of per candidate; this
+  // tree's own `search` touches none of that package's geometry types at
+  // all -- it walks `_stackLevel`/`_stackIndex`, two typed arrays already
+  // held as fields, entirely in raw ints -- so there is nothing of that
+  // shape *to* watch here. What is watched instead is `Aabb2` and
+  // `Transform2`: not because `search` uses either today, but because it is
+  // exactly what a well-meaning future edit would reach for first (compare
+  // `boxOfPayload`, right above this test, which already builds one) if it
+  // started computing something geometric per visited node instead of just
+  // testing raw doubles against `_boxes` -- see [_overlaps].
+  test('search allocates nothing after the first call', () async {
+    final meter = await AllocationMeter.connect();
+    if (meter == null) {
+      markTestSkipped(vmServiceUnavailableReason);
+      return;
+    }
+    addTearDown(meter.dispose);
+
     final tree = gridTree(5000);
     var seen = 0;
     void count(int _) => seen++;
-    tree.search(0, 0, 70, 70, count); // warm
+    for (var i = 0; i < 20000; i++) {
+      tree.search(0, 0, 70, 70, count); // warm
+    }
+    expect(seen, greaterThan(0),
+        reason: 'the fixture must actually match something, or this test '
+            'would pass by never exercising a real walk at all');
 
-    final before = _allocatedBytes();
-    for (var i = 0; i < 50; i++) {
+    await meter.reset();
+    const iters = 1000;
+    for (var i = 0; i < iters; i++) {
       tree.search(0, 0, 70, 70, count);
     }
-    final after = _allocatedBytes();
-    // A tolerance rather than zero: the VM allocates for reasons outside this
-    // call. What is being excluded is per-item or per-node allocation, which
-    // at 5000 items x 50 calls would be enormous rather than marginal.
-    expect(after - before, lessThan(64 * 1024),
-        reason: 'search must not allocate per node or per item');
-  }, skip: 'stubbed measurement — see Task 17 for the real harness');
+    final accumulated =
+        await meter.accumulatedInstances({'Vector2', 'Aabb2', 'Transform2'});
+    for (final entry in accumulated.entries) {
+      // A tolerance rather than zero: the VM allocates for reasons outside
+      // this call, and `Aabb2`'s own name collides with an unused class of
+      // the same name in `package:vector_math` (see
+      // `AllocationMeter.accumulatedInstances`'s own doc comment) -- 0.5
+      // admits that noise without admitting a genuine per-node object,
+      // which at 5000 items visited per call would read as several
+      // thousand, not a fraction of one.
+      expect(entry.value / iters, lessThan(0.5),
+          reason: '${entry.key}: ${entry.value / iters} per call over '
+              '$iters calls against a 5000-item tree -- a per-node or '
+              'per-item allocation here would be orders of magnitude above '
+              'this budget');
+    }
+  });
 
   test('handles items that all share one box', () {
     final boxes = Float64List(64 * 4);
@@ -152,12 +190,130 @@ void main() {
     expect(hits(tree, 2, 2, 4, 4), [9]);
     expect(hits(tree, 3, 3, 3, 3), [9]);
   });
-}
 
-int _allocatedBytes() {
-  // dart:developer's Service API is not available in a plain test run, so this
-  // is a deliberate approximation: it measures nothing and returns 0 unless
-  // the harness in Task 17 replaces it. The assertion above therefore passes
-  // trivially here and is made real in Task 17.
-  return 0;
+  // --- growBox ---------------------------------------------------------
+  //
+  // The one mutation a packed tree accepts. It exists so an instance box can
+  // follow its definition outwards without a rebuild; what has to hold is
+  // that the *ancestors* follow too, since `search` never opens a node whose
+  // own box misses the query.
+
+  test('growBox makes an enlarged item findable through its ancestors', () {
+    // 1000 items forces a tree several levels deep, so an implementation
+    // that widened only the leaf's own box would be caught here and not by a
+    // one-level fixture.
+    final tree = gridTree(1000);
+    expect(hits(tree, 500, 500, 501, 501), isEmpty);
+
+    expect(tree.growBox(7, 500, 500, 501, 501), isTrue);
+
+    expect(hits(tree, 500, 500, 501, 501), [7],
+        reason: 'every node on the path to the root has to have grown, or '
+            'the search never reaches the item at all');
+    expect(hits(tree, 0, 0, 1e9, 1e9), hasLength(1000),
+        reason: 'growing one box must not lose any other');
+  });
+
+  test('growBox keeps the original extent as well as the new one', () {
+    final tree = gridTree(64);
+    expect(hits(tree, 3, 3, 3.2, 3.2), isNotEmpty);
+    final payload = hits(tree, 3, 3, 3.2, 3.2).first;
+
+    tree.growBox(payload, -100, -100, -99, -99);
+
+    expect(hits(tree, -100, -100, -99, -99), contains(payload));
+    expect(hits(tree, 3, 3, 3.2, 3.2), contains(payload),
+        reason: 'growing is a union, not a replacement');
+  });
+
+  test('growBox reports false when the stored box already covers it', () {
+    final tree = gridTree(64);
+    // Item 5 of an 8-wide grid sits at [5, 0] .. [5.5, 0.5].
+    expect(tree.growBox(5, 5.1, 0.1, 5.2, 0.2), isFalse,
+        reason: 'the caller uses this to decide whether to keep propagating '
+            'upwards, so "no change" has to be distinguishable');
+  });
+
+  test('growBox is a no-op for a payload the tree does not hold', () {
+    final tree = gridTree(16);
+    expect(tree.growBox(999, -50, -50, 50, 50), isFalse);
+    expect(hits(tree, -50, -50, -40, -40), isEmpty);
+  });
+
+  test('growBox on a single-item tree still works', () {
+    // The degenerate shape: one item is also the root, so the walk up has to
+    // terminate on the very first node rather than index past the level
+    // table.
+    final tree = gridTree(1);
+    expect(tree.growBox(0, 20, 20, 21, 21), isTrue);
+    expect(hits(tree, 20, 20, 21, 21), [0]);
+    expect(tree.bounds.maxX, 21.0);
+  });
+
+  test('setBox narrows an item and stops it being reported', () {
+    final tree = gridTree(1000);
+    tree.growBox(7, 500, 500, 501, 501);
+    expect(hits(tree, 500, 500, 501, 501), [7]);
+
+    // Item 7 of a 32-wide grid sits at [7, 0] .. [7.5, 0.5].
+    tree.setBox(7, 7, 0, 7.5, 0.5);
+
+    expect(hits(tree, 500, 500, 501, 501), isEmpty,
+        reason: 'narrowing an item box is what gives a widened instance box a '
+            'way back; growth alone is monotone for the life of the index');
+    expect(hits(tree, 7, 0, 7.5, 0.5), contains(7),
+        reason: 'and it is still where it says it is');
+    expect(hits(tree, 0, 0, 1e9, 1e9), hasLength(1000),
+        reason: 'narrowing one item must not lose any other');
+  });
+
+  test('setBox leaves ancestors wide, which costs visits and not answers', () {
+    // The stated trade: an ancestor box is only ever an upper bound on its
+    // subtree, so leaving it wide after a child narrows keeps every search
+    // correct -- it opens a node it need not have opened and then reports
+    // nothing.
+    final tree = gridTree(1000);
+    tree.growBox(7, 500, 500, 501, 501);
+    tree.setBox(7, 7, 0, 7.5, 0.5);
+    for (var i = 0; i < 1000; i++) {
+      expect(hits(tree, 500, 500, 501, 501), isEmpty);
+    }
+    expect(tree.bounds.maxX, greaterThanOrEqualTo(501.0),
+        reason: 'the root box is deliberately not re-tightened');
+  });
+
+  test('setBox can also widen, and is a no-op for an unknown payload', () {
+    final tree = gridTree(16);
+    tree.setBox(3, -80, -80, -70, -70);
+    expect(hits(tree, -75, -75, -74, -74), [3]);
+    tree.setBox(999, -500, -500, -400, -400);
+    expect(hits(tree, -500, -500, -400, -400), isEmpty);
+  });
+
+  test('liveItemBounds ignores dead items, unlike bounds', () {
+    final tree = gridTree(64);
+    final full = tree.bounds;
+    expect(tree.liveItemBounds().maxX, full.maxX);
+
+    // Kill everything in the far half of the grid.
+    for (var i = 0; i < 64; i++) {
+      if (i % 8 >= 4) tree.markDead(i);
+    }
+
+    expect(tree.bounds.maxX, full.maxX,
+        reason: 'bounds reads the root node, which was fixed at build time');
+    expect(tree.liveItemBounds().maxX, lessThan(full.maxX),
+        reason: 'liveItemBounds scans level 0 and skips the dead, which is '
+            'what lets a container bound come back in');
+  });
+
+  test('liveItemBounds is empty when everything is dead, and for an empty tree',
+      () {
+    expect(PackedRTree.empty().liveItemBounds().isEmpty, isTrue);
+    final tree = gridTree(16);
+    for (var i = 0; i < 16; i++) {
+      tree.markDead(i);
+    }
+    expect(tree.liveItemBounds().isEmpty, isTrue);
+  });
 }

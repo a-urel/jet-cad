@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
+import '../core/tolerance.dart';
 import '../store/geometry_store.dart';
 import 'primitives.dart';
 
@@ -163,6 +164,88 @@ bool insideClosedPolyline(Vector2 p, GeometryPayload payload) {
     }
   }
   return inside;
+}
+
+/// The closest point on segment [a]-[b] to [p], written into [out].
+///
+/// Returns [out] on success, or null for a degenerate zero-length segment,
+/// where "the closest point on the segment" has no useful answer distinct
+/// from the endpoint itself. Exact-zero test, the same reasoning as
+/// [_segmentDistance]'s: this is the degenerate-segment branch, not a
+/// near-degenerate one, and any nonzero length gives a valid projection no
+/// matter how short.
+///
+/// Used by `SpatialIndex.snapInto` for both `SnapKind.nearest` and
+/// `SnapKind.perpendicular` — on a straight segment the foot of the
+/// perpendicular from [p] *is* the closest point, clamped the same way at
+/// the endpoints, so the two kinds share this one computation and differ
+/// only in which priority slot the caller reports the result under.
+Vector2? projectOntoSegment(Vector2 p, Vector2 a, Vector2 b, Vector2 out) {
+  final abx = b.x - a.x, aby = b.y - a.y;
+  final lengthSq = abx * abx + aby * aby;
+  if (lengthSq == 0.0) return null;
+  var t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lengthSq;
+  if (t < 0.0) {
+    t = 0.0;
+  } else if (t > 1.0) {
+    t = 1.0;
+  }
+  out
+    ..x = a.x + t * abx
+    ..y = a.y + t * aby;
+  return out;
+}
+
+/// Where segments [a1]-[a2] and [b1]-[b2] cross, written into [out].
+///
+/// Null in three cases: a degenerate (zero-length) input segment; a
+/// near-parallel pair, guarded by [Tolerance.standard.angular] rather than
+/// an exact-zero test (see below); or infinite lines that cross outside one
+/// of the two actual segments. All three matter: a CAD user asking for an
+/// intersection snap wants a point where the *drawn* geometry meets, not an
+/// extrapolation of it, and not a point produced by dividing by something
+/// numerically indistinguishable from zero.
+///
+/// **Near-parallel is a `Tolerance` decision, not a stored-value one.**
+/// `denominator / (|a2-a1| * |b2-b1|)` is `sin` of the angle between the two
+/// segments' directions; comparing that ratio against
+/// [Tolerance.standard.angular] (rather than testing the raw, unnormalised
+/// `denominator` against zero) keeps the near-parallel threshold meaningful
+/// regardless of how long the segments happen to be. A pair just past this
+/// threshold can still report a perfectly ordinary-looking point — the
+/// danger this guards against is not that any one such point is *wrong*,
+/// it is that the point is arbitrarily sensitive to a change in either
+/// segment's direction too small to matter for anything else, which is
+/// exactly the situation a routine drawing edit produces. That instability
+/// is what makes the point untrustworthy as a snap target, not its
+/// coordinates in isolation.
+Vector2? segmentIntersection(
+    Vector2 a1, Vector2 a2, Vector2 b1, Vector2 b2, Vector2 out) {
+  final rx = a2.x - a1.x, ry = a2.y - a1.y;
+  final sx = b2.x - b1.x, sy = b2.y - b1.y;
+  final rLenSq = rx * rx + ry * ry;
+  final sLenSq = sx * sx + sy * sy;
+  // Exact zero: a zero-length segment has no direction to intersect with,
+  // which is a different question from the near-parallel guard below —
+  // that guard concerns two well-defined but nearly-aligned directions, not
+  // the absence of one.
+  if (rLenSq == 0.0 || sLenSq == 0.0) return null;
+
+  final denominator = rx * sy - ry * sx;
+  final sinAngle = denominator / math.sqrt(rLenSq * sLenSq);
+  if (sinAngle.abs() <= Tolerance.standard.angular) return null;
+
+  final t = ((b1.x - a1.x) * sy - (b1.y - a1.y) * sx) / denominator;
+  final u = ((b1.x - a1.x) * ry - (b1.y - a1.y) * rx) / denominator;
+  // Clamped to both segments, not the infinite lines they lie on: dropping
+  // this check is what turns a "the drawn geometry doesn't actually meet
+  // here" miss into a false hit at the infinite lines' crossing.
+  if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0) return null;
+
+  out
+    ..x = a1.x + t * rx
+    ..y = a1.y + t * ry;
+  return out;
 }
 
 /// Distance to the nearest vertex, writing that vertex into [out].

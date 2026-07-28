@@ -21,7 +21,8 @@ void main() {
   });
 
   test('finds an entry whose box overlaps', () {
-    final list = DirtyList()..put(7, box(0, 0, 1, 1));
+    final list = DirtyList()
+      ..put(7, box(0, 0, 1, 1), DirtyList.noCentre, DirtyList.noCentre);
     expect(hits(list, box(0.5, 0.5, 1, 1)), [7]);
     expect(hits(list, box(10, 10, 1, 1)), isEmpty);
   });
@@ -29,7 +30,8 @@ void main() {
   test('repeated put on one slot replaces in place and does not grow', () {
     final list = DirtyList();
     for (var i = 0; i < 200; i++) {
-      list.put(7, box(i.toDouble(), 0, 1, 1));
+      list.put(7, box(i.toDouble(), 0, 1, 1), DirtyList.noCentre,
+          DirtyList.noCentre);
     }
     expect(list.length, 1,
         reason: 'a 200-move drag must leave one entry, not 200');
@@ -41,9 +43,9 @@ void main() {
 
   test('remove drops an entry and keeps the rest findable', () {
     final list = DirtyList()
-      ..put(1, box(0, 0, 1, 1))
-      ..put(2, box(2, 0, 1, 1))
-      ..put(3, box(4, 0, 1, 1));
+      ..put(1, box(0, 0, 1, 1), DirtyList.noCentre, DirtyList.noCentre)
+      ..put(2, box(2, 0, 1, 1), DirtyList.noCentre, DirtyList.noCentre)
+      ..put(3, box(4, 0, 1, 1), DirtyList.noCentre, DirtyList.noCentre);
 
     list.remove(2);
 
@@ -53,7 +55,8 @@ void main() {
   });
 
   test('remove of the last entry, and of an absent slot, are both safe', () {
-    final list = DirtyList()..put(1, box(0, 0, 1, 1));
+    final list = DirtyList()
+      ..put(1, box(0, 0, 1, 1), DirtyList.noCentre, DirtyList.noCentre);
     list.remove(99);
     expect(list.length, 1);
     list.remove(1);
@@ -67,7 +70,8 @@ void main() {
     // and unremovable. This is the defect the test exists for.
     final list = DirtyList();
     for (var i = 0; i < 10; i++) {
-      list.put(i, box(i.toDouble(), 0, 0.5, 1));
+      list.put(i, box(i.toDouble(), 0, 0.5, 1), DirtyList.noCentre,
+          DirtyList.noCentre);
     }
     list.remove(0); // moves slot 9 into position 0
 
@@ -79,8 +83,8 @@ void main() {
 
   test('clear empties everything', () {
     final list = DirtyList()
-      ..put(1, box(0, 0, 1, 1))
-      ..put(2, box(2, 0, 1, 1));
+      ..put(1, box(0, 0, 1, 1), DirtyList.noCentre, DirtyList.noCentre)
+      ..put(2, box(2, 0, 1, 1), DirtyList.noCentre, DirtyList.noCentre);
     list.clear();
     expect(list.isEmpty, isTrue);
     expect(list.contains(1), isFalse);
@@ -88,7 +92,8 @@ void main() {
   });
 
   test('an empty box is stored and never matches', () {
-    final list = DirtyList()..put(5, Aabb2.empty());
+    final list = DirtyList()
+      ..put(5, Aabb2.empty(), DirtyList.noCentre, DirtyList.noCentre);
     expect(list.length, 1);
     expect(hits(list, box(-1e9, -1e9, 2e9, 2e9)), isEmpty,
         reason: 'an empty box has minX > maxX and overlaps nothing');
@@ -110,9 +115,9 @@ void main() {
     final finiteAxisInverted = Aabb2.raw(5, 0, 3, 10);
 
     final list = DirtyList()
-      ..put(1, canonical)
-      ..put(2, infiniteAxisInverted)
-      ..put(3, finiteAxisInverted);
+      ..put(1, canonical, DirtyList.noCentre, DirtyList.noCentre)
+      ..put(2, infiniteAxisInverted, DirtyList.noCentre, DirtyList.noCentre)
+      ..put(3, finiteAxisInverted, DirtyList.noCentre, DirtyList.noCentre);
 
     expect(list.length, 3);
     expect(list.contains(1), isTrue);
