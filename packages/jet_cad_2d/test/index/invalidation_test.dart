@@ -804,11 +804,15 @@ void main() {
     expect(index.rootIndex.bounds.maxY, closeTo(501.0, 1e-9));
   });
 
-  test('ContainerIndex.bounds does not shrink again, as documented', () {
+  test("the root's bounds does not shrink again, as documented", () {
     // The stated limit of the guarantee above, pinned rather than left to
-    // prose: `bounds` only ever grows between rebuilds, because narrowing it
-    // would mean rescanning every leaf on every edit. Too large costs
-    // broad-phase candidates; too small would drop hits.
+    // prose. A *placed* container's bound is let back in — see the
+    // out-and-back drag below — because every instance box that places it is
+    // derived from it. The root has no such consumer: nothing on a query
+    // path reads its bound, so narrowing it would mean rescanning every leaf
+    // in the document to sharpen a number only the public getter and the
+    // benchmark ever look at. Too large costs nothing here; too small would
+    // drop hits.
     final doc = DraftDocument.empty();
     addLine(doc, doc.rootHandle, 0, 0, 1, 1);
     final far = addLine(doc, doc.rootHandle, 500, 500, 501, 501);
@@ -825,5 +829,80 @@ void main() {
     index.rebuildAll();
     expect(index.rootIndex.bounds.maxX, closeTo(1.0, 1e-9),
         reason: 'and exact again immediately after a rebuild');
+  });
+
+  test('an out-and-back drag inside a definition leaves no widened boxes', () {
+    // The regression that growth-only propagation introduced. `growBox`
+    // mutates tree boxes in place and never touches `dirty`, and
+    // `DirtyList.put` keeps repeated edits to one slot at a single entry, so
+    // a drag sits at `dirty.length == 1` forever and the rebuild floor of 64
+    // is unreachable. Without a way back, every box that ever grew stayed
+    // grown for the session: at 3000 placements one gesture took `pickInto`
+    // over empty space from 0.4 us to 3.75 ms.
+    final doc = DraftDocument.empty();
+    const def = Handle(950);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'Dragged',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    addLine(doc, def, 0, 0, 1, 0);
+    for (var i = 0; i < 4; i++) {
+      doc.commands.execute(AddNodeCommand(InstanceNode(
+        handle: Handle(960 + i),
+        parent: doc.rootHandle,
+        transform: Transform2.translation(i * 3.0, 0),
+        definition: def,
+        layer: ReservedHandles.layerZero,
+      )));
+    }
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final rebuildsBefore = index.rebuildCount;
+
+    // Out: drag one leaf far away, a step at a time, as a pointer would.
+    var dragged = addLine(doc, def, 0, 0, 1, 0);
+    for (var step = 1; step <= 10; step++) {
+      doc.commands.execute(RemoveEntityCommand(dragged));
+      dragged = addLine(doc, def, 0, 0, step * 100.0, step * 100.0);
+    }
+
+    final far = Aabb2(Vector2(500, 500), Vector2(501, 501));
+    final atFullReach = <Handle>[];
+    index.forEachInstanceInRect(far, const QueryFilter.all(), atFullReach.add);
+    expect(atFullReach, hasLength(4),
+        reason: 'the fixture must actually push every instance box out there, '
+            'or the assertion below proves nothing');
+
+    // Back: the leaf returns to where it started.
+    doc.commands.execute(RemoveEntityCommand(dragged));
+    addLine(doc, def, 0, 0, 1, 0);
+
+    expect(index.rebuildCount, rebuildsBefore,
+        reason: 'the whole point is that this happens without a rebuild -- a '
+            'rebuild would re-derive every box for its own reasons');
+
+    final after = <Handle>[];
+    index.forEachInstanceInRect(far, const QueryFilter.all(), after.add);
+    expect(after, isEmpty,
+        reason: 'nothing is drawn out here any more, so no instance box may '
+            'still reach it -- forEachInstanceInRect has no narrow phase, so '
+            'a widened box is a reported result, not a spent candidate');
+
+    final hit = HitPath();
+    expect(index.pickInto(Vector2(500, 500), 0.5, const QueryFilter.all(), hit),
+        isFalse);
+
+    expect(index.indexFor(def)!.bounds.maxX, closeTo(1.0, 1e-9),
+        reason: "the definition's own bound has to come back too, or the "
+            'next edit measures its escape against a bound that is not there');
+
+    // And the geometry that *is* there is still found, which is what
+    // distinguishes tightening from over-tightening.
+    expect(index.pickInto(Vector2(9.5, 0), 0.5, const QueryFilter.all(), hit),
+        isTrue,
+        reason: 'instance 3 sits at x = 9 and still holds the original line');
   });
 }

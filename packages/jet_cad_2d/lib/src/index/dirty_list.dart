@@ -75,6 +75,39 @@ class DirtyList {
     _centres[at * 2 + 1] = centreY;
   }
 
+  /// The box recorded for [slot], or null when this list holds no entry for
+  /// it. Empty for an entry [put] normalised to nothing.
+  Aabb2? boxOf(int slot) {
+    final at = _positionOf[slot];
+    if (at == null) return null;
+    return Aabb2.raw(_boxes[at * 4], _boxes[at * 4 + 1], _boxes[at * 4 + 2],
+        _boxes[at * 4 + 3]);
+  }
+
+  /// The union of every recorded box, skipping the empty ones [put]
+  /// normalises.
+  ///
+  /// The overlay half of `ContainerIndex.recomputeBounds`: a leaf that has
+  /// moved is dead in the packed tree and live only here, so a bound derived
+  /// from the tree alone would miss exactly the entities that just changed.
+  Aabb2 entryBounds() {
+    var minX = double.infinity, minY = double.infinity;
+    var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    var any = false;
+    for (var at = 0; at < _length; at++) {
+      // `put` stores `Aabb2.empty()` as inverted infinities, so this rejects
+      // an entry that bounds nothing by the same arithmetic `search` uses,
+      // rather than by a separate convention.
+      if (_boxes[at * 4] > _boxes[at * 4 + 2]) continue;
+      any = true;
+      if (_boxes[at * 4] < minX) minX = _boxes[at * 4];
+      if (_boxes[at * 4 + 1] < minY) minY = _boxes[at * 4 + 1];
+      if (_boxes[at * 4 + 2] > maxX) maxX = _boxes[at * 4 + 2];
+      if (_boxes[at * 4 + 3] > maxY) maxY = _boxes[at * 4 + 3];
+    }
+    return any ? Aabb2.raw(minX, minY, maxX, maxY) : Aabb2.empty();
+  }
+
   /// Drops [slot]. Safe to call for a slot that is not present.
   void remove(int slot) {
     final at = _positionOf.remove(slot);

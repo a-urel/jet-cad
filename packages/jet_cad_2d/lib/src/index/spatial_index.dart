@@ -116,9 +116,20 @@ class _Placement {
 /// definition's bound, so an entity added to a definition has to widen every
 /// box that places it or no query ever steps in far enough to find it — see
 /// [_placedBy] and [_growPlacements] for how that is done without a rebuild
-/// and without walking every container. Growth propagates; *shrinkage* does
-/// not, so a bound stays an upper bound until the next rebuild, exactly as
-/// [ContainerIndex.bounds] and [ContainerIndex.ownNarrowPhaseSlack] do.
+/// and without walking every container.
+///
+/// **Both directions, and that is not decoration.** Growth alone is monotone,
+/// and monotone here is not a small conservatism of the kind
+/// [ContainerIndex.ownNarrowPhaseSlack] gets away with: a slack is a
+/// broad-phase margin of bounded size with a narrow phase behind it to reject
+/// what it lets through, whereas an instance box is what
+/// [forEachInstanceInRect] *reports* and what [pickInto] descends into, with
+/// nothing behind it. Left to grow only, one out-and-back drag inside a
+/// definition placed 3000 times left every one of those boxes at the furthest
+/// reach of the gesture and took a pick over the empty space it had crossed
+/// from 0.4 us to 3.75 ms — a quarter of a frame, over geometry that is not
+/// there, for the rest of the index's life. [_letBoundRecede] is the way
+/// back.
 class SpatialIndex {
   SpatialIndex(this.document) {
     rebuildAll();
@@ -1942,6 +1953,14 @@ class SpatialIndex {
     // does.
     _filters.invalidate();
     _rebuildPlacements();
+    // Every container here was just derived from the document, so this is a
+    // no-op unless `DraftDocument.definitionBounds` and the union
+    // `ContainerIndex.build` accumulates ever disagree. Running it anyway
+    // turns "those two agree" from an assumption the escape check silently
+    // rests on into something this class enforces.
+    for (final container in _byContainer.keys) {
+      _restoreInstanceBoxesOf(container);
+    }
   }
 
   /// Re-derives [_placedBy] from the containers currently indexed.
@@ -1964,6 +1983,62 @@ class SpatialIndex {
         (_placedBy[tree.definition] ??= <_Placement>[])
             .add(_Placement(index, node, index.instanceTransformAt(i)));
       }
+    }
+  }
+
+  /// Restores, for one container, the rule every escape check depends on:
+  /// **an instance box always covers the placed definition's stored bound.**
+  ///
+  /// Called after that container is rebuilt. The rebuild derives each
+  /// instance box from `DraftDocument.definitionBounds`, which is the
+  /// definition's *true* bound — but the definition's own [ContainerIndex]
+  /// may still be carrying a widened one, and [_reconcileEntity] decides
+  /// whether to propagate growth by asking whether a leaf escaped that
+  /// widened bound. A freshly tightened instance box under a still-widened
+  /// definition bound is exactly the state in which a leaf can escape the
+  /// truth, stay inside the stored bound, propagate nothing, and vanish
+  /// again.
+  void _restoreInstanceBoxesOf(Handle container) {
+    final index = _byContainer[container];
+    if (index == null) return;
+    for (var i = 0; i < index.instanceCount; i++) {
+      final node = index.instanceHandleAt(i);
+      final tree = document.tree[node];
+      if (tree is! InstanceNode) continue;
+      final placed = _byContainer[tree.definition];
+      if (placed == null) continue;
+      index.growInstanceBox(
+          node, placed.bounds.transformedBy(index.instanceTransformAt(i)));
+    }
+  }
+
+  /// Narrows every instance box that places [container] back onto its
+  /// freshly rebuilt bound.
+  ///
+  /// The other half of a rebuild, and the one that gives widening a way back.
+  /// [_growPlacements] is monotone, so without this a definition dragged
+  /// outwards and back leaves all of its placements permanently enlarged, and
+  /// a query over the empty space it briefly covered descends into every one
+  /// of them. Measured at 3000 placements, one out-and-back drag took
+  /// `pickInto` over empty space from 0.4 us to 3.75 ms — a quarter of a
+  /// frame, for geometry that is not there.
+  ///
+  /// Uses [ContainerIndex.setInstanceBox], which narrows, rather than
+  /// [ContainerIndex.growInstanceBox]: this runs immediately after
+  /// [container]'s own bound was re-derived from the document, so the stored
+  /// box is known to be exact and the difference is known to be pure slack.
+  /// Together with [_restoreInstanceBoxesOf] it makes a rebuild leave the
+  /// same state whichever order containers are rebuilt in, which matters
+  /// because [_reconcile]'s sweep rebuilds a definition and the container
+  /// placing it in map order, not dependency order.
+  void _retightenPlacementsOf(Handle container) {
+    final index = _byContainer[container];
+    if (index == null) return;
+    final places = _placedBy[container];
+    if (places == null) return;
+    for (final place in places) {
+      place.container.setInstanceBox(
+          place.node, index.bounds.transformedBy(place.transform));
     }
   }
 
@@ -2053,6 +2128,12 @@ class SpatialIndex {
     // container places would still point at the discarded one, and growing
     // an instance box would grow a tree nothing queries.
     _rebuildPlacements();
+    // The two halves of "an instance box covers the definition's stored
+    // bound", restored in both directions so that this is correct whether it
+    // was called on a definition, on the container placing one, or — as
+    // [_reconcile]'s sweep may do — on both in either order.
+    _restoreInstanceBoxesOf(container);
+    _retightenPlacementsOf(container);
   }
 
   /// **Re-derive and compare**, not a typed change kind.
@@ -2154,10 +2235,53 @@ class SpatialIndex {
     // grow `_byContainer` with a genuinely new entry, the `structural`
     // branch above, has already returned by this point.
     for (final container in _byContainer.keys.toList()) {
-      if (_byContainer[container]?.needsRebuild ?? false) {
+      final index = _byContainer[container];
+      if (index == null) continue;
+      if (index.needsRebuild) {
         rebuildContainer(container);
+        continue;
       }
+      _letBoundRecede(container, index);
     }
+  }
+
+  /// Gives a container's bound a way back in, and carries the tightening into
+  /// every box that places it.
+  ///
+  /// **The mirror image of [_growPlacements], and the half that was missing.**
+  /// Growth is exact at every step: a leaf that escapes its container's bound
+  /// widens it and re-derives every instance box in the same breath.
+  /// Shrinkage had no path at all, so the two directions were not symmetric —
+  /// they were monotone. A definition dragged outwards and back left every
+  /// box that places it stuck at the furthest reach of the gesture, for the
+  /// rest of the index's life, and a query over the empty space it briefly
+  /// covered descended into all of them. At 3000 placements one out-and-back
+  /// drag took `pickInto` over empty space from 0.4 us to 3.75 ms.
+  ///
+  /// **Only for a container something actually places.** A bound reaches a
+  /// query exactly when a *parent* indexes this container by it. The root has
+  /// no parent and nothing on any query path reads its bound, so recomputing
+  /// it would be an O(leaves) scan of the whole document — half a million
+  /// boxes — bought nothing. Its public [ContainerIndex.bounds] therefore
+  /// stays the upper bound its own doc comment already describes. A
+  /// definition nothing places is skipped for the same reason, and cannot
+  /// stay skipped by accident: placing one is a structural change, and every
+  /// structural change goes through [rebuildAll].
+  ///
+  /// **No threshold, and deliberately so.** The obvious shape here is "rebuild
+  /// once the bound has drifted by more than some factor", which needs a
+  /// number chosen to trade query slack against rebuild frequency. This needs
+  /// none: [ContainerIndex.boundsMayHaveReceded] is a one-sided *necessary*
+  /// condition, false for any edit that was not holding a side of the bound,
+  /// so the scan is skipped outright for almost every edit; and when it does
+  /// run the answer is exact rather than within a factor. The cost profile is
+  /// the exact mirror of the growth path already measured — O(placements) to
+  /// push the new bound out, on the frames where the bound actually moves.
+  void _letBoundRecede(Handle container, ContainerIndex index) {
+    if (!index.boundsMayHaveReceded) return;
+    final places = _placedBy[container];
+    if (places == null || places.isEmpty) return;
+    if (index.recomputeBounds()) _retightenPlacementsOf(container);
   }
 
   void _reconcileEntity(Handle handle) {
@@ -2190,6 +2314,17 @@ class SpatialIndex {
       // A previously-seen entity that is now gone. Mark it dead everywhere
       // it might be indexed, and drop any dirty entry for it.
       for (final index in _byContainer.values) {
+        // Before it stops counting: a removed leaf that was holding a side of
+        // this container's bound is the plainest way for that bound to become
+        // loose, and nothing else on this path would notice.
+        //
+        // The overlay is consulted when the tree has no live box, and that is
+        // the common case rather than the exotic one: an entity edited since
+        // the last rebuild is dead in the tree and live only on the overlay,
+        // so reading `boxOfLeaf` alone would see null for exactly the
+        // entities a session has been working on.
+        final was = index.boxOfLeaf(last) ?? index.dirty.boxOf(last);
+        if (was != null) index.noteBoxWithdrawn(was);
         index.markLeafDead(last);
         index.dirty.remove(last);
         // And its composed group transform, so a later entity that reuses
@@ -2298,6 +2433,16 @@ class SpatialIndex {
         return;
       }
     }
+
+    // The box this leaf used to occupy stops holding the container's bound
+    // out the moment the line below supersedes it. `indexed` is null for a
+    // leaf that is already dead, in which case the overlay entry about to be
+    // replaced is what was in force — a drag replaces its own dirty entry
+    // once per pointer move, and that is precisely the gesture whose
+    // *return* leg would otherwise leave the bound stuck at its furthest
+    // reach for the rest of the session.
+    index.noteBoxWithdrawn(
+        indexed ?? (index.dirty.boxOf(slot) ?? Aabb2.empty()));
 
     index.markLeafDead(slot);
     index.dirty.put(slot, expected, centreX, centreY);

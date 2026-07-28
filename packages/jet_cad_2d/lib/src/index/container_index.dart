@@ -355,16 +355,29 @@ class ContainerIndex {
 
   /// The union of everything this container holds, in its own space.
   ///
-  /// **Maintained across reconciliation, not merely set at build time**, and
-  /// it only ever *grows* between rebuilds — the same conservative direction,
-  /// and for the same reason, as [_ownSlack] and [_ownSnapCentreReach]. A
+  /// **Maintained across reconciliation, not merely set at build time.** A
   /// leaf that moves outward through [noteLeaf], and an instance whose
-  /// definition grew through [growInstanceBox], both widen it; a leaf that
-  /// moves back inward, or is removed, does not narrow it again, because
-  /// that would mean rescanning every leaf on every edit to find the new
-  /// maximum. So this is an upper bound on the container's contents, exact
-  /// immediately after a rebuild and never smaller than the truth in
-  /// between.
+  /// definition grew through [growInstanceBox], both widen it.
+  ///
+  /// **Whether it ever narrows again depends on whether anything places this
+  /// container.** Narrowing costs an O(leaves + instances) scan
+  /// ([recomputeBounds]), so it is done only where it buys something: a
+  /// *definition*'s bound is what every instance box that places it is
+  /// derived from, so leaving it wide leaves those boxes wide, and a query
+  /// over empty space keeps descending into all of them for the life of the
+  /// index. `SpatialIndex` therefore lets a placed container's bound recede,
+  /// gated on [boundsMayHaveReceded] so the scan is skipped for any edit that
+  /// was not holding a side of it.
+  ///
+  /// For the **root**, and for a definition nothing places, no query path
+  /// reads this at all, and the scan would be over the whole document — so
+  /// it stays an upper bound: exact immediately after a rebuild, never
+  /// smaller than the truth in between, and narrowed again only by a rebuild.
+  /// Unlike [_ownSlack] and [_ownSnapCentreReach], which are broad-phase
+  /// margins with a narrow phase behind them to reject the excess, a bound
+  /// this one feeds has no second chance — an over-wide instance box is a
+  /// reported result, not a spent candidate — which is exactly why the
+  /// placed case is not allowed the same latitude.
   ///
   /// It used to be `final`, which made it a *lower* bound instead: an entity
   /// added at (500, 500) to a document that correctly found it left this
@@ -375,6 +388,88 @@ class ContainerIndex {
   /// inside" about geometry that is not.
   Aabb2 get bounds => _bounds;
   Aabb2 _bounds;
+
+  /// Whether an edit since the last [recomputeBounds] could have let [bounds]
+  /// back in — a leaf that was holding a side of it moved inwards, or left.
+  ///
+  /// A *necessary* condition, cheap and one-sided: it is set when the old box
+  /// of a reconciled leaf touched the bound, which is the only way that leaf
+  /// could have been what was holding it out. When it is false the bound
+  /// provably cannot have receded, so [recomputeBounds] — the only O(items)
+  /// operation on this path — is skipped outright, which is the answer for
+  /// almost every edit, since almost every edit is to geometry in the middle
+  /// of a drawing rather than on its edge.
+  bool get boundsMayHaveReceded => _boundsMayHaveReceded;
+  bool _boundsMayHaveReceded = false;
+
+  /// Records that [was] — a leaf or instance box this container had indexed —
+  /// is no longer in force, so [bounds] may no longer be tight.
+  ///
+  /// Exact comparison against each side, not a tolerance: this is asking
+  /// "was this box holding the bound out", a stored-value question, and a
+  /// tolerance would make it fire on boxes that were never touching.
+  void noteBoxWithdrawn(Aabb2 was) {
+    if (_boundsMayHaveReceded || was.isEmpty || _bounds.isEmpty) return;
+    if (was.minX == _bounds.minX ||
+        was.minY == _bounds.minY ||
+        was.maxX == _bounds.maxX ||
+        was.maxY == _bounds.maxY) {
+      _boundsMayHaveReceded = true;
+    }
+  }
+
+  /// Re-derives [bounds] from what this container currently holds, letting it
+  /// **shrink**, and clears [boundsMayHaveReceded]. Returns whether it
+  /// actually changed.
+  ///
+  /// O(leaves + instances) *of this container*, with no walk of the document
+  /// and no rebuild: the live item boxes of both trees, unioned with the
+  /// dirty overlay in front of them. A leaf that has moved is dead in the
+  /// tree and live only on the overlay, so both halves are needed to get the
+  /// same answer a rebuild would.
+  ///
+  /// **Why growth does not need this and shrinkage does.** `noteLeaf` widens
+  /// the bound exactly when a leaf escapes it, and `SpatialIndex`
+  /// re-derives every instance box that places this container in the same
+  /// breath, so the outward direction is exact at every step. Nothing does
+  /// the mirror image, because nothing can tell in O(1) that the last leaf
+  /// holding a side has moved in. Left alone, that asymmetry is not a small
+  /// inaccuracy: it accumulates for the life of the session, and it lands on
+  /// the query side, where every instance box that ever covered a region goes
+  /// on being descended into for as long as the index lives.
+  bool recomputeBounds() {
+    _boundsMayHaveReceded = false;
+    final tight = _leaves
+        .liveItemBounds()
+        .union(_instances.liveItemBounds())
+        .union(dirty.entryBounds());
+    if (_sameBox(tight, _bounds)) return false;
+
+    // [_ownSnapCentreReach] is measured *against* [bounds], so pulling the
+    // bound in leaves every reach already recorded understated by however far
+    // the sides moved — and an understated reach is the one direction that
+    // drops hits, since it is what widens a parent's instance search enough
+    // to reach a snap centre lying outside the definition it belongs to.
+    //
+    // Raised by the diagonal retreat rather than recomputed: any point's
+    // distance to the narrowed box is at most its distance to the old box
+    // plus how far the nearest part of that box moved away from it, which
+    // `hypot` of the two axes' retreats bounds rigorously. Recomputing the
+    // exact figure would mean a third scan, over the centre tree and the
+    // overlay's centres, to sharpen a number that is zero for almost every
+    // document and only ever costs broad-phase candidates when it is not.
+    if (!tight.isEmpty && !_bounds.isEmpty && _ownSnapCentreReach > 0) {
+      final dx = math.max(tight.minX - _bounds.minX, _bounds.maxX - tight.maxX);
+      final dy = math.max(tight.minY - _bounds.minY, _bounds.maxY - tight.maxY);
+      if (dx > 0 || dy > 0) {
+        final ex = dx > 0 ? dx : 0.0, ey = dy > 0 ? dy : 0.0;
+        _ownSnapCentreReach += math.sqrt(ex * ex + ey * ey);
+      }
+    }
+
+    _bounds = tight;
+    return true;
+  }
 
   final DirtyList dirty;
 
@@ -582,6 +677,33 @@ class ContainerIndex {
         _instances.growBox(node.value, box.minX, box.minY, box.maxX, box.maxY);
     if (grew) _bounds = _bounds.union(box);
     return grew;
+  }
+
+  /// Replaces the indexed box of the instance node [node] outright, narrowing
+  /// it if [box] is smaller than what is stored.
+  ///
+  /// The counterpart of [growInstanceBox], and the only way an instance box
+  /// ever gets smaller without a rebuild of *this* container. Called when the
+  /// placed definition's own index has just been rebuilt, so its bound is
+  /// exact again and the widened box here is known to be pure slack — see
+  /// `SpatialIndex._retightenPlacementsOf` for why leaving that slack in place
+  /// is what turned one ordinary drag into a query cliff.
+  ///
+  /// [bounds] is deliberately *not* narrowed alongside it: it is a maximum
+  /// over everything this container holds, and lowering it would mean
+  /// rescanning every leaf and every other instance. Leaving it high costs a
+  /// too-large public bound, which its own doc comment already discloses, and
+  /// nothing on a query path reads it.
+  void setInstanceBox(Handle node, Aabb2 box) {
+    if (box.isEmpty) return;
+    if (_instances.setBox(node.value, box.minX, box.minY, box.maxX, box.maxY)) {
+      // A side of this instance's box moved in, so this container's own bound
+      // may have been resting on it. Set directly rather than through
+      // [noteBoxWithdrawn], which would need the old box and therefore an
+      // allocation per placement; the flag is a one-sided hint either way, so
+      // the only cost of setting it slightly more often is one skipped scan.
+      _boundsMayHaveReceded = true;
+    }
   }
 
   /// Deliberately exact `==`, not a tolerance: this asks "did the stored

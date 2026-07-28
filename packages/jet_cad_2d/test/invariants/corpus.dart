@@ -449,6 +449,15 @@ CorpusDocument _definitionGrownAfterBuild() => CorpusDocument(
             kind: EntityKind.arc,
             coords: [-15, -15],
             scalars: [4.0, 0.1, 0.3]);
+        // Out and back: a third entity pushes the definition much further
+        // still, and is then removed again. Growth alone is monotone, so
+        // without a way back every instance box would stay stretched to
+        // (300, 300) and this row would report instances over an empty
+        // region that the brute-force oracle -- which re-derives every
+        // definition bound from the document -- knows nothing about.
+        final transient = _addEntity(doc,
+            owner: def, kind: EntityKind.line, coords: [300, 300, 301, 301]);
+        doc.commands.execute(RemoveEntityCommand(transient));
         expect(index.rebuildCount, before,
             reason: 'this row is about reconciliation reaching the instance '
                 'boxes; a rebuild would re-derive them for its own reasons '

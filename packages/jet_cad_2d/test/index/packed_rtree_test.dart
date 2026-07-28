@@ -249,4 +249,71 @@ void main() {
     expect(hits(tree, 20, 20, 21, 21), [0]);
     expect(tree.bounds.maxX, 21.0);
   });
+
+  test('setBox narrows an item and stops it being reported', () {
+    final tree = gridTree(1000);
+    tree.growBox(7, 500, 500, 501, 501);
+    expect(hits(tree, 500, 500, 501, 501), [7]);
+
+    // Item 7 of a 32-wide grid sits at [7, 0] .. [7.5, 0.5].
+    tree.setBox(7, 7, 0, 7.5, 0.5);
+
+    expect(hits(tree, 500, 500, 501, 501), isEmpty,
+        reason: 'narrowing an item box is what gives a widened instance box a '
+            'way back; growth alone is monotone for the life of the index');
+    expect(hits(tree, 7, 0, 7.5, 0.5), contains(7),
+        reason: 'and it is still where it says it is');
+    expect(hits(tree, 0, 0, 1e9, 1e9), hasLength(1000),
+        reason: 'narrowing one item must not lose any other');
+  });
+
+  test('setBox leaves ancestors wide, which costs visits and not answers', () {
+    // The stated trade: an ancestor box is only ever an upper bound on its
+    // subtree, so leaving it wide after a child narrows keeps every search
+    // correct -- it opens a node it need not have opened and then reports
+    // nothing.
+    final tree = gridTree(1000);
+    tree.growBox(7, 500, 500, 501, 501);
+    tree.setBox(7, 7, 0, 7.5, 0.5);
+    for (var i = 0; i < 1000; i++) {
+      expect(hits(tree, 500, 500, 501, 501), isEmpty);
+    }
+    expect(tree.bounds.maxX, greaterThanOrEqualTo(501.0),
+        reason: 'the root box is deliberately not re-tightened');
+  });
+
+  test('setBox can also widen, and is a no-op for an unknown payload', () {
+    final tree = gridTree(16);
+    tree.setBox(3, -80, -80, -70, -70);
+    expect(hits(tree, -75, -75, -74, -74), [3]);
+    tree.setBox(999, -500, -500, -400, -400);
+    expect(hits(tree, -500, -500, -400, -400), isEmpty);
+  });
+
+  test('liveItemBounds ignores dead items, unlike bounds', () {
+    final tree = gridTree(64);
+    final full = tree.bounds;
+    expect(tree.liveItemBounds().maxX, full.maxX);
+
+    // Kill everything in the far half of the grid.
+    for (var i = 0; i < 64; i++) {
+      if (i % 8 >= 4) tree.markDead(i);
+    }
+
+    expect(tree.bounds.maxX, full.maxX,
+        reason: 'bounds reads the root node, which was fixed at build time');
+    expect(tree.liveItemBounds().maxX, lessThan(full.maxX),
+        reason: 'liveItemBounds scans level 0 and skips the dead, which is '
+            'what lets a container bound come back in');
+  });
+
+  test('liveItemBounds is empty when everything is dead, and for an empty tree',
+      () {
+    expect(PackedRTree.empty().liveItemBounds().isEmpty, isTrue);
+    final tree = gridTree(16);
+    for (var i = 0; i < 16; i++) {
+      tree.markDead(i);
+    }
+    expect(tree.liveItemBounds().isEmpty, isTrue);
+  });
 }
