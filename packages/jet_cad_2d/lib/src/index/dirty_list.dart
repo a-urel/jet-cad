@@ -24,6 +24,15 @@ class DirtyList {
 
   /// Records [box] for [slot], replacing any box already recorded for it.
   void put(int slot, Aabb2 box) {
+    // Normalise anything the geometry layer calls empty to the canonical
+    // inverted-infinity form, so `search`'s ordinary overlap test rejects it
+    // by arithmetic rather than by convention. `Aabb2.isEmpty` is
+    // `minX > maxX || minY > maxY`, which a single-axis inversion with
+    // *finite* bounds also satisfies — that shape's inverted axis wouldn't
+    // fail either overlap clause on its own, so without this normalisation
+    // it would match every query whose range covers it.
+    final stored = box.isEmpty ? Aabb2.empty() : box;
+
     final existing = _positionOf[slot];
     final at = existing ?? _length;
     if (existing == null) {
@@ -32,10 +41,10 @@ class DirtyList {
       _positionOf[slot] = at;
       _length++;
     }
-    _boxes[at * 4] = box.minX;
-    _boxes[at * 4 + 1] = box.minY;
-    _boxes[at * 4 + 2] = box.maxX;
-    _boxes[at * 4 + 3] = box.maxY;
+    _boxes[at * 4] = stored.minX;
+    _boxes[at * 4 + 1] = stored.minY;
+    _boxes[at * 4 + 2] = stored.maxX;
+    _boxes[at * 4 + 3] = stored.maxY;
   }
 
   /// Drops [slot]. Safe to call for a slot that is not present.

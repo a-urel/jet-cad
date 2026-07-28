@@ -93,4 +93,33 @@ void main() {
     expect(hits(list, box(-1e9, -1e9, 2e9, 2e9)), isEmpty,
         reason: 'an empty box has minX > maxX and overlaps nothing');
   });
+
+  test('every Aabb2.isEmpty shape is stored and never matches', () {
+    // Aabb2.isEmpty is `minX > maxX || minY > maxY`. Three distinct shapes
+    // satisfy that:
+    //   - the canonical form, inverted-infinite on both axes;
+    //   - a single axis inverted with infinite bounds;
+    //   - a single axis inverted with *finite* bounds — the shape that
+    //     originally slipped through, because its own overlap clause does
+    //     not fail unconditionally the way the infinite forms' do.
+    // put() must normalise all three to the canonical form so search's
+    // ordinary overlap test rejects them by arithmetic, not convention.
+    final canonical = Aabb2.empty();
+    final infiniteAxisInverted =
+        Aabb2.raw(double.infinity, 0, double.negativeInfinity, 10);
+    final finiteAxisInverted = Aabb2.raw(5, 0, 3, 10);
+
+    final list = DirtyList()
+      ..put(1, canonical)
+      ..put(2, infiniteAxisInverted)
+      ..put(3, finiteAxisInverted);
+
+    expect(list.length, 3);
+    expect(list.contains(1), isTrue);
+    expect(list.contains(2), isTrue);
+    expect(list.contains(3), isTrue);
+    expect(hits(list, box(-100, -100, 200, 200)), isEmpty,
+        reason: 'every isEmpty shape must be rejected, not just the '
+            'canonical inverted-infinity one');
+  });
 }
