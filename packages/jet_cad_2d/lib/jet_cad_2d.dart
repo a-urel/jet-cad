@@ -27,6 +27,7 @@ export 'src/document/tree.dart';
 export 'src/document/undo.dart';
 export 'src/document/validate.dart';
 export 'src/geometry/aabb2.dart';
+export 'src/geometry/distance.dart';
 export 'src/geometry/primitives.dart';
 export 'src/geometry/transform2.dart';
 export 'src/index/container_index.dart';

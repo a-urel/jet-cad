@@ -115,6 +115,23 @@ class GeometryStore {
     );
   }
 
+  /// The stored payload, **without copying**.
+  ///
+  /// The returned buffers are the store's own. Mutating them corrupts the
+  /// document silently, and holding one past the next edit to this slot gives
+  /// a caller a payload that changes underneath it.
+  ///
+  /// Exists for the frame path only — hit-testing and snapping read geometry
+  /// per candidate at pointer-move rate, where [read]'s defensive copy costs
+  /// three allocations per candidate. Anything that stores the result, and
+  /// every command, must use [read] instead: an inverse payload sharing the
+  /// store's buffer would let a later edit rewrite undo history, which is the
+  /// exact hazard [read] exists to prevent.
+  GeometryPayload peek(int slot) {
+    _requireLive(slot);
+    return _payloads[slot];
+  }
+
   void replace(int slot, GeometryPayload payload) {
     _requireLive(slot);
     _payloads[slot] = GeometryPayload(

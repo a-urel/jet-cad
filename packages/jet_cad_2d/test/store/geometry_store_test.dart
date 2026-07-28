@@ -111,6 +111,30 @@ void main() {
     expect(store.liveCount, 2);
   });
 
+  test('peek returns the stored buffers, read returns copies', () {
+    final store = GeometryStore();
+    final slot = store.add(GeometryPayload(
+      coords: Float64List.fromList([1, 2, 3, 4]),
+      scalars: Float64List(0),
+    ));
+
+    expect(identical(store.peek(slot), store.peek(slot)), isTrue,
+        reason: 'peek must not allocate');
+    expect(identical(store.read(slot), store.read(slot)), isFalse,
+        reason: 'read is a defensive copy, and stays one');
+    expect(store.peek(slot).coords, store.read(slot).coords);
+  });
+
+  test('peek rejects a dead slot exactly as read does', () {
+    final store = GeometryStore();
+    final slot = store.add(GeometryPayload(
+      coords: Float64List.fromList([0, 0]),
+      scalars: Float64List(0),
+    ));
+    store.remove(slot);
+    expect(() => store.peek(slot), throwsA(isA<SlotStateError>()));
+  });
+
   test('payload json round-trips', () {
     final payload = GeometryPayload(
       coords: Float64List.fromList([1, 2, 3, 4]),
