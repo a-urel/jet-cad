@@ -12,6 +12,15 @@ import 'container_index.dart';
 /// One index per indexed container: the tree root, plus every definition —
 /// including definitions with no instances, since one may be placed at any
 /// moment and building on demand would put an unbounded build inside a query.
+///
+/// **Definitions must be in place before construction, or followed by an
+/// explicit [rebuildAll].** [DocumentTree.addDefinition] and
+/// [DocumentTree.removeDefinition] are not commands — nothing calling either
+/// one emits a [DocChange], so this class has no way to hear about it. A
+/// definition added afterwards never gets a [ContainerIndex]; one removed
+/// leaves a stale entry that [rebuildContainer] would reject and only
+/// [rebuildAll] clears. A future plan that turns definition mutation into
+/// commands removes this caveat along with the gap it names.
 class SpatialIndex {
   SpatialIndex(this.document) {
     rebuildAll();
@@ -136,6 +145,12 @@ class SpatialIndex {
   /// Re-derives the box of every touched handle and dirties what moved.
   void _reconcile(Set<Handle> touched) {
     if (touched.isEmpty) {
+      // Defensive, not currently reachable: every `DraftCommand.apply` in
+      // this package returns a non-empty `touched` (see `commands.dart`),
+      // so `CommandDispatcher` never emits an empty set here today. Kept in
+      // case a future command legitimately has nothing to name — falling
+      // back to a full rebuild is the same conservative answer this class
+      // already gives to every other "cannot pin down what changed" case.
       rebuildAll();
       return;
     }
@@ -146,6 +161,22 @@ class SpatialIndex {
     final ordered = touched.toList()
       ..sort((a, b) => a.value.compareTo(b.value));
 
+    // Not currently distinguishable from a simpler "let `_reconcileEntity`
+    // find out" by any test: every shipped `DraftCommand.apply` returns a
+    // singleton `touched`, so for the one handle in it, a node or
+    // definition that still resolves reaches `rebuildAll()` here, and a
+    // handle that resolves to *neither* an entity nor a node — a removal —
+    // reaches the equally conservative fallback inside `_reconcileEntity`
+    // (see its `last == null` branch). Either path ends this call with
+    // exactly one `rebuildAll()`, so a single-handle touch cannot tell them
+    // apart by outcome. The distinction only matters for a *batch* naming
+    // more than one structural handle at once: this loop calls
+    // `rebuildAll()` once after scanning the whole set, where routing every
+    // structural handle through `_reconcileEntity` individually would call
+    // it once per handle. No command in this package produces such a batch
+    // today, so that saving is unexercised — kept for the shape of a
+    // future command that touches several nodes in one edit, not because a
+    // test proves it pays for itself yet.
     var structural = false;
     for (final handle in ordered) {
       if (document.tree.definition(handle) != null) {
@@ -186,14 +217,35 @@ class SpatialIndex {
   void _reconcileEntity(Handle handle) {
     final slot = document.entities.slotOf(handle);
     if (slot == null) {
-      // Removed. Mark it dead everywhere it might be indexed, and drop any
-      // dirty entry for it.
       final last = _lastKnownSlot[handle];
-      if (last != null) {
-        for (final index in _byContainer.values) {
-          index.markLeafDead(last);
-          index.dirty.remove(last);
-        }
+      if (last == null) {
+        // Never a live entity, and by the time `_reconcile` routed here it
+        // no longer resolves to a node or definition either — so it *was*
+        // one, and has just been removed (`RemoveNodeCommand`, most
+        // directly, but anything with the same shape). `_reconcile`'s
+        // structural rule only catches a handle that *still* resolves to a
+        // node or definition when it is inspected; a removal is the one
+        // case where the handle can no longer tell us that about itself,
+        // which is why it falls through to here instead of setting
+        // `structural`.
+        //
+        // Falling back to a full rebuild is the conservative version of the
+        // fix: a precise one would mirror `_lastKnownSlot` for node and
+        // definition handles too, but this class already accepts
+        // `rebuildAll()` for every other structural change, so this is
+        // consistent with the shipped design rather than a special case.
+        // Without it, a removed node's leaves and instances — and a removed
+        // definition's own `ContainerIndex` — stay indexed and keep being
+        // found by every query until the next unrelated rebuild, a purge,
+        // or a load.
+        rebuildAll();
+        return;
+      }
+      // A previously-seen entity that is now gone. Mark it dead everywhere
+      // it might be indexed, and drop any dirty entry for it.
+      for (final index in _byContainer.values) {
+        index.markLeafDead(last);
+        index.dirty.remove(last);
       }
       _lastKnownSlot.remove(handle);
       return;
@@ -203,6 +255,12 @@ class SpatialIndex {
     final owner = document.entities.ownerAt(slot);
     final index = _containerHolding(owner);
     if (index == null) {
+      // Defensive, not currently reachable in a valid document: every
+      // entity's owner chain terminates at the root, which is always
+      // indexed, so this only fires if the tree is malformed (a broken
+      // `parent` chain, or an owner naming neither a node nor an indexed
+      // container). A full rebuild is the same conservative answer given
+      // above rather than propagating a lookup failure into a query.
       rebuildAll();
       return;
     }
@@ -224,10 +282,17 @@ class SpatialIndex {
 
     final indexed = index.boxOfLeaf(slot);
     if (indexed != null && _sameBox(indexed, expected)) {
-      // Live, indexed, and unchanged. A stale dirty entry from an earlier
-      // edit that has since been undone back to its original box must go, or
-      // the dirty list grows across an edit-undo cycle and eventually forces
-      // a rebuild nothing asked for.
+      // Live, indexed, and unchanged.
+      //
+      // `index.dirty.remove(slot)` here is defensive, not currently
+      // reachable: the only place this class ever calls `dirty.put` is right
+      // below, paired unconditionally with `markLeafDead` in the same
+      // breath, so a slot that still has a usable box (`indexed != null`,
+      // i.e. not dead) can never also carry a dirty entry today. Kept
+      // anyway — and cheap — in case a future change adds a second path
+      // onto the dirty list without also going through `markLeafDead`; if
+      // that ever happens this stops a stale entry from surviving an edit
+      // that reverted to its original box.
       index.dirty.remove(slot);
       return;
     }

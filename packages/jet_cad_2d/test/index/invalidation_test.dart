@@ -102,13 +102,56 @@ void main() {
     final index = SpatialIndex(doc);
     addTearDown(index.dispose);
 
+    final rebuildsBefore = index.rebuildCount;
     doc.commands.execute(RemoveEntityCommand(drop));
+
+    // Asserting `rebuildCount` is not just belt-and-braces here: without
+    // `_lastKnownSlot` populated in `rebuildAll`, `_reconcileEntity` cannot
+    // find the removed slot to mark dead and falls back to a full
+    // `rebuildAll()` — which still produces the right *answer* below, so a
+    // version of this test that checked only `found` would pass against
+    // that regression too. This is the one assertion that forces the fast,
+    // incremental path rather than the conservative fallback.
+    expect(index.rebuildCount, rebuildsBefore,
+        reason: 'a plain removal must be reconciled without a full rebuild');
 
     final found = <int>[];
     index.rootIndex
         .searchLeaves(Aabb2(Vector2(-1, -1), Vector2(100, 100)), found.add);
     expect(found, hasLength(1));
     expect(doc.entities.handleAt(found.single), keep);
+  });
+
+  test(
+      'a slot reused by a different entity is found at its own box, not the '
+      "dead entity's", () {
+    // Regression test for the hazard `_sameBox`'s exact `==` exists to
+    // close: `SlotAllocator` reuses a freed slot immediately, so the next
+    // entity added after a removal can land in the very slot the removed
+    // entity left dead. Reconciliation must not mistake the new entity's
+    // touch for "this dead slot came back with its old box" — only an exact
+    // match against the *dead* entry's stored box may revive it, and a real
+    // new entity at a different location must not match.
+    final doc = DraftDocument.empty();
+    final dropped = addLine(doc, doc.rootHandle, 0, 0, 1, 1);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    doc.commands.execute(RemoveEntityCommand(dropped));
+    final replacement = addLine(doc, doc.rootHandle, 100, 100, 101, 101);
+
+    final atDeadEntitysOldBox = <int>[];
+    index.rootIndex.searchLeaves(
+        Aabb2(Vector2(-1, -1), Vector2(2, 2)), atDeadEntitysOldBox.add);
+    expect(atDeadEntitysOldBox, isEmpty,
+        reason: 'the replacement must not be findable at the coordinates of '
+            'the entity it replaced');
+
+    final atItsOwnBox = <int>[];
+    index.rootIndex.searchLeaves(
+        Aabb2(Vector2(99, 99), Vector2(102, 102)), atItsOwnBox.add);
+    expect(atItsOwnBox, hasLength(1));
+    expect(doc.entities.handleAt(atItsOwnBox.single), replacement);
   });
 
   test('undo restores findability', () {
@@ -158,6 +201,91 @@ void main() {
         Aabb2(Vector2(499, 499), Vector2(502, 502)), found.add);
     expect(found, [instance],
         reason: 'the instance must be findable at its new position');
+  });
+
+  test('removing an instance node (via undo) invalidates the index', () {
+    // Regression test: a touched handle that no longer resolves to a node
+    // — because it was just removed — used to fall through `_reconcile`'s
+    // structural check (which only fires for a handle that *still*
+    // resolves) into `_reconcileEntity`, where it was neither a live
+    // entity nor a previously-seen one, and reconciliation did nothing.
+    // The removed instance stayed indexed and stayed findable forever.
+    final doc = DraftDocument.empty();
+    const def = Handle(200);
+    const instance = Handle(400);
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'T',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    // The definition must hold a leaf, or `definitionBounds` is empty and
+    // `Aabb2.transformedBy` short-circuits an empty box to itself — the
+    // instance's indexed box would then be empty regardless of the
+    // placement transform, unfindable by any query before removal even
+    // enters the picture, and the test would pass whether or not removal
+    // is reconciled correctly.
+    addLine(doc, def, 0, 0, 1, 1);
+    doc.commands.execute(AddNodeCommand(
+      InstanceNode(
+        handle: instance,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(500, 500),
+        definition: def,
+        layer: ReservedHandles.layerZero,
+      ),
+    ));
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    // Sanity check: the instance is findable before the removal we are
+    // about to test invalidation for. Without this, the assertion below
+    // would pass just as vacuously as it did before this fix.
+    final before = <Handle>[];
+    index.rootIndex.searchInstances(
+        Aabb2(Vector2(499, 499), Vector2(502, 502)), before.add);
+    expect(before, [instance],
+        reason: 'setup check: the instance must be findable before removal, '
+            'or the assertion below proves nothing');
+
+    doc.commands.undo(); // applies the inverse: RemoveNodeCommand(instance)
+
+    final found = <Handle>[];
+    index.rootIndex.searchInstances(
+        Aabb2(Vector2(-1e6, -1e6), Vector2(1e6, 1e6)), found.add);
+    expect(found, isEmpty,
+        reason: 'a removed instance must not still be indexed');
+  });
+
+  test('removing a group node invalidates the index for its leaf', () {
+    // Same regression as above, but via `RemoveNodeCommand` directly and
+    // exercising a group's leaf rather than an instance: the leaf entity
+    // itself is untouched by the command (its record still lives in the
+    // entity store, unowned by anything reachable from the tree), so the
+    // only signal reconciliation gets is the group handle's own touch.
+    final doc = DraftDocument.empty();
+    const group = Handle(300);
+    doc.commands.execute(AddNodeCommand(
+      GroupNode(
+        handle: group,
+        parent: doc.rootHandle,
+        transform: Transform2.identity(),
+        children: const [],
+      ),
+    ));
+    addLine(doc, group, 0, 0, 1, 1);
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    doc.commands.execute(RemoveNodeCommand(group));
+
+    final found = <int>[];
+    index.rootIndex
+        .searchLeaves(Aabb2(Vector2(-1e6, -1e6), Vector2(1e6, 1e6)), found.add);
+    expect(found, isEmpty,
+        reason: "a removed group's leaf must not still be indexed");
   });
 
   test('an ATTRIB owned by an instance dirties nothing on a component edit',

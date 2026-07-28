@@ -258,15 +258,14 @@ class ContainerIndex {
   /// with no error anywhere.
   Aabb2? boxOfLeaf(int slot) => _leaves.boxOfPayload(slot);
 
-  bool containsLeaf(int slot) => _leaves.boxOfPayload(slot) != null;
-
   /// Un-marks a leaf, for the restore half of remove-then-undo.
   void markLeafAlive(int slot) => _leaves.markAlive(slot);
 
   /// Whether the tree holds an entry for [slot] at all, alive or dead.
   ///
-  /// Distinct from [containsLeaf], which answers "is there a usable box" and
-  /// so is false for a dead entry. Reconciliation needs both questions.
+  /// Distinct from asking "is there a usable box" — [boxOfLeaf] non-null
+  /// answers that, and is false for a dead entry. Reconciliation needs both
+  /// questions: this one to tell a dead entry apart from no entry at all.
   bool containsLeafSlot(int slot) => _leaves.holdsPayload(slot);
 
   /// The stored box of a dead entry, so reconciliation can decide whether a
