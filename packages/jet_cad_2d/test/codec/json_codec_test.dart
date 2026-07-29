@@ -119,6 +119,62 @@ void main() {
     expect(loaded.extents.min.x, closeTo(4.5e6, 1e-9));
   });
 
+  test("an instance's colour survives save and load", () {
+    final doc = DraftDocument.empty();
+    const def = Handle(600);
+    doc.tree.addDefinition(Definition(
+        handle: def,
+        name: 'sym',
+        basePoint: Vector2.zero(),
+        children: const []));
+    const instance = Handle(601);
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: instance,
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      definition: def,
+      layer: ReservedHandles.layerZero,
+      color: const IndexedColor(3),
+    )));
+
+    final loaded = DraftDocumentCodec.decode(DraftDocumentCodec.encode(doc));
+    final node = loaded.tree[instance]! as InstanceNode;
+    expect(node.color, const IndexedColor(3));
+  });
+
+  test('an instance with no stored colour loads as ByBlockColor', () {
+    // Simulates a file written before InstanceNode carried a colour field:
+    // strip the key a current encode would have written, rather than
+    // hand-authoring a whole schemaVersion-2 file, so the fixture stays
+    // anchored to what this build actually produces.
+    final doc = DraftDocument.empty();
+    const def = Handle(602);
+    doc.tree.addDefinition(Definition(
+        handle: def,
+        name: 'sym',
+        basePoint: Vector2.zero(),
+        children: const []));
+    const instance = Handle(603);
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: instance,
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      definition: def,
+      layer: ReservedHandles.layerZero,
+      color: const IndexedColor(3),
+    )));
+
+    final json = DraftDocumentCodec.encode(doc);
+    final nodes = (json['nodes']! as List).cast<Map<String, Object?>>();
+    final nodeJson = nodes.singleWhere((n) => n['handle'] == instance.toJson());
+    expect(nodeJson.remove('color'), isNotNull,
+        reason: 'sanity: a current encode really does write the key');
+
+    final loaded = DraftDocumentCodec.decode(json);
+    final node = loaded.tree[instance]! as InstanceNode;
+    expect(node.color, const ByBlockColor());
+  });
+
   test('geometry is stored inline, so slots are never persisted', () {
     final json = DraftDocumentCodec.encode(sampleDocument());
     final entity = (json['entities']! as List).single as Map;
