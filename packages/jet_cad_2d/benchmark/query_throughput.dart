@@ -20,9 +20,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d/testing.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
-
-import 'generate_document.dart';
 
 const int _kWarmupIterations = 20;
 const int _kMeasuredIterations = 120; // >= 100, per the brief
