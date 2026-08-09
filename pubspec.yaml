@@ -5,4 +5,5 @@ environment:
 workspace:
   - packages/jet_cad
   - packages/jet_cad_2d
+  - packages/jet_cad_2d_flutter
   - apps/dev_harness
