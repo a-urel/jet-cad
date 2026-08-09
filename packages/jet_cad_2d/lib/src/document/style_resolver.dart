@@ -27,10 +27,18 @@ class DocumentStyleResolver implements StyleResolver {
   StyleContext contextFor(Handle instance, StyleContext inherited) {
     final node = document.tree[instance];
     if (node is! InstanceNode) return inherited;
+    // An instance on layer 0 is substituted onto the layer it is placed
+    // through, exactly as an entity is in [styleFor]. That one effective layer
+    // answers both questions this method asks — which layer supplies this
+    // instance's own BYLAYER colour, and which layer it passes down — so it is
+    // computed once. Reading `node.layer` for the colour while passing the
+    // substituted layer down would make one node report two effective layers.
+    final layer =
+        node.layer == ReservedHandles.layerZero ? inherited.layer : node.layer;
     final encoded = encodeColor(node.color);
     final color = switch (encoded) {
       kByBlock => inherited.color,
-      kByLayer => _layerColorOf(node.layer, inherited),
+      kByLayer => _layerColorOf(layer, inherited),
       _ => encoded,
     };
     return StyleContext(
@@ -39,29 +47,23 @@ class DocumentStyleResolver implements StyleResolver {
       linetypeScale: inherited.linetypeScale,
       lineweight: inherited.lineweight,
       transparency: inherited.transparency,
-      layer: node.layer == ReservedHandles.layerZero
-          ? inherited.layer
-          : node.layer,
+      layer: layer,
     );
   }
 
   @override
   ResolvedStyle styleFor(int slot, StyleContext ctx) {
     final entityLayer = document.entities.layerAt(slot);
-    // The layer-0 rule: an entity on layer 0 takes the layer it is placed
-    // through, which is what the context carries.
+    // The layer-0 rule is SUBSTITUTION, not deferral: an entity on layer 0
+    // takes the layer it is placed through, which is what the context carries.
+    // When nothing substitutes — a root-level entity, or an instance chain that
+    // is itself all layer 0 — the effective layer is still layer 0, and layer 0
+    // is a real DXF layer whose record governs. Skipping the lookup there would
+    // make layer 0's record unreachable and would quietly give BYLAYER the
+    // meaning of BYBLOCK.
     final layer =
         entityLayer == ReservedHandles.layerZero ? ctx.layer : entityLayer;
-    // If the substitution still lands on layer 0, there is no real
-    // containing layer to read: layer 0's own table record exists only so
-    // the handle is always valid to look up, not to be treated as this
-    // entity's concrete style. Defer straight to the context instead of
-    // reading placeholder defaults that merely happen to usually agree with
-    // it (see [_layerColorOf], which applies the same rule for an instance's
-    // own BYLAYER colour).
-    final record = layer == ReservedHandles.layerZero
-        ? null
-        : document.tables.layers[layer];
+    final record = document.tables.layers[layer];
 
     final encoded = document.entities.colorAt(slot);
     final color = switch (encoded) {
@@ -101,13 +103,8 @@ class DocumentStyleResolver implements StyleResolver {
     );
   }
 
-  int _layerColorOf(Handle layer, StyleContext inherited) {
-    // Same placeholder-record rule as in [styleFor]: layer 0 names no real
-    // style of its own, so an instance whose own colour is BYLAYER and whose
-    // layer is 0 takes whatever placed it rather than layer 0's table entry.
-    if (layer == ReservedHandles.layerZero) return inherited.color;
-    return _concreteLayerColor(document.tables.layers[layer], inherited);
-  }
+  int _layerColorOf(Handle layer, StyleContext inherited) =>
+      _concreteLayerColor(document.tables.layers[layer], inherited);
 
   int _concreteLayerColor(LayerRecord? record, StyleContext ctx) {
     if (record == null) return ctx.color;
