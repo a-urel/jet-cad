@@ -3,5 +3,6 @@ library;
 
 export 'src/camera_controller.dart';
 export 'src/canvas_draw_sink.dart';
+export 'src/draft_painter.dart';
 export 'src/draw_sink.dart';
 export 'src/viewport_transform.dart';
