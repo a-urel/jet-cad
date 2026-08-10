@@ -41,22 +41,31 @@ carries `--run-skipped`.
 # R1 — paint microbench, and R3 — query-only, both from the same file.
 cd packages/jet_cad_2d_flutter && flutter test --tags rig --run-skipped
 
-# R2 — profile-mode frame timing on a device, from the harness app.
-cd apps/dev_harness_2d && flutter run --profile -d macos
+# R2 (camera), R4a (leaf edit) and R4b (instance drag), from the harness app.
+# `flutter test --profile` does not exist; profile-mode frame timings only come
+# out of a real run on a device, which is what `flutter drive` gives.
+cd apps/dev_harness_2d && flutter drive \
+  --driver=test_driver/integration_test.dart \
+  --target=integration_test/frame_timing_test.dart --profile -d macos
 
-# R4a — pan and zoom under a held gesture, from the harness app.
-cd apps/dev_harness_2d && flutter run --profile -d macos --dart-define=RIG=pan
-
-# R4b — edit damage: repaint cost per command, from the harness app.
-cd apps/dev_harness_2d && flutter run --profile -d macos --dart-define=RIG=edit
+# One rig at a time, and at the large corpus. RIG is pan | leaf | instance.
+cd apps/dev_harness_2d && flutter drive \
+  --driver=test_driver/integration_test.dart \
+  --target=integration_test/frame_timing_test.dart --profile -d macos \
+  --dart-define=ENTITIES=500000 --dart-define=RIG=instance \
+  --dart-define=STEPS=60
 
 # The engine's own query throughput, for comparison against Plan 2's gate note.
 cd packages/jet_cad_2d && dart run benchmark/query_throughput.dart
 ```
 
+**Run `flutter drive` in the foreground.** Backgrounded, the app blocks on its
+first `pumpWidget` at 0% CPU, waiting for a frame the windowing system never
+asks it for; it does not time out, it simply never finishes. Both foreground
+runs completed and both background runs hung, which is why `RIG` and `STEPS`
+exist — they keep a single rig inside one foreground run.
+
 R1 runs under `flutter test`: debug JIT, and `PictureRecorder` records without
 rasterising. **It is a relative regression signal only.** It is not comparable
 to R2's profile-mode numbers and cannot see raster cost. Do not mix the two in
 a results note.
-
-R2, R4a and R4b need the harness app, which lands with Task 16.
