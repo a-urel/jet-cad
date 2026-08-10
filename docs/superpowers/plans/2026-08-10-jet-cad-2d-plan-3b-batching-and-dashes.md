@@ -948,7 +948,7 @@ Future<Uint8List> render(DraftDocument doc, BatchMode mode) async {
   final canvas = ui.Canvas(recorder);
   canvas.drawRect(
       ui.Offset.zero & kSize, ui.Paint()..color = const ui.Color(0xFFFFFFFF));
-  final sink = ui_sink(canvas, mode);
+  final sink = sinkOver(canvas, mode);
   DraftPainter(
           document: doc,
           index: SpatialIndex(doc),
@@ -967,7 +967,7 @@ Future<Uint8List> render(DraftDocument doc, BatchMode mode) async {
   return data!.buffer.asUint8List();
 }
 
-CanvasDrawSink ui_sink(ui.Canvas canvas, BatchMode mode) => CanvasDrawSink(
+CanvasDrawSink sinkOver(ui.Canvas canvas, BatchMode mode) => CanvasDrawSink(
     canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm, mode: mode);
 
 /// What changed between two renders, characterised rather than counted.
