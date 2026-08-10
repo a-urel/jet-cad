@@ -123,3 +123,6 @@ app.*.symbols
 !/dev/ci/**/Gemfile.lock
 # Subagent-driven development scratch (ledger, briefs, review packages).
 .superpowers/
+
+# Harness-managed worktrees (EnterWorktree and manual).
+.claude/worktrees/
