@@ -29,7 +29,7 @@ class PackedRTree {
 
   PackedRTree._(this._boxes, this._payloads, this._levelEnd, this.itemCount,
       this._payloadToItem)
-      : _dead = Uint64List((itemCount + 63) >> 6),
+      : _dead = Uint32List((itemCount + 31) >> 5),
         _stackLevel = Int32List(_kSearchStackDepth * kNodeCapacity),
         _stackIndex = Int32List(_kSearchStackDepth * kNodeCapacity);
 
@@ -158,7 +158,14 @@ class PackedRTree {
   final Uint32List _payloads;
   final Int32List _levelEnd;
   final Map<int, int> _payloadToItem;
-  final Uint64List _dead;
+
+  /// One bit per item, in **32-bit** words.
+  ///
+  /// Not `Uint64List`: it does not exist on the web, and a 64-bit word would be
+  /// wrong there even if it did — JavaScript's bitwise operators are 32-bit, so
+  /// `1 << 40` is not the bit anyone meant. This is the only 64-bit typed list
+  /// the engine had, and it took the whole render path down on web.
+  final Uint32List _dead;
 
   /// Preallocated so [search] allocates nothing. Two parallel stacks — level
   /// and node index — rather than one packed value, since a node can push up
@@ -233,7 +240,7 @@ class PackedRTree {
   void markDead(int payload) {
     final item = _payloadToItem[payload];
     if (item == null) return;
-    _dead[item >> 6] |= 1 << (item & 63);
+    _dead[item >> 5] |= 1 << (item & 31);
   }
 
   bool isDead(int payload) {
@@ -403,7 +410,7 @@ class PackedRTree {
   void markAlive(int payload) {
     final item = _payloadToItem[payload];
     if (item == null) return;
-    _dead[item >> 6] &= ~(1 << (item & 63));
+    _dead[item >> 5] &= ~(1 << (item & 31));
   }
 
   /// Whether this tree holds an entry for [payload] at all, alive or dead.
@@ -424,7 +431,7 @@ class PackedRTree {
     }
   }
 
-  bool _isDeadItem(int item) => (_dead[item >> 6] >> (item & 63)) & 1 == 1;
+  bool _isDeadItem(int item) => (_dead[item >> 5] >> (item & 31)) & 1 == 1;
 
   bool _overlaps(
           int node, double minX, double minY, double maxX, double maxY) =>
