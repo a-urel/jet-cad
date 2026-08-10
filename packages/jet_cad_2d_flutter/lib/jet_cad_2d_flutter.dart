@@ -6,4 +6,5 @@ export 'src/canvas_draw_sink.dart';
 export 'src/draft_painter.dart';
 export 'src/draw_sink.dart';
 export 'src/leaf_owner_map.dart';
+export 'src/reference_walk.dart';
 export 'src/viewport_transform.dart';
