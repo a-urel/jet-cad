@@ -35,6 +35,7 @@ class DraftPainter {
     required this.index,
     required this.resolver,
     this.ownerMap,
+    this.debugDisableRebasing = false,
   });
 
   final DraftDocument document;
@@ -47,6 +48,14 @@ class DraftPainter {
   /// dead slots on screen. Opt-in means a caller that forgets to feed it gets
   /// the slower path rather than a wrong picture.
   final LeafOwnerMap? ownerMap;
+
+  /// **Test-only.** Paints with the rebase origin pinned at the world origin.
+  ///
+  /// Exists so the damage the rebase prevents can be measured rather than
+  /// argued about: at 4.5e6, float32 spacing is about 0.5 units, and a test
+  /// that shows the drawing moving with this on is what makes the assertions
+  /// about small residuals mean something.
+  final bool debugDisableRebasing;
 
   /// Reused across frames; the frame path must not allocate once warm.
   Float64List _points = Float64List(256);
@@ -127,7 +136,8 @@ class DraftPainter {
     _directBuckets = 0;
     final world = camera.visibleWorld(viewport);
     _worldRect = world;
-    final origin = rebaseOriginFor(world);
+    final origin =
+        debugDisableRebasing ? Vector2.zero() : rebaseOriginFor(world);
     final rootIndex = index.rootIndex;
 
     // Drain the instance query completely first. Holding its results across
