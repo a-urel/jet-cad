@@ -8,12 +8,13 @@ import 'camera_controller.dart';
 import 'draw_sink.dart';
 import 'viewport_transform.dart';
 
-/// How far from conformal a leaf's screen transform may be before one baked
+/// How far from conformal a curve's screen transform may be before its baked
 /// stroke width stops being close enough.
 ///
-/// `Transform2.anisotropyRatio` is the ratio of the larger singular value to
-/// the smaller, so 1.0 is conformal — including mirroring, where the
-/// determinant is negative but both axes scale alike.
+/// **Diagnostic only.** It gates no drawing decision: points, lines and
+/// polylines are carried into screen space regardless, and curves take the
+/// residual path regardless. All it decides is whether a curve is counted in
+/// [DraftPainter.anisotropicCurveCount].
 const double kAnisotropyThreshold = 2.0;
 
 /// Walks the document and writes to a [DrawSink]. No cache of any kind.
@@ -74,11 +75,17 @@ class DraftPainter {
   /// Instances not drawn in the last frame because they sat below [maxDepth].
   int get skippedDeepInstanceCount => _skippedDeepInstances;
 
-  int _bypassCount = 0;
+  int _screenSpaceLeaves = 0;
   int _anisotropicCurves = 0;
 
-  /// Leaves drawn through the exact per-axis path in the last frame.
-  int get bypassCount => _bypassCount;
+  /// Leaves drawn with their points already carried into screen space, under
+  /// the frame's shared translation residual.
+  ///
+  /// Every point, line and polyline drawn in the frame. Plan 3a's
+  /// `bypassCount` counted the minority that took this path when their
+  /// transform was past [kAnisotropyThreshold]; the path is now the rule, so
+  /// the name changed with the meaning rather than quietly keeping it.
+  int get screenSpaceLeafCount => _screenSpaceLeaves;
 
   /// Circles and arcs drawn in the last frame under a transform past
   /// [kAnisotropyThreshold], where their stroke width is an approximation.
@@ -116,7 +123,7 @@ class DraftPainter {
   void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
     _skippedText = 0;
     _skippedDeepInstances = 0;
-    _bypassCount = 0;
+    _screenSpaceLeaves = 0;
     _anisotropicCurves = 0;
     final world = camera.visibleWorld(viewport);
     _worldRect = world;
@@ -284,20 +291,35 @@ class DraftPainter {
     final style = resolver.styleFor(slot, ctx);
 
     // `Paint.strokeWidth` is a single scalar measured in the residual's units,
-    // so it can only be right when the residual scales both axes alike.
-    // `sqrt(|det|)` is the representative scale and `anisotropyRatio` says how
-    // far from conformal the transform is; within the threshold one width is
-    // close enough. Beyond it no single width is right, so the points are
-    // transformed here in Float64 and the residual carries translation only.
+    // so it can only be right when the residual scales both axes alike. Points,
+    // lines and polylines avoid the question entirely: their points are carried
+    // into screen space here in Float64 and the residual is a pure translation,
+    // so the sink's width is the exact paper width with nothing divided out.
+    //
+    // This was the anisotropy bypass, taken only past kAnisotropyThreshold. The
+    // threshold was never why it works — a conformal transform has the same
+    // property — so it is now the rule rather than the exception, and one
+    // residual value serves every line-like leaf in the frame.
     final toScreen = camera.worldToScreenMatrix.multiply(placement);
-    if (toScreen.anisotropyRatio > kAnisotropyThreshold) {
-      if (_bypassable(kind)) {
-        _bypassCount++;
-        _emitBypassed(
+    switch (kind) {
+      case EntityKind.point:
+      case EntityKind.line:
+      case EntityKind.polyline:
+        _screenSpaceLeaves++;
+        _emitScreenSpace(
             sink, camera, toScreen, origin, slot, kind, payload, style);
         return;
-      }
-      _anisotropicCurves++;
+      case EntityKind.circle:
+      case EntityKind.arc:
+        // Curves keep the residual path: an anisotropic transform turns a
+        // circle into an ellipse, and DrawSink.circle carries one radius.
+        // What a sink does with that residual is a sink decision.
+        if (toScreen.anisotropyRatio > kAnisotropyThreshold) {
+          _anisotropicCurves++;
+        }
+      case EntityKind.text:
+      case EntityKind.attrib:
+        break;
     }
 
     // The rebase subtraction happens in the leaf's own space, because that is
@@ -317,16 +339,6 @@ class DraftPainter {
     sink.endResidual();
   }
 
-  /// Whether an entity of [kind] can be drawn with its points pre-transformed.
-  ///
-  /// Curves cannot: an anisotropic transform turns a circle into an ellipse,
-  /// and the sink's circle and arc calls carry one radius. They keep the
-  /// residual path, where `Canvas` draws the ellipse correctly.
-  static bool _bypassable(EntityKind kind) =>
-      kind == EntityKind.point ||
-      kind == EntityKind.line ||
-      kind == EntityKind.polyline;
-
   /// Draws a leaf with its points already carried into screen space.
   ///
   /// The residual left for `Canvas` is a pure translation, so its scale is 1
@@ -334,7 +346,7 @@ class DraftPainter {
   /// pixels — nothing divided out of it, and nothing wrong on either axis.
   /// Rebasing here is in screen space, since that is the space the points are
   /// now in.
-  void _emitBypassed(
+  void _emitScreenSpace(
       DrawSink sink,
       ViewportTransform camera,
       Transform2 toScreen,

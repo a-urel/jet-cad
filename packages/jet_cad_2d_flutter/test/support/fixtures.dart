@@ -114,7 +114,9 @@ DraftDocument differentialFixture({double originX = 0}) {
     color: const IndexedColor(3),
   )));
 
-  // Mirrored, and still conformal, so it stays off the anisotropy bypass.
+  // Mirrored, and still conformal: anisotropyRatio 1. Its own polyline leaf
+  // takes the screen-space path regardless (every line-like leaf does now);
+  // the arc sharing this instance is what still exercises the residual path.
   doc.commands.execute(AddNodeCommand(InstanceNode(
     handle: const Handle(830),
     parent: doc.rootHandle,

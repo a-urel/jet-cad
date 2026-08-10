@@ -219,9 +219,9 @@ void main() {
     painter.paint(RecordingDrawSink(),
         ViewportTransform.fit(doc.extents, kGoldenViewport), kGoldenViewport);
 
-    expect(painter.bypassCount, 2,
-        reason: 'the stretched instance holds two polylines, and both are '
-            'bypassable kinds');
+    expect(painter.screenSpaceLeafCount, 4,
+        reason: 'both instances place two polylines each, and every '
+            'polyline takes the screen-space path now, conformal or not');
     expect(painter.anisotropicCurveCount, 0,
         reason: 'the fixture holds no curves, so nothing may fall through to '
             'the approximate path');

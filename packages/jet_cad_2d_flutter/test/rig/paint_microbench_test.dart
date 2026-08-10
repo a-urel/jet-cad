@@ -150,7 +150,7 @@ void main() {
         print('    R1 paint          $paint');
         print('    R3 query-only     $query');
         print('    ops/frame: $opsPerFrame');
-        print('    bypassed leaves: ${painter.bypassCount}  '
+        print('    screen-space leaves: ${painter.screenSpaceLeafCount}  '
             'anisotropic curves: ${painter.anisotropicCurveCount}');
         print('    skipped text: ${painter.skippedTextCount}  '
             'skipped deep instances: ${painter.skippedDeepInstanceCount}');
