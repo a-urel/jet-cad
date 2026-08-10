@@ -1,6 +1,11 @@
-# Golden files are bytes produced by one Skia build on one platform. They were
-# generated and reviewed on macOS; another platform will differ by antialiasing
-# alone. Run `flutter test --exclude-tags golden` anywhere that is not the
-# platform they were generated on.
 tags:
   golden:
+    # Golden files are bytes produced by one Skia build on one platform. They
+    # were generated and reviewed on macOS; another platform will differ by
+    # antialiasing alone. Run `flutter test --exclude-tags golden` anywhere
+    # that is not the platform they were generated on.
+
+  rig:
+    # Rigs measure; they do not assert. Running them in the normal suite would
+    # make it slow and make its result depend on machine load.
+    skip: "run explicitly: flutter test --tags rig --run-skipped"
