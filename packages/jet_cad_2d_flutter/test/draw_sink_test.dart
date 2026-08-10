@@ -5,55 +5,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'support/spy_canvas.dart';
+
 const ResolvedStyle _anyStyle = ResolvedStyle(
   argb: 0xFFFF0000,
   lineweightHundredths: 25,
   linetype: ReservedHandles.continuousLinetype,
   linetypeScale: 1.0,
 );
-
-/// Records what reaches `dart:ui`.
-///
-/// `CanvasDrawSink` reuses one `Paint` across ops, so the paint is snapshotted
-/// at call time; holding the reference would show every call the last colour.
-class _SpyCanvas implements Canvas {
-  final List<_Call> calls = <_Call>[];
-
-  Iterable<_Call> named(String name) => calls.where((c) => c.name == name);
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) {
-    final args = invocation.positionalArguments;
-    Paint? paint;
-    for (final a in args) {
-      if (a is Paint) paint = a;
-    }
-    calls.add(_Call(
-      _nameOf(invocation.memberName),
-      args,
-      color: paint?.color,
-      strokeWidth: paint?.strokeWidth,
-      paintingStyle: paint?.style,
-    ));
-    return null;
-  }
-}
-
-class _Call {
-  _Call(this.name, this.args,
-      {this.color, this.strokeWidth, this.paintingStyle});
-
-  final String name;
-  final List<Object?> args;
-  final Color? color;
-  final double? strokeWidth;
-  final PaintingStyle? paintingStyle;
-}
-
-String _nameOf(Symbol s) {
-  final text = s.toString(); // Symbol("drawPath")
-  return text.substring(text.indexOf('"') + 1, text.lastIndexOf('"'));
-}
 
 void main() {
   group('RecordingDrawSink', () {
@@ -144,11 +103,11 @@ void main() {
   });
 
   group('CanvasDrawSink', () {
-    late _SpyCanvas canvas;
+    late SpyCanvas canvas;
     late CanvasDrawSink sink;
 
     setUp(() {
-      canvas = _SpyCanvas();
+      canvas = SpyCanvas();
       // 96 dpi / 25.4 mm — one paper millimetre is 3.78 logical pixels.
       sink = CanvasDrawSink(canvas, pixelsPerPaperMm: 4.0);
     });

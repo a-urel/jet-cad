@@ -8,6 +8,14 @@ import 'camera_controller.dart';
 import 'draw_sink.dart';
 import 'viewport_transform.dart';
 
+/// How far from conformal a leaf's screen transform may be before one baked
+/// stroke width stops being close enough.
+///
+/// `Transform2.anisotropyRatio` is the ratio of the larger singular value to
+/// the smaller, so 1.0 is conformal — including mirroring, where the
+/// determinant is negative but both axes scale alike.
+const double kAnisotropyThreshold = 2.0;
+
 /// Walks the document and writes to a [DrawSink]. No cache of any kind.
 ///
 /// This is not scaffolding for the cached painter of Plan 3b — it is the
@@ -57,6 +65,22 @@ class DraftPainter {
   /// Instances not drawn in the last frame because they sat below [maxDepth].
   int get skippedDeepInstanceCount => _skippedDeepInstances;
 
+  int _bypassCount = 0;
+  int _anisotropicCurves = 0;
+
+  /// Leaves drawn through the exact per-axis path in the last frame.
+  int get bypassCount => _bypassCount;
+
+  /// Circles and arcs drawn in the last frame under a transform past
+  /// [kAnisotropyThreshold], where their stroke width is an approximation.
+  ///
+  /// They cannot take the bypass: such a transform turns a circle into an
+  /// ellipse, and [DrawSink.circle] carries one radius. `Canvas` still draws
+  /// the ellipse correctly through the residual — it is only the width that is
+  /// wrong, by up to the anisotropy ratio. Counted so the results note can say
+  /// how often it happens instead of implying it never does.
+  int get anisotropicCurveCount => _anisotropicCurves;
+
   int _skippedText = 0;
 
   /// Text entities not drawn in the last frame.
@@ -77,6 +101,8 @@ class DraftPainter {
   void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
     _skippedText = 0;
     _skippedDeepInstances = 0;
+    _bypassCount = 0;
+    _anisotropicCurves = 0;
     final world = camera.visibleWorld(viewport);
     _worldRect = world;
     final origin = rebaseOriginFor(world);
@@ -237,6 +263,27 @@ class DraftPainter {
   /// coordinates and world space — is already composed.
   void _drawLeafComposed(DrawSink sink, ViewportTransform camera,
       Vector2 origin, Transform2 placement, int slot, StyleContext ctx) {
+    final kind = document.entities.kindAt(slot);
+    final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
+    final style = resolver.styleFor(slot, ctx);
+
+    // `Paint.strokeWidth` is a single scalar measured in the residual's units,
+    // so it can only be right when the residual scales both axes alike.
+    // `sqrt(|det|)` is the representative scale and `anisotropyRatio` says how
+    // far from conformal the transform is; within the threshold one width is
+    // close enough. Beyond it no single width is right, so the points are
+    // transformed here in Float64 and the residual carries translation only.
+    final toScreen = camera.worldToScreenMatrix.multiply(placement);
+    if (toScreen.anisotropyRatio > kAnisotropyThreshold) {
+      if (_bypassable(kind)) {
+        _bypassCount++;
+        _emitBypassed(
+            sink, camera, toScreen, origin, slot, kind, payload, style);
+        return;
+      }
+      _anisotropicCurves++;
+    }
+
     // The rebase subtraction happens in the leaf's own space, because that is
     // the space the stored coordinates are in. So the origin — a world point —
     // is pulled back through the placement first, and the rebase translation
@@ -249,10 +296,59 @@ class DraftPainter {
         .multiply(placement)
         .multiply(Transform2.translation(localOrigin.x, localOrigin.y));
 
-    final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
-    final style = resolver.styleFor(slot, ctx);
     sink.beginResidual(chain, debugHandle: document.entities.handleAt(slot));
-    _emit(sink, document.entities.kindAt(slot), payload, localOrigin, style);
+    _emit(sink, kind, payload, localOrigin, style);
+    sink.endResidual();
+  }
+
+  /// Whether an entity of [kind] can be drawn with its points pre-transformed.
+  ///
+  /// Curves cannot: an anisotropic transform turns a circle into an ellipse,
+  /// and the sink's circle and arc calls carry one radius. They keep the
+  /// residual path, where `Canvas` draws the ellipse correctly.
+  static bool _bypassable(EntityKind kind) =>
+      kind == EntityKind.point ||
+      kind == EntityKind.line ||
+      kind == EntityKind.polyline;
+
+  /// Draws a leaf with its points already carried into screen space.
+  ///
+  /// The residual left for `Canvas` is a pure translation, so its scale is 1
+  /// and the stroke width the sink computes is the exact paper width in device
+  /// pixels — nothing divided out of it, and nothing wrong on either axis.
+  /// Rebasing here is in screen space, since that is the space the points are
+  /// now in.
+  void _emitBypassed(
+      DrawSink sink,
+      ViewportTransform camera,
+      Transform2 toScreen,
+      Vector2 origin,
+      int slot,
+      EntityKind kind,
+      GeometryPayload payload,
+      ResolvedStyle style) {
+    final screenOrigin = camera.worldToScreen(origin);
+    final coords = payload.coords;
+    final count = payload.pointCount;
+    if (count == 0) return;
+
+    _ensurePoints(count);
+    for (var i = 0; i < count; i++) {
+      final x = coords[i * 2];
+      final y = coords[i * 2 + 1];
+      _points[i * 2] =
+          toScreen.a * x + toScreen.c * y + toScreen.e - screenOrigin.x;
+      _points[i * 2 + 1] =
+          toScreen.b * x + toScreen.d * y + toScreen.f - screenOrigin.y;
+    }
+
+    sink.beginResidual(Transform2.translation(screenOrigin.x, screenOrigin.y),
+        debugHandle: document.entities.handleAt(slot));
+    if (kind == EntityKind.point) {
+      sink.point(_points[0], _points[1], style);
+    } else {
+      sink.polyline(_points, count, style, closed: false);
+    }
     sink.endResidual();
   }
 
