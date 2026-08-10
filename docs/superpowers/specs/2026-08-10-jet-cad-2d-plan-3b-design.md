@@ -395,18 +395,23 @@ and the web result.
 
 ### The differential oracle survives
 
-`referenceWalk` moves into screen space too — and that is a **second, separate
-change**, not the same one. The reference re-implements emission independently
-on purpose: "no packed tree, no dirty overlay, no container index, no scratch
-buffers, no cull floor, no anisotropy bypass … that independence is the whole
-value: two implementations sharing a mistake agree, and a test comparing them
-stays green."
+**`referenceWalk` does not change at all.** Not one edit, let alone two.
 
-So the same edit is made twice, deliberately, in two files that must not be
-refactored into one. Anyone who later removes the duplication in the name of
-tidiness removes the oracle.
+`flatten` in `test/support/differential.dart` already applies each residual
+before comparing, and its comment says exactly why: "the painter's bypass hands
+the sink screen-space points under a translation-only residual where the
+reference hands it local points under a full one. Both draw the same line."
+Extending the bypass from an exception to the rule makes that the common case.
+It does not create a new one.
 
-The oracle's assertions are unchanged in substance. `expectPainterSupersetOfReference`
+This is the strongest available outcome for the oracle's independence. The
+reference deliberately shares nothing with the painter — "no packed tree, no
+dirty overlay, no container index, no scratch buffers, no cull floor, no
+anisotropy bypass … that independence is the whole value" — and 3b keeps it
+untouched rather than making the same edit twice in two files that must never be
+merged into one.
+
+The oracle's assertions are unchanged. `expectPainterSupersetOfReference`
 makes two: every reference item is matched by the painter **in the same relative
 order**, and every unmatched painter item lies outside the viewport. Both
 differential tests keep running — the default fixture, and
@@ -481,7 +486,7 @@ them.
 | 500k working-set raster p50, **with dashes on** | **≤ 182.73 ms** — 3a's dash-free number. Failable |
 | batched vs unbatched goldens, fixtures 1 and 2 | byte-identical |
 | batched vs unbatched goldens, fixture 3 | byte-identical under B; a reviewed, deliberately regenerated golden under A or A′ |
-| the differential oracle | both differential tests and the non-vacuity test pass, in both files, with the reference still independent |
+| the differential oracle | both differential tests and the non-vacuity test pass, with `reference_walk.dart` unmodified |
 | the spike's four variants | measured, recorded, and the shipped one chosen by the stated rule |
 | `kDashCollapsePx` | swept with its numbers recorded, and chosen by a recorded human review of the dash-ladder goldens |
 | engine and Flutter suites, analyzer, formatter | green and clean |
@@ -570,5 +575,5 @@ Unchanged from 3a, plus one:
 | Pre-transforming points in Dart costs more build time than it saves raster time | Measured directly: the spike reports build and raster separately, as 3a's rigs already do |
 | A′ ships and its wider ordering contract bites in 3d | The tie-break prefers A and B; A′ ships only if it wins by more than noise, and the contract is written down here rather than inferred later |
 | The bucket lifecycle is left implicit and two readers build two sinks | Named as the axis the spike measures, with both lifecycles tabulated, an ordering-loss column per variant, and golden fixture 3 whose expected result differs between them |
-| The oracle's independence is refactored away while both walks move to screen space | The duplication is stated as deliberate at the point where the second edit is made, quoting `referenceWalk`'s own doc |
+| The oracle is "helpfully" updated alongside the painter | `reference_walk.dart` is untouched by this plan, and the diff being empty is an exit criterion. `flatten` already normalises both routes to screen space |
 | The web ceiling persists | Re-measured, not gated, and named as CanvasKit's limit rather than this plan's |
