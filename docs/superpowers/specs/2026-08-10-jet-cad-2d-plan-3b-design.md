@@ -456,10 +456,22 @@ Three reasons, and the first two are measured rather than anticipated:
 1. **Translucent geometry renders identically**, pixel for pixel, because a
    style below full alpha is never batched. Zero differing pixels — no
    tolerance, and therefore no margin to argue about.
-2. **Opaque geometry may differ only in partial coverage.** Every pixel fully
-   covered in the unbatched render is fully covered in the batched one;
-   differing pixels stay under a small fraction of the image; no pixel changes
-   hue. A dropped, moved or recoloured primitive fails all three.
+2. **Opaque geometry is the same picture, differently antialiased.** Batching
+   redistributes sub-pixel coverage, so a 4×4 box average — the operation that
+   undoes a redistribution — must reduce the difference to nothing much: a max
+   per-channel delta of 12 and a mean under 2. Total ink is conserved within
+   2%, and no pixel changes hue. Geometry that was dropped, moved or recoloured
+   is not a redistribution and survives the filter.
+
+   Two checks that look right and are **not** asserted, because a measurement
+   refuted them. "No pixel that was fully covered stops being fully covered" is
+   false in both directions: two opaque strokes each covering 97% of a pixel
+   composite to `255 × 0.03²`, which rounds to black, while unioned they cover
+   97% and land on 8 — and two disjoint half-covered strokes go the other way,
+   unioning to full coverage where compositing leaves 64. And a cap on the raw
+   differing-pixel fraction was written as 3% before anything was measured; the
+   figure is about 4%. A threshold fitted to an observation afterwards is a
+   record of the observation, not a threshold.
 3. **Cross-key overlap** is byte-identical under variant B and under B alone.
    Under the mapped variants the difference is the ordering contract made
    visible, and it is a *hue* change at the overlap — which is what separates it
