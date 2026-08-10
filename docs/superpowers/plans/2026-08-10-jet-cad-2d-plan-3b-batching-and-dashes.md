@@ -1404,27 +1404,28 @@ Extend the enum:
 Replace the single-bucket fields with a map, keeping the single-bucket fast path:
 
 ```dart
-  /// Open buckets, keyed by paint. `Map` preserves insertion order, which is
-  /// the order they are flushed in — the only draw order this mode keeps.
+  /// Open buckets, keyed by colour and then by lineweight.
   ///
-  /// Keyed by a packed `int`, **not** by a `(int, int)` record: a record is an
-  /// object, so building one per primitive to index this map would be an
-  /// allocation per primitive per frame, against the global constraint that
-  /// the frame path allocates nothing once warm.
-  final Map<int, Path> _buckets = <int, Path>{};
-
-  /// argb and lineweight packed into one integer, by multiplication rather
-  /// than by shifting.
+  /// **Two levels, not one packed integer**, and that is a correction rather
+  /// than a preference. A packed key — `argb * 4096 + lineweightHundredths` —
+  /// is invertible only while the lineweight stays inside `[0, 4096)`, and
+  /// nothing guarantees that. `DocumentStyleResolver` passes a lineweight
+  /// through unclamped (`_ => lw`), its source column is an `Int16List`, and a
+  /// `LayerRecord.lineweight` is a plain `int`. A lineweight of 5000 packs to
+  /// the same key as a different colour with a lineweight of 904, and the
+  /// flush then paints one of them in the other's colour — reachable through
+  /// `AddEntityCommand`, no malformed file required. Nesting **removes** the
+  /// domain assumption instead of restating it with a bigger number.
   ///
-  /// `argb << 16` would be wrong on the web, where Dart's bitwise operators
-  /// are 32-bit — the same trap that took the whole render path down through
-  /// `PackedRTree`'s `Uint64List`. Multiplication stays exact: the largest
-  /// value here is `0xFFFFFFFF * 4096 + 4095`, about 1.76e13, well under the
-  /// 2^53 a double represents exactly. DXF lineweights top out at 211
-  /// hundredths of a millimetre and a *resolved* one is never negative, so
-  /// 4096 is headroom, not a guess.
-  static int _paintKey(ResolvedStyle style) =>
-      style.argb * 4096 + style.lineweightHundredths;
+  /// Neither level is keyed by a `(int, int)` record: a record is an object,
+  /// so building one per primitive would be an allocation per primitive per
+  /// frame.
+  ///
+  /// Both levels preserve insertion order, which is the order buckets are
+  /// flushed in — the only draw order the mapped modes keep. The inner maps
+  /// are **kept across frames** and only emptied, so a steady-state frame
+  /// allocates no map at all.
+  final Map<int, Map<int, Path>> _buckets = <int, Map<int, Path>>{};
 
   /// Paths returned to the pool by [flush], so a frame allocates at most one
   /// `Path` per distinct paint ever seen rather than one per frame.
@@ -1447,17 +1448,21 @@ Replace the single-bucket fields with a map, keeping the single-bucket fast path
       _canvasCalls++;
       _bucket.reset();
     }
-    if (_buckets.isEmpty) return;
-    for (final entry in _buckets.entries) {
-      _paint
-        ..color = Color(entry.key ~/ 4096)
-        ..strokeWidth = _widthFor(entry.key % 4096, 1.0);
-      canvas.drawPath(entry.value, _paint);
-      _canvasCalls++;
-      entry.value.reset();
-      _pool.add(entry.value);
+    // The outer map keeps its (now empty) inner maps rather than being
+    // cleared, so a steady-state frame allocates no map. Iterating a handful
+    // of empty inner maps costs nothing next to a draw call.
+    for (final byLineweight in _buckets.entries) {
+      for (final entry in byLineweight.value.entries) {
+        _paint
+          ..color = Color(byLineweight.key)
+          ..strokeWidth = _widthFor(entry.key, 1.0);
+        canvas.drawPath(entry.value, _paint);
+        _canvasCalls++;
+        entry.value.reset();
+        _pool.add(entry.value);
+      }
+      byLineweight.value.clear();
     }
-    _buckets.clear();
   }
 ```
 
@@ -1477,13 +1482,17 @@ Replace the single-bucket fields with a map, keeping the single-bucket fast path
       return null;
     }
     if (_mapped) {
-      final key = _paintKey(style);
-      final existing = _buckets[key];
+      // Not putIfAbsent, at either level: its `ifAbsent` argument is a
+      // closure, allocated on every call whether or not the key is missing.
+      var byLineweight = _buckets[style.argb];
+      if (byLineweight == null) {
+        byLineweight = <int, Path>{};
+        _buckets[style.argb] = byLineweight;
+      }
+      final existing = byLineweight[style.lineweightHundredths];
       if (existing != null) return existing;
-      // Not putIfAbsent: its `ifAbsent` argument is a closure, allocated on
-      // every call whether or not the key is missing.
       final fresh = _pool.isEmpty ? Path() : _pool.removeLast();
-      _buckets[key] = fresh;
+      byLineweight[style.lineweightHundredths] = fresh;
       return fresh;
     }
     if (_bucketOpen &&
@@ -3256,7 +3265,7 @@ The method that found Plan 2's and 3a's real defects, applied to the constructs 
 | 12 | the pattern restarts per *polyline* rather than per vertex | `the pattern restarts at every vertex` (Task 6) |
 | 13 | `circleClipWindows` returns `-1` always | `only the angular window inside the clip is generated` (Task 7) |
 | 14 | the clip inflation set to `0` | a new painter test: a stroke whose centreline is one pixel outside the viewport must still emit a span |
-| 16 | `_paintKey` drops the `* 4096`, so argb and lineweight collide | the same test as mutant 3 — two styles differing only in lineweight |
+| 16 | the bucket lookup keys on `argb` alone, ignoring lineweight | the same test as mutant 3 — two styles differing only in lineweight |
 | 17 | `_localClipFor` returns `_rebasedClip` unconditionally | `only the angular window inside the clip is generated`, exercised through the painter on a dashed circle under a scaled instance |
 | 15 | the painter draws curves through `_emitScreenSpace` | golden `anisotropy_bypass.png` |
 
