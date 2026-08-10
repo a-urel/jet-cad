@@ -49,14 +49,91 @@ const double kDefaultOriginX = 4500000.0;
 /// pass it explicitly to control instancing directly (the definition-bounds
 /// build-time probe in `query_throughput.dart` does this, to guarantee every
 /// definition is reached by at least one instance).
+/// The extensions below are all off by default, and "off" means **draws
+/// nothing**.
+///
+/// Every one of them takes its randomness from a second [math.Random] and
+/// allocates no handle while it is zero, so the default document is the one
+/// Plan 2 measured, coordinate for coordinate. One stray `nextDouble()` on the
+/// primary stream would shift every value after it and silently invalidate the
+/// gate results note; `generate_document_test.dart` pins the serialisation's
+/// fingerprint against exactly that.
 DraftDocument generateDocument(
   int entityCount, {
   int definitionCount = 20,
   int instanceCount = 0,
   double originX = kDefaultOriginX,
+
+  /// How deep an instance chain inside definitions may run. Definitions are
+  /// chained in index order, so a cycle cannot be constructed.
+  int nestingDepth = 0,
+
+  /// Fraction of root instances placed with a negative determinant.
+  double mirroredFraction = 0,
+
+  /// Fraction of root instances scaled past `kAnisotropyThreshold`, so the
+  /// painter's exact per-axis path is actually reached.
+  double nonUniformFraction = 0,
+
+  /// Group nodes under the root, each a cluster of local geometry placed on
+  /// the floor plan — the folded-leaf-transform path.
+  int groupCount = 0,
+
+  /// Total layer records including layer 0.
+  int layerCount = 1,
+
+  /// Fraction of **definition-owned** entities authored ByBlock. Root-level
+  /// ByBlock has no instance to resolve against and exercises no extra path.
+  double byBlockFraction = 0,
+
+  /// Fraction of all entities carrying a dashed linetype rather than ByLayer.
+  double dashedFraction = 0,
 }) {
   final random = math.Random(0xC0FFEE);
+  // A second stream, drawn from only by the extensions. Keeping them off the
+  // primary one is what makes the default document byte-identical however many
+  // extensions exist.
+  final extra = math.Random(0x5EEDED);
   final doc = DraftDocument.empty();
+
+  final layers = <Handle>[];
+  if (layerCount > 1) {
+    layers.add(ReservedHandles.layerZero);
+    for (var i = 1; i < layerCount; i++) {
+      final handle = doc.handleSeed.next();
+      doc.tables.layers.add(LayerRecord(
+        handle: handle,
+        name: 'layer_$i',
+        // A concrete colour, so an entity on this layer resolves ByLayer to
+        // something other than layer 0's — otherwise more layers would mean
+        // more table records and one resolution outcome.
+        color: IndexedColor(1 + (i % 254)),
+        linetype: ReservedHandles.continuousLinetype,
+        lineweight: 25 + (i % 4) * 25,
+        transparency: 0,
+      ));
+      layers.add(handle);
+    }
+  }
+
+  Handle? dashedLinetype;
+  if (dashedFraction > 0) {
+    dashedLinetype = doc.handleSeed.next();
+    doc.tables.linetypes.add(LinetypeRecord(
+      handle: dashedLinetype,
+      name: 'Dashed',
+      description: '__ __ __',
+      pattern: const DashPattern(dashes: [12.0, -6.0], totalLength: 18.0),
+    ));
+  }
+
+  final styling = _Styling(
+    random: extra,
+    layers: layers,
+    dashed: dashedLinetype,
+    dashedFraction: dashedFraction,
+    byBlockFraction: byBlockFraction,
+  );
 
   // --- definitions: small local symbols, entities owned by the definition
   // handle directly (never by a `children` list -- see
@@ -81,8 +158,68 @@ DraftDocument generateDocument(
     final leaves = math.min(definitionBudget, entitiesLeft);
     entitiesLeft -= leaves;
     for (var i = 0; i < leaves; i++) {
-      _addSymbolEntity(doc, owner: handle, random: random);
+      _addSymbolEntity(doc,
+          owner: handle,
+          random: random,
+          styling: styling,
+          insideDefinition: true);
     }
+  }
+
+  // --- nesting: definitions chained in index order. ------------------------
+  //
+  // Index order is the whole cycle guard: definition i places only i + 1, so
+  // the placement graph is a forest of forward chains and cannot close. The
+  // chains are cut every `nestingDepth` definitions, which is what bounds the
+  // depth to the number asked for rather than to `definitionCount`.
+  if (nestingDepth > 0) {
+    for (var d = 0; d + 1 < definitionHandles.length; d++) {
+      if ((d + 1) % (nestingDepth + 1) == 0) continue; // chain boundary
+      doc.commands.execute(AddNodeCommand(InstanceNode(
+        handle: doc.handleSeed.next(),
+        parent: definitionHandles[d],
+        transform: Transform2.translation((extra.nextDouble() - 0.5) * 400,
+                (extra.nextDouble() - 0.5) * 400)
+            .multiply(Transform2.rotation(extra.nextDouble() * math.pi * 2))
+            .multiply(Transform2.scale(0.5 + extra.nextDouble(), 0.5)),
+        definition: definitionHandles[d + 1],
+        layer: ReservedHandles.layerZero,
+      )));
+    }
+  }
+
+  // --- groups: clusters of local geometry placed on the floor plan. --------
+  //
+  // A group folds its transform into the leaves of the container above it, so
+  // its contents are authored in local coordinates exactly as a definition's
+  // are; the floor position lives in the group's own transform. Authoring them
+  // at floor coordinates instead would move the whole cluster by the plan's
+  // width once the transform composed.
+  final groupHandles = <Handle>[];
+  var groupEntityCount = 0;
+  if (groupCount > 0) {
+    groupEntityCount = math.min(groupCount * 8, entitiesLeft ~/ 4);
+    for (var g = 0; g < groupCount; g++) {
+      final handle = doc.handleSeed.next();
+      doc.commands.execute(AddNodeCommand(GroupNode(
+        handle: handle,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(
+                originX + extra.nextDouble() * kFloorWidth,
+                kOriginY + extra.nextDouble() * kFloorHeight)
+            .multiply(Transform2.rotation(extra.nextDouble() * math.pi * 2)),
+        children: const [],
+      )));
+      groupHandles.add(handle);
+    }
+    for (var i = 0; i < groupEntityCount; i++) {
+      _addSymbolEntity(doc,
+          owner: groupHandles[i % groupHandles.length],
+          random: random,
+          styling: styling,
+          insideDefinition: false);
+    }
+    entitiesLeft -= groupEntityCount;
   }
 
   // --- root-level content: the rest of the entity budget, spread across
@@ -96,25 +233,27 @@ DraftDocument generateDocument(
   final arcCount = remaining - lineCount - polylineCount - circleCount;
 
   for (var i = 0; i < lineCount; i++) {
-    _addFloorLine(doc, originX: originX, random: random);
+    _addFloorLine(doc, originX: originX, random: random, styling: styling);
   }
   for (var i = 0; i < polylineCount; i++) {
-    _addFloorPolyline(doc, originX: originX, random: random);
+    _addFloorPolyline(doc, originX: originX, random: random, styling: styling);
   }
   for (var i = 0; i < circleCount; i++) {
-    _addFloorCircle(doc, originX: originX, random: random);
+    _addFloorCircle(doc, originX: originX, random: random, styling: styling);
   }
   for (var i = 0; i < arcCount; i++) {
-    _addFloorArc(doc, originX: originX, random: random);
+    _addFloorArc(doc, originX: originX, random: random, styling: styling);
   }
   for (var i = 0; i < textCount; i++) {
-    _addFloorText(doc, originX: originX, random: random);
+    _addFloorText(doc, originX: originX, random: random, styling: styling);
   }
 
   // --- instances: every definition placed many times, scattered across
   // the floor plan. --------------------------------------------------------
   final effectiveInstanceCount =
       instanceCount > 0 ? instanceCount : definitionCount * 25;
+  var mirroredDue = 0.0;
+  var nonUniformDue = 0.0;
   for (var i = 0; i < effectiveInstanceCount; i++) {
     final definition = definitionHandles[i % definitionHandles.length];
     final x = originX + random.nextDouble() * kFloorWidth;
@@ -123,10 +262,34 @@ DraftDocument generateDocument(
     // an angle is common in a real floor plan and exercises the transform
     // composition the index relies on, without making every instance's
     // placement a special case to reason about.
-    final transform = random.nextDouble() < 0.15
+    var transform = random.nextDouble() < 0.15
         ? Transform2.translation(x, y)
             .multiply(Transform2.rotation(random.nextDouble() * math.pi * 2))
         : Transform2.translation(x, y);
+    // A quota, not a coin flip. The fraction specifies the corpus, and a coin
+    // flip would make it a property of the seed instead: 500 instances at 0.25
+    // came out 0.308 that way, three standard deviations off, and a rig cannot
+    // tell that from a real difference. Both accumulators advance every
+    // instance; when they collide, mirroring wins and the non-uniform debt is
+    // carried rather than dropped, so each count still lands exactly.
+    //
+    // A mirror is conformal — equal scale on both axes, negative determinant —
+    // so it stays off the painter's anisotropy path and the two stay distinct
+    // things to measure.
+    mirroredDue += mirroredFraction;
+    nonUniformDue += nonUniformFraction;
+    if (mirroredDue >= 1.0) {
+      mirroredDue -= 1.0;
+      final s = 0.8 + extra.nextDouble() * 0.4;
+      transform = transform.multiply(Transform2.scale(-s, s));
+    } else if (nonUniformDue >= 1.0) {
+      nonUniformDue -= 1.0;
+      // Past kAnisotropyThreshold (2.0) on purpose: a gently squashed instance
+      // would measure the fast path and be reported as coverage of the exact
+      // one.
+      transform = transform
+          .multiply(Transform2.scale(1.0, 2.5 + extra.nextDouble() * 3));
+    }
     doc.commands.execute(AddNodeCommand(InstanceNode(
       handle: doc.handleSeed.next(),
       parent: doc.rootHandle,
@@ -139,24 +302,83 @@ DraftDocument generateDocument(
   return doc;
 }
 
+/// Which layer, linetype and colour an entity gets.
+///
+/// Every accessor returns the Plan 2 value without drawing at all when its
+/// extension is off, which is what keeps the default document identical. The
+/// draws are ordered layer, linetype, colour, and that order is part of the
+/// fingerprint the test pins.
+class _Styling {
+  _Styling({
+    required this.random,
+    required this.layers,
+    required this.dashed,
+    required this.dashedFraction,
+    required this.byBlockFraction,
+  });
+
+  final math.Random random;
+
+  /// Empty when there is only layer 0.
+  final List<Handle> layers;
+  final Handle? dashed;
+  final double dashedFraction;
+  final double byBlockFraction;
+
+  /// Which layer is a choice, so it is drawn. How *many* entities are dashed
+  /// or ByBlock is a quota, for the reason given at the instance loop.
+  double _dashedDue = 0;
+  double _byBlockDue = 0;
+
+  Handle layerFor() => layers.isEmpty
+      ? ReservedHandles.layerZero
+      : layers[random.nextInt(layers.length)];
+
+  Handle linetypeFor() {
+    final handle = dashed;
+    if (handle == null) return ReservedHandles.byLayerLinetype;
+    _dashedDue += dashedFraction;
+    if (_dashedDue < 1.0) return ReservedHandles.byLayerLinetype;
+    _dashedDue -= 1.0;
+    return handle;
+  }
+
+  /// ByBlock only inside a definition: at the root there is no instance to
+  /// resolve against, so it would resolve to the context and exercise nothing.
+  /// The quota advances only for those, so the fraction means what it says
+  /// rather than being diluted by every root entity that could not take it.
+  DraftColor colorFor({required bool insideDefinition}) {
+    if (!insideDefinition || byBlockFraction == 0) return const ByLayerColor();
+    _byBlockDue += byBlockFraction;
+    if (_byBlockDue < 1.0) return const ByLayerColor();
+    _byBlockDue -= 1.0;
+    return const ByBlockColor();
+  }
+}
+
 Handle _addEntity(
   DraftDocument doc, {
   required Handle owner,
   required EntityKind kind,
   required List<double> coords,
+  required _Styling styling,
+  bool insideDefinition = false,
   List<double> scalars = const [],
 }) {
   final handle = doc.handleSeed.next();
+  final layer = styling.layerFor();
+  final linetype = styling.linetypeFor();
+  final color = styling.colorFor(insideDefinition: insideDefinition);
   doc.commands.execute(AddEntityCommand(
     record: EntityRecord(
       handle: handle,
       owner: owner,
       kind: kind,
-      layer: ReservedHandles.layerZero,
-      linetype: ReservedHandles.byLayerLinetype,
+      layer: layer,
+      linetype: linetype,
       linetypeScale: 1.0,
       geomIndex: 0,
-      color: const ByLayerColor(),
+      color: color,
       lineweight: kByLayer,
       transparency: kByLayer,
       flags: 0,
@@ -175,12 +397,18 @@ void _addSymbolEntity(
   DraftDocument doc, {
   required Handle owner,
   required math.Random random,
+  required _Styling styling,
+  required bool insideDefinition,
 }) {
   double c() => (random.nextDouble() - 0.5) * 1000.0; // +/-500 units
   switch (random.nextInt(4)) {
     case 0:
       _addEntity(doc,
-          owner: owner, kind: EntityKind.line, coords: [c(), c(), c(), c()]);
+          owner: owner,
+          kind: EntityKind.line,
+          coords: [c(), c(), c(), c()],
+          styling: styling,
+          insideDefinition: insideDefinition);
     case 1:
       final points = <double>[];
       final n = 3 + random.nextInt(3);
@@ -189,22 +417,32 @@ void _addSymbolEntity(
           ..add(c())
           ..add(c());
       }
-      _addEntity(doc, owner: owner, kind: EntityKind.polyline, coords: points);
+      _addEntity(doc,
+          owner: owner,
+          kind: EntityKind.polyline,
+          coords: points,
+          styling: styling,
+          insideDefinition: insideDefinition);
     case 2:
       _addEntity(doc,
           owner: owner,
           kind: EntityKind.circle,
           coords: [c(), c()],
+          styling: styling,
+          insideDefinition: insideDefinition,
           scalars: [50.0 + random.nextDouble() * 200.0]);
     default:
-      _addEntity(doc, owner: owner, kind: EntityKind.arc, coords: [
-        c(),
-        c()
-      ], scalars: [
-        50.0 + random.nextDouble() * 200.0,
-        random.nextDouble() * math.pi * 2,
-        (0.5 + random.nextDouble()) * math.pi,
-      ]);
+      _addEntity(doc,
+          owner: owner,
+          kind: EntityKind.arc,
+          coords: [c(), c()],
+          styling: styling,
+          insideDefinition: insideDefinition,
+          scalars: [
+            50.0 + random.nextDouble() * 200.0,
+            random.nextDouble() * math.pi * 2,
+            (0.5 + random.nextDouble()) * math.pi,
+          ]);
   }
 }
 
@@ -214,18 +452,25 @@ double _floorY(math.Random random) =>
     kOriginY + random.nextDouble() * kFloorHeight;
 
 void _addFloorLine(DraftDocument doc,
-    {required double originX, required math.Random random}) {
+    {required double originX,
+    required math.Random random,
+    required _Styling styling}) {
   final x0 = _floorX(originX, random), y0 = _floorY(random);
   final length = 50.0 + random.nextDouble() * 2950.0;
   final angle = random.nextDouble() * math.pi * 2;
   final x1 = x0 + length * math.cos(angle);
   final y1 = y0 + length * math.sin(angle);
   _addEntity(doc,
-      owner: doc.rootHandle, kind: EntityKind.line, coords: [x0, y0, x1, y1]);
+      owner: doc.rootHandle,
+      kind: EntityKind.line,
+      coords: [x0, y0, x1, y1],
+      styling: styling);
 }
 
 void _addFloorPolyline(DraftDocument doc,
-    {required double originX, required math.Random random}) {
+    {required double originX,
+    required math.Random random,
+    required _Styling styling}) {
   final n = 3 + random.nextInt(4);
   var x = _floorX(originX, random), y = _floorY(random);
   final coords = <double>[x, y];
@@ -239,40 +484,53 @@ void _addFloorPolyline(DraftDocument doc,
       ..add(y);
   }
   _addEntity(doc,
-      owner: doc.rootHandle, kind: EntityKind.polyline, coords: coords);
+      owner: doc.rootHandle,
+      kind: EntityKind.polyline,
+      coords: coords,
+      styling: styling);
 }
 
 void _addFloorCircle(DraftDocument doc,
-    {required double originX, required math.Random random}) {
+    {required double originX,
+    required math.Random random,
+    required _Styling styling}) {
   final x = _floorX(originX, random), y = _floorY(random);
   final radius = 50.0 + random.nextDouble() * 1450.0;
   _addEntity(doc,
       owner: doc.rootHandle,
       kind: EntityKind.circle,
       coords: [x, y],
+      styling: styling,
       scalars: [radius]);
 }
 
 void _addFloorArc(DraftDocument doc,
-    {required double originX, required math.Random random}) {
+    {required double originX,
+    required math.Random random,
+    required _Styling styling}) {
   final x = _floorX(originX, random), y = _floorY(random);
   final radius = 50.0 + random.nextDouble() * 1450.0;
-  _addEntity(doc, owner: doc.rootHandle, kind: EntityKind.arc, coords: [
-    x,
-    y
-  ], scalars: [
-    radius,
-    random.nextDouble() * math.pi * 2,
-    (0.25 + random.nextDouble() * 1.5) * math.pi,
-  ]);
+  _addEntity(doc,
+      owner: doc.rootHandle,
+      kind: EntityKind.arc,
+      coords: [x, y],
+      styling: styling,
+      scalars: [
+        radius,
+        random.nextDouble() * math.pi * 2,
+        (0.25 + random.nextDouble() * 1.5) * math.pi,
+      ]);
 }
 
 void _addFloorText(DraftDocument doc,
-    {required double originX, required math.Random random}) {
+    {required double originX,
+    required math.Random random,
+    required _Styling styling}) {
   final x = _floorX(originX, random), y = _floorY(random);
   _addEntity(doc,
       owner: doc.rootHandle,
       kind: EntityKind.text,
       coords: [x, y],
+      styling: styling,
       scalars: [100.0 + random.nextDouble() * 200.0]);
 }
