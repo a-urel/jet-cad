@@ -27,8 +27,7 @@ const ResolvedStyle _redDashed = ResolvedStyle(
     linetypeScale: 1.0);
 
 CanvasDrawSink _sinkOn(PictureRecorder recorder, BatchMode mode) =>
-    CanvasDrawSink(
-        canvas: Canvas(recorder), pixelsPerPaperMm: 8.0, mode: mode);
+    CanvasDrawSink(canvas: Canvas(recorder), pixelsPerPaperMm: 8.0, mode: mode);
 
 void _line(CanvasDrawSink sink, double x, ResolvedStyle style) {
   sink.beginResidual(Transform2.translation(0, 0));

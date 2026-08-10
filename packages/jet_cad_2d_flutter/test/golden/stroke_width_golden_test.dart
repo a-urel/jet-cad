@@ -133,7 +133,9 @@ class _PainterHost extends CustomPainter {
     // fixtures have touching same-key geometry that would otherwise regress
     // under the coverage difference batch_equivalence_test.dart characterises.
     final sink = CanvasDrawSink(
-        canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm, mode: BatchMode.off);
+        canvas: canvas,
+        pixelsPerPaperMm: kPixelsPerPaperMm,
+        mode: BatchMode.off);
     painter.paint(sink, camera, size);
     // CanvasDrawSink defers drawing to an open bucket until flushed; without
     // this the last run of same-paint primitives is accepted and never drawn.
