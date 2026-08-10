@@ -459,7 +459,9 @@ void main() {
     final doc = DraftDocument.empty();
     const siblingCount = 300;
     for (var i = 0; i < siblingCount; i++) {
-      final g = Handle(1000 + i);
+      // From the seed: `addLine` below takes one too, and interleaving a
+      // written-out run with seeded allocations collides on the second pass.
+      final g = doc.handleSeed.next();
       doc.commands.execute(AddNodeCommand(
         GroupNode(
           handle: g,
@@ -484,7 +486,7 @@ void main() {
     var parent = doc.rootHandle;
     const depth = 300;
     for (var i = 0; i < depth; i++) {
-      final g = Handle(2000 + i);
+      final g = doc.handleSeed.next();
       doc.commands.execute(AddNodeCommand(
         GroupNode(
           handle: g,

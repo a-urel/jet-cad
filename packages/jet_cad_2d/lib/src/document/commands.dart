@@ -36,7 +36,13 @@ class AddEntityCommand extends DraftCommand {
 
   @override
   CommandResult apply(CommandTarget target) {
-    if (target.entities.containsHandle(record.handle)) {
+    // Both stores, not just this one. A handle names one thing in the
+    // document, the way it does in DXF — the shared `handleSeed` already says
+    // so, and everything that keys by handle alone assumes it: `touched` is a
+    // `Set<Handle>`, and the render path merges leaves and instances by
+    // comparing handle values, where a tie has no defined order.
+    if (target.entities.containsHandle(record.handle) ||
+        target.tree[record.handle] != null) {
       throw DuplicateHandleError(record.handle);
     }
     final geomIndex = target.geometry.add(payload);
@@ -165,7 +171,8 @@ class AddNodeCommand extends DraftCommand {
 
   @override
   CommandResult apply(CommandTarget target) {
-    if (target.tree[node.handle] != null) {
+    if (target.tree[node.handle] != null ||
+        target.entities.containsHandle(node.handle)) {
       throw DuplicateHandleError(node.handle);
     }
     target.tree.addNode(node);

@@ -806,8 +806,10 @@ void main() {
     ));
     final line = addEntity(doc, group, EntityKind.line, [0, 0, 1, 0], []);
     doc.commands.execute(AddNodeCommand(
+      // From the seed, not written out: `addEntity` above draws from the same
+      // seed, and a handle names one thing across both stores.
       InstanceNode(
-        handle: const Handle(402),
+        handle: doc.handleSeed.next(),
         parent: doc.rootHandle,
         transform: Transform2.translation(100, 0),
         definition: def,

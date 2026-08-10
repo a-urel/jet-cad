@@ -128,6 +128,12 @@ class DraftPainter {
   /// "all leaves, then all instances" — a different order, invisible while
   /// nothing is filled, and deciding what covers what the moment Plan 3b adds
   /// fills. They are merged instead.
+  ///
+  /// The merge compares handle values across the two streams, so it has no
+  /// answer for a tie — and needs none, because a handle names one thing in
+  /// the document. `AddEntityCommand` and `AddNodeCommand` each reject a
+  /// handle the other store already holds; that guard is what makes this
+  /// comparison total.
   void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
     _skippedText = 0;
     _skippedDeepInstances = 0;

@@ -282,6 +282,90 @@ void main() {
         Vector2(5, 0));
   });
 
+  group('handles are one space, not two', () {
+    // Entities and nodes live in separate stores, and each command used to
+    // check only its own. That let one handle name both an entity and a node
+    // at once — legal to neither DXF, which makes handles globally unique, nor
+    // to anything downstream that keys by handle alone: `DocChange.touched` is
+    // a `Set<Handle>`, so a collision leaves "which one changed?" with no
+    // answer, and the render path merges the leaf and instance streams by
+    // comparing handle values, where a tie has no defined order.
+    //
+    // Found by mutation: flipping that merge's `<` to `<=` changed nothing any
+    // test could see, because no fixture could produce the tie.
+
+    test('AddEntityCommand refuses a handle the tree already holds', () {
+      final target = TestTarget();
+      final dispatcher = CommandDispatcher(target: target);
+      final handle = target.handleSeed.next();
+
+      dispatcher.execute(AddNodeCommand(GroupNode(
+        handle: handle,
+        parent: target.rootHandle,
+        transform: Transform2.translation(5, 0),
+        children: const [],
+      )));
+
+      expect(
+          () => dispatcher.execute(AddEntityCommand(
+                record: recordFor(handle, target.rootHandle),
+                payload: line(0, 0, 1, 1),
+              )),
+          throwsA(isA<DuplicateHandleError>()));
+      // The rejection must cost nothing: the geometry slot is claimed before
+      // the record is added, so a check placed after it would leak one slot per
+      // attempt — the leak the test above already pins for the other path.
+      expect(target.geometry.liveCount, 0);
+      expect(target.entities.liveCount, 0);
+      expect(target.tree[handle], isNotNull);
+    });
+
+    test('AddNodeCommand refuses a handle the entity store already holds', () {
+      final target = TestTarget();
+      final dispatcher = CommandDispatcher(target: target);
+      final handle = target.handleSeed.next();
+
+      dispatcher.execute(AddEntityCommand(
+        record: recordFor(handle, target.rootHandle),
+        payload: line(0, 0, 1, 1),
+      ));
+
+      expect(
+          () => dispatcher.execute(AddNodeCommand(GroupNode(
+                handle: handle,
+                parent: target.rootHandle,
+                transform: Transform2.translation(5, 0),
+                children: const [],
+              ))),
+          throwsA(isA<DuplicateHandleError>()));
+      expect(target.tree[handle], isNull);
+      expect(target.entities.containsHandle(handle), isTrue);
+    });
+
+    test('undo frees the handle for the other store', () {
+      // The guard must read live state, not a growing record of every handle
+      // ever used: undoing an entity has to leave its handle available to a
+      // node, or undo/redo would slowly poison the handle space.
+      final target = TestTarget();
+      final dispatcher = CommandDispatcher(target: target);
+      final handle = target.handleSeed.next();
+
+      dispatcher.execute(AddEntityCommand(
+        record: recordFor(handle, target.rootHandle),
+        payload: line(0, 0, 1, 1),
+      ));
+      dispatcher.undo();
+
+      dispatcher.execute(AddNodeCommand(GroupNode(
+        handle: handle,
+        parent: target.rootHandle,
+        transform: Transform2.translation(5, 0),
+        children: const [],
+      )));
+      expect(target.tree[handle], isNotNull);
+    });
+  });
+
   test('SetComponentCommand attaches, detaches, and reverses both', () {
     final target = TestTarget();
     final dispatcher = CommandDispatcher(target: target);
