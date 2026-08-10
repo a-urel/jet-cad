@@ -33,11 +33,17 @@ Handle addLineAt(
   return handle;
 }
 
-Handle addDefinitionWithLine(DraftDocument doc, Handle def) {
+/// A definition holding one line, plus the handle of that line.
+///
+/// An instance pushes no residual of its own — its definition's contents do,
+/// each under its own handle — so it is the content handle that shows up in
+/// the draw order at the instance's position.
+({Handle def, Handle content}) addDefinitionWithLine(
+    DraftDocument doc, Handle def) {
   doc.tree.addDefinition(Definition(
       handle: def, name: 'sym', basePoint: Vector2.zero(), children: const []));
-  addLineAt(doc, def, doc.handleSeed.next(), 0, 0);
-  return def;
+  final content = addLineAt(doc, def, const Handle(400), 0, 0);
+  return (def: def, content: content);
 }
 
 Handle placeInstance(
@@ -83,60 +89,64 @@ void main() {
     // It is invisible in 3a — nothing is filled — and decides what covers what
     // as soon as 3b adds fills, by which time the painter would need rewriting.
     final doc = DraftDocument.empty();
-    final def = addDefinitionWithLine(doc, const Handle(500));
+    final sym = addDefinitionWithLine(doc, const Handle(500));
 
     final lowLeaf = addLineAt(doc, doc.rootHandle, const Handle(600), 0, 0);
-    final instance = placeInstance(doc, const Handle(601), def, 5, 5);
+    placeInstance(doc, const Handle(601), sym.def, 5, 5);
     final highLeaf = addLineAt(doc, doc.rootHandle, const Handle(602), 10, 10);
 
     final run = paintToRecording(doc);
-    expect(handleOrderOf(run.sink.ops), [lowLeaf, instance, highLeaf]);
+    expect(handleOrderOf(run.sink.ops), [lowLeaf, sym.content, highLeaf],
+        reason: 'the instance draws between the two leaves, under the handle '
+            'of the content it places');
   });
 
   test('an instance below every leaf is flushed before the first one', () {
     final doc = DraftDocument.empty();
-    final def = addDefinitionWithLine(doc, const Handle(500));
-    final instance = placeInstance(doc, const Handle(600), def, 5, 5);
+    final sym = addDefinitionWithLine(doc, const Handle(500));
+    placeInstance(doc, const Handle(600), sym.def, 5, 5);
     final leafA = addLineAt(doc, doc.rootHandle, const Handle(601), 0, 0);
     final leafB = addLineAt(doc, doc.rootHandle, const Handle(602), 10, 10);
 
     final run = paintToRecording(doc);
-    expect(handleOrderOf(run.sink.ops), [instance, leafA, leafB]);
+    expect(handleOrderOf(run.sink.ops), [sym.content, leafA, leafB]);
   });
 
   test('an instance above every leaf is flushed after the last one', () {
     // The tail drain after the leaf stream ends is its own branch, and a
     // fixture whose instances all sort between two leaves never reaches it.
     final doc = DraftDocument.empty();
-    final def = addDefinitionWithLine(doc, const Handle(500));
+    final sym = addDefinitionWithLine(doc, const Handle(500));
     final leafA = addLineAt(doc, doc.rootHandle, const Handle(600), 0, 0);
     final leafB = addLineAt(doc, doc.rootHandle, const Handle(601), 10, 10);
-    final instance = placeInstance(doc, const Handle(602), def, 5, 5);
+    placeInstance(doc, const Handle(602), sym.def, 5, 5);
 
     final run = paintToRecording(doc);
-    expect(handleOrderOf(run.sink.ops), [leafA, leafB, instance]);
+    expect(handleOrderOf(run.sink.ops), [leafA, leafB, sym.content]);
   });
 
   test('several instances between two leaves all flush, not just one', () {
     // The flush is a while loop, not an if. With a single instance per gap the
     // two spell the same thing.
     final doc = DraftDocument.empty();
-    final def = addDefinitionWithLine(doc, const Handle(500));
+    final sym = addDefinitionWithLine(doc, const Handle(500));
     final leafA = addLineAt(doc, doc.rootHandle, const Handle(600), 0, 0);
-    final i1 = placeInstance(doc, const Handle(601), def, 5, 5);
-    final i2 = placeInstance(doc, const Handle(602), def, 6, 6);
-    final i3 = placeInstance(doc, const Handle(603), def, 7, 7);
+    placeInstance(doc, const Handle(601), sym.def, 5, 5);
+    placeInstance(doc, const Handle(602), sym.def, 6, 6);
+    placeInstance(doc, const Handle(603), sym.def, 7, 7);
     final leafB = addLineAt(doc, doc.rootHandle, const Handle(604), 10, 10);
 
     final run = paintToRecording(doc);
-    expect(handleOrderOf(run.sink.ops), [leafA, i1, i2, i3, leafB]);
+    expect(handleOrderOf(run.sink.ops),
+        [leafA, sym.content, sym.content, sym.content, leafB],
+        reason: 'three placements of one definition, each drawn once');
   });
 
   test('an instance outside the view is not drawn', () {
     final doc = DraftDocument.empty();
-    final def = addDefinitionWithLine(doc, const Handle(500));
+    final sym = addDefinitionWithLine(doc, const Handle(500));
     final leaf = addLineAt(doc, doc.rootHandle, const Handle(600), 0, 0);
-    placeInstance(doc, const Handle(601), def, 100000, 100000);
+    placeInstance(doc, const Handle(601), sym.def, 100000, 100000);
 
     final run =
         paintToRecording(doc, view: Aabb2(Vector2(-5, -5), Vector2(15, 15)));
@@ -149,15 +159,15 @@ void main() {
     // that must grow it once and reuse it forever after — and must not drop
     // the instances that arrive after the growth.
     final doc = DraftDocument.empty();
-    final def = addDefinitionWithLine(doc, const Handle(500));
-    final placed = <Handle>[];
+    final sym = addDefinitionWithLine(doc, const Handle(500));
     for (var i = 0; i < 100; i++) {
-      placed.add(placeInstance(
-          doc, Handle(1000 + i), def, i.toDouble() * 10, i.toDouble() * 10));
+      placeInstance(
+          doc, Handle(1000 + i), sym.def, i.toDouble() * 10, i.toDouble() * 10);
     }
 
     final run = paintToRecording(doc);
-    expect(handleOrderOf(run.sink.ops), placed);
+    expect(handleOrderOf(run.sink.ops), List.filled(100, sym.content),
+        reason: 'every placement drawn, none lost across the growth');
     expect(run.painter.instanceBufferCapacity, greaterThanOrEqualTo(100));
 
     final warm = run.painter.instanceBufferCapacity;
