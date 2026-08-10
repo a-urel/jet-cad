@@ -3,7 +3,7 @@
 /// Bump it whenever the on-disk shape changes, and add a migration for the
 /// previous value. An unversioned document is not readable: guessing at the
 /// shape of a file that never declared one is how silent corruption starts.
-const int kSchemaVersion = 2;
+const int kSchemaVersion = 3;
 
 class SchemaVersionError implements Exception {
   final Object? found;

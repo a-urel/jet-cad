@@ -4,7 +4,9 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
-EntityRecord lineOn(Handle handle, Handle owner, Handle layer) => EntityRecord(
+EntityRecord lineOn(Handle handle, Handle owner, Handle layer,
+        {int flags = 0}) =>
+    EntityRecord(
       handle: handle,
       owner: owner,
       kind: EntityKind.line,
@@ -15,13 +17,13 @@ EntityRecord lineOn(Handle handle, Handle owner, Handle layer) => EntityRecord(
       color: const ByLayerColor(),
       lineweight: kByLayer,
       transparency: kByLayer,
-      flags: 0,
+      flags: flags,
     );
 
-int addOn(DraftDocument doc, Handle owner, Handle layer) {
+int addOn(DraftDocument doc, Handle owner, Handle layer, {int flags = 0}) {
   final handle = doc.handleSeed.next();
   doc.commands.execute(AddEntityCommand(
-    record: lineOn(handle, owner, layer),
+    record: lineOn(handle, owner, layer, flags: flags),
     payload: GeometryPayload(
       coords: Float64List.fromList([0, 0, 1, 1]),
       scalars: Float64List(0),
@@ -88,6 +90,22 @@ void main() {
     final evaluator = FilterEvaluator(doc);
 
     expect(evaluator.acceptsEntity(slot, const QueryFilter.all()), isTrue);
+    expect(
+        evaluator.acceptsEntity(slot, const QueryFilter.rendering()), isFalse);
+    expect(evaluator.acceptsEntity(slot, const QueryFilter.picking()), isFalse);
+  });
+
+  test("an entity's own invisible flag fails visibleOnly but passes all", () {
+    // DXF group code 60: the entity exists but is not drawn. The bit has a
+    // column and a constant, and until this test nothing read it — an entity
+    // marked not-drawn was drawn by the renderer and selectable by a click.
+    final doc = DraftDocument.empty();
+    final slot = addOn(doc, doc.rootHandle, ReservedHandles.layerZero,
+        flags: EntityFlags.invisible);
+    final evaluator = FilterEvaluator(doc);
+
+    expect(evaluator.acceptsEntity(slot, const QueryFilter.all()), isTrue,
+        reason: 'a hidden entity is still in the document');
     expect(
         evaluator.acceptsEntity(slot, const QueryFilter.rendering()), isFalse);
     expect(evaluator.acceptsEntity(slot, const QueryFilter.picking()), isFalse);

@@ -1,6 +1,7 @@
 import '../core/handle.dart';
 import '../document/draft_document.dart';
 import '../document/node.dart';
+import '../document/style.dart';
 
 /// What a query should skip.
 ///
@@ -69,6 +70,12 @@ class FilterEvaluator {
     if (filter.isPassthrough) return true;
     final layer = document.entities.layerAt(slot);
     if (filter.visibleOnly) {
+      // The entity's own bit first: it is a column read, where the other two
+      // are map lookups, and DXF group code 60 outranks both — an entity
+      // marked not-drawn is not drawn however visible its layer and owner are.
+      if (document.entities.flagsAt(slot) & EntityFlags.invisible != 0) {
+        return false;
+      }
       if (!_visibleLayer(layer)) return false;
       if (!_visibleContainer(document.entities.ownerAt(slot))) return false;
     }

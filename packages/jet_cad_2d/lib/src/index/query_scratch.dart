@@ -19,9 +19,9 @@ class QueryScratch {
   /// scratch, so this corrects it silently rather than adding a precondition
   /// every caller would have to satisfy for no benefit.
   QueryScratch([int initialCapacity = 1024])
-      : _slots = Int32List(initialCapacity < 1 ? 1 : initialCapacity);
+      : _slots = Uint32List(initialCapacity < 1 ? 1 : initialCapacity);
 
-  Int32List _slots;
+  Uint32List _slots;
   int _length = 0;
 
   int get length => _length;
@@ -44,7 +44,7 @@ class QueryScratch {
 
   void add(int slot) {
     if (_length == _slots.length) {
-      final grown = Int32List(_slots.length * 2);
+      final grown = Uint32List(_slots.length * 2);
       grown.setRange(0, _length, _slots);
       _slots = grown;
     }

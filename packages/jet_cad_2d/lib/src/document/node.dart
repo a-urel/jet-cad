@@ -5,6 +5,7 @@ import '../core/handle.dart';
 import '../core/list_equality.dart';
 import '../core/tolerance.dart';
 import '../geometry/transform2.dart';
+import 'style.dart';
 
 /// A container in the scene tree.
 ///
@@ -153,12 +154,21 @@ final class InstanceNode extends Node {
   final Handle definition;
   final Handle layer;
 
+  /// This instance's own colour, imposed on its definition's BYBLOCK contents.
+  ///
+  /// `ByBlockColor` — the default — means "inherit from whatever places me",
+  /// which for a root-level instance is the document context. This field is how
+  /// 500 tables share one geometry and render in 500 colours, and it
+  /// round-trips to DXF losslessly.
+  final DraftColor color;
+
   const InstanceNode({
     required super.handle,
     required super.parent,
     required super.transform,
     required this.definition,
     required this.layer,
+    this.color = const ByBlockColor(),
     super.visible = true,
   });
 
@@ -169,6 +179,7 @@ final class InstanceNode extends Node {
     bool? visible,
     Handle? definition,
     Handle? layer,
+    DraftColor? color,
   }) =>
       InstanceNode(
         handle: handle ?? this.handle,
@@ -177,6 +188,7 @@ final class InstanceNode extends Node {
         visible: visible ?? this.visible,
         definition: definition ?? this.definition,
         layer: layer ?? this.layer,
+        color: color ?? this.color,
       );
 
   @override
@@ -188,6 +200,7 @@ final class InstanceNode extends Node {
         'visible': visible,
         'definition': definition.toJson(),
         'layer': layer.toJson(),
+        'color': encodeColor(color),
       };
 
   static InstanceNode fromJson(Map<String, Object?> json) => InstanceNode(
@@ -197,6 +210,13 @@ final class InstanceNode extends Node {
         visible: json['visible']! as bool,
         definition: Handle.fromJson(json['definition']),
         layer: Handle.fromJson(json['layer']),
+        // Absent in files written before this field existed: BYBLOCK is the
+        // correct default because it is a no-op — it reproduces the old
+        // behaviour, where a placed instance imposed nothing on its
+        // definition's colour, exactly.
+        color: json['color'] == null
+            ? const ByBlockColor()
+            : decodeColor(json['color']! as int),
       );
 
   @override
@@ -208,10 +228,12 @@ final class InstanceNode extends Node {
           .equals(transform, const Tolerance(linear: 0, angular: 0)) &&
       other.visible == visible &&
       other.definition == definition &&
-      other.layer == layer;
+      other.layer == layer &&
+      other.color == color;
 
   @override
-  int get hashCode => Object.hash(handle, parent, visible, definition, layer);
+  int get hashCode =>
+      Object.hash(handle, parent, visible, definition, layer, color);
 
   @override
   String toString() =>

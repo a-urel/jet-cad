@@ -138,6 +138,23 @@ void main() {
     expect([for (var i = 0; i < scratch.length; i++) scratch[i]],
         [for (var i = 0; i < 60; i++) i]);
   });
+
+  test('sortByValue orders handle values above 2^31 correctly', () {
+    // `forEachInstanceInRect` stores raw handle values here, and kMaxHandle is
+    // 0xFFFFFFFF. An Int32List reads 0x90000000 as negative, so it sorts below
+    // a small handle and then throws HandleRangeError when the caller rebuilds
+    // the Handle. Values chosen to straddle the sign bit.
+    final scratch = QueryScratch(4);
+    scratch
+      ..add(0x90000000)
+      ..add(0x00000010)
+      ..add(0xFFFFFFFF);
+    scratch.sortByValue();
+
+    expect([for (var i = 0; i < scratch.length; i++) scratch[i]],
+        [0x00000010, 0x90000000, 0xFFFFFFFF]);
+    expect(() => Handle(scratch[2]), returnsNormally);
+  });
 }
 
 Handle _add(DraftDocument doc) {
