@@ -185,6 +185,38 @@ DraftDocument sameKeyOverlapFixture({int transparency = 0}) {
   return doc;
 }
 
+/// Overlapping strokes in **two** paint keys, which is where a draw-order
+/// change becomes visible.
+///
+/// Identical under [BatchMode.openBucket] and under it alone. Under the mapped
+/// modes the second red stroke merges with the first and draws beneath the
+/// blue that separates them, so the overlap changes colour. A **hue** change,
+/// not a coverage one — which is exactly what separates the ordering contract
+/// from the antialiasing difference fixture 1 tolerates.
+DraftDocument crossKeyOverlapFixture() {
+  final doc = DraftDocument.empty();
+  _line(doc, [-50, -50, 50, 50], 0xCC0000, lineweight: 200);
+  _line(doc, [-50, 50, 50, -50], 0x0000CC, lineweight: 200);
+  _line(doc, [-50, -30, 50, 70], 0xCC0000, lineweight: 200);
+  return doc;
+}
+
+/// Pixels whose red and blue channels swap dominance between two renders.
+///
+/// `Diff.hueChanged` asks whether a render is non-grey, which every pixel of
+/// this fixture is. The question here is different: did the *winner* of an
+/// overlap change? That is one primitive drawing over another instead of
+/// under it, and no amount of coverage noise produces it.
+int dominanceFlips(Uint8List a, Uint8List b) {
+  var flips = 0;
+  for (var i = 0; i < a.length; i += 4) {
+    final aRed = a[i] > a[i + 2];
+    final bRed = b[i] > b[i + 2];
+    if (aRed != bRed) flips++;
+  }
+  return flips;
+}
+
 /// Largest per-channel difference tolerated between the two **downsampled**
 /// renders.
 ///
@@ -258,5 +290,29 @@ void main() {
     // - a cap on the raw differing-pixel fraction. It was set to 3% before
     //   anything was measured; the real figure is about 4%. A threshold fitted
     //   to an observation is a record of the observation, not a threshold.
+  });
+
+  test('cross-key overlap is identical under the ordered mode', () async {
+    final off = await render(crossKeyOverlapFixture(), BatchMode.off);
+    final ordered =
+        await render(crossKeyOverlapFixture(), BatchMode.openBucket);
+    final diff = Diff.between(off, ordered);
+    expect(diff.inkA, greaterThan(100000));
+    expect(diff.differing, 0,
+        reason: 'the ordered mode flushes on every paint change, so the three '
+            'strokes reach the canvas in handle order exactly as unbatched — '
+            '$diff');
+  });
+
+  test('the mapped modes reorder cross-key overlaps, and that is visible',
+      () async {
+    // Not a defect: it is the ordering contract the mapped modes trade draw
+    // order for, and this is where it becomes a picture. Asserted so the
+    // trade is demonstrated rather than described.
+    final off = await render(crossKeyOverlapFixture(), BatchMode.off);
+    final mapped = await render(crossKeyOverlapFixture(), BatchMode.bucketMap);
+    expect(dominanceFlips(off, mapped), greaterThan(100),
+        reason: 'the two reds merge into one path and both draw beneath the '
+            'blue, so the blue wins pixels the second red used to own');
   });
 }
