@@ -57,6 +57,7 @@ class DraftCanvas extends StatefulWidget {
     required this.camera,
     this.resolver,
     this.pixelsPerPaperMm = kLogicalPixelsPerMm,
+    this.batchMode = BatchMode.openBucket,
   });
 
   final DraftDocument document;
@@ -68,6 +69,12 @@ class DraftCanvas extends StatefulWidget {
   final StyleResolver? resolver;
 
   final double pixelsPerPaperMm;
+
+  /// Which [BatchMode] the canvas's sink runs in.
+  ///
+  /// A widget parameter rather than a global so the batched and unbatched
+  /// renderings of one fixture can be compared inside a single test.
+  final BatchMode batchMode;
 
   @override
   State<DraftCanvas> createState() => DraftCanvasState();
@@ -91,7 +98,8 @@ class DraftCanvasState extends State<DraftCanvas> {
   }
 
   void _attach() {
-    sink = CanvasDrawSink(pixelsPerPaperMm: widget.pixelsPerPaperMm);
+    sink = CanvasDrawSink(
+        pixelsPerPaperMm: widget.pixelsPerPaperMm, mode: widget.batchMode);
     painter = DraftPainter(
       document: widget.document,
       index: widget.index,
@@ -110,7 +118,8 @@ class DraftCanvasState extends State<DraftCanvas> {
         widget.index != oldWidget.index ||
         widget.camera != oldWidget.camera ||
         widget.resolver != oldWidget.resolver ||
-        widget.pixelsPerPaperMm != oldWidget.pixelsPerPaperMm) {
+        widget.pixelsPerPaperMm != oldWidget.pixelsPerPaperMm ||
+        widget.batchMode != oldWidget.batchMode) {
       _changes.dispose();
       _attach();
     }
@@ -153,6 +162,10 @@ class _DraftCustomPainter extends CustomPainter {
     canvas.clipRect(Offset.zero & size);
     sink.canvas = canvas;
     painter.paint(sink, camera.value, size);
+    // The last bucket of the frame has nothing after it to force it out.
+    // Without this the geometry is accepted and never drawn, and no assertion
+    // inside the walk can see that.
+    sink.flush();
   }
 
   /// Always false: [repaint] is the only trigger.
