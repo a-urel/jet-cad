@@ -54,7 +54,7 @@
 |---|---|
 | `packages/jet_cad_2d/test/geometry/dasher_test.dart` (create) | pure dash-generation tests |
 | `packages/jet_cad_2d/test/geometry/segment_clip_test.dart` (create) | clip and angular-window tests |
-| `packages/jet_cad_2d_flutter/test/golden/batch_equivalence_golden_test.dart` (create) | fixtures 1–3, batched vs unbatched |
+| `packages/jet_cad_2d_flutter/test/batch_equivalence_test.dart` (create) | fixtures 1–3, both modes rendered in-process and compared pixel by pixel |
 | `packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart` (create) | the collapse-floor review golden |
 | `packages/jet_cad_2d_flutter/test/rig/rig_support.dart` (create) | `kRigViewport`, `rigCorpus`, the two cameras — lifted out of R1 so the spike shares them |
 | `packages/jet_cad_2d_flutter/test/rig/batch_spike_test.dart` (create) | the spike's R1-side numbers |
@@ -460,15 +460,16 @@ reference_walk.dart is untouched. flatten already normalises both routes."
 
 ---
 
-## Task 2: `CanvasDrawSink` batching, mode B, and the equality goldens
+## Task 2: `CanvasDrawSink` batching, mode B, and the pixel-equivalence test
 
 The first of two sink tasks. It adds the mode enum, the frame boundary, the real-call counter, the alpha rule, and the **single open bucket** lifecycle — variant B, which gives up no draw order at all.
 
 **Files:**
 - Modify: `packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart`
-- Modify: `packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart` (call `sink.flush()`)
-- Create: `packages/jet_cad_2d_flutter/test/golden/batch_equivalence_golden_test.dart`
-- Create: `packages/jet_cad_2d_flutter/test/golden/batch_*.png` (generated)
+- Modify: `packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart` (call `sink.flush()`, add `batchMode`)
+- Create: `packages/jet_cad_2d_flutter/test/batch_equivalence_test.dart`
+- Modify: `packages/jet_cad_2d_flutter/test/golden/stroke_width_golden_test.dart` (pin to `BatchMode.off`, add the missing `flush()`)
+- Modify: `packages/jet_cad_2d_flutter/test/draw_sink_test.dart` and `test/lineweight_test.dart` (both read the sink's raw per-primitive `Canvas` calls, so both need `BatchMode.off`)
 - Test: `packages/jet_cad_2d_flutter/test/canvas_draw_sink_test.dart`
 
 **Interfaces:**
@@ -889,62 +890,135 @@ Run: `cd packages/jet_cad_2d_flutter && flutter test test/canvas_draw_sink_test.
 
 Expected: PASS, all eight.
 
-- [ ] **Step 6: Write the equality goldens, fixtures 1 and 2**
+- [ ] **Step 6: Write the pixel-equivalence test, fixtures 1 and 2**
 
-Create `packages/jet_cad_2d_flutter/test/golden/batch_equivalence_golden_test.dart`:
+**Not a golden.** Both modes are rendered in-process and their pixels compared
+directly. Two reasons, both measured rather than assumed:
+
+1. **The widget route does not re-render.** `_DraftCustomPainter.shouldRepaint`
+   returns `false` by design — repaint is driven by the camera and document
+   listenables, not by rebuilds — and `RenderCustomPaint` skips
+   `markNeedsPaint` when the new painter has the same `runtimeType` and says
+   not to repaint. Two `pumpWidget` calls in one test therefore produce **one**
+   render, and a second `expectLater` silently re-checks the first image.
+2. **Byte-identity is false for opaque geometry, and the batched image is the
+   correct one.** Merging overlapping strokes into one path makes Skia compute
+   coverage once over the unioned outline — `1 − union(a, b)` — where separate
+   draws composite one antialiased stroke over another — `(1−a)(1−b)`. At half
+   coverage that is 0.5 against 0.25. The seam that disappears under batching
+   is an artifact of drawing touching strokes separately, and a CAD drawing is
+   made of touching strokes.
+
+Create `packages/jet_cad_2d_flutter/test/batch_equivalence_test.dart`:
 
 ```dart
-@Tags(['golden'])
-library;
-
-// The batch's correctness proof, and it has to be a pixel-level one: batching
-// is a Canvas-level behaviour that an op list cannot see. RecordingDrawSink is
-// unbatched by construction, so the differential oracle is blind to it.
+// The batch's correctness proof. Pixel-level, because batching is a `Canvas`
+// behaviour that an op list cannot see: `RecordingDrawSink` is unbatched by
+// construction, so the differential oracle is blind to it.
 //
-// The invariant is NOT "the picture is identical". It is: batched and unbatched
-// rendering are byte-identical whenever no two overlapping primitives have
-// different paint keys. Fixture 3, in Task 3, is the cross-key case.
+// The invariant is in three parts, and the first is the discriminator:
+//
+// 1. Translucent geometry renders identically, pixel for pixel, because a
+//    style below full alpha is never batched. Zero differing pixels — no
+//    tolerance, and therefore no margin to argue about.
+// 2. Opaque geometry may differ only in partial coverage: nothing fully
+//    covered becomes uncovered, the differing fraction stays small, and no
+//    pixel changes hue. A dropped, moved or recoloured primitive fails all
+//    three.
+// 3. Cross-key overlap (Task 3) is identical under the ordered mode alone.
 
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
-import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
-const Size kGoldenViewport = Size(400, 300);
-const Key kCanvasKey = Key('golden-canvas');
+const ui.Size kSize = ui.Size(400, 300);
+const double kPixelsPerPaperMm = 8.0;
 
-/// A cross of two strokes, repeated at [count] offsets, in one colour.
+/// Renders [doc] through [mode] and returns its raw RGBA bytes.
 ///
-/// Overlaps are within one paint key by construction: every entity here shares
-/// a colour and a lineweight, so this fixture is byte-identical under every
-/// batch mode. It is the assertion that path accumulation itself does not
-/// change rasterisation.
-DraftDocument sameKeyOverlapFixture() {
-  final doc = DraftDocument.empty();
-  for (var i = 0; i < 6; i++) {
-    final x = -40.0 + i * 16;
-    _line(doc, [x, -50, x + 30, 50], 0x000000);
-    _line(doc, [-50, x, 50, x + 30], 0x000000);
-  }
-  return doc;
+/// No widget, no golden file, no comparator: this is a comparison between two
+/// in-process renders, and routing it through a `CustomPaint` is what made the
+/// first version of this test pass vacuously.
+Future<Uint8List> render(DraftDocument doc, BatchMode mode) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  canvas.drawRect(
+      ui.Offset.zero & kSize, ui.Paint()..color = const ui.Color(0xFFFFFFFF));
+  final sink = ui_sink(canvas, mode);
+  DraftPainter(
+          document: doc,
+          index: SpatialIndex(doc),
+          resolver: DocumentStyleResolver(doc))
+      .paint(
+          sink,
+          ViewportTransform.fit(
+              Aabb2(Vector2(-60, -60), Vector2(60, 60)), kSize),
+          kSize);
+  sink.flush();
+  final image = await recorder
+      .endRecording()
+      .toImage(kSize.width.toInt(), kSize.height.toInt());
+  final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+  image.dispose();
+  return data!.buffer.asUint8List();
 }
 
-/// The same crosses, below full alpha.
-///
-/// Byte-identical **only** because a style below full alpha is excluded from
-/// batching. Deleting that exclusion must make this fixture differ, which is
-/// what proves the exclusion does work rather than merely existing.
-DraftDocument translucentOverlapFixture() {
-  final doc = DraftDocument.empty();
-  for (var i = 0; i < 6; i++) {
-    final x = -40.0 + i * 16;
-    _line(doc, [x, -50, x + 30, 50], 0x000000, transparency: 128);
-    _line(doc, [-50, x, 50, x + 30], 0x000000, transparency: 128);
+CanvasDrawSink ui_sink(ui.Canvas canvas, BatchMode mode) => CanvasDrawSink(
+    canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm, mode: mode);
+
+/// What changed between two renders, characterised rather than counted.
+class Diff {
+  Diff(this.differing, this.maxDelta, this.hueChanged, this.lostFullCoverage,
+      this.ink);
+
+  /// Pixels whose colour differs at all.
+  final int differing;
+
+  /// The largest per-channel difference over those pixels.
+  final int maxDelta;
+
+  /// Whether any pixel in either image is non-grey. Both fixtures draw black
+  /// on white, so a hue means a colour was invented.
+  final bool hueChanged;
+
+  /// Pixels fully covered in the first image that are not fully covered in the
+  /// second. **This is the one that catches a dropped or moved primitive**:
+  /// antialiasing only ever moves partial coverage.
+  final int lostFullCoverage;
+
+  /// Non-background pixels in the first image, so a fixture that draws nothing
+  /// cannot satisfy the bounds vacuously.
+  final int ink;
+
+  static Diff between(Uint8List a, Uint8List b) {
+    var differing = 0, maxDelta = 0, lost = 0, ink = 0;
+    var hue = false;
+    for (var i = 0; i < a.length; i += 4) {
+      final ar = a[i], ag = a[i + 1], ab = a[i + 2];
+      final br = b[i], bg = b[i + 1], bb = b[i + 2];
+      if (ar != ag || ag != ab || br != bg || bg != bb) hue = true;
+      if (ar != 255) ink++;
+      if (ar == 0 && br != 0) lost++;
+      if (ar != br || ag != bg || ab != bb) {
+        differing++;
+        final dr = (ar - br).abs();
+        final dg = (ag - bg).abs();
+        final db = (ab - bb).abs();
+        if (dr > maxDelta) maxDelta = dr;
+        if (dg > maxDelta) maxDelta = dg;
+        if (db > maxDelta) maxDelta = db;
+      }
+    }
+    return Diff(differing, maxDelta, hue, lost, ink);
   }
-  return doc;
+
+  @override
+  String toString() => 'differing=$differing maxDelta=$maxDelta '
+      'hueChanged=$hueChanged lostFullCoverage=$lostFullCoverage ink=$ink';
 }
 
 void _line(DraftDocument doc, List<double> coords, int rgb,
@@ -959,7 +1033,7 @@ void _line(DraftDocument doc, List<double> coords, int rgb,
       linetypeScale: 1.0,
       geomIndex: 0,
       // TrueColor, not ByLayer: ByLayer resolves through layer 0 to ACI 7,
-      // which is white on the white golden background.
+      // which is white on the white background.
       color: TrueColor(rgb),
       lineweight: lineweight,
       transparency: transparency,
@@ -970,88 +1044,116 @@ void _line(DraftDocument doc, List<double> coords, int rgb,
   ));
 }
 
-Widget _canvasOver(DraftDocument doc, BatchMode mode) {
-  final index = SpatialIndex(doc);
-  return MaterialApp(
-    home: Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(
-        child: SizedBox(
-          key: kCanvasKey,
-          width: kGoldenViewport.width,
-          height: kGoldenViewport.height,
-          child: DraftCanvas(
-            document: doc,
-            index: index,
-            resolver: DocumentStyleResolver(doc),
-            camera: CameraController(ViewportTransform.fit(
-                Aabb2(Vector2(-60, -60), Vector2(60, 60)), kGoldenViewport)),
-            batchMode: mode,
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
-Future<void> _bothWays(
-    WidgetTester tester, DraftDocument Function() build, String name) async {
-  await tester.pumpWidget(_canvasOver(build(), BatchMode.off));
-  await expectLater(
-      find.byKey(kCanvasKey), matchesGoldenFile('batch_$name.png'));
-
-  await tester.pumpWidget(_canvasOver(build(), BatchMode.openBucket));
-  await expectLater(
-      find.byKey(kCanvasKey), matchesGoldenFile('batch_$name.png'));
+/// Crossing strokes that all share one paint key, so every overlap is
+/// same-key.
+DraftDocument sameKeyOverlapFixture({int transparency = 0}) {
+  final doc = DraftDocument.empty();
+  for (var i = 0; i < 6; i++) {
+    final x = -40.0 + i * 16;
+    _line(doc, [x, -50, x + 30, 50], 0x000000, transparency: transparency);
+    _line(doc, [-50, x, 50, x + 30], 0x000000, transparency: transparency);
+  }
+  return doc;
 }
 
 void main() {
-  testWidgets('fixture 1: same-key overlap is byte-identical either way',
-      (tester) async {
-    await _bothWays(tester, sameKeyOverlapFixture, 'same_key');
+  test('translucent same-key overlap renders identically', () async {
+    // Zero, not a tolerance. A style below full alpha is never batched, so
+    // the two modes issue the same calls. This is the assertion the alpha
+    // exclusion exists to make true, and Step 9 mutates the exclusion to
+    // prove it is doing the work.
+    final off = await render(sameKeyOverlapFixture(transparency: 128),
+        BatchMode.off);
+    final on = await render(sameKeyOverlapFixture(transparency: 128),
+        BatchMode.openBucket);
+    final diff = Diff.between(off, on);
+    expect(diff.ink, greaterThan(1000),
+        reason: 'the fixture must actually draw, or every bound below is '
+            'satisfied by an empty canvas');
+    expect(diff.differing, 0, reason: '$diff');
   });
 
-  testWidgets('fixture 2: translucent overlap is byte-identical either way',
-      (tester) async {
-    // Passes only because _opaque() excludes it from batching. Deleting that
-    // check must make the second expectLater fail.
-    await _bothWays(tester, translucentOverlapFixture, 'translucent');
+  test('opaque same-key overlap differs only in partial coverage', () async {
+    final off = await render(sameKeyOverlapFixture(), BatchMode.off);
+    final on = await render(sameKeyOverlapFixture(), BatchMode.openBucket);
+    final diff = Diff.between(off, on);
+
+    expect(diff.ink, greaterThan(1000),
+        reason: 'the fixture must actually draw');
+    expect(diff.lostFullCoverage, 0,
+        reason: 'antialiasing only moves partial coverage; a pixel that was '
+            'fully covered and is not any more means geometry was dropped, '
+            'moved, or recoloured — $diff');
+    expect(diff.hueChanged, isFalse,
+        reason: 'both renders are black on white — $diff');
+    expect(diff.differing, lessThan(off.length ~/ 4 * 3 ~/ 100),
+        reason: 'coverage differences live on stroke edges, so they are a '
+            'small fraction of the image — $diff');
+    expect(diff.maxDelta, lessThanOrEqualTo(64), reason: '$diff');
   });
 }
 ```
 
 - [ ] **Step 7: Give `DraftCanvas` a `batchMode`**
 
-The golden needs to build both ways. Add to `DraftCanvas`:
+Not needed by the test above, which bypasses the widget — but Task 4's harness
+app selects a mode per profile run through it, and the dash-ladder golden in
+Task 9 renders at whatever the default is. Add to `DraftCanvas`:
 
 ```dart
   /// Which [BatchMode] the canvas's sink runs in.
   ///
-  /// A widget parameter rather than a global so the batched and unbatched
-  /// renderings of one fixture can be compared inside a single test.
+  /// A widget parameter rather than a global so one process can render two
+  /// modes, and so a profile run can select one from a `--dart-define`.
   final BatchMode batchMode;
 ```
 
-defaulted to `BatchMode.openBucket` in the constructor, and passed through in `_attach`:
+defaulted to `BatchMode.openBucket` in the constructor, passed through in
+`_attach`:
 
 ```dart
     sink = CanvasDrawSink(
         pixelsPerPaperMm: widget.pixelsPerPaperMm, mode: widget.batchMode);
 ```
 
-- [ ] **Step 8: Generate the goldens and look at them**
+and added to `didUpdateWidget`'s re-attach check beside the other constructor
+parameters, or the parameter does nothing on rebuild.
 
-Run: `cd packages/jet_cad_2d_flutter && flutter test --tags golden --update-goldens`
+- [ ] **Step 8: Pin the existing goldens to `BatchMode.off`**
 
-**Open `batch_same_key.png` and `batch_translucent.png`.** The first must show six dark crosses of uniform weight. The second must show the same crosses paler, with the overlaps visibly darker than the strokes — that darkening is the double blend, and it is the whole reason the alpha exclusion exists. If the overlaps are *not* darker, the fixture's transparency did not survive resolution and the test proves nothing.
+`stroke_width_golden_test.dart` measures paper-space **stroke width** and the
+shape of an anisotropic instance. Neither is a question about batching, and
+both of its fixtures have touching same-key geometry — so leaving them on the
+new default would regress `anisotropy_bypass.png` by the coverage difference
+Step 6 characterises, for a reason that has nothing to do with what those
+goldens assert.
+
+Its `_PainterHost` builds a `CanvasDrawSink` directly. Give it
+`mode: BatchMode.off` and a `sink.flush()` call.
+
+**The `flush()` call is not optional and its absence is silent.** Without it
+every primitive in those fixtures lands in an unflushed bucket and the golden
+becomes a blank canvas — and `--update-goldens` will happily write that blank
+canvas over four committed PNGs. Run `git status` after any `--update-goldens`
+and check that only the files you meant to change are listed.
 
 - [ ] **Step 9: Verify the alpha exclusion is load-bearing**
 
-Temporarily change `_opaque` to `=> true`. Run: `flutter test --tags golden`
+Temporarily change `_opaque` to `=> true`. Run:
 
-Expected: **fixture 2 FAILS.** Restore `_opaque` and re-run to green.
+`cd packages/jet_cad_2d_flutter && flutter test test/batch_equivalence_test.dart`
 
-A test that passes with and without the code it is testing is not a test. Record the result in the mutation log in Task 11.
+Expected: **`translucent same-key overlap renders identically` FAILS**, with a
+non-zero `differing` count in the failure message. Record the exact number.
+
+Restore `_opaque` and re-run to green.
+
+A test that passes with and without the code it is testing is not a test. If
+the translucent test still passes with `_opaque` returning true, stop and
+report BLOCKED — the alpha rule is then unproven and the correctness argument
+for batching collapses with it. Record the result for the mutation log in Task
+11.
+
 
 - [ ] **Step 10: Run everything and commit**
 
@@ -1064,8 +1166,32 @@ git commit -m "feat(jet_cad_2d_flutter): coalesce draw calls in CanvasDrawSink
 The batching lives in the sink, so DrawSink gains no methods,
 RecordingDrawSink stays one op per primitive, and the differential
 oracle keeps its shape. It also means the oracle is blind to batching,
-which is why the correctness proof here is a pair of goldens rendered
-both ways and compared byte for byte.
+which is why the correctness proof here renders both modes in-process
+and compares their pixels directly.
+
+It is not a golden. Two measured reasons. _DraftCustomPainter's
+shouldRepaint returns false by design, and RenderCustomPaint skips
+markNeedsPaint when the new painter has the same runtimeType and says
+not to repaint - so two pumpWidget calls in one test produce one render
+and the second comparison silently re-checks the first image. And
+byte-identity is false for opaque geometry anyway: merging overlapping
+strokes into one path makes Skia compute coverage once over the unioned
+outline, 1 - union(a, b), where separate draws composite one antialiased
+stroke over another, (1-a)(1-b). The batched image is the correct one -
+the seam that disappears is an artifact of drawing touching strokes
+separately, and a CAD drawing is made of touching strokes.
+
+So the invariant is in parts. Translucent geometry renders identically,
+pixel for pixel, because it is never batched - zero, with no tolerance
+to argue about, and it fails the moment the alpha exclusion is deleted.
+Opaque geometry may differ only in partial coverage: nothing fully
+covered becomes uncovered, the differing fraction stays small, and no
+pixel changes hue.
+
+The stroke-width goldens are pinned to BatchMode.off. They measure
+paper-space width and the shape of an anisotropic instance; neither is a
+question about batching, and both fixtures have touching same-key
+geometry.
 
 BatchMode.openBucket holds one Path and the paint key it carries; a
 primitive whose key differs flushes it, so draw order is preserved
@@ -1091,7 +1217,7 @@ Variants A and A′. Both hold a `Map` of open buckets instead of one, which is 
 **Files:**
 - Modify: `packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart`
 - Modify: `packages/jet_cad_2d_flutter/test/canvas_draw_sink_test.dart`
-- Modify: `packages/jet_cad_2d_flutter/test/golden/batch_equivalence_golden_test.dart`
+- Modify: `packages/jet_cad_2d_flutter/test/batch_equivalence_test.dart`
 
 **Interfaces:**
 - Consumes: `BatchMode`, `CanvasDrawSink` from Task 2.
@@ -1155,7 +1281,8 @@ Append to `test/canvas_draw_sink_test.dart`:
     sink.flush();
     final picture = recorder.endRecording();
     expect(picture.approximateBytesUsed, greaterThan(0));
-    // The ordering itself is pinned by golden fixture 3; this asserts only
+    // The ordering itself is pinned by fixture 3 in batch_equivalence_test;
+    // this asserts only
     // that flushing a map produces one call per bucket and does not throw.
     expect(sink.canvasCallCount, 2);
   });
@@ -1348,18 +1475,19 @@ Run: `cd packages/jet_cad_2d_flutter && flutter test test/canvas_draw_sink_test.
 
 Expected: PASS, all twelve.
 
-- [ ] **Step 5: Add golden fixture 3 — cross-key overlap**
+- [ ] **Step 5: Add fixture 3 — cross-key overlap**
 
-Append to `batch_equivalence_golden_test.dart`:
+Append to `test/batch_equivalence_test.dart`:
 
 ```dart
 /// Overlapping strokes in **two** paint keys, which is where a draw-order
 /// change becomes visible.
 ///
-/// Byte-identical under [BatchMode.openBucket] and under it alone. Under the
-/// mapped modes the two renderings are *expected* to differ: the second red
-/// stroke merges with the first and draws beneath the blue that separates
-/// them. That difference is the ordering contract made visible.
+/// Identical under [BatchMode.openBucket] and under it alone. Under the mapped
+/// modes the second red stroke merges with the first and draws beneath the
+/// blue that separates them, so the overlap changes colour. A **hue** change,
+/// not a coverage one — which is exactly what separates the ordering contract
+/// from the antialiasing difference fixture 1 tolerates.
 DraftDocument crossKeyOverlapFixture() {
   final doc = DraftDocument.empty();
   _line(doc, [-50, -50, 50, 50], 0xCC0000, lineweight: 200);
@@ -1368,23 +1496,65 @@ DraftDocument crossKeyOverlapFixture() {
   return doc;
 }
 
-  testWidgets('fixture 3: cross-key overlap under the ordered mode',
-      (tester) async {
-    await _bothWays(tester, crossKeyOverlapFixture, 'cross_key');
+/// Pixels whose red and blue channels swap dominance between two renders.
+///
+/// `Diff.hueChanged` asks whether a render is non-grey, which every pixel of
+/// this fixture is. The question here is different: did the *winner* of an
+/// overlap change? That is one primitive drawing over another instead of
+/// under it, and no amount of coverage noise produces it.
+int dominanceFlips(Uint8List a, Uint8List b) {
+  var flips = 0;
+  for (var i = 0; i < a.length; i += 4) {
+    final aRed = a[i] > a[i + 2];
+    final bRed = b[i] > b[i + 2];
+    if (aRed != bRed) flips++;
+  }
+  return flips;
+}
+
+  test('cross-key overlap is identical under the ordered mode', () async {
+    final off = await render(crossKeyOverlapFixture(), BatchMode.off);
+    final ordered =
+        await render(crossKeyOverlapFixture(), BatchMode.openBucket);
+    final diff = Diff.between(off, ordered);
+    expect(diff.ink, greaterThan(1000));
+    expect(diff.differing, 0,
+        reason: 'the ordered mode flushes on every paint change, so the three '
+            'strokes reach the canvas in handle order exactly as unbatched — '
+            '$diff');
+  });
+
+  test('the mapped modes reorder cross-key overlaps, and that is visible',
+      () async {
+    // Not a defect: it is the ordering contract the mapped modes trade draw
+    // order for, and this is where it becomes a picture. Asserted so the
+    // trade is demonstrated rather than described.
+    final off = await render(crossKeyOverlapFixture(), BatchMode.off);
+    final mapped = await render(crossKeyOverlapFixture(), BatchMode.bucketMap);
+    expect(dominanceFlips(off, mapped), greaterThan(100),
+        reason: 'the two reds merge into one path and both draw beneath the '
+            'blue, so the blue wins pixels the second red used to own');
   });
 ```
 
-- [ ] **Step 6: Generate and inspect fixture 3**
+- [ ] **Step 6: Run the equivalence tests**
 
-Run: `cd packages/jet_cad_2d_flutter && flutter test --tags golden --update-goldens`
+Run: `cd packages/jet_cad_2d_flutter && flutter test test/batch_equivalence_test.dart`
 
-**Open `batch_cross_key.png`.** The blue diagonal must cross *over* the first red diagonal and *under* the second. That is handle order, and under `openBucket` it survives.
+Expected: PASS, all four. Record the reported `Diff` line for fixture 1 and the
+`dominanceFlips` count — both go in the results note as the measured shape of
+what each mode changes.
 
-- [ ] **Step 7: Prove fixture 3 discriminates**
+- [ ] **Step 7: Prove the ordered mode is what keeps fixture 3 identical**
 
-Temporarily change `_canvasOver`'s second call in `_bothWays` to `BatchMode.bucketMap`. Run: `flutter test --tags golden`
+Temporarily change the ordered test's second render to `BatchMode.bucketMap`.
+Run: `flutter test test/batch_equivalence_test.dart`
 
-Expected: **fixture 3 FAILS** and fixtures 1 and 2 pass. That is the ordering contract, demonstrated rather than asserted in prose. Restore `openBucket` and re-run to green.
+Expected: **the ordered test FAILS** with a non-zero `differing` count, and the
+other three pass. Restore `BatchMode.openBucket` and re-run to green.
+
+Without this, "order is preserved exactly" is a claim about code nobody
+exercised. Record the failure output for the mutation log in Task 11.
 
 - [ ] **Step 8: Run everything and commit**
 
@@ -1408,10 +1578,13 @@ baking the matrix applies the stroke in screen space, giving the ellipse
 a uniform paper-space width, which is what lineweightHundredths says a
 lineweight is.
 
-Golden fixture 3 covers cross-key overlap: byte-identical under
-openBucket and expected to differ under the mapped modes. Switching the
-comparison to bucketMap fails fixture 3 and passes 1 and 2, which is the
-ordering contract demonstrated rather than argued."
+Fixture 3 covers cross-key overlap: zero differing pixels under
+openBucket, and under a mapped mode the two reds merge into one path and
+both draw beneath the blue that separates them, so the blue wins pixels
+the second red used to own. That is asserted as a dominance flip rather
+than described - a hue change no amount of coverage noise produces,
+which is what separates the ordering contract from the antialiasing
+difference fixture 1 tolerates."
 ```
 
 ---
@@ -2986,12 +3159,12 @@ The method that found Plan 2's and 3a's real defects, applied to the constructs 
 
 | # | Mutant | Must be caught by |
 |---|---|---|
-| 1 | `_opaque` returns `true` always | golden fixture 2 (Task 2) |
+| 1 | `_opaque` returns `true` always | `translucent same-key overlap renders identically` (Task 2) |
 | 2 | `flush()` body emptied | `flush is required` (Task 2) |
 | 3 | the bucket key drops `lineweightHundredths` | a new sink test: two styles differing only in lineweight must produce two calls |
 | 4 | `_bucketFor` skips the key-change flush in `openBucket` | `a paint change flushes` (Task 2) |
 | 5 | the curve flush in `bucketMap` is dropped | `flushes every bucket before a curve` (Task 3) |
-| 6 | `_translationOnly` returns `true` always | golden fixture 1 — a curve's residual would be applied as a translation |
+| 6 | `_translationOnly` returns `true` always | `opaque same-key overlap differs only in partial coverage` — a curve's residual applied as a translation moves it, so `lostFullCoverage` is non-zero |
 | 7 | `clipSegment` returns `t0 = 0` instead of the computed value | `the phase is carried from the true start` (Task 6) |
 | 8 | `cursor` starts at `0` instead of the floored multiple of `period` | the same test, and R2's frame time |
 | 9 | `period < collapsePx` → `period <= collapsePx` | a boundary test: `scale` chosen so `period == collapsePx` exactly must **not** collapse |
@@ -3097,8 +3270,10 @@ git commit -m "docs: record Plan 3b's measurements"
 | Criterion | Threshold |
 |---|---|
 | 500k working-set raster p50, dashes on | ≤ 182.73 ms |
-| goldens, fixtures 1 and 2, batched vs unbatched | byte-identical |
-| golden fixture 3 | byte-identical under `openBucket`; a reviewed, deliberately regenerated golden under a mapped mode |
+| translucent same-key overlap, both modes | **zero** differing pixels, no tolerance |
+| opaque same-key overlap, both modes | nothing fully covered becomes uncovered, no hue change, differing fraction under 3%, max per-channel delta ≤ 64 |
+| cross-key overlap | zero differing pixels under `openBucket`; under a mapped mode the dominance flips are asserted instead |
+| the pre-existing stroke-width goldens | pass unchanged, pinned to `BatchMode.off` |
 | the differential oracle | both differential tests and the non-vacuity test pass |
 | `git diff --stat main -- packages/jet_cad_2d_flutter/lib/src/reference_walk.dart` | **empty** |
 | `kDashCollapsePx` | swept, numbers recorded, chosen by recorded review |

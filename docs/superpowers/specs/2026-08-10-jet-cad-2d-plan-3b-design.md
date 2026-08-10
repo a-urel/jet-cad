@@ -425,37 +425,49 @@ the batching goes — and, as noted above, why the oracle is blind to it.
 
 ### Batched equals unbatched
 
-`CanvasDrawSink` gains `debugDisableBatching`. A golden test renders the same
-fixture both ways and compares the PNGs.
+The proof is pixel-level rather than op-list, because batching is a `Canvas`
+behaviour that an op list cannot see. It is **not** a golden comparison. Both
+modes are rendered in one test through `PictureRecorder` → `Picture.toImage` and
+their pixels are compared directly.
 
-This is the batch's correctness proof, and it is a pixel-level one rather than
-an op-list one, because batching is a `Canvas`-level behaviour that an op list
-cannot see.
+Three reasons, and the first two are measured rather than anticipated:
 
-**The invariant, stated exactly, because it is not "the picture is identical":**
-batched and unbatched rendering are byte-identical whenever no two overlapping
-primitives have different paint keys. Cross-key overlap is where a draw-order
-change becomes visible, and under the persistent-map variants it is where the
-two renderings are *expected* to differ.
+- **The widget route does not re-render.** `_DraftCustomPainter.shouldRepaint`
+  returns `false` by design — repaint is driven by the camera and document
+  listenables, not by rebuilds — and `RenderCustomPaint` skips
+  `markNeedsPaint` when the new painter has the same `runtimeType` and says not
+  to repaint. Two `pumpWidget` calls in one test therefore produce **one**
+  render, and the second `expectLater` silently re-checks the first image. Both
+  fixtures passed vacuously under mutation before this was found.
+- **Byte-identity is false for opaque geometry**, and the batched image is the
+  correct one. Merging overlapping strokes into one path makes Skia compute
+  coverage once over the unioned outline — `1 − union(a, b)` — where separate
+  draws composite one antialiased stroke over another — `(1−a)(1−b)`. At half
+  coverage that is 0.5 against 0.25. The seam that disappears under batching is
+  an artifact of drawing touching strokes separately, and a CAD drawing is made
+  of touching strokes. Measured at 1.09% of pixels, magnitudes peaking at 1 and
+  trailing to 37, inside the crossing region; a control of unbatched against
+  itself differs by nothing.
+- Golden files add a platform, a comparator with no tolerance, and a set of PNG
+  bytes to maintain, for a comparison that is between two in-process renders.
 
-Three fixtures, and each one is load-bearing:
+**The invariant, in three parts:**
 
-1. **Same-key overlap.** Several paint keys present, but every overlap is within
-   one key. **Byte-identical under every variant** — this is the assertion that
-   path accumulation itself does not change rasterisation, since opaque union
-   and opaque double-blend agree.
-2. **Transparent same-key overlap**, alpha below 255. **Byte-identical**, but
-   only because transparent styles are excluded from batching. Deleting that
-   exclusion must make this fixture differ, which is what proves the exclusion
-   does work rather than merely existing.
-3. **Cross-key overlap.** Byte-identical under variant B, and under B alone.
-   Under A and A′ this fixture is a **reviewed golden** whose difference *is* the
-   ordering contract made visible — regenerated deliberately when the variant
-   ships, with the pixels that changed named in the commit.
+1. **Translucent geometry renders identically**, pixel for pixel, because a
+   style below full alpha is never batched. Zero differing pixels — no
+   tolerance, and therefore no margin to argue about.
+2. **Opaque geometry may differ only in partial coverage.** Every pixel fully
+   covered in the unbatched render is fully covered in the batched one;
+   differing pixels stay under a small fraction of the image; no pixel changes
+   hue. A dropped, moved or recoloured primitive fails all three.
+3. **Cross-key overlap** is byte-identical under variant B and under B alone.
+   Under the mapped variants the difference is the ordering contract made
+   visible, and it is a *hue* change at the overlap — which is what separates it
+   from part 2's coverage noise.
 
-Fixture 3 is the one that turns the tie-break in the decision rule from a
-preference into something with a picture attached: if B wins or ties, this
-fixture is an equality assertion, and 3b hands 3d a contract with nothing in it.
+Part 1 is the discriminator. Deleting the alpha exclusion turns fixture 2's zero
+into a difference immediately, with no tolerance standing between the mutant and
+the failure. Parts 2 and 3 characterise what batching is allowed to change.
 
 ### Mutation testing
 
