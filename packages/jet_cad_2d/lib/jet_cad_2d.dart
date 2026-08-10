@@ -24,7 +24,6 @@ export 'src/document/raw_data.dart';
 export 'src/document/resolved_style.dart';
 export 'src/document/style.dart';
 export 'src/document/style_context.dart';
-export 'src/document/memoised_style_resolver.dart';
 export 'src/document/style_resolver.dart';
 export 'src/document/tables.dart';
 export 'src/document/tree.dart';

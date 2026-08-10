@@ -146,32 +146,9 @@ void main() {
         final query = measure(() => painter.paint(sink, camera, kRigViewport));
         final opsPerFrame = (sink.opCount - before) ~/ (query.n + 20);
 
-        // Measured on the same corpus in the same run: a delta taken across two
-        // runs would be a delta in machine load.
-        final memo = MemoisedStyleResolver(DocumentStyleResolver(doc));
-        final memoQuery = measure(() =>
-            DraftPainter(document: doc, index: index, resolver: memo)
-                .paint(NullDrawSink(), camera, kRigViewport));
-
-        // The owner-map shortcut is opt-in, so a painter built without one
-        // reports `directBuckets: 0` — which reads as "the shortcut is dead"
-        // rather than "the shortcut was not offered".
-        final ownerMap = LeafOwnerMap(doc);
-        final mapped = DraftPainter(
-            document: doc,
-            index: index,
-            resolver: DocumentStyleResolver(doc),
-            ownerMap: ownerMap);
-        final mappedQuery =
-            measure(() => mapped.paint(NullDrawSink(), camera, kRigViewport));
-
         print('  -- $label --');
         print('    R1 paint          $paint');
         print('    R3 query-only     $query');
-        print('    R3 + style memo   $memoQuery '
-            '(entries=${memo.entryCount})');
-        print('    R3 + owner map    $mappedQuery '
-            '(directBuckets=${mapped.directBucketCount})');
         print('    ops/frame: $opsPerFrame');
         print('    bypassed leaves: ${painter.bypassCount}  '
             'anisotropic curves: ${painter.anisotropicCurveCount}');

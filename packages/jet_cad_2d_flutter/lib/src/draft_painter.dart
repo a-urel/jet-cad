@@ -6,7 +6,6 @@ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import 'camera_controller.dart';
 import 'draw_sink.dart';
-import 'leaf_owner_map.dart';
 import 'viewport_transform.dart';
 
 /// How far from conformal a leaf's screen transform may be before one baked
@@ -16,13 +15,6 @@ import 'viewport_transform.dart';
 /// the smaller, so 1.0 is conformal — including mirroring, where the
 /// determinant is negative but both axes scale alike.
 const double kAnisotropyThreshold = 2.0;
-
-/// Below this many leaves, a container is drawn whole instead of queried.
-///
-/// Testing thirty-odd boxes against a rectangle costs more than drawing them
-/// and letting `Canvas` clip. **A measured guess**: the number to revisit from
-/// R1's numbers, not a derived constant.
-const int kCullFloor = 32;
 
 /// Walks the document and writes to a [DrawSink]. No cache of any kind.
 ///
@@ -34,20 +26,12 @@ class DraftPainter {
     required this.document,
     required this.index,
     required this.resolver,
-    this.ownerMap,
     this.debugDisableRebasing = false,
   });
 
   final DraftDocument document;
   final SpatialIndex index;
   final StyleResolver resolver;
-
-  /// Optional, and the shortcut below is taken only when it is supplied.
-  ///
-  /// A map is only as good as the changes fed to it, and a stale one would put
-  /// dead slots on screen. Opt-in means a caller that forgets to feed it gets
-  /// the slower path rather than a wrong picture.
-  final LeafOwnerMap? ownerMap;
 
   /// **Test-only.** Paints with the rebase origin pinned at the world origin.
   ///
@@ -92,11 +76,6 @@ class DraftPainter {
 
   int _bypassCount = 0;
   int _anisotropicCurves = 0;
-  int _directBuckets = 0;
-
-  /// Containers drawn whole from the owner map in the last frame, rather than
-  /// through a rectangle query.
-  int get directBucketCount => _directBuckets;
 
   /// Leaves drawn through the exact per-axis path in the last frame.
   int get bypassCount => _bypassCount;
@@ -139,7 +118,6 @@ class DraftPainter {
     _skippedDeepInstances = 0;
     _bypassCount = 0;
     _anisotropicCurves = 0;
-    _directBuckets = 0;
     final world = camera.visibleWorld(viewport);
     _worldRect = world;
     final origin =
@@ -230,18 +208,10 @@ class DraftPainter {
 
     final scratch = _scratchAt(depth);
     scratch.leaves.reset();
-    final bucket = _directBucketFor(container, ci);
-    if (bucket != null) {
-      _directBuckets++;
-      for (var i = 0; i < bucket.length; i++) {
-        scratch.leaves.add(bucket[i]);
-      }
-    } else {
-      // searchLeaves is neither ordered nor deduplicated: it walks the packed
-      // tree and then the dirty overlay, and a slot in both is visited twice by
-      // design. Both are this caller's job.
-      ci.searchLeaves(localRect, scratch.leaves.add);
-    }
+    // searchLeaves is neither ordered nor deduplicated: it walks the packed
+    // tree and then the dirty overlay, and a slot in both is visited twice by
+    // design. Both are this caller's job.
+    ci.searchLeaves(localRect, scratch.leaves.add);
     scratch.leaves.sortByHandle(document.entities);
     scratch.collectInstances(ci, localRect);
 
@@ -291,24 +261,6 @@ class DraftPainter {
       ctx: resolver.contextFor(handle, ctx),
       depth: depth + 1,
     );
-  }
-
-  /// The leaves of [container] to draw whole, or null to run the rect query.
-  ///
-  /// Two conditions, and the second is not an optimisation. `slotsOf` answers
-  /// for the leaves a container owns **directly**, while a `ContainerIndex`
-  /// also holds every leaf folded up out of the groups nested inside it —
-  /// those are owned by the group node, not by the container. Requiring the
-  /// two counts to agree is what keeps a definition with a nested group off
-  /// this path, where the bucket would silently be missing its leaves. It also
-  /// catches a container edited since the index was built, whose new leaves
-  /// live in the dirty overlay and are not in `leafCount` yet.
-  List<int>? _directBucketFor(Handle container, ContainerIndex ci) {
-    final map = ownerMap;
-    if (map == null || ci.leafCount > kCullFloor) return null;
-    final bucket = map.slotsOf(container);
-    if (bucket.length != ci.leafCount) return null;
-    return bucket;
   }
 
   _DepthScratch _scratchAt(int depth) {
