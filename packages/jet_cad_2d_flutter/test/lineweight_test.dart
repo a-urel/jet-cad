@@ -91,8 +91,10 @@ double screenStrokeWidthUnder(Transform2 instance) {
   final canvas = SpyCanvas();
   DraftPainter(
           document: doc, index: index, resolver: DocumentStyleResolver(doc))
-      .paint(CanvasDrawSink(canvas, pixelsPerPaperMm: kPixelsPerPaperMm),
-          kCamera, kViewport);
+      .paint(
+          CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm),
+          kCamera,
+          kViewport);
 
   final transform = canvas.named('transform').last.args.single as Float64List;
   final residual = Transform2(transform[0], transform[1], transform[4],

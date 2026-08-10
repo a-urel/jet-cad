@@ -109,7 +109,7 @@ void main() {
     setUp(() {
       canvas = SpyCanvas();
       // 96 dpi / 25.4 mm — one paper millimetre is 3.78 logical pixels.
-      sink = CanvasDrawSink(canvas, pixelsPerPaperMm: 4.0);
+      sink = CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: 4.0);
     });
 
     test('beginResidual pushes the affine as a column-major 4x4', () {

@@ -13,9 +13,19 @@ import 'draw_sink.dart';
 /// scale — because `Paint.strokeWidth` is measured in the *current* canvas
 /// units, which the residual has already scaled.
 class CanvasDrawSink implements DrawSink {
-  CanvasDrawSink(this.canvas, {required this.pixelsPerPaperMm});
+  CanvasDrawSink({Canvas? canvas, required this.pixelsPerPaperMm}) {
+    if (canvas != null) this.canvas = canvas;
+  }
 
-  final Canvas canvas;
+  /// Rebound each frame rather than fixed at construction.
+  ///
+  /// The `Paint`, the `Path` and the two typed lists below are the whole
+  /// reason this is an object: they are allocated once and rewritten per op.
+  /// A sink built per paint would throw that away and put four allocations
+  /// back on the frame path. The `Canvas` is the only part that genuinely
+  /// changes from one frame to the next, so it is the only part that moves.
+  late Canvas canvas;
+
   final double pixelsPerPaperMm;
 
   // One paint and one path for the whole frame. Both are rewritten per op;

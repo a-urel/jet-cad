@@ -128,7 +128,7 @@ class _PainterHost extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) => painter.paint(
-      CanvasDrawSink(canvas, pixelsPerPaperMm: kPixelsPerPaperMm),
+      CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm),
       camera,
       size);
 
