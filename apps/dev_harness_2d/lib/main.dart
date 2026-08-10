@@ -13,6 +13,13 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 /// Entity count, so one binary serves both corpus sizes.
 const int kEntities = int.fromEnvironment('ENTITIES', defaultValue: 50000);
 
+/// Which [BatchMode] the harness renders with, so one profile run measures one
+/// mode. `off` | `openBucket` | `bucketMap` | `bucketMapBakedCurves`.
+const String kBatch =
+    String.fromEnvironment('BATCH', defaultValue: 'bucketMap');
+
+BatchMode get batchMode => BatchMode.values.firstWhere((m) => m.name == kBatch);
+
 /// The corpus the rigs measure on: the same shape as R1's, so the two sets of
 /// numbers describe one drawing.
 DraftDocument harnessDocument([int? entityCount]) => generateDocument(
@@ -77,7 +84,10 @@ class _HarnessAppState extends State<HarnessApp> {
                   event.scrollDelta.dy < 0 ? 1.1 : 1 / 1.1);
             },
             child: DraftCanvas(
-                document: widget.document, index: index, camera: camera),
+                document: widget.document,
+                index: index,
+                camera: camera,
+                batchMode: batchMode),
           ),
         ),
       );
