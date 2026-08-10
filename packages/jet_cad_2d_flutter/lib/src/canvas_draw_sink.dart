@@ -28,7 +28,7 @@ class CanvasDrawSink implements DrawSink {
   double _residualScale = 1.0;
 
   @override
-  void beginResidual(Transform2 residual) {
+  void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {
     canvas.save();
     // Matrix4 storage is column-major: columns 0 and 1 carry the linear part,
     // column 3 the translation. Row-major here would transpose every residual.

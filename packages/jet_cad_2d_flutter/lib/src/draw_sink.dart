@@ -15,7 +15,11 @@ import 'package:meta/meta.dart';
 /// mechanism, and an ambiguous coordinate space lets two correct
 /// implementations disagree.
 abstract class DrawSink {
-  void beginResidual(Transform2 residual);
+  /// [debugHandle] names the leaf or instance this residual belongs to. It is
+  /// diagnostic only — [RecordingDrawSink] keeps it so a test can assert draw
+  /// order, `==` ignores it, and the other sinks drop it. `Handle` is an
+  /// extension type over `int`, so carrying it costs nothing at runtime.
+  void beginResidual(Transform2 residual, {Handle debugHandle});
   void endResidual();
   void point(double x, double y, ResolvedStyle style);
   void polyline(Float64List points, int count, ResolvedStyle style,
@@ -34,9 +38,16 @@ sealed class DrawOp {
 
 @immutable
 final class BeginResidualOp extends DrawOp {
-  const BeginResidualOp(this.residual);
+  const BeginResidualOp(this.residual, {this.debugHandle = Handle.none});
 
   final Transform2 residual;
+
+  /// Which leaf or instance this residual belongs to, or [Handle.none].
+  ///
+  /// Deliberately outside `==` and `hashCode`: the oracle compares two
+  /// painters' op lists, and the same picture drawn from different slots must
+  /// still compare equal.
+  final Handle debugHandle;
 
   // `Transform2` deliberately has no `operator ==` — exact equality on a
   // composed transform is usually a bug — so the comparison is spelled out
@@ -177,8 +188,8 @@ class RecordingDrawSink implements DrawSink {
   void clear() => _ops.clear();
 
   @override
-  void beginResidual(Transform2 residual) =>
-      _ops.add(BeginResidualOp(residual));
+  void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) =>
+      _ops.add(BeginResidualOp(residual, debugHandle: debugHandle));
 
   @override
   void endResidual() => _ops.add(const EndResidualOp());
@@ -210,7 +221,8 @@ class NullDrawSink implements DrawSink {
   int opCount = 0;
 
   @override
-  void beginResidual(Transform2 residual) => opCount++;
+  void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) =>
+      opCount++;
 
   @override
   void endResidual() => opCount++;

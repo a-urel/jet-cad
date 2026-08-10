@@ -28,6 +28,13 @@ class DraftPainter {
   Float64List _points = Float64List(256);
   int get leafBufferCapacity => _points.length;
 
+  /// This frame's visible root-level instances, ascending. Copied out of the
+  /// query rather than held by reference: both rect queries share one set of
+  /// scratch buffers inside `SpatialIndex`.
+  Uint32List _instances = Uint32List(64);
+  int _instanceCount = 0;
+  int get instanceBufferCapacity => _instances.length;
+
   int _skippedText = 0;
 
   /// Text entities not drawn in the last frame.
@@ -38,16 +45,71 @@ class DraftPainter {
   /// assumed away.
   int get skippedTextCount => _skippedText;
 
+  /// Draws everything visible, in ascending handle order.
+  ///
+  /// Root-level leaves and root-level instances arrive from two different
+  /// queries, each ascending on its own. Running them back to back would give
+  /// "all leaves, then all instances" — a different order, invisible while
+  /// nothing is filled, and deciding what covers what the moment Plan 3b adds
+  /// fills. They are merged instead.
   void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
     _skippedText = 0;
     final world = camera.visibleWorld(viewport);
     final origin = rebaseOriginFor(world);
     final rootIndex = index.rootIndex;
 
+    // Drain the instance query completely first. Holding its results across
+    // the leaf query is safe only because they are copied out here.
+    _instanceCount = 0;
+    index.forEachInstanceInRect(world, const QueryFilter.rendering(), (h) {
+      if (_instanceCount == _instances.length) _growInstances();
+      _instances[_instanceCount++] = h.value;
+    });
+
+    // Stream the leaves, flushing every lower-handled instance first.
+    //
+    // `_drawInstance` runs *inside* this visitor. That is legal only because
+    // it uses `ContainerIndex` queries and never a `SpatialIndex`-level one:
+    // `_beginQuery` is called by `SpatialIndex` methods alone, so reaching for
+    // one here would throw `QueryReentrancyError`.
+    var next = 0;
     index.forEachInRect(world, const QueryFilter.rendering(), (slot) {
+      final leafHandle = document.entities.handleAt(slot).value;
+      while (next < _instanceCount && _instances[next] < leafHandle) {
+        _drawInstance(sink, camera, origin, Handle(_instances[next++]));
+      }
       _drawLeaf(sink, camera, origin, rootIndex.transformOfLeaf(slot), slot,
           StyleContext.documentRoot);
     });
+
+    // Whatever is left sorts after every visible leaf.
+    while (next < _instanceCount) {
+      _drawInstance(sink, camera, origin, Handle(_instances[next++]));
+    }
+  }
+
+  void _growInstances() {
+    final grown = Uint32List(_instances.length * 2)
+      ..setRange(0, _instances.length, _instances);
+    _instances = grown;
+  }
+
+  /// Draws one root-level instance.
+  ///
+  /// Task 8 fills in the descent into the definition's contents; today this
+  /// establishes the instance's residual and its place in the draw order.
+  void _drawInstance(DrawSink sink, ViewportTransform camera, Vector2 origin,
+      Handle instance) {
+    final node = document.tree[instance];
+    if (node is! InstanceNode) return;
+
+    final localOrigin = _localOriginFor(node.transform, origin);
+    final chain = camera.worldToScreenMatrix
+        .multiply(node.transform)
+        .multiply(Transform2.translation(localOrigin.x, localOrigin.y));
+
+    sink.beginResidual(chain, debugHandle: instance);
+    sink.endResidual();
   }
 
   void _drawLeaf(DrawSink sink, ViewportTransform camera, Vector2 origin,
@@ -68,7 +130,7 @@ class DraftPainter {
 
     final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
     final style = resolver.styleFor(slot, ctx);
-    sink.beginResidual(chain);
+    sink.beginResidual(chain, debugHandle: document.entities.handleAt(slot));
     _emit(sink, document.entities.kindAt(slot), payload, localOrigin, style);
     sink.endResidual();
   }
