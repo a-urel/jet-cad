@@ -179,4 +179,25 @@ void main() {
     // that flushing a map produces one call per bucket and does not throw.
     expect(sink.canvasCallCount, 2);
   });
+
+  test('two styles differing only in lineweight get separate buckets', () {
+    const thin = ResolvedStyle(
+        argb: 0xFFFF0000,
+        lineweightHundredths: 25,
+        linetype: ReservedHandles.continuousLinetype,
+        linetypeScale: 1.0);
+    const thick = ResolvedStyle(
+        argb: 0xFFFF0000,
+        lineweightHundredths: 200,
+        linetype: ReservedHandles.continuousLinetype,
+        linetypeScale: 1.0);
+    final recorder = PictureRecorder();
+    final sink = _sinkOn(recorder, BatchMode.bucketMap);
+    _line(sink, 0, thin);
+    _line(sink, 10, thick);
+    sink.flush();
+    expect(sink.canvasCallCount, 2,
+        reason: 'same colour, different width — one bucket would draw the '
+            'thin line at the thick width or the reverse');
+  });
 }

@@ -86,27 +86,28 @@ class CanvasDrawSink implements DrawSink {
   int _bucketArgb = 0;
   int _bucketLineweight = 0;
 
-  /// Open buckets, keyed by paint. `Map` preserves insertion order, which is
-  /// the order they are flushed in — the only draw order this mode keeps.
+  /// Open buckets, keyed by colour and then by lineweight.
   ///
-  /// Keyed by a packed `int`, **not** by a `(int, int)` record: a record is an
-  /// object, so building one per primitive to index this map would be an
-  /// allocation per primitive per frame, against the global constraint that
-  /// the frame path allocates nothing once warm.
-  final Map<int, Path> _buckets = <int, Path>{};
-
-  /// argb and lineweight packed into one integer, by multiplication rather
-  /// than by shifting.
+  /// **Two levels, not one packed integer**, and that is a correction rather
+  /// than a preference. A packed key — `argb * 4096 + lineweightHundredths` —
+  /// is invertible only while the lineweight stays inside `[0, 4096)`, and
+  /// nothing guarantees that. `DocumentStyleResolver` passes a lineweight
+  /// through unclamped (`_ => lw`), its source column is an `Int16List`, and a
+  /// `LayerRecord.lineweight` is a plain `int`. A lineweight of 5000 packs to
+  /// the same key as a different colour with a lineweight of 904, and the
+  /// flush then paints one of them in the other's colour — reachable through
+  /// `AddEntityCommand`, no malformed file required. Nesting **removes** the
+  /// domain assumption instead of restating it with a bigger number.
   ///
-  /// `argb << 16` would be wrong on the web, where Dart's bitwise operators
-  /// are 32-bit — the same trap that took the whole render path down through
-  /// `PackedRTree`'s `Uint64List`. Multiplication stays exact: the largest
-  /// value here is `0xFFFFFFFF * 4096 + 4095`, about 1.76e13, well under the
-  /// 2^53 a double represents exactly. DXF lineweights top out at 211
-  /// hundredths of a millimetre and a *resolved* one is never negative, so
-  /// 4096 is headroom, not a guess.
-  static int _paintKey(ResolvedStyle style) =>
-      style.argb * 4096 + style.lineweightHundredths;
+  /// Neither level is keyed by a `(int, int)` record: a record is an object,
+  /// so building one per primitive would be an allocation per primitive per
+  /// frame.
+  ///
+  /// Both levels preserve insertion order, which is the order buckets are
+  /// flushed in — the only draw order the mapped modes keep. The inner maps
+  /// are **kept across frames** and only emptied, so a steady-state frame
+  /// allocates no map at all.
+  final Map<int, Map<int, Path>> _buckets = <int, Map<int, Path>>{};
 
   /// Paths returned to the pool by [flush], so a frame allocates at most one
   /// `Path` per distinct paint ever seen rather than one per frame.
@@ -141,17 +142,21 @@ class CanvasDrawSink implements DrawSink {
       _canvasCalls++;
       _bucket.reset();
     }
-    if (_buckets.isEmpty) return;
-    for (final entry in _buckets.entries) {
-      _paint
-        ..color = Color(entry.key ~/ 4096)
-        ..strokeWidth = _widthFor(entry.key % 4096, 1.0);
-      canvas.drawPath(entry.value, _paint);
-      _canvasCalls++;
-      entry.value.reset();
-      _pool.add(entry.value);
+    // The outer map keeps its (now empty) inner maps rather than being
+    // cleared, so a steady-state frame allocates no map. Iterating a handful
+    // of empty inner maps costs nothing next to a draw call.
+    for (final byLineweight in _buckets.entries) {
+      for (final entry in byLineweight.value.entries) {
+        _paint
+          ..color = Color(byLineweight.key)
+          ..strokeWidth = _widthFor(entry.key, 1.0);
+        canvas.drawPath(entry.value, _paint);
+        _canvasCalls++;
+        entry.value.reset();
+        _pool.add(entry.value);
+      }
+      byLineweight.value.clear();
     }
-    _buckets.clear();
   }
 
   /// Whether [style] may share a path with others of its paint.
@@ -214,13 +219,17 @@ class CanvasDrawSink implements DrawSink {
       return null;
     }
     if (_mapped) {
-      final key = _paintKey(style);
-      final existing = _buckets[key];
+      // Not putIfAbsent, at either level: its `ifAbsent` argument is a
+      // closure, allocated on every call whether or not the key is missing.
+      var byLineweight = _buckets[style.argb];
+      if (byLineweight == null) {
+        byLineweight = <int, Path>{};
+        _buckets[style.argb] = byLineweight;
+      }
+      final existing = byLineweight[style.lineweightHundredths];
       if (existing != null) return existing;
-      // Not putIfAbsent: its `ifAbsent` argument is a closure, allocated on
-      // every call whether or not the key is missing.
       final fresh = _pool.isEmpty ? Path() : _pool.removeLast();
-      _buckets[key] = fresh;
+      byLineweight[style.lineweightHundredths] = fresh;
       return fresh;
     }
     if (_bucketOpen &&
