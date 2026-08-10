@@ -59,7 +59,8 @@ void main() {
   final index = SpatialIndex(doc);
   final e = doc.extents;
   final cx = (e.minX + e.maxX) / 2, cy = (e.minY + e.maxY) / 2;
-  final rect = Aabb2(Vector2(cx - 1500, cy - 1125), Vector2(cx + 1500, cy + 1125));
+  final rect =
+      Aabb2(Vector2(cx - 1500, cy - 1125), Vector2(cx + 1500, cy + 1125));
   final threshold = index.rootIndex.rebuildThreshold;
   print('rebuildThreshold=$threshold  leafCount=${index.rootIndex.leafCount}');
   print('overlay=0  rectQuery p50=${medianRectQueryMs(index, doc, rect)}ms');
