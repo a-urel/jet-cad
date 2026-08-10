@@ -14,7 +14,8 @@
 ## Global Constraints
 
 - **`packages/jet_cad_2d` must never import Flutter.** No `dart:ui`, no `package:flutter`. `dart test` must keep working there. The dasher lives here, so it takes plain doubles and `Aabb2`, never `Offset` or `Rect`.
-- **Zero allocation on the frame path.** No `Path`, `Paint`, list or closure allocated per primitive. Scratch objects are fields, reset in place. Proven structurally through capacity getters, in the shape of `SpatialIndex.entityScratchCapacity`.
+- **Zero allocation on the frame path.** No `Path`, `Paint`, list, **record, or closure** allocated per primitive. Scratch objects are fields, reset in place. Proven structurally through capacity getters, in the shape of `SpatialIndex.entityScratchCapacity`. Three consequences worth naming, because each is a natural way to write the code that violates this: a `(int, int)` record built to index a map is an object; `Map.putIfAbsent`'s `ifAbsent` argument is a closure allocated on every call; and a closure literal passed to the dasher captures its enclosing variables into a fresh object per leaf.
+- **No 64-bit bitwise arithmetic, ever.** Dart's bitwise operators are 32-bit on the web. Pack integers by multiplication and unpack by `~/` and `%`. `PackedRTree`'s `Uint64List` took the entire render path down on web in Plan 3a; this is the same trap wearing different clothes.
 - **`reference_walk.dart` is not modified by this plan.** `flatten` in `test/support/differential.dart` already applies each residual before comparing, so the reference needs no screen-space change. An empty diff on that file is an exit criterion.
 - **`DrawSink` (the abstract class in `draw_sink.dart`) gains no methods.** Batching is a `CanvasDrawSink` implementation detail. `RecordingDrawSink` and `NullDrawSink` stay one op per primitive.
 - **`NullDrawSink.opCount` keeps its meaning** — one per painter call — so Plan 3a's R1 and R3 rows stay comparable. Real `Canvas` calls get a separate counter on `CanvasDrawSink`.
@@ -123,9 +124,17 @@ Add to `packages/jet_cad_2d_flutter/test/draft_canvas_test.dart`:
         Aabb2(Vector2(0, 0), Vector2(120, 90)), kViewport);
     painter.paint(recording, camera, kViewport);
 
-    expect(recording.ops.whereType<PolylineOp>().length, lessThanOrEqualTo(2),
-        reason: 'the container has eight leaves and the view holds one or '
-            'two of them; drawing all eight is the cull-floor shortcut');
+    final drawn = recording.ops.whereType<PolylineOp>().length;
+    // Not an exact count: index boxes carry narrow-phase slack, so the culled
+    // number is "fewer than all of them", not a number this test may pin. The
+    // two bounds together are the property — 8 means the shortcut is live, 0
+    // means the fixture is wrong and the assertion above it proves nothing.
+    expect(drawn, greaterThan(0),
+        reason: 'the view holds part of the strip; drawing nothing means the '
+            'fixture, not the cull floor, is what this test is measuring');
+    expect(drawn, lessThan(8),
+        reason: 'the container has eight leaves and the view holds one or two '
+            'of them; drawing all eight is the cull-floor shortcut');
   });
 ```
 
@@ -1187,7 +1196,25 @@ Replace the single-bucket fields with a map, keeping the single-bucket fast path
 ```dart
   /// Open buckets, keyed by paint. `Map` preserves insertion order, which is
   /// the order they are flushed in — the only draw order this mode keeps.
-  final Map<(int, int), Path> _buckets = <(int, int), Path>{};
+  ///
+  /// Keyed by a packed `int`, **not** by a `(int, int)` record: a record is an
+  /// object, so building one per primitive to index this map would be an
+  /// allocation per primitive per frame, against the global constraint that
+  /// the frame path allocates nothing once warm.
+  final Map<int, Path> _buckets = <int, Path>{};
+
+  /// argb and lineweight packed into one integer, by multiplication rather
+  /// than by shifting.
+  ///
+  /// `argb << 16` would be wrong on the web, where Dart's bitwise operators
+  /// are 32-bit — the same trap that took the whole render path down through
+  /// `PackedRTree`'s `Uint64List`. Multiplication stays exact: the largest
+  /// value here is `0xFFFFFFFF * 4096 + 4095`, about 1.76e13, well under the
+  /// 2^53 a double represents exactly. DXF lineweights top out at 211
+  /// hundredths of a millimetre and a *resolved* one is never negative, so
+  /// 4096 is headroom, not a guess.
+  static int _paintKey(ResolvedStyle style) =>
+      style.argb * 4096 + style.lineweightHundredths;
 
   /// Paths returned to the pool by [flush], so a frame allocates at most one
   /// `Path` per distinct paint ever seen rather than one per frame.
@@ -1213,8 +1240,8 @@ Replace the single-bucket fields with a map, keeping the single-bucket fast path
     if (_buckets.isEmpty) return;
     for (final entry in _buckets.entries) {
       _paint
-        ..color = Color(entry.key.$1)
-        ..strokeWidth = _widthFor(entry.key.$2, 1.0);
+        ..color = Color(entry.key ~/ 4096)
+        ..strokeWidth = _widthFor(entry.key % 4096, 1.0);
       canvas.drawPath(entry.value, _paint);
       _canvasCalls++;
       entry.value.reset();
@@ -1240,8 +1267,14 @@ Replace the single-bucket fields with a map, keeping the single-bucket fast path
       return null;
     }
     if (_mapped) {
-      return _buckets.putIfAbsent((style.argb, style.lineweightHundredths),
-          () => _pool.isEmpty ? Path() : _pool.removeLast());
+      final key = _paintKey(style);
+      final existing = _buckets[key];
+      if (existing != null) return existing;
+      // Not putIfAbsent: its `ifAbsent` argument is a closure, allocated on
+      // every call whether or not the key is missing.
+      final fresh = _pool.isEmpty ? Path() : _pool.removeLast();
+      _buckets[key] = fresh;
+      return fresh;
     }
     if (_bucketOpen &&
         (_bucketArgb != style.argb ||
@@ -2477,26 +2510,71 @@ In `draft_painter.dart`, add the fields:
   /// Entities whose dash pattern collapsed to solid in the last frame.
   int get collapsedDashCount => _dasher.collapsedCount;
 
-  /// The clip the dasher generates inside, in screen space.
+  /// The clip the dasher generates inside, in the space the carried points are
+  /// in — screen space **minus the frame's screen origin**.
   ///
   /// Inflated by half the widest stroke the frame can draw, so a stroke whose
-  /// centreline is just outside still contributes its visible edge.
-  Aabb2 _screenClip = Aabb2.empty();
+  /// centreline is just outside still contributes its visible edge. Rebased
+  /// once per frame rather than un-rebasing every point back into raw screen
+  /// space to compare them.
+  Aabb2 _rebasedClip = Aabb2.empty();
+
+  /// The same box before the rebase subtraction, for the curves that stay in
+  /// their own local space.
+  Aabb2 _screenSpaceClip = Aabb2.empty();
+
+  /// The frame's rebase origin in screen space. Constant for the whole frame,
+  /// so it is computed in [paint] rather than per leaf.
+  Vector2 _screenOrigin = Vector2.zero();
 
   /// One two-point buffer, reused per span. A span is emitted through the sink
   /// immediately, so it never needs to outlive the callback.
   final Float64List _span = Float64List(4);
+
+  // The dasher's callbacks, bound once. A closure literal at the call site
+  // would allocate per dashed entity per frame; these capture nothing and read
+  // the two varying values from fields the caller sets just before the call.
+  DrawSink? _spanSink;
+  ResolvedStyle? _spanStyle;
+
+  late final DashSpanEmit _emitSpan = (double x0, double y0, double x1,
+      double y1) {
+    _span[0] = x0;
+    _span[1] = y0;
+    _span[2] = x1;
+    _span[3] = y1;
+    _dashSpans++;
+    _spanSink!.polyline(_span, 2, _spanStyle!, closed: false);
+  };
+
+  double _arcCx = 0, _arcCy = 0, _arcR = 0;
+
+  late final DashArcEmit _emitArc = (double startAngle, double sweep) {
+    _dashSpans++;
+    _spanSink!.arc(_arcCx, _arcCy, _arcR, startAngle, sweep, _spanStyle!);
+  };
 ```
 
-In `paint`, reset the counters and compute the clip:
+In `paint`, after `origin` is chosen, reset the counters and compute the clip
+once:
 
 ```dart
     _dashSpans = 0;
     _dasher.resetCounters();
-    const inflate = 32.0; // half of the widest plausible stroke, in device px
-    _screenClip = Aabb2(Vector2(-inflate, -inflate),
+    _screenOrigin = camera.worldToScreen(origin);
+    // Half the widest stroke the frame can draw, in device pixels, so a stroke
+    // whose centreline is just outside still contributes its visible edge.
+    const inflate = 32.0;
+    _screenSpaceClip = Aabb2(Vector2(-inflate, -inflate),
         Vector2(viewport.width + inflate, viewport.height + inflate));
+    _rebasedClip = Aabb2(
+        Vector2(-inflate - _screenOrigin.x, -inflate - _screenOrigin.y),
+        Vector2(viewport.width + inflate - _screenOrigin.x,
+            viewport.height + inflate - _screenOrigin.y));
 ```
+
+`_emitScreenSpace` reads `_screenOrigin` instead of recomputing
+`camera.worldToScreen(origin)` per leaf.
 
 Add the pattern lookup and the scale chain:
 
@@ -2533,35 +2611,83 @@ In `_emitScreenSpace`, after the points are transformed, branch:
       return;
     }
     final pattern = _patternFor(style);
-    if (pattern == null ||
-        !_dasher.dashPolyline(
-            _points, count, pattern, _dashScale(style, toScreen), _screenClip,
-            (x0, y0, x1, y1) {
-          _span[0] = x0;
-          _span[1] = y0;
-          _span[2] = x1;
-          _span[3] = y1;
-          _dashSpans++;
-          sink.polyline(_span, 2, style, closed: false);
-        })) {
+    if (pattern == null) {
+      sink.polyline(_points, count, style, closed: false);
+      sink.endResidual();
+      return;
+    }
+    // The emitter is a field bound once (see `_emitSpan` below), not a closure
+    // written here: a closure literal that captures `sink` and `style` is a
+    // fresh object on every dashed leaf of every frame, against the global
+    // constraint that the frame path allocates nothing once warm. The two
+    // captured values move into fields instead.
+    _spanSink = sink;
+    _spanStyle = style;
+    if (!_dasher.dashPolyline(_points, count, pattern,
+        _dashScale(style, toScreen), _rebasedClip, _emitSpan)) {
       sink.polyline(_points, count, style, closed: false);
     }
     sink.endResidual();
 ```
 
-The clip is in screen space and the points are screen-space **before** the rebase subtraction, so subtract the screen origin from `_screenClip` once per frame rather than adding it back per point:
+For curves, `_emit`'s `circle` and `arc` cases take the same branch through
+`dashArc`, using the pre-bound `_emitArc`. Pass `toScreen` down to `_emit` so
+it has the scale, and set the three arc fields before the call:
 
 ```dart
-    final clip = Aabb2(
-        Vector2(_screenClip.minX - screenOrigin.x,
-            _screenClip.minY - screenOrigin.y),
-        Vector2(_screenClip.maxX - screenOrigin.x,
-            _screenClip.maxY - screenOrigin.y));
+      case EntityKind.circle:
+        final r = payload.scalars[0];
+        final pattern = _patternFor(style);
+        if (pattern == null) {
+          sink.circle(coords[0] - ox, coords[1] - oy, r, style);
+          return;
+        }
+        _spanSink = sink;
+        _spanStyle = style;
+        _arcCx = coords[0] - ox;
+        _arcCy = coords[1] - oy;
+        _arcR = r;
+        // The clip is in the carried-point space and the curve is in its own
+        // local space, so the dasher is handed the curve's screen radius for
+        // the arc-length maths and a clip pulled back the same way the points
+        // are. A curve under a non-invertible placement was already dropped by
+        // `_drawContainer`, so `toScreen` is invertible here.
+        if (!_dasher.dashArc(
+            _arcCx,
+            _arcCy,
+            r,
+            0,
+            2 * math.pi,
+            pattern,
+            _dashScale(style, toScreen),
+            _localClipFor(toScreen),
+            _emitArc)) {
+          sink.circle(_arcCx, _arcCy, r, style);
+        }
 ```
 
-Hoist that into `paint` as `_rebasedClip`, computed once after `origin` is chosen, and pass it to the dasher.
+with the same shape for `arc`, passing `payload.scalars[1]` and
+`payload.scalars[2]` as start and sweep instead of a full turn.
 
-For curves, in `_emit`'s `circle` and `arc` cases, apply the same branch through `dashArc`, emitting each span as `sink.arc(...)`. The curve's screen radius is `payload.scalars[0] * toScreen.scaleMagnitude`; pass `toScreen` down to `_emit` for the scale.
+`_localClipFor` pulls the frame's clip back into the leaf's own space, since
+that is the space a curve's centre and radius are in:
+
+```dart
+  /// The frame's clip expressed in a leaf's own space.
+  ///
+  /// A curve is not carried into screen space — it keeps the residual path —
+  /// so its coordinates are local and the clip has to meet them there. The
+  /// transformed box is an over-approximation under rotation, which is the
+  /// safe direction: it clips less, never more.
+  Aabb2 _localClipFor(Transform2 toScreen) {
+    final det = toScreen.determinant;
+    if (det == 0.0 || !det.isFinite) return _rebasedClip;
+    return _screenSpaceClip.transformedBy(toScreen.invert());
+  }
+```
+
+where `_screenSpaceClip` is the un-rebased viewport box, computed in `paint`
+beside `_rebasedClip`.
 
 - [ ] **Step 4: Run the painter tests**
 
@@ -2873,7 +2999,9 @@ The method that found Plan 2's and 3a's real defects, applied to the constructs 
 | 11 | `_dashScale` drops `toScreen.scaleMagnitude` | `the instance scale multiplies the on-screen dash length` (Task 8) |
 | 12 | the pattern restarts per *polyline* rather than per vertex | `the pattern restarts at every vertex` (Task 6) |
 | 13 | `circleClipWindows` returns `-1` always | `only the angular window inside the clip is generated` (Task 7) |
-| 14 | `_screenClip` inflation set to `0` | a new painter test: a stroke whose centreline is one pixel outside the viewport must still emit a span |
+| 14 | the clip inflation set to `0` | a new painter test: a stroke whose centreline is one pixel outside the viewport must still emit a span |
+| 16 | `_paintKey` drops the `* 4096`, so argb and lineweight collide | the same test as mutant 3 — two styles differing only in lineweight |
+| 17 | `_localClipFor` returns `_rebasedClip` unconditionally | `only the angular window inside the clip is generated`, exercised through the painter on a dashed circle under a scaled instance |
 | 15 | the painter draws curves through `_emitScreenSpace` | golden `anisotropy_bypass.png` |
 
 - [ ] **Step 2: For every mutant that survives, write the test that kills it**
