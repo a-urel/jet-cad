@@ -2,8 +2,8 @@
 
 **Status:** draft 2026-08-10
 **Parent:** [2026-07-27-jet-cad-2d-architecture-design.md](2026-07-27-jet-cad-2d-architecture-design.md)
-**Predecessor:** Plan 3a (render path foundation and measurement) — merged at `bfe9df4`, 759 tests
-**Carried in:** [2026-08-10-plan-3a-results.md](../notes/2026-08-10-plan-3a-results.md)
+**Predecessor:** Plan 3a (render path foundation and measurement) — tasks 0–9 merged at `f9a7d8e`, tasks 10–18 committed to `main` directly, exit gate run at `cdeb4cc` and recorded at `bfe9df4`. 759 tests: 639 engine, 120 Flutter
+**Carried in:** [2026-08-10-plan-3a-results.md](../notes/2026-08-10-plan-3a-results.md), [2026-08-10-plan-3a-ledger.md](../notes/2026-08-10-plan-3a-ledger.md)
 
 ## Summary
 
@@ -31,6 +31,14 @@ halfway through is two plans wearing one name.
 | 3c | text: engine content model, rendering, paragraph layout cache | relative |
 | 3d | the fill entity, hatch and pattern rendering | relative |
 | 3e | definition picture cache, tile cache, the two invalidation channels | **16.6 ms** |
+
+**This moves the 16.6 ms gate.** The 3a results note says it "belongs to 3b",
+and 3a's own spec placed it at the end of Plan 3. Splitting the remainder four
+ways moves it with the caches, because 3a's argument for not gating an uncached
+painter applies unchanged to a painter that is batched but still uncached: the
+gate would either fail uninformatively or pass on a document too small to mean
+anything. The reversal is deliberate, and it is stated here rather than left for
+a reader of the note to find as a contradiction.
 
 **Content before caches.** The cache key's dimensions are discovered by writing
 the content, not guessed at: a mirrored instance cannot reuse a
@@ -109,23 +117,51 @@ its precondition removed.
 `_bypassable` disappears. Points, lines and polylines are **always** carried into
 screen space in Float64, and the shared translation residual is pushed once.
 
-The consequence for `kAnisotropyThreshold` is that it no longer applies to
-line-like geometry at all: there is no residual scale left for a stroke width to
-be wrong about. What remains of the threshold — if anything — is decided by the
-spike, because variant A′ removes the curve case as well.
+Curves are untouched here: the painter still pushes the full chain as a residual
+and calls `circle` or `arc` in local space, exactly as today. What a sink does
+with that residual is a sink decision, and it is where the variants differ.
+
+`kAnisotropyThreshold` stops gating anything. It no longer applies to line-like
+geometry — there is no residual scale left for a stroke width to be wrong about
+— and for curves it was only ever a counter's condition. It survives as
+`anisotropicCurveCount`'s predicate and nothing else, which the spec says out
+loud so nobody later reads it as a live threshold.
 
 The cost is Dart-side arithmetic: four multiplies and two adds per point, per
 frame, instead of letting Skia's matrix do it. That is build time traded for
 raster time, at a ratio of 10.69 ms against 182.73 ms. The trade is in the right
 direction by construction; how far it pays is measured.
 
+**This is the whole painter change, and every variant in the spike shares it.**
+The variants differ in `CanvasDrawSink` alone. That is deliberate: it keeps the
+spike's diff small, and it means the differential oracle — which reads
+`RecordingDrawSink`, not `CanvasDrawSink` — is affected by this one change and
+by no variant choice at all.
+
 ### What changes in `CanvasDrawSink`
 
 The batching lives in the sink, not the painter. `CanvasDrawSink` accumulates
-into a `ui.Path` while the current bucket holds, and flushes with one
-`canvas.drawPath` when it does not.
+geometry into `ui.Path`s and flushes each with one `canvas.drawPath`.
 
-This is the decision that keeps the seam intact:
+**Two bucket lifecycles are possible, and they are different designs, not
+different tunings.** The spike measures both, because the choice decides how much
+batching is available, what draw order survives, and what 3b owes 3d.
+
+| | **Single open bucket** | **Persistent bucket map** |
+|---|---|---|
+| State | one `Path`, one paint key | `Map<paintKey, Path>`, insertion-ordered |
+| A primitive whose key differs | flushes the open bucket, opens a new one | appends to that key's path; nothing flushes |
+| Batching available | run-length in walk order — a corpus that alternates styles per handle gets none | every primitive of a key merges across the whole frame |
+| Draw order | **fully preserved** | preserved within a key, lost across keys |
+| Flush at end of frame | the one open bucket | every bucket, in insertion order |
+
+Neither is obviously right. The single open bucket gives up nothing and may buy
+nothing: the corpus assigns eight layers round-robin, so adjacent handles rarely
+share a paint, and it could degenerate to today's call count with extra Dart
+arithmetic on top. The persistent map is the design that can actually collapse
+21,031 ops into tens of calls, and it is the one that costs draw order.
+
+This is the decision that keeps the seam intact, under either lifecycle:
 
 | | |
 |---|---|
@@ -146,28 +182,40 @@ and a width, which is a bucket per nothing.
 
 ### Draw order, and what a flush means
 
-Batching by bucket loses draw order between primitives in different buckets.
-That is the one thing given up, and it needs a contract rather than a shrug.
+Under the persistent map, draw order is lost between primitives with different
+paint keys. That is the one thing given up, and it needs a contract rather than
+a shrug. Under the single open bucket nothing is given up and the contract below
+is vacuous — which is itself a reason to prefer it at equal speed.
 
 **The contract: a batch is flushed by anything that can occlude what is already
 in it.** In 3b nothing can — every primitive is a thin stroke, and two strokes
-that cross do not hide each other. When 3d adds fills, a fill flushes the open
-buckets before drawing and opens new ones after, so a hatch drawn later still
-covers the lines drawn earlier. The rule is one condition in one place, and it
-degrades correctly as content arrives.
+that cross do not hide each other; which of two crossing opaque strokes wins the
+overlapping pixels is the only difference, and it is a difference between two
+equally arbitrary answers. When 3d adds fills, a fill flushes the open buckets
+before drawing and opens new ones after, so a hatch drawn later still covers the
+lines drawn earlier. The rule is one condition in one place, and it degrades
+correctly as content arrives.
 
 Order **within** a bucket is preserved, because a path preserves the order its
 subpaths were added in.
 
+**The differential oracle cannot see any of this.** It reads
+`RecordingDrawSink`, which is unbatched by construction, and its in-order
+superset assertion is on the painter's op stream — the batching happens
+downstream of it. The only witness to a draw-order change is a golden, which is
+why the golden work below is the batch's correctness proof and not a formality.
+
 ### Transparency
 
 Two overlapping strokes in one path are unioned; drawn separately they are
-blended twice. With opaque paint the result is identical. With
-`transparency > 0` it is not.
+blended twice. With opaque paint the result is identical. Below full alpha it is
+not.
 
-`ResolvedStyle.argb` carries alpha, so this is not hypothetical — it is
-invisible today only because the corpus is entirely opaque, and it would appear
-the first time a user sets a transparent layer.
+`ResolvedStyle` has no transparency field — an entity's transparency is folded
+into `argb` at resolution time, where "alpha is `255 - transparency`". So the
+test is `(argb >>> 24) != 0xFF`, and it is not hypothetical: it is invisible
+today only because the corpus is entirely opaque, and it would appear the first
+time a user sets a transparent layer.
 
 **A style with alpha < 255 is never batched.** It flushes the open bucket and
 draws on its own. Today that costs nothing at all, and it is what makes the
@@ -181,26 +229,34 @@ The reason raster is 26 µs per leaf is an inference — "the per-leaf transform
 push defeats batching" is plausible and unproven. If it is wrong, this plan's
 headline is wrong, and that is better learned in task 1 than in task 15.
 
-**Task 1 measures four variants on the same scenes**, sharing most of their code:
+**Task 1 measures four variants on the same scenes.** All four share the single
+painter change above and differ only inside `CanvasDrawSink`:
 
-| Variant | Lines, points, polylines | Curves | Flush on |
-|---|---|---|---|
-| **0** | today: per-leaf `save`/`transform`/`restore` | same | n/a |
-| **A** | carried to screen, shared residual | keep a per-leaf `Canvas` transform | residual change, style change, alpha |
-| **B** | carried to screen, shared residual | keep a per-leaf `Canvas` transform | **any** style change — order fully preserved |
-| **A′** | carried to screen, shared residual | residual matrix baked into the path via `Path.addPath(matrix4:)`, from one reset scratch path so the frame path still does not allocate | style change, alpha only |
+| Variant | Buckets | Curves | Flushes on | Order lost |
+|---|---|---|---|---|
+| **0** | none — today's sink | per-leaf `save`/`transform`/`restore` | n/a | nothing |
+| **B** | one open bucket | `canvas.transform`, which flushes the open bucket | paint-key change, alpha, end of frame | **nothing** |
+| **A** | persistent map | `canvas.transform`, which flushes **every** bucket first so the curve lands in order | curve, alpha, end of frame | between two consecutive curves, across paint keys |
+| **A′** | persistent map | residual matrix baked into the bucket's path via `Path.addPath(matrix4:)`, from one `reset()` scratch path so the frame path still does not allocate | alpha, end of frame | across the whole frame, across paint keys |
 
-A′ is strictly the most batched and has a second effect worth naming: baking the
-matrix into the path means the stroke is applied in screen space, so an
-anisotropically placed circle is drawn as an exact ellipse with a **uniform**
-paper-space width. That is what `ResolvedStyle.lineweightHundredths` says a
+**Even variant B is not trivially zero.** Today every leaf pays
+`save` + `transform` + `restore` around one `drawPath` — three of the 21,031 ops
+are one leaf. With line-like geometry carried to screen space the residual is the
+same for every one of them, so the transform is issued once per frame instead of
+once per leaf. B keeps all of that even if it merges nothing at all.
+
+**A′ carries a stroke-width rule the other variants do not**, and it is a
+correctness change rather than a tuning one. With the matrix baked into the path,
+the stroke is applied in screen space, so an anisotropically placed circle is
+drawn as an exact ellipse with a **uniform** paper-space width and nothing
+divided out of it. That is what `ResolvedStyle.lineweightHundredths` says a
 lineweight is — "paper-space width in 1/100 mm, **not** a world quantity" — so
-A′ does not approximate less, it is correct where the current path is wrong. It
-also retires finding (6) entirely.
+A′ does not approximate less than the current path, it is correct where the
+current path is wrong. It retires finding (6) entirely.
 
-A′'s cost is the widest ordering contract: with no residual flush, order is lost
-between every pair of opaque strokes in different buckets across the whole
-frame, not merely between those sharing a residual.
+Its cost is the widest ordering contract in the table: nothing but a transparent
+style or the end of the frame ever flushes, so order is lost between every pair
+of opaque primitives with different paint keys anywhere in the frame.
 
 **The decision rule, stated before the numbers exist:**
 
@@ -339,31 +395,62 @@ and the web result.
 
 ### The differential oracle survives
 
-`referenceWalk` moves into screen space exactly as the painter does — they share
-the emit path, so it is one change. The four assertions are unchanged, and they
-still run on `differentialFixture(originX: 4.5e6)`.
+`referenceWalk` moves into screen space too — and that is a **second, separate
+change**, not the same one. The reference re-implements emission independently
+on purpose: "no packed tree, no dirty overlay, no container index, no scratch
+buffers, no cull floor, no anisotropy bypass … that independence is the whole
+value: two implementations sharing a mistake agree, and a test comparing them
+stays green."
+
+So the same edit is made twice, deliberately, in two files that must not be
+refactored into one. Anyone who later removes the duplication in the name of
+tidiness removes the oracle.
+
+The oracle's assertions are unchanged in substance. `expectPainterSupersetOfReference`
+makes two: every reference item is matched by the painter **in the same relative
+order**, and every unmatched painter item lies outside the viewport. Both
+differential tests keep running — the default fixture, and
+`differentialFixture(originX: 4.5e6)` viewed through `cameraOverNestedInstance`
+— alongside the four-expect non-vacuity test that proves the reference draws a
+polyline, a circle, an arc and a point on the default fixture.
 
 The oracle answers "does the index-driven walk visit what a brute-force walk
 visits". Batching does not touch that question, which is why the sink is where
-the batching goes.
+the batching goes — and, as noted above, why the oracle is blind to it.
 
 ### Batched equals unbatched
 
 `CanvasDrawSink` gains `debugDisableBatching`. A golden test renders the same
-fixture both ways and asserts the two PNGs are **byte-identical**.
+fixture both ways and compares the PNGs.
 
 This is the batch's correctness proof, and it is a pixel-level one rather than
 an op-list one, because batching is a `Canvas`-level behaviour that an op list
 cannot see.
 
-Two fixtures, and the second is the one that makes the first mean something:
+**The invariant, stated exactly, because it is not "the picture is identical":**
+batched and unbatched rendering are byte-identical whenever no two overlapping
+primitives have different paint keys. Cross-key overlap is where a draw-order
+change becomes visible, and under the persistent-map variants it is where the
+two renderings are *expected* to differ.
 
-1. Overlapping opaque strokes in several styles. Byte-identical, because opaque
-   union and opaque double-blend agree.
-2. Overlapping strokes with `transparency > 0`. Also byte-identical — but only
-   because transparent styles are excluded from batching. Deleting that
+Three fixtures, and each one is load-bearing:
+
+1. **Same-key overlap.** Several paint keys present, but every overlap is within
+   one key. **Byte-identical under every variant** — this is the assertion that
+   path accumulation itself does not change rasterisation, since opaque union
+   and opaque double-blend agree.
+2. **Transparent same-key overlap**, alpha below 255. **Byte-identical**, but
+   only because transparent styles are excluded from batching. Deleting that
    exclusion must make this fixture differ, which is what proves the exclusion
-   is doing work rather than merely existing.
+   does work rather than merely existing.
+3. **Cross-key overlap.** Byte-identical under variant B, and under B alone.
+   Under A and A′ this fixture is a **reviewed golden** whose difference *is* the
+   ordering contract made visible — regenerated deliberately when the variant
+   ships, with the pixels that changed named in the commit.
+
+Fixture 3 is the one that turns the tie-break in the decision rule from a
+preference into something with a picture attached: if B wins or ties, this
+fixture is an equality assertion, and 3b hands 3d a contract with nothing in it.
 
 ### Mutation testing
 
@@ -371,8 +458,10 @@ The method that found Plan 2's and 3a's real defects, applied to the constructs
 this plan adds. At minimum: the clip-then-phase computation (drop the phase
 carry — the picture must slide), the collapse-floor comparison (flip the
 inequality), the alpha exclusion (delete it — fixture 2 must differ), the bucket
-key (drop a field from it — two styles must merge visibly), and the flush on
-end of frame (drop it — the last bucket must vanish).
+key (drop a field from it — two styles must merge visibly), the flush at end of
+frame (drop it — the last bucket must vanish), and, if variant A ships, the
+flush-all-buckets-before-a-curve (drop it — a curve must then draw beneath
+geometry it belongs above, which is what fixture 3 is shaped to catch).
 
 The log lives at `docs/superpowers/notes/plan-3b-mutation-log.md`, in the shape
 3a's log established: every mutant, killed or survived, and for a survivor
@@ -390,8 +479,9 @@ them.
 | Criterion | Threshold |
 |---|---|
 | 500k working-set raster p50, **with dashes on** | **≤ 182.73 ms** — 3a's dash-free number. Failable |
-| batched vs unbatched goldens, both fixtures | byte-identical |
-| the differential oracle's four assertions | pass |
+| batched vs unbatched goldens, fixtures 1 and 2 | byte-identical |
+| batched vs unbatched goldens, fixture 3 | byte-identical under B; a reviewed, deliberately regenerated golden under A or A′ |
+| the differential oracle | both differential tests and the non-vacuity test pass, in both files, with the reference still independent |
 | the spike's four variants | measured, recorded, and the shipped one chosen by the stated rule |
 | `kDashCollapsePx` | swept with its numbers recorded, and chosen by a recorded human review of the dash-ladder goldens |
 | engine and Flutter suites, analyzer, formatter | green and clean |
@@ -413,9 +503,12 @@ The text content model as an engine task sequenced before any rendering that
 consumes it: stored string, per-entity text-style handle, rotation, DXF 72/73
 alignment, codec support, commands, and the `TextMeasurer` signature they imply.
 Then `FlutterTextMeasurer`, text rendering, the paragraph layout cache,
-mirrored-text fidelity, and the measurer-dependence test. Today a real measurer
-and `InsertionPointMeasurer` return the same answer, so none of those can be
-written.
+mirrored-text fidelity, and the measurer-dependence test.
+
+None of those can be written today. `InsertionPointMeasurer` is the only
+`TextMeasurer` in the tree — there is no real measurer to disagree with it, so a
+test that a document's extents depend on which measurer it was given has nothing
+to compare.
 
 `DraftPainter.skippedTextCount` is the count that stops being useful when 3c
 lands, and the row it feeds in the results note is where text's real cost first
@@ -424,8 +517,12 @@ appears.
 ## Carried to Plan 3d
 
 The fill entity: a new `EntityKind`, its geometry payload, the boundary-to-fill
-association, codec support, commands and inverses, index bounds, and
-`HitKind.fill`. Then hatch and pattern rendering.
+association, codec support, commands and inverses, and index bounds. Then hatch
+and pattern rendering.
+
+**Not `HitKind.fill`** — 3a's carried list named it, but it already exists and
+`SpatialIndex` already produces it for closed-polyline and circle interiors.
+What 3d adds is an entity the hit kind can point at.
 
 3b owes 3d one thing specifically: **the flush contract**. A fill flushes the
 open buckets before it draws and opens new ones after. 3b writes the condition
@@ -472,4 +569,6 @@ Unchanged from 3a, plus one:
 | Clipping breaks dash phase under a moving camera | The phase carry is an explicit mutation target — dropping it must make the picture slide |
 | Pre-transforming points in Dart costs more build time than it saves raster time | Measured directly: the spike reports build and raster separately, as 3a's rigs already do |
 | A′ ships and its wider ordering contract bites in 3d | The tie-break prefers A and B; A′ ships only if it wins by more than noise, and the contract is written down here rather than inferred later |
+| The bucket lifecycle is left implicit and two readers build two sinks | Named as the axis the spike measures, with both lifecycles tabulated, an ordering-loss column per variant, and golden fixture 3 whose expected result differs between them |
+| The oracle's independence is refactored away while both walks move to screen space | The duplication is stated as deliberate at the point where the second edit is made, quoting `referenceWalk`'s own doc |
 | The web ceiling persists | Re-measured, not gated, and named as CanvasKit's limit rather than this plan's |
