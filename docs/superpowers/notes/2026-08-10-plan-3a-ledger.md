@@ -763,3 +763,57 @@ Web numbers: 12.5-13.6x slower than native debug JIT where it completes, and the
 with ~3.4M ops in one picture. `flutter build web --release` succeeds, 40 MB.
 
 Suite: engine 639, Flutter 120. Analyze clean.
+
+## Task 18 — exit gate
+
+Run on 2026-08-10 at `cdeb4cc`.
+
+| Check | Result |
+|---|---|
+| `jet_cad_2d`: `dart test` | **639 pass** |
+| `jet_cad_2d`: `dart analyze` | clean |
+| `jet_cad_2d`: `dart format --set-exit-if-changed` | one file reformatted, committed as `cdeb4cc` |
+| `jet_cad_2d_flutter`: `flutter test` | **120 pass**, 1 file skipped (the rig) |
+| `jet_cad_2d_flutter`: `flutter test --tags golden` | **3 pass** |
+| `jet_cad_2d_flutter`: `flutter analyze` | clean |
+| `jet_cad_2d_flutter`: `dart format --set-exit-if-changed` | clean |
+| `benchmark/query_throughput.dart` | 5 of 6 gated rows pass |
+
+The failing benchmark row is `snap at dirty threshold`, p95 1.102 ms against a
+1 ms threshold. That is Plan 2's recorded, known failure — the gate note gives
+1.100 ms for the same row — not a Plan 3a regression. Every other row is inside
+the recorded band.
+
+### The two failable criteria
+
+| Criterion | Where proven | Result |
+|---|---|---|
+| The differential oracle's four assertions hold on the large-coordinate, nested, mirrored, group-owning corpus | `test/differential_test.dart`, `test/large_coordinate_test.dart` | **pass** |
+| Per-depth painter buffers do not grow after warm-up | `test/draft_painter_recursion_test.dart: no depth buffer grows after warm-up` | **pass** |
+
+All four assertions are implemented in `expectPainterSupersetOfReference`:
+every reference op appears in the painter's recording (1), with geometry equal
+to within `kScreenTolerance` after each residual is applied (2), in the same
+relative order via a two-pointer subsequence match (3), and every unmatched
+painter op is asserted outside the view rectangle (4). They run on
+`differentialFixture(originX: 4.5e6)`, which nests two levels, mirrors one
+instance, owns one leaf through a group, and contains no identity transform.
+
+Mutation log: 14 rows, every mutant in the plan's table accounted for.
+
+### Open
+
+**The three stroke-width goldens have not been reviewed by a human.** The
+pre-flight ruling reserves that review, and it is a stated gate criterion. The
+implementer generated and inspected them, and separately proved the anisotropy
+golden discriminates by regenerating it with the bypass disabled — the
+horizontal edges come out roughly eight times thicker. The human review is
+deferred at the human's own direction; the gate is otherwise closed.
+
+### Merge
+
+Nothing to merge. Tasks 0-9 landed at `f9a7d8e`; tasks 10-18 were committed
+directly to `main` at the human's direction. The worktree's branch,
+`worktree-jet-cad-2d-plan-3a` at `a4e1da0`, was verified to have zero commits
+not reachable from `main` and no uncommitted work before the worktree and the
+branch were removed.
