@@ -403,7 +403,15 @@ class DraftPainter {
         .multiply(Transform2.translation(localOrigin.x, localOrigin.y));
 
     sink.beginResidual(chain, debugHandle: document.entities.handleAt(slot));
-    _emit(sink, kind, payload, localOrigin, style, toScreen);
+    // `chain`, not `toScreen`: the geometry `_emit` receives has already had
+    // `localOrigin` subtracted (that is what "rebased local" means), and
+    // `chain` — `toScreen . translate(localOrigin)` — is the transform that
+    // maps *that* rebased frame to screen, exactly the one this residual
+    // pushes. `toScreen` alone maps the *unrebased* local frame to screen, a
+    // frame apart by `localOrigin`; handing it to a clip pullback silently
+    // clipped a dashed curve against the wrong window on any pan where the
+    // rebase origin was non-zero. See `_localClipFor`.
+    _emit(sink, kind, payload, localOrigin, style, chain);
     sink.endResidual();
   }
 
@@ -492,7 +500,7 @@ class DraftPainter {
   }
 
   void _emit(DrawSink sink, EntityKind kind, GeometryPayload payload,
-      Vector2 localOrigin, ResolvedStyle style, Transform2 toScreen) {
+      Vector2 localOrigin, ResolvedStyle style, Transform2 chain) {
     final coords = payload.coords;
     final ox = localOrigin.x;
     final oy = localOrigin.y;
@@ -529,11 +537,13 @@ class DraftPainter {
         _arcCx = coords[0] - ox;
         _arcCy = coords[1] - oy;
         _arcR = r;
-        // The clip is in the carried-point space and the curve is in its own
-        // local space, so the dasher is handed the curve's screen radius for
-        // the arc-length maths and a clip pulled back the same way the points
-        // are. A curve under a non-invertible placement was already dropped by
-        // `_drawContainer`, so `toScreen` is invertible here.
+        // The circle's centre is in rebased-local space (localOrigin already
+        // subtracted), so the clip has to be pulled back through `chain` —
+        // the transform that maps *that* frame to screen — not `toScreen`,
+        // which maps the unrebased local frame instead. See the comment on
+        // `chain` at the call site and on `_localClipFor`. A curve under a
+        // non-invertible placement was already dropped by `_drawContainer`,
+        // so `chain` is invertible here.
         if (!_dasher.dashArc(
             _arcCx,
             _arcCy,
@@ -541,12 +551,15 @@ class DraftPainter {
             0,
             2 * math.pi,
             pattern,
-            // Local units: no `toScreen.scaleMagnitude` here, because `r` and
+            // Local units: no `chain.scaleMagnitude` here, because `r` and
             // the clip are not in pixels either.
             style.linetypeScale * document.header.globalLinetypeScale,
-            _localClipFor(toScreen),
+            _localClipFor(chain),
             _emitArc,
-            pixelScale: toScreen.scaleMagnitude)) {
+            // A pure translation does not change a scale magnitude, so this
+            // is the same value `toScreen.scaleMagnitude` would have given —
+            // only the clip pullback needed the rebase-aware transform.
+            pixelScale: chain.scaleMagnitude)) {
           sink.circle(_arcCx, _arcCy, r, style);
         }
 
@@ -575,9 +588,9 @@ class DraftPainter {
             sweep,
             pattern,
             style.linetypeScale * document.header.globalLinetypeScale,
-            _localClipFor(toScreen),
+            _localClipFor(chain),
             _emitArc,
-            pixelScale: toScreen.scaleMagnitude)) {
+            pixelScale: chain.scaleMagnitude)) {
           sink.arc(_arcCx, _arcCy, r, start, sweep, style);
         }
 
@@ -587,16 +600,27 @@ class DraftPainter {
     }
   }
 
-  /// The frame's clip expressed in a leaf's own space.
+  /// The frame's clip expressed in a leaf's own **rebased-local** space —
+  /// the frame the coordinates `_emit` draws in actually live in, since
+  /// `localOrigin` has already been subtracted from them there.
   ///
   /// A curve is not carried into screen space — it keeps the residual path —
   /// so its coordinates are local and the clip has to meet them there. The
   /// transformed box is an over-approximation under rotation, which is the
   /// safe direction: it clips less, never more.
-  Aabb2 _localClipFor(Transform2 toScreen) {
-    final det = toScreen.determinant;
+  ///
+  /// [chain] must be the full residual — `toScreen . translate(localOrigin)`
+  /// — not `toScreen` alone. `toScreen` maps the *unrebased* local frame to
+  /// screen; the circle/arc centre passed to the dasher is in the rebased
+  /// frame, one `localOrigin` apart. Pulling the clip back through `toScreen`
+  /// intersected a shifted circle against an unshifted window and silently
+  /// dropped over 90% of a dashed curve's spans on any pan where the rebase
+  /// origin was non-zero — caught by
+  /// `'rebasing does not clip a dashed curve out of its own frame'`.
+  Aabb2 _localClipFor(Transform2 chain) {
+    final det = chain.determinant;
     if (det == 0.0 || !det.isFinite) return _rebasedClip;
-    return _screenSpaceClip.transformedBy(toScreen.invert());
+    return _screenSpaceClip.transformedBy(chain.invert());
   }
 
   void _ensurePoints(int pointCount) {

@@ -179,13 +179,21 @@ void main() {
     expect(ops.length, 1);
   });
 
-  // Radius 20 in the circle's own local space, world-placed at the origin.
-  // Small enough to stay clear of both camera boxes the tests below use
-  // (fixed, not fit to this doc's own extents — see those tests for why),
-  // and large enough that the pattern's local circumference (2*pi*20 =~
-  // 125.7 units, versus an 18-unit period) draws several dashes rather than
-  // one or two.
-  DraftDocument dashedCircleFixture({required Transform2 placement}) {
+  // Radius 20 in the circle's own local space, centred at the local origin,
+  // unless a test asks otherwise. Small enough to stay clear of both camera
+  // boxes the tests below use (fixed, not fit to this doc's own extents —
+  // see those tests for why), and large enough that the pattern's local
+  // circumference (2*pi*20 =~ 125.7 units, versus an 18-unit period) draws
+  // several dashes rather than one or two.
+  //
+  // [center] is the circle's own stored coordinate, distinct from
+  // [placement]: the rebase-clip test below needs an entity whose *own*
+  // coordinates carry a translation, with the instance placement left at
+  // the identity, to match the exact reproduction that exposed the bug —
+  // see that test for why the two are not interchangeable here.
+  DraftDocument dashedCircleFixture(
+      {required Transform2 placement, double r = 20, Vector2? center}) {
+    final c = center ?? Vector2.zero();
     final doc = DraftDocument.empty();
     final dashed = doc.handleSeed.next();
     doc.tables.linetypes.add(LinetypeRecord(
@@ -212,8 +220,8 @@ void main() {
         flags: 0,
       ),
       payload: GeometryPayload(
-          coords: Float64List.fromList([0, 0]),
-          scalars: Float64List.fromList([20.0])),
+          coords: Float64List.fromList([c.x, c.y]),
+          scalars: Float64List.fromList([r])),
     ));
     doc.commands.execute(AddNodeCommand(InstanceNode(
       handle: doc.handleSeed.next(),
@@ -234,18 +242,21 @@ void main() {
   // every placement regardless of whether the painter is right — canceling
   // the very thing under test. A fixed box breaks that cancellation: r=20
   // stays clear of it at both 1x and 2x placement (world radius up to 40,
-  // against a box reaching from -50 to 300 on each axis), so the circle is
-  // never clipped and the two runs differ only by whatever the placement
-  // scale actually does downstream.
+  // against a box reaching to 125 on each axis), so the circle is never
+  // clipped and the two runs differ only by whatever the placement scale
+  // actually does downstream.
   //
-  // Deliberately not centred on the origin, either: a box like
-  // `(-150,-150)..(150,150)` sends the frame's rebase origin through
-  // `rebaseOriginFor`'s power-of-two floor at a coordinate whose true centre
-  // is zero only up to floating-point noise, and `floor` sends that noise
-  // troppo negative onto the wrong step — verified by hand while building
-  // this test, before the asymmetric box below replaced it.
+  // Centred on the origin, and that is fine: an earlier version of this box
+  // was deliberately off-centre, worked around a case where a centred box's
+  // near-zero-but-negative computed centre sent `rebaseOriginFor`'s
+  // power-of-two floor onto the wrong step, which (via the frame mismatch
+  // `_localClipFor` had at the time — see
+  // `'rebasing does not clip a dashed curve out of its own frame'` below)
+  // clipped the circle out of view entirely. That was the same bug, not a
+  // second one: retried after the fix with this centred box restored, both
+  // placements draw 7 identical spans, same as the off-centre box gave.
   final ViewportTransform curveTestCamera = ViewportTransform.fit(
-      Aabb2(Vector2(-50, -50), Vector2(300, 300)), kViewport);
+      Aabb2(Vector2(-125, -125), Vector2(125, 125)), kViewport);
 
   test('the instance scale does not change a curve\'s dash pattern', () {
     // The mirror image of the line-path test above, and it has to be, because
@@ -309,5 +320,61 @@ void main() {
     expect(recording.ops.whereType<ArcOp>(), isEmpty);
     expect(recording.ops.whereType<CircleOp>().length, 1);
     expect(painter.collapsedDashCount, 1);
+  });
+
+  test('rebasing does not clip a dashed curve out of its own frame', () {
+    // `_localClipFor` once pulled the clip back through `toScreen`, while the
+    // circle's centre had already had the rebase origin subtracted from it —
+    // two frames an origin apart. A circle sitting well inside the viewport
+    // lost over 90% of its dashes, on any pan where the rebase origin is not
+    // zero. `debugDisableRebasing` exists to make exactly this measurable:
+    // rebasing changes the arithmetic route, never the picture, so the two
+    // must agree on how many dashes there are.
+    //
+    // This is the reviewer's own reproduction: camera fitted to
+    // `Aabb2((300,300),(600,600))` puts the rebase origin at (256,256) — a
+    // plain pan, no floating-point ambiguity — and a radius-100 circle
+    // centred at (450,450) — the box's own centre, so it sits well inside
+    // the resulting viewport — under an otherwise-identity placement. The
+    // circle's own coordinate has to carry the offset rather than the
+    // placement: `_localOriginFor` is `placement.invert().transformPoint
+    // (origin)`, so with an identity placement, `localOrigin` is exactly
+    // the rebase origin (256,256) and the rebased-local centre comes out at
+    // (194,194) — just outside the pulled-back-through-`toScreen` clip on
+    // one edge, which is what produced the reported 3 spans instead of 35.
+    // Moving the same offset into the placement instead changes which
+    // corner of the mismatch is exposed (verified separately: it still
+    // reproduces a divergence, just not the reviewer's specific 3-vs-35),
+    // so this shape is pinned deliberately, not incidentally.
+    final doc = dashedCircleFixture(
+        placement: Transform2(1, 0, 0, 1, 0, 0),
+        r: 100,
+        center: Vector2(450, 450));
+    final camera = ViewportTransform.fit(
+        Aabb2(Vector2(300, 300), Vector2(600, 600)), kViewport);
+
+    int spansWith({required bool disableRebasing}) {
+      final recording = RecordingDrawSink();
+      DraftPainter(
+              document: doc,
+              index: SpatialIndex(doc),
+              resolver: DocumentStyleResolver(doc),
+              debugDisableRebasing: disableRebasing)
+          .paint(recording, camera, kViewport);
+      return recording.ops.whereType<ArcOp>().length;
+    }
+
+    final rebased = spansWith(disableRebasing: false);
+    final unrebased = spansWith(disableRebasing: true);
+    // Guards the comparison below against a vacuous pass (0 == 0, e.g. if a
+    // future edit moved the fixture out of view): the whole circle, wholly
+    // visible, is 2*pi*100/18 =~ 34.9 spans — 35, measured — so both counts
+    // must actually be near that, not just equal to each other.
+    expect(unrebased, greaterThan(30),
+        reason: 'sanity check: the circle must be visible and wholly '
+            'undashed-away with rebasing off, or the comparison below is '
+            'vacuous');
+    expect(rebased, unrebased,
+        reason: 'the rebase must not change what is visible');
   });
 }
