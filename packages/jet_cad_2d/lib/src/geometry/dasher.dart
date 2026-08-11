@@ -8,9 +8,15 @@ import 'segment_clip.dart';
 /// Below this on-screen pattern period, a linetype is drawn solid.
 ///
 /// Zoomed far enough out a dashed line is visually solid anyway, and below the
-/// floor dash generation buys nothing but segments. **Swept and reviewed**, not
-/// chosen — see the results note.
-const double kDashCollapsePx = 3.0;
+/// floor dash generation buys nothing but segments. **Swept, not yet visually
+/// reviewed.** Of the candidates `1.0, 2.0, 3.0, 4.0, 6.0`, this is the
+/// largest at which `dash_ladder_golden_test.dart`'s rungs 3 and 4 both stay
+/// on the dashed side of the dasher's own collapse test, and the rig showed
+/// no measurable paint-time or span-count difference between this value and
+/// `1.0` on the 500k working-set corpus. A human has not looked at the
+/// ladder PNGs yet — see `task-9-report.md` for the full sweep and the
+/// outstanding review.
+const double kDashCollapsePx = 2.0;
 
 /// Sums the absolute lengths in [dashes] — the pattern's true cycle length.
 ///
