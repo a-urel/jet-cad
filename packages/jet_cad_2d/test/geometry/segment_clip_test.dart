@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -36,5 +37,32 @@ void main() {
     expect(clipSegment(-50, 50, 50, -50, clip, out), isTrue);
     expect(out[0], closeTo(0.5, 1e-12));
     expect(out[1], closeTo(0.5, 1e-12));
+  });
+
+  group('circleClipWindows', () {
+    final out = Float64List(16);
+
+    test('a circle entirely inside reports the whole-circle sentinel', () {
+      expect(circleClipWindows(50, 50, 10, clip, out), -1);
+    });
+
+    test('a circle entirely outside reports no windows', () {
+      expect(circleClipWindows(500, 500, 10, clip, out), 0);
+    });
+
+    test('a circle centred on the left edge keeps its right half', () {
+      // Centre at x=0, radius 40: the arc from -pi/2 to +pi/2 is inside.
+      final n = circleClipWindows(0, 50, 40, clip, out);
+      expect(n, 1);
+      expect(out[0], closeTo(-math.pi / 2, 1e-9));
+      expect(out[1], closeTo(math.pi / 2, 1e-9));
+    });
+
+    test('a circle larger than the rect reports the windows over each edge',
+        () {
+      // Radius 200 around the rect centre: no part of the circle is inside, so
+      // nothing is drawn even though the circle encloses the whole view.
+      expect(circleClipWindows(50, 50, 200, clip, out), 0);
+    });
   });
 }

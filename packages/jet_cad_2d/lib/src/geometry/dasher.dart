@@ -12,9 +12,27 @@ import 'segment_clip.dart';
 /// chosen — see the results note.
 const double kDashCollapsePx = 3.0;
 
+/// Sums the absolute lengths in [dashes] — the pattern's true cycle length.
+///
+/// Never `pattern.totalLength`: nothing enforces that the declared total
+/// agrees with the entries that produced it, and a disagreement drifts the
+/// phase after the cursor's cycle skip (see [Dasher.patternStepCount]).
+/// Shared by [Dasher.dashPolyline] and [Dasher.dashArc] so the segment walk
+/// and the arc walk can never disagree about where a cycle ends.
+double _dashCycle(List<double> dashes) {
+  var cycle = 0.0;
+  for (final d in dashes) {
+    cycle += d.abs();
+  }
+  return cycle;
+}
+
 /// Reports one drawn span of a dash pattern.
 typedef DashSpanEmit = void Function(
     double x0, double y0, double x1, double y1);
+
+/// Reports one drawn span of a dash pattern along an arc.
+typedef DashArcEmit = void Function(double startAngle, double sweep);
 
 /// Walks a dash pattern along screen-space geometry.
 ///
@@ -31,6 +49,10 @@ class Dasher {
   final double collapsePx;
 
   final Float64List _range = Float64List(2);
+
+  /// Scratch space for [circleClipWindows]'s output, reused across calls to
+  /// [dashArc] so the per-curve, per-frame hot path never allocates.
+  final Float64List _windows = Float64List(16);
 
   int _collapsed = 0;
   int _steps = 0;
@@ -75,10 +97,7 @@ class Dasher {
     // of producer that could hand this class an inconsistent DashPattern —
     // and the cursor skip below assumes a period boundary is exactly where a
     // pass through `dashes` completes. Trust the array, not the label.
-    var cycle = 0.0;
-    for (final d in pattern.dashes) {
-      cycle += d.abs();
-    }
+    final cycle = _dashCycle(pattern.dashes);
     if (!cycle.isFinite || cycle <= 0.0) {
       // No length to walk: this pattern was never dashed, so it is not a
       // collapse — the same reasoning that already exempts an empty
@@ -146,6 +165,132 @@ class Dasher {
         final b = math.min(end, to);
         if (b > a) {
           emit(x0 + ux * a, y0 + uy * a, x0 + ux * b, y0 + uy * b);
+        }
+      }
+      cursor = end;
+      element = (element + 1) % pattern.dashes.length;
+    }
+  }
+
+  /// Emits the drawn spans of [pattern] along an arc, by angle.
+  ///
+  /// [r] is the arc's **screen** radius, so arc length is `r * |sweep|` in the
+  /// same units the period is in. Returns false when the caller must draw the
+  /// arc as it stands.
+  bool dashArc(double cx, double cy, double r, double start, double sweep,
+      DashPattern pattern, double scale, Aabb2 clip, DashArcEmit emit) {
+    if (pattern.dashes.isEmpty) return false;
+    // Same reasoning, and the same helper, as dashPolyline: the cycle comes
+    // from summing the array, never from `pattern.totalLength`.
+    final cycle = _dashCycle(pattern.dashes);
+    if (!cycle.isFinite || cycle <= 0.0) return false;
+    final period = cycle * scale;
+    if (!period.isFinite || period < collapsePx) {
+      _collapsed++;
+      return false;
+    }
+    if (r <= 0 || !r.isFinite || sweep == 0.0) return false;
+
+    final windows = circleClipWindows(cx, cy, r, clip, _windows);
+    if (windows == 0) return true; // nothing visible; nothing to draw
+    if (windows < 0) {
+      // The whole circle is inside `clip`. Walk the arc's entire length
+      // directly rather than synthesising a "-pi..3pi" window and routing it
+      // through the angular intersection math below: that window is two full
+      // turns wide, and along()'s modulo-2pi reduction maps both of its
+      // endpoints to the *same* residue for any `start`, so the general
+      // window-clipping code has no way to tell "the window wraps past the
+      // arc's own start" apart from "the window is everything" — it always
+      // takes the former reading and walks `[from, total*r]` instead of
+      // `[0, total*r]`, silently dropping the arc's first `from` units. A
+      // wholly-visible circle needs no clipping at all, so skip the angle
+      // math and hand the walker the untrimmed range.
+      _walkArcRange(
+          r, start, sweep, 0.0, sweep.abs() * r, pattern, scale, period, emit);
+      return true;
+    }
+    for (var w = 0; w < windows; w++) {
+      _dashArcWindow(r, start, sweep, _windows[w * 2], _windows[w * 2 + 1],
+          pattern, scale, period, emit);
+    }
+    return true;
+  }
+
+  /// Walks one angular window of the arc.
+  ///
+  /// The pattern's phase is measured from [start] along the arc, so clipping
+  /// to a window shifts it exactly as clipping a segment does. Angles are
+  /// reduced into the arc's own range before comparison, because a window
+  /// from [circleClipWindows] may sit a full turn away from where the arc
+  /// begins.
+  void _dashArcWindow(
+      double r,
+      double start,
+      double sweep,
+      double windowStart,
+      double windowEnd,
+      DashPattern pattern,
+      double scale,
+      double period,
+      DashArcEmit emit) {
+    final direction = sweep < 0 ? -1.0 : 1.0;
+    final total = sweep.abs();
+    // The window, expressed as distances along the arc from `start`.
+    double along(double angle) {
+      var delta = (angle - start) * direction;
+      while (delta < 0) {
+        delta += 2 * math.pi;
+      }
+      while (delta > 2 * math.pi) {
+        delta -= 2 * math.pi;
+      }
+      return delta * r;
+    }
+
+    var from = along(windowStart);
+    var to = along(windowEnd);
+    if (to <= from) to = total * r;
+    from = math.max(0.0, from);
+    to = math.min(total * r, to);
+    if (to <= from) return;
+    _walkArcRange(r, start, sweep, from, to, pattern, scale, period, emit);
+  }
+
+  /// Walks the pattern over `[from, to]`, both distances along the arc from
+  /// `start` in the sweep direction, emitting each drawn span as an angle and
+  /// sweep.
+  ///
+  /// Shared by the sentinel (whole-circle) and windowed paths of [dashArc] so
+  /// there is exactly one place that turns arc-length distance into angle,
+  /// and exactly one place that counts a step — see [patternStepCount].
+  void _walkArcRange(
+      double r,
+      double start,
+      double sweep,
+      double from,
+      double to,
+      DashPattern pattern,
+      double scale,
+      double period,
+      DashArcEmit emit) {
+    final direction = sweep < 0 ? -1.0 : 1.0;
+    // Skip whole cycles before `from` in one step, for the same reason
+    // `_dashSegment` does: a circle with a ten-thousand-pixel screen radius,
+    // clipped to a small window, must not cost thousands of iterations to
+    // reach it.
+    var cursor = (from / period).floorToDouble() * period;
+    var element = 0;
+    while (cursor < to) {
+      _steps++;
+      final raw = pattern.dashes[element];
+      final span = raw.abs() * scale;
+      final width = span == 0.0 ? 1e-9 : span;
+      final end = cursor + width;
+      if (raw >= 0 && end > from) {
+        final a = math.max(cursor, from);
+        final b = math.min(end, to);
+        if (b > a) {
+          emit(start + direction * (a / r), direction * ((b - a) / r));
         }
       }
       cursor = end;

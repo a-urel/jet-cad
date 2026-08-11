@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -126,5 +127,95 @@ void main() {
     collect(dasher, [0, 0, 32000, 0], kDashed, 1.0,
         clip: Aabb2(Vector2(31900, -5), Vector2(32000, 5)));
     expect(dasher.patternStepCount, lessThan(20));
+  });
+
+  group('dashArc', () {
+    List<List<double>> arcs(Dasher dasher, double cx, double cy, double r,
+        double start, double sweep, double scale,
+        {Aabb2? clip}) {
+      final out = <List<double>>[];
+      dasher.dashArc(cx, cy, r, start, sweep, kDashed, scale, clip ?? kOpen,
+          (a, s) => out.add([a, s]));
+      return out;
+    }
+
+    test('a full circle is walked by arc length', () {
+      // r = 18/(2*pi) makes the circumference exactly 18: one full cycle, so
+      // one 12-long span, which is 12/18 of a turn.
+      final r = 18 / (2 * math.pi);
+      final spans = arcs(Dasher(), 0, 0, r, 0, 2 * math.pi, 1.0);
+      expect(spans.length, 1);
+      expect(spans.first[0], closeTo(0.0, 1e-9));
+      expect(spans.first[1], closeTo(2 * math.pi * 12 / 18, 1e-9));
+    });
+
+    test('a period below the floor collapses and is counted', () {
+      final dasher = Dasher(collapsePx: 3.0);
+      expect(arcs(dasher, 0, 0, 100, 0, 2 * math.pi, 0.1), isEmpty);
+      expect(dasher.collapsedCount, 1);
+    });
+
+    test('only the angular window inside the clip is generated', () {
+      // A large circle whose centre is far left: a narrow window crosses the
+      // clip. Every emitted span must lie inside that window.
+      final clip = Aabb2(Vector2(0, -10), Vector2(20, 10));
+      final spans =
+          arcs(Dasher(), -1000, 0, 1005, 0, 2 * math.pi, 1.0, clip: clip);
+      expect(spans, isNotEmpty);
+      for (final s in spans) {
+        final mid = s[0] + s[1] / 2;
+        final x = -1000 + 1005 * math.cos(mid);
+        final y = 1005 * math.sin(mid);
+        expect(x, greaterThanOrEqualTo(clip.minX - 1));
+        expect(x, lessThanOrEqualTo(clip.maxX + 1));
+        expect(y, greaterThanOrEqualTo(clip.minY - 1));
+        expect(y, lessThanOrEqualTo(clip.maxY + 1));
+      }
+    });
+
+    test('a circle wholly outside the clip emits nothing', () {
+      final spans = arcs(Dasher(), 0, 0, 10, 0, 2 * math.pi, 1.0,
+          clip: Aabb2(Vector2(500, 500), Vector2(600, 600)));
+      expect(spans, isEmpty);
+    });
+
+    test('a large circle clipped to a small window costs few pattern steps',
+        () {
+      // Window near the bottom of the circle (angle 3*pi/2), far from where
+      // the arc begins (angle 0). Without the cycle skip this walks from
+      // zero: the along-distance to reach the window is r * 3*pi/2, about
+      // 23,562 units at an 18-unit period is roughly 1,309 iterations.
+      // Measured with the skip: 3.
+      final dasher = Dasher();
+      final r = 5000.0;
+      final clip = Aabb2(Vector2(-5, -r - 5), Vector2(5, -r + 5));
+      arcs(dasher, 0, 0, r, 0, 2 * math.pi, 1.0, clip: clip);
+      expect(dasher.patternStepCount, lessThan(15));
+    });
+
+    test(
+        'a circle wholly inside the clip emits the same spans as the same '
+        'circle whose windows were computed the long way', () {
+      // `start` (angle 0) sits exactly where this clip's right edge grazes
+      // the circle, so the razor-thin sliver excluded there straddles the
+      // arc's own wrap point (angle 0 == angle 2*pi) rather than falling
+      // inside the visible span. That is the one placement where a single
+      // circleClipWindows window maps onto a single contiguous
+      // [from, to] without needing to split — the same shape of window the
+      // sentinel's synthetic "-pi..3pi" range collapses to. Shrinking the
+      // excluded sliver toward zero must shrink the disagreement with the
+      // sentinel path toward zero, too.
+      final r = 18 / (2 * math.pi);
+      final wholeCircle = arcs(Dasher(), 0, 0, r, 0, 2 * math.pi, 1.0,
+          clip: Aabb2(Vector2(-r - 1, -r - 1), Vector2(r + 1, r + 1)));
+      final longWay = arcs(Dasher(), 0, 0, r, 0, 2 * math.pi, 1.0,
+          clip: Aabb2(Vector2(-r - 1, -r - 1), Vector2(r - 1e-9, r + 1)));
+      expect(longWay, isNotEmpty);
+      expect(longWay.length, wholeCircle.length);
+      for (var i = 0; i < wholeCircle.length; i++) {
+        expect(longWay[i][0], closeTo(wholeCircle[i][0], 1e-3));
+        expect(longWay[i][1], closeTo(wholeCircle[i][1], 1e-3));
+      }
+    });
   });
 }
