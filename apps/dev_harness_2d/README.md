@@ -13,14 +13,9 @@ Plan 4, and every line here is a line the rigs have to keep working.
 ```bash
 flutter run --profile -d macos
 flutter run --profile -d macos --dart-define=ENTITIES=500000
-flutter run --profile -d macos --dart-define=BATCH=openBucket
 ```
 
 Drag to pan, scroll to zoom.
-
-`BATCH` selects the `CanvasDrawSink`'s `BatchMode`: `off` | `openBucket` |
-`bucketMap` | `bucketMapBakedCurves`, defaulting to `bucketMap`. One profile
-run measures one mode — this is how Plan 3b's Task 4 spike compared them.
 
 ## The rigs
 
@@ -37,12 +32,6 @@ flutter drive --driver=test_driver/integration_test.dart \
   --target=integration_test/frame_timing_test.dart --profile -d macos \
   --dart-define=ENTITIES=500000 --dart-define=RIG=instance \
   --dart-define=STEPS=60
-
-# one BatchMode at a time, for the Task 4 spike.
-flutter drive --driver=test_driver/integration_test.dart \
-  --target=integration_test/frame_timing_test.dart --profile -d macos \
-  --dart-define=ENTITIES=500000 --dart-define=RIG=pan \
-  --dart-define=BATCH=bucketMap
 ```
 
 **Run these in the foreground.** Backgrounded, the app blocks on its first

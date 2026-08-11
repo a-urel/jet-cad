@@ -109,22 +109,16 @@ void main() {
     setUp(() {
       canvas = SpyCanvas();
       // 96 dpi / 25.4 mm — one paper millimetre is 3.78 logical pixels.
-      //
-      // BatchMode.off: this group tests the sink's per-primitive Canvas call
-      // shape (matrix layout, save/restore pairing, width math) rather than
-      // batching itself, which is covered separately in
-      // canvas_draw_sink_test.dart.
-      sink = CanvasDrawSink(
-          canvas: canvas, pixelsPerPaperMm: 4.0, mode: BatchMode.off);
+      sink = CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: 4.0);
     });
 
     test('beginResidual pushes the affine as a column-major 4x4', () {
       // Canvas.transform takes Matrix4 storage order. Row-major here would
       // transpose every residual and shear the whole drawing.
       sink.beginResidual(const Transform2(2, 3, 4, 5, 6, 7));
-      // The push is deferred to the first primitive that cannot batch, so a
-      // batched primitive never disturbs canvas state. Any primitive forces
-      // it; a point is the simplest.
+      // The push is deferred to the first primitive drawn under the residual,
+      // so a residual under which nothing is drawn never touches canvas
+      // state. Any primitive forces it; a point is the simplest.
       sink.point(0, 0, _anyStyle);
 
       expect(canvas.named('save'), hasLength(1));

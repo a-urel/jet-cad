@@ -129,17 +129,10 @@ class _PainterHost extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     // These goldens measure paper-space stroke width and the shape of an
-    // anisotropic instance — neither is a question about batching, and both
-    // fixtures have touching same-key geometry that would otherwise regress
-    // under the coverage difference batch_equivalence_test.dart characterises.
-    final sink = CanvasDrawSink(
-        canvas: canvas,
-        pixelsPerPaperMm: kPixelsPerPaperMm,
-        mode: BatchMode.off);
+    // anisotropic instance.
+    final sink =
+        CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm);
     painter.paint(sink, camera, size);
-    // CanvasDrawSink defers drawing to an open bucket until flushed; without
-    // this the last run of same-paint primitives is accepted and never drawn.
-    sink.flush();
   }
 
   @override

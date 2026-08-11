@@ -41,13 +41,6 @@ carries `--run-skipped`.
 # R1 — paint microbench, and R3 — query-only, both from the same file.
 cd packages/jet_cad_2d_flutter && flutter test --tags rig --run-skipped
 
-# The batch-mode spike: all four `BatchMode` values over one 500k-entity
-# corpus, working-set camera, printed p50/p95/canvasCalls/painterOps per mode.
-# Same debug-JIT, records-don't-rasterise caveat as R1 — it cannot see raster
-# cost, which is why Plan 3b's decision rule is keyed to R2's numbers instead.
-cd packages/jet_cad_2d_flutter && \
-  flutter test --tags rig --run-skipped test/rig/batch_spike_test.dart
-
 # R2 (camera), R4a (leaf edit) and R4b (instance drag), from the harness app.
 # `flutter test --profile` does not exist; profile-mode frame timings only come
 # out of a real run on a device, which is what `flutter drive` gives.

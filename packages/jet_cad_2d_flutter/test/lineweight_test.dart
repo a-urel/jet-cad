@@ -89,17 +89,12 @@ double screenStrokeWidthUnder(Transform2 instance) {
   final index = SpatialIndex(doc);
   addTearDown(index.dispose);
   final canvas = SpyCanvas();
-  // BatchMode.off: this reads the residual back out of the pushed
-  // canvas.transform() call, which a batched (translation-only, opaque)
-  // primitive never issues — the translation is baked straight into the
-  // path's coordinates instead. Off forces every primitive through the
-  // push, which is what this introspection technique depends on.
-  final sink = CanvasDrawSink(
-      canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm, mode: BatchMode.off);
+  // This reads the residual back out of the pushed canvas.transform() call.
+  final sink =
+      CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm);
   DraftPainter(
           document: doc, index: index, resolver: DocumentStyleResolver(doc))
       .paint(sink, kCamera, kViewport);
-  sink.flush();
 
   final transform = canvas.named('transform').last.args.single as Float64List;
   final residual = Transform2(transform[0], transform[1], transform[4],
