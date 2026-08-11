@@ -92,4 +92,39 @@ void main() {
             buffer, 2, kSolid, 1.0, kOpen, (_, __, ___, ____) {}),
         isFalse);
   });
+
+  test(
+      'a totalLength that disagrees with the dashes does not change the '
+      'output', () {
+    // The cycle comes from the array, not from the declared total. Nothing
+    // validates DashPattern, and a DXF importer is exactly what would build
+    // an inconsistent one.
+    const honest = DashPattern(dashes: [12.0, -6.0], totalLength: 18.0);
+    const lying = DashPattern(dashes: [12.0, -6.0], totalLength: 10.0);
+    final clip = Aabb2(Vector2(40, -5), Vector2(200, 5));
+    expect(collect(Dasher(), [0, 0, 200, 0], lying, 1.0, clip: clip),
+        collect(Dasher(), [0, 0, 200, 0], honest, 1.0, clip: clip));
+  });
+
+  test('a zero-length pattern terminates instead of looping', () {
+    // dashes:[0.0] with a totalLength above the collapse floor once ran for
+    // 445 million iterations covering 0.45 of a 100-unit segment.
+    const bad = DashPattern(dashes: [0.0], totalLength: 100.0);
+    final dasher = Dasher();
+    expect(collect(dasher, [0, 0, 100, 0], bad, 1.0), isEmpty);
+    expect(dasher.collapsedCount, 0,
+        reason: 'a pattern with no length was never dashed, so it did not '
+            'collapse');
+  }, timeout: const Timeout(Duration(seconds: 10)));
+
+  test('a long segment clipped to a small window costs few pattern steps', () {
+    // Without the cycle skip this walks from zero: 32,000 units at an
+    // 18-unit period is about 1,800 iterations to reach a window that needs
+    // three. The skip is invisible to any output assertion, so this bounds
+    // the work instead.
+    final dasher = Dasher();
+    collect(dasher, [0, 0, 32000, 0], kDashed, 1.0,
+        clip: Aabb2(Vector2(31900, -5), Vector2(32000, 5)));
+    expect(dasher.patternStepCount, lessThan(20));
+  });
 }

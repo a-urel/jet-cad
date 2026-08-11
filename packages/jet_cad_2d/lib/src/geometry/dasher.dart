@@ -33,27 +33,61 @@ class Dasher {
   final Float64List _range = Float64List(2);
 
   int _collapsed = 0;
+  int _steps = 0;
 
   /// Entities whose pattern collapsed to solid since [resetCounters].
   int get collapsedCount => _collapsed;
 
-  void resetCounters() => _collapsed = 0;
+  /// Iterations of the pattern-walk loop since [resetCounters].
+  ///
+  /// Exists to make the cursor's cycle skip (below) testable. For a
+  /// correctly-summed pattern, starting the walk at `cursor = 0` and at
+  /// `cursor = floor(from / period) * period` reach the identical breakpoint
+  /// with the same element index — the skip changes only how many loop
+  /// iterations it takes to get there, never the emitted spans. No assertion
+  /// on output can tell a working skip apart from one that has regressed to
+  /// walking from zero; only a bound on this counter can.
+  int get patternStepCount => _steps;
+
+  void resetCounters() {
+    _collapsed = 0;
+    _steps = 0;
+  }
 
   /// Emits the drawn spans of [pattern] along the polyline in [points].
   ///
   /// [scale] converts pattern units to the units [points] are in. Returns false
   /// when nothing was dashed and the caller must draw the geometry as it
-  /// stands — an empty pattern, or a period under [collapsePx].
+  /// stands — an empty pattern, a pattern with no length, or a period under
+  /// [collapsePx].
   ///
   /// The phase restarts at every vertex. That is DXF's default without
   /// LWPOLYLINE flag 128; the continuous-pattern flag is a field the DXF plan
   /// adds, not a decision made here.
   bool dashPolyline(Float64List points, int count, DashPattern pattern,
       double scale, Aabb2 clip, DashSpanEmit emit) {
-    if (count < 2 || pattern.dashes.isEmpty || pattern.totalLength <= 0) {
+    if (count < 2 || pattern.dashes.isEmpty) {
       return false;
     }
-    final period = pattern.totalLength * scale;
+    // The cycle length comes from summing the array, not from
+    // `pattern.totalLength`. Nothing enforces that the declared total agrees
+    // with the dashes that produced it — a DXF importer is exactly the kind
+    // of producer that could hand this class an inconsistent DashPattern —
+    // and the cursor skip below assumes a period boundary is exactly where a
+    // pass through `dashes` completes. Trust the array, not the label.
+    var cycle = 0.0;
+    for (final d in pattern.dashes) {
+      cycle += d.abs();
+    }
+    if (!cycle.isFinite || cycle <= 0.0) {
+      // No length to walk: this pattern was never dashed, so it is not a
+      // collapse — the same reasoning that already exempts an empty
+      // `dashes`. (A single [0.0] element reaches this branch too, which is
+      // what keeps a degenerate "dot with no length" pattern from spinning
+      // the cursor forever below.)
+      return false;
+    }
+    final period = cycle * scale;
     if (!period.isFinite || period < collapsePx) {
       _collapsed++;
       return false;
@@ -90,12 +124,17 @@ class Dasher {
     final ux = dx / length;
     final uy = dy / length;
 
-    // Walk the pattern from its start, skipping cycles before `from` in one
-    // step rather than one element at a time: a 32,000-pixel line clipped to
-    // 200 visible pixels must not cost 10,000 iterations to reach them.
+    // Skip whole cycles before `from` in one step rather than walking one
+    // element at a time from zero: a 32,000-unit line clipped to a
+    // 100-unit window must not cost thousands of iterations to reach it.
+    // This is purely a cost optimisation — with `period` derived from the
+    // array above, `floor(from / period) * period` always lands on a
+    // breakpoint where `dashes` restarts at element 0, so the emitted spans
+    // are identical to walking from zero. See patternStepCount.
     var cursor = (from / period).floorToDouble() * period;
     var element = 0;
     while (cursor < to) {
+      _steps++;
       final raw = pattern.dashes[element];
       final span = raw.abs() * scale;
       // A zero-length element is a DXF dot: give it the smallest visible run
