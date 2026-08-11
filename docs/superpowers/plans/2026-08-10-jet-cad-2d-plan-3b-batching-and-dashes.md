@@ -3715,17 +3715,48 @@ cd packages/jet_cad_2d && dart run benchmark/query_throughput.dart
 
 - [ ] **Step 2: Write the note**
 
-`docs/superpowers/notes/<completion-date>-plan-3b-results.md` must contain:
+`docs/superpowers/notes/<completion-date>-plan-3b-results.md`. Two notes already
+exist and this one must **reference rather than restate** them — a number
+copied into a second place is a number that will disagree with itself later:
 
-1. Machine and builds, in 3a's format, with the same caveat that R1/R3 are a relative signal and cannot see raster.
-2. **The spike:** all four modes, three runs each, R2 raster p50, R1 p50, real `Canvas` calls, and which shipped under which clause of the decision rule.
-3. Every 3a row re-measured, **before and after in the same table**, with dashes on.
-4. The gate row: 500k working-set raster p50 against 182.73 ms, pass or fail, stated plainly either way.
-5. Dash spans and collapses per frame, both cameras, both corpora.
-6. The `kDashCollapsePx` sweep: five candidates, their numbers, the chosen value, and the sentence on what the reviewer saw.
-7. Real `Canvas` calls against painter ops, both cameras, both corpora — the ratio this plan exists to move.
-8. Web: whether the 500k whole-drawing frame now completes, and its number if so. **Informational, not a gate.**
-9. What this says about Plan 3c, 3d and 3e, in the shape of 3a's closing section.
+- [`2026-08-11-plan-3b-batch-spike.md`](2026-08-11-plan-3b-batch-spike.md) — the
+  four modes, twelve runs, and the decision rule's stop clause firing.
+- [`2026-08-11-plan-3b-raster-profile.md`](2026-08-11-plan-3b-raster-profile.md)
+  — what the 179 ms actually is.
+
+The note must contain:
+
+1. Machine and builds, in 3a's format, with the same caveat that R1/R3 are a
+   relative signal and cannot see raster.
+2. **What 3b delivered, in one paragraph**, with pointers to the two notes
+   above. Batching was measured and refuted, so what shipped is the two
+   deletions, the screen-space carry, and dashes.
+3. **Every 3a row re-measured, before and after in the same table, with dashes
+   on.** This is the note's spine.
+4. **The dash cost, stated as a number.** 500k working-set raster p50 against
+   **179.63 ms** — the unbatched baseline measured after Tasks 0 and 1, which is
+   the honest comparison because that is the code dashes were added to. 3a's
+   182.73 ms is a different tree and belongs in the table as history, not as the
+   threshold. **This row is measured and recorded, not a gate**: the gate asked
+   whether the batching win exceeded the dash cost, and the spike established
+   there is no batching win. State the number plainly whichever way it falls.
+5. Dash spans and collapses per frame, both cameras, both corpora. **Say which
+   figures are per-frame** — all three counters now are, but the note should not
+   make a reader work that out.
+6. The `kDashCollapsePx` sweep: five candidates, their collapse thresholds in
+   pixels per world unit, the ladder rungs each one collapses, the chosen value,
+   and what the reviewer saw. The review is recorded as a judgement, not
+   dressed up as a derivation.
+7. Real `Canvas` calls against painter ops, both cameras, both corpora.
+   **A diagnostic, no longer a target** — the spike established that collapsing
+   this ratio makes the frame slower, not faster.
+8. Web: whether the 500k whole-drawing frame completes. **Informational.** Note
+   that 3a's 3.4-million-op CanvasKit abort did not reproduce, and that 3a's
+   results note item 5 should not be treated as a live constraint until someone
+   re-establishes it.
+9. What this says about Plans 3c, 3d and 3e, in the shape of 3a's closing
+   section. 3e's is now largely written for it by the raster-profile note; say
+   what dashes add to that picture.
 
 - [ ] **Step 3: Commit**
 
