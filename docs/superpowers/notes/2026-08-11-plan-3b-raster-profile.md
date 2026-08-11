@@ -7,9 +7,14 @@ with the number of drawn leaves, or with the number of shaded pixels? Three
 controlled experiments answer it before any profiler is touched, and a
 profiler capture then attributes it on the GPU.
 
-**Answer: leaf-count-proportional, not pixel-proportional.** Vertex-stage GPU
-work — not fragment/fill — is what a real capture shows dominating, and that
-is consistent with everything below.
+**Answer: the cost tracks leaf count, not pixel count — but softer than
+"proportional."** A 2.09x leaf-count change produced a 2.42x time change, not
+a 2.09x one: real, leaf-count-dominated, and slightly super-linear on top of
+that, not a clean 1:1. Vertex-stage GPU work — not fragment/fill — is what a
+real capture shows dominating, and that is consistent with everything below.
+Plan 3e should read the magnitude as softer than a confident one-line headline
+would suggest: enough to justify a leaf-reducing cache, not enough to promise
+that halving leaves exactly halves raster time.
 
 ## Machine and build
 
@@ -44,14 +49,59 @@ medians stand without a third run: **170.60 ms** raster at 500k,
 to leaf-count-proportional than to entity-count-proportional (10x) or flat.**
 It is not an exact 1:1 (2.42 against 2.09 is about 16% more time growth than
 leaf growth), so the relationship is slightly super-linear in leaf count
-rather than perfectly linear — plausibly because denser corpora also carry
-more points per leaf on average, not just more leaves. But the finding is
-unambiguous: **halving the leaf count roughly halves the raster time.** A
-cache that reduces leaves drawn per frame is addressing the right lever.
+rather than perfectly linear. Two things sit inside that residual 16%, and
+the note should not collapse them into one vague "more points per leaf":
+
+1. **A structural confound in the corpus, not just denser geometry.**
+   `harnessDocument()` (and this task's direct calls to `generateDocument`)
+   hold `definitionCount: 200` and `instanceCount: 20000` fixed while
+   `entityCount` scales 10x from 50k to 500k. Entities-per-definition rises
+   with corpus size, so A is not a clean "same drawing, more copies of the
+   same shapes" scaling — it is "same number of definitions and instances,
+   each definition carrying more geometry." Some of the extra 16% is
+   plausibly the extra points-per-leaf that denser definitions carry (each
+   `screenSpaceLeafCount` unit doing slightly more work), and some is
+   plausibly this instancing-density shift changing how much of the walk and
+   paint concentrate inside fewer, busier definitions. Neither was isolated
+   here; both are consistent with leaf-count dominance, but the exact split
+   is not known.
+2. Given that confound, "halving the leaf count roughly halves the raster
+   time" is the right shape of the finding but not a precise guarantee — **a
+   cache that reduces leaves drawn per frame is addressing the right lever,
+   sized to something a bit larger than 1:1 rather than exactly 1:1.**
 
 Build p50 moved in step (9.545 ms → 4.105 ms, a 2.33x ratio), which makes
 sense: build cost is the walk, and the walk visits roughly the same set of
 things the paint step draws.
+
+### Reconciling `screenSpaceLeafCount` against Plan 3a's leaf counts
+
+Plan 3a's results note reports "about 3,670 and 7,010 leaves on the working
+set" for the 50k/500k working-set cameras — 33–40% higher than this task's
+2,237 and 4,679. Both numbers are correct; they count different things, and
+that has to be on the record rather than left as a silent mismatch a later
+plan could build on.
+
+3a's figure is `opsPerFrame / 3` from R1, the debug-JIT `PictureRecorder` rig
+using `NullDrawSink`. `NullDrawSink.opCount` increments once for
+`beginResidual`, once for the geometry call, once for `endResidual` — three
+ops per leaf, for **every** leaf kind `DraftPainter` draws: points, lines,
+polylines, circles and arcs all go through that same
+beginResidual/geometry/endResidual shape, whichever of the two paths
+(screen-space or residual) they take. `screenSpaceLeafCount` is a different,
+narrower counter, redefined in Task 1: it increments only inside
+`_drawLeafComposed`'s `point`/`line`/`polyline` case — the screen-space path.
+Circles and arcs always take the residual path and are structurally excluded
+from it, by design, not by omission (see `DraftPainter.screenSpaceLeafCount`'s
+own doc comment).
+
+So 3a's number is "every leaf drawn" and this task's is "every leaf drawn via
+the screen-space path" — a strict subset. The two ratios stay close (this
+task's 2.09x against 3a's 7,010/3,670 = 1.91x) because the point/line/polyline
+share of the corpus is proportionally similar at both sizes, not because the
+two counters measure the same thing. A cache or any other Plan 3e mechanism
+that reads "leaves drawn" from either note needs to know which of these two
+definitions it is getting.
 
 ## Experiment B — vary stroke width, hold everything else
 
@@ -76,11 +126,56 @@ Medians: 1x = 170.60 ms, 2x = 175.68 ms (+3.0%), 4x = 180.35 ms (+5.7%).
 `screenSpaceLeafCount` and build p50 are flat across all three, confirming
 the multiplier touches nothing but pixel coverage.
 
-**Time scaled by 1.057x when the shaded pixel area scaled by roughly 4x** (a
-4x width multiplier on the default ~0.94-device-pixel stroke gives
-approximately 4x more covered area for lines, which are the corpus
-majority). A quadrupling of shaded area moved raster time by under 6%. **Fill
-rate is a minor contributor, not the dominant one.**
+### Measuring the covered area, rather than assuming 4x width gives 4x area
+
+A 4x width multiplier does not obviously give 4x covered area: the working-set
+scene is dense enough that widened strokes can overlap *more* with their
+neighbours instead of claiming new white space, which would understate B's
+true fill-rate sensitivity if the raw multiplier were used as the area figure.
+So the area was measured, not assumed, using the technique the deleted
+`batch_equivalence_test.dart` used for its own pixel-level proof:
+`PictureRecorder` → `DraftPainter.paint` → `Picture.toImage` →
+`toByteData(rawRgba)`, on the same working-set scene and camera as the rig,
+at a plain `test()` (no widget, no window) so it needed no profile-mode run.
+Written as a throwaway test, run once per `LINEWEIGHT_SCALE`, then deleted —
+it is not part of the suite.
+
+The first attempt counted pixels differing from a white background fill and
+got a nonsensical result: coverage *fell* as width grew (0.87x at 2x, 0.77x
+at 4x). The cause was the background choice, not the render: the corpus
+draws some layers in white — `ByLayerColor` resolving through layer 0 to ACI
+7, which the deleted test's own comments called out by name as "white on the
+white background." A white stroke is invisible against a white background,
+and worse, a *widened* white stroke visibly painted back over other, already
+non-white ink, erasing it toward white and shrinking the naive count as the
+scale grew. Fixed by drawing no background at all (`PictureRecorder`'s
+canvas starts transparent) and counting pixels with alpha > 0 — coverage by
+"was any ink drawn here," regardless of that ink's colour:
+
+| LINEWEIGHT_SCALE | covered pixels | of 1,920,000 (1600x1200) | ratio to 1x |
+|---|---|---|---|
+| 1x | 1,911,000 | 99.531% | — |
+| 2x | 1,919,800 | 99.990% | **1.0046x** |
+| 4x | 1,920,000 | 100.000% | **1.0047x** |
+
+The scene is already 99.5% covered at 1x. There is essentially no white space
+left for a wider stroke to claim, so covered area **cannot** grow anywhere
+near 4x on this scene regardless of stroke width — it is ceiling-bound at
+1.0x already, with at most 0.47% of the viewport left to gain, which is
+exactly what both 2x and 4x measure.
+
+**Restated against the measured area, not the multiplier: time scaled by
+1.057x when covered area scaled by only 1.0047x.** This is a stronger
+result than the original framing, not a weaker one — B's raster time grew
+*more* than fill area did, by over 50x in relative terms (5.7% against
+0.47%), which rules fill rate out even more firmly than "a 4x multiplier
+bought under 6%" did. It also reframes what that small 5.7% residual likely
+is: since the *rasterised* footprint barely moved, a wider stroke's
+marginal cost is more plausibly the larger tessellated outline geometry
+Impeller has to build for a wider stroke (more vertices per leaf, whether or
+not they end up overlapping on screen) than any fragment/fill cost — which
+is the same vertex-dominant story Step 2's GPU capture tells directly, not a
+separate one.
 
 ## Experiment C — vary the viewport (dropped)
 
@@ -217,13 +312,63 @@ also expected to leave Skia's own trace tracks empty on this rendering
 backend, per the brief's own framing — so Route 3 was deprioritized in favour
 of the working route rather than attempted and found empty.
 
+## The batch spike's 2.7x, revisited
+
+The batch spike found that merging ~7,000 draw calls into one giant `Path`
+(`bucketMapBakedCurves`) made rasterising 2.7x *slower* (490 ms against 179
+ms), not faster. This note's finding — the bottleneck is per-leaf vertex
+work, not dispatch — explains why merging *didn't help*: collapsing draw
+calls doesn't reduce the total vertex/geometry work Impeller has to
+tessellate, so there was never a mechanism by which it should have won.
+
+**It does not explain why merging made things worse.** If per-leaf vertex
+work dominates and the total vertex count is roughly the same whether it
+arrives as one `Path` or seven thousand, something about the *merged* shape
+specifically got more expensive, and this note has not measured what.
+Leaving that unconnected would let a reader assume "vertex work dominates"
+is the whole story behind both numbers, when only the first is established.
+
+One candidate, named as a hypothesis and not a finding: path-fill and
+-stroke tessellation generally has to resolve overlaps and winding across
+everything sharing one `Path` object, so tessellating ten thousand unrelated
+subpaths *as one path* may require a joint resolution step that ten thousand
+independent, small, locally-resolved draw calls do not — each separate
+`drawPath` call only has to resolve winding within its own few points, and
+relies on cheap GPU blending (not joint tessellation) to composite the
+results together on screen. This is consistent with the batch spike's own
+record/raster split — `bucketMapBakedCurves` had the *cheapest* recording
+time of the four modes (4.11 ms), which rules out expensive `Path`
+construction (`Path.addPath(matrix4:)` itself) as the mechanism, since that
+cost would show up at recording time and didn't. It points instead at
+something that only happens at rasterisation, when Impeller actually
+tessellates the accumulated path — consistent with, but not proof of, a
+joint winding-resolution cost.
+
+**This is unconfirmed. What would settle it:** repeat this note's Route 2
+capture (`xctrace`, Metal System Trace, `metal-gpu-intervals`, attached while
+panning) against the `bucketMapBakedCurves` build. That build no longer
+exists on this branch — Task 4b removed the batching machinery after the
+spike refuted it — so answering this needs checking out the parent commit
+(`b5e6a21^`, the commit immediately before the removal) into a scratch
+worktree rather than reverting anything here. Not attempted in this task:
+optional per the brief, and the honest "unexplained, here is what would
+settle it" costs nothing that a wrong guess wouldn't cost more. If the
+capture shows Vertex-stage time disproportionately larger for the merged
+build (more than the leaf/vertex count alone would predict), that supports
+the joint-resolution hypothesis; if some other channel dominates instead —
+GPU submission stalls from one giant command buffer being unable to
+pipeline the way many small ones can, say — that would point somewhere
+else entirely, and the hypothesis above should be discarded rather than
+defended.
+
 ## What this means for Plan 3e
 
 The dominant cost is **GPU vertex-stage work that scales with the number of
 drawn leaves** (Experiment A), **not fragment/fill work that scales with
-shaded pixels** (Experiment B barely moved under a 4x width multiplier),
-and a direct GPU capture (Step 2, Route 2) attributes the app's own GPU time
-to the Vertex channel over Fragment by 2.2–2.5x, reproduced twice.
+shaded pixels** (Experiment B's *measured* covered area barely moved — 1.0047x
+— while raster time grew 5.7%), and a direct GPU capture (Step 2, Route 2)
+attributes the app's own GPU time to the Vertex channel over Fragment by
+2.2–2.5x, reproduced twice.
 
 This decides between Plan 3e's candidate mechanisms:
 
@@ -234,8 +379,10 @@ This decides between Plan 3e's candidate mechanisms:
   built to produce.
 - **A mechanism aimed only at reducing fill area** (thinner default
   strokes, crisper AA, fewer overlapping pixels) **would not address the
-  dominant cost** — Experiment B already showed a 4x fill-area change moves
-  raster time by under 6%.
+  dominant cost** — Experiment B's *measured* covered area barely moved at
+  all (1.0047x at a 4x width multiplier, the scene already being 99.5%
+  covered at 1x) while raster time still grew 5.7%, so fill rate is not
+  where the time is going.
 - **A mechanism aimed only at reducing transform pushes / draw-call count is
   already refuted** by the batch spike: the most call-collapsed mode was
   2.7x slower, not faster, which is consistent with this note's finding that
