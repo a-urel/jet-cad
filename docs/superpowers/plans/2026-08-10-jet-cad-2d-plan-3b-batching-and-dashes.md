@@ -3200,9 +3200,94 @@ In `_emitScreenSpace`, after the points are transformed, branch:
     sink.endResidual();
 ```
 
-For curves, `_emit`'s `circle` and `arc` cases take the same branch through
-`dashArc`, using the pre-bound `_emitArc`. Pass `toScreen` down to `_emit` so
-it has the scale, and set the three arc fields before the call:
+### Curves dash in their own space, and that needs one dasher change
+
+A line is carried into screen space, so its period is a screen-space length and
+`dashPolyline` compares it against the pixel floor directly. **A curve is not
+carried** — it keeps the residual path, because an anisotropic transform turns a
+circle into an ellipse and `DrawSink.circle` holds one radius. So its centre,
+its radius and its angles are all in the leaf's own space.
+
+That leaves two consistent choices and only one of them is cheap.
+
+Doing the arc in **screen** space means mapping angles: a conformal `toScreen`
+rotates by `atan2(b, a)` and a mirrored one reverses the sweep, so every emitted
+span would have to be mapped back before reaching `sink.arc`. Doing it in
+**local** space needs no angle maths at all — the radius, the angles and the
+clip are already in that space, and `_localClipFor` pulls the frame's clip back
+to meet them.
+
+Local space it is. The one quantity that is unavoidably in pixels is the
+**collapse decision**: `kDashCollapsePx` asks whether the period is too small to
+see, and that is a question about the screen. So `dashArc` takes the conversion
+factor rather than assuming its geometry is already in pixels:
+
+```dart
+  /// Emits the drawn spans of [pattern] along an arc, by angle.
+  ///
+  /// [r] and [clip] are in whatever space the caller's arc lives in, and
+  /// [scale] converts pattern units to that same space. [pixelScale] converts
+  /// that space to device pixels, and is used for **one thing only** — asking
+  /// whether the period has fallen under [collapsePx], which is a question
+  /// about the screen and not about the geometry.
+  ///
+  /// A caller working in screen space already passes 1.0 and can ignore it. The
+  /// painter does not: a curve keeps the residual path, so its radius and
+  /// angles stay in the leaf's own space and only this factor knows how big
+  /// that is on screen.
+  bool dashArc(double cx, double cy, double r, double start, double sweep,
+      DashPattern pattern, double scale, Aabb2 clip, DashArcEmit emit,
+      {double pixelScale = 1.0}) {
+```
+
+with the collapse test becoming:
+
+```dart
+    final period = cycle * scale;
+    if (!period.isFinite || period * pixelScale < collapsePx) {
+      _collapsed++;
+      return false;
+    }
+```
+
+Add a test that the two are distinguished — a period that is comfortably above
+the floor in local units but below it once `pixelScale` shrinks it must
+collapse, and the reverse must not:
+
+```dart
+    test('the collapse floor is measured in pixels, not in local units', () {
+      // A pattern that is 18 local units per cycle is far above a 3-pixel
+      // floor — until the leaf is placed at a hundredth of its size, where
+      // the same cycle is 0.18 pixels and there is nothing to see.
+      final tiny = Dasher(collapsePx: 3.0);
+      expect(
+          tiny.dashArc(0, 0, 100, 0, 2 * math.pi, kDashed, 1.0, kOpen,
+              (_, __) {}, pixelScale: 0.01),
+          isFalse);
+      expect(tiny.collapsedCount, 1);
+
+      final visible = Dasher(collapsePx: 3.0);
+      expect(
+          visible.dashArc(0, 0, 100, 0, 2 * math.pi, kDashed, 1.0, kOpen,
+              (_, __) {}, pixelScale: 1.0),
+          isTrue);
+      expect(visible.collapsedCount, 0);
+    });
+```
+
+`dashPolyline` is unchanged: its geometry is already in pixels, so its
+`pixelScale` would always be 1.0 and a parameter nobody varies is a parameter
+nobody should have.
+
+### Wiring the curve cases
+
+`_emit`'s `circle` and `arc` cases take the branch through `dashArc`, using the
+pre-bound `_emitArc`. Pass `toScreen` down to `_emit` so it has the scale, and
+set the three arc fields before the call. **Note the two scales are different
+and deliberately so:** a line's `_dashScale` carries `toScreen.scaleMagnitude`
+because its points are in pixels, while a curve's does not, because its radius
+is not — the same factor reaches `dashArc` as `pixelScale` instead. The two
+produce the same picture.
 
 ```dart
       case EntityKind.circle:
@@ -3229,9 +3314,12 @@ it has the scale, and set the three arc fields before the call:
             0,
             2 * math.pi,
             pattern,
-            _dashScale(style, toScreen),
+            // Local units: no `toScreen.scaleMagnitude` here, because `r` and
+            // the clip are not in pixels either.
+            style.linetypeScale * document.header.globalLinetypeScale,
             _localClipFor(toScreen),
-            _emitArc)) {
+            _emitArc,
+            pixelScale: toScreen.scaleMagnitude)) {
           sink.circle(_arcCx, _arcCy, r, style);
         }
 ```
