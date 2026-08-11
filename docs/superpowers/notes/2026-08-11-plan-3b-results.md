@@ -251,10 +251,13 @@ confirms the batch spike (Task 4, commit `56b8ec3`, including its web
 re-check) predates every dash-related commit; `bcbb0f5` (Task 8) is the one
 that first wires dashing into the painter — so the two runs really are two
 different trees, and the spike's own numbers are correct for what they
-measured. Dashing is the only substantive code change between those two
-trees (every non-documentation commit in the range is dash work). That is as
-far as the evidence goes, and it is not far enough to call dashing the
-cause:
+measured. **Two substantive changes sit between the two trees, not one**:
+dashing, and `b5e6a21` — `revert: remove the batching machinery the spike
+refuted`, also in this range — which strips 217 lines from
+`canvas_draw_sink.dart` (the component that actually emits the `Canvas`
+calls a picture is built from), changes `draft_canvas.dart`, and deletes two
+test files. That is as far as the evidence goes, and it is not far enough to
+call either change the cause:
 
 - **At this exact camera, dashing provably produces the same call
   sequence.** Real `Canvas` calls (`canvasCallCount`) came back
@@ -270,7 +273,9 @@ cause:
   reach CanvasKit too. **A code path that provably produces an identical
   picture is a poor candidate for why that picture's fate changed** — this
   is an argument against dashing being the cause, not a caveat on it being
-  the cause.
+  the cause. It says nothing about the batching removal, which touched the
+  sink directly and was not separately measured at this camera by either
+  note.
 - **The environment was not held constant between the two runs.** They ran
   hours apart, in different sessions; this task's own session had Low Power
   Mode forced on (see "The dash cost" below) and whatever browser/WASM heap
@@ -283,9 +288,10 @@ cause:
   nothing in this task's evidence excludes it.
 
 **The trigger is unknown.** What is established: the abort reproduced here,
-twice, and did not at the spike's run, on two trees that differ by dashing
-and nothing else substantive. What is not established: that dashing is why —
-the one mechanism this task could check (call count) argues against it, and
+twice, and did not at the spike's run, on two trees that differ by two
+substantive changes — dashing and the batching removal, neither ruled in or
+out. What is not established: that either one is why — the one mechanism
+this task could check (call count) argues against dashing specifically, and
 an unexcluded environmental explanation accounts for both results without
 any code being at fault. **What would settle it:** run both trees back to
 back in one session, on one machine, in one state — a scratch worktree

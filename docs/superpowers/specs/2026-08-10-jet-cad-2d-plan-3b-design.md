@@ -579,20 +579,23 @@ the finished, dashed tree and the abort **reproduced**, twice, at the same
 `finishRecordingAsPicture` call site 3a originally recorded. The two notes do
 not disagree about what they measured — they measured two different trees —
 but that is where the settled part ends. **3a's results note item 5 is
-observed again, not re-established.** Dashing is the only substantive code
-change between the two trees, which makes it tempting to call it the cause,
-but Task 12's own draw-call counts argue the other way: real `Canvas` calls
-at this camera came back identical either side of it (1,134,900, both
-trees), because every dashed entity here collapses below the dash floor to
-the same single solid call the pre-dash code already emitted — a code path
-proven to produce an identical picture is a poor candidate for why that
-picture's fate changed. The two runs' environments were also never
-controlled to be the same session, and `RuntimeError: Aborted()` inside
-`finishRecordingAsPicture` is consistent with a memory-pressure allocation
-failure that would track the session rather than the tree. **The trigger is
-unknown; 3e should not design against a fixed op-count ceiling until someone
-re-runs both trees back to back in one session and shows the abort tracks
-the tree rather than the session.**
+observed again, not re-established.** Two substantive changes sit between
+the two trees, not one: dashing, and `b5e6a21`'s removal of the batching
+machinery, which strips 217 lines from `canvas_draw_sink.dart` itself — the
+component that emits the `Canvas` calls a picture is built from — along with
+changes to `draft_canvas.dart` and two deleted test files. Neither has been
+shown to cause the abort. Task 12's own draw-call counts argue against
+dashing specifically: real `Canvas` calls at this camera came back identical
+either side of it (1,134,900, both trees), because every dashed entity here
+collapses below the dash floor to the same single solid call the pre-dash
+code already emitted — a code path proven to produce an identical picture is
+a poor candidate for why that picture's fate changed. The two runs'
+environments were also never controlled to be the same session, and
+`RuntimeError: Aborted()` inside `finishRecordingAsPicture` is consistent
+with a memory-pressure allocation failure that would track the session
+rather than the tree. **The trigger is unknown; 3e should not design against
+a fixed op-count ceiling until someone re-runs both trees back to back in
+one session and shows the abort tracks the tree rather than the session.**
 
 ## Carried to Plan 3c
 
@@ -625,6 +628,11 @@ What 3d adds is an entity the hit kind can point at.
 open buckets before it draws and opens new ones after. 3b writes the condition
 with nothing to put in it, so 3d adds a caller rather than a mechanism.
 
+**Stale.** Batching was reverted (`b5e6a21`) — there are no buckets and no
+flush condition. **3d inherits no mechanism from 3b here, only the ordinary
+one-call-per-primitive `CanvasDrawSink` Task 12 measured throughout.** See
+`2026-08-11-plan-3b-results.md`'s "What this says about Plans 3c, 3d and 3e."
+
 ## Carried to Plan 3e
 
 The definition picture cache, the tile cache, the per-definition entry bounds,
@@ -636,6 +644,15 @@ gate.
 handful of batched paths rather than hundreds of transform-wrapped draws, so the
 cache's value, its memory footprint and its scale-band key all have to be
 computed from 3b's numbers, not 3a's.
+
+**Stale.** Batching was reverted; a definition still draws as one call per
+primitive, not "a handful of batched paths." What 3b actually changes for
+3e's cache is described in `2026-08-11-plan-3b-results.md`'s 3e section: the
+dominant cost is leaf-count-bound GPU vertex work (per the raster-profile
+note), dashing makes that leaf-count story stronger rather than weaker, a
+cached picture is not scale-invariant once dash phase/collapse depend on
+screen scale, and the web op ceiling is observed again with an unconfirmed
+trigger — none of which is "batched paths."
 
 ## Carried to Plan 4
 
@@ -660,12 +677,20 @@ Unchanged from 3a, plus one:
 |---|---|
 | The batch hypothesis is wrong and raster is bound by something else | Task 1's spike, with a stated stop-and-reopen rule, before the plan's other work exists |
 | Batching changes the picture | Byte-identical goldens both ways, with a transparent fixture that fails if the alpha exclusion is deleted |
-| Dashes cost more than batching saves | That is the gate, phrased as a question rather than assumed away |
-| The ordering contract is wrong once fills exist | The flush condition is written in 3b with 3d's caller named; the tie-break in the spike's decision rule prefers the narrower contract at equal speed |
+| Dashes cost more than batching saves | That is the gate, phrased as a question rather than assumed away. **Stale (see "What the spike changed"): there is no batching win to weigh the cost against, so the gate was demoted from a question to a recorded number.** |
+| The ordering contract is wrong once fills exist | The flush condition is written in 3b with 3d's caller named; the tie-break in the spike's decision rule prefers the narrower contract at equal speed. **Stale: batching was reverted (`b5e6a21`), so there is no flush condition — see "Carried to Plan 3d" below.** |
 | The collapse floor hides real dashes | Swept, and the value that ships is the largest with no visible golden difference; collapses counted per frame |
 | Clipping breaks dash phase under a moving camera | The phase carry is an explicit mutation target — dropping it must make the picture slide |
 | Pre-transforming points in Dart costs more build time than it saves raster time | Measured directly: the spike reports build and raster separately, as 3a's rigs already do |
 | A′ ships and its wider ordering contract bites in 3d | The tie-break prefers A and B; A′ ships only if it wins by more than noise, and the contract is written down here rather than inferred later |
 | The bucket lifecycle is left implicit and two readers build two sinks | Named as the axis the spike measures, with both lifecycles tabulated, an ordering-loss column per variant, and golden fixture 3 whose expected result differs between them |
 | The oracle is "helpfully" updated alongside the painter | `reference_walk.dart` is untouched by this plan, and the diff being empty is an exit criterion. `flatten` already normalises both routes to screen space |
-| The web ceiling persists | Re-measured, not gated, and named as CanvasKit's limit rather than this plan's |
+| The web ceiling persists | Re-measured, not gated, and named as CanvasKit's limit rather than this plan's. **Stale (see the Task 12 correction above): the abort is observed again on the dashed tree and was not observed on the batch spike's dash-free tree, but its trigger is unknown — it has not been shown to be a fixed op ceiling, "CanvasKit's limit," or anything else attributable. Do not read this row as settled.** |
+
+**This table predates Task 4** — it is the original planning commit's risk
+register, written while batching was still the design and before the spike
+refuted it. Rows above marked **Stale** assert something as settled that
+Task 12 found is not; the rest describe risks and mitigations that were
+genuinely exercised (the goldens, the mutation log, the spike's own
+decision rule) and are left as the historical record they are, even where
+the risk itself is now moot because batching didn't ship.
