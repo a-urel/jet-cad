@@ -2054,39 +2054,62 @@ optimise anything you find.
 - Consumes: `apps/dev_harness_2d` at 500,000 entities, working-set camera.
 - Produces: a named dominant cost and a repeatable capture recipe.
 
-- [ ] **Step 1: Capture the frame**
+- [ ] **Step 1: Three controlled experiments, before any profiler**
 
-Three routes; take whichever produces a breakdown first, and record which ones
-failed and how, because a route that does not work is worth the next person
-knowing.
+The central question — **does the 179 ms scale with the number of drawn leaves,
+or with the number of pixels covered?** — is answerable by varying one thing at
+a time in the rig that already exists. A picture cache addresses the first
+answer and does nothing for the second, so this is the fork Plan 3e turns on.
 
-1. **Xcode Instruments, Metal System Trace or the Game Performance template**,
-   attached to the profile-mode harness while it pans. This is the one that can
-   attribute time inside Impeller.
-2. **`flutter run --profile --trace-skia`** plus DevTools' Performance view,
-   exporting the timeline. Impeller may render the Skia-specific tracks empty;
-   say so if it does rather than reporting a blank chart as a result.
-3. **`IMPELLER_TRACE`-style engine flags**, if the installed engine build
-   exposes any. Check `flutter run --help` and the engine's own flags rather
-   than guessing.
+Do these first. They cannot fail to produce a number, and a profiler capture
+that disagrees with them is a capture to distrust.
 
-- [ ] **Step 2: Answer four questions with numbers**
+**A — vary the leaf count, hold the camera and the pixels.** Run the pan rig at
+`ENTITIES=500000` and at `ENTITIES=50000` on the same working-set camera. Plan
+3a measured about 7,010 and about 3,670 drawn leaves respectively, so the leaf
+count roughly halves while the covered area barely moves. Report
+`screenSpaceLeafCount` for each alongside the raster p50.
 
-The note must answer these, or say explicitly which the capture could not:
+> Roughly halved time means per-leaf work, and the leaf count is the lever.
+> Barely-moved time means per-pixel work, and no cache that reduces leaves will
+> help.
 
-- **Where does the 179 ms sit** — CPU-side tessellation, GPU vertex work, GPU
-  fragment/fill, or blit and composite?
-- **How much of it scales with the number of drawn leaves** rather than with
-  screen area? Compare the working-set frame at 500,000 entities against the
-  same camera at 50,000, where the drawn-leaf count falls from about 7,010 to
-  about 3,670. If the time halves, it is per-leaf work; if it barely moves, it
-  is per-pixel work and the leaf count is not the lever.
-- **What does overdraw look like?** Thousands of thin strokes over a small
-  viewport is a plausible fill-rate story, and it is the one a picture cache
-  would not fix.
-- **Does the 2.7× penalty for one giant path have a name in the capture?** The
-  batched mode is deleted by then, so if answering this needs it, capture it in
-  Task 4b's parent commit before the removal lands, and say that is what you did.
+**B — vary the stroke width, hold everything else.** Same corpus, same camera,
+same leaves, same draw calls — only the covered area changes. Add a
+`--dart-define=LINEWEIGHT_SCALE` to the harness that multiplies
+`ResolvedStyle.lineweightHundredths` at the sink, and run at 1×, 2× and 4×.
+
+> This is the cleanest fill-rate test available here: geometry, call count and
+> walk are identical across the three runs, and only the number of shaded
+> pixels changes. Time rising roughly with the multiplier is fill rate.
+
+**C — vary the viewport, if the harness lets you.** Same scene at 4× the pixel
+area. `tester.view.physicalSize` can be assigned from an integration test; if
+it does not take effect on a real macOS window, say so and skip C — A and B
+together already separate per-leaf from per-pixel.
+
+- [ ] **Step 2: Then attribute it, if a capture can be had**
+
+A and B say *which* kind of work dominates. A capture says *what* it is. Try, in
+order, and record which routes failed and how — a route that does not work is
+worth the next person knowing:
+
+1. **`flutter run --profile --trace-to-file=<path>`**, which writes a
+   machine-readable Chrome trace. Look for the engine's rasterizer and Impeller
+   spans. This is the only route that needs no GUI, so try it first.
+2. **Xcode Instruments**, Metal System Trace or the Game Performance template,
+   attached to the profile-mode harness while it pans. The one route that can
+   attribute time inside Impeller's tessellator.
+3. **`--trace-skia`** plus a DevTools timeline export. Impeller may leave the
+   Skia tracks empty; say so rather than reporting a blank chart as a result.
+
+Whatever you get, answer: is the dominant cost CPU-side tessellation, GPU vertex
+work, GPU fragment and fill, or blit and composite?
+
+**One question needs geometry that no longer exists.** The 2.7× penalty for a
+single giant path was measured before Task 4b removed the batching. If
+attributing it needs the code, check out the parent commit into a scratch
+worktree rather than reverting anything here, and say that is what you did.
 
 - [ ] **Step 3: Write the note and state what it means for 3e**
 
