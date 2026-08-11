@@ -108,10 +108,10 @@ definitions it is getting.
 Added `--dart-define=LINEWEIGHT_SCALE` (see "Harness change" below), which
 multiplies every stroke's device-pixel width at the sink and nowhere else.
 Geometry, draw-call count and the walk are byte-identical across 1x, 2x and
-4x — only the number of shaded pixels changes. `ENTITIES=500000`, `RIG=pan`,
-two runs per multiplier (1x reuses Experiment A's 500k runs, since
-`LINEWEIGHT_SCALE=1.0` is the harness default and produces an identical
-binary).
+4x — only each stroke's own shaded area changes. `ENTITIES=500000`,
+`RIG=pan`, two runs per multiplier (1x reuses Experiment A's 500k runs,
+since `LINEWEIGHT_SCALE=1.0` is the harness default and produces an
+identical binary).
 
 | Scale | Run | raster p50 | raster p95 | build p50 | screenSpaceLeafCount |
 |---|---|---|---|---|---|
@@ -124,16 +124,30 @@ binary).
 
 Medians: 1x = 170.60 ms, 2x = 175.68 ms (+3.0%), 4x = 180.35 ms (+5.7%).
 `screenSpaceLeafCount` and build p50 are flat across all three, confirming
-the multiplier touches nothing but pixel coverage.
+the multiplier touches nothing but how much of each stroke's own area is
+shaded.
 
-### Measuring the covered area, rather than assuming 4x width gives 4x area
+### B's denominator is overdraw, not coverage — and it scales exactly by construction
 
-A 4x width multiplier does not obviously give 4x covered area: the working-set
-scene is dense enough that widened strokes can overlap *more* with their
-neighbours instead of claiming new white space, which would understate B's
-true fill-rate sensitivity if the raw multiplier were used as the area figure.
-So the area was measured, not assumed, using the technique the deleted
-`batch_equivalence_test.dart` used for its own pixel-level proof:
+Fragment shading cost tracks **fragment invocations**: every stroke's own
+area, counted separately, overlaps included. That is overdraw — total
+`Σ (screen-space polyline length × stroke width)` — and it is a different
+quantity from *coverage*, which is the union of what got touched at all and
+saturates at 100% of the viewport. `LINEWEIGHT_SCALE` multiplies every
+stroke's width and touches nothing else — not length, not draw-call count,
+not the walk — so overdraw scales **exactly linearly by construction**: 2x
+at `LINEWEIGHT_SCALE=2.0`, 4x at `4.0`. No measurement is needed to know
+that, and none could disagree with it.
+
+**Time grew 5.7% when fragment work (overdraw) grew 4x. Fill rate is a minor
+contributor, not the dominant one.** That is B's conclusion, and it is the
+one the experiment was designed to produce.
+
+### A separate finding: the working-set scene is already ~99.5% covered
+
+Before settling on overdraw as B's denominator, this task tried measuring
+*coverage* instead — the union of touched pixels — using the technique the
+deleted `batch_equivalence_test.dart` used for its own pixel-level proof:
 `PictureRecorder` → `DraftPainter.paint` → `Picture.toImage` →
 `toByteData(rawRgba)`, on the same working-set scene and camera as the rig,
 at a plain `test()` (no widget, no window) so it needed no profile-mode run.
@@ -152,30 +166,30 @@ scale grew. Fixed by drawing no background at all (`PictureRecorder`'s
 canvas starts transparent) and counting pixels with alpha > 0 — coverage by
 "was any ink drawn here," regardless of that ink's colour:
 
-| LINEWEIGHT_SCALE | covered pixels | of 1,920,000 (1600x1200) | ratio to 1x |
-|---|---|---|---|
-| 1x | 1,911,000 | 99.531% | — |
-| 2x | 1,919,800 | 99.990% | **1.0046x** |
-| 4x | 1,920,000 | 100.000% | **1.0047x** |
+| LINEWEIGHT_SCALE | covered pixels | of 1,920,000 (1600x1200) |
+|---|---|---|
+| 1x | 1,911,000 | 99.531% |
+| 2x | 1,919,800 | 99.990% |
+| 4x | 1,920,000 | 100.000% |
 
-The scene is already 99.5% covered at 1x. There is essentially no white space
-left for a wider stroke to claim, so covered area **cannot** grow anywhere
-near 4x on this scene regardless of stroke width — it is ceiling-bound at
-1.0x already, with at most 0.47% of the viewport left to gain, which is
-exactly what both 2x and 4x measure.
+**The working-set scene is already ~99.5% covered at 1x** — essentially
+solid ink, with almost no white space left. That is a fact about this
+corpus's density, not a measurement of fill-rate sensitivity, and it stands
+on its own: it is what makes fill rate a reasonable suspect in the first
+place (a nearly-solid viewport is exactly the situation where per-pixel
+cost would be expected to matter), and it bounds what any leaf-culling
+mechanism can achieve on this working set — the visible area is already
+almost entirely touched by *something*, so culling reduces which leaves
+contribute to a pixel, not how many pixels have contributions.
 
-**Restated against the measured area, not the multiplier: time scaled by
-1.057x when covered area scaled by only 1.0047x.** This is a stronger
-result than the original framing, not a weaker one — B's raster time grew
-*more* than fill area did, by over 50x in relative terms (5.7% against
-0.47%), which rules fill rate out even more firmly than "a 4x multiplier
-bought under 6%" did. It also reframes what that small 5.7% residual likely
-is: since the *rasterised* footprint barely moved, a wider stroke's
-marginal cost is more plausibly the larger tessellated outline geometry
-Impeller has to build for a wider stroke (more vertices per leaf, whether or
-not they end up overlapping on screen) than any fragment/fill cost — which
-is the same vertex-dominant story Step 2's GPU capture tells directly, not a
-separate one.
+**Coverage was the wrong instrument for B, and it is worth saying plainly so
+the mistake isn't repeated:** an already-saturated scene cannot report a
+change in a quantity that is pinned at its ceiling. Coverage moving from
+99.531% to 100.000% is not evidence that "not much changed" when width
+quadruples — it is evidence that coverage was never the quantity fragment
+shading cost depends on. Overdraw, which has no ceiling and scales exactly
+with the multiplier by construction, is that quantity, and it is what B's
+5.7%-against-4x conclusion above is stated against.
 
 ## Experiment C — vary the viewport (dropped)
 
@@ -365,10 +379,10 @@ defended.
 
 The dominant cost is **GPU vertex-stage work that scales with the number of
 drawn leaves** (Experiment A), **not fragment/fill work that scales with
-shaded pixels** (Experiment B's *measured* covered area barely moved — 1.0047x
-— while raster time grew 5.7%), and a direct GPU capture (Step 2, Route 2)
-attributes the app's own GPU time to the Vertex channel over Fragment by
-2.2–2.5x, reproduced twice.
+overdraw** (Experiment B: overdraw quadrupled by construction and raster time
+grew only 5.7%), and a direct GPU capture (Step 2, Route 2) attributes the
+app's own GPU time to the Vertex channel over Fragment by 2.2–2.5x,
+reproduced twice.
 
 This decides between Plan 3e's candidate mechanisms:
 
@@ -378,11 +392,15 @@ This decides between Plan 3e's candidate mechanisms:
   near-halving of leaf count is exactly the effect such a cache would be
   built to produce.
 - **A mechanism aimed only at reducing fill area** (thinner default
-  strokes, crisper AA, fewer overlapping pixels) **would not address the
-  dominant cost** — Experiment B's *measured* covered area barely moved at
-  all (1.0047x at a 4x width multiplier, the scene already being 99.5%
-  covered at 1x) while raster time still grew 5.7%, so fill rate is not
-  where the time is going.
+  strokes, crisper AA, fewer overlapping fragments) **would not address the
+  dominant cost** — Experiment B quadrupled overdraw by construction (the
+  width multiplier applies to every stroke and nothing else) and raster time
+  grew only 5.7%, so fill rate is not where the time is going. (The
+  working-set scene is separately measured at ~99.5% *coverage* at 1x —
+  worth knowing on its own, since it is what makes fill rate a reasonable
+  suspect at all, but it is not the quantity this bullet's conclusion rests
+  on: coverage is already pinned near its ceiling and cannot be B's
+  denominator.)
 - **A mechanism aimed only at reducing transform pushes / draw-call count is
   already refuted** by the batch spike: the most call-collapsed mode was
   2.7x slower, not faster, which is consistent with this note's finding that
