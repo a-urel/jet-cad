@@ -2841,8 +2841,19 @@ and inside `Dasher`:
   /// arc as it stands.
   bool dashArc(double cx, double cy, double r, double start, double sweep,
       DashPattern pattern, double scale, Aabb2 clip, DashArcEmit emit) {
-    if (pattern.dashes.isEmpty || pattern.totalLength <= 0) return false;
-    final period = pattern.totalLength * scale;
+    if (pattern.dashes.isEmpty) return false;
+    // The cycle comes from summing the array, never from
+    // `pattern.totalLength` — nothing enforces that the declared total agrees
+    // with the entries, and Task 6 measured both consequences: a phase that
+    // drifts after the cursor's cycle skip, and a `[0.0]` pattern with a
+    // declared total above the collapse floor that ran 445 million iterations
+    // in eight seconds. Use the same summing loop `dashPolyline` uses.
+    var cycle = 0.0;
+    for (final d in pattern.dashes) {
+      cycle += d.abs();
+    }
+    if (!cycle.isFinite || cycle <= 0.0) return false;
+    final period = cycle * scale;
     if (!period.isFinite || period < collapsePx) {
       _collapsed++;
       return false;
