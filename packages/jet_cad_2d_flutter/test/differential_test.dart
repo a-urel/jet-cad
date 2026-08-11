@@ -39,6 +39,21 @@ void main() {
     expect(ops.whereType<PointOp>(), isNotEmpty);
   });
 
+  test('the differential fixture is entirely continuous', () {
+    // The reference walk does not dash. If a fixture entity ever carries a
+    // pattern, the painter emits spans where the reference emits one polyline
+    // and the superset assertion fails for a reason that has nothing to do
+    // with the walk. Dashing is covered by the dasher's own tests and by the
+    // goldens, not here.
+    final doc = differentialFixture();
+    final resolver = DocumentStyleResolver(doc);
+    for (final slot in doc.entities.liveSlots) {
+      final style = resolver.styleFor(slot, StyleContext.documentRoot);
+      final pattern = doc.tables.linetypes[style.linetype]?.pattern;
+      expect(pattern?.dashes ?? const <double>[], isEmpty);
+    }
+  });
+
   test('the reference uses no spatial index at all', () {
     // Independence is the whole value of the oracle: two implementations that
     // share a mistake agree. The walk must run on a document that has no index

@@ -258,6 +258,27 @@ void main() {
       expect(dasher.patternStepCount, lessThan(15));
     });
 
+    test('the collapse floor is measured in pixels, not in local units', () {
+      // A pattern that is 18 local units per cycle is far above a 3-pixel
+      // floor — until the leaf is placed at a hundredth of its size, where
+      // the same cycle is 0.18 pixels and there is nothing to see.
+      final tiny = Dasher(collapsePx: 3.0);
+      expect(
+          tiny.dashArc(
+              0, 0, 100, 0, 2 * math.pi, kDashed, 1.0, kOpen, (_, __) {},
+              pixelScale: 0.01),
+          isFalse);
+      expect(tiny.collapsedCount, 1);
+
+      final visible = Dasher(collapsePx: 3.0);
+      expect(
+          visible.dashArc(
+              0, 0, 100, 0, 2 * math.pi, kDashed, 1.0, kOpen, (_, __) {},
+              pixelScale: 1.0),
+          isTrue);
+      expect(visible.collapsedCount, 0);
+    });
+
     test(
         'a circle wholly inside the clip emits the same spans as the same '
         'circle whose windows were computed the long way', () {

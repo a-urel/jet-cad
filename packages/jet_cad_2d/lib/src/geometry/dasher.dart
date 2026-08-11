@@ -174,18 +174,28 @@ class Dasher {
 
   /// Emits the drawn spans of [pattern] along an arc, by angle.
   ///
-  /// [r] is the arc's **screen** radius, so arc length is `r * |sweep|` in the
-  /// same units the period is in. Returns false when the caller must draw the
-  /// arc as it stands.
+  /// [r] and [clip] are in whatever space the caller's arc lives in, and
+  /// [scale] converts pattern units to that same space. [pixelScale] converts
+  /// that space to device pixels, and is used for **one thing only** — asking
+  /// whether the period has fallen under [collapsePx], which is a question
+  /// about the screen and not about the geometry.
+  ///
+  /// A caller working in screen space already passes 1.0 and can ignore it. The
+  /// painter does not: a curve keeps the residual path, so its radius and
+  /// angles stay in the leaf's own space and only this factor knows how big
+  /// that is on screen.
+  ///
+  /// Returns false when the caller must draw the arc as it stands.
   bool dashArc(double cx, double cy, double r, double start, double sweep,
-      DashPattern pattern, double scale, Aabb2 clip, DashArcEmit emit) {
+      DashPattern pattern, double scale, Aabb2 clip, DashArcEmit emit,
+      {double pixelScale = 1.0}) {
     if (pattern.dashes.isEmpty) return false;
     // Same reasoning, and the same helper, as dashPolyline: the cycle comes
     // from summing the array, never from `pattern.totalLength`.
     final cycle = _dashCycle(pattern.dashes);
     if (!cycle.isFinite || cycle <= 0.0) return false;
     final period = cycle * scale;
-    if (!period.isFinite || period < collapsePx) {
+    if (!period.isFinite || period * pixelScale < collapsePx) {
       _collapsed++;
       return false;
     }
