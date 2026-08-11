@@ -211,6 +211,21 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     await tester.pumpAndSettle();
+    // All three counters now mean the same thing: this frame. dashSpanCount
+    // and collapsedDashCount reset themselves every paint; canvasCallCount
+    // does not, because the sink outlives the frame. But pumpAndSettle
+    // leaves nothing dirty, so a bare pump() would not repaint at all —
+    // RenderCustomPaint only repaints when its `repaint` Listenable fires,
+    // and nothing has changed since the last real frame. panBy(Offset.zero)
+    // is a numeric no-op but still assigns a fresh ViewportTransform
+    // (Transform2 and ViewportTransform both deliberately have no
+    // operator==, so ValueNotifier's reference check always sees a
+    // "change"), which fires the listener and forces the one real repaint
+    // that makes resetCounters() meaningful. A running total beside two
+    // per-frame figures is a wrong comparison waiting to be published.
+    app.sink.resetCounters();
+    app.camera.panBy(Offset.zero);
+    await tester.pump(const Duration(milliseconds: 16));
     report('R2 ($kEntities)', timings);
     print('  screenSpaceLeafCount=${app.painter.screenSpaceLeafCount} '
         'lineweightScale=$kLineweightScale');
@@ -249,6 +264,21 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     await tester.pumpAndSettle();
+    // All three counters now mean the same thing: this frame. dashSpanCount
+    // and collapsedDashCount reset themselves every paint; canvasCallCount
+    // does not, because the sink outlives the frame. But pumpAndSettle
+    // leaves nothing dirty, so a bare pump() would not repaint at all —
+    // RenderCustomPaint only repaints when its `repaint` Listenable fires,
+    // and nothing has changed since the last real frame. panBy(Offset.zero)
+    // is a numeric no-op but still assigns a fresh ViewportTransform
+    // (Transform2 and ViewportTransform both deliberately have no
+    // operator==, so ValueNotifier's reference check always sees a
+    // "change"), which fires the listener and forces the one real repaint
+    // that makes resetCounters() meaningful. A running total beside two
+    // per-frame figures is a wrong comparison waiting to be published.
+    app.sink.resetCounters();
+    app.camera.panBy(Offset.zero);
+    await tester.pump(const Duration(milliseconds: 16));
     report('R4a ($kEntities)', timings);
     print('  command ${clock.summary}');
     print('  overlay=${app.index.rootIndex.dirty.length} '
@@ -284,8 +314,26 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     await tester.pumpAndSettle();
+    // All three counters now mean the same thing: this frame. dashSpanCount
+    // and collapsedDashCount reset themselves every paint; canvasCallCount
+    // does not, because the sink outlives the frame. But pumpAndSettle
+    // leaves nothing dirty, so a bare pump() would not repaint at all —
+    // RenderCustomPaint only repaints when its `repaint` Listenable fires,
+    // and nothing has changed since the last real frame. panBy(Offset.zero)
+    // is a numeric no-op but still assigns a fresh ViewportTransform
+    // (Transform2 and ViewportTransform both deliberately have no
+    // operator==, so ValueNotifier's reference check always sees a
+    // "change"), which fires the listener and forces the one real repaint
+    // that makes resetCounters() meaningful. A running total beside two
+    // per-frame figures is a wrong comparison waiting to be published.
+    app.sink.resetCounters();
+    app.camera.panBy(Offset.zero);
+    await tester.pump(const Duration(milliseconds: 16));
     report('R4b ($kEntities)', timings);
     print('  command ${clock.summary}');
     print('  rebuilds=${app.index.rebuildCount - before} over $kSteps frames');
+    print('  dashSpans=${app.painter.dashSpanCount} '
+        'collapsed=${app.painter.collapsedDashCount} '
+        'canvasCalls=${app.sink.canvasCallCount}');
   });
 }
