@@ -178,4 +178,136 @@ void main() {
     final ops = paintDashed(doc, ViewportTransform.fit(doc.extents, kViewport));
     expect(ops.length, 1);
   });
+
+  // Radius 20 in the circle's own local space, world-placed at the origin.
+  // Small enough to stay clear of both camera boxes the tests below use
+  // (fixed, not fit to this doc's own extents — see those tests for why),
+  // and large enough that the pattern's local circumference (2*pi*20 =~
+  // 125.7 units, versus an 18-unit period) draws several dashes rather than
+  // one or two.
+  DraftDocument dashedCircleFixture({required Transform2 placement}) {
+    final doc = DraftDocument.empty();
+    final dashed = doc.handleSeed.next();
+    doc.tables.linetypes.add(LinetypeRecord(
+      handle: dashed,
+      name: 'DASHED',
+      description: '__ __ __',
+      pattern: const DashPattern(dashes: [12.0, -6.0], totalLength: 18.0),
+    ));
+    final def = doc.handleSeed.next();
+    doc.tree.addDefinition(Definition(
+        handle: def, name: 'd', basePoint: Vector2.zero(), children: const []));
+    doc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: doc.handleSeed.next(),
+        owner: def,
+        kind: EntityKind.circle,
+        layer: ReservedHandles.layerZero,
+        linetype: dashed,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: 25,
+        transparency: 0,
+        flags: 0,
+      ),
+      payload: GeometryPayload(
+          coords: Float64List.fromList([0, 0]),
+          scalars: Float64List.fromList([20.0])),
+    ));
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: doc.handleSeed.next(),
+      parent: doc.rootHandle,
+      definition: def,
+      transform: placement,
+      layer: ReservedHandles.layerZero,
+    )));
+    return doc;
+  }
+
+  // A fixed camera, shared by both placements below, deliberately *not*
+  // `ViewportTransform.fit(doc.extents, kViewport)`. Fitting to each doc's
+  // own extents would defeat the test: `doc.extents` scales with `placement`
+  // exactly as the circle's world size does, so `ViewportTransform.fit`
+  // would zoom out by the same factor the placement zoomed in by, and the
+  // composed screen scale a curve leaf sees would come out identical for
+  // every placement regardless of whether the painter is right — canceling
+  // the very thing under test. A fixed box breaks that cancellation: r=20
+  // stays clear of it at both 1x and 2x placement (world radius up to 40,
+  // against a box reaching from -50 to 300 on each axis), so the circle is
+  // never clipped and the two runs differ only by whatever the placement
+  // scale actually does downstream.
+  //
+  // Deliberately not centred on the origin, either: a box like
+  // `(-150,-150)..(150,150)` sends the frame's rebase origin through
+  // `rebaseOriginFor`'s power-of-two floor at a coordinate whose true centre
+  // is zero only up to floating-point noise, and `floor` sends that noise
+  // troppo negative onto the wrong step — verified by hand while building
+  // this test, before the asymmetric box below replaced it.
+  final ViewportTransform curveTestCamera = ViewportTransform.fit(
+      Aabb2(Vector2(-50, -50), Vector2(300, 300)), kViewport);
+
+  test('the instance scale does not change a curve\'s dash pattern', () {
+    // The mirror image of the line-path test above, and it has to be, because
+    // the two paths carry different scales on purpose. A line is drawn from
+    // points already in pixels, so its period is a screen length and doubling
+    // the placement doubles a span. A circle keeps the residual path, so its
+    // radius and angles stay in the leaf's own space — the pattern is measured
+    // in the same units the radius is, and the placement cannot touch it.
+    //
+    // Concretely: adding toScreen.scaleMagnitude to the curve branch's `scale`
+    // argument (as `_dashScale` does for the line path) passes the whole
+    // suite without this test — confirmed by making that exact edit and
+    // running the file: 7 spans at 1x becomes 5, and 7 at 2x becomes 3.
+    List<ArcOp> spansAt(double placementScale) {
+      final doc = dashedCircleFixture(
+          placement: Transform2(placementScale, 0, 0, placementScale, 0, 0));
+      final recording = RecordingDrawSink();
+      DraftPainter(
+              document: doc,
+              index: SpatialIndex(doc),
+              resolver: DocumentStyleResolver(doc))
+          .paint(recording, curveTestCamera, kViewport);
+      return recording.ops.whereType<ArcOp>().toList();
+    }
+
+    final one = spansAt(1.0);
+    final two = spansAt(2.0);
+
+    expect(one.length, greaterThan(3),
+        reason: 'the circle must actually dash, or the comparison below is '
+            'between two empty lists');
+    expect(two.length, one.length,
+        reason: 'the pattern is measured in the leaf\'s own units, so the '
+            'placement scale cannot change how many dashes fit round the '
+            'circle');
+    for (var i = 0; i < one.length; i++) {
+      expect(two[i].start, closeTo(one[i].start, 1e-9));
+      expect(two[i].sweep, closeTo(one[i].sweep, 1e-9));
+    }
+  });
+
+  test('pixelScale reaches the collapse decision through the painter', () {
+    // Same circle, same 1x placement, but a camera fit to a box thousands of
+    // times the circle's size — so the composed screen scale (`pixelScale`)
+    // is tiny, and the 18-local-unit period, though unaffected by the camera
+    // in local units, maps to well under the 3px floor on screen. Unlike
+    // `curveTestCamera` above, an exactly-centred box is fine here: the box
+    // is so large that the floating-point noise in its computed centre is
+    // many orders of magnitude below the power-of-two step `rebaseOriginFor`
+    // would snap a mis-signed centre to, so there is no equivalent trap.
+    final doc = dashedCircleFixture(placement: Transform2(1, 0, 0, 1, 0, 0));
+    final tinyCamera = ViewportTransform.fit(
+        Aabb2(Vector2(-100000, -75000), Vector2(100000, 75000)), kViewport);
+    final recording = RecordingDrawSink();
+    final painter = DraftPainter(
+        document: doc,
+        index: SpatialIndex(doc),
+        resolver: DocumentStyleResolver(doc));
+    painter.paint(recording, tinyCamera, kViewport);
+
+    expect(recording.ops.whereType<ArcOp>(), isEmpty);
+    expect(recording.ops.whereType<CircleOp>().length, 1);
+    expect(painter.collapsedDashCount, 1);
+  });
 }
