@@ -47,9 +47,9 @@ void main() {
     // every colour ByLayer, every node an instance under the root). Those pass
     // on a document whose coordinates have all moved.
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
-        -0x4a8a4829271a2189);
+        4478729767976143987);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
-        0x61227cda40917e68);
+        7265843217140545300);
   });
 
   test('defaults reproduce the Plan 2 corpus structurally too', () {

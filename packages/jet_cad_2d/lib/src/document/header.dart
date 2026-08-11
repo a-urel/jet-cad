@@ -9,6 +9,13 @@ class DocumentHeader {
   DrawingUnits units = DrawingUnits.unitless;
   double scale = 1.0;
 
+  /// DXF `$LTSCALE`: multiplies every linetype pattern in the drawing.
+  ///
+  /// A plain mutable field with no command, matching [units] and [scale]. It
+  /// is a display setting rather than document content — no geometry moves —
+  /// so it is not on the undo stack.
+  double globalLinetypeScale = 1.0;
+
   /// Extents exactly as they were read from an imported file, preserved so
   /// `$EXTMIN`/`$EXTMAX` survive a round-trip.
   ///
@@ -35,6 +42,7 @@ class DocumentHeader {
   Map<String, Object?> toJson() => {
         'units': units.name,
         'scale': scale,
+        'globalLinetypeScale': globalLinetypeScale,
         'importedExtents': _persistable(importedExtents)?.toJson(),
         'customVariables': {
           for (final key in customVariables.keys.toList()..sort())
@@ -49,7 +57,9 @@ class DocumentHeader {
   static DocumentHeader fromJson(Map<String, Object?> json) {
     final header = DocumentHeader()
       ..units = DrawingUnits.values.byName(json['units']! as String)
-      ..scale = (json['scale']! as num).toDouble();
+      ..scale = (json['scale']! as num).toDouble()
+      ..globalLinetypeScale =
+          (json['globalLinetypeScale'] as num?)?.toDouble() ?? 1.0;
     final extents = json['importedExtents'];
     if (extents != null) {
       header.importedExtents = _persistable(Aabb2.fromJson(extents));
