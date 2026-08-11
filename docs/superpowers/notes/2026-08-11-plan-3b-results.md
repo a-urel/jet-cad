@@ -242,39 +242,57 @@ same as native.
 `finishRecordingAsPicture`, reproduced twice independently — once inside the
 full `--tags rig --run-skipped --platform chrome` suite run, once again in a
 `--plain-name "paint and query at 500000"` isolated re-run — both times at
-the same call site 3a originally recorded.
+the same call site 3a originally recorded. It did not reproduce at the batch
+spike's run
+([`2026-08-11-plan-3b-batch-spike.md`](2026-08-11-plan-3b-batch-spike.md)).
 
-**This is not a disagreement with
-[`2026-08-11-plan-3b-batch-spike.md`](2026-08-11-plan-3b-batch-spike.md) — it
-measured a different tree.** `git log 56b8ec3..bcbb0f5` confirms the batch
-spike (Task 4, commit `56b8ec3`, including its web re-check) predates every
-dash-related commit; `bcbb0f5` (Task 8) is the one that first wires dashing
-into the painter. The spike's web re-check genuinely ran on a tree with
-nothing dashed — its "all four modes completed, nothing aborted" is correct
-for what it measured, and its numbers are unchanged. **Dashing reintroduced
-the web ceiling.** Every non-documentation commit in `56b8ec3..bcbb0f5` is
-dash work, so it is the best-supported cause of the two measurements
-diverging.
+**What is established, and what is not.** `git log 56b8ec3..bcbb0f5`
+confirms the batch spike (Task 4, commit `56b8ec3`, including its web
+re-check) predates every dash-related commit; `bcbb0f5` (Task 8) is the one
+that first wires dashing into the painter — so the two runs really are two
+different trees, and the spike's own numbers are correct for what they
+measured. Dashing is the only substantive code change between those two
+trees (every non-documentation commit in the range is dash work). That is as
+far as the evidence goes, and it is not far enough to call dashing the
+cause:
 
-That said, the specific mechanism is not confirmed, and the one number this
-task has on either side of it argues against the obvious "more draw calls"
-story: real `Canvas` calls (`canvasCallCount`) at this exact camera came back
-**identical**, 1,134,900, in both the batch spike's dash-free `off` mode and
-this task's own dashed native re-measurement (see "Every 3a row" above).
-That is not a coincidence — `Dasher.dashArc`'s (and the sink-level polyline
-dasher's) collapse check runs *before* any window/span computation, so a
-collapsed dashed entity at this zoom falls back to exactly the same single
-`sink.circle`/`sink.arc`/`sink.polyline` call the pre-dash code already
-issued, confirmed both by reading `dasher.dart` (the early-return sits ahead
-of `_dashArcWindow`) and by this measurement. `CanvasDrawSink` is shared Dart
-code across native and web, so the same call sequence should reach CanvasKit
-too. **So dashing is confirmed as the responsible change by elimination (it
-is the only substantive code difference between the two trees), but not by a
-demonstrated increase in the op count a naive reading of "the ceiling is
-about op count" would predict** — something about the dashed tree's picture
-pushes CanvasKit over the edge without changing how many `Canvas` calls are
-in it, and this task does not know what. **3a's results note item 5 — the
-500k web ceiling is real — is re-established, not open.**
+- **At this exact camera, dashing provably produces the same call
+  sequence.** Real `Canvas` calls (`canvasCallCount`) came back
+  **identical**, 1,134,900, in both the batch spike's dash-free `off` mode
+  and this task's own dashed native re-measurement (see "Every 3a row"
+  above). `Dasher.dashArc`'s (and the sink-level polyline dasher's) collapse
+  check runs *before* any window/span computation, so a collapsed dashed
+  entity at this zoom falls back to exactly the same single
+  `sink.circle`/`sink.arc`/`sink.polyline` call the pre-dash code already
+  issued — confirmed both by reading `dasher.dart` (the early-return sits
+  ahead of `_dashArcWindow`) and by this measurement. `CanvasDrawSink` is
+  shared Dart code across native and web, so the same call sequence should
+  reach CanvasKit too. **A code path that provably produces an identical
+  picture is a poor candidate for why that picture's fate changed** — this
+  is an argument against dashing being the cause, not a caveat on it being
+  the cause.
+- **The environment was not held constant between the two runs.** They ran
+  hours apart, in different sessions; this task's own session had Low Power
+  Mode forced on (see "The dash cost" below) and whatever browser/WASM heap
+  state each run started from is unknown. `RuntimeError: Aborted()` inside
+  `finishRecordingAsPicture` is not self-evidently a deterministic op
+  ceiling — a WASM allocation failure under memory pressure produces exactly
+  this signature and would be load- and session-dependent, not
+  code-dependent. That alternative explains both observations (spike:
+  completed; this task: aborted) with **no code change involved**, and
+  nothing in this task's evidence excludes it.
+
+**The trigger is unknown.** What is established: the abort reproduced here,
+twice, and did not at the spike's run, on two trees that differ by dashing
+and nothing else substantive. What is not established: that dashing is why —
+the one mechanism this task could check (call count) argues against it, and
+an unexcluded environmental explanation accounts for both results without
+any code being at fault. **What would settle it:** run both trees back to
+back in one session, on one machine, in one state — a scratch worktree
+checked out at `56b8ec3` (not a `git stash`, which would still share this
+worktree's toolchain/build cache state) alongside this tree — and see
+whether the abort tracks the tree or the session. Not attempted here; out of
+this task's scope once the coordinator's fix round identified it.
 
 `flutter build web --release` succeeds; `build/web` is 40 MB, matching 3a.
 
@@ -480,14 +498,21 @@ reason (real per-span GPU work, not joint-path tessellation).
 
 Covered above under "Web." Restated here only because the brief calls it out
 as its own item: **the 500,000-entity whole-drawing frame aborts CanvasKit,
-reproduced twice this task.** This is not open against
-[`2026-08-11-plan-3b-batch-spike.md`](2026-08-11-plan-3b-batch-spike.md)'s
-non-abort — `git log 56b8ec3..bcbb0f5` confirms that note's web re-check ran
-before any dashing existed in the tree, and this task's own re-measurement,
-on the finished dashed tree, is the first time the scenario has been run
-since dashing landed. **3a's results note item 5 — the 500k web ceiling is
-real — is re-established.** `docs/superpowers/specs/2026-08-10-jet-cad-2d-plan-3b-design.md`
-and the batch spike note have both been corrected to say so.
+reproduced twice this task**, on the same finished, dashed tree; it did not
+abort at [`2026-08-11-plan-3b-batch-spike.md`](2026-08-11-plan-3b-batch-spike.md)'s
+earlier run, on a tree with nothing dashed yet (`git log 56b8ec3..bcbb0f5`
+confirms the ordering). **What that establishes is narrower than "dashing
+did it":** at this camera, dashing provably produces the same `Canvas` call
+sequence as the pre-dash code (see "Web" above), and the two runs'
+environments — hours apart, different sessions, this one with Low Power Mode
+forced on — were never controlled to be the same. `RuntimeError: Aborted()`
+inside `finishRecordingAsPicture` is consistent with a WASM allocation
+failure under memory pressure, which would track the session rather than the
+tree. **3a's results note item 5 is observed again, not re-established** —
+the abort is real and reproduced, but its trigger is unknown, and this task
+did not rule out an environmental cause that would make dashing irrelevant
+to it. `docs/superpowers/specs/2026-08-10-jet-cad-2d-plan-3b-design.md` and
+the batch spike note have both been corrected to the same open status.
 
 ## What this says about Plans 3c, 3d and 3e
 
@@ -524,16 +549,21 @@ table. This task adds three things to that picture:
    render solid instead (or vice versa), which is a real invalidation axis
    3e's design doesn't yet have a name for. This task did not design that
    axis; it is naming that it exists.
-3. **The web whole-drawing ceiling is real again**, confirmed by this task's
-   reproduction and the commit-range check that shows the batch spike's
-   non-abort measured a dash-free tree. 3a's original constraint — a
-   definition/tile cache's picture sizes have to stay under whatever
-   CanvasKit's op ceiling actually is — is back in force for 3e's design,
-   with one open question this task's own numbers raise but don't answer: a
-   collapsed dashed picture has the *same* real `Canvas` call count as a
-   non-dashed one, so whatever pushed this task's picture over the ceiling
-   is not simply "more calls," and 3e's cache should not assume that keeping
-   `canvasCallCount` low is sufficient to stay under it.
+3. **The web whole-drawing abort is observed again, and its trigger is
+   unknown.** This task's reproduction is real, and the commit-range check
+   confirms the batch spike's non-abort measured a tree with nothing
+   dashed. But this task's own numbers argue against dashing as the
+   mechanism: a collapsed dashed picture has the *same* real `Canvas` call
+   count as a non-dashed one at this camera (1,134,900, both trees), and the
+   two runs' environments were never controlled to be the same session. A
+   memory- or session-dependent CanvasKit failure is an unexcluded
+   alternative that explains both results with no code at fault. **3e should
+   not design against a fixed op-count ceiling on the strength of this
+   task's evidence** — that would be designing against a specific cause
+   this task did not establish. What 3e is owed instead is the back-to-back,
+   same-session re-run described above, which would show whether the abort
+   tracks the tree or the session before anyone designs around either
+   answer.
 
 ## Verification
 

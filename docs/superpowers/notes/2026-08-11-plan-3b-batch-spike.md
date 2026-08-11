@@ -109,10 +109,17 @@ existed anywhere in the tree — `bcbb0f5` (Task 8) wired dashing into the
 painter afterward. The numbers above are correct for what they measured: a
 tree with Tasks 0 and 1 but nothing dashed. Task 12 re-ran the identical
 500k whole-drawing scenario on the finished, dashed tree and the abort
-**reproduced**, twice, at the same call site 3a originally recorded. The two
-findings do not disagree — they are two different trees — and the honest
-reading is that dashing reintroduced the ceiling this section found gone. See
-`2026-08-11-plan-3b-results.md` for the re-measurement.
+**reproduced**, twice, at the same call site 3a originally recorded — so
+this section's "nothing aborted" and Task 12's "aborted" are not, in fact,
+about the same tree. That much is settled. **Whether dashing is *why* is
+not**: Task 12 found that at this camera a collapsed dashed entity emits the
+identical `Canvas` call sequence a pre-dash entity would, which argues
+against dashing as the mechanism rather than for it, and the two runs'
+environments (different sessions, hours apart) were never controlled to rule
+out a memory- or session-dependent CanvasKit failure instead. See the "Web"
+and "3c/3d/3e" sections of `2026-08-11-plan-3b-results.md` for the full
+reasoning and the open question — a same-session, back-to-back re-run of
+both trees, not attempted here.
 
 ## What this leaves
 

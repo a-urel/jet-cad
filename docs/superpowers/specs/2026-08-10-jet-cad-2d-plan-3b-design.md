@@ -576,17 +576,23 @@ measured platform.
 — `bcbb0f5` (Task 8) landed after it — so the batch spike's web re-check
 measured a tree with nothing dashed. Task 12 re-ran the identical scenario on
 the finished, dashed tree and the abort **reproduced**, twice, at the same
-`finishRecordingAsPicture` call site 3a originally recorded. **3a's results
-note item 5 — the 500k web ceiling is real — is re-established, not open.**
-The two notes do not disagree; they measured two different trees. Dashing is
-the only substantive code change between the two measurements (every commit
-in `56b8ec3..bcbb0f5` besides pure documentation is dash work), so it is the
-best-supported cause, though Task 12's own draw-call counts complicate a
-naive "more ops" story: real `Canvas` calls at this camera came back
-identical either side of it (1,134,900, both trees), because every dashed
-entity here collapses below the dash floor to the same single solid call the
-pre-dash code already emitted. The exact mechanism is unconfirmed; that
-dashing is what changed is not.
+`finishRecordingAsPicture` call site 3a originally recorded. The two notes do
+not disagree about what they measured — they measured two different trees —
+but that is where the settled part ends. **3a's results note item 5 is
+observed again, not re-established.** Dashing is the only substantive code
+change between the two trees, which makes it tempting to call it the cause,
+but Task 12's own draw-call counts argue the other way: real `Canvas` calls
+at this camera came back identical either side of it (1,134,900, both
+trees), because every dashed entity here collapses below the dash floor to
+the same single solid call the pre-dash code already emitted — a code path
+proven to produce an identical picture is a poor candidate for why that
+picture's fate changed. The two runs' environments were also never
+controlled to be the same session, and `RuntimeError: Aborted()` inside
+`finishRecordingAsPicture` is consistent with a memory-pressure allocation
+failure that would track the session rather than the tree. **The trigger is
+unknown; 3e should not design against a fixed op-count ceiling until someone
+re-runs both trees back to back in one session and shows the abort tracks
+the tree rather than the session.**
 
 ## Carried to Plan 3c
 
