@@ -179,6 +179,76 @@ void main() {
     expect(ops.length, 1);
   });
 
+  test(
+      'a dashed stroke whose centreline sits one pixel outside the raw '
+      'viewport still emits a span there', () {
+    // The dasher's clip is inflated by half the widest stroke the frame can
+    // draw, so a centreline that never crosses back into the true viewport
+    // still contributes its visible edge. A three-vertex polyline: the first
+    // leg (x=5, y from 300 down to -1) crosses into the true viewport, which
+    // guarantees the whole entity's bounding box overlaps the spatial
+    // index's query rect — that query has no inflation of its own, so an
+    // entity that never touched the true viewport at all would be culled
+    // before reaching the dasher. The second leg (y=-1 throughout, x from 5
+    // down to -395) never crosses back in: its centreline sits exactly one
+    // raw pixel above the top edge (y=0) for its whole length, and only the
+    // inflated clip can still reach it.
+    //
+    // The camera is the plain identity — world units are screen pixels —
+    // with no rebase offset (`debugDisableRebasing`), so "one pixel outside"
+    // can be read directly off the coordinates rather than pulled back
+    // through a transform.
+    final doc = DraftDocument.empty();
+    final dashed = doc.handleSeed.next();
+    doc.tables.linetypes.add(LinetypeRecord(
+      handle: dashed,
+      name: 'DASHED',
+      description: '__ __ __',
+      pattern: const DashPattern(dashes: [12.0, -6.0], totalLength: 18.0),
+    ));
+    doc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: doc.handleSeed.next(),
+        owner: doc.rootHandle,
+        kind: EntityKind.polyline,
+        layer: ReservedHandles.layerZero,
+        linetype: dashed,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: 25,
+        transparency: 0,
+        flags: 0,
+      ),
+      payload: GeometryPayload(
+        coords: Float64List.fromList([5, 300, 5, -1, -395, -1]),
+        scalars: Float64List(0),
+      ),
+    ));
+
+    final camera =
+        ViewportTransform(worldToScreenMatrix: Transform2(1, 0, 0, 1, 0, 0));
+
+    final recording = RecordingDrawSink();
+    DraftPainter(
+      document: doc,
+      index: SpatialIndex(doc),
+      resolver: DocumentStyleResolver(doc),
+      debugDisableRebasing: true,
+    ).paint(recording, camera, kViewport);
+
+    // The first leg's spans all sit at x==5 (it never moves off that
+    // vertical line); only the second, wholly-outside leg can produce a
+    // span whose x has moved away from it.
+    final outside = recording.ops
+        .whereType<PolylineOp>()
+        .where((op) => op.points[0] < 4.5 || op.points[2] < 4.5)
+        .toList();
+    expect(outside, isNotEmpty,
+        reason: 'the second leg sits one pixel outside the raw viewport for '
+            'its whole length; the inflated clip must still draw it');
+  });
+
   // Radius 20 in the circle's own local space, centred at the local origin,
   // unless a test asks otherwise. Small enough to stay clear of both camera
   // boxes the tests below use (fixed, not fit to this doc's own extents —
@@ -296,6 +366,91 @@ void main() {
       expect(two[i].start, closeTo(one[i].start, 1e-9));
       expect(two[i].sweep, closeTo(one[i].sweep, 1e-9));
     }
+  });
+
+  test('globalLinetypeScale multiplies a curve\'s dash pattern too', () {
+    // The line-path and curve-path `_dashScale` computations are two
+    // separate call sites (`_dashScale` itself, and the inline expression at
+    // the top of `_emit`'s circle and arc cases) that happen to read the
+    // same document field. `globalLinetypeScale multiplies it too` above
+    // only exercises the line path; dropping `globalLinetypeScale` from the
+    // circle/arc call site passes that test and the whole rest of the suite
+    // untouched — confirmed by making that edit and running the file.
+    int spanCount(DraftDocument doc) {
+      final recording = RecordingDrawSink();
+      DraftPainter(
+              document: doc,
+              index: SpatialIndex(doc),
+              resolver: DocumentStyleResolver(doc))
+          .paint(recording, curveTestCamera, kViewport);
+      return recording.ops.whereType<ArcOp>().length;
+    }
+
+    final doc = dashedCircleFixture(placement: Transform2(1, 0, 0, 1, 0, 0));
+    final before = spanCount(doc);
+    doc.header.globalLinetypeScale = 3.0;
+    final after = spanCount(doc);
+
+    expect(before, greaterThan(3),
+        reason: 'the circle must actually dash, or the comparison below is '
+            'vacuous');
+    expect(after, lessThan(before),
+        reason: 'a longer pattern means fewer dashes fit round the circle');
+  });
+
+  test('globalLinetypeScale multiplies an arc entity\'s dash pattern too', () {
+    // The circle and arc cases in `_emit`'s switch are two separately
+    // written call sites, not one shared helper — the previous test's
+    // circle fixture cannot exercise this one. Confirmed independently:
+    // dropping `globalLinetypeScale` from the *arc* call site (leaving the
+    // circle one alone) survives the whole suite, including the test above.
+    final doc = DraftDocument.empty();
+    final dashed = doc.handleSeed.next();
+    doc.tables.linetypes.add(LinetypeRecord(
+      handle: dashed,
+      name: 'DASHED',
+      description: '__ __ __',
+      pattern: const DashPattern(dashes: [12.0, -6.0], totalLength: 18.0),
+    ));
+    doc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: doc.handleSeed.next(),
+        owner: doc.rootHandle,
+        kind: EntityKind.arc,
+        layer: ReservedHandles.layerZero,
+        linetype: dashed,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: 25,
+        transparency: 0,
+        flags: 0,
+      ),
+      payload: GeometryPayload(
+        coords: Float64List.fromList([0, 0]),
+        scalars: Float64List.fromList([20, 0, 2 * math.pi]),
+      ),
+    ));
+
+    int spanCount() {
+      final recording = RecordingDrawSink();
+      DraftPainter(
+              document: doc,
+              index: SpatialIndex(doc),
+              resolver: DocumentStyleResolver(doc))
+          .paint(recording, curveTestCamera, kViewport);
+      return recording.ops.whereType<ArcOp>().length;
+    }
+
+    final before = spanCount();
+    doc.header.globalLinetypeScale = 3.0;
+    final after = spanCount();
+
+    expect(before, greaterThan(3),
+        reason: 'the arc must actually dash, or the comparison below is '
+            'vacuous');
+    expect(after, lessThan(before),
+        reason: 'a longer pattern means fewer dashes fit round the arc');
   });
 
   test('pixelScale reaches the collapse decision through the painter', () {

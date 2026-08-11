@@ -66,6 +66,17 @@ void main() {
     expect(dasher.collapsedCount, 1);
   });
 
+  test('a period exactly at the floor does not collapse', () {
+    // scale chosen so period == collapsePx exactly: 18 * (3.0/18.0) = 3.0.
+    // The floor is a strict "under", so a period sitting exactly on it must
+    // still be walked as a pattern, not treated as too small to draw.
+    final dasher = Dasher(collapsePx: 3.0);
+    final spans = collect(dasher, [0, 0, 100, 0], kDashed, 3.0 / 18.0);
+    expect(spans, isNotEmpty,
+        reason: 'a period equal to the floor is still drawn as a pattern');
+    expect(dasher.collapsedCount, 0);
+  });
+
   test('an empty pattern is solid and is not counted as a collapse', () {
     final dasher = Dasher();
     expect(collect(dasher, [0, 0, 100, 0], kSolid, 1.0), isEmpty);
@@ -277,6 +288,21 @@ void main() {
               pixelScale: 1.0),
           isTrue);
       expect(visible.collapsedCount, 0);
+    });
+
+    test('a screen period exactly at the floor does not collapse', () {
+      // pixelScale chosen so period * pixelScale == collapsePx exactly:
+      // 18 * (3.0/18.0) = 3.0. Same boundary as the polyline path's "a
+      // period exactly at the floor does not collapse", mirrored here since
+      // the arc walk has its own, separate collapse check.
+      final dasher = Dasher(collapsePx: 3.0);
+      expect(
+          dasher.dashArc(
+              0, 0, 100, 0, 2 * math.pi, kDashed, 1.0, kOpen, (_, __) {},
+              pixelScale: 3.0 / 18.0),
+          isTrue,
+          reason: 'a period equal to the floor is still drawn as a pattern');
+      expect(dasher.collapsedCount, 0);
     });
 
     test(
