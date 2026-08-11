@@ -97,6 +97,16 @@ void main() {
         final query = measure(() => painter.paint(sink, camera, kRigViewport));
         final opsPerFrame = (sink.opCount - before) ~/ (query.n + 20);
 
+        // One more, untimed: a single CanvasDrawSink run, alongside the
+        // NullDrawSink one above, so canvasCalls and the dash counters
+        // describe the same frame this row's other counters came from.
+        final canvasRecorder = PictureRecorder();
+        final canvasSink = CanvasDrawSink(
+            canvas: Canvas(canvasRecorder),
+            pixelsPerPaperMm: kLogicalPixelsPerMm);
+        painter.paint(canvasSink, camera, kRigViewport);
+        canvasRecorder.endRecording().dispose();
+
         print('  -- $label --');
         print('    R1 paint          $paint');
         print('    R3 query-only     $query');
@@ -105,6 +115,9 @@ void main() {
             'anisotropic curves: ${painter.anisotropicCurveCount}');
         print('    skipped text: ${painter.skippedTextCount}  '
             'skipped deep instances: ${painter.skippedDeepInstanceCount}');
+        print('    canvasCalls: ${canvasSink.canvasCallCount}  '
+            'dashSpans: ${painter.dashSpanCount}  '
+            'collapsed: ${painter.collapsedDashCount}');
       }
 
       index.dispose();

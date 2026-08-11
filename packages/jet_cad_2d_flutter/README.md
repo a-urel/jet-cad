@@ -69,3 +69,12 @@ R1 runs under `flutter test`: debug JIT, and `PictureRecorder` records without
 rasterising. **It is a relative regression signal only.** It is not comparable
 to R2's profile-mode numbers and cannot see raster cost. Do not mix the two in
 a results note.
+
+Alongside R1 and R3's timings, each row also prints `canvasCalls` — real
+`Canvas` draw calls from a `CanvasDrawSink` run over the same frame — and the
+painter's `dashSpanCount` and `collapsedDashCount`, so a dash-path regression
+shows up next to the timing it costs. `canvasCalls` is deliberately a separate
+number from `NullDrawSink.opCount`: `opCount` counts painter calls and keeps
+Plan 3a's R1 and R3 rows comparable line for line, while `canvasCalls` counts
+what those calls become once dashing can split one polyline into several
+strokes.

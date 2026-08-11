@@ -48,9 +48,15 @@ class HarnessApp extends StatefulWidget {
 
   final DraftDocument document;
 
-  /// Handed the pieces a rig needs to drive: the camera it scripts, and the
-  /// index whose rebuild count it reports.
-  final void Function(CameraController camera, SpatialIndex index)? onReady;
+  /// Handed the pieces a rig needs to drive: the camera it scripts, the
+  /// index whose rebuild count it reports, and the painter and sink whose
+  /// counters it reads.
+  ///
+  /// Fired after the first frame, not from `initState` — the painter and
+  /// sink belong to `DraftCanvasState`, a descendant whose own `initState`
+  /// has not run yet when this widget's has.
+  final void Function(CameraController camera, SpatialIndex index,
+      DraftPainter painter, CanvasDrawSink sink)? onReady;
 
   @override
   State<HarnessApp> createState() => _HarnessAppState();
@@ -60,11 +66,16 @@ class _HarnessAppState extends State<HarnessApp> {
   late final SpatialIndex index = SpatialIndex(widget.document);
   late final CameraController camera = CameraController(
       ViewportTransform.fit(widget.document.extents, const Size(1600, 1200)));
+  final GlobalKey<DraftCanvasState> _canvasKey = GlobalKey<DraftCanvasState>();
 
   @override
   void initState() {
     super.initState();
-    widget.onReady?.call(camera, index);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final canvasState = _canvasKey.currentState!;
+      widget.onReady
+          ?.call(camera, index, canvasState.painter, canvasState.sink);
+    });
   }
 
   @override
@@ -90,6 +101,7 @@ class _HarnessAppState extends State<HarnessApp> {
                   event.scrollDelta.dy < 0 ? 1.1 : 1 / 1.1);
             },
             child: DraftCanvas(
+                key: _canvasKey,
                 document: widget.document,
                 index: index,
                 camera: camera,
