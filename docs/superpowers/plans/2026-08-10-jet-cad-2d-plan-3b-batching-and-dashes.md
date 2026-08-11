@@ -462,6 +462,11 @@ reference_walk.dart is untouched. flatten already normalises both routes."
 
 ## Task 2: `CanvasDrawSink` batching, mode B, and the pixel-equivalence test
 
+> **Superseded 2026-08-11.** This task was implemented and its result measured;
+> the batching it builds does not ship. Kept as the record of what was built and
+> why. See [the spike note](../notes/2026-08-11-plan-3b-batch-spike.md) and
+> "The spike fired its stop clause" below. Task 4b removes this code.
+
 The first of two sink tasks. It adds the mode enum, the frame boundary, the real-call counter, the alpha rule, and the **single open bucket** lifecycle — variant B, which gives up no draw order at all.
 
 **Files:**
@@ -1295,6 +1300,11 @@ can see."
 
 ## Task 3: The persistent bucket map, and the baked-curve variant
 
+> **Superseded 2026-08-11.** This task was implemented and its result measured;
+> the batching it builds does not ship. Kept as the record of what was built and
+> why. See [the spike note](../notes/2026-08-11-plan-3b-batch-spike.md) and
+> "The spike fired its stop clause" below. Task 4b removes this code.
+
 Variants A and A′. Both hold a `Map` of open buckets instead of one, which is the only lifecycle that can collapse 21,031 ops into tens of calls — and the only one that costs draw order.
 
 **Files:**
@@ -1683,6 +1693,13 @@ difference fixture 1 tolerates."
 
 ## Task 4: The spike — measure the four modes and choose one
 
+> **Ran 2026-08-11. The decision rule's stop clause fired.** No mode beat the
+> unbatched path: 179.63 ms unbatched against 187.19 / 229.37 / 490.19 ms for
+> the three batched modes. Step 6 was correctly not performed. The numbers, the
+> record/raster split that explains them, and the two follow-ups are in
+> [the spike note](../notes/2026-08-11-plan-3b-batch-spike.md). Steps 1 to 5
+> stand as written and were executed; Steps 6 to 8 are void.
+
 The reason raster is 26 µs per leaf is an inference. This task turns it into a number, under a decision rule written before the numbers exist.
 
 **Files:**
@@ -1837,6 +1854,260 @@ break toward the narrower ordering contract, and no winner means stop.
 The losing modes are deleted rather than left behind a flag. A mode
 nobody measured is configuration, and this plan's whole method is that
 the numbers choose."
+```
+
+---
+
+---
+
+## The spike fired its stop clause — what changes
+
+Task 4's decision rule was written before any number existed and its fourth
+clause fired: no batching mode beat the unbatched path. Draw calls collapsed
+from 7,009 to 10, recording got 40% cheaper, and rasterising got 2.7 times more
+expensive. The mechanism was implemented correctly; it is not what binds the
+frame. Full numbers, and the two follow-ups that closed off the remaining
+arguments, in [the spike note](../notes/2026-08-11-plan-3b-batch-spike.md).
+
+**Tasks 0 and 1 are unaffected and stand.** The two deletions were made on Plan
+3a's measurements, and the screen-space carry is speed-neutral — the unbatched
+path measures 179.63 ms against 3a's 182.73 ms — while removing `_bypassable`,
+demoting `kAnisotropyThreshold` to a counter's predicate, and taking the
+residual-scale division out of the stroke width for every line.
+
+**Tasks 2, 3 and 4's product code comes out.** Task 4b does that.
+
+**Task 4c replaces the spike.** The 179 ms is now unexplained and it is not
+draw-call dispatch. Plan 3e is a plan about reducing per-frame work, and it
+cannot be designed until something says what that work is. This is the same
+move Plan 3a made when it insisted on measuring the unmemoised style resolver
+before adopting a memo — and that one saved a 19–39% pessimisation from
+shipping.
+
+**Tasks 5 to 13 proceed as written**, with two amendments recorded in Task 13:
+the dash gate stops being failable, and the web row's justification changes.
+
+---
+
+## Task 4b: Remove the batching machinery
+
+Nothing measured supports keeping it, and a sink with four modes that all lose
+is configuration nobody can choose between. The counter stays: how many real
+draw calls a frame issues is worth knowing whatever the sink does with them.
+
+**Files:**
+- Modify: `packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart`
+- Modify: `packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart` (drop `batchMode`, keep the `flush()` call site only if `flush()` survives — it does not; see below)
+- Modify: `packages/jet_cad_2d_flutter/test/canvas_draw_sink_test.dart`
+- Modify: `packages/jet_cad_2d_flutter/test/draw_sink_test.dart`, `test/lineweight_test.dart`, `test/golden/stroke_width_golden_test.dart` (all three carry `BatchMode.off` arguments that no longer exist)
+- Modify: `apps/dev_harness_2d/lib/main.dart` (drop `kBatch` and `batchMode`)
+- Modify: `apps/dev_harness_2d/README.md`, `packages/jet_cad_2d_flutter/README.md`
+- Delete: `packages/jet_cad_2d_flutter/test/batch_equivalence_test.dart`
+- Delete: `packages/jet_cad_2d_flutter/test/rig/batch_spike_test.dart`
+- **Keep:** `packages/jet_cad_2d_flutter/test/rig/rig_support.dart` — the lift was behaviour-preserving and R1/R3 now share it.
+
+**Interfaces:**
+- Consumes: the sink as Task 3 left it.
+- Produces: `CanvasDrawSink({Canvas? canvas, required double pixelsPerPaperMm})` — no `mode`, no `flush()`. `int canvasCallCount` and `void resetCounters()` survive. `DraftCanvas` loses `batchMode`.
+
+- [ ] **Step 1: Write the failing test**
+
+The property worth pinning on the way out is the one the batching existed to
+change, stated in reverse: every primitive issues its own draw call. Replace the
+whole of `canvas_draw_sink_test.dart`'s batching group with:
+
+```dart
+  test('every primitive issues its own canvas call', () {
+    // The counter outlives the batching. Plan 3b measured four coalescing
+    // modes and all four were slower than this one, so what the sink does is
+    // one call per primitive — and that is now an assertion rather than an
+    // absence.
+    final recorder = PictureRecorder();
+    final sink = CanvasDrawSink(
+        canvas: Canvas(recorder), pixelsPerPaperMm: 8.0);
+    for (var i = 0; i < 5; i++) {
+      _line(sink, i * 10.0, _red);
+    }
+    sink.beginResidual(Transform2(2, 0, 0, 2, 5, 5));
+    sink.circle(0, 0, 4, _red);
+    sink.endResidual();
+    expect(sink.canvasCallCount, 6);
+  });
+
+  test('resetCounters zeroes the count without touching the canvas', () {
+    final recorder = PictureRecorder();
+    final sink = CanvasDrawSink(
+        canvas: Canvas(recorder), pixelsPerPaperMm: 8.0);
+    _line(sink, 0, _red);
+    expect(sink.canvasCallCount, 1);
+    sink.resetCounters();
+    expect(sink.canvasCallCount, 0);
+    _line(sink, 10, _red);
+    expect(sink.canvasCallCount, 1);
+  });
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `cd packages/jet_cad_2d_flutter && flutter test test/canvas_draw_sink_test.dart`
+
+Expected: FAIL to compile once the surrounding batching tests are deleted and
+`BatchMode` is still referenced — or, if you delete the tests first, FAIL with
+`canvasCallCount` reporting 0 because nothing has flushed. Either failure is the
+right one; record which you saw.
+
+- [ ] **Step 3: Strip the sink**
+
+From `canvas_draw_sink.dart` delete: the `BatchMode` enum, the `mode` field and
+constructor parameter, `_buckets`, `_pool`, `_bucket`, `_bucketOpen`,
+`_bucketArgb`, `_bucketLineweight`, `_mapped`, `_opaque`, `_translationOnly`,
+`_bucketFor`, `flush()`, and the batching branches in `point`, `polyline`,
+`circle` and `arc`.
+
+Keep `_scratch`, `_paint`, `_point`, `_matrix`, `_matrix4OfResidual`,
+`_pushTransform`, `_widthFor`, `canvasCallCount` and `resetCounters`.
+
+`beginResidual` keeps the **deferred** transform push — `_pushTransform` called
+from the primitive rather than from `beginResidual`. That is not batching
+residue: it is what lets `endResidual` skip a `save`/`restore` pair for a
+residual under which nothing was drawn, and the existing `draw_sink_test.dart`
+tests cover the pairing.
+
+- [ ] **Step 4: Unwire the callers**
+
+`draft_canvas.dart`: drop the `batchMode` field, its constructor parameter, its
+entry in `didUpdateWidget`'s re-attach check, and the `sink.flush()` call in
+`_DraftCustomPainter.paint`.
+
+`apps/dev_harness_2d/lib/main.dart`: drop `kBatch`, the `batchMode` getter and
+the `batchMode:` argument.
+
+`draw_sink_test.dart`, `lineweight_test.dart` and
+`stroke_width_golden_test.dart`: drop the `mode: BatchMode.off` arguments and
+the `sink.flush()` calls that Task 2 added. **The `flush()` in
+`stroke_width_golden_test.dart`'s `_PainterHost` must go with them** — with no
+buckets there is nothing to flush, and leaving a call to a deleted method is a
+compile error rather than a silent one, which is the good case.
+
+- [ ] **Step 5: Delete the two dead test files**
+
+`test/batch_equivalence_test.dart` and `test/rig/batch_spike_test.dart`. Both
+exist only to compare or measure modes that no longer exist.
+
+Their loss is real and worth naming in the commit: the alpha-exclusion rule and
+the ordering contract they proved were properties *of the batching*. With one
+call per primitive, draw order is the painter's ascending-handle order and
+nothing downstream reorders it, so there is no contract left to test.
+
+- [ ] **Step 6: Run everything**
+
+Run: `cd packages/jet_cad_2d_flutter && flutter test` — expected: PASS.
+Run: `cd packages/jet_cad_2d_flutter && flutter test --tags golden` — expected: PASS, 3 tests, **with no PNG regenerated**. Check `git status` and confirm no `.png` is modified.
+Run: `cd packages/jet_cad_2d && dart test` — expected: PASS.
+Run `dart format .` and `flutter analyze` in both packages and `apps/dev_harness_2d`; all clean.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add -A packages/jet_cad_2d_flutter apps/dev_harness_2d
+git commit -m "revert: remove the batching machinery the spike refuted
+
+Twelve profile runs at 500,000 entities: unbatched 179.63 ms, and the
+three batched modes 187.19, 229.37 and 490.19. Draw calls collapsed from
+7,009 to 10 and recording got 40% cheaper, so the mechanism worked - it
+is simply not what binds the frame. The most batched mode is the
+slowest, by a factor of 2.7.
+
+So BatchMode, the buckets, flush(), DraftCanvas.batchMode and the BATCH
+define all come out, and with them the two tests that only existed to
+compare modes. Losing them costs the alpha-exclusion proof and the
+ordering-contract proof, and that is correct: both were properties of
+the batching. One call per primitive means draw order is the painter's
+ascending-handle order with nothing downstream to reorder it.
+
+canvasCallCount and resetCounters stay. How many real draw calls a frame
+issues is worth knowing whatever the sink does with them, and the gap
+between that and NullDrawSink.opCount is now a diagnostic rather than a
+target.
+
+rig_support.dart stays: the lift out of paint_microbench_test.dart was
+behaviour-preserving, proven by running R1/R3 before and after."
+```
+
+---
+
+## Task 4c: Find out what the 179 ms actually is
+
+The frame is raster-bound and the cost is not draw-call dispatch. That is all
+that is known. Plan 3e exists to reduce per-frame work and cannot be designed
+against an unknown — this task's deliverable is a name for the dominant cost,
+with a repeatable way to see it again.
+
+**This is a measurement task. It produces a note, not a feature.** Do not
+optimise anything you find.
+
+**Files:**
+- Create: `docs/superpowers/notes/<date>-plan-3b-raster-profile.md`
+- Modify: `apps/dev_harness_2d/README.md` (the capture recipe)
+
+**Interfaces:**
+- Consumes: `apps/dev_harness_2d` at 500,000 entities, working-set camera.
+- Produces: a named dominant cost and a repeatable capture recipe.
+
+- [ ] **Step 1: Capture the frame**
+
+Three routes; take whichever produces a breakdown first, and record which ones
+failed and how, because a route that does not work is worth the next person
+knowing.
+
+1. **Xcode Instruments, Metal System Trace or the Game Performance template**,
+   attached to the profile-mode harness while it pans. This is the one that can
+   attribute time inside Impeller.
+2. **`flutter run --profile --trace-skia`** plus DevTools' Performance view,
+   exporting the timeline. Impeller may render the Skia-specific tracks empty;
+   say so if it does rather than reporting a blank chart as a result.
+3. **`IMPELLER_TRACE`-style engine flags**, if the installed engine build
+   exposes any. Check `flutter run --help` and the engine's own flags rather
+   than guessing.
+
+- [ ] **Step 2: Answer four questions with numbers**
+
+The note must answer these, or say explicitly which the capture could not:
+
+- **Where does the 179 ms sit** — CPU-side tessellation, GPU vertex work, GPU
+  fragment/fill, or blit and composite?
+- **How much of it scales with the number of drawn leaves** rather than with
+  screen area? Compare the working-set frame at 500,000 entities against the
+  same camera at 50,000, where the drawn-leaf count falls from about 7,010 to
+  about 3,670. If the time halves, it is per-leaf work; if it barely moves, it
+  is per-pixel work and the leaf count is not the lever.
+- **What does overdraw look like?** Thousands of thin strokes over a small
+  viewport is a plausible fill-rate story, and it is the one a picture cache
+  would not fix.
+- **Does the 2.7× penalty for one giant path have a name in the capture?** The
+  batched mode is deleted by then, so if answering this needs it, capture it in
+  Task 4b's parent commit before the removal lands, and say that is what you did.
+
+- [ ] **Step 3: Write the note and state what it means for 3e**
+
+One section, plainly: given the dominant cost, which of Plan 3e's intended
+mechanisms could touch it, and which could not. A definition picture cache, a
+tile cache and fewer transform pushes address quite different costs, and this
+note is what decides between them.
+
+If the capture is inconclusive, **say so and say what would settle it.** An
+inconclusive measurement honestly reported is worth more than a mechanism
+guessed at, which is the whole reason Task 4 was written the way it was.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A docs/superpowers/notes apps/dev_harness_2d/README.md
+git commit -m "docs: profile the 500k working-set frame
+
+The batch spike established what the 179 ms is not. This establishes
+what it is, so Plan 3e can be designed against a cost rather than an
+assumption."
 ```
 
 ---
@@ -3251,23 +3522,26 @@ The method that found Plan 2's and 3a's real defects, applied to the constructs 
 
 | # | Mutant | Must be caught by |
 |---|---|---|
-| 1 | `_opaque` returns `true` always | `translucent same-key overlap renders identically` (Task 2) |
-| 2 | `flush()` body emptied | `flush is required` (Task 2) |
-| 3 | the bucket key drops `lineweightHundredths` | a new sink test: two styles differing only in lineweight must produce two calls |
-| 4 | `_bucketFor` skips the key-change flush in `openBucket` | `a paint change flushes` (Task 2) |
-| 5 | the curve flush in `bucketMap` is dropped | `flushes every bucket before a curve` (Task 3) |
-| 6 | `_translationOnly` returns `true` always | `opaque same-key overlap differs only in partial coverage` — a curve's residual applied as a translation moves it, so `lostFullCoverage` is non-zero |
-| 7 | `clipSegment` returns `t0 = 0` instead of the computed value | `the phase is carried from the true start` (Task 6) |
-| 8 | `cursor` starts at `0` instead of the floored multiple of `period` | the same test, and R2's frame time |
-| 9 | `period < collapsePx` → `period <= collapsePx` | a boundary test: `scale` chosen so `period == collapsePx` exactly must **not** collapse |
-| 10 | `_dashScale` drops `globalLinetypeScale` | `globalLinetypeScale multiplies it too` (Task 8) |
-| 11 | `_dashScale` drops `toScreen.scaleMagnitude` | `the instance scale multiplies the on-screen dash length` (Task 8) |
-| 12 | the pattern restarts per *polyline* rather than per vertex | `the pattern restarts at every vertex` (Task 6) |
-| 13 | `circleClipWindows` returns `-1` always | `only the angular window inside the clip is generated` (Task 7) |
-| 14 | the clip inflation set to `0` | a new painter test: a stroke whose centreline is one pixel outside the viewport must still emit a span |
-| 16 | the bucket lookup keys on `argb` alone, ignoring lineweight | the same test as mutant 3 — two styles differing only in lineweight |
-| 17 | `_localClipFor` returns `_rebasedClip` unconditionally | `only the angular window inside the clip is generated`, exercised through the painter on a dashed circle under a scaled instance |
-| 15 | the painter draws curves through `_emitScreenSpace` | golden `anisotropy_bypass.png` |
+| 1 | `clipSegment` returns `t0 = 0` instead of the computed value | `the phase is carried from the true start` (Task 6) |
+| 2 | `cursor` starts at `0` instead of the floored multiple of `period` | the same test, and R2's frame time |
+| 3 | `period < collapsePx` → `period <= collapsePx` | a boundary test: `scale` chosen so `period == collapsePx` exactly must **not** collapse |
+| 4 | `_dashScale` drops `globalLinetypeScale` | `globalLinetypeScale multiplies it too` (Task 8) |
+| 5 | `_dashScale` drops `toScreen.scaleMagnitude` | `the instance scale multiplies the on-screen dash length` (Task 8) |
+| 6 | the pattern restarts per *polyline* rather than per vertex | `the pattern restarts at every vertex` (Task 6) |
+| 7 | `circleClipWindows` returns `-1` always | `only the angular window inside the clip is generated` (Task 7) |
+| 8 | the clip inflation set to `0` | a new painter test: a stroke whose centreline is one pixel outside the viewport must still emit a span |
+| 9 | `_localClipFor` returns `_rebasedClip` unconditionally | a dashed circle under a scaled instance, exercised through the painter |
+| 10 | `DocumentHeader.globalLinetypeScale` defaults to `0.0` instead of `1.0` | `a document written before the field reads back as 1` (Task 5) |
+| 11 | the painter draws curves through `_emitScreenSpace` | golden `anisotropy_bypass.png` |
+| 12 | `_emitSpan` writes to `_span` but the painter passes `_points` | any dashed painter test — spans would carry the whole polyline |
+
+The batching mutants that earlier drafts of this table listed are gone with the
+code they targeted. Two of them had already done their work before the removal
+and are recorded in the spike note rather than lost: mutating `_opaque` to
+`=> true` broke the translucent-equivalence test with 4,686 differing pixels,
+and keying the bucket map on a constant instead of the lineweight broke the
+collision test. Both were verified by a reviewer independently of the
+implementer.
 
 - [ ] **Step 2: For every mutant that survives, write the test that kills it**
 
@@ -3361,19 +3635,34 @@ git commit -m "docs: record Plan 3b's measurements"
 
 | Criterion | Threshold |
 |---|---|
-| 500k working-set raster p50, dashes on | ≤ 182.73 ms |
-| translucent same-key overlap, both modes | **zero** differing pixels, no tolerance |
-| opaque same-key overlap, both modes | after a 4×4 box downsample, max per-channel delta ≤ 12 and mean < 2; ink conserved within 2%; no hue change |
-| cross-key overlap | zero differing pixels under `openBucket`; under a mapped mode the dominance flips are asserted instead |
-| the pre-existing stroke-width goldens | pass unchanged, pinned to `BatchMode.off` |
+| the spike's four modes | measured, recorded, stop clause honoured. **Met** — see the spike note |
+| the batching machinery | removed (Task 4b), suite green afterwards |
+| the raster profile | one named dominant cost for the 500k working-set frame, with a repeatable capture recipe — or an explicit statement of what the capture could not establish and what would settle it |
+| 500k working-set raster p50, dashes on | **measured and recorded** against 179.63 ms. Not a threshold — see below |
+| the pre-existing stroke-width goldens | pass unchanged, **no PNG regenerated** |
+| the dash-ladder goldens | generated and reviewed |
 | the differential oracle | both differential tests and the non-vacuity test pass |
 | `git diff --stat main -- packages/jet_cad_2d_flutter/lib/src/reference_walk.dart` | **empty** |
 | `kDashCollapsePx` | swept, numbers recorded, chosen by recorded review |
 | mutation log | every mutant killed or argued equivalent |
 
-- [ ] **Step 3: If the gate fails, record it — do not work around it**
+**The dash row is no longer failable, and the demotion is on evidence.** It was
+written as "does the batching win exceed the dash cost?", which was a real
+question while there was a batching win to weigh. The spike established there is
+none. Keeping the threshold would assert that a third of the drawing can start
+being drawn dashed at no cost, against a path with nothing to offset it — which
+is asserting that dashes are free. They are not. The number is the deliverable.
 
-A failure means the batching win is smaller than the dash cost. Write that in the results note as a number, state what it implies for 3e, and stop. Plan 3a's `snap at dirty threshold` row is the precedent: a known failure carried forward honestly is worth more than a threshold quietly moved.
+The batching-equivalence rows are gone with the code they tested. Their loss is
+real: the alpha-exclusion rule and the ordering contract were properties *of the
+batching*, and with one draw call per primitive there is no reordering left to
+constrain.
+
+- [ ] **Step 3: If a criterion fails, record it — do not work around it**
+
+Plan 3a's `snap at dirty threshold` row is the precedent, and Task 4 is this
+plan's own: a stop clause that fires is a result. Write the number, state what
+it implies for 3c, 3d and 3e, and stop.
 
 - [ ] **Step 4: Record the gate and finish the branch**
 
@@ -3383,10 +3672,12 @@ Append the gate results to the results note, then use the **superpowers:finishin
 
 ## Self-Review
 
-**Spec coverage.** Every section of the spec maps to a task: the batch mechanism to Tasks 1–3, the spike and its decision rule to Task 4, dashes to Tasks 5–8, the collapse floor to Task 9, the removals to Task 0, measurement and counters to Tasks 10 and 12, the goldens and the oracle to Tasks 2, 3 and 8, mutation testing to Task 11, and the exit criteria to Task 13. The flush contract 3b owes 3d is written in Task 2's `_bucketFor` and exercised by Task 3's curve test.
+**Spec coverage, as revised.** The removals map to Task 0, the screen-space carry to Task 1, the batch mechanism to Tasks 1–3 and the spike to Task 4 — all executed, and the batching refuted and removed in Task 4b. Task 4c replaces the spike as the measurement 3e needs. Dashes map to Tasks 5–8, the collapse floor to Task 9, counters and rigs to Tasks 10 and 12, mutation testing to Task 11, and the exit criteria to Task 13.
+
+**What the revision cost, stated rather than quietly dropped.** The flush contract 3b was to hand 3d is gone: it existed so a fill could force batched strokes out before drawing over them, and with one draw call per primitive there is nothing to flush. 3d inherits the ordinary situation instead — the painter's ascending-handle order reaches the canvas unaltered.
 
 **Verified against the code while writing.** `TableSection.operator []` returns `T?` keyed by `Handle`; `EntityStore` exposes `liveSlots`, not a slot count plus a liveness test; `workingSetCamera` takes one argument and uses `kRigViewport`; `DraftCanvas.resolver` is optional; `TrueColor` is a const constructor over `rgb`. Each of those was checked in the source rather than recalled, and two of the four first drafts of these tests were wrong.
 
-**Type consistency.** `BatchMode` is introduced in Task 2 with two values and extended in Task 3 to four, then reduced in Task 4. `CanvasDrawSink.flush()`, `canvasCallCount` and `resetCounters()` keep their names throughout. `Dasher.dashPolyline` and `Dasher.dashArc` return `bool` with the same meaning in both — false means the caller draws the geometry as it stands. `screenSpaceLeafCount` replaces `bypassCount` in Task 1 and is used under the new name in Tasks 4 and 10. `kDashCollapsePx` is defined in Task 6 and set in Task 9.
+**Type consistency.** `BatchMode` is introduced in Task 2 with two values, extended in Task 3 to four, and deleted entirely in Task 4b along with `CanvasDrawSink.flush()` and `DraftCanvas.batchMode`. `canvasCallCount` and `resetCounters()` survive and keep their names throughout. `Dasher.dashPolyline` and `Dasher.dashArc` return `bool` with the same meaning in both — false means the caller draws the geometry as it stands. `screenSpaceLeafCount` replaces `bypassCount` in Task 1 and is used under the new name in Tasks 4 and 10. `kDashCollapsePx` is defined in Task 6 and set in Task 9.
 
 **Known gap, deliberate.** The differential oracle does not cover dashed drawing, because the reference walk does not dash and `differentialFixture` is entirely continuous. Task 8 asserts that fact rather than relying on it. Dashing is covered by the dasher's unit tests, the painter's scale-chain tests, and the dash-ladder golden.

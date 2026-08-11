@@ -1,6 +1,22 @@
 # jet_cad_2d Plan 3b — Draw-Call Batching and Dashes
 
-**Status:** draft 2026-08-10
+> ## Revised 2026-08-11: the batching half of this spec was measured and refuted
+>
+> The spike below ran, its decision rule's stop clause fired, and **no batching
+> mode ships**. Twelve profile runs at 500,000 entities: the unbatched path is
+> 179.63 ms, the most batched mode is 490.19 ms, and nothing beats unbatched.
+> Draw calls collapsed from 7,009 to 10 and recording got 40% cheaper, so the
+> mechanism was implemented correctly — it simply is not what binds the frame.
+>
+> Numbers and the two follow-ups in
+> [2026-08-11-plan-3b-batch-spike.md](../notes/2026-08-11-plan-3b-batch-spike.md).
+>
+> Everything below about the batch is kept as the record of what was designed,
+> why, and what the measurement did to it. **Read "What the spike changed" at
+> the end of this document for what 3b actually delivers.** The dash design,
+> the two deletions, and the screen-space carry are unaffected and still stand.
+
+**Status:** draft 2026-08-10, batching half refuted 2026-08-11
 **Parent:** [2026-07-27-jet-cad-2d-architecture-design.md](2026-07-27-jet-cad-2d-architecture-design.md)
 **Predecessor:** Plan 3a (render path foundation and measurement) — tasks 0–9 merged at `f9a7d8e`, tasks 10–18 committed to `main` directly, exit gate run at `cdeb4cc` and recorded at `bfe9df4`. 759 tests: 639 engine, 120 Flutter
 **Carried in:** [2026-08-10-plan-3a-results.md](../notes/2026-08-10-plan-3a-results.md), [2026-08-10-plan-3a-ledger.md](../notes/2026-08-10-plan-3a-ledger.md)
@@ -503,28 +519,58 @@ never write handle literals. Two 3a fixtures were silently building malformed
 documents because they did, and the cross-store handle invariant is what exposed
 them.
 
+## What the spike changed
+
+The batch shipped nothing. What 3b delivers instead:
+
+1. **The two deletions stand.** `kCullFloor`, `LeafOwnerMap` and
+   `MemoisedStyleResolver` are gone, on Plan 3a's measurements. Unaffected by
+   anything the spike found.
+2. **The screen-space carry stands.** Every point, line and polyline reaches the
+   sink already in screen space under one shared translation residual. It is
+   speed-neutral — the unbatched path measures 179.63 ms against 3a's
+   182.73 ms — and it removes `_bypassable`, reduces `kAnisotropyThreshold` to a
+   counter's predicate, and takes the residual-scale division out of the stroke
+   width for every line. Kept for the code it deletes, not for a speed claim.
+3. **The batching machinery is removed.** `BatchMode`, the buckets, `flush()`,
+   `DraftCanvas.batchMode`, the `BATCH` define, the spike rig and the
+   pixel-equivalence test all go. `CanvasDrawSink.canvasCallCount` stays: a
+   counter that says how many real draw calls a frame issues is worth having
+   whatever the sink does with them.
+4. **A profiling task replaces the spike.** The 179 ms is now unexplained, and it
+   is not draw-call dispatch. Before Plan 3e designs a cache to reduce
+   per-frame work, something has to say what that work *is*. This is the same
+   move 3a made when it measured the unmemoised style resolver first.
+5. **Dashes proceed unchanged.** The design in this document is untouched by the
+   spike: an engine-side dasher, a screen-space period, clip-then-phase, and a
+   measured collapse floor.
+
 ## Exit criteria
 
 | Criterion | Threshold |
 |---|---|
-| 500k working-set raster p50, **with dashes on** | **≤ 182.73 ms** — 3a's dash-free number. Failable |
-| batched vs unbatched goldens, fixtures 1 and 2 | byte-identical |
-| batched vs unbatched goldens, fixture 3 | byte-identical under B; a reviewed, deliberately regenerated golden under A or A′ |
+| the spike's four modes | measured, recorded, and the stop clause honoured — **met**, see the note |
+| the raster profile | one named cost accounting for the largest share of the 500k working-set frame, with the capture method recorded and repeatable |
+| the batching machinery | removed, with the suite green after its removal |
+| 500k working-set raster p50, **with dashes on** | measured and recorded against 179.63 ms. **Not a threshold** |
 | the differential oracle | both differential tests and the non-vacuity test pass, with `reference_walk.dart` unmodified |
-| the spike's four variants | measured, recorded, and the shipped one chosen by the stated rule |
 | `kDashCollapsePx` | swept with its numbers recorded, and chosen by a recorded human review of the dash-ladder goldens |
 | engine and Flutter suites, analyzer, formatter | green and clean |
 | mutation log | every mutant killed or argued equivalent |
 
-The gate asks the only question worth asking of this plan: **does the batching
-win exceed the dash cost?** A pass means 3c and 3d start from a path that has
-absorbed a third of the drawing becoming dashed. A failure means the batch win
-is smaller than the dash cost, 3e's job is larger than 3a's note assumed, and
-that is recorded as a number rather than discovered in 3e.
+**The dash gate is no longer failable, and that is a demotion made on evidence.**
+It was written as "does the batching win exceed the dash cost?" — a real
+question while there was a batching win to weigh. There is none. Asserting that
+a third of the drawing can start being drawn dashed without costing anything,
+against a path with nothing to offset it, would be asserting that dashes are
+free. They are not, and the honest deliverable is the number.
 
-Web's 500k whole-drawing frame is **re-measured and not gated**. Batching is the
-direct remedy for the 3.4-million-op abort and it would be satisfying to require
-the fix, but a hard limit inside CanvasKit is not this plan's to guarantee.
+Web's 500k whole-drawing frame is **re-measured and not gated**, and the reason
+has changed: Plan 3a's 3.4-million-op CanvasKit abort **did not reproduce**
+against the current tree, on the same corpus, camera and toolchain. All four
+modes completed. That removes the last argument for shipping a batching mode
+that loses on the measured platform, and it means 3a's results note item 5
+should not be treated as a live constraint until someone re-establishes it.
 
 ## Carried to Plan 3c
 
