@@ -174,6 +174,12 @@ int circleClipWindows(
     final a = _crossings[i];
     final b =
         i + 1 < crossingCount ? _crossings[i + 1] : _crossings[0] + 2 * math.pi;
+    // A tangent circle touches an edge at a single point rather than
+    // crossing it, and that point is found twice (once from each side of
+    // the edge search), producing a gap of width zero. There is no visible
+    // arc at a point, so skip it rather than reporting a start == end pair
+    // that would violate this function's own contract.
+    if (b <= a) continue;
     final mid = (a + b) / 2;
     final mx = cx + r * math.cos(mid);
     final my = cy + r * math.sin(mid);

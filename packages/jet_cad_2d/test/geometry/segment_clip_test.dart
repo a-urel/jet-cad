@@ -64,5 +64,17 @@ void main() {
       // nothing is drawn even though the circle encloses the whole view.
       expect(circleClipWindows(50, 50, 200, clip, out), 0);
     });
+
+    test('a circle tangent to an edge reports no zero-width window', () {
+      // Centre (50, -40), radius 40: cy + r == 0 == clip.minY exactly, so the
+      // circle's topmost point (50, 0) touches the bottom edge at a single
+      // point rather than crossing it. Both crossings the edge search finds
+      // there coincide at angle pi/2, and that point's midpoint-of-itself is
+      // inside the (closed) clip, so before the fix this reported one pair
+      // [pi/2, pi/2] — violating the doc comment's `start < end`. A tangent
+      // touches at a point; there is no visible arc there, so the correct
+      // count is zero.
+      expect(circleClipWindows(50, -40, 40, clip, out), 0);
+    });
   });
 }

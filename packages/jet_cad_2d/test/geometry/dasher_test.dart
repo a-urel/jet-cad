@@ -209,6 +209,35 @@ void main() {
       expect(below, greaterThan(0), reason: 'the part before it');
     });
 
+    test('the emitted spans cover the visible window, not just part of it', () {
+      // Containment says every span is inside the clip; a dasher that emits
+      // one span in ten satisfies it. This says the spans add up. It is the
+      // assertion that would have caught the straddling under-draw directly
+      // rather than by inspecting which side they fell on.
+      final clip = Aabb2(Vector2(0, -100), Vector2(20, 100));
+      final dasher = Dasher();
+      final spans =
+          arcs(dasher, -1000, 0, 1005, 0, 2 * math.pi, 1.0, clip: clip);
+
+      var drawn = 0.0;
+      for (final s in spans) {
+        drawn += s[1].abs() * 1005;
+      }
+      // windowArcLength = 2 * r * asin(100 / 1005): the visible window is
+      // bound by |y| <= 100, not by x >= 0 — see the report for the hand
+      // comparison of the two half-angles that establishes this. `asin`
+      // is not a const function, so this is computed once at runtime from
+      // the hand-derived closed form rather than hand-evaluated into a
+      // literal (which would risk an arithmetic slip the report can't
+      // catch).
+      final windowArcLength = 2 * 1005 * math.asin(100 / 1005);
+      const perPeriodDrawn = 12.0 / 18.0;
+      expect(drawn, closeTo(windowArcLength * perPeriodDrawn, 2 * 12.0),
+          reason: 'total drawn arc length must match the pattern\'s drawn '
+              'fraction of the visible window, within one drawn run at each '
+              'end');
+    });
+
     test('a circle wholly outside the clip emits nothing', () {
       final spans = arcs(Dasher(), 0, 0, 10, 0, 2 * math.pi, 1.0,
           clip: Aabb2(Vector2(500, 500), Vector2(600, 600)));
