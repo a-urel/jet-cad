@@ -3545,8 +3545,9 @@ The method that found Plan 2's and 3a's real defects, applied to the constructs 
 
 | # | Mutant | Must be caught by |
 |---|---|---|
-| 1 | `clipSegment` returns `t0 = 0` instead of the computed value | `the phase is carried from the true start` (Task 6) |
-| 2 | `cursor` starts at `0` instead of the floored multiple of `period` | the same test, and R2's frame time |
+| 1 | `_dashSegment` uses `from = 0` instead of `_range[0] * length` | `the phase is carried from the true start` (Task 6) |
+| 2 | `cursor` starts at `0` instead of the floored multiple of the cycle | `a long segment clipped to a small window costs few pattern steps` (Task 6). **No output test can catch this**: for a well-formed pattern the two starting points reach the same breakpoint with the same element index, so the skip is a pure work optimisation and only a work bound can see it break |
+| 2b | the cycle is taken from `pattern.totalLength` instead of `sum(abs(dashes))` | `a totalLength that disagrees with the dashes does not change the output` (Task 6) |
 | 3 | `period < collapsePx` → `period <= collapsePx` | a boundary test: `scale` chosen so `period == collapsePx` exactly must **not** collapse |
 | 4 | `_dashScale` drops `globalLinetypeScale` | `globalLinetypeScale multiplies it too` (Task 8) |
 | 5 | `_dashScale` drops `toScreen.scaleMagnitude` | `the instance scale multiplies the on-screen dash length` (Task 8) |
