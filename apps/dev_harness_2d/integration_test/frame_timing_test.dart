@@ -229,6 +229,15 @@ void main() {
     report('R2 ($kEntities)', timings);
     print('  screenSpaceLeafCount=${app.painter.screenSpaceLeafCount} '
         'lineweightScale=$kLineweightScale');
+    if (app.sink.canvasCallCount == 0) {
+      // The counters above are read from a frame that has to actually have
+      // happened. `panBy(Offset.zero)` forces one only because Transform2 has
+      // no operator== for ValueNotifier to dedupe against — a property this
+      // rig depends on and does not own. If that ever changes, this rig would
+      // print a plausible-looking zero rather than fail, and a zero is the one
+      // wrong number nobody questions.
+      throw StateError('no repaint happened: the forced frame did not draw');
+    }
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
@@ -285,6 +294,11 @@ void main() {
         'threshold=${app.index.rootIndex.rebuildThreshold} '
         'rebuilds=${app.index.rebuildCount - rebuildsBefore} '
         'handles burned=${app.doc.handleSeed.current.value - handlesBefore}');
+    // See R2's guard above for why: a zero here would mean the forced
+    // repaint silently stopped happening.
+    if (app.sink.canvasCallCount == 0) {
+      throw StateError('no repaint happened: the forced frame did not draw');
+    }
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
@@ -332,6 +346,11 @@ void main() {
     report('R4b ($kEntities)', timings);
     print('  command ${clock.summary}');
     print('  rebuilds=${app.index.rebuildCount - before} over $kSteps frames');
+    // See R2's guard above for why: a zero here would mean the forced
+    // repaint silently stopped happening.
+    if (app.sink.canvasCallCount == 0) {
+      throw StateError('no repaint happened: the forced frame did not draw');
+    }
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
