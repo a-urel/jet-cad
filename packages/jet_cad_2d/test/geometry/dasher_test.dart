@@ -158,6 +158,14 @@ void main() {
     test('only the angular window inside the clip is generated', () {
       // A large circle whose centre is far left: a narrow window crosses the
       // clip. Every emitted span must lie inside that window.
+      //
+      // This constrains containment only — every span emitted must be
+      // inside the window — and says nothing about completeness. It is
+      // satisfied trivially by under-drawing, which is exactly what this
+      // clip's window does before the fix below: the visible cap straddles
+      // `start` (angle 0 is the circle's rightmost point, dead centre of
+      // the cap), and the fix for that is pinned by the next test, "a
+      // window straddling the arc start emits on both sides of it".
       final clip = Aabb2(Vector2(0, -10), Vector2(20, 10));
       final spans =
           arcs(Dasher(), -1000, 0, 1005, 0, 2 * math.pi, 1.0, clip: clip);
@@ -171,6 +179,34 @@ void main() {
         expect(y, greaterThanOrEqualTo(clip.minY - 1));
         expect(y, lessThanOrEqualTo(clip.maxY + 1));
       }
+    });
+
+    test('a window straddling the arc start emits on both sides of it', () {
+      // A circle sitting left of the viewport, visible only in a narrow cap
+      // around angle 0 — which is exactly where the pattern's phase starts.
+      // Expressed as distances along the arc, that one window runs from near
+      // the end of the turn to near its beginning, so a single [from, to]
+      // range cannot hold it. Half the cap goes missing if it tries.
+      final clip = Aabb2(Vector2(0, -10), Vector2(20, 10));
+      final spans =
+          arcs(Dasher(), -1000, 0, 1005, 0, 2 * math.pi, 1.0, clip: clip);
+      expect(spans, isNotEmpty);
+
+      var below = 0, above = 0;
+      for (final s in spans) {
+        // Midpoint angle, normalised into [0, 2pi).
+        var mid = (s[0] + s[1] / 2) % (2 * math.pi);
+        if (mid < 0) mid += 2 * math.pi;
+        if (mid < math.pi) {
+          above++;
+        } else {
+          below++;
+        }
+      }
+      expect(above, greaterThan(0),
+          reason: 'the part of the cap past the start angle — this is the '
+              'piece a single contiguous range drops');
+      expect(below, greaterThan(0), reason: 'the part before it');
     });
 
     test('a circle wholly outside the clip emits nothing', () {

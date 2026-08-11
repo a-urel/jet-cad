@@ -247,13 +247,48 @@ class Dasher {
       return delta * r;
     }
 
-    var from = along(windowStart);
-    var to = along(windowEnd);
-    if (to <= from) to = total * r;
-    from = math.max(0.0, from);
-    to = math.min(total * r, to);
-    if (to <= from) return;
-    _walkArcRange(r, start, sweep, from, to, pattern, scale, period, emit);
+    final maxLen = total * r;
+    final from = math.max(0.0, along(windowStart));
+    final to = math.max(0.0, along(windowEnd));
+
+    if (to > from) {
+      // The common case: the window, expressed as an along-distance from
+      // `start`, is one contiguous piece. Clamp to the arc's own length in
+      // case the window (drawn from the full circle) extends past where a
+      // partial arc actually ends.
+      final clippedTo = math.min(maxLen, to);
+      if (clippedTo > from) {
+        _walkArcRange(
+            r, start, sweep, from, clippedTo, pattern, scale, period, emit);
+      }
+      return;
+    }
+    if (to < from) {
+      // The window wraps past `start`: `from` (measured going forward from
+      // `start`) lands near the end of the turn and `to` lands near the
+      // beginning, because `start` itself sits inside the visible window
+      // rather than inside the excluded gap. A single [from, to] range
+      // cannot represent that — it is two pieces of the arc, one on each
+      // side of `start` — so walk both. Dropping the [0, to] piece here
+      // silently under-draws every window whose visible cap straddles the
+      // arc's own start angle, which for a full circle is any window that
+      // contains angle 0.
+      final clippedFrom = math.min(maxLen, from);
+      if (clippedFrom < maxLen) {
+        _walkArcRange(
+            r, start, sweep, clippedFrom, maxLen, pattern, scale, period, emit);
+      }
+      final clippedTo = math.min(maxLen, to);
+      if (clippedTo > 0.0) {
+        _walkArcRange(
+            r, start, sweep, 0.0, clippedTo, pattern, scale, period, emit);
+      }
+      return;
+    }
+    // to == from: a degenerate, zero-width window. A real window from
+    // circleClipWindows always has positive angular extent, and the
+    // full-turn case is handled entirely by the sentinel path in dashArc, so
+    // this is not "the whole turn" — it is nothing.
   }
 
   /// Walks the pattern over `[from, to]`, both distances along the arc from
