@@ -13,6 +13,19 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 /// Entity count, so one binary serves both corpus sizes.
 const int kEntities = int.fromEnvironment('ENTITIES', defaultValue: 50000);
 
+/// Multiplies every stroke's device-pixel width at the sink.
+///
+/// **Measurement-only**, added for Task 4c's fill-rate experiment (B):
+/// geometry, draw-call count and the walk are unchanged across a run at 1x,
+/// 2x or 4x — only the number of shaded pixels changes. There is no
+/// `double.fromEnvironment` in Dart, so this parses the string define at
+/// startup rather than being a compile-time constant. Inert at its default
+/// of 1.0.
+final double kLineweightScale = double.tryParse(
+      const String.fromEnvironment('LINEWEIGHT_SCALE', defaultValue: '1.0'),
+    ) ??
+    1.0;
+
 /// The corpus the rigs measure on: the same shape as R1's, so the two sets of
 /// numbers describe one drawing.
 DraftDocument harnessDocument([int? entityCount]) => generateDocument(
@@ -77,7 +90,10 @@ class _HarnessAppState extends State<HarnessApp> {
                   event.scrollDelta.dy < 0 ? 1.1 : 1 / 1.1);
             },
             child: DraftCanvas(
-                document: widget.document, index: index, camera: camera),
+                document: widget.document,
+                index: index,
+                camera: camera,
+                lineweightScale: kLineweightScale),
           ),
         ),
       );

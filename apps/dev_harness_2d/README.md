@@ -63,3 +63,60 @@ synchronously in the gesture handler, before the frame it causes, so the index
 invalidation it triggers lands outside `buildDuration` entirely. Without that
 line the rig prints "200 full index rebuilds" and "build p50 5.4 ms" side by
 side, which reads as "rebuilds are free".
+
+R2 also prints `screenSpaceLeafCount` (the drawn-leaf count, from
+`DraftPainter`) and `lineweightScale` alongside its timings.
+
+## Isolating per-leaf cost from per-pixel cost
+
+Two `--dart-define`s support the controlled-experiment method Task 4c used
+to separate per-leaf raster cost from per-pixel raster cost, ahead of
+reaching for a profiler — see
+`docs/superpowers/notes/2026-08-11-plan-3b-raster-profile.md` for the full
+results.
+
+```bash
+# A: vary ENTITIES, same camera, same command otherwise — compare
+# screenSpaceLeafCount and raster p50 between runs.
+flutter drive --driver=test_driver/integration_test.dart \
+  --target=integration_test/frame_timing_test.dart --profile -d macos \
+  --dart-define=ENTITIES=500000 --dart-define=RIG=pan
+
+# B: vary LINEWEIGHT_SCALE, everything else fixed. Multiplies every stroke's
+# device-pixel width at the sink (CanvasDrawSink._widthFor) and nowhere
+# else, so geometry, draw-call count and the walk stay identical — only the
+# shaded pixel count changes. Inert at its default of 1.0.
+flutter drive --driver=test_driver/integration_test.dart \
+  --target=integration_test/frame_timing_test.dart --profile -d macos \
+  --dart-define=ENTITIES=500000 --dart-define=RIG=pan \
+  --dart-define=LINEWEIGHT_SCALE=4.0
+```
+
+## GPU attribution with Instruments
+
+`flutter drive --trace-to-file=<path>` is silently inert for this app on
+macOS (accepted, no error, no file — see the profiling note above). What
+worked instead: build and run the *interactive* app directly (not the
+integration-test rig, which is a `flutter_driver`-controlled process rather
+than a normal one), attach Xcode's `xctrace` to the already-running process,
+and drive it with real OS-level input.
+
+```bash
+flutter build macos --profile --dart-define=ENTITIES=500000
+open build/macos/Build/Products/Profile/dev_harness_2d.app
+
+# `--launch` leaves the target stopped and captures nothing; attach to an
+# already-running instance instead. Pan by hand during the recording, or
+# script it with `cliclick` (dd:/dm:/du: for drag-down/move/up).
+xcrun xctrace record --template "Metal System Trace" --time-limit 15s \
+  --no-prompt --output metal-trace.trace --attach dev_harness_2d
+
+xcrun xctrace export --input metal-trace.trace \
+  --xpath '/trace-toc/run[@number="1"]/data/table[@schema="metal-gpu-intervals"]' \
+  --output gpu-intervals.xml
+```
+
+The exported XML interns repeated values (`<tag ref="id"/>` points back at
+an earlier `<tag id="id" fmt="...">`), so summing by `gpu-channel-name` and
+`process` needs a small script to resolve refs before aggregating — see the
+profiling note for the approach.

@@ -57,6 +57,7 @@ class DraftCanvas extends StatefulWidget {
     required this.camera,
     this.resolver,
     this.pixelsPerPaperMm = kLogicalPixelsPerMm,
+    this.lineweightScale = 1.0,
   });
 
   final DraftDocument document;
@@ -68,6 +69,10 @@ class DraftCanvas extends StatefulWidget {
   final StyleResolver? resolver;
 
   final double pixelsPerPaperMm;
+
+  /// Forwarded to [CanvasDrawSink.lineweightScale]. Measurement-only, for
+  /// Task 4c's fill-rate experiment; inert at its default of 1.0.
+  final double lineweightScale;
 
   @override
   State<DraftCanvas> createState() => DraftCanvasState();
@@ -91,7 +96,9 @@ class DraftCanvasState extends State<DraftCanvas> {
   }
 
   void _attach() {
-    sink = CanvasDrawSink(pixelsPerPaperMm: widget.pixelsPerPaperMm);
+    sink = CanvasDrawSink(
+        pixelsPerPaperMm: widget.pixelsPerPaperMm,
+        lineweightScale: widget.lineweightScale);
     painter = DraftPainter(
       document: widget.document,
       index: widget.index,
@@ -110,7 +117,8 @@ class DraftCanvasState extends State<DraftCanvas> {
         widget.index != oldWidget.index ||
         widget.camera != oldWidget.camera ||
         widget.resolver != oldWidget.resolver ||
-        widget.pixelsPerPaperMm != oldWidget.pixelsPerPaperMm) {
+        widget.pixelsPerPaperMm != oldWidget.pixelsPerPaperMm ||
+        widget.lineweightScale != oldWidget.lineweightScale) {
       _changes.dispose();
       _attach();
     }

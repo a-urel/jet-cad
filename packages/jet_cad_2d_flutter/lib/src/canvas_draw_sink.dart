@@ -16,6 +16,7 @@ class CanvasDrawSink implements DrawSink {
   CanvasDrawSink({
     Canvas? canvas,
     required this.pixelsPerPaperMm,
+    this.lineweightScale = 1.0,
   }) {
     if (canvas != null) this.canvas = canvas;
   }
@@ -30,6 +31,17 @@ class CanvasDrawSink implements DrawSink {
   late Canvas canvas;
 
   final double pixelsPerPaperMm;
+
+  /// Multiplies every stroke's device-pixel width before it reaches `Canvas`.
+  ///
+  /// **Measurement-only**, for Task 4c's fill-rate experiment (B): it exists
+  /// so a run can change the number of shaded pixels while leaving geometry,
+  /// draw-call count and the walk byte-identical to every other run. Inert at
+  /// its default of 1.0 — nothing here branches on that value, the
+  /// multiplication is simply a no-op at it. Not read anywhere in the
+  /// painter or the style resolver; the point of the experiment is that
+  /// only the sink's idea of width changes.
+  final double lineweightScale;
 
   // One paint and one scratch path for the whole frame, reused in place;
   // neither is handed to a caller that could retain it.
@@ -148,7 +160,8 @@ class CanvasDrawSink implements DrawSink {
   }
 
   double _widthFor(int lineweightHundredths, double residualScale) {
-    final devicePx = lineweightHundredths / 100.0 * pixelsPerPaperMm;
+    final devicePx =
+        lineweightHundredths / 100.0 * pixelsPerPaperMm * lineweightScale;
     final w = residualScale == 0 ? devicePx : devicePx / residualScale;
     // 0 means "hairline" to Skia — one device pixel regardless of transform,
     // which is the right floor for a lineweight that has scaled away.

@@ -1,0 +1,313 @@
+# What the 179 ms actually is
+
+The batch spike established the negative: raster time is not draw-call
+dispatch — collapsing 7,009 calls to 10 made rasterising 2.7x *slower*. This
+task asks the positive question the spike left open: does raster time scale
+with the number of drawn leaves, or with the number of shaded pixels? Three
+controlled experiments answer it before any profiler is touched, and a
+profiler capture then attributes it on the GPU.
+
+**Answer: leaf-count-proportional, not pixel-proportional.** Vertex-stage GPU
+work — not fragment/fill — is what a real capture shows dominating, and that
+is consistent with everything below.
+
+## Machine and build
+
+Apple M3 Pro, macOS 26.5.1, Flutter 3.44.9, Dart SDK 3.12.2, Impeller (the
+macOS default, unchanged from the batch spike). Same corpus generator, same
+working-set camera as Plan 3a and the batch spike. `RIG=pan` throughout —
+`R2`'s 120 pan frames + 120 zoom frames.
+
+## Experiment A — vary leaf count, hold the camera
+
+`ENTITIES=500000` and `ENTITIES=50000`, same working-set camera, two runs
+each.
+
+| Entities | Run | raster p50 | raster p95 | build p50 | screenSpaceLeafCount |
+|---|---|---|---|---|---|
+| 500,000 | 1 | 170.02 ms | 178.70 ms | 9.56 ms | 4,679 |
+| 500,000 | 2 | 171.17 ms | 178.41 ms | 9.53 ms | 4,679 |
+| 50,000 | 1 | 70.46 ms | 74.54 ms | 4.11 ms | 2,237 |
+| 50,000 | 2 | 70.42 ms | 74.37 ms | 4.10 ms | 2,237 |
+
+Within-condition spread is negligible (170.02 vs 171.17; 70.46 vs 70.42), so
+medians stand without a third run: **170.60 ms** raster at 500k,
+**70.44 ms** at 50k.
+
+- Entity count scaled by **10.0x** (500,000 / 50,000).
+- `screenSpaceLeafCount` scaled by **2.09x** (4,679 / 2,237) — the working-set
+  camera shows roughly the same world-space window regardless of corpus
+  density, so most of that 10x never reaches the screen.
+- Raster p50 scaled by **2.42x** (170.60 / 70.44).
+
+**Time scaled by 2.42x when the drawn leaf count scaled by 2.09x — far closer
+to leaf-count-proportional than to entity-count-proportional (10x) or flat.**
+It is not an exact 1:1 (2.42 against 2.09 is about 16% more time growth than
+leaf growth), so the relationship is slightly super-linear in leaf count
+rather than perfectly linear — plausibly because denser corpora also carry
+more points per leaf on average, not just more leaves. But the finding is
+unambiguous: **halving the leaf count roughly halves the raster time.** A
+cache that reduces leaves drawn per frame is addressing the right lever.
+
+Build p50 moved in step (9.545 ms → 4.105 ms, a 2.33x ratio), which makes
+sense: build cost is the walk, and the walk visits roughly the same set of
+things the paint step draws.
+
+## Experiment B — vary stroke width, hold everything else
+
+Added `--dart-define=LINEWEIGHT_SCALE` (see "Harness change" below), which
+multiplies every stroke's device-pixel width at the sink and nowhere else.
+Geometry, draw-call count and the walk are byte-identical across 1x, 2x and
+4x — only the number of shaded pixels changes. `ENTITIES=500000`, `RIG=pan`,
+two runs per multiplier (1x reuses Experiment A's 500k runs, since
+`LINEWEIGHT_SCALE=1.0` is the harness default and produces an identical
+binary).
+
+| Scale | Run | raster p50 | raster p95 | build p50 | screenSpaceLeafCount |
+|---|---|---|---|---|---|
+| 1x | 1 | 170.02 ms | 178.70 ms | 9.56 ms | 4,679 |
+| 1x | 2 | 171.17 ms | 178.41 ms | 9.53 ms | 4,679 |
+| 2x | 1 | 173.80 ms | 182.77 ms | 9.54 ms | 4,679 |
+| 2x | 2 | 177.55 ms | 184.89 ms | 9.60 ms | 4,679 |
+| 4x | 1 | 180.18 ms | 187.42 ms | 9.55 ms | 4,679 |
+| 4x | 2 | 180.52 ms | 188.18 ms | 9.47 ms | 4,679 |
+
+Medians: 1x = 170.60 ms, 2x = 175.68 ms (+3.0%), 4x = 180.35 ms (+5.7%).
+`screenSpaceLeafCount` and build p50 are flat across all three, confirming
+the multiplier touches nothing but pixel coverage.
+
+**Time scaled by 1.057x when the shaded pixel area scaled by roughly 4x** (a
+4x width multiplier on the default ~0.94-device-pixel stroke gives
+approximately 4x more covered area for lines, which are the corpus
+majority). A quadrupling of shaded area moved raster time by under 6%. **Fill
+rate is a minor contributor, not the dominant one.**
+
+## Experiment C — vary the viewport (dropped)
+
+Attempted by assigning `tester.view.physicalSize = tester.view.physicalSize *
+2.0` inside `boot()` before the camera fit, at `ENTITIES=500000`. Two runs.
+
+| Run | raster p50 | raster p95 | build p50 | screenSpaceLeafCount | reportedPhysicalSize |
+|---|---|---|---|---|---|
+| 1 | 0.00 ms | 0.00 ms | 10.60 ms | 4,861 | (unprintable — see below) |
+| 2 | 0.00 ms | 0.00 ms | 10.44 ms | 4,861 | 3200.0 x 2400.0 |
+
+`tester.view.physicalSize` **did** change what the widget tree believes: the
+reported size doubled from the default 1600x1200 to 3200x2400 as instructed,
+and `screenSpaceLeafCount` shifted (4,679 → 4,861) because `ViewportTransform
+.fit` now maps the fixed world rect into a differently-proportioned screen.
+(The first run's `reportedPhysicalSize` printed as `Instance of 'Size'`
+rather than a value — profile-mode AOT compilation strips `Size.toString()`
+in this build; the second run prints `.width`/`.height` directly instead,
+which are plain `double`s and print correctly.)
+
+But raster p50 and p95 both collapsed to **0.00 ms** for 241 of 242 frames in
+both runs — only the first (cold-start) frame recorded a nonzero duration,
+at a magnitude matching the *unscaled* baseline's own cold-start cost
+(~2.2 s), not anything resembling a 4x-pixel-area steady-state cost. Build
+time went up slightly instead of down, consistent with more layout work
+producing no corresponding GPU-visible raster work.
+
+**This means the real macOS window's backing surface was not actually
+resized** — the widget tree's belief about its own size and what the engine
+actually rasterises onto diverged, and the frame pipeline stopped doing (or
+stopped reporting) real raster work once they disagreed. Per this task's
+ambiguity resolution #2, **C is dropped**: it produces no reliable pixel-area
+number on this rig. A and B together already separate per-leaf from
+per-pixel work, which is why C was scoped as best-effort in the first place.
+
+The `VIEWPORT_SCALE` code that produced this table was written directly in
+`frame_timing_test.dart`, used for these two runs, and then **reverted** —
+it does not appear in the committed harness diff, since it produces nothing
+trustworthy and the brief's ambiguity resolution says to drop a C that
+doesn't work rather than ship it.
+
+## Step 2 — attributing it on the GPU
+
+### Route 1: `flutter drive --profile --trace-to-file=<path>.binpb` — failed silently
+
+Tried at `ENTITIES=500000` and (as a faster repeat) `ENTITIES=1000`, both
+with `RIG=pan`. The flag is accepted by `flutter drive`'s argument parser
+(confirmed via `--help -v`; the flag is `--trace-to-file=<path/to/trace.binpb>`,
+Perfetto proto format, not literal Chrome JSON as the brief's phrasing
+suggested — that's already a difference from what was expected). Every run
+exited 0, printed no error, and **no trace file ever appeared at the
+specified absolute path** — confirmed on disk and by `find`. A full run
+under `-v` (verbose) produced no line anywhere containing "trace",
+"timeline" or "binpb" connected to this flag (the only "trace" hits were
+unrelated Clang/DTrace build environment variables). Conclusion: this flag
+is silently inert for `flutter drive -d macos` in Flutter 3.44.9, at least
+in this configuration — not implemented, or gated on something undiscovered
+within budget.
+
+### Route 2: Xcode Instruments (`xctrace`), Metal System Trace — succeeded
+
+`xctrace` (Xcode 16.0) is scriptable from the command line with no GUI
+interaction required (`xcrun xctrace record`), which matters in this
+environment.
+
+**`--launch` sub-mode failed.** `xctrace record --template "Metal System
+Trace" --launch -- <path-to-binary> --no-prompt` starts the target process
+itself. `ps aux` showed it sitting in **`T` (stopped)** state for the entire
+20-second recording window — it never ran. The recording "succeeded" (exit
+messages looked normal) but captured nothing of the app, because the app
+never executed. This is consistent with a developer-tools/ptrace permission
+gate that an interactive Xcode/Instruments session satisfies via a one-time
+GUI prompt, which `--no-prompt` skips rather than grants, in this
+non-interactive session.
+
+**`--attach` sub-mode worked.** Built the harness's ordinary interactive
+target — `flutter build macos --profile --dart-define=ENTITIES=500000`
+(not the integration-test rig binary, which is a `flutter_driver`-controlled
+process rather than a normal interactive app) — and launched it with `open`.
+A real on-screen window exists at a fixed position (confirmed via
+`osascript`/System Events) and responds to synthetic OS-level mouse events:
+`cliclick`'s `dd:`/`dm:`/`du:` drag commands visibly panned the drawing
+(screenshotted before/after — the empty margin on the canvas's edge visibly
+grew). `xctrace record --template "Metal System Trace" --attach
+dev_harness_2d --time-limit <N>s --no-prompt` was then run in the background
+while several drag gestures were issued during its window.
+
+The `metal-gpu-intervals` table (exported via `xctrace export --xpath`) has
+one row per GPU work interval, tagged with a `gpu-channel-name` (`Vertex`,
+`Fragment`, or `Compute`) and a `process`. Instruments' XML export interns
+repeated values — a value is written once with an `id`, and every later
+occurrence is `<tag ref="id"/>` — so a small Python script
+(`parse_gpu2.py`, kept in the scratchpad, not committed) resolves refs
+against a first-pass `id → fmt` map and sums duration by channel and
+process.
+
+Two independent captures, each covering several manual pan drags at
+`ENTITIES=500000`:
+
+| Capture | Window | Vertex (dev_harness_2d) | Fragment (dev_harness_2d) | Compute | Vertex:Fragment |
+|---|---|---|---|---|---|
+| 1 | 15.910 s | 13,035.2 ms (812 intervals, avg 16.05 ms) | 5,289.9 ms (817 intervals, avg 6.47 ms) | ~0 | **2.46x** |
+| 2 | 12.921 s | 7,161.1 ms (584 intervals) | 3,240.2 ms (592 intervals) | ~0 | **2.21x** |
+
+**The Vertex-stage total exceeds the Fragment-stage total by 2.2–2.5x,
+reproduced across two independent captures.** (The fraction of wall clock
+spent busy differs between the two captures — 82%/33% in capture 1 versus
+55%/25% in capture 2 — because how much of each window was spent actively
+dragging versus idle is an artifact of manual `cliclick` timing, not a
+property of the render path; the ratio between the two channels is the
+stable signal, not their absolute share of the window.) As a control,
+`WindowServer`'s own compositing channels in capture 1 are roughly
+1:1 (10,373 ms Vertex vs 10,487 ms Fragment) — the 2.2–2.5x skew is specific
+to this app's rendering, not a general property of Metal work on this
+machine.
+
+**Answering the brief's question directly: the dominant GPU cost is vertex
+work, not fragment/fill.** This is not the same claim as "CPU-side
+tessellation" — this capture is GPU-side only. It does not distinguish
+whether Impeller does its own CPU-side path flattening ahead of the GPU
+vertex stage (which would show up in a `time-profile` CPU stack sample, not
+captured here). What it does rule out is GPU fragment/fill and blit/composite
+as the dominant cost, and it is fully consistent with A and B: work that
+scales with per-leaf geometry (vertex/tessellation load) dominates; work
+that scales with shaded-pixel area (fragment/fill) does not.
+
+### Route 3: `--trace-skia` + DevTools timeline — not attempted
+
+Route 2 already produced a reproducible, corroborated attribution, and the
+task's ~40-minute Step 2 budget was consumed by Route 1 (which failed
+cleanly but took real time to confirm) and Route 2 (including diagnosing
+the `--launch` stuck-process failure before finding `--attach`). Impeller is
+also expected to leave Skia's own trace tracks empty on this rendering
+backend, per the brief's own framing — so Route 3 was deprioritized in favour
+of the working route rather than attempted and found empty.
+
+## What this means for Plan 3e
+
+The dominant cost is **GPU vertex-stage work that scales with the number of
+drawn leaves** (Experiment A), **not fragment/fill work that scales with
+shaded pixels** (Experiment B barely moved under a 4x width multiplier),
+and a direct GPU capture (Step 2, Route 2) attributes the app's own GPU time
+to the Vertex channel over Fragment by 2.2–2.5x, reproduced twice.
+
+This decides between Plan 3e's candidate mechanisms:
+
+- **A definition/tile cache that reduces the number of leaves walked and
+  re-tessellated per frame is on the table** — it directly addresses the
+  identified cost. Experiment A's near-halving of raster time under a
+  near-halving of leaf count is exactly the effect such a cache would be
+  built to produce.
+- **A mechanism aimed only at reducing fill area** (thinner default
+  strokes, crisper AA, fewer overlapping pixels) **would not address the
+  dominant cost** — Experiment B already showed a 4x fill-area change moves
+  raster time by under 6%.
+- **A mechanism aimed only at reducing transform pushes / draw-call count is
+  already refuted** by the batch spike: the most call-collapsed mode was
+  2.7x slower, not faster, which is consistent with this note's finding that
+  the bottleneck is downstream of dispatch, in per-leaf GPU geometry work.
+
+**Open gap, honestly stated:** whether there is a *separate, significant*
+CPU-side tessellation cost ahead of the GPU vertex stage (Impeller's own
+path flattening, say) was not measured here — only the GPU-side channel
+breakdown was captured, within the Step 2 time budget. If Plan 3e's design
+needs to choose between caching raw (untessellated) geometry versus caching
+GPU-ready (tessellated) geometry, that CPU/GPU split still matters and
+remains open. A `time-profile` capture via the same `xctrace --attach`
+recipe below (swap the template for "Time Profiler" or add it as an
+`--instrument`) is the natural next step, not attempted here.
+
+## Harness change: `LINEWEIGHT_SCALE`
+
+Added for Experiment B, permanent, inert at its default:
+
+- `packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart` —
+  `CanvasDrawSink` gained a `lineweightScale` field (default `1.0`), applied
+  in `_widthFor` as a multiplier on the computed device-pixel width, nowhere
+  else. Not read by `DraftPainter` or `StyleResolver` — the point of the
+  experiment is that only the sink's idea of width changes, leaving
+  geometry, draw-call count and the walk untouched.
+- `packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart` — `DraftCanvas`
+  gained a matching `lineweightScale` constructor parameter (default `1.0`),
+  forwarded to the sink and included in `didUpdateWidget`'s re-attach check.
+- `apps/dev_harness_2d/lib/main.dart` — a `kLineweightScale` top-level value
+  parses `--dart-define=LINEWEIGHT_SCALE`. There is no `double.fromEnvironment`
+  in Dart, so (unlike `kEntities`) it is not `const`: it parses the string
+  define with `double.tryParse` at startup instead, falling back to `1.0`.
+  Passed straight through to `DraftCanvas`.
+- `apps/dev_harness_2d/integration_test/frame_timing_test.dart` — `boot()`
+  now also returns the `DraftPainter` (reached via
+  `tester.state<DraftCanvasState>(find.byType(DraftCanvas)).painter`, which
+  is public exactly so a rig can do this), and the R2 pan rig prints
+  `screenSpaceLeafCount` and `lineweightScale` after its report.
+
+## Capture recipe, for next time
+
+```bash
+# Experiment A: vary ENTITIES, same command otherwise.
+flutter drive --driver=test_driver/integration_test.dart \
+  --target=integration_test/frame_timing_test.dart --profile -d macos \
+  --dart-define=ENTITIES=500000 --dart-define=RIG=pan
+
+# Experiment B: vary LINEWEIGHT_SCALE, ENTITIES fixed.
+flutter drive --driver=test_driver/integration_test.dart \
+  --target=integration_test/frame_timing_test.dart --profile -d macos \
+  --dart-define=ENTITIES=500000 --dart-define=RIG=pan \
+  --dart-define=LINEWEIGHT_SCALE=4.0
+
+# GPU attribution (Route 2): build the interactive app, not the test rig.
+flutter build macos --profile --dart-define=ENTITIES=500000
+open build/macos/Build/Products/Profile/dev_harness_2d.app
+
+# Record while panning by hand, or drive the window with cliclick
+# (brew install cliclick) — dd:/dm:/du: for drag-down/move/up. --launch
+# leaves the target process stopped and captures nothing; --attach an
+# already-running instance instead.
+xcrun xctrace record --template "Metal System Trace" --time-limit 15s \
+  --no-prompt --output metal-trace.trace --attach dev_harness_2d
+
+xcrun xctrace export --input metal-trace.trace \
+  --xpath '/trace-toc/run[@number="1"]/data/table[@schema="metal-gpu-intervals"]' \
+  --output gpu-intervals.xml
+# Then resolve id/ref and sum duration by gpu-channel-name and process —
+# see parse_gpu2.py's approach in this task's report.
+```
+
+Every `flutter drive` run above must be foregrounded with a long explicit
+timeout, per the operational note both this task and the batch spike
+inherited: any move to the background stalls the process at 0% CPU,
+recoverable only by `pkill -9 -f dev_harness_2d.app` and an identical retry.

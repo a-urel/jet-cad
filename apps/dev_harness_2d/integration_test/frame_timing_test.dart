@@ -132,8 +132,13 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   /// Builds the app and hands back everything a rig drives.
-  Future<({DraftDocument doc, CameraController camera, SpatialIndex index})>
-      boot(WidgetTester tester) async {
+  Future<
+      ({
+        DraftDocument doc,
+        CameraController camera,
+        SpatialIndex index,
+        DraftPainter painter
+      })> boot(WidgetTester tester) async {
     final doc = harnessDocument(kEntities);
     late CameraController camera;
     late SpatialIndex index;
@@ -153,7 +158,11 @@ void main() {
         Aabb2(Vector2(cx - 1500, cy - 1125), Vector2(cx + 1500, cy + 1125)),
         tester.view.physicalSize / tester.view.devicePixelRatio);
     await tester.pump();
-    return (doc: doc, camera: camera, index: index);
+    // `DraftCanvasState` is public precisely so a rig can reach the
+    // painter's counters this way — see its doc comment.
+    final painter =
+        tester.state<DraftCanvasState>(find.byType(DraftCanvas)).painter;
+    return (doc: doc, camera: camera, index: index, painter: painter);
   }
 
   testWidgets('R2 pan and zoom', (tester) async {
@@ -175,6 +184,8 @@ void main() {
     }
     await tester.pumpAndSettle();
     report('R2 ($kEntities)', timings);
+    print('  screenSpaceLeafCount=${app.painter.screenSpaceLeafCount} '
+        'lineweightScale=$kLineweightScale');
   });
 
   testWidgets('R4a leaf edit per frame', (tester) async {
