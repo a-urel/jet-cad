@@ -51,6 +51,31 @@ finite timeout; killing the stuck `.app` process and rerunning the
 identical command immediately succeeded. Treat a stalled run as a
 process to kill and retry, not a number to wait out.
 
+**Task 12 found the plain kill-and-retry insufficient at 500k.** All three
+500k rigs (`RIG=pan`, `RIG=leaf`, `RIG=instance`) stalled on a plain
+`flutter drive` invocation; `RIG=pan` alone stalled four times in a row —
+`pkill -9 -f dev_harness_2d.app` plus an identical retry did not clear it,
+where it had cleared a single Task 4 stall immediately. What worked was
+prefixing the command with `caffeinate -dimsu`, which kept every subsequent
+500k run (all three rigs) from stalling at all, on the first attempt each
+time:
+
+```bash
+caffeinate -dimsu flutter drive --driver=test_driver/integration_test.dart \
+  --target=integration_test/frame_timing_test.dart --profile -d macos \
+  --dart-define=ENTITIES=500000 --dart-define=RIG=pan --dart-define=STEPS=60
+```
+
+Plain kill-and-retry is still the right first move — it is cheap and it is
+what worked for the shorter runs this file was originally written against.
+If it doesn't clear a stall within a couple of attempts on a run long
+enough to approach your environment's own synchronous-execution ceiling
+(not necessarily this project's 500k — whatever is slow enough to run long),
+reach for `caffeinate -dimsu` next rather than continuing to retry the bare
+command. See `docs/superpowers/notes/2026-08-11-plan-3b-results.md` for the
+full investigation, including a Low Power Mode finding that (separately)
+elevated the 500k build/raster figures `caffeinate` did not fix.
+
 The file refuses to run in debug mode rather than print numbers nobody should
 read.
 

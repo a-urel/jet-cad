@@ -104,6 +104,16 @@ it.** The leaf count is unchanged from 3a (1,134,900 draw calls against 3a's
 leaves), so the difference is in what reaches the picture, not in what is drawn.
 No explanation here is better than a guess, and none is offered.
 
+**Superseded (Task 12).** This web re-check ran at `56b8ec3`, before dashing
+existed anywhere in the tree — `bcbb0f5` (Task 8) wired dashing into the
+painter afterward. The numbers above are correct for what they measured: a
+tree with Tasks 0 and 1 but nothing dashed. Task 12 re-ran the identical
+500k whole-drawing scenario on the finished, dashed tree and the abort
+**reproduced**, twice, at the same call site 3a originally recorded. The two
+findings do not disagree — they are two different trees — and the honest
+reading is that dashing reintroduced the ceiling this section found gone. See
+`2026-08-11-plan-3b-results.md` for the re-measurement.
+
 ## What this leaves
 
 1. **Batching does not ship.** Not in any mode, on the evidence available.

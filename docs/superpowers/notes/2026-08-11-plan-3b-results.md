@@ -242,24 +242,39 @@ same as native.
 `finishRecordingAsPicture`, reproduced twice independently — once inside the
 full `--tags rig --run-skipped --platform chrome` suite run, once again in a
 `--plain-name "paint and query at 500000"` isolated re-run — both times at
-the same call site 3a originally recorded. **This contradicts
-[`2026-08-11-plan-3b-batch-spike.md`](2026-08-11-plan-3b-batch-spike.md)'s
-own finding that the abort "does not reproduce."** That note's re-test used
-`batch_spike_test.dart`, a narrower, now-deleted probe built for comparing
-the four batching modes against the same `wholeDrawingCamera` scenario; this
-task's re-test is the actual committed rig
-(`paint_microbench_test.dart`), run exactly as this task's own brief's Step 1
-specifies. Both notes measured "the same corpus, camera and toolchain" by
-their own account, and got opposite results, on the same code (batching was
-already reverted by the time the spike note's web re-check ran). No
-explanation is offered for why the two probes disagree — the disagreement
-itself is the finding, per this task's own ambiguity resolution 2. **3a's
-results note item 5 — the 500k web ceiling is real — is confirmed live
-again, not settled dead**, and Plan 3e's whole-drawing/web design should
-treat it that way until someone resolves the disagreement directly (most
-likely by running `batch_spike_test.dart`'s exact scenario back to back with
-`paint_microbench_test.dart`'s, in the same session, since neither
-reproduction here re-ran the other's probe).
+the same call site 3a originally recorded.
+
+**This is not a disagreement with
+[`2026-08-11-plan-3b-batch-spike.md`](2026-08-11-plan-3b-batch-spike.md) — it
+measured a different tree.** `git log 56b8ec3..bcbb0f5` confirms the batch
+spike (Task 4, commit `56b8ec3`, including its web re-check) predates every
+dash-related commit; `bcbb0f5` (Task 8) is the one that first wires dashing
+into the painter. The spike's web re-check genuinely ran on a tree with
+nothing dashed — its "all four modes completed, nothing aborted" is correct
+for what it measured, and its numbers are unchanged. **Dashing reintroduced
+the web ceiling.** Every non-documentation commit in `56b8ec3..bcbb0f5` is
+dash work, so it is the best-supported cause of the two measurements
+diverging.
+
+That said, the specific mechanism is not confirmed, and the one number this
+task has on either side of it argues against the obvious "more draw calls"
+story: real `Canvas` calls (`canvasCallCount`) at this exact camera came back
+**identical**, 1,134,900, in both the batch spike's dash-free `off` mode and
+this task's own dashed native re-measurement (see "Every 3a row" above).
+That is not a coincidence — `Dasher.dashArc`'s (and the sink-level polyline
+dasher's) collapse check runs *before* any window/span computation, so a
+collapsed dashed entity at this zoom falls back to exactly the same single
+`sink.circle`/`sink.arc`/`sink.polyline` call the pre-dash code already
+issued, confirmed both by reading `dasher.dart` (the early-return sits ahead
+of `_dashArcWindow`) and by this measurement. `CanvasDrawSink` is shared Dart
+code across native and web, so the same call sequence should reach CanvasKit
+too. **So dashing is confirmed as the responsible change by elimination (it
+is the only substantive code difference between the two trees), but not by a
+demonstrated increase in the op count a naive reading of "the ceiling is
+about op count" would predict** — something about the dashed tree's picture
+pushes CanvasKit over the edge without changing how many `Canvas` calls are
+in it, and this task does not know what. **3a's results note item 5 — the
+500k web ceiling is real — is re-established, not open.**
 
 `flutter build web --release` succeeds; `build/web` is 40 MB, matching 3a.
 
@@ -276,32 +291,47 @@ work touches the code that benchmark measures.
 
 ## The dash cost, stated as a number
 
-**500,000 entities, working-set camera, `RIG=pan`, raster p50 with dashes on:
-753.47 ms, against the unbatched, pre-dash 179.63 ms baseline
+**Reported dash cost: +59.4% (1.59x), at a 50,000-entity working set —
+`RIG=pan`, raster p50 124.72 ms against 3a's pre-dash 78.29 ms.** Named at
+this corpus size specifically, not at the 500,000-entity size 3a's own
+headline used, because this is the cleaner of the two available
+measurements: this task's own evidence (the reasoning is kept in full below)
+says the 50k row is not touched by the Low Power Mode confound documented
+above, while the 500k row is. This is the number to carry forward as "what
+dashing costs," with its scope named rather than left implicit.
+
+**The 500k row, for the record and not as the headline: raster p50 753.47
+ms against the unbatched, pre-dash 179.63 ms baseline
 ([`2026-08-11-plan-3b-batch-spike.md`](2026-08-11-plan-3b-batch-spike.md)'s
-`off` mode, measured after Tasks 0 and 1 — the tree dashes were added to)
-is +319.5% (4.2x).**
+`off` mode, measured after Tasks 0 and 1) is +319.5% (4.2x). This figure is
+contaminated and is not a second, independent read of the same question —
+it answers "what does dashing cost under Low Power Mode," not "what does
+dashing cost."** The confound: `pmset -g` showed `lowpowermode 1` for this
+entire session, and it could not be turned off (`sudo pmset` requires root
+and this session's own permission classifier correctly refused it). The
+evidence ruling out a general slow machine rather than a GPU-specific
+throttle: in the very same 500k runs, R4b's command p50 (a full,
+CPU-only `SpatialIndex.rebuildAll()`, no window, no GPU) came back 904.03
+ms against 3a's original 957.98 ms — within 5.6%; the native, non-windowed
+R1/R3 rig, re-measured mid-session, stayed within 1–2% of this plan's own
+prior recordings; and R4a's command p50 (0.07 ms) matched 3a's 0.10 ms.
+Only the numbers that touch the real window — build and raster at 500,000
+entities specifically — are elevated, by 4–12x. Nothing in that pattern is
+consistent with "the whole machine is just slower right now"; all of it is
+consistent with a throttle that binds on the GPU/window path and does not
+bind on pure CPU work, which is what Low Power Mode does on Apple Silicon.
 
-That is the number, stated plainly per this task's ambiguity resolution 1.
-It is also the number carrying the Low Power Mode confound documented above,
-and it should not be read as a clean measurement of what dashing costs by
-itself. The same comparison at 50,000 entities — a corpus size this task's
-own evidence says is *not* affected by the confound (matches Task 10's prior
-dashed measurement to within 1.5%) — gives **124.72 ms against 3a's pre-dash
-78.29 ms, +59.4% (1.59x)**. Both numbers are reported because this task
-cannot adjudicate between them: the 500k figure is the one the brief asks
-for and the one at the corpus size Plan 3e actually cares about, but it
-carries a confound this session could not remove; the 50k figure is cleaner
-but is not the size the brief's comparison baseline (179.63 ms) was measured
-at. **A re-run of the 500k row on a machine without Low Power Mode forced on
-is the one thing that would settle which number is closer to the real dash
-cost**, and this note does not have that machine.
+**Neither number is presented as the answer to the other's question, and
+they are not averaged.** The 50k figure is clean but is not the corpus size
+3a's own 179.63 ms baseline — or Plan 3e's own interest — was measured at.
+The 500k figure is at the size that matters and is the one the brief's
+comparison baseline was built for, but it is not trustworthy as a
+measurement of dashing alone. **A clean 500k figure is owed to whichever
+plan needs it next: re-run `RIG=pan` at `ENTITIES=500000` on a machine
+without Low Power Mode forced on.** This note does not have that machine.
 
-Either reading agrees on direction and rough shape: dashing a third of the
-drawing is not free, it costs somewhere between "half again" and "four
-times" at working-set scale, and — per the gate's demotion in this plan's own
-design doc — that cost ships anyway, because there is no batching win left to
-weigh it against.
+Per the gate's demotion in this plan's own design doc, this cost ships
+either way — there is no batching win left to weigh it against.
 
 ## Dash spans and collapses per frame
 
@@ -450,12 +480,14 @@ reason (real per-span GPU work, not joint-path tessellation).
 
 Covered above under "Web." Restated here only because the brief calls it out
 as its own item: **the 500,000-entity whole-drawing frame aborts CanvasKit,
-reproduced twice this task.** 3a's results note item 5 ("the 500k web
-ceiling is real") should be treated as live again — this task's own
-reproduction outweighs the batch spike note's single non-reproduction on a
-narrower probe, but neither this note nor the spike note has run both
-probes back to back to resolve the disagreement directly, so "live again"
-is this task's read of the evidence, not a closed question.
+reproduced twice this task.** This is not open against
+[`2026-08-11-plan-3b-batch-spike.md`](2026-08-11-plan-3b-batch-spike.md)'s
+non-abort — `git log 56b8ec3..bcbb0f5` confirms that note's web re-check ran
+before any dashing existed in the tree, and this task's own re-measurement,
+on the finished dashed tree, is the first time the scenario has been run
+since dashing landed. **3a's results note item 5 — the 500k web ceiling is
+real — is re-established.** `docs/superpowers/specs/2026-08-10-jet-cad-2d-plan-3b-design.md`
+and the batch spike note have both been corrected to say so.
 
 ## What this says about Plans 3c, 3d and 3e
 
@@ -492,12 +524,16 @@ table. This task adds three things to that picture:
    render solid instead (or vice versa), which is a real invalidation axis
    3e's design doesn't yet have a name for. This task did not design that
    axis; it is naming that it exists.
-3. **The web whole-drawing ceiling is live again**, per this task's
-   reproduction above, which reopens 3a's original constraint that a
-   defintion/tile cache's picture sizes have to stay under whatever
-   CanvasKit's op ceiling actually is — the batch spike's note that removed
-   this constraint from 3e's design space should not be relied on until the
-   direct-comparison re-check described above happens.
+3. **The web whole-drawing ceiling is real again**, confirmed by this task's
+   reproduction and the commit-range check that shows the batch spike's
+   non-abort measured a dash-free tree. 3a's original constraint — a
+   definition/tile cache's picture sizes have to stay under whatever
+   CanvasKit's op ceiling actually is — is back in force for 3e's design,
+   with one open question this task's own numbers raise but don't answer: a
+   collapsed dashed picture has the *same* real `Canvas` call count as a
+   non-dashed one, so whatever pushed this task's picture over the ceiling
+   is not simply "more calls," and 3e's cache should not assume that keeping
+   `canvasCallCount` low is sufficient to stay under it.
 
 ## Verification
 
