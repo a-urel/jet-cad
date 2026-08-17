@@ -131,6 +131,35 @@ void main() {
     expect(t.c, isNot(closeTo(math.tan(0.3) * scale, 1e-6)));
   });
 
+  test(
+      'a non-baseline vertical justification carries the oblique shear into '
+      'the horizontal offset, but never into the vertical one', () {
+    final style = TextStyleRecord(
+        handle: const Handle(7),
+        name: 'SLANT',
+        fontFamily: 'Roboto',
+        obliqueAngle: 0.3);
+    final m = _model.measure(text: 'WC', style: _plain);
+    final scale = 200.0 / 70.0;
+    final t = textLocalTransform(
+        _resolve(
+            attrs: packTextAttrs(h: TextJustifyH.right, v: TextJustifyV.top),
+            style: style),
+        m,
+        Vector2.zero());
+    // Reference point is (advanceWidth, ascent) in glyph space. Carried
+    // through the shear before being negated, so e picks up a term from the
+    // *vertical* reference point too: e = -scale * (refX + tan(k) * refY).
+    // A flat per-axis offset (dx depending only on refX) would instead give
+    // -scale * advanceWidth, which this pins against.
+    final expectedE = -scale * (m.advanceWidth + math.tan(0.3) * m.ascent);
+    expect(t.e, closeTo(expectedE, 1e-9));
+    expect(t.e, isNot(closeTo(-scale * m.advanceWidth, 1e-6)));
+    // b is always 0 (the shear only tilts x), so the vertical offset is the
+    // same as the oblique-free top justification: no cross term reaches f.
+    expect(t.f, closeTo(-m.ascent * scale, 1e-9));
+  });
+
   test('aligned and fit fall back to left, in the resolver', () {
     final a = _resolve(attrs: packTextAttrs(h: TextJustifyH.aligned));
     expect(a.h, TextJustifyH.left);
