@@ -14,6 +14,7 @@ import 'node.dart';
 import 'raw_data.dart';
 import 'style.dart';
 import 'tables.dart';
+import 'text_metrics.dart';
 import 'tree.dart';
 import 'undo.dart';
 

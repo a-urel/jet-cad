@@ -26,6 +26,7 @@ export 'src/document/style.dart';
 export 'src/document/style_context.dart';
 export 'src/document/style_resolver.dart';
 export 'src/document/tables.dart';
+export 'src/document/text_metrics.dart';
 export 'src/document/text_scalars.dart';
 export 'src/document/tree.dart';
 export 'src/document/undo.dart';
