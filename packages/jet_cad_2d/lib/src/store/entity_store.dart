@@ -139,6 +139,10 @@ class EntityRecord {
         'lineweight': lineweight,
         'transparency': transparency,
         'flags': flags,
+        'text': text,
+        'tag': tag,
+        'textStyle': textStyle.toJson(),
+        'textAttrs': textAttrs,
       };
 
   /// [geomIndex] is always 0 on the way back in, whether or not the source
@@ -163,6 +167,17 @@ class EntityRecord {
       lineweight: json['lineweight']! as int,
       transparency: json['transparency']! as int,
       flags: json['flags']! as int,
+      // Absent in a schema-3 document — these four defaults *are* the
+      // v3->v4 migration. `DraftDocumentCodec.decode` accepts anything from
+      // schema 1 through the current version, so a document written before
+      // Plan 3c reaches this constructor with none of these keys set, and
+      // the record ends up exactly as if it had always carried empty text.
+      text: json['text'] as String? ?? '',
+      tag: json['tag'] as String? ?? '',
+      textStyle: json['textStyle'] == null
+          ? ReservedHandles.standardTextStyle
+          : Handle.fromJson(json['textStyle']),
+      textAttrs: json['textAttrs'] as int? ?? 0,
     );
   }
 

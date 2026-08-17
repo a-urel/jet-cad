@@ -168,6 +168,10 @@ void main() {
       'lineweight',
       'transparency',
       'flags',
+      'text',
+      'tag',
+      'textStyle',
+      'textAttrs',
     ]);
   });
 

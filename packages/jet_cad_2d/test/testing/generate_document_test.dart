@@ -46,10 +46,13 @@ void main() {
     // Deliberately not the structural assertions the plan sketches (one layer,
     // every colour ByLayer, every node an instance under the root). Those pass
     // on a document whose coordinates have all moved.
+    //
+    // Re-baselined in Plan 3c Task 1: the four text keys changed the
+    // serialisation.
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
-        4478729767976143987);
+        -4223683079839955300);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
-        7265843217140545300);
+        -1538364231202837705);
   });
 
   test('defaults reproduce the Plan 2 corpus structurally too', () {
