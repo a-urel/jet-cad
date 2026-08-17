@@ -606,3 +606,73 @@ Full verbatim command transcripts, every retry and why, and the process of
 finding the Low Power Mode confound are in this task's own report,
 `task-12-report.md`, alongside the other tasks' reports in this plan's
 `.superpowers/sdd/` directory.
+
+---
+
+## Task 13 — the exit gate
+
+Run 2026-08-17 on the branch tip, worktree clean before the run.
+
+### Step 1 — every check
+
+| Check | Result |
+|---|---|
+| `cd packages/jet_cad_2d && dart test` | **667 passed**, 0 failed |
+| `dart analyze` (engine) | clean |
+| `dart format --output=none --set-exit-if-changed .` (engine) | clean, 97 files, 0 changed |
+| `cd packages/jet_cad_2d_flutter && flutter test` | **123 passed**, 1 skipped, 0 failed |
+| `flutter test --tags golden` | **8 passed** |
+| `flutter analyze` (widget package) | clean |
+| `dart format` (widget package) | clean, 27 files, 0 changed |
+| `cd apps/dev_harness_2d && flutter analyze` | clean |
+| `dart format` (harness) | clean, 3 files, 0 changed |
+| `dart run benchmark/query_throughput.dart` | **5 of 6 gated rows PASS**; `snap at dirty threshold` p95 = 1.0220 ms against its 1.0 ms threshold — **FAIL**, the known row carried since Plan 2 |
+
+**A correction to this note's own earlier verification block.** That block reports
+the query gate as "**GATE: PASS** — every gated row under its threshold". This
+run prints `GATE: FAIL` on `snap at dirty threshold`, at p95 = 1.0220 ms. Both
+readings are real: Plan 2's gate note recorded this row straddling its threshold
+across consecutive runs on an idle machine (0.938–1.153 ms, ~±15% machine
+spread) and said in as many words that "a single green run on this row means
+nothing". The earlier block generalised one lucky sample into a claim about every
+row. The row's status is unchanged — deliberately accepted in Plan 2, with the
+dirty overlay's option C chosen in 3a and deferred to Plan 4 — but it is a
+carried failure, not a pass, and this note should not have said otherwise.
+
+Every other gated row passes with margin: `forEachInRect` fresh 0.841 ms p95 of
+2 ms, `pick` fresh 0.367 ms of 1 ms, `snap` fresh 0.579 ms of 1 ms,
+`forEachInRect` at threshold 1.022 ms of 2 ms, `pick` at threshold 0.710 ms of
+1 ms. The sample at the document centre visited 3,832 entities, so the rect row
+is returning a real working set.
+
+### Step 2 — the failable criteria
+
+| Criterion | Verdict |
+|---|---|
+| the spike's four modes measured, recorded, stop clause honoured | **met** — `2026-08-11-plan-3b-batch-spike.md` |
+| the batching machinery removed | **met** — no `bucket` or `batch` identifier survives in `packages/jet_cad_2d_flutter/lib`; suite green afterwards |
+| the raster profile names one dominant cost, with a repeatable recipe and stated limits | **met** — `2026-08-11-plan-3b-raster-profile.md`: cost tracks leaf count rather than pixel count, 2.09x leaves to 2.42x time, vertex-stage GPU work dominant, and the note explicitly declines to promise proportionality |
+| 500k working-set raster p50 with dashes on, measured and recorded against 179.63 ms | **met as a record, with its scope named** — 753.47 ms under Low Power Mode, published as contaminated and explicitly not the headline; the clean figure is the 50k row's +59.4% |
+| pre-existing stroke-width goldens pass, no PNG regenerated | **met** — the only new PNGs are the five dash-ladder rungs; no existing PNG is modified. `stroke_width_golden_test.dart` changed one assertion, from `bypassCount == 2` to `screenSpaceLeafCount == 4`, because Task 1 removed the bypass as a concept; `anisotropicCurveCount == 0` still holds and the images are byte-identical |
+| dash-ladder goldens generated and reviewed | **met** — five rungs, reviewed in Task 9 |
+| differential oracle: both differential tests and the non-vacuity test pass | **met** — inside the 123, including `the reference draws something, so the comparison is not vacuous` |
+| `git diff --stat main -- .../reference_walk.dart` empty | **met** — the oracle is untouched by this plan |
+| `kDashCollapsePx` swept, recorded, chosen by review | **met** — 3.0, raised from the sweep's value after human review |
+| mutation log: every mutant killed or argued equivalent | **met** — B1–B12, with B4/B6/B8 each caught by multiple tests and B9's second, non-golden witness added in Task 11 |
+
+### Step 3 — what is recorded rather than worked around
+
+Two items leave this plan open, both already argued above rather than fixed here:
+
+1. **`snap at dirty threshold` fails at p95**, as it has since Plan 2. Accepted
+   there, option C chosen in 3a, deferred to Plan 4.
+2. **A clean 500k dash cost is still owed.** Low Power Mode was on for every
+   `flutter drive` run in Task 12 and is still on at this gate's run
+   (`pmset -g` reports `lowpowermode 1`); turning it off needs root, which no
+   session here has. The number to re-take is `RIG=pan` at
+   `ENTITIES=500000`, compared against the batch spike's `off` mode baseline of
+   179.63 ms. Until then the shipped dash cost is the 50k figure, +59.4%.
+
+**Verdict: the gate is met.** Every failable criterion passes. The two open
+items are a pre-existing carried failure and a measurement debt whose scope is
+named in this note, neither of which this plan introduced or can close.
