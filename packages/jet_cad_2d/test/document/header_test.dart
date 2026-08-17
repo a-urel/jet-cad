@@ -27,8 +27,13 @@ void main() {
       ..units = DrawingUnits.millimeters
       ..customVariables['zeta'] = 1
       ..customVariables['alpha'] = 2;
-    expect(header.toJson().keys.toList(),
-        ['units', 'scale', 'importedExtents', 'customVariables']);
+    expect(header.toJson().keys.toList(), [
+      'units',
+      'scale',
+      'globalLinetypeScale',
+      'importedExtents',
+      'customVariables'
+    ]);
     expect((header.toJson()['customVariables']! as Map).keys.toList(),
         ['alpha', 'zeta']);
   });
@@ -90,5 +95,21 @@ void main() {
     expect(() => DraftDocumentCodec.encodeToString(doc), returnsNormally);
     final loaded = DraftDocumentCodec.decode(DraftDocumentCodec.encode(doc));
     expect(loaded.header.importedExtents, isNull);
+  });
+
+  test('globalLinetypeScale round-trips and defaults to 1', () {
+    final header = DocumentHeader();
+    expect(header.globalLinetypeScale, 1.0);
+
+    header.globalLinetypeScale = 0.375;
+    final restored = DocumentHeader.fromJson(header.toJson());
+    expect(restored.globalLinetypeScale, 0.375);
+  });
+
+  test('a document written before the field reads back as 1', () {
+    // Forward compatibility runs both ways: an older file has no key, and the
+    // default has to be the value that changes nothing.
+    final json = DocumentHeader().toJson()..remove('globalLinetypeScale');
+    expect(DocumentHeader.fromJson(json).globalLinetypeScale, 1.0);
   });
 }

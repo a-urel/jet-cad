@@ -6,7 +6,6 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'camera_controller.dart';
 import 'canvas_draw_sink.dart';
 import 'draft_painter.dart';
-import 'leaf_owner_map.dart';
 
 /// Logical pixels per millimetre at Flutter's nominal 96 dpi.
 ///
@@ -58,6 +57,7 @@ class DraftCanvas extends StatefulWidget {
     required this.camera,
     this.resolver,
     this.pixelsPerPaperMm = kLogicalPixelsPerMm,
+    this.lineweightScale = 1.0,
   });
 
   final DraftDocument document;
@@ -70,14 +70,17 @@ class DraftCanvas extends StatefulWidget {
 
   final double pixelsPerPaperMm;
 
+  /// Forwarded to [CanvasDrawSink.lineweightScale]. Measurement-only, for
+  /// Task 4c's fill-rate experiment; inert at its default of 1.0.
+  final double lineweightScale;
+
   @override
   State<DraftCanvas> createState() => DraftCanvasState();
 }
 
 /// Public so a test — or a tool that needs the painter's counters — can reach
-/// the two pieces of derived state this widget owns.
+/// the derived state this widget owns.
 class DraftCanvasState extends State<DraftCanvas> {
-  late LeafOwnerMap ownerMap;
   late DraftPainter painter;
 
   /// One sink for the life of the widget, its `Canvas` rebound per paint.
@@ -93,16 +96,17 @@ class DraftCanvasState extends State<DraftCanvas> {
   }
 
   void _attach() {
-    sink = CanvasDrawSink(pixelsPerPaperMm: widget.pixelsPerPaperMm);
-    ownerMap = LeafOwnerMap(widget.document);
+    sink = CanvasDrawSink(
+        pixelsPerPaperMm: widget.pixelsPerPaperMm,
+        lineweightScale: widget.lineweightScale);
     painter = DraftPainter(
       document: widget.document,
       index: widget.index,
       resolver: widget.resolver ?? DocumentStyleResolver(widget.document),
-      ownerMap: ownerMap,
     );
-    _changes =
-        DocChangeNotifier(widget.document, onChange: ownerMap.applyChange);
+    // No derived state left to update before listeners run: the map that
+    // needed it was the cull floor's, and the cull floor is gone.
+    _changes = DocChangeNotifier(widget.document);
     _repaint = Listenable.merge([widget.camera, _changes]);
   }
 
@@ -113,7 +117,8 @@ class DraftCanvasState extends State<DraftCanvas> {
         widget.index != oldWidget.index ||
         widget.camera != oldWidget.camera ||
         widget.resolver != oldWidget.resolver ||
-        widget.pixelsPerPaperMm != oldWidget.pixelsPerPaperMm) {
+        widget.pixelsPerPaperMm != oldWidget.pixelsPerPaperMm ||
+        widget.lineweightScale != oldWidget.lineweightScale) {
       _changes.dispose();
       _attach();
     }

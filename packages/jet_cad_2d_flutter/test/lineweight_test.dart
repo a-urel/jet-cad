@@ -89,12 +89,12 @@ double screenStrokeWidthUnder(Transform2 instance) {
   final index = SpatialIndex(doc);
   addTearDown(index.dispose);
   final canvas = SpyCanvas();
+  // This reads the residual back out of the pushed canvas.transform() call.
+  final sink =
+      CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm);
   DraftPainter(
           document: doc, index: index, resolver: DocumentStyleResolver(doc))
-      .paint(
-          CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm),
-          kCamera,
-          kViewport);
+      .paint(sink, kCamera, kViewport);
 
   final transform = canvas.named('transform').last.args.single as Float64List;
   final residual = Transform2(transform[0], transform[1], transform[4],
@@ -123,7 +123,7 @@ void main() {
     // residual, and use the exact width.
     final run = paintFixture(Transform2.scale(1.0, 8.0));
 
-    expect(run.painter.bypassCount, 1);
+    expect(run.painter.screenSpaceLeafCount, 1);
     final begin = run.sink.ops.whereType<BeginResidualOp>().single;
     expect(begin.residual.a, closeTo(1.0, 1e-12));
     expect(begin.residual.d, closeTo(1.0, 1e-12));
@@ -131,23 +131,13 @@ void main() {
     expect(begin.residual.c, closeTo(0.0, 1e-12));
   });
 
-  test('a mirrored but conformal instance does not take the bypass', () {
+  test('a mirrored but conformal instance also takes the screen-space path',
+      () {
     // scale(-2, 2) has determinant -4 and anisotropyRatio 1: mirroring alone
-    // is conformal, and sqrt(|det|) is exactly right. Bypassing it would cost
-    // the cache path in 3b for nothing.
-    expect(paintFixture(Transform2.scale(-2.0, 2.0)).painter.bypassCount, 0);
-  });
-
-  test('the threshold is exclusive, so exactly 2.0 stays on the fast path', () {
+    // is conformal. The screen-space path is the rule for every line-like
+    // leaf now, regardless of anisotropy, so this one takes it too.
     expect(
-        paintFixture(Transform2.scale(1.0, kAnisotropyThreshold))
-            .painter
-            .bypassCount,
-        0);
-    expect(
-        paintFixture(Transform2.scale(1.0, kAnisotropyThreshold + 0.001))
-            .painter
-            .bypassCount,
+        paintFixture(Transform2.scale(-2.0, 2.0)).painter.screenSpaceLeafCount,
         1);
   });
 
@@ -188,7 +178,7 @@ void main() {
     painter.paint(
         sink, ViewportTransform.fit(doc.extents, kViewport), kViewport);
 
-    expect(painter.bypassCount, 1);
+    expect(painter.screenSpaceLeafCount, 1);
     for (final v in sink.ops.whereType<PolylineOp>().single.points) {
       expect(v.abs(), lessThan(1 << 20),
           reason: 'a screen-space residual, not a world coordinate');
@@ -212,7 +202,7 @@ void main() {
       final run = paintFixture(Transform2.scale(1.0, 8.0),
           kind: EntityKind.circle, coords: const [0, 0], scalars: const [5]);
 
-      expect(run.painter.bypassCount, 0);
+      expect(run.painter.screenSpaceLeafCount, 0);
       expect(run.painter.anisotropicCurveCount, 1);
       expect(run.sink.ops.whereType<CircleOp>(), hasLength(1));
       final begin = run.sink.ops.whereType<BeginResidualOp>().single;
@@ -235,6 +225,25 @@ void main() {
       final run = paintFixture(Transform2.scale(2.0, 2.0),
           kind: EntityKind.circle, coords: const [0, 0], scalars: const [5]);
       expect(run.painter.anisotropicCurveCount, 0);
+    });
+
+    test(
+        'the threshold is exclusive, so a circle exactly at 2.0 is not counted',
+        () {
+      // kAnisotropyThreshold no longer gates whether a line-like leaf takes
+      // the screen-space path — only whether a curve counts as anisotropic.
+      expect(
+          paintFixture(Transform2.scale(1.0, kAnisotropyThreshold),
+              kind: EntityKind.circle,
+              coords: const [0, 0],
+              scalars: const [5]).painter.anisotropicCurveCount,
+          0);
+      expect(
+          paintFixture(Transform2.scale(1.0, kAnisotropyThreshold + 0.001),
+              kind: EntityKind.circle,
+              coords: const [0, 0],
+              scalars: const [5]).painter.anisotropicCurveCount,
+          1);
     });
   });
 }

@@ -116,6 +116,10 @@ void main() {
       // Canvas.transform takes Matrix4 storage order. Row-major here would
       // transpose every residual and shear the whole drawing.
       sink.beginResidual(const Transform2(2, 3, 4, 5, 6, 7));
+      // The push is deferred to the first primitive drawn under the residual,
+      // so a residual under which nothing is drawn never touches canvas
+      // state. Any primitive forces it; a point is the simplest.
+      sink.point(0, 0, _anyStyle);
 
       expect(canvas.named('save'), hasLength(1));
       final matrix = canvas.named('transform').single.args.single;
@@ -131,6 +135,9 @@ void main() {
     test('endResidual restores the canvas', () {
       sink
         ..beginResidual(Transform2.translation(3, 4))
+        // Forces the deferred push, same as above; endResidual only restores
+        // what was actually pushed.
+        ..point(0, 0, _anyStyle)
         ..endResidual();
       expect(canvas.named('restore'), hasLength(1));
     });

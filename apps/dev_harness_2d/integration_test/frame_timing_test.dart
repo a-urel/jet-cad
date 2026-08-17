@@ -105,7 +105,8 @@ class CommandClock {
   }
 }
 
-Handle addLineAt(DraftDocument doc, Handle owner, double x, double y) {
+Handle addLineAt(
+    DraftDocument doc, Handle owner, double x, double y, Handle linetype) {
   final handle = doc.handleSeed.next();
   doc.commands.execute(AddEntityCommand(
     record: EntityRecord(
@@ -113,7 +114,10 @@ Handle addLineAt(DraftDocument doc, Handle owner, double x, double y) {
       owner: owner,
       kind: EntityKind.line,
       layer: ReservedHandles.layerZero,
-      linetype: ReservedHandles.byLayerLinetype,
+      // The corpus's dashed linetype, not ByLayer: layer 0 is continuous, so
+      // a ByLayer line would measure an edit path that never dashes — which
+      // is not the edit path this rig is for.
+      linetype: linetype,
       linetypeScale: 1.0,
       geomIndex: 0,
       color: const ByLayerColor(),
@@ -132,16 +136,27 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   /// Builds the app and hands back everything a rig drives.
-  Future<({DraftDocument doc, CameraController camera, SpatialIndex index})>
-      boot(WidgetTester tester) async {
+  Future<
+      ({
+        DraftDocument doc,
+        CameraController camera,
+        SpatialIndex index,
+        DraftPainter painter,
+        CanvasDrawSink sink,
+        Handle dashedLinetype
+      })> boot(WidgetTester tester) async {
     final doc = harnessDocument(kEntities);
     late CameraController camera;
     late SpatialIndex index;
+    late DraftPainter painter;
+    late CanvasDrawSink sink;
     await tester.pumpWidget(HarnessApp(
       document: doc,
-      onReady: (c, i) {
+      onReady: (c, i, p, s) {
         camera = c;
         index = i;
+        painter = p;
+        sink = s;
       },
     ));
     // Zoom to the working set. Fitting the whole drawing measures a frame
@@ -153,7 +168,29 @@ void main() {
         Aabb2(Vector2(cx - 1500, cy - 1125), Vector2(cx + 1500, cy + 1125)),
         tester.view.physicalSize / tester.view.devicePixelRatio);
     await tester.pump();
-    return (doc: doc, camera: camera, index: index);
+
+    // The corpus's dashed linetype: `harnessDocument` seeds exactly one via
+    // `dashedFraction` (see `generateDocument`). Found by shape — the only
+    // `LinetypeRecord` whose pattern carries dashes — not by name, so a
+    // corpus change that renames it cannot make this silently pick the wrong
+    // table row.
+    final dashedLinetypes = doc.tables.linetypes.records
+        .where((lt) => lt.pattern.dashes.isNotEmpty)
+        .toList();
+    if (dashedLinetypes.length != 1) {
+      throw StateError('expected exactly one dashed linetype in the '
+          'corpus, found ${dashedLinetypes.length}: '
+          '${dashedLinetypes.map((lt) => lt.name).toList()}');
+    }
+
+    return (
+      doc: doc,
+      camera: camera,
+      index: index,
+      painter: painter,
+      sink: sink,
+      dashedLinetype: dashedLinetypes.single.handle
+    );
   }
 
   testWidgets('R2 pan and zoom', (tester) async {
@@ -174,7 +211,36 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     await tester.pumpAndSettle();
+    // All three counters now mean the same thing: this frame. dashSpanCount
+    // and collapsedDashCount reset themselves every paint; canvasCallCount
+    // does not, because the sink outlives the frame. But pumpAndSettle
+    // leaves nothing dirty, so a bare pump() would not repaint at all —
+    // RenderCustomPaint only repaints when its `repaint` Listenable fires,
+    // and nothing has changed since the last real frame. panBy(Offset.zero)
+    // is a numeric no-op but still assigns a fresh ViewportTransform
+    // (Transform2 and ViewportTransform both deliberately have no
+    // operator==, so ValueNotifier's reference check always sees a
+    // "change"), which fires the listener and forces the one real repaint
+    // that makes resetCounters() meaningful. A running total beside two
+    // per-frame figures is a wrong comparison waiting to be published.
+    app.sink.resetCounters();
+    app.camera.panBy(Offset.zero);
+    await tester.pump(const Duration(milliseconds: 16));
     report('R2 ($kEntities)', timings);
+    print('  screenSpaceLeafCount=${app.painter.screenSpaceLeafCount} '
+        'lineweightScale=$kLineweightScale');
+    if (app.sink.canvasCallCount == 0) {
+      // The counters above are read from a frame that has to actually have
+      // happened. `panBy(Offset.zero)` forces one only because Transform2 has
+      // no operator== for ValueNotifier to dedupe against — a property this
+      // rig depends on and does not own. If that ever changes, this rig would
+      // print a plausible-looking zero rather than fail, and a zero is the one
+      // wrong number nobody questions.
+      throw StateError('no repaint happened: the forced frame did not draw');
+    }
+    print('  dashSpans=${app.painter.dashSpanCount} '
+        'collapsed=${app.painter.collapsedDashCount} '
+        'canvasCalls=${app.sink.canvasCallCount}');
   });
 
   testWidgets('R4a leaf edit per frame', (tester) async {
@@ -193,25 +259,49 @@ void main() {
     final y = (e.minY + e.maxY) / 2;
     final handlesBefore = app.doc.handleSeed.current.value;
     final rebuildsBefore = app.index.rebuildCount;
-    var dragged = addLineAt(app.doc, app.doc.rootHandle, x, y);
+    var dragged =
+        addLineAt(app.doc, app.doc.rootHandle, x, y, app.dashedLinetype);
 
     final clock = CommandClock();
     for (var step = 1; step <= kSteps; step++) {
       clock.time(() {
         app.doc.commands.execute(RemoveEntityCommand(dragged));
-        dragged = addLineAt(
-            app.doc, app.doc.rootHandle, x + step * 2.0, y + step * 1.0);
+        dragged = addLineAt(app.doc, app.doc.rootHandle, x + step * 2.0,
+            y + step * 1.0, app.dashedLinetype);
       });
       app.camera.panBy(const Offset(-3, -1));
       await tester.pump(const Duration(milliseconds: 16));
     }
     await tester.pumpAndSettle();
+    // All three counters now mean the same thing: this frame. dashSpanCount
+    // and collapsedDashCount reset themselves every paint; canvasCallCount
+    // does not, because the sink outlives the frame. But pumpAndSettle
+    // leaves nothing dirty, so a bare pump() would not repaint at all —
+    // RenderCustomPaint only repaints when its `repaint` Listenable fires,
+    // and nothing has changed since the last real frame. panBy(Offset.zero)
+    // is a numeric no-op but still assigns a fresh ViewportTransform
+    // (Transform2 and ViewportTransform both deliberately have no
+    // operator==, so ValueNotifier's reference check always sees a
+    // "change"), which fires the listener and forces the one real repaint
+    // that makes resetCounters() meaningful. A running total beside two
+    // per-frame figures is a wrong comparison waiting to be published.
+    app.sink.resetCounters();
+    app.camera.panBy(Offset.zero);
+    await tester.pump(const Duration(milliseconds: 16));
     report('R4a ($kEntities)', timings);
     print('  command ${clock.summary}');
     print('  overlay=${app.index.rootIndex.dirty.length} '
         'threshold=${app.index.rootIndex.rebuildThreshold} '
         'rebuilds=${app.index.rebuildCount - rebuildsBefore} '
         'handles burned=${app.doc.handleSeed.current.value - handlesBefore}');
+    // See R2's guard above for why: a zero here would mean the forced
+    // repaint silently stopped happening.
+    if (app.sink.canvasCallCount == 0) {
+      throw StateError('no repaint happened: the forced frame did not draw');
+    }
+    print('  dashSpans=${app.painter.dashSpanCount} '
+        'collapsed=${app.painter.collapsedDashCount} '
+        'canvasCalls=${app.sink.canvasCallCount}');
   });
 
   testWidgets('R4b instance drag per frame', (tester) async {
@@ -238,8 +328,31 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     await tester.pumpAndSettle();
+    // All three counters now mean the same thing: this frame. dashSpanCount
+    // and collapsedDashCount reset themselves every paint; canvasCallCount
+    // does not, because the sink outlives the frame. But pumpAndSettle
+    // leaves nothing dirty, so a bare pump() would not repaint at all —
+    // RenderCustomPaint only repaints when its `repaint` Listenable fires,
+    // and nothing has changed since the last real frame. panBy(Offset.zero)
+    // is a numeric no-op but still assigns a fresh ViewportTransform
+    // (Transform2 and ViewportTransform both deliberately have no
+    // operator==, so ValueNotifier's reference check always sees a
+    // "change"), which fires the listener and forces the one real repaint
+    // that makes resetCounters() meaningful. A running total beside two
+    // per-frame figures is a wrong comparison waiting to be published.
+    app.sink.resetCounters();
+    app.camera.panBy(Offset.zero);
+    await tester.pump(const Duration(milliseconds: 16));
     report('R4b ($kEntities)', timings);
     print('  command ${clock.summary}');
     print('  rebuilds=${app.index.rebuildCount - before} over $kSteps frames');
+    // See R2's guard above for why: a zero here would mean the forced
+    // repaint silently stopped happening.
+    if (app.sink.canvasCallCount == 0) {
+      throw StateError('no repaint happened: the forced frame did not draw');
+    }
+    print('  dashSpans=${app.painter.dashSpanCount} '
+        'collapsed=${app.painter.collapsedDashCount} '
+        'canvasCalls=${app.sink.canvasCallCount}');
   });
 }

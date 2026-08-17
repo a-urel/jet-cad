@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' show Size;
 
@@ -6,23 +7,16 @@ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import 'camera_controller.dart';
 import 'draw_sink.dart';
-import 'leaf_owner_map.dart';
 import 'viewport_transform.dart';
 
-/// How far from conformal a leaf's screen transform may be before one baked
+/// How far from conformal a curve's screen transform may be before its baked
 /// stroke width stops being close enough.
 ///
-/// `Transform2.anisotropyRatio` is the ratio of the larger singular value to
-/// the smaller, so 1.0 is conformal — including mirroring, where the
-/// determinant is negative but both axes scale alike.
+/// **Diagnostic only.** It gates no drawing decision: points, lines and
+/// polylines are carried into screen space regardless, and curves take the
+/// residual path regardless. All it decides is whether a curve is counted in
+/// [DraftPainter.anisotropicCurveCount].
 const double kAnisotropyThreshold = 2.0;
-
-/// Below this many leaves, a container is drawn whole instead of queried.
-///
-/// Testing thirty-odd boxes against a rectangle costs more than drawing them
-/// and letting `Canvas` clip. **A measured guess**: the number to revisit from
-/// R1's numbers, not a derived constant.
-const int kCullFloor = 32;
 
 /// Walks the document and writes to a [DrawSink]. No cache of any kind.
 ///
@@ -34,20 +28,12 @@ class DraftPainter {
     required this.document,
     required this.index,
     required this.resolver,
-    this.ownerMap,
     this.debugDisableRebasing = false,
   });
 
   final DraftDocument document;
   final SpatialIndex index;
   final StyleResolver resolver;
-
-  /// Optional, and the shortcut below is taken only when it is supplied.
-  ///
-  /// A map is only as good as the changes fed to it, and a stale one would put
-  /// dead slots on screen. Opt-in means a caller that forgets to feed it gets
-  /// the slower path rather than a wrong picture.
-  final LeafOwnerMap? ownerMap;
 
   /// **Test-only.** Paints with the rebase origin pinned at the world origin.
   ///
@@ -90,16 +76,17 @@ class DraftPainter {
   /// Instances not drawn in the last frame because they sat below [maxDepth].
   int get skippedDeepInstanceCount => _skippedDeepInstances;
 
-  int _bypassCount = 0;
+  int _screenSpaceLeaves = 0;
   int _anisotropicCurves = 0;
-  int _directBuckets = 0;
 
-  /// Containers drawn whole from the owner map in the last frame, rather than
-  /// through a rectangle query.
-  int get directBucketCount => _directBuckets;
-
-  /// Leaves drawn through the exact per-axis path in the last frame.
-  int get bypassCount => _bypassCount;
+  /// Leaves drawn with their points already carried into screen space, under
+  /// the frame's shared translation residual.
+  ///
+  /// Every point, line and polyline drawn in the frame. Plan 3a's
+  /// `bypassCount` counted the minority that took this path when their
+  /// transform was past [kAnisotropyThreshold]; the path is now the rule, so
+  /// the name changed with the meaning rather than quietly keeping it.
+  int get screenSpaceLeafCount => _screenSpaceLeaves;
 
   /// Circles and arcs drawn in the last frame under a transform past
   /// [kAnisotropyThreshold], where their stroke width is an approximation.
@@ -121,6 +108,62 @@ class DraftPainter {
   /// assumed away.
   int get skippedTextCount => _skippedText;
 
+  final Dasher _dasher = Dasher();
+
+  int _dashSpans = 0;
+
+  /// Dash spans emitted in the last frame.
+  int get dashSpanCount => _dashSpans;
+
+  /// Entities whose dash pattern collapsed to solid in the last frame.
+  int get collapsedDashCount => _dasher.collapsedCount;
+
+  /// The clip the dasher generates inside, in the space the carried points are
+  /// in — screen space **minus the frame's screen origin**.
+  ///
+  /// Inflated by half the widest stroke the frame can draw, so a stroke whose
+  /// centreline is just outside still contributes its visible edge. Rebased
+  /// once per frame rather than un-rebasing every point back into raw screen
+  /// space to compare them.
+  Aabb2 _rebasedClip = Aabb2.empty();
+
+  /// The same box before the rebase subtraction, for the curves that stay in
+  /// their own local space.
+  Aabb2 _screenSpaceClip = Aabb2.empty();
+
+  /// The frame's rebase origin in screen space. Constant for the whole frame,
+  /// so it is computed in [paint] rather than per leaf.
+  Vector2 _screenOrigin = Vector2.zero();
+
+  /// One two-point buffer, reused per span. A span is emitted through the sink
+  /// immediately, so it never needs to outlive the callback.
+  final Float64List _span = Float64List(4);
+
+  // The dasher's callbacks, bound once. A closure literal at the call site
+  // would allocate per dashed entity per frame; these capture nothing and read
+  // the two varying values from fields the caller sets just before the call.
+  DrawSink? _spanSink;
+  ResolvedStyle? _spanStyle;
+
+  // ignore: prefer_function_declarations_over_variables
+  late final DashSpanEmit _emitSpan =
+      (double x0, double y0, double x1, double y1) {
+    _span[0] = x0;
+    _span[1] = y0;
+    _span[2] = x1;
+    _span[3] = y1;
+    _dashSpans++;
+    _spanSink!.polyline(_span, 2, _spanStyle!, closed: false);
+  };
+
+  double _arcCx = 0, _arcCy = 0, _arcR = 0;
+
+  // ignore: prefer_function_declarations_over_variables
+  late final DashArcEmit _emitArc = (double startAngle, double sweep) {
+    _dashSpans++;
+    _spanSink!.arc(_arcCx, _arcCy, _arcR, startAngle, sweep, _spanStyle!);
+  };
+
   /// Draws everything visible, in ascending handle order.
   ///
   /// Root-level leaves and root-level instances arrive from two different
@@ -137,13 +180,24 @@ class DraftPainter {
   void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
     _skippedText = 0;
     _skippedDeepInstances = 0;
-    _bypassCount = 0;
+    _screenSpaceLeaves = 0;
     _anisotropicCurves = 0;
-    _directBuckets = 0;
     final world = camera.visibleWorld(viewport);
     _worldRect = world;
     final origin =
         debugDisableRebasing ? Vector2.zero() : rebaseOriginFor(world);
+    _dashSpans = 0;
+    _dasher.resetCounters();
+    _screenOrigin = camera.worldToScreen(origin);
+    // Half the widest stroke the frame can draw, in device pixels, so a stroke
+    // whose centreline is just outside still contributes its visible edge.
+    const inflate = 32.0;
+    _screenSpaceClip = Aabb2(Vector2(-inflate, -inflate),
+        Vector2(viewport.width + inflate, viewport.height + inflate));
+    _rebasedClip = Aabb2(
+        Vector2(-inflate - _screenOrigin.x, -inflate - _screenOrigin.y),
+        Vector2(viewport.width + inflate - _screenOrigin.x,
+            viewport.height + inflate - _screenOrigin.y));
     final rootIndex = index.rootIndex;
 
     // Drain the instance query completely first. Holding its results across
@@ -230,18 +284,10 @@ class DraftPainter {
 
     final scratch = _scratchAt(depth);
     scratch.leaves.reset();
-    final bucket = _directBucketFor(container, ci);
-    if (bucket != null) {
-      _directBuckets++;
-      for (var i = 0; i < bucket.length; i++) {
-        scratch.leaves.add(bucket[i]);
-      }
-    } else {
-      // searchLeaves is neither ordered nor deduplicated: it walks the packed
-      // tree and then the dirty overlay, and a slot in both is visited twice by
-      // design. Both are this caller's job.
-      ci.searchLeaves(localRect, scratch.leaves.add);
-    }
+    // searchLeaves is neither ordered nor deduplicated: it walks the packed
+    // tree and then the dirty overlay, and a slot in both is visited twice by
+    // design. Both are this caller's job.
+    ci.searchLeaves(localRect, scratch.leaves.add);
     scratch.leaves.sortByHandle(document.entities);
     scratch.collectInstances(ci, localRect);
 
@@ -293,24 +339,6 @@ class DraftPainter {
     );
   }
 
-  /// The leaves of [container] to draw whole, or null to run the rect query.
-  ///
-  /// Two conditions, and the second is not an optimisation. `slotsOf` answers
-  /// for the leaves a container owns **directly**, while a `ContainerIndex`
-  /// also holds every leaf folded up out of the groups nested inside it —
-  /// those are owned by the group node, not by the container. Requiring the
-  /// two counts to agree is what keeps a definition with a nested group off
-  /// this path, where the bucket would silently be missing its leaves. It also
-  /// catches a container edited since the index was built, whose new leaves
-  /// live in the dirty overlay and are not in `leafCount` yet.
-  List<int>? _directBucketFor(Handle container, ContainerIndex ci) {
-    final map = ownerMap;
-    if (map == null || ci.leafCount > kCullFloor) return null;
-    final bucket = map.slotsOf(container);
-    if (bucket.length != ci.leafCount) return null;
-    return bucket;
-  }
-
   _DepthScratch _scratchAt(int depth) {
     while (_depths.length <= depth) {
       _depths.add(_DepthScratch());
@@ -332,20 +360,34 @@ class DraftPainter {
     final style = resolver.styleFor(slot, ctx);
 
     // `Paint.strokeWidth` is a single scalar measured in the residual's units,
-    // so it can only be right when the residual scales both axes alike.
-    // `sqrt(|det|)` is the representative scale and `anisotropyRatio` says how
-    // far from conformal the transform is; within the threshold one width is
-    // close enough. Beyond it no single width is right, so the points are
-    // transformed here in Float64 and the residual carries translation only.
+    // so it can only be right when the residual scales both axes alike. Points,
+    // lines and polylines avoid the question entirely: their points are carried
+    // into screen space here in Float64 and the residual is a pure translation,
+    // so the sink's width is the exact paper width with nothing divided out.
+    //
+    // This was the anisotropy bypass, taken only past kAnisotropyThreshold. The
+    // threshold was never why it works — a conformal transform has the same
+    // property — so it is now the rule rather than the exception, and one
+    // residual value serves every line-like leaf in the frame.
     final toScreen = camera.worldToScreenMatrix.multiply(placement);
-    if (toScreen.anisotropyRatio > kAnisotropyThreshold) {
-      if (_bypassable(kind)) {
-        _bypassCount++;
-        _emitBypassed(
-            sink, camera, toScreen, origin, slot, kind, payload, style);
+    switch (kind) {
+      case EntityKind.point:
+      case EntityKind.line:
+      case EntityKind.polyline:
+        _screenSpaceLeaves++;
+        _emitScreenSpace(sink, toScreen, slot, kind, payload, style);
         return;
-      }
-      _anisotropicCurves++;
+      case EntityKind.circle:
+      case EntityKind.arc:
+        // Curves keep the residual path: an anisotropic transform turns a
+        // circle into an ellipse, and DrawSink.circle carries one radius.
+        // What a sink does with that residual is a sink decision.
+        if (toScreen.anisotropyRatio > kAnisotropyThreshold) {
+          _anisotropicCurves++;
+        }
+      case EntityKind.text:
+      case EntityKind.attrib:
+        break;
     }
 
     // The rebase subtraction happens in the leaf's own space, because that is
@@ -361,19 +403,17 @@ class DraftPainter {
         .multiply(Transform2.translation(localOrigin.x, localOrigin.y));
 
     sink.beginResidual(chain, debugHandle: document.entities.handleAt(slot));
-    _emit(sink, kind, payload, localOrigin, style);
+    // `chain`, not `toScreen`: the geometry `_emit` receives has already had
+    // `localOrigin` subtracted (that is what "rebased local" means), and
+    // `chain` — `toScreen . translate(localOrigin)` — is the transform that
+    // maps *that* rebased frame to screen, exactly the one this residual
+    // pushes. `toScreen` alone maps the *unrebased* local frame to screen, a
+    // frame apart by `localOrigin`; handing it to a clip pullback silently
+    // clipped a dashed curve against the wrong window on any pan where the
+    // rebase origin was non-zero. See `_localClipFor`.
+    _emit(sink, kind, payload, localOrigin, style, chain);
     sink.endResidual();
   }
-
-  /// Whether an entity of [kind] can be drawn with its points pre-transformed.
-  ///
-  /// Curves cannot: an anisotropic transform turns a circle into an ellipse,
-  /// and the sink's circle and arc calls carry one radius. They keep the
-  /// residual path, where `Canvas` draws the ellipse correctly.
-  static bool _bypassable(EntityKind kind) =>
-      kind == EntityKind.point ||
-      kind == EntityKind.line ||
-      kind == EntityKind.polyline;
 
   /// Draws a leaf with its points already carried into screen space.
   ///
@@ -381,17 +421,10 @@ class DraftPainter {
   /// and the stroke width the sink computes is the exact paper width in device
   /// pixels — nothing divided out of it, and nothing wrong on either axis.
   /// Rebasing here is in screen space, since that is the space the points are
-  /// now in.
-  void _emitBypassed(
-      DrawSink sink,
-      ViewportTransform camera,
-      Transform2 toScreen,
-      Vector2 origin,
-      int slot,
-      EntityKind kind,
-      GeometryPayload payload,
-      ResolvedStyle style) {
-    final screenOrigin = camera.worldToScreen(origin);
+  /// now in. Reads the frame's [_screenOrigin] rather than recomputing
+  /// `camera.worldToScreen(origin)` per leaf — it is the same value all frame.
+  void _emitScreenSpace(DrawSink sink, Transform2 toScreen, int slot,
+      EntityKind kind, GeometryPayload payload, ResolvedStyle style) {
     final coords = payload.coords;
     final count = payload.pointCount;
     if (count == 0) return;
@@ -401,20 +434,57 @@ class DraftPainter {
       final x = coords[i * 2];
       final y = coords[i * 2 + 1];
       _points[i * 2] =
-          toScreen.a * x + toScreen.c * y + toScreen.e - screenOrigin.x;
+          toScreen.a * x + toScreen.c * y + toScreen.e - _screenOrigin.x;
       _points[i * 2 + 1] =
-          toScreen.b * x + toScreen.d * y + toScreen.f - screenOrigin.y;
+          toScreen.b * x + toScreen.d * y + toScreen.f - _screenOrigin.y;
     }
 
-    sink.beginResidual(Transform2.translation(screenOrigin.x, screenOrigin.y),
+    sink.beginResidual(Transform2.translation(_screenOrigin.x, _screenOrigin.y),
         debugHandle: document.entities.handleAt(slot));
     if (kind == EntityKind.point) {
       sink.point(_points[0], _points[1], style);
-    } else {
+      sink.endResidual();
+      return;
+    }
+    final pattern = _patternFor(style);
+    if (pattern == null) {
+      sink.polyline(_points, count, style, closed: false);
+      sink.endResidual();
+      return;
+    }
+    // The emitter is a field bound once (see `_emitSpan` above), not a closure
+    // written here: a closure literal that captures `sink` and `style` is a
+    // fresh object on every dashed leaf of every frame, against the global
+    // constraint that the frame path allocates nothing once warm. The two
+    // captured values move into fields instead.
+    _spanSink = sink;
+    _spanStyle = style;
+    if (!_dasher.dashPolyline(_points, count, pattern,
+        _dashScale(style, toScreen), _rebasedClip, _emitSpan)) {
       sink.polyline(_points, count, style, closed: false);
     }
     sink.endResidual();
   }
+
+  /// The pattern for [style], or null when the entity is continuous.
+  DashPattern? _patternFor(ResolvedStyle style) {
+    final record = document.tables.linetypes[style.linetype];
+    final pattern = record?.pattern;
+    if (pattern == null || pattern.dashes.isEmpty) return null;
+    return pattern;
+  }
+
+  /// Pattern units to device pixels.
+  ///
+  /// `entity scale × document scale × the composed screen scale`. The last is
+  /// `sqrt(|det|)` of the full world-to-screen chain — the same representative
+  /// scale the stroke width uses, and under an anisotropic placement it is an
+  /// approximation for the same reason, counted in [anisotropicCurveCount]'s
+  /// company rather than assumed away.
+  double _dashScale(ResolvedStyle style, Transform2 toScreen) =>
+      style.linetypeScale *
+      document.header.globalLinetypeScale *
+      toScreen.scaleMagnitude;
 
   /// The rebase origin expressed in a leaf's own space.
   ///
@@ -430,7 +500,7 @@ class DraftPainter {
   }
 
   void _emit(DrawSink sink, EntityKind kind, GeometryPayload payload,
-      Vector2 localOrigin, ResolvedStyle style) {
+      Vector2 localOrigin, ResolvedStyle style, Transform2 chain) {
     final coords = payload.coords;
     final ox = localOrigin.x;
     final oy = localOrigin.y;
@@ -456,19 +526,101 @@ class DraftPainter {
       case EntityKind.circle:
         // The radius is not a point and is not rebased; subtracting the origin
         // from it would shrink every circle by its distance to the origin.
-        sink.circle(coords[0] - ox, coords[1] - oy, payload.scalars[0], style);
+        final r = payload.scalars[0];
+        final pattern = _patternFor(style);
+        if (pattern == null) {
+          sink.circle(coords[0] - ox, coords[1] - oy, r, style);
+          return;
+        }
+        _spanSink = sink;
+        _spanStyle = style;
+        _arcCx = coords[0] - ox;
+        _arcCy = coords[1] - oy;
+        _arcR = r;
+        // The circle's centre is in rebased-local space (localOrigin already
+        // subtracted), so the clip has to be pulled back through `chain` —
+        // the transform that maps *that* frame to screen — not `toScreen`,
+        // which maps the unrebased local frame instead. See the comment on
+        // `chain` at the call site and on `_localClipFor`. A curve under a
+        // non-invertible placement was already dropped by `_drawContainer`,
+        // so `chain` is invertible here.
+        if (!_dasher.dashArc(
+            _arcCx,
+            _arcCy,
+            r,
+            0,
+            2 * math.pi,
+            pattern,
+            // Local units: no `chain.scaleMagnitude` here, because `r` and
+            // the clip are not in pixels either.
+            style.linetypeScale * document.header.globalLinetypeScale,
+            _localClipFor(chain),
+            _emitArc,
+            // A pure translation does not change a scale magnitude, so this
+            // is the same value `toScreen.scaleMagnitude` would have given —
+            // only the clip pullback needed the rebase-aware transform.
+            pixelScale: chain.scaleMagnitude)) {
+          sink.circle(_arcCx, _arcCy, r, style);
+        }
 
       case EntityKind.arc:
         // Neither the radius nor the two angles are rebased, for the same
         // reason. The residual carries no rotation of its own, so world angles
         // stay world angles.
-        sink.arc(coords[0] - ox, coords[1] - oy, payload.scalars[0],
-            payload.scalars[1], payload.scalars[2], style);
+        final r = payload.scalars[0];
+        final start = payload.scalars[1];
+        final sweep = payload.scalars[2];
+        final pattern = _patternFor(style);
+        if (pattern == null) {
+          sink.arc(coords[0] - ox, coords[1] - oy, r, start, sweep, style);
+          return;
+        }
+        _spanSink = sink;
+        _spanStyle = style;
+        _arcCx = coords[0] - ox;
+        _arcCy = coords[1] - oy;
+        _arcR = r;
+        if (!_dasher.dashArc(
+            _arcCx,
+            _arcCy,
+            r,
+            start,
+            sweep,
+            pattern,
+            style.linetypeScale * document.header.globalLinetypeScale,
+            _localClipFor(chain),
+            _emitArc,
+            pixelScale: chain.scaleMagnitude)) {
+          sink.arc(_arcCx, _arcCy, r, start, sweep, style);
+        }
 
       case EntityKind.text:
       case EntityKind.attrib:
         _skippedText++;
     }
+  }
+
+  /// The frame's clip expressed in a leaf's own **rebased-local** space —
+  /// the frame the coordinates `_emit` draws in actually live in, since
+  /// `localOrigin` has already been subtracted from them there.
+  ///
+  /// A curve is not carried into screen space — it keeps the residual path —
+  /// so its coordinates are local and the clip has to meet them there. The
+  /// transformed box is an over-approximation under rotation, which is the
+  /// safe direction: it clips less, never more.
+  ///
+  /// [chain] must be the full residual — `toScreen . translate(localOrigin)`
+  /// — not `toScreen` alone. `toScreen` maps the *unrebased* local frame to
+  /// screen; the circle/arc centre passed to the dasher is in the rebased
+  /// frame, one `localOrigin` apart. Pulling the clip back through `toScreen`
+  /// intersected a shifted circle against an unshifted window and silently
+  /// dropped over 90% of a dashed curve's spans on any pan where the rebase
+  /// origin was non-zero — caught by
+  /// `'rebasing does not clip a dashed curve out of its own frame'`.
+  Aabb2 _localClipFor(Transform2 chain) {
+    final det = chain.determinant;
+    if (det == 0.0 || !det.isFinite) return _rebasedClip;
+    return _screenSpaceClip.transformedBy(chain.invert());
   }
 
   void _ensurePoints(int pointCount) {

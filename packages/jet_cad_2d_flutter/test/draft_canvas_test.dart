@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import 'support/fixtures.dart';
 
@@ -34,6 +35,9 @@ AddEntityCommand lineAt(Handle owner, Handle handle, List<double> coords) =>
       payload: GeometryPayload(
           coords: Float64List.fromList(coords), scalars: Float64List(0)),
     );
+
+void addLine(DraftDocument doc) => doc.commands
+    .execute(lineAt(doc.rootHandle, doc.handleSeed.next(), [0, 0, 1, 1]));
 
 void main() {
   late DraftDocument doc;
@@ -104,44 +108,23 @@ void main() {
     expect(painter.shouldRepaint(painter), isFalse);
   });
 
-  testWidgets('each change reaches the leaf-owner map', (tester) async {
-    // The map is what lets the painter draw a small container whole instead of
-    // querying it. Fed by the canvas, because the document's only synchronous
-    // channel belongs to the index — so a canvas that subscribes but forgets
-    // to forward gives the painter a map that is right only until the first
-    // edit.
-    await tester.pumpWidget(
-        wrap(DraftCanvas(document: doc, index: index, camera: camera)));
-    final state = tester.state<DraftCanvasState>(find.byType(DraftCanvas));
-
-    const inner = Handle(500);
-    final before = state.ownerMap.slotsOf(inner).length;
-    doc.commands.execute(lineAt(inner, const Handle(951), [0, 0, 1, 1]));
-    await tester.idle();
-
-    expect(state.ownerMap.slotsOf(inner), hasLength(before + 1));
-  });
-
   testWidgets('disposing stops listening', (tester) async {
-    // Two failures live here and neither announces itself. A subscription left
-    // open keeps a dead canvas maintaining derived state for the life of the
-    // document — no crash, just work and memory that nothing will ever read.
-    // A subscription left open onto a *disposed* notifier does throw, on the
-    // next edit, which is a user action far from the canvas that caused it.
-    await tester.pumpWidget(
-        wrap(DraftCanvas(document: doc, index: index, camera: camera)));
-    final map =
-        tester.state<DraftCanvasState>(find.byType(DraftCanvas)).ownerMap;
-    final before = map.slotsOf(doc.rootHandle).length;
+    final doc = DraftDocument.empty();
+    var changes = 0;
+    final notifier = DocChangeNotifier(doc, onChange: (_) => changes++);
+    addLine(doc);
+    await tester.pump();
+    final afterFirst = changes;
+    expect(afterFirst, greaterThan(0),
+        reason: 'the listener must be live '
+            'before disposal, or the assertion below proves nothing');
 
-    await tester.pumpWidget(wrap(const SizedBox()));
-    doc.commands
-        .execute(lineAt(doc.rootHandle, const Handle(952), [0, 0, 1, 1]));
-    await tester.idle();
-
-    expect(map.slotsOf(doc.rootHandle), hasLength(before),
-        reason: 'a disposed canvas must stop maintaining its derived state');
-    expect(tester.takeException(), isNull);
+    notifier.dispose();
+    addLine(doc);
+    await tester.pump();
+    expect(changes, afterFirst,
+        reason: 'a disposed notifier that still receives changes leaks; '
+            'it does not throw, so "no exception" would not catch it');
   });
 
   testWidgets('one sink serves every paint', (tester) async {
@@ -178,6 +161,52 @@ void main() {
 
     expect(index.rootIndex.leafCount, greaterThan(0));
     camera.panBy(const Offset(1, 0)); // would throw on a disposed notifier
+  });
+
+  testWidgets('a small container does not draw its off-screen leaves',
+      (tester) async {
+    // Eight leaves — under the old kCullFloor of 32 — spread across a strip
+    // far wider than the view. The camera sees the leftmost two.
+    final doc = DraftDocument.empty();
+    final def = doc.handleSeed.next();
+    doc.tree.addDefinition(Definition(
+        handle: def,
+        name: 'strip',
+        basePoint: Vector2.zero(),
+        children: const []));
+    for (var i = 0; i < 8; i++) {
+      addEntity(doc, def, doc.handleSeed.next(), EntityKind.line,
+          [i * 1000.0, 0, i * 1000.0 + 40, 30], const []);
+    }
+    final placed = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: placed,
+      parent: doc.rootHandle,
+      definition: def,
+      layer: ReservedHandles.layerZero,
+      transform: Transform2(1.3, 0.2, -0.1, 1.7, 25, 40),
+    )));
+
+    final index = SpatialIndex(doc);
+    final recording = RecordingDrawSink();
+    final painter = DraftPainter(
+        document: doc, index: index, resolver: DocumentStyleResolver(doc));
+    // A view over the first strip cell only.
+    final camera = ViewportTransform.fit(
+        Aabb2(Vector2(0, 0), Vector2(120, 90)), kViewport);
+    painter.paint(recording, camera, kViewport);
+
+    final drawn = recording.ops.whereType<PolylineOp>().length;
+    // Not an exact count: index boxes carry narrow-phase slack, so the culled
+    // number is "fewer than all of them", not a number this test may pin. The
+    // two bounds together are the property — 8 means the shortcut is live, 0
+    // means the fixture is wrong and the assertion above it proves nothing.
+    expect(drawn, greaterThan(0),
+        reason: 'the view holds part of the strip; drawing nothing means the '
+            'fixture, not the cull floor, is what this test is measuring');
+    expect(drawn, lessThan(8),
+        reason: 'the container has eight leaves and the view holds one or two '
+            'of them; drawing all eight is the cull-floor shortcut');
   });
 
   group('DocChangeNotifier', () {

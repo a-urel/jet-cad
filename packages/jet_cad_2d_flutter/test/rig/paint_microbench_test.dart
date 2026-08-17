@@ -15,29 +15,9 @@ import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d/testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
-import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
 
-const Size kRigViewport = Size(1600, 1200);
-
-/// Root instances per document, held fixed across both entity counts.
-///
-/// **Not the plan's `definitionCount: entityCount ~/ 25`.** That asks for
-/// 20,000 definitions and 500,000 root instances at the large size, and the
-/// document never finishes building: `DocumentTree._link` scans and copies the
-/// parent's `children` list on every add, so filling one parent is quadratic in
-/// its child count. Measured on this machine, at 50,000 entities: 6,250
-/// instances 236 ms, 12,500 → 532 ms, 25,000 → 2,684 ms, 50,000 → 15,767 ms —
-/// four times the instances, thirty times the time. Loading a file does not go
-/// through it (`DraftDocumentCodec` uses `addNodeUnchecked`), so this is the
-/// command path only, and fixing it means changing how a node holds its
-/// children. Recorded for a later plan; the rig works around it.
-///
-/// 200 definitions each placed 100 times is also the more honest floor plan.
-/// A drawing with one definition per 25 entities has no reuse to measure.
-const int kDefinitionCount = 200;
-const int kInstanceCount = 20000;
+import 'rig_support.dart';
 
 class Stats {
   Stats(this.p50, this.p95, this.min, this.n);
@@ -77,35 +57,6 @@ Stats measure(void Function() body,
       samples[(samples.length * 0.95).floor()], samples.first, samples.length);
 }
 
-/// A viewport-sized window over the document centre.
-///
-/// The fit camera draws the entire drawing, which is the worst case and not a
-/// frame anyone renders. This is the one that speaks to a frame budget: the
-/// working set a user actually looks at.
-ViewportTransform workingSetCamera(DraftDocument doc) {
-  final e = doc.extents;
-  final cx = (e.minX + e.maxX) / 2;
-  final cy = (e.minY + e.maxY) / 2;
-  // 3000 x 2250 world units at 1600 x 1200 px: a room or two of a floor plan
-  // whose whole extent is 60000 x 40000.
-  return ViewportTransform.fit(
-      Aabb2(Vector2(cx - 1500, cy - 1125), Vector2(cx + 1500, cy + 1125)),
-      kRigViewport);
-}
-
-DraftDocument rigCorpus(int entityCount) => generateDocument(
-      entityCount,
-      definitionCount: kDefinitionCount,
-      instanceCount: kInstanceCount,
-      nestingDepth: 2,
-      mirroredFraction: 0.1,
-      nonUniformFraction: 0.2,
-      groupCount: 50,
-      layerCount: 8,
-      byBlockFraction: 0.3,
-      dashedFraction: 0.35,
-    );
-
 void main() {
   for (final entityCount in [50000, 500000]) {
     test('paint and query at $entityCount', () {
@@ -127,7 +78,7 @@ void main() {
       // draws the whole drawing and is the worst case; the working set is what
       // a frame budget is actually about.
       for (final (label, camera) in [
-        ('whole drawing', ViewportTransform.fit(doc.extents, kRigViewport)),
+        ('whole drawing', wholeDrawingCamera(doc)),
         ('working set', workingSetCamera(doc)),
       ]) {
         final paint = measure(() {
@@ -146,37 +97,27 @@ void main() {
         final query = measure(() => painter.paint(sink, camera, kRigViewport));
         final opsPerFrame = (sink.opCount - before) ~/ (query.n + 20);
 
-        // Measured on the same corpus in the same run: a delta taken across two
-        // runs would be a delta in machine load.
-        final memo = MemoisedStyleResolver(DocumentStyleResolver(doc));
-        final memoQuery = measure(() =>
-            DraftPainter(document: doc, index: index, resolver: memo)
-                .paint(NullDrawSink(), camera, kRigViewport));
-
-        // The owner-map shortcut is opt-in, so a painter built without one
-        // reports `directBuckets: 0` — which reads as "the shortcut is dead"
-        // rather than "the shortcut was not offered".
-        final ownerMap = LeafOwnerMap(doc);
-        final mapped = DraftPainter(
-            document: doc,
-            index: index,
-            resolver: DocumentStyleResolver(doc),
-            ownerMap: ownerMap);
-        final mappedQuery =
-            measure(() => mapped.paint(NullDrawSink(), camera, kRigViewport));
+        // One more, untimed: a single CanvasDrawSink run, alongside the
+        // NullDrawSink one above, so canvasCalls and the dash counters
+        // describe the same frame this row's other counters came from.
+        final canvasRecorder = PictureRecorder();
+        final canvasSink = CanvasDrawSink(
+            canvas: Canvas(canvasRecorder),
+            pixelsPerPaperMm: kLogicalPixelsPerMm);
+        painter.paint(canvasSink, camera, kRigViewport);
+        canvasRecorder.endRecording().dispose();
 
         print('  -- $label --');
         print('    R1 paint          $paint');
         print('    R3 query-only     $query');
-        print('    R3 + style memo   $memoQuery '
-            '(entries=${memo.entryCount})');
-        print('    R3 + owner map    $mappedQuery '
-            '(directBuckets=${mapped.directBucketCount})');
         print('    ops/frame: $opsPerFrame');
-        print('    bypassed leaves: ${painter.bypassCount}  '
+        print('    screen-space leaves: ${painter.screenSpaceLeafCount}  '
             'anisotropic curves: ${painter.anisotropicCurveCount}');
         print('    skipped text: ${painter.skippedTextCount}  '
             'skipped deep instances: ${painter.skippedDeepInstanceCount}');
+        print('    canvasCalls: ${canvasSink.canvasCallCount}  '
+            'dashSpans: ${painter.dashSpanCount}  '
+            'collapsed: ${painter.collapsedDashCount}');
       }
 
       index.dispose();

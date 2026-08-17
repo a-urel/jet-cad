@@ -1,6 +1,22 @@
 # jet_cad_2d Plan 3b — Draw-Call Batching and Dashes
 
-**Status:** draft 2026-08-10
+> ## Revised 2026-08-11: the batching half of this spec was measured and refuted
+>
+> The spike below ran, its decision rule's stop clause fired, and **no batching
+> mode ships**. Twelve profile runs at 500,000 entities: the unbatched path is
+> 179.63 ms, the most batched mode is 490.19 ms, and nothing beats unbatched.
+> Draw calls collapsed from 7,009 to 10 and recording got 40% cheaper, so the
+> mechanism was implemented correctly — it simply is not what binds the frame.
+>
+> Numbers and the two follow-ups in
+> [2026-08-11-plan-3b-batch-spike.md](../notes/2026-08-11-plan-3b-batch-spike.md).
+>
+> Everything below about the batch is kept as the record of what was designed,
+> why, and what the measurement did to it. **Read "What the spike changed" at
+> the end of this document for what 3b actually delivers.** The dash design,
+> the two deletions, and the screen-space carry are unaffected and still stand.
+
+**Status:** draft 2026-08-10, batching half refuted 2026-08-11
 **Parent:** [2026-07-27-jet-cad-2d-architecture-design.md](2026-07-27-jet-cad-2d-architecture-design.md)
 **Predecessor:** Plan 3a (render path foundation and measurement) — tasks 0–9 merged at `f9a7d8e`, tasks 10–18 committed to `main` directly, exit gate run at `cdeb4cc` and recorded at `bfe9df4`. 759 tests: 639 engine, 120 Flutter
 **Carried in:** [2026-08-10-plan-3a-results.md](../notes/2026-08-10-plan-3a-results.md), [2026-08-10-plan-3a-ledger.md](../notes/2026-08-10-plan-3a-ledger.md)
@@ -425,37 +441,61 @@ the batching goes — and, as noted above, why the oracle is blind to it.
 
 ### Batched equals unbatched
 
-`CanvasDrawSink` gains `debugDisableBatching`. A golden test renders the same
-fixture both ways and compares the PNGs.
+The proof is pixel-level rather than op-list, because batching is a `Canvas`
+behaviour that an op list cannot see. It is **not** a golden comparison. Both
+modes are rendered in one test through `PictureRecorder` → `Picture.toImage` and
+their pixels are compared directly.
 
-This is the batch's correctness proof, and it is a pixel-level one rather than
-an op-list one, because batching is a `Canvas`-level behaviour that an op list
-cannot see.
+Three reasons, and the first two are measured rather than anticipated:
 
-**The invariant, stated exactly, because it is not "the picture is identical":**
-batched and unbatched rendering are byte-identical whenever no two overlapping
-primitives have different paint keys. Cross-key overlap is where a draw-order
-change becomes visible, and under the persistent-map variants it is where the
-two renderings are *expected* to differ.
+- **The widget route does not re-render.** `_DraftCustomPainter.shouldRepaint`
+  returns `false` by design — repaint is driven by the camera and document
+  listenables, not by rebuilds — and `RenderCustomPaint` skips
+  `markNeedsPaint` when the new painter has the same `runtimeType` and says not
+  to repaint. Two `pumpWidget` calls in one test therefore produce **one**
+  render, and the second `expectLater` silently re-checks the first image. Both
+  fixtures passed vacuously under mutation before this was found.
+- **Byte-identity is false for opaque geometry**, and the batched image is the
+  correct one. Merging overlapping strokes into one path makes Skia compute
+  coverage once over the unioned outline — `1 − union(a, b)` — where separate
+  draws composite one antialiased stroke over another — `(1−a)(1−b)`. At half
+  coverage that is 0.5 against 0.25. The seam that disappears under batching is
+  an artifact of drawing touching strokes separately, and a CAD drawing is made
+  of touching strokes. Measured at 1.09% of pixels, magnitudes peaking at 1 and
+  trailing to 37, inside the crossing region; a control of unbatched against
+  itself differs by nothing.
+- Golden files add a platform, a comparator with no tolerance, and a set of PNG
+  bytes to maintain, for a comparison that is between two in-process renders.
 
-Three fixtures, and each one is load-bearing:
+**The invariant, in three parts:**
 
-1. **Same-key overlap.** Several paint keys present, but every overlap is within
-   one key. **Byte-identical under every variant** — this is the assertion that
-   path accumulation itself does not change rasterisation, since opaque union
-   and opaque double-blend agree.
-2. **Transparent same-key overlap**, alpha below 255. **Byte-identical**, but
-   only because transparent styles are excluded from batching. Deleting that
-   exclusion must make this fixture differ, which is what proves the exclusion
-   does work rather than merely existing.
-3. **Cross-key overlap.** Byte-identical under variant B, and under B alone.
-   Under A and A′ this fixture is a **reviewed golden** whose difference *is* the
-   ordering contract made visible — regenerated deliberately when the variant
-   ships, with the pixels that changed named in the commit.
+1. **Translucent geometry renders identically**, pixel for pixel, because a
+   style below full alpha is never batched. Zero differing pixels — no
+   tolerance, and therefore no margin to argue about.
+2. **Opaque geometry is the same picture, differently antialiased.** Batching
+   redistributes sub-pixel coverage, so a 4×4 box average — the operation that
+   undoes a redistribution — must reduce the difference to nothing much: a max
+   per-channel delta of 12 and a mean under 2. Total ink is conserved within
+   2%, and no pixel changes hue. Geometry that was dropped, moved or recoloured
+   is not a redistribution and survives the filter.
 
-Fixture 3 is the one that turns the tie-break in the decision rule from a
-preference into something with a picture attached: if B wins or ties, this
-fixture is an equality assertion, and 3b hands 3d a contract with nothing in it.
+   Two checks that look right and are **not** asserted, because a measurement
+   refuted them. "No pixel that was fully covered stops being fully covered" is
+   false in both directions: two opaque strokes each covering 97% of a pixel
+   composite to `255 × 0.03²`, which rounds to black, while unioned they cover
+   97% and land on 8 — and two disjoint half-covered strokes go the other way,
+   unioning to full coverage where compositing leaves 64. And a cap on the raw
+   differing-pixel fraction was written as 3% before anything was measured; the
+   figure is about 4%. A threshold fitted to an observation afterwards is a
+   record of the observation, not a threshold.
+3. **Cross-key overlap** is byte-identical under variant B and under B alone.
+   Under the mapped variants the difference is the ordering contract made
+   visible, and it is a *hue* change at the overlap — which is what separates it
+   from part 2's coverage noise.
+
+Part 1 is the discriminator. Deleting the alpha exclusion turns fixture 2's zero
+into a difference immediately, with no tolerance standing between the mutant and
+the failure. Parts 2 and 3 characterise what batching is allowed to change.
 
 ### Mutation testing
 
@@ -479,28 +519,83 @@ never write handle literals. Two 3a fixtures were silently building malformed
 documents because they did, and the cross-store handle invariant is what exposed
 them.
 
+## What the spike changed
+
+The batch shipped nothing. What 3b delivers instead:
+
+1. **The two deletions stand.** `kCullFloor`, `LeafOwnerMap` and
+   `MemoisedStyleResolver` are gone, on Plan 3a's measurements. Unaffected by
+   anything the spike found.
+2. **The screen-space carry stands.** Every point, line and polyline reaches the
+   sink already in screen space under one shared translation residual. It is
+   speed-neutral — the unbatched path measures 179.63 ms against 3a's
+   182.73 ms — and it removes `_bypassable`, reduces `kAnisotropyThreshold` to a
+   counter's predicate, and takes the residual-scale division out of the stroke
+   width for every line. Kept for the code it deletes, not for a speed claim.
+3. **The batching machinery is removed.** `BatchMode`, the buckets, `flush()`,
+   `DraftCanvas.batchMode`, the `BATCH` define, the spike rig and the
+   pixel-equivalence test all go. `CanvasDrawSink.canvasCallCount` stays: a
+   counter that says how many real draw calls a frame issues is worth having
+   whatever the sink does with them.
+4. **A profiling task replaces the spike.** The 179 ms is now unexplained, and it
+   is not draw-call dispatch. Before Plan 3e designs a cache to reduce
+   per-frame work, something has to say what that work *is*. This is the same
+   move 3a made when it measured the unmemoised style resolver first.
+5. **Dashes proceed unchanged.** The design in this document is untouched by the
+   spike: an engine-side dasher, a screen-space period, clip-then-phase, and a
+   measured collapse floor.
+
 ## Exit criteria
 
 | Criterion | Threshold |
 |---|---|
-| 500k working-set raster p50, **with dashes on** | **≤ 182.73 ms** — 3a's dash-free number. Failable |
-| batched vs unbatched goldens, fixtures 1 and 2 | byte-identical |
-| batched vs unbatched goldens, fixture 3 | byte-identical under B; a reviewed, deliberately regenerated golden under A or A′ |
+| the spike's four modes | measured, recorded, and the stop clause honoured — **met**, see the note |
+| the raster profile | one named cost accounting for the largest share of the 500k working-set frame, with the capture method recorded and repeatable |
+| the batching machinery | removed, with the suite green after its removal |
+| 500k working-set raster p50, **with dashes on** | measured and recorded against 179.63 ms. **Not a threshold** |
 | the differential oracle | both differential tests and the non-vacuity test pass, with `reference_walk.dart` unmodified |
-| the spike's four variants | measured, recorded, and the shipped one chosen by the stated rule |
 | `kDashCollapsePx` | swept with its numbers recorded, and chosen by a recorded human review of the dash-ladder goldens |
 | engine and Flutter suites, analyzer, formatter | green and clean |
 | mutation log | every mutant killed or argued equivalent |
 
-The gate asks the only question worth asking of this plan: **does the batching
-win exceed the dash cost?** A pass means 3c and 3d start from a path that has
-absorbed a third of the drawing becoming dashed. A failure means the batch win
-is smaller than the dash cost, 3e's job is larger than 3a's note assumed, and
-that is recorded as a number rather than discovered in 3e.
+**The dash gate is no longer failable, and that is a demotion made on evidence.**
+It was written as "does the batching win exceed the dash cost?" — a real
+question while there was a batching win to weigh. There is none. Asserting that
+a third of the drawing can start being drawn dashed without costing anything,
+against a path with nothing to offset it, would be asserting that dashes are
+free. They are not, and the honest deliverable is the number.
 
-Web's 500k whole-drawing frame is **re-measured and not gated**. Batching is the
-direct remedy for the 3.4-million-op abort and it would be satisfying to require
-the fix, but a hard limit inside CanvasKit is not this plan's to guarantee.
+Web's 500k whole-drawing frame is **re-measured and not gated**, and the reason
+has changed: Plan 3a's 3.4-million-op CanvasKit abort **did not reproduce**
+against the tree at the time — the batch spike (Task 4, commit `56b8ec3`),
+which had Tasks 0 and 1 but no dashing yet. All four batch modes completed.
+That removed the last argument for shipping a batching mode that loses on the
+measured platform.
+
+**Correction, recorded after the fact (Task 12).** `56b8ec3` predates dashing
+— `bcbb0f5` (Task 8) landed after it — so the batch spike's web re-check
+measured a tree with nothing dashed. Task 12 re-ran the identical scenario on
+the finished, dashed tree and the abort **reproduced**, twice, at the same
+`finishRecordingAsPicture` call site 3a originally recorded. The two notes do
+not disagree about what they measured — they measured two different trees —
+but that is where the settled part ends. **3a's results note item 5 is
+observed again, not re-established.** Two substantive changes sit between
+the two trees, not one: dashing, and `b5e6a21`'s removal of the batching
+machinery, which strips 217 lines from `canvas_draw_sink.dart` itself — the
+component that emits the `Canvas` calls a picture is built from — along with
+changes to `draft_canvas.dart` and two deleted test files. Neither has been
+shown to cause the abort. Task 12's own draw-call counts argue against
+dashing specifically: real `Canvas` calls at this camera came back identical
+either side of it (1,134,900, both trees), because every dashed entity here
+collapses below the dash floor to the same single solid call the pre-dash
+code already emitted — a code path proven to produce an identical picture is
+a poor candidate for why that picture's fate changed. The two runs'
+environments were also never controlled to be the same session, and
+`RuntimeError: Aborted()` inside `finishRecordingAsPicture` is consistent
+with a memory-pressure allocation failure that would track the session
+rather than the tree. **The trigger is unknown; 3e should not design against
+a fixed op-count ceiling until someone re-runs both trees back to back in
+one session and shows the abort tracks the tree rather than the session.**
 
 ## Carried to Plan 3c
 
@@ -533,6 +628,11 @@ What 3d adds is an entity the hit kind can point at.
 open buckets before it draws and opens new ones after. 3b writes the condition
 with nothing to put in it, so 3d adds a caller rather than a mechanism.
 
+**Stale.** Batching was reverted (`b5e6a21`) — there are no buckets and no
+flush condition. **3d inherits no mechanism from 3b here, only the ordinary
+one-call-per-primitive `CanvasDrawSink` Task 12 measured throughout.** See
+`2026-08-11-plan-3b-results.md`'s "What this says about Plans 3c, 3d and 3e."
+
 ## Carried to Plan 3e
 
 The definition picture cache, the tile cache, the per-definition entry bounds,
@@ -544,6 +644,15 @@ gate.
 handful of batched paths rather than hundreds of transform-wrapped draws, so the
 cache's value, its memory footprint and its scale-band key all have to be
 computed from 3b's numbers, not 3a's.
+
+**Stale.** Batching was reverted; a definition still draws as one call per
+primitive, not "a handful of batched paths." What 3b actually changes for
+3e's cache is described in `2026-08-11-plan-3b-results.md`'s 3e section: the
+dominant cost is leaf-count-bound GPU vertex work (per the raster-profile
+note), dashing makes that leaf-count story stronger rather than weaker, a
+cached picture is not scale-invariant once dash phase/collapse depend on
+screen scale, and the web op ceiling is observed again with an unconfirmed
+trigger — none of which is "batched paths."
 
 ## Carried to Plan 4
 
@@ -568,12 +677,20 @@ Unchanged from 3a, plus one:
 |---|---|
 | The batch hypothesis is wrong and raster is bound by something else | Task 1's spike, with a stated stop-and-reopen rule, before the plan's other work exists |
 | Batching changes the picture | Byte-identical goldens both ways, with a transparent fixture that fails if the alpha exclusion is deleted |
-| Dashes cost more than batching saves | That is the gate, phrased as a question rather than assumed away |
-| The ordering contract is wrong once fills exist | The flush condition is written in 3b with 3d's caller named; the tie-break in the spike's decision rule prefers the narrower contract at equal speed |
+| Dashes cost more than batching saves | That is the gate, phrased as a question rather than assumed away. **Stale (see "What the spike changed"): there is no batching win to weigh the cost against, so the gate was demoted from a question to a recorded number.** |
+| The ordering contract is wrong once fills exist | The flush condition is written in 3b with 3d's caller named; the tie-break in the spike's decision rule prefers the narrower contract at equal speed. **Stale: batching was reverted (`b5e6a21`), so there is no flush condition — see "Carried to Plan 3d" below.** |
 | The collapse floor hides real dashes | Swept, and the value that ships is the largest with no visible golden difference; collapses counted per frame |
 | Clipping breaks dash phase under a moving camera | The phase carry is an explicit mutation target — dropping it must make the picture slide |
 | Pre-transforming points in Dart costs more build time than it saves raster time | Measured directly: the spike reports build and raster separately, as 3a's rigs already do |
 | A′ ships and its wider ordering contract bites in 3d | The tie-break prefers A and B; A′ ships only if it wins by more than noise, and the contract is written down here rather than inferred later |
 | The bucket lifecycle is left implicit and two readers build two sinks | Named as the axis the spike measures, with both lifecycles tabulated, an ordering-loss column per variant, and golden fixture 3 whose expected result differs between them |
 | The oracle is "helpfully" updated alongside the painter | `reference_walk.dart` is untouched by this plan, and the diff being empty is an exit criterion. `flatten` already normalises both routes to screen space |
-| The web ceiling persists | Re-measured, not gated, and named as CanvasKit's limit rather than this plan's |
+| The web ceiling persists | Re-measured, not gated, and named as CanvasKit's limit rather than this plan's. **Stale (see the Task 12 correction above): the abort is observed again on the dashed tree and was not observed on the batch spike's dash-free tree, but its trigger is unknown — it has not been shown to be a fixed op ceiling, "CanvasKit's limit," or anything else attributable. Do not read this row as settled.** |
+
+**This table predates Task 4** — it is the original planning commit's risk
+register, written while batching was still the design and before the spike
+refuted it. Rows above marked **Stale** assert something as settled that
+Task 12 found is not; the rest describe risks and mitigations that were
+genuinely exercised (the goldens, the mutation log, the spike's own
+decision rule) and are left as the historical record they are, even where
+the risk itself is now moot because batching didn't ship.

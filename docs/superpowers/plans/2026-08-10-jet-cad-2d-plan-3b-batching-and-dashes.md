@@ -14,7 +14,8 @@
 ## Global Constraints
 
 - **`packages/jet_cad_2d` must never import Flutter.** No `dart:ui`, no `package:flutter`. `dart test` must keep working there. The dasher lives here, so it takes plain doubles and `Aabb2`, never `Offset` or `Rect`.
-- **Zero allocation on the frame path.** No `Path`, `Paint`, list or closure allocated per primitive. Scratch objects are fields, reset in place. Proven structurally through capacity getters, in the shape of `SpatialIndex.entityScratchCapacity`.
+- **Zero allocation on the frame path.** No `Path`, `Paint`, list, **record, or closure** allocated per primitive. Scratch objects are fields, reset in place. Proven structurally through capacity getters, in the shape of `SpatialIndex.entityScratchCapacity`. Three consequences worth naming, because each is a natural way to write the code that violates this: a `(int, int)` record built to index a map is an object; `Map.putIfAbsent`'s `ifAbsent` argument is a closure allocated on every call; and a closure literal passed to the dasher captures its enclosing variables into a fresh object per leaf.
+- **No 64-bit bitwise arithmetic, ever.** Dart's bitwise operators are 32-bit on the web. Pack integers by multiplication and unpack by `~/` and `%`. `PackedRTree`'s `Uint64List` took the entire render path down on web in Plan 3a; this is the same trap wearing different clothes.
 - **`reference_walk.dart` is not modified by this plan.** `flatten` in `test/support/differential.dart` already applies each residual before comparing, so the reference needs no screen-space change. An empty diff on that file is an exit criterion.
 - **`DrawSink` (the abstract class in `draw_sink.dart`) gains no methods.** Batching is a `CanvasDrawSink` implementation detail. `RecordingDrawSink` and `NullDrawSink` stay one op per primitive.
 - **`NullDrawSink.opCount` keeps its meaning** — one per painter call — so Plan 3a's R1 and R3 rows stay comparable. Real `Canvas` calls get a separate counter on `CanvasDrawSink`.
@@ -53,7 +54,7 @@
 |---|---|
 | `packages/jet_cad_2d/test/geometry/dasher_test.dart` (create) | pure dash-generation tests |
 | `packages/jet_cad_2d/test/geometry/segment_clip_test.dart` (create) | clip and angular-window tests |
-| `packages/jet_cad_2d_flutter/test/golden/batch_equivalence_golden_test.dart` (create) | fixtures 1–3, batched vs unbatched |
+| `packages/jet_cad_2d_flutter/test/batch_equivalence_test.dart` (create) | fixtures 1–3, both modes rendered in-process and compared pixel by pixel |
 | `packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart` (create) | the collapse-floor review golden |
 | `packages/jet_cad_2d_flutter/test/rig/rig_support.dart` (create) | `kRigViewport`, `rigCorpus`, the two cameras — lifted out of R1 so the spike shares them |
 | `packages/jet_cad_2d_flutter/test/rig/batch_spike_test.dart` (create) | the spike's R1-side numbers |
@@ -123,9 +124,17 @@ Add to `packages/jet_cad_2d_flutter/test/draft_canvas_test.dart`:
         Aabb2(Vector2(0, 0), Vector2(120, 90)), kViewport);
     painter.paint(recording, camera, kViewport);
 
-    expect(recording.ops.whereType<PolylineOp>().length, lessThanOrEqualTo(2),
-        reason: 'the container has eight leaves and the view holds one or '
-            'two of them; drawing all eight is the cull-floor shortcut');
+    final drawn = recording.ops.whereType<PolylineOp>().length;
+    // Not an exact count: index boxes carry narrow-phase slack, so the culled
+    // number is "fewer than all of them", not a number this test may pin. The
+    // two bounds together are the property — 8 means the shortcut is live, 0
+    // means the fixture is wrong and the assertion above it proves nothing.
+    expect(drawn, greaterThan(0),
+        reason: 'the view holds part of the strip; drawing nothing means the '
+            'fixture, not the cull floor, is what this test is measuring');
+    expect(drawn, lessThan(8),
+        reason: 'the container has eight leaves and the view holds one or two '
+            'of them; drawing all eight is the cull-floor shortcut');
   });
 ```
 
@@ -451,15 +460,21 @@ reference_walk.dart is untouched. flatten already normalises both routes."
 
 ---
 
-## Task 2: `CanvasDrawSink` batching, mode B, and the equality goldens
+## Task 2: `CanvasDrawSink` batching, mode B, and the pixel-equivalence test
+
+> **Superseded 2026-08-11.** This task was implemented and its result measured;
+> the batching it builds does not ship. Kept as the record of what was built and
+> why. See [the spike note](../notes/2026-08-11-plan-3b-batch-spike.md) and
+> "The spike fired its stop clause" below. Task 4b removes this code.
 
 The first of two sink tasks. It adds the mode enum, the frame boundary, the real-call counter, the alpha rule, and the **single open bucket** lifecycle — variant B, which gives up no draw order at all.
 
 **Files:**
 - Modify: `packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart`
-- Modify: `packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart` (call `sink.flush()`)
-- Create: `packages/jet_cad_2d_flutter/test/golden/batch_equivalence_golden_test.dart`
-- Create: `packages/jet_cad_2d_flutter/test/golden/batch_*.png` (generated)
+- Modify: `packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart` (call `sink.flush()`, add `batchMode`)
+- Create: `packages/jet_cad_2d_flutter/test/batch_equivalence_test.dart`
+- Modify: `packages/jet_cad_2d_flutter/test/golden/stroke_width_golden_test.dart` (pin to `BatchMode.off`, add the missing `flush()`)
+- Modify: `packages/jet_cad_2d_flutter/test/draw_sink_test.dart` and `test/lineweight_test.dart` (both read the sink's raw per-primitive `Canvas` calls, so both need `BatchMode.off`)
 - Test: `packages/jet_cad_2d_flutter/test/canvas_draw_sink_test.dart`
 
 **Interfaces:**
@@ -880,62 +895,179 @@ Run: `cd packages/jet_cad_2d_flutter && flutter test test/canvas_draw_sink_test.
 
 Expected: PASS, all eight.
 
-- [ ] **Step 6: Write the equality goldens, fixtures 1 and 2**
+- [ ] **Step 6: Write the pixel-equivalence test, fixtures 1 and 2**
 
-Create `packages/jet_cad_2d_flutter/test/golden/batch_equivalence_golden_test.dart`:
+**Not a golden.** Both modes are rendered in-process and their pixels compared
+directly. Two reasons, both measured rather than assumed:
+
+1. **The widget route does not re-render.** `_DraftCustomPainter.shouldRepaint`
+   returns `false` by design — repaint is driven by the camera and document
+   listenables, not by rebuilds — and `RenderCustomPaint` skips
+   `markNeedsPaint` when the new painter has the same `runtimeType` and says
+   not to repaint. Two `pumpWidget` calls in one test therefore produce **one**
+   render, and a second `expectLater` silently re-checks the first image.
+2. **Byte-identity is false for opaque geometry, and the batched image is the
+   correct one.** Merging overlapping strokes into one path makes Skia compute
+   coverage once over the unioned outline — `1 − union(a, b)` — where separate
+   draws composite one antialiased stroke over another — `(1−a)(1−b)`. At half
+   coverage that is 0.5 against 0.25. The seam that disappears under batching
+   is an artifact of drawing touching strokes separately, and a CAD drawing is
+   made of touching strokes.
+
+Create `packages/jet_cad_2d_flutter/test/batch_equivalence_test.dart`:
 
 ```dart
-@Tags(['golden'])
-library;
-
-// The batch's correctness proof, and it has to be a pixel-level one: batching
-// is a Canvas-level behaviour that an op list cannot see. RecordingDrawSink is
-// unbatched by construction, so the differential oracle is blind to it.
+// The batch's correctness proof. Pixel-level, because batching is a `Canvas`
+// behaviour that an op list cannot see: `RecordingDrawSink` is unbatched by
+// construction, so the differential oracle is blind to it.
 //
-// The invariant is NOT "the picture is identical". It is: batched and unbatched
-// rendering are byte-identical whenever no two overlapping primitives have
-// different paint keys. Fixture 3, in Task 3, is the cross-key case.
+// The invariant is in three parts, and the first is the discriminator:
+//
+// 1. Translucent geometry renders identically, pixel for pixel, because a
+//    style below full alpha is never batched. Zero differing pixels — no
+//    tolerance, and therefore no margin to argue about.
+// 2. Opaque geometry may differ only in partial coverage: nothing fully
+//    covered becomes uncovered, the differing fraction stays small, and no
+//    pixel changes hue. A dropped, moved or recoloured primitive fails all
+//    three.
+// 3. Cross-key overlap (Task 3) is identical under the ordered mode alone.
 
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
-import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
-const Size kGoldenViewport = Size(400, 300);
-const Key kCanvasKey = Key('golden-canvas');
+const ui.Size kSize = ui.Size(400, 300);
+const double kPixelsPerPaperMm = 8.0;
 
-/// A cross of two strokes, repeated at [count] offsets, in one colour.
+/// Renders [doc] through [mode] and returns its raw RGBA bytes.
 ///
-/// Overlaps are within one paint key by construction: every entity here shares
-/// a colour and a lineweight, so this fixture is byte-identical under every
-/// batch mode. It is the assertion that path accumulation itself does not
-/// change rasterisation.
-DraftDocument sameKeyOverlapFixture() {
-  final doc = DraftDocument.empty();
-  for (var i = 0; i < 6; i++) {
-    final x = -40.0 + i * 16;
-    _line(doc, [x, -50, x + 30, 50], 0x000000);
-    _line(doc, [-50, x, 50, x + 30], 0x000000);
-  }
-  return doc;
+/// No widget, no golden file, no comparator: this is a comparison between two
+/// in-process renders, and routing it through a `CustomPaint` is what made the
+/// first version of this test pass vacuously.
+Future<Uint8List> render(DraftDocument doc, BatchMode mode) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  canvas.drawRect(
+      ui.Offset.zero & kSize, ui.Paint()..color = const ui.Color(0xFFFFFFFF));
+  final sink = sinkOver(canvas, mode);
+  DraftPainter(
+          document: doc,
+          index: SpatialIndex(doc),
+          resolver: DocumentStyleResolver(doc))
+      .paint(
+          sink,
+          ViewportTransform.fit(
+              Aabb2(Vector2(-60, -60), Vector2(60, 60)), kSize),
+          kSize);
+  sink.flush();
+  final image = await recorder
+      .endRecording()
+      .toImage(kSize.width.toInt(), kSize.height.toInt());
+  final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+  image.dispose();
+  return data!.buffer.asUint8List();
 }
 
-/// The same crosses, below full alpha.
-///
-/// Byte-identical **only** because a style below full alpha is excluded from
-/// batching. Deleting that exclusion must make this fixture differ, which is
-/// what proves the exclusion does work rather than merely existing.
-DraftDocument translucentOverlapFixture() {
-  final doc = DraftDocument.empty();
-  for (var i = 0; i < 6; i++) {
-    final x = -40.0 + i * 16;
-    _line(doc, [x, -50, x + 30, 50], 0x000000, transparency: 128);
-    _line(doc, [-50, x, 50, x + 30], 0x000000, transparency: 128);
+CanvasDrawSink sinkOver(ui.Canvas canvas, BatchMode mode) => CanvasDrawSink(
+    canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm, mode: mode);
+
+/// What changed between two renders, characterised rather than counted.
+class Diff {
+  Diff(this.differing, this.maxDelta, this.hueChanged, this.lostFullCoverage,
+      this.ink);
+
+  /// Pixels whose colour differs at all.
+  final int differing;
+
+  /// The largest per-channel difference over those pixels.
+  final int maxDelta;
+
+  /// Whether any pixel in either image is non-grey. Both fixtures draw black
+  /// on white, so a hue means a colour was invented.
+  final bool hueChanged;
+
+  /// Total ink in each image: the sum of `255 - R` over every pixel.
+  ///
+  /// Coverage recomposition moves ink between neighbouring pixels; it does not
+  /// create or destroy much of it. A dropped primitive does.
+  final int inkA, inkB;
+
+  static Diff between(Uint8List a, Uint8List b) {
+    var differing = 0, maxDelta = 0, inkA = 0, inkB = 0;
+    var hue = false;
+    for (var i = 0; i < a.length; i += 4) {
+      final ar = a[i], ag = a[i + 1], ab = a[i + 2];
+      final br = b[i], bg = b[i + 1], bb = b[i + 2];
+      if (ar != ag || ag != ab || br != bg || bg != bb) hue = true;
+      inkA += 255 - ar;
+      inkB += 255 - br;
+      if (ar != br || ag != bg || ab != bb) {
+        differing++;
+        final dr = (ar - br).abs();
+        final dg = (ag - bg).abs();
+        final db = (ab - bb).abs();
+        if (dr > maxDelta) maxDelta = dr;
+        if (dg > maxDelta) maxDelta = dg;
+        if (db > maxDelta) maxDelta = db;
+      }
+    }
+    return Diff(differing, maxDelta, hue, inkA, inkB);
   }
-  return doc;
+
+  @override
+  String toString() => 'differing=$differing maxDelta=$maxDelta '
+      'hueChanged=$hueChanged inkA=$inkA inkB=$inkB';
+}
+
+/// Reduces an RGBA buffer by an integer factor, averaging each box.
+///
+/// This is what "the same picture, drawn with different antialiasing" means
+/// operationally. Batching **redistributes sub-pixel coverage** — where two
+/// antialiased stroke edges met, there is now one — and a box filter is
+/// precisely the operation that undoes a redistribution. Geometry that was
+/// dropped, moved or recoloured is not a redistribution and survives the
+/// filter.
+Uint8List boxDownsample(Uint8List rgba, int width, int height, int factor) {
+  final outW = width ~/ factor, outH = height ~/ factor;
+  final out = Uint8List(outW * outH * 4);
+  for (var by = 0; by < outH; by++) {
+    for (var bx = 0; bx < outW; bx++) {
+      var r = 0, g = 0, b = 0, a = 0;
+      for (var y = 0; y < factor; y++) {
+        for (var x = 0; x < factor; x++) {
+          final i = (((by * factor + y) * width) + bx * factor + x) * 4;
+          r += rgba[i];
+          g += rgba[i + 1];
+          b += rgba[i + 2];
+          a += rgba[i + 3];
+        }
+      }
+      final n = factor * factor;
+      final o = (by * outW + bx) * 4;
+      out[o] = r ~/ n;
+      out[o + 1] = g ~/ n;
+      out[o + 2] = b ~/ n;
+      out[o + 3] = a ~/ n;
+    }
+  }
+  return out;
+}
+
+/// The largest and the mean per-channel difference, over a whole buffer.
+(int, double) deltas(Uint8List a, Uint8List b) {
+  var max = 0;
+  var total = 0;
+  for (var i = 0; i < a.length; i++) {
+    if (i % 4 == 3) continue; // alpha
+    final d = (a[i] - b[i]).abs();
+    total += d;
+    if (d > max) max = d;
+  }
+  return (max, total / (a.length * 3 / 4));
 }
 
 void _line(DraftDocument doc, List<double> coords, int rgb,
@@ -950,7 +1082,7 @@ void _line(DraftDocument doc, List<double> coords, int rgb,
       linetypeScale: 1.0,
       geomIndex: 0,
       // TrueColor, not ByLayer: ByLayer resolves through layer 0 to ACI 7,
-      // which is white on the white golden background.
+      // which is white on the white background.
       color: TrueColor(rgb),
       lineweight: lineweight,
       transparency: transparency,
@@ -961,88 +1093,155 @@ void _line(DraftDocument doc, List<double> coords, int rgb,
   ));
 }
 
-Widget _canvasOver(DraftDocument doc, BatchMode mode) {
-  final index = SpatialIndex(doc);
-  return MaterialApp(
-    home: Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(
-        child: SizedBox(
-          key: kCanvasKey,
-          width: kGoldenViewport.width,
-          height: kGoldenViewport.height,
-          child: DraftCanvas(
-            document: doc,
-            index: index,
-            resolver: DocumentStyleResolver(doc),
-            camera: CameraController(ViewportTransform.fit(
-                Aabb2(Vector2(-60, -60), Vector2(60, 60)), kGoldenViewport)),
-            batchMode: mode,
-          ),
-        ),
-      ),
-    ),
-  );
+/// Crossing strokes that all share one paint key, so every overlap is
+/// same-key.
+DraftDocument sameKeyOverlapFixture({int transparency = 0}) {
+  final doc = DraftDocument.empty();
+  for (var i = 0; i < 6; i++) {
+    final x = -40.0 + i * 16;
+    _line(doc, [x, -50, x + 30, 50], 0x000000, transparency: transparency);
+    _line(doc, [-50, x, 50, x + 30], 0x000000, transparency: transparency);
+  }
+  return doc;
 }
 
-Future<void> _bothWays(
-    WidgetTester tester, DraftDocument Function() build, String name) async {
-  await tester.pumpWidget(_canvasOver(build(), BatchMode.off));
-  await expectLater(
-      find.byKey(kCanvasKey), matchesGoldenFile('batch_$name.png'));
+/// Largest per-channel difference tolerated between the two **downsampled**
+/// renders.
+///
+/// Derived, not fitted. A 4x4 box holds 16 pixels. The raw per-pixel coverage
+/// differences batching produces peak at magnitude 1 and trail to about 37, so
+/// even a pathological box in which four pixels each differ by the full 37
+/// averages to `4 * 37 / 16` = 9.25. Twelve leaves headroom over that without
+/// coming near what a real defect does: a dropped stroke puts differences of
+/// order 255 across whole boxes, and a moved one does it twice.
+const int kBoxTolerance = 12;
 
-  await tester.pumpWidget(_canvasOver(build(), BatchMode.openBucket));
-  await expectLater(
-      find.byKey(kCanvasKey), matchesGoldenFile('batch_$name.png'));
-}
+/// Mean per-channel difference over the downsampled buffers. Coverage noise is
+/// sparse — a few percent of pixels, mostly by one level — so its mean is well
+/// under one.
+const double kBoxMeanTolerance = 2.0;
 
 void main() {
-  testWidgets('fixture 1: same-key overlap is byte-identical either way',
-      (tester) async {
-    await _bothWays(tester, sameKeyOverlapFixture, 'same_key');
+  test('translucent same-key overlap renders identically', () async {
+    // Zero, not a tolerance. A style below full alpha is never batched, so
+    // the two modes issue the same calls. This is the assertion the alpha
+    // exclusion exists to make true, and Step 9 mutates the exclusion to
+    // prove it is doing the work.
+    final off = await render(sameKeyOverlapFixture(transparency: 128),
+        BatchMode.off);
+    final on = await render(sameKeyOverlapFixture(transparency: 128),
+        BatchMode.openBucket);
+    final diff = Diff.between(off, on);
+    expect(diff.inkA, greaterThan(100000),
+        reason: 'the fixture must actually draw, or every bound below is '
+            'satisfied by an empty canvas');
+    expect(diff.differing, 0, reason: '$diff');
   });
 
-  testWidgets('fixture 2: translucent overlap is byte-identical either way',
-      (tester) async {
-    // Passes only because _opaque() excludes it from batching. Deleting that
-    // check must make the second expectLater fail.
-    await _bothWays(tester, translucentOverlapFixture, 'translucent');
+  test('opaque same-key overlap is the same picture, differently antialiased',
+      () async {
+    final off = await render(sameKeyOverlapFixture(), BatchMode.off);
+    final on = await render(sameKeyOverlapFixture(), BatchMode.openBucket);
+    final diff = Diff.between(off, on);
+    final w = kSize.width.toInt(), h = kSize.height.toInt();
+    final (boxMax, boxMean) =
+        deltas(boxDownsample(off, w, h, 4), boxDownsample(on, w, h, 4));
+
+    // Reported unconditionally: these numbers are the measured shape of what
+    // batching changes, and they belong in the results note whether or not
+    // the bounds below hold.
+    print('opaque same-key: $diff boxMax=$boxMax '
+        'boxMean=${boxMean.toStringAsFixed(3)}');
+
+    expect(diff.inkA, greaterThan(100000),
+        reason: 'the fixture must actually draw');
+    expect(diff.hueChanged, isFalse,
+        reason: 'both renders are black on white — $diff');
+    // Ink is conserved: coverage moves between neighbouring pixels, it is not
+    // created or destroyed. A dropped primitive fails this by its own area.
+    expect((diff.inkA - diff.inkB).abs() / diff.inkA, lessThan(0.02),
+        reason: 'total ink must survive the recomposition — $diff');
+    expect(boxMax, lessThanOrEqualTo(kBoxTolerance),
+        reason: 'a box average undoes a sub-pixel redistribution; whatever '
+            'survives it is not one — $diff boxMax=$boxMax');
+    expect(boxMean, lessThan(kBoxMeanTolerance), reason: '$diff');
+
+    // Deliberately NOT asserted, and both were, in an earlier draft of this
+    // plan that a measurement refuted:
+    //
+    // - "no pixel that was fully covered stops being fully covered". False in
+    //   both directions. Two opaque strokes each covering 97% of a pixel
+    //   composite to 255*(0.03)^2, which rounds to black; unioned they cover
+    //   97% and land on 8. Two disjoint half-covered strokes go the other way:
+    //   unioned they cover the pixel completely and land on 0, composited
+    //   they land on 64.
+    // - a cap on the raw differing-pixel fraction. It was set to 3% before
+    //   anything was measured; the real figure is about 4%. A threshold fitted
+    //   to an observation is a record of the observation, not a threshold.
   });
 }
 ```
 
 - [ ] **Step 7: Give `DraftCanvas` a `batchMode`**
 
-The golden needs to build both ways. Add to `DraftCanvas`:
+Not needed by the test above, which bypasses the widget — but Task 4's harness
+app selects a mode per profile run through it, and the dash-ladder golden in
+Task 9 renders at whatever the default is. Add to `DraftCanvas`:
 
 ```dart
   /// Which [BatchMode] the canvas's sink runs in.
   ///
-  /// A widget parameter rather than a global so the batched and unbatched
-  /// renderings of one fixture can be compared inside a single test.
+  /// A widget parameter rather than a global so one process can render two
+  /// modes, and so a profile run can select one from a `--dart-define`.
   final BatchMode batchMode;
 ```
 
-defaulted to `BatchMode.openBucket` in the constructor, and passed through in `_attach`:
+defaulted to `BatchMode.openBucket` in the constructor, passed through in
+`_attach`:
 
 ```dart
     sink = CanvasDrawSink(
         pixelsPerPaperMm: widget.pixelsPerPaperMm, mode: widget.batchMode);
 ```
 
-- [ ] **Step 8: Generate the goldens and look at them**
+and added to `didUpdateWidget`'s re-attach check beside the other constructor
+parameters, or the parameter does nothing on rebuild.
 
-Run: `cd packages/jet_cad_2d_flutter && flutter test --tags golden --update-goldens`
+- [ ] **Step 8: Pin the existing goldens to `BatchMode.off`**
 
-**Open `batch_same_key.png` and `batch_translucent.png`.** The first must show six dark crosses of uniform weight. The second must show the same crosses paler, with the overlaps visibly darker than the strokes — that darkening is the double blend, and it is the whole reason the alpha exclusion exists. If the overlaps are *not* darker, the fixture's transparency did not survive resolution and the test proves nothing.
+`stroke_width_golden_test.dart` measures paper-space **stroke width** and the
+shape of an anisotropic instance. Neither is a question about batching, and
+both of its fixtures have touching same-key geometry — so leaving them on the
+new default would regress `anisotropy_bypass.png` by the coverage difference
+Step 6 characterises, for a reason that has nothing to do with what those
+goldens assert.
+
+Its `_PainterHost` builds a `CanvasDrawSink` directly. Give it
+`mode: BatchMode.off` and a `sink.flush()` call.
+
+**The `flush()` call is not optional and its absence is silent.** Without it
+every primitive in those fixtures lands in an unflushed bucket and the golden
+becomes a blank canvas — and `--update-goldens` will happily write that blank
+canvas over four committed PNGs. Run `git status` after any `--update-goldens`
+and check that only the files you meant to change are listed.
 
 - [ ] **Step 9: Verify the alpha exclusion is load-bearing**
 
-Temporarily change `_opaque` to `=> true`. Run: `flutter test --tags golden`
+Temporarily change `_opaque` to `=> true`. Run:
 
-Expected: **fixture 2 FAILS.** Restore `_opaque` and re-run to green.
+`cd packages/jet_cad_2d_flutter && flutter test test/batch_equivalence_test.dart`
 
-A test that passes with and without the code it is testing is not a test. Record the result in the mutation log in Task 11.
+Expected: **`translucent same-key overlap renders identically` FAILS**, with a
+non-zero `differing` count in the failure message. Record the exact number.
+
+Restore `_opaque` and re-run to green.
+
+A test that passes with and without the code it is testing is not a test. If
+the translucent test still passes with `_opaque` returning true, stop and
+report BLOCKED — the alpha rule is then unproven and the correctness argument
+for batching collapses with it. Record the result for the mutation log in Task
+11.
+
 
 - [ ] **Step 10: Run everything and commit**
 
@@ -1055,8 +1254,32 @@ git commit -m "feat(jet_cad_2d_flutter): coalesce draw calls in CanvasDrawSink
 The batching lives in the sink, so DrawSink gains no methods,
 RecordingDrawSink stays one op per primitive, and the differential
 oracle keeps its shape. It also means the oracle is blind to batching,
-which is why the correctness proof here is a pair of goldens rendered
-both ways and compared byte for byte.
+which is why the correctness proof here renders both modes in-process
+and compares their pixels directly.
+
+It is not a golden. Two measured reasons. _DraftCustomPainter's
+shouldRepaint returns false by design, and RenderCustomPaint skips
+markNeedsPaint when the new painter has the same runtimeType and says
+not to repaint - so two pumpWidget calls in one test produce one render
+and the second comparison silently re-checks the first image. And
+byte-identity is false for opaque geometry anyway: merging overlapping
+strokes into one path makes Skia compute coverage once over the unioned
+outline, 1 - union(a, b), where separate draws composite one antialiased
+stroke over another, (1-a)(1-b). The batched image is the correct one -
+the seam that disappears is an artifact of drawing touching strokes
+separately, and a CAD drawing is made of touching strokes.
+
+So the invariant is in parts. Translucent geometry renders identically,
+pixel for pixel, because it is never batched - zero, with no tolerance
+to argue about, and it fails the moment the alpha exclusion is deleted.
+Opaque geometry may differ only in partial coverage: nothing fully
+covered becomes uncovered, the differing fraction stays small, and no
+pixel changes hue.
+
+The stroke-width goldens are pinned to BatchMode.off. They measure
+paper-space width and the shape of an anisotropic instance; neither is a
+question about batching, and both fixtures have touching same-key
+geometry.
 
 BatchMode.openBucket holds one Path and the paint key it carries; a
 primitive whose key differs flushes it, so draw order is preserved
@@ -1077,12 +1300,17 @@ can see."
 
 ## Task 3: The persistent bucket map, and the baked-curve variant
 
+> **Superseded 2026-08-11.** This task was implemented and its result measured;
+> the batching it builds does not ship. Kept as the record of what was built and
+> why. See [the spike note](../notes/2026-08-11-plan-3b-batch-spike.md) and
+> "The spike fired its stop clause" below. Task 4b removes this code.
+
 Variants A and A′. Both hold a `Map` of open buckets instead of one, which is the only lifecycle that can collapse 21,031 ops into tens of calls — and the only one that costs draw order.
 
 **Files:**
 - Modify: `packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart`
 - Modify: `packages/jet_cad_2d_flutter/test/canvas_draw_sink_test.dart`
-- Modify: `packages/jet_cad_2d_flutter/test/golden/batch_equivalence_golden_test.dart`
+- Modify: `packages/jet_cad_2d_flutter/test/batch_equivalence_test.dart`
 
 **Interfaces:**
 - Consumes: `BatchMode`, `CanvasDrawSink` from Task 2.
@@ -1146,7 +1374,8 @@ Append to `test/canvas_draw_sink_test.dart`:
     sink.flush();
     final picture = recorder.endRecording();
     expect(picture.approximateBytesUsed, greaterThan(0));
-    // The ordering itself is pinned by golden fixture 3; this asserts only
+    // The ordering itself is pinned by fixture 3 in batch_equivalence_test;
+    // this asserts only
     // that flushing a map produces one call per bucket and does not throw.
     expect(sink.canvasCallCount, 2);
   });
@@ -1185,9 +1414,28 @@ Extend the enum:
 Replace the single-bucket fields with a map, keeping the single-bucket fast path:
 
 ```dart
-  /// Open buckets, keyed by paint. `Map` preserves insertion order, which is
-  /// the order they are flushed in — the only draw order this mode keeps.
-  final Map<(int, int), Path> _buckets = <(int, int), Path>{};
+  /// Open buckets, keyed by colour and then by lineweight.
+  ///
+  /// **Two levels, not one packed integer**, and that is a correction rather
+  /// than a preference. A packed key — `argb * 4096 + lineweightHundredths` —
+  /// is invertible only while the lineweight stays inside `[0, 4096)`, and
+  /// nothing guarantees that. `DocumentStyleResolver` passes a lineweight
+  /// through unclamped (`_ => lw`), its source column is an `Int16List`, and a
+  /// `LayerRecord.lineweight` is a plain `int`. A lineweight of 5000 packs to
+  /// the same key as a different colour with a lineweight of 904, and the
+  /// flush then paints one of them in the other's colour — reachable through
+  /// `AddEntityCommand`, no malformed file required. Nesting **removes** the
+  /// domain assumption instead of restating it with a bigger number.
+  ///
+  /// Neither level is keyed by a `(int, int)` record: a record is an object,
+  /// so building one per primitive would be an allocation per primitive per
+  /// frame.
+  ///
+  /// Both levels preserve insertion order, which is the order buckets are
+  /// flushed in — the only draw order the mapped modes keep. The inner maps
+  /// are **kept across frames** and only emptied, so a steady-state frame
+  /// allocates no map at all.
+  final Map<int, Map<int, Path>> _buckets = <int, Map<int, Path>>{};
 
   /// Paths returned to the pool by [flush], so a frame allocates at most one
   /// `Path` per distinct paint ever seen rather than one per frame.
@@ -1210,17 +1458,21 @@ Replace the single-bucket fields with a map, keeping the single-bucket fast path
       _canvasCalls++;
       _bucket.reset();
     }
-    if (_buckets.isEmpty) return;
-    for (final entry in _buckets.entries) {
-      _paint
-        ..color = Color(entry.key.$1)
-        ..strokeWidth = _widthFor(entry.key.$2, 1.0);
-      canvas.drawPath(entry.value, _paint);
-      _canvasCalls++;
-      entry.value.reset();
-      _pool.add(entry.value);
+    // The outer map keeps its (now empty) inner maps rather than being
+    // cleared, so a steady-state frame allocates no map. Iterating a handful
+    // of empty inner maps costs nothing next to a draw call.
+    for (final byLineweight in _buckets.entries) {
+      for (final entry in byLineweight.value.entries) {
+        _paint
+          ..color = Color(byLineweight.key)
+          ..strokeWidth = _widthFor(entry.key, 1.0);
+        canvas.drawPath(entry.value, _paint);
+        _canvasCalls++;
+        entry.value.reset();
+        _pool.add(entry.value);
+      }
+      byLineweight.value.clear();
     }
-    _buckets.clear();
   }
 ```
 
@@ -1240,8 +1492,18 @@ Replace the single-bucket fields with a map, keeping the single-bucket fast path
       return null;
     }
     if (_mapped) {
-      return _buckets.putIfAbsent((style.argb, style.lineweightHundredths),
-          () => _pool.isEmpty ? Path() : _pool.removeLast());
+      // Not putIfAbsent, at either level: its `ifAbsent` argument is a
+      // closure, allocated on every call whether or not the key is missing.
+      var byLineweight = _buckets[style.argb];
+      if (byLineweight == null) {
+        byLineweight = <int, Path>{};
+        _buckets[style.argb] = byLineweight;
+      }
+      final existing = byLineweight[style.lineweightHundredths];
+      if (existing != null) return existing;
+      final fresh = _pool.isEmpty ? Path() : _pool.removeLast();
+      byLineweight[style.lineweightHundredths] = fresh;
+      return fresh;
     }
     if (_bucketOpen &&
         (_bucketArgb != style.argb ||
@@ -1315,18 +1577,19 @@ Run: `cd packages/jet_cad_2d_flutter && flutter test test/canvas_draw_sink_test.
 
 Expected: PASS, all twelve.
 
-- [ ] **Step 5: Add golden fixture 3 — cross-key overlap**
+- [ ] **Step 5: Add fixture 3 — cross-key overlap**
 
-Append to `batch_equivalence_golden_test.dart`:
+Append to `test/batch_equivalence_test.dart`:
 
 ```dart
 /// Overlapping strokes in **two** paint keys, which is where a draw-order
 /// change becomes visible.
 ///
-/// Byte-identical under [BatchMode.openBucket] and under it alone. Under the
-/// mapped modes the two renderings are *expected* to differ: the second red
-/// stroke merges with the first and draws beneath the blue that separates
-/// them. That difference is the ordering contract made visible.
+/// Identical under [BatchMode.openBucket] and under it alone. Under the mapped
+/// modes the second red stroke merges with the first and draws beneath the
+/// blue that separates them, so the overlap changes colour. A **hue** change,
+/// not a coverage one — which is exactly what separates the ordering contract
+/// from the antialiasing difference fixture 1 tolerates.
 DraftDocument crossKeyOverlapFixture() {
   final doc = DraftDocument.empty();
   _line(doc, [-50, -50, 50, 50], 0xCC0000, lineweight: 200);
@@ -1335,23 +1598,65 @@ DraftDocument crossKeyOverlapFixture() {
   return doc;
 }
 
-  testWidgets('fixture 3: cross-key overlap under the ordered mode',
-      (tester) async {
-    await _bothWays(tester, crossKeyOverlapFixture, 'cross_key');
+/// Pixels whose red and blue channels swap dominance between two renders.
+///
+/// `Diff.hueChanged` asks whether a render is non-grey, which every pixel of
+/// this fixture is. The question here is different: did the *winner* of an
+/// overlap change? That is one primitive drawing over another instead of
+/// under it, and no amount of coverage noise produces it.
+int dominanceFlips(Uint8List a, Uint8List b) {
+  var flips = 0;
+  for (var i = 0; i < a.length; i += 4) {
+    final aRed = a[i] > a[i + 2];
+    final bRed = b[i] > b[i + 2];
+    if (aRed != bRed) flips++;
+  }
+  return flips;
+}
+
+  test('cross-key overlap is identical under the ordered mode', () async {
+    final off = await render(crossKeyOverlapFixture(), BatchMode.off);
+    final ordered =
+        await render(crossKeyOverlapFixture(), BatchMode.openBucket);
+    final diff = Diff.between(off, ordered);
+    expect(diff.inkA, greaterThan(100000));
+    expect(diff.differing, 0,
+        reason: 'the ordered mode flushes on every paint change, so the three '
+            'strokes reach the canvas in handle order exactly as unbatched — '
+            '$diff');
+  });
+
+  test('the mapped modes reorder cross-key overlaps, and that is visible',
+      () async {
+    // Not a defect: it is the ordering contract the mapped modes trade draw
+    // order for, and this is where it becomes a picture. Asserted so the
+    // trade is demonstrated rather than described.
+    final off = await render(crossKeyOverlapFixture(), BatchMode.off);
+    final mapped = await render(crossKeyOverlapFixture(), BatchMode.bucketMap);
+    expect(dominanceFlips(off, mapped), greaterThan(100),
+        reason: 'the two reds merge into one path and both draw beneath the '
+            'blue, so the blue wins pixels the second red used to own');
   });
 ```
 
-- [ ] **Step 6: Generate and inspect fixture 3**
+- [ ] **Step 6: Run the equivalence tests**
 
-Run: `cd packages/jet_cad_2d_flutter && flutter test --tags golden --update-goldens`
+Run: `cd packages/jet_cad_2d_flutter && flutter test test/batch_equivalence_test.dart`
 
-**Open `batch_cross_key.png`.** The blue diagonal must cross *over* the first red diagonal and *under* the second. That is handle order, and under `openBucket` it survives.
+Expected: PASS, all four. Record the reported `Diff` line for fixture 1 and the
+`dominanceFlips` count — both go in the results note as the measured shape of
+what each mode changes.
 
-- [ ] **Step 7: Prove fixture 3 discriminates**
+- [ ] **Step 7: Prove the ordered mode is what keeps fixture 3 identical**
 
-Temporarily change `_canvasOver`'s second call in `_bothWays` to `BatchMode.bucketMap`. Run: `flutter test --tags golden`
+Temporarily change the ordered test's second render to `BatchMode.bucketMap`.
+Run: `flutter test test/batch_equivalence_test.dart`
 
-Expected: **fixture 3 FAILS** and fixtures 1 and 2 pass. That is the ordering contract, demonstrated rather than asserted in prose. Restore `openBucket` and re-run to green.
+Expected: **the ordered test FAILS** with a non-zero `differing` count, and the
+other three pass. Restore `BatchMode.openBucket` and re-run to green.
+
+Without this, "order is preserved exactly" is a claim about code nobody
+exercised. Record the failure output for the mutation log in Task 11.
 
 - [ ] **Step 8: Run everything and commit**
 
@@ -1375,15 +1680,25 @@ baking the matrix applies the stroke in screen space, giving the ellipse
 a uniform paper-space width, which is what lineweightHundredths says a
 lineweight is.
 
-Golden fixture 3 covers cross-key overlap: byte-identical under
-openBucket and expected to differ under the mapped modes. Switching the
-comparison to bucketMap fails fixture 3 and passes 1 and 2, which is the
-ordering contract demonstrated rather than argued."
+Fixture 3 covers cross-key overlap: zero differing pixels under
+openBucket, and under a mapped mode the two reds merge into one path and
+both draw beneath the blue that separates them, so the blue wins pixels
+the second red used to own. That is asserted as a dominance flip rather
+than described - a hue change no amount of coverage noise produces,
+which is what separates the ordering contract from the antialiasing
+difference fixture 1 tolerates."
 ```
 
 ---
 
 ## Task 4: The spike — measure the four modes and choose one
+
+> **Ran 2026-08-11. The decision rule's stop clause fired.** No mode beat the
+> unbatched path: 179.63 ms unbatched against 187.19 / 229.37 / 490.19 ms for
+> the three batched modes. Step 6 was correctly not performed. The numbers, the
+> record/raster split that explains them, and the two follow-ups are in
+> [the spike note](../notes/2026-08-11-plan-3b-batch-spike.md). Steps 1 to 5
+> stand as written and were executed; Steps 6 to 8 are void.
 
 The reason raster is 26 µs per leaf is an inference. This task turns it into a number, under a decision rule written before the numbers exist.
 
@@ -1539,6 +1854,283 @@ break toward the narrower ordering contract, and no winner means stop.
 The losing modes are deleted rather than left behind a flag. A mode
 nobody measured is configuration, and this plan's whole method is that
 the numbers choose."
+```
+
+---
+
+---
+
+## The spike fired its stop clause — what changes
+
+Task 4's decision rule was written before any number existed and its fourth
+clause fired: no batching mode beat the unbatched path. Draw calls collapsed
+from 7,009 to 10, recording got 40% cheaper, and rasterising got 2.7 times more
+expensive. The mechanism was implemented correctly; it is not what binds the
+frame. Full numbers, and the two follow-ups that closed off the remaining
+arguments, in [the spike note](../notes/2026-08-11-plan-3b-batch-spike.md).
+
+**Tasks 0 and 1 are unaffected and stand.** The two deletions were made on Plan
+3a's measurements, and the screen-space carry is speed-neutral — the unbatched
+path measures 179.63 ms against 3a's 182.73 ms — while removing `_bypassable`,
+demoting `kAnisotropyThreshold` to a counter's predicate, and taking the
+residual-scale division out of the stroke width for every line.
+
+**Tasks 2, 3 and 4's product code comes out.** Task 4b does that.
+
+**Task 4c replaces the spike.** The 179 ms is now unexplained and it is not
+draw-call dispatch. Plan 3e is a plan about reducing per-frame work, and it
+cannot be designed until something says what that work is. This is the same
+move Plan 3a made when it insisted on measuring the unmemoised style resolver
+before adopting a memo — and that one saved a 19–39% pessimisation from
+shipping.
+
+**Tasks 5 to 13 proceed as written**, with two amendments recorded in Task 13:
+the dash gate stops being failable, and the web row's justification changes.
+
+---
+
+## Task 4b: Remove the batching machinery
+
+Nothing measured supports keeping it, and a sink with four modes that all lose
+is configuration nobody can choose between. The counter stays: how many real
+draw calls a frame issues is worth knowing whatever the sink does with them.
+
+**Files:**
+- Modify: `packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart`
+- Modify: `packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart` (drop `batchMode`, keep the `flush()` call site only if `flush()` survives — it does not; see below)
+- Modify: `packages/jet_cad_2d_flutter/test/canvas_draw_sink_test.dart`
+- Modify: `packages/jet_cad_2d_flutter/test/draw_sink_test.dart`, `test/lineweight_test.dart`, `test/golden/stroke_width_golden_test.dart` (all three carry `BatchMode.off` arguments that no longer exist)
+- Modify: `apps/dev_harness_2d/lib/main.dart` (drop `kBatch` and `batchMode`)
+- Modify: `apps/dev_harness_2d/README.md`, `packages/jet_cad_2d_flutter/README.md`
+- Delete: `packages/jet_cad_2d_flutter/test/batch_equivalence_test.dart`
+- Delete: `packages/jet_cad_2d_flutter/test/rig/batch_spike_test.dart`
+- **Keep:** `packages/jet_cad_2d_flutter/test/rig/rig_support.dart` — the lift was behaviour-preserving and R1/R3 now share it.
+
+**Interfaces:**
+- Consumes: the sink as Task 3 left it.
+- Produces: `CanvasDrawSink({Canvas? canvas, required double pixelsPerPaperMm})` — no `mode`, no `flush()`. `int canvasCallCount` and `void resetCounters()` survive. `DraftCanvas` loses `batchMode`.
+
+- [ ] **Step 1: Write the failing test**
+
+The property worth pinning on the way out is the one the batching existed to
+change, stated in reverse: every primitive issues its own draw call. Replace the
+whole of `canvas_draw_sink_test.dart`'s batching group with:
+
+```dart
+  test('every primitive issues its own canvas call', () {
+    // The counter outlives the batching. Plan 3b measured four coalescing
+    // modes and all four were slower than this one, so what the sink does is
+    // one call per primitive — and that is now an assertion rather than an
+    // absence.
+    final recorder = PictureRecorder();
+    final sink = CanvasDrawSink(
+        canvas: Canvas(recorder), pixelsPerPaperMm: 8.0);
+    for (var i = 0; i < 5; i++) {
+      _line(sink, i * 10.0, _red);
+    }
+    sink.beginResidual(Transform2(2, 0, 0, 2, 5, 5));
+    sink.circle(0, 0, 4, _red);
+    sink.endResidual();
+    expect(sink.canvasCallCount, 6);
+  });
+
+  test('resetCounters zeroes the count without touching the canvas', () {
+    final recorder = PictureRecorder();
+    final sink = CanvasDrawSink(
+        canvas: Canvas(recorder), pixelsPerPaperMm: 8.0);
+    _line(sink, 0, _red);
+    expect(sink.canvasCallCount, 1);
+    sink.resetCounters();
+    expect(sink.canvasCallCount, 0);
+    _line(sink, 10, _red);
+    expect(sink.canvasCallCount, 1);
+  });
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `cd packages/jet_cad_2d_flutter && flutter test test/canvas_draw_sink_test.dart`
+
+Expected: FAIL to compile once the surrounding batching tests are deleted and
+`BatchMode` is still referenced — or, if you delete the tests first, FAIL with
+`canvasCallCount` reporting 0 because nothing has flushed. Either failure is the
+right one; record which you saw.
+
+- [ ] **Step 3: Strip the sink**
+
+From `canvas_draw_sink.dart` delete: the `BatchMode` enum, the `mode` field and
+constructor parameter, `_buckets`, `_pool`, `_bucket`, `_bucketOpen`,
+`_bucketArgb`, `_bucketLineweight`, `_mapped`, `_opaque`, `_translationOnly`,
+`_bucketFor`, `flush()`, and the batching branches in `point`, `polyline`,
+`circle` and `arc`.
+
+Keep `_scratch`, `_paint`, `_point`, `_matrix`, `_matrix4OfResidual`,
+`_pushTransform`, `_widthFor`, `canvasCallCount` and `resetCounters`.
+
+`beginResidual` keeps the **deferred** transform push — `_pushTransform` called
+from the primitive rather than from `beginResidual`. That is not batching
+residue: it is what lets `endResidual` skip a `save`/`restore` pair for a
+residual under which nothing was drawn, and the existing `draw_sink_test.dart`
+tests cover the pairing.
+
+- [ ] **Step 4: Unwire the callers**
+
+`draft_canvas.dart`: drop the `batchMode` field, its constructor parameter, its
+entry in `didUpdateWidget`'s re-attach check, and the `sink.flush()` call in
+`_DraftCustomPainter.paint`.
+
+`apps/dev_harness_2d/lib/main.dart`: drop `kBatch`, the `batchMode` getter and
+the `batchMode:` argument.
+
+`draw_sink_test.dart`, `lineweight_test.dart` and
+`stroke_width_golden_test.dart`: drop the `mode: BatchMode.off` arguments and
+the `sink.flush()` calls that Task 2 added. **The `flush()` in
+`stroke_width_golden_test.dart`'s `_PainterHost` must go with them** — with no
+buckets there is nothing to flush, and leaving a call to a deleted method is a
+compile error rather than a silent one, which is the good case.
+
+- [ ] **Step 5: Delete the two dead test files**
+
+`test/batch_equivalence_test.dart` and `test/rig/batch_spike_test.dart`. Both
+exist only to compare or measure modes that no longer exist.
+
+Their loss is real and worth naming in the commit: the alpha-exclusion rule and
+the ordering contract they proved were properties *of the batching*. With one
+call per primitive, draw order is the painter's ascending-handle order and
+nothing downstream reorders it, so there is no contract left to test.
+
+- [ ] **Step 6: Run everything**
+
+Run: `cd packages/jet_cad_2d_flutter && flutter test` — expected: PASS.
+Run: `cd packages/jet_cad_2d_flutter && flutter test --tags golden` — expected: PASS, 3 tests, **with no PNG regenerated**. Check `git status` and confirm no `.png` is modified.
+Run: `cd packages/jet_cad_2d && dart test` — expected: PASS.
+Run `dart format .` and `flutter analyze` in both packages and `apps/dev_harness_2d`; all clean.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add -A packages/jet_cad_2d_flutter apps/dev_harness_2d
+git commit -m "revert: remove the batching machinery the spike refuted
+
+Twelve profile runs at 500,000 entities: unbatched 179.63 ms, and the
+three batched modes 187.19, 229.37 and 490.19. Draw calls collapsed from
+7,009 to 10 and recording got 40% cheaper, so the mechanism worked - it
+is simply not what binds the frame. The most batched mode is the
+slowest, by a factor of 2.7.
+
+So BatchMode, the buckets, flush(), DraftCanvas.batchMode and the BATCH
+define all come out, and with them the two tests that only existed to
+compare modes. Losing them costs the alpha-exclusion proof and the
+ordering-contract proof, and that is correct: both were properties of
+the batching. One call per primitive means draw order is the painter's
+ascending-handle order with nothing downstream to reorder it.
+
+canvasCallCount and resetCounters stay. How many real draw calls a frame
+issues is worth knowing whatever the sink does with them, and the gap
+between that and NullDrawSink.opCount is now a diagnostic rather than a
+target.
+
+rig_support.dart stays: the lift out of paint_microbench_test.dart was
+behaviour-preserving, proven by running R1/R3 before and after."
+```
+
+---
+
+## Task 4c: Find out what the 179 ms actually is
+
+The frame is raster-bound and the cost is not draw-call dispatch. That is all
+that is known. Plan 3e exists to reduce per-frame work and cannot be designed
+against an unknown — this task's deliverable is a name for the dominant cost,
+with a repeatable way to see it again.
+
+**This is a measurement task. It produces a note, not a feature.** Do not
+optimise anything you find.
+
+**Files:**
+- Create: `docs/superpowers/notes/<date>-plan-3b-raster-profile.md`
+- Modify: `apps/dev_harness_2d/README.md` (the capture recipe)
+
+**Interfaces:**
+- Consumes: `apps/dev_harness_2d` at 500,000 entities, working-set camera.
+- Produces: a named dominant cost and a repeatable capture recipe.
+
+- [ ] **Step 1: Three controlled experiments, before any profiler**
+
+The central question — **does the 179 ms scale with the number of drawn leaves,
+or with the number of pixels covered?** — is answerable by varying one thing at
+a time in the rig that already exists. A picture cache addresses the first
+answer and does nothing for the second, so this is the fork Plan 3e turns on.
+
+Do these first. They cannot fail to produce a number, and a profiler capture
+that disagrees with them is a capture to distrust.
+
+**A — vary the leaf count, hold the camera and the pixels.** Run the pan rig at
+`ENTITIES=500000` and at `ENTITIES=50000` on the same working-set camera. Plan
+3a measured about 7,010 and about 3,670 drawn leaves respectively, so the leaf
+count roughly halves while the covered area barely moves. Report
+`screenSpaceLeafCount` for each alongside the raster p50.
+
+> Roughly halved time means per-leaf work, and the leaf count is the lever.
+> Barely-moved time means per-pixel work, and no cache that reduces leaves will
+> help.
+
+**B — vary the stroke width, hold everything else.** Same corpus, same camera,
+same leaves, same draw calls — only the covered area changes. Add a
+`--dart-define=LINEWEIGHT_SCALE` to the harness that multiplies
+`ResolvedStyle.lineweightHundredths` at the sink, and run at 1×, 2× and 4×.
+
+> This is the cleanest fill-rate test available here: geometry, call count and
+> walk are identical across the three runs, and only the number of shaded
+> pixels changes. Time rising roughly with the multiplier is fill rate.
+
+**C — vary the viewport, if the harness lets you.** Same scene at 4× the pixel
+area. `tester.view.physicalSize` can be assigned from an integration test; if
+it does not take effect on a real macOS window, say so and skip C — A and B
+together already separate per-leaf from per-pixel.
+
+- [ ] **Step 2: Then attribute it, if a capture can be had**
+
+A and B say *which* kind of work dominates. A capture says *what* it is. Try, in
+order, and record which routes failed and how — a route that does not work is
+worth the next person knowing:
+
+1. **`flutter run --profile --trace-to-file=<path>`**, which writes a
+   machine-readable Chrome trace. Look for the engine's rasterizer and Impeller
+   spans. This is the only route that needs no GUI, so try it first.
+2. **Xcode Instruments**, Metal System Trace or the Game Performance template,
+   attached to the profile-mode harness while it pans. The one route that can
+   attribute time inside Impeller's tessellator.
+3. **`--trace-skia`** plus a DevTools timeline export. Impeller may leave the
+   Skia tracks empty; say so rather than reporting a blank chart as a result.
+
+Whatever you get, answer: is the dominant cost CPU-side tessellation, GPU vertex
+work, GPU fragment and fill, or blit and composite?
+
+**One question needs geometry that no longer exists.** The 2.7× penalty for a
+single giant path was measured before Task 4b removed the batching. If
+attributing it needs the code, check out the parent commit into a scratch
+worktree rather than reverting anything here, and say that is what you did.
+
+- [ ] **Step 3: Write the note and state what it means for 3e**
+
+One section, plainly: given the dominant cost, which of Plan 3e's intended
+mechanisms could touch it, and which could not. A definition picture cache, a
+tile cache and fewer transform pushes address quite different costs, and this
+note is what decides between them.
+
+If the capture is inconclusive, **say so and say what would settle it.** An
+inconclusive measurement honestly reported is worth more than a mechanism
+guessed at, which is the whole reason Task 4 was written the way it was.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A docs/superpowers/notes apps/dev_harness_2d/README.md
+git commit -m "docs: profile the 500k working-set frame
+
+The batch spike established what the 179 ms is not. This establishes
+what it is, so Plan 3e can be designed against a cost rather than an
+assumption."
 ```
 
 ---
@@ -2249,8 +2841,19 @@ and inside `Dasher`:
   /// arc as it stands.
   bool dashArc(double cx, double cy, double r, double start, double sweep,
       DashPattern pattern, double scale, Aabb2 clip, DashArcEmit emit) {
-    if (pattern.dashes.isEmpty || pattern.totalLength <= 0) return false;
-    final period = pattern.totalLength * scale;
+    if (pattern.dashes.isEmpty) return false;
+    // The cycle comes from summing the array, never from
+    // `pattern.totalLength` — nothing enforces that the declared total agrees
+    // with the entries, and Task 6 measured both consequences: a phase that
+    // drifts after the cursor's cycle skip, and a `[0.0]` pattern with a
+    // declared total above the collapse floor that ran 445 million iterations
+    // in eight seconds. Use the same summing loop `dashPolyline` uses.
+    var cycle = 0.0;
+    for (final d in pattern.dashes) {
+      cycle += d.abs();
+    }
+    if (!cycle.isFinite || cycle <= 0.0) return false;
+    final period = cycle * scale;
     if (!period.isFinite || period < collapsePx) {
       _collapsed++;
       return false;
@@ -2477,26 +3080,71 @@ In `draft_painter.dart`, add the fields:
   /// Entities whose dash pattern collapsed to solid in the last frame.
   int get collapsedDashCount => _dasher.collapsedCount;
 
-  /// The clip the dasher generates inside, in screen space.
+  /// The clip the dasher generates inside, in the space the carried points are
+  /// in — screen space **minus the frame's screen origin**.
   ///
   /// Inflated by half the widest stroke the frame can draw, so a stroke whose
-  /// centreline is just outside still contributes its visible edge.
-  Aabb2 _screenClip = Aabb2.empty();
+  /// centreline is just outside still contributes its visible edge. Rebased
+  /// once per frame rather than un-rebasing every point back into raw screen
+  /// space to compare them.
+  Aabb2 _rebasedClip = Aabb2.empty();
+
+  /// The same box before the rebase subtraction, for the curves that stay in
+  /// their own local space.
+  Aabb2 _screenSpaceClip = Aabb2.empty();
+
+  /// The frame's rebase origin in screen space. Constant for the whole frame,
+  /// so it is computed in [paint] rather than per leaf.
+  Vector2 _screenOrigin = Vector2.zero();
 
   /// One two-point buffer, reused per span. A span is emitted through the sink
   /// immediately, so it never needs to outlive the callback.
   final Float64List _span = Float64List(4);
+
+  // The dasher's callbacks, bound once. A closure literal at the call site
+  // would allocate per dashed entity per frame; these capture nothing and read
+  // the two varying values from fields the caller sets just before the call.
+  DrawSink? _spanSink;
+  ResolvedStyle? _spanStyle;
+
+  late final DashSpanEmit _emitSpan = (double x0, double y0, double x1,
+      double y1) {
+    _span[0] = x0;
+    _span[1] = y0;
+    _span[2] = x1;
+    _span[3] = y1;
+    _dashSpans++;
+    _spanSink!.polyline(_span, 2, _spanStyle!, closed: false);
+  };
+
+  double _arcCx = 0, _arcCy = 0, _arcR = 0;
+
+  late final DashArcEmit _emitArc = (double startAngle, double sweep) {
+    _dashSpans++;
+    _spanSink!.arc(_arcCx, _arcCy, _arcR, startAngle, sweep, _spanStyle!);
+  };
 ```
 
-In `paint`, reset the counters and compute the clip:
+In `paint`, after `origin` is chosen, reset the counters and compute the clip
+once:
 
 ```dart
     _dashSpans = 0;
     _dasher.resetCounters();
-    const inflate = 32.0; // half of the widest plausible stroke, in device px
-    _screenClip = Aabb2(Vector2(-inflate, -inflate),
+    _screenOrigin = camera.worldToScreen(origin);
+    // Half the widest stroke the frame can draw, in device pixels, so a stroke
+    // whose centreline is just outside still contributes its visible edge.
+    const inflate = 32.0;
+    _screenSpaceClip = Aabb2(Vector2(-inflate, -inflate),
         Vector2(viewport.width + inflate, viewport.height + inflate));
+    _rebasedClip = Aabb2(
+        Vector2(-inflate - _screenOrigin.x, -inflate - _screenOrigin.y),
+        Vector2(viewport.width + inflate - _screenOrigin.x,
+            viewport.height + inflate - _screenOrigin.y));
 ```
+
+`_emitScreenSpace` reads `_screenOrigin` instead of recomputing
+`camera.worldToScreen(origin)` per leaf.
 
 Add the pattern lookup and the scale chain:
 
@@ -2533,35 +3181,171 @@ In `_emitScreenSpace`, after the points are transformed, branch:
       return;
     }
     final pattern = _patternFor(style);
-    if (pattern == null ||
-        !_dasher.dashPolyline(
-            _points, count, pattern, _dashScale(style, toScreen), _screenClip,
-            (x0, y0, x1, y1) {
-          _span[0] = x0;
-          _span[1] = y0;
-          _span[2] = x1;
-          _span[3] = y1;
-          _dashSpans++;
-          sink.polyline(_span, 2, style, closed: false);
-        })) {
+    if (pattern == null) {
+      sink.polyline(_points, count, style, closed: false);
+      sink.endResidual();
+      return;
+    }
+    // The emitter is a field bound once (see `_emitSpan` below), not a closure
+    // written here: a closure literal that captures `sink` and `style` is a
+    // fresh object on every dashed leaf of every frame, against the global
+    // constraint that the frame path allocates nothing once warm. The two
+    // captured values move into fields instead.
+    _spanSink = sink;
+    _spanStyle = style;
+    if (!_dasher.dashPolyline(_points, count, pattern,
+        _dashScale(style, toScreen), _rebasedClip, _emitSpan)) {
       sink.polyline(_points, count, style, closed: false);
     }
     sink.endResidual();
 ```
 
-The clip is in screen space and the points are screen-space **before** the rebase subtraction, so subtract the screen origin from `_screenClip` once per frame rather than adding it back per point:
+### Curves dash in their own space, and that needs one dasher change
+
+A line is carried into screen space, so its period is a screen-space length and
+`dashPolyline` compares it against the pixel floor directly. **A curve is not
+carried** — it keeps the residual path, because an anisotropic transform turns a
+circle into an ellipse and `DrawSink.circle` holds one radius. So its centre,
+its radius and its angles are all in the leaf's own space.
+
+That leaves two consistent choices and only one of them is cheap.
+
+Doing the arc in **screen** space means mapping angles: a conformal `toScreen`
+rotates by `atan2(b, a)` and a mirrored one reverses the sweep, so every emitted
+span would have to be mapped back before reaching `sink.arc`. Doing it in
+**local** space needs no angle maths at all — the radius, the angles and the
+clip are already in that space, and `_localClipFor` pulls the frame's clip back
+to meet them.
+
+Local space it is. The one quantity that is unavoidably in pixels is the
+**collapse decision**: `kDashCollapsePx` asks whether the period is too small to
+see, and that is a question about the screen. So `dashArc` takes the conversion
+factor rather than assuming its geometry is already in pixels:
 
 ```dart
-    final clip = Aabb2(
-        Vector2(_screenClip.minX - screenOrigin.x,
-            _screenClip.minY - screenOrigin.y),
-        Vector2(_screenClip.maxX - screenOrigin.x,
-            _screenClip.maxY - screenOrigin.y));
+  /// Emits the drawn spans of [pattern] along an arc, by angle.
+  ///
+  /// [r] and [clip] are in whatever space the caller's arc lives in, and
+  /// [scale] converts pattern units to that same space. [pixelScale] converts
+  /// that space to device pixels, and is used for **one thing only** — asking
+  /// whether the period has fallen under [collapsePx], which is a question
+  /// about the screen and not about the geometry.
+  ///
+  /// A caller working in screen space already passes 1.0 and can ignore it. The
+  /// painter does not: a curve keeps the residual path, so its radius and
+  /// angles stay in the leaf's own space and only this factor knows how big
+  /// that is on screen.
+  bool dashArc(double cx, double cy, double r, double start, double sweep,
+      DashPattern pattern, double scale, Aabb2 clip, DashArcEmit emit,
+      {double pixelScale = 1.0}) {
 ```
 
-Hoist that into `paint` as `_rebasedClip`, computed once after `origin` is chosen, and pass it to the dasher.
+with the collapse test becoming:
 
-For curves, in `_emit`'s `circle` and `arc` cases, apply the same branch through `dashArc`, emitting each span as `sink.arc(...)`. The curve's screen radius is `payload.scalars[0] * toScreen.scaleMagnitude`; pass `toScreen` down to `_emit` for the scale.
+```dart
+    final period = cycle * scale;
+    if (!period.isFinite || period * pixelScale < collapsePx) {
+      _collapsed++;
+      return false;
+    }
+```
+
+Add a test that the two are distinguished — a period that is comfortably above
+the floor in local units but below it once `pixelScale` shrinks it must
+collapse, and the reverse must not:
+
+```dart
+    test('the collapse floor is measured in pixels, not in local units', () {
+      // A pattern that is 18 local units per cycle is far above a 3-pixel
+      // floor — until the leaf is placed at a hundredth of its size, where
+      // the same cycle is 0.18 pixels and there is nothing to see.
+      final tiny = Dasher(collapsePx: 3.0);
+      expect(
+          tiny.dashArc(0, 0, 100, 0, 2 * math.pi, kDashed, 1.0, kOpen,
+              (_, __) {}, pixelScale: 0.01),
+          isFalse);
+      expect(tiny.collapsedCount, 1);
+
+      final visible = Dasher(collapsePx: 3.0);
+      expect(
+          visible.dashArc(0, 0, 100, 0, 2 * math.pi, kDashed, 1.0, kOpen,
+              (_, __) {}, pixelScale: 1.0),
+          isTrue);
+      expect(visible.collapsedCount, 0);
+    });
+```
+
+`dashPolyline` is unchanged: its geometry is already in pixels, so its
+`pixelScale` would always be 1.0 and a parameter nobody varies is a parameter
+nobody should have.
+
+### Wiring the curve cases
+
+`_emit`'s `circle` and `arc` cases take the branch through `dashArc`, using the
+pre-bound `_emitArc`. Pass `toScreen` down to `_emit` so it has the scale, and
+set the three arc fields before the call. **Note the two scales are different
+and deliberately so:** a line's `_dashScale` carries `toScreen.scaleMagnitude`
+because its points are in pixels, while a curve's does not, because its radius
+is not — the same factor reaches `dashArc` as `pixelScale` instead. The two
+produce the same picture.
+
+```dart
+      case EntityKind.circle:
+        final r = payload.scalars[0];
+        final pattern = _patternFor(style);
+        if (pattern == null) {
+          sink.circle(coords[0] - ox, coords[1] - oy, r, style);
+          return;
+        }
+        _spanSink = sink;
+        _spanStyle = style;
+        _arcCx = coords[0] - ox;
+        _arcCy = coords[1] - oy;
+        _arcR = r;
+        // The clip is in the carried-point space and the curve is in its own
+        // local space, so the dasher is handed the curve's screen radius for
+        // the arc-length maths and a clip pulled back the same way the points
+        // are. A curve under a non-invertible placement was already dropped by
+        // `_drawContainer`, so `toScreen` is invertible here.
+        if (!_dasher.dashArc(
+            _arcCx,
+            _arcCy,
+            r,
+            0,
+            2 * math.pi,
+            pattern,
+            // Local units: no `toScreen.scaleMagnitude` here, because `r` and
+            // the clip are not in pixels either.
+            style.linetypeScale * document.header.globalLinetypeScale,
+            _localClipFor(toScreen),
+            _emitArc,
+            pixelScale: toScreen.scaleMagnitude)) {
+          sink.circle(_arcCx, _arcCy, r, style);
+        }
+```
+
+with the same shape for `arc`, passing `payload.scalars[1]` and
+`payload.scalars[2]` as start and sweep instead of a full turn.
+
+`_localClipFor` pulls the frame's clip back into the leaf's own space, since
+that is the space a curve's centre and radius are in:
+
+```dart
+  /// The frame's clip expressed in a leaf's own space.
+  ///
+  /// A curve is not carried into screen space — it keeps the residual path —
+  /// so its coordinates are local and the clip has to meet them there. The
+  /// transformed box is an over-approximation under rotation, which is the
+  /// safe direction: it clips less, never more.
+  Aabb2 _localClipFor(Transform2 toScreen) {
+    final det = toScreen.determinant;
+    if (det == 0.0 || !det.isFinite) return _rebasedClip;
+    return _screenSpaceClip.transformedBy(toScreen.invert());
+  }
+```
+
+where `_screenSpaceClip` is the un-rebased viewport box, computed in `paint`
+beside `_rebasedClip`.
 
 - [ ] **Step 4: Run the painter tests**
 
@@ -2860,21 +3644,27 @@ The method that found Plan 2's and 3a's real defects, applied to the constructs 
 
 | # | Mutant | Must be caught by |
 |---|---|---|
-| 1 | `_opaque` returns `true` always | golden fixture 2 (Task 2) |
-| 2 | `flush()` body emptied | `flush is required` (Task 2) |
-| 3 | the bucket key drops `lineweightHundredths` | a new sink test: two styles differing only in lineweight must produce two calls |
-| 4 | `_bucketFor` skips the key-change flush in `openBucket` | `a paint change flushes` (Task 2) |
-| 5 | the curve flush in `bucketMap` is dropped | `flushes every bucket before a curve` (Task 3) |
-| 6 | `_translationOnly` returns `true` always | golden fixture 1 — a curve's residual would be applied as a translation |
-| 7 | `clipSegment` returns `t0 = 0` instead of the computed value | `the phase is carried from the true start` (Task 6) |
-| 8 | `cursor` starts at `0` instead of the floored multiple of `period` | the same test, and R2's frame time |
-| 9 | `period < collapsePx` → `period <= collapsePx` | a boundary test: `scale` chosen so `period == collapsePx` exactly must **not** collapse |
-| 10 | `_dashScale` drops `globalLinetypeScale` | `globalLinetypeScale multiplies it too` (Task 8) |
-| 11 | `_dashScale` drops `toScreen.scaleMagnitude` | `the instance scale multiplies the on-screen dash length` (Task 8) |
-| 12 | the pattern restarts per *polyline* rather than per vertex | `the pattern restarts at every vertex` (Task 6) |
-| 13 | `circleClipWindows` returns `-1` always | `only the angular window inside the clip is generated` (Task 7) |
-| 14 | `_screenClip` inflation set to `0` | a new painter test: a stroke whose centreline is one pixel outside the viewport must still emit a span |
-| 15 | the painter draws curves through `_emitScreenSpace` | golden `anisotropy_bypass.png` |
+| 1 | `_dashSegment` uses `from = 0` instead of `_range[0] * length` | `the phase is carried from the true start` (Task 6) |
+| 2 | `cursor` starts at `0` instead of the floored multiple of the cycle | `a long segment clipped to a small window costs few pattern steps` (Task 6). **No output test can catch this**: for a well-formed pattern the two starting points reach the same breakpoint with the same element index, so the skip is a pure work optimisation and only a work bound can see it break |
+| 2b | the cycle is taken from `pattern.totalLength` instead of `sum(abs(dashes))` | `a totalLength that disagrees with the dashes does not change the output` (Task 6) |
+| 3 | `period < collapsePx` → `period <= collapsePx` | a boundary test: `scale` chosen so `period == collapsePx` exactly must **not** collapse |
+| 4 | `_dashScale` drops `globalLinetypeScale` | `globalLinetypeScale multiplies it too` (Task 8) |
+| 5 | `_dashScale` drops `toScreen.scaleMagnitude` | `the instance scale multiplies the on-screen dash length` (Task 8) |
+| 6 | the pattern restarts per *polyline* rather than per vertex | `the pattern restarts at every vertex` (Task 6) |
+| 7 | `circleClipWindows` returns `-1` always | `only the angular window inside the clip is generated` (Task 7) |
+| 8 | the clip inflation set to `0` | a new painter test: a stroke whose centreline is one pixel outside the viewport must still emit a span |
+| 9 | `_localClipFor` returns `_rebasedClip` unconditionally | a dashed circle under a scaled instance, exercised through the painter |
+| 10 | `DocumentHeader.globalLinetypeScale` defaults to `0.0` instead of `1.0` | `a document written before the field reads back as 1` (Task 5) |
+| 11 | the painter draws curves through `_emitScreenSpace` | golden `anisotropy_bypass.png` |
+| 12 | `_emitSpan` writes to `_span` but the painter passes `_points` | any dashed painter test — spans would carry the whole polyline |
+
+The batching mutants that earlier drafts of this table listed are gone with the
+code they targeted. Two of them had already done their work before the removal
+and are recorded in the spike note rather than lost: mutating `_opaque` to
+`=> true` broke the translucent-equivalence test with 4,686 differing pixels,
+and keying the bucket map on a constant instead of the lineweight broke the
+collision test. Both were verified by a reviewer independently of the
+implementer.
 
 - [ ] **Step 2: For every mutant that survives, write the test that kills it**
 
@@ -2925,17 +3715,48 @@ cd packages/jet_cad_2d && dart run benchmark/query_throughput.dart
 
 - [ ] **Step 2: Write the note**
 
-`docs/superpowers/notes/<completion-date>-plan-3b-results.md` must contain:
+`docs/superpowers/notes/<completion-date>-plan-3b-results.md`. Two notes already
+exist and this one must **reference rather than restate** them — a number
+copied into a second place is a number that will disagree with itself later:
 
-1. Machine and builds, in 3a's format, with the same caveat that R1/R3 are a relative signal and cannot see raster.
-2. **The spike:** all four modes, three runs each, R2 raster p50, R1 p50, real `Canvas` calls, and which shipped under which clause of the decision rule.
-3. Every 3a row re-measured, **before and after in the same table**, with dashes on.
-4. The gate row: 500k working-set raster p50 against 182.73 ms, pass or fail, stated plainly either way.
-5. Dash spans and collapses per frame, both cameras, both corpora.
-6. The `kDashCollapsePx` sweep: five candidates, their numbers, the chosen value, and the sentence on what the reviewer saw.
-7. Real `Canvas` calls against painter ops, both cameras, both corpora — the ratio this plan exists to move.
-8. Web: whether the 500k whole-drawing frame now completes, and its number if so. **Informational, not a gate.**
-9. What this says about Plan 3c, 3d and 3e, in the shape of 3a's closing section.
+- [`2026-08-11-plan-3b-batch-spike.md`](2026-08-11-plan-3b-batch-spike.md) — the
+  four modes, twelve runs, and the decision rule's stop clause firing.
+- [`2026-08-11-plan-3b-raster-profile.md`](2026-08-11-plan-3b-raster-profile.md)
+  — what the 179 ms actually is.
+
+The note must contain:
+
+1. Machine and builds, in 3a's format, with the same caveat that R1/R3 are a
+   relative signal and cannot see raster.
+2. **What 3b delivered, in one paragraph**, with pointers to the two notes
+   above. Batching was measured and refuted, so what shipped is the two
+   deletions, the screen-space carry, and dashes.
+3. **Every 3a row re-measured, before and after in the same table, with dashes
+   on.** This is the note's spine.
+4. **The dash cost, stated as a number.** 500k working-set raster p50 against
+   **179.63 ms** — the unbatched baseline measured after Tasks 0 and 1, which is
+   the honest comparison because that is the code dashes were added to. 3a's
+   182.73 ms is a different tree and belongs in the table as history, not as the
+   threshold. **This row is measured and recorded, not a gate**: the gate asked
+   whether the batching win exceeded the dash cost, and the spike established
+   there is no batching win. State the number plainly whichever way it falls.
+5. Dash spans and collapses per frame, both cameras, both corpora. **Say which
+   figures are per-frame** — all three counters now are, but the note should not
+   make a reader work that out.
+6. The `kDashCollapsePx` sweep: five candidates, their collapse thresholds in
+   pixels per world unit, the ladder rungs each one collapses, the chosen value,
+   and what the reviewer saw. The review is recorded as a judgement, not
+   dressed up as a derivation.
+7. Real `Canvas` calls against painter ops, both cameras, both corpora.
+   **A diagnostic, no longer a target** — the spike established that collapsing
+   this ratio makes the frame slower, not faster.
+8. Web: whether the 500k whole-drawing frame completes. **Informational.** Note
+   that 3a's 3.4-million-op CanvasKit abort did not reproduce, and that 3a's
+   results note item 5 should not be treated as a live constraint until someone
+   re-establishes it.
+9. What this says about Plans 3c, 3d and 3e, in the shape of 3a's closing
+   section. 3e's is now largely written for it by the raster-profile note; say
+   what dashes add to that picture.
 
 - [ ] **Step 3: Commit**
 
@@ -2968,17 +3789,34 @@ git commit -m "docs: record Plan 3b's measurements"
 
 | Criterion | Threshold |
 |---|---|
-| 500k working-set raster p50, dashes on | ≤ 182.73 ms |
-| goldens, fixtures 1 and 2, batched vs unbatched | byte-identical |
-| golden fixture 3 | byte-identical under `openBucket`; a reviewed, deliberately regenerated golden under a mapped mode |
+| the spike's four modes | measured, recorded, stop clause honoured. **Met** — see the spike note |
+| the batching machinery | removed (Task 4b), suite green afterwards |
+| the raster profile | one named dominant cost for the 500k working-set frame, with a repeatable capture recipe — or an explicit statement of what the capture could not establish and what would settle it |
+| 500k working-set raster p50, dashes on | **measured and recorded** against 179.63 ms. Not a threshold — see below |
+| the pre-existing stroke-width goldens | pass unchanged, **no PNG regenerated** |
+| the dash-ladder goldens | generated and reviewed |
 | the differential oracle | both differential tests and the non-vacuity test pass |
 | `git diff --stat main -- packages/jet_cad_2d_flutter/lib/src/reference_walk.dart` | **empty** |
 | `kDashCollapsePx` | swept, numbers recorded, chosen by recorded review |
 | mutation log | every mutant killed or argued equivalent |
 
-- [ ] **Step 3: If the gate fails, record it — do not work around it**
+**The dash row is no longer failable, and the demotion is on evidence.** It was
+written as "does the batching win exceed the dash cost?", which was a real
+question while there was a batching win to weigh. The spike established there is
+none. Keeping the threshold would assert that a third of the drawing can start
+being drawn dashed at no cost, against a path with nothing to offset it — which
+is asserting that dashes are free. They are not. The number is the deliverable.
 
-A failure means the batching win is smaller than the dash cost. Write that in the results note as a number, state what it implies for 3e, and stop. Plan 3a's `snap at dirty threshold` row is the precedent: a known failure carried forward honestly is worth more than a threshold quietly moved.
+The batching-equivalence rows are gone with the code they tested. Their loss is
+real: the alpha-exclusion rule and the ordering contract were properties *of the
+batching*, and with one draw call per primitive there is no reordering left to
+constrain.
+
+- [ ] **Step 3: If a criterion fails, record it — do not work around it**
+
+Plan 3a's `snap at dirty threshold` row is the precedent, and Task 4 is this
+plan's own: a stop clause that fires is a result. Write the number, state what
+it implies for 3c, 3d and 3e, and stop.
 
 - [ ] **Step 4: Record the gate and finish the branch**
 
@@ -2988,10 +3826,12 @@ Append the gate results to the results note, then use the **superpowers:finishin
 
 ## Self-Review
 
-**Spec coverage.** Every section of the spec maps to a task: the batch mechanism to Tasks 1–3, the spike and its decision rule to Task 4, dashes to Tasks 5–8, the collapse floor to Task 9, the removals to Task 0, measurement and counters to Tasks 10 and 12, the goldens and the oracle to Tasks 2, 3 and 8, mutation testing to Task 11, and the exit criteria to Task 13. The flush contract 3b owes 3d is written in Task 2's `_bucketFor` and exercised by Task 3's curve test.
+**Spec coverage, as revised.** The removals map to Task 0, the screen-space carry to Task 1, the batch mechanism to Tasks 1–3 and the spike to Task 4 — all executed, and the batching refuted and removed in Task 4b. Task 4c replaces the spike as the measurement 3e needs. Dashes map to Tasks 5–8, the collapse floor to Task 9, counters and rigs to Tasks 10 and 12, mutation testing to Task 11, and the exit criteria to Task 13.
+
+**What the revision cost, stated rather than quietly dropped.** The flush contract 3b was to hand 3d is gone: it existed so a fill could force batched strokes out before drawing over them, and with one draw call per primitive there is nothing to flush. 3d inherits the ordinary situation instead — the painter's ascending-handle order reaches the canvas unaltered.
 
 **Verified against the code while writing.** `TableSection.operator []` returns `T?` keyed by `Handle`; `EntityStore` exposes `liveSlots`, not a slot count plus a liveness test; `workingSetCamera` takes one argument and uses `kRigViewport`; `DraftCanvas.resolver` is optional; `TrueColor` is a const constructor over `rgb`. Each of those was checked in the source rather than recalled, and two of the four first drafts of these tests were wrong.
 
-**Type consistency.** `BatchMode` is introduced in Task 2 with two values and extended in Task 3 to four, then reduced in Task 4. `CanvasDrawSink.flush()`, `canvasCallCount` and `resetCounters()` keep their names throughout. `Dasher.dashPolyline` and `Dasher.dashArc` return `bool` with the same meaning in both — false means the caller draws the geometry as it stands. `screenSpaceLeafCount` replaces `bypassCount` in Task 1 and is used under the new name in Tasks 4 and 10. `kDashCollapsePx` is defined in Task 6 and set in Task 9.
+**Type consistency.** `BatchMode` is introduced in Task 2 with two values, extended in Task 3 to four, and deleted entirely in Task 4b along with `CanvasDrawSink.flush()` and `DraftCanvas.batchMode`. `canvasCallCount` and `resetCounters()` survive and keep their names throughout. `Dasher.dashPolyline` and `Dasher.dashArc` return `bool` with the same meaning in both — false means the caller draws the geometry as it stands. `screenSpaceLeafCount` replaces `bypassCount` in Task 1 and is used under the new name in Tasks 4 and 10. `kDashCollapsePx` is defined in Task 6 and set in Task 9.
 
 **Known gap, deliberate.** The differential oracle does not cover dashed drawing, because the reference walk does not dash and `differentialFixture` is entirely continuous. Task 8 asserts that fact rather than relying on it. Dashing is covered by the dasher's unit tests, the painter's scale-chain tests, and the dash-ladder golden.
