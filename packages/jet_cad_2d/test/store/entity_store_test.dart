@@ -16,6 +16,21 @@ EntityRecord lineRecord(int handle, {int geomIndex = 0, int owner = 100}) =>
       flags: 0,
     );
 
+EntityRecord _textRecord(Handle handle, {String text = ''}) => EntityRecord(
+      handle: handle,
+      owner: const Handle(100),
+      kind: EntityKind.text,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.byLayerLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: const ByLayerColor(),
+      lineweight: kLineweightDefault,
+      transparency: kByLayer,
+      flags: 0,
+      text: text,
+    );
+
 void main() {
   test('round-trips a record through the columns', () {
     final store = EntityStore();
@@ -154,5 +169,48 @@ void main() {
       'transparency',
       'flags',
     ]);
+  });
+
+  test('text fields round-trip through the store and clear on remove', () {
+    final store = EntityStore();
+    final slot = store.add(EntityRecord(
+      handle: const Handle(1),
+      owner: const Handle(100),
+      kind: EntityKind.text,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.byLayerLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: const ByLayerColor(),
+      lineweight: kLineweightDefault,
+      transparency: kByLayer,
+      flags: 0,
+      text: 'WC',
+      tag: 'ROOM',
+      textStyle: const Handle(7),
+      textAttrs: 0x0121,
+    ));
+
+    expect(store.textAt(slot), 'WC');
+    expect(store.tagAt(slot), 'ROOM');
+    expect(store.textStyleAt(slot), const Handle(7));
+    expect(store.textAttrsAt(slot), 0x0121);
+    expect(store.read(slot).text, 'WC');
+
+    store.remove(slot);
+    // Strings are heap references: an unreachable slot that still points at a
+    // string keeps the whole document's text alive after deletion. The typed
+    // columns can afford to keep stale numbers; these cannot.
+    expect(store.debugRawTextAt(slot), '');
+    expect(store.debugRawTagAt(slot), '');
+  });
+
+  test('purge carries the text columns with the slot', () {
+    final store = EntityStore();
+    final a = store.add(_textRecord(const Handle(1), text: 'A'));
+    final b = store.add(_textRecord(const Handle(2), text: 'B'));
+    store.remove(a);
+    final remap = store.purge();
+    expect(store.textAt(remap[b]), 'B');
   });
 }

@@ -50,6 +50,21 @@ class EntityRecord {
   /// Bitmask; see [EntityFlags].
   final int flags;
 
+  /// The displayed string. `''` for every kind but [EntityKind.text] and
+  /// [EntityKind.attrib].
+  final String text;
+
+  /// A DXF ATTRIB's tag. `''` for a TEXT.
+  final String tag;
+
+  final Handle textStyle;
+
+  /// Packed: bits 0-3 horizontal justification (DXF 72), bits 4-7 vertical
+  /// justification (DXF 73 for TEXT, **74 for ATTRIB** — for an ATTRIB, group
+  /// 73 is field length, not justification), bit 8 `widthFactor` is
+  /// overridden, bit 9 `obliqueAngle` is overridden.
+  final int textAttrs;
+
   const EntityRecord({
     required this.handle,
     required this.owner,
@@ -62,6 +77,10 @@ class EntityRecord {
     required this.lineweight,
     required this.transparency,
     required this.flags,
+    this.text = '',
+    this.tag = '',
+    this.textStyle = ReservedHandles.standardTextStyle,
+    this.textAttrs = 0,
   });
 
   EntityRecord copyWith({
@@ -76,6 +95,10 @@ class EntityRecord {
     int? lineweight,
     int? transparency,
     int? flags,
+    String? text,
+    String? tag,
+    Handle? textStyle,
+    int? textAttrs,
   }) =>
       EntityRecord(
         handle: handle ?? this.handle,
@@ -89,6 +112,10 @@ class EntityRecord {
         lineweight: lineweight ?? this.lineweight,
         transparency: transparency ?? this.transparency,
         flags: flags ?? this.flags,
+        text: text ?? this.text,
+        tag: tag ?? this.tag,
+        textStyle: textStyle ?? this.textStyle,
+        textAttrs: textAttrs ?? this.textAttrs,
       );
 
   /// Key order is fixed, because serialization must be byte-deterministic.
@@ -152,11 +179,29 @@ class EntityRecord {
       other.color == color &&
       other.lineweight == lineweight &&
       other.transparency == transparency &&
-      other.flags == flags;
+      other.flags == flags &&
+      other.text == text &&
+      other.tag == tag &&
+      other.textStyle == textStyle &&
+      other.textAttrs == textAttrs;
 
   @override
-  int get hashCode => Object.hash(handle, owner, kind, layer, linetype,
-      linetypeScale, geomIndex, color, lineweight, transparency, flags);
+  int get hashCode => Object.hash(
+      handle,
+      owner,
+      kind,
+      layer,
+      linetype,
+      linetypeScale,
+      geomIndex,
+      color,
+      lineweight,
+      transparency,
+      flags,
+      text,
+      tag,
+      textStyle,
+      textAttrs);
 
   @override
   String toString() => 'EntityRecord(${kind.name} ${handle.toHex()})';
@@ -189,6 +234,15 @@ class EntityStore {
   Int16List _transparency = Int16List(_initialCapacity);
 
   Uint8List _flags = Uint8List(_initialCapacity);
+
+  // Not typed lists, because a string is not a number. This is the one place
+  // the all-typed-list shape of this store is broken, and interning into a
+  // `Uint32List` index column is the recorded alternative — rejected for now
+  // because it puts a refcount on the slot lifetime.
+  List<String> _text = List<String>.filled(_initialCapacity, '');
+  List<String> _tag = List<String>.filled(_initialCapacity, '');
+  Uint32List _textStyle = Uint32List(_initialCapacity);
+  Uint16List _textAttrs = Uint16List(_initialCapacity);
 
   int get liveCount => _slots.liveCount;
 
@@ -223,6 +277,10 @@ class EntityStore {
       lineweight: _lineweight[slot],
       transparency: _transparency[slot],
       flags: _flags[slot],
+      text: _text[slot],
+      tag: _tag[slot],
+      textStyle: Handle(_textStyle[slot]),
+      textAttrs: _textAttrs[slot],
     );
   }
 
@@ -242,6 +300,12 @@ class EntityStore {
   void remove(int slot) {
     _requireLive(slot);
     _slotOf.remove(Handle(_handle[slot]));
+    // Strings are heap references, unlike every other column here: a stale
+    // number left behind in a freed slot is harmless, but a stale string
+    // reference keeps the whole document's text alive after deletion. Clear
+    // both before freeing so removal actually releases the memory.
+    _text[slot] = '';
+    _tag[slot] = '';
     _slots.free(slot);
   }
 
@@ -256,6 +320,17 @@ class EntityStore {
   int lineweightAt(int slot) => _lineweight[slot];
   int transparencyAt(int slot) => _transparency[slot];
   int flagsAt(int slot) => _flags[slot];
+  String textAt(int slot) => _text[slot];
+  String tagAt(int slot) => _tag[slot];
+  Handle textStyleAt(int slot) => Handle(_textStyle[slot]);
+  int textAttrsAt(int slot) => _textAttrs[slot];
+
+  /// Reads the column without the live check, so a test can assert that
+  /// [remove] released the string reference.
+  @visibleForTesting
+  String debugRawTextAt(int slot) => _text[slot];
+  @visibleForTesting
+  String debugRawTagAt(int slot) => _tag[slot];
 
   /// Explicit maintenance compaction of **entity** slots.
   ///
@@ -279,6 +354,10 @@ class EntityStore {
       _lineweight[to] = _lineweight[old];
       _transparency[to] = _transparency[old];
       _flags[to] = _flags[old];
+      _text[to] = _text[old];
+      _tag[to] = _tag[old];
+      _textStyle[to] = _textStyle[old];
+      _textAttrs[to] = _textAttrs[old];
     }
     _slotOf.clear();
     for (final slot in _slots.liveSlots) {
@@ -290,6 +369,11 @@ class EntityStore {
   void clear() {
     _slots.clear();
     _slotOf.clear();
+    // Refill rather than leave stale references: the numeric columns don't
+    // need this because a stray number is harmless, but a stray string keeps
+    // the whole document's text alive.
+    _text = List<String>.filled(_text.length, '');
+    _tag = List<String>.filled(_tag.length, '');
   }
 
   void _write(int slot, EntityRecord r) {
@@ -304,6 +388,10 @@ class EntityStore {
     _lineweight[slot] = r.lineweight;
     _transparency[slot] = r.transparency;
     _flags[slot] = r.flags;
+    _text[slot] = r.text;
+    _tag[slot] = r.tag;
+    _textStyle[slot] = r.textStyle.value;
+    _textAttrs[slot] = r.textAttrs;
   }
 
   /// Growth reallocates and copies. It never reorders live slots, because a
@@ -326,6 +414,10 @@ class EntityStore {
     _lineweight = Int16List(capacity)..setAll(0, _lineweight);
     _transparency = Int16List(capacity)..setAll(0, _transparency);
     _flags = Uint8List(capacity)..setAll(0, _flags);
+    _text = List<String>.filled(capacity, '')..setAll(0, _text);
+    _tag = List<String>.filled(capacity, '')..setAll(0, _tag);
+    _textStyle = Uint32List(capacity)..setAll(0, _textStyle);
+    _textAttrs = Uint16List(capacity)..setAll(0, _textAttrs);
   }
 
   void _requireLive(int slot) {
