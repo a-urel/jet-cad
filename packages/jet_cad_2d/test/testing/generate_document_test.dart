@@ -1,6 +1,7 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart';
 import 'package:test/test.dart';
+import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 /// FNV-1a over the document's full serialisation.
 ///
@@ -206,5 +207,109 @@ void main() {
           dashedFraction: 0.4,
         ));
     expect(build().toString(), build().toString());
+  });
+
+  // --- labelFraction / attributedInstanceFraction -------------------------
+  //
+  // Both draw from the generator's second `Random` (`extra`), and there is
+  // one such stream, not one per extension: naming one on its own shifts
+  // every draw the other would make. So these fixtures each name only one
+  // of the two (the other stays at its default of 0, drawing nothing), and
+  // no fixture here names both -- see `generate_document.dart`'s doc comment
+  // on [generateDocument].
+
+  test('both text fractions default to zero and change nothing', () {
+    // The two fingerprints from Task 1's re-baseline (commit 7f85226) still
+    // hold. If either moved, `labelFraction` or `attributedInstanceFraction`
+    // drew from `extra` while off, which is exactly the bug this test
+    // exists to catch -- not a signal to update the expected value.
+    expect(fingerprint(generateDocument(2000, definitionCount: 20)),
+        -4223683079839955300);
+    expect(fingerprint(generateDocument(20000, definitionCount: 20)),
+        -1538364231202837705);
+  });
+
+  test('labelFraction produces repeating strings out of the root budget', () {
+    final doc =
+        generateDocument(2000, definitionCount: 20, labelFraction: 0.05);
+    final labels = <String>{};
+    var count = 0;
+    for (final slot in doc.entities.liveSlots) {
+      if (doc.entities.kindAt(slot) == EntityKind.text) {
+        count++;
+        labels.add(doc.entities.textAt(slot));
+      }
+    }
+    expect(count, greaterThan(50));
+    // Repeating, not unique: this is the distribution the cache hits.
+    expect(labels.length, lessThanOrEqualTo(20));
+  });
+
+  test('labelFraction does not change the total leaf count', () {
+    // Labels come *out of* the root budget rather than adding to it: a
+    // document built with labelFraction on has exactly as many leaves as
+    // one built without it, for the same entityCount/definitionCount.
+    final off = generateDocument(2000, definitionCount: 20);
+    final on = generateDocument(2000, definitionCount: 20, labelFraction: 0.05);
+    expect(on.entities.liveSlots.length, off.entities.liveSlots.length);
+  });
+
+  test('attributedInstanceFraction gives each chosen instance a unique attrib',
+      () {
+    final doc = generateDocument(2000,
+        definitionCount: 20,
+        instanceCount: 100,
+        attributedInstanceFraction: 0.5);
+    final values = <String>[];
+    for (final slot in doc.entities.liveSlots) {
+      if (doc.entities.kindAt(slot) == EntityKind.attrib) {
+        values.add(doc.entities.textAt(slot));
+        // Owned by the instance node, in instance-local coordinates.
+        expect(doc.tree[doc.entities.ownerAt(slot)], isA<InstanceNode>());
+      }
+    }
+    expect(values.length, 50);
+    expect(values.toSet().length, values.length);
+  });
+
+  test(
+      'attributedInstanceFraction places attributes in the instance\'s local '
+      'space, not world space', () {
+    // A generator bug that wrote an ATTRIB's coordinates already in world
+    // space would have `container_index.dart` apply the instance's
+    // transform on top of that, double-placing it. This pins both halves of
+    // that: the stored coordinate is symbol-scale (nowhere near the floor
+    // plan's own extent), and applying the instance's own composed
+    // transform to it lands within the floor plan the instances are
+    // actually scattered across.
+    final doc = generateDocument(2000,
+        definitionCount: 20,
+        instanceCount: 100,
+        attributedInstanceFraction: 0.5);
+    var checked = 0;
+    for (final slot in doc.entities.liveSlots) {
+      if (doc.entities.kindAt(slot) != EntityKind.attrib) continue;
+      final owner = doc.entities.ownerAt(slot);
+      final node = doc.tree[owner];
+      expect(node, isA<InstanceNode>());
+
+      final coords = doc.geometry.peek(doc.entities.geomIndexAt(slot)).coords;
+      final local = Vector2(coords[0], coords[1]);
+      // Symbol-scale local coordinates, not floor-plan-scale world ones.
+      expect(local.x.abs(), lessThanOrEqualTo(100.0));
+      expect(local.y.abs(), lessThanOrEqualTo(50.0));
+
+      // Resolved through the instance's own composed transform, the only
+      // correct way to reach world space from a leaf an InstanceNode owns.
+      final world = node!.transform.transformPoint(local);
+      expect(
+          world.x,
+          inInclusiveRange(
+              kDefaultOriginX - 1000, kDefaultOriginX + kFloorWidth + 1000));
+      expect(world.y,
+          inInclusiveRange(kOriginY - 1000, kOriginY + kFloorHeight + 1000));
+      checked++;
+    }
+    expect(checked, 50);
   });
 }
