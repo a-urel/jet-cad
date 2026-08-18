@@ -633,8 +633,7 @@ CorpusDocument _textDefaultMeasurer() =>
           kind: record.kind,
           payload: doc.geometry.peek(record.geomIndex),
           measurer: measurer,
-          textStyle: doc.tables.textStyles[record.textStyle] ??
-              doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+          textStyle: doc.textStyleOf(record.textStyle),
           textAttrs: record.textAttrs,
           text: record.text,
         );

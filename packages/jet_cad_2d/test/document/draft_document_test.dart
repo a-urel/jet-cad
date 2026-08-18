@@ -46,6 +46,63 @@ void main() {
     expect(doc.extents.max, Vector2(10, 5));
   });
 
+  test(
+      'extents still work when the STANDARD text style is missing from the '
+      "table -- every leaf resolves a textStyle, not only TEXT and ATTRIB", () {
+    final doc = DraftDocument.empty();
+    final handle = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+      record: lineRecord(handle, doc.rootHandle),
+      payload: line(0, 0, 10, 5),
+    ));
+    // `JsonCodec._loadTables` clears the seeded defaults before loading a
+    // file's own entries, and `TableSection.remove` is public, so a document
+    // whose `textStyles` table lacks the STANDARD handle is reachable, not
+    // hypothetical -- `_boundsOfContainer` calls `entityBounds` for every
+    // leaf regardless of kind, so even a document with only a line resolves
+    // a textStyle and must not crash when the table can't supply one.
+    doc.tables.textStyles.remove(ReservedHandles.standardTextStyle);
+    expect(() => doc.extents, returnsNormally);
+    expect(doc.extents.min, Vector2(0, 0));
+    expect(doc.extents.max, Vector2(10, 5));
+  });
+
+  test(
+      'extents cover a text entity\'s laid-out box, not just its insertion '
+      'point', () {
+    final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
+    final style = doc.tables.textStyles.byName('Standard')!;
+    final handle = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: handle,
+        owner: doc.rootHandle,
+        kind: EntityKind.text,
+        layer: ReservedHandles.layerZero,
+        linetype: ReservedHandles.byLayerLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: kByLayer,
+        transparency: kByLayer,
+        flags: 0,
+        text: 'HELLO',
+        textStyle: style.handle,
+      ),
+      payload: GeometryPayload(
+        coords: Float64List.fromList([0, 0]),
+        scalars: Float64List.fromList([200, 0, 0, 0]),
+      ),
+    ));
+    // The insertion point alone is a zero-area box at the origin. This is
+    // the call site zoom-to-fit reads (`_boundsOfContainer`, through
+    // `doc.extents`); hard-coding `text: ''` there would leave this
+    // degenerate and both suites green, since nothing else exercises
+    // `doc.extents` with a real measurer on a text entity.
+    expect(doc.extents.maxX - doc.extents.minX, greaterThan(0.0));
+    expect(doc.extents.maxY - doc.extents.minY, greaterThan(0.0));
+  });
+
   test('extents are recomputed after a mutation, not stale', () {
     final doc = DraftDocument.empty();
     final first = doc.handleSeed.next();

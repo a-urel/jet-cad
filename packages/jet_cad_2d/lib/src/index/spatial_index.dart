@@ -9,7 +9,6 @@ import '../document/doc_change.dart';
 import '../document/draft_document.dart';
 import '../document/extents.dart';
 import '../document/node.dart';
-import '../document/style.dart';
 import '../geometry/aabb2.dart';
 import '../geometry/distance.dart';
 import '../geometry/primitives.dart';
@@ -2359,8 +2358,7 @@ class SpatialIndex {
       kind: record.kind,
       payload: payload,
       measurer: document.textMeasurer,
-      textStyle: document.tables.textStyles[record.textStyle] ??
-          document.tables.textStyles[ReservedHandles.standardTextStyle]!,
+      textStyle: document.textStyleOf(record.textStyle),
       textAttrs: record.textAttrs,
       text: record.text,
     );

@@ -211,8 +211,7 @@ List<Handle> referenceEntitiesInRect(
       kind: record.kind,
       payload: doc.geometry.peek(record.geomIndex),
       measurer: doc.textMeasurer,
-      textStyle: doc.tables.textStyles[record.textStyle] ??
-          doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+      textStyle: doc.textStyleOf(record.textStyle),
       textAttrs: record.textAttrs,
       text: record.text,
     ).transformedBy(composed);
@@ -809,8 +808,7 @@ void _considerIntersections(
       kind: kind,
       payload: doc.geometry.peek(record.geomIndex),
       measurer: doc.textMeasurer,
-      textStyle: doc.tables.textStyles[record.textStyle] ??
-          doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+      textStyle: doc.textStyleOf(record.textStyle),
       textAttrs: record.textAttrs,
       text: record.text,
     ).transformedBy(composed);

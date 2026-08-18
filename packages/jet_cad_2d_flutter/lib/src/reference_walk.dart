@@ -105,12 +105,17 @@ class _ReferenceWalk {
     if (kind == EntityKind.text || kind == EntityKind.attrib) return;
     if (doc.entities.flagsAt(slot) & EntityFlags.invisible != 0) return;
 
+    // textStyle/textAttrs/text are dead for this call: the early return above
+    // already skips every TEXT and ATTRIB entity, so this always resolves a
+    // non-text kind's defaults. They stay wired through so this expression
+    // matches the other three `entityBounds` call sites exactly and cannot
+    // silently drift from them; they start mattering once Task 10 stops
+    // skipping text here.
     final box = entityBounds(
       kind: kind,
       payload: payload,
       measurer: doc.textMeasurer,
-      textStyle: doc.tables.textStyles[doc.entities.textStyleAt(slot)] ??
-          doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+      textStyle: doc.textStyleOf(doc.entities.textStyleAt(slot)),
       textAttrs: doc.entities.textAttrsAt(slot),
       text: doc.entities.textAt(slot),
     ).transformedBy(placement);

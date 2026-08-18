@@ -5,7 +5,6 @@ import '../core/handle.dart';
 import '../document/draft_document.dart';
 import '../document/extents.dart';
 import '../document/node.dart';
-import '../document/style.dart';
 import '../geometry/aabb2.dart';
 import '../geometry/transform2.dart';
 import '../store/entity_store.dart';
@@ -94,8 +93,7 @@ class ContainerIndex {
         kind: record.kind,
         payload: payload,
         measurer: doc.textMeasurer,
-        textStyle: doc.tables.textStyles[record.textStyle] ??
-            doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+        textStyle: doc.textStyleOf(record.textStyle),
         textAttrs: record.textAttrs,
         text: record.text,
       ).transformedBy(composed);

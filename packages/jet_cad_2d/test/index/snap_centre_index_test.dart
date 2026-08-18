@@ -121,8 +121,7 @@ void _expectCentreOutsideItsOwnBox(DraftDocument doc, Handle arc) {
     kind: record.kind,
     payload: payload,
     measurer: doc.textMeasurer,
-    textStyle: doc.tables.textStyles[record.textStyle] ??
-        doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+    textStyle: doc.textStyleOf(record.textStyle),
     textAttrs: record.textAttrs,
     text: record.text,
   );
@@ -357,8 +356,7 @@ void main() {
       kind: secondRecord.kind,
       payload: doc.geometry.peek(secondRecord.geomIndex),
       measurer: doc.textMeasurer,
-      textStyle: doc.tables.textStyles[secondRecord.textStyle] ??
-          doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+      textStyle: doc.textStyleOf(secondRecord.textStyle),
       textAttrs: secondRecord.textAttrs,
       text: secondRecord.text,
     );
