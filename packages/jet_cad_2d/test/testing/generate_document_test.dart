@@ -238,11 +238,45 @@ void main() {
       if (doc.entities.kindAt(slot) == EntityKind.text) {
         count++;
         labels.add(doc.entities.textAt(slot));
+        // A degenerate (zero-area) box would measure nothing downstream, in
+        // every text render, pick and benchmark taken against this corpus.
+        final scalars =
+            doc.geometry.peek(doc.entities.geomIndexAt(slot)).scalars;
+        expect(scalars[0], greaterThan(0));
       }
     }
-    expect(count, greaterThan(50));
-    // Repeating, not unique: this is the distribution the cache hits.
-    expect(labels.length, lessThanOrEqualTo(20));
+    // Exact, not a floor: labelCount is 5% of the *root* budget (1680 at
+    // this entityCount/definitionCount), not of entityCount itself and not
+    // capped the way the old floor-text ceiling (`min(300, ...)`) was.
+    expect(count, 84);
+    // Exactly the vocabulary's size, not merely bounded by it: this is the
+    // distribution Task 12's distinct-visible-key measurement is taken
+    // against, and it is also labelFraction's only draw from the shared
+    // `extra` stream -- a generator that stopped drawing (e.g. always
+    // choosing index 0) would still pass a `lessThanOrEqualTo` bound.
+    expect(labels.length, 20);
+  });
+
+  test(
+      'labelFraction is not capped by the old floor-text ceiling at a '
+      'larger corpus', () {
+    // All the other labelFraction tests use entityCount: 2000, where the
+    // pre-existing floor-text ceiling (`math.min(300, rootEntityCount ~/
+    // 100)`) and the true 5%-of-root label count are far apart enough that
+    // a label count silently re-using that ceiling could still slip past a
+    // loose bound. 20000 is the corpus the benchmarks actually use.
+    int textCountOf(int entityCount) {
+      final doc = generateDocument(entityCount,
+          definitionCount: 20, labelFraction: 0.05);
+      var count = 0;
+      for (final slot in doc.entities.liveSlots) {
+        if (doc.entities.kindAt(slot) == EntityKind.text) count++;
+      }
+      return count;
+    }
+
+    expect(textCountOf(2000), 84);
+    expect(textCountOf(20000), 984);
   });
 
   test('labelFraction does not change the total leaf count', () {
@@ -266,6 +300,13 @@ void main() {
         values.add(doc.entities.textAt(slot));
         // Owned by the instance node, in instance-local coordinates.
         expect(doc.tree[doc.entities.ownerAt(slot)], isA<InstanceNode>());
+        // A degenerate (zero-area) box would measure nothing downstream.
+        final scalars =
+            doc.geometry.peek(doc.entities.geomIndexAt(slot)).scalars;
+        expect(scalars[0], greaterThan(0));
+        // The DXF ATTRIB tag -- the attribute definition's key -- must be
+        // present; it is what distinguishes this leaf from a plain TEXT.
+        expect(doc.entities.tagAt(slot), isNotEmpty);
       }
     }
     expect(values.length, 50);
