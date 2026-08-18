@@ -97,6 +97,14 @@ class ResolvedTextAttributes {
 /// Caller-owned and refilled in place, so nothing may hold a reference to a
 /// [TextLayout] it did not fill itself; the same rule [HitPath] and
 /// [SnapResult] state for their own reusable buffers.
+///
+/// `@internal`: this exists so the query path can lay text out without
+/// allocating, not as a second supported way to ask where a text entity's
+/// glyphs sit. The barrel re-exports this library wholesale, so the
+/// annotation — not the export list — is what says a caller outside this
+/// package should use [resolveTextAttributes], [textLocalTransform] and
+/// [textLocalBounds] instead, which are the same answers in immutable form.
+@internal
 class TextLayout {
   /// Every double this object holds, in one typed array rather than in
   /// fourteen plain `double` fields.

@@ -102,8 +102,8 @@ import 'vm_allocation_meter.dart';
 /// a generic collection class such as `List`.
 ///
 /// **Not used by `pickInto`/`snapInto`**, which watch
-/// [_recursiveCandidateScalingClasses] (`Vector2` alone) at the same tight
-/// budget instead: both share `SpatialIndex._descend`, which allocates one
+/// [_recursiveCandidateScalingClasses] (`Vector2` and `_Record`) at the same
+/// tight budget instead: both share `SpatialIndex._descend`, which allocates one
 /// `Aabb2` per recursion level regardless of candidate count (see
 /// [_depthBoundClasses]) -- including `Aabb2` here for those two methods
 /// would fail a correct three-level-deep pick on the pre-existing,

@@ -1176,19 +1176,27 @@ void main() {
     // 'LONG ROOM NAME' is 14 characters, so under MetricModelMeasurer's
     // defaults (advanceRatio 0.55, ascent 0.8, descent 0.2, cap 0.7, all of
     // kNominalTextPixels = 100) it lays out 770 wide, 80 up and 20 down at
-    // the nominal size, scaled by height/capHeight = 200/70. The world box
-    // is therefore x in [0, 2200], y in [-57.14, 228.57].
+    // the nominal size, scaled by height/capHeight = 200/70.
+    //
+    // **The insertion point is (300, 20), not the origin, and the two
+    // coordinates differ by more than the box is tall.** An anchor whose x
+    // and y are equal -- or both zero -- cannot tell a correct pick from one
+    // that reads the anchor as `(coords[1], coords[0])`, and every probe
+    // below would land in the same place under both. With this anchor the
+    // world box is x in [300, 2500], y in [-37.14, 248.57]; under the
+    // swapped anchor (20, 300) it would be x in [20, 2220],
+    // y in [242.86, 528.57], which shares no point with any probe here.
     final textHandle = addText(doc, doc.rootHandle,
         text: 'LONG ROOM NAME',
         textStyle: style.handle,
-        coords: [0, 0],
+        coords: [300, 20],
         scalars: [200, 0, 0, 0]);
     final index = SpatialIndex(doc);
     addTearDown(index.dispose);
 
     final hit = HitPath();
-    // Well inside the box and far from the insertion point: 404 units away
-    // from (0, 0), against a pick radius of 1.
+    // Well inside the box and far from the insertion point: 108 units away
+    // from (300, 20), against a pick radius of 1.
     expect(
         index.pickInto(Vector2(400, 60), 1.0, const QueryFilter.picking(), hit),
         isTrue);
@@ -1198,24 +1206,46 @@ void main() {
     // -- the same convention the closed-polyline fill case uses.
     expect(hit.worldPoint.x, closeTo(400, 1e-9));
     expect(hit.worldPoint.y, closeTo(60, 1e-9));
+
+    // Just inside the bottom-left corner: 5 units right of the left edge and
+    // 7 above the descent line. A probe deep in the middle of a box tolerates
+    // an anchor that is wrong by tens of units; this one does not.
+    expect(
+        index.pickInto(
+            Vector2(305, -30), 1.0, const QueryFilter.picking(), hit),
+        isTrue,
+        reason: 'the box starts at the insertion point and hangs 57.14 below '
+            'it');
+    expect(hit.kind, HitKind.fill);
+
+    // Ten units the other side of the same left edge.
+    expect(
+        index.pickInto(
+            Vector2(295, -30), 1.0, const QueryFilter.picking(), hit),
+        isFalse,
+        reason: 'left-justified text starts *at* its insertion point, so this '
+            'is outside the box -- and only 25 units from the insertion '
+            'point, which is no longer a pick candidate at any radius');
   });
 
   test('a pointer near the insertion point is no longer a vertex hit', () {
     final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
     final style = doc.tables.textStyles.byName('STANDARD')!;
+    // Same asymmetric anchor as the fixture above, for the same reason.
     addText(doc, doc.rootHandle,
         text: 'LONG ROOM NAME',
         textStyle: style.handle,
-        coords: [0, 0],
+        coords: [300, 20],
         scalars: [200, 0, 0, 0]);
     final index = SpatialIndex(doc);
     addTearDown(index.dispose);
 
     final hit = HitPath();
-    // (-5, -5) is outside the box (x < 0) but 7 units from the insertion
+    // (295, 15) is outside the box (x < 300) but 7 units from the insertion
     // point, well inside the 10-unit radius that used to make it a vertex.
     expect(
-        index.pickInto(Vector2(-5, -5), 10.0, const QueryFilter.picking(), hit),
+        index.pickInto(
+            Vector2(295, 15), 10.0, const QueryFilter.picking(), hit),
         isFalse,
         reason: 'picking and snapping are different questions: the insertion '
             'point stays a snap candidate and is no longer a pick candidate');
@@ -1242,22 +1272,24 @@ void main() {
   test('the insertion point is still a snap candidate', () {
     final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
     final style = doc.tables.textStyles.byName('STANDARD')!;
+    // Asymmetric anchor here too: the snap path reads the same two
+    // coordinates, and (0, 0) cannot tell them apart either.
     final textHandle = addText(doc, doc.rootHandle,
         text: 'LONG ROOM NAME',
         textStyle: style.handle,
-        coords: [0, 0],
+        coords: [300, 20],
         scalars: [200, 0, 0, 0]);
     final index = SpatialIndex(doc);
     addTearDown(index.dispose);
 
     final out = SnapResult();
     index.snapInto(
-        Vector2(2, 2), 20.0, SnapMask.none.with_(SnapKind.insertion), out);
+        Vector2(302, 22), 20.0, SnapMask.none.with_(SnapKind.insertion), out);
     expect(out.found, isTrue);
     expect(out.kind, SnapKind.insertion);
     expect(out.entity, textHandle);
-    expect(out.point.x, closeTo(0, 1e-9));
-    expect(out.point.y, closeTo(0, 1e-9));
+    expect(out.point.x, closeTo(300, 1e-9));
+    expect(out.point.y, closeTo(20, 1e-9));
   });
 
   test('an attrib picks by its box too', () {
