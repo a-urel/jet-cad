@@ -84,7 +84,7 @@ void main() {
     final box = entityBounds(
       kind: EntityKind.text,
       payload: payload([7, 8], [200]),
-      measurer: const MetricModelMeasurer(),
+      measurer: MetricModelMeasurer(),
       textStyle: style,
       text: 'WC',
     );

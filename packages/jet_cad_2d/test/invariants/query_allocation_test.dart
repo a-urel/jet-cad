@@ -113,7 +113,17 @@ const _candidateScalingClasses = {'Vector2', 'Aabb2'};
 /// Watched by `pickInto`/`snapInto` at [_perCallBudget] -- see
 /// [_candidateScalingClasses]'s own doc comment for why those two use this
 /// narrower set instead of it.
-const _recursiveCandidateScalingClasses = {'Vector2'};
+///
+/// `_Record` is the VM's name for a Dart record object, and it is here
+/// because of a real regression this file caught: `MetricModelMeasurer`
+/// memoised its metrics in a map keyed by a five-field record, which cost
+/// nothing until picking put `measure` on the query path and then cost one
+/// record per *text candidate* -- 41 per call against this file's fixture,
+/// invisible to every class watched before. Records are cheap to write and
+/// exactly the kind of object that gets built inside a helper without
+/// anyone thinking of it as an allocation, so the query path is now watched
+/// for them the same way it is watched for `Vector2`.
+const _recursiveCandidateScalingClasses = {'Vector2', '_Record'};
 
 /// A per-call instance count admitting real JIT/VM-service noise (measured
 /// at roughly 0.02 `Vector2` and 0.002 `Aabb2` per call on this machine,
@@ -290,22 +300,38 @@ DraftDocument _manyRootInstancesDocument(int count) {
 /// allocation (see this file's mutation table in the task-17 report) scales
 /// with [leafCount], while the pre-existing, depth-bound closure/Transform2
 /// cost documented on `SpatialIndex._descend` does not.
-({DraftDocument doc, Vector2 point, double radius}) _deepNestedDocument(
-    int leafCount) {
-  final doc = DraftDocument.empty();
+///
+/// **Half the leaves are text**, laid out by [MetricModelMeasurer] rather
+/// than the default [InsertionPointMeasurer]. Text is the one kind whose
+/// narrow phase has to *resolve* something per candidate — a style, packed
+/// justification attributes, font metrics, a composed local transform and a
+/// glyph box — where every other kind reads coordinates straight out of the
+/// payload. Written the obvious way (`resolveTextAttributes` +
+/// `textLocalTransform` + `textLocalBounds` + `Transform2.invert`) that is
+/// four fresh objects per text candidate, two of them classes this file
+/// already watches; with [leafCount] text leaves in range of the query
+/// point, such a regression reads in the dozens per call rather than the
+/// fraction of one the budgets allow. A fixture with a single text entity
+/// would hide exactly that, the same way a single-leaf fixture cannot tell
+/// a per-recursion cost from a per-candidate one.
+///
+/// `textProbe` is a world point strictly inside the first text entity's
+/// glyph box and clear of every line, so the tests can assert the text
+/// leaves are genuinely measured by the narrow phase rather than merely
+/// present in the document.
+({DraftDocument doc, Vector2 point, double radius, Vector2 textProbe})
+    _deepNestedDocument(int leafCount) {
+  final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
 
   final d3 = doc.handleSeed.next();
   doc.tree.addDefinition(Definition(
       handle: d3, name: 'D3', basePoint: Vector2.zero(), children: const []));
   final side = math.sqrt(leafCount).ceil();
-  for (var i = 0; i < leafCount; i++) {
-    final x = (i % side) * 2.0;
-    final y = (i ~/ side) * 2.0;
-    doc.commands.execute(AddEntityCommand(
-      record: EntityRecord(
+  EntityRecord leafRecord(EntityKind kind, {String text = '', int attrs = 0}) =>
+      EntityRecord(
         handle: doc.handleSeed.next(),
         owner: d3,
-        kind: EntityKind.line,
+        kind: kind,
         layer: ReservedHandles.layerZero,
         linetype: ReservedHandles.byLayerLinetype,
         linetypeScale: 1.0,
@@ -314,10 +340,36 @@ DraftDocument _manyRootInstancesDocument(int count) {
         lineweight: kByLayer,
         transparency: kByLayer,
         flags: 0,
-      ),
+        text: text,
+        textAttrs: attrs,
+      );
+
+  for (var i = 0; i < leafCount; i++) {
+    final x = (i % side) * 2.0;
+    final y = (i ~/ side) * 2.0;
+    doc.commands.execute(AddEntityCommand(
+      record: leafRecord(EntityKind.line),
       payload: GeometryPayload(
         coords: Float64List.fromList([x, y, x + 1, y + 1]),
         scalars: Float64List(0),
+      ),
+    ));
+    // A label beside each line. The justification, the rotation and the
+    // string length all vary with `i`, so no per-candidate value the narrow
+    // phase resolves is constant across the fixture and none of it can be
+    // hoisted out of the loop by the runtime.
+    doc.commands.execute(AddEntityCommand(
+      record: leafRecord(
+        EntityKind.text,
+        text: switch (i % 3) { 0 => 'T1', 1 => 'TAG', _ => 'LABEL7' },
+        attrs: packTextAttrs(
+          h: TextJustifyH.values[i % 3],
+          v: TextJustifyV.values[i % 4],
+        ),
+      ),
+      payload: GeometryPayload(
+        coords: Float64List.fromList([x, y + 1.2]),
+        scalars: Float64List.fromList([1.0, (i % 5) * 0.3]),
       ),
     ));
   }
@@ -370,7 +422,13 @@ DraftDocument _manyRootInstancesDocument(int count) {
   // Wide enough to reach every leaf in D3's grid from its centre, so the
   // narrow phase actually has [leafCount] candidates to consider, not one.
   final radius = side * 3.0;
-  return (doc: doc, point: point, radius: radius);
+  // Inside the i = 0 label's glyph box: that one is left-justified on the
+  // baseline and unrotated (0 % 3 and 0 % 4 and 0 % 5 are all zero), and
+  // 'T1' at height 1 lays out 1.571 wide, 1.143 up and 0.286 down from its
+  // insertion point at (0, 1.2) -- so local (1.4, 1.2) is inside it, and no
+  // closer than 0.44 to any line in the grid.
+  final textProbe = whole.transformPoint(Vector2(1.4, 1.2));
+  return (doc: doc, point: point, radius: radius, textProbe: textProbe);
 }
 
 void main() {
@@ -492,6 +550,21 @@ void main() {
       index.pickInto(
           fixture.point, fixture.radius, const QueryFilter.picking(), hit);
     }
+    // The text leaves are not merely present: the narrow phase lays each of
+    // them out and tests the query point against the resulting box. Without
+    // this, a pick path that skipped text entirely would still read a clean
+    // allocation profile -- and pass this test for the one reason it must
+    // not.
+    expect(
+        index.pickInto(
+            fixture.textProbe, 0.05, const QueryFilter.picking(), hit),
+        isTrue,
+        reason: 'the probe point must land inside a text entity\'s laid-out '
+            'box, or this fixture measures a pick that never resolves a '
+            'text style, metrics or transform at all');
+    expect(hit.kind, HitKind.fill);
+    index.pickInto(
+        fixture.point, fixture.radius, const QueryFilter.picking(), hit);
     expect(hit.chainLength, 3,
         reason: 'this fixture exists specifically to exercise a pick that '
             'descends three instance boundaries deep -- see this file\'s '

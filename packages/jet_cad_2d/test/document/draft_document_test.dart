@@ -70,7 +70,7 @@ void main() {
   test(
       'extents cover a text entity\'s laid-out box, not just its insertion '
       'point', () {
-    final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
     final style = doc.tables.textStyles.byName('Standard')!;
     final handle = doc.handleSeed.next();
     doc.commands.execute(AddEntityCommand(

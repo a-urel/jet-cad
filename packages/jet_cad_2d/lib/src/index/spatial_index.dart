@@ -9,6 +9,7 @@ import '../document/doc_change.dart';
 import '../document/draft_document.dart';
 import '../document/extents.dart';
 import '../document/node.dart';
+import '../document/text_geometry.dart';
 import '../geometry/aabb2.dart';
 import '../geometry/distance.dart';
 import '../geometry/primitives.dart';
@@ -337,6 +338,19 @@ class SpatialIndex {
   /// allocation the zero-allocation guarantee on [pickInto] forbids.
   final Vector2 _scratchA = Vector2.zero();
   final Vector2 _scratchB = Vector2.zero();
+
+  /// One text candidate's resolved attributes, composed local transform and
+  /// glyph box, refilled in place for every text or attrib leaf a pick
+  /// considers. Same reasoning as [_scratchA]/[_scratchB]: calling
+  /// `resolveTextAttributes`, `textLocalTransform` and `textLocalBounds`
+  /// instead would build three fresh objects per candidate — four with the
+  /// inverse the box test needs — including a [Transform2] and an [Aabb2],
+  /// two of the three classes
+  /// `test/invariants/query_allocation_test.dart` watches — which is exactly
+  /// the per-candidate allocation [pickInto]'s guarantee forbids. See
+  /// [TextLayout]'s own doc comment for why the layout math itself is not
+  /// inlined here instead.
+  final TextLayout _textLayout = TextLayout();
 
   /// The instance handle taken to reach each depth of the current descent,
   /// root first. Copied into [HitPath.chain] by [_writeChain] when a new
@@ -761,12 +775,8 @@ class SpatialIndex {
 
     switch (kind) {
       case EntityKind.point:
-      case EntityKind.text:
-      case EntityKind.attrib:
-        // The only geometric feature is the anchor point -- the insertion
-        // point for text/attrib, the point itself for a point entity --
-        // treated as a vertex, since that is the one feature there is to
-        // grab.
+        // The only geometric feature is the point itself, treated as a
+        // vertex, since that is the one feature there is to grab.
         final lx = coords[0], ly = coords[1];
         final wx = ta * lx + tc * ly + te, wy = tb * lx + td * ly + tf;
         final dx = world.x - wx, dy = world.y - wy;
@@ -774,6 +784,72 @@ class SpatialIndex {
           foundKind = HitKind.vertex;
           foundX = wx;
           foundY = wy;
+        }
+
+      case EntityKind.text:
+      case EntityKind.attrib:
+        // The laid-out box is the hit geometry ([HitKind.fill]); the
+        // insertion point stays a *snap* candidate (see
+        // [_considerSnapLeaf]'s own text case) and is no longer a pick
+        // candidate. Picking and snapping are different questions: a label
+        // is grabbed by the words the eye sees, and the insertion point is
+        // a construction reference, not a handle.
+        //
+        // Everything below writes into [_textLayout] and plain locals. The
+        // obvious spelling -- `resolveTextAttributes` +
+        // `textLocalTransform` + `textLocalBounds`, then
+        // `Transform2.invert()` -- builds four objects per candidate, which
+        // is what this method's zero-allocation guarantee forbids.
+        final style = document.textStyleOf(document.entities.textStyleAt(slot));
+        final metrics = document.textMeasurer
+            .measure(text: document.entities.textAt(slot), style: style);
+        final layout = _textLayout
+          ..resolve(payload, document.entities.textAttrsAt(slot), style)
+          ..layOutBox(metrics)
+          ..composeTransform(metrics, coords[0], coords[1]);
+
+        // A box with no area has nothing to fill: an empty string, or the
+        // zero metrics [InsertionPointMeasurer] answers with for every
+        // string. Stated as its own rule rather than left to fall out of
+        // the containment test, because the brute-force oracle in
+        // `test/invariants/reference_query.dart` states the same one and
+        // the two must agree on the degenerate case, not merely on the
+        // ordinary one.
+        if (layout.maxX <= layout.minX || layout.maxY <= layout.minY) return;
+
+        // Glyph space -> this leaf's own space (the layout) -> world
+        // (ta..tf), composed into six locals: `Transform2.multiply` and
+        // `Transform2.invert` each hand back a fresh matrix, being
+        // immutable, so neither can appear on this path.
+        final ma = ta * layout.a + tc * layout.b;
+        final mb = tb * layout.a + td * layout.b;
+        final mc = ta * layout.c + tc * layout.d;
+        final md = tb * layout.c + td * layout.d;
+        final me = ta * layout.e + tc * layout.f + te;
+        final mf = tb * layout.e + td * layout.f + tf;
+        final det = ma * md - mb * mc;
+        // Singular: a zero height, or an instance transform that collapses
+        // this text to a line or a point. Nothing is drawn, so nothing is
+        // hit -- the same answer [_descend] gives for a singular container
+        // transform, rather than a [SingularTransformError] thrown out of a
+        // pointer move.
+        if (det == 0.0 || !det.isFinite) return;
+
+        // The query point in glyph space, by solving the 2x2 system rather
+        // than forming the inverse: same answer, no matrix.
+        final px = world.x - me, py = world.y - mf;
+        final gx = (md * px - mc * py) / det;
+        final gy = (ma * py - mb * px) / det;
+        if (gx >= layout.minX &&
+            gx <= layout.maxX &&
+            gy >= layout.minY &&
+            gy <= layout.maxY) {
+          // A fill hit has no feature of its own to report, so the query
+          // point stands in for it -- the same convention the closed
+          // polyline case below uses.
+          foundKind = HitKind.fill;
+          foundX = world.x;
+          foundY = world.y;
         }
 
       case EntityKind.line:

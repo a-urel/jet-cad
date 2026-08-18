@@ -11,7 +11,7 @@ void main() {
   test(
       'the metric model is deterministic and its ascent differs from its descent',
       () {
-    const m = MetricModelMeasurer();
+    final m = MetricModelMeasurer();
     final metrics = m.measure(text: 'WC', style: _style);
 
     expect(metrics.advanceWidth, closeTo(2 * 0.55 * kNominalTextPixels, 1e-9));
@@ -24,7 +24,7 @@ void main() {
   });
 
   test('measure returns the identical instance on a repeat call', () {
-    const m = MetricModelMeasurer();
+    final m = MetricModelMeasurer();
     final a = m.measure(text: 'T-0001', style: _style);
     final b = m.measure(text: 'T-0001', style: _style);
     // The pick path measures per candidate. A fresh object per call breaks
@@ -32,12 +32,13 @@ void main() {
     expect(identical(a, b), isTrue);
   });
 
-  test('the memo is keyed by ratios, not only by string length', () {
-    // Two models with the same string length but different ratios must not
-    // collide in the shared memo — otherwise the second model would silently
-    // read the first model's cached metrics.
-    const wide = MetricModelMeasurer(advanceRatio: 0.9);
-    const narrow = MetricModelMeasurer(advanceRatio: 0.1);
+  test('two models with different ratios do not share memoised metrics', () {
+    // The memo is per measurer instance and keyed by string length alone, so
+    // this is the test that would catch it going back to a shared map keyed
+    // by length only — the second model would then silently read the first
+    // model's cached metrics.
+    final wide = MetricModelMeasurer(advanceRatio: 0.9);
+    final narrow = MetricModelMeasurer(advanceRatio: 0.1);
     final wideMetrics = wide.measure(text: 'WC', style: _style);
     final narrowMetrics = narrow.measure(text: 'WC', style: _style);
     expect(wideMetrics.advanceWidth, isNot(equals(narrowMetrics.advanceWidth)));

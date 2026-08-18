@@ -435,7 +435,7 @@ void main() {
     test(
         'execute widens the box and sets text/tag; undo restores both; redo '
         're-applies', () {
-      final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
+      final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
       final style = doc.tables.textStyles.byName('STANDARD')!;
       final handle = doc.handleSeed.next();
       doc.commands.execute(AddEntityCommand(
@@ -490,7 +490,7 @@ void main() {
       // top-right corner at the insertion point, so growing the string moves
       // `minX`/`minY` instead of `maxX`/`maxY` -- the mirror image of the
       // default case.
-      final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
+      final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
       final style = doc.tables.textStyles.byName('STANDARD')!;
       final handle = doc.handleSeed.next();
       final attrs = packTextAttrs(h: TextJustifyH.right, v: TextJustifyV.top);

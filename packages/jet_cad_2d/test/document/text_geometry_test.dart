@@ -5,7 +5,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart';
 
-const _model = MetricModelMeasurer();
+final _model = MetricModelMeasurer();
 final _plain = TextStyleRecord(
     handle: const Handle(7), name: 'STANDARD', fontFamily: 'Roboto');
 

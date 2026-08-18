@@ -50,6 +50,9 @@ Handle _addEntity(
   required List<double> coords,
   List<double> scalars = const [],
   Handle? layer,
+  String text = '',
+  Handle? textStyle,
+  int textAttrs = 0,
 }) {
   final handle = doc.handleSeed.next();
   doc.commands.execute(AddEntityCommand(
@@ -65,6 +68,9 @@ Handle _addEntity(
       lineweight: kByLayer,
       transparency: kByLayer,
       flags: 0,
+      text: text,
+      textStyle: textStyle ?? ReservedHandles.standardTextStyle,
+      textAttrs: textAttrs,
     ),
     payload: GeometryPayload(
       coords: Float64List.fromList(coords),
@@ -673,6 +679,131 @@ CorpusDocument _textDefaultMeasurer() =>
       return doc;
     });
 
+/// Text that actually occupies a box: every justification the engine can
+/// represent, a rotation, a width-factor and oblique override, a
+/// non-STANDARD style with a fixed height, and an ATTRIB under a rotated,
+/// scaled instance.
+///
+/// **The sibling of [_textDefaultMeasurer], and the reason that one is not
+/// enough.** `InsertionPointMeasurer` answers `TextMetrics.zero` for every
+/// string, so every text entity in that fixture has a zero-area box; the
+/// pick rule "the query point is inside the laid-out box" is then trivially
+/// false for every point, and the differential test agrees with the index
+/// without ever evaluating the rule. `MetricModelMeasurer` gives each string
+/// a real box, so the two sides' independently-written containment tests are
+/// actually compared here.
+CorpusDocument _textLaidOut() => CorpusDocument('textLaidOut', () {
+      final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+      const tall = TextStyleRecord(
+        handle: Handle(900),
+        name: 'TALL',
+        fontFamily: 'Roboto',
+        // Overrides each entity's own height scalar, so a bug that resolved
+        // a bare STANDARD instead of the entity's own style produces a
+        // visibly different box for the two entities that use this style.
+        fixedHeight: 15,
+        widthFactor: 1.3,
+        obliqueAngle: 0.2,
+      );
+      doc.tables.textStyles.add(tall);
+
+      Handle text(
+        String content, {
+        required Handle owner,
+        required List<double> coords,
+        required List<double> scalars,
+        int textAttrs = 0,
+        Handle? style,
+        EntityKind kind = EntityKind.text,
+      }) {
+        final handle = _addEntity(doc,
+            owner: owner,
+            kind: kind,
+            coords: coords,
+            scalars: scalars,
+            text: content,
+            textStyle: style,
+            textAttrs: textAttrs);
+        final slot = doc.entities.slotOf(handle)!;
+        final record = doc.entities.read(slot);
+        final box = entityBounds(
+          kind: record.kind,
+          payload: doc.geometry.peek(record.geomIndex),
+          measurer: doc.textMeasurer,
+          textStyle: doc.textStyleOf(record.textStyle),
+          textAttrs: record.textAttrs,
+          text: record.text,
+        );
+        expect(box.maxX - box.minX, greaterThan(0.5),
+            reason: 'this fixture exists to give the pick rule a box with '
+                'real area to test against');
+        expect(box.maxY - box.minY, greaterThan(0.5));
+        return handle;
+      }
+
+      // Left/baseline, upright -- the plain case.
+      text('ROOM', owner: doc.rootHandle, coords: [0, 0], scalars: [10, 0]);
+      // Centre/middle, rotated: the box straddles its insertion point and
+      // is not axis-aligned, so a bounds test rather than an oriented-box
+      // test disagrees near its corners.
+      text('HALL 2',
+          owner: doc.rootHandle,
+          coords: [40, 20],
+          scalars: [8, 0.7],
+          textAttrs:
+              packTextAttrs(h: TextJustifyH.centre, v: TextJustifyV.middle));
+      // Right/top, with both per-entity overrides live: the width factor
+      // widens the box and the oblique angle shears it, so a pick path that
+      // read the style's values instead of the entity's lands elsewhere.
+      text('WIDE',
+          owner: doc.rootHandle,
+          coords: [10, 60],
+          scalars: [12, -0.4, 2.0, 0.35],
+          textAttrs: packTextAttrs(
+            h: TextJustifyH.right,
+            v: TextJustifyV.top,
+            overrideWidthFactor: true,
+            overrideOblique: true,
+          ));
+      // The non-STANDARD style, whose fixed height wins over the 3 below,
+      // and whose own width factor and oblique angle apply because neither
+      // override bit is set.
+      text('LABEL',
+          owner: doc.rootHandle,
+          coords: [60, 70],
+          scalars: [3, 0],
+          style: tall.handle,
+          textAttrs: packTextAttrs(v: TextJustifyV.bottom));
+      // 72 = 3 (aligned) falls back to left justification, and must fall
+      // back the same way on both sides of the differential.
+      text('FIT?',
+          owner: doc.rootHandle,
+          coords: [-30, 40],
+          scalars: [9, 0.2],
+          textAttrs: packTextAttrs(h: TextJustifyH.aligned));
+
+      // An ATTRIB owned by an instance node -- its coordinates are
+      // instance-local, so its box is laid out in the instance's space and
+      // then carried through a rotation and a non-uniform scale.
+      final def = _addDefinition(doc, name: 'Tagged');
+      _addEntity(doc, owner: def, kind: EntityKind.line, coords: [0, 0, 8, 4]);
+      final inst = _addInstance(doc,
+          parent: doc.rootHandle,
+          definition: def,
+          transform: Transform2.rotation(0.5)
+              .multiply(Transform2.scale(1.4, 0.8))
+              .multiply(Transform2.translation(-40, -30)));
+      text('TAG',
+          owner: inst,
+          kind: EntityKind.attrib,
+          coords: [2, 1],
+          scalars: [6, 0],
+          style: tall.handle,
+          textAttrs: packTextAttrs(h: TextJustifyH.middle));
+
+      return doc;
+    });
+
 /// Two lines whose real segments come nowhere near each other or the query
 /// point, but whose *infinite* extensions cross exactly at the origin.
 ///
@@ -772,5 +903,6 @@ List<CorpusDocument> buildCorpus() => [
       _afterPurge(),
       _afterUndoReusingSlot(),
       _textDefaultMeasurer(),
+      _textLaidOut(),
       _nearMissIntersection(),
     ];

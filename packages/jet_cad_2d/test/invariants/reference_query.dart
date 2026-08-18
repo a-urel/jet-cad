@@ -394,11 +394,56 @@ List<Handle> referenceInstancesInRect(
 
   switch (record.kind) {
     case EntityKind.point:
-    case EntityKind.text:
-    case EntityKind.attrib:
       final p = toWorld.transformPoint(payload.pointAt(0));
       return world.distanceTo(p) <= radius
           ? (kind: HitKind.vertex, point: p)
+          : null;
+
+    case EntityKind.text:
+    case EntityKind.attrib:
+      // Text is picked by the box its glyphs occupy, not by its insertion
+      // point -- which stays a `SnapKind.insertion` candidate, and only
+      // that. The radius plays no part, exactly as it plays none in the
+      // closed-polyline fill case above.
+      //
+      // **Written from the laid-out box, deliberately not the way the index
+      // computes it.** `SpatialIndex._considerLeaf` composes the text's
+      // local transform with the leaf's world transform into six raw
+      // doubles, inverts that by solving a 2x2 system, and tests the
+      // resulting glyph-space point against the axis-aligned box. This maps
+      // the box's four corners *forwards* into world space and asks whether
+      // the query point is inside the resulting parallelogram, by the sign
+      // of four edge cross products. The two agree only if the composition,
+      // the inversion and the interval test are all right; a shared helper,
+      // or copying that expression here, would have made the differential
+      // test compare an implementation with itself.
+      //
+      // `resolveTextAttributes`/`textLocalBounds`/`textLocalTransform` *are*
+      // shared, on the same footing as `entityBounds` and `distance.dart`'s
+      // formulas (see this file's own header): they are the definition of
+      // where a text entity's glyphs sit, not the index under test, and
+      // re-deriving DXF's justification and oblique rules here would test
+      // that arithmetic twice rather than testing the index.
+      final style = doc.textStyleOf(record.textStyle);
+      final metrics = doc.textMeasurer.measure(text: record.text, style: style);
+      final attrs = resolveTextAttributes(payload, record.textAttrs, style);
+      final box = textLocalBounds(attrs, metrics);
+      // A box with no area has nothing to fill -- an empty string, or the
+      // zero metrics `InsertionPointMeasurer` answers with. The index
+      // states the same rule; both sides need it, or they disagree on
+      // whether a collapsed box swallows the single point it collapsed to.
+      if (box.maxX <= box.minX || box.maxY <= box.minY) return null;
+
+      final toGlyphWorld = toWorld
+          .multiply(textLocalTransform(attrs, metrics, payload.pointAt(0)));
+      final corners = [
+        toGlyphWorld.transformPoint(Vector2(box.minX, box.minY)),
+        toGlyphWorld.transformPoint(Vector2(box.maxX, box.minY)),
+        toGlyphWorld.transformPoint(Vector2(box.maxX, box.maxY)),
+        toGlyphWorld.transformPoint(Vector2(box.minX, box.maxY)),
+      ];
+      return _insideParallelogram(world, corners)
+          ? (kind: HitKind.fill, point: world)
           : null;
 
     case EntityKind.line:
@@ -538,6 +583,37 @@ Vector2 _footOnWorldArc(Vector2 world, Vector2 centre, double worldRadius,
   return world.distanceToSquared(start) <= world.distanceToSquared(end)
       ? start
       : end;
+}
+
+/// Whether [world] lies in the closed convex quadrilateral [corners], given
+/// in order around its perimeter.
+///
+/// The half-plane test, not the even-odd ray cast [_insideWorldPolygon] runs
+/// for a closed polyline: an affine image of a rectangle is convex, so "on
+/// the same side of all four edges" is exact for it, and -- unlike the ray
+/// cast -- it treats the boundary as *inside*, which is what makes it agree
+/// with the index's closed-interval box test on a point sitting exactly on
+/// an edge.
+///
+/// A collapsed quadrilateral (zero area, from a singular transform: a zero
+/// text height, or an instance that flattens its definition) would make
+/// every cross product zero and swallow every point on the segment it
+/// collapsed to, so it answers false outright. The index states the same
+/// rule as its own singular-determinant guard.
+bool _insideParallelogram(Vector2 world, List<Vector2> corners) {
+  var positive = false;
+  var negative = false;
+  var area = 0.0;
+  for (var i = 0; i < corners.length; i++) {
+    final a = corners[i];
+    final b = corners[(i + 1) % corners.length];
+    area += a.x * b.y - b.x * a.y;
+    final cross = (b.x - a.x) * (world.y - a.y) - (b.y - a.y) * (world.x - a.x);
+    if (cross > 0) positive = true;
+    if (cross < 0) negative = true;
+  }
+  if (area == 0.0) return false;
+  return !(positive && negative);
 }
 
 /// Even-odd ray cast over already-world-space points. The same standard

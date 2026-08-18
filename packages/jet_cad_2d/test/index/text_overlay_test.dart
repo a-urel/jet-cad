@@ -36,7 +36,7 @@ EntityRecord _textRecord(
 
 void main() {
   test('an edited text has the same box in the overlay as after a rebuild', () {
-    final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
     final style = doc.tables.textStyles.byName('STANDARD')!;
     final handle = doc.handleSeed.next();
     doc.commands.execute(AddEntityCommand(
@@ -89,7 +89,7 @@ void main() {
     // "resolve to STANDARD" and "resolve to the entity's own STANDARD" are
     // the same answer. This fixture's style is not STANDARD and has a
     // non-zero fixedHeight, so the two answers diverge.
-    final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
     final standard = doc.tables.textStyles.byName('STANDARD')!;
     const bigStyle = TextStyleRecord(
       handle: Handle(600),
@@ -140,7 +140,7 @@ void main() {
     // bottom-left, so `maxX`/`maxY` landing on the anchor -- rather than
     // `minX`/`minY`, as the default case would put them -- is proof the
     // stored `textAttrs` was actually read.
-    final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
     final style = doc.tables.textStyles.byName('STANDARD')!;
     final handle = doc.handleSeed.next();
     final attrs = packTextAttrs(h: TextJustifyH.right, v: TextJustifyV.top);
