@@ -108,6 +108,16 @@ List<DrawnItem> flatten(List<DrawOp> ops) {
         out.add(DrawnItem(
             'arc', style, [residual.transformPoint(Vector2(cx, cy))],
             radius: r * residual.scaleMagnitude, start: start, sweep: sweep));
+      case TextOp(:final text, :final resolved):
+        // Three points, not one: the origin plus the images of the local
+        // unit vectors, so `kScreenTolerance` covers scale, rotation and
+        // shear with the machinery already here. The string rides in
+        // `kind`, which compares exactly.
+        out.add(DrawnItem('text:$text', resolved, [
+          residual.transformPoint(Vector2.zero()),
+          residual.transformPoint(Vector2(1, 0)),
+          residual.transformPoint(Vector2(0, 1)),
+        ]));
     }
   }
   return out;

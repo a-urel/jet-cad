@@ -27,6 +27,13 @@ abstract class DrawSink {
   void circle(double cx, double cy, double r, ResolvedStyle style);
   void arc(double cx, double cy, double r, double start, double sweep,
       ResolvedStyle style);
+
+  /// Draws [text] at the residual's local origin.
+  ///
+  /// No offset and no second matrix: the painter pushes `residual ∘
+  /// textLocal` as the residual itself, so by the time this is called the
+  /// text's own placement is already folded in.
+  void text(String text, Handle style, ResolvedStyle resolved);
 }
 
 /// One recorded call. Compared by value, so two painters that agree produce
@@ -179,6 +186,28 @@ final class ArcOp extends DrawOp {
   String toString() => 'ArcOp($cx, $cy, $r, $start, $sweep)';
 }
 
+@immutable
+final class TextOp extends DrawOp {
+  const TextOp(this.text, this.style, this.resolved);
+
+  final String text;
+  final Handle style;
+  final ResolvedStyle resolved;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TextOp &&
+      other.text == text &&
+      other.style == style &&
+      other.resolved == resolved;
+
+  @override
+  int get hashCode => Object.hash(text, style, resolved);
+
+  @override
+  String toString() => 'TextOp($text, $style)';
+}
+
 /// Keeps every op, for tests and for the differential oracle.
 class RecordingDrawSink implements DrawSink {
   final List<DrawOp> _ops = <DrawOp>[];
@@ -213,6 +242,10 @@ class RecordingDrawSink implements DrawSink {
   void arc(double cx, double cy, double r, double start, double sweep,
           ResolvedStyle style) =>
       _ops.add(ArcOp(cx, cy, r, start, sweep, style));
+
+  @override
+  void text(String text, Handle style, ResolvedStyle resolved) =>
+      _ops.add(TextOp(text, style, resolved));
 }
 
 /// Counts ops and keeps none, so a measurement rig can time the walk without
@@ -242,4 +275,7 @@ class NullDrawSink implements DrawSink {
   void arc(double cx, double cy, double r, double start, double sweep,
           ResolvedStyle style) =>
       opCount++;
+
+  @override
+  void text(String text, Handle style, ResolvedStyle resolved) => opCount++;
 }

@@ -139,6 +139,14 @@ class CanvasDrawSink implements DrawSink {
     _canvasCalls++;
   }
 
+  @override
+  void text(String text, Handle style, ResolvedStyle resolved) {
+    // Task 9 supplies the paragraph cache this resolves through; until then
+    // nothing calls this, so it must stay unreachable rather than draw a
+    // fake paragraph that would silently diverge from what Task 9 lands.
+    throw UnimplementedError('Task 9 supplies the paragraph cache');
+  }
+
   /// The current residual as the column-major `Float64List(16)` `addPath` and
   /// `Canvas.transform` both want. Rewritten in place — the list is a field.
   Float64List _matrix4OfResidual() {
