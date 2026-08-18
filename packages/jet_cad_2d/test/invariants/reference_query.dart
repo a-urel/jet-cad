@@ -211,7 +211,10 @@ List<Handle> referenceEntitiesInRect(
       kind: record.kind,
       payload: doc.geometry.peek(record.geomIndex),
       measurer: doc.textMeasurer,
-      textStyle: ReservedHandles.standardTextStyle,
+      textStyle: doc.tables.textStyles[record.textStyle] ??
+          doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+      textAttrs: record.textAttrs,
+      text: record.text,
     ).transformedBy(composed);
 
     if (!box.isEmpty && box.intersects(world)) {
@@ -806,7 +809,10 @@ void _considerIntersections(
       kind: kind,
       payload: doc.geometry.peek(record.geomIndex),
       measurer: doc.textMeasurer,
-      textStyle: ReservedHandles.standardTextStyle,
+      textStyle: doc.tables.textStyles[record.textStyle] ??
+          doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+      textAttrs: record.textAttrs,
+      text: record.text,
     ).transformedBy(composed);
     if (box.isEmpty || !box.intersects(queryBox)) continue;
 

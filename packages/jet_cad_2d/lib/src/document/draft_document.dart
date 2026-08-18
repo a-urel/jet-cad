@@ -228,7 +228,10 @@ class DraftDocument implements CommandTarget {
         kind: record.kind,
         payload: geometry.read(record.geomIndex),
         measurer: textMeasurer,
-        textStyle: ReservedHandles.standardTextStyle,
+        textStyle: tables.textStyles[record.textStyle] ??
+            tables.textStyles[ReservedHandles.standardTextStyle]!,
+        textAttrs: record.textAttrs,
+        text: record.text,
       ));
     }
 

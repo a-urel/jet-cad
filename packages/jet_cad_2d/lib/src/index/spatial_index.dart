@@ -2359,7 +2359,10 @@ class SpatialIndex {
       kind: record.kind,
       payload: payload,
       measurer: document.textMeasurer,
-      textStyle: ReservedHandles.standardTextStyle,
+      textStyle: document.tables.textStyles[record.textStyle] ??
+          document.tables.textStyles[ReservedHandles.standardTextStyle]!,
+      textAttrs: record.textAttrs,
+      text: record.text,
     );
     // The indexed box is in container space; if this entity sits under a
     // flattened group — or is an ATTRIB owned directly by an instance node —

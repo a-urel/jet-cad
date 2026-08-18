@@ -633,8 +633,15 @@ CorpusDocument _textDefaultMeasurer() =>
           kind: record.kind,
           payload: doc.geometry.peek(record.geomIndex),
           measurer: measurer,
-          textStyle: ReservedHandles.standardTextStyle,
+          textStyle: doc.tables.textStyles[record.textStyle] ??
+              doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+          textAttrs: record.textAttrs,
+          text: record.text,
         );
+        // Still degenerate after Task 4's change: InsertionPointMeasurer
+        // returns TextMetrics.zero regardless of the string, which collapses
+        // `textLocalTransform`'s height scale to zero and keeps the laid-out
+        // box a single point at the insertion point, exactly as before.
         expect(box.minX, box.maxX,
             reason: 'InsertionPointMeasurer must produce a zero-area box');
         expect(box.minY, box.maxY);

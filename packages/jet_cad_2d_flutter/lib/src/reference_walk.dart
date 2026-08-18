@@ -109,7 +109,10 @@ class _ReferenceWalk {
       kind: kind,
       payload: payload,
       measurer: doc.textMeasurer,
-      textStyle: ReservedHandles.standardTextStyle,
+      textStyle: doc.tables.textStyles[doc.entities.textStyleAt(slot)] ??
+          doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+      textAttrs: doc.entities.textAttrsAt(slot),
+      text: doc.entities.textAt(slot),
     ).transformedBy(placement);
     if (box.isEmpty || !box.intersects(world)) return;
 

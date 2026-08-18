@@ -1,21 +1,29 @@
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
-import '../core/handle.dart';
 import '../geometry/aabb2.dart';
 import '../geometry/primitives.dart';
 import '../store/entity_store.dart';
 import '../store/geometry_store.dart';
+import 'tables.dart';
+import 'text_geometry.dart';
 import 'text_metrics.dart';
 
 /// Bounds one entity in its **owner's** space.
 ///
 /// Callers transform the result into the enclosing space; this function knows
 /// geometry, not placement.
+///
+/// Takes the [TextStyleRecord] itself, not a style handle, because
+/// [TextStyleRecord.fixedHeight] and the per-entity override bits in
+/// [textAttrs] cannot be resolved from a handle alone, and giving this
+/// function a document dependency so it could look one up would be worse:
+/// every caller already holds the document and can resolve the record once.
 Aabb2 entityBounds({
   required EntityKind kind,
   required GeometryPayload payload,
   required TextMeasurer measurer,
-  required Handle textStyle,
+  required TextStyleRecord textStyle,
+  int textAttrs = 0,
   String text = '',
 }) {
   switch (kind) {
@@ -46,7 +54,9 @@ Aabb2 entityBounds({
 
     case EntityKind.text:
     case EntityKind.attrib:
-      // Task 4 replaces this.
-      return Aabb2(payload.pointAt(0), payload.pointAt(0));
+      final attrs = resolveTextAttributes(payload, textAttrs, textStyle);
+      final metrics = measurer.measure(text: text, style: textStyle);
+      return textLocalBounds(attrs, metrics).transformedBy(
+          textLocalTransform(attrs, metrics, payload.pointAt(0)));
   }
 }

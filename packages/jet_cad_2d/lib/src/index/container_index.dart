@@ -94,7 +94,10 @@ class ContainerIndex {
         kind: record.kind,
         payload: payload,
         measurer: doc.textMeasurer,
-        textStyle: ReservedHandles.standardTextStyle,
+        textStyle: doc.tables.textStyles[record.textStyle] ??
+            doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
+        textAttrs: record.textAttrs,
+        text: record.text,
       ).transformedBy(composed);
       leafSlots.add(slot);
       addBox(leafBoxes, leafBox);
