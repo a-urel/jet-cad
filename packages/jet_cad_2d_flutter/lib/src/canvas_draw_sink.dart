@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import 'draw_sink.dart';
+import 'flutter_text_measurer.dart';
 
 /// Writes to `dart:ui`.
 ///
@@ -16,6 +17,8 @@ class CanvasDrawSink implements DrawSink {
   CanvasDrawSink({
     Canvas? canvas,
     required this.pixelsPerPaperMm,
+    required this.measurer,
+    required this.textStyleOf,
     this.lineweightScale = 1.0,
   }) {
     if (canvas != null) this.canvas = canvas;
@@ -31,6 +34,20 @@ class CanvasDrawSink implements DrawSink {
   late Canvas canvas;
 
   final double pixelsPerPaperMm;
+
+  /// Owns the paragraph cache [text] draws through. One per widget, not one
+  /// per sink rebuild, so a prop change that recreates the sink does not
+  /// throw away every paragraph already laid out.
+  final FlutterTextMeasurer measurer;
+
+  /// Resolves a text entity's style handle to the record [text] needs for
+  /// `fontFamily`.
+  ///
+  /// [DrawSink.text] carries only the [Handle] — the sink has no document to
+  /// look tables up in, so the caller that does (`DraftCanvas`, over
+  /// `DraftDocument.textStyleOf`) hands over the one accessor rather than the
+  /// whole document.
+  final TextStyleRecord Function(Handle) textStyleOf;
 
   /// Multiplies every stroke's device-pixel width before it reaches `Canvas`.
   ///
@@ -141,10 +158,12 @@ class CanvasDrawSink implements DrawSink {
 
   @override
   void text(String text, Handle style, ResolvedStyle resolved) {
-    // Task 9 supplies the paragraph cache this resolves through; until then
-    // nothing calls this, so it must stay unreachable rather than draw a
-    // fake paragraph that would silently diverge from what Task 9 lands.
-    throw UnimplementedError('Task 9 supplies the paragraph cache');
+    _pushTransform();
+    canvas.drawParagraph(
+      measurer.paragraphFor(text, style, textStyleOf(style), resolved.argb),
+      Offset.zero,
+    );
+    _canvasCalls++;
   }
 
   /// The current residual as the column-major `Float64List(16)` `addPath` and

@@ -6,6 +6,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'camera_controller.dart';
 import 'canvas_draw_sink.dart';
 import 'draft_painter.dart';
+import 'flutter_text_measurer.dart';
 
 /// Logical pixels per millimetre at Flutter's nominal 96 dpi.
 ///
@@ -86,6 +87,11 @@ class DraftCanvasState extends State<DraftCanvas> {
   /// One sink for the life of the widget, its `Canvas` rebound per paint.
   late CanvasDrawSink sink;
 
+  /// Outlives [sink]: a prop change [_attach] reacts to rebuilds the sink,
+  /// not the paragraph cache behind it, so a document swap does not throw
+  /// away every glyph already laid out for the previous one.
+  late final FlutterTextMeasurer _measurer = FlutterTextMeasurer();
+
   late DocChangeNotifier _changes;
   late Listenable _repaint;
 
@@ -98,7 +104,9 @@ class DraftCanvasState extends State<DraftCanvas> {
   void _attach() {
     sink = CanvasDrawSink(
         pixelsPerPaperMm: widget.pixelsPerPaperMm,
-        lineweightScale: widget.lineweightScale);
+        lineweightScale: widget.lineweightScale,
+        measurer: _measurer,
+        textStyleOf: widget.document.textStyleOf);
     painter = DraftPainter(
       document: widget.document,
       index: widget.index,
@@ -127,6 +135,11 @@ class DraftCanvasState extends State<DraftCanvas> {
   @override
   void dispose() {
     _changes.dispose();
+    // A `Paragraph` holds native glyph memory the garbage collector does not
+    // know about; the widget that owns the cache has to release it rather
+    // than let every entry outlive this state by however long the native
+    // heap takes to notice nothing references it anymore.
+    _measurer.clear();
     super.dispose();
   }
 

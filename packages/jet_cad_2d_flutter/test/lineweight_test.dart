@@ -90,8 +90,11 @@ double screenStrokeWidthUnder(Transform2 instance) {
   addTearDown(index.dispose);
   final canvas = SpyCanvas();
   // This reads the residual back out of the pushed canvas.transform() call.
-  final sink =
-      CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm);
+  final sink = CanvasDrawSink(
+      canvas: canvas,
+      pixelsPerPaperMm: kPixelsPerPaperMm,
+      measurer: FlutterTextMeasurer(),
+      textStyleOf: doc.textStyleOf);
   DraftPainter(
           document: doc, index: index, resolver: DocumentStyleResolver(doc))
       .paint(sink, kCamera, kViewport);

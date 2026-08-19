@@ -86,7 +86,9 @@ void main() {
           painter.paint(
               CanvasDrawSink(
                   canvas: Canvas(recorder),
-                  pixelsPerPaperMm: kLogicalPixelsPerMm),
+                  pixelsPerPaperMm: kLogicalPixelsPerMm,
+                  measurer: FlutterTextMeasurer(),
+                  textStyleOf: doc.textStyleOf),
               camera,
               kRigViewport);
           recorder.endRecording().dispose();
@@ -103,7 +105,9 @@ void main() {
         final canvasRecorder = PictureRecorder();
         final canvasSink = CanvasDrawSink(
             canvas: Canvas(canvasRecorder),
-            pixelsPerPaperMm: kLogicalPixelsPerMm);
+            pixelsPerPaperMm: kLogicalPixelsPerMm,
+            measurer: FlutterTextMeasurer(),
+            textStyleOf: doc.textStyleOf);
         painter.paint(canvasSink, camera, kRigViewport);
         canvasRecorder.endRecording().dispose();
 

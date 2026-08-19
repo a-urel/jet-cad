@@ -16,6 +16,9 @@ const ResolvedStyle _anyStyle = ResolvedStyle(
   linetypeScale: 1.0,
 );
 
+const TextStyleRecord _standard =
+    TextStyleRecord(handle: Handle(11), name: 'Standard', fontFamily: 'Roboto');
+
 const ResolvedStyle _resolved = ResolvedStyle(
   argb: 0xFF00FFAA,
   lineweightHundredths: 18,
@@ -180,7 +183,11 @@ void main() {
     setUp(() {
       canvas = SpyCanvas();
       // 96 dpi / 25.4 mm — one paper millimetre is 3.78 logical pixels.
-      sink = CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: 4.0);
+      sink = CanvasDrawSink(
+          canvas: canvas,
+          pixelsPerPaperMm: 4.0,
+          measurer: FlutterTextMeasurer(),
+          textStyleOf: (Handle handle) => _standard);
     });
 
     test('beginResidual pushes the affine as a column-major 4x4', () {

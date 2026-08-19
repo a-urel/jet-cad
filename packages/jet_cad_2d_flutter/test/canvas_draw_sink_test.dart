@@ -11,8 +11,16 @@ const ResolvedStyle _red = ResolvedStyle(
     linetype: ReservedHandles.continuousLinetype,
     linetypeScale: 1.0);
 
-CanvasDrawSink _sinkOn(PictureRecorder recorder) =>
-    CanvasDrawSink(canvas: Canvas(recorder), pixelsPerPaperMm: 8.0);
+const TextStyleRecord _standard =
+    TextStyleRecord(handle: Handle(11), name: 'Standard', fontFamily: 'Roboto');
+
+CanvasDrawSink _sinkOn(PictureRecorder recorder,
+        {FlutterTextMeasurer? measurer}) =>
+    CanvasDrawSink(
+        canvas: Canvas(recorder),
+        pixelsPerPaperMm: 8.0,
+        measurer: measurer ?? FlutterTextMeasurer(),
+        textStyleOf: (Handle handle) => _standard);
 
 void _line(CanvasDrawSink sink, double x, ResolvedStyle style) {
   sink.beginResidual(Transform2.translation(0, 0));
@@ -46,5 +54,20 @@ void main() {
     expect(sink.canvasCallCount, 0);
     _line(sink, 10, _red);
     expect(sink.canvasCallCount, 1);
+  });
+
+  test('text resolves a paragraph through the measurer and draws it', () {
+    final recorder = PictureRecorder();
+    final measurer = FlutterTextMeasurer();
+    final sink = _sinkOn(recorder, measurer: measurer);
+    sink.beginResidual(Transform2.translation(10, 20));
+    sink.text('WC', const Handle(7), _red);
+    sink.endResidual();
+    expect(sink.canvasCallCount, 1);
+    // The sink resolved the style handle and asked the measurer to lay the
+    // string out — the same paragraph a direct paragraphFor call would hand
+    // back, since both go through the same cache key.
+    expect(measurer.layoutCount, 1);
+    expect(measurer.liveParagraphCount, 1);
   });
 }
