@@ -1,22 +1,22 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-20
-**Verified against:** `main` @ `2748b63`, `plan-3c` worktree @ `6a9a2aa`, working tree clean.
+**Verified against:** `main` @ `cfe1eab`, `plan-3c` worktree @ `a147e5d`, working tree clean.
 Every count below was produced by running the suite, not by reading a report.
 
 ---
 
 ## TL;DR — where you left off
 
-Plan 3c (**text**) is 10 tasks into 15, running on the `plan-3c` worktree.
-Tasks 0–9 are committed. **Everything is green and the tree is clean.**
+Plan 3c (**text**) is 11 tasks into 15, running on the `plan-3c` worktree.
+Tasks 0–10 are committed. **Everything is green and the tree is clean.**
 
 | Suite | State |
 |---|---|
-| `packages/jet_cad_2d` — engine | **716 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **133 tests, all pass** (1 pre-existing skip), analyze/format clean |
+| `packages/jet_cad_2d` — engine | **717 tests, all pass**, analyze/format clean |
+| `packages/jet_cad_2d_flutter` — widgets | **143 tests, all pass** (1 pre-existing skip), analyze/format clean |
 
-**Next up is Task 10 — the painter draws text.** It carries a measurement
+**Next up is Task 11 — goldens: the attribute ladder and the mirror.** It carries a measurement
 obligation and a carried-forward guard; see [Resume here](#resume-here).
 
 ---
@@ -179,48 +179,54 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-Task 9 is committed at `6a9a2aa`. **Task 10 — the painter draws text** is next.
+Task 10 is committed at `a147e5d`. **Task 11 — goldens: the attribute ladder
+and the mirror** is next.
 
-### What Task 10 must do
+### What Task 11 must do
 
-- `draft_painter.dart` draws text instead of counting it; `reference_walk.dart`
-  does the same at its `entityBounds` call and draws text too.
-- `skippedTextCount` still exists but must reach **0** on a text corpus.
-- Text draws under `residual ∘ textLocal` through the existing `beginResidual`.
-- Create `test/text_paint_test.dart`; flip `draft_painter_root_test.dart:287-289`.
-- Three tests the plan names: one text leaf draws one `TextOp` with
-  `skippedTextCount == 0`; the reference walk and the painter agree over a
-  corpus that actually contains text; text inside a mirrored instance is drawn
-  **mirrored, not corrected** (the residual's determinant stays negative).
+Create `test/golden/text_ladder_golden_test.dart` and five PNGs. Five rungs,
+each a small document at a fixed viewport:
 
-### Two obligations Task 10 inherits
+1. horizontal justification — left, centre, right, middle, sharing one anchor
+2. vertical justification — baseline, bottom, middle, top, sharing one anchor
+3. rotation — 0, 0.4, 1.2, −0.9 radians
+4. width factor 0.5/1/2 **crossed** with oblique 0/0.3 — the pair that pins the
+   composition order, since either alone commutes
+5. one mirrored instance containing a label, beside the same label unmirrored
 
-**Ruling 20 — measure, don't assume.** The spec wanted a second reusable
-`Float64List(16)` in `CanvasDrawSink`; the plan dropped it. Task 10 **must
-measure per-text-leaf allocation on the paint path and record the number.** If
-it exceeds the per-leaf norm circles and arcs already establish
-(`draft_painter.dart:401-403` already does a per-leaf `.multiply()`), Task 10
-reintroduces the spec's second buffer.
+Then `flutter test --update-goldens test/golden/text_ladder_golden_test.dart`
+and **look at all five PNGs**: no glyph clipped, the crossed rung wider at the
+same slope rather than more slanted, rung 5 reading backwards. A golden
+accepted without being looked at pins whatever bug produced it. Finish with
+`flutter test --tags golden` — the pre-existing stroke-width and dash-ladder
+PNGs must not regenerate.
 
-**Ruling 23 — the empty-text guard is only half done.** Task 9 fixed the
-*measurer*, not `entityBounds`. An empty text entity now contributes a
-zero-width box at its anchor, which is correct for bounds. Task 10 still owes
-the **draw-path** guard its brief specifies:
+### What Task 10 leaves it
 
-```dart
-if (record.text.isEmpty) {
-  _skippedText++;   // nothing to draw; still counted
-  break;
-}
-```
+Task 10 found that `Canvas.drawParagraph` draws in paragraph space (y down
+from the top of the line) while the residual maps glyph space (y up from the
+baseline). Nothing reconciled them, so **every string rendered mirrored about
+its own baseline** while every box in the document stayed right — invisible to
+every bounds, pick, op-count and differential test, because the `TextOp` and
+its residual were correct and only the rasteriser was wrong. It is fixed in
+`CanvasDrawSink.text` and pinned by composition arithmetic.
 
-It should also confirm no test asserts a *non-zero* box for empty text.
+**That is the thing Task 11's goldens exist to catch independently.** A golden
+of a single left-baseline string is what would notice a flip that is right in
+the matrix and wrong on screen. Rung 1 already does it; do not skip looking.
 
-### Then Tasks 11–14
+### Then Tasks 12–14
 
-`11` goldens (attribute ladder + mirror) → `12` rigs and counters → `13`
-mutation log → `14` exit gate + results note, then
-`superpowers:finishing-a-development-branch`.
+`12` rigs and counters → `13` mutation log → `14` exit gate + results note,
+then `superpowers:finishing-a-development-branch`.
+
+**Task 12 inherits one debt.** The per-text-leaf allocation gate
+(`packages/jet_cad_2d/test/invariants/text_paint_allocation_test.dart`) lives
+in the engine suite because `jet_cad_2d_flutter` has no `vm_service`
+dependency, so it measures the engine helpers the painter calls, in the
+painter's order, rather than the painter itself. A painter that went back
+through the allocating wrappers would not turn it red. Closing it means moving
+`AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
 
 ---
 
@@ -236,14 +242,16 @@ measured distinct-visible-key count recorded beside it. Lowering
 zero-new-layouts gate row is not.** Otherwise the gate passes because the corpus
 was thinned rather than because the cache works.
 
-**Ruling 20 — Task 10 owes a measurement.** The spec wanted a second reusable
-`Float64List(16)` in `CanvasDrawSink` to compose `residual ∘ local` without a
-per-text-entity allocation. The plan dropped it and pushes an already-composed
-transform through the existing `beginResidual`, on the grounds that
-`draft_painter.dart:401-403` already does a per-leaf `.multiply()` for circles
-and arcs. **Task 10 must measure per-text-leaf allocation on the paint path and
-record the number.** If it exceeds the per-leaf norm circles and arcs already
-establish, Task 10 reintroduces the spec's second buffer.
+**Ruling 20 — discharged in Task 10, with numbers.** The residual-path norm is
+**1.00** allocations per leaf (one `Transform2`). A text leaf through
+`resolveTextAttributes` + `textLocalTransform` was **9.00**; through one
+long-lived `TextLayout` it is **0.87–1.00**, at or below the norm. The spec's
+second `Float64List(16)` was not the fix — under the plan's shape the sink
+composes nothing — the reusable layout was, and `TextLayout` lost `@internal`
+for it. Gate:
+`packages/jet_cad_2d/test/invariants/text_paint_allocation_test.dart`. Every
+assertion there is a **ratio**, because the profiler was observed once to read
+0.07 where two other runs read 1.00.
 
 **Ruling 10 — `boxOfLeaf` returns null after an edit, correctly.** Dirtying a
 leaf removes it from the packed R-tree and parks it in the overlay. Any test
@@ -270,7 +278,24 @@ font fails loudly, which this plan prefers to a silent pass.
 `FlutterTextMeasurer` now shares `ascent`/`descent`'s `lines.isEmpty` guard for
 `advanceWidth` so it returns `0.0`, matching `MetricModelMeasurer`. The seam's
 premise — and the differential oracle's validity — is that the two are
-interchangeable. **Task 10 still owes the draw-path `isEmpty` guard.**
+interchangeable. The draw-path `isEmpty` guard landed in Task 10, in the
+painter *and* in the reference walk, and both halves are pinned by mutation.
+
+**Ruling 28 — the paragraph flip lives in the sink, not the painter.**
+`Canvas.drawParagraph` draws y-down from the top of the line; the residual maps
+glyph space, y-up from the baseline. `CanvasDrawSink.text` reconciles them with
+`translate(0, alphabeticBaseline)` then `scale(1, -1)`. It must **not** move
+into the painter: it is a `dart:ui` fact, and `reference_walk` composes the
+same residual independently — sharing it would have the oracle share the
+assumption it exists to test.
+
+**Ruling 33 — the fixture set, not any one task, is the recurring hole.** Three
+Task 10 mutations survived a green suite, all degenerate fixtures: no blank
+text entity anywhere (the corpus *replaces* blanks with labels rather than
+adding them), and **no text entity on a non-STANDARD style anywhere**, which is
+Ruling 13's exact hole reopening one plan later in two new call sites. Both are
+now covered by hand-built fixtures. Any new text call site must be checked
+against both before it is called done.
 
 **Ruling 17 — the corpus must hold exactly 20 distinct labels.**
 `expect(labels.length, 20)`, not `lessThanOrEqualTo(20)`. The distribution is
