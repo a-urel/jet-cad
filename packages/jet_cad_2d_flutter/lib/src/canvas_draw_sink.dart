@@ -159,10 +159,26 @@ class CanvasDrawSink implements DrawSink {
   @override
   void text(String text, Handle style, ResolvedStyle resolved) {
     _pushTransform();
-    canvas.drawParagraph(
-      measurer.paragraphFor(text, style, textStyleOf(style), resolved.argb),
-      Offset.zero,
-    );
+    final paragraph =
+        measurer.paragraphFor(text, style, textStyleOf(style), resolved.argb);
+    // Two coordinate systems meet here, and only one of them is `dart:ui`'s.
+    // `drawParagraph` lays glyphs out with y increasing *downward* from the
+    // top of the first line; the residual maps *glyph* space — y up, origin
+    // on the baseline — because that is the space `textLocalBounds`, and so
+    // `entityBounds`, is expressed in, and the camera has already flipped y
+    // once on the way there. Reconciling them is a flip about the baseline:
+    // lift by the distance from the paragraph's top to it, then negate y.
+    //
+    // The flip belongs here and not in the painter because it is a fact about
+    // `drawParagraph`, not about the document — `reference_walk` composes the
+    // same residual by an independent route and must not have to know it, or
+    // the two would be sharing exactly the assumption the oracle exists to
+    // test.
+    canvas.save();
+    canvas.translate(0, paragraph.alphabeticBaseline);
+    canvas.scale(1, -1);
+    canvas.drawParagraph(paragraph, Offset.zero);
+    canvas.restore();
     _canvasCalls++;
   }
 

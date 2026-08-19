@@ -98,13 +98,21 @@ class ResolvedTextAttributes {
 /// [TextLayout] it did not fill itself; the same rule [HitPath] and
 /// [SnapResult] state for their own reusable buffers.
 ///
-/// `@internal`: this exists so the query path can lay text out without
-/// allocating, not as a second supported way to ask where a text entity's
-/// glyphs sit. The barrel re-exports this library wholesale, so the
-/// annotation — not the export list — is what says a caller outside this
-/// package should use [resolveTextAttributes], [textLocalTransform] and
-/// [textLocalBounds] instead, which are the same answers in immutable form.
-@internal
+/// **Prefer the three wrappers.** This is not a second supported way to ask
+/// where a text entity's glyphs sit; it is the allocation-free way, for the
+/// two paths that have a budget. [resolveTextAttributes],
+/// [textLocalTransform] and [textLocalBounds] are the same answers in
+/// immutable form and are what every other caller should use.
+///
+/// It carried `@internal` until Plan 3c Task 10, on the reading that the
+/// query path was the only caller with such a budget. That reading was
+/// measured wrong: `DraftPainter._drawText`, in `jet_cad_2d_flutter`, is on
+/// the frame path — the path this project's first non-negotiable says
+/// allocates nothing in steady state — and going through the wrappers there
+/// cost nine allocations per text leaf against a residual-path norm of one
+/// (`test/invariants/text_paint_allocation_test.dart`). An annotation that
+/// forbids the fix for a budget in another package is encoding an assumption,
+/// not a rule, so it is gone; the ownership rule above is what still binds.
 class TextLayout {
   /// Every double this object holds, in one typed array rather than in
   /// fourteen plain `double` fields.

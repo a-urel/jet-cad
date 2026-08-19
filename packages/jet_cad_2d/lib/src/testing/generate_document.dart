@@ -143,13 +143,24 @@ DraftDocument generateDocument(
   /// See the class doc comment above for why the two extensions cannot be
   /// pinned independently.
   double attributedInstanceFraction = 0,
+
+  /// The measurer the generated document is built with.
+  ///
+  /// Defaults to the same [InsertionPointMeasurer] every earlier caller got
+  /// implicitly, so no fingerprint and no `extents` moves when this is left
+  /// alone. A caller that turns [labelFraction] or
+  /// [attributedInstanceFraction] on and wants the labels to have a size has
+  /// to pass a real one: the zero metrics collapse every glyph box to a point
+  /// and every text transform to a singular matrix, which is a corpus that
+  /// looks like it covers text and does not.
+  TextMeasurer measurer = const InsertionPointMeasurer(),
 }) {
   final random = math.Random(0xC0FFEE);
   // A second stream, drawn from only by the extensions. Keeping them off the
   // primary one is what makes the default document byte-identical however many
   // extensions exist.
   final extra = math.Random(0x5EEDED);
-  final doc = DraftDocument.empty();
+  final doc = DraftDocument.empty(measurer: measurer);
 
   final layers = <Handle>[];
   if (layerCount > 1) {

@@ -85,6 +85,15 @@ class _ReferenceWalk {
       final composed = accumulated.multiply(node.transform);
       if (node is InstanceNode) {
         into.add(_Item(child, composed));
+        // Attributes belong to the INSERT, not to the definition: an ATTRIB's
+        // owner is the instance node and its coordinates are instance-local,
+        // so it is a leaf of *this* container placed by `composed` — the same
+        // rule `ContainerIndex` applies. Recursing into the definition alone
+        // never reaches it, which is how it stayed invisible while text was
+        // skipped.
+        for (final slot in leaves[child] ?? const <int>[]) {
+          into.add(_Item(doc.entities.handleAt(slot), composed, slot: slot));
+        }
       } else {
         _collect(child, composed, into);
       }
@@ -102,15 +111,8 @@ class _ReferenceWalk {
   void _leaf(int slot, Transform2 placement, StyleContext ctx) {
     final kind = doc.entities.kindAt(slot);
     final payload = doc.geometry.peek(doc.entities.geomIndexAt(slot));
-    if (kind == EntityKind.text || kind == EntityKind.attrib) return;
     if (doc.entities.flagsAt(slot) & EntityFlags.invisible != 0) return;
 
-    // textStyle/textAttrs/text are dead for this call: the early return above
-    // already skips every TEXT and ATTRIB entity, so this always resolves a
-    // non-text kind's defaults. They stay wired through so this expression
-    // matches the other three `entityBounds` call sites exactly and cannot
-    // silently drift from them; they start mattering once Task 10 stops
-    // skipping text here.
     final box = entityBounds(
       kind: kind,
       payload: payload,
@@ -133,6 +135,30 @@ class _ReferenceWalk {
     final ox = localOrigin.x;
     final oy = localOrigin.y;
 
+    if (kind == EntityKind.text || kind == EntityKind.attrib) {
+      // Text's placement is a transform, not a coordinate, and `DrawSink.text`
+      // carries no coordinates — so it travels in the residual. Composed here
+      // rather than pushed as an inner `beginResidual`, which does not nest.
+      final text = doc.entities.textAt(slot);
+      // Nothing to draw. The painter counts this; the walk has no counter to
+      // keep, and a `TextOp` for the empty string would be a difference.
+      if (text.isEmpty) return;
+      final textStyle = doc.entities.textStyleAt(slot);
+      final record = doc.textStyleOf(textStyle);
+      final attrs = resolveTextAttributes(
+          payload, doc.entities.textAttrsAt(slot), record);
+      final metrics = doc.textMeasurer.measure(text: text, style: record);
+      // Rebased, like every other coordinate handed to `chain`.
+      final anchor = Vector2(coords[0] - ox, coords[1] - oy);
+      sink
+        ..beginResidual(
+            chain.multiply(textLocalTransform(attrs, metrics, anchor)),
+            debugHandle: doc.entities.handleAt(slot))
+        ..text(text, textStyle, style)
+        ..endResidual();
+      return;
+    }
+
     sink.beginResidual(chain, debugHandle: doc.entities.handleAt(slot));
     switch (kind) {
       case EntityKind.point:
@@ -153,6 +179,7 @@ class _ReferenceWalk {
             payload.scalars[1], payload.scalars[2], style);
       case EntityKind.text:
       case EntityKind.attrib:
+        // Unreachable: handled above, under its own composed residual.
         break;
     }
     sink.endResidual();
