@@ -1,32 +1,23 @@
 # jet-cad — project status
 
-**Last updated:** 2026-08-18
-**Verified against:** `main` @ `a7008a6`, `plan-3c` worktree @ `c381e24` + uncommitted Task 9 work.
+**Last updated:** 2026-08-20
+**Verified against:** `main` @ `2748b63`, `plan-3c` worktree @ `6a9a2aa`, working tree clean.
 Every count below was produced by running the suite, not by reading a report.
 
 ---
 
 ## TL;DR — where you left off
 
-Plan 3c (**text**) is 9 tasks into 15, running on the `plan-3c` worktree.
-Tasks 0–8 are committed and reviewed. **Task 9 is half-done and uncommitted, and
-the widget suite is currently RED for one mechanical reason.**
+Plan 3c (**text**) is 10 tasks into 15, running on the `plan-3c` worktree.
+Tasks 0–9 are committed. **Everything is green and the tree is clean.**
 
 | Suite | State |
 |---|---|
-| `packages/jet_cad_2d` — engine | **716 tests, all pass** |
-| `packages/jet_cad_2d_flutter` — widgets | **RED** — `test/draw_sink_test.dart` fails to compile |
+| `packages/jet_cad_2d` — engine | **716 tests, all pass**, analyze/format clean |
+| `packages/jet_cad_2d_flutter` — widgets | **133 tests, all pass** (1 pre-existing skip), analyze/format clean |
 
-**The exact break:** Task 9 added a required `measurer` parameter to
-`CanvasDrawSink`. Four test files were updated; one was missed.
-
-```
-test/draw_sink_test.dart:183:28: Error: Required named parameter 'measurer' must be provided.
-      sink = CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: 4.0);
-```
-
-Fix that one call site to get back to green, then finish Task 9 (see
-[Resume here](#resume-here)).
+**Next up is Task 10 — the painter draws text.** It carries a measurement
+obligation and a carried-forward guard; see [Resume here](#resume-here).
 
 ---
 
@@ -82,7 +73,7 @@ docs/superpowers/
 | Location | Branch | State |
 |---|---|---|
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, `a7008a6`, Plans 1/2/3a/3b merged |
-| `.claude/worktrees/plan-3c` | `plan-3c` | 13 commits ahead, **8 files uncommitted** |
+| `.claude/worktrees/plan-3c` | `plan-3c` | 14 commits ahead, **clean** |
 
 `main` is ahead of `origin/main`. **Nothing has been pushed.** Do not push
 unless explicitly asked.
@@ -175,58 +166,61 @@ So the paragraph cache key carries no height, angle or width factor. It is
 | 6 | Text picks as `HitKind.fill` | ✅ complete, approved |
 | 7 | The corpus grows two text sources | ✅ complete, fix round 1/5 |
 | 8 | The sink learns one text op | ✅ complete, approved |
-| 9 | `FlutterTextMeasurer` + paragraph cache | 🔴 **IN FLIGHT — uncommitted, suite red** |
-| 10 | The painter draws text | ⬜ not started |
+| 9 | `FlutterTextMeasurer` + paragraph cache | ✅ complete (Rulings 21–23; one real defect found) |
+| 10 | The painter draws text | ⬜ **NEXT** |
 | 11 | Goldens — attribute ladder and mirror | ⬜ not started |
 | 12 | Rigs, counters, the number the gate depends on | ⬜ not started |
 | 13 | Mutation testing | ⬜ not started |
 | 14 | Exit gate and the results note | ⬜ not started |
 
-Test count grew 667 → 716 engine across Tasks 0–8.
+Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ---
 
 ## Resume here
 
-### 1. Unbreak the suite (one line)
+Task 9 is committed at `6a9a2aa`. **Task 10 — the painter draws text** is next.
 
-`packages/jet_cad_2d_flutter/test/draw_sink_test.dart:183` still constructs
-`CanvasDrawSink` without the now-required `measurer`. Every other call site was
-updated. Fix it, then `flutter test` should go green again.
+### What Task 10 must do
 
-### 2. Finish Task 9
+- `draft_painter.dart` draws text instead of counting it; `reference_walk.dart`
+  does the same at its `entityBounds` call and draws text too.
+- `skippedTextCount` still exists but must reach **0** on a text corpus.
+- Text draws under `residual ∘ textLocal` through the existing `beginResidual`.
+- Create `test/text_paint_test.dart`; flip `draft_painter_root_test.dart:287-289`.
+- Three tests the plan names: one text leaf draws one `TextOp` with
+  `skippedTextCount == 0`; the reference walk and the painter agree over a
+  corpus that actually contains text; text inside a mirrored instance is drawn
+  **mirrored, not corrected** (the residual's determinant stays negative).
 
-Uncommitted work already on disk in the worktree:
+### Two obligations Task 10 inherits
 
+**Ruling 20 — measure, don't assume.** The spec wanted a second reusable
+`Float64List(16)` in `CanvasDrawSink`; the plan dropped it. Task 10 **must
+measure per-text-leaf allocation on the paint path and record the number.** If
+it exceeds the per-leaf norm circles and arcs already establish
+(`draft_painter.dart:401-403` already does a per-leaf `.multiply()`), Task 10
+reintroduces the spec's second buffer.
+
+**Ruling 23 — the empty-text guard is only half done.** Task 9 fixed the
+*measurer*, not `entityBounds`. An empty text entity now contributes a
+zero-width box at its anchor, which is correct for bounds. Task 10 still owes
+the **draw-path** guard its brief specifies:
+
+```dart
+if (record.text.isEmpty) {
+  _skippedText++;   // nothing to draw; still counted
+  break;
+}
 ```
-?? packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart   (208 lines, new)
- M packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart        (+27/-4)
- M packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart            (+15/-1)
- M packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart          (export)
- M  4 test files updated for the new required parameter
-```
 
-Task 9's brief exists at `.superpowers/sdd/2026-08-17-jet-cad-2d-plan-3c-text/task-9-brief.md`;
-**there is no task-9-report.md**, which is how you can tell the task never closed.
+It should also confirm no test asserts a *non-zero* box for empty text.
 
-Still owed by Task 9 (from the plan, §1253):
+### Then Tasks 11–14
 
-- `packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart` — **does not exist yet**
-- `FlutterTextMeasurer` must expose `paragraphFor(...)`, `layoutCount`,
-  `evictionCount`, `liveParagraphCount`, `clear()`, and `const int kParagraphCacheLimit = 512`
-- Three tests the plan names explicitly:
-  - the same string in two colours is **two** cache entries, not one
-  - a repeat `measure()` lays out nothing **and returns an identical object**
-    (a fresh object per call breaks `query_allocation_test`)
-  - eviction **disposes** the paragraph
-- ⚠️ `Paragraph.debugDisposed` must be confirmed against this Flutter version
-  before the eviction test relies on it (ledger, per-task scan).
-
-### 3. Then Tasks 10–14
-
-Task 10 (painter draws text) → 11 (goldens) → 12 (rigs and counters) → 13
-(mutation log) → 14 (exit gate + results note, then
-`superpowers:finishing-a-development-branch`).
+`11` goldens (attribute ladder + mirror) → `12` rigs and counters → `13`
+mutation log → `14` exit gate + results note, then
+`superpowers:finishing-a-development-branch`.
 
 ---
 
@@ -261,6 +255,22 @@ the seeded defaults and `TableSection.remove` is public, so a document missing
 handle 5 crashes on plain `doc.extents`. Use
 `DraftDocument.textStyleOf(Handle)`, which falls back to a `const
 TextStyleRecord`.
+
+**Ruling 22 — pin the layout em size exactly, not positively.** The measurer's
+one unforgivable failure is laying a paragraph out at anything other than
+`kNominalTextPixels`, and `expect(ascent, greaterThan(0))` is satisfied by every
+positive em size. `flutter_test`'s font is exactly 0.75em ascent / 0.25em
+descent / 1em per character, so the assertions are exact: `WC` at nominal is
+ascent 75.0, descent 25.0, advance 200.0. A Flutter upgrade that moves the test
+font fails loudly, which this plan prefers to a silent pass.
+
+**Ruling 23 — the two measurers must agree, and one guard is still owed.**
+`Paragraph.longestLine` is `-FLT_MAX` for a paragraph with no lines, and
+`-FLT_MAX` is **finite**, so no `isFinite` guard catches it.
+`FlutterTextMeasurer` now shares `ascent`/`descent`'s `lines.isEmpty` guard for
+`advanceWidth` so it returns `0.0`, matching `MetricModelMeasurer`. The seam's
+premise — and the differential oracle's validity — is that the two are
+interchangeable. **Task 10 still owes the draw-path `isEmpty` guard.**
 
 **Ruling 17 — the corpus must hold exactly 20 distinct labels.**
 `expect(labels.length, 20)`, not `lessThanOrEqualTo(20)`. The distribution is
@@ -401,7 +411,7 @@ flutter drive --profile -d macos
 
 ---
 
-## Housekeeping done 2026-08-18
+## Housekeeping done 2026-08-20
 
 Removed as dead weight:
 
