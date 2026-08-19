@@ -1,23 +1,25 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-20
-**Verified against:** `main` @ `cfe1eab`, `plan-3c` worktree @ `a147e5d`, working tree clean.
+**Verified against:** `main` @ `761d454`, `plan-3c` worktree @ `7b285f0`, working tree clean.
 Every count below was produced by running the suite, not by reading a report.
 
 ---
 
 ## TL;DR — where you left off
 
-Plan 3c (**text**) is 11 tasks into 15, running on the `plan-3c` worktree.
-Tasks 0–10 are committed. **Everything is green and the tree is clean.**
+Plan 3c (**text**) is 12 tasks into 15, running on the `plan-3c` worktree.
+Tasks 0–11 are committed. **Everything is green and the tree is clean.**
 
 | Suite | State |
 |---|---|
 | `packages/jet_cad_2d` — engine | **717 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **143 tests, all pass** (1 pre-existing skip), analyze/format clean |
+| `packages/jet_cad_2d_flutter` — widgets | **148 tests, all pass** (1 pre-existing skip), analyze/format clean |
+| `flutter test --tags golden` | **13 pass**; no pre-existing PNG regenerated |
 
-**Next up is Task 11 — goldens: the attribute ladder and the mirror.** It carries a measurement
-obligation and a carried-forward guard; see [Resume here](#resume-here).
+**Next up is Task 12 — rigs, counters, and the number the gate depends on.** It
+carries a measurement that can invalidate a gate row; see
+[Resume here](#resume-here).
 
 ---
 
@@ -73,7 +75,7 @@ docs/superpowers/
 | Location | Branch | State |
 |---|---|---|
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, `a7008a6`, Plans 1/2/3a/3b merged |
-| `.claude/worktrees/plan-3c` | `plan-3c` | 14 commits ahead, **clean** |
+| `.claude/worktrees/plan-3c` | `plan-3c` | 15 commits ahead, **clean** |
 
 `main` is ahead of `origin/main`. **Nothing has been pushed.** Do not push
 unless explicitly asked.
@@ -179,48 +181,34 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-Task 10 is committed at `a147e5d`. **Task 11 — goldens: the attribute ladder
-and the mirror** is next.
+Task 11 is committed at `7b285f0`. **Task 12 — rigs, counters, and the number
+the gate depends on** is next.
 
-### What Task 11 must do
+### What Task 12 must do
 
-Create `test/golden/text_ladder_golden_test.dart` and five PNGs. Five rungs,
-each a small document at a fixed viewport:
+1. Add `textRigCorpus(int)` beside `rigCorpus` in `test/rig/rig_support.dart` —
+   a **separate function, not a flag**: `labelFraction` comes out of the root
+   budget, so switching it on inside `rigCorpus` would move the line, polyline,
+   circle and arc counts and retire Plan 3b's dash and canvas-call baselines as
+   a side effect. The plan gives the exact parameter list.
+2. **Measure the number the whole gate rests on.** Walk the working-set camera
+   once over `textRigCorpus(50000)` and print the count of distinct
+   `(string, style, argb)` keys drawn, then the same at the whole-drawing
+   camera.
+3. Extend every rig's printed lines with layout count, eviction count, live
+   paragraphs and text ops per frame, at both cameras, and the same rows with
+   text drawing off — so the on/off delta is one flag apart on one corpus.
 
-1. horizontal justification — left, centre, right, middle, sharing one anchor
-2. vertical justification — baseline, bottom, middle, top, sharing one anchor
-3. rotation — 0, 0.4, 1.2, −0.9 radians
-4. width factor 0.5/1/2 **crossed** with oblique 0/0.3 — the pair that pins the
-   composition order, since either alone commutes
-5. one mirrored instance containing a label, beside the same label unmirrored
+**If the working-set count exceeds `kParagraphCacheLimit` (512), the
+zero-new-layouts gate row cannot pass by construction. Do not relax the row.**
+Record the count, then either raise the limit to the measured count rounded up
+or lower `attributedInstanceFraction`, and write down which and why. Ruling 4
+allows the limit to move exactly once, here, and only with the number recorded
+beside it.
 
-Then `flutter test --update-goldens test/golden/text_ladder_golden_test.dart`
-and **look at all five PNGs**: no glyph clipped, the crossed rung wider at the
-same slope rather than more slanted, rung 5 reading backwards. A golden
-accepted without being looked at pins whatever bug produced it. Finish with
-`flutter test --tags golden` — the pre-existing stroke-width and dash-ladder
-PNGs must not regenerate.
+### Task 12 inherits one debt
 
-### What Task 10 leaves it
-
-Task 10 found that `Canvas.drawParagraph` draws in paragraph space (y down
-from the top of the line) while the residual maps glyph space (y up from the
-baseline). Nothing reconciled them, so **every string rendered mirrored about
-its own baseline** while every box in the document stayed right — invisible to
-every bounds, pick, op-count and differential test, because the `TextOp` and
-its residual were correct and only the rasteriser was wrong. It is fixed in
-`CanvasDrawSink.text` and pinned by composition arithmetic.
-
-**That is the thing Task 11's goldens exist to catch independently.** A golden
-of a single left-baseline string is what would notice a flip that is right in
-the matrix and wrong on screen. Rung 1 already does it; do not skip looking.
-
-### Then Tasks 12–14
-
-`12` rigs and counters → `13` mutation log → `14` exit gate + results note,
-then `superpowers:finishing-a-development-branch`.
-
-**Task 12 inherits one debt.** The per-text-leaf allocation gate
+The per-text-leaf allocation gate
 (`packages/jet_cad_2d/test/invariants/text_paint_allocation_test.dart`) lives
 in the engine suite because `jet_cad_2d_flutter` has no `vm_service`
 dependency, so it measures the engine helpers the painter calls, in the
@@ -228,11 +216,46 @@ painter's order, rather than the painter itself. A painter that went back
 through the allocating wrappers would not turn it red. Closing it means moving
 `AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
 
+### What Task 11 left behind
+
+Five rungs in `test/golden/text_ladder_golden_test.dart` plus `text_ladder_1..5.png`.
+Three things about them a later task needs to know:
+
+- **They load a vendored font.** `test/golden/fonts/Roboto-Regular.ttf`, with
+  its licence and a README recording provenance and SHA-256. Without it
+  `flutter_test` renders Ahem — one solid box per glyph — and rung 5 asserts
+  nothing, because a mirrored box is a box. Replacing the font means
+  regenerating all five PNGs.
+- **Rung 1 is the colour golden Task 13 asks for.** It draws *one* string four
+  times in four colours. Four different strings would be four distinct cache
+  keys with or without `argb`, and the mutation Task 13 names — dropping the
+  colour from `_CacheKey` — left the four-label version green. It turns rung 1
+  red now.
+- **Rung 4's expectation is the opposite of what the plan says.** See
+  Ruling 34 below.
+
+Seven mutants were run and reverted, all seven killed. For the four in
+`text_geometry.dart`, `flutter test --exclude-tags golden` stays **green** —
+these five PNGs are the only thing inside the widget package tying the
+engine's composition order to the pixels it produces.
+
+### Then Tasks 13–14
+
+`13` mutation log → `14` exit gate + results note, then
+`superpowers:finishing-a-development-branch`.
+
+Task 13's sixteen mutants are the spec's table. Three of them the plan singles
+out as the ones a green suite most plausibly misses: laying the paragraph out
+at the *effective* em size instead of nominal (renders correctly; only the
+zero-layout row and the cache-entry count can see it), allocating a fresh
+`TextMetrics` on a cache hit, and dropping `argb` from the cache key. The last
+one is already covered both ways — `flutter_text_measurer_test` and rung 1.
+
 ---
 
 ## Rulings that still bind the remaining tasks
 
-The ledger carries 20 numbered rulings. These are the ones that constrain work
+The ledger carries 38 numbered rulings. These are the ones that constrain work
 you have not done yet:
 
 **Ruling 4 — the cache limit is not a tuning knob.** `kParagraphCacheLimit` is
@@ -296,6 +319,27 @@ adding them), and **no text entity on a non-STANDARD style anywhere**, which is
 Ruling 13's exact hole reopening one plan later in two new call sites. Both are
 now covered by hand-built fixtures. Any new text call site must be checked
 against both before it is called done.
+
+**Ruling 34 — Plan 3c Task 11 Step 2's rung-4 criterion is backwards, and the
+engine wins.** The step says to check that the crossed cells are "wider at the
+same slope rather than more slanted". `composeTransform` shears *before* the
+width-factor x-scale — `w * (x + k*y)`, which `textLocalTransform`'s doc names
+as the DXF reading and `text_geometry_test.dart` pins as
+`c = widthFactor * tan(oblique) * scale`. The stem slope is therefore
+`widthFactor * tan(oblique)` and the wide cell **is** more slanted; the plan's
+sentence describes the swapped order, which is the drawing rung 4 exists to
+reject. If any later task quotes that sentence, it is quoting the mutant.
+
+**Ruling 37 — a colour golden needs a repeated string, not a palette.** See
+[Resume here](#resume-here); it constrains Task 13's "visibly by a colour
+golden" requirement to a property of the fixture.
+
+**Ruling 36 — a golden document must carry a real measurer.** The painter
+takes its scale from `document.textMeasurer` while the sink lays the paragraph
+out through its own; the glyphs sit inside the box the document believes they
+occupy only while the two agree. A golden on `MetricModelMeasurer` pins a
+drawing no production wiring produces — the degenerate fixture in its most
+expensive form, a *reviewed* one.
 
 **Ruling 17 — the corpus must hold exactly 20 distinct labels.**
 `expect(labels.length, 20)`, not `lessThanOrEqualTo(20)`. The distribution is
@@ -405,6 +449,7 @@ dart analyze && dart format --output=none --set-exit-if-changed .
 cd packages/jet_cad_2d_flutter
 flutter test
 flutter test --tags golden
+flutter test --exclude-tags golden          # any platform but the one they were made on
 flutter test --tags rig --run-skipped
 flutter analyze && dart format --output=none --set-exit-if-changed .
 
@@ -431,6 +476,14 @@ flutter drive --profile -d macos
   Task 6.
 - **Reviewers verify claims independently.** Synthesized test output invalidates
   a task.
+- **Never `git checkout` a file to revert a mutation.** It restores HEAD, so it
+  silently wipes every uncommitted change in that file — Task 10 lost a full
+  task's painter work that way. Copy the file aside first and restore from the
+  copy in a `finally` block.
+- **`flutter_test` renders Ahem, not a real font,** unless one is loaded. Any
+  golden asserting something about glyph *shape* — that a mirrored label reads
+  backwards, most of all — needs `test/golden/fonts/Roboto-Regular.ttf` loaded
+  through a `FontLoader`, or it asserts nothing while looking like it does.
 - **The `plan-3c` ledger is the only progress record** for that plan — TodoWrite
   was unavailable in the session that ran it. Keep appending to it.
 
