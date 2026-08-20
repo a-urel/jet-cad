@@ -72,7 +72,8 @@ docs/superpowers/
   specs/                # design specs — BINDING AUTHORITY
   plans/                # implementation plans — what the implementer follows
   notes/                # measurement + mutation results of record
-.superpowers/sdd/       # git-ignored per-task ledger, briefs, reports
+  ledgers/              # raw per-task record, archived when a plan merges
+.superpowers/sdd/       # git-ignored per-task ledger for the plan IN FLIGHT
 ```
 
 `jet_cad_2d` is Dart-only (`meta`, `vector_math`; dev: `test`, `vm_service`).

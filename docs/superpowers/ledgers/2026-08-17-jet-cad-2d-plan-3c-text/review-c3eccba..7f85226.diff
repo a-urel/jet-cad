@@ -1,0 +1,302 @@
+# Review package: c3eccba..7f85226
+
+## Commits
+7f85226 feat(jet_cad_2d): carry text fields through the codec at schema 4
+
+## Files changed
+ packages/jet_cad_2d/lib/jet_cad_2d.dart            |  1 +
+ .../jet_cad_2d/lib/src/codec/schema_version.dart   |  6 +-
+ .../jet_cad_2d/lib/src/document/text_scalars.dart  | 11 +++
+ .../jet_cad_2d/lib/src/store/entity_store.dart     | 15 ++++
+ .../test/codec/schema_v3_fixture_test.dart         | 87 ++++++++++++++++++++++
+ .../jet_cad_2d/test/store/entity_store_test.dart   |  4 +
+ .../test/testing/generate_document_test.dart       |  7 +-
+ 7 files changed, 128 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/jet_cad_2d.dart b/packages/jet_cad_2d/lib/jet_cad_2d.dart
+index b8e3f95..ba92180 100644
+--- a/packages/jet_cad_2d/lib/jet_cad_2d.dart
++++ b/packages/jet_cad_2d/lib/jet_cad_2d.dart
+@@ -19,20 +19,21 @@ export 'src/document/draft_document.dart';
+ export 'src/document/extents.dart';
+ export 'src/document/header.dart';
+ export 'src/document/node.dart';
+ export 'src/document/origin_component.dart';
+ export 'src/document/raw_data.dart';
+ export 'src/document/resolved_style.dart';
+ export 'src/document/style.dart';
+ export 'src/document/style_context.dart';
+ export 'src/document/style_resolver.dart';
+ export 'src/document/tables.dart';
++export 'src/document/text_scalars.dart';
+ export 'src/document/tree.dart';
+ export 'src/document/undo.dart';
+ export 'src/document/validate.dart';
+ export 'src/geometry/aabb2.dart';
+ export 'src/geometry/dasher.dart';
+ export 'src/geometry/distance.dart';
+ export 'src/geometry/primitives.dart';
+ export 'src/geometry/segment_clip.dart';
+ export 'src/geometry/transform2.dart';
+ export 'src/index/container_index.dart';
+diff --git a/packages/jet_cad_2d/lib/src/codec/schema_version.dart b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+index e77283f..3643d50 100644
+--- a/packages/jet_cad_2d/lib/src/codec/schema_version.dart
++++ b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+@@ -1,16 +1,20 @@
+ /// The document schema this build writes.
+ ///
+ /// Bump it whenever the on-disk shape changes, and add a migration for the
+ /// previous value. An unversioned document is not readable: guessing at the
+ /// shape of a file that never declared one is how silent corruption starts.
+-const int kSchemaVersion = 3;
++///
++/// 4: `EntityRecord.toJson` gained `text`, `tag`, `textStyle` and
++/// `textAttrs`; `EntityRecord.fromJson` defaults all four when absent, which
++/// is the whole of the v3->v4 migration.
++const int kSchemaVersion = 4;
+ 
+ class SchemaVersionError implements Exception {
+   final Object? found;
+   const SchemaVersionError(this.found);
+ 
+   @override
+   String toString() => found == null
+       ? 'SchemaVersionError: document has no schemaVersion'
+       : 'SchemaVersionError: unsupported schemaVersion $found '
+           '(this build writes $kSchemaVersion)';
+diff --git a/packages/jet_cad_2d/lib/src/document/text_scalars.dart b/packages/jet_cad_2d/lib/src/document/text_scalars.dart
+new file mode 100644
+index 0000000..ce0da4a
+--- /dev/null
++++ b/packages/jet_cad_2d/lib/src/document/text_scalars.dart
+@@ -0,0 +1,11 @@
++import '../store/geometry_store.dart';
++
++/// Reads a scalar that a document written before Plan 3c does not carry.
++///
++/// A text entity written at schema 3 holds exactly one scalar — its height —
++/// so `scalars[1..3]` is a `RangeError` on every such document. The payload is
++/// **not** padded on load: padding would write geometry the file did not
++/// contain and would make `save(load(save(d))) == save(d)` compare a padded
++/// payload against an unpadded one.
++double scalarOr(GeometryPayload payload, int index, double fallback) =>
++    index < payload.scalars.length ? payload.scalars[index] : fallback;
+diff --git a/packages/jet_cad_2d/lib/src/store/entity_store.dart b/packages/jet_cad_2d/lib/src/store/entity_store.dart
+index 0ea328a..86e6be7 100644
+--- a/packages/jet_cad_2d/lib/src/store/entity_store.dart
++++ b/packages/jet_cad_2d/lib/src/store/entity_store.dart
+@@ -132,20 +132,24 @@ class EntityRecord {
+         'handle': handle.toJson(),
+         'owner': owner.toJson(),
+         'kind': kind.name,
+         'layer': layer.toJson(),
+         'linetype': linetype.toJson(),
+         'linetypeScale': linetypeScale,
+         'color': encodeColor(color),
+         'lineweight': lineweight,
+         'transparency': transparency,
+         'flags': flags,
++        'text': text,
++        'tag': tag,
++        'textStyle': textStyle.toJson(),
++        'textAttrs': textAttrs,
+       };
+ 
+   /// [geomIndex] is always 0 on the way back in, whether or not the source
+   /// names one. Files written before `geomIndex` was dropped from [toJson] do
+   /// carry it, and that stored value is deliberately discarded rather than
+   /// honoured: it describes the allocation history of the store that saved it,
+   /// which has nothing to do with the store loading it. The caller re-points
+   /// the record with [copyWith] at the slot its geometry actually receives.
+   static EntityRecord fromJson(Object? json) {
+     if (json is! Map) {
+@@ -156,20 +160,31 @@ class EntityRecord {
+       owner: Handle.fromJson(json['owner']),
+       kind: EntityKind.values.byName(json['kind']! as String),
+       layer: Handle.fromJson(json['layer']),
+       linetype: Handle.fromJson(json['linetype']),
+       linetypeScale: (json['linetypeScale']! as num).toDouble(),
+       geomIndex: 0,
+       color: decodeColor(json['color']! as int),
+       lineweight: json['lineweight']! as int,
+       transparency: json['transparency']! as int,
+       flags: json['flags']! as int,
++      // Absent in a schema-3 document — these four defaults *are* the
++      // v3->v4 migration. `DraftDocumentCodec.decode` accepts anything from
++      // schema 1 through the current version, so a document written before
++      // Plan 3c reaches this constructor with none of these keys set, and
++      // the record ends up exactly as if it had always carried empty text.
++      text: json['text'] as String? ?? '',
++      tag: json['tag'] as String? ?? '',
++      textStyle: json['textStyle'] == null
++          ? ReservedHandles.standardTextStyle
++          : Handle.fromJson(json['textStyle']),
++      textAttrs: json['textAttrs'] as int? ?? 0,
+     );
+   }
+ 
+   @override
+   bool operator ==(Object other) =>
+       other is EntityRecord &&
+       other.handle == handle &&
+       other.owner == owner &&
+       other.kind == kind &&
+       other.layer == layer &&
+diff --git a/packages/jet_cad_2d/test/codec/schema_v3_fixture_test.dart b/packages/jet_cad_2d/test/codec/schema_v3_fixture_test.dart
+new file mode 100644
+index 0000000..9c226e3
+--- /dev/null
++++ b/packages/jet_cad_2d/test/codec/schema_v3_fixture_test.dart
+@@ -0,0 +1,87 @@
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++
++/// A hand-built schema-3 document: one text entity carrying exactly the one
++/// scalar (height) that schema 3 wrote for TEXT. The top-level shape mirrors
++/// what `DraftDocumentCodec.encode(DraftDocument.empty())` actually produces
++/// (plain integer handles, not hex strings, and `definitions`/`root`/`nodes`
++/// rather than a nested `tree`) — this package's codec, not the illustrative
++/// shape a plan brief sketches from memory.
++const _v3Document = '''
++{
++  "schemaVersion": 3,
++  "header": {"units": "unitless", "scale": 1.0, "customVariables": {}},
++  "tables": {
++    "layers": [
++      {"handle": 1, "name": "0", "color": 7, "linetype": 4,
++       "lineweight": -3, "transparency": 0, "visible": true, "locked": false}
++    ],
++    "linetypes": [
++      {"handle": 2, "name": "ByLayer", "description": "",
++       "pattern": {"dashes": [], "totalLength": 0.0}},
++      {"handle": 3, "name": "ByBlock", "description": "",
++       "pattern": {"dashes": [], "totalLength": 0.0}},
++      {"handle": 4, "name": "Continuous", "description": "Solid line",
++       "pattern": {"dashes": [], "totalLength": 0.0}}
++    ],
++    "textStyles": [
++      {"handle": 5, "name": "Standard", "fontFamily": "Roboto",
++       "widthFactor": 1.0, "obliqueAngle": 0.0, "fixedHeight": 0.0,
++       "isShx": false, "shxFileName": ""}
++    ],
++    "patterns": [],
++    "dimStyles": [],
++    "appIds": []
++  },
++  "definitions": [],
++  "root": 17,
++  "nodes": [
++    {"type": "group", "handle": 17, "parent": 0,
++     "transform": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0], "visible": true,
++     "children": [], "exportAsDxfGroup": false}
++  ],
++  "entities": [
++    {
++      "record": {
++        "handle": 100, "owner": 17, "kind": "text", "layer": 1,
++        "linetype": 2, "linetypeScale": 1.0, "color": -1, "lineweight": -3,
++        "transparency": -1, "flags": 0
++      },
++      "geometry": {"coords": [10.0, 20.0], "scalars": [100.0]}
++    }
++  ],
++  "components": {},
++  "rawData": {},
++  "handleSeed": 101
++}
++''';
++
++void main() {
++  test('a version-3 document loads under the version-4 build', () {
++    final doc = DraftDocumentCodec.decodeString(_v3Document);
++    final slot = doc.entities.liveSlots.single;
++    expect(doc.entities.textAt(slot), '');
++    expect(doc.entities.tagAt(slot), '');
++    expect(doc.entities.textStyleAt(slot), ReservedHandles.standardTextStyle);
++    expect(doc.entities.textAttrsAt(slot), 0);
++    // One scalar, not four. Reading scalars[1] must not throw.
++    final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
++    expect(scalarOr(payload, 1, 0.0), 0.0);
++    expect(scalarOr(payload, 0, 0.0), 100.0);
++  });
++
++  test('a version-3 document survives a round-trip unpadded', () {
++    final once =
++        DraftDocumentCodec.encodeToString(DraftDocumentCodec.decodeString(
++      _v3Document,
++    ));
++    final twice =
++        DraftDocumentCodec.encodeToString(DraftDocumentCodec.decodeString(
++      once,
++    ));
++    expect(twice, once);
++    // The payload is not rewritten on load: padding it would change geometry
++    // the file never contained.
++    expect(once.contains('"scalars":[100.0]'), isTrue);
++  });
++}
+diff --git a/packages/jet_cad_2d/test/store/entity_store_test.dart b/packages/jet_cad_2d/test/store/entity_store_test.dart
+index 1d8de3a..a619395 100644
+--- a/packages/jet_cad_2d/test/store/entity_store_test.dart
++++ b/packages/jet_cad_2d/test/store/entity_store_test.dart
+@@ -161,20 +161,24 @@ void main() {
+       'handle',
+       'owner',
+       'kind',
+       'layer',
+       'linetype',
+       'linetypeScale',
+       'color',
+       'lineweight',
+       'transparency',
+       'flags',
++      'text',
++      'tag',
++      'textStyle',
++      'textAttrs',
+     ]);
+   });
+ 
+   test('text fields round-trip through the store and clear on remove', () {
+     final store = EntityStore();
+     final slot = store.add(EntityRecord(
+       handle: const Handle(1),
+       owner: const Handle(100),
+       kind: EntityKind.text,
+       layer: ReservedHandles.layerZero,
+diff --git a/packages/jet_cad_2d/test/testing/generate_document_test.dart b/packages/jet_cad_2d/test/testing/generate_document_test.dart
+index a01defd..f910c0d 100644
+--- a/packages/jet_cad_2d/test/testing/generate_document_test.dart
++++ b/packages/jet_cad_2d/test/testing/generate_document_test.dart
+@@ -39,24 +39,27 @@ void main() {
+     // These two numbers were taken from this file's serialisation *before* the
+     // corpus extensions were written, and they are the whole guard on them.
+     // Every extension draws from its own `Random` and allocates no handle
+     // while it is off, so a default that leaks — one extra `nextDouble()`, one
+     // extra node — shifts every subsequent value in the document and moves
+     // these. Plan 2's gate note is only reproducible while they hold.
+     //
+     // Deliberately not the structural assertions the plan sketches (one layer,
+     // every colour ByLayer, every node an instance under the root). Those pass
+     // on a document whose coordinates have all moved.
++    //
++    // Re-baselined in Plan 3c Task 1: the four text keys changed the
++    // serialisation.
+     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
+-        4478729767976143987);
++        -4223683079839955300);
+     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
+-        7265843217140545300);
++        -1538364231202837705);
+   });
+ 
+   test('defaults reproduce the Plan 2 corpus structurally too', () {
+     // The fingerprint says "unchanged" but not "unchanged in what way". This
+     // names the properties the extensions must each leave alone, so a failure
+     // says which one moved.
+     final doc = generateDocument(2000, definitionCount: 20);
+     expect(doc.tables.layers.records, hasLength(1));
+     expect(doc.tables.linetypes.records, hasLength(3));
+     for (final slot in doc.entities.liveSlots) {

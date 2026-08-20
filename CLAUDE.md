@@ -12,7 +12,10 @@ task-by-task with a fresh implementer and an independent reviewer per task.
 - Specs (binding authority): `docs/superpowers/specs/`
 - Plans (what the implementer follows): `docs/superpowers/plans/`
 - Measurement and mutation notes (results of record): `docs/superpowers/notes/`
-- Per-task ledger, briefs and reports: `.superpowers/sdd/<plan-slug>/` (git-ignored)
+- Per-task ledger, briefs and reports, **while a plan is in flight**:
+  `.superpowers/sdd/<plan-slug>/` (git-ignored, lives in the worktree)
+- The same material for a **merged** plan: `docs/superpowers/ledgers/` —
+  archived on merge, never appended to afterwards
 
 **Read the current plan before touching code.** It carries the technologies,
 the file structure, the global constraints and the exit gate for the work in

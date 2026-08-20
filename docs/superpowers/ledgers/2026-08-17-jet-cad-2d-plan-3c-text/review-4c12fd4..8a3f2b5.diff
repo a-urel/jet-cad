@@ -1,0 +1,723 @@
+# Review package: 4c12fd4..HEAD
+
+## Commits
+8a3f2b5 feat(jet_cad_2d): add SetEntityTextCommand with an index-dirtying inverse
+0ad927b feat(jet_cad_2d): bound text by its laid-out box at every call site
+
+## Files changed
+ packages/jet_cad_2d/lib/src/document/commands.dart |  44 +++++++++
+ .../lib/src/document/draft_document.dart           |   5 +-
+ packages/jet_cad_2d/lib/src/document/extents.dart  |  18 +++-
+ .../jet_cad_2d/lib/src/index/container_index.dart  |   5 +-
+ .../jet_cad_2d/lib/src/index/spatial_index.dart    |   5 +-
+ .../jet_cad_2d/test/document/commands_test.dart    | 101 +++++++++++++++++++++
+ .../jet_cad_2d/test/document/extents_test.dart     |  41 +++++++--
+ .../test/index/snap_centre_index_test.dart         |  10 +-
+ .../jet_cad_2d/test/index/text_overlay_test.dart   |  71 +++++++++++++++
+ packages/jet_cad_2d/test/invariants/corpus.dart    |   9 +-
+ .../test/invariants/reference_query.dart           |  10 +-
+ .../jet_cad_2d_flutter/lib/src/reference_walk.dart |   5 +-
+ 12 files changed, 304 insertions(+), 20 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/document/commands.dart b/packages/jet_cad_2d/lib/src/document/commands.dart
+index 865ee7f..04cb779 100644
+--- a/packages/jet_cad_2d/lib/src/document/commands.dart
++++ b/packages/jet_cad_2d/lib/src/document/commands.dart
+@@ -90,20 +90,64 @@ class RemoveEntityCommand extends DraftCommand {
+     target.entities.remove(slot);
+     target.geometry.remove(record.geomIndex);
+     target.invalidateDerived();
+     return CommandResult(
+       inverse: AddEntityCommand(record: record, payload: payload),
+       touched: {handle},
+     );
+   }
+ }
+ 
++/// Replaces a TEXT or ATTRIB entity's displayed string, and its tag.
++///
++/// Minimal stand-in for the fuller command a later task builds out: what
++/// matters here is that an edit goes through the command path rather than a
++/// direct column write, because that is what lets `SpatialIndex`'s dirty
++/// overlay pick it up — see `entityBounds`' text case, which reads exactly
++/// the fields this command writes.
++///
++/// Rejects a kind other than [EntityKind.text] or [EntityKind.attrib]: `text`
++/// and `tag` are meaningless on every other entity, and letting this command
++/// silently write them there would let a document accumulate values nothing
++/// else ever reads.
++class SetEntityTextCommand extends DraftCommand {
++  final Handle handle;
++  final String text;
++  final String tag;
++
++  SetEntityTextCommand(this.handle, this.text, this.tag);
++
++  @override
++  Capability get capability => Capability.geometry;
++
++  @override
++  String get label => 'Edit text';
++
++  @override
++  CommandResult apply(CommandTarget target) {
++    final slot = target.entities.slotOf(handle);
++    if (slot == null) {
++      throw StateError('no entity with handle ${handle.toHex()}');
++    }
++    final record = target.entities.read(slot);
++    if (record.kind != EntityKind.text && record.kind != EntityKind.attrib) {
++      throw StateError('${handle.toHex()} is not a text or attrib entity');
++    }
++    target.entities.replace(slot, record.copyWith(text: text, tag: tag));
++    target.invalidateDerived();
++    return CommandResult(
++      inverse: SetEntityTextCommand(handle, record.text, record.tag),
++      touched: {handle},
++    );
++  }
++}
++
+ /// Replaces a container's transform.
+ ///
+ /// Distinct from editing geometry, which is what makes the `transform` and
+ /// `geometry` capabilities separable at all: leaf entities carry no transform
+ /// of their own, so moving an instance and editing coordinates are already
+ /// distinct operations. That separation is what lets a point-of-sale runtime
+ /// move a table but not draw a wall.
+ ///
+ /// All-or-nothing: the missing-node check runs before anything is written, and
+ /// [DocumentTree.replaceNode] runs its own cycle guard before it touches
+diff --git a/packages/jet_cad_2d/lib/src/document/draft_document.dart b/packages/jet_cad_2d/lib/src/document/draft_document.dart
+index 0c59318..96b7f0a 100644
+--- a/packages/jet_cad_2d/lib/src/document/draft_document.dart
++++ b/packages/jet_cad_2d/lib/src/document/draft_document.dart
+@@ -221,21 +221,24 @@ class DraftDocument implements CommandTarget {
+ 
+     final held = _childrenOf(container, leavesByOwner);
+     var box = Aabb2.empty();
+ 
+     for (final slot in held.leafSlots) {
+       final record = entities.read(slot);
+       box = box.union(entityBounds(
+         kind: record.kind,
+         payload: geometry.read(record.geomIndex),
+         measurer: textMeasurer,
+-        textStyle: ReservedHandles.standardTextStyle,
++        textStyle: tables.textStyles[record.textStyle] ??
++            tables.textStyles[ReservedHandles.standardTextStyle]!,
++        textAttrs: record.textAttrs,
++        text: record.text,
+       ));
+     }
+ 
+     for (final child in held.childNodes) {
+       switch (tree[child]!) {
+         case GroupNode(:final transform):
+           box = box.union(
+               _boundsOfContainer(child, visiting, memo, leavesByOwner)
+                   .transformedBy(transform));
+         case InstanceNode(:final definition, :final transform):
+diff --git a/packages/jet_cad_2d/lib/src/document/extents.dart b/packages/jet_cad_2d/lib/src/document/extents.dart
+index 9ac88dc..95ac5e3 100644
+--- a/packages/jet_cad_2d/lib/src/document/extents.dart
++++ b/packages/jet_cad_2d/lib/src/document/extents.dart
+@@ -1,28 +1,36 @@
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
+-import '../core/handle.dart';
+ import '../geometry/aabb2.dart';
+ import '../geometry/primitives.dart';
+ import '../store/entity_store.dart';
+ import '../store/geometry_store.dart';
++import 'tables.dart';
++import 'text_geometry.dart';
+ import 'text_metrics.dart';
+ 
+ /// Bounds one entity in its **owner's** space.
+ ///
+ /// Callers transform the result into the enclosing space; this function knows
+ /// geometry, not placement.
++///
++/// Takes the [TextStyleRecord] itself, not a style handle, because
++/// [TextStyleRecord.fixedHeight] and the per-entity override bits in
++/// [textAttrs] cannot be resolved from a handle alone, and giving this
++/// function a document dependency so it could look one up would be worse:
++/// every caller already holds the document and can resolve the record once.
+ Aabb2 entityBounds({
+   required EntityKind kind,
+   required GeometryPayload payload,
+   required TextMeasurer measurer,
+-  required Handle textStyle,
++  required TextStyleRecord textStyle,
++  int textAttrs = 0,
+   String text = '',
+ }) {
+   switch (kind) {
+     case EntityKind.point:
+     case EntityKind.line:
+     case EntityKind.polyline:
+       var box = Aabb2.empty();
+       for (var i = 0; i < payload.pointCount; i++) {
+         box = box.expandedToPoint(payload.pointAt(i));
+       }
+@@ -39,14 +47,16 @@ Aabb2 entityBounds({
+     case EntityKind.arc:
+       return arcBounds(
+         payload.pointAt(0),
+         payload.scalars[0],
+         payload.scalars[1],
+         payload.scalars[2],
+       );
+ 
+     case EntityKind.text:
+     case EntityKind.attrib:
+-      // Task 4 replaces this.
+-      return Aabb2(payload.pointAt(0), payload.pointAt(0));
++      final attrs = resolveTextAttributes(payload, textAttrs, textStyle);
++      final metrics = measurer.measure(text: text, style: textStyle);
++      return textLocalBounds(attrs, metrics).transformedBy(
++          textLocalTransform(attrs, metrics, payload.pointAt(0)));
+   }
+ }
+diff --git a/packages/jet_cad_2d/lib/src/index/container_index.dart b/packages/jet_cad_2d/lib/src/index/container_index.dart
+index 63c8549..5934287 100644
+--- a/packages/jet_cad_2d/lib/src/index/container_index.dart
++++ b/packages/jet_cad_2d/lib/src/index/container_index.dart
+@@ -87,21 +87,24 @@ class ContainerIndex {
+         ..add(b.maxY);
+     }
+ 
+     void addLeaf(int slot, Transform2 composed) {
+       final record = doc.entities.read(slot);
+       final payload = doc.geometry.read(record.geomIndex);
+       final leafBox = entityBounds(
+         kind: record.kind,
+         payload: payload,
+         measurer: doc.textMeasurer,
+-        textStyle: ReservedHandles.standardTextStyle,
++        textStyle: doc.tables.textStyles[record.textStyle] ??
++            doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
++        textAttrs: record.textAttrs,
++        text: record.text,
+       ).transformedBy(composed);
+       leafSlots.add(slot);
+       addBox(leafBoxes, leafBox);
+       bounds = bounds.union(leafBox);
+       // Identity is not stored: see [_leafTransforms]. `isIdentity` is
+       // bit-exact, so a composed transform that is identity only to within
+       // rounding is kept and multiplied through — one redundant multiply per
+       // candidate, never a wrong answer.
+       if (!composed.isIdentity) leafTransforms[slot] = composed;
+       ownSlack = ownSlack.union(
+diff --git a/packages/jet_cad_2d/lib/src/index/spatial_index.dart b/packages/jet_cad_2d/lib/src/index/spatial_index.dart
+index 0c83efa..1cebbef 100644
+--- a/packages/jet_cad_2d/lib/src/index/spatial_index.dart
++++ b/packages/jet_cad_2d/lib/src/index/spatial_index.dart
+@@ -2352,21 +2352,24 @@ class SpatialIndex {
+       rebuildAll();
+       return;
+     }
+ 
+     final record = document.entities.read(slot);
+     final payload = document.geometry.read(record.geomIndex);
+     final current = entityBounds(
+       kind: record.kind,
+       payload: payload,
+       measurer: document.textMeasurer,
+-      textStyle: ReservedHandles.standardTextStyle,
++      textStyle: document.tables.textStyles[record.textStyle] ??
++          document.tables.textStyles[ReservedHandles.standardTextStyle]!,
++      textAttrs: record.textAttrs,
++      text: record.text,
+     );
+     // The indexed box is in container space; if this entity sits under a
+     // flattened group — or is an ATTRIB owned directly by an instance node —
+     // the two differ by that chain's composed transform. Comparing against
+     // the composed box is what makes an unchanged entity register as
+     // unchanged.
+     final composed = _groupTransformOf(owner, index.container);
+     final expected = current.transformedBy(composed);
+ 
+     // Before any of the unchanged/revive shortcuts below: the narrow phase
+diff --git a/packages/jet_cad_2d/test/document/commands_test.dart b/packages/jet_cad_2d/test/document/commands_test.dart
+index 2aa04da..d5e4a27 100644
+--- a/packages/jet_cad_2d/test/document/commands_test.dart
++++ b/packages/jet_cad_2d/test/document/commands_test.dart
+@@ -394,11 +394,112 @@ void main() {
+       target: target,
+       permissions: DraftPermissions.runtime,
+     );
+     dispatcher.execute(SetComponentCommand<OriginComponent>(
+       const Handle(1000),
+       const OriginComponent(source: SourceKind.native, id: 'x'),
+     ));
+     expect(
+         target.components.get<OriginComponent>(const Handle(1000)), isNotNull);
+   });
++
++  group('SetEntityTextCommand', () {
++    // Ruling 5: the briefs' snippets reference an undefined local helper for
++    // building a text record; this is that helper, written out.
++    EntityRecord textRecord(
++      Handle handle,
++      Handle owner,
++      Handle textStyle, {
++      String text = 'A',
++      String tag = '',
++    }) =>
++        EntityRecord(
++          handle: handle,
++          owner: owner,
++          kind: EntityKind.text,
++          layer: ReservedHandles.layerZero,
++          linetype: ReservedHandles.byLayerLinetype,
++          linetypeScale: 1.0,
++          geomIndex: 0,
++          color: const ByLayerColor(),
++          lineweight: kByLayer,
++          transparency: kByLayer,
++          flags: 0,
++          text: text,
++          tag: tag,
++          textStyle: textStyle,
++        );
++
++    test(
++        'execute widens the box and sets text/tag; undo restores both; redo '
++        're-applies', () {
++      final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
++      final style = doc.tables.textStyles.byName('STANDARD')!;
++      final handle = doc.handleSeed.next();
++      doc.commands.execute(AddEntityCommand(
++        record: textRecord(handle, doc.rootHandle, style.handle),
++        payload: GeometryPayload(
++          coords: Float64List.fromList([0, 0]),
++          scalars: Float64List.fromList([200, 0, 0, 0]),
++        ),
++      ));
++
++      final index = SpatialIndex(doc);
++      addTearDown(index.dispose);
++      final slot = doc.entities.slotOf(handle)!;
++
++      // The index is freshly rebuilt by the SpatialIndex constructor, so the
++      // leaf is live in the packed tree and `boxOfLeaf` alone is enough here.
++      final before = index.rootIndex.boxOfLeaf(slot)!.maxX;
++
++      doc.commands.execute(SetEntityTextCommand(handle, 'AAAAAAAA', 'TAG'));
++      expect(doc.entities.textAt(slot), 'AAAAAAAA');
++      expect(doc.entities.tagAt(slot), 'TAG');
++
++      // Per Ruling 10: editing dirties the leaf, which removes it from the
++      // packed tree and parks it in the dirty overlay, so `boxOfLeaf` alone
++      // would see null here. Follow the codebase's own idiom instead of
++      // "fixing" `boxOfLeaf` to answer for dirty leaves.
++      final afterExecute =
++          index.rootIndex.boxOfLeaf(slot) ?? index.rootIndex.dirty.boxOf(slot);
++      expect(afterExecute!.maxX, greaterThan(before));
++
++      doc.commands.undo();
++      expect(doc.entities.textAt(slot), 'A');
++      expect(doc.entities.tagAt(slot), '');
++      final afterUndo =
++          index.rootIndex.boxOfLeaf(slot) ?? index.rootIndex.dirty.boxOf(slot);
++      expect(afterUndo!.maxX, closeTo(before, 1e-9));
++
++      doc.commands.redo();
++      expect(doc.entities.textAt(slot), 'AAAAAAAA');
++      expect(doc.entities.tagAt(slot), 'TAG');
++      final afterRedo =
++          index.rootIndex.boxOfLeaf(slot) ?? index.rootIndex.dirty.boxOf(slot);
++      expect(afterRedo!.maxX, closeTo(afterExecute.maxX, 1e-9));
++    });
++
++    test('rejects an unknown handle', () {
++      final target = TestTarget();
++      final dispatcher = CommandDispatcher(target: target);
++      expect(
++        () => dispatcher
++            .execute(SetEntityTextCommand(const Handle(9999), 'X', '')),
++        throwsA(isA<StateError>()),
++      );
++    });
++
++    test('rejects a non-text, non-attrib entity kind', () {
++      final target = TestTarget();
++      final dispatcher = CommandDispatcher(target: target);
++      final handle = target.handleSeed.next();
++      dispatcher.execute(AddEntityCommand(
++        record: recordFor(handle, target.rootHandle), // EntityKind.line
++        payload: line(0, 0, 1, 1),
++      ));
++      expect(
++        () => dispatcher.execute(SetEntityTextCommand(handle, 'X', '')),
++        throwsA(isA<StateError>()),
++      );
++    });
++  });
+ }
+diff --git a/packages/jet_cad_2d/test/document/extents_test.dart b/packages/jet_cad_2d/test/document/extents_test.dart
+index 6c659d9..d717f63 100644
+--- a/packages/jet_cad_2d/test/document/extents_test.dart
++++ b/packages/jet_cad_2d/test/document/extents_test.dart
+@@ -7,70 +7,97 @@ import 'package:vector_math/vector_math_64.dart';
+ 
+ GeometryPayload payload(List<double> coords,
+         [List<double> scalars = const []]) =>
+     GeometryPayload(
+       coords: Float64List.fromList(coords),
+       scalars: Float64List.fromList(scalars),
+     );
+ 
+ void main() {
+   const measurer = InsertionPointMeasurer();
++  const style = TextStyleRecord(
++      handle: Handle(7), name: 'STANDARD', fontFamily: 'Roboto');
+ 
+   test('line bounds its endpoints', () {
+     final box = entityBounds(
+       kind: EntityKind.line,
+       payload: payload([0, 0, 10, -5]),
+       measurer: measurer,
+-      textStyle: ReservedHandles.standardTextStyle,
++      textStyle: style,
+     );
+     expect(box.min, Vector2(0, -5));
+     expect(box.max, Vector2(10, 0));
+   });
+ 
+   test('circle bounds centre plus radius, not just the centre point', () {
+     final box = entityBounds(
+       kind: EntityKind.circle,
+       payload: payload([100, 50], [10]),
+       measurer: measurer,
+-      textStyle: ReservedHandles.standardTextStyle,
++      textStyle: style,
+     );
+     expect(box.min, Vector2(90, 40));
+     expect(box.max, Vector2(110, 60));
+   });
+ 
+   test('arc includes an axis extreme inside its sweep', () {
+     // The same trap arcBounds exists to avoid, reached through the entity path.
+     final box = entityBounds(
+       kind: EntityKind.arc,
+       payload: payload([0, 0], [1, -math.pi / 4, math.pi / 2]),
+       measurer: measurer,
+-      textStyle: ReservedHandles.standardTextStyle,
++      textStyle: style,
+     );
+     expect(box.max.x, closeTo(1, 1e-12));
+   });
+ 
+   test('polyline bounds every vertex', () {
+     final box = entityBounds(
+       kind: EntityKind.polyline,
+       payload: payload([0, 0, 5, 12, -3, 4]),
+       measurer: measurer,
+-      textStyle: ReservedHandles.standardTextStyle,
++      textStyle: style,
+     );
+     expect(box.min, Vector2(-3, 0));
+     expect(box.max, Vector2(5, 12));
+   });
+ 
+   test('text uses the injected measurer, so the engine needs no font stack',
+       () {
+     final box = entityBounds(
+       kind: EntityKind.text,
+       payload: payload([7, 8], [2.5]),
+       measurer: measurer,
+-      textStyle: ReservedHandles.standardTextStyle,
++      textStyle: style,
+       text: 'Table 12',
+     );
+-    // The default measurer contributes the insertion point only; a real layout
+-    // arrives with the widget layer.
++    // InsertionPointMeasurer returns TextMetrics.zero regardless of the
++    // string, so height scale collapses to zero and the laid-out box
++    // collapses to the insertion point; a real layout arrives with the
++    // widget layer's measurer.
+     expect(box.min, Vector2(7, 8));
+     expect(box.max, Vector2(7, 8));
+   });
++
++  test(
++      'text with a real measurer is bound by its laid-out glyph box, not '
++      'the insertion point', () {
++    final box = entityBounds(
++      kind: EntityKind.text,
++      payload: payload([7, 8], [200]),
++      measurer: const MetricModelMeasurer(),
++      textStyle: style,
++      text: 'WC',
++    );
++    // Hand-derived, not re-run through the production formulas: two-char
++    // 'WC' under MetricModelMeasurer's defaults (advanceRatio 0.55, ascentRatio
++    // 0.8, descentRatio 0.2, capRatio 0.7 of a 100px em) gives advanceWidth
++    // 110, ascent 80, descent 20, capHeight 70. Left/baseline justification
++    // (default textAttrs = 0) puts the anchor at the box's bottom-left, and
++    // height 200 over capHeight 70 scales everything by 20/7.
++    const scale = 200 / 70.0;
++    expect(box.min.x, closeTo(7, 1e-9));
++    expect(box.min.y, closeTo(8 - 20 * scale, 1e-9));
++    expect(box.max.x, closeTo(7 + 110 * scale, 1e-9));
++    expect(box.max.y, closeTo(8 + 80 * scale, 1e-9));
++  });
+ }
+diff --git a/packages/jet_cad_2d/test/index/snap_centre_index_test.dart b/packages/jet_cad_2d/test/index/snap_centre_index_test.dart
+index f1f55c5..0a3ea03 100644
+--- a/packages/jet_cad_2d/test/index/snap_centre_index_test.dart
++++ b/packages/jet_cad_2d/test/index/snap_centre_index_test.dart
+@@ -114,21 +114,24 @@ Handle _addNarrowArc(DraftDocument doc, Handle owner, double cx, double cy) =>
+ /// every assertion below meaningful. Checked once, here, rather than asserted
+ /// in prose.
+ void _expectCentreOutsideItsOwnBox(DraftDocument doc, Handle arc) {
+   final slot = doc.entities.slotOf(arc)!;
+   final record = doc.entities.read(slot);
+   final payload = doc.geometry.peek(record.geomIndex);
+   final box = entityBounds(
+     kind: record.kind,
+     payload: payload,
+     measurer: doc.textMeasurer,
+-    textStyle: ReservedHandles.standardTextStyle,
++    textStyle: doc.tables.textStyles[record.textStyle] ??
++        doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
++    textAttrs: record.textAttrs,
++    text: record.text,
+   );
+   final cx = payload.coords[0], cy = payload.coords[1];
+   expect(cx >= box.minX && cx <= box.maxX && cy >= box.minY && cy <= box.maxY,
+       isFalse,
+       reason: 'fixture is not exercising anything: the arc centre ($cx, $cy) '
+           'is inside its own indexed box $box, so a tight query would reach '
+           'it with no centre tree at all');
+ }
+ 
+ void main() {
+@@ -347,21 +350,24 @@ void main() {
+     // prose: the freed slot really is reused, and the two boxes really are
+     // bit-identical.
+     expect(secondSlot, firstSlot,
+         reason: 'fixture must reuse the freed slot, or the revive path is '
+             'never reached');
+     final secondRecord = doc.entities.read(secondSlot);
+     final secondBox = entityBounds(
+       kind: secondRecord.kind,
+       payload: doc.geometry.peek(secondRecord.geomIndex),
+       measurer: doc.textMeasurer,
+-      textStyle: ReservedHandles.standardTextStyle,
++      textStyle: doc.tables.textStyles[secondRecord.textStyle] ??
++          doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
++      textAttrs: secondRecord.textAttrs,
++      text: secondRecord.text,
+     );
+     expect([secondBox.minX, secondBox.minY, secondBox.maxX, secondBox.maxY],
+         [firstBox.minX, firstBox.minY, firstBox.maxX, firstBox.maxY],
+         reason: 'fixture must produce a bit-identical box, or `_sameBox` '
+             'rejects it on the box alone and the centre term is never the '
+             'thing under test');
+ 
+     final atNew = SnapResult();
+     index.snapInto(Vector2(0.0, sin1), 0.05, centreOnly, atNew);
+     expect(atNew.found, isTrue,
+diff --git a/packages/jet_cad_2d/test/index/text_overlay_test.dart b/packages/jet_cad_2d/test/index/text_overlay_test.dart
+new file mode 100644
+index 0000000..eb5b738
+--- /dev/null
++++ b/packages/jet_cad_2d/test/index/text_overlay_test.dart
+@@ -0,0 +1,71 @@
++// Pins `spatial_index.dart`'s incremental dirty-overlay path to resolve text
++// exactly the way a full rebuild does. Before this task, the overlay path
++// hard-coded `text: ''` when re-deriving a leaf's box, so an edited text
++// entity kept its old, degenerate box on the overlay while a rebuilt index
++// gave it the correct laid-out one -- "the box is not where the glyphs are",
++// on the path an editing session spends all its time in.
++
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++
++void main() {
++  test('an edited text has the same box in the overlay as after a rebuild', () {
++    final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
++    final style = doc.tables.textStyles.byName('STANDARD')!;
++    final handle = doc.handleSeed.next();
++    doc.commands.execute(AddEntityCommand(
++      record: EntityRecord(
++        handle: handle,
++        owner: doc.rootHandle,
++        kind: EntityKind.text,
++        layer: ReservedHandles.layerZero,
++        linetype: ReservedHandles.byLayerLinetype,
++        linetypeScale: 1.0,
++        geomIndex: 0,
++        color: const ByLayerColor(),
++        lineweight: kByLayer,
++        transparency: kByLayer,
++        flags: 0,
++        text: 'A',
++        textStyle: style.handle,
++      ),
++      payload: GeometryPayload(
++        coords: Float64List.fromList([1000, 2000]),
++        scalars: Float64List.fromList([200, 0, 0, 0]),
++      ),
++    ));
++
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    doc.commands
++        .execute(SetEntityTextCommand(handle, 'A MUCH LONGER LABEL', ''));
++
++    // Dirtying a leaf removes it from the packed R-tree and parks it in the
++    // dirty overlay, so `boxOfLeaf` alone answers null for an entity edited
++    // since the last rebuild. That is correct, not a defect -- the codebase's
++    // own idiom for reading a leaf's box regardless of which side it lives
++    // on is `boxOfLeaf(slot) ?? dirty.boxOf(slot)` (see spatial_index.dart's
++    // `_reconcileEntity`), so the test follows the same idiom rather than
++    // reading the packed tree directly.
++    final slot = doc.entities.slotOf(handle)!;
++    final incrementalOrNull =
++        index.rootIndex.boxOfLeaf(slot) ?? index.rootIndex.dirty.boxOf(slot);
++    expect(incrementalOrNull, isNotNull);
++    final incremental = incrementalOrNull!;
++    index.rebuildAll();
++    final rebuilt = index.rootIndex.boxOfLeaf(slot)!;
++
++    // The dirty-overlay path at spatial_index.dart's `_reconcileEntity` must
++    // resolve text the same way the full build does. Hard-coding `text: ''`
++    // there leaves an edited text in a degenerate box while a rebuilt one is
++    // correct -- on the path an editing session spends all its time in.
++    expect(incremental.minX, closeTo(rebuilt.minX, 1e-9));
++    expect(incremental.maxX, closeTo(rebuilt.maxX, 1e-9));
++    expect(incremental.minY, closeTo(rebuilt.minY, 1e-9));
++    expect(incremental.maxY, closeTo(rebuilt.maxY, 1e-9));
++    expect(rebuilt.maxX - rebuilt.minX, greaterThan(0.0));
++  });
++}
+diff --git a/packages/jet_cad_2d/test/invariants/corpus.dart b/packages/jet_cad_2d/test/invariants/corpus.dart
+index b49a23c..6427558 100644
+--- a/packages/jet_cad_2d/test/invariants/corpus.dart
++++ b/packages/jet_cad_2d/test/invariants/corpus.dart
+@@ -626,22 +626,29 @@ CorpusDocument _textDefaultMeasurer() =>
+       final doc = DraftDocument.empty();
+       final measurer = doc.textMeasurer;
+ 
+       void assertDegenerate(Handle h) {
+         final slot = doc.entities.slotOf(h)!;
+         final record = doc.entities.read(slot);
+         final box = entityBounds(
+           kind: record.kind,
+           payload: doc.geometry.peek(record.geomIndex),
+           measurer: measurer,
+-          textStyle: ReservedHandles.standardTextStyle,
++          textStyle: doc.tables.textStyles[record.textStyle] ??
++              doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
++          textAttrs: record.textAttrs,
++          text: record.text,
+         );
++        // Still degenerate after Task 4's change: InsertionPointMeasurer
++        // returns TextMetrics.zero regardless of the string, which collapses
++        // `textLocalTransform`'s height scale to zero and keeps the laid-out
++        // box a single point at the insertion point, exactly as before.
+         expect(box.minX, box.maxX,
+             reason: 'InsertionPointMeasurer must produce a zero-area box');
+         expect(box.minY, box.maxY);
+       }
+ 
+       for (var i = 0; i < 10; i++) {
+         final h = _addEntity(doc,
+             owner: doc.rootHandle,
+             kind: EntityKind.text,
+             coords: [i * 3.0, i * 2.0],
+diff --git a/packages/jet_cad_2d/test/invariants/reference_query.dart b/packages/jet_cad_2d/test/invariants/reference_query.dart
+index 3ac0ac8..714dbb7 100644
+--- a/packages/jet_cad_2d/test/invariants/reference_query.dart
++++ b/packages/jet_cad_2d/test/invariants/reference_query.dart
+@@ -204,21 +204,24 @@ List<Handle> referenceEntitiesInRect(
+     final owner = doc.entities.ownerAt(slot);
+     final composed = toRootSpace(doc, owner);
+     if (composed == null) continue; // inside a definition, not root-level
+     if (!evaluator.acceptsEntity(slot, filter)) continue;
+ 
+     final record = doc.entities.read(slot);
+     final box = entityBounds(
+       kind: record.kind,
+       payload: doc.geometry.peek(record.geomIndex),
+       measurer: doc.textMeasurer,
+-      textStyle: ReservedHandles.standardTextStyle,
++      textStyle: doc.tables.textStyles[record.textStyle] ??
++          doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
++      textAttrs: record.textAttrs,
++      text: record.text,
+     ).transformedBy(composed);
+ 
+     if (!box.isEmpty && box.intersects(world)) {
+       out.add(doc.entities.handleAt(slot));
+     }
+   }
+ 
+   out.sort((a, b) => a.value.compareTo(b.value));
+   return out;
+ }
+@@ -799,21 +802,24 @@ void _considerIntersections(
+     if (kind != EntityKind.line && kind != EntityKind.polyline) continue;
+     final owner = doc.entities.ownerAt(slot);
+     final composed = toRootSpace(doc, owner);
+     if (composed == null) continue;
+ 
+     final record = doc.entities.read(slot);
+     final box = entityBounds(
+       kind: kind,
+       payload: doc.geometry.peek(record.geomIndex),
+       measurer: doc.textMeasurer,
+-      textStyle: ReservedHandles.standardTextStyle,
++      textStyle: doc.tables.textStyles[record.textStyle] ??
++          doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
++      textAttrs: record.textAttrs,
++      text: record.text,
+     ).transformedBy(composed);
+     if (box.isEmpty || !box.intersects(queryBox)) continue;
+ 
+     candidates.add((doc.entities.handleAt(slot), slot, composed));
+   }
+   candidates.sort((a, b) => a.$1.value.compareTo(b.$1.value));
+ 
+   final n = candidates.length < kIntersectionCandidateCap
+       ? candidates.length
+       : kIntersectionCandidateCap;
+diff --git a/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart b/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
+index bbf0a60..b7f7431 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
+@@ -102,21 +102,24 @@ class _ReferenceWalk {
+   void _leaf(int slot, Transform2 placement, StyleContext ctx) {
+     final kind = doc.entities.kindAt(slot);
+     final payload = doc.geometry.peek(doc.entities.geomIndexAt(slot));
+     if (kind == EntityKind.text || kind == EntityKind.attrib) return;
+     if (doc.entities.flagsAt(slot) & EntityFlags.invisible != 0) return;
+ 
+     final box = entityBounds(
+       kind: kind,
+       payload: payload,
+       measurer: doc.textMeasurer,
+-      textStyle: ReservedHandles.standardTextStyle,
++      textStyle: doc.tables.textStyles[doc.entities.textStyleAt(slot)] ??
++          doc.tables.textStyles[ReservedHandles.standardTextStyle]!,
++      textAttrs: doc.entities.textAttrsAt(slot),
++      text: doc.entities.textAt(slot),
+     ).transformedBy(placement);
+     if (box.isEmpty || !box.intersects(world)) return;
+ 
+     final det = placement.determinant;
+     final localOrigin = det == 0.0 || !det.isFinite
+         ? Vector2.zero()
+         : placement.invert().transformPoint(origin);
+     final chain = camera.worldToScreenMatrix
+         .multiply(placement)
+         .multiply(Transform2.translation(localOrigin.x, localOrigin.y));

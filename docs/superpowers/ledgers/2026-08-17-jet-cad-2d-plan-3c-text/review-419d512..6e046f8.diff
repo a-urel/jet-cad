@@ -1,0 +1,1771 @@
+# Review package: 419d512..HEAD
+
+## Commits
+6e046f8 feat(jet_cad_2d): pick text by its laid-out box as HitKind.fill
+
+## Files changed
+ .../jet_cad_2d/lib/src/document/text_geometry.dart | 266 ++++++++++++-----
+ .../jet_cad_2d/lib/src/document/text_metrics.dart  |  58 ++--
+ .../jet_cad_2d/lib/src/index/spatial_index.dart    |  88 +++++-
+ .../jet_cad_2d/test/document/commands_test.dart    |   4 +-
+ .../test/document/draft_document_test.dart         |   2 +-
+ .../jet_cad_2d/test/document/extents_test.dart     |   2 +-
+ .../test/document/text_geometry_test.dart          |   2 +-
+ .../test/document/text_metrics_test.dart           |  17 +-
+ packages/jet_cad_2d/test/index/pick_test.dart      | 329 +++++++++++++++++++++
+ .../jet_cad_2d/test/index/text_overlay_test.dart   |   6 +-
+ packages/jet_cad_2d/test/invariants/corpus.dart    | 132 +++++++++
+ .../test/invariants/query_allocation_test.dart     |  97 +++++-
+ .../test/invariants/reference_query.dart           |  80 ++++-
+ 13 files changed, 954 insertions(+), 129 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/document/text_geometry.dart b/packages/jet_cad_2d/lib/src/document/text_geometry.dart
+index 3146b65..7510438 100644
+--- a/packages/jet_cad_2d/lib/src/document/text_geometry.dart
++++ b/packages/jet_cad_2d/lib/src/document/text_geometry.dart
+@@ -1,11 +1,12 @@
+ import 'dart:math' as math;
++import 'dart:typed_data';
+ 
+ import 'package:meta/meta.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../geometry/aabb2.dart';
+ import '../geometry/transform2.dart';
+ import '../store/geometry_store.dart';
+ import 'tables.dart';
+ import 'text_metrics.dart';
+ import 'text_scalars.dart';
+@@ -66,59 +67,217 @@ class ResolvedTextAttributes {
+   final TextJustifyV v;
+ 
+   /// True when the stored code was 72=3 (aligned) or 72=5 (fit) and was
+   /// downgraded to [TextJustifyH.left] here, because both need a second
+   /// alignment point the payload does not carry. This is how a later painter
+   /// task learns to raise a `Diagnostic` instead of silently drawing
+   /// left-justified text as if that were what the document asked for.
+   final bool fellBackFromAlignedOrFit;
+ }
+ 
+-/// Resolves one text entity's effective height, rotation, width factor,
+-/// oblique angle and justification against its [style].
++/// One text entity's layout — its resolved attributes, its composed local
++/// transform and its laid-out glyph box — in reusable, refillable storage.
+ ///
+-/// The single place these decisions are made: `entityBounds` and the painter
+-/// both call this rather than each re-deriving it, which is what keeps a
+-/// text entity's glyph box and its drawn glyphs from disagreeing.
+-ResolvedTextAttributes resolveTextAttributes(
+-    GeometryPayload payload, int textAttrs, TextStyleRecord style) {
+-  var h = TextJustifyH.values[textAttrs & 0xF];
+-  var fellBack = false;
+-  if (h == TextJustifyH.aligned || h == TextJustifyH.fit) {
+-    // Both need a second point the payload does not carry. The fallback
+-    // lives here, not in the painter, so the box and the glyphs agree.
+-    h = TextJustifyH.left;
+-    fellBack = true;
+-  }
+-  // DXF ignores the vertical code entirely when 72 = 4 (middle).
+-  final v = h == TextJustifyH.middle
+-      ? TextJustifyV.middle
+-      : TextJustifyV.values[(textAttrs >> 4) & 0xF];
++/// **Why a mutable form of all three exists.**
++/// `SpatialIndex._considerLeaf` lays out every text candidate a pick
++/// touches, and [resolveTextAttributes], [textLocalTransform] and
++/// [textLocalBounds] each hand back a fresh object: three allocations per
++/// *candidate*, which is exactly what the zero-allocation budget on
++/// `pickInto`/`snapInto` forbids and what
++/// `test/invariants/query_allocation_test.dart` measures. One of these,
++/// owned by the index and refilled per candidate, allocates nothing.
++///
++/// **The layout decisions live here, and only here.** The three functions
++/// below are thin wrappers that fill a throwaway instance and copy the
++/// answer out, so the fixed-height rule, DXF's 72=4 rule, the aligned/fit
++/// fallback and the shear-before-scale order are each written exactly once.
++/// A second, hand-inlined copy of them inside the index — which is the
++/// obvious way to make the pick path allocation-free — is precisely the
++/// box/glyph disagreement this file exists to prevent.
++///
++/// Caller-owned and refilled in place, so nothing may hold a reference to a
++/// [TextLayout] it did not fill itself; the same rule [HitPath] and
++/// [SnapResult] state for their own reusable buffers.
++class TextLayout {
++  /// Every double this object holds, in one typed array rather than in
++  /// fourteen plain `double` fields.
++  ///
++  /// **Measured, not stylistic.** A store to an ordinary `double` field of a
++  /// Dart object boxes the value; this object is refilled for every text
++  /// candidate a pick considers, so the plain-fields version was measured
++  /// (`test/invariants/query_allocation_test.dart`'s 64-label fixture, VM
++  /// allocation profiler) at roughly 10 extra `_Double` instances per text
++  /// candidate — 644 per pick, a textbook per-candidate allocation, just of
++  /// a class nothing was watching. A `Float64List` element store keeps the
++  /// value unboxed and takes that to zero.
++  ///
++  /// The accessors below name the slots; nothing outside this class indexes
++  /// it.
++  final Float64List _values = Float64List(14);
+ 
+-  return ResolvedTextAttributes(
++  static const int _kHeight = 0;
++  static const int _kRotation = 1;
++  static const int _kWidthFactor = 2;
++  static const int _kObliqueAngle = 3;
++  static const int _kA = 4;
++  static const int _kMinX = 10;
++
++  /// Resolved attributes — see [ResolvedTextAttributes], whose fields these
++  /// mirror one for one.
++  double get height => _values[_kHeight];
++  set height(double value) => _values[_kHeight] = value;
++  double get rotation => _values[_kRotation];
++  set rotation(double value) => _values[_kRotation] = value;
++  double get widthFactor => _values[_kWidthFactor];
++  set widthFactor(double value) => _values[_kWidthFactor] = value;
++  double get obliqueAngle => _values[_kObliqueAngle];
++  set obliqueAngle(double value) => _values[_kObliqueAngle] = value;
++  TextJustifyH h = TextJustifyH.left;
++  TextJustifyV v = TextJustifyV.baseline;
++  bool fellBackFromAlignedOrFit = false;
++
++  /// The six coefficients [textLocalTransform] returns as a [Transform2],
++  /// valid after [composeTransform].
++  double get a => _values[_kA];
++  double get b => _values[_kA + 1];
++  double get c => _values[_kA + 2];
++  double get d => _values[_kA + 3];
++  double get e => _values[_kA + 4];
++  double get f => _values[_kA + 5];
++
++  /// The glyph box [textLocalBounds] returns as an [Aabb2], valid after
++  /// [layOutBox].
++  double get minX => _values[_kMinX];
++  double get minY => _values[_kMinX + 1];
++  double get maxX => _values[_kMinX + 2];
++  double get maxY => _values[_kMinX + 3];
++
++  /// Resolves one text entity's effective height, rotation, width factor,
++  /// oblique angle and justification against its [style], into this object.
++  void resolve(GeometryPayload payload, int textAttrs, TextStyleRecord style) {
++    var justifyH = TextJustifyH.values[textAttrs & 0xF];
++    var fellBack = false;
++    if (justifyH == TextJustifyH.aligned || justifyH == TextJustifyH.fit) {
++      // Both need a second point the payload does not carry. The fallback
++      // lives here, not in the painter, so the box and the glyphs agree.
++      justifyH = TextJustifyH.left;
++      fellBack = true;
++    }
++    h = justifyH;
++    // DXF ignores the vertical code entirely when 72 = 4 (middle).
++    v = justifyH == TextJustifyH.middle
++        ? TextJustifyV.middle
++        : TextJustifyV.values[(textAttrs >> 4) & 0xF];
+     // A non-zero fixed height on the style overrides the entity's own —
+     // TextStyleRecord.fixedHeight's own contract.
+-    height:
+-        style.fixedHeight != 0 ? style.fixedHeight : scalarOr(payload, 0, 0),
+-    rotation: scalarOr(payload, 1, 0),
+-    widthFactor: (textAttrs & _kOverrideWidthFactor) != 0
++    height =
++        style.fixedHeight != 0 ? style.fixedHeight : scalarOr(payload, 0, 0);
++    rotation = scalarOr(payload, 1, 0);
++    widthFactor = (textAttrs & _kOverrideWidthFactor) != 0
+         ? scalarOr(payload, 2, style.widthFactor)
+-        : style.widthFactor,
+-    obliqueAngle: (textAttrs & _kOverrideOblique) != 0
++        : style.widthFactor;
++    obliqueAngle = (textAttrs & _kOverrideOblique) != 0
+         ? scalarOr(payload, 3, style.obliqueAngle)
+-        : style.obliqueAngle,
+-    h: h,
+-    v: v,
+-    fellBackFromAlignedOrFit: fellBack,
+-  );
++        : style.obliqueAngle;
++    fellBackFromAlignedOrFit = fellBack;
++  }
++
++  /// Copies an already-resolved [attrs] in, for the callers that hold one.
++  void adopt(ResolvedTextAttributes attrs) {
++    height = attrs.height;
++    rotation = attrs.rotation;
++    widthFactor = attrs.widthFactor;
++    obliqueAngle = attrs.obliqueAngle;
++    h = attrs.h;
++    v = attrs.v;
++    fellBackFromAlignedOrFit = attrs.fellBackFromAlignedOrFit;
++  }
++
++  /// The resolved attributes as an immutable record — allocates, so not for
++  /// the query path.
++  ResolvedTextAttributes get attributes => ResolvedTextAttributes(
++        height: height,
++        rotation: rotation,
++        widthFactor: widthFactor,
++        obliqueAngle: obliqueAngle,
++        h: h,
++        v: v,
++        fellBackFromAlignedOrFit: fellBackFromAlignedOrFit,
++      );
++
++  /// Fills [minX]..[maxY] with the glyph box in the text's own space,
++  /// before [composeTransform]'s transform is applied to it.
++  ///
++  /// Independent of the resolved attributes on purpose: height, width
++  /// factor, oblique angle, rotation and justification are exactly what
++  /// [composeTransform] encodes, so folding any of them in here too would
++  /// give a caller two places to get the same answer from and a way for
++  /// them to disagree.
++  void layOutBox(TextMetrics metrics) {
++    _values[_kMinX] = 0;
++    _values[_kMinX + 1] = -metrics.descent;
++    _values[_kMinX + 2] = metrics.advanceWidth;
++    _values[_kMinX + 3] = metrics.ascent;
++  }
++
++  /// Fills [a]..[f] with the transform from glyph space to the entity's own
++  /// space, anchored at ([anchorX], [anchorY]). See [textLocalTransform]'s
++  /// doc comment for the composition order and why it is that order.
++  void composeTransform(TextMetrics metrics, double anchorX, double anchorY) {
++    final scale = metrics.capHeight == 0 ? 0.0 : height / metrics.capHeight;
++    final k = math.tan(obliqueAngle);
++
++    // Glyph space -> shear -> width factor -> uniform height scale.
++    final la = widthFactor * scale;
++    const lb = 0.0;
++    final lc = widthFactor * k * scale;
++    final ld = scale;
++
++    final refX = switch (h) {
++      TextJustifyH.left || TextJustifyH.aligned || TextJustifyH.fit => 0.0,
++      TextJustifyH.centre || TextJustifyH.middle => metrics.advanceWidth / 2,
++      TextJustifyH.right => metrics.advanceWidth,
++    };
++    final refY = switch (v) {
++      TextJustifyV.baseline => 0.0,
++      TextJustifyV.bottom => -metrics.descent,
++      TextJustifyV.middle => (metrics.ascent - metrics.descent) / 2,
++      TextJustifyV.top => metrics.ascent,
++    };
++    // Reference point carried through the linear map above, then negated:
++    // this is what lands the reference point exactly on the anchor once
++    // rotation and translation are applied.
++    final dx = -(la * refX + lc * refY);
++    final dy = -(lb * refX + ld * refY);
++
++    final cos = math.cos(rotation), sin = math.sin(rotation);
++    _values[_kA] = cos * la - sin * lb;
++    _values[_kA + 1] = sin * la + cos * lb;
++    _values[_kA + 2] = cos * lc - sin * ld;
++    _values[_kA + 3] = sin * lc + cos * ld;
++    _values[_kA + 4] = anchorX + cos * dx - sin * dy;
++    _values[_kA + 5] = anchorY + sin * dx + cos * dy;
++  }
+ }
+ 
++/// Resolves one text entity's effective height, rotation, width factor,
++/// oblique angle and justification against its [style].
++///
++/// The single place these decisions are made: `entityBounds` and the painter
++/// both call this rather than each re-deriving it, which is what keeps a
++/// text entity's glyph box and its drawn glyphs from disagreeing. The
++/// decisions themselves live in [TextLayout.resolve]; this wrapper is the
++/// allocating, immutable face of them.
++ResolvedTextAttributes resolveTextAttributes(
++        GeometryPayload payload, int textAttrs, TextStyleRecord style) =>
++    (TextLayout()..resolve(payload, textAttrs, style)).attributes;
++
+ /// Composed innermost-first:
+ ///
+ ///   oblique shear -> width-factor x-scale -> height scale
+ ///   -> justification offset -> rotation -> translation to [anchor]
+ ///
+ /// Shear before the x-scale, deliberately: `w * (x + k*y)` is not
+ /// `w*x + k*y`. Scaling the already-slanted glyph is the DXF reading, and
+ /// either transform alone commutes with the rest of this composition — only
+ /// a case with both a width factor and an oblique angle can tell the two
+ /// orders apart, which is why the crossed test in `text_geometry_test.dart`
+@@ -127,56 +286,27 @@ ResolvedTextAttributes resolveTextAttributes(
+ /// The justification offset is the *same* shear/scale linear map applied to
+ /// the justification reference point (e.g. top-left is `(0, ascent)` before
+ /// any transform), then negated, rather than a plain per-axis nudge added on
+ /// top. A plain nudge is indistinguishable from this for every case the
+ /// tests exercise (h=left or oblique=0 for every non-baseline v case here),
+ /// but it silently drifts for a justified, obliqued entity: the reference
+ /// point would then land somewhere other than [anchor], which is exactly the
+ /// kind of box/glyph disagreement this file exists to prevent.
+ Transform2 textLocalTransform(
+     ResolvedTextAttributes attrs, TextMetrics metrics, Vector2 anchor) {
+-  final scale = metrics.capHeight == 0 ? 0.0 : attrs.height / metrics.capHeight;
+-  final k = math.tan(attrs.obliqueAngle);
+-
+-  // Glyph space -> shear -> width factor -> uniform height scale.
+-  final a = attrs.widthFactor * scale;
+-  const b = 0.0;
+-  final c = attrs.widthFactor * k * scale;
+-  final d = scale;
+-
+-  final refX = switch (attrs.h) {
+-    TextJustifyH.left || TextJustifyH.aligned || TextJustifyH.fit => 0.0,
+-    TextJustifyH.centre || TextJustifyH.middle => metrics.advanceWidth / 2,
+-    TextJustifyH.right => metrics.advanceWidth,
+-  };
+-  final refY = switch (attrs.v) {
+-    TextJustifyV.baseline => 0.0,
+-    TextJustifyV.bottom => -metrics.descent,
+-    TextJustifyV.middle => (metrics.ascent - metrics.descent) / 2,
+-    TextJustifyV.top => metrics.ascent,
+-  };
+-  // Reference point carried through the linear map above, then negated: this
+-  // is what lands the reference point exactly on [anchor] once rotation and
+-  // translation are applied.
+-  final dx = -(a * refX + c * refY);
+-  final dy = -(b * refX + d * refY);
+-
+-  final cos = math.cos(attrs.rotation), sin = math.sin(attrs.rotation);
+-  return Transform2(
+-    cos * a - sin * b,
+-    sin * a + cos * b,
+-    cos * c - sin * d,
+-    sin * c + cos * d,
+-    anchor.x + cos * dx - sin * dy,
+-    anchor.y + sin * dx + cos * dy,
+-  );
++  final layout = TextLayout()
++    ..adopt(attrs)
++    ..composeTransform(metrics, anchor.x, anchor.y);
++  return Transform2(layout.a, layout.b, layout.c, layout.d, layout.e, layout.f);
+ }
+ 
+ /// The glyph box in the text's own space, before [textLocalTransform] is
+ /// applied to it.
+ ///
+ /// Independent of [attrs] on purpose: height, width factor, oblique angle,
+ /// rotation and justification are exactly what [textLocalTransform] encodes,
+ /// so folding any of them in here too would give a caller two places to get
+ /// the same answer from and a way for them to disagree.
+-Aabb2 textLocalBounds(ResolvedTextAttributes attrs, TextMetrics metrics) =>
+-    Aabb2.raw(0, -metrics.descent, metrics.advanceWidth, metrics.ascent);
++Aabb2 textLocalBounds(ResolvedTextAttributes attrs, TextMetrics metrics) {
++  final layout = TextLayout()..layOutBox(metrics);
++  return Aabb2.raw(layout.minX, layout.minY, layout.maxX, layout.maxY);
++}
+diff --git a/packages/jet_cad_2d/lib/src/document/text_metrics.dart b/packages/jet_cad_2d/lib/src/document/text_metrics.dart
+index d3614e8..e5cb3e4 100644
+--- a/packages/jet_cad_2d/lib/src/document/text_metrics.dart
++++ b/packages/jet_cad_2d/lib/src/document/text_metrics.dart
+@@ -64,49 +64,57 @@ class InsertionPointMeasurer implements TextMeasurer {
+       TextMetrics.zero;
+ }
+ 
+ /// Deterministic, font-free metrics for engine tests.
+ ///
+ /// Ascent and descent use different ratios on purpose: a model where they
+ /// match would hide every vertical-justification defect in code that
+ /// consumes [TextMetrics], since top- and bottom-anchored layouts would land
+ /// on the same result by accident.
+ class MetricModelMeasurer implements TextMeasurer {
+-  const MetricModelMeasurer({
++  MetricModelMeasurer({
+     this.advanceRatio = 0.55,
+     this.ascentRatio = 0.8,
+     this.descentRatio = 0.2,
+     this.capRatio = kCapHeightRatio,
+   });
+ 
+   final double advanceRatio;
+   final double ascentRatio;
+   final double descentRatio;
+   final double capRatio;
+ 
+-  // Keyed by the ratios as well as the string length: two measurers with
+-  // different ratios must not collide on the same entry just because they
+-  // happen to be asked about strings of the same length. Memoised at all
+-  // because the pick path measures per candidate and the allocation harness
+-  // (test/invariants/query_allocation_test.dart) forbids a fresh object
+-  // there — a repeat call must return the identical instance.
+-  static final Map<
+-      (
+-        int length,
+-        double advanceRatio,
+-        double ascentRatio,
+-        double descentRatio,
+-        double capRatio
+-      ),
+-      TextMetrics> _cache = {};
++  /// Memoised by string length, per measurer instance.
++  ///
++  /// Memoised at all because the pick path measures once per text candidate
++  /// and the allocation harness (`test/invariants/query_allocation_test
++  /// .dart`) forbids a fresh object there — a repeat call must return the
++  /// identical instance.
++  ///
++  /// **Per instance, rather than one `static` map keyed by (length, ratios)
++  /// — and that is why this class is no longer `const`-constructible.** The
++  /// shared map needed the four ratios in its key so two measurers could not
++  /// collide on the same string length, and building that five-field record
++  /// key was measured, once picking put `measure` on the query path, to
++  /// allocate one `_Record` *per text candidate* (roughly 41 per pick
++  /// against that harness's 64-label fixture), plus a `putIfAbsent` closure
++  /// and its context. The ratios are fixed for the life of one measurer, so
++  /// they do not belong in the key at all: a plain `int` lookup against the
++  /// instance's own map allocates nothing, and a mutable field is worth more
++  /// here than a `const` constructor.
++  final Map<int, TextMetrics> _cache = {};
+ 
+   @override
+-  TextMetrics measure({required String text, required TextStyleRecord style}) =>
+-      _cache.putIfAbsent(
+-          (text.length, advanceRatio, ascentRatio, descentRatio, capRatio),
+-          () => TextMetrics(
+-                advanceWidth: text.length * advanceRatio * kNominalTextPixels,
+-                ascent: ascentRatio * kNominalTextPixels,
+-                descent: descentRatio * kNominalTextPixels,
+-                capHeight: capRatio * kNominalTextPixels,
+-              ));
++  TextMetrics measure({required String text, required TextStyleRecord style}) {
++    final memo = _cache[text.length];
++    if (memo != null) return memo;
++    // Deliberately not `putIfAbsent`: its callback closes over `text` and
++    // over `this`, so it allocates a closure and a context on every call —
++    // on a hit as well as a miss.
++    return _cache[text.length] = TextMetrics(
++      advanceWidth: text.length * advanceRatio * kNominalTextPixels,
++      ascent: ascentRatio * kNominalTextPixels,
++      descent: descentRatio * kNominalTextPixels,
++      capHeight: capRatio * kNominalTextPixels,
++    );
++  }
+ }
+diff --git a/packages/jet_cad_2d/lib/src/index/spatial_index.dart b/packages/jet_cad_2d/lib/src/index/spatial_index.dart
+index 7ebe404..88765ad 100644
+--- a/packages/jet_cad_2d/lib/src/index/spatial_index.dart
++++ b/packages/jet_cad_2d/lib/src/index/spatial_index.dart
+@@ -2,20 +2,21 @@ import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
+ import '../core/handle.dart';
+ import '../core/tolerance.dart';
+ import '../document/doc_change.dart';
+ import '../document/draft_document.dart';
+ import '../document/extents.dart';
+ import '../document/node.dart';
++import '../document/text_geometry.dart';
+ import '../geometry/aabb2.dart';
+ import '../geometry/distance.dart';
+ import '../geometry/primitives.dart';
+ import '../geometry/transform2.dart';
+ import '../store/entity_store.dart';
+ import 'container_index.dart';
+ import 'dirty_list.dart';
+ import 'hit.dart';
+ import 'query_filter.dart';
+ import 'query_scratch.dart';
+@@ -331,20 +332,33 @@ class SpatialIndex {
+   int _bestRoot = 0;
+ 
+   /// Scratch endpoints for [distanceToSegment] and centres for
+   /// [distanceToCircle]/[distanceToArc], reused across every candidate of
+   /// every pick. Mutated with [Vector2.setValues], never replaced: replacing
+   /// either with a fresh `Vector2` would be exactly the per-candidate
+   /// allocation the zero-allocation guarantee on [pickInto] forbids.
+   final Vector2 _scratchA = Vector2.zero();
+   final Vector2 _scratchB = Vector2.zero();
+ 
++  /// One text candidate's resolved attributes, composed local transform and
++  /// glyph box, refilled in place for every text or attrib leaf a pick
++  /// considers. Same reasoning as [_scratchA]/[_scratchB]: calling
++  /// `resolveTextAttributes`, `textLocalTransform` and `textLocalBounds`
++  /// instead would build three fresh objects per candidate — four with the
++  /// inverse the box test needs — including a [Transform2] and an [Aabb2],
++  /// two of the three classes
++  /// `test/invariants/query_allocation_test.dart` watches — which is exactly
++  /// the per-candidate allocation [pickInto]'s guarantee forbids. See
++  /// [TextLayout]'s own doc comment for why the layout math itself is not
++  /// inlined here instead.
++  final TextLayout _textLayout = TextLayout();
++
+   /// The instance handle taken to reach each depth of the current descent,
+   /// root first. Copied into [HitPath.chain] by [_writeChain] when a new
+   /// best candidate is found. Grows, never shrinks, like every other scratch
+   /// in this class.
+   Uint32List _instancePath = Uint32List(16);
+ 
+   /// The container (root or definition) being searched at each depth of the
+   /// current descent. Exists only to make [_pickIn]'s cycle guard an O(depth)
+   /// scratch scan instead of a `Set<Handle>` allocated per pick.
+   Uint32List _containerPath = Uint32List(16);
+@@ -754,35 +768,97 @@ class SpatialIndex {
+     final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
+     final coords = payload.coords;
+     final count = payload.pointCount;
+     if (count == 0) return;
+ 
+     HitKind? foundKind;
+     var foundX = 0.0, foundY = 0.0;
+ 
+     switch (kind) {
+       case EntityKind.point:
+-      case EntityKind.text:
+-      case EntityKind.attrib:
+-        // The only geometric feature is the anchor point -- the insertion
+-        // point for text/attrib, the point itself for a point entity --
+-        // treated as a vertex, since that is the one feature there is to
+-        // grab.
++        // The only geometric feature is the point itself, treated as a
++        // vertex, since that is the one feature there is to grab.
+         final lx = coords[0], ly = coords[1];
+         final wx = ta * lx + tc * ly + te, wy = tb * lx + td * ly + tf;
+         final dx = world.x - wx, dy = world.y - wy;
+         if (math.sqrt(dx * dx + dy * dy) <= radius) {
+           foundKind = HitKind.vertex;
+           foundX = wx;
+           foundY = wy;
+         }
+ 
++      case EntityKind.text:
++      case EntityKind.attrib:
++        // The laid-out box is the hit geometry ([HitKind.fill]); the
++        // insertion point stays a *snap* candidate (see
++        // [_considerSnapLeaf]'s own text case) and is no longer a pick
++        // candidate. Picking and snapping are different questions: a label
++        // is grabbed by the words the eye sees, and the insertion point is
++        // a construction reference, not a handle.
++        //
++        // Everything below writes into [_textLayout] and plain locals. The
++        // obvious spelling -- `resolveTextAttributes` +
++        // `textLocalTransform` + `textLocalBounds`, then
++        // `Transform2.invert()` -- builds four objects per candidate, which
++        // is what this method's zero-allocation guarantee forbids.
++        final style = document.textStyleOf(document.entities.textStyleAt(slot));
++        final metrics = document.textMeasurer
++            .measure(text: document.entities.textAt(slot), style: style);
++        final layout = _textLayout
++          ..resolve(payload, document.entities.textAttrsAt(slot), style)
++          ..layOutBox(metrics)
++          ..composeTransform(metrics, coords[0], coords[1]);
++
++        // A box with no area has nothing to fill: an empty string, or the
++        // zero metrics [InsertionPointMeasurer] answers with for every
++        // string. Stated as its own rule rather than left to fall out of
++        // the containment test, because the brute-force oracle in
++        // `test/invariants/reference_query.dart` states the same one and
++        // the two must agree on the degenerate case, not merely on the
++        // ordinary one.
++        if (layout.maxX <= layout.minX || layout.maxY <= layout.minY) return;
++
++        // Glyph space -> this leaf's own space (the layout) -> world
++        // (ta..tf), composed into six locals: `Transform2.multiply` and
++        // `Transform2.invert` each hand back a fresh matrix, being
++        // immutable, so neither can appear on this path.
++        final ma = ta * layout.a + tc * layout.b;
++        final mb = tb * layout.a + td * layout.b;
++        final mc = ta * layout.c + tc * layout.d;
++        final md = tb * layout.c + td * layout.d;
++        final me = ta * layout.e + tc * layout.f + te;
++        final mf = tb * layout.e + td * layout.f + tf;
++        final det = ma * md - mb * mc;
++        // Singular: a zero height, or an instance transform that collapses
++        // this text to a line or a point. Nothing is drawn, so nothing is
++        // hit -- the same answer [_descend] gives for a singular container
++        // transform, rather than a [SingularTransformError] thrown out of a
++        // pointer move.
++        if (det == 0.0 || !det.isFinite) return;
++
++        // The query point in glyph space, by solving the 2x2 system rather
++        // than forming the inverse: same answer, no matrix.
++        final px = world.x - me, py = world.y - mf;
++        final gx = (md * px - mc * py) / det;
++        final gy = (ma * py - mb * px) / det;
++        if (gx >= layout.minX &&
++            gx <= layout.maxX &&
++            gy >= layout.minY &&
++            gy <= layout.maxY) {
++          // A fill hit has no feature of its own to report, so the query
++          // point stands in for it -- the same convention the closed
++          // polyline case below uses.
++          foundKind = HitKind.fill;
++          foundX = world.x;
++          foundY = world.y;
++        }
++
+       case EntityKind.line:
+       case EntityKind.polyline:
+         var bestVertexDist = double.infinity;
+         var bestVertexX = 0.0, bestVertexY = 0.0;
+         for (var i = 0; i < count; i++) {
+           final lx = coords[i * 2], ly = coords[i * 2 + 1];
+           final wx = ta * lx + tc * ly + te, wy = tb * lx + td * ly + tf;
+           final dx = world.x - wx, dy = world.y - wy;
+           final dist = math.sqrt(dx * dx + dy * dy);
+           if (dist < bestVertexDist) {
+diff --git a/packages/jet_cad_2d/test/document/commands_test.dart b/packages/jet_cad_2d/test/document/commands_test.dart
+index ffe34c8..e1b451b 100644
+--- a/packages/jet_cad_2d/test/document/commands_test.dart
++++ b/packages/jet_cad_2d/test/document/commands_test.dart
+@@ -428,21 +428,21 @@ void main() {
+           flags: 0,
+           text: text,
+           tag: tag,
+           textStyle: textStyle,
+           textAttrs: textAttrs,
+         );
+ 
+     test(
+         'execute widens the box and sets text/tag; undo restores both; redo '
+         're-applies', () {
+-      final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
++      final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+       final style = doc.tables.textStyles.byName('STANDARD')!;
+       final handle = doc.handleSeed.next();
+       doc.commands.execute(AddEntityCommand(
+         record: textRecord(handle, doc.rootHandle, style.handle),
+         payload: GeometryPayload(
+           coords: Float64List.fromList([0, 0]),
+           scalars: Float64List.fromList([200, 0, 0, 0]),
+         ),
+       ));
+ 
+@@ -483,21 +483,21 @@ void main() {
+ 
+     test(
+         'a non-default justification anchors the box on the opposite edge, '
+         'proving textAttrs is not hard-coded away', () {
+       // The primary test above uses the default (left/baseline) packing, so
+       // a bug that hard-coded `textAttrs: 0` at any engine call site would
+       // still leave it green. Right/top justification anchors the box's
+       // top-right corner at the insertion point, so growing the string moves
+       // `minX`/`minY` instead of `maxX`/`maxY` -- the mirror image of the
+       // default case.
+-      final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
++      final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+       final style = doc.tables.textStyles.byName('STANDARD')!;
+       final handle = doc.handleSeed.next();
+       final attrs = packTextAttrs(h: TextJustifyH.right, v: TextJustifyV.top);
+       doc.commands.execute(AddEntityCommand(
+         record:
+             textRecord(handle, doc.rootHandle, style.handle, textAttrs: attrs),
+         payload: GeometryPayload(
+           coords: Float64List.fromList([1000, 2000]),
+           scalars: Float64List.fromList([200, 0, 0, 0]),
+         ),
+diff --git a/packages/jet_cad_2d/test/document/draft_document_test.dart b/packages/jet_cad_2d/test/document/draft_document_test.dart
+index f82a925..4799c93 100644
+--- a/packages/jet_cad_2d/test/document/draft_document_test.dart
++++ b/packages/jet_cad_2d/test/document/draft_document_test.dart
+@@ -63,21 +63,21 @@ void main() {
+     // a textStyle and must not crash when the table can't supply one.
+     doc.tables.textStyles.remove(ReservedHandles.standardTextStyle);
+     expect(() => doc.extents, returnsNormally);
+     expect(doc.extents.min, Vector2(0, 0));
+     expect(doc.extents.max, Vector2(10, 5));
+   });
+ 
+   test(
+       'extents cover a text entity\'s laid-out box, not just its insertion '
+       'point', () {
+-    final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+     final style = doc.tables.textStyles.byName('Standard')!;
+     final handle = doc.handleSeed.next();
+     doc.commands.execute(AddEntityCommand(
+       record: EntityRecord(
+         handle: handle,
+         owner: doc.rootHandle,
+         kind: EntityKind.text,
+         layer: ReservedHandles.layerZero,
+         linetype: ReservedHandles.byLayerLinetype,
+         linetypeScale: 1.0,
+diff --git a/packages/jet_cad_2d/test/document/extents_test.dart b/packages/jet_cad_2d/test/document/extents_test.dart
+index d717f63..5811818 100644
+--- a/packages/jet_cad_2d/test/document/extents_test.dart
++++ b/packages/jet_cad_2d/test/document/extents_test.dart
+@@ -77,21 +77,21 @@ void main() {
+     expect(box.min, Vector2(7, 8));
+     expect(box.max, Vector2(7, 8));
+   });
+ 
+   test(
+       'text with a real measurer is bound by its laid-out glyph box, not '
+       'the insertion point', () {
+     final box = entityBounds(
+       kind: EntityKind.text,
+       payload: payload([7, 8], [200]),
+-      measurer: const MetricModelMeasurer(),
++      measurer: MetricModelMeasurer(),
+       textStyle: style,
+       text: 'WC',
+     );
+     // Hand-derived, not re-run through the production formulas: two-char
+     // 'WC' under MetricModelMeasurer's defaults (advanceRatio 0.55, ascentRatio
+     // 0.8, descentRatio 0.2, capRatio 0.7 of a 100px em) gives advanceWidth
+     // 110, ascent 80, descent 20, capHeight 70. Left/baseline justification
+     // (default textAttrs = 0) puts the anchor at the box's bottom-left, and
+     // height 200 over capHeight 70 scales everything by 20/7.
+     const scale = 200 / 70.0;
+diff --git a/packages/jet_cad_2d/test/document/text_geometry_test.dart b/packages/jet_cad_2d/test/document/text_geometry_test.dart
+index 3743385..5e0a8a7 100644
+--- a/packages/jet_cad_2d/test/document/text_geometry_test.dart
++++ b/packages/jet_cad_2d/test/document/text_geometry_test.dart
+@@ -1,18 +1,18 @@
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:test/test.dart';
+ import 'package:vector_math/vector_math_64.dart';
+ 
+-const _model = MetricModelMeasurer();
++final _model = MetricModelMeasurer();
+ final _plain = TextStyleRecord(
+     handle: const Handle(7), name: 'STANDARD', fontFamily: 'Roboto');
+ 
+ ResolvedTextAttributes _resolve(
+         {double height = 200.0,
+         double rotation = 0.0,
+         int attrs = 0,
+         double? widthFactor,
+         double? oblique,
+         TextStyleRecord? style}) =>
+diff --git a/packages/jet_cad_2d/test/document/text_metrics_test.dart b/packages/jet_cad_2d/test/document/text_metrics_test.dart
+index 3fa345a..33dd3f2 100644
+--- a/packages/jet_cad_2d/test/document/text_metrics_test.dart
++++ b/packages/jet_cad_2d/test/document/text_metrics_test.dart
+@@ -4,47 +4,48 @@ import 'package:test/test.dart';
+ const _style = TextStyleRecord(
+   handle: Handle(24),
+   name: 'Standard',
+   fontFamily: 'Roboto',
+ );
+ 
+ void main() {
+   test(
+       'the metric model is deterministic and its ascent differs from its descent',
+       () {
+-    const m = MetricModelMeasurer();
++    final m = MetricModelMeasurer();
+     final metrics = m.measure(text: 'WC', style: _style);
+ 
+     expect(metrics.advanceWidth, closeTo(2 * 0.55 * kNominalTextPixels, 1e-9));
+     expect(metrics.ascent, closeTo(0.8 * kNominalTextPixels, 1e-9));
+     expect(metrics.descent, closeTo(0.2 * kNominalTextPixels, 1e-9));
+     expect(metrics.capHeight, closeTo(0.7 * kNominalTextPixels, 1e-9));
+     // A model whose ascent equals its descent hides every vertical
+     // justification defect, so this inequality is load-bearing.
+     expect(metrics.ascent, isNot(closeTo(metrics.descent, 1e-9)));
+   });
+ 
+   test('measure returns the identical instance on a repeat call', () {
+-    const m = MetricModelMeasurer();
++    final m = MetricModelMeasurer();
+     final a = m.measure(text: 'T-0001', style: _style);
+     final b = m.measure(text: 'T-0001', style: _style);
+     // The pick path measures per candidate. A fresh object per call breaks
+     // query_allocation_test.
+     expect(identical(a, b), isTrue);
+   });
+ 
+-  test('the memo is keyed by ratios, not only by string length', () {
+-    // Two models with the same string length but different ratios must not
+-    // collide in the shared memo — otherwise the second model would silently
+-    // read the first model's cached metrics.
+-    const wide = MetricModelMeasurer(advanceRatio: 0.9);
+-    const narrow = MetricModelMeasurer(advanceRatio: 0.1);
++  test('two models with different ratios do not share memoised metrics', () {
++    // The memo is per measurer instance and keyed by string length alone, so
++    // this is the test that would catch it going back to a shared map keyed
++    // by length only — the second model would then silently read the first
++    // model's cached metrics.
++    final wide = MetricModelMeasurer(advanceRatio: 0.9);
++    final narrow = MetricModelMeasurer(advanceRatio: 0.1);
+     final wideMetrics = wide.measure(text: 'WC', style: _style);
+     final narrowMetrics = narrow.measure(text: 'WC', style: _style);
+     expect(wideMetrics.advanceWidth, isNot(equals(narrowMetrics.advanceWidth)));
+   });
+ 
+   test('the insertion-point measurer is a declared lower bound', () {
+     expect(const InsertionPointMeasurer().measure(text: 'WC', style: _style),
+         same(TextMetrics.zero));
+   });
+ }
+diff --git a/packages/jet_cad_2d/test/index/pick_test.dart b/packages/jet_cad_2d/test/index/pick_test.dart
+index d1b1874..5b07a6f 100644
+--- a/packages/jet_cad_2d/test/index/pick_test.dart
++++ b/packages/jet_cad_2d/test/index/pick_test.dart
+@@ -1,17 +1,60 @@
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:test/test.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
++/// A text entity with a real string, style and packed attributes — the three
++/// things `addEntity` cannot carry.
++///
++/// Separate helper rather than four more optional parameters on [addEntity]:
++/// every text fixture below needs all three together, and a text entity with
++/// a default style and `textAttrs: 0` is exactly the degenerate fixture the
++/// tests at the bottom of this file exist to rule out.
++Handle addText(
++  DraftDocument doc,
++  Handle owner, {
++  required String text,
++  required Handle textStyle,
++  required List<double> coords,
++  required List<double> scalars,
++  int textAttrs = 0,
++  EntityKind kind = EntityKind.text,
++}) {
++  final handle = doc.handleSeed.next();
++  doc.commands.execute(AddEntityCommand(
++    record: EntityRecord(
++      handle: handle,
++      owner: owner,
++      kind: kind,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.byLayerLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: const ByLayerColor(),
++      lineweight: kByLayer,
++      transparency: kByLayer,
++      flags: 0,
++      text: text,
++      textStyle: textStyle,
++      textAttrs: textAttrs,
++    ),
++    payload: GeometryPayload(
++      coords: Float64List.fromList(coords),
++      scalars: Float64List.fromList(scalars),
++    ),
++  ));
++  return handle;
++}
++
+ Handle addEntity(DraftDocument doc, Handle owner, EntityKind kind,
+     List<double> coords, List<double> scalars) {
+   final handle = doc.handleSeed.next();
+   doc.commands.execute(AddEntityCommand(
+     record: EntityRecord(
+       handle: handle,
+       owner: owner,
+       kind: kind,
+       layer: ReservedHandles.layerZero,
+       linetype: ReservedHandles.byLayerLinetype,
+@@ -1111,11 +1154,297 @@ void main() {
+ 
+     final hit = HitPath();
+     expect(index.pickInto(Vector2(-10, -1), 2.0, const QueryFilter.all(), hit),
+         isTrue);
+     expect(hit.kind, HitKind.edge);
+     final angle = math.atan2(hit.worldPoint.y, hit.worldPoint.x);
+     expect(angle, greaterThanOrEqualTo(math.pi / 2 - 1e-12),
+         reason: 'the mirrored sweep is [pi/2, pi]');
+     expect(angle, lessThanOrEqualTo(math.pi + 1e-12));
+   });
++
++  // --- text picks by its laid-out box -----------------------------------
++  //
++  // Every fixture here uses `MetricModelMeasurer`, never the default
++  // `InsertionPointMeasurer`: that one answers `TextMetrics.zero` for every
++  // string, which collapses the glyph box to a single point and would let
++  // *any* containment rule -- including one that never fires at all -- pass
++  // every test below for the wrong reason.
++
++  test('a pointer inside a text box hits it as a fill', () {
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
++    final style = doc.tables.textStyles.byName('STANDARD')!;
++    // 'LONG ROOM NAME' is 14 characters, so under MetricModelMeasurer's
++    // defaults (advanceRatio 0.55, ascent 0.8, descent 0.2, cap 0.7, all of
++    // kNominalTextPixels = 100) it lays out 770 wide, 80 up and 20 down at
++    // the nominal size, scaled by height/capHeight = 200/70. The world box
++    // is therefore x in [0, 2200], y in [-57.14, 228.57].
++    final textHandle = addText(doc, doc.rootHandle,
++        text: 'LONG ROOM NAME',
++        textStyle: style.handle,
++        coords: [0, 0],
++        scalars: [200, 0, 0, 0]);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final hit = HitPath();
++    // Well inside the box and far from the insertion point: 404 units away
++    // from (0, 0), against a pick radius of 1.
++    expect(
++        index.pickInto(Vector2(400, 60), 1.0, const QueryFilter.picking(), hit),
++        isTrue);
++    expect(hit.kind, HitKind.fill);
++    expect(hit.entity, textHandle);
++    // A fill has no feature of its own, so the query point stands in for it
++    // -- the same convention the closed-polyline fill case uses.
++    expect(hit.worldPoint.x, closeTo(400, 1e-9));
++    expect(hit.worldPoint.y, closeTo(60, 1e-9));
++  });
++
++  test('a pointer near the insertion point is no longer a vertex hit', () {
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
++    final style = doc.tables.textStyles.byName('STANDARD')!;
++    addText(doc, doc.rootHandle,
++        text: 'LONG ROOM NAME',
++        textStyle: style.handle,
++        coords: [0, 0],
++        scalars: [200, 0, 0, 0]);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final hit = HitPath();
++    // (-5, -5) is outside the box (x < 0) but 7 units from the insertion
++    // point, well inside the 10-unit radius that used to make it a vertex.
++    expect(
++        index.pickInto(Vector2(-5, -5), 10.0, const QueryFilter.picking(), hit),
++        isFalse,
++        reason: 'picking and snapping are different questions: the insertion '
++            'point stays a snap candidate and is no longer a pick candidate');
++    expect(hit.kind, isNot(HitKind.vertex));
++  });
++
++  test('a point entity still picks as a vertex', () {
++    // The switch case used to be shared between point, text and attrib;
++    // splitting it must not move `point`.
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
++    final handle = addEntity(doc, doc.rootHandle, EntityKind.point, [7, 9], []);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final hit = HitPath();
++    expect(index.pickInto(Vector2(8, 9), 5.0, const QueryFilter.picking(), hit),
++        isTrue);
++    expect(hit.kind, HitKind.vertex);
++    expect(hit.entity, handle);
++    expect(hit.worldPoint.x, closeTo(7, 1e-9));
++    expect(hit.worldPoint.y, closeTo(9, 1e-9));
++  });
++
++  test('the insertion point is still a snap candidate', () {
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
++    final style = doc.tables.textStyles.byName('STANDARD')!;
++    final textHandle = addText(doc, doc.rootHandle,
++        text: 'LONG ROOM NAME',
++        textStyle: style.handle,
++        coords: [0, 0],
++        scalars: [200, 0, 0, 0]);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final out = SnapResult();
++    index.snapInto(
++        Vector2(2, 2), 20.0, SnapMask.none.with_(SnapKind.insertion), out);
++    expect(out.found, isTrue);
++    expect(out.kind, SnapKind.insertion);
++    expect(out.entity, textHandle);
++    expect(out.point.x, closeTo(0, 1e-9));
++    expect(out.point.y, closeTo(0, 1e-9));
++  });
++
++  test('an attrib picks by its box too', () {
++    // ATTRIB shares the case with TEXT, and its owner is the INSERT node
++    // rather than a container -- so this also pins that the box is measured
++    // in the instance's space, not the root's.
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
++    final style = doc.tables.textStyles.byName('STANDARD')!;
++    final def = doc.handleSeed.next();
++    doc.tree.addDefinition(Definition(
++      handle: def,
++      name: 'WithAttrib',
++      basePoint: Vector2.zero(),
++      children: const [],
++    ));
++    addEntity(doc, def, EntityKind.line, [0, 0, 1, 1], []);
++    final inst = doc.handleSeed.next();
++    doc.commands.execute(AddNodeCommand(InstanceNode(
++      handle: inst,
++      parent: doc.rootHandle,
++      // Rotated, not merely translated, and the text itself is rotated too:
++      // two pure translations commute, so a fixture built from them cannot
++      // tell the composition `world-after-layout` from `layout-after-world`.
++      // With both rotations present the two orders land in different places.
++      transform: Transform2.rotation(math.pi / 2)
++          .multiply(Transform2.translation(1000, 500)),
++      definition: def,
++      layer: ReservedHandles.layerZero,
++    )));
++    // 'AB' is 2 characters: 110 wide at the nominal size, scaled by 70/70,
++    // so the glyph box is x in [0, 110], y in [-20, 80]. Its own transform
++    // rotates that by 0.3 rad and anchors it at instance-local (2, 3); the
++    // instance then translates by (1000, 500) and turns a quarter turn, so
++    // instance-local (X, Y) lands at world (-(Y + 500), X + 1000).
++    final attrib = addText(doc, inst,
++        kind: EntityKind.attrib,
++        text: 'AB',
++        textStyle: style.handle,
++        coords: [2, 3],
++        scalars: [70, 0.3, 0, 0]);
++
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final hit = HitPath();
++    // The glyph-box centre (55, 30) is at instance-local (45.678, 47.914)
++    // and therefore world (-547.914, 1045.678).
++    expect(
++        index.pickInto(
++            Vector2(-547.914, 1045.678), 0.5, const QueryFilter.picking(), hit),
++        isTrue);
++    expect(hit.entity, attrib);
++    expect(hit.kind, HitKind.fill);
++    expect(
++        index.pickInto(
++            Vector2(45.678, 47.914), 0.5, const QueryFilter.picking(), hit),
++        isFalse,
++        reason: "the attrib's coordinates are instance-local; a box measured "
++            'in root space would hit here instead');
++  });
++
++  test('a justified text box is where its justification puts it', () {
++    // Right/top justification, so the box hangs to the *left of* and *below*
++    // the insertion point. A pick path that hard-coded `textAttrs: 0` would
++    // put the box on the opposite side of the anchor on both axes and miss
++    // every point this test hits.
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
++    final style = doc.tables.textStyles.byName('STANDARD')!;
++    final handle = addText(doc, doc.rootHandle,
++        text: 'ABCDE',
++        textStyle: style.handle,
++        coords: [1000, 1000],
++        scalars: [70, 0, 0, 0],
++        textAttrs: packTextAttrs(h: TextJustifyH.right, v: TextJustifyV.top));
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    // 'ABCDE' lays out 275 wide at scale 1, so the world box is
++    // x in [725, 1000], y in [900, 1000].
++    final hit = HitPath();
++    expect(
++        index.pickInto(
++            Vector2(800, 950), 0.5, const QueryFilter.picking(), hit),
++        isTrue,
++        reason: 'inside the right/top box; outside the left/baseline one');
++    expect(hit.entity, handle);
++    expect(hit.kind, HitKind.fill);
++
++    expect(
++        index.pickInto(
++            Vector2(1100, 1020), 0.5, const QueryFilter.picking(), hit),
++        isFalse,
++        reason: 'inside the left/baseline box the unjustified reading would '
++            'produce, and outside the real one');
++  });
++
++  test("a non-STANDARD style's fixed height sizes the pickable box", () {
++    // Every other text fixture here uses STANDARD, whose fixedHeight is 0 --
++    // so "resolve STANDARD" and "resolve the entity's own style" give the
++    // same answer and neither can tell a hard-coded STANDARD lookup from a
++    // correct one. BIG's fixedHeight overrides the entity's own height
++    // scalar, and the two readings differ by 7.14x.
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
++    const big = TextStyleRecord(
++      handle: Handle(600),
++      name: 'BIG',
++      fontFamily: 'Roboto',
++      fixedHeight: 500,
++    );
++    doc.tables.textStyles.add(big);
++    final handle = addText(doc, doc.rootHandle,
++        text: 'AB',
++        textStyle: big.handle,
++        coords: [0, 0],
++        scalars: [70, 0, 0, 0]);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    // Under BIG the scale is 500/70, so the box is x in [0, 785.7],
++    // y in [-142.9, 571.4]; under STANDARD it would be x in [0, 110],
++    // y in [-20, 80].
++    final hit = HitPath();
++    expect(
++        index.pickInto(
++            Vector2(400, 300), 0.5, const QueryFilter.picking(), hit),
++        isTrue,
++        reason: "inside BIG's box, far outside the one a STANDARD lookup "
++            'would give');
++    expect(hit.entity, handle);
++    expect(hit.kind, HitKind.fill);
++  });
++
++  test('a rotated text is picked by its oriented box, not its bounds', () {
++    // The indexed box is the axis-aligned *bound* of the rotated glyph box.
++    // Testing the query point against that bound instead of against the
++    // oriented box would hit here, in a corner the glyphs never reach.
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
++    final style = doc.tables.textStyles.byName('STANDARD')!;
++    final handle = addText(doc, doc.rootHandle,
++        text: 'AAAA',
++        textStyle: style.handle,
++        coords: [0, 0],
++        // Height 70 (scale 1) rotated by 45 degrees.
++        scalars: [70, math.pi / 4, 0, 0]);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    // Glyph-space box x in [0, 220], y in [-20, 80]; rotated by 45 degrees
++    // its four corners land at (14.1, -14.1), (169.7, 141.4), (99.0, 212.1)
++    // and (-56.6, 56.6), whose axis-aligned bound is x in [-56.6, 169.7],
++    // y in [-14.1, 212.1].
++    final hit = HitPath();
++    // Glyph-space (110, 30) -> world (56.57, 98.99): inside the real box.
++    expect(
++        index.pickInto(
++            Vector2(56.57, 98.99), 0.5, const QueryFilter.picking(), hit),
++        isTrue);
++    expect(hit.entity, handle);
++    expect(hit.kind, HitKind.fill);
++
++    // Inside the axis-aligned bound, but glyph-space y = -123.7 there --
++    // far below the descent line.
++    expect(
++        index.pickInto(
++            Vector2(165, -10), 0.5, const QueryFilter.picking(), hit),
++        isFalse,
++        reason: 'a bounds test rather than an oriented-box test would report '
++            'a fill here');
++  });
++
++  test('a text entity with no laid-out box is not pickable', () {
++    // The default measurer answers TextMetrics.zero for every string, which
++    // collapses the box to a point and the local transform to a singular
++    // matrix. Inverting that throws; the pick must answer "no hit" rather
++    // than propagate a SingularTransformError out of a pointer move.
++    final doc = DraftDocument.empty();
++    final style = doc.tables.textStyles.byName('STANDARD')!;
++    addText(doc, doc.rootHandle,
++        text: 'INVISIBLE',
++        textStyle: style.handle,
++        coords: [0, 0],
++        scalars: [200, 0, 0, 0]);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final hit = HitPath();
++    expect(index.pickInto(Vector2(0, 0), 5.0, const QueryFilter.picking(), hit),
++        isFalse);
++  });
+ }
+diff --git a/packages/jet_cad_2d/test/index/text_overlay_test.dart b/packages/jet_cad_2d/test/index/text_overlay_test.dart
+index d42c5b4..4e50767 100644
+--- a/packages/jet_cad_2d/test/index/text_overlay_test.dart
++++ b/packages/jet_cad_2d/test/index/text_overlay_test.dart
+@@ -29,21 +29,21 @@ EntityRecord _textRecord(
+       lineweight: kByLayer,
+       transparency: kByLayer,
+       flags: 0,
+       text: text,
+       textStyle: textStyle,
+       textAttrs: textAttrs,
+     );
+ 
+ void main() {
+   test('an edited text has the same box in the overlay as after a rebuild', () {
+-    final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+     final style = doc.tables.textStyles.byName('STANDARD')!;
+     final handle = doc.handleSeed.next();
+     doc.commands.execute(AddEntityCommand(
+       record: _textRecord(handle, doc.rootHandle, style.handle),
+       payload: GeometryPayload(
+         coords: Float64List.fromList([1000, 2000]),
+         scalars: Float64List.fromList([200, 0, 0, 0]),
+       ),
+     ));
+ 
+@@ -82,21 +82,21 @@ void main() {
+   test(
+       "a non-STANDARD text style's fixedHeight overrides the entity's own "
+       'height scalar', () {
+     // Every other fixture in this suite uses STANDARD, whose fixedHeight is
+     // 0 (height comes from the entity). A bug that resolved every entity's
+     // style as a bare STANDARD lookup -- rather than through the entity's
+     // own `textStyle` handle -- would go undetected by any of them, since
+     // "resolve to STANDARD" and "resolve to the entity's own STANDARD" are
+     // the same answer. This fixture's style is not STANDARD and has a
+     // non-zero fixedHeight, so the two answers diverge.
+-    final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+     final standard = doc.tables.textStyles.byName('STANDARD')!;
+     const bigStyle = TextStyleRecord(
+       handle: Handle(600),
+       name: 'BIG',
+       fontFamily: 'Roboto',
+       fixedHeight: 500,
+     );
+     doc.tables.textStyles.add(bigStyle);
+ 
+     final handle = doc.handleSeed.next();
+@@ -133,21 +133,21 @@ void main() {
+   test(
+       'a non-default justification anchors the box on the opposite edge '
+       'from left/baseline', () {
+     // Every other fixture in this suite leaves `textAttrs` at its default
+     // (left/baseline), so a bug that hard-coded `textAttrs: 0` at any engine
+     // call site would go undetected. Right/top justification anchors the
+     // box's *top-right* corner at the insertion point instead of the
+     // bottom-left, so `maxX`/`maxY` landing on the anchor -- rather than
+     // `minX`/`minY`, as the default case would put them -- is proof the
+     // stored `textAttrs` was actually read.
+-    final doc = DraftDocument.empty(measurer: const MetricModelMeasurer());
++    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+     final style = doc.tables.textStyles.byName('STANDARD')!;
+     final handle = doc.handleSeed.next();
+     final attrs = packTextAttrs(h: TextJustifyH.right, v: TextJustifyV.top);
+     doc.commands.execute(AddEntityCommand(
+       record:
+           _textRecord(handle, doc.rootHandle, style.handle, textAttrs: attrs),
+       payload: GeometryPayload(
+         coords: Float64List.fromList([1000, 2000]),
+         scalars: Float64List.fromList([200, 0, 0, 0]),
+       ),
+diff --git a/packages/jet_cad_2d/test/invariants/corpus.dart b/packages/jet_cad_2d/test/invariants/corpus.dart
+index 321d6b7..6d2ae66 100644
+--- a/packages/jet_cad_2d/test/invariants/corpus.dart
++++ b/packages/jet_cad_2d/test/invariants/corpus.dart
+@@ -43,35 +43,41 @@ class CorpusDocument {
+ 
+ // --- shared construction helpers ------------------------------------
+ 
+ Handle _addEntity(
+   DraftDocument doc, {
+   required Handle owner,
+   required EntityKind kind,
+   required List<double> coords,
+   List<double> scalars = const [],
+   Handle? layer,
++  String text = '',
++  Handle? textStyle,
++  int textAttrs = 0,
+ }) {
+   final handle = doc.handleSeed.next();
+   doc.commands.execute(AddEntityCommand(
+     record: EntityRecord(
+       handle: handle,
+       owner: owner,
+       kind: kind,
+       layer: layer ?? ReservedHandles.layerZero,
+       linetype: ReservedHandles.byLayerLinetype,
+       linetypeScale: 1.0,
+       geomIndex: 0,
+       color: const ByLayerColor(),
+       lineweight: kByLayer,
+       transparency: kByLayer,
+       flags: 0,
++      text: text,
++      textStyle: textStyle ?? ReservedHandles.standardTextStyle,
++      textAttrs: textAttrs,
+     ),
+     payload: GeometryPayload(
+       coords: Float64List.fromList(coords),
+       scalars: Float64List.fromList(scalars),
+     ),
+   ));
+   return handle;
+ }
+ 
+ Handle _addGroup(
+@@ -666,20 +672,145 @@ CorpusDocument _textDefaultMeasurer() =>
+       final attrib = _addEntity(doc,
+           owner: inst,
+           kind: EntityKind.attrib,
+           coords: [0.5, 0.5],
+           scalars: [1.0]);
+       assertDegenerate(attrib);
+ 
+       return doc;
+     });
+ 
++/// Text that actually occupies a box: every justification the engine can
++/// represent, a rotation, a width-factor and oblique override, a
++/// non-STANDARD style with a fixed height, and an ATTRIB under a rotated,
++/// scaled instance.
++///
++/// **The sibling of [_textDefaultMeasurer], and the reason that one is not
++/// enough.** `InsertionPointMeasurer` answers `TextMetrics.zero` for every
++/// string, so every text entity in that fixture has a zero-area box; the
++/// pick rule "the query point is inside the laid-out box" is then trivially
++/// false for every point, and the differential test agrees with the index
++/// without ever evaluating the rule. `MetricModelMeasurer` gives each string
++/// a real box, so the two sides' independently-written containment tests are
++/// actually compared here.
++CorpusDocument _textLaidOut() => CorpusDocument('textLaidOut', () {
++      final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
++      const tall = TextStyleRecord(
++        handle: Handle(900),
++        name: 'TALL',
++        fontFamily: 'Roboto',
++        // Overrides each entity's own height scalar, so a bug that resolved
++        // a bare STANDARD instead of the entity's own style produces a
++        // visibly different box for the two entities that use this style.
++        fixedHeight: 15,
++        widthFactor: 1.3,
++        obliqueAngle: 0.2,
++      );
++      doc.tables.textStyles.add(tall);
++
++      Handle text(
++        String content, {
++        required Handle owner,
++        required List<double> coords,
++        required List<double> scalars,
++        int textAttrs = 0,
++        Handle? style,
++        EntityKind kind = EntityKind.text,
++      }) {
++        final handle = _addEntity(doc,
++            owner: owner,
++            kind: kind,
++            coords: coords,
++            scalars: scalars,
++            text: content,
++            textStyle: style,
++            textAttrs: textAttrs);
++        final slot = doc.entities.slotOf(handle)!;
++        final record = doc.entities.read(slot);
++        final box = entityBounds(
++          kind: record.kind,
++          payload: doc.geometry.peek(record.geomIndex),
++          measurer: doc.textMeasurer,
++          textStyle: doc.textStyleOf(record.textStyle),
++          textAttrs: record.textAttrs,
++          text: record.text,
++        );
++        expect(box.maxX - box.minX, greaterThan(0.5),
++            reason: 'this fixture exists to give the pick rule a box with '
++                'real area to test against');
++        expect(box.maxY - box.minY, greaterThan(0.5));
++        return handle;
++      }
++
++      // Left/baseline, upright -- the plain case.
++      text('ROOM', owner: doc.rootHandle, coords: [0, 0], scalars: [10, 0]);
++      // Centre/middle, rotated: the box straddles its insertion point and
++      // is not axis-aligned, so a bounds test rather than an oriented-box
++      // test disagrees near its corners.
++      text('HALL 2',
++          owner: doc.rootHandle,
++          coords: [40, 20],
++          scalars: [8, 0.7],
++          textAttrs:
++              packTextAttrs(h: TextJustifyH.centre, v: TextJustifyV.middle));
++      // Right/top, with both per-entity overrides live: the width factor
++      // widens the box and the oblique angle shears it, so a pick path that
++      // read the style's values instead of the entity's lands elsewhere.
++      text('WIDE',
++          owner: doc.rootHandle,
++          coords: [10, 60],
++          scalars: [12, -0.4, 2.0, 0.35],
++          textAttrs: packTextAttrs(
++            h: TextJustifyH.right,
++            v: TextJustifyV.top,
++            overrideWidthFactor: true,
++            overrideOblique: true,
++          ));
++      // The non-STANDARD style, whose fixed height wins over the 3 below,
++      // and whose own width factor and oblique angle apply because neither
++      // override bit is set.
++      text('LABEL',
++          owner: doc.rootHandle,
++          coords: [60, 70],
++          scalars: [3, 0],
++          style: tall.handle,
++          textAttrs: packTextAttrs(v: TextJustifyV.bottom));
++      // 72 = 3 (aligned) falls back to left justification, and must fall
++      // back the same way on both sides of the differential.
++      text('FIT?',
++          owner: doc.rootHandle,
++          coords: [-30, 40],
++          scalars: [9, 0.2],
++          textAttrs: packTextAttrs(h: TextJustifyH.aligned));
++
++      // An ATTRIB owned by an instance node -- its coordinates are
++      // instance-local, so its box is laid out in the instance's space and
++      // then carried through a rotation and a non-uniform scale.
++      final def = _addDefinition(doc, name: 'Tagged');
++      _addEntity(doc, owner: def, kind: EntityKind.line, coords: [0, 0, 8, 4]);
++      final inst = _addInstance(doc,
++          parent: doc.rootHandle,
++          definition: def,
++          transform: Transform2.rotation(0.5)
++              .multiply(Transform2.scale(1.4, 0.8))
++              .multiply(Transform2.translation(-40, -30)));
++      text('TAG',
++          owner: inst,
++          kind: EntityKind.attrib,
++          coords: [2, 1],
++          scalars: [6, 0],
++          style: tall.handle,
++          textAttrs: packTextAttrs(h: TextJustifyH.middle));
++
++      return doc;
++    });
++
+ /// Two lines whose real segments come nowhere near each other or the query
+ /// point, but whose *infinite* extensions cross exactly at the origin.
+ ///
+ /// **Not one of the task-16 brief's fifteen named rows.** Added after
+ /// mutation-testing the differential harness found a real hole: dropping
+ /// `segmentIntersection`'s segment clamp (the "return the infinite-line
+ /// intersection" mutation) went uncaught by every fixture above, because
+ /// none of them contains two root-level lines whose segments *don't* cross
+ /// but whose infinite extensions *do*, near a point close enough to a
+ /// random trial to be sampled in 200 tries. See the task-16 report,
+@@ -765,12 +896,13 @@ List<CorpusDocument> buildCorpus() => [
+       _nonUniformScale(),
+       _rotated(),
+       _largeCoordinates(),
+       _sharedDefinition(),
+       _definitionGrownAfterBuild(),
+       _dirtyUnderThreshold(),
+       _dirtyOverThreshold(),
+       _afterPurge(),
+       _afterUndoReusingSlot(),
+       _textDefaultMeasurer(),
++      _textLaidOut(),
+       _nearMissIntersection(),
+     ];
+diff --git a/packages/jet_cad_2d/test/invariants/query_allocation_test.dart b/packages/jet_cad_2d/test/invariants/query_allocation_test.dart
+index 5d3da9e..7506297 100644
+--- a/packages/jet_cad_2d/test/invariants/query_allocation_test.dart
++++ b/packages/jet_cad_2d/test/invariants/query_allocation_test.dart
+@@ -106,21 +106,31 @@ import 'vm_allocation_meter.dart';
+ /// budget instead: both share `SpatialIndex._descend`, which allocates one
+ /// `Aabb2` per recursion level regardless of candidate count (see
+ /// [_depthBoundClasses]) -- including `Aabb2` here for those two methods
+ /// would fail a correct three-level-deep pick on the pre-existing,
+ /// depth-bound cost, not on a per-candidate regression.
+ const _candidateScalingClasses = {'Vector2', 'Aabb2'};
+ 
+ /// Watched by `pickInto`/`snapInto` at [_perCallBudget] -- see
+ /// [_candidateScalingClasses]'s own doc comment for why those two use this
+ /// narrower set instead of it.
+-const _recursiveCandidateScalingClasses = {'Vector2'};
++///
++/// `_Record` is the VM's name for a Dart record object, and it is here
++/// because of a real regression this file caught: `MetricModelMeasurer`
++/// memoised its metrics in a map keyed by a five-field record, which cost
++/// nothing until picking put `measure` on the query path and then cost one
++/// record per *text candidate* -- 41 per call against this file's fixture,
++/// invisible to every class watched before. Records are cheap to write and
++/// exactly the kind of object that gets built inside a helper without
++/// anyone thinking of it as an allocation, so the query path is now watched
++/// for them the same way it is watched for `Vector2`.
++const _recursiveCandidateScalingClasses = {'Vector2', '_Record'};
+ 
+ /// A per-call instance count admitting real JIT/VM-service noise (measured
+ /// at roughly 0.02 `Vector2` and 0.002 `Aabb2` per call on this machine,
+ /// well over an order of magnitude below this) but not a per-candidate or
+ /// per-call object: even the smallest fixture in this file has enough
+ /// candidates that a genuine violation shows up at 1 or more per call, not
+ /// a fraction of one.
+ const double _perCallBudget = 0.5;
+ 
+ /// Watched only by the `pickInto`/`snapInto` tests, at [_depthBoundBudgets]
+@@ -283,50 +293,92 @@ DraftDocument _manyRootInstancesDocument(int count) {
+ /// enough to pin the *correctness* of a three-level composition but not
+ /// enough to distinguish a **per-recursion** cost from a **per-candidate**
+ /// one -- with only one candidate ever presented to the narrow phase, the
+ /// two are the same number. [leafCount] entities at the deepest level, laid
+ /// out so a single pick/snap query at the shared centre point sees more
+ /// than one of them as a broad-phase candidate, is what makes that
+ /// distinction observable: a deliberately-reintroduced per-candidate
+ /// allocation (see this file's mutation table in the task-17 report) scales
+ /// with [leafCount], while the pre-existing, depth-bound closure/Transform2
+ /// cost documented on `SpatialIndex._descend` does not.
+-({DraftDocument doc, Vector2 point, double radius}) _deepNestedDocument(
+-    int leafCount) {
+-  final doc = DraftDocument.empty();
++///
++/// **Half the leaves are text**, laid out by [MetricModelMeasurer] rather
++/// than the default [InsertionPointMeasurer]. Text is the one kind whose
++/// narrow phase has to *resolve* something per candidate — a style, packed
++/// justification attributes, font metrics, a composed local transform and a
++/// glyph box — where every other kind reads coordinates straight out of the
++/// payload. Written the obvious way (`resolveTextAttributes` +
++/// `textLocalTransform` + `textLocalBounds` + `Transform2.invert`) that is
++/// four fresh objects per text candidate, two of them classes this file
++/// already watches; with [leafCount] text leaves in range of the query
++/// point, such a regression reads in the dozens per call rather than the
++/// fraction of one the budgets allow. A fixture with a single text entity
++/// would hide exactly that, the same way a single-leaf fixture cannot tell
++/// a per-recursion cost from a per-candidate one.
++///
++/// `textProbe` is a world point strictly inside the first text entity's
++/// glyph box and clear of every line, so the tests can assert the text
++/// leaves are genuinely measured by the narrow phase rather than merely
++/// present in the document.
++({DraftDocument doc, Vector2 point, double radius, Vector2 textProbe})
++    _deepNestedDocument(int leafCount) {
++  final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+ 
+   final d3 = doc.handleSeed.next();
+   doc.tree.addDefinition(Definition(
+       handle: d3, name: 'D3', basePoint: Vector2.zero(), children: const []));
+   final side = math.sqrt(leafCount).ceil();
+-  for (var i = 0; i < leafCount; i++) {
+-    final x = (i % side) * 2.0;
+-    final y = (i ~/ side) * 2.0;
+-    doc.commands.execute(AddEntityCommand(
+-      record: EntityRecord(
++  EntityRecord leafRecord(EntityKind kind, {String text = '', int attrs = 0}) =>
++      EntityRecord(
+         handle: doc.handleSeed.next(),
+         owner: d3,
+-        kind: EntityKind.line,
++        kind: kind,
+         layer: ReservedHandles.layerZero,
+         linetype: ReservedHandles.byLayerLinetype,
+         linetypeScale: 1.0,
+         geomIndex: 0,
+         color: const ByLayerColor(),
+         lineweight: kByLayer,
+         transparency: kByLayer,
+         flags: 0,
+-      ),
++        text: text,
++        textAttrs: attrs,
++      );
++
++  for (var i = 0; i < leafCount; i++) {
++    final x = (i % side) * 2.0;
++    final y = (i ~/ side) * 2.0;
++    doc.commands.execute(AddEntityCommand(
++      record: leafRecord(EntityKind.line),
+       payload: GeometryPayload(
+         coords: Float64List.fromList([x, y, x + 1, y + 1]),
+         scalars: Float64List(0),
+       ),
+     ));
++    // A label beside each line. The justification, the rotation and the
++    // string length all vary with `i`, so no per-candidate value the narrow
++    // phase resolves is constant across the fixture and none of it can be
++    // hoisted out of the loop by the runtime.
++    doc.commands.execute(AddEntityCommand(
++      record: leafRecord(
++        EntityKind.text,
++        text: switch (i % 3) { 0 => 'T1', 1 => 'TAG', _ => 'LABEL7' },
++        attrs: packTextAttrs(
++          h: TextJustifyH.values[i % 3],
++          v: TextJustifyV.values[i % 4],
++        ),
++      ),
++      payload: GeometryPayload(
++        coords: Float64List.fromList([x, y + 1.2]),
++        scalars: Float64List.fromList([1.0, (i % 5) * 0.3]),
++      ),
++    ));
+   }
+ 
+   final d2 = doc.handleSeed.next();
+   doc.tree.addDefinition(Definition(
+       handle: d2, name: 'D2', basePoint: Vector2.zero(), children: const []));
+   doc.commands.execute(AddNodeCommand(InstanceNode(
+     handle: doc.handleSeed.next(),
+     parent: d2,
+     transform: Transform2.rotation(0.6).multiply(Transform2.translation(4, 0)),
+     definition: d3,
+@@ -363,21 +415,27 @@ DraftDocument _manyRootInstancesDocument(int count) {
+   final gridCentre = Vector2((side - 1) * 1.0, (side - 1) * 1.0);
+   final whole = Transform2.scale(1.5, 1.5)
+       .multiply(Transform2.translation(10, 10))
+       .multiply(Transform2.translation(0, 4))
+       .multiply(
+           Transform2.rotation(0.6).multiply(Transform2.translation(4, 0)));
+   final point = whole.transformPoint(gridCentre);
+   // Wide enough to reach every leaf in D3's grid from its centre, so the
+   // narrow phase actually has [leafCount] candidates to consider, not one.
+   final radius = side * 3.0;
+-  return (doc: doc, point: point, radius: radius);
++  // Inside the i = 0 label's glyph box: that one is left-justified on the
++  // baseline and unrotated (0 % 3 and 0 % 4 and 0 % 5 are all zero), and
++  // 'T1' at height 1 lays out 1.571 wide, 1.143 up and 0.286 down from its
++  // insertion point at (0, 1.2) -- so local (1.4, 1.2) is inside it, and no
++  // closer than 0.44 to any line in the grid.
++  final textProbe = whole.transformPoint(Vector2(1.4, 1.2));
++  return (doc: doc, point: point, radius: radius, textProbe: textProbe);
+ }
+ 
+ void main() {
+   AllocationMeter? meter;
+ 
+   setUpAll(() async {
+     meter = await AllocationMeter.connect();
+   });
+ 
+   tearDownAll(() async {
+@@ -485,20 +543,35 @@ void main() {
+     }
+     final fixture = _deepNestedDocument(64);
+     final index = SpatialIndex(fixture.doc);
+     addTearDown(index.dispose);
+     final hit = HitPath(32);
+ 
+     for (var i = 0; i < 20000; i++) {
+       index.pickInto(
+           fixture.point, fixture.radius, const QueryFilter.picking(), hit);
+     }
++    // The text leaves are not merely present: the narrow phase lays each of
++    // them out and tests the query point against the resulting box. Without
++    // this, a pick path that skipped text entirely would still read a clean
++    // allocation profile -- and pass this test for the one reason it must
++    // not.
++    expect(
++        index.pickInto(
++            fixture.textProbe, 0.05, const QueryFilter.picking(), hit),
++        isTrue,
++        reason: 'the probe point must land inside a text entity\'s laid-out '
++            'box, or this fixture measures a pick that never resolves a '
++            'text style, metrics or transform at all');
++    expect(hit.kind, HitKind.fill);
++    index.pickInto(
++        fixture.point, fixture.radius, const QueryFilter.picking(), hit);
+     expect(hit.chainLength, 3,
+         reason: 'this fixture exists specifically to exercise a pick that '
+             'descends three instance boundaries deep -- see this file\'s '
+             'own comment on _deepNestedDocument for why a root-only fixture '
+             'cannot distinguish the per-recursion cost SpatialIndex._descend '
+             'already documents from a per-candidate one');
+ 
+     await m.reset();
+     const iters = 1000;
+     for (var i = 0; i < iters; i++) {
+diff --git a/packages/jet_cad_2d/test/invariants/reference_query.dart b/packages/jet_cad_2d/test/invariants/reference_query.dart
+index 7c1e536..d8ffc95 100644
+--- a/packages/jet_cad_2d/test/invariants/reference_query.dart
++++ b/packages/jet_cad_2d/test/invariants/reference_query.dart
+@@ -387,27 +387,72 @@ List<Handle> referenceInstancesInRect(
+   double radius,
+ ) {
+   final record = doc.entities.read(candidate.slot);
+   final payload = doc.geometry.peek(record.geomIndex);
+   final toWorld = candidate.toWorld;
+   final count = payload.pointCount;
+   if (count == 0) return null;
+ 
+   switch (record.kind) {
+     case EntityKind.point:
+-    case EntityKind.text:
+-    case EntityKind.attrib:
+       final p = toWorld.transformPoint(payload.pointAt(0));
+       return world.distanceTo(p) <= radius
+           ? (kind: HitKind.vertex, point: p)
+           : null;
+ 
++    case EntityKind.text:
++    case EntityKind.attrib:
++      // Text is picked by the box its glyphs occupy, not by its insertion
++      // point -- which stays a `SnapKind.insertion` candidate, and only
++      // that. The radius plays no part, exactly as it plays none in the
++      // closed-polyline fill case above.
++      //
++      // **Written from the laid-out box, deliberately not the way the index
++      // computes it.** `SpatialIndex._considerLeaf` composes the text's
++      // local transform with the leaf's world transform into six raw
++      // doubles, inverts that by solving a 2x2 system, and tests the
++      // resulting glyph-space point against the axis-aligned box. This maps
++      // the box's four corners *forwards* into world space and asks whether
++      // the query point is inside the resulting parallelogram, by the sign
++      // of four edge cross products. The two agree only if the composition,
++      // the inversion and the interval test are all right; a shared helper,
++      // or copying that expression here, would have made the differential
++      // test compare an implementation with itself.
++      //
++      // `resolveTextAttributes`/`textLocalBounds`/`textLocalTransform` *are*
++      // shared, on the same footing as `entityBounds` and `distance.dart`'s
++      // formulas (see this file's own header): they are the definition of
++      // where a text entity's glyphs sit, not the index under test, and
++      // re-deriving DXF's justification and oblique rules here would test
++      // that arithmetic twice rather than testing the index.
++      final style = doc.textStyleOf(record.textStyle);
++      final metrics = doc.textMeasurer.measure(text: record.text, style: style);
++      final attrs = resolveTextAttributes(payload, record.textAttrs, style);
++      final box = textLocalBounds(attrs, metrics);
++      // A box with no area has nothing to fill -- an empty string, or the
++      // zero metrics `InsertionPointMeasurer` answers with. The index
++      // states the same rule; both sides need it, or they disagree on
++      // whether a collapsed box swallows the single point it collapsed to.
++      if (box.maxX <= box.minX || box.maxY <= box.minY) return null;
++
++      final toGlyphWorld = toWorld
++          .multiply(textLocalTransform(attrs, metrics, payload.pointAt(0)));
++      final corners = [
++        toGlyphWorld.transformPoint(Vector2(box.minX, box.minY)),
++        toGlyphWorld.transformPoint(Vector2(box.maxX, box.minY)),
++        toGlyphWorld.transformPoint(Vector2(box.maxX, box.maxY)),
++        toGlyphWorld.transformPoint(Vector2(box.minX, box.maxY)),
++      ];
++      return _insideParallelogram(world, corners)
++          ? (kind: HitKind.fill, point: world)
++          : null;
++
+     case EntityKind.line:
+     case EntityKind.polyline:
+       final worldPts = [
+         for (var i = 0; i < count; i++)
+           toWorld.transformPoint(payload.pointAt(i)),
+       ];
+       var bestVertex = double.infinity;
+       var bestVertexPoint = worldPts[0];
+       for (final p in worldPts) {
+         final d = world.distanceTo(p);
+@@ -533,20 +578,51 @@ Vector2 _footOnWorldArc(Vector2 world, Vector2 centre, double worldRadius,
+   final endAngle = worldStartAngle + worldSweep;
+   final start = Vector2(centre.x + worldRadius * math.cos(worldStartAngle),
+       centre.y + worldRadius * math.sin(worldStartAngle));
+   final end = Vector2(centre.x + worldRadius * math.cos(endAngle),
+       centre.y + worldRadius * math.sin(endAngle));
+   return world.distanceToSquared(start) <= world.distanceToSquared(end)
+       ? start
+       : end;
+ }
+ 
++/// Whether [world] lies in the closed convex quadrilateral [corners], given
++/// in order around its perimeter.
++///
++/// The half-plane test, not the even-odd ray cast [_insideWorldPolygon] runs
++/// for a closed polyline: an affine image of a rectangle is convex, so "on
++/// the same side of all four edges" is exact for it, and -- unlike the ray
++/// cast -- it treats the boundary as *inside*, which is what makes it agree
++/// with the index's closed-interval box test on a point sitting exactly on
++/// an edge.
++///
++/// A collapsed quadrilateral (zero area, from a singular transform: a zero
++/// text height, or an instance that flattens its definition) would make
++/// every cross product zero and swallow every point on the segment it
++/// collapsed to, so it answers false outright. The index states the same
++/// rule as its own singular-determinant guard.
++bool _insideParallelogram(Vector2 world, List<Vector2> corners) {
++  var positive = false;
++  var negative = false;
++  var area = 0.0;
++  for (var i = 0; i < corners.length; i++) {
++    final a = corners[i];
++    final b = corners[(i + 1) % corners.length];
++    area += a.x * b.y - b.x * a.y;
++    final cross = (b.x - a.x) * (world.y - a.y) - (b.y - a.y) * (world.x - a.x);
++    if (cross > 0) positive = true;
++    if (cross < 0) negative = true;
++  }
++  if (area == 0.0) return false;
++  return !(positive && negative);
++}
++
+ /// Even-odd ray cast over already-world-space points. The same standard
+ /// algorithm `SpatialIndex._insideWorldPolygon` uses, but written fresh
+ /// against a plain `List<Vector2>` rather than imported -- that private
+ /// function is not even visible outside `spatial_index.dart`.
+ bool _insideWorldPolygon(List<Vector2> pts, Vector2 world) {
+   var inside = false;
+   var j = pts.length - 1;
+   for (var i = 0; i < pts.length; i++) {
+     final xi = pts[i].x, yi = pts[i].y;
+     final xj = pts[j].x, yj = pts[j].y;

@@ -1,0 +1,344 @@
+# Review package: 7f85226..2a868b9
+
+## Commits
+2a868b9 feat(jet_cad_2d): add the TextMetrics seam and a deterministic metric model
+
+## Files changed
+ packages/jet_cad_2d/lib/jet_cad_2d.dart            |   1 +
+ packages/jet_cad_2d/lib/src/codec/json_codec.dart  |   2 +-
+ .../lib/src/document/draft_document.dart           |   1 +
+ packages/jet_cad_2d/lib/src/document/extents.dart  |  42 +-------
+ .../jet_cad_2d/lib/src/document/text_metrics.dart  | 112 +++++++++++++++++++++
+ .../test/document/text_metrics_test.dart           |  50 +++++++++
+ 6 files changed, 168 insertions(+), 40 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/jet_cad_2d.dart b/packages/jet_cad_2d/lib/jet_cad_2d.dart
+index ba92180..bdcc174 100644
+--- a/packages/jet_cad_2d/lib/jet_cad_2d.dart
++++ b/packages/jet_cad_2d/lib/jet_cad_2d.dart
+@@ -19,20 +19,21 @@ export 'src/document/draft_document.dart';
+ export 'src/document/extents.dart';
+ export 'src/document/header.dart';
+ export 'src/document/node.dart';
+ export 'src/document/origin_component.dart';
+ export 'src/document/raw_data.dart';
+ export 'src/document/resolved_style.dart';
+ export 'src/document/style.dart';
+ export 'src/document/style_context.dart';
+ export 'src/document/style_resolver.dart';
+ export 'src/document/tables.dart';
++export 'src/document/text_metrics.dart';
+ export 'src/document/text_scalars.dart';
+ export 'src/document/tree.dart';
+ export 'src/document/undo.dart';
+ export 'src/document/validate.dart';
+ export 'src/geometry/aabb2.dart';
+ export 'src/geometry/dasher.dart';
+ export 'src/geometry/distance.dart';
+ export 'src/geometry/primitives.dart';
+ export 'src/geometry/segment_clip.dart';
+ export 'src/geometry/transform2.dart';
+diff --git a/packages/jet_cad_2d/lib/src/codec/json_codec.dart b/packages/jet_cad_2d/lib/src/codec/json_codec.dart
+index d51a7ea..b5a7c9f 100644
+--- a/packages/jet_cad_2d/lib/src/codec/json_codec.dart
++++ b/packages/jet_cad_2d/lib/src/codec/json_codec.dart
+@@ -1,20 +1,20 @@
+ import 'dart:convert';
+ 
+ import '../core/diagnostic.dart';
+ import '../core/handle.dart';
+ import '../document/command.dart';
+ import '../document/draft_document.dart';
+-import '../document/extents.dart';
+ import '../document/header.dart';
+ import '../document/node.dart';
+ import '../document/tables.dart';
++import '../document/text_metrics.dart';
+ import '../store/entity_store.dart';
+ import '../store/geometry_store.dart';
+ import 'schema_version.dart';
+ 
+ /// Reads and writes the canonical document format.
+ ///
+ /// Deterministic by construction: every `toJson` builds its map in a fixed key
+ /// order and every collection is emitted in ascending-handle order, so no
+ /// sorting happens here. The ordering discipline lives in the model, where it
+ /// is testable.
+diff --git a/packages/jet_cad_2d/lib/src/document/draft_document.dart b/packages/jet_cad_2d/lib/src/document/draft_document.dart
+index 248bd54..0c59318 100644
+--- a/packages/jet_cad_2d/lib/src/document/draft_document.dart
++++ b/packages/jet_cad_2d/lib/src/document/draft_document.dart
+@@ -7,20 +7,21 @@ import '../store/entity_store.dart';
+ import '../store/geometry_store.dart';
+ import 'command.dart';
+ import 'component.dart';
+ import 'doc_change.dart';
+ import 'extents.dart';
+ import 'header.dart';
+ import 'node.dart';
+ import 'raw_data.dart';
+ import 'style.dart';
+ import 'tables.dart';
++import 'text_metrics.dart';
+ import 'tree.dart';
+ import 'undo.dart';
+ 
+ /// The 2D CAD document.
+ ///
+ /// Owns four kinds of state: object-per-record containers (nodes, definitions,
+ /// table records), columnar stores for leaves, sparse component stores, and the
+ /// opaque preserve-unknown slot. Mutation happens only through commands.
+ class DraftDocument implements CommandTarget {
+   @override
+diff --git a/packages/jet_cad_2d/lib/src/document/extents.dart b/packages/jet_cad_2d/lib/src/document/extents.dart
+index 0ab3818..9ac88dc 100644
+--- a/packages/jet_cad_2d/lib/src/document/extents.dart
++++ b/packages/jet_cad_2d/lib/src/document/extents.dart
+@@ -1,50 +1,18 @@
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
+ import '../core/handle.dart';
+ import '../geometry/aabb2.dart';
+ import '../geometry/primitives.dart';
+ import '../store/entity_store.dart';
+ import '../store/geometry_store.dart';
+-
+-/// Supplies the laid-out box of a text entity.
+-///
+-/// An interface rather than an implementation because real layout needs a font
+-/// stack, and this package must not depend on Flutter. The widget layer
+-/// supplies a real measurer; the engine ships [InsertionPointMeasurer].
+-abstract class TextMeasurer {
+-  Aabb2 measure({
+-    required String text,
+-    required Handle style,
+-    required double height,
+-    required Vector2 insertion,
+-  });
+-}
+-
+-/// Contributes only the insertion point.
+-///
+-/// Correct-but-minimal: extents computed with it are a lower bound, which is
+-/// the honest answer when no font stack is present. It also keeps engine tests
+-/// deterministic across machines, since real text layout is font- and
+-/// platform-dependent.
+-class InsertionPointMeasurer implements TextMeasurer {
+-  const InsertionPointMeasurer();
+-
+-  @override
+-  Aabb2 measure({
+-    required String text,
+-    required Handle style,
+-    required double height,
+-    required Vector2 insertion,
+-  }) =>
+-      Aabb2(insertion, insertion);
+-}
++import 'text_metrics.dart';
+ 
+ /// Bounds one entity in its **owner's** space.
+ ///
+ /// Callers transform the result into the enclosing space; this function knows
+ /// geometry, not placement.
+ Aabb2 entityBounds({
+   required EntityKind kind,
+   required GeometryPayload payload,
+   required TextMeasurer measurer,
+   required Handle textStyle,
+@@ -71,18 +39,14 @@ Aabb2 entityBounds({
+     case EntityKind.arc:
+       return arcBounds(
+         payload.pointAt(0),
+         payload.scalars[0],
+         payload.scalars[1],
+         payload.scalars[2],
+       );
+ 
+     case EntityKind.text:
+     case EntityKind.attrib:
+-      return measurer.measure(
+-        text: text,
+-        style: textStyle,
+-        height: payload.scalars.isEmpty ? 0 : payload.scalars[0],
+-        insertion: payload.pointAt(0),
+-      );
++      // Task 4 replaces this.
++      return Aabb2(payload.pointAt(0), payload.pointAt(0));
+   }
+ }
+diff --git a/packages/jet_cad_2d/lib/src/document/text_metrics.dart b/packages/jet_cad_2d/lib/src/document/text_metrics.dart
+new file mode 100644
+index 0000000..d3614e8
+--- /dev/null
++++ b/packages/jet_cad_2d/lib/src/document/text_metrics.dart
+@@ -0,0 +1,112 @@
++import 'package:meta/meta.dart';
++
++import 'tables.dart';
++
++/// The em size every paragraph is laid out at.
++///
++/// Layout is size-independent here on purpose: height, rotation, width factor
++/// and oblique angle are all transforms, so one laid-out paragraph serves the
++/// same string at every size. Laying out at the *effective* size instead
++/// renders correctly and silently destroys the cache.
++const double kNominalTextPixels = 100.0;
++
++/// Cap height as a fraction of the em size.
++///
++/// DXF's text height is the height of a capital letter; a font's `fontSize` is
++/// the em size. `dart:ui` exposes no cap height — `computeLineMetrics` gives
++/// ascent and descent only — so this constant stands in for it and the
++/// deviation is declared rather than hidden.
++const double kCapHeightRatio = 0.7;
++
++/// Font metrics for one string laid out at [kNominalTextPixels].
++///
++/// Everything else a text entity needs — height, rotation, width factor,
++/// oblique angle, insertion alignment — is a transform applied to this box,
++/// not a reason to re-measure.
++@immutable
++class TextMetrics {
++  const TextMetrics({
++    required this.advanceWidth,
++    required this.ascent,
++    required this.descent,
++    required this.capHeight,
++  });
++
++  final double advanceWidth;
++  final double ascent;
++  final double descent;
++  final double capHeight;
++
++  static const TextMetrics zero =
++      TextMetrics(advanceWidth: 0, ascent: 0, descent: 0, capHeight: 0);
++}
++
++/// Supplies font metrics at [kNominalTextPixels].
++///
++/// Takes the [TextStyleRecord], not a handle: `fontFamily`, `widthFactor` and
++/// `obliqueAngle` live on the record, and a measurer is constructed before the
++/// document that owns the table, so it cannot look one up.
++abstract class TextMeasurer {
++  TextMetrics measure({required String text, required TextStyleRecord style});
++}
++
++/// Contributes nothing beyond the zero box.
++///
++/// Correct-but-minimal: metrics computed with it are a lower bound, which is
++/// the honest answer when no font stack is present. It also keeps engine tests
++/// deterministic across machines, since real text layout is font- and
++/// platform-dependent.
++class InsertionPointMeasurer implements TextMeasurer {
++  const InsertionPointMeasurer();
++
++  @override
++  TextMetrics measure({required String text, required TextStyleRecord style}) =>
++      TextMetrics.zero;
++}
++
++/// Deterministic, font-free metrics for engine tests.
++///
++/// Ascent and descent use different ratios on purpose: a model where they
++/// match would hide every vertical-justification defect in code that
++/// consumes [TextMetrics], since top- and bottom-anchored layouts would land
++/// on the same result by accident.
++class MetricModelMeasurer implements TextMeasurer {
++  const MetricModelMeasurer({
++    this.advanceRatio = 0.55,
++    this.ascentRatio = 0.8,
++    this.descentRatio = 0.2,
++    this.capRatio = kCapHeightRatio,
++  });
++
++  final double advanceRatio;
++  final double ascentRatio;
++  final double descentRatio;
++  final double capRatio;
++
++  // Keyed by the ratios as well as the string length: two measurers with
++  // different ratios must not collide on the same entry just because they
++  // happen to be asked about strings of the same length. Memoised at all
++  // because the pick path measures per candidate and the allocation harness
++  // (test/invariants/query_allocation_test.dart) forbids a fresh object
++  // there — a repeat call must return the identical instance.
++  static final Map<
++      (
++        int length,
++        double advanceRatio,
++        double ascentRatio,
++        double descentRatio,
++        double capRatio
++      ),
++      TextMetrics> _cache = {};
++
++  @override
++  TextMetrics measure({required String text, required TextStyleRecord style}) =>
++      _cache.putIfAbsent(
++          (text.length, advanceRatio, ascentRatio, descentRatio, capRatio),
++          () => TextMetrics(
++                advanceWidth: text.length * advanceRatio * kNominalTextPixels,
++                ascent: ascentRatio * kNominalTextPixels,
++                descent: descentRatio * kNominalTextPixels,
++                capHeight: capRatio * kNominalTextPixels,
++              ));
++}
+diff --git a/packages/jet_cad_2d/test/document/text_metrics_test.dart b/packages/jet_cad_2d/test/document/text_metrics_test.dart
+new file mode 100644
+index 0000000..3fa345a
+--- /dev/null
++++ b/packages/jet_cad_2d/test/document/text_metrics_test.dart
+@@ -0,0 +1,50 @@
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++
++const _style = TextStyleRecord(
++  handle: Handle(24),
++  name: 'Standard',
++  fontFamily: 'Roboto',
++);
++
++void main() {
++  test(
++      'the metric model is deterministic and its ascent differs from its descent',
++      () {
++    const m = MetricModelMeasurer();
++    final metrics = m.measure(text: 'WC', style: _style);
++
++    expect(metrics.advanceWidth, closeTo(2 * 0.55 * kNominalTextPixels, 1e-9));
++    expect(metrics.ascent, closeTo(0.8 * kNominalTextPixels, 1e-9));
++    expect(metrics.descent, closeTo(0.2 * kNominalTextPixels, 1e-9));
++    expect(metrics.capHeight, closeTo(0.7 * kNominalTextPixels, 1e-9));
++    // A model whose ascent equals its descent hides every vertical
++    // justification defect, so this inequality is load-bearing.
++    expect(metrics.ascent, isNot(closeTo(metrics.descent, 1e-9)));
++  });
++
++  test('measure returns the identical instance on a repeat call', () {
++    const m = MetricModelMeasurer();
++    final a = m.measure(text: 'T-0001', style: _style);
++    final b = m.measure(text: 'T-0001', style: _style);
++    // The pick path measures per candidate. A fresh object per call breaks
++    // query_allocation_test.
++    expect(identical(a, b), isTrue);
++  });
++
++  test('the memo is keyed by ratios, not only by string length', () {
++    // Two models with the same string length but different ratios must not
++    // collide in the shared memo — otherwise the second model would silently
++    // read the first model's cached metrics.
++    const wide = MetricModelMeasurer(advanceRatio: 0.9);
++    const narrow = MetricModelMeasurer(advanceRatio: 0.1);
++    final wideMetrics = wide.measure(text: 'WC', style: _style);
++    final narrowMetrics = narrow.measure(text: 'WC', style: _style);
++    expect(wideMetrics.advanceWidth, isNot(equals(narrowMetrics.advanceWidth)));
++  });
++
++  test('the insertion-point measurer is a declared lower bound', () {
++    expect(const InsertionPointMeasurer().measure(text: 'WC', style: _style),
++        same(TextMetrics.zero));
++  });
++}
