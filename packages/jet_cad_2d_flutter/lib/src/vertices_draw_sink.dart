@@ -57,9 +57,9 @@ import 'draw_sink.dart';
 ///
 /// ## What this is not
 ///
-/// - **No joins and no caps.** Every segment is an independent quad, so a
-///   polyline's corners have a notch on the outside. Dash spans are two points
-///   each and have no corners, which is where the measurement is aimed.
+/// - **No caps, and no seam join on a closed run.** Miter and bevel joins fill
+///   the notch at every open corner; a closed polyline or a full sweep still
+///   draws one segment short of its seam until that lands.
 /// - **Text goes to [CanvasDrawSink], and the buffer flushes before it.**
 ///   A paragraph is not triangles. Points, circles and arcs are batched;
 ///   only text falls back, and flushing first is what keeps a stroke batched
@@ -150,6 +150,23 @@ class VerticesDrawSink implements DrawSink {
   /// Vertices written, so `_vertices * 2` floats and `_vertices` colours.
   int _vertices = 0;
 
+  // Run state. Fields and not a per-run object, because a `_StrokeRun`
+  // allocated per polyline would put an allocation back on the frame path
+  // that `paint_allocation_test.dart` has just finished pinning at zero.
+  //
+  // `_runFirst*` and `_runSegments` are written here but read only by the
+  // closed branch of `_endRun`, which is Task 5 -- `_endRun` asserts against
+  // reaching it in the meantime, so nothing consumes them yet.
+  // ignore: unused_field
+  double _runFirstX = 0, _runFirstY = 0;
+  // ignore: unused_field
+  double _runFirstDx = 0, _runFirstDy = 0;
+  double _runPrevX = 0, _runPrevY = 0;
+  double _runPrevDx = 0, _runPrevDy = 0;
+  bool _runHasDirection = false;
+  // ignore: unused_field
+  int _runSegments = 0;
+
   Transform2 _residual = Transform2.identity();
 
   int _segments = 0;
@@ -157,7 +174,7 @@ class VerticesDrawSink implements DrawSink {
   int _lastFlushSegments = 0;
   int _lastFlushVertices = 0;
   int _totalFlushes = 0;
-  int _frameSegments = 0;
+  int _frameTriangles = 0;
   bool _lastFlushDisposed = false;
 
   /// Segments batched since the last [flush].
@@ -179,16 +196,22 @@ class VerticesDrawSink implements DrawSink {
   /// a rig should print beside `CanvasDrawSink.canvasCallCount`.
   int get totalFlushCount => _totalFlushes;
 
-  /// Segments emitted since [resetCounters], across every flush in the frame.
+  /// Triangles emitted since [resetCounters], across every flush in the
+  /// frame -- a quad's own two and a join's one or two, both counted
+  /// individually, so this equals `debugPositions().length ~/ 6` for the
+  /// frame as a whole.
   ///
-  /// [batchedSegmentCount] and [lastFlushSegmentCount] are both per-flush, so
-  /// neither is the frame's total once a mid-frame flush has happened.
-  int get frameSegmentCount => _frameSegments;
+  /// Named `frameSegmentCount` before joins existed, when a quad's two
+  /// triangles and "one segment" were the same count. [batchedSegmentCount]
+  /// and [lastFlushSegmentCount] are both per-flush and both still count
+  /// quads, not triangles; neither is the frame's total once a mid-frame
+  /// flush has happened.
+  int get frameTriangleCount => _frameTriangles;
 
   /// Zeroes the frame counters. The buffer and its capacity are untouched.
   void resetCounters() {
     _totalFlushes = 0;
-    _frameSegments = 0;
+    _frameTriangles = 0;
   }
 
   /// Vertices the last [flush] actually handed to `drawVertices`.
@@ -251,31 +274,132 @@ class VerticesDrawSink implements DrawSink {
 
     // The transform is applied once per point rather than once per segment:
     // each point is the end of one segment and the start of the next.
-    var px = a * points[0] + c * points[1] + e;
-    var py = b * points[0] + d * points[1] + f;
-    final firstX = px, firstY = py;
-
+    final px = a * points[0] + c * points[1] + e;
+    final py = b * points[0] + d * points[1] + f;
+    _beginRun(px, py);
     for (var i = 1; i < count; i++) {
       final qx = a * points[i * 2] + c * points[i * 2 + 1] + e;
       final qy = b * points[i * 2] + d * points[i * 2 + 1] + f;
-      _emitSegment(px, py, qx, qy, half, argb);
-      px = qx;
-      py = qy;
+      _runTo(qx, qy, half, argb);
     }
-    if (closed) _emitSegment(px, py, firstX, firstY, half, argb);
+    _endRun(closed: false, half: half, argb: argb);
+    // The spike's closing segment moves to Task 5 with its seam join, so a
+    // closed polyline draws one segment short until then. No caller reaches
+    // it: `closed:` is `false` at all four of the painter's call sites, and
+    // the one unit test that passes `closed: true` moves to Task 5 with it.
   }
 
-  /// Two triangles, `(A, B, C)` and `(B, D, C)`, around the segment.
-  void _emitSegment(
-      double x0, double y0, double x1, double y1, double half, int argb) {
-    final dx = x1 - x0, dy = y1 - y0;
-    final length = math.sqrt(dx * dx + dy * dy);
-    // A zero-length segment has no direction to take a normal from. `Canvas`
-    // would draw a cap-shaped dot here; a quad would be NaN.
-    if (length == 0) return;
+  /// Starts a connected run at a device-space point.
+  void _beginRun(double x, double y) {
+    _runFirstX = x;
+    _runFirstY = y;
+    _runPrevX = x;
+    _runPrevY = y;
+    _runHasDirection = false;
+    _runSegments = 0;
+  }
 
-    final nx = -dy / length * half;
-    final ny = dx / length * half;
+  /// Extends the run to a device-space point, emitting the join first.
+  ///
+  /// The join comes before the segment so the buffer's order is the drawing's
+  /// order: at a corner the ink nearer the start of the run is written first.
+  void _runTo(double x, double y, double half, int argb) {
+    final dx = x - _runPrevX, dy = y - _runPrevY;
+    final length = math.sqrt(dx * dx + dy * dy);
+    // A repeated point carries no direction. Skip the step, keep the previous
+    // direction, and let the join span it — the corner is still there.
+    if (length == 0) return;
+    final ux = dx / length, uy = dy / length;
+
+    if (_runHasDirection) {
+      _emitJoin(
+          _runPrevX, _runPrevY, _runPrevDx, _runPrevDy, ux, uy, half, argb);
+    } else {
+      _runFirstDx = ux;
+      _runFirstDy = uy;
+    }
+    _emitQuad(_runPrevX, _runPrevY, x, y, ux, uy, half, argb);
+
+    _runPrevX = x;
+    _runPrevY = y;
+    _runPrevDx = ux;
+    _runPrevDy = uy;
+    _runHasDirection = true;
+    _runSegments++;
+  }
+
+  /// Ends the run.
+  ///
+  /// An open run gets butt caps, which is to say nothing at all. The closed
+  /// case — a closing segment and a seam join — is Task 5; it asserts here so
+  /// a caller that reaches it before then fails loudly rather than silently
+  /// dropping the closing segment the spike used to emit.
+  void _endRun(
+      {required bool closed, required double half, required int argb}) {
+    assert(!closed, 'closed runs arrive in Task 5');
+  }
+
+  /// Fills the notch at a vertex between two unit directions.
+  ///
+  /// The notch is the quadrilateral `(V, A, M, B)` — vertex, outer corner of
+  /// the incoming segment, miter point, outer corner of the outgoing one — so
+  /// a miter is **two** triangles: the bevel `(V, A, B)` and the tip
+  /// `(A, M, B)`. The tip alone leaves a hairline crack along `AB`.
+  void _emitJoin(double vx, double vy, double d0x, double d0y, double d1x,
+      double d1y, double half, int argb) {
+    final cross = d0x * d1y - d0y * d1x;
+    // Collinear: either straight through, where the quads already meet, or a
+    // reversal, where both the miter and the bevel are degenerate.
+    if (cross == 0) return;
+
+    // The outer side of the turn is the one away from it: a left turn
+    // (cross > 0) opens a notch on the right.
+    final s = cross > 0 ? -half : half;
+    final n0x = -d0y * s, n0y = d0x * s;
+    final n1x = -d1y * s, n1y = d1x * s;
+    final ax = vx + n0x, ay = vy + n0y;
+    final bx = vx + n1x, by = vy + n1y;
+
+    _emitTriangle(vx, vy, ax, ay, bx, by, argb);
+
+    if (d0x * d1x + d0y * d1y < kMinMiterCosine) return;
+
+    var mx = n0x + n1x, my = n0y + n1y;
+    final mlen = math.sqrt(mx * mx + my * my);
+    if (mlen == 0) return;
+    mx /= mlen;
+    my /= mlen;
+    // `n0` has length `half`, so this is the cosine of half the included angle.
+    final cosHalf = (mx * n0x + my * n0y) / half;
+    if (cosHalf <= 0) return;
+    final reach = half / cosHalf;
+    _emitTriangle(ax, ay, vx + mx * reach, vy + my * reach, bx, by, argb);
+  }
+
+  /// Writes one triangle, six floats and three colours.
+  void _emitTriangle(double ax, double ay, double bx, double by, double cx,
+      double cy, int argb) {
+    _reserve(3);
+    final v = _positions;
+    var i = _vertices * 2;
+    v[i++] = ax;
+    v[i++] = ay;
+    v[i++] = bx;
+    v[i++] = by;
+    v[i++] = cx;
+    v[i++] = cy;
+    final colors = _colors;
+    for (var k = _vertices; k < _vertices + 3; k++) {
+      colors[k] = argb;
+    }
+    _vertices += 3;
+    _frameTriangles++;
+  }
+
+  /// Two triangles around a segment whose unit direction is already known.
+  void _emitQuad(double x0, double y0, double x1, double y1, double ux,
+      double uy, double half, int argb) {
+    final nx = -uy * half, ny = ux * half;
 
     _reserve(6);
     final v = _positions;
@@ -299,7 +423,18 @@ class VerticesDrawSink implements DrawSink {
     }
     _vertices += 6;
     _segments++;
-    _frameSegments++;
+    _frameTriangles += 2;
+  }
+
+  /// Two triangles around a segment, taking its direction from its endpoints.
+  void _emitSegment(
+      double x0, double y0, double x1, double y1, double half, int argb) {
+    final dx = x1 - x0, dy = y1 - y0;
+    final length = math.sqrt(dx * dx + dy * dy);
+    // A zero-length segment has no direction to take a normal from. `Canvas`
+    // would draw a cap-shaped dot here; a quad would be NaN.
+    if (length == 0) return;
+    _emitQuad(x0, y0, x1, y1, dx / length, dy / length, half, argb);
   }
 
   void _reserve(int moreVertices) {
@@ -319,6 +454,17 @@ class VerticesDrawSink implements DrawSink {
   /// Impeller's thinnest line, in device pixels: `kMinStrokeSize` from
   /// `impeller/entity/geometry/geometry.h`.
   static const double kMinStrokeDevicePixels = 1.0;
+
+  /// Flutter's default miter limit (`painting.dart:1535`).
+  static const double kMiterLimit = 4.0;
+
+  /// The cosine of the direction change at which a miter becomes a bevel.
+  ///
+  /// Impeller's own conversion of the limit: `2 * (1 / limit)^2 - 1`
+  /// (`stroke_path_geometry.cc:442`). At a limit of 4 that is -0.875, so a
+  /// corner is mitred up to about a 151-degree turn and bevelled past it.
+  static const double kMinMiterCosine =
+      2.0 * (1.0 / kMiterLimit) * (1.0 / kMiterLimit) - 1.0;
 
   /// Half the stroke's width, in the logical pixels the buffer is in.
   ///
@@ -470,25 +616,21 @@ class VerticesDrawSink implements DrawSink {
     final argb = _coveredArgb(style.argb, style.lineweightHundredths);
     final step = sweep / steps;
 
-    var angle = start;
-    var px = t.a * (cx + r * math.cos(angle)) +
-        t.c * (cy + r * math.sin(angle)) +
-        t.e;
-    var py = t.b * (cx + r * math.cos(angle)) +
-        t.d * (cy + r * math.sin(angle)) +
-        t.f;
+    var lx = cx + r * math.cos(start);
+    var ly = cy + r * math.sin(start);
+    _beginRun(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f);
     for (var i = 1; i <= steps; i++) {
-      angle = start + step * i;
-      final lx = cx + r * math.cos(angle);
-      final ly = cy + r * math.sin(angle);
-      final qx = t.a * lx + t.c * ly + t.e;
-      final qy = t.b * lx + t.d * ly + t.f;
-      _emitSegment(px, py, qx, qy, half, argb);
-      px = qx;
-      py = qy;
+      final angle = start + step * i;
+      lx = cx + r * math.cos(angle);
+      ly = cy + r * math.sin(angle);
+      _runTo(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f, half, argb);
     }
-    // `closed` is documentation here rather than a branch: a full sweep already
-    // lands the last chord on the first point.
+    _endRun(closed: false, half: half, argb: argb);
+    // `closed` is documentation here rather than a branch: a full sweep
+    // already lands the last chord on the first point. A full sweep's last
+    // sample is its first point, so the run closes itself geometrically and
+    // the seam is still unjoined -- that is Task 5's, and `closed: false`
+    // above says so rather than pretending otherwise.
     assert(!closed || (sweep - 2 * math.pi).abs() < 1e-9);
   }
 

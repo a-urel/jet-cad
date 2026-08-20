@@ -70,7 +70,7 @@ void main() {
 
     expect(sink.totalFlushCount, greaterThan(0),
         reason: 'nothing was flushed, so nothing was measured');
-    expect(sink.frameSegmentCount, greaterThan(1000),
+    expect(sink.frameTriangleCount, greaterThan(1000),
         reason: 'a degenerate corpus would make the bound meaningless');
 
     // The buffer must not have grown in the subject frame. Growth is the one

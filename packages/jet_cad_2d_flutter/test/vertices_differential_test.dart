@@ -51,10 +51,17 @@ void main() {
 
     expectNoStrayInk(paintToVertices(doc, camera), inkSamples(ops),
         // Half a sample spacing to reach the primitive between two samples,
-        // plus the widest stroke's own half-width to reach its edge from the
-        // centreline, plus the chord sag of the coarsest curve.
+        // plus the widest stroke's own half-width scaled up for a join's own
+        // reach, plus the chord sag of the coarsest curve.
+        //
+        // A join's centroid is the average of three points: the two segments'
+        // own half-width corners (each `half` from the vertex) and the miter
+        // tip, which -- since a corner past `kMinMiterCosine` bevels instead
+        // -- reaches out no further than `half * kMiterLimit`. The vertex
+        // itself sits on the primitive, so `half * (2 + kMiterLimit) / 3`
+        // bounds a join triangle's excess over the plain stroke edge.
         slackPx: kSampleSpacingPx / 2 +
-            widestHalfStroke(ops) +
+            widestHalfStroke(ops) * (2 + VerticesDrawSink.kMiterLimit) / 3 +
             VerticesDrawSink.kFlattenTolerance);
   });
 

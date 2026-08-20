@@ -95,22 +95,29 @@ void main() {
     expect(w[2] - w[0], closeTo(1.0, 1e-12), reason: 'vertical width');
   });
 
-  test('a polyline of n points emits n-1 segments, and closed adds one more',
+  test('a polyline of n points emits n-1 segments plus a join at each corner',
       () {
+    // 2 segments are 4 triangles; the one corner between them turns a right
+    // angle, well inside the miter limit, so `_emitJoin` adds a bevel and a
+    // tip triangle -- 6 triangles, 36 floats, in total.
     final open = _sink()
       ..beginResidual(Transform2.identity())
       ..polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, _style(),
           closed: false)
       ..endResidual();
-    expect(open.debugPositions().length, 2 * 6 * 2);
-
-    final closed = _sink()
-      ..beginResidual(Transform2.identity())
-      ..polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, _style(),
-          closed: true)
-      ..endResidual();
-    expect(closed.debugPositions().length, 3 * 6 * 2);
+    expect(open.debugPositions().length, 6 * 6);
   });
+
+  // The `closed: true` half of this test -- a closing segment and the seam
+  // join at its corner -- moves to Task 5, which implements `_endRun`'s
+  // closed branch. `_endRun` asserts `!closed` until then, so a caller that
+  // reached it here would fail loudly rather than silently drawing one
+  // segment short; no caller does, since `closed:` is `false` at every one of
+  // the painter's four call sites.
+  test(
+      'a closed polyline gets a closing segment and a seam join',
+      skip: 'Task 5: _endRun\'s closed branch',
+      () {});
 
   test('colour rides on the vertices, so one buffer carries every colour', () {
     final sink = _sink()..beginResidual(Transform2.identity());
@@ -321,14 +328,30 @@ void main() {
   });
 }
 
-/// Centre of the segment that starts at vertex [seg] * 6.
+/// Every corner an arc or circle flattens into turns by a small angle -- well
+/// inside the miter limit -- so `_emitJoin` writes exactly two triangles
+/// between every pair of quads: the stride from one chord's quad to the
+/// next's is 4 triangles (24 floats), not 2, because a join sits in between.
+/// Checked once per fixture below rather than assumed, so a fixture that ever
+/// crossed the miter limit or went collinear would fail loudly here instead
+/// of reading the wrong floats silently.
+void _expectUniformMiterStride(VerticesDrawSink sink) {
+  final segments = sink.batchedSegmentCount;
+  final triangles = sink.debugPositions().length ~/ 6;
+  expect(triangles, 4 * segments - 2,
+      reason: 'every corner between the $segments chords is expected to '
+          'stay well inside the miter limit, so _startCentre/_endCentre\'s '
+          'fixed stride of 4 triangles per chord applies');
+}
+
+/// Centre of the segment that starts at vertex [seg] * 24.
 (double, double) _startCentre(Float32List v, int seg) {
-  final i = seg * 12;
+  final i = seg * 24;
   return ((v[i] + v[i + 2]) / 2, (v[i + 1] + v[i + 3]) / 2);
 }
 
 (double, double) _endCentre(Float32List v, int seg) {
-  final i = seg * 12;
+  final i = seg * 24;
   return ((v[i + 4] + v[i + 8]) / 2, (v[i + 5] + v[i + 9]) / 2);
 }
 
@@ -342,6 +365,7 @@ void _arcTests() {
     final v = sink.debugPositions();
     final segments = sink.batchedSegmentCount;
     expect(segments, greaterThan(1), reason: 'a quarter arc is not one chord');
+    _expectUniformMiterStride(sink);
 
     final (sx, sy) = _startCentre(v, 0);
     expect(sx, closeTo(10, 1e-4), reason: 'start x');
@@ -367,6 +391,7 @@ void _arcTests() {
         ..endResidual();
       final v = sink.debugPositions();
       final segments = sink.batchedSegmentCount;
+      _expectUniformMiterStride(sink);
       var worst = 0.0;
       for (var s = 0; s < segments; s++) {
         final (sx, sy) = _startCentre(v, s);
@@ -402,6 +427,7 @@ void _arcTests() {
       ..circle(0, 0, 10, _style())
       ..endResidual();
     final v = sink.debugPositions();
+    _expectUniformMiterStride(sink);
     var maxX = 0.0, maxY = 0.0;
     for (var s = 0; s < sink.batchedSegmentCount; s++) {
       final (x, y) = _startCentre(v, s);
@@ -447,6 +473,7 @@ void _arcTests() {
       ..circle(0, 0, 10, _style())
       ..endResidual();
     final v = sink.debugPositions();
+    _expectUniformMiterStride(sink);
     final (sx, sy) = _startCentre(v, 0);
     final (ex, ey) = _endCentre(v, sink.batchedSegmentCount - 1);
     expect(ex, closeTo(sx, 1e-4));
@@ -471,12 +498,14 @@ void _arcTests() {
     expect(sink.totalFlushCount, 2,
         reason: 'one flush before the text, one at the end of the frame');
     // Per-flush counters cannot see past the mid-frame flush; the frame
-    // counter is what a rig prints.
+    // counter is what a rig prints. Each `polyline` call here is its own
+    // run -- no join between them, since they are two separate calls -- so
+    // this is 2 quads' own triangles, 4, not the 2 quads themselves.
     //
     // MUTATION: report `lastFlushSegmentCount` as the frame total and this
-    // reads 1, the tail after the text, instead of 2.
+    // reads 1, the tail after the text, instead of 4.
     expect(sink.lastFlushSegmentCount, 1);
-    expect(sink.frameSegmentCount, 2);
+    expect(sink.frameTriangleCount, 4);
     recorder.endRecording().dispose();
   });
 }
