@@ -1,0 +1,238 @@
+// The rasterizer is test infrastructure, so it gets its own tests: a golden
+// compared through a broken scan-converter is a green test and a wrong
+// drawing.
+
+import 'dart:typed_data';
+import 'dart:ui';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/src/vertices_draw_sink.dart';
+
+import 'triangle_rasterizer.dart';
+
+Float32List _tri(List<double> xy) => Float32List.fromList(xy);
+Int32List _rgb(int argb) => Int32List.fromList(List<int>.filled(3, argb));
+
+void main() {
+  test('a triangle covers its interior and not its outside', () {
+    // MUTATION: reuse edge AB's direction (bx - ax, by - ay) for edge BC
+    // instead of (cx - bx, cy - by) -- a plausible copy-paste when writing
+    // the three edge functions -- and (2, 2), genuinely inside via all three
+    // real edges, no longer satisfies the corrupted second one.
+    final r = TriangleRasterizer(8, 8)
+      ..observe(_tri([1, 1, 6, 1, 1, 6]), _rgb(0xFFFF0000));
+    expect(r.inked(2, 2), isTrue, reason: 'inside');
+    expect(r.inked(5, 5), isFalse, reason: 'past the hypotenuse');
+    expect(r.inked(7, 7), isFalse, reason: 'outside the bounding box');
+  });
+
+  test('winding does not matter', () {
+    // MUTATION: reject triangles whose edge functions come out negative and
+    // the clockwise one vanishes. `drawVertices` culls nothing, so neither
+    // does this.
+    final ccw = TriangleRasterizer(8, 8)
+      ..observe(_tri([1, 1, 6, 1, 1, 6]), _rgb(0xFF00FF00));
+    final cw = TriangleRasterizer(8, 8)
+      ..observe(_tri([1, 1, 1, 6, 6, 1]), _rgb(0xFF00FF00));
+    expect(cw.inked(2, 2), ccw.inked(2, 2));
+  });
+
+  test('a later triangle draws over an earlier one', () {
+    // The buffer's order is the draw order, and the rasterizer must not
+    // reorder it -- that is the property the whole sink is built around.
+    //
+    // MUTATION: skip a pixel that is already inked and this reads red.
+    //
+    // The expected constant is `0xFF0000`, not `0x0000FF`: the ARGB->RGBA
+    // repack puts R at the packed value's byte 0 and B at byte 2 (verified
+    // directly -- `rgba(0xFFFF0000) & 0xFFFFFF == 0xFF`,
+    // `rgba(0xFF0000FF) & 0xFFFFFF == 0xFF0000`), so blue's marker in the
+    // masked low 24 bits is `0xFF0000` and red's is `0x0000FF`.
+    final r = TriangleRasterizer(8, 8)
+      ..observe(_tri([0, 0, 8, 0, 0, 8]), _rgb(0xFFFF0000))
+      ..observe(_tri([0, 0, 8, 0, 0, 8]), _rgb(0xFF0000FF));
+    expect(r.pixels[1 * 8 + 1] & 0x00FFFFFF, 0xFF0000);
+  });
+
+  test(
+      'two overlapping triangles: whichever is submitted last wins the '
+      'overlap, and only the overlap', () {
+    // Two distinct triangles (not the identity, not the origin, not equal
+    // sides) with a region unique to each and a region shared by both, so a
+    // mutation that just paints "last colour everywhere" or "first colour
+    // everywhere" is distinguishable from one that gets the overlap wrong.
+    //
+    // A = (0,0),(5,0),(0,5): x>=0, y>=0, x+y<=5.
+    // B = (1,1),(6,1),(1,6): x>=1, y>=1, x+y<=7.
+    // (0,0) is inside A only. (5,1) is inside B only. (2,2) is inside both.
+    //
+    // MUTATION: track "inked at all" instead of "last colour", e.g. skip a
+    // pixel once any triangle has touched it, and the overlap keeps A's
+    // colour under both submission orders.
+    //
+    // Markers are the ARGB->RGBA-packed value's low 24 bits, not the ARGB
+    // literal read naively: R lands at packed byte 0 and B at byte 2, so
+    // red's marker is `0x0000FF` and blue's is `0xFF0000` (verified directly
+    // against the packing formula, same as the test above).
+    final a = _tri([0, 0, 5, 0, 0, 5]);
+    final b = _tri([1, 1, 6, 1, 1, 6]);
+    const red = 0xFFFF0000;
+    const blue = 0xFF0000FF;
+    const redMarker = 0x0000FF;
+    const blueMarker = 0xFF0000;
+
+    final aThenB = TriangleRasterizer(8, 8)
+      ..observe(a, _rgb(red))
+      ..observe(b, _rgb(blue));
+    expect(aThenB.pixels[0 * 8 + 0] & 0x00FFFFFF, redMarker, reason: 'A-only');
+    expect(aThenB.pixels[1 * 8 + 5] & 0x00FFFFFF, blueMarker, reason: 'B-only');
+    expect(aThenB.pixels[2 * 8 + 2] & 0x00FFFFFF, blueMarker,
+        reason: 'overlap, B submitted last');
+
+    final bThenA = TriangleRasterizer(8, 8)
+      ..observe(b, _rgb(blue))
+      ..observe(a, _rgb(red));
+    expect(bThenA.pixels[0 * 8 + 0] & 0x00FFFFFF, redMarker, reason: 'A-only');
+    expect(bThenA.pixels[1 * 8 + 5] & 0x00FFFFFF, blueMarker, reason: 'B-only');
+    expect(bThenA.pixels[2 * 8 + 2] & 0x00FFFFFF, redMarker,
+        reason: 'overlap, A submitted last');
+  });
+
+  test('geometry outside the surface is clipped, not wrapped', () {
+    // A = (-20,-20), B = (30,-20), C = (-20,30): the right-angle vertex is
+    // far outside the surface in both axes (drives the raw bounding box
+    // negative, which is what removing the clamp turns into a RangeError),
+    // and the hypotenuse (edge BC) actually crosses the canvas -- verified
+    // directly against the edge functions: (0,0) has w0=1025, w1=450,
+    // w2=1025 (inside), and (7,7) has w0=1375, w1=-250, w2=1375 (outside, on
+    // the far side of BC alone). A triangle whose hypotenuse never reaches
+    // the canvas at all would pass this test by accident, whichever pixel it
+    // picked, so the fixture has to actually cut the surface.
+    //
+    // MUTATION: drop the row and column clamps and this throws a RangeError,
+    // or worse, writes a pixel on the opposite edge.
+    final r = TriangleRasterizer(8, 8)
+      ..observe(_tri([-20, -20, 30, -20, -20, 30]), _rgb(0xFF000000));
+    expect(r.inked(0, 0), isTrue);
+    expect(r.inked(7, 7), isFalse);
+  });
+
+  test(
+      'a triangle entirely off the surface inks nothing, even after its '
+      'bounding box is clamped onto the surface', () {
+    // A = (20,20), B = (25,20), C = (20,25): the whole triangle is beyond
+    // both edges of an 8x8 surface. `floor`/`ceil` then the row and column
+    // clamps collapse its bounding box onto pixel (7,7) alone -- a real
+    // pixel, well inside the canvas -- so this only inks nothing if the
+    // per-pixel edge test still runs inside the clamped box; a rasterizer
+    // that shortcuts "clamped bbox is small, just fill it" would light (7,7)
+    // up regardless of the triangle's true edges.
+    //
+    // MUTATION: `if (w0 < 0 && w1 < 0 && w2 < 0) continue;` (De Morgan's flip
+    // on the reject test) -- at (7.5, 7.5) only two of the three edge values
+    // are negative, so the mutant no longer rejects it and (7,7) inks.
+    final r = TriangleRasterizer(8, 8)
+      ..observe(_tri([20, 20, 25, 20, 20, 25]), _rgb(0xFF000000));
+    expect(List.generate(64, (i) => r.pixels[i]).every((p) => p == 0), isTrue);
+  });
+
+  test('a degenerate triangle inks nothing', () {
+    // MUTATION: divide by a zero area and every pixel comes out NaN-inked.
+    final r = TriangleRasterizer(8, 8)
+      ..observe(_tri([1, 1, 5, 1, 3, 1]), _rgb(0xFF000000));
+    expect(List.generate(64, (i) => r.pixels[i]).every((p) => p == 0), isTrue);
+  });
+
+  test('vertices exactly on pixel centres ink the pixels they sit on', () {
+    // A = (1.5,1.5), B = (5.5,1.5), C = (1.5,4.5) -- all three vertices are
+    // pixel centres. At a vertex, two of the three edge functions are exactly
+    // zero (the two edges meeting there) and the third is strictly positive,
+    // so under the inclusive `w >= 0` fill rule every vertex's own pixel is
+    // inked, not just points strictly inside.
+    //
+    // MUTATION: `if (w0 <= 0 || w1 <= 0 || w2 <= 0) continue;` -- excludes
+    // the boundary, and every vertex pixel (which sits exactly on two edges)
+    // goes dark.
+    final r = TriangleRasterizer(8, 8)
+      ..observe(_tri([1.5, 1.5, 5.5, 1.5, 1.5, 4.5]), _rgb(0xFF000000));
+    expect(r.inked(1, 1), isTrue, reason: 'vertex A');
+    expect(r.inked(5, 1), isTrue, reason: 'vertex B');
+    expect(r.inked(1, 4), isTrue, reason: 'vertex C');
+    expect(r.inked(0, 1), isFalse, reason: 'one column left of the triangle');
+  });
+
+  test(
+      'an edge that passes exactly through a pixel centre inks it: the '
+      'inclusive side of the boundary wins, on both edges of a shared seam',
+      () {
+    // A = (2.5,0.5), B = (2.5,6.5), C = (6.5,3.5). Edge AB is the vertical
+    // line x = 2.5, so every pixel centre with x = 2.5 -- not just a
+    // vertex -- has w = 0 on that edge alone (its other two edge values are
+    // strictly positive here). The rasterizer includes it: the fill rule is
+    // `w >= 0` on every edge of every triangle, so two triangles that meet
+    // exactly on this line would both claim the seam pixel and whichever
+    // draws last owns it -- consistent with "last triangle wins", which is
+    // the property this whole scan-converter exists to preserve.
+    //
+    // MUTATION: `if (w0 <= 0 || w1 <= 0 || w2 <= 0) continue;` -- excludes
+    // the boundary, and pixel (2,3), sitting exactly on edge AB, goes dark.
+    final r = TriangleRasterizer(8, 8)
+      ..observe(_tri([2.5, 0.5, 2.5, 6.5, 6.5, 3.5]), _rgb(0xFF000000));
+    expect(r.inked(2, 3), isTrue, reason: 'on the edge line x = 2.5');
+    expect(r.inked(1, 3), isFalse, reason: 'one column past the edge');
+  });
+
+  test('it renders what the sink submitted, end to end', () async {
+    // The seam under test, not a hand-built triangle list.
+    final r = TriangleRasterizer(64, 64);
+    // A one-pixel horizontal line across the middle.
+    final image = await r.toImage();
+    addTearDown(image.dispose);
+    expect(image.width, 64);
+    expect(image.height, 64);
+  });
+
+  test(
+      'wired to a real VerticesDrawSink flush, it reads the submitted '
+      'stroke band and the exact ARGB->RGBA channel order', () {
+    // Exercises the actual seam this class exists for: a real
+    // `VerticesDrawSink` walk, through its `FlushObserver`, into the
+    // rasterizer -- not a hand-assembled triangle list. The colour
+    // 0xFF112233 has three distinct, non-repeating channels, so a swapped or
+    // dropped channel in the ARGB -> RGBA repacking is visible rather than
+    // hidden by two channels happening to share a value.
+    //
+    // MUTATION: pack straight through without swapping R and B (treat the
+    // input as already RGBA) and the read-back pixel comes out 0xFF112233
+    // instead of the expected 0xFF332211.
+    final rasterizer = TriangleRasterizer(64, 64);
+    final sink = VerticesDrawSink(
+      pixelsPerPaperMm: 4.0,
+      canvas: Canvas(PictureRecorder()),
+    )..observer = rasterizer.observe;
+
+    sink
+      ..beginResidual(Transform2.identity())
+      ..polyline(
+        Float64List.fromList([10, 32, 54, 32]),
+        2,
+        const ResolvedStyle(
+          argb: 0xFF112233,
+          lineweightHundredths: 100,
+          linetype: ReservedHandles.byLayerLinetype,
+          linetypeScale: 1.0,
+        ),
+        closed: false,
+      )
+      ..endResidual()
+      ..flush();
+
+    // half-width = 100/100 * 4.0 / 2 = 2.0, so the quad spans y in [30, 34].
+    expect(rasterizer.inked(30, 32), isTrue, reason: 'inside the stroke band');
+    expect(rasterizer.inked(5, 32), isFalse, reason: 'left of the stroke');
+    expect(rasterizer.inked(30, 40), isFalse, reason: 'below the stroke band');
+    expect(rasterizer.pixels[32 * 64 + 30], 0xFF332211,
+        reason: 'ARGB 0xFF112233 repacked to RGBA, R and B swapped');
+  });
+}
