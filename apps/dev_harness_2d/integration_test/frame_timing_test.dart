@@ -169,7 +169,7 @@ void main() {
         SpatialIndex index,
         DraftPainter painter,
         CanvasDrawSink sink,
-        Handle dashedLinetype
+        Handle? dashedLinetype
       })> boot(WidgetTester tester) async {
     final doc = harnessDocument(kEntities);
     late CameraController camera;
@@ -203,9 +203,17 @@ void main() {
     final dashedLinetypes = doc.tables.linetypes.records
         .where((lt) => lt.pattern.dashes.isNotEmpty)
         .toList();
-    if (dashedLinetypes.length != 1) {
-      throw StateError('expected exactly one dashed linetype in the '
-          'corpus, found ${dashedLinetypes.length}: '
+    // `kDashedFraction == 0` is the control arm of the dash/leaf separation
+    // experiment, and `generateDocument` seeds no dashed `LinetypeRecord` at
+    // all in that case -- so the count expected there is zero, not one. Any
+    // other count still fails: two would mean the shape lookup below is
+    // ambiguous, and one at a fraction of zero would mean the corpus stopped
+    // honouring the define.
+    final expectedDashedLinetypes = kDashedFraction > 0 ? 1 : 0;
+    if (dashedLinetypes.length != expectedDashedLinetypes) {
+      throw StateError('expected $expectedDashedLinetypes dashed linetype(s) '
+          'in the corpus at DASHED=$kDashedFraction, found '
+          '${dashedLinetypes.length}: '
           '${dashedLinetypes.map((lt) => lt.name).toList()}');
     }
 
@@ -215,7 +223,7 @@ void main() {
       index: index,
       painter: painter,
       sink: sink,
-      dashedLinetype: dashedLinetypes.single.handle
+      dashedLinetype: dashedLinetypes.singleOrNull?.handle
     );
   }
 
@@ -275,6 +283,10 @@ void main() {
 
   testWidgets('R4a leaf edit per frame', (tester) async {
     if (!runs('leaf')) return;
+    if (kDashedFraction == 0) {
+      print('R4a skipped: DASHED=0 seeds no dashed linetype to edit with.');
+      return;
+    }
     refuseDebugMode();
     final app = await boot(tester);
     final timings = <FrameTiming>[];
@@ -289,15 +301,17 @@ void main() {
     final y = (e.minY + e.maxY) / 2;
     final handlesBefore = app.doc.handleSeed.current.value;
     final rebuildsBefore = app.index.rebuildCount;
-    var dragged =
-        addLineAt(app.doc, app.doc.rootHandle, x, y, app.dashedLinetype);
+    // Non-null past the `kDashedFraction == 0` return above, which is the only
+    // arm in which the corpus carries no dashed linetype.
+    final dashed = app.dashedLinetype!;
+    var dragged = addLineAt(app.doc, app.doc.rootHandle, x, y, dashed);
 
     final clock = CommandClock();
     for (var step = 1; step <= kSteps; step++) {
       clock.time(() {
         app.doc.commands.execute(RemoveEntityCommand(dragged));
         dragged = addLineAt(app.doc, app.doc.rootHandle, x + step * 2.0,
-            y + step * 1.0, app.dashedLinetype);
+            y + step * 1.0, dashed);
       });
       app.camera.panBy(const Offset(-3, -1));
       await tester.pump(const Duration(milliseconds: 16));

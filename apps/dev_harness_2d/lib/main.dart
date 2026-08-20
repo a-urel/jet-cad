@@ -40,6 +40,31 @@ final double kLineweightScale = double.tryParse(
 /// Both are inert at their defaults: with `TEXT` unset the document is
 /// byte-for-byte the one Plan 3b measured, and `DRAW_TEXT` has nothing to act
 /// on.
+/// The fraction of entities carrying the dashed linetype.
+///
+/// The dash/leaf separation experiment: `dashSpans` and `screenSpaceLeafCount`
+/// move together in this corpus (x1.293 against x1.304 from 10,000 to 50,000
+/// entities), so no run so far can tell "cost per drawn leaf" from "cost per
+/// dash span" apart. This define holds the geometry still and moves only the
+/// linetype, which is the one thing that separates them.
+///
+/// It is sound as a control because `_Styling.linetypeFor` is a quota counter,
+/// not a draw from the corpus's random stream: changing this fraction cannot
+/// perturb a single coordinate, so extents, camera and leaf count are
+/// unchanged. The one thing it does change is that `generateDocument` seeds
+/// the dashed `LinetypeRecord` only when the fraction is positive, so at 0
+/// every later handle shifts down by one -- relative draw order, and therefore
+/// what is drawn, is the same. That the control held is *measured*, not
+/// assumed: the two runs must report the same `screenSpaceLeafCount`.
+///
+/// There is no `double.fromEnvironment`, so this parses a string define the
+/// same way [kLineweightScale] does. Inert at its default of 0.35, which is
+/// the value every run before this one used.
+final double kDashedFraction = double.tryParse(
+      const String.fromEnvironment('DASHED', defaultValue: '0.35'),
+    ) ??
+    0.35;
+
 const bool kTextCorpus = bool.fromEnvironment('TEXT');
 const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
 
@@ -61,7 +86,7 @@ DraftDocument harnessDocument([int? entityCount]) => generateDocument(
       groupCount: 50,
       layerCount: 8,
       byBlockFraction: 0.3,
-      dashedFraction: 0.35,
+      dashedFraction: kDashedFraction,
       labelFraction: kTextCorpus ? 0.02 : 0,
       attributedInstanceFraction: kTextCorpus ? 0.2 : 0,
       measurer:

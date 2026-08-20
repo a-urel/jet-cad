@@ -1,7 +1,8 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-20
-**Verified against:** `main` @ `33bdafb`, working tree clean, no worktrees.
+**Verified against:** `main`, working tree clean, no worktrees — both suites
+re-run on 2026-08-20 on the tree carrying the dash/leaf measurement below.
 Every count below was produced by running the suite, not by reading a report.
 
 ---
@@ -29,9 +30,24 @@ failure is Plan 2's carried `snap at dirty threshold`.
 Results note:
 [docs/superpowers/notes/2026-08-20-plan-3c-results.md](docs/superpowers/notes/2026-08-20-plan-3c-results.md).
 **macOS Low Power Mode was on for the whole session** — every timing in it is
-contaminated; no failable criterion is a timing.
+contaminated; no failable criterion is a timing. Re-measured with it off, the
+contamination is a uniform **~24%** on both raster and build, not the 4–12×
+that note guesses, and Plan 3b's claim that CPU-only paths are unaffected is
+**wrong**: they run 23–40% faster with it off.
 
-**Next: pick the next plan.** Nothing is in flight.
+### The per-leaf cost model is dead
+
+[docs/superpowers/notes/2026-08-20-dash-leaf-separation.md](docs/superpowers/notes/2026-08-20-dash-leaf-separation.md)
+holds the drawn geometry fixed (`screenSpaceLeafCount=1664` in all three arms)
+and moves only `dashedFraction`. The frame moves **6.0×**, so **the unit of
+render cost is the canvas call, not the drawn leaf**. Every per-leaf µs figure
+in Plans 3a, 3b and 3c is an artefact of a corpus where dash spans and leaves
+are collinear — do not carry them forward. `build` is linear in call count to
+±30 µs; raster is super-linear because each call is one Impeller `Entity`. At
+`DASHED=0` a 10,000-entity frame is **9.5 ms**, inside the 60 fps budget.
+
+**Next: pick the next plan.** Nothing is in flight. The measurement above
+points at one — a `VerticesDrawSink` behind the existing `DrawSink` seam.
 
 ---
 
