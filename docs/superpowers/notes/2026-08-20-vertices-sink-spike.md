@@ -67,6 +67,13 @@ The last row is the median of three consecutive runs, raster 8.73 / 8.77 /
 8.87. The 18 remaining canvas calls are text paragraphs; the 19 flushes are one
 per text op plus one at the end of the frame.
 
+**One reading of 6.88 ms was taken before that row and never reproduced.** It
+came off the build immediately before the frame-scoped counters landed, whose
+only difference is one increment per segment, and the six runs taken after it
+span 8.47 to 8.87 ms. It is recorded here because it happened and because it is
+the reason every row above is a median of three rather than a single run — not
+because it is a result. Nothing in this note rests on it.
+
 **The per-call model predicted this before it was measured.** From the
 separation note, fitted on a completely different sink:
 

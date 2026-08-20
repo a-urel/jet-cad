@@ -4,8 +4,12 @@
 **Parent:** [2026-07-27-jet-cad-2d-architecture-design.md](2026-07-27-jet-cad-2d-architecture-design.md)
 **Carried in from:** [2026-08-20-dash-leaf-separation.md](../notes/2026-08-20-dash-leaf-separation.md) and [2026-08-20-vertices-sink-spike.md](../notes/2026-08-20-vertices-sink-spike.md)
 **Written against:** `main` at `bb67137` (Plans 1, 2, 3a, 3b and 3c merged) and
-the spike branch `spike/vertices-sink` at `d0e872e`. Every fact below was read
-off that tree, not remembered.
+the spike branch `spike/vertices-sink` at `d0e872e`, which was that branch's
+head while this was written and is now its second commit back — this document
+and the revision below are the two after it. Every fact was read off that tree,
+not remembered.
+**Revised:** 2026-08-20, after three independent reviews. Their findings and
+what changed are at the end.
 
 ## Summary
 
@@ -123,29 +127,55 @@ These were settled in the design conversation of 2026-08-20 and are inputs.
 ### Backend selection has one resolution point
 
 A `RenderBackend` enum with two values, `canvas` and `vertices`, resolved once
-in `DraftCanvas` from `kIsWeb` and overridable by an optional widget
-parameter. Not a `bool`, because a third backend is foreseeable
-(`flutter_gpu`), and not read in more than one place, because two call sites
-that each decide would eventually disagree.
+in `DraftCanvas` and overridable by the caller. Not a `bool`, because a third
+backend is foreseeable (`flutter_gpu`), and not read in more than one place,
+because two call sites that each decide would eventually disagree.
+
+The contract, in full, because a widget parameter is public API and a test
+needs to know what it may ask for:
+
+- `DraftCanvas` takes `RenderBackend? backend`, defaulting to `null`.
+- `null` means "the platform's own choice", resolved in one function:
+  `kIsWeb ? RenderBackend.canvas : RenderBackend.vertices`.
+- A non-null value is **honoured on every platform**, including
+  `RenderBackend.vertices` on web. It is not clamped, because the web
+  measurement in Phase C needs to force it, and a parameter that silently
+  ignores what it is given is worse than one that is slow.
+- `devicePixelRatio` reaches `VerticesDrawSink` the way the spike already does
+  it: read in `build` from `MediaQuery.devicePixelRatioOf(context)` and
+  assigned to the sink, never cached at construction, because the ratio
+  changes when a window moves between displays.
+- The resolved backend is readable from `DraftCanvasState`, so a rig reports
+  what it measured rather than what it asked for.
 
 The widget owns both sinks' lifetimes as it owns `CanvasDrawSink`'s today: one
 per widget, rebound per paint, so a prop change that recreates a sink does not
 throw away the paragraph cache behind it.
 
-### The two backends must draw the same picture
+### The two backends draw the same picture, except where the vertices one is
+### more correct
 
-This is the invariant that makes two production paths tolerable, and it is the
-reason joins and caps match `Paint`'s defaults rather than being chosen fresh.
-It is not a claim the spec makes; it is a test Phase B writes.
+The first draft of this spec said the backends may differ only on
+anti-aliasing and rounding, and that anything else was a defect. **That is
+false, and it is false by construction rather than by accident.** Two of the
+divergences are things the vertices sink does *better*, and a comparison
+written against the earlier claim could only pass on a fixture at the identity
+transform — the degenerate fixture `CLAUDE.md` names as this repository's
+dominant failure mode.
 
-Where they may differ, and only here:
+**The vertices backend is authoritative.** Where the two disagree below, the
+canvas backend is the one being bounded, and the bound is "close enough that a
+drawing is recognisably the same", not "identical".
 
-| | Reason |
-|---|---|
-| Anti-aliasing | The canvas path anti-aliases analytically through the SDF; the vertices path gets MSAA. A coverage comparison must therefore be at a tolerance, not exact. |
-| Sub-pixel strokes | Both apply the same two rules (fact 4), but the canvas path applies them in the engine and the vertices path in Dart, so they round differently in the last bit. |
+| Divergence | Which is right | Why |
+|---|---|---|
+| **Anisotropic stroke width** | vertices | `CanvasDrawSink._widthFor` divides the width by `scaleMagnitude`, `sqrt(\|det\|)` — one scalar standing in for two axis scales, exact only when the residual is conformal. The vertices sink takes the perpendicular *after* transforming the endpoints, so the half-width is a device-pixel quantity on both axes. Under a non-conformal residual the two draw different widths, not different last bits. |
+| **Point shape** | neither, they are different conventions | `CanvasDrawSink.point` pushes the residual onto the canvas and calls `drawRawPoints`, so the square cap rotates and shears with the residual. The vertices sink emits a device-space axis-aligned square. Under a rotated residual these are different squares. 3d picks one — the axis-aligned square, because a point marker that shears is not what a point marker is for — and changes `CanvasDrawSink` to match. |
+| **Anti-aliasing** | canvas | Analytic SDF coverage against MSAA. Not fixable on the vertices path without a coverage shader, and out of scope. |
+| **Sub-pixel strokes** | vertices, but untestable by comparison | See the next section. |
+| **Overlapping translucent strokes** | canvas | A stroked path unions its coverage; a triangle soup does not, so two quads that overlap at a near-180° reversal double-blend. Inert while the corpus is opaque (`argb`'s alpha is `255 - transparency`, `resolved_style.dart:15`), live the moment 3e adds fills. Recorded, not fixed. |
 
-Anything else is a defect.
+Anything **not** in this table is a defect.
 
 ### Joins and caps
 
@@ -154,20 +184,54 @@ outside. 3d closes it:
 
 - **Caps are butt.** The quad ends at the endpoint. This is what the sink
   already does, and it needs a test rather than a change.
-- **Joins are miter, with bevel past the limit.** At each interior vertex,
-  offset the two adjacent segment edges on the outside of the turn and add the
-  triangle that fills the notch out to their intersection. When the cosine of
-  the direction change falls below **-0.875** (fact 5), fill to the bevel
-  instead: the triangle between the two outer corners and the vertex.
+- **Joins are miter, with bevel past the limit, and a miter is two triangles.**
+  The notch at an interior vertex is the quadrilateral `(V, A, M, B)` — the
+  vertex, the outer corner of the incoming segment, the miter point where the
+  two offset edges meet, and the outer corner of the outgoing one. Filling it
+  takes the **bevel triangle `(V, A, B)` and the tip triangle `(A, M, B)`**.
+  One triangle alone leaves a hairline crack at every mitred corner, which is
+  invisible in a unit test that only counts triangles and obvious in a golden
+  at a visible lineweight. When the cosine of the direction change falls below
+  **-0.875** (fact 5), emit the bevel triangle alone.
 - **A zero-length segment contributes no direction** and is skipped, as it is
   now; the join is then taken between the segments either side of it.
-- **A closed polyline joins at the seam rather than capping.** Dead on the
-  frame path today (fact 2), live for 3e, and cheap to get right now.
 
-The join belongs to the *pair* of segments, so it is emitted by the polyline
-walk and not by `_emitSegment`. Curves are flattened into chords by the same
-walk and get the same joins, which is what keeps a thick dashed arc from
-showing 40 notches.
+The join belongs to the *pair* of segments, so it is emitted by the walk and
+not by `_emitSegment`. There are **two** walks today — `polyline` and
+`_flatten` — and the join code is shared between them rather than written
+twice; a thick dashed arc showing 40 notches and a thick polyline showing none
+is the failure that shape prevents.
+
+A closed walk joins at its seam instead of capping. That is live for `circle`,
+which is a `_flatten` at a full sweep whose last chord lands on its first
+point: without a seam join every circle at a visible lineweight carries one
+notch at its start angle. It is dead for `polyline`, which the painter never
+calls with `closed: true` (fact 2) — but it is directly reachable from a test,
+`sink.polyline(..., closed: true)` needs no painter, so it lands with a test
+and a mutant rather than as unreached code. The spike's one not-applicable
+mutant was this same branch; 3d does not add a second.
+
+### `Vertices` is disposable, and the spike never disposes
+
+`Vertices` extends `NativeFieldWrapperClass1` and carries a real
+`void dispose()` over a native `Vertices::dispose` symbol, with `_disposed`
+and `debugDisposed` beside it
+(`sky_engine/lib/ui/painting.dart`, in the `Vertices` class body). `flush()`
+builds one per flush and drops it on the floor. At 19 flushes a frame and 60
+frames a second that is **1,140 undisposed native-backed objects a second**,
+each holding the frame's position and colour buffers, reclaimed only when a
+finalizer eventually runs.
+
+This is not a line item inside the allocation discussion below. It is a native
+memory leak in code the spike already ships, and it is Phase A's to close.
+
+The open question the plan must settle first, by test rather than by reading:
+**whether a `Vertices` may be disposed immediately after the `drawVertices`
+that submitted it**, or whether the recorded `Picture` still refers to it. The
+test is a device run — the frame must keep drawing, and `debugDisposed` must
+read true — because a `PictureRecorder` in `flutter_test` may retain what a
+real rasterisation does not. If it may not be disposed at submission, the plan
+records what it costs to hold one per frame and dispose it on the next.
 
 ### The allocation question
 
@@ -187,13 +251,35 @@ order:
    every other sink here; there is no reason it is not one in this one. The two
    `sublistView`s are views over a reused buffer and allocate a wrapper each.
 3. **State the residue and its bound.** If a `Vertices` object cannot be reused
-   across frames — the plan must check whether `Vertices` is disposable and
-   whether a raw one may be retained — then the residue is **O(1) per flush,
-   not O(entities)**, and the non-negotiable is amended in `CLAUDE.md` to say
-   so in those words, with the measured number beside it.
+   across frames, then the residue is **O(1) per flush, not O(entities)**, and
+   an amendment to `CLAUDE.md` saying so in those words, with the measured
+   number beside it, is *proposed*.
 
 An amendment with a measurement behind it is a decision. Silence would be a
-breach.
+breach. **The plan does not grant itself the amendment**: `CLAUDE.md` is a
+governing document, criterion 7 is not satisfied by editing it, and the change
+needs the same explicit approval this spec did. If the approval does not come,
+criterion 7 fails and the residue has to go to zero or the plan stops. Writing
+the exit gate so it can be passed by rewriting the rule it is measured against
+is Ruling 4's failure mode wearing a different hat.
+
+### What Phase A does not have to build
+
+The spike already ships, tested, and 3d inherits rather than writes:
+
+- Both of Impeller's sub-pixel stroke rules (fact 4), in `_halfWidthFor` and
+  `_coveredArgb`, pinned by six of the 24 unit tests.
+- The curve flattening and its chord-error budget.
+- The single ordered buffer, the per-vertex colour, and the mid-frame flush.
+- The differential oracle and its four tests.
+
+One thing it ships that is **wrong and must be fixed**: the class comment at
+`vertices_draw_sink.dart:63` still says "Points, circles, arcs and text still
+go to `CanvasDrawSink`… the one place draw order is still wrong". Points,
+circles and arcs have batched since the curve commit; only text falls back, and
+it flushes first. A reader of the tree finds the code and the comment
+disagreeing, and one review of this spec read the comment and reported an
+ordering defect that does not exist. Fixing it is Phase A's first task.
 
 ### Text, and why `CanvasDrawSink` survives
 
@@ -214,6 +300,12 @@ they are the wrong control: the rig needs to force a *backend*, not to toggle a
 sink. `useVertices` is replaced by the `RenderBackend` parameter and the
 harness define becomes `BACKEND=canvas|vertices`, defaulting to the platform's
 own choice so an ordinary run measures what a user gets.
+
+**It is a `String.fromEnvironment`, and it stays one.** Plan 3c lost a full
+device run to `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as
+false while printing plausible numbers; the string form has no such hazard, and
+an unrecognised value is a `StateError` at startup rather than a silent
+fallback. Nobody is to helpfully convert it back to a `bool`.
 
 `DASHED`, `TEXT`, `DRAW_TEXT`, `LINEWEIGHT_SCALE` and `ENTITIES` stay as they
 are.
@@ -250,15 +342,52 @@ cannot be drawn by one backend does not exist.
 
 ### The sink-against-sink coverage test
 
-The new test, and the one that earns the two-backend decision. For a fixture
-carrying every primitive: render it through `CanvasDrawSink` into an image with
-`flutter_test`, render it through `VerticesDrawSink` and the rasterizer, and
-compare coverage at a tolerance that admits the two rows of the table above and
-nothing else.
+The new test, and the one that earns the two-backend decision. Render a fixture
+through `CanvasDrawSink` into an image with `flutter_test`, render it through
+`VerticesDrawSink` and the rasterizer, and compare.
 
-The tolerance is a number this plan measures rather than guesses: the plan
-records the observed per-pixel disagreement on the fixture and sets the bound
-above it with the margin stated.
+Four things about it are decided here rather than left to the implementer,
+because each of them is a way for the test to pass without meaning anything.
+
+**It compares ink regions, not pixel colours.** The rasterizer has no
+anti-aliasing and a CAD stroke is about one pixel wide, so essentially every
+ink pixel on the canvas side is an edge pixel. A per-pixel tolerance loose
+enough to admit that admits real geometry defects with it, and the
+measure-then-set-the-bound procedure would produce a number that is not a
+bound on anything. The comparison is membership instead, in both directions:
+every pixel the rasterizer inked must fall inside the canvas image's ink
+dilated by one pixel, and every pixel of the canvas image above a stated
+opacity floor must be inked by the rasterizer. That is the same shape as
+`vertices_differential.dart`'s two directions, one level up.
+
+**`flutter_test` is software Skia, so facts 4 and 5 do not hold on the canvas
+side.** The one-device-pixel floor and the alpha fade are Impeller's, and the
+comparison runs in an environment that has neither. Worse, `flutter_test`
+defaults to `devicePixelRatio` 1, where the corpus's thinnest lineweight is
+0.945 device pixels (fact 3) — every thin stroke lands in exactly the regime
+the two engines treat differently. The fixture therefore **pins
+`devicePixelRatio` and uses lineweights above the floor at that ratio**, and
+the plan says in the test's own header that this buys agreement by excluding
+the sub-pixel rules from the comparison. Those rules stay pinned by the six
+unit tests that already cover them, and by nothing else.
+
+**Text is excluded from the pixel comparison.** A paragraph never enters the
+triangle buffer, so the vertices-side image has no glyphs while the canvas-side
+one does. Criterion 3's fixture still *carries* text — because text forces the
+mid-frame flush, and the ordering that depends on it is what the fixture is
+there to exercise — but the comparison masks the text's own bounds out and
+asserts the flush count instead. A fixture with text whose glyphs were compared
+would fail for a reason that is not a defect; a fixture without text would not
+exercise the flush at all.
+
+**The rasterizer needs the triangles before `flush()` destroys them.**
+`flush()` builds the `Vertices`, submits it and rewinds the buffer in one call,
+so a test that runs after it finds an empty buffer and one that runs before it
+has not exercised the code under test. Phase A adds the seam: `flush()` gains
+an optional observer that is handed the position and colour views *as
+submitted*, before the rewind. The rasterizer is that observer. It reads what
+Impeller was given, which is the whole point of owning it — no duplicated
+geometry, no second walk.
 
 ### What the existing differential oracle keeps doing
 
@@ -278,12 +407,26 @@ re-measurement showed a uniform ~24% on both raster and build.
 | R2 pan and zoom | 10,000 / 50,000 / 500,000 | canvas, vertices |
 | R4a leaf edit | 50,000 | canvas, vertices |
 | R4b instance drag | 50,000 | canvas, vertices |
-| R2, `--platform chrome` | 10,000 / 50,000 | canvas, vertices |
+| R2 on web | 10,000 / 50,000 | canvas, vertices |
 
 Three consecutive runs per row, median reported, spread reported beside it. A
-single reading is not a measurement: the spike recorded 6.88 ms once and 8.47
-to 8.87 ms on every run after it, and only the repetition showed which was the
-outlier.
+single reading is not a measurement: the spike recorded one reading of 6.88 ms
+that no later run reproduced, against 8.47 to 8.87 ms across the six taken
+after it. It is written down in the spike note under the measurements table,
+where it belongs — as the reason for the rule, not as a result.
+
+The web rows run through `flutter drive ... -d chrome`, not
+`flutter test --platform chrome`: the first is the integration-test driver the
+other rows use and it needs `chromedriver` on the path, the second runs widget
+tests and cannot drive the frame-timing rig. The plan pins the exact
+invocation, because getting this wrong is how a web row comes back empty and
+gets reported as "web is fine".
+
+The results note also records **peak buffer bytes**, not only frame time.
+`_reserve` doubles and never gives capacity back — that is what makes the
+steady-state frame allocation-free, and it means one zoom-out at 500,000
+entities pins the peak for the life of the widget. One line, so the number
+exists before somebody is surprised by it.
 
 The web rows are the ones that can still change a decision. If CanvasKit's
 `drawVertices` is slower than its `drawPath` at these counts, the platform
@@ -307,6 +450,11 @@ applicable. These are the ones Phase A adds.
 | J4 | Take the miter on the inside of the turn | A corner that turns in a known direction |
 | J5 | Join the first and last segment of an *open* polyline | An open polyline whose ends are near each other |
 | J6 | Skip the join between two chords of a flattened curve | A thick dashed arc |
+| J7 | Emit the miter tip triangle without the bevel triangle | A mitred corner at a lineweight where the crack is more than one pixel |
+| J8 | Cap the seam of a closed flatten instead of joining it | A thick circle, checked at its start angle |
+| J9 | Cap the seam of a closed polyline instead of joining it | `sink.polyline(..., closed: true)` directly — no painter reaches this |
+| V1 | Never dispose the submitted `Vertices` | `debugDisposed` read after a flush |
+| P1 | Emit the point square in local space, so it shears with the residual | A point under a rotated residual |
 | B1 | Resolve the backend per call site rather than once | A test that overrides the backend and reads it back from both the widget and the rig |
 | B2 | Ignore the backend override, always use the platform default | The same |
 | A1 | Allocate the `Paint` per flush | The extended allocation invariant |
@@ -341,9 +489,21 @@ Every criterion is failable and each names how it is checked.
 5. **At 10,000 entities on the working-set camera, the vertices backend's
    frame is under 16.67 ms**, median of three, spread recorded.
 6. At 50,000 and 500,000, the vertices backend's raster p50 is **better than**
-   the canvas backend's by more than the run-to-run spread of either, median of
-   three. "No worse than" would pass on noise; the plan exists to make the
-   frame faster, so a tie at 500,000 is a failure that reopens the design.
+   the canvas backend's by more than the spread, median of three. **Spread is
+   `max - min` of the three runs**, chosen over a standard deviation because
+   three samples do not support one; the criterion is met when the two
+   backends' `[min, max]` intervals do not overlap and the vertices one is
+   lower. "No worse than" would pass on noise.
+
+   **If it ties at 500,000, that is a result and the plan says what happens
+   next** rather than stalling: the working-set camera may already be culling
+   the call count down to where per-`Entity` cost stops dominating, which is
+   the model's own prediction and not a defect. The fallback is to record the
+   crossover — the entity count above which the two backends converge — as the
+   plan's finding, keep the vertices backend for the counts below it, and hand
+   3f the number, because a picture cache changes exactly that arithmetic. The
+   spike measured only 10,000; nothing about 500,000 is known yet, and a stop
+   clause with no stated next step is how a plan stalls.
 7. The allocation invariant covers the paint path and passes, with the residue
    measured and either zero or bounded and written into `CLAUDE.md`.
 8. The web rows are measured and the platform default is stated with the number
@@ -385,3 +545,77 @@ fail, and failing them is a result, not a delay.
 - **CanvasKit makes the web rows bad enough to want a third path.** Out of
   scope by construction: the fallback already exists and is already the web
   default.
+
+## Review, and what it changed
+
+Three independent reviews of the draft. Their findings are recorded here rather
+than silently folded in, because two of them found things that were true of the
+shipped spike and not only of the document.
+
+### Changed the design
+
+- **The allowed-difference table was wrong, and wrong in the way this repository
+  is warned about.** It admitted anti-aliasing and rounding and called anything
+  else a defect, which made criterion 3 passable only on a fixture at the
+  identity transform. Two divergences already exist in the spike and one is the
+  vertices sink being *more* correct: anisotropic stroke width, where
+  `CanvasDrawSink` divides by `scaleMagnitude` and the vertices sink does not
+  approximate at all; and point shape, where one square shears with the residual
+  and the other does not. A third, translucent overlap, is inert now and live
+  for 3e. The table is rewritten, the vertices backend is named authoritative,
+  and `CanvasDrawSink.point` changes to match.
+- **Criterion 3 could not be implemented as written.** The rasterizer reads the
+  triangle buffer; `flush()` destroys it in the same call that submits it. The
+  spec now specifies the observer seam. Text never enters the buffer at all, so
+  the comparison masks it and asserts the flush count instead. And comparing a
+  no-AA raster against an anti-aliased one at a per-pixel tolerance is not a
+  bound on anything at one-pixel strokes — the comparison is ink-region
+  membership in both directions instead.
+- **`flutter_test` is software Skia, so facts 4 and 5 do not hold on the canvas
+  side of that comparison** — and its default `devicePixelRatio` of 1 puts the
+  corpus's thinnest lineweight at 0.945 device pixels, squarely in the regime
+  the two engines treat differently. The fixture pins the ratio and stays above
+  the floor, and the spec says out loud what that costs: the sub-pixel rules are
+  pinned by unit test and by nothing else.
+- **A miter is two triangles, not one.** The draft said "the triangle that fills
+  the notch"; the notch is a quadrilateral, and one triangle leaves a hairline
+  crack at every mitred corner. Bevel triangle plus tip triangle, and the bevel
+  triangle alone past the limit.
+- **`Vertices` is disposable and the spike never disposes it** — about 1,140
+  undisposed native-backed objects a second at 60 fps. Promoted out of the
+  allocation discussion into its own Phase A item, with the open question
+  (may it be disposed at submission?) named and assigned a test.
+- **Circles have a seam.** `circle` is a full-sweep `_flatten` whose last chord
+  lands on its first point, and no mutant covered the join there. Added, with
+  the closed-polyline seam beside it — that one is unreachable from the painter
+  but directly reachable from a test, so it lands with a mutant rather than as
+  unreached code.
+- **Criterion 6 needed a definition and a fallback.** Spread is `max - min` of
+  three runs and the intervals must not overlap; a tie at 500,000 records the
+  crossover and hands it to 3f rather than stalling the plan.
+- **The plan may not grant itself the `CLAUDE.md` amendment.** Criterion 7 is
+  not satisfied by editing the rule it is measured against.
+
+### Corrected a fact
+
+- The draft cited a 6.88 ms reading that appeared in no note. It is now recorded
+  in the spike note where it belongs, as an unreproduced reading and the reason
+  every row is a median of three.
+
+### Found a defect in the tree, not in the spec
+
+- `vertices_draw_sink.dart:63` still claims points, circles and arcs go to the
+  fallback and that draw order is wrong there. It has been false since the curve
+  commit. One review read the comment rather than the code and reported an
+  ordering defect that does not exist — which is exactly the cost of a stale
+  comment, and why fixing it is Phase A's first task.
+
+### Considered and not changed
+
+- **Backend selection contract** — was underspecified rather than wrong; now
+  written out in full, including that `vertices` is honoured on web because
+  Phase C needs to force it.
+- **`BACKEND` as a string define** — flagged as correctly dodging Plan 3c's
+  `bool.fromEnvironment` trap. Said so explicitly, so nobody converts it.
+- **Buffer capacity never shrinks** — that is the property that makes the frame
+  allocation-free, not a leak. Peak buffer bytes joins the results note.
