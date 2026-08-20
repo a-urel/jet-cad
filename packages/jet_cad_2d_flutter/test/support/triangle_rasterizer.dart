@@ -24,10 +24,32 @@ class TriangleRasterizer {
   final int width;
   final int height;
 
-  /// RGBA, row-major, zero where nothing was drawn.
+  /// Row-major, zero where nothing was drawn.
+  ///
+  /// Each element is a packed little-endian `0xAABBGGRR` `Uint32`: byte 0
+  /// (R) is the least-significant byte, byte 3 (A) the most-significant.
+  /// [toImage] reinterprets this buffer's raw bytes as `rgba8888` via
+  /// `asUint8List()`, which reproduces that channel order only on a
+  /// little-endian host -- true of every platform this repository builds or
+  /// tests on, so it is not a portability gap this class actually carries,
+  /// only an assumption worth stating next to a "deterministic across
+  /// machines" claim.
   final Uint32List pixels;
 
-  bool inked(int x, int y) => pixels[y * width + x] != 0;
+  /// Whether `(x, y)` was painted by any triangle.
+  ///
+  /// Bounds-checked rather than left to fall through to [pixels]' own index
+  /// check: `y * width + x` is a single flat index, so an out-of-range `x`
+  /// with an in-range `y` would otherwise silently read a neighbouring row
+  /// instead of failing. Tasks 10 and 11 assert on coordinates near the
+  /// surface's edge, where that silent wraparound would read as a passing,
+  /// wrong assertion rather than a crash.
+  bool inked(int x, int y) {
+    if (x < 0 || x >= width || y < 0 || y >= height) {
+      throw RangeError('($x, $y) is outside the ${width}x$height surface');
+    }
+    return pixels[y * width + x] != 0;
+  }
 
   /// A [FlushObserver]. Triangles are drawn in buffer order with no depth
   /// test, exactly as `drawVertices` rasterises them, so a later one covers an
@@ -41,6 +63,14 @@ class TriangleRasterizer {
         positions[t * 2 + 3],
         positions[t * 2 + 4],
         positions[t * 2 + 5],
+        // Only the first vertex's colour is read: `VerticesDrawSink` always
+        // writes three identical colours per triangle (colour rides on the
+        // vertex, not on a shared shader), so a flat fill matches its output
+        // exactly. This is a coverage rasterizer, not a rendering one, and
+        // it does not interpolate -- a future producer that submitted a
+        // genuine per-vertex gradient would be flattened to vertex 0's
+        // colour here rather than blended, which would be wrong for that
+        // producer and is unreachable for this one today.
         colors[t].toUnsigned(32),
       );
     }

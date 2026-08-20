@@ -18,8 +18,11 @@ void main() {
   test('a triangle covers its interior and not its outside', () {
     // MUTATION: reuse edge AB's direction (bx - ax, by - ay) for edge BC
     // instead of (cx - bx, cy - by) -- a plausible copy-paste when writing
-    // the three edge functions -- and (2, 2), genuinely inside via all three
-    // real edges, no longer satisfies the corrupted second one.
+    // the three edge functions. Run: (2, 2) is *not* what goes dark -- at
+    // (2, 2) the corrupted w1 comes out 7.5, still non-negative, so the
+    // "inside" assertion stays green. What actually goes red is "past the
+    // hypotenuse": (5, 5) newly satisfies the corrupted w1 and reads inked
+    // when it should not.
     final r = TriangleRasterizer(8, 8)
       ..observe(_tri([1, 1, 6, 1, 1, 6]), _rgb(0xFFFF0000));
     expect(r.inked(2, 2), isTrue, reason: 'inside');
@@ -31,11 +34,19 @@ void main() {
     // MUTATION: reject triangles whose edge functions come out negative and
     // the clockwise one vanishes. `drawVertices` culls nothing, so neither
     // does this.
+    //
+    // Both sides are pinned to `isTrue`, not just to each other: comparing
+    // `cw.inked(2, 2)` against `ccw.inked(2, 2)` alone is satisfied equally
+    // by "both true" and "both false", so a mutation that rejects every
+    // triangle regardless of winding (e.g. `w0 > 0` in place of `w0 >= 0`
+    // dropping the boundary, or any change that goes dark on both windings
+    // together) leaves the two sides equal and the test green.
     final ccw = TriangleRasterizer(8, 8)
       ..observe(_tri([1, 1, 6, 1, 1, 6]), _rgb(0xFF00FF00));
     final cw = TriangleRasterizer(8, 8)
       ..observe(_tri([1, 1, 1, 6, 6, 1]), _rgb(0xFF00FF00));
-    expect(cw.inked(2, 2), ccw.inked(2, 2));
+    expect(ccw.inked(2, 2), isTrue, reason: 'counter-clockwise');
+    expect(cw.inked(2, 2), isTrue, reason: 'clockwise');
   });
 
   test('a later triangle draws over an earlier one', () {
@@ -53,6 +64,54 @@ void main() {
       ..observe(_tri([0, 0, 8, 0, 0, 8]), _rgb(0xFFFF0000))
       ..observe(_tri([0, 0, 8, 0, 0, 8]), _rgb(0xFF0000FF));
     expect(r.pixels[1 * 8 + 1] & 0x00FFFFFF, 0xFF0000);
+  });
+
+  test(
+      'a later triangle wins the overlap within a single observe() call, '
+      'not just across separate calls', () {
+    // Every ordering test above submits one triangle per `observe` call,
+    // which pins *call* order, not *buffer* order -- and buffer order is
+    // the actual property `VerticesDrawSink.flush` relies on: one call
+    // submits an entire frame's triangles in one buffer, walk order first
+    // to last (`vertices_draw_sink.dart:32-33`, `observe`'s own doc comment
+    // above).
+    //
+    // MUTATION: walk the buffer back to front --
+    // `for (var t = ((colors.length ~/ 3) - 1) * 3; t >= 0; t -= 3)`.
+    // A test that submits one triangle per call cannot tell this apart from
+    // correct code: reversing which triangle a loop visits first does
+    // nothing when the loop only ever sees one triangle. This test submits
+    // both triangles in the same buffer, so it is the one that actually
+    // exercises the loop's direction.
+    final positions = Float32List.fromList([
+      0, 0, 8, 0, 0, 8, // red, first in the buffer
+      0, 0, 8, 0, 0, 8, // blue, second in the buffer, same footprint
+    ]);
+    final colors = Int32List.fromList([
+      ...List.filled(3, 0xFFFF0000),
+      ...List.filled(3, 0xFF0000FF),
+    ]);
+    final r = TriangleRasterizer(8, 8)..observe(positions, colors);
+    expect(r.pixels[1 * 8 + 1] & 0x00FFFFFF, 0xFF0000,
+        reason: 'blue is later in the buffer, so it should win');
+  });
+
+  test('sub-full alpha survives the ARGB->RGBA repack, not just RGB', () {
+    // MUTATION: replace `(argb & 0xFF000000)` with the literal `0xFF000000`
+    // (assume every triangle is opaque). Every other fixture in this file
+    // uses `0xFF......` alpha, so that substitution would stay green
+    // everywhere except here.
+    //
+    // `VerticesDrawSink._coveredArgb` (`vertices_draw_sink.dart:515`)
+    // deliberately fades a stroke thinner than one device pixel instead of
+    // drawing it at full opacity, so a rasterizer that silently forced alpha
+    // to `0xFF` would certify a Task 10 golden of a thin lineweight as fully
+    // opaque when the sink actually drew it faded.
+    final r = TriangleRasterizer(8, 8)
+      ..observe(_tri([1, 1, 6, 1, 1, 6]), _rgb(0x80112233));
+    expect(r.pixels[2 * 8 + 2], 0x80332211,
+        reason: 'alpha 0x80 preserved, R and B swapped into the packed '
+            'RGBA value');
   });
 
   test(
@@ -112,9 +171,20 @@ void main() {
     //
     // MUTATION: drop the row and column clamps and this throws a RangeError,
     // or worse, writes a pixel on the opposite edge.
+    //
+    // MUTATION: `x <= maxX` -> `x < maxX` (an off-by-one on the loop bound,
+    // easy to write by analogy with a half-open range). `ceil(30)` clamps to
+    // `width - 1 == 7`, so column 7 is only reached because the loop is
+    // inclusive of `maxX`; drop that and the whole rightmost column of the
+    // clamped bounding box is never visited, silently. (7, 0) sits at
+    // x + y = 8 <= 10 -- genuinely inside this triangle, and reachable only
+    // through that inclusive last column -- so it is the assertion that
+    // catches it; (7, 7) alone would not, since it is outside the triangle
+    // either way.
     final r = TriangleRasterizer(8, 8)
       ..observe(_tri([-20, -20, 30, -20, -20, 30]), _rgb(0xFF000000));
     expect(r.inked(0, 0), isTrue);
+    expect(r.inked(7, 0), isTrue, reason: 'the clamped box\'s last column');
     expect(r.inked(7, 7), isFalse);
   });
 
@@ -183,19 +253,9 @@ void main() {
     expect(r.inked(1, 3), isFalse, reason: 'one column past the edge');
   });
 
-  test('it renders what the sink submitted, end to end', () async {
-    // The seam under test, not a hand-built triangle list.
-    final r = TriangleRasterizer(64, 64);
-    // A one-pixel horizontal line across the middle.
-    final image = await r.toImage();
-    addTearDown(image.dispose);
-    expect(image.width, 64);
-    expect(image.height, 64);
-  });
-
   test(
       'wired to a real VerticesDrawSink flush, it reads the submitted '
-      'stroke band and the exact ARGB->RGBA channel order', () {
+      'stroke band and the exact ARGB->RGBA channel order', () async {
     // Exercises the actual seam this class exists for: a real
     // `VerticesDrawSink` walk, through its `FlushObserver`, into the
     // rasterizer -- not a hand-assembled triangle list. The colour
@@ -234,5 +294,30 @@ void main() {
     expect(rasterizer.inked(30, 40), isFalse, reason: 'below the stroke band');
     expect(rasterizer.pixels[32 * 64 + 30], 0xFF332211,
         reason: 'ARGB 0xFF112233 repacked to RGBA, R and B swapped');
+
+    // The `pixels` buffer alone does not exercise `toImage`, the fourth of
+    // the four members this class exists to hand to Tasks 10 and 11
+    // (`matchesGoldenFile` reads an `Image`, not a `Uint32List`). Reading
+    // the encoded image straight back with `rawRgba` and comparing against
+    // the same buffer pins that the whole `decodeImageFromPixels` round
+    // trip -- width, height, pixel format and byte order together -- lands
+    // the exact bytes this class wrote, not merely an image of the right
+    // dimensions.
+    //
+    // MUTATION: pass `ui.PixelFormat.bgra8888` instead of `rgba8888` to
+    // `decodeImageFromPixels`, and the round-tripped pixel reads back with
+    // its outer channels swapped again -- 0xFF112233, not 0xFF332211,
+    // undoing the very swap this test's first half just checked.
+    final image = await rasterizer.toImage();
+    addTearDown(image.dispose);
+    expect(image.width, 64);
+    expect(image.height, 64);
+    final bytes = await image.toByteData(format: ImageByteFormat.rawRgba);
+    expect(bytes, isNotNull);
+    final roundTripped = bytes!.buffer.asUint32List();
+    expect(roundTripped[32 * 64 + 30], 0xFF332211,
+        reason: 'toImage round-trips the packed pixel exactly');
+    expect(roundTripped[32 * 64 + 5], 0,
+        reason: 'and leaves an untouched pixel at zero');
   });
 }
