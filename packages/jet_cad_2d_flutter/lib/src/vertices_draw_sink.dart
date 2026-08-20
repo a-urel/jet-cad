@@ -7,6 +7,13 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'canvas_draw_sink.dart';
 import 'draw_sink.dart';
 
+/// Handed the position and colour views a [VerticesDrawSink.flush] submitted,
+/// before it rewinds the buffer.
+///
+/// The views are live over the sink's own storage and are valid only for the
+/// duration of the call; an observer that keeps one must copy it.
+typedef FlushObserver = void Function(Float32List positions, Int32List colors);
+
 /// Builds each stroked segment's two triangles itself and submits the whole
 /// frame's strokes as **one** `drawVertices`, instead of one `drawPath` per
 /// segment.
@@ -104,6 +111,14 @@ class VerticesDrawSink implements DrawSink {
 
   /// Where [flush] submits. Rebound each frame, as on [CanvasDrawSink].
   late Canvas canvas;
+
+  /// Watches every flush, or null.
+  ///
+  /// **Test seam, null in production.** `flush` submits, disposes and rewinds
+  /// in one call, so there is no moment outside it at which the triangles
+  /// Impeller was given can be read. The rasterizer in
+  /// `test/support/triangle_rasterizer.dart` is the only caller.
+  FlushObserver? observer;
 
   /// Chord error allowed when flattening a curve, in device pixels.
   ///
@@ -530,6 +545,7 @@ class VerticesDrawSink implements DrawSink {
     final positions = Float32List.sublistView(_positions, 0, _vertices * 2);
     final colors = Int32List.sublistView(_colors, 0, _vertices);
     _lastFlushVertices = colors.length;
+    observer?.call(positions, colors);
     final vertices = Vertices.raw(
       VertexMode.triangles,
       positions,

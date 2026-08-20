@@ -330,6 +330,91 @@ void main() {
     // not exactly representable in it.
     expect(math.sqrt(dx * dx + dy * dy), closeTo(1.0, 1e-6));
   });
+
+  test('the observer sees exactly what was submitted, before the rewind', () {
+    // The rasterizer's seam. Reading the buffer after a flush finds it
+    // rewound; reading it before finds work the flush has not yet done.
+    //
+    // MUTATION: hand the observer the whole buffer rather than the submitted
+    // view and the length reads the capacity, 4096, instead of 12.
+    final recorder = PictureRecorder();
+    final canvas = Canvas(recorder);
+    late Float32List seenPositions;
+    late Int32List seenColors;
+    late bool disposedAtCallTime;
+    var calls = 0;
+
+    // Built without the cascade the brief's snippet uses, so the closure can
+    // read `sink.lastFlushDisposed` at call time -- a self-reference a
+    // chained `..observer = ...` cannot make before `sink` exists.
+    final sink = _sink(canvas: canvas);
+    sink.observer = (positions, colors) {
+      calls++;
+      seenPositions = Float32List.fromList(positions);
+      seenColors = Int32List.fromList(colors);
+      // `flush()` sets `_lastFlushDisposed` from `Vertices.debugDisposed`
+      // only in the `assert` block that runs after `vertices.dispose()`, so
+      // this reads false only if the observer runs before that block.
+      //
+      // MUTATION: move the observer call to after that `assert` block
+      // (still ahead of the rewind) and this reads true instead of false --
+      // confirmed empirically: moving it there flips this expectation from
+      // green to red. Moving it to the narrower window between
+      // `vertices.dispose()` itself and the `assert` block that follows it
+      // does *not* flip it -- also confirmed empirically -- because
+      // `Vertices.raw` copies `positions`/`colors` into native memory
+      // synchronously at construction, so disposing the `Vertices` object
+      // never touches the Dart-side views this test already holds. That
+      // three-line window has no observable side effect through any public
+      // API; every mutation that matters (rewound, or the assert's own
+      // disposal record) is still caught above and below.
+      disposedAtCallTime = sink.lastFlushDisposed;
+    };
+    sink.beginResidual(Transform2.identity());
+    sink.polyline(_seg(0, 0, 10, 0), 2, _style(argb: 0xFF112233),
+        closed: false);
+    sink.endResidual();
+    sink.flush();
+
+    expect(calls, 1);
+    expect(seenPositions.length, 12);
+    expect(seenColors.length, 6);
+    expect(seenColors[0].toUnsigned(32), 0xFF112233);
+    expect(disposedAtCallTime, isFalse);
+    // And the buffer really was rewound afterwards.
+    expect(sink.debugPositions(), isEmpty);
+    recorder.endRecording().dispose();
+  });
+
+  test('a flush with nothing batched does not call the observer', () {
+    // MUTATION: call it unconditionally and a frame that drew nothing
+    // rasterises an empty buffer over the previous one.
+    var calls = 0;
+    final recorder = PictureRecorder();
+    _sink(canvas: Canvas(recorder))
+      ..observer = ((_, __) => calls++)
+      ..flush();
+    expect(calls, 0);
+    recorder.endRecording().dispose();
+  });
+
+  test('the observer fires once per flush, text included', () {
+    // MUTATION: observe only the final flush and a fixture with text loses
+    // every triangle drawn before the first text op.
+    var calls = 0;
+    final recorder = PictureRecorder();
+    final canvas = Canvas(recorder);
+    final sink = _sink(canvas: canvas)
+      ..observer = ((_, __) => calls++)
+      ..beginResidual(Transform2.identity());
+    sink.polyline(_seg(0, 0, 10, 0), 2, _style(), closed: false);
+    sink.text('x', ReservedHandles.standardTextStyle, _style());
+    sink.polyline(_seg(0, 5, 10, 5), 2, _style(), closed: false);
+    sink.endResidual();
+    sink.flush();
+    expect(calls, 2);
+    recorder.endRecording().dispose();
+  });
 }
 
 /// Every corner an arc or circle flattens into turns by a small angle -- well
