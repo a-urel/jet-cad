@@ -220,8 +220,9 @@ class _DraftCustomPainter extends CustomPainter {
     // The flush is here and not in the painter because it is a fact about this
     // sink, not about the walk: the painter hands ops to a `DrawSink` and has
     // no opinion on when one of them reaches the `Canvas`.
+    batching.canvas = canvas;
     painter.paint(batching, camera.value, size);
-    batching.flush(canvas);
+    batching.flush();
   }
 
   /// Always false: [repaint] is the only trigger.

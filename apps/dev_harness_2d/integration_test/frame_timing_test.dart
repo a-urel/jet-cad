@@ -152,8 +152,11 @@ void printVerticesCounters(VerticesDrawSink? vertices) {
     print('  vertices: off');
     return;
   }
-  print('  vertices: on segments=${vertices.lastFlushSegmentCount} '
-      'drawVerticesCalls=${vertices.flushCallCount}');
+  // Frame-scoped counters, not per-flush ones: with text in the corpus a
+  // frame flushes once per text op, so `lastFlushSegmentCount` would report
+  // only the tail after the last of them.
+  print('  vertices: on segments=${vertices.frameSegmentCount} '
+      'drawVerticesCalls=${vertices.totalFlushCount}');
 }
 
 void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
@@ -273,6 +276,7 @@ void main() {
     // that makes resetCounters() meaningful. A running total beside two
     // per-frame figures is a wrong comparison waiting to be published.
     app.sink.resetCounters();
+    app.vertices?.resetCounters();
     final layoutsBefore = app.sink.measurer.layoutCount;
     final evictionsBefore = app.sink.measurer.evictionCount;
     app.camera.panBy(Offset.zero);
@@ -346,6 +350,7 @@ void main() {
     // that makes resetCounters() meaningful. A running total beside two
     // per-frame figures is a wrong comparison waiting to be published.
     app.sink.resetCounters();
+    app.vertices?.resetCounters();
     final layoutsBefore = app.sink.measurer.layoutCount;
     final evictionsBefore = app.sink.measurer.evictionCount;
     app.camera.panBy(Offset.zero);
@@ -406,6 +411,7 @@ void main() {
     // that makes resetCounters() meaningful. A running total beside two
     // per-frame figures is a wrong comparison waiting to be published.
     app.sink.resetCounters();
+    app.vertices?.resetCounters();
     final layoutsBefore = app.sink.measurer.layoutCount;
     final evictionsBefore = app.sink.measurer.evictionCount;
     app.camera.panBy(Offset.zero);

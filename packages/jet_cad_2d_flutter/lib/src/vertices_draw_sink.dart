@@ -76,7 +76,28 @@ class VerticesDrawSink implements DrawSink {
     required this.pixelsPerPaperMm,
     this.lineweightScale = 1.0,
     CanvasDrawSink? fallback,
-  }) : _fallback = fallback;
+    Canvas? canvas,
+  }) : _fallback = fallback {
+    if (canvas != null) this.canvas = canvas;
+  }
+
+  /// Where [flush] submits. Rebound each frame, as on [CanvasDrawSink].
+  late Canvas canvas;
+
+  /// Chord error allowed when flattening a curve, in device pixels.
+  ///
+  /// A quarter pixel: below what MSAA can show, and low enough that a curve
+  /// zoomed to fill the viewport still reads as a curve. It sets the segment
+  /// count through `N = theta * sqrt(R / (8 * tolerance))`, which is the
+  /// inverse of the sagitta `R * (1 - cos(theta / 2N))`.
+  static const double kFlattenTolerance = 0.25;
+
+  /// Ceiling on the segments one curve may contribute.
+  ///
+  /// A curve larger than the viewport is clipped by the camera long before it
+  /// needs this many, so the cap costs nothing on a drawing and bounds the
+  /// damage from a residual that has gone wrong.
+  static const int kMaxFlattenSegments = 512;
 
   final double pixelsPerPaperMm;
 
@@ -108,6 +129,8 @@ class VerticesDrawSink implements DrawSink {
   int _flushCalls = 0;
   int _lastFlushSegments = 0;
   int _lastFlushVertices = 0;
+  int _totalFlushes = 0;
+  int _frameSegments = 0;
 
   /// Segments batched since the last [flush].
   int get batchedSegmentCount => _segments;
@@ -119,6 +142,26 @@ class VerticesDrawSink implements DrawSink {
   /// `drawVertices` calls the last [flush] issued: one, or none when the frame
   /// batched nothing.
   int get flushCallCount => _flushCalls;
+
+  /// `drawVertices` calls issued since [resetCounters], including the
+  /// mid-frame ones an unbatchable op forces.
+  ///
+  /// [flushCallCount] reports the *last* flush alone, which is one or none.
+  /// With text in the corpus a frame flushes many times, so this is the number
+  /// a rig should print beside `CanvasDrawSink.canvasCallCount`.
+  int get totalFlushCount => _totalFlushes;
+
+  /// Segments emitted since [resetCounters], across every flush in the frame.
+  ///
+  /// [batchedSegmentCount] and [lastFlushSegmentCount] are both per-flush, so
+  /// neither is the frame's total once a mid-frame flush has happened.
+  int get frameSegmentCount => _frameSegments;
+
+  /// Zeroes the frame counters. The buffer and its capacity are untouched.
+  void resetCounters() {
+    _totalFlushes = 0;
+    _frameSegments = 0;
+  }
 
   /// Vertices the last [flush] actually handed to `drawVertices`.
   ///
@@ -207,6 +250,7 @@ class VerticesDrawSink implements DrawSink {
     }
     _vertices += 6;
     _segments++;
+    _frameSegments++;
   }
 
   void _reserve(int moreVertices) {
@@ -232,10 +276,12 @@ class VerticesDrawSink implements DrawSink {
     return w / 2;
   }
 
-  /// Submits the frame's strokes as one `drawVertices` and rewinds the buffer.
+  /// Submits everything batched so far as one `drawVertices` and rewinds the
+  /// buffer.
   ///
-  /// Called once a frame by the painter's owner, not by the walk.
-  void flush(Canvas canvas) {
+  /// Called at the end of the frame by the painter's owner, and mid-frame by
+  /// any op that cannot become triangles -- see [_flushBeforeUnbatchable].
+  void flush() {
     _flushCalls = 0;
     _lastFlushSegments = _segments;
     _lastFlushVertices = 0;
@@ -258,24 +304,99 @@ class VerticesDrawSink implements DrawSink {
       Paint()..color = const Color(0xFFFFFFFF),
     );
     _flushCalls = 1;
+    _totalFlushes++;
     _vertices = 0;
     _segments = 0;
   }
 
+  /// Submits the batch so an op that cannot be batched draws after it.
+  ///
+  /// Without this the unbatchable op would reach the `Canvas` immediately
+  /// while every stroke before it waited for the end of the frame, which is
+  /// the reordering the class comment's history describes. Text is the only
+  /// caller: a paragraph is not triangles.
+  void _flushBeforeUnbatchable() {
+    if (_vertices == 0) return;
+    flush();
+  }
+
+  /// A dot the width of the stroke, as two triangles.
+  ///
+  /// `Canvas` would draw it through `drawRawPoints`, whose square-cap form is
+  /// exactly this quad; the round-cap form is not reachable from here, and no
+  /// caller asks for one.
   @override
-  void point(double x, double y, ResolvedStyle style) =>
-      _fallback?.point(x, y, style);
+  void point(double x, double y, ResolvedStyle style) {
+    final half = _halfWidthFor(style.lineweightHundredths);
+    final t = _residual;
+    final px = t.a * x + t.c * y + t.e;
+    final py = t.b * x + t.d * y + t.f;
+    // A horizontal segment of the stroke's own width is a square of it.
+    _emitSegment(px - half, py, px + half, py, half, style.argb);
+  }
 
   @override
   void circle(double cx, double cy, double r, ResolvedStyle style) =>
-      _fallback?.circle(cx, cy, r, style);
+      _flatten(cx, cy, r, 0, 2 * math.pi, style, closed: true);
 
   @override
   void arc(double cx, double cy, double r, double start, double sweep,
           ResolvedStyle style) =>
-      _fallback?.arc(cx, cy, r, start, sweep, style);
+      _flatten(cx, cy, r, start, sweep, style, closed: false);
+
+  /// Walks a circular arc in the residual's local space, emitting a chord per
+  /// step.
+  ///
+  /// Local space, not device space, on purpose: the residual may be
+  /// non-uniform, and the arc that `Canvas` would draw under it is an ellipse.
+  /// Flattening here and transforming each point reproduces that ellipse;
+  /// flattening a device-space circle would not.
+  ///
+  /// Only the *count* is a device-space decision — the chord error the viewer
+  /// sees is a device-pixel quantity, so the radius that sets it has to be the
+  /// on-screen one.
+  void _flatten(double cx, double cy, double r, double start, double sweep,
+      ResolvedStyle style,
+      {required bool closed}) {
+    if (r <= 0 || sweep == 0) return;
+    final t = _residual;
+    final deviceRadius = r * t.scaleMagnitude;
+    if (deviceRadius <= 0) return;
+
+    final theta = sweep.abs();
+    final ideal =
+        (theta * math.sqrt(deviceRadius / (8 * kFlattenTolerance))).ceil();
+    final steps = ideal.clamp(1, kMaxFlattenSegments);
+
+    final half = _halfWidthFor(style.lineweightHundredths);
+    final argb = style.argb;
+    final step = sweep / steps;
+
+    var angle = start;
+    var px = t.a * (cx + r * math.cos(angle)) +
+        t.c * (cy + r * math.sin(angle)) +
+        t.e;
+    var py = t.b * (cx + r * math.cos(angle)) +
+        t.d * (cy + r * math.sin(angle)) +
+        t.f;
+    for (var i = 1; i <= steps; i++) {
+      angle = start + step * i;
+      final lx = cx + r * math.cos(angle);
+      final ly = cy + r * math.sin(angle);
+      final qx = t.a * lx + t.c * ly + t.e;
+      final qy = t.b * lx + t.d * ly + t.f;
+      _emitSegment(px, py, qx, qy, half, argb);
+      px = qx;
+      py = qy;
+    }
+    // `closed` is documentation here rather than a branch: a full sweep already
+    // lands the last chord on the first point.
+    assert(!closed || (sweep - 2 * math.pi).abs() < 1e-9);
+  }
 
   @override
-  void text(String text, Handle style, ResolvedStyle resolved) =>
-      _fallback?.text(text, style, resolved);
+  void text(String text, Handle style, ResolvedStyle resolved) {
+    _flushBeforeUnbatchable();
+    _fallback?.text(text, style, resolved);
+  }
 }

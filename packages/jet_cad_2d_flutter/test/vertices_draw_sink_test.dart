@@ -24,7 +24,8 @@ ResolvedStyle _style({int argb = 0xFF000000, int lineweight = _lw}) =>
       linetypeScale: 1.0,
     );
 
-VerticesDrawSink _sink() => VerticesDrawSink(pixelsPerPaperMm: _pxPerMm);
+VerticesDrawSink _sink({Canvas? canvas}) =>
+    VerticesDrawSink(pixelsPerPaperMm: _pxPerMm, canvas: canvas);
 
 Float64List _seg(double x0, double y0, double x1, double y1) =>
     Float64List.fromList([x0, y0, x1, y1]);
@@ -154,14 +155,14 @@ void main() {
   test('one flush, one draw call, whatever the colours', () {
     final recorder = PictureRecorder();
     final canvas = Canvas(recorder);
-    final sink = _sink()..beginResidual(Transform2.identity());
+    final sink = _sink(canvas: canvas)..beginResidual(Transform2.identity());
     for (var i = 0; i < 5; i++) {
       sink.polyline(_seg(0, i * 1.0, 10, i * 1.0), 2,
           _style(argb: 0xFF000000 | (i * 0x203040)),
           closed: false);
     }
     sink.endResidual();
-    sink.flush(canvas);
+    sink.flush();
     expect(sink.flushCallCount, 1);
     expect(sink.lastFlushSegmentCount, 5);
     // What was submitted, not what was counted: a flush that rewound first
@@ -206,6 +207,8 @@ void main() {
     expect(sink.batchedSegmentCount, 7);
   });
 
+  _arcTests();
+
   test('a 45-degree segment gets a normal of the right length', () {
     // Degenerate-fixture guard: every case above is axis-aligned, so a normal
     // that forgot to normalise would still pass them.
@@ -219,5 +222,165 @@ void main() {
     // `Float32List`, and a 45-degree normal is the first value here that is
     // not exactly representable in it.
     expect(math.sqrt(dx * dx + dy * dy), closeTo(1.0, 1e-6));
+  });
+}
+
+/// Centre of the segment that starts at vertex [seg] * 6.
+(double, double) _startCentre(Float32List v, int seg) {
+  final i = seg * 12;
+  return ((v[i] + v[i + 2]) / 2, (v[i + 1] + v[i + 3]) / 2);
+}
+
+(double, double) _endCentre(Float32List v, int seg) {
+  final i = seg * 12;
+  return ((v[i + 4] + v[i + 8]) / 2, (v[i + 5] + v[i + 9]) / 2);
+}
+
+void _arcTests() {
+  test('an arc is flattened, and its ends sit on the arc', () {
+    final sink = _sink()
+      ..beginResidual(Transform2.identity())
+      ..arc(0, 0, 10, 0, math.pi / 2, _style())
+      ..endResidual();
+
+    final v = sink.debugPositions();
+    final segments = sink.batchedSegmentCount;
+    expect(segments, greaterThan(1), reason: 'a quarter arc is not one chord');
+
+    final (sx, sy) = _startCentre(v, 0);
+    expect(sx, closeTo(10, 1e-4), reason: 'start x');
+    expect(sy, closeTo(0, 1e-4), reason: 'start y');
+
+    final (ex, ey) = _endCentre(v, segments - 1);
+    expect(ex, closeTo(0, 1e-4), reason: 'end x');
+    expect(ey, closeTo(10, 1e-4), reason: 'end y');
+  });
+
+  test('the flattened arc stays within a quarter pixel of the true one', () {
+    // Measured at the *middle* of each chord, not at its ends. The ends are on
+    // the arc by construction, so a test that sampled them would read zero
+    // error for any segment count at all -- it would pass a sink that drew a
+    // single chord across a half circle.
+    //
+    // MUTATION: replace the segment count with a constant 8, and r = 500 reads
+    // about 12 pixels of sag against a budget of 0.25.
+    for (final r in <double>[5, 50, 500]) {
+      final sink = _sink()
+        ..beginResidual(Transform2.identity())
+        ..arc(0, 0, r, 0.3, math.pi, _style())
+        ..endResidual();
+      final v = sink.debugPositions();
+      final segments = sink.batchedSegmentCount;
+      var worst = 0.0;
+      for (var s = 0; s < segments; s++) {
+        final (sx, sy) = _startCentre(v, s);
+        final (ex, ey) = _endCentre(v, s);
+        final mx = (sx + ex) / 2, my = (sy + ey) / 2;
+        worst = math.max(worst, (r - math.sqrt(mx * mx + my * my)).abs());
+      }
+      expect(worst, lessThan(VerticesDrawSink.kFlattenTolerance),
+          reason: 'r=$r used $segments segments');
+    }
+  });
+
+  test('the segment count follows the arc as the residual scales it', () {
+    // MUTATION: take the radius in local space and the two counts match.
+    int countAt(double scale) {
+      final sink = _sink()
+        ..beginResidual(Transform2(scale, 0, 0, scale, 0, 0))
+        ..arc(0, 0, 10, 0, math.pi, _style())
+        ..endResidual();
+      return sink.batchedSegmentCount;
+    }
+
+    expect(countAt(100), greaterThan(countAt(1) * 4),
+        reason: 'a 100x residual is a 100x arc on screen');
+  });
+
+  test('a non-uniform residual turns a circle into an ellipse', () {
+    // Degenerate-fixture guard: flattening in device space from one radius
+    // would draw a circle here, which is what `Canvas` would not do either.
+    const t = Transform2(3, 0, 0, 1, 0, 0);
+    final sink = _sink()
+      ..beginResidual(t)
+      ..circle(0, 0, 10, _style())
+      ..endResidual();
+    final v = sink.debugPositions();
+    var maxX = 0.0, maxY = 0.0;
+    for (var s = 0; s < sink.batchedSegmentCount; s++) {
+      final (x, y) = _startCentre(v, s);
+      maxX = math.max(maxX, x.abs());
+      maxY = math.max(maxY, y.abs());
+    }
+    expect(maxX, closeTo(30, 0.3));
+    expect(maxY, closeTo(10, 0.3));
+  });
+
+  test('a point is a square of the stroke width, at the residual', () {
+    // Under a residual, not at the identity: a point placed at the origin of
+    // an identity transform would pass with the transform dropped entirely.
+    //
+    // MUTATION: emit nothing for a point and this finds an empty buffer.
+    const t = Transform2(1, 0, 0, 1, 100, 200);
+    final sink = _sink()
+      ..beginResidual(t)
+      ..point(3, 4, _style())
+      ..endResidual();
+
+    final v = sink.debugPositions();
+    expect(sink.batchedSegmentCount, 1);
+    var minX = double.infinity, maxX = -double.infinity;
+    var minY = double.infinity, maxY = -double.infinity;
+    for (var i = 0; i < v.length; i += 2) {
+      minX = math.min(minX, v[i]);
+      maxX = math.max(maxX, v[i]);
+      minY = math.min(minY, v[i + 1]);
+      maxY = math.max(maxY, v[i + 1]);
+    }
+    // 0.25 mm at 4 px/mm is a 1-pixel stroke, so the square is 1 x 1 around
+    // the transformed point.
+    expect(minX, closeTo(102.5, 1e-12));
+    expect(maxX, closeTo(103.5, 1e-12));
+    expect(minY, closeTo(203.5, 1e-12));
+    expect(maxY, closeTo(204.5, 1e-12));
+  });
+
+  test('a circle closes on itself', () {
+    final sink = _sink()
+      ..beginResidual(Transform2.identity())
+      ..circle(0, 0, 10, _style())
+      ..endResidual();
+    final v = sink.debugPositions();
+    final (sx, sy) = _startCentre(v, 0);
+    final (ex, ey) = _endCentre(v, sink.batchedSegmentCount - 1);
+    expect(ex, closeTo(sx, 1e-4));
+    expect(ey, closeTo(sy, 1e-4));
+  });
+
+  test('an unbatchable op flushes first, so draw order holds across it', () {
+    // Text cannot become triangles, so it goes to the fallback -- and it must
+    // not jump ahead of every stroke batched before it.
+    //
+    // MUTATION: let `text` reach the fallback without flushing, and this
+    // reads one flush instead of two.
+    final recorder = PictureRecorder();
+    final canvas = Canvas(recorder);
+    final sink = _sink(canvas: canvas)..beginResidual(Transform2.identity());
+    sink.polyline(_seg(0, 0, 10, 0), 2, _style(), closed: false);
+    sink.text('x', ReservedHandles.standardTextStyle, _style());
+    sink.polyline(_seg(0, 5, 10, 5), 2, _style(), closed: false);
+    sink.endResidual();
+    sink.flush();
+
+    expect(sink.totalFlushCount, 2,
+        reason: 'one flush before the text, one at the end of the frame');
+    // Per-flush counters cannot see past the mid-frame flush; the frame
+    // counter is what a rig prints.
+    //
+    // MUTATION: report `lastFlushSegmentCount` as the frame total and this
+    // reads 1, the tail after the text, instead of 2.
+    expect(sink.lastFlushSegmentCount, 1);
+    expect(sink.frameSegmentCount, 2);
+    recorder.endRecording().dispose();
   });
 }
