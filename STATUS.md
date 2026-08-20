@@ -16,12 +16,12 @@ Tasks 0–12 are committed. **Everything is green and the tree is clean.**
 | `packages/jet_cad_2d` — engine | **717 tests, all pass**, analyze/format clean |
 | `packages/jet_cad_2d_flutter` — widgets | **152 tests, all pass** (1 pre-existing skip), analyze/format clean |
 | `flutter test --tags golden` | **13 pass**; no pre-existing PNG regenerated |
-| `apps/dev_harness_2d` | analyze/format clean; R2 run on macOS in profile mode |
+| `apps/dev_harness_2d` | analyze/format clean; **R2/R4a/R4b run on macOS in profile mode** |
 
 **The gate's feasibility number is taken and the news is good:** 18 distinct
 paragraph-cache keys at the working-set camera against a limit of 512, and
 **zero new layouts in the steady-state frame on real hardware**.
-`kParagraphCacheLimit` does not move.
+`kParagraphCacheLimit` does not move, and all three device rigs agree.
 
 **Next up is Task 13 — the mutation log.** See [Resume here](#resume-here).
 
@@ -198,7 +198,8 @@ Task 12 is committed at `e5aa3c4`. **Task 13 — the mutation log** is next.
 unspent.** The row is specified against the working-set camera; the
 whole-drawing camera is the one the rig itself calls "not a frame anyone
 renders". Confirmed on real hardware: `flutter drive --profile -d macos` with
-`TEXT=true` reports **newLayouts 0** in the forced steady-state frame.
+`TEXT=true` reports **newLayouts 0** in the forced steady-state frame of all
+three rigs — R2 (23 text ops), R4a (18) and R4b (18).
 
 The row is also **weak** — 18 of 512 would stay green at a limit of 32. The rig
 prints a key-pressure ladder so Task 14 can state the margin rather than assert
