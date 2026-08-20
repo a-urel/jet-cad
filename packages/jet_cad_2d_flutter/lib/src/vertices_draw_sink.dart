@@ -75,6 +75,15 @@ import 'draw_sink.dart';
 ///   `scaleMagnitude`, one scalar standing in for two axis scales. The full
 ///   list of permitted divergences is in Plan 3d's design document; anything
 ///   not on it is a defect.
+///
+/// ## What a steady-state frame allocates
+///
+/// Three objects per flush — the `Vertices` and the two `sublistView`
+/// wrappers — and nothing per entity. The buffers themselves are grown once
+/// and reused; `test/invariants/paint_allocation_test.dart` fails if they grow
+/// in a steady-state frame. With text in the corpus a frame flushes once per
+/// text op plus once at the end, so the frame's total is
+/// `3 * (textOps + 1)`.
 class VerticesDrawSink implements DrawSink {
   VerticesDrawSink({
     required this.pixelsPerPaperMm,
@@ -131,6 +140,12 @@ class VerticesDrawSink implements DrawSink {
 
   /// One ARGB per vertex, parallel to [_positions].
   Int32List _colors = Int32List(4096);
+
+  /// One paint for the life of the sink, as on [CanvasDrawSink].
+  ///
+  /// It never varies: the colour rides on the vertices, so the only thing the
+  /// paint contributes is its alpha, and that is always opaque.
+  final Paint _paint = Paint()..color = const Color(0xFFFFFFFF);
 
   /// Vertices written, so `_vertices * 2` floats and `_vertices` colours.
   int _vertices = 0;
@@ -203,6 +218,13 @@ class VerticesDrawSink implements DrawSink {
 
   /// The per-vertex colours written so far.
   Int32List debugColors() => Int32List.sublistView(_colors, 0, _vertices);
+
+  /// Vertices the buffers can hold without growing.
+  ///
+  /// The steady-state claim is that this stops changing: `_reserve` doubles
+  /// and never gives capacity back, so once a frame has drawn its widest view
+  /// the buffer is large enough for every later one.
+  int get debugCapacityVertices => _colors.length;
 
   @override
   void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {
@@ -362,7 +384,7 @@ class VerticesDrawSink implements DrawSink {
       // With per-vertex colours and no shader on the paint, the vertex colour
       // is the colour drawn; the paint contributes only its alpha.
       BlendMode.dst,
-      Paint()..color = const Color(0xFFFFFFFF),
+      _paint,
     );
     // `drawVertices` has taken what it needs by the time it returns; holding
     // the object past that point holds native buffers the engine has already
