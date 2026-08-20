@@ -260,4 +260,65 @@ void main() {
       expect(notifications, 0);
     });
   });
+
+  testWidgets('drawText reaches the painter, and a change to it rebuilds one',
+      (tester) async {
+    // `drawText` is measurement-only, so nothing in the product reads it and
+    // nothing else would notice if the forward were dropped. What *does* read
+    // it is `apps/dev_harness_2d`'s `DRAW_TEXT=0` define, and a dropped
+    // forward there does not fail — it prints a text-off row identical to the
+    // text-on row, which is the plausible-looking number this file's other
+    // guard already exists to refuse.
+    final textDoc = DraftDocument.empty(measurer: MetricModelMeasurer());
+    textDoc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: textDoc.handleSeed.next(),
+        owner: textDoc.rootHandle,
+        kind: EntityKind.text,
+        layer: ReservedHandles.layerZero,
+        linetype: ReservedHandles.byLayerLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: 25,
+        transparency: 0,
+        flags: 0,
+        text: 'STAIR',
+        textStyle: ReservedHandles.standardTextStyle,
+        textAttrs: packTextAttrs(),
+      ),
+      payload: GeometryPayload(
+          coords: Float64List.fromList([12, 7]),
+          scalars: Float64List.fromList([8, 0, 1, 0])),
+    ));
+    final textIndex = SpatialIndex(textDoc);
+    addTearDown(textIndex.dispose);
+    final textCamera =
+        CameraController(ViewportTransform.fit(textDoc.extents, kViewport));
+    addTearDown(textCamera.dispose);
+
+    final key = GlobalKey<DraftCanvasState>();
+    Widget canvas({required bool drawText}) => wrap(DraftCanvas(
+        key: key,
+        document: textDoc,
+        index: textIndex,
+        camera: textCamera,
+        drawText: drawText));
+
+    await tester.pumpWidget(canvas(drawText: true));
+    expect(key.currentState!.painter.drawText, isTrue);
+    expect(key.currentState!.painter.textOpCount, 1,
+        reason: 'the fixture must actually draw text, or neither half of '
+            'this test means anything');
+
+    // A prop change has to rebuild the painter: `drawText` is final on
+    // `DraftPainter`, so a `didUpdateWidget` that ignored it would leave the
+    // old painter in place and the flag would be silently one frame — or one
+    // whole run — behind.
+    await tester.pumpWidget(canvas(drawText: false));
+    expect(key.currentState!.painter.drawText, isFalse);
+    textCamera.panBy(Offset.zero);
+    await tester.pump();
+    expect(key.currentState!.painter.textOpCount, 0);
+  });
 }

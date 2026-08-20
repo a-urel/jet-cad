@@ -401,4 +401,169 @@ void main() {
     expect(
         target.components.get<OriginComponent>(const Handle(1000)), isNotNull);
   });
+
+  group('SetEntityTextCommand', () {
+    // Ruling 5: the briefs' snippets reference an undefined local helper for
+    // building a text record; this is that helper, written out.
+    EntityRecord textRecord(
+      Handle handle,
+      Handle owner,
+      Handle textStyle, {
+      String text = 'A',
+      String tag = '',
+      int textAttrs = 0,
+      EntityKind kind = EntityKind.text,
+    }) =>
+        EntityRecord(
+          handle: handle,
+          owner: owner,
+          kind: kind,
+          layer: ReservedHandles.layerZero,
+          linetype: ReservedHandles.byLayerLinetype,
+          linetypeScale: 1.0,
+          geomIndex: 0,
+          color: const ByLayerColor(),
+          lineweight: kByLayer,
+          transparency: kByLayer,
+          flags: 0,
+          text: text,
+          tag: tag,
+          textStyle: textStyle,
+          textAttrs: textAttrs,
+        );
+
+    test(
+        'execute widens the box and sets text/tag; undo restores both; redo '
+        're-applies', () {
+      final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+      final style = doc.tables.textStyles.byName('STANDARD')!;
+      final handle = doc.handleSeed.next();
+      doc.commands.execute(AddEntityCommand(
+        record: textRecord(handle, doc.rootHandle, style.handle),
+        payload: GeometryPayload(
+          coords: Float64List.fromList([0, 0]),
+          scalars: Float64List.fromList([200, 0, 0, 0]),
+        ),
+      ));
+
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final slot = doc.entities.slotOf(handle)!;
+
+      // The index is freshly rebuilt by the SpatialIndex constructor, so the
+      // leaf is live in the packed tree and `boxOfLeaf` alone is enough here.
+      final before = index.rootIndex.boxOfLeaf(slot)!.maxX;
+
+      doc.commands.execute(SetEntityTextCommand(handle, 'AAAAAAAA', 'TAG'));
+      expect(doc.entities.textAt(slot), 'AAAAAAAA');
+      expect(doc.entities.tagAt(slot), 'TAG');
+
+      // Per Ruling 10: editing dirties the leaf, which removes it from the
+      // packed tree and parks it in the dirty overlay, so `boxOfLeaf` alone
+      // would see null here. Follow the codebase's own idiom instead of
+      // "fixing" `boxOfLeaf` to answer for dirty leaves.
+      final afterExecute =
+          index.rootIndex.boxOfLeaf(slot) ?? index.rootIndex.dirty.boxOf(slot);
+      expect(afterExecute!.maxX, greaterThan(before));
+
+      doc.commands.undo();
+      expect(doc.entities.textAt(slot), 'A');
+      expect(doc.entities.tagAt(slot), '');
+      final afterUndo =
+          index.rootIndex.boxOfLeaf(slot) ?? index.rootIndex.dirty.boxOf(slot);
+      expect(afterUndo!.maxX, closeTo(before, 1e-9));
+
+      doc.commands.redo();
+      expect(doc.entities.textAt(slot), 'AAAAAAAA');
+      expect(doc.entities.tagAt(slot), 'TAG');
+      final afterRedo =
+          index.rootIndex.boxOfLeaf(slot) ?? index.rootIndex.dirty.boxOf(slot);
+      expect(afterRedo!.maxX, closeTo(afterExecute.maxX, 1e-9));
+    });
+
+    test(
+        'a non-default justification anchors the box on the opposite edge, '
+        'proving textAttrs is not hard-coded away', () {
+      // The primary test above uses the default (left/baseline) packing, so
+      // a bug that hard-coded `textAttrs: 0` at any engine call site would
+      // still leave it green. Right/top justification anchors the box's
+      // top-right corner at the insertion point, so growing the string moves
+      // `minX`/`minY` instead of `maxX`/`maxY` -- the mirror image of the
+      // default case.
+      final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+      final style = doc.tables.textStyles.byName('STANDARD')!;
+      final handle = doc.handleSeed.next();
+      final attrs = packTextAttrs(h: TextJustifyH.right, v: TextJustifyV.top);
+      doc.commands.execute(AddEntityCommand(
+        record:
+            textRecord(handle, doc.rootHandle, style.handle, textAttrs: attrs),
+        payload: GeometryPayload(
+          coords: Float64List.fromList([1000, 2000]),
+          scalars: Float64List.fromList([200, 0, 0, 0]),
+        ),
+      ));
+
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final slot = doc.entities.slotOf(handle)!;
+
+      final before = index.rootIndex.boxOfLeaf(slot)!;
+      expect(before.maxX, closeTo(1000, 1e-6));
+      expect(before.maxY, closeTo(2000, 1e-6));
+
+      doc.commands.execute(SetEntityTextCommand(handle, 'AAAAAAAA', 'TAG'));
+      final after =
+          index.rootIndex.boxOfLeaf(slot) ?? index.rootIndex.dirty.boxOf(slot);
+      expect(after!.maxX, closeTo(1000, 1e-6));
+      expect(after.minX, lessThan(before.minX));
+    });
+
+    test('accepts an ATTRIB entity, not only TEXT', () {
+      // No other test in this file builds an ATTRIB, so dropping
+      // `|| kind == EntityKind.attrib` from the guard would go undetected.
+      final target = TestTarget();
+      final dispatcher = CommandDispatcher(target: target);
+      final handle = target.handleSeed.next();
+      dispatcher.execute(AddEntityCommand(
+        record: textRecord(
+          handle,
+          target.rootHandle,
+          ReservedHandles.standardTextStyle,
+          text: 'V1',
+          tag: 'TAG1',
+          kind: EntityKind.attrib,
+        ),
+        payload: line(0, 0, 1, 1),
+      ));
+
+      dispatcher.execute(SetEntityTextCommand(handle, 'V2', 'TAG2'));
+      final slot = target.entities.slotOf(handle)!;
+      expect(target.entities.textAt(slot), 'V2');
+      expect(target.entities.tagAt(slot), 'TAG2');
+    });
+
+    test('rejects an unknown handle', () {
+      final target = TestTarget();
+      final dispatcher = CommandDispatcher(target: target);
+      expect(
+        () => dispatcher
+            .execute(SetEntityTextCommand(const Handle(9999), 'X', '')),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('rejects a non-text, non-attrib entity kind', () {
+      final target = TestTarget();
+      final dispatcher = CommandDispatcher(target: target);
+      final handle = target.handleSeed.next();
+      dispatcher.execute(AddEntityCommand(
+        record: recordFor(handle, target.rootHandle), // EntityKind.line
+        payload: line(0, 0, 1, 1),
+      ));
+      expect(
+        () => dispatcher.execute(SetEntityTextCommand(handle, 'X', '')),
+        throwsA(isA<StateError>()),
+      );
+    });
+  });
 }

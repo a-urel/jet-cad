@@ -6,6 +6,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'camera_controller.dart';
 import 'canvas_draw_sink.dart';
 import 'draft_painter.dart';
+import 'flutter_text_measurer.dart';
 
 /// Logical pixels per millimetre at Flutter's nominal 96 dpi.
 ///
@@ -58,6 +59,7 @@ class DraftCanvas extends StatefulWidget {
     this.resolver,
     this.pixelsPerPaperMm = kLogicalPixelsPerMm,
     this.lineweightScale = 1.0,
+    this.drawText = true,
   });
 
   final DraftDocument document;
@@ -74,6 +76,15 @@ class DraftCanvas extends StatefulWidget {
   /// Task 4c's fill-rate experiment; inert at its default of 1.0.
   final double lineweightScale;
 
+  /// Forwarded to [DraftPainter.drawText]. Measurement-only, for Task 12's
+  /// text rows; inert at its default of `true`.
+  ///
+  /// It is a widget property rather than something the rig reaches through
+  /// [DraftCanvasState] because the painter is built in [_attach] and its
+  /// `drawText` is final: a rig that wanted to flip it after the fact would
+  /// have to rebuild the painter, and a rebuilt painter is a different frame.
+  final bool drawText;
+
   @override
   State<DraftCanvas> createState() => DraftCanvasState();
 }
@@ -85,6 +96,11 @@ class DraftCanvasState extends State<DraftCanvas> {
 
   /// One sink for the life of the widget, its `Canvas` rebound per paint.
   late CanvasDrawSink sink;
+
+  /// Outlives [sink]: a prop change [_attach] reacts to rebuilds the sink,
+  /// not the paragraph cache behind it, so a document swap does not throw
+  /// away every glyph already laid out for the previous one.
+  late final FlutterTextMeasurer _measurer = FlutterTextMeasurer();
 
   late DocChangeNotifier _changes;
   late Listenable _repaint;
@@ -98,11 +114,14 @@ class DraftCanvasState extends State<DraftCanvas> {
   void _attach() {
     sink = CanvasDrawSink(
         pixelsPerPaperMm: widget.pixelsPerPaperMm,
-        lineweightScale: widget.lineweightScale);
+        lineweightScale: widget.lineweightScale,
+        measurer: _measurer,
+        textStyleOf: widget.document.textStyleOf);
     painter = DraftPainter(
       document: widget.document,
       index: widget.index,
       resolver: widget.resolver ?? DocumentStyleResolver(widget.document),
+      drawText: widget.drawText,
     );
     // No derived state left to update before listeners run: the map that
     // needed it was the cull floor's, and the cull floor is gone.
@@ -118,7 +137,8 @@ class DraftCanvasState extends State<DraftCanvas> {
         widget.camera != oldWidget.camera ||
         widget.resolver != oldWidget.resolver ||
         widget.pixelsPerPaperMm != oldWidget.pixelsPerPaperMm ||
-        widget.lineweightScale != oldWidget.lineweightScale) {
+        widget.lineweightScale != oldWidget.lineweightScale ||
+        widget.drawText != oldWidget.drawText) {
       _changes.dispose();
       _attach();
     }
@@ -127,6 +147,11 @@ class DraftCanvasState extends State<DraftCanvas> {
   @override
   void dispose() {
     _changes.dispose();
+    // A `Paragraph` holds native glyph memory the garbage collector does not
+    // know about; the widget that owns the cache has to release it rather
+    // than let every entry outlive this state by however long the native
+    // heap takes to notice nothing references it anymore.
+    _measurer.clear();
     super.dispose();
   }
 

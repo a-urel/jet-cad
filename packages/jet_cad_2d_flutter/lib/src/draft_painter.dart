@@ -18,6 +18,16 @@ import 'viewport_transform.dart';
 /// [DraftPainter.anisotropicCurveCount].
 const double kAnisotropyThreshold = 2.0;
 
+/// How far past the viewport, in device pixels, the frame's clip reaches.
+///
+/// Half the widest stroke the frame can draw, so a stroke whose centreline is
+/// just outside still contributes its visible edge. Named rather than inlined
+/// because it is the painter's *published* culling slack: the differential
+/// oracle has to know how much extra the painter is entitled to draw, and a
+/// number defined in two places is a number the two will eventually disagree
+/// on.
+const double kScreenClipInflate = 32.0;
+
 /// Walks the document and writes to a [DrawSink]. No cache of any kind.
 ///
 /// This is not scaffolding for the cached painter of Plan 3b — it is the
@@ -29,6 +39,7 @@ class DraftPainter {
     required this.index,
     required this.resolver,
     this.debugDisableRebasing = false,
+    this.drawText = true,
   });
 
   final DraftDocument document;
@@ -42,6 +53,20 @@ class DraftPainter {
   /// that shows the drawing moving with this on is what makes the assertions
   /// about small residuals mean something.
   final bool debugDisableRebasing;
+
+  /// **Measurement-only, inert at its default of `true`.**
+  ///
+  /// Task 12's rigs report every text counter twice, once with text drawing
+  /// and once without, and the delta between the two rows is only readable as
+  /// *the cost of text* if nothing else about the frame moved. Rebuilding the
+  /// corpus with `labelFraction: 0` would move the entity mix, the extents and
+  /// therefore both cameras; this moves one branch.
+  ///
+  /// Turning it off skips a text leaf before anything is resolved for it, so
+  /// the delta covers attribute resolution, layout composition and the
+  /// paragraph lookup together. It also leaves [skippedTextCount] at zero,
+  /// because that counter means *empty string*, not *not drawn*.
+  final bool drawText;
 
   /// Reused across frames; the frame path must not allocate once warm.
   Float64List _points = Float64List(256);
@@ -102,11 +127,38 @@ class DraftPainter {
 
   /// Text entities not drawn in the last frame.
   ///
-  /// Text has no content in the model yet (Plan 3b adds it), so it cannot be
-  /// drawn — and text is the product's payload, which makes every measurement
-  /// here optimistic by exactly this many entities. Recorded rather than
-  /// assumed away.
+  /// Since Plan 3c Task 10 text draws, so this counts one thing only: a text
+  /// or attrib entity whose string is empty, which has nothing to hand
+  /// `Canvas`. It stays because the generated corpus's plain floor texts are
+  /// all blank, and a measurement taken over them would otherwise read as a
+  /// measurement of drawn text.
   int get skippedTextCount => _skippedText;
+
+  int _textOps = 0;
+
+  /// Text and attrib entities handed to [DrawSink.text] in the last frame.
+  ///
+  /// The other half of [skippedTextCount]: together they account for every
+  /// text leaf that survived culling. Reported by the rigs because a paragraph
+  /// cache's hit rate is meaningless without the number of lookups it is a
+  /// rate over — `layoutCount` alone cannot tell one layout in one draw from
+  /// one layout in ten thousand.
+  int get textOpCount => _textOps;
+
+  /// One text layout for every text leaf in the frame, refilled in place.
+  ///
+  /// **Measured, not stylistic.** The allocating wrappers over this class —
+  /// `resolveTextAttributes` and `textLocalTransform` — build one
+  /// `TextLayout` each, plus the `Float64List` each of those carries, plus a
+  /// `ResolvedTextAttributes`, plus a `Vector2` for the anchor and its own
+  /// `Float64List`, plus an intermediate `Transform2`. That was measured at
+  /// **nine allocations per text leaf against a residual-path norm of one**
+  /// (`packages/jet_cad_2d/test/invariants/text_paint_allocation_test.dart`),
+  /// which is Ruling 20's threshold for doing something about it. Filling one
+  /// long-lived layout in place instead takes it back to the norm. The
+  /// engine's pick path made the same move, for the same reason and against
+  /// the same measurement — see [TextLayout]'s own doc comment.
+  final TextLayout _textLayout = TextLayout();
 
   final Dasher _dasher = Dasher();
 
@@ -179,6 +231,7 @@ class DraftPainter {
   /// comparison total.
   void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
     _skippedText = 0;
+    _textOps = 0;
     _skippedDeepInstances = 0;
     _screenSpaceLeaves = 0;
     _anisotropicCurves = 0;
@@ -189,9 +242,7 @@ class DraftPainter {
     _dashSpans = 0;
     _dasher.resetCounters();
     _screenOrigin = camera.worldToScreen(origin);
-    // Half the widest stroke the frame can draw, in device pixels, so a stroke
-    // whose centreline is just outside still contributes its visible edge.
-    const inflate = 32.0;
+    const inflate = kScreenClipInflate;
     _screenSpaceClip = Aabb2(Vector2(-inflate, -inflate),
         Vector2(viewport.width + inflate, viewport.height + inflate));
     _rebasedClip = Aabb2(
@@ -402,6 +453,11 @@ class DraftPainter {
         .multiply(placement)
         .multiply(Transform2.translation(localOrigin.x, localOrigin.y));
 
+    if (kind == EntityKind.text || kind == EntityKind.attrib) {
+      _drawText(sink, slot, payload, style, chain, localOrigin);
+      return;
+    }
+
     sink.beginResidual(chain, debugHandle: document.entities.handleAt(slot));
     // `chain`, not `toScreen`: the geometry `_emit` receives has already had
     // `localOrigin` subtracted (that is what "rebased local" means), and
@@ -596,8 +652,54 @@ class DraftPainter {
 
       case EntityKind.text:
       case EntityKind.attrib:
-        _skippedText++;
+        // Unreachable: `_drawLeafComposed` routes text to `_drawText` before
+        // it pushes a residual at all, because a text leaf's residual is not
+        // `chain`. Kept as an exhaustive case rather than a `default` so a
+        // new EntityKind still fails to compile here.
+        break;
     }
+  }
+
+  /// Draws one text or attrib leaf under `chain . textLocal`.
+  ///
+  /// Text does not go through [_emit]. Its placement — height, rotation,
+  /// width factor, oblique angle and justification — *is* a transform, and
+  /// `DrawSink.text` carries no coordinates at all, so that placement can
+  /// only reach the canvas as part of the residual. It is composed into
+  /// `chain` rather than pushed as a second, inner residual because
+  /// `beginResidual` does not nest: `CanvasDrawSink` overwrites its residual
+  /// and clears it again on `endResidual`, so an inner pair would leave the
+  /// outer one at the identity.
+  void _drawText(DrawSink sink, int slot, GeometryPayload payload,
+      ResolvedStyle style, Transform2 chain, Vector2 localOrigin) {
+    if (!drawText) return;
+    final text = document.entities.textAt(slot);
+    if (text.isEmpty) {
+      // Nothing to draw, and still counted: the generated corpus's plain
+      // floor texts carry the empty string, so without this the counter
+      // would read zero on a document whose text is entirely blank.
+      _skippedText++;
+      return;
+    }
+    final styleHandle = document.entities.textStyleAt(slot);
+    final record = document.textStyleOf(styleHandle);
+    final metrics = document.textMeasurer.measure(text: text, style: record);
+    // The anchor is rebased like every other coordinate that reaches `chain`,
+    // which already carries `translate(localOrigin)`. An unrebased anchor is
+    // exactly right at the origin and one rebase origin wrong everywhere
+    // else — the failure a fixture at (0, 0) cannot see.
+    final layout = _textLayout
+      ..resolve(payload, document.entities.textAttrsAt(slot), record)
+      ..composeTransform(metrics, payload.coords[0] - localOrigin.x,
+          payload.coords[1] - localOrigin.y);
+    sink
+      ..beginResidual(
+          chain.multiply(Transform2(
+              layout.a, layout.b, layout.c, layout.d, layout.e, layout.f)),
+          debugHandle: document.entities.handleAt(slot))
+      ..text(text, styleHandle, style)
+      ..endResidual();
+    _textOps++;
   }
 
   /// The frame's clip expressed in a leaf's own **rebased-local** space —

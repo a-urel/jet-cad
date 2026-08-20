@@ -6,5 +6,6 @@ export 'src/canvas_draw_sink.dart';
 export 'src/draft_canvas.dart';
 export 'src/draft_painter.dart';
 export 'src/draw_sink.dart';
+export 'src/flutter_text_measurer.dart';
 export 'src/reference_walk.dart';
 export 'src/viewport_transform.dart';

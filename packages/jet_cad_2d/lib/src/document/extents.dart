@@ -1,53 +1,29 @@
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
-import '../core/handle.dart';
 import '../geometry/aabb2.dart';
 import '../geometry/primitives.dart';
 import '../store/entity_store.dart';
 import '../store/geometry_store.dart';
-
-/// Supplies the laid-out box of a text entity.
-///
-/// An interface rather than an implementation because real layout needs a font
-/// stack, and this package must not depend on Flutter. The widget layer
-/// supplies a real measurer; the engine ships [InsertionPointMeasurer].
-abstract class TextMeasurer {
-  Aabb2 measure({
-    required String text,
-    required Handle style,
-    required double height,
-    required Vector2 insertion,
-  });
-}
-
-/// Contributes only the insertion point.
-///
-/// Correct-but-minimal: extents computed with it are a lower bound, which is
-/// the honest answer when no font stack is present. It also keeps engine tests
-/// deterministic across machines, since real text layout is font- and
-/// platform-dependent.
-class InsertionPointMeasurer implements TextMeasurer {
-  const InsertionPointMeasurer();
-
-  @override
-  Aabb2 measure({
-    required String text,
-    required Handle style,
-    required double height,
-    required Vector2 insertion,
-  }) =>
-      Aabb2(insertion, insertion);
-}
+import 'tables.dart';
+import 'text_geometry.dart';
+import 'text_metrics.dart';
 
 /// Bounds one entity in its **owner's** space.
 ///
 /// Callers transform the result into the enclosing space; this function knows
 /// geometry, not placement.
+///
+/// Takes the [TextStyleRecord] itself, not a style handle, because
+/// [TextStyleRecord.fixedHeight] and the per-entity override bits in
+/// [textAttrs] cannot be resolved from a handle alone, and giving this
+/// function a document dependency so it could look one up would be worse:
+/// every caller already holds the document and can resolve the record once.
 Aabb2 entityBounds({
   required EntityKind kind,
   required GeometryPayload payload,
   required TextMeasurer measurer,
-  required Handle textStyle,
+  required TextStyleRecord textStyle,
+  int textAttrs = 0,
   String text = '',
 }) {
   switch (kind) {
@@ -78,11 +54,9 @@ Aabb2 entityBounds({
 
     case EntityKind.text:
     case EntityKind.attrib:
-      return measurer.measure(
-        text: text,
-        style: textStyle,
-        height: payload.scalars.isEmpty ? 0 : payload.scalars[0],
-        insertion: payload.pointAt(0),
-      );
+      final attrs = resolveTextAttributes(payload, textAttrs, textStyle);
+      final metrics = measurer.measure(text: text, style: textStyle);
+      return textLocalBounds(attrs, metrics).transformedBy(
+          textLocalTransform(attrs, metrics, payload.pointAt(0)));
   }
 }

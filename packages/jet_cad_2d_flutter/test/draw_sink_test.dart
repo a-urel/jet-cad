@@ -4,7 +4,9 @@ import 'dart:ui';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
+import 'support/differential.dart';
 import 'support/spy_canvas.dart';
 
 const ResolvedStyle _anyStyle = ResolvedStyle(
@@ -13,6 +15,18 @@ const ResolvedStyle _anyStyle = ResolvedStyle(
   linetype: ReservedHandles.continuousLinetype,
   linetypeScale: 1.0,
 );
+
+const TextStyleRecord _standard =
+    TextStyleRecord(handle: Handle(11), name: 'Standard', fontFamily: 'Roboto');
+
+const ResolvedStyle _resolved = ResolvedStyle(
+  argb: 0xFF00FFAA,
+  lineweightHundredths: 18,
+  linetype: ReservedHandles.continuousLinetype,
+  linetypeScale: 1.0,
+);
+
+Vector2 _v(double x, double y) => Vector2(x, y);
 
 void main() {
   group('RecordingDrawSink', () {
@@ -86,6 +100,33 @@ void main() {
       expect(BeginResidualOp(Transform2.translation(1, 2)),
           isNot(BeginResidualOp(Transform2.translation(1, 3))));
     });
+
+    test('a text op records its string, style handle and resolved style', () {
+      final sink = RecordingDrawSink()
+        ..beginResidual(Transform2.translation(10, 20))
+        ..text('WC', const Handle(7), _resolved)
+        ..endResidual();
+      expect(sink.ops[1], TextOp('WC', const Handle(7), _resolved));
+    });
+
+    test('text ops compare by value over all three fields', () {
+      // Each field guards its own mutation: dropping any one of the three
+      // from `==`/`hashCode` would let a wrong TextOp compare equal to a
+      // right one and this test would stop catching it.
+      expect(const TextOp('WC', Handle(7), _resolved),
+          const TextOp('WC', Handle(7), _resolved));
+      expect(const TextOp('WC', Handle(7), _resolved).hashCode,
+          const TextOp('WC', Handle(7), _resolved).hashCode);
+      expect(const TextOp('WC', Handle(7), _resolved),
+          isNot(const TextOp('XX', Handle(7), _resolved)),
+          reason: 'different text is a different op');
+      expect(const TextOp('WC', Handle(7), _resolved),
+          isNot(const TextOp('WC', Handle(8), _resolved)),
+          reason: 'a different style handle is a different op');
+      expect(const TextOp('WC', Handle(7), _resolved),
+          isNot(const TextOp('WC', Handle(7), _anyStyle)),
+          reason: 'a different resolved style is a different op');
+    });
   });
 
   group('NullDrawSink', () {
@@ -97,8 +138,41 @@ void main() {
             closed: false)
         ..circle(0, 0, 5, _anyStyle)
         ..arc(0, 0, 5, 0, 1, _anyStyle)
+        ..text('WC', const Handle(7), _resolved)
         ..endResidual();
-      expect(sink.opCount, 6);
+      expect(sink.opCount, 7);
+    });
+  });
+
+  group('flatten', () {
+    test('turns a text op into an origin and two unit images', () {
+      // The residual here is not a pure scale on purpose: a fixture that only
+      // scales cannot tell a right implementation from one that swapped the
+      // +x and +y unit images, because a symmetric scale sends both the same
+      // way as sending them straight. Rotation (and shear, more generally)
+      // breaks that symmetry.
+      final items = flatten(<DrawOp>[
+        BeginResidualOp(const Transform2(0, 2, -2, 0, 100, 200)),
+        const TextOp('WC', Handle(7), _resolved),
+        const EndResidualOp(),
+      ]);
+      expect(items.single.kind, 'text:WC');
+      expect(items.single.style, _resolved);
+      expect(items.single.points[0], _v(100, 200));
+      expect(items.single.points[1], _v(100, 202));
+      expect(items.single.points[2], _v(98, 200));
+    });
+
+    test('flatten with a pure scale, as a sanity check on the brief', () {
+      final items = flatten(<DrawOp>[
+        BeginResidualOp(const Transform2(2, 0, 0, 2, 100, 200)),
+        const TextOp('WC', Handle(7), _resolved),
+        const EndResidualOp(),
+      ]);
+      expect(items.single.kind, 'text:WC');
+      expect(items.single.points[0], _v(100, 200));
+      expect(items.single.points[1], _v(102, 200));
+      expect(items.single.points[2], _v(100, 202));
     });
   });
 
@@ -109,7 +183,11 @@ void main() {
     setUp(() {
       canvas = SpyCanvas();
       // 96 dpi / 25.4 mm — one paper millimetre is 3.78 logical pixels.
-      sink = CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: 4.0);
+      sink = CanvasDrawSink(
+          canvas: canvas,
+          pixelsPerPaperMm: 4.0,
+          measurer: FlutterTextMeasurer(),
+          textStyleOf: (Handle handle) => _standard);
     });
 
     test('beginResidual pushes the affine as a column-major 4x4', () {

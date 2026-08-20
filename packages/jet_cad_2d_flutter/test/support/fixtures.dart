@@ -180,3 +180,36 @@ ViewportTransform cameraOverNestedInstance(DraftDocument doc) {
           Vector2(centre.x + 6, centre.y + 5)),
       kViewport);
 }
+
+/// [paintToRecording] plus the painter itself, for the tests that assert on a
+/// counter as well as on the ops.
+///
+/// The two must stay one call: a test that painted twice — once for the ops,
+/// once for the counter — would be reading a counter reset by the second run
+/// and could not tell a stale value from a fresh one.
+({DraftPainter painter, RecordingDrawSink sink, ViewportTransform camera})
+    paintRecorded(DraftDocument doc, [ViewportTransform? camera]) {
+  final index = SpatialIndex(doc);
+  addTearDown(index.dispose);
+  final view = camera ?? ViewportTransform.fit(doc.extents, kViewport);
+  final sink = RecordingDrawSink();
+  final painter = DraftPainter(
+      document: doc, index: index, resolver: DocumentStyleResolver(doc));
+  painter.paint(sink, view, kViewport);
+  return (painter: painter, sink: sink, camera: view);
+}
+
+/// A viewport-sized window over the middle of [doc], so most of it culls away.
+///
+/// The fit camera draws everything and therefore exercises no culling at all;
+/// a differential run that only ever uses it compares two walks that both
+/// kept every entity.
+ViewportTransform cameraOverDocumentCentre(DraftDocument doc) {
+  final e = doc.extents;
+  final cx = (e.minX + e.maxX) / 2;
+  final cy = (e.minY + e.maxY) / 2;
+  final w = (e.maxX - e.minX) / 8;
+  final h = (e.maxY - e.minY) / 8;
+  return ViewportTransform.fit(
+      Aabb2(Vector2(cx - w, cy - h), Vector2(cx + w, cy + h)), kViewport);
+}

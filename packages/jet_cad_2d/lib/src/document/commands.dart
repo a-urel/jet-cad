@@ -97,6 +97,50 @@ class RemoveEntityCommand extends DraftCommand {
   }
 }
 
+/// Replaces a TEXT or ATTRIB entity's displayed string, and its tag.
+///
+/// Minimal stand-in for the fuller command a later task builds out: what
+/// matters here is that an edit goes through the command path rather than a
+/// direct column write, because that is what lets `SpatialIndex`'s dirty
+/// overlay pick it up — see `entityBounds`' text case, which reads exactly
+/// the fields this command writes.
+///
+/// Rejects a kind other than [EntityKind.text] or [EntityKind.attrib]: `text`
+/// and `tag` are meaningless on every other entity, and letting this command
+/// silently write them there would let a document accumulate values nothing
+/// else ever reads.
+class SetEntityTextCommand extends DraftCommand {
+  final Handle handle;
+  final String text;
+  final String tag;
+
+  SetEntityTextCommand(this.handle, this.text, this.tag);
+
+  @override
+  Capability get capability => Capability.geometry;
+
+  @override
+  String get label => 'Edit text';
+
+  @override
+  CommandResult apply(CommandTarget target) {
+    final slot = target.entities.slotOf(handle);
+    if (slot == null) {
+      throw StateError('no entity with handle ${handle.toHex()}');
+    }
+    final record = target.entities.read(slot);
+    if (record.kind != EntityKind.text && record.kind != EntityKind.attrib) {
+      throw StateError('${handle.toHex()} is not a text or attrib entity');
+    }
+    target.entities.replace(slot, record.copyWith(text: text, tag: tag));
+    target.invalidateDerived();
+    return CommandResult(
+      inverse: SetEntityTextCommand(handle, record.text, record.tag),
+      touched: {handle},
+    );
+  }
+}
+
 /// Replaces a container's transform.
 ///
 /// Distinct from editing geometry, which is what makes the `transform` and

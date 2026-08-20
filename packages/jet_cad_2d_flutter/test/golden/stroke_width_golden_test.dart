@@ -121,17 +121,21 @@ DraftDocument anisotropicFixture({double scaleY = 8.0}) {
 }
 
 class _PainterHost extends CustomPainter {
-  _PainterHost(this.painter, this.camera);
+  _PainterHost(this.painter, this.camera, this.textStyleOf);
 
   final DraftPainter painter;
   final ViewportTransform camera;
+  final TextStyleRecord Function(Handle) textStyleOf;
 
   @override
   void paint(Canvas canvas, Size size) {
     // These goldens measure paper-space stroke width and the shape of an
-    // anisotropic instance.
-    final sink =
-        CanvasDrawSink(canvas: canvas, pixelsPerPaperMm: kPixelsPerPaperMm);
+    // anisotropic instance; neither draws text yet.
+    final sink = CanvasDrawSink(
+        canvas: canvas,
+        pixelsPerPaperMm: kPixelsPerPaperMm,
+        measurer: FlutterTextMeasurer(),
+        textStyleOf: textStyleOf);
     painter.paint(sink, camera, size);
   }
 
@@ -154,6 +158,7 @@ Widget canvasOver(
                   index: index,
                   resolver: DocumentStyleResolver(doc)),
               camera,
+              doc.textStyleOf,
             ),
           ),
         ),

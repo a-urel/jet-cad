@@ -1,6 +1,7 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart';
 import 'package:test/test.dart';
+import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 /// FNV-1a over the document's full serialisation.
 ///
@@ -46,10 +47,13 @@ void main() {
     // Deliberately not the structural assertions the plan sketches (one layer,
     // every colour ByLayer, every node an instance under the root). Those pass
     // on a document whose coordinates have all moved.
+    //
+    // Re-baselined in Plan 3c Task 1: the four text keys changed the
+    // serialisation.
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
-        4478729767976143987);
+        -4223683079839955300);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
-        7265843217140545300);
+        -1538364231202837705);
   });
 
   test('defaults reproduce the Plan 2 corpus structurally too', () {
@@ -203,5 +207,150 @@ void main() {
           dashedFraction: 0.4,
         ));
     expect(build().toString(), build().toString());
+  });
+
+  // --- labelFraction / attributedInstanceFraction -------------------------
+  //
+  // Both draw from the generator's second `Random` (`extra`), and there is
+  // one such stream, not one per extension: naming one on its own shifts
+  // every draw the other would make. So these fixtures each name only one
+  // of the two (the other stays at its default of 0, drawing nothing), and
+  // no fixture here names both -- see `generate_document.dart`'s doc comment
+  // on [generateDocument].
+
+  test('both text fractions default to zero and change nothing', () {
+    // The two fingerprints from Task 1's re-baseline (commit 7f85226) still
+    // hold. If either moved, `labelFraction` or `attributedInstanceFraction`
+    // drew from `extra` while off, which is exactly the bug this test
+    // exists to catch -- not a signal to update the expected value.
+    expect(fingerprint(generateDocument(2000, definitionCount: 20)),
+        -4223683079839955300);
+    expect(fingerprint(generateDocument(20000, definitionCount: 20)),
+        -1538364231202837705);
+  });
+
+  test('labelFraction produces repeating strings out of the root budget', () {
+    final doc =
+        generateDocument(2000, definitionCount: 20, labelFraction: 0.05);
+    final labels = <String>{};
+    var count = 0;
+    for (final slot in doc.entities.liveSlots) {
+      if (doc.entities.kindAt(slot) == EntityKind.text) {
+        count++;
+        labels.add(doc.entities.textAt(slot));
+        // A degenerate (zero-area) box would measure nothing downstream, in
+        // every text render, pick and benchmark taken against this corpus.
+        final scalars =
+            doc.geometry.peek(doc.entities.geomIndexAt(slot)).scalars;
+        expect(scalars[0], greaterThan(0));
+      }
+    }
+    // Exact, not a floor: labelCount is 5% of the *root* budget (1680 at
+    // this entityCount/definitionCount), not of entityCount itself and not
+    // capped the way the old floor-text ceiling (`min(300, ...)`) was.
+    expect(count, 84);
+    // Exactly the vocabulary's size, not merely bounded by it: this is the
+    // distribution Task 12's distinct-visible-key measurement is taken
+    // against, and it is also labelFraction's only draw from the shared
+    // `extra` stream -- a generator that stopped drawing (e.g. always
+    // choosing index 0) would still pass a `lessThanOrEqualTo` bound.
+    expect(labels.length, 20);
+  });
+
+  test(
+      'labelFraction is not capped by the old floor-text ceiling at a '
+      'larger corpus', () {
+    // All the other labelFraction tests use entityCount: 2000, where the
+    // pre-existing floor-text ceiling (`math.min(300, rootEntityCount ~/
+    // 100)`) and the true 5%-of-root label count are far apart enough that
+    // a label count silently re-using that ceiling could still slip past a
+    // loose bound. 20000 is the corpus the benchmarks actually use.
+    int textCountOf(int entityCount) {
+      final doc = generateDocument(entityCount,
+          definitionCount: 20, labelFraction: 0.05);
+      var count = 0;
+      for (final slot in doc.entities.liveSlots) {
+        if (doc.entities.kindAt(slot) == EntityKind.text) count++;
+      }
+      return count;
+    }
+
+    expect(textCountOf(2000), 84);
+    expect(textCountOf(20000), 984);
+  });
+
+  test('labelFraction does not change the total leaf count', () {
+    // Labels come *out of* the root budget rather than adding to it: a
+    // document built with labelFraction on has exactly as many leaves as
+    // one built without it, for the same entityCount/definitionCount.
+    final off = generateDocument(2000, definitionCount: 20);
+    final on = generateDocument(2000, definitionCount: 20, labelFraction: 0.05);
+    expect(on.entities.liveSlots.length, off.entities.liveSlots.length);
+  });
+
+  test('attributedInstanceFraction gives each chosen instance a unique attrib',
+      () {
+    final doc = generateDocument(2000,
+        definitionCount: 20,
+        instanceCount: 100,
+        attributedInstanceFraction: 0.5);
+    final values = <String>[];
+    for (final slot in doc.entities.liveSlots) {
+      if (doc.entities.kindAt(slot) == EntityKind.attrib) {
+        values.add(doc.entities.textAt(slot));
+        // Owned by the instance node, in instance-local coordinates.
+        expect(doc.tree[doc.entities.ownerAt(slot)], isA<InstanceNode>());
+        // A degenerate (zero-area) box would measure nothing downstream.
+        final scalars =
+            doc.geometry.peek(doc.entities.geomIndexAt(slot)).scalars;
+        expect(scalars[0], greaterThan(0));
+        // The DXF ATTRIB tag -- the attribute definition's key -- must be
+        // present; it is what distinguishes this leaf from a plain TEXT.
+        expect(doc.entities.tagAt(slot), isNotEmpty);
+      }
+    }
+    expect(values.length, 50);
+    expect(values.toSet().length, values.length);
+  });
+
+  test(
+      'attributedInstanceFraction places attributes in the instance\'s local '
+      'space, not world space', () {
+    // A generator bug that wrote an ATTRIB's coordinates already in world
+    // space would have `container_index.dart` apply the instance's
+    // transform on top of that, double-placing it. This pins both halves of
+    // that: the stored coordinate is symbol-scale (nowhere near the floor
+    // plan's own extent), and applying the instance's own composed
+    // transform to it lands within the floor plan the instances are
+    // actually scattered across.
+    final doc = generateDocument(2000,
+        definitionCount: 20,
+        instanceCount: 100,
+        attributedInstanceFraction: 0.5);
+    var checked = 0;
+    for (final slot in doc.entities.liveSlots) {
+      if (doc.entities.kindAt(slot) != EntityKind.attrib) continue;
+      final owner = doc.entities.ownerAt(slot);
+      final node = doc.tree[owner];
+      expect(node, isA<InstanceNode>());
+
+      final coords = doc.geometry.peek(doc.entities.geomIndexAt(slot)).coords;
+      final local = Vector2(coords[0], coords[1]);
+      // Symbol-scale local coordinates, not floor-plan-scale world ones.
+      expect(local.x.abs(), lessThanOrEqualTo(100.0));
+      expect(local.y.abs(), lessThanOrEqualTo(50.0));
+
+      // Resolved through the instance's own composed transform, the only
+      // correct way to reach world space from a leaf an InstanceNode owns.
+      final world = node!.transform.transformPoint(local);
+      expect(
+          world.x,
+          inInclusiveRange(
+              kDefaultOriginX - 1000, kDefaultOriginX + kFloorWidth + 1000));
+      expect(world.y,
+          inInclusiveRange(kOriginY - 1000, kOriginY + kFloorHeight + 1000));
+      checked++;
+    }
+    expect(checked, 50);
   });
 }

@@ -5,6 +5,49 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
+/// A text entity with a real string, style and packed attributes — the three
+/// things `addEntity` cannot carry.
+///
+/// Separate helper rather than four more optional parameters on [addEntity]:
+/// every text fixture below needs all three together, and a text entity with
+/// a default style and `textAttrs: 0` is exactly the degenerate fixture the
+/// tests at the bottom of this file exist to rule out.
+Handle addText(
+  DraftDocument doc,
+  Handle owner, {
+  required String text,
+  required Handle textStyle,
+  required List<double> coords,
+  required List<double> scalars,
+  int textAttrs = 0,
+  EntityKind kind = EntityKind.text,
+}) {
+  final handle = doc.handleSeed.next();
+  doc.commands.execute(AddEntityCommand(
+    record: EntityRecord(
+      handle: handle,
+      owner: owner,
+      kind: kind,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.byLayerLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: const ByLayerColor(),
+      lineweight: kByLayer,
+      transparency: kByLayer,
+      flags: 0,
+      text: text,
+      textStyle: textStyle,
+      textAttrs: textAttrs,
+    ),
+    payload: GeometryPayload(
+      coords: Float64List.fromList(coords),
+      scalars: Float64List.fromList(scalars),
+    ),
+  ));
+  return handle;
+}
+
 Handle addEntity(DraftDocument doc, Handle owner, EntityKind kind,
     List<double> coords, List<double> scalars) {
   final handle = doc.handleSeed.next();
@@ -1117,5 +1160,323 @@ void main() {
     expect(angle, greaterThanOrEqualTo(math.pi / 2 - 1e-12),
         reason: 'the mirrored sweep is [pi/2, pi]');
     expect(angle, lessThanOrEqualTo(math.pi + 1e-12));
+  });
+
+  // --- text picks by its laid-out box -----------------------------------
+  //
+  // Every fixture here uses `MetricModelMeasurer`, never the default
+  // `InsertionPointMeasurer`: that one answers `TextMetrics.zero` for every
+  // string, which collapses the glyph box to a single point and would let
+  // *any* containment rule -- including one that never fires at all -- pass
+  // every test below for the wrong reason.
+
+  test('a pointer inside a text box hits it as a fill', () {
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+    final style = doc.tables.textStyles.byName('STANDARD')!;
+    // 'LONG ROOM NAME' is 14 characters, so under MetricModelMeasurer's
+    // defaults (advanceRatio 0.55, ascent 0.8, descent 0.2, cap 0.7, all of
+    // kNominalTextPixels = 100) it lays out 770 wide, 80 up and 20 down at
+    // the nominal size, scaled by height/capHeight = 200/70.
+    //
+    // **The insertion point is (300, 20), not the origin, and the two
+    // coordinates differ by more than the box is tall.** An anchor whose x
+    // and y are equal -- or both zero -- cannot tell a correct pick from one
+    // that reads the anchor as `(coords[1], coords[0])`, and every probe
+    // below would land in the same place under both. With this anchor the
+    // world box is x in [300, 2500], y in [-37.14, 248.57]; under the
+    // swapped anchor (20, 300) it would be x in [20, 2220],
+    // y in [242.86, 528.57], which shares no point with any probe here.
+    final textHandle = addText(doc, doc.rootHandle,
+        text: 'LONG ROOM NAME',
+        textStyle: style.handle,
+        coords: [300, 20],
+        scalars: [200, 0, 0, 0]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    // Well inside the box and far from the insertion point: 108 units away
+    // from (300, 20), against a pick radius of 1.
+    expect(
+        index.pickInto(Vector2(400, 60), 1.0, const QueryFilter.picking(), hit),
+        isTrue);
+    expect(hit.kind, HitKind.fill);
+    expect(hit.entity, textHandle);
+    // A fill has no feature of its own, so the query point stands in for it
+    // -- the same convention the closed-polyline fill case uses.
+    expect(hit.worldPoint.x, closeTo(400, 1e-9));
+    expect(hit.worldPoint.y, closeTo(60, 1e-9));
+
+    // Just inside the bottom-left corner: 5 units right of the left edge and
+    // 7 above the descent line. A probe deep in the middle of a box tolerates
+    // an anchor that is wrong by tens of units; this one does not.
+    expect(
+        index.pickInto(
+            Vector2(305, -30), 1.0, const QueryFilter.picking(), hit),
+        isTrue,
+        reason: 'the box starts at the insertion point and hangs 57.14 below '
+            'it');
+    expect(hit.kind, HitKind.fill);
+
+    // Ten units the other side of the same left edge.
+    expect(
+        index.pickInto(
+            Vector2(295, -30), 1.0, const QueryFilter.picking(), hit),
+        isFalse,
+        reason: 'left-justified text starts *at* its insertion point, so this '
+            'is outside the box -- and only 25 units from the insertion '
+            'point, which is no longer a pick candidate at any radius');
+  });
+
+  test('a pointer near the insertion point is no longer a vertex hit', () {
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+    final style = doc.tables.textStyles.byName('STANDARD')!;
+    // Same asymmetric anchor as the fixture above, for the same reason.
+    addText(doc, doc.rootHandle,
+        text: 'LONG ROOM NAME',
+        textStyle: style.handle,
+        coords: [300, 20],
+        scalars: [200, 0, 0, 0]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    // (295, 15) is outside the box (x < 300) but 7 units from the insertion
+    // point, well inside the 10-unit radius that used to make it a vertex.
+    expect(
+        index.pickInto(
+            Vector2(295, 15), 10.0, const QueryFilter.picking(), hit),
+        isFalse,
+        reason: 'picking and snapping are different questions: the insertion '
+            'point stays a snap candidate and is no longer a pick candidate');
+    expect(hit.kind, isNot(HitKind.vertex));
+  });
+
+  test('a point entity still picks as a vertex', () {
+    // The switch case used to be shared between point, text and attrib;
+    // splitting it must not move `point`.
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+    final handle = addEntity(doc, doc.rootHandle, EntityKind.point, [7, 9], []);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    expect(index.pickInto(Vector2(8, 9), 5.0, const QueryFilter.picking(), hit),
+        isTrue);
+    expect(hit.kind, HitKind.vertex);
+    expect(hit.entity, handle);
+    expect(hit.worldPoint.x, closeTo(7, 1e-9));
+    expect(hit.worldPoint.y, closeTo(9, 1e-9));
+  });
+
+  test('the insertion point is still a snap candidate', () {
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+    final style = doc.tables.textStyles.byName('STANDARD')!;
+    // Asymmetric anchor here too: the snap path reads the same two
+    // coordinates, and (0, 0) cannot tell them apart either.
+    final textHandle = addText(doc, doc.rootHandle,
+        text: 'LONG ROOM NAME',
+        textStyle: style.handle,
+        coords: [300, 20],
+        scalars: [200, 0, 0, 0]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final out = SnapResult();
+    index.snapInto(
+        Vector2(302, 22), 20.0, SnapMask.none.with_(SnapKind.insertion), out);
+    expect(out.found, isTrue);
+    expect(out.kind, SnapKind.insertion);
+    expect(out.entity, textHandle);
+    expect(out.point.x, closeTo(300, 1e-9));
+    expect(out.point.y, closeTo(20, 1e-9));
+  });
+
+  test('an attrib picks by its box too', () {
+    // ATTRIB shares the case with TEXT, and its owner is the INSERT node
+    // rather than a container -- so this also pins that the box is measured
+    // in the instance's space, not the root's.
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+    final style = doc.tables.textStyles.byName('STANDARD')!;
+    final def = doc.handleSeed.next();
+    doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'WithAttrib',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+    addEntity(doc, def, EntityKind.line, [0, 0, 1, 1], []);
+    final inst = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: inst,
+      parent: doc.rootHandle,
+      // Rotated, not merely translated, and the text itself is rotated too:
+      // two pure translations commute, so a fixture built from them cannot
+      // tell the composition `world-after-layout` from `layout-after-world`.
+      // With both rotations present the two orders land in different places.
+      transform: Transform2.rotation(math.pi / 2)
+          .multiply(Transform2.translation(1000, 500)),
+      definition: def,
+      layer: ReservedHandles.layerZero,
+    )));
+    // 'AB' is 2 characters: 110 wide at the nominal size, scaled by 70/70,
+    // so the glyph box is x in [0, 110], y in [-20, 80]. Its own transform
+    // rotates that by 0.3 rad and anchors it at instance-local (2, 3); the
+    // instance then translates by (1000, 500) and turns a quarter turn, so
+    // instance-local (X, Y) lands at world (-(Y + 500), X + 1000).
+    final attrib = addText(doc, inst,
+        kind: EntityKind.attrib,
+        text: 'AB',
+        textStyle: style.handle,
+        coords: [2, 3],
+        scalars: [70, 0.3, 0, 0]);
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    // The glyph-box centre (55, 30) is at instance-local (45.678, 47.914)
+    // and therefore world (-547.914, 1045.678).
+    expect(
+        index.pickInto(
+            Vector2(-547.914, 1045.678), 0.5, const QueryFilter.picking(), hit),
+        isTrue);
+    expect(hit.entity, attrib);
+    expect(hit.kind, HitKind.fill);
+    expect(
+        index.pickInto(
+            Vector2(45.678, 47.914), 0.5, const QueryFilter.picking(), hit),
+        isFalse,
+        reason: "the attrib's coordinates are instance-local; a box measured "
+            'in root space would hit here instead');
+  });
+
+  test('a justified text box is where its justification puts it', () {
+    // Right/top justification, so the box hangs to the *left of* and *below*
+    // the insertion point. A pick path that hard-coded `textAttrs: 0` would
+    // put the box on the opposite side of the anchor on both axes and miss
+    // every point this test hits.
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+    final style = doc.tables.textStyles.byName('STANDARD')!;
+    final handle = addText(doc, doc.rootHandle,
+        text: 'ABCDE',
+        textStyle: style.handle,
+        coords: [1000, 1000],
+        scalars: [70, 0, 0, 0],
+        textAttrs: packTextAttrs(h: TextJustifyH.right, v: TextJustifyV.top));
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    // 'ABCDE' lays out 275 wide at scale 1, so the world box is
+    // x in [725, 1000], y in [900, 1000].
+    final hit = HitPath();
+    expect(
+        index.pickInto(
+            Vector2(800, 950), 0.5, const QueryFilter.picking(), hit),
+        isTrue,
+        reason: 'inside the right/top box; outside the left/baseline one');
+    expect(hit.entity, handle);
+    expect(hit.kind, HitKind.fill);
+
+    expect(
+        index.pickInto(
+            Vector2(1100, 1020), 0.5, const QueryFilter.picking(), hit),
+        isFalse,
+        reason: 'inside the left/baseline box the unjustified reading would '
+            'produce, and outside the real one');
+  });
+
+  test("a non-STANDARD style's fixed height sizes the pickable box", () {
+    // Every other text fixture here uses STANDARD, whose fixedHeight is 0 --
+    // so "resolve STANDARD" and "resolve the entity's own style" give the
+    // same answer and neither can tell a hard-coded STANDARD lookup from a
+    // correct one. BIG's fixedHeight overrides the entity's own height
+    // scalar, and the two readings differ by 7.14x.
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+    const big = TextStyleRecord(
+      handle: Handle(600),
+      name: 'BIG',
+      fontFamily: 'Roboto',
+      fixedHeight: 500,
+    );
+    doc.tables.textStyles.add(big);
+    final handle = addText(doc, doc.rootHandle,
+        text: 'AB',
+        textStyle: big.handle,
+        coords: [0, 0],
+        scalars: [70, 0, 0, 0]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    // Under BIG the scale is 500/70, so the box is x in [0, 785.7],
+    // y in [-142.9, 571.4]; under STANDARD it would be x in [0, 110],
+    // y in [-20, 80].
+    final hit = HitPath();
+    expect(
+        index.pickInto(
+            Vector2(400, 300), 0.5, const QueryFilter.picking(), hit),
+        isTrue,
+        reason: "inside BIG's box, far outside the one a STANDARD lookup "
+            'would give');
+    expect(hit.entity, handle);
+    expect(hit.kind, HitKind.fill);
+  });
+
+  test('a rotated text is picked by its oriented box, not its bounds', () {
+    // The indexed box is the axis-aligned *bound* of the rotated glyph box.
+    // Testing the query point against that bound instead of against the
+    // oriented box would hit here, in a corner the glyphs never reach.
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+    final style = doc.tables.textStyles.byName('STANDARD')!;
+    final handle = addText(doc, doc.rootHandle,
+        text: 'AAAA',
+        textStyle: style.handle,
+        coords: [0, 0],
+        // Height 70 (scale 1) rotated by 45 degrees.
+        scalars: [70, math.pi / 4, 0, 0]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    // Glyph-space box x in [0, 220], y in [-20, 80]; rotated by 45 degrees
+    // its four corners land at (14.1, -14.1), (169.7, 141.4), (99.0, 212.1)
+    // and (-56.6, 56.6), whose axis-aligned bound is x in [-56.6, 169.7],
+    // y in [-14.1, 212.1].
+    final hit = HitPath();
+    // Glyph-space (110, 30) -> world (56.57, 98.99): inside the real box.
+    expect(
+        index.pickInto(
+            Vector2(56.57, 98.99), 0.5, const QueryFilter.picking(), hit),
+        isTrue);
+    expect(hit.entity, handle);
+    expect(hit.kind, HitKind.fill);
+
+    // Inside the axis-aligned bound, but glyph-space y = -123.7 there --
+    // far below the descent line.
+    expect(
+        index.pickInto(
+            Vector2(165, -10), 0.5, const QueryFilter.picking(), hit),
+        isFalse,
+        reason: 'a bounds test rather than an oriented-box test would report '
+            'a fill here');
+  });
+
+  test('a text entity with no laid-out box is not pickable', () {
+    // The default measurer answers TextMetrics.zero for every string, which
+    // collapses the box to a point and the local transform to a singular
+    // matrix. Inverting that throws; the pick must answer "no hit" rather
+    // than propagate a SingularTransformError out of a pointer move.
+    final doc = DraftDocument.empty();
+    final style = doc.tables.textStyles.byName('STANDARD')!;
+    addText(doc, doc.rootHandle,
+        text: 'INVISIBLE',
+        textStyle: style.handle,
+        coords: [0, 0],
+        scalars: [200, 0, 0, 0]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    expect(index.pickInto(Vector2(0, 0), 5.0, const QueryFilter.picking(), hit),
+        isFalse);
   });
 }

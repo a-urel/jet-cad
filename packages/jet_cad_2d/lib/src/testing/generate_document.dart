@@ -33,6 +33,32 @@ const double kOriginY = 1200000.0;
 /// filler) at the same large coordinates without repeating the literal.
 const double kDefaultOriginX = 4500000.0;
 
+/// Room-label vocabulary for [labelFraction]'s doc comment and
+/// implementation. Order is part of the fixture: a test naming an index into
+/// this list depends on it. Copied verbatim from the Plan 3c Task 7 brief.
+const List<String> _kLabelVocabulary = <String>[
+  'WC',
+  'KITCHEN',
+  'BAR',
+  'STORE',
+  'OFFICE',
+  'ENTRY',
+  'HALL',
+  'STAIR',
+  'LIFT',
+  'TERRACE',
+  'PANTRY',
+  'CLOAK',
+  'PLANT',
+  'RISER',
+  'LOBBY',
+  'CORRIDOR',
+  'SERVICE',
+  'DECK',
+  'GARDEN',
+  'ROOF',
+];
+
 /// Builds a document for benchmark measurement.
 ///
 /// Entities are spread over a [kFloorWidth] x [kFloorHeight] floor-plan
@@ -58,6 +84,14 @@ const double kDefaultOriginX = 4500000.0;
 /// primary stream would shift every value after it and silently invalidate the
 /// gate results note; `generate_document_test.dart` pins the serialisation's
 /// fingerprint against exactly that.
+///
+/// [labelFraction] and [attributedInstanceFraction] draw from that same
+/// second stream too, and there is one such stream, not one per extension:
+/// turning either on shifts every draw the other makes, so the two are
+/// **not** independently reproducible. A fixture names both together or
+/// names neither; naming just one and expecting the other's defaulted output
+/// to match a fixture that also named the first is not a thing this
+/// generator supports.
 DraftDocument generateDocument(
   int entityCount, {
   int definitionCount = 20,
@@ -88,13 +122,45 @@ DraftDocument generateDocument(
 
   /// Fraction of all entities carrying a dashed linetype rather than ByLayer.
   double dashedFraction = 0,
+
+  /// Fraction of the **root** entity budget rendered as repeating floor-plan
+  /// labels ("KITCHEN", "STAIR", ...) from [_kLabelVocabulary], in place of
+  /// the plain, contentless floor texts [_addFloorText] would otherwise put
+  /// there. Comes *out of* the root budget rather than adding to it, so the
+  /// total leaf count does not move when this is on -- unlike
+  /// [attributedInstanceFraction], which is additive. See the class doc
+  /// comment above for why the two extensions cannot be pinned
+  /// independently.
+  double labelFraction = 0,
+
+  /// Fraction of root instances given one additional ATTRIB leaf: a unique
+  /// tag value, owned by the instance node, in the instance's own local
+  /// space. DXF stores an ATTRIB already placed in world space, and
+  /// `container_index.dart` transforms every leaf a container owns by that
+  /// container's composed transform, so writing world coordinates here would
+  /// apply the instance's placement twice. Additive -- each one is a leaf
+  /// the root budget did not already account for -- unlike [labelFraction].
+  /// See the class doc comment above for why the two extensions cannot be
+  /// pinned independently.
+  double attributedInstanceFraction = 0,
+
+  /// The measurer the generated document is built with.
+  ///
+  /// Defaults to the same [InsertionPointMeasurer] every earlier caller got
+  /// implicitly, so no fingerprint and no `extents` moves when this is left
+  /// alone. A caller that turns [labelFraction] or
+  /// [attributedInstanceFraction] on and wants the labels to have a size has
+  /// to pass a real one: the zero metrics collapse every glyph box to a point
+  /// and every text transform to a singular matrix, which is a corpus that
+  /// looks like it covers text and does not.
+  TextMeasurer measurer = const InsertionPointMeasurer(),
 }) {
   final random = math.Random(0xC0FFEE);
   // A second stream, drawn from only by the extensions. Keeping them off the
   // primary one is what makes the default document byte-identical however many
   // extensions exist.
   final extra = math.Random(0x5EEDED);
-  final doc = DraftDocument.empty();
+  final doc = DraftDocument.empty(measurer: measurer);
 
   final layers = <Handle>[];
   if (layerCount > 1) {
@@ -225,8 +291,19 @@ DraftDocument generateDocument(
   // --- root-level content: the rest of the entity budget, spread across
   // the floor plan, mostly straight and a few hundred texts. --------------
   final rootEntityCount = entitiesLeft;
-  final textCount = math.min(300, rootEntityCount ~/ 100);
-  final remaining = rootEntityCount - textCount;
+  final baseTextCount = math.min(300, rootEntityCount ~/ 100);
+  // Labels replace the plain floor texts one-for-one rather than adding to
+  // them: with both present, a kind-text entity's `text` would sometimes be
+  // '' (the floor text's own default) and sometimes a vocabulary word, which
+  // is a distinct string the labelling extension did not choose and no
+  // fixture should have to account for. So when labelFraction is on, every
+  // root-level text entity is a label; when it is off, `labelCount` is 0 and
+  // this whole block reduces to the original formula exactly.
+  final labelCount = labelFraction > 0
+      ? math.min(rootEntityCount, (rootEntityCount * labelFraction).round())
+      : 0;
+  final textCount = labelFraction > 0 ? 0 : baseTextCount;
+  final remaining = rootEntityCount - textCount - labelCount;
   final lineCount = (remaining * 0.45).round();
   final polylineCount = (remaining * 0.30).round();
   final circleCount = (remaining * 0.15).round();
@@ -247,6 +324,10 @@ DraftDocument generateDocument(
   for (var i = 0; i < textCount; i++) {
     _addFloorText(doc, originX: originX, random: random, styling: styling);
   }
+  for (var i = 0; i < labelCount; i++) {
+    _addLabelText(doc,
+        originX: originX, random: random, extra: extra, styling: styling);
+  }
 
   // --- instances: every definition placed many times, scattered across
   // the floor plan. --------------------------------------------------------
@@ -254,6 +335,7 @@ DraftDocument generateDocument(
       instanceCount > 0 ? instanceCount : definitionCount * 25;
   var mirroredDue = 0.0;
   var nonUniformDue = 0.0;
+  var attributedDue = 0.0;
   for (var i = 0; i < effectiveInstanceCount; i++) {
     final definition = definitionHandles[i % definitionHandles.length];
     final x = originX + random.nextDouble() * kFloorWidth;
@@ -290,13 +372,23 @@ DraftDocument generateDocument(
       transform = transform
           .multiply(Transform2.scale(1.0, 2.5 + extra.nextDouble() * 3));
     }
+    final instanceHandle = doc.handleSeed.next();
     doc.commands.execute(AddNodeCommand(InstanceNode(
-      handle: doc.handleSeed.next(),
+      handle: instanceHandle,
       parent: doc.rootHandle,
       transform: transform,
       definition: definition,
       layer: ReservedHandles.layerZero,
     )));
+
+    // Additive, unlike labelFraction above: each attribute is a leaf the
+    // root budget never accounted for, owned by the instance it tags.
+    attributedDue += attributedInstanceFraction;
+    if (attributedDue >= 1.0) {
+      attributedDue -= 1.0;
+      _addInstanceAttribute(doc,
+          instance: instanceHandle, extra: extra, styling: styling, ordinal: i);
+    }
   }
 
   return doc;
@@ -364,6 +456,8 @@ Handle _addEntity(
   required _Styling styling,
   bool insideDefinition = false,
   List<double> scalars = const [],
+  String text = '',
+  String tag = '',
 }) {
   final handle = doc.handleSeed.next();
   final layer = styling.layerFor();
@@ -382,6 +476,8 @@ Handle _addEntity(
       lineweight: kByLayer,
       transparency: kByLayer,
       flags: 0,
+      text: text,
+      tag: tag,
     ),
     payload: GeometryPayload(
       coords: Float64List.fromList(coords),
@@ -533,4 +629,51 @@ void _addFloorText(DraftDocument doc,
       coords: [x, y],
       styling: styling,
       scalars: [100.0 + random.nextDouble() * 200.0]);
+}
+
+/// A root-level room label: a floor position from the primary [random]
+/// stream (matching every other floor entity), a word from [extra] (the
+/// stream [labelFraction] shares with [attributedInstanceFraction] — see
+/// [generateDocument]'s doc comment).
+void _addLabelText(DraftDocument doc,
+    {required double originX,
+    required math.Random random,
+    required math.Random extra,
+    required _Styling styling}) {
+  final x = _floorX(originX, random), y = _floorY(random);
+  final label = _kLabelVocabulary[extra.nextInt(_kLabelVocabulary.length)];
+  _addEntity(doc,
+      owner: doc.rootHandle,
+      kind: EntityKind.text,
+      coords: [x, y],
+      styling: styling,
+      scalars: [100.0 + random.nextDouble() * 200.0],
+      text: label);
+}
+
+/// One ATTRIB leaf owned by [instance], placed in the instance's own local
+/// space — never world space; see [generateDocument]'s doc comment on
+/// [attributedInstanceFraction] for why. [ordinal] is the instance loop
+/// index, which is unique per call and is what makes the tag value unique
+/// without needing a draw for it.
+void _addInstanceAttribute(
+  DraftDocument doc, {
+  required Handle instance,
+  required math.Random extra,
+  required _Styling styling,
+  required int ordinal,
+}) {
+  // Small, symbol-scale local coordinates — the same order of magnitude as
+  // `_addSymbolEntity`'s — drawn from `extra`, the stream this extension
+  // shares with `labelFraction`.
+  final x = (extra.nextDouble() - 0.5) * 200.0;
+  final y = (extra.nextDouble() - 0.5) * 100.0;
+  _addEntity(doc,
+      owner: instance,
+      kind: EntityKind.attrib,
+      coords: [x, y],
+      styling: styling,
+      scalars: [80.0],
+      text: 'ATTR${ordinal.toString().padLeft(5, '0')}',
+      tag: 'REF');
 }

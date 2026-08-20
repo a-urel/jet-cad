@@ -108,6 +108,16 @@ List<DrawnItem> flatten(List<DrawOp> ops) {
         out.add(DrawnItem(
             'arc', style, [residual.transformPoint(Vector2(cx, cy))],
             radius: r * residual.scaleMagnitude, start: start, sweep: sweep));
+      case TextOp(:final text, :final resolved):
+        // Three points, not one: the origin plus the images of the local
+        // unit vectors, so `kScreenTolerance` covers scale, rotation and
+        // shear with the machinery already here. The string rides in
+        // `kind`, which compares exactly.
+        out.add(DrawnItem('text:$text', resolved, [
+          residual.transformPoint(Vector2.zero()),
+          residual.transformPoint(Vector2(1, 0)),
+          residual.transformPoint(Vector2(0, 1)),
+        ]));
     }
   }
   return out;
@@ -122,11 +132,28 @@ List<DrawnItem> flatten(List<DrawOp> ops) {
 /// instance whose box is looser than its geometry. What must never happen is
 /// the other direction — something the reference drew inside the view that the
 /// painter did not.
+/// [edgeBandPx] excludes a band along the inside of the frame from the
+/// *extra-ops* half of the comparison only. The superset half — everything
+/// the reference drew, the painter drew — is never relaxed.
+///
+/// Zero is the tight reading and is right for any camera with margin around
+/// the drawing, which is every fixture-sized one. A camera that **crops** needs
+/// a band, and the reason is structural rather than a tolerance fudge: the
+/// painter culls against index boxes carrying narrow-phase slack, in container
+/// space, against a clip inflated by [kScreenClipInflate]; the reference culls
+/// against exact entity bounds in root space against the viewport itself. An
+/// entity whose geometry falls a fraction of a pixel outside the frame edge is
+/// therefore drawn by one and dropped by the other, and **both are right**.
+/// Measured on the Task 10 text corpus: a circle 0.29 px below the bottom edge
+/// and a polyline 20 px below it. Without a band this comparison reports the
+/// difference between the two culling strategies as a wrong drawing.
 void expectPainterSupersetOfReference(
-    List<DrawOp> painter, List<DrawOp> reference, Size viewport) {
+    List<DrawOp> painter, List<DrawOp> reference, Size viewport,
+    {double edgeBandPx = 0}) {
   final drawn = flatten(painter);
   final expected = flatten(reference);
-  final rect = Rect.fromLTWH(0, 0, viewport.width, viewport.height);
+  final rect =
+      Rect.fromLTWH(0, 0, viewport.width, viewport.height).deflate(edgeBandPx);
 
   final matched = List<bool>.filled(drawn.length, false);
   var cursor = 0;

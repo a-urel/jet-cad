@@ -14,6 +14,7 @@ import 'node.dart';
 import 'raw_data.dart';
 import 'style.dart';
 import 'tables.dart';
+import 'text_metrics.dart';
 import 'tree.dart';
 import 'undo.dart';
 
@@ -111,6 +112,32 @@ class DraftDocument implements CommandTarget {
   }
 
   Handle get rootHandle => tree.root;
+
+  /// Resolves [handle] to its [TextStyleRecord], falling back to a plain
+  /// STANDARD-shaped record rather than a second table lookup.
+  ///
+  /// `JsonCodec._loadTables` clears the seeded defaults before loading a
+  /// file's own table entries, and `TableSection.remove` is public, so a
+  /// document whose `textStyles` table lacks even
+  /// [ReservedHandles.standardTextStyle] is reachable, not hypothetical —
+  /// chaining `?? tables.textStyles[ReservedHandles.standardTextStyle]!`
+  /// crashes on exactly that document. The fallback's field values match
+  /// [TextStyleRecord]'s own defaults (`widthFactor: 1.0`,
+  /// `obliqueAngle: 0.0`, `fixedHeight: 0.0`), so a document with no
+  /// resolvable style lays out text as if no deliberate override existed.
+  ///
+  /// Every call site that turns an entity's `textStyle` handle into a record
+  /// for [entityBounds] goes through this one accessor, so the four
+  /// production sites — including the incremental dirty-overlay re-derive
+  /// and the differential oracle's own bounds call — cannot drift apart.
+  TextStyleRecord textStyleOf(Handle handle) =>
+      tables.textStyles[handle] ?? _fallbackTextStyle;
+
+  static const TextStyleRecord _fallbackTextStyle = TextStyleRecord(
+    handle: ReservedHandles.standardTextStyle,
+    name: 'Standard',
+    fontFamily: 'Roboto',
+  );
 
   Stream<DocChange> get changes => commands.changes;
 
@@ -227,7 +254,9 @@ class DraftDocument implements CommandTarget {
         kind: record.kind,
         payload: geometry.read(record.geomIndex),
         measurer: textMeasurer,
-        textStyle: ReservedHandles.standardTextStyle,
+        textStyle: textStyleOf(record.textStyle),
+        textAttrs: record.textAttrs,
+        text: record.text,
       ));
     }
 

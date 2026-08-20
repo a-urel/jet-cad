@@ -126,3 +126,7 @@ app.*.symbols
 
 # Harness-managed worktrees (EnterWorktree and manual).
 .claude/worktrees/
+
+# `flutter test --tags golden` writes the failed/expected/diff PNG triple here
+# on a mismatch. Output of a failing run, never an input to one.
+**/test/golden/failures/

@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import 'draw_sink.dart';
+import 'flutter_text_measurer.dart';
 
 /// Writes to `dart:ui`.
 ///
@@ -16,6 +17,8 @@ class CanvasDrawSink implements DrawSink {
   CanvasDrawSink({
     Canvas? canvas,
     required this.pixelsPerPaperMm,
+    required this.measurer,
+    required this.textStyleOf,
     this.lineweightScale = 1.0,
   }) {
     if (canvas != null) this.canvas = canvas;
@@ -31,6 +34,20 @@ class CanvasDrawSink implements DrawSink {
   late Canvas canvas;
 
   final double pixelsPerPaperMm;
+
+  /// Owns the paragraph cache [text] draws through. One per widget, not one
+  /// per sink rebuild, so a prop change that recreates the sink does not
+  /// throw away every paragraph already laid out.
+  final FlutterTextMeasurer measurer;
+
+  /// Resolves a text entity's style handle to the record [text] needs for
+  /// `fontFamily`.
+  ///
+  /// [DrawSink.text] carries only the [Handle] — the sink has no document to
+  /// look tables up in, so the caller that does (`DraftCanvas`, over
+  /// `DraftDocument.textStyleOf`) hands over the one accessor rather than the
+  /// whole document.
+  final TextStyleRecord Function(Handle) textStyleOf;
 
   /// Multiplies every stroke's device-pixel width before it reaches `Canvas`.
   ///
@@ -136,6 +153,32 @@ class CanvasDrawSink implements DrawSink {
     _pushTransform();
     canvas.drawArc(Rect.fromCircle(center: Offset(cx, cy), radius: r), start,
         sweep, false, _paintFor(style));
+    _canvasCalls++;
+  }
+
+  @override
+  void text(String text, Handle style, ResolvedStyle resolved) {
+    _pushTransform();
+    final paragraph =
+        measurer.paragraphFor(text, style, textStyleOf(style), resolved.argb);
+    // Two coordinate systems meet here, and only one of them is `dart:ui`'s.
+    // `drawParagraph` lays glyphs out with y increasing *downward* from the
+    // top of the first line; the residual maps *glyph* space — y up, origin
+    // on the baseline — because that is the space `textLocalBounds`, and so
+    // `entityBounds`, is expressed in, and the camera has already flipped y
+    // once on the way there. Reconciling them is a flip about the baseline:
+    // lift by the distance from the paragraph's top to it, then negate y.
+    //
+    // The flip belongs here and not in the painter because it is a fact about
+    // `drawParagraph`, not about the document — `reference_walk` composes the
+    // same residual by an independent route and must not have to know it, or
+    // the two would be sharing exactly the assumption the oracle exists to
+    // test.
+    canvas.save();
+    canvas.translate(0, paragraph.alphabeticBaseline);
+    canvas.scale(1, -1);
+    canvas.drawParagraph(paragraph, Offset.zero);
+    canvas.restore();
     _canvasCalls++;
   }
 

@@ -132,6 +132,32 @@ Handle addLineAt(
   return handle;
 }
 
+/// The text counters, printed by every rig so the on/off delta is one define
+/// apart on one corpus.
+///
+/// `newLayouts` is the row the exit gate is about: in a steady state — the
+/// same strings visible frame after frame — a warm paragraph cache must lay
+/// nothing out, and a non-zero reading here means the working set does not fit
+/// under `kParagraphCacheLimit`. The counters are read after the same forced
+/// repaint the dash counters come from, so all of them describe one frame.
+///
+/// `layouts` and `evictions` are running totals since the sink was built; the
+/// per-frame figures are the deltas the caller passes in. A running total
+/// printed beside two per-frame figures is the wrong comparison this file
+/// already refuses to publish once.
+void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
+    {required int layoutsBefore, required int evictionsBefore}) {
+  final m = sink.measurer;
+  print('  text: corpus=${kTextCorpus ? "on" : "off"} '
+      'draw=${kDrawText ? "on" : "off"} '
+      'textOps=${painter.textOpCount} '
+      'skippedText=${painter.skippedTextCount}');
+  print('  paragraphs: newLayouts=${m.layoutCount - layoutsBefore} '
+      'newEvictions=${m.evictionCount - evictionsBefore} '
+      'live=${m.liveParagraphCount} '
+      '(totals layouts=${m.layoutCount} evictions=${m.evictionCount})');
+}
+
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -224,6 +250,8 @@ void main() {
     // that makes resetCounters() meaningful. A running total beside two
     // per-frame figures is a wrong comparison waiting to be published.
     app.sink.resetCounters();
+    final layoutsBefore = app.sink.measurer.layoutCount;
+    final evictionsBefore = app.sink.measurer.evictionCount;
     app.camera.panBy(Offset.zero);
     await tester.pump(const Duration(milliseconds: 16));
     report('R2 ($kEntities)', timings);
@@ -241,6 +269,8 @@ void main() {
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
+    printTextCounters(app.painter, app.sink,
+        layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
   });
 
   testWidgets('R4a leaf edit per frame', (tester) async {
@@ -286,6 +316,8 @@ void main() {
     // that makes resetCounters() meaningful. A running total beside two
     // per-frame figures is a wrong comparison waiting to be published.
     app.sink.resetCounters();
+    final layoutsBefore = app.sink.measurer.layoutCount;
+    final evictionsBefore = app.sink.measurer.evictionCount;
     app.camera.panBy(Offset.zero);
     await tester.pump(const Duration(milliseconds: 16));
     report('R4a ($kEntities)', timings);
@@ -302,6 +334,8 @@ void main() {
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
+    printTextCounters(app.painter, app.sink,
+        layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
   });
 
   testWidgets('R4b instance drag per frame', (tester) async {
@@ -341,6 +375,8 @@ void main() {
     // that makes resetCounters() meaningful. A running total beside two
     // per-frame figures is a wrong comparison waiting to be published.
     app.sink.resetCounters();
+    final layoutsBefore = app.sink.measurer.layoutCount;
+    final evictionsBefore = app.sink.measurer.evictionCount;
     app.camera.panBy(Offset.zero);
     await tester.pump(const Duration(milliseconds: 16));
     report('R4b ($kEntities)', timings);
@@ -354,5 +390,7 @@ void main() {
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
+    printTextCounters(app.painter, app.sink,
+        layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
   });
 }

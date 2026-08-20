@@ -279,14 +279,28 @@ void main() {
     expect(painter.leafBufferCapacity, warm);
   });
 
-  test('text entities are counted, not silently dropped', () {
-    // The corpus generates a few hundred text entities. If they vanished with
-    // no counter, the results note would read as a complete measurement.
-    final doc = generateDocument(30000, definitionCount: 100);
-    final run = paintAll(doc);
-    expect(run.painter.skippedTextCount, greaterThan(0));
-    expect(
-        run.sink.ops.whereType<PointOp>().length + run.painter.skippedTextCount,
-        greaterThan(0));
+  test('blank text is counted; text with content is drawn', () {
+    // Plan 3c Task 10: text draws now, so what this counter means changed.
+    // It used to say "the model has no text content yet"; it now says "this
+    // entity has nothing to hand `Canvas`". Both halves are asserted here
+    // because the corpus makes it easy to confuse them: `_addFloorText`
+    // leaves `text` empty, so the *default* corpus still skips every one of
+    // its text entities and a `greaterThan(0)` alone would pass just as well
+    // against a painter that had never learned to draw.
+    final blank = generateDocument(30000, definitionCount: 100);
+    final blankRun = paintAll(blank);
+    expect(blankRun.painter.skippedTextCount, greaterThan(0));
+    expect(blankRun.sink.ops.whereType<TextOp>(), isEmpty);
+
+    // `labelFraction` replaces those blanks one for one with real strings,
+    // and the measurer has to be a real one or every glyph box collapses to a
+    // point. Nothing is skipped then.
+    final labelled = generateDocument(30000,
+        definitionCount: 100,
+        labelFraction: 0.02,
+        measurer: MetricModelMeasurer());
+    final run = paintAll(labelled);
+    expect(run.painter.skippedTextCount, 0);
+    expect(run.sink.ops.whereType<TextOp>().length, greaterThan(100));
   });
 }

@@ -121,7 +121,9 @@ void _expectCentreOutsideItsOwnBox(DraftDocument doc, Handle arc) {
     kind: record.kind,
     payload: payload,
     measurer: doc.textMeasurer,
-    textStyle: ReservedHandles.standardTextStyle,
+    textStyle: doc.textStyleOf(record.textStyle),
+    textAttrs: record.textAttrs,
+    text: record.text,
   );
   final cx = payload.coords[0], cy = payload.coords[1];
   expect(cx >= box.minX && cx <= box.maxX && cy >= box.minY && cy <= box.maxY,
@@ -354,7 +356,9 @@ void main() {
       kind: secondRecord.kind,
       payload: doc.geometry.peek(secondRecord.geomIndex),
       measurer: doc.textMeasurer,
-      textStyle: ReservedHandles.standardTextStyle,
+      textStyle: doc.textStyleOf(secondRecord.textStyle),
+      textAttrs: secondRecord.textAttrs,
+      text: secondRecord.text,
     );
     expect([secondBox.minX, secondBox.minY, secondBox.maxX, secondBox.maxY],
         [firstBox.minX, firstBox.minY, firstBox.maxX, firstBox.maxY],
