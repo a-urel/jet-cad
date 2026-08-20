@@ -5,6 +5,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import 'camera_controller.dart';
 import 'canvas_draw_sink.dart';
+import 'vertices_draw_sink.dart';
 import 'draft_painter.dart';
 import 'flutter_text_measurer.dart';
 
@@ -60,6 +61,7 @@ class DraftCanvas extends StatefulWidget {
     this.pixelsPerPaperMm = kLogicalPixelsPerMm,
     this.lineweightScale = 1.0,
     this.drawText = true,
+    this.useVertices = false,
   });
 
   final DraftDocument document;
@@ -85,6 +87,16 @@ class DraftCanvas extends StatefulWidget {
   /// have to rebuild the painter, and a rebuilt painter is a different frame.
   final bool drawText;
 
+  /// Routes the walk through [VerticesDrawSink] instead of [CanvasDrawSink].
+  ///
+  /// **Spike, measurement-only, inert at its default of `false`.** The vertices
+  /// sink batches stroked segments into one `drawVertices` per colour and does
+  /// not preserve draw order across the flush; see its class comment for the
+  /// full list of what it gives up. It is wired here rather than in a fork of
+  /// the widget so that a run against it differs from a run against
+  /// `CanvasDrawSink` in the sink and nothing else.
+  final bool useVertices;
+
   @override
   State<DraftCanvas> createState() => DraftCanvasState();
 }
@@ -96,6 +108,10 @@ class DraftCanvasState extends State<DraftCanvas> {
 
   /// One sink for the life of the widget, its `Canvas` rebound per paint.
   late CanvasDrawSink sink;
+
+  /// Non-null only under `useVertices`. Wraps [sink], which keeps taking every
+  /// op the vertices sink does not batch.
+  VerticesDrawSink? vertices;
 
   /// Outlives [sink]: a prop change [_attach] reacts to rebuilds the sink,
   /// not the paragraph cache behind it, so a document swap does not throw
@@ -117,6 +133,12 @@ class DraftCanvasState extends State<DraftCanvas> {
         lineweightScale: widget.lineweightScale,
         measurer: _measurer,
         textStyleOf: widget.document.textStyleOf);
+    vertices = widget.useVertices
+        ? VerticesDrawSink(
+            pixelsPerPaperMm: widget.pixelsPerPaperMm,
+            lineweightScale: widget.lineweightScale,
+            fallback: sink)
+        : null;
     painter = DraftPainter(
       document: widget.document,
       index: widget.index,
@@ -162,6 +184,7 @@ class DraftCanvasState extends State<DraftCanvas> {
             painter: painter,
             camera: widget.camera,
             sink: sink,
+            vertices: vertices,
             repaint: _repaint,
           ),
           size: Size.infinite,
@@ -174,6 +197,7 @@ class _DraftCustomPainter extends CustomPainter {
     required this.painter,
     required this.camera,
     required this.sink,
+    required this.vertices,
     required super.repaint,
   });
 
@@ -181,11 +205,23 @@ class _DraftCustomPainter extends CustomPainter {
   final CameraController camera;
   final CanvasDrawSink sink;
 
+  /// Spike, null in every default build. See `DraftCanvas.useVertices`.
+  final VerticesDrawSink? vertices;
+
   @override
   void paint(Canvas canvas, Size size) {
     canvas.clipRect(Offset.zero & size);
     sink.canvas = canvas;
-    painter.paint(sink, camera.value, size);
+    final batching = vertices;
+    if (batching == null) {
+      painter.paint(sink, camera.value, size);
+      return;
+    }
+    // The flush is here and not in the painter because it is a fact about this
+    // sink, not about the walk: the painter hands ops to a `DrawSink` and has
+    // no opinion on when one of them reaches the `Canvas`.
+    painter.paint(batching, camera.value, size);
+    batching.flush(canvas);
   }
 
   /// Always false: [repaint] is the only trigger.

@@ -68,6 +68,13 @@ final double kDashedFraction = double.tryParse(
 const bool kTextCorpus = bool.fromEnvironment('TEXT');
 const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
 
+/// Routes the walk through `VerticesDrawSink` instead of `CanvasDrawSink`.
+///
+/// The spike for `2026-08-20-dash-leaf-separation.md`'s conclusion: the unit of
+/// render cost is the canvas call, so batch the calls. Inert at its default of
+/// `false`, which leaves the frame byte-identical to every earlier run.
+const bool kVertices = bool.fromEnvironment('VERTICES');
+
 /// The corpus the rigs measure on: the same shape as R1's, so the two sets of
 /// numbers describe one drawing.
 ///
@@ -107,8 +114,15 @@ class HarnessApp extends StatefulWidget {
   /// Fired after the first frame, not from `initState` — the painter and
   /// sink belong to `DraftCanvasState`, a descendant whose own `initState`
   /// has not run yet when this widget's has.
-  final void Function(CameraController camera, SpatialIndex index,
-      DraftPainter painter, CanvasDrawSink sink)? onReady;
+  ///
+  /// [vertices] is non-null only under [kVertices]; a rig reads its batch and
+  /// flush counters the same way it reads the painter's.
+  final void Function(
+      CameraController camera,
+      SpatialIndex index,
+      DraftPainter painter,
+      CanvasDrawSink sink,
+      VerticesDrawSink? vertices)? onReady;
 
   @override
   State<HarnessApp> createState() => _HarnessAppState();
@@ -125,8 +139,8 @@ class _HarnessAppState extends State<HarnessApp> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final canvasState = _canvasKey.currentState!;
-      widget.onReady
-          ?.call(camera, index, canvasState.painter, canvasState.sink);
+      widget.onReady?.call(camera, index, canvasState.painter, canvasState.sink,
+          canvasState.vertices);
     });
   }
 
@@ -158,7 +172,8 @@ class _HarnessAppState extends State<HarnessApp> {
                 index: index,
                 camera: camera,
                 lineweightScale: kLineweightScale,
-                drawText: kDrawText),
+                drawText: kDrawText,
+                useVertices: kVertices),
           ),
         ),
       );

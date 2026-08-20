@@ -145,6 +145,17 @@ Handle addLineAt(
 /// per-frame figures are the deltas the caller passes in. A running total
 /// printed beside two per-frame figures is the wrong comparison this file
 /// already refuses to publish once.
+/// The spike's counters, printed only when it is on so every earlier run's
+/// transcript stays comparable line for line.
+void printVerticesCounters(VerticesDrawSink? vertices) {
+  if (vertices == null) {
+    print('  vertices: off');
+    return;
+  }
+  print('  vertices: on segments=${vertices.lastFlushSegmentCount} '
+      'drawVerticesCalls=${vertices.flushCallCount}');
+}
+
 void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
     {required int layoutsBefore, required int evictionsBefore}) {
   final m = sink.measurer;
@@ -169,6 +180,7 @@ void main() {
         SpatialIndex index,
         DraftPainter painter,
         CanvasDrawSink sink,
+        VerticesDrawSink? vertices,
         Handle? dashedLinetype
       })> boot(WidgetTester tester) async {
     final doc = harnessDocument(kEntities);
@@ -176,13 +188,15 @@ void main() {
     late SpatialIndex index;
     late DraftPainter painter;
     late CanvasDrawSink sink;
+    VerticesDrawSink? vertices;
     await tester.pumpWidget(HarnessApp(
       document: doc,
-      onReady: (c, i, p, s) {
+      onReady: (c, i, p, s, v) {
         camera = c;
         index = i;
         painter = p;
         sink = s;
+        vertices = v;
       },
     ));
     // Zoom to the working set. Fitting the whole drawing measures a frame
@@ -223,6 +237,7 @@ void main() {
       index: index,
       painter: painter,
       sink: sink,
+      vertices: vertices,
       dashedLinetype: dashedLinetypes.singleOrNull?.handle
     );
   }
@@ -277,6 +292,7 @@ void main() {
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
+    printVerticesCounters(app.vertices);
     printTextCounters(app.painter, app.sink,
         layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
   });
@@ -348,6 +364,7 @@ void main() {
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
+    printVerticesCounters(app.vertices);
     printTextCounters(app.painter, app.sink,
         layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
   });
@@ -404,6 +421,7 @@ void main() {
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
+    printVerticesCounters(app.vertices);
     printTextCounters(app.painter, app.sink,
         layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
   });
