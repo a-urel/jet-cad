@@ -66,6 +66,13 @@ Widget _at(DraftDocument doc, double halfSpan) {
           width: kGoldenViewport.width,
           height: kGoldenViewport.height,
           child: DraftCanvas(
+            // The canvas backend explicitly: these 14 PNGs are the canvas
+            // backend's suite, and Plan 3d Task 10 renders the same fixtures
+            // through the vertices backend into a second set. Left at the
+            // platform default they would follow whatever
+            // `defaultRenderBackend()` returns, which is not what a golden
+            // named for one renderer should do.
+            backend: RenderBackend.canvas,
             document: doc,
             index: index,
             resolver: DocumentStyleResolver(doc),

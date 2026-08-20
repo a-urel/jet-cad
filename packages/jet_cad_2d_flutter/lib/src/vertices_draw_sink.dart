@@ -60,15 +60,21 @@ import 'draw_sink.dart';
 /// - **No joins and no caps.** Every segment is an independent quad, so a
 ///   polyline's corners have a notch on the outside. Dash spans are two points
 ///   each and have no corners, which is where the measurement is aimed.
-/// - **Points, circles, arcs and text still go to [CanvasDrawSink].** They are
-///   drawn as they arrive, so they land *before* the flush — the one place
-///   draw order is still wrong. Dashed curves reach `arc`, which is why the
-///   measured call count does not fall as far as the segment count suggests.
+/// - **Text goes to [CanvasDrawSink], and the buffer flushes before it.**
+///   A paragraph is not triangles. Points, circles and arcs are batched;
+///   only text falls back, and flushing first is what keeps a stroke batched
+///   before a text op from drawing after it.
 /// - **Anti-aliasing comes from MSAA, not from a coverage shader.** The SDF
 ///   path this replaces anti-aliases analytically.
 /// - **`flutter_test` cannot render it.** The software Skia backend takes
 ///   minutes on a `drawVertices` that Impeller draws instantly, so the golden
 ///   suite is not available to this sink.
+/// - **This sink is authoritative where it disagrees with [CanvasDrawSink].**
+///   Under a non-conformal residual the two draw different stroke widths, and
+///   this one is right: `CanvasDrawSink._widthFor` divides by
+///   `scaleMagnitude`, one scalar standing in for two axis scales. The full
+///   list of permitted divergences is in Plan 3d's design document; anything
+///   not on it is a defect.
 class VerticesDrawSink implements DrawSink {
   VerticesDrawSink({
     required this.pixelsPerPaperMm,

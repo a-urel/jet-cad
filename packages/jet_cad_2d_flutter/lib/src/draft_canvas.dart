@@ -8,6 +8,7 @@ import 'canvas_draw_sink.dart';
 import 'vertices_draw_sink.dart';
 import 'draft_painter.dart';
 import 'flutter_text_measurer.dart';
+import 'render_backend.dart';
 
 /// Logical pixels per millimetre at Flutter's nominal 96 dpi.
 ///
@@ -61,7 +62,7 @@ class DraftCanvas extends StatefulWidget {
     this.pixelsPerPaperMm = kLogicalPixelsPerMm,
     this.lineweightScale = 1.0,
     this.drawText = true,
-    this.useVertices = false,
+    this.backend,
   });
 
   final DraftDocument document;
@@ -87,15 +88,13 @@ class DraftCanvas extends StatefulWidget {
   /// have to rebuild the painter, and a rebuilt painter is a different frame.
   final bool drawText;
 
-  /// Routes the walk through [VerticesDrawSink] instead of [CanvasDrawSink].
+  /// Which sink draws the frame, or `null` for [defaultRenderBackend].
   ///
-  /// **Spike, measurement-only, inert at its default of `false`.** The vertices
-  /// sink batches stroked segments into one `drawVertices` per colour and does
-  /// not preserve draw order across the flush; see its class comment for the
-  /// full list of what it gives up. It is wired here rather than in a fork of
-  /// the widget so that a run against it differs from a run against
-  /// `CanvasDrawSink` in the sink and nothing else.
-  final bool useVertices;
+  /// A non-null value is honoured on **every** platform, including
+  /// `RenderBackend.vertices` on the web. It is not clamped: Plan 3d's Phase C
+  /// forces it to measure CanvasKit, and a parameter that silently ignored
+  /// what it was given would make that measurement report the wrong thing.
+  final RenderBackend? backend;
 
   @override
   State<DraftCanvas> createState() => DraftCanvasState();
@@ -106,11 +105,16 @@ class DraftCanvas extends StatefulWidget {
 class DraftCanvasState extends State<DraftCanvas> {
   late DraftPainter painter;
 
+  /// The backend this state actually built, resolved once in [_attach].
+  ///
+  /// Public so a rig reports what it measured rather than what it asked for.
+  late RenderBackend resolvedBackend;
+
   /// One sink for the life of the widget, its `Canvas` rebound per paint.
   late CanvasDrawSink sink;
 
-  /// Non-null only under `useVertices`. Wraps [sink], which keeps taking every
-  /// op the vertices sink does not batch.
+  /// Non-null only when [resolvedBackend] is [RenderBackend.vertices]. Wraps
+  /// [sink], which keeps taking every op the vertices sink does not batch.
   VerticesDrawSink? vertices;
 
   /// Outlives [sink]: a prop change [_attach] reacts to rebuilds the sink,
@@ -133,7 +137,8 @@ class DraftCanvasState extends State<DraftCanvas> {
         lineweightScale: widget.lineweightScale,
         measurer: _measurer,
         textStyleOf: widget.document.textStyleOf);
-    vertices = widget.useVertices
+    resolvedBackend = widget.backend ?? defaultRenderBackend();
+    vertices = resolvedBackend == RenderBackend.vertices
         ? VerticesDrawSink(
             pixelsPerPaperMm: widget.pixelsPerPaperMm,
             lineweightScale: widget.lineweightScale,
@@ -160,7 +165,8 @@ class DraftCanvasState extends State<DraftCanvas> {
         widget.resolver != oldWidget.resolver ||
         widget.pixelsPerPaperMm != oldWidget.pixelsPerPaperMm ||
         widget.lineweightScale != oldWidget.lineweightScale ||
-        widget.drawText != oldWidget.drawText) {
+        widget.drawText != oldWidget.drawText ||
+        widget.backend != oldWidget.backend) {
       _changes.dispose();
       _attach();
     }
@@ -211,7 +217,8 @@ class _DraftCustomPainter extends CustomPainter {
   final CameraController camera;
   final CanvasDrawSink sink;
 
-  /// Spike, null in every default build. See `DraftCanvas.useVertices`.
+  /// Null unless the resolved backend is [RenderBackend.vertices].
+  /// See [DraftCanvas.backend].
   final VerticesDrawSink? vertices;
 
   @override

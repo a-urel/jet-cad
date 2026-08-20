@@ -295,6 +295,10 @@ Widget _framed(DraftDocument doc) => MaterialApp(
             width: kGoldenViewport.width,
             height: kGoldenViewport.height,
             child: DraftCanvas(
+              // See the note in `dash_ladder_golden_test.dart`: these are the
+              // canvas backend's goldens, pinned rather than left to the
+              // platform default.
+              backend: RenderBackend.canvas,
               document: doc,
               index: SpatialIndex(doc),
               resolver: DocumentStyleResolver(doc),
