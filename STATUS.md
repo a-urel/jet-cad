@@ -1,25 +1,29 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-20
-**Verified against:** `main` @ `761d454`, `plan-3c` worktree @ `7b285f0`, working tree clean.
+**Verified against:** `main` @ `3f92163`, `plan-3c` worktree @ `e5aa3c4`, working tree clean.
 Every count below was produced by running the suite, not by reading a report.
 
 ---
 
 ## TL;DR — where you left off
 
-Plan 3c (**text**) is 12 tasks into 15, running on the `plan-3c` worktree.
-Tasks 0–11 are committed. **Everything is green and the tree is clean.**
+Plan 3c (**text**) is 13 tasks into 15, running on the `plan-3c` worktree.
+Tasks 0–12 are committed. **Everything is green and the tree is clean.**
 
 | Suite | State |
 |---|---|
 | `packages/jet_cad_2d` — engine | **717 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **148 tests, all pass** (1 pre-existing skip), analyze/format clean |
+| `packages/jet_cad_2d_flutter` — widgets | **152 tests, all pass** (1 pre-existing skip), analyze/format clean |
 | `flutter test --tags golden` | **13 pass**; no pre-existing PNG regenerated |
+| `apps/dev_harness_2d` | analyze/format clean; R2 run on macOS in profile mode |
 
-**Next up is Task 12 — rigs, counters, and the number the gate depends on.** It
-carries a measurement that can invalidate a gate row; see
-[Resume here](#resume-here).
+**The gate's feasibility number is taken and the news is good:** 18 distinct
+paragraph-cache keys at the working-set camera against a limit of 512, and
+**zero new layouts in the steady-state frame on real hardware**.
+`kParagraphCacheLimit` does not move.
+
+**Next up is Task 13 — the mutation log.** See [Resume here](#resume-here).
 
 ---
 
@@ -75,7 +79,7 @@ docs/superpowers/
 | Location | Branch | State |
 |---|---|---|
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, `a7008a6`, Plans 1/2/3a/3b merged |
-| `.claude/worktrees/plan-3c` | `plan-3c` | 15 commits ahead, **clean** |
+| `.claude/worktrees/plan-3c` | `plan-3c` | 16 commits ahead, **clean** |
 
 `main` is ahead of `origin/main`. **Nothing has been pushed.** Do not push
 unless explicitly asked.
@@ -181,75 +185,75 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-Task 11 is committed at `7b285f0`. **Task 12 — rigs, counters, and the number
-the gate depends on** is next.
+Task 12 is committed at `e5aa3c4`. **Task 13 — the mutation log** is next.
 
-### What Task 12 must do
+### What Task 12 measured, and what it means for the gate
 
-1. Add `textRigCorpus(int)` beside `rigCorpus` in `test/rig/rig_support.dart` —
-   a **separate function, not a flag**: `labelFraction` comes out of the root
-   budget, so switching it on inside `rigCorpus` would move the line, polyline,
-   circle and arc counts and retire Plan 3b's dash and canvas-call baselines as
-   a side effect. The plan gives the exact parameter list.
-2. **Measure the number the whole gate rests on.** Walk the working-set camera
-   once over `textRigCorpus(50000)` and print the count of distinct
-   `(string, style, argb)` keys drawn, then the same at the whole-drawing
-   camera.
-3. Extend every rig's printed lines with layout count, eviction count, live
-   paragraphs and text ops per frame, at both cameras, and the same rows with
-   text drawing off — so the on/off delta is one flag apart on one corpus.
+| camera | distinct `(string, style, argb)` keys | vs limit 512 | steady-state frame |
+|---|---|---|---|
+| working set | **18** | under, by 28x | newLayouts 0, newEvictions 0 |
+| whole drawing | **4140** | 8x over | newLayouts 4140, newEvictions 4140 |
 
-**If the working-set count exceeds `kParagraphCacheLimit` (512), the
-zero-new-layouts gate row cannot pass by construction. Do not relax the row.**
-Record the count, then either raise the limit to the measured count rounded up
-or lower `attributedInstanceFraction`, and write down which and why. Ruling 4
-allows the limit to move exactly once, here, and only with the number recorded
-beside it.
+**`kParagraphCacheLimit` stays at 512 and Ruling 4's one permitted raise is
+unspent.** The row is specified against the working-set camera; the
+whole-drawing camera is the one the rig itself calls "not a frame anyone
+renders". Confirmed on real hardware: `flutter drive --profile -d macos` with
+`TEXT=true` reports **newLayouts 0** in the forced steady-state frame.
 
-### Task 12 inherits one debt
+The row is also **weak** — 18 of 512 would stay green at a limit of 32. The rig
+prints a key-pressure ladder so Task 14 can state the margin rather than assert
+it: the limit starts binding between **12000 and 24000 world units wide**,
+about five times the working-set camera.
 
-The per-text-leaf allocation gate
-(`packages/jet_cad_2d/test/invariants/text_paint_allocation_test.dart`) lives
-in the engine suite because `jet_cad_2d_flutter` has no `vm_service`
-dependency, so it measures the engine helpers the painter calls, in the
-painter's order, rather than the painter itself. A painter that went back
-through the allocating wrappers would not turn it red. Closing it means moving
-`AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
+### What Task 13 must do
 
-### What Task 11 left behind
+Run the spec's sixteen mutants one at a time: edit the named expression, run
+the narrowest suite that should catch it, record which test failed and how,
+then restore the file and confirm `git status --short` is empty before the
+next. Write `docs/superpowers/notes/plan-3c-mutation-log.md` in the same shape
+as `plan-3b-mutation-log.md` — mutant, expression, suite, killing test, and a
+"Reproducing" section naming the exact commands.
 
-Five rungs in `test/golden/text_ladder_golden_test.dart` plus `text_ladder_1..5.png`.
-Three things about them a later task needs to know:
+**Do not `git checkout` to revert a mutation.** Copy the file aside first and
+restore from the copy in a `finally` block; Task 10 lost a full task's
+uncommitted work to `git checkout`.
 
-- **They load a vendored font.** `test/golden/fonts/Roboto-Regular.ttf`, with
-  its licence and a README recording provenance and SHA-256. Without it
-  `flutter_test` renders Ahem — one solid box per glyph — and rung 5 asserts
-  nothing, because a mirrored box is a box. Replacing the font means
-  regenerating all five PNGs.
-- **Rung 1 is the colour golden Task 13 asks for.** It draws *one* string four
-  times in four colours. Four different strings would be four distinct cache
-  keys with or without `argb`, and the mutation Task 13 names — dropping the
-  colour from `_CacheKey` — left the four-label version green. It turns rung 1
-  red now.
-- **Rung 4's expectation is the opposite of what the plan says.** See
-  Ruling 34 below.
+Three of the sixteen deserve care, and two of them are already covered:
 
-Seven mutants were run and reverted, all seven killed. For the four in
-`text_geometry.dart`, `flutter test --exclude-tags golden` stays **green** —
-these five PNGs are the only thing inside the widget package tying the
-engine's composition order to the pixels it produces.
+- **Lay the paragraph out at the effective em size instead of nominal.** Renders
+  correctly. Only the zero-layout row and the cache-entry count can see it — if
+  nothing fails, add the assertion that makes it fail before moving on. **Not
+  yet covered.**
+- **Allocate a fresh `TextMetrics` on a cache hit** — `query_allocation_test`.
+- **Drop `argb` from the cache key** — covered twice now, by
+  `flutter_text_measurer_test` and visibly by golden rung 1.
 
-### Then Tasks 13–14
+Tasks 9–12 already ran 33 mutants of their own; the ledger's tables are the
+record and Task 13's log should cite them rather than re-run them.
 
-`13` mutation log → `14` exit gate + results note, then
-`superpowers:finishing-a-development-branch`.
+### Then Task 14
 
-Task 13's sixteen mutants are the spec's table. Three of them the plan singles
-out as the ones a green suite most plausibly misses: laying the paragraph out
-at the *effective* em size instead of nominal (renders correctly; only the
-zero-layout row and the cache-entry count can see it), allocating a fresh
-`TextMetrics` on a cache hit, and dropping `argb` from the cache key. The last
-one is already covered both ways — `flutter_text_measurer_test` and rung 1.
+Exit gate + results note, then `superpowers:finishing-a-development-branch`.
+
+**Task 14 inherits three debts.**
+
+1. **Nothing outside the tests wires a real measurer into a document**
+   (Ruling 42). `DraftDocument.empty` defaults to `InsertionPointMeasurer`, the
+   zero metrics, so `composeTransform`'s `height / capHeight` divides into zero
+   — singular text transform, glyph boxes collapsed to points. An application
+   built the ordinary way draws no text **and reports no error**. This is a real
+   defect with no owner yet.
+2. **There are two paragraph caches, not one** (Ruling 41). The painter takes
+   metrics from `document.textMeasurer`; the sink lays paragraphs out through
+   `DraftCanvas`'s own. Text costs up to two layouts per leaf, and the
+   query-only row pays for text even though `NullDrawSink` lays nothing out —
+   measured at **+97 ms** at the whole-drawing camera.
+3. **The allocation gate measures the engine helpers, not the painter.**
+   `text_paint_allocation_test.dart` lives in the engine suite because
+   `jet_cad_2d_flutter` has no `vm_service` dependency, so it calls the engine
+   helpers in the painter's order rather than calling the painter. A painter
+   that went back through the allocating wrappers would not turn it red.
+   Closing it means moving `AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
 
 ---
 
