@@ -13,12 +13,15 @@ library;
 // and neither becomes more or less correct for being inside a widget.
 
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+
+import '../support/triangle_rasterizer.dart';
 
 const Size kGoldenViewport = Size(400, 300);
 
@@ -176,6 +179,38 @@ ViewportTransform cameraAt(double zoom) => ViewportTransform(
           .multiply(Transform2.scale(zoom, -zoom)),
     );
 
+/// Renders [doc] through `VerticesDrawSink` and the coverage rasterizer,
+/// driven directly the same way [canvasOver] drives `CanvasDrawSink` —
+/// `DraftCanvas` does not own either of this file's fixtures.
+///
+/// `devicePixelRatio` is fixed at 1.0 because there is no widget's
+/// `MediaQuery` here to read it from, and 1.0 is what the canvas half of this
+/// suite is already pinned at: both goldens are exactly `kGoldenViewport` in
+/// size, and it is what makes the class comment's "0.5 mm lands on 4 device
+/// pixels" true of this rasterization too.
+Future<ui.Image> _renderVertices(WidgetTester tester, DraftDocument doc,
+    SpatialIndex index, ViewportTransform camera) async {
+  final recorder = ui.PictureRecorder();
+  final rasterizer = TriangleRasterizer(
+      kGoldenViewport.width.round(), kGoldenViewport.height.round());
+  final sink = VerticesDrawSink(
+    pixelsPerPaperMm: kPixelsPerPaperMm,
+    canvas: Canvas(recorder),
+  )..observer = rasterizer.observe;
+  DraftPainter(
+          document: doc, index: index, resolver: DocumentStyleResolver(doc))
+      .paint(sink, camera, kGoldenViewport);
+  sink.flush();
+  recorder.endRecording().dispose();
+  // `rasterizer.toImage()` completes through `decodeImageFromPixels`, a real
+  // engine callback. Confirmed by a minimal repro: once this test binding has
+  // actually pumped a widget (as `canvasOver` already has by the time this is
+  // called), the fake-async test zone never delivers that callback and the
+  // await hangs forever; before any pump it resolves immediately. `runAsync`
+  // steps outside the fake zone for the one call that needs it.
+  return (await tester.runAsync(rasterizer.toImage))!;
+}
+
 void main() {
   testWidgets('paper-space stroke width at three zoom levels', (tester) async {
     // "Paper space" means the width is a property of the paper, not of the
@@ -191,9 +226,14 @@ void main() {
       final doc = strokeWidthFixture();
       final index = SpatialIndex(doc);
       addTearDown(index.dispose);
+      final camera = cameraAt(zoom);
 
-      await tester.pumpWidget(canvasOver(doc, index, cameraAt(zoom)));
+      await tester.pumpWidget(canvasOver(doc, index, camera));
       await expectLater(find.byKey(kCanvasKey), matchesGoldenFile(name));
+
+      final image = await _renderVertices(tester, doc, index, camera);
+      addTearDown(image.dispose);
+      await expectLater(image, matchesGoldenFile('vertices/$name'));
     }
   });
 
@@ -205,11 +245,16 @@ void main() {
     final doc = anisotropicFixture(scaleY: 8.0);
     final index = SpatialIndex(doc);
     addTearDown(index.dispose);
+    final camera = ViewportTransform.fit(doc.extents, kGoldenViewport);
 
-    await tester.pumpWidget(canvasOver(
-        doc, index, ViewportTransform.fit(doc.extents, kGoldenViewport)));
+    await tester.pumpWidget(canvasOver(doc, index, camera));
     await expectLater(
         find.byKey(kCanvasKey), matchesGoldenFile('anisotropy_bypass.png'));
+
+    final image = await _renderVertices(tester, doc, index, camera);
+    addTearDown(image.dispose);
+    await expectLater(
+        image, matchesGoldenFile('vertices/anisotropy_bypass.png'));
   });
 
   testWidgets('the anisotropic instance really took the bypass',

@@ -133,8 +133,18 @@ void main() {
     // allocations on the frame path, which is the one thing this render path
     // is built not to do. The `Canvas` is what changes per frame, so it is
     // what gets rebound.
-    await tester.pumpWidget(
-        wrap(DraftCanvas(document: doc, index: index, camera: camera)));
+    // Pinned to the canvas backend explicitly: this is a claim about
+    // `CanvasDrawSink`'s identity and lifetime, and under the vertices
+    // backend `CanvasDrawSink` is the fallback that takes only text —
+    // `state.sink.canvas` would still read back normally there because
+    // `_DraftCustomPainter.paint` binds it before branching on the backend,
+    // which would make this test pass while asserting the wrong thing about
+    // the fallback rather than about the sink that actually paints.
+    await tester.pumpWidget(wrap(DraftCanvas(
+        document: doc,
+        index: index,
+        camera: camera,
+        backend: RenderBackend.canvas)));
     final state = tester.state<DraftCanvasState>(find.byType(DraftCanvas));
     final first = state.sink;
 

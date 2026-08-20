@@ -27,6 +27,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
 
+import '../support/triangle_rasterizer.dart';
+
 const Size kGoldenViewport = Size(400, 300);
 const Key kCanvasKey = Key('golden-canvas');
 
@@ -310,6 +312,85 @@ Widget _framed(DraftDocument doc) => MaterialApp(
       ),
     );
 
+/// Renders one rung on one backend and compares it to that backend's PNG.
+///
+/// The canvas backend goes through [_framed] unchanged, so these five PNGs
+/// stay pixel-identical to what they were before this backend loop existed.
+/// The vertices backend cannot go through `matchesGoldenFile` on the widget:
+/// software Skia does not finish a `drawVertices` of this size, so its
+/// triangles are scan-converted by `TriangleRasterizer` and the *image* is
+/// matched instead.
+///
+/// The vertices golden of this ladder carries the rung's polyline and none of
+/// its glyphs: text goes to `CanvasDrawSink` as a paragraph and never reaches
+/// the triangle buffer. What it pins is that the strokes around the text are
+/// right and that the flush before each text op happened; the glyphs are
+/// pinned by the canvas golden beside it.
+Future<void> _rung(WidgetTester tester, DraftDocument doc, String name,
+    RenderBackend backend) async {
+  if (backend == RenderBackend.canvas) {
+    await tester.pumpWidget(_framed(doc));
+    await expectLater(
+        find.byKey(kCanvasKey), matchesGoldenFile('text_ladder_$name.png'));
+    return;
+  }
+
+  final index = SpatialIndex(doc);
+  addTearDown(index.dispose);
+  final camera =
+      CameraController(ViewportTransform.fit(kWorld, kGoldenViewport));
+  addTearDown(camera.dispose);
+  final rasterizer = TriangleRasterizer(
+      kGoldenViewport.width.round(), kGoldenViewport.height.round());
+
+  final key = GlobalKey<DraftCanvasState>();
+  await tester.pumpWidget(MaterialApp(
+    home: Scaffold(
+      backgroundColor: Colors.white,
+      body: Center(
+        child: SizedBox(
+          width: kGoldenViewport.width,
+          height: kGoldenViewport.height,
+          child: DraftCanvas(
+              key: key,
+              document: doc,
+              index: index,
+              resolver: DocumentStyleResolver(doc),
+              camera: camera,
+              backend: backend),
+        ),
+      ),
+    ),
+  ));
+  // Attached after the first pump, and the widget pumped again: the state —
+  // and the vertices sink it owns — does not exist until the first build.
+  key.currentState!.vertices?.observer = rasterizer.observe;
+  // The first pump already painted once — the picture this golden pins —
+  // but without an observer attached. Nothing about the document or the
+  // camera changes for the second pump, `_DraftCustomPainter.shouldRepaint`
+  // is unconditionally false, and the painter's own `repaint` listenable
+  // never fires on its own, so a bare `tester.pump()` here finds nothing
+  // dirty and skips the repaint entirely — confirmed by a probe that pumped
+  // this exact sequence and read the observer back having seen zero
+  // triangles. `markNeedsPaint` forces the same picture to paint again, this
+  // time through the now-attached observer.
+  tester
+      .renderObject<RenderObject>(find.descendant(
+          of: find.byType(DraftCanvas), matching: find.byType(CustomPaint)))
+      .markNeedsPaint();
+  await tester.pump();
+
+  // `rasterizer.toImage()` completes through `decodeImageFromPixels`, a real
+  // engine callback. Confirmed by a minimal repro: once this test binding has
+  // actually pumped a widget, the fake-async test zone never delivers that
+  // callback and the await hangs forever; before any pump it resolves
+  // immediately. `runAsync` steps outside the fake zone for the one call that
+  // needs it.
+  final image = (await tester.runAsync(rasterizer.toImage))!;
+  addTearDown(image.dispose);
+  await expectLater(image, matchesGoldenFile('vertices/text_ladder_$name.png'));
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(_loadRoboto);
@@ -321,10 +402,10 @@ void main() {
     ('4', _rung4),
     ('5', _rung5),
   ]) {
-    testWidgets('text ladder rung $name', (tester) async {
-      await tester.pumpWidget(_framed(fixture()));
-      await expectLater(
-          find.byKey(kCanvasKey), matchesGoldenFile('text_ladder_$name.png'));
-    });
+    for (final backend in RenderBackend.values) {
+      testWidgets('text ladder rung $name ($backend)', (tester) async {
+        await _rung(tester, fixture(), name, backend);
+      });
+    }
   }
 }

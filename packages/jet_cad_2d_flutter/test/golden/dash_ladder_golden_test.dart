@@ -12,6 +12,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
 
+import '../support/triangle_rasterizer.dart';
+
 const Size kGoldenViewport = Size(400, 300);
 const Key kCanvasKey = Key('golden-canvas');
 
@@ -87,6 +89,80 @@ Widget _at(DraftDocument doc, double halfSpan) {
   );
 }
 
+/// Renders one rung on one backend and compares it to that backend's PNG.
+///
+/// The canvas backend goes through [_at] unchanged, so these five PNGs stay
+/// pixel-identical to what they were before this backend loop existed. The
+/// vertices backend cannot go through `matchesGoldenFile` on the widget:
+/// software Skia does not finish a `drawVertices` of this size, so its
+/// triangles are scan-converted by `TriangleRasterizer` and the *image* is
+/// matched instead.
+Future<void> _rung(WidgetTester tester, DraftDocument doc, double halfSpan,
+    String name, RenderBackend backend) async {
+  if (backend == RenderBackend.canvas) {
+    await tester.pumpWidget(_at(doc, halfSpan));
+    await expectLater(
+        find.byKey(kCanvasKey), matchesGoldenFile('dash_ladder_$name.png'));
+    return;
+  }
+
+  final index = SpatialIndex(doc);
+  addTearDown(index.dispose);
+  final camera = CameraController(ViewportTransform.fit(
+      Aabb2(Vector2(-halfSpan, -halfSpan), Vector2(halfSpan, halfSpan)),
+      kGoldenViewport));
+  addTearDown(camera.dispose);
+  final rasterizer = TriangleRasterizer(
+      kGoldenViewport.width.round(), kGoldenViewport.height.round());
+
+  final key = GlobalKey<DraftCanvasState>();
+  await tester.pumpWidget(MaterialApp(
+    home: Scaffold(
+      backgroundColor: Colors.white,
+      body: Center(
+        child: SizedBox(
+          width: kGoldenViewport.width,
+          height: kGoldenViewport.height,
+          child: DraftCanvas(
+              key: key,
+              document: doc,
+              index: index,
+              resolver: DocumentStyleResolver(doc),
+              camera: camera,
+              backend: backend),
+        ),
+      ),
+    ),
+  ));
+  // Attached after the first pump, and the widget pumped again: the state —
+  // and the vertices sink it owns — does not exist until the first build.
+  key.currentState!.vertices?.observer = rasterizer.observe;
+  // The first pump already painted once — the picture this golden pins —
+  // but without an observer attached. Nothing about the document or the
+  // camera changes for the second pump, `_DraftCustomPainter.shouldRepaint`
+  // is unconditionally false, and the painter's own `repaint` listenable
+  // never fires on its own, so a bare `tester.pump()` here finds nothing
+  // dirty and skips the repaint entirely — confirmed by a probe that pumped
+  // this exact sequence and read the observer back having seen zero
+  // triangles. `markNeedsPaint` forces the same picture to paint again, this
+  // time through the now-attached observer.
+  tester
+      .renderObject<RenderObject>(find.descendant(
+          of: find.byType(DraftCanvas), matching: find.byType(CustomPaint)))
+      .markNeedsPaint();
+  await tester.pump();
+
+  // `rasterizer.toImage()` completes through `decodeImageFromPixels`, a real
+  // engine callback. Confirmed by a minimal repro: once this test binding has
+  // actually pumped a widget, the fake-async test zone never delivers that
+  // callback and the await hangs forever; before any pump it resolves
+  // immediately. `runAsync` steps outside the fake zone for the one call that
+  // needs it.
+  final image = (await tester.runAsync(rasterizer.toImage))!;
+  addTearDown(image.dispose);
+  await expectLater(image, matchesGoldenFile('vertices/dash_ladder_$name.png'));
+}
+
 void main() {
   for (final (name, halfSpan) in const [
     ('1', 60.0),
@@ -95,10 +171,10 @@ void main() {
     ('4', 1200.0),
     ('5', 4000.0),
   ]) {
-    testWidgets('dash ladder rung $name', (tester) async {
-      await tester.pumpWidget(_at(dashLadderFixture(), halfSpan));
-      await expectLater(
-          find.byKey(kCanvasKey), matchesGoldenFile('dash_ladder_$name.png'));
-    });
+    for (final backend in RenderBackend.values) {
+      testWidgets('dash ladder rung $name ($backend)', (tester) async {
+        await _rung(tester, dashLadderFixture(), halfSpan, name, backend);
+      });
+    }
   }
 }
