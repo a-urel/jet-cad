@@ -1,15 +1,16 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-20
-**Verified against:** `main` @ `ac34b51`, `plan-3c` worktree @ `bcef175`, working tree clean.
+**Verified against:** `main` @ `51d2d01`, `plan-3c` worktree @ `143b7b9`, working tree clean.
 Every count below was produced by running the suite, not by reading a report.
 
 ---
 
 ## TL;DR — where you left off
 
-Plan 3c (**text**) is 14 tasks into 15, running on the `plan-3c` worktree.
-Tasks 0–13 are committed. **Everything is green and the tree is clean.**
+Plan 3c (**text**) is **complete**: all 15 tasks committed on the `plan-3c`
+worktree, **and the exit gate passes**. Everything is green and the tree is
+clean. What is left is the branch close — see [Resume here](#resume-here).
 
 | Suite | State |
 |---|---|
@@ -18,13 +19,18 @@ Tasks 0–13 are committed. **Everything is green and the tree is clean.**
 | `flutter test --tags golden` | **13 pass**; no pre-existing PNG regenerated |
 | `apps/dev_harness_2d` | analyze/format clean; **R2/R4a/R4b run on macOS in profile mode** |
 
-**The gate's feasibility number is taken and the news is good:** 18 distinct
-paragraph-cache keys at the working-set camera against a limit of 512, and
-**zero new layouts in the steady-state frame on real hardware**.
-`kParagraphCacheLimit` does not move, and all three device rigs agree.
+**Exit gate: PASS.** Every check ran and all eight failable criteria are met —
+zero new paragraph layouts and zero evictions in the steady-state frame at both
+entity counts and on real hardware, `skippedTextCount` 0, peak live paragraphs
+exactly at the declared limit, and 53 mutants accounted for. The one benchmark
+failure is Plan 2's carried `snap at dirty threshold`.
 
-**Next up is Task 14 — the exit gate and the results note**, the last one. See
-[Resume here](#resume-here).
+Results note:
+[docs/superpowers/notes/2026-08-20-plan-3c-results.md](docs/superpowers/notes/2026-08-20-plan-3c-results.md).
+**macOS Low Power Mode was on for the whole session** — every timing in it is
+contaminated; no failable criterion is a timing.
+
+**Next: close the branch** (`superpowers:finishing-a-development-branch`).
 
 ---
 
@@ -80,7 +86,7 @@ docs/superpowers/
 | Location | Branch | State |
 |---|---|---|
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, `a7008a6`, Plans 1/2/3a/3b merged |
-| `.claude/worktrees/plan-3c` | `plan-3c` | 17 commits ahead, **clean** |
+| `.claude/worktrees/plan-3c` | `plan-3c` | 18 commits ahead, **clean**, ready to integrate |
 
 `main` is ahead of `origin/main`. **Nothing has been pushed.** Do not push
 unless explicitly asked.
@@ -186,59 +192,65 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-Task 13 is committed at `bcef175`. **Task 14 — the exit gate and the results
-note** is the last one, then
-`superpowers:finishing-a-development-branch`.
+**Plan 3c is done and the exit gate passes.** Task 14 is committed at
+`143b7b9`; the worktree is 18 commits ahead of `main` and clean.
 
-### What Task 14 must do
+The one thing left is the branch close —
+`superpowers:finishing-a-development-branch`: verify the suite, detect the
+environment, present the integration options, act on the choice.
+**`main` is ahead of `origin/main` and nothing has been pushed. Do not push
+unless asked.**
 
-Run every row of [the exit gate](#plan-3c-exit-gate-task-14) below and write
-`docs/superpowers/notes/2026-08-2x-plan-3c-results.md` in the shape of
-`2026-08-11-plan-3b-results.md`. **The note must state whether macOS Low Power
-Mode was on** — Plan 3b's whole `flutter drive` table is contaminated because it
-was, and nobody recorded it until afterwards.
+### The exit gate, as measured
 
-**If a failable row misses: record it and stop.** Plan 3b's Task 4 stop clause
-is the precedent — a row that fires is a result, not a thing to tune until it
-complies.
-
-Numbers already taken, so the note does not have to re-derive them:
-
-| Row | Reading | Where |
+| Criterion | Reading | |
 |---|---|---|
-| repeat frame at the working-set camera | **0** new layouts | R1 rig, and R2/R4a/R4b on macOS |
-| evictions per repeat frame | **0** | same |
-| peak live paragraphs | 512 = the declared limit | same |
-| `skippedTextCount` on `textRigCorpus` | **0** | R1 rig |
-| distinct cache keys, working set | **18** of 512 | R1 rig |
-| mutation log | 53 accounted for, 52 killed, 1 not applicable | `plan-3c-mutation-log.md` |
+| repeat frame, working-set camera | **0** new layouts at 50k and 500k, and 0 on device in R2/R4a/R4b | PASS |
+| evictions per repeat frame | **0** at both sizes | PASS |
+| peak live paragraphs | **512** = `kParagraphCacheLimit` | PASS |
+| `skippedTextCount` on `textRigCorpus` | **0**, both sizes, both cameras | PASS |
+| differential + non-vacuity, text on | `text_paint_test` 9 pass | PASS |
+| reference-query differential, text picking | engine `differential_test` 72 pass | PASS |
+| overlay-equals-rebuild, edited text | `text_overlay_test` 4 pass | PASS |
+| mutation log | 53 accounted, 52 killed, 1 not applicable | PASS |
 
-### Task 14 inherits three debts, and must decide each one on the record
+The only benchmark failure is `snap at dirty threshold`, p95 **1.0800 ms**
+against `< 1.0 ms` — **carried from Plan 2**, every other gated row passes.
 
-1. **Nothing outside the tests wires a real measurer into a document**
-   (Ruling 42). `DraftDocument.empty` defaults to `InsertionPointMeasurer`, the
-   zero metrics, so `composeTransform`'s `height / capHeight` divides into zero
-   — singular text transform, glyph boxes collapsed to points. An application
-   built the ordinary way draws no text **and reports no error**. Task 13's S21
-   added the second piece of evidence: the extents path's dependence on that
-   field was itself untested until this task.
-2. **There are two paragraph caches, not one** (Ruling 41). The painter takes
-   metrics from `document.textMeasurer`; the sink lays paragraphs out through
-   `DraftCanvas`'s own. Text costs up to two layouts per leaf, and the
-   query-only row pays for text even though `NullDrawSink` lays nothing out —
-   measured at **+97 ms** at the whole-drawing camera.
+### What the next plan inherits
+
+Six items, listed in the results note's own table. The first is the one that
+blocks shipping:
+
+1. **Nothing outside the tests wires a real measurer into a document.**
+   `DraftDocument.empty` defaults to `InsertionPointMeasurer`, the zero
+   metrics, so `height / capHeight` divides into zero — singular text
+   transform — and `entityBounds` collapses every glyph box to a point. An
+   application built the ordinary way draws no text **and reports no error**.
+   Out of 3c's scope (the plan specifies the seam, not who plugs it in), and it
+   must be settled before text ships to an application.
+2. **Two paragraph caches, not one.** The painter takes metrics from
+   `document.textMeasurer`, the sink lays out through `DraftCanvas`'s own. A
+   text leaf costs up to two layouts, and the query path pays for text even
+   into a `NullDrawSink` — **+97 ms** at 50k, **+105 ms** at 500k, whole
+   drawing.
 3. **The allocation gate measures the engine helpers, not the painter.**
-   `text_paint_allocation_test.dart` lives in the engine suite because
-   `jet_cad_2d_flutter` has no `vm_service` dependency, so it calls the engine
-   helpers in the painter's order rather than calling the painter. A painter
-   that went back through the allocating wrappers would not turn it red.
-   Closing it means moving `AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
+   `text_paint_allocation_test.dart` is in the engine suite because
+   `jet_cad_2d_flutter` has no `vm_service`. Closing it means moving
+   `AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
+4. **Whole-drawing thrash → 3e's text LOD.** 4,140 layouts and 4,140 evictions
+   per frame, and it is 4,140 at *both* 50k and 500k because it is bounded by
+   string variety rather than entity count. A bigger cache holds one zoom level
+   of one corpus; not drawing text too small to read removes the cost.
+5. `snap at dirty threshold` — carried from Plan 2, unchanged.
+6. `DocumentTree._link` is quadratic in a parent's child count, which is why
+   the rigs cap `instanceCount` at 20,000 — recorded in Plan 3b, unchanged.
 
 ---
 
 ## Rulings that still bind the remaining tasks
 
-The ledger carries 51 numbered rulings. These are the ones that constrain work
+The ledger carries 56 numbered rulings. These are the ones that constrain work
 you have not done yet:
 
 **Ruling 4 — the cache limit is not a tuning knob.** `kParagraphCacheLimit` is
@@ -302,6 +314,21 @@ adding them), and **no text entity on a non-STANDARD style anywhere**, which is
 Ruling 13's exact hole reopening one plan later in two new call sites. Both are
 now covered by hand-built fixtures. Any new text call site must be checked
 against both before it is called done.
+
+**Ruling 53 — a gate that fails on correct code is worse than no gate.**
+`text_paint_allocation_test` failed one full-suite run in eleven while the code
+was right: the subject read 1.00, the *control* read 0.60, and because every
+assertion was a ratio a low control **tightened** the bound. Ruling 31's ratios
+answer the artefact only when all loops read low together. The repair is a
+plausibility guard on the controls — whose answers are fixed by construction, so
+retrying cannot mask a subject regression — and a failure message that names the
+meter rather than the subject. Any measurement gate here needs the same
+distinction between *a bad result* and *a bad read*.
+
+**Ruling 54 — report a cache hit rate split by source or not at all.** Blended,
+this corpus reads as a mediocre cache. Split, 9,928 label draws are served by
+140 entries (98.6%) while all 4,000 attributes miss every time. One number hid
+which half was the problem.
 
 **Ruling 49/50 — a named killer is not a killer until it has fired.** Four of
 the twenty spec mutants Task 13 ran survived the very suite the spec names for
