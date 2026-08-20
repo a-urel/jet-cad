@@ -1,13 +1,21 @@
-// What a steady-state frame allocates through each sink.
+// What a steady-state frame allocates through the vertices sink.
 //
 // `CLAUDE.md`: "The frame path allocates nothing in steady state."
 // `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` measures the
 // query path and stops there. This measures the paint path, which is the half
 // the vertices sink changes.
 //
-// The number is a *ratio against a control*, never an absolute: the VM's
-// allocation profiler has a documented low-read artefact, and a run that reads
-// low on both the control and the subject still reports the right ratio.
+// The property has an exact answer, so this needs no sampling profiler: once
+// a frame has drawn its widest view, `_reserve` never gives capacity back, so
+// [VerticesDrawSink.debugCapacityVertices] either holds still across a later
+// frame or it does not. A profiler would only add noise to a question that
+// reduces to reading a field. The warm-up runs the corpus three times so
+// growth is behind the buffer before anything is measured; the subject
+// frame's capacity is then read before and after and compared for equality.
+// What is left once the buffer stops growing is the residue the sink's class
+// comment states as a fact: three objects per flush -- the `Vertices` and the
+// two `sublistView` wrappers -- and nothing per entity, `3 * (textOps + 1)`
+// per frame.
 
 import 'dart:ui';
 
