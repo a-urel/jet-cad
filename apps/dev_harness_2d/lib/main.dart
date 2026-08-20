@@ -68,12 +68,23 @@ final double kDashedFraction = double.tryParse(
 const bool kTextCorpus = bool.fromEnvironment('TEXT');
 const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
 
-/// Routes the walk through `VerticesDrawSink` instead of `CanvasDrawSink`.
+/// Which sink the harness draws through: `canvas`, `vertices`, or unset for
+/// the platform's own choice.
 ///
-/// The spike for `2026-08-20-dash-leaf-separation.md`'s conclusion: the unit of
-/// render cost is the canvas call, so batch the calls. Inert at its default of
-/// `false`, which leaves the frame byte-identical to every earlier run.
-const bool kVertices = bool.fromEnvironment('VERTICES');
+/// **A `String.fromEnvironment`, and it stays one.** Plan 3c lost a full device
+/// run to `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as
+/// false while printing entirely plausible numbers; the only thing that caught
+/// it was a line printing `corpus=on/off`. A string has no such hazard, and an
+/// unrecognised value throws at startup rather than falling back to something
+/// that looks fine.
+final RenderBackend? kBackend =
+    switch (const String.fromEnvironment('BACKEND', defaultValue: '')) {
+  '' => null,
+  'canvas' => RenderBackend.canvas,
+  'vertices' => RenderBackend.vertices,
+  final other =>
+    throw StateError('BACKEND must be canvas, vertices or unset; got "$other"'),
+};
 
 /// The corpus the rigs measure on: the same shape as R1's, so the two sets of
 /// numbers describe one drawing.
@@ -115,14 +126,17 @@ class HarnessApp extends StatefulWidget {
   /// sink belong to `DraftCanvasState`, a descendant whose own `initState`
   /// has not run yet when this widget's has.
   ///
-  /// [vertices] is non-null only under [kVertices]; a rig reads its batch and
-  /// flush counters the same way it reads the painter's.
+  /// [vertices] is non-null only when [resolvedBackend] is
+  /// `RenderBackend.vertices`; a rig reads its batch and flush counters the
+  /// same way it reads the painter's. [resolvedBackend] is what
+  /// `DraftCanvasState` actually built, not what [kBackend] asked for.
   final void Function(
       CameraController camera,
       SpatialIndex index,
       DraftPainter painter,
       CanvasDrawSink sink,
-      VerticesDrawSink? vertices)? onReady;
+      VerticesDrawSink? vertices,
+      RenderBackend resolvedBackend)? onReady;
 
   @override
   State<HarnessApp> createState() => _HarnessAppState();
@@ -140,7 +154,7 @@ class _HarnessAppState extends State<HarnessApp> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final canvasState = _canvasKey.currentState!;
       widget.onReady?.call(camera, index, canvasState.painter, canvasState.sink,
-          canvasState.vertices);
+          canvasState.vertices, canvasState.resolvedBackend);
     });
   }
 
@@ -173,7 +187,7 @@ class _HarnessAppState extends State<HarnessApp> {
                 camera: camera,
                 lineweightScale: kLineweightScale,
                 drawText: kDrawText,
-                useVertices: kVertices),
+                backend: kBackend),
           ),
         ),
       );

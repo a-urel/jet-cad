@@ -145,17 +145,19 @@ Handle addLineAt(
 /// per-frame figures are the deltas the caller passes in. A running total
 /// printed beside two per-frame figures is the wrong comparison this file
 /// already refuses to publish once.
-/// The spike's counters, printed only when it is on so every earlier run's
-/// transcript stays comparable line for line.
-void printVerticesCounters(VerticesDrawSink? vertices) {
+/// The backend actually used, and the vertices counters when it was that one.
+///
+/// The resolved value and not the define: a run that asked for `vertices` and
+/// silently got `canvas` would otherwise report canvas numbers under a
+/// vertices heading, which is the shape of the mistake Plan 3c's `TEXT` define
+/// made.
+void printBackend(RenderBackend backend, VerticesDrawSink? vertices) {
   if (vertices == null) {
-    print('  vertices: off');
+    print('  backend=${backend.name}');
     return;
   }
-  // Frame-scoped counters, not per-flush ones: with text in the corpus a
-  // frame flushes once per text op, so `lastFlushSegmentCount` would report
-  // only the tail after the last of them.
-  print('  vertices: on segments=${vertices.frameSegmentCount} '
+  print('  backend=${backend.name} '
+      'triangles=${vertices.frameTriangleCount} '
       'drawVerticesCalls=${vertices.totalFlushCount}');
 }
 
@@ -184,6 +186,7 @@ void main() {
         DraftPainter painter,
         CanvasDrawSink sink,
         VerticesDrawSink? vertices,
+        RenderBackend resolvedBackend,
         Handle? dashedLinetype
       })> boot(WidgetTester tester) async {
     final doc = harnessDocument(kEntities);
@@ -192,14 +195,16 @@ void main() {
     late DraftPainter painter;
     late CanvasDrawSink sink;
     VerticesDrawSink? vertices;
+    late RenderBackend resolvedBackend;
     await tester.pumpWidget(HarnessApp(
       document: doc,
-      onReady: (c, i, p, s, v) {
+      onReady: (c, i, p, s, v, b) {
         camera = c;
         index = i;
         painter = p;
         sink = s;
         vertices = v;
+        resolvedBackend = b;
       },
     ));
     // Zoom to the working set. Fitting the whole drawing measures a frame
@@ -241,6 +246,7 @@ void main() {
       painter: painter,
       sink: sink,
       vertices: vertices,
+      resolvedBackend: resolvedBackend,
       dashedLinetype: dashedLinetypes.singleOrNull?.handle
     );
   }
@@ -296,7 +302,7 @@ void main() {
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
-    printVerticesCounters(app.vertices);
+    printBackend(app.resolvedBackend, app.vertices);
     printTextCounters(app.painter, app.sink,
         layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
   });
@@ -369,7 +375,7 @@ void main() {
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
-    printVerticesCounters(app.vertices);
+    printBackend(app.resolvedBackend, app.vertices);
     printTextCounters(app.painter, app.sink,
         layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
   });
@@ -427,7 +433,7 @@ void main() {
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
-    printVerticesCounters(app.vertices);
+    printBackend(app.resolvedBackend, app.vertices);
     printTextCounters(app.painter, app.sink,
         layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
   });
