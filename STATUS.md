@@ -259,7 +259,7 @@ Exit gate + results note, then `superpowers:finishing-a-development-branch`.
 
 ## Rulings that still bind the remaining tasks
 
-The ledger carries 38 numbered rulings. These are the ones that constrain work
+The ledger carries 47 numbered rulings. These are the ones that constrain work
 you have not done yet:
 
 **Ruling 4 — the cache limit is not a tuning knob.** `kParagraphCacheLimit` is
@@ -323,6 +323,20 @@ adding them), and **no text entity on a non-STANDARD style anywhere**, which is
 Ruling 13's exact hole reopening one plan later in two new call sites. Both are
 now covered by hand-built fixtures. Any new text call site must be checked
 against both before it is called done.
+
+**Ruling 39/40 — the cache limit is settled, with a measured margin.** 18 keys
+at the working-set camera against 512; the limit does not move and Ruling 4's
+one permitted raise is unspent. The margin is the key-pressure ladder, not a
+feeling: binding starts around 12000–24000 world units wide.
+
+**Ruling 44 — measurement machinery fails by printing a plausible number.**
+Three of Task 12's mutants survived a green suite, and none of the three would
+have errored: a dropped `DraftCanvas.drawText` forward prints a text-off row
+identical to text-on; a `resetCounters` that also cleared the cache prints one
+new layout per visible string and makes a working cache read as a failing gate;
+a `TextKeySink` without the colour axis under-reports the gate's own number.
+Any new counter, flag or rig sink needs a test that a *wrong reading* would
+fail, not just one that a crash would.
 
 **Ruling 34 — Plan 3c Task 11 Step 2's rung-4 criterion is backwards, and the
 engine wins.** The step says to check that the crossed cells are "wider at the
@@ -454,12 +468,16 @@ cd packages/jet_cad_2d_flutter
 flutter test
 flutter test --tags golden
 flutter test --exclude-tags golden          # any platform but the one they were made on
-flutter test --tags rig --run-skipped
+flutter test --tags rig --run-skipped   # R1/R3, and R4's text counters
+flutter test --tags rig --run-skipped test/rig/paint_microbench_test.dart \
+  --plain-name "text paint at 50000"    # the gate's feasibility number
 flutter analyze && dart format --output=none --set-exit-if-changed .
 
-# real-device frame timings
+# real-device frame timings  (TEXT/DRAW_TEXT must be "true"/"false", not 1/0)
 cd apps/dev_harness_2d
-flutter drive --profile -d macos
+flutter drive --profile -d macos --driver=test_driver/integration_test.dart \
+  --target=integration_test/frame_timing_test.dart \
+  --dart-define=TEXT=true --dart-define=DRAW_TEXT=false
 ```
 
 ---
@@ -488,6 +506,14 @@ flutter drive --profile -d macos
   golden asserting something about glyph *shape* — that a mirrored label reads
   backwards, most of all — needs `test/golden/fonts/Roboto-Regular.ttf` loaded
   through a `FontLoader`, or it asserts nothing while looking like it does.
+- **`bool.fromEnvironment` accepts only `"true"` and `"false"`.**
+  `--dart-define=TEXT=1` reads as **false**. One device rig run measured the
+  wrong document and printed numbers that looked entirely correct; only the
+  `corpus=on/off` line it now prints gave it away.
+- **`flutter drive` rewrites
+  `apps/dev_harness_2d/macos/Runner.xcodeproj/project.pbxproj`.** CocoaPods
+  bumps `MACOSX_DEPLOYMENT_TARGET` 10.15 → 12.0 in all three configurations.
+  Same class as the `analysis_options.yaml` trap: revert it, do not commit it.
 - **The `plan-3c` ledger is the only progress record** for that plan — TodoWrite
   was unavailable in the session that ran it. Keep appending to it.
 
