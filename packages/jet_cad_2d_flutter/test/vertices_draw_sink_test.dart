@@ -108,16 +108,24 @@ void main() {
     expect(open.debugPositions().length, 6 * 6);
   });
 
-  // The `closed: true` half of this test -- a closing segment and the seam
-  // join at its corner -- moves to Task 5, which implements `_endRun`'s
-  // closed branch. `_endRun` asserts `!closed` until then, so a caller that
-  // reached it here would fail loudly rather than silently drawing one
-  // segment short; no caller does, since `closed:` is `false` at every one of
-  // the painter's four call sites.
-  test(
-      'a closed polyline gets a closing segment and a seam join',
-      skip: 'Task 5: _endRun\'s closed branch',
-      () {});
+  test('a closed polyline hits the unimplemented closed branch, loudly', () {
+    // `polyline` forwards its own `closed:` to `_endRun`, so this is now
+    // reachable rather than dead code -- and `_endRun`'s closed branch, a
+    // closing segment and its seam join, is Task 5's. Until it lands, this
+    // pins the failure as an assertion rather than the silent one-segment-
+    // short drawing the spike used to produce: Task 5 changes this test's
+    // expectation to a real assertion about the closing geometry, not a
+    // silent gap it has to rediscover.
+    //
+    // No caller reaches this today: `closed:` is `false` at every one of the
+    // painter's four call sites.
+    final sink = _sink()..beginResidual(Transform2.identity());
+    expect(
+        () => sink.polyline(
+            Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, _style(),
+            closed: true),
+        throwsA(isA<AssertionError>()));
+  });
 
   test('colour rides on the vertices, so one buffer carries every colour', () {
     final sink = _sink()..beginResidual(Transform2.identity());

@@ -32,7 +32,11 @@ int _triangleCount(VerticesDrawSink s) => s.debugPositions().length ~/ 6;
 /// Whether any emitted triangle contains the point.
 bool _inked(VerticesDrawSink s, double px, double py) {
   final v = s.debugPositions();
-  for (var i = 0; i + 5 < v.length ~/ 2; i += 3) {
+  // `i + 2` is the last vertex the triangle starting at `i` needs, so the
+  // loop must keep visiting while that index is still valid -- `i + 5` here
+  // stopped one triangle short, leaving the very last triangle in the buffer
+  // invisible to every probe.
+  for (var i = 0; i + 2 < v.length ~/ 2; i += 3) {
     final ax = v[i * 2], ay = v[i * 2 + 1];
     final bx = v[i * 2 + 2], by = v[i * 2 + 3];
     final cx = v[i * 2 + 4], cy = v[i * 2 + 5];
@@ -84,10 +88,39 @@ void main() {
     expect(_inked(sink, 11.5, -1.5), isTrue, reason: 'the miter tip');
   });
 
+  test('a right (clockwise) turn is mitred out on its own outer side', () {
+    // P(0,0) -> V(10,0) -> Q(10,-10) turns right (`cross` is negative, the
+    // mirror of the left-turn fixture above), so the outer side is now
+    // *below* the path: V=(10,0), A=(10,2), the miter tip M=(12,2), B=(12,0).
+    // (11.5, 1.5) sits inside that notch and outside both segments' own
+    // quads (quad1 is x in [0,10] x [-2,2], quad2 is x in [8,12] x [-10,0]),
+    // so nothing but a correctly-sided join inks it.
+    //
+    // Every other fixture in this file turns left. A sign bug in the
+    // `cross > 0` branch selection would show up only on this side of the
+    // turn.
+    //
+    // MUTATION: collapse `s = cross > 0 ? -half : half` to `s = -half`,
+    // always taking the left-turn side, and (11.5, 1.5) goes uninked because
+    // the wedge is mirrored onto the wrong side of this clockwise corner.
+    final sink = _sink()
+      ..beginResidual(Transform2.identity())
+      ..polyline(_pts([0, 0, 10, 0, 10, -10]), 3, _style(), closed: false)
+      ..endResidual();
+
+    expect(_inked(sink, 11.5, 1.5), isTrue, reason: 'the miter tip');
+  });
+
   test('a mitred corner emits both the bevel and the tip triangle', () {
-    // MUTATION: emit the tip triangle alone and the point just inside the
-    // bevel wedge -- between the vertex and the chord AB -- goes uninked.
-    // That is the hairline crack.
+    // MUTATION: swap the bevel triangle's two outer corners for the *inner*
+    // ones (`_emitTriangle(vx, vy, vx - n0x, vy - n0y, vx - n1x, vy - n1y,
+    // argb)`), leaving the tip triangle's own `A`/`B` untouched. Still two
+    // triangles -- the count stays 6 -- but the bevel no longer connects `V`
+    // to the tip, so the point just inside the wedge -- between the vertex
+    // and the chord AB -- goes uninked. That is the hairline crack: dropping
+    // the bevel outright changes the *count* (5, not 6) and would fail this
+    // test before the wedge probe below ever ran; misplacing it instead
+    // keeps the count honest and dies on the probe the comment names.
     final sink = _sink()
       ..beginResidual(Transform2.identity())
       ..polyline(_pts([0, 0, 10, 0, 10, 10]), 3, _style(), closed: false)

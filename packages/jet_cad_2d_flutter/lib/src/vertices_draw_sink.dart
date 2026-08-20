@@ -282,11 +282,14 @@ class VerticesDrawSink implements DrawSink {
       final qy = b * points[i * 2] + d * points[i * 2 + 1] + f;
       _runTo(qx, qy, half, argb);
     }
-    _endRun(closed: false, half: half, argb: argb);
-    // The spike's closing segment moves to Task 5 with its seam join, so a
-    // closed polyline draws one segment short until then. No caller reaches
-    // it: `closed:` is `false` at all four of the painter's call sites, and
-    // the one unit test that passes `closed: true` moves to Task 5 with it.
+    _endRun(closed: closed, half: half, argb: argb);
+    // `closed` is forwarded rather than hardcoded so `_endRun`'s assert is
+    // reachable: the spike's closing segment moves to Task 5 with its seam
+    // join, and a caller that asks for it before Task 5 lands must fail
+    // loudly rather than silently drawing one segment short. No caller
+    // reaches it: `closed:` is `false` at all four of the painter's call
+    // sites, and the one unit test that passed `closed: true` moved to
+    // Task 5 with it.
   }
 
   /// Starts a connected run at a device-space point.
