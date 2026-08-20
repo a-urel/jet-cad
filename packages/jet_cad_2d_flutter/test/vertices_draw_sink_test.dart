@@ -216,12 +216,14 @@ void main() {
   _arcTests();
   _widthTests();
 
-  test('the submitted Vertices is disposed, and the picture still records', () {
+  test('the submitted Vertices is disposed, and the flag reads its state', () {
     // `Vertices` is native-backed: `dispose()` frees the position and colour
     // buffers the engine holds, and dropping the object instead leaves them to
     // a finalizer. At 19 flushes a frame that is about 1,140 a second.
     //
-    // MUTATION: drop the dispose call and `lastFlushDisposed` reads false.
+    // MUTATION: drop the dispose call and `lastFlushDisposed` reads false,
+    // because it is derived from `Vertices.debugDisposed` -- the object's own
+    // state -- rather than asserted unconditionally beside the call.
     final recorder = PictureRecorder();
     final canvas = Canvas(recorder);
     final sink = _sink(canvas: canvas)..beginResidual(Transform2.identity());
@@ -232,11 +234,65 @@ void main() {
     sink.flush();
 
     expect(sink.lastFlushDisposed, isTrue);
-    // The recording must survive the dispose. If `drawVertices` had kept a
-    // live reference rather than copying, this throws.
-    final picture = recorder.endRecording();
-    addTearDown(picture.dispose);
-    expect(picture, isNotNull);
+    recorder.endRecording().dispose();
+  });
+
+  test('the disposed Vertices rasterises the same pixels a retained one would',
+      () async {
+    // `PictureRecorder.endRecording()` only finalises a display-list op
+    // list -- it does not dereference vertex data, so a picture that merely
+    // records without throwing says nothing about whether disposal freed
+    // buffers a rasteriser would later read. Rasterising is the only way to
+    // ask the real question, so this compares actual pixels: one image drawn
+    // through the sink's real `flush()` (which disposes), one through a
+    // control that submits the identical geometry the same way but is never
+    // disposed -- exactly what `flush()` did before this task.
+    //
+    // Kept to one segment / two triangles / a 16x16 image: `flutter_test`'s
+    // software rasteriser did not finish a 1,007-segment `drawVertices` in
+    // seven and a half minutes, so a bigger buffer would hang the suite.
+    Future<Uint8List> rasterise(Picture picture) async {
+      final image = await picture.toImage(16, 16);
+      final bytes = (await image.toByteData())!.buffer.asUint8List();
+      image.dispose();
+      picture.dispose();
+      return bytes;
+    }
+
+    final recorder = PictureRecorder();
+    final canvas = Canvas(recorder);
+    final sink = _sink(canvas: canvas)..beginResidual(Transform2.identity());
+    sink.polyline(_seg(0, 1, 10, 1), 2, _style(argb: 0xFFFF0000),
+        closed: false);
+    sink.endResidual();
+    sink.flush();
+    expect(sink.lastFlushDisposed, isTrue);
+    final disposedPixels = await rasterise(recorder.endRecording());
+
+    // The exact two triangles `polyline` emits for this segment and style --
+    // see 'a segment becomes two triangles a half-width either side of it'
+    // for the derivation -- submitted the same way `flush` does, but never
+    // disposed.
+    final controlRecorder = PictureRecorder();
+    final controlCanvas = Canvas(controlRecorder);
+    final positions = Float32List.fromList(<double>[
+      0, 1.5, 0, 0.5, 10, 1.5, //
+      0, 0.5, 10, 0.5, 10, 1.5,
+    ]);
+    final colors = Int32List.fromList(List<int>.filled(6, 0xFFFF0000));
+    controlCanvas.drawVertices(
+      Vertices.raw(VertexMode.triangles, positions, colors: colors),
+      BlendMode.dst,
+      Paint()..color = const Color(0xFFFFFFFF),
+    );
+    final retainedPixels = await rasterise(controlRecorder.endRecording());
+
+    // MUTATION: dispose before `drawVertices` instead of after, and the
+    // `flush` call above throws -- confirmed empirically: swapping the two
+    // lines fails an `assert(!vertices.debugDisposed)` inside
+    // `dart:ui`'s `Canvas.drawVertices`, before this expectation is ever
+    // reached.
+    expect(disposedPixels, orderedEquals(retainedPixels));
   });
 
   test('a flush with nothing batched disposes nothing', () {

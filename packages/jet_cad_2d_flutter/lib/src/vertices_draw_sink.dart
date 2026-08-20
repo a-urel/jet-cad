@@ -187,6 +187,14 @@ class VerticesDrawSink implements DrawSink {
   ///
   /// Exposed rather than the object itself, because the object is gone by the
   /// time anything could read it — which is the point.
+  ///
+  /// **Debug-only.** It is set from `Vertices.debugDisposed`, which reads a
+  /// private field guarded by `assert` in the engine and throws a
+  /// `StateError` when asserts are off. This getter never reads that field
+  /// outside an `assert` block, so in a release build it stays `false`
+  /// whether or not disposal happened -- it exists for the test in
+  /// `vertices_draw_sink_test.dart` to check, not for the frame path to rely
+  /// on.
   bool get lastFlushDisposed => _lastFlushDisposed;
 
   /// The positions written so far, as `[x0, y0, x1, y1, ...]`.
@@ -361,7 +369,15 @@ class VerticesDrawSink implements DrawSink {
     // copied. Verified against a `PictureRecorder` here and on a device in
     // Plan 3d Task 2 step 7.
     vertices.dispose();
-    _lastFlushDisposed = true;
+    // Read the object's own state rather than assert the flag beside the
+    // call above -- an unconditional `= true` here would stay true even if
+    // `dispose()` were deleted, which is the exact regression this field
+    // exists to catch. `debugDisposed` throws outside asserts, so it must
+    // never execute in a release build.
+    assert(() {
+      _lastFlushDisposed = vertices.debugDisposed;
+      return true;
+    }());
     _flushCalls = 1;
     _totalFlushes++;
     _vertices = 0;
