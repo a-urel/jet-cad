@@ -1,16 +1,17 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-20
-**Verified against:** `main` @ `51d2d01`, `plan-3c` worktree @ `143b7b9`, working tree clean.
+**Verified against:** `main` @ `33bdafb`, working tree clean, no worktrees.
 Every count below was produced by running the suite, not by reading a report.
 
 ---
 
 ## TL;DR — where you left off
 
-Plan 3c (**text**) is **complete**: all 15 tasks committed on the `plan-3c`
-worktree, **and the exit gate passes**. Everything is green and the tree is
-clean. What is left is the branch close — see [Resume here](#resume-here).
+Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
+The `plan-3c` branch and its worktree are gone; the ledger is archived at
+[docs/superpowers/ledgers/](docs/superpowers/ledgers/). Everything is green and
+the tree is clean. **No plan is in flight** — see [Resume here](#resume-here).
 
 | Suite | State |
 |---|---|
@@ -30,7 +31,7 @@ Results note:
 **macOS Low Power Mode was on for the whole session** — every timing in it is
 contaminated; no failable criterion is a timing.
 
-**Next: close the branch** (`superpowers:finishing-a-development-branch`).
+**Next: pick the next plan.** Nothing is in flight.
 
 ---
 
@@ -86,11 +87,10 @@ docs/superpowers/
 
 | Location | Branch | State |
 |---|---|---|
-| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, `a7008a6`, Plans 1/2/3a/3b merged |
-| `.claude/worktrees/plan-3c` | `plan-3c` | 18 commits ahead, **clean**, ready to integrate |
+| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, `33bdafb`, Plans 1/2/3a/3b/**3c** merged |
 
-`main` is ahead of `origin/main`. **Nothing has been pushed.** Do not push
-unless explicitly asked.
+No worktrees. `main` is **29 commits ahead of `origin/main`**. **Nothing has
+been pushed.** Do not push unless explicitly asked.
 
 ---
 
@@ -193,43 +193,26 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Plan 3c is done and the exit gate passes.** Task 14 is committed at
-`143b7b9`; the worktree is 18 commits ahead of `main` and clean.
+**Nothing is in flight.** Plan 3c merged at `52c7a7b` with its exit gate
+passing; `main` is at `33bdafb`, clean, 29 commits ahead of `origin/main` and
+**unpushed**.
 
-The one thing left is the branch close —
-`superpowers:finishing-a-development-branch`: verify the suite, detect the
-environment, present the integration options, act on the choice.
-**`main` is ahead of `origin/main` and nothing has been pushed. Do not push
-unless asked.**
-
-### The exit gate, as measured
-
-| Criterion | Reading | |
-|---|---|---|
-| repeat frame, working-set camera | **0** new layouts at 50k and 500k, and 0 on device in R2/R4a/R4b | PASS |
-| evictions per repeat frame | **0** at both sizes | PASS |
-| peak live paragraphs | **512** = `kParagraphCacheLimit` | PASS |
-| `skippedTextCount` on `textRigCorpus` | **0**, both sizes, both cameras | PASS |
-| differential + non-vacuity, text on | `text_paint_test` 9 pass | PASS |
-| reference-query differential, text picking | engine `differential_test` 72 pass | PASS |
-| overlay-equals-rebuild, edited text | `text_overlay_test` 4 pass | PASS |
-| mutation log | 53 accounted, 52 killed, 1 not applicable | PASS |
-
-The only benchmark failure is `snap at dirty threshold`, p95 **1.0800 ms**
-against `< 1.0 ms` — **carried from Plan 2**, every other gated row passes.
+Starting the next plan means picking from the roadmap below, writing a spec,
+then a plan, then executing it task by task on a fresh worktree —
+`superpowers:brainstorming` first if the shape is not already settled.
 
 ### What the next plan inherits
 
-Six items, listed in the results note's own table. The first is the one that
-blocks shipping:
+Six items, listed in full in the [results
+note](docs/superpowers/notes/2026-08-20-plan-3c-results.md). The first blocks
+shipping text to an application and has no owner:
 
 1. **Nothing outside the tests wires a real measurer into a document.**
    `DraftDocument.empty` defaults to `InsertionPointMeasurer`, the zero
-   metrics, so `height / capHeight` divides into zero — singular text
-   transform — and `entityBounds` collapses every glyph box to a point. An
-   application built the ordinary way draws no text **and reports no error**.
-   Out of 3c's scope (the plan specifies the seam, not who plugs it in), and it
-   must be settled before text ships to an application.
+   metrics, so `composeTransform`'s `height / capHeight` divides into zero —
+   singular text transform — and `entityBounds` collapses every glyph box to a
+   point. An application built the ordinary way draws no text **and reports no
+   error**. Out of 3c's scope: the plan specifies the seam, not who plugs it in.
 2. **Two paragraph caches, not one.** The painter takes metrics from
    `document.textMeasurer`, the sink lays out through `DraftCanvas`'s own. A
    text leaf costs up to two layouts, and the query path pays for text even
@@ -243,16 +226,17 @@ blocks shipping:
    per frame, and it is 4,140 at *both* 50k and 500k because it is bounded by
    string variety rather than entity count. A bigger cache holds one zoom level
    of one corpus; not drawing text too small to read removes the cost.
-5. `snap at dirty threshold` — carried from Plan 2, unchanged.
+5. `snap at dirty threshold` p95 1.08 ms against < 1.0 ms — carried from Plan 2.
 6. `DocumentTree._link` is quadratic in a parent's child count, which is why
-   the rigs cap `instanceCount` at 20,000 — recorded in Plan 3b, unchanged.
+   the rigs cap `instanceCount` at 20,000 — recorded in Plan 3b.
 
 ---
 
-## Rulings that still bind the remaining tasks
+## Rulings that still bind future work
 
-The ledger carries 56 numbered rulings. These are the ones that constrain work
-you have not done yet:
+Plan 3c's ledger carries 56 numbered rulings, archived in full at
+[docs/superpowers/ledgers/](docs/superpowers/ledgers/). These are the ones that
+constrain work not yet done:
 
 **Ruling 4 — the cache limit is not a tuning knob.** `kParagraphCacheLimit` is
 owned by Task 9 and may be raised **once**, in Task 12, and only with the
