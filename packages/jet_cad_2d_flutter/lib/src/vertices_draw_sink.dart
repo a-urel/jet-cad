@@ -66,8 +66,6 @@ import 'draw_sink.dart';
 ///   measured call count does not fall as far as the segment count suggests.
 /// - **Anti-aliasing comes from MSAA, not from a coverage shader.** The SDF
 ///   path this replaces anti-aliases analytically.
-/// - **Hairlines are one device pixel, not zero.** A `strokeWidth` of 0 means
-///   "hairline" to `Canvas`; a quad of width 0 means "invisible".
 /// - **`flutter_test` cannot render it.** The software Skia backend takes
 ///   minutes on a `drawVertices` that Impeller draws instantly, so the golden
 ///   suite is not available to this sink.
@@ -77,9 +75,17 @@ class VerticesDrawSink implements DrawSink {
     this.lineweightScale = 1.0,
     CanvasDrawSink? fallback,
     Canvas? canvas,
+    this.devicePixelRatio = 1.0,
   }) : _fallback = fallback {
     if (canvas != null) this.canvas = canvas;
   }
+
+  /// Device pixels per logical pixel, rebound per frame by the widget.
+  ///
+  /// The buffer is in logical pixels, because that is the space the `Canvas`
+  /// this sink flushes into is in. Both of Impeller's stroke rules are in
+  /// *device* pixels, so converting between them is what this is for.
+  double devicePixelRatio;
 
   /// Where [flush] submits. Rebound each frame, as on [CanvasDrawSink].
   late Canvas canvas;
@@ -195,7 +201,7 @@ class VerticesDrawSink implements DrawSink {
       {required bool closed}) {
     if (count < 2) return;
     final half = _halfWidthFor(style.lineweightHundredths);
-    final argb = style.argb;
+    final argb = _coveredArgb(style.argb, style.lineweightHundredths);
 
     final a = _residual.a, b = _residual.b, c = _residual.c;
     final d = _residual.d, e = _residual.e, f = _residual.f;
@@ -267,13 +273,45 @@ class VerticesDrawSink implements DrawSink {
     _colors = colors;
   }
 
+  /// Impeller's thinnest line, in device pixels: `kMinStrokeSize` from
+  /// `impeller/entity/geometry/geometry.h`.
+  static const double kMinStrokeDevicePixels = 1.0;
+
+  /// Half the stroke's width, in the logical pixels the buffer is in.
+  ///
+  /// Mirrors `LineGeometry::ComputePixelHalfWidth`: the width is clamped in
+  /// device space, never in logical space, so the same lineweight draws the
+  /// same line on a retina display and an external monitor.
   double _halfWidthFor(int lineweightHundredths) {
-    final devicePx =
+    final logical =
         lineweightHundredths / 100.0 * pixelsPerPaperMm * lineweightScale;
-    // A quad of width 0 is invisible, where a `strokeWidth` of 0 is a
-    // hairline. One device pixel is the floor.
-    final w = devicePx.isFinite && devicePx > 1.0 ? devicePx : 1.0;
+    final floorLogical = kMinStrokeDevicePixels / devicePixelRatio;
+    final w =
+        logical.isFinite && logical > floorLogical ? logical : floorLogical;
     return w / 2;
+  }
+
+  /// The colour a stroke of this width is actually drawn in.
+  ///
+  /// Mirrors `Geometry::ComputeStrokeAlphaCoverage`. A stroke thinner than one
+  /// device pixel keeps its pixel and gives up alpha in proportion, so that
+  /// thinning a line fades it out instead of stopping at one pixel and staying
+  /// there. A width of exactly zero is the hairline case and keeps full alpha
+  /// — that is the first branch there, not an omission.
+  int _coveredArgb(int argb, int lineweightHundredths) {
+    final deviceWidth = lineweightHundredths /
+        100.0 *
+        pixelsPerPaperMm *
+        lineweightScale *
+        devicePixelRatio;
+    if (!deviceWidth.isFinite ||
+        deviceWidth <= 0 ||
+        deviceWidth >= kMinStrokeDevicePixels) {
+      return argb;
+    }
+    final coverage = (deviceWidth * 2).clamp(0.0, 1.0);
+    final alpha = (((argb >> 24) & 0xFF) * coverage).round();
+    return (alpha << 24) | (argb & 0x00FFFFFF);
   }
 
   /// Submits everything batched so far as one `drawVertices` and rewinds the
@@ -332,7 +370,8 @@ class VerticesDrawSink implements DrawSink {
     final px = t.a * x + t.c * y + t.e;
     final py = t.b * x + t.d * y + t.f;
     // A horizontal segment of the stroke's own width is a square of it.
-    _emitSegment(px - half, py, px + half, py, half, style.argb);
+    _emitSegment(px - half, py, px + half, py, half,
+        _coveredArgb(style.argb, style.lineweightHundredths));
   }
 
   @override
@@ -369,7 +408,7 @@ class VerticesDrawSink implements DrawSink {
     final steps = ideal.clamp(1, kMaxFlattenSegments);
 
     final half = _halfWidthFor(style.lineweightHundredths);
-    final argb = style.argb;
+    final argb = _coveredArgb(style.argb, style.lineweightHundredths);
     final step = sweep / steps;
 
     var angle = start;

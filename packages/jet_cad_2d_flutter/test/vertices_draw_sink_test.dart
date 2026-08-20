@@ -24,8 +24,14 @@ ResolvedStyle _style({int argb = 0xFF000000, int lineweight = _lw}) =>
       linetypeScale: 1.0,
     );
 
-VerticesDrawSink _sink({Canvas? canvas}) =>
-    VerticesDrawSink(pixelsPerPaperMm: _pxPerMm, canvas: canvas);
+VerticesDrawSink _sink({Canvas? canvas, double devicePixelRatio = 1.0}) =>
+    VerticesDrawSink(
+        pixelsPerPaperMm: _pxPerMm,
+        canvas: canvas,
+        devicePixelRatio: devicePixelRatio);
+
+/// Half the height of the quad the sink emitted for a horizontal segment.
+double _halfOf(Float32List v) => (v[1] - v[3]) / 2;
 
 Float64List _seg(double x0, double y0, double x1, double y1) =>
     Float64List.fromList([x0, y0, x1, y1]);
@@ -208,6 +214,7 @@ void main() {
   });
 
   _arcTests();
+  _widthTests();
 
   test('a 45-degree segment gets a normal of the right length', () {
     // Degenerate-fixture guard: every case above is axis-aligned, so a normal
@@ -382,5 +389,119 @@ void _arcTests() {
     expect(sink.lastFlushSegmentCount, 1);
     expect(sink.frameSegmentCount, 2);
     recorder.endRecording().dispose();
+  });
+}
+
+void _widthTests() {
+  // `CanvasDrawSink` hands `Canvas` a width and lets Impeller apply two rules
+  // to it, both in *device* space and neither reachable from Dart. Baking the
+  // transform into the positions means this sink has to apply them itself, or
+  // it draws a visibly different line from its sibling.
+  //
+  //   line_geometry.cc:24  max(width, kMinStrokeSize / max_basis) with
+  //                        kMinStrokeSize = 1.0f -- one device pixel is the
+  //                        thinnest line there is
+  //   geometry.cc:148      a stroke thinner than that keeps its one pixel but
+  //                        loses alpha in proportion, clamp(w * 2, 0, 1)
+  test('a stroke above the floor keeps its exact width, not a rounded one', () {
+    // 0.25 mm at 4 px/mm is 1.0 logical pixels, which at devicePixelRatio 2 is
+    // 2 device pixels -- above the floor, so nothing clamps it.
+    //
+    // MUTATION: floor the width at one logical pixel and a thinner case than
+    // this one rounds up; see the ratio test below for the case that catches it.
+    final sink = _sink(devicePixelRatio: 2.0)
+      ..beginResidual(Transform2.identity())
+      ..polyline(_seg(0, 0, 10, 0), 2, _style(lineweight: 30), closed: false)
+      ..endResidual();
+    expect(_halfOf(sink.debugPositions()),
+        closeTo(0.5 * 30 / 100 * _pxPerMm, 1e-6));
+    expect(sink.debugColors()[0].toUnsigned(32), 0xFF000000);
+  });
+
+  test('a sub-pixel stroke gets one device pixel and loses alpha for it', () {
+    // 0.05 mm at 4 px/mm is 0.2 logical, 0.4 device pixels at ratio 2: under
+    // the floor. Impeller draws it one device pixel wide at 0.4 * 2 = 0.8 alpha.
+    //
+    // MUTATION: clamp the width without touching the alpha, and this stays at
+    // 0xFF.
+    final sink = _sink(devicePixelRatio: 2.0)
+      ..beginResidual(Transform2.identity())
+      ..polyline(_seg(0, 0, 10, 0), 2, _style(lineweight: 5), closed: false)
+      ..endResidual();
+    // One device pixel is half a logical one at ratio 2, so the half-width is
+    // a quarter.
+    expect(_halfOf(sink.debugPositions()), closeTo(0.25, 1e-6));
+    expect(sink.debugColors()[0].toUnsigned(32), 0xCC000000);
+  });
+
+  test('the floor is device pixels, so it moves with the ratio', () {
+    // Degenerate-fixture guard: a sink that floored in logical pixels would
+    // draw the same line at every ratio.
+    //
+    // MUTATION: drop `devicePixelRatio` from the floor and the two read the
+    // same.
+    double halfAt(double ratio) {
+      final sink = _sink(devicePixelRatio: ratio)
+        ..beginResidual(Transform2.identity())
+        ..polyline(_seg(0, 0, 10, 0), 2, _style(lineweight: 5), closed: false)
+        ..endResidual();
+      return _halfOf(sink.debugPositions());
+    }
+
+    expect(halfAt(1.0), closeTo(0.5, 1e-6));
+    expect(halfAt(4.0), closeTo(0.125, 1e-6));
+  });
+
+  test('a lineweight of zero is a hairline at full alpha', () {
+    // `Canvas` reads a `strokeWidth` of 0 as "one device pixel whatever the
+    // transform", and Impeller returns full coverage for it rather than fading
+    // it to nothing -- `scaled_stroke_width == 0.0` is the first branch of
+    // ComputeStrokeAlphaCoverage.
+    //
+    // MUTATION: let zero fall through to the proportional fade and the alpha
+    // goes to 0x00.
+    final sink = _sink(devicePixelRatio: 2.0)
+      ..beginResidual(Transform2.identity())
+      ..polyline(_seg(0, 0, 10, 0), 2, _style(lineweight: 0), closed: false)
+      ..endResidual();
+    expect(_halfOf(sink.debugPositions()), closeTo(0.25, 1e-6));
+    expect(sink.debugColors()[0].toUnsigned(32), 0xFF000000);
+  });
+
+  test('every emitter fades, not just the straight one', () {
+    // Degenerate-coverage guard: the fade lives in one helper, but three call
+    // sites reach it and a curve or a point that took `style.argb` directly
+    // would draw at full alpha beside a faded line.
+    //
+    // MUTATION: pass `style.argb` in `_flatten` or in `point`, and the arc or
+    // the point row here stays at 0xFF.
+    final thin = _style(lineweight: 5);
+    final emitters = <String, void Function(VerticesDrawSink)>{
+      'polyline': (s) => s.polyline(_seg(0, 0, 10, 0), 2, thin, closed: false),
+      'arc': (s) => s.arc(0, 0, 10, 0, math.pi / 2, thin),
+      'circle': (s) => s.circle(0, 0, 10, thin),
+      'point': (s) => s.point(3, 4, thin),
+    };
+    emitters.forEach((name, emit) {
+      final sink = _sink(devicePixelRatio: 2.0)
+        ..beginResidual(Transform2.identity());
+      emit(sink);
+      sink.endResidual();
+      expect(sink.debugColors(), isNotEmpty, reason: name);
+      expect(sink.debugColors()[0].toUnsigned(32), 0xCC000000, reason: name);
+    });
+  });
+
+  test('the fade multiplies the style alpha rather than replacing it', () {
+    // A half-transparent entity at a sub-pixel width is both: 0x80 * 0.8.
+    //
+    // MUTATION: write the coverage as the alpha instead of scaling by it, and
+    // this reads 0xCC.
+    final sink = _sink(devicePixelRatio: 2.0)
+      ..beginResidual(Transform2.identity())
+      ..polyline(_seg(0, 0, 10, 0), 2, _style(argb: 0x80123456, lineweight: 5),
+          closed: false)
+      ..endResidual();
+    expect(sink.debugColors()[0].toUnsigned(32), 0x66123456);
   });
 }

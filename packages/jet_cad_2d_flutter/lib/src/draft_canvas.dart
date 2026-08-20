@@ -178,18 +178,24 @@ class DraftCanvasState extends State<DraftCanvas> {
   }
 
   @override
-  Widget build(BuildContext context) => RepaintBoundary(
+  Widget build(BuildContext context) {
+    // Read here rather than in `_attach`: the ratio is inherited state, it
+    // changes when the window moves between displays, and a sink that cached
+    // it at construction would keep drawing an external monitor's line widths
+    // after the window moved back to the built-in one.
+    vertices?.devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+    return RepaintBoundary(
         child: CustomPaint(
-          painter: _DraftCustomPainter(
-            painter: painter,
-            camera: widget.camera,
-            sink: sink,
-            vertices: vertices,
-            repaint: _repaint,
-          ),
-          size: Size.infinite,
-        ),
-      );
+      painter: _DraftCustomPainter(
+        painter: painter,
+        camera: widget.camera,
+        sink: sink,
+        vertices: vertices,
+        repaint: _repaint,
+      ),
+      size: Size.infinite,
+    ));
+  }
 }
 
 class _DraftCustomPainter extends CustomPainter {
