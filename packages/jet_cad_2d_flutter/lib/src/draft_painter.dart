@@ -39,6 +39,7 @@ class DraftPainter {
     required this.index,
     required this.resolver,
     this.debugDisableRebasing = false,
+    this.drawText = true,
   });
 
   final DraftDocument document;
@@ -52,6 +53,20 @@ class DraftPainter {
   /// that shows the drawing moving with this on is what makes the assertions
   /// about small residuals mean something.
   final bool debugDisableRebasing;
+
+  /// **Measurement-only, inert at its default of `true`.**
+  ///
+  /// Task 12's rigs report every text counter twice, once with text drawing
+  /// and once without, and the delta between the two rows is only readable as
+  /// *the cost of text* if nothing else about the frame moved. Rebuilding the
+  /// corpus with `labelFraction: 0` would move the entity mix, the extents and
+  /// therefore both cameras; this moves one branch.
+  ///
+  /// Turning it off skips a text leaf before anything is resolved for it, so
+  /// the delta covers attribute resolution, layout composition and the
+  /// paragraph lookup together. It also leaves [skippedTextCount] at zero,
+  /// because that counter means *empty string*, not *not drawn*.
+  final bool drawText;
 
   /// Reused across frames; the frame path must not allocate once warm.
   Float64List _points = Float64List(256);
@@ -118,6 +133,17 @@ class DraftPainter {
   /// all blank, and a measurement taken over them would otherwise read as a
   /// measurement of drawn text.
   int get skippedTextCount => _skippedText;
+
+  int _textOps = 0;
+
+  /// Text and attrib entities handed to [DrawSink.text] in the last frame.
+  ///
+  /// The other half of [skippedTextCount]: together they account for every
+  /// text leaf that survived culling. Reported by the rigs because a paragraph
+  /// cache's hit rate is meaningless without the number of lookups it is a
+  /// rate over — `layoutCount` alone cannot tell one layout in one draw from
+  /// one layout in ten thousand.
+  int get textOpCount => _textOps;
 
   /// One text layout for every text leaf in the frame, refilled in place.
   ///
@@ -205,6 +231,7 @@ class DraftPainter {
   /// comparison total.
   void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
     _skippedText = 0;
+    _textOps = 0;
     _skippedDeepInstances = 0;
     _screenSpaceLeaves = 0;
     _anisotropicCurves = 0;
@@ -645,6 +672,7 @@ class DraftPainter {
   /// outer one at the identity.
   void _drawText(DrawSink sink, int slot, GeometryPayload payload,
       ResolvedStyle style, Transform2 chain, Vector2 localOrigin) {
+    if (!drawText) return;
     final text = document.entities.textAt(slot);
     if (text.isEmpty) {
       // Nothing to draw, and still counted: the generated corpus's plain
@@ -671,6 +699,7 @@ class DraftPainter {
           debugHandle: document.entities.handleAt(slot))
       ..text(text, styleHandle, style)
       ..endResidual();
+    _textOps++;
   }
 
   /// The frame's clip expressed in a leaf's own **rebased-local** space —

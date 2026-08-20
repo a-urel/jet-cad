@@ -59,6 +59,7 @@ class DraftCanvas extends StatefulWidget {
     this.resolver,
     this.pixelsPerPaperMm = kLogicalPixelsPerMm,
     this.lineweightScale = 1.0,
+    this.drawText = true,
   });
 
   final DraftDocument document;
@@ -74,6 +75,15 @@ class DraftCanvas extends StatefulWidget {
   /// Forwarded to [CanvasDrawSink.lineweightScale]. Measurement-only, for
   /// Task 4c's fill-rate experiment; inert at its default of 1.0.
   final double lineweightScale;
+
+  /// Forwarded to [DraftPainter.drawText]. Measurement-only, for Task 12's
+  /// text rows; inert at its default of `true`.
+  ///
+  /// It is a widget property rather than something the rig reaches through
+  /// [DraftCanvasState] because the painter is built in [_attach] and its
+  /// `drawText` is final: a rig that wanted to flip it after the fact would
+  /// have to rebuild the painter, and a rebuilt painter is a different frame.
+  final bool drawText;
 
   @override
   State<DraftCanvas> createState() => DraftCanvasState();
@@ -111,6 +121,7 @@ class DraftCanvasState extends State<DraftCanvas> {
       document: widget.document,
       index: widget.index,
       resolver: widget.resolver ?? DocumentStyleResolver(widget.document),
+      drawText: widget.drawText,
     );
     // No derived state left to update before listeners run: the map that
     // needed it was the cull floor's, and the cull floor is gone.
@@ -126,7 +137,8 @@ class DraftCanvasState extends State<DraftCanvas> {
         widget.camera != oldWidget.camera ||
         widget.resolver != oldWidget.resolver ||
         widget.pixelsPerPaperMm != oldWidget.pixelsPerPaperMm ||
-        widget.lineweightScale != oldWidget.lineweightScale) {
+        widget.lineweightScale != oldWidget.lineweightScale ||
+        widget.drawText != oldWidget.drawText) {
       _changes.dispose();
       _attach();
     }

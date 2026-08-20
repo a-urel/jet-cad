@@ -329,4 +329,47 @@ void main() {
     expect(texts.length, greaterThan(20));
     expect(texts.map((op) => op.text).toSet().length, greaterThan(1));
   });
+
+  test(
+      'drawText: false drops the text ops and leaves the rest of the frame '
+      'byte-identical', () {
+    // The flag is measurement-only and its `false` branch has no other
+    // caller, which is exactly the shape of thing this project keeps shipping
+    // untested: flipping the default turns half the suite red, and deleting
+    // the branch turns nothing red at all. Task 12's whole on/off delta rests
+    // on the claim that one branch is all that moves, so the claim is an
+    // assertion.
+    final doc = _textCorpus(2000);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final resolver = DocumentStyleResolver(doc);
+    final camera = ViewportTransform.fit(doc.extents, kViewport);
+
+    final withText = RecordingDrawSink();
+    final painter =
+        DraftPainter(document: doc, index: index, resolver: resolver);
+    painter.paint(withText, camera, kViewport);
+
+    final without = RecordingDrawSink();
+    final textless = DraftPainter(
+        document: doc, index: index, resolver: resolver, drawText: false);
+    textless.paint(without, camera, kViewport);
+
+    // Non-degenerate: a corpus with no drawn text would pass this whichever
+    // way the branch went.
+    expect(painter.textOpCount, greaterThan(20));
+    expect(withText.ops.whereType<TextOp>(), isNotEmpty);
+
+    expect(textless.textOpCount, 0);
+    expect(without.ops.whereType<TextOp>(), isEmpty);
+
+    // Everything that is not text is the same drawing. Residual ops are left
+    // out of the comparison because a dropped text leaf drops its own
+    // `beginResidual`/`endResidual` pair with it — that is the flag working,
+    // not the rest of the frame moving.
+    bool geometry(DrawOp op) =>
+        op is! TextOp && op is! BeginResidualOp && op is! EndResidualOp;
+    expect(without.ops.where(geometry).toList(),
+        equals(withText.ops.where(geometry).toList()));
+  });
 }

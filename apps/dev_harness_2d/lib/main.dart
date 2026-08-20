@@ -26,8 +26,31 @@ final double kLineweightScale = double.tryParse(
     ) ??
     1.0;
 
+/// Whether the corpus carries text, and whether the painter draws it.
+///
+/// Two defines, not one, because they answer different questions.
+/// `TEXT=1` changes the *document* — it turns `labelFraction` and
+/// `attributedInstanceFraction` on, which changes the entity mix, the extents
+/// and therefore the camera, so an R2 run with it on is **not** comparable to
+/// Plan 3b's baselines and must be reported as its own row.
+/// `DRAW_TEXT=0` changes one branch in the painter and nothing else, which is
+/// what makes the text-on/text-off delta readable as the cost of text rather
+/// than as the difference between two drawings.
+///
+/// Both are inert at their defaults: with `TEXT` unset the document is
+/// byte-for-byte the one Plan 3b measured, and `DRAW_TEXT` has nothing to act
+/// on.
+const bool kTextCorpus = bool.fromEnvironment('TEXT');
+const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
+
 /// The corpus the rigs measure on: the same shape as R1's, so the two sets of
 /// numbers describe one drawing.
+///
+/// With [kTextCorpus] on this is `textRigCorpus`'s shape, and the measurer
+/// stops being a detail: `DraftDocument`'s default is the zero-metrics
+/// `InsertionPointMeasurer`, which collapses every glyph box to a point and
+/// every text transform to a singular matrix. A text corpus built on it looks
+/// like a text corpus and draws nothing measurable.
 DraftDocument harnessDocument([int? entityCount]) => generateDocument(
       entityCount ?? kEntities,
       definitionCount: 200,
@@ -39,6 +62,10 @@ DraftDocument harnessDocument([int? entityCount]) => generateDocument(
       layerCount: 8,
       byBlockFraction: 0.3,
       dashedFraction: 0.35,
+      labelFraction: kTextCorpus ? 0.02 : 0,
+      attributedInstanceFraction: kTextCorpus ? 0.2 : 0,
+      measurer:
+          kTextCorpus ? FlutterTextMeasurer() : const InsertionPointMeasurer(),
     );
 
 void main() => runApp(HarnessApp(document: harnessDocument()));
@@ -105,7 +132,8 @@ class _HarnessAppState extends State<HarnessApp> {
                 document: widget.document,
                 index: index,
                 camera: camera,
-                lineweightScale: kLineweightScale),
+                lineweightScale: kLineweightScale,
+                drawText: kDrawText),
           ),
         ),
       );

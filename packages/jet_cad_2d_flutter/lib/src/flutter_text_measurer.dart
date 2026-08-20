@@ -60,6 +60,18 @@ class FlutterTextMeasurer implements TextMeasurer {
   /// Live entries in the cache.
   int get liveParagraphCount => _cache.length;
 
+  /// Zeroes [layoutCount] and [evictionCount] without touching the cache.
+  ///
+  /// It deliberately leaves the entries alone. The counters are per-
+  /// measurement; the cache is the thing being measured, and a reset that
+  /// cleared it would guarantee the next frame lays everything out again —
+  /// the opposite of the steady state every text row is about.
+  /// [CanvasDrawSink.resetCounters] draws the same line for the same reason.
+  void resetCounters() {
+    layoutCount = 0;
+    evictionCount = 0;
+  }
+
   /// Insertion-ordered so the first key is always the least recently
   /// touched: [_touch] removes and reinserts a key on every hit, which moves
   /// it to the end, leaving the untouched entries at the front for
