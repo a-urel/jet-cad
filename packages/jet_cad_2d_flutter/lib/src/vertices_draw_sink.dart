@@ -143,6 +143,7 @@ class VerticesDrawSink implements DrawSink {
   int _lastFlushVertices = 0;
   int _totalFlushes = 0;
   int _frameSegments = 0;
+  bool _lastFlushDisposed = false;
 
   /// Segments batched since the last [flush].
   int get batchedSegmentCount => _segments;
@@ -181,6 +182,12 @@ class VerticesDrawSink implements DrawSink {
   /// flush that rewinds before it submits reports the empty buffer it drew
   /// rather than the full one it meant to.
   int get lastFlushVertexCount => _lastFlushVertices;
+
+  /// Whether the last [flush] disposed the `Vertices` it submitted.
+  ///
+  /// Exposed rather than the object itself, because the object is gone by the
+  /// time anything could read it — which is the point.
+  bool get lastFlushDisposed => _lastFlushDisposed;
 
   /// The positions written so far, as `[x0, y0, x1, y1, ...]`.
   Float32List debugPositions() =>
@@ -329,6 +336,7 @@ class VerticesDrawSink implements DrawSink {
     _flushCalls = 0;
     _lastFlushSegments = _segments;
     _lastFlushVertices = 0;
+    _lastFlushDisposed = false;
     if (_vertices == 0) {
       _segments = 0;
       return;
@@ -336,17 +344,24 @@ class VerticesDrawSink implements DrawSink {
     final positions = Float32List.sublistView(_positions, 0, _vertices * 2);
     final colors = Int32List.sublistView(_colors, 0, _vertices);
     _lastFlushVertices = colors.length;
+    final vertices = Vertices.raw(
+      VertexMode.triangles,
+      positions,
+      colors: colors,
+    );
     canvas.drawVertices(
-      Vertices.raw(
-        VertexMode.triangles,
-        positions,
-        colors: colors,
-      ),
+      vertices,
       // With per-vertex colours and no shader on the paint, the vertex colour
       // is the colour drawn; the paint contributes only its alpha.
       BlendMode.dst,
       Paint()..color = const Color(0xFFFFFFFF),
     );
+    // `drawVertices` has taken what it needs by the time it returns; holding
+    // the object past that point holds native buffers the engine has already
+    // copied. Verified against a `PictureRecorder` here and on a device in
+    // Plan 3d Task 2 step 7.
+    vertices.dispose();
+    _lastFlushDisposed = true;
     _flushCalls = 1;
     _totalFlushes++;
     _vertices = 0;

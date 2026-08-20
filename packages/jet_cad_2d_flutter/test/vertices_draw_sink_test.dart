@@ -216,6 +216,39 @@ void main() {
   _arcTests();
   _widthTests();
 
+  test('the submitted Vertices is disposed, and the picture still records', () {
+    // `Vertices` is native-backed: `dispose()` frees the position and colour
+    // buffers the engine holds, and dropping the object instead leaves them to
+    // a finalizer. At 19 flushes a frame that is about 1,140 a second.
+    //
+    // MUTATION: drop the dispose call and `lastFlushDisposed` reads false.
+    final recorder = PictureRecorder();
+    final canvas = Canvas(recorder);
+    final sink = _sink(canvas: canvas)..beginResidual(Transform2.identity());
+    for (var i = 0; i < 5; i++) {
+      sink.polyline(_seg(0, i * 1.0, 10, i * 1.0), 2, _style(), closed: false);
+    }
+    sink.endResidual();
+    sink.flush();
+
+    expect(sink.lastFlushDisposed, isTrue);
+    // The recording must survive the dispose. If `drawVertices` had kept a
+    // live reference rather than copying, this throws.
+    final picture = recorder.endRecording();
+    addTearDown(picture.dispose);
+    expect(picture, isNotNull);
+  });
+
+  test('a flush with nothing batched disposes nothing', () {
+    // MUTATION: dispose unconditionally and this throws on a null.
+    final recorder = PictureRecorder();
+    final sink = _sink(canvas: Canvas(recorder));
+    sink.flush();
+    expect(sink.flushCallCount, 0);
+    expect(sink.lastFlushDisposed, isFalse);
+    recorder.endRecording().dispose();
+  });
+
   test('a 45-degree segment gets a normal of the right length', () {
     // Degenerate-fixture guard: every case above is axis-aligned, so a normal
     // that forgot to normalise would still pass them.
