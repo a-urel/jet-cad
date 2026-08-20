@@ -321,11 +321,26 @@ Widget _framed(DraftDocument doc) => MaterialApp(
 /// triangles are scan-converted by `TriangleRasterizer` and the *image* is
 /// matched instead.
 ///
-/// The vertices golden of this ladder carries the rung's polyline and none of
-/// its glyphs: text goes to `CanvasDrawSink` as a paragraph and never reaches
-/// the triangle buffer. What it pins is that the strokes around the text are
-/// right and that the flush before each text op happened; the glyphs are
-/// pinned by the canvas golden beside it.
+/// The two sets are framed differently, and this does not try to reconcile
+/// it: [_framed] matches on `find.byKey(kCanvasKey)`, which sits on the outer
+/// `SizedBox`, and `matchesGoldenFile` walks up from there to the nearest
+/// `RepaintBoundary` -- not necessarily the one `DraftCanvas` owns
+/// internally. The vertices path below rasterizes exactly `DraftCanvas`'s
+/// own surface. The two PNGs are not pixel-registered captures of the same
+/// boundary; each is the right instrument for its own backend.
+///
+/// The vertices golden of this ladder carries the rung's anchor rule or
+/// crosses and none of its glyphs: text goes to `CanvasDrawSink` as a
+/// paragraph and never reaches the triangle buffer. What it pins is that the
+/// strokes around the text are right and that the flush before each text op
+/// happened; the glyphs are pinned by the canvas golden beside it.
+///
+/// Verified by decoding every generated PNG and counting non-transparent
+/// pixels rather than by eye: every rung's full set of anchor geometry is
+/// present (rung 3's four crosses; rung 4's and rung 5's two rules each), not
+/// just some of it. That was not always true — see `TriangleRasterizer`'s
+/// construction below for why a thin, near-pixel-grid-aligned line could
+/// once vanish entirely from this golden while drawing correctly.
 Future<void> _rung(WidgetTester tester, DraftDocument doc, String name,
     RenderBackend backend) async {
   if (backend == RenderBackend.canvas) {
@@ -340,8 +355,6 @@ Future<void> _rung(WidgetTester tester, DraftDocument doc, String name,
   final camera =
       CameraController(ViewportTransform.fit(kWorld, kGoldenViewport));
   addTearDown(camera.dispose);
-  final rasterizer = TriangleRasterizer(
-      kGoldenViewport.width.round(), kGoldenViewport.height.round());
 
   final key = GlobalKey<DraftCanvasState>();
   await tester.pumpWidget(MaterialApp(
@@ -362,9 +375,31 @@ Future<void> _rung(WidgetTester tester, DraftDocument doc, String name,
       ),
     ),
   ));
+
+  // `VerticesDrawSink`'s width floor (`kMinStrokeDevicePixels`) and the
+  // colour fade below it are *device*-pixel quantities, but the buffer's
+  // positions — what `TriangleRasterizer` scan-converts — are logical
+  // pixels. A rasterizer built at logical resolution asks the wrong
+  // question: at this widget's own device pixel ratio a stroke can be a
+  // full device pixel wide (inked by Impeller) while covering under half a
+  // *logical* pixel, which a logical-resolution, no-AA, pixel-centre sampler
+  // can miss along its whole length. `devicePixelRatio` is read back from
+  // the sink the widget actually built rather than assumed, so this samples
+  // at the same resolution Impeller would rasterize at on this device.
+  final dpr = key.currentState!.vertices!.devicePixelRatio;
+  final rasterizer = TriangleRasterizer((kGoldenViewport.width * dpr).round(),
+      (kGoldenViewport.height * dpr).round());
   // Attached after the first pump, and the widget pumped again: the state —
   // and the vertices sink it owns — does not exist until the first build.
-  key.currentState!.vertices?.observer = rasterizer.observe;
+  // The observer scales every position by `dpr` before handing it to the
+  // device-resolution rasterizer above.
+  key.currentState!.vertices!.observer = (positions, colors) {
+    final scaled = Float32List(positions.length);
+    for (var i = 0; i < positions.length; i++) {
+      scaled[i] = positions[i] * dpr;
+    }
+    rasterizer.observe(scaled, colors);
+  };
   // The first pump already painted once — the picture this golden pins —
   // but without an observer attached. Nothing about the document or the
   // camera changes for the second pump, `_DraftCustomPainter.shouldRepaint`
@@ -388,6 +423,15 @@ Future<void> _rung(WidgetTester tester, DraftDocument doc, String name,
   // needs it.
   final image = (await tester.runAsync(rasterizer.toImage))!;
   addTearDown(image.dispose);
+
+  // A golden that never inks a pixel passes forever and pins nothing --
+  // confirmed by a `polyline` no-op mutation that left logical-resolution
+  // versions of these goldens green with zero geometry drawn. Every rung
+  // draws at least one rule or cross, so this must always ink something.
+  expect(rasterizer.pixels.any((p) => p != 0), isTrue,
+      reason: 'rung $name drew nothing: its anchor rule or crosses are '
+          'always present, so a blank surface means the picture never '
+          'reached the rasterizer');
   await expectLater(image, matchesGoldenFile('vertices/text_ladder_$name.png'));
 }
 

@@ -179,24 +179,53 @@ ViewportTransform cameraAt(double zoom) => ViewportTransform(
           .multiply(Transform2.scale(zoom, -zoom)),
     );
 
+/// `devicePixelRatio` this file's vertices sink is given.
+///
+/// There is no widget's `MediaQuery` here to read a real device pixel ratio
+/// from — `_renderVertices` drives `VerticesDrawSink` directly, the same way
+/// [canvasOver] drives `CanvasDrawSink` directly. `1.0` matches the canvas
+/// half of this suite's own capture (both goldens are exactly
+/// `kGoldenViewport` in size, unscaled), and it is what makes the class
+/// comment's "0.5 mm lands on 4 device pixels" true of this rasterization
+/// too. Named so the rasterizer below is built at the *same* ratio rather
+/// than a second, independently-typed `1.0` that could drift from it.
+const double _kVerticesDevicePixelRatio = 1.0;
+
 /// Renders [doc] through `VerticesDrawSink` and the coverage rasterizer,
 /// driven directly the same way [canvasOver] drives `CanvasDrawSink` —
 /// `DraftCanvas` does not own either of this file's fixtures.
 ///
-/// `devicePixelRatio` is fixed at 1.0 because there is no widget's
-/// `MediaQuery` here to read it from, and 1.0 is what the canvas half of this
-/// suite is already pinned at: both goldens are exactly `kGoldenViewport` in
-/// size, and it is what makes the class comment's "0.5 mm lands on 4 device
-/// pixels" true of this rasterization too.
-Future<ui.Image> _renderVertices(WidgetTester tester, DraftDocument doc,
-    SpatialIndex index, ViewportTransform camera) async {
+/// Returns the rasterizer alongside the image so a caller can assert ink was
+/// actually produced before trusting the golden comparison — see the note
+/// beside `_rung` in `dash_ladder_golden_test.dart` for why that assertion
+/// exists at all.
+Future<(ui.Image, TriangleRasterizer)> _renderVertices(WidgetTester tester,
+    DraftDocument doc, SpatialIndex index, ViewportTransform camera) async {
   final recorder = ui.PictureRecorder();
+  // The rasterizer has to sample at the same resolution Impeller actually
+  // rasterizes at (a *device*-pixel quantity, which is what
+  // `VerticesDrawSink`'s width floor and colour fade are computed in), not
+  // at the logical resolution the sink's positions are expressed in — see
+  // the fuller version of this note in `dash_ladder_golden_test.dart`. Here
+  // that ratio is `_kVerticesDevicePixelRatio`, so scaling is a no-op, but
+  // the rasterizer is still built and fed through the same
+  // resolution/scaling shape the other two files use rather than a
+  // logical-resolution special case, so a future change to the ratio here
+  // does not silently reintroduce the bug.
   final rasterizer = TriangleRasterizer(
-      kGoldenViewport.width.round(), kGoldenViewport.height.round());
+      (kGoldenViewport.width * _kVerticesDevicePixelRatio).round(),
+      (kGoldenViewport.height * _kVerticesDevicePixelRatio).round());
   final sink = VerticesDrawSink(
     pixelsPerPaperMm: kPixelsPerPaperMm,
     canvas: Canvas(recorder),
-  )..observer = rasterizer.observe;
+    devicePixelRatio: _kVerticesDevicePixelRatio,
+  )..observer = (positions, colors) {
+      final scaled = Float32List(positions.length);
+      for (var i = 0; i < positions.length; i++) {
+        scaled[i] = positions[i] * _kVerticesDevicePixelRatio;
+      }
+      rasterizer.observe(scaled, colors);
+    };
   DraftPainter(
           document: doc, index: index, resolver: DocumentStyleResolver(doc))
       .paint(sink, camera, kGoldenViewport);
@@ -208,7 +237,8 @@ Future<ui.Image> _renderVertices(WidgetTester tester, DraftDocument doc,
   // called), the fake-async test zone never delivers that callback and the
   // await hangs forever; before any pump it resolves immediately. `runAsync`
   // steps outside the fake zone for the one call that needs it.
-  return (await tester.runAsync(rasterizer.toImage))!;
+  final image = (await tester.runAsync(rasterizer.toImage))!;
+  return (image, rasterizer);
 }
 
 void main() {
@@ -231,8 +261,13 @@ void main() {
       await tester.pumpWidget(canvasOver(doc, index, camera));
       await expectLater(find.byKey(kCanvasKey), matchesGoldenFile(name));
 
-      final image = await _renderVertices(tester, doc, index, camera);
+      final (image, rasterizer) =
+          await _renderVertices(tester, doc, index, camera);
       addTearDown(image.dispose);
+      // A golden that never inks a pixel passes forever and pins nothing --
+      // the two rules and the square are always present.
+      expect(rasterizer.pixels.any((p) => p != 0), isTrue,
+          reason: '$name drew nothing');
       await expectLater(image, matchesGoldenFile('vertices/$name'));
     }
   });
@@ -251,8 +286,13 @@ void main() {
     await expectLater(
         find.byKey(kCanvasKey), matchesGoldenFile('anisotropy_bypass.png'));
 
-    final image = await _renderVertices(tester, doc, index, camera);
+    final (image, rasterizer) =
+        await _renderVertices(tester, doc, index, camera);
     addTearDown(image.dispose);
+    // A golden that never inks a pixel passes forever and pins nothing --
+    // both instances' outlines and diagonals are always present.
+    expect(rasterizer.pixels.any((p) => p != 0), isTrue,
+        reason: 'anisotropy_bypass drew nothing');
     await expectLater(
         image, matchesGoldenFile('vertices/anisotropy_bypass.png'));
   });
