@@ -26,11 +26,11 @@ class CanvasDrawSink implements DrawSink {
 
   /// Rebound each frame rather than fixed at construction.
   ///
-  /// The `Paint`, the `Path` and the two typed lists below are the whole
-  /// reason this is an object: they are allocated once and rewritten per op.
-  /// A sink built per paint would throw that away and put four allocations
-  /// back on the frame path. The `Canvas` is the only part that genuinely
-  /// changes from one frame to the next, so it is the only part that moves.
+  /// The `Paint`, the `Path` and the typed list below are the whole reason
+  /// this is an object: they are allocated once and rewritten per op. A sink
+  /// built per paint would throw that away and put allocations back on the
+  /// frame path. The `Canvas` is the only part that genuinely changes from
+  /// one frame to the next, so it is the only part that moves.
   late Canvas canvas;
 
   final double pixelsPerPaperMm;
@@ -64,7 +64,6 @@ class CanvasDrawSink implements DrawSink {
   // neither is handed to a caller that could retain it.
   final Paint _paint = Paint()..style = PaintingStyle.stroke;
   final Path _scratch = Path();
-  final Float32List _point = Float32List(2);
   final Float64List _matrix = Float64List(16)..[10] = 1.0;
 
   Transform2 _residual = Transform2.identity();
@@ -116,12 +115,25 @@ class CanvasDrawSink implements DrawSink {
     _residualScale = 1.0;
   }
 
+  /// A square marker, axis-aligned on the screen.
+  ///
+  /// **Not** `drawRawPoints` under the pushed residual, which is what this used
+  /// to be: that draws the cap in local space, so a rotated or sheared instance
+  /// turned the marker with it. A marker marks a position and its orientation
+  /// carries nothing, so it is drawn in screen space — which is also what
+  /// `VerticesDrawSink` does, and the two backends have to agree.
   @override
   void point(double x, double y, ResolvedStyle style) {
-    _pushTransform();
-    _point[0] = x;
-    _point[1] = y;
-    canvas.drawRawPoints(PointMode.points, _point, _paintFor(style));
+    // Screen space, so the residual is applied here rather than pushed.
+    final sx = _residual.a * x + _residual.c * y + _residual.e;
+    final sy = _residual.b * x + _residual.d * y + _residual.f;
+    final half = _widthFor(style.lineweightHundredths, 1.0) / 2;
+    _paint
+      ..color = Color(style.argb)
+      ..style = PaintingStyle.fill;
+    canvas.drawRect(
+        Rect.fromLTRB(sx - half, sy - half, sx + half, sy + half), _paint);
+    _paint.style = PaintingStyle.stroke;
     _canvasCalls++;
   }
 

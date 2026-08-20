@@ -196,8 +196,10 @@ void main() {
       sink.beginResidual(const Transform2(2, 3, 4, 5, 6, 7));
       // The push is deferred to the first primitive drawn under the residual,
       // so a residual under which nothing is drawn never touches canvas
-      // state. Any primitive forces it; a point is the simplest.
-      sink.point(0, 0, _anyStyle);
+      // state. A point does *not* force it -- it applies the residual to its
+      // own coordinates instead of pushing it -- so a circle is the simplest
+      // primitive that does.
+      sink.circle(0, 0, 1, _anyStyle);
 
       expect(canvas.named('save'), hasLength(1));
       final matrix = canvas.named('transform').single.args.single;
@@ -213,9 +215,10 @@ void main() {
     test('endResidual restores the canvas', () {
       sink
         ..beginResidual(Transform2.translation(3, 4))
-        // Forces the deferred push, same as above; endResidual only restores
-        // what was actually pushed.
-        ..point(0, 0, _anyStyle)
+        // Forces the deferred push, same as above -- a point would not, so a
+        // circle is used instead; endResidual only restores what was
+        // actually pushed.
+        ..circle(0, 0, 1, _anyStyle)
         ..endResidual();
       expect(canvas.named('restore'), hasLength(1));
     });
@@ -283,13 +286,30 @@ void main() {
       expect(arc.args[3], isFalse, reason: 'an arc is not a pie slice');
     });
 
-    test('point reaches the canvas as a point, not a zero-length path', () {
-      // drawRawPoints over drawPoints: the latter needs a fresh List<Offset>
-      // per call, and points are per-entity work on the frame path.
-      sink.point(3, 4, _anyStyle);
-      final call = canvas.named('drawRawPoints').single;
-      expect(call.args.first, PointMode.points);
-      expect(call.args[1], <double>[3, 4]);
+    test(
+        'point reaches the canvas as an axis-aligned rect in screen space, '
+        'not a rotated cap', () {
+      // The residual is not pushed onto the canvas for a point -- it is
+      // folded into the coordinates before `drawRect`, in screen space -- so
+      // the marker's shape does not rotate or shear with the residual. See
+      // `point_shape_test.dart` for a rasterised check that this holds under
+      // an actually rotated residual.
+      sink
+        ..beginResidual(const Transform2(2, 0, 0, 2, 10, 20))
+        ..point(3, 4, _anyStyle);
+
+      expect(canvas.named('save'), isEmpty,
+          reason: 'a point never pushes the residual onto the canvas');
+      final call = canvas.named('drawRect').single;
+      final rect = call.args.first as Rect;
+      // (3,4) under a *2 scale + (10,20) translate lands at (16,28); 25/100
+      // mm at 4 px/mm is 1 device pixel, so half a pixel either side -- and
+      // the residual's scale plays no part in the marker's own size, because
+      // the width here is a device-pixel quantity, not a paper one
+      // pre-divided by it.
+      expect(rect, const Rect.fromLTRB(15.5, 27.5, 16.5, 28.5));
+      expect(call.paintingStyle, PaintingStyle.fill);
+      expect(call.color, const Color(0xFFFF0000));
     });
   });
 }
