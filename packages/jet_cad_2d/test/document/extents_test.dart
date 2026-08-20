@@ -100,4 +100,59 @@ void main() {
     expect(box.max.x, closeTo(7 + 110 * scale, 1e-9));
     expect(box.max.y, closeTo(8 + 80 * scale, 1e-9));
   });
+
+  test("doc.extents is computed through the document's own measurer", () {
+    // Every other text case in this file calls `entityBounds` with an
+    // explicit measurer, which proves the *function* reads its argument and
+    // proves nothing at all about the field. `DraftDocument._boxOfContainer`
+    // passes `textMeasurer`, and Plan 3c Task 13's S21 mutant — replacing that
+    // with a fresh default `MetricModelMeasurer()` — survived both full
+    // suites. The spec's table calls this the measurer-dependence test and it
+    // did not exist.
+    //
+    // Two measurers that differ only in their *ratios*, not in their kind: a
+    // fixture whose second measurer is `InsertionPointMeasurer` would pass
+    // against a mutant that hard-codes any real model, which is the same
+    // degenerate-fixture trap the rest of this plan keeps walking into.
+    DraftDocument docWith(TextMeasurer m) {
+      final doc = DraftDocument.empty(measurer: m);
+      doc.commands.execute(AddEntityCommand(
+        record: EntityRecord(
+          handle: doc.handleSeed.next(),
+          owner: doc.rootHandle,
+          kind: EntityKind.text,
+          layer: ReservedHandles.layerZero,
+          linetype: ReservedHandles.byLayerLinetype,
+          linetypeScale: 1.0,
+          geomIndex: 0,
+          color: const ByLayerColor(),
+          lineweight: kByLayer,
+          transparency: kByLayer,
+          flags: 0,
+          text: 'A MUCH LONGER LABEL',
+          textStyle: ReservedHandles.standardTextStyle,
+          textAttrs: 0,
+        ),
+        payload: payload([7, 8], [200, 0, 0, 0]),
+      ));
+      return doc;
+    }
+
+    final narrow = docWith(MetricModelMeasurer(advanceRatio: 0.30));
+    final wide = docWith(MetricModelMeasurer(advanceRatio: 0.90));
+    final defaults = docWith(MetricModelMeasurer());
+
+    double width(DraftDocument d) => d.extents.maxX - d.extents.minX;
+
+    // Non-degenerate on both sides: both are real boxes, and the ratio
+    // between them is the ratio between the two advance ratios, so this fails
+    // on a measurer that is ignored *and* on one that is only partly read.
+    expect(width(narrow), greaterThan(1.0));
+    expect(width(wide), closeTo(width(narrow) * (0.90 / 0.30), 1e-9));
+
+    // And neither equals the default model, which is what a mutant that
+    // hard-codes `MetricModelMeasurer()` would produce for all three.
+    expect(width(defaults), isNot(closeTo(width(narrow), 1e-6)));
+    expect(width(defaults), isNot(closeTo(width(wide), 1e-6)));
+  });
 }

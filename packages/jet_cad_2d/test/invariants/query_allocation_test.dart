@@ -123,7 +123,17 @@ const _candidateScalingClasses = {'Vector2', 'Aabb2'};
 /// exactly the kind of object that gets built inside a helper without
 /// anyone thinking of it as an allocation, so the query path is now watched
 /// for them the same way it is watched for `Vector2`.
-const _recursiveCandidateScalingClasses = {'Vector2', '_Record'};
+///
+/// `TextMetrics` joined it for the same reason one plan later. Plan 3c's
+/// design names *this file* as the killer for the mutant "allocate a fresh
+/// `TextMetrics` on a cache hit", and when Task 13 ran that mutant this file
+/// stayed **green**: a per-candidate `TextMetrics` was invisible to a watch
+/// list of `Vector2` and `_Record`, exactly as the per-candidate `_Record`
+/// had been invisible before it. `MetricModelMeasurer.measure` is on the
+/// pick path and must return the *identical* instance on a repeat call —
+/// that is its own doc comment's contract, and this is what enforces it
+/// where a hit-path regression would actually be felt.
+const _recursiveCandidateScalingClasses = {'Vector2', '_Record', 'TextMetrics'};
 
 /// A per-call instance count admitting real JIT/VM-service noise (measured
 /// at roughly 0.02 `Vector2` and 0.002 `Aabb2` per call on this machine,

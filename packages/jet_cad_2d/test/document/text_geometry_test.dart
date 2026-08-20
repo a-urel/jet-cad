@@ -104,6 +104,27 @@ void main() {
     expect(a.f, closeTo(b.f, 1e-9));
   });
 
+  test('rotation turns counter-clockwise, and by how much', () {
+    // `rotation is not symmetric about its sign`, below, names the right
+    // property and cannot see a *global* sign flip: `plus.b == -minus.b`
+    // holds just as well when both are negated. Plan 3c Task 13's S9 mutant
+    // (`math.sin(-rotation)`) walked straight through the whole of this file
+    // and was caught two packages away, by a pick test and a golden. The
+    // spec's table says the killer for that mutant is an arithmetic
+    // expectation; this is it.
+    final m = _model.measure(text: 'WC', style: _plain);
+    final t = textLocalTransform(_resolve(rotation: 0.4), m, Vector2.zero());
+    // Hand-derived: `_plain` leaves the width factor at 1 and the oblique at
+    // 0, so the linear map is a uniform 200/70 (height over cap height) with
+    // no shear, and rotation by +0.4 takes (la, 0) to (cos*la, sin*la).
+    const scale = 200 / 70.0;
+    expect(t.a, closeTo(math.cos(0.4) * scale, 1e-9));
+    expect(t.b, closeTo(math.sin(0.4) * scale, 1e-9));
+    // The sign is the whole point: +0.4 rad must send the baseline's x axis
+    // *up* in a y-up space, not down.
+    expect(t.b, greaterThan(0.0));
+  });
+
   test('rotation is not symmetric about its sign', () {
     final m = _model.measure(text: 'WC', style: _plain);
     // 0 and pi are degenerate for a sign flip; 0.4 rad is not.

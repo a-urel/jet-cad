@@ -163,4 +163,42 @@ void main() {
     expect(box.minX, lessThan(1000));
     expect(box.minY, lessThan(2000));
   });
+
+  test('editing a text dirties one leaf; it does not rebuild the index', () {
+    // `SetEntityTextCommand` names the edited handle in `CommandResult.touched`
+    // and that is what routes the edit down the incremental path. Dropping the
+    // name is **not** a wrong-answer defect — `_reconcile` treats an empty
+    // `touched` as "cannot pin down what changed" and falls back to
+    // `rebuildAll()`, so the box above still comes out right. It is a cost
+    // defect, and the box test cannot see it: Plan 3c Task 13's S16 mutant
+    // (`touched: const {}`) survived both full suites for exactly that reason.
+    //
+    // A full rebuild per keystroke on the path an editing session spends all
+    // its time in is the thing worth refusing, so this asserts the route
+    // rather than the answer.
+    final doc = DraftDocument.empty(measurer: MetricModelMeasurer());
+    final style = doc.tables.textStyles.byName('STANDARD')!;
+    final handle = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+      record: _textRecord(handle, doc.rootHandle, style.handle),
+      payload: GeometryPayload(
+        coords: Float64List.fromList([1000, 2000]),
+        scalars: Float64List.fromList([200, 0, 0, 0]),
+      ),
+    ));
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final before = index.rebuildCount;
+    doc.commands
+        .execute(SetEntityTextCommand(handle, 'A MUCH LONGER LABEL', ''));
+    expect(index.rebuildCount, before,
+        reason: 'a text edit must take the incremental path');
+
+    // Non-degenerate: the edit has to have actually reached the index, or
+    // "no rebuild" would be true of a command that did nothing at all.
+    final slot = doc.entities.slotOf(handle)!;
+    expect(index.rootIndex.dirty.boxOf(slot), isNotNull,
+        reason: 'the edited leaf must be parked in the dirty overlay');
+  });
 }
