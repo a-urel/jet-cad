@@ -147,162 +147,197 @@ void main() {
   // the cache evicts an entry the same frame asks for again, and the row is
   // unpassable no matter what the painter does. So this rig prints that count
   // before it prints anything else.
-  test('text paint at 50000', () {
-    // Two measurers, because production has two. `DraftCanvas` builds its own
-    // `FlutterTextMeasurer` for the sink and never touches
-    // `document.textMeasurer`, which is what the painter reads metrics from —
-    // so draw-colour paragraphs and metrics probes land in *different* caches,
-    // and only the sink's is the one `kParagraphCacheLimit` is about. Sharing
-    // one here would inflate the count with probe entries the real wiring
-    // keeps somewhere else.
-    final sinkMeasurer = FlutterTextMeasurer();
-    final docMeasurer = FlutterTextMeasurer();
+  for (final entityCount in [50000, 500000]) {
+    test('text paint at $entityCount', () {
+      // Two measurers, because production has two. `DraftCanvas` builds its own
+      // `FlutterTextMeasurer` for the sink and never touches
+      // `document.textMeasurer`, which is what the painter reads metrics from —
+      // so draw-colour paragraphs and metrics probes land in *different* caches,
+      // and only the sink's is the one `kParagraphCacheLimit` is about. Sharing
+      // one here would inflate the count with probe entries the real wiring
+      // keeps somewhere else.
+      final sinkMeasurer = FlutterTextMeasurer();
+      final docMeasurer = FlutterTextMeasurer();
 
-    final build = Stopwatch()..start();
-    final doc = textRigCorpus(50000, measurer: docMeasurer);
-    final docMs = build.elapsedMilliseconds;
-    final index = SpatialIndex(doc);
-    final indexMs = build.elapsedMilliseconds - docMs;
-    final resolver = DocumentStyleResolver(doc);
+      final build = Stopwatch()..start();
+      final doc = textRigCorpus(entityCount, measurer: docMeasurer);
+      final docMs = build.elapsedMilliseconds;
+      final index = SpatialIndex(doc);
+      final indexMs = build.elapsedMilliseconds - docMs;
+      final resolver = DocumentStyleResolver(doc);
 
-    final painter =
-        DraftPainter(document: doc, index: index, resolver: resolver);
-    final textless = DraftPainter(
-        document: doc, index: index, resolver: resolver, drawText: false);
+      final painter =
+          DraftPainter(document: doc, index: index, resolver: resolver);
+      final textless = DraftPainter(
+          document: doc, index: index, resolver: resolver, drawText: false);
 
-    // The corpus has to actually carry both kinds of text, or every number
-    // below is a measurement of a drawing with no text in it that still
-    // prints plausible figures. Checked here rather than in the normal suite
-    // because building it costs about two seconds and the check only matters
-    // at the moment the number is taken. `labelFraction` is drawn from the
-    // *root* budget, which the 20,000 instances mostly consume — at small
-    // entity counts it yields zero labels while `attributedInstanceFraction`
-    // keeps producing its 4,000, so "there is text" is not one condition.
-    // R2's forced-repaint guard in `frame_timing_test.dart` refuses a
-    // plausible zero for the same reason.
-    var attribs = 0, labels = 0;
-    for (final slot in doc.entities.liveSlots) {
-      final kind = doc.entities.kindAt(slot);
-      if (kind == EntityKind.attrib) attribs++;
-      if (kind == EntityKind.text && doc.entities.textAt(slot).isNotEmpty) {
-        labels++;
+      // The corpus has to actually carry both kinds of text, or every number
+      // below is a measurement of a drawing with no text in it that still
+      // prints plausible figures. Checked here rather than in the normal suite
+      // because building it costs about two seconds and the check only matters
+      // at the moment the number is taken. `labelFraction` is drawn from the
+      // *root* budget, which the 20,000 instances mostly consume — at small
+      // entity counts it yields zero labels while `attributedInstanceFraction`
+      // keeps producing its 4,000, so "there is text" is not one condition.
+      // R2's forced-repaint guard in `frame_timing_test.dart` refuses a
+      // plausible zero for the same reason.
+      var attribs = 0, labels = 0;
+      for (final slot in doc.entities.liveSlots) {
+        final kind = doc.entities.kindAt(slot);
+        if (kind == EntityKind.attrib) attribs++;
+        if (kind == EntityKind.text && doc.entities.textAt(slot).isNotEmpty) {
+          labels++;
+        }
       }
-    }
-    if (attribs < 100 || labels < 10) {
-      throw StateError('textRigCorpus is degenerate: attribs=$attribs '
-          'labels=$labels — the distinct-key number below would be a '
-          'measurement of a drawing with no text in it');
-    }
+      if (attribs < 100 || labels < 10) {
+        throw StateError('textRigCorpus is degenerate: attribs=$attribs '
+            'labels=$labels — the distinct-key number below would be a '
+            'measurement of a drawing with no text in it');
+      }
 
-    print('=== 50000 entities, with text ===');
-    print('  corpus: doc=${docMs}ms index=${indexMs}ms '
-        'entities=${doc.entities.liveCount} nodes=${doc.tree.nodes.length} '
-        'definitions=${doc.tree.definitions.length}');
-    print('  text in corpus: attribs=$attribs labels=$labels');
+      print('=== $entityCount entities, with text ===');
+      print('  corpus: doc=${docMs}ms index=${indexMs}ms '
+          'entities=${doc.entities.liveCount} nodes=${doc.tree.nodes.length} '
+          'definitions=${doc.tree.definitions.length}');
+      print('  text in corpus: attribs=$attribs labels=$labels');
 
-    for (final (label, camera) in [
-      ('whole drawing', wholeDrawingCamera(doc)),
-      ('working set', workingSetCamera(doc)),
-    ]) {
-      print('  -- $label --');
+      for (final (label, camera) in [
+        ('whole drawing', wholeDrawingCamera(doc)),
+        ('working set', workingSetCamera(doc)),
+      ]) {
+        print('  -- $label --');
 
-      // Step 2: the gate's feasibility number, taken first and on a sink that
-      // materialises nothing but the keys.
-      final keySink = TextKeySink();
-      painter.paint(keySink, camera, kRigViewport);
-      final strings = keySink.keys.map((k) => (k.$1, k.$2)).toSet();
-      final colours = keySink.keys.map((k) => k.$3).toSet();
-      print('    DISTINCT CACHE KEYS: ${keySink.keys.length}   '
-          '(limit $kParagraphCacheLimit) '
-          '${keySink.keys.length > kParagraphCacheLimit ? "OVER" : "under"}');
-      print('      text ops: ${keySink.textOps}  '
-          'distinct (string, style): ${strings.length}  '
-          'distinct argb: ${colours.length}');
+        // Step 2: the gate's feasibility number, taken first and on a sink that
+        // materialises nothing but the keys.
+        final keySink = TextKeySink();
+        painter.paint(keySink, camera, kRigViewport);
+        final keyCount = keySink.drawsPerKey.length;
+        final strings = keySink.keys.map((k) => (k.$1, k.$2)).toSet();
+        final colours = keySink.keys.map((k) => k.$3).toSet();
+        print('    DISTINCT CACHE KEYS: $keyCount   '
+            '(limit $kParagraphCacheLimit) '
+            '${keyCount > kParagraphCacheLimit ? "OVER" : "under"}');
+        print('      text ops: ${keySink.textOps}  '
+            'distinct (string, style): ${strings.length}  '
+            'distinct argb: ${colours.length}');
 
-      for (final (mode, p) in [('text on', painter), ('text off', textless)]) {
-        sinkMeasurer.resetCounters();
-        docMeasurer.resetCounters();
-        final paint = measure(() {
-          final recorder = PictureRecorder();
-          p.paint(
-              CanvasDrawSink(
-                  canvas: Canvas(recorder),
-                  pixelsPerPaperMm: kLogicalPixelsPerMm,
-                  measurer: sinkMeasurer,
-                  textStyleOf: doc.textStyleOf),
-              camera,
-              kRigViewport);
-          recorder.endRecording().dispose();
+        // Hit rate split by source. The two text sources have opposite cache
+        // behaviour by construction and the spec asks for them separately: a
+        // single blended figure hides that one of them is the entire pressure.
+        var labelOps = 0, labelKeys = 0, attrOps = 0, attrKeys = 0;
+        keySink.drawsPerKey.forEach((key, draws) {
+          if (TextKeySink.isAttributeTag(key.$1)) {
+            attrKeys++;
+            attrOps += draws;
+          } else {
+            labelKeys++;
+            labelOps += draws;
+          }
         });
+        String rate(int ops, int keys) => ops == 0
+            ? 'n/a'
+            : '${((1 - keys / ops) * 100).toStringAsFixed(1)}%';
+        print('      hit rate  labels: ${rate(labelOps, labelKeys)} '
+            '($labelOps ops / $labelKeys keys)   '
+            'attributes: ${rate(attrOps, attrKeys)} '
+            '($attrOps ops / $attrKeys keys)');
+        // The classification is checked, not assumed: an attribute key that the
+        // predicate missed would land in the label bucket and quietly flatten
+        // its hit rate.
+        if (attrOps > 0 && attrKeys != attrOps) {
+          throw StateError('an attribute tag repeated: $attrOps draws over '
+              '$attrKeys keys — every generated tag carries its own instance '
+              'ordinal, so the classifier has mixed the two sources');
+        }
 
-        final sink = NullDrawSink();
-        final before = sink.opCount;
-        final query = measure(() => p.paint(sink, camera, kRigViewport));
-        final opsPerFrame = (sink.opCount - before) ~/ (query.n + 20);
+        for (final (mode, p) in [
+          ('text on', painter),
+          ('text off', textless)
+        ]) {
+          sinkMeasurer.resetCounters();
+          docMeasurer.resetCounters();
+          final paint = measure(() {
+            final recorder = PictureRecorder();
+            p.paint(
+                CanvasDrawSink(
+                    canvas: Canvas(recorder),
+                    pixelsPerPaperMm: kLogicalPixelsPerMm,
+                    measurer: sinkMeasurer,
+                    textStyleOf: doc.textStyleOf),
+                camera,
+                kRigViewport);
+            recorder.endRecording().dispose();
+          });
 
-        // The counters below come from this one untimed frame, so they
-        // describe a frame rather than an average over two different sinks.
-        final canvasRecorder = PictureRecorder();
-        final canvasSink = CanvasDrawSink(
-            canvas: Canvas(canvasRecorder),
-            pixelsPerPaperMm: kLogicalPixelsPerMm,
-            measurer: sinkMeasurer,
-            textStyleOf: doc.textStyleOf);
-        final layoutsBefore = sinkMeasurer.layoutCount;
-        final evictionsBefore = sinkMeasurer.evictionCount;
-        p.paint(canvasSink, camera, kRigViewport);
-        canvasRecorder.endRecording().dispose();
+          final sink = NullDrawSink();
+          final before = sink.opCount;
+          final query = measure(() => p.paint(sink, camera, kRigViewport));
+          final opsPerFrame = (sink.opCount - before) ~/ (query.n + 20);
 
-        print('    [$mode]');
-        print('      R1 paint          $paint');
-        print('      R3 query-only     $query');
-        print('      ops/frame: $opsPerFrame  '
-            'canvasCalls: ${canvasSink.canvasCallCount}');
-        print('      textOps: ${p.textOpCount}  '
-            'skippedText: ${p.skippedTextCount}');
-        print('      steady-state frame: '
-            'newLayouts=${sinkMeasurer.layoutCount - layoutsBefore} '
-            'newEvictions=${sinkMeasurer.evictionCount - evictionsBefore}');
-        print('      sink cache: layouts=${sinkMeasurer.layoutCount} '
-            'evictions=${sinkMeasurer.evictionCount} '
-            'live=${sinkMeasurer.liveParagraphCount}');
-        print('      doc cache:  layouts=${docMeasurer.layoutCount} '
-            'evictions=${docMeasurer.evictionCount} '
-            'live=${docMeasurer.liveParagraphCount}');
-        print('      screen-space leaves: ${p.screenSpaceLeafCount}  '
-            'dashSpans: ${p.dashSpanCount}  '
-            'collapsed: ${p.collapsedDashCount}');
+          // The counters below come from this one untimed frame, so they
+          // describe a frame rather than an average over two different sinks.
+          final canvasRecorder = PictureRecorder();
+          final canvasSink = CanvasDrawSink(
+              canvas: Canvas(canvasRecorder),
+              pixelsPerPaperMm: kLogicalPixelsPerMm,
+              measurer: sinkMeasurer,
+              textStyleOf: doc.textStyleOf);
+          final layoutsBefore = sinkMeasurer.layoutCount;
+          final evictionsBefore = sinkMeasurer.evictionCount;
+          p.paint(canvasSink, camera, kRigViewport);
+          canvasRecorder.endRecording().dispose();
+
+          print('    [$mode]');
+          print('      R1 paint          $paint');
+          print('      R3 query-only     $query');
+          print('      ops/frame: $opsPerFrame  '
+              'canvasCalls: ${canvasSink.canvasCallCount}');
+          print('      textOps: ${p.textOpCount}  '
+              'skippedText: ${p.skippedTextCount}');
+          print('      steady-state frame: '
+              'newLayouts=${sinkMeasurer.layoutCount - layoutsBefore} '
+              'newEvictions=${sinkMeasurer.evictionCount - evictionsBefore}');
+          print('      sink cache: layouts=${sinkMeasurer.layoutCount} '
+              'evictions=${sinkMeasurer.evictionCount} '
+              'live=${sinkMeasurer.liveParagraphCount}');
+          print('      doc cache:  layouts=${docMeasurer.layoutCount} '
+              'evictions=${docMeasurer.evictionCount} '
+              'live=${docMeasurer.liveParagraphCount}');
+          print('      screen-space leaves: ${p.screenSpaceLeafCount}  '
+              'dashSpans: ${p.dashSpanCount}  '
+              'collapsed: ${p.collapsedDashCount}');
+        }
       }
-    }
 
-    // How much slack the working-set number has.
-    //
-    // "Under the limit" is not the same as "under the limit with room". The
-    // working-set camera sees a few square kilometres of a drawing whose text
-    // is spread over the whole site, so its key count says as much about how
-    // little text is in frame as about the cache. This ladder zooms out about
-    // the same centre and prints where the count crosses
-    // `kParagraphCacheLimit`, which is the number Task 14 needs to state the
-    // gate row's margin instead of asserting it has one.
-    print('  -- key pressure, zooming out about the working-set centre --');
-    final e = doc.extents;
-    final cx = (e.minX + e.maxX) / 2;
-    final cy = (e.minY + e.maxY) / 2;
-    for (final factor in [1, 2, 4, 8, 16, 32]) {
-      final halfW = 1500.0 * factor;
-      final halfH = 1125.0 * factor;
-      final camera = ViewportTransform.fit(
-          Aabb2(
-              Vector2(cx - halfW, cy - halfH), Vector2(cx + halfW, cy + halfH)),
-          kRigViewport);
-      final keys = TextKeySink();
-      painter.paint(keys, camera, kRigViewport);
-      print('    ${(factor * 3000).toString().padLeft(6)} world units wide: '
-          '${keys.keys.length.toString().padLeft(5)} keys, '
-          '${keys.textOps.toString().padLeft(5)} text ops  '
-          '${keys.keys.length > kParagraphCacheLimit ? "OVER" : "under"}');
-    }
+      // How much slack the working-set number has.
+      //
+      // "Under the limit" is not the same as "under the limit with room". The
+      // working-set camera sees a few square kilometres of a drawing whose text
+      // is spread over the whole site, so its key count says as much about how
+      // little text is in frame as about the cache. This ladder zooms out about
+      // the same centre and prints where the count crosses
+      // `kParagraphCacheLimit`, which is the number Task 14 needs to state the
+      // gate row's margin instead of asserting it has one.
+      print('  -- key pressure, zooming out about the working-set centre --');
+      final e = doc.extents;
+      final cx = (e.minX + e.maxX) / 2;
+      final cy = (e.minY + e.maxY) / 2;
+      for (final factor in [1, 2, 4, 8, 16, 32]) {
+        final halfW = 1500.0 * factor;
+        final halfH = 1125.0 * factor;
+        final camera = ViewportTransform.fit(
+            Aabb2(Vector2(cx - halfW, cy - halfH),
+                Vector2(cx + halfW, cy + halfH)),
+            kRigViewport);
+        final keys = TextKeySink();
+        painter.paint(keys, camera, kRigViewport);
+        print('    ${(factor * 3000).toString().padLeft(6)} world units wide: '
+            '${keys.keys.length.toString().padLeft(5)} keys, '
+            '${keys.textOps.toString().padLeft(5)} text ops  '
+            '${keys.keys.length > kParagraphCacheLimit ? "OVER" : "under"}');
+      }
 
-    index.dispose();
-  }, timeout: const Timeout(Duration(minutes: 10)));
+      index.dispose();
+    }, timeout: const Timeout(Duration(minutes: 20)));
+  }
 }

@@ -41,6 +41,19 @@ final int _attrs = packTextAttrs(
     overrideWidthFactor: true,
     overrideOblique: true);
 
+/// Below this, the norm loop did not measure what it measures.
+///
+/// `_norm` allocates exactly one `Transform2` per iteration and returns it, so
+/// the honest reading is 1.00. Anything under this is the profiler's low-read
+/// artefact — see the retry block in the test.
+const double _kNormFloor = 0.9;
+
+/// The same, for the wrappers loop, whose honest reading is 9.00.
+///
+/// Set well below nine rather than at it: this floor exists to reject a
+/// *failed read*, not to re-assert the measurement the test already makes.
+const double _kWrappedFloor = 6.0;
+
 int _sum(Map<String, int> counts) => counts.values.fold(0, (a, b) => a + b);
 
 String _report(Map<String, int> counts, int iters) => counts.entries
@@ -90,32 +103,71 @@ void main() {
 
     const iters = 20000;
 
-    // (a) the composition every residual-path leaf already pays — the norm
-    // circles and arcs establish, per `draft_painter.dart`.
-    await m.reset();
-    for (var i = 0; i < iters; i++) {
-      _norm(camera, placement, ox, oy);
-    }
-    final norm = await m.accumulatedInstances(_watched);
+    // **Two of these three loops are controls with known answers, and that is
+    // what makes retrying safe.** `_norm` returns one `Transform2` that
+    // escapes into the result, so its true cost is exactly 1.00 per leaf;
+    // `_textViaWrappers` allocates nine. Neither depends on anything the
+    // subject of this test (`_text`) does. So a reading materially below
+    // either is a **failed measurement, not a result**, and re-taking it
+    // cannot hide a text regression — nothing `_drawText` could do would make
+    // the norm loop under-report.
+    //
+    // It has to be guarded because the artefact is **not proportional**.
+    // Ruling 31 recorded a full-suite run where all three loops read low
+    // together, which a ratio absorbs. Task 14 caught the other kind: one run
+    // in eleven where the norm read **0.60** while the text loop read a full
+    // **1.00**, so the ratio assertion failed at 1.00035 against a bound of
+    // 0.9482 — a green subject reported as a regression. That is the worst
+    // failure a gate can have, because the number it prints looks like
+    // evidence.
+    Map<String, int> norm = const {}, text = const {}, wrapped = const {};
+    var normPerLeaf = 0.0, textPerLeaf = 0.0, wrappedPerLeaf = 0.0;
+    const attempts = 4;
+    for (var attempt = 1; attempt <= attempts; attempt++) {
+      // (a) the composition every residual-path leaf already pays — the norm
+      // circles and arcs establish, per `draft_painter.dart`.
+      await m.reset();
+      for (var i = 0; i < iters; i++) {
+        _norm(camera, placement, ox, oy);
+      }
+      norm = await m.accumulatedInstances(_watched);
 
-    // (b) what the painter does per text leaf.
-    await m.reset();
-    for (var i = 0; i < iters; i++) {
-      _text(camera, placement, ox, oy, payload, measurer, reused);
-    }
-    final text = await m.accumulatedInstances(_watched);
+      // (b) what the painter does per text leaf.
+      await m.reset();
+      for (var i = 0; i < iters; i++) {
+        _text(camera, placement, ox, oy, payload, measurer, reused);
+      }
+      text = await m.accumulatedInstances(_watched);
 
-    // (c) the same answer through the immutable wrappers, so the number the
-    // reduction is worth is measured rather than asserted.
-    await m.reset();
-    for (var i = 0; i < iters; i++) {
-      _textViaWrappers(camera, placement, ox, oy, payload, measurer);
-    }
-    final wrapped = await m.accumulatedInstances(_watched);
+      // (c) the same answer through the immutable wrappers, so the number the
+      // reduction is worth is measured rather than asserted.
+      await m.reset();
+      for (var i = 0; i < iters; i++) {
+        _textViaWrappers(camera, placement, ox, oy, payload, measurer);
+      }
+      wrapped = await m.accumulatedInstances(_watched);
 
-    final normPerLeaf = _sum(norm) / iters;
-    final textPerLeaf = _sum(text) / iters;
-    final wrappedPerLeaf = _sum(wrapped) / iters;
+      normPerLeaf = _sum(norm) / iters;
+      textPerLeaf = _sum(text) / iters;
+      wrappedPerLeaf = _sum(wrapped) / iters;
+      if (normPerLeaf >= _kNormFloor && wrappedPerLeaf >= _kWrappedFloor) break;
+      printOnFailure('attempt $attempt discarded: norm '
+          '${normPerLeaf.toStringAsFixed(2)}, wrappers '
+          '${wrappedPerLeaf.toStringAsFixed(2)} — the profiler under-reported');
+    }
+
+    // Four bad reads in a row is the profiler, not the code. Failing here
+    // rather than falling through keeps a broken measurement from being
+    // published as a text regression.
+    expect(normPerLeaf, greaterThanOrEqualTo(_kNormFloor),
+        reason: 'the allocation profiler under-reported the control loop in '
+            'all $attempts attempts (last: ${_report(norm, iters)} per leaf, '
+            'true value one Transform2). This is a meter failure; nothing is '
+            'known about the text path from this run.');
+    expect(wrappedPerLeaf, greaterThanOrEqualTo(_kWrappedFloor),
+        reason: 'the allocation profiler under-reported the wrappers loop in '
+            'all $attempts attempts (last: ${_report(wrapped, iters)} per '
+            'leaf, true value nine allocations)');
     printOnFailure('norm     ${normPerLeaf.toStringAsFixed(2)}/leaf: '
         '${_report(norm, iters)}');
     printOnFailure('text     ${textPerLeaf.toStringAsFixed(2)}/leaf: '
