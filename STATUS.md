@@ -46,8 +46,31 @@ are collinear — do not carry them forward. `build` is linear in call count to
 ±30 µs; raster is super-linear because each call is one Impeller `Entity`. At
 `DASHED=0` a 10,000-entity frame is **9.5 ms**, inside the 60 fps budget.
 
-**Next: pick the next plan.** Nothing is in flight. The measurement above
-points at one — a `VerticesDrawSink` behind the existing `DrawSink` seam.
+### The batching spike pulled the lever, on a branch
+
+[docs/superpowers/notes/2026-08-20-vertices-sink-spike.md](docs/superpowers/notes/2026-08-20-vertices-sink-spike.md).
+`VerticesDrawSink` builds each stroked segment's triangles itself and submits
+the frame's strokes as one ordered `drawVertices`. At 10,000 entities the frame
+goes **57.3 ms → 14.3 ms**, about 17 fps to about 70 — inside the 16.67 ms
+budget for the first time. Canvas calls 39,631 → 18, and the segment count went
+*up* 2.3× while the frame got faster, which is the sharpest confirmation of the
+per-call model there is.
+
+Lives on **`spike/vertices-sink`**, four commits, **not merged, not pushed**.
+`DraftCanvas.useVertices` and the harness's `VERTICES` define are inert at
+their defaults, so `main`'s frame is unchanged. Engine 720/720, widgets
+180/180, 33 mutants with 32 killed and 1 not applicable.
+
+It is not a finished sink: no joins, no caps, text still on `CanvasDrawSink`,
+and the golden suite is unavailable to it — `flutter_test`'s software Skia did
+not finish a 1,007-segment `drawVertices` in 7.5 minutes. A differential
+oracle covers it instead
+([test/support/vertices_differential.dart](packages/jet_cad_2d_flutter/test/support/vertices_differential.dart)),
+with its blind spots recorded in its own header.
+
+**Next: pick the next plan.** Nothing is in flight. The obvious candidate is
+turning that spike into one — joins and caps, a decision about goldens, and the
+50,000 and 500,000 corpora measured.
 
 ---
 
