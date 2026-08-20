@@ -220,4 +220,85 @@ void main() {
     expect(_inked(sink, r * math.cos(math.pi / 4), r * math.sin(math.pi / 4)),
         isTrue);
   });
+
+  test('a circle joins at its seam, so there is no notch at the start angle',
+      () {
+    // A circle is a full-sweep flatten whose last chord lands on its first
+    // point. The corner there is a corner, and it is the one that is easy to
+    // forget because no vertex list contains it.
+    //
+    // MUTATION: end a closed run without the seam join and the sample just
+    // outside the two chords that meet at angle 0 goes uninked.
+    final sink = _sink()
+      ..beginResidual(Transform2.identity())
+      ..circle(0, 0, 40, _style())
+      ..endResidual();
+
+    // Just inside the outer edge of the stroke, on the seam's bisector — the
+    // notch's deepest point if the join is missing.
+    expect(_inked(sink, 40 + _half - 0.15, 0.0), isTrue);
+  });
+
+  test('the seam is one join, not two, and not a cap', () {
+    // MUTATION: emit the closing segment without the join and this reads one
+    // triangle pair short; MUTATION: join both ends and it reads two too many.
+    final sink = _sink()
+      ..beginResidual(Transform2.identity())
+      ..polyline(_pts([0, 0, 30, 0, 30, 30, 0, 30]), 4, _style(), closed: true)
+      ..endResidual();
+
+    // Four segments (8 triangles) and four corners (2 triangles each, all four
+    // right angles so all four mitre).
+    expect(_triangleCount(sink), 8 + 8);
+  });
+
+  test('an open run of the same points has two corners, not four', () {
+    // The control for the row above: an open run of 4 points is 3 segments
+    // with a join at each of its 2 interior vertices (p1, p2) and nothing at
+    // p0 or p3 -- there is no following segment to join against there.
+    // Closing adds the segment p3 -> p0 and picks up two more corners: the
+    // join at p3 that only exists because the run keeps going past it now,
+    // and the explicit seam join at p0. That is 1 quad (2 triangles) plus 2
+    // joins (4 triangles) more than this row -- 10 + 6 = 16, matching the row
+    // above.
+    //
+    // MUTATION: treat every run as closed and this reads 16.
+    final sink = _sink()
+      ..beginResidual(Transform2.identity())
+      ..polyline(_pts([0, 0, 30, 0, 30, 30, 0, 30]), 4, _style(), closed: false)
+      ..endResidual();
+    expect(_triangleCount(sink), 6 + 4);
+  });
+
+  test('a closed run of two points closes without a phantom seam', () {
+    // Two points make one segment out and one back along the same line. There
+    // is no corner: both joins -- the automatic one at (30, 0), inside the
+    // closing `_runTo`, and the explicit seam join at (0, 0) -- are exact
+    // 180-degree reversals.
+    //
+    // `_endRun`'s own `_runSegments >= 2` guard turns out not to be what
+    // saves this fixture: by the time it is checked, the closing `_runTo`
+    // has already run, and a closed run can only reach that point with
+    // `_runSegments == 2` or more (checked by hand and confirmed empirically
+    // by disabling the guard -- every test here, including this one, stayed
+    // green). What actually keeps this finite is `_emitJoin`'s own layering,
+    // all three bails at once for an exact reversal: `cross == 0` fires
+    // first; even without it `dot < kMinMiterCosine` fires next (a reversal's
+    // cosine is exactly -1); even without both of those `mlen == 0` fires
+    // last, because `n0` and `n1` are exact opposites and their sum is the
+    // zero vector before it is ever divided into.
+    //
+    // MUTATION: disable all three of `_emitJoin`'s bails (`cross == 0`,
+    // `dot < kMinMiterCosine` and `mlen == 0`) at once and `mx /= mlen`
+    // divides zero by zero -- confirmed empirically: this test is the one
+    // that goes red (`v.isFinite` reads false), and it does so only when all
+    // three are gone together, not for any one of them alone.
+    final sink = _sink()
+      ..beginResidual(Transform2.identity())
+      ..polyline(_pts([0, 0, 30, 0]), 2, _style(), closed: true)
+      ..endResidual();
+    for (final v in sink.debugPositions()) {
+      expect(v.isFinite, isTrue);
+    }
+  });
 }

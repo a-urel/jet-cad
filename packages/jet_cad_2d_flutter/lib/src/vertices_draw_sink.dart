@@ -57,9 +57,9 @@ import 'draw_sink.dart';
 ///
 /// ## What this is not
 ///
-/// - **No caps, and no seam join on a closed run.** Miter and bevel joins fill
-///   the notch at every open corner; a closed polyline or a full sweep still
-///   draws one segment short of its seam until that lands.
+/// - **No caps.** Miter and bevel joins fill the notch at every corner,
+///   including a closed polyline's or a full sweep's seam; an open run's two
+///   ends still draw nothing beyond their last quad.
 /// - **Text goes to [CanvasDrawSink], and the buffer flushes before it.**
 ///   A paragraph is not triangles. Points, circles and arcs are batched;
 ///   only text falls back, and flushing first is what keeps a stroke batched
@@ -154,17 +154,15 @@ class VerticesDrawSink implements DrawSink {
   // allocated per polyline would put an allocation back on the frame path
   // that `paint_allocation_test.dart` has just finished pinning at zero.
   //
-  // `_runFirst*` and `_runSegments` are written here but read only by the
-  // closed branch of `_endRun`, which is Task 5 -- `_endRun` asserts against
-  // reaching it in the meantime, so nothing consumes them yet.
-  // ignore: unused_field
+  // `_runFirst*` and `_runSegments` are read by the closed branch of
+  // `_endRun`: the seam join needs the first point to close the run to and
+  // the first segment's own direction to join against, and the guard needs
+  // the segment count to tell a real corner from a two-point reversal.
   double _runFirstX = 0, _runFirstY = 0;
-  // ignore: unused_field
   double _runFirstDx = 0, _runFirstDy = 0;
   double _runPrevX = 0, _runPrevY = 0;
   double _runPrevDx = 0, _runPrevDy = 0;
   bool _runHasDirection = false;
-  // ignore: unused_field
   int _runSegments = 0;
 
   Transform2 _residual = Transform2.identity();
@@ -283,13 +281,9 @@ class VerticesDrawSink implements DrawSink {
       _runTo(qx, qy, half, argb);
     }
     _endRun(closed: closed, half: half, argb: argb);
-    // `closed` is forwarded rather than hardcoded so `_endRun`'s assert is
-    // reachable: the spike's closing segment moves to Task 5 with its seam
-    // join, and a caller that asks for it before Task 5 lands must fail
-    // loudly rather than silently drawing one segment short. No caller
-    // reaches it: `closed:` is `false` at all four of the painter's call
-    // sites, and the one unit test that passed `closed: true` moved to
-    // Task 5 with it.
+    // `closed` is forwarded rather than hardcoded so a closed polyline gets
+    // its closing segment and seam join. No caller reaches it today:
+    // `closed:` is `false` at all four of the painter's call sites.
   }
 
   /// Starts a connected run at a device-space point.
@@ -333,13 +327,26 @@ class VerticesDrawSink implements DrawSink {
 
   /// Ends the run.
   ///
-  /// An open run gets butt caps, which is to say nothing at all. The closed
-  /// case — a closing segment and a seam join — is Task 5; it asserts here so
-  /// a caller that reaches it before then fails loudly rather than silently
-  /// dropping the closing segment the spike used to emit.
+  /// An open run gets butt caps, which is to say nothing at all. A closed run
+  /// gets the segment back to its first point and then the seam join — the
+  /// corner no vertex list contains, and the one whose absence puts a notch on
+  /// every circle at its start angle.
   void _endRun(
       {required bool closed, required double half, required int argb}) {
-    assert(!closed, 'closed runs arrive in Task 5');
+    if (!closed || !_runHasDirection) return;
+    _runTo(_runFirstX, _runFirstY, half, argb);
+    // Defensive, not currently reachable-false: `_runHasDirection` already
+    // guarantees at least one real segment before this point, and the
+    // closing `_runTo` above either adds a second (when it moves) or leaves
+    // `_runSegments` at that pre-existing count of at least one (when it is
+    // already back at the start and skips as a zero-length step) -- there is
+    // no path that reaches here with exactly one. Kept as a guard anyway
+    // because the invariant is a fact about today's callers, not a promise
+    // `_emitJoin` makes on its own.
+    if (_runSegments >= 2) {
+      _emitJoin(_runFirstX, _runFirstY, _runPrevDx, _runPrevDy, _runFirstDx,
+          _runFirstDy, half, argb);
+    }
   }
 
   /// Fills the notch at a vertex between two unit directions.
@@ -622,19 +629,18 @@ class VerticesDrawSink implements DrawSink {
     var lx = cx + r * math.cos(start);
     var ly = cy + r * math.sin(start);
     _beginRun(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f);
-    for (var i = 1; i <= steps; i++) {
+    // A closed sweep stops one sample short: its last chord is the segment
+    // `_endRun` draws back to the first point, so closing here would draw
+    // that chord twice and leave the seam a duplicated point instead of a
+    // join.
+    final last = closed ? steps - 1 : steps;
+    for (var i = 1; i <= last; i++) {
       final angle = start + step * i;
       lx = cx + r * math.cos(angle);
       ly = cy + r * math.sin(angle);
       _runTo(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f, half, argb);
     }
-    _endRun(closed: false, half: half, argb: argb);
-    // `closed` is documentation here rather than a branch: a full sweep
-    // already lands the last chord on the first point. A full sweep's last
-    // sample is its first point, so the run closes itself geometrically and
-    // the seam is still unjoined -- that is Task 5's, and `closed: false`
-    // above says so rather than pretending otherwise.
-    assert(!closed || (sweep - 2 * math.pi).abs() < 1e-9);
+    _endRun(closed: closed, half: half, argb: argb);
   }
 
   @override

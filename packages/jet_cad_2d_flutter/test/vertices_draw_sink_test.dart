@@ -108,23 +108,19 @@ void main() {
     expect(open.debugPositions().length, 6 * 6);
   });
 
-  test('a closed polyline hits the unimplemented closed branch, loudly', () {
-    // `polyline` forwards its own `closed:` to `_endRun`, so this is now
-    // reachable rather than dead code -- and `_endRun`'s closed branch, a
-    // closing segment and its seam join, is Task 5's. Until it lands, this
-    // pins the failure as an assertion rather than the silent one-segment-
-    // short drawing the spike used to produce: Task 5 changes this test's
-    // expectation to a real assertion about the closing geometry, not a
-    // silent gap it has to rediscover.
-    //
-    // No caller reaches this today: `closed:` is `false` at every one of the
-    // painter's four call sites.
-    final sink = _sink()..beginResidual(Transform2.identity());
-    expect(
-        () => sink.polyline(
-            Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, _style(),
-            closed: true),
-        throwsA(isA<AssertionError>()));
+  test('a closed polyline draws its closing segment and seam join', () {
+    // `polyline` forwards its own `closed:` to `_endRun`, which now closes
+    // the run instead of asserting against reaching this branch. No caller
+    // reaches it today: `closed:` is `false` at every one of the painter's
+    // four call sites.
+    final closed = _sink()
+      ..beginResidual(Transform2.identity())
+      ..polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, _style(),
+          closed: true)
+      ..endResidual();
+    // Three segments and three corners: 3 * 2 quad triangles plus 3 * 2 join
+    // triangles, every corner shallow enough to mitre.
+    expect(closed.debugPositions().length, (3 * 2 + 3 * 2) * 3 * 2);
   });
 
   test('colour rides on the vertices, so one buffer carries every colour', () {
@@ -343,10 +339,14 @@ void main() {
 /// Checked once per fixture below rather than assumed, so a fixture that ever
 /// crossed the miter limit or went collinear would fail loudly here instead
 /// of reading the wrong floats silently.
-void _expectUniformMiterStride(VerticesDrawSink sink) {
+///
+/// An open run's `segments` chords have `segments - 1` interior corners; a
+/// closed one -- a circle -- has one more, the seam, so its stride carries no
+/// `-2`.
+void _expectUniformMiterStride(VerticesDrawSink sink, {bool closed = false}) {
   final segments = sink.batchedSegmentCount;
   final triangles = sink.debugPositions().length ~/ 6;
-  expect(triangles, 4 * segments - 2,
+  expect(triangles, closed ? 4 * segments : 4 * segments - 2,
       reason: 'every corner between the $segments chords is expected to '
           'stay well inside the miter limit, so _startCentre/_endCentre\'s '
           'fixed stride of 4 triangles per chord applies');
@@ -435,7 +435,7 @@ void _arcTests() {
       ..circle(0, 0, 10, _style())
       ..endResidual();
     final v = sink.debugPositions();
-    _expectUniformMiterStride(sink);
+    _expectUniformMiterStride(sink, closed: true);
     var maxX = 0.0, maxY = 0.0;
     for (var s = 0; s < sink.batchedSegmentCount; s++) {
       final (x, y) = _startCentre(v, s);
@@ -481,7 +481,7 @@ void _arcTests() {
       ..circle(0, 0, 10, _style())
       ..endResidual();
     final v = sink.debugPositions();
-    _expectUniformMiterStride(sink);
+    _expectUniformMiterStride(sink, closed: true);
     final (sx, sy) = _startCentre(v, 0);
     final (ex, ey) = _endCentre(v, sink.batchedSegmentCount - 1);
     expect(ex, closeTo(sx, 1e-4));
