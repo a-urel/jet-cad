@@ -51,23 +51,36 @@ Future<({int minX, int maxX, int minY, int maxY})> _alphaBounds(
 }
 
 void main() {
-  test('the marker is axis-aligned on screen under a rotated residual',
-      () async {
-    // A 30-degree residual with no translation in local space -- the marker
-    // is drawn at the local origin, so only the *shape* can grow, not the
-    // position. An axis-aligned marker rasterises to a 4x4-pixel square
-    // (1.0 mm at 4 px/mm) however the residual rotates; a marker drawn in
-    // local space and then rotated with the residual comes back with a
-    // bigger bounding box, because a rotated square's axis-aligned bbox is
-    // wider than the square itself.
+  test(
+      'the marker is axis-aligned on screen under a sheared, '
+      'non-uniformly-scaled residual', () async {
+    // `a != d` (1.5 vs 0.8) and both shear terms `b`, `c` are nonzero and not
+    // a rotation pairing (`b != -c`) -- on purpose, and for two separate
+    // reasons:
     //
-    // MUTATION: revert `point` to push the residual and call
-    // `canvas.drawRawPoints` in local space -- the old behaviour. Measured
-    // directly: at this same angle the old code's rasterised bounding box is
-    // 6x6 device pixels, not 4x4.
-    const angle = math.pi / 6;
-    final t = Transform2(math.cos(angle), math.sin(angle), -math.sin(angle),
-        math.cos(angle), 8, 8);
+    // 1. Shape: a residual that only rotates or uniformly scales (`a == d`)
+    //    still distorts a *locally drawn* square's bounding box (see the
+    //    MUTATION below), so it already discriminates old from new -- but a
+    //    residual that also shears is the stronger claim, and the one this
+    //    task actually makes: on screen, in *any* residual.
+    // 2. Position: `sx = a*x + c*y + e` and `sy = b*x + d*y + f` cannot tell
+    //    a correct implementation from one with `a` and `d` swapped when
+    //    `a == d` -- the swap is then a no-op. The point here is drawn at a
+    //    nonzero local coordinate `(3, 4)` and the assertion below pins the
+    //    exact device-space bounds, not just their size, so that swap is
+    //    caught by this fixture too.
+    //
+    // MUTATION 1: revert `point` to push the residual and call
+    // `canvas.drawRawPoints` in local space -- the old behaviour. The local
+    // square then goes through the same sheared transform as the rest of the
+    // scene and comes back a non-square parallelogram, not a 4x4 axis-aligned
+    // box.
+    //
+    // MUTATION 2: swap `a` and `d` in the coordinate math (`sx = d*x + c*y +
+    // e; sy = b*x + a*y + f`). The marker stays a 4x4 axis-aligned square --
+    // that claim survives -- but it recenters at the wrong device position,
+    // which the exact-bounds assertion below catches.
+    const t = Transform2(1.5, 0.3, 0.4, 0.8, 1.9, 3.9);
 
     final recorder = PictureRecorder();
     final sink = CanvasDrawSink(
@@ -82,26 +95,29 @@ void main() {
 
     sink
       ..beginResidual(t)
-      ..point(0, 0, _style())
+      ..point(3, 4, _style())
       ..endResidual();
     expect(sink.canvasCallCount, 1);
 
     final bounds = await _alphaBounds(recorder.endRecording());
-    final width = bounds.maxX - bounds.minX + 1;
-    final height = bounds.maxY - bounds.minY + 1;
-    // The axis-aligned square is 4 device pixels on a side; the old,
-    // locally-drawn-then-rotated square rasterises to 6.
-    expect(width, 4);
-    expect(height, 4);
+    // sx = 1.5*3 + 0.4*4 + 1.9 = 8.0; sy = 0.3*3 + 0.8*4 + 3.9 = 8.0. The
+    // marker's half-width is a device-pixel quantity (2.0, from 1.0 mm at
+    // 4 px/mm) that does not scale with the residual, so the rasterised
+    // square sits exactly on [6, 9]x[6, 9] whatever `a`, `b`, `c`, `d` are --
+    // this is the whole "axis-aligned and uniform on screen" claim.
+    expect(bounds, (minX: 6, maxX: 9, minY: 6, maxY: 9));
   });
 
   test('the two sinks agree on where the marker goes', () {
     // The position is not in question -- only the orientation -- so this pins
     // the position on the sink whose geometry is readable, and Task 10's
     // comparison covers the pair.
-    const angle = math.pi / 6;
-    final t = Transform2(math.cos(angle), math.sin(angle), -math.sin(angle),
-        math.cos(angle), 100, 200);
+    //
+    // Non-uniform and sheared (`a != d`, `b != -c`) rather than a pure
+    // rotation: a residual with `a == d` cannot distinguish this sink's
+    // `sx = a*x + c*y + e` from a version with `a` and `d` swapped, so a
+    // symmetric fixture here would not actually be pinning the formula.
+    const t = Transform2(1.7, 0.35, -0.2, 0.9, 100, 200);
     final sink = VerticesDrawSink(pixelsPerPaperMm: _pxPerMm)
       ..beginResidual(t)
       ..point(3, 4, _style())

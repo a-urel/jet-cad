@@ -292,22 +292,29 @@ void main() {
       // The residual is not pushed onto the canvas for a point -- it is
       // folded into the coordinates before `drawRect`, in screen space -- so
       // the marker's shape does not rotate or shear with the residual. See
-      // `point_shape_test.dart` for a rasterised check that this holds under
-      // an actually rotated residual.
+      // `point_shape_test.dart` for a rasterised check of the shape claim
+      // under a sheared residual.
+      //
+      // `a != d` and both shear terms `b`, `c` are nonzero and not a rotation
+      // pairing (`b != -c`), on purpose: a residual with `a == d` (any pure
+      // rotation or uniform scale) cannot tell `sx = a*x + c*y + e` apart
+      // from the swapped `sx = d*x + c*y + e`, and a swap of the `a`/`d`
+      // terms in that formula left an earlier, symmetric version of this
+      // fixture green.
       sink
-        ..beginResidual(const Transform2(2, 0, 0, 2, 10, 20))
+        ..beginResidual(const Transform2(2, 0.5, -0.25, 1, 10, 20))
         ..point(3, 4, _anyStyle);
 
       expect(canvas.named('save'), isEmpty,
           reason: 'a point never pushes the residual onto the canvas');
       final call = canvas.named('drawRect').single;
       final rect = call.args.first as Rect;
-      // (3,4) under a *2 scale + (10,20) translate lands at (16,28); 25/100
-      // mm at 4 px/mm is 1 device pixel, so half a pixel either side -- and
-      // the residual's scale plays no part in the marker's own size, because
-      // the width here is a device-pixel quantity, not a paper one
+      // sx = 2*3 + -0.25*4 + 10 = 15.0; sy = 0.5*3 + 1*4 + 20 = 25.5.
+      // 25/100 mm at 4 px/mm is 1 device pixel, so half a pixel either side --
+      // and the residual's scale plays no part in the marker's own size,
+      // because the width here is a device-pixel quantity, not a paper one
       // pre-divided by it.
-      expect(rect, const Rect.fromLTRB(15.5, 27.5, 16.5, 28.5));
+      expect(rect, const Rect.fromLTRB(14.5, 25.0, 15.5, 26.0));
       expect(call.paintingStyle, PaintingStyle.fill);
       expect(call.color, const Color(0xFFFF0000));
     });
