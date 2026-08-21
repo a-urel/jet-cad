@@ -117,8 +117,10 @@ class _ReferenceWalk {
     // call, matching every other lookup in this walk.
     EntityKind? boundaryKind;
     GeometryPayload? boundaryPayload;
+    Handle? boundary;
     if (kind == EntityKind.fill) {
-      final b = doc.entities.slotOf(boundaryHandleOf(payload));
+      boundary = boundaryHandleOf(payload);
+      final b = doc.entities.slotOf(boundary);
       if (b != null) {
         boundaryKind = doc.entities.kindAt(b);
         boundaryPayload = doc.geometry.peek(doc.entities.geomIndexAt(b));
@@ -196,8 +198,40 @@ class _ReferenceWalk {
         // Unreachable: handled above, under its own composed residual.
         break;
       case EntityKind.fill:
-        // Task 13 draws it.
-        break;
+        // Written independently of `DraftPainter._drawFill`, on purpose --
+        // see Plan 3c's Ruling 28. The oracle exists to disagree with the
+        // painter, and a shared helper would have it share the very
+        // assumption it is testing, so this duplicates the painter's
+        // boundary-follows-its-route logic rather than calling into it.
+        //
+        // A fill has no geometry of its own; it occupies its boundary's
+        // loop, rebased the same way that boundary's own kind is rebased
+        // above -- a circle's centre/radius, a polygon's points -- so it
+        // lands under the same `chain` residual its outline would.
+        if (boundaryKind == null || boundaryPayload == null) {
+          // Unresolvable: `box` above already bounded to empty for this
+          // case and the walk would not have reached here, but the check is
+          // kept rather than trusting that at a distance.
+          break;
+        }
+        if (boundaryKind == EntityKind.circle) {
+          if (boundaryPayload.scalars.isEmpty) break; // malformed: no radius
+          sink.fillCircle(
+              boundaryPayload.coords[0] - ox,
+              boundaryPayload.coords[1] - oy,
+              boundaryPayload.scalars[0],
+              style);
+          break;
+        }
+        final triangles = doc.fills.trianglesFor(boundary!);
+        if (triangles == null || triangles.isEmpty) break; // unfillable
+        final count = boundaryPayload.pointCount;
+        final points = Float64List(count * 2);
+        for (var i = 0; i < count; i++) {
+          points[i * 2] = boundaryPayload.coords[i * 2] - ox;
+          points[i * 2 + 1] = boundaryPayload.coords[i * 2 + 1] - oy;
+        }
+        sink.fillPolygon(points, count, triangles, style);
     }
     sink.endResidual();
   }

@@ -123,6 +123,26 @@ class DraftPainter {
   /// how often it happens instead of implying it never does.
   int get anisotropicCurveCount => _anisotropicCurves;
 
+  int _skippedFills = 0;
+
+  /// Fills drawn in the last frame, handed to a sink.
+  ///
+  /// Reset in the same place [screenSpaceLeafCount] is, so it reads as a
+  /// per-frame figure alongside [skippedFillCount] rather than a running
+  /// total — Task 16's rig reports both.
+  int _fills = 0;
+  int get fillCount => _fills;
+
+  /// Fills not drawn in the last frame because their boundary could not be
+  /// resolved or its triangulation was empty.
+  ///
+  /// The painter owns this skip rather than a sink: `CanvasDrawSink` fills a
+  /// self-intersecting path by non-zero winding while `VerticesDrawSink`,
+  /// given no triangles, draws nothing. Handing either of them an unfillable
+  /// fill would manufacture a backend divergence on exactly the case this
+  /// plan refuses, so neither is ever handed one.
+  int get skippedFillCount => _skippedFills;
+
   int _skippedText = 0;
 
   /// Text entities not drawn in the last frame.
@@ -235,6 +255,8 @@ class DraftPainter {
     _skippedDeepInstances = 0;
     _screenSpaceLeaves = 0;
     _anisotropicCurves = 0;
+    _fills = 0;
+    _skippedFills = 0;
     final world = camera.visibleWorld(viewport);
     _worldRect = world;
     final origin =
@@ -440,8 +462,8 @@ class DraftPainter {
       case EntityKind.attrib:
         break;
       case EntityKind.fill:
-        // Task 13 draws it.
-        break;
+        _drawFill(sink, camera, origin, placement, slot, style);
+        return;
     }
 
     // The rebase subtraction happens in the leaf's own space, because that is
@@ -562,6 +584,86 @@ class DraftPainter {
     return placement.invert().transformPoint(origin);
   }
 
+  /// Draws one fill, or skips it and says so.
+  ///
+  /// A fill has no geometry of its own: it occupies its boundary's loop and
+  /// follows its boundary's route through this painter -- screen space for a
+  /// polygon, the residual path for a circle -- so a filled shape and its own
+  /// outline are transformed by the same code.
+  ///
+  /// **The skip lives here, not in a sink.** `CanvasDrawSink` fills a
+  /// self-intersecting path by non-zero winding while `VerticesDrawSink`,
+  /// given no triangles, draws nothing. Handing either of them an unfillable
+  /// fill manufactures a backend divergence on exactly the case this plan
+  /// refuses, so neither is ever handed one.
+  void _drawFill(DrawSink sink, ViewportTransform camera, Vector2 origin,
+      Transform2 placement, int slot, ResolvedStyle style) {
+    final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
+    final boundary = boundaryHandleOf(payload);
+    final boundarySlot = document.entities.slotOf(boundary);
+    if (boundarySlot == null) {
+      _skippedFills++;
+      return;
+    }
+    final boundaryKind = document.entities.kindAt(boundarySlot);
+    final boundaryPayload =
+        document.geometry.peek(document.entities.geomIndexAt(boundarySlot));
+    final toScreen = camera.worldToScreenMatrix.multiply(placement);
+
+    if (boundaryKind == EntityKind.circle) {
+      // Never triangulated ahead of time: a circle's tessellation is
+      // scale-dependent, and the sink fans it at the step count its own
+      // stroke uses.
+      //
+      // A malformed document can carry a circle boundary with no scalars —
+      // `validate()` is what catches that off the frame path. Here it is
+      // just another unfillable boundary: skipped and counted, not indexed
+      // into and thrown from.
+      if (boundaryPayload.scalars.isEmpty) {
+        _skippedFills++;
+        return;
+      }
+      final localOrigin = _localOriginFor(placement, origin);
+      final chain = camera.worldToScreenMatrix
+          .multiply(placement)
+          .multiply(Transform2.translation(localOrigin.x, localOrigin.y));
+      sink.beginResidual(chain, debugHandle: document.entities.handleAt(slot));
+      sink.fillCircle(
+          boundaryPayload.coords[0] - localOrigin.x,
+          boundaryPayload.coords[1] - localOrigin.y,
+          boundaryPayload.scalars[0],
+          style);
+      sink.endResidual();
+      _fills++;
+      return;
+    }
+
+    // Read, never compute: the triangulation was materialised by the
+    // command, the codec or undo. A miss here means the boundary is
+    // unfillable, not that the cache is cold.
+    final triangles = document.fills.trianglesFor(boundary);
+    if (triangles == null || triangles.isEmpty) {
+      _skippedFills++;
+      return;
+    }
+
+    final count = boundaryPayload.pointCount;
+    _ensurePoints(count);
+    for (var i = 0; i < count; i++) {
+      final x = boundaryPayload.coords[i * 2];
+      final y = boundaryPayload.coords[i * 2 + 1];
+      _points[i * 2] =
+          toScreen.a * x + toScreen.c * y + toScreen.e - _screenOrigin.x;
+      _points[i * 2 + 1] =
+          toScreen.b * x + toScreen.d * y + toScreen.f - _screenOrigin.y;
+    }
+    sink.beginResidual(Transform2.translation(_screenOrigin.x, _screenOrigin.y),
+        debugHandle: document.entities.handleAt(slot));
+    sink.fillPolygon(_points, count, triangles, style);
+    sink.endResidual();
+    _fills++;
+  }
+
   void _emit(DrawSink sink, EntityKind kind, GeometryPayload payload,
       Vector2 localOrigin, ResolvedStyle style, Transform2 chain) {
     final coords = payload.coords;
@@ -669,7 +771,12 @@ class DraftPainter {
         break;
 
       case EntityKind.fill:
-        // Task 13 draws it.
+        // Unreachable: `_drawLeafComposed` routes a fill to `_drawFill` and
+        // returns, unconditionally, before it reaches this call — a fill
+        // follows its boundary's route (screen space for a polygon, the
+        // residual path for a circle), neither of which is this one. Kept as
+        // an exhaustive case rather than a `default` so a new EntityKind
+        // still fails to compile here.
         break;
     }
   }
