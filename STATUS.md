@@ -1,7 +1,7 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-21
-**Verified against:** `main` at the Plan 3d merge commit, working tree clean.
+**Verified against:** `main` at `0eac1be`, working tree clean.
 Every suite count below was produced by running the suite on the **merged**
 result, not by reading a report and not on the branch before it landed.
 
@@ -20,12 +20,17 @@ Nothing is in flight. The `spike/vertices-sink` branch and its worktree are
 gone; the ledger is archived at
 [docs/superpowers/ledgers/](docs/superpowers/ledgers/), beside Plan 3c's.
 
+**Since the merge, on `main` at `70d824e..0eac1be`: two of Plan 3d's three
+remaining open items are closed**, and one thing that note recorded turned out
+to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open) — one
+item remains and cannot be closed here.
+
 Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
 
 | Suite | State (on `main`, run against the merged result) |
 |---|---|
 | `packages/jet_cad_2d` — engine | **720 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **239 tests pass, 1 skipped**, analyze/format clean |
+| `packages/jet_cad_2d_flutter` — widgets | **242 tests pass, 1 skipped**, analyze/format clean |
 | `flutter test --tags golden` | **23 pass**, 28 PNGs (14 fixtures × 2 backends); no pre-existing PNG regenerated |
 | `apps/dev_harness_2d` | analyze/format clean; **R2/R4a/R4b run on macOS in profile mode, and R2 on Chrome/CanvasKit** |
 
@@ -64,7 +69,7 @@ The 2026-08-20 spike
 ([note](docs/superpowers/notes/2026-08-20-vertices-sink-spike.md)) became Plan
 3d, and Plan 3d is **merged into `main`** — the spike and spec commits at
 `bb67137..548fa8e`, the plan at `548fa8e..a4c31c1`, brought in by one `--no-ff`
-merge. **Merged locally, not pushed.**
+merge, pushed on 2026-08-21.
 `VerticesDrawSink` builds each stroked segment's triangles itself and submits
 the frame's strokes as one ordered `drawVertices`. What the spike lacked, 3d added: **miter and bevel
 joins** (a miter is two triangles), **seam joins on closed runs**, `Vertices`
@@ -188,10 +193,10 @@ git rev-list --count 52c7a7b..HEAD          # everything Plan 3d brought in
 git rev-list --count origin/main..main      # what is unpushed
 ```
 
-**Merged locally, not pushed.** `origin/main` was at `bb67137` when this was
-written, so the second command counts the whole of Plan 3d. That ref is local
-and a `git fetch` can move it, so re-run the command rather than trusting this
-sentence. Do not push unless explicitly asked.
+Plan 3d was pushed on 2026-08-21; `origin/main` reached `c54552f` then. The
+follow-up commits above may or may not be pushed by the time you read this —
+run the second command rather than trusting this sentence. Do not push unless
+explicitly asked.
 
 The Plan 3d per-task ledger was archived out of the worktree before it was
 removed, and is at
@@ -314,7 +319,11 @@ reads
 
 The plan measured the residue and stopped there rather than editing the rule
 itself, because a gate that can be passed by editing the rule it is measured
-against is not a gate. **Merged locally, not pushed.**
+against is not a gate.
+
+Plan 3d's open items were worked next, on `main` at `70d824e..0eac1be`: two
+closed, one shown to be unclosable until a DXF reader exists. Nothing is in
+flight.
 
 **Next**: pick a plan from the roadmap below — 3e (fills) and 3f
 (caches and tiles) are the named successors, and what 3d owes each is written
@@ -323,15 +332,38 @@ out at the end of
 
 ### What Plan 3d leaves open
 
+Three of the five are closed. The full account, with every number, is the
+**Follow-up** section at the end of
+[the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md);
+the nine new mutants are Part 4 of
+[the mutation log](docs/superpowers/notes/plan-3d-mutation-log.md).
+
 1. ~~**The `CLAUDE.md` amendment.**~~ Settled 2026-08-21, above.
-2. **A frame-path fixture for the seam and the point shape.** Both are pinned
-   against the `DrawSink` interface only. `DraftPainter` routes point, line and
-   polyline through `_emitScreenSpace`, whose residual is a bare translation, so
-   a rotated point never reaches the sink through the painter at all.
+2. ~~**A frame-path fixture for the seam and the point shape.**~~ **Closed
+   2026-08-21.** The two halves were different in kind. The **seam** was a real
+   gap and now has
+   [frame_path_seam_test.dart](packages/jet_cad_2d_flutter/test/frame_path_seam_test.dart):
+   a solid circle — the only closed run the painter produces, and exactly what
+   the dash ladder's dashed circle is not — walked along its centreline, plus a
+   triangle-count invariant, plus a comparison against the open full-sweep arc.
+   Eight of nine mutants killed. The **point shape** had no reachable state to
+   cover at all: `_drawLeafComposed` returns before `_emit` for point, line and
+   polyline, unconditionally, so those three cases were dead code carrying
+   working bodies. The bodies are gone; the cases stay as documented breaks.
 3. **The 2π-sweep `ARC` seam**, characterised and unfixed — safe only because
    there is no DXF reader in the repository and the corpus cannot produce one.
-4. **The R4a/R4b control**, plausible but not demonstrated: a grep pattern
-   dropped the invariant fields from those two rows' transcripts.
+   **Still open and still unclosable**: a fix cannot be test-driven, because
+   nothing here can produce a full-sweep `ARC` entity. The DXF plan owns it.
+4. ~~**The R4a/R4b control.**~~ **Closed 2026-08-21** — the three
+   backend-independent fields match exactly within each pair (R4a
+   2,081 / 46,511 / 292; R4b 1,970 / 46,696 / 241). **And the recorded cause was
+   wrong.** No grep pattern lost those fields: R4a and R4b kept the canvas-only
+   repaint guard after Task 13 fixed R2's, and under the vertices backend
+   `canvasCallCount` is 0 for a healthy frame, so **both vertices runs of record
+   failed** after printing `build`/`raster`/`command` and before printing
+   anything else. R4a and R4b never printed `screenSpaceLeafCount` at all. Fixed
+   at `0eac1be` by giving all three rigs one shared `requireRepaint` and
+   `printInvariants` — copies are how the drift happened.
 5. **Permitted divergence 5 (overlapping translucent strokes) goes live the
    moment 3e adds fills.** It is inert today only because the corpus is opaque.
 
@@ -690,6 +722,14 @@ flutter drive --profile -d macos --driver=test_driver/integration_test.dart \
   `apps/dev_harness_2d/macos/Runner.xcodeproj/project.pbxproj`.** CocoaPods
   bumps `MACOSX_DEPLOYMENT_TARGET` 10.15 → 12.0 in all three configurations.
   Same class as the `analysis_options.yaml` trap: revert it, do not commit it.
+- **A rig transcript that stops early is a failed run, not a bad grep.** R4a
+  and R4b printed `build`, `raster` and `command` and then threw, for months,
+  because their repaint guard was the canvas-only copy. The numbers looked
+  complete because the missing lines were the ones nobody expects to read. Any
+  rig guard belongs *before* the first print or nowhere.
+- **A transcript taken before 2026-08-21 has a different shape.**
+  `screenSpaceLeafCount` moved out of R2's `lineweightScale` line into the
+  shared `printInvariants` line. Old greps will miss it.
 - **The `plan-3c` ledger is the only progress record** for that plan — TodoWrite
   was unavailable in the session that ran it. Keep appending to it.
 

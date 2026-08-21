@@ -12,6 +12,10 @@ the next commit.
 **Spec:** [`docs/superpowers/specs/2026-08-20-jet-cad-2d-plan-3d-design.md`](../specs/2026-08-20-jet-cad-2d-plan-3d-design.md)
 **Plan:** [`docs/superpowers/plans/2026-08-20-jet-cad-2d-plan-3d-vertices-sink.md`](../plans/2026-08-20-jet-cad-2d-plan-3d-vertices-sink.md)
 **Mutation log:** [`plan-3d-mutation-log.md`](plan-3d-mutation-log.md)
+**Follow-up, 2026-08-21:** two of the three remaining open items are
+closed on `main` after this note was written, and one sentence in it is
+corrected. See [Follow-up](#follow-up-2026-08-21--two-open-items-closed-and-one-cause-corrected)
+at the end. The body above is left as it stood.
 
 ---
 
@@ -53,8 +57,9 @@ its own, which is the thing worth preserving.
   crossover fallback does not fire and there is no crossover number to hand 3f.
 - **Several things are true and unflattering** and are recorded below rather
   than left out: the web rows are not reproducible from what was committed; the
-  R4a/R4b pairs' control is not demonstrated; the seam join and the point-shape
-  fix have no coverage through any frame path; the permitted sub-pixel
+  R4a/R4b pairs' control is not demonstrated *(closed — see Follow-up)*; the
+  seam join and the point-shape fix have no coverage through any frame path
+  *(closed — see Follow-up)*; the permitted sub-pixel
   divergence is exercised in exactly one place and nowhere in production
   fixtures; a divergence *not* on the permitted list exists and is
   characterised rather than fixed; and the vertices backend pins 96.00 MiB of
@@ -526,7 +531,11 @@ makes a pair a comparison of two renderers rather than of two drawings:
 | 50,000 | 2,170 | 48,323 | 334 | 51,298 | 23 | 217,758 | 20 |
 | 500,000 | 4,625 | 146,335 | 356 | 151,671 | 74 | 559,682 | 22 |
 
-**The R4a/R4b pairs' control is NOT demonstrated.** Task 12's Step 3 grep
+**The R4a/R4b pairs' control is NOT demonstrated.** *(Demonstrated on
+2026-08-21, and the cause below is wrong — see
+[Follow-up](#follow-up-2026-08-21--two-open-items-closed-and-one-cause-corrected).
+The runs failed; no grep pattern could have recovered fields that were never
+printed.)* Task 12's Step 3 grep
 pattern (`-E "R4|build |raster |command |backend="`) dropped
 `screenSpaceLeafCount` and `dashSpans` from those transcripts, so those two
 rows' invariant fields were never captured. It is *plausible* — the corpus is
@@ -712,8 +721,11 @@ Recorded here because a results note that reports only what went well is not a
 result.
 
 **The seam join and the point-shape fix have no coverage through any frame
-path.** Not the goldens, not `draft_painter_*`. They are pinned against the
-`DrawSink` interface only.
+path.** *(Closed on 2026-08-21 — see
+[Follow-up](#follow-up-2026-08-21--two-open-items-closed-and-one-cause-corrected).
+The seam now has a frame-path fixture; the point shape turned out to have no
+reachable state to cover.)* Not the goldens, not `draft_painter_*`. They are
+pinned against the `DrawSink` interface only.
 
 - `draft_painter.dart:425-429` routes point, line and polyline unconditionally
   through `_emitScreenSpace`, whose residual is a bare `Transform2.translation`
@@ -864,10 +876,194 @@ when this was written, three now that the first has been answered:
 
 1. ~~**The `CLAUDE.md` allocation amendment**, undecided (criterion 7).~~
    **Closed 2026-08-21: approved and written.** Three items remain below.
-2. **A frame-path fixture for the seam and the point shape.** Both are pinned
-   against the `DrawSink` interface only; `DraftPainter` cannot exercise a
-   rotated point at all today.
+2. ~~**A frame-path fixture for the seam and the point shape.**~~ **Closed
+   2026-08-21.** The seam has one, killing eight of nine mutants. The point
+   shape had no reachable state to cover, so the three dead cases were emptied
+   instead. See Follow-up.
 3. **The 2π-sweep `ARC` seam**, characterised and unfixed, safe only because no
-   DXF reader exists. It becomes a real defect the day one does.
-4. **The R4a/R4b control**, plausible but not demonstrated — half an hour of
-   device time with the invariant fields in the grep pattern would close it.
+   DXF reader exists. It becomes a real defect the day one does. **Still open,
+   and still unclosable**: no fixture can be made to go red for a fix, because
+   nothing in the repository can produce a full-sweep `ARC` entity.
+4. ~~**The R4a/R4b control**, plausible but not demonstrated.~~ **Closed
+   2026-08-21**, and the cause recorded above was wrong. See Follow-up.
+
+---
+
+## Follow-up, 2026-08-21 — two open items closed, and one cause corrected
+
+Written after the merge, on `main`, at `70d824e..0eac1be`. The body above is
+left exactly as it stood; this section says what changed and what it revealed.
+**macOS Low Power Mode read `0`** for every run here, checked with `pmset -g`
+before the first one. Environment: Apple M3 Pro, macOS 26.5.1, Flutter 3.47.0,
+framework `4cf2416426`.
+
+### Item 2 — the seam has a frame-path fixture; the point shape had nothing to cover
+
+The item asked for one fixture covering two things. They turned out to be
+different in kind.
+
+**The point shape was not a coverage gap.** `_drawLeafComposed` routes point,
+line and polyline through `_emitScreenSpace` and returns, unconditionally —
+that routing was the anisotropy bypass, and Plan 3b made it the rule. So
+`_emit`'s `point`, `line` and `polyline` cases could not run, and a rotated
+residual could not reach `DrawSink.point` through the painter at any camera.
+The note above says this; what it does not say is that the fixture it asks for
+therefore cannot be written. A test for an unreachable state is this
+repository's named dominant failure mode wearing a different hat.
+
+All three cases carried *working bodies* — a second implementation of
+`_emitScreenSpace`'s job in a different space, rebasing in local coordinates
+and pushing `chain` where the live one rebases in screen coordinates and pushes
+a bare translation. A reader had no way to tell which the painter used, and the
+one they would have read is the dead one. The bodies are gone; the cases stay
+as documented breaks, matching what the same switch already does for `text` and
+`attrib`, so a new `EntityKind` still fails to compile there.
+
+Deadness is a fact about control flow, not about coverage, so a green suite is
+not the evidence — the unconditional `return` is. The traffic was confirmed to
+go the other way instead: throwing at the top of `_emitScreenSpace` fails 114
+test lines.
+
+**The seam was a real gap, and now has a fixture**:
+`packages/jet_cad_2d_flutter/test/frame_path_seam_test.dart`. A circle is the
+only closed run the painter produces — `polyline` forwards `closed` but all
+four painter call sites pass `false`, and a dashed circle never reaches the
+closed path either, because the dasher emits open spans. So the fixture's
+circle has to be **solid**, which is exactly what the dash ladder's circle is
+not, and why that golden never covered this.
+
+Three assertions, because the seam has three separable properties and no single
+instrument sees them all.
+
+1. **The closing chord is visible ink.** Walking the true circle's centreline at
+   one-degree samples, a missing chord blanks a run of samples starting at the
+   seam and nowhere else — measured `[0, 352…359]`, one chord wide.
+2. **The seam join is not visible ink, and this was measured rather than
+   assumed.** Deleting the join and counting inked device pixels, through this
+   frame path, at radius 90:
+
+   | lineweight | control ink | join deleted | difference |
+   |---|---|---|---|
+   | 60 (0.60 mm) | 10,964 | 10,964 | **0** |
+   | 200 (2.00 mm, the widest DXF defines) | 36,540 | 36,530 | 10 |
+   | 600 | 109,548 | 109,466 | 82 |
+   | 2000, radius 20 | 91,136 | 89,098 | 2,038 |
+   | 6000, radius 5 | 406,648 | 369,050 | 37,598 |
+
+   What goes missing is not a thin notch but the whole bevel triangle, whose
+   area goes as `half²`. At any honest lineweight that is under one device
+   pixel, so **no pixel assertion on a non-degenerate fixture can pin the seam
+   join.** It is pinned structurally instead: a closed run has one join per
+   chord, each 2 triangles, so its triangle count is `4 × chords` and divides
+   by 4.
+3. **Neither of those sees which side of the corner the wedge fills, nor a
+   closed walk that runs one sample long.** The full-sweep `ARC` gives the count
+   of reference for the second — closed draws the same chords plus one join, so
+   exactly 2 triangles more — and the wedge's distance from the circle's centre
+   answers the first.
+
+Nine mutants, eight killed:
+
+| # | mutation | verdict |
+|---|---|---|
+| M1 | closed branch of `_endRun` is a no-op | killed |
+| M2 | seam join dropped, closing chord kept | killed |
+| M3 | closed walk runs to `steps`, not `steps - 1` | killed |
+| M4 | `circle` forwards `closed: false` | killed |
+| M5 | closing chord dropped, seam join kept | killed |
+| M6 | zero-length step no longer skipped | **survived** |
+| M7 | seam join's two directions swapped | killed |
+| M8 | every join flips to the inner side | killed |
+| M9 | bevel triangle dropped, tip only | killed |
+
+M6 is not a seam property, and the suite already kills it twice by name, in
+`vertices_draw_sink_test.dart` and `vertices_join_test.dart`. It is listed
+because a survivor goes in the log whether or not it is this fixture's job.
+
+**M3 is worth its own line: it is not equivalent, and the divisibility check
+cannot see it.** `_flatten`'s comment says running the closed walk one sample
+long would "leave the seam a duplicated point instead of a join". Measured:
+**172 triangles against 168** on this fixture. `cos(2π)` does not land back on
+the first point, so the extra step is not the zero-length one `_runTo` skips —
+it is a real, sub-pixel chord, and the seam join is then taken from *its*
+numerically noisy direction rather than the last real chord's. 172 is still
+divisible by 4. That is why the open-sweep comparison exists.
+
+### Item 4 — the R4a/R4b control, demonstrated; and the cause above is wrong
+
+**The control holds.** Four runs, `flutter drive --profile -d macos`,
+`ENTITIES=50000`, `STEPS=200`, one rig and one backend per run:
+
+| rig | backend | screenSpaceLeafCount | dashSpans | collapsed | canvasCalls | triangles | drawVerticesCalls |
+|---|---|---|---|---|---|---|---|
+| R4a | canvas | 2,081 | 46,511 | 292 | 49,237 | — | — |
+| R4a | vertices | 2,081 | 46,511 | 292 | 0 | 203,899 | 1 |
+| R4b | canvas | 1,970 | 46,696 | 241 | 49,328 | — | — |
+| R4b | vertices | 1,970 | 46,696 | 241 | 0 | 210,094 | 1 |
+
+The three backend-independent fields match exactly within each pair, which is
+what makes a pair a comparison of two renderers rather than of two drawings.
+They differ *between* R4a and R4b, and between both and R2's 50,000 row
+(2,170 / 48,323 / 334): each rig leaves the camera and the document somewhere
+different after its 200 steps. Control is a within-pair property, not a
+cross-rig one.
+
+**The cause recorded above is wrong, and the correction matters more than the
+table.** Those fields were not lost to a grep pattern. R4a and R4b are a
+separate copy of R2's reporting block and kept the **canvas-only repaint
+guard** after Task 13 fixed R2's — and under the vertices backend
+`CanvasDrawSink` is the fallback, taking text and nothing else, so
+`canvasCallCount` is `0` for a perfectly healthy frame with no text corpus. The
+guard sat after `report()` and before every remaining print, so the vertices
+runs of both rigs ended like this:
+
+```
+R4a (50000) frames=202
+Bad state: no repaint happened: the forced frame did not draw
+```
+
+`build`, `raster` and `command` were printed. `dashSpans`, `canvasCalls`,
+`backend=` and the text counters never were. Reproduced by reverting that one
+guard and re-running. **The R4a and R4b vertices runs of record failed**, and
+their timing rows above are output from real frames printed before the failure.
+
+R4a and R4b also never printed `screenSpaceLeafCount` at all — only R2 did — so
+no grep pattern could have recovered it from any run, passing or failing.
+
+Both are fixed at `0eac1be`, by extracting what R2 already had into
+`requireRepaint` and `printInvariants` and calling them from all three rigs.
+Copies are how the drift happened, so there is one copy now. `printInvariants`
+puts all four backend-independent fields on one line, and R2's
+`screenSpaceLeafCount` moves out of its `lineweightScale` line into it: **a
+transcript taken before 2026-08-21 has a different shape from one taken after.**
+
+**The R4a `command` oddity reproduces.** Canvas `p50 = 0.05 ms` against
+vertices `p50 = 0.08 ms`, for a pure document mutation that touches neither
+sink — the same direction as the 0.05/0.12 recorded above, and still tens of
+microseconds. R4b's command time is *lower* on vertices in both sessions
+(81.63 against 72.04 here; 175.35 against 167.23 there), and roughly half what
+it was, which is a property of the session rather than of the backends. Neither
+is established as a real backend cost.
+
+Timings from these four runs, single runs rather than a median of three, so
+they are reported for company and not as a replacement for the table above:
+
+| rig | backend | build p50 | raster p50 | command p50 | frames |
+|---|---|---|---|---|---|
+| R4a | canvas | 14.95 ms | 61.87 ms | 0.05 ms | 202 |
+| R4a | vertices | **8.56 ms** | **4.39 ms** | 0.08 ms | 202 |
+| R4b | canvas | 15.87 ms | 73.67 ms | 81.63 ms | 201 |
+| R4b | vertices | **6.56 ms** | **3.51 ms** | 72.04 ms | 202 |
+
+### Item 3 — still open, and not closable here
+
+The 2π-sweep `ARC` draws an unjoined seam. It stays characterised and unfixed,
+for the reason the body already gives and one it does not: a fix cannot be
+test-driven, because nothing in the repository can produce a full-sweep `ARC`
+entity — there is no DXF reader and the corpus does not generate one. A fix
+whose test cannot be made to go red is not evidence in this codebase. The item
+opens the day a DXF reader lands, and that plan owns it.
+
+The one thing that did change: the full-sweep `ARC` is now *used*, as the open
+arm of the seam fixture's count comparison. It is used as a count of reference,
+not as a drawing asserted to be right.

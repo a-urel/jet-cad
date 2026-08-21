@@ -1,5 +1,10 @@
 # Plan 3d mutation log
 
+**Follow-up, 2026-08-21:** nine more mutants, run on `main` after the merge
+against the new frame-path seam fixture. Eight killed, one survivor that the
+existing suite already kills twice by name. Appended at the end; the forty-one
+below are unchanged.
+
 **Verdict: forty-one mutants accounted for. Thirty-four killed (two of them
 only after a fix round, one of those — `A1` — needing a second, stronger test
 after a first fix round proved too narrow), one recorded as a deliberate
@@ -482,3 +487,52 @@ finally:
 
 Every mutation's exact `old` → `new` strings live in that script; the `Site`
 and `Killed by` columns above name the file and test for each.
+
+---
+
+## Part 4 — the frame-path seam fixture, 2026-08-21
+
+Run on `main` at `70d824e`, against
+`packages/jet_cad_2d_flutter/test/frame_path_seam_test.dart`, which did not
+exist when Parts 1–3 were written. Same discipline as the rest of this log:
+`cp` the file aside, apply the edit, run the narrow suite, restore from the
+copy in a `trap` — **never `git checkout`**, for the reason the header gives.
+
+All nine mutate `packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart`.
+Narrow suite: `flutter test test/frame_path_seam_test.dart`.
+
+| # | Mutation | Site | Outcome |
+|---|---|---|---|
+| S3 | `_endRun`'s closed branch returns unconditionally | `_endRun` | **killed** — centreline blank at `[0, 352…359]` |
+| S4 | seam join dropped, closing chord kept | `_endRun` | **killed** — triangle count `4c − 2` |
+| S5 | closed walk runs to `steps`, not `steps − 1` | `_flatten` | **killed** — open-sweep comparison |
+| S6 | `circle` forwards `closed: false` | `circle` | **killed** — centreline and count |
+| S7 | closing chord dropped, seam join kept | `_endRun` | **killed** — centreline |
+| S8 | zero-length step no longer skipped | `_runTo` | **survived** — see below |
+| S9 | seam join's two directions swapped | `_endRun` | **killed** — wedge on the inner side |
+| S10 | `s = cross > 0 ? half : -half` — every join flips inward | `_emitJoin` | **killed** — wedge on the inner side |
+| S11 | bevel triangle dropped, tip only | `_emitJoin` | **killed** — triangle count |
+
+**S8 survived and is not this fixture's job.** `if (length == 0) return` guards
+a repeated point, and no step of a flattened circle is exactly zero-length. The
+widget suite kills it twice, by name: `a zero-length segment emits nothing
+rather than a NaN normal` in `vertices_draw_sink_test.dart` and `a zero-length
+step is skipped and the join spans it` in `vertices_join_test.dart`. Verified by
+running the whole widget suite under S8 and reading both failures.
+
+**S5 is the one that changed a belief.** `_flatten`'s comment predicts that
+closing a sample too late leaves "a duplicated point instead of a join", and
+the natural reading is that `_runTo`'s zero-length guard absorbs it and nothing
+changes. It does not: `cos(2π)` does not land back on the first point, so the
+extra step is a real sub-pixel chord with its own join, and the seam join is
+then taken from that noisy direction. Measured **172 triangles against 168** on
+the fixture. Both divide by 4, so the divisibility assertion is blind to it —
+which is why the fixture also compares against the open full-sweep arc.
+
+**What no mutation could reach.** `_emit`'s `point`, `line` and `polyline`
+cases in `draft_painter.dart` were emptied in the same session, and no mutation
+of them is listed here because none is meaningful: `_drawLeafComposed` returns
+before reaching them, unconditionally, so any edit survives every suite. That
+is a control-flow fact, not a coverage result. The inverse was measured
+instead — throwing at the top of `_emitScreenSpace` fails 114 test lines, which
+is where the traffic actually goes.
