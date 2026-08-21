@@ -17,6 +17,7 @@
 // two `sublistView` wrappers -- and nothing per entity, `3 * (textOps + 1)`
 // per frame.
 
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
@@ -29,18 +30,106 @@ import '../support/spy_canvas.dart';
 
 const Size _viewport = Size(800, 600);
 
-DraftDocument _corpus() => generateDocument(
-      4000,
-      definitionCount: 40,
-      instanceCount: 400,
-      nestingDepth: 2,
-      mirroredFraction: 0.1,
-      nonUniformFraction: 0.2,
-      groupCount: 10,
-      layerCount: 8,
-      byBlockFraction: 0.3,
-      dashedFraction: 0.35,
-    );
+/// Fraction of [_addFillRegions]'s closed polylines that gain a region
+/// partner (a fill); the rest are added as plain closed boundaries, stroked
+/// but not filled. Mirrors `kFillFraction` in
+/// `apps/dev_harness_2d/lib/main.dart` -- the same quota-accumulator shape,
+/// applied independently here because this corpus lives in a different
+/// package and cannot share that file's stream.
+const double _fillFraction = 0.4;
+
+DraftDocument _corpus() {
+  final doc = generateDocument(
+    4000,
+    definitionCount: 40,
+    instanceCount: 400,
+    nestingDepth: 2,
+    mirroredFraction: 0.1,
+    nonUniformFraction: 0.2,
+    groupCount: 10,
+    layerCount: 8,
+    byBlockFraction: 0.3,
+    dashedFraction: 0.35,
+  );
+  // Task 16: the allocation gate must run its two-flush comparison on a
+  // corpus containing fills -- a cache *miss* on the frame path would show up
+  // here immediately as a per-fill allocation, which is a second, independent
+  // proof (alongside the load-cost row) that triangulations are materialised
+  // eagerly at write time and never lazily on the frame path.
+  _addFillRegions(doc, seed: 0xFEEDFACE, count: 200, fraction: _fillFraction);
+  return doc;
+}
+
+/// Adds [count] closed-polyline rooms to [doc], scattered around
+/// [kDefaultOriginX]/[kOriginY] the way `generateDocument`'s own floor
+/// entities are. [fraction] of them are added as an [AddRegionCommand] pair
+/// (a fill under a boundary), via the same quota-accumulator shape
+/// `_Styling.linetypeFor` in `generate_document.dart` uses -- a fraction
+/// specifies the corpus exactly, not on average; the rest are added as plain
+/// closed [EntityKind.polyline] boundaries with no fill.
+void _addFillRegions(DraftDocument doc,
+    {required int seed, required int count, required double fraction}) {
+  final random = math.Random(seed);
+  var fillDue = 0.0;
+  for (var i = 0; i < count; i++) {
+    final x0 = kDefaultOriginX + random.nextDouble() * kFloorWidth;
+    final y0 = kOriginY + random.nextDouble() * kFloorHeight;
+    final w = 100.0 + random.nextDouble() * 400.0;
+    final h = 100.0 + random.nextDouble() * 300.0;
+    final coords = Float64List.fromList([
+      x0, y0, //
+      x0 + w, y0, //
+      x0 + w, y0 + h, //
+      x0, y0 + h, //
+      x0, y0, // closing duplicate: first == last, exactly.
+    ]);
+    final payload = GeometryPayload(coords: coords, scalars: Float64List(0));
+
+    fillDue += fraction;
+    if (fillDue >= 1.0) {
+      fillDue -= 1.0;
+      doc.commands.execute(AddRegionCommand.allocate(
+        seed: doc.handleSeed,
+        owner: doc.rootHandle,
+        boundaryKind: EntityKind.polyline,
+        boundaryPayload: payload,
+        layer: ReservedHandles.layerZero,
+        fillColor: const TrueColor(0x3366CC),
+        boundaryColor: const TrueColor(0x000000),
+      ));
+    } else {
+      final handle = doc.handleSeed.next();
+      doc.commands.execute(AddEntityCommand(
+        record: EntityRecord(
+          handle: handle,
+          owner: doc.rootHandle,
+          kind: EntityKind.polyline,
+          layer: ReservedHandles.layerZero,
+          linetype: ReservedHandles.byLayerLinetype,
+          linetypeScale: 1.0,
+          geomIndex: 0,
+          color: const ByLayerColor(),
+          lineweight: kByLayer,
+          transparency: kByLayer,
+          flags: 0,
+        ),
+        payload: payload,
+      ));
+    }
+  }
+}
+
+/// A document with many fills, for the load-cost row Task 16 owes: eager
+/// materialisation at write time moves the triangulation cost to load time
+/// rather than removing it, and that row must be measured and printed, with
+/// no threshold.
+DraftDocument fillHeavyCorpus() {
+  final doc = DraftDocument.empty();
+  // Every one of these is a region: `fraction: 1.0` so the count of fills
+  // created is exactly `count`, not a quota's rounded outcome.
+  _addFillRegions(doc, seed: 0xC0FFEE, count: 5000, fraction: 1.0);
+  return doc;
+}
 
 void main() {
   testWidgets('a steady-state frame allocates O(1) per flush, not O(entities)',
@@ -75,6 +164,16 @@ void main() {
         reason: 'nothing was flushed, so nothing was measured');
     expect(sink.frameTriangleCount, greaterThan(1000),
         reason: 'a degenerate corpus would make the bound meaningless');
+    // Task 16: this corpus must actually contain fills, and every one of them
+    // must draw -- an empty or all-skipped fill population would make the
+    // gate below vacuous for the one path it exists to cover.
+    expect(painter.fillCount, greaterThan(0),
+        reason: 'the corpus carries no fills, so this gate proves nothing '
+            'about fill triangulation being cached rather than allocated on '
+            'the frame path');
+    expect(painter.skippedFillCount, 0,
+        reason: 'every fill this corpus adds is a valid, closed, simple '
+            'rectangle -- none of them should be unresolvable');
 
     // The buffer must not have grown in the subject frame. Growth is the one
     // O(entities) allocation this sink can make, and it is the one the
@@ -160,5 +259,24 @@ void main() {
     expect(identical(paints[0], paints[1]), isTrue,
         reason: 'flush() must hand drawVertices the one Paint built for the '
             "sink's life, not a fresh one per call");
+  });
+
+  test('load-time triangulation cost, recorded', () {
+    // The row eager materialisation owes: `AddRegionCommand` and the codec's
+    // loader both triangulate at write/load time precisely so the frame path
+    // never has to, per the allocation gate above. That work has to land
+    // somewhere, and this is where -- no threshold, but no plan may skip the
+    // row.
+    final corpus = fillHeavyCorpus();
+    const n = 5000;
+    expect(corpus.fills.linkCount, n,
+        reason: 'fillHeavyCorpus() must actually carry the fill count this '
+            'row claims to measure the load cost of');
+    final json = DraftDocumentCodec.encodeToString(corpus);
+    final sw = Stopwatch()..start();
+    DraftDocumentCodec.decodeString(json);
+    sw.stop();
+    // ignore: avoid_print
+    print('LOAD fills=$n elapsed=${sw.elapsedMilliseconds}ms');
   });
 }

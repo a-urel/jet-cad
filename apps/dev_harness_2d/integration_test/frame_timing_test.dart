@@ -164,6 +164,18 @@ void main() {
           '${dashedLinetypes.map((lt) => lt.name).toList()}');
     }
 
+    // Same footgun as the dashed-linetype check above, for `FILLS`: a corpus
+    // that silently ignored the define would still print plausible-looking
+    // frame times, and this is the one place that would notice before the
+    // rig's own `fills=`/`skippedFills=` line does.
+    if (kFillsEnabled && doc.fills.linkCount == 0) {
+      throw StateError('FILLS=true but the corpus carries no fills');
+    }
+    if (!kFillsEnabled && doc.fills.linkCount != 0) {
+      throw StateError('FILLS=false but the corpus carries '
+          '${doc.fills.linkCount} fill(s)');
+    }
+
     return (
       doc: doc,
       camera: camera,

@@ -8,6 +8,8 @@
 // design; see `measurement_rig.dart`.
 
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -77,6 +79,38 @@ final double kDashedFraction = double.tryParse(
 const bool kTextCorpus = bool.fromEnvironment('TEXT');
 const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
 
+/// Fraction of the closed polylines [_addFillRegions] adds that gain a region
+/// partner (a fill), when [kFillsEnabled] is on. Named beside
+/// [kDashedFraction] for the same reason: a quota, applied by an accumulator
+/// exactly the way `_Styling.linetypeFor` and `.colorFor` apply theirs in
+/// `generate_document.dart`, not a coin flip -- see that file's comment on
+/// why a fraction has to land exactly rather than merely on average.
+///
+/// The rest of the closed polylines this adds are plain boundaries: stroked,
+/// never filled, so the corpus exercises both the fillable-and-filled and the
+/// fillable-but-not path.
+const double kFillFraction = 0.4;
+
+/// Whether the corpus carries filled regions, and the painter draws them.
+///
+/// Same shape as [kBackend], for the same reason: a `String.fromEnvironment`,
+/// not `bool.fromEnvironment` -- Plan 3c lost a full device run to
+/// `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as false
+/// while printing entirely plausible numbers. An unrecognised value throws at
+/// startup rather than silently defaulting to off.
+///
+/// Purely additive at its default of `false`: [harnessDocument] never calls
+/// [_addFillRegions], so the document is exactly what [generateDocument]
+/// returned, coordinate for coordinate -- fills-on and fills-off differ by
+/// this one flag on one drawing, the same way `DRAW_TEXT` and `TEXT` are
+/// inert at their defaults.
+final bool kFillsEnabled =
+    switch (const String.fromEnvironment('FILLS', defaultValue: 'false')) {
+  'false' => false,
+  'true' => true,
+  final other => throw StateError('FILLS must be true or false; got "$other"'),
+};
+
 /// Which sink the harness draws through: `canvas`, `vertices`, or unset for
 /// the platform's own choice.
 ///
@@ -103,22 +137,117 @@ final RenderBackend? kBackend =
 /// `InsertionPointMeasurer`, which collapses every glyph box to a point and
 /// every text transform to a singular matrix. A text corpus built on it looks
 /// like a text corpus and draws nothing measurable.
-DraftDocument harnessDocument([int? entityCount]) => generateDocument(
-      entityCount ?? kEntities,
-      definitionCount: 200,
-      instanceCount: 20000,
-      nestingDepth: 2,
-      mirroredFraction: 0.1,
-      nonUniformFraction: 0.2,
-      groupCount: 50,
-      layerCount: 8,
-      byBlockFraction: 0.3,
-      dashedFraction: kDashedFraction,
-      labelFraction: kTextCorpus ? 0.02 : 0,
-      attributedInstanceFraction: kTextCorpus ? 0.2 : 0,
-      measurer:
-          kTextCorpus ? FlutterTextMeasurer() : const InsertionPointMeasurer(),
-    );
+DraftDocument harnessDocument([int? entityCount]) {
+  final count = entityCount ?? kEntities;
+  final doc = generateDocument(
+    count,
+    definitionCount: 200,
+    instanceCount: 20000,
+    nestingDepth: 2,
+    mirroredFraction: 0.1,
+    nonUniformFraction: 0.2,
+    groupCount: 50,
+    layerCount: 8,
+    byBlockFraction: 0.3,
+    dashedFraction: kDashedFraction,
+    labelFraction: kTextCorpus ? 0.02 : 0,
+    attributedInstanceFraction: kTextCorpus ? 0.2 : 0,
+    measurer:
+        kTextCorpus ? FlutterTextMeasurer() : const InsertionPointMeasurer(),
+  );
+  if (kFillsEnabled) _addFillRegions(doc, count);
+  return doc;
+}
+
+/// Adds closed-polyline rooms behind [kFillsEnabled]. [kFillFraction] of
+/// them are added as an [AddRegionCommand] pair (a fill under a boundary);
+/// the rest are added as plain closed [EntityKind.polyline] boundaries with
+/// no fill, exercising the fillable-but-not-filled path alongside the filled
+/// one.
+///
+/// **Scattered over a corridor around the floor's centre, not the whole
+/// [kFloorWidth] x [kFloorHeight] plan the way `generateDocument`'s own floor
+/// entities are, and not a tight cluster at the centre either.** R2 fits the
+/// camera to a fixed ~3000x2250 working-set window around `doc.extents`'
+/// centre, then scripts 120 pan steps of `Offset(-7, -3)` followed by 120
+/// oscillating zoom steps anchored off-centre -- and *that* is the state
+/// `printInvariants` reports, not the initial fit. A uniform scatter over the
+/// full floor put a visible room in the initial window with probability
+/// ~0.3% (measured: `fills=0` at `FILLS=true`); a tight cluster at the
+/// initial fit's centre fixed that window but missed the state R2 actually
+/// measures -- the pan alone moves the window by roughly (+3200, -1350) world
+/// units, confirmed empirically by replaying R2's own script against a fresh
+/// camera and reading `visibleWorld` (see the task-16 report). This corridor
+/// is the bounding box of the initial and post-pan-and-zoom windows, plus a
+/// margin, so rooms stay visible through the whole scripted sequence, not
+/// just at one end of it -- and a future change to the pan/zoom script would
+/// show up as `fills=0` again rather than silently under-covering.
+///
+/// Its own [math.Random] stream, seeded independently of
+/// [generateDocument]'s two -- this runs after that function has already
+/// returned, so sharing either of its streams is not even available, and a
+/// fresh one keeps this addition's own output reproducible on its own.
+void _addFillRegions(DraftDocument doc, int entityCount) {
+  final random = math.Random(0xFEEDFACE);
+  final roomCount = math.max(200, entityCount ~/ 100);
+  // The floor's own centre -- generateDocument's floor entities are
+  // scattered uniformly over [kDefaultOriginX, kDefaultOriginX+kFloorWidth]
+  // x [kOriginY, kOriginY+kFloorHeight], so this is a close proxy for
+  // `doc.extents`' centre without needing the entities already added to
+  // compute it -- close enough that the margin above absorbs the difference.
+  final centerX = kDefaultOriginX + kFloorWidth / 2;
+  final centerY = kOriginY + kFloorHeight / 2;
+  var fillDue = 0.0;
+  for (var i = 0; i < roomCount; i++) {
+    final w = 30.0 + random.nextDouble() * 90.0;
+    final h = 30.0 + random.nextDouble() * 70.0;
+    // Corridor: centred (centerX + 1750, centerY - 750), half-extents
+    // (3500, 2100) -- see the doc comment above for how these were derived.
+    final x0 = centerX + 1750.0 + (random.nextDouble() - 0.5) * 7000.0 - w / 2;
+    final y0 = centerY - 750.0 + (random.nextDouble() - 0.5) * 4200.0 - h / 2;
+    final coords = Float64List.fromList([
+      x0, y0, //
+      x0 + w, y0, //
+      x0 + w, y0 + h, //
+      x0, y0 + h, //
+      x0, y0, // closing duplicate: first == last, exactly, per
+      // `triangulationFor`'s stored-value comparison.
+    ]);
+    final payload = GeometryPayload(coords: coords, scalars: Float64List(0));
+
+    fillDue += kFillFraction;
+    if (fillDue >= 1.0) {
+      fillDue -= 1.0;
+      doc.commands.execute(AddRegionCommand.allocate(
+        seed: doc.handleSeed,
+        owner: doc.rootHandle,
+        boundaryKind: EntityKind.polyline,
+        boundaryPayload: payload,
+        layer: ReservedHandles.layerZero,
+        fillColor: const TrueColor(0x3366CC),
+        boundaryColor: const TrueColor(0x000000),
+      ));
+    } else {
+      final handle = doc.handleSeed.next();
+      doc.commands.execute(AddEntityCommand(
+        record: EntityRecord(
+          handle: handle,
+          owner: doc.rootHandle,
+          kind: EntityKind.polyline,
+          layer: ReservedHandles.layerZero,
+          linetype: ReservedHandles.byLayerLinetype,
+          linetypeScale: 1.0,
+          geomIndex: 0,
+          color: const ByLayerColor(),
+          lineweight: kByLayer,
+          transparency: kByLayer,
+          flags: 0,
+        ),
+        payload: payload,
+      ));
+    }
+  }
+}
 
 /// Whether `main()` drives R2 itself on startup and prints its block,
 /// instead of waiting to be driven by `integration_test`.

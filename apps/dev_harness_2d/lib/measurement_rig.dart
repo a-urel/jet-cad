@@ -104,6 +104,13 @@ void printInvariants(DraftPainter painter, CanvasDrawSink sink) {
       'dashSpans=${painter.dashSpanCount} '
       'collapsed=${painter.collapsedDashCount} '
       'canvasCalls=${sink.canvasCallCount}');
+  // Task 16: `fillCount` and `skippedFillCount` are the same kind of
+  // backend-independent field as the line above -- both must match exactly
+  // across `BACKEND=canvas` and `BACKEND=vertices` at a fixed corpus.
+  // `skippedFillCount` is a failable criterion of the exit gate: its
+  // threshold on the rig corpus is zero.
+  print('  fills=${painter.fillCount} '
+      'skippedFills=${painter.skippedFillCount}');
 }
 
 /// The backend actually used, and the vertices counters when it was that one.
