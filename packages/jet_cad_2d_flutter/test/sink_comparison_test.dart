@@ -40,6 +40,30 @@ void main() {
             'both sides of it');
   });
 
+  testWidgets('the two sinks agree on an opaque fill', (tester) async {
+    // The opaque agreement floor Task 14 declares: a ratio, not an absolute
+    // count, so it does not depend on the fixture's size, plus a non-vacuity
+    // floor on `canvasInkPixels` so the ratio cannot pass by having nothing
+    // to disagree about.
+    //
+    // 2026-08-21: canvas 377858 ink pixels, vertices 377856, 0 stray and 0
+    // uncovered -- the pentagon's ear-clipped triangles and the circle's fan
+    // land in exactly the same pixels on both backends.
+    final doc = fillComparisonDoc();
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final report =
+        await measureAgreement(tester, doc, paintDrawing(doc, index));
+    expect(report.canvasInkPixels, greaterThan(4000),
+        reason: 'non-vacuity: this row must not pass against a near-blank '
+            'surface');
+    expect(report.strayVerticesPixels,
+        lessThanOrEqualTo(report.canvasInkPixels ~/ 100));
+    expect(report.uncoveredCanvasPixels,
+        lessThanOrEqualTo(report.canvasInkPixels ~/ 100));
+  });
+
   testWidgets('the two backends agree on the ops the painter cannot emit',
       (tester) async {
     // A closed run and a point under a rotated residual. `DraftPainter` can

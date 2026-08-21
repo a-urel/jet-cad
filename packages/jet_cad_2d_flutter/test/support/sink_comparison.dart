@@ -545,6 +545,54 @@ DraftDocument subPixelDivergenceFixture({int lineweight = 1}) {
   return doc;
 }
 
+/// A solid pentagon and a solid circle, comfortably above the ink alpha
+/// floor and each other's neighbour rather than overlapping: the opaque
+/// agreement floor Task 14 declares, at `kInkAlphaFloor`.
+///
+/// Neither the ear-clipped polygon's triangulation nor the circle's per-frame
+/// fan is trivial the way a plain rectangle's two-triangle case would be, and
+/// each fill's colour differs from its boundary's black stroke, so a fill
+/// painting over its own outline instead of under it would be visible here
+/// too -- even though this fixture's own job is agreement between backends,
+/// not draw order, which `fill_render_test.dart` already pins directly.
+DraftDocument fillComparisonDoc() {
+  final doc = DraftDocument.empty();
+  final seed = doc.handleSeed;
+
+  const sides = 5;
+  final coords = Float64List((sides + 1) * 2);
+  for (var i = 0; i < sides; i++) {
+    final a = i * 2 * math.pi / sides - math.pi / 2;
+    coords[i * 2] = 80 * math.cos(a);
+    coords[i * 2 + 1] = 80 * math.sin(a);
+  }
+  coords[sides * 2] = coords[0];
+  coords[sides * 2 + 1] = coords[1];
+  doc.commands.execute(AddRegionCommand.allocate(
+    seed: seed,
+    owner: doc.rootHandle,
+    boundaryKind: EntityKind.polyline,
+    boundaryPayload: GeometryPayload(coords: coords, scalars: Float64List(0)),
+    layer: ReservedHandles.layerZero,
+    fillColor: const TrueColor(0x3366CC),
+    boundaryColor: const TrueColor(0x000000),
+  ));
+
+  doc.commands.execute(AddRegionCommand.allocate(
+    seed: seed,
+    owner: doc.rootHandle,
+    boundaryKind: EntityKind.circle,
+    boundaryPayload: GeometryPayload(
+        coords: Float64List.fromList([180, 0]),
+        scalars: Float64List.fromList([70])),
+    layer: ReservedHandles.layerZero,
+    fillColor: const TrueColor(0xCC6633),
+    boundaryColor: const TrueColor(0x000000),
+  ));
+
+  return doc;
+}
+
 /// A full-sweep `ARC`: `sweep == 2 * pi`, which draws a closed circle through
 /// `Canvas.drawArc` and an **unjoined** one through `VerticesDrawSink`, whose
 /// `arc` passes `closed: false` structurally.
