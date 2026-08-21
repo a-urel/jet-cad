@@ -90,13 +90,23 @@ is no column, but there is a contract. This plan adds no column. It adopts the
 same test, at the same exactness, and the fillable boundary set is exactly the
 set the index can already answer a fill hit for.
 
-### There is no geometry-edit command, and `GeometryStore.replace` has no caller
+### There is no geometry-edit command, and `replace` has no production caller
 
 `replace(slot, payload)` exists, mutates in place and keeps the `geomIndex`. It
-is called by nothing — not by a command, not by a test, nowhere in the
-repository. Editing an entity's points today means `RemoveEntityCommand` +
+has **no production caller** — no command calls it, nothing in `lib/` calls it.
+It is pinned by one test, `geometry_store_test.dart:94` ("replace swaps the
+payload in place without changing the slot"), so the API is specified and
+unused rather than untested and unused.
+
+*(An earlier draft of this document said "not by a command, not by a test,
+nowhere in the repository". That was wrong: the search behind it was
+`geometry\.replace`, and the test calls `store.replace`. An absence found with
+a narrow pattern is not an absence.)*
+
+Editing an entity's points today therefore means `RemoveEntityCommand` +
 `AddEntityCommand`, which is why the R4a rig prints `handles burned=201` over
-200 steps.
+200 steps — measured in the 2026-08-21 follow-up runs recorded in the Plan 3d
+results note, not in the note's original body.
 
 **This breaks associativity outright.** A fill that references its boundary by
 handle loses its referent the moment the boundary is edited, because the
@@ -105,25 +115,55 @@ is not an extra this plan chooses to add; it is unreachable without a
 command that preserves identity. `SetEntityGeometryCommand` is therefore in
 scope, and `replace` finally gets its caller.
 
-### `geomIndex` slots are recycled
+### `geomIndex` is not a safe cache key, and `purge()` is why
 
-`GeometryStore` frees slots through `SlotAllocator` and reuses them. Any cache
-keyed by `geomIndex` that is not invalidated on removal will eventually serve a
-stale value **to a different entity**. This is the sharpest hazard in the plan
-and its own named mutant.
+Three separate facts, which together decide the key.
 
-### `replace` keeps the `geomIndex`
+1. **Slots are recycled.** `GeometryStore` frees slots through `SlotAllocator`
+   and reuses them, so an entry left behind after a removal is eventually served
+   **to a different entity**.
+2. **`replace` keeps the `geomIndex`.** An edit does not churn the key, so the
+   cache cannot rely on key churn for invalidation.
+3. **`purge()` renumbers every `geomIndex` wholesale** — `draft_document.dart`
+   takes `geometry.purge()`'s remap and rewrites `record.geomIndex` for every
+   live entity. A `geomIndex`-keyed cache does not go *stale* here. It goes
+   **permuted**: every surviving entry is now attached to the wrong entity at
+   once.
 
-Which means a geometry edit does **not** change the cache key. The cache cannot
-rely on key churn for invalidation; the command invalidates explicitly.
+**Handles have none of these properties.** `HandleSeed.next()` only increments
+and handles are never reissued; `purge()` compacts slots and leaves handles
+untouched, which is exactly what `CLAUDE.md`'s "draw order is ascending handle
+value, stable across undo, save, load and **purge**" asserts; and
+`RemoveEntityCommand`'s inverse re-inserts with the same handle through
+`handleSeed.raiseTo`.
+
+| | keyed by `geomIndex` | keyed by boundary `Handle` |
+|---|---|---|
+| `purge()` | silently **permuted** | untouched |
+| slot recycling | wrong drawing, plausible | not a key space at all |
+| missed invalidation on remove | wrong drawing | a **leak**, bounded by removals |
+| remove then undo | new slot, must re-triangulate | same handle, same payload — the surviving entry is still correct |
+
+**So the cache is keyed by the boundary's `Handle`.** The failure mode moves
+from *a lie* to *a leak*, which is the trade this codebase makes everywhere
+else, and `purge()` needs no invalidation hook at all — the third site
+disappears instead of being patched.
 
 ### Draw order is load-bearing far outside the painter
 
 `SpatialIndex` uses ascending handle value for pick priority, snap tie-breaks
-and "topmost"; the codec serialises in handle order; `DocumentTree` keeps
-children in handle order; `reference_walk` walks in handle order. `CLAUDE.md`
-lists it as a non-negotiable. Any design that reorders drawing reorders all of
-those.
+and "topmost"; `reference_walk` sorts into handle order before walking;
+`CLAUDE.md` lists the rule as a non-negotiable. Any design that reorders drawing
+reorders all of those.
+
+**Two things are *not* in handle order, and saying so matters because the
+round-trip argument below leans on the difference.** The codec emits entities in
+**ascending slot order** (`json_codec.dart:67-69`, and its comment says so),
+which parts company with handle order after an undo — a restored entity keeps
+its high handle and takes a recycled low slot. `DocumentTree._link` **appends**
+children in insertion order (`tree.dart:561`); ascending handle order is
+re-established downstream, by `reference_walk`'s sort. Neither breaks this plan.
+Both are pre-existing, and neither is a place to put a fill's ordering.
 
 ---
 
@@ -227,6 +267,20 @@ written, and the report says it will look wrong.
 | `SetEntityGeometryCommand` | Replaces one entity's payload in place, preserving handle and `geomIndex`. Inverse restores the previous payload, read through `GeometryStore.read` — never `peek`, whose shared buffer would let a later edit rewrite undo history. Invalidates the triangulation entry. |
 | `RemoveEntityCommand` (existing) | Extended: removing a boundary removes its fills, in the same transaction, restored together by the inverse. Also invalidates the triangulation entry. |
 
+**`AddRegionCommand` is one `apply`, not two composed.** It writes the fill
+first, and at that instant the boundary it names does not exist. If it composed
+two `AddEntityCommand`s, `invalidateDerived()` would fire between them and an
+observer — the index, the extents cache — would see a document containing a fill
+with a dangling reference. Required: **one `apply`, both writes, one
+`invalidateDerived`, the intermediate state never observed.** The inverse
+removes in the opposite order, boundary then fill, for the same reason.
+
+**`SetEntityGeometryCommand` refuses `EntityKind.fill`.** A fill's payload is a
+*reference*, not geometry, and letting a geometry command rewrite `scalars[0]`
+would repoint a fill at another boundary with no validation, no cache move and
+no `touched` story. Re-association is a different operation and is out of scope;
+the command throws, and the refusal is a named mutant.
+
 **A command cannot report.** `CommandResult` carries an inverse and a touched
 set and nothing else, and `DraftCommand.apply`'s contract is that it "must
 either complete fully or leave the target unmutated". So a command's answer to
@@ -301,38 +355,57 @@ scale-invariant. No new invalidation axis is created.
 | | |
 |---|---|
 | lives in | `packages/jet_cad_2d`, pure Dart, no `dart:ui` |
-| key | the **boundary's** `geomIndex` |
+| key | the **boundary's `Handle`** — see [why not `geomIndex`](#geomindex-is-not-a-safe-cache-key-and-purge-is-why) |
 | value | `Int32List` of triangle indices into the boundary's own `coords` |
-| bound | the number of live fills in the document; no eviction policy |
+| bound | one entry per boundary that a fill names; no eviction policy |
 | hit | returns the stored list by reference — **zero allocation** |
-| miss | after an edit or on first draw, never per frame |
+| miss | **never on the frame path** — see below |
 
 **Indices, not coordinates.** The points already live in the boundary's
 payload, the transform is applied to them at draw time, and an index list is
 small and transform-free. Storing coordinates would duplicate the loop — the
 thing the model design exists to avoid.
 
-**No eviction policy, deliberately.** Entries are created on demand and
-destroyed with their boundary, so the cache is bounded by the document's fill
-count, which is the correct bound. A limit like `kParagraphCacheLimit` exists
-because paragraphs are keyed by *content* and the key space is unbounded; a
-`geomIndex` key space is exactly the live slot count.
+**Populated eagerly, never lazily.** The frame path *reads*; it does not
+compute. A cache that misses "on first draw" still ear-clips and still allocates
+on a paint, for every fill that becomes visible after a load or an edit — which
+contradicts the rule this design is built around rather than satisfying it. So
+an entry is materialised at the four moments a boundary's geometry becomes
+current, all of which are off the frame path:
+
+`AddRegionCommand` · `SetEntityGeometryCommand` · codec load · undo and redo
+
+**The cost this moves rather than removes** is load time: a document with N
+fills triangulates all N before its first frame. Room boundaries are tens of
+points and ear clipping is O(n²) in points, not in fills, so this is expected to
+be small — and it is a **measured** row of the exit gate, not an assumption.
+
+**No eviction policy, deliberately.** Entries are created with a fill and
+destroyed with the boundary they name, so the cache holds at most one entry per
+boundary that some fill has named — bounded by the document, never by its edit
+history. A limit like `kParagraphCacheLimit` exists because paragraphs are keyed
+by *content*, an unbounded key space; a boundary handle is not.
 
 ### Invalidation, and the trap in it
 
-Two sites:
+Two sites, and — because the key is a `Handle` — only two:
 
-1. `SetEntityGeometryCommand` — `replace` mutates in place and keeps the
-   `geomIndex`, so the key does not change and the entry would otherwise go
-   stale silently.
-2. `RemoveEntityCommand` — **and this is the dangerous one.** `geomIndex` slots
-   are recycled. An entry left behind after a removal is served to whatever
-   entity next takes that slot: a silent, plausible, wrong drawing.
+1. `SetEntityGeometryCommand` — the payload changes under a key that does not,
+   so the entry is replaced, not merely dropped.
+2. `RemoveEntityCommand` — removing a boundary drops its entry.
 
-The test for (2) must force slot reuse — remove, then add a differently-shaped
-entity, assert it landed in the same slot, then draw. **A test that removes and
-does not re-add is the degenerate fixture here**: it stays green and proves
-nothing.
+**`purge()` is deliberately not a third site.** It renumbers every `geomIndex`
+and touches no handle, so a handle-keyed cache is correct across it with no hook
+at all. Under a `geomIndex` key it would have been the worst site of the three,
+permuting every live entry at once. **A test must pin this**: purge a document
+with fills and assert the drawing is unchanged. Under `geomIndex` keying that
+test goes red; under `Handle` keying it passes for a reason, and the reason is
+the point.
+
+**And a missed invalidation is now a leak, not a lie.** Forgetting site 2 grows
+the cache; it cannot draw the wrong thing, because handles are never reissued.
+The test for it is a *count*, not a picture: remove a fill's boundary, then
+assert the cache is empty.
 
 ### The algorithm
 
@@ -369,50 +442,192 @@ equality and the differential oracle continue to work unchanged.
 
 ### Bounds
 
-A fill has no `coords`, so `pointBounds` returns an empty box. `entityBounds`
-must resolve the reference and return the boundary's box.
+A fill has no `coords`, so `pointBounds` returns an empty box, and its box has
+to come from the boundary.
+
+**`entityBounds` does not resolve the reference, because the file forbids it in
+writing.** Its doc comment says, of the text style it takes as a record rather
+than a handle:
+
+> giving this function a document dependency so it could look one up would be
+> worse: every caller already holds the document and can resolve the record once.
+
+A boundary handle is the same shape of lookup, and the same answer applies. The
+**caller** resolves, exactly as it already does for `TextStyleRecord`, and
+`entityBounds` gains two parameters:
+
+```dart
+EntityKind? boundaryKind,
+GeometryPayload? boundaryPayload,
+```
+
+both null for every kind but `fill`, and both required for `fill` — a fill with
+no boundary resolved returns an empty box and is counted, never guessed at.
 
 **`entityBounds` and every one of its call sites are one task, not several.**
 This is exactly the shape of Plan 3c's Task 4, and for the same reason: update
-the function and miss a call site and the index carries a wrong box silently.
+the function, miss a call site, and the index carries a wrong box silently. Each
+call site must also state **`peek` or `read`** for the boundary payload:
+`read` copies three objects, `peek` returns the store's own buffer, and the
+index's hot paths already use `peek` for exactly that reason. Commands, which
+keep what they read, use `read`.
 
-### Picking
+### The fill's box goes stale when its boundary is edited — and that is the trap
 
-A fill answers `HitKind.fill` on its own handle. Reporting the boundary instead
-is policy, and policy lives in the widget layer — the architecture spec already
-says the engine reports the path and the viewer decides what to select.
+`SpatialIndex` re-derives boxes **only for the handles in a command's `touched`
+set**. `SetEntityGeometryCommand` on a boundary touches the boundary. The fill's
+box is *derived* from that boundary and its handle is not in the set, so the
+index keeps the old box: the fill is culled against a region it no longer
+occupies, and picks near it answer against an outline that has moved.
+
+**This is the same class as the cache hazard, one subsystem over**, and it is
+the reason the design cannot reason about the cache in isolation and call the
+job done.
+
+**`SetEntityGeometryCommand`'s `touched` set must contain every fill that names
+the edited boundary.** That requires a reverse lookup, which the design owes
+explicitly:
+
+**`boundary Handle → fills`, a map the document maintains**, not an owner scan.
+A scan is O(entities) per edit, and R4a already establishes that an edit happens
+per frame during a drag; at 50,000 entities that is a scan per frame. The map is
+written by the same three commands that write fills, and is rebuilt on load. It
+is needed twice — here, and for the cascade in `RemoveEntityCommand` — so it is
+not machinery introduced for one caller.
+
+### Picking: a fill is drawn, not picked
+
+**The design's earlier claim that "a fill answers `HitKind.fill` on its own
+handle" is withdrawn. It cannot work, and it should not.**
+
+Two independent facts make a fill unpickable, and both are correct as they
+stand:
+
+- `_considerLeaf` returns before any kind dispatch when `pointCount == 0`. A
+  fill has no coordinates, so it is never a candidate.
+- Even if it were, it would always lose. Pick priority is kind first, then
+  ancestor, then **greater handle wins**. A fill's handle is strictly lower than
+  its boundary's — that is the whole point of the reservation — and a closed
+  polyline already answers `HitKind.fill` on its own interior. The boundary wins
+  every interior click, in every case, by construction.
+
+So the resolution is to **delete the requirement, not to add a picker**.
+Clicking inside a filled room selects the **boundary**, with `HitKind.fill`,
+exactly as it does today for an unfilled closed polyline; the region tool maps
+either half of the pair to the pair, which is the architecture spec's "the user
+never sees two entities" working as designed.
+
+Two consequences to state so nobody later "fixes" them:
+
+- **`snapCentreOfLeaf` returns null for a fill** and **`NarrowPhaseSlack.ofLeaf`
+  returns `none`** — both already, through `if (kind != circle && kind != arc)`
+  guards rather than a switch with a default. Both answers are *right*: a fill
+  contributes no snap candidate (its boundary already contributes every vertex,
+  and doubling them would break snap tie-breaks), and its box contains its
+  narrow phase trivially because it has none. The plan states the reasoning;
+  it changes no code there.
+- **The parallel oracle needs the same silence.** `reference_query.dart`'s two
+  `switch (record.kind)` statements must gain `fill` cases that produce no hit
+  and no snap candidate, or the differential oracle goes red for a disagreement
+  that is not one.
 
 ### The translucent seam, decided by measurement
 
 Plan 3d recorded permitted divergence 5 as "overlapping translucent strokes
 double-blend", inert while the corpus is opaque, "live the moment 3e adds
-fills". **The shape of it is not quite what was recorded, and the correction
-matters.**
+fills". **There are two modes here, not one, and an earlier draft of this
+document wrongly replaced the recorded one instead of adding to it.**
 
-A triangulation of a simple polygon *tiles* its interior: triangles share edges
-but not area, so there is no overlap to double-blend. The divergence arrives
-along the **shared edges**. An antialiasing rasteriser covers edge pixels
-partially, and two adjacent triangles blend the same pixel twice at partial
-alpha — visible as seam lines across the interior of a translucent fill.
+**Mode 1 — overlapping strokes, exactly as 3d recorded it.** At every join,
+`_emitJoin` fills the notch on the *outer* side of the turn, and the two chord
+quads meeting at that vertex overlap in a lens on the *inner* side. That overlap
+is geometric and unavoidable: two rectangles of the same half-width sharing an
+endpoint at an angle intersect. So every corner of every polyline and every step
+of every flattened circle double-blends under alpha. 3d's shape was right.
+
+**Mode 2 — shared triangulation edges, new with fills.** A triangulation of a
+simple polygon *tiles* its interior: triangles share edges but not area, so
+there is no overlap. The divergence arrives at the edges. `Paint.isAntiAlias`
+defaults true and `VerticesDrawSink` does not clear it, so edge pixels are
+covered partially and two adjacent triangles blend the same pixel twice at
+partial alpha — visible as seam lines *across the interior of a single fill*.
 `Canvas.drawPath` computes coverage once for the whole path and has no seam.
 
-So the divergence is live for a **single** translucent fill, and has nothing to
-do with overlapping strokes.
+Both are measured. Neither is assumed.
 
-**The decision rule is declared here, before the measurement, and either
-outcome is a result:**
+#### The instrument, and why the obvious one is wrong
 
-> A translucent fill is drawn through both backends and the difference along
-> interior triangulation edges is measured. **If it exceeds the threshold the
-> plan states before measuring**, translucent fills route through the fallback
-> sink — flush the batch, draw the path — using `_flushBeforeUnbatchable`,
-> which is the mechanism Plan 3d handed over for exactly this. **If it does
-> not**, translucent fills batch, and divergence 5 is recorded as inert in
-> practice **with the measured number beside it**.
+**`TriangleRasterizer` cannot see either mode, and a test written against it
+would pass vacuously.** Its inner loop is `pixels[y * width + x] = rgba` — a
+plain store. No blending, no alpha compositing, no antialiasing, last write
+wins. It is a *coverage* instrument, which is what it was built to be, and both
+modes are *blending* artefacts. A seam test on the repository's own rasterizer
+is a reviewed degenerate fixture, which is this codebase's named worst case.
 
-Measuring and stopping is the outcome. Tuning until the number complies is not.
+The seam is therefore measured against the **real engine**: a `ui.Picture`
+recorded through each sink, `picture.toImage()`, `toByteData()`, compared pixel
+by pixel — the instrument Plan 3d's Task 2 already used when it needed an answer
+the rasterizer could not give.
 
----
+#### The thresholds, declared here, before the measurement
+
+Fixture: a single convex-and-a-notch boundary filled at `alpha = 0x80` over
+white, one entity, 400 × 300 logical at the `flutter_test` default device pixel
+ratio of 3.0. Compared: `CanvasDrawSink`'s `drawPath` against
+`VerticesDrawSink`'s `drawVertices`, both through `picture.toImage()`.
+Interior pixels only — the outer boundary ring, one device pixel wide, is
+excluded, because edge antialiasing there is not the artefact under test.
+
+> **Routing fires if** more than **0.5 %** of interior pixels differ by more
+> than **8/255** in any channel, **or** any single interior pixel differs by
+> more than **32/255**.
+
+If it fires, translucent fills route through the fallback sink —
+`_flushBeforeUnbatchable`, the mechanism Plan 3d handed over, whose only caller
+today is `text`. If it does not, translucent fills batch and both divergences
+are recorded as inert in practice **with the measured percentage and maximum
+beside them**.
+
+**A third answer exists and is rejected on the record:** clearing
+`isAntiAlias` on the vertices `Paint` removes the partial coverage and with it
+the seam. It also jags every stroke in the drawing, on every frame, to fix an
+artefact that appears only under alpha. Rejected, not overlooked.
+
+#### The opaque floor, also declared
+
+The opaque agreement row is measured with the existing `measureAgreement`
+harness at `kInkAlphaFloor = 0xC0`, and its threshold is a **ratio** so it does
+not depend on the fixture's size:
+
+> `strayVerticesPixels` and `uncoveredCanvasPixels` must each be **at most 1 %**
+> of `canvasInkPixels`, and `canvasInkPixels` must exceed **4000** so the row
+> cannot pass against a near-blank surface.
+
+### Two invariants on the vertices sink
+
+**`_coveredArgb` must never see a fill's style.** It fades alpha in proportion
+to device *stroke* width, mirroring `Geometry::ComputeStrokeAlphaCoverage`. A
+fill entity's `ResolvedStyle` still carries `lineweightHundredths`, because the
+column is per-entity and shared, so routing a fill through that function would
+fade a filled room on a hairline layer — **on the vertices backend only**, and
+the ink floor would then hide the disagreement. `fillPolygon` and `fillCircle`
+use `style.argb` directly.
+
+**A circle fill's fan uses the same step count as the circle's own stroke**, not
+merely a similar one: the identical expression, `(theta * sqrt(deviceRadius /
+(8 * kFlattenTolerance))).ceil()` clamped to `kMaxFlattenSegments`. A different
+count makes a filled circle's silhouette and its own outline disagree, and the
+disagreement changes with zoom.
+
+### The painter decides the skip, not the sinks
+
+A boundary that yields no triangles must never reach a sink. `CanvasDrawSink`
+ignores `triangles` and fills the path by non-zero winding, so a self-
+intersecting loop would paint *something* there while `VerticesDrawSink` painted
+nothing — a divergence created exactly on the malformed case this plan says it
+refuses. So the **painter** checks for an empty triangulation, skips the fill,
+and increments `skippedFillCount`; neither sink is ever handed an empty fill,
+and the rule is a stated painter invariant with a test.
 
 ## Testing
 
@@ -439,6 +654,14 @@ makes it go red.
 | return an empty triangle list instead of counting the skip | assert `skippedFillCount`, not just the blank result — a blank surface passes a blankness test forever |
 | drop one `validate()` code | one fixture document per code; a suite that checks "validate returns non-empty" cannot tell which |
 | treat a nearly-closed polyline as closed | a loop whose ends differ by less than any tolerance — closedness is an exact stored-value test |
+| key the cache by `geomIndex` instead of `Handle` | **purge a document containing fills and draw again** — a suite that never calls `purge()` cannot tell the two keyings apart |
+| drop dependent fills from `SetEntityGeometry`'s `touched` set | edit a boundary, then **pick or cull inside the new-but-outside-the-old region** — asserting the drawing alone will not show it |
+| make `AddRegionCommand` two composed commands | assert no observer sees a fill whose boundary is missing — a test that only checks the end state passes |
+| let `SetEntityGeometryCommand` accept a fill | assert it throws; a suite that only ever edits boundaries cannot tell |
+| route a fill through `_coveredArgb` | a fill on a **hairline** layer — every fixture at a normal lineweight passes |
+| give the circle fan its own step count | compare a filled circle's silhouette against its own outline **at two zooms** |
+| hand an empty triangulation to the sinks | a **self-intersecting** boundary through both backends — canvas paints, vertices does not |
+| drop the `fill` cases from `reference_query.dart` | the differential oracle, which fails for the right reason only if the cases exist |
 
 The last one is the `Tolerance` rule stated as a fixture: a boundary whose
 first and last points differ by 1e-12 is **not** closed, is **not** fillable,
@@ -459,10 +682,13 @@ Every task ends green on all three packages, per `CLAUDE.md`.
 | allocations per fill in a steady-state frame | **zero** |
 | 10,000 entities with fills on, vertices backend | under 16.67 ms |
 | a fill's cost in `canvasCalls` on the vertices backend | **zero** — it joins the same batch |
-| ink agreement between backends, opaque fills | above the floor the plan declares |
-| translucent seam difference | measured; the routing rule fires or does not |
+| ink agreement between backends, opaque fills | `strayVerticesPixels` and `uncoveredCanvasPixels` each **≤ 1 %** of `canvasInkPixels`, with `canvasInkPixels > 4000` |
+| translucent seam difference | measured **against the real engine**, not `TriangleRasterizer`; routing fires above 0.5 % of interior pixels at 8/255, or any pixel at 32/255 |
 | `skippedFillCount` on the rig corpus | **0** |
 | a malformed fill in a loaded document | reported by `validate()` with the matching code, and nothing mutated |
+| triangulation entries after `purge()` | drawing unchanged, byte for byte |
+| cache entries after removing every fill's boundary | **zero** |
+| load-time triangulation cost, rig corpus | measured and recorded; no threshold, but no plan may skip the row |
 | the mutation log | every mutant killed or argued equivalent |
 
 **If a failable row misses: record the number and stop.** Plan 3b's Task 4 stop
@@ -475,10 +701,11 @@ The results note must state whether macOS Low Power Mode was on.
 
 ## What 3e owes the plans after it
 
-- **3f (caches and tiles)** inherits a second cache keyed by `geomIndex` with a
-  slot-recycling hazard already characterised, and a fill path whose cost is
-  triangles rather than canvas calls — which is the arithmetic a tiling scheme
-  changes.
+- **3f (caches and tiles)** inherits a second cache, and the argument for why it
+  is keyed by `Handle` rather than by a slot — `purge()` permutes slots, and a
+  picture or tile cache keyed on one has the same defect for the same reason. It
+  also inherits a fill path whose cost is triangles rather than canvas calls,
+  which is the arithmetic a tiling scheme changes.
 - **The pattern-fill plan** inherits the boundary contract, the triangulation
   cache and its invalidation, and the region command. What it does not inherit
   is a clipper: a pattern is strokes clipped to a loop, and nothing here clips.
@@ -499,5 +726,113 @@ The results note must state whether macOS Low Power Mode was on.
 | `entityBounds` is updated and a call site is missed | One task owns the function and all its call sites, as in Plan 3c |
 | The translucent seam is worse than expected and the plan tunes rather than reports | The decision rule and both outcomes are declared before the measurement |
 | `SetEntityGeometryCommand` grows past its purpose | It replaces one payload and nothing else; it is not an edit framework |
+| The seam test is written against `TriangleRasterizer` and passes vacuously | The rasterizer does not blend — `pixels[i] = rgba`, last write wins. Named in the design, and the instrument is specified as `picture.toImage()` instead |
+| Eager triangulation makes load slow on a fill-heavy document | It is a measured gate row rather than an assumption, and ear clipping is O(n²) in a boundary's points, not in the document's fills |
+| The reverse lookup is rebuilt wrongly on load and nothing notices | It is derived state with one source of truth; a test rebuilds it from a loaded document and compares against the map the commands built |
 | A fill's transparency makes the corpus non-opaque and disturbs Plan 3d's measurements | The rig carries fills behind a define, as text does, so on/off is one flag apart on one corpus |
 | The first frame after an edit allocates, and the allocation gate reads it | The gate measures the **steady state**, exactly as Plan 3c's "zero new paragraph layouts on a repeat frame" does. A miss after an edit is expected; a miss on a repeat frame is the failure |
+
+---
+
+## Review, and what it changed
+
+Three independent reviews, 2026-08-21, before any task was written. Every claim
+below was re-verified against the tree rather than taken on report — the
+codebase's own rule, and it paid: two review findings were themselves
+overstated, and one thing none of the three found is the sharpest item here.
+
+### Changed the design
+
+- **The cache is keyed by the boundary's `Handle`, not its `geomIndex`.** A
+  review found a third invalidation site the draft had missed — `purge()`
+  renumbers every `geomIndex` wholesale, so a `geomIndex`-keyed cache is not
+  stale after a purge but **permuted**. Rather than add a third hook, the key
+  moved. Handles survive purge, are never reissued, and are restored by undo, so
+  two of the three hazards stop existing and the third degrades from a wrong
+  drawing to a leak.
+- **`entityBounds` does not resolve the boundary handle.** The draft said it
+  must. `extents.dart`'s own doc comment refuses exactly that dependency, in
+  writing, for `TextStyleRecord`. The caller resolves and passes
+  `boundaryKind` + `boundaryPayload`, following the precedent already in the
+  file, and each call site declares `peek` or `read`.
+- **A fill is drawn, not picked, and the claim that it "answers `HitKind.fill`
+  on its own handle" is withdrawn.** Two independent facts make it unpickable
+  and both are correct: `_considerLeaf` returns before kind dispatch when
+  `pointCount == 0`, and pick priority breaks kind ties by **greater** handle,
+  which a reserved-lower fill loses to its own boundary by construction. Two
+  reviews proposed adding a fill case to the picker. The verified answer is the
+  opposite — delete the requirement. Clicking a filled room selects the
+  boundary, which is what it already does, and the region tool owns the mapping.
+- **`SetEntityGeometryCommand`'s `touched` set must carry every dependent
+  fill**, and a `boundary → fills` map is now owed explicitly. `SpatialIndex`
+  reconciles only touched handles, so editing a boundary left its fill's indexed
+  box describing geometry that no longer exists — the same class as the cache
+  trap, one subsystem over, and the reason this design cannot reason about one
+  subsystem at a time.
+- **Triangulation is materialised eagerly**, at command, load and undo/redo.
+  "A miss on first draw" is still a computation on a paint, which contradicts
+  the rule the design is built around instead of satisfying it.
+- **Thresholds are numbers now.** "The floor the plan declares" is not a floor.
+  The seam rule is 0.5 % of interior pixels at 8/255, or any pixel at 32/255, at
+  a stated fixture, viewport and device pixel ratio; the opaque row is 1 % of
+  canvas ink with a non-vacuity floor of 4000.
+- **`AddRegionCommand` is one `apply`**, and `SetEntityGeometryCommand` refuses
+  fills. Both were unstated and both have a named mutant now.
+- **Two vertices-sink invariants** are stated: `_coveredArgb` never sees a
+  fill's style, and a circle fill's fan shares the stroke's exact step
+  expression.
+- **The painter owns the empty-triangulation skip**, because `CanvasDrawSink`
+  fills a self-intersecting path by non-zero winding while `VerticesDrawSink`
+  would draw nothing — a divergence manufactured on the very case the plan
+  refuses.
+
+### Found by verifying, not by any review
+
+**`TriangleRasterizer` cannot see the translucent seam at all.** Its inner loop
+is `pixels[y * width + x] = rgba`: a plain store, no blending, no alpha
+compositing, no antialiasing. Both divergence modes are blending artefacts. A
+seam test written against the repository's own rasterizer — the natural
+instrument, the one the goldens use — would have passed against a sink drawing
+the artefact at full strength. The measurement is specified against
+`picture.toImage()` instead.
+
+This is the failure this codebase names as dominant, in its most expensive form:
+not a degenerate fixture that slipped through, but one that a review had already
+approved.
+
+### Corrected a fact
+
+- **`GeometryStore.replace` has a test caller**, `geometry_store_test.dart:94`.
+  The draft said "not by a command, not by a test, nowhere in the repository".
+  The search behind that sentence was `geometry\.replace`; the test calls
+  `store.replace`. The true statement is *no production caller*, and it is now
+  the one in the text. An absence found with a narrow pattern is not an absence.
+- **The codec emits entities in slot order, not handle order**, and
+  `DocumentTree._link` appends in insertion order — handle order is
+  re-established downstream by `reference_walk`'s sort. The draft asserted
+  handle order for both. Neither affects a decision here, but the round-trip
+  argument leaned on a claim that was only approximately true.
+- **The `handles burned=201` figure** comes from the 2026-08-21 follow-up device
+  runs, not from Plan 3d's original results note.
+
+### Considered and not changed
+
+- **A fill-specific picker narrow phase.** Two reviews asked for one. Verified
+  unnecessary: the correct behaviour is no hit, and the existing `count == 0`
+  early-out already produces it.
+- **`NarrowPhaseSlack.ofLeaf` and `snapCentreOfLeaf` "fail silently" for a new
+  kind.** Reported as a hazard; verified as correct behaviour. Both use a
+  negative guard — `if (kind != circle && kind != arc)` — not a switch with a
+  default, and both of their answers for a fill are the right ones: zero slack,
+  because a fill's box contains a narrow phase it does not have, and no snap
+  centre, because its boundary already contributes every candidate and doubling
+  them would corrupt snap tie-breaks. The reasoning is recorded so a later
+  reader does not "fix" it.
+- **The cache "accumulates across fill/remove history".** Verified false: the key
+  space is live boundary handles, so the cache cannot exceed the document's
+  boundary count regardless of how many fills have come and gone. The draft's
+  stated bound — "the number of live fills" — was imprecise and is corrected,
+  but the bound itself holds.
+- **Clearing `isAntiAlias` to remove the seam.** Named and rejected on the
+  record rather than left unconsidered: it would jag every stroke on every frame
+  to fix an artefact that only appears under alpha.
