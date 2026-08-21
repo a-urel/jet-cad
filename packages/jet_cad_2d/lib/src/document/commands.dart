@@ -309,6 +309,69 @@ class SetComponentCommand<T extends Component> extends DraftCommand {
   }
 }
 
+/// Replaces one entity's geometry, preserving its handle and its `geomIndex`.
+///
+/// The command `GeometryStore.replace` was waiting for. Without it, editing
+/// points means remove + add, which issues a new handle -- and a fill that
+/// names its boundary by handle loses its referent the moment that happens.
+///
+/// Rejects [EntityKind.fill]: a fill's payload is a *reference*, not geometry,
+/// and letting this command rewrite it would repoint a fill at another
+/// boundary with no validation, no cache move and no `touched` story.
+/// Re-association is a different operation and is out of this plan's scope.
+class SetEntityGeometryCommand extends DraftCommand {
+  SetEntityGeometryCommand(this.handle, this.payload);
+
+  final Handle handle;
+  final GeometryPayload payload;
+
+  @override
+  Capability get capability => Capability.geometry;
+
+  @override
+  String get label => 'Edit geometry';
+
+  @override
+  CommandResult apply(CommandTarget target) {
+    final slot = target.entities.slotOf(handle);
+    if (slot == null) {
+      throw StateError('no entity with handle ${handle.toHex()}');
+    }
+    final record = target.entities.read(slot);
+    if (record.kind == EntityKind.fill) {
+      throw StateError(
+          '${handle.toHex()} is a fill: its payload names a boundary and is '
+          'not geometry this command may rewrite');
+    }
+    // `read`, not `peek`: the inverse keeps this payload, and `peek` returns
+    // the store's own buffer, which a later edit would rewrite underneath the
+    // undo stack.
+    final previous = target.geometry.read(record.geomIndex);
+    target.geometry.replace(record.geomIndex, payload);
+
+    // The fill's box is derived from this boundary, and `SpatialIndex`
+    // re-derives only what a command touches. Leaving the fills out here
+    // leaves them indexed against geometry that no longer exists.
+    final dependents = target.fills.fillsOf(handle);
+    if (dependents.isNotEmpty) {
+      final triangles = triangulationFor(record.kind, payload);
+      // `replace` keeps the geomIndex, so the key does not change and a stale
+      // entry would never be noticed. Replace it, or drop it when the edit
+      // made the boundary unfillable -- the painter then counts a skip.
+      if (triangles == null || triangles.isEmpty) {
+        target.fills.dropTriangles(handle);
+      } else {
+        target.fills.putTriangles(handle, triangles);
+      }
+    }
+    target.invalidateDerived();
+    return CommandResult(
+      inverse: SetEntityGeometryCommand(handle, previous),
+      touched: {handle, ...dependents},
+    );
+  }
+}
+
 /// Creates a boundary and the fill beneath it, as one mutation.
 ///
 /// **The pair's handles are the whole point.** Draw order is ascending handle
