@@ -12,6 +12,12 @@ import 'style.dart';
 
 /// Adds one leaf entity together with its geometry.
 ///
+/// A [EntityKind.fill] record carries no geometry of its own — its payload is
+/// the handle of the boundary it fills — so adding one also restores its
+/// entry in the [FillIndex]; see [_indexFill]. That branch is what makes this
+/// command a true inverse of removing a fill, and it is equally the path a
+/// caller takes who adds a fill directly.
+///
 /// The record's `geomIndex` is ignored on the way in: the geometry slot is
 /// whatever the store hands back, and the stored record is rewritten to match.
 /// Passing a stale index through would silently bind an entity to the wrong
@@ -52,11 +58,54 @@ class AddEntityCommand extends DraftCommand {
     final geomIndex = target.geometry.add(payload);
     target.entities.add(record.copyWith(geomIndex: geomIndex));
     target.handleSeed.raiseTo(record.handle);
+    if (record.kind == EntityKind.fill) _indexFill(target);
     target.invalidateDerived();
     return CommandResult(
       inverse: RemoveEntityCommand(record.handle),
       touched: {record.handle},
     );
+  }
+
+  /// Restores the [FillIndex] state that belongs to the fill just added.
+  ///
+  /// Adding a fill's *record* is not adding a fill: everything the painter and
+  /// the removal cascade read about it lives in the index, which nothing else
+  /// on this path writes. Without this, `fillsOf(boundary)` stayed empty while
+  /// the fill was live, so `SetEntityGeometryCommand` skipped the
+  /// re-triangulation and drew the stale index list against the new points,
+  /// `RemoveEntityCommand(boundary)` took its no-dependents branch and left the
+  /// fill orphaned, and `touched` never named the fill for `SpatialIndex`.
+  ///
+  /// **Linked even when the boundary is missing, unfillable, foreign-owned or
+  /// higher-handled**, which is the codec's `_rebuildFills` policy and is
+  /// deliberate for the same reason: dropping the link discards the user's
+  /// data, where `validate()` reports every one of those four and the painter
+  /// counts the skip.
+  ///
+  /// **The triangulation is recomputed, not assumed present.** An entry keyed
+  /// by this boundary may be older than the boundary's current payload:
+  /// `SetEntityGeometryCommand` refreshes the cache only for boundaries that
+  /// have fills, so editing a boundary while its fill is removed leaves the
+  /// entry behind untouched. Materialising only when absent would then restore
+  /// the fill onto exactly the stale triangulation this fix exists to prevent.
+  void _indexFill(CommandTarget target) {
+    final boundary = boundaryHandleOf(payload);
+    target.fills.link(record.handle, boundary);
+    final boundarySlot = target.entities.slotOf(boundary);
+    if (boundarySlot == null) return;
+    // `peek`, not `read`: the payload is triangulated here and never retained,
+    // so the store's own buffer is safe to look at.
+    final triangles = triangulationFor(target.entities.kindAt(boundarySlot),
+        target.geometry.peek(target.entities.geomIndexAt(boundarySlot)));
+    // Empty is a circle or a shape that would not reduce, and null is a
+    // boundary with no interior. Neither has an index list, and any entry
+    // sitting under this key is stale — drop it, and the painter counts the
+    // skip rather than drawing something arbitrary.
+    if (triangles == null || triangles.isEmpty) {
+      target.fills.dropTriangles(boundary);
+    } else {
+      target.fills.putTriangles(boundary, triangles);
+    }
   }
 }
 
@@ -93,6 +142,10 @@ class RemoveEntityCommand extends DraftCommand {
     final payload = target.geometry.read(record.geomIndex);
 
     if (record.kind == EntityKind.fill) {
+      // The link goes with the record; the boundary's triangulation stays, and
+      // may be read again by another fill on the same boundary. The inverse
+      // re-links and re-derives that triangulation itself rather than trusting
+      // what is left here -- see [AddEntityCommand._indexFill].
       target.entities.remove(slot);
       target.geometry.remove(record.geomIndex);
       target.fills.unlink(handle);
@@ -110,6 +163,31 @@ class RemoveEntityCommand extends DraftCommand {
     if (dependents.length == 1) {
       final fillSlot = target.entities.slotOf(dependents.single)!;
       final fillRecord = target.entities.read(fillSlot);
+      // The inverse below is `AddRegionCommand`, which re-checks its own
+      // preconditions when it replays -- so this branch asks first, while
+      // nothing has been written yet. A pair that fails them is not
+      // hypothetical: the codec's `_rebuildFills` deliberately links a fill to
+      // a missing, unfillable, foreign-owner or inverted-handle boundary
+      // rather than discard the user's data, and `validate()` reports all four
+      // without repairing them; `SetEntityGeometryCommand` can make a live
+      // boundary unfillable in-session too. Removing one of those used to
+      // destroy both entities and then throw on every undo attempt, forever --
+      // `apply`'s "complete fully or leave the target unmutated" contract kept
+      // to the letter while the history became unreplayable.
+      //
+      // Refuse rather than half-handle it: the same call the n-ary branch
+      // below makes. The escape is always available and never lossy --
+      // removing the fill on its own is an ordinary `RemoveEntityCommand`,
+      // it undoes cleanly through `AddEntityCommand`'s fill branch, and it
+      // leaves this cascade with nothing left to cascade.
+      final refusal = AddRegionCommand.refusalReason(
+          fill: fillRecord, boundary: record, boundaryPayload: payload);
+      if (refusal != null) {
+        throw StateError(
+            'cannot remove boundary ${handle.toHex()}: $refusal, so undo could '
+            'not restore the pair; remove fill ${fillRecord.handle.toHex()} '
+            'first');
+      }
       target.entities.remove(fillSlot);
       target.geometry.remove(fillRecord.geomIndex);
       target.entities.remove(slot);
@@ -487,21 +565,44 @@ class AddRegionCommand extends DraftCommand {
   @override
   String get label => 'Add region';
 
-  @override
-  CommandResult apply(CommandTarget target) {
+  /// Why [apply] would refuse this trio, or null when it would accept it.
+  ///
+  /// Split out because [RemoveEntityCommand] builds this command as the
+  /// inverse of removing a filled boundary, and has to ask *before it mutates
+  /// anything* whether that inverse could ever replay. A second copy of the
+  /// rule would drift from this one, and the drift is invisible until an undo
+  /// throws.
+  ///
+  /// Handle collisions are deliberately not part of it: handles are never
+  /// reissued, so a trio that is replayable now cannot become un-replayable
+  /// later by having its handles taken.
+  static String? refusalReason({
+    required EntityRecord fill,
+    required EntityRecord boundary,
+    required GeometryPayload boundaryPayload,
+  }) {
     if (fill.handle.value >= boundary.handle.value) {
-      throw StateError('a region\'s fill must carry the lower handle: got fill '
-          '${fill.handle.toHex()} against boundary ${boundary.handle.toHex()}');
+      return 'a region\'s fill must carry the lower handle: got fill '
+          '${fill.handle.toHex()} against boundary ${boundary.handle.toHex()}';
     }
     if (fill.owner != boundary.owner) {
-      throw StateError('a region\'s two halves must share one owner');
+      return 'a region\'s two halves must share one owner';
     }
+    if (triangulationFor(boundary.kind, boundaryPayload) == null) {
+      return '${boundary.handle.toHex()} is not a fillable boundary';
+    }
+    return null;
+  }
+
+  @override
+  CommandResult apply(CommandTarget target) {
     // Everything that can refuse, refuses before anything is written --
     // `apply` must either complete fully or leave the target unmutated.
-    final triangles = triangulationFor(boundary.kind, boundaryPayload);
-    if (triangles == null) {
-      throw StateError('${boundary.handle.toHex()} is not a fillable boundary');
-    }
+    final refusal = refusalReason(
+        fill: fill, boundary: boundary, boundaryPayload: boundaryPayload);
+    if (refusal != null) throw StateError(refusal);
+    // Non-null: `refusalReason` returns a reason for exactly the null case.
+    final triangles = triangulationFor(boundary.kind, boundaryPayload)!;
     if (target.entities.containsHandle(fill.handle) ||
         target.entities.containsHandle(boundary.handle)) {
       throw DuplicateHandleError(fill.handle);

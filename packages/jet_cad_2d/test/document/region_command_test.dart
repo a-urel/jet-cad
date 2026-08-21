@@ -6,6 +6,24 @@ GeometryPayload squareLoop() => GeometryPayload(
     coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
     scalars: Float64List(0));
 
+/// A six-vertex L: it reduces to four triangles, so its index list cannot be
+/// confused with the square's two.
+GeometryPayload lLoop() => GeometryPayload(
+    coords: Float64List.fromList(
+        [0, 0, 20, 0, 20, 10, 10, 10, 10, 20, 0, 20, 0, 0]),
+    scalars: Float64List(0));
+
+/// An open polyline: `triangulationFor` returns null for it, which is what
+/// makes a boundary carrying it unfillable.
+GeometryPayload openLoop() => GeometryPayload(
+    coords: Float64List.fromList([0, 0, 10, 0, 10, 10]),
+    scalars: Float64List(0));
+
+/// The payload of a fill naming [boundary] -- no coordinates, one scalar.
+GeometryPayload fillPayload(Handle boundary) => GeometryPayload(
+    coords: Float64List(0),
+    scalars: Float64List.fromList([boundary.value.toDouble()]));
+
 AddRegionCommand region(DraftDocument doc) => AddRegionCommand.allocate(
       seed: doc.handleSeed,
       owner: doc.rootHandle,
@@ -232,5 +250,157 @@ void main() {
     doc.commands.execute(RemoveEntityCommand(cmd.fill.handle));
     expect(doc.entities.slotOf(cmd.boundary.handle), isNotNull);
     expect(doc.fills.fillsOf(cmd.boundary.handle), isEmpty);
+  });
+
+  // --- Removing a fill ALONE, then restoring it. Every fixture above removes
+  // the boundary, and an entity-liveness assertion passes even with the fill
+  // index left empty, which is how this survived seventeen reviews.
+
+  test('undoing a fill-only removal restores the index, not just the record',
+      () {
+    final doc = DraftDocument.empty();
+    final cmd = region(doc);
+    doc.commands.execute(cmd);
+    doc.commands.execute(RemoveEntityCommand(cmd.fill.handle));
+    doc.commands.undo();
+
+    expect(doc.entities.slotOf(cmd.fill.handle), isNotNull);
+    expect(doc.fills.fillsOf(cmd.boundary.handle), [cmd.fill.handle],
+        reason: 'the record alone is not a fill: the painter, the removal '
+            'cascade and `touched` all read the link, not the store');
+    expect(doc.fills.trianglesFor(cmd.boundary.handle), hasLength(6));
+
+    // Indistinguishable from a fill that was never removed, including under a
+    // later boundary edit -- which is where the missing link did its damage:
+    // it made `SetEntityGeometryCommand` skip the refresh and draw the stale
+    // index list against the new points.
+    Set<Handle>? touched;
+    doc.commands.onAfterMutate = (change) => touched = change.touched;
+    doc.commands
+        .execute(SetEntityGeometryCommand(cmd.boundary.handle, lLoop()));
+    expect(doc.fills.trianglesFor(cmd.boundary.handle), hasLength(12),
+        reason: 'six vertices reduce to four triangles; a length of 6 here is '
+            'the square\'s triangulation drawn against the L\'s points');
+    expect(touched, contains(cmd.fill.handle));
+  });
+
+  test('a restored fill is a dependent again, so the cascade still sees it',
+      () {
+    final doc = DraftDocument.empty();
+    final cmd = region(doc);
+    doc.commands.execute(cmd);
+    doc.commands.execute(RemoveEntityCommand(cmd.fill.handle));
+    doc.commands.undo();
+
+    doc.commands.execute(RemoveEntityCommand(cmd.boundary.handle));
+    expect(doc.entities.slotOf(cmd.fill.handle), isNull,
+        reason: 'with the link gone this took the no-dependents branch and '
+            'left the fill orphaned -- the state the cascade exists to '
+            'prevent');
+    expect(doc.fills.linkCount, 0);
+    expect(doc.fills.entryCount, 0);
+  });
+
+  test('a fill added back onto an edited boundary gets the new triangulation',
+      () {
+    final doc = DraftDocument.empty();
+    final cmd = region(doc);
+    doc.commands.execute(cmd);
+    final fillSlot = doc.entities.slotOf(cmd.fill.handle)!;
+    final fillRecord = doc.entities.read(fillSlot);
+    final fillGeometry = doc.geometry.read(doc.entities.geomIndexAt(fillSlot));
+
+    doc.commands.execute(RemoveEntityCommand(cmd.fill.handle));
+    // No fill names the boundary now, so `SetEntityGeometryCommand` leaves the
+    // cache entry alone: it is a square's triangulation over an L's points.
+    doc.commands
+        .execute(SetEntityGeometryCommand(cmd.boundary.handle, lLoop()));
+    doc.commands
+        .execute(AddEntityCommand(record: fillRecord, payload: fillGeometry));
+
+    expect(doc.fills.fillsOf(cmd.boundary.handle), [cmd.fill.handle]);
+    expect(doc.fills.trianglesFor(cmd.boundary.handle), hasLength(12),
+        reason: 'materialising only when the entry is absent restores the '
+            'fill onto the stale entry left behind by the edit');
+    expect(doc.fills.trianglesFor(cmd.boundary.handle),
+        orderedEquals(triangulationFor(EntityKind.polyline, lLoop())!),
+        reason: 'derived from the boundary\'s current payload, not from '
+            'whatever the cache happened to hold');
+  });
+
+  test('a fill added directly is linked, not silently inert', () {
+    final doc = DraftDocument.empty();
+    final template = region(doc);
+    // Handles swapped: this document is malformed in exactly the way
+    // `_rebuildFills` preserves -- the fill draws over its own outline, and
+    // `validate()` reports it without repairing it.
+    final boundary =
+        template.boundary.copyWith(handle: Handle(template.fill.handle.value));
+    final fill =
+        template.fill.copyWith(handle: Handle(template.boundary.handle.value));
+    doc.commands
+        .execute(AddEntityCommand(record: boundary, payload: squareLoop()));
+    doc.commands.execute(
+        AddEntityCommand(record: fill, payload: fillPayload(boundary.handle)));
+
+    expect(doc.fills.fillsOf(boundary.handle), [fill.handle],
+        reason: 'an unlinked fill never paints and reports nothing');
+    expect(doc.fills.trianglesFor(boundary.handle), hasLength(6));
+    expect(doc.validate().map((d) => d.code),
+        contains(ValidationCodes.fillDrawOrderInverted),
+        reason: 'linking is not repairing: the malformation is still reported');
+
+    // And that malformation is exactly what makes the removal cascade's
+    // inverse un-replayable, so the removal is refused rather than performed.
+    expect(() => doc.commands.execute(RemoveEntityCommand(boundary.handle)),
+        throwsStateError);
+    expect(doc.entities.slotOf(boundary.handle), isNotNull);
+    expect(doc.entities.slotOf(fill.handle), isNotNull);
+  });
+
+  // --- The inverse of removing a filled boundary has to be replayable.
+
+  test('removing a boundary whose pair could not be restored is refused', () {
+    final doc = DraftDocument.empty();
+    final cmd = region(doc);
+    doc.commands.execute(cmd);
+    // In-session, no codec needed: this is the state
+    // `SetEntityGeometryCommand` documents as "the painter then counts a skip".
+    doc.commands
+        .execute(SetEntityGeometryCommand(cmd.boundary.handle, openLoop()));
+    expect(doc.fills.trianglesFor(cmd.boundary.handle), isNull);
+
+    expect(() => doc.commands.execute(RemoveEntityCommand(cmd.boundary.handle)),
+        throwsStateError,
+        reason: 'the cascade\'s inverse is an AddRegionCommand that would '
+            'refuse an unfillable boundary, so undo would throw forever');
+    expect(doc.entities.slotOf(cmd.boundary.handle), isNotNull);
+    expect(doc.entities.slotOf(cmd.fill.handle), isNotNull);
+    expect(doc.fills.fillsOf(cmd.boundary.handle), [cmd.fill.handle]);
+  });
+
+  test('the refused removal has an escape, and the escape undoes cleanly', () {
+    final doc = DraftDocument.empty();
+    final cmd = region(doc);
+    doc.commands.execute(cmd);
+    doc.commands
+        .execute(SetEntityGeometryCommand(cmd.boundary.handle, openLoop()));
+
+    doc.commands.execute(RemoveEntityCommand(cmd.fill.handle));
+    doc.commands.execute(RemoveEntityCommand(cmd.boundary.handle));
+    expect(doc.entities.liveSlots, isEmpty);
+
+    doc.commands.undo();
+    doc.commands.undo();
+    expect(doc.entities.slotOf(cmd.boundary.handle), isNotNull);
+    expect(doc.entities.slotOf(cmd.fill.handle), isNotNull);
+    expect(doc.fills.fillsOf(cmd.boundary.handle), [cmd.fill.handle],
+        reason: 'the malformed pair is restored exactly as it was, link '
+            'included; validate() still reports it');
+    expect(doc.fills.trianglesFor(cmd.boundary.handle), isNull,
+        reason: 'still unfillable, so still no index list to draw');
+    expect(doc.validate().map((d) => d.code),
+        contains(ValidationCodes.fillBoundaryNotClosed),
+        reason: 'the user\'s data survived the round trip unrepaired');
   });
 }
