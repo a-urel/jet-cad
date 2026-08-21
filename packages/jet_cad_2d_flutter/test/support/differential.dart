@@ -108,6 +108,19 @@ List<DrawnItem> flatten(List<DrawOp> ops) {
         out.add(DrawnItem(
             'arc', style, [residual.transformPoint(Vector2(cx, cy))],
             radius: r * residual.scaleMagnitude, start: start, sweep: sweep));
+      case FillPolygonOp(:final points, :final style):
+        out.add(DrawnItem(
+            'fillPolygon',
+            style,
+            [
+              for (var i = 0; i < points.length; i += 2)
+                residual.transformPoint(Vector2(points[i], points[i + 1]))
+            ],
+            closed: true));
+      case FillCircleOp(:final cx, :final cy, :final r, :final style):
+        out.add(DrawnItem(
+            'fillCircle', style, [residual.transformPoint(Vector2(cx, cy))],
+            radius: r * residual.scaleMagnitude));
       case TextOp(:final text, :final resolved):
         // Three points, not one: the origin plus the images of the local
         // unit vectors, so `kScreenTolerance` covers scale, rotation and

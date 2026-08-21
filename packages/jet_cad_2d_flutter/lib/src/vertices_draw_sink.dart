@@ -710,4 +710,21 @@ class VerticesDrawSink implements DrawSink {
     _flushBeforeUnbatchable();
     _fallback?.text(text, style, resolved);
   }
+
+  // TODO(Task 12): batch fills into the same buffer as strokes, using
+  // [triangles] directly instead of falling back. Until then a fill is
+  // unbatched, exactly like text: flush what is pending so draw order is
+  // preserved, then hand it to the fallback.
+  @override
+  void fillPolygon(
+      Float64List points, int count, Int32List triangles, ResolvedStyle style) {
+    _flushBeforeUnbatchable();
+    _fallback?.fillPolygon(points, count, triangles, style);
+  }
+
+  @override
+  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {
+    _flushBeforeUnbatchable();
+    _fallback?.fillCircle(cx, cy, r, style);
+  }
 }

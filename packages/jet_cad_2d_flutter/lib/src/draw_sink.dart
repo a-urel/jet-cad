@@ -28,6 +28,29 @@ abstract class DrawSink {
   void arc(double cx, double cy, double r, double start, double sweep,
       ResolvedStyle style);
 
+  /// Fills a closed loop.
+  ///
+  /// [points] is the boundary's loop in this residual's local space, [count]
+  /// its point count including the duplicated closing point. [triangles] is
+  /// the loop's triangulation as triple-indices into [points]' point
+  /// numbering -- computed once, off the frame path, and passed through
+  /// because a sink must not reach into the document to get it.
+  ///
+  /// A sink that fills paths natively ignores [triangles]; a sink that batches
+  /// geometry needs them. Both receive the same call, which is what keeps
+  /// [RecordingDrawSink] equality meaningful.
+  ///
+  /// The painter never calls this with an empty [triangles]: an unfillable
+  /// boundary is skipped and counted before it reaches a sink. See
+  /// `DraftPainter.skippedFillCount`.
+  void fillPolygon(
+      Float64List points, int count, Int32List triangles, ResolvedStyle style);
+
+  /// Fills a circle. Never triangulated ahead of time: a circle's
+  /// tessellation is scale-dependent, so a batching sink fans it per frame at
+  /// the step count its own stroke would use.
+  void fillCircle(double cx, double cy, double r, ResolvedStyle style);
+
   /// Draws [text] at the residual's local origin.
   ///
   /// No offset and no second matrix: the painter pushes `residual ∘
@@ -187,6 +210,60 @@ final class ArcOp extends DrawOp {
 }
 
 @immutable
+final class FillPolygonOp extends DrawOp {
+  const FillPolygonOp(this.points, this.triangles, this.style);
+
+  /// Flat `[x0, y0, x1, y1, ...]`, already trimmed to the drawn point count.
+  final List<double> points;
+
+  /// Triple-indices into [points]' point numbering. Part of `==`: a painter
+  /// that hands one sink a stale triangulation and the other a fresh one must
+  /// produce two op lists the oracle sees as different, not two lists that
+  /// happen to compare equal because only the boundary was checked.
+  final List<int> triangles;
+
+  final ResolvedStyle style;
+
+  @override
+  bool operator ==(Object other) =>
+      other is FillPolygonOp &&
+      other.style == style &&
+      listEquals(other.points, points) &&
+      listEquals(other.triangles, triangles);
+
+  @override
+  int get hashCode =>
+      Object.hash(Object.hashAll(points), Object.hashAll(triangles), style);
+
+  @override
+  String toString() => 'FillPolygonOp($points, $triangles)';
+}
+
+@immutable
+final class FillCircleOp extends DrawOp {
+  const FillCircleOp(this.cx, this.cy, this.r, this.style);
+
+  final double cx;
+  final double cy;
+  final double r;
+  final ResolvedStyle style;
+
+  @override
+  bool operator ==(Object other) =>
+      other is FillCircleOp &&
+      other.cx == cx &&
+      other.cy == cy &&
+      other.r == r &&
+      other.style == style;
+
+  @override
+  int get hashCode => Object.hash(cx, cy, r, style);
+
+  @override
+  String toString() => 'FillCircleOp($cx, $cy, $r)';
+}
+
+@immutable
 final class TextOp extends DrawOp {
   const TextOp(this.text, this.style, this.resolved);
 
@@ -244,6 +321,18 @@ class RecordingDrawSink implements DrawSink {
       _ops.add(ArcOp(cx, cy, r, start, sweep, style));
 
   @override
+  void fillPolygon(Float64List points, int count, Int32List triangles,
+          ResolvedStyle style) =>
+      // Copied, not retained, same reason as `polyline`: the painter reuses
+      // one scratch buffer per depth.
+      _ops.add(FillPolygonOp(
+          points.sublist(0, count * 2), triangles.toList(), style));
+
+  @override
+  void fillCircle(double cx, double cy, double r, ResolvedStyle style) =>
+      _ops.add(FillCircleOp(cx, cy, r, style));
+
+  @override
   void text(String text, Handle style, ResolvedStyle resolved) =>
       _ops.add(TextOp(text, style, resolved));
 }
@@ -274,6 +363,15 @@ class NullDrawSink implements DrawSink {
   @override
   void arc(double cx, double cy, double r, double start, double sweep,
           ResolvedStyle style) =>
+      opCount++;
+
+  @override
+  void fillPolygon(Float64List points, int count, Int32List triangles,
+          ResolvedStyle style) =>
+      opCount++;
+
+  @override
+  void fillCircle(double cx, double cy, double r, ResolvedStyle style) =>
       opCount++;
 
   @override

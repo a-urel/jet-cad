@@ -159,4 +159,9 @@ class TextKeySink implements DrawSink {
   @override
   void arc(double cx, double cy, double r, double start, double sweep,
       ResolvedStyle style) {}
+  @override
+  void fillPolygon(Float64List points, int count, Int32List triangles,
+      ResolvedStyle style) {}
+  @override
+  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {}
 }

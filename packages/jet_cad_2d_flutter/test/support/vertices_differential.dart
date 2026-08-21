@@ -152,6 +152,11 @@ List<InkSample> inkSamples(List<DrawOp> ops) {
           :final style
         ):
         sampleCurve(cx, cy, r, start, sweep, style.argb & 0x00FFFFFF, 'arc');
+      case FillPolygonOp():
+      case FillCircleOp():
+        // Not batched: a fill goes to the fallback sink, same as text. Task
+        // 12 gives VerticesDrawSink its own triangle batching for these.
+        break;
       case TextOp():
         // Not batched: text goes to the fallback sink as a paragraph.
         break;

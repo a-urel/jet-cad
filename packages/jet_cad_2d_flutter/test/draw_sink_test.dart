@@ -28,6 +28,11 @@ const ResolvedStyle _resolved = ResolvedStyle(
 
 Vector2 _v(double x, double y) => Vector2(x, y);
 
+// A unit square, closing point duplicated, and one of its triangulations.
+final Float64List _square =
+    Float64List.fromList([0, 0, 1, 0, 1, 1, 0, 1, 0, 0]);
+final Int32List _triangles = Int32List.fromList([0, 1, 2, 0, 2, 3]);
+
 void main() {
   group('RecordingDrawSink', () {
     test('captures ops in order with residual-local points', () {
@@ -127,6 +132,57 @@ void main() {
           isNot(const TextOp('WC', Handle(7), _anyStyle)),
           reason: 'a different resolved style is a different op');
     });
+
+    test('two recordings of the same fill compare equal', () {
+      final a = RecordingDrawSink()
+        ..fillPolygon(_square, 5, _triangles, _anyStyle);
+      final b = RecordingDrawSink()
+        ..fillPolygon(_square, 5, _triangles, _anyStyle);
+      expect(a.ops, b.ops);
+    });
+
+    test('a different triangulation of the same outline is a different op', () {
+      // The op carries the triangles, so a painter that hands one sink a
+      // stale triangulation and the other a fresh one is a disagreement the
+      // oracle sees.
+      final a = RecordingDrawSink()
+        ..fillPolygon(
+            _square, 5, Int32List.fromList([0, 1, 2, 0, 2, 3]), _anyStyle);
+      final b = RecordingDrawSink()
+        ..fillPolygon(
+            _square, 5, Int32List.fromList([0, 1, 3, 1, 2, 3]), _anyStyle);
+      expect(a.ops, isNot(b.ops));
+    });
+
+    test('fillPolygon copies the caller buffers', () {
+      // Same hazard as `polyline`: the painter reuses one scratch buffer per
+      // depth, so a sink that retained the caller's lists would record the
+      // same (last) geometry for every entity.
+      final sink = RecordingDrawSink();
+      final points = Float64List.fromList([0, 0, 1, 0, 1, 1, 0, 1, 0, 0]);
+      final triangles = Int32List.fromList([0, 1, 2, 0, 2, 3]);
+      sink.fillPolygon(points, 5, triangles, _anyStyle);
+      points[0] = 99;
+      triangles[0] = 99;
+      final op = sink.ops.single as FillPolygonOp;
+      expect(op.points.first, 0.0);
+      expect(op.triangles.first, 0);
+    });
+
+    test('fillCircle records centre, radius and style', () {
+      final sink = RecordingDrawSink()..fillCircle(1, 2, 5, _anyStyle);
+      expect(sink.ops.single, const FillCircleOp(1, 2, 5, _anyStyle));
+    });
+
+    test('fill ops compare by value', () {
+      expect(const FillCircleOp(0, 0, 5, _anyStyle),
+          isNot(const FillCircleOp(0, 0, 6, _anyStyle)));
+      expect(FillPolygonOp(const [0.0, 1.0], const [0, 1, 2], _anyStyle),
+          FillPolygonOp(const [0.0, 1.0], const [0, 1, 2], _anyStyle));
+      expect(
+          FillPolygonOp(const [0.0, 1.0], const [0, 1, 2], _anyStyle).hashCode,
+          FillPolygonOp(const [0.0, 1.0], const [0, 1, 2], _anyStyle).hashCode);
+    });
   });
 
   group('NullDrawSink', () {
@@ -138,9 +194,11 @@ void main() {
             closed: false)
         ..circle(0, 0, 5, _anyStyle)
         ..arc(0, 0, 5, 0, 1, _anyStyle)
+        ..fillPolygon(_square, 5, _triangles, _anyStyle)
+        ..fillCircle(0, 0, 5, _anyStyle)
         ..text('WC', const Handle(7), _resolved)
         ..endResidual();
-      expect(sink.opCount, 7);
+      expect(sink.opCount, 9);
     });
   });
 
@@ -317,6 +375,66 @@ void main() {
       expect(rect, const Rect.fromLTRB(14.5, 25.0, 15.5, 26.0));
       expect(call.paintingStyle, PaintingStyle.fill);
       expect(call.color, const Color(0xFFFF0000));
+    });
+
+    testWidgets('the canvas sink fills the path and does not stroke it',
+        (tester) async {
+      sink
+        ..beginResidual(Transform2.identity())
+        ..fillPolygon(_square, 5, _triangles, _anyStyle)
+        ..endResidual();
+      final draws = canvas.named('drawPath');
+      expect(draws, hasLength(1),
+          reason: 'one path, not two triangles: Canvas resolves concavity '
+              'itself and the triangles argument is for the vertices '
+              'backend');
+      expect(draws.single.paintingStyle, PaintingStyle.fill);
+    });
+
+    testWidgets('the canvas sink leaves its paint on stroke afterwards',
+        (tester) async {
+      // The sink reuses one Paint. A fill that leaves `style` on fill turns
+      // every later stroke in the frame into a fill -- the shape of bug the
+      // point op already guards against by restoring PaintingStyle.stroke.
+      sink
+        ..beginResidual(Transform2.identity())
+        ..fillPolygon(_square, 5, _triangles, _anyStyle)
+        ..polyline(_square, 5, _anyStyle, closed: false)
+        ..endResidual();
+      final draws = canvas.named('drawPath').toList();
+      expect(draws, hasLength(2));
+      expect(draws.last.paintingStyle, PaintingStyle.stroke);
+      expect(sink.canvasCallCount, 2);
+    });
+
+    test('fillPolygon closes the path', () {
+      sink.fillPolygon(_square, 5, _triangles, _anyStyle);
+      final path = canvas.named('drawPath').single.args.first as Path;
+      expect(path.computeMetrics().single.isClosed, isTrue);
+    });
+
+    test('fillPolygon with fewer than 3 points draws nothing', () {
+      sink.fillPolygon(
+          Float64List.fromList([0, 0, 1, 1]), 2, Int32List(0), _anyStyle);
+      expect(canvas.named('drawPath'), isEmpty);
+      expect(sink.canvasCallCount, 0);
+    });
+
+    test('fillCircle draws a filled circle', () {
+      sink.fillCircle(1, 2, 5, _anyStyle);
+      final call = canvas.named('drawCircle').single;
+      expect(call.paintingStyle, PaintingStyle.fill);
+      expect(call.args[0], const Offset(1, 2));
+      expect(call.args[1], 5.0);
+    });
+
+    test('fillCircle leaves the paint on stroke afterwards', () {
+      sink
+        ..fillCircle(1, 2, 5, _anyStyle)
+        ..circle(1, 2, 5, _anyStyle);
+      final draws = canvas.named('drawCircle').toList();
+      expect(draws, hasLength(2));
+      expect(draws.last.paintingStyle, PaintingStyle.stroke);
     });
   });
 }

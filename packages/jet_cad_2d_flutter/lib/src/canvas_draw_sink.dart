@@ -169,6 +169,38 @@ class CanvasDrawSink implements DrawSink {
   }
 
   @override
+  void fillPolygon(
+      Float64List points, int count, Int32List triangles, ResolvedStyle style) {
+    if (count < 3) return;
+    _pushTransform();
+    _scratch.reset();
+    _scratch.moveTo(points[0], points[1]);
+    for (var i = 1; i < count; i++) {
+      _scratch.lineTo(points[i * 2], points[i * 2 + 1]);
+    }
+    _scratch.close();
+    _paint
+      ..color = Color(style.argb)
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(_scratch, _paint);
+    // Restored for the same reason `point` restores it: one Paint is reused
+    // for the whole frame, and a stroke drawn after this must not be filled.
+    _paint.style = PaintingStyle.stroke;
+    _canvasCalls++;
+  }
+
+  @override
+  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {
+    _pushTransform();
+    _paint
+      ..color = Color(style.argb)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(cx, cy), r, _paint);
+    _paint.style = PaintingStyle.stroke;
+    _canvasCalls++;
+  }
+
+  @override
   void text(String text, Handle style, ResolvedStyle resolved) {
     _pushTransform();
     final paragraph =
