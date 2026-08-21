@@ -10,9 +10,9 @@ result, not by reading a report and not on the branch before it landed.
 ## TL;DR — where you left off
 
 **Plan 3d (the vertices sink) is merged into `main`** — fifteen tasks,
-executed, reviewed and committed, then merged locally with `--no-ff`. **Its
-exit gate is 7 of 8 with one criterion still open for the human**, and that
-one criterion is the whole handoff. See
+executed, reviewed and committed, then merged locally with `--no-ff`. **Its exit gate is 8 of 8** — criterion 7 stayed open until the human approved
+the `CLAUDE.md` allocation amendment on 2026-08-21, which the plan was forbidden
+from granting itself. See
 [Plan 3d](#plan-3d--the-vertices-sink-is-the-default-everywhere) and
 [Resume here](#resume-here).
 
@@ -77,8 +77,10 @@ Results note:
 Mutation log:
 [docs/superpowers/notes/plan-3d-mutation-log.md](docs/superpowers/notes/plan-3d-mutation-log.md).
 
-**Exit gate: 7 of 8 pass. Criterion 7 is measured and cannot be closed by the
-plan.** Desktop, median of three (build p50 / raster p50): 10,000 — canvas
+**Exit gate: 8 of 8.** Seven passed on the plan's own measurements; criterion 7
+was measured by the plan, left open because the design forbids it from amending
+the rule it is measured against, and closed on 2026-08-21 when the human
+approved the amendment. Desktop, median of three (build p50 / raster p50): 10,000 — canvas
 12.35 / 44.32 ms, vertices **5.71 / 6.68 ms**; 50,000 — canvas 15.36 / 66.94,
 vertices **7.07 / 8.53**; 500,000 — canvas 44.29 / 508.00, vertices **17.44 /
 21.64**. Criterion 5 (10k under 16.67 ms) and criterion 6 (raster better by
@@ -95,14 +97,16 @@ submission. The desktop and web tables are **two separate confirmations, not one
 table doubled** — they did not draw the same drawing. `CanvasDrawSink` is not
 dead: it is the fallback and takes text on every frame (`canvasCalls=19` at 10k).
 
-**What is open, and it is the handoff:** `CLAUDE.md`'s "the frame path allocates
-nothing in steady state" is **not literally true of this backend**. Measured
-residue is **three objects per flush** (a `Vertices` and two `sublistView`
-wrappers), **nothing per entity**, so `3 × (textOps + 1)` per frame. The design
-forbids the plan from amending the rule it is measured against, so `CLAUDE.md` is
-untouched and **the human decides**. Proposed wording, and both outcomes, are in
-the results note. Approved → criterion 7 passes and the gate is 8/8. Refused →
-criterion 7 **fails** and that is the plan's result.
+**The allocation rule, settled.** `CLAUDE.md`'s "the frame path allocates nothing
+in steady state" was **not literally true of this backend**. Measured residue is
+**three objects per flush** (a `Vertices` and two `sublistView` wrappers),
+**nothing per entity**, so `3 × (textOps + 1)` per frame. The design forbade the
+plan from amending the rule it is measured against, so the plan measured and
+stopped. **The human approved the amendment on 2026-08-21** and it landed in a
+commit that changed nothing else; the non-negotiable now reads "allocates
+nothing per entity in steady state, and O(1) per flush", measured by
+`query_allocation_test.dart` on the query path and `paint_allocation_test.dart`
+on the paint path.
 
 **Costs and gaps the note records rather than smooths over:** 96.00 MiB of
 vertex buffer pinned for the widget's life at 500,000 entities; the web rows are
@@ -296,35 +300,30 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Plan 3d is merged into `main` and waiting on one human decision.** The
-merged result is green on all three packages and the tree is clean; nothing is
-in flight. The one open item is a rule, not code.
+**Plan 3d is merged into `main` and its gate is 8 of 8.** The merged result is
+green on all three packages, the tree is clean, and nothing is in flight.
 
-**The one thing to answer first — the `CLAUDE.md` allocation amendment.** The
-current non-negotiable says the frame path allocates *nothing* in steady state.
-The vertices sink allocates **three objects per flush and nothing per entity**.
-The plan measured this and stopped, because a gate that can be passed by editing
-the rule it is measured against is not a gate. The proposed replacement:
+The last open item was the `CLAUDE.md` allocation amendment, and it is
+**settled**: the human approved it on 2026-08-21 and the non-negotiable now
+reads
 
 > **The frame path allocates nothing per entity in steady state, and O(1) per
 > flush.** `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` and
 > `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`
 > measure it.
 
-**Approve it** → exit criterion 7 passes and the gate is 8/8. **Refuse it** →
-criterion 7 fails, and that is Plan 3d's recorded result rather than a delay;
-the residue has to go to zero, and the code that merged stays as it is until
-it does. The merge happened on the strength of seven passing criteria and an
-honestly-open eighth, which the results note states in those terms.
+The plan measured the residue and stopped there rather than editing the rule
+itself, because a gate that can be passed by editing the rule it is measured
+against is not a gate. **Merged locally, not pushed.**
 
-**Then**: pick the next plan from the roadmap below — 3e (fills) and 3f
+**Next**: pick a plan from the roadmap below — 3e (fills) and 3f
 (caches and tiles) are the named successors, and what 3d owes each is written
 out at the end of
 [the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
 
 ### What Plan 3d leaves open
 
-1. **The `CLAUDE.md` amendment**, above.
+1. ~~**The `CLAUDE.md` amendment.**~~ Settled 2026-08-21, above.
 2. **A frame-path fixture for the seam and the point shape.** Both are pinned
    against the `DrawSink` interface only. `DraftPainter` routes point, line and
    polyline through `_emitScreenSpace`, whose residual is a bare translation, so

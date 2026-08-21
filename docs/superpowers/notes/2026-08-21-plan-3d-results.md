@@ -1,7 +1,11 @@
 # Plan 3d results and exit gate — the vertices sink
 
 **Runs of record:** 2026-08-20 and 2026-08-21.
-**Branch:** `spike/vertices-sink`, worktree `.claude/worktrees/vertices-spike`.
+**Branch:** `spike/vertices-sink`, worktree `.claude/worktrees/vertices-spike`
+— where the runs were taken. Both are gone: the branch merged into `main` with
+`--no-ff` on 2026-08-21 and the worktree was removed. The per-task ledger was
+archived first, to
+[`docs/superpowers/ledgers/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/`](../ledgers/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/).
 **Commit range:** the plan is `548fa8e..4a16b41`; Task 15's own docs commits
 land on top of that. Ranges rather than counts, because a count is falsified by
 the next commit.
@@ -13,31 +17,38 @@ the next commit.
 
 ## Verdict
 
-**Seven of the eight criteria pass on measurements taken and pasted below.
-Criterion 7 is measured and cannot be closed by this plan** — it requires a
-`CLAUDE.md` amendment that the design forbids the plan from granting itself.
-It is open for the human and it is the only thing standing between this plan
-and a clean gate.
+**Eight of eight.** Seven criteria passed on the measurements taken and pasted
+below. The eighth — criterion 7 — was measured here and deliberately left open,
+because it requires a `CLAUDE.md` amendment the design forbids the plan from
+granting itself.
+
+**Closed on 2026-08-21, after this note was first written**: the human approved
+the amendment, and `CLAUDE.md` now reads "allocates nothing per entity in
+steady state, and O(1) per flush", measured on both paths. The sections below
+are left as they were written — they record what the plan could establish on
+its own, which is the thing worth preserving.
 
 | # | Criterion | Verdict | The deciding number |
 |---|---|---|---|
-| 1 | Both suites green, analyze and format clean | **PASS** | engine 720/720, widgets 238 passing + 1 skipped, three packages clean |
+| 1 | Both suites green, analyze and format clean | **PASS** | engine 720/720, widgets 238 passing + 1 skipped when this note was written; **239 + 1 after the whole-branch review added an order test**, re-run green on the merged result |
 | 2 | Every design-table mutant killed by a named test, recorded in the log | **PASS**, one qualification | 14/14 named mutants killed; `B1` killed by an equivalent mutation, not the tabled one |
 | 3 | Sink-against-sink coverage on point/polyline/circle/arc/text at a justified tolerance | **PASS** | stray 0, uncovered 0, at a one-pixel dilation; canvas 22,398 ink px, vertices 23,241 |
 | 4 | Goldens exist and pass on both backends for all 14 fixtures | **PASS** | 28 PNGs (14 canvas + 14 vertices), 23 golden tests pass |
 | 5 | 10,000 entities: vertices frame under 16.67 ms, median of three | **PASS** | build p50 **5.71 ms** [5.67, 5.81], raster p50 **6.68 ms** [6.63, 6.75] |
 | 6 | 50k and 500k: vertices raster p50 better than canvas by more than the spread | **PASS at both** | 50k gap **58.22 ms**, 500k gap **485.01 ms**; no interval overlap, no crossover |
-| 7 | Allocation invariant covers the paint path, residue zero or bounded **and written into `CLAUDE.md`** | **MEASURED, NOT CLOSED** | residue is 3 objects per flush, `3 × (textOps + 1)` per frame, nothing per entity; `CLAUDE.md` unamended |
+| 7 | Allocation invariant covers the paint path, residue zero or bounded **and written into `CLAUDE.md`** | **PASS**, on a decision the plan could not take | residue is 3 objects per flush, `3 × (textOps + 1)` per frame, nothing per entity; amendment approved and written 2026-08-21 |
 | 8 | Web rows measured and the platform default stated with the number that justifies it | **PASS** | default is `vertices` everywhere; the justifying number is the **17.3×–17.5× web build ratio**, not the raster figure |
 
 ### What failed, and what is merely unfinished
 
-- **Criterion 7 is not passed.** Its text requires the residue "written into
-  `CLAUDE.md`". It is not written, deliberately: the design says "the plan may
-  not grant itself the `CLAUDE.md` amendment. Criterion 7 is not satisfied by
-  editing the rule it is measured against." See
+- **Criterion 7 was not passed by the plan, and passed afterwards.** Its text
+  requires the residue "written into `CLAUDE.md`". The plan did not write it,
+  deliberately: the design says "the plan may not grant itself the `CLAUDE.md`
+  amendment. Criterion 7 is not satisfied by editing the rule it is measured
+  against." The human approved the amendment on 2026-08-21 and it landed in a
+  commit that changed nothing else. See
   [The allocation residue](#the-allocation-residue-and-the-claudemd-question)
-  for the exact proposed wording and both outcomes.
+  for the wording and the reasoning that preceded the decision.
 - **Nothing else failed.** Criterion 6 did not tie at 500,000, so the design's
   crossover fallback does not fire and there is no crossover number to hand 3f.
 - **Several things are true and unflattering** and are recorded below rather
@@ -375,8 +386,10 @@ $ cd packages/jet_cad_2d_flutter && flutter test test/invariants/
 `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` is green in the
 engine run above (`720/720`).
 
-**MEASURED, NOT CLOSED.** See the next section. This is the one criterion this
-plan cannot decide.
+**MEASURED; NOT CLOSED BY THIS PLAN.** See the next section. This is the one
+criterion the plan cannot decide. The human approved the amendment on
+2026-08-21 and it landed in a commit that changed nothing else, so the
+criterion passes on a decision taken outside the plan rather than inside it.
 
 ### Criterion 8 — the web rows and the platform default
 
@@ -427,11 +440,16 @@ nothing. The proposed wording, unchanged since Task 3 measured it:
 > `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`
 > measure it.
 
-**`CLAUDE.md` is untouched by this plan, on purpose.** The design says: "The
+**`CLAUDE.md` was untouched by this plan, on purpose.** The design says: "The
 plan may not grant itself the `CLAUDE.md` amendment. Criterion 7 is not
 satisfied by editing the rule it is measured against." An exit gate that can be
-passed by editing the rule it is measured against is not a gate. The decision is
-the human's and it has not been made.
+passed by editing the rule it is measured against is not a gate. The decision
+was the human's.
+
+**Answered 2026-08-21: approved.** The amendment landed in its own commit,
+changing nothing else. The paragraphs below were written before the answer and
+are left as they stood — the point of stating both outcomes in advance is lost
+if the losing one is deleted once the coin lands.
 
 **Both outcomes, stated in advance so the answer is a decision and not a
 negotiation:**
@@ -841,9 +859,11 @@ captures in `web_rows.log` are the unreflowed record.
 **Whoever chooses round joins** inherits one branch, in one method, with a
 golden on each backend to show the difference.
 
-**Whoever writes the next plan** inherits four open items from this one:
+**Whoever writes the next plan** inherits these open items from this one — four
+when this was written, three now that the first has been answered:
 
-1. **The `CLAUDE.md` allocation amendment**, undecided (criterion 7).
+1. ~~**The `CLAUDE.md` allocation amendment**, undecided (criterion 7).~~
+   **Closed 2026-08-21: approved and written.** Three items remain below.
 2. **A frame-path fixture for the seam and the point shape.** Both are pinned
    against the `DrawSink` interface only; `DraftPainter` cannot exercise a
    rotated point at all today.
