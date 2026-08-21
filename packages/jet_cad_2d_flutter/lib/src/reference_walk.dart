@@ -223,9 +223,36 @@ class _ReferenceWalk {
               style);
           break;
         }
-        final triangles = doc.fills.trianglesFor(boundary!);
-        if (triangles == null || triangles.isEmpty) break; // unfillable
+        // Triangulated here, from the boundary's own points. Reading
+        // `doc.fills.trianglesFor` -- which is what `DraftPainter._drawFill`
+        // reads -- would have the oracle share the painter's single most
+        // consequential assumption, that the cached index list still matches
+        // the boundary's current coordinates. It did not, once: a stale list
+        // was drawn against new points, both sinks emitted the *same*
+        // out-of-range indices, and the differential row agreed on a frame
+        // that was garbage. Deriving it here is what makes that a divergence.
+        //
+        // The carve-out that remains, stated rather than left to be assumed:
+        // `triangulateSimplePolygon` itself is shared with the command that
+        // populates the cache, so a defect *inside* the ear clipper appears on
+        // both sides and no differential row can see it. What this derivation
+        // is independent of is the cache -- its freshness, its presence, and
+        // the closedness rule that decides whether an entry is written at all.
+        // The clipper's own behaviour is covered by
+        // `packages/jet_cad_2d/test/geometry/triangulate_test.dart`.
+        if (boundaryKind != EntityKind.polyline) break; // no interior
         final count = boundaryPayload.pointCount;
+        if (count < 3) break; // not a loop
+        // Closedness is a stored-value question, so the comparison is exact.
+        if (boundaryPayload.coords[0] !=
+                boundaryPayload.coords[(count - 1) * 2] ||
+            boundaryPayload.coords[1] !=
+                boundaryPayload.coords[(count - 1) * 2 + 1]) {
+          break; // an open polyline has no interior to fill
+        }
+        final triangles =
+            triangulateSimplePolygon(boundaryPayload.coords, count);
+        if (triangles.isEmpty) break; // closed, but would not reduce
         final points = Float64List(count * 2);
         for (var i = 0; i < count; i++) {
           points[i * 2] = boundaryPayload.coords[i * 2] - ox;

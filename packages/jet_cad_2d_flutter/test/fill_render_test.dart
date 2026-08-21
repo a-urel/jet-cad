@@ -110,6 +110,39 @@ void main() {
     expect(painter.skippedFillCount, 1);
   });
 
+  test('the oracle triangulates for itself, so a wrong cache diverges', () {
+    // What `expectPainterSupersetOfReference` could not see while the walk
+    // read `doc.fills.trianglesFor`: the painter reads that same cache, so a
+    // stale or wrong index list reached both sinks identically and the two op
+    // lists agreed on garbage. This plants exactly that -- a valid, in-range,
+    // *wrong* triangulation -- and asserts the two disagree.
+    final doc = DraftDocument.empty();
+    final cmd = region(doc);
+    doc.commands.execute(cmd);
+
+    final control = paintToRecording(doc).whereType<FillPolygonOp>().single;
+    expect(
+        referenceToRecording(doc).whereType<FillPolygonOp>().single.triangles,
+        orderedEquals(control.triangles),
+        reason: 'the control: on an honest cache the two must agree, or the '
+            'divergence below proves nothing');
+
+    // One triangle where the square needs two. In range, so nothing throws;
+    // the painter hands it straight to the sink.
+    doc.fills.putTriangles(cmd.boundary.handle, Int32List.fromList([0, 1, 2]));
+    final painted = paintToRecording(doc).whereType<FillPolygonOp>().single;
+    final reference =
+        referenceToRecording(doc).whereType<FillPolygonOp>().single;
+    expect(painted.triangles, orderedEquals([0, 1, 2]),
+        reason: 'the painter reads the cache and does not check it');
+    expect(reference.triangles, isNot(orderedEquals(painted.triangles)),
+        reason: 'an oracle that read the same cache would agree with the '
+            'painter about a triangulation neither of them derived');
+    expect(reference.triangles,
+        orderedEquals(triangulationFor(EntityKind.polyline, squareLoop())!),
+        reason: 'the walk derives it from the boundary\'s own points');
+  });
+
   test('the painter walks fills and the reference walk agrees', () {
     // `expectPainterSupersetOfReference` in
     // `packages/jet_cad_2d_flutter/test/support/differential.dart` is the
