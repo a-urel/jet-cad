@@ -26,10 +26,24 @@ enum RenderBackend {
 /// 50,000: canvas 15.36 / 66.94 ms, vertices 7.07 / 8.53 ms; 500,000: canvas
 /// 44.29 / 508.00 ms, vertices 17.44 / 21.64 ms. The web rows (Task 13,
 /// CanvasKit via Chrome 151.0.7922.170, `flutter run -d chrome --profile`,
-/// median of 3) went further, not merely holding: 10,000 entities — canvas
-/// 117.80 / 79.30 ms, vertices 6.80 / 1.40 ms (17.3x / 56.6x); 50,000 —
+/// median of 3) held the same shape: 10,000 entities — canvas 117.80 /
+/// 79.30 ms, vertices 6.80 / 1.40 ms (17.3x / 56.6x build/raster); 50,000 —
 /// canvas 155.70 / 107.90 ms, vertices 8.90 / 1.80 ms (17.5x / 59.9x).
-/// CanvasKit's `drawVertices` was the open question this default was
-/// written against; it is answered now, and by a wider margin than the
-/// desktop numbers that motivated the design.
+///
+/// **Read the two tables as two separate confirmations, not one table
+/// doubled.** They are not the same drawing — different viewport (web fits
+/// 1200x723 @2, desktop whatever the driven window was), different leaf
+/// counts (web 10k is 2111 screen-space leaves against desktop's 1664) — so
+/// there is no sound per-platform multiplier between them. Within a
+/// platform, `build` (Dart-side widget-to-displaylist cost, the same
+/// Flutter framework code on both) is the trustworthy comparison and it is
+/// what this default actually rests on: the 17.3x-17.5x web build ratio.
+/// `raster` is not commensurable across platforms — CanvasKit's
+/// `FrameTiming.rasterDuration` most likely ends at command submission
+/// rather than completion, which is the only way web vertices can raster in
+/// 1.40ms against desktop's 6.68ms while drawing 34% more geometry — so the
+/// 56x-60x raster figures are not the number this decision leans on, even
+/// though they point the same direction. CanvasKit's `drawVertices` was the
+/// open question this default was written against; the within-platform
+/// build ratio answers it.
 RenderBackend defaultRenderBackend() => RenderBackend.vertices;
