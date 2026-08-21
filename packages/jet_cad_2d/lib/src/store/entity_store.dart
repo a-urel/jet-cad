@@ -4,9 +4,13 @@ import 'package:meta/meta.dart';
 
 import '../core/handle.dart';
 import '../document/style.dart';
+import 'geometry_store.dart';
 import 'slot_allocator.dart';
 
-enum EntityKind { point, line, polyline, circle, arc, text, attrib }
+/// `fill` is appended, never inserted: [EntityStore] stores `kind.index` in a
+/// `Uint8List` column, so an insertion renumbers every stored document's kinds
+/// in memory. The JSON is safe either way -- it carries `kind.name`.
+enum EntityKind { point, line, polyline, circle, arc, text, attrib, fill }
 
 class DuplicateHandleError implements Exception {
   final Handle handle;
@@ -221,6 +225,16 @@ class EntityRecord {
   @override
   String toString() => 'EntityRecord(${kind.name} ${handle.toHex()})';
 }
+
+/// The boundary a fill entity names, or [Handle.none] if its payload carries
+/// none.
+///
+/// A fill stores no coordinates. Its whole geometry is one scalar: the handle
+/// of the entity whose loop it fills. A handle is an `int` at most
+/// `kMaxHandle` (0xFFFFFFFF), far under 2^53, so the round trip through
+/// `double` is exact in both directions.
+Handle boundaryHandleOf(GeometryPayload payload) =>
+    payload.scalars.isEmpty ? Handle.none : Handle(payload.scalars[0].toInt());
 
 /// Columnar storage for leaf entity records, including tier-1 style.
 ///

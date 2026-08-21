@@ -439,6 +439,9 @@ class DraftPainter {
       case EntityKind.text:
       case EntityKind.attrib:
         break;
+      case EntityKind.fill:
+        // Task 13 draws it.
+        break;
     }
 
     // The rebase subtraction happens in the leaf's own space, because that is
@@ -663,6 +666,10 @@ class DraftPainter {
         // it pushes a residual at all, because a text leaf's residual is not
         // `chain`. Kept as an exhaustive case rather than a `default` so a
         // new EntityKind still fails to compile here.
+        break;
+
+      case EntityKind.fill:
+        // Task 13 draws it.
         break;
     }
   }

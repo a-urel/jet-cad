@@ -181,6 +181,9 @@ class _ReferenceWalk {
       case EntityKind.attrib:
         // Unreachable: handled above, under its own composed residual.
         break;
+      case EntityKind.fill:
+        // Task 13 draws it.
+        break;
     }
     sink.endResidual();
   }

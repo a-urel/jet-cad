@@ -58,5 +58,10 @@ Aabb2 entityBounds({
       final metrics = measurer.measure(text: text, style: textStyle);
       return textLocalBounds(attrs, metrics).transformedBy(
           textLocalTransform(attrs, metrics, payload.pointAt(0)));
+
+    case EntityKind.fill:
+      // Task 9 gives this case the boundary's box. Until then a fill bounds
+      // to nothing, which is what its own payload says.
+      return Aabb2.empty();
   }
 }

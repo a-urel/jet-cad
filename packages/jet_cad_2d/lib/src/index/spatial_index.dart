@@ -993,6 +993,13 @@ class SpatialIndex {
           foundX = foot.x;
           foundY = foot.y;
         }
+
+      case EntityKind.fill:
+        // Unreachable: this method returns above when `count == 0`, and a
+        // fill's payload carries no coordinates. This case exists only so the
+        // switch stays exhaustive, so a future EntityKind still fails to
+        // compile here instead of falling through silently.
+        break;
     }
 
     if (foundKind == null) return;
@@ -1560,6 +1567,13 @@ class SpatialIndex {
         final lx = coords[0], ly = coords[1];
         _considerSnapCandidate(SnapKind.insertion, ta * lx + tc * ly + te,
             tb * lx + td * ly + tf, world, radius, slot, depth, out);
+
+      case EntityKind.fill:
+        // Unreachable: this method returns above when `count == 0`, and a
+        // fill's payload carries no coordinates. This case exists only so the
+        // switch stays exhaustive, so a future EntityKind still fails to
+        // compile here instead of falling through silently.
+        break;
     }
   }
 

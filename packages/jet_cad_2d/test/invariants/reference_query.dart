@@ -537,6 +537,10 @@ List<Handle> referenceInstancesInRect(
         point: _footOnWorldArc(
             world, centre, worldRadius, worldStartAngle, worldSweep),
       );
+
+    case EntityKind.fill:
+      // A fill produces no hit and no snap candidate.
+      return null;
   }
 }
 
@@ -780,6 +784,10 @@ List<(SnapKind, Vector2)> _snapCandidates(
     case EntityKind.text:
     case EntityKind.attrib:
       add(SnapKind.insertion, toWorld.transformPoint(payload.pointAt(0)));
+
+    case EntityKind.fill:
+      // A fill produces no hit and no snap candidate.
+      break;
   }
 
   return out;

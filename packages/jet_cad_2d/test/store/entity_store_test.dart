@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 
@@ -216,5 +218,23 @@ void main() {
     store.remove(a);
     final remap = store.purge();
     expect(store.textAt(remap[b]), 'B');
+  });
+
+  test('fill is the last EntityKind, and its ordinal is stable', () {
+    // The store writes `kind.index` into a Uint8List column. Inserting a
+    // member rather than appending would silently renumber every stored kind.
+    expect(EntityKind.values.last, EntityKind.fill);
+    expect(EntityKind.fill.index, 7);
+  });
+
+  test('boundaryHandleOf reads the boundary from scalars, and none when absent',
+      () {
+    final withBoundary = GeometryPayload(
+        coords: Float64List(0), scalars: Float64List.fromList([4919.0]));
+    expect(boundaryHandleOf(withBoundary), const Handle(4919));
+
+    final empty =
+        GeometryPayload(coords: Float64List(0), scalars: Float64List(0));
+    expect(boundaryHandleOf(empty), Handle.none);
   });
 }
