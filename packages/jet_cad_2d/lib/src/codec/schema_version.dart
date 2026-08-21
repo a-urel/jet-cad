@@ -7,7 +7,12 @@
 /// 4: `EntityRecord.toJson` gained `text`, `tag`, `textStyle` and
 /// `textAttrs`; `EntityRecord.fromJson` defaults all four when absent, which
 /// is the whole of the v3->v4 migration.
-const int kSchemaVersion = 4;
+///
+/// 5: `EntityKind.fill`. The JSON shape is unchanged -- a fill is an ordinary
+/// entity and `kind` is written by name -- but a v4 reader must refuse a
+/// document containing one rather than fail inside `EntityKind.values.byName`,
+/// and the version check at `json_codec.dart:103` is what makes it.
+const int kSchemaVersion = 5;
 
 class SchemaVersionError implements Exception {
   final Object? found;

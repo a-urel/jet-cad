@@ -50,10 +50,13 @@ void main() {
     //
     // Re-baselined in Plan 3c Task 1: the four text keys changed the
     // serialisation.
+    //
+    // Re-baselined in Plan 3e Task 7: kSchemaVersion moved from 4 to 5, and
+    // that value is the first thing every serialisation writes.
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
-        -4223683079839955300);
+        4778422453512744465);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
-        -1538364231202837705);
+        2508170127112452780);
   });
 
   test('defaults reproduce the Plan 2 corpus structurally too', () {
@@ -223,10 +226,14 @@ void main() {
     // hold. If either moved, `labelFraction` or `attributedInstanceFraction`
     // drew from `extra` while off, which is exactly the bug this test
     // exists to catch -- not a signal to update the expected value.
+    //
+    // Re-baselined in Plan 3e Task 7 in step with the sibling test above:
+    // kSchemaVersion moved from 4 to 5, which shifts every fingerprint in
+    // this file regardless of what `extra` drew.
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
-        -4223683079839955300);
+        4778422453512744465);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
-        -1538364231202837705);
+        2508170127112452780);
   });
 
   test('labelFraction produces repeating strings out of the root budget', () {

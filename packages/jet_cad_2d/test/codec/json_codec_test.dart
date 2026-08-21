@@ -437,4 +437,53 @@ void main() {
     final loadedWithoutDiagnostics = DraftDocumentCodec.decode(json);
     expect(loadedWithoutDiagnostics.tree.definition(defB)!.children, isEmpty);
   });
+
+  test('a document with a region round-trips byte-identically', () {
+    final doc = DraftDocument.empty();
+    final cmd = AddRegionCommand.allocate(
+      seed: doc.handleSeed,
+      owner: doc.rootHandle,
+      boundaryKind: EntityKind.polyline,
+      boundaryPayload: GeometryPayload(
+          coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
+          scalars: Float64List(0)),
+      layer: ReservedHandles.layerZero,
+      fillColor: const TrueColor(0x3366CC),
+      boundaryColor: const TrueColor(0x000000),
+    );
+    doc.commands.execute(cmd);
+    final first = jsonEncode(DraftDocumentCodec.encode(doc));
+    final reloaded =
+        DraftDocumentCodec.decode(jsonDecode(first) as Map<String, Object?>);
+    expect(jsonEncode(DraftDocumentCodec.encode(reloaded)), first);
+  });
+
+  test('load leaves the fill index populated, not empty', () {
+    // The frame path reads and never computes. A load that left this empty
+    // would ear-clip on the first paint of every visible fill.
+    final doc = DraftDocument.empty();
+    final cmd = AddRegionCommand.allocate(
+      seed: doc.handleSeed,
+      owner: doc.rootHandle,
+      boundaryKind: EntityKind.polyline,
+      boundaryPayload: GeometryPayload(
+          coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
+          scalars: Float64List(0)),
+      layer: ReservedHandles.layerZero,
+      fillColor: const TrueColor(0x3366CC),
+      boundaryColor: const TrueColor(0x000000),
+    );
+    doc.commands.execute(cmd);
+    final reloaded = DraftDocumentCodec.decode(
+        jsonDecode(jsonEncode(DraftDocumentCodec.encode(doc)))
+            as Map<String, Object?>);
+    expect(reloaded.fills.fillsOf(cmd.boundary.handle), [cmd.fill.handle]);
+    expect(reloaded.fills.trianglesFor(cmd.boundary.handle), hasLength(6));
+  });
+
+  test('the schema version is 5, and a v6 document is refused', () {
+    expect(kSchemaVersion, 5);
+    expect(() => DraftDocumentCodec.decode({'schemaVersion': 6}),
+        throwsA(anything));
+  });
 }

@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../core/diagnostic.dart';
 import '../core/handle.dart';
 import '../document/command.dart';
+import '../document/commands.dart';
 import '../document/draft_document.dart';
 import '../document/header.dart';
 import '../document/node.dart';
@@ -133,6 +134,8 @@ class DraftDocumentCodec {
     // handle.
     doc.handleSeed.raiseTo(Handle.fromJson(json['handleSeed']));
 
+    _rebuildFills(doc, diagnostics);
+
     doc.invalidateDerived();
     // A loaded document has no history: the stacks describe edits to a
     // document that is now gone.
@@ -259,6 +262,35 @@ class DraftDocumentCodec {
       final geomIndex = doc.geometry.add(payload);
       doc.entities.add(record.copyWith(geomIndex: geomIndex));
       doc.handleSeed.raiseTo(record.handle);
+    }
+  }
+}
+
+/// Rebuilds the fill index from the loaded entities.
+///
+/// Derived state with one source of truth: the document stores a fill's
+/// boundary handle and nothing else, and everything else about a fill --
+/// its link and its boundary's triangulation -- is computed here, once,
+/// before the first frame.
+///
+/// A fill whose boundary is missing or unfillable is **linked anyway and left
+/// without triangles**. Dropping the link would silently discard the user's
+/// data; `validate()` reports the condition and the painter counts the skip.
+void _rebuildFills(DraftDocument doc, List<Diagnostic>? diagnostics) {
+  doc.fills.clear();
+  for (final slot in doc.entities.liveSlots) {
+    if (doc.entities.kindAt(slot) != EntityKind.fill) continue;
+    final fill = doc.entities.handleAt(slot);
+    final boundary =
+        boundaryHandleOf(doc.geometry.peek(doc.entities.geomIndexAt(slot)));
+    doc.fills.link(fill, boundary);
+    final boundarySlot = doc.entities.slotOf(boundary);
+    if (boundarySlot == null) continue;
+    if (doc.fills.trianglesFor(boundary) != null) continue;
+    final triangles = triangulationFor(doc.entities.kindAt(boundarySlot),
+        doc.geometry.peek(doc.entities.geomIndexAt(boundarySlot)));
+    if (triangles != null && triangles.isNotEmpty) {
+      doc.fills.putTriangles(boundary, triangles);
     }
   }
 }
