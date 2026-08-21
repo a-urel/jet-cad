@@ -327,6 +327,7 @@ void main() {
 
   _arcTests();
   _widthTests();
+  _fillTests();
 
   test('the submitted Vertices is disposed, and the flag reads its state', () {
     // `Vertices` is native-backed: `dispose()` frees the position and colour
@@ -815,5 +816,117 @@ void _widthTests() {
           closed: false)
       ..endResidual();
     expect(sink.debugColors()[0].toUnsigned(32), 0x66123456);
+  });
+}
+
+void _fillTests() {
+  // A unit square with its closing point duplicated, the shape
+  // `triangulationFor` hands a fill: `count` is 5, and the two triangles'
+  // indices only ever reach corners 0-3.
+  final square = Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]);
+  final squareTriangles = Int32List.fromList([0, 1, 2, 0, 2, 3]);
+
+  test('a polygon fill emits exactly the triangles it was handed', () {
+    final sink = _sink()
+      ..beginResidual(Transform2.identity())
+      ..fillPolygon(square, 5, squareTriangles, _style())
+      ..endResidual();
+    expect(sink.frameTriangleCount, 2);
+  });
+
+  test('a fill on a hairline layer keeps full alpha', () {
+    // `_coveredArgb` fades a sub-pixel STROKE, in proportion to its device
+    // width. A fill has no width of its own -- but its `ResolvedStyle` still
+    // carries a lineweight, because the column is per-entity and shared with
+    // strokes. Route a fill through `_coveredArgb` and this same lineweight,
+    // at this same device pixel ratio, would fade it to 0xCC -- see "a
+    // sub-pixel stroke gets one device pixel and loses alpha for it" above --
+    // and it would do so on this backend only, where the comparison
+    // harness's ink floor then hides the disagreement.
+    //
+    // MUTATION: route `fillPolygon`'s colour through `_coveredArgb` and this
+    // reads 0xCC3366CC instead of 0xFF3366CC.
+    final sink = _sink(devicePixelRatio: 2.0)
+      ..beginResidual(Transform2.identity())
+      ..fillPolygon(
+          square, 5, squareTriangles, _style(argb: 0xFF3366CC, lineweight: 5))
+      ..endResidual();
+    expect(sink.debugColors()[0].toUnsigned(32), 0xFF3366CC);
+  });
+
+  test('a polygon fill is baked into the positions, not pushed on the canvas',
+      () {
+    // Same residual-baking contract every other emitter honours: the corner
+    // at local (10, 0) lands in device space, not local space, once a
+    // non-identity residual is active.
+    const t = Transform2(0, 1, -1, 0, 100, 200);
+    final sink = _sink()
+      ..beginResidual(t)
+      ..fillPolygon(square, 5, squareTriangles, _style())
+      ..endResidual();
+    final v = sink.debugPositions();
+    expect(v.sublist(0, 2), orderedEquals(<double>[100, 200]));
+    expect(v.sublist(2, 4), orderedEquals(<double>[100, 210]));
+    expect(v.sublist(4, 6), orderedEquals(<double>[90, 210]));
+  });
+
+  test('an empty triangle list draws nothing, defensively', () {
+    final sink = _sink()
+      ..beginResidual(Transform2.identity())
+      ..fillPolygon(square, 5, Int32List(0), _style())
+      ..endResidual();
+    expect(sink.frameTriangleCount, 0);
+  });
+
+  test('a filled circle and its own outline use the same step count', () {
+    // `_flatten`'s stroke and `fillCircle`'s fan share one expression for the
+    // step count, `_flattenSteps`. A closed stroked run is 4 triangles per
+    // chord -- the quad plus its join, per `_expectUniformMiterStride`'s own
+    // comment above -- and a fan is 1 triangle per chord, so the two frame
+    // totals are related by exactly that factor whatever the step count
+    // turns out to be.
+    //
+    // MUTATION: give the fan a different step count (e.g. a literal 32) and
+    // the two circles' chord counts diverge, so this ratio breaks.
+    final filled = _sink()
+      ..beginResidual(Transform2.identity())
+      ..fillCircle(0, 0, 90, _style())
+      ..endResidual();
+    final stroked = _sink()
+      ..beginResidual(Transform2.identity())
+      ..circle(0, 0, 90, _style())
+      ..endResidual();
+    expect(filled.frameTriangleCount * 4, stroked.frameTriangleCount,
+        reason: 'a different step count makes the fill\'s silhouette and '
+            'its own outline disagree, and the disagreement changes with '
+            'zoom');
+  });
+
+  test('a fill batches with strokes into one flush, not one call each', () {
+    // The entire point of this task: leaving the Task 11 fallback forwarding
+    // in place kept every drawing correct but cost one `drawVertices` per
+    // fill. A fill emitted between two strokes must land in the same batch
+    // as both of them.
+    final recorder = PictureRecorder();
+    final canvas = Canvas(recorder);
+    final sink = _sink(canvas: canvas)
+      ..beginResidual(Transform2.identity())
+      ..polyline(_seg(0, 0, 10, 0), 2, _style(), closed: false)
+      ..fillPolygon(square, 5, squareTriangles, _style())
+      ..polyline(_seg(0, 5, 10, 5), 2, _style(), closed: false)
+      ..endResidual();
+    sink.flush();
+    expect(sink.totalFlushCount, 1);
+    // 2 stroke triangles + 2 fill triangles + 2 stroke triangles.
+    expect(sink.frameTriangleCount, 6);
+    recorder.endRecording().dispose();
+  });
+
+  test('a zero-radius fill circle emits nothing rather than a NaN fan', () {
+    final sink = _sink()
+      ..beginResidual(Transform2.identity())
+      ..fillCircle(0, 0, 0, _style())
+      ..endResidual();
+    expect(sink.frameTriangleCount, 0);
   });
 }

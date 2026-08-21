@@ -680,9 +680,7 @@ class VerticesDrawSink implements DrawSink {
     if (deviceRadius <= 0) return;
 
     final theta = sweep.abs();
-    final ideal =
-        (theta * math.sqrt(deviceRadius / (8 * kFlattenTolerance))).ceil();
-    final steps = ideal.clamp(1, kMaxFlattenSegments);
+    final steps = _flattenSteps(deviceRadius, theta);
 
     final half = _halfWidthFor(style.lineweightHundredths);
     final argb = _coveredArgb(style.argb, style.lineweightHundredths);
@@ -705,26 +703,79 @@ class VerticesDrawSink implements DrawSink {
     _endRun(closed: closed, half: half, argb: argb);
   }
 
+  /// The chord count a device-space circle or arc of [deviceRadius] and
+  /// sweep [theta] flattens to.
+  ///
+  /// One expression, shared by `_flatten`'s stroke and [fillCircle]'s fan:
+  /// a filled circle's silhouette is tessellated by the *same* call as its
+  /// own outline, so the two never disagree, at any zoom.
+  int _flattenSteps(double deviceRadius, double theta) {
+    final ideal =
+        (theta * math.sqrt(deviceRadius / (8 * kFlattenTolerance))).ceil();
+    return ideal.clamp(1, kMaxFlattenSegments);
+  }
+
   @override
   void text(String text, Handle style, ResolvedStyle resolved) {
     _flushBeforeUnbatchable();
     _fallback?.text(text, style, resolved);
   }
 
-  // TODO(Task 12): batch fills into the same buffer as strokes, using
-  // [triangles] directly instead of falling back. Until then a fill is
-  // unbatched, exactly like text: flush what is pending so draw order is
-  // preserved, then hand it to the fallback.
+  /// Emits [triangles] straight into the batch, transforming each referenced
+  /// point as it goes.
+  ///
+  /// `triangles` triple-indexes into `points`' own point numbering, so each
+  /// index is doubled to reach the coordinate pair. Nothing is allocated: the
+  /// boundary's points are transformed straight into the shared buffer, same
+  /// as every other emitter here.
   @override
   void fillPolygon(
       Float64List points, int count, Int32List triangles, ResolvedStyle style) {
-    _flushBeforeUnbatchable();
-    _fallback?.fillPolygon(points, count, triangles, style);
+    if (triangles.isEmpty) return;
+    final t = _residual;
+    // `style.argb` directly, NOT `_coveredArgb`: that function fades a stroke
+    // thinner than a device pixel, and a fill has no width. A fill entity's
+    // `ResolvedStyle` still carries a lineweight because the column is
+    // shared with strokes, so routing a fill through `_coveredArgb` would
+    // fade a filled room on a hairline layer -- on this backend only.
+    final argb = style.argb;
+    for (var i = 0; i < triangles.length; i += 3) {
+      final a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+      _emitTriangle(
+        t.a * points[a * 2] + t.c * points[a * 2 + 1] + t.e,
+        t.b * points[a * 2] + t.d * points[a * 2 + 1] + t.f,
+        t.a * points[b * 2] + t.c * points[b * 2 + 1] + t.e,
+        t.b * points[b * 2] + t.d * points[b * 2 + 1] + t.f,
+        t.a * points[c * 2] + t.c * points[c * 2 + 1] + t.e,
+        t.b * points[c * 2] + t.d * points[c * 2 + 1] + t.f,
+        argb,
+      );
+    }
   }
 
+  /// A triangle fan around the circle's centre, at the same step count
+  /// `_flatten` would give its own outline.
   @override
   void fillCircle(double cx, double cy, double r, ResolvedStyle style) {
-    _flushBeforeUnbatchable();
-    _fallback?.fillCircle(cx, cy, r, style);
+    if (r <= 0) return;
+    final t = _residual;
+    final deviceRadius = r * t.scaleMagnitude;
+    if (deviceRadius <= 0) return;
+    const theta = 2 * math.pi;
+    final steps = _flattenSteps(deviceRadius, theta);
+    final argb = style.argb;
+    final ccx = t.a * cx + t.c * cy + t.e;
+    final ccy = t.b * cx + t.d * cy + t.f;
+    var px = cx + r, py = cy;
+    var dx = t.a * px + t.c * py + t.e, dy = t.b * px + t.d * py + t.f;
+    for (var i = 1; i <= steps; i++) {
+      final angle = theta * i / steps;
+      px = cx + r * math.cos(angle);
+      py = cy + r * math.sin(angle);
+      final nx = t.a * px + t.c * py + t.e, ny = t.b * px + t.d * py + t.f;
+      _emitTriangle(ccx, ccy, dx, dy, nx, ny, argb);
+      dx = nx;
+      dy = ny;
+    }
   }
 }
