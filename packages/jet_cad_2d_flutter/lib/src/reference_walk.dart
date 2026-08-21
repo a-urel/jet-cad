@@ -113,6 +113,18 @@ class _ReferenceWalk {
     final payload = doc.geometry.peek(doc.entities.geomIndexAt(slot));
     if (doc.entities.flagsAt(slot) & EntityFlags.invisible != 0) return;
 
+    // `peek`, not `read`: nothing here keeps the boundary payload past this
+    // call, matching every other lookup in this walk.
+    EntityKind? boundaryKind;
+    GeometryPayload? boundaryPayload;
+    if (kind == EntityKind.fill) {
+      final b = doc.entities.slotOf(boundaryHandleOf(payload));
+      if (b != null) {
+        boundaryKind = doc.entities.kindAt(b);
+        boundaryPayload = doc.geometry.peek(doc.entities.geomIndexAt(b));
+      }
+    }
+
     final box = entityBounds(
       kind: kind,
       payload: payload,
@@ -120,6 +132,8 @@ class _ReferenceWalk {
       textStyle: doc.textStyleOf(doc.entities.textStyleAt(slot)),
       textAttrs: doc.entities.textAttrsAt(slot),
       text: doc.entities.textAt(slot),
+      boundaryKind: boundaryKind,
+      boundaryPayload: boundaryPayload,
     ).transformedBy(placement);
     if (box.isEmpty || !box.intersects(world)) return;
 

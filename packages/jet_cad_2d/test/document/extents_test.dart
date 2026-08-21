@@ -5,6 +5,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart';
 
+import '../document/region_command_test.dart' show region;
+
 GeometryPayload payload(List<double> coords,
         [List<double> scalars = const []]) =>
     GeometryPayload(
@@ -154,5 +156,75 @@ void main() {
     // hard-codes `MetricModelMeasurer()` would produce for all three.
     expect(width(defaults), isNot(closeTo(width(narrow), 1e-6)));
     expect(width(defaults), isNot(closeTo(width(wide), 1e-6)));
+  });
+
+  test('a fill bounds to its boundary, not to nothing', () {
+    final square = GeometryPayload(
+        coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
+        scalars: Float64List(0));
+    final fill = GeometryPayload(
+        coords: Float64List(0), scalars: Float64List.fromList([40.0]));
+    final box = entityBounds(
+      kind: EntityKind.fill,
+      payload: fill,
+      measurer: measurer,
+      textStyle: style,
+      boundaryKind: EntityKind.polyline,
+      boundaryPayload: square,
+    );
+    expect(box.min.x, 0.0);
+    expect(box.max.x, 10.0);
+    expect(box.max.y, 10.0);
+  });
+
+  test('a fill with no boundary resolved bounds to empty, not to a guess', () {
+    final box = entityBounds(
+      kind: EntityKind.fill,
+      payload: GeometryPayload(
+          coords: Float64List(0), scalars: Float64List.fromList([40.0])),
+      measurer: measurer,
+      textStyle: style,
+    );
+    expect(box.isEmpty, isTrue);
+  });
+
+  test('a fill on a circle boundary bounds to the circle', () {
+    final circle = GeometryPayload(
+        coords: Float64List.fromList([5, 5]),
+        scalars: Float64List.fromList([3]));
+    final box = entityBounds(
+      kind: EntityKind.fill,
+      payload: GeometryPayload(
+          coords: Float64List(0), scalars: Float64List.fromList([40.0])),
+      measurer: measurer,
+      textStyle: style,
+      boundaryKind: EntityKind.circle,
+      boundaryPayload: circle,
+    );
+    expect(box.min.x, 2.0);
+    expect(box.max.y, 8.0);
+  });
+
+  test("an edited boundary moves its fill's indexed box", () {
+    final doc = DraftDocument.empty();
+    final cmd = region(doc); // square at 0,0..10,10
+    doc.commands.execute(cmd);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    doc.commands.execute(SetEntityGeometryCommand(
+        cmd.boundary.handle,
+        GeometryPayload(
+            coords: Float64List.fromList(
+                [100, 100, 110, 100, 110, 110, 100, 110, 100, 100]),
+            scalars: Float64List(0))));
+
+    final slot = doc.entities.slotOf(cmd.fill.handle)!;
+    final box =
+        index.rootIndex.boxOfLeaf(slot) ?? index.rootIndex.dirty.boxOf(slot);
+    expect(box!.min.x, 100.0,
+        reason: 'the fill is derived from the boundary; if the reconcile '
+            'misses it, the fill is culled and picked against an outline '
+            'that moved');
   });
 }

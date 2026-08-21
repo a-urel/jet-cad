@@ -207,13 +207,28 @@ List<Handle> referenceEntitiesInRect(
     if (!evaluator.acceptsEntity(slot, filter)) continue;
 
     final record = doc.entities.read(slot);
+    final payload = doc.geometry.peek(record.geomIndex);
+    // `peek`, not `read`: this reference walk mirrors the index's own
+    // per-candidate style, and nothing here keeps the boundary payload past
+    // the call.
+    EntityKind? boundaryKind;
+    GeometryPayload? boundaryPayload;
+    if (record.kind == EntityKind.fill) {
+      final b = doc.entities.slotOf(boundaryHandleOf(payload));
+      if (b != null) {
+        boundaryKind = doc.entities.kindAt(b);
+        boundaryPayload = doc.geometry.peek(doc.entities.geomIndexAt(b));
+      }
+    }
     final box = entityBounds(
       kind: record.kind,
-      payload: doc.geometry.peek(record.geomIndex),
+      payload: payload,
       measurer: doc.textMeasurer,
       textStyle: doc.textStyleOf(record.textStyle),
       textAttrs: record.textAttrs,
       text: record.text,
+      boundaryKind: boundaryKind,
+      boundaryPayload: boundaryPayload,
     ).transformedBy(composed);
 
     if (!box.isEmpty && box.intersects(world)) {

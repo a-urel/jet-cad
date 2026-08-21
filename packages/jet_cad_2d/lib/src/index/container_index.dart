@@ -89,6 +89,19 @@ class ContainerIndex {
     void addLeaf(int slot, Transform2 composed) {
       final record = doc.entities.read(slot);
       final payload = doc.geometry.read(record.geomIndex);
+      // `peek`, not `read`: this runs per leaf during a whole-index build and
+      // `read` copies three objects. Nothing here keeps the boundary payload
+      // past the call.
+      EntityKind? boundaryKind;
+      GeometryPayload? boundaryPayload;
+      if (record.kind == EntityKind.fill) {
+        final b = doc.entities
+            .slotOf(boundaryHandleOf(doc.geometry.peek(record.geomIndex)));
+        if (b != null) {
+          boundaryKind = doc.entities.kindAt(b);
+          boundaryPayload = doc.geometry.peek(doc.entities.geomIndexAt(b));
+        }
+      }
       final leafBox = entityBounds(
         kind: record.kind,
         payload: payload,
@@ -96,6 +109,8 @@ class ContainerIndex {
         textStyle: doc.textStyleOf(record.textStyle),
         textAttrs: record.textAttrs,
         text: record.text,
+        boundaryKind: boundaryKind,
+        boundaryPayload: boundaryPayload,
       ).transformedBy(composed);
       leafSlots.add(slot);
       addBox(leafBoxes, leafBox);

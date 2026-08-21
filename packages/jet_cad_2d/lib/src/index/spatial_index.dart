@@ -15,6 +15,7 @@ import '../geometry/distance.dart';
 import '../geometry/primitives.dart';
 import '../geometry/transform2.dart';
 import '../store/entity_store.dart';
+import '../store/geometry_store.dart';
 import 'container_index.dart';
 import 'dirty_list.dart';
 import 'hit.dart';
@@ -2444,6 +2445,20 @@ class SpatialIndex {
 
     final record = document.entities.read(slot);
     final payload = document.geometry.read(record.geomIndex);
+    // `peek`, not `read`: this runs per candidate on the reconcile path and
+    // `read` copies three objects. Nothing here keeps the payload past the
+    // call.
+    EntityKind? boundaryKind;
+    GeometryPayload? boundaryPayload;
+    if (record.kind == EntityKind.fill) {
+      final b = document.entities
+          .slotOf(boundaryHandleOf(document.geometry.peek(record.geomIndex)));
+      if (b != null) {
+        boundaryKind = document.entities.kindAt(b);
+        boundaryPayload =
+            document.geometry.peek(document.entities.geomIndexAt(b));
+      }
+    }
     final current = entityBounds(
       kind: record.kind,
       payload: payload,
@@ -2451,6 +2466,8 @@ class SpatialIndex {
       textStyle: document.textStyleOf(record.textStyle),
       textAttrs: record.textAttrs,
       text: record.text,
+      boundaryKind: boundaryKind,
+      boundaryPayload: boundaryPayload,
     );
     // The indexed box is in container space; if this entity sits under a
     // flattened group — or is an ATTRIB owned directly by an instance node —

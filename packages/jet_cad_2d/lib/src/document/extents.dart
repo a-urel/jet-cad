@@ -18,6 +18,12 @@ import 'text_metrics.dart';
 /// [textAttrs] cannot be resolved from a handle alone, and giving this
 /// function a document dependency so it could look one up would be worse:
 /// every caller already holds the document and can resolve the record once.
+///
+/// [boundaryKind] and [boundaryPayload] are the resolved boundary of an
+/// [EntityKind.fill], and null for every other kind. They are *resolved by
+/// the caller*, for the same reason [textStyle] is: giving this function a
+/// document dependency so it could look a handle up would be worse, and
+/// every caller already holds the document.
 Aabb2 entityBounds({
   required EntityKind kind,
   required GeometryPayload payload,
@@ -25,6 +31,8 @@ Aabb2 entityBounds({
   required TextStyleRecord textStyle,
   int textAttrs = 0,
   String text = '',
+  EntityKind? boundaryKind,
+  GeometryPayload? boundaryPayload,
 }) {
   switch (kind) {
     case EntityKind.point:
@@ -60,8 +68,17 @@ Aabb2 entityBounds({
           textLocalTransform(attrs, metrics, payload.pointAt(0)));
 
     case EntityKind.fill:
-      // Task 9 gives this case the boundary's box. Until then a fill bounds
-      // to nothing, which is what its own payload says.
-      return Aabb2.empty();
+      // A fill has no geometry of its own -- it occupies exactly its
+      // boundary. Unresolved, it bounds to nothing rather than to a guess;
+      // the painter counts that as a skip and `validate()` names the cause.
+      if (boundaryKind == null || boundaryPayload == null) {
+        return Aabb2.empty();
+      }
+      return entityBounds(
+        kind: boundaryKind,
+        payload: boundaryPayload,
+        measurer: measurer,
+        textStyle: textStyle,
+      );
   }
 }

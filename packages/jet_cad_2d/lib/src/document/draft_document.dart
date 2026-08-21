@@ -257,13 +257,28 @@ class DraftDocument implements CommandTarget {
 
     for (final slot in held.leafSlots) {
       final record = entities.read(slot);
+      // `read`, not `peek`, for both the entity's own payload and its
+      // resolved boundary: this box is unioned into a result [memo] keeps
+      // beyond this call, unlike the index's per-candidate hot paths.
+      final payload = geometry.read(record.geomIndex);
+      EntityKind? boundaryKind;
+      GeometryPayload? boundaryPayload;
+      if (record.kind == EntityKind.fill) {
+        final b = entities.slotOf(boundaryHandleOf(payload));
+        if (b != null) {
+          boundaryKind = entities.kindAt(b);
+          boundaryPayload = geometry.read(entities.geomIndexAt(b));
+        }
+      }
       box = box.union(entityBounds(
         kind: record.kind,
-        payload: geometry.read(record.geomIndex),
+        payload: payload,
         measurer: textMeasurer,
         textStyle: textStyleOf(record.textStyle),
         textAttrs: record.textAttrs,
         text: record.text,
+        boundaryKind: boundaryKind,
+        boundaryPayload: boundaryPayload,
       ));
     }
 
