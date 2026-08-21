@@ -1,0 +1,291 @@
+### PROVENANCE — read this before citing a number from this file.
+
+Twelve web runs were taken (10,000 and 50,000 entities x canvas and vertices x
+3 runs). **Ten of them were captured to this file** by `run_web_r2.sh` +
+`cdp_poll_generic.py`; each is a block below headed `=== ... ===` /
+`=== RETRIEVED ===`, printed by the app itself and retrieved unmodified.
+
+**Two were not**, and they are appended at the end of this file under
+`RECOVERED BLOCKS`, reconstructed from the Task 13 report rather than captured
+here. They are 10,000-entity run 1 on each backend. Their provenance and what
+is missing from them is stated there. They are marked because one of them,
+canvas run 1's `build p50=122.20ms`, is an endpoint of an interval published in
+the results note, and a reader must be able to see that this endpoint is a
+reconstruction and not a capture.
+
+**The `run N` numbers in the ten captured headers below do NOT match the run
+numbers used in the Task 13 report or in the results note.** Specifically, the
+block headed `10000 canvas run 1 (already captured above, repeating cleanly)`
+carries the report's **run 2** figures (117.10 / 79.30), and `10000 canvas
+run 2` carries the report's **run 3** (117.80 / 79.60). The headers were typed
+by the operator during the session; the figures inside them are the app's own
+output. **Trust the figures, not the header's ordinal.** Nothing depends on the
+ordering: every published cell is a median or a min/max over the three runs at
+that corpus size and backend, all of which are present once the two recovered
+blocks are counted.
+
+--------------------------------------------------------------------------
+
+=== 10000 vertices run 2 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (10000) frames=240
+  build  p50=6.90ms p95=7.90ms max=13.10ms
+  raster p50=1.30ms p95=1.70ms max=58.50ms
+  screenSpaceLeafCount=2111 lineweightScale=1
+  dashSpans=50120 collapsed=182 canvasCalls=19
+  backend=vertices triangles=223733 drawVerticesCalls=20
+  text: corpus=on draw=on textOps=19 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 10000 vertices run 3 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (10000) frames=241
+  build  p50=6.80ms p95=8.10ms max=12.70ms
+  raster p50=1.40ms p95=1.70ms max=54.60ms
+  screenSpaceLeafCount=2111 lineweightScale=1
+  dashSpans=50120 collapsed=182 canvasCalls=19
+  backend=vertices triangles=223733 drawVerticesCalls=20
+  text: corpus=on draw=on textOps=19 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 10000 canvas run 1 (already captured above, repeating cleanly) ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (10000) frames=241
+  build  p50=117.10ms p95=133.90ms max=140.00ms
+  raster p50=79.30ms p95=91.20ms max=191.90ms
+  screenSpaceLeafCount=2111 lineweightScale=1
+  dashSpans=50120 collapsed=182 canvasCalls=52897
+  backend=canvas
+  text: corpus=on draw=on textOps=19 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 10000 canvas run 2 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (10000) frames=241
+  build  p50=117.80ms p95=134.40ms max=142.10ms
+  raster p50=79.60ms p95=91.70ms max=198.30ms
+  screenSpaceLeafCount=2111 lineweightScale=1
+  dashSpans=50120 collapsed=182 canvasCalls=52897
+  backend=canvas
+  text: corpus=on draw=on textOps=19 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 vertices run 1 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=241
+  build  p50=8.90ms p95=9.50ms max=14.10ms
+  raster p50=1.80ms p95=2.10ms max=267.70ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=24
+  backend=vertices triangles=294536 drawVerticesCalls=21
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 vertices run 2 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=239
+  build  p50=8.80ms p95=9.40ms max=14.00ms
+  raster p50=1.80ms p95=2.10ms max=67.90ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=24
+  backend=vertices triangles=294536 drawVerticesCalls=21
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 vertices run 3 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=233
+  build  p50=8.90ms p95=9.60ms max=14.30ms
+  raster p50=1.80ms p95=2.10ms max=70.90ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=24
+  backend=vertices triangles=294536 drawVerticesCalls=21
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 canvas run 1 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=241
+  build  p50=156.50ms p95=165.80ms max=170.50ms
+  raster p50=107.90ms p95=111.50ms max=219.40ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=70193
+  backend=canvas
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 canvas run 2 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=241
+  build  p50=155.70ms p95=165.40ms max=168.40ms
+  raster p50=107.90ms p95=112.00ms max=222.20ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=70193
+  backend=canvas
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 canvas run 3 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=241
+  build  p50=154.20ms p95=163.50ms max=167.40ms
+  raster p50=108.00ms p95=112.60ms max=219.50ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=70193
+  backend=canvas
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+
+--------------------------------------------------------------------------
+
+### RECOVERED BLOCKS — reconstructed, NOT captured to this file
+
+The two runs below were not written to this file during the session. They
+survive only in the Task 13 report
+(`.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/task-13-report.md`,
+archived to `docs/superpowers/ledgers/` when this branch merges), whose own
+"Corrections" section states that its transcripts are **reflowed, not verbatim**:
+blocks were condensed onto fewer lines for its tables and the identical
+`text:` / `paragraphs:` lines were dropped.
+
+So what follows is a **reconstruction into this file's block shape** of figures
+the app printed, not a byte-for-byte capture. Every number in them comes from
+the report; nothing is computed, interpolated or invented here.
+
+**What is present:** `frames`, `build` p50/p95/max, `raster` p50/p95/max,
+`screenSpaceLeafCount`, `dashSpans`, `collapsed`, `canvasCalls`, `backend`,
+and for the vertices run `triangles` and `drawVerticesCalls`.
+
+**What is missing and cannot be recovered:** the `lineweightScale` field, the
+`text:` line and the `paragraphs:` line. They were dropped by the report's
+reflowing before this file was ever written. Every other block at 10,000
+entities shows `lineweightScale=1`, `textOps=19`, `skippedText=0`,
+`newLayouts=0`, `newEvictions=0`, `live=512` — but that is an inference from
+the neighbours, so those fields are left out rather than filled in. They are
+marked `<not recovered>` below.
+
+**Why this matters to a published figure:** canvas run 1's
+`build p50=122.20ms` is the upper endpoint of the interval `[117.10, 122.20]`
+that the results note publishes for web 10,000 canvas build. It does not move
+the median (117.80). It does set the published spread of 5.10 ms.
+
+=== 10000 vertices run 1 (RECONSTRUCTED from the Task 13 report) ===
+R2 (10000) frames=238
+  build  p50=6.80ms p95=8.20ms max=12.60ms
+  raster p50=1.40ms p95=1.70ms max=56.80ms
+  screenSpaceLeafCount=2111 lineweightScale=<not recovered>
+  dashSpans=50120 collapsed=182 canvasCalls=19
+  backend=vertices triangles=223733 drawVerticesCalls=20
+  text: <not recovered>
+  paragraphs: <not recovered>
+
+=== 10000 canvas run 1 (RECONSTRUCTED from the Task 13 report) ===
+R2 (10000) frames=241
+  build  p50=122.20ms p95=140.10ms max=146.10ms
+  raster p50=79.20ms p95=91.30ms max=388.50ms
+  screenSpaceLeafCount=2111 lineweightScale=<not recovered>
+  dashSpans=50120 collapsed=182 canvasCalls=52897
+  backend=canvas
+  text: <not recovered>
+  paragraphs: <not recovered>

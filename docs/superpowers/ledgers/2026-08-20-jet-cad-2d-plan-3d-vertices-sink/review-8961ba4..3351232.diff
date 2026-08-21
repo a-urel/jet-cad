@@ -1,0 +1,301 @@
+# Review package: 8961ba4..HEAD
+
+## Commits
+3351232 feat: the harness selects a backend rather than toggling a sink
+
+## Files changed
+ .../integration_test/frame_timing_test.dart        | 30 +++++++++++--------
+ apps/dev_harness_2d/lib/main.dart                  | 34 +++++++++++++++-------
+ 2 files changed, 42 insertions(+), 22 deletions(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/integration_test/frame_timing_test.dart b/apps/dev_harness_2d/integration_test/frame_timing_test.dart
+index 2d49700..2d3a461 100644
+--- a/apps/dev_harness_2d/integration_test/frame_timing_test.dart
++++ b/apps/dev_harness_2d/integration_test/frame_timing_test.dart
+@@ -138,31 +138,33 @@ Handle addLineAt(
+ /// `newLayouts` is the row the exit gate is about: in a steady state — the
+ /// same strings visible frame after frame — a warm paragraph cache must lay
+ /// nothing out, and a non-zero reading here means the working set does not fit
+ /// under `kParagraphCacheLimit`. The counters are read after the same forced
+ /// repaint the dash counters come from, so all of them describe one frame.
+ ///
+ /// `layouts` and `evictions` are running totals since the sink was built; the
+ /// per-frame figures are the deltas the caller passes in. A running total
+ /// printed beside two per-frame figures is the wrong comparison this file
+ /// already refuses to publish once.
+-/// The spike's counters, printed only when it is on so every earlier run's
+-/// transcript stays comparable line for line.
+-void printVerticesCounters(VerticesDrawSink? vertices) {
++/// The backend actually used, and the vertices counters when it was that one.
++///
++/// The resolved value and not the define: a run that asked for `vertices` and
++/// silently got `canvas` would otherwise report canvas numbers under a
++/// vertices heading, which is the shape of the mistake Plan 3c's `TEXT` define
++/// made.
++void printBackend(RenderBackend backend, VerticesDrawSink? vertices) {
+   if (vertices == null) {
+-    print('  vertices: off');
++    print('  backend=${backend.name}');
+     return;
+   }
+-  // Frame-scoped counters, not per-flush ones: with text in the corpus a
+-  // frame flushes once per text op, so `lastFlushSegmentCount` would report
+-  // only the tail after the last of them.
+-  print('  vertices: on segments=${vertices.frameSegmentCount} '
++  print('  backend=${backend.name} '
++      'triangles=${vertices.frameTriangleCount} '
+       'drawVerticesCalls=${vertices.totalFlushCount}');
+ }
+ 
+ void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
+     {required int layoutsBefore, required int evictionsBefore}) {
+   final m = sink.measurer;
+   print('  text: corpus=${kTextCorpus ? "on" : "off"} '
+       'draw=${kDrawText ? "on" : "off"} '
+       'textOps=${painter.textOpCount} '
+       'skippedText=${painter.skippedTextCount}');
+@@ -177,36 +179,39 @@ void main() {
+ 
+   /// Builds the app and hands back everything a rig drives.
+   Future<
+       ({
+         DraftDocument doc,
+         CameraController camera,
+         SpatialIndex index,
+         DraftPainter painter,
+         CanvasDrawSink sink,
+         VerticesDrawSink? vertices,
++        RenderBackend resolvedBackend,
+         Handle? dashedLinetype
+       })> boot(WidgetTester tester) async {
+     final doc = harnessDocument(kEntities);
+     late CameraController camera;
+     late SpatialIndex index;
+     late DraftPainter painter;
+     late CanvasDrawSink sink;
+     VerticesDrawSink? vertices;
++    late RenderBackend resolvedBackend;
+     await tester.pumpWidget(HarnessApp(
+       document: doc,
+-      onReady: (c, i, p, s, v) {
++      onReady: (c, i, p, s, v, b) {
+         camera = c;
+         index = i;
+         painter = p;
+         sink = s;
+         vertices = v;
++        resolvedBackend = b;
+       },
+     ));
+     // Zoom to the working set. Fitting the whole drawing measures a frame
+     // nobody renders — R1 already reports that one, at a second per frame.
+     final e = doc.extents;
+     final cx = (e.minX + e.maxX) / 2;
+     final cy = (e.minY + e.maxY) / 2;
+     camera.value = ViewportTransform.fit(
+         Aabb2(Vector2(cx - 1500, cy - 1125), Vector2(cx + 1500, cy + 1125)),
+         tester.view.physicalSize / tester.view.devicePixelRatio);
+@@ -234,20 +239,21 @@ void main() {
+           '${dashedLinetypes.map((lt) => lt.name).toList()}');
+     }
+ 
+     return (
+       doc: doc,
+       camera: camera,
+       index: index,
+       painter: painter,
+       sink: sink,
+       vertices: vertices,
++      resolvedBackend: resolvedBackend,
+       dashedLinetype: dashedLinetypes.singleOrNull?.handle
+     );
+   }
+ 
+   testWidgets('R2 pan and zoom', (tester) async {
+     if (!runs('pan')) return;
+     refuseDebugMode();
+     final app = await boot(tester);
+     final timings = <FrameTiming>[];
+     binding.addTimingsCallback(timings.addAll);
+@@ -289,21 +295,21 @@ void main() {
+       // happened. `panBy(Offset.zero)` forces one only because Transform2 has
+       // no operator== for ValueNotifier to dedupe against — a property this
+       // rig depends on and does not own. If that ever changes, this rig would
+       // print a plausible-looking zero rather than fail, and a zero is the one
+       // wrong number nobody questions.
+       throw StateError('no repaint happened: the forced frame did not draw');
+     }
+     print('  dashSpans=${app.painter.dashSpanCount} '
+         'collapsed=${app.painter.collapsedDashCount} '
+         'canvasCalls=${app.sink.canvasCallCount}');
+-    printVerticesCounters(app.vertices);
++    printBackend(app.resolvedBackend, app.vertices);
+     printTextCounters(app.painter, app.sink,
+         layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
+   });
+ 
+   testWidgets('R4a leaf edit per frame', (tester) async {
+     if (!runs('leaf')) return;
+     if (kDashedFraction == 0) {
+       print('R4a skipped: DASHED=0 seeds no dashed linetype to edit with.');
+       return;
+     }
+@@ -362,21 +368,21 @@ void main() {
+         'rebuilds=${app.index.rebuildCount - rebuildsBefore} '
+         'handles burned=${app.doc.handleSeed.current.value - handlesBefore}');
+     // See R2's guard above for why: a zero here would mean the forced
+     // repaint silently stopped happening.
+     if (app.sink.canvasCallCount == 0) {
+       throw StateError('no repaint happened: the forced frame did not draw');
+     }
+     print('  dashSpans=${app.painter.dashSpanCount} '
+         'collapsed=${app.painter.collapsedDashCount} '
+         'canvasCalls=${app.sink.canvasCallCount}');
+-    printVerticesCounters(app.vertices);
++    printBackend(app.resolvedBackend, app.vertices);
+     printTextCounters(app.painter, app.sink,
+         layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
+   });
+ 
+   testWidgets('R4b instance drag per frame', (tester) async {
+     if (!runs('instance')) return;
+     refuseDebugMode();
+     final app = await boot(tester);
+     final timings = <FrameTiming>[];
+     binding.addTimingsCallback(timings.addAll);
+@@ -420,15 +426,15 @@ void main() {
+     print('  command ${clock.summary}');
+     print('  rebuilds=${app.index.rebuildCount - before} over $kSteps frames');
+     // See R2's guard above for why: a zero here would mean the forced
+     // repaint silently stopped happening.
+     if (app.sink.canvasCallCount == 0) {
+       throw StateError('no repaint happened: the forced frame did not draw');
+     }
+     print('  dashSpans=${app.painter.dashSpanCount} '
+         'collapsed=${app.painter.collapsedDashCount} '
+         'canvasCalls=${app.sink.canvasCallCount}');
+-    printVerticesCounters(app.vertices);
++    printBackend(app.resolvedBackend, app.vertices);
+     printTextCounters(app.painter, app.sink,
+         layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
+   });
+ }
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index 809ec11..59817f7 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -61,26 +61,37 @@ final double kLineweightScale = double.tryParse(
+ /// same way [kLineweightScale] does. Inert at its default of 0.35, which is
+ /// the value every run before this one used.
+ final double kDashedFraction = double.tryParse(
+       const String.fromEnvironment('DASHED', defaultValue: '0.35'),
+     ) ??
+     0.35;
+ 
+ const bool kTextCorpus = bool.fromEnvironment('TEXT');
+ const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
+ 
+-/// Routes the walk through `VerticesDrawSink` instead of `CanvasDrawSink`.
++/// Which sink the harness draws through: `canvas`, `vertices`, or unset for
++/// the platform's own choice.
+ ///
+-/// The spike for `2026-08-20-dash-leaf-separation.md`'s conclusion: the unit of
+-/// render cost is the canvas call, so batch the calls. Inert at its default of
+-/// `false`, which leaves the frame byte-identical to every earlier run.
+-const bool kVertices = bool.fromEnvironment('VERTICES');
++/// **A `String.fromEnvironment`, and it stays one.** Plan 3c lost a full device
++/// run to `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as
++/// false while printing entirely plausible numbers; the only thing that caught
++/// it was a line printing `corpus=on/off`. A string has no such hazard, and an
++/// unrecognised value throws at startup rather than falling back to something
++/// that looks fine.
++final RenderBackend? kBackend =
++    switch (const String.fromEnvironment('BACKEND', defaultValue: '')) {
++  '' => null,
++  'canvas' => RenderBackend.canvas,
++  'vertices' => RenderBackend.vertices,
++  final other =>
++    throw StateError('BACKEND must be canvas, vertices or unset; got "$other"'),
++};
+ 
+ /// The corpus the rigs measure on: the same shape as R1's, so the two sets of
+ /// numbers describe one drawing.
+ ///
+ /// With [kTextCorpus] on this is `textRigCorpus`'s shape, and the measurer
+ /// stops being a detail: `DraftDocument`'s default is the zero-metrics
+ /// `InsertionPointMeasurer`, which collapses every glyph box to a point and
+ /// every text transform to a singular matrix. A text corpus built on it looks
+ /// like a text corpus and draws nothing measurable.
+ DraftDocument harnessDocument([int? entityCount]) => generateDocument(
+@@ -108,46 +119,49 @@ class HarnessApp extends StatefulWidget {
+   final DraftDocument document;
+ 
+   /// Handed the pieces a rig needs to drive: the camera it scripts, the
+   /// index whose rebuild count it reports, and the painter and sink whose
+   /// counters it reads.
+   ///
+   /// Fired after the first frame, not from `initState` — the painter and
+   /// sink belong to `DraftCanvasState`, a descendant whose own `initState`
+   /// has not run yet when this widget's has.
+   ///
+-  /// [vertices] is non-null only under [kVertices]; a rig reads its batch and
+-  /// flush counters the same way it reads the painter's.
++  /// [vertices] is non-null only when [resolvedBackend] is
++  /// `RenderBackend.vertices`; a rig reads its batch and flush counters the
++  /// same way it reads the painter's. [resolvedBackend] is what
++  /// `DraftCanvasState` actually built, not what [kBackend] asked for.
+   final void Function(
+       CameraController camera,
+       SpatialIndex index,
+       DraftPainter painter,
+       CanvasDrawSink sink,
+-      VerticesDrawSink? vertices)? onReady;
++      VerticesDrawSink? vertices,
++      RenderBackend resolvedBackend)? onReady;
+ 
+   @override
+   State<HarnessApp> createState() => _HarnessAppState();
+ }
+ 
+ class _HarnessAppState extends State<HarnessApp> {
+   late final SpatialIndex index = SpatialIndex(widget.document);
+   late final CameraController camera = CameraController(
+       ViewportTransform.fit(widget.document.extents, const Size(1600, 1200)));
+   final GlobalKey<DraftCanvasState> _canvasKey = GlobalKey<DraftCanvasState>();
+ 
+   @override
+   void initState() {
+     super.initState();
+     WidgetsBinding.instance.addPostFrameCallback((_) {
+       final canvasState = _canvasKey.currentState!;
+       widget.onReady?.call(camera, index, canvasState.painter, canvasState.sink,
+-          canvasState.vertices);
++          canvasState.vertices, canvasState.resolvedBackend);
+     });
+   }
+ 
+   @override
+   void dispose() {
+     index.dispose();
+     camera.dispose();
+     super.dispose();
+   }
+ 
+@@ -166,15 +180,15 @@ class _HarnessAppState extends State<HarnessApp> {
+               camera.zoomAt(event.localPosition,
+                   event.scrollDelta.dy < 0 ? 1.1 : 1 / 1.1);
+             },
+             child: DraftCanvas(
+                 key: _canvasKey,
+                 document: widget.document,
+                 index: index,
+                 camera: camera,
+                 lineweightScale: kLineweightScale,
+                 drawText: kDrawText,
+-                useVertices: kVertices),
++                backend: kBackend),
+           ),
+         ),
+       );
+ }

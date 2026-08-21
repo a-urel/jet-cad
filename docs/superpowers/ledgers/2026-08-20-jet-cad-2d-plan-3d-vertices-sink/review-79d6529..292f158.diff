@@ -1,0 +1,529 @@
+# Review package: 79d6529..HEAD
+
+## Commits
+292f158 test: goldens on both backends
+
+## Files changed
+ .../jet_cad_2d_flutter/test/draft_canvas_test.dart |  14 +++-
+ .../test/golden/dash_ladder_golden_test.dart       |  86 +++++++++++++++++--
+ .../test/golden/stroke_width_golden_test.dart      |  51 +++++++++++-
+ .../test/golden/text_ladder_golden_test.dart       |  91 +++++++++++++++++++--
+ .../test/golden/vertices/anisotropy_bypass.png     | Bin 0 -> 1568 bytes
+ .../test/golden/vertices/dash_ladder_1.png         | Bin 0 -> 1347 bytes
+ .../test/golden/vertices/dash_ladder_2.png         | Bin 0 -> 1505 bytes
+ .../test/golden/vertices/dash_ladder_3.png         | Bin 0 -> 1095 bytes
+ .../test/golden/vertices/dash_ladder_4.png         | Bin 0 -> 737 bytes
+ .../test/golden/vertices/dash_ladder_5.png         | Bin 0 -> 614 bytes
+ .../test/golden/vertices/stroke_width_0_5x.png     | Bin 0 -> 1223 bytes
+ .../test/golden/vertices/stroke_width_1_0x.png     | Bin 0 -> 1232 bytes
+ .../test/golden/vertices/stroke_width_8_0x.png     | Bin 0 -> 1250 bytes
+ .../test/golden/vertices/text_ladder_1.png         | Bin 0 -> 574 bytes
+ .../test/golden/vertices/text_ladder_2.png         | Bin 0 -> 574 bytes
+ .../test/golden/vertices/text_ladder_3.png         | Bin 0 -> 688 bytes
+ .../test/golden/vertices/text_ladder_4.png         | Bin 0 -> 592 bytes
+ .../test/golden/vertices/text_ladder_5.png         | Bin 0 -> 778 bytes
+ 18 files changed, 227 insertions(+), 15 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart b/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart
+index 860c0e5..3b53a4c 100644
+--- a/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart
++++ b/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart
+@@ -126,22 +126,32 @@ void main() {
+         reason: 'a disposed notifier that still receives changes leaks; '
+             'it does not throw, so "no exception" would not catch it');
+   });
+ 
+   testWidgets('one sink serves every paint', (tester) async {
+     // `CanvasDrawSink` exists to own a `Paint`, a `Path` and two typed lists
+     // across frames; constructing one per paint throws that away and puts four
+     // allocations on the frame path, which is the one thing this render path
+     // is built not to do. The `Canvas` is what changes per frame, so it is
+     // what gets rebound.
+-    await tester.pumpWidget(
+-        wrap(DraftCanvas(document: doc, index: index, camera: camera)));
++    // Pinned to the canvas backend explicitly: this is a claim about
++    // `CanvasDrawSink`'s identity and lifetime, and under the vertices
++    // backend `CanvasDrawSink` is the fallback that takes only text —
++    // `state.sink.canvas` would still read back normally there because
++    // `_DraftCustomPainter.paint` binds it before branching on the backend,
++    // which would make this test pass while asserting the wrong thing about
++    // the fallback rather than about the sink that actually paints.
++    await tester.pumpWidget(wrap(DraftCanvas(
++        document: doc,
++        index: index,
++        camera: camera,
++        backend: RenderBackend.canvas)));
+     final state = tester.state<DraftCanvasState>(find.byType(DraftCanvas));
+     final first = state.sink;
+ 
+     camera.panBy(const Offset(10, 0));
+     await tester.pump();
+     camera.zoomAt(const Offset(200, 150), 1.5);
+     await tester.pump();
+ 
+     expect(identical(state.sink, first), isTrue);
+     // Identity alone proves only that the field was left alone. `canvas` is
+diff --git a/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart b/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
+index 4279fe0..8135c73 100644
+--- a/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
++++ b/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
+@@ -5,20 +5,22 @@ library;
+ // floor's effect is visible as a ladder rather than as a number.
+ 
+ import 'dart:typed_data';
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+ 
++import '../support/triangle_rasterizer.dart';
++
+ const Size kGoldenViewport = Size(400, 300);
+ const Key kCanvasKey = Key('golden-canvas');
+ 
+ /// Six horizontal dashed rules, and one dashed circle, spanning the width.
+ DraftDocument dashLadderFixture() {
+   final doc = DraftDocument.empty();
+   final dashed = doc.handleSeed.next();
+   doc.tables.linetypes.add(LinetypeRecord(
+     handle: dashed,
+     name: 'DASHED',
+@@ -80,25 +82,99 @@ Widget _at(DraftDocument doc, double halfSpan) {
+                 Aabb2(
+                     Vector2(-halfSpan, -halfSpan), Vector2(halfSpan, halfSpan)),
+                 kGoldenViewport)),
+           ),
+         ),
+       ),
+     ),
+   );
+ }
+ 
++/// Renders one rung on one backend and compares it to that backend's PNG.
++///
++/// The canvas backend goes through [_at] unchanged, so these five PNGs stay
++/// pixel-identical to what they were before this backend loop existed. The
++/// vertices backend cannot go through `matchesGoldenFile` on the widget:
++/// software Skia does not finish a `drawVertices` of this size, so its
++/// triangles are scan-converted by `TriangleRasterizer` and the *image* is
++/// matched instead.
++Future<void> _rung(WidgetTester tester, DraftDocument doc, double halfSpan,
++    String name, RenderBackend backend) async {
++  if (backend == RenderBackend.canvas) {
++    await tester.pumpWidget(_at(doc, halfSpan));
++    await expectLater(
++        find.byKey(kCanvasKey), matchesGoldenFile('dash_ladder_$name.png'));
++    return;
++  }
++
++  final index = SpatialIndex(doc);
++  addTearDown(index.dispose);
++  final camera = CameraController(ViewportTransform.fit(
++      Aabb2(Vector2(-halfSpan, -halfSpan), Vector2(halfSpan, halfSpan)),
++      kGoldenViewport));
++  addTearDown(camera.dispose);
++  final rasterizer = TriangleRasterizer(
++      kGoldenViewport.width.round(), kGoldenViewport.height.round());
++
++  final key = GlobalKey<DraftCanvasState>();
++  await tester.pumpWidget(MaterialApp(
++    home: Scaffold(
++      backgroundColor: Colors.white,
++      body: Center(
++        child: SizedBox(
++          width: kGoldenViewport.width,
++          height: kGoldenViewport.height,
++          child: DraftCanvas(
++              key: key,
++              document: doc,
++              index: index,
++              resolver: DocumentStyleResolver(doc),
++              camera: camera,
++              backend: backend),
++        ),
++      ),
++    ),
++  ));
++  // Attached after the first pump, and the widget pumped again: the state —
++  // and the vertices sink it owns — does not exist until the first build.
++  key.currentState!.vertices?.observer = rasterizer.observe;
++  // The first pump already painted once — the picture this golden pins —
++  // but without an observer attached. Nothing about the document or the
++  // camera changes for the second pump, `_DraftCustomPainter.shouldRepaint`
++  // is unconditionally false, and the painter's own `repaint` listenable
++  // never fires on its own, so a bare `tester.pump()` here finds nothing
++  // dirty and skips the repaint entirely — confirmed by a probe that pumped
++  // this exact sequence and read the observer back having seen zero
++  // triangles. `markNeedsPaint` forces the same picture to paint again, this
++  // time through the now-attached observer.
++  tester
++      .renderObject<RenderObject>(find.descendant(
++          of: find.byType(DraftCanvas), matching: find.byType(CustomPaint)))
++      .markNeedsPaint();
++  await tester.pump();
++
++  // `rasterizer.toImage()` completes through `decodeImageFromPixels`, a real
++  // engine callback. Confirmed by a minimal repro: once this test binding has
++  // actually pumped a widget, the fake-async test zone never delivers that
++  // callback and the await hangs forever; before any pump it resolves
++  // immediately. `runAsync` steps outside the fake zone for the one call that
++  // needs it.
++  final image = (await tester.runAsync(rasterizer.toImage))!;
++  addTearDown(image.dispose);
++  await expectLater(image, matchesGoldenFile('vertices/dash_ladder_$name.png'));
++}
++
+ void main() {
+   for (final (name, halfSpan) in const [
+     ('1', 60.0),
+     ('2', 150.0),
+     ('3', 400.0),
+     ('4', 1200.0),
+     ('5', 4000.0),
+   ]) {
+-    testWidgets('dash ladder rung $name', (tester) async {
+-      await tester.pumpWidget(_at(dashLadderFixture(), halfSpan));
+-      await expectLater(
+-          find.byKey(kCanvasKey), matchesGoldenFile('dash_ladder_$name.png'));
+-    });
++    for (final backend in RenderBackend.values) {
++      testWidgets('dash ladder rung $name ($backend)', (tester) async {
++        await _rung(tester, dashLadderFixture(), halfSpan, name, backend);
++      });
++    }
+   }
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/golden/stroke_width_golden_test.dart b/packages/jet_cad_2d_flutter/test/golden/stroke_width_golden_test.dart
+index 1a3af8f..0493022 100644
+--- a/packages/jet_cad_2d_flutter/test/golden/stroke_width_golden_test.dart
++++ b/packages/jet_cad_2d_flutter/test/golden/stroke_width_golden_test.dart
+@@ -6,27 +6,30 @@ library;
+ // stroke *looks* the right width, and whether the anisotropy bypass produces
+ // the right shape. Everything else in this package is asserted on
+ // `RecordingDrawSink`, where a number can be compared instead of a picture.
+ //
+ // These drive `DraftPainter` through `CanvasDrawSink` directly rather than
+ // through `DraftCanvas`, which does not exist yet. That is the honest coupling
+ // anyway: stroke width is computed in the sink and the bypass in the painter,
+ // and neither becomes more or less correct for being inside a widget.
+ 
+ import 'dart:typed_data';
++import 'dart:ui' as ui;
+ 
+ import 'package:flutter/widgets.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+ 
++import '../support/triangle_rasterizer.dart';
++
+ const Size kGoldenViewport = Size(400, 300);
+ 
+ /// Chosen so a 0.5 mm lineweight lands on 4 device pixels: thick enough that a
+ /// wrong width is obvious by eye, thin enough that the shapes stay readable.
+ const double kPixelsPerPaperMm = 8.0;
+ 
+ /// 1/100 mm, so 0.5 mm.
+ const int kHalfMillimetre = 50;
+ 
+ const Key kCanvasKey = Key('golden-canvas');
+@@ -169,54 +172,96 @@ Widget canvasOver(
+ ///
+ /// Written out rather than fitted, because the point of the first golden is
+ /// that three *different* scales produce one stroke width — a fit camera would
+ /// choose the scale and hide the variable.
+ ViewportTransform cameraAt(double zoom) => ViewportTransform(
+       worldToScreenMatrix: Transform2.translation(
+               kGoldenViewport.width / 2, kGoldenViewport.height / 2)
+           .multiply(Transform2.scale(zoom, -zoom)),
+     );
+ 
++/// Renders [doc] through `VerticesDrawSink` and the coverage rasterizer,
++/// driven directly the same way [canvasOver] drives `CanvasDrawSink` —
++/// `DraftCanvas` does not own either of this file's fixtures.
++///
++/// `devicePixelRatio` is fixed at 1.0 because there is no widget's
++/// `MediaQuery` here to read it from, and 1.0 is what the canvas half of this
++/// suite is already pinned at: both goldens are exactly `kGoldenViewport` in
++/// size, and it is what makes the class comment's "0.5 mm lands on 4 device
++/// pixels" true of this rasterization too.
++Future<ui.Image> _renderVertices(WidgetTester tester, DraftDocument doc,
++    SpatialIndex index, ViewportTransform camera) async {
++  final recorder = ui.PictureRecorder();
++  final rasterizer = TriangleRasterizer(
++      kGoldenViewport.width.round(), kGoldenViewport.height.round());
++  final sink = VerticesDrawSink(
++    pixelsPerPaperMm: kPixelsPerPaperMm,
++    canvas: Canvas(recorder),
++  )..observer = rasterizer.observe;
++  DraftPainter(
++          document: doc, index: index, resolver: DocumentStyleResolver(doc))
++      .paint(sink, camera, kGoldenViewport);
++  sink.flush();
++  recorder.endRecording().dispose();
++  // `rasterizer.toImage()` completes through `decodeImageFromPixels`, a real
++  // engine callback. Confirmed by a minimal repro: once this test binding has
++  // actually pumped a widget (as `canvasOver` already has by the time this is
++  // called), the fake-async test zone never delivers that callback and the
++  // await hangs forever; before any pump it resolves immediately. `runAsync`
++  // steps outside the fake zone for the one call that needs it.
++  return (await tester.runAsync(rasterizer.toImage))!;
++}
++
+ void main() {
+   testWidgets('paper-space stroke width at three zoom levels', (tester) async {
+     // "Paper space" means the width is a property of the paper, not of the
+     // camera: 0.5 mm stays 0.5 mm on screen however far in the view is.
+     await tester.binding.setSurfaceSize(kGoldenViewport);
+     addTearDown(() => tester.binding.setSurfaceSize(null));
+ 
+     for (final (zoom, name) in const [
+       (0.5, 'stroke_width_0_5x.png'),
+       (1.0, 'stroke_width_1_0x.png'),
+       (8.0, 'stroke_width_8_0x.png'),
+     ]) {
+       final doc = strokeWidthFixture();
+       final index = SpatialIndex(doc);
+       addTearDown(index.dispose);
++      final camera = cameraAt(zoom);
+ 
+-      await tester.pumpWidget(canvasOver(doc, index, cameraAt(zoom)));
++      await tester.pumpWidget(canvasOver(doc, index, camera));
+       await expectLater(find.byKey(kCanvasKey), matchesGoldenFile(name));
++
++      final image = await _renderVertices(tester, doc, index, camera);
++      addTearDown(image.dispose);
++      await expectLater(image, matchesGoldenFile('vertices/$name'));
+     }
+   });
+ 
+   testWidgets('an anisotropic instance draws exact per-axis widths',
+       (tester) async {
+     await tester.binding.setSurfaceSize(kGoldenViewport);
+     addTearDown(() => tester.binding.setSurfaceSize(null));
+ 
+     final doc = anisotropicFixture(scaleY: 8.0);
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
++    final camera = ViewportTransform.fit(doc.extents, kGoldenViewport);
+ 
+-    await tester.pumpWidget(canvasOver(
+-        doc, index, ViewportTransform.fit(doc.extents, kGoldenViewport)));
++    await tester.pumpWidget(canvasOver(doc, index, camera));
+     await expectLater(
+         find.byKey(kCanvasKey), matchesGoldenFile('anisotropy_bypass.png'));
++
++    final image = await _renderVertices(tester, doc, index, camera);
++    addTearDown(image.dispose);
++    await expectLater(
++        image, matchesGoldenFile('vertices/anisotropy_bypass.png'));
+   });
+ 
+   testWidgets('the anisotropic instance really took the bypass',
+       (tester) async {
+     // A golden records whatever the code did. This says the picture above is
+     // the bypass being exercised and not the fallback quietly drawing
+     // something plausible — the one thing about that image an eye cannot
+     // check.
+     final doc = anisotropicFixture(scaleY: 8.0);
+     final index = SpatialIndex(doc);
+diff --git a/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart b/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart
+index 49a29f1..7d815a2 100644
+--- a/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart
++++ b/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart
+@@ -20,20 +20,22 @@ library;
+ import 'dart:io';
+ import 'dart:typed_data';
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show FontLoader;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+ 
++import '../support/triangle_rasterizer.dart';
++
+ const Size kGoldenViewport = Size(400, 300);
+ const Key kCanvasKey = Key('golden-canvas');
+ 
+ /// The world box every rung is framed to, at the viewport's own aspect ratio
+ /// so `fit` adds no letterbox and the same world distance is the same number
+ /// of pixels in all five PNGs.
+ final Aabb2 kWorld = Aabb2(Vector2(0, 0), Vector2(200, 150));
+ 
+ /// The vendored font, loaded under the family the Standard text style names.
+ ///
+@@ -303,28 +305,107 @@ Widget _framed(DraftDocument doc) => MaterialApp(
+               index: SpatialIndex(doc),
+               resolver: DocumentStyleResolver(doc),
+               camera: CameraController(
+                   ViewportTransform.fit(kWorld, kGoldenViewport)),
+             ),
+           ),
+         ),
+       ),
+     );
+ 
++/// Renders one rung on one backend and compares it to that backend's PNG.
++///
++/// The canvas backend goes through [_framed] unchanged, so these five PNGs
++/// stay pixel-identical to what they were before this backend loop existed.
++/// The vertices backend cannot go through `matchesGoldenFile` on the widget:
++/// software Skia does not finish a `drawVertices` of this size, so its
++/// triangles are scan-converted by `TriangleRasterizer` and the *image* is
++/// matched instead.
++///
++/// The vertices golden of this ladder carries the rung's polyline and none of
++/// its glyphs: text goes to `CanvasDrawSink` as a paragraph and never reaches
++/// the triangle buffer. What it pins is that the strokes around the text are
++/// right and that the flush before each text op happened; the glyphs are
++/// pinned by the canvas golden beside it.
++Future<void> _rung(WidgetTester tester, DraftDocument doc, String name,
++    RenderBackend backend) async {
++  if (backend == RenderBackend.canvas) {
++    await tester.pumpWidget(_framed(doc));
++    await expectLater(
++        find.byKey(kCanvasKey), matchesGoldenFile('text_ladder_$name.png'));
++    return;
++  }
++
++  final index = SpatialIndex(doc);
++  addTearDown(index.dispose);
++  final camera =
++      CameraController(ViewportTransform.fit(kWorld, kGoldenViewport));
++  addTearDown(camera.dispose);
++  final rasterizer = TriangleRasterizer(
++      kGoldenViewport.width.round(), kGoldenViewport.height.round());
++
++  final key = GlobalKey<DraftCanvasState>();
++  await tester.pumpWidget(MaterialApp(
++    home: Scaffold(
++      backgroundColor: Colors.white,
++      body: Center(
++        child: SizedBox(
++          width: kGoldenViewport.width,
++          height: kGoldenViewport.height,
++          child: DraftCanvas(
++              key: key,
++              document: doc,
++              index: index,
++              resolver: DocumentStyleResolver(doc),
++              camera: camera,
++              backend: backend),
++        ),
++      ),
++    ),
++  ));
++  // Attached after the first pump, and the widget pumped again: the state —
++  // and the vertices sink it owns — does not exist until the first build.
++  key.currentState!.vertices?.observer = rasterizer.observe;
++  // The first pump already painted once — the picture this golden pins —
++  // but without an observer attached. Nothing about the document or the
++  // camera changes for the second pump, `_DraftCustomPainter.shouldRepaint`
++  // is unconditionally false, and the painter's own `repaint` listenable
++  // never fires on its own, so a bare `tester.pump()` here finds nothing
++  // dirty and skips the repaint entirely — confirmed by a probe that pumped
++  // this exact sequence and read the observer back having seen zero
++  // triangles. `markNeedsPaint` forces the same picture to paint again, this
++  // time through the now-attached observer.
++  tester
++      .renderObject<RenderObject>(find.descendant(
++          of: find.byType(DraftCanvas), matching: find.byType(CustomPaint)))
++      .markNeedsPaint();
++  await tester.pump();
++
++  // `rasterizer.toImage()` completes through `decodeImageFromPixels`, a real
++  // engine callback. Confirmed by a minimal repro: once this test binding has
++  // actually pumped a widget, the fake-async test zone never delivers that
++  // callback and the await hangs forever; before any pump it resolves
++  // immediately. `runAsync` steps outside the fake zone for the one call that
++  // needs it.
++  final image = (await tester.runAsync(rasterizer.toImage))!;
++  addTearDown(image.dispose);
++  await expectLater(image, matchesGoldenFile('vertices/text_ladder_$name.png'));
++}
++
+ void main() {
+   TestWidgetsFlutterBinding.ensureInitialized();
+   setUpAll(_loadRoboto);
+ 
+   for (final (name, fixture) in <(String, DraftDocument Function())>[
+     ('1', _rung1),
+     ('2', _rung2),
+     ('3', _rung3),
+     ('4', _rung4),
+     ('5', _rung5),
+   ]) {
+-    testWidgets('text ladder rung $name', (tester) async {
+-      await tester.pumpWidget(_framed(fixture()));
+-      await expectLater(
+-          find.byKey(kCanvasKey), matchesGoldenFile('text_ladder_$name.png'));
+-    });
++    for (final backend in RenderBackend.values) {
++      testWidgets('text ladder rung $name ($backend)', (tester) async {
++        await _rung(tester, fixture(), name, backend);
++      });
++    }
+   }
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/anisotropy_bypass.png b/packages/jet_cad_2d_flutter/test/golden/vertices/anisotropy_bypass.png
+new file mode 100644
+index 0000000..3537cd1
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/anisotropy_bypass.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_1.png b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_1.png
+new file mode 100644
+index 0000000..1a00fd9
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_1.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_2.png b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_2.png
+new file mode 100644
+index 0000000..a97271b
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_2.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_3.png b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_3.png
+new file mode 100644
+index 0000000..b0fd55f
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_3.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_4.png b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_4.png
+new file mode 100644
+index 0000000..49c7924
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_4.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_5.png b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_5.png
+new file mode 100644
+index 0000000..6786480
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_5.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/stroke_width_0_5x.png b/packages/jet_cad_2d_flutter/test/golden/vertices/stroke_width_0_5x.png
+new file mode 100644
+index 0000000..149fd21
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/stroke_width_0_5x.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/stroke_width_1_0x.png b/packages/jet_cad_2d_flutter/test/golden/vertices/stroke_width_1_0x.png
+new file mode 100644
+index 0000000..da98e2b
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/stroke_width_1_0x.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/stroke_width_8_0x.png b/packages/jet_cad_2d_flutter/test/golden/vertices/stroke_width_8_0x.png
+new file mode 100644
+index 0000000..122c6df
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/stroke_width_8_0x.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_1.png b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_1.png
+new file mode 100644
+index 0000000..a982c2b
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_1.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_2.png b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_2.png
+new file mode 100644
+index 0000000..a982c2b
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_2.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_3.png b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_3.png
+new file mode 100644
+index 0000000..3ef6930
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_3.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_4.png b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_4.png
+new file mode 100644
+index 0000000..5a93863
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_4.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_5.png b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_5.png
+new file mode 100644
+index 0000000..2337f8c
+Binary files /dev/null and b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_5.png differ

@@ -1,0 +1,363 @@
+# Review package: 2f6223e..HEAD
+
+## Commits
+787a914 docs: recover the two uncaptured web blocks, finish the renumbering
+
+## Files changed
+ STATUS.md                                          | 46 +++++++-----
+ .../notes/2026-08-21-plan-3d-results.md            | 28 ++++++--
+ .../notes/2026-08-21-plan-3d-web-raw/web_rows.log  | 81 ++++++++++++++++++++++
+ 3 files changed, 132 insertions(+), 23 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 53ebba2..f966efd 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -54,22 +54,23 @@ and moves only `dashedFraction`. The frame moves **6.0×**, so **the unit of
+ render cost is the canvas call, not the drawn leaf**. Every per-leaf µs figure
+ in Plans 3a, 3b and 3c is an artefact of a corpus where dash spans and leaves
+ are collinear — do not carry them forward. `build` is linear in call count to
+ ±30 µs; raster is super-linear because each call is one Impeller `Entity`. At
+ `DASHED=0` a 10,000-entity frame is **9.5 ms**, inside the 60 fps budget.
+ 
+ ### Plan 3d — the vertices sink is the default everywhere
+ 
+ The 2026-08-20 spike
+ ([note](docs/superpowers/notes/2026-08-20-vertices-sink-spike.md)) became Plan
+-3d, and Plan 3d is **finished on `spike/vertices-sink`** — 23 commits,
+-`548fa8e..HEAD`, **not merged, not pushed**. `VerticesDrawSink` builds each
++3d, and Plan 3d is **finished on `spike/vertices-sink`** — **24 commits**,
++`548fa8e..HEAD`, on top of 8 spike-and-spec commits, so **32 off `main`**.
++**Not merged, not pushed.** `VerticesDrawSink` builds each
+ stroked segment's triangles itself and submits the frame's strokes as one
+ ordered `drawVertices`. What the spike lacked, 3d added: **miter and bevel
+ joins** (a miter is two triangles), **seam joins on closed runs**, `Vertices`
+ disposal at submission, a **coverage-only triangle rasterizer** so the golden
+ suite is available to it, goldens **on both backends**, and a **sink-against-sink
+ ink comparison**.
+ 
+ Results note:
+ [docs/superpowers/notes/2026-08-21-plan-3d-results.md](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
+ Mutation log:
+@@ -159,27 +160,32 @@ docs/superpowers/
+ `jet_cad_2d` is Dart-only (`meta`, `vector_math`; dev: `test`, `vm_service`).
+ `jet_cad_2d_flutter` depends on Flutter + `jet_cad_2d` by path. Both are
+ `resolution: workspace` members of the root pubspec.
+ 
+ ---
+ 
+ ## Branch and worktree map
+ 
+ | Location | Branch | State |
+ |---|---|---|
+-| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, `33bdafb`, Plans 1/2/3a/3b/**3c** merged |
+-| `.claude/worktrees/vertices-spike` | `spike/vertices-sink` | clean, **Plan 3d complete**, 23 commits off `main`, not merged, not pushed |
+-
+-`main` is **29 commits ahead of `origin/main`**. **Nothing has been pushed.** Do
+-not push unless explicitly asked. The Plan 3d per-task ledger lives in the
+-worktree at `.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` and
+-is git-ignored; **archive it to `docs/superpowers/ledgers/` when the branch
++| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, **`bb67137`**, Plans 1/2/3a/3b/**3c** merged |
++| `.claude/worktrees/vertices-spike` | `spike/vertices-sink` | clean, **Plan 3d complete**, **32 commits off `main`** (8 spike/spec + 24 plan), not merged, not pushed |
++
++`main` is a strict ancestor of the branch, so the branch is a fast-forward.
++**As of this worktree's refs `origin/main` is also at `bb67137`** —
++`git rev-list --count origin/main..main` is `0`, not the 29 this file used to
++claim. That ref is local and may be stale; re-check with `git fetch` before
++acting on it. Do not push unless explicitly asked.
++
++The Plan 3d per-task ledger lives in the worktree at
++`.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` and is
++git-ignored; **archive it to `docs/superpowers/ledgers/` when the branch
+ merges**, or it is lost with the worktree.
+ 
+ ---
+ 
+ ## Completed work
+ 
+ ### Plan 1 — the 2D core (merged)
+ 
+ Identity and handles, the scene tree, columnar geometry and entity stores,
+ components, commands with undo, style tables and resolution, the packed R-tree
+@@ -210,22 +216,22 @@ call-collapsed mode was **2.7× slower to rasterise** than one
+ stop clause fired. What shipped instead:
+ 
+ - The cull floor and the style memo were **deleted** — both were measured losses.
+ - Every line-like leaf is carried into screen space unconditionally, replacing
+   the old anisotropy-gated bypass.
+ - An engine-side **dasher**: screen space for polylines, arc-window-aware for
+   circles and arcs, with a human-reviewed collapse floor (`kDashCollapsePx`).
+ 
+ The profiling task also answered the standing question about an unexplained
+ 179 ms: it is **leaf-count-bound GPU vertex work**, not fragment fill and not
+-draw-call dispatch. That finding is what makes a picture cache (Plan 3e)
+-worth building.
++draw-call dispatch. That finding is what makes a picture cache (**Plan 3f**,
++called 3e before the vertices sink took the 3d slot) worth building.
+ 
+ > **Every `flutter drive` number in the 3b results note is contaminated:**
+ > macOS Low Power Mode was on system-wide for the whole session and could not be
+ > turned off. CPU-only paths are unaffected; build and raster columns at 500k
+ > entities are elevated 4–12×. **Any future `flutter drive` note must state
+ > whether Low Power Mode was on.**
+ 
+ ---
+ 
+ ## In flight: Plan 3c — text
+@@ -332,24 +338,25 @@ shipping text to an application and has no owner:
+    error**. Out of 3c's scope: the plan specifies the seam, not who plugs it in.
+ 2. **Two paragraph caches, not one.** The painter takes metrics from
+    `document.textMeasurer`, the sink lays out through `DraftCanvas`'s own. A
+    text leaf costs up to two layouts, and the query path pays for text even
+    into a `NullDrawSink` — **+97 ms** at 50k, **+105 ms** at 500k, whole
+    drawing.
+ 3. **The allocation gate measures the engine helpers, not the painter.**
+    `text_paint_allocation_test.dart` is in the engine suite because
+    `jet_cad_2d_flutter` has no `vm_service`. Closing it means moving
+    `AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
+-4. **Whole-drawing thrash → 3e's text LOD.** 4,140 layouts and 4,140 evictions
++4. **Whole-drawing thrash → the picture cache's text LOD (Plan 3f).** 4,140
++   layouts and 4,140 evictions
+    per frame, and it is 4,140 at *both* 50k and 500k because it is bounded by
+-   string variety rather than entity count. A bigger cache holds one zoom level
+-   of one corpus; not drawing text too small to read removes the cost.
++   string variety rather than entity count. A bigger cache holds one zoom
++   level of one corpus; not drawing text too small to read removes the cost.
+ 5. `snap at dirty threshold` p95 1.08 ms against < 1.0 ms — carried from Plan 2.
+ 6. `DocumentTree._link` is quadratic in a parent's child count, which is why
+    the rigs cap `instanceCount` at 20,000 — recorded in Plan 3b.
+ 
+ ---
+ 
+ ## Rulings that still bind future work
+ 
+ Plan 3c's ledger carries 56 numbered rulings, archived in full at
+ [docs/superpowers/ledgers/](docs/superpowers/ledgers/). These are the ones that
+@@ -517,33 +524,38 @@ degenerate assertion collapsing it to one label would silently void the gate.
+ | evictions per repeat frame, working-set camera | **zero** |
+ | peak live paragraphs | ≤ the declared limit |
+ | `skippedTextCount` on `textRigCorpus` | **0** |
+ | differential and non-vacuity, text on | pass |
+ | reference-query differential, text picking | pass |
+ | overlay-equals-rebuild for an edited text | pass |
+ | mutation log | every mutant killed or argued equivalent |
+ 
+ **If a failable row misses: record it and stop.** Plan 3b's Task 4 stop clause
+ is the precedent — a row that fires is a result. Write the number, say what it
+-implies for 3d and 3e, and stop rather than tuning until it complies.
++implies for fills and the picture cache (**3e and 3f** under the current
++numbering; 3c's own plan text called them 3d and 3e), and stop rather than
++tuning until it complies.
+ 
+ The results note must state **whether macOS Low Power Mode was on**.
+ 
+ ---
+ 
+ ## Roadmap after 3d
+ 
+ **Renumbered.** The vertices sink took the `3d` slot, so the two plans below
+ moved up one: **fills is 3e** and **the picture cache is 3f**. That is the
+ numbering the Plan 3d design document uses in "What 3d owes the plans after it",
+-and it is the numbering the rest of this file uses. Older notes written before
+-2026-08-20 call fills "3d" and the cache "3e"; read those by name, not by number.
++and it is the numbering the rest of this file uses — every `3d`/`3e`/`3f` above
++was swept and corrected, including the picture-cache pointer in the 3b section
++and the text-LOD item in 3c's carry-forward list. **Notes and plan documents
++written before 2026-08-20 still call fills "3d" and the cache "3e"; read those
++by name, not by number.**
+ 
+ ### Plan 3e — fills
+ 
+ **It inherits no mechanism from 3b.** The 3b design's "flush contract" — a fill
+ flushing open draw buckets — has nothing to attach to, because batching was
+ reverted — but 3d's vertices sink supersedes that concern entirely: **3e
+ inherits a triangle buffer already appended to in draw order, and a flush that
+ already happens before anything unbatchable.** `_flushBeforeUnbatchable` is the
+ shape any fill-flush contract extends.
+ 
+diff --git a/docs/superpowers/notes/2026-08-21-plan-3d-results.md b/docs/superpowers/notes/2026-08-21-plan-3d-results.md
+index 58264d4..044d333 100644
+--- a/docs/superpowers/notes/2026-08-21-plan-3d-results.md
++++ b/docs/superpowers/notes/2026-08-21-plan-3d-results.md
+@@ -283,22 +283,24 @@ return immediately — no geometry at all — left `text_ladder_1` and `_2`
+ **green**. The fix rasterizes at device resolution, which is what Impeller does;
+ the negative control now turns **all 14** vertices goldens red.
+ 
+ **A rationale that is now void and must not be repeated.** Task 10 justified
+ keeping the 14 canvas goldens partly as "canvas is the web renderer, so they
+ stop testing code nothing draws through." That reason died with the web
+ default flip: **no platform defaults to canvas now.** The goldens still earn
+ their place, for a different and correct reason — `CanvasDrawSink` is not dead
+ code. `DraftCanvasState._attach` constructs
+ `VerticesDrawSink(..., fallback: sink)`, and the vertices runs show
+-`canvasCalls=19` (10k) and `canvasCalls=24` (50k): it draws text and fallbacks
+-on every frame.
++`canvasCalls=19` (10k) and `canvasCalls=24` (50k) **on web** — the desktop
++control table above shows the same thing at 18 and 23, the small difference
++being the different viewport, not a different behaviour. Either way
++`CanvasDrawSink` draws text and fallbacks on every frame.
+ 
+ ### Criterion 5 — 10,000 entities under 16.67 ms
+ 
+ Desktop, macOS profile, R2 pan/zoom, 242 frames, vertices backend, three runs:
+ 
+ | run | build p50 | raster p50 |
+ |---|---|---|
+ | 1 | 5.81 ms | 6.63 ms |
+ | 2 | 5.67 ms | 6.68 ms |
+ | 3 | 5.71 ms | 6.75 ms |
+@@ -757,28 +759,42 @@ committed path on this machine.** They ran under:
+ Running the shipped `RUN_R2` mode exactly as its doc comment describes produces
+ **no output whatsoever** here, because `flutter run -d chrome --profile` never
+ links a debug service on this machine. That gap is the reason the workaround
+ existed. A published row nobody can re-take is a number nobody can check, so the
+ artifacts are committed beside this note:
+ 
+ `docs/superpowers/notes/2026-08-21-plan-3d-web-raw/`
+ 
+ | file | what it is |
+ |---|---|
+-| `web_rows.log` | the raw retrieved blocks — the source of every figure in the web table |
++| `web_rows.log` | **ten of the twelve run blocks**, as the app printed them and the poller retrieved them. The other two — 10,000-entity run 1 on each backend — are appended to the same file under `RECOVERED BLOCKS`, **reconstructed from the Task 13 report rather than captured**, with the three fields that could not be recovered marked `<not recovered>`. See the note below the table. |
+ | `run_web_r2.sh` | the driver: launches `flutter run -d chrome --profile`, waits for the CLI banner, finds Chrome's `--remote-debugging-port` from `ps aux`, calls the poller, cleans up |
+ | `cdp_poll_generic.py` | the retrieval: one `Runtime.evaluate("window.localStorage.getItem('r2Result')")` over a CDP websocket, polled every 2 s, `returnByValue`, no scraping and no fragment assembly |
+ | `main.dart.pre-diag` | the harness `main.dart` **as backed up with `cp` before the run-time edits** — it carries that session's diagnostic `print()` lines but **not** the `runZoned`/localStorage capture |
+ 
+-**The exact `main.dart` that ran is not among them.** `main.dart.pre-diag` is
+-the restore point, not the run-time file. The `runZoned` capture survives only
+-as the code excerpt in the Task 13 report, which is archived with this plan's
++**Two of the twelve web runs were never captured to `web_rows.log`.** They are
++10,000-entity run 1 on each backend, and they survive only in the Task 13
++report, whose transcripts are reflowed rather than verbatim. They are now
++appended to `web_rows.log` as clearly-labelled reconstructions so that no
++published figure rests on a file that will be deleted with this worktree — but
++a reconstruction is not a capture and the file says so at both ends. The one
++published figure this affects is the **upper endpoint of the web 10,000 canvas
++build interval, `[117.10, 122.20]`**: `122.20` is a reconstructed number. It
++does not move the median (117.80); it does set the published spread of 5.10 ms.
++Also note that the run ordinals in `web_rows.log`'s ten captured headers were
++typed by the operator and **do not line up with the report's run numbering** —
++the file's own header explains which is which, and nothing published depends on
++the ordering, only on the set of three.
++
++**The exact `main.dart` that ran is not among the artifacts either.**
++`main.dart.pre-diag` is the restore point, not the run-time file. The
++`runZoned` capture survives only as the code excerpt in the Task 13 report, which is archived with this plan's
+ ledger. Anyone reproducing these rows must re-write that wrapper from the
+ excerpt.
+ 
+ **Two further caveats on the absolute web figures.** Every measured run
+ executed inside that `runZoned` wrapper, which the shipped code does not have —
+ it only buffers `print()` output and forwards it unchanged, and it wrapped both
+ backends identically, so the ratios hold, but the absolute numbers were taken
+ under code that is not the committed code. And
+ `localStorage['r2Result']` was never cleared at startup, so a stale prior-run
+ read was possible in principle; it was not observed — every block's `backend=`
+diff --git a/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/web_rows.log b/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/web_rows.log
+index 58dfdf1..bcd9078 100644
+--- a/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/web_rows.log
++++ b/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/web_rows.log
+@@ -1,10 +1,38 @@
++### PROVENANCE — read this before citing a number from this file.
++
++Twelve web runs were taken (10,000 and 50,000 entities x canvas and vertices x
++3 runs). **Ten of them were captured to this file** by `run_web_r2.sh` +
++`cdp_poll_generic.py`; each is a block below headed `=== ... ===` /
++`=== RETRIEVED ===`, printed by the app itself and retrieved unmodified.
++
++**Two were not**, and they are appended at the end of this file under
++`RECOVERED BLOCKS`, reconstructed from the Task 13 report rather than captured
++here. They are 10,000-entity run 1 on each backend. Their provenance and what
++is missing from them is stated there. They are marked because one of them,
++canvas run 1's `build p50=122.20ms`, is an endpoint of an interval published in
++the results note, and a reader must be able to see that this endpoint is a
++reconstruction and not a capture.
++
++**The `run N` numbers in the ten captured headers below do NOT match the run
++numbers used in the Task 13 report or in the results note.** Specifically, the
++block headed `10000 canvas run 1 (already captured above, repeating cleanly)`
++carries the report's **run 2** figures (117.10 / 79.30), and `10000 canvas
++run 2` carries the report's **run 3** (117.80 / 79.60). The headers were typed
++by the operator during the session; the figures inside them are the app's own
++output. **Trust the figures, not the header's ordinal.** Nothing depends on the
++ordering: every published cell is a median or a min/max over the three runs at
++that corpus size and backend, all of which are present once the two recovered
++blocks are counted.
++
++--------------------------------------------------------------------------
++
+ === 10000 vertices run 2 ===
+ === RETRIEVED ===
+ onReady fired
+ R2 app-run: driving started
+ R2 app-run: window=1200x723 dpr=2
+ R2 (10000) frames=240
+   build  p50=6.90ms p95=7.90ms max=13.10ms
+   raster p50=1.30ms p95=1.70ms max=58.50ms
+   screenSpaceLeafCount=2111 lineweightScale=1
+   dashSpans=50120 collapsed=182 canvasCalls=19
+@@ -201,10 +229,63 @@ R2 (50000) frames=241
+   text: corpus=on draw=on textOps=24 skippedText=0
+   paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+ R2 app-run: done
+ 
+ --- flutter run log tail (diagnostics) ---
+ h List all available interactive commands.
+ d Detach (terminate "flutter run" but leave application running).
+ c Clear the screen
+ q Quit (terminate the application on the device).
+ 
++
++--------------------------------------------------------------------------
++
++### RECOVERED BLOCKS — reconstructed, NOT captured to this file
++
++The two runs below were not written to this file during the session. They
++survive only in the Task 13 report
++(`.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/task-13-report.md`,
++archived to `docs/superpowers/ledgers/` when this branch merges), whose own
++"Corrections" section states that its transcripts are **reflowed, not verbatim**:
++blocks were condensed onto fewer lines for its tables and the identical
++`text:` / `paragraphs:` lines were dropped.
++
++So what follows is a **reconstruction into this file's block shape** of figures
++the app printed, not a byte-for-byte capture. Every number in them comes from
++the report; nothing is computed, interpolated or invented here.
++
++**What is present:** `frames`, `build` p50/p95/max, `raster` p50/p95/max,
++`screenSpaceLeafCount`, `dashSpans`, `collapsed`, `canvasCalls`, `backend`,
++and for the vertices run `triangles` and `drawVerticesCalls`.
++
++**What is missing and cannot be recovered:** the `lineweightScale` field, the
++`text:` line and the `paragraphs:` line. They were dropped by the report's
++reflowing before this file was ever written. Every other block at 10,000
++entities shows `lineweightScale=1`, `textOps=19`, `skippedText=0`,
++`newLayouts=0`, `newEvictions=0`, `live=512` — but that is an inference from
++the neighbours, so those fields are left out rather than filled in. They are
++marked `<not recovered>` below.
++
++**Why this matters to a published figure:** canvas run 1's
++`build p50=122.20ms` is the upper endpoint of the interval `[117.10, 122.20]`
++that the results note publishes for web 10,000 canvas build. It does not move
++the median (117.80). It does set the published spread of 5.10 ms.
++
++=== 10000 vertices run 1 (RECONSTRUCTED from the Task 13 report) ===
++R2 (10000) frames=238
++  build  p50=6.80ms p95=8.20ms max=12.60ms
++  raster p50=1.40ms p95=1.70ms max=56.80ms
++  screenSpaceLeafCount=2111 lineweightScale=<not recovered>
++  dashSpans=50120 collapsed=182 canvasCalls=19
++  backend=vertices triangles=223733 drawVerticesCalls=20
++  text: <not recovered>
++  paragraphs: <not recovered>
++
++=== 10000 canvas run 1 (RECONSTRUCTED from the Task 13 report) ===
++R2 (10000) frames=241
++  build  p50=122.20ms p95=140.10ms max=146.10ms
++  raster p50=79.20ms p95=91.30ms max=388.50ms
++  screenSpaceLeafCount=2111 lineweightScale=<not recovered>
++  dashSpans=50120 collapsed=182 canvasCalls=52897
++  backend=canvas
++  text: <not recovered>
++  paragraphs: <not recovered>

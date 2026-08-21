@@ -1,0 +1,894 @@
+# Review package: aca6d22..HEAD
+
+## Commits
+9031c57 feat: miter and bevel joins, shared by both stroke walks
+
+## Files changed
+ .../lib/src/vertices_draw_sink.dart                | 228 +++++++++++++++++----
+ .../test/invariants/paint_allocation_test.dart     |   2 +-
+ .../test/vertices_differential_test.dart           |  13 +-
+ .../test/vertices_draw_sink_test.dart              |  59 ++++--
+ .../test/vertices_join_test.dart                   | 190 +++++++++++++++++
+ 5 files changed, 430 insertions(+), 62 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+index 7e5a8b9..4cd0afa 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+@@ -50,23 +50,23 @@ import 'draw_sink.dart';
+ /// `CanvasDrawSink._widthFor` divides the device width by the residual's
+ /// `scaleMagnitude`, because `Paint.strokeWidth` is measured in the canvas
+ /// units the residual has already scaled. `scaleMagnitude` is `sqrt(|det|)` —
+ /// one scalar standing in for two axis scales, which is exact only when the
+ /// residual is conformal. This sink takes the perpendicular **after**
+ /// transforming the endpoints, so the half-width is a device-pixel quantity on
+ /// both axes and the approximation is not made at all.
+ ///
+ /// ## What this is not
+ ///
+-/// - **No joins and no caps.** Every segment is an independent quad, so a
+-///   polyline's corners have a notch on the outside. Dash spans are two points
+-///   each and have no corners, which is where the measurement is aimed.
++/// - **No caps, and no seam join on a closed run.** Miter and bevel joins fill
++///   the notch at every open corner; a closed polyline or a full sweep still
++///   draws one segment short of its seam until that lands.
+ /// - **Text goes to [CanvasDrawSink], and the buffer flushes before it.**
+ ///   A paragraph is not triangles. Points, circles and arcs are batched;
+ ///   only text falls back, and flushing first is what keeps a stroke batched
+ ///   before a text op from drawing after it.
+ /// - **Anti-aliasing comes from MSAA, not from a coverage shader.** The SDF
+ ///   path this replaces anti-aliases analytically.
+ /// - **`flutter_test` cannot render it.** The software Skia backend takes
+ ///   minutes on a `drawVertices` that Impeller draws instantly, so the golden
+ ///   suite is not available to this sink.
+ /// - **This sink is authoritative where it disagrees with [CanvasDrawSink].**
+@@ -143,28 +143,45 @@ class VerticesDrawSink implements DrawSink {
+ 
+   /// One paint for the life of the sink, as on [CanvasDrawSink].
+   ///
+   /// It never varies: the colour rides on the vertices, so the only thing the
+   /// paint contributes is its alpha, and that is always opaque.
+   final Paint _paint = Paint()..color = const Color(0xFFFFFFFF);
+ 
+   /// Vertices written, so `_vertices * 2` floats and `_vertices` colours.
+   int _vertices = 0;
+ 
++  // Run state. Fields and not a per-run object, because a `_StrokeRun`
++  // allocated per polyline would put an allocation back on the frame path
++  // that `paint_allocation_test.dart` has just finished pinning at zero.
++  //
++  // `_runFirst*` and `_runSegments` are written here but read only by the
++  // closed branch of `_endRun`, which is Task 5 -- `_endRun` asserts against
++  // reaching it in the meantime, so nothing consumes them yet.
++  // ignore: unused_field
++  double _runFirstX = 0, _runFirstY = 0;
++  // ignore: unused_field
++  double _runFirstDx = 0, _runFirstDy = 0;
++  double _runPrevX = 0, _runPrevY = 0;
++  double _runPrevDx = 0, _runPrevDy = 0;
++  bool _runHasDirection = false;
++  // ignore: unused_field
++  int _runSegments = 0;
++
+   Transform2 _residual = Transform2.identity();
+ 
+   int _segments = 0;
+   int _flushCalls = 0;
+   int _lastFlushSegments = 0;
+   int _lastFlushVertices = 0;
+   int _totalFlushes = 0;
+-  int _frameSegments = 0;
++  int _frameTriangles = 0;
+   bool _lastFlushDisposed = false;
+ 
+   /// Segments batched since the last [flush].
+   int get batchedSegmentCount => _segments;
+ 
+   /// Segments the last [flush] submitted. Survives the flush, which
+   /// [batchedSegmentCount] does not, so a rig can read it after the frame.
+   int get lastFlushSegmentCount => _lastFlushSegments;
+ 
+   /// `drawVertices` calls the last [flush] issued: one, or none when the frame
+@@ -172,30 +189,36 @@ class VerticesDrawSink implements DrawSink {
+   int get flushCallCount => _flushCalls;
+ 
+   /// `drawVertices` calls issued since [resetCounters], including the
+   /// mid-frame ones an unbatchable op forces.
+   ///
+   /// [flushCallCount] reports the *last* flush alone, which is one or none.
+   /// With text in the corpus a frame flushes many times, so this is the number
+   /// a rig should print beside `CanvasDrawSink.canvasCallCount`.
+   int get totalFlushCount => _totalFlushes;
+ 
+-  /// Segments emitted since [resetCounters], across every flush in the frame.
++  /// Triangles emitted since [resetCounters], across every flush in the
++  /// frame -- a quad's own two and a join's one or two, both counted
++  /// individually, so this equals `debugPositions().length ~/ 6` for the
++  /// frame as a whole.
+   ///
+-  /// [batchedSegmentCount] and [lastFlushSegmentCount] are both per-flush, so
+-  /// neither is the frame's total once a mid-frame flush has happened.
+-  int get frameSegmentCount => _frameSegments;
++  /// Named `frameSegmentCount` before joins existed, when a quad's two
++  /// triangles and "one segment" were the same count. [batchedSegmentCount]
++  /// and [lastFlushSegmentCount] are both per-flush and both still count
++  /// quads, not triangles; neither is the frame's total once a mid-frame
++  /// flush has happened.
++  int get frameTriangleCount => _frameTriangles;
+ 
+   /// Zeroes the frame counters. The buffer and its capacity are untouched.
+   void resetCounters() {
+     _totalFlushes = 0;
+-    _frameSegments = 0;
++    _frameTriangles = 0;
+   }
+ 
+   /// Vertices the last [flush] actually handed to `drawVertices`.
+   ///
+   /// Read from the view that was submitted rather than from the counter, so a
+   /// flush that rewinds before it submits reports the empty buffer it drew
+   /// rather than the full one it meant to.
+   int get lastFlushVertexCount => _lastFlushVertices;
+ 
+   /// Whether the last [flush] disposed the `Vertices` it submitted.
+@@ -244,45 +267,146 @@ class VerticesDrawSink implements DrawSink {
+       {required bool closed}) {
+     if (count < 2) return;
+     final half = _halfWidthFor(style.lineweightHundredths);
+     final argb = _coveredArgb(style.argb, style.lineweightHundredths);
+ 
+     final a = _residual.a, b = _residual.b, c = _residual.c;
+     final d = _residual.d, e = _residual.e, f = _residual.f;
+ 
+     // The transform is applied once per point rather than once per segment:
+     // each point is the end of one segment and the start of the next.
+-    var px = a * points[0] + c * points[1] + e;
+-    var py = b * points[0] + d * points[1] + f;
+-    final firstX = px, firstY = py;
+-
++    final px = a * points[0] + c * points[1] + e;
++    final py = b * points[0] + d * points[1] + f;
++    _beginRun(px, py);
+     for (var i = 1; i < count; i++) {
+       final qx = a * points[i * 2] + c * points[i * 2 + 1] + e;
+       final qy = b * points[i * 2] + d * points[i * 2 + 1] + f;
+-      _emitSegment(px, py, qx, qy, half, argb);
+-      px = qx;
+-      py = qy;
++      _runTo(qx, qy, half, argb);
+     }
+-    if (closed) _emitSegment(px, py, firstX, firstY, half, argb);
++    _endRun(closed: false, half: half, argb: argb);
++    // The spike's closing segment moves to Task 5 with its seam join, so a
++    // closed polyline draws one segment short until then. No caller reaches
++    // it: `closed:` is `false` at all four of the painter's call sites, and
++    // the one unit test that passes `closed: true` moves to Task 5 with it.
+   }
+ 
+-  /// Two triangles, `(A, B, C)` and `(B, D, C)`, around the segment.
+-  void _emitSegment(
+-      double x0, double y0, double x1, double y1, double half, int argb) {
+-    final dx = x1 - x0, dy = y1 - y0;
++  /// Starts a connected run at a device-space point.
++  void _beginRun(double x, double y) {
++    _runFirstX = x;
++    _runFirstY = y;
++    _runPrevX = x;
++    _runPrevY = y;
++    _runHasDirection = false;
++    _runSegments = 0;
++  }
++
++  /// Extends the run to a device-space point, emitting the join first.
++  ///
++  /// The join comes before the segment so the buffer's order is the drawing's
++  /// order: at a corner the ink nearer the start of the run is written first.
++  void _runTo(double x, double y, double half, int argb) {
++    final dx = x - _runPrevX, dy = y - _runPrevY;
+     final length = math.sqrt(dx * dx + dy * dy);
+-    // A zero-length segment has no direction to take a normal from. `Canvas`
+-    // would draw a cap-shaped dot here; a quad would be NaN.
++    // A repeated point carries no direction. Skip the step, keep the previous
++    // direction, and let the join span it — the corner is still there.
+     if (length == 0) return;
++    final ux = dx / length, uy = dy / length;
++
++    if (_runHasDirection) {
++      _emitJoin(
++          _runPrevX, _runPrevY, _runPrevDx, _runPrevDy, ux, uy, half, argb);
++    } else {
++      _runFirstDx = ux;
++      _runFirstDy = uy;
++    }
++    _emitQuad(_runPrevX, _runPrevY, x, y, ux, uy, half, argb);
++
++    _runPrevX = x;
++    _runPrevY = y;
++    _runPrevDx = ux;
++    _runPrevDy = uy;
++    _runHasDirection = true;
++    _runSegments++;
++  }
+ 
+-    final nx = -dy / length * half;
+-    final ny = dx / length * half;
++  /// Ends the run.
++  ///
++  /// An open run gets butt caps, which is to say nothing at all. The closed
++  /// case — a closing segment and a seam join — is Task 5; it asserts here so
++  /// a caller that reaches it before then fails loudly rather than silently
++  /// dropping the closing segment the spike used to emit.
++  void _endRun(
++      {required bool closed, required double half, required int argb}) {
++    assert(!closed, 'closed runs arrive in Task 5');
++  }
++
++  /// Fills the notch at a vertex between two unit directions.
++  ///
++  /// The notch is the quadrilateral `(V, A, M, B)` — vertex, outer corner of
++  /// the incoming segment, miter point, outer corner of the outgoing one — so
++  /// a miter is **two** triangles: the bevel `(V, A, B)` and the tip
++  /// `(A, M, B)`. The tip alone leaves a hairline crack along `AB`.
++  void _emitJoin(double vx, double vy, double d0x, double d0y, double d1x,
++      double d1y, double half, int argb) {
++    final cross = d0x * d1y - d0y * d1x;
++    // Collinear: either straight through, where the quads already meet, or a
++    // reversal, where both the miter and the bevel are degenerate.
++    if (cross == 0) return;
++
++    // The outer side of the turn is the one away from it: a left turn
++    // (cross > 0) opens a notch on the right.
++    final s = cross > 0 ? -half : half;
++    final n0x = -d0y * s, n0y = d0x * s;
++    final n1x = -d1y * s, n1y = d1x * s;
++    final ax = vx + n0x, ay = vy + n0y;
++    final bx = vx + n1x, by = vy + n1y;
++
++    _emitTriangle(vx, vy, ax, ay, bx, by, argb);
++
++    if (d0x * d1x + d0y * d1y < kMinMiterCosine) return;
++
++    var mx = n0x + n1x, my = n0y + n1y;
++    final mlen = math.sqrt(mx * mx + my * my);
++    if (mlen == 0) return;
++    mx /= mlen;
++    my /= mlen;
++    // `n0` has length `half`, so this is the cosine of half the included angle.
++    final cosHalf = (mx * n0x + my * n0y) / half;
++    if (cosHalf <= 0) return;
++    final reach = half / cosHalf;
++    _emitTriangle(ax, ay, vx + mx * reach, vy + my * reach, bx, by, argb);
++  }
++
++  /// Writes one triangle, six floats and three colours.
++  void _emitTriangle(double ax, double ay, double bx, double by, double cx,
++      double cy, int argb) {
++    _reserve(3);
++    final v = _positions;
++    var i = _vertices * 2;
++    v[i++] = ax;
++    v[i++] = ay;
++    v[i++] = bx;
++    v[i++] = by;
++    v[i++] = cx;
++    v[i++] = cy;
++    final colors = _colors;
++    for (var k = _vertices; k < _vertices + 3; k++) {
++      colors[k] = argb;
++    }
++    _vertices += 3;
++    _frameTriangles++;
++  }
++
++  /// Two triangles around a segment whose unit direction is already known.
++  void _emitQuad(double x0, double y0, double x1, double y1, double ux,
++      double uy, double half, int argb) {
++    final nx = -uy * half, ny = ux * half;
+ 
+     _reserve(6);
+     final v = _positions;
+     var i = _vertices * 2;
+     v[i++] = x0 + nx;
+     v[i++] = y0 + ny;
+     v[i++] = x0 - nx;
+     v[i++] = y0 - ny;
+     v[i++] = x1 + nx;
+     v[i++] = y1 + ny;
+@@ -292,41 +416,63 @@ class VerticesDrawSink implements DrawSink {
+     v[i++] = y1 - ny;
+     v[i++] = x1 + nx;
+     v[i++] = y1 + ny;
+ 
+     final colors = _colors;
+     for (var k = _vertices; k < _vertices + 6; k++) {
+       colors[k] = argb;
+     }
+     _vertices += 6;
+     _segments++;
+-    _frameSegments++;
++    _frameTriangles += 2;
++  }
++
++  /// Two triangles around a segment, taking its direction from its endpoints.
++  void _emitSegment(
++      double x0, double y0, double x1, double y1, double half, int argb) {
++    final dx = x1 - x0, dy = y1 - y0;
++    final length = math.sqrt(dx * dx + dy * dy);
++    // A zero-length segment has no direction to take a normal from. `Canvas`
++    // would draw a cap-shaped dot here; a quad would be NaN.
++    if (length == 0) return;
++    _emitQuad(x0, y0, x1, y1, dx / length, dy / length, half, argb);
+   }
+ 
+   void _reserve(int moreVertices) {
+     if (_vertices + moreVertices <= _colors.length) return;
+     var capacity = _colors.length;
+     while (capacity < _vertices + moreVertices) {
+       capacity *= 2;
+     }
+     final positions = Float32List(capacity * 2);
+     positions.setRange(0, _vertices * 2, _positions);
+     _positions = positions;
+     final colors = Int32List(capacity);
+     colors.setRange(0, _vertices, _colors);
+     _colors = colors;
+   }
+ 
+   /// Impeller's thinnest line, in device pixels: `kMinStrokeSize` from
+   /// `impeller/entity/geometry/geometry.h`.
+   static const double kMinStrokeDevicePixels = 1.0;
+ 
++  /// Flutter's default miter limit (`painting.dart:1535`).
++  static const double kMiterLimit = 4.0;
++
++  /// The cosine of the direction change at which a miter becomes a bevel.
++  ///
++  /// Impeller's own conversion of the limit: `2 * (1 / limit)^2 - 1`
++  /// (`stroke_path_geometry.cc:442`). At a limit of 4 that is -0.875, so a
++  /// corner is mitred up to about a 151-degree turn and bevelled past it.
++  static const double kMinMiterCosine =
++      2.0 * (1.0 / kMiterLimit) * (1.0 / kMiterLimit) - 1.0;
++
+   /// Half the stroke's width, in the logical pixels the buffer is in.
+   ///
+   /// Mirrors `LineGeometry::ComputePixelHalfWidth`: the width is clamped in
+   /// device space, never in logical space, so the same lineweight draws the
+   /// same line on a retina display and an external monitor.
+   double _halfWidthFor(int lineweightHundredths) {
+     final logical =
+         lineweightHundredths / 100.0 * pixelsPerPaperMm * lineweightScale;
+     final floorLogical = kMinStrokeDevicePixels / devicePixelRatio;
+     final w =
+@@ -463,38 +609,34 @@ class VerticesDrawSink implements DrawSink {
+ 
+     final theta = sweep.abs();
+     final ideal =
+         (theta * math.sqrt(deviceRadius / (8 * kFlattenTolerance))).ceil();
+     final steps = ideal.clamp(1, kMaxFlattenSegments);
+ 
+     final half = _halfWidthFor(style.lineweightHundredths);
+     final argb = _coveredArgb(style.argb, style.lineweightHundredths);
+     final step = sweep / steps;
+ 
+-    var angle = start;
+-    var px = t.a * (cx + r * math.cos(angle)) +
+-        t.c * (cy + r * math.sin(angle)) +
+-        t.e;
+-    var py = t.b * (cx + r * math.cos(angle)) +
+-        t.d * (cy + r * math.sin(angle)) +
+-        t.f;
++    var lx = cx + r * math.cos(start);
++    var ly = cy + r * math.sin(start);
++    _beginRun(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f);
+     for (var i = 1; i <= steps; i++) {
+-      angle = start + step * i;
+-      final lx = cx + r * math.cos(angle);
+-      final ly = cy + r * math.sin(angle);
+-      final qx = t.a * lx + t.c * ly + t.e;
+-      final qy = t.b * lx + t.d * ly + t.f;
+-      _emitSegment(px, py, qx, qy, half, argb);
+-      px = qx;
+-      py = qy;
++      final angle = start + step * i;
++      lx = cx + r * math.cos(angle);
++      ly = cy + r * math.sin(angle);
++      _runTo(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f, half, argb);
+     }
+-    // `closed` is documentation here rather than a branch: a full sweep already
+-    // lands the last chord on the first point.
++    _endRun(closed: false, half: half, argb: argb);
++    // `closed` is documentation here rather than a branch: a full sweep
++    // already lands the last chord on the first point. A full sweep's last
++    // sample is its first point, so the run closes itself geometrically and
++    // the seam is still unjoined -- that is Task 5's, and `closed: false`
++    // above says so rather than pretending otherwise.
+     assert(!closed || (sweep - 2 * math.pi).abs() < 1e-9);
+   }
+ 
+   @override
+   void text(String text, Handle style, ResolvedStyle resolved) {
+     _flushBeforeUnbatchable();
+     _fallback?.text(text, style, resolved);
+   }
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart b/packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart
+index b30071f..a128d5e 100644
+--- a/packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart
++++ b/packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart
+@@ -63,21 +63,21 @@ void main() {
+ 
+     // The subject frame. Flushes are counted, not assumed: the assertion below
+     // is in units of flushes, so a frame that stopped flushing would make it
+     // vacuous.
+     sink.resetCounters();
+     painter.paint(sink, camera, _viewport);
+     sink.flush();
+ 
+     expect(sink.totalFlushCount, greaterThan(0),
+         reason: 'nothing was flushed, so nothing was measured');
+-    expect(sink.frameSegmentCount, greaterThan(1000),
++    expect(sink.frameTriangleCount, greaterThan(1000),
+         reason: 'a degenerate corpus would make the bound meaningless');
+ 
+     // The buffer must not have grown in the subject frame. Growth is the one
+     // O(entities) allocation this sink can make, and it is the one the
+     // steady-state claim is about.
+     //
+     // MUTATION: drop `_reserve`'s capacity-sufficiency guard and
+     // unconditionally double, so every segment regrows the buffer instead of
+     // only a call that needs more room. `debugCapacityVertices` no longer
+     // holds still between the two reads -- it compounds every segment of the
+diff --git a/packages/jet_cad_2d_flutter/test/vertices_differential_test.dart b/packages/jet_cad_2d_flutter/test/vertices_differential_test.dart
+index adc9874..7afcf1e 100644
+--- a/packages/jet_cad_2d_flutter/test/vertices_differential_test.dart
++++ b/packages/jet_cad_2d_flutter/test/vertices_differential_test.dart
+@@ -44,24 +44,31 @@ void main() {
+     // The other direction, and against the *painter's* ops rather than the
+     // reference's: the painter is a superset of the reference by design, so
+     // reference ops cannot bound what the sink is allowed to draw. What the
+     // painter handed the sink can.
+     final doc = differentialFixture();
+     final camera = ViewportTransform.fit(doc.extents, kViewport);
+     final ops = paintToRecording(doc, camera);
+ 
+     expectNoStrayInk(paintToVertices(doc, camera), inkSamples(ops),
+         // Half a sample spacing to reach the primitive between two samples,
+-        // plus the widest stroke's own half-width to reach its edge from the
+-        // centreline, plus the chord sag of the coarsest curve.
++        // plus the widest stroke's own half-width scaled up for a join's own
++        // reach, plus the chord sag of the coarsest curve.
++        //
++        // A join's centroid is the average of three points: the two segments'
++        // own half-width corners (each `half` from the vertex) and the miter
++        // tip, which -- since a corner past `kMinMiterCosine` bevels instead
++        // -- reaches out no further than `half * kMiterLimit`. The vertex
++        // itself sits on the primitive, so `half * (2 + kMiterLimit) / 3`
++        // bounds a join triangle's excess over the plain stroke edge.
+         slackPx: kSampleSpacingPx / 2 +
+-            widestHalfStroke(ops) +
++            widestHalfStroke(ops) * (2 + VerticesDrawSink.kMiterLimit) / 3 +
+             VerticesDrawSink.kFlattenTolerance);
+   });
+ 
+   test('the comparison is not vacuous', () {
+     // A coverage assertion passes trivially against an empty sample set, and a
+     // stray-ink assertion passes trivially against an empty sink. Both sides
+     // are pinned here so neither can go quiet without a test going red.
+     final doc = differentialFixture();
+     final camera = ViewportTransform.fit(doc.extents, kViewport);
+     final samples = inkSamples(referenceToRecording(doc, camera));
+diff --git a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+index 17c8717..3bf7cf2 100644
+--- a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
++++ b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+@@ -88,37 +88,44 @@ void main() {
+     expect(h[1] - h[3], closeTo(1.0, 1e-12), reason: 'horizontal width');
+ 
+     final vertical = _sink()
+       ..beginResidual(t)
+       ..polyline(_seg(0, 0, 0, 10), 2, _style(), closed: false)
+       ..endResidual();
+     final w = vertical.debugPositions();
+     expect(w[2] - w[0], closeTo(1.0, 1e-12), reason: 'vertical width');
+   });
+ 
+-  test('a polyline of n points emits n-1 segments, and closed adds one more',
++  test('a polyline of n points emits n-1 segments plus a join at each corner',
+       () {
++    // 2 segments are 4 triangles; the one corner between them turns a right
++    // angle, well inside the miter limit, so `_emitJoin` adds a bevel and a
++    // tip triangle -- 6 triangles, 36 floats, in total.
+     final open = _sink()
+       ..beginResidual(Transform2.identity())
+       ..polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, _style(),
+           closed: false)
+       ..endResidual();
+-    expect(open.debugPositions().length, 2 * 6 * 2);
+-
+-    final closed = _sink()
+-      ..beginResidual(Transform2.identity())
+-      ..polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, _style(),
+-          closed: true)
+-      ..endResidual();
+-    expect(closed.debugPositions().length, 3 * 6 * 2);
++    expect(open.debugPositions().length, 6 * 6);
+   });
+ 
++  // The `closed: true` half of this test -- a closing segment and the seam
++  // join at its corner -- moves to Task 5, which implements `_endRun`'s
++  // closed branch. `_endRun` asserts `!closed` until then, so a caller that
++  // reached it here would fail loudly rather than silently drawing one
++  // segment short; no caller does, since `closed:` is `false` at every one of
++  // the painter's four call sites.
++  test(
++      'a closed polyline gets a closing segment and a seam join',
++      skip: 'Task 5: _endRun\'s closed branch',
++      () {});
++
+   test('colour rides on the vertices, so one buffer carries every colour', () {
+     final sink = _sink()..beginResidual(Transform2.identity());
+     sink.polyline(_seg(0, 0, 10, 0), 2, _style(argb: 0xFFFF0000),
+         closed: false);
+     // Different lineweight as well as different colour: the width is already
+     // spent on the triangles, so it cannot split anything either.
+     sink.polyline(
+         _seg(0, 5, 10, 5), 2, _style(argb: 0xFF00FF00, lineweight: 50),
+         closed: false);
+     sink.endResidual();
+@@ -314,41 +321,58 @@ void main() {
+       ..endResidual();
+     final v = sink.debugPositions();
+     final dx = v[0] - v[2], dy = v[1] - v[3];
+     // 1e-6, not the 1e-12 the axis-aligned cases use: the buffer is
+     // `Float32List`, and a 45-degree normal is the first value here that is
+     // not exactly representable in it.
+     expect(math.sqrt(dx * dx + dy * dy), closeTo(1.0, 1e-6));
+   });
+ }
+ 
+-/// Centre of the segment that starts at vertex [seg] * 6.
++/// Every corner an arc or circle flattens into turns by a small angle -- well
++/// inside the miter limit -- so `_emitJoin` writes exactly two triangles
++/// between every pair of quads: the stride from one chord's quad to the
++/// next's is 4 triangles (24 floats), not 2, because a join sits in between.
++/// Checked once per fixture below rather than assumed, so a fixture that ever
++/// crossed the miter limit or went collinear would fail loudly here instead
++/// of reading the wrong floats silently.
++void _expectUniformMiterStride(VerticesDrawSink sink) {
++  final segments = sink.batchedSegmentCount;
++  final triangles = sink.debugPositions().length ~/ 6;
++  expect(triangles, 4 * segments - 2,
++      reason: 'every corner between the $segments chords is expected to '
++          'stay well inside the miter limit, so _startCentre/_endCentre\'s '
++          'fixed stride of 4 triangles per chord applies');
++}
++
++/// Centre of the segment that starts at vertex [seg] * 24.
+ (double, double) _startCentre(Float32List v, int seg) {
+-  final i = seg * 12;
++  final i = seg * 24;
+   return ((v[i] + v[i + 2]) / 2, (v[i + 1] + v[i + 3]) / 2);
+ }
+ 
+ (double, double) _endCentre(Float32List v, int seg) {
+-  final i = seg * 12;
++  final i = seg * 24;
+   return ((v[i + 4] + v[i + 8]) / 2, (v[i + 5] + v[i + 9]) / 2);
+ }
+ 
+ void _arcTests() {
+   test('an arc is flattened, and its ends sit on the arc', () {
+     final sink = _sink()
+       ..beginResidual(Transform2.identity())
+       ..arc(0, 0, 10, 0, math.pi / 2, _style())
+       ..endResidual();
+ 
+     final v = sink.debugPositions();
+     final segments = sink.batchedSegmentCount;
+     expect(segments, greaterThan(1), reason: 'a quarter arc is not one chord');
++    _expectUniformMiterStride(sink);
+ 
+     final (sx, sy) = _startCentre(v, 0);
+     expect(sx, closeTo(10, 1e-4), reason: 'start x');
+     expect(sy, closeTo(0, 1e-4), reason: 'start y');
+ 
+     final (ex, ey) = _endCentre(v, segments - 1);
+     expect(ex, closeTo(0, 1e-4), reason: 'end x');
+     expect(ey, closeTo(10, 1e-4), reason: 'end y');
+   });
+ 
+@@ -360,20 +384,21 @@ void _arcTests() {
+     //
+     // MUTATION: replace the segment count with a constant 8, and r = 500 reads
+     // about 12 pixels of sag against a budget of 0.25.
+     for (final r in <double>[5, 50, 500]) {
+       final sink = _sink()
+         ..beginResidual(Transform2.identity())
+         ..arc(0, 0, r, 0.3, math.pi, _style())
+         ..endResidual();
+       final v = sink.debugPositions();
+       final segments = sink.batchedSegmentCount;
++      _expectUniformMiterStride(sink);
+       var worst = 0.0;
+       for (var s = 0; s < segments; s++) {
+         final (sx, sy) = _startCentre(v, s);
+         final (ex, ey) = _endCentre(v, s);
+         final mx = (sx + ex) / 2, my = (sy + ey) / 2;
+         worst = math.max(worst, (r - math.sqrt(mx * mx + my * my)).abs());
+       }
+       expect(worst, lessThan(VerticesDrawSink.kFlattenTolerance),
+           reason: 'r=$r used $segments segments');
+     }
+@@ -395,20 +420,21 @@ void _arcTests() {
+ 
+   test('a non-uniform residual turns a circle into an ellipse', () {
+     // Degenerate-fixture guard: flattening in device space from one radius
+     // would draw a circle here, which is what `Canvas` would not do either.
+     const t = Transform2(3, 0, 0, 1, 0, 0);
+     final sink = _sink()
+       ..beginResidual(t)
+       ..circle(0, 0, 10, _style())
+       ..endResidual();
+     final v = sink.debugPositions();
++    _expectUniformMiterStride(sink);
+     var maxX = 0.0, maxY = 0.0;
+     for (var s = 0; s < sink.batchedSegmentCount; s++) {
+       final (x, y) = _startCentre(v, s);
+       maxX = math.max(maxX, x.abs());
+       maxY = math.max(maxY, y.abs());
+     }
+     expect(maxX, closeTo(30, 0.3));
+     expect(maxY, closeTo(10, 0.3));
+   });
+ 
+@@ -440,20 +466,21 @@ void _arcTests() {
+     expect(minY, closeTo(203.5, 1e-12));
+     expect(maxY, closeTo(204.5, 1e-12));
+   });
+ 
+   test('a circle closes on itself', () {
+     final sink = _sink()
+       ..beginResidual(Transform2.identity())
+       ..circle(0, 0, 10, _style())
+       ..endResidual();
+     final v = sink.debugPositions();
++    _expectUniformMiterStride(sink);
+     final (sx, sy) = _startCentre(v, 0);
+     final (ex, ey) = _endCentre(v, sink.batchedSegmentCount - 1);
+     expect(ex, closeTo(sx, 1e-4));
+     expect(ey, closeTo(sy, 1e-4));
+   });
+ 
+   test('an unbatchable op flushes first, so draw order holds across it', () {
+     // Text cannot become triangles, so it goes to the fallback -- and it must
+     // not jump ahead of every stroke batched before it.
+     //
+@@ -464,26 +491,28 @@ void _arcTests() {
+     final sink = _sink(canvas: canvas)..beginResidual(Transform2.identity());
+     sink.polyline(_seg(0, 0, 10, 0), 2, _style(), closed: false);
+     sink.text('x', ReservedHandles.standardTextStyle, _style());
+     sink.polyline(_seg(0, 5, 10, 5), 2, _style(), closed: false);
+     sink.endResidual();
+     sink.flush();
+ 
+     expect(sink.totalFlushCount, 2,
+         reason: 'one flush before the text, one at the end of the frame');
+     // Per-flush counters cannot see past the mid-frame flush; the frame
+-    // counter is what a rig prints.
++    // counter is what a rig prints. Each `polyline` call here is its own
++    // run -- no join between them, since they are two separate calls -- so
++    // this is 2 quads' own triangles, 4, not the 2 quads themselves.
+     //
+     // MUTATION: report `lastFlushSegmentCount` as the frame total and this
+-    // reads 1, the tail after the text, instead of 2.
++    // reads 1, the tail after the text, instead of 4.
+     expect(sink.lastFlushSegmentCount, 1);
+-    expect(sink.frameSegmentCount, 2);
++    expect(sink.frameTriangleCount, 4);
+     recorder.endRecording().dispose();
+   });
+ }
+ 
+ void _widthTests() {
+   // `CanvasDrawSink` hands `Canvas` a width and lets Impeller apply two rules
+   // to it, both in *device* space and neither reachable from Dart. Baking the
+   // transform into the positions means this sink has to apply them itself, or
+   // it draws a visibly different line from its sibling.
+   //
+diff --git a/packages/jet_cad_2d_flutter/test/vertices_join_test.dart b/packages/jet_cad_2d_flutter/test/vertices_join_test.dart
+new file mode 100644
+index 0000000..2335205
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/vertices_join_test.dart
+@@ -0,0 +1,190 @@
++// Joins. Every case here is at a lineweight where the corner is several pixels
++// across, because a join is invisible at a hairline and most of a CAD drawing
++// is hairlines — a fixture at the shipped corpus's widths would pass with the
++// join code deleted.
++
++import 'dart:math' as math;
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/src/vertices_draw_sink.dart';
++
++/// 1.0 mm at 4 px/mm is 4 logical pixels, so the half-width is 2 and every
++/// expected coordinate below is exact in binary.
++const _lw = 100;
++const _pxPerMm = 4.0;
++const _half = 2.0;
++
++ResolvedStyle _style({int argb = 0xFF000000}) => ResolvedStyle(
++      argb: argb,
++      lineweightHundredths: _lw,
++      linetype: ReservedHandles.byLayerLinetype,
++      linetypeScale: 1.0,
++    );
++
++VerticesDrawSink _sink() => VerticesDrawSink(pixelsPerPaperMm: _pxPerMm);
++
++Float64List _pts(List<double> xy) => Float64List.fromList(xy);
++
++int _triangleCount(VerticesDrawSink s) => s.debugPositions().length ~/ 6;
++
++/// Whether any emitted triangle contains the point.
++bool _inked(VerticesDrawSink s, double px, double py) {
++  final v = s.debugPositions();
++  for (var i = 0; i + 5 < v.length ~/ 2; i += 3) {
++    final ax = v[i * 2], ay = v[i * 2 + 1];
++    final bx = v[i * 2 + 2], by = v[i * 2 + 3];
++    final cx = v[i * 2 + 4], cy = v[i * 2 + 5];
++    double edge(double x0, double y0, double x1, double y1) =>
++        (x1 - x0) * (py - y0) - (y1 - y0) * (px - x0);
++    final d1 = edge(ax, ay, bx, by);
++    final d2 = edge(bx, by, cx, cy);
++    final d3 = edge(cx, cy, ax, ay);
++    const eps = 1e-2;
++    final neg = d1 < -eps || d2 < -eps || d3 < -eps;
++    final pos = d1 > eps || d2 > eps || d3 > eps;
++    if (!(neg && pos)) return true;
++  }
++  return false;
++}
++
++void main() {
++  test('the miter limit and its cosine are Impellers own', () {
++    // painting.dart:1535 and stroke_path_geometry.cc:442. Written down as a
++    // test so a change to either constant is a red test rather than a drawing
++    // that quietly stops matching CanvasDrawSink.
++    expect(VerticesDrawSink.kMiterLimit, 4.0);
++    expect(VerticesDrawSink.kMinMiterCosine, closeTo(-0.875, 1e-12));
++  });
++
++  test('a right-angle corner is mitred out to the square corner', () {
++    // P(0,0) -> V(10,0) -> Q(10,10) turns left, so the outer side is the right
++    // one and the miter point is the outer corner of the square: (12, -2).
++    // (11.5, -1.5) sits inside that notch and outside both segments' own
++    // quads (quad1 is x in [0,10] x [-2,2], quad2 is x in [8,12] x [0,10]),
++    // so nothing but a correctly-sided join inks it.
++    //
++    // A probe on the *inside* of the turn, e.g. (8, 2), cannot discriminate
++    // this mutation: at exactly 90 degrees the wrong-side bevel and tip
++    // triangles land entirely inside quad1's and quad2's own overlap, which
++    // is already double-covered before any join exists, so such a probe reads
++    // inked under both the correct and the mutated code and was dropped after
++    // being checked against the code it was meant to describe.
++    //
++    // MUTATION: take the miter on the inside of the turn (flip the sign
++    // choice in `_emitJoin`, `s = cross > 0 ? -half : half` -> `? half :
++    // -half`) and (11.5, -1.5) goes uninked, because the notch is filled on
++    // the wrong side instead.
++    final sink = _sink()
++      ..beginResidual(Transform2.identity())
++      ..polyline(_pts([0, 0, 10, 0, 10, 10]), 3, _style(), closed: false)
++      ..endResidual();
++
++    expect(_inked(sink, 11.5, -1.5), isTrue, reason: 'the miter tip');
++  });
++
++  test('a mitred corner emits both the bevel and the tip triangle', () {
++    // MUTATION: emit the tip triangle alone and the point just inside the
++    // bevel wedge -- between the vertex and the chord AB -- goes uninked.
++    // That is the hairline crack.
++    final sink = _sink()
++      ..beginResidual(Transform2.identity())
++      ..polyline(_pts([0, 0, 10, 0, 10, 10]), 3, _style(), closed: false)
++      ..endResidual();
++
++    // Two segments are 4 triangles; the join adds 2.
++    expect(_triangleCount(sink), 6);
++    // A = (10, -2), B = (12, 0), V = (10, 0). The wedge's centroid.
++    expect(_inked(sink, 10.6, -0.6), isTrue, reason: 'the bevel wedge');
++  });
++
++  test('a corner past the miter limit is bevelled, one triangle', () {
++    // A 170-degree direction change: dot = cos(170 deg) = -0.985, below
++    // -0.875.
++    //
++    // MUTATION: miter every corner and this reads 6 triangles and a spike
++    // reaching about 23 units out.
++    const a = 170 * math.pi / 180;
++    final sink = _sink()
++      ..beginResidual(Transform2.identity())
++      ..polyline(_pts([0, 0, 10, 0, 10 + 10 * math.cos(a), 10 * math.sin(a)]),
++          3, _style(),
++          closed: false)
++      ..endResidual();
++
++    expect(_triangleCount(sink), 5, reason: '4 for the segments, 1 bevel');
++  });
++
++  test('a corner just inside the limit is still mitred', () {
++    // 150 degrees: dot = -0.866, above -0.875. The boundary is a real edge and
++    // both sides of it are pinned.
++    //
++    // MUTATION: bevel every corner and this reads 5.
++    const a = 150 * math.pi / 180;
++    final sink = _sink()
++      ..beginResidual(Transform2.identity())
++      ..polyline(_pts([0, 0, 10, 0, 10 + 10 * math.cos(a), 10 * math.sin(a)]),
++          3, _style(),
++          closed: false)
++      ..endResidual();
++
++    expect(_triangleCount(sink), 6);
++  });
++
++  test('an open polyline gets no join between its ends', () {
++    // MUTATION: join the first and last segment of an open run and this reads
++    // 8 -- the L gets a phantom corner at the origin.
++    final sink = _sink()
++      ..beginResidual(Transform2.identity())
++      ..polyline(_pts([0, 0, 10, 0, 10, 10]), 3, _style(), closed: false)
++      ..endResidual();
++    expect(_triangleCount(sink), 6);
++  });
++
++  test('a zero-length step is skipped and the join spans it', () {
++    // A repeated point carries no direction. Skipping it must not also skip
++    // the corner it sits on.
++    //
++    // MUTATION: return early from the whole run on a zero-length step and the
++    // second segment and its join both vanish.
++    final sink = _sink()
++      ..beginResidual(Transform2.identity())
++      ..polyline(_pts([0, 0, 10, 0, 10, 0, 10, 10]), 4, _style(), closed: false)
++      ..endResidual();
++    expect(_triangleCount(sink), 6);
++    expect(_inked(sink, 11.5, -1.5), isTrue, reason: 'the miter still fires');
++  });
++
++  test('joins are emitted under the residual, not in local space', () {
++    // Degenerate-fixture guard: every case above is at the identity, and a
++    // join computed before the transform would pass all of them.
++    //
++    // MUTATION: compute the join from local-space directions and the miter
++    // lands at (2, 12) instead.
++    const t = Transform2(0, 1, -1, 0, 0, 0); // quarter turn
++    final sink = _sink()
++      ..beginResidual(t)
++      ..polyline(_pts([0, 0, 10, 0, 10, 10]), 3, _style(), closed: false)
++      ..endResidual();
++    // (12, -2) rotated a quarter turn is (2, 12).
++    expect(_inked(sink, 1.5, 11.5), isTrue);
++  });
++
++  test('a flattened curve joins its chords', () {
++    // MUTATION: skip the join between two chords and a thick arc shows a notch
++    // at every one of them. Sampled just outside the chord and inside the
++    // stroke, at the arc's midpoint.
++    final sink = _sink()
++      ..beginResidual(Transform2.identity())
++      ..arc(0, 0, 40, 0, math.pi / 2, _style())
++      ..endResidual();
++
++    // The outer edge of the stroke at 45 degrees is at radius 42, and the
++    // chord there falls short of it by the sag. Without joins that sliver is
++    // uninked.
++    final r = 40 + _half - 0.15;
++    expect(_inked(sink, r * math.cos(math.pi / 4), r * math.sin(math.pi / 4)),
++        isTrue);
++  });
++}

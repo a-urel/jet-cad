@@ -1,0 +1,123 @@
+# Review package: 405dd90..HEAD
+
+## Commits
+c678ec3 test: floor the ink on the two comparisons that measure divergence
+
+## Files changed
+ .../test/sink_comparison_test.dart                 | 24 ++++++++++++++++++++++
+ .../test/support/sink_comparison.dart              | 21 +++++++++++++------
+ 2 files changed, 39 insertions(+), 6 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/test/sink_comparison_test.dart b/packages/jet_cad_2d_flutter/test/sink_comparison_test.dart
+index 491bb89..2e6c916 100644
+--- a/packages/jet_cad_2d_flutter/test/sink_comparison_test.dart
++++ b/packages/jet_cad_2d_flutter/test/sink_comparison_test.dart
+@@ -73,20 +73,26 @@ void main() {
+     // 2026-08-21 at `scaleY` 3.0: canvas 19194 ink pixels, vertices 24580,
+     // 3513 stray and 897 uncovered. Looked at: the canvas stroke is visibly
+     // fatter at the two ends of the ellipse's major axis and visibly thinner
+     // along its flanks, while the vertices stroke is even all the way round.
+     final doc = anisotropyDivergenceFixture(scaleY: 3.0);
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+ 
+     final report =
+         await measureAgreement(tester, doc, paintDrawing(doc, index));
++    // `measureAgreement` has no ink floors of its own -- `expectSinksAgree`
++    // owns those, and this test does not go through it. Without them a sink
++    // that drew nothing would satisfy every "greaterThan" below by having
++    // nothing to disagree with. 2026-08-21: 19194 and 24580.
++    expect(report.canvasInkPixels, greaterThan(10000));
++    expect(report.verticesInkPixels, greaterThan(10000));
+     expect(report.strayVerticesPixels, greaterThan(1000),
+         reason: 'the vertices sink should be wider than the canvas one along '
+             'the flanks, where the canvas divides by sqrt(3)');
+     expect(report.uncoveredCanvasPixels, greaterThan(200),
+         reason: 'and narrower at the ends of the major axis, where the '
+             'canvas multiplies by sqrt(3)');
+     // Both directions, which is what says this is a *width* divergence and
+     // not the ellipse being in the wrong place.
+     expect(report.verticesInkPixels, greaterThan(report.canvasInkPixels));
+   });
+@@ -157,16 +163,34 @@ void main() {
+     //
+     // 2026-08-21: canvas 5688 ink pixels, vertices 5710, 0 stray and 6
+     // uncovered. Looked at: one radial red notch at the 3 o'clock seam, the
+     // start angle, and nothing anywhere else on the ring.
+     //
+     // **When Task 5's `closed` decision learns about a full sweep, this test
+     // goes red and the right fix is to change these two expectations to
+     // zero**, not to delete the fixture.
+     final doc = DraftDocument.empty();
+     final report = await measureAgreement(tester, doc, fullSweepArcDrawing);
++    // Floors first, and they are not decoration. This test does not go
++    // through `expectSinksAgree`, so it inherits none of its ink floors, and
++    // a `greaterThan(0)` on missing ink is exactly the assertion an empty
++    // vertices side satisfies best. Task 11's review made `arc` return early
++    // for `sweep > 6.0` -- the vertices backend then drew *nothing* for this
++    // fixture -- and every test in this file still passed. 2026-08-21 the ring
++    // measures 5688 and 5710 ink pixels, so 4000 is clear of an empty side by
++    // a wide margin and clear of the real number by a wider one.
++    expect(report.canvasInkPixels, greaterThan(4000),
++        reason: 'the canvas backend must have drawn the whole ring');
++    expect(report.verticesInkPixels, greaterThan(4000),
++        reason: 'the vertices backend must have drawn the whole ring, not '
++            'skipped the op and left a notch-shaped hole the size of it');
++    // And an upper bound, so "unjoined seam" cannot quietly become "half the
++    // ring missing" and still read as this known defect. The notch measured 6
++    // pixels.
++    expect(report.uncoveredCanvasPixels, lessThan(50),
++        reason: 'one seam notch, not a missing arc');
+     expect(report.uncoveredCanvasPixels, greaterThan(0),
+         reason: 'the seam of a 2*pi ARC is unjoined on the vertices backend');
+     expect(report.strayVerticesPixels, 0,
+         reason: 'the notch is missing ink, never invented ink');
+   });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/support/sink_comparison.dart b/packages/jet_cad_2d_flutter/test/support/sink_comparison.dart
+index dee9bfd..2c8b6a2 100644
+--- a/packages/jet_cad_2d_flutter/test/support/sink_comparison.dart
++++ b/packages/jet_cad_2d_flutter/test/support/sink_comparison.dart
+@@ -386,26 +386,35 @@ DraftDocument comparisonFixture() {
+   // An oblique corner, comfortably inside the miter limit: the cosine of the
+   // direction change is about 0.29, nowhere near the -0.875 bevel threshold
+   // and nowhere near 0 or 1, so this is a genuine mitred bend and not a right
+   // angle or a straight run.
+   _entity(doc, doc.rootHandle, seed.next(), EntityKind.polyline,
+       [30, 60, 75, 110, 150, 75], const [],
+       lineweight: 160);
+ 
+   // A corner past the miter limit: a 160-degree direction change (cosine
+   // -0.939), below -0.875, so `_emitJoin` takes the bevel-only branch and
+-  // emits no miter tip. Not the near-reversal it used to be: at 178 degrees
+-  // the bevel triangle is itself degenerate, so the branch was exercised
+-  // while the ink it controls was nil, and a mutant that emitted the miter
+-  // tip anyway would have been caught by luck rather than by geometry. At
+-  // 160 degrees the suppressed tip would reach 5.9 half-widths past the
+-  // corner.
++  // emits no miter tip.
++  //
++  // Not the 178-degree near-reversal it used to be, and the reason is about
++  // the *bevel*, not about the tip. Past the limit the bevel triangle
++  // `(V, A, B)` is the only ink the join contributes, and its area goes as
++  // `sin` of the direction change: at 178 degrees that is 0.035, a sliver
++  // narrower than the one-pixel dilation, so the branch was exercised while
++  // the ink it controls was nil. At 160 degrees the bevel is real ink and a
++  // mutant that dropped it has something to drop.
++  //
++  // This is *not* the reason the miter-limit mutant is caught. Task 11's
++  // review reran that mutant against the 178-degree corner and it was caught
++  // by 4567 pixels, because the suppressed tip's reach is `half / cos(theta/2)`
++  // and blows up as the corner approaches a reversal. It reaches 5.9
++  // half-widths here, which is plenty.
+   _entity(doc, doc.rootHandle, seed.next(), EntityKind.polyline,
+       [170, 40, 230, 90, 173.6, 69.7], const [],
+       lineweight: 160);
+ 
+   // An open arc.
+   _entity(doc, doc.rootHandle, seed.next(), EntityKind.arc, [280, 70],
+       const [35, 0.3, 2.0],
+       lineweight: 60);
+ 
+   // Text: forces `_flushBeforeUnbatchable`. Its handle sits after the four

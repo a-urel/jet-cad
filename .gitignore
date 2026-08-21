@@ -121,6 +121,11 @@ app.*.symbols
 !**/ios/**/default.perspectivev3
 !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
 !/dev/ci/**/Gemfile.lock
+
+# Raw measurement captures published beside a results note. `*.log` above is
+# for build noise; these are the evidence a published row is checkable from.
+!docs/superpowers/notes/**/*.log
+
 # Subagent-driven development scratch (ledger, briefs, review packages).
 .superpowers/
 

@@ -1,0 +1,1909 @@
+# Review package: 4a16b41..HEAD
+
+## Commits
+2f6223e docs: Plan 3d results and exit gate
+
+## Files changed
+ .gitignore                                         |   5 +
+ STATUS.md                                          | 212 ++++--
+ .../notes/2026-08-21-plan-3d-results.md            | 835 +++++++++++++++++++++
+ .../2026-08-21-plan-3d-web-raw/cdp_poll_generic.py |  46 ++
+ .../2026-08-21-plan-3d-web-raw/main.dart.pre-diag  | 318 ++++++++
+ .../notes/2026-08-21-plan-3d-web-raw/run_web_r2.sh |  62 ++
+ .../notes/2026-08-21-plan-3d-web-raw/web_rows.log  | 210 ++++++
+ 7 files changed, 1634 insertions(+), 54 deletions(-)
+
+## Diff
+diff --git a/.gitignore b/.gitignore
+index e529573..a67c30c 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -114,19 +114,24 @@ coverage/
+ # Symbols
+ app.*.symbols
+ 
+ # Exceptions to above rules.
+ !**/ios/**/default.mode1v3
+ !**/ios/**/default.mode2v3
+ !**/ios/**/default.pbxuser
+ !**/ios/**/default.perspectivev3
+ !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
+ !/dev/ci/**/Gemfile.lock
++
++# Raw measurement captures published beside a results note. `*.log` above is
++# for build noise; these are the evidence a published row is checkable from.
++!docs/superpowers/notes/**/*.log
++
+ # Subagent-driven development scratch (ledger, briefs, review packages).
+ .superpowers/
+ 
+ # Harness-managed worktrees (EnterWorktree and manual).
+ .claude/worktrees/
+ 
+ # `flutter test --tags golden` writes the failed/expected/diff PNG triple here
+ # on a mismatch. Output of a failing run, never an input to one.
+ **/test/golden/failures/
+diff --git a/STATUS.md b/STATUS.md
+index 765d513..53ebba2 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,83 +1,123 @@
+ # jet-cad — project status
+ 
+-**Last updated:** 2026-08-20
+-**Verified against:** `main`, working tree clean, no worktrees — both suites
+-re-run on 2026-08-20 on the tree carrying the dash/leaf measurement below.
+-Every count below was produced by running the suite, not by reading a report.
++**Last updated:** 2026-08-21
++**Verified against:** branch `spike/vertices-sink`, worktree
++`.claude/worktrees/vertices-spike`, at `4a16b41`, working tree clean — all
++three packages re-run there on 2026-08-21. Every count below was produced by
++running the suite, not by reading a report.
+ 
+ ---
+ 
+ ## TL;DR — where you left off
+ 
++**Plan 3d (the vertices sink) is finished and in flight on
++`spike/vertices-sink`** — fifteen tasks, executed, reviewed and committed, not
++merged and not pushed. **Its exit gate is 7 of 8 with one criterion open for
++the human**, and that one criterion is the whole handoff. See
++[Plan 3d](#plan-3d--the-vertices-sink-is-the-default-everywhere) and
++[Resume here](#resume-here).
++
+ Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
+ The `plan-3c` branch and its worktree are gone; the ledger is archived at
+-[docs/superpowers/ledgers/](docs/superpowers/ledgers/). Everything is green and
+-the tree is clean. **No plan is in flight** — see [Resume here](#resume-here).
++[docs/superpowers/ledgers/](docs/superpowers/ledgers/).
+ 
+-| Suite | State |
++| Suite | State (on `spike/vertices-sink` at `4a16b41`) |
+ |---|---|
+ | `packages/jet_cad_2d` — engine | **720 tests, all pass**, analyze/format clean |
+-| `packages/jet_cad_2d_flutter` — widgets | **152 tests, all pass** (1 pre-existing skip), analyze/format clean |
+-| `flutter test --tags golden` | **13 pass**; no pre-existing PNG regenerated |
+-| `apps/dev_harness_2d` | analyze/format clean; **R2/R4a/R4b run on macOS in profile mode** |
++| `packages/jet_cad_2d_flutter` — widgets | **238 tests pass, 1 skipped**, analyze/format clean |
++| `flutter test --tags golden` | **23 pass**, 28 PNGs (14 fixtures × 2 backends); no pre-existing PNG regenerated |
++| `apps/dev_harness_2d` | analyze/format clean; **R2/R4a/R4b run on macOS in profile mode, and R2 on Chrome/CanvasKit** |
++
++The widget suite's one skip is `test/rig/paint_microbench_test.dart`, skipped at
++suite level by the `rig` tag in `dart_test.yaml` — pre-existing and by design.
+ 
+-**Exit gate: PASS.** Every check ran and all eight failable criteria are met —
++**Plan 3c's exit gate: PASS.** All eight of its failable criteria were met —
+ zero new paragraph layouts and zero evictions in the steady-state frame at both
+ entity counts and on real hardware, `skippedTextCount` 0, peak live paragraphs
+ exactly at the declared limit, and 53 mutants accounted for. The one benchmark
+ failure is Plan 2's carried `snap at dirty threshold`.
+ 
+ Results note:
+ [docs/superpowers/notes/2026-08-20-plan-3c-results.md](docs/superpowers/notes/2026-08-20-plan-3c-results.md).
+-**macOS Low Power Mode was on for the whole session** — every timing in it is
++**macOS Low Power Mode was on for the whole 3c session** — every timing in it is
+ contaminated; no failable criterion is a timing. Re-measured with it off, the
+ contamination is a uniform **~24%** on both raster and build, not the 4–12×
+ that note guesses, and Plan 3b's claim that CPU-only paths are unaffected is
+-**wrong**: they run 23–40% faster with it off.
++**wrong**: they run 23–40% faster with it off. Plan 3d read Low Power Mode as
++`0` before and after its desktop sweep.
+ 
+ ### The per-leaf cost model is dead
+ 
+ [docs/superpowers/notes/2026-08-20-dash-leaf-separation.md](docs/superpowers/notes/2026-08-20-dash-leaf-separation.md)
+ holds the drawn geometry fixed (`screenSpaceLeafCount=1664` in all three arms)
+ and moves only `dashedFraction`. The frame moves **6.0×**, so **the unit of
+ render cost is the canvas call, not the drawn leaf**. Every per-leaf µs figure
+ in Plans 3a, 3b and 3c is an artefact of a corpus where dash spans and leaves
+ are collinear — do not carry them forward. `build` is linear in call count to
+ ±30 µs; raster is super-linear because each call is one Impeller `Entity`. At
+ `DASHED=0` a 10,000-entity frame is **9.5 ms**, inside the 60 fps budget.
+ 
+-### The batching spike pulled the lever, on a branch
+-
+-[docs/superpowers/notes/2026-08-20-vertices-sink-spike.md](docs/superpowers/notes/2026-08-20-vertices-sink-spike.md).
+-`VerticesDrawSink` builds each stroked segment's triangles itself and submits
+-the frame's strokes as one ordered `drawVertices`. At 10,000 entities the frame
+-goes **57.3 ms → 14.3 ms**, about 17 fps to about 70 — inside the 16.67 ms
+-budget for the first time. Canvas calls 39,631 → 18, and the segment count went
+-*up* 2.3× while the frame got faster, which is the sharpest confirmation of the
+-per-call model there is.
+-
+-Lives on **`spike/vertices-sink`**, four commits, **not merged, not pushed**.
+-`DraftCanvas.useVertices` and the harness's `VERTICES` define are inert at
+-their defaults, so `main`'s frame is unchanged. Engine 720/720, widgets
+-180/180, 33 mutants with 32 killed and 1 not applicable.
++### Plan 3d — the vertices sink is the default everywhere
+ 
+-It is not a finished sink: no joins, no caps, text still on `CanvasDrawSink`,
+-and the golden suite is unavailable to it — `flutter_test`'s software Skia did
+-not finish a 1,007-segment `drawVertices` in 7.5 minutes. A differential
+-oracle covers it instead
+-([test/support/vertices_differential.dart](packages/jet_cad_2d_flutter/test/support/vertices_differential.dart)),
+-with its blind spots recorded in its own header.
++The 2026-08-20 spike
++([note](docs/superpowers/notes/2026-08-20-vertices-sink-spike.md)) became Plan
++3d, and Plan 3d is **finished on `spike/vertices-sink`** — 23 commits,
++`548fa8e..HEAD`, **not merged, not pushed**. `VerticesDrawSink` builds each
++stroked segment's triangles itself and submits the frame's strokes as one
++ordered `drawVertices`. What the spike lacked, 3d added: **miter and bevel
++joins** (a miter is two triangles), **seam joins on closed runs**, `Vertices`
++disposal at submission, a **coverage-only triangle rasterizer** so the golden
++suite is available to it, goldens **on both backends**, and a **sink-against-sink
++ink comparison**.
+ 
+-**Next: pick the next plan.** Nothing is in flight. The obvious candidate is
+-turning that spike into one — joins and caps, a decision about goldens, and the
+-50,000 and 500,000 corpora measured.
++Results note:
++[docs/superpowers/notes/2026-08-21-plan-3d-results.md](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
++Mutation log:
++[docs/superpowers/notes/plan-3d-mutation-log.md](docs/superpowers/notes/plan-3d-mutation-log.md).
++
++**Exit gate: 7 of 8 pass. Criterion 7 is measured and cannot be closed by the
++plan.** Desktop, median of three (build p50 / raster p50): 10,000 — canvas
++12.35 / 44.32 ms, vertices **5.71 / 6.68 ms**; 50,000 — canvas 15.36 / 66.94,
++vertices **7.07 / 8.53**; 500,000 — canvas 44.29 / 508.00, vertices **17.44 /
++21.64**. Criterion 5 (10k under 16.67 ms) and criterion 6 (raster better by
++more than the spread at 50k and 500k) both pass, with disjoint `[min, max]`
++intervals and no crossover anywhere.
++
++**`defaultRenderBackend()` now returns `RenderBackend.vertices`
++unconditionally, web included.** CanvasKit's `drawVertices` beats its
++`drawPath` decisively — web 10,000: canvas 117.80 / 79.30 ms, vertices 6.80 /
++1.40 ms. **The number that justifies the flip is the 17.3×–17.5× within-platform
++`build` ratio, not the 56–60× raster figure**: `build` is the same Dart code on
++both arms, while CanvasKit's `rasterDuration` almost certainly ends at command
++submission. The desktop and web tables are **two separate confirmations, not one
++table doubled** — they did not draw the same drawing. `CanvasDrawSink` is not
++dead: it is the fallback and takes text on every frame (`canvasCalls=19` at 10k).
++
++**What is open, and it is the handoff:** `CLAUDE.md`'s "the frame path allocates
++nothing in steady state" is **not literally true of this backend**. Measured
++residue is **three objects per flush** (a `Vertices` and two `sublistView`
++wrappers), **nothing per entity**, so `3 × (textOps + 1)` per frame. The design
++forbids the plan from amending the rule it is measured against, so `CLAUDE.md` is
++untouched and **the human decides**. Proposed wording, and both outcomes, are in
++the results note. Approved → criterion 7 passes and the gate is 8/8. Refused →
++criterion 7 **fails** and that is the plan's result.
++
++**Costs and gaps the note records rather than smooths over:** 96.00 MiB of
++vertex buffer pinned for the widget's life at 500,000 entities; the web rows are
++**not reproducible from what was committed** (raw artifacts committed at
++`docs/superpowers/notes/2026-08-21-plan-3d-web-raw/`); the seam join and the
++point-shape fix have **no coverage through any frame path**; the permitted
++sub-pixel divergence is exercised by one unit test and no golden; a **2π-sweep
++`ARC`** would draw an unjoined seam and is characterised, not fixed (no DXF
++reader exists, and the corpus cannot produce one); and the R4a/R4b pairs'
++control is plausible but **not demonstrated**.
+ 
+ ---
+ 
+ ## What this project is
+ 
+ A CAD workspace holding **two independent product lines that share a name and
+ nothing else**.
+ 
+ ### `jet_cad_2d` — the live line (pure Dart 2D CAD)
+ 
+@@ -120,23 +160,27 @@ docs/superpowers/
+ `jet_cad_2d_flutter` depends on Flutter + `jet_cad_2d` by path. Both are
+ `resolution: workspace` members of the root pubspec.
+ 
+ ---
+ 
+ ## Branch and worktree map
+ 
+ | Location | Branch | State |
+ |---|---|---|
+ | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, `33bdafb`, Plans 1/2/3a/3b/**3c** merged |
++| `.claude/worktrees/vertices-spike` | `spike/vertices-sink` | clean, **Plan 3d complete**, 23 commits off `main`, not merged, not pushed |
+ 
+-No worktrees. `main` is **29 commits ahead of `origin/main`**. **Nothing has
+-been pushed.** Do not push unless explicitly asked.
++`main` is **29 commits ahead of `origin/main`**. **Nothing has been pushed.** Do
++not push unless explicitly asked. The Plan 3d per-task ledger lives in the
++worktree at `.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` and
++is git-ignored; **archive it to `docs/superpowers/ledgers/` when the branch
++merges**, or it is lost with the worktree.
+ 
+ ---
+ 
+ ## Completed work
+ 
+ ### Plan 1 — the 2D core (merged)
+ 
+ Identity and handles, the scene tree, columnar geometry and entity stores,
+ components, commands with undo, style tables and resolution, the packed R-tree
+ spatial index with a dirty overlay, snapping, and a deterministic versioned JSON
+@@ -225,29 +269,63 @@ So the paragraph cache key carries no height, angle or width factor. It is
+ | 12 | Rigs, counters, the number the gate depends on | ⬜ not started |
+ | 13 | Mutation testing | ⬜ not started |
+ | 14 | Exit gate and the results note | ⬜ not started |
+ 
+ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
+ 
+ ---
+ 
+ ## Resume here
+ 
+-**Nothing is in flight.** Plan 3c merged at `52c7a7b` with its exit gate
+-passing; `main` is at `33bdafb`, clean, 29 commits ahead of `origin/main` and
+-**unpushed**.
+-
+-Starting the next plan means picking from the roadmap below, writing a spec,
+-then a plan, then executing it task by task on a fresh worktree —
+-`superpowers:brainstorming` first if the shape is not already settled.
+-
+-### What the next plan inherits
++**Plan 3d is complete on `spike/vertices-sink` and waiting on one human
++decision.** Everything is green there and the tree is clean; nothing else is in
++flight.
++
++**The one thing to answer first — the `CLAUDE.md` allocation amendment.** The
++current non-negotiable says the frame path allocates *nothing* in steady state.
++The vertices sink allocates **three objects per flush and nothing per entity**.
++The plan measured this and stopped, because a gate that can be passed by editing
++the rule it is measured against is not a gate. The proposed replacement:
++
++> **The frame path allocates nothing per entity in steady state, and O(1) per
++> flush.** `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` and
++> `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`
++> measure it.
++
++**Approve it** → exit criterion 7 passes, the gate is 8/8, and the branch is
++ready for `superpowers:finishing-a-development-branch`. **Refuse it** →
++criterion 7 fails, and that is Plan 3d's recorded result rather than a delay;
++the branch does not merge on the strength of its note until the residue is
++removed or the rule is settled another way.
++
++**Then**: finish the branch (the merge menu is the human's to answer), archive
++`.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` into
++`docs/superpowers/ledgers/`, and pick the next plan from the roadmap below —
++3e (fills) and 3f (caches and tiles) are the named successors, and what 3d owes
++each is written out at the end of
++[the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
++
++### What Plan 3d leaves open
++
++1. **The `CLAUDE.md` amendment**, above.
++2. **A frame-path fixture for the seam and the point shape.** Both are pinned
++   against the `DrawSink` interface only. `DraftPainter` routes point, line and
++   polyline through `_emitScreenSpace`, whose residual is a bare translation, so
++   a rotated point never reaches the sink through the painter at all.
++3. **The 2π-sweep `ARC` seam**, characterised and unfixed — safe only because
++   there is no DXF reader in the repository and the corpus cannot produce one.
++4. **The R4a/R4b control**, plausible but not demonstrated: a grep pattern
++   dropped the invariant fields from those two rows' transcripts.
++5. **Permitted divergence 5 (overlapping translucent strokes) goes live the
++   moment 3e adds fills.** It is inert today only because the corpus is opaque.
++
++### What the next plan inherits from 3c
+ 
+ Six items, listed in full in the [results
+ note](docs/superpowers/notes/2026-08-20-plan-3c-results.md). The first blocks
+ shipping text to an application and has no owner:
+ 
+ 1. **Nothing outside the tests wires a real measurer into a document.**
+    `DraftDocument.empty` defaults to `InsertionPointMeasurer`, the zero
+    metrics, so `composeTransform`'s `height / capHeight` divides into zero —
+    singular text transform — and `entityBounds` collapses every glyph box to a
+    point. An application built the ordinary way draws no text **and reports no
+@@ -445,38 +523,64 @@ degenerate assertion collapsing it to one label would silently void the gate.
+ | mutation log | every mutant killed or argued equivalent |
+ 
+ **If a failable row misses: record it and stop.** Plan 3b's Task 4 stop clause
+ is the precedent — a row that fires is a result. Write the number, say what it
+ implies for 3d and 3e, and stop rather than tuning until it complies.
+ 
+ The results note must state **whether macOS Low Power Mode was on**.
+ 
+ ---
+ 
+-## Roadmap after 3c
++## Roadmap after 3d
++
++**Renumbered.** The vertices sink took the `3d` slot, so the two plans below
++moved up one: **fills is 3e** and **the picture cache is 3f**. That is the
++numbering the Plan 3d design document uses in "What 3d owes the plans after it",
++and it is the numbering the rest of this file uses. Older notes written before
++2026-08-20 call fills "3d" and the cache "3e"; read those by name, not by number.
+ 
+-### Plan 3d — fills
++### Plan 3e — fills
+ 
+ **It inherits no mechanism from 3b.** The 3b design's "flush contract" — a fill
+ flushing open draw buckets — has nothing to attach to, because batching was
+-reverted. 3d gets the ordinary one-call-per-primitive `CanvasDrawSink`.
++reverted — but 3d's vertices sink supersedes that concern entirely: **3e
++inherits a triangle buffer already appended to in draw order, and a flush that
++already happens before anything unbatchable.** `_flushBeforeUnbatchable` is the
++shape any fill-flush contract extends.
+ 
+ **The open problem:** draw order is ascending handle value, so a region's fill
+ must carry a **lower** handle than its boundary or it paints over its own
+ outline. But handles are monotonic by creation and the natural authoring order
+ is *draw the boundary, then hatch it* — which produces exactly the failing case.
+-3d must choose and state one of:
++3e must choose and state one of:
+ 
+ - give the fill an explicit draw-order key the painter honours ahead of handle order, or
+ - require the region command to create boundary and fill in one transaction with the ordering reserved.
+ 
+-### Plan 3e — the definition/tile picture cache
++**One thing 3e must not inherit silently.** Permitted divergence 5 —
++overlapping translucent strokes — is **inert today only because the corpus is
++opaque** (`argb`'s alpha is `255 - transparency`). A stroked path unions its
++coverage; a triangle soup does not, so two quads that overlap double-blend. The
++moment 3e draws anything with alpha < 255 that divergence is live and needs a
++test. See the [3d results
++note](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
++
++### Plan 3f — the definition/tile picture cache
++
++**What 3d hands it.** A picture cache that records into a `Picture` interacts
++with a sink that batches across residuals: 3f must decide whether a cached
++picture flushes the vertex buffer at its boundary. There is **no crossover
++number** to work against — the vertices backend's raster margin is still
++widening at 500,000 entities — and there is **96.00 MiB of vertex buffer pinned
++for the widget's life** at that corpus size, which is the arithmetic a tiling
++scheme changes. Read the margin against **canvas calls**, not entity count: a
++10× entity rise moves `screenSpaceLeafCount` only 2.13× and `dashSpans` 3.03×.
+ 
+ The prize is real: the dominant cost is leaf-count-bound GPU vertex work, and
+ dashing makes that story **stronger** — one dashed polyline becomes dozens of
+ drawn spans per leaf without moving the painter's op count.
+ 
+ Four traps recorded in
+ [docs/superpowers/notes/2026-08-17-carry-forward-additions.md](docs/superpowers/notes/2026-08-17-carry-forward-additions.md):
+ 
+ 1. **`documentRevision` does not exist yet** and nothing says what bumps it. If
+    an ordinary entity edit bumps it, every definition picture is discarded every
+@@ -488,23 +592,23 @@ Four traps recorded in
+    and map touched handles through placements.
+ 3. **A cached picture is no longer scale-invariant now that dashes exist.** Dash
+    phase and the collapse floor are both functions of screen-space scale, so
+    zoom far enough and baked-dashed entities need to render solid. That is a new
+    invalidation axis with no name yet.
+ 4. **`InstanceNode` carries only 2 of `StyleContext`'s 6 fields.**
+    `linetype`, `linetypeScale`, `lineweight`, `transparency` are missing, and
+    DXF's INSERT carries all four. `StyleContext` is the picture cache key, so
+    this model decision belongs **before** the cache, not after.
+ 
+-**Do not design 3e against a fixed op-count ceiling.** The web whole-drawing
++**Do not design 3f against a fixed op-count ceiling.** The web whole-drawing
+ abort is reproducible but its trigger is unknown — a memory- or
+-session-dependent CanvasKit failure explains it with no code at fault. What 3e
++session-dependent CanvasKit failure explains it with no code at fault. What 3f
+ is owed first is a back-to-back, same-session re-run.
+ 
+ ---
+ 
+ ## Commands
+ 
+ ```sh
+ # engine (pure Dart)
+ cd packages/jet_cad_2d
+ dart test
+diff --git a/docs/superpowers/notes/2026-08-21-plan-3d-results.md b/docs/superpowers/notes/2026-08-21-plan-3d-results.md
+new file mode 100644
+index 0000000..58264d4
+--- /dev/null
++++ b/docs/superpowers/notes/2026-08-21-plan-3d-results.md
+@@ -0,0 +1,835 @@
++# Plan 3d results and exit gate — the vertices sink
++
++**Runs of record:** 2026-08-20 and 2026-08-21.
++**Branch:** `spike/vertices-sink`, worktree `.claude/worktrees/vertices-spike`.
++**Commit range:** `548fa8e..4a16b41` (Task 15's own commit lands on top).
++**Spec:** [`docs/superpowers/specs/2026-08-20-jet-cad-2d-plan-3d-design.md`](../specs/2026-08-20-jet-cad-2d-plan-3d-design.md)
++**Plan:** [`docs/superpowers/plans/2026-08-20-jet-cad-2d-plan-3d-vertices-sink.md`](../plans/2026-08-20-jet-cad-2d-plan-3d-vertices-sink.md)
++**Mutation log:** [`plan-3d-mutation-log.md`](plan-3d-mutation-log.md)
++
++---
++
++## Verdict
++
++**Seven of the eight criteria pass on measurements taken and pasted below.
++Criterion 7 is measured and cannot be closed by this plan** — it requires a
++`CLAUDE.md` amendment that the design forbids the plan from granting itself.
++It is open for the human and it is the only thing standing between this plan
++and a clean gate.
++
++| # | Criterion | Verdict | The deciding number |
++|---|---|---|---|
++| 1 | Both suites green, analyze and format clean | **PASS** | engine 720/720, widgets 238 passing + 1 skipped, three packages clean |
++| 2 | Every design-table mutant killed by a named test, recorded in the log | **PASS**, one qualification | 14/14 named mutants killed; `B1` killed by an equivalent mutation, not the tabled one |
++| 3 | Sink-against-sink coverage on point/polyline/circle/arc/text at a justified tolerance | **PASS** | stray 0, uncovered 0, at a one-pixel dilation; canvas 22,398 ink px, vertices 23,241 |
++| 4 | Goldens exist and pass on both backends for all 14 fixtures | **PASS** | 28 PNGs (14 canvas + 14 vertices), 23 golden tests pass |
++| 5 | 10,000 entities: vertices frame under 16.67 ms, median of three | **PASS** | build p50 **5.71 ms** [5.67, 5.81], raster p50 **6.68 ms** [6.63, 6.75] |
++| 6 | 50k and 500k: vertices raster p50 better than canvas by more than the spread | **PASS at both** | 50k gap **58.22 ms**, 500k gap **485.01 ms**; no interval overlap, no crossover |
++| 7 | Allocation invariant covers the paint path, residue zero or bounded **and written into `CLAUDE.md`** | **MEASURED, NOT CLOSED** | residue is 3 objects per flush, `3 × (textOps + 1)` per frame, nothing per entity; `CLAUDE.md` unamended |
++| 8 | Web rows measured and the platform default stated with the number that justifies it | **PASS** | default is `vertices` everywhere; the justifying number is the **17.3×–17.5× web build ratio**, not the raster figure |
++
++### What failed, and what is merely unfinished
++
++- **Criterion 7 is not passed.** Its text requires the residue "written into
++  `CLAUDE.md`". It is not written, deliberately: the design says "the plan may
++  not grant itself the `CLAUDE.md` amendment. Criterion 7 is not satisfied by
++  editing the rule it is measured against." See
++  [The allocation residue](#the-allocation-residue-and-the-claudemd-question)
++  for the exact proposed wording and both outcomes.
++- **Nothing else failed.** Criterion 6 did not tie at 500,000, so the design's
++  crossover fallback does not fire and there is no crossover number to hand 3f.
++- **Several things are true and unflattering** and are recorded below rather
++  than left out: the web rows are not reproducible from what was committed; the
++  R4a/R4b pairs' control is not demonstrated; the seam join and the point-shape
++  fix have no coverage through any frame path; the permitted sub-pixel
++  divergence is exercised in exactly one place and nowhere in production
++  fixtures; a divergence *not* on the permitted list exists and is
++  characterised rather than fixed; and the vertices backend pins 96.00 MiB of
++  vertex buffer at 500,000 entities that the canvas backend does not.
++
++---
++
++## Machine, OS and versions
++
++Every timing in this note was taken on one machine.
++
++```
++$ sw_vers
++ProductName:        macOS
++ProductVersion:      26.5.1
++BuildVersion:        25F80
++```
++
++Hardware (`system_profiler SPHardwareDataType`): MacBook Pro, Model Identifier
++`Mac15,7`, Apple M3 Pro, 12 cores (6 performance + 6 efficiency), 36 GB memory.
++
++```
++$ flutter --version
++Flutter 3.47.0 • channel stable • https://github.com/flutter/flutter.git
++Framework • revision 4cf2416426 (9 days ago) • 2026-08-11 11:53:49 -0700
++Engine • hash 59d54a2b2896a6bbf356c94b7fac7b9e235bdacd (revision 5f77625673) (9 days ago) • 2026-08-11 16:38:36.000Z
++Tools • Dart 3.13.0 • DevTools 2.60.0
++```
++
++```
++$ /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --version
++Google Chrome 151.0.7922.170
++```
++
++### Low Power Mode
++
++Plan 3c's whole timing set was contaminated by macOS Low Power Mode, so this
++plan reads it before and after.
++
++```
++$ pmset -g | grep lowpowermode
++ lowpowermode         0
++```
++
++Task 12 read it **before** the desktop sweep and **again after** it, both `0`.
++The desktop rows are not contaminated.
++
++**The web sweep has no Low Power Mode reading of record.** Task 13 never took
++one. It ran on the same machine within about two hours of Task 12's post-run
++reading of `0` and nothing in the session turned it on, so contamination is
++unlikely — but "unlikely" is not "read", and this note will not claim a reading
++that was not taken.
++
++### When the runs happened
++
++Timestamps from the branch's own commits (local time, +0300):
++
++- **Phase A** (Task 7, first device run of the vertices backend, 10,000
++  entities): **2026-08-20**, before `3351232` at 22:12.
++- **Phase C desktop** (Task 12, 30 `flutter drive` runs) and **Phase C web**
++  (Task 13, 12 `flutter run -d chrome` runs): **2026-08-21**, in the window
++  between `c678ec3` (06:08) and `25bed0d` (08:26).
++
++---
++
++## The exit gate, criterion by criterion
++
++### Criterion 1 — both suites green, analyze and format clean
++
++Run on this tree at `4a16b41`, working tree clean.
++
++```
++$ cd packages/jet_cad_2d && dart test
++00:02 +720: All tests passed!
++
++$ dart analyze
++Analyzing jet_cad_2d...
++No issues found!
++
++$ dart format --output=none --set-exit-if-changed .
++Formatted 105 files (0 changed) in 0.13 seconds.
++exit=0
++```
++
++```
++$ cd packages/jet_cad_2d_flutter && flutter test
++00:02 +238 ~1: All tests passed!
++
++$ flutter analyze
++Analyzing jet_cad_2d_flutter...
++No issues found! (ran in 0.9s)
++
++$ dart format --output=none --set-exit-if-changed .
++Formatted 44 files (0 changed) in 0.06 seconds.
++exit=0
++```
++
++The harness is in the gate from Task 7 onward (it does not compile in Tasks 1–6
++by construction — Task 1 deletes the `useVertices` parameter it passed and Task
++7 is the task that repairs it):
++
++```
++$ cd apps/dev_harness_2d && flutter analyze
++Analyzing dev_harness_2d...
++No issues found! (ran in 0.9s)
++
++$ dart format --output=none --set-exit-if-changed lib integration_test
++Formatted 3 files (0 changed) in 0.01 seconds.
++exit=0
++```
++
++**PASS.** 720 engine tests, 238 widget tests passing with 1 skipped, three
++packages analyze- and format-clean. The one skip is
++`test/rig/paint_microbench_test.dart`, skipped at the suite level by the `rig`
++tag in `dart_test.yaml` ("rigs measure; they do not assert") — pre-existing, by
++design, and unrelated to this plan's deliverables.
++
++### Criterion 2 — every mutant in the design's table killed by a named test
++
++The log is [`docs/superpowers/notes/plan-3d-mutation-log.md`](plan-3d-mutation-log.md),
++41 mutants accounted for: 34 killed, 1 deliberate control, 2 unreachable dead
++code, 2 cited from the codebase's own confirmed record, 2 structurally not
++reproducible. The design document's own table is the 14 rows `J1`–`J9`, `B1`,
++`B2`, `A1`, `V1`, `P1`, and **all 14 are killed** — 13 outright, `A1` after
++surviving and being closed with a new test in two rounds.
++
++**PASS, with one qualification the log itself states and this note repeats
++rather than smooths over.** `B1` ("resolve the backend per call site rather
++than once") was killed by an *equivalent* mutation, not the tabled one. The
++design's stated killer for `B1` is "a test that overrides the backend and reads
++it back from both the widget and the rig" — **no such test exists**, and `B1`'s
++literal mutation has no line to invert, because `defaultRenderBackend()` is
++unconditional with exactly one `lib/` call site at `draft_canvas.dart:140`. The
++substitute run was `didUpdateWidget`'s comparison dropping
++`widget.backend != oldWidget.backend`, which died on
++`'changing the backend prop rebuilds the sinks'` with
++`Expected: not null / Actual: <null>`. Read `B1` as killed via an equivalent
++mutation, not as the tabled mutation run literally.
++
++Two survivors surfaced during the mutation run and both were closed with a new
++test in the same task, which is the mutation log doing its job rather than
++confirming a suite that was already adequate:
++
++- **`A1`** — a `Paint` allocated per flush. It survived because
++  `paint_allocation_test.dart` measured buffer capacity only and was blind to a
++  `Paint` object. A first fix proved too narrow (a call-site-local
++  `Paint()` that never touched the field still passed all 237 tests); the second
++  pins object identity across two flushes.
++- **`S2`** — colour grouping before the flush. It survived because the existing
++  test read the *pre-flush* buffer, correct by construction, and could not see a
++  reorder inside `flush()` itself — which is exactly where the sink's real
++  historic bug lived.
++
++### Criterion 3 — sink against sink, on a fixture carrying all five primitives
++
++```
++$ cd packages/jet_cad_2d_flutter && flutter test test/sink_comparison_test.dart
++00:00 +0: the two backends draw the same drawing
++00:00 +1: the two backends agree on the ops the painter cannot emit
++00:00 +2: anisotropic stroke width diverges, and vertices is right
++00:00 +3: a sub-pixel stroke is where the two backends stop agreeing
++00:00 +4: a full-sweep ARC leaves an unjoined seam. This is a defect
++00:00 +5: All tests passed!
++```
++
++**The fixture carries all five required primitives.** `comparisonFixture()` in
++`test/support/sink_comparison.dart` emits a point marker, two polylines (one
++oblique corner inside the miter limit, one 160° corner past it), an open arc, a
++text entity that forces a mid-frame flush, and a circle under a rotated
++(0.35 rad) and non-uniformly scaled (1.0 × 1.15) residual.
++`assertNoIdentityTransforms(doc)` runs first, so the degenerate-fixture failure
++mode this repository names is checked by the test rather than asserted by its
++author.
++
++**The measurement of record (2026-08-21, `devicePixelRatio` 3.0, 1200×900
++device pixels):** canvas 22,398 ink pixels, vertices 23,241, **0 stray and 0
++uncovered**, at two flushes. The direct-ops fixture (a closed run and a point
++under a rotated residual, neither of which `DraftPainter` can emit): canvas
++18,291, vertices 18,906, **0 stray and 0 uncovered**, one flush.
++
++**The tolerance and why it is that value.** The comparison is not a per-pixel
++colour difference — comparing a no-AA scan conversion against an anti-aliased
++raster at a per-pixel tolerance bounds nothing at one-pixel strokes. It is
++**ink-region membership in both directions**, with exactly two knobs:
++
++- `kInkAlphaFloor = 0xC0` — canvas pixels below this alpha are anti-aliasing
++  spill, which the coverage-only rasterizer has no way to produce and which is
++  row 3 of the permitted-divergence table.
++- `_nearInk` dilates by **exactly one pixel in each direction**, a 3×3
++  neighbourhood. That covers the half-pixel each rasteriser may place an edge
++  differently and does not cover a corner in the wrong place.
++
++Neither was widened to make a number go to zero: **both zeros were measured at
++the tolerance as designed.** The thresholding is also conservative in the
++dangerous direction — canvas ink is the strict `alpha >= 0xC0` core while
++vertices ink is all coverage, which makes `stray` harder to zero than to
++inflate. The text mask hides 61,631 canvas ink pixels and **zero** vertices
++pixels, which is what says it excludes glyphs and not geometry.
++
++**PASS.**
++
++### Criterion 4 — goldens on both backends for all 14 fixtures
++
++```
++$ cd packages/jet_cad_2d_flutter && flutter test --tags golden
++00:01 +23: All tests passed!
++
++$ ls test/golden/*.png | wc -l          # canvas
++14
++$ ls test/golden/vertices/*.png | wc -l # vertices
++14
++```
++
++28 PNGs, 14 fixtures × 2 backends: `dash_ladder_1..5`, `text_ladder_1..5`,
++`stroke_width_0_5x`, `stroke_width_1_0x`, `stroke_width_8_0x`,
++`anisotropy_bypass`. 23 test cases cover them (the three stroke-width zooms
++share one test and the anisotropy fixture carries a second, non-golden
++assertion). All 14 pre-existing canvas PNGs are byte-identical to what they
++were before this plan (md5-compared in Task 10 and re-confirmed after its fix
++round).
++
++**PASS**, and the goldens were checked as pictures rather than as a green tick.
++A reviewer opened all 14: `dash_ladder_2`'s circle has **no notch at three
++o'clock at 10× zoom** (Task 5's seam holds), the three `stroke_width` fixtures
++show **no crack at any miter base** (Task 4's two-triangle miter holds), and
++`anisotropy_bypass` shows uniform width on every edge including the 8:1 stretch.
++Suppressing the bevel triangle in `_emitJoin` moved exactly 3 vertices goldens
++and 0 canvas ones, which is the hairline crack the spec names.
++
++**One thing the goldens nearly failed to test at all, recorded because the
++cause was not the one first reported.** The two text ladders' vertices goldens
++were blank. The cause was structural: `TriangleRasterizer` was built at logical
++resolution and samples pixel centres at `k + 0.5`, while the sink's width math
++is calibrated in *device* pixels. At `dpr` 3.0 the `_rule` lineweight gives
++0.3402 logical px against a floor of 1/3 = 0.3333, so neither the clamp nor the
++alpha fade fires and the correctly-emitted 2-triangle band spanning
++x ∈ [199.8299, 200.1701] contained no sample point. Mutating `polyline` to
++return immediately — no geometry at all — left `text_ladder_1` and `_2`
++**green**. The fix rasterizes at device resolution, which is what Impeller does;
++the negative control now turns **all 14** vertices goldens red.
++
++**A rationale that is now void and must not be repeated.** Task 10 justified
++keeping the 14 canvas goldens partly as "canvas is the web renderer, so they
++stop testing code nothing draws through." That reason died with the web
++default flip: **no platform defaults to canvas now.** The goldens still earn
++their place, for a different and correct reason — `CanvasDrawSink` is not dead
++code. `DraftCanvasState._attach` constructs
++`VerticesDrawSink(..., fallback: sink)`, and the vertices runs show
++`canvasCalls=19` (10k) and `canvasCalls=24` (50k): it draws text and fallbacks
++on every frame.
++
++### Criterion 5 — 10,000 entities under 16.67 ms
++
++Desktop, macOS profile, R2 pan/zoom, 242 frames, vertices backend, three runs:
++
++| run | build p50 | raster p50 |
++|---|---|---|
++| 1 | 5.81 ms | 6.63 ms |
++| 2 | 5.67 ms | 6.68 ms |
++| 3 | 5.71 ms | 6.75 ms |
++| **median** | **5.71 ms** | **6.68 ms** |
++| spread (`max − min`) | 0.14 ms | 0.12 ms |
++
++**PASS.** Both stages' median p50 are under 16.67 ms, and so is every
++individual run's p50 — the worst single reading is build 5.81 and raster 6.75.
++The canvas backend at the same corpus is 12.35 / 44.32 ms, so this is the
++criterion the plan existed to move.
++
++**The honest caveat.** The criterion is written on the median of three p50s and
++it passes on that. It is not a claim that every frame of the pan/zoom script
++fits the budget: **vertices raster p95 is 22.10–22.36 ms** across the three
++runs, so a minority of frames — the zoom extremes, where the working set is
++largest — still exceed 16.67 ms. Canvas's raster p95 at the same corpus is
++59.40–60.53 ms.
++
++Web at 10,000 entities is also under budget on the vertices backend (build p50
++6.80 ms, raster p50 1.40 ms), but see
++[Why the two tables cannot be merged](#why-the-two-tables-cannot-be-merged)
++before reading the raster figure as a GPU measurement.
++
++### Criterion 6 — 50,000 and 500,000, raster p50 better by more than the spread
++
++The criterion's own definition: spread is `max − min` of the three runs, and it
++is met when the two backends' `[min, max]` intervals **do not overlap** and the
++vertices one is lower.
++
++**At 50,000 entities:**
++
++| backend | raster p50, three runs | median | interval | spread |
++|---|---|---|---|---|
++| canvas | 66.95, 66.94, 66.85 | 66.94 ms | [66.85, 66.95] | 0.10 ms |
++| vertices | 8.63, 8.53, 8.22 | 8.53 ms | [8.22, 8.63] | 0.41 ms |
++
++Intervals disjoint, vertices lower. Gap between the intervals:
++**66.85 − 8.63 = 58.22 ms**, against a combined spread of 0.51 ms — a margin
++of about 114× the spread. **PASS.**
++
++**At 500,000 entities:**
++
++| backend | raster p50, three runs | median | interval | spread |
++|---|---|---|---|---|
++| canvas | 507.05, 508.90, 508.00 | 508.00 ms | [507.05, 508.90] | 1.85 ms |
++| vertices | 22.04, 21.20, 21.64 | 21.64 ms | [21.20, 22.04] | 0.84 ms |
++
++Intervals disjoint, vertices lower. Gap: **507.05 − 22.04 = 485.01 ms**,
++against a combined spread of 2.69 ms. **PASS.**
++
++**It did not tie at 500,000, so there is no crossover to record and nothing to
++hand 3f under the design's fallback clause.** The margin widens rather than
++narrowing: raster p50 ratio is 6.63× at 10k, 7.85× at 50k, 23.48× at 500k.
++Nothing failed at 500,000 and there was no OOM.
++
++**But do not read that widening as linear in entities** — see
++[The ratio is not linear in entities](#the-ratio-is-not-linear-in-entities).
++
++### Criterion 7 — the allocation invariant on the paint path
++
++The invariant exists, covers the paint path, and passes:
++
++```
++$ cd packages/jet_cad_2d_flutter && flutter test test/invariants/
++00:00 +0: a steady-state frame allocates O(1) per flush, not O(entities)
++00:00 +1: flush hands drawVertices the same Paint object every time, not a call-site-local one
++00:00 +2: All tests passed!
++```
++
++`packages/jet_cad_2d/test/invariants/query_allocation_test.dart` is green in the
++engine run above (`720/720`).
++
++**MEASURED, NOT CLOSED.** See the next section. This is the one criterion this
++plan cannot decide.
++
++### Criterion 8 — the web rows and the platform default
++
++Measured (Task 13): see [the web table](#web-chrome-canvaskit). The default is
++stated in code, in the one place the decision is made:
++
++```dart
++RenderBackend defaultRenderBackend() => RenderBackend.vertices;
++```
++
++**`defaultRenderBackend()` now returns `RenderBackend.vertices` unconditionally,
++web included.** That flip was the design's own stated consequence of the
++measurement, not an improvisation: the spec's risk list says "CanvasKit makes
++the web rows bad enough to want a third path" is out of scope *because* the
++fallback already exists, and the criterion asks for the default to be stated
++with the number that justifies it.
++
++**The number that justifies it is the 17.3×–17.5× within-platform build
++ratio, not the headline raster figure.** The doc comment on
++`defaultRenderBackend()` carries both tables and that caveat. See the next
++section for why the raster number is the wrong one to lean on.
++
++**PASS.**
++
++---
++
++## The allocation residue, and the `CLAUDE.md` question
++
++**What a steady-state frame actually allocates.** Task 3 measured it:
++**three objects per flush** — the `Vertices` itself plus two
++`Float32List.sublistView` / `Int32List.sublistView` wrappers — and **nothing
++per entity**. A frame flushes once at the end plus once before each unbatchable
++op, so the frame total is `3 × (textOps + 1)`. The triangle buffer itself is a
++doubling reserve that never shrinks, so in steady state it is not reallocated
++at all; that is the property `paint_allocation_test.dart` pins deterministically
++by capacity, not by a profiler ratio.
++
++`CLAUDE.md`'s non-negotiable reads:
++
++> **The frame path allocates nothing in steady state.**
++> `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` measures it.
++
++**That is not literally true of this backend.** Three objects per flush is not
++nothing. The proposed wording, unchanged since Task 3 measured it:
++
++> **The frame path allocates nothing per entity in steady state, and O(1) per
++> flush.** `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` and
++> `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`
++> measure it.
++
++**`CLAUDE.md` is untouched by this plan, on purpose.** The design says: "The
++plan may not grant itself the `CLAUDE.md` amendment. Criterion 7 is not
++satisfied by editing the rule it is measured against." An exit gate that can be
++passed by editing the rule it is measured against is not a gate. The decision is
++the human's and it has not been made.
++
++**Both outcomes, stated in advance so the answer is a decision and not a
++negotiation:**
++
++- **If the amendment is approved** — criterion 7 passes. The residue is
++  measured, bounded, `O(1)` per flush, zero per entity, and written into
++  `CLAUDE.md` as the criterion requires. The gate is 8/8 and Plan 3d is done.
++- **If the amendment is refused** — criterion 7 **fails**, and that is this
++  plan's result rather than a delay. The design's own risk list says so: "The
++  allocation residue turns out to be unavoidable and larger than expected.
++  Then criterion 7 fails and the plan reports it. A non-negotiable amended with
++  a measurement is a decision; one amended to make a plan pass is not." A
++  refusal means the vertices backend does not meet this repository's standing
++  allocation rule and the branch does not merge on the strength of this note.
++
++---
++
++## The measurements
++
++### Convention: what "median of three" means in these tables
++
++**The medians are taken independently down each column.** A cell's build p50 is
++the median of the three runs' build p50s and its raster p50 is the median of the
++three runs' raster p50s — so a published pair may come from two different runs
++and no single run necessarily produced that exact pair. Desktop 10,000 canvas
++is an example: `12.35 / 44.32` is run 3's build with run 3's raster here, but
++web 10,000 canvas's `117.80 / 79.30` pairs run 3's build with run 2's raster.
++This is Task 12's convention and Task 13 followed it; it is stated rather than
++changed.
++
++Spread is `max − min` of the three runs, per the design's definition, not a
++standard deviation — three samples do not support one.
++
++### Desktop (macOS, profile)
++
++```sh
++cd apps/dev_harness_2d
++flutter drive --driver=test_driver/integration_test.dart \
++  --target=integration_test/frame_timing_test.dart --profile -d macos \
++  --dart-define=TEXT=true --dart-define=ENTITIES=$N \
++  --dart-define=RIG=pan --dart-define=BACKEND=$B 2>&1 \
++  | grep -E "R2 |build |raster |screenSpace|dashSpans|backend=|text:|debugCapacityVertices"
++```
++
++R2 (pan and zoom), 242 frames, `TEXT=true`, median of three. Build p50 /
++raster p50, each with its `[min, max]` beside it.
++
++| entities | backend | build p50 | build [min, max] | raster p50 | raster [min, max] |
++|---|---|---|---|---|---|
++| 10,000 | canvas | 12.35 ms | [12.34, 12.37] | 44.32 ms | [44.22, 44.96] |
++| 10,000 | vertices | **5.71 ms** | [5.67, 5.81] | **6.68 ms** | [6.63, 6.75] |
++| 50,000 | canvas | 15.36 ms | [15.35, 15.43] | 66.94 ms | [66.85, 66.95] |
++| 50,000 | vertices | **7.07 ms** | [7.06, 7.38] | **8.53 ms** | [8.22, 8.63] |
++| 500,000 | canvas | 44.29 ms | [44.12, 44.30] | 508.00 ms | [507.05, 508.90] |
++| 500,000 | vertices | **17.44 ms** | [17.19, 17.73] | **21.64 ms** | [21.20, 22.04] |
++
++R4a (a leaf edit per frame) and R4b (an instance edit per frame), both at
++50,000 entities, same driver, `--dart-define=RIG=$RIG`:
++
++| rig | backend | build p50 | build [min, max] | raster p50 | raster [min, max] | command p50 |
++|---|---|---|---|---|---|---|
++| R4a | canvas | 15.96 ms | [15.92, 15.98] | 67.11 ms | [67.08, 67.83] | 0.05 ms |
++| R4a | vertices | **8.73 ms** | [8.70, 8.77] | **4.71 ms** | [4.71, 4.79] | 0.12 ms |
++| R4b | canvas | 17.34 ms | [17.03, 17.40] | 64.89 ms | [64.84, 65.46] | 175.35 ms |
++| R4b | vertices | **7.26 ms** | [7.23, 7.36] | **3.65 ms** | [3.57, 3.68] | 167.23 ms |
++
++**Control — the R2 pairs are genuinely controlled.** The backend-independent
++fields match exactly across the two backends at each corpus size, which is what
++makes a pair a comparison of two renderers rather than of two drawings:
++
++| entities | screenSpaceLeafCount | dashSpans | collapsed | canvasCalls (canvas) | canvasCalls (vertices) | triangles | drawVerticesCalls |
++|---|---|---|---|---|---|---|---|
++| 10,000 | 1,664 | 37,376 | 238 | 39,631 | 18 | 166,279 | 19 |
++| 50,000 | 2,170 | 48,323 | 334 | 51,298 | 23 | 217,758 | 20 |
++| 500,000 | 4,625 | 146,335 | 356 | 151,671 | 74 | 559,682 | 22 |
++
++**The R4a/R4b pairs' control is NOT demonstrated.** Task 12's Step 3 grep
++pattern (`-E "R4|build |raster |command |backend="`) dropped
++`screenSpaceLeafCount` and `dashSpans` from those transcripts, so those two
++rows' invariant fields were never captured. It is *plausible* — the corpus is
++deterministic at a fixed `ENTITIES` and the R2 pairs establish control for the
++same corpus — but plausible is not shown, and re-running would cost over half
++an hour of device time to confirm what R2 already establishes. **The note
++states the gap rather than claiming control.**
++
++**One R4a oddity, recorded and unexplained.** R4a's `command` time is
++backend-dependent — canvas ~0.05 ms, vertices ~0.12 ms, consistent across three
++runs each — for a pure document mutation that should touch neither sink. Tens
++of microseconds; plausibly a cache or allocator artefact of the much larger
++vertices buffer, not established as a real backend cost.
++
++### Web (Chrome, CanvasKit)
++
++```sh
++flutter run -d chrome --profile \
++  --dart-define=RUN_R2=true --dart-define=TEXT=true \
++  --dart-define=ENTITIES=<N> --dart-define=BACKEND=<canvas|vertices>
++```
++
++Chrome 151.0.7922.170, CanvasKit, window 1200×723 at `dpr` 2, median of three.
++**500,000 was not run on web**; the Task 13 brief authorises skipping it, and
++the 10k/50k rows already point decisively.
++
++| entities | backend | build p50 | build [min, max] | raster p50 | raster [min, max] |
++|---|---|---|---|---|---|
++| 10,000 | canvas | 117.80 ms | [117.10, 122.20] | 79.30 ms | [79.20, 79.60] |
++| 10,000 | vertices | **6.80 ms** | [6.80, 6.90] | **1.40 ms** | [1.30, 1.40] |
++| 50,000 | canvas | 155.70 ms | [154.20, 156.50] | 107.90 ms | [107.90, 108.00] |
++| 50,000 | vertices | **8.90 ms** | [8.80, 8.90] | **1.80 ms** | [1.80, 1.80] |
++
++Web control fields, matching exactly within each pair:
++
++| entities | screenSpaceLeafCount | dashSpans | collapsed | canvasCalls (canvas) | canvasCalls (vertices) | triangles | drawVerticesCalls |
++|---|---|---|---|---|---|---|---|
++| 10,000 | 2,111 | 50,120 | 182 | 52,897 | 19 | 223,733 | 20 |
++| 50,000 | 2,709 | 66,627 | 257 | 70,193 | 24 | 294,536 | 21 |
++
++**`frames` does not match within each web pair and must not be read as having
++matched.** 10,000: vertices 238/240/241 against canvas 241/241/241. 50,000:
++vertices 241/239/233 against canvas 241/241/241. This is `onReportTimings`
++batching differently at the tail in app-run mode — a real running app has no
++synthetic clock to force an exact frame count the way `tester.pump` does. It
++does not move a p50, and every other invariant matches exactly, which is the
++control that matters.
++
++### Why the two tables cannot be merged
++
++**They are two separate confirmations, not one table doubled.** Three reasons,
++and the third is the one that matters most:
++
++1. **They did not draw the same drawing.** Desktop 10,000 is 1,664 screen-space
++   leaves and 37,376 dashSpans; web 10,000 is 2,111 and 50,120 — a different
++   viewport (web fits 1200×723 @2; desktop is whatever the driven window was).
++   There is no sound per-platform multiplier between them.
++2. **`build` is commensurable; `raster` is not.** `build` is Dart-side
++   widget-to-displaylist cost, the same Flutter framework code on both
++   platforms. Web vertices build is **3.22 µs/leaf** against macOS's **3.43** —
++   the same Dart-side work at the same cost, which is a sanity check that
++   passes. Web *canvas* build is 2.23 µs/call against macOS's 0.31, the
++   expected CanvasKit JS-interop penalty.
++3. **The headline web raster ratio is not a credible GPU measurement.** Web
++   vertices raster of **1.40 ms** against macOS's **6.68 ms**, on **34% more
++   geometry**, is not physically plausible as end-to-end GPU time. The most
++   likely explanation is that CanvasKit's `FrameTiming.rasterDuration` ends at
++   command submission rather than at completion. So the **56.6× / 59.9×** web
++   raster ratios point the same direction as everything else but are **not the
++   number the platform default rests on.**
++
++**The default rests on the within-platform build ratios: 117.80 / 6.80 =
++17.3× at 10,000 and 155.70 / 8.90 = 17.5× at 50,000.** That is the same Dart
++code on both arms of the comparison, measured on the same platform, and it is
++what answers the open question the default was written against — whether
++CanvasKit's `drawVertices` is worth using.
++
++### The ratio is not linear in entities
++
++The raster margin widens 6.63× → 7.85× → 23.48× across 10k → 50k → 500k
++entities, but **`ENTITIES` is not the driver of drawn cost.** From 50,000 to
++500,000 — a 10× rise in entities — the geometry that actually reaches the sink
++grows far less:
++
++| | 50,000 | 500,000 | factor |
++|---|---|---|---|
++| entities | 50,000 | 500,000 | 10.0× |
++| `screenSpaceLeafCount` | 2,170 | 4,625 | 2.13× |
++| `dashSpans` | 48,323 | 146,335 | 3.03× |
++| `canvasCalls` (canvas) | 51,298 | 151,671 | 2.96× |
++
++The working-set camera culls, so a 10× corpus is a ~3× frame. Read the widening
++ratio against **canvas calls**, which is the unit of render cost this project
++established in
++[`2026-08-20-dash-leaf-separation.md`](2026-08-20-dash-leaf-separation.md) —
++not against the entity count in the table's left column.
++
++### The cost the canvas backend does not carry
++
++Peak vertex-buffer capacity, read from `debugCapacityVertices` printed in the
++R2 vertices transcripts (12 bytes per vertex: `Float32x2` position + `Int32`
++colour):
++
++| entities | peak `debugCapacityVertices` | bytes | |
++|---|---|---|---|
++| 10,000 | 262,144 | 3,145,728 | 3.00 MiB |
++| 50,000 | 1,048,576 | 12,582,912 | 12.00 MiB |
++| 500,000 | 8,388,608 | 100,663,296 | **96.00 MiB** |
++
++**At 500,000 entities the vertices backend pins exactly 96.00 MiB for the life
++of the widget.** The doubling reserve never shrinks — that is the same property
++that makes the frame path allocation-free in steady state, and it is not free.
++The canvas backend has no equivalent. Whoever budgets memory for a large
++drawing needs this number and it is not visible from any timing row.
++
++---
++
++## The five permitted divergences, with their counts
++
++The design names five divergences as permitted; anything else is a defect. Each
++is exercised or explicitly not, with the sink-against-sink measurement beside
++it, taken 2026-08-21.
++
++| # | Divergence | Which is right | Where it is exercised | Measured |
++|---|---|---|---|---|
++| 1 | **Anisotropic stroke width** | vertices | `'anisotropic stroke width diverges, and vertices is right'`, `anisotropyDivergenceFixture(scaleY: 3.0)` | canvas 19,194 ink px, vertices 24,580, **3,513 stray and 897 uncovered** — in both directions, which is what makes it a width divergence and not a misplaced ellipse |
++| 2 | **Point shape** | neither; 3d picks the axis-aligned square | Removed as a divergence: `CanvasDrawSink.point` was changed to match. Pinned by `point_shape_test.dart` and by `'the two backends agree on the ops the painter cannot emit'` | **0 stray, 0 uncovered** (canvas 18,291, vertices 18,906) |
++| 3 | **Anti-aliasing** | canvas | Absorbed by `kInkAlphaFloor = 0xC0` and the one-pixel dilation in every comparison | **0 stray, 0 uncovered** on the agreement fixture (canvas 22,398, vertices 23,241) |
++| 4 | **Sub-pixel strokes** | vertices, untestable by agreement | `'a sub-pixel stroke is where the two backends stop agreeing'`, lineweight 1 → 0.11 device px | canvas **0** ink px (every pixel below the alpha floor), vertices **1,140**, all 1,140 stray |
++| 5 | **Overlapping translucent strokes** | canvas | **Not exercised.** Inert while the corpus is opaque (`argb`'s alpha is `255 - transparency`, `resolved_style.dart:15`); live the moment 3e adds fills | no measurement — recorded, not fixed |
++
++**Row 4 is exercised in exactly one place, and nowhere in a production
++fixture.** No golden fixture in this repository reaches the sub-pixel floor:
++the two ladders sit at 0.3402 logical px against a 0.3333 floor, the dash
++ladder at 1.134, and `stroke_width` at 4.0 with `dpr` 1.0. The permitted
++sub-pixel divergence is pinned by that one unit test and by nothing else — the
++spec predicted exactly this ("the sub-pixel rules are pinned by unit test and by
++nothing else") and it is true. A reader must not assume the golden suite covers
++it.
++
++**Two device-pixel regimes coexist in the golden suite, documented in neither
++file until now:** `stroke_width_golden_test.dart` pins `dpr` 1.0 while the two
++ladders run at the binding's 3.0.
++
++### A divergence that is NOT on the permitted list
++
++**A DXF `ARC` carrying `sweep == 2π` draws a full circle with an unjoined notch
++at its start angle, where `Canvas.drawArc` closes the loop.** `closed` is
++decided structurally with no tolerance anywhere — `VerticesDrawSink.circle`
++passes `true`, `arc` passes `false` — so the value reaches the sink untouched.
++
++**It is characterised, not fixed**, and the reason is that nothing can produce
++one today:
++
++- The corpus cannot. `generate_document.dart:617` draws root arc sweeps from
++  `[0.25π, 1.75π)` and `:540` draws definition arcs from `[0.5π, 1.5π)`, the
++  only two arc producers, both strictly below `2π`.
++- **There is no DXF reader in this repository at all.**
++  `packages/jet_cad_2d/lib/src/codec/` holds `json_codec.dart` and
++  `schema_version.dart` and nothing else.
++
++**It is also nearly invisible.** The seam notch is about `half · √(2/R)` device
++pixels wide at the flattening tolerance — at `half` ≈ 2 px and R ≈ 40 px that
++is **0.45 px**, under the comparison's one-pixel dilation. A 2π arc through the
++painter at a realistic size measured **0 stray and 0 uncovered**: the divergence
++was there and the comparison could not see it. The characterisation fixture
++therefore uses a 36-device-pixel radius stroked 25 device pixels wide, where it
++can: **canvas 5,688 ink px, vertices 5,710, 0 stray and 6 uncovered** — one
++radial notch at three o'clock, the start angle, and nothing anywhere else on the
++ring.
++
++**What would have to change for it to matter:** a DXF reader that maps an `ARC`
++with equal start and end angles onto a `2π` sweep, or a corpus change that
++widens the sweep range. When `closed` learns about a full sweep, that test goes
++red and the right fix is to change its two expectations to zero, not to delete
++the fixture.
++
++---
++
++## What has no coverage, and where the tests are narrower than they read
++
++Recorded here because a results note that reports only what went well is not a
++result.
++
++**The seam join and the point-shape fix have no coverage through any frame
++path.** Not the goldens, not `draft_painter_*`. They are pinned against the
++`DrawSink` interface only.
++
++- `draft_painter.dart:425-429` routes point, line and polyline unconditionally
++  through `_emitScreenSpace`, whose residual is a bare `Transform2.translation`
++  (`:498`). **A rotated residual therefore never reaches `point`** through the
++  painter, and `_emit`'s `case EntityKind.point` (`:566`) is dead code.
++- The seam is **unobservable through the painter, not unreachable** — the
++  painter does reach `closed: true` via `sink.circle` (`:588`, `:619`). What is
++  missing is a frame-path fixture that would *show* a broken seam, not a code
++  path that can never run.
++
++**Two `_emitJoin` branches are unreachable dead code, not layered guards.**
++`cosHalf <= 0` and `mlen == 0` cannot fire given the `dot < kMinMiterCosine`
++bail at ~151°; each was disabled alone with all 46 tests staying green. The
++mutation log records them as unreachable rather than counting them as covered.
++An unreachable branch does not want a test; it wants removal or a comment
++saying why it stays. **Left in place, recorded, for whoever touches the join
++next.**
++
++**A recurring shape this plan hit four times: the assertion is narrower than
++the mutant's name.** It is worth naming because it will recur.
++
++- Task 2: `_lastFlushDisposed = true` written unconditionally beside the
++  dispose call — deleting `vertices.dispose()` left all 26 tests green.
++- Task 4: every join fixture turned left, so `s = cross > 0 ? -half : half`
++  collapsed to `s = -half` with all 198 tests green.
++- Task 9: reversing the `observe` loop left all 11 tests green — nothing pinned
++  triangle order *within one buffer*, the one property the sink is built around.
++- Task 11: the full-sweep-ARC characterisation bypassed `expectSinksAgree`'s
++  ink floors, so making `VerticesDrawSink.arc` return early — the vertices side
++  emitting **nothing at all** — left all five tests passing.
++
++All four were found by mutation and all four are closed. They are listed
++together because reading the tests would not have found any of them.
++
++**`lib/src/draft_canvas.dart:192`'s `devicePixelRatio` plumbing is referenced by
++no test file.** Nothing in this plan should be read as covering it.
++
++---
++
++## Reproducibility
++
++### Desktop — reproducible from what is committed
++
++The `flutter drive` invocations above run against the committed harness. The one
++exception is the peak-buffer reading: `printBackend` does not print
++`debugCapacityVertices`, so Task 12 added one temporary line to
++`apps/dev_harness_2d/integration_test/frame_timing_test.dart` for the duration
++of the sweep and reverted it. The `debugCapacityVertices=… bytes=…` lines in
++Task 12's transcripts are real printed output, not arithmetic done afterwards.
++Reproducing the memory table means re-adding that line.
++
++### Web — NOT reproducible from what is committed
++
++**Say this plainly: the twelve web readings cannot be re-taken from the
++committed path on this machine.** They ran under:
++
++- a `main.dart` carrying a temporary `runZoned` + `dart:html` localStorage
++  capture that is **in neither commit** (a `ZoneSpecification.print` that both
++  forwards to the real `print()` and appends to a `StringBuffer`, written once
++  to `window.localStorage['r2Result']` after `runR2Rig` completed), and
++- two `/tmp` scripts that were never committed.
++
++Running the shipped `RUN_R2` mode exactly as its doc comment describes produces
++**no output whatsoever** here, because `flutter run -d chrome --profile` never
++links a debug service on this machine. That gap is the reason the workaround
++existed. A published row nobody can re-take is a number nobody can check, so the
++artifacts are committed beside this note:
++
++`docs/superpowers/notes/2026-08-21-plan-3d-web-raw/`
++
++| file | what it is |
++|---|---|
++| `web_rows.log` | the raw retrieved blocks — the source of every figure in the web table |
++| `run_web_r2.sh` | the driver: launches `flutter run -d chrome --profile`, waits for the CLI banner, finds Chrome's `--remote-debugging-port` from `ps aux`, calls the poller, cleans up |
++| `cdp_poll_generic.py` | the retrieval: one `Runtime.evaluate("window.localStorage.getItem('r2Result')")` over a CDP websocket, polled every 2 s, `returnByValue`, no scraping and no fragment assembly |
++| `main.dart.pre-diag` | the harness `main.dart` **as backed up with `cp` before the run-time edits** — it carries that session's diagnostic `print()` lines but **not** the `runZoned`/localStorage capture |
++
++**The exact `main.dart` that ran is not among them.** `main.dart.pre-diag` is
++the restore point, not the run-time file. The `runZoned` capture survives only
++as the code excerpt in the Task 13 report, which is archived with this plan's
++ledger. Anyone reproducing these rows must re-write that wrapper from the
++excerpt.
++
++**Two further caveats on the absolute web figures.** Every measured run
++executed inside that `runZoned` wrapper, which the shipped code does not have —
++it only buffers `print()` output and forwards it unchanged, and it wrapped both
++backends identically, so the ratios hold, but the absolute numbers were taken
++under code that is not the committed code. And
++`localStorage['r2Result']` was never cleared at startup, so a stale prior-run
++read was possible in principle; it was not observed — every block's `backend=`
++and `R2 (N)` matched its own run's defines.
++
++**The transcripts in the Task 13 report are reflowed, not byte-verbatim.**
++Blocks were condensed for the table format and the identical
++`text:`/`paragraphs:` lines were dropped from the per-run sweep tables. The raw
++captures in `web_rows.log` are the unreflowed record.
++
++---
++
++## What 3d owes 3e and 3f
++
++**3e (fills)** inherits:
++
++- A triangle buffer that is **already appended to in draw order**, and a flush
++  that already happens before anything unbatchable. The
++  `fill.handle < boundary.handle` question is unchanged and still 3e's to
++  answer; 3d only makes the guarantee it relies on stronger.
++- **Permitted divergence 5 goes live the moment 3e adds fills.** Overlapping
++  translucent strokes double-blend on a triangle soup where a stroked path
++  unions its coverage. It is inert today because the corpus is opaque. It has
++  no test, and the moment alpha < 255 appears it needs one.
++
++**3f (caches and tiles)** inherits:
++
++- `_flushBeforeUnbatchable` as the shape the picture-cache decision extends. A
++  picture cache that records into a `Picture` interacts with a sink that batches
++  across residuals; 3f must decide whether a cached picture flushes the buffer
++  at its boundary.
++- **No crossover number**, because criterion 6 did not tie. The design's
++  fallback anticipated handing 3f the entity count where the backends converge;
++  there is none up to 500,000 and the margin is still widening at that size.
++- **96.00 MiB of pinned vertex buffer at 500,000 entities.** A tile or cache
++  scheme changes how much geometry is live at once, which is exactly the
++  arithmetic that number comes from.
++- **The ratio is driven by canvas calls, not entities** (2.13× leaves and 3.03×
++  dashSpans for a 10× entity rise). Any cache that changes the call count
++  changes the whole comparison.
++
++**Whoever chooses round joins** inherits one branch, in one method, with a
++golden on each backend to show the difference.
++
++**Whoever writes the next plan** inherits four open items from this one:
++
++1. **The `CLAUDE.md` allocation amendment**, undecided (criterion 7).
++2. **A frame-path fixture for the seam and the point shape.** Both are pinned
++   against the `DrawSink` interface only; `DraftPainter` cannot exercise a
++   rotated point at all today.
++3. **The 2π-sweep `ARC` seam**, characterised and unfixed, safe only because no
++   DXF reader exists. It becomes a real defect the day one does.
++4. **The R4a/R4b control**, plausible but not demonstrated — half an hour of
++   device time with the invariant fields in the grep pattern would close it.
+diff --git a/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/cdp_poll_generic.py b/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/cdp_poll_generic.py
+new file mode 100644
+index 0000000..d8f9fcf
+--- /dev/null
++++ b/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/cdp_poll_generic.py
+@@ -0,0 +1,46 @@
++import json, sys
++import urllib.request
++import websockets
++import asyncio
++
++PORT = int(sys.argv[1])
++
++async def main():
++    resp = urllib.request.urlopen(f"http://localhost:{PORT}/json")
++    targets = json.loads(resp.read())
++    page = None
++    for t in targets:
++        if t.get("type") == "page":
++            page = t
++            break
++    if page is None:
++        print("NO PAGE TARGET FOUND", targets)
++        sys.exit(1)
++    ws_url = page["webSocketDebuggerUrl"]
++    async with websockets.connect(ws_url, max_size=50_000_000) as ws:
++        msg_id = 0
++        async def evaluate(expr):
++            nonlocal msg_id
++            msg_id += 1
++            await ws.send(json.dumps({
++                "id": msg_id, "method": "Runtime.evaluate",
++                "params": {"expression": expr, "returnByValue": True}
++            }))
++            while True:
++                raw = await ws.recv()
++                data = json.loads(raw)
++                if data.get("id") == msg_id:
++                    return data
++
++        for attempt in range(150):  # up to ~5 minutes
++            result = await evaluate("window.localStorage.getItem('r2Result')")
++            value = result.get("result", {}).get("result", {}).get("value")
++            if value:
++                print("=== RETRIEVED ===")
++                print(value)
++                return
++            await asyncio.sleep(2)
++        print("TIMED OUT waiting for r2Result in localStorage")
++        sys.exit(2)
++
++asyncio.run(main())
+diff --git a/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/main.dart.pre-diag b/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/main.dart.pre-diag
+new file mode 100644
+index 0000000..a313e33
+--- /dev/null
++++ b/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/main.dart.pre-diag
+@@ -0,0 +1,318 @@
++// A measurement harness, not a product.
++//
++// Pointer pan and scroll zoom go straight to `CameraController`. There is no
++// tool architecture and no selection, because tools are Plan 4 and every line
++// here is a line the rigs have to keep working.
++
++// ignore_for_file: avoid_print — the RUN_R2 diagnostics below print by
++// design; see `measurement_rig.dart`.
++
++import 'dart:async';
++import 'dart:developer' as developer;
++
++import 'package:flutter/gestures.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/scheduler.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d/testing.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
++
++import 'measurement_rig.dart';
++
++/// Entity count, so one binary serves both corpus sizes.
++const int kEntities = int.fromEnvironment('ENTITIES', defaultValue: 50000);
++
++/// Multiplies every stroke's device-pixel width at the sink.
++///
++/// **Measurement-only**, added for Task 4c's fill-rate experiment (B):
++/// geometry, draw-call count and the walk are unchanged across a run at 1x,
++/// 2x or 4x — only the number of shaded pixels changes. There is no
++/// `double.fromEnvironment` in Dart, so this parses the string define at
++/// startup rather than being a compile-time constant. Inert at its default
++/// of 1.0.
++final double kLineweightScale = double.tryParse(
++      const String.fromEnvironment('LINEWEIGHT_SCALE', defaultValue: '1.0'),
++    ) ??
++    1.0;
++
++/// Whether the corpus carries text, and whether the painter draws it.
++///
++/// Two defines, not one, because they answer different questions.
++/// `TEXT=1` changes the *document* — it turns `labelFraction` and
++/// `attributedInstanceFraction` on, which changes the entity mix, the extents
++/// and therefore the camera, so an R2 run with it on is **not** comparable to
++/// Plan 3b's baselines and must be reported as its own row.
++/// `DRAW_TEXT=0` changes one branch in the painter and nothing else, which is
++/// what makes the text-on/text-off delta readable as the cost of text rather
++/// than as the difference between two drawings.
++///
++/// Both are inert at their defaults: with `TEXT` unset the document is
++/// byte-for-byte the one Plan 3b measured, and `DRAW_TEXT` has nothing to act
++/// on.
++/// The fraction of entities carrying the dashed linetype.
++///
++/// The dash/leaf separation experiment: `dashSpans` and `screenSpaceLeafCount`
++/// move together in this corpus (x1.293 against x1.304 from 10,000 to 50,000
++/// entities), so no run so far can tell "cost per drawn leaf" from "cost per
++/// dash span" apart. This define holds the geometry still and moves only the
++/// linetype, which is the one thing that separates them.
++///
++/// It is sound as a control because `_Styling.linetypeFor` is a quota counter,
++/// not a draw from the corpus's random stream: changing this fraction cannot
++/// perturb a single coordinate, so extents, camera and leaf count are
++/// unchanged. The one thing it does change is that `generateDocument` seeds
++/// the dashed `LinetypeRecord` only when the fraction is positive, so at 0
++/// every later handle shifts down by one -- relative draw order, and therefore
++/// what is drawn, is the same. That the control held is *measured*, not
++/// assumed: the two runs must report the same `screenSpaceLeafCount`.
++///
++/// There is no `double.fromEnvironment`, so this parses a string define the
++/// same way [kLineweightScale] does. Inert at its default of 0.35, which is
++/// the value every run before this one used.
++final double kDashedFraction = double.tryParse(
++      const String.fromEnvironment('DASHED', defaultValue: '0.35'),
++    ) ??
++    0.35;
++
++const bool kTextCorpus = bool.fromEnvironment('TEXT');
++const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
++
++/// Which sink the harness draws through: `canvas`, `vertices`, or unset for
++/// the platform's own choice.
++///
++/// **A `String.fromEnvironment`, and it stays one.** Plan 3c lost a full device
++/// run to `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as
++/// false while printing entirely plausible numbers; the only thing that caught
++/// it was a line printing `corpus=on/off`. A string has no such hazard, and an
++/// unrecognised value throws at startup rather than falling back to something
++/// that looks fine.
++final RenderBackend? kBackend =
++    switch (const String.fromEnvironment('BACKEND', defaultValue: '')) {
++  '' => null,
++  'canvas' => RenderBackend.canvas,
++  'vertices' => RenderBackend.vertices,
++  final other =>
++    throw StateError('BACKEND must be canvas, vertices or unset; got "$other"'),
++};
++
++/// The corpus the rigs measure on: the same shape as R1's, so the two sets of
++/// numbers describe one drawing.
++///
++/// With [kTextCorpus] on this is `textRigCorpus`'s shape, and the measurer
++/// stops being a detail: `DraftDocument`'s default is the zero-metrics
++/// `InsertionPointMeasurer`, which collapses every glyph box to a point and
++/// every text transform to a singular matrix. A text corpus built on it looks
++/// like a text corpus and draws nothing measurable.
++DraftDocument harnessDocument([int? entityCount]) => generateDocument(
++      entityCount ?? kEntities,
++      definitionCount: 200,
++      instanceCount: 20000,
++      nestingDepth: 2,
++      mirroredFraction: 0.1,
++      nonUniformFraction: 0.2,
++      groupCount: 50,
++      layerCount: 8,
++      byBlockFraction: 0.3,
++      dashedFraction: kDashedFraction,
++      labelFraction: kTextCorpus ? 0.02 : 0,
++      attributedInstanceFraction: kTextCorpus ? 0.2 : 0,
++      measurer:
++          kTextCorpus ? FlutterTextMeasurer() : const InsertionPointMeasurer(),
++    );
++
++/// Whether `main()` drives R2 itself on startup and prints its block,
++/// instead of waiting to be driven by `integration_test`.
++///
++/// Task 13's web row needed `flutter drive -d chrome`, and that hangs in
++/// this environment before it ever reaches chromedriver — see the Task 13
++/// report. `flutter run -d chrome --profile` forwards the app's own
++/// `print()` output to the terminal, so this mode drives the rig itself and
++/// gets the same block without any driver.
++///
++/// Same footgun as [kTextCorpus], same rule: a `bool.fromEnvironment` reads
++/// anything other than exactly `"true"` as false, so `--dart-define=RUN_R2=1`
++/// silently runs the ordinary interactive harness instead. Always pass
++/// `=true`.
++///
++/// Inert at its default of `false`: an ordinary `flutter run`/`flutter
++/// drive` harness invocation is unaffected.
++const bool kRunR2 = bool.fromEnvironment('RUN_R2');
++
++void main() {
++  // TEMP (Task 13 diagnostic, not for the final commit): confirms app code
++  // is executing in the browser at all before trusting anything downstream.
++  print('main() entered, kRunR2=$kRunR2, kEntities=$kEntities');
++  developer.log('main() entered via dart:developer.log', name: 'r2diag');
++  final doc = harnessDocument();
++  print('main() corpus generated');
++  if (!kRunR2) {
++    runApp(HarnessApp(document: doc));
++    return;
++  }
++  runApp(HarnessApp(
++    document: doc,
++    onReady: (camera, index, painter, sink, vertices, resolvedBackend) {
++      print('onReady fired');
++      unawaited(
++          _driveR2(doc, camera, painter, sink, vertices, resolvedBackend));
++    },
++  ));
++}
++
++/// Fits the camera to the same working-set window `boot()` in
++/// `integration_test/frame_timing_test.dart` uses — not the widget's own
++/// full-extents fit, which would measure a frame nobody renders — then runs
++/// [runR2Rig] the same way the widget test does, driven by real frames
++/// instead of a synthetic test clock.
++///
++/// The viewport this fits *into* is whatever logical size the browser window
++/// actually is when this runs, unlike the widget test's fixed synthetic
++/// view. That size is printed so a reader can judge comparability against
++/// the desktop rows rather than assume it.
++Future<void> _driveR2(
++  DraftDocument doc,
++  CameraController camera,
++  DraftPainter painter,
++  CanvasDrawSink sink,
++  VerticesDrawSink? vertices,
++  RenderBackend resolvedBackend,
++) async {
++  print('R2 app-run: driving started');
++  final e = doc.extents;
++  final cx = (e.minX + e.maxX) / 2;
++  final cy = (e.minY + e.maxY) / 2;
++  final view = WidgetsBinding.instance.platformDispatcher.views.first;
++  final viewport = view.physicalSize / view.devicePixelRatio;
++  camera.value = ViewportTransform.fit(
++      Aabb2(Vector2(cx - 1500, cy - 1125), Vector2(cx + 1500, cy + 1125)),
++      viewport);
++  await _pumpFrame();
++
++  print('R2 app-run: window=${viewport.width.toStringAsFixed(0)}x'
++      '${viewport.height.toStringAsFixed(0)} dpr=${view.devicePixelRatio}');
++
++  await runR2Rig(
++    entities: kEntities,
++    lineweightScale: kLineweightScale,
++    textCorpus: kTextCorpus,
++    drawText: kDrawText,
++    camera: camera,
++    painter: painter,
++    sink: sink,
++    vertices: vertices,
++    resolvedBackend: resolvedBackend,
++    pumpFrame: _pumpFrame,
++    settle: _settle,
++  );
++  print('R2 app-run: done');
++}
++
++/// Renders exactly one frame and completes after it.
++///
++/// This is called from inside `_HarnessAppState`'s own post-frame callback —
++/// [SchedulerBinding.instance.schedulerPhase] is `postFrameCallbacks`, not
++/// `idle`, at that point, and [SchedulerBinding.endOfFrame] only calls
++/// [SchedulerBinding.scheduleFrame] for you when the phase is idle. Relying
++/// on `camera.value = ...`'s listener chain to schedule the next frame as a
++/// side effect worked on the first call by chance and hung on every one
++/// after it, once the phase genuinely was idle and nothing else nearby
++/// happened to call `scheduleFrame`. Calling it explicitly first removes the
++/// dependency on that side effect entirely.
++Future<void> _pumpFrame() {
++  SchedulerBinding.instance.scheduleFrame();
++  return SchedulerBinding.instance.endOfFrame;
++}
++
++/// A running app has no synthetic clock to advance, so there is no exact
++/// equivalent of `tester.pumpAndSettle()`. This pumps frames while one is
++/// still scheduled, bounded, which is the same loop `pumpAndSettle` runs
++/// internally minus its own timeout — the closest honest approximation
++/// available outside a test.
++Future<void> _settle() async {
++  const maxIdlePumps = 10;
++  for (var i = 0; i < maxIdlePumps; i++) {
++    if (!SchedulerBinding.instance.hasScheduledFrame) return;
++    await _pumpFrame();
++  }
++}
++
++class HarnessApp extends StatefulWidget {
++  const HarnessApp({super.key, required this.document, this.onReady});
++
++  final DraftDocument document;
++
++  /// Handed the pieces a rig needs to drive: the camera it scripts, the
++  /// index whose rebuild count it reports, and the painter and sink whose
++  /// counters it reads.
++  ///
++  /// Fired after the first frame, not from `initState` — the painter and
++  /// sink belong to `DraftCanvasState`, a descendant whose own `initState`
++  /// has not run yet when this widget's has.
++  ///
++  /// [vertices] is non-null only when [resolvedBackend] is
++  /// `RenderBackend.vertices`; a rig reads its batch and flush counters the
++  /// same way it reads the painter's. [resolvedBackend] is what
++  /// `DraftCanvasState` actually built, not what [kBackend] asked for.
++  final void Function(
++      CameraController camera,
++      SpatialIndex index,
++      DraftPainter painter,
++      CanvasDrawSink sink,
++      VerticesDrawSink? vertices,
++      RenderBackend resolvedBackend)? onReady;
++
++  @override
++  State<HarnessApp> createState() => _HarnessAppState();
++}
++
++class _HarnessAppState extends State<HarnessApp> {
++  late final SpatialIndex index = SpatialIndex(widget.document);
++  late final CameraController camera = CameraController(
++      ViewportTransform.fit(widget.document.extents, const Size(1600, 1200)));
++  final GlobalKey<DraftCanvasState> _canvasKey = GlobalKey<DraftCanvasState>();
++
++  @override
++  void initState() {
++    super.initState();
++    WidgetsBinding.instance.addPostFrameCallback((_) {
++      final canvasState = _canvasKey.currentState!;
++      widget.onReady?.call(camera, index, canvasState.painter, canvasState.sink,
++          canvasState.vertices, canvasState.resolvedBackend);
++    });
++  }
++
++  @override
++  void dispose() {
++    index.dispose();
++    camera.dispose();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) => MaterialApp(
++        debugShowCheckedModeBanner: false,
++        home: Scaffold(
++          body: Listener(
++            onPointerMove: (event) {
++              if (event.buttons != 0) camera.panBy(event.delta);
++            },
++            onPointerSignal: (event) {
++              if (event is! PointerScrollEvent) return;
++              // 1.1 per notch, in the direction the wheel turned. Scroll up is
++              // negative dy on every platform Flutter reports.
++              camera.zoomAt(event.localPosition,
++                  event.scrollDelta.dy < 0 ? 1.1 : 1 / 1.1);
++            },
++            child: DraftCanvas(
++                key: _canvasKey,
++                document: widget.document,
++                index: index,
++                camera: camera,
++                lineweightScale: kLineweightScale,
++                drawText: kDrawText,
++                backend: kBackend),
++          ),
++        ),
++      );
++}
+diff --git a/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/run_web_r2.sh b/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/run_web_r2.sh
+new file mode 100755
+index 0000000..51b3356
+--- /dev/null
++++ b/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/run_web_r2.sh
+@@ -0,0 +1,62 @@
++#!/bin/bash
++# Usage: run_web_r2.sh ENTITIES BACKEND
++# Runs the harness's RUN_R2 app-run mode on Chrome in profile mode, retrieves
++# the printed block via Chrome DevTools Protocol (localStorage), and prints
++# it. Cleans up its own Chrome/flutter run processes on exit.
++set -u
++ENTITIES="$1"
++BACKEND="$2"
++cd /Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/vertices-spike/apps/dev_harness_2d
++
++pkill -9 -f "flutter run" 2>/dev/null
++pkill -9 -f "Google Chrome" 2>/dev/null
++sleep 1
++
++LOG="/tmp/r2run.$$.$(date +%s).log"
++: > "$LOG"
++flutter run -d chrome --profile \
++  --dart-define=RUN_R2=true --dart-define=TEXT=true \
++  --dart-define=ENTITIES="$ENTITIES" --dart-define=BACKEND="$BACKEND" \
++  > "$LOG" 2>&1 &
++FPID=$!
++
++# Wait for the CLI banner (compile + Chrome launch + connect).
++for i in $(seq 1 60); do
++  grep -q "Flutter run key commands" "$LOG" 2>/dev/null && break
++  if ! kill -0 "$FPID" 2>/dev/null; then
++    echo "FLUTTER RUN EXITED EARLY"
++    cat "$LOG"
++    exit 1
++  fi
++  sleep 2
++done
++if ! grep -q "Flutter run key commands" "$LOG" 2>/dev/null; then
++  echo "TIMED OUT waiting for banner"
++  cat "$LOG"
++  kill -9 "$FPID" 2>/dev/null
++  pkill -9 -f "Google Chrome" 2>/dev/null
++  exit 1
++fi
++
++# Give Chrome a moment to fully register its CLI flags before we grep them.
++sleep 3
++PORT=$(ps aux | grep "Google Chrome" | grep -o -- "--remote-debugging-port=[0-9]*" | head -1 | cut -d= -f2)
++if [ -z "$PORT" ]; then
++  echo "NO CHROME REMOTE-DEBUGGING PORT FOUND"
++  cat "$LOG"
++  kill -9 "$FPID" 2>/dev/null
++  pkill -9 -f "Google Chrome" 2>/dev/null
++  exit 1
++fi
++
++PATH="$PATH:/Users/ahmeturel/Library/Python/3.9/bin" python3 /tmp/cdp_poll_generic.py "$PORT"
++RC=$?
++
++echo "--- flutter run log tail (diagnostics) ---"
++tail -5 "$LOG"
++
++kill -INT "$FPID" 2>/dev/null
++sleep 2
++kill -9 "$FPID" 2>/dev/null
++pkill -9 -f "Google Chrome" 2>/dev/null
++exit $RC
+diff --git a/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/web_rows.log b/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/web_rows.log
+new file mode 100644
+index 0000000..58dfdf1
+--- /dev/null
++++ b/docs/superpowers/notes/2026-08-21-plan-3d-web-raw/web_rows.log
+@@ -0,0 +1,210 @@
++=== 10000 vertices run 2 ===
++=== RETRIEVED ===
++onReady fired
++R2 app-run: driving started
++R2 app-run: window=1200x723 dpr=2
++R2 (10000) frames=240
++  build  p50=6.90ms p95=7.90ms max=13.10ms
++  raster p50=1.30ms p95=1.70ms max=58.50ms
++  screenSpaceLeafCount=2111 lineweightScale=1
++  dashSpans=50120 collapsed=182 canvasCalls=19
++  backend=vertices triangles=223733 drawVerticesCalls=20
++  text: corpus=on draw=on textOps=19 skippedText=0
++  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
++R2 app-run: done
++
++--- flutter run log tail (diagnostics) ---
++h List all available interactive commands.
++d Detach (terminate "flutter run" but leave application running).
++c Clear the screen
++q Quit (terminate the application on the device).
++
++=== 10000 vertices run 3 ===
++=== RETRIEVED ===
++onReady fired
++R2 app-run: driving started
++R2 app-run: window=1200x723 dpr=2
++R2 (10000) frames=241
++  build  p50=6.80ms p95=8.10ms max=12.70ms
++  raster p50=1.40ms p95=1.70ms max=54.60ms
++  screenSpaceLeafCount=2111 lineweightScale=1
++  dashSpans=50120 collapsed=182 canvasCalls=19
++  backend=vertices triangles=223733 drawVerticesCalls=20
++  text: corpus=on draw=on textOps=19 skippedText=0
++  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
++R2 app-run: done
++
++--- flutter run log tail (diagnostics) ---
++h List all available interactive commands.
++d Detach (terminate "flutter run" but leave application running).
++c Clear the screen
++q Quit (terminate the application on the device).
++
++=== 10000 canvas run 1 (already captured above, repeating cleanly) ===
++=== RETRIEVED ===
++onReady fired
++R2 app-run: driving started
++R2 app-run: window=1200x723 dpr=2
++R2 (10000) frames=241
++  build  p50=117.10ms p95=133.90ms max=140.00ms
++  raster p50=79.30ms p95=91.20ms max=191.90ms
++  screenSpaceLeafCount=2111 lineweightScale=1
++  dashSpans=50120 collapsed=182 canvasCalls=52897
++  backend=canvas
++  text: corpus=on draw=on textOps=19 skippedText=0
++  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
++R2 app-run: done
++
++--- flutter run log tail (diagnostics) ---
++h List all available interactive commands.
++d Detach (terminate "flutter run" but leave application running).
++c Clear the screen
++q Quit (terminate the application on the device).
++
++=== 10000 canvas run 2 ===
++=== RETRIEVED ===
++onReady fired
++R2 app-run: driving started
++R2 app-run: window=1200x723 dpr=2
++R2 (10000) frames=241
++  build  p50=117.80ms p95=134.40ms max=142.10ms
++  raster p50=79.60ms p95=91.70ms max=198.30ms
++  screenSpaceLeafCount=2111 lineweightScale=1
++  dashSpans=50120 collapsed=182 canvasCalls=52897
++  backend=canvas
++  text: corpus=on draw=on textOps=19 skippedText=0
++  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
++R2 app-run: done
++
++--- flutter run log tail (diagnostics) ---
++h List all available interactive commands.
++d Detach (terminate "flutter run" but leave application running).
++c Clear the screen
++q Quit (terminate the application on the device).
++
++=== 50000 vertices run 1 ===
++=== RETRIEVED ===
++onReady fired
++R2 app-run: driving started
++R2 app-run: window=1200x723 dpr=2
++R2 (50000) frames=241
++  build  p50=8.90ms p95=9.50ms max=14.10ms
++  raster p50=1.80ms p95=2.10ms max=267.70ms
++  screenSpaceLeafCount=2709 lineweightScale=1
++  dashSpans=66627 collapsed=257 canvasCalls=24
++  backend=vertices triangles=294536 drawVerticesCalls=21
++  text: corpus=on draw=on textOps=24 skippedText=0
++  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
++R2 app-run: done
++
++--- flutter run log tail (diagnostics) ---
++h List all available interactive commands.
++d Detach (terminate "flutter run" but leave application running).
++c Clear the screen
++q Quit (terminate the application on the device).
++
++=== 50000 vertices run 2 ===
++=== RETRIEVED ===
++onReady fired
++R2 app-run: driving started
++R2 app-run: window=1200x723 dpr=2
++R2 (50000) frames=239
++  build  p50=8.80ms p95=9.40ms max=14.00ms
++  raster p50=1.80ms p95=2.10ms max=67.90ms
++  screenSpaceLeafCount=2709 lineweightScale=1
++  dashSpans=66627 collapsed=257 canvasCalls=24
++  backend=vertices triangles=294536 drawVerticesCalls=21
++  text: corpus=on draw=on textOps=24 skippedText=0
++  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
++R2 app-run: done
++
++--- flutter run log tail (diagnostics) ---
++h List all available interactive commands.
++d Detach (terminate "flutter run" but leave application running).
++c Clear the screen
++q Quit (terminate the application on the device).
++
++=== 50000 vertices run 3 ===
++=== RETRIEVED ===
++onReady fired
++R2 app-run: driving started
++R2 app-run: window=1200x723 dpr=2
++R2 (50000) frames=233
++  build  p50=8.90ms p95=9.60ms max=14.30ms
++  raster p50=1.80ms p95=2.10ms max=70.90ms
++  screenSpaceLeafCount=2709 lineweightScale=1
++  dashSpans=66627 collapsed=257 canvasCalls=24
++  backend=vertices triangles=294536 drawVerticesCalls=21
++  text: corpus=on draw=on textOps=24 skippedText=0
++  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
++R2 app-run: done
++
++--- flutter run log tail (diagnostics) ---
++h List all available interactive commands.
++d Detach (terminate "flutter run" but leave application running).
++c Clear the screen
++q Quit (terminate the application on the device).
++
++=== 50000 canvas run 1 ===
++=== RETRIEVED ===
++onReady fired
++R2 app-run: driving started
++R2 app-run: window=1200x723 dpr=2
++R2 (50000) frames=241
++  build  p50=156.50ms p95=165.80ms max=170.50ms
++  raster p50=107.90ms p95=111.50ms max=219.40ms
++  screenSpaceLeafCount=2709 lineweightScale=1
++  dashSpans=66627 collapsed=257 canvasCalls=70193
++  backend=canvas
++  text: corpus=on draw=on textOps=24 skippedText=0
++  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
++R2 app-run: done
++
++--- flutter run log tail (diagnostics) ---
++h List all available interactive commands.
++d Detach (terminate "flutter run" but leave application running).
++c Clear the screen
++q Quit (terminate the application on the device).
++
++=== 50000 canvas run 2 ===
++=== RETRIEVED ===
++onReady fired
++R2 app-run: driving started
++R2 app-run: window=1200x723 dpr=2
++R2 (50000) frames=241
++  build  p50=155.70ms p95=165.40ms max=168.40ms
++  raster p50=107.90ms p95=112.00ms max=222.20ms
++  screenSpaceLeafCount=2709 lineweightScale=1
++  dashSpans=66627 collapsed=257 canvasCalls=70193
++  backend=canvas
++  text: corpus=on draw=on textOps=24 skippedText=0
++  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
++R2 app-run: done
++
++--- flutter run log tail (diagnostics) ---
++h List all available interactive commands.
++d Detach (terminate "flutter run" but leave application running).
++c Clear the screen
++q Quit (terminate the application on the device).
++
++=== 50000 canvas run 3 ===
++=== RETRIEVED ===
++onReady fired
++R2 app-run: driving started
++R2 app-run: window=1200x723 dpr=2
++R2 (50000) frames=241
++  build  p50=154.20ms p95=163.50ms max=167.40ms
++  raster p50=108.00ms p95=112.60ms max=219.50ms
++  screenSpaceLeafCount=2709 lineweightScale=1
++  dashSpans=66627 collapsed=257 canvasCalls=70193
++  backend=canvas
++  text: corpus=on draw=on textOps=24 skippedText=0
++  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
++R2 app-run: done
++
++--- flutter run log tail (diagnostics) ---
++h List all available interactive commands.
++d Detach (terminate "flutter run" but leave application running).
++c Clear the screen
++q Quit (terminate the application on the device).
++

@@ -1,0 +1,135 @@
+# Review package: 787a914..HEAD
+
+## Commits
+57bcd76 docs: state commit ranges, never a commit count
+
+## Files changed
+ STATUS.md                                          | 38 ++++++++++++++--------
+ .../notes/2026-08-21-plan-3d-results.md            |  4 ++-
+ 2 files changed, 28 insertions(+), 14 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index f966efd..42b1363 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,17 +1,18 @@
+ # jet-cad — project status
+ 
+ **Last updated:** 2026-08-21
+ **Verified against:** branch `spike/vertices-sink`, worktree
+-`.claude/worktrees/vertices-spike`, at `4a16b41`, working tree clean — all
+-three packages re-run there on 2026-08-21. Every count below was produced by
+-running the suite, not by reading a report.
++`.claude/worktrees/vertices-spike`, working tree clean. **`4a16b41` is the last
++commit touching `lib/` or `test/`**; everything after it is docs-only, and the
++three-package gate was re-run green on each. Every suite count below was
++produced by running the suite, not by reading a report.
+ 
+ ---
+ 
+ ## TL;DR — where you left off
+ 
+ **Plan 3d (the vertices sink) is finished and in flight on
+ `spike/vertices-sink`** — fifteen tasks, executed, reviewed and committed, not
+ merged and not pushed. **Its exit gate is 7 of 8 with one criterion open for
+ the human**, and that one criterion is the whole handoff. See
+ [Plan 3d](#plan-3d--the-vertices-sink-is-the-default-everywhere) and
+@@ -54,25 +55,25 @@ and moves only `dashedFraction`. The frame moves **6.0×**, so **the unit of
+ render cost is the canvas call, not the drawn leaf**. Every per-leaf µs figure
+ in Plans 3a, 3b and 3c is an artefact of a corpus where dash spans and leaves
+ are collinear — do not carry them forward. `build` is linear in call count to
+ ±30 µs; raster is super-linear because each call is one Impeller `Entity`. At
+ `DASHED=0` a 10,000-entity frame is **9.5 ms**, inside the 60 fps budget.
+ 
+ ### Plan 3d — the vertices sink is the default everywhere
+ 
+ The 2026-08-20 spike
+ ([note](docs/superpowers/notes/2026-08-20-vertices-sink-spike.md)) became Plan
+-3d, and Plan 3d is **finished on `spike/vertices-sink`** — **24 commits**,
+-`548fa8e..HEAD`, on top of 8 spike-and-spec commits, so **32 off `main`**.
+-**Not merged, not pushed.** `VerticesDrawSink` builds each
+-stroked segment's triangles itself and submits the frame's strokes as one
+-ordered `drawVertices`. What the spike lacked, 3d added: **miter and bevel
++3d, and Plan 3d is **finished on `spike/vertices-sink`** — the plan is
++`548fa8e..HEAD`, sitting on the spike and spec commits at `bb67137..548fa8e`,
++so the whole branch is `main..HEAD`. **Not merged, not pushed.**
++`VerticesDrawSink` builds each stroked segment's triangles itself and submits
++the frame's strokes as one ordered `drawVertices`. What the spike lacked, 3d added: **miter and bevel
+ joins** (a miter is two triangles), **seam joins on closed runs**, `Vertices`
+ disposal at submission, a **coverage-only triangle rasterizer** so the golden
+ suite is available to it, goldens **on both backends**, and a **sink-against-sink
+ ink comparison**.
+ 
+ Results note:
+ [docs/superpowers/notes/2026-08-21-plan-3d-results.md](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
+ Mutation log:
+ [docs/superpowers/notes/plan-3d-mutation-log.md](docs/superpowers/notes/plan-3d-mutation-log.md).
+ 
+@@ -161,27 +162,38 @@ docs/superpowers/
+ `jet_cad_2d_flutter` depends on Flutter + `jet_cad_2d` by path. Both are
+ `resolution: workspace` members of the root pubspec.
+ 
+ ---
+ 
+ ## Branch and worktree map
+ 
+ | Location | Branch | State |
+ |---|---|---|
+ | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, **`bb67137`**, Plans 1/2/3a/3b/**3c** merged |
+-| `.claude/worktrees/vertices-spike` | `spike/vertices-sink` | clean, **Plan 3d complete**, **32 commits off `main`** (8 spike/spec + 24 plan), not merged, not pushed |
++| `.claude/worktrees/vertices-spike` | `spike/vertices-sink` | clean, **Plan 3d complete**, `main..HEAD` off `main` — spike and spec at `bb67137..548fa8e`, the plan at `548fa8e..HEAD`; not merged, not pushed |
+ 
+ `main` is a strict ancestor of the branch, so the branch is a fast-forward.
+-**As of this worktree's refs `origin/main` is also at `bb67137`** —
+-`git rev-list --count origin/main..main` is `0`, not the 29 this file used to
+-claim. That ref is local and may be stale; re-check with `git fetch` before
+-acting on it. Do not push unless explicitly asked.
++
++**This file states commit ranges and never a commit count, on purpose.** A
++count is falsified by the next commit — including the commit that writes the
++count, which is how the figure here was wrong twice in one task. A range with
++named endpoints is true forever. If you want the number, ask git:
++
++```sh
++git -C .claude/worktrees/vertices-spike rev-list --count main..HEAD
++git -C .claude/worktrees/vertices-spike rev-list --count origin/main..main   # 0 at the time of writing
++```
++
++The second is `0`: **as of this worktree's refs `origin/main` is also at
++`bb67137`**, not the 29-ahead-and-unpushed this file used to claim. That ref is
++local and a `git fetch` can move it, so re-run the command rather than trusting
++the parenthetical. Do not push unless explicitly asked.
+ 
+ The Plan 3d per-task ledger lives in the worktree at
+ `.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` and is
+ git-ignored; **archive it to `docs/superpowers/ledgers/` when the branch
+ merges**, or it is lost with the worktree.
+ 
+ ---
+ 
+ ## Completed work
+ 
+diff --git a/docs/superpowers/notes/2026-08-21-plan-3d-results.md b/docs/superpowers/notes/2026-08-21-plan-3d-results.md
+index 044d333..42f4180 100644
+--- a/docs/superpowers/notes/2026-08-21-plan-3d-results.md
++++ b/docs/superpowers/notes/2026-08-21-plan-3d-results.md
+@@ -1,15 +1,17 @@
+ # Plan 3d results and exit gate — the vertices sink
+ 
+ **Runs of record:** 2026-08-20 and 2026-08-21.
+ **Branch:** `spike/vertices-sink`, worktree `.claude/worktrees/vertices-spike`.
+-**Commit range:** `548fa8e..4a16b41` (Task 15's own commit lands on top).
++**Commit range:** the plan is `548fa8e..4a16b41`; Task 15's own docs commits
++land on top of that. Ranges rather than counts, because a count is falsified by
++the next commit.
+ **Spec:** [`docs/superpowers/specs/2026-08-20-jet-cad-2d-plan-3d-design.md`](../specs/2026-08-20-jet-cad-2d-plan-3d-design.md)
+ **Plan:** [`docs/superpowers/plans/2026-08-20-jet-cad-2d-plan-3d-vertices-sink.md`](../plans/2026-08-20-jet-cad-2d-plan-3d-vertices-sink.md)
+ **Mutation log:** [`plan-3d-mutation-log.md`](plan-3d-mutation-log.md)
+ 
+ ---
+ 
+ ## Verdict
+ 
+ **Seven of the eight criteria pass on measurements taken and pasted below.
+ Criterion 7 is measured and cannot be closed by this plan** — it requires a

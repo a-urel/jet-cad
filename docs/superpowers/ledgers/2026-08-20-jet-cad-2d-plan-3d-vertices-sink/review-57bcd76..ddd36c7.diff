@@ -1,0 +1,479 @@
+# Review package: 57bcd76..HEAD
+
+## Commits
+ddd36c7 docs: retire four claims the implementation outlived
+420f9de fix(harness): detect a repaint on both backends, not only on canvas
+4034012 test: pin the text-flush order and the golden dpr, not their counts
+
+## Files changed
+ apps/dev_harness_2d/lib/measurement_rig.dart       | 15 +++++-
+ .../specs/2026-08-20-jet-cad-2d-plan-3d-design.md  | 12 +++++
+ .../lib/src/vertices_draw_sink.dart                | 55 ++++++++++++++++---
+ .../test/golden/dash_ladder_golden_test.dart       | 23 ++++++--
+ .../test/golden/text_ladder_golden_test.dart       | 23 ++++++--
+ .../test/vertices_draw_sink_test.dart              | 63 ++++++++++++++++++++++
+ 6 files changed, 174 insertions(+), 17 deletions(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/lib/measurement_rig.dart b/apps/dev_harness_2d/lib/measurement_rig.dart
+index bf41354..a13441f 100644
+--- a/apps/dev_harness_2d/lib/measurement_rig.dart
++++ b/apps/dev_harness_2d/lib/measurement_rig.dart
+@@ -165,21 +165,34 @@ Future<void> runR2Rig({
+     // per-frame figures is a wrong comparison waiting to be published.
+     sink.resetCounters();
+     vertices?.resetCounters();
+     final layoutsBefore = sink.measurer.layoutCount;
+     final evictionsBefore = sink.measurer.evictionCount;
+     camera.panBy(Offset.zero);
+     await pumpFrame();
+     report('R2 ($entities)', timings);
+     print('  screenSpaceLeafCount=${painter.screenSpaceLeafCount} '
+         'lineweightScale=$lineweightScale');
+-    if (sink.canvasCallCount == 0) {
++    // Did a repaint happen? Ask **both** backends, because neither counter
++    // answers it alone.
++    //
++    // `canvasCallCount` was the whole guard while `CanvasDrawSink` drew every
++    // frame. Under the vertices backend that sink is the fallback: it takes
++    // text and nothing else, so its counter counts *paragraphs*, and its four
++    // other increment sites are unreachable. With `DRAW_TEXT=0` — a supported
++    // define, see `main.dart` — it reads zero for a perfectly healthy frame,
++    // and this guard aborted the run. `totalFlushCount` is the vertices sink's
++    // own answer: one `drawVertices` per flush, so zero means the batched
++    // geometry never reached the canvas. Summing them makes the guard say
++    // "something was drawn" on whichever backend is running.
++    final drawCalls = sink.canvasCallCount + (vertices?.totalFlushCount ?? 0);
++    if (drawCalls == 0) {
+       // The counters above are read from a frame that has to actually have
+       // happened. `panBy(Offset.zero)` forces one only because Transform2 has
+       // no operator== for ValueNotifier to dedupe against — a property this
+       // rig depends on and does not own. If that ever changes, this rig would
+       // print a plausible-looking zero rather than fail, and a zero is the one
+       // wrong number nobody questions.
+       throw StateError('no repaint happened: the forced frame did not draw');
+     }
+     print('  dashSpans=${painter.dashSpanCount} '
+         'collapsed=${painter.collapsedDashCount} '
+diff --git a/docs/superpowers/specs/2026-08-20-jet-cad-2d-plan-3d-design.md b/docs/superpowers/specs/2026-08-20-jet-cad-2d-plan-3d-design.md
+index e3c90e5..4f41bff 100644
+--- a/docs/superpowers/specs/2026-08-20-jet-cad-2d-plan-3d-design.md
++++ b/docs/superpowers/specs/2026-08-20-jet-cad-2d-plan-3d-design.md
+@@ -329,20 +329,32 @@ not of appearance. That is the right trade for a regression test and the wrong
+ one for judging how a drawing looks; the screenshot on the device stays the
+ instrument for the second question, and the plan says so rather than pretending
+ one artefact does both jobs.
+ 
+ ### Goldens, on both backends
+ 
+ The existing 14 PNGs keep their fixtures and their assertions and are pinned to
+ the **canvas** backend, which is the web renderer. They are not dead-code tests
+ after the web decision; they are the web backend's regression suite.
+ 
++> **Annotation, 2026-08-21 (post-implementation).** The premise of the sentence
++> above — that canvas is the web renderer — was overturned by Phase C's own
++> measurement and no longer holds. Task 13 flipped the default to the
++> **vertices** backend on *every* platform, the web included: the within-platform
++> build ratios (17.3x at 10,000 entities, 17.5x at 50,000) decided it. Both
++> backends are now goldened, so the canvas PNGs are the canvas backend's
++> regression suite rather than "the web backend's". The argument in this
++> section is left exactly as it was written — it was correct against the
++> evidence available at the time, and rewriting it would erase the fact that
++> the measurement changed the answer. See
++> `docs/superpowers/notes/2026-08-21-plan-3d-results.md`.
++
+ The same fixtures are rendered again through the **vertices** backend and the
+ rasterizer, into their own PNGs. Both sets are checked in. A fixture that
+ cannot be drawn by one backend does not exist.
+ 
+ ### The sink-against-sink coverage test
+ 
+ The new test, and the one that earns the two-backend decision. Render a fixture
+ through `CanvasDrawSink` into an image with `flutter_test`, render it through
+ `VerticesDrawSink` and the rasterizer, and compare.
+ 
+diff --git a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+index 8d7d51e..a627dc3 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+@@ -11,23 +11,27 @@ import 'draw_sink.dart';
+ /// before it rewinds the buffer.
+ ///
+ /// The views are live over the sink's own storage and are valid only for the
+ /// duration of the call; an observer that keeps one must copy it.
+ typedef FlushObserver = void Function(Float32List positions, Int32List colors);
+ 
+ /// Builds each stroked segment's two triangles itself and submits the whole
+ /// frame's strokes as **one** `drawVertices`, instead of one `drawPath` per
+ /// segment.
+ ///
+-/// **A spike.** It exists to answer one question — whether collapsing the draw
+-/// calls collapses the frame — and it is honest about what it gives up to ask
+-/// it; see "What this is not" below.
++/// **The default backend on every platform, the web included.** It began as a
++/// spike, built to answer one question — whether collapsing the draw calls
++/// collapses the frame. Plan 3d's Phase C answered it and Task 13 flipped the
++/// default; the numbers are in
++/// `docs/superpowers/notes/2026-08-21-plan-3d-results.md`. What it gives up to
++/// buy that is unchanged and still listed under "What this is not" below —
++/// being the default does not make any of it go away.
+ ///
+ /// ## Why this shape
+ ///
+ /// `2026-08-20-dash-leaf-separation.md` measured the frame at a fixed drawn
+ /// geometry and found the unit of cost is the canvas call, not the drawn leaf:
+ /// holding `screenSpaceLeafCount` at 1664 and moving only the dash fraction
+ /// moved the frame 6.0x. Reading the engine at the revision that produced
+ /// those numbers showed why a cheaper *geometry* cannot help — a dash span is
+ /// a two-point path, so `dl_dispatcher.cc` lowers it through `IsLine` to
+ /// `AttemptDrawLineSDF` and it never reaches the stroke tessellator. There is
+@@ -66,23 +70,29 @@ typedef FlushObserver = void Function(Float32List positions, Int32List colors);
+ ///
+ /// - **No caps.** Miter and bevel joins fill the notch at every corner,
+ ///   including a closed polyline's or a full sweep's seam; an open run's two
+ ///   ends still draw nothing beyond their last quad.
+ /// - **Text goes to [CanvasDrawSink], and the buffer flushes before it.**
+ ///   A paragraph is not triangles. Points, circles and arcs are batched;
+ ///   only text falls back, and flushing first is what keeps a stroke batched
+ ///   before a text op from drawing after it.
+ /// - **Anti-aliasing comes from MSAA, not from a coverage shader.** The SDF
+ ///   path this replaces anti-aliases analytically.
+-/// - **`flutter_test` cannot render it.** The software Skia backend takes
+-///   minutes on a `drawVertices` that Impeller draws instantly, so the golden
+-///   suite is not available to this sink.
++/// - **`flutter_test` cannot *rasterise* it, so its goldens take another
++///   route.** The software Skia backend takes minutes on a `drawVertices`
++///   that Impeller draws instantly, which rules out `matchesGoldenFile` on a
++///   widget drawn by this sink — that much is still true and still the reason
++///   the seam below exists. It does **not** mean there are no goldens: the
++///   [observer] hands each submitted buffer to
++///   `test/support/triangle_rasterizer.dart`, which scan-converts it in Dart,
++///   and the 14 PNGs in `test/golden/vertices/` are matched against *that*
++///   image. Update them the same way as any other golden.
+ /// - **This sink is authoritative where it disagrees with [CanvasDrawSink].**
+ ///   Under a non-conformal residual the two draw different stroke widths, and
+ ///   this one is right: `CanvasDrawSink._widthFor` divides by
+ ///   `scaleMagnitude`, one scalar standing in for two axis scales. The full
+ ///   list of permitted divergences is in Plan 3d's design document; anything
+ ///   not on it is a defect.
+ ///
+ /// ## What a steady-state frame allocates
+ ///
+ /// Three objects per flush — the `Vertices` and the two `sublistView`
+@@ -133,31 +143,35 @@ class VerticesDrawSink implements DrawSink {
+   /// A curve larger than the viewport is clipped by the camera long before it
+   /// needs this many, so the cap costs nothing on a drawing and bounds the
+   /// damage from a residual that has gone wrong.
+   static const int kMaxFlattenSegments = 512;
+ 
+   final double pixelsPerPaperMm;
+ 
+   /// Measurement-only, as on [CanvasDrawSink]. Inert at 1.0.
+   final double lineweightScale;
+ 
+-  /// Takes every op this sink does not batch: points, circles, arcs and text.
++  /// Takes the ops this sink does not batch, which is fewer than it sounds:
++  /// exactly [beginResidual], [endResidual] and [text] forward here. Points,
++  /// circles and arcs all become triangles in this sink and never reach it.
+   ///
+   /// Composition rather than reimplementation, so the spike changes exactly
+   /// one thing about the frame and a run against it is comparable to a run
+   /// against [CanvasDrawSink].
+   final CanvasDrawSink? _fallback;
+ 
+   /// Interleaved `[x, y]` per vertex, six vertices per segment.
+   ///
+   /// Capacity is never given back, so a steady-state frame allocates nothing
+-  /// here: [flush] rewinds the length and leaves the storage in place.
++  /// here: [flush] rewinds the length and leaves the storage in place. That
++  /// is not free — see [debugCapacityVertices] for what the high-water mark
++  /// costs in bytes and for the measurement it was read from.
+   Float32List _positions = Float32List(8192);
+ 
+   /// One ARGB per vertex, parallel to [_positions].
+   Int32List _colors = Int32List(4096);
+ 
+   /// One paint for the life of the sink, as on [CanvasDrawSink].
+   ///
+   /// It never varies: the colour rides on the vertices, so the only thing the
+   /// paint contributes is its alpha, and that is always opaque.
+   final Paint _paint = Paint()..color = const Color(0xFFFFFFFF);
+@@ -260,20 +274,31 @@ class VerticesDrawSink implements DrawSink {
+       Float32List.sublistView(_positions, 0, _vertices * 2);
+ 
+   /// The per-vertex colours written so far.
+   Int32List debugColors() => Int32List.sublistView(_colors, 0, _vertices);
+ 
+   /// Vertices the buffers can hold without growing.
+   ///
+   /// The steady-state claim is that this stops changing: `_reserve` doubles
+   /// and never gives capacity back, so once a frame has drawn its widest view
+   /// the buffer is large enough for every later one.
++  ///
++  /// **What that costs, measured.** A vertex is 12 bytes here — a `Float32x2`
++  /// position plus an `Int32` colour — and the peak is pinned for the life of
++  /// the widget, because nothing ever shrinks it. On the dev harness's R2
++  /// corpus (`apps/dev_harness_2d`, pan 120 / zoom 120 over an 800x600
++  /// viewport) the peaks read out of this getter were 262,144 vertices at
++  /// 10,000 entities (3.00 MiB), 1,048,576 at 50,000 (12.00 MiB) and
++  /// **8,388,608 at 500,000 entities — 100,663,296 bytes, exactly 96.00
++  /// MiB**. The canvas backend has no equivalent cost. Whoever budgets memory
++  /// for a large drawing needs that number; the full table is in
++  /// `docs/superpowers/notes/2026-08-21-plan-3d-results.md`.
+   int get debugCapacityVertices => _colors.length;
+ 
+   @override
+   void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {
+     _residual = residual;
+     _fallback?.beginResidual(residual, debugHandle: debugHandle);
+   }
+ 
+   @override
+   void endResidual() {
+@@ -391,25 +416,39 @@ class VerticesDrawSink implements DrawSink {
+     final n1x = -d1y * s, n1y = d1x * s;
+     final ax = vx + n0x, ay = vy + n0y;
+     final bx = vx + n1x, by = vy + n1y;
+ 
+     _emitTriangle(vx, vy, ax, ay, bx, by, argb);
+ 
+     if (d0x * d1x + d0y * d1y < kMinMiterCosine) return;
+ 
+     var mx = n0x + n1x, my = n0y + n1y;
+     final mlen = math.sqrt(mx * mx + my * my);
++    // Defensive, not currently reachable, and kept for the same reason as
++    // `_endRun`'s guard: `n0` and `n1` have equal length, so their sum
++    // vanishes only when they are antiparallel -- which is `d0` and `d1`
++    // antiparallel, a dot product of -1, and the `kMinMiterCosine` bail three
++    // lines up already returned. It stays because that is a fact about
++    // today's bail threshold (-0.875 at a miter limit of 4) and not a promise
++    // the arithmetic below makes on its own; without it a loosened limit
++    // divides by zero and writes NaN positions into the buffer.
+     if (mlen == 0) return;
+     mx /= mlen;
+     my /= mlen;
+     // `n0` has length `half`, so this is the cosine of half the included angle.
+     final cosHalf = (mx * n0x + my * n0y) / half;
++    // Defensive, not currently reachable, and unreachable for the same reason:
++    // the bail bounds the turn at about 151 degrees, so half of it is under
++    // 76 and its cosine is comfortably positive. Kept because the alternative
++    // to a bounded `reach` is a miter spike of unbounded length -- the failure
++    // a miter limit exists to prevent -- so this is the guard that survives if
++    // the threshold ever moves.
+     if (cosHalf <= 0) return;
+     final reach = half / cosHalf;
+     _emitTriangle(ax, ay, vx + mx * reach, vy + my * reach, bx, by, argb);
+   }
+ 
+   /// Writes one triangle, six floats and three colours.
+   void _emitTriangle(double ax, double ay, double bx, double by, double cx,
+       double cy, int argb) {
+     _reserve(3);
+     final v = _positions;
+diff --git a/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart b/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
+index e7d7ab5..ed55ad8 100644
+--- a/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
++++ b/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
+@@ -141,24 +141,39 @@ Future<void> _rung(WidgetTester tester, DraftDocument doc, double halfSpan,
+     ),
+   ));
+ 
+   // `VerticesDrawSink`'s width floor (`kMinStrokeDevicePixels`) and the
+   // colour fade below it are *device*-pixel quantities, but the buffer's
+   // positions — what `TriangleRasterizer` scan-converts — are logical
+   // pixels. A rasterizer built at logical resolution asks the wrong
+   // question: at this widget's own device pixel ratio a stroke can be a
+   // full device pixel wide (inked by Impeller) while covering under half a
+   // *logical* pixel, which a logical-resolution, no-AA, pixel-centre sampler
+-  // can miss along its whole length. `devicePixelRatio` is read back from
+-  // the sink the widget actually built rather than assumed, so this samples
+-  // at the same resolution Impeller would rasterize at on this device.
+-  final dpr = key.currentState!.vertices!.devicePixelRatio;
++  // can miss along its whole length. So the rasterizer is built at the
++  // device resolution Impeller would rasterize at.
++  //
++  // The ratio is the **binding's**, and the sink is asserted against it
++  // rather than read back from it. Reading it back made the rasterization
++  // resolution follow any mutation of `devicePixelRatio`: deleting
++  // `DraftCanvas`'s per-frame rebind (`draft_canvas.dart`, `vertices
++  // ?.devicePixelRatio = MediaQuery.devicePixelRatioOf(context)`) leaves the
++  // sink at its constructor default of 1.0, and every vertices golden then
++  // failed only on *image size* — which one `flutter test
++  // --update-goldens` absorbs, writing the wrong stroke widths into the PNGs
++  // and locking the break in green forever. A named assertion is the one
++  // thing `--update-goldens` cannot absorb.
++  final dpr = tester.view.devicePixelRatio;
++  expect(key.currentState!.vertices!.devicePixelRatio, dpr,
++      reason: 'the sink must be at the binding\'s device pixel ratio: '
++          'DraftCanvas rebinds it per frame from MediaQuery, and a sink left '
++          'at its constructor default draws stroke widths for the wrong '
++          'device. Do NOT regenerate the goldens to make this pass.');
+   final rasterizer = TriangleRasterizer((kGoldenViewport.width * dpr).round(),
+       (kGoldenViewport.height * dpr).round());
+   // Attached after the first pump, and the widget pumped again: the state —
+   // and the vertices sink it owns — does not exist until the first build.
+   // The observer scales every position by `dpr` before handing it to the
+   // device-resolution rasterizer above.
+   key.currentState!.vertices!.observer = (positions, colors) {
+     final scaled = Float32List(positions.length);
+     for (var i = 0; i < positions.length; i++) {
+       scaled[i] = positions[i] * dpr;
+diff --git a/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart b/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart
+index 88953f1..0a8ab4a 100644
+--- a/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart
++++ b/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart
+@@ -376,24 +376,39 @@ Future<void> _rung(WidgetTester tester, DraftDocument doc, String name,
+     ),
+   ));
+ 
+   // `VerticesDrawSink`'s width floor (`kMinStrokeDevicePixels`) and the
+   // colour fade below it are *device*-pixel quantities, but the buffer's
+   // positions — what `TriangleRasterizer` scan-converts — are logical
+   // pixels. A rasterizer built at logical resolution asks the wrong
+   // question: at this widget's own device pixel ratio a stroke can be a
+   // full device pixel wide (inked by Impeller) while covering under half a
+   // *logical* pixel, which a logical-resolution, no-AA, pixel-centre sampler
+-  // can miss along its whole length. `devicePixelRatio` is read back from
+-  // the sink the widget actually built rather than assumed, so this samples
+-  // at the same resolution Impeller would rasterize at on this device.
+-  final dpr = key.currentState!.vertices!.devicePixelRatio;
++  // can miss along its whole length. So the rasterizer is built at the
++  // device resolution Impeller would rasterize at.
++  //
++  // The ratio is the **binding's**, and the sink is asserted against it
++  // rather than read back from it. Reading it back made the rasterization
++  // resolution follow any mutation of `devicePixelRatio`: deleting
++  // `DraftCanvas`'s per-frame rebind (`draft_canvas.dart`, `vertices
++  // ?.devicePixelRatio = MediaQuery.devicePixelRatioOf(context)`) leaves the
++  // sink at its constructor default of 1.0, and every vertices golden then
++  // failed only on *image size* — which one `flutter test
++  // --update-goldens` absorbs, writing the wrong stroke widths into the PNGs
++  // and locking the break in green forever. A named assertion is the one
++  // thing `--update-goldens` cannot absorb.
++  final dpr = tester.view.devicePixelRatio;
++  expect(key.currentState!.vertices!.devicePixelRatio, dpr,
++      reason: 'the sink must be at the binding\'s device pixel ratio: '
++          'DraftCanvas rebinds it per frame from MediaQuery, and a sink left '
++          'at its constructor default draws stroke widths for the wrong '
++          'device. Do NOT regenerate the goldens to make this pass.');
+   final rasterizer = TriangleRasterizer((kGoldenViewport.width * dpr).round(),
+       (kGoldenViewport.height * dpr).round());
+   // Attached after the first pump, and the widget pumped again: the state —
+   // and the vertices sink it owns — does not exist until the first build.
+   // The observer scales every position by `dpr` before handing it to the
+   // device-resolution rasterizer above.
+   key.currentState!.vertices!.observer = (positions, colors) {
+     final scaled = Float32List(positions.length);
+     for (var i = 0; i < positions.length; i++) {
+       scaled[i] = positions[i] * dpr;
+diff --git a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+index bf4a72f..ed65686 100644
+--- a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
++++ b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+@@ -2,22 +2,26 @@
+ // instead of handing `Canvas` one `drawPath` per segment. A performance spike
+ // with no correctness check is worthless — a sink that emits nothing is very
+ // fast — so the triangles are pinned here before anything is measured.
+ 
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ import 'dart:ui';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/src/canvas_draw_sink.dart';
++import 'package:jet_cad_2d_flutter/src/flutter_text_measurer.dart';
+ import 'package:jet_cad_2d_flutter/src/vertices_draw_sink.dart';
+ 
++import 'support/spy_canvas.dart';
++
+ /// 0.25 mm at 4 px/mm is exactly 1 device pixel, so the half-width is 0.5 and
+ /// every expected coordinate below is exact in binary.
+ const _lw = 25;
+ const _pxPerMm = 4.0;
+ 
+ ResolvedStyle _style({int argb = 0xFF000000, int lineweight = _lw}) =>
+     ResolvedStyle(
+       argb: argb,
+       lineweightHundredths: lineweight,
+       linetype: ReservedHandles.byLayerLinetype,
+@@ -255,20 +259,79 @@ void main() {
+ 
+   test('the segment count is what a rig reads to compare sinks', () {
+     final sink = _sink()..beginResidual(Transform2.identity());
+     for (var i = 0; i < 7; i++) {
+       sink.polyline(_seg(0, i * 1.0, 10, i * 1.0), 2, _style(), closed: false);
+     }
+     sink.endResidual();
+     expect(sink.batchedSegmentCount, 7);
+   });
+ 
++  test('the batch reaches the Canvas before the text it was batched before',
++      () {
++    // The *order*, not the count. Every other assertion in this repository
++    // about the text flush is in units of flushes, and a flush that happens
++    // after the paragraph is still a flush: counting cannot tell the two
++    // apart. This records what the `Canvas` was actually told, in sequence,
++    // and asserts where `drawVertices` sits relative to `drawParagraph`.
++    //
++    // MUTATION: in `VerticesDrawSink.text`, hand the text to the fallback
++    // *before* `_flushBeforeUnbatchable()`. The flush count is unchanged --
++    // still one mid-frame and one at the end -- so the counting tests stay
++    // green, while the paragraph now reaches the canvas ahead of the strokes
++    // batched in front of it. Strokes are opaque, so those strokes then draw
++    // on top of the text: the screenshot regression the class comment's
++    // history describes. This test fails on the ordering expectation below.
++    //
++    // Non-identity residual on purpose: a quarter turn and a translation, so
++    // the fixture is not sitting at the transform every degenerate test in
++    // this repository sits at.
++    const t = Transform2(0, 1, -1, 0, 100, 200);
++    final spy = SpyCanvas();
++    final doc = DraftDocument.empty(measurer: FlutterTextMeasurer());
++    final fallback = CanvasDrawSink(
++        canvas: spy,
++        pixelsPerPaperMm: _pxPerMm,
++        measurer: FlutterTextMeasurer(),
++        textStyleOf: doc.textStyleOf);
++    final sink = VerticesDrawSink(
++        pixelsPerPaperMm: _pxPerMm, canvas: spy, fallback: fallback);
++    sink.beginResidual(t);
++    sink.polyline(_seg(0, 0, 10, 0), 2, _style(), closed: false);
++    sink.text('x', ReservedHandles.standardTextStyle, _style());
++    sink.polyline(_seg(0, 5, 10, 5), 2, _style(), closed: false);
++    sink.endResidual();
++    sink.flush();
++
++    final names = spy.calls.map((c) => c.name).toList();
++    final firstVertices = names.indexOf('drawVertices');
++    final paragraph = names.indexOf('drawParagraph');
++    final lastVertices = names.lastIndexOf('drawVertices');
++    // A missing call would make the ordering comparison below vacuous: -1 is
++    // less than every index.
++    expect(firstVertices, isNonNegative,
++        reason: 'nothing was batched, so there is no order to check');
++    expect(paragraph, isNonNegative,
++        reason: 'the text never reached the canvas, so there is no order to '
++            'check');
++
++    expect(firstVertices, lessThan(paragraph),
++        reason: 'the strokes batched before the text must reach the Canvas '
++            'before the paragraph does. Canvas call sequence was: $names');
++    expect(lastVertices, greaterThan(paragraph),
++        reason: 'the strokes batched after the text must reach the Canvas '
++            'after the paragraph does. Canvas call sequence was: $names');
++    // Only after the order holds: two distinct submissions, so the assertion
++    // above compared two different flushes and not one flush against itself.
++    expect(firstVertices, isNot(lastVertices));
++  });
++
+   _arcTests();
+   _widthTests();
+ 
+   test('the submitted Vertices is disposed, and the flag reads its state', () {
+     // `Vertices` is native-backed: `dispose()` frees the position and colour
+     // buffers the engine holds, and dropping the object instead leaves them to
+     // a finalizer. At 19 flushes a frame that is about 1,140 a second.
+     //
+     // MUTATION: drop the dispose call and `lastFlushDisposed` reads false,
+     // because it is derived from `Vertices.debugDisposed` -- the object's own

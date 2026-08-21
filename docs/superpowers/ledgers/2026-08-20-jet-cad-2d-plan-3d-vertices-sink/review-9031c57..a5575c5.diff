@@ -1,0 +1,191 @@
+# Review package: 9031c57..HEAD
+
+## Commits
+a5575c5 fix: right-turn join fixture, live closed-run assert, honest mutations
+
+## Files changed
+ .../lib/src/vertices_draw_sink.dart                | 13 ++++---
+ .../test/vertices_draw_sink_test.dart              | 28 +++++++++------
+ .../test/vertices_join_test.dart                   | 41 +++++++++++++++++++---
+ 3 files changed, 63 insertions(+), 19 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+index 4cd0afa..9d85b58 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+@@ -275,25 +275,28 @@ class VerticesDrawSink implements DrawSink {
+     // The transform is applied once per point rather than once per segment:
+     // each point is the end of one segment and the start of the next.
+     final px = a * points[0] + c * points[1] + e;
+     final py = b * points[0] + d * points[1] + f;
+     _beginRun(px, py);
+     for (var i = 1; i < count; i++) {
+       final qx = a * points[i * 2] + c * points[i * 2 + 1] + e;
+       final qy = b * points[i * 2] + d * points[i * 2 + 1] + f;
+       _runTo(qx, qy, half, argb);
+     }
+-    _endRun(closed: false, half: half, argb: argb);
+-    // The spike's closing segment moves to Task 5 with its seam join, so a
+-    // closed polyline draws one segment short until then. No caller reaches
+-    // it: `closed:` is `false` at all four of the painter's call sites, and
+-    // the one unit test that passes `closed: true` moves to Task 5 with it.
++    _endRun(closed: closed, half: half, argb: argb);
++    // `closed` is forwarded rather than hardcoded so `_endRun`'s assert is
++    // reachable: the spike's closing segment moves to Task 5 with its seam
++    // join, and a caller that asks for it before Task 5 lands must fail
++    // loudly rather than silently drawing one segment short. No caller
++    // reaches it: `closed:` is `false` at all four of the painter's call
++    // sites, and the one unit test that passed `closed: true` moved to
++    // Task 5 with it.
+   }
+ 
+   /// Starts a connected run at a device-space point.
+   void _beginRun(double x, double y) {
+     _runFirstX = x;
+     _runFirstY = y;
+     _runPrevX = x;
+     _runPrevY = y;
+     _runHasDirection = false;
+     _runSegments = 0;
+diff --git a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+index 3bf7cf2..e313c93 100644
+--- a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
++++ b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+@@ -101,30 +101,38 @@ void main() {
+     // angle, well inside the miter limit, so `_emitJoin` adds a bevel and a
+     // tip triangle -- 6 triangles, 36 floats, in total.
+     final open = _sink()
+       ..beginResidual(Transform2.identity())
+       ..polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, _style(),
+           closed: false)
+       ..endResidual();
+     expect(open.debugPositions().length, 6 * 6);
+   });
+ 
+-  // The `closed: true` half of this test -- a closing segment and the seam
+-  // join at its corner -- moves to Task 5, which implements `_endRun`'s
+-  // closed branch. `_endRun` asserts `!closed` until then, so a caller that
+-  // reached it here would fail loudly rather than silently drawing one
+-  // segment short; no caller does, since `closed:` is `false` at every one of
+-  // the painter's four call sites.
+-  test(
+-      'a closed polyline gets a closing segment and a seam join',
+-      skip: 'Task 5: _endRun\'s closed branch',
+-      () {});
++  test('a closed polyline hits the unimplemented closed branch, loudly', () {
++    // `polyline` forwards its own `closed:` to `_endRun`, so this is now
++    // reachable rather than dead code -- and `_endRun`'s closed branch, a
++    // closing segment and its seam join, is Task 5's. Until it lands, this
++    // pins the failure as an assertion rather than the silent one-segment-
++    // short drawing the spike used to produce: Task 5 changes this test's
++    // expectation to a real assertion about the closing geometry, not a
++    // silent gap it has to rediscover.
++    //
++    // No caller reaches this today: `closed:` is `false` at every one of the
++    // painter's four call sites.
++    final sink = _sink()..beginResidual(Transform2.identity());
++    expect(
++        () => sink.polyline(
++            Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, _style(),
++            closed: true),
++        throwsA(isA<AssertionError>()));
++  });
+ 
+   test('colour rides on the vertices, so one buffer carries every colour', () {
+     final sink = _sink()..beginResidual(Transform2.identity());
+     sink.polyline(_seg(0, 0, 10, 0), 2, _style(argb: 0xFFFF0000),
+         closed: false);
+     // Different lineweight as well as different colour: the width is already
+     // spent on the triangles, so it cannot split anything either.
+     sink.polyline(
+         _seg(0, 5, 10, 5), 2, _style(argb: 0xFF00FF00, lineweight: 50),
+         closed: false);
+diff --git a/packages/jet_cad_2d_flutter/test/vertices_join_test.dart b/packages/jet_cad_2d_flutter/test/vertices_join_test.dart
+index 2335205..5d302e5 100644
+--- a/packages/jet_cad_2d_flutter/test/vertices_join_test.dart
++++ b/packages/jet_cad_2d_flutter/test/vertices_join_test.dart
+@@ -25,21 +25,25 @@ ResolvedStyle _style({int argb = 0xFF000000}) => ResolvedStyle(
+ 
+ VerticesDrawSink _sink() => VerticesDrawSink(pixelsPerPaperMm: _pxPerMm);
+ 
+ Float64List _pts(List<double> xy) => Float64List.fromList(xy);
+ 
+ int _triangleCount(VerticesDrawSink s) => s.debugPositions().length ~/ 6;
+ 
+ /// Whether any emitted triangle contains the point.
+ bool _inked(VerticesDrawSink s, double px, double py) {
+   final v = s.debugPositions();
+-  for (var i = 0; i + 5 < v.length ~/ 2; i += 3) {
++  // `i + 2` is the last vertex the triangle starting at `i` needs, so the
++  // loop must keep visiting while that index is still valid -- `i + 5` here
++  // stopped one triangle short, leaving the very last triangle in the buffer
++  // invisible to every probe.
++  for (var i = 0; i + 2 < v.length ~/ 2; i += 3) {
+     final ax = v[i * 2], ay = v[i * 2 + 1];
+     final bx = v[i * 2 + 2], by = v[i * 2 + 3];
+     final cx = v[i * 2 + 4], cy = v[i * 2 + 5];
+     double edge(double x0, double y0, double x1, double y1) =>
+         (x1 - x0) * (py - y0) - (y1 - y0) * (px - x0);
+     final d1 = edge(ax, ay, bx, by);
+     final d2 = edge(bx, by, cx, cy);
+     final d3 = edge(cx, cy, ax, ay);
+     const eps = 1e-2;
+     final neg = d1 < -eps || d2 < -eps || d3 < -eps;
+@@ -77,24 +81,53 @@ void main() {
+     // -half`) and (11.5, -1.5) goes uninked, because the notch is filled on
+     // the wrong side instead.
+     final sink = _sink()
+       ..beginResidual(Transform2.identity())
+       ..polyline(_pts([0, 0, 10, 0, 10, 10]), 3, _style(), closed: false)
+       ..endResidual();
+ 
+     expect(_inked(sink, 11.5, -1.5), isTrue, reason: 'the miter tip');
+   });
+ 
++  test('a right (clockwise) turn is mitred out on its own outer side', () {
++    // P(0,0) -> V(10,0) -> Q(10,-10) turns right (`cross` is negative, the
++    // mirror of the left-turn fixture above), so the outer side is now
++    // *below* the path: V=(10,0), A=(10,2), the miter tip M=(12,2), B=(12,0).
++    // (11.5, 1.5) sits inside that notch and outside both segments' own
++    // quads (quad1 is x in [0,10] x [-2,2], quad2 is x in [8,12] x [-10,0]),
++    // so nothing but a correctly-sided join inks it.
++    //
++    // Every other fixture in this file turns left. A sign bug in the
++    // `cross > 0` branch selection would show up only on this side of the
++    // turn.
++    //
++    // MUTATION: collapse `s = cross > 0 ? -half : half` to `s = -half`,
++    // always taking the left-turn side, and (11.5, 1.5) goes uninked because
++    // the wedge is mirrored onto the wrong side of this clockwise corner.
++    final sink = _sink()
++      ..beginResidual(Transform2.identity())
++      ..polyline(_pts([0, 0, 10, 0, 10, -10]), 3, _style(), closed: false)
++      ..endResidual();
++
++    expect(_inked(sink, 11.5, 1.5), isTrue, reason: 'the miter tip');
++  });
++
+   test('a mitred corner emits both the bevel and the tip triangle', () {
+-    // MUTATION: emit the tip triangle alone and the point just inside the
+-    // bevel wedge -- between the vertex and the chord AB -- goes uninked.
+-    // That is the hairline crack.
++    // MUTATION: swap the bevel triangle's two outer corners for the *inner*
++    // ones (`_emitTriangle(vx, vy, vx - n0x, vy - n0y, vx - n1x, vy - n1y,
++    // argb)`), leaving the tip triangle's own `A`/`B` untouched. Still two
++    // triangles -- the count stays 6 -- but the bevel no longer connects `V`
++    // to the tip, so the point just inside the wedge -- between the vertex
++    // and the chord AB -- goes uninked. That is the hairline crack: dropping
++    // the bevel outright changes the *count* (5, not 6) and would fail this
++    // test before the wedge probe below ever ran; misplacing it instead
++    // keeps the count honest and dies on the probe the comment names.
+     final sink = _sink()
+       ..beginResidual(Transform2.identity())
+       ..polyline(_pts([0, 0, 10, 0, 10, 10]), 3, _style(), closed: false)
+       ..endResidual();
+ 
+     // Two segments are 4 triangles; the join adds 2.
+     expect(_triangleCount(sink), 6);
+     // A = (10, -2), B = (12, 0), V = (10, 0). The wedge's centroid.
+     expect(_inked(sink, 10.6, -0.6), isTrue, reason: 'the bevel wedge');
+   });

@@ -1,0 +1,174 @@
+# Review package: 2a7b762..HEAD
+
+## Commits
+d17a436 fix: dispose the Vertices each flush submits
+
+## Files changed
+ .../lib/src/vertices_draw_sink.dart                | 25 ++++++++++++----
+ .../test/vertices_draw_sink_test.dart              | 33 ++++++++++++++++++++++
+ 2 files changed, 53 insertions(+), 5 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+index 63a750c..5dbb1aa 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+@@ -136,20 +136,21 @@ class VerticesDrawSink implements DrawSink {
+   int _vertices = 0;
+ 
+   Transform2 _residual = Transform2.identity();
+ 
+   int _segments = 0;
+   int _flushCalls = 0;
+   int _lastFlushSegments = 0;
+   int _lastFlushVertices = 0;
+   int _totalFlushes = 0;
+   int _frameSegments = 0;
++  bool _lastFlushDisposed = false;
+ 
+   /// Segments batched since the last [flush].
+   int get batchedSegmentCount => _segments;
+ 
+   /// Segments the last [flush] submitted. Survives the flush, which
+   /// [batchedSegmentCount] does not, so a rig can read it after the frame.
+   int get lastFlushSegmentCount => _lastFlushSegments;
+ 
+   /// `drawVertices` calls the last [flush] issued: one, or none when the frame
+   /// batched nothing.
+@@ -175,20 +176,26 @@ class VerticesDrawSink implements DrawSink {
+     _frameSegments = 0;
+   }
+ 
+   /// Vertices the last [flush] actually handed to `drawVertices`.
+   ///
+   /// Read from the view that was submitted rather than from the counter, so a
+   /// flush that rewinds before it submits reports the empty buffer it drew
+   /// rather than the full one it meant to.
+   int get lastFlushVertexCount => _lastFlushVertices;
+ 
++  /// Whether the last [flush] disposed the `Vertices` it submitted.
++  ///
++  /// Exposed rather than the object itself, because the object is gone by the
++  /// time anything could read it — which is the point.
++  bool get lastFlushDisposed => _lastFlushDisposed;
++
+   /// The positions written so far, as `[x0, y0, x1, y1, ...]`.
+   Float32List debugPositions() =>
+       Float32List.sublistView(_positions, 0, _vertices * 2);
+ 
+   /// The per-vertex colours written so far.
+   Int32List debugColors() => Int32List.sublistView(_colors, 0, _vertices);
+ 
+   @override
+   void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {
+     _residual = residual;
+@@ -322,38 +329,46 @@ class VerticesDrawSink implements DrawSink {
+ 
+   /// Submits everything batched so far as one `drawVertices` and rewinds the
+   /// buffer.
+   ///
+   /// Called at the end of the frame by the painter's owner, and mid-frame by
+   /// any op that cannot become triangles -- see [_flushBeforeUnbatchable].
+   void flush() {
+     _flushCalls = 0;
+     _lastFlushSegments = _segments;
+     _lastFlushVertices = 0;
++    _lastFlushDisposed = false;
+     if (_vertices == 0) {
+       _segments = 0;
+       return;
+     }
+     final positions = Float32List.sublistView(_positions, 0, _vertices * 2);
+     final colors = Int32List.sublistView(_colors, 0, _vertices);
+     _lastFlushVertices = colors.length;
++    final vertices = Vertices.raw(
++      VertexMode.triangles,
++      positions,
++      colors: colors,
++    );
+     canvas.drawVertices(
+-      Vertices.raw(
+-        VertexMode.triangles,
+-        positions,
+-        colors: colors,
+-      ),
++      vertices,
+       // With per-vertex colours and no shader on the paint, the vertex colour
+       // is the colour drawn; the paint contributes only its alpha.
+       BlendMode.dst,
+       Paint()..color = const Color(0xFFFFFFFF),
+     );
++    // `drawVertices` has taken what it needs by the time it returns; holding
++    // the object past that point holds native buffers the engine has already
++    // copied. Verified against a `PictureRecorder` here and on a device in
++    // Plan 3d Task 2 step 7.
++    vertices.dispose();
++    _lastFlushDisposed = true;
+     _flushCalls = 1;
+     _totalFlushes++;
+     _vertices = 0;
+     _segments = 0;
+   }
+ 
+   /// Submits the batch so an op that cannot be batched draws after it.
+   ///
+   /// Without this the unbatchable op would reach the `Canvas` immediately
+   /// while every stroke before it waited for the end of the frame, which is
+diff --git a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+index 87f46b4..dccd426 100644
+--- a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
++++ b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+@@ -209,20 +209,53 @@ void main() {
+     for (var i = 0; i < 7; i++) {
+       sink.polyline(_seg(0, i * 1.0, 10, i * 1.0), 2, _style(), closed: false);
+     }
+     sink.endResidual();
+     expect(sink.batchedSegmentCount, 7);
+   });
+ 
+   _arcTests();
+   _widthTests();
+ 
++  test('the submitted Vertices is disposed, and the picture still records', () {
++    // `Vertices` is native-backed: `dispose()` frees the position and colour
++    // buffers the engine holds, and dropping the object instead leaves them to
++    // a finalizer. At 19 flushes a frame that is about 1,140 a second.
++    //
++    // MUTATION: drop the dispose call and `lastFlushDisposed` reads false.
++    final recorder = PictureRecorder();
++    final canvas = Canvas(recorder);
++    final sink = _sink(canvas: canvas)..beginResidual(Transform2.identity());
++    for (var i = 0; i < 5; i++) {
++      sink.polyline(_seg(0, i * 1.0, 10, i * 1.0), 2, _style(), closed: false);
++    }
++    sink.endResidual();
++    sink.flush();
++
++    expect(sink.lastFlushDisposed, isTrue);
++    // The recording must survive the dispose. If `drawVertices` had kept a
++    // live reference rather than copying, this throws.
++    final picture = recorder.endRecording();
++    addTearDown(picture.dispose);
++    expect(picture, isNotNull);
++  });
++
++  test('a flush with nothing batched disposes nothing', () {
++    // MUTATION: dispose unconditionally and this throws on a null.
++    final recorder = PictureRecorder();
++    final sink = _sink(canvas: Canvas(recorder));
++    sink.flush();
++    expect(sink.flushCallCount, 0);
++    expect(sink.lastFlushDisposed, isFalse);
++    recorder.endRecording().dispose();
++  });
++
+   test('a 45-degree segment gets a normal of the right length', () {
+     // Degenerate-fixture guard: every case above is axis-aligned, so a normal
+     // that forgot to normalise would still pass them.
+     final sink = _sink()
+       ..beginResidual(Transform2.identity())
+       ..polyline(_seg(0, 0, 10, 10), 2, _style(), closed: false)
+       ..endResidual();
+     final v = sink.debugPositions();
+     final dx = v[0] - v[2], dy = v[1] - v[3];
+     // 1e-6, not the 1e-12 the axis-aligned cases use: the buffer is

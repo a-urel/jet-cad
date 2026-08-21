@@ -11,6 +11,7 @@
 import 'dart:typed_data';
 
 import 'package:dev_harness_2d/main.dart';
+import 'package:dev_harness_2d/measurement_rig.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -40,44 +41,10 @@ const int kSteps = int.fromEnvironment('STEPS', defaultValue: 200);
 
 bool runs(String rig) => kRig == 'all' || kRig == rig;
 
-void refuseDebugMode() {
-  var isDebug = false;
-  assert(() {
-    isDebug = true;
-    return true;
-  }());
-  if (isDebug) {
-    throw StateError('run with --profile; debug frame times mean nothing');
-  }
-}
-
-/// p50, p95 and max of build and raster time, reported separately.
-///
-/// A build-bound frame and a raster-bound frame call for opposite fixes in
-/// Plan 3b — one wants less walking, the other fewer or cheaper draw calls —
-/// so a single "frame time" would hide the only thing the number is for.
-void report(String rig, List<FrameTiming> timings) {
-  if (timings.isEmpty) {
-    print('$rig: no frames recorded');
-    return;
-  }
-  String stats(List<double> ms) {
-    ms.sort();
-    return 'p50=${ms[(ms.length * 0.5).floor()].toStringAsFixed(2)}ms '
-        'p95=${ms[(ms.length * 0.95).floor()].toStringAsFixed(2)}ms '
-        'max=${ms.last.toStringAsFixed(2)}ms';
-  }
-
-  final build = [
-    for (final t in timings) t.buildDuration.inMicroseconds / 1000.0
-  ];
-  final raster = [
-    for (final t in timings) t.rasterDuration.inMicroseconds / 1000.0
-  ];
-  print('$rig frames=${timings.length}');
-  print('  build  ${stats(build)}');
-  print('  raster ${stats(raster)}');
-}
+// `refuseDebugMode`, `report`, `printBackend` and `printTextCounters` live in
+// `package:dev_harness_2d/measurement_rig.dart` now, shared with `main.dart`'s
+// `RUN_R2` app-run mode — see that file's header comment for why this file
+// no longer defines its own copies.
 
 /// Wall clock for the command itself, which no `FrameTiming` can see.
 ///
@@ -132,32 +99,6 @@ Handle addLineAt(
   return handle;
 }
 
-/// The text counters, printed by every rig so the on/off delta is one define
-/// apart on one corpus.
-///
-/// `newLayouts` is the row the exit gate is about: in a steady state — the
-/// same strings visible frame after frame — a warm paragraph cache must lay
-/// nothing out, and a non-zero reading here means the working set does not fit
-/// under `kParagraphCacheLimit`. The counters are read after the same forced
-/// repaint the dash counters come from, so all of them describe one frame.
-///
-/// `layouts` and `evictions` are running totals since the sink was built; the
-/// per-frame figures are the deltas the caller passes in. A running total
-/// printed beside two per-frame figures is the wrong comparison this file
-/// already refuses to publish once.
-void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
-    {required int layoutsBefore, required int evictionsBefore}) {
-  final m = sink.measurer;
-  print('  text: corpus=${kTextCorpus ? "on" : "off"} '
-      'draw=${kDrawText ? "on" : "off"} '
-      'textOps=${painter.textOpCount} '
-      'skippedText=${painter.skippedTextCount}');
-  print('  paragraphs: newLayouts=${m.layoutCount - layoutsBefore} '
-      'newEvictions=${m.evictionCount - evictionsBefore} '
-      'live=${m.liveParagraphCount} '
-      '(totals layouts=${m.layoutCount} evictions=${m.evictionCount})');
-}
-
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -169,6 +110,8 @@ void main() {
         SpatialIndex index,
         DraftPainter painter,
         CanvasDrawSink sink,
+        VerticesDrawSink? vertices,
+        RenderBackend resolvedBackend,
         Handle? dashedLinetype
       })> boot(WidgetTester tester) async {
     final doc = harnessDocument(kEntities);
@@ -176,13 +119,17 @@ void main() {
     late SpatialIndex index;
     late DraftPainter painter;
     late CanvasDrawSink sink;
+    VerticesDrawSink? vertices;
+    late RenderBackend resolvedBackend;
     await tester.pumpWidget(HarnessApp(
       document: doc,
-      onReady: (c, i, p, s) {
+      onReady: (c, i, p, s, v, b) {
         camera = c;
         index = i;
         painter = p;
         sink = s;
+        vertices = v;
+        resolvedBackend = b;
       },
     ));
     // Zoom to the working set. Fitting the whole drawing measures a frame
@@ -223,62 +170,33 @@ void main() {
       index: index,
       painter: painter,
       sink: sink,
+      vertices: vertices,
+      resolvedBackend: resolvedBackend,
       dashedLinetype: dashedLinetypes.singleOrNull?.handle
     );
   }
 
   testWidgets('R2 pan and zoom', (tester) async {
     if (!runs('pan')) return;
-    refuseDebugMode();
     final app = await boot(tester);
-    final timings = <FrameTiming>[];
-    binding.addTimingsCallback(timings.addAll);
-
-    // 120 frames of pan, then 120 of zoom across three scale bands, so band
-    // crossings are inside the measurement rather than either side of it.
-    for (var i = 0; i < 120; i++) {
-      app.camera.panBy(const Offset(-7, -3));
-      await tester.pump(const Duration(milliseconds: 16));
-    }
-    for (var i = 0; i < 120; i++) {
-      app.camera.zoomAt(const Offset(800, 600), i.isEven ? 1.03 : 0.97);
-      await tester.pump(const Duration(milliseconds: 16));
-    }
-    await tester.pumpAndSettle();
-    // All three counters now mean the same thing: this frame. dashSpanCount
-    // and collapsedDashCount reset themselves every paint; canvasCallCount
-    // does not, because the sink outlives the frame. But pumpAndSettle
-    // leaves nothing dirty, so a bare pump() would not repaint at all —
-    // RenderCustomPaint only repaints when its `repaint` Listenable fires,
-    // and nothing has changed since the last real frame. panBy(Offset.zero)
-    // is a numeric no-op but still assigns a fresh ViewportTransform
-    // (Transform2 and ViewportTransform both deliberately have no
-    // operator==, so ValueNotifier's reference check always sees a
-    // "change"), which fires the listener and forces the one real repaint
-    // that makes resetCounters() meaningful. A running total beside two
-    // per-frame figures is a wrong comparison waiting to be published.
-    app.sink.resetCounters();
-    final layoutsBefore = app.sink.measurer.layoutCount;
-    final evictionsBefore = app.sink.measurer.evictionCount;
-    app.camera.panBy(Offset.zero);
-    await tester.pump(const Duration(milliseconds: 16));
-    report('R2 ($kEntities)', timings);
-    print('  screenSpaceLeafCount=${app.painter.screenSpaceLeafCount} '
-        'lineweightScale=$kLineweightScale');
-    if (app.sink.canvasCallCount == 0) {
-      // The counters above are read from a frame that has to actually have
-      // happened. `panBy(Offset.zero)` forces one only because Transform2 has
-      // no operator== for ValueNotifier to dedupe against — a property this
-      // rig depends on and does not own. If that ever changes, this rig would
-      // print a plausible-looking zero rather than fail, and a zero is the one
-      // wrong number nobody questions.
-      throw StateError('no repaint happened: the forced frame did not draw');
-    }
-    print('  dashSpans=${app.painter.dashSpanCount} '
-        'collapsed=${app.painter.collapsedDashCount} '
-        'canvasCalls=${app.sink.canvasCallCount}');
-    printTextCounters(app.painter, app.sink,
-        layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
+    // The measured rig itself — 120 frames of pan, 120 of zoom, one forced
+    // repaint, then the block — lives in `measurement_rig.dart`'s
+    // `runR2Rig`, shared with `main.dart`'s `RUN_R2` app-run mode so the
+    // desktop and (Task 13) web rows come from one implementation. Only how
+    // a frame gets pumped differs between the two call sites.
+    await runR2Rig(
+      entities: kEntities,
+      lineweightScale: kLineweightScale,
+      textCorpus: kTextCorpus,
+      drawText: kDrawText,
+      camera: app.camera,
+      painter: app.painter,
+      sink: app.sink,
+      vertices: app.vertices,
+      resolvedBackend: app.resolvedBackend,
+      pumpFrame: () => tester.pump(const Duration(milliseconds: 16)),
+      settle: tester.pumpAndSettle,
+    );
   });
 
   testWidgets('R4a leaf edit per frame', (tester) async {
@@ -330,6 +248,7 @@ void main() {
     // that makes resetCounters() meaningful. A running total beside two
     // per-frame figures is a wrong comparison waiting to be published.
     app.sink.resetCounters();
+    app.vertices?.resetCounters();
     final layoutsBefore = app.sink.measurer.layoutCount;
     final evictionsBefore = app.sink.measurer.evictionCount;
     app.camera.panBy(Offset.zero);
@@ -348,8 +267,12 @@ void main() {
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
+    printBackend(app.resolvedBackend, app.vertices);
     printTextCounters(app.painter, app.sink,
-        layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
+        textCorpus: kTextCorpus,
+        drawText: kDrawText,
+        layoutsBefore: layoutsBefore,
+        evictionsBefore: evictionsBefore);
   });
 
   testWidgets('R4b instance drag per frame', (tester) async {
@@ -389,6 +312,7 @@ void main() {
     // that makes resetCounters() meaningful. A running total beside two
     // per-frame figures is a wrong comparison waiting to be published.
     app.sink.resetCounters();
+    app.vertices?.resetCounters();
     final layoutsBefore = app.sink.measurer.layoutCount;
     final evictionsBefore = app.sink.measurer.evictionCount;
     app.camera.panBy(Offset.zero);
@@ -404,7 +328,11 @@ void main() {
     print('  dashSpans=${app.painter.dashSpanCount} '
         'collapsed=${app.painter.collapsedDashCount} '
         'canvasCalls=${app.sink.canvasCallCount}');
+    printBackend(app.resolvedBackend, app.vertices);
     printTextCounters(app.painter, app.sink,
-        layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
+        textCorpus: kTextCorpus,
+        drawText: kDrawText,
+        layoutsBefore: layoutsBefore,
+        evictionsBefore: evictionsBefore);
   });
 }

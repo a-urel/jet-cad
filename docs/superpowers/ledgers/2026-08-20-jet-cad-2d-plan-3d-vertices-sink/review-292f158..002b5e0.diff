@@ -1,0 +1,470 @@
+# Review package: 292f158..HEAD
+
+## Commits
+002b5e0 fix: rasterize the vertices goldens at device resolution
+
+## Files changed
+ .../test/golden/dash_ladder_golden_test.dart       |  43 +++++++++++++-
+ .../test/golden/stroke_width_golden_test.dart      |  64 +++++++++++++++++----
+ .../test/golden/text_ladder_golden_test.dart       |  60 ++++++++++++++++---
+ .../test/golden/vertices/dash_ladder_1.png         | Bin 1347 -> 7259 bytes
+ .../test/golden/vertices/dash_ladder_2.png         | Bin 1505 -> 7853 bytes
+ .../test/golden/vertices/dash_ladder_3.png         | Bin 1095 -> 6116 bytes
+ .../test/golden/vertices/dash_ladder_4.png         | Bin 737 -> 4850 bytes
+ .../test/golden/vertices/dash_ladder_5.png         | Bin 614 -> 4423 bytes
+ .../test/golden/vertices/text_ladder_1.png         | Bin 574 -> 6119 bytes
+ .../test/golden/vertices/text_ladder_2.png         | Bin 574 -> 4334 bytes
+ .../test/golden/vertices/text_ladder_3.png         | Bin 688 -> 4842 bytes
+ .../test/golden/vertices/text_ladder_4.png         | Bin 592 -> 4346 bytes
+ .../test/golden/vertices/text_ladder_5.png         | Bin 778 -> 5002 bytes
+ 13 files changed, 144 insertions(+), 23 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart b/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
+index 8135c73..e7d7ab5 100644
+--- a/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
++++ b/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
+@@ -90,60 +90,88 @@ Widget _at(DraftDocument doc, double halfSpan) {
+ }
+ 
+ /// Renders one rung on one backend and compares it to that backend's PNG.
+ ///
+ /// The canvas backend goes through [_at] unchanged, so these five PNGs stay
+ /// pixel-identical to what they were before this backend loop existed. The
+ /// vertices backend cannot go through `matchesGoldenFile` on the widget:
+ /// software Skia does not finish a `drawVertices` of this size, so its
+ /// triangles are scan-converted by `TriangleRasterizer` and the *image* is
+ /// matched instead.
++///
++/// The two sets are framed differently, and this does not try to reconcile
++/// it: [_at] matches on `find.byKey(kCanvasKey)`, which sits on the outer
++/// `SizedBox`, and `matchesGoldenFile` walks up from there to the nearest
++/// `RepaintBoundary` -- not necessarily the one `DraftCanvas` owns
++/// internally. The vertices path below rasterizes exactly `DraftCanvas`'s
++/// own surface. The two PNGs are not pixel-registered captures of the same
++/// boundary; each is the right instrument for its own backend.
+ Future<void> _rung(WidgetTester tester, DraftDocument doc, double halfSpan,
+     String name, RenderBackend backend) async {
+   if (backend == RenderBackend.canvas) {
+     await tester.pumpWidget(_at(doc, halfSpan));
+     await expectLater(
+         find.byKey(kCanvasKey), matchesGoldenFile('dash_ladder_$name.png'));
+     return;
+   }
+ 
+   final index = SpatialIndex(doc);
+   addTearDown(index.dispose);
+   final camera = CameraController(ViewportTransform.fit(
+       Aabb2(Vector2(-halfSpan, -halfSpan), Vector2(halfSpan, halfSpan)),
+       kGoldenViewport));
+   addTearDown(camera.dispose);
+-  final rasterizer = TriangleRasterizer(
+-      kGoldenViewport.width.round(), kGoldenViewport.height.round());
+ 
+   final key = GlobalKey<DraftCanvasState>();
+   await tester.pumpWidget(MaterialApp(
+     home: Scaffold(
+       backgroundColor: Colors.white,
+       body: Center(
+         child: SizedBox(
+           width: kGoldenViewport.width,
+           height: kGoldenViewport.height,
+           child: DraftCanvas(
+               key: key,
+               document: doc,
+               index: index,
+               resolver: DocumentStyleResolver(doc),
+               camera: camera,
+               backend: backend),
+         ),
+       ),
+     ),
+   ));
++
++  // `VerticesDrawSink`'s width floor (`kMinStrokeDevicePixels`) and the
++  // colour fade below it are *device*-pixel quantities, but the buffer's
++  // positions — what `TriangleRasterizer` scan-converts — are logical
++  // pixels. A rasterizer built at logical resolution asks the wrong
++  // question: at this widget's own device pixel ratio a stroke can be a
++  // full device pixel wide (inked by Impeller) while covering under half a
++  // *logical* pixel, which a logical-resolution, no-AA, pixel-centre sampler
++  // can miss along its whole length. `devicePixelRatio` is read back from
++  // the sink the widget actually built rather than assumed, so this samples
++  // at the same resolution Impeller would rasterize at on this device.
++  final dpr = key.currentState!.vertices!.devicePixelRatio;
++  final rasterizer = TriangleRasterizer((kGoldenViewport.width * dpr).round(),
++      (kGoldenViewport.height * dpr).round());
+   // Attached after the first pump, and the widget pumped again: the state —
+   // and the vertices sink it owns — does not exist until the first build.
+-  key.currentState!.vertices?.observer = rasterizer.observe;
++  // The observer scales every position by `dpr` before handing it to the
++  // device-resolution rasterizer above.
++  key.currentState!.vertices!.observer = (positions, colors) {
++    final scaled = Float32List(positions.length);
++    for (var i = 0; i < positions.length; i++) {
++      scaled[i] = positions[i] * dpr;
++    }
++    rasterizer.observe(scaled, colors);
++  };
+   // The first pump already painted once — the picture this golden pins —
+   // but without an observer attached. Nothing about the document or the
+   // camera changes for the second pump, `_DraftCustomPainter.shouldRepaint`
+   // is unconditionally false, and the painter's own `repaint` listenable
+   // never fires on its own, so a bare `tester.pump()` here finds nothing
+   // dirty and skips the repaint entirely — confirmed by a probe that pumped
+   // this exact sequence and read the observer back having seen zero
+   // triangles. `markNeedsPaint` forces the same picture to paint again, this
+   // time through the now-attached observer.
+   tester
+@@ -153,20 +181,29 @@ Future<void> _rung(WidgetTester tester, DraftDocument doc, double halfSpan,
+   await tester.pump();
+ 
+   // `rasterizer.toImage()` completes through `decodeImageFromPixels`, a real
+   // engine callback. Confirmed by a minimal repro: once this test binding has
+   // actually pumped a widget, the fake-async test zone never delivers that
+   // callback and the await hangs forever; before any pump it resolves
+   // immediately. `runAsync` steps outside the fake zone for the one call that
+   // needs it.
+   final image = (await tester.runAsync(rasterizer.toImage))!;
+   addTearDown(image.dispose);
++
++  // A golden that never inks a pixel passes forever and pins nothing --
++  // confirmed by a `polyline` no-op mutation that left a logical-resolution
++  // version of this golden green with zero geometry drawn. Every rung draws
++  // at least the six dashed rules, so this must always ink something.
++  expect(rasterizer.pixels.any((p) => p != 0), isTrue,
++      reason: 'rung $name drew nothing: the dashed rules and circle are '
++          'always present, so a blank surface means the picture never '
++          'reached the rasterizer');
+   await expectLater(image, matchesGoldenFile('vertices/dash_ladder_$name.png'));
+ }
+ 
+ void main() {
+   for (final (name, halfSpan) in const [
+     ('1', 60.0),
+     ('2', 150.0),
+     ('3', 400.0),
+     ('4', 1200.0),
+     ('5', 4000.0),
+diff --git a/packages/jet_cad_2d_flutter/test/golden/stroke_width_golden_test.dart b/packages/jet_cad_2d_flutter/test/golden/stroke_width_golden_test.dart
+index 0493022..5bfc2d8 100644
+--- a/packages/jet_cad_2d_flutter/test/golden/stroke_width_golden_test.dart
++++ b/packages/jet_cad_2d_flutter/test/golden/stroke_width_golden_test.dart
+@@ -172,50 +172,80 @@ Widget canvasOver(
+ ///
+ /// Written out rather than fitted, because the point of the first golden is
+ /// that three *different* scales produce one stroke width — a fit camera would
+ /// choose the scale and hide the variable.
+ ViewportTransform cameraAt(double zoom) => ViewportTransform(
+       worldToScreenMatrix: Transform2.translation(
+               kGoldenViewport.width / 2, kGoldenViewport.height / 2)
+           .multiply(Transform2.scale(zoom, -zoom)),
+     );
+ 
++/// `devicePixelRatio` this file's vertices sink is given.
++///
++/// There is no widget's `MediaQuery` here to read a real device pixel ratio
++/// from — `_renderVertices` drives `VerticesDrawSink` directly, the same way
++/// [canvasOver] drives `CanvasDrawSink` directly. `1.0` matches the canvas
++/// half of this suite's own capture (both goldens are exactly
++/// `kGoldenViewport` in size, unscaled), and it is what makes the class
++/// comment's "0.5 mm lands on 4 device pixels" true of this rasterization
++/// too. Named so the rasterizer below is built at the *same* ratio rather
++/// than a second, independently-typed `1.0` that could drift from it.
++const double _kVerticesDevicePixelRatio = 1.0;
++
+ /// Renders [doc] through `VerticesDrawSink` and the coverage rasterizer,
+ /// driven directly the same way [canvasOver] drives `CanvasDrawSink` —
+ /// `DraftCanvas` does not own either of this file's fixtures.
+ ///
+-/// `devicePixelRatio` is fixed at 1.0 because there is no widget's
+-/// `MediaQuery` here to read it from, and 1.0 is what the canvas half of this
+-/// suite is already pinned at: both goldens are exactly `kGoldenViewport` in
+-/// size, and it is what makes the class comment's "0.5 mm lands on 4 device
+-/// pixels" true of this rasterization too.
+-Future<ui.Image> _renderVertices(WidgetTester tester, DraftDocument doc,
+-    SpatialIndex index, ViewportTransform camera) async {
++/// Returns the rasterizer alongside the image so a caller can assert ink was
++/// actually produced before trusting the golden comparison — see the note
++/// beside `_rung` in `dash_ladder_golden_test.dart` for why that assertion
++/// exists at all.
++Future<(ui.Image, TriangleRasterizer)> _renderVertices(WidgetTester tester,
++    DraftDocument doc, SpatialIndex index, ViewportTransform camera) async {
+   final recorder = ui.PictureRecorder();
++  // The rasterizer has to sample at the same resolution Impeller actually
++  // rasterizes at (a *device*-pixel quantity, which is what
++  // `VerticesDrawSink`'s width floor and colour fade are computed in), not
++  // at the logical resolution the sink's positions are expressed in — see
++  // the fuller version of this note in `dash_ladder_golden_test.dart`. Here
++  // that ratio is `_kVerticesDevicePixelRatio`, so scaling is a no-op, but
++  // the rasterizer is still built and fed through the same
++  // resolution/scaling shape the other two files use rather than a
++  // logical-resolution special case, so a future change to the ratio here
++  // does not silently reintroduce the bug.
+   final rasterizer = TriangleRasterizer(
+-      kGoldenViewport.width.round(), kGoldenViewport.height.round());
++      (kGoldenViewport.width * _kVerticesDevicePixelRatio).round(),
++      (kGoldenViewport.height * _kVerticesDevicePixelRatio).round());
+   final sink = VerticesDrawSink(
+     pixelsPerPaperMm: kPixelsPerPaperMm,
+     canvas: Canvas(recorder),
+-  )..observer = rasterizer.observe;
++    devicePixelRatio: _kVerticesDevicePixelRatio,
++  )..observer = (positions, colors) {
++      final scaled = Float32List(positions.length);
++      for (var i = 0; i < positions.length; i++) {
++        scaled[i] = positions[i] * _kVerticesDevicePixelRatio;
++      }
++      rasterizer.observe(scaled, colors);
++    };
+   DraftPainter(
+           document: doc, index: index, resolver: DocumentStyleResolver(doc))
+       .paint(sink, camera, kGoldenViewport);
+   sink.flush();
+   recorder.endRecording().dispose();
+   // `rasterizer.toImage()` completes through `decodeImageFromPixels`, a real
+   // engine callback. Confirmed by a minimal repro: once this test binding has
+   // actually pumped a widget (as `canvasOver` already has by the time this is
+   // called), the fake-async test zone never delivers that callback and the
+   // await hangs forever; before any pump it resolves immediately. `runAsync`
+   // steps outside the fake zone for the one call that needs it.
+-  return (await tester.runAsync(rasterizer.toImage))!;
++  final image = (await tester.runAsync(rasterizer.toImage))!;
++  return (image, rasterizer);
+ }
+ 
+ void main() {
+   testWidgets('paper-space stroke width at three zoom levels', (tester) async {
+     // "Paper space" means the width is a property of the paper, not of the
+     // camera: 0.5 mm stays 0.5 mm on screen however far in the view is.
+     await tester.binding.setSurfaceSize(kGoldenViewport);
+     addTearDown(() => tester.binding.setSurfaceSize(null));
+ 
+     for (final (zoom, name) in const [
+@@ -224,42 +254,52 @@ void main() {
+       (8.0, 'stroke_width_8_0x.png'),
+     ]) {
+       final doc = strokeWidthFixture();
+       final index = SpatialIndex(doc);
+       addTearDown(index.dispose);
+       final camera = cameraAt(zoom);
+ 
+       await tester.pumpWidget(canvasOver(doc, index, camera));
+       await expectLater(find.byKey(kCanvasKey), matchesGoldenFile(name));
+ 
+-      final image = await _renderVertices(tester, doc, index, camera);
++      final (image, rasterizer) =
++          await _renderVertices(tester, doc, index, camera);
+       addTearDown(image.dispose);
++      // A golden that never inks a pixel passes forever and pins nothing --
++      // the two rules and the square are always present.
++      expect(rasterizer.pixels.any((p) => p != 0), isTrue,
++          reason: '$name drew nothing');
+       await expectLater(image, matchesGoldenFile('vertices/$name'));
+     }
+   });
+ 
+   testWidgets('an anisotropic instance draws exact per-axis widths',
+       (tester) async {
+     await tester.binding.setSurfaceSize(kGoldenViewport);
+     addTearDown(() => tester.binding.setSurfaceSize(null));
+ 
+     final doc = anisotropicFixture(scaleY: 8.0);
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+     final camera = ViewportTransform.fit(doc.extents, kGoldenViewport);
+ 
+     await tester.pumpWidget(canvasOver(doc, index, camera));
+     await expectLater(
+         find.byKey(kCanvasKey), matchesGoldenFile('anisotropy_bypass.png'));
+ 
+-    final image = await _renderVertices(tester, doc, index, camera);
++    final (image, rasterizer) =
++        await _renderVertices(tester, doc, index, camera);
+     addTearDown(image.dispose);
++    // A golden that never inks a pixel passes forever and pins nothing --
++    // both instances' outlines and diagonals are always present.
++    expect(rasterizer.pixels.any((p) => p != 0), isTrue,
++        reason: 'anisotropy_bypass drew nothing');
+     await expectLater(
+         image, matchesGoldenFile('vertices/anisotropy_bypass.png'));
+   });
+ 
+   testWidgets('the anisotropic instance really took the bypass',
+       (tester) async {
+     // A golden records whatever the code did. This says the picture above is
+     // the bypass being exercised and not the fallback quietly drawing
+     // something plausible — the one thing about that image an eye cannot
+     // check.
+diff --git a/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart b/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart
+index 7d815a2..88953f1 100644
+--- a/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart
++++ b/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart
+@@ -314,64 +314,99 @@ Widget _framed(DraftDocument doc) => MaterialApp(
+ 
+ /// Renders one rung on one backend and compares it to that backend's PNG.
+ ///
+ /// The canvas backend goes through [_framed] unchanged, so these five PNGs
+ /// stay pixel-identical to what they were before this backend loop existed.
+ /// The vertices backend cannot go through `matchesGoldenFile` on the widget:
+ /// software Skia does not finish a `drawVertices` of this size, so its
+ /// triangles are scan-converted by `TriangleRasterizer` and the *image* is
+ /// matched instead.
+ ///
+-/// The vertices golden of this ladder carries the rung's polyline and none of
+-/// its glyphs: text goes to `CanvasDrawSink` as a paragraph and never reaches
+-/// the triangle buffer. What it pins is that the strokes around the text are
+-/// right and that the flush before each text op happened; the glyphs are
+-/// pinned by the canvas golden beside it.
++/// The two sets are framed differently, and this does not try to reconcile
++/// it: [_framed] matches on `find.byKey(kCanvasKey)`, which sits on the outer
++/// `SizedBox`, and `matchesGoldenFile` walks up from there to the nearest
++/// `RepaintBoundary` -- not necessarily the one `DraftCanvas` owns
++/// internally. The vertices path below rasterizes exactly `DraftCanvas`'s
++/// own surface. The two PNGs are not pixel-registered captures of the same
++/// boundary; each is the right instrument for its own backend.
++///
++/// The vertices golden of this ladder carries the rung's anchor rule or
++/// crosses and none of its glyphs: text goes to `CanvasDrawSink` as a
++/// paragraph and never reaches the triangle buffer. What it pins is that the
++/// strokes around the text are right and that the flush before each text op
++/// happened; the glyphs are pinned by the canvas golden beside it.
++///
++/// Verified by decoding every generated PNG and counting non-transparent
++/// pixels rather than by eye: every rung's full set of anchor geometry is
++/// present (rung 3's four crosses; rung 4's and rung 5's two rules each), not
++/// just some of it. That was not always true — see `TriangleRasterizer`'s
++/// construction below for why a thin, near-pixel-grid-aligned line could
++/// once vanish entirely from this golden while drawing correctly.
+ Future<void> _rung(WidgetTester tester, DraftDocument doc, String name,
+     RenderBackend backend) async {
+   if (backend == RenderBackend.canvas) {
+     await tester.pumpWidget(_framed(doc));
+     await expectLater(
+         find.byKey(kCanvasKey), matchesGoldenFile('text_ladder_$name.png'));
+     return;
+   }
+ 
+   final index = SpatialIndex(doc);
+   addTearDown(index.dispose);
+   final camera =
+       CameraController(ViewportTransform.fit(kWorld, kGoldenViewport));
+   addTearDown(camera.dispose);
+-  final rasterizer = TriangleRasterizer(
+-      kGoldenViewport.width.round(), kGoldenViewport.height.round());
+ 
+   final key = GlobalKey<DraftCanvasState>();
+   await tester.pumpWidget(MaterialApp(
+     home: Scaffold(
+       backgroundColor: Colors.white,
+       body: Center(
+         child: SizedBox(
+           width: kGoldenViewport.width,
+           height: kGoldenViewport.height,
+           child: DraftCanvas(
+               key: key,
+               document: doc,
+               index: index,
+               resolver: DocumentStyleResolver(doc),
+               camera: camera,
+               backend: backend),
+         ),
+       ),
+     ),
+   ));
++
++  // `VerticesDrawSink`'s width floor (`kMinStrokeDevicePixels`) and the
++  // colour fade below it are *device*-pixel quantities, but the buffer's
++  // positions — what `TriangleRasterizer` scan-converts — are logical
++  // pixels. A rasterizer built at logical resolution asks the wrong
++  // question: at this widget's own device pixel ratio a stroke can be a
++  // full device pixel wide (inked by Impeller) while covering under half a
++  // *logical* pixel, which a logical-resolution, no-AA, pixel-centre sampler
++  // can miss along its whole length. `devicePixelRatio` is read back from
++  // the sink the widget actually built rather than assumed, so this samples
++  // at the same resolution Impeller would rasterize at on this device.
++  final dpr = key.currentState!.vertices!.devicePixelRatio;
++  final rasterizer = TriangleRasterizer((kGoldenViewport.width * dpr).round(),
++      (kGoldenViewport.height * dpr).round());
+   // Attached after the first pump, and the widget pumped again: the state —
+   // and the vertices sink it owns — does not exist until the first build.
+-  key.currentState!.vertices?.observer = rasterizer.observe;
++  // The observer scales every position by `dpr` before handing it to the
++  // device-resolution rasterizer above.
++  key.currentState!.vertices!.observer = (positions, colors) {
++    final scaled = Float32List(positions.length);
++    for (var i = 0; i < positions.length; i++) {
++      scaled[i] = positions[i] * dpr;
++    }
++    rasterizer.observe(scaled, colors);
++  };
+   // The first pump already painted once — the picture this golden pins —
+   // but without an observer attached. Nothing about the document or the
+   // camera changes for the second pump, `_DraftCustomPainter.shouldRepaint`
+   // is unconditionally false, and the painter's own `repaint` listenable
+   // never fires on its own, so a bare `tester.pump()` here finds nothing
+   // dirty and skips the repaint entirely — confirmed by a probe that pumped
+   // this exact sequence and read the observer back having seen zero
+   // triangles. `markNeedsPaint` forces the same picture to paint again, this
+   // time through the now-attached observer.
+   tester
+@@ -381,20 +416,29 @@ Future<void> _rung(WidgetTester tester, DraftDocument doc, String name,
+   await tester.pump();
+ 
+   // `rasterizer.toImage()` completes through `decodeImageFromPixels`, a real
+   // engine callback. Confirmed by a minimal repro: once this test binding has
+   // actually pumped a widget, the fake-async test zone never delivers that
+   // callback and the await hangs forever; before any pump it resolves
+   // immediately. `runAsync` steps outside the fake zone for the one call that
+   // needs it.
+   final image = (await tester.runAsync(rasterizer.toImage))!;
+   addTearDown(image.dispose);
++
++  // A golden that never inks a pixel passes forever and pins nothing --
++  // confirmed by a `polyline` no-op mutation that left logical-resolution
++  // versions of these goldens green with zero geometry drawn. Every rung
++  // draws at least one rule or cross, so this must always ink something.
++  expect(rasterizer.pixels.any((p) => p != 0), isTrue,
++      reason: 'rung $name drew nothing: its anchor rule or crosses are '
++          'always present, so a blank surface means the picture never '
++          'reached the rasterizer');
+   await expectLater(image, matchesGoldenFile('vertices/text_ladder_$name.png'));
+ }
+ 
+ void main() {
+   TestWidgetsFlutterBinding.ensureInitialized();
+   setUpAll(_loadRoboto);
+ 
+   for (final (name, fixture) in <(String, DraftDocument Function())>[
+     ('1', _rung1),
+     ('2', _rung2),
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_1.png b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_1.png
+index 1a00fd9..9e606fd 100644
+Binary files a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_1.png and b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_1.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_2.png b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_2.png
+index a97271b..136431a 100644
+Binary files a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_2.png and b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_2.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_3.png b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_3.png
+index b0fd55f..efa75ee 100644
+Binary files a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_3.png and b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_3.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_4.png b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_4.png
+index 49c7924..fda4d15 100644
+Binary files a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_4.png and b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_4.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_5.png b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_5.png
+index 6786480..5404d71 100644
+Binary files a/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_5.png and b/packages/jet_cad_2d_flutter/test/golden/vertices/dash_ladder_5.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_1.png b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_1.png
+index a982c2b..4adc476 100644
+Binary files a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_1.png and b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_1.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_2.png b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_2.png
+index a982c2b..35682eb 100644
+Binary files a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_2.png and b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_2.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_3.png b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_3.png
+index 3ef6930..ad592b5 100644
+Binary files a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_3.png and b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_3.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_4.png b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_4.png
+index 5a93863..34fa216 100644
+Binary files a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_4.png and b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_4.png differ
+diff --git a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_5.png b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_5.png
+index 2337f8c..3f55f70 100644
+Binary files a/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_5.png and b/packages/jet_cad_2d_flutter/test/golden/vertices/text_ladder_5.png differ
