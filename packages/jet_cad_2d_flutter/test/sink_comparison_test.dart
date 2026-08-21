@@ -46,9 +46,13 @@ void main() {
     // floor on `canvasInkPixels` so the ratio cannot pass by having nothing
     // to disagree about.
     //
-    // 2026-08-21: canvas 377858 ink pixels, vertices 377856, 0 stray and 0
-    // uncovered -- the pentagon's ear-clipped triangles and the circle's fan
-    // land in exactly the same pixels on both backends.
+    // 2026-08-21: canvas 174135 ink pixels, vertices 174130, 0 stray and 0
+    // uncovered -- the pentagon's ear-clipped triangles, the circle's fan and
+    // the L-shape's concave triangulation all land in exactly the same
+    // pixels on both backends. Under T14a (fan the polygon from vertex 0
+    // instead of ear-clipping), this same row reads 7744 stray pixels,
+    // 4.45% of canvas ink and well clear of the 1% ceiling below -- see this
+    // task's report for the mutation transcript.
     final doc = fillComparisonDoc();
     final index = SpatialIndex(doc);
     addTearDown(index.dispose);

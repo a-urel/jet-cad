@@ -545,8 +545,8 @@ DraftDocument subPixelDivergenceFixture({int lineweight = 1}) {
   return doc;
 }
 
-/// A solid pentagon and a solid circle, comfortably above the ink alpha
-/// floor and each other's neighbour rather than overlapping: the opaque
+/// A solid pentagon, a solid circle and a solid L-shape, each comfortably
+/// above the ink alpha floor and clear of its neighbours: the opaque
 /// agreement floor Task 14 declares, at `kInkAlphaFloor`.
 ///
 /// Neither the ear-clipped polygon's triangulation nor the circle's per-frame
@@ -555,6 +555,16 @@ DraftDocument subPixelDivergenceFixture({int lineweight = 1}) {
 /// painting over its own outline instead of under it would be visible here
 /// too -- even though this fixture's own job is agreement between backends,
 /// not draw order, which `fill_render_test.dart` already pins directly.
+///
+/// The L-shape is the one property a convex boundary cannot exercise: on a
+/// convex polygon, fanning from vertex 0 instead of ear-clipping covers
+/// exactly the same triangles ear-clipping would choose, so T14a (Task 14's
+/// review) passed this row with only the pentagon and the circle in it --
+/// zero stray pixels under a mutant that reds every L-shaped golden. Its
+/// first vertex is placed, as in `fill_ladder_golden_test.dart`'s own
+/// L-shape, so the chord from vertex 0 to the notch's far corner crosses
+/// outside the polygon: a fan from vertex 0 is not star-shaped here and
+/// covers the excised square; ear-clipping never proposes that triangle.
 DraftDocument fillComparisonDoc() {
   final doc = DraftDocument.empty();
   final seed = doc.handleSeed;
@@ -587,6 +597,51 @@ DraftDocument fillComparisonDoc() {
         scalars: Float64List.fromList([70])),
     layer: ReservedHandles.layerZero,
     fillColor: const TrueColor(0xCC6633),
+    boundaryColor: const TrueColor(0x000000),
+  ));
+
+  // The L-shape: an "L" occupying the union of [-500,-260]x[-120,0] and
+  // [-500,-380]x[0,120], with the excised square [-380,-260]x[0,120] as its
+  // notch, three times the linear size of this fixture's first draft.
+  //
+  // Listed starting at (-500, 120) -- the convex tip of the vertical arm,
+  // diagonally farthest from the notch. This is deliberately *not* the
+  // polygon's one reflex vertex, at (-380, 0): a reflex vertex sits inside
+  // this L-tromino's own visibility kernel and can see every other vertex,
+  // so a fan pivoted there is star-shaped and produces zero error --
+  // confirmed empirically, not assumed, when an earlier draft of this
+  // fixture pivoted there and read 0 stray pixels under T14a with the
+  // canvas and vertices images visually identical. The far convex tip,
+  // outside the kernel, is what a fan cannot see across: the chord from
+  // (-500, 120) to (-260, 0) -- index 3 below -- crosses (-380, 60),
+  // inside the excised square.
+  //
+  // Sized at 3x rather than 1x so its own share of this fixture's ink
+  // budget, and so its overfill's share of that ink, clears the 1% ceiling
+  // with real margin instead of by a coin flip: the 1x draft's overfill was
+  // real (confirmed by hand -- about 400 world-units^2, a corner sliver)
+  // but read only 2070 stray device pixels against 211607 canvas ink,
+  // 0.98%, diluted under the ceiling by the pentagon and the circle sharing
+  // the frame. See this task's report for the full geometric argument and
+  // the measured numbers at each size.
+  doc.commands.execute(AddRegionCommand.allocate(
+    seed: seed,
+    owner: doc.rootHandle,
+    boundaryKind: EntityKind.polyline,
+    boundaryPayload: GeometryPayload(
+      coords: Float64List.fromList([
+        -500, 120, //
+        -500, -120, //
+        -260, -120, //
+        -260, 0, //
+        -380, 0, //
+        -380, 120, //
+        -500, 120, // closing duplicate
+      ]),
+      scalars: Float64List(0),
+    ),
+    layer: ReservedHandles.layerZero,
+    fillColor: const TrueColor(0xCC3366),
     boundaryColor: const TrueColor(0x000000),
   ));
 
