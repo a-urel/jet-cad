@@ -172,7 +172,20 @@ Future<void> runR2Rig({
     report('R2 ($entities)', timings);
     print('  screenSpaceLeafCount=${painter.screenSpaceLeafCount} '
         'lineweightScale=$lineweightScale');
-    if (sink.canvasCallCount == 0) {
+    // Did a repaint happen? Ask **both** backends, because neither counter
+    // answers it alone.
+    //
+    // `canvasCallCount` was the whole guard while `CanvasDrawSink` drew every
+    // frame. Under the vertices backend that sink is the fallback: it takes
+    // text and nothing else, so its counter counts *paragraphs*, and its four
+    // other increment sites are unreachable. With `DRAW_TEXT=0` — a supported
+    // define, see `main.dart` — it reads zero for a perfectly healthy frame,
+    // and this guard aborted the run. `totalFlushCount` is the vertices sink's
+    // own answer: one `drawVertices` per flush, so zero means the batched
+    // geometry never reached the canvas. Summing them makes the guard say
+    // "something was drawn" on whichever backend is running.
+    final drawCalls = sink.canvasCallCount + (vertices?.totalFlushCount ?? 0);
+    if (drawCalls == 0) {
       // The counters above are read from a frame that has to actually have
       // happened. `panBy(Offset.zero)` forces one only because Transform2 has
       // no operator== for ValueNotifier to dedupe against — a property this
