@@ -504,6 +504,10 @@ class DraftPainter {
     }
     final pattern = _patternFor(style);
     if (pattern == null) {
+      // `closed` is always false: the model carries no closed-polyline flag
+      // yet. A DXF LWPOLYLINE has one, so this becomes a real read when the
+      // DXF plan adds the field — not a decision made here. This is the only
+      // place the painter can pass it: `_emit`'s polyline case is dead.
       sink.polyline(_points, count, style, closed: false);
       sink.endResidual();
       return;
@@ -563,21 +567,24 @@ class DraftPainter {
 
     switch (kind) {
       case EntityKind.point:
-        sink.point(coords[0] - ox, coords[1] - oy, style);
-
       case EntityKind.line:
       case EntityKind.polyline:
-        final count = payload.pointCount;
-        if (count == 0) return;
-        _ensurePoints(count);
-        for (var i = 0; i < count; i++) {
-          _points[i * 2] = coords[i * 2] - ox;
-          _points[i * 2 + 1] = coords[i * 2 + 1] - oy;
-        }
-        // `closed` is always false: the model carries no closed-polyline flag
-        // yet. A DXF LWPOLYLINE has one, so this becomes a real read when the
-        // DXF plan adds the field — not a decision made here.
-        sink.polyline(_points, count, style, closed: false);
+        // Unreachable, for the same shape of reason as text and attrib below:
+        // `_drawLeafComposed` routes all three through `_emitScreenSpace` and
+        // returns, unconditionally, before it reaches this call. That routing
+        // was the anisotropy bypass and is now the rule, so nothing gates it
+        // any more and nothing can fall through to here.
+        //
+        // These three carried working bodies until they were emptied. They
+        // were not layered guards — they were a second implementation of
+        // `_emitScreenSpace`'s job, in a different space, that no frame could
+        // reach: this one rebases in *local* coordinates and pushes `chain`,
+        // where `_emitScreenSpace` rebases in *screen* coordinates and pushes
+        // a bare translation. A reader had no way to tell which one the
+        // painter used, and the one they would have read is the dead one.
+        // Kept as exhaustive cases rather than a `default` so a new
+        // EntityKind still fails to compile here.
+        break;
 
       case EntityKind.circle:
         // The radius is not a point and is not rebased; subtracting the origin
