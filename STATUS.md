@@ -1,7 +1,7 @@
 # jet-cad — project status
 
-**Last updated:** 2026-08-21
-**Verified against:** `main` at `0eac1be`, working tree clean.
+**Last updated:** 2026-08-22
+**Verified against:** `main` at `f0ea51e`, working tree clean.
 Every suite count below was produced by running the suite on the **merged**
 result, not by reading a report and not on the branch before it landed.
 
@@ -9,30 +9,46 @@ result, not by reading a report and not on the branch before it landed.
 
 ## TL;DR — where you left off
 
+**Plan 3e (fills) is done, seventeen tasks, worked directly on `main`** — see
+[Plan 3e](#plan-3e--fills) and [Resume here](#resume-here). Six of its nine
+failable criteria pass outright; one is a device timing row measured under
+macOS Low Power Mode and left explicitly unevaluable rather than scored; one
+(the translucent seam) is settled only for the routing rule and left open on
+Impeller/GPU, on the reviewer's own instruction not to write "no seam was
+found." No criterion failed.
+
+Results note:
+[docs/superpowers/notes/2026-08-22-plan-3e-results.md](docs/superpowers/notes/2026-08-22-plan-3e-results.md).
+Mutation log:
+[docs/superpowers/notes/plan-3e-mutation-log.md](docs/superpowers/notes/plan-3e-mutation-log.md) —
+56 mutants accounted for, 52 killed, 2 proven equivalent, 2 documented gaps.
+
 **Plan 3d (the vertices sink) is merged into `main`** — fifteen tasks,
 executed, reviewed and committed, then merged locally with `--no-ff`. **Its exit gate is 8 of 8** — criterion 7 stayed open until the human approved
 the `CLAUDE.md` allocation amendment on 2026-08-21, which the plan was forbidden
 from granting itself. See
-[Plan 3d](#plan-3d--the-vertices-sink-is-the-default-everywhere) and
-[Resume here](#resume-here).
+[Plan 3d](#plan-3d--the-vertices-sink-is-the-default-everywhere).
 
 Nothing is in flight. The `spike/vertices-sink` branch and its worktree are
 gone; the ledger is archived at
 [docs/superpowers/ledgers/](docs/superpowers/ledgers/), beside Plan 3c's.
+Plan 3e's own ledger (`.superpowers/sdd/2026-08-21-jet-cad-2d-plan-3e-fills/`)
+is to be archived the same way, since this plan had no worktree of its own.
 
-**Since the merge, on `main` at `70d824e..0eac1be`: two of Plan 3d's three
-remaining open items are closed**, and one thing that note recorded turned out
-to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open) — one
-item remains and cannot be closed here.
+**Since Plan 3d's merge, on `main` at `70d824e..0eac1be`: two of Plan 3d's
+three remaining open items are closed**, and one thing that note recorded
+turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open)
+— one item remains and cannot be closed here.
 
 Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
 
 | Suite | State (on `main`, run against the merged result) |
 |---|---|
-| `packages/jet_cad_2d` — engine | **720 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **242 tests pass, 1 skipped**, analyze/format clean |
-| `flutter test --tags golden` | **23 pass**, 28 PNGs (14 fixtures × 2 backends); no pre-existing PNG regenerated |
-| `apps/dev_harness_2d` | analyze/format clean; **R2/R4a/R4b run on macOS in profile mode, and R2 on Chrome/CanvasKit** |
+| `packages/jet_cad_2d` — engine | **771 tests, all pass**, analyze/format clean |
+| `packages/jet_cad_2d_flutter` — widgets | **276 tests pass, 1 skipped**, analyze/format clean |
+| `flutter test --tags golden` | **29 pass**, 34 PNGs (17 fixtures × 2 backends); no pre-existing PNG regenerated |
+| `apps/dev_harness_2d` | analyze/format clean |
+| `benchmark/query_throughput.dart` | one gated row fails — `snap at dirty threshold`, **carried from Plan 2**, not a regression |
 
 The widget suite's one skip is `test/rig/paint_microbench_test.dart`, skipped at
 suite level by the `rig` tag in `dart_test.yaml` — pre-existing and by design.
@@ -305,12 +321,28 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Plan 3d is merged into `main` and its gate is 8 of 8.** The merged result is
-green on all three packages, the tree is clean, and nothing is in flight.
+**Plan 3e (fills) is done, worked directly on `main`, nothing in flight.**
+Six of nine failable criteria PASS outright; one device timing row is
+recorded as measured-but-unevaluable (macOS Low Power Mode was on for the
+whole session); one (the translucent seam) is settled only for the routing
+rule and left explicitly open on Impeller/GPU, per the reviewer's own
+instruction not to write "no seam was found." No criterion failed. See
+[Plan 3e](#plan-3e--fills) above and
+[the results note](docs/superpowers/notes/2026-08-22-plan-3e-results.md) for
+every number.
 
-The last open item was the `CLAUDE.md` allocation amendment, and it is
-**settled**: the human approved it on 2026-08-21 and the non-negotiable now
-reads
+**Two things a resumer should do before trusting any 3e timing number:**
+`pmset -g | grep lowpowermode` before taking a new one — it read `1` (on)
+throughout this plan's own session and Plan 3d's already measured what that
+is worth (~24% uniform on raster and build). And the translucent-seam
+question needs a GPU-backed instrument (`flutter drive`'s real Impeller path,
+not `flutter_test`) to close — `flutter_test`'s software Skia does not
+antialias `drawVertices` at all, which this plan proved by direct probe and
+pinned as a permanent regression test.
+
+**Plan 3d is merged into `main` and its gate is 8 of 8.** The last open item
+was the `CLAUDE.md` allocation amendment, and it is **settled**: the human
+approved it on 2026-08-21 and the non-negotiable now reads
 
 > **The frame path allocates nothing per entity in steady state, and O(1) per
 > flush.** `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` and
@@ -319,16 +351,19 @@ reads
 
 The plan measured the residue and stopped there rather than editing the rule
 itself, because a gate that can be passed by editing the rule it is measured
-against is not a gate.
+against is not a gate. **No plan since has needed the rule amended again** —
+3e measured against it and it still describes the work.
 
 Plan 3d's open items were worked next, on `main` at `70d824e..0eac1be`: two
-closed, one shown to be unclosable until a DXF reader exists. Nothing is in
-flight.
+closed, one shown to be unclosable until a DXF reader exists.
 
-**Next**: pick a plan from the roadmap below — 3e (fills) and 3f
-(caches and tiles) are the named successors, and what 3d owes each is written
-out at the end of
-[the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
+**Next**: pick a plan from the roadmap below. **Plan 3f (caches and tiles)**
+is the named successor and what 3d and 3e owe it is written out at the end of
+[the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md)
+and [the 3e results note](docs/superpowers/notes/2026-08-22-plan-3e-results.md)
+respectively. **Permitted divergence 5** (overlapping translucent strokes on
+a triangle soup) is now live and still has no fixture — a candidate for a
+short follow-up before or alongside 3f.
 
 ### What Plan 3d leaves open
 
@@ -364,8 +399,13 @@ the nine new mutants are Part 4 of
    anything else. R4a and R4b never printed `screenSpaceLeafCount` at all. Fixed
    at `0eac1be` by giving all three rigs one shared `requireRepaint` and
    `printInvariants` — copies are how the drift happened.
-5. **Permitted divergence 5 (overlapping translucent strokes) goes live the
-   moment 3e adds fills.** It is inert today only because the corpus is opaque.
+5. **Permitted divergence 5 (overlapping translucent strokes) is now live**,
+   since Plan 3e adds fills — but **still not exercised by any fixture**.
+   Plan 3e's Task 15 measured the translucent-fill-triangulation seam
+   question (its own boundary's internal triangle edges) and found the
+   routing rule does not fire on the instrument available; it did not build a
+   fixture with an opaque stroke overlapping a translucent fill, which is
+   what this item names. Still open for whoever builds one.
 
 ### What the next plan inherits from 3c
 
@@ -595,29 +635,59 @@ by name, not by number.**
 
 ### Plan 3e — fills
 
-**It inherits no mechanism from 3b.** The 3b design's "flush contract" — a fill
-flushing open draw buckets — has nothing to attach to, because batching was
-reverted — but 3d's vertices sink supersedes that concern entirely: **3e
-inherits a triangle buffer already appended to in draw order, and a flush that
-already happens before anything unbatchable.** `_flushBeforeUnbatchable` is the
-shape any fill-flush contract extends.
+**Done — seventeen tasks, executed and reviewed one at a time directly on
+`main`** (no worktree; the brief scoped this plan to work in the main
+checkout, with `.superpowers/sdd/2026-08-21-jet-cad-2d-plan-3e-fills/` as its
+ledger, archived the same way a worktree plan's would be). Commit range:
+design and plan at `0eac1be..3201cc5`, the seventeen tasks at
+`3201cc5..f0ea51e` plus the results-note commit on top.
 
-**The open problem:** draw order is ascending handle value, so a region's fill
-must carry a **lower** handle than its boundary or it paints over its own
-outline. But handles are monotonic by creation and the natural authoring order
-is *draw the boundary, then hatch it* — which produces exactly the failing case.
-3e must choose and state one of:
+**The open problem the plan named — solved.** Draw order is ascending handle
+value, so a region's fill must carry a lower handle than its boundary. The
+chosen answer is **`AddRegionCommand`**: one atomic command that allocates
+the fill's handle first, the boundary's second, refuses an inverted pair, and
+returns one `CommandResult` — so no observer, including undo/redo, can ever
+see a fill whose boundary does not yet exist. `FillIndex` (`fill_index.dart`)
+holds the triangulation cache and the fill→boundary reverse map, **keyed by
+`Handle`, never `geomIndex`**, because `purge()` renumbers every `geomIndex`
+wholesale and a slot-keyed cache would not go stale, it would go *permuted*.
 
-- give the fill an explicit draw-order key the painter honours ahead of handle order, or
-- require the region command to create boundary and fill in one transaction with the ordering reserved.
+**Exit gate: 6 of 9 failable criteria PASS outright; 2 measured but not
+scored (a contaminated timing row, and the seam question left explicitly open
+on Impeller/GPU); 1 process criterion (the mutation log) PASS.** No criterion
+failed. Full detail, criterion by criterion:
+[docs/superpowers/notes/2026-08-22-plan-3e-results.md](docs/superpowers/notes/2026-08-22-plan-3e-results.md).
+Mutation log (56 mutants, 52 killed, 2 proven equivalent, 2 documented gaps):
+[docs/superpowers/notes/plan-3e-mutation-log.md](docs/superpowers/notes/plan-3e-mutation-log.md).
 
-**One thing 3e must not inherit silently.** Permitted divergence 5 —
-overlapping translucent strokes — is **inert today only because the corpus is
-opaque** (`argb`'s alpha is `255 - transparency`). A stroked path unions its
-coverage; a triangle soup does not, so two quads that overlap double-blend. The
-moment 3e draws anything with alpha < 255 that divergence is live and needs a
-test. See the [3d results
-note](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
+**Four facts worth carrying forward, because no single per-task report states
+them together:**
+
+1. **Measured on Flutter 3.47.1** (framework `6655482ec0`), not the 3.47.0 the
+   plan's own header states — the upgrade landed mid-plan, between Tasks 2 and
+   3, and broke nothing checkable.
+2. **macOS Low Power Mode was on for the whole of Task 16's device session.**
+   Every timing row in it carries that mark; per Plan 3d's own measurement,
+   that is a uniform ~24% penalty on both raster and build, not a rounding
+   error.
+3. **The 10,000-entity-under-16.67ms criterion is therefore MEASURED, not
+   PASS** — both numbers (build 9.12ms, raster 5.00ms) clear the bar by a wide
+   margin, but a contaminated timing row is recorded rather than scored.
+4. **The translucent seam's routing rule does not fire (fills batch,
+   settled), but the mode-2 mechanism itself is open on Impeller/GPU** —
+   `flutter_test`'s software Skia cannot antialias `drawVertices` at all
+   (proven by probe, pinned as a permanent regression test), so the measured
+   `0.000%` is a property of the instrument. Do not read it as "no seam was
+   found."
+
+**One thing 3e did not close.** Permitted divergence 5 — overlapping
+translucent strokes double-blending on a triangle soup — is now **live**
+(fills exist and can carry alpha < 255) but **still not exercised by any
+fixture**. Task 15 measured a different, narrower question (a translucent
+fill's own internal triangulation seam), not this one. Open for 3f or a
+follow-up. See the [3d results
+note](docs/superpowers/notes/2026-08-21-plan-3d-results.md) for where this
+divergence was first named.
 
 ### Plan 3f — the definition/tile picture cache
 
