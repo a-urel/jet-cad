@@ -290,8 +290,10 @@ default flip: **no platform defaults to canvas now.** The goldens still earn
 their place, for a different and correct reason — `CanvasDrawSink` is not dead
 code. `DraftCanvasState._attach` constructs
 `VerticesDrawSink(..., fallback: sink)`, and the vertices runs show
-`canvasCalls=19` (10k) and `canvasCalls=24` (50k): it draws text and fallbacks
-on every frame.
+`canvasCalls=19` (10k) and `canvasCalls=24` (50k) **on web** — the desktop
+control table above shows the same thing at 18 and 23, the small difference
+being the different viewport, not a different behaviour. Either way
+`CanvasDrawSink` draws text and fallbacks on every frame.
 
 ### Criterion 5 — 10,000 entities under 16.67 ms
 
@@ -764,14 +766,28 @@ artifacts are committed beside this note:
 
 | file | what it is |
 |---|---|
-| `web_rows.log` | the raw retrieved blocks — the source of every figure in the web table |
+| `web_rows.log` | **ten of the twelve run blocks**, as the app printed them and the poller retrieved them. The other two — 10,000-entity run 1 on each backend — are appended to the same file under `RECOVERED BLOCKS`, **reconstructed from the Task 13 report rather than captured**, with the three fields that could not be recovered marked `<not recovered>`. See the note below the table. |
 | `run_web_r2.sh` | the driver: launches `flutter run -d chrome --profile`, waits for the CLI banner, finds Chrome's `--remote-debugging-port` from `ps aux`, calls the poller, cleans up |
 | `cdp_poll_generic.py` | the retrieval: one `Runtime.evaluate("window.localStorage.getItem('r2Result')")` over a CDP websocket, polled every 2 s, `returnByValue`, no scraping and no fragment assembly |
 | `main.dart.pre-diag` | the harness `main.dart` **as backed up with `cp` before the run-time edits** — it carries that session's diagnostic `print()` lines but **not** the `runZoned`/localStorage capture |
 
-**The exact `main.dart` that ran is not among them.** `main.dart.pre-diag` is
-the restore point, not the run-time file. The `runZoned` capture survives only
-as the code excerpt in the Task 13 report, which is archived with this plan's
+**Two of the twelve web runs were never captured to `web_rows.log`.** They are
+10,000-entity run 1 on each backend, and they survive only in the Task 13
+report, whose transcripts are reflowed rather than verbatim. They are now
+appended to `web_rows.log` as clearly-labelled reconstructions so that no
+published figure rests on a file that will be deleted with this worktree — but
+a reconstruction is not a capture and the file says so at both ends. The one
+published figure this affects is the **upper endpoint of the web 10,000 canvas
+build interval, `[117.10, 122.20]`**: `122.20` is a reconstructed number. It
+does not move the median (117.80); it does set the published spread of 5.10 ms.
+Also note that the run ordinals in `web_rows.log`'s ten captured headers were
+typed by the operator and **do not line up with the report's run numbering** —
+the file's own header explains which is which, and nothing published depends on
+the ordering, only on the set of three.
+
+**The exact `main.dart` that ran is not among the artifacts either.**
+`main.dart.pre-diag` is the restore point, not the run-time file. The
+`runZoned` capture survives only as the code excerpt in the Task 13 report, which is archived with this plan's
 ledger. Anyone reproducing these rows must re-write that wrapper from the
 excerpt.
 

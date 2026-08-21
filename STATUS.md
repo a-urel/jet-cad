@@ -61,8 +61,9 @@ are collinear — do not carry them forward. `build` is linear in call count to
 
 The 2026-08-20 spike
 ([note](docs/superpowers/notes/2026-08-20-vertices-sink-spike.md)) became Plan
-3d, and Plan 3d is **finished on `spike/vertices-sink`** — 23 commits,
-`548fa8e..HEAD`, **not merged, not pushed**. `VerticesDrawSink` builds each
+3d, and Plan 3d is **finished on `spike/vertices-sink`** — **24 commits**,
+`548fa8e..HEAD`, on top of 8 spike-and-spec commits, so **32 off `main`**.
+**Not merged, not pushed.** `VerticesDrawSink` builds each
 stroked segment's triangles itself and submits the frame's strokes as one
 ordered `drawVertices`. What the spike lacked, 3d added: **miter and bevel
 joins** (a miter is two triangles), **seam joins on closed runs**, `Vertices`
@@ -166,13 +167,18 @@ docs/superpowers/
 
 | Location | Branch | State |
 |---|---|---|
-| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, `33bdafb`, Plans 1/2/3a/3b/**3c** merged |
-| `.claude/worktrees/vertices-spike` | `spike/vertices-sink` | clean, **Plan 3d complete**, 23 commits off `main`, not merged, not pushed |
+| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, **`bb67137`**, Plans 1/2/3a/3b/**3c** merged |
+| `.claude/worktrees/vertices-spike` | `spike/vertices-sink` | clean, **Plan 3d complete**, **32 commits off `main`** (8 spike/spec + 24 plan), not merged, not pushed |
 
-`main` is **29 commits ahead of `origin/main`**. **Nothing has been pushed.** Do
-not push unless explicitly asked. The Plan 3d per-task ledger lives in the
-worktree at `.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` and
-is git-ignored; **archive it to `docs/superpowers/ledgers/` when the branch
+`main` is a strict ancestor of the branch, so the branch is a fast-forward.
+**As of this worktree's refs `origin/main` is also at `bb67137`** —
+`git rev-list --count origin/main..main` is `0`, not the 29 this file used to
+claim. That ref is local and may be stale; re-check with `git fetch` before
+acting on it. Do not push unless explicitly asked.
+
+The Plan 3d per-task ledger lives in the worktree at
+`.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` and is
+git-ignored; **archive it to `docs/superpowers/ledgers/` when the branch
 merges**, or it is lost with the worktree.
 
 ---
@@ -217,8 +223,8 @@ stop clause fired. What shipped instead:
 
 The profiling task also answered the standing question about an unexplained
 179 ms: it is **leaf-count-bound GPU vertex work**, not fragment fill and not
-draw-call dispatch. That finding is what makes a picture cache (Plan 3e)
-worth building.
+draw-call dispatch. That finding is what makes a picture cache (**Plan 3f**,
+called 3e before the vertices sink took the 3d slot) worth building.
 
 > **Every `flutter drive` number in the 3b results note is contaminated:**
 > macOS Low Power Mode was on system-wide for the whole session and could not be
@@ -339,10 +345,11 @@ shipping text to an application and has no owner:
    `text_paint_allocation_test.dart` is in the engine suite because
    `jet_cad_2d_flutter` has no `vm_service`. Closing it means moving
    `AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
-4. **Whole-drawing thrash → 3e's text LOD.** 4,140 layouts and 4,140 evictions
+4. **Whole-drawing thrash → the picture cache's text LOD (Plan 3f).** 4,140
+   layouts and 4,140 evictions
    per frame, and it is 4,140 at *both* 50k and 500k because it is bounded by
-   string variety rather than entity count. A bigger cache holds one zoom level
-   of one corpus; not drawing text too small to read removes the cost.
+   string variety rather than entity count. A bigger cache holds one zoom
+   level of one corpus; not drawing text too small to read removes the cost.
 5. `snap at dirty threshold` p95 1.08 ms against < 1.0 ms — carried from Plan 2.
 6. `DocumentTree._link` is quadratic in a parent's child count, which is why
    the rigs cap `instanceCount` at 20,000 — recorded in Plan 3b.
@@ -524,7 +531,9 @@ degenerate assertion collapsing it to one label would silently void the gate.
 
 **If a failable row misses: record it and stop.** Plan 3b's Task 4 stop clause
 is the precedent — a row that fires is a result. Write the number, say what it
-implies for 3d and 3e, and stop rather than tuning until it complies.
+implies for fills and the picture cache (**3e and 3f** under the current
+numbering; 3c's own plan text called them 3d and 3e), and stop rather than
+tuning until it complies.
 
 The results note must state **whether macOS Low Power Mode was on**.
 
@@ -535,8 +544,11 @@ The results note must state **whether macOS Low Power Mode was on**.
 **Renumbered.** The vertices sink took the `3d` slot, so the two plans below
 moved up one: **fills is 3e** and **the picture cache is 3f**. That is the
 numbering the Plan 3d design document uses in "What 3d owes the plans after it",
-and it is the numbering the rest of this file uses. Older notes written before
-2026-08-20 call fills "3d" and the cache "3e"; read those by name, not by number.
+and it is the numbering the rest of this file uses — every `3d`/`3e`/`3f` above
+was swept and corrected, including the picture-cache pointer in the 3b section
+and the text-LOD item in 3c's carry-forward list. **Notes and plan documents
+written before 2026-08-20 still call fills "3d" and the cache "3e"; read those
+by name, not by number.**
 
 ### Plan 3e — fills
 
