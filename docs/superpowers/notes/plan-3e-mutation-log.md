@@ -23,6 +23,14 @@ counted once, in Part 1.
 | Documented coverage gaps (real survivors, argued) | 2 — T9c, cross-task #4 |
 | **Total accounted for** | **56** |
 
+**"56" counts verification runs, not 56 distinct code mutations.** Cross-task
+mutant #1 ("key the cache by `geomIndex`") is the *same* mutation as Task 3's
+own "keying" row — re-verified here against a larger call-site surface than
+Task 3 had, not a second, independent mutant. 55 distinct mutations, one of
+them (the keying mutant) verified twice, for 56 verification runs total. The
+overlap is disclosed above, not hidden; this line just says plainly what the
+headline number counts.
+
 ---
 
 ## Part 1 — Tasks 1–15's own mutants, re-run today

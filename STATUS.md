@@ -704,8 +704,11 @@ The prize is real: the dominant cost is leaf-count-bound GPU vertex work, and
 dashing makes that story **stronger** — one dashed polyline becomes dozens of
 drawn spans per leaf without moving the painter's op count.
 
-Four traps recorded in
-[docs/superpowers/notes/2026-08-17-carry-forward-additions.md](docs/superpowers/notes/2026-08-17-carry-forward-additions.md):
+Five traps. The first four are recorded in
+[docs/superpowers/notes/2026-08-17-carry-forward-additions.md](docs/superpowers/notes/2026-08-17-carry-forward-additions.md);
+the fifth is Plan 3e's own, added here because a reader who follows
+`CLAUDE.md`'s "read `STATUS.md` first" and stops at this section would
+otherwise never see it:
 
 1. **`documentRevision` does not exist yet** and nothing says what bumps it. If
    an ordinary entity edit bumps it, every definition picture is discarded every
@@ -723,6 +726,23 @@ Four traps recorded in
    `linetype`, `linetypeScale`, `lineweight`, `transparency` are missing, and
    DXF's INSERT carries all four. `StyleContext` is the picture cache key, so
    this model decision belongs **before** the cache, not after.
+5. **The allocation gate cannot see a lazily-populated cache, and a picture
+   cache is exactly that shape.** Plan 3e proved this directly: mutating
+   `DraftPainter._drawFill` to compute and store a triangulation on a cache
+   miss, instead of skipping it, left `paint_allocation_test.dart`'s own
+   `debugCapacityVertices` before/after comparison green. The mechanism only
+   reads `VerticesDrawSink`'s own vertex-buffer capacity; a triangulation (or
+   a baked `Picture`) that lands on the general Dart heap without touching
+   that buffer is invisible to it, and the warm-up frames a gate like this
+   one always runs will have already sized the buffer before the subject
+   frame is measured, hiding a first-draw allocation completely. **If 3f's
+   picture cache populates lazily on first paint, this exact gate will stay
+   green while the cache allocates a `Picture` per miss on the frame path.**
+   What actually proved fills are populated eagerly and not lazily was a
+   direct command-time assertion (`the triangulation is materialised by the
+   command, not by a draw`), not the allocation gate — 3f needs the
+   equivalent of that assertion, or a real VM allocation-profile mechanism
+   ported to the Flutter-side suite, not another buffer-capacity read.
 
 **Do not design 3f against a fixed op-count ceiling.** The web whole-drawing
 abort is reproducible but its trigger is unknown — a memory- or
