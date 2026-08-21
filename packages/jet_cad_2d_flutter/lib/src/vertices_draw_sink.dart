@@ -18,9 +18,13 @@ typedef FlushObserver = void Function(Float32List positions, Int32List colors);
 /// frame's strokes as **one** `drawVertices`, instead of one `drawPath` per
 /// segment.
 ///
-/// **A spike.** It exists to answer one question — whether collapsing the draw
-/// calls collapses the frame — and it is honest about what it gives up to ask
-/// it; see "What this is not" below.
+/// **The default backend on every platform, the web included.** It began as a
+/// spike, built to answer one question — whether collapsing the draw calls
+/// collapses the frame. Plan 3d's Phase C answered it and Task 13 flipped the
+/// default; the numbers are in
+/// `docs/superpowers/notes/2026-08-21-plan-3d-results.md`. What it gives up to
+/// buy that is unchanged and still listed under "What this is not" below —
+/// being the default does not make any of it go away.
 ///
 /// ## Why this shape
 ///
@@ -73,9 +77,15 @@ typedef FlushObserver = void Function(Float32List positions, Int32List colors);
 ///   before a text op from drawing after it.
 /// - **Anti-aliasing comes from MSAA, not from a coverage shader.** The SDF
 ///   path this replaces anti-aliases analytically.
-/// - **`flutter_test` cannot render it.** The software Skia backend takes
-///   minutes on a `drawVertices` that Impeller draws instantly, so the golden
-///   suite is not available to this sink.
+/// - **`flutter_test` cannot *rasterise* it, so its goldens take another
+///   route.** The software Skia backend takes minutes on a `drawVertices`
+///   that Impeller draws instantly, which rules out `matchesGoldenFile` on a
+///   widget drawn by this sink — that much is still true and still the reason
+///   the seam below exists. It does **not** mean there are no goldens: the
+///   [observer] hands each submitted buffer to
+///   `test/support/triangle_rasterizer.dart`, which scan-converts it in Dart,
+///   and the 14 PNGs in `test/golden/vertices/` are matched against *that*
+///   image. Update them the same way as any other golden.
 /// - **This sink is authoritative where it disagrees with [CanvasDrawSink].**
 ///   Under a non-conformal residual the two draw different stroke widths, and
 ///   this one is right: `CanvasDrawSink._widthFor` divides by
@@ -140,7 +150,9 @@ class VerticesDrawSink implements DrawSink {
   /// Measurement-only, as on [CanvasDrawSink]. Inert at 1.0.
   final double lineweightScale;
 
-  /// Takes every op this sink does not batch: points, circles, arcs and text.
+  /// Takes the ops this sink does not batch, which is fewer than it sounds:
+  /// exactly [beginResidual], [endResidual] and [text] forward here. Points,
+  /// circles and arcs all become triangles in this sink and never reach it.
   ///
   /// Composition rather than reimplementation, so the spike changes exactly
   /// one thing about the frame and a run against it is comparable to a run
@@ -150,7 +162,9 @@ class VerticesDrawSink implements DrawSink {
   /// Interleaved `[x, y]` per vertex, six vertices per segment.
   ///
   /// Capacity is never given back, so a steady-state frame allocates nothing
-  /// here: [flush] rewinds the length and leaves the storage in place.
+  /// here: [flush] rewinds the length and leaves the storage in place. That
+  /// is not free — see [debugCapacityVertices] for what the high-water mark
+  /// costs in bytes and for the measurement it was read from.
   Float32List _positions = Float32List(8192);
 
   /// One ARGB per vertex, parallel to [_positions].
@@ -267,6 +281,17 @@ class VerticesDrawSink implements DrawSink {
   /// The steady-state claim is that this stops changing: `_reserve` doubles
   /// and never gives capacity back, so once a frame has drawn its widest view
   /// the buffer is large enough for every later one.
+  ///
+  /// **What that costs, measured.** A vertex is 12 bytes here — a `Float32x2`
+  /// position plus an `Int32` colour — and the peak is pinned for the life of
+  /// the widget, because nothing ever shrinks it. On the dev harness's R2
+  /// corpus (`apps/dev_harness_2d`, pan 120 / zoom 120 over an 800x600
+  /// viewport) the peaks read out of this getter were 262,144 vertices at
+  /// 10,000 entities (3.00 MiB), 1,048,576 at 50,000 (12.00 MiB) and
+  /// **8,388,608 at 500,000 entities — 100,663,296 bytes, exactly 96.00
+  /// MiB**. The canvas backend has no equivalent cost. Whoever budgets memory
+  /// for a large drawing needs that number; the full table is in
+  /// `docs/superpowers/notes/2026-08-21-plan-3d-results.md`.
   int get debugCapacityVertices => _colors.length;
 
   @override
@@ -398,11 +423,25 @@ class VerticesDrawSink implements DrawSink {
 
     var mx = n0x + n1x, my = n0y + n1y;
     final mlen = math.sqrt(mx * mx + my * my);
+    // Defensive, not currently reachable, and kept for the same reason as
+    // `_endRun`'s guard: `n0` and `n1` have equal length, so their sum
+    // vanishes only when they are antiparallel -- which is `d0` and `d1`
+    // antiparallel, a dot product of -1, and the `kMinMiterCosine` bail three
+    // lines up already returned. It stays because that is a fact about
+    // today's bail threshold (-0.875 at a miter limit of 4) and not a promise
+    // the arithmetic below makes on its own; without it a loosened limit
+    // divides by zero and writes NaN positions into the buffer.
     if (mlen == 0) return;
     mx /= mlen;
     my /= mlen;
     // `n0` has length `half`, so this is the cosine of half the included angle.
     final cosHalf = (mx * n0x + my * n0y) / half;
+    // Defensive, not currently reachable, and unreachable for the same reason:
+    // the bail bounds the turn at about 151 degrees, so half of it is under
+    // 76 and its cosine is comfortably positive. Kept because the alternative
+    // to a bounded `reach` is a miter spike of unbounded length -- the failure
+    // a miter limit exists to prevent -- so this is the guard that survives if
+    // the threshold ever moves.
     if (cosHalf <= 0) return;
     final reach = half / cosHalf;
     _emitTriangle(ax, ay, vx + mx * reach, vy + my * reach, bx, by, argb);

@@ -336,6 +336,18 @@ The existing 14 PNGs keep their fixtures and their assertions and are pinned to
 the **canvas** backend, which is the web renderer. They are not dead-code tests
 after the web decision; they are the web backend's regression suite.
 
+> **Annotation, 2026-08-21 (post-implementation).** The premise of the sentence
+> above — that canvas is the web renderer — was overturned by Phase C's own
+> measurement and no longer holds. Task 13 flipped the default to the
+> **vertices** backend on *every* platform, the web included: the within-platform
+> build ratios (17.3x at 10,000 entities, 17.5x at 50,000) decided it. Both
+> backends are now goldened, so the canvas PNGs are the canvas backend's
+> regression suite rather than "the web backend's". The argument in this
+> section is left exactly as it was written — it was correct against the
+> evidence available at the time, and rewriting it would erase the fact that
+> the measurement changed the answer. See
+> `docs/superpowers/notes/2026-08-21-plan-3d-results.md`.
+
 The same fixtures are rendered again through the **vertices** backend and the
 rasterizer, into their own PNGs. Both sets are checked in. A fixture that
 cannot be drawn by one backend does not exist.
