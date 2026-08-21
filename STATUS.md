@@ -1,31 +1,31 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-21
-**Verified against:** branch `spike/vertices-sink`, worktree
-`.claude/worktrees/vertices-spike`, working tree clean. **`4a16b41` is the last
-commit touching `lib/` or `test/`**; everything after it is docs-only, and the
-three-package gate was re-run green on each. Every suite count below was
-produced by running the suite, not by reading a report.
+**Verified against:** `main` at the Plan 3d merge commit, working tree clean.
+Every suite count below was produced by running the suite on the **merged**
+result, not by reading a report and not on the branch before it landed.
 
 ---
 
 ## TL;DR — where you left off
 
-**Plan 3d (the vertices sink) is finished and in flight on
-`spike/vertices-sink`** — fifteen tasks, executed, reviewed and committed, not
-merged and not pushed. **Its exit gate is 7 of 8 with one criterion open for
-the human**, and that one criterion is the whole handoff. See
+**Plan 3d (the vertices sink) is merged into `main`** — fifteen tasks,
+executed, reviewed and committed, then merged locally with `--no-ff`. **Its
+exit gate is 7 of 8 with one criterion still open for the human**, and that
+one criterion is the whole handoff. See
 [Plan 3d](#plan-3d--the-vertices-sink-is-the-default-everywhere) and
 [Resume here](#resume-here).
 
-Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
-The `plan-3c` branch and its worktree are gone; the ledger is archived at
-[docs/superpowers/ledgers/](docs/superpowers/ledgers/).
+Nothing is in flight. The `spike/vertices-sink` branch and its worktree are
+gone; the ledger is archived at
+[docs/superpowers/ledgers/](docs/superpowers/ledgers/), beside Plan 3c's.
 
-| Suite | State (on `spike/vertices-sink` at `4a16b41`) |
+Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
+
+| Suite | State (on `main`, run against the merged result) |
 |---|---|
 | `packages/jet_cad_2d` — engine | **720 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **238 tests pass, 1 skipped**, analyze/format clean |
+| `packages/jet_cad_2d_flutter` — widgets | **239 tests pass, 1 skipped**, analyze/format clean |
 | `flutter test --tags golden` | **23 pass**, 28 PNGs (14 fixtures × 2 backends); no pre-existing PNG regenerated |
 | `apps/dev_harness_2d` | analyze/format clean; **R2/R4a/R4b run on macOS in profile mode, and R2 on Chrome/CanvasKit** |
 
@@ -62,9 +62,9 @@ are collinear — do not carry them forward. `build` is linear in call count to
 
 The 2026-08-20 spike
 ([note](docs/superpowers/notes/2026-08-20-vertices-sink-spike.md)) became Plan
-3d, and Plan 3d is **finished on `spike/vertices-sink`** — the plan is
-`548fa8e..HEAD`, sitting on the spike and spec commits at `bb67137..548fa8e`,
-so the whole branch is `main..HEAD`. **Not merged, not pushed.**
+3d, and Plan 3d is **merged into `main`** — the spike and spec commits at
+`bb67137..548fa8e`, the plan at `548fa8e..a4c31c1`, brought in by one `--no-ff`
+merge. **Merged locally, not pushed.**
 `VerticesDrawSink` builds each stroked segment's triangles itself and submits
 the frame's strokes as one ordered `drawVertices`. What the spike lacked, 3d added: **miter and bevel
 joins** (a miter is two triangles), **seam joins on closed runs**, `Vertices`
@@ -168,10 +168,11 @@ docs/superpowers/
 
 | Location | Branch | State |
 |---|---|---|
-| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, **`bb67137`**, Plans 1/2/3a/3b/**3c** merged |
-| `.claude/worktrees/vertices-spike` | `spike/vertices-sink` | clean, **Plan 3d complete**, `main..HEAD` off `main` — spike and spec at `bb67137..548fa8e`, the plan at `548fa8e..HEAD`; not merged, not pushed |
+| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, Plans 1/2/3a/3b/**3c**/**3d** merged |
 
-`main` is a strict ancestor of the branch, so the branch is a fast-forward.
+**No worktrees.** `spike/vertices-sink` was merged with `--no-ff` and both the
+branch and `.claude/worktrees/vertices-spike` were removed. Nothing is in
+flight.
 
 **This file states commit ranges and never a commit count, on purpose.** A
 count is falsified by the next commit — including the commit that writes the
@@ -179,19 +180,20 @@ count, which is how the figure here was wrong twice in one task. A range with
 named endpoints is true forever. If you want the number, ask git:
 
 ```sh
-git -C .claude/worktrees/vertices-spike rev-list --count main..HEAD
-git -C .claude/worktrees/vertices-spike rev-list --count origin/main..main   # 0 at the time of writing
+git rev-list --count 52c7a7b..HEAD          # everything Plan 3d brought in
+git rev-list --count origin/main..main      # what is unpushed
 ```
 
-The second is `0`: **as of this worktree's refs `origin/main` is also at
-`bb67137`**, not the 29-ahead-and-unpushed this file used to claim. That ref is
-local and a `git fetch` can move it, so re-run the command rather than trusting
-the parenthetical. Do not push unless explicitly asked.
+**Merged locally, not pushed.** `origin/main` was at `bb67137` when this was
+written, so the second command counts the whole of Plan 3d. That ref is local
+and a `git fetch` can move it, so re-run the command rather than trusting this
+sentence. Do not push unless explicitly asked.
 
-The Plan 3d per-task ledger lives in the worktree at
-`.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` and is
-git-ignored; **archive it to `docs/superpowers/ledgers/` when the branch
-merges**, or it is lost with the worktree.
+The Plan 3d per-task ledger was archived out of the worktree before it was
+removed, and is at
+[docs/superpowers/ledgers/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/](docs/superpowers/ledgers/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/):
+fifty-nine files, including `progress.md` with its fourteen rulings and the
+twenty-six review packages.
 
 ---
 
@@ -246,11 +248,11 @@ called 3e before the vertices sink took the 3d slot) worth building.
 
 ---
 
-## In flight: Plan 3c — text
+## Merged: Plan 3c — text
 
 - **Spec (binding):** [docs/superpowers/specs/2026-08-17-jet-cad-2d-plan-3c-design.md](docs/superpowers/specs/2026-08-17-jet-cad-2d-plan-3c-design.md)
 - **Plan:** [docs/superpowers/plans/2026-08-17-jet-cad-2d-plan-3c-text.md](docs/superpowers/plans/2026-08-17-jet-cad-2d-plan-3c-text.md)
-- **Ledger (the only progress record — read it):** `.claude/worktrees/plan-3c/.superpowers/sdd/2026-08-17-jet-cad-2d-plan-3c-text/progress.md`
+- **Ledger (the only progress record — read it):** [docs/superpowers/ledgers/2026-08-17-jet-cad-2d-plan-3c-text/progress.md](docs/superpowers/ledgers/2026-08-17-jet-cad-2d-plan-3c-text/progress.md) — archived on merge; the `plan-3c` worktree the older text points at is gone
 
 **Goal:** store, measure, hit-test and draw single-line text so the product's
 real payload — table numbers and room labels — renders, and measure what it
@@ -294,9 +296,9 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Plan 3d is complete on `spike/vertices-sink` and waiting on one human
-decision.** Everything is green there and the tree is clean; nothing else is in
-flight.
+**Plan 3d is merged into `main` and waiting on one human decision.** The
+merged result is green on all three packages and the tree is clean; nothing is
+in flight. The one open item is a rule, not code.
 
 **The one thing to answer first — the `CLAUDE.md` allocation amendment.** The
 current non-negotiable says the frame path allocates *nothing* in steady state.
@@ -309,17 +311,15 @@ the rule it is measured against is not a gate. The proposed replacement:
 > `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`
 > measure it.
 
-**Approve it** → exit criterion 7 passes, the gate is 8/8, and the branch is
-ready for `superpowers:finishing-a-development-branch`. **Refuse it** →
+**Approve it** → exit criterion 7 passes and the gate is 8/8. **Refuse it** →
 criterion 7 fails, and that is Plan 3d's recorded result rather than a delay;
-the branch does not merge on the strength of its note until the residue is
-removed or the rule is settled another way.
+the residue has to go to zero, and the code that merged stays as it is until
+it does. The merge happened on the strength of seven passing criteria and an
+honestly-open eighth, which the results note states in those terms.
 
-**Then**: finish the branch (the merge menu is the human's to answer), archive
-`.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` into
-`docs/superpowers/ledgers/`, and pick the next plan from the roadmap below —
-3e (fills) and 3f (caches and tiles) are the named successors, and what 3d owes
-each is written out at the end of
+**Then**: pick the next plan from the roadmap below — 3e (fills) and 3f
+(caches and tiles) are the named successors, and what 3d owes each is written
+out at the end of
 [the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
 
 ### What Plan 3d leaves open
