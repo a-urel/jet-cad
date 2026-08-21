@@ -1,0 +1,218 @@
+# Review package: 4a36455..HEAD
+
+## Commits
+aeb2373 test: measure what the paint path allocates, and hoist the Paint
+
+## Files changed
+ .../lib/src/vertices_draw_sink.dart                | 24 +++++-
+ .../test/invariants/paint_allocation_test.dart     | 89 ++++++++++++++++++++++
+ 2 files changed, 112 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+index fcb75aa..7e5a8b9 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+@@ -68,20 +68,29 @@ import 'draw_sink.dart';
+ ///   path this replaces anti-aliases analytically.
+ /// - **`flutter_test` cannot render it.** The software Skia backend takes
+ ///   minutes on a `drawVertices` that Impeller draws instantly, so the golden
+ ///   suite is not available to this sink.
+ /// - **This sink is authoritative where it disagrees with [CanvasDrawSink].**
+ ///   Under a non-conformal residual the two draw different stroke widths, and
+ ///   this one is right: `CanvasDrawSink._widthFor` divides by
+ ///   `scaleMagnitude`, one scalar standing in for two axis scales. The full
+ ///   list of permitted divergences is in Plan 3d's design document; anything
+ ///   not on it is a defect.
++///
++/// ## What a steady-state frame allocates
++///
++/// Three objects per flush — the `Vertices` and the two `sublistView`
++/// wrappers — and nothing per entity. The buffers themselves are grown once
++/// and reused; `test/invariants/paint_allocation_test.dart` fails if they grow
++/// in a steady-state frame. With text in the corpus a frame flushes once per
++/// text op plus once at the end, so the frame's total is
++/// `3 * (textOps + 1)`.
+ class VerticesDrawSink implements DrawSink {
+   VerticesDrawSink({
+     required this.pixelsPerPaperMm,
+     this.lineweightScale = 1.0,
+     CanvasDrawSink? fallback,
+     Canvas? canvas,
+     this.devicePixelRatio = 1.0,
+   }) : _fallback = fallback {
+     if (canvas != null) this.canvas = canvas;
+   }
+@@ -125,20 +134,26 @@ class VerticesDrawSink implements DrawSink {
+ 
+   /// Interleaved `[x, y]` per vertex, six vertices per segment.
+   ///
+   /// Capacity is never given back, so a steady-state frame allocates nothing
+   /// here: [flush] rewinds the length and leaves the storage in place.
+   Float32List _positions = Float32List(8192);
+ 
+   /// One ARGB per vertex, parallel to [_positions].
+   Int32List _colors = Int32List(4096);
+ 
++  /// One paint for the life of the sink, as on [CanvasDrawSink].
++  ///
++  /// It never varies: the colour rides on the vertices, so the only thing the
++  /// paint contributes is its alpha, and that is always opaque.
++  final Paint _paint = Paint()..color = const Color(0xFFFFFFFF);
++
+   /// Vertices written, so `_vertices * 2` floats and `_vertices` colours.
+   int _vertices = 0;
+ 
+   Transform2 _residual = Transform2.identity();
+ 
+   int _segments = 0;
+   int _flushCalls = 0;
+   int _lastFlushSegments = 0;
+   int _lastFlushVertices = 0;
+   int _totalFlushes = 0;
+@@ -197,20 +212,27 @@ class VerticesDrawSink implements DrawSink {
+   /// on.
+   bool get lastFlushDisposed => _lastFlushDisposed;
+ 
+   /// The positions written so far, as `[x0, y0, x1, y1, ...]`.
+   Float32List debugPositions() =>
+       Float32List.sublistView(_positions, 0, _vertices * 2);
+ 
+   /// The per-vertex colours written so far.
+   Int32List debugColors() => Int32List.sublistView(_colors, 0, _vertices);
+ 
++  /// Vertices the buffers can hold without growing.
++  ///
++  /// The steady-state claim is that this stops changing: `_reserve` doubles
++  /// and never gives capacity back, so once a frame has drawn its widest view
++  /// the buffer is large enough for every later one.
++  int get debugCapacityVertices => _colors.length;
++
+   @override
+   void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {
+     _residual = residual;
+     _fallback?.beginResidual(residual, debugHandle: debugHandle);
+   }
+ 
+   @override
+   void endResidual() {
+     // Deliberately does not flush. A buffer outliving the residual that filled
+     // it is the entire mechanism.
+@@ -355,21 +377,21 @@ class VerticesDrawSink implements DrawSink {
+     final vertices = Vertices.raw(
+       VertexMode.triangles,
+       positions,
+       colors: colors,
+     );
+     canvas.drawVertices(
+       vertices,
+       // With per-vertex colours and no shader on the paint, the vertex colour
+       // is the colour drawn; the paint contributes only its alpha.
+       BlendMode.dst,
+-      Paint()..color = const Color(0xFFFFFFFF),
++      _paint,
+     );
+     // `drawVertices` has taken what it needs by the time it returns; holding
+     // the object past that point holds native buffers the engine has already
+     // copied. Verified against a `PictureRecorder` here and on a device in
+     // Plan 3d Task 2 step 7.
+     vertices.dispose();
+     // Read the object's own state rather than assert the flag beside the
+     // call above -- an unconditional `= true` here would stay true even if
+     // `dispose()` were deleted, which is the exact regression this field
+     // exists to catch. `debugDisposed` throws outside asserts, so it must
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart b/packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart
+new file mode 100644
+index 0000000..8ac620a
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart
+@@ -0,0 +1,89 @@
++// What a steady-state frame allocates through each sink.
++//
++// `CLAUDE.md`: "The frame path allocates nothing in steady state."
++// `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` measures the
++// query path and stops there. This measures the paint path, which is the half
++// the vertices sink changes.
++//
++// The number is a *ratio against a control*, never an absolute: the VM's
++// allocation profiler has a documented low-read artefact, and a run that reads
++// low on both the control and the subject still reports the right ratio.
++
++import 'dart:ui';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d/testing.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++const Size _viewport = Size(800, 600);
++
++DraftDocument _corpus() => generateDocument(
++      4000,
++      definitionCount: 40,
++      instanceCount: 400,
++      nestingDepth: 2,
++      mirroredFraction: 0.1,
++      nonUniformFraction: 0.2,
++      groupCount: 10,
++      layerCount: 8,
++      byBlockFraction: 0.3,
++      dashedFraction: 0.35,
++    );
++
++void main() {
++  testWidgets('a steady-state frame allocates O(1) per flush, not O(entities)',
++      (tester) async {
++    final doc = _corpus();
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final painter = DraftPainter(
++        document: doc, index: index, resolver: DocumentStyleResolver(doc));
++    final camera = ViewportTransform.fit(doc.extents, _viewport);
++
++    final recorder = PictureRecorder();
++    final canvas = Canvas(recorder);
++    final sink =
++        VerticesDrawSink(pixelsPerPaperMm: kLogicalPixelsPerMm, canvas: canvas);
++
++    // Warm up: the first frame grows the buffers, and growth is exactly what
++    // the steady state is defined as being past.
++    for (var i = 0; i < 3; i++) {
++      painter.paint(sink, camera, _viewport);
++      sink.flush();
++    }
++
++    // The subject frame. Flushes are counted, not assumed: the assertion below
++    // is in units of flushes, so a frame that stopped flushing would make it
++    // vacuous.
++    sink.resetCounters();
++    painter.paint(sink, camera, _viewport);
++    sink.flush();
++
++    expect(sink.totalFlushCount, greaterThan(0),
++        reason: 'nothing was flushed, so nothing was measured');
++    expect(sink.frameSegmentCount, greaterThan(1000),
++        reason: 'a degenerate corpus would make the bound meaningless');
++
++    // The buffer must not have grown in the subject frame. Growth is the one
++    // O(entities) allocation this sink can make, and it is the one the
++    // steady-state claim is about.
++    //
++    // MUTATION: drop `_reserve`'s capacity-sufficiency guard and
++    // unconditionally double, so every segment regrows the buffer instead of
++    // only a call that needs more room. `debugCapacityVertices` no longer
++    // holds still between the two reads -- it compounds every segment of the
++    // frame and the run in fact throws an `OutOfMemoryError` from
++    // `_reserve`'s `Float32List` allocation long before either `expect`
++    // below runs, which is the steady-state property failing as loudly as
++    // it can.
++    final before = sink.debugCapacityVertices;
++    painter.paint(sink, camera, _viewport);
++    sink.flush();
++    expect(sink.debugCapacityVertices, before,
++        reason: 'the buffer grew in a steady-state frame, so the frame path '
++            'allocates O(entities) and not O(1)');
++
++    recorder.endRecording().dispose();
++  });
++}

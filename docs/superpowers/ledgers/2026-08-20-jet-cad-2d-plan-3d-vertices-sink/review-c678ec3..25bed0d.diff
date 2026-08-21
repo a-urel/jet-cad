@@ -1,0 +1,782 @@
+# Review package: c678ec3..HEAD
+
+## Commits
+25bed0d fix: flip the platform default to vertices, web included
+1623545 feat: share the R2 rig so the harness can drive itself on web
+
+## Files changed
+ .../integration_test/frame_timing_test.dart        | 164 ++++-------------
+ apps/dev_harness_2d/lib/main.dart                  | 133 +++++++++++++-
+ apps/dev_harness_2d/lib/measurement_rig.dart       | 196 +++++++++++++++++++++
+ .../jet_cad_2d_flutter/lib/src/render_backend.dart |  27 +--
+ .../test/render_backend_test.dart                  |  12 +-
+ 5 files changed, 382 insertions(+), 150 deletions(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/integration_test/frame_timing_test.dart b/apps/dev_harness_2d/integration_test/frame_timing_test.dart
+index 2d3a461..a14ed20 100644
+--- a/apps/dev_harness_2d/integration_test/frame_timing_test.dart
++++ b/apps/dev_harness_2d/integration_test/frame_timing_test.dart
+@@ -4,20 +4,21 @@
+ // Profile mode only:
+ //   flutter test integration_test/frame_timing_test.dart --profile -d macos
+ //
+ // Debug numbers are meaningless here; the harness refuses to record them.
+ 
+ // ignore_for_file: avoid_print — printing the numbers is what a rig is for.
+ 
+ import 'dart:typed_data';
+ 
+ import 'package:dev_harness_2d/main.dart';
++import 'package:dev_harness_2d/measurement_rig.dart';
+ import 'package:flutter/scheduler.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:integration_test/integration_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+ 
+ /// Entity count for one run of the whole file, so both corpus sizes are
+ /// measured by running it twice rather than by doubling every rig.
+ const int kEntities = int.fromEnvironment('ENTITIES', defaultValue: 50000);
+@@ -33,58 +34,24 @@ const String kRig = String.fromEnvironment('RIG', defaultValue: 'all');
+ 
+ /// Gesture samples for R4a and R4b.
+ ///
+ /// R4b costs a full index rebuild per step, so 200 of them at 500,000 entities
+ /// is minutes of wall clock for one number. The number wanted is the per-step
+ /// cost, and that does not need 200 samples.
+ const int kSteps = int.fromEnvironment('STEPS', defaultValue: 200);
+ 
+ bool runs(String rig) => kRig == 'all' || kRig == rig;
+ 
+-void refuseDebugMode() {
+-  var isDebug = false;
+-  assert(() {
+-    isDebug = true;
+-    return true;
+-  }());
+-  if (isDebug) {
+-    throw StateError('run with --profile; debug frame times mean nothing');
+-  }
+-}
+-
+-/// p50, p95 and max of build and raster time, reported separately.
+-///
+-/// A build-bound frame and a raster-bound frame call for opposite fixes in
+-/// Plan 3b — one wants less walking, the other fewer or cheaper draw calls —
+-/// so a single "frame time" would hide the only thing the number is for.
+-void report(String rig, List<FrameTiming> timings) {
+-  if (timings.isEmpty) {
+-    print('$rig: no frames recorded');
+-    return;
+-  }
+-  String stats(List<double> ms) {
+-    ms.sort();
+-    return 'p50=${ms[(ms.length * 0.5).floor()].toStringAsFixed(2)}ms '
+-        'p95=${ms[(ms.length * 0.95).floor()].toStringAsFixed(2)}ms '
+-        'max=${ms.last.toStringAsFixed(2)}ms';
+-  }
+-
+-  final build = [
+-    for (final t in timings) t.buildDuration.inMicroseconds / 1000.0
+-  ];
+-  final raster = [
+-    for (final t in timings) t.rasterDuration.inMicroseconds / 1000.0
+-  ];
+-  print('$rig frames=${timings.length}');
+-  print('  build  ${stats(build)}');
+-  print('  raster ${stats(raster)}');
+-}
++// `refuseDebugMode`, `report`, `printBackend` and `printTextCounters` live in
++// `package:dev_harness_2d/measurement_rig.dart` now, shared with `main.dart`'s
++// `RUN_R2` app-run mode — see that file's header comment for why this file
++// no longer defines its own copies.
+ 
+ /// Wall clock for the command itself, which no `FrameTiming` can see.
+ ///
+ /// A command runs synchronously in the gesture handler, before the frame it
+ /// causes. Its cost — including the index invalidation it triggers — lands
+ /// outside `buildDuration` entirely, so reporting frame times alone would put
+ /// "200 full index rebuilds" and "build p50 5.4 ms" side by side and read as
+ /// "rebuilds are free".
+ class CommandClock {
+   final List<double> _ms = [];
+@@ -125,62 +92,20 @@ Handle addLineAt(
+       transparency: 0,
+       flags: 0,
+     ),
+     payload: GeometryPayload(
+         coords: Float64List.fromList([x, y, x + 400, y + 250]),
+         scalars: Float64List(0)),
+   ));
+   return handle;
+ }
+ 
+-/// The text counters, printed by every rig so the on/off delta is one define
+-/// apart on one corpus.
+-///
+-/// `newLayouts` is the row the exit gate is about: in a steady state — the
+-/// same strings visible frame after frame — a warm paragraph cache must lay
+-/// nothing out, and a non-zero reading here means the working set does not fit
+-/// under `kParagraphCacheLimit`. The counters are read after the same forced
+-/// repaint the dash counters come from, so all of them describe one frame.
+-///
+-/// `layouts` and `evictions` are running totals since the sink was built; the
+-/// per-frame figures are the deltas the caller passes in. A running total
+-/// printed beside two per-frame figures is the wrong comparison this file
+-/// already refuses to publish once.
+-/// The backend actually used, and the vertices counters when it was that one.
+-///
+-/// The resolved value and not the define: a run that asked for `vertices` and
+-/// silently got `canvas` would otherwise report canvas numbers under a
+-/// vertices heading, which is the shape of the mistake Plan 3c's `TEXT` define
+-/// made.
+-void printBackend(RenderBackend backend, VerticesDrawSink? vertices) {
+-  if (vertices == null) {
+-    print('  backend=${backend.name}');
+-    return;
+-  }
+-  print('  backend=${backend.name} '
+-      'triangles=${vertices.frameTriangleCount} '
+-      'drawVerticesCalls=${vertices.totalFlushCount}');
+-}
+-
+-void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
+-    {required int layoutsBefore, required int evictionsBefore}) {
+-  final m = sink.measurer;
+-  print('  text: corpus=${kTextCorpus ? "on" : "off"} '
+-      'draw=${kDrawText ? "on" : "off"} '
+-      'textOps=${painter.textOpCount} '
+-      'skippedText=${painter.skippedTextCount}');
+-  print('  paragraphs: newLayouts=${m.layoutCount - layoutsBefore} '
+-      'newEvictions=${m.evictionCount - evictionsBefore} '
+-      'live=${m.liveParagraphCount} '
+-      '(totals layouts=${m.layoutCount} evictions=${m.evictionCount})');
+-}
+-
+ void main() {
+   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+ 
+   /// Builds the app and hands back everything a rig drives.
+   Future<
+       ({
+         DraftDocument doc,
+         CameraController camera,
+         SpatialIndex index,
+         DraftPainter painter,
+@@ -246,72 +171,39 @@ void main() {
+       painter: painter,
+       sink: sink,
+       vertices: vertices,
+       resolvedBackend: resolvedBackend,
+       dashedLinetype: dashedLinetypes.singleOrNull?.handle
+     );
+   }
+ 
+   testWidgets('R2 pan and zoom', (tester) async {
+     if (!runs('pan')) return;
+-    refuseDebugMode();
+     final app = await boot(tester);
+-    final timings = <FrameTiming>[];
+-    binding.addTimingsCallback(timings.addAll);
+-
+-    // 120 frames of pan, then 120 of zoom across three scale bands, so band
+-    // crossings are inside the measurement rather than either side of it.
+-    for (var i = 0; i < 120; i++) {
+-      app.camera.panBy(const Offset(-7, -3));
+-      await tester.pump(const Duration(milliseconds: 16));
+-    }
+-    for (var i = 0; i < 120; i++) {
+-      app.camera.zoomAt(const Offset(800, 600), i.isEven ? 1.03 : 0.97);
+-      await tester.pump(const Duration(milliseconds: 16));
+-    }
+-    await tester.pumpAndSettle();
+-    // All three counters now mean the same thing: this frame. dashSpanCount
+-    // and collapsedDashCount reset themselves every paint; canvasCallCount
+-    // does not, because the sink outlives the frame. But pumpAndSettle
+-    // leaves nothing dirty, so a bare pump() would not repaint at all —
+-    // RenderCustomPaint only repaints when its `repaint` Listenable fires,
+-    // and nothing has changed since the last real frame. panBy(Offset.zero)
+-    // is a numeric no-op but still assigns a fresh ViewportTransform
+-    // (Transform2 and ViewportTransform both deliberately have no
+-    // operator==, so ValueNotifier's reference check always sees a
+-    // "change"), which fires the listener and forces the one real repaint
+-    // that makes resetCounters() meaningful. A running total beside two
+-    // per-frame figures is a wrong comparison waiting to be published.
+-    app.sink.resetCounters();
+-    app.vertices?.resetCounters();
+-    final layoutsBefore = app.sink.measurer.layoutCount;
+-    final evictionsBefore = app.sink.measurer.evictionCount;
+-    app.camera.panBy(Offset.zero);
+-    await tester.pump(const Duration(milliseconds: 16));
+-    report('R2 ($kEntities)', timings);
+-    print('  screenSpaceLeafCount=${app.painter.screenSpaceLeafCount} '
+-        'lineweightScale=$kLineweightScale');
+-    if (app.sink.canvasCallCount == 0) {
+-      // The counters above are read from a frame that has to actually have
+-      // happened. `panBy(Offset.zero)` forces one only because Transform2 has
+-      // no operator== for ValueNotifier to dedupe against — a property this
+-      // rig depends on and does not own. If that ever changes, this rig would
+-      // print a plausible-looking zero rather than fail, and a zero is the one
+-      // wrong number nobody questions.
+-      throw StateError('no repaint happened: the forced frame did not draw');
+-    }
+-    print('  dashSpans=${app.painter.dashSpanCount} '
+-        'collapsed=${app.painter.collapsedDashCount} '
+-        'canvasCalls=${app.sink.canvasCallCount}');
+-    printBackend(app.resolvedBackend, app.vertices);
+-    printTextCounters(app.painter, app.sink,
+-        layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
++    // The measured rig itself — 120 frames of pan, 120 of zoom, one forced
++    // repaint, then the block — lives in `measurement_rig.dart`'s
++    // `runR2Rig`, shared with `main.dart`'s `RUN_R2` app-run mode so the
++    // desktop and (Task 13) web rows come from one implementation. Only how
++    // a frame gets pumped differs between the two call sites.
++    await runR2Rig(
++      entities: kEntities,
++      lineweightScale: kLineweightScale,
++      textCorpus: kTextCorpus,
++      drawText: kDrawText,
++      camera: app.camera,
++      painter: app.painter,
++      sink: app.sink,
++      vertices: app.vertices,
++      resolvedBackend: app.resolvedBackend,
++      pumpFrame: () => tester.pump(const Duration(milliseconds: 16)),
++      settle: tester.pumpAndSettle,
++    );
+   });
+ 
+   testWidgets('R4a leaf edit per frame', (tester) async {
+     if (!runs('leaf')) return;
+     if (kDashedFraction == 0) {
+       print('R4a skipped: DASHED=0 seeds no dashed linetype to edit with.');
+       return;
+     }
+     refuseDebugMode();
+     final app = await boot(tester);
+@@ -370,21 +262,24 @@ void main() {
+     // See R2's guard above for why: a zero here would mean the forced
+     // repaint silently stopped happening.
+     if (app.sink.canvasCallCount == 0) {
+       throw StateError('no repaint happened: the forced frame did not draw');
+     }
+     print('  dashSpans=${app.painter.dashSpanCount} '
+         'collapsed=${app.painter.collapsedDashCount} '
+         'canvasCalls=${app.sink.canvasCallCount}');
+     printBackend(app.resolvedBackend, app.vertices);
+     printTextCounters(app.painter, app.sink,
+-        layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
++        textCorpus: kTextCorpus,
++        drawText: kDrawText,
++        layoutsBefore: layoutsBefore,
++        evictionsBefore: evictionsBefore);
+   });
+ 
+   testWidgets('R4b instance drag per frame', (tester) async {
+     if (!runs('instance')) return;
+     refuseDebugMode();
+     final app = await boot(tester);
+     final timings = <FrameTiming>[];
+     binding.addTimingsCallback(timings.addAll);
+ 
+     // `TransformNodeCommand` touches a node handle, which the index classifies
+@@ -428,13 +323,16 @@ void main() {
+     // See R2's guard above for why: a zero here would mean the forced
+     // repaint silently stopped happening.
+     if (app.sink.canvasCallCount == 0) {
+       throw StateError('no repaint happened: the forced frame did not draw');
+     }
+     print('  dashSpans=${app.painter.dashSpanCount} '
+         'collapsed=${app.painter.collapsedDashCount} '
+         'canvasCalls=${app.sink.canvasCallCount}');
+     printBackend(app.resolvedBackend, app.vertices);
+     printTextCounters(app.painter, app.sink,
+-        layoutsBefore: layoutsBefore, evictionsBefore: evictionsBefore);
++        textCorpus: kTextCorpus,
++        drawText: kDrawText,
++        layoutsBefore: layoutsBefore,
++        evictionsBefore: evictionsBefore);
+   });
+ }
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index 59817f7..0aa495d 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -1,21 +1,30 @@
+ // A measurement harness, not a product.
+ //
+ // Pointer pan and scroll zoom go straight to `CameraController`. There is no
+ // tool architecture and no selection, because tools are Plan 4 and every line
+ // here is a line the rigs have to keep working.
+ 
++// ignore_for_file: avoid_print — the RUN_R2 diagnostics below print by
++// design; see `measurement_rig.dart`.
++
++import 'dart:async';
++
+ import 'package:flutter/gestures.dart';
+ import 'package:flutter/material.dart';
++import 'package:flutter/scheduler.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d/testing.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
++
++import 'measurement_rig.dart';
+ 
+ /// Entity count, so one binary serves both corpus sizes.
+ const int kEntities = int.fromEnvironment('ENTITIES', defaultValue: 50000);
+ 
+ /// Multiplies every stroke's device-pixel width at the sink.
+ ///
+ /// **Measurement-only**, added for Task 4c's fill-rate experiment (B):
+ /// geometry, draw-call count and the walk are unchanged across a run at 1x,
+ /// 2x or 4x — only the number of shaded pixels changes. There is no
+ /// `double.fromEnvironment` in Dart, so this parses the string define at
+@@ -104,21 +113,143 @@ DraftDocument harnessDocument([int? entityCount]) => generateDocument(
+       groupCount: 50,
+       layerCount: 8,
+       byBlockFraction: 0.3,
+       dashedFraction: kDashedFraction,
+       labelFraction: kTextCorpus ? 0.02 : 0,
+       attributedInstanceFraction: kTextCorpus ? 0.2 : 0,
+       measurer:
+           kTextCorpus ? FlutterTextMeasurer() : const InsertionPointMeasurer(),
+     );
+ 
+-void main() => runApp(HarnessApp(document: harnessDocument()));
++/// Whether `main()` drives R2 itself on startup and prints its block,
++/// instead of waiting to be driven by `integration_test`.
++///
++/// Task 13's web row needed `flutter drive -d chrome`, and that hangs in
++/// this environment before it ever reaches chromedriver — see the Task 13
++/// report. `flutter run -d chrome` forwards the app's own `print()` output
++/// to the terminal once its debug service links, so this mode drives the
++/// rig itself and gets the same block without any driver.
++///
++/// **Caveat found while measuring, not assumed**: in this environment,
++/// `flutter run -d chrome --profile` never printed "Waiting for connection
++/// from debug service on Chrome..." and never linked one, so this mode's own
++/// `print()` output never reached the terminal in profile mode — only debug
++/// mode linked reliably, and debug numbers are exactly what
++/// `refuseDebugMode()` inside `runR2Rig` refuses to record. The Task 13
++/// report used the Chrome DevTools Protocol directly (reading a value the
++/// app wrote to `window.localStorage`, a temporary addition not part of this
++/// commit) to get profile-mode numbers out despite that gap; that retrieval
++/// path is not shipped here because it is investigation plumbing for one
++/// environment's limitation, not shared measurement code. A future
++/// environment where profile mode links normally would use this mode as
++/// written, watching the terminal directly.
++///
++/// Same footgun as [kTextCorpus], same rule: a `bool.fromEnvironment` reads
++/// anything other than exactly `"true"` as false, so `--dart-define=RUN_R2=1`
++/// silently runs the ordinary interactive harness instead. Always pass
++/// `=true`.
++///
++/// Inert at its default of `false`: an ordinary `flutter run`/`flutter
++/// drive` harness invocation is unaffected.
++const bool kRunR2 = bool.fromEnvironment('RUN_R2');
++
++void main() {
++  final doc = harnessDocument();
++  if (!kRunR2) {
++    runApp(HarnessApp(document: doc));
++    return;
++  }
++  runApp(HarnessApp(
++    document: doc,
++    onReady: (camera, index, painter, sink, vertices, resolvedBackend) {
++      unawaited(
++          _driveR2(doc, camera, painter, sink, vertices, resolvedBackend));
++    },
++  ));
++}
++
++/// Fits the camera to the same working-set window `boot()` in
++/// `integration_test/frame_timing_test.dart` uses — not the widget's own
++/// full-extents fit, which would measure a frame nobody renders — then runs
++/// [runR2Rig] the same way the widget test does, driven by real frames
++/// instead of a synthetic test clock.
++///
++/// The viewport this fits *into* is whatever logical size the browser window
++/// actually is when this runs, unlike the widget test's fixed synthetic
++/// view. That size is printed so a reader can judge comparability against
++/// the desktop rows rather than assume it.
++Future<void> _driveR2(
++  DraftDocument doc,
++  CameraController camera,
++  DraftPainter painter,
++  CanvasDrawSink sink,
++  VerticesDrawSink? vertices,
++  RenderBackend resolvedBackend,
++) async {
++  print('R2 app-run: driving started');
++  final e = doc.extents;
++  final cx = (e.minX + e.maxX) / 2;
++  final cy = (e.minY + e.maxY) / 2;
++  final view = WidgetsBinding.instance.platformDispatcher.views.first;
++  final viewport = view.physicalSize / view.devicePixelRatio;
++  camera.value = ViewportTransform.fit(
++      Aabb2(Vector2(cx - 1500, cy - 1125), Vector2(cx + 1500, cy + 1125)),
++      viewport);
++  await _pumpFrame();
++
++  print('R2 app-run: window=${viewport.width.toStringAsFixed(0)}x'
++      '${viewport.height.toStringAsFixed(0)} dpr=${view.devicePixelRatio}');
++
++  await runR2Rig(
++    entities: kEntities,
++    lineweightScale: kLineweightScale,
++    textCorpus: kTextCorpus,
++    drawText: kDrawText,
++    camera: camera,
++    painter: painter,
++    sink: sink,
++    vertices: vertices,
++    resolvedBackend: resolvedBackend,
++    pumpFrame: _pumpFrame,
++    settle: _settle,
++  );
++  print('R2 app-run: done');
++}
++
++/// Renders exactly one frame and completes after it.
++///
++/// This is called from inside `_HarnessAppState`'s own post-frame callback —
++/// [SchedulerBinding.instance.schedulerPhase] is `postFrameCallbacks`, not
++/// `idle`, at that point, and [SchedulerBinding.endOfFrame] only calls
++/// [SchedulerBinding.scheduleFrame] for you when the phase is idle. Relying
++/// on `camera.value = ...`'s listener chain to schedule the next frame as a
++/// side effect worked on the first call by chance and hung on every one
++/// after it, once the phase genuinely was idle and nothing else nearby
++/// happened to call `scheduleFrame`. Calling it explicitly first removes the
++/// dependency on that side effect entirely.
++Future<void> _pumpFrame() {
++  SchedulerBinding.instance.scheduleFrame();
++  return SchedulerBinding.instance.endOfFrame;
++}
++
++/// A running app has no synthetic clock to advance, so there is no exact
++/// equivalent of `tester.pumpAndSettle()`. This pumps frames while one is
++/// still scheduled, bounded, which is the same loop `pumpAndSettle` runs
++/// internally minus its own timeout — the closest honest approximation
++/// available outside a test.
++Future<void> _settle() async {
++  const maxIdlePumps = 10;
++  for (var i = 0; i < maxIdlePumps; i++) {
++    if (!SchedulerBinding.instance.hasScheduledFrame) return;
++    await _pumpFrame();
++  }
++}
+ 
+ class HarnessApp extends StatefulWidget {
+   const HarnessApp({super.key, required this.document, this.onReady});
+ 
+   final DraftDocument document;
+ 
+   /// Handed the pieces a rig needs to drive: the camera it scripts, the
+   /// index whose rebuild count it reports, and the painter and sink whose
+   /// counters it reads.
+   ///
+diff --git a/apps/dev_harness_2d/lib/measurement_rig.dart b/apps/dev_harness_2d/lib/measurement_rig.dart
+new file mode 100644
+index 0000000..bf41354
+--- /dev/null
++++ b/apps/dev_harness_2d/lib/measurement_rig.dart
+@@ -0,0 +1,196 @@
++// The R2 measurement rig, shared between `integration_test/frame_timing_test.dart`
++// and `main.dart`'s app-run mode (`RUN_R2=true`).
++//
++// Task 13 needed a web row and `flutter drive -d chrome` hangs in this
++// environment before it ever reaches chromedriver (see the Task 13 report).
++// `flutter run -d chrome --profile` forwards the app's own `print()` output
++// instead, so the harness can drive itself. Lifting this code out of the
++// widget test rather than reimplementing it for `main.dart` is the point:
++// two independent copies of "pan 120, zoom 120, print the block" could drift
++// and make the desktop and web rows describe two different measurements
++// under one label. One copy, called two ways.
++//
++// The only thing that differs between the two call sites is *how a frame
++// gets pumped*: a widget test advances a synthetic clock with
++// `tester.pump(duration)`; a real running app has no synthetic clock and
++// instead waits for the engine to actually render one, via
++// `SchedulerBinding.instance.endOfFrame`. That is exactly the shape of the
++// `pumpFrame` and `settle` parameters below — everything else, including the
++// forced extra frame that makes `resetCounters()` meaningful and the guard
++// against a silently-skipped repaint, is identical code for both platforms.
++
++// ignore_for_file: avoid_print — printing the numbers is what a rig is for.
++
++import 'package:flutter/scheduler.dart';
++import 'package:flutter/widgets.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++void refuseDebugMode() {
++  var isDebug = false;
++  assert(() {
++    isDebug = true;
++    return true;
++  }());
++  if (isDebug) {
++    throw StateError('run with --profile; debug frame times mean nothing');
++  }
++}
++
++/// p50, p95 and max of build and raster time, reported separately.
++///
++/// A build-bound frame and a raster-bound frame call for opposite fixes in
++/// Plan 3b — one wants less walking, the other fewer or cheaper draw calls —
++/// so a single "frame time" would hide the only thing the number is for.
++void report(String rig, List<FrameTiming> timings) {
++  if (timings.isEmpty) {
++    print('$rig: no frames recorded');
++    return;
++  }
++  String stats(List<double> ms) {
++    ms.sort();
++    return 'p50=${ms[(ms.length * 0.5).floor()].toStringAsFixed(2)}ms '
++        'p95=${ms[(ms.length * 0.95).floor()].toStringAsFixed(2)}ms '
++        'max=${ms.last.toStringAsFixed(2)}ms';
++  }
++
++  final build = [
++    for (final t in timings) t.buildDuration.inMicroseconds / 1000.0
++  ];
++  final raster = [
++    for (final t in timings) t.rasterDuration.inMicroseconds / 1000.0
++  ];
++  print('$rig frames=${timings.length}');
++  print('  build  ${stats(build)}');
++  print('  raster ${stats(raster)}');
++}
++
++/// The backend actually used, and the vertices counters when it was that one.
++///
++/// The resolved value and not the define: a run that asked for `vertices` and
++/// silently got `canvas` would otherwise report canvas numbers under a
++/// vertices heading, which is the shape of the mistake Plan 3c's `TEXT` define
++/// made.
++void printBackend(RenderBackend backend, VerticesDrawSink? vertices) {
++  if (vertices == null) {
++    print('  backend=${backend.name}');
++    return;
++  }
++  print('  backend=${backend.name} '
++      'triangles=${vertices.frameTriangleCount} '
++      'drawVerticesCalls=${vertices.totalFlushCount}');
++}
++
++/// The text counters, printed by every rig so the on/off delta is one define
++/// apart on one corpus.
++///
++/// `newLayouts` is the row the exit gate is about: in a steady state — the
++/// same strings visible frame after frame — a warm paragraph cache must lay
++/// nothing out, and a non-zero reading here means the working set does not fit
++/// under `kParagraphCacheLimit`. The counters are read after the same forced
++/// repaint the dash counters come from, so all of them describe one frame.
++///
++/// `layouts` and `evictions` are running totals since the sink was built; the
++/// per-frame figures are the deltas the caller passes in. A running total
++/// printed beside two per-frame figures is the wrong comparison this file
++/// already refuses to publish once.
++void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
++    {required bool textCorpus,
++    required bool drawText,
++    required int layoutsBefore,
++    required int evictionsBefore}) {
++  final m = sink.measurer;
++  print('  text: corpus=${textCorpus ? "on" : "off"} '
++      'draw=${drawText ? "on" : "off"} '
++      'textOps=${painter.textOpCount} '
++      'skippedText=${painter.skippedTextCount}');
++  print('  paragraphs: newLayouts=${m.layoutCount - layoutsBefore} '
++      'newEvictions=${m.evictionCount - evictionsBefore} '
++      'live=${m.liveParagraphCount} '
++      '(totals layouts=${m.layoutCount} evictions=${m.evictionCount})');
++}
++
++/// R2: 120 frames of pan, then 120 of zoom across three scale bands, then one
++/// forced repaint whose counters are the ones printed.
++///
++/// [pumpFrame] renders exactly one frame and completes after it —
++/// `() => tester.pump(const Duration(milliseconds: 16))` in a widget test,
++/// `() => SchedulerBinding.instance.endOfFrame` in a running app. [settle]
++/// is the equivalent gap between `tester.pumpAndSettle()` (pump until
++/// nothing is scheduled, or a timeout) and a running app's own approximation
++/// of the same idea — there is no synthetic clock outside a test, so this is
++/// where the two platforms' behaviour genuinely cannot be identical, not
++/// just differently spelled.
++///
++/// The camera must already be fitted to the working set before this is
++/// called — this function does not do that, so the fit's own frame is never
++/// counted among the 240+1 this rig reports, on either platform.
++Future<void> runR2Rig({
++  required int entities,
++  required double lineweightScale,
++  required bool textCorpus,
++  required bool drawText,
++  required CameraController camera,
++  required DraftPainter painter,
++  required CanvasDrawSink sink,
++  required VerticesDrawSink? vertices,
++  required RenderBackend resolvedBackend,
++  required Future<void> Function() pumpFrame,
++  required Future<void> Function() settle,
++}) async {
++  refuseDebugMode();
++  final timings = <FrameTiming>[];
++  void collect(List<FrameTiming> t) => timings.addAll(t);
++  SchedulerBinding.instance.addTimingsCallback(collect);
++  try {
++    for (var i = 0; i < 120; i++) {
++      camera.panBy(const Offset(-7, -3));
++      await pumpFrame();
++    }
++    for (var i = 0; i < 120; i++) {
++      camera.zoomAt(const Offset(800, 600), i.isEven ? 1.03 : 0.97);
++      await pumpFrame();
++    }
++    await settle();
++    // All three counters now mean the same thing: this frame. dashSpanCount
++    // and collapsedDashCount reset themselves every paint; canvasCallCount
++    // does not, because the sink outlives the frame. But settling leaves
++    // nothing dirty, so a bare pumped frame would not repaint at all —
++    // RenderCustomPaint only repaints when its `repaint` Listenable fires,
++    // and nothing has changed since the last real frame. panBy(Offset.zero)
++    // is a numeric no-op but still assigns a fresh ViewportTransform
++    // (Transform2 and ViewportTransform both deliberately have no
++    // operator==, so ValueNotifier's reference check always sees a
++    // "change"), which fires the listener and forces the one real repaint
++    // that makes resetCounters() meaningful. A running total beside two
++    // per-frame figures is a wrong comparison waiting to be published.
++    sink.resetCounters();
++    vertices?.resetCounters();
++    final layoutsBefore = sink.measurer.layoutCount;
++    final evictionsBefore = sink.measurer.evictionCount;
++    camera.panBy(Offset.zero);
++    await pumpFrame();
++    report('R2 ($entities)', timings);
++    print('  screenSpaceLeafCount=${painter.screenSpaceLeafCount} '
++        'lineweightScale=$lineweightScale');
++    if (sink.canvasCallCount == 0) {
++      // The counters above are read from a frame that has to actually have
++      // happened. `panBy(Offset.zero)` forces one only because Transform2 has
++      // no operator== for ValueNotifier to dedupe against — a property this
++      // rig depends on and does not own. If that ever changes, this rig would
++      // print a plausible-looking zero rather than fail, and a zero is the one
++      // wrong number nobody questions.
++      throw StateError('no repaint happened: the forced frame did not draw');
++    }
++    print('  dashSpans=${painter.dashSpanCount} '
++        'collapsed=${painter.collapsedDashCount} '
++        'canvasCalls=${sink.canvasCallCount}');
++    printBackend(resolvedBackend, vertices);
++    printTextCounters(painter, sink,
++        textCorpus: textCorpus,
++        drawText: drawText,
++        layoutsBefore: layoutsBefore,
++        evictionsBefore: evictionsBefore);
++  } finally {
++    SchedulerBinding.instance.removeTimingsCallback(collect);
++  }
++}
+diff --git a/packages/jet_cad_2d_flutter/lib/src/render_backend.dart b/packages/jet_cad_2d_flutter/lib/src/render_backend.dart
+index d2ec95d..b88d62c 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/render_backend.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/render_backend.dart
+@@ -1,28 +1,35 @@
+-import 'package:flutter/foundation.dart' show kIsWeb;
+-
+ /// Which sink `DraftCanvas` draws through.
+ ///
+ /// An enum and not a `bool` because a third backend is foreseeable —
+ /// `flutter_gpu` ships in the SDK — and because a `bool` named for one of the
+ /// two options reads wrong the moment there is a third.
+ enum RenderBackend {
+-  /// `CanvasDrawSink`: one `drawPath` per primitive. The web renderer, and the
+-  /// fallback everywhere.
++  /// `CanvasDrawSink`: one `drawPath` per primitive. No longer any
++  /// platform's default — see [defaultRenderBackend] — but kept as the
++  /// fallback an explicit `backend:` argument can still choose.
+   canvas,
+ 
+   /// `VerticesDrawSink`: the frame's strokes as one ordered `drawVertices`.
++  /// The default on every platform, web included.
+   vertices,
+ }
+ 
+ /// The backend a platform gets when the caller does not say.
+ ///
+ /// **The only place this decision is made.** Two call sites that each decided
+ /// would eventually disagree, and the disagreement would show as a drawing
+ /// that changes when a widget is rebuilt somewhere unrelated.
+ ///
+-/// Web gets the canvas backend because Impeller is not on the web — the engine
+-/// FAQ records interfacing the web engine with Impeller as a non-goal — and
+-/// CanvasKit's `drawVertices` is unmeasured. Phase C measures it; until then
+-/// the platform that has no Impeller gets the path that never needed one.
+-RenderBackend defaultRenderBackend() =>
+-    kIsWeb ? RenderBackend.canvas : RenderBackend.vertices;
++/// Unconditional since Plan 3d Phase C measured the web. The desktop rows
++/// (Task 12, macOS profile, median of 3, build p50 / raster p50) showed no
++/// crossover — 10,000: canvas 12.35 / 44.32 ms, vertices 5.71 / 6.68 ms;
++/// 50,000: canvas 15.36 / 66.94 ms, vertices 7.07 / 8.53 ms; 500,000: canvas
++/// 44.29 / 508.00 ms, vertices 17.44 / 21.64 ms. The web rows (Task 13,
++/// CanvasKit via Chrome 151.0.7922.170, `flutter run -d chrome --profile`,
++/// median of 3) went further, not merely holding: 10,000 entities — canvas
++/// 117.80 / 79.30 ms, vertices 6.80 / 1.40 ms (17.3x / 56.6x); 50,000 —
++/// canvas 155.70 / 107.90 ms, vertices 8.90 / 1.80 ms (17.5x / 59.9x).
++/// CanvasKit's `drawVertices` was the open question this default was
++/// written against; it is answered now, and by a wider margin than the
++/// desktop numbers that motivated the design.
++RenderBackend defaultRenderBackend() => RenderBackend.vertices;
+diff --git a/packages/jet_cad_2d_flutter/test/render_backend_test.dart b/packages/jet_cad_2d_flutter/test/render_backend_test.dart
+index c492e7f..3f30025 100644
+--- a/packages/jet_cad_2d_flutter/test/render_backend_test.dart
++++ b/packages/jet_cad_2d_flutter/test/render_backend_test.dart
+@@ -1,11 +1,10 @@
+-import 'package:flutter/foundation.dart';
+ import 'package:flutter/widgets.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d/testing.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ Future<DraftCanvasState> _pump(WidgetTester tester,
+     {RenderBackend? backend}) async {
+   final doc = generateDocument(40, dashedFraction: 0.5);
+   final index = SpatialIndex(doc);
+@@ -24,25 +23,26 @@ Future<DraftCanvasState> _pump(WidgetTester tester,
+           document: doc,
+           index: index,
+           camera: camera,
+           backend: backend),
+     ),
+   ));
+   return key.currentState!;
+ }
+ 
+ void main() {
+-  test('the platform default is vertices everywhere but the web', () {
+-    // `kIsWeb` is false under `flutter_test`, so this pins the branch the
+-    // suite runs on; the web branch is pinned by reading `kIsWeb` back.
+-    expect(defaultRenderBackend(),
+-        kIsWeb ? RenderBackend.canvas : RenderBackend.vertices);
++  test('the platform default is vertices, unconditionally', () {
++    // Plan 3d Phase C (Task 13) measured the web: CanvasKit's `drawVertices`
++    // beat `drawPath` by 17-60x at 10,000-50,000 entities, wider than the
++    // desktop margin that motivated the web exception in the first place.
++    // `defaultRenderBackend()` no longer branches on `kIsWeb`.
++    expect(defaultRenderBackend(), RenderBackend.vertices);
+   });
+ 
+   testWidgets('with no backend given, the widget resolves the platform default',
+       (tester) async {
+     final state = await _pump(tester);
+     expect(state.resolvedBackend, defaultRenderBackend());
+   });
+ 
+   testWidgets('an explicit backend is honoured, not clamped', (tester) async {
+     // Phase C forces `vertices` on the web to measure it. A parameter that

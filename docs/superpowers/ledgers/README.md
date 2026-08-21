@@ -23,6 +23,7 @@ worktree.
 | Plan | Contents |
 |---|---|
 | `2026-08-17-jet-cad-2d-plan-3c-text/` | Plan 3c (text), 15 tasks. `progress.md` carries **56 numbered rulings** — the decisions taken while executing, each with its cost-if-wrong — plus every task's mutation table. Beside it, task briefs, task reports, and ten review diffs. |
+| `2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` | Plan 3d (the vertices sink), 15 tasks. `progress.md` carries **14 rulings** and the finding from every review round — including five mutations that reviewers ran and implementers had not, each of which left a green suite hiding a real gap. Beside it, task briefs, task reports, the whole-branch fix report, and twenty-six review diffs. Its own `README.md` says what the directory holds and what was committed to the repository proper instead. |
 
 Plans 1, 2, 3a and 3b were merged before this directory existed and their
 ledger scratch was deleted; their conclusions survive in `notes/`

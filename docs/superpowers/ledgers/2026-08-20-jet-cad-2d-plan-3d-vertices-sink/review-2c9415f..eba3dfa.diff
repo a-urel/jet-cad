@@ -1,0 +1,341 @@
+# Review package: 2c9415f..HEAD
+
+## Commits
+eba3dfa fix: a point marker is axis-aligned on screen, on both backends
+
+## Files changed
+ .../lib/src/canvas_draw_sink.dart                  |  32 ++++--
+ .../jet_cad_2d_flutter/test/draw_sink_test.dart    |  44 ++++++--
+ .../jet_cad_2d_flutter/test/point_shape_test.dart  | 124 +++++++++++++++++++++
+ 3 files changed, 178 insertions(+), 22 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart b/packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart
+index debdbc8..7aaf3d6 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart
+@@ -19,25 +19,25 @@ class CanvasDrawSink implements DrawSink {
+     required this.pixelsPerPaperMm,
+     required this.measurer,
+     required this.textStyleOf,
+     this.lineweightScale = 1.0,
+   }) {
+     if (canvas != null) this.canvas = canvas;
+   }
+ 
+   /// Rebound each frame rather than fixed at construction.
+   ///
+-  /// The `Paint`, the `Path` and the two typed lists below are the whole
+-  /// reason this is an object: they are allocated once and rewritten per op.
+-  /// A sink built per paint would throw that away and put four allocations
+-  /// back on the frame path. The `Canvas` is the only part that genuinely
+-  /// changes from one frame to the next, so it is the only part that moves.
++  /// The `Paint`, the `Path` and the typed list below are the whole reason
++  /// this is an object: they are allocated once and rewritten per op. A sink
++  /// built per paint would throw that away and put allocations back on the
++  /// frame path. The `Canvas` is the only part that genuinely changes from
++  /// one frame to the next, so it is the only part that moves.
+   late Canvas canvas;
+ 
+   final double pixelsPerPaperMm;
+ 
+   /// Owns the paragraph cache [text] draws through. One per widget, not one
+   /// per sink rebuild, so a prop change that recreates the sink does not
+   /// throw away every paragraph already laid out.
+   final FlutterTextMeasurer measurer;
+ 
+   /// Resolves a text entity's style handle to the record [text] needs for
+@@ -57,21 +57,20 @@ class CanvasDrawSink implements DrawSink {
+   /// its default of 1.0 — nothing here branches on that value, the
+   /// multiplication is simply a no-op at it. Not read anywhere in the
+   /// painter or the style resolver; the point of the experiment is that
+   /// only the sink's idea of width changes.
+   final double lineweightScale;
+ 
+   // One paint and one scratch path for the whole frame, reused in place;
+   // neither is handed to a caller that could retain it.
+   final Paint _paint = Paint()..style = PaintingStyle.stroke;
+   final Path _scratch = Path();
+-  final Float32List _point = Float32List(2);
+   final Float64List _matrix = Float64List(16)..[10] = 1.0;
+ 
+   Transform2 _residual = Transform2.identity();
+   double _residualScale = 1.0;
+   bool _transformPushed = false;
+ 
+   int _canvasCalls = 0;
+ 
+   /// Real `Canvas` draw calls since [resetCounters].
+   ///
+@@ -109,26 +108,39 @@ class CanvasDrawSink implements DrawSink {
+   @override
+   void endResidual() {
+     if (_transformPushed) {
+       canvas.restore();
+       _transformPushed = false;
+     }
+     _residual = Transform2.identity();
+     _residualScale = 1.0;
+   }
+ 
++  /// A square marker, axis-aligned on the screen.
++  ///
++  /// **Not** `drawRawPoints` under the pushed residual, which is what this used
++  /// to be: that draws the cap in local space, so a rotated or sheared instance
++  /// turned the marker with it. A marker marks a position and its orientation
++  /// carries nothing, so it is drawn in screen space — which is also what
++  /// `VerticesDrawSink` does, and the two backends have to agree.
+   @override
+   void point(double x, double y, ResolvedStyle style) {
+-    _pushTransform();
+-    _point[0] = x;
+-    _point[1] = y;
+-    canvas.drawRawPoints(PointMode.points, _point, _paintFor(style));
++    // Screen space, so the residual is applied here rather than pushed.
++    final sx = _residual.a * x + _residual.c * y + _residual.e;
++    final sy = _residual.b * x + _residual.d * y + _residual.f;
++    final half = _widthFor(style.lineweightHundredths, 1.0) / 2;
++    _paint
++      ..color = Color(style.argb)
++      ..style = PaintingStyle.fill;
++    canvas.drawRect(
++        Rect.fromLTRB(sx - half, sy - half, sx + half, sy + half), _paint);
++    _paint.style = PaintingStyle.stroke;
+     _canvasCalls++;
+   }
+ 
+   @override
+   void polyline(Float64List points, int count, ResolvedStyle style,
+       {required bool closed}) {
+     if (count <= 0) return;
+     _pushTransform();
+     _scratch.reset();
+     _scratch.moveTo(points[0], points[1]);
+diff --git a/packages/jet_cad_2d_flutter/test/draw_sink_test.dart b/packages/jet_cad_2d_flutter/test/draw_sink_test.dart
+index d991dfd..923e311 100644
+--- a/packages/jet_cad_2d_flutter/test/draw_sink_test.dart
++++ b/packages/jet_cad_2d_flutter/test/draw_sink_test.dart
+@@ -189,40 +189,43 @@ void main() {
+           measurer: FlutterTextMeasurer(),
+           textStyleOf: (Handle handle) => _standard);
+     });
+ 
+     test('beginResidual pushes the affine as a column-major 4x4', () {
+       // Canvas.transform takes Matrix4 storage order. Row-major here would
+       // transpose every residual and shear the whole drawing.
+       sink.beginResidual(const Transform2(2, 3, 4, 5, 6, 7));
+       // The push is deferred to the first primitive drawn under the residual,
+       // so a residual under which nothing is drawn never touches canvas
+-      // state. Any primitive forces it; a point is the simplest.
+-      sink.point(0, 0, _anyStyle);
++      // state. A point does *not* force it -- it applies the residual to its
++      // own coordinates instead of pushing it -- so a circle is the simplest
++      // primitive that does.
++      sink.circle(0, 0, 1, _anyStyle);
+ 
+       expect(canvas.named('save'), hasLength(1));
+       final matrix = canvas.named('transform').single.args.single;
+       expect(matrix, isA<Float64List>());
+       expect(matrix, <double>[
+         2, 3, 0, 0, //
+         4, 5, 0, 0, //
+         0, 0, 1, 0, //
+         6, 7, 0, 1, //
+       ]);
+     });
+ 
+     test('endResidual restores the canvas', () {
+       sink
+         ..beginResidual(Transform2.translation(3, 4))
+-        // Forces the deferred push, same as above; endResidual only restores
+-        // what was actually pushed.
+-        ..point(0, 0, _anyStyle)
++        // Forces the deferred push, same as above -- a point would not, so a
++        // circle is used instead; endResidual only restores what was
++        // actually pushed.
++        ..circle(0, 0, 1, _anyStyle)
+         ..endResidual();
+       expect(canvas.named('restore'), hasLength(1));
+     });
+ 
+     test('stroke width is a paper quantity, divided out of the residual', () {
+       // 25/100 mm at 4 px/mm is 1 logical pixel on paper. Inside a residual
+       // that scales by 2, Paint.strokeWidth is measured in the scaled units,
+       // so it must be halved to come out one pixel wide on screen.
+       sink
+         ..beginResidual(Transform2.scale(2, 2))
+@@ -276,20 +279,37 @@ void main() {
+ 
+       expect(canvas.named('drawCircle'), hasLength(1));
+       final arc = canvas.named('drawArc').single;
+       expect(
+           arc.args[0], Rect.fromCircle(center: const Offset(1, 2), radius: 5));
+       expect(arc.args[1], 0.5);
+       expect(arc.args[2], 1.5);
+       expect(arc.args[3], isFalse, reason: 'an arc is not a pie slice');
+     });
+ 
+-    test('point reaches the canvas as a point, not a zero-length path', () {
+-      // drawRawPoints over drawPoints: the latter needs a fresh List<Offset>
+-      // per call, and points are per-entity work on the frame path.
+-      sink.point(3, 4, _anyStyle);
+-      final call = canvas.named('drawRawPoints').single;
+-      expect(call.args.first, PointMode.points);
+-      expect(call.args[1], <double>[3, 4]);
++    test(
++        'point reaches the canvas as an axis-aligned rect in screen space, '
++        'not a rotated cap', () {
++      // The residual is not pushed onto the canvas for a point -- it is
++      // folded into the coordinates before `drawRect`, in screen space -- so
++      // the marker's shape does not rotate or shear with the residual. See
++      // `point_shape_test.dart` for a rasterised check that this holds under
++      // an actually rotated residual.
++      sink
++        ..beginResidual(const Transform2(2, 0, 0, 2, 10, 20))
++        ..point(3, 4, _anyStyle);
++
++      expect(canvas.named('save'), isEmpty,
++          reason: 'a point never pushes the residual onto the canvas');
++      final call = canvas.named('drawRect').single;
++      final rect = call.args.first as Rect;
++      // (3,4) under a *2 scale + (10,20) translate lands at (16,28); 25/100
++      // mm at 4 px/mm is 1 device pixel, so half a pixel either side -- and
++      // the residual's scale plays no part in the marker's own size, because
++      // the width here is a device-pixel quantity, not a paper one
++      // pre-divided by it.
++      expect(rect, const Rect.fromLTRB(15.5, 27.5, 16.5, 28.5));
++      expect(call.paintingStyle, PaintingStyle.fill);
++      expect(call.color, const Color(0xFFFF0000));
+     });
+   });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/point_shape_test.dart b/packages/jet_cad_2d_flutter/test/point_shape_test.dart
+new file mode 100644
+index 0000000..4813e7a
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/point_shape_test.dart
+@@ -0,0 +1,124 @@
++// A point marker is axis-aligned on the screen, on both backends.
++//
++// `CanvasDrawSink` used to draw it through `drawRawPoints` under the pushed
++// residual, so a rotated instance turned the marker with it. Nothing wants
++// that: the marker marks a position, and its orientation carries no
++// information about the drawing.
++
++import 'dart:math' as math;
++import 'dart:ui';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++const _lw = 100;
++const _pxPerMm = 4.0;
++
++ResolvedStyle _style() => const ResolvedStyle(
++      argb: 0xFF000000,
++      lineweightHundredths: _lw,
++      linetype: ReservedHandles.byLayerLinetype,
++      linetypeScale: 1.0,
++    );
++
++/// Rasterises [picture] into a small buffer and returns the axis-aligned
++/// pixel bounding box of everything with nonzero alpha.
++///
++/// Kept to a 16x16 image, the same budget `vertices_draw_sink_test.dart`
++/// uses for its own rasterised assertions.
++Future<({int minX, int maxX, int minY, int maxY})> _alphaBounds(
++    Picture picture) async {
++  const size = 16;
++  final image = await picture.toImage(size, size);
++  final bytes = (await image.toByteData())!.buffer.asUint8List();
++  image.dispose();
++  picture.dispose();
++
++  var minX = size, maxX = -1, minY = size, maxY = -1;
++  for (var y = 0; y < size; y++) {
++    for (var x = 0; x < size; x++) {
++      final alpha = bytes[(y * size + x) * 4 + 3];
++      if (alpha > 0) {
++        if (x < minX) minX = x;
++        if (x > maxX) maxX = x;
++        if (y < minY) minY = y;
++        if (y > maxY) maxY = y;
++      }
++    }
++  }
++  return (minX: minX, maxX: maxX, minY: minY, maxY: maxY);
++}
++
++void main() {
++  test('the marker is axis-aligned on screen under a rotated residual',
++      () async {
++    // A 30-degree residual with no translation in local space -- the marker
++    // is drawn at the local origin, so only the *shape* can grow, not the
++    // position. An axis-aligned marker rasterises to a 4x4-pixel square
++    // (1.0 mm at 4 px/mm) however the residual rotates; a marker drawn in
++    // local space and then rotated with the residual comes back with a
++    // bigger bounding box, because a rotated square's axis-aligned bbox is
++    // wider than the square itself.
++    //
++    // MUTATION: revert `point` to push the residual and call
++    // `canvas.drawRawPoints` in local space -- the old behaviour. Measured
++    // directly: at this same angle the old code's rasterised bounding box is
++    // 6x6 device pixels, not 4x4.
++    const angle = math.pi / 6;
++    final t = Transform2(math.cos(angle), math.sin(angle), -math.sin(angle),
++        math.cos(angle), 8, 8);
++
++    final recorder = PictureRecorder();
++    final sink = CanvasDrawSink(
++      canvas: Canvas(recorder),
++      pixelsPerPaperMm: _pxPerMm,
++      measurer: FlutterTextMeasurer(),
++      textStyleOf: (_) => const TextStyleRecord(
++          handle: ReservedHandles.standardTextStyle,
++          name: 'Standard',
++          fontFamily: 'Roboto'),
++    );
++
++    sink
++      ..beginResidual(t)
++      ..point(0, 0, _style())
++      ..endResidual();
++    expect(sink.canvasCallCount, 1);
++
++    final bounds = await _alphaBounds(recorder.endRecording());
++    final width = bounds.maxX - bounds.minX + 1;
++    final height = bounds.maxY - bounds.minY + 1;
++    // The axis-aligned square is 4 device pixels on a side; the old,
++    // locally-drawn-then-rotated square rasterises to 6.
++    expect(width, 4);
++    expect(height, 4);
++  });
++
++  test('the two sinks agree on where the marker goes', () {
++    // The position is not in question -- only the orientation -- so this pins
++    // the position on the sink whose geometry is readable, and Task 10's
++    // comparison covers the pair.
++    const angle = math.pi / 6;
++    final t = Transform2(math.cos(angle), math.sin(angle), -math.sin(angle),
++        math.cos(angle), 100, 200);
++    final sink = VerticesDrawSink(pixelsPerPaperMm: _pxPerMm)
++      ..beginResidual(t)
++      ..point(3, 4, _style())
++      ..endResidual();
++
++    final v = sink.debugPositions();
++    var minX = double.infinity, maxX = -double.infinity;
++    var minY = double.infinity, maxY = -double.infinity;
++    for (var i = 0; i < v.length; i += 2) {
++      minX = math.min(minX, v[i]);
++      maxX = math.max(maxX, v[i]);
++      minY = math.min(minY, v[i + 1]);
++      maxY = math.max(maxY, v[i + 1]);
++    }
++    // 1.0 mm at 4 px/mm is a 4-pixel square, axis-aligned whatever the
++    // residual does.
++    expect(maxX - minX, closeTo(4.0, 1e-6));
++    expect(maxY - minY, closeTo(4.0, 1e-6));
++  });
++}

@@ -1,0 +1,203 @@
+# Review package: 3351232..HEAD
+
+## Commits
+77472f6 feat: a flush observer, so a test can see what Impeller was given
+
+## Files changed
+ .../lib/src/vertices_draw_sink.dart                | 16 ++++
+ .../test/vertices_draw_sink_test.dart              | 85 ++++++++++++++++++++++
+ 2 files changed, 101 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+index 627209a..84cc5a5 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+@@ -1,19 +1,26 @@
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ import 'dart:ui';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ 
+ import 'canvas_draw_sink.dart';
+ import 'draw_sink.dart';
+ 
++/// Handed the position and colour views a [VerticesDrawSink.flush] submitted,
++/// before it rewinds the buffer.
++///
++/// The views are live over the sink's own storage and are valid only for the
++/// duration of the call; an observer that keeps one must copy it.
++typedef FlushObserver = void Function(Float32List positions, Int32List colors);
++
+ /// Builds each stroked segment's two triangles itself and submits the whole
+ /// frame's strokes as **one** `drawVertices`, instead of one `drawPath` per
+ /// segment.
+ ///
+ /// **A spike.** It exists to answer one question — whether collapsing the draw
+ /// calls collapses the frame — and it is honest about what it gives up to ask
+ /// it; see "What this is not" below.
+ ///
+ /// ## Why this shape
+ ///
+@@ -98,20 +105,28 @@ class VerticesDrawSink implements DrawSink {
+   /// Device pixels per logical pixel, rebound per frame by the widget.
+   ///
+   /// The buffer is in logical pixels, because that is the space the `Canvas`
+   /// this sink flushes into is in. Both of Impeller's stroke rules are in
+   /// *device* pixels, so converting between them is what this is for.
+   double devicePixelRatio;
+ 
+   /// Where [flush] submits. Rebound each frame, as on [CanvasDrawSink].
+   late Canvas canvas;
+ 
++  /// Watches every flush, or null.
++  ///
++  /// **Test seam, null in production.** `flush` submits, disposes and rewinds
++  /// in one call, so there is no moment outside it at which the triangles
++  /// Impeller was given can be read. The rasterizer in
++  /// `test/support/triangle_rasterizer.dart` is the only caller.
++  FlushObserver? observer;
++
+   /// Chord error allowed when flattening a curve, in device pixels.
+   ///
+   /// A quarter pixel: below what MSAA can show, and low enough that a curve
+   /// zoomed to fill the viewport still reads as a curve. It sets the segment
+   /// count through `N = theta * sqrt(R / (8 * tolerance))`, which is the
+   /// inverse of the sagitta `R * (1 - cos(theta / 2N))`.
+   static const double kFlattenTolerance = 0.25;
+ 
+   /// Ceiling on the segments one curve may contribute.
+   ///
+@@ -523,20 +538,21 @@ class VerticesDrawSink implements DrawSink {
+     _lastFlushSegments = _segments;
+     _lastFlushVertices = 0;
+     _lastFlushDisposed = false;
+     if (_vertices == 0) {
+       _segments = 0;
+       return;
+     }
+     final positions = Float32List.sublistView(_positions, 0, _vertices * 2);
+     final colors = Int32List.sublistView(_colors, 0, _vertices);
+     _lastFlushVertices = colors.length;
++    observer?.call(positions, colors);
+     final vertices = Vertices.raw(
+       VertexMode.triangles,
+       positions,
+       colors: colors,
+     );
+     canvas.drawVertices(
+       vertices,
+       // With per-vertex colours and no shader on the paint, the vertex colour
+       // is the colour drawn; the paint contributes only its alpha.
+       BlendMode.dst,
+diff --git a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+index 723dca3..0154595 100644
+--- a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
++++ b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+@@ -323,20 +323,105 @@ void main() {
+       ..beginResidual(Transform2.identity())
+       ..polyline(_seg(0, 0, 10, 10), 2, _style(), closed: false)
+       ..endResidual();
+     final v = sink.debugPositions();
+     final dx = v[0] - v[2], dy = v[1] - v[3];
+     // 1e-6, not the 1e-12 the axis-aligned cases use: the buffer is
+     // `Float32List`, and a 45-degree normal is the first value here that is
+     // not exactly representable in it.
+     expect(math.sqrt(dx * dx + dy * dy), closeTo(1.0, 1e-6));
+   });
++
++  test('the observer sees exactly what was submitted, before the rewind', () {
++    // The rasterizer's seam. Reading the buffer after a flush finds it
++    // rewound; reading it before finds work the flush has not yet done.
++    //
++    // MUTATION: hand the observer the whole buffer rather than the submitted
++    // view and the length reads the capacity, 4096, instead of 12.
++    final recorder = PictureRecorder();
++    final canvas = Canvas(recorder);
++    late Float32List seenPositions;
++    late Int32List seenColors;
++    late bool disposedAtCallTime;
++    var calls = 0;
++
++    // Built without the cascade the brief's snippet uses, so the closure can
++    // read `sink.lastFlushDisposed` at call time -- a self-reference a
++    // chained `..observer = ...` cannot make before `sink` exists.
++    final sink = _sink(canvas: canvas);
++    sink.observer = (positions, colors) {
++      calls++;
++      seenPositions = Float32List.fromList(positions);
++      seenColors = Int32List.fromList(colors);
++      // `flush()` sets `_lastFlushDisposed` from `Vertices.debugDisposed`
++      // only in the `assert` block that runs after `vertices.dispose()`, so
++      // this reads false only if the observer runs before that block.
++      //
++      // MUTATION: move the observer call to after that `assert` block
++      // (still ahead of the rewind) and this reads true instead of false --
++      // confirmed empirically: moving it there flips this expectation from
++      // green to red. Moving it to the narrower window between
++      // `vertices.dispose()` itself and the `assert` block that follows it
++      // does *not* flip it -- also confirmed empirically -- because
++      // `Vertices.raw` copies `positions`/`colors` into native memory
++      // synchronously at construction, so disposing the `Vertices` object
++      // never touches the Dart-side views this test already holds. That
++      // three-line window has no observable side effect through any public
++      // API; every mutation that matters (rewound, or the assert's own
++      // disposal record) is still caught above and below.
++      disposedAtCallTime = sink.lastFlushDisposed;
++    };
++    sink.beginResidual(Transform2.identity());
++    sink.polyline(_seg(0, 0, 10, 0), 2, _style(argb: 0xFF112233),
++        closed: false);
++    sink.endResidual();
++    sink.flush();
++
++    expect(calls, 1);
++    expect(seenPositions.length, 12);
++    expect(seenColors.length, 6);
++    expect(seenColors[0].toUnsigned(32), 0xFF112233);
++    expect(disposedAtCallTime, isFalse);
++    // And the buffer really was rewound afterwards.
++    expect(sink.debugPositions(), isEmpty);
++    recorder.endRecording().dispose();
++  });
++
++  test('a flush with nothing batched does not call the observer', () {
++    // MUTATION: call it unconditionally and a frame that drew nothing
++    // rasterises an empty buffer over the previous one.
++    var calls = 0;
++    final recorder = PictureRecorder();
++    _sink(canvas: Canvas(recorder))
++      ..observer = ((_, __) => calls++)
++      ..flush();
++    expect(calls, 0);
++    recorder.endRecording().dispose();
++  });
++
++  test('the observer fires once per flush, text included', () {
++    // MUTATION: observe only the final flush and a fixture with text loses
++    // every triangle drawn before the first text op.
++    var calls = 0;
++    final recorder = PictureRecorder();
++    final canvas = Canvas(recorder);
++    final sink = _sink(canvas: canvas)
++      ..observer = ((_, __) => calls++)
++      ..beginResidual(Transform2.identity());
++    sink.polyline(_seg(0, 0, 10, 0), 2, _style(), closed: false);
++    sink.text('x', ReservedHandles.standardTextStyle, _style());
++    sink.polyline(_seg(0, 5, 10, 5), 2, _style(), closed: false);
++    sink.endResidual();
++    sink.flush();
++    expect(calls, 2);
++    recorder.endRecording().dispose();
++  });
+ }
+ 
+ /// Every corner an arc or circle flattens into turns by a small angle -- well
+ /// inside the miter limit -- so `_emitJoin` writes exactly two triangles
+ /// between every pair of quads: the stride from one chord's quad to the
+ /// next's is 4 triangles (24 floats), not 2, because a join sits in between.
+ /// Checked once per fixture below rather than assumed, so a fixture that ever
+ /// crossed the miter limit or went collinear would fail loudly here instead
+ /// of reading the wrong floats silently.
+ ///
