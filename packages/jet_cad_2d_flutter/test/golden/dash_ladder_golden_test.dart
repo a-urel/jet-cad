@@ -148,10 +148,25 @@ Future<void> _rung(WidgetTester tester, DraftDocument doc, double halfSpan,
   // question: at this widget's own device pixel ratio a stroke can be a
   // full device pixel wide (inked by Impeller) while covering under half a
   // *logical* pixel, which a logical-resolution, no-AA, pixel-centre sampler
-  // can miss along its whole length. `devicePixelRatio` is read back from
-  // the sink the widget actually built rather than assumed, so this samples
-  // at the same resolution Impeller would rasterize at on this device.
-  final dpr = key.currentState!.vertices!.devicePixelRatio;
+  // can miss along its whole length. So the rasterizer is built at the
+  // device resolution Impeller would rasterize at.
+  //
+  // The ratio is the **binding's**, and the sink is asserted against it
+  // rather than read back from it. Reading it back made the rasterization
+  // resolution follow any mutation of `devicePixelRatio`: deleting
+  // `DraftCanvas`'s per-frame rebind (`draft_canvas.dart`, `vertices
+  // ?.devicePixelRatio = MediaQuery.devicePixelRatioOf(context)`) leaves the
+  // sink at its constructor default of 1.0, and every vertices golden then
+  // failed only on *image size* — which one `flutter test
+  // --update-goldens` absorbs, writing the wrong stroke widths into the PNGs
+  // and locking the break in green forever. A named assertion is the one
+  // thing `--update-goldens` cannot absorb.
+  final dpr = tester.view.devicePixelRatio;
+  expect(key.currentState!.vertices!.devicePixelRatio, dpr,
+      reason: 'the sink must be at the binding\'s device pixel ratio: '
+          'DraftCanvas rebinds it per frame from MediaQuery, and a sink left '
+          'at its constructor default draws stroke widths for the wrong '
+          'device. Do NOT regenerate the goldens to make this pass.');
   final rasterizer = TriangleRasterizer((kGoldenViewport.width * dpr).round(),
       (kGoldenViewport.height * dpr).round());
   // Attached after the first pump, and the widget pumped again: the state —

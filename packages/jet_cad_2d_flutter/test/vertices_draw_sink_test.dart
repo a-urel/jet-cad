@@ -9,7 +9,11 @@ import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/src/canvas_draw_sink.dart';
+import 'package:jet_cad_2d_flutter/src/flutter_text_measurer.dart';
 import 'package:jet_cad_2d_flutter/src/vertices_draw_sink.dart';
+
+import 'support/spy_canvas.dart';
 
 /// 0.25 mm at 4 px/mm is exactly 1 device pixel, so the half-width is 0.5 and
 /// every expected coordinate below is exact in binary.
@@ -260,6 +264,65 @@ void main() {
     }
     sink.endResidual();
     expect(sink.batchedSegmentCount, 7);
+  });
+
+  test('the batch reaches the Canvas before the text it was batched before',
+      () {
+    // The *order*, not the count. Every other assertion in this repository
+    // about the text flush is in units of flushes, and a flush that happens
+    // after the paragraph is still a flush: counting cannot tell the two
+    // apart. This records what the `Canvas` was actually told, in sequence,
+    // and asserts where `drawVertices` sits relative to `drawParagraph`.
+    //
+    // MUTATION: in `VerticesDrawSink.text`, hand the text to the fallback
+    // *before* `_flushBeforeUnbatchable()`. The flush count is unchanged --
+    // still one mid-frame and one at the end -- so the counting tests stay
+    // green, while the paragraph now reaches the canvas ahead of the strokes
+    // batched in front of it. Strokes are opaque, so those strokes then draw
+    // on top of the text: the screenshot regression the class comment's
+    // history describes. This test fails on the ordering expectation below.
+    //
+    // Non-identity residual on purpose: a quarter turn and a translation, so
+    // the fixture is not sitting at the transform every degenerate test in
+    // this repository sits at.
+    const t = Transform2(0, 1, -1, 0, 100, 200);
+    final spy = SpyCanvas();
+    final doc = DraftDocument.empty(measurer: FlutterTextMeasurer());
+    final fallback = CanvasDrawSink(
+        canvas: spy,
+        pixelsPerPaperMm: _pxPerMm,
+        measurer: FlutterTextMeasurer(),
+        textStyleOf: doc.textStyleOf);
+    final sink = VerticesDrawSink(
+        pixelsPerPaperMm: _pxPerMm, canvas: spy, fallback: fallback);
+    sink.beginResidual(t);
+    sink.polyline(_seg(0, 0, 10, 0), 2, _style(), closed: false);
+    sink.text('x', ReservedHandles.standardTextStyle, _style());
+    sink.polyline(_seg(0, 5, 10, 5), 2, _style(), closed: false);
+    sink.endResidual();
+    sink.flush();
+
+    final names = spy.calls.map((c) => c.name).toList();
+    final firstVertices = names.indexOf('drawVertices');
+    final paragraph = names.indexOf('drawParagraph');
+    final lastVertices = names.lastIndexOf('drawVertices');
+    // A missing call would make the ordering comparison below vacuous: -1 is
+    // less than every index.
+    expect(firstVertices, isNonNegative,
+        reason: 'nothing was batched, so there is no order to check');
+    expect(paragraph, isNonNegative,
+        reason: 'the text never reached the canvas, so there is no order to '
+            'check');
+
+    expect(firstVertices, lessThan(paragraph),
+        reason: 'the strokes batched before the text must reach the Canvas '
+            'before the paragraph does. Canvas call sequence was: $names');
+    expect(lastVertices, greaterThan(paragraph),
+        reason: 'the strokes batched after the text must reach the Canvas '
+            'after the paragraph does. Canvas call sequence was: $names');
+    // Only after the order holds: two distinct submissions, so the assertion
+    // above compared two different flushes and not one flush against itself.
+    expect(firstVertices, isNot(lastVertices));
   });
 
   _arcTests();
