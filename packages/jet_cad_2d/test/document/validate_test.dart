@@ -4,6 +4,60 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
+/// Builds a fill naming [boundary] directly, bypassing AddRegionCommand, which
+/// is the only way to produce the malformed documents this test is about.
+Handle rawFill(DraftDocument doc, Handle boundary,
+    {Handle? owner, Handle? handle}) {
+  final h = handle ?? doc.handleSeed.next();
+  doc.commands.execute(AddEntityCommand(
+    record: EntityRecord(
+      handle: h,
+      owner: owner ?? doc.rootHandle,
+      kind: EntityKind.fill,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.continuousLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: const TrueColor(0x3366CC),
+      lineweight: kLineweightDefault,
+      transparency: 0,
+      flags: 0,
+    ),
+    payload: GeometryPayload(
+        coords: Float64List(0),
+        scalars: Float64List.fromList([boundary.value.toDouble()])),
+  ));
+  return h;
+}
+
+/// Adds a leaf of [kind] with [coords] and returns its handle. `rawFill` and
+/// these three tests are the only way to build the malformed documents
+/// `validate()` is about -- `AddRegionCommand` refuses every one of them.
+Handle rawLeaf(DraftDocument doc, EntityKind kind, List<double> coords,
+    {Handle? owner, List<double> scalars = const [], String text = ''}) {
+  final h = doc.handleSeed.next();
+  doc.commands.execute(AddEntityCommand(
+    record: EntityRecord(
+      handle: h,
+      owner: owner ?? doc.rootHandle,
+      kind: kind,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.continuousLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: const TrueColor(0x000000),
+      lineweight: 30,
+      transparency: 0,
+      flags: 0,
+      text: text,
+    ),
+    payload: GeometryPayload(
+        coords: Float64List.fromList(coords),
+        scalars: Float64List.fromList(scalars)),
+  ));
+  return h;
+}
+
 /// A minimal line entity owned by [owner].
 EntityRecord line(Handle handle, Handle owner) => EntityRecord(
       handle: handle,
@@ -440,5 +494,78 @@ void main() {
       [const Handle(102), doc.rootHandle],
       [const Handle(103), doc.rootHandle],
     ]);
+  });
+
+  test('a fill naming nothing is reported', () {
+    final doc = DraftDocument.empty();
+    rawFill(doc, const Handle(9999));
+    expect(doc.validate().map((d) => d.code),
+        contains(ValidationCodes.fillBoundaryMissing));
+  });
+
+  test('a fill on a text entity is reported as not fillable', () {
+    final doc = DraftDocument.empty();
+    final textHandle =
+        rawLeaf(doc, EntityKind.text, [0, 0], scalars: [2.5], text: 'ROOM 3');
+    rawFill(doc, textHandle);
+    expect(doc.validate().map((d) => d.code),
+        contains(ValidationCodes.fillBoundaryNotFillable));
+  });
+
+  test('a fill on an open polyline is reported as not closed', () {
+    final doc = DraftDocument.empty();
+    final open = rawLeaf(doc, EntityKind.polyline, [0, 0, 10, 0, 10, 10]);
+    rawFill(doc, open);
+    expect(doc.validate().map((d) => d.code),
+        contains(ValidationCodes.fillBoundaryNotClosed));
+  });
+
+  test('a fill in a different owner than its boundary is reported', () {
+    final doc = DraftDocument.empty();
+    final group = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(GroupNode(
+      handle: group,
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      children: const [],
+    )));
+    final boundary = rawLeaf(
+        doc, EntityKind.polyline, [0, 0, 10, 0, 10, 10, 0, 10, 0, 0],
+        owner: group);
+    rawFill(doc, boundary); // owner defaults to the root
+    expect(doc.validate().map((d) => d.code),
+        contains(ValidationCodes.fillBoundaryForeignOwner));
+  });
+
+  test('an inverted pair is reported and nothing is changed', () {
+    final doc = DraftDocument.empty();
+    final boundary = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: boundary,
+        owner: doc.rootHandle,
+        kind: EntityKind.polyline,
+        layer: ReservedHandles.layerZero,
+        linetype: ReservedHandles.continuousLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const TrueColor(0x000000),
+        lineweight: 30,
+        transparency: 0,
+        flags: 0,
+      ),
+      payload: GeometryPayload(
+          coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
+          scalars: Float64List(0)),
+    ));
+    final fill = rawFill(doc, boundary); // allocated after, so higher
+    expect(fill.value, greaterThan(boundary.value));
+    final before = DraftDocumentCodec.encodeToString(doc);
+    expect(doc.validate().map((d) => d.code),
+        contains(ValidationCodes.fillDrawOrderInverted));
+    expect(DraftDocumentCodec.encodeToString(doc), before,
+        reason: 'validate reports and never mutates; a loader that re-sorted '
+            'to defend the draw-order rule would make the drawing differ '
+            'from the file');
   });
 }

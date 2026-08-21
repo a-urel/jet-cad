@@ -1,5 +1,7 @@
 import '../core/diagnostic.dart';
 import '../core/handle.dart';
+import '../store/entity_store.dart';
+import 'commands.dart';
 import 'draft_document.dart';
 import 'node.dart';
 import 'tree.dart';
@@ -16,6 +18,11 @@ abstract final class ValidationCodes {
   static const String cycle = 'tree.cycle';
   static const String definitionCycle = 'tree.definition_cycle';
   static const String ownerMissing = 'entity.owner_missing';
+  static const String fillBoundaryMissing = 'fill.boundary_missing';
+  static const String fillBoundaryNotFillable = 'fill.boundary_not_fillable';
+  static const String fillBoundaryNotClosed = 'fill.boundary_not_closed';
+  static const String fillBoundaryForeignOwner = 'fill.boundary_foreign_owner';
+  static const String fillDrawOrderInverted = 'fill.draw_order_inverted';
 }
 
 extension DocumentValidation on DraftDocument {
@@ -219,6 +226,53 @@ extension DocumentValidation on DraftDocument {
               '${child.value} of ${node.definition.value}, which reaches it.',
               [definition.handle, child, node.definition]));
         }
+      }
+    }
+
+    // 7. Fills. Every check reports; none repairs.
+    for (final slot in entities.liveSlots) {
+      if (entities.kindAt(slot) != EntityKind.fill) continue;
+      final fill = entities.handleAt(slot);
+      final boundary =
+          boundaryHandleOf(geometry.peek(entities.geomIndexAt(slot)));
+      final boundarySlot = entities.slotOf(boundary);
+      if (boundarySlot == null) {
+        out.add(error(
+            ValidationCodes.fillBoundaryMissing,
+            'fill ${fill.toHex()} names ${boundary.toHex()}, which is not in '
+            'this document',
+            [fill, boundary]));
+        continue;
+      }
+      final kind = entities.kindAt(boundarySlot);
+      if (kind != EntityKind.polyline && kind != EntityKind.circle) {
+        out.add(error(
+            ValidationCodes.fillBoundaryNotFillable,
+            'fill ${fill.toHex()} names a ${kind.name}, which has no interior',
+            [fill, boundary]));
+      } else if (kind == EntityKind.polyline &&
+          triangulationFor(
+                  kind, geometry.peek(entities.geomIndexAt(boundarySlot))) ==
+              null) {
+        out.add(error(
+            ValidationCodes.fillBoundaryNotClosed,
+            'fill ${fill.toHex()} names an open polyline; closedness is the '
+            'stored first point repeated as the last, compared exactly',
+            [fill, boundary]));
+      }
+      if (entities.ownerAt(slot) != entities.ownerAt(boundarySlot)) {
+        out.add(error(
+            ValidationCodes.fillBoundaryForeignOwner,
+            'fill ${fill.toHex()} and its boundary are in different owners, so '
+            'the reference cannot resolve under an instance',
+            [fill, boundary]));
+      }
+      if (fill.value > boundary.value) {
+        out.add(error(
+            ValidationCodes.fillDrawOrderInverted,
+            'fill ${fill.toHex()} has a higher handle than its boundary '
+            '${boundary.toHex()}, so it draws over its own outline',
+            [fill, boundary]));
       }
     }
 
