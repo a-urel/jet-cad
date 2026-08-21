@@ -23,7 +23,7 @@ flight.
 
 ## Non-negotiables
 
-- **The frame path allocates nothing in steady state.** `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` measures it.
+- **The frame path allocates nothing per entity in steady state, and O(1) per flush.** `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` and `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart` measure it.
 - **Draw order is ascending handle value**, stable across undo, save, load and purge.
 - **Geometric *decisions* use `Tolerance`; *stored value* comparisons are exact `==`.**
 - **Never commit `analysis_options.yaml`** — `flutter pub get` rewrites three of them in this workspace.
