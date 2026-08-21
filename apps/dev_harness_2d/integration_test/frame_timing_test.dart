@@ -259,14 +259,8 @@ void main() {
         'threshold=${app.index.rootIndex.rebuildThreshold} '
         'rebuilds=${app.index.rebuildCount - rebuildsBefore} '
         'handles burned=${app.doc.handleSeed.current.value - handlesBefore}');
-    // See R2's guard above for why: a zero here would mean the forced
-    // repaint silently stopped happening.
-    if (app.sink.canvasCallCount == 0) {
-      throw StateError('no repaint happened: the forced frame did not draw');
-    }
-    print('  dashSpans=${app.painter.dashSpanCount} '
-        'collapsed=${app.painter.collapsedDashCount} '
-        'canvasCalls=${app.sink.canvasCallCount}');
+    requireRepaint(app.sink, app.vertices);
+    printInvariants(app.painter, app.sink);
     printBackend(app.resolvedBackend, app.vertices);
     printTextCounters(app.painter, app.sink,
         textCorpus: kTextCorpus,
@@ -320,14 +314,8 @@ void main() {
     report('R4b ($kEntities)', timings);
     print('  command ${clock.summary}');
     print('  rebuilds=${app.index.rebuildCount - before} over $kSteps frames');
-    // See R2's guard above for why: a zero here would mean the forced
-    // repaint silently stopped happening.
-    if (app.sink.canvasCallCount == 0) {
-      throw StateError('no repaint happened: the forced frame did not draw');
-    }
-    print('  dashSpans=${app.painter.dashSpanCount} '
-        'collapsed=${app.painter.collapsedDashCount} '
-        'canvasCalls=${app.sink.canvasCallCount}');
+    requireRepaint(app.sink, app.vertices);
+    printInvariants(app.painter, app.sink);
     printBackend(app.resolvedBackend, app.vertices);
     printTextCounters(app.painter, app.sink,
         textCorpus: kTextCorpus,

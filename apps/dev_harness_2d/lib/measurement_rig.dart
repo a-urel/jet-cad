@@ -64,6 +64,48 @@ void report(String rig, List<FrameTiming> timings) {
   print('  raster ${stats(raster)}');
 }
 
+/// Throws unless the forced frame actually drew, on whichever backend is
+/// running.
+///
+/// `canvasCallCount` was the whole guard while `CanvasDrawSink` drew every
+/// frame. Under the vertices backend that sink is the fallback: it takes text
+/// and nothing else, so its counter counts *paragraphs*, and its four other
+/// increment sites are unreachable. With no text corpus, or with
+/// `DRAW_TEXT=0`, it reads zero for a perfectly healthy frame.
+/// `totalFlushCount` is the vertices sink's own answer -- one `drawVertices`
+/// per flush -- so summing them makes the guard say "something was drawn" on
+/// either backend.
+///
+/// Shared rather than copied, because copying it is how R4a and R4b came to
+/// keep the canvas-only form after R2's was fixed.
+void requireRepaint(CanvasDrawSink sink, VerticesDrawSink? vertices) {
+  // The counters above are read from a frame that has to actually have
+  // happened. `panBy(Offset.zero)` forces one only because Transform2 has no
+  // operator== for ValueNotifier to dedupe against -- a property these rigs
+  // depend on and do not own. If that ever changes, a rig would print a
+  // plausible-looking zero rather than fail, and a zero is the one wrong
+  // number nobody questions.
+  if (sink.canvasCallCount + (vertices?.totalFlushCount ?? 0) == 0) {
+    throw StateError('no repaint happened: the forced frame did not draw');
+  }
+}
+
+/// The frame's backend-independent fields.
+///
+/// These are what make a backend pair a comparison of two renderers rather
+/// than of two drawings: at a fixed corpus size they must match exactly across
+/// `BACKEND=canvas` and `BACKEND=vertices`. Printed by every rig, on one line,
+/// so no rig can establish control for a corpus size that another rig then
+/// reports without it -- which is what happened to R4a and R4b, whose
+/// transcripts carried no `screenSpaceLeafCount` at all because only R2
+/// printed it.
+void printInvariants(DraftPainter painter, CanvasDrawSink sink) {
+  print('  screenSpaceLeafCount=${painter.screenSpaceLeafCount} '
+      'dashSpans=${painter.dashSpanCount} '
+      'collapsed=${painter.collapsedDashCount} '
+      'canvasCalls=${sink.canvasCallCount}');
+}
+
 /// The backend actually used, and the vertices counters when it was that one.
 ///
 /// The resolved value and not the define: a run that asked for `vertices` and
@@ -170,33 +212,9 @@ Future<void> runR2Rig({
     camera.panBy(Offset.zero);
     await pumpFrame();
     report('R2 ($entities)', timings);
-    print('  screenSpaceLeafCount=${painter.screenSpaceLeafCount} '
-        'lineweightScale=$lineweightScale');
-    // Did a repaint happen? Ask **both** backends, because neither counter
-    // answers it alone.
-    //
-    // `canvasCallCount` was the whole guard while `CanvasDrawSink` drew every
-    // frame. Under the vertices backend that sink is the fallback: it takes
-    // text and nothing else, so its counter counts *paragraphs*, and its four
-    // other increment sites are unreachable. With `DRAW_TEXT=0` — a supported
-    // define, see `main.dart` — it reads zero for a perfectly healthy frame,
-    // and this guard aborted the run. `totalFlushCount` is the vertices sink's
-    // own answer: one `drawVertices` per flush, so zero means the batched
-    // geometry never reached the canvas. Summing them makes the guard say
-    // "something was drawn" on whichever backend is running.
-    final drawCalls = sink.canvasCallCount + (vertices?.totalFlushCount ?? 0);
-    if (drawCalls == 0) {
-      // The counters above are read from a frame that has to actually have
-      // happened. `panBy(Offset.zero)` forces one only because Transform2 has
-      // no operator== for ValueNotifier to dedupe against — a property this
-      // rig depends on and does not own. If that ever changes, this rig would
-      // print a plausible-looking zero rather than fail, and a zero is the one
-      // wrong number nobody questions.
-      throw StateError('no repaint happened: the forced frame did not draw');
-    }
-    print('  dashSpans=${painter.dashSpanCount} '
-        'collapsed=${painter.collapsedDashCount} '
-        'canvasCalls=${sink.canvasCallCount}');
+    print('  lineweightScale=$lineweightScale');
+    requireRepaint(sink, vertices);
+    printInvariants(painter, sink);
     printBackend(resolvedBackend, vertices);
     printTextCounters(painter, sink,
         textCorpus: textCorpus,
