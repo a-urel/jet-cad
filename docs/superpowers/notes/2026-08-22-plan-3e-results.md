@@ -470,6 +470,33 @@ re-deriving the real signature from the tree.
 
 ---
 
+## Open items after the final fix wave
+
+The whole-branch review's three findings were fixed on the branch (ledger:
+`.superpowers/sdd/2026-08-21-jet-cad-2d-plan-3e-fills/final-fix-report.md`).
+Two things it surfaced are recorded here rather than changed:
+
+- **A fill ignores its boundary's `EntityFlags.invisible`.** Neither
+  `DraftPainter._drawFill` nor `referenceWalk`'s fill case consults the
+  boundary entity's flags, so hiding an outline leaves its fill painted, with
+  no outline around it. Both backends and the oracle agree, so no differential
+  or golden row fires, and the spec is silent on what visibility means for an
+  entity that borrows another's geometry. **Recorded, not fixed** — deciding it
+  is a spec question (does a fill follow its boundary's visibility, or carry
+  its own?), and answering it in a fix wave would be inventing policy.
+- **The differential covers the triangulation's *freshness*, not the ear
+  clipper itself.** `referenceWalk` now derives a fill's triangulation from the
+  boundary's own points instead of reading `doc.fills.trianglesFor`, which is
+  what the painter reads — so a stale, missing or wrong cache entry is a
+  divergence rather than something both sides agree on. What both sides still
+  share is `triangulateSimplePolygon`: a defect inside the clipper appears
+  identically in painter and oracle and no differential row can see it.
+  `packages/jet_cad_2d/test/geometry/triangulate_test.dart` is the only cover
+  for that, and this carve-out is stated at the shared call in
+  `reference_walk.dart` as well.
+
+---
+
 ## `CLAUDE.md`
 
 **Not amended.** Every non-negotiable this plan measured against still

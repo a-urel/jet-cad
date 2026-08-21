@@ -313,3 +313,28 @@ one.
   frame-path allocation claim was untested against the specific "lazily
   populate on miss" shape). Every probe was deleted after use — none is
   committed.
+
+---
+
+## Part 4 — the final fix wave (whole-branch review, after Task 17)
+
+Four mutants, four kills. Full transcripts, including the failure text and the
+reasoning for each fix's shape, are in
+`.superpowers/sdd/2026-08-21-jet-cad-2d-plan-3e-fills/final-fix-report.md`
+(archived with the rest of the ledger on merge). Same method as Parts 1–3:
+`cp` aside, `python3` exact-string replace, narrowest test file, `cp` back,
+`git diff --stat` — never `git checkout`, all inside one shell call.
+
+| # | Mutation | Verdict |
+| --- | --- | --- |
+| F1a | Delete `if (record.kind == EntityKind.fill) _indexFill(target);` from `AddEntityCommand.apply` — i.e. restore the Critical exactly | **KILLED**, 5 named tests in `region_command_test.dart` |
+| F1b | Materialise the boundary's triangulation in `_indexFill` **only when the entry is absent**, instead of recomputing | **KILLED** — `a fill added back onto an edited boundary gets the new triangulation` reads `[3, 0, 1, 1, 2, 3]`, the square's triangulation restored onto an L |
+| F2a | Delete the `AddRegionCommand.refusalReason` pre-check from `RemoveEntityCommand`'s single-dependent branch | **KILLED**, 2 named tests, one per refusal reason. A throwaway probe under the same mutation reproduced the review's `Bad state: 13 is not a fillable boundary` on every undo attempt, with `canUndo` still true |
+| F3a | Put `referenceWalk`'s fill case back on `doc.fills.trianglesFor(boundary)` — the map the painter reads | **KILLED** — `the oracle triangulates for itself, so a wrong cache diverges`. Its control half still passes under the mutation, which is the point: only the planted cache separates the two |
+
+F1b is the one worth remembering. The obvious implementation of the Critical's
+fix — link, and materialise the triangulation if it is missing — is still
+wrong, because `SetEntityGeometryCommand` refreshes the cache only for
+boundaries that *have* fills, so editing a boundary while its fill is removed
+leaves a stale entry under that key for the restore to land on. The mutant is
+plausible, compiles, and passes every test written before this wave.
