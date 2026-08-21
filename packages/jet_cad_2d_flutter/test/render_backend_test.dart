@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -31,11 +30,12 @@ Future<DraftCanvasState> _pump(WidgetTester tester,
 }
 
 void main() {
-  test('the platform default is vertices everywhere but the web', () {
-    // `kIsWeb` is false under `flutter_test`, so this pins the branch the
-    // suite runs on; the web branch is pinned by reading `kIsWeb` back.
-    expect(defaultRenderBackend(),
-        kIsWeb ? RenderBackend.canvas : RenderBackend.vertices);
+  test('the platform default is vertices, unconditionally', () {
+    // Plan 3d Phase C (Task 13) measured the web: CanvasKit's `drawVertices`
+    // beat `drawPath` by 17-60x at 10,000-50,000 entities, wider than the
+    // desktop margin that motivated the web exception in the first place.
+    // `defaultRenderBackend()` no longer branches on `kIsWeb`.
+    expect(defaultRenderBackend(), RenderBackend.vertices);
   });
 
   testWidgets('with no backend given, the widget resolves the platform default',
