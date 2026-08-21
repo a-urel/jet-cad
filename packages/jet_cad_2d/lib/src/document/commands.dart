@@ -91,8 +91,49 @@ class RemoveEntityCommand extends DraftCommand {
     }
     final record = target.entities.read(slot);
     final payload = target.geometry.read(record.geomIndex);
+
+    if (record.kind == EntityKind.fill) {
+      target.entities.remove(slot);
+      target.geometry.remove(record.geomIndex);
+      target.fills.unlink(handle);
+      target.invalidateDerived();
+      return CommandResult(
+        inverse: AddEntityCommand(record: record, payload: payload),
+        touched: {handle},
+      );
+    }
+
+    // Removing a boundary removes the fills that name it, in this same
+    // mutation. The alternative is an orphaned fill: it draws nothing, reports
+    // nothing, and looks like it works.
+    final dependents = target.fills.fillsOf(handle);
+    if (dependents.length == 1) {
+      final fillSlot = target.entities.slotOf(dependents.single)!;
+      final fillRecord = target.entities.read(fillSlot);
+      target.entities.remove(fillSlot);
+      target.geometry.remove(fillRecord.geomIndex);
+      target.entities.remove(slot);
+      target.geometry.remove(record.geomIndex);
+      target.fills.dropBoundary(handle);
+      target.invalidateDerived();
+      return CommandResult(
+        inverse: AddRegionCommand(
+            fill: fillRecord, boundary: record, boundaryPayload: payload),
+        touched: {handle, fillRecord.handle},
+      );
+    }
+    if (dependents.isNotEmpty) {
+      // More than one fill on one boundary is not something this plan's
+      // commands can create, and inventing an n-ary inverse for it here would
+      // be untested machinery. Refuse rather than half-handle it.
+      throw StateError(
+          '${handle.toHex()} carries ${dependents.length} fills; remove them '
+          'before removing the boundary');
+    }
+
     target.entities.remove(slot);
     target.geometry.remove(record.geomIndex);
+    target.fills.dropBoundary(handle);
     target.invalidateDerived();
     return CommandResult(
       inverse: AddEntityCommand(record: record, payload: payload),

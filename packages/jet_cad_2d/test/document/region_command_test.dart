@@ -209,4 +209,28 @@ void main() {
         .coords;
     expect(afterSecondUndo, orderedEquals(original));
   });
+
+  test('removing a boundary removes its fill, and undo restores both', () {
+    final doc = DraftDocument.empty();
+    final cmd = region(doc);
+    doc.commands.execute(cmd);
+    doc.commands.execute(RemoveEntityCommand(cmd.boundary.handle));
+    expect(doc.entities.slotOf(cmd.fill.handle), isNull,
+        reason: 'an orphaned fill draws nothing and reports nothing');
+    expect(doc.fills.entryCount, 0);
+    expect(doc.fills.linkCount, 0);
+    doc.commands.undo();
+    expect(doc.entities.slotOf(cmd.fill.handle), isNotNull);
+    expect(doc.entities.slotOf(cmd.boundary.handle), isNotNull);
+    expect(doc.fills.trianglesFor(cmd.boundary.handle), hasLength(6));
+  });
+
+  test('removing a fill alone unlinks it and leaves the boundary drawable', () {
+    final doc = DraftDocument.empty();
+    final cmd = region(doc);
+    doc.commands.execute(cmd);
+    doc.commands.execute(RemoveEntityCommand(cmd.fill.handle));
+    expect(doc.entities.slotOf(cmd.boundary.handle), isNotNull);
+    expect(doc.fills.fillsOf(cmd.boundary.handle), isEmpty);
+  });
 }
