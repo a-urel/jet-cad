@@ -2,7 +2,9 @@
 
 **Runs of record:** 2026-08-20 and 2026-08-21.
 **Branch:** `spike/vertices-sink`, worktree `.claude/worktrees/vertices-spike`.
-**Commit range:** `548fa8e..4a16b41` (Task 15's own commit lands on top).
+**Commit range:** the plan is `548fa8e..4a16b41`; Task 15's own docs commits
+land on top of that. Ranges rather than counts, because a count is falsified by
+the next commit.
 **Spec:** [`docs/superpowers/specs/2026-08-20-jet-cad-2d-plan-3d-design.md`](../specs/2026-08-20-jet-cad-2d-plan-3d-design.md)
 **Plan:** [`docs/superpowers/plans/2026-08-20-jet-cad-2d-plan-3d-vertices-sink.md`](../plans/2026-08-20-jet-cad-2d-plan-3d-vertices-sink.md)
 **Mutation log:** [`plan-3d-mutation-log.md`](plan-3d-mutation-log.md)

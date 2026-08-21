@@ -2,9 +2,10 @@
 
 **Last updated:** 2026-08-21
 **Verified against:** branch `spike/vertices-sink`, worktree
-`.claude/worktrees/vertices-spike`, at `4a16b41`, working tree clean — all
-three packages re-run there on 2026-08-21. Every count below was produced by
-running the suite, not by reading a report.
+`.claude/worktrees/vertices-spike`, working tree clean. **`4a16b41` is the last
+commit touching `lib/` or `test/`**; everything after it is docs-only, and the
+three-package gate was re-run green on each. Every suite count below was
+produced by running the suite, not by reading a report.
 
 ---
 
@@ -61,11 +62,11 @@ are collinear — do not carry them forward. `build` is linear in call count to
 
 The 2026-08-20 spike
 ([note](docs/superpowers/notes/2026-08-20-vertices-sink-spike.md)) became Plan
-3d, and Plan 3d is **finished on `spike/vertices-sink`** — **24 commits**,
-`548fa8e..HEAD`, on top of 8 spike-and-spec commits, so **32 off `main`**.
-**Not merged, not pushed.** `VerticesDrawSink` builds each
-stroked segment's triangles itself and submits the frame's strokes as one
-ordered `drawVertices`. What the spike lacked, 3d added: **miter and bevel
+3d, and Plan 3d is **finished on `spike/vertices-sink`** — the plan is
+`548fa8e..HEAD`, sitting on the spike and spec commits at `bb67137..548fa8e`,
+so the whole branch is `main..HEAD`. **Not merged, not pushed.**
+`VerticesDrawSink` builds each stroked segment's triangles itself and submits
+the frame's strokes as one ordered `drawVertices`. What the spike lacked, 3d added: **miter and bevel
 joins** (a miter is two triangles), **seam joins on closed runs**, `Vertices`
 disposal at submission, a **coverage-only triangle rasterizer** so the golden
 suite is available to it, goldens **on both backends**, and a **sink-against-sink
@@ -168,13 +169,24 @@ docs/superpowers/
 | Location | Branch | State |
 |---|---|---|
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, **`bb67137`**, Plans 1/2/3a/3b/**3c** merged |
-| `.claude/worktrees/vertices-spike` | `spike/vertices-sink` | clean, **Plan 3d complete**, **32 commits off `main`** (8 spike/spec + 24 plan), not merged, not pushed |
+| `.claude/worktrees/vertices-spike` | `spike/vertices-sink` | clean, **Plan 3d complete**, `main..HEAD` off `main` — spike and spec at `bb67137..548fa8e`, the plan at `548fa8e..HEAD`; not merged, not pushed |
 
 `main` is a strict ancestor of the branch, so the branch is a fast-forward.
-**As of this worktree's refs `origin/main` is also at `bb67137`** —
-`git rev-list --count origin/main..main` is `0`, not the 29 this file used to
-claim. That ref is local and may be stale; re-check with `git fetch` before
-acting on it. Do not push unless explicitly asked.
+
+**This file states commit ranges and never a commit count, on purpose.** A
+count is falsified by the next commit — including the commit that writes the
+count, which is how the figure here was wrong twice in one task. A range with
+named endpoints is true forever. If you want the number, ask git:
+
+```sh
+git -C .claude/worktrees/vertices-spike rev-list --count main..HEAD
+git -C .claude/worktrees/vertices-spike rev-list --count origin/main..main   # 0 at the time of writing
+```
+
+The second is `0`: **as of this worktree's refs `origin/main` is also at
+`bb67137`**, not the 29-ahead-and-unpushed this file used to claim. That ref is
+local and a `git fetch` can move it, so re-run the command rather than trusting
+the parenthetical. Do not push unless explicitly asked.
 
 The Plan 3d per-task ledger lives in the worktree at
 `.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` and is
