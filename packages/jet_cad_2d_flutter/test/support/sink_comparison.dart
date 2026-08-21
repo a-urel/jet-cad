@@ -393,12 +393,21 @@ DraftDocument comparisonFixture() {
 
   // A corner past the miter limit: a 160-degree direction change (cosine
   // -0.939), below -0.875, so `_emitJoin` takes the bevel-only branch and
-  // emits no miter tip. Not the near-reversal it used to be: at 178 degrees
-  // the bevel triangle is itself degenerate, so the branch was exercised
-  // while the ink it controls was nil, and a mutant that emitted the miter
-  // tip anyway would have been caught by luck rather than by geometry. At
-  // 160 degrees the suppressed tip would reach 5.9 half-widths past the
-  // corner.
+  // emits no miter tip.
+  //
+  // Not the 178-degree near-reversal it used to be, and the reason is about
+  // the *bevel*, not about the tip. Past the limit the bevel triangle
+  // `(V, A, B)` is the only ink the join contributes, and its area goes as
+  // `sin` of the direction change: at 178 degrees that is 0.035, a sliver
+  // narrower than the one-pixel dilation, so the branch was exercised while
+  // the ink it controls was nil. At 160 degrees the bevel is real ink and a
+  // mutant that dropped it has something to drop.
+  //
+  // This is *not* the reason the miter-limit mutant is caught. Task 11's
+  // review reran that mutant against the 178-degree corner and it was caught
+  // by 4567 pixels, because the suppressed tip's reach is `half / cos(theta/2)`
+  // and blows up as the corner approaches a reversal. It reaches 5.9
+  // half-widths here, which is plenty.
   _entity(doc, doc.rootHandle, seed.next(), EntityKind.polyline,
       [170, 40, 230, 90, 173.6, 69.7], const [],
       lineweight: 160);

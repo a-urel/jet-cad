@@ -80,6 +80,12 @@ void main() {
 
     final report =
         await measureAgreement(tester, doc, paintDrawing(doc, index));
+    // `measureAgreement` has no ink floors of its own -- `expectSinksAgree`
+    // owns those, and this test does not go through it. Without them a sink
+    // that drew nothing would satisfy every "greaterThan" below by having
+    // nothing to disagree with. 2026-08-21: 19194 and 24580.
+    expect(report.canvasInkPixels, greaterThan(10000));
+    expect(report.verticesInkPixels, greaterThan(10000));
     expect(report.strayVerticesPixels, greaterThan(1000),
         reason: 'the vertices sink should be wider than the canvas one along '
             'the flanks, where the canvas divides by sqrt(3)');
@@ -164,6 +170,24 @@ void main() {
     // zero**, not to delete the fixture.
     final doc = DraftDocument.empty();
     final report = await measureAgreement(tester, doc, fullSweepArcDrawing);
+    // Floors first, and they are not decoration. This test does not go
+    // through `expectSinksAgree`, so it inherits none of its ink floors, and
+    // a `greaterThan(0)` on missing ink is exactly the assertion an empty
+    // vertices side satisfies best. Task 11's review made `arc` return early
+    // for `sweep > 6.0` -- the vertices backend then drew *nothing* for this
+    // fixture -- and every test in this file still passed. 2026-08-21 the ring
+    // measures 5688 and 5710 ink pixels, so 4000 is clear of an empty side by
+    // a wide margin and clear of the real number by a wider one.
+    expect(report.canvasInkPixels, greaterThan(4000),
+        reason: 'the canvas backend must have drawn the whole ring');
+    expect(report.verticesInkPixels, greaterThan(4000),
+        reason: 'the vertices backend must have drawn the whole ring, not '
+            'skipped the op and left a notch-shaped hole the size of it');
+    // And an upper bound, so "unjoined seam" cannot quietly become "half the
+    // ring missing" and still read as this known defect. The notch measured 6
+    // pixels.
+    expect(report.uncoveredCanvasPixels, lessThan(50),
+        reason: 'one seam notch, not a missing arc');
     expect(report.uncoveredCanvasPixels, greaterThan(0),
         reason: 'the seam of a 2*pi ARC is unjoined on the vertices backend');
     expect(report.strayVerticesPixels, 0,
