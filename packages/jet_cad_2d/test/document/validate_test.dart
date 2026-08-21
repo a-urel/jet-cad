@@ -500,24 +500,32 @@ void main() {
     final doc = DraftDocument.empty();
     rawFill(doc, const Handle(9999));
     expect(doc.validate().map((d) => d.code),
-        contains(ValidationCodes.fillBoundaryMissing));
+        [ValidationCodes.fillBoundaryMissing]);
   });
 
   test('a fill on a text entity is reported as not fillable', () {
     final doc = DraftDocument.empty();
+    // The fill's handle is allocated before the boundary's, the way
+    // AddRegionCommand.allocate does it, so this fixture is malformed in
+    // exactly one way: fill.value < boundary.value here, which keeps
+    // fillDrawOrderInverted from also firing alongside the code under test.
+    final fillHandle = doc.handleSeed.next();
     final textHandle =
         rawLeaf(doc, EntityKind.text, [0, 0], scalars: [2.5], text: 'ROOM 3');
-    rawFill(doc, textHandle);
+    rawFill(doc, textHandle, handle: fillHandle);
     expect(doc.validate().map((d) => d.code),
-        contains(ValidationCodes.fillBoundaryNotFillable));
+        [ValidationCodes.fillBoundaryNotFillable]);
   });
 
   test('a fill on an open polyline is reported as not closed', () {
     final doc = DraftDocument.empty();
+    // Fill handle allocated before the boundary's — see the comment in the
+    // not-fillable test above.
+    final fillHandle = doc.handleSeed.next();
     final open = rawLeaf(doc, EntityKind.polyline, [0, 0, 10, 0, 10, 10]);
-    rawFill(doc, open);
+    rawFill(doc, open, handle: fillHandle);
     expect(doc.validate().map((d) => d.code),
-        contains(ValidationCodes.fillBoundaryNotClosed));
+        [ValidationCodes.fillBoundaryNotClosed]);
   });
 
   test('a fill in a different owner than its boundary is reported', () {
@@ -529,12 +537,17 @@ void main() {
       transform: Transform2.identity(),
       children: const [],
     )));
+    // Fill handle allocated before the boundary's — see the comment in the
+    // not-fillable test above. The boundary still lives under `group` while
+    // the fill defaults to the root, so the foreign-owner mismatch is real;
+    // only the handle order changes.
+    final fillHandle = doc.handleSeed.next();
     final boundary = rawLeaf(
         doc, EntityKind.polyline, [0, 0, 10, 0, 10, 10, 0, 10, 0, 0],
         owner: group);
-    rawFill(doc, boundary); // owner defaults to the root
+    rawFill(doc, boundary, handle: fillHandle); // owner defaults to the root
     expect(doc.validate().map((d) => d.code),
-        contains(ValidationCodes.fillBoundaryForeignOwner));
+        [ValidationCodes.fillBoundaryForeignOwner]);
   });
 
   test('an inverted pair is reported and nothing is changed', () {
@@ -562,7 +575,7 @@ void main() {
     expect(fill.value, greaterThan(boundary.value));
     final before = DraftDocumentCodec.encodeToString(doc);
     expect(doc.validate().map((d) => d.code),
-        contains(ValidationCodes.fillDrawOrderInverted));
+        [ValidationCodes.fillDrawOrderInverted]);
     expect(DraftDocumentCodec.encodeToString(doc), before,
         reason: 'validate reports and never mutates; a loader that re-sorted '
             'to defend the draw-order rule would make the drawing differ '
