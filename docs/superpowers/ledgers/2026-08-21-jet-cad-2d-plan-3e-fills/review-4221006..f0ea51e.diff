@@ -1,0 +1,522 @@
+# Review package: 4221006..f0ea51e
+
+## Commits
+f0ea51e test: the rig corpus grows fills, behind a define
+
+## Files changed
+ .../integration_test/frame_timing_test.dart        |  12 ++
+ apps/dev_harness_2d/lib/main.dart                  | 161 +++++++++++++++++++--
+ apps/dev_harness_2d/lib/measurement_rig.dart       |   7 +
+ .../test/invariants/paint_allocation_test.dart     | 142 ++++++++++++++++--
+ 4 files changed, 294 insertions(+), 28 deletions(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/integration_test/frame_timing_test.dart b/apps/dev_harness_2d/integration_test/frame_timing_test.dart
+index 229738c..d08395f 100644
+--- a/apps/dev_harness_2d/integration_test/frame_timing_test.dart
++++ b/apps/dev_harness_2d/integration_test/frame_timing_test.dart
+@@ -157,20 +157,32 @@ void main() {
+     // ambiguous, and one at a fraction of zero would mean the corpus stopped
+     // honouring the define.
+     final expectedDashedLinetypes = kDashedFraction > 0 ? 1 : 0;
+     if (dashedLinetypes.length != expectedDashedLinetypes) {
+       throw StateError('expected $expectedDashedLinetypes dashed linetype(s) '
+           'in the corpus at DASHED=$kDashedFraction, found '
+           '${dashedLinetypes.length}: '
+           '${dashedLinetypes.map((lt) => lt.name).toList()}');
+     }
+ 
++    // Same footgun as the dashed-linetype check above, for `FILLS`: a corpus
++    // that silently ignored the define would still print plausible-looking
++    // frame times, and this is the one place that would notice before the
++    // rig's own `fills=`/`skippedFills=` line does.
++    if (kFillsEnabled && doc.fills.linkCount == 0) {
++      throw StateError('FILLS=true but the corpus carries no fills');
++    }
++    if (!kFillsEnabled && doc.fills.linkCount != 0) {
++      throw StateError('FILLS=false but the corpus carries '
++          '${doc.fills.linkCount} fill(s)');
++    }
++
+     return (
+       doc: doc,
+       camera: camera,
+       index: index,
+       painter: painter,
+       sink: sink,
+       vertices: vertices,
+       resolvedBackend: resolvedBackend,
+       dashedLinetype: dashedLinetypes.singleOrNull?.handle
+     );
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index 0aa495d..0207896 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -1,20 +1,22 @@
+ // A measurement harness, not a product.
+ //
+ // Pointer pan and scroll zoom go straight to `CameraController`. There is no
+ // tool architecture and no selection, because tools are Plan 4 and every line
+ // here is a line the rigs have to keep working.
+ 
+ // ignore_for_file: avoid_print — the RUN_R2 diagnostics below print by
+ // design; see `measurement_rig.dart`.
+ 
+ import 'dart:async';
++import 'dart:math' as math;
++import 'dart:typed_data';
+ 
+ import 'package:flutter/gestures.dart';
+ import 'package:flutter/material.dart';
+ import 'package:flutter/scheduler.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d/testing.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+ 
+ import 'measurement_rig.dart';
+@@ -70,20 +72,52 @@ final double kLineweightScale = double.tryParse(
+ /// same way [kLineweightScale] does. Inert at its default of 0.35, which is
+ /// the value every run before this one used.
+ final double kDashedFraction = double.tryParse(
+       const String.fromEnvironment('DASHED', defaultValue: '0.35'),
+     ) ??
+     0.35;
+ 
+ const bool kTextCorpus = bool.fromEnvironment('TEXT');
+ const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
+ 
++/// Fraction of the closed polylines [_addFillRegions] adds that gain a region
++/// partner (a fill), when [kFillsEnabled] is on. Named beside
++/// [kDashedFraction] for the same reason: a quota, applied by an accumulator
++/// exactly the way `_Styling.linetypeFor` and `.colorFor` apply theirs in
++/// `generate_document.dart`, not a coin flip -- see that file's comment on
++/// why a fraction has to land exactly rather than merely on average.
++///
++/// The rest of the closed polylines this adds are plain boundaries: stroked,
++/// never filled, so the corpus exercises both the fillable-and-filled and the
++/// fillable-but-not path.
++const double kFillFraction = 0.4;
++
++/// Whether the corpus carries filled regions, and the painter draws them.
++///
++/// Same shape as [kBackend], for the same reason: a `String.fromEnvironment`,
++/// not `bool.fromEnvironment` -- Plan 3c lost a full device run to
++/// `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as false
++/// while printing entirely plausible numbers. An unrecognised value throws at
++/// startup rather than silently defaulting to off.
++///
++/// Purely additive at its default of `false`: [harnessDocument] never calls
++/// [_addFillRegions], so the document is exactly what [generateDocument]
++/// returned, coordinate for coordinate -- fills-on and fills-off differ by
++/// this one flag on one drawing, the same way `DRAW_TEXT` and `TEXT` are
++/// inert at their defaults.
++final bool kFillsEnabled =
++    switch (const String.fromEnvironment('FILLS', defaultValue: 'false')) {
++  'false' => false,
++  'true' => true,
++  final other => throw StateError('FILLS must be true or false; got "$other"'),
++};
++
+ /// Which sink the harness draws through: `canvas`, `vertices`, or unset for
+ /// the platform's own choice.
+ ///
+ /// **A `String.fromEnvironment`, and it stays one.** Plan 3c lost a full device
+ /// run to `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as
+ /// false while printing entirely plausible numbers; the only thing that caught
+ /// it was a line printing `corpus=on/off`. A string has no such hazard, and an
+ /// unrecognised value throws at startup rather than falling back to something
+ /// that looks fine.
+ final RenderBackend? kBackend =
+@@ -96,36 +130,131 @@ final RenderBackend? kBackend =
+ };
+ 
+ /// The corpus the rigs measure on: the same shape as R1's, so the two sets of
+ /// numbers describe one drawing.
+ ///
+ /// With [kTextCorpus] on this is `textRigCorpus`'s shape, and the measurer
+ /// stops being a detail: `DraftDocument`'s default is the zero-metrics
+ /// `InsertionPointMeasurer`, which collapses every glyph box to a point and
+ /// every text transform to a singular matrix. A text corpus built on it looks
+ /// like a text corpus and draws nothing measurable.
+-DraftDocument harnessDocument([int? entityCount]) => generateDocument(
+-      entityCount ?? kEntities,
+-      definitionCount: 200,
+-      instanceCount: 20000,
+-      nestingDepth: 2,
+-      mirroredFraction: 0.1,
+-      nonUniformFraction: 0.2,
+-      groupCount: 50,
+-      layerCount: 8,
+-      byBlockFraction: 0.3,
+-      dashedFraction: kDashedFraction,
+-      labelFraction: kTextCorpus ? 0.02 : 0,
+-      attributedInstanceFraction: kTextCorpus ? 0.2 : 0,
+-      measurer:
+-          kTextCorpus ? FlutterTextMeasurer() : const InsertionPointMeasurer(),
+-    );
++DraftDocument harnessDocument([int? entityCount]) {
++  final count = entityCount ?? kEntities;
++  final doc = generateDocument(
++    count,
++    definitionCount: 200,
++    instanceCount: 20000,
++    nestingDepth: 2,
++    mirroredFraction: 0.1,
++    nonUniformFraction: 0.2,
++    groupCount: 50,
++    layerCount: 8,
++    byBlockFraction: 0.3,
++    dashedFraction: kDashedFraction,
++    labelFraction: kTextCorpus ? 0.02 : 0,
++    attributedInstanceFraction: kTextCorpus ? 0.2 : 0,
++    measurer:
++        kTextCorpus ? FlutterTextMeasurer() : const InsertionPointMeasurer(),
++  );
++  if (kFillsEnabled) _addFillRegions(doc, count);
++  return doc;
++}
++
++/// Adds closed-polyline rooms behind [kFillsEnabled]. [kFillFraction] of
++/// them are added as an [AddRegionCommand] pair (a fill under a boundary);
++/// the rest are added as plain closed [EntityKind.polyline] boundaries with
++/// no fill, exercising the fillable-but-not-filled path alongside the filled
++/// one.
++///
++/// **Scattered over a corridor around the floor's centre, not the whole
++/// [kFloorWidth] x [kFloorHeight] plan the way `generateDocument`'s own floor
++/// entities are, and not a tight cluster at the centre either.** R2 fits the
++/// camera to a fixed ~3000x2250 working-set window around `doc.extents`'
++/// centre, then scripts 120 pan steps of `Offset(-7, -3)` followed by 120
++/// oscillating zoom steps anchored off-centre -- and *that* is the state
++/// `printInvariants` reports, not the initial fit. A uniform scatter over the
++/// full floor put a visible room in the initial window with probability
++/// ~0.3% (measured: `fills=0` at `FILLS=true`); a tight cluster at the
++/// initial fit's centre fixed that window but missed the state R2 actually
++/// measures -- the pan alone moves the window by roughly (+3200, -1350) world
++/// units, confirmed empirically by replaying R2's own script against a fresh
++/// camera and reading `visibleWorld` (see the task-16 report). This corridor
++/// is the bounding box of the initial and post-pan-and-zoom windows, plus a
++/// margin, so rooms stay visible through the whole scripted sequence, not
++/// just at one end of it -- and a future change to the pan/zoom script would
++/// show up as `fills=0` again rather than silently under-covering.
++///
++/// Its own [math.Random] stream, seeded independently of
++/// [generateDocument]'s two -- this runs after that function has already
++/// returned, so sharing either of its streams is not even available, and a
++/// fresh one keeps this addition's own output reproducible on its own.
++void _addFillRegions(DraftDocument doc, int entityCount) {
++  final random = math.Random(0xFEEDFACE);
++  final roomCount = math.max(200, entityCount ~/ 100);
++  // The floor's own centre -- generateDocument's floor entities are
++  // scattered uniformly over [kDefaultOriginX, kDefaultOriginX+kFloorWidth]
++  // x [kOriginY, kOriginY+kFloorHeight], so this is a close proxy for
++  // `doc.extents`' centre without needing the entities already added to
++  // compute it -- close enough that the margin above absorbs the difference.
++  final centerX = kDefaultOriginX + kFloorWidth / 2;
++  final centerY = kOriginY + kFloorHeight / 2;
++  var fillDue = 0.0;
++  for (var i = 0; i < roomCount; i++) {
++    final w = 30.0 + random.nextDouble() * 90.0;
++    final h = 30.0 + random.nextDouble() * 70.0;
++    // Corridor: centred (centerX + 1750, centerY - 750), half-extents
++    // (3500, 2100) -- see the doc comment above for how these were derived.
++    final x0 = centerX + 1750.0 + (random.nextDouble() - 0.5) * 7000.0 - w / 2;
++    final y0 = centerY - 750.0 + (random.nextDouble() - 0.5) * 4200.0 - h / 2;
++    final coords = Float64List.fromList([
++      x0, y0, //
++      x0 + w, y0, //
++      x0 + w, y0 + h, //
++      x0, y0 + h, //
++      x0, y0, // closing duplicate: first == last, exactly, per
++      // `triangulationFor`'s stored-value comparison.
++    ]);
++    final payload = GeometryPayload(coords: coords, scalars: Float64List(0));
++
++    fillDue += kFillFraction;
++    if (fillDue >= 1.0) {
++      fillDue -= 1.0;
++      doc.commands.execute(AddRegionCommand.allocate(
++        seed: doc.handleSeed,
++        owner: doc.rootHandle,
++        boundaryKind: EntityKind.polyline,
++        boundaryPayload: payload,
++        layer: ReservedHandles.layerZero,
++        fillColor: const TrueColor(0x3366CC),
++        boundaryColor: const TrueColor(0x000000),
++      ));
++    } else {
++      final handle = doc.handleSeed.next();
++      doc.commands.execute(AddEntityCommand(
++        record: EntityRecord(
++          handle: handle,
++          owner: doc.rootHandle,
++          kind: EntityKind.polyline,
++          layer: ReservedHandles.layerZero,
++          linetype: ReservedHandles.byLayerLinetype,
++          linetypeScale: 1.0,
++          geomIndex: 0,
++          color: const ByLayerColor(),
++          lineweight: kByLayer,
++          transparency: kByLayer,
++          flags: 0,
++        ),
++        payload: payload,
++      ));
++    }
++  }
++}
+ 
+ /// Whether `main()` drives R2 itself on startup and prints its block,
+ /// instead of waiting to be driven by `integration_test`.
+ ///
+ /// Task 13's web row needed `flutter drive -d chrome`, and that hangs in
+ /// this environment before it ever reaches chromedriver — see the Task 13
+ /// report. `flutter run -d chrome` forwards the app's own `print()` output
+ /// to the terminal once its debug service links, so this mode drives the
+ /// rig itself and gets the same block without any driver.
+ ///
+diff --git a/apps/dev_harness_2d/lib/measurement_rig.dart b/apps/dev_harness_2d/lib/measurement_rig.dart
+index da9ee88..8e104aa 100644
+--- a/apps/dev_harness_2d/lib/measurement_rig.dart
++++ b/apps/dev_harness_2d/lib/measurement_rig.dart
+@@ -97,20 +97,27 @@ void requireRepaint(CanvasDrawSink sink, VerticesDrawSink? vertices) {
+ /// `BACKEND=canvas` and `BACKEND=vertices`. Printed by every rig, on one line,
+ /// so no rig can establish control for a corpus size that another rig then
+ /// reports without it -- which is what happened to R4a and R4b, whose
+ /// transcripts carried no `screenSpaceLeafCount` at all because only R2
+ /// printed it.
+ void printInvariants(DraftPainter painter, CanvasDrawSink sink) {
+   print('  screenSpaceLeafCount=${painter.screenSpaceLeafCount} '
+       'dashSpans=${painter.dashSpanCount} '
+       'collapsed=${painter.collapsedDashCount} '
+       'canvasCalls=${sink.canvasCallCount}');
++  // Task 16: `fillCount` and `skippedFillCount` are the same kind of
++  // backend-independent field as the line above -- both must match exactly
++  // across `BACKEND=canvas` and `BACKEND=vertices` at a fixed corpus.
++  // `skippedFillCount` is a failable criterion of the exit gate: its
++  // threshold on the rig corpus is zero.
++  print('  fills=${painter.fillCount} '
++      'skippedFills=${painter.skippedFillCount}');
+ }
+ 
+ /// The backend actually used, and the vertices counters when it was that one.
+ ///
+ /// The resolved value and not the define: a run that asked for `vertices` and
+ /// silently got `canvas` would otherwise report canvas numbers under a
+ /// vertices heading, which is the shape of the mistake Plan 3c's `TEXT` define
+ /// made.
+ void printBackend(RenderBackend backend, VerticesDrawSink? vertices) {
+   if (vertices == null) {
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart b/packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart
+index 102ae26..1c4eece 100644
+--- a/packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart
++++ b/packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart
+@@ -10,44 +10,133 @@
+ // [VerticesDrawSink.debugCapacityVertices] either holds still across a later
+ // frame or it does not. A profiler would only add noise to a question that
+ // reduces to reading a field. The warm-up runs the corpus three times so
+ // growth is behind the buffer before anything is measured; the subject
+ // frame's capacity is then read before and after and compared for equality.
+ // What is left once the buffer stops growing is the residue the sink's class
+ // comment states as a fact: three objects per flush -- the `Vertices` and the
+ // two `sublistView` wrappers -- and nothing per entity, `3 * (textOps + 1)`
+ // per frame.
+ 
++import 'dart:math' as math;
+ import 'dart:typed_data';
+ import 'dart:ui';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d/testing.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import '../support/spy_canvas.dart';
+ 
+ const Size _viewport = Size(800, 600);
+ 
+-DraftDocument _corpus() => generateDocument(
+-      4000,
+-      definitionCount: 40,
+-      instanceCount: 400,
+-      nestingDepth: 2,
+-      mirroredFraction: 0.1,
+-      nonUniformFraction: 0.2,
+-      groupCount: 10,
+-      layerCount: 8,
+-      byBlockFraction: 0.3,
+-      dashedFraction: 0.35,
+-    );
++/// Fraction of [_addFillRegions]'s closed polylines that gain a region
++/// partner (a fill); the rest are added as plain closed boundaries, stroked
++/// but not filled. Mirrors `kFillFraction` in
++/// `apps/dev_harness_2d/lib/main.dart` -- the same quota-accumulator shape,
++/// applied independently here because this corpus lives in a different
++/// package and cannot share that file's stream.
++const double _fillFraction = 0.4;
++
++DraftDocument _corpus() {
++  final doc = generateDocument(
++    4000,
++    definitionCount: 40,
++    instanceCount: 400,
++    nestingDepth: 2,
++    mirroredFraction: 0.1,
++    nonUniformFraction: 0.2,
++    groupCount: 10,
++    layerCount: 8,
++    byBlockFraction: 0.3,
++    dashedFraction: 0.35,
++  );
++  // Task 16: the allocation gate must run its two-flush comparison on a
++  // corpus containing fills -- a cache *miss* on the frame path would show up
++  // here immediately as a per-fill allocation, which is a second, independent
++  // proof (alongside the load-cost row) that triangulations are materialised
++  // eagerly at write time and never lazily on the frame path.
++  _addFillRegions(doc, seed: 0xFEEDFACE, count: 200, fraction: _fillFraction);
++  return doc;
++}
++
++/// Adds [count] closed-polyline rooms to [doc], scattered around
++/// [kDefaultOriginX]/[kOriginY] the way `generateDocument`'s own floor
++/// entities are. [fraction] of them are added as an [AddRegionCommand] pair
++/// (a fill under a boundary), via the same quota-accumulator shape
++/// `_Styling.linetypeFor` in `generate_document.dart` uses -- a fraction
++/// specifies the corpus exactly, not on average; the rest are added as plain
++/// closed [EntityKind.polyline] boundaries with no fill.
++void _addFillRegions(DraftDocument doc,
++    {required int seed, required int count, required double fraction}) {
++  final random = math.Random(seed);
++  var fillDue = 0.0;
++  for (var i = 0; i < count; i++) {
++    final x0 = kDefaultOriginX + random.nextDouble() * kFloorWidth;
++    final y0 = kOriginY + random.nextDouble() * kFloorHeight;
++    final w = 100.0 + random.nextDouble() * 400.0;
++    final h = 100.0 + random.nextDouble() * 300.0;
++    final coords = Float64List.fromList([
++      x0, y0, //
++      x0 + w, y0, //
++      x0 + w, y0 + h, //
++      x0, y0 + h, //
++      x0, y0, // closing duplicate: first == last, exactly.
++    ]);
++    final payload = GeometryPayload(coords: coords, scalars: Float64List(0));
++
++    fillDue += fraction;
++    if (fillDue >= 1.0) {
++      fillDue -= 1.0;
++      doc.commands.execute(AddRegionCommand.allocate(
++        seed: doc.handleSeed,
++        owner: doc.rootHandle,
++        boundaryKind: EntityKind.polyline,
++        boundaryPayload: payload,
++        layer: ReservedHandles.layerZero,
++        fillColor: const TrueColor(0x3366CC),
++        boundaryColor: const TrueColor(0x000000),
++      ));
++    } else {
++      final handle = doc.handleSeed.next();
++      doc.commands.execute(AddEntityCommand(
++        record: EntityRecord(
++          handle: handle,
++          owner: doc.rootHandle,
++          kind: EntityKind.polyline,
++          layer: ReservedHandles.layerZero,
++          linetype: ReservedHandles.byLayerLinetype,
++          linetypeScale: 1.0,
++          geomIndex: 0,
++          color: const ByLayerColor(),
++          lineweight: kByLayer,
++          transparency: kByLayer,
++          flags: 0,
++        ),
++        payload: payload,
++      ));
++    }
++  }
++}
++
++/// A document with many fills, for the load-cost row Task 16 owes: eager
++/// materialisation at write time moves the triangulation cost to load time
++/// rather than removing it, and that row must be measured and printed, with
++/// no threshold.
++DraftDocument fillHeavyCorpus() {
++  final doc = DraftDocument.empty();
++  // Every one of these is a region: `fraction: 1.0` so the count of fills
++  // created is exactly `count`, not a quota's rounded outcome.
++  _addFillRegions(doc, seed: 0xC0FFEE, count: 5000, fraction: 1.0);
++  return doc;
++}
+ 
+ void main() {
+   testWidgets('a steady-state frame allocates O(1) per flush, not O(entities)',
+       (tester) async {
+     final doc = _corpus();
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+     final painter = DraftPainter(
+         document: doc, index: index, resolver: DocumentStyleResolver(doc));
+     final camera = ViewportTransform.fit(doc.extents, _viewport);
+@@ -68,20 +157,30 @@ void main() {
+     // is in units of flushes, so a frame that stopped flushing would make it
+     // vacuous.
+     sink.resetCounters();
+     painter.paint(sink, camera, _viewport);
+     sink.flush();
+ 
+     expect(sink.totalFlushCount, greaterThan(0),
+         reason: 'nothing was flushed, so nothing was measured');
+     expect(sink.frameTriangleCount, greaterThan(1000),
+         reason: 'a degenerate corpus would make the bound meaningless');
++    // Task 16: this corpus must actually contain fills, and every one of them
++    // must draw -- an empty or all-skipped fill population would make the
++    // gate below vacuous for the one path it exists to cover.
++    expect(painter.fillCount, greaterThan(0),
++        reason: 'the corpus carries no fills, so this gate proves nothing '
++            'about fill triangulation being cached rather than allocated on '
++            'the frame path');
++    expect(painter.skippedFillCount, 0,
++        reason: 'every fill this corpus adds is a valid, closed, simple '
++            'rectangle -- none of them should be unresolvable');
+ 
+     // The buffer must not have grown in the subject frame. Growth is the one
+     // O(entities) allocation this sink can make, and it is the one the
+     // steady-state claim is about.
+     //
+     // MUTATION: drop `_reserve`'s capacity-sufficiency guard and
+     // unconditionally double, so every segment regrows the buffer instead of
+     // only a call that needs more room. `debugCapacityVertices` no longer
+     // holds still between the two reads -- it compounds every segment of the
+     // frame and the run in fact throws an `OutOfMemoryError` from
+@@ -154,11 +253,30 @@ void main() {
+         .toList(growable: false);
+     // MUTATION: replace `_paint` in the `drawVertices` call with a fresh,
+     // call-site-local `Paint()..color = const Color(0xFFFFFFFF)`, never
+     // touching the field -- confirmed empirically: the test above and every
+     // other test in the suite stay green under this exact mutation, and
+     // only this `identical` check goes red.
+     expect(identical(paints[0], paints[1]), isTrue,
+         reason: 'flush() must hand drawVertices the one Paint built for the '
+             "sink's life, not a fresh one per call");
+   });
++
++  test('load-time triangulation cost, recorded', () {
++    // The row eager materialisation owes: `AddRegionCommand` and the codec's
++    // loader both triangulate at write/load time precisely so the frame path
++    // never has to, per the allocation gate above. That work has to land
++    // somewhere, and this is where -- no threshold, but no plan may skip the
++    // row.
++    final corpus = fillHeavyCorpus();
++    const n = 5000;
++    expect(corpus.fills.linkCount, n,
++        reason: 'fillHeavyCorpus() must actually carry the fill count this '
++            'row claims to measure the load cost of');
++    final json = DraftDocumentCodec.encodeToString(corpus);
++    final sw = Stopwatch()..start();
++    DraftDocumentCodec.decodeString(json);
++    sw.stop();
++    // ignore: avoid_print
++    print('LOAD fills=$n elapsed=${sw.elapsedMilliseconds}ms');
++  });
+ }

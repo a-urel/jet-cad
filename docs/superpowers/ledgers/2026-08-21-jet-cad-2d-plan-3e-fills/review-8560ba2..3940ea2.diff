@@ -1,0 +1,110 @@
+# Review package: 8560ba2..3940ea2
+
+## Commits
+3940ea2 docs: Plan 3e fix round 1 — trap 5 for 3f, mutation-count footnote
+
+## Files changed
+ STATUS.md                                      | 24 ++++++++++++++++++++++--
+ docs/superpowers/notes/plan-3e-mutation-log.md |  8 ++++++++
+ 2 files changed, 30 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index c02a22d..08eed0a 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -697,39 +697,59 @@ picture flushes the vertex buffer at its boundary. There is **no crossover
+ number** to work against — the vertices backend's raster margin is still
+ widening at 500,000 entities — and there is **96.00 MiB of vertex buffer pinned
+ for the widget's life** at that corpus size, which is the arithmetic a tiling
+ scheme changes. Read the margin against **canvas calls**, not entity count: a
+ 10× entity rise moves `screenSpaceLeafCount` only 2.13× and `dashSpans` 3.03×.
+ 
+ The prize is real: the dominant cost is leaf-count-bound GPU vertex work, and
+ dashing makes that story **stronger** — one dashed polyline becomes dozens of
+ drawn spans per leaf without moving the painter's op count.
+ 
+-Four traps recorded in
+-[docs/superpowers/notes/2026-08-17-carry-forward-additions.md](docs/superpowers/notes/2026-08-17-carry-forward-additions.md):
++Five traps. The first four are recorded in
++[docs/superpowers/notes/2026-08-17-carry-forward-additions.md](docs/superpowers/notes/2026-08-17-carry-forward-additions.md);
++the fifth is Plan 3e's own, added here because a reader who follows
++`CLAUDE.md`'s "read `STATUS.md` first" and stops at this section would
++otherwise never see it:
+ 
+ 1. **`documentRevision` does not exist yet** and nothing says what bumps it. If
+    an ordinary entity edit bumps it, every definition picture is discarded every
+    command — the exact pathology the two-channel split exists to avoid, and the
+    planned gate row would not catch it.
+ 2. **Tile invalidation has a hole for edits inside a definition.** A touched
+    handle owned by a definition appears in no tile's handle list and its new box
+    is in definition-local space. Tiles must record which definitions they baked
+    and map touched handles through placements.
+ 3. **A cached picture is no longer scale-invariant now that dashes exist.** Dash
+    phase and the collapse floor are both functions of screen-space scale, so
+    zoom far enough and baked-dashed entities need to render solid. That is a new
+    invalidation axis with no name yet.
+ 4. **`InstanceNode` carries only 2 of `StyleContext`'s 6 fields.**
+    `linetype`, `linetypeScale`, `lineweight`, `transparency` are missing, and
+    DXF's INSERT carries all four. `StyleContext` is the picture cache key, so
+    this model decision belongs **before** the cache, not after.
++5. **The allocation gate cannot see a lazily-populated cache, and a picture
++   cache is exactly that shape.** Plan 3e proved this directly: mutating
++   `DraftPainter._drawFill` to compute and store a triangulation on a cache
++   miss, instead of skipping it, left `paint_allocation_test.dart`'s own
++   `debugCapacityVertices` before/after comparison green. The mechanism only
++   reads `VerticesDrawSink`'s own vertex-buffer capacity; a triangulation (or
++   a baked `Picture`) that lands on the general Dart heap without touching
++   that buffer is invisible to it, and the warm-up frames a gate like this
++   one always runs will have already sized the buffer before the subject
++   frame is measured, hiding a first-draw allocation completely. **If 3f's
++   picture cache populates lazily on first paint, this exact gate will stay
++   green while the cache allocates a `Picture` per miss on the frame path.**
++   What actually proved fills are populated eagerly and not lazily was a
++   direct command-time assertion (`the triangulation is materialised by the
++   command, not by a draw`), not the allocation gate — 3f needs the
++   equivalent of that assertion, or a real VM allocation-profile mechanism
++   ported to the Flutter-side suite, not another buffer-capacity read.
+ 
+ **Do not design 3f against a fixed op-count ceiling.** The web whole-drawing
+ abort is reproducible but its trigger is unknown — a memory- or
+ session-dependent CanvasKit failure explains it with no code at fault. What 3f
+ is owed first is a back-to-back, same-session re-run.
+ 
+ ---
+ 
+ ## Commands
+ 
+diff --git a/docs/superpowers/notes/plan-3e-mutation-log.md b/docs/superpowers/notes/plan-3e-mutation-log.md
+index 157c4d2..9a3a5ac 100644
+--- a/docs/superpowers/notes/plan-3e-mutation-log.md
++++ b/docs/superpowers/notes/plan-3e-mutation-log.md
+@@ -16,20 +16,28 @@ corpus fixture closed the gap Task 9 recorded. Task 15's forced-seam mutation
+ and its permanent regression test (`drawvertices_antialiasing_test.dart`) are
+ counted once, in Part 1.
+ 
+ | Category | Count |
+ |---|---|
+ | Killed, re-confirmed on today's tree | 52 |
+ | Equivalent mutants (proven, not fixture gaps) | 2 — T2c, T5d |
+ | Documented coverage gaps (real survivors, argued) | 2 — T9c, cross-task #4 |
+ | **Total accounted for** | **56** |
+ 
++**"56" counts verification runs, not 56 distinct code mutations.** Cross-task
++mutant #1 ("key the cache by `geomIndex`") is the *same* mutation as Task 3's
++own "keying" row — re-verified here against a larger call-site surface than
++Task 3 had, not a second, independent mutant. 55 distinct mutations, one of
++them (the keying mutant) verified twice, for 56 verification runs total. The
++overlap is disclosed above, not hidden; this line just says plainly what the
++headline number counts.
++
+ ---
+ 
+ ## Part 1 — Tasks 1–15's own mutants, re-run today
+ 
+ ### Task 1 — `EntityKind.fill`
+ 
+ | # | mutation | verdict | killed by |
+ |---|---|---|---|
+ | T1a | insert `fill` first in the enum instead of appending | **KILLED** | `fill is the last EntityKind, and its ordinal is stable` — `Expected: EntityKind.fill / Actual: EntityKind.attrib` |
+ 

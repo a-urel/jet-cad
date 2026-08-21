@@ -1,0 +1,477 @@
+# Review package: bd78f9b..a02c5a4
+
+## Commits
+a02c5a4 feat: a fill is drawn, not picked, in the index and the oracle
+
+## Files changed
+ .../jet_cad_2d/lib/src/index/container_index.dart  | 19 ++++++
+ .../jet_cad_2d/lib/src/index/spatial_index.dart    | 18 +++++
+ packages/jet_cad_2d/test/index/pick_test.dart      | 28 ++++++++
+ packages/jet_cad_2d/test/index/snap_test.dart      | 53 +++++++++++++++
+ packages/jet_cad_2d/test/invariants/corpus.dart    | 76 ++++++++++++++++++++++
+ .../test/invariants/reference_query.dart           | 24 ++++++-
+ 6 files changed, 216 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/index/container_index.dart b/packages/jet_cad_2d/lib/src/index/container_index.dart
+index 1f44cc3..f59a97b 100644
+--- a/packages/jet_cad_2d/lib/src/index/container_index.dart
++++ b/packages/jet_cad_2d/lib/src/index/container_index.dart
+@@ -817,20 +817,31 @@ class ContainerIndex {
+ }
+ 
+ /// The centre a leaf offers as a `SnapKind.center` snap candidate, in the
+ /// space [composed] maps its stored coordinates into — or null for a kind
+ /// that offers none.
+ ///
+ /// Arcs and circles only. Every other kind's snap candidates are corners,
+ /// midpoints and projections of geometry its own box already contains, so
+ /// there is nothing to index separately for them.
+ ///
++/// **A fill is one of those "every other kind"s, and deliberately not a
++/// special case.** Its `kind != circle && kind != arc` guard already
++/// answers null for it, for the same reason it answers null for a line or a
++/// polyline: a fill's boundary already contributes every vertex a snap
++/// could find on that shape, so a second candidate at the same point would
++/// not add a real choice -- it would only give the snap tie-break two
++/// entities to choose between where there was always meant to be one. If a
++/// later change gives a fill coordinates of its own, this guard starts
++/// answering for it too, and null remains the right answer for the same
++/// reason.
++///
+ /// Null, not a NaN pair, for a payload whose centre does not come out
+ /// finite: `PackedRTree.build` sorts by box centre, and a NaN would make
+ /// that comparison meaningless for every other item in the same tree.
+ (double, double)? snapCentreOfLeaf(
+   EntityKind kind,
+   GeometryPayload payload,
+   Transform2 composed,
+ ) {
+   if (kind != EntityKind.circle && kind != EntityKind.arc) return null;
+   if (payload.coords.length < 2) return null;
+@@ -943,20 +954,28 @@ class NarrowPhaseSlack {
+   /// it, so the two agree by construction rather than by re-derivation.
+   factory NarrowPhaseSlack.ofLeaf(
+     EntityKind kind,
+     GeometryPayload payload,
+     Transform2 composed,
+     Aabb2 box,
+   ) {
+     if (kind != EntityKind.circle && kind != EntityKind.arc) {
+       // Every other kind's narrow phase measures points, segments or the
+       // interior of a closed polyline, all of which the box contains.
++      //
++      // A fill falls through this same branch, and its zero is exact
++      // rather than approximate: it has no narrow phase of its own at
++      // all -- `_considerLeaf` and `_considerSnapLeaf` never reach a fill's
++      // kind dispatch, because its `pointCount` is zero. Its indexed box
++      // (derived from its boundary, see `entityBounds`) contains a query
++      // that will never actually run, so there is nothing for a margin to
++      // compensate for.
+       return none;
+     }
+     if (box.isEmpty || payload.scalars.isEmpty) return none;
+ 
+     // The radius the narrow phase will actually use, expressed in the box's
+     // own space: `scaleMagnitude` is exactly what `_considerLeaf` multiplies
+     // the stored radius by.
+     final rho = payload.scalars[0] * composed.scaleMagnitude;
+     if (!rho.isFinite) return none;
+ 
+diff --git a/packages/jet_cad_2d/lib/src/index/spatial_index.dart b/packages/jet_cad_2d/lib/src/index/spatial_index.dart
+index 896e108..8832640 100644
+--- a/packages/jet_cad_2d/lib/src/index/spatial_index.dart
++++ b/packages/jet_cad_2d/lib/src/index/spatial_index.dart
+@@ -993,20 +993,30 @@ class SpatialIndex {
+               worldSweep, _scratchB);
+           foundX = foot.x;
+           foundY = foot.y;
+         }
+ 
+       case EntityKind.fill:
+         // Unreachable: this method returns above when `count == 0`, and a
+         // fill's payload carries no coordinates. This case exists only so the
+         // switch stays exhaustive, so a future EntityKind still fails to
+         // compile here instead of falling through silently.
++        //
++        // That is the intended behaviour, not an oversight: a fill is drawn,
++        // not picked. Even if it did reach kind dispatch, it would always
++        // lose the tie-break below -- greater handle wins among equal kinds,
++        // and a fill's handle is strictly lower than its boundary's by
++        // construction (`AddRegionCommand.allocate` takes the fill's handle
++        // first) -- and the boundary already answers `HitKind.fill` on the
++        // same interior. If a later change gives a fill coordinates of its
++        // own, this guard starts answering for it, and `break` remains the
++        // right answer for the reasons above.
+         break;
+     }
+ 
+     if (foundKind == null) return;
+ 
+     final handle = document.entities.handleAt(slot);
+     // A root-level leaf's own handle stands in for its "root-level
+     // ancestor": it has no enclosing instance, and draw order among
+     // root-level things is exactly their own ascending handle order, so
+     // treating it as its own ancestor is what keeps this comparison
+@@ -1567,20 +1577,28 @@ class SpatialIndex {
+         if (!mask.has(SnapKind.insertion)) return;
+         final lx = coords[0], ly = coords[1];
+         _considerSnapCandidate(SnapKind.insertion, ta * lx + tc * ly + te,
+             tb * lx + td * ly + tf, world, radius, slot, depth, out);
+ 
+       case EntityKind.fill:
+         // Unreachable: this method returns above when `count == 0`, and a
+         // fill's payload carries no coordinates. This case exists only so the
+         // switch stays exhaustive, so a future EntityKind still fails to
+         // compile here instead of falling through silently.
++        //
++        // That is the intended behaviour, not an oversight: the fill's own
++        // boundary already contributes every vertex a snap could offer for
++        // this shape, so a second candidate at the same point would only
++        // give the tie-break two entities to choose between where there was
++        // always meant to be one. `snapCentreOfLeaf` and
++        // `NarrowPhaseSlack.ofLeaf` (`container_index.dart`) answer null and
++        // zero for a fill for the same reason.
+         break;
+     }
+   }
+ 
+   /// Offers one arc's or circle's centre as a [SnapKind.center] candidate.
+   ///
+   /// The counterpart of [_considerSnapLeaf] for the one snap kind that comes
+   /// from [ContainerIndex.searchSnapCentres] instead of from the leaf tree.
+   /// The world transform arrives as its six raw coefficients for the same
+   /// zero-allocation reason [_considerLeaf]'s doc comment gives, and the
+diff --git a/packages/jet_cad_2d/test/index/pick_test.dart b/packages/jet_cad_2d/test/index/pick_test.dart
+index e69dc8e..d655799 100644
+--- a/packages/jet_cad_2d/test/index/pick_test.dart
++++ b/packages/jet_cad_2d/test/index/pick_test.dart
+@@ -1,17 +1,19 @@
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:test/test.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
++import '../document/region_command_test.dart' show region;
++
+ /// A text entity with a real string, style and packed attributes — the three
+ /// things `addEntity` cannot carry.
+ ///
+ /// Separate helper rather than four more optional parameters on [addEntity]:
+ /// every text fixture below needs all three together, and a text entity with
+ /// a default style and `textAttrs: 0` is exactly the degenerate fixture the
+ /// tests at the bottom of this file exist to rule out.
+ Handle addText(
+   DraftDocument doc,
+   Handle owner, {
+@@ -1472,11 +1474,37 @@ void main() {
+         textStyle: style.handle,
+         coords: [0, 0],
+         scalars: [200, 0, 0, 0]);
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+ 
+     final hit = HitPath();
+     expect(index.pickInto(Vector2(0, 0), 5.0, const QueryFilter.picking(), hit),
+         isFalse);
+   });
++
++  test('clicking inside a filled room selects the boundary, not the fill', () {
++    // The spec's original claim -- "a fill answers HitKind.fill on its own
++    // handle" -- was withdrawn: `_considerLeaf` returns before any kind
++    // dispatch when `pointCount == 0`, and a fill has no coordinates, so it
++    // is never even a candidate. Even if it were, it would always lose the
++    // tie-break: pick priority is kind, then ancestor, then greater handle
++    // wins, and a fill's handle is strictly lower than its boundary's by
++    // construction (`AddRegionCommand.allocate` takes the fill's handle
++    // first). The boundary already answers `HitKind.fill` on its own
++    // interior, exactly as an unfilled closed polyline does today.
++    final doc = DraftDocument.empty();
++    final cmd = region(doc);
++    doc.commands.execute(cmd);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final hit = HitPath();
++    expect(index.pickInto(Vector2(5, 5), 0.5, const QueryFilter.all(), hit),
++        isTrue);
++    expect(hit.entity, cmd.boundary.handle,
++        reason: 'the fill carries the lower handle by construction and '
++            'would lose the tie-break anyway; the region tool maps the '
++            'boundary to the pair');
++    expect(hit.kind, HitKind.fill);
++  });
+ }
+diff --git a/packages/jet_cad_2d/test/index/snap_test.dart b/packages/jet_cad_2d/test/index/snap_test.dart
+index 012bdc9..9c6bed3 100644
+--- a/packages/jet_cad_2d/test/index/snap_test.dart
++++ b/packages/jet_cad_2d/test/index/snap_test.dart
+@@ -1,17 +1,19 @@
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:test/test.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
++import '../document/region_command_test.dart' show region;
++
+ Handle addEntity(DraftDocument doc, Handle owner, EntityKind kind,
+     List<double> coords, List<double> scalars) {
+   final handle = doc.handleSeed.next();
+   doc.commands.execute(AddEntityCommand(
+     record: EntityRecord(
+       handle: handle,
+       owner: owner,
+       kind: kind,
+       layer: ReservedHandles.layerZero,
+       linetype: ReservedHandles.byLayerLinetype,
+@@ -537,11 +539,62 @@ void main() {
+     final out = SnapResult();
+     index.snapInto(Vector2(0.2, 0.1), 0.5, SnapMask.cheap, out);
+     expect(out.found, isTrue,
+         reason: 'the broad phase must never be tighter than the region the '
+             'narrow phase tests, and the narrow phase offers this centre');
+     expect(out.kind, SnapKind.center);
+     expect(out.entity, arc);
+     expect(out.point.x, closeTo(0, 1e-9));
+     expect(out.point.y, closeTo(0, 1e-9));
+   });
++
++  test('a fill never wins a snap, so boundary vertices are not doubled', () {
++    // `snapCentreOfLeaf` and `NarrowPhaseSlack.ofLeaf` both use negative
++    // guards (`kind != circle && kind != arc`), not a switch with a
++    // default, so a fill already falls through both: no snap centre, and
++    // zero narrow-phase slack. Both are right for the same reason -- the
++    // fill's own boundary already contributes every vertex a snap could
++    // find, so a second candidate at the same point would only corrupt the
++    // tie-break, never add a real choice.
++    final doc = DraftDocument.empty();
++    final cmd = region(doc);
++    doc.commands.execute(cmd);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final out = SnapResult();
++    index.snapInto(Vector2(0, 0), 1.0, SnapMask.all, out);
++    expect(out.found, isTrue,
++        reason: "the boundary's own corner at the origin is still snappable");
++    expect(out.entity, isNot(cmd.fill.handle),
++        reason: 'the boundary already contributes every vertex; a second '
++            'candidate on the same point would corrupt the snap tie-break');
++    expect(out.entity, cmd.boundary.handle);
++  });
++
++  test(
++      'a fill manufactures no snap candidate of its own, even away from '
++      'every real vertex', () {
++    // The corner check above alone cannot catch `snapCentreOfLeaf` leaking
++    // an answer for a fill: at (0,0) the boundary's own SnapKind.endpoint
++    // candidate sits at the exact same point and always outranks a
++    // SnapKind.center candidate by kind priority, regardless of distance --
++    // so a corrupted centre would be silently masked there, the same
++    // "closer, higher-priority candidate" hazard `corpus.dart`'s
++    // `_nearMissIntersection` fixture documents. The room's interior, five
++    // units from every edge and vertex, has no real candidate within this
++    // query's radius at all, so nothing can mask a fill that manufactures
++    // one.
++    final doc = DraftDocument.empty();
++    final cmd = region(doc);
++    doc.commands.execute(cmd);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final out = SnapResult();
++    index.snapInto(Vector2(5, 5), 0.5, SnapMask.all, out);
++    expect(out.found, isFalse,
++        reason: 'no real snap feature is within reach of the room interior; '
++            'a hit here can only mean the fill supplied one it should not '
++            'have');
++  });
+ }
+diff --git a/packages/jet_cad_2d/test/invariants/corpus.dart b/packages/jet_cad_2d/test/invariants/corpus.dart
+index 6d2ae66..852cafe 100644
+--- a/packages/jet_cad_2d/test/invariants/corpus.dart
++++ b/packages/jet_cad_2d/test/invariants/corpus.dart
+@@ -827,20 +827,95 @@ CorpusDocument _textLaidOut() => CorpusDocument('textLaidOut', () {
+ /// perpendicular axes, leaving a genuinely samplable few-unit-square window
+ /// where a random trial can land -- confirmed against both this suite's
+ /// fixed seeds (20260730, 20260731) before being kept at these exact
+ /// coordinates.
+ ///
+ /// Each segment's near endpoint sits exactly 3.0 from the origin — past the
+ /// snap query's fixed `radius = 2.0` — so no endpoint, midpoint or
+ /// nearest/perpendicular candidate from either line is ever a competing
+ /// candidate near the origin; only the (illegitimate, clamp-dropped)
+ /// intersection candidate would be found there at all.
++/// A filled room at the root, plus a second one defined once and placed
++/// through a rotated, non-uniformly scaled instance.
++///
++/// **Not one of the task-16 brief's fifteen named rows** -- `EntityKind
++/// .fill` postdates that table. Added to close a mutation task-10 left
++/// deliberately surviving: with no fill entity anywhere in the corpus,
++/// `reference_query.dart`'s two `case EntityKind.fill:` branches (in
++/// `_hitAtOf` and `_snapCandidates`) were never exercised by the
++/// differential walk at all, so a mutant that made either one *produce* a
++/// hit or a snap candidate for a fill would have gone undetected -- not
++/// because the oracle disagreed with the index, but because neither side
++/// was ever asked.
++///
++/// **Deliberately not at the identity transform.** The second room sits
++/// inside an instance that is both rotated and non-uniformly scaled, so the
++/// fill leaf the differential walk visits there is reached through a
++/// genuinely composed transform, matching this suite's general rule against
++/// fixtures that only ever exercise the identity case.
++///
++/// A plain, unfilled line sits nearby so this fixture also gives the random
++/// trials something ordinary to hit next to a fill that contributes
++/// nothing, rather than a room floating alone in empty space.
++CorpusDocument _regionFill() => CorpusDocument('regionFill', () {
++      final doc = DraftDocument.empty();
++
++      final room = AddRegionCommand.allocate(
++        seed: doc.handleSeed,
++        owner: doc.rootHandle,
++        boundaryKind: EntityKind.polyline,
++        boundaryPayload: GeometryPayload(
++          coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
++          scalars: Float64List(0),
++        ),
++        layer: ReservedHandles.layerZero,
++        fillColor: const TrueColor(0x3366CC),
++        boundaryColor: const TrueColor(0x000000),
++      );
++      doc.commands.execute(room);
++      expect(room.fill.handle.value, lessThan(room.boundary.handle.value),
++          reason: 'draw order is ascending handle value; the fill must '
++              'carry the lower handle by construction');
++
++      final def = _addDefinition(doc, name: 'Room');
++      final defRoom = AddRegionCommand.allocate(
++        seed: doc.handleSeed,
++        owner: def,
++        boundaryKind: EntityKind.polyline,
++        boundaryPayload: GeometryPayload(
++          coords: Float64List.fromList([0, 0, 6, 0, 6, 4, 0, 4, 0, 0]),
++          scalars: Float64List(0),
++        ),
++        layer: ReservedHandles.layerZero,
++        fillColor: const TrueColor(0x99CC33),
++        boundaryColor: const TrueColor(0x000000),
++      );
++      doc.commands.execute(defRoom);
++      final inst = _addInstance(doc,
++          parent: doc.rootHandle,
++          definition: def,
++          transform: Transform2.rotation(0.6)
++              .multiply(Transform2.scale(1.8, 0.7))
++              .multiply(Transform2.translation(30, -5)));
++      expect(doc.tree.nodes.map((n) => n.handle), contains(inst));
++      expect(doc.fills.fillsOf(defRoom.boundary.handle), [defRoom.fill.handle],
++          reason: 'the fill under the instance is still linked to its own '
++              'boundary, not the root room');
++
++      _addEntity(doc,
++          owner: doc.rootHandle,
++          kind: EntityKind.line,
++          coords: [-5, -5, -1, -5]);
++
++      return doc;
++    });
++
+ CorpusDocument _nearMissIntersection() =>
+     CorpusDocument('nearMissIntersection', () {
+       final doc = DraftDocument.empty();
+       // Horizontal: y = 0, x from 3 to 10 -- does not reach x = 0.
+       final a = _addEntity(doc,
+           owner: doc.rootHandle, kind: EntityKind.line, coords: [3, 0, 6, 0]);
+       // Vertical: x = 0, y from 3 to 10 -- does not reach y = 0.
+       final b = _addEntity(doc,
+           owner: doc.rootHandle, kind: EntityKind.line, coords: [0, 3, 0, 6]);
+ 
+@@ -897,12 +972,13 @@ List<CorpusDocument> buildCorpus() => [
+       _rotated(),
+       _largeCoordinates(),
+       _sharedDefinition(),
+       _definitionGrownAfterBuild(),
+       _dirtyUnderThreshold(),
+       _dirtyOverThreshold(),
+       _afterPurge(),
+       _afterUndoReusingSlot(),
+       _textDefaultMeasurer(),
+       _textLaidOut(),
++      _regionFill(),
+       _nearMissIntersection(),
+     ];
+diff --git a/packages/jet_cad_2d/test/invariants/reference_query.dart b/packages/jet_cad_2d/test/invariants/reference_query.dart
+index 7a47eca..5e29817 100644
+--- a/packages/jet_cad_2d/test/invariants/reference_query.dart
++++ b/packages/jet_cad_2d/test/invariants/reference_query.dart
+@@ -547,21 +547,32 @@ List<Handle> referenceInstancesInRect(
+       final d = distanceToArc(
+           world, centre, worldRadius, worldStartAngle, worldSweep);
+       if (d > radius) return null;
+       return (
+         kind: HitKind.edge,
+         point: _footOnWorldArc(
+             world, centre, worldRadius, worldStartAngle, worldSweep),
+       );
+ 
+     case EntityKind.fill:
+-      // A fill produces no hit and no snap candidate.
++      // Unreachable: this function returns above when `count == 0`, and a
++      // fill's payload carries no coordinates -- mirroring
++      // `SpatialIndex._considerLeaf`'s own dead branch of the same shape.
++      // This case exists only so the switch stays exhaustive.
++      //
++      // Even reachable, a fill could never win: pick priority is kind, then
++      // ancestor, then greater handle, and a fill's handle is strictly
++      // lower than its boundary's by construction
++      // (`AddRegionCommand.allocate` takes the fill's handle first). A
++      // closed polyline boundary already answers `HitKind.fill` on its own
++      // interior, so clicking inside a filled room selects the boundary,
++      // not the fill -- the pair the region tool maps either half back to.
+       return null;
+   }
+ }
+ 
+ /// The point of `[a], [b]` nearest [world], clamped to the segment.
+ ///
+ /// Written out rather than calling `projectOntoSegment`: that function is
+ /// what the implementation itself uses for its `nearest`/`perpendicular`
+ /// snap candidates, and a pick's edge point has to be derived here from the
+ /// definition of "closest point on a segment", not from the same code.
+@@ -794,21 +805,30 @@ List<(SnapKind, Vector2)> _snapCandidates(
+             add(SnapKind.tangent, tb);
+           }
+         }
+       }
+ 
+     case EntityKind.text:
+     case EntityKind.attrib:
+       add(SnapKind.insertion, toWorld.transformPoint(payload.pointAt(0)));
+ 
+     case EntityKind.fill:
+-      // A fill produces no hit and no snap candidate.
++      // Unreachable: this function returns above when `count == 0`, and a
++      // fill's payload carries no coordinates -- mirroring
++      // `SpatialIndex._considerSnapLeaf`'s own dead branch of the same
++      // shape. This case exists only so the switch stays exhaustive.
++      //
++      // Even reachable, a fill would add nothing real: its boundary already
++      // contributes every vertex a snap could find on that shape, so a
++      // second candidate at the same point would only give the tie-break
++      // two entities to choose between where there was always meant to be
++      // one.
+       break;
+   }
+ 
+   return out;
+ }
+ 
+ /// The point on a world-space circle's rim nearest [world]. Null when
+ /// [world] sits exactly on [centre], the sibling of
+ /// `SpatialIndex._footOnRim`'s own null case.
+ Vector2? _footOnRim(Vector2 world, Vector2 centre, double worldRadius) {

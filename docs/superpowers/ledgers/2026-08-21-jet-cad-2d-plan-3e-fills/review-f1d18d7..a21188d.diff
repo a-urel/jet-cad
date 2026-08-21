@@ -1,0 +1,391 @@
+# Review package: f1d18d7..a21188d
+
+## Commits
+a21188d feat: FillIndex, keyed by handle so purge cannot permute it
+
+## Files changed
+ packages/jet_cad_2d/lib/jet_cad_2d.dart            |  1 +
+ packages/jet_cad_2d/lib/src/document/command.dart  |  6 ++
+ .../lib/src/document/draft_document.dart           |  7 ++
+ .../jet_cad_2d/lib/src/document/fill_index.dart    | 71 +++++++++++++++++
+ .../jet_cad_2d/test/document/command_test.dart     |  2 +
+ .../jet_cad_2d/test/document/commands_test.dart    |  2 +
+ .../jet_cad_2d/test/document/fill_index_test.dart  | 90 ++++++++++++++++++++++
+ 7 files changed, 179 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/jet_cad_2d.dart b/packages/jet_cad_2d/lib/jet_cad_2d.dart
+index fdcd3f0..9d4c81d 100644
+--- a/packages/jet_cad_2d/lib/jet_cad_2d.dart
++++ b/packages/jet_cad_2d/lib/jet_cad_2d.dart
+@@ -10,20 +10,21 @@ export 'src/codec/schema_version.dart';
+ export 'src/core/diagnostic.dart';
+ export 'src/core/handle.dart';
+ export 'src/core/list_equality.dart';
+ export 'src/core/tolerance.dart';
+ export 'src/document/command.dart';
+ export 'src/document/commands.dart';
+ export 'src/document/component.dart';
+ export 'src/document/doc_change.dart';
+ export 'src/document/draft_document.dart';
+ export 'src/document/extents.dart';
++export 'src/document/fill_index.dart';
+ export 'src/document/header.dart';
+ export 'src/document/node.dart';
+ export 'src/document/origin_component.dart';
+ export 'src/document/raw_data.dart';
+ export 'src/document/resolved_style.dart';
+ export 'src/document/style.dart';
+ export 'src/document/style_context.dart';
+ export 'src/document/style_resolver.dart';
+ export 'src/document/tables.dart';
+ export 'src/document/text_geometry.dart';
+diff --git a/packages/jet_cad_2d/lib/src/document/command.dart b/packages/jet_cad_2d/lib/src/document/command.dart
+index f33e9aa..2bac05b 100644
+--- a/packages/jet_cad_2d/lib/src/document/command.dart
++++ b/packages/jet_cad_2d/lib/src/document/command.dart
+@@ -1,16 +1,17 @@
+ import 'package:meta/meta.dart';
+ 
+ import '../core/handle.dart';
+ import '../store/entity_store.dart';
+ import '../store/geometry_store.dart';
+ import 'component.dart';
++import 'fill_index.dart';
+ import 'tables.dart';
+ import 'tree.dart';
+ 
+ /// What a command is allowed to change.
+ ///
+ /// The split is only possible because leaves carry no transform: moving an
+ /// instance and editing geometry are already distinct operations.
+ enum Capability {
+   /// Move or rotate an instance or group.
+   transform,
+@@ -75,20 +76,25 @@ class PermissionDeniedError implements Exception {
+ /// against. That lets this task be tested against a small fake, and it
+ /// states exactly what a command is allowed to touch.
+ abstract class CommandTarget {
+   EntityStore get entities;
+   GeometryStore get geometry;
+   DocumentTree get tree;
+   DocumentTables get tables;
+   ComponentRegistry get components;
+   HandleSeed get handleSeed;
+ 
++  /// The fill cache and the boundary->fills map. A command that changes a
++  /// boundary's geometry or removes one must keep this current; see
++  /// `SetEntityGeometryCommand` and `RemoveEntityCommand`.
++  FillIndex get fills;
++
+   /// Marks derived state stale: working extents, cached world transforms, and
+   /// any index built over the stores. Derived state is never persisted, so this
+   /// is the only bookkeeping a mutation owes it.
+   void invalidateDerived();
+ }
+ 
+ @immutable
+ class CommandResult {
+   final DraftCommand inverse;
+   final Set<Handle> touched;
+diff --git a/packages/jet_cad_2d/lib/src/document/draft_document.dart b/packages/jet_cad_2d/lib/src/document/draft_document.dart
+index 84926fb..76281d8 100644
+--- a/packages/jet_cad_2d/lib/src/document/draft_document.dart
++++ b/packages/jet_cad_2d/lib/src/document/draft_document.dart
+@@ -2,20 +2,21 @@ import 'dart:async';
+ 
+ import '../core/handle.dart';
+ import '../geometry/aabb2.dart';
+ import '../geometry/transform2.dart';
+ import '../store/entity_store.dart';
+ import '../store/geometry_store.dart';
+ import 'command.dart';
+ import 'component.dart';
+ import 'doc_change.dart';
+ import 'extents.dart';
++import 'fill_index.dart';
+ import 'header.dart';
+ import 'node.dart';
+ import 'raw_data.dart';
+ import 'style.dart';
+ import 'tables.dart';
+ import 'text_metrics.dart';
+ import 'tree.dart';
+ import 'undo.dart';
+ 
+ /// The 2D CAD document.
+@@ -30,20 +31,23 @@ class DraftDocument implements CommandTarget {
+   final GeometryStore geometry;
+   @override
+   final DocumentTables tables;
+   @override
+   final ComponentRegistry components;
+   @override
+   final HandleSeed handleSeed;
+   @override
+   final DocumentTree tree;
+ 
++  @override
++  final FillIndex fills = FillIndex();
++
+   final DocumentHeader header;
+   final RawDataStore rawData;
+ 
+   /// Top-level document fields written by a newer version of this package.
+   ///
+   /// Preserved verbatim and written back unchanged: no layer discards data it
+   /// does not understand, and a document edited by an older build must not lose
+   /// what a newer one wrote.
+   final Map<String, Object?> unknownDocumentFields = {};
+ 
+@@ -191,20 +195,23 @@ class DraftDocument implements CommandTarget {
+     }
+     final geometryRemap = geometry.purge();
+     for (final slot in entities.liveSlots.toList()) {
+       final record = entities.read(slot);
+       final moved = geometryRemap[record.geomIndex];
+       if (moved >= 0 && moved != record.geomIndex) {
+         entities.replace(slot, record.copyWith(geomIndex: moved));
+       }
+     }
+     entities.purge();
++    // `fills` is deliberately untouched. It is keyed by handle, and purge
++    // renumbers slots, not handles. Adding an invalidation here would be
++    // correct-looking and wrong: it would throw away work nothing invalidated.
+     invalidateDerived();
+     commands.notifyPurged();
+   }
+ 
+   Future<void> dispose() => commands.dispose();
+ 
+   Aabb2 _computeExtents() => _boundsOfContainer(
+       tree.root, <Handle>{}, <Handle, Aabb2>{}, leavesByOwner());
+ 
+   /// Every live entity slot bucketed by its owner, ascending within a bucket.
+diff --git a/packages/jet_cad_2d/lib/src/document/fill_index.dart b/packages/jet_cad_2d/lib/src/document/fill_index.dart
+new file mode 100644
+index 0000000..a0c42a9
+--- /dev/null
++++ b/packages/jet_cad_2d/lib/src/document/fill_index.dart
+@@ -0,0 +1,71 @@
++import 'dart:typed_data';
++
++import '../core/handle.dart';
++
++/// Derived state for fills: one triangulation per boundary, and the reverse
++/// map from a boundary to the fills that name it.
++///
++/// **Keyed by `Handle`, never by `geomIndex`.** `DraftDocument.purge()`
++/// renumbers every `geomIndex` from a remap table, so a slot-keyed cache does
++/// not go stale across a purge -- it goes *permuted*, every surviving entry
++/// attached to the wrong entity at once. Handles are never reissued
++/// (`HandleSeed.next` only increments) and `RemoveEntityCommand`'s inverse
++/// restores the same handle, so a stale entry here can only ever be an entry
++/// nobody reads. The failure mode is a leak, not a lie.
++///
++/// **Never populated on the frame path.** Commands and the codec fill it; the
++/// painter only reads. [trianglesFor] returns the stored list itself rather
++/// than a copy, because the alternative allocates once per fill per frame.
++///
++/// Both halves live in one object because the same three commands write both
++/// and the same moments invalidate both.
++class FillIndex {
++  final Map<Handle, Int32List> _triangles = {};
++  final Map<Handle, Handle> _boundaryOfFill = {};
++
++  Int32List? trianglesFor(Handle boundary) => _triangles[boundary];
++
++  void putTriangles(Handle boundary, Int32List triangles) {
++    _triangles[boundary] = triangles;
++  }
++
++  void link(Handle fill, Handle boundary) {
++    _boundaryOfFill[fill] = boundary;
++  }
++
++  void unlink(Handle fill) {
++    _boundaryOfFill.remove(fill);
++  }
++
++  /// Every fill naming [boundary], in ascending handle order.
++  ///
++  /// Ordered because callers put these into a command's `touched` set and into
++  /// removal cascades, and this project's determinism rests on stable orders.
++  List<Handle> fillsOf(Handle boundary) {
++    final out = <Handle>[
++      for (final e in _boundaryOfFill.entries)
++        if (e.value == boundary) e.key,
++    ];
++    out.sort((a, b) => a.value.compareTo(b.value));
++    return out;
++  }
++
++  /// Triangles only; links stay. Callers that only invalidate a boundary's
++  /// geometry (not its removal) must not sever fills from it.
++  void dropTriangles(Handle boundary) {
++    _triangles.remove(boundary);
++  }
++
++  void dropBoundary(Handle boundary) {
++    _triangles.remove(boundary);
++    _boundaryOfFill.removeWhere((_, b) => b == boundary);
++  }
++
++  void clear() {
++    _triangles.clear();
++    _boundaryOfFill.clear();
++  }
++
++  int get entryCount => _triangles.length;
++  int get linkCount => _boundaryOfFill.length;
++}
+diff --git a/packages/jet_cad_2d/test/document/command_test.dart b/packages/jet_cad_2d/test/document/command_test.dart
+index 4aa48b5..d0a1a8b 100644
+--- a/packages/jet_cad_2d/test/document/command_test.dart
++++ b/packages/jet_cad_2d/test/document/command_test.dart
+@@ -17,20 +17,22 @@ class FakeTarget implements CommandTarget {
+   final HandleSeed handleSeed = HandleSeed(ReservedHandles.firstFree);
+   @override
+   late final DocumentTree tree = DocumentTree(
+     rootNode: GroupNode(
+       handle: handleSeed.next(),
+       parent: Handle.none,
+       transform: Transform2.identity(),
+       children: const [],
+     ),
+   );
++  @override
++  final FillIndex fills = FillIndex();
+ 
+   int invalidations = 0;
+   @override
+   void invalidateDerived() => invalidations++;
+ }
+ 
+ /// A command that only records that it ran, so the dispatcher can be tested
+ /// without depending on any concrete command.
+ class CounterCommand extends DraftCommand {
+   static int applied = 0;
+diff --git a/packages/jet_cad_2d/test/document/commands_test.dart b/packages/jet_cad_2d/test/document/commands_test.dart
+index e1b451b..1e42920 100644
+--- a/packages/jet_cad_2d/test/document/commands_test.dart
++++ b/packages/jet_cad_2d/test/document/commands_test.dart
+@@ -19,20 +19,22 @@ class TestTarget implements CommandTarget {
+   @override
+   late final DocumentTree tree = DocumentTree(
+     rootNode: GroupNode(
+       handle: rootHandle,
+       parent: Handle.none,
+       transform: Transform2.identity(),
+       children: const [],
+     ),
+   );
+   @override
++  final FillIndex fills = FillIndex();
++  @override
+   void invalidateDerived() {}
+ }
+ 
+ GeometryPayload line(double x1, double y1, double x2, double y2) =>
+     GeometryPayload(
+       coords: Float64List.fromList([x1, y1, x2, y2]),
+       scalars: Float64List(0),
+     );
+ 
+ EntityRecord recordFor(Handle handle, Handle owner) => EntityRecord(
+diff --git a/packages/jet_cad_2d/test/document/fill_index_test.dart b/packages/jet_cad_2d/test/document/fill_index_test.dart
+new file mode 100644
+index 0000000..a3ed765
+--- /dev/null
++++ b/packages/jet_cad_2d/test/document/fill_index_test.dart
+@@ -0,0 +1,90 @@
++import 'dart:typed_data';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++
++void main() {
++  test('triangles round-trip by boundary handle', () {
++    final ix = FillIndex();
++    expect(ix.trianglesFor(const Handle(20)), isNull);
++    ix.putTriangles(const Handle(20), Int32List.fromList([0, 1, 2]));
++    expect(ix.trianglesFor(const Handle(20)), [0, 1, 2]);
++    expect(ix.entryCount, 1);
++  });
++
++  test('a hit returns the stored list itself, not a copy', () {
++    // The frame path reads this per fill per frame. A defensive copy here
++    // would allocate per entity and break the global constraint.
++    final ix = FillIndex();
++    final stored = Int32List.fromList([0, 1, 2]);
++    ix.putTriangles(const Handle(20), stored);
++    expect(identical(ix.trianglesFor(const Handle(20)), stored), isTrue);
++  });
++
++  test('fillsOf returns every fill naming a boundary, in handle order', () {
++    final ix = FillIndex();
++    ix.link(const Handle(31), const Handle(40));
++    ix.link(const Handle(19), const Handle(40));
++    ix.link(const Handle(22), const Handle(41));
++    expect(ix.fillsOf(const Handle(40)), [const Handle(19), const Handle(31)]);
++    expect(ix.fillsOf(const Handle(41)), [const Handle(22)]);
++    expect(ix.fillsOf(const Handle(99)), isEmpty);
++  });
++
++  test('dropBoundary removes the triangles and every link naming it', () {
++    final ix = FillIndex();
++    ix.putTriangles(const Handle(40), Int32List.fromList([0, 1, 2]));
++    ix.link(const Handle(19), const Handle(40));
++    ix.link(const Handle(31), const Handle(40));
++    ix.dropBoundary(const Handle(40));
++    expect(ix.trianglesFor(const Handle(40)), isNull);
++    expect(ix.fillsOf(const Handle(40)), isEmpty);
++    expect(ix.entryCount, 0);
++    expect(ix.linkCount, 0,
++        reason: 'a link left behind after its boundary died is the leak the '
++            'handle key was chosen to make harmless -- but it is still a leak');
++  });
++
++  test('unlink removes one fill and leaves its siblings', () {
++    final ix = FillIndex();
++    ix.link(const Handle(19), const Handle(40));
++    ix.link(const Handle(31), const Handle(40));
++    ix.unlink(const Handle(19));
++    expect(ix.fillsOf(const Handle(40)), [const Handle(31)]);
++  });
++
++  test('the index survives a purge because handles do', () {
++    // The purge test that a geomIndex-keyed cache cannot pass. Two entities,
++    // one removed, then purge -- which renumbers every geomIndex and leaves
++    // every handle alone.
++    final doc = DraftDocument.empty();
++    final a = doc.handleSeed.next();
++    final b = doc.handleSeed.next();
++    for (final h in [a, b]) {
++      doc.commands.execute(AddEntityCommand(
++        record: EntityRecord(
++          handle: h,
++          owner: doc.rootHandle,
++          kind: EntityKind.polyline,
++          layer: ReservedHandles.layerZero,
++          linetype: ReservedHandles.continuousLinetype,
++          linetypeScale: 1.0,
++          geomIndex: 0,
++          color: const TrueColor(0x000000),
++          lineweight: 30,
++          transparency: 0,
++          flags: 0,
++        ),
++        payload: GeometryPayload(
++            coords: Float64List.fromList(
++                h == a ? [0, 0, 1, 0, 1, 1, 0, 0] : [5, 5, 6, 5, 6, 6, 5, 5]),
++            scalars: Float64List(0)),
++      ));
++    }
++    doc.fills.putTriangles(b, Int32List.fromList([0, 1, 2]));
++    doc.commands.execute(RemoveEntityCommand(a));
++    doc.purge();
++    expect(doc.fills.trianglesFor(b), [0, 1, 2],
++        reason: 'purge renumbers every geomIndex and touches no handle, so a '
++            'handle-keyed entry is still attached to the same entity');
++  });
++}

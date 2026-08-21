@@ -1,0 +1,566 @@
+# Review package: a02c5a4..a9891a9
+
+## Commits
+a9891a9 feat: DrawSink.fillPolygon and fillCircle
+
+## Files changed
+ .../lib/src/canvas_draw_sink.dart                  |  32 ++++++
+ packages/jet_cad_2d_flutter/lib/src/draw_sink.dart |  98 +++++++++++++++++
+ .../lib/src/vertices_draw_sink.dart                |  17 +++
+ .../jet_cad_2d_flutter/test/draw_sink_test.dart    | 120 ++++++++++++++++++++-
+ .../jet_cad_2d_flutter/test/rig/rig_support.dart   |   5 +
+ .../test/support/differential.dart                 |  13 +++
+ .../test/support/vertices_differential.dart        |   5 +
+ 7 files changed, 289 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart b/packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart
+index 7aaf3d6..9d18b03 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/canvas_draw_sink.dart
+@@ -161,20 +161,52 @@ class CanvasDrawSink implements DrawSink {
+ 
+   @override
+   void arc(double cx, double cy, double r, double start, double sweep,
+       ResolvedStyle style) {
+     _pushTransform();
+     canvas.drawArc(Rect.fromCircle(center: Offset(cx, cy), radius: r), start,
+         sweep, false, _paintFor(style));
+     _canvasCalls++;
+   }
+ 
++  @override
++  void fillPolygon(
++      Float64List points, int count, Int32List triangles, ResolvedStyle style) {
++    if (count < 3) return;
++    _pushTransform();
++    _scratch.reset();
++    _scratch.moveTo(points[0], points[1]);
++    for (var i = 1; i < count; i++) {
++      _scratch.lineTo(points[i * 2], points[i * 2 + 1]);
++    }
++    _scratch.close();
++    _paint
++      ..color = Color(style.argb)
++      ..style = PaintingStyle.fill;
++    canvas.drawPath(_scratch, _paint);
++    // Restored for the same reason `point` restores it: one Paint is reused
++    // for the whole frame, and a stroke drawn after this must not be filled.
++    _paint.style = PaintingStyle.stroke;
++    _canvasCalls++;
++  }
++
++  @override
++  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {
++    _pushTransform();
++    _paint
++      ..color = Color(style.argb)
++      ..style = PaintingStyle.fill;
++    canvas.drawCircle(Offset(cx, cy), r, _paint);
++    _paint.style = PaintingStyle.stroke;
++    _canvasCalls++;
++  }
++
+   @override
+   void text(String text, Handle style, ResolvedStyle resolved) {
+     _pushTransform();
+     final paragraph =
+         measurer.paragraphFor(text, style, textStyleOf(style), resolved.argb);
+     // Two coordinate systems meet here, and only one of them is `dart:ui`'s.
+     // `drawParagraph` lays glyphs out with y increasing *downward* from the
+     // top of the first line; the residual maps *glyph* space — y up, origin
+     // on the baseline — because that is the space `textLocalBounds`, and so
+     // `entityBounds`, is expressed in, and the camera has already flipped y
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draw_sink.dart b/packages/jet_cad_2d_flutter/lib/src/draw_sink.dart
+index 39d551e..d2e2eed 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/draw_sink.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/draw_sink.dart
+@@ -21,20 +21,43 @@ abstract class DrawSink {
+   /// extension type over `int`, so carrying it costs nothing at runtime.
+   void beginResidual(Transform2 residual, {Handle debugHandle});
+   void endResidual();
+   void point(double x, double y, ResolvedStyle style);
+   void polyline(Float64List points, int count, ResolvedStyle style,
+       {required bool closed});
+   void circle(double cx, double cy, double r, ResolvedStyle style);
+   void arc(double cx, double cy, double r, double start, double sweep,
+       ResolvedStyle style);
+ 
++  /// Fills a closed loop.
++  ///
++  /// [points] is the boundary's loop in this residual's local space, [count]
++  /// its point count including the duplicated closing point. [triangles] is
++  /// the loop's triangulation as triple-indices into [points]' point
++  /// numbering -- computed once, off the frame path, and passed through
++  /// because a sink must not reach into the document to get it.
++  ///
++  /// A sink that fills paths natively ignores [triangles]; a sink that batches
++  /// geometry needs them. Both receive the same call, which is what keeps
++  /// [RecordingDrawSink] equality meaningful.
++  ///
++  /// The painter never calls this with an empty [triangles]: an unfillable
++  /// boundary is skipped and counted before it reaches a sink. See
++  /// `DraftPainter.skippedFillCount`.
++  void fillPolygon(
++      Float64List points, int count, Int32List triangles, ResolvedStyle style);
++
++  /// Fills a circle. Never triangulated ahead of time: a circle's
++  /// tessellation is scale-dependent, so a batching sink fans it per frame at
++  /// the step count its own stroke would use.
++  void fillCircle(double cx, double cy, double r, ResolvedStyle style);
++
+   /// Draws [text] at the residual's local origin.
+   ///
+   /// No offset and no second matrix: the painter pushes `residual ∘
+   /// textLocal` as the residual itself, so by the time this is called the
+   /// text's own placement is already folded in.
+   void text(String text, Handle style, ResolvedStyle resolved);
+ }
+ 
+ /// One recorded call. Compared by value, so two painters that agree produce
+ /// two equal op lists.
+@@ -179,20 +202,74 @@ final class ArcOp extends DrawOp {
+       other.sweep == sweep &&
+       other.style == style;
+ 
+   @override
+   int get hashCode => Object.hash(cx, cy, r, start, sweep, style);
+ 
+   @override
+   String toString() => 'ArcOp($cx, $cy, $r, $start, $sweep)';
+ }
+ 
++@immutable
++final class FillPolygonOp extends DrawOp {
++  const FillPolygonOp(this.points, this.triangles, this.style);
++
++  /// Flat `[x0, y0, x1, y1, ...]`, already trimmed to the drawn point count.
++  final List<double> points;
++
++  /// Triple-indices into [points]' point numbering. Part of `==`: a painter
++  /// that hands one sink a stale triangulation and the other a fresh one must
++  /// produce two op lists the oracle sees as different, not two lists that
++  /// happen to compare equal because only the boundary was checked.
++  final List<int> triangles;
++
++  final ResolvedStyle style;
++
++  @override
++  bool operator ==(Object other) =>
++      other is FillPolygonOp &&
++      other.style == style &&
++      listEquals(other.points, points) &&
++      listEquals(other.triangles, triangles);
++
++  @override
++  int get hashCode =>
++      Object.hash(Object.hashAll(points), Object.hashAll(triangles), style);
++
++  @override
++  String toString() => 'FillPolygonOp($points, $triangles)';
++}
++
++@immutable
++final class FillCircleOp extends DrawOp {
++  const FillCircleOp(this.cx, this.cy, this.r, this.style);
++
++  final double cx;
++  final double cy;
++  final double r;
++  final ResolvedStyle style;
++
++  @override
++  bool operator ==(Object other) =>
++      other is FillCircleOp &&
++      other.cx == cx &&
++      other.cy == cy &&
++      other.r == r &&
++      other.style == style;
++
++  @override
++  int get hashCode => Object.hash(cx, cy, r, style);
++
++  @override
++  String toString() => 'FillCircleOp($cx, $cy, $r)';
++}
++
+ @immutable
+ final class TextOp extends DrawOp {
+   const TextOp(this.text, this.style, this.resolved);
+ 
+   final String text;
+   final Handle style;
+   final ResolvedStyle resolved;
+ 
+   @override
+   bool operator ==(Object other) =>
+@@ -236,20 +313,32 @@ class RecordingDrawSink implements DrawSink {
+ 
+   @override
+   void circle(double cx, double cy, double r, ResolvedStyle style) =>
+       _ops.add(CircleOp(cx, cy, r, style));
+ 
+   @override
+   void arc(double cx, double cy, double r, double start, double sweep,
+           ResolvedStyle style) =>
+       _ops.add(ArcOp(cx, cy, r, start, sweep, style));
+ 
++  @override
++  void fillPolygon(Float64List points, int count, Int32List triangles,
++          ResolvedStyle style) =>
++      // Copied, not retained, same reason as `polyline`: the painter reuses
++      // one scratch buffer per depth.
++      _ops.add(FillPolygonOp(
++          points.sublist(0, count * 2), triangles.toList(), style));
++
++  @override
++  void fillCircle(double cx, double cy, double r, ResolvedStyle style) =>
++      _ops.add(FillCircleOp(cx, cy, r, style));
++
+   @override
+   void text(String text, Handle style, ResolvedStyle resolved) =>
+       _ops.add(TextOp(text, style, resolved));
+ }
+ 
+ /// Counts ops and keeps none, so a measurement rig can time the walk without
+ /// timing the rasteriser.
+ class NullDrawSink implements DrawSink {
+   int opCount = 0;
+ 
+@@ -269,13 +358,22 @@ class NullDrawSink implements DrawSink {
+       opCount++;
+ 
+   @override
+   void circle(double cx, double cy, double r, ResolvedStyle style) => opCount++;
+ 
+   @override
+   void arc(double cx, double cy, double r, double start, double sweep,
+           ResolvedStyle style) =>
+       opCount++;
+ 
++  @override
++  void fillPolygon(Float64List points, int count, Int32List triangles,
++          ResolvedStyle style) =>
++      opCount++;
++
++  @override
++  void fillCircle(double cx, double cy, double r, ResolvedStyle style) =>
++      opCount++;
++
+   @override
+   void text(String text, Handle style, ResolvedStyle resolved) => opCount++;
+ }
+diff --git a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+index a627dc3..0cea43b 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+@@ -703,11 +703,28 @@ class VerticesDrawSink implements DrawSink {
+       _runTo(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f, half, argb);
+     }
+     _endRun(closed: closed, half: half, argb: argb);
+   }
+ 
+   @override
+   void text(String text, Handle style, ResolvedStyle resolved) {
+     _flushBeforeUnbatchable();
+     _fallback?.text(text, style, resolved);
+   }
++
++  // TODO(Task 12): batch fills into the same buffer as strokes, using
++  // [triangles] directly instead of falling back. Until then a fill is
++  // unbatched, exactly like text: flush what is pending so draw order is
++  // preserved, then hand it to the fallback.
++  @override
++  void fillPolygon(
++      Float64List points, int count, Int32List triangles, ResolvedStyle style) {
++    _flushBeforeUnbatchable();
++    _fallback?.fillPolygon(points, count, triangles, style);
++  }
++
++  @override
++  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {
++    _flushBeforeUnbatchable();
++    _fallback?.fillCircle(cx, cy, r, style);
++  }
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/draw_sink_test.dart b/packages/jet_cad_2d_flutter/test/draw_sink_test.dart
+index bdac020..7d97134 100644
+--- a/packages/jet_cad_2d_flutter/test/draw_sink_test.dart
++++ b/packages/jet_cad_2d_flutter/test/draw_sink_test.dart
+@@ -21,20 +21,25 @@ const TextStyleRecord _standard =
+ 
+ const ResolvedStyle _resolved = ResolvedStyle(
+   argb: 0xFF00FFAA,
+   lineweightHundredths: 18,
+   linetype: ReservedHandles.continuousLinetype,
+   linetypeScale: 1.0,
+ );
+ 
+ Vector2 _v(double x, double y) => Vector2(x, y);
+ 
++// A unit square, closing point duplicated, and one of its triangulations.
++final Float64List _square =
++    Float64List.fromList([0, 0, 1, 0, 1, 1, 0, 1, 0, 0]);
++final Int32List _triangles = Int32List.fromList([0, 1, 2, 0, 2, 3]);
++
+ void main() {
+   group('RecordingDrawSink', () {
+     test('captures ops in order with residual-local points', () {
+       final sink = RecordingDrawSink();
+       final residual = Transform2.translation(3, 4);
+ 
+       sink
+         ..beginResidual(residual)
+         ..polyline(Float64List.fromList([0, 0, 1, 1]), 2, _anyStyle,
+             closed: false)
+@@ -120,34 +125,87 @@ void main() {
+       expect(const TextOp('WC', Handle(7), _resolved),
+           isNot(const TextOp('XX', Handle(7), _resolved)),
+           reason: 'different text is a different op');
+       expect(const TextOp('WC', Handle(7), _resolved),
+           isNot(const TextOp('WC', Handle(8), _resolved)),
+           reason: 'a different style handle is a different op');
+       expect(const TextOp('WC', Handle(7), _resolved),
+           isNot(const TextOp('WC', Handle(7), _anyStyle)),
+           reason: 'a different resolved style is a different op');
+     });
++
++    test('two recordings of the same fill compare equal', () {
++      final a = RecordingDrawSink()
++        ..fillPolygon(_square, 5, _triangles, _anyStyle);
++      final b = RecordingDrawSink()
++        ..fillPolygon(_square, 5, _triangles, _anyStyle);
++      expect(a.ops, b.ops);
++    });
++
++    test('a different triangulation of the same outline is a different op', () {
++      // The op carries the triangles, so a painter that hands one sink a
++      // stale triangulation and the other a fresh one is a disagreement the
++      // oracle sees.
++      final a = RecordingDrawSink()
++        ..fillPolygon(
++            _square, 5, Int32List.fromList([0, 1, 2, 0, 2, 3]), _anyStyle);
++      final b = RecordingDrawSink()
++        ..fillPolygon(
++            _square, 5, Int32List.fromList([0, 1, 3, 1, 2, 3]), _anyStyle);
++      expect(a.ops, isNot(b.ops));
++    });
++
++    test('fillPolygon copies the caller buffers', () {
++      // Same hazard as `polyline`: the painter reuses one scratch buffer per
++      // depth, so a sink that retained the caller's lists would record the
++      // same (last) geometry for every entity.
++      final sink = RecordingDrawSink();
++      final points = Float64List.fromList([0, 0, 1, 0, 1, 1, 0, 1, 0, 0]);
++      final triangles = Int32List.fromList([0, 1, 2, 0, 2, 3]);
++      sink.fillPolygon(points, 5, triangles, _anyStyle);
++      points[0] = 99;
++      triangles[0] = 99;
++      final op = sink.ops.single as FillPolygonOp;
++      expect(op.points.first, 0.0);
++      expect(op.triangles.first, 0);
++    });
++
++    test('fillCircle records centre, radius and style', () {
++      final sink = RecordingDrawSink()..fillCircle(1, 2, 5, _anyStyle);
++      expect(sink.ops.single, const FillCircleOp(1, 2, 5, _anyStyle));
++    });
++
++    test('fill ops compare by value', () {
++      expect(const FillCircleOp(0, 0, 5, _anyStyle),
++          isNot(const FillCircleOp(0, 0, 6, _anyStyle)));
++      expect(FillPolygonOp(const [0.0, 1.0], const [0, 1, 2], _anyStyle),
++          FillPolygonOp(const [0.0, 1.0], const [0, 1, 2], _anyStyle));
++      expect(
++          FillPolygonOp(const [0.0, 1.0], const [0, 1, 2], _anyStyle).hashCode,
++          FillPolygonOp(const [0.0, 1.0], const [0, 1, 2], _anyStyle).hashCode);
++    });
+   });
+ 
+   group('NullDrawSink', () {
+     test('counts every op and keeps nothing', () {
+       final sink = NullDrawSink()
+         ..beginResidual(Transform2.identity())
+         ..point(1, 2, _anyStyle)
+         ..polyline(Float64List.fromList([0, 0, 1, 1]), 2, _anyStyle,
+             closed: false)
+         ..circle(0, 0, 5, _anyStyle)
+         ..arc(0, 0, 5, 0, 1, _anyStyle)
++        ..fillPolygon(_square, 5, _triangles, _anyStyle)
++        ..fillCircle(0, 0, 5, _anyStyle)
+         ..text('WC', const Handle(7), _resolved)
+         ..endResidual();
+-      expect(sink.opCount, 7);
++      expect(sink.opCount, 9);
+     });
+   });
+ 
+   group('flatten', () {
+     test('turns a text op into an origin and two unit images', () {
+       // The residual here is not a pure scale on purpose: a fixture that only
+       // scales cannot tell a right implementation from one that swapped the
+       // +x and +y unit images, because a symmetric scale sends both the same
+       // way as sending them straight. Rotation (and shear, more generally)
+       // breaks that symmetry.
+@@ -311,12 +369,72 @@ void main() {
+       final rect = call.args.first as Rect;
+       // sx = 2*3 + -0.25*4 + 10 = 15.0; sy = 0.5*3 + 1*4 + 20 = 25.5.
+       // 25/100 mm at 4 px/mm is 1 device pixel, so half a pixel either side --
+       // and the residual's scale plays no part in the marker's own size,
+       // because the width here is a device-pixel quantity, not a paper one
+       // pre-divided by it.
+       expect(rect, const Rect.fromLTRB(14.5, 25.0, 15.5, 26.0));
+       expect(call.paintingStyle, PaintingStyle.fill);
+       expect(call.color, const Color(0xFFFF0000));
+     });
++
++    testWidgets('the canvas sink fills the path and does not stroke it',
++        (tester) async {
++      sink
++        ..beginResidual(Transform2.identity())
++        ..fillPolygon(_square, 5, _triangles, _anyStyle)
++        ..endResidual();
++      final draws = canvas.named('drawPath');
++      expect(draws, hasLength(1),
++          reason: 'one path, not two triangles: Canvas resolves concavity '
++              'itself and the triangles argument is for the vertices '
++              'backend');
++      expect(draws.single.paintingStyle, PaintingStyle.fill);
++    });
++
++    testWidgets('the canvas sink leaves its paint on stroke afterwards',
++        (tester) async {
++      // The sink reuses one Paint. A fill that leaves `style` on fill turns
++      // every later stroke in the frame into a fill -- the shape of bug the
++      // point op already guards against by restoring PaintingStyle.stroke.
++      sink
++        ..beginResidual(Transform2.identity())
++        ..fillPolygon(_square, 5, _triangles, _anyStyle)
++        ..polyline(_square, 5, _anyStyle, closed: false)
++        ..endResidual();
++      final draws = canvas.named('drawPath').toList();
++      expect(draws, hasLength(2));
++      expect(draws.last.paintingStyle, PaintingStyle.stroke);
++      expect(sink.canvasCallCount, 2);
++    });
++
++    test('fillPolygon closes the path', () {
++      sink.fillPolygon(_square, 5, _triangles, _anyStyle);
++      final path = canvas.named('drawPath').single.args.first as Path;
++      expect(path.computeMetrics().single.isClosed, isTrue);
++    });
++
++    test('fillPolygon with fewer than 3 points draws nothing', () {
++      sink.fillPolygon(
++          Float64List.fromList([0, 0, 1, 1]), 2, Int32List(0), _anyStyle);
++      expect(canvas.named('drawPath'), isEmpty);
++      expect(sink.canvasCallCount, 0);
++    });
++
++    test('fillCircle draws a filled circle', () {
++      sink.fillCircle(1, 2, 5, _anyStyle);
++      final call = canvas.named('drawCircle').single;
++      expect(call.paintingStyle, PaintingStyle.fill);
++      expect(call.args[0], const Offset(1, 2));
++      expect(call.args[1], 5.0);
++    });
++
++    test('fillCircle leaves the paint on stroke afterwards', () {
++      sink
++        ..fillCircle(1, 2, 5, _anyStyle)
++        ..circle(1, 2, 5, _anyStyle);
++      final draws = canvas.named('drawCircle').toList();
++      expect(draws, hasLength(2));
++      expect(draws.last.paintingStyle, PaintingStyle.stroke);
++    });
+   });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/rig/rig_support.dart b/packages/jet_cad_2d_flutter/test/rig/rig_support.dart
+index 7edf6eb..66f7570 100644
+--- a/packages/jet_cad_2d_flutter/test/rig/rig_support.dart
++++ b/packages/jet_cad_2d_flutter/test/rig/rig_support.dart
+@@ -152,11 +152,16 @@ class TextKeySink implements DrawSink {
+   @override
+   void point(double x, double y, ResolvedStyle style) {}
+   @override
+   void polyline(Float64List points, int count, ResolvedStyle style,
+       {required bool closed}) {}
+   @override
+   void circle(double cx, double cy, double r, ResolvedStyle style) {}
+   @override
+   void arc(double cx, double cy, double r, double start, double sweep,
+       ResolvedStyle style) {}
++  @override
++  void fillPolygon(Float64List points, int count, Int32List triangles,
++      ResolvedStyle style) {}
++  @override
++  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {}
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/support/differential.dart b/packages/jet_cad_2d_flutter/test/support/differential.dart
+index ac285cf..3ca7eb2 100644
+--- a/packages/jet_cad_2d_flutter/test/support/differential.dart
++++ b/packages/jet_cad_2d_flutter/test/support/differential.dart
+@@ -101,20 +101,33 @@ List<DrawnItem> flatten(List<DrawOp> ops) {
+           :final cx,
+           :final cy,
+           :final r,
+           :final start,
+           :final sweep,
+           :final style
+         ):
+         out.add(DrawnItem(
+             'arc', style, [residual.transformPoint(Vector2(cx, cy))],
+             radius: r * residual.scaleMagnitude, start: start, sweep: sweep));
++      case FillPolygonOp(:final points, :final style):
++        out.add(DrawnItem(
++            'fillPolygon',
++            style,
++            [
++              for (var i = 0; i < points.length; i += 2)
++                residual.transformPoint(Vector2(points[i], points[i + 1]))
++            ],
++            closed: true));
++      case FillCircleOp(:final cx, :final cy, :final r, :final style):
++        out.add(DrawnItem(
++            'fillCircle', style, [residual.transformPoint(Vector2(cx, cy))],
++            radius: r * residual.scaleMagnitude));
+       case TextOp(:final text, :final resolved):
+         // Three points, not one: the origin plus the images of the local
+         // unit vectors, so `kScreenTolerance` covers scale, rotation and
+         // shear with the machinery already here. The string rides in
+         // `kind`, which compares exactly.
+         out.add(DrawnItem('text:$text', resolved, [
+           residual.transformPoint(Vector2.zero()),
+           residual.transformPoint(Vector2(1, 0)),
+           residual.transformPoint(Vector2(0, 1)),
+         ]));
+diff --git a/packages/jet_cad_2d_flutter/test/support/vertices_differential.dart b/packages/jet_cad_2d_flutter/test/support/vertices_differential.dart
+index e87d5f5..b76651d 100644
+--- a/packages/jet_cad_2d_flutter/test/support/vertices_differential.dart
++++ b/packages/jet_cad_2d_flutter/test/support/vertices_differential.dart
+@@ -145,20 +145,25 @@ List<InkSample> inkSamples(List<DrawOp> ops) {
+             cx, cy, r, 0, 2 * math.pi, style.argb & 0x00FFFFFF, 'circle');
+       case ArcOp(
+           :final cx,
+           :final cy,
+           :final r,
+           :final start,
+           :final sweep,
+           :final style
+         ):
+         sampleCurve(cx, cy, r, start, sweep, style.argb & 0x00FFFFFF, 'arc');
++      case FillPolygonOp():
++      case FillCircleOp():
++        // Not batched: a fill goes to the fallback sink, same as text. Task
++        // 12 gives VerticesDrawSink its own triangle batching for these.
++        break;
+       case TextOp():
+         // Not batched: text goes to the fallback sink as a paragraph.
+         break;
+     }
+   }
+   return out;
+ }
+ 
+ /// One emitted triangle, read back out of the sink's buffer.
+ class _Triangle {

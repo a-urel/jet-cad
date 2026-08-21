@@ -1,0 +1,258 @@
+# Review package: 66f40ed..8c2f29e
+
+## Commits
+8c2f29e feat: schema 5, and the fill index rebuilt at load
+
+## Files changed
+ packages/jet_cad_2d/lib/src/codec/json_codec.dart  | 32 ++++++++++++++
+ .../jet_cad_2d/lib/src/codec/schema_version.dart   |  7 +++-
+ .../jet_cad_2d/test/codec/json_codec_test.dart     | 49 ++++++++++++++++++++++
+ .../test/testing/generate_document_test.dart       | 15 +++++--
+ 4 files changed, 98 insertions(+), 5 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/codec/json_codec.dart b/packages/jet_cad_2d/lib/src/codec/json_codec.dart
+index b5a7c9f..1008e4c 100644
+--- a/packages/jet_cad_2d/lib/src/codec/json_codec.dart
++++ b/packages/jet_cad_2d/lib/src/codec/json_codec.dart
+@@ -1,15 +1,16 @@
+ import 'dart:convert';
+ 
+ import '../core/diagnostic.dart';
+ import '../core/handle.dart';
+ import '../document/command.dart';
++import '../document/commands.dart';
+ import '../document/draft_document.dart';
+ import '../document/header.dart';
+ import '../document/node.dart';
+ import '../document/tables.dart';
+ import '../document/text_metrics.dart';
+ import '../store/entity_store.dart';
+ import '../store/geometry_store.dart';
+ import 'schema_version.dart';
+ 
+ /// Reads and writes the canonical document format.
+@@ -126,20 +127,22 @@ class DraftDocumentCodec {
+     doc.components
+         .loadJson((json['components']! as Map).cast<String, Object?>());
+     doc.rawData.loadJson((json['rawData']! as Map).cast<String, Object?>());
+     // The file's declared seed is a floor, not the sole source of truth: every
+     // handle actually read above raises the seed as it is read (see
+     // _loadTables, _loadTree, _loadEntities), so a file whose declared seed
+     // undercounts what it actually contains still cannot reissue a live
+     // handle.
+     doc.handleSeed.raiseTo(Handle.fromJson(json['handleSeed']));
+ 
++    _rebuildFills(doc, diagnostics);
++
+     doc.invalidateDerived();
+     // A loaded document has no history: the stacks describe edits to a
+     // document that is now gone.
+     doc.commands.notifyLoaded();
+     return doc;
+   }
+ 
+   static DraftDocument decodeString(
+     String source, {
+     TextMeasurer measurer = const InsertionPointMeasurer(),
+@@ -255,10 +258,39 @@ class DraftDocumentCodec {
+       final record = EntityRecord.fromJson(entry['record']);
+       final payload = GeometryPayload.fromJson(entry['geometry']);
+       // The stored slot is discarded: whatever slot the payload lands in is
+       // what the restored record points at.
+       final geomIndex = doc.geometry.add(payload);
+       doc.entities.add(record.copyWith(geomIndex: geomIndex));
+       doc.handleSeed.raiseTo(record.handle);
+     }
+   }
+ }
++
++/// Rebuilds the fill index from the loaded entities.
++///
++/// Derived state with one source of truth: the document stores a fill's
++/// boundary handle and nothing else, and everything else about a fill --
++/// its link and its boundary's triangulation -- is computed here, once,
++/// before the first frame.
++///
++/// A fill whose boundary is missing or unfillable is **linked anyway and left
++/// without triangles**. Dropping the link would silently discard the user's
++/// data; `validate()` reports the condition and the painter counts the skip.
++void _rebuildFills(DraftDocument doc, List<Diagnostic>? diagnostics) {
++  doc.fills.clear();
++  for (final slot in doc.entities.liveSlots) {
++    if (doc.entities.kindAt(slot) != EntityKind.fill) continue;
++    final fill = doc.entities.handleAt(slot);
++    final boundary =
++        boundaryHandleOf(doc.geometry.peek(doc.entities.geomIndexAt(slot)));
++    doc.fills.link(fill, boundary);
++    final boundarySlot = doc.entities.slotOf(boundary);
++    if (boundarySlot == null) continue;
++    if (doc.fills.trianglesFor(boundary) != null) continue;
++    final triangles = triangulationFor(doc.entities.kindAt(boundarySlot),
++        doc.geometry.peek(doc.entities.geomIndexAt(boundarySlot)));
++    if (triangles != null && triangles.isNotEmpty) {
++      doc.fills.putTriangles(boundary, triangles);
++    }
++  }
++}
+diff --git a/packages/jet_cad_2d/lib/src/codec/schema_version.dart b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+index 3643d50..60aacd7 100644
+--- a/packages/jet_cad_2d/lib/src/codec/schema_version.dart
++++ b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+@@ -1,20 +1,25 @@
+ /// The document schema this build writes.
+ ///
+ /// Bump it whenever the on-disk shape changes, and add a migration for the
+ /// previous value. An unversioned document is not readable: guessing at the
+ /// shape of a file that never declared one is how silent corruption starts.
+ ///
+ /// 4: `EntityRecord.toJson` gained `text`, `tag`, `textStyle` and
+ /// `textAttrs`; `EntityRecord.fromJson` defaults all four when absent, which
+ /// is the whole of the v3->v4 migration.
+-const int kSchemaVersion = 4;
++///
++/// 5: `EntityKind.fill`. The JSON shape is unchanged -- a fill is an ordinary
++/// entity and `kind` is written by name -- but a v4 reader must refuse a
++/// document containing one rather than fail inside `EntityKind.values.byName`,
++/// and the version check at `json_codec.dart:103` is what makes it.
++const int kSchemaVersion = 5;
+ 
+ class SchemaVersionError implements Exception {
+   final Object? found;
+   const SchemaVersionError(this.found);
+ 
+   @override
+   String toString() => found == null
+       ? 'SchemaVersionError: document has no schemaVersion'
+       : 'SchemaVersionError: unsupported schemaVersion $found '
+           '(this build writes $kSchemaVersion)';
+diff --git a/packages/jet_cad_2d/test/codec/json_codec_test.dart b/packages/jet_cad_2d/test/codec/json_codec_test.dart
+index d75aacb..c0c0d43 100644
+--- a/packages/jet_cad_2d/test/codec/json_codec_test.dart
++++ b/packages/jet_cad_2d/test/codec/json_codec_test.dart
+@@ -430,11 +430,60 @@ void main() {
+     // definition its container names, and the definition it pointed at.
+     expect(diagnostics.single.handles, [nodeB, defB, defA]);
+     // The cycle is broken, not merely detected: defB no longer instances
+     // anything, so walking from either definition now terminates.
+     expect(loaded.tree.definition(defB)!.children, isEmpty);
+ 
+     // The repair itself happens whether or not the caller asks to be told.
+     final loadedWithoutDiagnostics = DraftDocumentCodec.decode(json);
+     expect(loadedWithoutDiagnostics.tree.definition(defB)!.children, isEmpty);
+   });
++
++  test('a document with a region round-trips byte-identically', () {
++    final doc = DraftDocument.empty();
++    final cmd = AddRegionCommand.allocate(
++      seed: doc.handleSeed,
++      owner: doc.rootHandle,
++      boundaryKind: EntityKind.polyline,
++      boundaryPayload: GeometryPayload(
++          coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
++          scalars: Float64List(0)),
++      layer: ReservedHandles.layerZero,
++      fillColor: const TrueColor(0x3366CC),
++      boundaryColor: const TrueColor(0x000000),
++    );
++    doc.commands.execute(cmd);
++    final first = jsonEncode(DraftDocumentCodec.encode(doc));
++    final reloaded =
++        DraftDocumentCodec.decode(jsonDecode(first) as Map<String, Object?>);
++    expect(jsonEncode(DraftDocumentCodec.encode(reloaded)), first);
++  });
++
++  test('load leaves the fill index populated, not empty', () {
++    // The frame path reads and never computes. A load that left this empty
++    // would ear-clip on the first paint of every visible fill.
++    final doc = DraftDocument.empty();
++    final cmd = AddRegionCommand.allocate(
++      seed: doc.handleSeed,
++      owner: doc.rootHandle,
++      boundaryKind: EntityKind.polyline,
++      boundaryPayload: GeometryPayload(
++          coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
++          scalars: Float64List(0)),
++      layer: ReservedHandles.layerZero,
++      fillColor: const TrueColor(0x3366CC),
++      boundaryColor: const TrueColor(0x000000),
++    );
++    doc.commands.execute(cmd);
++    final reloaded = DraftDocumentCodec.decode(
++        jsonDecode(jsonEncode(DraftDocumentCodec.encode(doc)))
++            as Map<String, Object?>);
++    expect(reloaded.fills.fillsOf(cmd.boundary.handle), [cmd.fill.handle]);
++    expect(reloaded.fills.trianglesFor(cmd.boundary.handle), hasLength(6));
++  });
++
++  test('the schema version is 5, and a v6 document is refused', () {
++    expect(kSchemaVersion, 5);
++    expect(() => DraftDocumentCodec.decode({'schemaVersion': 6}),
++        throwsA(anything));
++  });
+ }
+diff --git a/packages/jet_cad_2d/test/testing/generate_document_test.dart b/packages/jet_cad_2d/test/testing/generate_document_test.dart
+index 4045565..04630f7 100644
+--- a/packages/jet_cad_2d/test/testing/generate_document_test.dart
++++ b/packages/jet_cad_2d/test/testing/generate_document_test.dart
+@@ -43,24 +43,27 @@ void main() {
+     // while it is off, so a default that leaks — one extra `nextDouble()`, one
+     // extra node — shifts every subsequent value in the document and moves
+     // these. Plan 2's gate note is only reproducible while they hold.
+     //
+     // Deliberately not the structural assertions the plan sketches (one layer,
+     // every colour ByLayer, every node an instance under the root). Those pass
+     // on a document whose coordinates have all moved.
+     //
+     // Re-baselined in Plan 3c Task 1: the four text keys changed the
+     // serialisation.
++    //
++    // Re-baselined in Plan 3e Task 7: kSchemaVersion moved from 4 to 5, and
++    // that value is the first thing every serialisation writes.
+     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
+-        -4223683079839955300);
++        4778422453512744465);
+     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
+-        -1538364231202837705);
++        2508170127112452780);
+   });
+ 
+   test('defaults reproduce the Plan 2 corpus structurally too', () {
+     // The fingerprint says "unchanged" but not "unchanged in what way". This
+     // names the properties the extensions must each leave alone, so a failure
+     // says which one moved.
+     final doc = generateDocument(2000, definitionCount: 20);
+     expect(doc.tables.layers.records, hasLength(1));
+     expect(doc.tables.linetypes.records, hasLength(3));
+     for (final slot in doc.entities.liveSlots) {
+@@ -216,24 +219,28 @@ void main() {
+   // every draw the other would make. So these fixtures each name only one
+   // of the two (the other stays at its default of 0, drawing nothing), and
+   // no fixture here names both -- see `generate_document.dart`'s doc comment
+   // on [generateDocument].
+ 
+   test('both text fractions default to zero and change nothing', () {
+     // The two fingerprints from Task 1's re-baseline (commit 7f85226) still
+     // hold. If either moved, `labelFraction` or `attributedInstanceFraction`
+     // drew from `extra` while off, which is exactly the bug this test
+     // exists to catch -- not a signal to update the expected value.
++    //
++    // Re-baselined in Plan 3e Task 7 in step with the sibling test above:
++    // kSchemaVersion moved from 4 to 5, which shifts every fingerprint in
++    // this file regardless of what `extra` drew.
+     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
+-        -4223683079839955300);
++        4778422453512744465);
+     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
+-        -1538364231202837705);
++        2508170127112452780);
+   });
+ 
+   test('labelFraction produces repeating strings out of the root budget', () {
+     final doc =
+         generateDocument(2000, definitionCount: 20, labelFraction: 0.05);
+     final labels = <String>{};
+     var count = 0;
+     for (final slot in doc.entities.liveSlots) {
+       if (doc.entities.kindAt(slot) == EntityKind.text) {
+         count++;

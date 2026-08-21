@@ -1,0 +1,119 @@
+# Review package: 3f6e7ba..66f40ed
+
+## Commits
+66f40ed feat: removing a boundary removes its fill, in one mutation
+
+## Files changed
+ packages/jet_cad_2d/lib/src/document/commands.dart | 41 ++++++++++++++++++++++
+ .../test/document/region_command_test.dart         | 24 +++++++++++++
+ 2 files changed, 65 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/document/commands.dart b/packages/jet_cad_2d/lib/src/document/commands.dart
+index 9ece982..2e88f9d 100644
+--- a/packages/jet_cad_2d/lib/src/document/commands.dart
++++ b/packages/jet_cad_2d/lib/src/document/commands.dart
+@@ -84,22 +84,63 @@ class RemoveEntityCommand extends DraftCommand {
+   String get label => 'Remove entity';
+ 
+   @override
+   CommandResult apply(CommandTarget target) {
+     final slot = target.entities.slotOf(handle);
+     if (slot == null) {
+       throw StateError('no entity with handle ${handle.toHex()}');
+     }
+     final record = target.entities.read(slot);
+     final payload = target.geometry.read(record.geomIndex);
++
++    if (record.kind == EntityKind.fill) {
++      target.entities.remove(slot);
++      target.geometry.remove(record.geomIndex);
++      target.fills.unlink(handle);
++      target.invalidateDerived();
++      return CommandResult(
++        inverse: AddEntityCommand(record: record, payload: payload),
++        touched: {handle},
++      );
++    }
++
++    // Removing a boundary removes the fills that name it, in this same
++    // mutation. The alternative is an orphaned fill: it draws nothing, reports
++    // nothing, and looks like it works.
++    final dependents = target.fills.fillsOf(handle);
++    if (dependents.length == 1) {
++      final fillSlot = target.entities.slotOf(dependents.single)!;
++      final fillRecord = target.entities.read(fillSlot);
++      target.entities.remove(fillSlot);
++      target.geometry.remove(fillRecord.geomIndex);
++      target.entities.remove(slot);
++      target.geometry.remove(record.geomIndex);
++      target.fills.dropBoundary(handle);
++      target.invalidateDerived();
++      return CommandResult(
++        inverse: AddRegionCommand(
++            fill: fillRecord, boundary: record, boundaryPayload: payload),
++        touched: {handle, fillRecord.handle},
++      );
++    }
++    if (dependents.isNotEmpty) {
++      // More than one fill on one boundary is not something this plan's
++      // commands can create, and inventing an n-ary inverse for it here would
++      // be untested machinery. Refuse rather than half-handle it.
++      throw StateError(
++          '${handle.toHex()} carries ${dependents.length} fills; remove them '
++          'before removing the boundary');
++    }
++
+     target.entities.remove(slot);
+     target.geometry.remove(record.geomIndex);
++    target.fills.dropBoundary(handle);
+     target.invalidateDerived();
+     return CommandResult(
+       inverse: AddEntityCommand(record: record, payload: payload),
+       touched: {handle},
+     );
+   }
+ }
+ 
+ /// Replaces a TEXT or ATTRIB entity's displayed string, and its tag.
+ ///
+diff --git a/packages/jet_cad_2d/test/document/region_command_test.dart b/packages/jet_cad_2d/test/document/region_command_test.dart
+index 34aeea4..28bc46b 100644
+--- a/packages/jet_cad_2d/test/document/region_command_test.dart
++++ b/packages/jet_cad_2d/test/document/region_command_test.dart
+@@ -202,11 +202,35 @@ void main() {
+         .coords;
+     expect(afterFirstUndo, orderedEquals(firstEdit));
+ 
+     doc.commands.undo();
+     final afterSecondUndo = doc.geometry
+         .peek(
+             doc.entities.geomIndexAt(doc.entities.slotOf(cmd.boundary.handle)!))
+         .coords;
+     expect(afterSecondUndo, orderedEquals(original));
+   });
++
++  test('removing a boundary removes its fill, and undo restores both', () {
++    final doc = DraftDocument.empty();
++    final cmd = region(doc);
++    doc.commands.execute(cmd);
++    doc.commands.execute(RemoveEntityCommand(cmd.boundary.handle));
++    expect(doc.entities.slotOf(cmd.fill.handle), isNull,
++        reason: 'an orphaned fill draws nothing and reports nothing');
++    expect(doc.fills.entryCount, 0);
++    expect(doc.fills.linkCount, 0);
++    doc.commands.undo();
++    expect(doc.entities.slotOf(cmd.fill.handle), isNotNull);
++    expect(doc.entities.slotOf(cmd.boundary.handle), isNotNull);
++    expect(doc.fills.trianglesFor(cmd.boundary.handle), hasLength(6));
++  });
++
++  test('removing a fill alone unlinks it and leaves the boundary drawable', () {
++    final doc = DraftDocument.empty();
++    final cmd = region(doc);
++    doc.commands.execute(cmd);
++    doc.commands.execute(RemoveEntityCommand(cmd.fill.handle));
++    expect(doc.entities.slotOf(cmd.boundary.handle), isNotNull);
++    expect(doc.fills.fillsOf(cmd.boundary.handle), isEmpty);
++  });
+ }

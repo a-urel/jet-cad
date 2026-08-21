@@ -1,0 +1,142 @@
+# Review package: 4a78bc6..f1d18d7
+
+## Commits
+f1d18d7 fix: tolerate a consecutive duplicate point in a triangulated loop
+
+## Files changed
+ .../jet_cad_2d/lib/src/geometry/triangulate.dart   | 38 +++++++++++++++++++++-
+ .../jet_cad_2d/test/geometry/triangulate_test.dart | 25 ++++++++++++++
+ 2 files changed, 62 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/geometry/triangulate.dart b/packages/jet_cad_2d/lib/src/geometry/triangulate.dart
+index e744c19..776766e 100644
+--- a/packages/jet_cad_2d/lib/src/geometry/triangulate.dart
++++ b/packages/jet_cad_2d/lib/src/geometry/triangulate.dart
+@@ -8,27 +8,35 @@ import 'dart:typed_data';
+ /// last point is ignored.
+ ///
+ /// Returns triple-indices into [coords]' point numbering, every triangle wound
+ /// counter-clockwise whatever the input winding. Returns an **empty** list --
+ /// never throws, never guesses -- when the loop has fewer than three distinct
+ /// points, is self-intersecting, or is otherwise degenerate and cannot be
+ /// reduced. Self-intersection is checked explicitly up front, because the
+ /// clipper's own "no ear anywhere" stall does not see every case: see
+ /// `_hasSelfIntersection` for the fixture that motivates it.
+ ///
++/// A point repeated consecutively *within* the ring (not the store's closing
++/// duplicate, which is dropped by `count - 1` before any of this) is
++/// tolerated, not rejected: it collapses to the single vertex it geometrically
++/// is, per the contract's "at least three distinct points". A plausible
++/// DXF-imported boundary with a snap-rounding duplicate vertex must still
++/// fill. See `_dedupeConsecutive`.
++///
+ /// O(n^2). Room boundaries are tens of points, and this runs once per edit,
+ /// off the frame path -- see the plan's global constraints.
+ Int32List triangulateSimplePolygon(Float64List coords, int count) {
+   final n = count - 1; // drop the duplicated closing point
+   if (n < 3) return Int32List(0);
+ 
+-  final index = List<int>.generate(n, (i) => i);
++  final index = _dedupeConsecutive(coords, List<int>.generate(n, (i) => i));
++  if (index.length < 3) return Int32List(0);
+   // Reject a self-intersecting boundary before clipping. Plain ear-clipping's
+   // "no ear anywhere" stall does not see every self-intersection: at n == 4 a
+   // bow tie crosses between its two far edges, and every candidate diagonal
+   // is adjacent to both, so no vertex ever falls inside a candidate ear and
+   // the clipper never gets stuck. This check is orientation-independent, so
+   // it runs before winding normalisation.
+   if (_hasSelfIntersection(coords, index)) return Int32List(0);
+   if (_signedArea(coords, index) < 0) {
+     // Normalised, not rejected: DXF produces both windings, and every ear test
+     // below assumes counter-clockwise.
+@@ -57,20 +65,48 @@ Int32List triangulateSimplePolygon(Float64List coords, int count) {
+     if (!clipped) return Int32List(0);
+   }
+   if (index.length != 3) return Int32List(0);
+   out
+     ..add(index[0])
+     ..add(index[1])
+     ..add(index[2]);
+   return Int32List.fromList(out);
+ }
+ 
++/// Collapses a point repeated at consecutive ring positions (including the
++/// wrap from the last position back to the first) into a single entry,
++/// keeping the earlier index. This is a stored-value comparison, not a
++/// geometric decision -- exact `==`, no tolerance, consistent with this
++/// file's other exact comparisons -- because it is asking "are these two
++/// stored coordinate pairs bit-for-bit the same point", not "are these two
++/// distinct points close enough to treat as one".
++///
++/// Only *consecutive* duplicates collapse. A duplicate coordinate elsewhere
++/// in the ring is a different situation -- a loop touching itself at a
++/// vertex -- and stays exactly as many entries as stored; whether that is a
++/// simple loop is for the ear-clipper (and `_hasSelfIntersection`) to decide,
++/// not this function.
++List<int> _dedupeConsecutive(Float64List c, List<int> raw) {
++  final out = <int>[];
++  for (final p in raw) {
++    if (out.isNotEmpty && _samePoint(c, out.last, p)) continue;
++    out.add(p);
++  }
++  if (out.length > 1 && _samePoint(c, out.first, out.last)) {
++    out.removeLast();
++  }
++  return out;
++}
++
++bool _samePoint(Float64List c, int a, int b) =>
++    c[a * 2] == c[b * 2] && c[a * 2 + 1] == c[b * 2 + 1];
++
+ double _signedArea(Float64List c, List<int> index) {
+   var sum = 0.0;
+   for (var i = 0; i < index.length; i++) {
+     final p = index[i], q = index[(i + 1) % index.length];
+     sum += c[p * 2] * c[q * 2 + 1] - c[q * 2] * c[p * 2 + 1];
+   }
+   return sum / 2;
+ }
+ 
+ double _cross(Float64List c, int a, int b, int d) =>
+diff --git a/packages/jet_cad_2d/test/geometry/triangulate_test.dart b/packages/jet_cad_2d/test/geometry/triangulate_test.dart
+index 4a73067..ca7e56c 100644
+--- a/packages/jet_cad_2d/test/geometry/triangulate_test.dart
++++ b/packages/jet_cad_2d/test/geometry/triangulate_test.dart
+@@ -70,11 +70,36 @@ void main() {
+   });
+ 
+   test('a loop that pinches itself at a shared vertex returns empty', () {
+     // Two triangles joined at one point, stored as two distinct points at the
+     // same coordinate -- self-touching, not a proper edge crossing. No edge
+     // pair intersects, so this cannot be rejected by a crossing test; it can
+     // only be caught by the clipper genuinely finding no ear anywhere.
+     final c = loop([0, 0, 4, 0, 2, 2, 0, 4, 4, 4, 2, 2]);
+     expect(triangulateSimplePolygon(c, c.length ~/ 2), isEmpty);
+   });
++
++  test(
++      'a consecutive duplicate point right after the first vertex is '
++      'tolerated, not rejected', () {
++    // A 10x10 square with (10,0) stored twice in a row -- a plausible
++    // snap-rounding artefact from a DXF import. The duplicate is not the
++    // store's closing duplicate (that is the separate first-equals-last
++    // convention, already stripped by count - 1); it is a second, genuinely
++    // stored point sitting on top of its neighbour, elsewhere in the ring.
++    final c = loop([0, 0, 10, 0, 10, 0, 10, 10, 0, 10]);
++    final t = triangulateSimplePolygon(c, c.length ~/ 2);
++    expect(t, isNotEmpty);
++    expect(areaOf(c, t), closeTo(100.0, 1e-9));
++  });
++
++  test(
++      'a consecutive duplicate point mid-ring is tolerated too, not just '
++      'right after the first vertex', () {
++    // Same square, but the doubled point is the third vertex, not the
++    // second -- so a fix that only checks index 0/1 cannot pass this.
++    final c = loop([0, 0, 10, 0, 10, 10, 10, 10, 0, 10]);
++    final t = triangulateSimplePolygon(c, c.length ~/ 2);
++    expect(t, isNotEmpty);
++    expect(areaOf(c, t), closeTo(100.0, 1e-9));
++  });
+ }

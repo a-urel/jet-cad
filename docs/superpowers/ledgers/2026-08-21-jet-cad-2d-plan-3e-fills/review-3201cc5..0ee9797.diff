@@ -1,0 +1,340 @@
+# Review package: 3201cc5..0ee9797
+
+## Commits
+0ee9797 feat: EntityKind.fill, stored and inert
+
+## Files changed
+ packages/jet_cad_2d/lib/src/document/extents.dart    |  5 +++++
+ packages/jet_cad_2d/lib/src/index/spatial_index.dart | 14 ++++++++++++++
+ packages/jet_cad_2d/lib/src/store/entity_store.dart  | 16 +++++++++++++++-
+ .../jet_cad_2d/test/invariants/reference_query.dart  |  8 ++++++++
+ .../jet_cad_2d/test/store/entity_store_test.dart     | 20 ++++++++++++++++++++
+ .../jet_cad_2d_flutter/lib/src/draft_painter.dart    |  7 +++++++
+ .../jet_cad_2d_flutter/lib/src/reference_walk.dart   |  3 +++
+ 7 files changed, 72 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/document/extents.dart b/packages/jet_cad_2d/lib/src/document/extents.dart
+index 95ac5e3..5eb0f25 100644
+--- a/packages/jet_cad_2d/lib/src/document/extents.dart
++++ b/packages/jet_cad_2d/lib/src/document/extents.dart
+@@ -51,12 +51,17 @@ Aabb2 entityBounds({
+         payload.scalars[1],
+         payload.scalars[2],
+       );
+ 
+     case EntityKind.text:
+     case EntityKind.attrib:
+       final attrs = resolveTextAttributes(payload, textAttrs, textStyle);
+       final metrics = measurer.measure(text: text, style: textStyle);
+       return textLocalBounds(attrs, metrics).transformedBy(
+           textLocalTransform(attrs, metrics, payload.pointAt(0)));
++
++    case EntityKind.fill:
++      // Task 9 gives this case the boundary's box. Until then a fill bounds
++      // to nothing, which is what its own payload says.
++      return Aabb2.empty();
+   }
+ }
+diff --git a/packages/jet_cad_2d/lib/src/index/spatial_index.dart b/packages/jet_cad_2d/lib/src/index/spatial_index.dart
+index 88765ad..301967c 100644
+--- a/packages/jet_cad_2d/lib/src/index/spatial_index.dart
++++ b/packages/jet_cad_2d/lib/src/index/spatial_index.dart
+@@ -986,20 +986,27 @@ class SpatialIndex {
+           // to the endpoints outside the sweep -- but the reported point did
+           // not, so a pick just past an arc's end answered `true` with a
+           // `worldPoint` off the curve. Sharing [_footOnArc] with
+           // [_considerSnapLeaf] is what keeps pick and snap agreeing on what
+           // "the point on an arc" means.
+           final foot = _footOnArc(world, wx, wy, worldRadius, worldStartAngle,
+               worldSweep, _scratchB);
+           foundX = foot.x;
+           foundY = foot.y;
+         }
++
++      case EntityKind.fill:
++        // Unreachable: this method returns above when `count == 0`, and a
++        // fill's payload carries no coordinates. This case exists only so the
++        // switch stays exhaustive, so a future EntityKind still fails to
++        // compile here instead of falling through silently.
++        break;
+     }
+ 
+     if (foundKind == null) return;
+ 
+     final handle = document.entities.handleAt(slot);
+     // A root-level leaf's own handle stands in for its "root-level
+     // ancestor": it has no enclosing instance, and draw order among
+     // root-level things is exactly their own ascending handle order, so
+     // treating it as its own ancestor is what keeps this comparison
+     // consistent with a leaf reached through an instance. Defaulting a
+@@ -1553,20 +1560,27 @@ class SpatialIndex {
+             }
+           }
+         }
+ 
+       case EntityKind.text:
+       case EntityKind.attrib:
+         if (!mask.has(SnapKind.insertion)) return;
+         final lx = coords[0], ly = coords[1];
+         _considerSnapCandidate(SnapKind.insertion, ta * lx + tc * ly + te,
+             tb * lx + td * ly + tf, world, radius, slot, depth, out);
++
++      case EntityKind.fill:
++        // Unreachable: this method returns above when `count == 0`, and a
++        // fill's payload carries no coordinates. This case exists only so the
++        // switch stays exhaustive, so a future EntityKind still fails to
++        // compile here instead of falling through silently.
++        break;
+     }
+   }
+ 
+   /// Offers one arc's or circle's centre as a [SnapKind.center] candidate.
+   ///
+   /// The counterpart of [_considerSnapLeaf] for the one snap kind that comes
+   /// from [ContainerIndex.searchSnapCentres] instead of from the leaf tree.
+   /// The world transform arrives as its six raw coefficients for the same
+   /// zero-allocation reason [_considerLeaf]'s doc comment gives, and the
+   /// centre is transformed to world space before being measured -- an affine
+diff --git a/packages/jet_cad_2d/lib/src/store/entity_store.dart b/packages/jet_cad_2d/lib/src/store/entity_store.dart
+index 86e6be7..f84f16c 100644
+--- a/packages/jet_cad_2d/lib/src/store/entity_store.dart
++++ b/packages/jet_cad_2d/lib/src/store/entity_store.dart
+@@ -1,19 +1,23 @@
+ import 'dart:typed_data';
+ 
+ import 'package:meta/meta.dart';
+ 
+ import '../core/handle.dart';
+ import '../document/style.dart';
++import 'geometry_store.dart';
+ import 'slot_allocator.dart';
+ 
+-enum EntityKind { point, line, polyline, circle, arc, text, attrib }
++/// `fill` is appended, never inserted: [EntityStore] stores `kind.index` in a
++/// `Uint8List` column, so an insertion renumbers every stored document's kinds
++/// in memory. The JSON is safe either way -- it carries `kind.name`.
++enum EntityKind { point, line, polyline, circle, arc, text, attrib, fill }
+ 
+ class DuplicateHandleError implements Exception {
+   final Handle handle;
+   const DuplicateHandleError(this.handle);
+ 
+   @override
+   String toString() => 'DuplicateHandleError(${handle.toHex()})';
+ }
+ 
+ /// A detached leaf record.
+@@ -215,20 +219,30 @@ class EntityRecord {
+       flags,
+       text,
+       tag,
+       textStyle,
+       textAttrs);
+ 
+   @override
+   String toString() => 'EntityRecord(${kind.name} ${handle.toHex()})';
+ }
+ 
++/// The boundary a fill entity names, or [Handle.none] if its payload carries
++/// none.
++///
++/// A fill stores no coordinates. Its whole geometry is one scalar: the handle
++/// of the entity whose loop it fills. A handle is an `int` at most
++/// `kMaxHandle` (0xFFFFFFFF), far under 2^53, so the round trip through
++/// `double` is exact in both directions.
++Handle boundaryHandleOf(GeometryPayload payload) =>
++    payload.scalars.isEmpty ? Handle.none : Handle(payload.scalars[0].toInt());
++
+ /// Columnar storage for leaf entity records, including tier-1 style.
+ ///
+ /// Style lives in columns here rather than in a component store because these
+ /// are native CAD fields required for lossless round-trip, whereas components
+ /// are the extension mechanism. Defaults are `BYLAYER` sentinels, so the common
+ /// case costs one small integer per column.
+ class EntityStore {
+   static const int _initialCapacity = 64;
+ 
+   final SlotAllocator _slots = SlotAllocator();
+diff --git a/packages/jet_cad_2d/test/invariants/reference_query.dart b/packages/jet_cad_2d/test/invariants/reference_query.dart
+index d8ffc95..31fbe75 100644
+--- a/packages/jet_cad_2d/test/invariants/reference_query.dart
++++ b/packages/jet_cad_2d/test/invariants/reference_query.dart
+@@ -530,20 +530,24 @@ List<Handle> referenceInstancesInRect(
+           math.atan2(worldStart.y - centre.y, worldStart.x - centre.x);
+       final worldSweep = toWorld.determinant < 0 ? -sweep : sweep;
+       final d = distanceToArc(
+           world, centre, worldRadius, worldStartAngle, worldSweep);
+       if (d > radius) return null;
+       return (
+         kind: HitKind.edge,
+         point: _footOnWorldArc(
+             world, centre, worldRadius, worldStartAngle, worldSweep),
+       );
++
++    case EntityKind.fill:
++      // A fill produces no hit and no snap candidate.
++      return null;
+   }
+ }
+ 
+ /// The point of `[a], [b]` nearest [world], clamped to the segment.
+ ///
+ /// Written out rather than calling `projectOntoSegment`: that function is
+ /// what the implementation itself uses for its `nearest`/`perpendicular`
+ /// snap candidates, and a pick's edge point has to be derived here from the
+ /// definition of "closest point on a segment", not from the same code.
+ Vector2 _clampedFootOnSegment(Vector2 world, Vector2 a, Vector2 b) {
+@@ -773,20 +777,24 @@ List<(SnapKind, Vector2)> _snapCandidates(
+           if (angleInSweep(math.atan2(tb.y - centre.y, tb.x - centre.x),
+               worldStartAngle, worldSweep)) {
+             add(SnapKind.tangent, tb);
+           }
+         }
+       }
+ 
+     case EntityKind.text:
+     case EntityKind.attrib:
+       add(SnapKind.insertion, toWorld.transformPoint(payload.pointAt(0)));
++
++    case EntityKind.fill:
++      // A fill produces no hit and no snap candidate.
++      break;
+   }
+ 
+   return out;
+ }
+ 
+ /// The point on a world-space circle's rim nearest [world]. Null when
+ /// [world] sits exactly on [centre], the sibling of
+ /// `SpatialIndex._footOnRim`'s own null case.
+ Vector2? _footOnRim(Vector2 world, Vector2 centre, double worldRadius) {
+   final dx = world.x - centre.x, dy = world.y - centre.y;
+diff --git a/packages/jet_cad_2d/test/store/entity_store_test.dart b/packages/jet_cad_2d/test/store/entity_store_test.dart
+index a619395..53f5f8f 100644
+--- a/packages/jet_cad_2d/test/store/entity_store_test.dart
++++ b/packages/jet_cad_2d/test/store/entity_store_test.dart
+@@ -1,10 +1,12 @@
++import 'dart:typed_data';
++
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:test/test.dart';
+ 
+ EntityRecord lineRecord(int handle, {int geomIndex = 0, int owner = 100}) =>
+     EntityRecord(
+       handle: Handle(handle),
+       owner: Handle(owner),
+       kind: EntityKind.line,
+       layer: ReservedHandles.layerZero,
+       linetype: ReservedHandles.byLayerLinetype,
+@@ -210,11 +212,29 @@ void main() {
+   });
+ 
+   test('purge carries the text columns with the slot', () {
+     final store = EntityStore();
+     final a = store.add(_textRecord(const Handle(1), text: 'A'));
+     final b = store.add(_textRecord(const Handle(2), text: 'B'));
+     store.remove(a);
+     final remap = store.purge();
+     expect(store.textAt(remap[b]), 'B');
+   });
++
++  test('fill is the last EntityKind, and its ordinal is stable', () {
++    // The store writes `kind.index` into a Uint8List column. Inserting a
++    // member rather than appending would silently renumber every stored kind.
++    expect(EntityKind.values.last, EntityKind.fill);
++    expect(EntityKind.fill.index, 7);
++  });
++
++  test('boundaryHandleOf reads the boundary from scalars, and none when absent',
++      () {
++    final withBoundary = GeometryPayload(
++        coords: Float64List(0), scalars: Float64List.fromList([4919.0]));
++    expect(boundaryHandleOf(withBoundary), const Handle(4919));
++
++    final empty =
++        GeometryPayload(coords: Float64List(0), scalars: Float64List(0));
++    expect(boundaryHandleOf(empty), Handle.none);
++  });
+ }
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart b/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart
+index edf9110..3eabbc4 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart
+@@ -432,20 +432,23 @@ class DraftPainter {
+       case EntityKind.arc:
+         // Curves keep the residual path: an anisotropic transform turns a
+         // circle into an ellipse, and DrawSink.circle carries one radius.
+         // What a sink does with that residual is a sink decision.
+         if (toScreen.anisotropyRatio > kAnisotropyThreshold) {
+           _anisotropicCurves++;
+         }
+       case EntityKind.text:
+       case EntityKind.attrib:
+         break;
++      case EntityKind.fill:
++        // Task 13 draws it.
++        break;
+     }
+ 
+     // The rebase subtraction happens in the leaf's own space, because that is
+     // the space the stored coordinates are in. So the origin — a world point —
+     // is pulled back through the placement first, and the rebase translation
+     // the chain carries is that *local* origin, not the world one. With a
+     // non-identity placement the two differ, and composing the world origin
+     // here would put every group-owned leaf in the wrong place while a fixture
+     // with an identity placement still passed.
+     final localOrigin = _localOriginFor(placement, origin);
+@@ -657,20 +660,24 @@ class DraftPainter {
+           sink.arc(_arcCx, _arcCy, r, start, sweep, style);
+         }
+ 
+       case EntityKind.text:
+       case EntityKind.attrib:
+         // Unreachable: `_drawLeafComposed` routes text to `_drawText` before
+         // it pushes a residual at all, because a text leaf's residual is not
+         // `chain`. Kept as an exhaustive case rather than a `default` so a
+         // new EntityKind still fails to compile here.
+         break;
++
++      case EntityKind.fill:
++        // Task 13 draws it.
++        break;
+     }
+   }
+ 
+   /// Draws one text or attrib leaf under `chain . textLocal`.
+   ///
+   /// Text does not go through [_emit]. Its placement — height, rotation,
+   /// width factor, oblique angle and justification — *is* a transform, and
+   /// `DrawSink.text` carries no coordinates at all, so that placement can
+   /// only reach the canvas as part of the residual. It is composed into
+   /// `chain` rather than pushed as a second, inner residual because
+diff --git a/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart b/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
+index 92134ac..1d24a6d 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
+@@ -174,20 +174,23 @@ class _ReferenceWalk {
+         sink.polyline(points, count, style, closed: false);
+       case EntityKind.circle:
+         sink.circle(coords[0] - ox, coords[1] - oy, payload.scalars[0], style);
+       case EntityKind.arc:
+         sink.arc(coords[0] - ox, coords[1] - oy, payload.scalars[0],
+             payload.scalars[1], payload.scalars[2], style);
+       case EntityKind.text:
+       case EntityKind.attrib:
+         // Unreachable: handled above, under its own composed residual.
+         break;
++      case EntityKind.fill:
++        // Task 13 draws it.
++        break;
+     }
+     sink.endResidual();
+   }
+ }
+ 
+ class _Item {
+   _Item(this.handle, this.placement, {this.slot});
+   final Handle handle;
+   final Transform2 placement;
+   final int? slot;

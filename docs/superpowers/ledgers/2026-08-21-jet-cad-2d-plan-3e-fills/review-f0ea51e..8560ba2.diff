@@ -1,0 +1,1136 @@
+# Review package: f0ea51e..8560ba2
+
+## Commits
+8560ba2 docs: Plan 3e results, mutation log, and the exit gate
+
+## Files changed
+ STATUS.md                                          | 170 +++++--
+ .../notes/2026-08-22-plan-3e-results.md            | 523 +++++++++++++++++++++
+ docs/superpowers/notes/plan-3e-mutation-log.md     | 307 ++++++++++++
+ 3 files changed, 950 insertions(+), 50 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index f6c649d..c02a22d 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,45 +1,61 @@
+ # jet-cad — project status
+ 
+-**Last updated:** 2026-08-21
+-**Verified against:** `main` at `0eac1be`, working tree clean.
++**Last updated:** 2026-08-22
++**Verified against:** `main` at `f0ea51e`, working tree clean.
+ Every suite count below was produced by running the suite on the **merged**
+ result, not by reading a report and not on the branch before it landed.
+ 
+ ---
+ 
+ ## TL;DR — where you left off
+ 
++**Plan 3e (fills) is done, seventeen tasks, worked directly on `main`** — see
++[Plan 3e](#plan-3e--fills) and [Resume here](#resume-here). Six of its nine
++failable criteria pass outright; one is a device timing row measured under
++macOS Low Power Mode and left explicitly unevaluable rather than scored; one
++(the translucent seam) is settled only for the routing rule and left open on
++Impeller/GPU, on the reviewer's own instruction not to write "no seam was
++found." No criterion failed.
++
++Results note:
++[docs/superpowers/notes/2026-08-22-plan-3e-results.md](docs/superpowers/notes/2026-08-22-plan-3e-results.md).
++Mutation log:
++[docs/superpowers/notes/plan-3e-mutation-log.md](docs/superpowers/notes/plan-3e-mutation-log.md) —
++56 mutants accounted for, 52 killed, 2 proven equivalent, 2 documented gaps.
++
+ **Plan 3d (the vertices sink) is merged into `main`** — fifteen tasks,
+ executed, reviewed and committed, then merged locally with `--no-ff`. **Its exit gate is 8 of 8** — criterion 7 stayed open until the human approved
+ the `CLAUDE.md` allocation amendment on 2026-08-21, which the plan was forbidden
+ from granting itself. See
+-[Plan 3d](#plan-3d--the-vertices-sink-is-the-default-everywhere) and
+-[Resume here](#resume-here).
++[Plan 3d](#plan-3d--the-vertices-sink-is-the-default-everywhere).
+ 
+ Nothing is in flight. The `spike/vertices-sink` branch and its worktree are
+ gone; the ledger is archived at
+ [docs/superpowers/ledgers/](docs/superpowers/ledgers/), beside Plan 3c's.
++Plan 3e's own ledger (`.superpowers/sdd/2026-08-21-jet-cad-2d-plan-3e-fills/`)
++is to be archived the same way, since this plan had no worktree of its own.
+ 
+-**Since the merge, on `main` at `70d824e..0eac1be`: two of Plan 3d's three
+-remaining open items are closed**, and one thing that note recorded turned out
+-to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open) — one
+-item remains and cannot be closed here.
++**Since Plan 3d's merge, on `main` at `70d824e..0eac1be`: two of Plan 3d's
++three remaining open items are closed**, and one thing that note recorded
++turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open)
++— one item remains and cannot be closed here.
+ 
+ Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
+ 
+ | Suite | State (on `main`, run against the merged result) |
+ |---|---|
+-| `packages/jet_cad_2d` — engine | **720 tests, all pass**, analyze/format clean |
+-| `packages/jet_cad_2d_flutter` — widgets | **242 tests pass, 1 skipped**, analyze/format clean |
+-| `flutter test --tags golden` | **23 pass**, 28 PNGs (14 fixtures × 2 backends); no pre-existing PNG regenerated |
+-| `apps/dev_harness_2d` | analyze/format clean; **R2/R4a/R4b run on macOS in profile mode, and R2 on Chrome/CanvasKit** |
++| `packages/jet_cad_2d` — engine | **771 tests, all pass**, analyze/format clean |
++| `packages/jet_cad_2d_flutter` — widgets | **276 tests pass, 1 skipped**, analyze/format clean |
++| `flutter test --tags golden` | **29 pass**, 34 PNGs (17 fixtures × 2 backends); no pre-existing PNG regenerated |
++| `apps/dev_harness_2d` | analyze/format clean |
++| `benchmark/query_throughput.dart` | one gated row fails — `snap at dirty threshold`, **carried from Plan 2**, not a regression |
+ 
+ The widget suite's one skip is `test/rig/paint_microbench_test.dart`, skipped at
+ suite level by the `rig` tag in `dart_test.yaml` — pre-existing and by design.
+ 
+ **Plan 3c's exit gate: PASS.** All eight of its failable criteria were met —
+ zero new paragraph layouts and zero evictions in the steady-state frame at both
+ entity counts and on real hardware, `skippedTextCount` 0, peak live paragraphs
+ exactly at the declared limit, and 53 mutants accounted for. The one benchmark
+ failure is Plan 2's carried `snap at dirty threshold`.
+ 
+@@ -298,44 +314,63 @@ So the paragraph cache key carries no height, angle or width factor. It is
+ | 12 | Rigs, counters, the number the gate depends on | ⬜ not started |
+ | 13 | Mutation testing | ⬜ not started |
+ | 14 | Exit gate and the results note | ⬜ not started |
+ 
+ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
+ 
+ ---
+ 
+ ## Resume here
+ 
+-**Plan 3d is merged into `main` and its gate is 8 of 8.** The merged result is
+-green on all three packages, the tree is clean, and nothing is in flight.
+-
+-The last open item was the `CLAUDE.md` allocation amendment, and it is
+-**settled**: the human approved it on 2026-08-21 and the non-negotiable now
+-reads
++**Plan 3e (fills) is done, worked directly on `main`, nothing in flight.**
++Six of nine failable criteria PASS outright; one device timing row is
++recorded as measured-but-unevaluable (macOS Low Power Mode was on for the
++whole session); one (the translucent seam) is settled only for the routing
++rule and left explicitly open on Impeller/GPU, per the reviewer's own
++instruction not to write "no seam was found." No criterion failed. See
++[Plan 3e](#plan-3e--fills) above and
++[the results note](docs/superpowers/notes/2026-08-22-plan-3e-results.md) for
++every number.
++
++**Two things a resumer should do before trusting any 3e timing number:**
++`pmset -g | grep lowpowermode` before taking a new one — it read `1` (on)
++throughout this plan's own session and Plan 3d's already measured what that
++is worth (~24% uniform on raster and build). And the translucent-seam
++question needs a GPU-backed instrument (`flutter drive`'s real Impeller path,
++not `flutter_test`) to close — `flutter_test`'s software Skia does not
++antialias `drawVertices` at all, which this plan proved by direct probe and
++pinned as a permanent regression test.
++
++**Plan 3d is merged into `main` and its gate is 8 of 8.** The last open item
++was the `CLAUDE.md` allocation amendment, and it is **settled**: the human
++approved it on 2026-08-21 and the non-negotiable now reads
+ 
+ > **The frame path allocates nothing per entity in steady state, and O(1) per
+ > flush.** `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` and
+ > `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`
+ > measure it.
+ 
+ The plan measured the residue and stopped there rather than editing the rule
+ itself, because a gate that can be passed by editing the rule it is measured
+-against is not a gate.
++against is not a gate. **No plan since has needed the rule amended again** —
++3e measured against it and it still describes the work.
+ 
+ Plan 3d's open items were worked next, on `main` at `70d824e..0eac1be`: two
+-closed, one shown to be unclosable until a DXF reader exists. Nothing is in
+-flight.
++closed, one shown to be unclosable until a DXF reader exists.
+ 
+-**Next**: pick a plan from the roadmap below — 3e (fills) and 3f
+-(caches and tiles) are the named successors, and what 3d owes each is written
+-out at the end of
+-[the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
++**Next**: pick a plan from the roadmap below. **Plan 3f (caches and tiles)**
++is the named successor and what 3d and 3e owe it is written out at the end of
++[the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md)
++and [the 3e results note](docs/superpowers/notes/2026-08-22-plan-3e-results.md)
++respectively. **Permitted divergence 5** (overlapping translucent strokes on
++a triangle soup) is now live and still has no fixture — a candidate for a
++short follow-up before or alongside 3f.
+ 
+ ### What Plan 3d leaves open
+ 
+ Three of the five are closed. The full account, with every number, is the
+ **Follow-up** section at the end of
+ [the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md);
+ the nine new mutants are Part 4 of
+ [the mutation log](docs/superpowers/notes/plan-3d-mutation-log.md).
+ 
+ 1. ~~**The `CLAUDE.md` amendment.**~~ Settled 2026-08-21, above.
+@@ -357,22 +392,27 @@ the nine new mutants are Part 4 of
+ 4. ~~**The R4a/R4b control.**~~ **Closed 2026-08-21** — the three
+    backend-independent fields match exactly within each pair (R4a
+    2,081 / 46,511 / 292; R4b 1,970 / 46,696 / 241). **And the recorded cause was
+    wrong.** No grep pattern lost those fields: R4a and R4b kept the canvas-only
+    repaint guard after Task 13 fixed R2's, and under the vertices backend
+    `canvasCallCount` is 0 for a healthy frame, so **both vertices runs of record
+    failed** after printing `build`/`raster`/`command` and before printing
+    anything else. R4a and R4b never printed `screenSpaceLeafCount` at all. Fixed
+    at `0eac1be` by giving all three rigs one shared `requireRepaint` and
+    `printInvariants` — copies are how the drift happened.
+-5. **Permitted divergence 5 (overlapping translucent strokes) goes live the
+-   moment 3e adds fills.** It is inert today only because the corpus is opaque.
++5. **Permitted divergence 5 (overlapping translucent strokes) is now live**,
++   since Plan 3e adds fills — but **still not exercised by any fixture**.
++   Plan 3e's Task 15 measured the translucent-fill-triangulation seam
++   question (its own boundary's internal triangle edges) and found the
++   routing rule does not fire on the instrument available; it did not build a
++   fixture with an opaque stroke overlapping a translucent fill, which is
++   what this item names. Still open for whoever builds one.
+ 
+ ### What the next plan inherits from 3c
+ 
+ Six items, listed in full in the [results
+ note](docs/superpowers/notes/2026-08-20-plan-3c-results.md). The first blocks
+ shipping text to an application and has no owner:
+ 
+ 1. **Nothing outside the tests wires a real measurer into a document.**
+    `DraftDocument.empty` defaults to `InsertionPointMeasurer`, the zero
+    metrics, so `composeTransform`'s `height / capHeight` divides into zero —
+@@ -588,43 +628,73 @@ The results note must state **whether macOS Low Power Mode was on**.
+ moved up one: **fills is 3e** and **the picture cache is 3f**. That is the
+ numbering the Plan 3d design document uses in "What 3d owes the plans after it",
+ and it is the numbering the rest of this file uses — every `3d`/`3e`/`3f` above
+ was swept and corrected, including the picture-cache pointer in the 3b section
+ and the text-LOD item in 3c's carry-forward list. **Notes and plan documents
+ written before 2026-08-20 still call fills "3d" and the cache "3e"; read those
+ by name, not by number.**
+ 
+ ### Plan 3e — fills
+ 
+-**It inherits no mechanism from 3b.** The 3b design's "flush contract" — a fill
+-flushing open draw buckets — has nothing to attach to, because batching was
+-reverted — but 3d's vertices sink supersedes that concern entirely: **3e
+-inherits a triangle buffer already appended to in draw order, and a flush that
+-already happens before anything unbatchable.** `_flushBeforeUnbatchable` is the
+-shape any fill-flush contract extends.
+-
+-**The open problem:** draw order is ascending handle value, so a region's fill
+-must carry a **lower** handle than its boundary or it paints over its own
+-outline. But handles are monotonic by creation and the natural authoring order
+-is *draw the boundary, then hatch it* — which produces exactly the failing case.
+-3e must choose and state one of:
+-
+-- give the fill an explicit draw-order key the painter honours ahead of handle order, or
+-- require the region command to create boundary and fill in one transaction with the ordering reserved.
+-
+-**One thing 3e must not inherit silently.** Permitted divergence 5 —
+-overlapping translucent strokes — is **inert today only because the corpus is
+-opaque** (`argb`'s alpha is `255 - transparency`). A stroked path unions its
+-coverage; a triangle soup does not, so two quads that overlap double-blend. The
+-moment 3e draws anything with alpha < 255 that divergence is live and needs a
+-test. See the [3d results
+-note](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
++**Done — seventeen tasks, executed and reviewed one at a time directly on
++`main`** (no worktree; the brief scoped this plan to work in the main
++checkout, with `.superpowers/sdd/2026-08-21-jet-cad-2d-plan-3e-fills/` as its
++ledger, archived the same way a worktree plan's would be). Commit range:
++design and plan at `0eac1be..3201cc5`, the seventeen tasks at
++`3201cc5..f0ea51e` plus the results-note commit on top.
++
++**The open problem the plan named — solved.** Draw order is ascending handle
++value, so a region's fill must carry a lower handle than its boundary. The
++chosen answer is **`AddRegionCommand`**: one atomic command that allocates
++the fill's handle first, the boundary's second, refuses an inverted pair, and
++returns one `CommandResult` — so no observer, including undo/redo, can ever
++see a fill whose boundary does not yet exist. `FillIndex` (`fill_index.dart`)
++holds the triangulation cache and the fill→boundary reverse map, **keyed by
++`Handle`, never `geomIndex`**, because `purge()` renumbers every `geomIndex`
++wholesale and a slot-keyed cache would not go stale, it would go *permuted*.
++
++**Exit gate: 6 of 9 failable criteria PASS outright; 2 measured but not
++scored (a contaminated timing row, and the seam question left explicitly open
++on Impeller/GPU); 1 process criterion (the mutation log) PASS.** No criterion
++failed. Full detail, criterion by criterion:
++[docs/superpowers/notes/2026-08-22-plan-3e-results.md](docs/superpowers/notes/2026-08-22-plan-3e-results.md).
++Mutation log (56 mutants, 52 killed, 2 proven equivalent, 2 documented gaps):
++[docs/superpowers/notes/plan-3e-mutation-log.md](docs/superpowers/notes/plan-3e-mutation-log.md).
++
++**Four facts worth carrying forward, because no single per-task report states
++them together:**
++
++1. **Measured on Flutter 3.47.1** (framework `6655482ec0`), not the 3.47.0 the
++   plan's own header states — the upgrade landed mid-plan, between Tasks 2 and
++   3, and broke nothing checkable.
++2. **macOS Low Power Mode was on for the whole of Task 16's device session.**
++   Every timing row in it carries that mark; per Plan 3d's own measurement,
++   that is a uniform ~24% penalty on both raster and build, not a rounding
++   error.
++3. **The 10,000-entity-under-16.67ms criterion is therefore MEASURED, not
++   PASS** — both numbers (build 9.12ms, raster 5.00ms) clear the bar by a wide
++   margin, but a contaminated timing row is recorded rather than scored.
++4. **The translucent seam's routing rule does not fire (fills batch,
++   settled), but the mode-2 mechanism itself is open on Impeller/GPU** —
++   `flutter_test`'s software Skia cannot antialias `drawVertices` at all
++   (proven by probe, pinned as a permanent regression test), so the measured
++   `0.000%` is a property of the instrument. Do not read it as "no seam was
++   found."
++
++**One thing 3e did not close.** Permitted divergence 5 — overlapping
++translucent strokes double-blending on a triangle soup — is now **live**
++(fills exist and can carry alpha < 255) but **still not exercised by any
++fixture**. Task 15 measured a different, narrower question (a translucent
++fill's own internal triangulation seam), not this one. Open for 3f or a
++follow-up. See the [3d results
++note](docs/superpowers/notes/2026-08-21-plan-3d-results.md) for where this
++divergence was first named.
+ 
+ ### Plan 3f — the definition/tile picture cache
+ 
+ **What 3d hands it.** A picture cache that records into a `Picture` interacts
+ with a sink that batches across residuals: 3f must decide whether a cached
+ picture flushes the vertex buffer at its boundary. There is **no crossover
+ number** to work against — the vertices backend's raster margin is still
+ widening at 500,000 entities — and there is **96.00 MiB of vertex buffer pinned
+ for the widget's life** at that corpus size, which is the arithmetic a tiling
+ scheme changes. Read the margin against **canvas calls**, not entity count: a
+diff --git a/docs/superpowers/notes/2026-08-22-plan-3e-results.md b/docs/superpowers/notes/2026-08-22-plan-3e-results.md
+new file mode 100644
+index 0000000..01bd713
+--- /dev/null
++++ b/docs/superpowers/notes/2026-08-22-plan-3e-results.md
+@@ -0,0 +1,523 @@
++# Plan 3e results and exit gate — fills
++
++**Run of record:** 2026-08-22, on `main`, directly (no worktree — this plan
++worked on `main` throughout, per its own brief).
++**Commit range:** design and plan at `0eac1be..3201cc5`; the seventeen tasks
++at `3201cc5..f0ea51e` (Tasks 1–16) plus this task's own results commit on top.
++Ranges, not counts — a count is falsified by the commit that writes it.
++**Spec:** `docs/superpowers/specs/2026-08-21-jet-cad-2d-plan-3e-design.md`
++(referenced by the plan; not re-read line by line here).
++**Plan:** [`docs/superpowers/plans/2026-08-21-jet-cad-2d-plan-3e-fills.md`](../plans/2026-08-21-jet-cad-2d-plan-3e-fills.md)
++**Mutation log:** [`plan-3e-mutation-log.md`](plan-3e-mutation-log.md) — 56
++mutants accounted for, 52 killed, 2 proven equivalent, 2 documented gaps.
++**Per-task ledger:** `.superpowers/sdd/2026-08-21-jet-cad-2d-plan-3e-fills/`,
++to be archived to `docs/superpowers/ledgers/` alongside this note.
++
++---
++
++## Verdict
++
++**Six of nine failable criteria pass outright. One is measured and cannot be
++honestly evaluated from what exists (a contaminated timing row — recorded, not
++scored). One is settled only in part, on the instrument this plan could
++measure with, and is explicitly left open on the engine this codebase ships
++on. One (the mutation log) is a process criterion, satisfied.** No criterion
++failed. Nothing here was tuned to make a number comply.
++
++| # | Criterion | Verdict | The deciding evidence |
++|---|---|---|---|
++| 1 | Allocations per fill in a steady-state frame — zero | **PASS** | `paint_allocation_test.dart`: `debugCapacityVertices` unchanged across the subject frame on a 200-fill corpus; `fillCount > 0`, `skippedFillCount == 0` |
++| 2 | 10,000 entities, fills on, vertices backend — under 16.67 ms | **MEASURED, UNEVALUABLE** — macOS Low Power Mode was **on** for every device row | build p50 **9.12 ms**, raster p50 **5.00 ms** (Task 16, run 2) — both numbers are under threshold, but the row is contaminated and the honest reading is "does not settle the question," not "passed" |
++| 3 | A fill's cost in `canvasCalls` on the vertices backend — zero | **PASS** | Task 16: `canvasCalls=0` on every `BACKEND=vertices` row, `FILLS=true` and `FILLS=false` alike |
++| 4 | Ink agreement, opaque fills | **PASS** | Task 14 (fix round): canvas 174,135 / vertices 174,130 ink pixels, **0 stray, 0 uncovered** — well past the 4,000-pixel floor and the ≤1% ceilings |
++| 5 | Translucent seam | **PARTLY SETTLED — do not read as "no seam"** | `SEAM interior=656204 over8=0 fraction=0.000% worst=0`; the rule does not fire, so fills batch — that part is settled. The mode-2 mechanism itself is **open on Impeller/GPU**: `flutter_test`'s software Skia does not antialias `drawVertices` at all (proven by probe, pinned as a permanent regression test), so the 0.000% is a property of the instrument, not evidence the seam is absent |
++| 6 | `skippedFillCount` on the rig corpus — zero | **PASS** | Task 16: all four `FILLS=true` runs, `skippedFills=0` |
++| 7 | A malformed fill in a loaded document | **PASS** | Task 8's five `validate()` codes, all five re-confirmed killed today, one-fixture-per-code, 0 cross-contamination |
++| 8 | Triangulation entries after `purge()` | **PASS** | Task 3's keying mutant, re-derived across today's full six-call-site surface (not just the two files it touched at Task 3's own time) — still killed, and now also breaks undo/redo, which the original test didn't know to check |
++| 9 | Cache entries after removing every fill's boundary — zero | **PASS** | Task 6's `T6b`, re-confirmed: `entryCount` goes to 0 only when `dropBoundary` actually runs; entity liveness alone stays green under the mutation |
++| 10 | Load-time triangulation cost | **MEASURED AND RECORDED, no threshold** | `LOAD fills=5000 elapsed=66ms` (today's re-run; Task 16's own run read 68ms) |
++| 11 | The mutation log | **PASS** | 56/56 accounted for — see [the log](plan-3e-mutation-log.md) |
++
++**If a failable row misses, the rule is "record the number and stop."**
++Nothing here misses outright. Two rows (2 and 5) are recorded as **not
++settleable** by what exists rather than scored pass or fail, per the
++instruction that governs exactly this situation: measure honestly, say why it
++does not decide the question, and do not force a verdict a contaminated or
++instrument-blind measurement cannot support.
++
++---
++
++## Four facts the per-task reports never state together
++
++### 1. Flutter upgraded mid-plan: 3.47.0 → 3.47.1, between Tasks 2 and 3
++
++Confirmed again today:
++
++```
++$ flutter --version
++Flutter 3.47.1 • channel stable • https://github.com/flutter/flutter.git
++Framework • revision 6655482ec0 (2 days ago) • 2026-08-19 10:07:23 -0700
++```
++
++Task 3's report records the cause directly: three of four implementer-agent
++stalls were the auto-update triggering a full Dart SDK re-download
++mid-session (`curl --continue-at - ... dart-sdk-darwin-arm64.zip`, about ten
++minutes, diagnosed via `ps aux` rather than by re-reading transcripts). **The
++plan's own header states 3.47.0; every measurement from Task 3 onward,
++including everything in this results note, was taken on 3.47.1, framework
++`6655482ec0`.** The upgrade broke nothing that could be checked: the golden
++suite held (23/23 at Task 3's own check, 29/29 today) and Plan 3c's Ruling 22
++test-font tripwire held throughout.
++
++### 2. macOS Low Power Mode was ON for every device timing row in Task 16
++
++```
++$ pmset -g | grep lowpowermode
++ lowpowermode         1
++```
++
++Read before this task's own gate re-run, and it was **already** on when Task
++16 took its six device transcripts (Task 16's own report opens with this
++exact reading). This repository has been bitten by exactly this contamination
++twice before: Plan 3b's entire timing set is contaminated with no clean
++control, and Plan 3d measured the effect directly with Low Power Mode off —
++**a uniform ~24% penalty on both raster and build**, not the 4–12× Plan 3b's
++own note guessed, and CPU-only paths (closer to what the vertices backend's
++`build` phase does) run **23–40% faster** with it off, contradicting Plan 3b's
++claim that CPU-only paths are unaffected.
++
++**Every timing row in Task 16 carries this mark. None of the six device
++transcripts is a clean number.** The directional comparisons inside Task 16
++(vertices build/raster far below canvas's; `FILLS=true` vs `FILLS=false`
++leaving `dashSpans`/`collapsed` unchanged) are still meaningful, because Low
++Power Mode's ~24% is a near-uniform multiplier applied to both arms of each
++comparison — but no absolute number from that session should be read as a
++clean measurement, and none is here.
++
++### 3. Criterion 2 (10,000 entities, fills on, vertices, under 16.67 ms) is a timing row, and cannot be honestly evaluated
++
++The row exists:
++
++```
++R2 (10000) frames=243
++  build  p50=9.12ms p95=11.18ms max=201.24ms            [CONTAMINATED]
++  raster p50=5.00ms p95=6.67ms max=80.99ms              [CONTAMINATED]
++  fills=18 skippedFills=0
++  backend=vertices triangles=207343 drawVerticesCalls=1
++```
++
++Both `build` p50 (9.12 ms) and `raster` p50 (5.00 ms) are numerically under
++16.67 ms, by a wide margin — wider than the ~24% contamination could plausibly
++erase. **This note still does not mark the row passed.** The plan's own rule
++for a failable row that misses is "record the number and stop"; the honest
++form of that rule for a row that is **measured but contaminated** is to record
++the number, say plainly that Low Power Mode makes it unevaluable as a clean
++result, and stop there rather than either asserting a pass the contamination
++undermines or manufacturing a failure the numbers do not show. **Recorded:
++measured, not scored.** Re-measuring with Low Power Mode off is the only way
++to close this row, and it was not done in this task — Task 17's brief scopes
++this task to re-running mutations and writing the note, not to retaking
++device timings.
++
++### 4. The translucent seam question is open on Impeller/GPU
++
++Task 15 measured `SEAM interior=656204 over8=0 fraction=0.000% worst=0`
++against the design's declared rule (routing fires above 0.5% at 8/255, or any
++pixel at 32/255). **The rule does not fire, and that part is genuinely
++settled: fills batch through `VerticesDrawSink.fillPolygon` unchanged, no
++routing change was needed.**
++
++What is **not** settled is whether the mode-2 mechanism — two triangles each
++contributing partial coverage to a shared edge pixel, compounding into a
++double blend — exists on the engine this codebase actually ships on. Task
++15's own reviewer-driven addendum proved, by direct probe against
++`Canvas.drawVertices` (not through any sink), that `flutter_test`'s software
++Skia **does not antialias `drawVertices` at all**, independent of the
++`isAntiAlias` paint flag: the exact same slope shows real partial-coverage
++values under `drawPath` (`224,232,247`, `167,189,233` — genuinely between
++white and the full-coverage colour) and only flat, fully-covered or fully-white
++values under `drawVertices`, at the identical sampled coordinates. This is
++pinned as a permanent regression
++(`packages/jet_cad_2d_flutter/test/drawvertices_antialiasing_test.dart`, 2
++tests, both green today) so a future Skia upgrade that starts antialiasing
++`drawVertices` would be caught before anyone reads Task 15's `0.000%` as
++settled.
++
++**The correct sentence, and the one this note uses:** the mode-2 question is
++open on Impeller/GPU, unmeasured by anything in this repository's test suite,
++because the suite's picture-capture path cannot see the mechanism the design
++predicts — on any geometry, not only Task 15's fixture. Per Task 15's own
++amended report: **do not write "no seam was found."** This note does not.
++
++---
++
++## The exit gate, criterion by criterion
++
++### Criterion 1 — allocations per fill in a steady-state frame, zero
++
++Re-run today:
++
++```
++$ cd packages/jet_cad_2d_flutter && flutter test test/invariants/paint_allocation_test.dart
++00:00 +0: a steady-state frame allocates O(1) per flush, not O(entities)
++00:00 +1: flush hands drawVertices the same Paint object every time, not a call-site-local one
++00:00 +2: load-time triangulation cost, recorded
++LOAD fills=5000 elapsed=66ms
++00:00 +3: All tests passed!
++```
++
++The 200-fill corpus (`_corpus()`, `_fillFraction = 0.4`) is warmed up three
++times, then `sink.debugCapacityVertices` is read before and after the subject
++frame and compared for equality — a fill's triangles land in the same
++doubling-reserve buffer every other primitive does, so a fill that needed to
++grow the buffer in steady state would show up here exactly like any other
++entity would. `painter.fillCount > 0` and `painter.skippedFillCount == 0` are
++asserted directly, so the gate cannot pass vacuously on a corpus that carries
++no fills or silently drops them all.
++
++**PASS.** T4c (materialises triangles at command time, not draw time) is the
++mutation that actually proves eager population — see the caveat below on what
++this specific allocation mechanism can and cannot see.
++
++**A documented caveat, found while re-deriving the cross-task mutants (see
++the mutation log's Part 2, mutant #4):** `debugCapacityVertices` measures only
++`VerticesDrawSink`'s own vertex-buffer capacity. A fill that computed a fresh
++triangulation on the frame path (a genuine "populate lazily on first draw"
++defect) would allocate an `Int32List` on the general Dart heap without
++necessarily growing the sink's own buffer, because the warm-up frames have
++already sized that buffer to the corpus's worst case. Constructing exactly
++this mutation and forcing a cache miss on the subject frame (by clearing
++`doc.fills` immediately before it) leaves this specific assertion green. **The
++gate's own doc comment claims a cache miss "would show up here immediately as
++a per-fill allocation" — that claim does not hold for this mechanism.** It is
++`T4c`'s direct assertion (materialisation happens at `apply()` time, not
++`_drawFill` time) that actually carries this criterion, not the allocation
++gate's buffer-capacity read. Recorded so a future task does not lean on the
++allocation gate for a claim it cannot make.
++
++### Criterion 2 — 10,000 entities, fills on, vertices backend, under 16.67 ms
++
++**MEASURED, UNEVALUABLE.** See fact 3 above. Task 16's run:
++
++```
++R2 (10000) frames=243
++  build  p50=9.12ms p95=11.18ms max=201.24ms            [CONTAMINATED]
++  raster p50=5.00ms p95=6.67ms max=80.99ms              [CONTAMINATED]
++  fills=18 skippedFills=0
++  backend=vertices triangles=207343 drawVerticesCalls=1
++```
++
++Both numbers clear the threshold by a wide margin. This note records the
++number and does not mark the row passed, because macOS Low Power Mode was on
++for the entire session that produced it and this project has twice measured
++what that contamination is worth (Plan 3d: ~24% uniform on raster and build;
++CPU-bound paths run 23–40% faster with it off) — a margin this row's numbers
++do not obviously survive being told apart from. **What it implies for 3f:**
++any plan that inherits a timing-sensitive criterion from device rows taken in
++this session must re-take them with Low Power Mode confirmed off before
++treating the number as clean, exactly as Plan 3d's own note had to be
++re-measured after Plan 3c's contamination was discovered.
++
++### Criterion 3 — a fill's cost in `canvasCalls` on the vertices backend, zero
++
++Task 16, all four device transcripts:
++
++| run | backend | FILLS | canvasCalls |
++|---|---|---|---|
++| 1 | canvas | true | 50,969 |
++| 2 | vertices | true | **0** |
++| 3 | canvas | true | 54,381 |
++| 4 | vertices | true | **0** |
++| 5 | canvas | false | 50,893 |
++| 6 | vertices | false | **0** |
++
++Every vertices row reads `canvasCalls=0` regardless of whether fills are
++present — a fill costs the vertices backend nothing in `canvasCalls` because
++nothing about a fill routes through `CanvasDrawSink` on that backend at all.
++This is a structural fact (`fillPolygon`/`fillCircle` are handled entirely
++inside `VerticesDrawSink`, with no fallback path the way `text` has one), not
++a timing measurement, so it is not marked contaminated.
++
++**PASS.**
++
++### Criterion 4 — ink agreement, opaque fills
++
++Task 14's fix round (the amended `fillComparisonDoc`, a pentagon, a circle
++and a concave L-tromino pivoted at its convex tip and scaled 3×, so the fixture
++both clears the non-vacuity floor and gives a real triangulation mutant real
++margin to be caught by):
++
++```
++UNMUTATED CANVAS=174135 VERTICES=174130 STRAY=0 UNCOVERED=0
++```
++
++`canvasInkPixels = 174,135`, clearing the 4,000-pixel non-vacuity floor by
++close to two orders of magnitude. `strayVerticesPixels / canvasInkPixels =
++0.0000%` and `uncoveredCanvasPixels / canvasInkPixels = 0.0000%`, both inside
++the ≤1% ceiling with room to spare. Re-running the round's own T14a mutation
++(fan from vertex 0) against this exact fixture: `STRAY=7744`, `7744/174135 =
++4.45%` — clears the 1% ceiling by roughly 4.4× rather than by a coin flip,
++which is the property the fix round exists to guarantee (the first attempt's
++fixture cleared the ceiling by a margin of 0.02 percentage points, a
++measurement noise-level result the coordinator rejected).
++
++**PASS.**
++
++### Criterion 5 — translucent seam
++
++See fact 4 above in full. **The routing rule does not fire, and fills
++continue to batch unchanged — that half is PASS.** The mode-2 mechanism
++itself is **OPEN on Impeller/GPU**, not evaluable by anything this repository
++can run today, and this note states that rather than reading the 0.000% as
++proof of absence.
++
++### Criterion 6 — `skippedFillCount` on the rig corpus, zero
++
++Task 16, all four `FILLS=true` runs: `skippedFills=0` in every one — the two
++device rows at 10,000 entities (canvas and vertices) and the two at 50,000.
++The corpus's fill placement corridor (derived from replaying R2's own
++pan/zoom script — 120 pan steps, `Offset(-7,-3)`, zoom anchor `(800,600)`,
++factors 1.03/0.97) was purpose-built after a real bug was found mid-task: a
++uniform scatter or a fixed-point cluster both missed R2's actual measurement
++window, which sits well away from the fit's initial centre after 120 pan
++steps move it by `(+3228, -1355)` world units.
++
++**PASS.**
++
++### Criterion 7 — a malformed fill in a loaded document
++
++Task 8's five `validate()` codes — `fillBoundaryMissing`,
++`fillBoundaryNotFillable`, `fillBoundaryNotClosed`, `fillBoundaryForeignOwner`,
++`fillDrawOrderInverted` — each deleted and re-run today, each time inside one
++shell call (delete the block, run the suite, restore, diff clean). Each
++deletion failed **exactly one** named test and no other:
++
++| deleted check | failing test | other fill tests failing |
++|---|---|---|
++| `fillBoundaryMissing` | `a fill naming nothing is reported` | 0 |
++| `fillBoundaryNotFillable` | `a fill on a text entity is reported as not fillable` | 0 |
++| `fillBoundaryNotClosed` | `a fill on an open polyline is reported as not closed` | 0 |
++| `fillBoundaryForeignOwner` | `a fill in a different owner than its boundary is reported` | 0 |
++| `fillDrawOrderInverted` | `an inverted pair is reported and nothing is changed` | 0 |
++
++The "0 other tests failing" column is the property Task 8's fix round exists
++to guarantee: the round-1 fixtures allocated the fill's handle *after* the
++boundary's, so `fillDrawOrderInverted` silently fired alongside every other
++fixture and the isolation was incidental, not real. The fixed fixtures
++allocate in the production order (`AddRegionCommand.allocate`'s own order)
++and every assertion moved from `contains(...)` to exact list equality — that
++discipline still holds today; nothing repairs, none mutates the document.
++
++**PASS.**
++
++### Criterion 8 — triangulation entries after `purge()`
++
++Task 3's keying mutant is the deliverable for this criterion, and it was not
++merely re-run today — it was **re-derived against a much larger surface**
++than it had at Task 3's own time. In `a21188d`, `FillIndex` had exactly two
++callers (its own test file); today it has six production call sites across
++both packages (`json_codec.dart`, `commands.dart` twice, `draft_painter.dart`,
++`reference_walk.dart`) plus test-file call sites in three more files, all of
++which needed patching together for a `geomIndex`-keyed `FillIndex` to even
++compile.
++
++**KILLED**, and more broadly than before: `the index survives a purge because
++handles do` fails (`Expected: [0, 1, 2] / Actual: null`) when the read side
++uses the entity's *current* `geomIndex` rather than the stale write-time
++value — confirming the failure mode the design names is "permuted/orphaned,"
++not "stale in a way that happens to still work." **Collateral finding, not
++itself required by the criterion but worth recording:** the same mutation
++also breaks two unrelated, pre-existing tests — `removing a boundary removes
++its fill, and undo restores both` and `undo removes both halves and redo
++restores the same handles` — because `geomIndex` is not stable across
++undo/redo, only handles are. The handle-keying decision protects more of this
++plan's surface than its own dedicated test suite advertises.
++
++"Drawing unchanged, byte for byte" reads here as: the exact same `Int32List`
++values (`[0, 1, 2]`) that were written before the purge are the values found
++after it — not a fresh recomputation that happens to agree, but the identical
++stored data, because nothing about the purge touches `FillIndex` at all
++(`draft_document.dart`'s own comment: "`fills` is deliberately untouched...
++adding an invalidation here would be correct-looking and wrong").
++
++**PASS.**
++
++### Criterion 9 — cache entries after removing every fill's boundary, zero
++
++Task 6's `T6b` (cascade the removal but forget the `dropBoundary` call),
++re-run today:
++
++```
++Expected: <0>
++  Actual: <1>
++```
++
++`entryCount` is what catches this — entity liveness alone (`slotOf(...)`
++returning null for both halves) stays green under this mutation, exactly as
++Task 6's report warned it would; it is the direct `FillIndex.entryCount`
++assertion that proves the triangulation entry is actually gone, not merely
++that the entities that used to reference it are.
++
++**PASS.**
++
++### Criterion 10 — load-time triangulation cost
++
++```
++$ flutter test test/invariants/paint_allocation_test.dart
++LOAD fills=5000 elapsed=66ms
++```
++
++Re-run today on `fillHeavyCorpus()` (5,000 fills, `fraction: 1.0`, every
++boundary a region) — `DraftDocumentCodec.decodeString` on the encoded JSON,
++wall-clock via `Stopwatch`. Task 16's own run read `68ms`; today's `66ms` is
++consistent within session-to-session variance and is not itself a device
++frame-timing row (it runs inside `flutter test`, not `flutter drive`), so it
++carries no Low Power Mode contamination mark, though the machine's overall
++clock speed is still whatever Low Power Mode leaves it at. **No threshold is
++declared for this row**, per the brief's own instruction; it is recorded as
++the cost eager materialisation owes, and it has to land somewhere.
++
++**MEASURED AND RECORDED.**
++
++### Criterion 11 — the mutation log
++
++56 mutants accounted for across Tasks 1–15's own named mutations plus the
++five cross-task mutants this task's brief names as belonging to no single
++task. 52 killed outright on today's tree, 2 proven equivalent mutants (T2c,
++T5d — both argued formally in the log, not merely asserted), 2 documented
++coverage gaps with the argument given (T9c; cross-task mutant #4). One
++additional, unscheduled finding: a mutation that **survived** at Task 9's own
++time (the oracle at `reference_query.dart:210`) is **now killed**, because
++Task 10's `_regionFill()` corpus fixture — added one task later, for an
++unrelated reason — closed exactly the gap Task 9's report recorded and left
++open. Full detail: [`plan-3e-mutation-log.md`](plan-3e-mutation-log.md).
++
++**PASS.**
++
++---
++
++## Nine plan defects found and corrected during execution
++
++All nine share one root cause: **an API written from memory rather than
++looked up.** None changed what got built; all cost implementer time
++re-deriving the real signature from the tree.
++
++1. `JsonCodec.save`/`JsonCodec.load` — the real class is `DraftDocumentCodec`,
++   with `encode`/`decode`/`encodeToString`/`decodeString`. Named in at least
++   three separate briefs' Step-1 snippets (Tasks 7, 8, 16) before being
++   corrected each time.
++2. `GroupNode(handle: ..., parent: ...)` missing the required `transform` and
++   `children` fields (Task 8).
++3. `CommandDispatcher.execute` assumed to return a `CommandResult`; it is
++   `void` in this codebase, and the established pattern for observing
++   `touched` synchronously is `onAfterMutate` (Task 5).
++4. `CanvasDrawSink._popTransform()`, which does not exist — every other
++   primitive pushes the transform once per residual and lets `endResidual()`
++   pop it once; there is no per-op pop anywhere in the file (Task 11).
++5. `index.boxOfLeaf`/`index.dirty` called on a `SpatialIndex` receiver; both
++   are members of `ContainerIndex`, reached via `SpatialIndex.rootIndex`
++   (Task 9).
++6. `expectPainterSupersetOfReference(doc)` called with one argument; the real
++   helper takes `(painter ops, reference ops, viewport, {edgeBandPx})` (Task
++   13).
++7. `SpyCanvas.lastPaintStyle`/`drawPathCount`, which do not exist — the real
++   API is `spy.named('drawPath')`/`.paintingStyle`/`.length` (Task 11).
++8. The ear-clipping code, transcribed verbatim from the brief's own Step 3,
++   failed its own Step 4 test: the bow-tie self-intersection fixture returned
++   two triangles covering the whole square instead of empty, because the
++   "no ear anywhere" stall the brief's comment relies on cannot fire for a
++   self-intersection that crosses through edges the clipper never diagonals
++   across. Fixed with an explicit upfront proper-crossing check (Task 2).
++9. The instruction "T14a must red both backends" contradicted the design's
++   own architecture: `CanvasDrawSink.fillPolygon` never reads the
++   triangulation at all (it fills a `Path` by Skia's own winding rule), so no
++   fixture at any size can make the canvas backend sensitive to a
++   triangulation-only mutant. Reported rather than force-fit (Task 14).
++
++---
++
++## Deferred minors, triaged
++
++- **`GeometryStore.peek`'s doc comment states an aliasing hazard that every
++  write path forecloses.** Confirmed directly (Task 5): `GeometryStore.replace`
++  always builds a fresh `GeometryPayload` with fresh `Float64List`s rather
++  than mutating a stored object's arrays in place, and `grep -rn '\.coords\['
++  lib/` shows every hit in this codebase is a read. The comment describes a
++  real hazard in the abstract (a future in-place vertex-drag optimisation
++  would reintroduce it) but no reachable code path today exercises it — this
++  is also **why T5d is a proven equivalent mutant, not a test gap.** Leave the
++  comment; it is forward-looking documentation, not a stale claim about
++  today's code. No action needed unless a future task adds an in-place write.
++- **`draft_document.dart:266-267`'s comment justifies `read` over `peek`
++  imprecisely.** Not independently re-verified in this task beyond confirming
++  the surrounding code still reads as Task 9 described it. Left for whoever
++  next edits `_boundsOfContainer` to tighten, since it is a comment-accuracy
++  issue with no behavioural weight.
++- **`fill_seam_test`'s probe 2 hardcodes an exact colour constant**
++  (`153,178,229,255`, the Porter-Duff composite of `0x3366CC` at alpha `0x80`
++  over white). This is a legitimate, derived-and-checked constant (Task 15's
++  report shows the arithmetic), not a magic number, but it will need
++  recomputing by hand if the fixture's colours or alpha ever change. No action
++  needed now.
++- **Task 16's placement corridor is coupled to today's pan/zoom script
++  constants** (120 steps, `Offset(-7,-3)`, zoom anchor `(800,600)`, factors
++  1.03/0.97). If `measurement_rig.dart`'s script changes, the corpus's fill
++  placement could silently under-cover the measured window again — the only
++  safety net is the `fills=`/`skippedFills=` printed line itself, the same
++  net Task 16 relies on for the `FILLS` define generally. Recorded, not
++  fixed, since strengthening it is outside this task's scope and outside
++  Task 16's stated scope too.
++
++---
++
++## `CLAUDE.md`
++
++**Not amended.** Every non-negotiable this plan measured against still
++describes this work:
++
++- The frame path allocates nothing per entity in steady state (criterion 1,
++  PASS) and O(1) per flush — fills add no new per-entity allocation and no
++  new per-flush object.
++- Draw order is ascending handle value, stable across undo, save, load and
++  purge — `AddRegionCommand`'s fill-before-boundary handle ordering and
++  criterion 8's purge survival both hold this exactly.
++- Geometric decisions use `Tolerance`; stored-value comparisons are exact
++  `==` — the triangulator's closedness check, `_isEar`'s containment test,
++  and `_hasSelfIntersection`'s proper-crossing test are all exact comparisons
++  by design (Task 2's report), and `boundaryHandleOf`'s `Handle` round trip
++  through a `double` is exact by construction.
++
++No criterion here needed the rule amended to pass, and none is recorded as
++failing because the rule does not describe the work — the precedent Plan 3d
++set for criterion 7 does not apply to anything in this plan.
++
++---
++
++## What this implies for Plan 3f
++
++- **Any timing-sensitive criterion 3f inherits from this session's device
++  rows must be re-taken with Low Power Mode confirmed off first.** Criterion
++  2 here is the second plan in a row (after Plan 3d's initial Plan 3c
++  contamination) to be unable to close a timing criterion cleanly for this
++  reason. Check `pmset -g | grep lowpowermode` before, not after.
++- **Permitted divergence 5 (overlapping translucent strokes double-blending
++  on a triangle soup) is now live**, per Plan 3d's own note — 3e's translucent
++  fills are exactly the case that makes it reachable. Task 15 measured the
++  *seam* question and found the routing rule does not fire on the instrument
++  available; it did **not** measure divergence 5 itself (opaque strokes
++  overlapping a translucent fill, rather than a fill's own internal
++  triangulation seam). That is a distinct, still-open question for whoever
++  next builds a fixture with both a translucent fill and an overlapping
++  stroke.
++- **The mode-2 seam question needs a GPU-backed instrument to close, not
++  another software-Skia measurement.** `flutter_test`'s picture-capture path
++  is structurally blind to partial-coverage antialiasing on `drawVertices`;
++  closing this needs either `flutter drive`'s real Impeller path with a pixel
++  probe, or an external tool that can inspect a GPU-rendered frame.
++- **The allocation gate's `debugCapacityVertices` mechanism cannot see a
++  non-buffer heap allocation.** A "lazy populate" style defect on any future
++  frame-path cache would need either a genuine VM allocation-profile
++  mechanism (like `packages/jet_cad_2d/test/invariants/vm_allocation_meter.dart`,
++  not currently available to the Flutter-side test suite) or a
++  command-time-materialisation assertion in the style of `T4c`, not a buffer
++  capacity read.
+diff --git a/docs/superpowers/notes/plan-3e-mutation-log.md b/docs/superpowers/notes/plan-3e-mutation-log.md
+new file mode 100644
+index 0000000..157c4d2
+--- /dev/null
++++ b/docs/superpowers/notes/plan-3e-mutation-log.md
+@@ -0,0 +1,307 @@
++# Plan 3e mutation log — fills
++
++Every mutant this plan named, from Tasks 1–15's own per-task reports, **re-run
++on today's merged code** (`main` at `f0ea51e`, the commit before this task's
++own), plus the five cross-task mutants Task 17's brief names as belonging to
++no single task. Every mutation used the `cp`/`trap` harness inside one shell
++call — mutate, test, restore — and **never `git checkout`** to revert one, per
++this plan's own non-negotiable. `git status --porcelain` was read after every
++restore and showed no residual diff in every case below.
++
++**Verdict: 56 mutants accounted for. 52 killed, 4 recorded as not killable —
++2 proven equivalent mutants, 2 documented coverage gaps with the argument
++given.** One additional finding, not itself a new mutant: a mutation that
++**survived at Task 9's own time is now killed**, because Task 10's `_regionFill`
++corpus fixture closed the gap Task 9 recorded. Task 15's forced-seam mutation
++and its permanent regression test (`drawvertices_antialiasing_test.dart`) are
++counted once, in Part 1.
++
++| Category | Count |
++|---|---|
++| Killed, re-confirmed on today's tree | 52 |
++| Equivalent mutants (proven, not fixture gaps) | 2 — T2c, T5d |
++| Documented coverage gaps (real survivors, argued) | 2 — T9c, cross-task #4 |
++| **Total accounted for** | **56** |
++
++---
++
++## Part 1 — Tasks 1–15's own mutants, re-run today
++
++### Task 1 — `EntityKind.fill`
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T1a | insert `fill` first in the enum instead of appending | **KILLED** | `fill is the last EntityKind, and its ordinal is stable` — `Expected: EntityKind.fill / Actual: EntityKind.attrib` |
++
++### Task 2 — the triangulator
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T2a | drop winding normalisation | **KILLED** | `a clockwise loop is normalised, not rejected` — exactly this one fixture, none other |
++| T2b | emit a fan instead of clipping ears | **KILLED** | `an L-shape is triangulated...` (400 vs 300) and the pinch fixture |
++| T2c | `if (!clipped) break;` instead of `return Int32List(0);` | **SURVIVED — proven equivalent** | the post-loop `if (index.length != 3) return Int32List(0);` unconditionally re-catches the same condition whenever `!clipped` fires (`index.length` is always `>= 4`, hence `!= 3`); `break` and `return` are byte-identical in every reachable execution of this exact code |
++| T2d | accept reflex vertices as ears (`area == 0` instead of `area <= 0`) | **KILLED** | the pinch fixture: `Expected: empty / Actual: [2,3,4, 1,2,4, 5,0,1, 1,4,5]` |
++| T2e | drop the consecutive-duplicate collapse | **KILLED** | both duplicate-point fixtures |
++
++### Task 3 — `FillIndex`
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T3a | `trianglesFor` returns a defensive copy | **KILLED** | `a hit returns the stored list itself, not a copy` |
++| T3b | `dropBoundary` forgets the links | **KILLED** | `dropBoundary removes the triangles and every link naming it` |
++| T3c | `fillsOf` returns insertion order | **KILLED** | `fillsOf returns every fill naming a boundary, in handle order` |
++| keying | the cache keyed by `geomIndex` instead of `Handle` | **KILLED, and re-derived across today's larger surface — see Part 2** | see cross-task mutant #1 |
++
++### Task 4 — `AddRegionCommand`
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T4a | allocate the boundary's handle before the fill's | **KILLED** | `the fill gets the lower handle, so it draws underneath` and 3 more |
++| T4b | drop the ordering re-check | **KILLED** | `apply refuses an inverted pair rather than drawing it wrong` |
++| T4c | don't populate triangles at command time | **KILLED** | `the triangulation is materialised by the command, not by a draw` and the undo/redo test |
++| T4d | accept a nearly-closed loop | **KILLED** | `an unfillable boundary is refused before anything is written` |
++
++### Task 5 — `SetEntityGeometryCommand`
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T5a | drop dependent fills from `touched` | **KILLED** | `editing a boundary re-triangulates and touches its fills` |
++| T5b | do not re-triangulate after the edit | **KILLED** | same test, on triangle count |
++| T5c | accept a fill's own geometry as editable | **KILLED** | `it refuses a fill, because a fill's payload is a reference` |
++| T5d | inverse reads via `peek` instead of `read` | **SURVIVED — proven equivalent** | `GeometryStore.replace` always builds a fresh `GeometryPayload` with fresh `Float64List`s rather than mutating one in place, so nothing in this codebase writes into a stored payload's arrays; a `peek`-based inverse cannot be observably distinguished from a `read`-based one by any command-level test |
++
++### Task 6 — `RemoveEntityCommand` cascades to fills
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T6a | do not cascade, leave the fill orphaned | **KILLED** | `removing a boundary removes its fill, and undo restores both` (`StateError`) |
++| T6b | cascade but forget the index (`dropBoundary` not called) | **KILLED** | `entryCount` stays 1 instead of 0 — entity liveness alone stays green, the index-entry assertion is what catches it |
++| T6c | removing a fill forgets to unlink it | **KILLED** | `removing a fill alone unlinks it and leaves the boundary drawable` |
++
++### Task 7 — schema 5 and the load-time rebuild
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T7a | drop the `_rebuildFills` call | **KILLED** | `load leaves the fill index populated, not empty` |
++| T7b | leave `kSchemaVersion` at 4 | **KILLED** | `the schema version is 5, and a v6 document is refused` |
++
++### Task 8 — `validate()`'s five fill codes
++
++Five deletions, each in its own shell call, each restored and diffed
++byte-identical before the next ran.
++
++| deleted check | verdict | killed by | other fill tests failing |
++|---|---|---|---|
++| `fillBoundaryMissing` | **KILLED** | `a fill naming nothing is reported` | 0 |
++| `fillBoundaryNotFillable` | **KILLED** | `a fill on a text entity is reported as not fillable` | 0 |
++| `fillBoundaryNotClosed` | **KILLED** | `a fill on an open polyline is reported as not closed` | 0 |
++| `fillBoundaryForeignOwner` | **KILLED** | `a fill in a different owner than its boundary is reported` | 0 |
++| `fillDrawOrderInverted` | **KILLED** | `an inverted pair is reported and nothing is changed` | 0 |
++
++Each deletion failed exactly its own fixture and no other, confirming the
++one-fixture-per-code discipline the fix round (Task 8's own report) put in
++place still holds on today's tree.
++
++### Task 9 — `entityBounds` and its call sites
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T9a | fill always returns `Aabb2.empty()` | **KILLED** | 5 named tests, including the two the fix round added |
++| T9b (spatial_index.dart, `_reconcileEntity`) | skip fill resolution at this site | **KILLED** | `an edited boundary moves its fill's indexed box` |
++| T9b (container_index.dart, `addLeaf`) | same, at initial build | **KILLED** | `a fresh index resolves a fill to its boundary without any edit` (fix-round test) |
++| T9b (draft_document.dart, `_boundsOfContainer`) | same, at `doc.extents` | **KILLED** | `doc.extents finds a fill's boundary by handle, not by walking the tree` (fix-round test) |
++| T9c | `read` instead of `peek` in the reconcile hot path | **SURVIVED — documented gap** | correctness is unaffected (`peek`/`read` is an allocation choice) and `query_allocation_test.dart` never invokes `_reconcileEntity` during its measured window (it only queries, never edits, inside the steady-state frame) — a genuine, unclosed blind spot in the allocation gate, not a false reading |
++| T9b variant (`reference_query.dart:210`, oracle) | skip fill resolution in the oracle | **NOW KILLED — was SURVIVED at Task 9's own time** | `regionFill entitiesInRect matches brute force over 200 random rects` — Task 10's `_regionFill()` corpus fixture (added one task later) closed exactly the gap Task 9 recorded; re-running today shows the survivor from Task 9's report no longer survives |
++
++### Task 10 — the index stays silent about fills
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T10a | give the oracle a fill hit the real index does not produce | **KILLED** | `regionFill pick matches brute force over 200 random points` |
++| T10b | plant a fabricated snap centre for a fill and stop re-filtering it (both `container_index.dart`'s `snapCentreOfLeaf` and `spatial_index.dart`'s `_considerSnapCentre` mutated together — a single-function mutation of either alone is masked by the other, exactly as Task 10's report found) | **KILLED** | `a fill manufactures no snap candidate of its own, even away from every real vertex` — the corner-of-the-room test stays green under the same mutation, confirming it is masked by the endpoint tie-break as documented |
++
++### Task 11 — `DrawSink.fillPolygon`/`fillCircle`
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T11a | leave `_paint.style` on fill after `fillPolygon` | **KILLED** | `the canvas sink leaves its paint on stroke afterwards` |
++| T11b | drop `triangles` from `FillPolygonOp`'s `==` | **KILLED** | `a different triangulation of the same outline is a different op` |
++| T11c | draw the polygon unclosed | **KILLED** | `fillPolygon closes the path` |
++
++### Task 12 — `VerticesDrawSink` fills
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T12a | route the fill through `_coveredArgb` | **KILLED** | `a fill on a hairline layer keeps full alpha` (only the hairline fixture; the normal-lineweight fixture stays green, confirming the brief's claim) |
++| T12b | give the circle fan its own step count (`steps = 32`) | **KILLED** | `a filled circle and its own outline use the same step count` |
++| T12c | drop every third triangle (`i += 6`) | **KILLED** | `a fill batches with strokes into one flush, not one call each` and `a polygon fill emits exactly the triangles it was handed` |
++
++### Task 13 — the painter draws fills, and counts the ones it skips
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T13a | defer every fill to the end of `paint()` | **KILLED** | `a region draws the fill before its boundary` and `the painter walks fills and the reference walk agrees` |
++| T13b | hand `trianglesFor(boundary) ?? Int32List(0)` to the sink instead of skipping | **KILLED** | `an unfillable boundary is skipped and counted, not handed to a sink` |
++| T13c | replace every `_skippedFills++;` with a no-op | **KILLED** | same test |
++| T13d | drop the `_skippedFills = 0;` reset | **KILLED** | `skippedFillCount is per frame, not a running total` (2 instead of 1) |
++| T13e | triangulate the circle boundary instead of fanning it | **KILLED** | `a circle boundary draws a fillCircle, never a triangulated polygon` |
++
++### Task 14 — goldens and the opaque agreement floor
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| T14a | fan the polygon from vertex 0 instead of ear-clipping | **KILLED on the vertices backend at rungs 1–2, and on the opaque-agreement fixture (7744/174135 = 4.45%, clears the 1% ceiling with real margin); the canvas backend is architecturally immune** — `CanvasDrawSink.fillPolygon` builds a `Path` from `points` and lets `Canvas.drawPath` fill it by Skia's own winding rule, never reading `triangles` at all, so no fixture at any size can make it sensitive to a triangulation-only mutant. This is the same finding Task 14's own report reached; re-confirmed rather than assumed. |
++| T14b | skip winding normalisation | **KILLED on both backends, all 3 rungs** | all 6 golden tests |
++| T14c | route the fill through `_coveredArgb` (vertices backend) | **KILLED on the vertices backend, all 3 rungs; canvas untouched** | matches T12a's mechanism, re-run against the golden ladder fixture specifically |
++
++### Task 15 — the translucent seam
++
++| # | mutation | verdict | killed by |
++|---|---|---|---|
++| forced seam (every triangle in `fillPolygon` emitted twice) | **KILLED** | `the translucent seam, measured` — `fraction=1.0` instead of `0.000%` |
++| (pinned regression, not a new mutant) | `drawvertices_antialiasing_test.dart` — 2 tests, both green today | confirms `flutter_test`'s software Skia still does not antialias `drawVertices`, so the instrument's own blind spot (recorded in Task 15's addendum) has not silently changed |
++
++---
++
++## Part 2 — the cross-task mutants Task 17's brief names
++
++None of these belong to a single task's own test file. Each was verified by
++constructing the exact fixture property the brief names, not by reusing an
++existing task's test verbatim — three of the five needed a purpose-built
++probe because no existing test exercises that specific property.
++
++### 1. Key the cache by `geomIndex` instead of `Handle`
++
++**Fixture property: purge a document containing fills and draw again.**
++
++Task 3's original mutation (`a21188d`) touched two files, because at the time
++`FillIndex` had no other callers. **Re-derived here against today's full
++surface** — six call sites across both packages
++(`json_codec.dart`, `commands.dart` ×2, `draft_painter.dart`,
++`reference_walk.dart`, plus every test call site that had grown since) needed
++patching together for the mutation to even compile, which is itself evidence
++of how much this decision now protects.
++
++**KILLED.** `the index survives a purge because handles do` fails
++(`Expected: [0, 1, 2] / Actual: null`) when the read side uses the entity's
++**current** (post-purge) `geomIndex` — the stale write-time key is never
++re-attached to anything, so the entry is orphaned rather than merely stale.
++**Collateral, and worth recording on its own:** the same mutation also breaks
++two *unrelated*, pre-existing named tests — `removing a boundary removes its
++fill, and undo restores both` and `undo removes both halves and redo restores
++the same handles` — because `geomIndex` is not stable across undo/redo either,
++not only across `purge()`. The handle-keying decision protects more ground
++than its own test suite advertises.
++
++### 2. Drop dependent fills from `SetEntityGeometryCommand`'s `touched`
++
++**Fixture property: edit a boundary, then pick or cull inside the
++new-but-outside-the-old region.**
++
++Task 5's own T5a test reads the indexed box directly
++(`index.rootIndex.boxOfLeaf(slot)`), not through a query. This is a materially
++different, stronger fixture: a real `forEachInRect` cull.
++
++Built a probe (`AddRegionCommand.allocate` a 10×10 room, build a
++`SpatialIndex` **before** the edit so the edit drives its incremental
++`onAfterMutate` reconcile, grow the boundary to 100×100, then
++`forEachInRect` a rect at `(45,45)–(55,55)` — inside the new region, outside
++the old one).
++
++**KILLED.** Control: `sawFill=true`. Under the mutation (`touched: {handle}`,
++dropping the dependents): `sawFill=false` — the fill's stale, small box never
++grows with its boundary, so the broad-phase cull misses it in exactly the
++region the brief names.
++
++### 3. Make `AddRegionCommand` two composed commands
++
++**Fixture property: assert no observer sees a fill whose boundary is
++missing.**
++
++`AddRegionCommand.apply` is one atomic mutation returning one `CommandResult`,
++so `CommandDispatcher.execute` notifies `onAfterMutate` exactly once, after
++both halves already exist. `CommandTarget` (what `apply` receives) has no
++notification hook of its own, so the "two composed commands" alternative
++can only be built as two separate top-level `execute()` calls — which is
++exactly what a less careful implementation would do.
++
++Built a probe: an observer hooked to `onAfterMutate` that checks, after every
++mutation, whether any live fill's boundary handle fails to resolve.
++
++**KILLED, by construction.** The real `AddRegionCommand`: `sawGap=false`. The
++same two `EntityRecord`s added via two separate `AddEntityCommand.execute()`
++calls (fill first, boundary second — the natural order): `sawGap=true`, since
++the observer callback after the first `execute()` sees a live fill entity
++whose boundary does not exist yet.
++
++### 4. Populate the cache lazily on first draw
++
++**Fixture property: the allocation gate, on a corpus with fills.**
++
++Mutated `DraftPainter._drawFill` to compute `triangulationFor(...)` and write
++it into `document.fills` on a cache miss, instead of skipping and counting.
++Task 16's paint_allocation_test.dart's own doc comment claims "a cache miss on
++the frame path would show up here immediately as a per-fill allocation."
++
++**SURVIVED — a real, documented gap, not a fabricated pass.** Cleared
++`doc.fills` immediately before the gate's subject (post-warm-up) frame to
++force exactly the miss this mutation exists to make interesting, then ran the
++gate's `debugCapacityVertices`-before/after comparison: it stayed green
++under the mutation. Root cause: `debugCapacityVertices` measures only
++`VerticesDrawSink`'s own vertex-buffer capacity, and the warm-up frames had
++already sized that buffer to the corpus's worst case (fills included, since
++the buffer is a doubling reserve that never shrinks) — a freshly computed
++`Int32List` triangulation lands on the general Dart heap, which this specific
++gate mechanism was never built to see. **Task 16's claim, read literally as
++"this gate would catch a lazy-populate mutation," does not hold** — the
++mechanism that actually proves eager, command-time population is Task 4's
++`T4c` (`the triangulation is materialised by the command, not by a draw`,
++re-confirmed killed above), not the allocation gate. Recorded as a deferred
++finding for the note below rather than argued away.
++
++### 5. Let the codec skip `_rebuildFills`
++
++**Fixture property: the same gate, after a load.**
++
++Built a probe alongside mutant 4's: encode the same 200-fill corpus, decode
++it with Task 7's `T7a` mutation applied (the `_rebuildFills` call removed),
++and run the same gate's frame on the **reloaded** document.
++
++**KILLED — but not by the buffer-capacity assertion.** `painter.fillCount`
++stays `> 0` and `debugCapacityVertices` stays unchanged (a skip, like a miss,
++allocates nothing in the sink's own buffer — same mechanism gap as mutant 4),
++but the gate's own **`expect(painter.skippedFillCount, 0)`** assertion goes
++red: every polyline fill in the reloaded, never-rebuilt document is silently
++skipped, since `FillIndex` carries no triangles for any of them. "The same
++gate" is correct as stated in the brief — it is the `skippedFillCount`
++assertion inside that gate, not the allocation assertion, that catches this
++one.
++
++---
++
++## Method notes
++
++- Every mutation ran inside one shell call: `cp` the target file(s) aside,
++  apply the edit (`perl`, `sed`, or a small `python3` string-replace script
++  when the edit needed to be exact-matched against surrounding context),
++  run the narrowest test file that should catch it, then `cp` the backup
++  back — **never `git checkout`**. `git status --porcelain` was clean after
++  every single mutation in this log.
++- The keying mutant (Part 2, #1) required patching six production files plus
++  four test files together to keep the tree compiling; every patch that
++  failed to compile printed `Failed to load`, not a named test failure, and
++  was **not** counted as a kill — this plan's own recorded history (Task 3's
++  two discarded controller attempts, Task 8's discarded zsh-array attempt)
++  says to assume the harness is wrong until a named test failure proves
++  otherwise, and that discipline held here too: one early version of the
++  keying mutant's purge test read the *stale* write-time `geomIndex` on both
++  the write and the read side, which made the mutation look like it survived
++  when it had not actually been exercised — caught before being recorded,
++  not after.
++- Cross-task mutants 2–5 needed purpose-built probes because the brief's
++  fixture properties are, in three of four cases, materially different from
++  what any existing named test checks (a direct index-box read is not a
++  cull query; an atomicity property has no existing observer test; a
++  frame-path allocation claim was untested against the specific "lazily
++  populate on miss" shape). Every probe was deleted after use — none is
++  committed.

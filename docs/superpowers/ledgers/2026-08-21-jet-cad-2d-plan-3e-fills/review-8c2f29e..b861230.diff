@@ -1,0 +1,272 @@
+# Review package: 8c2f29e..b861230
+
+## Commits
+b861230 feat: validate() reports five fill conditions and repairs none
+
+## Files changed
+ packages/jet_cad_2d/lib/src/document/validate.dart |  54 +++++++++
+ .../jet_cad_2d/test/document/validate_test.dart    | 127 +++++++++++++++++++++
+ 2 files changed, 181 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/document/validate.dart b/packages/jet_cad_2d/lib/src/document/validate.dart
+index 9ccfa8e..9982529 100644
+--- a/packages/jet_cad_2d/lib/src/document/validate.dart
++++ b/packages/jet_cad_2d/lib/src/document/validate.dart
+@@ -1,28 +1,35 @@
+ import '../core/diagnostic.dart';
+ import '../core/handle.dart';
++import '../store/entity_store.dart';
++import 'commands.dart';
+ import 'draft_document.dart';
+ import 'node.dart';
+ import 'tree.dart';
+ 
+ /// The codes [DocumentValidation.validate] can emit.
+ ///
+ /// Constants rather than literals so a caller or a test matches a symbol the
+ /// compiler checks, instead of a string it does not.
+ abstract final class ValidationCodes {
+   static const String rootMissing = 'tree.root_missing';
+   static const String parentChildMismatch = 'tree.parent_child_mismatch';
+   static const String danglingChild = 'tree.dangling_child';
+   static const String leafInChildren = 'tree.leaf_in_children';
+   static const String cycle = 'tree.cycle';
+   static const String definitionCycle = 'tree.definition_cycle';
+   static const String ownerMissing = 'entity.owner_missing';
++  static const String fillBoundaryMissing = 'fill.boundary_missing';
++  static const String fillBoundaryNotFillable = 'fill.boundary_not_fillable';
++  static const String fillBoundaryNotClosed = 'fill.boundary_not_closed';
++  static const String fillBoundaryForeignOwner = 'fill.boundary_foreign_owner';
++  static const String fillDrawOrderInverted = 'fill.draw_order_inverted';
+ }
+ 
+ extension DocumentValidation on DraftDocument {
+   /// Structural problems in this document, in a stable order.
+   ///
+   /// Empty means well-formed. This reports and never mutates; the caller
+   /// decides whether to reject, repair or warn. It is not redundant with
+   /// [DocumentTree.repairCycles]: that method *mutates* — it drops the
+   /// back-edge instance that closes a definition cycle, and the codec calls
+   /// it on load — while this one only reports and never changes the tree.
+@@ -215,13 +222,60 @@ extension DocumentValidation on DraftDocument {
+         if (reachesOwner) {
+           out.add(error(
+               ValidationCodes.definitionCycle,
+               'Definition ${definition.handle.value} contains instance '
+               '${child.value} of ${node.definition.value}, which reaches it.',
+               [definition.handle, child, node.definition]));
+         }
+       }
+     }
+ 
++    // 7. Fills. Every check reports; none repairs.
++    for (final slot in entities.liveSlots) {
++      if (entities.kindAt(slot) != EntityKind.fill) continue;
++      final fill = entities.handleAt(slot);
++      final boundary =
++          boundaryHandleOf(geometry.peek(entities.geomIndexAt(slot)));
++      final boundarySlot = entities.slotOf(boundary);
++      if (boundarySlot == null) {
++        out.add(error(
++            ValidationCodes.fillBoundaryMissing,
++            'fill ${fill.toHex()} names ${boundary.toHex()}, which is not in '
++            'this document',
++            [fill, boundary]));
++        continue;
++      }
++      final kind = entities.kindAt(boundarySlot);
++      if (kind != EntityKind.polyline && kind != EntityKind.circle) {
++        out.add(error(
++            ValidationCodes.fillBoundaryNotFillable,
++            'fill ${fill.toHex()} names a ${kind.name}, which has no interior',
++            [fill, boundary]));
++      } else if (kind == EntityKind.polyline &&
++          triangulationFor(
++                  kind, geometry.peek(entities.geomIndexAt(boundarySlot))) ==
++              null) {
++        out.add(error(
++            ValidationCodes.fillBoundaryNotClosed,
++            'fill ${fill.toHex()} names an open polyline; closedness is the '
++            'stored first point repeated as the last, compared exactly',
++            [fill, boundary]));
++      }
++      if (entities.ownerAt(slot) != entities.ownerAt(boundarySlot)) {
++        out.add(error(
++            ValidationCodes.fillBoundaryForeignOwner,
++            'fill ${fill.toHex()} and its boundary are in different owners, so '
++            'the reference cannot resolve under an instance',
++            [fill, boundary]));
++      }
++      if (fill.value > boundary.value) {
++        out.add(error(
++            ValidationCodes.fillDrawOrderInverted,
++            'fill ${fill.toHex()} has a higher handle than its boundary '
++            '${boundary.toHex()}, so it draws over its own outline',
++            [fill, boundary]));
++      }
++    }
++
+     return out;
+   }
+ }
+diff --git a/packages/jet_cad_2d/test/document/validate_test.dart b/packages/jet_cad_2d/test/document/validate_test.dart
+index e4aa51d..39bbb5c 100644
+--- a/packages/jet_cad_2d/test/document/validate_test.dart
++++ b/packages/jet_cad_2d/test/document/validate_test.dart
+@@ -1,16 +1,70 @@
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:test/test.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
++/// Builds a fill naming [boundary] directly, bypassing AddRegionCommand, which
++/// is the only way to produce the malformed documents this test is about.
++Handle rawFill(DraftDocument doc, Handle boundary,
++    {Handle? owner, Handle? handle}) {
++  final h = handle ?? doc.handleSeed.next();
++  doc.commands.execute(AddEntityCommand(
++    record: EntityRecord(
++      handle: h,
++      owner: owner ?? doc.rootHandle,
++      kind: EntityKind.fill,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.continuousLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: const TrueColor(0x3366CC),
++      lineweight: kLineweightDefault,
++      transparency: 0,
++      flags: 0,
++    ),
++    payload: GeometryPayload(
++        coords: Float64List(0),
++        scalars: Float64List.fromList([boundary.value.toDouble()])),
++  ));
++  return h;
++}
++
++/// Adds a leaf of [kind] with [coords] and returns its handle. `rawFill` and
++/// these three tests are the only way to build the malformed documents
++/// `validate()` is about -- `AddRegionCommand` refuses every one of them.
++Handle rawLeaf(DraftDocument doc, EntityKind kind, List<double> coords,
++    {Handle? owner, List<double> scalars = const [], String text = ''}) {
++  final h = doc.handleSeed.next();
++  doc.commands.execute(AddEntityCommand(
++    record: EntityRecord(
++      handle: h,
++      owner: owner ?? doc.rootHandle,
++      kind: kind,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.continuousLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: const TrueColor(0x000000),
++      lineweight: 30,
++      transparency: 0,
++      flags: 0,
++      text: text,
++    ),
++    payload: GeometryPayload(
++        coords: Float64List.fromList(coords),
++        scalars: Float64List.fromList(scalars)),
++  ));
++  return h;
++}
++
+ /// A minimal line entity owned by [owner].
+ EntityRecord line(Handle handle, Handle owner) => EntityRecord(
+       handle: handle,
+       owner: owner,
+       kind: EntityKind.line,
+       layer: ReservedHandles.layerZero,
+       linetype: ReservedHandles.byLayerLinetype,
+       linetypeScale: 1.0,
+       geomIndex: 0,
+       color: const ByLayerColor(),
+@@ -434,11 +488,84 @@ void main() {
+       for (final d in result) d.handles
+     ], [
+       [const Handle(101), const Handle(971)],
+       [const Handle(102), const Handle(972)],
+       [const Handle(103), const Handle(973)],
+       [const Handle(101), doc.rootHandle],
+       [const Handle(102), doc.rootHandle],
+       [const Handle(103), doc.rootHandle],
+     ]);
+   });
++
++  test('a fill naming nothing is reported', () {
++    final doc = DraftDocument.empty();
++    rawFill(doc, const Handle(9999));
++    expect(doc.validate().map((d) => d.code),
++        contains(ValidationCodes.fillBoundaryMissing));
++  });
++
++  test('a fill on a text entity is reported as not fillable', () {
++    final doc = DraftDocument.empty();
++    final textHandle =
++        rawLeaf(doc, EntityKind.text, [0, 0], scalars: [2.5], text: 'ROOM 3');
++    rawFill(doc, textHandle);
++    expect(doc.validate().map((d) => d.code),
++        contains(ValidationCodes.fillBoundaryNotFillable));
++  });
++
++  test('a fill on an open polyline is reported as not closed', () {
++    final doc = DraftDocument.empty();
++    final open = rawLeaf(doc, EntityKind.polyline, [0, 0, 10, 0, 10, 10]);
++    rawFill(doc, open);
++    expect(doc.validate().map((d) => d.code),
++        contains(ValidationCodes.fillBoundaryNotClosed));
++  });
++
++  test('a fill in a different owner than its boundary is reported', () {
++    final doc = DraftDocument.empty();
++    final group = doc.handleSeed.next();
++    doc.commands.execute(AddNodeCommand(GroupNode(
++      handle: group,
++      parent: doc.rootHandle,
++      transform: Transform2.identity(),
++      children: const [],
++    )));
++    final boundary = rawLeaf(
++        doc, EntityKind.polyline, [0, 0, 10, 0, 10, 10, 0, 10, 0, 0],
++        owner: group);
++    rawFill(doc, boundary); // owner defaults to the root
++    expect(doc.validate().map((d) => d.code),
++        contains(ValidationCodes.fillBoundaryForeignOwner));
++  });
++
++  test('an inverted pair is reported and nothing is changed', () {
++    final doc = DraftDocument.empty();
++    final boundary = doc.handleSeed.next();
++    doc.commands.execute(AddEntityCommand(
++      record: EntityRecord(
++        handle: boundary,
++        owner: doc.rootHandle,
++        kind: EntityKind.polyline,
++        layer: ReservedHandles.layerZero,
++        linetype: ReservedHandles.continuousLinetype,
++        linetypeScale: 1.0,
++        geomIndex: 0,
++        color: const TrueColor(0x000000),
++        lineweight: 30,
++        transparency: 0,
++        flags: 0,
++      ),
++      payload: GeometryPayload(
++          coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
++          scalars: Float64List(0)),
++    ));
++    final fill = rawFill(doc, boundary); // allocated after, so higher
++    expect(fill.value, greaterThan(boundary.value));
++    final before = DraftDocumentCodec.encodeToString(doc);
++    expect(doc.validate().map((d) => d.code),
++        contains(ValidationCodes.fillDrawOrderInverted));
++    expect(DraftDocumentCodec.encodeToString(doc), before,
++        reason: 'validate reports and never mutates; a loader that re-sorted '
++            'to defend the draw-order rule would make the drawing differ '
++            'from the file');
++  });
+ }

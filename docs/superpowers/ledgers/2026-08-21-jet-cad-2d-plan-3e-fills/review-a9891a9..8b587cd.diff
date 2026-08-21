@@ -1,0 +1,284 @@
+# Review package: a9891a9..8b587cd
+
+## Commits
+8b587cd feat: VerticesDrawSink fills, with the two invariants pinned
+
+## Files changed
+ .../lib/src/vertices_draw_sink.dart                |  73 +++++++++++--
+ .../test/vertices_draw_sink_test.dart              | 113 +++++++++++++++++++++
+ 2 files changed, 175 insertions(+), 11 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+index 0cea43b..166014f 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart
+@@ -673,23 +673,21 @@ class VerticesDrawSink implements DrawSink {
+   /// on-screen one.
+   void _flatten(double cx, double cy, double r, double start, double sweep,
+       ResolvedStyle style,
+       {required bool closed}) {
+     if (r <= 0 || sweep == 0) return;
+     final t = _residual;
+     final deviceRadius = r * t.scaleMagnitude;
+     if (deviceRadius <= 0) return;
+ 
+     final theta = sweep.abs();
+-    final ideal =
+-        (theta * math.sqrt(deviceRadius / (8 * kFlattenTolerance))).ceil();
+-    final steps = ideal.clamp(1, kMaxFlattenSegments);
++    final steps = _flattenSteps(deviceRadius, theta);
+ 
+     final half = _halfWidthFor(style.lineweightHundredths);
+     final argb = _coveredArgb(style.argb, style.lineweightHundredths);
+     final step = sweep / steps;
+ 
+     var lx = cx + r * math.cos(start);
+     var ly = cy + r * math.sin(start);
+     _beginRun(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f);
+     // A closed sweep stops one sample short: its last chord is the segment
+     // `_endRun` draws back to the first point, so closing here would draw
+@@ -698,33 +696,86 @@ class VerticesDrawSink implements DrawSink {
+     final last = closed ? steps - 1 : steps;
+     for (var i = 1; i <= last; i++) {
+       final angle = start + step * i;
+       lx = cx + r * math.cos(angle);
+       ly = cy + r * math.sin(angle);
+       _runTo(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f, half, argb);
+     }
+     _endRun(closed: closed, half: half, argb: argb);
+   }
+ 
++  /// The chord count a device-space circle or arc of [deviceRadius] and
++  /// sweep [theta] flattens to.
++  ///
++  /// One expression, shared by `_flatten`'s stroke and [fillCircle]'s fan:
++  /// a filled circle's silhouette is tessellated by the *same* call as its
++  /// own outline, so the two never disagree, at any zoom.
++  int _flattenSteps(double deviceRadius, double theta) {
++    final ideal =
++        (theta * math.sqrt(deviceRadius / (8 * kFlattenTolerance))).ceil();
++    return ideal.clamp(1, kMaxFlattenSegments);
++  }
++
+   @override
+   void text(String text, Handle style, ResolvedStyle resolved) {
+     _flushBeforeUnbatchable();
+     _fallback?.text(text, style, resolved);
+   }
+ 
+-  // TODO(Task 12): batch fills into the same buffer as strokes, using
+-  // [triangles] directly instead of falling back. Until then a fill is
+-  // unbatched, exactly like text: flush what is pending so draw order is
+-  // preserved, then hand it to the fallback.
++  /// Emits [triangles] straight into the batch, transforming each referenced
++  /// point as it goes.
++  ///
++  /// `triangles` triple-indexes into `points`' own point numbering, so each
++  /// index is doubled to reach the coordinate pair. Nothing is allocated: the
++  /// boundary's points are transformed straight into the shared buffer, same
++  /// as every other emitter here.
+   @override
+   void fillPolygon(
+       Float64List points, int count, Int32List triangles, ResolvedStyle style) {
+-    _flushBeforeUnbatchable();
+-    _fallback?.fillPolygon(points, count, triangles, style);
++    if (triangles.isEmpty) return;
++    final t = _residual;
++    // `style.argb` directly, NOT `_coveredArgb`: that function fades a stroke
++    // thinner than a device pixel, and a fill has no width. A fill entity's
++    // `ResolvedStyle` still carries a lineweight because the column is
++    // shared with strokes, so routing a fill through `_coveredArgb` would
++    // fade a filled room on a hairline layer -- on this backend only.
++    final argb = style.argb;
++    for (var i = 0; i < triangles.length; i += 3) {
++      final a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
++      _emitTriangle(
++        t.a * points[a * 2] + t.c * points[a * 2 + 1] + t.e,
++        t.b * points[a * 2] + t.d * points[a * 2 + 1] + t.f,
++        t.a * points[b * 2] + t.c * points[b * 2 + 1] + t.e,
++        t.b * points[b * 2] + t.d * points[b * 2 + 1] + t.f,
++        t.a * points[c * 2] + t.c * points[c * 2 + 1] + t.e,
++        t.b * points[c * 2] + t.d * points[c * 2 + 1] + t.f,
++        argb,
++      );
++    }
+   }
+ 
++  /// A triangle fan around the circle's centre, at the same step count
++  /// `_flatten` would give its own outline.
+   @override
+   void fillCircle(double cx, double cy, double r, ResolvedStyle style) {
+-    _flushBeforeUnbatchable();
+-    _fallback?.fillCircle(cx, cy, r, style);
++    if (r <= 0) return;
++    final t = _residual;
++    final deviceRadius = r * t.scaleMagnitude;
++    if (deviceRadius <= 0) return;
++    const theta = 2 * math.pi;
++    final steps = _flattenSteps(deviceRadius, theta);
++    final argb = style.argb;
++    final ccx = t.a * cx + t.c * cy + t.e;
++    final ccy = t.b * cx + t.d * cy + t.f;
++    var px = cx + r, py = cy;
++    var dx = t.a * px + t.c * py + t.e, dy = t.b * px + t.d * py + t.f;
++    for (var i = 1; i <= steps; i++) {
++      final angle = theta * i / steps;
++      px = cx + r * math.cos(angle);
++      py = cy + r * math.sin(angle);
++      final nx = t.a * px + t.c * py + t.e, ny = t.b * px + t.d * py + t.f;
++      _emitTriangle(ccx, ccy, dx, dy, nx, ny, argb);
++      dx = nx;
++      dy = ny;
++    }
+   }
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+index ed65686..b0f54b3 100644
+--- a/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
++++ b/packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart
+@@ -320,20 +320,21 @@ void main() {
+     expect(lastVertices, greaterThan(paragraph),
+         reason: 'the strokes batched after the text must reach the Canvas '
+             'after the paragraph does. Canvas call sequence was: $names');
+     // Only after the order holds: two distinct submissions, so the assertion
+     // above compared two different flushes and not one flush against itself.
+     expect(firstVertices, isNot(lastVertices));
+   });
+ 
+   _arcTests();
+   _widthTests();
++  _fillTests();
+ 
+   test('the submitted Vertices is disposed, and the flag reads its state', () {
+     // `Vertices` is native-backed: `dispose()` frees the position and colour
+     // buffers the engine holds, and dropping the object instead leaves them to
+     // a finalizer. At 19 flushes a frame that is about 1,140 a second.
+     //
+     // MUTATION: drop the dispose call and `lastFlushDisposed` reads false,
+     // because it is derived from `Vertices.debugDisposed` -- the object's own
+     // state -- rather than asserted unconditionally beside the call.
+     final recorder = PictureRecorder();
+@@ -810,10 +811,122 @@ void _widthTests() {
+     // MUTATION: write the coverage as the alpha instead of scaling by it, and
+     // this reads 0xCC.
+     final sink = _sink(devicePixelRatio: 2.0)
+       ..beginResidual(Transform2.identity())
+       ..polyline(_seg(0, 0, 10, 0), 2, _style(argb: 0x80123456, lineweight: 5),
+           closed: false)
+       ..endResidual();
+     expect(sink.debugColors()[0].toUnsigned(32), 0x66123456);
+   });
+ }
++
++void _fillTests() {
++  // A unit square with its closing point duplicated, the shape
++  // `triangulationFor` hands a fill: `count` is 5, and the two triangles'
++  // indices only ever reach corners 0-3.
++  final square = Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]);
++  final squareTriangles = Int32List.fromList([0, 1, 2, 0, 2, 3]);
++
++  test('a polygon fill emits exactly the triangles it was handed', () {
++    final sink = _sink()
++      ..beginResidual(Transform2.identity())
++      ..fillPolygon(square, 5, squareTriangles, _style())
++      ..endResidual();
++    expect(sink.frameTriangleCount, 2);
++  });
++
++  test('a fill on a hairline layer keeps full alpha', () {
++    // `_coveredArgb` fades a sub-pixel STROKE, in proportion to its device
++    // width. A fill has no width of its own -- but its `ResolvedStyle` still
++    // carries a lineweight, because the column is per-entity and shared with
++    // strokes. Route a fill through `_coveredArgb` and this same lineweight,
++    // at this same device pixel ratio, would fade it to 0xCC -- see "a
++    // sub-pixel stroke gets one device pixel and loses alpha for it" above --
++    // and it would do so on this backend only, where the comparison
++    // harness's ink floor then hides the disagreement.
++    //
++    // MUTATION: route `fillPolygon`'s colour through `_coveredArgb` and this
++    // reads 0xCC3366CC instead of 0xFF3366CC.
++    final sink = _sink(devicePixelRatio: 2.0)
++      ..beginResidual(Transform2.identity())
++      ..fillPolygon(
++          square, 5, squareTriangles, _style(argb: 0xFF3366CC, lineweight: 5))
++      ..endResidual();
++    expect(sink.debugColors()[0].toUnsigned(32), 0xFF3366CC);
++  });
++
++  test('a polygon fill is baked into the positions, not pushed on the canvas',
++      () {
++    // Same residual-baking contract every other emitter honours: the corner
++    // at local (10, 0) lands in device space, not local space, once a
++    // non-identity residual is active.
++    const t = Transform2(0, 1, -1, 0, 100, 200);
++    final sink = _sink()
++      ..beginResidual(t)
++      ..fillPolygon(square, 5, squareTriangles, _style())
++      ..endResidual();
++    final v = sink.debugPositions();
++    expect(v.sublist(0, 2), orderedEquals(<double>[100, 200]));
++    expect(v.sublist(2, 4), orderedEquals(<double>[100, 210]));
++    expect(v.sublist(4, 6), orderedEquals(<double>[90, 210]));
++  });
++
++  test('an empty triangle list draws nothing, defensively', () {
++    final sink = _sink()
++      ..beginResidual(Transform2.identity())
++      ..fillPolygon(square, 5, Int32List(0), _style())
++      ..endResidual();
++    expect(sink.frameTriangleCount, 0);
++  });
++
++  test('a filled circle and its own outline use the same step count', () {
++    // `_flatten`'s stroke and `fillCircle`'s fan share one expression for the
++    // step count, `_flattenSteps`. A closed stroked run is 4 triangles per
++    // chord -- the quad plus its join, per `_expectUniformMiterStride`'s own
++    // comment above -- and a fan is 1 triangle per chord, so the two frame
++    // totals are related by exactly that factor whatever the step count
++    // turns out to be.
++    //
++    // MUTATION: give the fan a different step count (e.g. a literal 32) and
++    // the two circles' chord counts diverge, so this ratio breaks.
++    final filled = _sink()
++      ..beginResidual(Transform2.identity())
++      ..fillCircle(0, 0, 90, _style())
++      ..endResidual();
++    final stroked = _sink()
++      ..beginResidual(Transform2.identity())
++      ..circle(0, 0, 90, _style())
++      ..endResidual();
++    expect(filled.frameTriangleCount * 4, stroked.frameTriangleCount,
++        reason: 'a different step count makes the fill\'s silhouette and '
++            'its own outline disagree, and the disagreement changes with '
++            'zoom');
++  });
++
++  test('a fill batches with strokes into one flush, not one call each', () {
++    // The entire point of this task: leaving the Task 11 fallback forwarding
++    // in place kept every drawing correct but cost one `drawVertices` per
++    // fill. A fill emitted between two strokes must land in the same batch
++    // as both of them.
++    final recorder = PictureRecorder();
++    final canvas = Canvas(recorder);
++    final sink = _sink(canvas: canvas)
++      ..beginResidual(Transform2.identity())
++      ..polyline(_seg(0, 0, 10, 0), 2, _style(), closed: false)
++      ..fillPolygon(square, 5, squareTriangles, _style())
++      ..polyline(_seg(0, 5, 10, 5), 2, _style(), closed: false)
++      ..endResidual();
++    sink.flush();
++    expect(sink.totalFlushCount, 1);
++    // 2 stroke triangles + 2 fill triangles + 2 stroke triangles.
++    expect(sink.frameTriangleCount, 6);
++    recorder.endRecording().dispose();
++  });
++
++  test('a zero-radius fill circle emits nothing rather than a NaN fan', () {
++    final sink = _sink()
++      ..beginResidual(Transform2.identity())
++      ..fillCircle(0, 0, 0, _style())
++      ..endResidual();
++    expect(sink.frameTriangleCount, 0);
++  });
++}

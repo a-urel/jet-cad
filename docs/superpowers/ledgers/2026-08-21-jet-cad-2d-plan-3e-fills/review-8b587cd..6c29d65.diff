@@ -1,0 +1,451 @@
+# Review package: 8b587cd..6c29d65
+
+## Commits
+6c29d65 feat: the painter draws fills, and counts the ones it skips
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/draft_painter.dart  | 113 ++++++++++++++++++-
+ .../jet_cad_2d_flutter/lib/src/reference_walk.dart |  40 ++++++-
+ .../jet_cad_2d_flutter/test/fill_render_test.dart  | 124 +++++++++++++++++++++
+ 3 files changed, 271 insertions(+), 6 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart b/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart
+index 3eabbc4..a8e8ec9 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart
+@@ -116,20 +116,40 @@ class DraftPainter {
+   /// Circles and arcs drawn in the last frame under a transform past
+   /// [kAnisotropyThreshold], where their stroke width is an approximation.
+   ///
+   /// They cannot take the bypass: such a transform turns a circle into an
+   /// ellipse, and [DrawSink.circle] carries one radius. `Canvas` still draws
+   /// the ellipse correctly through the residual — it is only the width that is
+   /// wrong, by up to the anisotropy ratio. Counted so the results note can say
+   /// how often it happens instead of implying it never does.
+   int get anisotropicCurveCount => _anisotropicCurves;
+ 
++  int _skippedFills = 0;
++
++  /// Fills drawn in the last frame, handed to a sink.
++  ///
++  /// Reset in the same place [screenSpaceLeafCount] is, so it reads as a
++  /// per-frame figure alongside [skippedFillCount] rather than a running
++  /// total — Task 16's rig reports both.
++  int _fills = 0;
++  int get fillCount => _fills;
++
++  /// Fills not drawn in the last frame because their boundary could not be
++  /// resolved or its triangulation was empty.
++  ///
++  /// The painter owns this skip rather than a sink: `CanvasDrawSink` fills a
++  /// self-intersecting path by non-zero winding while `VerticesDrawSink`,
++  /// given no triangles, draws nothing. Handing either of them an unfillable
++  /// fill would manufacture a backend divergence on exactly the case this
++  /// plan refuses, so neither is ever handed one.
++  int get skippedFillCount => _skippedFills;
++
+   int _skippedText = 0;
+ 
+   /// Text entities not drawn in the last frame.
+   ///
+   /// Since Plan 3c Task 10 text draws, so this counts one thing only: a text
+   /// or attrib entity whose string is empty, which has nothing to hand
+   /// `Canvas`. It stays because the generated corpus's plain floor texts are
+   /// all blank, and a measurement taken over them would otherwise read as a
+   /// measurement of drawn text.
+   int get skippedTextCount => _skippedText;
+@@ -228,20 +248,22 @@ class DraftPainter {
+   /// answer for a tie — and needs none, because a handle names one thing in
+   /// the document. `AddEntityCommand` and `AddNodeCommand` each reject a
+   /// handle the other store already holds; that guard is what makes this
+   /// comparison total.
+   void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
+     _skippedText = 0;
+     _textOps = 0;
+     _skippedDeepInstances = 0;
+     _screenSpaceLeaves = 0;
+     _anisotropicCurves = 0;
++    _fills = 0;
++    _skippedFills = 0;
+     final world = camera.visibleWorld(viewport);
+     _worldRect = world;
+     final origin =
+         debugDisableRebasing ? Vector2.zero() : rebaseOriginFor(world);
+     _dashSpans = 0;
+     _dasher.resetCounters();
+     _screenOrigin = camera.worldToScreen(origin);
+     const inflate = kScreenClipInflate;
+     _screenSpaceClip = Aabb2(Vector2(-inflate, -inflate),
+         Vector2(viewport.width + inflate, viewport.height + inflate));
+@@ -433,22 +455,22 @@ class DraftPainter {
+         // Curves keep the residual path: an anisotropic transform turns a
+         // circle into an ellipse, and DrawSink.circle carries one radius.
+         // What a sink does with that residual is a sink decision.
+         if (toScreen.anisotropyRatio > kAnisotropyThreshold) {
+           _anisotropicCurves++;
+         }
+       case EntityKind.text:
+       case EntityKind.attrib:
+         break;
+       case EntityKind.fill:
+-        // Task 13 draws it.
+-        break;
++        _drawFill(sink, camera, origin, placement, slot, style);
++        return;
+     }
+ 
+     // The rebase subtraction happens in the leaf's own space, because that is
+     // the space the stored coordinates are in. So the origin — a world point —
+     // is pulled back through the placement first, and the rebase translation
+     // the chain carries is that *local* origin, not the world one. With a
+     // non-identity placement the two differ, and composing the world origin
+     // here would put every group-owned leaf in the wrong place while a fixture
+     // with an identity placement still passed.
+     final localOrigin = _localOriginFor(placement, origin);
+@@ -555,20 +577,100 @@ class DraftPainter {
+   /// express the origin at all. Rebasing is then skipped for that leaf rather
+   /// than throwing: `invert()` runs per leaf per frame, and one degenerate
+   /// group must not take the whole frame down. Such a leaf collapses to a line
+   /// or a point on screen anyway.
+   Vector2 _localOriginFor(Transform2 placement, Vector2 origin) {
+     final det = placement.determinant;
+     if (det == 0.0 || !det.isFinite) return Vector2.zero();
+     return placement.invert().transformPoint(origin);
+   }
+ 
++  /// Draws one fill, or skips it and says so.
++  ///
++  /// A fill has no geometry of its own: it occupies its boundary's loop and
++  /// follows its boundary's route through this painter -- screen space for a
++  /// polygon, the residual path for a circle -- so a filled shape and its own
++  /// outline are transformed by the same code.
++  ///
++  /// **The skip lives here, not in a sink.** `CanvasDrawSink` fills a
++  /// self-intersecting path by non-zero winding while `VerticesDrawSink`,
++  /// given no triangles, draws nothing. Handing either of them an unfillable
++  /// fill manufactures a backend divergence on exactly the case this plan
++  /// refuses, so neither is ever handed one.
++  void _drawFill(DrawSink sink, ViewportTransform camera, Vector2 origin,
++      Transform2 placement, int slot, ResolvedStyle style) {
++    final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
++    final boundary = boundaryHandleOf(payload);
++    final boundarySlot = document.entities.slotOf(boundary);
++    if (boundarySlot == null) {
++      _skippedFills++;
++      return;
++    }
++    final boundaryKind = document.entities.kindAt(boundarySlot);
++    final boundaryPayload =
++        document.geometry.peek(document.entities.geomIndexAt(boundarySlot));
++    final toScreen = camera.worldToScreenMatrix.multiply(placement);
++
++    if (boundaryKind == EntityKind.circle) {
++      // Never triangulated ahead of time: a circle's tessellation is
++      // scale-dependent, and the sink fans it at the step count its own
++      // stroke uses.
++      //
++      // A malformed document can carry a circle boundary with no scalars —
++      // `validate()` is what catches that off the frame path. Here it is
++      // just another unfillable boundary: skipped and counted, not indexed
++      // into and thrown from.
++      if (boundaryPayload.scalars.isEmpty) {
++        _skippedFills++;
++        return;
++      }
++      final localOrigin = _localOriginFor(placement, origin);
++      final chain = camera.worldToScreenMatrix
++          .multiply(placement)
++          .multiply(Transform2.translation(localOrigin.x, localOrigin.y));
++      sink.beginResidual(chain, debugHandle: document.entities.handleAt(slot));
++      sink.fillCircle(
++          boundaryPayload.coords[0] - localOrigin.x,
++          boundaryPayload.coords[1] - localOrigin.y,
++          boundaryPayload.scalars[0],
++          style);
++      sink.endResidual();
++      _fills++;
++      return;
++    }
++
++    // Read, never compute: the triangulation was materialised by the
++    // command, the codec or undo. A miss here means the boundary is
++    // unfillable, not that the cache is cold.
++    final triangles = document.fills.trianglesFor(boundary);
++    if (triangles == null || triangles.isEmpty) {
++      _skippedFills++;
++      return;
++    }
++
++    final count = boundaryPayload.pointCount;
++    _ensurePoints(count);
++    for (var i = 0; i < count; i++) {
++      final x = boundaryPayload.coords[i * 2];
++      final y = boundaryPayload.coords[i * 2 + 1];
++      _points[i * 2] =
++          toScreen.a * x + toScreen.c * y + toScreen.e - _screenOrigin.x;
++      _points[i * 2 + 1] =
++          toScreen.b * x + toScreen.d * y + toScreen.f - _screenOrigin.y;
++    }
++    sink.beginResidual(Transform2.translation(_screenOrigin.x, _screenOrigin.y),
++        debugHandle: document.entities.handleAt(slot));
++    sink.fillPolygon(_points, count, triangles, style);
++    sink.endResidual();
++    _fills++;
++  }
++
+   void _emit(DrawSink sink, EntityKind kind, GeometryPayload payload,
+       Vector2 localOrigin, ResolvedStyle style, Transform2 chain) {
+     final coords = payload.coords;
+     final ox = localOrigin.x;
+     final oy = localOrigin.y;
+ 
+     switch (kind) {
+       case EntityKind.point:
+       case EntityKind.line:
+       case EntityKind.polyline:
+@@ -662,21 +764,26 @@ class DraftPainter {
+ 
+       case EntityKind.text:
+       case EntityKind.attrib:
+         // Unreachable: `_drawLeafComposed` routes text to `_drawText` before
+         // it pushes a residual at all, because a text leaf's residual is not
+         // `chain`. Kept as an exhaustive case rather than a `default` so a
+         // new EntityKind still fails to compile here.
+         break;
+ 
+       case EntityKind.fill:
+-        // Task 13 draws it.
++        // Unreachable: `_drawLeafComposed` routes a fill to `_drawFill` and
++        // returns, unconditionally, before it reaches this call — a fill
++        // follows its boundary's route (screen space for a polygon, the
++        // residual path for a circle), neither of which is this one. Kept as
++        // an exhaustive case rather than a `default` so a new EntityKind
++        // still fails to compile here.
+         break;
+     }
+   }
+ 
+   /// Draws one text or attrib leaf under `chain . textLocal`.
+   ///
+   /// Text does not go through [_emit]. Its placement — height, rotation,
+   /// width factor, oblique angle and justification — *is* a transform, and
+   /// `DrawSink.text` carries no coordinates at all, so that placement can
+   /// only reach the canvas as part of the residual. It is composed into
+diff --git a/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart b/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
+index f5c4cea..0ced326 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
+@@ -110,22 +110,24 @@ class _ReferenceWalk {
+ 
+   void _leaf(int slot, Transform2 placement, StyleContext ctx) {
+     final kind = doc.entities.kindAt(slot);
+     final payload = doc.geometry.peek(doc.entities.geomIndexAt(slot));
+     if (doc.entities.flagsAt(slot) & EntityFlags.invisible != 0) return;
+ 
+     // `peek`, not `read`: nothing here keeps the boundary payload past this
+     // call, matching every other lookup in this walk.
+     EntityKind? boundaryKind;
+     GeometryPayload? boundaryPayload;
++    Handle? boundary;
+     if (kind == EntityKind.fill) {
+-      final b = doc.entities.slotOf(boundaryHandleOf(payload));
++      boundary = boundaryHandleOf(payload);
++      final b = doc.entities.slotOf(boundary);
+       if (b != null) {
+         boundaryKind = doc.entities.kindAt(b);
+         boundaryPayload = doc.geometry.peek(doc.entities.geomIndexAt(b));
+       }
+     }
+ 
+     final box = entityBounds(
+       kind: kind,
+       payload: payload,
+       measurer: doc.textMeasurer,
+@@ -189,22 +191,54 @@ class _ReferenceWalk {
+       case EntityKind.circle:
+         sink.circle(coords[0] - ox, coords[1] - oy, payload.scalars[0], style);
+       case EntityKind.arc:
+         sink.arc(coords[0] - ox, coords[1] - oy, payload.scalars[0],
+             payload.scalars[1], payload.scalars[2], style);
+       case EntityKind.text:
+       case EntityKind.attrib:
+         // Unreachable: handled above, under its own composed residual.
+         break;
+       case EntityKind.fill:
+-        // Task 13 draws it.
+-        break;
++        // Written independently of `DraftPainter._drawFill`, on purpose --
++        // see Plan 3c's Ruling 28. The oracle exists to disagree with the
++        // painter, and a shared helper would have it share the very
++        // assumption it is testing, so this duplicates the painter's
++        // boundary-follows-its-route logic rather than calling into it.
++        //
++        // A fill has no geometry of its own; it occupies its boundary's
++        // loop, rebased the same way that boundary's own kind is rebased
++        // above -- a circle's centre/radius, a polygon's points -- so it
++        // lands under the same `chain` residual its outline would.
++        if (boundaryKind == null || boundaryPayload == null) {
++          // Unresolvable: `box` above already bounded to empty for this
++          // case and the walk would not have reached here, but the check is
++          // kept rather than trusting that at a distance.
++          break;
++        }
++        if (boundaryKind == EntityKind.circle) {
++          if (boundaryPayload.scalars.isEmpty) break; // malformed: no radius
++          sink.fillCircle(
++              boundaryPayload.coords[0] - ox,
++              boundaryPayload.coords[1] - oy,
++              boundaryPayload.scalars[0],
++              style);
++          break;
++        }
++        final triangles = doc.fills.trianglesFor(boundary!);
++        if (triangles == null || triangles.isEmpty) break; // unfillable
++        final count = boundaryPayload.pointCount;
++        final points = Float64List(count * 2);
++        for (var i = 0; i < count; i++) {
++          points[i * 2] = boundaryPayload.coords[i * 2] - ox;
++          points[i * 2 + 1] = boundaryPayload.coords[i * 2 + 1] - oy;
++        }
++        sink.fillPolygon(points, count, triangles, style);
+     }
+     sink.endResidual();
+   }
+ }
+ 
+ class _Item {
+   _Item(this.handle, this.placement, {this.slot});
+   final Handle handle;
+   final Transform2 placement;
+   final int? slot;
+diff --git a/packages/jet_cad_2d_flutter/test/fill_render_test.dart b/packages/jet_cad_2d_flutter/test/fill_render_test.dart
+new file mode 100644
+index 0000000..837f3b3
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/fill_render_test.dart
+@@ -0,0 +1,124 @@
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import 'support/differential.dart';
++import 'support/fixtures.dart';
++
++GeometryPayload squareLoop() => GeometryPayload(
++    coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
++    scalars: Float64List(0));
++
++AddRegionCommand region(DraftDocument doc) => AddRegionCommand.allocate(
++      seed: doc.handleSeed,
++      owner: doc.rootHandle,
++      boundaryKind: EntityKind.polyline,
++      boundaryPayload: squareLoop(),
++      layer: ReservedHandles.layerZero,
++      fillColor: const TrueColor(0x3366CC),
++      boundaryColor: const TrueColor(0x000000),
++    );
++
++/// Paints one frame with a fresh index and painter, returning the painter so
++/// its per-frame counters can be read.
++DraftPainter paintOnce(DraftDocument doc, RecordingDrawSink sink) {
++  final index = SpatialIndex(doc);
++  addTearDown(index.dispose);
++  final painter = DraftPainter(
++      document: doc, index: index, resolver: DocumentStyleResolver(doc));
++  painter.paint(sink, ViewportTransform.fit(doc.extents, kViewport), kViewport);
++  return painter;
++}
++
++/// Paints a second frame with the same painter, so a counter's reset can be
++/// told apart from a running total.
++void paintAgain(DraftPainter painter, RecordingDrawSink sink) {
++  painter.paint(sink,
++      ViewportTransform.fit(painter.document.extents, kViewport), kViewport);
++}
++
++void main() {
++  test('a region draws the fill before its boundary', () {
++    final doc = DraftDocument.empty();
++    final cmd = region(doc);
++    doc.commands.execute(cmd);
++    final sink = RecordingDrawSink();
++    paintOnce(doc, sink);
++    final fillAt = sink.ops.indexWhere((o) => o is FillPolygonOp);
++    final strokeAt = sink.ops.indexWhere((o) => o is PolylineOp);
++    expect(fillAt, isNonNegative);
++    expect(fillAt, lessThan(strokeAt),
++        reason: 'draw order is ascending handle value and the fill holds the '
++            'lower one; if this inverts, the fill paints over its own outline');
++  });
++
++  test('an unfillable boundary is skipped and counted, not handed to a sink',
++      () {
++    final doc = DraftDocument.empty();
++    final cmd = region(doc);
++    doc.commands.execute(cmd);
++    // Edit the boundary into a bow tie: still closed, no longer simple.
++    doc.commands.execute(SetEntityGeometryCommand(
++        cmd.boundary.handle,
++        GeometryPayload(
++            coords: Float64List.fromList([0, 0, 10, 10, 10, 0, 0, 10, 0, 0]),
++            scalars: Float64List(0))));
++    final sink = RecordingDrawSink();
++    final painter = paintOnce(doc, sink);
++    expect(sink.ops.whereType<FillPolygonOp>(), isEmpty,
++        reason: 'CanvasDrawSink fills a self-intersecting path by non-zero '
++            'winding while VerticesDrawSink draws nothing -- handing either '
++            'one this fill manufactures a divergence on the refused case');
++    expect(painter.skippedFillCount, 1);
++  });
++
++  test('a circle boundary draws a fillCircle, never a triangulated polygon',
++      () {
++    // The scale-dependence rule, as a drawing property.
++    final doc = DraftDocument.empty();
++    doc.commands.execute(AddRegionCommand.allocate(
++      seed: doc.handleSeed,
++      owner: doc.rootHandle,
++      boundaryKind: EntityKind.circle,
++      boundaryPayload: GeometryPayload(
++          coords: Float64List.fromList([0, 0]),
++          scalars: Float64List.fromList([50])),
++      layer: ReservedHandles.layerZero,
++      fillColor: const TrueColor(0x3366CC),
++      boundaryColor: const TrueColor(0x000000),
++    ));
++    final sink = RecordingDrawSink();
++    paintOnce(doc, sink);
++    expect(sink.ops.whereType<FillCircleOp>(), hasLength(1));
++    expect(sink.ops.whereType<FillPolygonOp>(), isEmpty);
++  });
++
++  test('skippedFillCount is per frame, not a running total', () {
++    // Plan 3c's Ruling 44: a counter that never resets prints a plausible
++    // number beside two per-frame figures and reads as a working gate.
++    final doc = DraftDocument.empty();
++    doc.commands.execute(region(doc));
++    doc.commands.execute(SetEntityGeometryCommand(
++        doc.entities.handleAt(doc.entities.liveSlots.last),
++        GeometryPayload(
++            coords: Float64List.fromList([0, 0, 10, 10, 10, 0, 0, 10, 0, 0]),
++            scalars: Float64List(0))));
++    final painter = paintOnce(doc, RecordingDrawSink());
++    paintAgain(painter, RecordingDrawSink());
++    expect(painter.skippedFillCount, 1);
++  });
++
++  test('the painter walks fills and the reference walk agrees', () {
++    // `expectPainterSupersetOfReference` in
++    // `packages/jet_cad_2d_flutter/test/support/differential.dart` is the
++    // existing oracle. It is a *superset* check by design, so it catches a
++    // painter that forgets a fill and not one that draws an extra -- pair it
++    // with the ordering test above, which is exact.
++    final doc = DraftDocument.empty();
++    doc.commands.execute(region(doc));
++    expectPainterSupersetOfReference(
++        paintToRecording(doc), referenceToRecording(doc), kViewport);
++  });
++}
