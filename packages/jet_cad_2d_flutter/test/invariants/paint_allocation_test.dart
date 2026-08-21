@@ -17,12 +17,15 @@
 // two `sublistView` wrappers -- and nothing per entity, `3 * (textOps + 1)`
 // per frame.
 
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+
+import '../support/spy_canvas.dart';
 
 const Size _viewport = Size(800, 600);
 
@@ -92,17 +95,70 @@ void main() {
     expect(sink.debugCapacityVertices, before,
         reason: 'the buffer grew in a steady-state frame, so the frame path '
             'allocates O(entities) and not O(1)');
-    // MUTATION: allocate a fresh `Paint` inside `flush()` instead of reusing
-    // the field for the sink's life. `debugCapacityVertices` cannot see this
-    // -- a `Paint` is not part of either buffer -- so identity is pinned
-    // directly. Confirmed empirically: constructing `_paint = Paint()..color
-    // = const Color(0xFFFFFFFF);` right before `canvas.drawVertices` in
-    // `flush()` leaves the two prior assertions green and fails only this
-    // one, `identical` reading false.
+    // MUTATION: reassign the `_paint` field to a fresh `Paint` inside
+    // `flush()` instead of reusing the one built for the sink's life.
+    // `debugCapacityVertices` cannot see this -- a `Paint` is not part of
+    // either buffer -- so the field's identity is pinned directly. Confirmed
+    // empirically: `_paint = Paint()..color = const Color(0xFFFFFFFF);`
+    // right before `canvas.drawVertices` in `flush()` leaves the two prior
+    // assertions green and fails only this one, `identical` reading false.
+    //
+    // **This assertion alone is narrower than the property's name.** It pins
+    // that the *field* is not reassigned; it says nothing about what is
+    // actually handed to `canvas.drawVertices`, because it never looks at
+    // the call. A mutation that constructs a fresh, call-site-local `Paint`
+    // and passes *that* to `drawVertices` -- `Paint()..color = const
+    // Color(0xFFFFFFFF)` written inline, `_paint` never touched -- satisfies
+    // this `identical` check (the field genuinely did not change) while
+    // still allocating a `Paint` every flush. See the test below, which
+    // reads what `dart:ui` actually received and is the one that closes A1.
     expect(identical(sink.debugPaint, paintBefore), isTrue,
         reason: 'flush() must reuse the one Paint built for the sink\'s '
             'life, not build a fresh one per call');
 
     recorder.endRecording().dispose();
+  });
+
+  test(
+      'flush hands drawVertices the same Paint object every time, not a '
+      'call-site-local one', () {
+    // The test above pins that the `_paint` *field* is not reassigned, which
+    // a mutation that builds a fresh, call-site-local `Paint` and passes it
+    // straight to `drawVertices` -- never touching the field -- survives.
+    // This reads what `dart:ui` actually received, through `SpyCanvas`,
+    // which is the only way to see the difference: identity of the object
+    // handed to the call, not of the field.
+    final spy = SpyCanvas();
+    final sink = VerticesDrawSink(pixelsPerPaperMm: kLogicalPixelsPerMm)
+      ..canvas = spy;
+    const style = ResolvedStyle(
+      argb: 0xFF000000,
+      lineweightHundredths: 25,
+      linetype: ReservedHandles.byLayerLinetype,
+      linetypeScale: 1.0,
+    );
+    for (var i = 0; i < 2; i++) {
+      sink
+        ..beginResidual(Transform2.identity())
+        ..polyline(
+            Float64List.fromList([0, i.toDouble(), 10, i.toDouble()]), 2, style,
+            closed: false)
+        ..endResidual()
+        ..flush();
+    }
+
+    final calls = spy.named('drawVertices').toList();
+    expect(calls.length, 2, reason: 'one drawVertices per flush');
+    final paints = calls
+        .map((c) => c.args.whereType<Paint>().single)
+        .toList(growable: false);
+    // MUTATION: replace `_paint` in the `drawVertices` call with a fresh,
+    // call-site-local `Paint()..color = const Color(0xFFFFFFFF)`, never
+    // touching the field -- confirmed empirically: the test above and every
+    // other test in the suite stay green under this exact mutation, and
+    // only this `identical` check goes red.
+    expect(identical(paints[0], paints[1]), isTrue,
+        reason: 'flush() must hand drawVertices the one Paint built for the '
+            "sink's life, not a fresh one per call");
   });
 }

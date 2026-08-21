@@ -1,58 +1,51 @@
 # Plan 3d mutation log
 
-**Verdict: thirty-nine mutants accounted for. Thirty-four killed (two of them
-only after a fix round), one recorded as a deliberate control that is
-expected to survive, and two recorded as not independently re-mutated with
-the reason given, plus two more cited from the codebase's own confirmed
-record rather than re-run.** Fourteen of the thirty-four kills are the design
-document's own table — `J1`-`J9`, `B1`, `B2`, `A1`, `V1`,
-`P1` — run fresh in this task in twelve mutation-test cycles (two pairs share
-one code line and one run each: `J1`/`J6` and `J8`/`J9`, see the note under
-Part 1). The other twenty-two kills, plus the one control, stand in for "the
-spike's 33": drawn from the `// MUTATION:` comments the spike and Tasks 2, 4,
-5, 6, 8 and 9 left embedded in the inherited test suite, plus a handful
-constructed to reach code the comments describe but do not spell out, all run
-fresh in this task against today's code. Combined, Parts 1 and 2 below are
-**thirty-three distinct mutation-test cycles** — a coincidence with the
-spike's own tally, explained rather than engineered, in the note before
-Part 2. Two survivors surfaced (`A1`, `S2`) and both are closed, in this task,
-with a new test each — `debugPaint` identity and flush-time colour order —
-that the suite did not carry before, and both are re-counted as kills in the
-"killed" total above. Two mutations are cited from the codebase's own
-"confirmed empirically" record rather than re-run, and two are recorded as
-not independently reproducible; the reasoning for each is given below rather
-than treated as a gap.
+**Verdict: forty-one mutants accounted for. Thirty-four killed (two of them
+only after a fix round, one of those — `A1` — needing a second, stronger test
+after a first fix round proved too narrow), one recorded as a deliberate
+control that is expected to survive, two recorded as unreachable dead code
+rather than guarded, two recorded as not independently re-mutated with the
+reason given, and two cited from the codebase's own confirmed record rather
+than re-run.** Fourteen of the thirty-four kills are the design document's
+own table — `J1`-`J9`, `B1`, `B2`, `A1`, `V1`, `P1` — run fresh in this task
+in twelve mutation-test cycles (two pairs share one code line and one run
+each: `J1`/`J6` and `J8`/`J9`, see the note under Part 1). The other twenty
+kills, plus the one control, are drawn from the `// MUTATION:` comments the
+spike and Tasks 2, 4, 5, 6, 8 and 9 left embedded in the inherited test
+suite, plus a handful constructed to reach code the comments describe but do
+not spell out, all run fresh in this task against today's code (Part 2, 21
+rows). Two survivors surfaced (`A1`, `S2`) and both are closed, in this task,
+with a new test each, and both are counted as killed in the total above.
 
 | Category | Count | Outcome |
 |---|---|---|
-| Named in the design document (`J1`-`J9`, `B1`, `B2`, `A1`, `V1`, `P1`) | 14 | 13 killed outright, 1 (`A1`) survived and was closed with a new test |
-| Spike-heritage, run fresh in this task | 21 | 19 killed outright, 1 (`S2`) survived and was closed with a new test, 1 (`E20_one`) is a deliberate control confirming a documented property |
+| Named in the design document (`J1`-`J9`, `B1`, `B2`, `A1`, `V1`, `P1`) | 14 | 13 killed outright, 1 (`A1`) survived and was closed |
+| Spike-heritage, run fresh in this task (Part 2) | 21 | 19 killed outright, 1 (`S2`) survived and was closed, 1 (`E20_one`) is a deliberate control confirming a documented property |
+| Unreachable, recorded as dead code rather than a guard | 2 | `cosHalf <= 0`, `mlen == 0` in `_emitJoin` — see below |
 | Cited from the codebase's own confirmed-empirical record, not re-run | 2 | both previously confirmed (Task 2, Task 8) |
 | Not independently reproducible, reason recorded | 2 | no discrete code path exists to mutate (structural) |
-| **Total accounted for** | **39** | **34 killed, 1 control, 2 cited, 2 not reproducible** |
+| **Total accounted for** | **41** | **34 killed, 1 control, 2 unreachable, 2 cited, 2 not reproducible** |
 
-Parts 1 and 2 below run to **thirty-three distinct mutation-test cycles**
-(twelve covering the fourteen named mutants, twenty-one more for the
-spike-heritage set) — a numeric coincidence with the spike's own tally,
-explained rather than engineered, in the note before Part 2.
+Parts 1 and 2 below run to thirty-three mutation-test cycles: twelve covering
+the fourteen named mutants, twenty-one more for the spike-heritage set. The
+paragraph below explains what "the spike's 33" means here and why this is
+not a reproduction of it.
 
-**Why "the spike's 33" is not a literal replay.** The spike's own note
+**What "the spike's 33" means in this log.** The spike's own note
 (`docs/superpowers/notes/2026-08-20-vertices-sink-spike.md`) records a tally —
 33 mutants, 32 killed, 1 not applicable — but no surviving per-mutant diff:
 the individual edits lived only in a session-local script that was never
-committed. What *did* survive, committed and inherited, is `// MUTATION:`
-comments beside twenty of the twenty-eight tests the spike shipped in
-`vertices_draw_sink_test.dart`, plus more that Tasks 2, 4, 5, 6, 8 and 9 added
-alongside their own work in `vertices_join_test.dart`, `point_shape_test.dart`
-and `render_backend_test.dart`. Those comments *are* the concrete, checkable
-trace of the spike's mutation testing, most of them still describing the exact
-lines they were written against. This task ran every one of them for real,
-against the code as it stands today, rather than assert the historical count.
-Two of the thirty-four candidate mutations this produced turned out to be the
-same code line under two different names (`S15` and `S17b`, both the
-half-width floor's `devicePixelRatio` division — see below); merged, that
-leaves **thirty-three** distinct mutations run in this part of the task,
-which is a coincidence worth naming rather than a target this task aimed at.
+committed, so there is nothing to replay. What did survive, committed and
+inherited, is `// MUTATION:` comments beside most of the tests the spike
+shipped in `vertices_draw_sink_test.dart`, plus more that Tasks 2, 4, 5, 6, 8
+and 9 added alongside their own work in `vertices_join_test.dart`,
+`point_shape_test.dart` and `render_backend_test.dart`. Part 2 below runs
+21 mutations drawn from those comments — a mix of genuine spike heritage and
+later tasks' own additions to the same suite, not a spike-only set — for real
+against today's code. That Part 1 (12) plus Part 2 (21) totals 33 is not a
+target this task aimed at and not a claim that the spike's original 33 have
+been reproduced; it is reported once, here, rather than repeated as a
+coincidence throughout this document.
 
 **How each mutant was applied and reverted.** A Python runner
 (`scratchpad/mutate14.py`, session-local, not committed, modelled on Plan 3c's
@@ -60,17 +53,17 @@ which is a coincidence worth naming rather than a target this task aimed at.
 narrowest test file that should catch it, and restores from the copy in a
 `finally` block — **`git checkout` was not used anywhere in this task.**
 `git status --porcelain` was read after every mutation and confirmed the
-backup-restored file carried no leftover edit; the three real (non-mutation)
-changes this task makes — a `debugPaint` getter and two new tests — are the
+backup-restored file carried no leftover edit; the four real (non-mutation)
+changes this task makes — a `debugPaint` getter and three new tests — are the
 only diff left in the tree once every mutation run finished, confirmed by
 `grep -rn MUTATION packages/jet_cad_2d_flutter/lib/` finding nothing.
 
 **Baseline before this task:** `jet_cad_2d` 720 tests; `jet_cad_2d_flutter`
 236 passed / 1 skipped. **After:** `jet_cad_2d` 720 (unchanged, this task
-touches no file in that package); `jet_cad_2d_flutter` **237** passed / 1
-skipped — one net new test (the second closes an existing test's own
-assertion, described below); `dart analyze`/`flutter analyze` and
-`dart format --set-exit-if-changed` clean in all three packages.
+touches no file in that package); `jet_cad_2d_flutter` **238** passed / 1
+skipped — two net new tests, one closing `A1` (below) and one closing `S2`
+(Part 2); `dart analyze`/`flutter analyze` and `dart format
+--set-exit-if-changed` clean in all three packages.
 
 ---
 
@@ -126,13 +119,49 @@ same property reached a second way). Both die today, on the same fixture
 (`'a right (clockwise) turn is mitred out on its own outer side'` for `J4b`),
 because that fixture exists precisely because the first review missed it.
 
-### A1 — the one survivor in the named table, closed
+### B1 — what was actually run, and why it stands in for the tabled mutant
 
-`paint_allocation_test.dart` measures `debugCapacityVertices`, which pins the
-two buffers but has no way to see a `Paint` object, because a `Paint` is not
-part of either buffer. Mutating `flush()` to build a fresh `Paint()..color =
-const Color(0xFFFFFFFF)` on every call, instead of reusing the field the sink
-carries for its life, left every existing assertion in the file green:
+The design document's `B1` is "resolve the backend per call site rather than
+once," and its stated killer is "a test that overrides the backend and reads
+it back from both the widget and the rig." **No such test exists.** There is
+no rig-facing read of the resolved backend anywhere in this suite — `main.dart`
+prints `backend=` from `DraftCanvasState.resolvedBackend` for the device
+harness (`main.dart:288`), but nothing in `render_backend_test.dart` reads it
+back through that path, only through `DraftCanvasState` directly.
+
+`B1`'s literal mutation — a second call site independently deciding the
+backend — also has no line to invert. `defaultRenderBackend()` is a pure,
+unconditional function (`RenderBackend defaultRenderBackend() =>
+RenderBackend.vertices;`) with exactly one call site in `lib/`:
+`draft_canvas.dart:140`'s `resolvedBackend = widget.backend ??
+defaultRenderBackend();`, inside `_attach()`. A second call site calling the
+same pure function would always agree with the first, so "two call sites
+disagreeing" cannot be written as a mutation of an unconditional function —
+it would need new code with nothing to invert, the same shape as the `S1`
+and join-local-space entries below.
+
+What this task ran instead is the **property's equivalence class**: caching
+the decision once and re-deciding it on every call are indistinguishable
+exactly as long as the cache is invalidated whenever the input that fed it
+changes. `didUpdateWidget` is that invalidation — `if (... || widget.backend
+!= oldWidget.backend) { _changes.dispose(); _attach(); }` — so dropping
+`backend` from that comparison is the reachable form of "the cached decision
+goes stale relative to what a fresh per-call-site read would give," which is
+the same failure the design document's own reasoning names ("a disagreement
+would show as a drawing that changes when a widget is rebuilt somewhere
+unrelated"). This is a genuine, defensible substitution, not a different
+property — but it is a substitution, made without a test for the design
+document's own stated fixture, and `Task 15`'s exit-gate reader should treat
+`B1` as **killed via an equivalent mutation**, not as the tabled mutation run
+literally.
+
+### A1 — the one survivor in the named table, closed in two rounds
+
+**Round 1.** `paint_allocation_test.dart` measures `debugCapacityVertices`,
+which pins the two buffers but has no way to see a `Paint` object, because a
+`Paint` is not part of either buffer. Mutating `flush()` to *reassign the
+`_paint` field* to a fresh `Paint()..color = const Color(0xFFFFFFFF)` on
+every call left every existing assertion in the file green:
 
 ```
 [A1] file: lib/src/vertices_draw_sink.dart
@@ -140,32 +169,57 @@ carries for its life, left every existing assertion in the file green:
 All tests passed!
 ```
 
-Neither of `jet_cad_2d_flutter`'s test files instruments VM-level allocation
-the way `jet_cad_2d/test/invariants/vm_allocation_meter.dart` does for the
-query path — `paint_allocation_test.dart`'s own mechanism is a field read,
-by design ("this needs no sampling profiler: once a frame has drawn its
-widest view... either holds still... or it does not," per the file's header),
-which is exactly why a non-buffer allocation is invisible to it. **Closed** by
-adding a `debugPaint` getter (`vertices_draw_sink.dart:159-171`, `Paint get
-debugPaint => _paint;`) and pinning its *identity* — not its value — across
-the subject frame in `paint_allocation_test.dart`:
+Closed, in the first pass, by adding a `debugPaint` getter (`Paint get
+debugPaint => _paint;`) and pinning its identity across the subject frame.
+That killed the field-reassignment form: `Expected: true / Actual: <false>`
+on the `identical` check.
+
+**Round 2 (post-review).** That fix is narrower than `A1`'s own title. A
+reviewer wrote a mutation that never touches the field at all — a
+call-site-local `Paint`, built fresh and handed straight to the call:
 
 ```dart
-final paintBefore = sink.debugPaint;
-painter.paint(sink, camera, _viewport);
-sink.flush();
-...
-expect(identical(sink.debugPaint, paintBefore), isTrue, ...);
+canvas.drawVertices(
+  vertices,
+  BlendMode.dst,
+  Paint()..color = const Color(0xFFFFFFFF), // never assigns to _paint
+);
 ```
 
-Re-run against the widened file: **killed**, `Expected: true / Actual:
-<false>`, on the `identical` check specifically — the two prior assertions
-(flush count, triangle count) stayed green under this exact mutation, which
-is the point: nothing else in the file was ever going to catch it.
+Run against the round-1 fix and the full suite: **survived both**, `+238 ~1:
+All tests passed!` — the `debugPaint` check is a field read, and the field
+genuinely never changed, so it cannot see a Paint built and discarded at the
+call site itself. Re-verified by the controller directly (not taken from the
+reviewer's report): copied `vertices_draw_sink.dart` aside, applied the exact
+mutation above, ran `paint_allocation_test.dart` (green) and the full
+238-test suite (green), restored from the copy, confirmed `git status
+--porcelain` clean.
+
+**Closed for real** by reading what `dart:ui` actually receives, through
+`test/support/spy_canvas.dart` (already in the tree, built for
+`draft_painter_test.dart`'s call-recording needs). A new test flushes twice
+and pins that `canvas.drawVertices`'s own `Paint` argument is `identical`
+across both calls:
+
+```dart
+final calls = spy.named('drawVertices').toList();
+final paints = calls.map((c) => c.args.whereType<Paint>().single).toList();
+expect(identical(paints[0], paints[1]), isTrue, ...);
+```
+
+Re-run against the reviewer's mutation: **killed**, `Expected: true / Actual:
+<false>`, on this `identical` check specifically, with the round-1 test and
+the rest of the 238-test suite staying green — which is the point: this is
+the one instrument that reads the call itself rather than any field, so a
+`Paint` allocated anywhere on the way to `drawVertices` — a reassigned
+field, a call-site-local temporary, or anything else with the same shape —
+has to fail it. Both rounds' assertions are kept: the field-identity check is
+still a real, narrower property (`_paint` is not reassigned), and the new
+call-site check is the one that actually closes `A1` as named.
 
 ---
 
-## Part 2: the inherited suite's own mutations (33, after one duplicate merge)
+## Part 2: the inherited suite's own mutations (21, after one duplicate merge)
 
 Each of these is either an existing `// MUTATION:` comment in
 `vertices_draw_sink_test.dart`, `vertices_join_test.dart`,
@@ -207,18 +261,49 @@ task.**
 
 `vertices_join_test.dart`'s own comment on `'a closed run of two points closes
 without a phantom seam'` (the fixture two points make: one segment out, one
-back) already states that disabling `_emitJoin`'s three bails **one at a
-time** does not reach the division-by-zero the fixture is built to catch —
-"confirmed empirically: this test is the one that goes red... and it does so
-only when all three are gone together, not for any one of them alone." This
-task re-ran that claim rather than take it on faith: disabling only the
-`cross == 0` bail left all 14 tests in the file green, because the other two
-bails (`dot < kMinMiterCosine`, `mlen == 0`) still catch the same reversal on
-their own. `E20_all` — all three disabled together — then does fail, on
-`v.isFinite` reading false as the comment predicts. `E20_one` is recorded as a
-**deliberate control confirming a documented layered-guard property**, not as
-an open survivor; the property it demonstrates is that no single bail is
-load-bearing alone, which is a fact about the code, not a gap in its tests.
+back) states that disabling `_emitJoin`'s `cross == 0` bail alone does not
+reach the division-by-zero the fixture is built to catch. This task re-ran
+that claim rather than take it on faith: disabling only `cross == 0` left all
+14 tests in the file green, because `dot < kMinMiterCosine` — still active —
+catches the same exact reversal on its own (`dot` is exactly `-1` for a
+180-degree reversal, well below the `-0.875` threshold, so this bail fires
+whether or not `cross == 0` was checked first). `E20_all` — `cross == 0`,
+`dot < kMinMiterCosine` *and* `mlen == 0` all disabled together — then does
+fail, on `v.isFinite` reading false. `E20_one` is recorded as a **deliberate
+control**, not an open survivor: it shows `cross == 0` is redundant with
+`dot < kMinMiterCosine` for this one fixture, which is a fact about the code.
+It does **not** show that `mlen == 0` is reachable on its own — see the next
+section, which the first version of this log conflated with this one.
+
+### Two branches recorded as unreachable, not guarded
+
+`progress.md:68` (Task 4) records that `cosHalf <= 0` and `mlen == 0` inside
+`_emitJoin`'s tip-triangle computation (`vertices_draw_sink.dart:401`,
+`:406`) are unreachable **given the `dot < kMinMiterCosine` bail at line 397
+being active**: that bail bounds the turn angle at roughly 151 degrees before
+either line is ever reached, and neither can be produced by any narrower
+angle. The first version of this log filed both under `E20_one`'s "no single
+bail is load-bearing alone" — which is true of `cross == 0` (the previous
+section) but is the wrong frame for these two: they are not redundant with
+another guard for one fixture, they are **dead code under the shipped
+configuration**, full stop.
+
+Re-confirmed directly in this fix round, each in isolation, against the
+*entire* 238-test suite rather than the 14-test join file alone (`cross == 0`
+and `dot < kMinMiterCosine` both left active):
+
+```
+mlen == 0    -> `if (false && mlen == 0) return;`    -> +238 ~1: All tests passed!
+cosHalf <= 0 -> `if (false && cosHalf <= 0) return;`  -> +238 ~1: All tests passed!
+```
+
+Neither is counted as killed, tested, or guarded anywhere in this log's
+tally; both are recorded as **not applicable**, with the file:line that makes
+each unreachable, per the same convention Plan 3c's `S10` used for a mutant
+with no site at all. (`E20_all`'s crash, above, is a different, compound
+experiment — disabling all three checks including `mlen == 0`'s own line —
+and does not bear on whether `mlen == 0` is reachable when `dot <
+kMinMiterCosine` is left active, which it is not.)
 
 ### S2 — the other survivor, closed
 
@@ -239,13 +324,23 @@ building the submitted view, left this test green:
 
 **Closed** by adding `'draw order survives the flush itself, not just the
 pre-flush buffer'` (`vertices_draw_sink_test.dart:172-206`), which attaches
-`sink.observer` and reads the colours the observer actually receives — the
-same view `flush()` hands to `Vertices.raw` — rather than the pre-flush
-buffer. Re-run against the widened file: **killed**,
+`sink.observer` and reads the colours the observer actually receives, rather
+than the pre-flush buffer. Re-run against the widened file: **killed**,
 `Expected: equals [4294901760, 4278255360, 4294901760] ordered / Actual:
 [4278255360, 4294901760, 4294901760]` (0xFFFF0000, 0xFF00FF00, 0xFFFF0000
 read back unsigned) — green, red, red instead of red, green, red, on the new
 test specifically; the old test stays green either way, exactly as diagnosed.
+
+**What this new test constrains, precisely.** The observer's view is *today*
+identical to what `Vertices.raw` receives, but the test does not pin that —
+it pins only what the observer is handed, one call earlier in `flush()`.
+Confirmed directly: grouping by colour *after* `observer?.call(positions,
+colors)` and *before* `Vertices.raw(...)` — so the observer still sees
+emission order and only the submitted `Vertices` is reordered — survives the
+new test **and the full 238-test suite, goldens and `sink_comparison_test.dart`
+included**. The `S2` mutation this log logs (grouping before the observer
+call) is genuinely killed; a narrower, later-reordering variant of the same
+property is not. Recorded here rather than left implicit.
 
 ---
 
@@ -302,27 +397,54 @@ dedicated local-space-join mutant to run against it directly.
 
 ## What this does not cover
 
-Consistent with Task 11's architectural finding (`progress.md`, Task 11): the
-seam join and the point-shape fix have no coverage through any frame path.
-`draft_painter.dart` routes point, line and polyline through `_emitScreenSpace`
-whose residual is a bare `Transform2.translation`, so a rotated residual never
-reaches `point`, and `closed:` is `false` at all four of the painter's call
-sites — `J9`'s mutation is killed here only because
-`vertices_join_test.dart` calls `sink.polyline(..., closed: true)` directly,
-exactly as the design document's own table says ("no painter reaches this").
-This log pins what the sink does when driven directly; it does not claim the
-frame path exercises `J5`, `J8`, `J9` or `P1` end to end. That gap is
-pre-existing and outside this task's brief.
+Consistent with Task 11's architectural finding (`progress.md`, Task 11), and
+correcting the first version of this log against it: the seam join and the
+point-shape fix are not equally reachable, and calling both "unreachable" is
+wrong for one of them.
+
+- **`J9`** — capping the seam of a closed *polyline* instead of joining it —
+  is genuinely unreachable from the frame path: `closed:` is `false` at all
+  four of `draft_painter.dart`'s `polyline` call sites, so no drawing this
+  repository can generate ever calls `VerticesDrawSink.polyline(...,
+  closed: true)`. This log's `J9` mutation is killed only because
+  `vertices_join_test.dart` calls it directly, exactly as the design
+  document's own table says ("no painter reaches this").
+- **`J8`** — capping the seam of a closed *flatten* (a circle) — is
+  **not** unreachable. `progress.md:122` corrects the claim this log first
+  made: the painter *does* reach `closed: true`, via `sink.circle`
+  (`draft_painter.dart:588`, `:619`), for every circle entity the corpus
+  draws. The seam geometry is on the frame path already. What is missing is
+  a test that reads the actual triangle buffer *through* the painter and
+  checks the seam is joined there — the goldens and `sink_comparison_test.dart`
+  compare ink regions and pixel coverage, neither of which is built to
+  isolate one join's few square pixels from the rest of a drawn circle. The
+  seam is **unobservable through the painter with today's instruments, not
+  unreachable by it.**
+- **`J5`, `P1`** — `draft_painter.dart` routes point, line and polyline
+  through `_emitScreenSpace`, whose residual is a bare
+  `Transform2.translation`, so a *rotated or sheared* residual — the
+  specific case `P1`'s fixture needs — never reaches `point` through the
+  frame path, and an *open* polyline forced closed (`J5`'s shape) is not
+  a distinct entity the corpus generates either.
+
+This log pins what the sink does when driven directly, through
+`VerticesDrawSink`'s own interface; it does not claim `J5`, `J8`, `J9` or
+`P1` are exercised end to end through `DraftPainter`. `J8` is the one row
+where that gap is a testing gap rather than an architectural one, and a
+future task could close it by reading `debugPositions()` after a painter
+frame that draws a circle, rather than by adding a new mutant.
 
 ---
 
 ## Files changed
 
 - `packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart` — one getter
-  added, `debugPaint`, exposing `_paint`'s identity for `A1`'s test. No
-  behaviour change.
+  added, `debugPaint`, exposing `_paint`'s identity for `A1`'s round-1 test.
+  No behaviour change.
 - `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart` —
-  pins `debugPaint`'s identity across the subject frame, closing `A1`.
+  two tests for `A1`: the round-1 `debugPaint` identity check, and the
+  round-2 `SpyCanvas`-based check of what `drawVertices` actually receives,
+  which is the one that closes it.
 - `packages/jet_cad_2d_flutter/test/vertices_draw_sink_test.dart` — one new
   test, `'draw order survives the flush itself, not just the pre-flush
   buffer'`, closing `S2`.
@@ -334,7 +456,7 @@ cd /Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/vertices-spike
 
 # baseline
 (cd packages/jet_cad_2d          && dart test)      # 720 pass
-(cd packages/jet_cad_2d_flutter  && flutter test)   # 237 pass, 1 skip
+(cd packages/jet_cad_2d_flutter  && flutter test)   # 238 pass, 1 skip
 
 # the two mutants that needed new tests, narrowest suite each
 (cd packages/jet_cad_2d_flutter && flutter test \
