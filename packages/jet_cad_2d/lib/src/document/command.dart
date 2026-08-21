@@ -4,6 +4,7 @@ import '../core/handle.dart';
 import '../store/entity_store.dart';
 import '../store/geometry_store.dart';
 import 'component.dart';
+import 'fill_index.dart';
 import 'tables.dart';
 import 'tree.dart';
 
@@ -81,6 +82,11 @@ abstract class CommandTarget {
   DocumentTables get tables;
   ComponentRegistry get components;
   HandleSeed get handleSeed;
+
+  /// The fill cache and the boundary->fills map. A command that changes a
+  /// boundary's geometry or removes one must keep this current; see
+  /// `SetEntityGeometryCommand` and `RemoveEntityCommand`.
+  FillIndex get fills;
 
   /// Marks derived state stale: working extents, cached world transforms, and
   /// any index built over the stores. Derived state is never persisted, so this

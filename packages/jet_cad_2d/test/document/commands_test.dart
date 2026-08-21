@@ -26,6 +26,8 @@ class TestTarget implements CommandTarget {
     ),
   );
   @override
+  final FillIndex fills = FillIndex();
+  @override
   void invalidateDerived() {}
 }
 

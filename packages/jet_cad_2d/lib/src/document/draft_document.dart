@@ -9,6 +9,7 @@ import 'command.dart';
 import 'component.dart';
 import 'doc_change.dart';
 import 'extents.dart';
+import 'fill_index.dart';
 import 'header.dart';
 import 'node.dart';
 import 'raw_data.dart';
@@ -36,6 +37,9 @@ class DraftDocument implements CommandTarget {
   final HandleSeed handleSeed;
   @override
   final DocumentTree tree;
+
+  @override
+  final FillIndex fills = FillIndex();
 
   final DocumentHeader header;
   final RawDataStore rawData;
@@ -198,6 +202,9 @@ class DraftDocument implements CommandTarget {
       }
     }
     entities.purge();
+    // `fills` is deliberately untouched. It is keyed by handle, and purge
+    // renumbers slots, not handles. Adding an invalidation here would be
+    // correct-looking and wrong: it would throw away work nothing invalidated.
     invalidateDerived();
     commands.notifyPurged();
   }

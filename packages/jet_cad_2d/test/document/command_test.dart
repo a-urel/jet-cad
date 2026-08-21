@@ -24,6 +24,8 @@ class FakeTarget implements CommandTarget {
       children: const [],
     ),
   );
+  @override
+  final FillIndex fills = FillIndex();
 
   int invalidations = 0;
   @override

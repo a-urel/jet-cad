@@ -17,6 +17,7 @@ export 'src/document/component.dart';
 export 'src/document/doc_change.dart';
 export 'src/document/draft_document.dart';
 export 'src/document/extents.dart';
+export 'src/document/fill_index.dart';
 export 'src/document/header.dart';
 export 'src/document/node.dart';
 export 'src/document/origin_component.dart';
