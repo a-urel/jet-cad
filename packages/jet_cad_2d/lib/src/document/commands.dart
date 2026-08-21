@@ -1,10 +1,14 @@
+import 'dart:typed_data';
+
 import '../core/handle.dart';
 import '../geometry/transform2.dart';
+import '../geometry/triangulate.dart';
 import '../store/entity_store.dart';
 import '../store/geometry_store.dart';
 import 'command.dart';
 import 'component.dart';
 import 'node.dart';
+import 'style.dart';
 
 /// Adds one leaf entity together with its geometry.
 ///
@@ -301,6 +305,191 @@ class SetComponentCommand<T extends Component> extends DraftCommand {
     return CommandResult(
       inverse: SetComponentCommand<T>(handle, previous),
       touched: {handle},
+    );
+  }
+}
+
+/// Creates a boundary and the fill beneath it, as one mutation.
+///
+/// **The pair's handles are the whole point.** Draw order is ascending handle
+/// value, and the natural authoring order -- draw the outline, then hatch it --
+/// produces exactly the failing case. [allocate] takes the fill's handle first,
+/// so it is strictly lower, and [apply] re-checks that rather than trusting it:
+/// a hand-built command must not be able to invert the order silently.
+///
+/// **One `apply`, not two composed commands.** The fill is written first and at
+/// that instant the boundary it names does not exist. Two `AddEntityCommand`s
+/// would fire `invalidateDerived()` between them and let the index observe a
+/// fill with a dangling reference.
+class AddRegionCommand extends DraftCommand {
+  AddRegionCommand({
+    required this.fill,
+    required this.boundary,
+    required this.boundaryPayload,
+  });
+
+  final EntityRecord fill;
+  final EntityRecord boundary;
+  final GeometryPayload boundaryPayload;
+
+  /// Allocates the pair, **fill first**.
+  static AddRegionCommand allocate({
+    required HandleSeed seed,
+    required Handle owner,
+    required EntityKind boundaryKind,
+    required GeometryPayload boundaryPayload,
+    required Handle layer,
+    required DraftColor fillColor,
+    required DraftColor boundaryColor,
+    int fillTransparency = 0,
+    int boundaryLineweight = kLineweightDefault,
+  }) {
+    final fillHandle = seed.next();
+    final boundaryHandle = seed.next();
+    return AddRegionCommand(
+      fill: EntityRecord(
+        handle: fillHandle,
+        owner: owner,
+        kind: EntityKind.fill,
+        layer: layer,
+        linetype: ReservedHandles.continuousLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: fillColor,
+        lineweight: kLineweightDefault,
+        transparency: fillTransparency,
+        flags: 0,
+      ),
+      boundary: EntityRecord(
+        handle: boundaryHandle,
+        owner: owner,
+        kind: boundaryKind,
+        layer: layer,
+        linetype: ReservedHandles.continuousLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: boundaryColor,
+        lineweight: boundaryLineweight,
+        transparency: 0,
+        flags: 0,
+      ),
+      boundaryPayload: boundaryPayload,
+    );
+  }
+
+  @override
+  Capability get capability => Capability.geometry;
+
+  @override
+  String get label => 'Add region';
+
+  @override
+  CommandResult apply(CommandTarget target) {
+    if (fill.handle.value >= boundary.handle.value) {
+      throw StateError('a region\'s fill must carry the lower handle: got fill '
+          '${fill.handle.toHex()} against boundary ${boundary.handle.toHex()}');
+    }
+    if (fill.owner != boundary.owner) {
+      throw StateError('a region\'s two halves must share one owner');
+    }
+    // Everything that can refuse, refuses before anything is written --
+    // `apply` must either complete fully or leave the target unmutated.
+    final triangles = triangulationFor(boundary.kind, boundaryPayload);
+    if (triangles == null) {
+      throw StateError('${boundary.handle.toHex()} is not a fillable boundary');
+    }
+    if (target.entities.containsHandle(fill.handle) ||
+        target.entities.containsHandle(boundary.handle)) {
+      throw DuplicateHandleError(fill.handle);
+    }
+
+    final fillGeom = target.geometry.add(GeometryPayload(
+      coords: Float64List(0),
+      scalars: Float64List.fromList([boundary.handle.value.toDouble()]),
+    ));
+    target.entities.add(fill.copyWith(geomIndex: fillGeom));
+    final boundaryGeom = target.geometry.add(boundaryPayload);
+    target.entities.add(boundary.copyWith(geomIndex: boundaryGeom));
+    target.handleSeed.raiseTo(boundary.handle);
+
+    target.fills.link(fill.handle, boundary.handle);
+    if (triangles.isNotEmpty) {
+      target.fills.putTriangles(boundary.handle, triangles);
+    }
+    target.invalidateDerived();
+
+    return CommandResult(
+      inverse: RemoveRegionCommand(
+          fill: fill, boundary: boundary, boundaryPayload: boundaryPayload),
+      touched: {fill.handle, boundary.handle},
+    );
+  }
+}
+
+/// The triangulation for a fillable boundary, or null when it is not one.
+///
+/// An **empty** result is different from null: null means "this is not a
+/// boundary at all" and is refused at command time; empty means "a fillable
+/// shape that could not be reduced", which the painter skips and counts.
+/// A circle returns an empty list and is fanned per frame instead -- its
+/// triangulation is scale-dependent and must never be cached.
+Int32List? triangulationFor(EntityKind kind, GeometryPayload payload) {
+  if (kind == EntityKind.circle) {
+    return payload.scalars.isNotEmpty && payload.scalars[0] > 0
+        ? Int32List(0)
+        : null;
+  }
+  if (kind != EntityKind.polyline) return null;
+  final count = payload.pointCount;
+  // Closedness is a stored-value question, so the comparison is exact. This is
+  // the same test `SpatialIndex` already applies before answering
+  // `HitKind.fill` for a closed polyline's interior.
+  if (count < 3) return null;
+  if (payload.coords[0] != payload.coords[(count - 1) * 2] ||
+      payload.coords[1] != payload.coords[(count - 1) * 2 + 1]) {
+    return null;
+  }
+  return triangulateSimplePolygon(payload.coords, count);
+}
+
+/// Removes a region as one mutation. [AddRegionCommand]'s inverse.
+///
+/// Removal order is boundary first, then fill: the reverse of creation, so no
+/// observer ever sees a live fill whose boundary has gone.
+class RemoveRegionCommand extends DraftCommand {
+  RemoveRegionCommand({
+    required this.fill,
+    required this.boundary,
+    required this.boundaryPayload,
+  });
+
+  final EntityRecord fill;
+  final EntityRecord boundary;
+  final GeometryPayload boundaryPayload;
+
+  @override
+  Capability get capability => Capability.geometry;
+
+  @override
+  String get label => 'Remove region';
+
+  @override
+  CommandResult apply(CommandTarget target) {
+    final boundarySlot = target.entities.slotOf(boundary.handle);
+    final fillSlot = target.entities.slotOf(fill.handle);
+    if (boundarySlot == null || fillSlot == null) {
+      throw StateError('region ${boundary.handle.toHex()} is not intact');
+    }
+    target.geometry.remove(target.entities.geomIndexAt(boundarySlot));
+    target.entities.remove(boundarySlot);
+    target.geometry.remove(target.entities.geomIndexAt(fillSlot));
+    target.entities.remove(fillSlot);
+    target.fills.dropBoundary(boundary.handle);
+    target.invalidateDerived();
+    return CommandResult(
+      inverse: AddRegionCommand(
+          fill: fill, boundary: boundary, boundaryPayload: boundaryPayload),
+      touched: {fill.handle, boundary.handle},
     );
   }
 }
