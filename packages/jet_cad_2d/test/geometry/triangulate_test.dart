@@ -77,4 +77,29 @@ void main() {
     final c = loop([0, 0, 4, 0, 2, 2, 0, 4, 4, 4, 2, 2]);
     expect(triangulateSimplePolygon(c, c.length ~/ 2), isEmpty);
   });
+
+  test(
+      'a consecutive duplicate point right after the first vertex is '
+      'tolerated, not rejected', () {
+    // A 10x10 square with (10,0) stored twice in a row -- a plausible
+    // snap-rounding artefact from a DXF import. The duplicate is not the
+    // store's closing duplicate (that is the separate first-equals-last
+    // convention, already stripped by count - 1); it is a second, genuinely
+    // stored point sitting on top of its neighbour, elsewhere in the ring.
+    final c = loop([0, 0, 10, 0, 10, 0, 10, 10, 0, 10]);
+    final t = triangulateSimplePolygon(c, c.length ~/ 2);
+    expect(t, isNotEmpty);
+    expect(areaOf(c, t), closeTo(100.0, 1e-9));
+  });
+
+  test(
+      'a consecutive duplicate point mid-ring is tolerated too, not just '
+      'right after the first vertex', () {
+    // Same square, but the doubled point is the third vertex, not the
+    // second -- so a fix that only checks index 0/1 cannot pass this.
+    final c = loop([0, 0, 10, 0, 10, 10, 10, 10, 0, 10]);
+    final t = triangulateSimplePolygon(c, c.length ~/ 2);
+    expect(t, isNotEmpty);
+    expect(areaOf(c, t), closeTo(100.0, 1e-9));
+  });
 }

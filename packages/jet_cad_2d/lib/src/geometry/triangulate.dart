@@ -15,13 +15,21 @@ import 'dart:typed_data';
 /// clipper's own "no ear anywhere" stall does not see every case: see
 /// `_hasSelfIntersection` for the fixture that motivates it.
 ///
+/// A point repeated consecutively *within* the ring (not the store's closing
+/// duplicate, which is dropped by `count - 1` before any of this) is
+/// tolerated, not rejected: it collapses to the single vertex it geometrically
+/// is, per the contract's "at least three distinct points". A plausible
+/// DXF-imported boundary with a snap-rounding duplicate vertex must still
+/// fill. See `_dedupeConsecutive`.
+///
 /// O(n^2). Room boundaries are tens of points, and this runs once per edit,
 /// off the frame path -- see the plan's global constraints.
 Int32List triangulateSimplePolygon(Float64List coords, int count) {
   final n = count - 1; // drop the duplicated closing point
   if (n < 3) return Int32List(0);
 
-  final index = List<int>.generate(n, (i) => i);
+  final index = _dedupeConsecutive(coords, List<int>.generate(n, (i) => i));
+  if (index.length < 3) return Int32List(0);
   // Reject a self-intersecting boundary before clipping. Plain ear-clipping's
   // "no ear anywhere" stall does not see every self-intersection: at n == 4 a
   // bow tie crosses between its two far edges, and every candidate diagonal
@@ -63,6 +71,34 @@ Int32List triangulateSimplePolygon(Float64List coords, int count) {
     ..add(index[2]);
   return Int32List.fromList(out);
 }
+
+/// Collapses a point repeated at consecutive ring positions (including the
+/// wrap from the last position back to the first) into a single entry,
+/// keeping the earlier index. This is a stored-value comparison, not a
+/// geometric decision -- exact `==`, no tolerance, consistent with this
+/// file's other exact comparisons -- because it is asking "are these two
+/// stored coordinate pairs bit-for-bit the same point", not "are these two
+/// distinct points close enough to treat as one".
+///
+/// Only *consecutive* duplicates collapse. A duplicate coordinate elsewhere
+/// in the ring is a different situation -- a loop touching itself at a
+/// vertex -- and stays exactly as many entries as stored; whether that is a
+/// simple loop is for the ear-clipper (and `_hasSelfIntersection`) to decide,
+/// not this function.
+List<int> _dedupeConsecutive(Float64List c, List<int> raw) {
+  final out = <int>[];
+  for (final p in raw) {
+    if (out.isNotEmpty && _samePoint(c, out.last, p)) continue;
+    out.add(p);
+  }
+  if (out.length > 1 && _samePoint(c, out.first, out.last)) {
+    out.removeLast();
+  }
+  return out;
+}
+
+bool _samePoint(Float64List c, int a, int b) =>
+    c[a * 2] == c[b * 2] && c[a * 2 + 1] == c[b * 2 + 1];
 
 double _signedArea(Float64List c, List<int> index) {
   var sum = 0.0;
