@@ -162,6 +162,13 @@ class VerticesDrawSink implements DrawSink {
   /// paint contributes is its alpha, and that is always opaque.
   final Paint _paint = Paint()..color = const Color(0xFFFFFFFF);
 
+  /// The [Paint] instance [flush] hands to `drawVertices`.
+  ///
+  /// Exposed so `paint_allocation_test.dart` can pin its *identity* across
+  /// flushes -- `debugCapacityVertices` alone cannot see a fresh [Paint]
+  /// built every call, because a `Paint` is not part of either buffer.
+  Paint get debugPaint => _paint;
+
   /// Vertices written, so `_vertices * 2` floats and `_vertices` colours.
   int _vertices = 0;
 

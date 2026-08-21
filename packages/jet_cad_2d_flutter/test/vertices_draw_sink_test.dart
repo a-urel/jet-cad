@@ -169,6 +169,44 @@ void main() {
     expect(sink.debugPositions()[13], closeTo(1.5, 1e-12));
   });
 
+  test('draw order survives the flush itself, not just the pre-flush buffer',
+      () {
+    // The row above reads `debugColors()` before any `flush()` runs, so it
+    // pins only that `polyline` writes `_colors` in call order -- true by
+    // construction, since nothing reorders on the way in. It cannot see a
+    // reorder introduced *inside* `flush()`, on the way to `drawVertices`,
+    // which is where the sink's first shipped cut actually had the bug (see
+    // the class comment). This test reads what the observer sees: the exact
+    // view `flush()` hands to `Vertices.raw`.
+    //
+    // MUTATION: sort the vertices by colour inside `flush()` before
+    // building the submitted view (e.g. group by colour, stable within a
+    // colour) and this reads red, red, green instead of red, green, red --
+    // confirmed empirically: `debugColors()` above stays green under this
+    // exact mutation because it never calls `flush()`.
+    final recorder = PictureRecorder();
+    final canvas = Canvas(recorder);
+    late Int32List seenColors;
+    final sink = _sink(canvas: canvas);
+    sink.observer = (_, colors) {
+      seenColors = Int32List.fromList(colors);
+    };
+    sink.beginResidual(Transform2.identity());
+    sink.polyline(_seg(0, 0, 10, 0), 2, _style(argb: 0xFFFF0000),
+        closed: false);
+    sink.polyline(_seg(0, 1, 10, 1), 2, _style(argb: 0xFF00FF00),
+        closed: false);
+    sink.polyline(_seg(0, 2, 10, 2), 2, _style(argb: 0xFFFF0000),
+        closed: false);
+    sink.endResidual();
+    sink.flush();
+
+    final colors = seenColors.map((c) => c.toUnsigned(32)).toList();
+    expect([colors[0], colors[6], colors[12]],
+        orderedEquals(<int>[0xFFFF0000, 0xFF00FF00, 0xFFFF0000]));
+    recorder.endRecording().dispose();
+  });
+
   test('one flush, one draw call, whatever the colours', () {
     final recorder = PictureRecorder();
     final canvas = Canvas(recorder);

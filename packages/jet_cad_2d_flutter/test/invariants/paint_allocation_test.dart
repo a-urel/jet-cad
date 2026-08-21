@@ -86,11 +86,22 @@ void main() {
     // below runs, which is the steady-state property failing as loudly as
     // it can.
     final before = sink.debugCapacityVertices;
+    final paintBefore = sink.debugPaint;
     painter.paint(sink, camera, _viewport);
     sink.flush();
     expect(sink.debugCapacityVertices, before,
         reason: 'the buffer grew in a steady-state frame, so the frame path '
             'allocates O(entities) and not O(1)');
+    // MUTATION: allocate a fresh `Paint` inside `flush()` instead of reusing
+    // the field for the sink's life. `debugCapacityVertices` cannot see this
+    // -- a `Paint` is not part of either buffer -- so identity is pinned
+    // directly. Confirmed empirically: constructing `_paint = Paint()..color
+    // = const Color(0xFFFFFFFF);` right before `canvas.drawVertices` in
+    // `flush()` leaves the two prior assertions green and fails only this
+    // one, `identical` reading false.
+    expect(identical(sink.debugPaint, paintBefore), isTrue,
+        reason: 'flush() must reuse the one Paint built for the sink\'s '
+            'life, not build a fresh one per call');
 
     recorder.endRecording().dispose();
   });
