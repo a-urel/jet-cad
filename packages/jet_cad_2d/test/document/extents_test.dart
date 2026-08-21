@@ -227,4 +227,124 @@ void main() {
             'misses it, the fill is culled and picked against an outline '
             'that moved');
   });
+
+  test('a fresh index resolves a fill to its boundary without any edit', () {
+    // Unlike the test above, nothing here is ever edited: `region` builds
+    // the pair and `SpatialIndex` is constructed once, over that
+    // already-settled document. If `ContainerIndex.build`'s own resolution
+    // were missing, only `_reconcileEntity`'s (exercised above, by an edit)
+    // would ever be caught -- and the path every freshly opened document
+    // takes, first build with no edits at all, would go untested.
+    final doc = DraftDocument.empty();
+    final cmd = region(doc); // square at 0,0..10,10
+    doc.commands.execute(cmd);
+
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final slot = doc.entities.slotOf(cmd.fill.handle)!;
+    final box = index.rootIndex.boxOfLeaf(slot);
+    expect(box!.min.x, 0.0,
+        reason: 'the fill is derived from the boundary; if the initial '
+            'build never resolves it, a document opened fresh -- never '
+            'edited -- indexes its fill as an empty box that is never '
+            'found and never picked');
+    expect(box.max.x, 10.0);
+    expect(box.max.y, 10.0);
+  });
+
+  test(
+      "doc.extents finds a fill's boundary by handle, not by walking the "
+      'tree', () {
+    // `doc.extents` unions every leaf a container owns, and `AddRegionCommand`
+    // always gives a fill and its boundary the same owner -- so in every
+    // document built through the command layer, the boundary's own leaf
+    // already contributes its box to that union, and a fill that resolved
+    // to nothing would still leave `doc.extents` unchanged (`Aabb2.union`
+    // treats an empty box as a no-op). That makes the redundant case
+    // worthless as a test: it cannot go red no matter what a mutant does to
+    // the fill's own resolution, because the boundary's identical box is
+    // already there regardless.
+    //
+    // So this fixture breaks the redundancy on purpose: the boundary lives
+    // in a definition nothing instantiates, built directly through
+    // `AddEntityCommand` rather than `AddRegionCommand` (which would refuse
+    // the mismatched owners). It is unreachable by any tree walk from the
+    // root -- `doc.extents` never visits an unplaced definition -- so the
+    // *only* way its box can reach `doc.extents` is through the fill,
+    // sitting at the root, resolving the boundary handle stored in its own
+    // payload.
+    final doc = DraftDocument.empty();
+
+    final defHandle = doc.handleSeed.next();
+    doc.tree.addDefinition(Definition(
+      handle: defHandle,
+      name: 'Orphaned',
+      basePoint: Vector2.zero(),
+      children: const [],
+    ));
+
+    final boundaryHandle = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: boundaryHandle,
+        owner: defHandle,
+        kind: EntityKind.polyline,
+        layer: ReservedHandles.layerZero,
+        linetype: ReservedHandles.byLayerLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: kByLayer,
+        transparency: kByLayer,
+        flags: 0,
+      ),
+      payload: payload([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
+    ));
+
+    doc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: doc.handleSeed.next(),
+        owner: doc.rootHandle,
+        kind: EntityKind.fill,
+        layer: ReservedHandles.layerZero,
+        linetype: ReservedHandles.byLayerLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: kByLayer,
+        transparency: kByLayer,
+        flags: 0,
+      ),
+      payload: payload([], [boundaryHandle.value.toDouble()]),
+    ));
+
+    // A second, unrelated root entity, well clear of the boundary -- proves
+    // the assertion below is not vacuous: without it, the fill would be the
+    // only thing at the root, and a bug that returned `Aabb2.empty()`
+    // wholesale would show up merely as `doc.extents.isEmpty`, a coarser and
+    // less convincing signal than one specific corner moving.
+    doc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: doc.handleSeed.next(),
+        owner: doc.rootHandle,
+        kind: EntityKind.line,
+        layer: ReservedHandles.layerZero,
+        linetype: ReservedHandles.byLayerLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: kByLayer,
+        transparency: kByLayer,
+        flags: 0,
+      ),
+      payload: payload([-3, -3, -1, -1]),
+    ));
+
+    expect(doc.extents.max.x, 10.0,
+        reason: "only the fill can pull the orphaned boundary's box into "
+            'doc.extents; a fill that fails to resolve it leaves this '
+            'corner at -1, from the line alone.');
+    expect(doc.extents.max.y, 10.0);
+  });
 }
