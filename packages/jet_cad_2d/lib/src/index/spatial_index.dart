@@ -1000,6 +1000,16 @@ class SpatialIndex {
         // fill's payload carries no coordinates. This case exists only so the
         // switch stays exhaustive, so a future EntityKind still fails to
         // compile here instead of falling through silently.
+        //
+        // That is the intended behaviour, not an oversight: a fill is drawn,
+        // not picked. Even if it did reach kind dispatch, it would always
+        // lose the tie-break below -- greater handle wins among equal kinds,
+        // and a fill's handle is strictly lower than its boundary's by
+        // construction (`AddRegionCommand.allocate` takes the fill's handle
+        // first) -- and the boundary already answers `HitKind.fill` on the
+        // same interior. If a later change gives a fill coordinates of its
+        // own, this guard starts answering for it, and `break` remains the
+        // right answer for the reasons above.
         break;
     }
 
@@ -1574,6 +1584,14 @@ class SpatialIndex {
         // fill's payload carries no coordinates. This case exists only so the
         // switch stays exhaustive, so a future EntityKind still fails to
         // compile here instead of falling through silently.
+        //
+        // That is the intended behaviour, not an oversight: the fill's own
+        // boundary already contributes every vertex a snap could offer for
+        // this shape, so a second candidate at the same point would only
+        // give the tie-break two entities to choose between where there was
+        // always meant to be one. `snapCentreOfLeaf` and
+        // `NarrowPhaseSlack.ofLeaf` (`container_index.dart`) answer null and
+        // zero for a fill for the same reason.
         break;
     }
   }

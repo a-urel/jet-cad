@@ -824,6 +824,17 @@ class ContainerIndex {
 /// midpoints and projections of geometry its own box already contains, so
 /// there is nothing to index separately for them.
 ///
+/// **A fill is one of those "every other kind"s, and deliberately not a
+/// special case.** Its `kind != circle && kind != arc` guard already
+/// answers null for it, for the same reason it answers null for a line or a
+/// polyline: a fill's boundary already contributes every vertex a snap
+/// could find on that shape, so a second candidate at the same point would
+/// not add a real choice -- it would only give the snap tie-break two
+/// entities to choose between where there was always meant to be one. If a
+/// later change gives a fill coordinates of its own, this guard starts
+/// answering for it too, and null remains the right answer for the same
+/// reason.
+///
 /// Null, not a NaN pair, for a payload whose centre does not come out
 /// finite: `PackedRTree.build` sorts by box centre, and a NaN would make
 /// that comparison meaningless for every other item in the same tree.
@@ -950,6 +961,14 @@ class NarrowPhaseSlack {
     if (kind != EntityKind.circle && kind != EntityKind.arc) {
       // Every other kind's narrow phase measures points, segments or the
       // interior of a closed polyline, all of which the box contains.
+      //
+      // A fill falls through this same branch, and its zero is exact
+      // rather than approximate: it has no narrow phase of its own at
+      // all -- `_considerLeaf` and `_considerSnapLeaf` never reach a fill's
+      // kind dispatch, because its `pointCount` is zero. Its indexed box
+      // (derived from its boundary, see `entityBounds`) contains a query
+      // that will never actually run, so there is nothing for a margin to
+      // compensate for.
       return none;
     }
     if (box.isEmpty || payload.scalars.isEmpty) return none;

@@ -5,6 +5,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
+import '../document/region_command_test.dart' show region;
+
 Handle addEntity(DraftDocument doc, Handle owner, EntityKind kind,
     List<double> coords, List<double> scalars) {
   final handle = doc.handleSeed.next();
@@ -543,5 +545,56 @@ void main() {
     expect(out.entity, arc);
     expect(out.point.x, closeTo(0, 1e-9));
     expect(out.point.y, closeTo(0, 1e-9));
+  });
+
+  test('a fill never wins a snap, so boundary vertices are not doubled', () {
+    // `snapCentreOfLeaf` and `NarrowPhaseSlack.ofLeaf` both use negative
+    // guards (`kind != circle && kind != arc`), not a switch with a
+    // default, so a fill already falls through both: no snap centre, and
+    // zero narrow-phase slack. Both are right for the same reason -- the
+    // fill's own boundary already contributes every vertex a snap could
+    // find, so a second candidate at the same point would only corrupt the
+    // tie-break, never add a real choice.
+    final doc = DraftDocument.empty();
+    final cmd = region(doc);
+    doc.commands.execute(cmd);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final out = SnapResult();
+    index.snapInto(Vector2(0, 0), 1.0, SnapMask.all, out);
+    expect(out.found, isTrue,
+        reason: "the boundary's own corner at the origin is still snappable");
+    expect(out.entity, isNot(cmd.fill.handle),
+        reason: 'the boundary already contributes every vertex; a second '
+            'candidate on the same point would corrupt the snap tie-break');
+    expect(out.entity, cmd.boundary.handle);
+  });
+
+  test(
+      'a fill manufactures no snap candidate of its own, even away from '
+      'every real vertex', () {
+    // The corner check above alone cannot catch `snapCentreOfLeaf` leaking
+    // an answer for a fill: at (0,0) the boundary's own SnapKind.endpoint
+    // candidate sits at the exact same point and always outranks a
+    // SnapKind.center candidate by kind priority, regardless of distance --
+    // so a corrupted centre would be silently masked there, the same
+    // "closer, higher-priority candidate" hazard `corpus.dart`'s
+    // `_nearMissIntersection` fixture documents. The room's interior, five
+    // units from every edge and vertex, has no real candidate within this
+    // query's radius at all, so nothing can mask a fill that manufactures
+    // one.
+    final doc = DraftDocument.empty();
+    final cmd = region(doc);
+    doc.commands.execute(cmd);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final out = SnapResult();
+    index.snapInto(Vector2(5, 5), 0.5, SnapMask.all, out);
+    expect(out.found, isFalse,
+        reason: 'no real snap feature is within reach of the room interior; '
+            'a hit here can only mean the fill supplied one it should not '
+            'have');
   });
 }

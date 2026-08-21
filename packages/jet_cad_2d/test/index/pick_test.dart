@@ -5,6 +5,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
+import '../document/region_command_test.dart' show region;
+
 /// A text entity with a real string, style and packed attributes — the three
 /// things `addEntity` cannot carry.
 ///
@@ -1478,5 +1480,31 @@ void main() {
     final hit = HitPath();
     expect(index.pickInto(Vector2(0, 0), 5.0, const QueryFilter.picking(), hit),
         isFalse);
+  });
+
+  test('clicking inside a filled room selects the boundary, not the fill', () {
+    // The spec's original claim -- "a fill answers HitKind.fill on its own
+    // handle" -- was withdrawn: `_considerLeaf` returns before any kind
+    // dispatch when `pointCount == 0`, and a fill has no coordinates, so it
+    // is never even a candidate. Even if it were, it would always lose the
+    // tie-break: pick priority is kind, then ancestor, then greater handle
+    // wins, and a fill's handle is strictly lower than its boundary's by
+    // construction (`AddRegionCommand.allocate` takes the fill's handle
+    // first). The boundary already answers `HitKind.fill` on its own
+    // interior, exactly as an unfilled closed polyline does today.
+    final doc = DraftDocument.empty();
+    final cmd = region(doc);
+    doc.commands.execute(cmd);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    expect(index.pickInto(Vector2(5, 5), 0.5, const QueryFilter.all(), hit),
+        isTrue);
+    expect(hit.entity, cmd.boundary.handle,
+        reason: 'the fill carries the lower handle by construction and '
+            'would lose the tie-break anyway; the region tool maps the '
+            'boundary to the pair');
+    expect(hit.kind, HitKind.fill);
   });
 }

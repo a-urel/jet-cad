@@ -834,6 +834,81 @@ CorpusDocument _textLaidOut() => CorpusDocument('textLaidOut', () {
 /// nearest/perpendicular candidate from either line is ever a competing
 /// candidate near the origin; only the (illegitimate, clamp-dropped)
 /// intersection candidate would be found there at all.
+/// A filled room at the root, plus a second one defined once and placed
+/// through a rotated, non-uniformly scaled instance.
+///
+/// **Not one of the task-16 brief's fifteen named rows** -- `EntityKind
+/// .fill` postdates that table. Added to close a mutation task-10 left
+/// deliberately surviving: with no fill entity anywhere in the corpus,
+/// `reference_query.dart`'s two `case EntityKind.fill:` branches (in
+/// `_hitAtOf` and `_snapCandidates`) were never exercised by the
+/// differential walk at all, so a mutant that made either one *produce* a
+/// hit or a snap candidate for a fill would have gone undetected -- not
+/// because the oracle disagreed with the index, but because neither side
+/// was ever asked.
+///
+/// **Deliberately not at the identity transform.** The second room sits
+/// inside an instance that is both rotated and non-uniformly scaled, so the
+/// fill leaf the differential walk visits there is reached through a
+/// genuinely composed transform, matching this suite's general rule against
+/// fixtures that only ever exercise the identity case.
+///
+/// A plain, unfilled line sits nearby so this fixture also gives the random
+/// trials something ordinary to hit next to a fill that contributes
+/// nothing, rather than a room floating alone in empty space.
+CorpusDocument _regionFill() => CorpusDocument('regionFill', () {
+      final doc = DraftDocument.empty();
+
+      final room = AddRegionCommand.allocate(
+        seed: doc.handleSeed,
+        owner: doc.rootHandle,
+        boundaryKind: EntityKind.polyline,
+        boundaryPayload: GeometryPayload(
+          coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
+          scalars: Float64List(0),
+        ),
+        layer: ReservedHandles.layerZero,
+        fillColor: const TrueColor(0x3366CC),
+        boundaryColor: const TrueColor(0x000000),
+      );
+      doc.commands.execute(room);
+      expect(room.fill.handle.value, lessThan(room.boundary.handle.value),
+          reason: 'draw order is ascending handle value; the fill must '
+              'carry the lower handle by construction');
+
+      final def = _addDefinition(doc, name: 'Room');
+      final defRoom = AddRegionCommand.allocate(
+        seed: doc.handleSeed,
+        owner: def,
+        boundaryKind: EntityKind.polyline,
+        boundaryPayload: GeometryPayload(
+          coords: Float64List.fromList([0, 0, 6, 0, 6, 4, 0, 4, 0, 0]),
+          scalars: Float64List(0),
+        ),
+        layer: ReservedHandles.layerZero,
+        fillColor: const TrueColor(0x99CC33),
+        boundaryColor: const TrueColor(0x000000),
+      );
+      doc.commands.execute(defRoom);
+      final inst = _addInstance(doc,
+          parent: doc.rootHandle,
+          definition: def,
+          transform: Transform2.rotation(0.6)
+              .multiply(Transform2.scale(1.8, 0.7))
+              .multiply(Transform2.translation(30, -5)));
+      expect(doc.tree.nodes.map((n) => n.handle), contains(inst));
+      expect(doc.fills.fillsOf(defRoom.boundary.handle), [defRoom.fill.handle],
+          reason: 'the fill under the instance is still linked to its own '
+              'boundary, not the root room');
+
+      _addEntity(doc,
+          owner: doc.rootHandle,
+          kind: EntityKind.line,
+          coords: [-5, -5, -1, -5]);
+
+      return doc;
+    });
+
 CorpusDocument _nearMissIntersection() =>
     CorpusDocument('nearMissIntersection', () {
       final doc = DraftDocument.empty();
@@ -904,5 +979,6 @@ List<CorpusDocument> buildCorpus() => [
       _afterUndoReusingSlot(),
       _textDefaultMeasurer(),
       _textLaidOut(),
+      _regionFill(),
       _nearMissIntersection(),
     ];

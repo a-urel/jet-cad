@@ -554,7 +554,18 @@ List<Handle> referenceInstancesInRect(
       );
 
     case EntityKind.fill:
-      // A fill produces no hit and no snap candidate.
+      // Unreachable: this function returns above when `count == 0`, and a
+      // fill's payload carries no coordinates -- mirroring
+      // `SpatialIndex._considerLeaf`'s own dead branch of the same shape.
+      // This case exists only so the switch stays exhaustive.
+      //
+      // Even reachable, a fill could never win: pick priority is kind, then
+      // ancestor, then greater handle, and a fill's handle is strictly
+      // lower than its boundary's by construction
+      // (`AddRegionCommand.allocate` takes the fill's handle first). A
+      // closed polyline boundary already answers `HitKind.fill` on its own
+      // interior, so clicking inside a filled room selects the boundary,
+      // not the fill -- the pair the region tool maps either half back to.
       return null;
   }
 }
@@ -801,7 +812,16 @@ List<(SnapKind, Vector2)> _snapCandidates(
       add(SnapKind.insertion, toWorld.transformPoint(payload.pointAt(0)));
 
     case EntityKind.fill:
-      // A fill produces no hit and no snap candidate.
+      // Unreachable: this function returns above when `count == 0`, and a
+      // fill's payload carries no coordinates -- mirroring
+      // `SpatialIndex._considerSnapLeaf`'s own dead branch of the same
+      // shape. This case exists only so the switch stays exhaustive.
+      //
+      // Even reachable, a fill would add nothing real: its boundary already
+      // contributes every vertex a snap could find on that shape, so a
+      // second candidate at the same point would only give the tie-break
+      // two entities to choose between where there was always meant to be
+      // one.
       break;
   }
 
