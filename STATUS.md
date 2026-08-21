@@ -1,27 +1,37 @@
 # jet-cad — project status
 
-**Last updated:** 2026-08-20
-**Verified against:** `main`, working tree clean, no worktrees — both suites
-re-run on 2026-08-20 on the tree carrying the dash/leaf measurement below.
-Every count below was produced by running the suite, not by reading a report.
+**Last updated:** 2026-08-21
+**Verified against:** branch `spike/vertices-sink`, worktree
+`.claude/worktrees/vertices-spike`, at `4a16b41`, working tree clean — all
+three packages re-run there on 2026-08-21. Every count below was produced by
+running the suite, not by reading a report.
 
 ---
 
 ## TL;DR — where you left off
 
+**Plan 3d (the vertices sink) is finished and in flight on
+`spike/vertices-sink`** — fifteen tasks, executed, reviewed and committed, not
+merged and not pushed. **Its exit gate is 7 of 8 with one criterion open for
+the human**, and that one criterion is the whole handoff. See
+[Plan 3d](#plan-3d--the-vertices-sink-is-the-default-everywhere) and
+[Resume here](#resume-here).
+
 Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
 The `plan-3c` branch and its worktree are gone; the ledger is archived at
-[docs/superpowers/ledgers/](docs/superpowers/ledgers/). Everything is green and
-the tree is clean. **No plan is in flight** — see [Resume here](#resume-here).
+[docs/superpowers/ledgers/](docs/superpowers/ledgers/).
 
-| Suite | State |
+| Suite | State (on `spike/vertices-sink` at `4a16b41`) |
 |---|---|
 | `packages/jet_cad_2d` — engine | **720 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **152 tests, all pass** (1 pre-existing skip), analyze/format clean |
-| `flutter test --tags golden` | **13 pass**; no pre-existing PNG regenerated |
-| `apps/dev_harness_2d` | analyze/format clean; **R2/R4a/R4b run on macOS in profile mode** |
+| `packages/jet_cad_2d_flutter` — widgets | **238 tests pass, 1 skipped**, analyze/format clean |
+| `flutter test --tags golden` | **23 pass**, 28 PNGs (14 fixtures × 2 backends); no pre-existing PNG regenerated |
+| `apps/dev_harness_2d` | analyze/format clean; **R2/R4a/R4b run on macOS in profile mode, and R2 on Chrome/CanvasKit** |
 
-**Exit gate: PASS.** Every check ran and all eight failable criteria are met —
+The widget suite's one skip is `test/rig/paint_microbench_test.dart`, skipped at
+suite level by the `rig` tag in `dart_test.yaml` — pre-existing and by design.
+
+**Plan 3c's exit gate: PASS.** All eight of its failable criteria were met —
 zero new paragraph layouts and zero evictions in the steady-state frame at both
 entity counts and on real hardware, `skippedTextCount` 0, peak live paragraphs
 exactly at the declared limit, and 53 mutants accounted for. The one benchmark
@@ -29,11 +39,12 @@ failure is Plan 2's carried `snap at dirty threshold`.
 
 Results note:
 [docs/superpowers/notes/2026-08-20-plan-3c-results.md](docs/superpowers/notes/2026-08-20-plan-3c-results.md).
-**macOS Low Power Mode was on for the whole session** — every timing in it is
+**macOS Low Power Mode was on for the whole 3c session** — every timing in it is
 contaminated; no failable criterion is a timing. Re-measured with it off, the
 contamination is a uniform **~24%** on both raster and build, not the 4–12×
 that note guesses, and Plan 3b's claim that CPU-only paths are unaffected is
-**wrong**: they run 23–40% faster with it off.
+**wrong**: they run 23–40% faster with it off. Plan 3d read Low Power Mode as
+`0` before and after its desktop sweep.
 
 ### The per-leaf cost model is dead
 
@@ -46,31 +57,60 @@ are collinear — do not carry them forward. `build` is linear in call count to
 ±30 µs; raster is super-linear because each call is one Impeller `Entity`. At
 `DASHED=0` a 10,000-entity frame is **9.5 ms**, inside the 60 fps budget.
 
-### The batching spike pulled the lever, on a branch
+### Plan 3d — the vertices sink is the default everywhere
 
-[docs/superpowers/notes/2026-08-20-vertices-sink-spike.md](docs/superpowers/notes/2026-08-20-vertices-sink-spike.md).
-`VerticesDrawSink` builds each stroked segment's triangles itself and submits
-the frame's strokes as one ordered `drawVertices`. At 10,000 entities the frame
-goes **57.3 ms → 14.3 ms**, about 17 fps to about 70 — inside the 16.67 ms
-budget for the first time. Canvas calls 39,631 → 18, and the segment count went
-*up* 2.3× while the frame got faster, which is the sharpest confirmation of the
-per-call model there is.
+The 2026-08-20 spike
+([note](docs/superpowers/notes/2026-08-20-vertices-sink-spike.md)) became Plan
+3d, and Plan 3d is **finished on `spike/vertices-sink`** — 23 commits,
+`548fa8e..HEAD`, **not merged, not pushed**. `VerticesDrawSink` builds each
+stroked segment's triangles itself and submits the frame's strokes as one
+ordered `drawVertices`. What the spike lacked, 3d added: **miter and bevel
+joins** (a miter is two triangles), **seam joins on closed runs**, `Vertices`
+disposal at submission, a **coverage-only triangle rasterizer** so the golden
+suite is available to it, goldens **on both backends**, and a **sink-against-sink
+ink comparison**.
 
-Lives on **`spike/vertices-sink`**, four commits, **not merged, not pushed**.
-`DraftCanvas.useVertices` and the harness's `VERTICES` define are inert at
-their defaults, so `main`'s frame is unchanged. Engine 720/720, widgets
-180/180, 33 mutants with 32 killed and 1 not applicable.
+Results note:
+[docs/superpowers/notes/2026-08-21-plan-3d-results.md](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
+Mutation log:
+[docs/superpowers/notes/plan-3d-mutation-log.md](docs/superpowers/notes/plan-3d-mutation-log.md).
 
-It is not a finished sink: no joins, no caps, text still on `CanvasDrawSink`,
-and the golden suite is unavailable to it — `flutter_test`'s software Skia did
-not finish a 1,007-segment `drawVertices` in 7.5 minutes. A differential
-oracle covers it instead
-([test/support/vertices_differential.dart](packages/jet_cad_2d_flutter/test/support/vertices_differential.dart)),
-with its blind spots recorded in its own header.
+**Exit gate: 7 of 8 pass. Criterion 7 is measured and cannot be closed by the
+plan.** Desktop, median of three (build p50 / raster p50): 10,000 — canvas
+12.35 / 44.32 ms, vertices **5.71 / 6.68 ms**; 50,000 — canvas 15.36 / 66.94,
+vertices **7.07 / 8.53**; 500,000 — canvas 44.29 / 508.00, vertices **17.44 /
+21.64**. Criterion 5 (10k under 16.67 ms) and criterion 6 (raster better by
+more than the spread at 50k and 500k) both pass, with disjoint `[min, max]`
+intervals and no crossover anywhere.
 
-**Next: pick the next plan.** Nothing is in flight. The obvious candidate is
-turning that spike into one — joins and caps, a decision about goldens, and the
-50,000 and 500,000 corpora measured.
+**`defaultRenderBackend()` now returns `RenderBackend.vertices`
+unconditionally, web included.** CanvasKit's `drawVertices` beats its
+`drawPath` decisively — web 10,000: canvas 117.80 / 79.30 ms, vertices 6.80 /
+1.40 ms. **The number that justifies the flip is the 17.3×–17.5× within-platform
+`build` ratio, not the 56–60× raster figure**: `build` is the same Dart code on
+both arms, while CanvasKit's `rasterDuration` almost certainly ends at command
+submission. The desktop and web tables are **two separate confirmations, not one
+table doubled** — they did not draw the same drawing. `CanvasDrawSink` is not
+dead: it is the fallback and takes text on every frame (`canvasCalls=19` at 10k).
+
+**What is open, and it is the handoff:** `CLAUDE.md`'s "the frame path allocates
+nothing in steady state" is **not literally true of this backend**. Measured
+residue is **three objects per flush** (a `Vertices` and two `sublistView`
+wrappers), **nothing per entity**, so `3 × (textOps + 1)` per frame. The design
+forbids the plan from amending the rule it is measured against, so `CLAUDE.md` is
+untouched and **the human decides**. Proposed wording, and both outcomes, are in
+the results note. Approved → criterion 7 passes and the gate is 8/8. Refused →
+criterion 7 **fails** and that is the plan's result.
+
+**Costs and gaps the note records rather than smooths over:** 96.00 MiB of
+vertex buffer pinned for the widget's life at 500,000 entities; the web rows are
+**not reproducible from what was committed** (raw artifacts committed at
+`docs/superpowers/notes/2026-08-21-plan-3d-web-raw/`); the seam join and the
+point-shape fix have **no coverage through any frame path**; the permitted
+sub-pixel divergence is exercised by one unit test and no golden; a **2π-sweep
+`ARC`** would draw an unjoined seam and is characterised, not fixed (no DXF
+reader exists, and the corpus cannot produce one); and the R4a/R4b pairs'
+control is plausible but **not demonstrated**.
 
 ---
 
@@ -127,9 +167,13 @@ docs/superpowers/
 | Location | Branch | State |
 |---|---|---|
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, `33bdafb`, Plans 1/2/3a/3b/**3c** merged |
+| `.claude/worktrees/vertices-spike` | `spike/vertices-sink` | clean, **Plan 3d complete**, 23 commits off `main`, not merged, not pushed |
 
-No worktrees. `main` is **29 commits ahead of `origin/main`**. **Nothing has
-been pushed.** Do not push unless explicitly asked.
+`main` is **29 commits ahead of `origin/main`**. **Nothing has been pushed.** Do
+not push unless explicitly asked. The Plan 3d per-task ledger lives in the
+worktree at `.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` and
+is git-ignored; **archive it to `docs/superpowers/ledgers/` when the branch
+merges**, or it is lost with the worktree.
 
 ---
 
@@ -232,15 +276,49 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Nothing is in flight.** Plan 3c merged at `52c7a7b` with its exit gate
-passing; `main` is at `33bdafb`, clean, 29 commits ahead of `origin/main` and
-**unpushed**.
+**Plan 3d is complete on `spike/vertices-sink` and waiting on one human
+decision.** Everything is green there and the tree is clean; nothing else is in
+flight.
 
-Starting the next plan means picking from the roadmap below, writing a spec,
-then a plan, then executing it task by task on a fresh worktree —
-`superpowers:brainstorming` first if the shape is not already settled.
+**The one thing to answer first — the `CLAUDE.md` allocation amendment.** The
+current non-negotiable says the frame path allocates *nothing* in steady state.
+The vertices sink allocates **three objects per flush and nothing per entity**.
+The plan measured this and stopped, because a gate that can be passed by editing
+the rule it is measured against is not a gate. The proposed replacement:
 
-### What the next plan inherits
+> **The frame path allocates nothing per entity in steady state, and O(1) per
+> flush.** `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` and
+> `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`
+> measure it.
+
+**Approve it** → exit criterion 7 passes, the gate is 8/8, and the branch is
+ready for `superpowers:finishing-a-development-branch`. **Refuse it** →
+criterion 7 fails, and that is Plan 3d's recorded result rather than a delay;
+the branch does not merge on the strength of its note until the residue is
+removed or the rule is settled another way.
+
+**Then**: finish the branch (the merge menu is the human's to answer), archive
+`.superpowers/sdd/2026-08-20-jet-cad-2d-plan-3d-vertices-sink/` into
+`docs/superpowers/ledgers/`, and pick the next plan from the roadmap below —
+3e (fills) and 3f (caches and tiles) are the named successors, and what 3d owes
+each is written out at the end of
+[the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
+
+### What Plan 3d leaves open
+
+1. **The `CLAUDE.md` amendment**, above.
+2. **A frame-path fixture for the seam and the point shape.** Both are pinned
+   against the `DrawSink` interface only. `DraftPainter` routes point, line and
+   polyline through `_emitScreenSpace`, whose residual is a bare translation, so
+   a rotated point never reaches the sink through the painter at all.
+3. **The 2π-sweep `ARC` seam**, characterised and unfixed — safe only because
+   there is no DXF reader in the repository and the corpus cannot produce one.
+4. **The R4a/R4b control**, plausible but not demonstrated: a grep pattern
+   dropped the invariant fields from those two rows' transcripts.
+5. **Permitted divergence 5 (overlapping translucent strokes) goes live the
+   moment 3e adds fills.** It is inert today only because the corpus is opaque.
+
+### What the next plan inherits from 3c
 
 Six items, listed in full in the [results
 note](docs/superpowers/notes/2026-08-20-plan-3c-results.md). The first blocks
@@ -452,24 +530,50 @@ The results note must state **whether macOS Low Power Mode was on**.
 
 ---
 
-## Roadmap after 3c
+## Roadmap after 3d
 
-### Plan 3d — fills
+**Renumbered.** The vertices sink took the `3d` slot, so the two plans below
+moved up one: **fills is 3e** and **the picture cache is 3f**. That is the
+numbering the Plan 3d design document uses in "What 3d owes the plans after it",
+and it is the numbering the rest of this file uses. Older notes written before
+2026-08-20 call fills "3d" and the cache "3e"; read those by name, not by number.
+
+### Plan 3e — fills
 
 **It inherits no mechanism from 3b.** The 3b design's "flush contract" — a fill
 flushing open draw buckets — has nothing to attach to, because batching was
-reverted. 3d gets the ordinary one-call-per-primitive `CanvasDrawSink`.
+reverted — but 3d's vertices sink supersedes that concern entirely: **3e
+inherits a triangle buffer already appended to in draw order, and a flush that
+already happens before anything unbatchable.** `_flushBeforeUnbatchable` is the
+shape any fill-flush contract extends.
 
 **The open problem:** draw order is ascending handle value, so a region's fill
 must carry a **lower** handle than its boundary or it paints over its own
 outline. But handles are monotonic by creation and the natural authoring order
 is *draw the boundary, then hatch it* — which produces exactly the failing case.
-3d must choose and state one of:
+3e must choose and state one of:
 
 - give the fill an explicit draw-order key the painter honours ahead of handle order, or
 - require the region command to create boundary and fill in one transaction with the ordering reserved.
 
-### Plan 3e — the definition/tile picture cache
+**One thing 3e must not inherit silently.** Permitted divergence 5 —
+overlapping translucent strokes — is **inert today only because the corpus is
+opaque** (`argb`'s alpha is `255 - transparency`). A stroked path unions its
+coverage; a triangle soup does not, so two quads that overlap double-blend. The
+moment 3e draws anything with alpha < 255 that divergence is live and needs a
+test. See the [3d results
+note](docs/superpowers/notes/2026-08-21-plan-3d-results.md).
+
+### Plan 3f — the definition/tile picture cache
+
+**What 3d hands it.** A picture cache that records into a `Picture` interacts
+with a sink that batches across residuals: 3f must decide whether a cached
+picture flushes the vertex buffer at its boundary. There is **no crossover
+number** to work against — the vertices backend's raster margin is still
+widening at 500,000 entities — and there is **96.00 MiB of vertex buffer pinned
+for the widget's life** at that corpus size, which is the arithmetic a tiling
+scheme changes. Read the margin against **canvas calls**, not entity count: a
+10× entity rise moves `screenSpaceLeafCount` only 2.13× and `dashSpans` 3.03×.
 
 The prize is real: the dominant cost is leaf-count-bound GPU vertex work, and
 dashing makes that story **stronger** — one dashed polyline becomes dozens of
@@ -495,9 +599,9 @@ Four traps recorded in
    DXF's INSERT carries all four. `StyleContext` is the picture cache key, so
    this model decision belongs **before** the cache, not after.
 
-**Do not design 3e against a fixed op-count ceiling.** The web whole-drawing
+**Do not design 3f against a fixed op-count ceiling.** The web whole-drawing
 abort is reproducible but its trigger is unknown — a memory- or
-session-dependent CanvasKit failure explains it with no code at fault. What 3e
+session-dependent CanvasKit failure explains it with no code at fault. What 3f
 is owed first is a back-to-back, same-session re-run.
 
 ---

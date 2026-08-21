@@ -1,0 +1,210 @@
+=== 10000 vertices run 2 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (10000) frames=240
+  build  p50=6.90ms p95=7.90ms max=13.10ms
+  raster p50=1.30ms p95=1.70ms max=58.50ms
+  screenSpaceLeafCount=2111 lineweightScale=1
+  dashSpans=50120 collapsed=182 canvasCalls=19
+  backend=vertices triangles=223733 drawVerticesCalls=20
+  text: corpus=on draw=on textOps=19 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 10000 vertices run 3 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (10000) frames=241
+  build  p50=6.80ms p95=8.10ms max=12.70ms
+  raster p50=1.40ms p95=1.70ms max=54.60ms
+  screenSpaceLeafCount=2111 lineweightScale=1
+  dashSpans=50120 collapsed=182 canvasCalls=19
+  backend=vertices triangles=223733 drawVerticesCalls=20
+  text: corpus=on draw=on textOps=19 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 10000 canvas run 1 (already captured above, repeating cleanly) ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (10000) frames=241
+  build  p50=117.10ms p95=133.90ms max=140.00ms
+  raster p50=79.30ms p95=91.20ms max=191.90ms
+  screenSpaceLeafCount=2111 lineweightScale=1
+  dashSpans=50120 collapsed=182 canvasCalls=52897
+  backend=canvas
+  text: corpus=on draw=on textOps=19 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 10000 canvas run 2 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (10000) frames=241
+  build  p50=117.80ms p95=134.40ms max=142.10ms
+  raster p50=79.60ms p95=91.70ms max=198.30ms
+  screenSpaceLeafCount=2111 lineweightScale=1
+  dashSpans=50120 collapsed=182 canvasCalls=52897
+  backend=canvas
+  text: corpus=on draw=on textOps=19 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2020 evictions=1508)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 vertices run 1 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=241
+  build  p50=8.90ms p95=9.50ms max=14.10ms
+  raster p50=1.80ms p95=2.10ms max=267.70ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=24
+  backend=vertices triangles=294536 drawVerticesCalls=21
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 vertices run 2 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=239
+  build  p50=8.80ms p95=9.40ms max=14.00ms
+  raster p50=1.80ms p95=2.10ms max=67.90ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=24
+  backend=vertices triangles=294536 drawVerticesCalls=21
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 vertices run 3 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=233
+  build  p50=8.90ms p95=9.60ms max=14.30ms
+  raster p50=1.80ms p95=2.10ms max=70.90ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=24
+  backend=vertices triangles=294536 drawVerticesCalls=21
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 canvas run 1 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=241
+  build  p50=156.50ms p95=165.80ms max=170.50ms
+  raster p50=107.90ms p95=111.50ms max=219.40ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=70193
+  backend=canvas
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 canvas run 2 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=241
+  build  p50=155.70ms p95=165.40ms max=168.40ms
+  raster p50=107.90ms p95=112.00ms max=222.20ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=70193
+  backend=canvas
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+=== 50000 canvas run 3 ===
+=== RETRIEVED ===
+onReady fired
+R2 app-run: driving started
+R2 app-run: window=1200x723 dpr=2
+R2 (50000) frames=241
+  build  p50=154.20ms p95=163.50ms max=167.40ms
+  raster p50=108.00ms p95=112.60ms max=219.50ms
+  screenSpaceLeafCount=2709 lineweightScale=1
+  dashSpans=66627 collapsed=257 canvasCalls=70193
+  backend=canvas
+  text: corpus=on draw=on textOps=24 skippedText=0
+  paragraphs: newLayouts=0 newEvictions=0 live=512 (totals layouts=2269 evictions=1757)
+R2 app-run: done
+
+--- flutter run log tail (diagnostics) ---
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
