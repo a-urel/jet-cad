@@ -248,7 +248,10 @@ void main() {
       // requests and the sink's drawn paragraphs land in the same object —
       // metrics in its colour-free map, paragraphs in its coloured one. Before
       // Plan 3f these were two `FlutterTextMeasurer`s with two caches, and this
-      // rig built two to match; that wiring is gone.
+      // rig built two to match; that wiring is gone. The threshold ladder
+      // near the end of this test builds a second `FlutterTextMeasurer` of
+      // its own (`paragraphs`, below) — that is not a relapse into this
+      // production topology; see the comment at its construction for why.
       final measurer = FlutterTextMeasurer();
 
       final build = Stopwatch()..start();
@@ -512,6 +515,22 @@ void main() {
             final distinctKeys = keySink.drawsPerKey.length;
             final culled = p.culledTextCount;
 
+            // A second `FlutterTextMeasurer`, deliberately — and not the
+            // two-measurer topology the comment on `measurer` above warns
+            // against. That one was a production wiring bug: the painter and
+            // the sink held two different objects, so a paint could look
+            // healthy while metrics and paragraphs silently disagreed. This
+            // one is a throwaway confined to the `LADDER`-gated branch above,
+            // which production and every ordinary test run never reach.
+            //
+            // It exists because a ladder row needs a cold cache: sharing the
+            // outer `measurer` here would carry paragraph-cache state from
+            // one threshold into the next, so every row after the first
+            // would read however warm the previous threshold's paint left
+            // the cache, not what a cold paint at *this* threshold costs.
+            // Built fresh every iteration for exactly that reason — see the
+            // "Two independent readings" comment above this loop for the
+            // rest of the split between this object and `measurer`.
             final paragraphs = FlutterTextMeasurer();
             measurer.resetCounters();
             final recorder = PictureRecorder();
