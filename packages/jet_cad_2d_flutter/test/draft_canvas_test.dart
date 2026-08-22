@@ -355,6 +355,33 @@ void main() {
     expect(key.currentState!.painter.textOpCount, 0);
   });
 
+  testWidgets('changing minTextCapPixels rebuilds the painter', (tester) async {
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final doc = DraftDocument.empty(measurer: measurer);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final camera = CameraController(ViewportTransform.fit(
+        Aabb2(Vector2.zero(), Vector2(100, 100)), kViewport));
+    addTearDown(camera.dispose);
+    final key = GlobalKey<DraftCanvasState>();
+
+    Widget at(double threshold) => wrap(DraftCanvas(
+        key: key,
+        document: doc,
+        index: index,
+        camera: camera,
+        minTextCapPixels: threshold));
+
+    await tester.pumpWidget(at(kMinTextCapPixels));
+    expect(key.currentState!.painter.minTextCapPixels, kMinTextCapPixels);
+
+    await tester.pumpWidget(at(0.0));
+    // The painter's field is final, so a stale painter here means the control
+    // arm measures the wrong build and reads as a working gate.
+    expect(key.currentState!.painter.minTextCapPixels, 0.0);
+  });
+
   testWidgets('refuses a document whose measurer cannot lay out paragraphs',
       (tester) async {
     final doc = DraftDocument.empty();

@@ -18,6 +18,27 @@ import 'viewport_transform.dart';
 /// [DraftPainter.anisotropicCurveCount].
 const double kAnisotropyThreshold = 2.0;
 
+/// Text whose on-screen cap height is below this many **logical** pixels is not
+/// drawn, and not laid out either.
+///
+/// Below three pixels of cap height a glyph cannot resolve two strokes, so
+/// nothing readable is lost. Logical rather than device pixels is deliberate:
+/// on a 2x display the same text is six device pixels tall, so this culls
+/// *less* than a device-pixel rule would — the safe direction, the same one
+/// [kScreenClipInflate] takes.
+///
+/// **Two alternatives were considered and are not taken.** *Greeking* — drawing
+/// a bar the width of the text instead of the glyphs, so a zoomed-out plan
+/// keeps its visual weight — is cheap to draw (two batched triangles in
+/// `VerticesDrawSink`) but needs `advanceWidth`, so either the layout happens
+/// anyway and the saving is lost, or a font-free width model
+/// (`text.length * ratio`, the shape `MetricModelMeasurer` uses) becomes a new
+/// approximation to defend. *Two tiers* — greek in a middle band, nothing
+/// beyond it — is closest to real CAD and the most control, at two constants,
+/// two counters, two golden ladders, and the same font-free width model.
+/// Neither is ruled out later; both were priced and deferred.
+const double kMinTextCapPixels = 3.0;
+
 /// How far past the viewport, in device pixels, the frame's clip reaches.
 ///
 /// Half the widest stroke the frame can draw, so a stroke whose centreline is
@@ -40,6 +61,7 @@ class DraftPainter {
     required this.resolver,
     this.debugDisableRebasing = false,
     this.drawText = true,
+    this.minTextCapPixels = kMinTextCapPixels,
   });
 
   final DraftDocument document;
@@ -67,6 +89,17 @@ class DraftPainter {
   /// paragraph lookup together. It also leaves [skippedTextCount] at zero,
   /// because that counter means *empty string*, not *not drawn*.
   final bool drawText;
+
+  /// Cap height in logical pixels below which a text leaf is culled.
+  ///
+  /// **`0.0` disables level of detail**, which is what the exit gate's control
+  /// arm needs: LOD-on and LOD-off must be compared on the same corpus at the
+  /// same camera, or the two rows are two different documents.
+  ///
+  /// `final` for the reason [drawText] is: the painter is built once and a rig
+  /// that flipped this after the fact would be measuring a rebuilt painter,
+  /// which is a different frame.
+  final double minTextCapPixels;
 
   /// Reused across frames; the frame path must not allocate once warm.
   Float64List _points = Float64List(256);
@@ -153,6 +186,17 @@ class DraftPainter {
   /// all blank, and a measurement taken over them would otherwise read as a
   /// measurement of drawn text.
   int get skippedTextCount => _skippedText;
+
+  int _culledText = 0;
+
+  /// Text and attrib entities culled in the last frame for being too small to
+  /// read — see [kMinTextCapPixels].
+  ///
+  /// **Separate from [skippedTextCount] on purpose.** That one means *empty
+  /// string*; this one means *below the threshold*. Blended, the exit gate
+  /// cannot tell which mechanism fired, which is the mistake Ruling 54 records
+  /// for the paragraph cache's hit rate.
+  int get culledTextCount => _culledText;
 
   int _textOps = 0;
 
@@ -251,6 +295,7 @@ class DraftPainter {
   /// comparison total.
   void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
     _skippedText = 0;
+    _culledText = 0;
     _textOps = 0;
     _skippedDeepInstances = 0;
     _screenSpaceLeaves = 0;
@@ -804,15 +849,34 @@ class DraftPainter {
     }
     final styleHandle = document.entities.textStyleAt(slot);
     final record = document.textStyleOf(styleHandle);
+    // Resolved before the metrics are asked for, and that ordering is the whole
+    // mechanism. `resolve` needs no metrics — height, rotation, width factor,
+    // oblique angle and justification all come from the payload, the attribute
+    // bits and the style record — while `measure` is the expensive call. A cull
+    // placed after `measure` would skip the draw and save no layout at all.
+    final layout = _textLayout
+      ..resolve(payload, document.entities.textAttrsAt(slot), record);
+    // `layout.height` is the effective DXF text height, which *is* the cap
+    // height, in world units; `chain` carries camera, ancestors, instance,
+    // placement and rebase. The product is the on-screen cap height in pixels,
+    // with no measurement involved.
+    //
+    // `scaleMagnitude` is the geometric mean of the axis scales, so text
+    // squashed in y under an anisotropic placement reads taller than it renders
+    // and survives longer than it should. Same approximation the painter
+    // already makes for curve stroke widths past [kAnisotropyThreshold], and it
+    // errs toward drawing.
+    if (layout.height * chain.scaleMagnitude < minTextCapPixels) {
+      _culledText++;
+      return;
+    }
     final metrics = document.textMeasurer.measure(text: text, style: record);
     // The anchor is rebased like every other coordinate that reaches `chain`,
     // which already carries `translate(localOrigin)`. An unrebased anchor is
-    // exactly right at the origin and one rebase origin wrong everywhere
-    // else — the failure a fixture at (0, 0) cannot see.
-    final layout = _textLayout
-      ..resolve(payload, document.entities.textAttrsAt(slot), record)
-      ..composeTransform(metrics, payload.coords[0] - localOrigin.x,
-          payload.coords[1] - localOrigin.y);
+    // exactly right at the origin and one rebase origin wrong everywhere else —
+    // the failure a fixture at (0, 0) cannot see.
+    layout.composeTransform(metrics, payload.coords[0] - localOrigin.x,
+        payload.coords[1] - localOrigin.y);
     sink
       ..beginResidual(
           chain.multiply(Transform2(

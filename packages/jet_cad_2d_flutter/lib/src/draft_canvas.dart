@@ -62,6 +62,7 @@ class DraftCanvas extends StatefulWidget {
     this.pixelsPerPaperMm = kLogicalPixelsPerMm,
     this.lineweightScale = 1.0,
     this.drawText = true,
+    this.minTextCapPixels = kMinTextCapPixels,
     this.backend,
   });
 
@@ -87,6 +88,10 @@ class DraftCanvas extends StatefulWidget {
   /// `drawText` is final: a rig that wanted to flip it after the fact would
   /// have to rebuild the painter, and a rebuilt painter is a different frame.
   final bool drawText;
+
+  /// Forwarded to [DraftPainter.minTextCapPixels]. `0.0` disables level of
+  /// detail, which is what the exit gate's control arm needs.
+  final double minTextCapPixels;
 
   /// Which sink draws the frame, or `null` for [defaultRenderBackend].
   ///
@@ -172,6 +177,7 @@ class DraftCanvasState extends State<DraftCanvas> {
       index: widget.index,
       resolver: widget.resolver ?? DocumentStyleResolver(widget.document),
       drawText: widget.drawText,
+      minTextCapPixels: widget.minTextCapPixels,
     );
     // No derived state left to update before listeners run: the map that
     // needed it was the cull floor's, and the cull floor is gone.
@@ -189,6 +195,7 @@ class DraftCanvasState extends State<DraftCanvas> {
         widget.pixelsPerPaperMm != oldWidget.pixelsPerPaperMm ||
         widget.lineweightScale != oldWidget.lineweightScale ||
         widget.drawText != oldWidget.drawText ||
+        widget.minTextCapPixels != oldWidget.minTextCapPixels ||
         widget.backend != oldWidget.backend) {
       // Guard before teardown: see the note on `_requireMeasurer`.
       _requireMeasurer();
