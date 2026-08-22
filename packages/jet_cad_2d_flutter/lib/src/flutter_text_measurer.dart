@@ -19,11 +19,18 @@ const int kParagraphCacheLimit = 512;
 /// every text entity in the document, because level of detail deliberately does
 /// not apply on the query path.
 ///
-/// The rig corpus is expected to hold about 4,020 distinct
-/// `(text, styleHandle)` pairs — 4,000 unique `ATTRnnnnn` strings and the
-/// twenty distinct labels Ruling 17 pins — and this is that with room. **That
-/// figure is derived from the corpus generator, not yet measured;** Plan 3f
-/// Task 8 replaces this sentence with the measured count.
+/// The rig corpus holds 4,020 distinct `(text, styleHandle)` pairs — 4,000
+/// unique `ATTRnnnnn` strings and the twenty distinct labels Ruling 17 pins —
+/// and this is that with room. **Measured, not derived:** Plan 3f Task 8 read
+/// `FlutterTextMeasurer.liveMetricsCount` on `textRigCorpus(50000)`'s own
+/// measurer and got exactly 4,020, at every one of the threshold-ladder's
+/// seven `minTextCapPixels` values and on both its cameras (the whole-drawing
+/// fit and the working set) alike — level of detail does not touch this map
+/// at all, because `entityBounds` fills it once, for every text entity, while
+/// the document is built, and `DraftPainter`'s LOD check
+/// (`draft_painter.dart:873`) only ever touches keys already there. The count
+/// is therefore camera-independent by construction, not merely unmeasured
+/// across cameras.
 ///
 /// Raising this does not spend Ruling 4's single permitted raise. Ruling 4
 /// names [kParagraphCacheLimit] and the zero-new-layouts paint row.
