@@ -1,0 +1,458 @@
+# Review package: 6efd7fa7b1fcf315f9aabe489378560f0c5b9685..bce35c700573b50a6ed187935aa413e72fde5f58
+
+## Commits
+bce35c7 docs: the rig's follow-up gets a permanent home, and the default audit is named
+486c1b7 test: teardown for every FlutterTextMeasurer in the rig and its unit test
+
+## Files changed
+ STATUS.md                                          | 16 ++++++++---
+ .../notes/2026-08-22-plan-3f-results.md            | 31 ++++++++++++++++++----
+ .../test/flutter_text_measurer_test.dart           | 15 ++++++++++-
+ .../test/rig/paint_microbench_test.dart            | 10 +++++++
+ 4 files changed, 62 insertions(+), 10 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 6df474f..750262b 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,15 +1,17 @@
+ # jet-cad — project status
+ 
+ **Last updated:** 2026-08-23
+-**Verified against:** `main` at `d113d2d`, **not yet pushed**, working tree
+-clean apart from the three files the traps below say never to commit.
++**Verified against:** `main` at `486c1b7` — the final fix wave's test-teardown
++commit, the exact tree the suites below were run against — **not yet pushed**,
++working tree clean apart from the three files the traps below say never to
++commit.
+ Every suite count below was produced by running the suite on the **merged**
+ result, not by reading a report and not on the branch before it landed.
+ 
+ ---
+ 
+ ## TL;DR — where you left off
+ 
+ **Plan 3f (text wiring and level of detail) is done, nine tasks, worked
+ directly on `main`, nothing in flight.** **Its exit gate is 11 of 13 — and the
+ two that miss are recorded as missing, not tuned away.** See
+@@ -55,21 +57,21 @@ no worktree of its own: 64 files at
+ **The ordering is the lesson: archive the ledger onto the branch before the
+ workspace is deleted, never after.**
+ 
+ **Since Plan 3d's merge, on `main` at `70d824e..0eac1be`: two of Plan 3d's
+ three remaining open items are closed**, and one thing that note recorded
+ turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open)
+ — one item remains and cannot be closed here.
+ 
+ Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
+ 
+-| Suite | State (on `main` at `d113d2d`, run, not read off a report) |
++| Suite | State (on `main` at `486c1b7`, run, not read off a report) |
+ |---|---|
+ | `packages/jet_cad_2d` — engine | **777 tests, all pass**, analyze/format clean |
+ | `packages/jet_cad_2d_flutter` — widgets | **299 tests pass, 1 skipped**, analyze/format clean |
+ | `flutter test --tags golden` | **35 pass**, 40 PNGs (20 fixtures × 2 backends, 3 fills and 3 text-LOD rungs); no pre-existing PNG regenerated |
+ | `apps/dev_harness_2d` | analyze/format clean |
+ | `benchmark/query_throughput.dart` | **GATE: PASS** — every gated row under its threshold on 2026-08-23, `snap at dirty threshold` included (p50 0.552 ms against 1.0 ms). That row is Plan 2's carried failure and it is a **timing on a shared machine**: recorded as passing today, not declared fixed |
+ 
+ The widget suite's one skip is `test/rig/paint_microbench_test.dart`, skipped at
+ suite level by the `rig` tag in `dart_test.yaml` — pre-existing and by design.
+ 
+@@ -833,21 +835,27 @@ compare equal. Mutant 10 was fired twice and row 6's test passed both times;
+ recorded as a restatement, never as a kill. Criterion 10 at **corpus** scale is
+ non-discriminating — `doc.extents` is not the 4,020-key sweep the spec assumed
+ (`_computeExtents` caches bounds per definition, so 12 distinct strings get
+ measured, not 4,020), and it passes under both mutations it exists to catch.
+ The discriminating form is the unit-scale test.
+ 
+ **Mutant 7 survived its own suite** — `metricsLimit` defaulted to
+ `kParagraphCacheLimit` passed all 297 tests, because every test in
+ `flutter_text_measurer_test.dart` constructed the measurer with both bounds
+ given explicitly. Recorded as a survivor, then killed by a test written for it
+-(`645b027`). The shape of that hole was not audited elsewhere.
++(`645b027`). The shape of that hole **was audited** in the final fix wave.
++Three known instances: `metricsLimit`'s default (mutant 7, above);
++`paragraphLimit`'s default, audited during Task 9's review — mutating it
++reddens only a restatement test, so the default is still behaviourally
++unexercised; and `reference_walk.dart:36`'s `minTextCapPixels` default, where
++setting it to `0.0` leaves the whole suite green because a caller's own
++default shadows it.
+ 
+ ### Plan 3g — the definition/tile picture cache
+ 
+ **What 3f hands it, and one question it must answer first.**
+ 
+ - **A working text LOD** — `kMinTextCapPixels = 3.0`, `0.0` disables it, wired
+   from `DraftPainter` through `DraftCanvas` to the harness's `LOD` define,
+   counted by `culledTextCount`, pinned by a golden ladder.
+ - **The threshold ladder**, regenerable from the committed tree behind a
+   `LADDER` dart-define, and the finding that the step is a **band** (3.0→6.0),
+diff --git a/docs/superpowers/notes/2026-08-22-plan-3f-results.md b/docs/superpowers/notes/2026-08-22-plan-3f-results.md
+index b303102..769e689 100644
+--- a/docs/superpowers/notes/2026-08-22-plan-3f-results.md
++++ b/docs/superpowers/notes/2026-08-22-plan-3f-results.md
+@@ -367,25 +367,46 @@ justified and cache-feasible on this corpus at this camera. Level of detail as
+ built is the right mechanism for the camera that matters and is not, by
+ itself, an answer for the whole-drawing camera. That is the shape of the
+ problem Plan 3g inherits.
+ 
+ **4. Row 10 at corpus scale does not discriminate** (see above). The claim is
+ held by the unit-scale fixture.
+ 
+ **5. Criterion 6 is unfalsifiable by construction** (see above). The invariant
+ is true; no fixture can distinguish it from a uniformly wrong `entityBounds`.
+ 
+-**6. Mutant 7's survival exposed a shape, not just a constant.** A test file
+-that always constructs its subject with every bound passed explicitly cannot
+-see a wrong default. One test was added for `metricsLimit`; the same hole would
+-hide a wrong `paragraphLimit` default, and no audit was made of how widely that
+-pattern occurs.
++**6. Mutant 7's survival exposed a shape, not just a constant, and the shape
++*was* audited.** A test file that always constructs its subject with every
++bound passed explicitly cannot see a wrong default. One test was added for
++`metricsLimit`. The final fix wave audited how widely that pattern occurs and
++found three known instances:
++
++- `FlutterTextMeasurer.metricsLimit`'s default — mutant 7, the one that
++  survived the suite it shipped with.
++- `FlutterTextMeasurer.paragraphLimit`'s default — audited during Task 9's
++  review. Mutating it reddens only a restatement test
++  (`the same string in two colours is two entries, not one`, which merely
++  checks `layoutCount`/`liveParagraphCount` against literal `2`s regardless of
++  what the default is), so the default is still behaviourally unexercised.
++- `reference_walk.dart:36`'s `minTextCapPixels` default. Setting it to `0.0`
++  leaves the whole suite green, because every caller that cares supplies its
++  own threshold explicitly, and that caller's default shadows the parameter's.
++
++**7. The rig's prints are not assertions, and the fix should be turning them
++into some.** Rows 1–5 and corpus-scale row 10 in
++`test/rig/paint_microbench_test.dart` print rather than assert. This is not
++hypothetical: mutant 7 (above) survived its own suite while the rig printed
++`liveMetrics=512 metricsEvictions=608634` for a run that should have read
++`liveMetrics=4020 metricsEvictions=0`, and the run still passed — a glaring
++regression that a human has to notice by reading a transcript rather than one
++the suite would fail on. Turning the rig's degeneracy guard into real
++assertions is a candidate follow-up for Plan 3g and was out of scope here.
+ 
+ ---
+ 
+ ## What Plan 3g inherits
+ 
+ - **A working text LOD**, `kMinTextCapPixels = 3.0`, disableable with `0.0`,
+   wired from `DraftPainter` through `DraftCanvas` to the harness's `LOD`
+   define, counted by `culledTextCount` and pinned by a three-rung golden
+   ladder.
+ - **The threshold ladder**, regenerable from the tree behind a `LADDER`
+diff --git a/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart b/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart
+index b376f1a..f63070d 100644
+--- a/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart
++++ b/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart
+@@ -3,90 +3,97 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'rig/rig_support.dart';
+ 
+ const TextStyleRecord _style =
+     TextStyleRecord(handle: Handle(7), name: 'Standard', fontFamily: 'Roboto');
+ 
+ void main() {
+   test('the same string in two colours is two entries, not one', () {
+     final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
+     m.paragraphFor('WC', const Handle(7), _style, 0xFFFF0000);
+     m.paragraphFor('WC', const Handle(7), _style, 0xFF00FF00);
+     // ui.Paragraph bakes its colour and drawParagraph takes no Paint, so a key
+     // without argb would draw one of these in the wrong colour.
+     expect(m.layoutCount, 2);
+     expect(m.liveParagraphCount, 2);
+   });
+ 
+   test('a repeat request lays out nothing and allocates no metrics', () {
+     final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
+     final a = m.measure(text: 'WC', style: _style);
+     final before = m.layoutCount;
+     final b = m.measure(text: 'WC', style: _style);
+     expect(m.layoutCount, before);
+     // The pick path measures per candidate; a fresh object per call breaks
+     // query_allocation_test.
+     expect(identical(a, b), isTrue);
+   });
+ 
+   test('eviction disposes the paragraph', () {
+     final m = FlutterTextMeasurer(paragraphLimit: 2);
++    addTearDown(m.clear);
+     m.paragraphFor('A', const Handle(7), _style, 0xFF000000);
+     m.paragraphFor('B', const Handle(7), _style, 0xFF000000);
+     m.paragraphFor('C', const Handle(7), _style, 0xFF000000);
+     expect(m.paragraphEvictionCount, 1);
+     expect(m.liveParagraphCount, 2);
+     // A Paragraph holds native glyph memory: a bound on the count is not a
+     // bound on the memory unless eviction releases it.
+     expect(m.debugLastEvicted!.debugDisposed, isTrue);
+   });
+ 
+   test('metrics are cap-height based and taken at the nominal size', () {
+     final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
+     final metrics = m.measure(text: 'WC', style: _style);
+     expect(
+         metrics.capHeight, closeTo(kCapHeightRatio * kNominalTextPixels, 1e-9));
+     // Exact, not `greaterThan(0)`: the layout em size is the one thing this
+     // class must never get wrong, and a positivity check survives every wrong
+     // size there is. flutter_test's own font is exactly 0.75em ascent /
+     // 0.25em descent / 1em per character, so laying `WC` out at the nominal
+     // size pins all three numbers. If a Flutter upgrade moves the test font,
+     // this fails loudly rather than going quiet.
+     expect(metrics.ascent, closeTo(0.75 * kNominalTextPixels, 1e-9));
+     expect(metrics.descent, closeTo(0.25 * kNominalTextPixels, 1e-9));
+     expect(metrics.advanceWidth, closeTo(2 * kNominalTextPixels, 1e-9));
+   });
+ 
+   test('an empty string measures zero, not the negative float floor', () {
+     // `Paragraph.longestLine` is -FLT_MAX for an empty paragraph, and -FLT_MAX
+     // is finite, so no isFinite guard downstream would catch it. entityBounds
+     // has no isEmpty guard of its own (Task 10's guard is on the *draw* path,
+     // not the bounds path), so an empty text entity would hand doc.extents and
+     // the R-tree a box 3.4e38 wide.
+-    final flutter = FlutterTextMeasurer().measure(text: '', style: _style);
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final flutter = measurer.measure(text: '', style: _style);
+     expect(flutter.advanceWidth, 0.0);
+ 
+     // The seam's whole premise is that the two measurers are interchangeable:
+     // the differential oracle is only valid if they agree here.
+     final model = MetricModelMeasurer().measure(text: '', style: _style);
+     expect(flutter.advanceWidth, model.advanceWidth);
+   });
+ 
+   test('resetCounters zeroes the counters and keeps the cache warm', () {
+     // The counters are per-measurement; the cache is what is being measured.
+     // If reset also cleared the cache, every rig row would report one new
+     // layout per visible string — and the exit gate's zero-new-layouts row
+     // would read as failing on a cache that was working perfectly. Nothing
+     // else in the suite would notice, because the numbers stay internally
+     // consistent; they are just measurements of the wrong thing.
+     final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
+     for (final text in ['WC', 'STAIR', 'LOBBY']) {
+       measurer.paragraphFor(text, const Handle(7), _style, 0xFF000000);
+     }
+     expect(measurer.layoutCount, 3);
+     expect(measurer.liveParagraphCount, 3);
+ 
+     measurer.resetCounters();
+     expect(measurer.layoutCount, 0);
+     expect(measurer.paragraphEvictionCount, 0);
+     expect(measurer.liveParagraphCount, 3,
+@@ -129,48 +136,51 @@ void main() {
+       ..text('WC', style, green)
+       ..text('STAIR', style, red)
+       ..text('WC', const Handle(8), red);
+     expect(sink.textOps, 5);
+     expect(sink.keys.length, 4);
+ 
+     // The same five requests through the real cache: the rig's count and the
+     // cache's entry count are the same number, which is the only reason
+     // reading one tells you anything about the other.
+     final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
+     measurer
+       ..paragraphFor('WC', style, _style, red.argb)
+       ..paragraphFor('WC', style, _style, red.argb)
+       ..paragraphFor('WC', style, _style, green.argb)
+       ..paragraphFor('STAIR', style, _style, red.argb)
+       ..paragraphFor('WC', const Handle(8), _style, red.argb);
+     expect(measurer.liveParagraphCount, sink.keys.length);
+   });
+ 
+   test('measure disposes its probe and leaves no paragraph entry', () {
+     final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
+     m.measure(text: 'WC', style: _style);
+     expect(m.layoutCount, 1);
+     // The probe is built at kMetricsProbeArgb, which ACI 7 (white) is not, so
+     // keeping it would hold two entries per string and halve the paragraph
+     // cache's effective capacity.
+     expect(m.liveParagraphCount, 0);
+     expect(m.liveMetricsCount, 1);
+     // A Paragraph holds native glyph memory: an entry-count bound proves
+     // nothing about the probe's memory unless disposal actually released it.
+     expect(m.debugLastProbe!.debugDisposed, isTrue);
+   });
+ 
+   test('a metrics sweep does not evict drawn paragraphs', () {
+     // Row 10 of the exit gate, at unit scale: a full extents recomputation
+     // walks every string in the document with no LOD protection. Before the
+     // split it would have walked straight through the paragraph cache.
+     final m = FlutterTextMeasurer(paragraphLimit: 4, metricsLimit: 1024);
++    addTearDown(m.clear);
+     for (final t in ['A', 'B', 'C', 'D']) {
+       m.paragraphFor(t, const Handle(7), _style, 0xFFFFFFFF);
+     }
+     expect(m.liveParagraphCount, 4);
+ 
+     for (var i = 0; i < 200; i++) {
+       m.measure(text: 'SWEEP$i', style: _style);
+     }
+     expect(m.paragraphEvictionCount, 0);
+     expect(m.liveParagraphCount, 4);
+@@ -180,20 +190,21 @@ void main() {
+       m.paragraphFor(t, const Handle(7), _style, 0xFFFFFFFF);
+     }
+     expect(m.layoutCount, layoutsBefore,
+         reason: 'the sweep must leave the drawn set warm');
+   });
+ 
+   test(
+       'the metrics map evicts on its own bound, and it is not the paragraph one',
+       () {
+     final m = FlutterTextMeasurer(paragraphLimit: 512, metricsLimit: 2);
++    addTearDown(m.clear);
+     m.measure(text: 'A', style: _style);
+     m.measure(text: 'B', style: _style);
+     m.measure(text: 'C', style: _style);
+     expect(m.metricsEvictionCount, 1);
+     expect(m.paragraphEvictionCount, 0);
+     expect(m.liveMetricsCount, 2);
+   });
+ 
+   test('the default metrics bound is not the paragraph bound', () {
+     // **Landed because a named mutant survived.** Plan 3f's mutant 7 —
+@@ -203,36 +214,38 @@ void main() {
+     // the defaults themselves were untested. At rig scale the mutant is
+     // plainly visible and unasserted: the 50,000-entity corpus reads
+     // `liveMetrics=512 metricsEvictions=608634` under it against
+     // `liveMetrics=4020 metricsEvictions=0` shipped. This is that difference
+     // at unit scale, where something fails rather than merely prints.
+     //
+     // The behavioural assertions come first on purpose: a test whose only
+     // failing line is `expect(m.metricsLimit, kMetricsCacheLimit)` restates
+     // the mutation instead of observing it.
+     final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
+     // One more distinct string than the paragraph cache could hold. A metrics
+     // map bounded by the paragraph limit evicts here; the real one does not.
+     for (var i = 0; i <= kParagraphCacheLimit; i++) {
+       m.measure(text: 'SWEEP$i', style: _style);
+     }
+     expect(m.metricsEvictionCount, 0);
+     expect(m.liveMetricsCount, kParagraphCacheLimit + 1);
+     // And the sweep held no paragraphs at all, which is the other half of
+     // why the two bounds are allowed to differ by an order of magnitude.
+     expect(m.liveParagraphCount, 0);
+     expect(m.paragraphLimit, kParagraphCacheLimit);
+     expect(m.metricsLimit, kMetricsCacheLimit);
+   });
+ 
+   test('clear empties both maps', () {
+     final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
+     final p = m.paragraphFor('WC', const Handle(7), _style, 0xFFFFFFFF);
+     m.measure(text: 'STAIR', style: _style);
+     expect(m.liveParagraphCount, 1);
+     expect(m.liveMetricsCount, 1);
+     m.clear();
+     expect(m.liveParagraphCount, 0);
+     expect(m.liveMetricsCount, 0);
+     // A Paragraph holds native glyph memory: dropping it from the map is not
+     // enough unless clear() actually disposes it.
+     expect(p.debugDisposed, isTrue);
+diff --git a/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart b/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
+index bb45d4d..f75c446 100644
+--- a/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
++++ b/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
+@@ -165,20 +165,21 @@ void main() {
+           document: doc, index: index, resolver: DocumentStyleResolver(doc));
+ 
+       // One measurer for the whole rig, not one per iteration. A fresh
+       // `FlutterTextMeasurer()` inside the timed body hands every frame an
+       // empty paragraph cache, which for a corpus with text in it measures
+       // cold layout over and over and never measures the steady state the
+       // frame budget is about. Harmless on this corpus, which has no drawn
+       // text; wrong on `textRigCorpus`, and the two rigs must not differ in
+       // how they hold it.
+       final measurer = FlutterTextMeasurer();
++      addTearDown(measurer.clear);
+ 
+       print('=== $entityCount entities ===');
+       print('  corpus: doc=${docMs}ms index=${indexMs}ms '
+           'entities=${doc.entities.liveCount} nodes=${doc.tree.nodes.length} '
+           'definitions=${doc.tree.definitions.length}');
+ 
+       // Two cameras, because one of them answers a different question. `fit`
+       // draws the whole drawing and is the worst case; the working set is what
+       // a frame budget is actually about.
+       for (final (label, camera) in [
+@@ -246,20 +247,21 @@ void main() {
+       // One measurer, because production has one. The document owns it and
+       // `DraftCanvas` borrows it for the sink, so the painter's metrics
+       // requests and the sink's drawn paragraphs land in the same object —
+       // metrics in its colour-free map, paragraphs in its coloured one. Before
+       // Plan 3f these were two `FlutterTextMeasurer`s with two caches, and this
+       // rig built two to match; that wiring is gone. The threshold ladder
+       // near the end of this test builds a second `FlutterTextMeasurer` of
+       // its own (`paragraphs`, below) — that is not a relapse into this
+       // production topology; see the comment at its construction for why.
+       final measurer = FlutterTextMeasurer();
++      addTearDown(measurer.clear);
+ 
+       final build = Stopwatch()..start();
+       final doc = textRigCorpus(entityCount, measurer: measurer);
+       final docMs = build.elapsedMilliseconds;
+       final index = SpatialIndex(doc);
+       final indexMs = build.elapsedMilliseconds - docMs;
+       final resolver = DocumentStyleResolver(doc);
+ 
+       final painter =
+           DraftPainter(document: doc, index: index, resolver: resolver);
+@@ -610,20 +612,27 @@ void main() {
+             // which production and every ordinary test run never reach.
+             //
+             // It exists because a ladder row needs a cold cache: sharing the
+             // outer `measurer` here would carry paragraph-cache state from
+             // one threshold into the next, so every row after the first
+             // would read however warm the previous threshold's paint left
+             // the cache, not what a cold paint at *this* threshold costs.
+             // Built fresh every iteration for exactly that reason — see the
+             // "Two independent readings" comment above this loop for the
+             // rest of the split between this object and `measurer`.
++            // Cleared at the end of this iteration rather than via
++            // `addTearDown`: this loop runs up to fourteen times (seven
++            // thresholds times two cameras) inside one test, and
++            // `addTearDown` only fires once the whole test body returns, so
++            // it would let all fourteen measurers' native paragraphs pile up
++            // live together instead of bounding the population to one
++            // measurer's worth at a time.
+             final paragraphs = FlutterTextMeasurer();
+             measurer.resetCounters();
+             final recorder = PictureRecorder();
+             p.paint(
+                 CanvasDrawSink(
+                     canvas: Canvas(recorder),
+                     pixelsPerPaperMm: kLogicalPixelsPerMm,
+                     measurer: paragraphs,
+                     textStyleOf: doc.textStyleOf),
+                 camera,
+@@ -631,18 +640,19 @@ void main() {
+             recorder.endRecording().dispose();
+ 
+             print('    threshold=${threshold.toStringAsFixed(1)} '
+                 '$label: distinctKeys=$distinctKeys '
+                 'layouts=${paragraphs.layoutCount} '
+                 'paragraphEvictions=${paragraphs.paragraphEvictionCount} '
+                 'metricsEvictions=${measurer.metricsEvictionCount} '
+                 'culledText=$culled '
+                 'liveParagraphs=${paragraphs.liveParagraphCount} '
+                 'liveMetrics=${measurer.liveMetricsCount}');
++            paragraphs.clear();
+           }
+         }
+       }
+ 
+       index.dispose();
+     }, timeout: const Timeout(Duration(minutes: 20)));
+   }
+ }

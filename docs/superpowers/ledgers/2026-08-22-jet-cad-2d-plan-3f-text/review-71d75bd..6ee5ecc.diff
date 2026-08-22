@@ -1,0 +1,120 @@
+# Review package: 71d75bdbdef31648234abbba2ee7e9272ab21806..6ee5ecc3a238ea0d532e93c7615b58430b6d0299
+
+## Commits
+6ee5ecc test: prove the metrics probe and clear() dispose loop actually fire
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart     | 11 +++++++++++
+ .../jet_cad_2d_flutter/test/flutter_text_measurer_test.dart   |  8 +++++++-
+ 2 files changed, 18 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart b/packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart
+index b6e95fb..8db309f 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart
+@@ -80,20 +80,30 @@ class FlutterTextMeasurer implements TextMeasurer {
+   /// Metrics entries evicted since construction.
+   int metricsEvictionCount = 0;
+ 
+   /// The paragraph most recently evicted, already [Paragraph.dispose]d.
+   ///
+   /// Debug-only surface for the disposal assertion: a bound on the *entry
+   /// count* says nothing about the native glyph memory an evicted `Paragraph`
+   /// held unless eviction actually released it.
+   Paragraph? debugLastEvicted;
+ 
++  /// The metrics probe most recently built and disposed, already
++  /// [Paragraph.dispose]d.
++  ///
++  /// Debug-only surface for the disposal assertion, mirroring
++  /// [debugLastEvicted] for exactly the same reason: a bound on the entry
++  /// count says nothing about whether the probe's native glyph memory was
++  /// actually released, and this is the highest-frequency disposal site in
++  /// the class — once per metrics miss.
++  Paragraph? debugLastProbe;
++
+   /// Live entries in the paragraph cache — native paragraphs, which is what
+   /// Plan 3c's "peak live paragraphs" row means.
+   int get liveParagraphCount => _paragraphs.length;
+ 
+   /// Live entries in the metrics cache.
+   int get liveMetricsCount => _metrics.length;
+ 
+   /// Zeroes all three counters without touching either map.
+   ///
+   /// It deliberately leaves the entries alone. The counters are per-
+@@ -173,20 +183,21 @@ class FlutterTextMeasurer implements TextMeasurer {
+       ..styleHandle = style.handle;
+     final hit = _metrics[_metricsProbe];
+     if (hit != null) {
+       _metrics.remove(hit.key);
+       _metrics[hit.key] = hit;
+       return hit.metrics;
+     }
+     final probe = _layOut(text, style, kMetricsProbeArgb);
+     final metrics = _metricsOf(probe);
+     probe.dispose();
++    debugLastProbe = probe;
+     if (_metrics.length >= metricsLimit) _evictOldestMetrics();
+     final key = _MetricsKey(text, style.handle);
+     _metrics[key] = _MetricsEntry(key, metrics);
+     return metrics;
+   }
+ 
+   Paragraph _layOut(String text, TextStyleRecord style, int argb) {
+     // Layout is always at kNominalTextPixels — never the entity's effective
+     // height. Height, rotation, width factor and oblique angle are all
+     // transforms applied afterwards, so only the string and the style may
+diff --git a/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart b/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart
+index 05b4a3e..b8946cd 100644
+--- a/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart
++++ b/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart
+@@ -147,20 +147,23 @@ void main() {
+ 
+   test('measure disposes its probe and leaves no paragraph entry', () {
+     final m = FlutterTextMeasurer();
+     m.measure(text: 'WC', style: _style);
+     expect(m.layoutCount, 1);
+     // The probe is built at kMetricsProbeArgb, which ACI 7 (white) is not, so
+     // keeping it would hold two entries per string and halve the paragraph
+     // cache's effective capacity.
+     expect(m.liveParagraphCount, 0);
+     expect(m.liveMetricsCount, 1);
++    // A Paragraph holds native glyph memory: an entry-count bound proves
++    // nothing about the probe's memory unless disposal actually released it.
++    expect(m.debugLastProbe!.debugDisposed, isTrue);
+   });
+ 
+   test('a metrics sweep does not evict drawn paragraphs', () {
+     // Row 10 of the exit gate, at unit scale: a full extents recomputation
+     // walks every string in the document with no LOD protection. Before the
+     // split it would have walked straight through the paragraph cache.
+     final m = FlutterTextMeasurer(paragraphLimit: 4, metricsLimit: 1024);
+     for (final t in ['A', 'B', 'C', 'D']) {
+       m.paragraphFor(t, const Handle(7), _style, 0xFFFFFFFF);
+     }
+@@ -187,19 +190,22 @@ void main() {
+     m.measure(text: 'A', style: _style);
+     m.measure(text: 'B', style: _style);
+     m.measure(text: 'C', style: _style);
+     expect(m.metricsEvictionCount, 1);
+     expect(m.paragraphEvictionCount, 0);
+     expect(m.liveMetricsCount, 2);
+   });
+ 
+   test('clear empties both maps', () {
+     final m = FlutterTextMeasurer();
+-    m.paragraphFor('WC', const Handle(7), _style, 0xFFFFFFFF);
++    final p = m.paragraphFor('WC', const Handle(7), _style, 0xFFFFFFFF);
+     m.measure(text: 'STAIR', style: _style);
+     expect(m.liveParagraphCount, 1);
+     expect(m.liveMetricsCount, 1);
+     m.clear();
+     expect(m.liveParagraphCount, 0);
+     expect(m.liveMetricsCount, 0);
++    // A Paragraph holds native glyph memory: dropping it from the map is not
++    // enough unless clear() actually disposes it.
++    expect(p.debugDisposed, isTrue);
+   });
+ }

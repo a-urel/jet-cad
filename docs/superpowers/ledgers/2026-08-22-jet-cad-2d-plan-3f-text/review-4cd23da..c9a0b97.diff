@@ -1,0 +1,547 @@
+# Review package: 4cd23dab5f1db6c4ea71d1425c8fc782d98351dc..c9a0b970a03790c6ae188685d866df0ae0c15631
+
+## Commits
+c9a0b97 feat: cull text too small to read, before it is measured
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/draft_canvas.dart   |   7 +
+ .../jet_cad_2d_flutter/lib/src/draft_painter.dart  |  76 ++++++++-
+ .../jet_cad_2d_flutter/test/draft_canvas_test.dart |  27 ++++
+ .../jet_cad_2d_flutter/test/text_lod_test.dart     | 176 +++++++++++++++++++++
+ 4 files changed, 280 insertions(+), 6 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart b/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
+index cf9bed5..8d5af66 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
+@@ -55,20 +55,21 @@ class DocChangeNotifier extends ChangeNotifier {
+ class DraftCanvas extends StatefulWidget {
+   const DraftCanvas({
+     super.key,
+     required this.document,
+     required this.index,
+     required this.camera,
+     this.resolver,
+     this.pixelsPerPaperMm = kLogicalPixelsPerMm,
+     this.lineweightScale = 1.0,
+     this.drawText = true,
++    this.minTextCapPixels = kMinTextCapPixels,
+     this.backend,
+   });
+ 
+   final DraftDocument document;
+   final SpatialIndex index;
+   final CameraController camera;
+ 
+   /// Defaults to a [DocumentStyleResolver] over [document]; supplied only when
+   /// something wants to memoise or override resolution.
+   final StyleResolver? resolver;
+@@ -81,20 +82,24 @@ class DraftCanvas extends StatefulWidget {
+ 
+   /// Forwarded to [DraftPainter.drawText]. Measurement-only, for Task 12's
+   /// text rows; inert at its default of `true`.
+   ///
+   /// It is a widget property rather than something the rig reaches through
+   /// [DraftCanvasState] because the painter is built in [_attach] and its
+   /// `drawText` is final: a rig that wanted to flip it after the fact would
+   /// have to rebuild the painter, and a rebuilt painter is a different frame.
+   final bool drawText;
+ 
++  /// Forwarded to [DraftPainter.minTextCapPixels]. `0.0` disables level of
++  /// detail, which is what the exit gate's control arm needs.
++  final double minTextCapPixels;
++
+   /// Which sink draws the frame, or `null` for [defaultRenderBackend].
+   ///
+   /// A non-null value is honoured on **every** platform, including
+   /// `RenderBackend.vertices` on the web. It is not clamped: Plan 3d's Phase C
+   /// forces it to measure CanvasKit, and a parameter that silently ignored
+   /// what it was given would make that measurement report the wrong thing.
+   final RenderBackend? backend;
+ 
+   @override
+   State<DraftCanvas> createState() => DraftCanvasState();
+@@ -165,37 +170,39 @@ class DraftCanvasState extends State<DraftCanvas> {
+         ? VerticesDrawSink(
+             pixelsPerPaperMm: widget.pixelsPerPaperMm,
+             lineweightScale: widget.lineweightScale,
+             fallback: sink)
+         : null;
+     painter = DraftPainter(
+       document: widget.document,
+       index: widget.index,
+       resolver: widget.resolver ?? DocumentStyleResolver(widget.document),
+       drawText: widget.drawText,
++      minTextCapPixels: widget.minTextCapPixels,
+     );
+     // No derived state left to update before listeners run: the map that
+     // needed it was the cull floor's, and the cull floor is gone.
+     _changes = DocChangeNotifier(widget.document);
+     _repaint = Listenable.merge([widget.camera, _changes]);
+   }
+ 
+   @override
+   void didUpdateWidget(DraftCanvas oldWidget) {
+     super.didUpdateWidget(oldWidget);
+     if (widget.document != oldWidget.document ||
+         widget.index != oldWidget.index ||
+         widget.camera != oldWidget.camera ||
+         widget.resolver != oldWidget.resolver ||
+         widget.pixelsPerPaperMm != oldWidget.pixelsPerPaperMm ||
+         widget.lineweightScale != oldWidget.lineweightScale ||
+         widget.drawText != oldWidget.drawText ||
++        widget.minTextCapPixels != oldWidget.minTextCapPixels ||
+         widget.backend != oldWidget.backend) {
+       // Guard before teardown: see the note on `_requireMeasurer`.
+       _requireMeasurer();
+       _changes.dispose();
+       _attach();
+     }
+   }
+ 
+   @override
+   void dispose() {
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart b/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart
+index a8e8ec9..ecd4bbd 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/draft_painter.dart
+@@ -11,20 +11,41 @@ import 'viewport_transform.dart';
+ 
+ /// How far from conformal a curve's screen transform may be before its baked
+ /// stroke width stops being close enough.
+ ///
+ /// **Diagnostic only.** It gates no drawing decision: points, lines and
+ /// polylines are carried into screen space regardless, and curves take the
+ /// residual path regardless. All it decides is whether a curve is counted in
+ /// [DraftPainter.anisotropicCurveCount].
+ const double kAnisotropyThreshold = 2.0;
+ 
++/// Text whose on-screen cap height is below this many **logical** pixels is not
++/// drawn, and not laid out either.
++///
++/// Below three pixels of cap height a glyph cannot resolve two strokes, so
++/// nothing readable is lost. Logical rather than device pixels is deliberate:
++/// on a 2x display the same text is six device pixels tall, so this culls
++/// *less* than a device-pixel rule would — the safe direction, the same one
++/// [kScreenClipInflate] takes.
++///
++/// **Two alternatives were considered and are not taken.** *Greeking* — drawing
++/// a bar the width of the text instead of the glyphs, so a zoomed-out plan
++/// keeps its visual weight — is cheap to draw (two batched triangles in
++/// `VerticesDrawSink`) but needs `advanceWidth`, so either the layout happens
++/// anyway and the saving is lost, or a font-free width model
++/// (`text.length * ratio`, the shape `MetricModelMeasurer` uses) becomes a new
++/// approximation to defend. *Two tiers* — greek in a middle band, nothing
++/// beyond it — is closest to real CAD and the most control, at two constants,
++/// two counters, two golden ladders, and the same font-free width model.
++/// Neither is ruled out later; both were priced and deferred.
++const double kMinTextCapPixels = 3.0;
++
+ /// How far past the viewport, in device pixels, the frame's clip reaches.
+ ///
+ /// Half the widest stroke the frame can draw, so a stroke whose centreline is
+ /// just outside still contributes its visible edge. Named rather than inlined
+ /// because it is the painter's *published* culling slack: the differential
+ /// oracle has to know how much extra the painter is entitled to draw, and a
+ /// number defined in two places is a number the two will eventually disagree
+ /// on.
+ const double kScreenClipInflate = 32.0;
+ 
+@@ -33,20 +54,21 @@ const double kScreenClipInflate = 32.0;
+ /// This is not scaffolding for the cached painter of Plan 3b — it is the
+ /// differential oracle that one is tested against, in the same role brute-force
+ /// queries played for the spatial index.
+ class DraftPainter {
+   DraftPainter({
+     required this.document,
+     required this.index,
+     required this.resolver,
+     this.debugDisableRebasing = false,
+     this.drawText = true,
++    this.minTextCapPixels = kMinTextCapPixels,
+   });
+ 
+   final DraftDocument document;
+   final SpatialIndex index;
+   final StyleResolver resolver;
+ 
+   /// **Test-only.** Paints with the rebase origin pinned at the world origin.
+   ///
+   /// Exists so the damage the rebase prevents can be measured rather than
+   /// argued about: at 4.5e6, float32 spacing is about 0.5 units, and a test
+@@ -61,20 +83,31 @@ class DraftPainter {
+   /// *the cost of text* if nothing else about the frame moved. Rebuilding the
+   /// corpus with `labelFraction: 0` would move the entity mix, the extents and
+   /// therefore both cameras; this moves one branch.
+   ///
+   /// Turning it off skips a text leaf before anything is resolved for it, so
+   /// the delta covers attribute resolution, layout composition and the
+   /// paragraph lookup together. It also leaves [skippedTextCount] at zero,
+   /// because that counter means *empty string*, not *not drawn*.
+   final bool drawText;
+ 
++  /// Cap height in logical pixels below which a text leaf is culled.
++  ///
++  /// **`0.0` disables level of detail**, which is what the exit gate's control
++  /// arm needs: LOD-on and LOD-off must be compared on the same corpus at the
++  /// same camera, or the two rows are two different documents.
++  ///
++  /// `final` for the reason [drawText] is: the painter is built once and a rig
++  /// that flipped this after the fact would be measuring a rebuilt painter,
++  /// which is a different frame.
++  final double minTextCapPixels;
++
+   /// Reused across frames; the frame path must not allocate once warm.
+   Float64List _points = Float64List(256);
+   int get leafBufferCapacity => _points.length;
+ 
+   /// This frame's visible root-level instances, ascending. Copied out of the
+   /// query rather than held by reference: both rect queries share one set of
+   /// scratch buffers inside `SpatialIndex`.
+   Uint32List _instances = Uint32List(64);
+   int _instanceCount = 0;
+   int get instanceBufferCapacity => _instances.length;
+@@ -147,20 +180,31 @@ class DraftPainter {
+ 
+   /// Text entities not drawn in the last frame.
+   ///
+   /// Since Plan 3c Task 10 text draws, so this counts one thing only: a text
+   /// or attrib entity whose string is empty, which has nothing to hand
+   /// `Canvas`. It stays because the generated corpus's plain floor texts are
+   /// all blank, and a measurement taken over them would otherwise read as a
+   /// measurement of drawn text.
+   int get skippedTextCount => _skippedText;
+ 
++  int _culledText = 0;
++
++  /// Text and attrib entities culled in the last frame for being too small to
++  /// read — see [kMinTextCapPixels].
++  ///
++  /// **Separate from [skippedTextCount] on purpose.** That one means *empty
++  /// string*; this one means *below the threshold*. Blended, the exit gate
++  /// cannot tell which mechanism fired, which is the mistake Ruling 54 records
++  /// for the paragraph cache's hit rate.
++  int get culledTextCount => _culledText;
++
+   int _textOps = 0;
+ 
+   /// Text and attrib entities handed to [DrawSink.text] in the last frame.
+   ///
+   /// The other half of [skippedTextCount]: together they account for every
+   /// text leaf that survived culling. Reported by the rigs because a paragraph
+   /// cache's hit rate is meaningless without the number of lookups it is a
+   /// rate over — `layoutCount` alone cannot tell one layout in one draw from
+   /// one layout in ten thousand.
+   int get textOpCount => _textOps;
+@@ -244,20 +288,21 @@ class DraftPainter {
+   /// nothing is filled, and deciding what covers what the moment Plan 3b adds
+   /// fills. They are merged instead.
+   ///
+   /// The merge compares handle values across the two streams, so it has no
+   /// answer for a tie — and needs none, because a handle names one thing in
+   /// the document. `AddEntityCommand` and `AddNodeCommand` each reject a
+   /// handle the other store already holds; that guard is what makes this
+   /// comparison total.
+   void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
+     _skippedText = 0;
++    _culledText = 0;
+     _textOps = 0;
+     _skippedDeepInstances = 0;
+     _screenSpaceLeaves = 0;
+     _anisotropicCurves = 0;
+     _fills = 0;
+     _skippedFills = 0;
+     final world = camera.visibleWorld(viewport);
+     _worldRect = world;
+     final origin =
+         debugDisableRebasing ? Vector2.zero() : rebaseOriginFor(world);
+@@ -797,29 +842,48 @@ class DraftPainter {
+     final text = document.entities.textAt(slot);
+     if (text.isEmpty) {
+       // Nothing to draw, and still counted: the generated corpus's plain
+       // floor texts carry the empty string, so without this the counter
+       // would read zero on a document whose text is entirely blank.
+       _skippedText++;
+       return;
+     }
+     final styleHandle = document.entities.textStyleAt(slot);
+     final record = document.textStyleOf(styleHandle);
++    // Resolved before the metrics are asked for, and that ordering is the whole
++    // mechanism. `resolve` needs no metrics — height, rotation, width factor,
++    // oblique angle and justification all come from the payload, the attribute
++    // bits and the style record — while `measure` is the expensive call. A cull
++    // placed after `measure` would skip the draw and save no layout at all.
++    final layout = _textLayout
++      ..resolve(payload, document.entities.textAttrsAt(slot), record);
++    // `layout.height` is the effective DXF text height, which *is* the cap
++    // height, in world units; `chain` carries camera, ancestors, instance,
++    // placement and rebase. The product is the on-screen cap height in pixels,
++    // with no measurement involved.
++    //
++    // `scaleMagnitude` is the geometric mean of the axis scales, so text
++    // squashed in y under an anisotropic placement reads taller than it renders
++    // and survives longer than it should. Same approximation the painter
++    // already makes for curve stroke widths past [kAnisotropyThreshold], and it
++    // errs toward drawing.
++    if (layout.height * chain.scaleMagnitude < minTextCapPixels) {
++      _culledText++;
++      return;
++    }
+     final metrics = document.textMeasurer.measure(text: text, style: record);
+     // The anchor is rebased like every other coordinate that reaches `chain`,
+     // which already carries `translate(localOrigin)`. An unrebased anchor is
+-    // exactly right at the origin and one rebase origin wrong everywhere
+-    // else — the failure a fixture at (0, 0) cannot see.
+-    final layout = _textLayout
+-      ..resolve(payload, document.entities.textAttrsAt(slot), record)
+-      ..composeTransform(metrics, payload.coords[0] - localOrigin.x,
+-          payload.coords[1] - localOrigin.y);
++    // exactly right at the origin and one rebase origin wrong everywhere else —
++    // the failure a fixture at (0, 0) cannot see.
++    layout.composeTransform(metrics, payload.coords[0] - localOrigin.x,
++        payload.coords[1] - localOrigin.y);
+     sink
+       ..beginResidual(
+           chain.multiply(Transform2(
+               layout.a, layout.b, layout.c, layout.d, layout.e, layout.f)),
+           debugHandle: document.entities.handleAt(slot))
+       ..text(text, styleHandle, style)
+       ..endResidual();
+     _textOps++;
+   }
+ 
+diff --git a/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart b/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart
+index 04ca47a..104fe87 100644
+--- a/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart
++++ b/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart
+@@ -348,20 +348,47 @@ void main() {
+     // `DraftPainter`, so a `didUpdateWidget` that ignored it would leave the
+     // old painter in place and the flag would be silently one frame — or one
+     // whole run — behind.
+     await tester.pumpWidget(canvas(drawText: false));
+     expect(key.currentState!.painter.drawText, isFalse);
+     textCamera.panBy(Offset.zero);
+     await tester.pump();
+     expect(key.currentState!.painter.textOpCount, 0);
+   });
+ 
++  testWidgets('changing minTextCapPixels rebuilds the painter', (tester) async {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final doc = DraftDocument.empty(measurer: measurer);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final camera = CameraController(ViewportTransform.fit(
++        Aabb2(Vector2.zero(), Vector2(100, 100)), kViewport));
++    addTearDown(camera.dispose);
++    final key = GlobalKey<DraftCanvasState>();
++
++    Widget at(double threshold) => wrap(DraftCanvas(
++        key: key,
++        document: doc,
++        index: index,
++        camera: camera,
++        minTextCapPixels: threshold));
++
++    await tester.pumpWidget(at(kMinTextCapPixels));
++    expect(key.currentState!.painter.minTextCapPixels, kMinTextCapPixels);
++
++    await tester.pumpWidget(at(0.0));
++    // The painter's field is final, so a stale painter here means the control
++    // arm measures the wrong build and reads as a working gate.
++    expect(key.currentState!.painter.minTextCapPixels, 0.0);
++  });
++
+   testWidgets('refuses a document whose measurer cannot lay out paragraphs',
+       (tester) async {
+     final doc = DraftDocument.empty();
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+     final camera = CameraController(ViewportTransform.fit(
+         Aabb2(Vector2.zero(), Vector2(100, 100)), const Size(400, 300)));
+     addTearDown(camera.dispose);
+ 
+     await tester.pumpWidget(Directionality(
+diff --git a/packages/jet_cad_2d_flutter/test/text_lod_test.dart b/packages/jet_cad_2d_flutter/test/text_lod_test.dart
+new file mode 100644
+index 0000000..154a320
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/text_lod_test.dart
+@@ -0,0 +1,176 @@
++// `dart:typed_data` for Float64List, `dart:ui` for the bare `Size` the
++// painter's viewport takes (the barrel doesn't re-export it, only fixtures.dart
++// does), and `hide Aabb2` because vector_math ships its own Aabb2 and
++// `jet_cad_2d` exports the one this codebase means. Every text-bearing test in
++// this directory has these lines — see `text_paint_test.dart` and
++// `draft_canvas_test.dart`.
++import 'dart:typed_data';
++import 'dart:ui' show Size;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2;
++
++/// One text entity of [height] world units at the world origin, and nothing
++/// else, so the camera fit is decided by [world] rather than by the glyph box.
++DraftDocument _doc(double height, Aabb2 world, FlutterTextMeasurer m) {
++  final doc = DraftDocument.empty(measurer: m);
++  doc.commands.execute(AddEntityCommand(
++    record: EntityRecord(
++      handle: doc.handleSeed.next(),
++      owner: doc.rootHandle,
++      kind: EntityKind.text,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.byLayerLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: const ByLayerColor(),
++      lineweight: 25,
++      transparency: 0,
++      flags: 0,
++      text: 'STAIR',
++      textStyle: ReservedHandles.standardTextStyle,
++      textAttrs: packTextAttrs(),
++    ),
++    payload: GeometryPayload(
++      coords: Float64List.fromList([world.min.x, world.min.y]),
++      scalars: Float64List.fromList([height, 0, 1, 0]),
++    ),
++  ));
++  return doc;
++}
++
++void main() {
++  test('text below the threshold is culled and never measured', () {
++    final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
++    // 1000 world units across a 400 px viewport, with `ViewportTransform.fit`'s
++    // own 5% margin, is 0.38 px per unit, so a height-2 glyph is 0.76 px of
++    // cap height — under the 3.0 default.
++    final world = Aabb2(Vector2.zero(), Vector2(1000, 750));
++    final doc = _doc(2.0, world, m);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    // `SpatialIndex(doc)` above already measured this text once, to bound it
++    // for insertion — a mechanism the painter's LOD gate has nothing to do
++    // with. The load-bearing claim is that the painter's own cull adds no
++    // *further* layout, so the baseline is taken here, after the index and
++    // before `paint`, rather than asserted against zero.
++    final baseline = m.layoutCount;
++    final painter = DraftPainter(
++        document: doc, index: index, resolver: DocumentStyleResolver(doc));
++    final sink = RecordingDrawSink();
++
++    painter.paint(sink, ViewportTransform.fit(world, const Size(400, 300)),
++        const Size(400, 300));
++
++    expect(painter.culledTextCount, 1);
++    expect(painter.textOpCount, 0);
++    // The load-bearing half: culling after `measure` would push this past
++    // `baseline`. It is why the LOD gate sits before the measure call.
++    expect(m.layoutCount, baseline);
++  });
++
++  test('the same text at the same camera draws once LOD is off', () {
++    final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
++    final world = Aabb2(Vector2.zero(), Vector2(1000, 750));
++    final doc = _doc(2.0, world, m);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final painter = DraftPainter(
++        document: doc,
++        index: index,
++        resolver: DocumentStyleResolver(doc),
++        minTextCapPixels: 0.0);
++    final sink = RecordingDrawSink();
++
++    painter.paint(sink, ViewportTransform.fit(world, const Size(400, 300)),
++        const Size(400, 300));
++
++    // The control arm. Without it the first test passes on a corpus with no
++    // text at all.
++    expect(painter.culledTextCount, 0);
++    expect(painter.textOpCount, 1);
++  });
++
++  test('readable text at the same threshold is not culled', () {
++    final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
++    final world = Aabb2(Vector2.zero(), Vector2(1000, 750));
++    // 40 world units at 0.38 px per unit (see the culled test above for where
++    // that figure comes from) is 15.2 px of cap height.
++    final doc = _doc(40.0, world, m);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final painter = DraftPainter(
++        document: doc, index: index, resolver: DocumentStyleResolver(doc));
++    final sink = RecordingDrawSink();
++
++    painter.paint(sink, ViewportTransform.fit(world, const Size(400, 300)),
++        const Size(400, 300));
++
++    expect(painter.culledTextCount, 0);
++    expect(painter.textOpCount, 1);
++  });
++
++  test('the threshold is exclusive at exactly kMinTextCapPixels', () {
++    final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
++    final world = Aabb2(Vector2.zero(), Vector2(1000, 750));
++    const size = Size(400, 300);
++    // The camera's scale is derived, not hand-computed, because
++    // `ViewportTransform.fit` bakes in its own 5% margin (see the factory's
++    // doc comment) on top of the raw viewport/world ratio — a height picked
++    // against the raw ratio alone lands a few percent off the boundary this
++    // test means to sit on. One `view` instance is reused for the fixture and
++    // for `paint` so the same double is multiplied both times.
++    final view = ViewportTransform.fit(world, size);
++    final doc = _doc(kMinTextCapPixels / view.scale, world, m);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final painter = DraftPainter(
++        document: doc, index: index, resolver: DocumentStyleResolver(doc));
++    final sink = RecordingDrawSink();
++
++    painter.paint(sink, view, size);
++
++    // `<`, not `<=`: a glyph exactly at the threshold is drawn.
++    expect(painter.culledTextCount, 0);
++    expect(painter.textOpCount, 1);
++  });
++
++  test('culledTextCount is a per-frame figure, not a running total', () {
++    final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
++    final world = Aabb2(Vector2.zero(), Vector2(1000, 750));
++    final doc = _doc(2.0, world, m);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final painter = DraftPainter(
++        document: doc, index: index, resolver: DocumentStyleResolver(doc));
++    final view = ViewportTransform.fit(world, const Size(400, 300));
++
++    painter.paint(RecordingDrawSink(), view, const Size(400, 300));
++    painter.paint(RecordingDrawSink(), view, const Size(400, 300));
++
++    expect(painter.culledTextCount, 1);
++  });
++
++  test('the threshold does not reach doc.extents', () {
++    final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
++    final world = Aabb2(Vector2.zero(), Vector2(1000, 750));
++    final doc = _doc(2.0, world, m);
++    final wide = doc.extents;
++    doc.invalidateDerived();
++    final again = doc.extents;
++    // A document box that changed with zoom would be absurd; the painter's
++    // threshold is a draw decision and lives nowhere near entityBounds.
++    expect(again.min.x, wide.min.x);
++    expect(again.min.y, wide.min.y);
++    expect(again.max.x, wide.max.x);
++    expect(again.max.y, wide.max.y);
++  });
++}

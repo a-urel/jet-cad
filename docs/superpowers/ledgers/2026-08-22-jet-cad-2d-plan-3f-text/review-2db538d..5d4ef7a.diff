@@ -1,0 +1,200 @@
+# Review package: 2db538d7b2001d5e3b8475ae6508815f179afe26..5d4ef7a330236749acb3b9dab0d3099535ad2ff6
+
+## Commits
+5d4ef7a docs: the picture cache is 3g; text wiring and LOD take 3f
+
+## Files changed
+ STATUS.md | 41 ++++++++++++++++++++++++++++++-----------
+ 1 file changed, 30 insertions(+), 11 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 6a28d45..78aab9f 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -260,21 +260,21 @@ call-collapsed mode was **2.7× slower to rasterise** than one
+ stop clause fired. What shipped instead:
+ 
+ - The cull floor and the style memo were **deleted** — both were measured losses.
+ - Every line-like leaf is carried into screen space unconditionally, replacing
+   the old anisotropy-gated bypass.
+ - An engine-side **dasher**: screen space for polylines, arc-window-aware for
+   circles and arcs, with a human-reviewed collapse floor (`kDashCollapsePx`).
+ 
+ The profiling task also answered the standing question about an unexplained
+ 179 ms: it is **leaf-count-bound GPU vertex work**, not fragment fill and not
+-draw-call dispatch. That finding is what makes a picture cache (**Plan 3f**,
++draw-call dispatch. That finding is what makes a picture cache (**Plan 3g**,
+ called 3e before the vertices sink took the 3d slot) worth building.
+ 
+ > **Every `flutter drive` number in the 3b results note is contaminated:**
+ > macOS Low Power Mode was on system-wide for the whole session and could not be
+ > turned off. CPU-only paths are unaffected; build and raster columns at 500k
+ > entities are elevated 4–12×. **Any future `flutter drive` note must state
+ > whether Low Power Mode was on.**
+ 
+ ---
+ 
+@@ -355,27 +355,27 @@ approved it on 2026-08-21 and the non-negotiable now reads
+ > measure it.
+ 
+ The plan measured the residue and stopped there rather than editing the rule
+ itself, because a gate that can be passed by editing the rule it is measured
+ against is not a gate. **No plan since has needed the rule amended again** —
+ 3e measured against it and it still describes the work.
+ 
+ Plan 3d's open items were worked next, on `main` at `70d824e..0eac1be`: two
+ closed, one shown to be unclosable until a DXF reader exists.
+ 
+-**Next**: pick a plan from the roadmap below. **Plan 3f (caches and tiles)**
++**Next**: pick a plan from the roadmap below. **Plan 3g (caches and tiles)**
+ is the named successor and what 3d and 3e owe it is written out at the end of
+ [the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md)
+ and [the 3e results note](docs/superpowers/notes/2026-08-22-plan-3e-results.md)
+ respectively. **Permitted divergence 5** (overlapping translucent strokes on
+ a triangle soup) is now live and still has no fixture — a candidate for a
+-short follow-up before or alongside 3f.
++short follow-up before or alongside 3g.
+ 
+ ### What Plan 3d leaves open
+ 
+ Three of the five are closed. The full account, with every number, is the
+ **Follow-up** section at the end of
+ [the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md);
+ the nine new mutants are Part 4 of
+ [the mutation log](docs/superpowers/notes/plan-3d-mutation-log.md).
+ 
+ 1. ~~**The `CLAUDE.md` amendment.**~~ Settled 2026-08-21, above.
+@@ -426,21 +426,22 @@ shipping text to an application and has no owner:
+    error**. Out of 3c's scope: the plan specifies the seam, not who plugs it in.
+ 2. **Two paragraph caches, not one.** The painter takes metrics from
+    `document.textMeasurer`, the sink lays out through `DraftCanvas`'s own. A
+    text leaf costs up to two layouts, and the query path pays for text even
+    into a `NullDrawSink` — **+97 ms** at 50k, **+105 ms** at 500k, whole
+    drawing.
+ 3. **The allocation gate measures the engine helpers, not the painter.**
+    `text_paint_allocation_test.dart` is in the engine suite because
+    `jet_cad_2d_flutter` has no `vm_service`. Closing it means moving
+    `AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
+-4. **Whole-drawing thrash → the picture cache's text LOD (Plan 3f).** 4,140
++4. **Whole-drawing thrash → text LOD (Plan 3f), split from the picture cache,
++   now Plan 3g.** 4,140
+    layouts and 4,140 evictions
+    per frame, and it is 4,140 at *both* 50k and 500k because it is bounded by
+    string variety rather than entity count. A bigger cache holds one zoom
+    level of one corpus; not drawing text too small to read removes the cost.
+ 5. `snap at dirty threshold` p95 1.08 ms against < 1.0 ms — carried from Plan 2.
+ 6. `DocumentTree._link` is quadratic in a parent's child count, which is why
+    the rigs cap `instanceCount` at 20,000 — recorded in Plan 3b.
+ 
+ ---
+ 
+@@ -631,20 +632,26 @@ The results note must state **whether macOS Low Power Mode was on**.
+ 
+ **Renumbered.** The vertices sink took the `3d` slot, so the two plans below
+ moved up one: **fills is 3e** and **the picture cache is 3f**. That is the
+ numbering the Plan 3d design document uses in "What 3d owes the plans after it",
+ and it is the numbering the rest of this file uses — every `3d`/`3e`/`3f` above
+ was swept and corrected, including the picture-cache pointer in the 3b section
+ and the text-LOD item in 3c's carry-forward list. **Notes and plan documents
+ written before 2026-08-20 still call fills "3d" and the cache "3e"; read those
+ by name, not by number.**
+ 
++**Renumbered again on 2026-08-22.** Text wiring and text LOD were split out of
++the picture cache and took the `3f` slot, so **the picture cache is now 3g**.
++The sentence above describes the *earlier* move and is left as written: it is
++the record of why the numbers shifted the first time, not a statement about the
++current numbering.
++
+ ### Plan 3e — fills
+ 
+ **Done — seventeen tasks, executed and reviewed one at a time directly on
+ `main`** (no worktree; the brief scoped this plan to work in the main
+ checkout, with `.superpowers/sdd/2026-08-21-jet-cad-2d-plan-3e-fills/` as its
+ ledger, archived the same way a worktree plan's would be). Commit range:
+ design and plan at `0eac1be..3201cc5`, the seventeen tasks at
+ `3201cc5..f0ea51e` plus the results-note commit on top.
+ 
+ **The open problem the plan named — solved.** Draw order is ascending handle
+@@ -682,29 +689,41 @@ them together:**
+    settled), but the mode-2 mechanism itself is open on Impeller/GPU** —
+    `flutter_test`'s software Skia cannot antialias `drawVertices` at all
+    (proven by probe, pinned as a permanent regression test), so the measured
+    `0.000%` is a property of the instrument. Do not read it as "no seam was
+    found."
+ 
+ **One thing 3e did not close.** Permitted divergence 5 — overlapping
+ translucent strokes double-blending on a triangle soup — is now **live**
+ (fills exist and can carry alpha < 255) but **still not exercised by any
+ fixture**. Task 15 measured a different, narrower question (a translucent
+-fill's own internal triangulation seam), not this one. Open for 3f or a
++fill's own internal triangulation seam), not this one. Open for 3g or a
+ follow-up. See the [3d results
+ note](docs/superpowers/notes/2026-08-21-plan-3d-results.md) for where this
+ divergence was first named.
+ 
+-### Plan 3f — the definition/tile picture cache
++### Plan 3f — text wiring and level of detail
++
++In flight. Spec:
++[docs/superpowers/specs/2026-08-22-jet-cad-2d-plan-3f-text-design.md](docs/superpowers/specs/2026-08-22-jet-cad-2d-plan-3f-text-design.md).
++Plan:
++[docs/superpowers/plans/2026-08-22-jet-cad-2d-plan-3f-text.md](docs/superpowers/plans/2026-08-22-jet-cad-2d-plan-3f-text.md).
++
++Two defects: a document built the ordinary way carries `InsertionPointMeasurer`
++and draws no text without reporting anything, and the painter and the sink read
++different measurers. Plus text LOD, which is the one of Plan 3g's four
++subsystems that depends on none of the other three.
++
++### Plan 3g — the definition/tile picture cache
+ 
+ **What 3d hands it.** A picture cache that records into a `Picture` interacts
+-with a sink that batches across residuals: 3f must decide whether a cached
++with a sink that batches across residuals: 3g must decide whether a cached
+ picture flushes the vertex buffer at its boundary. There is **no crossover
+ number** to work against — the vertices backend's raster margin is still
+ widening at 500,000 entities — and there is **96.00 MiB of vertex buffer pinned
+ for the widget's life** at that corpus size, which is the arithmetic a tiling
+ scheme changes. Read the margin against **canvas calls**, not entity count: a
+ 10× entity rise moves `screenSpaceLeafCount` only 2.13× and `dashSpans` 3.03×.
+ 
+ The prize is real: the dominant cost is leaf-count-bound GPU vertex work, and
+ dashing makes that story **stronger** — one dashed polyline becomes dozens of
+ drawn spans per leaf without moving the painter's op count.
+@@ -733,32 +752,32 @@ otherwise never see it:
+    this model decision belongs **before** the cache, not after.
+ 5. **The allocation gate cannot see a lazily-populated cache, and a picture
+    cache is exactly that shape.** Plan 3e proved this directly: mutating
+    `DraftPainter._drawFill` to compute and store a triangulation on a cache
+    miss, instead of skipping it, left `paint_allocation_test.dart`'s own
+    `debugCapacityVertices` before/after comparison green. The mechanism only
+    reads `VerticesDrawSink`'s own vertex-buffer capacity; a triangulation (or
+    a baked `Picture`) that lands on the general Dart heap without touching
+    that buffer is invisible to it, and the warm-up frames a gate like this
+    one always runs will have already sized the buffer before the subject
+-   frame is measured, hiding a first-draw allocation completely. **If 3f's
++   frame is measured, hiding a first-draw allocation completely. **If 3g's
+    picture cache populates lazily on first paint, this exact gate will stay
+    green while the cache allocates a `Picture` per miss on the frame path.**
+    What actually proved fills are populated eagerly and not lazily was a
+    direct command-time assertion (`the triangulation is materialised by the
+-   command, not by a draw`), not the allocation gate — 3f needs the
++   command, not by a draw`), not the allocation gate — 3g needs the
+    equivalent of that assertion, or a real VM allocation-profile mechanism
+    ported to the Flutter-side suite, not another buffer-capacity read.
+ 
+-**Do not design 3f against a fixed op-count ceiling.** The web whole-drawing
++**Do not design 3g against a fixed op-count ceiling.** The web whole-drawing
+ abort is reproducible but its trigger is unknown — a memory- or
+-session-dependent CanvasKit failure explains it with no code at fault. What 3f
++session-dependent CanvasKit failure explains it with no code at fault. What 3g
+ is owed first is a back-to-back, same-session re-run.
+ 
+ ---
+ 
+ ## Commands
+ 
+ ```sh
+ # engine (pure Dart)
+ cd packages/jet_cad_2d
+ dart test

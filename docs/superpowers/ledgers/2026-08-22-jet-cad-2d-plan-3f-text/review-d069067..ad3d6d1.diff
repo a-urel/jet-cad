@@ -1,0 +1,228 @@
+# Review package: d069067..ad3d6d1ce72aa6bc0873dd50e59f064087433b87
+
+## Commits
+ad3d6d1 fix: measure the true distinct-key count, land the ladder in-tree, and show LOD's threshold in device transcripts
+
+## Files changed
+ apps/dev_harness_2d/lib/main.dart                  |  13 ++-
+ apps/dev_harness_2d/lib/measurement_rig.dart       |   7 ++
+ .../test/rig/paint_microbench_test.dart            | 100 +++++++++++++++++++++
+ 3 files changed, 116 insertions(+), 4 deletions(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index c4303c7..7d503c5 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -76,28 +76,33 @@ final double kDashedFraction = double.tryParse(
+     ) ??
+     0.35;
+ 
+ const bool kTextCorpus = bool.fromEnvironment('TEXT');
+ const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
+ 
+ /// Whether the painter culls text too small to read.
+ ///
+ /// **A `String.fromEnvironment`, and it stays one.** `bool.fromEnvironment`
+ /// reads `--dart-define=LOD=1` as **false**, and Plan 3c lost a full device run
+-/// to exactly that with `TEXT=1`. An unrecognised value throws at startup rather
+-/// than falling back to something that looks fine.
++/// to exactly that with `TEXT=1`. An unrecognised value throws rather than
++/// falling back to something that looks fine — **on first read**, not at
++/// process startup: this is a lazy top-level `final`, not a `const`, so the
++/// throw actually happens at `_HarnessAppState.build()`'s first evaluation of
++/// [kMinTextCap], which for an ordinary `flutter run`/`flutter drive`
++/// invocation is loud and immediate enough to be the same thing in practice,
++/// but is not literally "at startup".
+ final double kMinTextCap =
+     switch (const String.fromEnvironment('LOD', defaultValue: 'true')) {
+   'true' => kMinTextCapPixels,
+   'false' => 0.0,
+-  final other => throw ArgumentError.value(
+-      other, 'LOD', 'expected "true" or "false"'),
++  final other =>
++    throw ArgumentError.value(other, 'LOD', 'expected "true" or "false"'),
+ };
+ 
+ /// Fraction of the closed polylines [_addFillRegions] adds that gain a region
+ /// partner (a fill), when [kFillsEnabled] is on. Named beside
+ /// [kDashedFraction] for the same reason: a quota, applied by an accumulator
+ /// exactly the way `_Styling.linetypeFor` and `.colorFor` apply theirs in
+ /// `generate_document.dart`, not a coin flip -- see that file's comment on
+ /// why a fraction has to land exactly rather than merely on average.
+ ///
+ /// The rest of the closed polylines this adds are plain boundaries: stroked,
+diff --git a/apps/dev_harness_2d/lib/measurement_rig.dart b/apps/dev_harness_2d/lib/measurement_rig.dart
+index 85c0848..4e9582c 100644
+--- a/apps/dev_harness_2d/lib/measurement_rig.dart
++++ b/apps/dev_harness_2d/lib/measurement_rig.dart
+@@ -142,22 +142,29 @@ void printBackend(RenderBackend backend, VerticesDrawSink? vertices) {
+ /// per-frame figures are the deltas the caller passes in. A running total
+ /// printed beside two per-frame figures is the wrong comparison this file
+ /// already refuses to publish once.
+ void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
+     {required bool textCorpus,
+     required bool drawText,
+     required int layoutsBefore,
+     required int paragraphEvictionsBefore,
+     required int metricsEvictionsBefore}) {
+   final m = sink.measurer;
++  // `minTextCapPixels` is printed here, not just implied by which binary was
++  // launched with which define: a device run comparing `LOD=true` against
++  // `LOD=false` is otherwise indistinguishable from one that failed to wire
++  // the define through at all whenever the camera's text happens to sit
++  // above both thresholds — this line is the only place in either transcript
++  // that shows the two runs actually differed in what they were given.
+   print('  text: corpus=${textCorpus ? "on" : "off"} '
+       'draw=${drawText ? "on" : "off"} '
++      'minTextCapPixels=${painter.minTextCapPixels} '
+       'textOps=${painter.textOpCount} '
+       'skippedText=${painter.skippedTextCount} '
+       'culledText=${painter.culledTextCount}');
+   // Two eviction numbers, not one. A paragraph eviction released native glyph
+   // memory and guarantees a future re-layout; a metrics eviction dropped four
+   // doubles. Ruling 54: a blended number hides which half moved.
+   print('  paragraphs: newLayouts=${m.layoutCount - layoutsBefore} '
+       'newParagraphEvictions=${m.paragraphEvictionCount - paragraphEvictionsBefore} '
+       'newMetricsEvictions=${m.metricsEvictionCount - metricsEvictionsBefore} '
+       'liveParagraphs=${m.liveParagraphCount} '
+diff --git a/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart b/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
+index 6ac5569..6f32540 100644
+--- a/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
++++ b/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
+@@ -13,20 +13,42 @@ library;
+ 
+ import 'dart:ui';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
+ import 'rig_support.dart';
+ 
++/// Threshold ladder for Task 8's step-locator measurement: `minTextCapPixels`
++/// values to probe, one full pass each, at the 50,000-entity text corpus.
++///
++/// **Gated behind an environment define, not always-on.** An ordinary rig
++/// run already costs minutes; this loop is fourteen additional full paints
++/// (seven thresholds, two cameras) and belongs only to the run that is
++/// actually measuring the ladder. Comma-separated pixel values; unset (the
++/// default) leaves the list empty and the loop below a no-op.
++///
++/// Reproduces the Task 8 report's ladder table exactly:
++/// ```sh
++/// cd packages/jet_cad_2d_flutter && CI=true flutter test --tags rig \
++///   --run-skipped test/rig/paint_microbench_test.dart \
++///   --plain-name "text paint at 50000" \
++///   --dart-define=LADDER=0.0,1.0,2.0,3.0,4.0,6.0,10.0
++/// ```
++final List<double> kLadderThresholds = const String.fromEnvironment('LADDER')
++    .split(',')
++    .where((s) => s.isNotEmpty)
++    .map(double.parse)
++    .toList();
++
+ class Stats {
+   Stats(this.p50, this.p95, this.min, this.n);
+   final double p50;
+   final double p95;
+   final double min;
+   final int n;
+ 
+   @override
+   String toString() => 'p50=${p50.toStringAsFixed(3)}ms '
+       'p95=${p95.toStringAsFixed(3)}ms min=${min.toStringAsFixed(3)}ms (n=$n)';
+@@ -430,14 +452,92 @@ void main() {
+                 Vector2(cx + halfW, cy + halfH)),
+             kRigViewport);
+         final keys = TextKeySink();
+         painter.paint(keys, camera, kRigViewport);
+         print('    ${(factor * 3000).toString().padLeft(6)} world units wide: '
+             '${keys.keys.length.toString().padLeft(5)} keys, '
+             '${keys.textOps.toString().padLeft(5)} text ops  '
+             '${keys.keys.length > kParagraphCacheLimit ? "OVER" : "under"}');
+       }
+ 
++      // Task 8's threshold ladder — see kLadderThresholds' doc comment for
++      // the command that reproduces the report's table. A no-op unless
++      // `LADDER` is set: `kLadderThresholds` is then empty and this loop
++      // does not run.
++      //
++      // Two independent readings per row, from two different objects, on
++      // purpose:
++      //
++      // `distinctKeys` is the **true** distinct `(text, styleHandle, argb)`
++      // count visible at this threshold and camera — a `TextKeySink` pass,
++      // which draws nothing and costs no layout at all. This is the number
++      // Ruling 4's single permitted raise of `kParagraphCacheLimit` needs
++      // recorded beside it, and it is not the same thing as `layouts` below:
++      // `layouts` counts *cache misses* in one paint, which only equals the
++      // true distinct-key count when the paint's own eviction pressure
++      // happens not to force a second miss on a key already seen earlier in
++      // that same pass. Above the 512-entry limit that coincidence cannot be
++      // assumed, so this rig measures the real thing instead of reasoning
++      // about whether the coincidence held.
++      //
++      // `layouts`/`paragraphEvictions`/`liveParagraphs` come from a *fresh*
++      // `FlutterTextMeasurer` built fresh each iteration and passed as the
++      // `CanvasDrawSink`'s `measurer:` — the object `paragraphFor` (the
++      // drawn, coloured cache) writes to. Fresh each time so this reports
++      // what one cold paint at that threshold costs, not a number
++      // contaminated by whichever keys the *previous* threshold's paint
++      // happened to leave live.
++      //
++      // `metricsEvictions`/`liveMetrics` are read from `measurer` — this
++      // test's own `document.textMeasurer`, the object `textRigCorpus` built
++      // the document with. `DraftPainter._drawText`'s LOD check calls
++      // `.measure()` on *that* object (`draft_painter.dart:873`), never on
++      // the sink's measurer, so it is the only one this column can mean
++      // anything read from. `resetCounters()` isolates each iteration's
++      // eviction delta without clearing the map itself.
++      if (entityCount == 50000 && kLadderThresholds.isNotEmpty) {
++        print('  -- threshold ladder --');
++        for (final threshold in kLadderThresholds) {
++          for (final (label, camera) in [
++            ('whole drawing', wholeDrawingCamera(doc)),
++            ('working set', workingSetCamera(doc)),
++          ]) {
++            final p = DraftPainter(
++                document: doc,
++                index: index,
++                resolver: resolver,
++                minTextCapPixels: threshold);
++
++            final keySink = TextKeySink();
++            p.paint(keySink, camera, kRigViewport);
++            final distinctKeys = keySink.drawsPerKey.length;
++            final culled = p.culledTextCount;
++
++            final paragraphs = FlutterTextMeasurer();
++            measurer.resetCounters();
++            final recorder = PictureRecorder();
++            p.paint(
++                CanvasDrawSink(
++                    canvas: Canvas(recorder),
++                    pixelsPerPaperMm: kLogicalPixelsPerMm,
++                    measurer: paragraphs,
++                    textStyleOf: doc.textStyleOf),
++                camera,
++                kRigViewport);
++            recorder.endRecording().dispose();
++
++            print('    threshold=${threshold.toStringAsFixed(1)} '
++                '$label: distinctKeys=$distinctKeys '
++                'layouts=${paragraphs.layoutCount} '
++                'paragraphEvictions=${paragraphs.paragraphEvictionCount} '
++                'metricsEvictions=${measurer.metricsEvictionCount} '
++                'culledText=$culled '
++                'liveParagraphs=${paragraphs.liveParagraphCount} '
++                'liveMetrics=${measurer.liveMetricsCount}');
++          }
++        }
++      }
++
+       index.dispose();
+     }, timeout: const Timeout(Duration(minutes: 20)));
+   }
+ }

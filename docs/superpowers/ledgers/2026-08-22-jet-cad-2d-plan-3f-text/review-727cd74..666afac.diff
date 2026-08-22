@@ -1,0 +1,663 @@
+# Review package: 727cd748797365e1959f4786bbba88bffe1a17d4..666afac5ab555825098d5489e3f9162cd70c76c4
+
+## Commits
+666afac test: the reference walk derives its own cull, and every painter site has a margin
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/reference_walk.dart |  26 +++-
+ .../test/draft_painter_root_test.dart              |  22 +++-
+ .../test/rig/paint_microbench_test.dart            |  17 +++
+ .../jet_cad_2d_flutter/test/support/fixtures.dart  | 145 ++++++++++++++++++++-
+ .../jet_cad_2d_flutter/test/text_lod_test.dart     |  60 +++++++++
+ .../jet_cad_2d_flutter/test/text_paint_test.dart   |  45 +++++--
+ 6 files changed, 294 insertions(+), 21 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart b/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
+index bbb9f32..ee8d31c 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/reference_walk.dart
+@@ -1,17 +1,18 @@
+ import 'dart:typed_data';
+ import 'dart:ui' show Size;
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
+ import 'camera_controller.dart';
++import 'draft_painter.dart' show kMinTextCapPixels;
+ import 'draw_sink.dart';
+ import 'viewport_transform.dart';
+ 
+ /// Draws the document the slow, obvious way, so [DraftPainter] can be compared
+ /// against it.
+ ///
+ /// **It uses no `SpatialIndex`.** No packed tree, no dirty overlay, no
+ /// container index, no scratch buffers, no cull floor, no anisotropy bypass —
+ /// it walks `doc.tree` from the root, reads leaves through `leavesByOwner`,
+ /// composes transforms with `Transform2.multiply`, and keeps an entity when its
+@@ -24,42 +25,46 @@ import 'viewport_transform.dart';
+ ///
+ /// Group flattening is reproduced rather than avoided. A group's leaves belong
+ /// to the container that encloses the group and sort among that container's own
+ /// leaves by handle — which is what `ContainerIndex` does when it folds them
+ /// in, and what the draw order means. An instance is the recursion boundary.
+ void referenceWalk(
+   DraftDocument doc,
+   DrawSink sink,
+   ViewportTransform camera,
+   Size viewport,
+-  StyleResolver resolver,
+-) {
++  StyleResolver resolver, {
++  double minTextCapPixels = kMinTextCapPixels,
++}) {
+   final world = camera.visibleWorld(viewport);
+   final origin = rebaseOriginFor(world);
+-  _ReferenceWalk(
+-          doc, sink, camera, resolver, world, origin, doc.leavesByOwner())
++  _ReferenceWalk(doc, sink, camera, resolver, world, origin,
++          doc.leavesByOwner(), minTextCapPixels)
+       .container(
+           doc.rootHandle, Transform2.identity(), StyleContext.documentRoot, 0);
+ }
+ 
+ class _ReferenceWalk {
+   _ReferenceWalk(this.doc, this.sink, this.camera, this.resolver, this.world,
+-      this.origin, this.leaves);
++      this.origin, this.leaves, this.minTextCapPixels);
+ 
+   final DraftDocument doc;
+   final DrawSink sink;
+   final ViewportTransform camera;
+   final StyleResolver resolver;
+   final Aabb2 world;
+   final Vector2 origin;
+   final Map<Handle, List<int>> leaves;
+ 
++  /// On-screen cap height, in pixels, below which text is not drawn.
++  final double minTextCapPixels;
++
+   /// Draws one container's contents in ascending handle order.
+   void container(
+       Handle handle, Transform2 accumulated, StyleContext ctx, int depth) {
+     if (depth > 64) return;
+     final items = <_Item>[];
+     _collect(handle, accumulated, items);
+     items.sort((a, b) => a.handle.value.compareTo(b.handle.value));
+     for (final item in items) {
+       if (item.slot != null) {
+         _leaf(item.slot!, item.placement, ctx);
+@@ -156,20 +161,31 @@ class _ReferenceWalk {
+       // carries no coordinates — so it travels in the residual. Composed here
+       // rather than pushed as an inner `beginResidual`, which does not nest.
+       final text = doc.entities.textAt(slot);
+       // Nothing to draw. The painter counts this; the walk has no counter to
+       // keep, and a `TextOp` for the empty string would be a difference.
+       if (text.isEmpty) return;
+       final textStyle = doc.entities.textStyleAt(slot);
+       final record = doc.textStyleOf(textStyle);
+       final attrs = resolveTextAttributes(
+           payload, doc.entities.textAttrsAt(slot), record);
++      // The same rule the painter applies, computed here rather than asked
++      // for. An oracle that read the painter's decision would share the
++      // assumption it exists to test — the correction Plan 3e made at
++      // `24cfd23` for fill triangulation. `attrs.height` is resolved from this
++      // walk's own payload/attribute-bit/style read, and `chain` is composed
++      // from this walk's own transform stack, so the product is a genuinely
++      // independent number that happens to equal the painter's.
++      //
++      // Nothing is counted here: the painter keeps `culledTextCount`, and the
++      // walk deliberately has no counter for the comparison to borrow.
++      if (attrs.height * chain.scaleMagnitude < minTextCapPixels) return;
+       final metrics = doc.textMeasurer.measure(text: text, style: record);
+       // Rebased, like every other coordinate handed to `chain`.
+       final anchor = Vector2(coords[0] - ox, coords[1] - oy);
+       sink
+         ..beginResidual(
+             chain.multiply(textLocalTransform(attrs, metrics, anchor)),
+             debugHandle: doc.entities.handleAt(slot))
+         ..text(text, textStyle, style)
+         ..endResidual();
+       return;
+diff --git a/packages/jet_cad_2d_flutter/test/draft_painter_root_test.dart b/packages/jet_cad_2d_flutter/test/draft_painter_root_test.dart
+index db5ea75..ecdda36 100644
+--- a/packages/jet_cad_2d_flutter/test/draft_painter_root_test.dart
++++ b/packages/jet_cad_2d_flutter/test/draft_painter_root_test.dart
+@@ -44,26 +44,34 @@ Handle _add(
+ }
+ 
+ Handle addLine(DraftDocument doc, Handle owner, double x1, double y1, double x2,
+         double y2,
+         {int flags = 0}) =>
+     _add(doc, owner, EntityKind.line, [x1, y1, x2, y2], const [], flags: flags);
+ 
+ /// Builds the index and paints the whole document into a recording sink.
+ ///
+ /// [view] overrides the camera's world box, for culling tests.
++///
++/// [minTextCapPixels] is forwarded to the painter. Only the text test below
++/// passes it; every other caller here draws no text at all, so the default is
++/// what they should measure.
+ ({DraftPainter painter, RecordingDrawSink sink, ViewportTransform camera})
+-    paintAll(DraftDocument doc, {Aabb2? view}) {
++    paintAll(DraftDocument doc,
++        {Aabb2? view, double minTextCapPixels = kMinTextCapPixels}) {
+   final index = SpatialIndex(doc);
+   addTearDown(index.dispose);
+   final painter = DraftPainter(
+-      document: doc, index: index, resolver: DocumentStyleResolver(doc));
++      document: doc,
++      index: index,
++      resolver: DocumentStyleResolver(doc),
++      minTextCapPixels: minTextCapPixels);
+   final camera = ViewportTransform.fit(view ?? doc.extents, kViewport);
+   final sink = RecordingDrawSink();
+   painter.paint(sink, camera, kViewport);
+   return (painter: painter, sink: sink, camera: camera);
+ }
+ 
+ void main() {
+   test('a group-owned leaf is drawn through its folded transform', () {
+     // Group nodes are flattened into the enclosing container and the leaf's
+     // composed transform is kept in ContainerIndex._leafTransforms. A painter
+@@ -292,15 +300,23 @@ void main() {
+     expect(blankRun.painter.skippedTextCount, greaterThan(0));
+     expect(blankRun.sink.ops.whereType<TextOp>(), isEmpty);
+ 
+     // `labelFraction` replaces those blanks one for one with real strings,
+     // and the measurer has to be a real one or every glyph box collapses to a
+     // point. Nothing is skipped then.
+     final labelled = generateDocument(30000,
+         definitionCount: 100,
+         labelFraction: 0.02,
+         measurer: MetricModelMeasurer());
+-    final run = paintAll(labelled);
++    // Level of detail off, explicitly, and this is the site where it matters
++    // most in the package. This camera fits a 30,000-entity drawing into 800 x
++    // 600, so at the default 3.0 px the painter culls 454 of the 568 labels
++    // and the assertion below reads `114 > 100` — fourteen ops of margin on a
++    // test whose subject is a counter, not a threshold. Off, it reads
++    // `568 > 100`, and a later `kMinTextCapPixels` cannot quietly turn this
++    // into a test of the cull.
++    final run = paintAll(labelled, minTextCapPixels: 0.0);
+     expect(run.painter.skippedTextCount, 0);
++    expect(run.painter.culledTextCount, 0);
+     expect(run.sink.ops.whereType<TextOp>().length, greaterThan(100));
+   });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart b/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
+index 4fa6bce..edb9892 100644
+--- a/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
++++ b/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
+@@ -202,20 +202,36 @@ void main() {
+       for (final (label, camera) in [
+         ('whole drawing', wholeDrawingCamera(doc)),
+         ('working set', workingSetCamera(doc)),
+       ]) {
+         print('  -- $label --');
+ 
+         // Step 2: the gate's feasibility number, taken first and on a sink that
+         // materialises nothing but the keys.
+         final keySink = TextKeySink();
+         painter.paint(keySink, camera, kRigViewport);
++        // This rig measures the frame production draws, so it runs at the
++        // shipped `kMinTextCapPixels` rather than pinning the threshold to 0 —
++        // a rig that measured a frame nobody paints is not a frame budget.
++        // The exposure that buys is that a later threshold could cull this
++        // camera's text away entirely and every row below would still print a
++        // plausible number, which is the same failure the corpus check above
++        // refuses. Measured at 50,000 entities on the whole-drawing camera:
++        // 4,514 text ops drawn, 414 culled, the smallest survivor at 3.0006 px
++        // of cap height — 0.02% clear of the 3.0 threshold. So the cull figure
++        // is printed with every row, and an empty one is refused here.
++        if (keySink.textOps == 0) {
++          throw StateError('level of detail culled every text entity at this '
++              'camera (${painter.culledTextCount} culled, threshold '
++              '${painter.minTextCapPixels} px): the rows below would be a '
++              'measurement of a drawing with no text in it');
++        }
+         final keyCount = keySink.drawsPerKey.length;
+         final strings = keySink.keys.map((k) => (k.$1, k.$2)).toSet();
+         final colours = keySink.keys.map((k) => k.$3).toSet();
+         print('    DISTINCT CACHE KEYS: $keyCount   '
+             '(limit $kParagraphCacheLimit) '
+             '${keyCount > kParagraphCacheLimit ? "OVER" : "under"}');
+         print('      text ops: ${keySink.textOps}  '
+             'distinct (string, style): ${strings.length}  '
+             'distinct argb: ${colours.length}');
+ 
+@@ -283,20 +299,21 @@ void main() {
+           final paragraphEvictionsBefore = measurer.paragraphEvictionCount;
+           p.paint(canvasSink, camera, kRigViewport);
+           canvasRecorder.endRecording().dispose();
+ 
+           print('    [$mode]');
+           print('      R1 paint          $paint');
+           print('      R3 query-only     $query');
+           print('      ops/frame: $opsPerFrame  '
+               'canvasCalls: ${canvasSink.canvasCallCount}');
+           print('      textOps: ${p.textOpCount}  '
++              'culledText: ${p.culledTextCount}  '
+               'skippedText: ${p.skippedTextCount}');
+           print('      newLayouts=${measurer.layoutCount - layoutsBefore} '
+               'newParagraphEvictions='
+               '${measurer.paragraphEvictionCount - paragraphEvictionsBefore}');
+           print('      cache: layouts=${measurer.layoutCount} '
+               'paragraphEvictions=${measurer.paragraphEvictionCount} '
+               'metricsEvictions=${measurer.metricsEvictionCount} '
+               'liveParagraphs=${measurer.liveParagraphCount} '
+               'liveMetrics=${measurer.liveMetricsCount}');
+           print('      screen-space leaves: ${p.screenSpaceLeafCount}  '
+diff --git a/packages/jet_cad_2d_flutter/test/support/fixtures.dart b/packages/jet_cad_2d_flutter/test/support/fixtures.dart
+index a982b2d..72abcc9 100644
+--- a/packages/jet_cad_2d_flutter/test/support/fixtures.dart
++++ b/packages/jet_cad_2d_flutter/test/support/fixtures.dart
+@@ -152,36 +152,46 @@ void assertNoIdentityTransforms(DraftDocument doc) {
+   ]) {
+     final node = doc.tree[handle];
+     expect(node, isNotNull, reason: 'fixture node $handle went missing');
+     expect(node!.transform.isIdentity, isFalse,
+         reason: 'fixture rule: an identity transform hides ordering defects');
+   }
+ }
+ 
+ /// The one spelling every differential test uses, so a signature change lands
+ /// in one place.
+-List<DrawOp> paintToRecording(DraftDocument doc, [ViewportTransform? camera]) {
++///
++/// [minTextCapPixels] is steerable on **both** helpers, not just on the
++/// oracle: a matched on/off control arm needs the two sides driven to the same
++/// threshold on purpose, and a differential row that could only turn the
++/// painter's cull off would be comparing two different rules.
++List<DrawOp> paintToRecording(DraftDocument doc,
++    [ViewportTransform? camera, double minTextCapPixels = kMinTextCapPixels]) {
+   final index = SpatialIndex(doc);
+   final view = camera ?? ViewportTransform.fit(doc.extents, kViewport);
+   final sink = RecordingDrawSink();
+   DraftPainter(
+-          document: doc, index: index, resolver: DocumentStyleResolver(doc))
++          document: doc,
++          index: index,
++          resolver: DocumentStyleResolver(doc),
++          minTextCapPixels: minTextCapPixels)
+       .paint(sink, view, kViewport);
+   index.dispose();
+   return sink.ops;
+ }
+ 
+ List<DrawOp> referenceToRecording(DraftDocument doc,
+-    [ViewportTransform? camera]) {
++    [ViewportTransform? camera, double minTextCapPixels = kMinTextCapPixels]) {
+   final view = camera ?? ViewportTransform.fit(doc.extents, kViewport);
+   final sink = RecordingDrawSink();
+-  referenceWalk(doc, sink, view, kViewport, DocumentStyleResolver(doc));
++  referenceWalk(doc, sink, view, kViewport, DocumentStyleResolver(doc),
++      minTextCapPixels: minTextCapPixels);
+   return sink.ops;
+ }
+ 
+ /// A camera tight around the nested instance, so most of the document culls
+ /// away and the comparison is about what survives.
+ ViewportTransform cameraOverNestedInstance(DraftDocument doc) {
+   final node = doc.tree[const Handle(820)] as InstanceNode;
+   final centre = node.transform.transformPoint(Vector2(8, 3));
+   return ViewportTransform.fit(
+       Aabb2(Vector2(centre.x - 6, centre.y - 5),
+@@ -214,10 +224,137 @@ ViewportTransform cameraOverNestedInstance(DraftDocument doc) {
+ /// kept every entity.
+ ViewportTransform cameraOverDocumentCentre(DraftDocument doc) {
+   final e = doc.extents;
+   final cx = (e.minX + e.maxX) / 2;
+   final cy = (e.minY + e.maxY) / 2;
+   final w = (e.maxX - e.minX) / 8;
+   final h = (e.maxY - e.minY) / 8;
+   return ViewportTransform.fit(
+       Aabb2(Vector2(cx - w, cy - h), Vector2(cx + w, cy + h)), kViewport);
+ }
++
++/// Adds one text entity, which [addEntity] cannot: text carries `text`,
++/// `textStyle` and `textAttrs` on the record rather than in the payload.
++Handle addText(
++  DraftDocument doc,
++  Handle owner,
++  Handle handle,
++  String text,
++  double x,
++  double y,
++  double height,
++) {
++  doc.commands.execute(AddEntityCommand(
++    record: EntityRecord(
++      handle: handle,
++      owner: owner,
++      kind: EntityKind.text,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.byLayerLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: const ByLayerColor(),
++      lineweight: 25,
++      transparency: 0,
++      flags: 0,
++      text: text,
++      textStyle: ReservedHandles.standardTextStyle,
++      textAttrs: packTextAttrs(),
++    ),
++    payload: GeometryPayload(
++      coords: Float64List.fromList([x, y]),
++      // height, rotation, widthFactor, obliqueAngle.
++      scalars: Float64List.fromList([height, 0, 1, 0]),
++    ),
++  ));
++  return handle;
++}
++
++/// A drawing whose text straddles [kMinTextCapPixels] at the fitted camera,
++/// placed under a scaled and rotated instance well away from the origin.
++///
++/// Every property here is load-bearing. At the identity transform the painter's
++/// `chain` and the walk's `chain` are the same matrix by accident rather than
++/// by agreement, so a walk that read the painter's decision would pass. Away
++/// from the origin the rebase term differs between the two. And three heights
++/// straddling the threshold are what make the comparison about culling rather
++/// than about drawing.
++///
++/// **The heights are measured, not derived.** The arithmetic gets close — the
++/// root line spans 16,000 x 12,000 world units into [kViewport]'s 800 x 600 and
++/// `ViewportTransform.fit` keeps a 0.95 margin, so the fit is 0.0475 px per
++/// world unit; the instance scales by 0.35; so on-screen cap height is
++/// `height * 0.016625` and 3.0 px would fall at a height of about 180.5 — but
++/// the glyph boxes of the labels themselves could push `doc.extents` past that
++/// root line and move the fit again, so the numbers below were printed rather
++/// than trusted. Measured from `attrs.height * chain.scaleMagnitude` at this
++/// document's own fitted camera, and recorded in Task 6's report:
++///
++///   * `doc.extents` is exactly the root line, (0, 0)-(16000, 12000): every
++///     glyph box lands inside it, so the fit is the plain 0.0475 and the chain
++///     scale is 0.016625.
++///   * TINY, height 40, is **0.665 px** — 4.5x below the threshold. Culled.
++///   * NEAR, height 170, is **2.826 px** — 5.8% below it. Culled.
++///   * EDGE, height 191, is **3.175 px** — 5.8% above it. Drawn.
++///   * LARGE, height 800, is **13.30 px** — 4.4x above it. Drawn.
++///
++/// So two of the four cull, which is what makes the differential row
++/// non-vacuous. NEAR and EDGE sit near the boundary but not *on* it on
++/// purpose: the painter and the walk each multiply their own `chain`, and a
++/// height landing within a few ulps of 3.0 could have the two round to
++/// opposite sides of `<` and go flaky. 0.175 px of slack is enormous next to
++/// that and still small next to the threshold.
++///
++/// **Four labels, not three, and NEAR is the fourth.** With only TINY, EDGE
++/// and LARGE, a walk that used `camera.scale` in place of
++/// `chain.scaleMagnitude` — forgetting the instance's own 0.35 — survived:
++/// 1.9, 9.07 and 38.0 px fall on the same sides of 3.0 as 0.665, 3.175 and
++/// 13.30 do, so the mutant culled exactly the same label and the row stayed
++/// green. NEAR is the height that separates them: 2.826 px through the full
++/// chain, 8.075 px through the camera alone, so the mutant draws what the
++/// painter culls and the comparison reddens. See Task 6's report for the
++/// transcript.
++///
++/// If a change here stops them straddling 3.0, **the heights move, never
++/// [kMinTextCapPixels]** — a fixture tuned by moving the threshold tests
++/// nothing.
++DraftDocument textLodDifferentialDocument(TextMeasurer measurer) {
++  final doc = DraftDocument.empty(measurer: measurer);
++
++  // The drawing's real extent, so the camera fit is decided by this and not by
++  // whichever glyph box happens to be widest.
++  addEntity(doc, doc.rootHandle, const Handle(890), EntityKind.line,
++      [0, 0, 16000, 12000], const []);
++
++  const labels = Handle(900);
++  // Not `const`: `Vector2.zero()` is not a const constructor, which is why
++  // `differentialFixture` spells it this way too.
++  doc.tree.addDefinition(Definition(
++      handle: labels,
++      name: 'labels',
++      basePoint: Vector2.zero(),
++      children: const []));
++
++  // Definition-local coordinates, so nothing here is at the world origin once
++  // the instance places it.
++  addText(doc, labels, const Handle(901), 'TINY', 0, 0, 40);
++  addText(doc, labels, const Handle(902), 'NEAR', 0, 900, 170);
++  addText(doc, labels, const Handle(903), 'EDGE', 0, 1600, 191);
++  addText(doc, labels, const Handle(904), 'LARGE', 0, 2400, 800);
++
++  // Rotated, uniformly scaled, and far from the origin. Uniform scale keeps
++  // `scaleMagnitude` exactly 0.35 so the arithmetic above is checkable; the
++  // rotation and the translation are what make the painter's and the walk's
++  // routes to `chain` genuinely different rather than accidentally equal.
++  doc.commands.execute(AddNodeCommand(InstanceNode(
++    handle: const Handle(910),
++    parent: doc.rootHandle,
++    transform: Transform2.translation(12000, 9000)
++        .multiply(Transform2.rotation(0.4))
++        .multiply(Transform2.scale(0.35, 0.35)),
++    definition: labels,
++    layer: ReservedHandles.layerZero,
++    color: const IndexedColor(3),
++  )));
++
++  return doc;
++}
+diff --git a/packages/jet_cad_2d_flutter/test/text_lod_test.dart b/packages/jet_cad_2d_flutter/test/text_lod_test.dart
+index 9743340..1f9aa3a 100644
+--- a/packages/jet_cad_2d_flutter/test/text_lod_test.dart
++++ b/packages/jet_cad_2d_flutter/test/text_lod_test.dart
+@@ -5,20 +5,23 @@
+ // this directory has these lines — see `text_paint_test.dart` and
+ // `draft_canvas_test.dart`.
+ import 'dart:typed_data';
+ import 'dart:ui' show Size;
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
++import 'support/differential.dart';
++import 'support/fixtures.dart';
++
+ /// One text entity of [height] world units at the world origin, and nothing
+ /// else, so the camera fit is decided by [world] rather than by the glyph box.
+ DraftDocument _doc(double height, Aabb2 world, FlutterTextMeasurer m) {
+   final doc = DraftDocument.empty(measurer: m);
+   doc.commands.execute(AddEntityCommand(
+     record: EntityRecord(
+       handle: doc.handleSeed.next(),
+       owner: doc.rootHandle,
+       kind: EntityKind.text,
+       layer: ReservedHandles.layerZero,
+@@ -220,11 +223,68 @@ void main() {
+     // identical wrong answers still compare equal. That mutation *did*
+     // redden three of this file's other tests — the collapsed box drops the
+     // leaf out of the spatial index's query window, so `culledTextCount`
+     // reads 0 instead of 1 — which is the real, if incidental, guard against
+     // it; see Task 5's report for the transcript.
+     expect(withTextCulled.min.x, withTextDrawn.min.x);
+     expect(withTextCulled.min.y, withTextDrawn.min.y);
+     expect(withTextCulled.max.x, withTextDrawn.max.x);
+     expect(withTextCulled.max.y, withTextDrawn.max.y);
+   });
++
++  test('painter and oracle cull the same text under a non-identity placement',
++      () {
++    // Deliberately not at the identity and not at the origin: the painter and
++    // the walk reach `chain` by different routes, and a fixture at the identity
++    // transform cannot tell a shared decision from two agreeing ones.
++    final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
++    final doc = textLodDifferentialDocument(m);
++    final world = doc.extents;
++    final view = ViewportTransform.fit(world, kViewport);
++
++    // Compared through `flatten`, not op for op. The two sides reach the same
++    // picture by different arithmetic routes — the painter hands the sink
++    // screen-space points under a translation-only residual where the walk
++    // hands it local points under the full one — so a raw `DrawOp` comparison
++    // reports the fixture's own root line as a difference and never gets as
++    // far as the text. `flatten` applies each residual to the geometry drawn
++    // under it, which is the comparison every other differential row in this
++    // package makes.
++    final painted = flatten(paintToRecording(doc, view));
++    final walked = flatten(referenceToRecording(doc, view));
++
++    expect(painted.length, walked.length);
++    for (var i = 0; i < painted.length; i++) {
++      expect(painted[i].matches(walked[i]), isTrue,
++          reason: 'item $i: painter ${painted[i]} vs walk ${walked[i]}');
++    }
++    // Both sides drew the two readable labels and neither drew the two that
++    // fall under the threshold. Named rather than counted, so a cull that took
++    // the wrong pair away would still be caught.
++    expect(painted.map((i) => i.kind).toList(),
++        containsAll(<String>['text:EDGE', 'text:LARGE']));
++    for (final culled in const ['text:TINY', 'text:NEAR']) {
++      expect(painted.map((i) => i.kind), isNot(contains(culled)));
++      expect(walked.map((i) => i.kind), isNot(contains(culled)));
++    }
++
++    // Non-vacuity: if nothing were culled this would pass with LOD deleted.
++    // The threshold is the third *positional* argument — `camera` is already
++    // optional-positional on both helpers, and Dart does not let one signature
++    // carry optional-positional and named parameters at once.
++    final all = flatten(paintToRecording(doc, view, 0.0));
++    expect(all.length, greaterThan(painted.length));
++    // And by exactly two items, which are the labels the fixture's measured
++    // cap heights — 0.665, 2.826, 3.175 and 13.30 px against the 3.0 threshold
++    // — say are the ones under it. `greaterThan` alone would still pass if the
++    // cull had swallowed three of the four, or all of them.
++    expect(all.length - painted.length, 2);
++    expect(all.map((i) => i.kind),
++        containsAll(<String>['text:TINY', 'text:NEAR']));
++    // The matched control arm, which is why the threshold is steerable on
++    // *both* helpers and not just on the oracle: at 0.0 the walk draws the
++    // same complete set the painter does, so the on-arm's agreement above is a
++    // statement about the cull and not about what the two can draw at all.
++    expect(flatten(referenceToRecording(doc, view, 0.0)).length, all.length);
++  });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/text_paint_test.dart b/packages/jet_cad_2d_flutter/test/text_paint_test.dart
+index 3a0e49c..3aabac4 100644
+--- a/packages/jet_cad_2d_flutter/test/text_paint_test.dart
++++ b/packages/jet_cad_2d_flutter/test/text_paint_test.dart
+@@ -243,31 +243,42 @@ void main() {
+     final mirrored = detOf(true);
+     expect(plain, lessThan(0));
+     expect(mirrored, greaterThan(0));
+   });
+ 
+   test('the reference walk and the painter agree with text on', () {
+     // The differential oracle over a corpus that actually contains text, at
+     // both cameras: the working set, where culling decides most of the
+     // answer, and the whole drawing, where it decides none of it.
+     final doc = _textCorpus(2000);
+-    expectPainterSupersetOfReference(
+-        paintToRecording(doc, ViewportTransform.fit(doc.extents, kViewport)),
+-        referenceToRecording(
+-            doc, ViewportTransform.fit(doc.extents, kViewport)),
+-        kViewport);
++    final whole = ViewportTransform.fit(doc.extents, kViewport);
++    expectPainterSupersetOfReference(paintToRecording(doc, whole),
++        referenceToRecording(doc, whole), kViewport);
+     // The cropping camera is the one that exercises culling at all, and the
+     // one whose edge the two walks read differently — see [slack].
+     final cropped = cameraOverDocumentCentre(doc);
+     expectPainterSupersetOfReference(paintToRecording(doc, cropped),
+         referenceToRecording(doc, cropped), kViewport,
+         edgeBandPx: 4.0);
++
++    // A third arm, with level of detail off on **both** sides.
++    //
++    // The two rows above are the interesting ones — at 3.0 px the painter and
++    // the walk each cull 116 of this corpus's 141 text entities off their own
++    // arithmetic, and their agreeing on *which* 116 is a real claim. But they
++    // are also thin: 25 text ops survive, the smallest at 3.06 px, a 2%
++    // margin over the threshold. A later `kMinTextCapPixels` of 3.3 would
++    // leave this row comparing a drawing with no text in it and still green.
++    // This arm is the one that cannot be emptied that way: at 0.0 every text
++    // entity the camera sees is drawn by both sides and compared.
++    expectPainterSupersetOfReference(paintToRecording(doc, whole, 0.0),
++        referenceToRecording(doc, whole, 0.0), kViewport);
+   });
+ 
+   test('a text entity is drawn through its own style, not through STANDARD',
+       () {
+     // Ruling 13's failure class, back in a new task: with every fixture on
+     // STANDARD, `document.textStyleOf(entity.textStyle)` and a hard-coded
+     // `textStyleOf(standardTextStyle)` are the same expression, and the
+     // second passes the whole suite. This is the fixture that separates them.
+     //
+     // The three fields are chosen so each one has to travel: `fixedHeight`
+@@ -317,49 +328,65 @@ void main() {
+         reference.whereType<TextOp>().map((op) => op.text).toList(), ['STAIR']);
+     expectPainterSupersetOfReference(
+         paintToRecording(doc, camera), reference, kViewport);
+   });
+ 
+   test('the text corpus is not vacuous', () {
+     // A superset assertion passes trivially against a reference that drew no
+     // text at all, which is exactly what the previous shape of the walk did.
+     final doc = _textCorpus(2000);
+     final camera = ViewportTransform.fit(doc.extents, kViewport);
+-    final reference = referenceToRecording(doc, camera);
++    // Level of detail off, explicitly. At the default 3.0 the walk culls 116
++    // of this corpus's 141 text entities and this guard would be asserting
++    // `25 > 20` — five ops of margin on the one test whose job is to prove the
++    // corpus is not empty. Off, it counts what the corpus actually carries.
++    final reference = referenceToRecording(doc, camera, 0.0);
+     final texts = reference.whereType<TextOp>().toList();
+     expect(texts.length, greaterThan(20));
+     expect(texts.map((op) => op.text).toSet().length, greaterThan(1));
++    // And the culled figure is still not zero, so the row above it is not
++    // comparing a text-free drawing either.
++    expect(referenceToRecording(doc, camera).whereType<TextOp>(), isNotEmpty);
+   });
+ 
+   test(
+       'drawText: false drops the text ops and leaves the rest of the frame '
+       'byte-identical', () {
+     // The flag is measurement-only and its `false` branch has no other
+     // caller, which is exactly the shape of thing this project keeps shipping
+     // untested: flipping the default turns half the suite red, and deleting
+     // the branch turns nothing red at all. Task 12's whole on/off delta rests
+     // on the claim that one branch is all that moves, so the claim is an
+     // assertion.
+     final doc = _textCorpus(2000);
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+     final resolver = DocumentStyleResolver(doc);
+     final camera = ViewportTransform.fit(doc.extents, kViewport);
+ 
++    // Both painters run with level of detail off, explicitly and identically.
++    // At the default 3.0 this corpus draws 25 text ops against a
++    // `greaterThan(20)` below, which is five ops of margin; and the two
++    // painters must cull the same set or the geometry comparison at the end
++    // would be reading a cull difference as a `drawText` difference.
+     final withText = RecordingDrawSink();
+-    final painter =
+-        DraftPainter(document: doc, index: index, resolver: resolver);
++    final painter = DraftPainter(
++        document: doc, index: index, resolver: resolver, minTextCapPixels: 0.0);
+     painter.paint(withText, camera, kViewport);
+ 
+     final without = RecordingDrawSink();
+     final textless = DraftPainter(
+-        document: doc, index: index, resolver: resolver, drawText: false);
++        document: doc,
++        index: index,
++        resolver: resolver,
++        drawText: false,
++        minTextCapPixels: 0.0);
+     textless.paint(without, camera, kViewport);
+ 
+     // Non-degenerate: a corpus with no drawn text would pass this whichever
+     // way the branch went.
+     expect(painter.textOpCount, greaterThan(20));
+     expect(withText.ops.whereType<TextOp>(), isNotEmpty);
+ 
+     expect(textless.textOpCount, 0);
+     expect(without.ops.whereType<TextOp>(), isEmpty);
+ 

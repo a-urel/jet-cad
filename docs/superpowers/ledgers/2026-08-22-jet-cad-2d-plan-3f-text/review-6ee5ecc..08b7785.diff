@@ -1,0 +1,293 @@
+# Review package: 6ee5ecc3a238ea0d532e93c7615b58430b6d0299..08b778515e120fbaa56995a9d328b7124f1cb1e6
+
+## Commits
+08b7785 refactor: report paragraph and metrics evictions apart
+
+## Files changed
+ .../integration_test/frame_timing_test.dart        | 12 ++++--
+ apps/dev_harness_2d/lib/measurement_rig.dart       | 19 ++++++---
+ .../test/rig/paint_microbench_test.dart            | 46 ++++++++++------------
+ 3 files changed, 42 insertions(+), 35 deletions(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/integration_test/frame_timing_test.dart b/apps/dev_harness_2d/integration_test/frame_timing_test.dart
+index d08395f..5cc11e2 100644
+--- a/apps/dev_harness_2d/integration_test/frame_timing_test.dart
++++ b/apps/dev_harness_2d/integration_test/frame_timing_test.dart
+@@ -255,37 +255,39 @@ void main() {
+     // and nothing has changed since the last real frame. panBy(Offset.zero)
+     // is a numeric no-op but still assigns a fresh ViewportTransform
+     // (Transform2 and ViewportTransform both deliberately have no
+     // operator==, so ValueNotifier's reference check always sees a
+     // "change"), which fires the listener and forces the one real repaint
+     // that makes resetCounters() meaningful. A running total beside two
+     // per-frame figures is a wrong comparison waiting to be published.
+     app.sink.resetCounters();
+     app.vertices?.resetCounters();
+     final layoutsBefore = app.sink.measurer.layoutCount;
+-    final evictionsBefore = app.sink.measurer.evictionCount;
++    final paragraphEvictionsBefore = app.sink.measurer.paragraphEvictionCount;
++    final metricsEvictionsBefore = app.sink.measurer.metricsEvictionCount;
+     app.camera.panBy(Offset.zero);
+     await tester.pump(const Duration(milliseconds: 16));
+     report('R4a ($kEntities)', timings);
+     print('  command ${clock.summary}');
+     print('  overlay=${app.index.rootIndex.dirty.length} '
+         'threshold=${app.index.rootIndex.rebuildThreshold} '
+         'rebuilds=${app.index.rebuildCount - rebuildsBefore} '
+         'handles burned=${app.doc.handleSeed.current.value - handlesBefore}');
+     requireRepaint(app.sink, app.vertices);
+     printInvariants(app.painter, app.sink);
+     printBackend(app.resolvedBackend, app.vertices);
+     printTextCounters(app.painter, app.sink,
+         textCorpus: kTextCorpus,
+         drawText: kDrawText,
+         layoutsBefore: layoutsBefore,
+-        evictionsBefore: evictionsBefore);
++        paragraphEvictionsBefore: paragraphEvictionsBefore,
++        metricsEvictionsBefore: metricsEvictionsBefore);
+   });
+ 
+   testWidgets('R4b instance drag per frame', (tester) async {
+     if (!runs('instance')) return;
+     refuseDebugMode();
+     final app = await boot(tester);
+     final timings = <FrameTiming>[];
+     binding.addTimingsCallback(timings.addAll);
+ 
+     // `TransformNodeCommand` touches a node handle, which the index classifies
+@@ -313,26 +315,28 @@ void main() {
+     // and nothing has changed since the last real frame. panBy(Offset.zero)
+     // is a numeric no-op but still assigns a fresh ViewportTransform
+     // (Transform2 and ViewportTransform both deliberately have no
+     // operator==, so ValueNotifier's reference check always sees a
+     // "change"), which fires the listener and forces the one real repaint
+     // that makes resetCounters() meaningful. A running total beside two
+     // per-frame figures is a wrong comparison waiting to be published.
+     app.sink.resetCounters();
+     app.vertices?.resetCounters();
+     final layoutsBefore = app.sink.measurer.layoutCount;
+-    final evictionsBefore = app.sink.measurer.evictionCount;
++    final paragraphEvictionsBefore = app.sink.measurer.paragraphEvictionCount;
++    final metricsEvictionsBefore = app.sink.measurer.metricsEvictionCount;
+     app.camera.panBy(Offset.zero);
+     await tester.pump(const Duration(milliseconds: 16));
+     report('R4b ($kEntities)', timings);
+     print('  command ${clock.summary}');
+     print('  rebuilds=${app.index.rebuildCount - before} over $kSteps frames');
+     requireRepaint(app.sink, app.vertices);
+     printInvariants(app.painter, app.sink);
+     printBackend(app.resolvedBackend, app.vertices);
+     printTextCounters(app.painter, app.sink,
+         textCorpus: kTextCorpus,
+         drawText: kDrawText,
+         layoutsBefore: layoutsBefore,
+-        evictionsBefore: evictionsBefore);
++        paragraphEvictionsBefore: paragraphEvictionsBefore,
++        metricsEvictionsBefore: metricsEvictionsBefore);
+   });
+ }
+diff --git a/apps/dev_harness_2d/lib/measurement_rig.dart b/apps/dev_harness_2d/lib/measurement_rig.dart
+index 8e104aa..eb0a607 100644
+--- a/apps/dev_harness_2d/lib/measurement_rig.dart
++++ b/apps/dev_harness_2d/lib/measurement_rig.dart
+@@ -139,30 +139,35 @@ void printBackend(RenderBackend backend, VerticesDrawSink? vertices) {
+ /// repaint the dash counters come from, so all of them describe one frame.
+ ///
+ /// `layouts` and `evictions` are running totals since the sink was built; the
+ /// per-frame figures are the deltas the caller passes in. A running total
+ /// printed beside two per-frame figures is the wrong comparison this file
+ /// already refuses to publish once.
+ void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
+     {required bool textCorpus,
+     required bool drawText,
+     required int layoutsBefore,
+-    required int evictionsBefore}) {
++    required int paragraphEvictionsBefore,
++    required int metricsEvictionsBefore}) {
+   final m = sink.measurer;
+   print('  text: corpus=${textCorpus ? "on" : "off"} '
+       'draw=${drawText ? "on" : "off"} '
+       'textOps=${painter.textOpCount} '
+       'skippedText=${painter.skippedTextCount}');
++  // Two eviction numbers, not one. A paragraph eviction released native glyph
++  // memory and guarantees a future re-layout; a metrics eviction dropped four
++  // doubles. Ruling 54: a blended number hides which half moved.
+   print('  paragraphs: newLayouts=${m.layoutCount - layoutsBefore} '
+-      'newEvictions=${m.evictionCount - evictionsBefore} '
+-      'live=${m.liveParagraphCount} '
+-      '(totals layouts=${m.layoutCount} evictions=${m.evictionCount})');
++      'newParagraphEvictions=${m.paragraphEvictionCount - paragraphEvictionsBefore} '
++      'newMetricsEvictions=${m.metricsEvictionCount - metricsEvictionsBefore} '
++      'liveParagraphs=${m.liveParagraphCount} '
++      'liveMetrics=${m.liveMetricsCount}');
+ }
+ 
+ /// R2: 120 frames of pan, then 120 of zoom across three scale bands, then one
+ /// forced repaint whose counters are the ones printed.
+ ///
+ /// [pumpFrame] renders exactly one frame and completes after it —
+ /// `() => tester.pump(const Duration(milliseconds: 16))` in a widget test,
+ /// `() => SchedulerBinding.instance.endOfFrame` in a running app. [settle]
+ /// is the equivalent gap between `tester.pumpAndSettle()` (pump until
+ /// nothing is scheduled, or a timeout) and a running app's own approximation
+@@ -208,27 +213,29 @@ Future<void> runR2Rig({
+     // and nothing has changed since the last real frame. panBy(Offset.zero)
+     // is a numeric no-op but still assigns a fresh ViewportTransform
+     // (Transform2 and ViewportTransform both deliberately have no
+     // operator==, so ValueNotifier's reference check always sees a
+     // "change"), which fires the listener and forces the one real repaint
+     // that makes resetCounters() meaningful. A running total beside two
+     // per-frame figures is a wrong comparison waiting to be published.
+     sink.resetCounters();
+     vertices?.resetCounters();
+     final layoutsBefore = sink.measurer.layoutCount;
+-    final evictionsBefore = sink.measurer.evictionCount;
++    final paragraphEvictionsBefore = sink.measurer.paragraphEvictionCount;
++    final metricsEvictionsBefore = sink.measurer.metricsEvictionCount;
+     camera.panBy(Offset.zero);
+     await pumpFrame();
+     report('R2 ($entities)', timings);
+     print('  lineweightScale=$lineweightScale');
+     requireRepaint(sink, vertices);
+     printInvariants(painter, sink);
+     printBackend(resolvedBackend, vertices);
+     printTextCounters(painter, sink,
+         textCorpus: textCorpus,
+         drawText: drawText,
+         layoutsBefore: layoutsBefore,
+-        evictionsBefore: evictionsBefore);
++        paragraphEvictionsBefore: paragraphEvictionsBefore,
++        metricsEvictionsBefore: metricsEvictionsBefore);
+   } finally {
+     SchedulerBinding.instance.removeTimingsCallback(collect);
+   }
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart b/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
+index 09eef16..4fa6bce 100644
+--- a/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
++++ b/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
+@@ -142,32 +142,30 @@ void main() {
+   //
+   // `kParagraphCacheLimit` bounds the paragraph cache at 512 entries. The
+   // zero-new-layouts gate row says a steady-state frame lays nothing out; that
+   // is reachable only if the number of **distinct `(string, styleHandle, argb)`
+   // triples visible at the working-set camera** fits under the limit. Above it
+   // the cache evicts an entry the same frame asks for again, and the row is
+   // unpassable no matter what the painter does. So this rig prints that count
+   // before it prints anything else.
+   for (final entityCount in [50000, 500000]) {
+     test('text paint at $entityCount', () {
+-      // Two measurers, because production has two. `DraftCanvas` builds its own
+-      // `FlutterTextMeasurer` for the sink and never touches
+-      // `document.textMeasurer`, which is what the painter reads metrics from —
+-      // so draw-colour paragraphs and metrics probes land in *different* caches,
+-      // and only the sink's is the one `kParagraphCacheLimit` is about. Sharing
+-      // one here would inflate the count with probe entries the real wiring
+-      // keeps somewhere else.
+-      final sinkMeasurer = FlutterTextMeasurer();
+-      final docMeasurer = FlutterTextMeasurer();
++      // One measurer, because production has one. The document owns it and
++      // `DraftCanvas` borrows it for the sink, so the painter's metrics
++      // requests and the sink's drawn paragraphs land in the same object —
++      // metrics in its colour-free map, paragraphs in its coloured one. Before
++      // Plan 3f these were two `FlutterTextMeasurer`s with two caches, and this
++      // rig built two to match; that wiring is gone.
++      final measurer = FlutterTextMeasurer();
+ 
+       final build = Stopwatch()..start();
+-      final doc = textRigCorpus(entityCount, measurer: docMeasurer);
++      final doc = textRigCorpus(entityCount, measurer: measurer);
+       final docMs = build.elapsedMilliseconds;
+       final index = SpatialIndex(doc);
+       final indexMs = build.elapsedMilliseconds - docMs;
+       final resolver = DocumentStyleResolver(doc);
+ 
+       final painter =
+           DraftPainter(document: doc, index: index, resolver: resolver);
+       final textless = DraftPainter(
+           document: doc, index: index, resolver: resolver, drawText: false);
+ 
+@@ -247,69 +245,67 @@ void main() {
+         if (attrOps > 0 && attrKeys != attrOps) {
+           throw StateError('an attribute tag repeated: $attrOps draws over '
+               '$attrKeys keys — every generated tag carries its own instance '
+               'ordinal, so the classifier has mixed the two sources');
+         }
+ 
+         for (final (mode, p) in [
+           ('text on', painter),
+           ('text off', textless)
+         ]) {
+-          sinkMeasurer.resetCounters();
+-          docMeasurer.resetCounters();
++          measurer.resetCounters();
+           final paint = measure(() {
+             final recorder = PictureRecorder();
+             p.paint(
+                 CanvasDrawSink(
+                     canvas: Canvas(recorder),
+                     pixelsPerPaperMm: kLogicalPixelsPerMm,
+-                    measurer: sinkMeasurer,
++                    measurer: measurer,
+                     textStyleOf: doc.textStyleOf),
+                 camera,
+                 kRigViewport);
+             recorder.endRecording().dispose();
+           });
+ 
+           final sink = NullDrawSink();
+           final before = sink.opCount;
+           final query = measure(() => p.paint(sink, camera, kRigViewport));
+           final opsPerFrame = (sink.opCount - before) ~/ (query.n + 20);
+ 
+           // The counters below come from this one untimed frame, so they
+           // describe a frame rather than an average over two different sinks.
+           final canvasRecorder = PictureRecorder();
+           final canvasSink = CanvasDrawSink(
+               canvas: Canvas(canvasRecorder),
+               pixelsPerPaperMm: kLogicalPixelsPerMm,
+-              measurer: sinkMeasurer,
++              measurer: measurer,
+               textStyleOf: doc.textStyleOf);
+-          final layoutsBefore = sinkMeasurer.layoutCount;
+-          final evictionsBefore = sinkMeasurer.evictionCount;
++          final layoutsBefore = measurer.layoutCount;
++          final paragraphEvictionsBefore = measurer.paragraphEvictionCount;
+           p.paint(canvasSink, camera, kRigViewport);
+           canvasRecorder.endRecording().dispose();
+ 
+           print('    [$mode]');
+           print('      R1 paint          $paint');
+           print('      R3 query-only     $query');
+           print('      ops/frame: $opsPerFrame  '
+               'canvasCalls: ${canvasSink.canvasCallCount}');
+           print('      textOps: ${p.textOpCount}  '
+               'skippedText: ${p.skippedTextCount}');
+-          print('      steady-state frame: '
+-              'newLayouts=${sinkMeasurer.layoutCount - layoutsBefore} '
+-              'newEvictions=${sinkMeasurer.evictionCount - evictionsBefore}');
+-          print('      sink cache: layouts=${sinkMeasurer.layoutCount} '
+-              'evictions=${sinkMeasurer.evictionCount} '
+-              'live=${sinkMeasurer.liveParagraphCount}');
+-          print('      doc cache:  layouts=${docMeasurer.layoutCount} '
+-              'evictions=${docMeasurer.evictionCount} '
+-              'live=${docMeasurer.liveParagraphCount}');
++          print('      newLayouts=${measurer.layoutCount - layoutsBefore} '
++              'newParagraphEvictions='
++              '${measurer.paragraphEvictionCount - paragraphEvictionsBefore}');
++          print('      cache: layouts=${measurer.layoutCount} '
++              'paragraphEvictions=${measurer.paragraphEvictionCount} '
++              'metricsEvictions=${measurer.metricsEvictionCount} '
++              'liveParagraphs=${measurer.liveParagraphCount} '
++              'liveMetrics=${measurer.liveMetricsCount}');
+           print('      screen-space leaves: ${p.screenSpaceLeafCount}  '
+               'dashSpans: ${p.dashSpanCount}  '
+               'collapsed: ${p.collapsedDashCount}');
+         }
+       }
+ 
+       // How much slack the working-set number has.
+       //
+       // "Under the limit" is not the same as "under the limit with room". The
+       // working-set camera sees a few square kilometres of a drawing whose text

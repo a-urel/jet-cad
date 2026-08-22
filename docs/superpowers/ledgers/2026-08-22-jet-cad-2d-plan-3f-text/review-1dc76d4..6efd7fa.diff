@@ -1,0 +1,1914 @@
+# Review package: 1dc76d43e4dee0e8b5ced86026c2ad0e65061dfe..6efd7fa7b1fcf315f9aabe489378560f0c5b9685
+
+## Commits
+6efd7fa docs: STATUS.md carries Plan 3f's finished account
+d113d2d docs: Plan 3f results — 11 of 13, and the two that miss
+8f45e82 docs: Plan 3f's mutation log — fifteen mutants, one restatement
+2c6bdaa test: run exit-gate row 10 at corpus scale, and record that it has no teeth
+645b027 test: close gate row 7, and kill the mutant that survived its own suite
+
+## Files changed
+ STATUS.md                                          | 206 ++++-
+ .../notes/2026-08-22-plan-3f-results.md            | 408 ++++++++++
+ docs/superpowers/notes/plan-3f-mutation-log.md     | 852 +++++++++++++++++++++
+ .../test/flutter_text_measurer_test.dart           |  29 +
+ .../test/rig/paint_microbench_test.dart            |  86 +++
+ .../jet_cad_2d_flutter/test/text_lod_test.dart     |  58 ++
+ 6 files changed, 1611 insertions(+), 28 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 78aab9f..6df474f 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,65 +1,81 @@
+ # jet-cad — project status
+ 
+-**Last updated:** 2026-08-22
+-**Verified against:** `main` at `8fad846`, pushed, working tree clean apart from
+-the three files the traps below say never to commit.
++**Last updated:** 2026-08-23
++**Verified against:** `main` at `d113d2d`, **not yet pushed**, working tree
++clean apart from the three files the traps below say never to commit.
+ Every suite count below was produced by running the suite on the **merged**
+ result, not by reading a report and not on the branch before it landed.
+ 
+ ---
+ 
+ ## TL;DR — where you left off
+ 
++**Plan 3f (text wiring and level of detail) is done, nine tasks, worked
++directly on `main`, nothing in flight.** **Its exit gate is 11 of 13 — and the
++two that miss are recorded as missing, not tuned away.** See
++[Plan 3f](#plan-3f--text-wiring-and-level-of-detail) and
++[Resume here](#resume-here).
++
++Results note:
++[docs/superpowers/notes/2026-08-22-plan-3f-results.md](docs/superpowers/notes/2026-08-22-plan-3f-results.md).
++Mutation log:
++[docs/superpowers/notes/plan-3f-mutation-log.md](docs/superpowers/notes/plan-3f-mutation-log.md) —
++fifteen named mutants, 14 killed, 1 restatement, 1 mutation recorded as
++unmeasurable with its reason.
++
+ **Plan 3e (fills) is done, seventeen tasks, worked directly on `main`** — see
+ [Plan 3e](#plan-3e--fills) and [Resume here](#resume-here). Six of its nine
+ failable criteria pass outright; one is a device timing row measured under
+ macOS Low Power Mode and left explicitly unevaluable rather than scored; one
+ (the translucent seam) is settled only for the routing rule and left open on
+ Impeller/GPU, on the reviewer's own instruction not to write "no seam was
+ found." No criterion failed.
+ 
+ Results note:
+ [docs/superpowers/notes/2026-08-22-plan-3e-results.md](docs/superpowers/notes/2026-08-22-plan-3e-results.md).
+ Mutation log:
+ [docs/superpowers/notes/plan-3e-mutation-log.md](docs/superpowers/notes/plan-3e-mutation-log.md) —
+ 56 mutants accounted for, 52 killed, 2 proven equivalent, 2 documented gaps.
+ 
+ **Plan 3d (the vertices sink) is merged into `main`** — fifteen tasks,
+ executed, reviewed and committed, then merged locally with `--no-ff`. **Its exit gate is 8 of 8** — criterion 7 stayed open until the human approved
+ the `CLAUDE.md` allocation amendment on 2026-08-21, which the plan was forbidden
+ from granting itself. See
+ [Plan 3d](#plan-3d--the-vertices-sink-is-the-default-everywhere).
+ 
+-Nothing is in flight. The `spike/vertices-sink` branch and its worktree are
+-gone; the ledger is archived at
++Nothing is in flight. Plan 3f had no worktree either — the human gave explicit
++consent to work `main` directly, as for 3e — so **its ledger must be archived
++onto `main` before the `.superpowers/sdd/` directory is cleared**, the same
++ordering 3e's archive records as the lesson. The `spike/vertices-sink` branch
++and its worktree are gone; the ledger is archived at
+ [docs/superpowers/ledgers/](docs/superpowers/ledgers/), beside Plan 3c's.
+ Plan 3e's own ledger was archived the same way at `8fad846`, since that plan had
+ no worktree of its own: 64 files at
+ [docs/superpowers/ledgers/2026-08-21-jet-cad-2d-plan-3e-fills/](docs/superpowers/ledgers/2026-08-21-jet-cad-2d-plan-3e-fills/).
+ **The ordering is the lesson: archive the ledger onto the branch before the
+ workspace is deleted, never after.**
+ 
+ **Since Plan 3d's merge, on `main` at `70d824e..0eac1be`: two of Plan 3d's
+ three remaining open items are closed**, and one thing that note recorded
+ turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open)
+ — one item remains and cannot be closed here.
+ 
+ Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
+ 
+-| Suite | State (on `main`, run against the merged result) |
++| Suite | State (on `main` at `d113d2d`, run, not read off a report) |
+ |---|---|
+ | `packages/jet_cad_2d` — engine | **777 tests, all pass**, analyze/format clean |
+-| `packages/jet_cad_2d_flutter` — widgets | **277 tests pass, 1 skipped**, analyze/format clean |
+-| `flutter test --tags golden` | **29 pass**, 34 PNGs (17 fixtures × 2 backends, 3 of them fills); no pre-existing PNG regenerated |
++| `packages/jet_cad_2d_flutter` — widgets | **299 tests pass, 1 skipped**, analyze/format clean |
++| `flutter test --tags golden` | **35 pass**, 40 PNGs (20 fixtures × 2 backends, 3 fills and 3 text-LOD rungs); no pre-existing PNG regenerated |
+ | `apps/dev_harness_2d` | analyze/format clean |
+-| `benchmark/query_throughput.dart` | one gated row fails — `snap at dirty threshold`, **carried from Plan 2**, not a regression |
++| `benchmark/query_throughput.dart` | **GATE: PASS** — every gated row under its threshold on 2026-08-23, `snap at dirty threshold` included (p50 0.552 ms against 1.0 ms). That row is Plan 2's carried failure and it is a **timing on a shared machine**: recorded as passing today, not declared fixed |
+ 
+ The widget suite's one skip is `test/rig/paint_microbench_test.dart`, skipped at
+ suite level by the `rig` tag in `dart_test.yaml` — pre-existing and by design.
+ 
+ **Plan 3c's exit gate: PASS.** All eight of its failable criteria were met —
+ zero new paragraph layouts and zero evictions in the steady-state frame at both
+ entity counts and on real hardware, `skippedTextCount` 0, peak live paragraphs
+ exactly at the declared limit, and 53 mutants accounted for. The one benchmark
+ failure is Plan 2's carried `snap at dirty threshold`.
+ 
+@@ -319,20 +335,44 @@ So the paragraph cache key carries no height, angle or width factor. It is
+ | 12 | Rigs, counters, the number the gate depends on | ⬜ not started |
+ | 13 | Mutation testing | ⬜ not started |
+ | 14 | Exit gate and the results note | ⬜ not started |
+ 
+ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
+ 
+ ---
+ 
+ ## Resume here
+ 
++**Plan 3f (text wiring and level of detail) is done, worked directly on
++`main`, nothing in flight. Its exit gate is 11 of 13.** Everything below about
++3e is still true and still worth reading; this is what changed on top of it.
++
++**One thing is waiting on a human and nothing else in 3f is.** Rows 1 and 2 of
++3f's gate miss: at the shipped `kMinTextCapPixels = 3.0` the whole-drawing
++camera needs **3,876 distinct paragraph keys in one frame** against a
++512-entry cache, so a repeated identical frame relays out all 3,876 and evicts
++3,876. **Ruling 4's single permitted `kParagraphCacheLimit` raise is now
++available** — the ruling wanted a measured distinct-visible-key count recorded
++beside any raise, and 3,876 is it. **The plan deliberately did not spend it**,
++because it can only be spent once and 3g may want it, and because holding
++3,876 live native `ui.Paragraph` objects in a frame is a memory cost nobody
++has measured. Raising the *threshold* instead makes both rows comply and was
++refused on principle: 3.0 is a readability number, 6.0 would be a
++gate-passing number. **The decision is written up as an option in
++[the 3f results note](docs/superpowers/notes/2026-08-22-plan-3f-results.md)
++and is yours to make.**
++
++**A resumer's ledger chore:** 3f had no worktree, so its
++`.superpowers/sdd/2026-08-22-jet-cad-2d-plan-3f-text/` material is **not yet
++archived** to `docs/superpowers/ledgers/`. Do that before clearing it — the
++ordering is the lesson 3e's archive records.
++
+ **Plan 3e (fills) is done, worked directly on `main`, nothing in flight.**
+ Six of nine failable criteria PASS outright; one device timing row is
+ recorded as measured-but-unevaluable (macOS Low Power Mode was on for the
+ whole session); one (the translucent seam) is settled only for the routing
+ rule and left explicitly open on Impeller/GPU, per the reviewer's own
+ instruction not to write "no seam was found." No criterion failed. See
+ [Plan 3e](#plan-3e--fills) above and
+ [the results note](docs/superpowers/notes/2026-08-22-plan-3e-results.md) for
+ every number.
+ 
+@@ -356,26 +396,30 @@ approved it on 2026-08-21 and the non-negotiable now reads
+ 
+ The plan measured the residue and stopped there rather than editing the rule
+ itself, because a gate that can be passed by editing the rule it is measured
+ against is not a gate. **No plan since has needed the rule amended again** —
+ 3e measured against it and it still describes the work.
+ 
+ Plan 3d's open items were worked next, on `main` at `70d824e..0eac1be`: two
+ closed, one shown to be unclosable until a DXF reader exists.
+ 
+ **Next**: pick a plan from the roadmap below. **Plan 3g (caches and tiles)**
+-is the named successor and what 3d and 3e owe it is written out at the end of
+-[the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md)
+-and [the 3e results note](docs/superpowers/notes/2026-08-22-plan-3e-results.md)
+-respectively. **Permitted divergence 5** (overlapping translucent strokes on
+-a triangle soup) is now live and still has no fixture — a candidate for a
+-short follow-up before or alongside 3g.
++is the named successor and what 3d, 3e and 3f owe it is written out at the end
++of [the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md),
++[the 3e results note](docs/superpowers/notes/2026-08-22-plan-3e-results.md) and
++[the 3f results note](docs/superpowers/notes/2026-08-22-plan-3f-results.md)
++respectively. 3g's **first design decision** is 3f's unanswered question:
++whether a cached picture may contain text at all, given that a picture is baked
++per scale band while level of detail is a function of continuous scale.
++**Permitted divergence 5** (overlapping translucent strokes on a triangle soup)
++is now live and still has no fixture — 3f did not touch it either — a candidate
++for a short follow-up before or alongside 3g.
+ 
+ ### What Plan 3d leaves open
+ 
+ Three of the five are closed. The full account, with every number, is the
+ **Follow-up** section at the end of
+ [the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md);
+ the nine new mutants are Part 4 of
+ [the mutation log](docs/superpowers/notes/plan-3d-mutation-log.md).
+ 
+ 1. ~~**The `CLAUDE.md` amendment.**~~ Settled 2026-08-21, above.
+@@ -426,45 +470,65 @@ shipping text to an application and has no owner:
+    error**. Out of 3c's scope: the plan specifies the seam, not who plugs it in.
+ 2. **Two paragraph caches, not one.** The painter takes metrics from
+    `document.textMeasurer`, the sink lays out through `DraftCanvas`'s own. A
+    text leaf costs up to two layouts, and the query path pays for text even
+    into a `NullDrawSink` — **+97 ms** at 50k, **+105 ms** at 500k, whole
+    drawing.
+ 3. **The allocation gate measures the engine helpers, not the painter.**
+    `text_paint_allocation_test.dart` is in the engine suite because
+    `jet_cad_2d_flutter` has no `vm_service`. Closing it means moving
+    `AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
+-4. **Whole-drawing thrash → text LOD (Plan 3f), split from the picture cache,
+-   now Plan 3g.** 4,140
+-   layouts and 4,140 evictions
+-   per frame, and it is 4,140 at *both* 50k and 500k because it is bounded by
+-   string variety rather than entity count. A bigger cache holds one zoom
+-   level of one corpus; not drawing text too small to read removes the cost.
++4. **Whole-drawing thrash → text LOD (Plan 3f). Attempted, measured, and
++   *not* closed.** The premise was 4,140 layouts and 4,140 evictions per
++   frame, bounded by string variety rather than entity count, and that "not
++   drawing text too small to read removes the cost." Plan 3f built the LOD
++   and measured what it removes: at the readability-justified 3.0 px
++   threshold, **3,876** — a 6.4% improvement on a row whose bar is zero. The
++   cost is *not* removed at the whole-drawing camera; it is removed
++   completely at the working-set camera, which never needed it (smallest
++   surviving cap height 53.67 px, 17.9× the threshold). **This item stays
++   open**, and the two ways to close it are named in
++   [the 3f results note](docs/superpowers/notes/2026-08-22-plan-3f-results.md):
++   Ruling 4's one unspent `kParagraphCacheLimit` raise, now that 3,876 is
++   measured, or a threshold in the 3.0–6.0 band chosen on grounds other than
++   a gate row.
+ 5. `snap at dirty threshold` p95 1.08 ms against < 1.0 ms — carried from Plan 2.
+ 6. `DocumentTree._link` is quadratic in a parent's child count, which is why
+    the rigs cap `instanceCount` at 20,000 — recorded in Plan 3b.
+ 
+ ---
+ 
+ ## Rulings that still bind future work
+ 
+ Plan 3c's ledger carries 56 numbered rulings, archived in full at
+ [docs/superpowers/ledgers/](docs/superpowers/ledgers/). These are the ones that
+ constrain work not yet done:
+ 
+ **Ruling 4 — the cache limit is not a tuning knob.** `kParagraphCacheLimit` is
+-owned by Task 9 and may be raised **once**, in Task 12, and only with the
++owned by Plan 3c Task 9 and may be raised **once**, and only with the
+ measured distinct-visible-key count recorded beside it. Lowering
+ `attributedInstanceFraction` is equally acceptable. **Relaxing the
+ zero-new-layouts gate row is not.** Otherwise the gate passes because the corpus
+ was thinned rather than because the cache works.
+ 
++> **Status as of 2026-08-23: the raise is now *available* and is still
++> unspent.** Plan 3f Task 8 produced the count the ruling asks for —
++> **3,876** distinct `(text, styleHandle, argb)` keys at the whole-drawing
++> camera on the 50,000-entity corpus at `kMinTextCapPixels = 3.0`, read by
++> three independent mechanisms. Plan 3f declined to spend it: the raise can
++> only happen once, Plan 3g may want it, and holding 3,876 live native
++> `ui.Paragraph` objects in one frame is a memory cost nobody has measured on
++> any target. **A human decides whether to spend it.** Plan 3f also refused
++> the other route — raising `kMinTextCapPixels` from 3.0 to 6.0 makes the
++> gate rows comply and would be a threshold chosen because a gate needed it,
++> which is the same failure this ruling names one level up.
++
+ **Ruling 20 — discharged in Task 10, with numbers.** The residual-path norm is
+ **1.00** allocations per leaf (one `Transform2`). A text leaf through
+ `resolveTextAttributes` + `textLocalTransform` was **9.00**; through one
+ long-lived `TextLayout` it is **0.87–1.00**, at or below the norm. The spec's
+ second `Float64List(16)` was not the fix — under the plan's shape the sink
+ composes nothing — the reusable layout was, and `TextLayout` lost `@internal`
+ for it. Gate:
+ `packages/jet_cad_2d/test/invariants/text_paint_allocation_test.dart`. Every
+ assertion there is a **ratio**, because the profiler was observed once to read
+ 0.07 where two other runs read 1.00.
+@@ -696,32 +760,118 @@ them together:**
+ translucent strokes double-blending on a triangle soup — is now **live**
+ (fills exist and can carry alpha < 255) but **still not exercised by any
+ fixture**. Task 15 measured a different, narrower question (a translucent
+ fill's own internal triangulation seam), not this one. Open for 3g or a
+ follow-up. See the [3d results
+ note](docs/superpowers/notes/2026-08-21-plan-3d-results.md) for where this
+ divergence was first named.
+ 
+ ### Plan 3f — text wiring and level of detail
+ 
+-In flight. Spec:
++**Done.** Nine tasks, worked directly on `main` at `5d4ef7a..d113d2d`, no
++worktree, on the human's explicit consent. Spec:
+ [docs/superpowers/specs/2026-08-22-jet-cad-2d-plan-3f-text-design.md](docs/superpowers/specs/2026-08-22-jet-cad-2d-plan-3f-text-design.md).
+ Plan:
+ [docs/superpowers/plans/2026-08-22-jet-cad-2d-plan-3f-text.md](docs/superpowers/plans/2026-08-22-jet-cad-2d-plan-3f-text.md).
+-
+-Two defects: a document built the ordinary way carries `InsertionPointMeasurer`
+-and draws no text without reporting anything, and the painter and the sink read
+-different measurers. Plus text LOD, which is the one of Plan 3g's four
+-subsystems that depends on none of the other three.
++Results:
++[docs/superpowers/notes/2026-08-22-plan-3f-results.md](docs/superpowers/notes/2026-08-22-plan-3f-results.md).
++Mutation log:
++[docs/superpowers/notes/plan-3f-mutation-log.md](docs/superpowers/notes/plan-3f-mutation-log.md).
++
++Two defects fixed and one mechanism built. A document assembled the ordinary
++way carried `InsertionPointMeasurer` and drew no text while reporting nothing —
++the document now owns a `FlutterTextMeasurer`, `DraftCanvas` borrows it, and a
++document whose measurer cannot lay out paragraphs is refused with the fix
++spelled out. The painter and the sink read different measurers — they now read
++the same one, whose cache is **split**: colour-free metrics keyed
++`(text, styleHandle)`, coloured paragraphs keyed `(text, styleHandle, argb)`,
++bounded separately, so a full `extents` sweep cannot evict what the paint path
++had warm. And text level of detail: `kMinTextCapPixels = 3.0`, checked
++**before** `measure()` so a cull saves the layout, `0.0` to disable, counted by
++`culledTextCount`, pinned by a three-rung golden ladder.
++
++**Exit gate: 11 of 13 pass, 2 miss, 0 unevaluable.**
++
++**Rows 1 and 2 miss and are left missing.** At the shipped 3.0 threshold the
++whole-drawing camera needs **3,876 distinct paragraph keys in one frame**
++against a 512-entry cache, so a repeated, unchanged frame produces 3,876 new
++layouts and 3,876 paragraph evictions — zero cache hits, against a baseline of
++4,140. Three independent mechanisms read the same 3,876.
++
++**Neither available remedy was taken, and the second is a decision waiting for
++the human.**
++
++1. **Raising `kMinTextCapPixels` to 6.0 makes both rows comply outright**
++   (`distinctKeys=94`, `paragraphEvictions=0`) and is **refused**. 3.0 comes
++   from a readability argument — under about three pixels of cap height a
++   glyph cannot resolve two strokes. 6.0 would come from a gate row needing
++   it. Those are different in kind.
++2. **Ruling 4's single permitted `kParagraphCacheLimit` raise is now
++   available and is deliberately unspent.** The ruling requires a measured
++   distinct-visible-key count recorded beside any raise; that count did not
++   exist until Task 8 produced it, and now does. Cost: **3,876 live native
++   `ui.Paragraph` objects in one frame**, which Plan 3d's carry-forward note
++   argued against and which nobody has measured in resident memory on any
++   target. It also forecloses spending the raise in 3g. **The human decides
++   this, not a plan.** Written up in full in the results note.
++
++**The honest shape of the outcome.** Level of detail is **decisive at the
++working-set camera — by not firing at all**: flat at every threshold from 0.0
++to 10.0 (18 keys, 18 layouts, 0 culled), smallest surviving cap height
++**53.67 px**, about five times the widest threshold tried. That is the camera a
++frame budget is about and it is nowhere near the cliff. It is **insufficient at
++the whole-drawing camera at a readability-justified threshold**. And the step
++is a **band from 3.0 to 6.0, not a point** — the corpus's mirrored and
++non-uniform placement transforms spread per-instance `scaleMagnitude` even at
++one fixed logical text height, so the mass crosses over about three units
++rather than at one value.
++
++**Two rows pass without being able to fail, and both are recorded as such.**
++Criterion 6 (`doc.extents` bit-identical at either threshold) is **structurally
++guaranteed**: `entityBounds` has no channel to a painter's `minTextCapPixels`,
++so it recomputes identically on both reads and two identical wrong answers
++compare equal. Mutant 10 was fired twice and row 6's test passed both times;
++recorded as a restatement, never as a kill. Criterion 10 at **corpus** scale is
++non-discriminating — `doc.extents` is not the 4,020-key sweep the spec assumed
++(`_computeExtents` caches bounds per definition, so 12 distinct strings get
++measured, not 4,020), and it passes under both mutations it exists to catch.
++The discriminating form is the unit-scale test.
++
++**Mutant 7 survived its own suite** — `metricsLimit` defaulted to
++`kParagraphCacheLimit` passed all 297 tests, because every test in
++`flutter_text_measurer_test.dart` constructed the measurer with both bounds
++given explicitly. Recorded as a survivor, then killed by a test written for it
++(`645b027`). The shape of that hole was not audited elsewhere.
+ 
+ ### Plan 3g — the definition/tile picture cache
+ 
++**What 3f hands it, and one question it must answer first.**
++
++- **A working text LOD** — `kMinTextCapPixels = 3.0`, `0.0` disables it, wired
++  from `DraftPainter` through `DraftCanvas` to the harness's `LOD` define,
++  counted by `culledTextCount`, pinned by a golden ladder.
++- **The threshold ladder**, regenerable from the committed tree behind a
++  `LADDER` dart-define, and the finding that the step is a **band** (3.0→6.0),
++  not a point.
++- **The measured distinct-visible-key count: 3,876** — and with it, **Ruling
++  4's one permitted `kParagraphCacheLimit` raise, now available and
++  unspent.** Spending it in 3g is a live option; so is spending it on 3f's
++  missed rows. It can only be spent once.
++- **A split text cache** and **document-owned measurer** (see 3f above).
++- **The unresolved question, and it is 3g's first design decision: may a
++  cached picture contain text at all?** A picture is baked per scale band;
++  level of detail is a function of continuous scale. A picture baked at one
++  scale and replayed at another either shows glyphs the current camera would
++  cull or hides glyphs it would draw. Three candidate answers — never bake
++  text, bake per LOD band as a fourth cache axis, or draw text outside the
++  cached picture entirely — and **none of them has been priced**.
++
+ **What 3d hands it.** A picture cache that records into a `Picture` interacts
+ with a sink that batches across residuals: 3g must decide whether a cached
+ picture flushes the vertex buffer at its boundary. There is **no crossover
+ number** to work against — the vertices backend's raster margin is still
+ widening at 500,000 entities — and there is **96.00 MiB of vertex buffer pinned
+ for the widget's life** at that corpus size, which is the arithmetic a tiling
+ scheme changes. Read the margin against **canvas calls**, not entity count: a
+ 10× entity rise moves `screenSpaceLeafCount` only 2.13× and `dashSpans` 3.03×.
+ 
+ The prize is real: the dominant cost is leaf-count-bound GPU vertex work, and
+diff --git a/docs/superpowers/notes/2026-08-22-plan-3f-results.md b/docs/superpowers/notes/2026-08-22-plan-3f-results.md
+new file mode 100644
+index 0000000..b303102
+--- /dev/null
++++ b/docs/superpowers/notes/2026-08-22-plan-3f-results.md
+@@ -0,0 +1,408 @@
++# Plan 3f results — text wiring, the split cache, and level of detail
++
++**Exit gate: 11 of 13 pass, 2 miss, 0 unevaluable.** The two that miss are
++rows 1 and 2 — zero new paragraph layouts and zero paragraph evictions on a
++repeated, unchanged frame at the whole-drawing camera. They are recorded and
++left missing, per the plan's own stop clause. Nothing in this plan was tuned
++to make them pass.
++
++Mutation log:
++[plan-3f-mutation-log.md](plan-3f-mutation-log.md) — fifteen named mutants, 14
++killed, 1 restatement, plus one mutation recorded as unmeasurable with its
++reason.
++
++## Conditions
++
++**Low Power Mode: OFF**, read before this task's first timed run, per the
++spec's rule that Plan 3c's whole contaminated session established:
++
++```
++$ pmset -g | grep lowpowermode
++ lowpowermode         0
++```
++
++Every timing in this note carries that mark. **No timing here is a gate.**
++Every failable row is a count.
++
++```
++$ flutter --version
++Flutter 3.47.1 • channel stable • https://github.com/flutter/flutter.git
++Framework • revision 6655482ec0 (3 days ago) • 2026-08-19 10:07:23 -0700
++Engine • hash 11d79658c444477b06513d32b52c8c4ccb7276b0 (revision 5d53178869) (3 days ago) • 2026-08-18 23:36:01.000Z
++Tools • Dart 3.13.1 • DevTools 2.60.0
++```
++
++Corpus: `textRigCorpus(50000)` and `textRigCorpus(500000)`
++(`test/rig/rig_support.dart`), viewport `kRigViewport`. Rig command:
++
++```sh
++cd packages/jet_cad_2d_flutter
++CI=true flutter test --tags rig --run-skipped test/rig/paint_microbench_test.dart
++```
++
++---
++
++## The thirteen failable criteria
++
++| # | row | threshold | measured | verdict |
++|---|---|---|---|---|
++| 1 | whole-drawing camera, repeat frame, new layouts | 0 (baseline 4,140) | **3,876** at 50k, **3,658** at 500k | **MISS** |
++| 2 | whole-drawing camera, repeat frame, paragraph evictions | 0 (baseline 4,140) | **3,876** at 50k, **3,658** at 500k | **MISS** |
++| 3 | working-set camera, layouts and paragraph evictions | 0 | 0 and 0, both corpus sizes | **PASS** |
++| 4 | `culledTextCount`, whole-drawing camera | > 0 | **414** at 50k, **2,246** at 500k | **PASS** |
++| 5 | `culledTextCount`, working-set camera | 0 | 0, both corpus sizes | **PASS** |
++| 6 | `doc.extents` at `minTextCapPixels` 0 and 1000 | bit-identical | bit-identical on all four components | **PASS**, structurally — see below |
++| 7 | picking a text entity, at both thresholds | same hit | same entity, kind and world point | **PASS** |
++| 8 | `DraftCanvas` over a document with the default measurer | throws, naming the fix | `ArgumentError` carrying the two-line fix | **PASS** |
++| 9 | differential oracle, LOD on, both cameras | passes | passes at both, plus an LOD-off arm | **PASS** |
++| 10 | extents-sweep non-interference | layouts 0, paragraph evictions 0 | 0 and 0 at unit and corpus scale | **PASS**, with a caveat — see below |
++| 11 | split view: dispose one canvas | the other's cache unchanged | sibling keeps its one live paragraph | **PASS** |
++| 12 | `measurer.clear()` | every live paragraph `debugDisposed` | `debugDisposed` true, both maps empty | **PASS** |
++| 13 | mutation log | every mutant killed, argued equivalent, or unmeasurable with its reason | 14 killed, 1 restated, 1 unmeasurable | **PASS** |
++
++### Rows 1 and 2 — the miss, and what it means
++
++At the shipped `kMinTextCapPixels = 3.0`, the whole-drawing camera over the
++50,000-entity corpus needs **3,876 distinct `(text, styleHandle, argb)`
++paragraph keys in a single frame** against a 512-entry cache. A repeated,
++unchanged frame therefore produces 3,876 new layouts and 3,876 paragraph
++evictions — **zero cache hits**. Verbatim, from the rig's `[text on]` block
++with a measurer already warm from twenty prior paints:
++
++```
++    [text on]
++      R1 paint          p50=550.335ms p95=592.156ms min=530.677ms (n=37)
++      R3 query-only     p50=140.727ms p95=152.163ms min=138.560ms (n=120)
++      textOps: 4514  culledText: 414  skippedText: 0
++      newLayouts=3876 newParagraphEvictions=3876
++      cache: layouts=224808 paragraphEvictions=224296 metricsEvictions=0 liveParagraphs=512 liveMetrics=4020
++```
++
++The baseline this plan set out to beat was 4,140. 3,876 is a 6.4% improvement
++on a row whose threshold is zero. **Rows 1 and 2 miss.**
++
++Three independent mechanisms read the same 3,876 and are recorded because one
++number from one mechanism is not a measurement: the ladder's query-only
++`TextKeySink` pass (`distinctKeys`, draws nothing and lays nothing out), the
++warm-cache `newLayouts` delta above, and the rig's pre-existing
++`DISTINCT CACHE KEYS: 3876   (limit 512) OVER` print.
++
++**The plan pre-committed to what happens next, and it binds this task: record
++the number and stop.** Two things were available and neither was taken.
++
++1. **Raising `kMinTextCapPixels` is refused.** 6.0 makes both rows comply
++   outright (`distinctKeys=94`, `paragraphEvictions=0` — see the ladder). 3.0
++   was chosen from a readability argument: below roughly three pixels of cap
++   height a glyph cannot resolve two strokes. 6.0 would be chosen because a
++   gate row needs it. Those are different in kind, and tuning a threshold
++   until a gate passes is the failure this clause exists to prevent.
++2. **Spending Ruling 4's single permitted `kParagraphCacheLimit` raise is the
++   human's decision, not this plan's.** It is now *available* for the first
++   time — the ruling requires a measured distinct-visible-key count recorded
++   beside any raise, and that count did not exist until Task 8 produced it.
++   Written up below as an option, and left unspent.
++
++### The option this plan leaves on the table, unspent
++
++**Raise `kParagraphCacheLimit` from 512 to something above 3,876.**
++
++- **What it buys.** Rows 1 and 2 at the whole-drawing camera, on this corpus,
++  at the shipped readability threshold. `liveParagraphs` would settle at
++  3,876 and the repeat frame would hit every key.
++- **What it costs.** Holding **3,876 native `ui.Paragraph` objects live in one
++  frame**. A `Paragraph` holds native glyph memory that outlives the Dart
++  object until `dispose()` runs. Plan 3d's carry-forward note argued against
++  exactly this shape of decision — a bound relaxed to fit one corpus's
++  worst-case camera rather than to fit a memory budget — and that argument
++  has not been answered by anything measured here. Nobody has measured what
++  3,876 live paragraphs cost in resident memory on any of the three targets.
++- **What it does not buy.** It is a fact about *this* corpus at *this*
++  camera. The 500,000-entity corpus needs 3,658, but the key-pressure ladder
++  in the same rig run shows the count keeps climbing as the camera zooms out;
++  a bound set at 4,096 is a bound that a different drawing walks past.
++- **The ruling's terms.** One raise, once, with the measured count recorded
++  beside it. Spending it here forecloses spending it in 3g, where the picture
++  cache may want it.
++
++**This is written down so a human can decide it, and is deliberately not
++decided here.**
++
++### Row 6 — passes, and cannot fail
++
++`doc.extents` is bit-identical after a painter at `minTextCapPixels: 0.0` and
++after one at `1000.0`, with `invalidateDerived()` between the reads so the
++second is a genuine recomputation. That invariant is true and worth stating.
++
++It is also **structurally guaranteed rather than testable**, and the mutation
++log records that as a restatement instead of a kill. Mutant 10 — a cull leaked
++into `entityBounds` — was fired, twice, and row 6's test **passed both times**.
++`entityBounds` is a pure function of stored document data with no channel to
++any painter's threshold, so it recomputes identically on both reads and two
++identical wrong answers compare equal. The mutation is caught, incidentally, by
++four other tests: a collapsed bound drops the leaf out of the spatial index's
++query window, so `culledTextCount` reads 0 where 1 was expected.
++
++### Row 10 — passes at both scales; only one of them discriminates
++
++Row 10's procedure (paint warm at the working-set camera; `invalidateDerived()`
++then a full `doc.extents` read; repaint; read the repeat frame's new paragraph
++layouts and evictions) had no in-tree form and now has one, inside the rig:
++
++```
++  -- row 10: extents-sweep non-interference --
++    sweep (66522.34207401797 x 48478.932530765655 world units): layouts=0 paragraphEvictions=0 metricsEvictions=0
++    repeat frame after the sweep: newLayouts=0 newParagraphEvictions=0 newMetricsEvictions=0 liveParagraphs=512 liveMetrics=4020
++```
++
++**Two premises in the design document turn out to be wrong, and the row is
++weaker than it reads.**
++
++- `doc.extents` is **not** the 4,020-key sweep the spec justified the row
++  with. `_computeExtents` is `_boundsOfContainer` over the tree with a
++  per-*definition* bounds cache, so a corpus of 20,000 instances over 200
++  definitions measures **12** distinct strings, not 4,020. The 4,020 figure
++  belongs to `ContainerIndex.build`, which is a genuinely per-entity sweep and
++  runs once when the index is built.
++- Consequently the corpus-scale row **passes under both mutations it was
++  written to catch**. Under mutant 6 (one merged map) the sweep evicted 12
++  paragraphs and the repeat frame still read `newLayouts=0`; under mutant 7
++  (`metricsLimit` cut to the paragraph bound) the same. LRU drops the *oldest*
++  entries, and this camera's 18 keys were the newest with 512 slots to sit in.
++
++The discriminating evidence is the **unit-scale** row 10 in
++`flutter_text_measurer_test.dart` — `paragraphLimit: 4` against a 200-key
++sweep leaves the drawn set no such margin, and mutants 6 and 12 both redden it
++(200 paragraph evictions where the split cache has none). The corpus-scale
++block stays because it is the plan's stated procedure and because its
++`liveMetrics` field *is* the one that moves under both mutations; its comment
++says plainly that it does not discriminate on this corpus.
++
++---
++
++## The threshold ladder
++
++Reproduced from the committed tree at `1dc76d4` for this note, byte-for-byte
++against Task 8's table:
++
++```sh
++cd packages/jet_cad_2d_flutter && CI=true flutter test --tags rig --run-skipped \
++  test/rig/paint_microbench_test.dart --name 'text paint at 50000$' \
++  --dart-define=LADDER=0.0,1.0,2.0,3.0,4.0,6.0,10.0
++```
++
++| threshold | camera | distinctKeys | layouts | paragraphEvictions | metricsEvictions | culledText | liveParagraphs | liveMetrics |
++|---|---|---:|---:|---:|---:|---:|---:|---:|
++| 0.0 | whole drawing | 4140 | 4140 | 3628 | 0 | 0 | 512 | 4020 |
++| 0.0 | working set | 18 | 18 | 0 | 0 | 0 | 18 | 4020 |
++| 1.0 | whole drawing | 4140 | 4140 | 3628 | 0 | 0 | 512 | 4020 |
++| 1.0 | working set | 18 | 18 | 0 | 0 | 0 | 18 | 4020 |
++| 2.0 | whole drawing | 4140 | 4140 | 3628 | 0 | 0 | 512 | 4020 |
++| 2.0 | working set | 18 | 18 | 0 | 0 | 0 | 18 | 4020 |
++| **3.0** | **whole drawing** | **3876** | **3876** | **3364** | 0 | **414** | 512 | 4020 |
++| **3.0** | **working set** | **18** | **18** | **0** | 0 | **0** | 18 | 4020 |
++| 4.0 | whole drawing | 1123 | 1123 | 611 | 0 | 3368 | 512 | 4020 |
++| 4.0 | working set | 18 | 18 | 0 | 0 | 0 | 18 | 4020 |
++| 6.0 | whole drawing | 94 | 94 | **0** | 0 | 4751 | **94** | 4020 |
++| 6.0 | working set | 18 | 18 | 0 | 0 | 0 | 18 | 4020 |
++| 10.0 | whole drawing | 0 | 0 | 0 | 0 | 4928 | 0 | 4020 |
++| 10.0 | working set | 18 | 18 | 0 | 0 | 0 | 18 | 4020 |
++
++### What the ladder says, plainly
++
++**Level of detail is decisive at the working-set camera — and by not firing at
++all.** Every threshold from 0.0 to 10.0 gives identical numbers: 18 distinct
++keys, 18 layouts, 0 culled, 0 evicted. The smallest surviving cap height at
++that camera is **53.67 px**, about five times the widest threshold tried and
++17.9× the shipped one. This is the camera a frame budget is actually about,
++and it is nowhere near the cliff. There is nothing for LOD to do there, and
++rows 3 and 5 pass because of it.
++
++**Level of detail is insufficient at the whole-drawing camera, at a
++readability-justified threshold.** 3.0 culls 414 of 4,928 candidates and
++leaves 3,876 keys chasing 512 slots.
++
++**The step is a band from 3.0 to 6.0, not a point.** `generate_document.dart`'s
++fixed-height-80.0 attributes are about 4,000 of the ~4,928 candidates, and at a
++small enough camera scale their pixel cap heights cluster tightly. But the
++corpus's `mirroredFraction` and `nonUniformFraction` placement transforms give
++per-instance `scaleMagnitude` real spread **even at one fixed logical text
++height**, so the mass crosses over a roughly 3-unit-wide band rather than at
++one exact threshold value: 414 culled at 3.0, 3,368 at 4.0, 4,751 at 6.0, the
++full 4,928 at 10.0. Reported as a band rather than smoothed into a cliff.
++
++`liveMetrics` reads **4,020 at every threshold and both cameras** — level of
++detail does not touch the metrics map at all, because `entityBounds` fills it
++for every text entity while the index is built, before any camera exists, and
++the painter's LOD check only ever touches keys already there. That is the
++measured count now written into `kMetricsCacheLimit`'s doc comment.
++
++---
++
++## Per-site LOD margin (from Task 6)
++
++Every `DraftPainter` construction site in the package that draws text, with the
++smallest **drawn** cap height it produces and its margin over the 3.0
++threshold. Taken by temporarily instrumenting `_drawText` to print, per frame,
++the smallest cap height among drawn text; the instrumentation was removed
++before the commit.
++
++| site | camera | drawn / culled | smallest drawn cap height | margin | decision |
++|---|---|---|---|---|---|
++| `text_paint_test.dart` — hand-built label tests | `doc.extents` fit | 1 / 0 each | 57.90 / 76.44 / 83.41 / 111.84 px | 19×–37× | default |
++| `text_paint_test.dart` — `_textCorpus(2000)`, whole drawing | `fit(doc.extents)` | 25 / 116 | **3.0591 px** | **1.02×** | thin → new explicit `0.0` arm added |
++| `text_paint_test.dart` — `_textCorpus(2000)`, cropped | `cameraOverDocumentCentre` | 15 / 0 | **3.2289 px** | **1.08×** | thin → covered by the same `0.0` arm |
++| `text_paint_test.dart` — `'the text corpus is not vacuous'` | `fit(doc.extents)` | 25 ops vs `greaterThan(20)` | **3.0591 px** | **1.02×** | `0.0` explicitly |
++| `text_paint_test.dart` — `'drawText: false …'` | `fit(doc.extents)` | 25 / 116 | **3.0591 px** | **1.02×** | `0.0` on both painters |
++| `rig/paint_microbench_test.dart` — whole drawing, 50k | `wholeDrawingCamera` | 4,514 / 414 | **3.0006 px** | **1.0002×** | default kept on purpose, plus a degeneracy guard |
++| `rig/paint_microbench_test.dart` — working set, 50k | `workingSetCamera` | 19 / 0 | **53.67 px** | 17.9× | default |
++| `support/sink_comparison.dart` | its own | 1 / 0 | **28.98 px** | 9.7× | default |
++| `draft_painter_root_test.dart` — blank-text counting, 30k | `fit(doc.extents)` | 114 / 454 | **3.0080 px** | **1.003×** | `minTextCapPixels: 0.0` |
++| `draft_canvas_test.dart` — `'drawText reaches the painter…'` | its own | 1 / 0 | **106.40 px** | 35.5× | default |
++| `golden/text_ladder_golden_test.dart` | `kGoldenViewport` | — | **22 px** | 7.3× | default; goldens unchanged |
++
++**The five thin sites are the finding.** Four tests sat within 8% of the
++threshold and one within 0.02%: a later `kMinTextCapPixels` of 3.3 would have
++left them comparing text-free drawings and still green. They were given
++explicit `0.0` arms rather than a moved threshold. The rig's whole-drawing row
++keeps the shipped default deliberately — a rig that measured a frame nobody
++paints is not a frame budget — and prints its own margin every run
++(`LOD MARGIN: smallest drawn cap height 3.0005 px  (threshold 3.0 px, 1.0002x)  culled: 414`)
++so a human reading a transcript sees how close it is on the run in front of
++them.
++
++A note on a visible discrepancy left unreconciled: the pinned figure at
++`paint_microbench_test.dart:313` reads **3.0006 px** and three separate runs
++of the rig this session all measured **3.0005 px**. The difference is in the
++fifth significant digit, inside the bisection's declared 1e-4 relative
++tolerance, and both round to the same reported margin. Left visible rather
++than silently edited.
++
++---
++
++## Timings, recorded and not gated
++
++50,000 entities, `[text on]` / `[text off]`, Low Power Mode off:
++
++| camera | arm | R1 paint p50 | R3 query-only p50 |
++|---|---|---|---|
++| whole drawing | text on | 550.3 ms | 140.7 ms |
++| whole drawing | text off | 499.0 ms | 139.6 ms |
++| working set | text on | 19.3 ms | 1.44 ms |
++| working set | text off | 19.3 ms | 1.43 ms |
++
++500,000 entities:
++
++| camera | arm | R1 paint p50 | R3 query-only p50 |
++|---|---|---|---|
++| whole drawing | text on | 927.2 ms | 284.4 ms |
++| whole drawing | text off | 866.2 ms | 282.3 ms |
++| working set | text on | 44.5 ms | 3.46 ms |
++| working set | text off | 44.5 ms | 3.45 ms |
++
++Text costs about 50–60 ms of a whole-drawing paint at either corpus size and
++is **not measurable** at the working-set camera. This is the widget-level rig
++(JIT, `PictureRecorder`), a relative signal only, per the file's own header.
++
++The device arms (`flutter drive --profile -d macos`) are in Task 8's report.
++Both arms complete cleanly, `minTextCapPixels=3.0` and `0.0` visibly differ on
++the transcript, and `culledText=0` in both — that camera stays well above both
++thresholds, consistent with the ladder's working-set row.
++
++---
++
++## Suites, on the merged result
++
++Every count below was produced by running the suite, not by reading a report.
++
++| suite | result |
++|---|---|
++| `packages/jet_cad_2d` — `CI=true dart test` | **777 pass**, analyze and format clean |
++| `packages/jet_cad_2d_flutter` — `CI=true flutter test` | **299 pass, 1 skipped**, analyze and format clean |
++| `CI=true flutter test --tags golden` | **35 pass**, 40 PNGs |
++| `apps/dev_harness_2d` | analyze and format clean |
++| `benchmark/query_throughput.dart` | **GATE: PASS** — every gated row under its threshold |
++
++The one skip is `test/rig/paint_microbench_test.dart`, gated at suite level by
++the `rig` tag — by design.
++
++`snap at dirty threshold`, the carried failure from Plan 2, **passes** on this
++run (p50 0.552 ms, p95 0.680 ms against a 1.0 ms threshold). It is a timing
++row on a shared machine and has failed before; recorded as passing today
++rather than declared fixed.
++
++Six new PNGs (`text_lod_ladder`, three rungs × two backends) took the golden
++count from 34 to 40. **No pre-existing PNG was regenerated.** The three
++`vertices/text_lod_ladder_*.png` are byte-identical to each other, which is
++understood and documented: text reaches the canvas through
++`VerticesDrawSink.text` → `_fallback.text` → `CanvasDrawSink.text` →
++`canvas.drawParagraph` and never reaches the triangle buffer the rasterizer
++observes, so the threshold has nothing to act on in that backend. The
++information about the threshold lives entirely in the three canvas PNGs.
++
++---
++
++## What this plan did **not** close
++
++**1. Permitted divergence 5 — overlapping translucent strokes on a triangle
++soup.** Still live, still unexercised by any fixture. Plan 3e's Task 15
++measured a different and narrower question (a translucent fill's own internal
++triangulation seam). Nothing in 3f touched it. Carried forward unchanged.
++
++**2. The metrics map's lookup allocation is unmeasurable on this side.**
++`AllocationMeter` lives in the engine suite because `jet_cad_2d_flutter` has no
++`vm_service` dependency — Plan 3c carry-forward item 3. The split cache is
++Flutter-side, so no VM allocation profile can watch it. `a repeat request lays
++out nothing and allocates no metrics` asserts `identical(a, b)` on two
++`measure()` calls, which proves the returned **value** is cached and says
++nothing about whether the lookup allocated a key on the way to it. The
++corresponding mutation is recorded in the mutation log as unmeasurable with its
++reason rather than listed with a killer that cannot kill it. Closing it means
++moving `AllocationMeter` into `packages/jet_cad_2d/lib/src/testing/`.
++
++**3. The corpus's text pressure is a step function, and the step is in the
++wrong place for rows 1 and 2.** The pressure does not fall off smoothly with
++the threshold — it sits flat at 4,140 keys through 2.0, then collapses across
++a 3.0→6.0 band to 94. There is no threshold value that is both readability-
++justified and cache-feasible on this corpus at this camera. Level of detail as
++built is the right mechanism for the camera that matters and is not, by
++itself, an answer for the whole-drawing camera. That is the shape of the
++problem Plan 3g inherits.
++
++**4. Row 10 at corpus scale does not discriminate** (see above). The claim is
++held by the unit-scale fixture.
++
++**5. Criterion 6 is unfalsifiable by construction** (see above). The invariant
++is true; no fixture can distinguish it from a uniformly wrong `entityBounds`.
++
++**6. Mutant 7's survival exposed a shape, not just a constant.** A test file
++that always constructs its subject with every bound passed explicitly cannot
++see a wrong default. One test was added for `metricsLimit`; the same hole would
++hide a wrong `paragraphLimit` default, and no audit was made of how widely that
++pattern occurs.
++
++---
++
++## What Plan 3g inherits
++
++- **A working text LOD**, `kMinTextCapPixels = 3.0`, disableable with `0.0`,
++  wired from `DraftPainter` through `DraftCanvas` to the harness's `LOD`
++  define, counted by `culledTextCount` and pinned by a three-rung golden
++  ladder.
++- **The threshold ladder**, regenerable from the tree behind a `LADDER`
++  dart-define, and the finding that the step is a band.
++- **The measured distinct-visible-key count: 3,876** at the whole-drawing
++  camera on the 50,000-entity corpus at the shipped threshold — the figure
++  Ruling 4's single permitted `kParagraphCacheLimit` raise requires beside it.
++  **The raise is available and unspent.**
++- **A split text cache** — colour-free metrics, coloured paragraphs — bounded
++  separately, so a full `extents` sweep cannot evict what the paint path had
++  warm.
++- **The document owns the measurer and `DraftCanvas` borrows it**, refusing a
++  document whose measurer cannot lay out paragraphs and naming the fix.
++- **One unresolved question, and it is 3g's first design decision: whether a
++  cached picture may contain text at all.** A picture is baked per scale band;
++  level of detail is a function of continuous scale. A picture baked at one
++  scale and replayed at another either shows glyphs the current camera would
++  cull or hides glyphs it would draw. The three candidate answers — never bake
++  text, bake per LOD band as a fourth cache axis, or draw text outside the
++  cached picture entirely — have not been priced.
+diff --git a/docs/superpowers/notes/plan-3f-mutation-log.md b/docs/superpowers/notes/plan-3f-mutation-log.md
+new file mode 100644
+index 0000000..d274897
+--- /dev/null
++++ b/docs/superpowers/notes/plan-3f-mutation-log.md
+@@ -0,0 +1,852 @@
++# Plan 3f mutation log — text ownership, the split cache, and level of detail
++
++The fifteen mutants Section 3 of
++`docs/superpowers/specs/2026-08-22-jet-cad-2d-plan-3f-text-design.md` names,
++every one fired on `main` at `645b027`'s parent tree unless a row says
++otherwise, plus the one mutation the spec records as **unmeasurable** rather
++than listing it with a killer that cannot kill it.
++
++Every mutation, its test and its restore ran in **one shell call**, in the
++shape the plan's brief pins:
++
++```bash
++cp target.dart $SCRATCH/mN.bak && \
++  python3 mut.py target.dart '<exact old text>' '<exact new text>' && \
++  (cd packages/jet_cad_2d_flutter && CI=true flutter test > $SCRATCH/mN.out 2>&1; echo "EXIT=$?") ; \
++  cp $SCRATCH/mN.bak target.dart
++```
++
++`mut.py` is a three-line helper that refuses to write unless its anchor
++matches **exactly once** in the file, so a mutation that silently missed its
++site cannot be reported as applied. No mutation was reverted with
++`git checkout`. `git diff --stat <target>` was read after every restore and
++was empty in all seventeen runs; `git status --short` after the last one shows
++only the three pre-existing `apps/dev_harness` `flutter pub get` artefacts.
++
++## Tally
++
++| Category | Count | Which |
++|---|---:|---|
++| Killed | 14 | 1–9, 11–15 |
++| Killed only after a test was added this task | 1 | 7 (see its row) |
++| Restatement — structurally unreachable by the named killer | 1 | 10 |
++| Unmeasurable, with the reason | 1 | the metrics-probe key allocation (not one of the fifteen; the spec lists it under Accepted gaps) |
++
++Fifteen named mutants: **14 killed, 1 recorded as a restatement.** Mutant 7 is
++counted among the fourteen and is flagged, because it **survived the suite as
++it stood** and was only killed after a test was written for it in `645b027`.
++That is a result about the suite, not a formality — see its row.
++
++---
++
++## 1 — move the LOD test after `measure()`
++
++**Target:** `packages/jet_cad_2d_flutter/lib/src/draft_painter.dart`,
++`_drawText`.
++
++```diff
++-    if (layout.height * chain.scaleMagnitude < minTextCapPixels) {
++-      _culledText++;
++-      return;
++-    }
++-    final metrics = document.textMeasurer.measure(text: text, style: record);
+++    final metrics = document.textMeasurer.measure(text: text, style: record);
+++    if (layout.height * chain.scaleMagnitude < minTextCapPixels) {
+++      _culledText++;
+++      return;
+++    }
++```
++
++**Command:** `CI=true flutter test test/text_lod_test.dart` from
++`packages/jet_cad_2d_flutter`.
++
++```
++00:00 +0: text below the threshold is culled and never measured
++00:00 +0 -1: text below the threshold is culled and never measured [E]
++  Expected: <1>
++    Actual: <2>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/text_lod_test.dart 85:5                        main.<fn>
++
++00:00 +0 -1: the same text at the same camera draws once LOD is off
++00:00 +1 -1: readable text at the same threshold is not culled
++00:00 +2 -1: the threshold is exclusive at exactly kMinTextCapPixels
++00:00 +3 -1: culledTextCount is a per-frame figure, not a running total
++00:00 +4 -1: doc.extents is bit-identical whichever threshold the painter runs at
++00:00 +5 -1: painter and oracle cull the same text under a non-identity placement
++00:00 +6 -1: Some tests failed.
++
++Failing tests:
++  test/text_lod_test.dart: text below the threshold is culled and never measured
++```
++
++**Verdict: KILLED.** The failing line is `expect(m.layoutCount, baseline)` —
++the assertion the test's own comment calls "the load-bearing half". The
++counter reads 2 against a baseline of 1: the cull still fires, so
++`culledTextCount` is right, but a layout was paid for text nobody drew, which
++is the entire saving the row-1 claim rests on.
++
++## 2 — `<` to `<=` at the threshold
++
++**Target:** `draft_painter.dart`, `_drawText`.
++
++```diff
++-    if (layout.height * chain.scaleMagnitude < minTextCapPixels) {
+++    if (layout.height * chain.scaleMagnitude <= minTextCapPixels) {
++```
++
++**Command:** `CI=true flutter test test/text_lod_test.dart`.
++
++```
++00:00 +3: the threshold is exclusive at exactly kMinTextCapPixels
++00:00 +3 -1: the threshold is exclusive at exactly kMinTextCapPixels [E]
++  Expected: <0>
++    Actual: <1>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/text_lod_test.dart 153:5                       main.<fn>
++
++00:00 +3 -1: culledTextCount is a per-frame figure, not a running total
++00:00 +4 -1: doc.extents is bit-identical whichever threshold the painter runs at
++00:00 +5 -1: painter and oracle cull the same text under a non-identity placement
++00:00 +6 -1: Some tests failed.
++
++Failing tests:
++  test/text_lod_test.dart: the threshold is exclusive at exactly kMinTextCapPixels
++```
++
++**Verdict: KILLED**, by the boundary test the spec named, and by that test
++alone — the six other tests in the file are unmoved, which is what a boundary
++fixture is supposed to look like.
++
++## 3 — drop `chain.scaleMagnitude`, cull on world height alone
++
++**Target:** `draft_painter.dart`, `_drawText`.
++
++```diff
++-    if (layout.height * chain.scaleMagnitude < minTextCapPixels) {
+++    if (layout.height < minTextCapPixels) {
++```
++
++**Command:** `CI=true flutter test` (whole suite), from
++`packages/jet_cad_2d_flutter`.
++
++```
++00:00 +60 -1: test/text_paint_test.dart: the reference walk and the painter agree with text on [E]
++  Expected: true
++    Actual: <false>
++  the painter drew text:OFFICE(563.93,98.79)(563.95,98.79)(563.93,98.77) inside the view and the reference did not — that is a wrong drawing, not loose culling
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/support/differential.dart 189:5                expectPainterSupersetOfReference
++  test/text_paint_test.dart 254:5                     main.<fn>
++
++══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
++The following assertion was thrown while running async test code:
++Golden "text_lod_ladder_1.png": Pixel test failed, 0.02%, 96px diff detected.
++Failure feedback can be found at
++test/golden/failures
++
++00:00 +87 -2: test/golden/text_lod_ladder_golden_test.dart: text lod ladder rung 1 (RenderBackend.canvas) [E]
++  Test failed. See exception logs above.
++  The test description was: text lod ladder rung 1 (RenderBackend.canvas)
++
++00:01 +182 ~1 -3: test/text_lod_test.dart: painter and oracle cull the same text under a non-identity placement [E]
++  Expected: <3>
++    Actual: <5>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/text_lod_test.dart 256:5                       main.<fn>
++
++Failing tests:
++  test/golden/text_lod_ladder_golden_test.dart: text lod ladder rung 1 (RenderBackend.canvas)
++  test/text_lod_test.dart: painter and oracle cull the same text under a non-identity placement
++  test/text_paint_test.dart: the reference walk and the painter agree with text on
++00:03 +294 ~1 -3: Some tests failed.
++```
++
++**Verdict: KILLED**, three times over — and **not by the killer the spec
++named.** The spec expected row 5, `culledTextCount` at the working-set camera.
++Fired at rig scale
++(`--tags rig --run-skipped ... --name 'text paint at 50000$'`), row 5 does not
++see it:
++
++```
++  -- whole drawing --
++    LOD MARGIN: smallest drawn cap height 79.9980 px  (threshold 3.0 px, 26.6660x)  culled: 0
++      textOps: 4928  culledText: 0  skippedText: 0
++  -- working set --
++    LOD MARGIN: smallest drawn cap height 79.9980 px  (threshold 3.0 px, 26.6660x)  culled: 0
++      textOps: 19  culledText: 0  skippedText: 0
++01:50 +1: All tests passed!
++```
++
++Row 5 wants **0** at the working-set camera and gets 0 — passing. Every text
++entity the corpus carries is at least 80 world units tall, so a comparison
++against the raw height culls nothing anywhere and the "smallest drawn cap
++height" print collapses to the same 79.998 px on both cameras. The rig row
++that *does* catch it is **row 4**, `culledTextCount > 0` at the whole-drawing
++camera: 414 shipped, **0** here. The spec's expected killer for this mutant is
++corrected to row 4 rather than reported as having fired.
++
++What actually reddens a test is the pair of differential oracles — the walk
++keeps multiplying by its own `scaleMagnitude`, so painter and oracle disagree
++the moment a placement is not at unit scale — and the golden ladder, whose
++middle rung at 3.42 px of cap height turns back on.
++
++## 4 — drop `_culledText++`
++
++**Target:** `draft_painter.dart`, `_drawText`.
++
++```diff
++     if (layout.height * chain.scaleMagnitude < minTextCapPixels) {
++-      _culledText++;
++       return;
++     }
++```
++
++**Command:** `CI=true flutter test`.
++
++```
++00:01 +166 ~1 -1: test/text_lod_test.dart: text below the threshold is culled and never measured [E]
++  Expected: <1>
++    Actual: <0>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/text_lod_test.dart 81:5                        main.<fn>
++
++00:01 +171 ~1 -2: test/text_lod_test.dart: culledTextCount is a per-frame figure, not a running total [E]
++  Expected: <1>
++    Actual: <0>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/text_lod_test.dart 171:5                       main.<fn>
++
++Failing tests:
++  test/text_lod_test.dart: culledTextCount is a per-frame figure, not a running total
++  test/text_lod_test.dart: text below the threshold is culled and never measured
++00:03 +295 ~1 -2: Some tests failed.
++```
++
++**Verdict: KILLED.** Row 4's claim (`culledTextCount > 0` at the whole-drawing
++camera) is a rig print with no assertion behind it, so the kill comes from the
++unit tests that assert the same counter, which is the stronger evidence of the
++two.
++
++## 5 — reference walk reads the painter's decision
++
++**Target:** `packages/jet_cad_2d_flutter/lib/src/reference_walk.dart`,
++`_ReferenceWalk._leaf`. The walk stops reading the threshold it was handed and
++reads the painter's constant instead — the *shape* of "the oracle asks the
++subject", expressed at the one line where this walk makes the decision.
++
++```diff
++-      if (attrs.height * chain.scaleMagnitude < minTextCapPixels) return;
+++      if (attrs.height * chain.scaleMagnitude < kMinTextCapPixels) return;
++```
++
++**Command:** `CI=true flutter test`.
++
++```
++00:00 +60 -1: test/text_paint_test.dart: the reference walk and the painter agree with text on [E]
++  Expected: true
++    Actual: <false>
++  the painter drew text:OFFICE(563.93,98.79)(563.95,98.79)(563.93,98.77) inside the view and the reference did not — that is a wrong drawing, not loose culling
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/support/differential.dart 189:5                expectPainterSupersetOfReference
++  test/text_paint_test.dart 273:5                     main.<fn>
++
++00:01 +171 ~1 -2: test/text_lod_test.dart: painter and oracle cull the same text under a non-identity placement [E]
++  Expected: <5>
++    Actual: <3>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/text_lod_test.dart 288:5                       main.<fn>
++
++Failing tests:
++  test/text_lod_test.dart: painter and oracle cull the same text under a non-identity placement
++  test/text_paint_test.dart: the reference walk and the painter agree with text on
++00:03 +295 ~1 -2: Some tests failed.
++```
++
++**Verdict: KILLED**, and by the two lines that were put there for it. Both
++failures are the **LOD-off control arm**, not the LOD-on comparison:
++`text_lod_test.dart:288` is
++`expect(flatten(referenceToRecording(doc, view, 0.0)).length, all.length)` and
++`text_paint_test.dart:273` is the third arm with the threshold at 0.0 on both
++sides. That is the whole point of a steerable threshold on the oracle: a walk
++that ignores what it is handed and reuses the painter's number agrees with the
++painter perfectly on the on-arm and can only be caught where the two are told
++to differ. Without those arms this mutant survives.
++
++## 6 — merge the two maps back into one
++
++**Target:** `packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart`,
++`measure`. Metrics are read off the paragraph cache under the wide
++`(text, styleHandle, argb)` key at `kMetricsProbeArgb`; the metrics map goes
++unused.
++
++```diff
++-    _metricsProbe
++-      ..text = text
++-      ..styleHandle = style.handle;
++-    final hit = _metrics[_metricsProbe];
++-    if (hit != null) {
++-      _metrics.remove(hit.key);
++-      _metrics[hit.key] = hit;
++-      return hit.metrics;
++-    }
++-    final probe = _layOut(text, style, kMetricsProbeArgb);
++-    final metrics = _metricsOf(probe);
++-    probe.dispose();
++-    debugLastProbe = probe;
++-    if (_metrics.length >= metricsLimit) _evictOldestMetrics();
++-    final key = _MetricsKey(text, style.handle);
++-    _metrics[key] = _MetricsEntry(key, metrics);
++-    return metrics;
+++    // MUTANT 6: the two maps merged back into one.
+++    final probe = paragraphFor(text, style.handle, style, kMetricsProbeArgb);
+++    debugLastProbe = probe;
+++    return _metricsOf(probe);
++```
++
++**Command:** `CI=true flutter test`.
++
++```
++00:01 +131 -1: test/flutter_text_measurer_test.dart: a repeat request lays out nothing and allocates no metrics [E]
++  Expected: true
++    Actual: <false>
++  ... test/flutter_text_measurer_test.dart 29:5
++
++00:01 +136 -2: test/flutter_text_measurer_test.dart: measure disposes its probe and leaves no paragraph entry [E]
++  Expected: <0>
++    Actual: <1>
++  ... test/flutter_text_measurer_test.dart 155:5
++
++00:01 +136 -3: test/flutter_text_measurer_test.dart: a metrics sweep does not evict drawn paragraphs [E]
++  Expected: <0>
++    Actual: <200>
++  ... test/flutter_text_measurer_test.dart 175:5
++
++00:01 +136 -4: test/flutter_text_measurer_test.dart: the metrics map evicts on its own bound, and it is not the paragraph one [E]
++  Expected: <1>
++    Actual: <0>
++  ... test/flutter_text_measurer_test.dart 193:5
++
++00:01 +136 -5: test/flutter_text_measurer_test.dart: clear empties both maps [E]
++  Expected: <1>
++    Actual: <2>
++  ... test/flutter_text_measurer_test.dart 202:5
++
++Failing tests:
++  test/flutter_text_measurer_test.dart: a metrics sweep does not evict drawn paragraphs
++  test/flutter_text_measurer_test.dart: a repeat request lays out nothing and allocates no metrics
++  test/flutter_text_measurer_test.dart: clear empties both maps
++  test/flutter_text_measurer_test.dart: measure disposes its probe and leaves no paragraph entry
++  test/flutter_text_measurer_test.dart: the metrics map evicts on its own bound, and it is not the paragraph one
++00:03 +292 ~1 -5: Some tests failed.
++```
++
++(The `[E]` blocks are elided at the stack frames only, marked `...`; the
++`Expected`/`Actual` pairs and the failing list are verbatim.)
++
++**Verdict: KILLED**, five tests, `a metrics sweep does not evict drawn
++paragraphs` — row 10 at unit scale — among them, with 200 paragraph evictions
++where the split cache has none.
++
++**But row 10 at *corpus* scale does not kill it**, and that is recorded here
++rather than left implied. Fired against the rig's new row-10 block
++(`--tags rig --run-skipped ... --name 'text paint at 50000$'`):
++
++```
++  -- row 10: extents-sweep non-interference --
++    sweep (66522.34207401797 x 48478.932530765655 world units): layouts=12 paragraphEvictions=12 metricsEvictions=0
++    repeat frame after the sweep: newLayouts=0 newParagraphEvictions=0 newMetricsEvictions=0 liveParagraphs=512 liveMetrics=0
++02:07 +1: All tests passed!
++```
++
++The repeat frame reads zero anyway. Two reasons, both measured: `doc.extents`
++is not the 4,020-key sweep the spec assumed (`_computeExtents` caches bounds
++per *definition*, so 20,000 instances over 200 definitions measure **12**
++distinct strings), and LRU evicts the oldest entries while the working-set
++camera's 18 keys are the newest with 512 slots to sit in. The unit-scale
++fixture — `paragraphLimit: 4`, a 200-key sweep — is the one that leaves the
++drawn set no margin. See `paint_microbench_test.dart`'s row-10 comment.
++
++## 7 — `metricsLimit` defaulted to `kParagraphCacheLimit`
++
++**Target:** `flutter_text_measurer.dart`, the constructor.
++
++```diff
++   FlutterTextMeasurer({
++     this.paragraphLimit = kParagraphCacheLimit,
++-    this.metricsLimit = kMetricsCacheLimit,
+++    this.metricsLimit = kParagraphCacheLimit,
++   });
++```
++
++### First firing — **SURVIVED**
++
++**Command:** `CI=true flutter test`.
++
++```
++EXIT=0
++00:03 +297 ~1: All tests passed!
++```
++
++Nothing red. Every other test in `flutter_text_measurer_test.dart` constructs
++the measurer with **both** limits given explicitly — `FlutterTextMeasurer(paragraphLimit: 4, metricsLimit: 1024)`,
++`(paragraphLimit: 512, metricsLimit: 2)` — so the defaults themselves were
++never exercised by anything that could fail.
++
++### What the rig showed, and what it did not
++
++**Command:** `CI=true flutter test --tags rig --run-skipped test/rig/paint_microbench_test.dart --plain-name "text paint at 50000"`
++(matched 500,000 too — `--plain-name` is a substring).
++
++```
++  -- whole drawing --
++      cache: layouts=817938 paragraphEvictions=208792 metricsEvictions=608634 liveParagraphs=512 liveMetrics=512
++  -- working set --
++      cache: layouts=17 paragraphEvictions=17 metricsEvictions=0 liveParagraphs=512 liveMetrics=512
++...
++04:40 +2: All tests passed!
++```
++
++Against the shipped `liveMetrics=4020 metricsEvictions=0`. The mutant is
++glaring on the transcript — 608,634 metrics evictions where there should be
++none — and the rig **asserts nothing**, so it prints and passes. Nor does the
++corpus-scale row-10 block catch it, for the same LRU reason as mutant 6:
++
++```
++  -- row 10: extents-sweep non-interference --
++    sweep (66522.34207401797 x 48478.932530765655 world units): layouts=12 paragraphEvictions=0 metricsEvictions=12
++    repeat frame after the sweep: newLayouts=0 newParagraphEvictions=0 newMetricsEvictions=0 liveParagraphs=512 liveMetrics=512
++02:05 +1: All tests passed!
++```
++
++### The test that closes it, and the second firing — **KILLED**
++
++`the default metrics bound is not the paragraph bound`, added to
++`flutter_text_measurer_test.dart` in commit `645b027`: measure
++`kParagraphCacheLimit + 1` distinct strings on a **default-constructed**
++measurer and assert no metrics eviction. The behavioural assertions come
++first, deliberately — a test whose only failing line is
++`expect(m.metricsLimit, kMetricsCacheLimit)` restates the mutation instead of
++observing it.
++
++**Command:** `CI=true flutter test test/flutter_text_measurer_test.dart`, same
++mutation re-applied.
++
++```
++00:00 +10: the default metrics bound is not the paragraph bound
++00:00 +10 -1: the default metrics bound is not the paragraph bound [E]
++  Expected: <0>
++    Actual: <1>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/flutter_text_measurer_test.dart 218:5          main.<fn>
++
++00:00 +10 -1: clear empties both maps
++
++Failing tests:
++  test/flutter_text_measurer_test.dart: the default metrics bound is not the paragraph bound
++00:00 +11 -1: Some tests failed.
++```
++
++**Verdict: KILLED, after a test was written for it.** Recorded as a survivor
++first because that is what the run said. The finding it carries is about the
++suite's shape, not this constant: a file that always passes both limits
++explicitly cannot see a wrong default, and the same hole would hide a wrong
++`paragraphLimit` default just as well.
++
++## 8 — remove the `DraftCanvas` guard
++
++**Target:** `packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart`,
++`_requireMeasurer`. The widget quietly builds its own measurer, which is what
++it did before Plan 3f.
++
++```diff
++     if (measurer is! FlutterTextMeasurer) {
++-      throw ArgumentError.value(
++-          measurer,
++-          'document.textMeasurer',
++-          'DraftCanvas requires a FlutterTextMeasurer. Build the measurer '
++-              'first and pass it to the document:\n\n'
++-              '    final measurer = FlutterTextMeasurer();\n'
++-              '    final doc = DraftDocument.empty(measurer: measurer);\n');
+++      return FlutterTextMeasurer();
++     }
++     return measurer;
++```
++
++**Command:** `CI=true flutter test`.
++
++```
++══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
++The following TestFailure was thrown running a test:
++Expected: <Instance of 'ArgumentError'>
++  Actual: <null>
++   Which: is not an instance of 'ArgumentError'
++
++When the exception was thrown, this was the stack:
++#4      main.<anonymous closure> (file:///.../test/draft_canvas_test.dart:401:5)
++
++00:01 +154 ~1 -1: test/draft_canvas_test.dart: refuses a document whose measurer cannot lay out paragraphs [E]
++  Test failed. See exception logs above.
++  The test description was: refuses a document whose measurer cannot lay out paragraphs
++
++Failing tests:
++  test/draft_canvas_test.dart: refuses a document whose measurer cannot lay out paragraphs
++00:03 +296 ~1 -1: Some tests failed.
++```
++
++**Verdict: KILLED**, by row 8's own test and nothing else.
++
++## 9 — `measure()` does not store metrics
++
++**Target:** `flutter_text_measurer.dart`, `measure`.
++
++```diff
++-    final key = _MetricsKey(text, style.handle);
++-    _metrics[key] = _MetricsEntry(key, metrics);
++     return metrics;
++```
++
++**Command:** `CI=true flutter test`.
++
++```
++00:01 +131 -1: test/flutter_text_measurer_test.dart: a repeat request lays out nothing and allocates no metrics [E]
++  Expected: <1>
++    Actual: <2>
++  ... test/flutter_text_measurer_test.dart 26:5
++
++00:01 +136 -2: test/flutter_text_measurer_test.dart: measure disposes its probe and leaves no paragraph entry [E]
++  Expected: <1>
++    Actual: <0>
++  ... test/flutter_text_measurer_test.dart 156:5
++
++00:01 +137 -3: test/flutter_text_measurer_test.dart: the metrics map evicts on its own bound, and it is not the paragraph one [E]
++  Expected: <1>
++    Actual: <0>
++  ... test/flutter_text_measurer_test.dart 193:5
++
++00:01 +137 -4: test/flutter_text_measurer_test.dart: clear empties both maps [E]
++  Expected: <1>
++    Actual: <0>
++  ... test/flutter_text_measurer_test.dart 203:5
++
++Failing tests:
++  test/flutter_text_measurer_test.dart: a repeat request lays out nothing and allocates no metrics
++  test/flutter_text_measurer_test.dart: clear empties both maps
++  test/flutter_text_measurer_test.dart: measure disposes its probe and leaves no paragraph entry
++  test/flutter_text_measurer_test.dart: the metrics map evicts on its own bound, and it is not the paragraph one
++00:03 +293 ~1 -4: Some tests failed.
++```
++
++**Verdict: KILLED**, four tests. The first one is the row-1 mechanism at unit
++scale: a repeat `measure()` lays the string out a second time.
++
++## 10 — apply LOD inside `entityBounds`
++
++**Target:** `packages/jet_cad_2d/lib/src/document/extents.dart` — the **engine**
++package, which this plan does not otherwise touch. Copied aside before editing
++and restored from the copy.
++
++### The mutation has no exactly-reachable site
++
++`entityBounds` is a pure function of stored document data. Its parameters are
++`kind`, `payload`, `measurer`, `textStyle`, `textAttrs`, `text`,
++`boundaryKind`, `boundaryPayload` — no camera, no screen scale, no reference to
++any `DraftPainter`. Its three call sites are `draft_document.dart`'s
++`_computeExtents`, `container_index.dart`'s index build and
++`spatial_index.dart`'s incremental bound check; `DraftPainter._drawText` never
++calls it at all. So "compare against a painter's `minTextCapPixels`" cannot be
++written there. The nearest reachable form compares the raw world-space height
++against a literal matching the constant's value — the mistake someone would
++make forgetting the check needs a scale this function cannot perform:
++
++```diff
++       final attrs = resolveTextAttributes(payload, textAttrs, textStyle);
++       final metrics = measurer.measure(text: text, style: textStyle);
+++      if (payload.scalars[0] < 3.0) return Aabb2.empty();
++       return textLocalBounds(attrs, metrics).transformedBy(
++```
++
++**Command:** `CI=true flutter test test/text_lod_test.dart` from
++`packages/jet_cad_2d_flutter`, against the mutated engine package.
++
++```
++00:00 +0 -1: text below the threshold is culled and never measured [E]
++  Expected: <1>
++    Actual: <0>
++  ... test/text_lod_test.dart 81:5
++
++00:00 +0 -2: the same text at the same camera draws once LOD is off [E]
++  Expected: <1>
++    Actual: <0>
++  ... test/text_lod_test.dart 108:5
++
++00:00 +2 -3: culledTextCount is a per-frame figure, not a running total [E]
++  Expected: <1>
++    Actual: <0>
++  ... test/text_lod_test.dart 171:5
++
++00:00 +2 -3: doc.extents is bit-identical whichever threshold the painter runs at
++00:00 +3 -3: painter and oracle cull the same text under a non-identity placement
++00:00 +4 -3: Some tests failed.
++
++Failing tests:
++  test/text_lod_test.dart: culledTextCount is a per-frame figure, not a running total
++  test/text_lod_test.dart: text below the threshold is culled and never measured
++  test/text_lod_test.dart: the same text at the same camera draws once LOD is off
++```
++
++**Verdict: RESTATEMENT — the named killer cannot fire, and did not.** Row 6's
++test, `doc.extents is bit-identical whichever threshold the painter runs at`,
++**passed**. It reads `doc.extents` after a painter at 0.0 and again after one
++at 1000.0, with `invalidateDerived()` between. `entityBounds` has no channel to
++either painter's threshold, so it recomputes identically both times, and two
++identical wrong answers compare equal. Criterion 6 is therefore **structurally
++guaranteed rather than testable**: the invariant it states is true and worth
++stating, and no fixture can distinguish "`entityBounds` is right" from
++"`entityBounds` is uniformly wrong in a way no painter can trigger", because no
++painter can trigger anything there at all.
++
++This is not recorded as a kill and not as a failure. Plan 3c's log has two
++mutants in the same position, both recorded as restatements; this is the third.
++
++The mutation *is* caught, incidentally and by three other tests: a collapsed
++bound drops the leaf out of the spatial index's query window, so the painter's
++walk never reaches it and `culledTextCount` reads 0 where 1 was expected. That
++is the real, if accidental, guard.
++
++**Re-fired after `645b027`**, which added the row-7 pick test, the same
++mutation reddens **four** tests — the new one through its non-vacuity guard:
++
++```
++00:00 +3 -4: picking a text entity gives the same hit at either threshold [E]
++  Expected: true
++    Actual: <false>
++  the pick must land at threshold 0.0, or this row compares two misses
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/text_lod_test.dart 264:7                       main.<fn>.pickAfterPaintingAt
++  test/text_lod_test.dart 273:19                      main.<fn>
++
++Failing tests:
++  test/text_lod_test.dart: culledTextCount is a per-frame figure, not a running total
++  test/text_lod_test.dart: picking a text entity gives the same hit at either threshold
++  test/text_lod_test.dart: text below the threshold is culled and never measured
++  test/text_lod_test.dart: the same text at the same camera draws once LOD is off
++```
++
++Row 6's test still passes, for the reason above. The restatement stands.
++
++## 11 — `culledTextCount` not reset per frame
++
++**Target:** `draft_painter.dart`, `paint`.
++
++```diff
++     _skippedText = 0;
++-    _culledText = 0;
++     _textOps = 0;
++```
++
++**Command:** `CI=true flutter test`.
++
++```
++00:02 +171 ~1 -1: test/text_lod_test.dart: culledTextCount is a per-frame figure, not a running total [E]
++  Expected: <1>
++    Actual: <2>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/text_lod_test.dart 171:5                       main.<fn>
++
++Failing tests:
++  test/text_lod_test.dart: culledTextCount is a per-frame figure, not a running total
++00:03 +296 ~1 -1: Some tests failed.
++```
++
++**Verdict: KILLED**, by the two-frame test and only that one.
++
++## 12 — keep the metrics probe paragraph instead of disposing it
++
++**Target:** `flutter_text_measurer.dart`, `measure`.
++
++```diff
++     final probe = _layOut(text, style, kMetricsProbeArgb);
++     final metrics = _metricsOf(probe);
++-    probe.dispose();
+++    if (_paragraphs.length >= paragraphLimit) _evictOldestParagraph();
+++    final probeKey = _ParagraphKey(text, style.handle, kMetricsProbeArgb);
+++    _paragraphs[probeKey] = _ParagraphEntry(probeKey, probe);
++     debugLastProbe = probe;
++```
++
++**Command:** `CI=true flutter test`.
++
++```
++00:01 +137 -1: test/flutter_text_measurer_test.dart: measure disposes its probe and leaves no paragraph entry [E]
++  Expected: <0>
++    Actual: <1>
++  ... test/flutter_text_measurer_test.dart 155:5
++
++00:01 +137 -2: test/flutter_text_measurer_test.dart: a metrics sweep does not evict drawn paragraphs [E]
++  Expected: <0>
++    Actual: <200>
++  ... test/flutter_text_measurer_test.dart 175:5
++
++00:01 +138 -3: test/flutter_text_measurer_test.dart: clear empties both maps [E]
++  Expected: <1>
++    Actual: <2>
++  ... test/flutter_text_measurer_test.dart 202:5
++
++Failing tests:
++  test/flutter_text_measurer_test.dart: a metrics sweep does not evict drawn paragraphs
++  test/flutter_text_measurer_test.dart: clear empties both maps
++  test/flutter_text_measurer_test.dart: measure disposes its probe and leaves no paragraph entry
++00:03 +294 ~1 -3: Some tests failed.
++```
++
++**Verdict: KILLED**, and by the unit suite rather than by the killer the spec
++named. The spec expected the ladder's distinct-key column — a print, not an
++assertion. Three unit tests fail instead, which is the better outcome: the
++premise the probe-disposal decision rests on (ACI 7 resolves to white, so the
++probe's black is almost never the drawn colour, so keeping it halves the
++paragraph cache) is now defended by something that fails rather than by
++something that has to be read.
++
++## 13 — `DraftCanvas.dispose()` keeps calling `clear()`
++
++**Target:** `draft_canvas.dart`, `dispose`.
++
++```diff
++   void dispose() {
++     _changes.dispose();
+++    _requireMeasurer().clear();
++```
++
++**Command:** `CI=true flutter test`.
++
++```
++══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
++The following TestFailure was thrown running a test:
++Expected: <1>
++  Actual: <0>
++
++When the exception was thrown, this was the stack:
++#4      main.<anonymous closure> (file:///.../test/draft_canvas_test.dart:440:5)
++
++00:01 +155 ~1 -1: test/draft_canvas_test.dart: disposing one canvas leaves a sibling cache warm [E]
++  Test failed. See exception logs above.
++  The test description was: disposing one canvas leaves a sibling cache warm
++
++Failing tests:
++  test/draft_canvas_test.dart: disposing one canvas leaves a sibling cache warm
++00:03 +296 ~1 -1: Some tests failed.
++```
++
++**Verdict: KILLED**, by row 11's own test: the sibling's live paragraph count
++drops from 1 to 0 when the other canvas is disposed.
++
++## 14 — `minTextCapPixels` left out of `didUpdateWidget`
++
++**Target:** `draft_canvas.dart`, `didUpdateWidget`.
++
++```diff
++         widget.drawText != oldWidget.drawText ||
++-        widget.minTextCapPixels != oldWidget.minTextCapPixels ||
++         widget.backend != oldWidget.backend) {
++```
++
++**Command:** `CI=true flutter test`.
++
++```
++══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
++The following TestFailure was thrown running a test:
++Expected: <0.0>
++  Actual: <3.0>
++
++When the exception was thrown, this was the stack:
++#4      main.<anonymous closure> (file:///.../test/draft_canvas_test.dart:382:5)
++
++00:01 +161 ~1 -1: test/draft_canvas_test.dart: changing minTextCapPixels rebuilds the painter [E]
++  Test failed. See exception logs above.
++  The test description was: changing minTextCapPixels rebuilds the painter
++
++Failing tests:
++  test/draft_canvas_test.dart: changing minTextCapPixels rebuilds the painter
++00:03 +296 ~1 -1: Some tests failed.
++```
++
++**Verdict: KILLED**, by the prop-update test the spec named. The painter kept
++the old 3.0 after the widget was rebuilt at 0.0.
++
++## 15 — `DraftPainter.minTextCapPixels` defaulted to `0.0`
++
++**Target:** `draft_painter.dart`, the constructor.
++
++```diff
++-    this.minTextCapPixels = kMinTextCapPixels,
+++    this.minTextCapPixels = 0.0,
++```
++
++**Command:** `CI=true flutter test`.
++
++```
++00:02 +178 ~1 -1: test/text_lod_test.dart: text below the threshold is culled and never measured [E]
++  Expected: <1>
++    Actual: <0>
++  ... test/text_lod_test.dart 81:5
++
++00:02 +182 ~1 -2: test/text_lod_test.dart: culledTextCount is a per-frame figure, not a running total [E]
++  Expected: <1>
++    Actual: <0>
++  ... test/text_lod_test.dart 171:5
++
++Failing tests:
++  test/text_lod_test.dart: culledTextCount is a per-frame figure, not a running total
++  test/text_lod_test.dart: text below the threshold is culled and never measured
++00:03 +295 ~1 -2: Some tests failed.
++```
++
++**Verdict: KILLED**, by the two tests in the file that construct a bare
++`DraftPainter` and pass no knob — exactly the construction sites the spec said
++would be needed, since the rig and the golden ladder both pass a threshold
++explicitly and stay green under this mutation.
++
++---
++
++## The mutation that is not on the list: the metrics probe's key allocation
++
++**Mutation that would be tested:** allocate a fresh `_MetricsKey` on every
++`measure()` lookup instead of mutating the reusable `_metricsProbe`.
++
++**Verdict: UNMEASURABLE on this side, with the reason.** `AllocationMeter`
++lives in `packages/jet_cad_2d/test/invariants/vm_allocation_meter.dart` and
++needs `vm_service`, which `jet_cad_2d_flutter` does not depend on — Plan 3c
++carry-forward item 3. The split cache is Flutter-side, so no VM allocation
++profile can watch it. `a repeat request lays out nothing and allocates no
++metrics` asserts `identical(a, b)` on two `measure()` calls, which proves the
++returned **value** is cached and says nothing about whether the lookup
++allocated a key on the way to it. The mutation would therefore be green under
++every test this package can run.
++
++Recorded here rather than listed as a sixteenth mutant with a killer that
++cannot kill it, per the spec's own instruction. Closing it means moving
++`AllocationMeter` into `packages/jet_cad_2d/lib/src/testing/`, which is out of
++scope for this plan.
+diff --git a/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart b/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart
+index b8946cd..b376f1a 100644
+--- a/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart
++++ b/packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart
+@@ -188,20 +188,49 @@ void main() {
+       () {
+     final m = FlutterTextMeasurer(paragraphLimit: 512, metricsLimit: 2);
+     m.measure(text: 'A', style: _style);
+     m.measure(text: 'B', style: _style);
+     m.measure(text: 'C', style: _style);
+     expect(m.metricsEvictionCount, 1);
+     expect(m.paragraphEvictionCount, 0);
+     expect(m.liveMetricsCount, 2);
+   });
+ 
++  test('the default metrics bound is not the paragraph bound', () {
++    // **Landed because a named mutant survived.** Plan 3f's mutant 7 —
++    // `metricsLimit` defaulted to `kParagraphCacheLimit` — passed the whole
++    // suite when it was fired in Task 9, because every other test in this
++    // file constructs the measurer with *both* limits given explicitly, so
++    // the defaults themselves were untested. At rig scale the mutant is
++    // plainly visible and unasserted: the 50,000-entity corpus reads
++    // `liveMetrics=512 metricsEvictions=608634` under it against
++    // `liveMetrics=4020 metricsEvictions=0` shipped. This is that difference
++    // at unit scale, where something fails rather than merely prints.
++    //
++    // The behavioural assertions come first on purpose: a test whose only
++    // failing line is `expect(m.metricsLimit, kMetricsCacheLimit)` restates
++    // the mutation instead of observing it.
++    final m = FlutterTextMeasurer();
++    // One more distinct string than the paragraph cache could hold. A metrics
++    // map bounded by the paragraph limit evicts here; the real one does not.
++    for (var i = 0; i <= kParagraphCacheLimit; i++) {
++      m.measure(text: 'SWEEP$i', style: _style);
++    }
++    expect(m.metricsEvictionCount, 0);
++    expect(m.liveMetricsCount, kParagraphCacheLimit + 1);
++    // And the sweep held no paragraphs at all, which is the other half of
++    // why the two bounds are allowed to differ by an order of magnitude.
++    expect(m.liveParagraphCount, 0);
++    expect(m.paragraphLimit, kParagraphCacheLimit);
++    expect(m.metricsLimit, kMetricsCacheLimit);
++  });
++
+   test('clear empties both maps', () {
+     final m = FlutterTextMeasurer();
+     final p = m.paragraphFor('WC', const Handle(7), _style, 0xFFFFFFFF);
+     m.measure(text: 'STAIR', style: _style);
+     expect(m.liveParagraphCount, 1);
+     expect(m.liveMetricsCount, 1);
+     m.clear();
+     expect(m.liveParagraphCount, 0);
+     expect(m.liveMetricsCount, 0);
+     // A Paragraph holds native glyph memory: dropping it from the map is not
+diff --git a/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart b/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
+index 6c7aed3..bb45d4d 100644
+--- a/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
++++ b/packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart
+@@ -427,20 +427,106 @@ void main() {
+               'paragraphEvictions=${measurer.paragraphEvictionCount} '
+               'metricsEvictions=${measurer.metricsEvictionCount} '
+               'liveParagraphs=${measurer.liveParagraphCount} '
+               'liveMetrics=${measurer.liveMetricsCount}');
+           print('      screen-space leaves: ${p.screenSpaceLeafCount}  '
+               'dashSpans: ${p.dashSpanCount}  '
+               'collapsed: ${p.collapsedDashCount}');
+         }
+       }
+ 
++      // Exit-gate row 10 — extents-sweep non-interference, at corpus scale.
++      //
++      // `flutter_text_measurer_test.dart`'s 'a metrics sweep does not evict
++      // drawn paragraphs' makes the same claim at unit scale, with both cache
++      // bounds handed in explicitly. This is the claim against the real
++      // corpus, at the shipped defaults, over the ~4,020 distinct strings the
++      // sweep actually walks — which is the number that decides whether
++      // `kMetricsCacheLimit` is sized right, and the thing a unit fixture
++      // with `metricsLimit: 1024` cannot say anything about.
++      //
++      // The procedure is the plan's, in order: paint one frame at the
++      // working-set camera warm; `invalidateDerived()` then read
++      // `doc.extents` in full; repaint at the same camera; read the *repeat
++      // frame's* new paragraph layouts and paragraph evictions. Both are
++      // expected to be 0. A merged cache fails it by construction — the sweep
++      // walks 4,020 keys through 512 slots and evicts everything the repaint
++      // asks for again.
++      //
++      // **Measured, and it does not do what the spec assumed — read this
++      // before trusting the row.** The design document justified row 10 with
++      // "step 2 walks 4,020 keys through 512 slots". `doc.extents` does not:
++      // `_computeExtents` is `_boundsOfContainer` over the tree with a
++      // per-*definition* bounds cache, so a corpus of 20,000 instances over
++      // 200 definitions measures each definition's strings once, not once per
++      // instance. The 4,020 figure belongs to `ContainerIndex.build`, which is
++      // a genuinely per-entity sweep and runs once when the index is built.
++      // Fired at 50,000 entities on 2026-08-22, this sweep laid out **12**
++      // strings under a merged cache and 12 under `metricsLimit` cut to the
++      // paragraph bound — not 4,020.
++      //
++      // The consequence is that this row **passes under both of the mutations
++      // it was written to catch**, and is recorded as non-discriminating on
++      // this corpus rather than as evidence. Under mutant 6 (one merged map)
++      // the sweep evicted 12 paragraphs and the repeat frame still read
++      // `newLayouts=0`: LRU drops the *oldest* entries, and the 18 keys this
++      // camera had just drawn were the newest, with 512 slots for 18 keys.
++      // The discriminating version of this claim is the unit-scale one in
++      // `flutter_text_measurer_test.dart`, where `paragraphLimit: 4` against a
++      // 200-key sweep leaves the drawn set no such margin — mutants 6 and 12
++      // both redden it.
++      //
++      // The sweep's own deltas are printed separately for that reason: at the
++      // shipped defaults they read zero, which is the designed outcome (the
++      // metrics map was filled at index-build time and `kMetricsCacheLimit` is
++      // above the corpus's distinct-key count), and any run where they do not
++      // is the one worth looking at. `liveMetrics` below shows whether the map
++      // still holds the whole corpus or a truncated part of it — that field,
++      // not the repeat frame, is what moved under both mutations.
++      {
++        final ws = workingSetCamera(doc);
++        CanvasDrawSink freshSink(PictureRecorder r) => CanvasDrawSink(
++            canvas: Canvas(r),
++            pixelsPerPaperMm: kLogicalPixelsPerMm,
++            measurer: measurer,
++            textStyleOf: doc.textStyleOf);
++
++        final warm = PictureRecorder();
++        painter.paint(freshSink(warm), ws, kRigViewport);
++        warm.endRecording().dispose();
++
++        measurer.resetCounters();
++        doc.invalidateDerived();
++        final swept = doc.extents;
++        final sweepLayouts = measurer.layoutCount;
++        final sweepParagraphEvictions = measurer.paragraphEvictionCount;
++        final sweepMetricsEvictions = measurer.metricsEvictionCount;
++
++        measurer.resetCounters();
++        final repeat = PictureRecorder();
++        painter.paint(freshSink(repeat), ws, kRigViewport);
++        repeat.endRecording().dispose();
++
++        print('  -- row 10: extents-sweep non-interference --');
++        print('    sweep (${swept.maxX - swept.minX} x '
++            '${swept.maxY - swept.minY} world units): '
++            'layouts=$sweepLayouts '
++            'paragraphEvictions=$sweepParagraphEvictions '
++            'metricsEvictions=$sweepMetricsEvictions');
++        print('    repeat frame after the sweep: '
++            'newLayouts=${measurer.layoutCount} '
++            'newParagraphEvictions=${measurer.paragraphEvictionCount} '
++            'newMetricsEvictions=${measurer.metricsEvictionCount} '
++            'liveParagraphs=${measurer.liveParagraphCount} '
++            'liveMetrics=${measurer.liveMetricsCount}');
++      }
++
+       // How much slack the working-set number has.
+       //
+       // "Under the limit" is not the same as "under the limit with room". The
+       // working-set camera sees a few square kilometres of a drawing whose text
+       // is spread over the whole site, so its key count says as much about how
+       // little text is in frame as about the cache. This ladder zooms out about
+       // the same centre and prints where the count crosses
+       // `kParagraphCacheLimit`, which is the number Task 14 needs to state the
+       // gate row's margin instead of asserting it has one.
+       print('  -- key pressure, zooming out about the working-set centre --');
+diff --git a/packages/jet_cad_2d_flutter/test/text_lod_test.dart b/packages/jet_cad_2d_flutter/test/text_lod_test.dart
+index 1f9aa3a..0fa2ec9 100644
+--- a/packages/jet_cad_2d_flutter/test/text_lod_test.dart
++++ b/packages/jet_cad_2d_flutter/test/text_lod_test.dart
+@@ -224,20 +224,78 @@ void main() {
+     // redden three of this file's other tests — the collapsed box drops the
+     // leaf out of the spatial index's query window, so `culledTextCount`
+     // reads 0 instead of 1 — which is the real, if incidental, guard against
+     // it; see Task 5's report for the transcript.
+     expect(withTextCulled.min.x, withTextDrawn.min.x);
+     expect(withTextCulled.min.y, withTextDrawn.min.y);
+     expect(withTextCulled.max.x, withTextDrawn.max.x);
+     expect(withTextCulled.max.y, withTextDrawn.max.y);
+   });
+ 
++  test('picking a text entity gives the same hit at either threshold', () {
++    // Row 7 of the exit gate, and the pick-path twin of the `doc.extents` row
++    // above. Picking runs through `SpatialIndex`, whose leaf boxes come from
++    // `entityBounds`; no `DraftPainter` and no `minTextCapPixels` reaches it.
++    // The claim is that a frame drawn with the text culled leaves the pick
++    // answer exactly where a frame that drew it does.
++    //
++    // Non-vacuous by construction: this is the same 2.0-unit-high fixture the
++    // first test culls at 0.76 px of cap height, so the two paints below
++    // genuinely differ — one draws the glyph, the other does not — and the
++    // pick is asserted to hit, not merely to agree. Two identical misses
++    // would agree too.
++    final m = FlutterTextMeasurer();
++    addTearDown(m.clear);
++    final world = Aabb2(Vector2.zero(), Vector2(1000, 750));
++    const size = Size(400, 300);
++    final doc = _doc(2.0, world, m);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final view = ViewportTransform.fit(world, size);
++    final textHandle = doc.entities.handleAt(doc.entities.liveSlots.single);
++
++    HitPath pickAfterPaintingAt(double threshold) {
++      final painter = DraftPainter(
++          document: doc,
++          index: index,
++          resolver: DocumentStyleResolver(doc),
++          minTextCapPixels: threshold);
++      painter.paint(RecordingDrawSink(), view, size);
++      final out = HitPath();
++      expect(
++          index.pickInto(
++              Vector2(0.5, 1.0), 2.0, const QueryFilter.picking(), out),
++          isTrue,
++          reason: 'the pick must land at threshold $threshold, or this row '
++              'compares two misses');
++      return out;
++    }
++
++    final drawn = pickAfterPaintingAt(0.0);
++    // `HitPath.worldPoint` is written in place by the next `pickInto`, so the
++    // first hit's fields are copied out before the second pick runs.
++    final drawnEntity = drawn.entity;
++    final drawnKind = drawn.kind;
++    final drawnX = drawn.worldPoint.x;
++    final drawnY = drawn.worldPoint.y;
++
++    final culled = pickAfterPaintingAt(1000.0);
++
++    expect(drawnEntity, textHandle);
++    expect(culled.entity, drawnEntity);
++    expect(culled.kind, drawnKind);
++    // Stored geometry, so exact `==` — the repository's rule for value
++    // comparisons, as against the tolerance a geometric *decision* takes.
++    expect(culled.worldPoint.x, drawnX);
++    expect(culled.worldPoint.y, drawnY);
++  });
++
+   test('painter and oracle cull the same text under a non-identity placement',
+       () {
+     // Deliberately not at the identity and not at the origin: the painter and
+     // the walk reach `chain` by different routes, and a fixture at the identity
+     // transform cannot tell a shared decision from two agreeing ones.
+     final m = FlutterTextMeasurer();
+     addTearDown(m.clear);
+     final doc = textLodDifferentialDocument(m);
+     final world = doc.extents;
+     final view = ViewportTransform.fit(world, kViewport);

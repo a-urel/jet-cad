@@ -1,0 +1,575 @@
+# Review package: 08b778515e120fbaa56995a9d328b7124f1cb1e6..cc26039bd7b6433f951fb82640c4a717311d7820
+
+## Commits
+cc26039 feat: the document owns the text measurer and DraftCanvas borrows it
+
+## Files changed
+ apps/dev_harness_2d/lib/main.dart                  | 20 +++++-
+ .../jet_cad_2d_flutter/lib/src/draft_canvas.dart   | 35 +++++++---
+ .../jet_cad_2d_flutter/test/draft_canvas_test.dart | 80 ++++++++++++++++++++--
+ .../test/frame_path_seam_test.dart                 |  4 +-
+ .../test/golden/dash_ladder_golden_test.dart       |  4 +-
+ .../test/golden/fill_ladder_golden_test.dart       |  4 +-
+ .../test/render_backend_test.dart                  |  8 ++-
+ .../jet_cad_2d_flutter/test/support/fixtures.dart  | 12 +++-
+ 8 files changed, 143 insertions(+), 24 deletions(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index 0207896..441f80f 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -122,20 +122,27 @@ final bool kFillsEnabled =
+ /// that looks fine.
+ final RenderBackend? kBackend =
+     switch (const String.fromEnvironment('BACKEND', defaultValue: '')) {
+   '' => null,
+   'canvas' => RenderBackend.canvas,
+   'vertices' => RenderBackend.vertices,
+   final other =>
+     throw StateError('BACKEND must be canvas, vertices or unset; got "$other"'),
+ };
+ 
++/// The one measurer the harness document is built with, reachable from
++/// `_HarnessState.dispose` so the native paragraphs it holds are released.
++///
++/// A field rather than an inline argument because `DraftCanvas` no longer
++/// disposes the cache: the document owns it and the application releases it.
++final FlutterTextMeasurer harnessMeasurer = FlutterTextMeasurer();
++
+ /// The corpus the rigs measure on: the same shape as R1's, so the two sets of
+ /// numbers describe one drawing.
+ ///
+ /// With [kTextCorpus] on this is `textRigCorpus`'s shape, and the measurer
+ /// stops being a detail: `DraftDocument`'s default is the zero-metrics
+ /// `InsertionPointMeasurer`, which collapses every glyph box to a point and
+ /// every text transform to a singular matrix. A text corpus built on it looks
+ /// like a text corpus and draws nothing measurable.
+ DraftDocument harnessDocument([int? entityCount]) {
+   final count = entityCount ?? kEntities;
+@@ -145,22 +152,28 @@ DraftDocument harnessDocument([int? entityCount]) {
+     instanceCount: 20000,
+     nestingDepth: 2,
+     mirroredFraction: 0.1,
+     nonUniformFraction: 0.2,
+     groupCount: 50,
+     layerCount: 8,
+     byBlockFraction: 0.3,
+     dashedFraction: kDashedFraction,
+     labelFraction: kTextCorpus ? 0.02 : 0,
+     attributedInstanceFraction: kTextCorpus ? 0.2 : 0,
+-    measurer:
+-        kTextCorpus ? FlutterTextMeasurer() : const InsertionPointMeasurer(),
++    // Always a real measurer. The old `kTextCorpus ? FlutterTextMeasurer() :
++    // const InsertionPointMeasurer()` was a workaround for this file's own
++    // doc comment above — a zero-metric measurer makes every text transform
++    // singular — applied at one call site while the cause stayed. `DraftCanvas`
++    // now refuses a document without one, and what turns text off is
++    // `labelFraction: 0` and `attributedInstanceFraction: 0`, which is the
++    // correct axis.
++    measurer: harnessMeasurer,
+   );
+   if (kFillsEnabled) _addFillRegions(doc, count);
+   return doc;
+ }
+ 
+ /// Adds closed-polyline rooms behind [kFillsEnabled]. [kFillFraction] of
+ /// them are added as an [AddRegionCommand] pair (a fill under a boundary);
+ /// the rest are added as plain closed [EntityKind.polyline] boundaries with
+ /// no fill, exercising the fillable-but-not-filled path alongside the filled
+ /// one.
+@@ -415,20 +428,23 @@ class _HarnessAppState extends State<HarnessApp> {
+       final canvasState = _canvasKey.currentState!;
+       widget.onReady?.call(camera, index, canvasState.painter, canvasState.sink,
+           canvasState.vertices, canvasState.resolvedBackend);
+     });
+   }
+ 
+   @override
+   void dispose() {
+     index.dispose();
+     camera.dispose();
++    // `DraftCanvas` stops disposing the cache under Plan 3f, because two
++    // canvases over one document share it. The application owns it instead.
++    harnessMeasurer.clear();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) => MaterialApp(
+         debugShowCheckedModeBanner: false,
+         home: Scaffold(
+           body: Listener(
+             onPointerMove: (event) {
+               if (event.buttons != 0) camera.panBy(event.delta);
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart b/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
+index e1538c7..369c5d6 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
+@@ -110,39 +110,52 @@ class DraftCanvasState extends State<DraftCanvas> {
+   /// Public so a rig reports what it measured rather than what it asked for.
+   late RenderBackend resolvedBackend;
+ 
+   /// One sink for the life of the widget, its `Canvas` rebound per paint.
+   late CanvasDrawSink sink;
+ 
+   /// Non-null only when [resolvedBackend] is [RenderBackend.vertices]. Wraps
+   /// [sink], which keeps taking every op the vertices sink does not batch.
+   VerticesDrawSink? vertices;
+ 
+-  /// Outlives [sink]: a prop change [_attach] reacts to rebuilds the sink,
+-  /// not the paragraph cache behind it, so a document swap does not throw
+-  /// away every glyph already laid out for the previous one.
+-  late final FlutterTextMeasurer _measurer = FlutterTextMeasurer();
+-
+   late DocChangeNotifier _changes;
+   late Listenable _repaint;
+ 
+   @override
+   void initState() {
+     super.initState();
+     _attach();
+   }
+ 
+   void _attach() {
++    // The document owns the measurer; this widget borrows it. Refused
++    // unconditionally rather than only when `drawText` is on: a document whose
++    // boxes were computed from `TextMetrics.zero` is wrong whether or not
++    // glyphs are drawn, and a conditional guard would force `CanvasDrawSink` to
++    // hold a throwaway measurer for its typed field — the second cache coming
++    // back. Before Plan 3f this widget built its own, handed it to the sink
++    // only, and left the painter reading `document.textMeasurer`; a document
++    // assembled the ordinary way therefore drew no text and reported nothing.
++    final measurer = widget.document.textMeasurer;
++    if (measurer is! FlutterTextMeasurer) {
++      throw ArgumentError.value(
++          measurer,
++          'document.textMeasurer',
++          'DraftCanvas requires a FlutterTextMeasurer. Build the measurer '
++              'first and pass it to the document:\n\n'
++              '    final measurer = FlutterTextMeasurer();\n'
++              '    final doc = DraftDocument.empty(measurer: measurer);\n');
++    }
+     sink = CanvasDrawSink(
+         pixelsPerPaperMm: widget.pixelsPerPaperMm,
+         lineweightScale: widget.lineweightScale,
+-        measurer: _measurer,
++        measurer: measurer,
+         textStyleOf: widget.document.textStyleOf);
+     resolvedBackend = widget.backend ?? defaultRenderBackend();
+     vertices = resolvedBackend == RenderBackend.vertices
+         ? VerticesDrawSink(
+             pixelsPerPaperMm: widget.pixelsPerPaperMm,
+             lineweightScale: widget.lineweightScale,
+             fallback: sink)
+         : null;
+     painter = DraftPainter(
+       document: widget.document,
+@@ -168,25 +181,25 @@ class DraftCanvasState extends State<DraftCanvas> {
+         widget.drawText != oldWidget.drawText ||
+         widget.backend != oldWidget.backend) {
+       _changes.dispose();
+       _attach();
+     }
+   }
+ 
+   @override
+   void dispose() {
+     _changes.dispose();
+-    // A `Paragraph` holds native glyph memory the garbage collector does not
+-    // know about; the widget that owns the cache has to release it rather
+-    // than let every entry outlive this state by however long the native
+-    // heap takes to notice nothing references it anymore.
+-    _measurer.clear();
++    // The measurer is **not** disposed here. The document owns it, two canvases
++    // over one document share it, and clearing on dispose would wipe the
++    // sibling's cache along with every native `Paragraph` in it. The
++    // application that constructed the measurer calls `clear()` when it retires
++    // the document — the ordinary Dart contract for a native-resource holder.
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+     // Read here rather than in `_attach`: the ratio is inherited state, it
+     // changes when the window moves between displays, and a sink that cached
+     // it at construction would keep drawing an external monitor's line widths
+     // after the window moved back to the built-in one.
+     vertices?.devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+diff --git a/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart b/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart
+index 3b53a4c..7f2aaab 100644
+--- a/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart
++++ b/packages/jet_cad_2d_flutter/test/draft_canvas_test.dart
+@@ -2,20 +2,23 @@ import 'dart:typed_data';
+ 
+ import 'package:flutter/rendering.dart';
+ import 'package:flutter/widgets.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
+ import 'support/fixtures.dart';
+ 
++const TextStyleRecord _roboto =
++    TextStyleRecord(handle: Handle(7), name: 'Standard', fontFamily: 'Roboto');
++
+ Widget wrap(Widget child) =>
+     Center(child: SizedBox(width: 400, height: 300, child: child));
+ 
+ /// The one render object the damage model acts on.
+ RenderCustomPaint paintBoxOf(WidgetTester tester) =>
+     tester.renderObject<RenderCustomPaint>(find.descendant(
+         of: find.byType(DraftCanvas), matching: find.byType(CustomPaint)));
+ 
+ AddEntityCommand lineAt(Handle owner, Handle handle, List<double> coords) =>
+     AddEntityCommand(
+@@ -38,21 +41,26 @@ AddEntityCommand lineAt(Handle owner, Handle handle, List<double> coords) =>
+ 
+ void addLine(DraftDocument doc) => doc.commands
+     .execute(lineAt(doc.rootHandle, doc.handleSeed.next(), [0, 0, 1, 1]));
+ 
+ void main() {
+   late DraftDocument doc;
+   late SpatialIndex index;
+   late CameraController camera;
+ 
+   setUp(() {
+-    doc = differentialFixture();
++    // `DraftCanvas` now refuses any document whose measurer is not a
++    // `FlutterTextMeasurer`; the shared fixture must carry a real one so
++    // every test in this file that builds a canvas over `doc` still can.
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    doc = differentialFixture(measurer: measurer);
+     index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+     camera = CameraController(ViewportTransform.fit(doc.extents, kViewport));
+     addTearDown(camera.dispose);
+   });
+ 
+   testWidgets('repaints on a camera change without rebuilding', (tester) async {
+     var builds = 0;
+     await tester.pumpWidget(wrap(Builder(builder: (_) {
+       builds++;
+@@ -102,21 +110,23 @@ void main() {
+     // `shouldRepaint` is asked on every rebuild; answering true there would
+     // make the canvas repaint for reasons that have nothing to do with the
+     // drawing having changed. The `repaint` listenable is the only trigger.
+     await tester.pumpWidget(
+         wrap(DraftCanvas(document: doc, index: index, camera: camera)));
+     final painter = paintBoxOf(tester).painter!;
+     expect(painter.shouldRepaint(painter), isFalse);
+   });
+ 
+   testWidgets('disposing stops listening', (tester) async {
+-    final doc = DraftDocument.empty();
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final doc = DraftDocument.empty(measurer: measurer);
+     var changes = 0;
+     final notifier = DocChangeNotifier(doc, onChange: (_) => changes++);
+     addLine(doc);
+     await tester.pump();
+     final afterFirst = changes;
+     expect(afterFirst, greaterThan(0),
+         reason: 'the listener must be live '
+             'before disposal, or the assertion below proves nothing');
+ 
+     notifier.dispose();
+@@ -170,21 +180,23 @@ void main() {
+     await tester.pumpWidget(wrap(const SizedBox()));
+ 
+     expect(index.rootIndex.leafCount, greaterThan(0));
+     camera.panBy(const Offset(1, 0)); // would throw on a disposed notifier
+   });
+ 
+   testWidgets('a small container does not draw its off-screen leaves',
+       (tester) async {
+     // Eight leaves — under the old kCullFloor of 32 — spread across a strip
+     // far wider than the view. The camera sees the leftmost two.
+-    final doc = DraftDocument.empty();
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final doc = DraftDocument.empty(measurer: measurer);
+     final def = doc.handleSeed.next();
+     doc.tree.addDefinition(Definition(
+         handle: def,
+         name: 'strip',
+         basePoint: Vector2.zero(),
+         children: const []));
+     for (var i = 0; i < 8; i++) {
+       addEntity(doc, def, doc.handleSeed.next(), EntityKind.line,
+           [i * 1000.0, 0, i * 1000.0 + 40, 30], const []);
+     }
+@@ -272,21 +284,23 @@ void main() {
+   });
+ 
+   testWidgets('drawText reaches the painter, and a change to it rebuilds one',
+       (tester) async {
+     // `drawText` is measurement-only, so nothing in the product reads it and
+     // nothing else would notice if the forward were dropped. What *does* read
+     // it is `apps/dev_harness_2d`'s `DRAW_TEXT=0` define, and a dropped
+     // forward there does not fail — it prints a text-off row identical to the
+     // text-on row, which is the plausible-looking number this file's other
+     // guard already exists to refuse.
+-    final textDoc = DraftDocument.empty(measurer: MetricModelMeasurer());
++    final textMeasurer = FlutterTextMeasurer();
++    addTearDown(textMeasurer.clear);
++    final textDoc = DraftDocument.empty(measurer: textMeasurer);
+     textDoc.commands.execute(AddEntityCommand(
+       record: EntityRecord(
+         handle: textDoc.handleSeed.next(),
+         owner: textDoc.rootHandle,
+         kind: EntityKind.text,
+         layer: ReservedHandles.layerZero,
+         linetype: ReservedHandles.byLayerLinetype,
+         linetypeScale: 1.0,
+         geomIndex: 0,
+         color: const ByLayerColor(),
+@@ -324,11 +338,69 @@ void main() {
+     // A prop change has to rebuild the painter: `drawText` is final on
+     // `DraftPainter`, so a `didUpdateWidget` that ignored it would leave the
+     // old painter in place and the flag would be silently one frame — or one
+     // whole run — behind.
+     await tester.pumpWidget(canvas(drawText: false));
+     expect(key.currentState!.painter.drawText, isFalse);
+     textCamera.panBy(Offset.zero);
+     await tester.pump();
+     expect(key.currentState!.painter.textOpCount, 0);
+   });
++
++  testWidgets('refuses a document whose measurer cannot lay out paragraphs',
++      (tester) async {
++    final doc = DraftDocument.empty();
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final camera = CameraController(ViewportTransform.fit(
++        Aabb2(Vector2.zero(), Vector2(100, 100)), const Size(400, 300)));
++    addTearDown(camera.dispose);
++
++    await tester.pumpWidget(Directionality(
++      textDirection: TextDirection.ltr,
++      child: DraftCanvas(document: doc, index: index, camera: camera),
++    ));
++
++    // The whole point is that this used to draw nothing and say nothing.
++    final error = tester.takeException();
++    expect(error, isA<ArgumentError>());
++    expect(error.toString(), contains('FlutterTextMeasurer'));
++    expect(error.toString(), contains('DraftDocument.empty(measurer:'));
++  });
++
++  testWidgets('disposing one canvas leaves a sibling cache warm',
++      (tester) async {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final doc = DraftDocument.empty(measurer: measurer);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final camera = CameraController(ViewportTransform.fit(
++        Aabb2(Vector2.zero(), Vector2(100, 100)), const Size(400, 300)));
++    addTearDown(camera.dispose);
++
++    Widget canvases(int count) => Directionality(
++          textDirection: TextDirection.ltr,
++          child: Column(
++            children: [
++              for (var i = 0; i < count; i++)
++                SizedBox(
++                    width: 200,
++                    height: 150,
++                    child: DraftCanvas(
++                        document: doc, index: index, camera: camera)),
++            ],
++          ),
++        );
++
++    await tester.pumpWidget(canvases(2));
++    measurer.paragraphFor('WC', const Handle(7), _roboto, 0xFFFFFFFF);
++    final live = measurer.liveParagraphCount;
++    expect(live, 1);
++
++    await tester.pumpWidget(canvases(1));
++    await tester.pump();
++
++    // A canvas that cleared on dispose would take its sibling's cache with it.
++    expect(measurer.liveParagraphCount, live);
++  });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/frame_path_seam_test.dart b/packages/jet_cad_2d_flutter/test/frame_path_seam_test.dart
+index f2f28dd..4adcf47 100644
+--- a/packages/jet_cad_2d_flutter/test/frame_path_seam_test.dart
++++ b/packages/jet_cad_2d_flutter/test/frame_path_seam_test.dart
+@@ -29,21 +29,23 @@ const double _halfSpan = 150.0;
+ 
+ /// One entity at the origin, thick enough that a sub-pixel chord error cannot
+ /// move a sample off the stroke.
+ ///
+ /// Lineweight 60 (0.60 mm) rather than the dash ladder's 30: the centreline
+ /// assertion samples the *true* circle while the sink draws an inscribed
+ /// polygon, so the stroke has to be wider than the flattener's sagitta with
+ /// room to spare. At this radius that sagitta is about a quarter of a logical
+ /// pixel against a half-width near 1.1 -- a factor of four, not a coin flip.
+ DraftDocument _fixture(EntityKind kind, List<double> scalars) {
+-  final doc = DraftDocument.empty();
++  final measurer = FlutterTextMeasurer();
++  addTearDown(measurer.clear);
++  final doc = DraftDocument.empty(measurer: measurer);
+   doc.commands.execute(AddEntityCommand(
+     record: EntityRecord(
+       handle: doc.handleSeed.next(),
+       owner: doc.rootHandle,
+       kind: kind,
+       layer: ReservedHandles.layerZero,
+       linetype: ReservedHandles.continuousLinetype,
+       linetypeScale: 1.0,
+       geomIndex: 0,
+       color: const TrueColor(0x000000),
+diff --git a/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart b/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
+index ed55ad8..6a7b617 100644
+--- a/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
++++ b/packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart
+@@ -12,21 +12,23 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+ 
+ import '../support/triangle_rasterizer.dart';
+ 
+ const Size kGoldenViewport = Size(400, 300);
+ const Key kCanvasKey = Key('golden-canvas');
+ 
+ /// Six horizontal dashed rules, and one dashed circle, spanning the width.
+ DraftDocument dashLadderFixture() {
+-  final doc = DraftDocument.empty();
++  final measurer = FlutterTextMeasurer();
++  addTearDown(measurer.clear);
++  final doc = DraftDocument.empty(measurer: measurer);
+   final dashed = doc.handleSeed.next();
+   doc.tables.linetypes.add(LinetypeRecord(
+     handle: dashed,
+     name: 'DASHED',
+     description: '__ __ __',
+     pattern: const DashPattern(dashes: [12.0, -6.0], totalLength: 18.0),
+   ));
+   for (var i = 0; i < 6; i++) {
+     _dashedEntity(doc, dashed, EntityKind.polyline,
+         [-500, -60.0 + i * 24, 500, -60.0 + i * 24], const []);
+diff --git a/packages/jet_cad_2d_flutter/test/golden/fill_ladder_golden_test.dart b/packages/jet_cad_2d_flutter/test/golden/fill_ladder_golden_test.dart
+index abd6e2f..8444935 100644
+--- a/packages/jet_cad_2d_flutter/test/golden/fill_ladder_golden_test.dart
++++ b/packages/jet_cad_2d_flutter/test/golden/fill_ladder_golden_test.dart
+@@ -36,21 +36,23 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+ 
+ import '../support/triangle_rasterizer.dart';
+ 
+ const Size kGoldenViewport = Size(400, 300);
+ const Key kCanvasKey = Key('fill-golden-canvas');
+ 
+ /// Four regions, one of each property this task names, all within a
+ /// [-50, 50] world box so half-span 60 frames the whole drawing.
+ DraftDocument fillLadderFixture() {
+-  final doc = DraftDocument.empty();
++  final measurer = FlutterTextMeasurer();
++  addTearDown(measurer.clear);
++  final doc = DraftDocument.empty(measurer: measurer);
+ 
+   // A layer whose lineweight is thin enough (0.01 mm) that at this file's
+   // scale and a device pixel ratio of 3.0 the device width is about 0.11
+   // device pixels -- comfortably under `VerticesDrawSink.kMinStrokeDevicePixels`
+   // (1.0), so `_coveredArgb` would fade a stroke of this width hard. A fill
+   // routed through it by mistake would dim visibly; routed correctly (never
+   // through `_coveredArgb`) it stays opaque regardless.
+   final hairline = doc.handleSeed.next();
+   doc.tables.layers.add(LayerRecord(
+     handle: hairline,
+diff --git a/packages/jet_cad_2d_flutter/test/render_backend_test.dart b/packages/jet_cad_2d_flutter/test/render_backend_test.dart
+index 3f30025..f2781c6 100644
+--- a/packages/jet_cad_2d_flutter/test/render_backend_test.dart
++++ b/packages/jet_cad_2d_flutter/test/render_backend_test.dart
+@@ -1,19 +1,21 @@
+ import 'package:flutter/widgets.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d/testing.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ Future<DraftCanvasState> _pump(WidgetTester tester,
+     {RenderBackend? backend}) async {
+-  final doc = generateDocument(40, dashedFraction: 0.5);
++  final measurer = FlutterTextMeasurer();
++  addTearDown(measurer.clear);
++  final doc = generateDocument(40, dashedFraction: 0.5, measurer: measurer);
+   final index = SpatialIndex(doc);
+   addTearDown(index.dispose);
+   final camera = CameraController(
+       ViewportTransform.fit(doc.extents, const Size(300, 300)));
+   addTearDown(camera.dispose);
+   final key = GlobalKey<DraftCanvasState>();
+   await tester.pumpWidget(Directionality(
+     textDirection: TextDirection.ltr,
+     child: SizedBox(
+       width: 300,
+@@ -59,21 +61,23 @@ void main() {
+     final vertices = await _pump(tester, backend: RenderBackend.vertices);
+     expect(vertices.vertices, isNotNull);
+ 
+     final canvas = await _pump(tester, backend: RenderBackend.canvas);
+     expect(canvas.vertices, isNull);
+   });
+ 
+   testWidgets('changing the backend prop rebuilds the sinks', (tester) async {
+     // MUTATION: leave `backend` out of `didUpdateWidget`'s comparison and the
+     // widget keeps drawing through the old sink after the prop changes.
+-    final doc = generateDocument(40, dashedFraction: 0.5);
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final doc = generateDocument(40, dashedFraction: 0.5, measurer: measurer);
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+     final camera = CameraController(
+         ViewportTransform.fit(doc.extents, const Size(300, 300)));
+     addTearDown(camera.dispose);
+     final key = GlobalKey<DraftCanvasState>();
+ 
+     Widget build(RenderBackend backend) => Directionality(
+           textDirection: TextDirection.ltr,
+           child: SizedBox(
+diff --git a/packages/jet_cad_2d_flutter/test/support/fixtures.dart b/packages/jet_cad_2d_flutter/test/support/fixtures.dart
+index 631557f..a982b2d 100644
+--- a/packages/jet_cad_2d_flutter/test/support/fixtures.dart
++++ b/packages/jet_cad_2d_flutter/test/support/fixtures.dart
+@@ -40,22 +40,30 @@ Handle addEntity(
+ }
+ 
+ /// The corpus every differential test runs on.
+ ///
+ /// **No identity transform anywhere.** Plan 2's post-mortem records a
+ /// composition-order defect that four separate fixtures failed to catch because
+ /// their transforms were the identity, which commutes and hides ordering. Every
+ /// instance here carries a distinct non-uniform scale, a rotation and a
+ /// translation; one is mirrored; one is nested two levels deep; one leaf is
+ /// owned by a group node so the folded leaf transform is exercised.
+-DraftDocument differentialFixture({double originX = 0}) {
+-  final doc = DraftDocument.empty();
++///
++/// [measurer] defaults to the zero-metric [InsertionPointMeasurer]: most
++/// callers only ever paint this fixture through [paintToRecording] or
++/// [referenceToRecording], never through a [DraftCanvas], and never touch
++/// text. A caller that does build a [DraftCanvas] over this fixture must pass
++/// a real [FlutterTextMeasurer] — the widget refuses anything else.
++DraftDocument differentialFixture(
++    {double originX = 0,
++    TextMeasurer measurer = const InsertionPointMeasurer()}) {
++  final doc = DraftDocument.empty(measurer: measurer);
+   final ox = originX;
+   final oy = originX == 0 ? 0.0 : 1200000.0;
+ 
+   // --- definitions -------------------------------------------------------
+   const inner = Handle(500), outer = Handle(501);
+   doc.tree.addDefinition(Definition(
+       handle: inner,
+       name: 'inner',
+       basePoint: Vector2.zero(),
+       children: const []));

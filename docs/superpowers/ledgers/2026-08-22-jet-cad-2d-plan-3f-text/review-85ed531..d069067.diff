@@ -1,0 +1,139 @@
+# Review package: 85ed53133620a493a252e305572a5edcd6b07c60..d069067b8bbdee42ee4ed8523ece3955c8ae2b71
+
+## Commits
+d069067 docs: kMetricsCacheLimit's distinct-key count is measured, not derived
+4a66f13 feat: the dev harness forwards a LOD define to the painter
+
+## Files changed
+ apps/dev_harness_2d/lib/main.dart                       | 15 +++++++++++++++
+ apps/dev_harness_2d/lib/measurement_rig.dart            |  3 ++-
+ .../lib/src/flutter_text_measurer.dart                  | 17 ++++++++++++-----
+ 3 files changed, 29 insertions(+), 6 deletions(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index 06a1356..c4303c7 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -72,20 +72,34 @@ final double kLineweightScale = double.tryParse(
+ /// same way [kLineweightScale] does. Inert at its default of 0.35, which is
+ /// the value every run before this one used.
+ final double kDashedFraction = double.tryParse(
+       const String.fromEnvironment('DASHED', defaultValue: '0.35'),
+     ) ??
+     0.35;
+ 
+ const bool kTextCorpus = bool.fromEnvironment('TEXT');
+ const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
+ 
++/// Whether the painter culls text too small to read.
++///
++/// **A `String.fromEnvironment`, and it stays one.** `bool.fromEnvironment`
++/// reads `--dart-define=LOD=1` as **false**, and Plan 3c lost a full device run
++/// to exactly that with `TEXT=1`. An unrecognised value throws at startup rather
++/// than falling back to something that looks fine.
++final double kMinTextCap =
++    switch (const String.fromEnvironment('LOD', defaultValue: 'true')) {
++  'true' => kMinTextCapPixels,
++  'false' => 0.0,
++  final other => throw ArgumentError.value(
++      other, 'LOD', 'expected "true" or "false"'),
++};
++
+ /// Fraction of the closed polylines [_addFillRegions] adds that gain a region
+ /// partner (a fill), when [kFillsEnabled] is on. Named beside
+ /// [kDashedFraction] for the same reason: a quota, applied by an accumulator
+ /// exactly the way `_Styling.linetypeFor` and `.colorFor` apply theirs in
+ /// `generate_document.dart`, not a coin flip -- see that file's comment on
+ /// why a fraction has to land exactly rather than merely on average.
+ ///
+ /// The rest of the closed polylines this adds are plain boundaries: stroked,
+ /// never filled, so the corpus exercises both the fillable-and-filled and the
+ /// fillable-but-not path.
+@@ -455,15 +469,16 @@ class _HarnessAppState extends State<HarnessApp> {
+               camera.zoomAt(event.localPosition,
+                   event.scrollDelta.dy < 0 ? 1.1 : 1 / 1.1);
+             },
+             child: DraftCanvas(
+                 key: _canvasKey,
+                 document: widget.document,
+                 index: index,
+                 camera: camera,
+                 lineweightScale: kLineweightScale,
+                 drawText: kDrawText,
++                minTextCapPixels: kMinTextCap,
+                 backend: kBackend),
+           ),
+         ),
+       );
+ }
+diff --git a/apps/dev_harness_2d/lib/measurement_rig.dart b/apps/dev_harness_2d/lib/measurement_rig.dart
+index eb0a607..85c0848 100644
+--- a/apps/dev_harness_2d/lib/measurement_rig.dart
++++ b/apps/dev_harness_2d/lib/measurement_rig.dart
+@@ -145,21 +145,22 @@ void printBackend(RenderBackend backend, VerticesDrawSink? vertices) {
+ void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
+     {required bool textCorpus,
+     required bool drawText,
+     required int layoutsBefore,
+     required int paragraphEvictionsBefore,
+     required int metricsEvictionsBefore}) {
+   final m = sink.measurer;
+   print('  text: corpus=${textCorpus ? "on" : "off"} '
+       'draw=${drawText ? "on" : "off"} '
+       'textOps=${painter.textOpCount} '
+-      'skippedText=${painter.skippedTextCount}');
++      'skippedText=${painter.skippedTextCount} '
++      'culledText=${painter.culledTextCount}');
+   // Two eviction numbers, not one. A paragraph eviction released native glyph
+   // memory and guarantees a future re-layout; a metrics eviction dropped four
+   // doubles. Ruling 54: a blended number hides which half moved.
+   print('  paragraphs: newLayouts=${m.layoutCount - layoutsBefore} '
+       'newParagraphEvictions=${m.paragraphEvictionCount - paragraphEvictionsBefore} '
+       'newMetricsEvictions=${m.metricsEvictionCount - metricsEvictionsBefore} '
+       'liveParagraphs=${m.liveParagraphCount} '
+       'liveMetrics=${m.liveMetricsCount}');
+ }
+ 
+diff --git a/packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart b/packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart
+index 8db309f..8ad59af 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart
+@@ -12,25 +12,32 @@ const int kParagraphCacheLimit = 512;
+ 
+ /// The metrics cache's entry ceiling.
+ ///
+ /// **A different number for a different reason, and deliberately not shared
+ /// with [kParagraphCacheLimit].** A [TextMetrics] is four doubles, so this
+ /// bound is not about memory; it exists so the map is not unbounded. It is
+ /// sized against what a full `DraftDocument.extents` sweep *touches*, which is
+ /// every text entity in the document, because level of detail deliberately does
+ /// not apply on the query path.
+ ///
+-/// The rig corpus is expected to hold about 4,020 distinct
+-/// `(text, styleHandle)` pairs — 4,000 unique `ATTRnnnnn` strings and the
+-/// twenty distinct labels Ruling 17 pins — and this is that with room. **That
+-/// figure is derived from the corpus generator, not yet measured;** Plan 3f
+-/// Task 8 replaces this sentence with the measured count.
++/// The rig corpus holds 4,020 distinct `(text, styleHandle)` pairs — 4,000
++/// unique `ATTRnnnnn` strings and the twenty distinct labels Ruling 17 pins —
++/// and this is that with room. **Measured, not derived:** Plan 3f Task 8 read
++/// `FlutterTextMeasurer.liveMetricsCount` on `textRigCorpus(50000)`'s own
++/// measurer and got exactly 4,020, at every one of the threshold-ladder's
++/// seven `minTextCapPixels` values and on both its cameras (the whole-drawing
++/// fit and the working set) alike — level of detail does not touch this map
++/// at all, because `entityBounds` fills it once, for every text entity, while
++/// the document is built, and `DraftPainter`'s LOD check
++/// (`draft_painter.dart:873`) only ever touches keys already there. The count
++/// is therefore camera-independent by construction, not merely unmeasured
++/// across cameras.
+ ///
+ /// Raising this does not spend Ruling 4's single permitted raise. Ruling 4
+ /// names [kParagraphCacheLimit] and the zero-new-layouts paint row.
+ const int kMetricsCacheLimit = 8192;
+ 
+ /// The colour a metrics-only request is built with.
+ ///
+ /// A `ui.Paragraph` bakes its colour at [ParagraphBuilder.pushStyle] time, so a
+ /// paragraph must be built to read metrics off it — but colour cannot change
+ /// metrics, so the one built for a metrics request is built at this declared
