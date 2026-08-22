@@ -267,7 +267,7 @@ stop clause fired. What shipped instead:
 
 The profiling task also answered the standing question about an unexplained
 179 ms: it is **leaf-count-bound GPU vertex work**, not fragment fill and not
-draw-call dispatch. That finding is what makes a picture cache (**Plan 3f**,
+draw-call dispatch. That finding is what makes a picture cache (**Plan 3g**,
 called 3e before the vertices sink took the 3d slot) worth building.
 
 > **Every `flutter drive` number in the 3b results note is contaminated:**
@@ -362,13 +362,13 @@ against is not a gate. **No plan since has needed the rule amended again** —
 Plan 3d's open items were worked next, on `main` at `70d824e..0eac1be`: two
 closed, one shown to be unclosable until a DXF reader exists.
 
-**Next**: pick a plan from the roadmap below. **Plan 3f (caches and tiles)**
+**Next**: pick a plan from the roadmap below. **Plan 3g (caches and tiles)**
 is the named successor and what 3d and 3e owe it is written out at the end of
 [the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md)
 and [the 3e results note](docs/superpowers/notes/2026-08-22-plan-3e-results.md)
 respectively. **Permitted divergence 5** (overlapping translucent strokes on
 a triangle soup) is now live and still has no fixture — a candidate for a
-short follow-up before or alongside 3f.
+short follow-up before or alongside 3g.
 
 ### What Plan 3d leaves open
 
@@ -433,7 +433,8 @@ shipping text to an application and has no owner:
    `text_paint_allocation_test.dart` is in the engine suite because
    `jet_cad_2d_flutter` has no `vm_service`. Closing it means moving
    `AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
-4. **Whole-drawing thrash → the picture cache's text LOD (Plan 3f).** 4,140
+4. **Whole-drawing thrash → text LOD (Plan 3f), split from the picture cache,
+   now Plan 3g.** 4,140
    layouts and 4,140 evictions
    per frame, and it is 4,140 at *both* 50k and 500k because it is bounded by
    string variety rather than entity count. A bigger cache holds one zoom
@@ -638,6 +639,12 @@ and the text-LOD item in 3c's carry-forward list. **Notes and plan documents
 written before 2026-08-20 still call fills "3d" and the cache "3e"; read those
 by name, not by number.**
 
+**Renumbered again on 2026-08-22.** Text wiring and text LOD were split out of
+the picture cache and took the `3f` slot, so **the picture cache is now 3g**.
+The sentence above describes the *earlier* move and is left as written: it is
+the record of why the numbers shifted the first time, not a statement about the
+current numbering.
+
 ### Plan 3e — fills
 
 **Done — seventeen tasks, executed and reviewed one at a time directly on
@@ -689,15 +696,27 @@ them together:**
 translucent strokes double-blending on a triangle soup — is now **live**
 (fills exist and can carry alpha < 255) but **still not exercised by any
 fixture**. Task 15 measured a different, narrower question (a translucent
-fill's own internal triangulation seam), not this one. Open for 3f or a
+fill's own internal triangulation seam), not this one. Open for 3g or a
 follow-up. See the [3d results
 note](docs/superpowers/notes/2026-08-21-plan-3d-results.md) for where this
 divergence was first named.
 
-### Plan 3f — the definition/tile picture cache
+### Plan 3f — text wiring and level of detail
+
+In flight. Spec:
+[docs/superpowers/specs/2026-08-22-jet-cad-2d-plan-3f-text-design.md](docs/superpowers/specs/2026-08-22-jet-cad-2d-plan-3f-text-design.md).
+Plan:
+[docs/superpowers/plans/2026-08-22-jet-cad-2d-plan-3f-text.md](docs/superpowers/plans/2026-08-22-jet-cad-2d-plan-3f-text.md).
+
+Two defects: a document built the ordinary way carries `InsertionPointMeasurer`
+and draws no text without reporting anything, and the painter and the sink read
+different measurers. Plus text LOD, which is the one of Plan 3g's four
+subsystems that depends on none of the other three.
+
+### Plan 3g — the definition/tile picture cache
 
 **What 3d hands it.** A picture cache that records into a `Picture` interacts
-with a sink that batches across residuals: 3f must decide whether a cached
+with a sink that batches across residuals: 3g must decide whether a cached
 picture flushes the vertex buffer at its boundary. There is **no crossover
 number** to work against — the vertices backend's raster margin is still
 widening at 500,000 entities — and there is **96.00 MiB of vertex buffer pinned
@@ -740,18 +759,18 @@ otherwise never see it:
    a baked `Picture`) that lands on the general Dart heap without touching
    that buffer is invisible to it, and the warm-up frames a gate like this
    one always runs will have already sized the buffer before the subject
-   frame is measured, hiding a first-draw allocation completely. **If 3f's
+   frame is measured, hiding a first-draw allocation completely. **If 3g's
    picture cache populates lazily on first paint, this exact gate will stay
    green while the cache allocates a `Picture` per miss on the frame path.**
    What actually proved fills are populated eagerly and not lazily was a
    direct command-time assertion (`the triangulation is materialised by the
-   command, not by a draw`), not the allocation gate — 3f needs the
+   command, not by a draw`), not the allocation gate — 3g needs the
    equivalent of that assertion, or a real VM allocation-profile mechanism
    ported to the Flutter-side suite, not another buffer-capacity read.
 
-**Do not design 3f against a fixed op-count ceiling.** The web whole-drawing
+**Do not design 3g against a fixed op-count ceiling.** The web whole-drawing
 abort is reproducible but its trigger is unknown — a memory- or
-session-dependent CanvasKit failure explains it with no code at fault. What 3f
+session-dependent CanvasKit failure explains it with no code at fault. What 3g
 is owed first is a back-to-back, same-session re-run.
 
 ---
