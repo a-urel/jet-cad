@@ -172,15 +172,40 @@ Widget _framed(DraftDocument doc, double minTextCapPixels) => MaterialApp(
 /// triangles are scan-converted by `TriangleRasterizer` and the *image* is
 /// matched instead.
 ///
-/// Text never reaches that triangle buffer at all — `CanvasDrawSink` and
-/// `VerticesDrawSink` both hand text to a paragraph on the real canvas, which
-/// this rasterizer cannot see (see `text_ladder_golden_test.dart`'s note on
-/// the same point) — so the three `vertices/text_lod_ladder_*.png` goldens
-/// carry only the three anchor ticks and are identical across all three
-/// rungs: the threshold has nothing to act on there. They still go through
-/// the same two-backend loop as every other ladder in this suite, and still
-/// guard the same regression: that the picture reaching the rasterizer is
-/// never empty.
+/// **Text never reaches that triangle buffer, at all, on any rung — this is
+/// load-bearing for reading the three `vertices/text_lod_ladder_*.png`
+/// goldens, so it is traced rather than asserted.** `VerticesDrawSink.text`
+/// (`vertices_draw_sink.dart`) flushes whatever is pending, then calls
+/// `_fallback?.text(...)`; `_fallback` is the very `CanvasDrawSink` the
+/// vertices backend already carries (wired up in `DraftCanvas._attach`,
+/// `draft_canvas.dart`), and `CanvasDrawSink.text` (`canvas_draw_sink.dart`)
+/// draws it with `canvas.drawParagraph`, a call this test's `observer` never
+/// sees — it is wired to `VerticesDrawSink`'s own `flush`, i.e. to
+/// `canvas.drawVertices` submissions only. A paragraph painted straight onto
+/// the real `Canvas` and a triangle buffer's flush are two different calls on
+/// two different code paths; nothing here chooses between them per rung, so
+/// nothing about `minTextCapPixels` can move what the rasterizer sees.
+///
+/// This is not a property of this fixture. `text_ladder_golden_test.dart`'s
+/// own vertices goldens carry the identical limitation and say so in their
+/// own doc comment ("none of its glyphs ... never reaches the triangle
+/// buffer") — confirmed by opening `vertices/text_ladder_1.png` and
+/// `vertices/text_ladder_3.png` by eye: rung 1 is one red rule and nothing
+/// else, rung 3 is four crosses and nothing else, in both cases exactly the
+/// anchor geometry and no glyph of "JUSTIFY" or "ROTATE" anywhere. Those five
+/// PNGs differ from each other only because each rung there is a *different
+/// fixture* with different anchor rules or crosses — not because any of them
+/// carries text.
+///
+/// This ladder's three rungs share one fixture and one camera and vary only
+/// the threshold, so once text is out of reach the three
+/// `vertices/text_lod_ladder_*.png` goldens have nothing left to differ on:
+/// they carry the same three anchor ticks and are byte-identical by
+/// construction, not by omission. Each still guards the same regression the
+/// rest of this suite's vertices goldens guard — that flushing before an
+/// unbatchable op does not corrupt the batch, and that the picture reaching
+/// the rasterizer is never empty — and the threshold itself is pinned by the
+/// three canvas PNGs beside them.
 Future<void> _rung(WidgetTester tester, DraftDocument doc, String name,
     double minTextCapPixels, RenderBackend backend) async {
   if (backend == RenderBackend.canvas) {
