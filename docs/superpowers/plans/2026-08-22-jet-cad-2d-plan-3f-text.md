@@ -987,10 +987,16 @@ git commit -m "feat: the document owns the text measurer and DraftCanvas borrows
 Create `packages/jet_cad_2d_flutter/test/text_lod_test.dart`:
 
 ```dart
+// `dart:typed_data` for Float64List, and `hide Aabb2` because vector_math ships
+// its own Aabb2 and `jet_cad_2d` exports the one this codebase means. Every
+// text-bearing test in this directory has exactly these two lines — see
+// `text_paint_test.dart` and `draft_canvas_test.dart`.
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
-import 'package:vector_math/vector_math_64.dart';
+import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import 'support/fixtures.dart';
 
