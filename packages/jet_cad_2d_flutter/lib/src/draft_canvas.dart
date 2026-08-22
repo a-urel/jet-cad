@@ -117,11 +117,6 @@ class DraftCanvasState extends State<DraftCanvas> {
   /// [sink], which keeps taking every op the vertices sink does not batch.
   VerticesDrawSink? vertices;
 
-  /// Outlives [sink]: a prop change [_attach] reacts to rebuilds the sink,
-  /// not the paragraph cache behind it, so a document swap does not throw
-  /// away every glyph already laid out for the previous one.
-  late final FlutterTextMeasurer _measurer = FlutterTextMeasurer();
-
   late DocChangeNotifier _changes;
   late Listenable _repaint;
 
@@ -132,10 +127,28 @@ class DraftCanvasState extends State<DraftCanvas> {
   }
 
   void _attach() {
+    // The document owns the measurer; this widget borrows it. Refused
+    // unconditionally rather than only when `drawText` is on: a document whose
+    // boxes were computed from `TextMetrics.zero` is wrong whether or not
+    // glyphs are drawn, and a conditional guard would force `CanvasDrawSink` to
+    // hold a throwaway measurer for its typed field — the second cache coming
+    // back. Before Plan 3f this widget built its own, handed it to the sink
+    // only, and left the painter reading `document.textMeasurer`; a document
+    // assembled the ordinary way therefore drew no text and reported nothing.
+    final measurer = widget.document.textMeasurer;
+    if (measurer is! FlutterTextMeasurer) {
+      throw ArgumentError.value(
+          measurer,
+          'document.textMeasurer',
+          'DraftCanvas requires a FlutterTextMeasurer. Build the measurer '
+              'first and pass it to the document:\n\n'
+              '    final measurer = FlutterTextMeasurer();\n'
+              '    final doc = DraftDocument.empty(measurer: measurer);\n');
+    }
     sink = CanvasDrawSink(
         pixelsPerPaperMm: widget.pixelsPerPaperMm,
         lineweightScale: widget.lineweightScale,
-        measurer: _measurer,
+        measurer: measurer,
         textStyleOf: widget.document.textStyleOf);
     resolvedBackend = widget.backend ?? defaultRenderBackend();
     vertices = resolvedBackend == RenderBackend.vertices
@@ -175,11 +188,11 @@ class DraftCanvasState extends State<DraftCanvas> {
   @override
   void dispose() {
     _changes.dispose();
-    // A `Paragraph` holds native glyph memory the garbage collector does not
-    // know about; the widget that owns the cache has to release it rather
-    // than let every entry outlive this state by however long the native
-    // heap takes to notice nothing references it anymore.
-    _measurer.clear();
+    // The measurer is **not** disposed here. The document owns it, two canvases
+    // over one document share it, and clearing on dispose would wipe the
+    // sibling's cache along with every native `Paragraph` in it. The
+    // application that constructed the measurer calls `clear()` when it retires
+    // the document — the ordinary Dart contract for a native-resource holder.
     super.dispose();
   }
 

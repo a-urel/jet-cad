@@ -43,7 +43,9 @@ const Key kCanvasKey = Key('fill-golden-canvas');
 /// Four regions, one of each property this task names, all within a
 /// [-50, 50] world box so half-span 60 frames the whole drawing.
 DraftDocument fillLadderFixture() {
-  final doc = DraftDocument.empty();
+  final measurer = FlutterTextMeasurer();
+  addTearDown(measurer.clear);
+  final doc = DraftDocument.empty(measurer: measurer);
 
   // A layer whose lineweight is thin enough (0.01 mm) that at this file's
   // scale and a device pixel ratio of 3.0 the device width is about 0.11

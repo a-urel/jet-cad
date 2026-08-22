@@ -36,7 +36,9 @@ const double _halfSpan = 150.0;
 /// room to spare. At this radius that sagitta is about a quarter of a logical
 /// pixel against a half-width near 1.1 -- a factor of four, not a coin flip.
 DraftDocument _fixture(EntityKind kind, List<double> scalars) {
-  final doc = DraftDocument.empty();
+  final measurer = FlutterTextMeasurer();
+  addTearDown(measurer.clear);
+  final doc = DraftDocument.empty(measurer: measurer);
   doc.commands.execute(AddEntityCommand(
     record: EntityRecord(
       handle: doc.handleSeed.next(),

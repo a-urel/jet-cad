@@ -6,7 +6,9 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 Future<DraftCanvasState> _pump(WidgetTester tester,
     {RenderBackend? backend}) async {
-  final doc = generateDocument(40, dashedFraction: 0.5);
+  final measurer = FlutterTextMeasurer();
+  addTearDown(measurer.clear);
+  final doc = generateDocument(40, dashedFraction: 0.5, measurer: measurer);
   final index = SpatialIndex(doc);
   addTearDown(index.dispose);
   final camera = CameraController(
@@ -66,7 +68,9 @@ void main() {
   testWidgets('changing the backend prop rebuilds the sinks', (tester) async {
     // MUTATION: leave `backend` out of `didUpdateWidget`'s comparison and the
     // widget keeps drawing through the old sink after the prop changes.
-    final doc = generateDocument(40, dashedFraction: 0.5);
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final doc = generateDocument(40, dashedFraction: 0.5, measurer: measurer);
     final index = SpatialIndex(doc);
     addTearDown(index.dispose);
     final camera = CameraController(

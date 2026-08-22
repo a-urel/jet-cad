@@ -19,7 +19,9 @@ const Key kCanvasKey = Key('golden-canvas');
 
 /// Six horizontal dashed rules, and one dashed circle, spanning the width.
 DraftDocument dashLadderFixture() {
-  final doc = DraftDocument.empty();
+  final measurer = FlutterTextMeasurer();
+  addTearDown(measurer.clear);
+  final doc = DraftDocument.empty(measurer: measurer);
   final dashed = doc.handleSeed.next();
   doc.tables.linetypes.add(LinetypeRecord(
     handle: dashed,

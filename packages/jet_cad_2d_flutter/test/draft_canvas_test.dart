@@ -9,6 +9,9 @@ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import 'support/fixtures.dart';
 
+const TextStyleRecord _roboto =
+    TextStyleRecord(handle: Handle(7), name: 'Standard', fontFamily: 'Roboto');
+
 Widget wrap(Widget child) =>
     Center(child: SizedBox(width: 400, height: 300, child: child));
 
@@ -45,7 +48,12 @@ void main() {
   late CameraController camera;
 
   setUp(() {
-    doc = differentialFixture();
+    // `DraftCanvas` now refuses any document whose measurer is not a
+    // `FlutterTextMeasurer`; the shared fixture must carry a real one so
+    // every test in this file that builds a canvas over `doc` still can.
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    doc = differentialFixture(measurer: measurer);
     index = SpatialIndex(doc);
     addTearDown(index.dispose);
     camera = CameraController(ViewportTransform.fit(doc.extents, kViewport));
@@ -109,7 +117,9 @@ void main() {
   });
 
   testWidgets('disposing stops listening', (tester) async {
-    final doc = DraftDocument.empty();
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final doc = DraftDocument.empty(measurer: measurer);
     var changes = 0;
     final notifier = DocChangeNotifier(doc, onChange: (_) => changes++);
     addLine(doc);
@@ -177,7 +187,9 @@ void main() {
       (tester) async {
     // Eight leaves — under the old kCullFloor of 32 — spread across a strip
     // far wider than the view. The camera sees the leftmost two.
-    final doc = DraftDocument.empty();
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final doc = DraftDocument.empty(measurer: measurer);
     final def = doc.handleSeed.next();
     doc.tree.addDefinition(Definition(
         handle: def,
@@ -279,7 +291,9 @@ void main() {
     // forward there does not fail — it prints a text-off row identical to the
     // text-on row, which is the plausible-looking number this file's other
     // guard already exists to refuse.
-    final textDoc = DraftDocument.empty(measurer: MetricModelMeasurer());
+    final textMeasurer = FlutterTextMeasurer();
+    addTearDown(textMeasurer.clear);
+    final textDoc = DraftDocument.empty(measurer: textMeasurer);
     textDoc.commands.execute(AddEntityCommand(
       record: EntityRecord(
         handle: textDoc.handleSeed.next(),
@@ -330,5 +344,63 @@ void main() {
     textCamera.panBy(Offset.zero);
     await tester.pump();
     expect(key.currentState!.painter.textOpCount, 0);
+  });
+
+  testWidgets('refuses a document whose measurer cannot lay out paragraphs',
+      (tester) async {
+    final doc = DraftDocument.empty();
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final camera = CameraController(ViewportTransform.fit(
+        Aabb2(Vector2.zero(), Vector2(100, 100)), const Size(400, 300)));
+    addTearDown(camera.dispose);
+
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: DraftCanvas(document: doc, index: index, camera: camera),
+    ));
+
+    // The whole point is that this used to draw nothing and say nothing.
+    final error = tester.takeException();
+    expect(error, isA<ArgumentError>());
+    expect(error.toString(), contains('FlutterTextMeasurer'));
+    expect(error.toString(), contains('DraftDocument.empty(measurer:'));
+  });
+
+  testWidgets('disposing one canvas leaves a sibling cache warm',
+      (tester) async {
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final doc = DraftDocument.empty(measurer: measurer);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final camera = CameraController(ViewportTransform.fit(
+        Aabb2(Vector2.zero(), Vector2(100, 100)), const Size(400, 300)));
+    addTearDown(camera.dispose);
+
+    Widget canvases(int count) => Directionality(
+          textDirection: TextDirection.ltr,
+          child: Column(
+            children: [
+              for (var i = 0; i < count; i++)
+                SizedBox(
+                    width: 200,
+                    height: 150,
+                    child: DraftCanvas(
+                        document: doc, index: index, camera: camera)),
+            ],
+          ),
+        );
+
+    await tester.pumpWidget(canvases(2));
+    measurer.paragraphFor('WC', const Handle(7), _roboto, 0xFFFFFFFF);
+    final live = measurer.liveParagraphCount;
+    expect(live, 1);
+
+    await tester.pumpWidget(canvases(1));
+    await tester.pump();
+
+    // A canvas that cleared on dispose would take its sibling's cache with it.
+    expect(measurer.liveParagraphCount, live);
   });
 }

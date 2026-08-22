@@ -47,8 +47,16 @@ Handle addEntity(
 /// instance here carries a distinct non-uniform scale, a rotation and a
 /// translation; one is mirrored; one is nested two levels deep; one leaf is
 /// owned by a group node so the folded leaf transform is exercised.
-DraftDocument differentialFixture({double originX = 0}) {
-  final doc = DraftDocument.empty();
+///
+/// [measurer] defaults to the zero-metric [InsertionPointMeasurer]: most
+/// callers only ever paint this fixture through [paintToRecording] or
+/// [referenceToRecording], never through a [DraftCanvas], and never touch
+/// text. A caller that does build a [DraftCanvas] over this fixture must pass
+/// a real [FlutterTextMeasurer] — the widget refuses anything else.
+DraftDocument differentialFixture(
+    {double originX = 0,
+    TextMeasurer measurer = const InsertionPointMeasurer()}) {
+  final doc = DraftDocument.empty(measurer: measurer);
   final ox = originX;
   final oy = originX == 0 ? 0.0 : 1200000.0;
 

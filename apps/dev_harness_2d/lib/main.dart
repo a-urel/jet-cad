@@ -129,6 +129,13 @@ final RenderBackend? kBackend =
     throw StateError('BACKEND must be canvas, vertices or unset; got "$other"'),
 };
 
+/// The one measurer the harness document is built with, reachable from
+/// `_HarnessState.dispose` so the native paragraphs it holds are released.
+///
+/// A field rather than an inline argument because `DraftCanvas` no longer
+/// disposes the cache: the document owns it and the application releases it.
+final FlutterTextMeasurer harnessMeasurer = FlutterTextMeasurer();
+
 /// The corpus the rigs measure on: the same shape as R1's, so the two sets of
 /// numbers describe one drawing.
 ///
@@ -152,8 +159,14 @@ DraftDocument harnessDocument([int? entityCount]) {
     dashedFraction: kDashedFraction,
     labelFraction: kTextCorpus ? 0.02 : 0,
     attributedInstanceFraction: kTextCorpus ? 0.2 : 0,
-    measurer:
-        kTextCorpus ? FlutterTextMeasurer() : const InsertionPointMeasurer(),
+    // Always a real measurer. The old `kTextCorpus ? FlutterTextMeasurer() :
+    // const InsertionPointMeasurer()` was a workaround for this file's own
+    // doc comment above — a zero-metric measurer makes every text transform
+    // singular — applied at one call site while the cause stayed. `DraftCanvas`
+    // now refuses a document without one, and what turns text off is
+    // `labelFraction: 0` and `attributedInstanceFraction: 0`, which is the
+    // correct axis.
+    measurer: harnessMeasurer,
   );
   if (kFillsEnabled) _addFillRegions(doc, count);
   return doc;
@@ -422,6 +435,9 @@ class _HarnessAppState extends State<HarnessApp> {
   void dispose() {
     index.dispose();
     camera.dispose();
+    // `DraftCanvas` stops disposing the cache under Plan 3f, because two
+    // canvases over one document share it. The application owns it instead.
+    harnessMeasurer.clear();
     super.dispose();
   }
 
