@@ -1,26 +1,27 @@
 # Plan 3f — text wiring and level of detail
 
 **Date:** 2026-08-22
-**Status:** design, approved section by section on 2026-08-22
+**Status:** design, approved section by section, then revised against three
+independent reviews on 2026-08-22
 **Line:** `jet_cad_2d` / `jet_cad_2d_flutter` — the live pure-Dart 2D line
 **Branch:** `main`, worked directly, no worktree
 
 ## Renumbering
 
-The roadmap in `STATUS.md` gave `3f` to the definition/tile picture cache.
-This plan takes the `3f` slot because it ships first, and the picture cache
-moves to **`3g`**. Every `3f` in `STATUS.md` that means the picture cache is
-swept to `3g` as part of this plan's first task.
+The roadmap in `STATUS.md` gave `3f` to the definition/tile picture cache. This
+plan takes the `3f` slot because it ships first, and the picture cache moves to
+**`3g`**. All fourteen `3f` occurrences in `STATUS.md` mean the picture cache and
+are swept to `3g` in this plan's first task.
 
-The reason for the reorder is a measurement, not a preference. Plan 3f's
-original justification was Plan 3b's finding that the dominant render cost is
+The reorder is argued from a measurement, not a preference. Plan 3f's original
+justification was Plan 3b's finding that the dominant render cost is
 leaf-count-bound GPU vertex work — measured on the **canvas** backend, with one
 `save`/`transform`/`restore` triple per leaf. Plan 3d retired that backend:
 `defaultRenderBackend()` returns `RenderBackend.vertices` unconditionally, and
 the vertices sink draws 10,000 entities in 5.71 ms build / 6.68 ms raster and
 500,000 in 17.44 / 21.64. The speed argument for a picture cache is much weaker
-than it was when it was written; the largest *measured* remaining loss in the
-text path is not.
+than when it was written; the largest measured remaining loss in the text path
+is not.
 
 ---
 
@@ -31,11 +32,22 @@ Two defects, both live on `main` at `8fad846`, both in text.
 ### 1. A document built the ordinary way draws no text and reports no error
 
 `DraftDocument.empty`'s `measurer` parameter defaults to
-`const InsertionPointMeasurer()` (`draft_document.dart:90`), which returns
-`TextMetrics.zero` for every string. `DraftPainter._drawText` takes its metrics
-from `document.textMeasurer` (`draft_painter.dart:807`) and composes the text
-transform from them; with a zero `capHeight` the scale is `height / 0`, so the
-transform is degenerate and nothing readable reaches the canvas.
+`const InsertionPointMeasurer()` (`src/document/draft_document.dart:90`), which
+returns `TextMetrics.zero` for every string. `DraftPainter._drawText` takes its
+metrics from `document.textMeasurer` (`draft_painter.dart:807`) and composes the
+text transform from them.
+
+**The mechanism is a guarded zero, not a division by zero.**
+`TextLayout.composeTransform` reads
+
+```dart
+final scale = metrics.capHeight == 0 ? 0.0 : height / metrics.capHeight;
+```
+
+(`text_geometry.dart:242`), so a zero-metric measurer produces an explicit
+`0.0` scale and a singular matrix. Plan 3c's results note and
+`apps/dev_harness_2d/lib/main.dart`'s comment both describe the symptom
+correctly and the mechanism loosely; this document is the correction.
 
 `DraftCanvasState` does build a real measurer — `FlutterTextMeasurer()` at
 `draft_canvas.dart:123` — but hands it only to `CanvasDrawSink`
@@ -52,70 +64,78 @@ The same zero metrics reach the query path: `entityBounds` is called with
 picking a text entity — which Plan 3c made a `HitKind.fill` against that box —
 misses.
 
-### 2. Two paragraph caches, and even one would not be enough
+### 2. Two paragraph caches, and unifying them alone makes things worse
 
 Because the painter and the sink read different measurers, a text leaf costs up
-to two layouts. Plan 3c measured the cost on the query path alone at **+97 ms at
-50,000 entities and +105 ms at 500,000**, whole drawing, even into a
-`NullDrawSink`.
+to two layouts. Plan 3c measured the query-only row at **+97 ms at 50,000
+entities and +105 ms at 500,000**, into a `NullDrawSink`, and attributed it
+precisely: "That is not the sink; it is `document.textMeasurer.measure(...)` in
+`_drawText`, which runs whatever the sink is."
 
-Unifying the two objects does **not** by itself remove the second layout, and
-this is the finding that shapes the design. `FlutterTextMeasurer`'s cache is
-keyed `(text, styleHandle, argb)`. The painter reaches it through `measure()`,
-which substitutes `kMetricsProbeArgb` (`0xFF000000`,
-`flutter_text_measurer.dart:21`); the sink reaches it through `paragraphFor()`
-with the entity's resolved ARGB. Different colour, different key, **two layouts
-of the same string in the same cache**.
+**That cost is killed by LOD, not by unification.** It is the paint walk's
+measure call, and the LOD early return happens before it. Section 1 must not
+claim it.
 
-The class's own doc comment states the fact that makes this wrong: colour cannot
-change metrics. The colour belongs to the `ui.Paragraph`, not to the
-`TextMetrics`. The key is at the wrong layer.
+What unification alone would do is make the cache *worse*. Today the two caches
+are separate, so metrics pressure cannot evict drawn paragraphs. Merge them
+naively and a full `extents` recomputation — 4,020 distinct strings, no LOD
+protection — walks straight through a 512-entry cache and throws away every
+paragraph the paint path had warm.
+
+The key is also at the wrong layer. `FlutterTextMeasurer`'s cache is keyed
+`(text, styleHandle, argb)`. `measure()` substitutes `kMetricsProbeArgb`
+(`0xFF000000`, `flutter_text_measurer.dart:21`); `paragraphFor()` passes the
+entity's resolved ARGB. The class's own doc comment states the fact that makes
+this wrong: colour cannot change metrics. Colour belongs to the `ui.Paragraph`,
+not to the `TextMetrics`.
 
 ### 3. Whole-drawing cache thrash
 
 Plan 3c measured, at the whole-drawing camera, **4,140 new paragraph layouts and
 4,140 new evictions per frame** — the cache evicting entries the same frame asks
 for again — at **both** 50,000 and 500,000 entities, because the count is bounded
-by string variety rather than entity count. In each of two caches: 349,740
-layouts over the run.
+by string variety rather than entity count. Over the 500,000 run: 349,740
+layouts in the document's cache and 149,040 in the sink's.
 
-Raising `kParagraphCacheLimit` is not the answer and Plan 3c's Ruling 4 forbids
-using it as one. A bigger cache holds one zoom level of one corpus. Text that is
-too small to read does not need to be laid out at all.
+Raising `kParagraphCacheLimit` is not the answer and Ruling 4 forbids using it as
+one. A bigger cache holds one zoom level of one corpus. Text too small to read
+does not need to be laid out at all.
 
 ---
 
 ## Decisions taken
 
-Four, settled with the human on 2026-08-22 before this document was written.
+Settled with the human on 2026-08-22, before and after review.
 
 1. **This plan is text, not the picture cache.** The picture cache is four
    independent subsystems — the `InstanceNode`/`StyleContext` model completion,
    the definition picture cache, tiling, and text LOD — and does not fit one
-   spec. Text LOD is the only one of the four with no dependency on the other
-   three, and it carries the largest measured loss.
+   spec. Text LOD is the only one with no dependency on the other three, and it
+   carries the largest measured loss.
 2. **Below the threshold, draw nothing.** Not a greeked bar, not two tiers. Both
-   alternatives are to be written into the code as comments, with the reason
-   each was not taken now.
+   alternatives are written into the code as comments with the reason each was
+   not taken now.
 3. **The document owns the measurer; the widget borrows it.** Approach A of
-   three. The rejected alternatives are recorded under "Alternatives considered".
+   three; the rejected two are under "Alternatives considered".
 4. **The paragraph cache splits in two**, colour-free metrics and coloured
-   paragraphs, because one cache with one key cannot serve both callers without
-   laying every coloured string out twice.
+   paragraphs, with **separate bounds and separate counters**.
+5. **The metrics probe paragraph is disposed, not kept.** Reversed on review —
+   see Section 1.
+6. **The application owns the measurer's disposal.** `DraftCanvas.dispose()`
+   stops calling `clear()`.
 
 ---
 
 ## Non-goals
 
-- MTEXT, DXF `72=3`/`72=5` layout, and any other text feature. Out of 3c's
-  scope and out of this one's.
-- The definition/tile picture cache. That is Plan 3g.
-- The `InstanceNode`/`StyleContext` model completion and `documentRevision`.
-  Prerequisites for 3g, not for this plan.
+- MTEXT, DXF `72=3`/`72=5` layout, and any other text feature.
+- The definition/tile picture cache — Plan 3g.
+- The `InstanceNode`/`StyleContext` model completion and `documentRevision` —
+  prerequisites for 3g, not for this plan.
 - Permitted divergence 5 (overlapping translucent strokes on a triangle soup).
   Still open, still unexercised, still nobody's.
 - Moving `AllocationMeter` into `jet_cad_2d/lib/src/testing/` so the Flutter
-  suite can run a real allocation profile. Named as an accepted gap below.
+  suite can run a real allocation profile. An accepted gap, below.
 
 ---
 
@@ -129,13 +149,13 @@ measurer from `widget.document.textMeasurer`.
 `DraftCanvas` refuses, at `_attach()` time, a document whose `textMeasurer` is
 not a `FlutterTextMeasurer`. The refusal is **unconditional** — it does not
 consult `drawText`. `drawText: false` is a measurement flag, not a licence to
-carry a measurer that computes the wrong extents: a document whose boxes were
-computed from `TextMetrics.zero` is wrong whether or not glyphs are drawn. A
-guard conditioned on `drawText` would also force `CanvasDrawSink` to hold a
-throwaway `FlutterTextMeasurer` for its typed field
-(`canvas_draw_sink.dart:41`), which is the second cache coming back.
+carry a measurer that computes the wrong extents: a document whose boxes came
+from `TextMetrics.zero` is wrong whether or not glyphs are drawn. A guard
+conditioned on `drawText` would also force `CanvasDrawSink` to hold a throwaway
+`FlutterTextMeasurer` for its typed field (`canvas_draw_sink.dart:41`), which is
+the second cache coming back.
 
-The refusal message names the fix, in full, including the construction order:
+The refusal message names the fix in full, including the construction order:
 
 ```
 DraftCanvas requires document.textMeasurer to be a FlutterTextMeasurer;
@@ -146,81 +166,163 @@ document:
     final doc = DraftDocument.empty(measurer: measurer);
 ```
 
-`DraftDocument.empty`'s `InsertionPointMeasurer` default **stays**. It is a
-legitimate, documented lower bound for an engine-only caller — `jet_cad_2d` has
-no Flutter dependency and cannot construct a real measurer. The rule belongs at
-the widget boundary, which is the first point at which a real font stack is
-known to exist.
+`DraftDocument.empty`'s and `generateDocument`'s `InsertionPointMeasurer`
+defaults **stay**. They are legitimate, documented lower bounds for an
+engine-only caller — `jet_cad_2d` has no Flutter dependency and cannot construct
+a real measurer. The rule lives at the `DraftCanvas` boundary and nowhere else.
 
-`DraftPainter` is unchanged: it already reads `document.textMeasurer`. What
-changes is that the sink now reads the same object.
+`DraftPainter` is unchanged in this respect: it already reads
+`document.textMeasurer`. What changes is that the sink now reads the same object.
 
-This makes Plan 3c's **Ruling 36** — "a golden document must carry a real
-measurer" — structural rather than conventional.
+This makes Ruling 36 — "a golden document must carry a real measurer" —
+structural rather than conventional.
+
+### Disposal, which this change makes homeless
+
+`DraftCanvasState.dispose()` currently calls `_measurer.clear()`
+(`draft_canvas.dart:182`), which is correct while the widget owns the cache. It
+becomes wrong the moment the document owns it: two canvases over one document —
+a split view — share one measurer, and closing one would wipe the other's cache
+and every `ui.Paragraph` it holds.
+
+**Ruling: the application owns the measurer's lifetime.** It constructs the
+`FlutterTextMeasurer`, hands it to the document, and calls `clear()` when it
+retires the document. `DraftCanvas.dispose()` no longer calls `clear()`, and
+carries a comment saying why. This is the ordinary Dart contract for a
+native-resource holder — `ui.Image` works the same way — and it is the only
+option that does not add a lifecycle to the engine package.
+
+Two tests pin it:
+
+- **Split view.** Two `DraftCanvas`es over one document; dispose one; the other
+  still serves paragraphs from a warm cache with `layoutCount` unchanged.
+- **Application teardown.** `measurer.clear()` disposes every live paragraph —
+  the existing `debugLastEvicted` / `Paragraph.debugDisposed` surface already
+  supports this assertion.
+
+`_measurer`'s current doc comment (`draft_canvas.dart:120-122`) argues that the
+cache should *survive* a document swap. The new ownership reverses that on
+purpose — the cache belongs to the document, so swapping the document swaps the
+cache. The comment is rewritten, not deleted.
 
 ### The split cache
 
-`FlutterTextMeasurer` holds two maps instead of one.
+`FlutterTextMeasurer` holds two `LinkedHashMap`s, both least-recently-touched
+first, both evicting from the front.
 
-| map | key | value | bound | eviction |
-|---|---|---|---|---|
-| metrics | `(text, styleHandle)` | `TextMetrics` | `limit` | free — no native memory |
-| paragraphs | `(text, styleHandle, argb)` | `ui.Paragraph` | `limit` | `Paragraph.dispose()` |
+| map | key | value | bound |
+|---|---|---|---|
+| metrics | `(text, styleHandle)` | `TextMetrics` | `kMetricsCacheLimit` |
+| paragraphs | `(text, styleHandle, argb)` | `ui.Paragraph` | `kParagraphCacheLimit` = 512 |
 
-Both maps are `LinkedHashMap`s ordered least-recently-touched first, evicted the
-same way, at the same `limit` — `kParagraphCacheLimit = 512`. Ruling 4's single
-permitted raise stays unspent. The metrics map is bounded even though its entries
-are four doubles apiece: an unbounded map grows to every string in the document,
-which is the shape of a leak whatever it holds.
+**The bounds are different numbers for different reasons and must not be
+shared.** A paragraph entry holds native glyph memory; 512 is Ruling 4's, and
+Ruling 4's single permitted raise stays unspent. A metrics entry is four
+doubles. The paragraph map is sized against what a *frame* draws; the metrics map
+is sized against what a full `extents` sweep *touches*, which is every text
+entity in the document because LOD deliberately does not apply there.
 
-`measure()` reads the metrics map. On a miss it builds a paragraph at
-`kMetricsProbeArgb`, derives the metrics, stores them, and **keeps** the
-paragraph in the paragraph map. Keeping it is deliberate: ACI 7 resolves to
-black in this renderer and black text is the common case, so the probe
-paragraph is usually the one the sink asks for next. Disposing it would
-guarantee a miss.
+`kMetricsCacheLimit` must exceed the measured distinct-`(text, styleHandle)`
+count of the rig corpus, and **the count ships written beside the constant**. The
+expected value is about 4,020 — 4,000 unique `ATTRnnnnn` strings plus the twenty
+distinct labels Ruling 17 pins — which is roughly 400 KB of `TextMetrics`. A
+metrics map bounded at 512 against 4,020 keys would thrash on every sweep, and a
+metrics miss *builds a paragraph*, so the thrash costs real layouts. This is
+Ruling 4's reasoning applied to a different cache, not a raise of Ruling 4's own
+constant.
 
-`paragraphFor()` reads the paragraph map, unchanged in behaviour.
+`measure()` reads the metrics map. On a miss it **probes the paragraph map
+first** for any entry with the same `(text, styleHandle)`; if one exists at any
+colour, the metrics come from it and no layout happens. Only if neither map has
+it does it build a paragraph at `kMetricsProbeArgb`, read the metrics, store
+them, and **dispose the probe paragraph**.
 
-Both maps must be probed without allocating. The paragraph map keeps the
-existing mutable `_CacheKey` probe; the metrics map needs its own two-field
-equivalent, for the reason recorded in `MetricModelMeasurer`'s doc comment —
-building a record key per lookup was measured at roughly 41 `_Record`
-allocations per pick and broke `query_allocation_test`.
+**Disposing the probe is a reversal, and the reason it was reversed is a fact
+that was checked.** The first draft kept it, arguing ACI 7 is black so the probe
+would usually be the one the sink asked for next. `resolved_style.dart:53` maps
+ACI 7 to `0xFFFFFF` — **white** — pinned by `style_resolver_test.dart:365`. The
+probe's black is therefore almost never the drawn colour, so keeping it would
+hold two paragraph entries per distinct string and halve the effective capacity
+of a 512-entry cache to 256 distinct strings. The alternative is a named mutant
+so the threshold ladder measures it rather than taking this argument on trust.
 
-`measure()` must return the **identical** `TextMetrics` instance on a repeat
-call. That is the property `MetricModelMeasurer` already guarantees and the only
-proxy available for "this lookup allocates nothing" on the Flutter side (see
-Accepted gaps).
+`paragraphFor()` reads the paragraph map, building on a miss.
+
+**Every insert over an existing paragraph key disposes the displaced
+paragraph.** `_buildEntry` currently ends `_cache[key] = entry`
+(`flutter_text_measurer.dart:172`) with no disposal, which is unreachable today
+because it is only called on a miss. The split makes it reachable: the two maps
+evict independently, so a `(text, style)` pair can be live in the paragraph map
+after its metrics entry is gone. Without the disposal that is a native leak, and
+it is a named mutant.
+
+Both maps must be probed without allocating. The paragraph map keeps the existing
+mutable `_CacheKey`; the metrics map needs its own two-field equivalent, for the
+reason `MetricModelMeasurer`'s doc comment records — building a record key per
+lookup was measured at roughly 41 `_Record` allocations per pick and broke
+`query_allocation_test`.
+
+`measure()` must return the **identical** `TextMetrics` instance on a repeat call.
+
+### Counters, per map
+
+`layoutCount` stays one number — a layout is a layout. Everything else splits:
+
+- `paragraphEvictionCount` and `metricsEvictionCount`. A paragraph eviction costs
+  native memory and a future re-layout; a metrics eviction is four doubles. Gate
+  row 2 reads the paragraph one. Blending them is Ruling 54's exact mistake — the
+  one this design refuses for `culledText` against `skippedText`.
+- `liveParagraphCount` stays pinned to the paragraph map. Plan 3c's "peak live
+  paragraphs at or below the declared limit" row depends on it meaning native
+  paragraphs.
+- `clear()` clears and disposes both.
+- `resetCounters()` zeroes all three counts and touches neither map.
+
+`measurement_rig.dart:155-157` prints `newLayouts=`, `newEvictions=` and `live=`
+from these and gains the second eviction number.
 
 ### What this buys, stated honestly
 
-The first time a string in a non-black colour is seen it still costs two
-layouts: the painter must measure before it can compose a transform, the sink
-must lay out to draw, and two colours are genuinely two `ui.Paragraph` objects.
-**Steady state is zero**, which is what every gate row measures.
+**Unification is required for correctness.** One real measurer is what makes the
+painter and the sink agree and what makes `extents` and picking see real boxes.
 
-The real win is the query path. `DraftDocument.extents`, `entityBounds` and
-picking now hit the metrics map and build **no** `ui.Paragraph` at all once it
-is warm. That is where the +97 ms / +105 ms came from.
+**The split is what stops unification from making the cache worse.** Merged
+naively, an `extents` sweep over 4,020 strings evicts everything the paint path
+had warm. Split, the sweep lands in the metrics map and the drawn paragraphs
+survive. That is the whole payoff, and it is a regression *prevented*, not a
+speed-up delivered.
+
+**The +97 ms / +105 ms is killed by LOD**, in Section 2, because it is the paint
+walk's own `measure` call and LOD returns before it.
+
+**First sight of a string still costs up to two layouts** — a disposed probe for
+the metrics, then the drawn paragraph. Steady state is zero, which is what every
+gate row measures.
 
 ### Blast radius
 
-Seven files construct a `DraftCanvas`. The three golden ladders already carry a
-`FlutterTextMeasurer` (Ruling 36) and are unaffected. The guard trips the other
-four, seven documents in total:
+Seven files construct a `DraftCanvas`. Only `text_ladder_golden_test.dart:59`
+already passes a `FlutterTextMeasurer`. The guard trips the other six, nine
+documents in total:
 
 | file | documents | current measurer |
 |---|---|---|
-| `draft_canvas_test.dart` | 3 | two default, one `MetricModelMeasurer` |
-| `render_backend_test.dart` | 2 | `generateDocument`'s default |
-| `frame_path_seam_test.dart` | 1 | default |
-| `apps/dev_harness_2d/lib/main.dart` | 1 | conditional — see below |
+| `test/draft_canvas_test.dart` | 3 | two default (`:112`, `:180`), one `MetricModelMeasurer` (`:282`) |
+| `test/render_backend_test.dart` | 2 | `generateDocument`'s default (`:9`, `:69`) |
+| `test/frame_path_seam_test.dart` | 1 | default (`:39`) |
+| `test/golden/dash_ladder_golden_test.dart` | 1 | default (`:22`) |
+| `test/golden/fill_ladder_golden_test.dart` | 1 | default (`:46`) |
+| `apps/dev_harness_2d/lib/main.dart` | 1 | conditional — below |
 
-Each is a one-line change: pass a `FlutterTextMeasurer`. `generateDocument`'s own
-`measurer` default stays `InsertionPointMeasurer`, for the same reason
-`DraftDocument.empty`'s does — an engine-only caller is legitimate. The rule is
-at the `DraftCanvas` boundary and nowhere else.
+**The task re-scans every `DraftCanvas` call site rather than trusting this
+table.** The table was wrong once already: the first draft of this document
+asserted all three golden ladders were safe, and two of them are not.
+
+Each is a one-line change: pass a `FlutterTextMeasurer`.
+`draft_canvas_test.dart:282` swaps `MetricModelMeasurer` for
+`FlutterTextMeasurer` and loses nothing — that test asserts `textOpCount == 1`,
+which is about the `drawText` forward, not about the metric model — and it must
+also pass `minTextCapPixels: 0` so LOD does not cull the entity it counts.
 
 `main.dart` is the interesting one. It already works around this defect by hand:
 
@@ -233,19 +335,14 @@ and its doc comment names the failure exactly — "every text transform to a
 singular matrix. A text corpus built on it looks like a text corpus and draws
 nothing measurable." The workaround was applied at one call site and the cause
 left in place. Under the guard the ternary collapses to an unconditional
-`FlutterTextMeasurer()`, and the thing that turns text off becomes
-`labelFraction: 0` and `attributedInstanceFraction: 0`, which is the correct
-axis. **A task that leaves the ternary in place has not done the work.**
-
-`measurement_rig.dart` reads `sink.measurer` (`:217`) and prints `newLayouts`
-and `newEvictions` from it (`:155`). Under this change `sink.measurer` **is**
-`document.textMeasurer`, so the rig keeps working through the same expression
-and starts reporting the only cache there is.
+`FlutterTextMeasurer()`, and what turns text off becomes `labelFraction: 0` and
+`attributedInstanceFraction: 0`, which is the correct axis. **A task that leaves
+the ternary in place has not done the work.**
 
 ### Alternatives considered
 
-**The widget owns it and attaches it to the document.** `textMeasurer` would
-stop being `final` and a once-only `attachMeasurer()` would call
+**The widget owns it and attaches it to the document.** `textMeasurer` would stop
+being `final` and a once-only `attachMeasurer()` would call
 `invalidateDerived()`. Zero burden on the application, which is its real appeal.
 Rejected because applications read `doc.extents` to place the initial camera
 *before* the canvas mounts: that read would be served by zero metrics, and
@@ -254,9 +351,8 @@ the wrong box. `DraftDocument.textMeasurer`'s own doc comment argues the same
 class of hazard for making the field `final`.
 
 **Keep two objects and make the default loud.** Drop the default from
-`DraftDocument.empty` so a measurer must be named. Closes the silent failure and
-leaves the double layout exactly where it is, with the +97/+105 ms intact.
-Cheapest and worth the least.
+`DraftDocument.empty` so a measurer must be named. Closes the silent failure,
+leaves the double layout where it is. Cheapest and worth the least.
 
 ---
 
@@ -264,7 +360,9 @@ Cheapest and worth the least.
 
 ### The test, and where it goes
 
-`DraftPainter._drawText` gains an early return. The order in the method becomes:
+`DraftPainter._drawText` gains an early return. **The method is also reordered**:
+today it calls `measure()` at `:807` and `TextLayout.resolve` at `:812`. The new
+order is
 
 1. `drawText` off → return
 2. empty string → `_skippedText++`, return
@@ -283,12 +381,12 @@ if (screenCap < minTextCapPixels) {
 
 `TextLayout.resolve` needs no metrics — it resolves height, rotation, width
 factor, oblique angle and justification from the payload, the attribute bits and
-the style record (`text_geometry.dart:172`). `TextLayout.height` is the
-effective DXF text height, which **is** the cap height, in world units.
+the style record (`text_geometry.dart:172`). `TextLayout.height` is the effective
+DXF text height, which **is** the cap height, in world units.
 `Transform2.scaleMagnitude` is `sqrt(|det|)`, already in the codebase
 (`transform2.dart:87`) and already documented as the representative scale the
-renderer uses. `chain` carries camera, ancestors, instance, placement and
-rebase, so the product is the on-screen cap height in pixels.
+renderer uses. `chain` carries camera, ancestors, instance, placement and rebase,
+so the product is the on-screen cap height in pixels.
 
 **No measurement is involved, and that is the whole point.** Placing this test
 after step 5 would cull the draw and save no layout — it would look like it
@@ -304,10 +402,27 @@ display the same text is six device pixels tall, so the rule culls **less** than
 a device-pixel rule would. That is the safe direction, the same one
 `kScreenClipInflate` takes.
 
-The plan must measure a threshold ladder against the corpus — layouts, evictions
-and `culledTextCount` at a range of thresholds and at both cameras — and record
-the table beside the constant. The constant ships with a measurement, not with
-an estimate.
+The plan measures a threshold ladder against the corpus and records the table
+beside the constant. The ladder reports, per threshold and per camera:
+layouts, paragraph evictions, metrics evictions, `culledTextCount`, **and the
+distinct surviving key count in each map**. The last is the number that says
+whether 3.0 is feasible or whether Ruling 4's single raise finally gets spent.
+
+### Why rows 1 and 2 are reachable, and why that is fragile
+
+`generate_document.dart:676` gives every attribute a fixed height of `80.0`;
+labels get `100 + rand*200` (`:631`, `:650`). At a 96,000-unit-wide camera an
+attribute is about one pixel of cap height. Attributes are 4,000 of the 4,020
+distinct pairs and Ruling 54 measured them at a 0.0% hit rate. LOD culls the
+entire pressure, leaving roughly 140 label keys — comfortably under 512 — which
+is why rows 1 and 2 can read zero.
+
+**That also makes the gate a step function rather than a gradient.** One fixed
+attribute height means one threshold at which 4,000 keys vanish at once. A later
+corpus change that varies attribute height would move the step and could take the
+gate green-to-green while the mechanism degrades. This is the repo's named
+degenerate-fixture class wearing a different hat, and it is written here so the
+plan's threshold ladder is read as a step-locator, not as a curve.
 
 ### Disabling it
 
@@ -316,35 +431,52 @@ an estimate.
 against LOD-off on the same corpus at the same camera; without a control arm the
 before/after numbers are two different documents.
 
-Both fields are `final`, for the reason `drawText` is (`draft_canvas.dart:87`).
+Both fields are `final`, for the reason `drawText` is (`draft_canvas.dart:89`).
+
+**`minTextCapPixels` must be added to `didUpdateWidget`'s comparison list**
+(`draft_canvas.dart:161-169`). Without it a rebuild that changes the threshold
+keeps the old painter, so the LOD-off control arm silently measures the LOD-on
+build and looks like it worked. Named mutant, and the equivalent prop-update test
+already exists for `drawText`.
+
+The harness maps its `LOD` define to `true → kMinTextCapPixels`,
+`false → 0.0`, and passes it to `DraftCanvas` (`main.dart:443-452` forwards
+`drawText` today and nothing else).
 
 ### Anisotropy
 
 `scaleMagnitude` is the geometric mean of the axis scales, so text squashed in y
-under an anisotropic placement reads taller than it renders and is culled later
-than it should be. This is the same approximation the painter already makes for
+under an anisotropic placement reads taller than it renders and survives longer
+than it should. This is the same approximation the painter already makes for
 curve stroke widths past `kAnisotropyThreshold`, and it errs toward drawing.
 Recorded here rather than hidden; not counted separately.
 
 ### The reference walk derives its own
 
-`reference_walk.dart` is the differential oracle. It must apply the same LOD
-rule and must **compute it itself** — from `resolveTextAttributes(...).height`
-(`text_geometry.dart:62`) and its own `chain.scaleMagnitude` — never by asking
-the painter what it decided. Sharing the decision would have the oracle share
-the assumption it exists to test. This is the correction Plan 3e made at
+`reference_walk.dart` is the differential oracle. It must apply the same LOD rule
+and must **compute it itself** — from `resolveTextAttributes(...)`
+(`text_geometry.dart:286`) `.height` and its own `chain.scaleMagnitude` — never
+by asking the painter what it decided. Sharing the decision would have the oracle
+share the assumption it exists to test. This is the correction Plan 3e made at
 `24cfd23` for fill triangulation, applied here before it can go wrong.
 
 The walk already skips the empty string independently
 (`reference_walk.dart:161`), which is the same pattern.
 
+**`referenceWalk` therefore needs the threshold as an input.** Its signature is
+five positional parameters and carries no LOD knob
+(`reference_walk.dart:29-42`); it gains `minTextCapPixels`, and so do its two
+call sites, `test/support/fixtures.dart:169` and `differential_test.dart:63`.
+Without it the plan cannot demonstrate matched on/off control arms, and cannot
+build the near-threshold non-identity fixture mutant 5 requires.
+
 ### The counter
 
 `DraftPainter.culledTextCount`, reset per frame in `paint()` beside the others.
 
-Kept separate from `skippedTextCount`, which stays the empty-string and
-`drawText: false` half. Blended, the gate cannot tell which mechanism fired —
-the same mistake Ruling 54 records for the cache hit rate.
+Kept separate from `skippedTextCount`, which counts **the empty string only** —
+`drawText: false` returns at `draft_painter.dart:796`, before the counter.
+Blended, the gate cannot tell which mechanism fired; that is Ruling 54's mistake.
 
 ### Documented alternatives
 
@@ -355,8 +487,8 @@ what it would cost:
   zoomed-out plan keeps its visual weight. In the vertices sink a bar is two
   batched triangles, effectively free. The obstacle is the width: it needs
   `advanceWidth`, so either the layout happens anyway and the saving is lost, or
-  a font-free width model (`text.length × ratio`, the shape
-  `MetricModelMeasurer` uses) is introduced as a new approximation.
+  a font-free width model (`text.length × ratio`, the shape `MetricModelMeasurer`
+  uses) is introduced as a new approximation.
 - **Two tiers** — greek in a middle band, nothing beyond it. Closest to real CAD
   and the most control, at two constants, two counters, two golden ladders, and
   the same font-free width model.
@@ -373,13 +505,12 @@ decision from text that is not drawn. Both are gate rows.
 
 ### No failable criterion is a timing
 
-Every row below is a count: layouts, evictions, culled entities, allocations.
-Plan 3c's whole session ran under macOS Low Power Mode and every timing in it is
-contaminated; Plan 3e's 10,000-entity row was measured, cleared its bar by a
-wide margin, and still could not be scored for the same reason. Counts are
-machine-independent.
+Every row below is a count. Plan 3c's whole session ran under macOS Low Power
+Mode and every timing in it is contaminated; Plan 3e's 10,000-entity row was
+measured, cleared its bar by a wide margin, and still could not be scored for the
+same reason. Counts are machine-independent.
 
-Timings are still to be measured and written down. They are not gates.
+Timings are still measured and written down. They are not gates.
 
 The results note must state whether Low Power Mode was on, checked with
 `pmset -g | grep lowpowermode` **before** the first run.
@@ -398,28 +529,35 @@ Both figures are identical at 50,000 and 500,000 entities.
 | # | row | threshold |
 |---|---|---|
 | 1 | whole-drawing camera, repeat frame, new layouts | **0** (baseline 4,140) |
-| 2 | whole-drawing camera, repeat frame, evictions | **0** (baseline 4,140) |
-| 3 | working-set camera, layouts and evictions | **0** — no regression |
+| 2 | whole-drawing camera, repeat frame, **paragraph** evictions | **0** (baseline 4,140) |
+| 3 | working-set camera, layouts and paragraph evictions | **0** — no regression |
 | 4 | `culledTextCount`, whole-drawing camera | **> 0** |
 | 5 | `culledTextCount`, working-set camera | **0** |
 | 6 | `doc.extents` at `minTextCapPixels` 0 and 1000 | **bit-identical** |
 | 7 | picking a text entity, at both thresholds | same hit |
 | 8 | `DraftCanvas` over a document with the default measurer | **throws, naming the fix** |
 | 9 | differential oracle, LOD on, both cameras | passes |
-| 10 | `layoutCount` after a warm pick sweep | **0** |
-| 11 | mutation log | every mutant killed or argued equivalent |
+| 10 | **extents-sweep non-interference** — see below | layouts **0**, paragraph evictions **0** |
+| 11 | split view: dispose one canvas | the other's `layoutCount` unchanged |
+| 12 | `measurer.clear()` | every live paragraph `debugDisposed` |
+| 13 | mutation log | every mutant killed, argued equivalent, or recorded unmeasurable with its reason |
 
-Rows 4 and 5 are load-bearing as a pair. Row 4 alone passes on a corpus with no
-text; row 5 alone passes with LOD disabled. One proves the mechanism fires, the
-other proves it does not fire where text is readable — which is the row a
-threshold set too high fails.
+**Rows 4 and 5 are load-bearing as a pair.** Row 4 alone passes on a corpus with
+no text; row 5 alone passes with LOD disabled. One proves the mechanism fires,
+the other proves it does not fire where text is readable — the row a threshold
+set too high fails.
 
-Row 10 is Plan 3c carry-forward item 2 discharged: the query path must build no
-`ui.Paragraph` once the metrics map is warm.
+**Row 10 is the row the split exists for**, and it replaces a weaker "warm pick
+sweep" row that a narrow sweep could pass while the regression hid behind it:
 
-**If a failable row misses: record the number and stop.** Plan 3b's Task 4 stop
-clause is the precedent. Do not tune the threshold until the row complies —
-say what the number implies for Plan 3g's text LOD and stop.
+1. paint one frame at the working-set camera, warm
+2. `invalidateDerived()`, then a full `doc.extents` recomputation — every text
+   entity in the document, roughly 4,020 distinct strings, no LOD
+3. repaint at the same camera
+
+New paragraph layouts **0** and paragraph evictions **0**. A merged cache fails
+this by construction: step 2 walks 4,020 keys through 512 slots and evicts
+everything step 3 needs. A metrics map bounded too low fails it too, in layouts.
 
 ### Named mutants
 
@@ -429,65 +567,102 @@ A test is worth landing here only if a named mutation makes it red.
 |---|---|---|
 | 1 | move the LOD test after `measure()` | row 1 |
 | 2 | `<` → `<=` at the threshold | boundary fixture, one entity exactly at `kMinTextCapPixels` |
-| 3 | drop `chain.scaleMagnitude`, cull on world height alone | row 5 (culls at every zoom) |
+| 3 | drop `chain.scaleMagnitude`, cull on world height alone | row 5 |
 | 4 | drop `_culledText++` | row 4 |
-| 5 | reference walk reads the painter's decision | a fixture where the two would differ |
-| 6 | key the metrics map by ARGB — undo the split | row 10 |
-| 7 | allocate the metrics probe key per call | the `identical` assertion |
+| 5 | reference walk reads the painter's decision | near-threshold, non-identity placement fixture |
+| 6 | merge the two maps back into one | row 10 |
+| 7 | `kMetricsCacheLimit` set to `kParagraphCacheLimit` | row 10, in layouts |
 | 8 | remove the `DraftCanvas` guard | row 8 |
 | 9 | `measure()` does not store metrics | rows 1 and 10 |
 | 10 | apply LOD inside `entityBounds` | row 6 |
-| 11 | `culledTextCount` not reset per frame | a two-frame fixture |
+| 11 | `culledTextCount` not reset per frame | two-frame fixture |
+| 12 | `measure()` skips the paragraph-map probe on a metrics miss | a layout-count assertion on a string already drawn |
+| 13 | insert over an existing paragraph key without disposing | `Paragraph.debugDisposed` on the displaced entry |
+| 14 | keep the metrics probe paragraph instead of disposing it | the threshold ladder's distinct-key column |
+| 15 | `DraftCanvas.dispose()` keeps calling `clear()` | row 11 |
+| 16 | `minTextCapPixels` left out of `didUpdateWidget` | prop-update test, the shape `drawText`'s already has |
 
-Mutant 5 needs a fixture the plan must design deliberately: the painter and the
-walk must be capable of disagreeing, which means text near the threshold under a
+**Mutant 6 replaced a bad one.** The first draft named "key the metrics map by
+ARGB", expecting row 10 to kill it. `measure()` always passes
+`kMetricsProbeArgb`, so re-keying by ARGB changes nothing observable — an
+equivalent mutant dressed as a real one. Merging the maps is the mutation that
+actually undoes the design.
+
+**Mutant 5 needs a fixture designed on purpose.** The painter and the walk must
+be capable of disagreeing, which means text near the threshold under a
 non-identity placement. A fixture at the identity transform cannot tell them
-apart — the repo's named dominant defect class.
+apart — the repo's named dominant defect class. The two reach `chain` by
+different routes (`draft_painter.dart:793`, `reference_walk.dart:145-148`), so a
+genuine disagreement is constructible.
+
+**Mutant 14 exists because a premise was wrong once.** The probe-disposal
+decision rests on ACI 7 resolving to white; the ladder measures the alternative
+rather than trusting the argument.
 
 ### Goldens
 
-One new ladder, `text_lod_ladder`, three rungs × two backends = six PNGs.
+One new ladder, `text_lod_ladder`, three rungs × two backends = six PNGs. Both
+backends are real: `RenderBackend.canvas` survives as an explicit choice even
+though the default is `vertices`.
 
 The fixture is one drawing carrying three text heights under a camera chosen so
-that the smallest is culled, the largest is not, and the middle sits near the
+the smallest is culled, the largest is not, and the middle sits near the
 boundary. It pins the threshold visually and goes red if the constant moves.
 
-Per Ruling 36 the golden document carries a `FlutterTextMeasurer`, which the
-guard now enforces anyway. Per the `flutter_test` trap, a golden asserting
-anything about glyph shape needs `Roboto-Regular.ttf` through a `FontLoader`;
-this one asserts presence and absence, so Ahem is sufficient — and the plan must
-say so explicitly rather than leave it to the reader.
+Ahem is sufficient and the reason is stronger than "presence and absence":
+`capHeight` is `kCapHeightRatio * kNominalTextPixels`, a constant, and the LOD
+test reads no metrics at all, so the cull decision is **font-independent**. The
+ladder is font-proof. It still carries a `FlutterTextMeasurer` per Ruling 36,
+which the guard now enforces anyway.
+
+**No pre-existing PNG may be regenerated**, and `text_ladder` in particular must
+not move. Its `kWorld` is 200×150 (`text_ladder_golden_test.dart:38`) rendered
+into `kGoldenViewport`, `Size(400, 300)` (`:32`) — 2.0 px per world unit — and
+its smallest rung is height 11 (`:222`), giving 22 pixels of cap height against a
+3.0 threshold: a **7.3× margin**. Note that `kGoldenViewport` is declared
+separately in each golden file and is *not* `fixtures.dart`'s `kViewport`, which
+is `Size(800, 600)`; reading the wrong one doubles the apparent margin. That
+margin belongs in this document rather than in the implementer's head.
 
 ### The rig
 
 `apps/dev_harness_2d` gains a `LOD` define. Per the trap,
 `bool.fromEnvironment` reads `--dart-define=LOD=1` as **false**; the define is
 therefore a `String.fromEnvironment` that throws on anything but `"true"` and
-`"false"`, which is the pattern Plan 3e used for `FILLS`.
+`"false"`, the pattern Plan 3e used for `FILLS`. It maps to
+`minTextCapPixels: kMinTextCapPixels` or `0.0` and is forwarded to `DraftCanvas`.
 
-`printInvariants` (`measurement_rig.dart:154`) gains `culledText=` beside
-`skippedText=`. Per the trap, any rig guard belongs before the first print or
-nowhere — R4a and R4b printed three lines and threw, for months.
+`printTextCounters` (`measurement_rig.dart:145`, which is where `skippedText=`
+is printed at `:154` — **not** `printInvariants` at `:102`) gains `culledText=`
+and the second eviction count. Per the trap, any rig guard belongs before the
+first print or nowhere: R4a and R4b printed three lines and threw, for months.
 
 ---
 
 ## Accepted gaps
 
-**The metrics map's allocation behaviour cannot be profiled.**
+**The metrics map's lookup allocation cannot be measured.**
 `query_allocation_test.dart` lives in the engine suite because
 `jet_cad_2d_flutter` has no `vm_service` dependency — Plan 3c carry-forward
 item 3. The split cache is Flutter-side, so no VM allocation profile can watch
-it. The proxy is the `identical` assertion on a repeat `measure()` call. That is
-weaker than a profile and is to be written as weaker, not as proof. Moving
-`AllocationMeter` into `jet_cad_2d/lib/src/testing/` would close it and is out
-of scope here.
+it. The `identical` assertion on a repeat `measure()` proves the **value** is
+cached; it proves nothing about whether the lookup allocated a key.
+
+Consequently the mutation "allocate the metrics probe key per call" is
+**unmeasurable on this side and is recorded as such rather than listed as a
+mutant with a killer that cannot kill it.** Row 13 admits that third category
+explicitly, and Plan 3e's log has the precedent — two documented gaps beside
+fifty-two kills. Moving `AllocationMeter` into `jet_cad_2d/lib/src/testing/`
+would close it and is out of scope here.
 
 **Anisotropic placements cull late.** Stated in Section 2, not counted.
 
+**The gate's text pressure is a step function.** Stated in Section 2. The
+threshold ladder locates a step; it does not trace a curve.
+
 **The engine package is untouched.** `DraftDocument`, `TextMeasurer`,
-`TextMetrics` and `text_geometry.dart` all keep their current shape. If a task
-finds it needs an engine change, that is a signal the design is wrong, not a
-licence — raise it as a ruling.
+`TextMetrics` and `text_geometry.dart` keep their current shape. A task that
+finds it needs an engine change should raise it as a ruling, not take it.
 
 ---
 
@@ -495,26 +670,32 @@ licence — raise it as a ruling.
 
 **Modified**
 
-- `packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart` — the split
+- `packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart` — the split,
+  the two bounds, per-map counters, probe disposal, dispose-on-overwrite
 - `packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart` — measurer resolution,
-  the guard, `minTextCapPixels`
-- `packages/jet_cad_2d_flutter/lib/src/draft_painter.dart` — the LOD test,
-  `culledTextCount`, `kMinTextCapPixels`, `minTextCapPixels`
+  the guard, `minTextCapPixels` including in `didUpdateWidget`, `dispose()` no
+  longer calling `clear()`
+- `packages/jet_cad_2d_flutter/lib/src/draft_painter.dart` — the reorder, the LOD
+  test, `culledTextCount`, `kMinTextCapPixels`, `minTextCapPixels`
 - `packages/jet_cad_2d_flutter/lib/src/reference_walk.dart` — an independently
-  derived LOD
-- `apps/dev_harness_2d/lib/main.dart` — the `LOD` define, and the
-  `kTextCorpus ? ... : ...` measurer ternary collapsed to an unconditional
-  `FlutterTextMeasurer()`
-- `apps/dev_harness_2d/lib/measurement_rig.dart` — `culledText=`
+  derived LOD, and `minTextCapPixels` on `referenceWalk`
+- `packages/jet_cad_2d_flutter/test/support/fixtures.dart` — the new parameter
+- `packages/jet_cad_2d_flutter/test/differential_test.dart` — the new parameter
+- `apps/dev_harness_2d/lib/main.dart` — the `LOD` define, the threshold
+  forwarded, and the measurer ternary collapsed
+- `apps/dev_harness_2d/lib/measurement_rig.dart` — `culledText=` and the second
+  eviction count, in `printTextCounters`
 - `packages/jet_cad_2d_flutter/test/draft_canvas_test.dart` — three documents
-  adapted to the guard
 - `packages/jet_cad_2d_flutter/test/render_backend_test.dart` — two documents
 - `packages/jet_cad_2d_flutter/test/frame_path_seam_test.dart` — one document
-- `STATUS.md` — the 3f/3g renumbering
+- `packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart` — one
+- `packages/jet_cad_2d_flutter/test/golden/fill_ladder_golden_test.dart` — one
+- `STATUS.md` — the 3f/3g renumbering, all fourteen occurrences
 
 **Created**
 
 - `packages/jet_cad_2d_flutter/test/text_lod_test.dart`
+- `packages/jet_cad_2d_flutter/test/text_measurer_split_test.dart`
 - `packages/jet_cad_2d_flutter/test/golden/text_lod_ladder_golden_test.dart`
   and six PNGs
 - `docs/superpowers/notes/2026-08-22-plan-3f-results.md`
@@ -526,8 +707,7 @@ licence — raise it as a ruling.
 
 Copied from `CLAUDE.md`; every task's requirements include them.
 
-- The frame path allocates nothing per entity in steady state, and O(1) per
-  flush.
+- The frame path allocates nothing per entity in steady state, and O(1) per flush.
 - Draw order is ascending handle value, stable across undo, save, load and purge.
 - Geometric *decisions* use `Tolerance`; *stored value* comparisons are exact `==`.
 - Never commit `analysis_options.yaml`. Also never commit
@@ -545,13 +725,15 @@ Copied from `CLAUDE.md`; every task's requirements include them.
 
 ## What this owes Plan 3g
 
-- **A working text LOD**, which is one of the four subsystems 3g was carrying.
-  3g inherits three: the `InstanceNode`/`StyleContext` model completion, the
-  definition picture cache, and tiling.
-- **The threshold ladder table**, which is the first real measurement of how
-  much of a zoomed-out frame is text.
+- **A working text LOD**, one of the four subsystems 3g was carrying. 3g inherits
+  three: the `InstanceNode`/`StyleContext` model completion, the definition
+  picture cache, and tiling.
+- **The threshold ladder table**, the first real measurement of how much of a
+  zoomed-out frame is text, with the caveat that it locates a step.
+- **A measured distinct-`(text, styleHandle)` count** for the rig corpus, which
+  is the number any future text cache is sized against.
 - **The unresolved question of whether a cached picture may contain text at
   all.** A baked picture is recorded per scale band; LOD is a function of
   continuous scale. A definition baked at one band and replayed across the band
   either draws text the current zoom would have culled or omits text it would
-  have drawn. 3g must decide, and this plan does not.
+  have drawn. 3g must decide; this plan does not.
