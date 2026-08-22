@@ -79,6 +79,20 @@ final double kDashedFraction = double.tryParse(
 const bool kTextCorpus = bool.fromEnvironment('TEXT');
 const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
 
+/// Whether the painter culls text too small to read.
+///
+/// **A `String.fromEnvironment`, and it stays one.** `bool.fromEnvironment`
+/// reads `--dart-define=LOD=1` as **false**, and Plan 3c lost a full device run
+/// to exactly that with `TEXT=1`. An unrecognised value throws at startup rather
+/// than falling back to something that looks fine.
+final double kMinTextCap =
+    switch (const String.fromEnvironment('LOD', defaultValue: 'true')) {
+  'true' => kMinTextCapPixels,
+  'false' => 0.0,
+  final other => throw ArgumentError.value(
+      other, 'LOD', 'expected "true" or "false"'),
+};
+
 /// Fraction of the closed polylines [_addFillRegions] adds that gain a region
 /// partner (a fill), when [kFillsEnabled] is on. Named beside
 /// [kDashedFraction] for the same reason: a quota, applied by an accumulator
@@ -462,6 +476,7 @@ class _HarnessAppState extends State<HarnessApp> {
                 camera: camera,
                 lineweightScale: kLineweightScale,
                 drawText: kDrawText,
+                minTextCapPixels: kMinTextCap,
                 backend: kBackend),
           ),
         ),

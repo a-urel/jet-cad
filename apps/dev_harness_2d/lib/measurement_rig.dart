@@ -152,7 +152,8 @@ void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
   print('  text: corpus=${textCorpus ? "on" : "off"} '
       'draw=${drawText ? "on" : "off"} '
       'textOps=${painter.textOpCount} '
-      'skippedText=${painter.skippedTextCount}');
+      'skippedText=${painter.skippedTextCount} '
+      'culledText=${painter.culledTextCount}');
   // Two eviction numbers, not one. A paragraph eviction released native glyph
   // memory and guarantees a future re-layout; a metrics eviction dropped four
   // doubles. Ruling 54: a blended number hides which half moved.
