@@ -5,137 +5,193 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 /// The paragraph cache's entry ceiling.
 ///
-/// **Owned by this task and moves at most once.** A future task may raise it,
-/// but only alongside a measured distinct-visible-key count recorded beside
-/// it — never to relax the zero-new-layouts gate a paint-path test checks
-/// against, and never behind an eviction-policy switch.
+/// **Owned by Plan 3c Task 9 and moves at most once, under Ruling 4.** A
+/// paragraph holds native glyph memory, so this bound is about memory, and it
+/// is sized against what one *frame* draws.
 const int kParagraphCacheLimit = 512;
+
+/// The metrics cache's entry ceiling.
+///
+/// **A different number for a different reason, and deliberately not shared
+/// with [kParagraphCacheLimit].** A [TextMetrics] is four doubles, so this
+/// bound is not about memory; it exists so the map is not unbounded. It is
+/// sized against what a full `DraftDocument.extents` sweep *touches*, which is
+/// every text entity in the document, because level of detail deliberately does
+/// not apply on the query path.
+///
+/// The rig corpus is expected to hold about 4,020 distinct
+/// `(text, styleHandle)` pairs — 4,000 unique `ATTRnnnnn` strings and the
+/// twenty distinct labels Ruling 17 pins — and this is that with room. **That
+/// figure is derived from the corpus generator, not yet measured;** Plan 3f
+/// Task 8 replaces this sentence with the measured count.
+///
+/// Raising this does not spend Ruling 4's single permitted raise. Ruling 4
+/// names [kParagraphCacheLimit] and the zero-new-layouts paint row.
+const int kMetricsCacheLimit = 8192;
 
 /// The colour a metrics-only request is built with.
 ///
-/// [FlutterTextMeasurer.measure] shares [FlutterTextMeasurer.paragraphFor]'s
-/// cache, whose key includes an ARGB colour because `ui.Paragraph` bakes
-/// colour in at build time. Colour cannot change metrics, though, so every
-/// metrics-only request is built under this one declared colour rather than
-/// adding a cache entry per colour a caller happens to ask metrics for.
+/// A `ui.Paragraph` bakes its colour at [ParagraphBuilder.pushStyle] time, so a
+/// paragraph must be built to read metrics off it — but colour cannot change
+/// metrics, so the one built for a metrics request is built at this declared
+/// colour and disposed immediately. See [FlutterTextMeasurer.measure].
 const int kMetricsProbeArgb = 0xFF000000;
 
-/// Lays a string out once, at [kNominalTextPixels], behind an LRU cache of
-/// `ui.Paragraph`s.
+/// Lays a string out once, at [kNominalTextPixels], behind two caches.
 ///
-/// **Layout is size-independent by design.** Height, rotation, width factor
-/// and oblique angle are transforms applied to the laid-out box afterwards —
-/// see `text_geometry.dart` — so the only inputs that can change the layout
-/// are the string, the font and the colour a paragraph is baked with. That is
-/// why a repeat request for the same `(text, style, colour)` triple is a
-/// cache hit rather than a re-layout, and why this class needs no
-/// scale-band invalidation axis at all.
+/// **Layout is size-independent by design.** Height, rotation, width factor and
+/// oblique angle are transforms applied to the laid-out box afterwards — see
+/// `text_geometry.dart` — so the only inputs that can change a layout are the
+/// string, the font and the colour a paragraph is baked with. That is why this
+/// class needs no scale-band invalidation axis at all.
 ///
-/// **Why the key carries an ARGB colour.** `Canvas.drawParagraph` takes no
-/// `Paint` — a `ui.Paragraph` bakes its colour in at
-/// [ParagraphBuilder.pushStyle] time — so two same-string entities in
-/// different colours are genuinely two different native paragraphs, not one
-/// paragraph drawn twice. A key without the colour would draw one of them in
-/// the wrong colour.
+/// **Two maps, because one key cannot serve both callers.** `ui.Paragraph`
+/// bakes its colour, so a drawn paragraph is genuinely keyed by
+/// `(text, styleHandle, argb)`. [TextMetrics] is not: colour cannot change
+/// metrics. A single map keyed on the wide tuple lays every coloured string out
+/// twice — once at [kMetricsProbeArgb] for [measure] and once at the entity's
+/// colour for [paragraphFor] — and, worse, lets a full `extents` sweep evict
+/// every paragraph the paint path had warm. Splitting them is what makes one
+/// shared measurer safe.
 class FlutterTextMeasurer implements TextMeasurer {
-  FlutterTextMeasurer({this.limit = kParagraphCacheLimit});
+  FlutterTextMeasurer({
+    this.paragraphLimit = kParagraphCacheLimit,
+    this.metricsLimit = kMetricsCacheLimit,
+  });
 
-  /// Entries kept before the least-recently-touched one is evicted.
-  final int limit;
+  /// Paragraph entries kept before the least-recently-touched one is evicted.
+  final int paragraphLimit;
 
-  /// Real `ParagraphBuilder.build()` calls since construction.
+  /// Metrics entries kept before the least-recently-touched one is evicted.
+  final int metricsLimit;
+
+  /// Real `ParagraphBuilder.build()` calls since construction, whether the
+  /// paragraph was kept or was a disposed metrics probe.
   int layoutCount = 0;
 
-  /// Entries evicted since construction.
-  int evictionCount = 0;
+  /// Paragraph entries evicted since construction.
+  ///
+  /// Split from [metricsEvictionCount] because the two cost different things:
+  /// this one released native glyph memory and guarantees a future re-layout,
+  /// that one dropped four doubles. Ruling 54 is about exactly this — a blended
+  /// number hides which half moved.
+  int paragraphEvictionCount = 0;
+
+  /// Metrics entries evicted since construction.
+  int metricsEvictionCount = 0;
 
   /// The paragraph most recently evicted, already [Paragraph.dispose]d.
   ///
-  /// Debug-only surface for the disposal assertion: a bound on the cache's
-  /// *entry count* says nothing about the native glyph memory an evicted
-  /// `Paragraph` held unless eviction actually released it, so a test needs
-  /// a handle on the evicted paragraph to check `debugDisposed` against.
+  /// Debug-only surface for the disposal assertion: a bound on the *entry
+  /// count* says nothing about the native glyph memory an evicted `Paragraph`
+  /// held unless eviction actually released it.
   Paragraph? debugLastEvicted;
 
-  /// Live entries in the cache.
-  int get liveParagraphCount => _cache.length;
+  /// Live entries in the paragraph cache — native paragraphs, which is what
+  /// Plan 3c's "peak live paragraphs" row means.
+  int get liveParagraphCount => _paragraphs.length;
 
-  /// Zeroes [layoutCount] and [evictionCount] without touching the cache.
+  /// Live entries in the metrics cache.
+  int get liveMetricsCount => _metrics.length;
+
+  /// Zeroes all three counters without touching either map.
   ///
   /// It deliberately leaves the entries alone. The counters are per-
-  /// measurement; the cache is the thing being measured, and a reset that
-  /// cleared it would guarantee the next frame lays everything out again —
+  /// measurement; the caches are the thing being measured, and a reset that
+  /// cleared them would guarantee the next frame lays everything out again —
   /// the opposite of the steady state every text row is about.
-  /// [CanvasDrawSink.resetCounters] draws the same line for the same reason.
   void resetCounters() {
     layoutCount = 0;
-    evictionCount = 0;
+    paragraphEvictionCount = 0;
+    metricsEvictionCount = 0;
   }
 
-  /// Insertion-ordered so the first key is always the least recently
-  /// touched: [_touch] removes and reinserts a key on every hit, which moves
-  /// it to the end, leaving the untouched entries at the front for
-  /// [_evictOldest] to find in O(1).
-  final LinkedHashMap<_CacheKey, _Entry> _cache =
-      LinkedHashMap<_CacheKey, _Entry>();
+  /// Insertion-ordered so the first key is always the least recently touched.
+  final LinkedHashMap<_ParagraphKey, _ParagraphEntry> _paragraphs =
+      LinkedHashMap<_ParagraphKey, _ParagraphEntry>();
 
-  /// Mutated in place and reused across calls so a lookup never allocates a
-  /// key object of its own — only a cache *miss* allocates the immutable key
-  /// an inserted entry keeps for itself. Never stored: every value read out
-  /// of [_cache] by probing with this object is copied into a return value
-  /// before this object's fields are next overwritten.
-  final _CacheKey _probe = _CacheKey('', Handle.none, 0);
+  final LinkedHashMap<_MetricsKey, _MetricsEntry> _metrics =
+      LinkedHashMap<_MetricsKey, _MetricsEntry>();
+
+  /// Mutated in place and reused so a lookup never allocates a key object of
+  /// its own — only a miss allocates the immutable key an inserted entry keeps.
+  /// Never stored: anything read out by probing with it is copied into a return
+  /// value before its fields are next overwritten.
+  final _ParagraphKey _paragraphProbe = _ParagraphKey('', Handle.none, 0);
+  final _MetricsKey _metricsProbe = _MetricsKey('', Handle.none);
 
   /// The paragraph for [text] set in [style] at [argb], laid out once and
   /// cached under `(text, styleHandle, argb)` thereafter.
   ///
-  /// [styleHandle] and [style] are deliberately separate: the cache key is
-  /// the handle, not the record's field values, so [style] only matters on a
-  /// miss, when it supplies the `fontFamily` a fresh layout is built with.
+  /// [styleHandle] and [style] are deliberately separate: the cache key is the
+  /// handle, not the record's field values, so [style] only matters on a miss,
+  /// when it supplies the `fontFamily` a fresh layout is built with.
   Paragraph paragraphFor(
-          String text, Handle styleHandle, TextStyleRecord style, int argb) =>
-      _entryFor(text, styleHandle, style, argb).paragraph;
-
-  @override
-  TextMetrics measure({required String text, required TextStyleRecord style}) =>
-      _entryFor(text, style.handle, style, kMetricsProbeArgb).metrics;
-
-  /// The cached entry for `(text, styleHandle, argb)`, built and inserted on
-  /// a miss.
-  ///
-  /// The lookup itself allocates nothing: [_probe] is overwritten in place
-  /// and handed to the map only to compare, never to be stored. On a hit the
-  /// entry is touched (moved to the most-recently-used end) and returned
-  /// as-is — the same [_Entry], the same [TextMetrics] instance, every time —
-  /// which is what lets a repeat [measure] call return `identical` metrics.
-  _Entry _entryFor(
       String text, Handle styleHandle, TextStyleRecord style, int argb) {
-    _probe
+    _paragraphProbe
       ..text = text
       ..styleHandle = styleHandle
       ..argb = argb;
-    final hit = _cache[_probe];
+    final hit = _paragraphs[_paragraphProbe];
     if (hit != null) {
-      _touch(hit);
-      return hit;
+      _paragraphs.remove(hit.key);
+      _paragraphs[hit.key] = hit;
+      return hit.paragraph;
     }
-    return _buildEntry(text, styleHandle, style, argb);
+    final paragraph = _layOut(text, style, argb);
+    if (_paragraphs.length >= paragraphLimit) _evictOldestParagraph();
+    final key = _ParagraphKey(text, styleHandle, argb);
+    // Unreachable by construction: this line is only reached after an exact-key
+    // miss, and `measure` never inserts here. A displaced entry would be a
+    // `Paragraph` dropped without `dispose()` — a native leak — so the
+    // invariant is asserted rather than handled, because handling it would be
+    // dead code and a mutation of dead code is equivalent by construction.
+    assert(!_paragraphs.containsKey(key));
+    _paragraphs[key] = _ParagraphEntry(key, paragraph);
+    return paragraph;
   }
 
-  void _touch(_Entry entry) {
-    _cache.remove(entry.key);
-    _cache[entry.key] = entry;
+  /// Metrics for [text] in [style], cached colour-free.
+  ///
+  /// **This does not consult the paragraph map, and that is a decision.** That
+  /// map is keyed on `(text, styleHandle, argb)` and cannot be queried on the
+  /// narrow pair without either a linear scan or a third reverse index. Neither
+  /// is needed: `DraftPainter._drawText` calls this *before* it calls
+  /// `DrawSink.text`, and `DrawSink.text` is the only route to [paragraphFor],
+  /// so at first sight of a string the paragraph map has nothing to find. A
+  /// probe could only pay after a metrics eviction, and [metricsLimit] is sized
+  /// above the corpus's whole distinct-key count so that does not happen.
+  ///
+  /// The paragraph built here is **disposed**, not kept. ACI 7 resolves to
+  /// white (`resolved_style.dart`), so [kMetricsProbeArgb]'s black is almost
+  /// never the drawn colour; keeping it would hold two paragraph entries per
+  /// distinct string and halve this cache's effective capacity.
+  @override
+  TextMetrics measure({required String text, required TextStyleRecord style}) {
+    _metricsProbe
+      ..text = text
+      ..styleHandle = style.handle;
+    final hit = _metrics[_metricsProbe];
+    if (hit != null) {
+      _metrics.remove(hit.key);
+      _metrics[hit.key] = hit;
+      return hit.metrics;
+    }
+    final probe = _layOut(text, style, kMetricsProbeArgb);
+    final metrics = _metricsOf(probe);
+    probe.dispose();
+    if (_metrics.length >= metricsLimit) _evictOldestMetrics();
+    final key = _MetricsKey(text, style.handle);
+    _metrics[key] = _MetricsEntry(key, metrics);
+    return metrics;
   }
 
-  _Entry _buildEntry(
-      String text, Handle styleHandle, TextStyleRecord style, int argb) {
+  Paragraph _layOut(String text, TextStyleRecord style, int argb) {
     // Layout is always at kNominalTextPixels — never the entity's effective
     // height. Height, rotation, width factor and oblique angle are all
     // transforms applied afterwards, so only the string and the style may
-    // affect layout; passing an effective size here would silently destroy
-    // the cache (every distinct on-screen size would re-lay the same string
-    // out again) and break the plan's central claim that text needs no
-    // scale-band invalidation axis.
+    // affect layout; passing an effective size here would silently destroy the
+    // cache and break the claim that text needs no scale-band axis.
     final builder = ParagraphBuilder(ParagraphStyle(
       fontFamily: style.fontFamily,
       fontSize: kNominalTextPixels,
@@ -148,59 +204,62 @@ class FlutterTextMeasurer implements TextMeasurer {
       ..addText(text);
     final paragraph = builder.build()
       ..layout(const ParagraphConstraints(width: double.infinity));
+    layoutCount++;
+    return paragraph;
+  }
+
+  TextMetrics _metricsOf(Paragraph paragraph) {
     final lines = paragraph.computeLineMetrics();
-    final metrics = TextMetrics(
-      // `longestLine` is -FLT_MAX, not 0, for a paragraph with no lines,
-      // and -FLT_MAX is finite — so this shares `ascent`'s and
-      // `descent`'s guard rather than relying on an isFinite check
-      // downstream. `MetricModelMeasurer` returns 0.0 here and the two
-      // must agree: the differential oracle assumes the seam's two
-      // implementations are interchangeable.
+    return TextMetrics(
+      // `longestLine` is -FLT_MAX, not 0, for a paragraph with no lines, and
+      // -FLT_MAX is finite — so this shares `ascent`'s and `descent`'s guard
+      // rather than relying on an isFinite check downstream.
+      // `MetricModelMeasurer` returns 0.0 here and the two must agree: the
+      // differential oracle assumes the seam's two implementations are
+      // interchangeable.
       advanceWidth: lines.isEmpty ? 0 : paragraph.longestLine,
       ascent: lines.isEmpty ? 0 : lines.first.ascent,
       descent: lines.isEmpty ? 0 : lines.first.descent,
-      // dart:ui exposes no cap height; the declared ratio stands in for it
-      // and the deviation is recorded in the results note.
+      // dart:ui exposes no cap height; the declared ratio stands in for it.
       capHeight: kCapHeightRatio * kNominalTextPixels,
     );
-    layoutCount++;
-
-    if (_cache.length >= limit) _evictOldest();
-
-    final key = _CacheKey(text, styleHandle, argb);
-    final entry = _Entry(key, paragraph, metrics);
-    _cache[key] = entry;
-    return entry;
   }
 
-  void _evictOldest() {
-    final oldestKey = _cache.keys.first;
-    final evicted = _cache.remove(oldestKey)!;
+  void _evictOldestParagraph() {
+    final oldestKey = _paragraphs.keys.first;
+    final evicted = _paragraphs.remove(oldestKey)!;
     evicted.paragraph.dispose();
     debugLastEvicted = evicted.paragraph;
-    evictionCount++;
+    paragraphEvictionCount++;
   }
 
-  /// Disposes every cached paragraph and empties the cache.
+  void _evictOldestMetrics() {
+    _metrics.remove(_metrics.keys.first);
+    metricsEvictionCount++;
+  }
+
+  /// Disposes every cached paragraph and empties both maps.
   ///
-  /// For a widget that owns this measurer for its whole lifetime: a
-  /// `Paragraph` holds native glyph memory that outlives the Dart object
-  /// referencing it until [Paragraph.dispose] runs, so the owner's own
-  /// `dispose()` has to reach every live entry, not just drop the map.
+  /// **The application calls this, not the widget.** The document owns the
+  /// measurer, two canvases over one document share it, and a canvas that
+  /// cleared on dispose would wipe its sibling's cache. A `Paragraph` holds
+  /// native glyph memory that outlives the Dart object referencing it until
+  /// [Paragraph.dispose] runs, so whoever constructed this object has to reach
+  /// every live entry when the document is retired.
   void clear() {
-    for (final entry in _cache.values) {
+    for (final entry in _paragraphs.values) {
       entry.paragraph.dispose();
     }
-    _cache.clear();
+    _paragraphs.clear();
+    _metrics.clear();
   }
 }
 
-/// `(text, styleHandle, argb)`. Mutable so [FlutterTextMeasurer._probe] can
-/// reuse one instance as a lookup key across calls; every key actually
-/// *stored* in the cache is a separate, never-mutated-again instance built
-/// on a miss.
-class _CacheKey {
-  _CacheKey(this.text, this.styleHandle, this.argb);
+/// `(text, styleHandle, argb)`. Mutable so [FlutterTextMeasurer._paragraphProbe]
+/// can reuse one instance as a lookup key across calls; every key actually
+/// *stored* is a separate, never-mutated-again instance built on a miss.
+class _ParagraphKey {
+  _ParagraphKey(this.text, this.styleHandle, this.argb);
 
   String text;
   Handle styleHandle;
@@ -208,7 +267,7 @@ class _CacheKey {
 
   @override
   bool operator ==(Object other) =>
-      other is _CacheKey &&
+      other is _ParagraphKey &&
       other.text == text &&
       other.styleHandle == styleHandle &&
       other.argb == argb;
@@ -217,10 +276,40 @@ class _CacheKey {
   int get hashCode => Object.hash(text, styleHandle, argb);
 }
 
-class _Entry {
-  _Entry(this.key, this.paragraph, this.metrics);
+/// `(text, styleHandle)`. Mutable for the same reason [_ParagraphKey] is.
+///
+/// A record key would be the obvious spelling and is the wrong one: building
+/// one per lookup was measured at roughly 41 `_Record` allocations per pick and
+/// broke `query_allocation_test`. See `MetricModelMeasurer`'s doc comment.
+class _MetricsKey {
+  _MetricsKey(this.text, this.styleHandle);
 
-  final _CacheKey key;
+  String text;
+  Handle styleHandle;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _MetricsKey &&
+      other.text == text &&
+      other.styleHandle == styleHandle;
+
+  @override
+  int get hashCode => Object.hash(text, styleHandle);
+}
+
+class _ParagraphEntry {
+  _ParagraphEntry(this.key, this.paragraph);
+
+  final _ParagraphKey key;
   final Paragraph paragraph;
+}
+
+class _MetricsEntry {
+  _MetricsEntry(this.key, this.metrics);
+
+  final _MetricsKey key;
+
+  /// The same instance on every hit: the pick path measures per candidate and a
+  /// fresh object per call breaks `query_allocation_test`.
   final TextMetrics metrics;
 }

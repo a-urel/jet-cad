@@ -30,11 +30,11 @@ void main() {
   });
 
   test('eviction disposes the paragraph', () {
-    final m = FlutterTextMeasurer(limit: 2);
+    final m = FlutterTextMeasurer(paragraphLimit: 2);
     m.paragraphFor('A', const Handle(7), _style, 0xFF000000);
     m.paragraphFor('B', const Handle(7), _style, 0xFF000000);
     m.paragraphFor('C', const Handle(7), _style, 0xFF000000);
-    expect(m.evictionCount, 1);
+    expect(m.paragraphEvictionCount, 1);
     expect(m.liveParagraphCount, 2);
     // A Paragraph holds native glyph memory: a bound on the count is not a
     // bound on the memory unless eviction releases it.
@@ -88,7 +88,7 @@ void main() {
 
     measurer.resetCounters();
     expect(measurer.layoutCount, 0);
-    expect(measurer.evictionCount, 0);
+    expect(measurer.paragraphEvictionCount, 0);
     expect(measurer.liveParagraphCount, 3,
         reason: 'reset must not evict: the warm cache is the measurement');
 
@@ -143,5 +143,63 @@ void main() {
       ..paragraphFor('STAIR', style, _style, red.argb)
       ..paragraphFor('WC', const Handle(8), _style, red.argb);
     expect(measurer.liveParagraphCount, sink.keys.length);
+  });
+
+  test('measure disposes its probe and leaves no paragraph entry', () {
+    final m = FlutterTextMeasurer();
+    m.measure(text: 'WC', style: _style);
+    expect(m.layoutCount, 1);
+    // The probe is built at kMetricsProbeArgb, which ACI 7 (white) is not, so
+    // keeping it would hold two entries per string and halve the paragraph
+    // cache's effective capacity.
+    expect(m.liveParagraphCount, 0);
+    expect(m.liveMetricsCount, 1);
+  });
+
+  test('a metrics sweep does not evict drawn paragraphs', () {
+    // Row 10 of the exit gate, at unit scale: a full extents recomputation
+    // walks every string in the document with no LOD protection. Before the
+    // split it would have walked straight through the paragraph cache.
+    final m = FlutterTextMeasurer(paragraphLimit: 4, metricsLimit: 1024);
+    for (final t in ['A', 'B', 'C', 'D']) {
+      m.paragraphFor(t, const Handle(7), _style, 0xFFFFFFFF);
+    }
+    expect(m.liveParagraphCount, 4);
+
+    for (var i = 0; i < 200; i++) {
+      m.measure(text: 'SWEEP$i', style: _style);
+    }
+    expect(m.paragraphEvictionCount, 0);
+    expect(m.liveParagraphCount, 4);
+
+    final layoutsBefore = m.layoutCount;
+    for (final t in ['A', 'B', 'C', 'D']) {
+      m.paragraphFor(t, const Handle(7), _style, 0xFFFFFFFF);
+    }
+    expect(m.layoutCount, layoutsBefore,
+        reason: 'the sweep must leave the drawn set warm');
+  });
+
+  test(
+      'the metrics map evicts on its own bound, and it is not the paragraph one',
+      () {
+    final m = FlutterTextMeasurer(paragraphLimit: 512, metricsLimit: 2);
+    m.measure(text: 'A', style: _style);
+    m.measure(text: 'B', style: _style);
+    m.measure(text: 'C', style: _style);
+    expect(m.metricsEvictionCount, 1);
+    expect(m.paragraphEvictionCount, 0);
+    expect(m.liveMetricsCount, 2);
+  });
+
+  test('clear empties both maps', () {
+    final m = FlutterTextMeasurer();
+    m.paragraphFor('WC', const Handle(7), _style, 0xFFFFFFFF);
+    m.measure(text: 'STAIR', style: _style);
+    expect(m.liveParagraphCount, 1);
+    expect(m.liveMetricsCount, 1);
+    m.clear();
+    expect(m.liveParagraphCount, 0);
+    expect(m.liveMetricsCount, 0);
   });
 }
