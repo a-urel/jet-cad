@@ -205,9 +205,23 @@ void main() {
     // `doc.extents` is a stored geometric quantity, derived once by
     // `entityBounds` from the payload, the attribute bits and the style
     // record; the painter's cull is a later, per-frame draw decision that
-    // never reaches it. Killed by moving the `minTextCapPixels` comparison
-    // into `entityBounds` instead of `_drawText` — the two thresholds would
-    // then bound the entity differently and this test would go red.
+    // never reaches it, and this asserts exactly that: the box does not
+    // depend on which painter, at which threshold, last ran.
+    //
+    // **What this test cannot do, verified rather than assumed.** A cull
+    // leaked into `entityBounds` itself
+    // (`packages/jet_cad_2d/lib/src/document/extents.dart`) was fired against
+    // this test — the nearest reachable form, comparing the raw world-space
+    // height against a literal 3.0, since `entityBounds` is handed no camera
+    // scale to turn that into an on-screen figure. It did not redden this
+    // test: `entityBounds` has no channel to a specific `DraftPainter`'s
+    // `minTextCapPixels`, so the mutated function returns the same collapsed
+    // box on both reads regardless of which painter ran in between, and two
+    // identical wrong answers still compare equal. That mutation *did*
+    // redden three of this file's other tests — the collapsed box drops the
+    // leaf out of the spatial index's query window, so `culledTextCount`
+    // reads 0 instead of 1 — which is the real, if incidental, guard against
+    // it; see Task 5's report for the transcript.
     expect(withTextCulled.min.x, withTextDrawn.min.x);
     expect(withTextCulled.min.y, withTextDrawn.min.y);
     expect(withTextCulled.max.x, withTextDrawn.max.x);
