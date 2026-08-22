@@ -158,6 +158,15 @@ void main() {
     final state = tester.state<DraftCanvasState>(find.byType(DraftCanvas));
     final first = state.sink;
 
+    // The sink must borrow the document's measurer rather than build its
+    // own. A private `FlutterTextMeasurer()` here would pass every other
+    // test in this file: `identical`, not `==`, because two distinct
+    // measurers holding equal (empty) state would pass a value comparison
+    // and hide exactly the two-cache defect this plan exists to remove.
+    expect(identical(state.sink.measurer, doc.textMeasurer), isTrue,
+        reason: "the sink must borrow the document's measurer, not build "
+            'its own');
+
     camera.panBy(const Offset(10, 0));
     await tester.pump();
     camera.zoomAt(const Offset(200, 150), 1.5);

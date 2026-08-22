@@ -139,11 +139,16 @@ final FlutterTextMeasurer harnessMeasurer = FlutterTextMeasurer();
 /// The corpus the rigs measure on: the same shape as R1's, so the two sets of
 /// numbers describe one drawing.
 ///
-/// With [kTextCorpus] on this is `textRigCorpus`'s shape, and the measurer
-/// stops being a detail: `DraftDocument`'s default is the zero-metrics
-/// `InsertionPointMeasurer`, which collapses every glyph box to a point and
-/// every text transform to a singular matrix. A text corpus built on it looks
-/// like a text corpus and draws nothing measurable.
+/// Always built on [harnessMeasurer], a real `FlutterTextMeasurer` —
+/// `DraftDocument`'s own default is the zero-metrics `InsertionPointMeasurer`,
+/// which collapses every glyph box to a point and every text transform to a
+/// singular matrix, and `DraftCanvas` now refuses a document carrying one
+/// unconditionally. This file used to branch on [kTextCorpus] instead — a
+/// real measurer only when the corpus carried text, the zero-metric one
+/// otherwise — which was a workaround at the one call site for what was, even
+/// then, true of every document: what actually turns text off is
+/// `labelFraction: 0` and `attributedInstanceFraction: 0` below, not the
+/// choice of measurer.
 DraftDocument harnessDocument([int? entityCount]) {
   final count = entityCount ?? kEntities;
   final doc = generateDocument(
@@ -159,13 +164,7 @@ DraftDocument harnessDocument([int? entityCount]) {
     dashedFraction: kDashedFraction,
     labelFraction: kTextCorpus ? 0.02 : 0,
     attributedInstanceFraction: kTextCorpus ? 0.2 : 0,
-    // Always a real measurer. The old `kTextCorpus ? FlutterTextMeasurer() :
-    // const InsertionPointMeasurer()` was a workaround for this file's own
-    // doc comment above — a zero-metric measurer makes every text transform
-    // singular — applied at one call site while the cause stayed. `DraftCanvas`
-    // now refuses a document without one, and what turns text off is
-    // `labelFraction: 0` and `attributedInstanceFraction: 0`, which is the
-    // correct axis.
+    // Always a real measurer — see the doc comment above.
     measurer: harnessMeasurer,
   );
   if (kFillsEnabled) _addFillRegions(doc, count);

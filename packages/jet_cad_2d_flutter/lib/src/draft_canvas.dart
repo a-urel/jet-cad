@@ -126,15 +126,20 @@ class DraftCanvasState extends State<DraftCanvas> {
     _attach();
   }
 
-  void _attach() {
-    // The document owns the measurer; this widget borrows it. Refused
-    // unconditionally rather than only when `drawText` is on: a document whose
-    // boxes were computed from `TextMetrics.zero` is wrong whether or not
-    // glyphs are drawn, and a conditional guard would force `CanvasDrawSink` to
-    // hold a throwaway measurer for its typed field — the second cache coming
-    // back. Before Plan 3f this widget built its own, handed it to the sink
-    // only, and left the painter reading `document.textMeasurer`; a document
-    // assembled the ordinary way therefore drew no text and reported nothing.
+  /// The document owns the measurer; this widget borrows it. Refused
+  /// unconditionally rather than only when `drawText` is on: a document whose
+  /// boxes were computed from `TextMetrics.zero` is wrong whether or not
+  /// glyphs are drawn, and a conditional guard would force `CanvasDrawSink` to
+  /// hold a throwaway measurer for its typed field — the second cache coming
+  /// back. Before Plan 3f this widget built its own, handed it to the sink
+  /// only, and left the painter reading `document.textMeasurer`; a document
+  /// assembled the ordinary way therefore drew no text and reported nothing.
+  ///
+  /// A separate method, and called before any teardown in [didUpdateWidget]:
+  /// a prop change that swaps in a bad measurer must throw before `_changes`
+  /// is disposed, or the widget's own `dispose()` disposes it a second time
+  /// once the throw unwinds the build.
+  FlutterTextMeasurer _requireMeasurer() {
     final measurer = widget.document.textMeasurer;
     if (measurer is! FlutterTextMeasurer) {
       throw ArgumentError.value(
@@ -145,6 +150,11 @@ class DraftCanvasState extends State<DraftCanvas> {
               '    final measurer = FlutterTextMeasurer();\n'
               '    final doc = DraftDocument.empty(measurer: measurer);\n');
     }
+    return measurer;
+  }
+
+  void _attach() {
+    final measurer = _requireMeasurer();
     sink = CanvasDrawSink(
         pixelsPerPaperMm: widget.pixelsPerPaperMm,
         lineweightScale: widget.lineweightScale,
@@ -180,6 +190,8 @@ class DraftCanvasState extends State<DraftCanvas> {
         widget.lineweightScale != oldWidget.lineweightScale ||
         widget.drawText != oldWidget.drawText ||
         widget.backend != oldWidget.backend) {
+      // Guard before teardown: see the note on `_requireMeasurer`.
+      _requireMeasurer();
       _changes.dispose();
       _attach();
     }
