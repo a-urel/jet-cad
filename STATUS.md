@@ -1,14 +1,27 @@
 # jet-cad — project status
 
-**Last updated:** 2026-08-22
-**Verified against:** `main` at `8fad846`, pushed, working tree clean apart from
-the three files the traps below say never to commit.
+**Last updated:** 2026-08-23
+**Verified against:** `main` at `d113d2d`, **not yet pushed**, working tree
+clean apart from the three files the traps below say never to commit.
 Every suite count below was produced by running the suite on the **merged**
 result, not by reading a report and not on the branch before it landed.
 
 ---
 
 ## TL;DR — where you left off
+
+**Plan 3f (text wiring and level of detail) is done, nine tasks, worked
+directly on `main`, nothing in flight.** **Its exit gate is 11 of 13 — and the
+two that miss are recorded as missing, not tuned away.** See
+[Plan 3f](#plan-3f--text-wiring-and-level-of-detail) and
+[Resume here](#resume-here).
+
+Results note:
+[docs/superpowers/notes/2026-08-22-plan-3f-results.md](docs/superpowers/notes/2026-08-22-plan-3f-results.md).
+Mutation log:
+[docs/superpowers/notes/plan-3f-mutation-log.md](docs/superpowers/notes/plan-3f-mutation-log.md) —
+fifteen named mutants, 14 killed, 1 restatement, 1 mutation recorded as
+unmeasurable with its reason.
 
 **Plan 3e (fills) is done, seventeen tasks, worked directly on `main`** — see
 [Plan 3e](#plan-3e--fills) and [Resume here](#resume-here). Six of its nine
@@ -30,8 +43,11 @@ the `CLAUDE.md` allocation amendment on 2026-08-21, which the plan was forbidden
 from granting itself. See
 [Plan 3d](#plan-3d--the-vertices-sink-is-the-default-everywhere).
 
-Nothing is in flight. The `spike/vertices-sink` branch and its worktree are
-gone; the ledger is archived at
+Nothing is in flight. Plan 3f had no worktree either — the human gave explicit
+consent to work `main` directly, as for 3e — so **its ledger must be archived
+onto `main` before the `.superpowers/sdd/` directory is cleared**, the same
+ordering 3e's archive records as the lesson. The `spike/vertices-sink` branch
+and its worktree are gone; the ledger is archived at
 [docs/superpowers/ledgers/](docs/superpowers/ledgers/), beside Plan 3c's.
 Plan 3e's own ledger was archived the same way at `8fad846`, since that plan had
 no worktree of its own: 64 files at
@@ -46,13 +62,13 @@ turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open
 
 Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
 
-| Suite | State (on `main`, run against the merged result) |
+| Suite | State (on `main` at `d113d2d`, run, not read off a report) |
 |---|---|
 | `packages/jet_cad_2d` — engine | **777 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **277 tests pass, 1 skipped**, analyze/format clean |
-| `flutter test --tags golden` | **29 pass**, 34 PNGs (17 fixtures × 2 backends, 3 of them fills); no pre-existing PNG regenerated |
+| `packages/jet_cad_2d_flutter` — widgets | **299 tests pass, 1 skipped**, analyze/format clean |
+| `flutter test --tags golden` | **35 pass**, 40 PNGs (20 fixtures × 2 backends, 3 fills and 3 text-LOD rungs); no pre-existing PNG regenerated |
 | `apps/dev_harness_2d` | analyze/format clean |
-| `benchmark/query_throughput.dart` | one gated row fails — `snap at dirty threshold`, **carried from Plan 2**, not a regression |
+| `benchmark/query_throughput.dart` | **GATE: PASS** — every gated row under its threshold on 2026-08-23, `snap at dirty threshold` included (p50 0.552 ms against 1.0 ms). That row is Plan 2's carried failure and it is a **timing on a shared machine**: recorded as passing today, not declared fixed |
 
 The widget suite's one skip is `test/rig/paint_microbench_test.dart`, skipped at
 suite level by the `rig` tag in `dart_test.yaml` — pre-existing and by design.
@@ -326,6 +342,30 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
+**Plan 3f (text wiring and level of detail) is done, worked directly on
+`main`, nothing in flight. Its exit gate is 11 of 13.** Everything below about
+3e is still true and still worth reading; this is what changed on top of it.
+
+**One thing is waiting on a human and nothing else in 3f is.** Rows 1 and 2 of
+3f's gate miss: at the shipped `kMinTextCapPixels = 3.0` the whole-drawing
+camera needs **3,876 distinct paragraph keys in one frame** against a
+512-entry cache, so a repeated identical frame relays out all 3,876 and evicts
+3,876. **Ruling 4's single permitted `kParagraphCacheLimit` raise is now
+available** — the ruling wanted a measured distinct-visible-key count recorded
+beside any raise, and 3,876 is it. **The plan deliberately did not spend it**,
+because it can only be spent once and 3g may want it, and because holding
+3,876 live native `ui.Paragraph` objects in a frame is a memory cost nobody
+has measured. Raising the *threshold* instead makes both rows comply and was
+refused on principle: 3.0 is a readability number, 6.0 would be a
+gate-passing number. **The decision is written up as an option in
+[the 3f results note](docs/superpowers/notes/2026-08-22-plan-3f-results.md)
+and is yours to make.**
+
+**A resumer's ledger chore:** 3f had no worktree, so its
+`.superpowers/sdd/2026-08-22-jet-cad-2d-plan-3f-text/` material is **not yet
+archived** to `docs/superpowers/ledgers/`. Do that before clearing it — the
+ordering is the lesson 3e's archive records.
+
 **Plan 3e (fills) is done, worked directly on `main`, nothing in flight.**
 Six of nine failable criteria PASS outright; one device timing row is
 recorded as measured-but-unevaluable (macOS Low Power Mode was on for the
@@ -363,12 +403,16 @@ Plan 3d's open items were worked next, on `main` at `70d824e..0eac1be`: two
 closed, one shown to be unclosable until a DXF reader exists.
 
 **Next**: pick a plan from the roadmap below. **Plan 3g (caches and tiles)**
-is the named successor and what 3d and 3e owe it is written out at the end of
-[the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md)
-and [the 3e results note](docs/superpowers/notes/2026-08-22-plan-3e-results.md)
-respectively. **Permitted divergence 5** (overlapping translucent strokes on
-a triangle soup) is now live and still has no fixture — a candidate for a
-short follow-up before or alongside 3g.
+is the named successor and what 3d, 3e and 3f owe it is written out at the end
+of [the 3d results note](docs/superpowers/notes/2026-08-21-plan-3d-results.md),
+[the 3e results note](docs/superpowers/notes/2026-08-22-plan-3e-results.md) and
+[the 3f results note](docs/superpowers/notes/2026-08-22-plan-3f-results.md)
+respectively. 3g's **first design decision** is 3f's unanswered question:
+whether a cached picture may contain text at all, given that a picture is baked
+per scale band while level of detail is a function of continuous scale.
+**Permitted divergence 5** (overlapping translucent strokes on a triangle soup)
+is now live and still has no fixture — 3f did not touch it either — a candidate
+for a short follow-up before or alongside 3g.
 
 ### What Plan 3d leaves open
 
@@ -433,12 +477,20 @@ shipping text to an application and has no owner:
    `text_paint_allocation_test.dart` is in the engine suite because
    `jet_cad_2d_flutter` has no `vm_service`. Closing it means moving
    `AllocationMeter` into `jet_cad_2d/lib/src/testing/`.
-4. **Whole-drawing thrash → text LOD (Plan 3f), split from the picture cache,
-   now Plan 3g.** 4,140
-   layouts and 4,140 evictions
-   per frame, and it is 4,140 at *both* 50k and 500k because it is bounded by
-   string variety rather than entity count. A bigger cache holds one zoom
-   level of one corpus; not drawing text too small to read removes the cost.
+4. **Whole-drawing thrash → text LOD (Plan 3f). Attempted, measured, and
+   *not* closed.** The premise was 4,140 layouts and 4,140 evictions per
+   frame, bounded by string variety rather than entity count, and that "not
+   drawing text too small to read removes the cost." Plan 3f built the LOD
+   and measured what it removes: at the readability-justified 3.0 px
+   threshold, **3,876** — a 6.4% improvement on a row whose bar is zero. The
+   cost is *not* removed at the whole-drawing camera; it is removed
+   completely at the working-set camera, which never needed it (smallest
+   surviving cap height 53.67 px, 17.9× the threshold). **This item stays
+   open**, and the two ways to close it are named in
+   [the 3f results note](docs/superpowers/notes/2026-08-22-plan-3f-results.md):
+   Ruling 4's one unspent `kParagraphCacheLimit` raise, now that 3,876 is
+   measured, or a threshold in the 3.0–6.0 band chosen on grounds other than
+   a gate row.
 5. `snap at dirty threshold` p95 1.08 ms against < 1.0 ms — carried from Plan 2.
 6. `DocumentTree._link` is quadratic in a parent's child count, which is why
    the rigs cap `instanceCount` at 20,000 — recorded in Plan 3b.
@@ -452,11 +504,23 @@ Plan 3c's ledger carries 56 numbered rulings, archived in full at
 constrain work not yet done:
 
 **Ruling 4 — the cache limit is not a tuning knob.** `kParagraphCacheLimit` is
-owned by Task 9 and may be raised **once**, in Task 12, and only with the
+owned by Plan 3c Task 9 and may be raised **once**, and only with the
 measured distinct-visible-key count recorded beside it. Lowering
 `attributedInstanceFraction` is equally acceptable. **Relaxing the
 zero-new-layouts gate row is not.** Otherwise the gate passes because the corpus
 was thinned rather than because the cache works.
+
+> **Status as of 2026-08-23: the raise is now *available* and is still
+> unspent.** Plan 3f Task 8 produced the count the ruling asks for —
+> **3,876** distinct `(text, styleHandle, argb)` keys at the whole-drawing
+> camera on the 50,000-entity corpus at `kMinTextCapPixels = 3.0`, read by
+> three independent mechanisms. Plan 3f declined to spend it: the raise can
+> only happen once, Plan 3g may want it, and holding 3,876 live native
+> `ui.Paragraph` objects in one frame is a memory cost nobody has measured on
+> any target. **A human decides whether to spend it.** Plan 3f also refused
+> the other route — raising `kMinTextCapPixels` from 3.0 to 6.0 makes the
+> gate rows comply and would be a threshold chosen because a gate needed it,
+> which is the same failure this ruling names one level up.
 
 **Ruling 20 — discharged in Task 10, with numbers.** The residual-path norm is
 **1.00** allocations per leaf (one `Transform2`). A text leaf through
@@ -703,17 +767,103 @@ divergence was first named.
 
 ### Plan 3f — text wiring and level of detail
 
-In flight. Spec:
+**Done.** Nine tasks, worked directly on `main` at `5d4ef7a..d113d2d`, no
+worktree, on the human's explicit consent. Spec:
 [docs/superpowers/specs/2026-08-22-jet-cad-2d-plan-3f-text-design.md](docs/superpowers/specs/2026-08-22-jet-cad-2d-plan-3f-text-design.md).
 Plan:
 [docs/superpowers/plans/2026-08-22-jet-cad-2d-plan-3f-text.md](docs/superpowers/plans/2026-08-22-jet-cad-2d-plan-3f-text.md).
+Results:
+[docs/superpowers/notes/2026-08-22-plan-3f-results.md](docs/superpowers/notes/2026-08-22-plan-3f-results.md).
+Mutation log:
+[docs/superpowers/notes/plan-3f-mutation-log.md](docs/superpowers/notes/plan-3f-mutation-log.md).
 
-Two defects: a document built the ordinary way carries `InsertionPointMeasurer`
-and draws no text without reporting anything, and the painter and the sink read
-different measurers. Plus text LOD, which is the one of Plan 3g's four
-subsystems that depends on none of the other three.
+Two defects fixed and one mechanism built. A document assembled the ordinary
+way carried `InsertionPointMeasurer` and drew no text while reporting nothing —
+the document now owns a `FlutterTextMeasurer`, `DraftCanvas` borrows it, and a
+document whose measurer cannot lay out paragraphs is refused with the fix
+spelled out. The painter and the sink read different measurers — they now read
+the same one, whose cache is **split**: colour-free metrics keyed
+`(text, styleHandle)`, coloured paragraphs keyed `(text, styleHandle, argb)`,
+bounded separately, so a full `extents` sweep cannot evict what the paint path
+had warm. And text level of detail: `kMinTextCapPixels = 3.0`, checked
+**before** `measure()` so a cull saves the layout, `0.0` to disable, counted by
+`culledTextCount`, pinned by a three-rung golden ladder.
+
+**Exit gate: 11 of 13 pass, 2 miss, 0 unevaluable.**
+
+**Rows 1 and 2 miss and are left missing.** At the shipped 3.0 threshold the
+whole-drawing camera needs **3,876 distinct paragraph keys in one frame**
+against a 512-entry cache, so a repeated, unchanged frame produces 3,876 new
+layouts and 3,876 paragraph evictions — zero cache hits, against a baseline of
+4,140. Three independent mechanisms read the same 3,876.
+
+**Neither available remedy was taken, and the second is a decision waiting for
+the human.**
+
+1. **Raising `kMinTextCapPixels` to 6.0 makes both rows comply outright**
+   (`distinctKeys=94`, `paragraphEvictions=0`) and is **refused**. 3.0 comes
+   from a readability argument — under about three pixels of cap height a
+   glyph cannot resolve two strokes. 6.0 would come from a gate row needing
+   it. Those are different in kind.
+2. **Ruling 4's single permitted `kParagraphCacheLimit` raise is now
+   available and is deliberately unspent.** The ruling requires a measured
+   distinct-visible-key count recorded beside any raise; that count did not
+   exist until Task 8 produced it, and now does. Cost: **3,876 live native
+   `ui.Paragraph` objects in one frame**, which Plan 3d's carry-forward note
+   argued against and which nobody has measured in resident memory on any
+   target. It also forecloses spending the raise in 3g. **The human decides
+   this, not a plan.** Written up in full in the results note.
+
+**The honest shape of the outcome.** Level of detail is **decisive at the
+working-set camera — by not firing at all**: flat at every threshold from 0.0
+to 10.0 (18 keys, 18 layouts, 0 culled), smallest surviving cap height
+**53.67 px**, about five times the widest threshold tried. That is the camera a
+frame budget is about and it is nowhere near the cliff. It is **insufficient at
+the whole-drawing camera at a readability-justified threshold**. And the step
+is a **band from 3.0 to 6.0, not a point** — the corpus's mirrored and
+non-uniform placement transforms spread per-instance `scaleMagnitude` even at
+one fixed logical text height, so the mass crosses over about three units
+rather than at one value.
+
+**Two rows pass without being able to fail, and both are recorded as such.**
+Criterion 6 (`doc.extents` bit-identical at either threshold) is **structurally
+guaranteed**: `entityBounds` has no channel to a painter's `minTextCapPixels`,
+so it recomputes identically on both reads and two identical wrong answers
+compare equal. Mutant 10 was fired twice and row 6's test passed both times;
+recorded as a restatement, never as a kill. Criterion 10 at **corpus** scale is
+non-discriminating — `doc.extents` is not the 4,020-key sweep the spec assumed
+(`_computeExtents` caches bounds per definition, so 12 distinct strings get
+measured, not 4,020), and it passes under both mutations it exists to catch.
+The discriminating form is the unit-scale test.
+
+**Mutant 7 survived its own suite** — `metricsLimit` defaulted to
+`kParagraphCacheLimit` passed all 297 tests, because every test in
+`flutter_text_measurer_test.dart` constructed the measurer with both bounds
+given explicitly. Recorded as a survivor, then killed by a test written for it
+(`645b027`). The shape of that hole was not audited elsewhere.
 
 ### Plan 3g — the definition/tile picture cache
+
+**What 3f hands it, and one question it must answer first.**
+
+- **A working text LOD** — `kMinTextCapPixels = 3.0`, `0.0` disables it, wired
+  from `DraftPainter` through `DraftCanvas` to the harness's `LOD` define,
+  counted by `culledTextCount`, pinned by a golden ladder.
+- **The threshold ladder**, regenerable from the committed tree behind a
+  `LADDER` dart-define, and the finding that the step is a **band** (3.0→6.0),
+  not a point.
+- **The measured distinct-visible-key count: 3,876** — and with it, **Ruling
+  4's one permitted `kParagraphCacheLimit` raise, now available and
+  unspent.** Spending it in 3g is a live option; so is spending it on 3f's
+  missed rows. It can only be spent once.
+- **A split text cache** and **document-owned measurer** (see 3f above).
+- **The unresolved question, and it is 3g's first design decision: may a
+  cached picture contain text at all?** A picture is baked per scale band;
+  level of detail is a function of continuous scale. A picture baked at one
+  scale and replayed at another either shows glyphs the current camera would
+  cull or hides glyphs it would draw. Three candidate answers — never bake
+  text, bake per LOD band as a fourth cache axis, or draw text outside the
+  cached picture entirely — and **none of them has been priced**.
 
 **What 3d hands it.** A picture cache that records into a `Picture` interacts
 with a sink that batches across residuals: 3g must decide whether a cached
