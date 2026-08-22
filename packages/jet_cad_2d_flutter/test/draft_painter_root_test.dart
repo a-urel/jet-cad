@@ -51,12 +51,20 @@ Handle addLine(DraftDocument doc, Handle owner, double x1, double y1, double x2,
 /// Builds the index and paints the whole document into a recording sink.
 ///
 /// [view] overrides the camera's world box, for culling tests.
+///
+/// [minTextCapPixels] is forwarded to the painter. Only the text test below
+/// passes it; every other caller here draws no text at all, so the default is
+/// what they should measure.
 ({DraftPainter painter, RecordingDrawSink sink, ViewportTransform camera})
-    paintAll(DraftDocument doc, {Aabb2? view}) {
+    paintAll(DraftDocument doc,
+        {Aabb2? view, double minTextCapPixels = kMinTextCapPixels}) {
   final index = SpatialIndex(doc);
   addTearDown(index.dispose);
   final painter = DraftPainter(
-      document: doc, index: index, resolver: DocumentStyleResolver(doc));
+      document: doc,
+      index: index,
+      resolver: DocumentStyleResolver(doc),
+      minTextCapPixels: minTextCapPixels);
   final camera = ViewportTransform.fit(view ?? doc.extents, kViewport);
   final sink = RecordingDrawSink();
   painter.paint(sink, camera, kViewport);
@@ -299,8 +307,16 @@ void main() {
         definitionCount: 100,
         labelFraction: 0.02,
         measurer: MetricModelMeasurer());
-    final run = paintAll(labelled);
+    // Level of detail off, explicitly, and this is the site where it matters
+    // most in the package. This camera fits a 30,000-entity drawing into 800 x
+    // 600, so at the default 3.0 px the painter culls 454 of the 568 labels
+    // and the assertion below reads `114 > 100` — fourteen ops of margin on a
+    // test whose subject is a counter, not a threshold. Off, it reads
+    // `568 > 100`, and a later `kMinTextCapPixels` cannot quietly turn this
+    // into a test of the cull.
+    final run = paintAll(labelled, minTextCapPixels: 0.0);
     expect(run.painter.skippedTextCount, 0);
+    expect(run.painter.culledTextCount, 0);
     expect(run.sink.ops.whereType<TextOp>().length, greaterThan(100));
   });
 }

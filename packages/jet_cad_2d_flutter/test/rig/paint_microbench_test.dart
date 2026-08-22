@@ -209,6 +209,22 @@ void main() {
         // materialises nothing but the keys.
         final keySink = TextKeySink();
         painter.paint(keySink, camera, kRigViewport);
+        // This rig measures the frame production draws, so it runs at the
+        // shipped `kMinTextCapPixels` rather than pinning the threshold to 0 —
+        // a rig that measured a frame nobody paints is not a frame budget.
+        // The exposure that buys is that a later threshold could cull this
+        // camera's text away entirely and every row below would still print a
+        // plausible number, which is the same failure the corpus check above
+        // refuses. Measured at 50,000 entities on the whole-drawing camera:
+        // 4,514 text ops drawn, 414 culled, the smallest survivor at 3.0006 px
+        // of cap height — 0.02% clear of the 3.0 threshold. So the cull figure
+        // is printed with every row, and an empty one is refused here.
+        if (keySink.textOps == 0) {
+          throw StateError('level of detail culled every text entity at this '
+              'camera (${painter.culledTextCount} culled, threshold '
+              '${painter.minTextCapPixels} px): the rows below would be a '
+              'measurement of a drawing with no text in it');
+        }
         final keyCount = keySink.drawsPerKey.length;
         final strings = keySink.keys.map((k) => (k.$1, k.$2)).toSet();
         final colours = keySink.keys.map((k) => k.$3).toSet();
@@ -290,6 +306,7 @@ void main() {
           print('      ops/frame: $opsPerFrame  '
               'canvasCalls: ${canvasSink.canvasCallCount}');
           print('      textOps: ${p.textOpCount}  '
+              'culledText: ${p.culledTextCount}  '
               'skippedText: ${p.skippedTextCount}');
           print('      newLayouts=${measurer.layoutCount - layoutsBefore} '
               'newParagraphEvictions='

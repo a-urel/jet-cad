@@ -12,6 +12,9 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
+import 'support/differential.dart';
+import 'support/fixtures.dart';
+
 /// One text entity of [height] world units at the world origin, and nothing
 /// else, so the camera fit is decided by [world] rather than by the glyph box.
 DraftDocument _doc(double height, Aabb2 world, FlutterTextMeasurer m) {
@@ -226,5 +229,62 @@ void main() {
     expect(withTextCulled.min.y, withTextDrawn.min.y);
     expect(withTextCulled.max.x, withTextDrawn.max.x);
     expect(withTextCulled.max.y, withTextDrawn.max.y);
+  });
+
+  test('painter and oracle cull the same text under a non-identity placement',
+      () {
+    // Deliberately not at the identity and not at the origin: the painter and
+    // the walk reach `chain` by different routes, and a fixture at the identity
+    // transform cannot tell a shared decision from two agreeing ones.
+    final m = FlutterTextMeasurer();
+    addTearDown(m.clear);
+    final doc = textLodDifferentialDocument(m);
+    final world = doc.extents;
+    final view = ViewportTransform.fit(world, kViewport);
+
+    // Compared through `flatten`, not op for op. The two sides reach the same
+    // picture by different arithmetic routes — the painter hands the sink
+    // screen-space points under a translation-only residual where the walk
+    // hands it local points under the full one — so a raw `DrawOp` comparison
+    // reports the fixture's own root line as a difference and never gets as
+    // far as the text. `flatten` applies each residual to the geometry drawn
+    // under it, which is the comparison every other differential row in this
+    // package makes.
+    final painted = flatten(paintToRecording(doc, view));
+    final walked = flatten(referenceToRecording(doc, view));
+
+    expect(painted.length, walked.length);
+    for (var i = 0; i < painted.length; i++) {
+      expect(painted[i].matches(walked[i]), isTrue,
+          reason: 'item $i: painter ${painted[i]} vs walk ${walked[i]}');
+    }
+    // Both sides drew the two readable labels and neither drew the two that
+    // fall under the threshold. Named rather than counted, so a cull that took
+    // the wrong pair away would still be caught.
+    expect(painted.map((i) => i.kind).toList(),
+        containsAll(<String>['text:EDGE', 'text:LARGE']));
+    for (final culled in const ['text:TINY', 'text:NEAR']) {
+      expect(painted.map((i) => i.kind), isNot(contains(culled)));
+      expect(walked.map((i) => i.kind), isNot(contains(culled)));
+    }
+
+    // Non-vacuity: if nothing were culled this would pass with LOD deleted.
+    // The threshold is the third *positional* argument — `camera` is already
+    // optional-positional on both helpers, and Dart does not let one signature
+    // carry optional-positional and named parameters at once.
+    final all = flatten(paintToRecording(doc, view, 0.0));
+    expect(all.length, greaterThan(painted.length));
+    // And by exactly two items, which are the labels the fixture's measured
+    // cap heights — 0.665, 2.826, 3.175 and 13.30 px against the 3.0 threshold
+    // — say are the ones under it. `greaterThan` alone would still pass if the
+    // cull had swallowed three of the four, or all of them.
+    expect(all.length - painted.length, 2);
+    expect(all.map((i) => i.kind),
+        containsAll(<String>['text:TINY', 'text:NEAR']));
+    // The matched control arm, which is why the threshold is steerable on
+    // *both* helpers and not just on the oracle: at 0.0 the walk draws the
+    // same complete set the painter does, so the on-arm's agreement above is a
+    // statement about the cull and not about what the two can draw at all.
+    expect(flatten(referenceToRecording(doc, view, 0.0)).length, all.length);
   });
 }

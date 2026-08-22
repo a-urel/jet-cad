@@ -5,6 +5,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import 'camera_controller.dart';
+import 'draft_painter.dart' show kMinTextCapPixels;
 import 'draw_sink.dart';
 import 'viewport_transform.dart';
 
@@ -31,19 +32,20 @@ void referenceWalk(
   DrawSink sink,
   ViewportTransform camera,
   Size viewport,
-  StyleResolver resolver,
-) {
+  StyleResolver resolver, {
+  double minTextCapPixels = kMinTextCapPixels,
+}) {
   final world = camera.visibleWorld(viewport);
   final origin = rebaseOriginFor(world);
-  _ReferenceWalk(
-          doc, sink, camera, resolver, world, origin, doc.leavesByOwner())
+  _ReferenceWalk(doc, sink, camera, resolver, world, origin,
+          doc.leavesByOwner(), minTextCapPixels)
       .container(
           doc.rootHandle, Transform2.identity(), StyleContext.documentRoot, 0);
 }
 
 class _ReferenceWalk {
   _ReferenceWalk(this.doc, this.sink, this.camera, this.resolver, this.world,
-      this.origin, this.leaves);
+      this.origin, this.leaves, this.minTextCapPixels);
 
   final DraftDocument doc;
   final DrawSink sink;
@@ -52,6 +54,9 @@ class _ReferenceWalk {
   final Aabb2 world;
   final Vector2 origin;
   final Map<Handle, List<int>> leaves;
+
+  /// On-screen cap height, in pixels, below which text is not drawn.
+  final double minTextCapPixels;
 
   /// Draws one container's contents in ascending handle order.
   void container(
@@ -163,6 +168,17 @@ class _ReferenceWalk {
       final record = doc.textStyleOf(textStyle);
       final attrs = resolveTextAttributes(
           payload, doc.entities.textAttrsAt(slot), record);
+      // The same rule the painter applies, computed here rather than asked
+      // for. An oracle that read the painter's decision would share the
+      // assumption it exists to test — the correction Plan 3e made at
+      // `24cfd23` for fill triangulation. `attrs.height` is resolved from this
+      // walk's own payload/attribute-bit/style read, and `chain` is composed
+      // from this walk's own transform stack, so the product is a genuinely
+      // independent number that happens to equal the painter's.
+      //
+      // Nothing is counted here: the painter keeps `culledTextCount`, and the
+      // walk deliberately has no counter for the comparison to borrow.
+      if (attrs.height * chain.scaleMagnitude < minTextCapPixels) return;
       final metrics = doc.textMeasurer.measure(text: text, style: record);
       // Rebased, like every other coordinate handed to `chain`.
       final anchor = Vector2(coords[0] - ox, coords[1] - oy);

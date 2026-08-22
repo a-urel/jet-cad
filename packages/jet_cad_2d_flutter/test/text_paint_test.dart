@@ -250,17 +250,28 @@ void main() {
     // both cameras: the working set, where culling decides most of the
     // answer, and the whole drawing, where it decides none of it.
     final doc = _textCorpus(2000);
-    expectPainterSupersetOfReference(
-        paintToRecording(doc, ViewportTransform.fit(doc.extents, kViewport)),
-        referenceToRecording(
-            doc, ViewportTransform.fit(doc.extents, kViewport)),
-        kViewport);
+    final whole = ViewportTransform.fit(doc.extents, kViewport);
+    expectPainterSupersetOfReference(paintToRecording(doc, whole),
+        referenceToRecording(doc, whole), kViewport);
     // The cropping camera is the one that exercises culling at all, and the
     // one whose edge the two walks read differently — see [slack].
     final cropped = cameraOverDocumentCentre(doc);
     expectPainterSupersetOfReference(paintToRecording(doc, cropped),
         referenceToRecording(doc, cropped), kViewport,
         edgeBandPx: 4.0);
+
+    // A third arm, with level of detail off on **both** sides.
+    //
+    // The two rows above are the interesting ones — at 3.0 px the painter and
+    // the walk each cull 116 of this corpus's 141 text entities off their own
+    // arithmetic, and their agreeing on *which* 116 is a real claim. But they
+    // are also thin: 25 text ops survive, the smallest at 3.06 px, a 2%
+    // margin over the threshold. A later `kMinTextCapPixels` of 3.3 would
+    // leave this row comparing a drawing with no text in it and still green.
+    // This arm is the one that cannot be emptied that way: at 0.0 every text
+    // entity the camera sees is drawn by both sides and compared.
+    expectPainterSupersetOfReference(paintToRecording(doc, whole, 0.0),
+        referenceToRecording(doc, whole, 0.0), kViewport);
   });
 
   test('a text entity is drawn through its own style, not through STANDARD',
@@ -324,10 +335,17 @@ void main() {
     // text at all, which is exactly what the previous shape of the walk did.
     final doc = _textCorpus(2000);
     final camera = ViewportTransform.fit(doc.extents, kViewport);
-    final reference = referenceToRecording(doc, camera);
+    // Level of detail off, explicitly. At the default 3.0 the walk culls 116
+    // of this corpus's 141 text entities and this guard would be asserting
+    // `25 > 20` — five ops of margin on the one test whose job is to prove the
+    // corpus is not empty. Off, it counts what the corpus actually carries.
+    final reference = referenceToRecording(doc, camera, 0.0);
     final texts = reference.whereType<TextOp>().toList();
     expect(texts.length, greaterThan(20));
     expect(texts.map((op) => op.text).toSet().length, greaterThan(1));
+    // And the culled figure is still not zero, so the row above it is not
+    // comparing a text-free drawing either.
+    expect(referenceToRecording(doc, camera).whereType<TextOp>(), isNotEmpty);
   });
 
   test(
@@ -345,14 +363,23 @@ void main() {
     final resolver = DocumentStyleResolver(doc);
     final camera = ViewportTransform.fit(doc.extents, kViewport);
 
+    // Both painters run with level of detail off, explicitly and identically.
+    // At the default 3.0 this corpus draws 25 text ops against a
+    // `greaterThan(20)` below, which is five ops of margin; and the two
+    // painters must cull the same set or the geometry comparison at the end
+    // would be reading a cull difference as a `drawText` difference.
     final withText = RecordingDrawSink();
-    final painter =
-        DraftPainter(document: doc, index: index, resolver: resolver);
+    final painter = DraftPainter(
+        document: doc, index: index, resolver: resolver, minTextCapPixels: 0.0);
     painter.paint(withText, camera, kViewport);
 
     final without = RecordingDrawSink();
     final textless = DraftPainter(
-        document: doc, index: index, resolver: resolver, drawText: false);
+        document: doc,
+        index: index,
+        resolver: resolver,
+        drawText: false,
+        minTextCapPixels: 0.0);
     textless.paint(without, camera, kViewport);
 
     // Non-degenerate: a corpus with no drawn text would pass this whichever
