@@ -57,6 +57,16 @@ void main() {
     // with. The load-bearing claim is that the painter's own cull adds no
     // *further* layout, so the baseline is taken here, after the index and
     // before `paint`, rather than asserted against zero.
+    //
+    // `clear()` first, and not just a baseline snapshot, because a snapshot
+    // alone hides the real failure mode: `measure()` is cache-first, and
+    // `SpatialIndex(doc)` already warmed the `('STAIR', Standard)` entry in
+    // both the metrics and paragraph caches. A cull moved to *after*
+    // `measure()` would call it, but on a warm cache that call is a lookup,
+    // not a layout — `layoutCount` would not move either way, and this test
+    // would pass while testing nothing. Clearing forces the painter's own
+    // call, cull-permitting, to be the one that pays for the layout.
+    m.clear();
     final baseline = m.layoutCount;
     final painter = DraftPainter(
         document: doc, index: index, resolver: DocumentStyleResolver(doc));
@@ -158,19 +168,49 @@ void main() {
     expect(painter.culledTextCount, 1);
   });
 
-  test('the threshold does not reach doc.extents', () {
+  test('doc.extents is bit-identical whichever threshold the painter runs at',
+      () {
     final m = FlutterTextMeasurer();
     addTearDown(m.clear);
     final world = Aabb2(Vector2.zero(), Vector2(1000, 750));
     final doc = _doc(2.0, world, m);
-    final wide = doc.extents;
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final view = ViewportTransform.fit(world, const Size(400, 300));
+
+    // 0.0 draws the glyph; 1000.0 culls it at any camera this fixture could
+    // reach. `minTextCapPixels` is final on `DraftPainter`, so two instances
+    // are needed to run the same document at two thresholds.
+    DraftPainter(
+            document: doc,
+            index: index,
+            resolver: DocumentStyleResolver(doc),
+            minTextCapPixels: 0.0)
+        .paint(RecordingDrawSink(), view, const Size(400, 300));
+    final withTextDrawn = doc.extents;
+
+    // Forces the next `doc.extents` read to be genuinely recomputed by
+    // `entityBounds` rather than served from `_extentsCache` — a cache hit
+    // here would pass even if the cull had leaked into `entityBounds`.
     doc.invalidateDerived();
-    final again = doc.extents;
-    // A document box that changed with zoom would be absurd; the painter's
-    // threshold is a draw decision and lives nowhere near entityBounds.
-    expect(again.min.x, wide.min.x);
-    expect(again.min.y, wide.min.y);
-    expect(again.max.x, wide.max.x);
-    expect(again.max.y, wide.max.y);
+
+    DraftPainter(
+            document: doc,
+            index: index,
+            resolver: DocumentStyleResolver(doc),
+            minTextCapPixels: 1000.0)
+        .paint(RecordingDrawSink(), view, const Size(400, 300));
+    final withTextCulled = doc.extents;
+
+    // `doc.extents` is a stored geometric quantity, derived once by
+    // `entityBounds` from the payload, the attribute bits and the style
+    // record; the painter's cull is a later, per-frame draw decision that
+    // never reaches it. Killed by moving the `minTextCapPixels` comparison
+    // into `entityBounds` instead of `_drawText` — the two thresholds would
+    // then bound the entity differently and this test would go red.
+    expect(withTextCulled.min.x, withTextDrawn.min.x);
+    expect(withTextCulled.min.y, withTextDrawn.min.y);
+    expect(withTextCulled.max.x, withTextDrawn.max.x);
+    expect(withTextCulled.max.y, withTextDrawn.max.y);
   });
 }
