@@ -61,18 +61,33 @@ Stats measure(void Function() body,
 /// The smallest on-screen cap height, in pixels, among the text this camera
 /// actually draws at [kMinTextCapPixels].
 ///
-/// **Recovered from outside the painter, on purpose.** The obvious way to get
-/// this number is a `double` field on `DraftPainter` updated once per text
-/// entity — and this package's first non-negotiable is that the frame path
-/// allocates nothing per entity in steady state, so a new per-entity write on
-/// the hot text path is not a thing to add for a rig print.
+/// **Recovered from outside the painter, on purpose — but not because the
+/// inside was forbidden.** The obvious alternative is a `double` field on
+/// `DraftPainter`, updated once per drawn text entity. That technique is
+/// available: `DraftPainter` already keeps `_arcCx`, `_arcCy` and `_arcR`
+/// (`draft_painter.dart:275`) and writes all three per dashed circle and per
+/// dashed arc on the same frame path (`:750-752`, `:793-795`). A `double` field
+/// assignment is not an allocation in Dart, and the package's
+/// nothing-per-entity rule is about allocation — so a per-entity `double` write
+/// would not have breached it.
 ///
-/// The cull rule is `cap < minTextCapPixels`, so a label of cap height `m`
-/// survives a threshold `t` exactly when `t <= m`. The largest `t` at which the
-/// frame still draws all [baseline] of its labels is therefore `m` for the
-/// smallest surviving one. Bisecting for it costs a handful of query-only
-/// paints — about 380 ms each at 500,000 entities, fifteen of them, against a
-/// rig that already runs for minutes — and adds nothing to the frame.
+/// It was passed over for a plainer reason: this number is a **rig
+/// diagnostic**. It is read once per printed row, by a human reading a
+/// transcript, and never by the renderer. Exposing it from `DraftPainter` would
+/// put a field and a public getter into production API whose only purpose is to
+/// be printed, and every later reader of that class would have to work out that
+/// nothing depends on it. Recovering it here keeps the painter's surface to
+/// what the frame actually needs.
+///
+/// The recovery is exact rather than approximate. The cull rule is
+/// `cap < minTextCapPixels`, so a label of cap height `m` survives a threshold
+/// `t` exactly when `t <= m` — the bound is achieved, not approached. The
+/// largest `t` at which the frame still draws all [baseline] of its labels is
+/// therefore `m` for the smallest surviving one. Bisecting for it costs a
+/// handful of query-only paints — about 380 ms each at 500,000 entities,
+/// fifteen of them, against a rig that already runs for minutes — and every one
+/// of them is a throwaway probe into a `NullDrawSink`, outside every timed
+/// block.
 ///
 /// Returns `double.nan` when nothing was drawn; the caller has already refused
 /// that case.
