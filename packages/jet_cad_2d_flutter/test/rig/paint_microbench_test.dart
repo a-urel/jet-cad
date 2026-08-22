@@ -434,6 +434,92 @@ void main() {
         }
       }
 
+      // Exit-gate row 10 — extents-sweep non-interference, at corpus scale.
+      //
+      // `flutter_text_measurer_test.dart`'s 'a metrics sweep does not evict
+      // drawn paragraphs' makes the same claim at unit scale, with both cache
+      // bounds handed in explicitly. This is the claim against the real
+      // corpus, at the shipped defaults, over the ~4,020 distinct strings the
+      // sweep actually walks — which is the number that decides whether
+      // `kMetricsCacheLimit` is sized right, and the thing a unit fixture
+      // with `metricsLimit: 1024` cannot say anything about.
+      //
+      // The procedure is the plan's, in order: paint one frame at the
+      // working-set camera warm; `invalidateDerived()` then read
+      // `doc.extents` in full; repaint at the same camera; read the *repeat
+      // frame's* new paragraph layouts and paragraph evictions. Both are
+      // expected to be 0. A merged cache fails it by construction — the sweep
+      // walks 4,020 keys through 512 slots and evicts everything the repaint
+      // asks for again.
+      //
+      // **Measured, and it does not do what the spec assumed — read this
+      // before trusting the row.** The design document justified row 10 with
+      // "step 2 walks 4,020 keys through 512 slots". `doc.extents` does not:
+      // `_computeExtents` is `_boundsOfContainer` over the tree with a
+      // per-*definition* bounds cache, so a corpus of 20,000 instances over
+      // 200 definitions measures each definition's strings once, not once per
+      // instance. The 4,020 figure belongs to `ContainerIndex.build`, which is
+      // a genuinely per-entity sweep and runs once when the index is built.
+      // Fired at 50,000 entities on 2026-08-22, this sweep laid out **12**
+      // strings under a merged cache and 12 under `metricsLimit` cut to the
+      // paragraph bound — not 4,020.
+      //
+      // The consequence is that this row **passes under both of the mutations
+      // it was written to catch**, and is recorded as non-discriminating on
+      // this corpus rather than as evidence. Under mutant 6 (one merged map)
+      // the sweep evicted 12 paragraphs and the repeat frame still read
+      // `newLayouts=0`: LRU drops the *oldest* entries, and the 18 keys this
+      // camera had just drawn were the newest, with 512 slots for 18 keys.
+      // The discriminating version of this claim is the unit-scale one in
+      // `flutter_text_measurer_test.dart`, where `paragraphLimit: 4` against a
+      // 200-key sweep leaves the drawn set no such margin — mutants 6 and 12
+      // both redden it.
+      //
+      // The sweep's own deltas are printed separately for that reason: at the
+      // shipped defaults they read zero, which is the designed outcome (the
+      // metrics map was filled at index-build time and `kMetricsCacheLimit` is
+      // above the corpus's distinct-key count), and any run where they do not
+      // is the one worth looking at. `liveMetrics` below shows whether the map
+      // still holds the whole corpus or a truncated part of it — that field,
+      // not the repeat frame, is what moved under both mutations.
+      {
+        final ws = workingSetCamera(doc);
+        CanvasDrawSink freshSink(PictureRecorder r) => CanvasDrawSink(
+            canvas: Canvas(r),
+            pixelsPerPaperMm: kLogicalPixelsPerMm,
+            measurer: measurer,
+            textStyleOf: doc.textStyleOf);
+
+        final warm = PictureRecorder();
+        painter.paint(freshSink(warm), ws, kRigViewport);
+        warm.endRecording().dispose();
+
+        measurer.resetCounters();
+        doc.invalidateDerived();
+        final swept = doc.extents;
+        final sweepLayouts = measurer.layoutCount;
+        final sweepParagraphEvictions = measurer.paragraphEvictionCount;
+        final sweepMetricsEvictions = measurer.metricsEvictionCount;
+
+        measurer.resetCounters();
+        final repeat = PictureRecorder();
+        painter.paint(freshSink(repeat), ws, kRigViewport);
+        repeat.endRecording().dispose();
+
+        print('  -- row 10: extents-sweep non-interference --');
+        print('    sweep (${swept.maxX - swept.minX} x '
+            '${swept.maxY - swept.minY} world units): '
+            'layouts=$sweepLayouts '
+            'paragraphEvictions=$sweepParagraphEvictions '
+            'metricsEvictions=$sweepMetricsEvictions');
+        print('    repeat frame after the sweep: '
+            'newLayouts=${measurer.layoutCount} '
+            'newParagraphEvictions=${measurer.paragraphEvictionCount} '
+            'newMetricsEvictions=${measurer.metricsEvictionCount} '
+            'liveParagraphs=${measurer.liveParagraphCount} '
+            'liveMetrics=${measurer.liveMetricsCount}');
+      }
+
       // How much slack the working-set number has.
       //
       // "Under the limit" is not the same as "under the limit with room". The
