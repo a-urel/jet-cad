@@ -20,6 +20,28 @@ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import 'rig_support.dart';
 
+/// Threshold ladder for Task 8's step-locator measurement: `minTextCapPixels`
+/// values to probe, one full pass each, at the 50,000-entity text corpus.
+///
+/// **Gated behind an environment define, not always-on.** An ordinary rig
+/// run already costs minutes; this loop is fourteen additional full paints
+/// (seven thresholds, two cameras) and belongs only to the run that is
+/// actually measuring the ladder. Comma-separated pixel values; unset (the
+/// default) leaves the list empty and the loop below a no-op.
+///
+/// Reproduces the Task 8 report's ladder table exactly:
+/// ```sh
+/// cd packages/jet_cad_2d_flutter && CI=true flutter test --tags rig \
+///   --run-skipped test/rig/paint_microbench_test.dart \
+///   --plain-name "text paint at 50000" \
+///   --dart-define=LADDER=0.0,1.0,2.0,3.0,4.0,6.0,10.0
+/// ```
+final List<double> kLadderThresholds = const String.fromEnvironment('LADDER')
+    .split(',')
+    .where((s) => s.isNotEmpty)
+    .map(double.parse)
+    .toList();
+
 class Stats {
   Stats(this.p50, this.p95, this.min, this.n);
   final double p50;
@@ -435,6 +457,84 @@ void main() {
             '${keys.keys.length.toString().padLeft(5)} keys, '
             '${keys.textOps.toString().padLeft(5)} text ops  '
             '${keys.keys.length > kParagraphCacheLimit ? "OVER" : "under"}');
+      }
+
+      // Task 8's threshold ladder — see kLadderThresholds' doc comment for
+      // the command that reproduces the report's table. A no-op unless
+      // `LADDER` is set: `kLadderThresholds` is then empty and this loop
+      // does not run.
+      //
+      // Two independent readings per row, from two different objects, on
+      // purpose:
+      //
+      // `distinctKeys` is the **true** distinct `(text, styleHandle, argb)`
+      // count visible at this threshold and camera — a `TextKeySink` pass,
+      // which draws nothing and costs no layout at all. This is the number
+      // Ruling 4's single permitted raise of `kParagraphCacheLimit` needs
+      // recorded beside it, and it is not the same thing as `layouts` below:
+      // `layouts` counts *cache misses* in one paint, which only equals the
+      // true distinct-key count when the paint's own eviction pressure
+      // happens not to force a second miss on a key already seen earlier in
+      // that same pass. Above the 512-entry limit that coincidence cannot be
+      // assumed, so this rig measures the real thing instead of reasoning
+      // about whether the coincidence held.
+      //
+      // `layouts`/`paragraphEvictions`/`liveParagraphs` come from a *fresh*
+      // `FlutterTextMeasurer` built fresh each iteration and passed as the
+      // `CanvasDrawSink`'s `measurer:` — the object `paragraphFor` (the
+      // drawn, coloured cache) writes to. Fresh each time so this reports
+      // what one cold paint at that threshold costs, not a number
+      // contaminated by whichever keys the *previous* threshold's paint
+      // happened to leave live.
+      //
+      // `metricsEvictions`/`liveMetrics` are read from `measurer` — this
+      // test's own `document.textMeasurer`, the object `textRigCorpus` built
+      // the document with. `DraftPainter._drawText`'s LOD check calls
+      // `.measure()` on *that* object (`draft_painter.dart:873`), never on
+      // the sink's measurer, so it is the only one this column can mean
+      // anything read from. `resetCounters()` isolates each iteration's
+      // eviction delta without clearing the map itself.
+      if (entityCount == 50000 && kLadderThresholds.isNotEmpty) {
+        print('  -- threshold ladder --');
+        for (final threshold in kLadderThresholds) {
+          for (final (label, camera) in [
+            ('whole drawing', wholeDrawingCamera(doc)),
+            ('working set', workingSetCamera(doc)),
+          ]) {
+            final p = DraftPainter(
+                document: doc,
+                index: index,
+                resolver: resolver,
+                minTextCapPixels: threshold);
+
+            final keySink = TextKeySink();
+            p.paint(keySink, camera, kRigViewport);
+            final distinctKeys = keySink.drawsPerKey.length;
+            final culled = p.culledTextCount;
+
+            final paragraphs = FlutterTextMeasurer();
+            measurer.resetCounters();
+            final recorder = PictureRecorder();
+            p.paint(
+                CanvasDrawSink(
+                    canvas: Canvas(recorder),
+                    pixelsPerPaperMm: kLogicalPixelsPerMm,
+                    measurer: paragraphs,
+                    textStyleOf: doc.textStyleOf),
+                camera,
+                kRigViewport);
+            recorder.endRecording().dispose();
+
+            print('    threshold=${threshold.toStringAsFixed(1)} '
+                '$label: distinctKeys=$distinctKeys '
+                'layouts=${paragraphs.layoutCount} '
+                'paragraphEvictions=${paragraphs.paragraphEvictionCount} '
+                'metricsEvictions=${measurer.metricsEvictionCount} '
+                'culledText=$culled '
+                'liveParagraphs=${paragraphs.liveParagraphCount} '
+                'liveMetrics=${measurer.liveMetricsCount}');
+          }
+        }
       }
 
       index.dispose();

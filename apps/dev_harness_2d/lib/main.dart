@@ -83,14 +83,19 @@ const bool kDrawText = bool.fromEnvironment('DRAW_TEXT', defaultValue: true);
 ///
 /// **A `String.fromEnvironment`, and it stays one.** `bool.fromEnvironment`
 /// reads `--dart-define=LOD=1` as **false**, and Plan 3c lost a full device run
-/// to exactly that with `TEXT=1`. An unrecognised value throws at startup rather
-/// than falling back to something that looks fine.
+/// to exactly that with `TEXT=1`. An unrecognised value throws rather than
+/// falling back to something that looks fine — **on first read**, not at
+/// process startup: this is a lazy top-level `final`, not a `const`, so the
+/// throw actually happens at `_HarnessAppState.build()`'s first evaluation of
+/// [kMinTextCap], which for an ordinary `flutter run`/`flutter drive`
+/// invocation is loud and immediate enough to be the same thing in practice,
+/// but is not literally "at startup".
 final double kMinTextCap =
     switch (const String.fromEnvironment('LOD', defaultValue: 'true')) {
   'true' => kMinTextCapPixels,
   'false' => 0.0,
-  final other => throw ArgumentError.value(
-      other, 'LOD', 'expected "true" or "false"'),
+  final other =>
+    throw ArgumentError.value(other, 'LOD', 'expected "true" or "false"'),
 };
 
 /// Fraction of the closed polylines [_addFillRegions] adds that gain a region

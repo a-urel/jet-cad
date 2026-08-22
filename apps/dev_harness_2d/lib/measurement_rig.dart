@@ -149,8 +149,15 @@ void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
     required int paragraphEvictionsBefore,
     required int metricsEvictionsBefore}) {
   final m = sink.measurer;
+  // `minTextCapPixels` is printed here, not just implied by which binary was
+  // launched with which define: a device run comparing `LOD=true` against
+  // `LOD=false` is otherwise indistinguishable from one that failed to wire
+  // the define through at all whenever the camera's text happens to sit
+  // above both thresholds — this line is the only place in either transcript
+  // that shows the two runs actually differed in what they were given.
   print('  text: corpus=${textCorpus ? "on" : "off"} '
       'draw=${drawText ? "on" : "off"} '
+      'minTextCapPixels=${painter.minTextCapPixels} '
       'textOps=${painter.textOpCount} '
       'skippedText=${painter.skippedTextCount} '
       'culledText=${painter.culledTextCount}');
