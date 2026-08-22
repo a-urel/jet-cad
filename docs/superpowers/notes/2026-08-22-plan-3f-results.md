@@ -374,11 +374,32 @@ held by the unit-scale fixture.
 **5. Criterion 6 is unfalsifiable by construction** (see above). The invariant
 is true; no fixture can distinguish it from a uniformly wrong `entityBounds`.
 
-**6. Mutant 7's survival exposed a shape, not just a constant.** A test file
-that always constructs its subject with every bound passed explicitly cannot
-see a wrong default. One test was added for `metricsLimit`; the same hole would
-hide a wrong `paragraphLimit` default, and no audit was made of how widely that
-pattern occurs.
+**6. Mutant 7's survival exposed a shape, not just a constant, and the shape
+*was* audited.** A test file that always constructs its subject with every
+bound passed explicitly cannot see a wrong default. One test was added for
+`metricsLimit`. The final fix wave audited how widely that pattern occurs and
+found three known instances:
+
+- `FlutterTextMeasurer.metricsLimit`'s default — mutant 7, the one that
+  survived the suite it shipped with.
+- `FlutterTextMeasurer.paragraphLimit`'s default — audited during Task 9's
+  review. Mutating it reddens only a restatement test
+  (`the same string in two colours is two entries, not one`, which merely
+  checks `layoutCount`/`liveParagraphCount` against literal `2`s regardless of
+  what the default is), so the default is still behaviourally unexercised.
+- `reference_walk.dart:36`'s `minTextCapPixels` default. Setting it to `0.0`
+  leaves the whole suite green, because every caller that cares supplies its
+  own threshold explicitly, and that caller's default shadows the parameter's.
+
+**7. The rig's prints are not assertions, and the fix should be turning them
+into some.** Rows 1–5 and corpus-scale row 10 in
+`test/rig/paint_microbench_test.dart` print rather than assert. This is not
+hypothetical: mutant 7 (above) survived its own suite while the rig printed
+`liveMetrics=512 metricsEvictions=608634` for a run that should have read
+`liveMetrics=4020 metricsEvictions=0`, and the run still passed — a glaring
+regression that a human has to notice by reading a transcript rather than one
+the suite would fail on. Turning the rig's degeneracy guard into real
+assertions is a candidate follow-up for Plan 3g and was out of scope here.
 
 ---
 

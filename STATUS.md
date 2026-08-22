@@ -1,8 +1,10 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-23
-**Verified against:** `main` at `d113d2d`, **not yet pushed**, working tree
-clean apart from the three files the traps below say never to commit.
+**Verified against:** `main` at `486c1b7` — the final fix wave's test-teardown
+commit, the exact tree the suites below were run against — **not yet pushed**,
+working tree clean apart from the three files the traps below say never to
+commit.
 Every suite count below was produced by running the suite on the **merged**
 result, not by reading a report and not on the branch before it landed.
 
@@ -62,7 +64,7 @@ turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open
 
 Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
 
-| Suite | State (on `main` at `d113d2d`, run, not read off a report) |
+| Suite | State (on `main` at `486c1b7`, run, not read off a report) |
 |---|---|
 | `packages/jet_cad_2d` — engine | **777 tests, all pass**, analyze/format clean |
 | `packages/jet_cad_2d_flutter` — widgets | **299 tests pass, 1 skipped**, analyze/format clean |
@@ -840,7 +842,13 @@ The discriminating form is the unit-scale test.
 `kParagraphCacheLimit` passed all 297 tests, because every test in
 `flutter_text_measurer_test.dart` constructed the measurer with both bounds
 given explicitly. Recorded as a survivor, then killed by a test written for it
-(`645b027`). The shape of that hole was not audited elsewhere.
+(`645b027`). The shape of that hole **was audited** in the final fix wave.
+Three known instances: `metricsLimit`'s default (mutant 7, above);
+`paragraphLimit`'s default, audited during Task 9's review — mutating it
+reddens only a restatement test, so the default is still behaviourally
+unexercised; and `reference_walk.dart:36`'s `minTextCapPixels` default, where
+setting it to `0.0` leaves the whole suite green because a caller's own
+default shadows it.
 
 ### Plan 3g — the definition/tile picture cache
 
