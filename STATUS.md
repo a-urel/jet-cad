@@ -1,7 +1,8 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-22
-**Verified against:** `main` at `f0ea51e`, working tree clean.
+**Verified against:** `main` at `8fad846`, pushed, working tree clean apart from
+the three files the traps below say never to commit.
 Every suite count below was produced by running the suite on the **merged**
 result, not by reading a report and not on the branch before it landed.
 
@@ -32,8 +33,11 @@ from granting itself. See
 Nothing is in flight. The `spike/vertices-sink` branch and its worktree are
 gone; the ledger is archived at
 [docs/superpowers/ledgers/](docs/superpowers/ledgers/), beside Plan 3c's.
-Plan 3e's own ledger (`.superpowers/sdd/2026-08-21-jet-cad-2d-plan-3e-fills/`)
-is to be archived the same way, since this plan had no worktree of its own.
+Plan 3e's own ledger was archived the same way at `8fad846`, since that plan had
+no worktree of its own: 64 files at
+[docs/superpowers/ledgers/2026-08-21-jet-cad-2d-plan-3e-fills/](docs/superpowers/ledgers/2026-08-21-jet-cad-2d-plan-3e-fills/).
+**The ordering is the lesson: archive the ledger onto the branch before the
+workspace is deleted, never after.**
 
 **Since Plan 3d's merge, on `main` at `70d824e..0eac1be`: two of Plan 3d's
 three remaining open items are closed**, and one thing that note recorded
@@ -44,9 +48,9 @@ Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
 
 | Suite | State (on `main`, run against the merged result) |
 |---|---|
-| `packages/jet_cad_2d` — engine | **771 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **276 tests pass, 1 skipped**, analyze/format clean |
-| `flutter test --tags golden` | **29 pass**, 34 PNGs (17 fixtures × 2 backends); no pre-existing PNG regenerated |
+| `packages/jet_cad_2d` — engine | **777 tests, all pass**, analyze/format clean |
+| `packages/jet_cad_2d_flutter` — widgets | **277 tests pass, 1 skipped**, analyze/format clean |
+| `flutter test --tags golden` | **29 pass**, 34 PNGs (17 fixtures × 2 backends, 3 of them fills); no pre-existing PNG regenerated |
 | `apps/dev_harness_2d` | analyze/format clean |
 | `benchmark/query_throughput.dart` | one gated row fails — `snap at dirty threshold`, **carried from Plan 2**, not a regression |
 
@@ -193,7 +197,7 @@ docs/superpowers/
 
 | Location | Branch | State |
 |---|---|---|
-| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, Plans 1/2/3a/3b/**3c**/**3d** merged |
+| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, Plans 1/2/3a/3b/**3c**/**3d**/**3e** merged |
 
 **No worktrees.** `spike/vertices-sink` was merged with `--no-ff` and both the
 branch and `.claude/worktrees/vertices-spike` were removed. Nothing is in
@@ -209,10 +213,11 @@ git rev-list --count 52c7a7b..HEAD          # everything Plan 3d brought in
 git rev-list --count origin/main..main      # what is unpushed
 ```
 
-Plan 3d was pushed on 2026-08-21; `origin/main` reached `c54552f` then. The
-follow-up commits above may or may not be pushed by the time you read this —
-run the second command rather than trusting this sentence. Do not push unless
-explicitly asked.
+Plan 3d was pushed on 2026-08-21; `origin/main` reached `c54552f` then. Plan 3e
+and Plan 3d's follow-up items were pushed on 2026-08-22, taking `origin/main`
+to `8fad846`. Anything committed after that may or may not be pushed by the
+time you read this — run the second command rather than trusting this
+sentence. Do not push unless explicitly asked.
 
 The Plan 3d per-task ledger was archived out of the worktree before it was
 removed, and is at
