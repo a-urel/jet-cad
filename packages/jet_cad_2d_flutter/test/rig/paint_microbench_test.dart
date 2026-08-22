@@ -172,6 +172,7 @@ void main() {
       // text; wrong on `textRigCorpus`, and the two rigs must not differ in
       // how they hold it.
       final measurer = FlutterTextMeasurer();
+      addTearDown(measurer.clear);
 
       print('=== $entityCount entities ===');
       print('  corpus: doc=${docMs}ms index=${indexMs}ms '
@@ -253,6 +254,7 @@ void main() {
       // its own (`paragraphs`, below) — that is not a relapse into this
       // production topology; see the comment at its construction for why.
       final measurer = FlutterTextMeasurer();
+      addTearDown(measurer.clear);
 
       final build = Stopwatch()..start();
       final doc = textRigCorpus(entityCount, measurer: measurer);
@@ -617,6 +619,13 @@ void main() {
             // Built fresh every iteration for exactly that reason — see the
             // "Two independent readings" comment above this loop for the
             // rest of the split between this object and `measurer`.
+            // Cleared at the end of this iteration rather than via
+            // `addTearDown`: this loop runs up to fourteen times (seven
+            // thresholds times two cameras) inside one test, and
+            // `addTearDown` only fires once the whole test body returns, so
+            // it would let all fourteen measurers' native paragraphs pile up
+            // live together instead of bounding the population to one
+            // measurer's worth at a time.
             final paragraphs = FlutterTextMeasurer();
             measurer.resetCounters();
             final recorder = PictureRecorder();
@@ -638,6 +647,7 @@ void main() {
                 'culledText=$culled '
                 'liveParagraphs=${paragraphs.liveParagraphCount} '
                 'liveMetrics=${measurer.liveMetricsCount}');
+            paragraphs.clear();
           }
         }
       }

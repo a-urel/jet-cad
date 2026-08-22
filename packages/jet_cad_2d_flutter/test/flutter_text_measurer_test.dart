@@ -10,6 +10,7 @@ const TextStyleRecord _style =
 void main() {
   test('the same string in two colours is two entries, not one', () {
     final m = FlutterTextMeasurer();
+    addTearDown(m.clear);
     m.paragraphFor('WC', const Handle(7), _style, 0xFFFF0000);
     m.paragraphFor('WC', const Handle(7), _style, 0xFF00FF00);
     // ui.Paragraph bakes its colour and drawParagraph takes no Paint, so a key
@@ -20,6 +21,7 @@ void main() {
 
   test('a repeat request lays out nothing and allocates no metrics', () {
     final m = FlutterTextMeasurer();
+    addTearDown(m.clear);
     final a = m.measure(text: 'WC', style: _style);
     final before = m.layoutCount;
     final b = m.measure(text: 'WC', style: _style);
@@ -31,6 +33,7 @@ void main() {
 
   test('eviction disposes the paragraph', () {
     final m = FlutterTextMeasurer(paragraphLimit: 2);
+    addTearDown(m.clear);
     m.paragraphFor('A', const Handle(7), _style, 0xFF000000);
     m.paragraphFor('B', const Handle(7), _style, 0xFF000000);
     m.paragraphFor('C', const Handle(7), _style, 0xFF000000);
@@ -43,6 +46,7 @@ void main() {
 
   test('metrics are cap-height based and taken at the nominal size', () {
     final m = FlutterTextMeasurer();
+    addTearDown(m.clear);
     final metrics = m.measure(text: 'WC', style: _style);
     expect(
         metrics.capHeight, closeTo(kCapHeightRatio * kNominalTextPixels, 1e-9));
@@ -63,7 +67,9 @@ void main() {
     // has no isEmpty guard of its own (Task 10's guard is on the *draw* path,
     // not the bounds path), so an empty text entity would hand doc.extents and
     // the R-tree a box 3.4e38 wide.
-    final flutter = FlutterTextMeasurer().measure(text: '', style: _style);
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final flutter = measurer.measure(text: '', style: _style);
     expect(flutter.advanceWidth, 0.0);
 
     // The seam's whole premise is that the two measurers are interchangeable:
@@ -80,6 +86,7 @@ void main() {
     // else in the suite would notice, because the numbers stay internally
     // consistent; they are just measurements of the wrong thing.
     final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
     for (final text in ['WC', 'STAIR', 'LOBBY']) {
       measurer.paragraphFor(text, const Handle(7), _style, 0xFF000000);
     }
@@ -136,6 +143,7 @@ void main() {
     // cache's entry count are the same number, which is the only reason
     // reading one tells you anything about the other.
     final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
     measurer
       ..paragraphFor('WC', style, _style, red.argb)
       ..paragraphFor('WC', style, _style, red.argb)
@@ -147,6 +155,7 @@ void main() {
 
   test('measure disposes its probe and leaves no paragraph entry', () {
     final m = FlutterTextMeasurer();
+    addTearDown(m.clear);
     m.measure(text: 'WC', style: _style);
     expect(m.layoutCount, 1);
     // The probe is built at kMetricsProbeArgb, which ACI 7 (white) is not, so
@@ -164,6 +173,7 @@ void main() {
     // walks every string in the document with no LOD protection. Before the
     // split it would have walked straight through the paragraph cache.
     final m = FlutterTextMeasurer(paragraphLimit: 4, metricsLimit: 1024);
+    addTearDown(m.clear);
     for (final t in ['A', 'B', 'C', 'D']) {
       m.paragraphFor(t, const Handle(7), _style, 0xFFFFFFFF);
     }
@@ -187,6 +197,7 @@ void main() {
       'the metrics map evicts on its own bound, and it is not the paragraph one',
       () {
     final m = FlutterTextMeasurer(paragraphLimit: 512, metricsLimit: 2);
+    addTearDown(m.clear);
     m.measure(text: 'A', style: _style);
     m.measure(text: 'B', style: _style);
     m.measure(text: 'C', style: _style);
@@ -210,6 +221,7 @@ void main() {
     // failing line is `expect(m.metricsLimit, kMetricsCacheLimit)` restates
     // the mutation instead of observing it.
     final m = FlutterTextMeasurer();
+    addTearDown(m.clear);
     // One more distinct string than the paragraph cache could hold. A metrics
     // map bounded by the paragraph limit evicts here; the real one does not.
     for (var i = 0; i <= kParagraphCacheLimit; i++) {
@@ -226,6 +238,7 @@ void main() {
 
   test('clear empties both maps', () {
     final m = FlutterTextMeasurer();
+    addTearDown(m.clear);
     final p = m.paragraphFor('WC', const Handle(7), _style, 0xFFFFFFFF);
     m.measure(text: 'STAIR', style: _style);
     expect(m.liveParagraphCount, 1);
