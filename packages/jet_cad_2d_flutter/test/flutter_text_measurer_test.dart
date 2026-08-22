@@ -195,6 +195,35 @@ void main() {
     expect(m.liveMetricsCount, 2);
   });
 
+  test('the default metrics bound is not the paragraph bound', () {
+    // **Landed because a named mutant survived.** Plan 3f's mutant 7 —
+    // `metricsLimit` defaulted to `kParagraphCacheLimit` — passed the whole
+    // suite when it was fired in Task 9, because every other test in this
+    // file constructs the measurer with *both* limits given explicitly, so
+    // the defaults themselves were untested. At rig scale the mutant is
+    // plainly visible and unasserted: the 50,000-entity corpus reads
+    // `liveMetrics=512 metricsEvictions=608634` under it against
+    // `liveMetrics=4020 metricsEvictions=0` shipped. This is that difference
+    // at unit scale, where something fails rather than merely prints.
+    //
+    // The behavioural assertions come first on purpose: a test whose only
+    // failing line is `expect(m.metricsLimit, kMetricsCacheLimit)` restates
+    // the mutation instead of observing it.
+    final m = FlutterTextMeasurer();
+    // One more distinct string than the paragraph cache could hold. A metrics
+    // map bounded by the paragraph limit evicts here; the real one does not.
+    for (var i = 0; i <= kParagraphCacheLimit; i++) {
+      m.measure(text: 'SWEEP$i', style: _style);
+    }
+    expect(m.metricsEvictionCount, 0);
+    expect(m.liveMetricsCount, kParagraphCacheLimit + 1);
+    // And the sweep held no paragraphs at all, which is the other half of
+    // why the two bounds are allowed to differ by an order of magnitude.
+    expect(m.liveParagraphCount, 0);
+    expect(m.paragraphLimit, kParagraphCacheLimit);
+    expect(m.metricsLimit, kMetricsCacheLimit);
+  });
+
   test('clear empties both maps', () {
     final m = FlutterTextMeasurer();
     final p = m.paragraphFor('WC', const Handle(7), _style, 0xFFFFFFFF);

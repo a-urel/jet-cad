@@ -231,6 +231,64 @@ void main() {
     expect(withTextCulled.max.y, withTextDrawn.max.y);
   });
 
+  test('picking a text entity gives the same hit at either threshold', () {
+    // Row 7 of the exit gate, and the pick-path twin of the `doc.extents` row
+    // above. Picking runs through `SpatialIndex`, whose leaf boxes come from
+    // `entityBounds`; no `DraftPainter` and no `minTextCapPixels` reaches it.
+    // The claim is that a frame drawn with the text culled leaves the pick
+    // answer exactly where a frame that drew it does.
+    //
+    // Non-vacuous by construction: this is the same 2.0-unit-high fixture the
+    // first test culls at 0.76 px of cap height, so the two paints below
+    // genuinely differ — one draws the glyph, the other does not — and the
+    // pick is asserted to hit, not merely to agree. Two identical misses
+    // would agree too.
+    final m = FlutterTextMeasurer();
+    addTearDown(m.clear);
+    final world = Aabb2(Vector2.zero(), Vector2(1000, 750));
+    const size = Size(400, 300);
+    final doc = _doc(2.0, world, m);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final view = ViewportTransform.fit(world, size);
+    final textHandle = doc.entities.handleAt(doc.entities.liveSlots.single);
+
+    HitPath pickAfterPaintingAt(double threshold) {
+      final painter = DraftPainter(
+          document: doc,
+          index: index,
+          resolver: DocumentStyleResolver(doc),
+          minTextCapPixels: threshold);
+      painter.paint(RecordingDrawSink(), view, size);
+      final out = HitPath();
+      expect(
+          index.pickInto(
+              Vector2(0.5, 1.0), 2.0, const QueryFilter.picking(), out),
+          isTrue,
+          reason: 'the pick must land at threshold $threshold, or this row '
+              'compares two misses');
+      return out;
+    }
+
+    final drawn = pickAfterPaintingAt(0.0);
+    // `HitPath.worldPoint` is written in place by the next `pickInto`, so the
+    // first hit's fields are copied out before the second pick runs.
+    final drawnEntity = drawn.entity;
+    final drawnKind = drawn.kind;
+    final drawnX = drawn.worldPoint.x;
+    final drawnY = drawn.worldPoint.y;
+
+    final culled = pickAfterPaintingAt(1000.0);
+
+    expect(drawnEntity, textHandle);
+    expect(culled.entity, drawnEntity);
+    expect(culled.kind, drawnKind);
+    // Stored geometry, so exact `==` — the repository's rule for value
+    // comparisons, as against the tolerance a geometric *decision* takes.
+    expect(culled.worldPoint.x, drawnX);
+    expect(culled.worldPoint.y, drawnY);
+  });
+
   test('painter and oracle cull the same text under a non-identity placement',
       () {
     // Deliberately not at the identity and not at the origin: the painter and
