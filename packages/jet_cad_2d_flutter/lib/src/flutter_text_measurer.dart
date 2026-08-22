@@ -87,6 +87,16 @@ class FlutterTextMeasurer implements TextMeasurer {
   /// held unless eviction actually released it.
   Paragraph? debugLastEvicted;
 
+  /// The metrics probe most recently built and disposed, already
+  /// [Paragraph.dispose]d.
+  ///
+  /// Debug-only surface for the disposal assertion, mirroring
+  /// [debugLastEvicted] for exactly the same reason: a bound on the entry
+  /// count says nothing about whether the probe's native glyph memory was
+  /// actually released, and this is the highest-frequency disposal site in
+  /// the class — once per metrics miss.
+  Paragraph? debugLastProbe;
+
   /// Live entries in the paragraph cache — native paragraphs, which is what
   /// Plan 3c's "peak live paragraphs" row means.
   int get liveParagraphCount => _paragraphs.length;
@@ -180,6 +190,7 @@ class FlutterTextMeasurer implements TextMeasurer {
     final probe = _layOut(text, style, kMetricsProbeArgb);
     final metrics = _metricsOf(probe);
     probe.dispose();
+    debugLastProbe = probe;
     if (_metrics.length >= metricsLimit) _evictOldestMetrics();
     final key = _MetricsKey(text, style.handle);
     _metrics[key] = _MetricsEntry(key, metrics);

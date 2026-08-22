@@ -154,6 +154,9 @@ void main() {
     // cache's effective capacity.
     expect(m.liveParagraphCount, 0);
     expect(m.liveMetricsCount, 1);
+    // A Paragraph holds native glyph memory: an entry-count bound proves
+    // nothing about the probe's memory unless disposal actually released it.
+    expect(m.debugLastProbe!.debugDisposed, isTrue);
   });
 
   test('a metrics sweep does not evict drawn paragraphs', () {
@@ -194,12 +197,15 @@ void main() {
 
   test('clear empties both maps', () {
     final m = FlutterTextMeasurer();
-    m.paragraphFor('WC', const Handle(7), _style, 0xFFFFFFFF);
+    final p = m.paragraphFor('WC', const Handle(7), _style, 0xFFFFFFFF);
     m.measure(text: 'STAIR', style: _style);
     expect(m.liveParagraphCount, 1);
     expect(m.liveMetricsCount, 1);
     m.clear();
     expect(m.liveParagraphCount, 0);
     expect(m.liveMetricsCount, 0);
+    // A Paragraph holds native glyph memory: dropping it from the map is not
+    // enough unless clear() actually disposes it.
+    expect(p.debugDisposed, isTrue);
   });
 }
