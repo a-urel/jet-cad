@@ -192,13 +192,25 @@ carries a comment saying why. This is the ordinary Dart contract for a
 native-resource holder — `ui.Image` works the same way — and it is the only
 option that does not add a lifecycle to the engine package.
 
-Two tests pin it:
+**Every construction site takes the obligation with the measurer.** A
+one-line change that adds `FlutterTextMeasurer()` and stops there moves the leak
+rather than fixing it. In tests that means `addTearDown(measurer.clear)` beside
+the construction; in the harness it means `_HarnessState.dispose()`
+(`main.dart:421-425`, which today releases `index` and `camera` and nothing else)
+gains the call. `harnessDocument` currently builds the measurer inline inside the
+`generateDocument` argument list (`main.dart:155`), so it must hoist it to a
+field the state can reach.
+
+Three tests pin it:
 
 - **Split view.** Two `DraftCanvas`es over one document; dispose one; the other
   still serves paragraphs from a warm cache with `layoutCount` unchanged.
 - **Application teardown.** `measurer.clear()` disposes every live paragraph —
   the existing `debugLastEvicted` / `Paragraph.debugDisposed` surface already
   supports this assertion.
+- **Harness lifecycle.** Disposing the harness state disposes the measurer.
+  The teardown row alone only proves `clear()` works when someone remembers to
+  call it, which is not the failure mode this change introduces.
 
 `_measurer`'s current doc comment (`draft_canvas.dart:120-122`) argues that the
 cache should *survive* a document swap. The new ownership reverses that on
@@ -231,11 +243,27 @@ metrics miss *builds a paragraph*, so the thrash costs real layouts. This is
 Ruling 4's reasoning applied to a different cache, not a raise of Ruling 4's own
 constant.
 
-`measure()` reads the metrics map. On a miss it **probes the paragraph map
-first** for any entry with the same `(text, styleHandle)`; if one exists at any
-colour, the metrics come from it and no layout happens. Only if neither map has
-it does it build a paragraph at `kMetricsProbeArgb`, read the metrics, store
-them, and **dispose the probe paragraph**.
+`measure()` reads the metrics map. On a miss it builds a paragraph at
+`kMetricsProbeArgb`, reads the metrics, stores them, and **disposes the probe
+paragraph**.
+
+**It does not consult the paragraph map, and that is a decision, not an
+oversight.** An earlier draft had it probe the paragraph map for any entry with
+the same `(text, styleHandle)` at any colour. Two reviews independently pointed
+out that a `LinkedHashMap` keyed on the wide `(text, styleHandle, argb)` tuple
+cannot be queried on the narrow one — the only implementations are a linear scan
+of up to 512 entries per miss, or a third reverse-index map with its own
+eviction maintenance.
+
+Neither is needed, because **the probe can never pay**. `DraftPainter._drawText`
+calls `measure()` before it calls `sink.text`, and `sink.text` is the only route
+to `paragraphFor` (`canvas_draw_sink.dart:207`; the vertices sink delegates text
+to the same fallback at `vertices_draw_sink.dart:721`). So at first sight of a
+string the paragraph map has nothing to find. The probe could only pay when a
+paragraph outlives its metrics entry — which requires a metrics eviction, and
+`kMetricsCacheLimit` is sized above the corpus's whole distinct-key count
+precisely so that does not happen. The bound that makes the split work is the
+same bound that makes the probe dead code.
 
 **Disposing the probe is a reversal, and the reason it was reversed is a fact
 that was checked.** The first draft kept it, arguing ACI 7 is black so the probe
@@ -248,13 +276,17 @@ so the threshold ladder measures it rather than taking this argument on trust.
 
 `paragraphFor()` reads the paragraph map, building on a miss.
 
-**Every insert over an existing paragraph key disposes the displaced
-paragraph.** `_buildEntry` currently ends `_cache[key] = entry`
-(`flutter_text_measurer.dart:172`) with no disposal, which is unreachable today
-because it is only called on a miss. The split makes it reachable: the two maps
-evict independently, so a `(text, style)` pair can be live in the paragraph map
-after its metrics entry is gone. Without the disposal that is a native leak, and
-it is a named mutant.
+**Insert-over-existing stays unreachable, and is asserted rather than
+handled.** `_buildEntry` ends `_cache[key] = entry`
+(`flutter_text_measurer.dart:172`) with no disposal of a displaced paragraph.
+An earlier draft called for a disposal branch, on the theory that the split made
+that path reachable. It does not: `paragraphFor` inserts only after an exact
+`(text, styleHandle, argb)` miss, and `measure()` — with the probe dropped —
+never inserts into the paragraph map at all. A disposal branch there would be
+dead code, and a mutant that deleted it would be equivalent. The invariant gets
+an `assert(!_paragraphs.containsKey(key))` instead, which is the honest shape:
+a claim the code makes about itself, not a handler for a case that cannot
+arise.
 
 Both maps must be probed without allocating. The paragraph map keeps the existing
 mutable `_CacheKey`; the metrics map needs its own two-field equivalent, for the
@@ -263,6 +295,14 @@ lookup was measured at roughly 41 `_Record` allocations per pick and broke
 `query_allocation_test`.
 
 `measure()` must return the **identical** `TextMetrics` instance on a repeat call.
+
+**The constructor takes two bounds, not one.** It is
+`FlutterTextMeasurer({this.limit = kParagraphCacheLimit})` today
+(`flutter_text_measurer.dart:41`), and `flutter_text_measurer_test.dart:33`
+passes `limit: 2` to force eviction. Under two maps a single `limit` is
+ambiguous, and both the eviction unit test and the threshold ladder need the
+metrics bound settable per instance. Two named parameters,
+`paragraphLimit` and `metricsLimit`, defaulting to the two constants.
 
 ### Counters, per map
 
@@ -278,8 +318,30 @@ lookup was measured at roughly 41 `_Record` allocations per pick and broke
 - `clear()` clears and disposes both.
 - `resetCounters()` zeroes all three counts and touches neither map.
 
+**`evictionCount` is a breaking rename and every reader must move with it.**
+`layoutCount` and `liveParagraphCount` keep their names and meanings; only
+`evictionCount` splits. The call sites, all of which the task must edit or the
+first analyze run is red:
+
+- `test/flutter_text_measurer_test.dart:37`, `:91` — the class's own unit test,
+  which also constructs `FlutterTextMeasurer(limit: 2)` at `:33`
+- `test/rig/paint_microbench_test.dart:286`, `:299`, `:301`, `:304`
+- `apps/dev_harness_2d/integration_test/frame_timing_test.dart:265`, `:323`
+- `apps/dev_harness_2d/lib/measurement_rig.dart:156`, `:158`, `:218` — `:218` is
+  a second call site outside `printTextCounters`, and that function's own
+  `evictionsBefore` parameter splits too
+
 `measurement_rig.dart:155-157` prints `newLayouts=`, `newEvictions=` and `live=`
 from these and gains the second eviction number.
+
+**`paint_microbench_test.dart` is a special case: this plan falsifies its
+premise.** Its fixture builds two measurers on purpose, and says why at
+`:153-158` — "Two measurers, because production has two. `DraftCanvas` builds its
+own `FlutterTextMeasurer` for the sink and never touches
+`document.textMeasurer`". That is exactly the wiring this plan removes, and it is
+the rig the +97/+105 ms figure came from. Left alone it measures a shape that no
+longer exists and its comment becomes false in-tree. The task collapses it to one
+measurer and rewrites the comment to say what the new wiring is.
 
 ### What this buys, stated honestly
 
@@ -440,8 +502,40 @@ build and looks like it worked. Named mutant, and the equivalent prop-update tes
 already exists for `drawText`.
 
 The harness maps its `LOD` define to `true → kMinTextCapPixels`,
-`false → 0.0`, and passes it to `DraftCanvas` (`main.dart:443-452` forwards
-`drawText` today and nothing else).
+`false → 0.0`, and passes it to `DraftCanvas` (`main.dart:443-450` forwards
+`drawText: kDrawText` today and nothing else).
+
+### The second blast radius: LOD arrives by default value
+
+The measurer guard's radius is a compile error at every call site, so it can be
+tabled and re-scanned. **`minTextCapPixels` defaulting to `kMinTextCapPixels`
+has no compiler-visible call site at all** — seventeen files construct a
+`DraftPainter`, and every one of them silently gains culling. A default-valued
+API change needs the same explicit sweep a signature change gets, and the first
+draft of this document did not give it one.
+
+Five of the seventeen carry text:
+
+| suite | why it matters |
+|---|---|
+| `test/text_paint_test.dart` | the text draw path's own tests |
+| `test/rig/paint_microbench_test.dart` | the gate's feasibility number |
+| `test/support/sink_comparison.dart` | sink-against-sink ink comparison |
+| `test/draft_painter_root_test.dart` | root-level text ordering |
+| `test/draft_canvas_test.dart` | the `drawText` forward |
+
+**The task enumerates all seventeen and records, for each text-bearing one, its
+smallest text cap height in pixels against the threshold** — the way
+`text_ladder`'s 7.3× is recorded below. A suite whose margin is thin gets
+`minTextCapPixels: 0` explicitly rather than an implicit pass, so that a later
+threshold change cannot silently empty it.
+
+`paintToRecording` (`test/support/fixtures.dart:154`) builds a bare
+`DraftPainter(document:, index:, resolver:)` and is the one spelling every
+differential test uses. It gains `minTextCapPixels` alongside
+`referenceToRecording`'s (`:167`) — **both sides**, or the matched on/off control
+arms cannot be driven and mutant 5's near-threshold fixture cannot put the
+painter and the oracle on the same number on purpose.
 
 ### Anisotropy
 
@@ -571,16 +665,22 @@ A test is worth landing here only if a named mutation makes it red.
 | 4 | drop `_culledText++` | row 4 |
 | 5 | reference walk reads the painter's decision | near-threshold, non-identity placement fixture |
 | 6 | merge the two maps back into one | row 10 |
-| 7 | `kMetricsCacheLimit` set to `kParagraphCacheLimit` | row 10, in layouts |
+| 7 | `metricsLimit` defaulted to `kParagraphCacheLimit` | row 10, in layouts |
 | 8 | remove the `DraftCanvas` guard | row 8 |
 | 9 | `measure()` does not store metrics | rows 1 and 10 |
 | 10 | apply LOD inside `entityBounds` | row 6 |
 | 11 | `culledTextCount` not reset per frame | two-frame fixture |
-| 12 | `measure()` skips the paragraph-map probe on a metrics miss | a layout-count assertion on a string already drawn |
-| 13 | insert over an existing paragraph key without disposing | `Paragraph.debugDisposed` on the displaced entry |
-| 14 | keep the metrics probe paragraph instead of disposing it | the threshold ladder's distinct-key column |
-| 15 | `DraftCanvas.dispose()` keeps calling `clear()` | row 11 |
-| 16 | `minTextCapPixels` left out of `didUpdateWidget` | prop-update test, the shape `drawText`'s already has |
+| 12 | keep the metrics probe paragraph instead of disposing it | the threshold ladder's distinct-key column |
+| 13 | `DraftCanvas.dispose()` keeps calling `clear()` | row 11 |
+| 14 | `minTextCapPixels` left out of `didUpdateWidget` | prop-update test, the shape `drawText`'s already has |
+| 15 | `DraftPainter.minTextCapPixels` defaulted to `0.0` | a bare-`DraftPainter` text test that passes no knob — the rig passes one explicitly and would stay green |
+
+**Two mutants from the previous draft are gone, both because the mechanisms they
+attacked were removed.** "Skip the paragraph-map probe on a metrics miss" and
+"insert over an existing paragraph key without disposing" both described paths
+that the probe's removal makes unreachable; a mutation of unreachable code is
+equivalent by construction, and listing it would have put a row in the log that
+row 13 could never close.
 
 **Mutant 6 replaced a bad one.** The first draft named "key the metrics map by
 ARGB", expecting row 10 to kill it. `measure()` always passes
@@ -595,9 +695,13 @@ apart — the repo's named dominant defect class. The two reach `chain` by
 different routes (`draft_painter.dart:793`, `reference_walk.dart:145-148`), so a
 genuine disagreement is constructible.
 
-**Mutant 14 exists because a premise was wrong once.** The probe-disposal
+**Mutant 12 exists because a premise was wrong once.** The probe-disposal
 decision rests on ACI 7 resolving to white; the ladder measures the alternative
 rather than trusting the argument.
+
+**Mutant 15 exists because the rig cannot see it.** The harness passes
+`minTextCapPixels` explicitly, so a wrong default leaves every gate row green.
+Only a construction site that relies on the default can catch it.
 
 ### Goldens
 
@@ -671,7 +775,8 @@ finds it needs an engine change should raise it as a ruling, not take it.
 **Modified**
 
 - `packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart` — the split,
-  the two bounds, per-map counters, probe disposal, dispose-on-overwrite
+  the two bounds, two constructor parameters, per-map counters, probe disposal,
+  and the insert-over-existing assertion
 - `packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart` — measurer resolution,
   the guard, `minTextCapPixels` including in `didUpdateWidget`, `dispose()` no
   longer calling `clear()`
@@ -679,10 +784,26 @@ finds it needs an engine change should raise it as a ruling, not take it.
   test, `culledTextCount`, `kMinTextCapPixels`, `minTextCapPixels`
 - `packages/jet_cad_2d_flutter/lib/src/reference_walk.dart` — an independently
   derived LOD, and `minTextCapPixels` on `referenceWalk`
-- `packages/jet_cad_2d_flutter/test/support/fixtures.dart` — the new parameter
+- `packages/jet_cad_2d_flutter/test/support/fixtures.dart` — the new parameter on
+  **both** `paintToRecording` (`:154`) and `referenceToRecording` (`:167`)
 - `packages/jet_cad_2d_flutter/test/differential_test.dart` — the new parameter
+- `packages/jet_cad_2d_flutter/test/flutter_text_measurer_test.dart` — the
+  measurer's own unit test: the eviction rename, the two constructor bounds, the
+  probe removal
+- `packages/jet_cad_2d_flutter/test/canvas_draw_sink_test.dart` — reads
+  `layoutCount` and `liveParagraphCount`, which keep their meaning; audited, not
+  necessarily changed
+- `packages/jet_cad_2d_flutter/test/rig/paint_microbench_test.dart` — collapsed
+  to one measurer, its two-measurer comment rewritten, the eviction rename
+- `packages/jet_cad_2d_flutter/test/support/sink_comparison.dart` — a
+  text-bearing bare `DraftPainter`
+- `packages/jet_cad_2d_flutter/test/text_paint_test.dart` — text-bearing
+- `packages/jet_cad_2d_flutter/test/draft_painter_root_test.dart` — text-bearing
+- `apps/dev_harness_2d/integration_test/frame_timing_test.dart` — the eviction
+  rename at `:265` and `:323`
 - `apps/dev_harness_2d/lib/main.dart` — the `LOD` define, the threshold
-  forwarded, and the measurer ternary collapsed
+  forwarded, the measurer ternary collapsed, the measurer hoisted out of the
+  `generateDocument` argument list to a field, and `dispose()` releasing it
 - `apps/dev_harness_2d/lib/measurement_rig.dart` — `culledText=` and the second
   eviction count, in `printTextCounters`
 - `packages/jet_cad_2d_flutter/test/draft_canvas_test.dart` — three documents
@@ -690,7 +811,14 @@ finds it needs an engine change should raise it as a ruling, not take it.
 - `packages/jet_cad_2d_flutter/test/frame_path_seam_test.dart` — one document
 - `packages/jet_cad_2d_flutter/test/golden/dash_ladder_golden_test.dart` — one
 - `packages/jet_cad_2d_flutter/test/golden/fill_ladder_golden_test.dart` — one
-- `STATUS.md` — the 3f/3g renumbering, all fourteen occurrences
+- `STATUS.md` — the 3f/3g renumbering. **Not a mechanical sweep.** Fourteen
+  occurrences, and three of them (`:622`, `:633`, `:635`) are prose *about the
+  previous renumbering* — "fills is 3e and the picture cache is 3f", "every
+  `3d`/`3e`/`3f` above was swept". Rewriting those blindly destroys the history
+  that explains why the numbers moved. `:436` is a third case: "the picture
+  cache's text LOD (Plan 3f)" is the item this plan takes and 3g keeps the rest,
+  so it splits rather than renumbers. The task states which of the fourteen are
+  prose before it edits any of them.
 
 **Created**
 
