@@ -58,6 +58,63 @@ Stats measure(void Function() body,
       samples[(samples.length * 0.95).floor()], samples.first, samples.length);
 }
 
+/// The smallest on-screen cap height, in pixels, among the text this camera
+/// actually draws at [kMinTextCapPixels].
+///
+/// **Recovered from outside the painter, on purpose.** The obvious way to get
+/// this number is a `double` field on `DraftPainter` updated once per text
+/// entity — and this package's first non-negotiable is that the frame path
+/// allocates nothing per entity in steady state, so a new per-entity write on
+/// the hot text path is not a thing to add for a rig print.
+///
+/// The cull rule is `cap < minTextCapPixels`, so a label of cap height `m`
+/// survives a threshold `t` exactly when `t <= m`. The largest `t` at which the
+/// frame still draws all [baseline] of its labels is therefore `m` for the
+/// smallest surviving one. Bisecting for it costs a handful of query-only
+/// paints — about 380 ms each at 500,000 entities, fifteen of them, against a
+/// rig that already runs for minutes — and adds nothing to the frame.
+///
+/// Returns `double.nan` when nothing was drawn; the caller has already refused
+/// that case.
+double smallestDrawnCapPixels(DraftDocument doc, SpatialIndex index,
+    StyleResolver resolver, ViewportTransform camera, int baseline) {
+  if (baseline == 0) return double.nan;
+  int drawnAt(double threshold) {
+    final probe = DraftPainter(
+        document: doc,
+        index: index,
+        resolver: resolver,
+        minTextCapPixels: threshold);
+    probe.paint(NullDrawSink(), camera, kRigViewport);
+    return probe.textOpCount;
+  }
+
+  // Bracket: `lo` keeps every label, `hi` loses at least one. 24 doublings
+  // reaches 50 million pixels of cap height, which no camera survives.
+  var lo = kMinTextCapPixels, hi = kMinTextCapPixels * 2;
+  var bracketed = false;
+  for (var i = 0; i < 24; i++) {
+    if (drawnAt(hi) != baseline) {
+      bracketed = true;
+      break;
+    }
+    lo = hi;
+    hi *= 2;
+  }
+  if (!bracketed) return double.infinity;
+  // Bisect to a relative 1e-4, which is four significant figures on a number
+  // printed to four decimal places.
+  for (var i = 0; i < 32 && hi - lo > lo * 1e-4; i++) {
+    final mid = (lo + hi) / 2;
+    if (drawnAt(mid) == baseline) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
 void main() {
   for (final entityCount in [50000, 500000]) {
     test('paint and query at $entityCount', () {
@@ -225,6 +282,21 @@ void main() {
               '${painter.minTextCapPixels} px): the rows below would be a '
               'measurement of a drawing with no text in it');
         }
+        // Emptying is not the realistic failure — drift is. This camera's
+        // smallest survivor sits 0.02% above the threshold, so a small
+        // threshold rise would take thousands of labels away while `textOps`
+        // stayed comfortably non-zero, and every row below would go on
+        // printing plausible numbers for a frame that no longer resembles the
+        // one it is supposed to measure. The margin is therefore printed, so a
+        // human reading this transcript sees how close it is on the run in
+        // front of them rather than on the run this comment was written from.
+        final smallest = smallestDrawnCapPixels(
+            doc, index, resolver, camera, painter.textOpCount);
+        print('    LOD MARGIN: smallest drawn cap height '
+            '${smallest.toStringAsFixed(4)} px  '
+            '(threshold ${painter.minTextCapPixels} px, '
+            '${(smallest / painter.minTextCapPixels).toStringAsFixed(4)}x)  '
+            'culled: ${painter.culledTextCount}');
         final keyCount = keySink.drawsPerKey.length;
         final strings = keySink.keys.map((k) => (k.$1, k.$2)).toSet();
         final colours = keySink.keys.map((k) => k.$3).toSet();
