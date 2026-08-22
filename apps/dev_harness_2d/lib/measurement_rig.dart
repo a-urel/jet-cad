@@ -146,16 +146,21 @@ void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
     {required bool textCorpus,
     required bool drawText,
     required int layoutsBefore,
-    required int evictionsBefore}) {
+    required int paragraphEvictionsBefore,
+    required int metricsEvictionsBefore}) {
   final m = sink.measurer;
   print('  text: corpus=${textCorpus ? "on" : "off"} '
       'draw=${drawText ? "on" : "off"} '
       'textOps=${painter.textOpCount} '
       'skippedText=${painter.skippedTextCount}');
+  // Two eviction numbers, not one. A paragraph eviction released native glyph
+  // memory and guarantees a future re-layout; a metrics eviction dropped four
+  // doubles. Ruling 54: a blended number hides which half moved.
   print('  paragraphs: newLayouts=${m.layoutCount - layoutsBefore} '
-      'newEvictions=${m.evictionCount - evictionsBefore} '
-      'live=${m.liveParagraphCount} '
-      '(totals layouts=${m.layoutCount} evictions=${m.evictionCount})');
+      'newParagraphEvictions=${m.paragraphEvictionCount - paragraphEvictionsBefore} '
+      'newMetricsEvictions=${m.metricsEvictionCount - metricsEvictionsBefore} '
+      'liveParagraphs=${m.liveParagraphCount} '
+      'liveMetrics=${m.liveMetricsCount}');
 }
 
 /// R2: 120 frames of pan, then 120 of zoom across three scale bands, then one
@@ -215,7 +220,8 @@ Future<void> runR2Rig({
     sink.resetCounters();
     vertices?.resetCounters();
     final layoutsBefore = sink.measurer.layoutCount;
-    final evictionsBefore = sink.measurer.evictionCount;
+    final paragraphEvictionsBefore = sink.measurer.paragraphEvictionCount;
+    final metricsEvictionsBefore = sink.measurer.metricsEvictionCount;
     camera.panBy(Offset.zero);
     await pumpFrame();
     report('R2 ($entities)', timings);
@@ -227,7 +233,8 @@ Future<void> runR2Rig({
         textCorpus: textCorpus,
         drawText: drawText,
         layoutsBefore: layoutsBefore,
-        evictionsBefore: evictionsBefore);
+        paragraphEvictionsBefore: paragraphEvictionsBefore,
+        metricsEvictionsBefore: metricsEvictionsBefore);
   } finally {
     SchedulerBinding.instance.removeTimingsCallback(collect);
   }

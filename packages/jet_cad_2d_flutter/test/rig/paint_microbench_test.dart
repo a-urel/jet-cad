@@ -149,18 +149,16 @@ void main() {
   // before it prints anything else.
   for (final entityCount in [50000, 500000]) {
     test('text paint at $entityCount', () {
-      // Two measurers, because production has two. `DraftCanvas` builds its own
-      // `FlutterTextMeasurer` for the sink and never touches
-      // `document.textMeasurer`, which is what the painter reads metrics from —
-      // so draw-colour paragraphs and metrics probes land in *different* caches,
-      // and only the sink's is the one `kParagraphCacheLimit` is about. Sharing
-      // one here would inflate the count with probe entries the real wiring
-      // keeps somewhere else.
-      final sinkMeasurer = FlutterTextMeasurer();
-      final docMeasurer = FlutterTextMeasurer();
+      // One measurer, because production has one. The document owns it and
+      // `DraftCanvas` borrows it for the sink, so the painter's metrics
+      // requests and the sink's drawn paragraphs land in the same object —
+      // metrics in its colour-free map, paragraphs in its coloured one. Before
+      // Plan 3f these were two `FlutterTextMeasurer`s with two caches, and this
+      // rig built two to match; that wiring is gone.
+      final measurer = FlutterTextMeasurer();
 
       final build = Stopwatch()..start();
-      final doc = textRigCorpus(entityCount, measurer: docMeasurer);
+      final doc = textRigCorpus(entityCount, measurer: measurer);
       final docMs = build.elapsedMilliseconds;
       final index = SpatialIndex(doc);
       final indexMs = build.elapsedMilliseconds - docMs;
@@ -254,15 +252,14 @@ void main() {
           ('text on', painter),
           ('text off', textless)
         ]) {
-          sinkMeasurer.resetCounters();
-          docMeasurer.resetCounters();
+          measurer.resetCounters();
           final paint = measure(() {
             final recorder = PictureRecorder();
             p.paint(
                 CanvasDrawSink(
                     canvas: Canvas(recorder),
                     pixelsPerPaperMm: kLogicalPixelsPerMm,
-                    measurer: sinkMeasurer,
+                    measurer: measurer,
                     textStyleOf: doc.textStyleOf),
                 camera,
                 kRigViewport);
@@ -280,10 +277,10 @@ void main() {
           final canvasSink = CanvasDrawSink(
               canvas: Canvas(canvasRecorder),
               pixelsPerPaperMm: kLogicalPixelsPerMm,
-              measurer: sinkMeasurer,
+              measurer: measurer,
               textStyleOf: doc.textStyleOf);
-          final layoutsBefore = sinkMeasurer.layoutCount;
-          final evictionsBefore = sinkMeasurer.evictionCount;
+          final layoutsBefore = measurer.layoutCount;
+          final paragraphEvictionsBefore = measurer.paragraphEvictionCount;
           p.paint(canvasSink, camera, kRigViewport);
           canvasRecorder.endRecording().dispose();
 
@@ -294,15 +291,14 @@ void main() {
               'canvasCalls: ${canvasSink.canvasCallCount}');
           print('      textOps: ${p.textOpCount}  '
               'skippedText: ${p.skippedTextCount}');
-          print('      steady-state frame: '
-              'newLayouts=${sinkMeasurer.layoutCount - layoutsBefore} '
-              'newEvictions=${sinkMeasurer.evictionCount - evictionsBefore}');
-          print('      sink cache: layouts=${sinkMeasurer.layoutCount} '
-              'evictions=${sinkMeasurer.evictionCount} '
-              'live=${sinkMeasurer.liveParagraphCount}');
-          print('      doc cache:  layouts=${docMeasurer.layoutCount} '
-              'evictions=${docMeasurer.evictionCount} '
-              'live=${docMeasurer.liveParagraphCount}');
+          print('      newLayouts=${measurer.layoutCount - layoutsBefore} '
+              'newParagraphEvictions='
+              '${measurer.paragraphEvictionCount - paragraphEvictionsBefore}');
+          print('      cache: layouts=${measurer.layoutCount} '
+              'paragraphEvictions=${measurer.paragraphEvictionCount} '
+              'metricsEvictions=${measurer.metricsEvictionCount} '
+              'liveParagraphs=${measurer.liveParagraphCount} '
+              'liveMetrics=${measurer.liveMetricsCount}');
           print('      screen-space leaves: ${p.screenSpaceLeafCount}  '
               'dashSpans: ${p.dashSpanCount}  '
               'collapsed: ${p.collapsedDashCount}');

@@ -262,7 +262,8 @@ void main() {
     app.sink.resetCounters();
     app.vertices?.resetCounters();
     final layoutsBefore = app.sink.measurer.layoutCount;
-    final evictionsBefore = app.sink.measurer.evictionCount;
+    final paragraphEvictionsBefore = app.sink.measurer.paragraphEvictionCount;
+    final metricsEvictionsBefore = app.sink.measurer.metricsEvictionCount;
     app.camera.panBy(Offset.zero);
     await tester.pump(const Duration(milliseconds: 16));
     report('R4a ($kEntities)', timings);
@@ -278,7 +279,8 @@ void main() {
         textCorpus: kTextCorpus,
         drawText: kDrawText,
         layoutsBefore: layoutsBefore,
-        evictionsBefore: evictionsBefore);
+        paragraphEvictionsBefore: paragraphEvictionsBefore,
+        metricsEvictionsBefore: metricsEvictionsBefore);
   });
 
   testWidgets('R4b instance drag per frame', (tester) async {
@@ -320,7 +322,8 @@ void main() {
     app.sink.resetCounters();
     app.vertices?.resetCounters();
     final layoutsBefore = app.sink.measurer.layoutCount;
-    final evictionsBefore = app.sink.measurer.evictionCount;
+    final paragraphEvictionsBefore = app.sink.measurer.paragraphEvictionCount;
+    final metricsEvictionsBefore = app.sink.measurer.metricsEvictionCount;
     app.camera.panBy(Offset.zero);
     await tester.pump(const Duration(milliseconds: 16));
     report('R4b ($kEntities)', timings);
@@ -333,6 +336,7 @@ void main() {
         textCorpus: kTextCorpus,
         drawText: kDrawText,
         layoutsBefore: layoutsBefore,
-        evictionsBefore: evictionsBefore);
+        paragraphEvictionsBefore: paragraphEvictionsBefore,
+        metricsEvictionsBefore: metricsEvictionsBefore);
   });
 }
