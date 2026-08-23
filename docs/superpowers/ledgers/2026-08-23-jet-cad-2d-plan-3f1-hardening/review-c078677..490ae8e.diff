@@ -1,0 +1,2689 @@
+# Review package: c078677..490ae8e
+
+## Commits
+490ae8e docs: Plan 3f.1 results, mutation log, and STATUS update
+b1e9ec1 test: three frame-accounting identities the rig only printed
+e39f295 test: narrow a false claim in the text-cache invariants header
+a5ff5db test: the text cache's default bounds become an always-on gate
+03bc025 test: a v5 document resolves bit-identically under v6
+a5bcf98 fix: StyleContext.linetypeScale reaches the drawing
+7f7aa76 feat: an INSERT imposes lineweight, transparency and linetype
+25b9873 feat: InstanceNode carries the four style fields StyleContext needs
+
+## Files changed
+ STATUS.md                                          | 162 +++++-
+ .../notes/2026-08-23-plan-3f1-results.md           | 287 ++++++++++
+ docs/superpowers/notes/plan-3f1-mutation-log.md    | 596 +++++++++++++++++++++
+ .../jet_cad_2d/lib/src/codec/schema_version.dart   |  11 +-
+ packages/jet_cad_2d/lib/src/document/node.dart     |  77 ++-
+ .../lib/src/document/style_resolver.dart           |  72 ++-
+ .../test/codec/instance_style_codec_test.dart      | 194 +++++++
+ .../jet_cad_2d/test/codec/json_codec_test.dart     |  13 +-
+ .../test/document/instance_style_test.dart         | 287 ++++++++++
+ .../test/testing/generate_document_test.dart       |  15 +-
+ .../test/invariants/frame_accounting_test.dart     | 176 ++++++
+ .../invariants/text_cache_invariants_test.dart     | 164 ++++++
+ .../jet_cad_2d_flutter/test/rig/rig_support.dart   |  74 +--
+ .../test/support/text_key_sink.dart                |  75 +++
+ 14 files changed, 2095 insertions(+), 108 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 750262b..73a571e 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,24 +1,38 @@
+ # jet-cad — project status
+ 
+ **Last updated:** 2026-08-23
+-**Verified against:** `main` at `486c1b7` — the final fix wave's test-teardown
+-commit, the exact tree the suites below were run against — **not yet pushed**,
+-working tree clean apart from the three files the traps below say never to
+-commit.
++**Verified against:** `main` at `b1e9ec1` — Plan 3f.1's last task commit (Task
++7 produced no commit; the tree at `b1e9ec1` is what its full revert restored
++and both a task reviewer and a re-reviewer confirmed byte-identical), the
++exact tree the suites below were run against — **not yet pushed**, working
++tree clean apart from the three files the traps below say never to commit.
+ Every suite count below was produced by running the suite on the **merged**
+ result, not by reading a report and not on the branch before it landed.
+ 
+ ---
+ 
+ ## TL;DR — where you left off
+ 
++**Plan 3f.1 (hardening before the picture cache) is done, eight tasks, worked
++directly on `main` at `c078677..b1e9ec1`, nothing in flight.** **Its exit gate
++is 16 of 17 — the one miss is the allocation-meter probe's own pre-committed
++stop clause firing, recorded as the plan working, not failing.** See
++[Plan 3f.1](#plan-3f1--hardening-before-the-picture-cache) and
++[Resume here](#resume-here).
++
++Results note:
++[docs/superpowers/notes/2026-08-23-plan-3f1-results.md](docs/superpowers/notes/2026-08-23-plan-3f1-results.md).
++Mutation log:
++[docs/superpowers/notes/plan-3f1-mutation-log.md](docs/superpowers/notes/plan-3f1-mutation-log.md) —
++seventeen named mutants, all seventeen killed, no survivors.
++
+ **Plan 3f (text wiring and level of detail) is done, nine tasks, worked
+ directly on `main`, nothing in flight.** **Its exit gate is 11 of 13 — and the
+ two that miss are recorded as missing, not tuned away.** See
+ [Plan 3f](#plan-3f--text-wiring-and-level-of-detail) and
+ [Resume here](#resume-here).
+ 
+ Results note:
+ [docs/superpowers/notes/2026-08-22-plan-3f-results.md](docs/superpowers/notes/2026-08-22-plan-3f-results.md).
+ Mutation log:
+ [docs/superpowers/notes/plan-3f-mutation-log.md](docs/superpowers/notes/plan-3f-mutation-log.md) —
+@@ -57,24 +71,24 @@ no worktree of its own: 64 files at
+ **The ordering is the lesson: archive the ledger onto the branch before the
+ workspace is deleted, never after.**
+ 
+ **Since Plan 3d's merge, on `main` at `70d824e..0eac1be`: two of Plan 3d's
+ three remaining open items are closed**, and one thing that note recorded
+ turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open)
+ — one item remains and cannot be closed here.
+ 
+ Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
+ 
+-| Suite | State (on `main` at `486c1b7`, run, not read off a report) |
++| Suite | State (on `main` at `b1e9ec1`, run, not read off a report) |
+ |---|---|
+-| `packages/jet_cad_2d` — engine | **777 tests, all pass**, analyze/format clean |
+-| `packages/jet_cad_2d_flutter` — widgets | **299 tests pass, 1 skipped**, analyze/format clean |
++| `packages/jet_cad_2d` — engine | **793 tests, all pass**, analyze/format clean |
++| `packages/jet_cad_2d_flutter` — widgets | **304 tests pass, 1 skipped**, analyze/format clean |
+ | `flutter test --tags golden` | **35 pass**, 40 PNGs (20 fixtures × 2 backends, 3 fills and 3 text-LOD rungs); no pre-existing PNG regenerated |
+ | `apps/dev_harness_2d` | analyze/format clean |
+ | `benchmark/query_throughput.dart` | **GATE: PASS** — every gated row under its threshold on 2026-08-23, `snap at dirty threshold` included (p50 0.552 ms against 1.0 ms). That row is Plan 2's carried failure and it is a **timing on a shared machine**: recorded as passing today, not declared fixed |
+ 
+ The widget suite's one skip is `test/rig/paint_microbench_test.dart`, skipped at
+ suite level by the `rig` tag in `dart_test.yaml` — pre-existing and by design.
+ 
+ **Plan 3c's exit gate: PASS.** All eight of its failable criteria were met —
+ zero new paragraph layouts and zero evictions in the steady-state frame at both
+ entity counts and on real hardware, `skippedTextCount` 0, peak live paragraphs
+@@ -337,20 +351,42 @@ So the paragraph cache key carries no height, angle or width factor. It is
+ | 12 | Rigs, counters, the number the gate depends on | ⬜ not started |
+ | 13 | Mutation testing | ⬜ not started |
+ | 14 | Exit gate and the results note | ⬜ not started |
+ 
+ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
+ 
+ ---
+ 
+ ## Resume here
+ 
++**Plan 3f.1 (hardening before the picture cache) is done, worked directly on
++`main` at `c078677..b1e9ec1`, nothing in flight. Its exit gate is 16 of 17,
++the one miss being its own pre-committed stop clause firing on the
++allocation-meter probe.** Everything below about 3f is still true and still
++worth reading; this is what changed on top of it.
++
++**Nothing here is waiting on a human.** `StyleContext` is now correctly keyed
++(trap 4, closed), `linetypeScale` reaches the drawing, and 3g knows before it
++starts that its central risk (trap 5) needs a command-time assertion rather
++than a frame-path allocation gate, because the latter does not work under
++`flutter test`. See
++[Plan 3f.1](#plan-3f1--hardening-before-the-picture-cache) above and
++[the results note](docs/superpowers/notes/2026-08-23-plan-3f1-results.md) for
++every number, including the plan's own recurring failure mode (a stated cause
++stronger than its evidence, three times, each caught by running something
++rather than reading it) and the three plan premises corrected mid-flight.
++
++**A resumer's ledger chore:** 3f.1 had no worktree, so its
++`.superpowers/sdd/2026-08-23-jet-cad-2d-plan-3f1-hardening/` material is
++**not yet archived** to `docs/superpowers/ledgers/`. Do that before clearing
++it — the ordering is the lesson 3e's and 3f's archives both record.
++
+ **Plan 3f (text wiring and level of detail) is done, worked directly on
+ `main`, nothing in flight. Its exit gate is 11 of 13.** Everything below about
+ 3e is still true and still worth reading; this is what changed on top of it.
+ 
+ **One thing is waiting on a human and nothing else in 3f is.** Rows 1 and 2 of
+ 3f's gate miss: at the shipped `kMinTextCapPixels = 3.0` the whole-drawing
+ camera needs **3,876 distinct paragraph keys in one frame** against a
+ 512-entry cache, so a repeated identical frame relays out all 3,876 and evicts
+ 3,876. **Ruling 4's single permitted `kParagraphCacheLimit` raise is now
+ available** — the ruling wanted a measured distinct-visible-key count recorded
+@@ -843,20 +879,91 @@ The discriminating form is the unit-scale test.
+ `flutter_text_measurer_test.dart` constructed the measurer with both bounds
+ given explicitly. Recorded as a survivor, then killed by a test written for it
+ (`645b027`). The shape of that hole **was audited** in the final fix wave.
+ Three known instances: `metricsLimit`'s default (mutant 7, above);
+ `paragraphLimit`'s default, audited during Task 9's review — mutating it
+ reddens only a restatement test, so the default is still behaviourally
+ unexercised; and `reference_walk.dart:36`'s `minTextCapPixels` default, where
+ setting it to `0.0` leaves the whole suite green because a caller's own
+ default shadows it.
+ 
++### Plan 3f.1 — hardening before the picture cache
++
++**Done.** Eight tasks, worked directly on `main` at `c078677..b1e9ec1`, no
++worktree, on the human's explicit consent. Task 7 (the allocation-meter
++probe) produced no commit — its stop clause fired and the change was fully
++reverted. Spec:
++[docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3f1-hardening-design.md](docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3f1-hardening-design.md).
++Plan:
++[docs/superpowers/plans/2026-08-23-jet-cad-2d-plan-3f1-hardening.md](docs/superpowers/plans/2026-08-23-jet-cad-2d-plan-3f1-hardening.md).
++Results:
++[docs/superpowers/notes/2026-08-23-plan-3f1-results.md](docs/superpowers/notes/2026-08-23-plan-3f1-results.md).
++Mutation log:
++[docs/superpowers/notes/plan-3f1-mutation-log.md](docs/superpowers/notes/plan-3f1-mutation-log.md).
++
++Two defects closed and one instrument tested to a verdict. `InstanceNode`
++gained the four style fields `StyleContext` needs (`lineweight`,
++`transparency`, `linetype`, `linetypeScale`; schema 5 → 6); `contextFor`
++resolves all three sentinel-carrying fields exactly as it already resolved
++`color`, including the `kLineweightDefault` (`-3`) guard and the layer-0
++substitution; and `linetypeScale` now composes multiplicatively — entity ×
++every enclosing INSERT × the header's global scale — where before it was
++constructed, copied, compared and hashed and read by nothing. Two structural
++invariant files moved Plan 3f's printed-but-unasserted rig numbers into
++always-on tests. And `AllocationMeter` was moved to `lib/src/testing/` and
++probed from `jet_cad_2d_flutter`: it does not work under `flutter test`
++(`flutter_tester` launches with `--disable-vm-service`), the move was reverted
++in full, and the finding is recorded rather than a workaround forced.
++
++**Exit gate: 16 of 17 criteria PASS, 1 MISS, 0 UNEVALUABLE.** The miss is
++criterion 17, the allocation-meter probe, and it is recorded as the plan's own
++pre-committed stop clause working as designed, not as a defect. All
++seventeen named mutants fired and were killed — no survivors, unlike Plan 3f's
++own log.
++
++**The Flutter package does not have a working allocation meter.** The
++mechanism `AllocationMeter` relies on — starting the VM service at runtime
++from inside the isolate under test, with no launch flag — cannot work under
++`flutter test`, because `flutter_tester` is launched with
++`--disable-vm-service` before any in-isolate code runs. A flag-based
++alternative (`flutter test --start-paused` or similar) is plausible and was
++never tried, but could not serve an always-on gate regardless, since the flag
++is supplied by `flutter test` itself and not by anything this repository
++controls per test run. **3g's trap 5 (the allocation gate cannot see a
++lazily-populated cache) therefore needs a command-time assertion, the same
++shape that proved fills eager in Plan 3e, not a frame-path allocation gate in
++`jet_cad_2d_flutter`.**
++
++**The plan's own recurring failure mode is named in the results note, in its
++own section, because it produced three findings across this plan alone: a
++stated cause written down more strongly than the evidence behind it, caught
++each time by running something rather than by reading it** — the spec's own
++defect 4 (a false present-tense claim about `flutter_text_measurer_test.dart`
++that reached a committed comment before the Task 5 review caught it), the
++ledger's "no retry would help" about the Task 7 probe, and the Task 7 report's
++first causal claim. See the results note for the full account.
++
++**Three plan premises were corrected mid-flight**, all recorded in the ledger
++with their rulings: layer 0 already has a seeded record
++(`tables.dart:509`, Task 2's fixture assumed otherwise); Task 1's "the
++pre-existing suite will not move" (three tests pin the schema version by
++literal or by FNV fingerprint, both re-baselined with evidence that the cause
++was the serialisation shape and not an RNG-order regression); and Task 2's
++"eight tests, all FAIL" (six failed, two were pre-existing regression guards
++for a capability that did not yet exist).
++
++**What this plan did not close:** permitted divergence 5 (overlapping
++translucent strokes on a triangle soup) — untouched, still unexercised;
++Ruling 4's single permitted `kParagraphCacheLimit` raise — still unspent, its
++measured 3,876 still beside it; and the malformed-layer asymmetry — mirrored
++onto instance resolution rather than fixed, an accepted gap from the spec.
++
+ ### Plan 3g — the definition/tile picture cache
+ 
+ **What 3f hands it, and one question it must answer first.**
+ 
+ - **A working text LOD** — `kMinTextCapPixels = 3.0`, `0.0` disables it, wired
+   from `DraftPainter` through `DraftCanvas` to the harness's `LOD` define,
+   counted by `culledTextCount`, pinned by a golden ladder.
+ - **The threshold ladder**, regenerable from the committed tree behind a
+   `LADDER` dart-define, and the finding that the step is a **band** (3.0→6.0),
+   not a point.
+@@ -866,20 +973,41 @@ default shadows it.
+   missed rows. It can only be spent once.
+ - **A split text cache** and **document-owned measurer** (see 3f above).
+ - **The unresolved question, and it is 3g's first design decision: may a
+   cached picture contain text at all?** A picture is baked per scale band;
+   level of detail is a function of continuous scale. A picture baked at one
+   scale and replayed at another either shows glyphs the current camera would
+   cull or hides glyphs it would draw. Three candidate answers — never bake
+   text, bake per LOD band as a fourth cache axis, or draw text outside the
+   cached picture entirely — and **none of them has been priced**.
+ 
++**What 3f.1 hands it.**
++
++- **A correctly-keyed `StyleContext`.** All six fields now carry what they
++  claim, so the picture cache key is right the first time and does not need
++  rekeying after the fact. See trap 4's closure note, below, for the
++  cardinality cost this creates.
++- **`linetypeScale` connected end to end** — entity × every enclosing INSERT ×
++  global — which bears directly on trap 3: a baked picture is not
++  scale-invariant now that dashes exist, and dash phase is a function of this
++  product.
++- **Structural invariants that run on every `flutter test`**
++  (`text_cache_invariants_test.dart`, `frame_accounting_test.dart`), so 3g's
++  own counters can land on a suite that fails rather than one that prints.
++- **No working Flutter-side allocation meter, and a recorded reason why.**
++  `AllocationMeter` does not connect under `flutter test`
++  (`--disable-vm-service` at the process launch, not a code defect). 3g's
++  trap 5 needs a **command-time assertion** — the shape that actually proved
++  fills eager in Plan 3e — not a frame-path allocation gate in
++  `jet_cad_2d_flutter`.
++- **Ruling 4 still unspent**, its measured 3,876 still beside it.
++
+ **What 3d hands it.** A picture cache that records into a `Picture` interacts
+ with a sink that batches across residuals: 3g must decide whether a cached
+ picture flushes the vertex buffer at its boundary. There is **no crossover
+ number** to work against — the vertices backend's raster margin is still
+ widening at 500,000 entities — and there is **96.00 MiB of vertex buffer pinned
+ for the widget's life** at that corpus size, which is the arithmetic a tiling
+ scheme changes. Read the margin against **canvas calls**, not entity count: a
+ 10× entity rise moves `screenSpaceLeafCount` only 2.13× and `dashSpans` 3.03×.
+ 
+ The prize is real: the dominant cost is leaf-count-bound GPU vertex work, and
+@@ -897,24 +1025,36 @@ otherwise never see it:
+    command — the exact pathology the two-channel split exists to avoid, and the
+    planned gate row would not catch it.
+ 2. **Tile invalidation has a hole for edits inside a definition.** A touched
+    handle owned by a definition appears in no tile's handle list and its new box
+    is in definition-local space. Tiles must record which definitions they baked
+    and map touched handles through placements.
+ 3. **A cached picture is no longer scale-invariant now that dashes exist.** Dash
+    phase and the collapse floor are both functions of screen-space scale, so
+    zoom far enough and baked-dashed entities need to render solid. That is a new
+    invalidation axis with no name yet.
+-4. **`InstanceNode` carries only 2 of `StyleContext`'s 6 fields.**
+-   `linetype`, `linetypeScale`, `lineweight`, `transparency` are missing, and
+-   DXF's INSERT carries all four. `StyleContext` is the picture cache key, so
+-   this model decision belongs **before** the cache, not after.
++4. ~~**`InstanceNode` carries only 2 of `StyleContext`'s 6 fields.**~~
++   **Closed by Plan 3f.1, 2026-08-23.** `linetype`, `linetypeScale`,
++   `lineweight`, `transparency` were missing; `InstanceNode` now carries all
++   four (schema 6) and `contextFor` resolves them exactly as it already
++   resolved `color`, including the layer-0 substitution and the
++   `kLineweightDefault` guard. **And closing it creates a cache-key
++   cardinality cost 3g should not meet as a surprise:** `StyleContext`
++   compares `linetypeScale` with `==` and feeds it to `Object.hash`
++   (`style_context.dart:67,73`). Now that the four fields carry real values,
++   instances that used to share one definition picture no longer do — and
++   because the scale is a **product** accumulated down the tree, two chains
++   whose scales are mathematically equal but reached by different factors
++   (say, `2.0 × 4.0` and `1.0 × 8.0`) are different doubles and therefore
++   different keys. That is correct behaviour with a real hit-rate
++   consequence, and it is a reason 3g may want its key to carry a **quantised
++   scale band** rather than the raw double.
+ 5. **The allocation gate cannot see a lazily-populated cache, and a picture
+    cache is exactly that shape.** Plan 3e proved this directly: mutating
+    `DraftPainter._drawFill` to compute and store a triangulation on a cache
+    miss, instead of skipping it, left `paint_allocation_test.dart`'s own
+    `debugCapacityVertices` before/after comparison green. The mechanism only
+    reads `VerticesDrawSink`'s own vertex-buffer capacity; a triangulation (or
+    a baked `Picture`) that lands on the general Dart heap without touching
+    that buffer is invisible to it, and the warm-up frames a gate like this
+    one always runs will have already sized the buffer before the subject
+    frame is measured, hiding a first-draw allocation completely. **If 3g's
+diff --git a/docs/superpowers/notes/2026-08-23-plan-3f1-results.md b/docs/superpowers/notes/2026-08-23-plan-3f1-results.md
+new file mode 100644
+index 0000000..6376565
+--- /dev/null
++++ b/docs/superpowers/notes/2026-08-23-plan-3f1-results.md
+@@ -0,0 +1,287 @@
++# Plan 3f.1 results — hardening before the picture cache
++
++**Exit gate: 16 of 17 criteria PASS, 1 MISS, 0 UNEVALUABLE.** The miss is
++criterion 17 — the allocation-meter probe under `flutter test` — and it is
++recorded as **the plan's stop clause working, not the plan failing**: it was
++pre-committed before the probe ran, and it fired without negotiation. See
++"Criterion 17" below.
++
++Mutation log: [plan-3f1-mutation-log.md](plan-3f1-mutation-log.md) — all
++seventeen named mutants fired and killed, no survivors.
++
++Commit range: `c078677..b1e9ec1` (Tasks 1–6; Task 7 produced no commit).
++Ledger: `.superpowers/sdd/2026-08-23-jet-cad-2d-plan-3f1-hardening/progress.md`
++and its seven task reports, in the same directory.
++
++## Conditions
++
++```
++$ flutter --version
++Flutter 3.47.1 • channel stable • https://github.com/flutter/flutter.git
++Framework • revision 6655482ec0 (4 days ago) • 2026-08-19 10:07:23 -0700
++Engine • hash 11d79658c444477b06513d32b52c8c4ccb7276b0 (revision 5d53178869) (4 days ago) • 2026-08-18 23:36:01.000Z
++Tools • Dart 3.13.1 • DevTools 2.60.0
++```
++
++**The `3.27.3` seen in the `flutter_tester` process path during Task 7's probe
++is a stale Homebrew cask directory name, not the running Flutter version. Do
++not read it as one** — `flutter --version` above, taken on the same tree this
++gate ran against, is the true figure.
++
++Full gate, both packages, clean tree, run at the end of this task:
++
++```
++$ git status --short
++(empty)
++
++$ cd packages/jet_cad_2d && CI=true dart test
++...
++00:03 +793: All tests passed!
++
++$ dart analyze
++Analyzing jet_cad_2d...
++No issues found!
++
++$ dart format --output=none --set-exit-if-changed .
++Formatted 112 files (0 changed) in 0.20 seconds.
++
++$ cd ../jet_cad_2d_flutter && CI=true flutter test
++...
++00:04 +304 ~1: All tests passed!
++
++$ flutter analyze
++Analyzing jet_cad_2d_flutter...
++No issues found! (ran in 1.1s)
++
++$ dart format --output=none --set-exit-if-changed .
++Formatted 54 files (0 changed) in 0.10 seconds.
++
++$ cd .. && git status --short jet_cad_2d_flutter/test/golden
++(empty)
++```
++
++793 engine tests (778 pre-existing + Task 1's net +3 + Task 2's net +8 +
++Task 3's net +2 + Task 4's net +2), 304 Flutter tests pass / 1 skipped (the
++`rig`-tagged microbench, pre-existing, by design). The golden directory shows
++no diff — no PNG regenerated by this plan. The verbatim transcripts of every
++task's own run of this gate are in `task-1-report.md` through
++`task-6-report.md` in the ledger directory; the numbers above are this task's
++own independent re-run from a clean tree at `b1e9ec1`, not a copy of an
++earlier one.
++
++## The seventeen criteria
++
++| # | claim | command | observed | verdict |
++|---|---|---|---|---|
++| 1 | an INSERT's concrete `lineweight` imposes on a BYBLOCK entity in its definition | `dart test test/document/instance_style_test.dart`, mutant M1 | `an INSERT imposes its concrete lineweight on a BYBLOCK child` passes; M1 (`contextFor` reverts `lineweight` to `inherited.lineweight`) reddens exactly this test and `BYLAYER ... lineweight`, `Expected: <211> Actual: <25>` (Task 2) | **PASS** |
++| 2 | the same for `transparency` | same file, mutant M2 | passes; M2 reddens exactly `imposes its concrete transparency` and `BYLAYER ... transparency`, `Expected: <118> Actual: <255>` | **PASS** |
++| 3 | the same for `linetype` | same file, mutant M3 | passes; M3 reddens exactly `imposes its concrete linetype` and `BYLAYER ... linetype`, `Expected: <42> Actual: <4>` | **PASS** |
++| 4 | nested `linetypeScale` composes multiplicatively: `2.0 × 4.0 × 8.0 = 64.0` | same file, mutants M4/M5 | passes; M4 (drops `ctx.linetypeScale ×` in `styleFor`) reddens reading `2.0`; M5 (drops `inherited.linetypeScale ×` in `contextFor`) reddens reading `8.0` (Task 3) | **PASS** |
++| 5 | BYLAYER `lineweight` reads the substituted layer, not `node.layer` | same file, mutant M6 | passes; M6 (`contextFor` uses `node.layer` for the lookup) reddens all three BYLAYER tests, lineweight `Expected: <191> Actual: <13>` | **PASS** |
++| 6 | the same for `transparency` | same file, mutants M6/M7 | passes; M6 gives `Expected: <167> Actual: <246>`; M7 (BYLAYER arm passes the sentinel through) reddens exactly `BYLAYER ... transparency` | **PASS** |
++| 7 | the same for `linetype` | same file, mutants M6/M8 | passes; M6 gives `Expected: <71> Actual: <70>`; M8 reddens exactly `BYLAYER ... linetype`, `Expected: <71> Actual: <2>` | **PASS** |
++| 8 | `kLineweightDefault` (`-3`) never reaches a `ResolvedStyle`, directly or via BYLAYER | same file, mutant M9 | passes; M9 (deletes the `concrete()` guard) reddens both `kLineweightDefault` tests, `Expected: <25> Actual: <-3>` (Task 2) | **PASS** |
++| 9 | a v5 document resolves bit-identically under a v6 build, on a fixture with a BYBLOCK-linetype entity through an INSERT whose effective layer's linetype differs from the inherited context | `dart test test/codec/instance_style_codec_test.dart`, mutant M10 | passes; M10 (`fromJson` defaults absent `linetype` to `byLayerLinetype`) reddens `every field of the resolved style matches the pre-3f.1 answer`, `Expected: <4> Actual: <71>` (Task 4) | **PASS** |
++| 10 | a v6 round-trip preserves all four fields at non-default values | same file, mutants M10/M11 | passes; M11 (`toJson` omits `linetypeScale`) reddens `an instance round-trips all four style fields`, `Expected: <4.0> Actual: <1.0>`; M10 also reddens Task 1's absent-tolerant test, `Expected: <3> Actual: <2>` (Task 1) | **PASS** |
++| 11 | every pre-existing golden PNG is byte-identical; none regenerated | `git status --short packages/jet_cad_2d_flutter/test/golden` after every task's gate, and again after this task's | empty every time (Tasks 2, 3, 4, and this task's own final run) | **PASS** |
++| 12 | a bare `FlutterTextMeasurer()` over 600 keys, painted through `CanvasDrawSink` over `Canvas(PictureRecorder())`, reads `liveMetricsCount=600`, `metricsEvictionCount=0`, `liveParagraphCount=512`, `paragraphEvictionCount=88`, `textOpCount=600`, `culledTextCount=0` | `flutter test test/invariants/text_cache_invariants_test.dart`, mutants M12/M13 | passes; M12 (`metricsLimit` defaults to `kParagraphCacheLimit` — Plan 3f's own survivor) reddens **two** tests suite-wide: this one on the paragraph side (`liveMetricsCount` 512 vs 600) and `flutter_text_measurer_test.dart`'s `the default metrics bound is not the paragraph bound` on the metrics side; M13 (`paragraphLimit` defaults to `kMetricsCacheLimit`) reddens this test, `liveParagraphCount` 600 vs 512 (Task 5) | **PASS** |
++| 13 | `referenceWalk`, called directly with no `minTextCapPixels`, culls sub-threshold text at its own default | same file, mutant M14 | passes; M14 (`reference_walk.dart`'s default becomes `0.0`) reddens `referenceWalk culls sub-threshold text at its own default`, drawn list `['TINY', 'BIG']` instead of `['BIG']` (Task 5) | **PASS** |
++| 14 | `textOpCount + culledTextCount + skippedTextCount` equals the frame's text leaf count, counted independently from the document | `flutter test test/invariants/frame_accounting_test.dart`, mutant M15 | passes; M15 (keeps `_culledText++` but deletes the `return`) reddens `text accounting closes`, `Expected: <4> Actual: <5>` (Task 6) | **PASS** |
++| 15 | two identical paints agree on every counter | same file, mutant M16 | passes; M16 (drops `_textOps = 0;` from `paint()`'s reset block) reddens exactly `a repeated frame is a repeated frame`, `textOpCount` accumulates to `(4,1,1,0)` instead of `(2,1,1,0)` (Task 6) | **PASS** |
++| 16 | under `RenderBackend.vertices`, `sink.canvasCallCount == painter.textOpCount` | same file, mutant M17 | passes; M17 (guards the fallback delegation so the first text op is dropped) reddens exactly `the vertices backend loses no text on the way through its fallback`, `Expected: <2> Actual: <1>` (Task 6) | **PASS** |
++| 17 | `AllocationMeter` connects **and** its escaping positive control reads ≥ 90% under `flutter test` | `flutter test test/invariants/allocation_meter_probe_test.dart` | `AllocationMeter.connect() returned null under flutter test.` The stop clause fired before the positive control was ever reached. Full revert verified byte-identical to `b1e9ec1` by both the reviewer and a re-reviewer. | **MISS** |
++
++**16 PASS / 1 MISS / 0 UNEVALUABLE, out of 17.**
++
++## Criterion 17 — the miss, what actually caused it, and what it means for 3g
++
++**The cause, found by running the process rather than reading the API.** The
++probe's own diagnostic first read only two facts —
++`Service.controlWebServer(enable: true)`'s `serverUri` came back `null`, and
++`Service.getIsolateId(Isolate.current)` resolved normally — and the first
++write-up chose a branch of its own disjunction ("the web server never starts")
++that neither fact actually separated from its alternative. The task review
++looked at the launched process instead:
++
++```
++flutter_tester --disable-vm-service --enable-checked-mode ...
++```
++
++**`flutter test` launches `flutter_tester` with `--disable-vm-service`.** The
++VM service is switched off at the process boundary, before any in-isolate call
++runs. `AllocationMeter`'s mechanism — start the service at runtime from inside
++the isolate under test, with no launch flag — cannot work there, not because
++the platform lacks the capability, but because the harness that runs the test
++disables it before the test's own code executes.
++
++**What Plan 3g now knows, before it starts.** 3g's central risk — a
++lazily-populated picture cache allocating on a frame-path cache miss,
++invisible to `paint_allocation_test.dart`'s buffer-capacity read (trap 5) —
++**cannot be gated by a frame-path allocation profile in `jet_cad_2d_flutter`**,
++because the one mechanism this plan built and proved under plain `dart test`
++does not carry into `flutter test` at all. 3g needs a **command-time
++assertion** instead: the same shape that actually proved fills are
++materialised eagerly in Plan 3e (`the triangulation is materialised by the
++command, not by a draw`), after Plan 3e's own allocation gate stayed green
++through the exact mutation that should have broken it. A buffer-capacity read
++answers "did the vertex buffer grow"; it cannot answer "did something get
++allocated and dropped on the general heap on a miss."
++
++**What is explicitly withdrawn, and what stays open.** The ledger's first pass
++at this finding went further than the evidence and stated "no retry would
++help." That is withdrawn. The cause is a **launch flag**
++(`--disable-vm-service`), not an intrinsic platform limitation — so a
++flag-based route is **plausible and unexplored**, not impossible:
++`flutter test --start-paused`, or any invocation that stops passing
++`--disable-vm-service`, was never tried. It would still not serve an
++**always-on** gate, because the flag is supplied by `flutter test` itself, not
++by anything this repository controls per-test-run — so even if such a route
++exists, it could not be the standing CI gate 3g would want. It could still be
++a one-off diagnostic tool for someone chasing an allocation regression by
++hand, which is why it is recorded as unexplored rather than closed.
++
++**The revert was complete and independently confirmed.** The file move, the
++`lib/testing.dart` export, the `pubspec.yaml` promotion of `vm_service` to
++`dependencies`, the three re-pointed imports, and the probe test file were all
++reverted; `git status --short` after the revert showed a clean tree, and both
++the task reviewer and a re-reviewer verified the tree byte-identical to
++`b1e9ec1` (the last commit before Task 7 began). Section 3 of the plan is
++dropped. No commit exists for Task 7.
++
++## The plan's own recurring failure mode
++
++This is written up because it is the most useful thing this plan produces, not
++despite that it is uncomfortable.
++
++**Three times in this plan, a stated cause was written down more strongly than
++the evidence behind it — and each time, the mistake was caught by someone
++running something, not by someone reading it, even though this plan alone had
++three rounds of external spec review before a single line of implementation
++code was written.**
++
++1. **The spec's own defect 4, present tense, false.** It stated "no test in
++   that file ever pushed past 512 distinct metrics keys" about
++   `flutter_text_measurer_test.dart`. That was true of the file as it stood
++   before Plan 3f's own remedy commit `645b027`, which is exactly the test
++   that closes the metrics half of the same gap — a bare measurer swept 513
++   distinct strings through `measure()` and pinned `metricsEvictionCount == 0`.
++   Three rounds of independent spec review read past that sentence because
++   none of them was pointed at it specifically. It surfaced only when Task 5's
++   own implementer wrote a comment restating the spec's claim, the controller
++   ran the file's own mutation transcript against it, and the transcript
++   contradicted the comment it was meant to justify. Fixed in `e39f295`
++   (fix round 1/5): the comment was narrowed to what the new file actually
++   adds (the paragraph-cache half), and the false present-tense claim about
++   the sibling file was removed.
++2. **The ledger's own "no retry would help," about the Task 7 probe.** Recorded
++   above under Criterion 17 — the controller's own ledger entry asserted an
++   implication ("no retry would help") that the two measured facts
++   (`serverUri: null`, `getIsolateId` resolving) never separated from its
++   alternative. The Task 7 reviewer found the actual cause by reading the
++   launched process's command line, not by re-reading the same two facts
++   harder.
++3. **The Task 7 report's own first write-up**, "the web server never comes
++   into existence" — the same honest disjunction chosen down to one branch,
++   with no evidence distinguishing it from the other, that the ledger then
++   repeated and extended. The correction (`Ruling T7-B`) replaced the
++   reasoning, kept the superseded version visible in the ledger rather than
++   rewriting it away, and withdrew the strengthened implication that had been
++   built on top of it.
++
++The common shape: an engineer (in one case, the plan's own author) has two
++facts, notices a disjunction, and writes down one branch of it as if it were
++the only one — because the chosen branch is the one that makes a clean
++sentence. Reading catches typos and missing cases; it does not catch a
++plausible sentence sitting on evidence that never actually chose between two
++explanations. What catches it is running the thing the sentence claims to
++describe — a mutation transcript, a process listing — and checking that what
++comes back actually rules out the alternative.
++
++## Three plan premises corrected mid-flight
++
++Recorded here, in one place, so the next plan's author does not repeat their
++shape. Full rulings are in `progress.md`.
++
++1. **Layer 0 already has a seeded record.** Task 2's fixture assumed layer 0
++   had no record and could be freely added; `DraftDocument.empty()` seeds one
++   at `tables.dart:509-516` via `DocumentTables.standard()`. The plan author's
++   own check had grepped only `draft_document.dart`. Fixed by having the
++   shared `addLayer` test helper remove-before-add, following the existing
++   precedent at `test/index/query_filter_test.dart:381`. Recorded in the
++   ledger as Ruling T2-A, with a deferred minor: the unconditional
++   remove-before-add would silently mask a genuine duplicate-handle defect in
++   a future test in the same file that meant to add a *new* layer, scoped to
++   one test file and carried to final triage rather than fixed here.
++2. **Task 1's "the pre-existing suite will not move."** Three pre-existing
++   tests moved as a direct, mechanical consequence of the schema bump and the
++   new `InstanceNode` fields: one pins `kSchemaVersion == 5` by literal
++   (`json_codec_test.dart:484-488`), and two are FNV-1a fingerprints over the
++   generated corpus (`generate_document_test.dart:56-59,233-236`) that shift
++   whenever the serialised shape changes — as their own comments already
++   record happening twice before, at the two prior schema bumps. Authorised
++   for re-baseline (Ruling T1-A) only after confirming the diff never touches
++   the generator and that all structural sibling assertions in the same file
++   stayed green — the discriminator between a benign shape change and a real
++   RNG-order regression.
++3. **Task 2's "eight tests, all FAIL."** Six failed; two passed pre-change.
++   The two `kLineweightDefault` tests expect the inherited lineweight (`25`),
++   and the pre-change `contextFor` already returns `25` because it ignores the
++   instance entirely — they are regression guards for a capability that did
++   not yet exist, not red-green drivers. Corrected in the ledger before Task 2
++   was dispatched (Ruling F2), so the implementer was not left to trust a
++   false "all fail" and edit a correct test to make it fail.
++
++## What this plan did not close
++
++- **Permitted divergence 5** — overlapping translucent strokes on a triangle
++  soup. Untouched by this plan, exactly as scoped; still unexercised by any
++  fixture in the repository.
++- **The malformed-layer asymmetry**, mirrored rather than fixed (spec's
++  accepted gap 2). A layer whose *colour* is itself BYLAYER or BYBLOCK is
++  rejected by `_concreteLayerColor`; a layer whose *linetype*, *lineweight* or
++  *transparency* is one of those sentinels is not checked at all. Decision 2
++  mirrors that asymmetry onto instance resolution rather than fixing it, so an
++  INSERT and an entity always agree with each other — even though both may be
++  wrong in the same way. Fixing the entity side is a separate change with its
++  own blast radius, out of this plan's scope.
++- **Ruling 4's single permitted `kParagraphCacheLimit` raise is still
++  unspent**, with its measured **3,876** distinct visible paragraph keys still
++  recorded beside it (Plan 3f Task 8). It can only be spent once; whether to
++  spend it on Plan 3f's own missed rows or hold it for 3g remains a human
++  decision, not a plan's.
++- **Criterion 17, in full** — see above. The instrument does not work under
++  `flutter test`; the mechanism (in-isolate runtime service start) is
++  incompatible with `flutter_tester`'s `--disable-vm-service` launch flag; a
++  flag-based alternative is plausible and unexplored, and could not serve an
++  always-on gate even if it worked, since the flag is not controlled per-test
++  by anything in this repository.
++
++## What Plan 3g inherits
++
++Restated from the spec's own "What Plan 3g inherits" section, now with each
++line's status:
++
++- **A correctly-keyed `StyleContext`.** All six fields carry what they claim
++  (Tasks 1–3, criteria 1–9 above). Landed.
++- **`linetypeScale` connected end to end** — entity × every enclosing INSERT ×
++  global (Task 3, criterion 4). Landed.
++- **Structural invariants that run on every `flutter test`** (Tasks 5–6,
++  criteria 12–16). Landed — 3g's own counters land on a suite that can fail.
++- **The two-backend text-fallback agreement asserted rather than commented**
++  (Task 6, criterion 16). Landed.
++- **A recorded finding that the mechanism does not work under `flutter
++  test`**, in place of a working Flutter-side allocation meter (criterion 17,
++  above). 3g knows before it starts that its central risk (trap 5) needs a
++  command-time assertion, not a frame-path gate.
++- **Ruling 4 still unspent**, 3,876 beside it, above.
++- **A cache-key cardinality cost** — see the `STATUS.md` update below for the
++  exact mechanism.
++
++## STATUS.md and trap 4
++
++`STATUS.md`'s Plan 3g section names trap 4: `InstanceNode` carries only 2 of
++`StyleContext`'s 6 fields. That trap is **closed** by this plan — all six
++fields now resolve — and `STATUS.md` records it as closed rather than deleted,
++so a reader following the older notes can still find the thread. The same
++update adds the cache-key cardinality consequence this closure creates: see
++`STATUS.md`'s Plan 3g section for the exact wording.
+diff --git a/docs/superpowers/notes/plan-3f1-mutation-log.md b/docs/superpowers/notes/plan-3f1-mutation-log.md
+new file mode 100644
+index 0000000..2a7fa50
+--- /dev/null
++++ b/docs/superpowers/notes/plan-3f1-mutation-log.md
+@@ -0,0 +1,596 @@
++# Plan 3f.1 mutation log — hardening before the picture cache
++
++Seventeen named mutants, from
++`docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3f1-hardening-design.md`'s
++"Named mutants" table. **All seventeen fired, all seventeen killed. No
++survivors.** Every edit was applied via `Edit`/manual patch after copying the
++target file aside; every restore was a copy back from that backup, verified
++`diff`-identical afterward. `git checkout` was never used to revert a mutant,
++per the repository's own trap about that command silently discarding
++uncommitted work.
++
++Transcripts below are copied verbatim from the task reports named in each
++section (`.superpowers/sdd/2026-08-23-jet-cad-2d-plan-3f1-hardening/task-N-report.md`);
++none were re-run or re-synthesized for this log.
++
++---
++
++## M1 — `contextFor` reverts `lineweight` to `inherited.lineweight`
++
++**Criteria:** 1, 5. **Task:** 2. **Target:**
++`packages/jet_cad_2d/lib/src/document/style_resolver.dart`, the
++`StyleContext(...)` return in `contextFor`.
++
++```diff
++-      lineweight: lineweight,
+++      lineweight: inherited.lineweight,
++```
++
++**Command:** `CI=true dart test test/document/instance_style_test.dart`
++
++```
++00:00 +0: an INSERT imposes its concrete lineweight on a BYBLOCK child
++00:00 +0 -1: an INSERT imposes its concrete lineweight on a BYBLOCK child [E]
++  Expected: <211>
++    Actual: <25>
++00:00 +2 -2: BYLAYER on an INSTANCE reads the substituted layer, not node.layer lineweight [E]
++  Expected: <191>
++    Actual: <25>
++...
++Failing tests:
++  test/document/instance_style_test.dart: BYLAYER on an INSTANCE reads the substituted layer, not node.layer lineweight
++  test/document/instance_style_test.dart: an INSERT imposes its concrete lineweight on a BYBLOCK child
++```
++
++Reddened exactly the two tests the criteria table predicts, nothing else.
++**KILLED.**
++
++---
++
++## M2 — `contextFor` reverts `transparency` to `inherited.transparency`
++
++**Criteria:** 2, 6. **Task:** 2. **Target:** same file, same return block.
++
++```diff
++-      transparency: transparency,
+++      transparency: inherited.transparency,
++```
++
++**Command:** `CI=true dart test test/document/instance_style_test.dart`
++
++```
++00:00 +1: an INSERT imposes its concrete transparency on a BYBLOCK child
++00:00 +1 -1: an INSERT imposes its concrete transparency on a BYBLOCK child [E]
++  Expected: <118>
++    Actual: <255>
++00:00 +3 -2: BYLAYER on an INSTANCE reads the substituted layer, not node.layer transparency [E]
++  Expected: <167>
++    Actual: <255>
++...
++Failing tests:
++  test/document/instance_style_test.dart: BYLAYER on an INSTANCE reads the substituted layer, not node.layer transparency
++  test/document/instance_style_test.dart: an INSERT imposes its concrete transparency on a BYBLOCK child
++```
++
++**KILLED.**
++
++---
++
++## M3 — `contextFor` reverts `linetype` to `inherited.linetype`
++
++**Criteria:** 3, 7. **Task:** 2. **Target:** same file, same return block.
++
++```diff
++-      linetype: linetype,
+++      linetype: inherited.linetype,
++```
++
++**Command:** `CI=true dart test test/document/instance_style_test.dart`
++
++```
++00:00 +2: an INSERT imposes its concrete linetype on a BYBLOCK child
++00:00 +2 -1: an INSERT imposes its concrete linetype on a BYBLOCK child [E]
++  Expected: <42>
++    Actual: <4>
++00:00 +4 -2: BYLAYER on an INSTANCE reads the substituted layer, not node.layer linetype [E]
++  Expected: <71>
++    Actual: <4>
++...
++Failing tests:
++  test/document/instance_style_test.dart: BYLAYER on an INSTANCE reads the substituted layer, not node.layer linetype
++  test/document/instance_style_test.dart: an INSERT imposes its concrete linetype on a BYBLOCK child
++```
++
++**KILLED.**
++
++---
++
++## M4 — `styleFor` drops the `ctx.linetypeScale ×` factor
++
++**Criteria:** 4. **Task:** 3. **Target:** `style_resolver.dart`, `styleFor`'s
++`ResolvedStyle(...)` construction.
++
++```diff
++-      linetypeScale:
++-          ctx.linetypeScale * document.entities.linetypeScaleAt(slot),
+++      linetypeScale: document.entities.linetypeScaleAt(slot),
++```
++
++**Command:**
++`CI=true dart test test/document/instance_style_test.dart --plain-name "linetypeScale multiplies"`
++
++```
++00:00 +0: linetypeScale multiplies down the tree entity 2.0 x inner 4.0 x outer 8.0 resolves to exactly 64.0
++00:00 +0 -1: linetypeScale multiplies down the tree entity 2.0 x inner 4.0 x outer 8.0 resolves to exactly 64.0 [E]
++  Expected: <64.0>
++    Actual: <2.0>
++
++00:00 +0 -1: linetypeScale multiplies down the tree an INSERT at 1.0 leaves its child alone
++00:00 +1 -1: Some tests failed.
++```
++
++Reddened reading `2.0` — the entity's own scale, with every enclosing INSERT's
++contribution dropped — exactly as predicted. The no-op guard test stayed
++green (it needed no INSERT-side contribution to distinguish). **KILLED.**
++
++---
++
++## M5 — `contextFor` drops the `inherited.linetypeScale ×` factor
++
++**Criteria:** 4. **Task:** 3. **Target:** same file, `contextFor`'s
++`StyleContext(...)` return.
++
++```diff
++-      linetypeScale: inherited.linetypeScale * node.linetypeScale,
+++      linetypeScale: node.linetypeScale,
++```
++
++**Command:**
++`CI=true dart test test/document/instance_style_test.dart --plain-name "linetypeScale multiplies"`
++
++```
++00:00 +0: linetypeScale multiplies down the tree entity 2.0 x inner 4.0 x outer 8.0 resolves to exactly 64.0
++00:00 +0 -1: linetypeScale multiplies down the tree entity 2.0 x inner 4.0 x outer 8.0 resolves to exactly 64.0 [E]
++  Expected: <64.0>
++    Actual: <8.0>
++
++00:00 +0 -1: linetypeScale multiplies down the tree an INSERT at 1.0 leaves its child alone
++00:00 +1 -1: Some tests failed.
++```
++
++Reddened reading `8.0` — the inner INSERT's `4.0 ×` the entity's own `2.0`,
++with the outer INSERT's `8.0` dropped from the chain. `64.0` differs from
++every partial product (`2.0`, `8.0`, `32.0`) and from the sum (`14.0`), so the
++distinct wrong values from M4 and M5 confirm the two multiplications are
++independently load-bearing. **KILLED.**
++
++---
++
++## M6 — `contextFor` uses `node.layer` for the BYLAYER lookup
++
++**Criteria:** 5, 6, 7. **Task:** 2. **Target:** `style_resolver.dart`, the
++layer-record fetch immediately below the "One lookup, not four" comment.
++
++```diff
++-      final record = document.tables.layers[layer];
+++      final record = document.tables.layers[node.layer];
++```
++
++(`layer` is the already-substituted effective layer; `node.layer` is the
++INSERT's own, pre-substitution value.)
++
++**Command:** `CI=true dart test test/document/instance_style_test.dart`
++
++```
++00:00 +3 -1: BYLAYER on an INSTANCE reads the substituted layer, not node.layer lineweight [E]
++  Expected: <191>
++    Actual: <13>
++
++00:00 +3 -2: BYLAYER on an INSTANCE reads the substituted layer, not node.layer transparency [E]
++  Expected: <167>
++    Actual: <246>
++
++00:00 +3 -3: BYLAYER on an INSTANCE reads the substituted layer, not node.layer linetype [E]
++  Expected: <71>
++    Actual: <70>
++
++Failing tests:
++  test/document/instance_style_test.dart: BYLAYER on an INSTANCE reads the substituted layer, not node.layer linetype
++  test/document/instance_style_test.dart: BYLAYER on an INSTANCE reads the substituted layer, not node.layer lineweight
++  test/document/instance_style_test.dart: BYLAYER on an INSTANCE reads the substituted layer, not node.layer transparency
++```
++
++Reddened all three BYLAYER tests, and only those three — the three
++"imposes its concrete X" tests (which never take the BYLAYER path) stayed
++green. **KILLED.**
++
++---
++
++## M7 — the BYLAYER arm for `transparency` passes the sentinel through
++
++**Criteria:** 6. **Task:** 2. **Target:** `style_resolver.dart`'s
++`transparency` switch.
++
++```diff
++ final transparency = switch (node.transparency) {
++   kByBlock => inherited.transparency,
++-  kByLayer => record?.transparency ?? inherited.transparency,
+++  kByLayer => node.transparency,
++   _ => node.transparency,
++ };
++```
++
++**Command:** `CI=true dart test test/document/instance_style_test.dart`
++
++```
++00:00 +4 -1: BYLAYER on an INSTANCE reads the substituted layer, not node.layer transparency [E]
++  Expected: <167>
++    Actual: <255>
++
++Failing tests:
++  test/document/instance_style_test.dart: BYLAYER on an INSTANCE reads the substituted layer, not node.layer transparency
++```
++
++Reddened exactly `BYLAYER ... transparency`, nothing else. **KILLED.**
++
++---
++
++## M8 — the BYLAYER arm for `linetype` passes the sentinel through
++
++**Criteria:** 7. **Task:** 2. **Target:** `style_resolver.dart`'s `linetype`
++nested-conditional.
++
++```diff
++ final linetype = node.linetype == ReservedHandles.byBlockLinetype
++     ? inherited.linetype
++     : node.linetype == ReservedHandles.byLayerLinetype
++-        ? (record?.linetype ?? inherited.linetype)
+++        ? node.linetype
++         : node.linetype;
++```
++
++**Command:** `CI=true dart test test/document/instance_style_test.dart`
++
++```
++00:00 +5 -1: BYLAYER on an INSTANCE reads the substituted layer, not node.layer linetype [E]
++  Expected: <71>
++    Actual: <2>
++
++Failing tests:
++  test/document/instance_style_test.dart: BYLAYER on an INSTANCE reads the substituted layer, not node.layer linetype
++```
++
++Reddened exactly `BYLAYER ... linetype`, nothing else. **KILLED.**
++
++---
++
++## M9 — the `kLineweightDefault` arm is dropped
++
++**Criteria:** 8. **Task:** 2. **Target:** `style_resolver.dart`'s `lineweight`
++switch — the `concrete()` guard removed, raw values used directly.
++
++```diff
++-int concrete(int value) =>
++-    value == kLineweightDefault ? inherited.lineweight : value;
++ final lineweight = switch (node.lineweight) {
++   kByBlock => inherited.lineweight,
++-  kByLayer => concrete(record?.lineweight ?? inherited.lineweight),
++-  _ => concrete(node.lineweight),
+++  kByLayer => record?.lineweight ?? inherited.lineweight,
+++  _ => node.lineweight,
++ };
++```
++
++**Command:** `CI=true dart test test/document/instance_style_test.dart`
++
++```
++00:00 +6 -1: kLineweightDefault never reaches a ResolvedStyle carried directly by the INSERT [E]
++  Expected: <25>
++    Actual: <-3>
++
++00:00 +6 -2: kLineweightDefault never reaches a ResolvedStyle reached through the INSERT's BYLAYER lookup [E]
++  Expected: <25>
++    Actual: <-3>
++
++Failing tests:
++  test/document/instance_style_test.dart: kLineweightDefault never reaches a ResolvedStyle carried directly by the INSERT
++  test/document/instance_style_test.dart: kLineweightDefault never reaches a ResolvedStyle reached through the INSERT's BYLAYER lookup
++```
++
++Reddened exactly both `kLineweightDefault` tests. **KILLED.**
++
++---
++
++## M10 — v6 `fromJson` defaults `linetype` to `byLayerLinetype`
++
++**Criteria:** 9, 11. **Task:** 1 (first fired), re-fired independently in
++Task 4. **Target:** `packages/jet_cad_2d/lib/src/document/node.dart`,
++`InstanceNode.fromJson`.
++
++```diff
++ linetype: json['linetype'] == null
++-    ? ReservedHandles.byBlockLinetype
+++    ? ReservedHandles.byLayerLinetype
++     : Handle.fromJson(json['linetype']),
++```
++
++**Command (Task 1):**
++`CI=true dart test test/codec/instance_style_codec_test.dart`
++
++```
++00:00 +1 -1: the four fields are absent-tolerant and default to the no-op values [E]
++  Expected: <3>
++    Actual: <2>
++```
++
++**Command (Task 4, after the v5-bit-identity fixture was added):**
++`CI=true dart test test/codec/instance_style_codec_test.dart`
++
++```
++00:00 +1 -1: the four fields are absent-tolerant and default to the no-op values [E]
++  Expected: <3>
++    Actual: <2>
++
++00:00 +3 -2: a v5 document resolves bit-identically under a v6 build every field of the resolved style matches the pre-3f.1 answer [E]
++  Expected: <4>
++    Actual: <71>
++
++Failing tests:
++  test/codec/instance_style_codec_test.dart: a v5 document resolves bit-identically under a v6 build every field of the resolved style matches the pre-3f.1 answer
++  test/codec/instance_style_codec_test.dart: the four fields are absent-tolerant and default to the no-op values
++```
++
++`Expected: <4>` is `ReservedHandles.continuousLinetype`'s raw handle value;
++`Actual: <71>` is the fixture's STRUCT layer's linetype leaking through the
++BYLAYER substitution — exactly the resolution consequence the spec names for
++this mutant. `Expected: <3> Actual: <2>` on the sibling test is
++`byBlockLinetype` vs `byLayerLinetype` by raw handle value. **KILLED**, on
++both the migration criterion (9) and, as a bonus, the round-trip default
++criterion's absent-tolerance case.
++
++---
++
++## M11 — `InstanceNode.toJson` omits `linetypeScale`
++
++**Criteria:** 10. **Task:** 1. **Target:** `node.dart`, `toJson`.
++
++```diff
++       'linetype': linetype.toJson(),
++-      'linetypeScale': linetypeScale,
++     };
++```
++
++**Command:** `CI=true dart test test/codec/instance_style_codec_test.dart`
++
++```
++00:00 +0 -1: an instance round-trips all four style fields at non-default values [E]
++  Expected: <4.0>
++    Actual: <1.0>
++
++Failing tests: (three more downstream failures in the same run, all
++consequences of this test's assertion order — the round-trip test is the one
++that must redden, and it does)
++```
++
++The dropped field silently defaults back to `1.0` (the multiplicative
++identity) on read. **KILLED.**
++
++---
++
++## M12 — `metricsLimit` defaults to `kParagraphCacheLimit` (Plan 3f's own survivor)
++
++**Criteria:** 12. **Task:** 5. **Target:**
++`packages/jet_cad_2d_flutter/lib/src/flutter_text_measurer.dart`, the
++`FlutterTextMeasurer` constructor.
++
++```diff
++-    this.metricsLimit = kMetricsCacheLimit,
+++    this.metricsLimit = kParagraphCacheLimit,
++```
++
++**Command:** `CI=true flutter test` (whole Flutter suite, not just the new
++file — this mutant's own history is that it survived a suite when tested too
++narrowly)
++
++```
++00:02 +125 -1: .../test/invariants/text_cache_invariants_test.dart: the default cache bounds hold 600 distinct keys the way they claim [E]
++  Expected: <600>
++    Actual: <512>
++
++00:02 +147 -2: .../test/flutter_text_measurer_test.dart: the default metrics bound is not the paragraph bound [E]
++  Expected: <0>
++    Actual: <1>
++
++00:04 +299 -2: Some tests failed.
++
++Failing tests:
++  .../test/flutter_text_measurer_test.dart: the default metrics bound is not the paragraph bound
++  .../test/invariants/text_cache_invariants_test.dart: the default cache bounds hold 600 distinct keys the way they claim
++```
++
++**Reddens two tests, not one — reported honestly rather than trimmed to match
++the single-test prediction.** `flutter_text_measurer_test.dart`'s
++`the default metrics bound is not the paragraph bound` (added by Plan 3f's own
++remedy `645b027`) catches the *metrics*-side symptom directly, because its own
++sweep of 513 distinct metrics keys is already past the mutated bound. It
++cannot and does not touch `liveParagraphCount` — it never calls `paragraphFor`.
++This task's own `text_cache_invariants_test.dart` is the one that reddens on
++the *paragraph* side of the same mutant (`liveMetricsCount` 512 against an
++expected 600) — the half this task exists to close. Every other test in the
++301-test suite (at the time this mutant was fired) stayed green. **KILLED**,
++from two independent angles.
++
++---
++
++## M13 — `paragraphLimit` defaults to `kMetricsCacheLimit`
++
++**Criteria:** 12. **Task:** 5. **Target:** same file, same constructor.
++
++```diff
++-    this.paragraphLimit = kParagraphCacheLimit,
+++    this.paragraphLimit = kMetricsCacheLimit,
++```
++
++**Command:**
++`CI=true flutter test test/invariants/text_cache_invariants_test.dart`
++
++```
++00:00 +0 -1: the default cache bounds hold 600 distinct keys the way they claim [E]
++  Expected: <512>
++    Actual: <600>
++
++Failing tests:
++  .../test/invariants/text_cache_invariants_test.dart: the default cache bounds hold 600 distinct keys the way they claim
++```
++
++`liveParagraphCount` read 600 (every insert kept, nothing evicted) instead of
++the paragraph limit's 512. **KILLED.**
++
++---
++
++## M14 — `reference_walk.dart`'s `minTextCapPixels` default becomes `0.0`
++
++**Criteria:** 13. **Task:** 5. **Target:**
++`packages/jet_cad_2d_flutter/lib/src/reference_walk.dart`, `referenceWalk`'s
++parameter default.
++
++```diff
++-  double minTextCapPixels = kMinTextCapPixels,
+++  double minTextCapPixels = 0.0,
++```
++
++**Command:**
++`CI=true flutter test test/invariants/text_cache_invariants_test.dart`
++
++```
++00:00 +1 -1: referenceWalk culls sub-threshold text at its own default [E]
++  Expected: ['BIG']
++    Actual: ['TINY', 'BIG']
++     Which: at location [0] is 'TINY' instead of 'BIG'
++  TINY is 1 px of cap height against a 3.0 px default
++
++Failing tests:
++  .../test/invariants/text_cache_invariants_test.dart: referenceWalk culls sub-threshold text at its own default
++```
++
++**KILLED.**
++
++---
++
++## M15 — `draft_painter.dart`'s `_drawText` keeps `_culledText++` but drops the `return`
++
++**Criteria:** 14. **Task:** 6. **Target:**
++`packages/jet_cad_2d_flutter/lib/src/draft_painter.dart`, `_drawText`, around
++line 869.
++
++```diff
++ if (layout.height * chain.scaleMagnitude < minTextCapPixels) {
++   _culledText++;
++-  return;
++ }
++```
++
++**Command:**
++`CI=true flutter test test/invariants/frame_accounting_test.dart`
++
++```
++00:00 +0 -1: text accounting closes: drawn + culled + skipped is every text leaf [E]
++  Expected: <4>
++    Actual: <5>
++
++Failing tests:
++  .../test/invariants/frame_accounting_test.dart: text accounting closes: drawn + culled + skipped is every text leaf
++```
++
++Without the `return`, the culled leaf falls through into the drawn path below
++and is double-counted, so the sum exceeds the document's true text-leaf count.
++**KILLED**, and only this test — the other two frame-accounting tests stayed
++green.
++
++---
++
++## M16 — a painter text counter is not reset between paints
++
++**Criteria:** 15. **Task:** 6. **Target:** same file, top of `paint()`.
++
++```diff
++ void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
++   _skippedText = 0;
++   _culledText = 0;
++-  _textOps = 0;
++   _skippedDeepInstances = 0;
++```
++
++**Command:**
++`CI=true flutter test test/invariants/frame_accounting_test.dart`
++
++```
++00:00 +1 -1: a repeated frame is a repeated frame [E]
++  Expected: (int, int, int, int):<(2, 1, 1, 0)>
++    Actual: (int, int, int, int):<(4, 1, 1, 0)>
++
++Failing tests:
++  .../test/invariants/frame_accounting_test.dart: a repeated frame is a repeated frame
++```
++
++`textOpCount` accumulates across the two identical paints (2 + 2 = 4) while
++the correctly-reset counters (`culledTextCount`, `skippedTextCount`,
++`screenSpaceLeafCount`) stay unchanged. **KILLED**, and only this test.
++
++---
++
++## M17 — `VerticesDrawSink.text` drops the first delegated call
++
++**Criteria:** 16. **Task:** 6. **Target:**
++`packages/jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart`, `text()`.
++
++```diff
+++  int _frameTextOps = 0; // mutation counter
++   @override
++   void text(String text, Handle style, ResolvedStyle resolved) {
++     _flushBeforeUnbatchable();
++-    _fallback?.text(text, style, resolved);
+++    if (_frameTextOps++ != 0) _fallback?.text(text, style, resolved);
++   }
++```
++
++**Command:**
++`CI=true flutter test test/invariants/frame_accounting_test.dart`
++
++```
++00:00 +2 -1: the vertices backend loses no text on the way through its fallback [E]
++  Expected: <2>
++    Actual: <1>
++
++Failing tests:
++  .../test/invariants/frame_accounting_test.dart: the vertices backend loses no text on the way through its fallback
++```
++
++The fixture draws two text ops; the guard drops the first delegated call, so
++`canvasCallCount` (1) falls short of `textOpCount` (2). **KILLED**, and only
++this test.
++
++---
++
++## Tally
++
++| Category | Count | Which |
++|---|---:|---|
++| Killed | 17 | M1–M17 |
++| Survivors | 0 | — |
++| Restatements | 0 | — |
++| Unmeasurable | 0 | — |
++
++All seventeen named mutants were fired and all seventeen were killed by the
++exact criterion each maps to in the spec's own table, with the reddened test
++set matching the prediction in every case except M12 and M10, where the
++transcript shows **more** tests reddening than the minimum predicted — both
++recorded above as extra evidence, not trimmed to fit the narrower claim.
++
++Unlike Plan 3f's mutation log, this plan's own seventeen mutants carry no
++survivor. The prior plan's three survivor rows (M7's own defaulting bug,
++caught only after being audited following its neighbors' pattern) were the
++direct motivation for this plan's Decision 6 — moving the two structural
++invariants this plan wrote into always-on tests sized from the bound under
++test, rather than leaving them printed in a suite that does not run by
++default.
+diff --git a/packages/jet_cad_2d/lib/src/codec/schema_version.dart b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+index 60aacd7..c663d35 100644
+--- a/packages/jet_cad_2d/lib/src/codec/schema_version.dart
++++ b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+@@ -4,22 +4,29 @@
+ /// previous value. An unversioned document is not readable: guessing at the
+ /// shape of a file that never declared one is how silent corruption starts.
+ ///
+ /// 4: `EntityRecord.toJson` gained `text`, `tag`, `textStyle` and
+ /// `textAttrs`; `EntityRecord.fromJson` defaults all four when absent, which
+ /// is the whole of the v3->v4 migration.
+ ///
+ /// 5: `EntityKind.fill`. The JSON shape is unchanged -- a fill is an ordinary
+ /// entity and `kind` is written by name -- but a v4 reader must refuse a
+ /// document containing one rather than fail inside `EntityKind.values.byName`,
+-/// and the version check at `json_codec.dart:103` is what makes it.
+-const int kSchemaVersion = 5;
++/// and the version check at `json_codec.dart:104` is what makes it.
++///
++/// 6: `InstanceNode.toJson` gained `lineweight`, `transparency`, `linetype`
++/// and `linetypeScale`; `fromJson` defaults all four to their no-op values
++/// (BYBLOCK, BYBLOCK, BYBLOCK-linetype, 1.0) when absent, which is the whole
++/// of the v5->v6 migration. The bump exists for the **reader**: without it a
++/// v5 build would load a v6 file, silently drop four fields, and render a
++/// different drawing. With it, that build refuses the file and says why.
++const int kSchemaVersion = 6;
+ 
+ class SchemaVersionError implements Exception {
+   final Object? found;
+   const SchemaVersionError(this.found);
+ 
+   @override
+   String toString() => found == null
+       ? 'SchemaVersionError: document has no schemaVersion'
+       : 'SchemaVersionError: unsupported schemaVersion $found '
+           '(this build writes $kSchemaVersion)';
+diff --git a/packages/jet_cad_2d/lib/src/document/node.dart b/packages/jet_cad_2d/lib/src/document/node.dart
+index bd4c817..64a7aca 100644
+--- a/packages/jet_cad_2d/lib/src/document/node.dart
++++ b/packages/jet_cad_2d/lib/src/document/node.dart
+@@ -155,92 +155,163 @@ final class InstanceNode extends Node {
+   final Handle layer;
+ 
+   /// This instance's own colour, imposed on its definition's BYBLOCK contents.
+   ///
+   /// `ByBlockColor` — the default — means "inherit from whatever places me",
+   /// which for a root-level instance is the document context. This field is how
+   /// 500 tables share one geometry and render in 500 colours, and it
+   /// round-trips to DXF losslessly.
+   final DraftColor color;
+ 
++  /// This instance's own lineweight, imposed on its definition's BYBLOCK
++  /// contents.
++  ///
++  /// Encoded exactly as `EntityRecord.lineweight` is — `kByBlock` (the
++  /// default), `kByLayer`, `kLineweightDefault`, or a concrete value in
++  /// 1/100 mm. A second encoding for the same concept would be a second thing
++  /// to keep in step, and `DocumentStyleResolver` would need two switches
++  /// where it now needs one shape.
++  final int lineweight;
++
++  /// 0..255, or `kByBlock` (the default) or `kByLayer`. Same encoding as
++  /// `EntityRecord.transparency`.
++  final int transparency;
++
++  /// `ReservedHandles.byBlockLinetype` (the default),
++  /// `ReservedHandles.byLayerLinetype`, or a concrete linetype handle. Same
++  /// encoding as `EntityRecord.linetype`.
++  final Handle linetype;
++
++  /// **Multiplies; it does not substitute.**
++  ///
++  /// DXF's rule for a nested entity's effective linetype scale is a product,
++  /// not an override, so an entity inside two INSERTs is scaled by both and by
++  /// the header's global scale. The other three fields above answer "which
++  /// value wins"; this one answers "by how much", and there is no sentinel
++  /// because there is nothing to defer to — `1.0` already means "impose
++  /// nothing".
++  final double linetypeScale;
++
+   const InstanceNode({
+     required super.handle,
+     required super.parent,
+     required super.transform,
+     required this.definition,
+     required this.layer,
+     this.color = const ByBlockColor(),
++    this.lineweight = kByBlock,
++    this.transparency = kByBlock,
++    this.linetype = ReservedHandles.byBlockLinetype,
++    this.linetypeScale = 1.0,
+     super.visible = true,
+   });
+ 
+   InstanceNode copyWith({
+     Handle? handle,
+     Handle? parent,
+     Transform2? transform,
+     bool? visible,
+     Handle? definition,
+     Handle? layer,
+     DraftColor? color,
++    int? lineweight,
++    int? transparency,
++    Handle? linetype,
++    double? linetypeScale,
+   }) =>
+       InstanceNode(
+         handle: handle ?? this.handle,
+         parent: parent ?? this.parent,
+         transform: transform ?? this.transform,
+         visible: visible ?? this.visible,
+         definition: definition ?? this.definition,
+         layer: layer ?? this.layer,
+         color: color ?? this.color,
++        lineweight: lineweight ?? this.lineweight,
++        transparency: transparency ?? this.transparency,
++        linetype: linetype ?? this.linetype,
++        linetypeScale: linetypeScale ?? this.linetypeScale,
+       );
+ 
+   @override
+   Map<String, Object?> toJson() => {
+         'type': 'instance',
+         'handle': handle.toJson(),
+         'parent': parent.toJson(),
+         'transform': transform.toJson(),
+         'visible': visible,
+         'definition': definition.toJson(),
+         'layer': layer.toJson(),
+         'color': encodeColor(color),
++        'lineweight': lineweight,
++        'transparency': transparency,
++        'linetype': linetype.toJson(),
++        'linetypeScale': linetypeScale,
+       };
+ 
+   static InstanceNode fromJson(Map<String, Object?> json) => InstanceNode(
+         handle: Handle.fromJson(json['handle']),
+         parent: Handle.fromJson(json['parent']),
+         transform: Transform2.fromJson(json['transform']),
+         visible: json['visible']! as bool,
+         definition: Handle.fromJson(json['definition']),
+         layer: Handle.fromJson(json['layer']),
+         // Absent in files written before this field existed: BYBLOCK is the
+         // correct default because it is a no-op — it reproduces the old
+         // behaviour, where a placed instance imposed nothing on its
+         // definition's colour, exactly.
+         color: json['color'] == null
+             ? const ByBlockColor()
+             : decodeColor(json['color']! as int),
++        // Absent in v5 and earlier. BYBLOCK for the three sentinel fields and
++        // 1.0 for the scale are the correct defaults for the same reason
++        // BYBLOCK was correct for `color`: they are no-ops. `contextFor`
++        // reduces to the pass-through it performed before this field existed,
++        // so a v5 document resolves bit-identically under a v6 build.
++        //
++        // BYLAYER would not be a no-op. It would make every pre-3f.1 INSERT
++        // start imposing its layer's linetype on its definition's BYBLOCK
++        // contents, silently changing how existing drawings render.
++        lineweight:
++            json['lineweight'] == null ? kByBlock : json['lineweight']! as int,
++        transparency: json['transparency'] == null
++            ? kByBlock
++            : json['transparency']! as int,
++        linetype: json['linetype'] == null
++            ? ReservedHandles.byBlockLinetype
++            : Handle.fromJson(json['linetype']),
++        linetypeScale: json['linetypeScale'] == null
++            ? 1.0
++            : (json['linetypeScale']! as num).toDouble(),
+       );
+ 
+   @override
+   bool operator ==(Object other) =>
+       other is InstanceNode &&
+       other.handle == handle &&
+       other.parent == parent &&
+       other.transform
+           .equals(transform, const Tolerance(linear: 0, angular: 0)) &&
+       other.visible == visible &&
+       other.definition == definition &&
+       other.layer == layer &&
+-      other.color == color;
++      other.color == color &&
++      other.lineweight == lineweight &&
++      other.transparency == transparency &&
++      other.linetype == linetype &&
++      // Exact, not tolerant: a stored value, and Plan 3g will key a picture
++      // cache on it.
++      other.linetypeScale == linetypeScale;
+ 
+   @override
+-  int get hashCode =>
+-      Object.hash(handle, parent, visible, definition, layer, color);
++  int get hashCode => Object.hash(handle, parent, visible, definition, layer,
++      color, lineweight, transparency, linetype, linetypeScale);
+ 
+   @override
+   String toString() =>
+       'InstanceNode(${handle.toHex()} of ${definition.toHex()})';
+ }
+ 
+ /// A reusable prototype subtree — DXF BLOCK, IFC type object.
+ ///
+ /// Not a [Node]: a prototype is not placed, so it has no parent and no
+ /// transform. [basePoint] is DXF's block base point; insertion alignment is
+diff --git a/packages/jet_cad_2d/lib/src/document/style_resolver.dart b/packages/jet_cad_2d/lib/src/document/style_resolver.dart
+index deabc19..3ab7106 100644
+--- a/packages/jet_cad_2d/lib/src/document/style_resolver.dart
++++ b/packages/jet_cad_2d/lib/src/document/style_resolver.dart
+@@ -22,38 +22,83 @@ class DocumentStyleResolver implements StyleResolver {
+   DocumentStyleResolver(this.document);
+ 
+   final DraftDocument document;
+ 
+   @override
+   StyleContext contextFor(Handle instance, StyleContext inherited) {
+     final node = document.tree[instance];
+     if (node is! InstanceNode) return inherited;
+     // An instance on layer 0 is substituted onto the layer it is placed
+     // through, exactly as an entity is in [styleFor]. That one effective layer
+-    // answers both questions this method asks — which layer supplies this
+-    // instance's own BYLAYER colour, and which layer it passes down — so it is
+-    // computed once. Reading `node.layer` for the colour while passing the
++    // answers every question this method asks — which layer supplies this
++    // instance's BYLAYER properties, and which layer it passes down — so it is
++    // computed once. Reading `node.layer` for a property while passing the
+     // substituted layer down would make one node report two effective layers.
+     final layer =
+         node.layer == ReservedHandles.layerZero ? inherited.layer : node.layer;
++    // One lookup, not four. Before Plan 3f.1 only `color` consulted the record;
++    // four properties asking the same table four times would be four map
++    // lookups per instance per frame, on a path the non-negotiables bound.
++    final record = document.tables.layers[layer];
++
+     final encoded = encodeColor(node.color);
+     final color = switch (encoded) {
+       kByBlock => inherited.color,
+-      kByLayer => _layerColorOf(layer, inherited),
++      kByLayer => _concreteLayerColor(record, inherited),
+       _ => encoded,
+     };
++
++    // `kLineweightDefault` is a *third* sentinel, not a width, and it must not
++    // survive into `StyleContext.lineweight` — a field whose own doc comment
++    // declares it concrete. It can arrive by either route: written on the
++    // INSERT itself, or read off a layer record, which
++    // `test/document/tables_test.dart:13` already does.
++    int concrete(int value) =>
++        value == kLineweightDefault ? inherited.lineweight : value;
++    final lineweight = switch (node.lineweight) {
++      kByBlock => inherited.lineweight,
++      kByLayer => concrete(record?.lineweight ?? inherited.lineweight),
++      _ => concrete(node.lineweight),
++    };
++
++    final transparency = switch (node.transparency) {
++      kByBlock => inherited.transparency,
++      kByLayer => record?.transparency ?? inherited.transparency,
++      _ => node.transparency,
++    };
++
++    // Spelled as nested conditionals rather than a switch because
++    // `ReservedHandles.byBlockLinetype` is a `Handle`, not an `int` constant
++    // pattern — the same shape `styleFor` uses for the entity-side read.
++    //
++    // Absence is checked; malformedness is not. A layer whose *colour* is
++    // itself BYLAYER or BYBLOCK is rejected by `_concreteLayerColor`, and a
++    // layer whose *linetype* is one of those sentinels is not — an asymmetry
++    // this method inherits from `styleFor` rather than introducing. An INSERT
++    // and an entity resolving the same malformed layer differently would be a
++    // new defect; fixing the entity side is a separate change.
++    final linetype = node.linetype == ReservedHandles.byBlockLinetype
++        ? inherited.linetype
++        : node.linetype == ReservedHandles.byLayerLinetype
++            ? (record?.linetype ?? inherited.linetype)
++            : node.linetype;
++
+     return StyleContext(
+       color: color,
+-      linetype: inherited.linetype,
+-      linetypeScale: inherited.linetypeScale,
+-      lineweight: inherited.lineweight,
+-      transparency: inherited.transparency,
++      linetype: linetype,
++      // Multiplies, never substitutes. DXF's rule for a nested entity's
++      // effective linetype scale is a product, so nesting composes without a
++      // special case for depth: entity x every enclosing INSERT x the header's
++      // global scale, which `DraftPainter` applies at the far end.
++      linetypeScale: inherited.linetypeScale * node.linetypeScale,
++      lineweight: lineweight,
++      transparency: transparency,
+       layer: layer,
+     );
+   }
+ 
+   @override
+   ResolvedStyle styleFor(int slot, StyleContext ctx) {
+     final entityLayer = document.entities.layerAt(slot);
+     // The layer-0 rule is SUBSTITUTION, not deferral: an entity on layer 0
+     // takes the layer it is placed through, which is what the context carries.
+     // When nothing substitutes — a root-level entity, or an instance chain that
+@@ -92,27 +137,30 @@ class DocumentStyleResolver implements StyleResolver {
+         ? ctx.linetype
+         : lt == ReservedHandles.byLayerLinetype
+             ? (record?.linetype ?? ctx.linetype)
+             : lt;
+ 
+     return ResolvedStyle(
+       argb: ((255 - transparency.clamp(0, 255)) << 24) | _rgbOf(color),
+       lineweightHundredths:
+           lineweight == kLineweightDefault ? ctx.lineweight : lineweight,
+       linetype: linetype,
+-      linetypeScale: document.entities.linetypeScaleAt(slot),
++      // Before Plan 3f.1 this read `document.entities.linetypeScaleAt(slot)`
++      // alone. `StyleContext.linetypeScale` was constructed, copied, compared
++      // and hashed, and no code path read it to produce a drawing — and no
++      // test could tell, because every linetypeScale literal in the repository
++      // was 1.0, the multiplicative identity.
++      linetypeScale:
++          ctx.linetypeScale * document.entities.linetypeScaleAt(slot),
+     );
+   }
+ 
+-  int _layerColorOf(Handle layer, StyleContext inherited) =>
+-      _concreteLayerColor(document.tables.layers[layer], inherited);
+-
+   int _concreteLayerColor(LayerRecord? record, StyleContext ctx) {
+     if (record == null) return ctx.color;
+     final encoded = encodeColor(record.color);
+     // A layer whose own colour is BYLAYER or BYBLOCK is malformed; the context
+     // is the only defined answer left.
+     return (encoded == kByLayer || encoded == kByBlock) ? ctx.color : encoded;
+   }
+ 
+   int _rgbOf(int encoded) => switch (decodeColor(encoded)) {
+         IndexedColor(:final aci) => aciToRgb(aci),
+diff --git a/packages/jet_cad_2d/test/codec/instance_style_codec_test.dart b/packages/jet_cad_2d/test/codec/instance_style_codec_test.dart
+new file mode 100644
+index 0000000..c135d3a
+--- /dev/null
++++ b/packages/jet_cad_2d/test/codec/instance_style_codec_test.dart
+@@ -0,0 +1,194 @@
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2;
++
++/// A placement whose four style fields are all non-default.
++///
++/// Every value is chosen to differ from the field's own default, from
++/// `StyleContext.documentRoot`'s value, and from every other field's value —
++/// so a round-trip that transposes two keys, or drops one to its default,
++/// lands on a number no assertion here expects. `linetypeScale` is 4.0 and
++/// not 1.0: this plan's anti-degenerate rule forbids the identity, because
++/// the identity is what hid the severed channel for fifty-four fixtures.
++InstanceNode styledInstance() => InstanceNode(
++      handle: const Handle(300),
++      parent: const Handle(1),
++      transform: Transform2.translation(17, 23),
++      definition: const Handle(200),
++      layer: const Handle(100),
++      color: const IndexedColor(3),
++      lineweight: 211,
++      transparency: 137,
++      linetype: const Handle(42),
++      linetypeScale: 4.0,
++    );
++
++void main() {
++  test('an instance round-trips all four style fields at non-default values',
++      () {
++    final node = styledInstance();
++    final back = InstanceNode.fromJson(node.toJson());
++
++    expect(back.lineweight, 211);
++    expect(back.transparency, 137);
++    expect(back.linetype, const Handle(42));
++    // A stored value, so the comparison is exact. `Tolerance` is for
++    // geometric decisions, never for a number read back off disk.
++    expect(back.linetypeScale, 4.0);
++    expect(back, node);
++  });
++
++  test('the four fields are absent-tolerant and default to the no-op values',
++      () {
++    // A v5 document's instance node, verbatim: the four keys do not exist.
++    final v5 = <String, Object?>{
++      'type': 'instance',
++      'handle': const Handle(300).toJson(),
++      'parent': const Handle(1).toJson(),
++      'transform': Transform2.identity().toJson(),
++      'visible': true,
++      'definition': const Handle(200).toJson(),
++      'layer': const Handle(100).toJson(),
++      'color': encodeColor(const IndexedColor(3)),
++    };
++    final back = InstanceNode.fromJson(v5);
++
++    // BYBLOCK, BYBLOCK, BYBLOCK-linetype and the multiplicative identity: the
++    // four values that make `contextFor` reproduce its pre-3f.1 behaviour
++    // exactly. Any other default silently changes how every existing document
++    // renders.
++    expect(back.lineweight, kByBlock);
++    expect(back.transparency, kByBlock);
++    expect(back.linetype, ReservedHandles.byBlockLinetype);
++    expect(back.linetypeScale, 1.0);
++  });
++
++  test('two instances differing only in linetypeScale are not equal', () {
++    // `==` and `hashCode` are the picture cache key's foundation in Plan 3g.
++    // A field left out of either makes two different placements collide.
++    final a = styledInstance();
++    final b = a.copyWith(linetypeScale: 8.0);
++    expect(a == b, isFalse);
++    expect(a.hashCode == b.hashCode, isFalse);
++  });
++
++  test('the schema this build writes is 6', () {
++    expect(kSchemaVersion, 6);
++  });
++
++  group('a v5 document resolves bit-identically under a v6 build', () {
++    /// A v5 document: a v6 encoding with the four new instance keys stripped
++    /// and the version declared back down.
++    ///
++    /// **Derived, not hand-written.** Hand-writing the whole document shape
++    /// would put a second, drifting copy of the codec's JSON contract in a
++    /// test file, and a fixture that silently fails to parse into anything
++    /// proves less than nothing about migration. Encoding a real document and
++    /// removing exactly the four keys a pre-3f.1 writer never wrote produces
++    /// precisely what that writer produced, and stays correct when the rest of
++    /// the shape changes.
++    ///
++    /// The document's shape is chosen so M10 has somewhere to land: entity 201
++    /// is BYBLOCK-linetype, it lives inside definition 200, and instance 300
++    /// sits on layer 100 whose linetype (71) differs from documentRoot's
++    /// `continuousLinetype`. Under the correct BYBLOCK default the entity
++    /// resolves to `continuousLinetype`; under M10's BYLAYER default it
++    /// resolves to `Handle(71)`.
++    Map<String, Object?> v5Document() {
++      final doc = DraftDocument.empty();
++      doc.tables.layers.add(const LayerRecord(
++        handle: Handle(100),
++        name: 'STRUCT',
++        color: IndexedColor(5),
++        linetype: Handle(71),
++        lineweight: 191,
++        transparency: 88,
++        visible: true,
++        locked: false,
++      ));
++      doc.tree.addDefinition(Definition(
++          handle: const Handle(200),
++          name: 'BOLT',
++          basePoint: Vector2.zero(),
++          children: const []));
++      doc.commands.execute(AddEntityCommand(
++        record: const EntityRecord(
++          handle: Handle(201),
++          owner: Handle(200),
++          kind: EntityKind.line,
++          layer: ReservedHandles.layerZero,
++          linetype: ReservedHandles.byBlockLinetype,
++          linetypeScale: 2.0,
++          geomIndex: 0,
++          color: ByBlockColor(),
++          lineweight: kByBlock,
++          transparency: kByBlock,
++          flags: 0,
++        ),
++        payload: GeometryPayload(
++          coords: Float64List.fromList([0, 0, 1, 1]),
++          scalars: Float64List(0),
++        ),
++      ));
++      doc.commands.execute(AddNodeCommand(InstanceNode(
++        handle: const Handle(300),
++        parent: doc.rootHandle,
++        transform: Transform2.translation(31, 17),
++        definition: const Handle(200),
++        layer: const Handle(100),
++      )));
++
++      final json = DraftDocumentCodec.encode(doc);
++      // Exactly the four keys a v5 writer did not write.
++      for (final node in json['nodes']! as List<Object?>) {
++        final map = node! as Map<String, Object?>;
++        if (map['type'] != 'instance') continue;
++        map.remove('lineweight');
++        map.remove('transparency');
++        map.remove('linetype');
++        map.remove('linetypeScale');
++      }
++      json['schemaVersion'] = 5;
++      return json;
++    }
++
++    test('every field of the resolved style matches the pre-3f.1 answer', () {
++      final doc = DraftDocumentCodec.decode(v5Document());
++      final resolver = DocumentStyleResolver(doc);
++      final ctx =
++          resolver.contextFor(const Handle(300), StyleContext.documentRoot);
++      final style =
++          resolver.styleFor(doc.entities.slotOf(const Handle(201))!, ctx);
++
++      // The four answers a pre-3f.1 build produced for this document, written
++      // as literals. Recomputing them from the current resolver would be a
++      // tautology -- the code under test on both sides of the comparison.
++      //
++      // lineweight: the INSERT defaults to BYBLOCK, so the entity's BYBLOCK
++      // reaches documentRoot's 25 -- NOT layer STRUCT's 191.
++      expect(style.lineweightHundredths, 25);
++      // transparency: same route to documentRoot's 0, so alpha is 255 --
++      // NOT 255 - 88.
++      expect(style.argb >> 24, 255);
++      // linetype: BYBLOCK all the way to documentRoot's continuousLinetype.
++      // This is the assertion M10 breaks.
++      expect(style.linetype, ReservedHandles.continuousLinetype);
++      // linetypeScale: the entity's own 2.0 times an INSERT that defaults to
++      // the identity.
++      expect(style.linetypeScale, 2.0);
++    });
++
++    test('a v6 build refuses nothing it wrote and everything from the future',
++        () {
++      // The bump's whole purpose is the reader. A v5 payload loads; a v7 one
++      // is refused by version rather than by a FormatException deep inside a
++      // field parse.
++      expect(() => DraftDocumentCodec.decode(v5Document()), returnsNormally);
++      final future = v5Document()..['schemaVersion'] = 7;
++      expect(() => DraftDocumentCodec.decode(future),
++          throwsA(isA<SchemaVersionError>()));
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d/test/codec/json_codec_test.dart b/packages/jet_cad_2d/test/codec/json_codec_test.dart
+index c0c0d43..f64c94e 100644
+--- a/packages/jet_cad_2d/test/codec/json_codec_test.dart
++++ b/packages/jet_cad_2d/test/codec/json_codec_test.dart
+@@ -474,16 +474,21 @@ void main() {
+       boundaryColor: const TrueColor(0x000000),
+     );
+     doc.commands.execute(cmd);
+     final reloaded = DraftDocumentCodec.decode(
+         jsonDecode(jsonEncode(DraftDocumentCodec.encode(doc)))
+             as Map<String, Object?>);
+     expect(reloaded.fills.fillsOf(cmd.boundary.handle), [cmd.fill.handle]);
+     expect(reloaded.fills.trianglesFor(cmd.boundary.handle), hasLength(6));
+   });
+ 
+-  test('the schema version is 5, and a v6 document is refused', () {
+-    expect(kSchemaVersion, 5);
+-    expect(() => DraftDocumentCodec.decode({'schemaVersion': 6}),
+-        throwsA(anything));
++  test('the schema version is 6, and a v7 document is refused by version', () {
++    expect(kSchemaVersion, 6);
++    // `isA<SchemaVersionError>()`, not `throwsA(anything)`: a bare
++    // `{'schemaVersion': N}` map fails on the missing `'header'` key too, so
++    // the loose matcher passed whenever N was the *current* version rather
++    // than a future one. The point of this test is that the refusal comes from
++    // the version guard.
++    expect(() => DraftDocumentCodec.decode({'schemaVersion': 7}),
++        throwsA(isA<SchemaVersionError>()));
+   });
+ }
+diff --git a/packages/jet_cad_2d/test/document/instance_style_test.dart b/packages/jet_cad_2d/test/document/instance_style_test.dart
+new file mode 100644
+index 0000000..a8bf184
+--- /dev/null
++++ b/packages/jet_cad_2d/test/document/instance_style_test.dart
+@@ -0,0 +1,287 @@
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2;
++
++// ---------------------------------------------------------------------------
++// Fixture helpers.
++//
++// Four distinct sources for every property under test — the instance, the
++// substituted layer's record, layer 0's record, and `StyleContext.documentRoot`
++// — so a resolution that reads the wrong one of the four lands on a number no
++// assertion here expects. A fixture where two of the four agree cannot tell a
++// correct resolver from the mutant that reads the other one.
++// ---------------------------------------------------------------------------
++
++Handle addLayer(
++  DraftDocument doc,
++  Handle handle,
++  String name, {
++  required int lineweight,
++  required int transparency,
++  required Handle linetype,
++}) {
++  // `DraftDocument.empty()` seeds layer 0 via `DocumentTables.standard()`, so
++  // overriding it (as the BYLAYER-substitution fixture does, to give layer 0
++  // and the substituted layer distinct values) collides on both handle and
++  // name unless the existing record is removed first -- the same pattern
++  // `test/index/query_filter_test.dart:381` uses to replace a layer record.
++  doc.tables.layers.remove(handle);
++  doc.tables.layers.add(LayerRecord(
++    handle: handle,
++    name: name,
++    color: const IndexedColor(5),
++    linetype: linetype,
++    lineweight: lineweight,
++    transparency: transparency,
++    visible: true,
++    locked: false,
++  ));
++  return handle;
++}
++
++Handle addDefinition(DraftDocument doc, Handle handle, String name) {
++  doc.tree.addDefinition(Definition(
++      handle: handle,
++      name: name,
++      basePoint: Vector2.zero(),
++      children: const []));
++  return handle;
++}
++
++/// A line that defers every property to whatever places it.
++Handle addByBlockLine(
++  DraftDocument doc,
++  Handle owner,
++  Handle handle, {
++  double linetypeScale = 2.0,
++}) {
++  doc.commands.execute(AddEntityCommand(
++    record: EntityRecord(
++      handle: handle,
++      owner: owner,
++      kind: EntityKind.line,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.byBlockLinetype,
++      linetypeScale: linetypeScale,
++      geomIndex: 0,
++      color: const ByBlockColor(),
++      lineweight: kByBlock,
++      transparency: kByBlock,
++      flags: 0,
++    ),
++    payload: GeometryPayload(
++      coords: Float64List.fromList([0, 0, 1, 1]),
++      scalars: Float64List(0),
++    ),
++  ));
++  return handle;
++}
++
++Handle addInstance(
++  DraftDocument doc,
++  Handle handle,
++  Handle definition, {
++  Handle? parent,
++  Handle layer = ReservedHandles.layerZero,
++  int lineweight = kByBlock,
++  int transparency = kByBlock,
++  Handle linetype = ReservedHandles.byBlockLinetype,
++  double linetypeScale = 1.0,
++}) {
++  doc.commands.execute(AddNodeCommand(InstanceNode(
++    handle: handle,
++    parent: parent ?? doc.rootHandle,
++    // Never the identity: an identity transform commutes and hides ordering,
++    // which is the defect four fixtures missed in Plan 2.
++    transform: Transform2.translation(31, 17),
++    definition: definition,
++    layer: layer,
++    lineweight: lineweight,
++    transparency: transparency,
++    linetype: linetype,
++    linetypeScale: linetypeScale,
++  )));
++  return handle;
++}
++
++/// Resolves [child] as if drawn through [instance], directly rather than by
++/// walking. The claim under test is what `contextFor` computes, not how a
++/// traversal reaches it; the traversal is covered by the differential and
++/// golden suites in the Flutter package.
++ResolvedStyle resolveThrough(
++    DraftDocument doc, List<Handle> instances, Handle child) {
++  final resolver = DocumentStyleResolver(doc);
++  var ctx = StyleContext.documentRoot;
++  for (final i in instances) {
++    ctx = resolver.contextFor(i, ctx);
++  }
++  return resolver.styleFor(doc.entities.slotOf(child)!, ctx);
++}
++
++void main() {
++  // `StyleContext.documentRoot` is lineweight 25, transparency 0, linetype
++  // `continuousLinetype`. Every expected value below differs from all three.
++
++  test('an INSERT imposes its concrete lineweight on a BYBLOCK child', () {
++    final doc = DraftDocument.empty();
++    final def = addDefinition(doc, const Handle(200), 'BOLT');
++    final child = addByBlockLine(doc, def, const Handle(201));
++    addInstance(doc, const Handle(300), def, lineweight: 211);
++
++    expect(resolveThrough(doc, [const Handle(300)], child).lineweightHundredths,
++        211);
++  });
++
++  test('an INSERT imposes its concrete transparency on a BYBLOCK child', () {
++    final doc = DraftDocument.empty();
++    final def = addDefinition(doc, const Handle(200), 'BOLT');
++    final child = addByBlockLine(doc, def, const Handle(201));
++    addInstance(doc, const Handle(300), def, transparency: 137);
++
++    // Transparency reaches the drawing as the alpha byte: 255 - 137 = 118.
++    // Asserted through `argb` rather than through a transparency getter
++    // because `ResolvedStyle` has no separate transparency field, and the
++    // byte is what a painter actually consumes.
++    expect(resolveThrough(doc, [const Handle(300)], child).argb >> 24, 118);
++  });
++
++  test('an INSERT imposes its concrete linetype on a BYBLOCK child', () {
++    final doc = DraftDocument.empty();
++    final def = addDefinition(doc, const Handle(200), 'BOLT');
++    final child = addByBlockLine(doc, def, const Handle(201));
++    addInstance(doc, const Handle(300), def, linetype: const Handle(42));
++
++    expect(resolveThrough(doc, [const Handle(300)], child).linetype,
++        const Handle(42));
++  });
++
++  group('BYLAYER on an INSTANCE reads the substituted layer, not node.layer',
++      () {
++    /// Layer 0 and layer `L` carry different values for every property, and
++    /// the instance sits on layer 0 so substitution has to happen for the
++    /// right one to be read. A mutant reading `node.layer` gets layer 0's
++    /// numbers; the correct resolver gets `L`'s.
++    DraftDocument fixture() {
++      final doc = DraftDocument.empty();
++      addLayer(doc, ReservedHandles.layerZero, '0',
++          lineweight: 13, transparency: 9, linetype: const Handle(70));
++      addLayer(doc, const Handle(100), 'STRUCT',
++          lineweight: 191, transparency: 88, linetype: const Handle(71));
++      final def = addDefinition(doc, const Handle(200), 'BOLT');
++      addByBlockLine(doc, def, const Handle(201));
++      // The outer placement puts layer STRUCT into the context; the inner
++      // instance is on layer 0, so it inherits STRUCT and must read STRUCT's
++      // record for its own BYLAYER properties.
++      addInstance(doc, const Handle(300), const Handle(210),
++          layer: const Handle(100));
++      return doc;
++    }
++
++    test('lineweight', () {
++      final doc = fixture();
++      addInstance(doc, const Handle(310), const Handle(200),
++          parent: const Handle(210), lineweight: kByLayer);
++      expect(
++          resolveThrough(doc, [const Handle(300), const Handle(310)],
++                  const Handle(201))
++              .lineweightHundredths,
++          191);
++    });
++
++    test('transparency', () {
++      final doc = fixture();
++      addInstance(doc, const Handle(310), const Handle(200),
++          parent: const Handle(210), transparency: kByLayer);
++      expect(
++          resolveThrough(doc, [const Handle(300), const Handle(310)],
++                      const Handle(201))
++                  .argb >>
++              24,
++          255 - 88);
++    });
++
++    test('linetype', () {
++      final doc = fixture();
++      addInstance(doc, const Handle(310), const Handle(200),
++          parent: const Handle(210), linetype: ReservedHandles.byLayerLinetype);
++      expect(
++          resolveThrough(doc, [const Handle(300), const Handle(310)],
++                  const Handle(201))
++              .linetype,
++          const Handle(71));
++    });
++  });
++
++  group('kLineweightDefault never reaches a ResolvedStyle', () {
++    // `-3` is a third sentinel in this encoding, not a width. A three-arm
++    // switch sends it down "otherwise" and into StyleContext.lineweight,
++    // whose doc comment declares that field concrete -- and the entity-side
++    // guard cannot rescue it, because that guard maps a -3 entity lineweight
++    // to ctx.lineweight, which here would itself be -3.
++    test('carried directly by the INSERT', () {
++      final doc = DraftDocument.empty();
++      final def = addDefinition(doc, const Handle(200), 'BOLT');
++      final child = addByBlockLine(doc, def, const Handle(201));
++      addInstance(doc, const Handle(300), def, lineweight: kLineweightDefault);
++
++      // documentRoot's 25 -- the inherited value, which is what "default"
++      // means here.
++      expect(
++          resolveThrough(doc, [const Handle(300)], child).lineweightHundredths,
++          25);
++    });
++
++    test('reached through the INSERT\'s BYLAYER lookup', () {
++      final doc = DraftDocument.empty();
++      addLayer(doc, const Handle(100), 'DEFAULTED',
++          lineweight: kLineweightDefault,
++          transparency: 0,
++          linetype: ReservedHandles.continuousLinetype);
++      final def = addDefinition(doc, const Handle(200), 'BOLT');
++      final child = addByBlockLine(doc, def, const Handle(201));
++      addInstance(doc, const Handle(300), def,
++          layer: const Handle(100), lineweight: kByLayer);
++
++      expect(
++          resolveThrough(doc, [const Handle(300)], child).lineweightHundredths,
++          25);
++    });
++  });
++
++  group('linetypeScale multiplies down the tree', () {
++    test('entity 2.0 x inner 4.0 x outer 8.0 resolves to exactly 64.0', () {
++      final doc = DraftDocument.empty();
++      final inner = addDefinition(doc, const Handle(200), 'BOLT');
++      final outer = addDefinition(doc, const Handle(210), 'PLATE');
++      final child =
++          addByBlockLine(doc, inner, const Handle(201), linetypeScale: 2.0);
++      addInstance(doc, const Handle(300), outer, linetypeScale: 8.0);
++      addInstance(doc, const Handle(310), inner,
++          parent: const Handle(210), linetypeScale: 4.0);
++
++      // Exact. Every factor is a power of two, so the product is
++      // representable and `Tolerance` would only hide a wrong answer.
++      expect(
++          resolveThrough(doc, [const Handle(300), const Handle(310)], child)
++              .linetypeScale,
++          64.0);
++    });
++
++    test('an INSERT at 1.0 leaves its child alone', () {
++      // The default's no-op property, asserted rather than assumed: this is
++      // what makes every pre-3f.1 document resolve unchanged. The entity's own
++      // scale is still 2.0, never 1.0 -- the identity on both sides would
++      // prove nothing.
++      final doc = DraftDocument.empty();
++      final def = addDefinition(doc, const Handle(200), 'BOLT');
++      final child =
++          addByBlockLine(doc, def, const Handle(201), linetypeScale: 2.0);
++      addInstance(doc, const Handle(300), def);
++
++      expect(
++          resolveThrough(doc, [const Handle(300)], child).linetypeScale, 2.0);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d/test/testing/generate_document_test.dart b/packages/jet_cad_2d/test/testing/generate_document_test.dart
+index 04630f7..5faf9a0 100644
+--- a/packages/jet_cad_2d/test/testing/generate_document_test.dart
++++ b/packages/jet_cad_2d/test/testing/generate_document_test.dart
+@@ -46,24 +46,27 @@ void main() {
+     //
+     // Deliberately not the structural assertions the plan sketches (one layer,
+     // every colour ByLayer, every node an instance under the root). Those pass
+     // on a document whose coordinates have all moved.
+     //
+     // Re-baselined in Plan 3c Task 1: the four text keys changed the
+     // serialisation.
+     //
+     // Re-baselined in Plan 3e Task 7: kSchemaVersion moved from 4 to 5, and
+     // that value is the first thing every serialisation writes.
++    //
++    // Re-baselined in Plan 3f.1 Task 1: InstanceNode.toJson gained four style
++    // keys and kSchemaVersion moved from 5 to 6.
+     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
+-        4778422453512744465);
++        1593811103237081036);
+     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
+-        2508170127112452780);
++        -4104570370941889723);
+   });
+ 
+   test('defaults reproduce the Plan 2 corpus structurally too', () {
+     // The fingerprint says "unchanged" but not "unchanged in what way". This
+     // names the properties the extensions must each leave alone, so a failure
+     // says which one moved.
+     final doc = generateDocument(2000, definitionCount: 20);
+     expect(doc.tables.layers.records, hasLength(1));
+     expect(doc.tables.linetypes.records, hasLength(3));
+     for (final slot in doc.entities.liveSlots) {
+@@ -223,24 +226,28 @@ void main() {
+ 
+   test('both text fractions default to zero and change nothing', () {
+     // The two fingerprints from Task 1's re-baseline (commit 7f85226) still
+     // hold. If either moved, `labelFraction` or `attributedInstanceFraction`
+     // drew from `extra` while off, which is exactly the bug this test
+     // exists to catch -- not a signal to update the expected value.
+     //
+     // Re-baselined in Plan 3e Task 7 in step with the sibling test above:
+     // kSchemaVersion moved from 4 to 5, which shifts every fingerprint in
+     // this file regardless of what `extra` drew.
++    //
++    // Re-baselined in Plan 3f.1 Task 1 in step with the sibling test above:
++    // InstanceNode.toJson gained four style keys and kSchemaVersion moved
++    // from 5 to 6.
+     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
+-        4778422453512744465);
++        1593811103237081036);
+     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
+-        2508170127112452780);
++        -4104570370941889723);
+   });
+ 
+   test('labelFraction produces repeating strings out of the root budget', () {
+     final doc =
+         generateDocument(2000, definitionCount: 20, labelFraction: 0.05);
+     final labels = <String>{};
+     var count = 0;
+     for (final slot in doc.entities.liveSlots) {
+       if (doc.entities.kindAt(slot) == EntityKind.text) {
+         count++;
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/frame_accounting_test.dart b/packages/jet_cad_2d_flutter/test/invariants/frame_accounting_test.dart
+new file mode 100644
+index 0000000..4b9d98a
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/invariants/frame_accounting_test.dart
+@@ -0,0 +1,176 @@
++// Identities the rig prints and does not assert. None of them carries a magic
++// constant: each is true at any corpus size, which is why this fixture is tiny
++// and always runs while the rig stays tagged `rig` and skipped.
++
++import 'dart:ui';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import '../support/fixtures.dart';
++
++/// World == screen, y flipped, no margin. See
++/// `text_cache_invariants_test.dart` for why this is not
++/// `ViewportTransform.fit`.
++ViewportTransform unitCamera() => ViewportTransform(
++    worldToScreenMatrix: Transform2(1, 0, 0, -1, 0, kViewport.height));
++
++/// Text in all three accounting states at once.
++///
++/// A fixture where any of the three counters is zero cannot tell a correct
++/// accounting identity from one that drops a term.
++DraftDocument threeWayTextDocument(FlutterTextMeasurer measurer) {
++  final doc = DraftDocument.empty(measurer: measurer);
++  // Drawn: 30 px of cap height against a 3.0 threshold.
++  addText(doc, doc.rootHandle, const Handle(1001), 'ALPHA', 40, 500, 30.0);
++  addText(doc, doc.rootHandle, const Handle(1002), 'BETA', 40, 440, 30.0);
++  // Culled: 1 px, a third of the threshold.
++  addText(doc, doc.rootHandle, const Handle(1003), 'GAMMA', 40, 380, 1.0);
++  // Skipped: the empty string is nothing to lay out, and the painter counts it
++  // separately from a cull because the two mean different things.
++  addText(doc, doc.rootHandle, const Handle(1004), '', 40, 320, 30.0);
++  return doc;
++}
++
++/// Every text leaf in [doc], counted from the document rather than from the
++/// painter.
++///
++/// Plan 3c's Ruling 28 in miniature: an identity whose two sides come from the
++/// same source is not an identity. Reading the expected total back off the
++/// painter would make this assertion compare a number with itself.
++int textLeafCount(DraftDocument doc) {
++  var n = 0;
++  // `leavesByOwner()` is the same enumeration `referenceWalk` uses to find
++  // leaves, and it is the document's own answer rather than the painter's.
++  for (final slots in doc.leavesByOwner().values) {
++    for (final slot in slots) {
++      final kind = doc.entities.kindAt(slot);
++      if (kind == EntityKind.text || kind == EntityKind.attrib) n++;
++    }
++  }
++  return n;
++}
++
++/// Paints [doc] once through a `CanvasDrawSink` over a throwaway recorder and
++/// returns the painter, counters intact.
++({DraftPainter painter, CanvasDrawSink sink}) paintOnce(
++  DraftDocument doc,
++  SpatialIndex index,
++  FlutterTextMeasurer measurer, {
++  bool vertices = false,
++}) {
++  final recorder = PictureRecorder();
++  final canvas = Canvas(recorder);
++  final sink = CanvasDrawSink(
++    canvas: canvas,
++    pixelsPerPaperMm: kLogicalPixelsPerMm,
++    measurer: measurer,
++    textStyleOf: doc.textStyleOf,
++  );
++  final painter = DraftPainter(
++    document: doc,
++    index: index,
++    resolver: DocumentStyleResolver(doc),
++  );
++  if (vertices) {
++    // `devicePixelRatio` defaults to 1.0 and is left there: the widget rebinds
++    // it from `MediaQuery` per frame, and a widgetless test has no display to
++    // ask. Nothing this test asserts is in device pixels.
++    final batching = VerticesDrawSink(
++      pixelsPerPaperMm: kLogicalPixelsPerMm,
++      fallback: sink,
++      canvas: canvas,
++    );
++    painter.paint(batching, unitCamera(), kViewport);
++    batching.flush();
++  } else {
++    painter.paint(sink, unitCamera(), kViewport);
++  }
++  recorder.endRecording().dispose();
++  return (painter: painter, sink: sink);
++}
++
++void main() {
++  test('text accounting closes: drawn + culled + skipped is every text leaf',
++      () {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final doc = threeWayTextDocument(measurer);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final p = paintOnce(doc, index, measurer).painter;
++
++    // All three non-zero, so no term can be dropped without changing the sum.
++    expect(p.textOpCount, greaterThan(0));
++    expect(p.culledTextCount, greaterThan(0));
++    expect(p.skippedTextCount, greaterThan(0));
++    expect(p.textOpCount + p.culledTextCount + p.skippedTextCount,
++        textLeafCount(doc));
++  });
++
++  test('a repeated frame is a repeated frame', () {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final doc = threeWayTextDocument(measurer);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final first = paintOnce(doc, index, measurer).painter;
++    final before = (
++      first.textOpCount,
++      first.culledTextCount,
++      first.skippedTextCount,
++      first.screenSpaceLeafCount,
++    );
++
++    // The same painter, painted again: every counter resets at the top of
++    // `paint()`, so a second identical frame must read identically. A counter
++    // that accumulates instead of resetting reads double here.
++    //
++    // The recorder is bound to a local and ended after the paint, exactly as
++    // `paintOnce` does for the first frame: an un-ended recording is the
++    // "moved the leak" shape Plan 3f was written against (Task 5).
++    final recorder = PictureRecorder();
++    first.paint(
++      CanvasDrawSink(
++        canvas: Canvas(recorder),
++        pixelsPerPaperMm: kLogicalPixelsPerMm,
++        measurer: measurer,
++        textStyleOf: doc.textStyleOf,
++      ),
++      unitCamera(),
++      kViewport,
++    );
++    recorder.endRecording().dispose();
++
++    expect((
++      first.textOpCount,
++      first.culledTextCount,
++      first.skippedTextCount,
++      first.screenSpaceLeafCount,
++    ), before);
++  });
++
++  test('the vertices backend loses no text on the way through its fallback',
++      () {
++    // `VerticesDrawSink` delegates exactly three calls to its fallback --
++    // beginResidual, endResidual and text (vertices_draw_sink.dart:300,307,721)
++    // -- and of the seven `_canvasCalls++` sites in CanvasDrawSink, none is in
++    // the two residual methods. So under this backend that counter counts
++    // paragraphs and nothing else, and the equality below is a real comparison
++    // between a sink-owned number and a painter-owned one.
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final doc = threeWayTextDocument(measurer);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final r = paintOnce(doc, index, measurer, vertices: true);
++
++    expect(r.painter.textOpCount, greaterThan(0),
++        reason: 'a fixture drawing no text cannot test a text seam');
++    expect(r.sink.canvasCallCount, r.painter.textOpCount);
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/text_cache_invariants_test.dart b/packages/jet_cad_2d_flutter/test/invariants/text_cache_invariants_test.dart
+new file mode 100644
+index 0000000..ac7f823
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/invariants/text_cache_invariants_test.dart
+@@ -0,0 +1,164 @@
++// The structural half of what `test/rig/paint_microbench_test.dart` prints.
++//
++// The rig measures at realistic scale and prints; those numbers depend on
++// machine load and a rig that fails the build on a slow machine teaches people
++// to ignore it. **These numbers do not.** Cache occupancy, eviction counts and
++// op counts are a function of the document, the camera and the code — the same
++// integers on every machine — so they can be a gate, and they are sized by the
++// bound under test rather than by realism.
++//
++// Plan 3f's mutant 7 (`metricsLimit` defaulting to `kParagraphCacheLimit`)
++// passed all 297 tests in the suite it was fired against. Nine of the twelve
++// constructions in `flutter_text_measurer_test.dart` were already bare, so
++// bare construction was never the missing half. Plan 3f's remedy
++// (`645b027`) closed one side of it: a bare measurer swept past 512
++// distinct strings through `measure()` and pinned `metricsEvictionCount`.
++// That test never calls `paragraphFor`, never runs a painter, and asserts
++// `liveParagraphCount == 0` outright — it closes the metrics half and
++// leaves the paragraph half exactly as untested as before. This file
++// closes that half: a real paint through `CanvasDrawSink` fills both maps
++// at once, and the 600-into-512 eviction arithmetic is pinned
++// behaviourally rather than restated. Firing mutant 7 again reddens both
++// files, each from its own side of the cache.
++
++import 'dart:ui';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import '../support/fixtures.dart';
++
++/// More distinct keys than `kParagraphCacheLimit` (512) and fewer than
++/// `kMetricsCacheLimit` (8192). 600 sits between the two bounds, which is the
++/// only property that matters: at 512 or below no value of either limit
++/// changes an answer.
++const int kDistinctLabels = 600;
++
++/// Cap height in world units. At the camera below, world units are screen
++/// pixels, so this is 8 px against a `kMinTextCapPixels` of 3.0 — a 2.67x
++/// margin, and `culledTextCount == 0` is asserted rather than assumed.
++const double kLabelHeight = 8.0;
++
++/// World == screen, y flipped, no margin.
++///
++/// **Not `ViewportTransform.fit`.** `fit` applies a 0.95 margin, and deriving
++/// an expected on-screen cap height through it is what cost Plan 3f two tasks.
++/// At scale 1.0 the level-of-detail arithmetic is `8.0 >= 3.0` and there is
++/// nothing to get wrong.
++ViewportTransform unitCamera() => ViewportTransform(
++    worldToScreenMatrix: Transform2(1, 0, 0, -1, 0, kViewport.height));
++
++/// 600 labels, every string distinct, laid out on a grid that fits inside
++/// [kViewport] so none of them culls by bounds.
++///
++/// 25 columns x 24 rows on a 30 x 24 pixel cell: a four-character label at 8 px
++/// cap height is roughly 18 px wide, so nothing leaves its cell and nothing
++/// leaves the viewport.
++DraftDocument sixHundredLabels(FlutterTextMeasurer measurer) {
++  final doc = DraftDocument.empty(measurer: measurer);
++  for (var i = 0; i < kDistinctLabels; i++) {
++    final column = i % 25;
++    final row = i ~/ 25;
++    addText(
++      doc,
++      doc.rootHandle,
++      Handle(1000 + i),
++      // Distinct by construction: 600 strings, 600 keys.
++      'L${i.toString().padLeft(3, '0')}',
++      column * 30.0 + 4,
++      row * 24.0 + 8,
++      kLabelHeight,
++    );
++  }
++  return doc;
++}
++
++void main() {
++  test('the default cache bounds hold 600 distinct keys the way they claim',
++      () {
++    // Bare. Both limits are what is under test, so neither may be supplied.
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++
++    final doc = sixHundredLabels(measurer);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    // The baseline, stated rather than assumed: `doc.extents` measures text
++    // through `entityBounds`, so building the document and the index has
++    // already warmed the *metrics* map with all 600 keys. That is harmless for
++    // the four counters below — the same 600 keys, still no evictions — but it
++    // is why `layoutCount` is deliberately not asserted here. Plan 3f's Task 5
++    // lost a round to exactly this warm-up.
++    expect(doc.extents.isEmpty, isFalse,
++        reason: 'the fixture must have measurable text');
++
++    // `CanvasDrawSink` over a real `Canvas`, and nothing else will do:
++    // `paragraphFor` has one production caller and this is it. A
++    // `RecordingDrawSink` or a `TextKeySink` would leave `liveParagraphCount`
++    // at zero while reporting `textOpCount == 600`.
++    final recorder = PictureRecorder();
++    final sink = CanvasDrawSink(
++      canvas: Canvas(recorder),
++      pixelsPerPaperMm: kLogicalPixelsPerMm,
++      measurer: measurer,
++      textStyleOf: doc.textStyleOf,
++    );
++    final painter = DraftPainter(
++      document: doc,
++      index: index,
++      resolver: DocumentStyleResolver(doc),
++    );
++
++    painter.paint(sink, unitCamera(), kViewport);
++    // A `Picture` holds native memory past the Dart object. Leaving one alive
++    // is the "moved the leak" shape Plan 3f's own rule was written against.
++    recorder.endRecording().dispose();
++
++    // The fixture proves it drew what it claims before any cache number is
++    // read: a level-of-detail cull would produce a smaller, self-consistent,
++    // wrong set of counts.
++    expect(painter.textOpCount, kDistinctLabels);
++    expect(painter.culledTextCount, 0);
++    expect(painter.skippedTextCount, 0);
++
++    // The metrics map is bounded at 8192 and holds all 600.
++    expect(measurer.liveMetricsCount, kDistinctLabels);
++    expect(measurer.metricsEvictionCount, 0);
++
++    // The paragraph map is bounded at 512, so 600 inserts leave 512 live and
++    // evict 88. Eviction is one-per-insert once full.
++    expect(measurer.liveParagraphCount, kParagraphCacheLimit);
++    expect(measurer.paragraphEvictionCount,
++        kDistinctLabels - kParagraphCacheLimit);
++  });
++
++  test('referenceWalk culls sub-threshold text at its own default', () {
++    // The third of Plan 3f's three named untested defaults, and the one still
++    // open. Two callers exist and neither closes it:
++    // `test/support/fixtures.dart:183` re-declares its own
++    // `minTextCapPixels = kMinTextCapPixels` and always passes it on, so the
++    // parameter is shadowed for anything routed through `referenceToRecording`
++    // — which is why this calls `referenceWalk` directly.
++    // `test/differential_test.dart:63` does call it bare, but asserts only
++    // `expect(sink.ops, isNotEmpty)`, which stays true at any threshold.
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++
++    final doc = DraftDocument.empty(measurer: measurer);
++    // 1.0 world unit at the unit camera is 1.0 px of cap height, a third of
++    // `kMinTextCapPixels`. Drawn beside a label that clears the threshold, so
++    // the walk is proved to be culling rather than simply drawing nothing.
++    addText(doc, doc.rootHandle, const Handle(1001), 'TINY', 40, 40, 1.0);
++    addText(doc, doc.rootHandle, const Handle(1002), 'BIG', 40, 200, 30.0);
++
++    final sink = RecordingDrawSink();
++    referenceWalk(
++        doc, sink, unitCamera(), kViewport, DocumentStyleResolver(doc));
++
++    final drawn = sink.ops.whereType<TextOp>().map((op) => op.text).toList();
++    expect(drawn, ['BIG'],
++        reason: 'TINY is 1 px of cap height against a 3.0 px default');
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/rig/rig_support.dart b/packages/jet_cad_2d_flutter/test/rig/rig_support.dart
+index 66f7570..1bf6e5e 100644
+--- a/packages/jet_cad_2d_flutter/test/rig/rig_support.dart
++++ b/packages/jet_cad_2d_flutter/test/rig/rig_support.dart
+@@ -1,23 +1,24 @@
+ // Shared corpus and camera helpers for the rigs. R1/R3 (`paint_microbench_test.dart`)
+ // and the Task 4 spike (`batch_spike_test.dart`) both need the same document
+ // and the same cameras — a spike measured on a different corpus than the rig
+ // it is compared against measures nothing.
+ 
+-import 'dart:typed_data';
+ import 'dart:ui';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d/testing.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+ 
++export '../support/text_key_sink.dart';
++
+ const Size kRigViewport = Size(1600, 1200);
+ 
+ /// Root instances per document, held fixed across both entity counts.
+ ///
+ /// **Not the plan's `definitionCount: entityCount ~/ 25`.** That asks for
+ /// 20,000 definitions and 500,000 root instances at the large size, and the
+ /// document never finishes building: `DocumentTree._link` scans and copies the
+ /// parent's `children` list on every add, so filling one parent is quadratic in
+ /// its child count. Measured on this machine, at 50,000 entities: 6,250
+ /// instances 236 ms, 12,500 → 532 ms, 25,000 → 2,684 ms, 50,000 → 15,767 ms —
+@@ -87,81 +88,10 @@ DraftDocument textRigCorpus(int entityCount,
+       mirroredFraction: 0.1,
+       nonUniformFraction: 0.2,
+       groupCount: 50,
+       layerCount: 8,
+       byBlockFraction: 0.3,
+       dashedFraction: 0.35,
+       labelFraction: 0.02,
+       attributedInstanceFraction: 0.2,
+       measurer: measurer,
+     );
+-
+-/// Counts the distinct `(string, styleHandle, argb)` triples a frame draws,
+-/// and nothing else.
+-///
+-/// That triple is `FlutterTextMeasurer`'s cache key. The number of *distinct*
+-/// ones visible at a camera is the number of entries the cache must hold for a
+-/// steady-state frame to lay nothing out, so it is what decides whether the
+-/// zero-new-layouts gate row is reachable at all — a count above
+-/// `kParagraphCacheLimit` makes that row unpassable by construction, no matter
+-/// how the painter behaves.
+-///
+-/// A [RecordingDrawSink] would answer the same question and would also
+-/// materialise every one of the frame's other ops; at 500,000 entities that is
+-/// the measurement changing what it measures.
+-class TextKeySink implements DrawSink {
+-  /// Draws per distinct key, so a hit rate can be taken as well as an entry
+-  /// count: `1 - keys/ops` is the fraction of this frame's text that a warm
+-  /// cache serves without laying anything out.
+-  final Map<(String, int, int), int> drawsPerKey = <(String, int, int), int>{};
+-  int textOps = 0;
+-
+-  Iterable<(String, int, int)> get keys => drawsPerKey.keys;
+-
+-  void reset() {
+-    drawsPerKey.clear();
+-    textOps = 0;
+-  }
+-
+-  /// True for a generated ATTRIB's tag, `ATTRnnnnn`.
+-  ///
+-  /// The corpus's two text sources have opposite cache behaviour by
+-  /// construction — 928 label entities share a twenty-word vocabulary, while
+-  /// every one of the 4,000 attributes carries a string built from its own
+-  /// instance ordinal — and separating those two distributions is, in the
+-  /// spec's words, the whole reason the corpus has both. The sink cannot see
+-  /// an entity's kind, so it classifies by the shape `_addInstanceAttribute`
+-  /// gives the tag. **The rig cross-checks the split against the entity-kind
+-  /// counts it takes from the document**, so this predicate is checked rather
+-  /// than assumed.
+-  static bool isAttributeTag(String text) =>
+-      text.length == 9 &&
+-      text.startsWith('ATTR') &&
+-      int.tryParse(text.substring(4)) != null;
+-
+-  @override
+-  void text(String text, Handle style, ResolvedStyle resolved) {
+-    final key = (text, style.value, resolved.argb);
+-    drawsPerKey[key] = (drawsPerKey[key] ?? 0) + 1;
+-    textOps++;
+-  }
+-
+-  @override
+-  void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {}
+-  @override
+-  void endResidual() {}
+-  @override
+-  void point(double x, double y, ResolvedStyle style) {}
+-  @override
+-  void polyline(Float64List points, int count, ResolvedStyle style,
+-      {required bool closed}) {}
+-  @override
+-  void circle(double cx, double cy, double r, ResolvedStyle style) {}
+-  @override
+-  void arc(double cx, double cy, double r, double start, double sweep,
+-      ResolvedStyle style) {}
+-  @override
+-  void fillPolygon(Float64List points, int count, Int32List triangles,
+-      ResolvedStyle style) {}
+-  @override
+-  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {}
+-}
+diff --git a/packages/jet_cad_2d_flutter/test/support/text_key_sink.dart b/packages/jet_cad_2d_flutter/test/support/text_key_sink.dart
+new file mode 100644
+index 0000000..e55fdc6
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/support/text_key_sink.dart
+@@ -0,0 +1,75 @@
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++/// Counts the distinct `(string, styleHandle, argb)` triples a frame draws,
++/// and nothing else.
++///
++/// That triple is `FlutterTextMeasurer`'s cache key. The number of *distinct*
++/// ones visible at a camera is the number of entries the cache must hold for a
++/// steady-state frame to lay nothing out, so it is what decides whether the
++/// zero-new-layouts gate row is reachable at all — a count above
++/// `kParagraphCacheLimit` makes that row unpassable by construction, no matter
++/// how the painter behaves.
++///
++/// A [RecordingDrawSink] would answer the same question and would also
++/// materialise every one of the frame's other ops; at 500,000 entities that is
++/// the measurement changing what it measures.
++class TextKeySink implements DrawSink {
++  /// Draws per distinct key, so a hit rate can be taken as well as an entry
++  /// count: `1 - keys/ops` is the fraction of this frame's text that a warm
++  /// cache serves without laying anything out.
++  final Map<(String, int, int), int> drawsPerKey = <(String, int, int), int>{};
++  int textOps = 0;
++
++  Iterable<(String, int, int)> get keys => drawsPerKey.keys;
++
++  void reset() {
++    drawsPerKey.clear();
++    textOps = 0;
++  }
++
++  /// True for a generated ATTRIB's tag, `ATTRnnnnn`.
++  ///
++  /// The corpus's two text sources have opposite cache behaviour by
++  /// construction — 928 label entities share a twenty-word vocabulary, while
++  /// every one of the 4,000 attributes carries a string built from its own
++  /// instance ordinal — and separating those two distributions is, in the
++  /// spec's words, the whole reason the corpus has both. The sink cannot see
++  /// an entity's kind, so it classifies by the shape `_addInstanceAttribute`
++  /// gives the tag. **The rig cross-checks the split against the entity-kind
++  /// counts it takes from the document**, so this predicate is checked rather
++  /// than assumed.
++  static bool isAttributeTag(String text) =>
++      text.length == 9 &&
++      text.startsWith('ATTR') &&
++      int.tryParse(text.substring(4)) != null;
++
++  @override
++  void text(String text, Handle style, ResolvedStyle resolved) {
++    final key = (text, style.value, resolved.argb);
++    drawsPerKey[key] = (drawsPerKey[key] ?? 0) + 1;
++    textOps++;
++  }
++
++  @override
++  void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {}
++  @override
++  void endResidual() {}
++  @override
++  void point(double x, double y, ResolvedStyle style) {}
++  @override
++  void polyline(Float64List points, int count, ResolvedStyle style,
++      {required bool closed}) {}
++  @override
++  void circle(double cx, double cy, double r, ResolvedStyle style) {}
++  @override
++  void arc(double cx, double cy, double r, double start, double sweep,
++      ResolvedStyle style) {}
++  @override
++  void fillPolygon(Float64List points, int count, Int32List triangles,
++      ResolvedStyle style) {}
++  @override
++  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {}
++}

@@ -1,0 +1,368 @@
+# Review package: 03bc025..a5ff5db
+
+## Commits
+a5ff5db test: the text cache's default bounds become an always-on gate
+
+## Files changed
+ .../invariants/text_cache_invariants_test.dart     | 157 +++++++++++++++++++++
+ .../jet_cad_2d_flutter/test/rig/rig_support.dart   |  74 +---------
+ .../test/support/text_key_sink.dart                |  75 ++++++++++
+ 3 files changed, 234 insertions(+), 72 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/text_cache_invariants_test.dart b/packages/jet_cad_2d_flutter/test/invariants/text_cache_invariants_test.dart
+new file mode 100644
+index 0000000..f8474af
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/invariants/text_cache_invariants_test.dart
+@@ -0,0 +1,157 @@
++// The structural half of what `test/rig/paint_microbench_test.dart` prints.
++//
++// The rig measures at realistic scale and prints; those numbers depend on
++// machine load and a rig that fails the build on a slow machine teaches people
++// to ignore it. **These numbers do not.** Cache occupancy, eviction counts and
++// op counts are a function of the document, the camera and the code — the same
++// integers on every machine — so they can be a gate, and they are sized by the
++// bound under test rather than by realism.
++//
++// Plan 3f's mutant 7 (`metricsLimit` defaulting to `kParagraphCacheLimit`)
++// passed all 297 tests in the suite it shipped with. Nine of the twelve
++// constructions in `flutter_text_measurer_test.dart` are already bare, so bare
++// construction was never the missing half: **no test in that file ever pushed
++// past 512 distinct metrics keys**, so nothing it asserted was sensitive to
++// `metricsLimit` at any value. This file supplies the other half.
++
++import 'dart:ui';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import '../support/fixtures.dart';
++
++/// More distinct keys than `kParagraphCacheLimit` (512) and fewer than
++/// `kMetricsCacheLimit` (8192). 600 sits between the two bounds, which is the
++/// only property that matters: at 512 or below no value of either limit
++/// changes an answer.
++const int kDistinctLabels = 600;
++
++/// Cap height in world units. At the camera below, world units are screen
++/// pixels, so this is 8 px against a `kMinTextCapPixels` of 3.0 — a 2.67x
++/// margin, and `culledTextCount == 0` is asserted rather than assumed.
++const double kLabelHeight = 8.0;
++
++/// World == screen, y flipped, no margin.
++///
++/// **Not `ViewportTransform.fit`.** `fit` applies a 0.95 margin, and deriving
++/// an expected on-screen cap height through it is what cost Plan 3f two tasks.
++/// At scale 1.0 the level-of-detail arithmetic is `8.0 >= 3.0` and there is
++/// nothing to get wrong.
++ViewportTransform unitCamera() => ViewportTransform(
++    worldToScreenMatrix: Transform2(1, 0, 0, -1, 0, kViewport.height));
++
++/// 600 labels, every string distinct, laid out on a grid that fits inside
++/// [kViewport] so none of them culls by bounds.
++///
++/// 25 columns x 24 rows on a 30 x 24 pixel cell: a four-character label at 8 px
++/// cap height is roughly 18 px wide, so nothing leaves its cell and nothing
++/// leaves the viewport.
++DraftDocument sixHundredLabels(FlutterTextMeasurer measurer) {
++  final doc = DraftDocument.empty(measurer: measurer);
++  for (var i = 0; i < kDistinctLabels; i++) {
++    final column = i % 25;
++    final row = i ~/ 25;
++    addText(
++      doc,
++      doc.rootHandle,
++      Handle(1000 + i),
++      // Distinct by construction: 600 strings, 600 keys.
++      'L${i.toString().padLeft(3, '0')}',
++      column * 30.0 + 4,
++      row * 24.0 + 8,
++      kLabelHeight,
++    );
++  }
++  return doc;
++}
++
++void main() {
++  test('the default cache bounds hold 600 distinct keys the way they claim',
++      () {
++    // Bare. Both limits are what is under test, so neither may be supplied.
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++
++    final doc = sixHundredLabels(measurer);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    // The baseline, stated rather than assumed: `doc.extents` measures text
++    // through `entityBounds`, so building the document and the index has
++    // already warmed the *metrics* map with all 600 keys. That is harmless for
++    // the four counters below — the same 600 keys, still no evictions — but it
++    // is why `layoutCount` is deliberately not asserted here. Plan 3f's Task 5
++    // lost a round to exactly this warm-up.
++    expect(doc.extents.isEmpty, isFalse,
++        reason: 'the fixture must have measurable text');
++
++    // `CanvasDrawSink` over a real `Canvas`, and nothing else will do:
++    // `paragraphFor` has one production caller and this is it. A
++    // `RecordingDrawSink` or a `TextKeySink` would leave `liveParagraphCount`
++    // at zero while reporting `textOpCount == 600`.
++    final recorder = PictureRecorder();
++    final sink = CanvasDrawSink(
++      canvas: Canvas(recorder),
++      pixelsPerPaperMm: kLogicalPixelsPerMm,
++      measurer: measurer,
++      textStyleOf: doc.textStyleOf,
++    );
++    final painter = DraftPainter(
++      document: doc,
++      index: index,
++      resolver: DocumentStyleResolver(doc),
++    );
++
++    painter.paint(sink, unitCamera(), kViewport);
++    // A `Picture` holds native memory past the Dart object. Leaving one alive
++    // is the "moved the leak" shape Plan 3f's own rule was written against.
++    recorder.endRecording().dispose();
++
++    // The fixture proves it drew what it claims before any cache number is
++    // read: a level-of-detail cull would produce a smaller, self-consistent,
++    // wrong set of counts.
++    expect(painter.textOpCount, kDistinctLabels);
++    expect(painter.culledTextCount, 0);
++    expect(painter.skippedTextCount, 0);
++
++    // The metrics map is bounded at 8192 and holds all 600.
++    expect(measurer.liveMetricsCount, kDistinctLabels);
++    expect(measurer.metricsEvictionCount, 0);
++
++    // The paragraph map is bounded at 512, so 600 inserts leave 512 live and
++    // evict 88. Eviction is one-per-insert once full.
++    expect(measurer.liveParagraphCount, kParagraphCacheLimit);
++    expect(measurer.paragraphEvictionCount,
++        kDistinctLabels - kParagraphCacheLimit);
++  });
++
++  test('referenceWalk culls sub-threshold text at its own default', () {
++    // The third of Plan 3f's three named untested defaults, and the one still
++    // open. Two callers exist and neither closes it:
++    // `test/support/fixtures.dart:184` re-declares its own
++    // `minTextCapPixels = kMinTextCapPixels` and always passes it on, so the
++    // parameter is shadowed for anything routed through `referenceToRecording`
++    // — which is why this calls `referenceWalk` directly.
++    // `test/differential_test.dart:63` does call it bare, but asserts only
++    // `expect(sink.ops, isNotEmpty)`, which stays true at any threshold.
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++
++    final doc = DraftDocument.empty(measurer: measurer);
++    // 1.0 world unit at the unit camera is 1.0 px of cap height, a third of
++    // `kMinTextCapPixels`. Drawn beside a label that clears the threshold, so
++    // the walk is proved to be culling rather than simply drawing nothing.
++    addText(doc, doc.rootHandle, const Handle(1001), 'TINY', 40, 40, 1.0);
++    addText(doc, doc.rootHandle, const Handle(1002), 'BIG', 40, 200, 30.0);
++
++    final sink = RecordingDrawSink();
++    referenceWalk(
++        doc, sink, unitCamera(), kViewport, DocumentStyleResolver(doc));
++
++    final drawn = sink.ops.whereType<TextOp>().map((op) => op.text).toList();
++    expect(drawn, ['BIG'],
++        reason: 'TINY is 1 px of cap height against a 3.0 px default');
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/rig/rig_support.dart b/packages/jet_cad_2d_flutter/test/rig/rig_support.dart
+index 66f7570..1bf6e5e 100644
+--- a/packages/jet_cad_2d_flutter/test/rig/rig_support.dart
++++ b/packages/jet_cad_2d_flutter/test/rig/rig_support.dart
+@@ -1,23 +1,24 @@
+ // Shared corpus and camera helpers for the rigs. R1/R3 (`paint_microbench_test.dart`)
+ // and the Task 4 spike (`batch_spike_test.dart`) both need the same document
+ // and the same cameras — a spike measured on a different corpus than the rig
+ // it is compared against measures nothing.
+ 
+-import 'dart:typed_data';
+ import 'dart:ui';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d/testing.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+ 
++export '../support/text_key_sink.dart';
++
+ const Size kRigViewport = Size(1600, 1200);
+ 
+ /// Root instances per document, held fixed across both entity counts.
+ ///
+ /// **Not the plan's `definitionCount: entityCount ~/ 25`.** That asks for
+ /// 20,000 definitions and 500,000 root instances at the large size, and the
+ /// document never finishes building: `DocumentTree._link` scans and copies the
+ /// parent's `children` list on every add, so filling one parent is quadratic in
+ /// its child count. Measured on this machine, at 50,000 entities: 6,250
+ /// instances 236 ms, 12,500 → 532 ms, 25,000 → 2,684 ms, 50,000 → 15,767 ms —
+@@ -87,81 +88,10 @@ DraftDocument textRigCorpus(int entityCount,
+       mirroredFraction: 0.1,
+       nonUniformFraction: 0.2,
+       groupCount: 50,
+       layerCount: 8,
+       byBlockFraction: 0.3,
+       dashedFraction: 0.35,
+       labelFraction: 0.02,
+       attributedInstanceFraction: 0.2,
+       measurer: measurer,
+     );
+-
+-/// Counts the distinct `(string, styleHandle, argb)` triples a frame draws,
+-/// and nothing else.
+-///
+-/// That triple is `FlutterTextMeasurer`'s cache key. The number of *distinct*
+-/// ones visible at a camera is the number of entries the cache must hold for a
+-/// steady-state frame to lay nothing out, so it is what decides whether the
+-/// zero-new-layouts gate row is reachable at all — a count above
+-/// `kParagraphCacheLimit` makes that row unpassable by construction, no matter
+-/// how the painter behaves.
+-///
+-/// A [RecordingDrawSink] would answer the same question and would also
+-/// materialise every one of the frame's other ops; at 500,000 entities that is
+-/// the measurement changing what it measures.
+-class TextKeySink implements DrawSink {
+-  /// Draws per distinct key, so a hit rate can be taken as well as an entry
+-  /// count: `1 - keys/ops` is the fraction of this frame's text that a warm
+-  /// cache serves without laying anything out.
+-  final Map<(String, int, int), int> drawsPerKey = <(String, int, int), int>{};
+-  int textOps = 0;
+-
+-  Iterable<(String, int, int)> get keys => drawsPerKey.keys;
+-
+-  void reset() {
+-    drawsPerKey.clear();
+-    textOps = 0;
+-  }
+-
+-  /// True for a generated ATTRIB's tag, `ATTRnnnnn`.
+-  ///
+-  /// The corpus's two text sources have opposite cache behaviour by
+-  /// construction — 928 label entities share a twenty-word vocabulary, while
+-  /// every one of the 4,000 attributes carries a string built from its own
+-  /// instance ordinal — and separating those two distributions is, in the
+-  /// spec's words, the whole reason the corpus has both. The sink cannot see
+-  /// an entity's kind, so it classifies by the shape `_addInstanceAttribute`
+-  /// gives the tag. **The rig cross-checks the split against the entity-kind
+-  /// counts it takes from the document**, so this predicate is checked rather
+-  /// than assumed.
+-  static bool isAttributeTag(String text) =>
+-      text.length == 9 &&
+-      text.startsWith('ATTR') &&
+-      int.tryParse(text.substring(4)) != null;
+-
+-  @override
+-  void text(String text, Handle style, ResolvedStyle resolved) {
+-    final key = (text, style.value, resolved.argb);
+-    drawsPerKey[key] = (drawsPerKey[key] ?? 0) + 1;
+-    textOps++;
+-  }
+-
+-  @override
+-  void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {}
+-  @override
+-  void endResidual() {}
+-  @override
+-  void point(double x, double y, ResolvedStyle style) {}
+-  @override
+-  void polyline(Float64List points, int count, ResolvedStyle style,
+-      {required bool closed}) {}
+-  @override
+-  void circle(double cx, double cy, double r, ResolvedStyle style) {}
+-  @override
+-  void arc(double cx, double cy, double r, double start, double sweep,
+-      ResolvedStyle style) {}
+-  @override
+-  void fillPolygon(Float64List points, int count, Int32List triangles,
+-      ResolvedStyle style) {}
+-  @override
+-  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {}
+-}
+diff --git a/packages/jet_cad_2d_flutter/test/support/text_key_sink.dart b/packages/jet_cad_2d_flutter/test/support/text_key_sink.dart
+new file mode 100644
+index 0000000..e55fdc6
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/support/text_key_sink.dart
+@@ -0,0 +1,75 @@
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++/// Counts the distinct `(string, styleHandle, argb)` triples a frame draws,
++/// and nothing else.
++///
++/// That triple is `FlutterTextMeasurer`'s cache key. The number of *distinct*
++/// ones visible at a camera is the number of entries the cache must hold for a
++/// steady-state frame to lay nothing out, so it is what decides whether the
++/// zero-new-layouts gate row is reachable at all — a count above
++/// `kParagraphCacheLimit` makes that row unpassable by construction, no matter
++/// how the painter behaves.
++///
++/// A [RecordingDrawSink] would answer the same question and would also
++/// materialise every one of the frame's other ops; at 500,000 entities that is
++/// the measurement changing what it measures.
++class TextKeySink implements DrawSink {
++  /// Draws per distinct key, so a hit rate can be taken as well as an entry
++  /// count: `1 - keys/ops` is the fraction of this frame's text that a warm
++  /// cache serves without laying anything out.
++  final Map<(String, int, int), int> drawsPerKey = <(String, int, int), int>{};
++  int textOps = 0;
++
++  Iterable<(String, int, int)> get keys => drawsPerKey.keys;
++
++  void reset() {
++    drawsPerKey.clear();
++    textOps = 0;
++  }
++
++  /// True for a generated ATTRIB's tag, `ATTRnnnnn`.
++  ///
++  /// The corpus's two text sources have opposite cache behaviour by
++  /// construction — 928 label entities share a twenty-word vocabulary, while
++  /// every one of the 4,000 attributes carries a string built from its own
++  /// instance ordinal — and separating those two distributions is, in the
++  /// spec's words, the whole reason the corpus has both. The sink cannot see
++  /// an entity's kind, so it classifies by the shape `_addInstanceAttribute`
++  /// gives the tag. **The rig cross-checks the split against the entity-kind
++  /// counts it takes from the document**, so this predicate is checked rather
++  /// than assumed.
++  static bool isAttributeTag(String text) =>
++      text.length == 9 &&
++      text.startsWith('ATTR') &&
++      int.tryParse(text.substring(4)) != null;
++
++  @override
++  void text(String text, Handle style, ResolvedStyle resolved) {
++    final key = (text, style.value, resolved.argb);
++    drawsPerKey[key] = (drawsPerKey[key] ?? 0) + 1;
++    textOps++;
++  }
++
++  @override
++  void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {}
++  @override
++  void endResidual() {}
++  @override
++  void point(double x, double y, ResolvedStyle style) {}
++  @override
++  void polyline(Float64List points, int count, ResolvedStyle style,
++      {required bool closed}) {}
++  @override
++  void circle(double cx, double cy, double r, ResolvedStyle style) {}
++  @override
++  void arc(double cx, double cy, double r, double start, double sweep,
++      ResolvedStyle style) {}
++  @override
++  void fillPolygon(Float64List points, int count, Int32List triangles,
++      ResolvedStyle style) {}
++  @override
++  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {}
++}

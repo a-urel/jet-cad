@@ -1,0 +1,75 @@
+# Review package: a5ff5db..e39f295
+
+## Commits
+e39f295 test: narrow a false claim in the text-cache invariants header
+
+## Files changed
+ .../test/invariants/text_cache_invariants_test.dart   | 19 +++++++++++++------
+ 1 file changed, 13 insertions(+), 6 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/text_cache_invariants_test.dart b/packages/jet_cad_2d_flutter/test/invariants/text_cache_invariants_test.dart
+index f8474af..ac7f823 100644
+--- a/packages/jet_cad_2d_flutter/test/invariants/text_cache_invariants_test.dart
++++ b/packages/jet_cad_2d_flutter/test/invariants/text_cache_invariants_test.dart
+@@ -1,25 +1,32 @@
+ // The structural half of what `test/rig/paint_microbench_test.dart` prints.
+ //
+ // The rig measures at realistic scale and prints; those numbers depend on
+ // machine load and a rig that fails the build on a slow machine teaches people
+ // to ignore it. **These numbers do not.** Cache occupancy, eviction counts and
+ // op counts are a function of the document, the camera and the code — the same
+ // integers on every machine — so they can be a gate, and they are sized by the
+ // bound under test rather than by realism.
+ //
+ // Plan 3f's mutant 7 (`metricsLimit` defaulting to `kParagraphCacheLimit`)
+-// passed all 297 tests in the suite it shipped with. Nine of the twelve
+-// constructions in `flutter_text_measurer_test.dart` are already bare, so bare
+-// construction was never the missing half: **no test in that file ever pushed
+-// past 512 distinct metrics keys**, so nothing it asserted was sensitive to
+-// `metricsLimit` at any value. This file supplies the other half.
++// passed all 297 tests in the suite it was fired against. Nine of the twelve
++// constructions in `flutter_text_measurer_test.dart` were already bare, so
++// bare construction was never the missing half. Plan 3f's remedy
++// (`645b027`) closed one side of it: a bare measurer swept past 512
++// distinct strings through `measure()` and pinned `metricsEvictionCount`.
++// That test never calls `paragraphFor`, never runs a painter, and asserts
++// `liveParagraphCount == 0` outright — it closes the metrics half and
++// leaves the paragraph half exactly as untested as before. This file
++// closes that half: a real paint through `CanvasDrawSink` fills both maps
++// at once, and the 600-into-512 eviction arithmetic is pinned
++// behaviourally rather than restated. Firing mutant 7 again reddens both
++// files, each from its own side of the cache.
+ 
+ import 'dart:ui';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import '../support/fixtures.dart';
+ 
+ /// More distinct keys than `kParagraphCacheLimit` (512) and fewer than
+@@ -123,21 +130,21 @@ void main() {
+     // The paragraph map is bounded at 512, so 600 inserts leave 512 live and
+     // evict 88. Eviction is one-per-insert once full.
+     expect(measurer.liveParagraphCount, kParagraphCacheLimit);
+     expect(measurer.paragraphEvictionCount,
+         kDistinctLabels - kParagraphCacheLimit);
+   });
+ 
+   test('referenceWalk culls sub-threshold text at its own default', () {
+     // The third of Plan 3f's three named untested defaults, and the one still
+     // open. Two callers exist and neither closes it:
+-    // `test/support/fixtures.dart:184` re-declares its own
++    // `test/support/fixtures.dart:183` re-declares its own
+     // `minTextCapPixels = kMinTextCapPixels` and always passes it on, so the
+     // parameter is shadowed for anything routed through `referenceToRecording`
+     // — which is why this calls `referenceWalk` directly.
+     // `test/differential_test.dart:63` does call it bare, but asserts only
+     // `expect(sink.ops, isNotEmpty)`, which stays true at any threshold.
+     final measurer = FlutterTextMeasurer();
+     addTearDown(measurer.clear);
+ 
+     final doc = DraftDocument.empty(measurer: measurer);
+     // 1.0 world unit at the unit camera is 1.0 px of cap height, a third of

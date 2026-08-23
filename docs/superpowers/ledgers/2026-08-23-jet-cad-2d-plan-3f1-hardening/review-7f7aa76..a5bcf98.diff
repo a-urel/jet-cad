@@ -1,0 +1,122 @@
+# Review package: 7f7aa76..a5bcf98
+
+## Commits
+a5bcf98 fix: StyleContext.linetypeScale reaches the drawing
+
+## Files changed
+ .../lib/src/document/style_resolver.dart           | 14 +++++++--
+ .../test/document/instance_style_test.dart         | 35 ++++++++++++++++++++++
+ 2 files changed, 47 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/document/style_resolver.dart b/packages/jet_cad_2d/lib/src/document/style_resolver.dart
+index 5f84541..3ab7106 100644
+--- a/packages/jet_cad_2d/lib/src/document/style_resolver.dart
++++ b/packages/jet_cad_2d/lib/src/document/style_resolver.dart
+@@ -78,21 +78,25 @@ class DocumentStyleResolver implements StyleResolver {
+     // new defect; fixing the entity side is a separate change.
+     final linetype = node.linetype == ReservedHandles.byBlockLinetype
+         ? inherited.linetype
+         : node.linetype == ReservedHandles.byLayerLinetype
+             ? (record?.linetype ?? inherited.linetype)
+             : node.linetype;
+ 
+     return StyleContext(
+       color: color,
+       linetype: linetype,
+-      linetypeScale: inherited.linetypeScale,
++      // Multiplies, never substitutes. DXF's rule for a nested entity's
++      // effective linetype scale is a product, so nesting composes without a
++      // special case for depth: entity x every enclosing INSERT x the header's
++      // global scale, which `DraftPainter` applies at the far end.
++      linetypeScale: inherited.linetypeScale * node.linetypeScale,
+       lineweight: lineweight,
+       transparency: transparency,
+       layer: layer,
+     );
+   }
+ 
+   @override
+   ResolvedStyle styleFor(int slot, StyleContext ctx) {
+     final entityLayer = document.entities.layerAt(slot);
+     // The layer-0 rule is SUBSTITUTION, not deferral: an entity on layer 0
+@@ -133,21 +137,27 @@ class DocumentStyleResolver implements StyleResolver {
+         ? ctx.linetype
+         : lt == ReservedHandles.byLayerLinetype
+             ? (record?.linetype ?? ctx.linetype)
+             : lt;
+ 
+     return ResolvedStyle(
+       argb: ((255 - transparency.clamp(0, 255)) << 24) | _rgbOf(color),
+       lineweightHundredths:
+           lineweight == kLineweightDefault ? ctx.lineweight : lineweight,
+       linetype: linetype,
+-      linetypeScale: document.entities.linetypeScaleAt(slot),
++      // Before Plan 3f.1 this read `document.entities.linetypeScaleAt(slot)`
++      // alone. `StyleContext.linetypeScale` was constructed, copied, compared
++      // and hashed, and no code path read it to produce a drawing — and no
++      // test could tell, because every linetypeScale literal in the repository
++      // was 1.0, the multiplicative identity.
++      linetypeScale:
++          ctx.linetypeScale * document.entities.linetypeScaleAt(slot),
+     );
+   }
+ 
+   int _concreteLayerColor(LayerRecord? record, StyleContext ctx) {
+     if (record == null) return ctx.color;
+     final encoded = encodeColor(record.color);
+     // A layer whose own colour is BYLAYER or BYBLOCK is malformed; the context
+     // is the only defined answer left.
+     return (encoded == kByLayer || encoded == kByBlock) ? ctx.color : encoded;
+   }
+diff --git a/packages/jet_cad_2d/test/document/instance_style_test.dart b/packages/jet_cad_2d/test/document/instance_style_test.dart
+index 77f3a2e..a8bf184 100644
+--- a/packages/jet_cad_2d/test/document/instance_style_test.dart
++++ b/packages/jet_cad_2d/test/document/instance_style_test.dart
+@@ -242,11 +242,46 @@ void main() {
+       final def = addDefinition(doc, const Handle(200), 'BOLT');
+       final child = addByBlockLine(doc, def, const Handle(201));
+       addInstance(doc, const Handle(300), def,
+           layer: const Handle(100), lineweight: kByLayer);
+ 
+       expect(
+           resolveThrough(doc, [const Handle(300)], child).lineweightHundredths,
+           25);
+     });
+   });
++
++  group('linetypeScale multiplies down the tree', () {
++    test('entity 2.0 x inner 4.0 x outer 8.0 resolves to exactly 64.0', () {
++      final doc = DraftDocument.empty();
++      final inner = addDefinition(doc, const Handle(200), 'BOLT');
++      final outer = addDefinition(doc, const Handle(210), 'PLATE');
++      final child =
++          addByBlockLine(doc, inner, const Handle(201), linetypeScale: 2.0);
++      addInstance(doc, const Handle(300), outer, linetypeScale: 8.0);
++      addInstance(doc, const Handle(310), inner,
++          parent: const Handle(210), linetypeScale: 4.0);
++
++      // Exact. Every factor is a power of two, so the product is
++      // representable and `Tolerance` would only hide a wrong answer.
++      expect(
++          resolveThrough(doc, [const Handle(300), const Handle(310)], child)
++              .linetypeScale,
++          64.0);
++    });
++
++    test('an INSERT at 1.0 leaves its child alone', () {
++      // The default's no-op property, asserted rather than assumed: this is
++      // what makes every pre-3f.1 document resolve unchanged. The entity's own
++      // scale is still 2.0, never 1.0 -- the identity on both sides would
++      // prove nothing.
++      final doc = DraftDocument.empty();
++      final def = addDefinition(doc, const Handle(200), 'BOLT');
++      final child =
++          addByBlockLine(doc, def, const Handle(201), linetypeScale: 2.0);
++      addInstance(doc, const Handle(300), def);
++
++      expect(
++          resolveThrough(doc, [const Handle(300)], child).linetypeScale, 2.0);
++    });
++  });
+ }

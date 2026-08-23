@@ -1,0 +1,399 @@
+# Review package: c078677..25b9873
+
+## Commits
+25b9873 feat: InstanceNode carries the four style fields StyleContext needs
+
+## Files changed
+ .../jet_cad_2d/lib/src/codec/schema_version.dart   | 11 +++-
+ packages/jet_cad_2d/lib/src/document/node.dart     | 77 +++++++++++++++++++++-
+ .../test/codec/instance_style_codec_test.dart      | 77 ++++++++++++++++++++++
+ .../jet_cad_2d/test/codec/json_codec_test.dart     | 13 ++--
+ .../test/testing/generate_document_test.dart       | 15 +++--
+ 5 files changed, 180 insertions(+), 13 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/codec/schema_version.dart b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+index 60aacd7..c663d35 100644
+--- a/packages/jet_cad_2d/lib/src/codec/schema_version.dart
++++ b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+@@ -4,22 +4,29 @@
+ /// previous value. An unversioned document is not readable: guessing at the
+ /// shape of a file that never declared one is how silent corruption starts.
+ ///
+ /// 4: `EntityRecord.toJson` gained `text`, `tag`, `textStyle` and
+ /// `textAttrs`; `EntityRecord.fromJson` defaults all four when absent, which
+ /// is the whole of the v3->v4 migration.
+ ///
+ /// 5: `EntityKind.fill`. The JSON shape is unchanged -- a fill is an ordinary
+ /// entity and `kind` is written by name -- but a v4 reader must refuse a
+ /// document containing one rather than fail inside `EntityKind.values.byName`,
+-/// and the version check at `json_codec.dart:103` is what makes it.
+-const int kSchemaVersion = 5;
++/// and the version check at `json_codec.dart:104` is what makes it.
++///
++/// 6: `InstanceNode.toJson` gained `lineweight`, `transparency`, `linetype`
++/// and `linetypeScale`; `fromJson` defaults all four to their no-op values
++/// (BYBLOCK, BYBLOCK, BYBLOCK-linetype, 1.0) when absent, which is the whole
++/// of the v5->v6 migration. The bump exists for the **reader**: without it a
++/// v5 build would load a v6 file, silently drop four fields, and render a
++/// different drawing. With it, that build refuses the file and says why.
++const int kSchemaVersion = 6;
+ 
+ class SchemaVersionError implements Exception {
+   final Object? found;
+   const SchemaVersionError(this.found);
+ 
+   @override
+   String toString() => found == null
+       ? 'SchemaVersionError: document has no schemaVersion'
+       : 'SchemaVersionError: unsupported schemaVersion $found '
+           '(this build writes $kSchemaVersion)';
+diff --git a/packages/jet_cad_2d/lib/src/document/node.dart b/packages/jet_cad_2d/lib/src/document/node.dart
+index bd4c817..64a7aca 100644
+--- a/packages/jet_cad_2d/lib/src/document/node.dart
++++ b/packages/jet_cad_2d/lib/src/document/node.dart
+@@ -155,92 +155,163 @@ final class InstanceNode extends Node {
+   final Handle layer;
+ 
+   /// This instance's own colour, imposed on its definition's BYBLOCK contents.
+   ///
+   /// `ByBlockColor` — the default — means "inherit from whatever places me",
+   /// which for a root-level instance is the document context. This field is how
+   /// 500 tables share one geometry and render in 500 colours, and it
+   /// round-trips to DXF losslessly.
+   final DraftColor color;
+ 
++  /// This instance's own lineweight, imposed on its definition's BYBLOCK
++  /// contents.
++  ///
++  /// Encoded exactly as `EntityRecord.lineweight` is — `kByBlock` (the
++  /// default), `kByLayer`, `kLineweightDefault`, or a concrete value in
++  /// 1/100 mm. A second encoding for the same concept would be a second thing
++  /// to keep in step, and `DocumentStyleResolver` would need two switches
++  /// where it now needs one shape.
++  final int lineweight;
++
++  /// 0..255, or `kByBlock` (the default) or `kByLayer`. Same encoding as
++  /// `EntityRecord.transparency`.
++  final int transparency;
++
++  /// `ReservedHandles.byBlockLinetype` (the default),
++  /// `ReservedHandles.byLayerLinetype`, or a concrete linetype handle. Same
++  /// encoding as `EntityRecord.linetype`.
++  final Handle linetype;
++
++  /// **Multiplies; it does not substitute.**
++  ///
++  /// DXF's rule for a nested entity's effective linetype scale is a product,
++  /// not an override, so an entity inside two INSERTs is scaled by both and by
++  /// the header's global scale. The other three fields above answer "which
++  /// value wins"; this one answers "by how much", and there is no sentinel
++  /// because there is nothing to defer to — `1.0` already means "impose
++  /// nothing".
++  final double linetypeScale;
++
+   const InstanceNode({
+     required super.handle,
+     required super.parent,
+     required super.transform,
+     required this.definition,
+     required this.layer,
+     this.color = const ByBlockColor(),
++    this.lineweight = kByBlock,
++    this.transparency = kByBlock,
++    this.linetype = ReservedHandles.byBlockLinetype,
++    this.linetypeScale = 1.0,
+     super.visible = true,
+   });
+ 
+   InstanceNode copyWith({
+     Handle? handle,
+     Handle? parent,
+     Transform2? transform,
+     bool? visible,
+     Handle? definition,
+     Handle? layer,
+     DraftColor? color,
++    int? lineweight,
++    int? transparency,
++    Handle? linetype,
++    double? linetypeScale,
+   }) =>
+       InstanceNode(
+         handle: handle ?? this.handle,
+         parent: parent ?? this.parent,
+         transform: transform ?? this.transform,
+         visible: visible ?? this.visible,
+         definition: definition ?? this.definition,
+         layer: layer ?? this.layer,
+         color: color ?? this.color,
++        lineweight: lineweight ?? this.lineweight,
++        transparency: transparency ?? this.transparency,
++        linetype: linetype ?? this.linetype,
++        linetypeScale: linetypeScale ?? this.linetypeScale,
+       );
+ 
+   @override
+   Map<String, Object?> toJson() => {
+         'type': 'instance',
+         'handle': handle.toJson(),
+         'parent': parent.toJson(),
+         'transform': transform.toJson(),
+         'visible': visible,
+         'definition': definition.toJson(),
+         'layer': layer.toJson(),
+         'color': encodeColor(color),
++        'lineweight': lineweight,
++        'transparency': transparency,
++        'linetype': linetype.toJson(),
++        'linetypeScale': linetypeScale,
+       };
+ 
+   static InstanceNode fromJson(Map<String, Object?> json) => InstanceNode(
+         handle: Handle.fromJson(json['handle']),
+         parent: Handle.fromJson(json['parent']),
+         transform: Transform2.fromJson(json['transform']),
+         visible: json['visible']! as bool,
+         definition: Handle.fromJson(json['definition']),
+         layer: Handle.fromJson(json['layer']),
+         // Absent in files written before this field existed: BYBLOCK is the
+         // correct default because it is a no-op — it reproduces the old
+         // behaviour, where a placed instance imposed nothing on its
+         // definition's colour, exactly.
+         color: json['color'] == null
+             ? const ByBlockColor()
+             : decodeColor(json['color']! as int),
++        // Absent in v5 and earlier. BYBLOCK for the three sentinel fields and
++        // 1.0 for the scale are the correct defaults for the same reason
++        // BYBLOCK was correct for `color`: they are no-ops. `contextFor`
++        // reduces to the pass-through it performed before this field existed,
++        // so a v5 document resolves bit-identically under a v6 build.
++        //
++        // BYLAYER would not be a no-op. It would make every pre-3f.1 INSERT
++        // start imposing its layer's linetype on its definition's BYBLOCK
++        // contents, silently changing how existing drawings render.
++        lineweight:
++            json['lineweight'] == null ? kByBlock : json['lineweight']! as int,
++        transparency: json['transparency'] == null
++            ? kByBlock
++            : json['transparency']! as int,
++        linetype: json['linetype'] == null
++            ? ReservedHandles.byBlockLinetype
++            : Handle.fromJson(json['linetype']),
++        linetypeScale: json['linetypeScale'] == null
++            ? 1.0
++            : (json['linetypeScale']! as num).toDouble(),
+       );
+ 
+   @override
+   bool operator ==(Object other) =>
+       other is InstanceNode &&
+       other.handle == handle &&
+       other.parent == parent &&
+       other.transform
+           .equals(transform, const Tolerance(linear: 0, angular: 0)) &&
+       other.visible == visible &&
+       other.definition == definition &&
+       other.layer == layer &&
+-      other.color == color;
++      other.color == color &&
++      other.lineweight == lineweight &&
++      other.transparency == transparency &&
++      other.linetype == linetype &&
++      // Exact, not tolerant: a stored value, and Plan 3g will key a picture
++      // cache on it.
++      other.linetypeScale == linetypeScale;
+ 
+   @override
+-  int get hashCode =>
+-      Object.hash(handle, parent, visible, definition, layer, color);
++  int get hashCode => Object.hash(handle, parent, visible, definition, layer,
++      color, lineweight, transparency, linetype, linetypeScale);
+ 
+   @override
+   String toString() =>
+       'InstanceNode(${handle.toHex()} of ${definition.toHex()})';
+ }
+ 
+ /// A reusable prototype subtree — DXF BLOCK, IFC type object.
+ ///
+ /// Not a [Node]: a prototype is not placed, so it has no parent and no
+ /// transform. [basePoint] is DXF's block base point; insertion alignment is
+diff --git a/packages/jet_cad_2d/test/codec/instance_style_codec_test.dart b/packages/jet_cad_2d/test/codec/instance_style_codec_test.dart
+new file mode 100644
+index 0000000..66a6d05
+--- /dev/null
++++ b/packages/jet_cad_2d/test/codec/instance_style_codec_test.dart
+@@ -0,0 +1,77 @@
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++
++/// A placement whose four style fields are all non-default.
++///
++/// Every value is chosen to differ from the field's own default, from
++/// `StyleContext.documentRoot`'s value, and from every other field's value —
++/// so a round-trip that transposes two keys, or drops one to its default,
++/// lands on a number no assertion here expects. `linetypeScale` is 4.0 and
++/// not 1.0: this plan's anti-degenerate rule forbids the identity, because
++/// the identity is what hid the severed channel for fifty-four fixtures.
++InstanceNode styledInstance() => InstanceNode(
++      handle: const Handle(300),
++      parent: const Handle(1),
++      transform: Transform2.translation(17, 23),
++      definition: const Handle(200),
++      layer: const Handle(100),
++      color: const IndexedColor(3),
++      lineweight: 211,
++      transparency: 137,
++      linetype: const Handle(42),
++      linetypeScale: 4.0,
++    );
++
++void main() {
++  test('an instance round-trips all four style fields at non-default values',
++      () {
++    final node = styledInstance();
++    final back = InstanceNode.fromJson(node.toJson());
++
++    expect(back.lineweight, 211);
++    expect(back.transparency, 137);
++    expect(back.linetype, const Handle(42));
++    // A stored value, so the comparison is exact. `Tolerance` is for
++    // geometric decisions, never for a number read back off disk.
++    expect(back.linetypeScale, 4.0);
++    expect(back, node);
++  });
++
++  test('the four fields are absent-tolerant and default to the no-op values',
++      () {
++    // A v5 document's instance node, verbatim: the four keys do not exist.
++    final v5 = <String, Object?>{
++      'type': 'instance',
++      'handle': const Handle(300).toJson(),
++      'parent': const Handle(1).toJson(),
++      'transform': Transform2.identity().toJson(),
++      'visible': true,
++      'definition': const Handle(200).toJson(),
++      'layer': const Handle(100).toJson(),
++      'color': encodeColor(const IndexedColor(3)),
++    };
++    final back = InstanceNode.fromJson(v5);
++
++    // BYBLOCK, BYBLOCK, BYBLOCK-linetype and the multiplicative identity: the
++    // four values that make `contextFor` reproduce its pre-3f.1 behaviour
++    // exactly. Any other default silently changes how every existing document
++    // renders.
++    expect(back.lineweight, kByBlock);
++    expect(back.transparency, kByBlock);
++    expect(back.linetype, ReservedHandles.byBlockLinetype);
++    expect(back.linetypeScale, 1.0);
++  });
++
++  test('two instances differing only in linetypeScale are not equal', () {
++    // `==` and `hashCode` are the picture cache key's foundation in Plan 3g.
++    // A field left out of either makes two different placements collide.
++    final a = styledInstance();
++    final b = a.copyWith(linetypeScale: 8.0);
++    expect(a == b, isFalse);
++    expect(a.hashCode == b.hashCode, isFalse);
++  });
++
++  test('the schema this build writes is 6', () {
++    expect(kSchemaVersion, 6);
++  });
++}
+diff --git a/packages/jet_cad_2d/test/codec/json_codec_test.dart b/packages/jet_cad_2d/test/codec/json_codec_test.dart
+index c0c0d43..f64c94e 100644
+--- a/packages/jet_cad_2d/test/codec/json_codec_test.dart
++++ b/packages/jet_cad_2d/test/codec/json_codec_test.dart
+@@ -474,16 +474,21 @@ void main() {
+       boundaryColor: const TrueColor(0x000000),
+     );
+     doc.commands.execute(cmd);
+     final reloaded = DraftDocumentCodec.decode(
+         jsonDecode(jsonEncode(DraftDocumentCodec.encode(doc)))
+             as Map<String, Object?>);
+     expect(reloaded.fills.fillsOf(cmd.boundary.handle), [cmd.fill.handle]);
+     expect(reloaded.fills.trianglesFor(cmd.boundary.handle), hasLength(6));
+   });
+ 
+-  test('the schema version is 5, and a v6 document is refused', () {
+-    expect(kSchemaVersion, 5);
+-    expect(() => DraftDocumentCodec.decode({'schemaVersion': 6}),
+-        throwsA(anything));
++  test('the schema version is 6, and a v7 document is refused by version', () {
++    expect(kSchemaVersion, 6);
++    // `isA<SchemaVersionError>()`, not `throwsA(anything)`: a bare
++    // `{'schemaVersion': N}` map fails on the missing `'header'` key too, so
++    // the loose matcher passed whenever N was the *current* version rather
++    // than a future one. The point of this test is that the refusal comes from
++    // the version guard.
++    expect(() => DraftDocumentCodec.decode({'schemaVersion': 7}),
++        throwsA(isA<SchemaVersionError>()));
+   });
+ }
+diff --git a/packages/jet_cad_2d/test/testing/generate_document_test.dart b/packages/jet_cad_2d/test/testing/generate_document_test.dart
+index 04630f7..5faf9a0 100644
+--- a/packages/jet_cad_2d/test/testing/generate_document_test.dart
++++ b/packages/jet_cad_2d/test/testing/generate_document_test.dart
+@@ -46,24 +46,27 @@ void main() {
+     //
+     // Deliberately not the structural assertions the plan sketches (one layer,
+     // every colour ByLayer, every node an instance under the root). Those pass
+     // on a document whose coordinates have all moved.
+     //
+     // Re-baselined in Plan 3c Task 1: the four text keys changed the
+     // serialisation.
+     //
+     // Re-baselined in Plan 3e Task 7: kSchemaVersion moved from 4 to 5, and
+     // that value is the first thing every serialisation writes.
++    //
++    // Re-baselined in Plan 3f.1 Task 1: InstanceNode.toJson gained four style
++    // keys and kSchemaVersion moved from 5 to 6.
+     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
+-        4778422453512744465);
++        1593811103237081036);
+     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
+-        2508170127112452780);
++        -4104570370941889723);
+   });
+ 
+   test('defaults reproduce the Plan 2 corpus structurally too', () {
+     // The fingerprint says "unchanged" but not "unchanged in what way". This
+     // names the properties the extensions must each leave alone, so a failure
+     // says which one moved.
+     final doc = generateDocument(2000, definitionCount: 20);
+     expect(doc.tables.layers.records, hasLength(1));
+     expect(doc.tables.linetypes.records, hasLength(3));
+     for (final slot in doc.entities.liveSlots) {
+@@ -223,24 +226,28 @@ void main() {
+ 
+   test('both text fractions default to zero and change nothing', () {
+     // The two fingerprints from Task 1's re-baseline (commit 7f85226) still
+     // hold. If either moved, `labelFraction` or `attributedInstanceFraction`
+     // drew from `extra` while off, which is exactly the bug this test
+     // exists to catch -- not a signal to update the expected value.
+     //
+     // Re-baselined in Plan 3e Task 7 in step with the sibling test above:
+     // kSchemaVersion moved from 4 to 5, which shifts every fingerprint in
+     // this file regardless of what `extra` drew.
++    //
++    // Re-baselined in Plan 3f.1 Task 1 in step with the sibling test above:
++    // InstanceNode.toJson gained four style keys and kSchemaVersion moved
++    // from 5 to 6.
+     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
+-        4778422453512744465);
++        1593811103237081036);
+     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
+-        2508170127112452780);
++        -4104570370941889723);
+   });
+ 
+   test('labelFraction produces repeating strings out of the root budget', () {
+     final doc =
+         generateDocument(2000, definitionCount: 20, labelFraction: 0.05);
+     final labels = <String>{};
+     var count = 0;
+     for (final slot in doc.entities.liveSlots) {
+       if (doc.entities.kindAt(slot) == EntityKind.text) {
+         count++;

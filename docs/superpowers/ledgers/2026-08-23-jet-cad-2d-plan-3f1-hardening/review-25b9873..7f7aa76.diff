@@ -1,0 +1,384 @@
+# Review package: 25b9873..7f7aa76
+
+## Commits
+7f7aa76 feat: an INSERT imposes lineweight, transparency and linetype
+
+## Files changed
+ .../lib/src/document/style_resolver.dart           |  58 ++++-
+ .../test/document/instance_style_test.dart         | 252 +++++++++++++++++++++
+ 2 files changed, 300 insertions(+), 10 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/document/style_resolver.dart b/packages/jet_cad_2d/lib/src/document/style_resolver.dart
+index deabc19..5f84541 100644
+--- a/packages/jet_cad_2d/lib/src/document/style_resolver.dart
++++ b/packages/jet_cad_2d/lib/src/document/style_resolver.dart
+@@ -22,38 +22,79 @@ class DocumentStyleResolver implements StyleResolver {
+   DocumentStyleResolver(this.document);
+ 
+   final DraftDocument document;
+ 
+   @override
+   StyleContext contextFor(Handle instance, StyleContext inherited) {
+     final node = document.tree[instance];
+     if (node is! InstanceNode) return inherited;
+     // An instance on layer 0 is substituted onto the layer it is placed
+     // through, exactly as an entity is in [styleFor]. That one effective layer
+-    // answers both questions this method asks — which layer supplies this
+-    // instance's own BYLAYER colour, and which layer it passes down — so it is
+-    // computed once. Reading `node.layer` for the colour while passing the
++    // answers every question this method asks — which layer supplies this
++    // instance's BYLAYER properties, and which layer it passes down — so it is
++    // computed once. Reading `node.layer` for a property while passing the
+     // substituted layer down would make one node report two effective layers.
+     final layer =
+         node.layer == ReservedHandles.layerZero ? inherited.layer : node.layer;
++    // One lookup, not four. Before Plan 3f.1 only `color` consulted the record;
++    // four properties asking the same table four times would be four map
++    // lookups per instance per frame, on a path the non-negotiables bound.
++    final record = document.tables.layers[layer];
++
+     final encoded = encodeColor(node.color);
+     final color = switch (encoded) {
+       kByBlock => inherited.color,
+-      kByLayer => _layerColorOf(layer, inherited),
++      kByLayer => _concreteLayerColor(record, inherited),
+       _ => encoded,
+     };
++
++    // `kLineweightDefault` is a *third* sentinel, not a width, and it must not
++    // survive into `StyleContext.lineweight` — a field whose own doc comment
++    // declares it concrete. It can arrive by either route: written on the
++    // INSERT itself, or read off a layer record, which
++    // `test/document/tables_test.dart:13` already does.
++    int concrete(int value) =>
++        value == kLineweightDefault ? inherited.lineweight : value;
++    final lineweight = switch (node.lineweight) {
++      kByBlock => inherited.lineweight,
++      kByLayer => concrete(record?.lineweight ?? inherited.lineweight),
++      _ => concrete(node.lineweight),
++    };
++
++    final transparency = switch (node.transparency) {
++      kByBlock => inherited.transparency,
++      kByLayer => record?.transparency ?? inherited.transparency,
++      _ => node.transparency,
++    };
++
++    // Spelled as nested conditionals rather than a switch because
++    // `ReservedHandles.byBlockLinetype` is a `Handle`, not an `int` constant
++    // pattern — the same shape `styleFor` uses for the entity-side read.
++    //
++    // Absence is checked; malformedness is not. A layer whose *colour* is
++    // itself BYLAYER or BYBLOCK is rejected by `_concreteLayerColor`, and a
++    // layer whose *linetype* is one of those sentinels is not — an asymmetry
++    // this method inherits from `styleFor` rather than introducing. An INSERT
++    // and an entity resolving the same malformed layer differently would be a
++    // new defect; fixing the entity side is a separate change.
++    final linetype = node.linetype == ReservedHandles.byBlockLinetype
++        ? inherited.linetype
++        : node.linetype == ReservedHandles.byLayerLinetype
++            ? (record?.linetype ?? inherited.linetype)
++            : node.linetype;
++
+     return StyleContext(
+       color: color,
+-      linetype: inherited.linetype,
++      linetype: linetype,
+       linetypeScale: inherited.linetypeScale,
+-      lineweight: inherited.lineweight,
+-      transparency: inherited.transparency,
++      lineweight: lineweight,
++      transparency: transparency,
+       layer: layer,
+     );
+   }
+ 
+   @override
+   ResolvedStyle styleFor(int slot, StyleContext ctx) {
+     final entityLayer = document.entities.layerAt(slot);
+     // The layer-0 rule is SUBSTITUTION, not deferral: an entity on layer 0
+     // takes the layer it is placed through, which is what the context carries.
+     // When nothing substitutes — a root-level entity, or an instance chain that
+@@ -96,23 +137,20 @@ class DocumentStyleResolver implements StyleResolver {
+ 
+     return ResolvedStyle(
+       argb: ((255 - transparency.clamp(0, 255)) << 24) | _rgbOf(color),
+       lineweightHundredths:
+           lineweight == kLineweightDefault ? ctx.lineweight : lineweight,
+       linetype: linetype,
+       linetypeScale: document.entities.linetypeScaleAt(slot),
+     );
+   }
+ 
+-  int _layerColorOf(Handle layer, StyleContext inherited) =>
+-      _concreteLayerColor(document.tables.layers[layer], inherited);
+-
+   int _concreteLayerColor(LayerRecord? record, StyleContext ctx) {
+     if (record == null) return ctx.color;
+     final encoded = encodeColor(record.color);
+     // A layer whose own colour is BYLAYER or BYBLOCK is malformed; the context
+     // is the only defined answer left.
+     return (encoded == kByLayer || encoded == kByBlock) ? ctx.color : encoded;
+   }
+ 
+   int _rgbOf(int encoded) => switch (decodeColor(encoded)) {
+         IndexedColor(:final aci) => aciToRgb(aci),
+diff --git a/packages/jet_cad_2d/test/document/instance_style_test.dart b/packages/jet_cad_2d/test/document/instance_style_test.dart
+new file mode 100644
+index 0000000..77f3a2e
+--- /dev/null
++++ b/packages/jet_cad_2d/test/document/instance_style_test.dart
+@@ -0,0 +1,252 @@
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2;
++
++// ---------------------------------------------------------------------------
++// Fixture helpers.
++//
++// Four distinct sources for every property under test — the instance, the
++// substituted layer's record, layer 0's record, and `StyleContext.documentRoot`
++// — so a resolution that reads the wrong one of the four lands on a number no
++// assertion here expects. A fixture where two of the four agree cannot tell a
++// correct resolver from the mutant that reads the other one.
++// ---------------------------------------------------------------------------
++
++Handle addLayer(
++  DraftDocument doc,
++  Handle handle,
++  String name, {
++  required int lineweight,
++  required int transparency,
++  required Handle linetype,
++}) {
++  // `DraftDocument.empty()` seeds layer 0 via `DocumentTables.standard()`, so
++  // overriding it (as the BYLAYER-substitution fixture does, to give layer 0
++  // and the substituted layer distinct values) collides on both handle and
++  // name unless the existing record is removed first -- the same pattern
++  // `test/index/query_filter_test.dart:381` uses to replace a layer record.
++  doc.tables.layers.remove(handle);
++  doc.tables.layers.add(LayerRecord(
++    handle: handle,
++    name: name,
++    color: const IndexedColor(5),
++    linetype: linetype,
++    lineweight: lineweight,
++    transparency: transparency,
++    visible: true,
++    locked: false,
++  ));
++  return handle;
++}
++
++Handle addDefinition(DraftDocument doc, Handle handle, String name) {
++  doc.tree.addDefinition(Definition(
++      handle: handle,
++      name: name,
++      basePoint: Vector2.zero(),
++      children: const []));
++  return handle;
++}
++
++/// A line that defers every property to whatever places it.
++Handle addByBlockLine(
++  DraftDocument doc,
++  Handle owner,
++  Handle handle, {
++  double linetypeScale = 2.0,
++}) {
++  doc.commands.execute(AddEntityCommand(
++    record: EntityRecord(
++      handle: handle,
++      owner: owner,
++      kind: EntityKind.line,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.byBlockLinetype,
++      linetypeScale: linetypeScale,
++      geomIndex: 0,
++      color: const ByBlockColor(),
++      lineweight: kByBlock,
++      transparency: kByBlock,
++      flags: 0,
++    ),
++    payload: GeometryPayload(
++      coords: Float64List.fromList([0, 0, 1, 1]),
++      scalars: Float64List(0),
++    ),
++  ));
++  return handle;
++}
++
++Handle addInstance(
++  DraftDocument doc,
++  Handle handle,
++  Handle definition, {
++  Handle? parent,
++  Handle layer = ReservedHandles.layerZero,
++  int lineweight = kByBlock,
++  int transparency = kByBlock,
++  Handle linetype = ReservedHandles.byBlockLinetype,
++  double linetypeScale = 1.0,
++}) {
++  doc.commands.execute(AddNodeCommand(InstanceNode(
++    handle: handle,
++    parent: parent ?? doc.rootHandle,
++    // Never the identity: an identity transform commutes and hides ordering,
++    // which is the defect four fixtures missed in Plan 2.
++    transform: Transform2.translation(31, 17),
++    definition: definition,
++    layer: layer,
++    lineweight: lineweight,
++    transparency: transparency,
++    linetype: linetype,
++    linetypeScale: linetypeScale,
++  )));
++  return handle;
++}
++
++/// Resolves [child] as if drawn through [instance], directly rather than by
++/// walking. The claim under test is what `contextFor` computes, not how a
++/// traversal reaches it; the traversal is covered by the differential and
++/// golden suites in the Flutter package.
++ResolvedStyle resolveThrough(
++    DraftDocument doc, List<Handle> instances, Handle child) {
++  final resolver = DocumentStyleResolver(doc);
++  var ctx = StyleContext.documentRoot;
++  for (final i in instances) {
++    ctx = resolver.contextFor(i, ctx);
++  }
++  return resolver.styleFor(doc.entities.slotOf(child)!, ctx);
++}
++
++void main() {
++  // `StyleContext.documentRoot` is lineweight 25, transparency 0, linetype
++  // `continuousLinetype`. Every expected value below differs from all three.
++
++  test('an INSERT imposes its concrete lineweight on a BYBLOCK child', () {
++    final doc = DraftDocument.empty();
++    final def = addDefinition(doc, const Handle(200), 'BOLT');
++    final child = addByBlockLine(doc, def, const Handle(201));
++    addInstance(doc, const Handle(300), def, lineweight: 211);
++
++    expect(resolveThrough(doc, [const Handle(300)], child).lineweightHundredths,
++        211);
++  });
++
++  test('an INSERT imposes its concrete transparency on a BYBLOCK child', () {
++    final doc = DraftDocument.empty();
++    final def = addDefinition(doc, const Handle(200), 'BOLT');
++    final child = addByBlockLine(doc, def, const Handle(201));
++    addInstance(doc, const Handle(300), def, transparency: 137);
++
++    // Transparency reaches the drawing as the alpha byte: 255 - 137 = 118.
++    // Asserted through `argb` rather than through a transparency getter
++    // because `ResolvedStyle` has no separate transparency field, and the
++    // byte is what a painter actually consumes.
++    expect(resolveThrough(doc, [const Handle(300)], child).argb >> 24, 118);
++  });
++
++  test('an INSERT imposes its concrete linetype on a BYBLOCK child', () {
++    final doc = DraftDocument.empty();
++    final def = addDefinition(doc, const Handle(200), 'BOLT');
++    final child = addByBlockLine(doc, def, const Handle(201));
++    addInstance(doc, const Handle(300), def, linetype: const Handle(42));
++
++    expect(resolveThrough(doc, [const Handle(300)], child).linetype,
++        const Handle(42));
++  });
++
++  group('BYLAYER on an INSTANCE reads the substituted layer, not node.layer',
++      () {
++    /// Layer 0 and layer `L` carry different values for every property, and
++    /// the instance sits on layer 0 so substitution has to happen for the
++    /// right one to be read. A mutant reading `node.layer` gets layer 0's
++    /// numbers; the correct resolver gets `L`'s.
++    DraftDocument fixture() {
++      final doc = DraftDocument.empty();
++      addLayer(doc, ReservedHandles.layerZero, '0',
++          lineweight: 13, transparency: 9, linetype: const Handle(70));
++      addLayer(doc, const Handle(100), 'STRUCT',
++          lineweight: 191, transparency: 88, linetype: const Handle(71));
++      final def = addDefinition(doc, const Handle(200), 'BOLT');
++      addByBlockLine(doc, def, const Handle(201));
++      // The outer placement puts layer STRUCT into the context; the inner
++      // instance is on layer 0, so it inherits STRUCT and must read STRUCT's
++      // record for its own BYLAYER properties.
++      addInstance(doc, const Handle(300), const Handle(210),
++          layer: const Handle(100));
++      return doc;
++    }
++
++    test('lineweight', () {
++      final doc = fixture();
++      addInstance(doc, const Handle(310), const Handle(200),
++          parent: const Handle(210), lineweight: kByLayer);
++      expect(
++          resolveThrough(doc, [const Handle(300), const Handle(310)],
++                  const Handle(201))
++              .lineweightHundredths,
++          191);
++    });
++
++    test('transparency', () {
++      final doc = fixture();
++      addInstance(doc, const Handle(310), const Handle(200),
++          parent: const Handle(210), transparency: kByLayer);
++      expect(
++          resolveThrough(doc, [const Handle(300), const Handle(310)],
++                      const Handle(201))
++                  .argb >>
++              24,
++          255 - 88);
++    });
++
++    test('linetype', () {
++      final doc = fixture();
++      addInstance(doc, const Handle(310), const Handle(200),
++          parent: const Handle(210), linetype: ReservedHandles.byLayerLinetype);
++      expect(
++          resolveThrough(doc, [const Handle(300), const Handle(310)],
++                  const Handle(201))
++              .linetype,
++          const Handle(71));
++    });
++  });
++
++  group('kLineweightDefault never reaches a ResolvedStyle', () {
++    // `-3` is a third sentinel in this encoding, not a width. A three-arm
++    // switch sends it down "otherwise" and into StyleContext.lineweight,
++    // whose doc comment declares that field concrete -- and the entity-side
++    // guard cannot rescue it, because that guard maps a -3 entity lineweight
++    // to ctx.lineweight, which here would itself be -3.
++    test('carried directly by the INSERT', () {
++      final doc = DraftDocument.empty();
++      final def = addDefinition(doc, const Handle(200), 'BOLT');
++      final child = addByBlockLine(doc, def, const Handle(201));
++      addInstance(doc, const Handle(300), def, lineweight: kLineweightDefault);
++
++      // documentRoot's 25 -- the inherited value, which is what "default"
++      // means here.
++      expect(
++          resolveThrough(doc, [const Handle(300)], child).lineweightHundredths,
++          25);
++    });
++
++    test('reached through the INSERT\'s BYLAYER lookup', () {
++      final doc = DraftDocument.empty();
++      addLayer(doc, const Handle(100), 'DEFAULTED',
++          lineweight: kLineweightDefault,
++          transparency: 0,
++          linetype: ReservedHandles.continuousLinetype);
++      final def = addDefinition(doc, const Handle(200), 'BOLT');
++      final child = addByBlockLine(doc, def, const Handle(201));
++      addInstance(doc, const Handle(300), def,
++          layer: const Handle(100), lineweight: kByLayer);
++
++      expect(
++          resolveThrough(doc, [const Handle(300)], child).lineweightHundredths,
++          25);
++    });
++  });
++}
