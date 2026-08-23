@@ -2395,7 +2395,11 @@ Append to `test/tile_invalidation_test.dart`:
     doc.tables.layers.add(LayerRecord(
       handle: const Handle(900),
       name: 'WALLS',
-      color: const DraftColor.indexed(3),
+      // `IndexedColor`, not `DraftColor.indexed` — an earlier revision of this
+      // plan guessed the latter and Task 2 corrected it against the tree. The
+      // three fields below are deliberately non-default for the reason the
+      // anti-degenerate rule gives.
+      color: const IndexedColor(3),
       linetype: ReservedHandles.continuousLinetype,
       lineweight: 50,
       transparency: 40,
