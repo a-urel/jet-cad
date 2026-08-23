@@ -10,4 +10,5 @@ export 'src/draw_sink.dart';
 export 'src/flutter_text_measurer.dart';
 export 'src/reference_walk.dart';
 export 'src/render_backend.dart';
+export 'src/tile_cache.dart';
 export 'src/viewport_transform.dart';
