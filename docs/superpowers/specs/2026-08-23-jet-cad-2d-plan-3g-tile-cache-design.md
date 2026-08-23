@@ -576,10 +576,26 @@ Each must turn a stated criterion red.
 | M14 | skip text when baking a tile | a tiled frame silently loses its labels — criterion 3 |
 | M15 | offset a tile's bake camera by one device pixel | a row of missing and duplicated pixels along every seam — criterion 2, **and this one the instrument can fire** |
 | M16 | record only leaf handles per tile, dropping the node list | a dragged instance leaves a ghost in the tile it left — criterion 5 |
-| M17 | bake tiles with a per-tile rebase origin instead of the frame-global one | different `float32` residuals from the live path — criterion 1 |
+| M17 | bake tiles with a per-tile rebase origin instead of the frame-global one | **not criterion 1** — see the note below. Fired by a wiring test that reads the coordinate `_bake` hands the sink |
 
 **Seventeen mutants against thirteen criteria. Sixteen can be fired in this
 plan's instrument; M3 cannot, and it is listed as deferred rather than counted.**
+
+**Corrected 2026-08-24, during Task 5. M17 is not fireable through the pixel
+criteria on the vertices backend, and the reason is algebraic rather than a
+matter of fixture magnitude.** The painter pushes the rebase origin as the
+residual itself — `Transform2.translation(_screenOrigin.x, _screenOrigin.y)`
+(`draft_painter.dart:605,742`) — and `VerticesDrawSink` applies that residual in
+Dart `Float64` (`vertices_draw_sink.dart:317-318`) before storing into its
+`Float32List`. So `(screen - origin) + origin = screen` **exactly**, whatever
+the origin, and the final pixel does not depend on it. Task 5 proved this both
+algebraically and with a magnitude sweep from 4.5e6 to 1e15.
+
+D1's injected origin is still required — it is what keeps the *stored* value
+small on the `CanvasDrawSink` path, where the residual becomes a canvas
+transform Skia evaluates in `float32`, and text takes that path on every frame
+— but its gate is a **wiring** test that reads the coordinate `_bake` hands the
+sink, not a pixel comparison. The mutation log records it that way.
 
 That distinction is the whole point of stating the property. Plan 3f.1's final
 review found a criterion with no possible mutant only after the plan had shipped,

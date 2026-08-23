@@ -1845,7 +1845,20 @@ cp lib/src/tile_cache.dart /tmp/tile_cache.dart.bak
 
 **M15** — offset a tile's bake camera by one device pixel. In `TileGrid.bakeCameraFor`, change `m.e - key.x * _tileLogical` to `m.e - key.x * _tileLogical + 1 / devicePixelRatio`. Criterion 2 must go red with non-zero stray *and* uncovered counts. Record the numbers.
 
-**M17** — drop the injected origin. In `_bake`, pass `Vector2.zero()` instead of `origin`. Criterion 1 must go red. **If it does not**, the fixture is too close to the world origin for the rebase quantisation to differ — move `crossingGrid` out to 4.5e6 and say so in the report, because a criterion that cannot see M17 is not gating D1.
+**M17** — drop the injected origin. In `_bake`, pass `Vector2.zero()` instead of `origin`.
+
+> **Corrected 2026-08-24, mid-execution.** An earlier revision expected
+> criterion 1 to go red, and offered "move the fixture out to 4.5e6" as the
+> remedy if it did not. **Neither works, and the reason is algebraic.** The
+> painter pushes the rebase origin *as the residual*
+> (`draft_painter.dart:605,742`) and `VerticesDrawSink` applies that residual
+> in `Float64` (`vertices_draw_sink.dart:317-318`) before its `Float32` store,
+> so `(screen - origin) + origin = screen` exactly and the pixel cannot depend
+> on the origin at any magnitude. **Fire M17 against a wiring test instead**:
+> subclass `VerticesDrawSink` and read the coordinate `_bake` actually hands
+> it, the way `large_coordinate_test.dart` and `draft_painter_rebase_test.dart`
+> already do. Criteria 1 and 2 stand on their own; they simply do not gate this
+> mutant.
 
 Restore from the copy after each.
 
@@ -2858,6 +2871,8 @@ No source changes. The transcripts go into Task 13's results note verbatim. **Ne
 - [ ] **Step 1: Write the mutation log**
 
 One section per mutant, seventeen of them, each with the exact edit, the command run, and the **verbatim** transcript of the red run and of the restored green run. M3 gets a section too, recording that it **could not be fired** and why — G1's instrument concession — rather than being quietly dropped.
+
+**M17's section must name the wiring test as its killer, not criterion 1.** The rebase origin cancels exactly through `VerticesDrawSink`, so no pixel comparison on that backend can see it; Task 5 established this algebraically and with a magnitude sweep. Recording M17 as "killed by criterion 1" would be the same false coverage claim this plan's spec cites from Plan 3f.1.
 
 - [ ] **Step 2: Write the results note**
 
