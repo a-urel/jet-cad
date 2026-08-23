@@ -2319,7 +2319,35 @@ In `tile_cache.dart`, hold a visit list per tile and switch on all five arms:
   }
 ```
 
-`_isDefinitionOwned`, `_worldBoxOf` and `_worldRectOf` are the three helpers. Write them against the APIs the tree actually has — `DocumentTree.ancestorsOf`, `DocumentTree.definition`, `DocumentTree.accumulatedTransform`, `EntityStore.slotOf`, `EntityStore.ownerAt`, `DraftDocument.definitionBounds` — and copy `entityBounds`'s argument shape from its real call site at `container_index.dart:105-114`, which handles the `EntityKind.fill` boundary case this must handle too.
+`_isDefinitionOwned`, `_worldBoxOf` and `_worldRectOf` are the three helpers.
+
+> **Four corrections from execution, 2026-08-24. Each was found by running
+> something, and each would have shipped a silently wrong gate.**
+>
+> 1. **`_isDefinitionOwned` must climb the ancestor chain.** The one-step test
+>    `tree.definition(entities.ownerAt(slot)) != null` is **wrong for a leaf
+>    owned by a group that is itself inside a definition** — the owner is the
+>    group, and `tree.definition(group)` is null. Climb with `ancestorsOf`.
+>    Note that `ancestorsOf` never returns the definition itself, so the
+>    definition is the chain-top's `parent`.
+> 2. **`definitionBounds` returns an empty box for an instance handle, with no
+>    error.** `_childrenOf` (`draft_document.dart:331-341`) matches `GroupNode`
+>    and otherwise falls to `tree.definition(container)?.children ?? const []`;
+>    an `InstanceNode` is neither, so it yields nothing and the union stays
+>    `Aabb2.empty()`. Direction two would have **skipped every instance and
+>    dropped no tile**, while direction one kept the tests green. Pass the
+>    instance's `definition` explicitly.
+> 3. **The brief's leaf edit cannot separate the two directions.** Shrinking a
+>    line makes the new tile set a subset of the old, so direction one alone
+>    covers it and M2 survives; extending it makes the new set a superset, so
+>    direction two alone covers it and M1 survives. **Only a move separates
+>    them.** Every invalidation edit is now a move, and each test asserts at
+>    runtime that the new and old tile sets are **disjoint** before asserting
+>    anything else.
+> 4. **M12 as written is a compile error, not a red test.** `DocChange` is
+>    `sealed`, so deleting the `CommandRedone` arm fails to compile. Fire the
+>    semantic equivalent — keep the arm and return immediately — and record the
+>    compile error as the reason. Write them against the APIs the tree actually has — `DocumentTree.ancestorsOf`, `DocumentTree.definition`, `DocumentTree.accumulatedTransform`, `EntityStore.slotOf`, `EntityStore.ownerAt`, `DraftDocument.definitionBounds` — and copy `entityBounds`'s argument shape from its real call site at `container_index.dart:105-114`, which handles the `EntityKind.fill` boundary case this must handle too.
 
 `_worldRectOf(key, grid)` inverts the anchor camera over the tile's device rect. Every corner, not two: `ViewportTransform.visibleWorld` documents why, and a rotated camera makes a two-corner box wrong.
 

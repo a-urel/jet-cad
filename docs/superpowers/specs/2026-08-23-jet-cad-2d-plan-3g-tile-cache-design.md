@@ -722,6 +722,25 @@ one-pixel `destRectFor` error (3192 against a bound of 60).
 does not transfer to a GPU backend, in either direction. Whether Impeller
 exhibits it, and at what magnitude, is owed alongside G1's device seam check.
 
+### G6 — Invalidation's second direction is geometric, and a stroke is wider than its geometry
+
+**Added 2026-08-24, from Task 7.**
+
+Direction two invalidates tiles intersecting a touched handle's **new world
+box**, and that box is the entity's geometry. A stroke is drawn with width, so
+it can put ink into a tile its geometry does not reach — by up to **half a
+stroke width**. An edit to such an entity leaves that tile stale.
+
+The bound is exactly half the rendered stroke width in device pixels, which at
+the default lineweight is sub-pixel and at a heavy lineweight is a few pixels
+along one edge. It is not closable from the tile cache: the spatial index
+carries its own margin for this and does not expose it.
+
+Recorded rather than fixed. Whoever owns eviction, the carry-over composite, or
+a future plan touching invalidation should know it exists, and closing it means
+either exposing the index's margin or inflating the box by the resolved
+lineweight at invalidation time.
+
 ### G2 — In-place table record mutation, now nearly closed
 
 Every table record is `@immutable` with all-final fields (`tables.dart:73-95`),
