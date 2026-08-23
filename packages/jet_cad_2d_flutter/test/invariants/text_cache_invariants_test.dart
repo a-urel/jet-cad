@@ -8,11 +8,18 @@
 // bound under test rather than by realism.
 //
 // Plan 3f's mutant 7 (`metricsLimit` defaulting to `kParagraphCacheLimit`)
-// passed all 297 tests in the suite it shipped with. Nine of the twelve
-// constructions in `flutter_text_measurer_test.dart` are already bare, so bare
-// construction was never the missing half: **no test in that file ever pushed
-// past 512 distinct metrics keys**, so nothing it asserted was sensitive to
-// `metricsLimit` at any value. This file supplies the other half.
+// passed all 297 tests in the suite it was fired against. Nine of the twelve
+// constructions in `flutter_text_measurer_test.dart` were already bare, so
+// bare construction was never the missing half. Plan 3f's remedy
+// (`645b027`) closed one side of it: a bare measurer swept past 512
+// distinct strings through `measure()` and pinned `metricsEvictionCount`.
+// That test never calls `paragraphFor`, never runs a painter, and asserts
+// `liveParagraphCount == 0` outright — it closes the metrics half and
+// leaves the paragraph half exactly as untested as before. This file
+// closes that half: a real paint through `CanvasDrawSink` fills both maps
+// at once, and the 600-into-512 eviction arithmetic is pinned
+// behaviourally rather than restated. Firing mutant 7 again reddens both
+// files, each from its own side of the cache.
 
 import 'dart:ui';
 
@@ -130,7 +137,7 @@ void main() {
   test('referenceWalk culls sub-threshold text at its own default', () {
     // The third of Plan 3f's three named untested defaults, and the one still
     // open. Two callers exist and neither closes it:
-    // `test/support/fixtures.dart:184` re-declares its own
+    // `test/support/fixtures.dart:183` re-declares its own
     // `minTextCapPixels = kMinTextCapPixels` and always passes it on, so the
     // parameter is shadowed for anything routed through `referenceToRecording`
     // — which is why this calls `referenceWalk` directly.
