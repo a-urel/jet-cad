@@ -1816,9 +1816,10 @@ Append to `test/tile_cache_test.dart`:
 
   test('criterion 2: a fixture crossing tile boundaries still matches',
       () async {
-    // `crossingGrid` is 90-logical-pixel lines on a 32-logical-pixel tile, so
-    // every line crosses at least two boundaries and most cross three. The
-    // seam is exercised by geometry, not by intent -- anti-degenerate clause 1.
+    // `crossingGrid` is 190 world units per line, which at this camera's 1.4
+    // scale is 266 logical pixels against a 32-logical-pixel tile: every line
+    // spans about eight tiles. The seam is exercised by geometry, not by
+    // intent -- anti-degenerate clause 1.
     final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
     addTearDown(rig.dispose);
     rig.paintOnce();
@@ -2888,7 +2889,7 @@ git commit -m "docs: Plan 3g results, mutation log, and STATUS"
 
 **Mutant coverage.** M1, M2, M5, M12, M16 → Task 7. M3 → deferred, recorded in Task 13. M4, M9 → Task 9. M6 → Task 10. M7 → Task 12. M8 → Tasks 2 and 8. M10 → Task 3. M11, M14 → Task 6. M13 → Tasks 4 and 10. M15, M17 → Task 5. **Sixteen fired, one recorded as unfirable.**
 
-**Anti-degenerate coverage.** Clause 1 → the 64 px tile everywhere and `crossingGrid`'s 90-logical-pixel lines. Clause 2 → `tileCamera()`, never `fit`. Clause 3 → asserted at `blitCount > 30`. Clauses 4 and 5 → `instancedFixture` and the dragged-instance test. Clauses 6 and 7 → Task 10's two eviction tests.
+**Anti-degenerate coverage.** Clause 1 → the 64 px tile everywhere and `crossingGrid`'s 266-logical-pixel lines (190 world units at the fixture camera's 1.4 scale), spanning about eight 32-logical-pixel tiles. Clause 2 → `tileCamera()`, never `fit`. Clause 3 → asserted at `blitCount > 30`. Clauses 4 and 5 → `instancedFixture` and the dragged-instance test. Clauses 6 and 7 → Task 10's two eviction tests.
 
 **Type consistency.** `TileCache.paintFrame` takes `CanvasDrawSink sink` (not `DrawSink`) throughout, and `tablesRevision` is added to its signature in Task 8 — Task 4's call sites in `tile_fixture.dart` must be updated there. `DraftPainter.debugRebaseOrigin` and `debugOnVisit` are mutable fields, not `final`, because `TileCache` sets them per bake.
 
