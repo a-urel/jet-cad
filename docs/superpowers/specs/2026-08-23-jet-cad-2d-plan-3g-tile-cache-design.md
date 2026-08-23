@@ -504,12 +504,24 @@ allocation gate in `jet_cad_2d_flutter`". `paint_allocation_test.dart` reads one
 field — `VerticesDrawSink.debugCapacityVertices` — which can see neither a
 `Paint` nor a `Rect`.
 
-So criterion 13 is measured the way `VerticesDrawSink.debugPaint` already is:
+So criterion 13 is measured by field reads rather than by a heap profile:
 `TileCache` exposes **the identity of the single blit `Paint`** and a
-**per-frame count of blit destinations**, and the test pins the identity across
-frames and the count against the visible tile count. That is a field read, not a
-heap measurement, and it is what makes M13 killable. Without it criterion 13 is
-prose.
+**per-frame count of blit destinations**, pinned across frames and against the
+visible tile count.
+
+**Corrected 2026-08-24, during Task 4.** An earlier revision said that exposing
+the `Paint`'s identity "is what makes M13 killable". **It does not.** A getter
+returning the cache's own field reports the same object whatever the blit
+actually passes to `drawImageRect`, so a mutant that builds a fresh `Paint` at
+the call site leaves the test green — the assertion is a tautology. This is the
+same gap `paint_allocation_test.dart` already exists to close for
+`VerticesDrawSink.debugPaint`, and this spec walked into it again one section
+after citing trap 5.
+
+**M13's real instrument is a canvas spy.** The repository already carries one
+(`test/support/spy_canvas.dart`); the test reads the `Paint` actually handed to
+`drawImageRect` and compares *that* to the cache's field. The identity getter
+stays — it is a useful cheap check — but it is not the gate.
 
 **Criterion 11's threshold is the one number here that is not backed by a
 measurement**, and the plan must not quietly relax it. D6's sweep runs before
@@ -560,7 +572,7 @@ Each must turn a stated criterion red.
 | M10 | blit without snapping | the settled frame resamples and stops being 1:1 — criterion 1 |
 | M11 | blit with `BlendMode.src` instead of `srcOver` | a tile's transparent regions overwrite the canvas beneath and translucent pixels stop compositing — criterion 4 |
 | M12 | handle `CommandApplied` and `CommandUndone` but drop the `CommandRedone` arm | a redo shows the pixels the undo left — the omission an undo-only gate would never see — criterion 9 |
-| M13 | build the blit `Paint` per tile instead of once | per-frame allocation grows with the tile count — criterion 13 |
+| M13 | build the blit `Paint` per tile at the `drawImageRect` call site instead of once | per-frame allocation grows with the tile count — criterion 13. **Fired through a canvas spy, not through the identity getter**, which cannot see what the call site passed |
 | M14 | skip text when baking a tile | a tiled frame silently loses its labels — criterion 3 |
 | M15 | offset a tile's bake camera by one device pixel | a row of missing and duplicated pixels along every seam — criterion 2, **and this one the instrument can fire** |
 | M16 | record only leaf handles per tile, dropping the node list | a dragged instance leaves a ghost in the tile it left — criterion 5 |

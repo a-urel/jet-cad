@@ -1588,7 +1588,16 @@ If `toImageSync` is slow enough to time the suite out, the fixture is too large 
 cp lib/src/tile_cache.dart /tmp/tile_cache.dart.bak
 ```
 
-Replace `_blitPaint` at its use site with a fresh `Paint()` per blit. The identity test must go red. Restore from the copy.
+Replace `_blitPaint` at its use site with a fresh `Paint()` per blit.
+
+> **Corrected 2026-08-24, mid-execution.** An earlier revision expected the
+> `debugBlitPaint` identity test to redden. **It does not, and cannot**: that
+> getter returns the cache's own field, which the mutation never touches, so
+> the assertion is a tautology. The same gap is why
+> `paint_allocation_test.dart` exists beside `VerticesDrawSink.debugPaint`.
+> **Use the repository's `test/support/spy_canvas.dart`** to read the `Paint`
+> actually handed to `drawImageRect` and compare that to the field. Keep the
+> identity test as a cheap check; the spy is the gate.
 
 - [ ] **Step 7: Green and commit**
 
