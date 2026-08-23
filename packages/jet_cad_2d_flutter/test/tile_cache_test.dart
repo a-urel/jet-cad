@@ -230,4 +230,114 @@ void main() {
             '${o.toStringAsFixed(0)}-magnitude world value instead, which '
             'this bound catches even though it renders to the same pixel');
   });
+
+  test('criterion 3: text survives the tile round trip', () async {
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final rig = TileRig(
+        tileDevicePixels: 64,
+        tilesBakedPerFrame: 1000,
+        document: crossingLabels(measurer));
+    addTearDown(rig.dispose);
+
+    // `DraftPainter.paint` resets its text counters on every call, and a
+    // tile bake calls it once per tile -- so reading `textOpCount` right
+    // after `rig.paintOnce()` would read whichever tile happened to bake
+    // *last* in `TileGrid.visibleKeys`' order, not the frame's total, and
+    // that tile is overwhelmingly likely to be one of the many that carry no
+    // text at all (confirmed empirically: it reads 0, not 6 -- see Task 6's
+    // report). Proved directly instead, with one live, whole-viewport walk --
+    // the same call `measureTiledAgreement`'s live arm makes -- so the
+    // counters reflect the entire frame from a single `paint` call, and this
+    // still runs before any pixel is compared.
+    final recorder = PictureRecorder();
+    final canvas = Canvas(recorder);
+    rig.sink.canvas = canvas;
+    rig.vertices.canvas = canvas;
+    rig.painter.paint(rig.vertices, rig.camera, kTileViewport);
+    rig.vertices.flush();
+    recorder.endRecording().dispose();
+    // A level-of-detail cull would produce a smaller, self-consistent, wrong
+    // picture that agreed with itself perfectly, so both counters are
+    // checked before any pixel comparison runs.
+    expect(rig.painter.textOpCount, 6);
+    expect(rig.painter.culledTextCount, 0);
+
+    rig.paintOnce();
+    await expectTiledEqualsLive(rig);
+  });
+
+  test('criterion 4: overlapping translucent strokes composite identically',
+      () async {
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final rig = TileRig(
+        tileDevicePixels: 64,
+        tilesBakedPerFrame: 1000,
+        document: translucentOverlap(measurer));
+    addTearDown(rig.dispose);
+
+    rig.paintOnce();
+    await expectTiledEqualsLive(rig);
+  });
+
+  test(
+      'M11 regression: the blit composites with srcOver, so a tile leaves '
+      'what is beneath it alone wherever it has no ink of its own', () async {
+    // `expectTiledEqualsLive`'s pixel comparison cannot see mutant M11
+    // (`_blitPaint`'s blend mode flipped to `BlendMode.src`): `_capture`
+    // always starts from a blank, fully transparent canvas, and `src` and
+    // `srcOver` compute the exact same result whenever the destination pixel
+    // already sits at alpha 0 -- `result = src` either way, because `srcOver`
+    // is `src + dst*(1-src.a)` and `dst` is zero. Every destination pixel in
+    // this plan's tile grid is blitted by exactly one tile, so criteria 1
+    // through 4 never touch a pixel twice and never give the two blend modes
+    // a chance to disagree. Confirmed empirically: pre-filling the
+    // destination with opaque red before calling `paintFrame` and reading
+    // the result back found 460,140 of 480,000 pixels erased to alpha 0
+    // under the mutation, and 0 erased on the restored, unmutated code (Task
+    // 6's report has the transcript).
+    //
+    // Checked two ways: the property directly, which is what actually gates
+    // the mutation, and the pixel-level damage it causes against a canvas
+    // that is not blank -- the shape `expectTiledEqualsLive`'s harness
+    // cannot produce -- so the property assertion above is not read on
+    // faith.
+    final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    expect(rig.cache.debugBlitPaint.blendMode, BlendMode.srcOver);
+
+    final width = (kTileViewport.width * kTileDpr).round();
+    final height = (kTileViewport.height * kTileDpr).round();
+    final recorder = PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.scale(kTileDpr);
+    canvas.drawRect(
+        Offset.zero & kTileViewport, Paint()..color = const Color(0xFFFF0000));
+    rig.cache.paintFrame(
+      canvas: canvas,
+      viewport: kTileViewport,
+      devicePixelRatio: kTileDpr,
+      camera: rig.camera,
+      painter: rig.painter,
+      sink: rig.sink,
+      vertices: rig.vertices,
+    );
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(width, height);
+    picture.dispose();
+    final data = await image.toByteData();
+    image.dispose();
+    final bytes = data!.buffer.asUint8List();
+
+    var erased = 0;
+    for (var i = 3; i < bytes.length; i += 4) {
+      if (bytes[i] == 0) erased++;
+    }
+    expect(erased, 0,
+        reason: 'srcOver must leave the red backdrop opaque everywhere a '
+            'tile has no ink of its own; $erased of ${bytes.length ~/ 4} '
+            'pixels went transparent');
+  });
 }

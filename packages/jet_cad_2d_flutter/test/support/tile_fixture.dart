@@ -122,3 +122,64 @@ DraftDocument crossingGrid(FlutterTextMeasurer measurer) {
   }
   return doc;
 }
+
+/// Labels large enough to clear `kMinTextCapPixels` and long enough to cross
+/// tile boundaries.
+///
+/// Text is the one content type that does not reach the vertices sink: it
+/// falls back to `CanvasDrawSink`, which flushes the batch first. A tile bake
+/// therefore exercises a mid-picture flush, and criterion 3 is the only place
+/// this plan sees it.
+DraftDocument crossingLabels(FlutterTextMeasurer measurer) {
+  final doc = DraftDocument.empty(measurer: measurer);
+  var handle = 1000;
+  for (var row = 0; row < 6; row++) {
+    // 14 world units of cap height at this camera's 1.4 scale is 19.6 logical
+    // pixels, well clear of the 3.0 default, and `culledTextCount` is
+    // asserted rather than assumed below.
+    addText(doc, doc.rootHandle, Handle(handle++), 'SECTION-A$row', 20,
+        30 + row * 40.0, 14);
+  }
+  return doc;
+}
+
+/// Overlapping translucent strokes: [crossingGrid]'s exact geometry, so every
+/// intersection of a horizontal and a vertical line is a genuine overlap of
+/// two translucent strokes, some inside one tile and some straddling a seam.
+///
+/// Transparency rides on the vertex colour, and a tile is baked to a
+/// transparent-backed `Image` and composited with `srcOver`. Both halves have
+/// to survive, and a blend-mode mistake shows up as a uniform shift rather
+/// than as a missing shape -- which is why the criterion compares bytes and
+/// not ink counts.
+///
+/// **Deliberately not a diagonal line.** An earlier version of this fixture
+/// drew ten independent diagonals (`(20, 30 + i*6)` to `(220, 150 - i*6)`).
+/// That geometry reddens `expectTiledEqualsLive` even with `transparency: 0`
+/// -- confirmed by capturing both arms and diffing bytes directly, at both
+/// zero and non-zero transparency alike: a diagonal stroke crossing a tile
+/// seam rasterises a handful of pixels (tens, not thousands) one device pixel
+/// off from the live walk. That is a real gap in this plan's tile-boundary
+/// coverage, but it is orthogonal to what criterion 4 is chartered to prove --
+/// alpha survives `toImageSync` and the `srcOver` blit -- and reusing
+/// [crossingGrid]'s already-proven-exact axis-aligned geometry (criterion 2
+/// runs it at `transparency: 0` and gets zero differing pixels across the
+/// same camera and tile size) isolates that one channel instead of
+/// conflating it with the diagonal-rasterisation gap. See Task 6's report for
+/// the transcript and the byte-level detail.
+DraftDocument translucentOverlap(FlutterTextMeasurer measurer) {
+  final doc = DraftDocument.empty(measurer: measurer);
+  var handle = 1000;
+  for (var i = 0; i < 12; i++) {
+    final t = i * 24.0;
+    // 60% transparent (of 255), so an overlap is visibly darker than a single
+    // stroke and a lost alpha is a byte difference on thousands of pixels.
+    // Zero is this channel's identity, so the value must not be zero -- 153
+    // (60% of 255) is what `addLine` receives.
+    addLine(doc, doc.rootHandle, Handle(handle++), 10, 10 + t, 200, 10 + t,
+        transparency: 153);
+    addLine(doc, doc.rootHandle, Handle(handle++), 10 + t, 10, 10 + t, 200,
+        transparency: 153);
+  }
+  return doc;
+}

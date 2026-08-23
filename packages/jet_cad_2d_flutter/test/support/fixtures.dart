@@ -16,6 +16,7 @@ Handle addEntity(
   List<double> coords,
   List<double> scalars, {
   DraftColor color = const ByLayerColor(),
+  int transparency = 0,
 }) {
   doc.commands.execute(AddEntityCommand(
     record: EntityRecord(
@@ -28,7 +29,7 @@ Handle addEntity(
       geomIndex: 0,
       color: color,
       lineweight: 25,
-      transparency: 0,
+      transparency: transparency,
       flags: 0,
     ),
     payload: GeometryPayload(
@@ -143,9 +144,14 @@ DraftDocument differentialFixture(
 }
 
 /// Adds a line entity from ([x0], [y0]) to ([x1], [y1]), owned by [owner].
+///
+/// [transparency] defaults to `0`, this channel's identity, so every existing
+/// caller is unaffected; a caller exercising translucency must pass a
+/// non-zero value explicitly.
 Handle addLine(DraftDocument doc, Handle owner, Handle handle, double x0,
-        double y0, double x1, double y1) =>
-    addEntity(doc, owner, handle, EntityKind.line, [x0, y0, x1, y1], const []);
+        double y0, double x1, double y1, {int transparency = 0}) =>
+    addEntity(doc, owner, handle, EntityKind.line, [x0, y0, x1, y1], const [],
+        transparency: transparency);
 
 /// Adds an empty block definition named [name].
 Handle addDefinition(DraftDocument doc, Handle handle, String name) {
