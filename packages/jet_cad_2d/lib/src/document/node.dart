@@ -162,6 +162,35 @@ final class InstanceNode extends Node {
   /// round-trips to DXF losslessly.
   final DraftColor color;
 
+  /// This instance's own lineweight, imposed on its definition's BYBLOCK
+  /// contents.
+  ///
+  /// Encoded exactly as `EntityRecord.lineweight` is — `kByBlock` (the
+  /// default), `kByLayer`, `kLineweightDefault`, or a concrete value in
+  /// 1/100 mm. A second encoding for the same concept would be a second thing
+  /// to keep in step, and `DocumentStyleResolver` would need two switches
+  /// where it now needs one shape.
+  final int lineweight;
+
+  /// 0..255, or `kByBlock` (the default) or `kByLayer`. Same encoding as
+  /// `EntityRecord.transparency`.
+  final int transparency;
+
+  /// `ReservedHandles.byBlockLinetype` (the default),
+  /// `ReservedHandles.byLayerLinetype`, or a concrete linetype handle. Same
+  /// encoding as `EntityRecord.linetype`.
+  final Handle linetype;
+
+  /// **Multiplies; it does not substitute.**
+  ///
+  /// DXF's rule for a nested entity's effective linetype scale is a product,
+  /// not an override, so an entity inside two INSERTs is scaled by both and by
+  /// the header's global scale. The other three fields above answer "which
+  /// value wins"; this one answers "by how much", and there is no sentinel
+  /// because there is nothing to defer to — `1.0` already means "impose
+  /// nothing".
+  final double linetypeScale;
+
   const InstanceNode({
     required super.handle,
     required super.parent,
@@ -169,6 +198,10 @@ final class InstanceNode extends Node {
     required this.definition,
     required this.layer,
     this.color = const ByBlockColor(),
+    this.lineweight = kByBlock,
+    this.transparency = kByBlock,
+    this.linetype = ReservedHandles.byBlockLinetype,
+    this.linetypeScale = 1.0,
     super.visible = true,
   });
 
@@ -180,6 +213,10 @@ final class InstanceNode extends Node {
     Handle? definition,
     Handle? layer,
     DraftColor? color,
+    int? lineweight,
+    int? transparency,
+    Handle? linetype,
+    double? linetypeScale,
   }) =>
       InstanceNode(
         handle: handle ?? this.handle,
@@ -189,6 +226,10 @@ final class InstanceNode extends Node {
         definition: definition ?? this.definition,
         layer: layer ?? this.layer,
         color: color ?? this.color,
+        lineweight: lineweight ?? this.lineweight,
+        transparency: transparency ?? this.transparency,
+        linetype: linetype ?? this.linetype,
+        linetypeScale: linetypeScale ?? this.linetypeScale,
       );
 
   @override
@@ -201,6 +242,10 @@ final class InstanceNode extends Node {
         'definition': definition.toJson(),
         'layer': layer.toJson(),
         'color': encodeColor(color),
+        'lineweight': lineweight,
+        'transparency': transparency,
+        'linetype': linetype.toJson(),
+        'linetypeScale': linetypeScale,
       };
 
   static InstanceNode fromJson(Map<String, Object?> json) => InstanceNode(
@@ -217,6 +262,26 @@ final class InstanceNode extends Node {
         color: json['color'] == null
             ? const ByBlockColor()
             : decodeColor(json['color']! as int),
+        // Absent in v5 and earlier. BYBLOCK for the three sentinel fields and
+        // 1.0 for the scale are the correct defaults for the same reason
+        // BYBLOCK was correct for `color`: they are no-ops. `contextFor`
+        // reduces to the pass-through it performed before this field existed,
+        // so a v5 document resolves bit-identically under a v6 build.
+        //
+        // BYLAYER would not be a no-op. It would make every pre-3f.1 INSERT
+        // start imposing its layer's linetype on its definition's BYBLOCK
+        // contents, silently changing how existing drawings render.
+        lineweight:
+            json['lineweight'] == null ? kByBlock : json['lineweight']! as int,
+        transparency: json['transparency'] == null
+            ? kByBlock
+            : json['transparency']! as int,
+        linetype: json['linetype'] == null
+            ? ReservedHandles.byBlockLinetype
+            : Handle.fromJson(json['linetype']),
+        linetypeScale: json['linetypeScale'] == null
+            ? 1.0
+            : (json['linetypeScale']! as num).toDouble(),
       );
 
   @override
@@ -229,11 +294,17 @@ final class InstanceNode extends Node {
       other.visible == visible &&
       other.definition == definition &&
       other.layer == layer &&
-      other.color == color;
+      other.color == color &&
+      other.lineweight == lineweight &&
+      other.transparency == transparency &&
+      other.linetype == linetype &&
+      // Exact, not tolerant: a stored value, and Plan 3g will key a picture
+      // cache on it.
+      other.linetypeScale == linetypeScale;
 
   @override
-  int get hashCode =>
-      Object.hash(handle, parent, visible, definition, layer, color);
+  int get hashCode => Object.hash(handle, parent, visible, definition, layer,
+      color, lineweight, transparency, linetype, linetypeScale);
 
   @override
   String toString() =>

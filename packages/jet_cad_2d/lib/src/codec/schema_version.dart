@@ -11,8 +11,15 @@
 /// 5: `EntityKind.fill`. The JSON shape is unchanged -- a fill is an ordinary
 /// entity and `kind` is written by name -- but a v4 reader must refuse a
 /// document containing one rather than fail inside `EntityKind.values.byName`,
-/// and the version check at `json_codec.dart:103` is what makes it.
-const int kSchemaVersion = 5;
+/// and the version check at `json_codec.dart:104` is what makes it.
+///
+/// 6: `InstanceNode.toJson` gained `lineweight`, `transparency`, `linetype`
+/// and `linetypeScale`; `fromJson` defaults all four to their no-op values
+/// (BYBLOCK, BYBLOCK, BYBLOCK-linetype, 1.0) when absent, which is the whole
+/// of the v5->v6 migration. The bump exists for the **reader**: without it a
+/// v5 build would load a v6 file, silently drop four fields, and render a
+/// different drawing. With it, that build refuses the file and says why.
+const int kSchemaVersion = 6;
 
 class SchemaVersionError implements Exception {
   final Object? found;

@@ -53,10 +53,13 @@ void main() {
     //
     // Re-baselined in Plan 3e Task 7: kSchemaVersion moved from 4 to 5, and
     // that value is the first thing every serialisation writes.
+    //
+    // Re-baselined in Plan 3f.1 Task 1: InstanceNode.toJson gained four style
+    // keys and kSchemaVersion moved from 5 to 6.
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
-        4778422453512744465);
+        1593811103237081036);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
-        2508170127112452780);
+        -4104570370941889723);
   });
 
   test('defaults reproduce the Plan 2 corpus structurally too', () {
@@ -230,10 +233,14 @@ void main() {
     // Re-baselined in Plan 3e Task 7 in step with the sibling test above:
     // kSchemaVersion moved from 4 to 5, which shifts every fingerprint in
     // this file regardless of what `extra` drew.
+    //
+    // Re-baselined in Plan 3f.1 Task 1 in step with the sibling test above:
+    // InstanceNode.toJson gained four style keys and kSchemaVersion moved
+    // from 5 to 6.
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
-        4778422453512744465);
+        1593811103237081036);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
-        2508170127112452780);
+        -4104570370941889723);
   });
 
   test('labelFraction produces repeating strings out of the root budget', () {

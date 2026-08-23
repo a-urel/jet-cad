@@ -481,9 +481,14 @@ void main() {
     expect(reloaded.fills.trianglesFor(cmd.boundary.handle), hasLength(6));
   });
 
-  test('the schema version is 5, and a v6 document is refused', () {
-    expect(kSchemaVersion, 5);
-    expect(() => DraftDocumentCodec.decode({'schemaVersion': 6}),
-        throwsA(anything));
+  test('the schema version is 6, and a v7 document is refused by version', () {
+    expect(kSchemaVersion, 6);
+    // `isA<SchemaVersionError>()`, not `throwsA(anything)`: a bare
+    // `{'schemaVersion': N}` map fails on the missing `'header'` key too, so
+    // the loose matcher passed whenever N was the *current* version rather
+    // than a future one. The point of this test is that the refusal comes from
+    // the version guard.
+    expect(() => DraftDocumentCodec.decode({'schemaVersion': 7}),
+        throwsA(isA<SchemaVersionError>()));
   });
 }
