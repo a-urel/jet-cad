@@ -586,7 +586,7 @@ criteria on the vertices backend, and the reason is algebraic rather than a
 matter of fixture magnitude.** The painter pushes the rebase origin as the
 residual itself — `Transform2.translation(_screenOrigin.x, _screenOrigin.y)`
 (`draft_painter.dart:605,742`) — and `VerticesDrawSink` applies that residual in
-Dart `Float64` (`vertices_draw_sink.dart:317-318`) before storing into its
+Dart `Float64` (`vertices_draw_sink.dart:322-323`) before storing into its
 `Float32List`. So `(screen - origin) + origin = screen` **exactly**, whatever
 the origin, and the final pixel does not depend on it. Task 5 proved this both
 algebraically and with a magnitude sweep from 4.5e6 to 1e15.

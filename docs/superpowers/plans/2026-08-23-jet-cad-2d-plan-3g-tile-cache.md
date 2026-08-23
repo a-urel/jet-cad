@@ -1852,7 +1852,7 @@ cp lib/src/tile_cache.dart /tmp/tile_cache.dart.bak
 > remedy if it did not. **Neither works, and the reason is algebraic.** The
 > painter pushes the rebase origin *as the residual*
 > (`draft_painter.dart:605,742`) and `VerticesDrawSink` applies that residual
-> in `Float64` (`vertices_draw_sink.dart:317-318`) before its `Float32` store,
+> in `Float64` (`vertices_draw_sink.dart:322-323`) before its `Float32` store,
 > so `(screen - origin) + origin = screen` exactly and the pixel cannot depend
 > on the origin at any magnitude. **Fire M17 against a wiring test instead**:
 > subclass `VerticesDrawSink` and read the coordinate `_bake` actually hands
