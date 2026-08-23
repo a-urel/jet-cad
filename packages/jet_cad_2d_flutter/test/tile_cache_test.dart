@@ -246,10 +246,11 @@ void main() {
     // *last* in `TileGrid.visibleKeys`' order, not the frame's total, and
     // that tile is overwhelmingly likely to be one of the many that carry no
     // text at all (confirmed empirically: it reads 0, not 6 -- see Task 6's
-    // report). Proved directly instead, with one live, whole-viewport walk --
-    // the same call `measureTiledAgreement`'s live arm makes -- so the
-    // counters reflect the entire frame from a single `paint` call, and this
-    // still runs before any pixel is compared.
+    // report). Proved directly instead, with one live, whole-viewport walk:
+    // unlike `measureTiledAgreement`'s live arm, this applies no
+    // `quantiseCamera` and sets no `debugRebaseOrigin` -- it exists only to
+    // total the counters over the whole frame in one `paint` call, and that
+    // total still runs before any pixel is compared.
     final recorder = PictureRecorder();
     final canvas = Canvas(recorder);
     rig.sink.canvas = canvas;
@@ -276,6 +277,23 @@ void main() {
         tilesBakedPerFrame: 1000,
         document: translucentOverlap(measurer));
     addTearDown(rig.dispose);
+
+    // `InkReport` carries no colour information -- it counts ink, it does not
+    // read alpha -- so if `style_resolver` dropped `transparency` entirely,
+    // both arms would draw fully opaque and `expectTiledEqualsLive` would
+    // still pass at zero, exactly the trap closed for text with
+    // `textOpCount`/`culledTextCount` and left open here. Checked directly,
+    // before any pixel is compared: `translucentOverlap`'s first line is
+    // handle 1000, `ByLayerColor` on layer zero resolves to white, and
+    // `transparency: 153` must resolve to alpha `255 - 153 = 102 = 0x66` --
+    // not the opaque `0xFF` a dropped channel would give.
+    final firstLineSlot = rig.doc.entities.slotOf(const Handle(1000))!;
+    final resolvedStyle = DocumentStyleResolver(rig.doc)
+        .styleFor(firstLineSlot, StyleContext.documentRoot);
+    expect(resolvedStyle.argb, 0x66FFFFFF,
+        reason: 'transparency: 153 must resolve to a translucent ARGB, not '
+            'the opaque one a dropped transparency channel would give: '
+            '0x${resolvedStyle.argb.toRadixString(16)}');
 
     rig.paintOnce();
     await expectTiledEqualsLive(rig);
@@ -350,7 +368,8 @@ void main() {
   // worst case with headroom, not a tolerance chosen to make a test pass: a
   // real defect in the tile machinery is nowhere near it. A one-device-pixel
   // error in `TileGrid.destRectFor` moves the whole frame and reddens this at
-  // roughly two hundred times the bound (verified in Task 6a).
+  // 53x the bound -- 3192 differing against a bound of 60 (verified in Task
+  // 6a).
   //
   // **What this does not prove.** It does not prove the tiled frame equals the
   // live frame; criteria 1 and 2 make that claim, and it holds for every
