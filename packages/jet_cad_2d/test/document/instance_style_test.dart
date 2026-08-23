@@ -249,4 +249,39 @@ void main() {
           25);
     });
   });
+
+  group('linetypeScale multiplies down the tree', () {
+    test('entity 2.0 x inner 4.0 x outer 8.0 resolves to exactly 64.0', () {
+      final doc = DraftDocument.empty();
+      final inner = addDefinition(doc, const Handle(200), 'BOLT');
+      final outer = addDefinition(doc, const Handle(210), 'PLATE');
+      final child =
+          addByBlockLine(doc, inner, const Handle(201), linetypeScale: 2.0);
+      addInstance(doc, const Handle(300), outer, linetypeScale: 8.0);
+      addInstance(doc, const Handle(310), inner,
+          parent: const Handle(210), linetypeScale: 4.0);
+
+      // Exact. Every factor is a power of two, so the product is
+      // representable and `Tolerance` would only hide a wrong answer.
+      expect(
+          resolveThrough(doc, [const Handle(300), const Handle(310)], child)
+              .linetypeScale,
+          64.0);
+    });
+
+    test('an INSERT at 1.0 leaves its child alone', () {
+      // The default's no-op property, asserted rather than assumed: this is
+      // what makes every pre-3f.1 document resolve unchanged. The entity's own
+      // scale is still 2.0, never 1.0 -- the identity on both sides would
+      // prove nothing.
+      final doc = DraftDocument.empty();
+      final def = addDefinition(doc, const Handle(200), 'BOLT');
+      final child =
+          addByBlockLine(doc, def, const Handle(201), linetypeScale: 2.0);
+      addInstance(doc, const Handle(300), def);
+
+      expect(
+          resolveThrough(doc, [const Handle(300)], child).linetypeScale, 2.0);
+    });
+  });
 }

@@ -85,7 +85,11 @@ class DocumentStyleResolver implements StyleResolver {
     return StyleContext(
       color: color,
       linetype: linetype,
-      linetypeScale: inherited.linetypeScale,
+      // Multiplies, never substitutes. DXF's rule for a nested entity's
+      // effective linetype scale is a product, so nesting composes without a
+      // special case for depth: entity x every enclosing INSERT x the header's
+      // global scale, which `DraftPainter` applies at the far end.
+      linetypeScale: inherited.linetypeScale * node.linetypeScale,
       lineweight: lineweight,
       transparency: transparency,
       layer: layer,
@@ -140,7 +144,13 @@ class DocumentStyleResolver implements StyleResolver {
       lineweightHundredths:
           lineweight == kLineweightDefault ? ctx.lineweight : lineweight,
       linetype: linetype,
-      linetypeScale: document.entities.linetypeScaleAt(slot),
+      // Before Plan 3f.1 this read `document.entities.linetypeScaleAt(slot)`
+      // alone. `StyleContext.linetypeScale` was constructed, copied, compared
+      // and hashed, and no code path read it to produce a drawing — and no
+      // test could tell, because every linetypeScale literal in the repository
+      // was 1.0, the multiplicative identity.
+      linetypeScale:
+          ctx.linetypeScale * document.entities.linetypeScaleAt(slot),
     );
   }
 
