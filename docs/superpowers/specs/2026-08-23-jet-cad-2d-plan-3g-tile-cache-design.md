@@ -235,7 +235,11 @@ When a zoom settles, the whole visible set is stale. Baking it in one frame is a
 rather than removed.
 
 `kTilesBakedPerFrame` bounds how many tiles bake per frame; the rest continue to
-show the stale scaled generation until replaced. The gesture already showed
+show the stale scaled generation until replaced. **It starts at 8**, which at
+256 px covers a 154-tile visible set in twenty frames — a third of a second at
+60 fps, against the ~60 ms single-frame stall it replaces. D6's sweep may move
+it, and the results note reports the value it settled on with the frame times
+that justify it. The gesture already showed
 stale pixels, so extending that by a few frames opens no new class of error.
 
 ### D14 — Behind a flag; correctness by ink comparison, not by goldens
@@ -274,10 +278,20 @@ paint(canvas, size):
   else:
      for each visible tile key, in a fixed order:
         image = cache[key]
-          ?? (baked, if this frame's bake budget allows)
-          ?? the previous generation's covering pixels
+          ?? (baked now, if this frame's bake budget is not spent)
+          ?? the previous generation's covering region, blitted scaled
+          ?? drawn live for this tile's rect      // no previous generation
         blit at the snapped destination
 ```
+
+**The third and fourth arms are not decoration.** With `kTilesBakedPerFrame`
+bounded, a frame can want more tiles than it may bake. A tile that cannot be
+baked this frame falls back to the previous generation's pixels for its rect,
+scaled — the same thing the zoom gesture shows. **On the very first frame of the
+very first generation there is no previous generation**, so that tile is drawn
+live, clipped to its own rect. Without that arm the first frame after startup is
+partly blank, which is a bug no correctness criterion above would catch because
+every one of them measures a settled frame.
 
 ### Allocation
 
@@ -314,10 +328,24 @@ held, as `CanvasDrawSink` and `VerticesDrawSink` both already do.
 
 ### Budget and performance
 
-10. The 500,000-entity settled frame, read from **`totalSpan`**.
-11. A pan frame that is baking a newly exposed strip, same column.
-12. Peak live tile bytes stay under the declared cap.
+10. The 500,000-entity settled frame, read from **`totalSpan`**: **≤ 4.00 ms**.
+    Probe D measured 1.61 ms for a single viewport blit; the allowance covers
+    the tile grid's extra `drawImageRect` calls, whose cost D6 has not measured
+    yet. Against a live frame's 40.27 ms this is still a 10× claim.
+11. A pan frame that is baking a newly exposed strip, same column: **≤ 16.67
+    ms** at 500,000 entities — the frame budget itself, since a pan frame that
+    misses it is a dropped frame and the whole plan is about pan.
+12. Peak live tile bytes stay under **`kTileCacheBytes = 64 MiB`**. The visible
+    set at 256 px on the reference viewport is 40.4 MB, so the cap leaves about
+    half a viewport of ring and forces eviction to be real rather than
+    theoretical.
 13. Frame-path allocation: nothing per entity, viewport-bounded per frame.
+
+**Criterion 11's threshold is the one number here that is not backed by a
+measurement**, and the plan must not quietly relax it. D6's sweep runs before
+criterion 11 is evaluated; if the sweep shows 16.67 ms is unreachable at 256 px,
+the response is a different tile size or a smaller bake budget, **not a larger
+threshold**. A gate moved to fit its result is not a gate.
 
 **Criteria 10 and 11 are read from `totalSpan` and not `rasterDuration`**, and
 the reason is Probe D: its rebake arm rasterised 217,758 triangles into a texture
@@ -353,6 +381,15 @@ Each must turn a stated criterion red.
 | M8 | do not read the tables revision | a layer colour change leaves stale pixels — criterion 7 |
 | M9 | bake the whole visible set in one frame | the settle hiccup returns — criterion 11 |
 | M10 | blit without snapping | the settled frame resamples and stops being 1:1 — criterion 1 |
+| M11 | blit with `BlendMode.src` instead of `srcOver` | a tile's transparent regions overwrite the canvas beneath and translucent pixels stop compositing — criterion 4 |
+| M12 | handle `CommandApplied` in the invalidation switch but not `CommandUndone` | an undo leaves the pixels its redo would have — criterion 9 |
+| M13 | build the blit `Paint` per tile instead of once | per-frame allocation grows with the tile count — criterion 13 |
+| M14 | skip text when baking a tile | a tiled frame silently loses its labels — criterion 3 |
+
+**Fourteen mutants against thirteen criteria, and every criterion is named by at
+least one.** That property is checked here rather than assumed: Plan 3f.1's final
+review found a criterion with no possible mutant only after the plan had shipped,
+and the sentence claiming otherwise had been in its spec the whole time.
 
 M7 is the one worth stating twice: it is the mutation that passes every
 correctness gate and destroys the plan's entire reason for existing. A suite that
