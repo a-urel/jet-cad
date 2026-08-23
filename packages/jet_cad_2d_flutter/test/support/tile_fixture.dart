@@ -109,8 +109,9 @@ class TileRig {
 /// A grid of lines long enough that many of them cross tile boundaries.
 ///
 /// Anti-degenerate clause 1 is structural here: at a 64 device-pixel tile and
-/// a `dpr` of 2, a tile is 32 logical pixels wide, and every line below is 90
-/// logical pixels long at this camera.
+/// a `dpr` of 2, a tile is 32 logical pixels wide. Each line below is 190
+/// world units, which at this camera's 1.4 scale is 266 logical pixels — about
+/// eight tiles.
 DraftDocument crossingGrid(FlutterTextMeasurer measurer) {
   final doc = DraftDocument.empty(measurer: measurer);
   var handle = 1000;
