@@ -153,20 +153,20 @@ DraftDocument crossingLabels(FlutterTextMeasurer measurer) {
 /// than as a missing shape -- which is why the criterion compares bytes and
 /// not ink counts.
 ///
-/// **Deliberately not a diagonal line.** An earlier version of this fixture
-/// drew ten independent diagonals (`(20, 30 + i*6)` to `(220, 150 - i*6)`).
-/// That geometry reddens `expectTiledEqualsLive` even with `transparency: 0`
-/// -- confirmed by capturing both arms and diffing bytes directly, at both
-/// zero and non-zero transparency alike: a diagonal stroke crossing a tile
-/// seam rasterises a handful of pixels (tens, not thousands) one device pixel
-/// off from the live walk. That is a real gap in this plan's tile-boundary
-/// coverage, but it is orthogonal to what criterion 4 is chartered to prove --
-/// alpha survives `toImageSync` and the `srcOver` blit -- and reusing
+/// **Deliberately not a near-axis line.** An earlier version of this fixture
+/// drew ten near-axis diagonals (`(20, 30 + i*6)` to `(220, 150 - i*6)`).
+/// That geometry disagrees between the two paths even with `transparency: 0`,
+/// on tens of pixels out of ten thousand. Task 6 read this as a
+/// tile-*crossing* defect; Task 6a measured it and it is not one --
+/// [crossingGrid] crosses just as many seams and agrees exactly, and ten
+/// *parallel* diagonals at slope 0.6 also agree exactly. It is a property of
+/// the slope, it is the accepted gap [nearAxisDiagonals] now measures on
+/// every run, and it is orthogonal to what criterion 4 is chartered to prove
+/// -- alpha survives `toImageSync` and the `srcOver` blit. Reusing
 /// [crossingGrid]'s already-proven-exact axis-aligned geometry (criterion 2
 /// runs it at `transparency: 0` and gets zero differing pixels across the
 /// same camera and tile size) isolates that one channel instead of
-/// conflating it with the diagonal-rasterisation gap. See Task 6's report for
-/// the transcript and the byte-level detail.
+/// conflating it with the gap. See Task 6a's report for the mechanism.
 DraftDocument translucentOverlap(FlutterTextMeasurer measurer) {
   final doc = DraftDocument.empty(measurer: measurer);
   var handle = 1000;
@@ -180,6 +180,43 @@ DraftDocument translucentOverlap(FlutterTextMeasurer measurer) {
         transparency: 153);
     addLine(doc, doc.rootHandle, Handle(handle++), 10 + t, 10, 10 + t, 200,
         transparency: 153);
+  }
+  return doc;
+}
+
+/// Ten near-axis lines, the geometry that measures Task 6a's accepted gap.
+///
+/// **This fixture is expected to disagree, by a bounded amount.** Each line
+/// spans 200 world units — 560 device pixels, 8.75 tiles at this rig's 64
+/// device-pixel tile — and rises only 12 to 24 units over that span, so its
+/// stroke edges run almost parallel to the pixel rows. Every fixture here
+/// crosses many tile seams; so does [crossingGrid], which agrees exactly. The
+/// variable is the slope, not the crossing.
+///
+/// **The mechanism, measured in Task 6a and not fixable from this
+/// repository.** A tile is rasterised into its own surface, so every vertex
+/// reaches Skia offset by the tile's position. That offset is a whole number
+/// of device pixels, but it still moves a coordinate to a different binary
+/// exponent, and Skia's `Float32` pipeline cannot always hold the low bits
+/// there: for this fixture's leftmost vertices the device x moves from
+/// `-17.943408966064453` to an exact `-401.94340896606445` that rounds to
+/// `-401.94342041015625`, an error of **1.144e-05 device pixels**. On a slope
+/// whose stroke edge passes exactly through a sample point — here every 50
+/// device pixels, because the device slope is exactly 3/50 — that error
+/// decides the tie, and one pixel moves. Reproduced with no `jet_cad` code at
+/// all: the same `Vertices` drawn twice into two 800x600 surfaces, one of them
+/// translated by a whole number of device pixels, differs on the same pixels.
+///
+/// Folding the offset into the camera instead (what `TileGrid.bakeCameraFor`
+/// does) rounds in `VerticesDrawSink`'s `Float32` vertex buffer rather than in
+/// Skia's matrix, at the same magnitude, and was measured to give **pixel-for-
+/// pixel identical** disagreement. There is no third place to put the offset.
+DraftDocument nearAxisDiagonals(FlutterTextMeasurer measurer) {
+  final doc = DraftDocument.empty(measurer: measurer);
+  var handle = 1000;
+  for (var i = 0; i < 10; i++) {
+    addLine(doc, doc.rootHandle, Handle(handle++), 20, 30 + i * 6.0, 220,
+        150 - i * 6.0);
   }
   return doc;
 }

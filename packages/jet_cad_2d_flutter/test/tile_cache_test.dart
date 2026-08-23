@@ -340,4 +340,85 @@ void main() {
             'tile has no ink of its own; $erased of ${bytes.length ~/ 4} '
             'pixels went transparent');
   });
+
+  // The accepted gap, measured on every run rather than rediscovered.
+  //
+  // **What this proves.** A near-axis stroke disagrees between the live and
+  // tiled paths on a small, bounded number of pixels, every one of them a
+  // pure displacement -- ink present on one side and absent on the other,
+  // never a pixel that carries a different colour. The bound is the measured
+  // worst case with headroom, not a tolerance chosen to make a test pass: a
+  // real defect in the tile machinery is nowhere near it. A one-device-pixel
+  // error in `TileGrid.destRectFor` moves the whole frame and reddens this at
+  // roughly two hundred times the bound (verified in Task 6a).
+  //
+  // **What this does not prove.** It does not prove the tiled frame equals the
+  // live frame; criteria 1 and 2 make that claim, and it holds for every
+  // axis-aligned and general-slope fixture measured. It does not prove the
+  // gap is harmless on a GPU backend, and it does not prove the bound holds
+  // at every camera and every slope -- Task 6a swept 82 slopes at one camera
+  // and one tile size. See `nearAxisDiagonals` for the mechanism.
+  group('accepted gap: near-axis strokes displace a bounded number of pixels',
+      () {
+    Future<InkReport> measure(DraftDocument Function(FlutterTextMeasurer) of,
+        {int minimumInk = 500}) async {
+      final measurer = FlutterTextMeasurer();
+      addTearDown(measurer.clear);
+      final rig = TileRig(
+          tileDevicePixels: 64,
+          tilesBakedPerFrame: 1000,
+          document: of(measurer));
+      addTearDown(rig.dispose);
+      final report = await measureTiledAgreement(rig);
+      // The floor first, for the reason `expectTiledEqualsLive` states: two
+      // blank captures agree perfectly and prove nothing.
+      expect(report.liveInk, greaterThan(minimumInk), reason: '$report');
+      expect(report.tiledInk, greaterThan(minimumInk), reason: '$report');
+      // Every disagreement is ink moved, never ink recoloured. A blend, alpha
+      // or colour-resolution defect would break this before it broke a count.
+      expect(
+          report.differingPixels, report.strayPixels + report.uncoveredPixels,
+          reason: 'a pixel differing without being stray or uncovered is a '
+              'colour defect, which this gap is not: $report');
+      return report;
+    }
+
+    test('the ten-line fan stays inside the bound', () async {
+      final report = await measure(nearAxisDiagonals);
+      // Measured 2026-08-24: differing 36 of 10342 ink, 0.348%.
+      expect(report.differingPixels, lessThanOrEqualTo(60), reason: '$report');
+      expect(report.differingPixels / report.liveInk, lessThan(0.01),
+          reason: '$report');
+    });
+
+    test('the worst single slope measured stays inside the bound', () async {
+      // The two worst of the 82 slopes Task 6a swept at this camera: a
+      // near-horizontal line rising 20 world units over 200, and a
+      // near-vertical one running 30 over 200. Each spans 8.75 tiles.
+      // Measured 2026-08-24: 24 of 1030 ink (2.330%) and 26 of 1092 (2.381%).
+      for (final (label, x0, y0, x1, y1)
+          in <(String, double, double, double, double)>[
+        ('near-horizontal', 20, 84, 220, 104),
+        ('near-vertical', 84, 20, 114, 220),
+      ]) {
+        final report = await measure((measurer) {
+          final doc = DraftDocument.empty(measurer: measurer);
+          addLine(doc, doc.rootHandle, const Handle(1000), x0, y0, x1, y1);
+          return doc;
+        });
+        expect(report.differingPixels, lessThanOrEqualTo(45),
+            reason: '$label: $report');
+        expect(report.differingPixels / report.liveInk, lessThan(0.04),
+            reason: '$label: $report');
+      }
+    });
+
+    test('the same camera and tile size agree exactly on axis-aligned ink',
+        () async {
+      // The control that makes the slope the variable rather than the tiling:
+      // `crossingGrid` crosses just as many seams and disagrees on nothing.
+      final report = await measure(crossingGrid, minimumInk: 5000);
+      expect(report.differingPixels, 0, reason: '$report');
+    });
+  });
 }
