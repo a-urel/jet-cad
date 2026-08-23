@@ -11,7 +11,9 @@ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 /// so a round-trip that transposes two keys, or drops one to its default,
 /// lands on a number no assertion here expects. `linetypeScale` is 4.0 and
 /// not 1.0: this plan's anti-degenerate rule forbids the identity, because
-/// the identity is what hid the severed channel for fifty-four fixtures.
+/// the identity is what hid the severed channel for fifty-three lines —
+/// every line in `jet_cad_2d`'s `lib/` and `test/` that already wrote the
+/// literal `linetypeScale: 1.0` before this plan.
 InstanceNode styledInstance() => InstanceNode(
       handle: const Handle(300),
       parent: const Handle(1),

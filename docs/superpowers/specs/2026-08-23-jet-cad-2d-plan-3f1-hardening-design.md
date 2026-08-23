@@ -90,7 +90,7 @@ reaches the dashes. The *context's* does not.
 ### Defect 3 — no fixture in the repository could see defect 2
 
 The identifier `linetypeScale` appears on 83 lines across `lib/` and `test/`
-in `jet_cad_2d`; 54 of those are the literal `1.0`, and the rest are
+in `jet_cad_2d`; 53 of those are the literal `1.0`, and the rest are
 declarations and pass-throughs. **Every literal value in the repository is
 `1.0`**, in both packages, with a single exception:
 `test/store/entity_store_test.dart:44` uses `2.5`, in a storage round-trip test
@@ -411,10 +411,15 @@ unverified. The v5 fixture carries it explicitly.
 **Files created:** `test/invariants/text_cache_invariants_test.dart`,
 `test/invariants/frame_accounting_test.dart`, both in `jet_cad_2d_flutter`.
 **File moved:** `TextKeySink`, from `test/rig/rig_support.dart` to
-`test/support/`, imported back by the rig. It has three readers today —
-`rig_support.dart:111`, `paint_microbench_test.dart` (four sites) and
-`flutter_text_measurer_test.dart:121` — and the new invariants make a fourth.
-One definition, four readers.
+`test/support/`, imported back by the rig. `rig_support.dart:111` is the
+class's own declaration site today, not a reader of it; its two real readers
+are `paint_microbench_test.dart` (four sites) and
+`flutter_text_measurer_test.dart:121`, both reaching it through
+`rig_support.dart`. The class is better placed in `test/support/` than
+declared inside a rig file — that is the move's justification — but neither
+new invariants file imports it (`text_cache_invariants_test.dart` says
+outright that a `TextKeySink` cannot carry criterion 12), so the move does not
+add a reader.
 
 **Not touched:** `dart_test.yaml`, the `rig` tag's `skip:`, the rig's timing
 prints, or the rig header's argument.
@@ -576,11 +581,15 @@ explains why the demonstration belongs to 3g.
 
 ## Failable criteria
 
-Seventeen. Sixteen of them are claims a test makes, and each of those has at
-least one named mutant below that must turn it red. **Criterion 17 is the
-exception and is stated as one**: it is a measurement of whether an instrument
-works in an environment, not a claim about code under test, so no mutation can
-address it. Its stop clause is what makes it failable.
+Seventeen. Fifteen of them are claims a test makes, and each of those has at
+least one named mutant below that must turn it red. **Criteria 11 and 17 are
+the exceptions, and both are stated as measurements**: 11 is `git status
+--short packages/jet_cad_2d_flutter/test/golden` — no golden test in the
+repository deserialises a document, so no `fromJson`-default mutation can move
+a PNG, which means no mutant can redden it — and 17 is whether an instrument
+works in an environment, not a claim about code under test. Neither can be
+addressed by a mutation. Criterion 17's own stop clause is what makes it
+failable.
 
 **Section 1 — model and resolution**
 
@@ -646,7 +655,7 @@ address it. Its stop clause is what makes it failable.
 | M7 | the BYLAYER arm for `transparency` passes the sentinel through | 6 |
 | M8 | the BYLAYER arm for `linetype` passes the sentinel through | 7 |
 | M9 | the `kLineweightDefault` arm is dropped | 8 |
-| M10 | v6 `fromJson` defaults `linetype` to `byLayerLinetype` | 9, 11 |
+| M10 | v6 `fromJson` defaults `linetype` to `byLayerLinetype` | 9, 10 |
 | M11 | `InstanceNode.toJson` omits `linetypeScale` | 10 |
 | M12 | `metricsLimit` defaults to `kParagraphCacheLimit` — **Plan 3f's survivor** | 12 |
 | M13 | `paragraphLimit` defaults to `kMetricsCacheLimit` | 12 |
@@ -674,8 +683,9 @@ its explanations was itself wrong.
   root — so a resolution that reads the wrong one of the three lands on a
   different number.
 
-Fifty-three fixtures in this repository already wrote `1.0` and none of them
-could see that the channel was severed. Decision 5 makes the new code
+Fifty-three lines in `jet_cad_2d`'s `lib/` and `test/` already wrote the
+literal `1.0` (Defect 3, above) and none of them could see that the channel
+was severed. Decision 5 makes the new code
 behaviourally identical at its defaults, which means a fixture at the defaults
 proves nothing at all.
 

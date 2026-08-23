@@ -27,7 +27,10 @@ Handle addLayer(
   // and the substituted layer distinct values) collides on both handle and
   // name unless the existing record is removed first -- the same pattern
   // `test/index/query_filter_test.dart:381` uses to replace a layer record.
-  doc.tables.layers.remove(handle);
+  // Only layer 0 is pre-seeded (`tables.dart:509`), and only it needs
+  // replacing. An unguarded remove would silently overwrite a genuine
+  // accidental duplicate instead of failing on it.
+  if (handle == ReservedHandles.layerZero) doc.tables.layers.remove(handle);
   doc.tables.layers.add(LayerRecord(
     handle: handle,
     name: name,
@@ -171,6 +174,12 @@ void main() {
           lineweight: 191, transparency: 88, linetype: const Handle(71));
       final def = addDefinition(doc, const Handle(200), 'BOLT');
       addByBlockLine(doc, def, const Handle(201));
+      // The container instance `300` places, and the parent every `310`
+      // variant nests under below: harmless to leave undefined for
+      // `resolveThrough` (which calls the resolver directly and never
+      // walks), but a real definition is what makes this a document a
+      // traversal could actually load and paint.
+      addDefinition(doc, const Handle(210), 'PLATE');
       // The outer placement puts layer STRUCT into the context; the inner
       // instance is on layer 0, so it inherits STRUCT and must read STRUCT's
       // record for its own BYLAYER properties.

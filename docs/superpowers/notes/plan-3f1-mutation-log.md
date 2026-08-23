@@ -414,9 +414,18 @@ the single-test prediction.** `flutter_text_measurer_test.dart`'s
 remedy `645b027`) catches the *metrics*-side symptom directly, because its own
 sweep of 513 distinct metrics keys is already past the mutated bound. It
 cannot and does not touch `liveParagraphCount` — it never calls `paragraphFor`.
-This task's own `text_cache_invariants_test.dart` is the one that reddens on
-the *paragraph* side of the same mutant (`liveMetricsCount` 512 against an
-expected 600) — the half this task exists to close. Every other test in the
+This task's own `text_cache_invariants_test.dart` also reddens from the
+*metrics* side of the same mutant, at `expect(measurer.liveMetricsCount,
+kDistinctLabels)` (`Expected: <600> Actual: <512>`) — **not** the paragraph
+side, as an earlier version of this entry claimed. That earlier wording named
+`liveMetricsCount` and called it the paragraph side in the same clause, which
+was wrong: `liveMetricsCount` is the metrics counter under any name. What this
+mutant actually shows is that the metrics half is covered twice over, by two
+independent tests reading two independent counters (`liveMetricsCount` here,
+and the sibling file's own eviction pin) — it is not evidence that this task's
+unique contribution, the paragraph half, is gated. **M13**, below, is the
+mutant that proves that: it fails only at `liveParagraphCount`, and nothing
+before this task ever called `paragraphFor`. Every other test in the
 301-test suite (at the time this mutant was fired) stayed green. **KILLED**,
 from two independent angles.
 

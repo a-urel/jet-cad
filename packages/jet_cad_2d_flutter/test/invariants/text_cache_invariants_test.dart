@@ -19,7 +19,11 @@
 // closes that half: a real paint through `CanvasDrawSink` fills both maps
 // at once, and the 600-into-512 eviction arithmetic is pinned
 // behaviourally rather than restated. Firing mutant 7 again reddens both
-// files, each from its own side of the cache.
+// files, but from the *same* side of the cache — the metrics side, at
+// `liveMetricsCount` in each. That is real evidence the metrics half is
+// doubly covered, not that this file's own paragraph half is gated; mutant
+// 13 (`paragraphLimit` defaulting to `kMetricsCacheLimit`) is the one that
+// proves that, since nothing before this file ever called `paragraphFor`.
 
 import 'dart:ui';
 
