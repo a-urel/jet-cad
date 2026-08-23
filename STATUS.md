@@ -1014,6 +1014,14 @@ onto instance resolution rather than fixed, an accepted gap from the spec.
 > Plan 3c. On the R2 corpus at 50,000 entities it is **+30% on build and +47% on
 > raster**. Not uniform. A plan budgeting against the older figure should know.
 >
+> **The design and the plan are written.**
+> Spec: [docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3g-tile-cache-design.md](docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3g-tile-cache-design.md)
+> — fourteen decisions, thirteen failable criteria, seventeen named mutants
+> (sixteen firable, M3 deferred to G1), four accepted gaps, a seven-clause
+> anti-degenerate rule.
+> Plan: [docs/superpowers/plans/2026-08-23-jet-cad-2d-plan-3g-tile-cache.md](docs/superpowers/plans/2026-08-23-jet-cad-2d-plan-3g-tile-cache.md)
+> — thirteen tasks, **not yet executed**.
+>
 > The rest of this section is what 3f, 3f.1 and 3d handed 3g, and all of it still
 > stands. Only the **shape of the cache** has changed.
 
