@@ -439,7 +439,37 @@ second half: a corpus that **pushes past the bound under test**. A default is
 exercised only where a wrong value would change the answer, and below 512
 distinct keys no value of `metricsLimit` changes anything.
 
-After a **single** paint that draws all 600:
+**The sink is `CanvasDrawSink` over a real `Canvas`, and nothing else will
+do.** The two maps are filled by two different calls on two different paths:
+
+- `measure()` fills the metrics map, and the painter calls it directly
+  (`draft_painter.dart:873`). Any sink reaches it.
+- `paragraphFor` fills the paragraph map, and it has exactly **one** production
+  caller — `CanvasDrawSink.text` (`canvas_draw_sink.dart:207`), which then
+  hands the paragraph to `canvas.drawParagraph`.
+
+So the obvious helper is the wrong one: `paintToRecording`
+(`test/support/fixtures.dart:167`) drives a `RecordingDrawSink`, and a
+`TextKeySink` records nothing but keys. Either would report `textOpCount = 600`
+with `liveParagraphCount` sitting at **zero**, and the two paragraph rows of
+this criterion would be unimplementable as stated.
+
+The fixture therefore paints through a `CanvasDrawSink` constructed with the
+same bare measurer, over a `Canvas(PictureRecorder())`, and disposes the
+recorded picture afterwards — `recorder.endRecording().dispose()`, the shape
+`test/vertices_draw_sink_test.dart` already uses at ten sites. A test that
+leaves a `Picture` alive is the "moved the leak" shape Plan 3f's own rule was
+written against.
+
+**The baseline is stated, not assumed.** `doc.extents` measures text through
+`entityBounds`, so building the document and its index already warms the
+*metrics* map with all 600 keys before any paint happens. That is harmless for
+the four counters below — the same 600 keys, still no evictions — but it is not
+harmless for `layoutCount`, which this criterion deliberately does not assert.
+Plan 3f's Task 5 lost a round to exactly this warm-up. Build, index, then take
+the four readings after **one** measured paint.
+
+After that single paint, which must draw all 600:
 
 | counter | expected | under mutant 7 |
 |---|---|---|
@@ -577,10 +607,14 @@ address it. Its stop clause is what makes it failable.
 
 **Section 2 — structural invariants**
 
-12. A bare-constructed `FlutterTextMeasurer()` over the 600-key fixture reads
-    `liveMetricsCount=600`, `metricsEvictionCount=0`, `liveParagraphCount=512`,
-    `paragraphEvictionCount=88`, with `textOpCount=600` and `culledTextCount=0`
-    proving the fixture drew what it claims.
+12. A bare-constructed `FlutterTextMeasurer()` over the 600-key fixture,
+    painted **through a `CanvasDrawSink` over a `Canvas(PictureRecorder())`
+    sharing that measurer**, reads `liveMetricsCount=600`,
+    `metricsEvictionCount=0`, `liveParagraphCount=512`,
+    `paragraphEvictionCount=88`, with `textOpCount=600` and
+    `culledTextCount=0` proving the fixture drew what it claims. The recorded
+    picture is disposed; a `RecordingDrawSink` or `TextKeySink` cannot carry
+    this criterion, because neither reaches `paragraphFor`.
 13. `referenceWalk`, called directly and without `minTextCapPixels`, culls
     sub-threshold text.
 14. `textOpCount + culledTextCount + skippedTextCount` equals the frame's text
