@@ -326,13 +326,21 @@ In `paint`, replace the origin derivation:
 
 Note the precedence: an injected origin wins over `debugDisableRebasing`, because a caller that supplies one has already decided.
 
-In `paint`'s leaf visitor, beside `_rootLeaves++`:
+In `paint`'s leaf visitor, immediately before the `_drawLeaf` call:
+
+> **Corrected 2026-08-23, mid-execution.** An earlier revision named
+> `_rootLeaves++` and `_defLeaves++` as the anchors. **Those counters do not
+> exist on `main`** — they are Probe B instrumentation on the unmerged
+> `spike/picture-cache-price` branch, and the plan cited them from memory of
+> that tree. Place the calls by structure, not by the missing anchors, and
+> the reviewer verifies the placement fires exactly once per leaf drawn and
+> once per container descended.
 
 ```dart
       debugOnVisit?.call(document.entities.handleAt(slot));
 ```
 
-In `_drawContainer`'s leaf loop, beside `_defLeaves++` — use `document.entities.handleAt(slot)`, which the loop already computed as `leafHandle`:
+In `_drawContainer`'s leaf loop, immediately before the `_drawLeafComposed` call and **after** the tree/overlay duplicate `continue` — use `leafHandle`, which the loop already computed:
 
 ```dart
       debugOnVisit?.call(Handle(leafHandle));
