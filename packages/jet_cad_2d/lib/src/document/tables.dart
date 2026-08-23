@@ -20,11 +20,58 @@ abstract class TableRecord {
   Map<String, Object?> toJson();
 }
 
+typedef VoidCallback = void Function();
+
+/// The subset of Flutter's `Listenable` that `Listenable.merge` requires.
+///
+/// Declared here rather than imported: this package has no Flutter dependency
+/// and gains none for one interface. Flutter's `Listenable.merge` accepts any
+/// object with these two methods through its own `Listenable` type, so
+/// `DraftCanvas` adapts this in Task 9 rather than passing it directly.
+abstract class TableListenable {
+  void addListener(VoidCallback listener);
+  void removeListener(VoidCallback listener);
+}
+
+/// A `Listenable` without Flutter.
+///
+/// `package:jet_cad_2d` is pure Dart on purpose — no `dart:ui`, no Flutter —
+/// so `foundation.ChangeNotifier` is not available. This is the whole of the
+/// contract `Listenable.merge` needs.
+class _TablesNotifier implements TableListenable {
+  final List<VoidCallback> _listeners = [];
+
+  @override
+  void addListener(VoidCallback listener) => _listeners.add(listener);
+
+  @override
+  void removeListener(VoidCallback listener) => _listeners.remove(listener);
+
+  void fire() {
+    // Copied before iteration: a listener that removes itself while being
+    // notified would otherwise mutate the list under the loop.
+    for (final listener in List.of(_listeners)) {
+      listener();
+    }
+  }
+}
+
 /// One named table — layers, linetypes, text styles, and so on.
 ///
 /// Generic rather than six near-identical classes: the only thing that varies
 /// per table is the record type.
 class TableSection<T extends TableRecord> {
+  /// Called after a mutation that actually changed this section.
+  ///
+  /// **Not a `ChangeNotifier` of its own.** `DocumentTables` holds six sections
+  /// as `late final` fields with no back-reference (`tables.dart`), and a
+  /// notifier per section would make a listener subscribe six times and a
+  /// caller reason about six revisions. One counter on the owner is the whole
+  /// contract Plan 3g needs.
+  TableSection({this.onMutated});
+
+  final void Function()? onMutated;
+
   final Map<Handle, T> _byHandle = {};
   final Map<String, Handle> _byName = {};
 
@@ -56,16 +103,20 @@ class TableSection<T extends TableRecord> {
     if (_byName.containsKey(key)) throw DuplicateTableNameError(record.name);
     _byHandle[record.handle] = record;
     _byName[key] = record.handle;
+    onMutated?.call();
   }
 
   void remove(Handle handle) {
     final record = _byHandle.remove(handle);
-    if (record != null) _byName.remove(record.name.toLowerCase());
+    if (record == null) return;
+    _byName.remove(record.name.toLowerCase());
+    onMutated?.call();
   }
 
   void clear() {
     _byHandle.clear();
     _byName.clear();
+    onMutated?.call();
   }
 }
 
@@ -469,14 +520,48 @@ class AppIdRecord implements TableRecord {
 
 /// Every named table a document owns.
 class DocumentTables {
-  final TableSection<LayerRecord> layers = TableSection();
-  final TableSection<LinetypeRecord> linetypes = TableSection();
-  final TableSection<TextStyleRecord> textStyles = TableSection();
-  final TableSection<PatternRecord> patterns = TableSection();
-  final TableSection<DimStyleRecord> dimStyles = TableSection();
-  final TableSection<AppIdRecord> appIds = TableSection();
+  DocumentTables() {
+    layers = TableSection(onMutated: _bump);
+    linetypes = TableSection(onMutated: _bump);
+    textStyles = TableSection(onMutated: _bump);
+    patterns = TableSection(onMutated: _bump);
+    dimStyles = TableSection(onMutated: _bump);
+    appIds = TableSection(onMutated: _bump);
+  }
 
-  DocumentTables();
+  late final TableSection<LayerRecord> layers;
+  late final TableSection<LinetypeRecord> linetypes;
+  late final TableSection<TextStyleRecord> textStyles;
+  late final TableSection<PatternRecord> patterns;
+  late final TableSection<DimStyleRecord> dimStyles;
+  late final TableSection<AppIdRecord> appIds;
+
+  int _revision = 0;
+  final _TablesNotifier _changes = _TablesNotifier();
+
+  /// Bumped by every table mutation that changed something.
+  ///
+  /// **Table mutations reach the command system not at all.** `DocChange` is
+  /// emitted only by `undo.dart`, and a layer edit goes through `TableSection`
+  /// directly, so before this counter existed a layer colour change produced
+  /// no signal of any kind. Plan 3g's tile cache reads it, and
+  /// `DraftCanvas` merges [changes] into its repaint listenable — the counter
+  /// alone would be correct and never reached, because a layer edit causes no
+  /// paint.
+  ///
+  /// **Every table record is `@immutable` with final fields, and `add` throws
+  /// on a duplicate handle, so changing a record is necessarily
+  /// remove-then-add and both are counted. If a record ever gains a setter,
+  /// that mutation is invisible here.**
+  int get mutationRevision => _revision;
+
+  /// Notifies after any table mutation.
+  TableListenable get changes => _changes;
+
+  void _bump() {
+    _revision++;
+    _changes.fire();
+  }
 
   /// Seeds the records a document cannot function without.
   ///
