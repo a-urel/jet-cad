@@ -4,7 +4,8 @@
 **Verified against:** `main` at `b1e9ec1` — Plan 3f.1's last task commit (Task
 7 produced no commit; the tree at `b1e9ec1` is what its full revert restored
 and both a task reviewer and a re-reviewer confirmed byte-identical), the
-exact tree the suites below were run against — **not yet pushed**, working
+exact tree the suites below were run against — **pushed on 2026-08-23**, the
+branch landing at `c6437e9` with the ledger archive on top of it, working
 tree clean apart from the three files the traps below say never to commit.
 Every suite count below was produced by running the suite on the **merged**
 result, not by reading a report and not on the branch before it landed.
@@ -109,7 +110,13 @@ that note guesses, and Plan 3b's claim that CPU-only paths are unaffected is
 [docs/superpowers/notes/2026-08-20-dash-leaf-separation.md](docs/superpowers/notes/2026-08-20-dash-leaf-separation.md)
 holds the drawn geometry fixed (`screenSpaceLeafCount=1664` in all three arms)
 and moves only `dashedFraction`. The frame moves **6.0×**, so **the unit of
-render cost is the canvas call, not the drawn leaf**. Every per-leaf µs figure
+render cost is the canvas call, not the drawn leaf — on the canvas backend.**
+**That qualification is not decoration.** The 2026-08-23 spike below moves a
+vertices frame from 20 to 633 `drawVertices` calls at a fixed triangle count
+and raster does not respond. Both findings hold: a `drawPath` call carries a
+tessellation into its `Entity`, a `drawVertices` call carries triangles that
+are already built, and the cost per call is a function of what the call
+contains. Every per-leaf µs figure
 in Plans 3a, 3b and 3c is an artefact of a corpus where dash spans and leaves
 are collinear — do not carry them forward. `build` is linear in call count to
 ±30 µs; raster is super-linear because each call is one Impeller `Entity`. At
@@ -958,6 +965,33 @@ measured 3,876 still beside it; and the malformed-layer asymmetry — mirrored
 onto instance resolution rather than fixed, an accepted gap from the spec.
 
 ### Plan 3g — the definition/tile picture cache
+
+> **Read this first: the 2026-08-23 spike reverses this section's premise.**
+> [docs/superpowers/notes/2026-08-23-picture-cache-price-spike.md](docs/superpowers/notes/2026-08-23-picture-cache-price-spike.md)
+> priced the definition-`Picture` route on the vertices backend and found the
+> objection that would have killed it — one flush plus one `drawPicture` per
+> visible instance, a 1-call frame becoming a 700-call one — **does not hold**:
+> raster is flat from 20 to 633 `drawVertices` calls at a fixed triangle count,
+> and wrapping a `drawVertices` in a `Picture` and replaying it costs nothing at
+> raster time.
+>
+> **What it found instead is a harder limit.** Every configuration ever measured
+> here, this spike's contaminated rows and Plan 3d's clean ones alike, is
+> **raster-bound**. A definition-level cache — `Picture` or pre-tessellated
+> vertices — attacks **build only**. Take the walk, the style resolution, the
+> dashing and the join construction to zero and the 500,000-entity frame still
+> sits at 21.64 ms, above the 16.67 ms budget.
+>
+> **The spike's recommendation is that 3g be a tile cache whose tiles are
+> rasterised**, not a definition `Picture` cache — and that recommendation is
+> itself **gated on a measurement nobody has taken** (Probe D: does a blit beat
+> drawing the triangles it replaces). The spike's timings were taken under
+> macOS Low Power Mode on battery and are **contaminated**; its relative
+> results survive that and its absolute milliseconds do not. The clean pass,
+> Probe D, and four other debts are listed in the note's "Owed" section.
+>
+> The rest of this section is what 3f, 3f.1 and 3d handed 3g, and all of it
+> still stands. Only the **shape of the cache** is in question.
 
 **What 3f hands it, and one question it must answer first.**
 
