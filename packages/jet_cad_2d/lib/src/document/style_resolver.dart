@@ -29,24 +29,65 @@ class DocumentStyleResolver implements StyleResolver {
     if (node is! InstanceNode) return inherited;
     // An instance on layer 0 is substituted onto the layer it is placed
     // through, exactly as an entity is in [styleFor]. That one effective layer
-    // answers both questions this method asks — which layer supplies this
-    // instance's own BYLAYER colour, and which layer it passes down — so it is
-    // computed once. Reading `node.layer` for the colour while passing the
+    // answers every question this method asks — which layer supplies this
+    // instance's BYLAYER properties, and which layer it passes down — so it is
+    // computed once. Reading `node.layer` for a property while passing the
     // substituted layer down would make one node report two effective layers.
     final layer =
         node.layer == ReservedHandles.layerZero ? inherited.layer : node.layer;
+    // One lookup, not four. Before Plan 3f.1 only `color` consulted the record;
+    // four properties asking the same table four times would be four map
+    // lookups per instance per frame, on a path the non-negotiables bound.
+    final record = document.tables.layers[layer];
+
     final encoded = encodeColor(node.color);
     final color = switch (encoded) {
       kByBlock => inherited.color,
-      kByLayer => _layerColorOf(layer, inherited),
+      kByLayer => _concreteLayerColor(record, inherited),
       _ => encoded,
     };
+
+    // `kLineweightDefault` is a *third* sentinel, not a width, and it must not
+    // survive into `StyleContext.lineweight` — a field whose own doc comment
+    // declares it concrete. It can arrive by either route: written on the
+    // INSERT itself, or read off a layer record, which
+    // `test/document/tables_test.dart:13` already does.
+    int concrete(int value) =>
+        value == kLineweightDefault ? inherited.lineweight : value;
+    final lineweight = switch (node.lineweight) {
+      kByBlock => inherited.lineweight,
+      kByLayer => concrete(record?.lineweight ?? inherited.lineweight),
+      _ => concrete(node.lineweight),
+    };
+
+    final transparency = switch (node.transparency) {
+      kByBlock => inherited.transparency,
+      kByLayer => record?.transparency ?? inherited.transparency,
+      _ => node.transparency,
+    };
+
+    // Spelled as nested conditionals rather than a switch because
+    // `ReservedHandles.byBlockLinetype` is a `Handle`, not an `int` constant
+    // pattern — the same shape `styleFor` uses for the entity-side read.
+    //
+    // Absence is checked; malformedness is not. A layer whose *colour* is
+    // itself BYLAYER or BYBLOCK is rejected by `_concreteLayerColor`, and a
+    // layer whose *linetype* is one of those sentinels is not — an asymmetry
+    // this method inherits from `styleFor` rather than introducing. An INSERT
+    // and an entity resolving the same malformed layer differently would be a
+    // new defect; fixing the entity side is a separate change.
+    final linetype = node.linetype == ReservedHandles.byBlockLinetype
+        ? inherited.linetype
+        : node.linetype == ReservedHandles.byLayerLinetype
+            ? (record?.linetype ?? inherited.linetype)
+            : node.linetype;
+
     return StyleContext(
       color: color,
-      linetype: inherited.linetype,
+      linetype: linetype,
       linetypeScale: inherited.linetypeScale,
-      lineweight: inherited.lineweight,
-      transparency: inherited.transparency,
+      lineweight: lineweight,
+      transparency: transparency,
       layer: layer,
     );
   }
@@ -102,9 +143,6 @@ class DocumentStyleResolver implements StyleResolver {
       linetypeScale: document.entities.linetypeScaleAt(slot),
     );
   }
-
-  int _layerColorOf(Handle layer, StyleContext inherited) =>
-      _concreteLayerColor(document.tables.layers[layer], inherited);
 
   int _concreteLayerColor(LayerRecord? record, StyleContext ctx) {
     if (record == null) return ctx.color;
