@@ -89,10 +89,12 @@ reaches the dashes. The *context's* does not.
 
 ### Defect 3 — no fixture in the repository could see defect 2
 
-`linetypeScale:` appears 53 times across `lib/` and `test/` in `jet_cad_2d`,
-plus every render fixture in `jet_cad_2d_flutter`. **Every one of them is
-`1.0`**, with a single exception: `test/store/entity_store_test.dart:44` uses
-`2.5`, in a storage round-trip test that never resolves a style.
+The identifier `linetypeScale` appears on 83 lines across `lib/` and `test/`
+in `jet_cad_2d`; 54 of those are the literal `1.0`, and the rest are
+declarations and pass-throughs. **Every literal value in the repository is
+`1.0`**, in both packages, with a single exception:
+`test/store/entity_store_test.dart:44` uses `2.5`, in a storage round-trip test
+that never resolves a style.
 
 `1.0` is the multiplicative identity. A channel that is connected and a channel
 that is severed produce the same output when every value flowing through it is
@@ -106,18 +108,29 @@ with the force of a criterion.**
 ### Defect 4 — the structural invariants are printed, not asserted, in a suite that does not run
 
 Plan 3f's mutant 7 — `metricsLimit` defaulting to `kParagraphCacheLimit` —
-passed all 297 tests in the suite it shipped with. Two independent things had
-to be true for that:
+passed all 297 tests in the suite it shipped with.
 
-1. **Every test in `flutter_text_measurer_test.dart` constructs its subject
-   with both bounds passed explicitly.** A test file that always supplies a
-   default cannot see that default being wrong.
-2. **The one place the defect was visible does not run.**
-   `test/rig/paint_microbench_test.dart` printed
-   `liveMetrics=512 metricsEvictions=608634` for a run that should have read
-   `liveMetrics=4020 metricsEvictions=0` — and passed, because the file has no
-   `expect` in it, and because `dart_test.yaml` marks the `rig` tag
-   `skip: "run explicitly: flutter test --tags rig --run-skipped"`.
+**The recorded explanation for that is wrong, and correcting it changes the
+remedy.** `docs/superpowers/notes/plan-3f-mutation-log.md:407-410` states that
+every other test in `flutter_text_measurer_test.dart` constructs the measurer
+with both limits given explicitly. It does not: **nine of its twelve
+constructions are bare** — `FlutterTextMeasurer()` at lines 12, 23, 48, 70, 88,
+145, 157, 223 and 240 — one passes `paragraphLimit` alone (line 35), and only
+two pass both (lines 175 and 199).
+
+So bare construction was already the majority case and still caught nothing.
+The real reason is single, not double: **no test, bare or otherwise, ever
+pushed past 512 distinct metrics keys**, so no assertion in the file was
+sensitive to `metricsLimit`'s value at all. A default is not exercised by being
+used; it is exercised by being used *where a wrong value would change the
+answer*.
+
+The second condition is separate and does hold: **the one place the defect was
+visible does not run.** `test/rig/paint_microbench_test.dart` printed
+`liveMetrics=512 metricsEvictions=608634` for a run that should have read
+`liveMetrics=4020 metricsEvictions=0` — and passed, because the file has no
+`expect` in it, and because `dart_test.yaml` marks the `rig` tag
+`skip: "run explicitly: flutter test --tags rig --run-skipped"`.
 
 The rig's own header argues its position and **is right about what it is
 arguing**:
@@ -164,9 +177,36 @@ as it already resolves `color`.**
 For each of `lineweight`, `transparency`, `linetype`:
 
 - BYBLOCK → the inherited value.
-- BYLAYER → the **effective** layer's record; falling back to the inherited
-  value when the record is absent or itself malformed.
+- BYLAYER → the **effective** layer's record, falling back to the inherited
+  value when the record is absent.
 - otherwise → the concrete value.
+
+**`lineweight` has a fourth arm, and omitting it is a defect this plan would
+otherwise introduce.** `kLineweightDefault` (`-3`) is a third sentinel, valid
+in the same encoding decision 1 adopts, and present in this repository today —
+`test/document/tables_test.dart:13` builds a `LayerRecord` with it, and
+`test/codec/schema_v3_fixture_test.dart:17,47` carries it in stored JSON. A
+three-arm switch sends `-3` down "otherwise" and writes it into
+`StyleContext.lineweight`, a field whose own doc comment
+(`style_context.dart:27-28`) declares it concrete.
+
+The entity side's guard does not save this. `style_resolver.dart:100` maps a
+`-3` entity lineweight to `ctx.lineweight` — which, under such an INSERT, is
+itself `-3`. A BYBLOCK entity would resolve `lineweightHundredths == -3` and
+that number would reach the painter.
+
+So: **`kLineweightDefault` → the inherited value, in both the direct arm and
+after the BYLAYER record read** — a layer record's own lineweight can be `-3`
+and must be mapped the same way.
+
+**The malformed-record question is answered by mirroring the entity side field
+by field, not by a single uniform rule.** Today `_concreteLayerColor`
+(`style_resolver.dart:109-115`) rejects a layer whose colour is itself BYLAYER
+or BYBLOCK, while the entity-side `linetype` read (`style_resolver.dart:90-95`)
+checks only for an absent record. That asymmetry is inherited, not introduced:
+an INSERT and an entity resolving the same malformed layer differently would be
+a new bug, and changing the entity side's behaviour is out of this plan's
+scope. Colour keeps its malformed check; the other three check absence only.
 
 "Effective layer" means the layer-0 substitution the method already computes at
 `style_resolver.dart:36-37`. The existing comment there states why one node must
@@ -276,29 +316,45 @@ The probe asks two questions, and connecting is not enough:
    instantiated nowhere else in the run, allocated a known 100,000 times, must
    read back at **90% or more**.
 
+The positive control's allocations must **escape** — stored into a
+collection that outlives the loop, or otherwise made unremovable. An allocation
+the JIT can prove dead may never happen, and a healthy meter would then read
+zero and be blamed for it.
+
 **Stop clause, binding:** if `connect()` returns null, or the positive control
-reads below 90%, then the move commit is reverted, the finding is recorded with
-its transcript in the results note, and Section 3 is dropped from the plan.
-Sections 1 and 2 do not depend on the meter and continue unaffected.
+reads below 90%, then the move is reverted — **the file move, the three import
+re-points, and the `pubspec.yaml` promotion of `vm_service` from
+`dev_dependencies` to `dependencies`, named here so the revert is
+unambiguous** — the finding is recorded with its transcript in the results
+note, and Section 3 is dropped from the plan. Sections 1 and 2 do not depend on
+the meter and continue unaffected.
 
-**Decision 9 — if the probe is green, the first Flutter-side use is 3g's
-trap 5, not the metrics-lookup claim.**
+**Decision 9 — this plan delivers a working instrument, and demonstrates it on
+nothing. The demonstration belongs to 3g.**
 
-The Plan 3f results note names the metrics-map lookup as the thing a moved
-meter would close. That target collides with the meter's own documented rule —
-watch classes the path under test does not build in bulk. The metrics key is a
-`(String, int)` record, and records are allocated throughout the frame path.
-Whether it can be isolated is unknown.
+An earlier draft of this design had the probe followed by a trap-5
+demonstration: prove that a lazily-populated cache allocating on the frame path
+is visible to the meter. **That criterion has no production subject in this
+repository.** There is no lazy cache-miss path to instrument: the fill path is
+explicitly eager, and says so at `draft_painter.dart:686-690` —
 
-`ui.Picture` can be. Nothing else on the frame path allocates pictures in bulk,
-and it is the exact class 3g's cache would allocate on a miss. So the
-deliverable is not "the meter is available" but **"a lazily-populated cache
-allocating on the frame path is visible to a gate"** — the claim
-`debugCapacityVertices` was proven unable to make.
+> Read, never compute: the triangulation was materialised by the command, the
+> codec or undo. A miss here means the boundary is unfillable, not that the
+> cache is cold.
 
-The metrics-record claim is attempted. It is **not promised**: if it cannot be
-isolated, it is recorded as unmeasurable with its reason, exactly as the Plan 3f
-mutation log records it now.
+A test-only `ui.Picture` allocation would exercise the meter's mechanics and
+prove nothing about a real miss being observable, while quietly implying it
+had. The trap-5 gate is 3g's to build, on 3g's cache, and this plan would only
+be pre-writing it against a subject that does not exist.
+
+The metrics-map lookup — the target the Plan 3f results note names — is also
+not taken. It collides with the meter's own documented rule (watch classes the
+path under test does not build in bulk): the metrics key is a `(String, int)`
+record, and records are allocated throughout the frame path.
+
+**So Section 3's deliverable is exactly one thing: the meter is reachable from
+`jet_cad_2d_flutter` and proven to work there, or it is proven not to.** That
+is what stops 3g discovering mid-plan that it cannot measure its central risk.
 
 ---
 
@@ -306,6 +362,10 @@ mutation log records it now.
 
 **Files:** `lib/src/document/node.dart`, `lib/src/document/style_resolver.dart`,
 `lib/src/codec/schema_version.dart`.
+
+While `schema_version.dart` is open for the v6 entry, its line 14 cites the
+version guard at `json_codec.dart:103`; the guard is at `:104`. A one-word fix
+on a file this plan edits anyway.
 
 `InstanceNode` gains the four fields of decision 1, in its constructor,
 `copyWith`, `toJson`, `fromJson`, `operator ==` and `hashCode`. `contextFor`
@@ -325,13 +385,24 @@ from their sum (14), and from their maximum (8). A mutant that drops one
 multiplication, replaces it with addition, or takes a maximum lands on a
 different number in every case.
 
-The BYLAYER criterion needs the layer-0 substitution to be observable, so its
+The BYLAYER criteria need the layer-0 substitution to be observable, so their
 fixture places an INSERT **on layer 0**, through a container whose context
-carries layer `L`, with the INSERT's `lineweight` set to `kByLayer`, and with
-layer `L`'s record and layer 0's record holding **different** lineweights. The
+carries layer `L`, with the INSERT's property set to `kByLayer`, and with layer
+`L`'s record and layer 0's record holding **different** values for it. The
 correct answer is `L`'s; the mutation that reads `node.layer` gets layer 0's.
 If both records held the same value the criterion would pass under its own
-mutant.
+mutant. This shape is required for **each of the three fields separately** — an
+implementation that resolves BYLAYER for `lineweight` and passes it through for
+`transparency` must fail.
+
+**The v5-migration criterion needs a named fixture shape or its mutant
+survives.** M10 changes `fromJson`'s absent-`linetype` default from
+`byBlockLinetype` to `byLayerLinetype`. That only changes a resolved style when
+the v5 fixture contains an entity whose linetype is BYBLOCK, inside a
+definition, placed through an INSERT whose effective layer's linetype differs
+from the inherited context's. Relying on criterion 11 (golden byte-identity) to
+catch it assumes some existing golden happens to contain that shape, which is
+unverified. The v5 fixture carries it explicitly.
 
 ---
 
@@ -340,7 +411,10 @@ mutant.
 **Files created:** `test/invariants/text_cache_invariants_test.dart`,
 `test/invariants/frame_accounting_test.dart`, both in `jet_cad_2d_flutter`.
 **File moved:** `TextKeySink`, from `test/rig/rig_support.dart` to
-`test/support/`, imported back by the rig. One definition, two readers.
+`test/support/`, imported back by the rig. It has three readers today —
+`rig_support.dart:111`, `paint_microbench_test.dart` (four sites) and
+`flutter_text_measurer_test.dart:121` — and the new invariants make a fourth.
+One definition, four readers.
 
 **Not touched:** `dart_test.yaml`, the `rig` tag's `skip:`, the rig's timing
 prints, or the rig header's argument.
@@ -355,18 +429,28 @@ kParagraphCacheLimit (512) < distinct keys ≤ kMetricsCacheLimit (8192)
 ```
 
 600 unique strings, one text style, one resolved colour — so 600 distinct
-metrics keys and 600 distinct paragraph keys. **The measurer is constructed
-bare — `FlutterTextMeasurer()`, no arguments.** That is the whole point: the
-defaults are what is under test.
+metrics keys and 600 distinct paragraph keys. The measurer is constructed bare
+— `FlutterTextMeasurer()`, no arguments.
+
+**Bare construction is necessary and is not what makes this test work.** Nine
+of the twelve tests in `flutter_text_measurer_test.dart` already construct the
+measurer bare, and mutant 7 survived all of them. What is new here is the
+second half: a corpus that **pushes past the bound under test**. A default is
+exercised only where a wrong value would change the answer, and below 512
+distinct keys no value of `metricsLimit` changes anything.
 
 After a **single** paint that draws all 600:
 
 | counter | expected | under mutant 7 |
 |---|---|---|
-| `liveMetrics` | 600 | 512 |
+| `liveMetricsCount` | 600 | 512 |
 | `metricsEvictionCount` | 0 | 88 |
 | `liveParagraphCount` | 512 | 512 |
 | `paragraphEvictionCount` | 88 | 88 |
+
+(The getters are `liveMetricsCount` and `liveParagraphCount`;
+`flutter_text_measurer.dart:109,112`. `liveMetrics` is the rig's print label,
+not an API.)
 
 The same assertions cover `paragraphLimit`'s default: under a mutant that
 raises it to `kMetricsCacheLimit`, the last two rows read 600 and 0.
@@ -378,9 +462,15 @@ cache counters, so the key count is verified rather than assumed.
 
 The third untested default — `reference_walk.dart:36`'s `minTextCapPixels` —
 gets its own short test: `referenceWalk` is called **without** the argument over
-a document carrying sub-threshold text, and the text must not be drawn. Today
-every caller supplies its own threshold, so the parameter's default is shadowed
-and setting it to `0.0` leaves the whole suite green.
+a document carrying sub-threshold text, and the text must not be drawn.
+
+Two callers exist, and neither closes it. `test/support/fixtures.dart:184`
+re-declares its own `minTextCapPixels = kMinTextCapPixels` default and always
+passes it on, so the parameter is shadowed for everything routed through
+`referenceToRecording` — **which is why this test must call `referenceWalk`
+directly.** `test/differential_test.dart:63` does call it bare, but asserts
+only `expect(sink.ops, isNotEmpty)`, which stays true at any threshold. The
+default is reached today and nothing depends on its value.
 
 ### `frame_accounting_test.dart`
 
@@ -390,25 +480,47 @@ No magic constants. Three identities, each true at any corpus size:
    `textOpCount + culledTextCount + skippedTextCount` equals the number of text
    leaves the frame visited. A cull that swallows an entity, or counts one
    twice, breaks the equality. The expected total is derived by the test from
-   the document's own entities — Plan 3e's Ruling 28 in miniature: an oracle
+   the document's own entities — Plan 3c's Ruling 28 in miniature, which Plan
+   3e applied as precedent when it corrected the fill oracle at `24cfd23`: an
+   oracle
    that asks the painter what the answer should be shares the assumption it
    exists to test.
 2. **A repeated frame is a repeated frame.** Two identical paints agree on
    every counter.
-3. **The two backends describe one drawing.** `screenSpaceLeafCount`,
-   `fillCount`, `skippedFillCount`, `textOpCount` and `culledTextCount` are
-   exactly equal between `RenderBackend.canvas` and `RenderBackend.vertices`.
+3. **The vertices backend's text fallback loses nothing.** Under
+   `RenderBackend.vertices`, `sink.canvasCallCount == painter.textOpCount`,
+   exactly.
 
-The third is not a new claim. It is written down today as a comment, in
-`apps/dev_harness_2d/lib/measurement_rig.dart:95-97`:
+**An earlier draft of this design had a different third item and it could not
+fail.** It asserted that `screenSpaceLeafCount`, `fillCount`,
+`skippedFillCount`, `textOpCount` and `culledTextCount` are equal across the
+two backends. All five are `DraftPainter` fields
+(`draft_painter.dart:147,167,177,199,210`), `DrawSink` is write-only, and the
+painter never branches on which sink it holds — `DraftCanvas` builds one
+painter and swaps only the sink (`draft_canvas.dart:169-180`). Two paints with
+two sinks cannot disagree unless a sink throws mid-frame. The claim was
+guaranteed by construction, and its mutant could not have reddened it either:
+dropping a text op inside `VerticesDrawSink` moves no painter counter.
 
-> at a fixed corpus size they must match exactly across `BACKEND=canvas` and
-> `BACKEND=vertices`
+The rig's version of that sentence
+(`apps/dev_harness_2d/lib/measurement_rig.dart:95-97`) does have teeth, because
+it compares two *processes* launched with different `BACKEND=` defines. An
+in-process test does not reproduce that, and pretending otherwise would have
+added a green row that proves nothing — the failure this whole plan exists to
+remove, committed inside the plan itself.
 
-An invariant whose only auditor is a human reading two transcripts side by side
-is an invariant that goes stale when the code is copied — which is how R4a and
-R4b kept the canvas-only guard after R2's was fixed. This test takes that
-sentence away from the human.
+What replaces it compares a number the **sink** owns against a number the
+**painter** owns. `VerticesDrawSink` delegates exactly three calls to its
+fallback — `beginResidual`, `endResidual` and `text`
+(`vertices_draw_sink.dart:300,307,721`) — and of the seven `_canvasCalls++`
+sites in `CanvasDrawSink`, none is in the two residual methods
+(`canvas_draw_sink.dart:137,152,159,168,189,200,226`). So under the vertices
+backend that counter counts paragraphs and nothing else, and a text op lost on
+the way through the sink breaks the equality.
+
+The cross-backend equality of the drawing itself is not abandoned; it is
+already carried, at op level by `vertices_differential_test.dart` and at pixel
+level by the golden suite. This plan does not restate it.
 
 ---
 
@@ -427,15 +539,15 @@ change one import line each to `package:jet_cad_2d/testing.dart`. The engine
 suite must be green on the moved file before the probe runs, so a failure in the
 probe is unambiguously about `flutter test` and not about the move.
 
-Then the probe of decision 8, then — only if green — the trap-5 demonstration of
-decision 9.
+Then the probe of decision 8. Nothing follows it in this plan: decision 9
+explains why the demonstration belongs to 3g.
 
 ---
 
 ## Failable criteria
 
-Fifteen. Fourteen of them are claims a test makes, and each of those has at
-least one named mutant below that must turn it red. **Criterion 14 is the
+Seventeen. Sixteen of them are claims a test makes, and each of those has at
+least one named mutant below that must turn it red. **Criterion 17 is the
 exception and is stated as one**: it is a measurement of whether an instrument
 works in an environment, not a claim about code under test, so no mutation can
 address it. Its stop clause is what makes it failable.
@@ -446,39 +558,44 @@ address it. Its stop clause is what makes it failable.
    inside its definition.
 2. The same for `transparency`.
 3. The same for `linetype`.
-4. Nested instances compose `linetypeScale` multiplicatively: entity `2.0` ×
-   inner INSERT `4.0` × outer INSERT `8.0` resolves to exactly `64.0`.
+4. Nested instances compose `linetypeScale` multiplicatively: entity `2.0` x
+   inner INSERT `4.0` x outer INSERT `8.0` resolves to exactly `64.0`.
 5. An INSERT whose `lineweight` is BYLAYER reads the **substituted** layer's
    record, not `node.layer`'s.
-6. A v5 document loads under a v6 build and every entity's `ResolvedStyle` is
-   bit-identical to what the v5 build resolved for it.
-7. A v6 round-trip preserves all four fields at non-default values.
-8. Every pre-existing golden PNG is byte-identical. No golden is regenerated by
-   this plan.
+6. The same for `transparency`.
+7. The same for `linetype`.
+8. `kLineweightDefault` never reaches a `ResolvedStyle`: an INSERT carrying
+   `-3` directly, and an INSERT whose BYLAYER lookup lands on a layer record
+   carrying `-3`, both resolve a BYBLOCK child to the inherited lineweight.
+9. A v5 document loads under a v6 build and every entity's `ResolvedStyle` is
+   bit-identical to what the v5 build resolved for it. The fixture contains a
+   BYBLOCK-linetype entity inside a definition, placed through an INSERT whose
+   effective layer's linetype differs from the inherited context's.
+10. A v6 round-trip preserves all four fields at non-default values.
+11. Every pre-existing golden PNG is byte-identical. No golden is regenerated
+    by this plan.
 
 **Section 2 — structural invariants**
 
-9. A bare-constructed `FlutterTextMeasurer()` over the 600-key fixture reads
-   `liveMetrics=600`, `metricsEvictionCount=0`, `liveParagraphCount=512`,
-   `paragraphEvictionCount=88`, with `textOpCount=600` and `culledTextCount=0`
-   proving the fixture drew what it claims.
-10. `referenceWalk`, called without `minTextCapPixels`, culls sub-threshold
-    text.
-11. `textOpCount + culledTextCount + skippedTextCount` equals the frame's text
+12. A bare-constructed `FlutterTextMeasurer()` over the 600-key fixture reads
+    `liveMetricsCount=600`, `metricsEvictionCount=0`, `liveParagraphCount=512`,
+    `paragraphEvictionCount=88`, with `textOpCount=600` and `culledTextCount=0`
+    proving the fixture drew what it claims.
+13. `referenceWalk`, called directly and without `minTextCapPixels`, culls
+    sub-threshold text.
+14. `textOpCount + culledTextCount + skippedTextCount` equals the frame's text
     leaf count. **The right-hand side is counted by the test from the
     document**, never read back from the painter: an identity whose two sides
     come from the same source is not an identity.
-12. Two identical paints agree on every counter.
-13. Canvas and vertices agree exactly on `screenSpaceLeafCount`, `fillCount`,
-    `skippedFillCount`, `textOpCount` and `culledTextCount`.
+15. Two identical paints agree on every counter.
+16. Under `RenderBackend.vertices`, `sink.canvasCallCount` equals
+    `painter.textOpCount`.
 
 **Section 3 — the allocation meter**
 
-14. The probe connects **and** reads its positive control at 90% or above — or
-    the stop clause fires, the move is reverted, and the finding is recorded
-    with its transcript.
-15. Given a green probe: a frame-path mutation that allocates lazily is visible
-    to the meter, on a fixture where `debugCapacityVertices` stays flat.
+17. The probe connects **and** reads its escaping positive control at 90% or
+    above — or the stop clause fires, the move is reverted in full, and the
+    finding is recorded with its transcript.
 
 ---
 
@@ -486,24 +603,28 @@ address it. Its stop clause is what makes it failable.
 
 | # | mutation | criterion it must redden |
 |---|---|---|
-| M1 | `contextFor` reverts `lineweight` to `inherited.lineweight` | 1 |
-| M2 | `contextFor` reverts `transparency` to `inherited.transparency` | 2 |
-| M3 | `contextFor` reverts `linetype` to `inherited.linetype` | 3 |
+| M1 | `contextFor` reverts `lineweight` to `inherited.lineweight` | 1, 5 |
+| M2 | `contextFor` reverts `transparency` to `inherited.transparency` | 2, 6 |
+| M3 | `contextFor` reverts `linetype` to `inherited.linetype` | 3, 7 |
 | M4 | `styleFor` drops the `ctx.linetypeScale *` factor | 4 |
-| M5 | `contextFor` uses `node.layer` for the BYLAYER lookup | 5 |
-| M6 | v6 `fromJson` defaults `linetype` to `byLayerLinetype` | 6, 8 |
-| M7 | `metricsLimit` defaults to `kParagraphCacheLimit` — **Plan 3f's survivor** | 9 |
-| M8 | `paragraphLimit` defaults to `kMetricsCacheLimit` | 9 |
-| M9 | `reference_walk.dart:36`'s default becomes `0.0` | 10 |
-| M10 | `_drawText` increments `_culledText` but does not `return` | 11 |
-| M11 | `VerticesDrawSink` drops one text op on delegation | 13 |
-| M12 | a frame-path allocation made lazily on a cache miss | 15 |
-| M13 | `InstanceNode.toJson` omits `linetypeScale` | 7 |
-| M14 | a painter text counter is not reset between paints | 12 |
+| M5 | `contextFor` drops the `inherited.linetypeScale *` factor | 4 |
+| M6 | `contextFor` uses `node.layer` for the BYLAYER lookup | 5, 6, 7 |
+| M7 | the BYLAYER arm for `transparency` passes the sentinel through | 6 |
+| M8 | the BYLAYER arm for `linetype` passes the sentinel through | 7 |
+| M9 | the `kLineweightDefault` arm is dropped | 8 |
+| M10 | v6 `fromJson` defaults `linetype` to `byLayerLinetype` | 9, 11 |
+| M11 | `InstanceNode.toJson` omits `linetypeScale` | 10 |
+| M12 | `metricsLimit` defaults to `kParagraphCacheLimit` — **Plan 3f's survivor** | 12 |
+| M13 | `paragraphLimit` defaults to `kMetricsCacheLimit` | 12 |
+| M14 | `reference_walk.dart:36`'s default becomes `0.0` | 13 |
+| M15 | `_drawText` increments `_culledText` but does not `return` | 14 |
+| M16 | a painter text counter is not reset between paints | 15 |
+| M17 | `VerticesDrawSink` drops a text op before delegating | 16 |
 
 A mutant that no criterion reddens is recorded as a survivor with its reason,
 never quietly dropped. Plan 3f's mutation log carries three such entries and
-they are the most useful rows in it.
+they are the most useful rows in it — and, as defect 4 above records, one of
+its explanations was itself wrong.
 
 ---
 
@@ -548,22 +669,28 @@ proves nothing at all.
 
 ## Accepted gaps
 
-1. **Criterion 6 proves the migration is a no-op; it cannot prove the bump is
+1. **Criterion 9 proves the migration is a no-op; it cannot prove the bump is
    necessary.** That a v5 build refuses a v6 file is a property of the version
-   check, already pinned by the v4→v5 tests. This plan does not re-test it.
-2. **`ui.Picture` isolation is assumed, not yet measured.** Decision 9 argues
-   that nothing else on the frame path allocates pictures in bulk. If the probe
-   is green and that assumption turns out false, criterion 15 is recorded as
-   unmeasurable with the reading that showed it.
+   check, already pinned by the v4->v5 tests. This plan does not re-test it.
+2. **The malformed-layer asymmetry is inherited, not resolved.** A layer whose
+   colour is itself BYLAYER or BYBLOCK is rejected
+   (`style_resolver.dart:109-115`); a layer whose *linetype* is one of those
+   sentinels is not. Decision 2 mirrors that asymmetry onto instances rather
+   than fixing it, so an INSERT and an entity always agree. Fixing the entity
+   side is a separate change with its own blast radius.
 3. **The `vm_service` dependency weight is accepted, not minimised.** The
    separate-package alternative was considered and rejected in favour of the
    existing `lib/testing.dart` precedent. If the dependency later proves a real
-   problem for a consumer, extracting `jet_cad_2d_testing` remains a
-   mechanical change.
-4. **Criterion 13 compares counters, not pixels.** Two backends agreeing on op
-   counts is not two backends drawing the same image; the golden suite and
-   `vertices_differential_test.dart` carry that claim, and this criterion does
-   not restate it.
+   problem for a consumer, extracting `jet_cad_2d_testing` remains a mechanical
+   change.
+4. **Section 3 delivers an instrument and demonstrates it on nothing real.**
+   Decision 9 explains why: there is no lazy cache-miss path in this repository
+   to instrument. The trap-5 gate 3g needs is 3g's to write, and this plan can
+   only guarantee that the instrument for it exists and works.
+5. **Criterion 16 is narrow on purpose.** It pins one seam — text surviving the
+   vertices sink's fallback — and says nothing about the two backends producing
+   the same drawing. That claim already lives in
+   `vertices_differential_test.dart` and the golden suite.
 
 ---
 
@@ -581,9 +708,20 @@ proves nothing at all.
 - **The two-backend agreement asserted rather than commented**, which is the
   claim 3g will lean on when it decides whether a cached picture flushes the
   vertex buffer at its boundary.
-- **Either a working Flutter-side allocation meter with trap 5 demonstrated, or
-  a recorded finding that the mechanism does not work under `flutter test`** —
-  and in the second case, 3g knows before it starts that its central risk needs
-  a command-time assertion rather than a frame-path gate, which is what
-  actually proved fills eager in Plan 3e.
+- **Either a working Flutter-side allocation meter, or a recorded finding that
+  the mechanism does not work under `flutter test`.** In the first case 3g
+  writes its own trap-5 gate against its own cache, on an instrument already
+  proven to count. In the second, 3g knows *before it starts* that its central
+  risk needs a command-time assertion rather than a frame-path gate — which is
+  what actually proved fills eager in Plan 3e, after the allocation gate stayed
+  green through the mutation that should have broken it.
 - **Ruling 4 still unspent**, with its measured 3,876 beside it.
+- **A cache-key cardinality cost, stated so 3g does not meet it as a surprise.**
+  `StyleContext` compares `linetypeScale` with `==` and feeds it to
+  `Object.hash` (`style_context.dart:67,73`). Once the four fields carry real
+  values, instances that used to share one definition picture no longer do —
+  and because the scale is a *product* accumulated down the tree, two chains
+  whose scales are mathematically equal but reached by different factors are
+  different doubles, hence different keys. That is correct behaviour with a
+  real hit-rate consequence, and it is a reason 3g may want its key to carry a
+  quantised scale band rather than the raw double.

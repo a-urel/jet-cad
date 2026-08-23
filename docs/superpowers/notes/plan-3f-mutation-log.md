@@ -409,6 +409,27 @@ the measurer with **both** limits given explicitly — `FlutterTextMeasurer(para
 `(paragraphLimit: 512, metricsLimit: 2)` — so the defaults themselves were
 never exercised by anything that could fail.
 
+> **Correction, 2026-08-23 (Plan 3f.1 spec review).** The paragraph above is
+> wrong about its own file and the error is left visible rather than rewritten,
+> because the wrong explanation propagated: it was copied into the first draft
+> of the Plan 3f.1 design and had to be caught there by an external review.
+>
+> **Nine of the twelve constructions in `flutter_text_measurer_test.dart` are
+> bare** — `FlutterTextMeasurer()` at lines 12, 23, 48, 70, 88, 145, 157, 223
+> and 240. One passes `paragraphLimit` alone (line 35). Only two pass both
+> (lines 175 and 199).
+>
+> The mutant's survival therefore has a single cause, not the one recorded
+> here: **no test in the file ever pushes past 512 distinct metrics keys**, so
+> nothing it asserts is sensitive to `metricsLimit` at any value. Bare
+> construction was already the majority case and caught nothing. A default is
+> exercised only where a wrong value would change the answer.
+>
+> The remedy Plan 3f applied (`645b027`) is unaffected — it added a test that
+> passes `metricsLimit` explicitly and pins the eviction behaviour. What
+> changes is what the *shape* of the hole was, and therefore what Plan 3f.1's
+> criterion 12 has to do: construct bare **and** exceed the bound.
+
 ### What the rig showed, and what it did not
 
 **Command:** `CI=true flutter test --tags rig --run-skipped test/rig/paint_microbench_test.dart --plain-name "text paint at 50000"`
