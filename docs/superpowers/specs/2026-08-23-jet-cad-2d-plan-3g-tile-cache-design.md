@@ -665,6 +665,63 @@ on the device pixel grid. A device-side check is **owed and not delivered by thi
 plan**, and the results note must say so in those words rather than publishing a
 green criterion 2 as a settled seam.
 
+### G5 — A tiled frame is not bit-identical for every slope, and the bound is measured
+
+**Added 2026-08-24, from Task 6a. This qualifies criteria 1 and 2 and it is the
+most important thing in this section.**
+
+Criteria 1 and 2 demand **zero** stray, uncovered and differing pixels, and they
+hold for the fixtures that gate them. **The general claim does not.** Some
+strokes disagree by a few pixels between the tiled and the live path, and the
+cause is neither a clipping error nor a blend error nor anything this plan
+introduced.
+
+**The cause, established to the bit.** `VerticesDrawSink` stores positions in a
+`Float32List`. A tile's whole-device-pixel offset moves a coordinate into a
+**coarser `Float32` binade**: device x `-17.943408966064453` is *exactly*
+representable (binade 2⁴, ulp 1.907e-06), while the same point expressed against
+the frame origin, `-401.94340896606445`, lands in binade 2⁸ where the ulp is
+3.052e-05 and it stores as `-401.94342041015625` — an error of **1.144e-05
+px**. Where a stroke's device slope makes its edge graze sample points at a
+regular period — the reproduction's slope is exactly 3/50, and its differing
+pixels are exactly 50 apart — that error decides the tie and one pixel flips.
+
+**It is not this codebase's.** Task 6a reproduced it with `Canvas.drawVertices`
+alone, with no jet-cad code in the path.
+
+**Two diagnoses that looked right and were not**, recorded because both were
+believed before being tested:
+
+- *"It is the slope."* Task 6 read the failure as diagonal-versus-axis-aligned.
+  It is not: ten **parallel** diagonals at slope 0.6 cross just as many seams and
+  give zero, while a single **near-axis** line gives seven on its own.
+- *"It is `Float64` cancellation in `bakeCameraFor`."* The controller's
+  hypothesis: folding the tile offset into the camera makes
+  `(A − k) − (B − k)` round differently from `A − B`. **Refuted by measurement** —
+  the `Float64` coordinates the two paths emit are **bit-identical**, 1368
+  comparisons, 0 mismatches.
+
+**No fix exists, and this was tested rather than argued.** Task 6a built the
+remedy the refuted hypothesis implied — region-based culling with an exact
+canvas translate, per-tile culling preserved, so **not** mutant M7. The emitted
+vertices became bit-identical and the pixels moved **zero**. The offset has only
+two homes and both round identically. The change was reverted.
+
+**The measured bound**, over an 82-slope sweep:
+
+| case | differing pixels, as a fraction of ink |
+|---|---|
+| worst case across all slopes | **2.38%** |
+| a ten-line drawing | 0.39% |
+| axis-aligned, and slopes 0.2 / 1.0 / 5.0 / 16.7 | **0.000%** |
+
+A permanent test asserts that bound rather than zero, and reddens under a
+one-pixel `destRectFor` error (3192 against a bound of 60).
+
+**This is a software-Skia bound and G1's reservation applies to it too**: it
+does not transfer to a GPU backend, in either direction. Whether Impeller
+exhibits it, and at what magnitude, is owed alongside G1's device seam check.
+
 ### G2 — In-place table record mutation, now nearly closed
 
 Every table record is `@immutable` with all-final fields (`tables.dart:73-95`),
