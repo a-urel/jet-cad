@@ -1,16 +1,30 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-23
-**Verified against:** `main` at `486c1b7` — the final fix wave's test-teardown
-commit, the exact tree the suites below were run against — **not yet pushed**,
-working tree clean apart from the three files the traps below say never to
-commit.
+**Verified against:** `main` at `b1e9ec1` — Plan 3f.1's last task commit (Task
+7 produced no commit; the tree at `b1e9ec1` is what its full revert restored
+and both a task reviewer and a re-reviewer confirmed byte-identical), the
+exact tree the suites below were run against — **not yet pushed**, working
+tree clean apart from the three files the traps below say never to commit.
 Every suite count below was produced by running the suite on the **merged**
 result, not by reading a report and not on the branch before it landed.
 
 ---
 
 ## TL;DR — where you left off
+
+**Plan 3f.1 (hardening before the picture cache) is done, eight tasks, worked
+directly on `main` at `c078677..b1e9ec1`, nothing in flight.** **Its exit gate
+is 16 of 17 — the one miss is the allocation-meter probe's own pre-committed
+stop clause firing, recorded as the plan working, not failing.** See
+[Plan 3f.1](#plan-3f1--hardening-before-the-picture-cache) and
+[Resume here](#resume-here).
+
+Results note:
+[docs/superpowers/notes/2026-08-23-plan-3f1-results.md](docs/superpowers/notes/2026-08-23-plan-3f1-results.md).
+Mutation log:
+[docs/superpowers/notes/plan-3f1-mutation-log.md](docs/superpowers/notes/plan-3f1-mutation-log.md) —
+seventeen named mutants, all seventeen killed, no survivors.
 
 **Plan 3f (text wiring and level of detail) is done, nine tasks, worked
 directly on `main`, nothing in flight.** **Its exit gate is 11 of 13 — and the
@@ -64,10 +78,10 @@ turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open
 
 Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
 
-| Suite | State (on `main` at `486c1b7`, run, not read off a report) |
+| Suite | State (on `main` at `b1e9ec1`, run, not read off a report) |
 |---|---|
-| `packages/jet_cad_2d` — engine | **777 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **299 tests pass, 1 skipped**, analyze/format clean |
+| `packages/jet_cad_2d` — engine | **793 tests, all pass**, analyze/format clean |
+| `packages/jet_cad_2d_flutter` — widgets | **304 tests pass, 1 skipped**, analyze/format clean |
 | `flutter test --tags golden` | **35 pass**, 40 PNGs (20 fixtures × 2 backends, 3 fills and 3 text-LOD rungs); no pre-existing PNG regenerated |
 | `apps/dev_harness_2d` | analyze/format clean |
 | `benchmark/query_throughput.dart` | **GATE: PASS** — every gated row under its threshold on 2026-08-23, `snap at dirty threshold` included (p50 0.552 ms against 1.0 ms). That row is Plan 2's carried failure and it is a **timing on a shared machine**: recorded as passing today, not declared fixed |
@@ -343,6 +357,28 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 ---
 
 ## Resume here
+
+**Plan 3f.1 (hardening before the picture cache) is done, worked directly on
+`main` at `c078677..b1e9ec1`, nothing in flight. Its exit gate is 16 of 17,
+the one miss being its own pre-committed stop clause firing on the
+allocation-meter probe.** Everything below about 3f is still true and still
+worth reading; this is what changed on top of it.
+
+**Nothing here is waiting on a human.** `StyleContext` is now correctly keyed
+(trap 4, closed), `linetypeScale` reaches the drawing, and 3g knows before it
+starts that its central risk (trap 5) needs a command-time assertion rather
+than a frame-path allocation gate, because the latter does not work under
+`flutter test`. See
+[Plan 3f.1](#plan-3f1--hardening-before-the-picture-cache) above and
+[the results note](docs/superpowers/notes/2026-08-23-plan-3f1-results.md) for
+every number, including the plan's own recurring failure mode (a stated cause
+stronger than its evidence, three times, each caught by running something
+rather than reading it) and the three plan premises corrected mid-flight.
+
+**A resumer's ledger chore:** 3f.1 had no worktree, so its
+`.superpowers/sdd/2026-08-23-jet-cad-2d-plan-3f1-hardening/` material is
+**not yet archived** to `docs/superpowers/ledgers/`. Do that before clearing
+it — the ordering is the lesson 3e's and 3f's archives both record.
 
 **Plan 3f (text wiring and level of detail) is done, worked directly on
 `main`, nothing in flight. Its exit gate is 11 of 13.** Everything below about
@@ -850,6 +886,77 @@ unexercised; and `reference_walk.dart:36`'s `minTextCapPixels` default, where
 setting it to `0.0` leaves the whole suite green because a caller's own
 default shadows it.
 
+### Plan 3f.1 — hardening before the picture cache
+
+**Done.** Eight tasks, worked directly on `main` at `c078677..b1e9ec1`, no
+worktree, on the human's explicit consent. Task 7 (the allocation-meter
+probe) produced no commit — its stop clause fired and the change was fully
+reverted. Spec:
+[docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3f1-hardening-design.md](docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3f1-hardening-design.md).
+Plan:
+[docs/superpowers/plans/2026-08-23-jet-cad-2d-plan-3f1-hardening.md](docs/superpowers/plans/2026-08-23-jet-cad-2d-plan-3f1-hardening.md).
+Results:
+[docs/superpowers/notes/2026-08-23-plan-3f1-results.md](docs/superpowers/notes/2026-08-23-plan-3f1-results.md).
+Mutation log:
+[docs/superpowers/notes/plan-3f1-mutation-log.md](docs/superpowers/notes/plan-3f1-mutation-log.md).
+
+Two defects closed and one instrument tested to a verdict. `InstanceNode`
+gained the four style fields `StyleContext` needs (`lineweight`,
+`transparency`, `linetype`, `linetypeScale`; schema 5 → 6); `contextFor`
+resolves all three sentinel-carrying fields exactly as it already resolved
+`color`, including the `kLineweightDefault` (`-3`) guard and the layer-0
+substitution; and `linetypeScale` now composes multiplicatively — entity ×
+every enclosing INSERT × the header's global scale — where before it was
+constructed, copied, compared and hashed and read by nothing. Two structural
+invariant files moved Plan 3f's printed-but-unasserted rig numbers into
+always-on tests. And `AllocationMeter` was moved to `lib/src/testing/` and
+probed from `jet_cad_2d_flutter`: it does not work under `flutter test`
+(`flutter_tester` launches with `--disable-vm-service`), the move was reverted
+in full, and the finding is recorded rather than a workaround forced.
+
+**Exit gate: 16 of 17 criteria PASS, 1 MISS, 0 UNEVALUABLE.** The miss is
+criterion 17, the allocation-meter probe, and it is recorded as the plan's own
+pre-committed stop clause working as designed, not as a defect. All
+seventeen named mutants fired and were killed — no survivors, unlike Plan 3f's
+own log.
+
+**The Flutter package does not have a working allocation meter.** The
+mechanism `AllocationMeter` relies on — starting the VM service at runtime
+from inside the isolate under test, with no launch flag — cannot work under
+`flutter test`, because `flutter_tester` is launched with
+`--disable-vm-service` before any in-isolate code runs. A flag-based
+alternative (`flutter test --start-paused` or similar) is plausible and was
+never tried, but could not serve an always-on gate regardless, since the flag
+is supplied by `flutter test` itself and not by anything this repository
+controls per test run. **3g's trap 5 (the allocation gate cannot see a
+lazily-populated cache) therefore needs a command-time assertion, the same
+shape that proved fills eager in Plan 3e, not a frame-path allocation gate in
+`jet_cad_2d_flutter`.**
+
+**The plan's own recurring failure mode is named in the results note, in its
+own section, because it produced three findings across this plan alone: a
+stated cause written down more strongly than the evidence behind it, caught
+each time by running something rather than by reading it** — the spec's own
+defect 4 (a false present-tense claim about `flutter_text_measurer_test.dart`
+that reached a committed comment before the Task 5 review caught it), the
+ledger's "no retry would help" about the Task 7 probe, and the Task 7 report's
+first causal claim. See the results note for the full account.
+
+**Three plan premises were corrected mid-flight**, all recorded in the ledger
+with their rulings: layer 0 already has a seeded record
+(`tables.dart:509`, Task 2's fixture assumed otherwise); Task 1's "the
+pre-existing suite will not move" (three tests pin the schema version by
+literal or by FNV fingerprint, both re-baselined with evidence that the cause
+was the serialisation shape and not an RNG-order regression); and Task 2's
+"eight tests, all FAIL" (six failed, two were pre-existing regression guards
+for a capability that did not yet exist).
+
+**What this plan did not close:** permitted divergence 5 (overlapping
+translucent strokes on a triangle soup) — untouched, still unexercised;
+Ruling 4's single permitted `kParagraphCacheLimit` raise — still unspent, its
+measured 3,876 still beside it; and the malformed-layer asymmetry — mirrored
+onto instance resolution rather than fixed, an accepted gap from the spec.
+
 ### Plan 3g — the definition/tile picture cache
 
 **What 3f hands it, and one question it must answer first.**
@@ -872,6 +979,27 @@ default shadows it.
   cull or hides glyphs it would draw. Three candidate answers — never bake
   text, bake per LOD band as a fourth cache axis, or draw text outside the
   cached picture entirely — and **none of them has been priced**.
+
+**What 3f.1 hands it.**
+
+- **A correctly-keyed `StyleContext`.** All six fields now carry what they
+  claim, so the picture cache key is right the first time and does not need
+  rekeying after the fact. See trap 4's closure note, below, for the
+  cardinality cost this creates.
+- **`linetypeScale` connected end to end** — entity × every enclosing INSERT ×
+  global — which bears directly on trap 3: a baked picture is not
+  scale-invariant now that dashes exist, and dash phase is a function of this
+  product.
+- **Structural invariants that run on every `flutter test`**
+  (`text_cache_invariants_test.dart`, `frame_accounting_test.dart`), so 3g's
+  own counters can land on a suite that fails rather than one that prints.
+- **No working Flutter-side allocation meter, and a recorded reason why.**
+  `AllocationMeter` does not connect under `flutter test`
+  (`--disable-vm-service` at the process launch, not a code defect). 3g's
+  trap 5 needs a **command-time assertion** — the shape that actually proved
+  fills eager in Plan 3e — not a frame-path allocation gate in
+  `jet_cad_2d_flutter`.
+- **Ruling 4 still unspent**, its measured 3,876 still beside it.
 
 **What 3d hands it.** A picture cache that records into a `Picture` interacts
 with a sink that batches across residuals: 3g must decide whether a cached
@@ -904,10 +1032,22 @@ otherwise never see it:
    phase and the collapse floor are both functions of screen-space scale, so
    zoom far enough and baked-dashed entities need to render solid. That is a new
    invalidation axis with no name yet.
-4. **`InstanceNode` carries only 2 of `StyleContext`'s 6 fields.**
-   `linetype`, `linetypeScale`, `lineweight`, `transparency` are missing, and
-   DXF's INSERT carries all four. `StyleContext` is the picture cache key, so
-   this model decision belongs **before** the cache, not after.
+4. ~~**`InstanceNode` carries only 2 of `StyleContext`'s 6 fields.**~~
+   **Closed by Plan 3f.1, 2026-08-23.** `linetype`, `linetypeScale`,
+   `lineweight`, `transparency` were missing; `InstanceNode` now carries all
+   four (schema 6) and `contextFor` resolves them exactly as it already
+   resolved `color`, including the layer-0 substitution and the
+   `kLineweightDefault` guard. **And closing it creates a cache-key
+   cardinality cost 3g should not meet as a surprise:** `StyleContext`
+   compares `linetypeScale` with `==` and feeds it to `Object.hash`
+   (`style_context.dart:67,73`). Now that the four fields carry real values,
+   instances that used to share one definition picture no longer do — and
+   because the scale is a **product** accumulated down the tree, two chains
+   whose scales are mathematically equal but reached by different factors
+   (say, `2.0 × 4.0` and `1.0 × 8.0`) are different doubles and therefore
+   different keys. That is correct behaviour with a real hit-rate
+   consequence, and it is a reason 3g may want its key to carry a **quantised
+   scale band** rather than the raw double.
 5. **The allocation gate cannot see a lazily-populated cache, and a picture
    cache is exactly that shape.** Plan 3e proved this directly: mutating
    `DraftPainter._drawFill` to compute and store a triangulation on a cache
