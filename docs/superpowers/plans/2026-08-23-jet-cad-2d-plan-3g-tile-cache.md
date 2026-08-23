@@ -1094,7 +1094,15 @@ cp lib/src/tile_cache.dart /tmp/tile_cache.dart.bak
 
 **M10's arithmetic half:** delete the rounding in `quantiseCamera` (`final e = m.e;`). The whole-device-pixel assertions must go red.
 
-**The negative-key mutant:** change `_floorDiv` to `a ~/ b`. The `abut exactly` test and the panned-destination test must go red once the pan crosses the anchor. If they do not, the pan step is too small to reach a negative key and the test is degenerate — fix the test, not the mutant.
+**The negative-key mutant:** change `_floorDiv` to `a ~/ b`. **The `visibleKeys` tests must go red once the pan reaches a negative key**, and a key is negative only when the anchor-relative device delta is *positive* — that is, when the camera's `e`/`f` moved **up**, not down. A pan that only subtracts from `e` and `f` drives `left` and `top` further positive and never reaches a negative key at all, which makes the test degenerate rather than passing.
+
+> **Corrected 2026-08-24, mid-execution.** An earlier revision said the
+> `abut exactly` test would redden too. **It cannot**: `destRectFor` never
+> calls `_floorDiv` — only `visibleKeys` does — so no pan and no key choice
+> makes that test sensitive to this mutant. It tests a distinct property and
+> is correct as written. The earlier revision also chose a pan sign that could
+> never reach a negative key; if the mutant survives, the required response is
+> to fix the **test**, and the fix is the pan's sign, not its size.
 
 ```sh
 cp /tmp/tile_cache.dart.bak lib/src/tile_cache.dart && rm /tmp/tile_cache.dart.bak
