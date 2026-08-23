@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -202,6 +203,25 @@ class TileCache {
   TileGrid? _grid;
   final Map<TileKey, Image> _tiles = <TileKey, Image>{};
 
+  /// What each tile baked: every leaf drawn and every container descended,
+  /// ascending, for a binary search on change.
+  ///
+  /// **Both halves, and the node half is not a refinement.**
+  /// `TransformNodeCommand` reports only the moved node's handle
+  /// (`commands.dart:304`); the leaves it moved keep their own and appear
+  /// nowhere in `touched`. A tile recording leaves alone cannot find the
+  /// pixels a drag left behind.
+  ///
+  /// Duplicates are left in. A handle drawn twice — the tree/overlay pair, or
+  /// one definition placed twice inside one tile — costs one extra slot, and
+  /// the binary search does not care. Deduplicating would be a sweep over a
+  /// list that is already the right answer.
+  ///
+  /// Keyed identically to [_tiles] at every point where either is observable:
+  /// [_bake] writes here and its caller writes there, and nothing removes from
+  /// one without removing from the other.
+  final Map<TileKey, Uint32List> _baked = <TileKey, Uint32List>{};
+
   /// One `Paint` for the life of the cache.
   ///
   /// `FilterQuality.none`: every blit is a 1:1 texel-to-pixel copy by
@@ -214,6 +234,7 @@ class TileCache {
   int _blits = 0;
   int _liveDraws = 0;
   int _generation = 0;
+  int _invalidations = 0;
 
   /// Tiles rasterised since [resetCounters].
   int get bakeCount => _bakes;
@@ -232,6 +253,22 @@ class TileCache {
   int get liveTileCount => _tiles.length;
 
   int get generation => _generation;
+
+  /// Tiles thrown away by [applyChange] over this cache's whole life.
+  ///
+  /// Not reset by [resetCounters], which zeroes the three per-frame counters:
+  /// this one counts edits, not frames, and a caller reading it across a
+  /// frame boundary is asking a different question.
+  int get invalidationCount => _invalidations;
+
+  /// Whether [key] is currently blittable. Test-only.
+  bool holds(TileKey key) => _tiles.containsKey(key);
+
+  /// Every live tile whose bake touched [handle]. Test-only.
+  List<TileKey> tilesHolding(Handle handle) => <TileKey>[
+        for (final entry in _baked.entries)
+          if (_contains(entry.value, handle.value)) entry.key
+      ];
 
   /// The blit `Paint`'s identity, for criterion 13.
   ///
@@ -325,6 +362,261 @@ class TileCache {
       image.dispose();
     }
     _tiles.clear();
+    _baked.clear();
+  }
+
+  /// Throws away whatever [change] made stale.
+  ///
+  /// **All five subclasses, exhaustively.** `DocChange` has five and five
+  /// emitters — `CommandApplied` (`undo.dart:112`), `CommandUndone` (`:140`),
+  /// `CommandRedone` (`:161`), `DocumentLoaded` (`:169`) and `DocumentPurged`
+  /// (`:178`). A cache that handles apply and undo and forgets redo shows
+  /// stale pixels after every redo while passing an undo-only gate. The switch
+  /// is written without a default so that a sixth subclass is a compile error
+  /// here rather than a silent omission, which is what
+  /// `SpatialIndex._onChange` does with the same stream.
+  void applyChange(DocChange change, DraftDocument document) {
+    switch (change) {
+      // A purge rewrites the entity store's slots wholesale and a load
+      // replaces the document; neither leaves anything worth keeping, and
+      // neither leaves the anchor camera meaning what it meant.
+      case DocumentLoaded():
+      case DocumentPurged():
+        _dropEverything();
+      case CommandApplied(:final touched):
+      case CommandUndone(:final touched):
+      case CommandRedone(:final touched):
+        if (touched.isEmpty) {
+          // `DocChange.touched` is documented as empty when the whole document
+          // changed (`doc_change.dart:11-12`).
+          _dropEverything();
+          return;
+        }
+        _invalidateTouched(touched, document);
+    }
+  }
+
+  void _invalidateTouched(Set<Handle> touched, DraftDocument document) {
+    // **A definition edit drops the generation.** If a tile baked a definition
+    // and that definition changed, every instance of it in that tile changed,
+    // so invalidation by definition is exact at tile granularity. The one case
+    // it does not cover — a definition whose content bounds grew, spilling an
+    // instance into a tile that never baked it — is why this is a generation
+    // drop rather than a per-tile pass. A definition edit is a block edit, not
+    // ordinary drawing.
+    for (final handle in touched) {
+      if (_isDefinitionOwned(document, handle)) {
+        _dropGeneration();
+        return;
+      }
+    }
+
+    final grid = _grid;
+    if (grid == null) return;
+    final doomed = <TileKey>{};
+
+    // Direction one: the old position. `DocChange` carries no previous
+    // geometry, and this is why each tile records what it baked.
+    for (final entry in _baked.entries) {
+      for (final handle in touched) {
+        if (_contains(entry.value, handle.value)) {
+          doomed.add(entry.key);
+          break;
+        }
+      }
+    }
+
+    // Direction two: the new position. Both are needed, for the reason
+    // `_letBoundRecede` exists in the index — a handle that moved *out* of a
+    // tile is only findable from the tile's record, and a handle that moved
+    // *into* one appears in no record at all.
+    //
+    // The boxes are derived once, ahead of the tile sweep, rather than once
+    // per (handle, tile) pair: `_worldBoxOf` reads the entity store and may
+    // walk a definition, and `touched` is small while the tile set is not.
+    final boxes = <Aabb2>[];
+    for (final handle in touched) {
+      final box = _worldBoxOf(document, handle);
+      if (box != null && !box.isEmpty) boxes.add(box);
+    }
+    if (boxes.isNotEmpty) {
+      for (final key in _baked.keys) {
+        if (doomed.contains(key)) continue;
+        final rect = _worldRectOf(key, grid);
+        for (final box in boxes) {
+          if (rect.intersects(box)) {
+            doomed.add(key);
+            break;
+          }
+        }
+      }
+    }
+
+    for (final key in doomed) {
+      _tiles.remove(key)?.dispose();
+      _baked.remove(key);
+      _invalidations++;
+    }
+  }
+
+  /// Drops every tile and the lattice they were baked on.
+  ///
+  /// Task 9's carry-over composite is cleared here too: it is anchored to the
+  /// grid that is about to go.
+  void _dropEverything() {
+    _dropGeneration();
+    _grid = null;
+  }
+
+  /// Drops the tiles and **keeps the grid**, so the next frame rebakes into
+  /// the same lattice rather than anchoring a new generation.
+  ///
+  /// A definition edit is not a scale change. Clearing `_grid` here would
+  /// renumber every key for no reason, bump [generation], and throw away the
+  /// one thing — the anchor — that lets the refilled tiles blit at whole
+  /// device pixels against the cameras already on screen.
+  void _dropGeneration() {
+    _invalidations += _tiles.length;
+    _retireGeneration();
+  }
+
+  /// Whether [handle] draws inside a block definition rather than at the
+  /// document root.
+  ///
+  /// **Not "is it owned by the root".** A leaf owned by a group is neither
+  /// root-owned nor definition-owned, and groups draw at root level, so the
+  /// test has to be for a definition. The walk climbs owners because a leaf
+  /// may sit under a group that is itself inside a definition, in which case
+  /// its own owner names no definition at all.
+  bool _isDefinitionOwned(DraftDocument document, Handle handle) {
+    final slot = document.entities.slotOf(handle);
+    if (slot != null) {
+      return _enclosingDefinition(
+              document.tree, document.entities.ownerAt(slot)) !=
+          null;
+    }
+    if (document.tree[handle] == null) return false;
+    return _enclosingDefinition(document.tree, handle) != null;
+  }
+
+  /// The definition [container] sits inside, or null if it sits at the root.
+  ///
+  /// `DocumentTree.ancestorsOf` walks `parent` while the parent is a *node*,
+  /// and a definition handle lives in the definition map rather than the node
+  /// map — so a definition never appears in the chain it returns. The
+  /// definition, when there is one, is therefore the `parent` of the chain's
+  /// last element, and that is the one place worth looking.
+  static Handle? _enclosingDefinition(DocumentTree tree, Handle container) {
+    if (tree.definition(container) != null) return container;
+    if (tree[container] == null) return null;
+    final chain = tree.ancestorsOf(container);
+    final top = chain.isEmpty ? container : chain.last;
+    final parent = tree[top]!.parent;
+    return tree.definition(parent) != null ? parent : null;
+  }
+
+  /// Where [handle] draws **now**, in world coordinates, or null if it draws
+  /// nothing.
+  ///
+  /// Only ever called for handles [_isDefinitionOwned] has already rejected,
+  /// so the enclosing space is the document root and the accumulated transform
+  /// of the owner is the whole of the placement.
+  ///
+  /// **The bound is geometric, not rasterised.** A bake's own index query is
+  /// widened by the index's narrow-phase slack — half a stroke width and the
+  /// like — so a tile whose bake drew a hairline spilling in from just outside
+  /// its world rect is not found here. Direction one catches that case
+  /// wherever the handle was already in the tile; what is left is a handle
+  /// arriving at a position that misses a tile geometrically while its stroke
+  /// clips into it, bounded by half the stroke width in world units. Recorded
+  /// rather than papered over with an arbitrary inflation.
+  Aabb2? _worldBoxOf(DraftDocument document, Handle handle) {
+    final tree = document.tree;
+    final node = tree[handle];
+    if (node != null) {
+      // `definitionBounds` is the public spelling of "union of everything a
+      // container holds, in its own space", and it takes a group handle as
+      // readily as a definition handle (`draft_document.dart:241-242`). An
+      // instance handle is the one thing it does *not* resolve — it holds no
+      // leaves and lists no children of its own — so the definition is named
+      // explicitly here.
+      final content = switch (node) {
+        InstanceNode(:final definition) =>
+          document.definitionBounds(definition),
+        GroupNode() => document.definitionBounds(handle),
+      };
+      if (content.isEmpty) return null;
+      return content.transformedBy(tree.accumulatedTransform(handle));
+    }
+    final slot = document.entities.slotOf(handle);
+    if (slot == null) return null; // deleted, or never a drawable at all
+    final record = document.entities.read(slot);
+    final payload = document.geometry.read(record.geomIndex);
+    // A fill's own payload names a boundary rather than carrying coordinates,
+    // so its bound is the boundary's. Copied from `container_index.dart:99-114`
+    // — the same boundary case, resolved the same way.
+    EntityKind? boundaryKind;
+    GeometryPayload? boundaryPayload;
+    if (record.kind == EntityKind.fill) {
+      final b = document.entities.slotOf(boundaryHandleOf(payload));
+      if (b != null) {
+        boundaryKind = document.entities.kindAt(b);
+        boundaryPayload =
+            document.geometry.read(document.entities.geomIndexAt(b));
+      }
+    }
+    final box = entityBounds(
+      kind: record.kind,
+      payload: payload,
+      measurer: document.textMeasurer,
+      textStyle: document.textStyleOf(record.textStyle),
+      textAttrs: record.textAttrs,
+      text: record.text,
+      boundaryKind: boundaryKind,
+      boundaryPayload: boundaryPayload,
+    );
+    if (box.isEmpty) return null;
+    return box.transformedBy(
+        tree.accumulatedTransform(document.entities.ownerAt(slot)));
+  }
+
+  /// The world-space box of tile [key] under [grid]'s anchor camera.
+  ///
+  /// **All four corners, not two.** `ViewportTransform.visibleWorld` documents
+  /// the reason and this is the same inversion: under a rotated or skewed
+  /// camera the axis-aligned box of two opposite corners omits world that is
+  /// genuinely inside the tile, and the tiles it omits are the ones this
+  /// method exists to condemn.
+  Aabb2 _worldRectOf(TileKey key, TileGrid grid) {
+    final side = grid._tileLogical;
+    final left = key.x * side;
+    final top = key.y * side;
+    var box = Aabb2.empty();
+    for (final p in <Vector2>[
+      Vector2(left, top),
+      Vector2(left + side, top),
+      Vector2(left, top + side),
+      Vector2(left + side, top + side),
+    ]) {
+      box = box.expandedToPoint(grid.anchor.screenToWorld(p));
+    }
+    return box;
+  }
+
+  /// Binary search over an ascending, possibly repeating, handle list.
+  static bool _contains(Uint32List sorted, int value) {
+    var lo = 0, hi = sorted.length - 1;
+    while (lo <= hi) {
+      final mid = (lo + hi) >> 1;
+      final at = sorted[mid];
+      if (at == value) return true;
+      if (at < value) {
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return false;
   }
 
   Image _bake(
@@ -347,8 +639,15 @@ class TileCache {
     // geometry's own rasterisation is untouched and each tile keeps exactly
     // the pixels it owns.
     into.clipRect(Rect.fromLTWH(0, 0, side, side), doAntiAlias: false);
+    // The one place the frame path allocates per entity — and a bake is not a
+    // steady-state frame. `onVisit` is null on every other call into
+    // `_drawInto`, so a warm frame that blits and bakes nothing never grows
+    // this list at all.
+    final visited = <int>[];
     _drawInto(into, Size(side, side), grid.bakeCameraFor(key), painter, sink,
-        vertices, origin, null);
+        vertices, origin, (handle) => visited.add(handle.value));
+    visited.sort();
+    _baked[key] = Uint32List.fromList(visited);
     final picture = recorder.endRecording();
     final image = picture.toImageSync(tileDevicePixels, tileDevicePixels);
     picture.dispose();
