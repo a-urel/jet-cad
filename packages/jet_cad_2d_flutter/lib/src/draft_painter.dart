@@ -62,6 +62,8 @@ class DraftPainter {
     this.debugDisableRebasing = false,
     this.drawText = true,
     this.minTextCapPixels = kMinTextCapPixels,
+    this.debugRebaseOrigin,
+    this.debugOnVisit,
   });
 
   final DraftDocument document;
@@ -100,6 +102,37 @@ class DraftPainter {
   /// that flipped this after the fact would be measuring a rebuilt painter,
   /// which is a different frame.
   final double minTextCapPixels;
+
+  /// Overrides the rebase origin `paint` would derive from this call's visible
+  /// world.
+  ///
+  /// **Rebasing is frame-global by construction.** `rebaseOriginFor` snaps the
+  /// view centre to a power-of-two grid whose step comes from the view *span*
+  /// (`camera_controller.dart:18-33`), precisely so a pan does not re-quantise
+  /// every coordinate. Plan 3g bakes tiles through per-tile cameras; without
+  /// this each tile would take its own span, its own exponent and its own
+  /// origin, and its `float32` residuals would differ from the live frame's.
+  ///
+  /// Not `debugDisableRebasing`, which forces the origin to zero and destroys
+  /// the precision rebasing exists for at 4.5e6.
+  /// **Deliberately mutable.** `TileCache` sets it around each bake and clears
+  /// it afterwards, so one painter serves the live frame and every tile in it.
+  /// A `final` field would force a painter instance per tile, and a painter
+  /// carries the scratch buffers `paint_allocation_test.dart` exists to keep
+  /// still.
+  Vector2? debugRebaseOrigin;
+
+  /// Called with every leaf drawn and every container descended into.
+  ///
+  /// Plan 3g's tile invalidation records what a tile baked. **Both halves are
+  /// needed**: `TransformNodeCommand` reports only the moved node's handle
+  /// (`commands.dart:304`), and the leaves it moved keep their own, so a tile
+  /// that recorded leaves alone cannot find a dragged instance's old pixels.
+  ///
+  /// Null on the production frame path, so it costs one null check per leaf and
+  /// allocates nothing.
+  /// Mutable for the same reason as [debugRebaseOrigin].
+  void Function(Handle handle)? debugOnVisit;
 
   /// Reused across frames; the frame path must not allocate once warm.
   Float64List _points = Float64List(256);
@@ -304,8 +337,8 @@ class DraftPainter {
     _skippedFills = 0;
     final world = camera.visibleWorld(viewport);
     _worldRect = world;
-    final origin =
-        debugDisableRebasing ? Vector2.zero() : rebaseOriginFor(world);
+    final origin = debugRebaseOrigin ??
+        (debugDisableRebasing ? Vector2.zero() : rebaseOriginFor(world));
     _dashSpans = 0;
     _dasher.resetCounters();
     _screenOrigin = camera.worldToScreen(origin);
@@ -338,6 +371,7 @@ class DraftPainter {
       while (next < _instanceCount && _instances[next] < leafHandle) {
         _drawInstance(sink, camera, origin, Handle(_instances[next++]));
       }
+      debugOnVisit?.call(document.entities.handleAt(slot));
       _drawLeaf(sink, camera, origin, rootIndex.transformOfLeaf(slot), slot,
           StyleContext.documentRoot);
     });
@@ -364,6 +398,7 @@ class DraftPainter {
       Handle instance) {
     final node = document.tree[instance];
     if (node is! InstanceNode) return;
+    debugOnVisit?.call(instance);
     _drawContainer(
       sink: sink,
       camera: camera,
@@ -416,6 +451,7 @@ class DraftPainter {
       final leafHandle = document.entities.handleAt(slot).value;
       if (leafHandle == previous) continue; // the tree/overlay duplicate
       previous = leafHandle;
+      debugOnVisit?.call(Handle(leafHandle));
       while (next < scratch.instanceCount &&
           scratch.instanceHandles[next] < leafHandle) {
         _descend(
@@ -446,6 +482,7 @@ class DraftPainter {
     final handle = Handle(scratch.instanceHandles[at]);
     final node = document.tree[handle];
     if (node is! InstanceNode) return;
+    debugOnVisit?.call(handle);
     _drawContainer(
       sink: sink,
       camera: camera,

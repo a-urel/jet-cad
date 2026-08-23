@@ -142,6 +142,35 @@ DraftDocument differentialFixture(
   return doc;
 }
 
+/// Adds a line entity from ([x0], [y0]) to ([x1], [y1]), owned by [owner].
+Handle addLine(DraftDocument doc, Handle owner, Handle handle, double x0,
+        double y0, double x1, double y1) =>
+    addEntity(doc, owner, handle, EntityKind.line, [x0, y0, x1, y1], const []);
+
+/// Adds an empty block definition named [name].
+Handle addDefinition(DraftDocument doc, Handle handle, String name) {
+  doc.tree.addDefinition(Definition(
+      handle: handle,
+      name: name,
+      basePoint: Vector2.zero(),
+      children: const []));
+  return handle;
+}
+
+/// Places [definition] at [transform], owned by [owner].
+Handle addInstance(DraftDocument doc, Handle owner, Handle handle,
+    Handle definition, Transform2 transform) {
+  doc.commands.execute(AddNodeCommand(InstanceNode(
+    handle: handle,
+    parent: owner,
+    transform: transform,
+    definition: definition,
+    layer: ReservedHandles.layerZero,
+    color: const ByBlockColor(),
+  )));
+  return handle;
+}
+
 /// A guard so the rule cannot rot.
 void assertNoIdentityTransforms(DraftDocument doc) {
   for (final handle in const [
