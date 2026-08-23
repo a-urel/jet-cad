@@ -203,19 +203,34 @@ class TileCache {
   TileGrid? _grid;
   final Map<TileKey, Image> _tiles = <TileKey, Image>{};
 
-  /// What each tile baked: every leaf drawn and every container descended,
-  /// ascending, for a binary search on change.
+  /// What each tile baked, ascending, for a binary search on change: every
+  /// handle the painter visited, **and every container node above it**.
   ///
-  /// **Both halves, and the node half is not a refinement.**
-  /// `TransformNodeCommand` reports only the moved node's handle
-  /// (`commands.dart:304`); the leaves it moved keep their own and appear
-  /// nowhere in `touched`. A tile recording leaves alone cannot find the
-  /// pixels a drag left behind.
+  /// **The node half is not a refinement.** `TransformNodeCommand` reports only
+  /// the moved node's handle (`commands.dart:304`); the leaves it moved keep
+  /// their own and appear nowhere in `touched`. A tile recording leaves alone
+  /// cannot find the pixels a drag left behind.
+  ///
+  /// **And the painter alone does not supply the node half.**
+  /// `DraftPainter.debugOnVisit` fires for leaves and for `InstanceNode`s, and
+  /// both node call sites return early on `node is! InstanceNode`
+  /// (`draft_painter.dart:401`, `:485`), so **a group handle never reaches it**
+  /// — groups are flattened into their container's leaf list with a composed
+  /// transform, and the group itself is never "descended into" as far as the
+  /// callback is concerned. `TransformNodeCommand` takes a `GroupNode` as
+  /// readily as an `InstanceNode` (`commands.dart:297-300`), so a record built
+  /// from the callback alone loses every dragged group: direction one finds
+  /// nothing, direction two drops the arrival tiles, and the departure tiles
+  /// keep their pixels. That is why [_bake] walks each visited handle's owner
+  /// chain and records it here rather than trusting the callback to be
+  /// complete.
   ///
   /// Duplicates are left in. A handle drawn twice — the tree/overlay pair, or
   /// one definition placed twice inside one tile — costs one extra slot, and
   /// the binary search does not care. Deduplicating would be a sweep over a
-  /// list that is already the right answer.
+  /// list that is already the right answer. The owner chain is the one
+  /// exception, and only because the walk needs a visited set anyway to stay
+  /// linear: an ancestor already recorded stops the climb.
   ///
   /// Keyed identically to [_tiles] at every point where either is observable:
   /// [_bake] writes here and its caller writes there, and nothing removes from
@@ -435,8 +450,18 @@ class TileCache {
     // per (handle, tile) pair: `_worldBoxOf` reads the entity store and may
     // walk a definition, and `touched` is small while the tile set is not.
     final boxes = <Aabb2>[];
+    // Derived at most once per change, and only when a node handle is actually
+    // in `touched`. `DraftDocument.definitionBounds` recomputes this map on
+    // every call it is not given one, and that is a full entity-store scan —
+    // `draft_document.dart:160-175` says so in as many words, and records the
+    // benchmark where not threading it cost seconds. Without this, invalidation
+    // would be O(live entities) *per touched node handle*.
+    Map<Handle, List<int>>? leavesByOwner;
     for (final handle in touched) {
-      final box = _worldBoxOf(document, handle);
+      if (leavesByOwner == null && document.tree[handle] != null) {
+        leavesByOwner = document.leavesByOwner();
+      }
+      final box = _worldBoxOf(document, handle, leavesByOwner);
       if (box != null && !box.isEmpty) boxes.add(box);
     }
     if (boxes.isNotEmpty) {
@@ -506,6 +531,17 @@ class TileCache {
   /// map — so a definition never appears in the chain it returns. The
   /// definition, when there is one, is therefore the `parent` of the chain's
   /// last element, and that is the one place worth looking.
+  ///
+  /// **The climb past the first line is what handles a node nested inside a
+  /// prototype**, where [container] names neither a definition nor anything
+  /// whose own parent is one: a group inside a definition owning a leaf, and
+  /// an instance inside a definition placing another. `nestedFixture` in
+  /// `tile_invalidation_test.dart` builds both, and reducing this method to
+  /// its first line reddens that test on each. Nothing else in the repository
+  /// has that shape — `differentialFixture`'s `Handle(520)` is an
+  /// `InstanceNode` parented directly to the definition `outer`
+  /// (`fixtures.dart:88-97`), which the chain's own
+  /// `chain.isEmpty ? container : chain.last` already resolves.
   static Handle? _enclosingDefinition(DocumentTree tree, Handle container) {
     if (tree.definition(container) != null) return container;
     if (tree[container] == null) return null;
@@ -530,7 +566,8 @@ class TileCache {
   /// arriving at a position that misses a tile geometrically while its stroke
   /// clips into it, bounded by half the stroke width in world units. Recorded
   /// rather than papered over with an arbitrary inflation.
-  Aabb2? _worldBoxOf(DraftDocument document, Handle handle) {
+  Aabb2? _worldBoxOf(DraftDocument document, Handle handle,
+      Map<Handle, List<int>>? leavesByOwner) {
     final tree = document.tree;
     final node = tree[handle];
     if (node != null) {
@@ -542,8 +579,8 @@ class TileCache {
       // explicitly here.
       final content = switch (node) {
         InstanceNode(:final definition) =>
-          document.definitionBounds(definition),
-        GroupNode() => document.definitionBounds(handle),
+          document.definitionBounds(definition, leavesByOwner),
+        GroupNode() => document.definitionBounds(handle, leavesByOwner),
       };
       if (content.isEmpty) return null;
       return content.transformedBy(tree.accumulatedTransform(handle));
@@ -640,12 +677,49 @@ class TileCache {
     // the pixels it owns.
     into.clipRect(Rect.fromLTWH(0, 0, side, side), doAntiAlias: false);
     // The one place the frame path allocates per entity — and a bake is not a
-    // steady-state frame. `onVisit` is null on every other call into
-    // `_drawInto`, so a warm frame that blits and bakes nothing never grows
-    // this list at all.
+    // steady-state frame. `onVisit` is null at the only other call into
+    // `_drawInto`, the live fallback in `paintFrame`, so a warm frame that
+    // blits and bakes nothing never grows this list at all.
     final visited = <int>[];
+    // Container nodes already recorded on this tile. Both a memo and the
+    // termination guard: once a node is in, every ancestor of it is in too, so
+    // the climb stops there — which is what keeps the whole pass linear in
+    // visits rather than O(visits x depth), and what makes a malformed cyclic
+    // parent chain terminate instead of hanging the bake.
+    final containers = <int>{};
+    final document = painter.document;
+
+    void recordOwners(Handle from) {
+      var current = from;
+      while (true) {
+        final node = document.tree[current];
+        // A definition handle lives outside the node map, and a definition is
+        // not a placement: an edit inside one takes the generation-drop path
+        // and never consults this list.
+        if (node == null) return;
+        if (!containers.add(current.value)) return;
+        visited.add(current.value);
+        if (node.parent.isNone) return;
+        current = node.parent;
+      }
+    }
+
     _drawInto(into, Size(side, side), grid.bakeCameraFor(key), painter, sink,
-        vertices, origin, (handle) => visited.add(handle.value));
+        vertices, origin, (handle) {
+      visited.add(handle.value);
+      final slot = document.entities.slotOf(handle);
+      if (slot != null) {
+        // A leaf names its container by owner; the root is a `GroupNode` like
+        // any other and is recorded too, so a transform of the root reaches
+        // every tile through direction one.
+        recordOwners(document.entities.ownerAt(slot));
+        return;
+      }
+      // An instance node the painter descended into: it is already recorded
+      // above, and what is missing is the groups it hangs under.
+      final node = document.tree[handle];
+      if (node != null && !node.parent.isNone) recordOwners(node.parent);
+    });
     visited.sort();
     _baked[key] = Uint32List.fromList(visited);
     final picture = recorder.endRecording();

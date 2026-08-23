@@ -48,6 +48,53 @@ DraftDocument instancedFixture(FlutterTextMeasurer measurer) {
       Transform2(1, 0, 0, 1, 30, 120));
   addInstance(doc, doc.rootHandle, const Handle(301), const Handle(210),
       Transform2(1, 0, 0, 1, 210, 120));
+  // A group, in the top-right corner where nothing else in this fixture goes:
+  // tile columns 9-10, rows 0-1, against instance 300's 0-1 x 3-4, instance
+  // 301's 8-9 x 3-4 and leaf 1001's 0-1 x 7-9. A group is neither a leaf nor
+  // an instance and `DraftPainter.debugOnVisit` names neither it nor anything
+  // that would stand in for it, so without one in the matrix a cache can lose
+  // every dragged group and stay green.
+  addGroup(
+      doc, doc.rootHandle, const Handle(400), Transform2(1, 0, 0, 1, 240, 190));
+  addLine(doc, const Handle(400), const Handle(1003), 0, 0, 20, 20);
+  return doc;
+}
+
+/// Two shapes that exist nowhere else in this repository, and that the
+/// `_enclosingDefinition` climb is the only code able to classify: a **group
+/// inside a definition** owning a leaf, and an **instance inside a definition**
+/// placing a second definition.
+///
+/// Both are one step further from the definition than
+/// `differentialFixture`'s `Handle(520)`, whose parent *is* the definition and
+/// which a one-level test therefore already resolves. Here `tree[1005].owner`
+/// is the group 410 and `tree[320].parent` is the definition only via its own
+/// chain — a cache that stops at the first level calls both root-owned and
+/// invalidates a handful of tiles where it must drop the generation, leaving
+/// every other placement of the block stale.
+DraftDocument nestedFixture(FlutterTextMeasurer measurer) {
+  final doc = DraftDocument.empty(measurer: measurer);
+  // A root leaf, so the drawing is not definition-owned end to end and a cache
+  // that dropped everything unconditionally would still have to earn it.
+  addLine(doc, doc.rootHandle, const Handle(1001), 20, 20, 60, 60);
+
+  addDefinition(doc, const Handle(220), 'RIVET');
+  addLine(doc, const Handle(220), const Handle(1004), 0, 0, 6, 6);
+
+  addDefinition(doc, const Handle(210), 'PLATE');
+  addLine(doc, const Handle(210), const Handle(1002), 0, 0, 25, 25);
+  // A group *inside* the definition, owning a leaf.
+  addGroup(
+      doc, const Handle(210), const Handle(410), Transform2(1, 0, 0, 1, 4, 30));
+  addLine(doc, const Handle(410), const Handle(1005), 0, 0, 14, 8);
+  // An instance *inside* the definition, placing another definition.
+  addInstance(doc, const Handle(210), const Handle(320), const Handle(220),
+      Transform2(1, 0, 0, 1, 30, 6));
+
+  addInstance(doc, doc.rootHandle, const Handle(300), const Handle(210),
+      Transform2(1, 0, 0, 1, 30, 120));
+  addInstance(doc, doc.rootHandle, const Handle(301), const Handle(210),
+      Transform2(1, 0, 0, 1, 210, 120));
   return doc;
 }
 
@@ -194,6 +241,84 @@ void main() {
     expect(rig.cache.liveTileCount, greaterThan(before ~/ 2));
   });
 
+  test('criterion 5: a dragged group leaves no ghost either', () async {
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final rig = rigOver(instancedFixture(measurer));
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    final before = rig.cache.liveTileCount;
+
+    // **The pixels, named without going through the group's own record.**
+    // Leaf 1003 is what is actually on screen; the group is only what moves it.
+    // Stating the criterion this way is what lets it fail for a cache that
+    // records no group handle at all, instead of failing on a guard that such
+    // a cache would trip first and that a reader could dismiss as a fixture
+    // problem.
+    final ghostTiles = rig.cache.tilesHolding(const Handle(1003)).toSet();
+    expect(ghostTiles, isNotEmpty);
+
+    rig.doc.commands.execute(TransformNodeCommand(
+        const Handle(400), Transform2(1, 0, 0, 1, 60, 190)));
+    final newTiles = tilesFor(rig.doc, const Handle(1003)).toSet();
+    expect(newTiles, isNotEmpty);
+    expect(newTiles.intersection(ghostTiles), isEmpty,
+        reason: 'fixture guard: the drag must leave the tiles it started in');
+
+    // `TransformNodeCommand` on a group reports the group handle and nothing
+    // else (`commands.dart:297-304`). Leaf 1003 is nowhere in this set.
+    rig.cache.applyChange(
+        const CommandApplied(label: 'drag group', touched: {Handle(400)}),
+        rig.doc);
+
+    for (final key in ghostTiles) {
+      expect(rig.cache.holds(key), isFalse,
+          reason: "ghost at $key: the group's pixels are still there and the "
+              'group that put them there has moved');
+    }
+    for (final key in newTiles) {
+      expect(rig.cache.holds(key), isFalse, reason: 'stale arrival at $key');
+    }
+    expect(rig.cache.liveTileCount, greaterThan(before ~/ 2),
+        reason: 'and still not a generation drop');
+  });
+
+  test('criterion 6: a group and an instance nested inside a definition',
+      () async {
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+
+    // Both handles below sit two steps from the root: their own owner or
+    // parent names neither a definition nor the root. Classifying them by
+    // their immediate owner alone calls them root-owned, sends them down the
+    // per-tile path, and leaves every *other* placement of the same block
+    // showing the old geometry.
+    Future<void> expectWholeDrop(Handle touched, String what) async {
+      final rig = rigOver(nestedFixture(measurer));
+      addTearDown(rig.dispose);
+      rig.paintOnce();
+      expect(rig.cache.liveTileCount, greaterThan(30));
+      final holding = rig.cache.tilesHolding(touched);
+      expect(holding, isNotEmpty, reason: '$what must be findable');
+      expect(holding.length, lessThan(rig.cache.liveTileCount),
+          reason: '$what occupies a few tiles, so a per-tile answer would '
+              'leave most of the cache standing and be visibly wrong rather '
+              'than accidentally right');
+
+      rig.cache.applyChange(
+          CommandApplied(label: what, touched: {touched}), rig.doc);
+      expect(rig.cache.liveTileCount, 0,
+          reason: '$what is inside a definition');
+    }
+
+    // A leaf owned by a group that is itself inside the definition.
+    await expectWholeDrop(const Handle(1005), 'a leaf under a nested group');
+    // The group itself.
+    await expectWholeDrop(const Handle(410), 'a group inside a definition');
+    // An instance inside the definition, placing a second definition.
+    await expectWholeDrop(const Handle(320), 'a nested instance');
+  });
+
   test('criterion 5: the undo of an instance transform invalidates both ends',
       () async {
     final measurer = FlutterTextMeasurer();
@@ -311,5 +436,15 @@ void main() {
     expect(rig.cache.generation, generation + 1,
         reason: 'a load replaces the document, so the lattice it was anchored '
             'against means nothing');
+
+    // And a purge, for the same reason and a different one: it renumbers every
+    // slot in the entity store. Pinned separately because nothing else in this
+    // file can tell `_dropEverything` from `_dropGeneration` on this arm --
+    // both leave zero tiles, and only the next frame's generation says which
+    // ran.
+    rig.cache.applyChange(const DocumentPurged(), rig.doc);
+    rig.paintOnce();
+    expect(rig.cache.generation, generation + 2,
+        reason: 'a purge rewrites the entity store wholesale');
   });
 }

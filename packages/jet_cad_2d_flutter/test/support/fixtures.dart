@@ -163,6 +163,24 @@ Handle addDefinition(DraftDocument doc, Handle handle, String name) {
   return handle;
 }
 
+/// Adds a group node at [transform], owned by [owner].
+///
+/// A group is not an instance, and the difference is load-bearing for anything
+/// that watches the painter: a group's leaves are flattened into its
+/// container's leaf list with a composed transform, so `DraftPainter` never
+/// descends into the group as such and `debugOnVisit` never names it. A
+/// fixture matrix without one cannot see that.
+Handle addGroup(
+    DraftDocument doc, Handle owner, Handle handle, Transform2 transform) {
+  doc.commands.execute(AddNodeCommand(GroupNode(
+    handle: handle,
+    parent: owner,
+    transform: transform,
+    children: const [],
+  )));
+  return handle;
+}
+
 /// Places [definition] at [transform], owned by [owner].
 Handle addInstance(DraftDocument doc, Handle owner, Handle handle,
     Handle definition, Transform2 transform) {
