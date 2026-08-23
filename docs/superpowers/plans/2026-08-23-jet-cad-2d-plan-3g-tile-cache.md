@@ -1942,7 +1942,17 @@ DraftDocument translucentOverlap(FlutterTextMeasurer measurer) {
 }
 ```
 
-`addText` and `setTransparency` come from `fixtures.dart`. If `setTransparency` does not exist there, write it in `fixtures.dart` as a `SetComponentCommand`-based helper and say so in the report — the transparency value must not be 0, which is the identity and would make criterion 4 degenerate.
+`addText` exists at `fixtures.dart:266`. **`setTransparency` does not exist, and the `SetComponentCommand` route an earlier revision suggested is wrong.**
+
+> **Corrected 2026-08-24, mid-execution.** Transparency is a field on the
+> `EntityRecord` itself (`entity_store.dart:52`), supplied at creation — not a
+> component. **Give `addLine` an optional `transparency` parameter defaulting
+> to `0`**, so every existing caller is unaffected, and pass a non-zero value
+> from `translucentOverlap`. Note while you are there that `fixtures.dart`
+> hardcodes `transparency: 0` at `:31` and `:286`: that is the multiplicative
+> identity for this channel and it is exactly the degenerate default the
+> anti-degenerate rule exists to catch. Leave those defaults in place — other
+> tests depend on them — but do not inherit one.
 
 - [ ] **Step 2: Write the two criteria**
 
