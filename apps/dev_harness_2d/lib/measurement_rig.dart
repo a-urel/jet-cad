@@ -36,11 +36,21 @@ void refuseDebugMode() {
   }
 }
 
-/// p50, p95 and max of build and raster time, reported separately.
+/// p50, p95 and max of build, raster and total time, reported separately.
 ///
 /// A build-bound frame and a raster-bound frame call for opposite fixes in
 /// Plan 3b — one wants less walking, the other fewer or cheaper draw calls —
 /// so a single "frame time" would hide the only thing the number is for.
+///
+/// **`totalSpan` is here because `build` and `raster` do not have to add up.**
+/// The 2026-08-23 picture-cache spike rasterised 217,758 triangles into a
+/// texture on every frame through `Picture.toImageSync` and *both* of those
+/// columns stayed flat — raster read 0.87 ms, indistinguishable from a bare
+/// blit — because `toImageSync` returns before the GPU work it schedules, and
+/// that work lands outside either window. `totalSpan` runs vsync-start to
+/// raster-finish and did see it, at 13.56 ms. Six plans have published numbers
+/// from this rig with two of these three columns; a column that reads "free"
+/// needs a second column that agrees.
 void report(String rig, List<FrameTiming> timings) {
   if (timings.isEmpty) {
     print('$rig: no frames recorded');
@@ -59,9 +69,11 @@ void report(String rig, List<FrameTiming> timings) {
   final raster = [
     for (final t in timings) t.rasterDuration.inMicroseconds / 1000.0
   ];
+  final total = [for (final t in timings) t.totalSpan.inMicroseconds / 1000.0];
   print('$rig frames=${timings.length}');
   print('  build  ${stats(build)}');
   print('  raster ${stats(raster)}');
+  print('  total  ${stats(total)}');
 }
 
 /// Throws unless the forced frame actually drew, on whichever backend is

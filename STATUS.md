@@ -966,32 +966,56 @@ onto instance resolution rather than fixed, an accepted gap from the spec.
 
 ### Plan 3g — the definition/tile picture cache
 
-> **Read this first: the 2026-08-23 spike reverses this section's premise.**
+> **Read this first: the 2026-08-23 spike reverses this section's premise, and
+> it is measured clean.**
 > [docs/superpowers/notes/2026-08-23-picture-cache-price-spike.md](docs/superpowers/notes/2026-08-23-picture-cache-price-spike.md)
-> priced the definition-`Picture` route on the vertices backend and found the
-> objection that would have killed it — one flush plus one `drawPicture` per
-> visible instance, a 1-call frame becoming a 700-call one — **does not hold**:
-> raster is flat from 20 to 633 `drawVertices` calls at a fixed triangle count,
-> and wrapping a `drawVertices` in a `Picture` and replaying it costs nothing at
-> raster time.
+> — Low Power Mode off, AC power, medians of three, with a control that
+> reproduces Plan 3d's clean 50,000 and 500,000 rows inside their own intervals.
 >
-> **What it found instead is a harder limit.** Every configuration ever measured
-> here, this spike's contaminated rows and Plan 3d's clean ones alike, is
-> **raster-bound**. A definition-level cache — `Picture` or pre-tessellated
-> vertices — attacks **build only**. Take the walk, the style resolution, the
-> dashing and the join construction to zero and the 500,000-entity frame still
-> sits at 21.64 ms, above the 16.67 ms budget.
+> **The objection that would have killed the definition-`Picture` route does not
+> hold.** One flush plus one `drawPicture` per visible instance takes the frame
+> from 20 to 702 `drawVertices` calls, and at a fixed triangle count raster does
+> not move: 8.25 ms at 20 calls, 8.23 ms at 702, overlapping intervals. Wrapping
+> a `drawVertices` in a `Picture` and replaying it costs **+0.35 ms at 702
+> replays** — small, real, and reported as zero by the contaminated sweep.
 >
-> **The spike's recommendation is that 3g be a tile cache whose tiles are
-> rasterised**, not a definition `Picture` cache — and that recommendation is
-> itself **gated on a measurement nobody has taken** (Probe D: does a blit beat
-> drawing the triangles it replaces). The spike's timings were taken under
-> macOS Low Power Mode on battery and are **contaminated**; its relative
-> results survive that and its absolute milliseconds do not. The clean pass,
-> Probe D, and four other debts are listed in the note's "Owed" section.
+> **But it attacks the wrong half.** Every configuration measured here and in 3d
+> is raster-bound. A definition-level cache — `Picture` or pre-tessellated
+> vertices — saves build alone; take the walk to zero and the 500,000-entity
+> frame still sits at 22.40 ms of raster inside a 40.27 ms total.
 >
-> The rest of this section is what 3f, 3f.1 and 3d handed 3g, and all of it
-> still stands. Only the **shape of the cache** is in question.
+> **Probe D settles the shape.** Baking the frame into a device-resolution
+> `Image` and blitting it costs **1.49 ms total at 50,000 entities against 15.04
+> live (10×), and 1.61 against 40.27 at 500,000 (25×)**. The blit is
+> corpus-independent — 0.97 ms of raster at both sizes — so the margin widens
+> with the drawing. **Plan 3g should be a tile cache whose tiles are
+> rasterised.**
+>
+> Three facts the design starts from rather than discovers:
+>
+> - **A tile is a pan-and-settle optimisation.** Rebaking every frame — the zoom
+>   regime — buys 11% at 50,000 and 26% at 500,000, not 10× and 25×. 3g must say
+>   what it does during a zoom gesture.
+> - **Tile budget is a viewport quantity**, not a drawing quantity, because the
+>   blit does not scale with the corpus.
+> - **A bake is invisible in `rasterDuration`.** `toImageSync` returns before the
+>   GPU work it schedules. Probe D's bake arm rasterised 217,758 triangles per
+>   frame while raster read 0.87 ms and `totalSpan` read 13.56. **Any gate 3g
+>   writes against a bake must read `totalSpan`** — `report()` now prints it.
+>
+> Four debts remain, listed in the note's "Owed": whether the 500,000 raster is
+> upload-bound or fill-bound (which decides tile *size*), an ink comparison on a
+> real Impeller surface, a replay arm under rotation and scale, and the web
+> re-run 3g was already owed. **The clean pass and Probe D are no longer among
+> them.**
+>
+> One correction to this file: `STATUS.md` above records Low Power Mode
+> contamination as **"a uniform ~24% on both raster and build"**, measured during
+> Plan 3c. On the R2 corpus at 50,000 entities it is **+30% on build and +47% on
+> raster**. Not uniform. A plan budgeting against the older figure should know.
+>
+> The rest of this section is what 3f, 3f.1 and 3d handed 3g, and all of it still
+> stands. Only the **shape of the cache** has changed.
 
 **What 3f hands it, and one question it must answer first.**
 
