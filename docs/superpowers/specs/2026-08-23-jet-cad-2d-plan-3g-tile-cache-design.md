@@ -250,7 +250,20 @@ transiently — and criterion 1 allows zero differing pixels. An earlier draft o
 this spec claimed the offset was zero at settle. It is not.
 
 **The rule instead: the camera's screen-space translation is quantised to whole
-device pixels, and the quantised camera drives the live path too.**
+device pixels, and the comparison's live arm uses the same quantised camera.**
+
+**Narrowed 2026-08-24, during Task 8.** An earlier revision said the quantised
+camera drives "the live path too", unqualified, and an implementation read that
+as *always* — including when `tiles` is off. It cost **sixteen re-recorded text
+goldens**: the level-of-detail ladders sit at `f = 292.5`, which at `dpr` 3 is
+exactly the rounding tie, so quantisation moves them half a device pixel in y.
+
+That was an unrequested change to the **default** rendering path, and it buys
+nothing. Criterion 1's instrument quantises its own live arm explicitly
+(`test/support/tile_comparison.dart:81`), so the gate never depended on the
+widget doing it. **`DraftCanvas` quantises in the tiled branch only**; with
+`tiles` off it draws exactly what it drew before this plan, and the goldens
+stand untouched.
 
 Then every tile destination is integral by construction, at every camera, and
 the blit is a 1:1 texel-to-pixel copy. The drawing sits up to half a device
