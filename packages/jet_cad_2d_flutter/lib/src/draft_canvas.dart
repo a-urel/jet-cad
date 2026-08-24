@@ -143,6 +143,13 @@ class DraftCanvas extends StatefulWidget {
   /// Off by default: the cache is a pan-and-settle optimisation with a memory
   /// budget attached ([kTileCacheBytes]), and a canvas that never pans pays for
   /// it without collecting.
+  ///
+  /// **A consequence worth knowing, not a requirement:** with [tiles] on, the
+  /// drawing sits up to half a device pixel from where it sits with [tiles]
+  /// off. The tiled path quantises the camera to whole device pixels
+  /// ([quantiseCamera]) so every tile lands on an exact texel boundary; the
+  /// default path does not and never has. Toggling this flag on an otherwise
+  /// static scene can therefore shift the drawing by that much.
   final bool tiles;
 
   /// Forwarded to [TileCache.tileDevicePixels]. Inert unless [tiles] is on.

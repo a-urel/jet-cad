@@ -277,7 +277,7 @@ tile keeps exactly the pixels it owns.
 
 **What can and cannot be proven about this, see G1.**
 
-### D9 — The frame's screen translation is quantised to whole device pixels, on **both** paths
+### D9 — The frame's screen translation is quantised to whole device pixels, on the **tiled** path
 
 A world-anchored tile lands at a fractional device offset after an arbitrary
 pan. **Settling does not make that offset zero**: the key excludes translation
@@ -307,8 +307,8 @@ stand untouched.
 Then every tile destination is integral by construction, at every camera, and
 the blit is a 1:1 texel-to-pixel copy. The drawing sits up to half a device
 pixel from the mathematically exact camera — invisible, uniform across the whole
-frame, and **identical in the tiled and live paths**, which is the property the
-gate needs.
+frame, and **identical to what the comparison's quantised live arm draws**,
+which is the property the gate needs.
 
 That is what earns the strongest correctness claim available: the tiled frame is
 required to match the live frame with **zero stray and zero uncovered pixels**,

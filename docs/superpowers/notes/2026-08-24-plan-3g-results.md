@@ -1,6 +1,9 @@
 # Plan 3g — results of record
 
-Written 2026-08-24, at `37918c5`, after Tasks 1 through 11a.
+Written 2026-08-24, at `37918c5` — the plan's last code-changing commit — after
+Tasks 1 through 12. (Task 12's own results, added three commits after this
+note was first written, are docs-only: the code tree this note describes has
+not moved since `37918c5`.)
 
 - Spec: `docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3g-tile-cache-design.md`
 - Plan: `docs/superpowers/plans/2026-08-23-jet-cad-2d-plan-3g-tile-cache.md`
@@ -381,8 +384,11 @@ exactly on the device pixel grid. Not delivered by this plan.
 
 ### G2 — no table record may gain a setter. **OPEN, as a rule.**
 
-Every table record is `@immutable` with all-final fields
-(`tables.dart:73-95`), and `TableSection.add` throws `DuplicateHandleError` on a
+Every table record is `@immutable` with all-final fields (the contract at
+`tables.dart:16`, the six records — `LayerRecord`, `LinetypeRecord`,
+`TextStyleRecord`, `PatternRecord`, `DimStyleRecord`, `AppIdRecord` — at
+`:138, :234, :278, :405, :451, :511`), and `TableSection.add` throws
+`DuplicateHandleError` on a
 handle it already holds — so changing a layer's colour is necessarily a `remove`
 followed by an `add`, and both bump the revision.
 

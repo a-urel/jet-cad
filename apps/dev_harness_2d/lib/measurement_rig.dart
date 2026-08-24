@@ -561,6 +561,11 @@ void _probeBake(TileCache cache, CameraController camera, DraftPainter painter,
       'viewport=${viewport.width.toStringAsFixed(0)}x'
       '${viewport.height.toStringAsFixed(0)} '
       'tileLogical=${side.toStringAsFixed(1)} pad=$pad');
+  // G7: `overdraw` cannot see a change to the shipped clip in [TileCache._bake]
+  // — this probe reimplements that geometry instead of calling it (see the
+  // class doc above), so the column reads bit-identical under mutant M7,
+  // which moved real triangle counts by 61%. Read it as a geometry sanity
+  // check, not a mutation-killing gate.
   print('    tiles=$tiles '
       'liveLeaves=$liveLeaves '
       'tileLeaves=$tileLeaves '

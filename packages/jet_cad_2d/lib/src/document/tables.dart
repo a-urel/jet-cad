@@ -20,7 +20,7 @@ abstract class TableRecord {
   Map<String, Object?> toJson();
 }
 
-typedef VoidCallback = void Function();
+typedef TableListener = void Function();
 
 /// The subset of Flutter's `Listenable` that `Listenable.merge` requires.
 ///
@@ -29,8 +29,8 @@ typedef VoidCallback = void Function();
 /// object with these two methods through its own `Listenable` type, so
 /// `DraftCanvas` adapts this in Task 9 rather than passing it directly.
 abstract class TableListenable {
-  void addListener(VoidCallback listener);
-  void removeListener(VoidCallback listener);
+  void addListener(TableListener listener);
+  void removeListener(TableListener listener);
 }
 
 /// A `Listenable` without Flutter.
@@ -39,13 +39,13 @@ abstract class TableListenable {
 /// so `foundation.ChangeNotifier` is not available. This is the whole of the
 /// contract `Listenable.merge` needs.
 class _TablesNotifier implements TableListenable {
-  final List<VoidCallback> _listeners = [];
+  final List<TableListener> _listeners = [];
 
   @override
-  void addListener(VoidCallback listener) => _listeners.add(listener);
+  void addListener(TableListener listener) => _listeners.add(listener);
 
   @override
-  void removeListener(VoidCallback listener) => _listeners.remove(listener);
+  void removeListener(TableListener listener) => _listeners.remove(listener);
 
   /// How many listeners are attached. **Test-only.**
   ///
@@ -71,7 +71,12 @@ class _TablesNotifier implements TableListenable {
 /// Generic rather than six near-identical classes: the only thing that varies
 /// per table is the record type.
 class TableSection<T extends TableRecord> {
-  /// Called after a mutation that actually changed this section.
+  /// Called after `add` or `remove` actually changes this section, and
+  /// unconditionally by `clear()` — `clear()` fires even when the section was
+  /// already empty, since [DraftDocument.empty]'s seeded records mean a load
+  /// (`json_codec.dart`) always calls `clear()` on all six sections before
+  /// repopulating them, and that reset must be observable whether or not the
+  /// section it targets happened to hold anything.
   ///
   /// **Not a `ChangeNotifier` of its own.** `DocumentTables` holds six sections
   /// as `late final` fields with no back-reference (`tables.dart`), and a

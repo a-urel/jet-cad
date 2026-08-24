@@ -156,17 +156,24 @@ class TileKey {
 
 /// Snaps a camera's screen translation to whole device pixels.
 ///
-/// **This is the whole of Plan 3g's exactness claim, and it applies to the live
-/// path too.** A world-anchored tile lands at a fractional device offset after
-/// an arbitrary pan, and settling never returns the camera to the one the grid
-/// was anchored at — the tile key excludes translation by design, and a pan is
-/// required to invalidate nothing. Quantising both paths puts every tile
+/// **This is the whole of Plan 3g's exactness claim, and it belongs to the
+/// tiled path only.** A world-anchored tile lands at a fractional device
+/// offset after an arbitrary pan, and settling never returns the camera to the
+/// one the grid was anchored at — the tile key excludes translation by design,
+/// and a pan is required to invalidate nothing. Quantising puts every tile
 /// destination on whole device pixels at every camera, which is what lets the
 /// tiled frame be required to equal the live frame with zero differing pixels.
 ///
-/// The cost is up to half a device pixel of global position error, identical in
-/// both paths and uniform across the frame. Nothing on screen provides a
-/// reference against which it could read as jitter.
+/// [DraftCanvas]'s default (non-tiled) path does **not** call this — see
+/// `draft_canvas.dart:384-392` for why not. The one production call site is
+/// inside the tiled branch, at this file's `paintFrame`. The comparison
+/// instrument that proves tiled equals live quantises its own live arm
+/// separately, at `test/support/tile_comparison.dart:81`, rather than relying
+/// on the widget to do it.
+///
+/// The cost is up to half a device pixel of global position error, uniform
+/// across the frame. Nothing on screen provides a reference against which it
+/// could read as jitter.
 ViewportTransform quantiseCamera(
     ViewportTransform camera, double devicePixelRatio) {
   final m = camera.worldToScreenMatrix;
@@ -765,10 +772,10 @@ class TileCache {
     // whole painter is the ~60 ms stall this cache exists to remove, and a
     // gesture frame is precisely where it must not happen.
     if (carryOverCovers) return;
-    // One walk for the union, not one per tile: at 256 px a full visible set is
-    // 154 tiles, and 154 painter invocations in one frame would be slower than
-    // the live path this cache exists to replace. Clipped, so the covered tiles
-    // keep the pixels they just blitted.
+    // One walk for the union, not one per tile: at 512 px a full visible set is
+    // about 48 tiles (see the 48.0 MiB figure above), and 48 painter invocations
+    // in one frame would be slower than the live path this cache exists to
+    // replace. Clipped, so the covered tiles keep the pixels they just blitted.
     canvas.save();
     canvas.clipRect(uncovered, doAntiAlias: false);
     _drawInto(
@@ -779,7 +786,7 @@ class TileCache {
 
   /// Every tile is the same square, so this is built once rather than per
   /// blit. It was a getter until Task 10, which allocated a fresh `Rect` on
-  /// each of a frame's ~130 blits — bounded by the viewport, so never a rule
+  /// each of a frame's ~48 blits — bounded by the viewport, so never a rule
   /// break, but the wrong side of the criterion this task lands.
   late final Rect _tileSourceRect = Rect.fromLTWH(
       0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble());
