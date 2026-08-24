@@ -85,6 +85,11 @@ void main() {
 
     expect(rig.cache.bakeCount, 0);
     expect(rig.cache.blitCount, visible);
+    expect(rig.cache.hasCarryOver, isFalse,
+        reason: 'and no composite stands -- a covering one suppresses the live '
+            'walk outright, so without this the count below would read the '
+            'same whether the tiles covered the viewport or something else '
+            'did');
     expect(rig.cache.liveDrawCount, 0, reason: 'nothing left uncovered');
   });
 
@@ -138,6 +143,63 @@ void main() {
           reason: 'paintFrame must hand drawImageRect the one Paint built '
               "for the cache's life, not a fresh one per blit");
     }
+
+    // **The second state, which the frame above cannot reach.** A cold frame
+    // has no composite, so "every call gets the same object" is a true
+    // statement about a frame that only ever blits tiles -- and it is *false*
+    // once a composite stands, where a frame legitimately hands
+    // `drawImageRect` two different objects. Asserted only over the first
+    // phase, the criterion would have gone on reading as "one Paint, always",
+    // and a mutation that built the composite's `Paint` at the call site would
+    // have had nowhere to be caught. Found by asking the file which tests
+    // exclude the state their comment is about; see the fix round in the
+    // report.
+    final zoomed = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+    addTearDown(zoomed.dispose);
+    zoomed.paintOnce();
+    // Four, not zero: the frame under the spy must contain *both* kinds of
+    // blit, or the two-object claim is made over one object again.
+    zoomed.cache.tilesBakedPerFrame = 4;
+    zoomed.zoomBy(1.19);
+    zoomed.cache.resetCounters();
+    final zoomedSpy = SpyCanvas();
+    zoomed.cache.paintFrame(
+      canvas: zoomedSpy,
+      viewport: kTileViewport,
+      devicePixelRatio: kTileDpr,
+      camera: zoomed.camera,
+      painter: zoomed.painter,
+      sink: zoomed.sink,
+      vertices: zoomed.vertices,
+      tablesRevision: zoomed.doc.tables.mutationRevision,
+    );
+
+    expect(zoomed.cache.carryOverBlitCount, 1);
+    expect(zoomed.cache.blitCount, 4);
+    final zoomedCalls = zoomedSpy.named('drawImageRect').toList();
+    expect(zoomedCalls.length, 5,
+        reason: 'one composite and four tiles: the state is real, not a '
+            'second cold frame under another name');
+    final zoomedPaints =
+        zoomedCalls.map((c) => c.args.whereType<Paint>().single).toList();
+    expect(
+        identical(zoomedPaints.first, zoomed.cache.debugCarryOverPaint), isTrue,
+        reason: 'the composite goes first and with its own field, so an '
+            'incoming tile and a live walk both composite on top of it');
+    for (final paint in zoomedPaints.skip(1)) {
+      expect(identical(paint, zoomed.cache.debugBlitPaint), isTrue,
+          reason: 'and every tile blit still gets the one tile Paint');
+    }
+
+    // The two fields differ in the one way the ruling is about, and nothing
+    // else in this plan pins it: the carry-over is the only blit that is not a
+    // 1:1 texel-to-pixel copy, so it is the only one that wants a filter.
+    expect(zoomed.cache.debugBlitPaint.filterQuality, FilterQuality.none);
+    expect(zoomed.cache.debugCarryOverPaint.filterQuality, FilterQuality.low);
+    // And it is drawn underneath everything, so `src` there would clobber the
+    // backdrop to transparent wherever the composite has no ink -- M11's
+    // hazard, on the one blit M11's test cannot see.
+    expect(zoomed.cache.debugCarryOverPaint.blendMode, BlendMode.srcOver);
   });
 
   test('criterion 1: a warm tiled frame equals the live frame exactly',
@@ -465,6 +527,11 @@ void main() {
     expect(rig.cache.liveTileCount, 12,
         reason: 'and every bake was kept, so 12 is a throttle rather than a '
             'recount of four tiles rebaked three times');
+    expect(rig.cache.hasCarryOver, isFalse,
+        reason: 'and no composite stands: generation one never covered the '
+            'viewport at a budget of four, so nothing was minted -- which is '
+            'what makes the live-draw count below a statement about coverage '
+            'rather than about suppression');
     expect(rig.cache.liveDrawCount, 3,
         reason: 'anti-vacuity: all three frames still left ink uncovered, so '
             'the visible set is larger than 12 and the budget is what bounded '
@@ -595,13 +662,95 @@ void main() {
     }
   });
 
+  test('an edit while a composite stands drops it, and the frame repaints',
+      () async {
+    // **Finding C1, and the state the test below could not reach.** That test
+    // asserts `liveDrawCount > 0` and its comment says "which a composite
+    // standing in front of it would hide" -- the right claim, made in the one
+    // state where the hazard cannot occur, because it never zooms and no
+    // composite ever exists. This one zooms first, so the assertion runs with
+    // a composite actually standing.
+    //
+    // What it was hiding: `_dropGeneration` and `_invalidateTouched` left
+    // `_carryOver` alone, and `paintFrame` suppresses the live fallback
+    // outright whenever the composite covers the viewport. Measured before the
+    // fix, on the frame after a layer edit: `hasCarryOver=true,
+    // liveTileCount=0, liveDrawCount=0, carryOverBlitCount=1` -- the whole
+    // frame is the pre-edit drawing -- and still `liveDrawCount=0` eleven
+    // frames later. At a real bake budget of 4 it was no better: four tiles
+    // rebaked at the new colour, and every pixel they did not cover still the
+    // old one, for the whole of the settle.
+    for (final (what, edit) in <(String, void Function(TileRig))>[
+      (
+        'a table edit, which reaches no command at all',
+        (rig) {
+          rig.doc.tables.layers.add(const LayerRecord(
+            handle: Handle(900),
+            name: 'WALLS',
+            color: IndexedColor(3),
+            linetype: ReservedHandles.continuousLinetype,
+            lineweight: 50,
+            transparency: 40,
+          ));
+        }
+      ),
+      // The per-tile arm, which is a different path and was a second hole:
+      // `_invalidateTouched` removes tiles one at a time and never reaches
+      // `_dropGeneration`, so only a drop hoisted above `applyChange`'s switch
+      // catches this one. With no tiles alive the `doomed` sweep finds nothing
+      // to remove, which is exactly what makes the composite the only thing
+      // left on screen.
+      (
+        'a leaf edit, which takes the per-tile path',
+        (rig) {
+          rig.cache.applyChange(
+              const CommandApplied(label: 'move', touched: {Handle(1001)}),
+              rig.doc);
+        }
+      ),
+    ]) {
+      final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+      addTearDown(rig.dispose);
+      rig.paintOnce();
+      // Zero budget from here, so the incoming generation cannot quietly
+      // refill and make a stale composite look like a repaint.
+      rig.cache.tilesBakedPerFrame = 0;
+      rig.zoomBy(1.19);
+      rig.paintOnce();
+      expect(rig.cache.hasCarryOver, isTrue,
+          reason: '$what: the floor, and the whole point of this test -- '
+              'without a composite standing, the assertions below run in a '
+              'state where what they are about cannot happen');
+      expect(rig.cache.liveTileCount, 0,
+          reason: '$what: and no tile stands either, so the frame on screen '
+              'is the composite and nothing else');
+      rig.cache.resetCounters();
+
+      edit(rig);
+      rig.paintOnce();
+
+      expect(rig.cache.hasCarryOver, isFalse,
+          reason: '$what: a composite is a picture of the document before the '
+              'edit');
+      expect(rig.cache.carryOverBlitCount, 0,
+          reason: '$what: and it must not have reached the canvas even once '
+              'on the way out');
+      expect(rig.cache.liveDrawCount, greaterThan(0),
+          reason: '$what: the viewport is uncovered and must be walked live, '
+              'at the post-edit document -- the walk a covering composite '
+              'suppresses outright');
+    }
+  });
+
   test('a table edit drops the generation without minting a carry-over',
       () async {
-    // `_dropGeneration` is not `_retireGeneration`. A table edit is not a
-    // scale change: the tiles it throws away hold the *wrong* colour, and
-    // compositing them would put that colour straight back on screen for as
-    // long as the refill takes -- while `liveTileCount` still read zero and
-    // every existing invalidation gate stayed green.
+    // The other half, and not the same claim: above, a composite already
+    // stands and must be destroyed; here the outgoing generation *covers the
+    // viewport*, which is the precondition `_retireGeneration` mints on. A
+    // `_dropGeneration` that composited instead of disposing would put the
+    // pre-edit colour straight back on screen for as long as the refill takes
+    // -- while `liveTileCount` still read zero and every existing
+    // invalidation gate stayed green.
     final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
     addTearDown(rig.dispose);
     rig.paintOnce();

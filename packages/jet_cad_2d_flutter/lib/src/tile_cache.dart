@@ -19,8 +19,9 @@ import 'viewport_transform.dart';
 /// **4.00x** its own area, because [kTileSlack] is 32 *logical* pixels and a
 /// 128 px tile is only 64 logical wide; 512 px costs 48.0 MiB and bakes 1.56x.
 /// Those multipliers were a prediction when this was written and are the real
-/// cost since Task 9a: the padded bake is what closed defect F1. 1024 px is excluded outright — its 80.0 MiB visible set leaves no
-/// room under [kTileCacheBytes] for the carry-over composite.
+/// cost since Task 9a: the padded bake is what closed defect F1. 1024 px is
+/// excluded outright — its 80.0 MiB visible set leaves no room under
+/// [kTileCacheBytes] for the carry-over composite.
 const int kTileDevicePixels = 256;
 
 /// The slack a tile's **arrival** rule and its **invalidation** rule share, in
@@ -429,6 +430,17 @@ class TileCache {
   /// read or it is prose.
   Paint get debugBlitPaint => _blitPaint;
 
+  /// The composite `Paint`'s identity, for the same criterion and the same
+  /// reason as [debugBlitPaint].
+  ///
+  /// Exposed in this fix round because criterion 13's `SpyCanvas` test could
+  /// not otherwise tell "the frame handed `drawImageRect` two long-lived
+  /// fields" from "the frame allocated a `Paint` at the call site": with a
+  /// composite standing there are legitimately two distinct `Paint` objects in
+  /// one frame, and the old assertion — every call gets the *same* object —
+  /// is false in that state rather than merely untested.
+  Paint get debugCarryOverPaint => _carryOverPaint;
+
   void resetCounters() {
     _bakes = 0;
     _blits = 0;
@@ -693,6 +705,15 @@ class TileCache {
   /// here rather than a silent omission, which is what
   /// `SpatialIndex._onChange` does with the same stream.
   void applyChange(DocChange change, DraftDocument document) {
+    // **Every arm, before the switch even runs.** `_dropGeneration` covers the
+    // definition arm and the table revision `paintFrame` reads for itself, but
+    // `_invalidateTouched`'s ordinary per-tile path removes tiles one at a
+    // time and never reaches it — so a leaf edit would leave the composite
+    // standing, and a composite covering the viewport suppresses the live
+    // fallback that would have repainted. Hoisted above the switch rather than
+    // repeated in each case for the reason the switch itself is exhaustive: a
+    // sixth `DocChange` subclass must not be able to arrive without this.
+    _dropCarryOver();
     switch (change) {
       // A purge rewrites the entity store's slots wholesale and a load
       // replaces the document; neither leaves anything worth keeping, and
@@ -810,9 +831,23 @@ class TileCache {
   /// **And mints no carry-over.** [_retireGeneration] is the scale path; this
   /// one runs for a definition or a table edit, whose tiles are wrong rather
   /// than merely stale.
+  ///
+  /// **It destroys one, though, and that is not symmetry — it is the whole of
+  /// finding C1.** A composite is a picture of the document *before* the
+  /// edit, and [paintFrame] suppresses the live fallback outright whenever the
+  /// composite covers the viewport. An edit landing while one stands therefore
+  /// produced a frame that was nothing but pre-edit pixels, and kept producing
+  /// it: measured at `hasCarryOver=true, liveTileCount=0, liveDrawCount=0,
+  /// carryOverBlitCount=1` on the frame after a layer edit, and still
+  /// `liveDrawCount=0` eleven frames later — at a *real* bake budget too,
+  /// where the un-refilled remainder of the viewport showed the old colour for
+  /// the whole of the settle. Nothing else on this path would ever have
+  /// cleared it: the composite is not a tile, so [liveTileCount] read zero the
+  /// entire time and every invalidation gate in this plan stayed green.
   void _dropGeneration() {
     _invalidations += _tiles.length;
     _disposeTiles();
+    _dropCarryOver();
   }
 
   /// Whether [handle] draws inside a block definition rather than at the
