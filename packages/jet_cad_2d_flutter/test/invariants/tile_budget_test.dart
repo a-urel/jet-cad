@@ -45,6 +45,18 @@ const int _smallCap = 8 * _tileBytes;
 /// pixels of RGBA, from [kTileViewport] at [kTileDpr].
 const int _compositeBytes = 800 * 600 * 4;
 
+/// A ceiling that admits a covering generation **and**, once a composite
+/// stands inside it, admits only a fraction of one.
+///
+/// 138 tiles. A covering generation at this viewport and tile size is 130, so
+/// the first frame covers -- which is the precondition for minting a composite
+/// at all. The composite is then 1,920,000 of the ceiling's 2,260,992 bytes,
+/// leaving room for twenty tiles: a sixth of the viewport, so the generation
+/// never covers again, the composite is never dropped, and every pan after the
+/// zoom has to evict. That intersection is the state the two states this file
+/// already covered could not reach between them.
+const int _capWithComposite = 138 * _tileBytes;
+
 void main() {
   test('criterion 12: the cap holds and eviction is real, not theoretical',
       () async {
@@ -128,9 +140,36 @@ void main() {
     expect(rig.cache.blitDestinationCount, greaterThan(30),
         reason: 'anti-degenerate clause 3: a single-tile viewport would make '
             'every count in this file vacuous');
+    expect(rig.cache.hasCarryOver, isFalse,
+        reason: 'setup: the equality below holds only with no composite '
+            'standing, since a composite allocates a destination of its own. '
+            'A pan-only history mints none, but the assertion has to say so '
+            'rather than leave the reader to derive it.');
+    expect(rig.cache.carryOverBlitCount, 0, reason: 'setup: and blits none');
     expect(rig.cache.blitDestinationCount, rig.cache.blitCount,
         reason: 'a covered frame with no composite standing allocates exactly '
             'one destination per tile it blits');
+
+    // **And the composite's own destination, which nothing else pins.**
+    // Deleting the increment on the carry-over arm of `paintFrame` leaves
+    // every assertion above green: they are all made in a state where that
+    // arm never runs. Same shape as the finding that put the `liveBytes`
+    // test in this file -- a term covered only where it is zero.
+    final zoomed = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+    addTearDown(zoomed.dispose);
+    zoomed.paintOnce();
+    zoomed.zoomBy(1.19);
+    zoomed.cache.resetCounters();
+    zoomed.paintOnce();
+
+    expect(zoomed.cache.carryOverBlitCount, 1,
+        reason: 'setup: a composite really was blitted this frame');
+    expect(zoomed.cache.liveDrawCount, 0,
+        reason: 'setup: and the generous budget covered the viewport, so '
+            'every visible key both blitted and cost a destination');
+    expect(zoomed.cache.blitDestinationCount,
+        zoomed.cache.blitCount + zoomed.cache.carryOverBlitCount,
+        reason: 'the composite allocates a destination like any other blit');
   });
 
   test('criterion 12: liveBytes counts the composite, not only the tiles',
@@ -304,5 +343,123 @@ void main() {
     zoomed.cache.dispose();
     expect(zoomed.cache.debugImagesAlive, 0,
         reason: 'dispose releases every one of them');
+  });
+
+  test(
+      'criterion 12: eviction runs with a composite standing, and never takes '
+      'it', () async {
+    // **The intersection, which neither half covers.** Every cap test in this
+    // file omits the zoom, so `_carryOver` is null through all of them; the
+    // composite test runs at the 96 MiB production ceiling, where eviction
+    // never fires. Both halves of `_makeRoomForOneTile`'s stated policy -- the
+    // composite is never a victim, and it counts against the ceiling the
+    // tiles are competing for -- live only where the two states overlap, and
+    // until this fixture nothing asserted either. Counting the rows of a
+    // coverage table would not have found it: both rows were there.
+    final rig = TileRig(
+        tileDevicePixels: 64,
+        tilesBakedPerFrame: 1000,
+        cacheBytes: _capWithComposite);
+    addTearDown(rig.dispose);
+
+    rig.paintOnce();
+    final covering = rig.cache.liveTileCount;
+    expect(rig.cache.liveDrawCount, 0,
+        reason: 'setup: the first generation covered the viewport, which is '
+            'what lets it be retired into a composite rather than thrown away');
+    expect(covering, greaterThan(30),
+        reason: 'setup, anti-degenerate clause 3: 130 tiles, so "fewer than a '
+            'covering generation" below is a real reduction');
+
+    rig.zoomBy(1.19);
+    rig.paintOnce();
+    expect(rig.cache.hasCarryOver, isTrue,
+        reason: 'setup: the scale change minted one');
+    // **Not `liveDrawCount` here.** A zoom *in* magnifies the composite past
+    // the viewport's edges, so `paintFrame` takes the `carryOverCovers` early
+    // return and skips the live walk entirely -- the gesture frame this cache
+    // exists to make cheap. The tile count is what says the ceiling is now
+    // shared; the live walk appears on the pans below, where the composite
+    // has moved off the edge.
+    expect(rig.cache.liveTileCount, lessThan(covering),
+        reason: 'setup: the ceiling no longer admits a covering generation, '
+            'because most of it is the composite now (20 tiles of 130). '
+            'Without this the next covered frame would drop the composite and '
+            'the pans below would run in the very state this file already '
+            'covers everywhere else.');
+    expect(rig.cache.liveTileCount, greaterThan(0),
+        reason: 'setup: but it does admit some, so tiles and the composite '
+            'really are competing for one ceiling rather than the composite '
+            'having taken all of it');
+
+    final baseline = rig.cache.evictionCount;
+    for (var i = 0; i < 6; i++) {
+      rig.panBy(-64, -32);
+      rig.paintOnce();
+      expect(rig.cache.hasCarryOver, isTrue,
+          reason: 'pan $i: the composite is never a victim. The frame path '
+              'reads it every frame it stands, and reclaiming it would put a '
+              'blank region where stale pixels were.');
+      expect(rig.cache.liveBytes, lessThanOrEqualTo(_capWithComposite),
+          reason: 'pan $i');
+      expect(rig.cache.liveBytes, greaterThan(_compositeBytes),
+          reason: 'pan $i: and tiles are live beside it, so the ceiling is '
+              'genuinely being shared rather than wholly consumed');
+    }
+    expect(rig.cache.evictionCount, greaterThan(baseline),
+        reason: 'eviction really ran in this state: a policy nothing reaches '
+            'is not a policy');
+    expect(rig.cache.debugImagesAlive, rig.cache.liveTileCount + 1,
+        reason: 'and nothing leaked on the way -- every tile, plus the one '
+            'composite');
+  });
+
+  test(
+      'criterion 12: a ceiling smaller than the composite bakes nothing '
+      'rather than overrun it', () async {
+    // The other half of the same policy. `_makeRoomForOneTile` returning
+    // `false` rather than baking anyway is what keeps `liveBytes` a ceiling
+    // and not a suggestion, and this is the only state where that arm is the
+    // only thing running.
+    final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    rig.zoomBy(1.19);
+    rig.paintOnce();
+    expect(rig.cache.hasCarryOver, isTrue, reason: 'setup: a composite stands');
+    expect(rig.cache.liveTileCount, greaterThan(30),
+        reason: 'setup: and there are tiles for the ceiling to take');
+
+    // **Unreachable through the constructor**, which is why `cacheBytes` is
+    // not final: a composite is minted only from a generation that covered,
+    // so any ceiling that permits one is already larger than one composite.
+    // Warm at a real ceiling, then take it away -- the manoeuvre the zoom
+    // tests use on the bake budget, for the same reason.
+    rig.cache.cacheBytes = 4 * _tileBytes;
+
+    // **Two frames, and the first one is not the steady state.** Eviction is
+    // asked only on a miss, so the tiles the loop had already blitted before
+    // it reached one are protected by the very guard I2 is about and survive
+    // the frame -- eleven of them here. The second frame pans past them and
+    // the ceiling is left holding exactly what it cannot evict.
+    rig.panBy(-64, -32);
+    rig.paintOnce();
+    rig.cache.resetCounters();
+    rig.panBy(-64, -32);
+    rig.paintOnce();
+
+    expect(rig.cache.hasCarryOver, isTrue,
+        reason: 'the composite survives a ceiling it does not fit under: it '
+            'is not in the tile map and eviction cannot reach it');
+    expect(rig.cache.liveBytes, _compositeBytes,
+        reason: 'and it is all the cache holds -- every tile went, and the '
+            'ceiling stayed a ceiling rather than being quietly exceeded');
+    expect(rig.cache.liveTileCount, 0);
+    expect(rig.cache.bakeCount, 0,
+        reason: 'baking under a ceiling that cannot hold the result is the '
+            'silent overrun this arm exists to refuse');
+    expect(rig.cache.liveDrawCount, 1,
+        reason: 'and the live walk is what stops the frame going blank '
+            'instead');
   });
 }

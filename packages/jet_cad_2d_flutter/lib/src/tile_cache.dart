@@ -249,7 +249,19 @@ class TileCache {
   /// only have blitted [_carryOver].
   int tilesBakedPerFrame;
 
-  final int cacheBytes;
+  /// The byte ceiling, counting [liveBytes] whole.
+  ///
+  /// **Not final, and for [tilesBakedPerFrame]'s reason exactly.** A composite
+  /// is minted only from a generation that *covered* the viewport, so any cap
+  /// that permits one to exist is already larger than one composite -- 130
+  /// tiles of coverage against a composite's 117 at the test tile size. The
+  /// state "a composite stands and the ceiling is smaller than it" is
+  /// therefore unreachable through the constructor, and it is the one state
+  /// where `_makeRoomForOneTile`'s "bakes nothing rather than overrun" arm is
+  /// the only thing running. Warming at a real ceiling and then taking it away
+  /// is how a test reaches it, the same manoeuvre the zoom-path tests use on
+  /// the bake budget.
+  int cacheBytes;
 
   TileGrid? _grid;
   final Map<TileKey, Image> _tiles = <TileKey, Image>{};
@@ -695,6 +707,21 @@ class TileCache {
   /// tile it needs already gone — evict, rebake, evict, forever, with the
   /// frame path doing the evicting. With it, the loop simply runs out of room
   /// and leaves the remainder to the live fallback, which is a bounded cost.
+  ///
+  /// **"Blitted", not "visible": the guard is weaker than a first reading
+  /// suggests, and deliberately.** A tile that is visible this frame but sits
+  /// later in [TileGrid.visibleKeys] than the miss being served still carries
+  /// the *previous* frame's serial, so it is a legal victim. What that costs
+  /// is bounded and it is a hit rate, never a pixel: the victim is rebaked or
+  /// left to the live fallback like any other miss, which is what
+  /// `tile_budget_test.dart`'s pixel comparison at the cap exercises. The
+  /// bound is **at most one such eviction per bake** — each pass frees
+  /// exactly one tile and the freed slot is filled immediately — and at
+  /// production sizes it is usually none, because the LRU order puts every
+  /// off-screen tile ahead of every on-screen one. Tightening it to *visible*
+  /// would mean sweeping `visibleKeys` once more before the bake loop to mark
+  /// the whole visible set, on every warm frame, to buy back a few bakes on
+  /// the frames that overrun. Not worth a second pass over the frame path.
   ///
   /// **The composite is never a candidate.** It is not in [_tiles] at all, and
   /// deliberately: [paintFrame] reads it every frame it stands, so a
