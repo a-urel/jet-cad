@@ -966,66 +966,64 @@ onto instance resolution rather than fixed, an accepted gap from the spec.
 
 ### Plan 3g — the definition/tile picture cache
 
-> **Read this first: the 2026-08-23 spike reverses this section's premise, and
-> it is measured clean.**
-> [docs/superpowers/notes/2026-08-23-picture-cache-price-spike.md](docs/superpowers/notes/2026-08-23-picture-cache-price-spike.md)
-> — Low Power Mode off, AC power, medians of three, with a control that
-> reproduces Plan 3d's clean 50,000 and 500,000 rows inside their own intervals.
+> **Plan 3g is executed. Exit gate: 11 of 13.** Thirteen planned tasks became
+> sixteen — 6a, 9a and 11a were inserted mid-flight — across
+> `477d4c5..3071096` on `main`, worked directly, nothing in flight.
 >
-> **The objection that would have killed the definition-`Picture` route does not
-> hold.** One flush plus one `drawPicture` per visible instance takes the frame
-> from 20 to 702 `drawVertices` calls, and at a fixed triangle count raster does
-> not move: 8.25 ms at 20 calls, 8.23 ms at 702, overlapping intervals. Wrapping
-> a `drawVertices` in a `Picture` and replaying it costs **+0.35 ms at 702
-> replays** — small, real, and reported as zero by the contaminated sweep.
+> Results:
+> [docs/superpowers/notes/2026-08-24-plan-3g-results.md](docs/superpowers/notes/2026-08-24-plan-3g-results.md).
+> Mutation log:
+> [docs/superpowers/notes/plan-3g-mutation-log.md](docs/superpowers/notes/plan-3g-mutation-log.md)
+> — **41 mutants named, 40 fired, 39 killing something.** The plan counted
+> seventeen; execution more than doubled it because repeatedly the mutant a task
+> was handed could not fire and a working one had to be built.
+> Spec:
+> [docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3g-tile-cache-design.md](docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3g-tile-cache-design.md).
 >
-> **But it attacks the wrong half.** Every configuration measured here and in 3d
-> is raster-bound. A definition-level cache — `Picture` or pre-tessellated
-> vertices — saves build alone; take the walk to zero and the 500,000-entity
-> frame still sits at 22.40 ms of raster inside a 40.27 ms total.
+> **What works.** A rasterised tile cache behind `DraftCanvas(tiles: true)`,
+> default off. `kTileDevicePixels = 512`, `kBakeBudgetDevicePixels = 262144`,
+> `kTileCacheBytes = 96 MiB`. **Criterion 10 PASSES: a settled 500,000-entity
+> frame reads a `totalSpan` median of 1.58 ms against a 4.00 ms threshold — 26x
+> the same runs' untiled 41.09 ms.** A tiled frame is byte-identical to a live
+> one at any camera, gated at zero stray, zero uncovered and zero differing
+> pixels.
 >
-> **Probe D settles the shape.** Baking the frame into a device-resolution
-> `Image` and blitting it costs **1.49 ms total at 50,000 entities against 15.04
-> live (10×), and 1.61 against 40.27 at 500,000 (25×)**. The blit is
-> corpus-independent — 0.97 ms of raster at both sizes — so the margin widens
-> with the drawing. **Plan 3g should be a tile cache whose tiles are
-> rasterised.**
+> **What misses, and it is recorded rather than tuned away.**
+> **Criterion 11 MISSES by 2.1x**: a baking pan frame reads 35.67 ms against
+> 16.67. The threshold was not moved. **The cause is not the bake** — a bake
+> walk is 5.7-6.4 ms per tile, and the frame's ~32 ms of excess is the **live
+> fallback drawing the still-uncovered strip**. The spec's own prescribed remedy
+> is spent: it said the answer was a smaller bake budget, and the budget is
+> already one tile. **Plan 3h inherits a design question, not a tuning one.**
 >
-> Three facts the design starts from rather than discovers:
+> **And one gap is worse than a miss.** **Nothing in Plan 3g gates per-tile
+> clipping** (gap G7). M7 — clip each tile to the viewport instead of its own
+> rect — was fired on device and collapsed nothing: criterion 10 is
+> *structurally blind* to it (`bakeFrames=0/60`), and criterion 11 was already
+> red, so there is no green-to-red transition anywhere. M7 was demonstrably
+> live: triangles 734,442 -> 1,183,035. The spec named M7 "the mutation that
+> passes every correctness gate and destroys the plan's entire reason for
+> existing" and said "a suite that cannot kill it is not gating this plan".
+> **That sentence stands.** What is owed is a bake-time assertion that a tile's
+> geometry is bounded by its own rect — the command-time-assertion shape trap 5
+> already recommends here, not another frame-path timing.
 >
-> - **A tile is a pan-and-settle optimisation.** Rebaking every frame — the zoom
->   regime — buys 11% at 50,000 and 26% at 500,000, not 10× and 25×. 3g must say
->   what it does during a zoom gesture.
-> - **Tile budget is a viewport quantity**, not a drawing quantity, because the
->   blit does not scale with the corpus.
-> - **A bake is invisible in `rasterDuration`.** `toImageSync` returns before the
->   GPU work it schedules. Probe D's bake arm rasterised 217,758 triangles per
->   frame while raster read 0.87 ms and `totalSpan` read 13.56. **Any gate 3g
->   writes against a bake must read `totalSpan`** — `report()` now prints it.
+> **Read the results note's last section before starting 3h.** The dominant
+> finding of this execution was not any single defect: **twelve times a gate
+> turned out unable to see what it claimed to measure**, each in a different
+> disguise, and the note carries the taxonomy and the seven questions that find
+> them. The twelfth reaches the instruments themselves — the rig's `overdraw`
+> column reads identically under M7 because `_probeBake` **reimplements** the
+> bake geometry instead of calling `_bake`, which means the overdraw figures in
+> the spec describe a reimplementation and not the shipped code. They
+> corroborated the 512 decision; the pan p95 and the live-walk fallback counts
+> decided it.
 >
-> Four debts remain, listed in the note's "Owed": whether the 500,000 raster is
-> upload-bound or fill-bound (which decides tile *size*), an ink comparison on a
-> real Impeller surface, a replay arm under rotation and scale, and the web
-> re-run 3g was already owed. **The clean pass and Probe D are no longer among
-> them.**
->
-> One correction to this file: `STATUS.md` above records Low Power Mode
-> contamination as **"a uniform ~24% on both raster and build"**, measured during
-> Plan 3c. On the R2 corpus at 50,000 entities it is **+30% on build and +47% on
-> raster**. Not uniform. A plan budgeting against the older figure should know.
->
-> **The design and the plan are written.**
-> Spec: [docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3g-tile-cache-design.md](docs/superpowers/specs/2026-08-23-jet-cad-2d-plan-3g-tile-cache-design.md)
-> — fourteen decisions, thirteen failable criteria, seventeen named mutants
-> (sixteen firable, M3 deferred to G1), four accepted gaps, a seven-clause
-> anti-degenerate rule.
-> Plan: [docs/superpowers/plans/2026-08-23-jet-cad-2d-plan-3g-tile-cache.md](docs/superpowers/plans/2026-08-23-jet-cad-2d-plan-3g-tile-cache.md)
-> — thirteen tasks, **not yet executed**.
->
-> The rest of this section is what 3f, 3f.1 and 3d handed 3g, and all of it still
-> stands. Only the **shape of the cache** has changed.
+> Traps 1, 2, 3 and 4 are closed, and so are F1 (a whole stroke column vanished
+> at 6 of 41 zoom factors) and G6. Gaps G1, G2, G3, G4, G5 and G7 are open and
+> each names what it owes.
 
-**What 3f hands it, and one question it must answer first.**
+**What 3f hands it, and one question it must answer first.****What 3f hands it, and one question it must answer first.**
 
 - **A working text LOD** — `kMinTextCapPixels = 3.0`, `0.0` disables it, wired
   from `DraftPainter` through `DraftCanvas` to the harness's `LOD` define,
