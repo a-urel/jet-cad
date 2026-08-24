@@ -362,6 +362,275 @@ void main() {
             'pixels went transparent');
   });
 
+  // ---------------------------------------------------------------------
+  // Task 9: the generation, the carry-over composite, and the zoom path.
+  // ---------------------------------------------------------------------
+
+  test('criterion 8: a pan drops nothing and a scale change drops everything',
+      () async {
+    final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    final generation = rig.cache.generation;
+    final tiles = rig.cache.liveTileCount;
+
+    // Twelve pans, none of them a whole tile.
+    for (var i = 0; i < 12; i++) {
+      rig.panBy(-5.5, -2.5);
+      rig.paintOnce();
+    }
+    expect(rig.cache.generation, generation,
+        reason: 'a pan is not a new generation');
+    expect(rig.cache.liveTileCount, greaterThanOrEqualTo(tiles),
+        reason: 'a pan adds tiles at the leading edge and drops none');
+
+    rig.zoomBy(1.03);
+    rig.paintOnce();
+    expect(rig.cache.generation, generation + 1);
+    expect(rig.cache.hasCarryOver, isTrue,
+        reason: 'the retired generation lives on as one composite: two live '
+            'generations do not fit under the cap, and independently snapped '
+            'scaled tiles gap or overlap along every shared edge');
+  });
+
+  test('a zoom gesture blits the carry-over and bakes nothing', () async {
+    // **The budget is taken away after the first frame, not at construction.**
+    // A rig built with `tilesBakedPerFrame: 0` never bakes a first generation
+    // at all, so there is nothing to retire, no composite is ever made, and
+    // every assertion below reads zero against zero -- green for the one
+    // reason that would make the test worthless. Deviation D1 in the report.
+    final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    rig.cache.tilesBakedPerFrame = 0;
+    rig.cache.resetCounters();
+    for (var i = 0; i < 8; i++) {
+      rig.zoomBy(1.03);
+      rig.paintOnce();
+    }
+    expect(rig.cache.bakeCount, 0);
+    expect(rig.cache.carryOverBlitCount, 8,
+        reason: 'one composite blit per gesture frame');
+    expect(rig.cache.blitCount, 0,
+        reason: 'and not one tile blit: every gesture frame anchors a fresh '
+            'generation whose tiles cannot be baked under a zero budget');
+    expect(rig.cache.liveDrawCount, 0,
+        reason: 'the carry-over covers the viewport, so nothing is uncovered');
+    expect(rig.cache.generation, greaterThanOrEqualTo(9),
+        reason: 'anti-vacuity: eight scale changes really did retire eight '
+            'generations, so the eight blits above are gesture frames and '
+            'not eight repeats of one warm frame');
+  });
+
+  test('the gesture frame the carry-over serves is not blank', () async {
+    // `carryOverBlitCount` counts calls, and a `drawImageRect` into a
+    // degenerate destination rect counts exactly the same as one that puts the
+    // outgoing generation on screen. This reads the pixels instead: under a
+    // zero bake budget and a fresh generation holding no tiles at all, every
+    // non-transparent pixel in the frame came from the composite or from
+    // nowhere.
+    final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    final warmInk = await frameInk(rig);
+    expect(warmInk, greaterThan(5000),
+        reason: 'the floor first: a blank warm frame would make the '
+            'comparison below vacuous');
+
+    rig.cache.tilesBakedPerFrame = 0;
+    rig.zoomBy(1.19);
+    final gestureInk = await frameInk(rig);
+    expect(rig.cache.liveTileCount, 0,
+        reason: 'the new generation holds nothing, so the ink below cannot '
+            'have come from a tile');
+    expect(rig.cache.liveDrawCount, 0,
+        reason: 'and no live walk ran, so it cannot have come from the '
+            'painter either');
+    expect(gestureInk, greaterThan(5000),
+        reason: 'the composite must actually reach the canvas: $gestureInk '
+            'against a warm $warmInk');
+  });
+
+  test('the settle spreads its bakes across frames', () async {
+    final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 4);
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    rig.zoomBy(1.03);
+    rig.cache.resetCounters();
+    // Settled: the scale stops moving, so the new generation fills in.
+    for (var i = 0; i < 3; i++) {
+      rig.paintOnce();
+    }
+    expect(rig.cache.bakeCount, 12, reason: 'four per frame, three frames');
+    expect(rig.cache.liveTileCount, 12,
+        reason: 'and every bake was kept, so 12 is a throttle rather than a '
+            'recount of four tiles rebaked three times');
+    expect(rig.cache.liveDrawCount, 3,
+        reason: 'anti-vacuity: all three frames still left ink uncovered, so '
+            'the visible set is larger than 12 and the budget is what bounded '
+            'the count');
+  });
+
+  test('criterion 1: a settled frame equals the live frame after a zoom',
+      () async {
+    // **The zoom half of criterion 1, and the camera was the degenerate
+    // fixture.** Every criterion 1 case before this one runs at the rig's one
+    // scale of 1.4 -- a pan cannot change a scale -- so nothing in this plan
+    // had ever asked whether a *different* scale tiles exactly.
+    //
+    // It does, at thirty-five of the forty-one factors swept from 0.70 to 1.50
+    // in steps of 0.02. The six that do not are defect F1, which the group
+    // below measures and the report diagnoses; the factors here are drawn from
+    // the clean thirty-five, both directions, and are a criterion-1 claim
+    // rather than a demonstration -- mutant M4 reddens every one of them,
+    // because a generation replayed at the old scale carries the old stroke
+    // widths and the old dash phase and no pan test can see either.
+    for (final factor in <double>[0.74, 0.83, 1.16, 1.18, 1.30]) {
+      final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+      addTearDown(rig.dispose);
+      rig.paintOnce();
+      rig.zoomBy(factor);
+      // Two frames. The first anchors the new generation and fills it, with
+      // the composite blitted underneath; the second bakes nothing, finds the
+      // viewport covered, and retires the composite. Only the third frame --
+      // the comparison's own -- is a clean generation, and that is the frame
+      // criterion 1 is a claim about.
+      rig.paintOnce();
+      rig.paintOnce();
+      expect(rig.cache.hasCarryOver, isFalse,
+          reason: 'factor $factor: a covered viewport retires the composite, '
+              'and a composite still on screen would compose stale ink under '
+              'every antialiased tile edge');
+      await expectTiledEqualsLive(rig);
+    }
+  });
+
+  // Defect F1, measured on every run rather than rediscovered, and **not an
+  // accepted gap**: this one loses ink.
+  //
+  // **What happens.** At six of the forty-one zoom factors swept from 0.70 to
+  // 1.50 in steps of 0.02, one whole one-device-pixel stroke column is absent
+  // from the tiled frame -- 370 to 561 pixels of pure `uncovered` with zero
+  // `stray`. A line simply is not drawn.
+  //
+  // **The mechanism, measured.** At factor 1.17 the quantised camera is
+  // `a = 1.638, e = -77.5`, which puts `crossingGrid`'s vertical line at world
+  // x 106 on device x **192.256** -- 0.256 px right of the tile boundary at
+  // 192. Its stroke is 2 device pixels wide, so it covers pixel centres 191.5
+  // and 192.5, and the live frame inks both. Pixel 191 belongs to tile column
+  // 2, whose device range is `[128, 192)`; `cache.tilesHolding(Handle(1009))`
+  // returns `[3]`. Column 2 never received the entity at all.
+  //
+  // **Why.** `DraftPainter.paint` derives its index query from
+  // `camera.visibleWorld(viewport)` with no slack whatsoever
+  // (`draft_painter.dart:338`); only its *screen* clip carries
+  // `kScreenClipInflate`, which is defined as "half the widest stroke the
+  // frame can draw" precisely so a centreline just outside still contributes
+  // its edge. A tile bake passes the tile as the viewport, so the tile's world
+  // rect ends 0.08 world units left of the centreline and the half of the
+  // stroke that reaches back inside is never drawn by anyone: the neighbouring
+  // tile owns different pixels, and a device column can only be written by the
+  // tile containing it.
+  //
+  // **The fix is one call and it is not this task's.** Padding `_bake`'s
+  // viewport by `kScreenClipInflate` and pulling the canvas back by the same
+  // amount takes the sweep from 6 of 41 to **0 of 41** (built, measured and
+  // reverted in Task 9; the patch is in the report). It also widens every
+  // tile's `_baked` record by a one-tile ring at this tile size, which breaks
+  // four direction-two assertions in `tile_invalidation_test.dart`: the
+  // arrival oracle over-reports while `_invalidateTouched`'s own geometry does
+  // not inflate. Making the two agree is a decision about how much
+  // over-invalidation is acceptable, and that belongs to a task of its own.
+  group('defect F1: a stroke centreline just outside a tile is culled from it',
+      () {
+    test('the loss is one stroke column, and it is ink lost rather than moved',
+        () async {
+      // Both halves matter. The bound says the damage has not grown; the
+      // second assertion says what kind of damage it is, and would catch a
+      // colour or blend regression hiding inside the same count.
+      for (final factor in <double>[0.72, 0.78, 0.82, 1.06, 1.10, 1.22]) {
+        final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+        addTearDown(rig.dispose);
+        rig.zoomBy(factor);
+        rig.paintOnce();
+        final report = await measureTiledAgreement(rig);
+        expect(report.liveInk, greaterThan(5000),
+            reason: 'factor $factor: the floor first: $report');
+        // Measured 2026-08-24: 370, 415, 436, 527, 484 and 561 uncovered.
+        expect(report.uncoveredPixels, lessThanOrEqualTo(600),
+            reason: 'factor $factor: $report');
+        expect(report.strayPixels, 0,
+            reason: 'factor $factor: the tiled frame draws nothing the live '
+                'frame does not -- the loss is a cull, not a displacement, '
+                'and a displacement would mean a different defect: $report');
+        expect(report.differingPixels, report.uncoveredPixels,
+            reason: 'factor $factor: and every differing pixel is one of the '
+                'lost ones, so no pixel disagrees on colour: $report');
+      }
+    });
+  });
+
+  test('a whole-document change clears the carry-over as well as the tiles',
+      () async {
+    for (final change in <DocChange>[
+      const DocumentLoaded(),
+      const DocumentPurged(),
+    ]) {
+      final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+      addTearDown(rig.dispose);
+      rig.paintOnce();
+      rig.cache.tilesBakedPerFrame = 0;
+      rig.zoomBy(1.19);
+      rig.paintOnce();
+      expect(rig.cache.hasCarryOver, isTrue,
+          reason: '$change: the floor -- there must be a composite to clear');
+
+      rig.cache.applyChange(change, rig.doc);
+      expect(rig.cache.hasCarryOver, isFalse,
+          reason: '$change: the composite is anchored to a camera that no '
+              'longer means anything, and it holds native memory until '
+              'something disposes it');
+      expect(rig.cache.liveTileCount, 0, reason: '$change');
+    }
+  });
+
+  test('a table edit drops the generation without minting a carry-over',
+      () async {
+    // `_dropGeneration` is not `_retireGeneration`. A table edit is not a
+    // scale change: the tiles it throws away hold the *wrong* colour, and
+    // compositing them would put that colour straight back on screen for as
+    // long as the refill takes -- while `liveTileCount` still read zero and
+    // every existing invalidation gate stayed green.
+    final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    expect(rig.cache.liveTileCount, greaterThan(30),
+        reason: 'the floor: a generation worth compositing');
+    final generation = rig.cache.generation;
+
+    // Budget zero for the frame that follows, so the drop cannot be papered
+    // over by an immediate refill.
+    rig.cache.tilesBakedPerFrame = 0;
+    rig.doc.tables.layers.add(const LayerRecord(
+      handle: Handle(900),
+      name: 'WALLS',
+      color: IndexedColor(3),
+      linetype: ReservedHandles.continuousLinetype,
+      lineweight: 50,
+      transparency: 40,
+    ));
+    rig.paintOnce();
+
+    expect(rig.cache.liveTileCount, 0, reason: 'the generation is dropped');
+    expect(rig.cache.hasCarryOver, isFalse,
+        reason: 'a table edit invalidates pixels; it does not retire a scale');
+    expect(rig.cache.liveDrawCount, greaterThan(0),
+        reason: 'and the uncovered viewport is drawn live, at the new table '
+            'values -- which a composite standing in front of it would hide');
+    expect(rig.cache.generation, generation,
+        reason: 'the lattice stays: the anchor still describes the camera');
+  });
+
   // The accepted gap, measured on every run rather than rediscovered.
   //
   // **What this proves.** A near-axis stroke disagrees between the live and
@@ -443,4 +712,41 @@ void main() {
       expect(report.differingPixels, 0, reason: '$report');
     });
   });
+}
+
+/// Non-transparent pixels in one tiled frame of [rig].
+///
+/// A separate instrument from `measureTiledAgreement`, and deliberately so:
+/// that one compares two arms and is blind to a frame both arms leave blank.
+/// This one asks the question that gates the carry-over -- did anything at all
+/// reach the canvas -- which is the only way to tell a composite that painted
+/// from a `drawImageRect` into a degenerate rect.
+Future<int> frameInk(TileRig rig) async {
+  final width = (kTileViewport.width * kTileDpr).round();
+  final height = (kTileViewport.height * kTileDpr).round();
+  final recorder = PictureRecorder();
+  final canvas = Canvas(recorder);
+  canvas.scale(kTileDpr);
+  canvas.clipRect(Offset.zero & kTileViewport);
+  rig.cache.paintFrame(
+    canvas: canvas,
+    viewport: kTileViewport,
+    devicePixelRatio: kTileDpr,
+    camera: rig.camera,
+    painter: rig.painter,
+    sink: rig.sink,
+    vertices: rig.vertices,
+    tablesRevision: rig.doc.tables.mutationRevision,
+  );
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(width, height);
+  picture.dispose();
+  final data = await image.toByteData();
+  image.dispose();
+  final bytes = data!.buffer.asUint8List();
+  var ink = 0;
+  for (var i = 3; i < bytes.length; i += 4) {
+    if (bytes[i] != 0) ink++;
+  }
+  return ink;
 }

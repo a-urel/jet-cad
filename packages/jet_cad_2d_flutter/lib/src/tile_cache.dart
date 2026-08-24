@@ -197,7 +197,18 @@ class TileCache {
   });
 
   final int tileDevicePixels;
-  final int tilesBakedPerFrame;
+
+  /// Tiles rasterised per frame while a generation fills in.
+  ///
+  /// **Not final, and the reason is a gate rather than a feature.** A cache
+  /// constructed with a budget of zero never bakes a first generation, so it
+  /// has nothing to retire, mints no composite, and reads zero on every
+  /// counter — green for the one reason that makes the measurement worthless.
+  /// The zoom-path tests warm a generation at a real budget and then take the
+  /// budget away, so a frame that still puts the outgoing pixels on screen can
+  /// only have blitted [_carryOver].
+  int tilesBakedPerFrame;
+
   final int cacheBytes;
 
   TileGrid? _grid;
@@ -245,7 +256,69 @@ class TileCache {
   /// its own.
   final Paint _blitPaint = Paint()..filterQuality = FilterQuality.none;
 
+  /// The retired generation, flattened to one viewport-sized image.
+  ///
+  /// **One image, not the old tiles.** [quantiseCamera] makes tile
+  /// destinations exact only when they differ by whole multiples of the tile
+  /// size, which holds at the generation's own scale and fails under an
+  /// arbitrary zoom factor: snapped independently, adjacent scaled tiles leave
+  /// a background gap or double-composite translucent ink along every shared
+  /// edge. A composite has no internal edges. It also keeps the budget
+  /// honest — two live generations do not fit under [kTileCacheBytes], and LRU
+  /// would never reclaim the outgoing one because the frame path reads it
+  /// every frame.
+  ///
+  /// **Never a resample of a resample.** A composite is minted only from a
+  /// generation that covered the viewport ([_viewportCovered]), so a gesture
+  /// frame — which anchors a fresh generation and bakes nothing into it —
+  /// carries the *same* composite forward rather than re-flattening the
+  /// already-scaled one. Eight gesture frames therefore filter the original
+  /// pixels once, not eight times.
+  Image? _carryOver;
+
+  /// The screen space [_carryOver] was recorded in: the quantised camera of
+  /// the last frame the retired generation covered.
+  ///
+  /// Not the grid's anchor. A generation outlives many pans, and the anchor
+  /// describes the camera the *first* of them ran at — its viewport rectangle
+  /// need not hold anything the user can currently see.
+  ViewportTransform? _carryOverAnchor;
+
+  /// [_carryOver]'s extent in [_carryOverAnchor]'s logical screen space.
+  ///
+  /// Kept rather than recomputed from `viewport` at blit time: the image's
+  /// device size is a `ceil`, so the logical rectangle it stands for is a hair
+  /// wider than the viewport, and the blit has to name the rectangle that was
+  /// actually recorded or it rescales by that hair.
+  Rect _carryOverRect = Rect.zero;
+
+  /// **The one blit that is not a 1:1 texel-to-pixel copy, and the one that
+  /// wants a filter.**
+  ///
+  /// Every tile blit lands on whole device pixels at its own scale, so
+  /// [_blitPaint]'s `FilterQuality.none` has nothing to interpolate and a
+  /// sampler would be pure cost. The carry-over is the opposite case by
+  /// construction: it is replayed at a scale it was never rasterised at, at an
+  /// arbitrary zoom factor and therefore at an arbitrary subpixel offset.
+  /// Nearest-neighbour there is not "exact", it is aliasing — stroke rows
+  /// dropped or doubled, and the drawing crawling as the factor sweeps.
+  /// `FilterQuality.low` is bilinear, which is the right cost for pixels that
+  /// are known to be stale and are about to be replaced by the settle.
+  final Paint _carryOverPaint = Paint()..filterQuality = FilterQuality.low;
+
+  /// Whether the previous frame's tiles covered the whole viewport.
+  ///
+  /// The precondition for minting a composite. A half-filled generation would
+  /// flatten to an image that is transparent wherever it never baked, and
+  /// blitting that in front of the live fallback would show a blank strip
+  /// instead of a stale one.
+  bool _viewportCovered = false;
+
+  /// The quantised camera of the last [paintFrame].
+  ViewportTransform? _lastCamera;
+
   int _bakes = 0;
+  int _carryOverBlits = 0;
   int _blits = 0;
   int _liveDraws = 0;
   int _generation = 0;
@@ -278,6 +351,12 @@ class TileCache {
   int get liveTileCount => _tiles.length;
 
   int get generation => _generation;
+
+  /// Whether a retired generation is still standing in for the incoming one.
+  bool get hasCarryOver => _carryOver != null;
+
+  /// Composite blits issued since [resetCounters]. One per gesture frame.
+  int get carryOverBlitCount => _carryOverBlits;
 
   /// Tiles thrown away by [applyChange], or by a table revision that moved,
   /// over this cache's whole life.
@@ -315,6 +394,7 @@ class TileCache {
     _bakes = 0;
     _blits = 0;
     _liveDraws = 0;
+    _carryOverBlits = 0;
   }
 
   void paintFrame({
@@ -346,7 +426,11 @@ class TileCache {
     }
 
     final quantised = quantiseCamera(camera, devicePixelRatio);
-    final grid = _gridFor(quantised, devicePixelRatio);
+    // The viewport reaches `_gridFor` because retiring a generation is now a
+    // composite and not just a `dispose`: the outgoing tiles have to be
+    // flattened into one viewport-sized image *before* they go.
+    final grid = _gridFor(quantised, devicePixelRatio, viewport);
+    _lastCamera = quantised;
 
     // Derived once and handed to every bake. Rebasing is frame-global by
     // construction; a per-tile origin would give each tile its own
@@ -354,7 +438,33 @@ class TileCache {
     final origin = rebaseOriginFor(quantised.visibleWorld(viewport));
 
     var budget = tilesBakedPerFrame;
+    var baked = 0;
     Rect? uncovered;
+
+    // **First, and underneath everything.** The composite is the outgoing
+    // generation, so an incoming tile blitted on top of it must win, and a
+    // live walk over an uncovered region must win too.
+    var carryOverCovers = false;
+    final carryOver = _carryOver;
+    if (carryOver != null) {
+      final dest = _carryOverDestRect(quantised);
+      canvas.drawImageRect(
+          carryOver,
+          Rect.fromLTWH(
+              0, 0, carryOver.width.toDouble(), carryOver.height.toDouble()),
+          dest,
+          _carryOverPaint);
+      _carryOverBlits++;
+      // A zoom *in* magnifies the composite past the viewport's edges and
+      // there is nothing left to fill; a zoom *out* shrinks it and leaves a
+      // genuine ring the live fallback owes. Asserting the containment rather
+      // than assuming the gesture's direction is the difference between a
+      // cheap gesture and a blank border.
+      carryOverCovers = dest.left <= 0 &&
+          dest.top <= 0 &&
+          dest.right >= viewport.width &&
+          dest.bottom >= viewport.height;
+    }
 
     for (final key in grid.visibleKeys(quantised, viewport)) {
       var image = _tiles[key];
@@ -362,6 +472,7 @@ class TileCache {
         image = _bake(key, grid, painter, sink, vertices, origin);
         _tiles[key] = image;
         budget--;
+        baked++;
       }
       final dest = grid.destRectFor(key, quantised);
       if (image == null) {
@@ -372,7 +483,28 @@ class TileCache {
       _blits++;
     }
 
-    if (uncovered == null) return;
+    _viewportCovered = uncovered == null;
+    if (uncovered == null) {
+      // The incoming generation now covers every pixel the composite served,
+      // so the composite is dead weight *and* a hazard: a tile's antialiased
+      // edge is translucent, and `srcOver` over stale ink is not the same
+      // pixel as `srcOver` over nothing. The next frame is a clean generation.
+      //
+      // **And not on the frame that finished the fill.** A generous budget
+      // fills a whole generation in the frame that anchors it, so dropping on
+      // coverage alone would mint a composite and destroy it inside one
+      // `paintFrame` — unobservable from outside, and leaving the *next* scale
+      // change of the same gesture with nothing to blit while its own
+      // generation is still empty. Surviving the frame that filled it costs
+      // one frame of stale ink under antialiased edges and buys a gesture that
+      // never blanks.
+      if (baked == 0) _dropCarryOver();
+      return;
+    }
+    // Stale scaled pixels rather than a live walk, deliberately: replaying the
+    // whole painter is the ~60 ms stall this cache exists to remove, and a
+    // gesture frame is precisely where it must not happen.
+    if (carryOverCovers) return;
     // One walk for the union, not one per tile: at 256 px a full visible set is
     // 154 tiles, and 154 painter invocations in one frame would be slower than
     // the live path this cache exists to replace. Clipped, so the covered tiles
@@ -388,7 +520,35 @@ class TileCache {
   Rect get _tileSourceRect => Rect.fromLTWH(
       0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble());
 
-  TileGrid _gridFor(ViewportTransform quantised, double devicePixelRatio) {
+  /// Where [_carryOver] lands under [camera].
+  ///
+  /// **Through the world, not through a scale ratio.** The composite's
+  /// rectangle is mapped out of [_carryOverAnchor]'s screen space into world
+  /// space and back in through the new camera, so a camera that also panned,
+  /// flipped or skewed between the two frames is carried correctly instead of
+  /// being assumed away. Two opposite corners suffice: the transform between
+  /// two cameras that differ in scale is axis-preserving, and a rotation
+  /// between them would need a `transform` rather than a `Rect` on either
+  /// reading. `Rect.fromPoints` normalises, which a y-flipped camera needs.
+  ///
+  /// **This one is not snapped.** Every other destination in this file is
+  /// rounded onto the device-pixel lattice because the copy is 1:1 and must be
+  /// exact. Here the source is stale by construction and the destination is a
+  /// fractional multiple of it; snapping would buy nothing and would make the
+  /// drawing jump by a pixel as the zoom factor swept.
+  Rect _carryOverDestRect(ViewportTransform camera) {
+    final anchor = _carryOverAnchor!;
+    final r = _carryOverRect;
+    final topLeft =
+        camera.worldToScreen(anchor.screenToWorld(Vector2(r.left, r.top)));
+    final bottomRight =
+        camera.worldToScreen(anchor.screenToWorld(Vector2(r.right, r.bottom)));
+    return Rect.fromPoints(
+        Offset(topLeft.x, topLeft.y), Offset(bottomRight.x, bottomRight.y));
+  }
+
+  TileGrid _gridFor(
+      ViewportTransform quantised, double devicePixelRatio, Size viewport) {
     final grid = _grid;
     if (grid != null &&
         grid.devicePixelRatio == devicePixelRatio &&
@@ -396,7 +556,7 @@ class TileCache {
         grid.matchesScale(quantised)) {
       return grid;
     }
-    _retireGeneration();
+    _retireGeneration(viewport);
     final fresh = TileGrid(
         anchor: quantised,
         devicePixelRatio: devicePixelRatio,
@@ -406,13 +566,81 @@ class TileCache {
     return fresh;
   }
 
-  /// Drops the current generation's tiles. Task 9 gives this a carry-over.
-  void _retireGeneration() {
+  /// Flattens the outgoing generation into [_carryOver], then drops its tiles.
+  ///
+  /// **Only reached from [_gridFor]**, which is the only place a *scale*
+  /// changes. `_dropGeneration` throws tiles away for a definition or a table
+  /// edit, and those tiles hold wrong pixels rather than stale ones:
+  /// compositing them would put the pre-edit colour back on screen for the
+  /// whole of the refill, with `liveTileCount` reading zero the entire time.
+  ///
+  /// **Three guards, and each of them is a different way to mint nonsense.**
+  /// No grid or no camera is the first frame, where there is nothing to
+  /// flatten. No tiles is a gesture frame, whose fresh generation baked
+  /// nothing — and there the *existing* composite is kept, which is what stops
+  /// a sweep of the zoom factor filtering the same pixels once per frame.
+  /// [_viewportCovered] is the half-filled generation: flattened, it is
+  /// transparent wherever it never baked, and a transparent composite in front
+  /// of the live fallback is a blank strip rather than a stale one.
+  void _retireGeneration(Size viewport) {
+    final grid = _grid;
+    final camera = _lastCamera;
+    if (grid != null &&
+        camera != null &&
+        _viewportCovered &&
+        _tiles.isNotEmpty) {
+      final dpr = grid.devicePixelRatio;
+      final width = (viewport.width * dpr).ceil();
+      final height = (viewport.height * dpr).ceil();
+      final rect = Rect.fromLTWH(0, 0, width / dpr, height / dpr);
+      final recorder = PictureRecorder();
+      final into = Canvas(recorder);
+      into.scale(dpr);
+      // Hard, for `_bake`'s reason: an antialiased clip edge would leave the
+      // composite's own border at partial coverage.
+      into.clipRect(rect, doAntiAlias: false);
+      // Recorded against the *last* camera, so the composite is a picture of
+      // what the user was actually looking at rather than of the anchor's
+      // viewport, which many pans ago may have left the screen entirely.
+      for (final key in grid.visibleKeys(camera, viewport)) {
+        final image = _tiles[key];
+        if (image == null) continue;
+        into.drawImageRect(
+            image, _tileSourceRect, grid.destRectFor(key, camera), _blitPaint);
+      }
+      final picture = recorder.endRecording();
+      // The old composite goes first: it was fully hidden by the generation
+      // being retired -- that is what `_viewportCovered` means -- and it holds
+      // native memory past its Dart object.
+      _dropCarryOver();
+      _carryOver = picture.toImageSync(width, height);
+      _carryOverAnchor = camera;
+      _carryOverRect = rect;
+      picture.dispose();
+    }
+    _disposeTiles();
+  }
+
+  /// Disposes every tile image and forgets what they baked.
+  ///
+  /// Clears [_viewportCovered] with them: coverage is a statement about tiles
+  /// that exist, and leaving it standing would let the *next* scale change
+  /// composite an empty generation.
+  void _disposeTiles() {
     for (final image in _tiles.values) {
       image.dispose();
     }
     _tiles.clear();
     _baked.clear();
+    _viewportCovered = false;
+  }
+
+  /// Releases the composite's native memory. Idempotent.
+  void _dropCarryOver() {
+    _carryOver?.dispose();
+    _carryOver = null;
+    _carryOverAnchor = null;
+    _carryOverRect = Rect.zero;
   }
 
   /// Throws away whatever [change] made stale.
@@ -521,11 +749,16 @@ class TileCache {
 
   /// Drops every tile and the lattice they were baked on.
   ///
-  /// Task 9's carry-over composite is cleared here too: it is anchored to the
-  /// grid that is about to go.
+  /// The carry-over composite is cleared here too, and it is the only drop
+  /// path that clears it. It is anchored to a camera over a document that no
+  /// longer exists, so replaying it would show the previous drawing scaled
+  /// over the new one — and it holds native memory that nothing else on this
+  /// path would ever release.
   void _dropEverything() {
     _dropGeneration();
+    _dropCarryOver();
     _grid = null;
+    _lastCamera = null;
   }
 
   /// Drops the tiles and **keeps the grid**, so the next frame rebakes into
@@ -535,9 +768,12 @@ class TileCache {
   /// renumber every key for no reason, bump [generation], and throw away the
   /// one thing — the anchor — that lets the refilled tiles blit at whole
   /// device pixels against the cameras already on screen.
+  /// **And mints no carry-over.** [_retireGeneration] is the scale path; this
+  /// one runs for a definition or a table edit, whose tiles are wrong rather
+  /// than merely stale.
   void _dropGeneration() {
     _invalidations += _tiles.length;
-    _retireGeneration();
+    _disposeTiles();
   }
 
   /// Whether [handle] draws inside a block definition rather than at the
@@ -796,7 +1032,9 @@ class TileCache {
   }
 
   void dispose() {
-    _retireGeneration();
+    _disposeTiles();
+    _dropCarryOver();
     _grid = null;
+    _lastCamera = null;
   }
 }

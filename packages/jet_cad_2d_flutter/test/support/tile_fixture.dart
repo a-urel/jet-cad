@@ -96,11 +96,30 @@ class TileRig {
             Transform2(m.a, m.b, m.c, m.d, m.e + dx, m.f + dy));
   }
 
+  /// Scales about the **viewport centre**, the way a zoom gesture keeps the
+  /// point under the cursor still.
+  ///
+  /// **Not by multiplying `a` and `d` alone.** That pins whichever world point
+  /// happens to sit at screen `(e, f)` — here `(-37, 323)`, outside the
+  /// viewport and below it — so a zoom *in* slides the whole drawing right and
+  /// down, and the retired generation's composite lands short of the left
+  /// edge by `e * (1 - factor)`. No zoom gesture behaves that way, and reading
+  /// the resulting uncovered strip as a fact about the carry-over rather than
+  /// about the rig is exactly the "gate that cannot see what it claims to
+  /// measure" this plan keeps finding. It also left `b` and `c` unscaled,
+  /// which is not a scale at all under a skewed camera.
   void zoomBy(double factor) {
     final m = camera.worldToScreenMatrix;
+    final cx = kTileViewport.width / 2;
+    final cy = kTileViewport.height / 2;
     camera = ViewportTransform(
-        worldToScreenMatrix:
-            Transform2(m.a * factor, m.b, m.c, m.d * factor, m.e, m.f));
+        worldToScreenMatrix: Transform2(
+            m.a * factor,
+            m.b * factor,
+            m.c * factor,
+            m.d * factor,
+            cx + (m.e - cx) * factor,
+            cy + (m.f - cy) * factor));
   }
 
   void dispose() {
