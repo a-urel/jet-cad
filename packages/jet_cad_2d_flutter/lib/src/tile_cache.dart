@@ -13,16 +13,44 @@ import 'viewport_transform.dart';
 
 /// A tile's side, in **device** pixels.
 ///
-/// 256 is a starting value with a measured shape behind it and a sweep still
-/// owed. Memory and bake cost pull in opposite directions: at a `dpr` of 2 on a
-/// 3200x2400 device viewport, 128 px costs 32.5 MiB of visible set but bakes
-/// **4.00x** its own area, because [kTileSlack] is 32 *logical* pixels and a
-/// 128 px tile is only 64 logical wide; 512 px costs 48.0 MiB and bakes 1.56x.
-/// Those multipliers were a prediction when this was written and are the real
-/// cost since Task 9a: the padded bake is what closed defect F1. 1024 px is
-/// excluded outright — its 80.0 MiB visible set leaves no room under
-/// [kTileCacheBytes] for the carry-over composite.
-const int kTileDevicePixels = 256;
+/// **512, chosen by a device sweep, not by the area arithmetic below.**
+/// Task 11 measured at `ENTITIES=500000`, `BACKEND=vertices`, `RIG=pan`,
+/// `TILES=on`, on a machine verified `lowpowermode 0` on AC power, with the
+/// control run reproducing Plan 3d's clean row (full transcripts in
+/// `.superpowers/sdd/2026-08-23-jet-cad-2d-plan-3g-tile-cache/task-11-report.md`):
+///
+/// | | 128 | 256 | **512** |
+/// |---|---|---|---|
+/// | blit per frame | 1.45 ms | 1.44 ms | 1.52 ms |
+/// | bake per tile | 5.70 ms | 7.23 ms | 12.56 ms |
+/// | whole-generation walk | 265.53 ms | 105.31 ms | **71.97 ms** |
+/// | pan `total` p95 | 65.19 ms | 47.42 ms | **2.31 ms** |
+/// | live-walk fallbacks during pan | 18 | 1 | **0** |
+/// | measured overdraw | 17.983 | 6.888 | 4.185 |
+///
+/// 512 is the only size whose pan p95 fits the 16.67 ms frame budget — by
+/// more than 20x, where 128 misses by 3.9x and 256 by 2.8x. **Blit cost is
+/// flat across the whole 16x range of tile count** (1.45 / 1.44 / 1.52 ms):
+/// it decides nothing on its own, which is why the sweep read the bake and
+/// overdraw columns too rather than stopping at the column that looked
+/// cheapest.
+///
+/// **The overdraw model below was wrong before this sweep, and the sweep is
+/// what caught it.** [kTileSlack] pads `_bake`'s cull, and the area factor it
+/// predicts — `((T/2 + 64) / (T/2))^2` at `dpr` 2 — is 4.000 / 2.250 / 1.563
+/// for 128 / 256 / 512, and matches what the tree does exactly. But measured
+/// leaf overdraw is 17.983 / 6.888 / 4.185 — a residue of 4.50x / 3.06x /
+/// 2.68x at each size that padding alone does not explain. **The larger term
+/// is crossing multiplicity: an entity larger than a tile is walked once for
+/// every tile it crosses**, independent of any pad, and it shrinks as tiles
+/// grow for the same reason a longer stroke crosses fewer of them. Padding is
+/// the smaller term at every size measured.
+///
+/// 1024 px was excluded before the sweep ran: its 80.0 MiB visible set (on
+/// the plan's 3200x2400 reference viewport) leaves no room under
+/// [kTileCacheBytes] for the carry-over composite, where 512's 48.0 MiB does
+/// (77.3 MiB together, against the 96 MiB cap).
+const int kTileDevicePixels = 512;
 
 /// The slack a tile's **arrival** rule and its **invalidation** rule share, in
 /// logical pixels.
@@ -62,12 +90,32 @@ const int kTileDevicePixels = 256;
 /// defect.
 const double kTileSlack = kScreenClipInflate;
 
-/// Tiles baked per frame while a generation fills in.
+/// The device-pixel area a frame may spend baking tiles, while a generation
+/// fills in.
 ///
-/// The settle after a zoom leaves the whole visible set stale, and baking it in
-/// one frame is the ~60 ms stall this plan exists to remove, moved rather than
-/// removed. At 256 px this covers a 154-tile visible set in twenty frames.
-const int kTilesBakedPerFrame = 8;
+/// **Not a tile count, because a tile count stopped meaning anything once
+/// [kTileDevicePixels] became 512.** Eight tiles at 128 px was a modest
+/// strip; eight tiles at 512 px is `8 x 12.56 ms` of measured bake cost —
+/// roughly 100 ms in one frame, six times the 16.67 ms budget this plan
+/// exists to hold. Expressing the budget as an area in device pixels instead
+/// lets the number of tiles a frame bakes fall out of
+/// [TileCache.tileDevicePixels] — see [TileCache.bakeBudgetDevicePixels] —
+/// so a later change to the tile size does not silently multiply the frame
+/// cost again the way the tile-count budget just did.
+///
+/// **The arithmetic that picked 262,144.** One 512 px tile is
+/// `512 x 512 = 262,144` device pixels and measured **12.56 ms** to bake
+/// (Task 11's sweep, `ENTITIES=500000`, `RIG=pan`). One tile's bake plus the
+/// hold-frame blit cost (measured 1.52 ms at 512 px) is 14.08 ms, under the
+/// 16.67 ms frame budget; two tiles' bake alone is 25.12 ms and blows it
+/// outright. So one tile is the most this budget can afford at the
+/// production tile size, and 262,144 is exactly one tile's worth.
+///
+/// **This is pinned to the 512 px measurement, not derived from
+/// [kTileDevicePixels] at read time.** The next person who changes the tile
+/// size must re-check whether one tile still fits under 16.67 ms at the new
+/// size's own bake cost — this constant does not track that change for them.
+const int kBakeBudgetDevicePixels = 262144;
 
 /// The cache's byte ceiling, counting the carry-over composite and every
 /// generation's tiles together.
@@ -232,13 +280,20 @@ class TileGrid {
 class TileCache {
   TileCache({
     this.tileDevicePixels = kTileDevicePixels,
-    this.tilesBakedPerFrame = kTilesBakedPerFrame,
+    this.bakeBudgetDevicePixels = kBakeBudgetDevicePixels,
     this.cacheBytes = kTileCacheBytes,
   });
 
   final int tileDevicePixels;
 
-  /// Tiles rasterised per frame while a generation fills in.
+  /// The device-pixel budget a frame may spend baking tiles while a
+  /// generation fills in. See [kBakeBudgetDevicePixels] for the unit and the
+  /// arithmetic that picked its default.
+  ///
+  /// **Not a tile count** -- [budgetedTilesPerFrame] is, and it is what
+  /// [paintFrame] actually bakes against: this divided by the tile's own
+  /// device-pixel area, so the same budget bakes more small tiles or fewer
+  /// large ones as [tileDevicePixels] changes.
   ///
   /// **Not final, and the reason is a gate rather than a feature.** A cache
   /// constructed with a budget of zero never bakes a first generation, so it
@@ -247,20 +302,20 @@ class TileCache {
   /// The zoom-path tests warm a generation at a real budget and then take the
   /// budget away, so a frame that still puts the outgoing pixels on screen can
   /// only have blitted [_carryOver].
-  int tilesBakedPerFrame;
+  int bakeBudgetDevicePixels;
 
   /// The byte ceiling, counting [liveBytes] whole.
   ///
-  /// **Not final, and for [tilesBakedPerFrame]'s reason exactly.** A composite
-  /// is minted only from a generation that *covered* the viewport, so any cap
-  /// that permits one to exist is already larger than one composite -- 130
-  /// tiles of coverage against a composite's 117 at the test tile size. The
-  /// state "a composite stands and the ceiling is smaller than it" is
-  /// therefore unreachable through the constructor, and it is the one state
-  /// where `_makeRoomForOneTile`'s "bakes nothing rather than overrun" arm is
-  /// the only thing running. Warming at a real ceiling and then taking it away
-  /// is how a test reaches it, the same manoeuvre the zoom-path tests use on
-  /// the bake budget.
+  /// **Not final, and for [bakeBudgetDevicePixels]'s reason exactly.** A
+  /// composite is minted only from a generation that *covered* the viewport,
+  /// so any cap that permits one to exist is already larger than one
+  /// composite -- 130 tiles of coverage against a composite's 117 at the
+  /// test tile size. The state "a composite stands and the ceiling is
+  /// smaller than it" is therefore unreachable through the constructor, and
+  /// it is the one state where `_makeRoomForOneTile`'s "bakes nothing rather
+  /// than overrun" arm is the only thing running. Warming at a real ceiling
+  /// and then taking it away is how a test reaches it, the same manoeuvre
+  /// the zoom-path tests use on the bake budget.
   int cacheBytes;
 
   TileGrid? _grid;
@@ -411,6 +466,17 @@ class TileCache {
   /// would instead make the first frame's behaviour depend on whether the
   /// document had been given its standard tables yet.
   int _tablesRevision = -1;
+
+  /// The number of tiles [bakeBudgetDevicePixels] permits [paintFrame] to
+  /// bake this frame, at the cache's current [tileDevicePixels].
+  ///
+  /// **The same division [paintFrame] itself performs**, exposed rather than
+  /// duplicated, so a caller reporting "the budget this run used" -- a rig
+  /// printing its configuration beside its counters, say -- reads the number
+  /// [paintFrame] actually acted on instead of a second computation of it
+  /// that could drift from the first.
+  int get budgetedTilesPerFrame =>
+      bakeBudgetDevicePixels ~/ _tileDevicePixelArea;
 
   /// Tiles rasterised since [resetCounters].
   int get bakeCount => _bakes;
@@ -592,7 +658,10 @@ class TileCache {
     // quantisation step and `float32` residuals the live frame does not have.
     final origin = rebaseOriginFor(quantised.visibleWorld(viewport));
 
-    var budget = tilesBakedPerFrame;
+    // The budget is device pixels; a tile costs its own area against it, so
+    // this is the number of *tiles* this frame may bake at the cache's
+    // current tile size. See [budgetedTilesPerFrame]'s own doc comment.
+    var budget = budgetedTilesPerFrame;
     var baked = 0;
     Rect? uncovered;
 
@@ -695,6 +764,10 @@ class TileCache {
   /// Bytes one tile's image occupies: RGBA, one byte a channel, exactly what
   /// `Picture.toImageSync` allocates in [_bake].
   int get _tileBytes => tileDevicePixels * tileDevicePixels * 4;
+
+  /// One tile's footprint, in device pixels: its side squared. What
+  /// [bakeBudgetDevicePixels] is measured against, in [paintFrame].
+  int get _tileDevicePixelArea => tileDevicePixels * tileDevicePixels;
 
   /// Reclaims least-recently-blitted tiles until one more will fit under
   /// [cacheBytes], and reports whether it succeeded.

@@ -129,10 +129,31 @@ void requireRepaint(CanvasDrawSink sink, VerticesDrawSink? vertices) {
 /// printed it.
 void printInvariants(DraftPainter painter, CanvasDrawSink sink,
     {TileCache? tileCache}) {
+  // **`screenSpaceLeafCount`, `dashSpans` and `collapsed` are `DraftPainter`
+  // fields that reset to zero at the top of every `paint()` call**
+  // (`draft_painter.dart:334,342`), so they hold whatever the *last* call
+  // wrote and nothing from any call before it. Untiled, there is exactly one
+  // `paint()` call in the frame this line reports, so that is the frame.
+  // **Under `TILES=on` it is not.** `TileCache.paintFrame` calls
+  // `painter.paint` once per tile it bakes this frame and, if any tile stayed
+  // uncovered, once more for the live fallback -- and whichever of those ran
+  // last is all these three fields describe. A frame that bakes most of its
+  // tiles and falls back for a small remainder prints a leaf count close to
+  // that remainder, not the frame's true total: measured at `TILE_PX=512`
+  // printing `screenSpaceLeafCount=1402` where a direct probe of the same
+  // frame read 4612 (Task 11's report, section 7 finding 2). `canvasCalls`
+  // and the vertices sink's own `triangles`/`drawVerticesCalls` counters
+  // (`printBackend`) are unaffected -- both count since `resetCounters()`,
+  // not since the last `paint()` call, so they sum correctly across every
+  // bake in the frame.
+  final tiledCaveat = tileCache == null
+      ? ''
+      : ' (leaf/dash figures: last paint() call only under TILES=on, not '
+          'the frame total -- see the tile probe for a frame figure)';
   print('  screenSpaceLeafCount=${painter.screenSpaceLeafCount} '
       'dashSpans=${painter.dashSpanCount} '
       'collapsed=${painter.collapsedDashCount} '
-      'canvasCalls=${sink.canvasCallCount}');
+      'canvasCalls=${sink.canvasCallCount}$tiledCaveat');
   // Task 16: `fillCount` and `skippedFillCount` are the same kind of
   // backend-independent field as the line above -- both must match exactly
   // across `BACKEND=canvas` and `BACKEND=vertices` at a fixed corpus.
@@ -155,13 +176,27 @@ void printInvariants(DraftPainter painter, CanvasDrawSink sink,
 /// -- they count since the last `resetCounters`, which every rig calls
 /// immediately before the one forced repaint it reports. `evictions` and
 /// `invalidations` are cache-lifetime totals by design and are labelled so.
+///
+/// **`bakeBudgetPx` and `bakeBudgetTiles` are printed together, and neither
+/// alone.** Two runs at different tile sizes can carry the same device-pixel
+/// budget and bake a different number of tiles, or the same tile-count
+/// budget and spend a different number of device pixels -- the whole reason
+/// [TileCache.bakeBudgetDevicePixels] stopped being a tile count. A
+/// transcript that named only one of the two would let a reader compare two
+/// runs that used different budgets without any line telling them so, which
+/// is exactly the failure a rig configured by `dart-define` and mutated at
+/// startup (`kTileBake` in `main.dart`) is one silent default change away
+/// from. `bakeBudgetTiles` reads [TileCache.budgetedTilesPerFrame], the same
+/// number [TileCache.paintFrame] itself bakes against -- not a second
+/// computation of it here that could drift from the first.
 void printTileCounters(TileCache? cache) {
   if (cache == null) {
     print('  tiles=off');
     return;
   }
   print('  tiles=on tilePx=${cache.tileDevicePixels} '
-      'bakePerFrame=${cache.tilesBakedPerFrame} '
+      'bakeBudgetPx=${cache.bakeBudgetDevicePixels} '
+      'bakeBudgetTiles=${cache.budgetedTilesPerFrame} '
       'liveTiles=${cache.liveTileCount} '
       'generation=${cache.generation} '
       'carryOver=${cache.hasCarryOver}');

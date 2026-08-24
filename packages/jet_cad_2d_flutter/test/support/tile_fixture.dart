@@ -30,6 +30,18 @@ ViewportTransform tileCamera() => ViewportTransform(
         Transform2(1.4, 0, 0, -1.4, -37.0, kTileViewport.height + 23.0));
 
 class TileRig {
+  /// [tilesBakedPerFrame] is a **tile count**, not the device-pixel budget
+  /// [TileCache] actually takes.
+  ///
+  /// Every fixture in this file builds at one fixed [tileDevicePixels] (64),
+  /// so converting here -- `tilesBakedPerFrame * tileDevicePixels^2` -- is
+  /// exact and loses nothing: `1000` still means "never runs out", `0` still
+  /// means "bake nothing this frame", and `4` still means exactly four
+  /// tiles. Keeping the tile-count spelling at the call sites is the point:
+  /// every test built against this rig read as "bake N tiles" before
+  /// [TileCache.bakeBudgetDevicePixels] existed, and translating the unit
+  /// here rather than at each of those call sites is what keeps every one of
+  /// those intents legible instead of a `* 4096` scattered through the file.
   TileRig({
     required int tileDevicePixels,
     required int tilesBakedPerFrame,
@@ -51,7 +63,8 @@ class TileRig {
         document: doc, index: index, resolver: DocumentStyleResolver(doc));
     cache = TileCache(
         tileDevicePixels: tileDevicePixels,
-        tilesBakedPerFrame: tilesBakedPerFrame,
+        bakeBudgetDevicePixels:
+            tilesBakedPerFrame * tileDevicePixels * tileDevicePixels,
         cacheBytes: cacheBytes);
   }
 

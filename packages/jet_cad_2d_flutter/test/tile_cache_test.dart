@@ -158,8 +158,9 @@ void main() {
     addTearDown(zoomed.dispose);
     zoomed.paintOnce();
     // Four, not zero: the frame under the spy must contain *both* kinds of
-    // blit, or the two-object claim is made over one object again.
-    zoomed.cache.tilesBakedPerFrame = 4;
+    // blit, or the two-object claim is made over one object again. Four
+    // *tiles*, at this rig's 64 px tile: the field is a device-pixel budget.
+    zoomed.cache.bakeBudgetDevicePixels = 4 * 64 * 64;
     zoomed.zoomBy(1.19);
     zoomed.cache.resetCounters();
     final zoomedSpy = SpyCanvas();
@@ -269,7 +270,8 @@ void main() {
         fallback: fallback);
     final painter = DraftPainter(
         document: doc, index: index, resolver: DocumentStyleResolver(doc));
-    final cache = TileCache(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+    final cache =
+        TileCache(tileDevicePixels: 64, bakeBudgetDevicePixels: 1000 * 64 * 64);
     addTearDown(cache.dispose);
     final camera = ViewportTransform(
         worldToScreenMatrix:
@@ -464,7 +466,7 @@ void main() {
     final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
     addTearDown(rig.dispose);
     rig.paintOnce();
-    rig.cache.tilesBakedPerFrame = 0;
+    rig.cache.bakeBudgetDevicePixels = 0;
     rig.cache.resetCounters();
     for (var i = 0; i < 8; i++) {
       rig.zoomBy(1.03);
@@ -499,7 +501,7 @@ void main() {
         reason: 'the floor first: a blank warm frame would make the '
             'comparison below vacuous');
 
-    rig.cache.tilesBakedPerFrame = 0;
+    rig.cache.bakeBudgetDevicePixels = 0;
     rig.zoomBy(1.19);
     final gestureInk = await frameInk(rig);
     expect(rig.cache.liveTileCount, 0,
@@ -647,7 +649,7 @@ void main() {
       final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
       addTearDown(rig.dispose);
       rig.paintOnce();
-      rig.cache.tilesBakedPerFrame = 0;
+      rig.cache.bakeBudgetDevicePixels = 0;
       rig.zoomBy(1.19);
       rig.paintOnce();
       expect(rig.cache.hasCarryOver, isTrue,
@@ -714,7 +716,7 @@ void main() {
       rig.paintOnce();
       // Zero budget from here, so the incoming generation cannot quietly
       // refill and make a stale composite look like a repaint.
-      rig.cache.tilesBakedPerFrame = 0;
+      rig.cache.bakeBudgetDevicePixels = 0;
       rig.zoomBy(1.19);
       rig.paintOnce();
       expect(rig.cache.hasCarryOver, isTrue,
@@ -760,7 +762,7 @@ void main() {
 
     // Budget zero for the frame that follows, so the drop cannot be papered
     // over by an immediate refill.
-    rig.cache.tilesBakedPerFrame = 0;
+    rig.cache.bakeBudgetDevicePixels = 0;
     rig.doc.tables.layers.add(const LayerRecord(
       handle: Handle(900),
       name: 'WALLS',

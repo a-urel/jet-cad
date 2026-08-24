@@ -179,13 +179,21 @@ final int kTilePx = _intDefine(
     'TILE_PX', const String.fromEnvironment('TILE_PX'), kTileDevicePixels,
     minimum: 1);
 
-/// Tiles baked per frame, forwarded to [TileCache.tilesBakedPerFrame].
+/// The device-pixel bake budget, forwarded to
+/// [TileCache.bakeBudgetDevicePixels].
+///
+/// **Device pixels, not a tile count** -- the same unit [kTilePx] already
+/// uses, and the field this forwards to since Task 11a re-expressed it: eight
+/// tiles at the 128 px arm of Task 11's sweep was a modest strip, and eight
+/// tiles at 512 px is roughly 100 ms of measured bake cost in one frame. A
+/// sweep wanting "N tiles at this run's `TILE_PX`" passes
+/// `TILE_BAKE=$((N * TILE_PX * TILE_PX))`.
 ///
 /// `0` is a legitimate value -- it is the budget the zoom-path tests take away
 /// to prove a frame blitted the carry-over composite rather than a tile -- so
 /// the floor here is zero and not one.
-final int kTileBake = _intDefine(
-    'TILE_BAKE', const String.fromEnvironment('TILE_BAKE'), kTilesBakedPerFrame,
+final int kTileBake = _intDefine('TILE_BAKE',
+    const String.fromEnvironment('TILE_BAKE'), kBakeBudgetDevicePixels,
     minimum: 0);
 
 /// Parses an integer define, or throws. Never falls back on a malformed value:
@@ -502,10 +510,10 @@ class _HarnessAppState extends State<HarnessApp> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final canvasState = _canvasKey.currentState!;
-      // `tilesBakedPerFrame` is a mutable field on the cache rather than a
-      // `DraftCanvas` property, so the define is applied here -- after the
+      // `bakeBudgetDevicePixels` is a mutable field on the cache rather than
+      // a `DraftCanvas` property, so the define is applied here -- after the
       // first frame, and before any frame a rig measures.
-      canvasState.tileCache?.tilesBakedPerFrame = kTileBake;
+      canvasState.tileCache?.bakeBudgetDevicePixels = kTileBake;
       widget.onReady?.call(
           camera,
           index,
