@@ -148,8 +148,9 @@ void printInvariants(DraftPainter painter, CanvasDrawSink sink,
   // bake in the frame.
   final tiledCaveat = tileCache == null
       ? ''
-      : ' (leaf/dash figures: last paint() call only under TILES=on, not '
-          'the frame total -- see the tile probe for a frame figure)';
+      : ' (screenSpaceLeafCount/dashSpans/collapsed: last paint() call only '
+          'under TILES=on, not the frame total -- see the tile probe for a '
+          'frame figure; canvasCalls is unaffected)';
   print('  screenSpaceLeafCount=${painter.screenSpaceLeafCount} '
       'dashSpans=${painter.dashSpanCount} '
       'collapsed=${painter.collapsedDashCount} '

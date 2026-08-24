@@ -83,7 +83,7 @@ const int kTileDevicePixels = 512;
 /// slack — the amount of extra ink the frame is entitled to draw.
 ///
 /// **What it costs.** Invalidation now over-drops by a ring: at the production
-/// 256 device-pixel tile and a `dpr` of 2 the ring is a quarter of a tile
+/// 512 device-pixel tile and a `dpr` of 2 the ring is an eighth of a tile
 /// wide, and at the 64-pixel tile the tests use it is a whole tile. That is a
 /// hit-rate cost, never a correctness one — a tile dropped that need not have
 /// been is rebaked, a tile kept that should have been dropped is a visible
@@ -111,6 +111,13 @@ const double kTileSlack = kScreenClipInflate;
 /// outright. So one tile is the most this budget can afford at the
 /// production tile size, and 262,144 is exactly one tile's worth.
 ///
+/// **12.56 ms rests on fourteen bake events, not a large sample.** The 512
+/// arm of the pan phase reported `bakes=14 perFrame=0.117` over 120 frames
+/// (Task 11's report, the `TILE_PX = 512` transcript) -- the repeat run that
+/// confirmed reproducibility was taken at 256, never at 512. The margin to
+/// the 16.67 ms budget is 2.59 ms, about 16%: not re-measured here, but
+/// worth knowing before leaning on that margin.
+///
 /// **This is pinned to the 512 px measurement, not derived from
 /// [kTileDevicePixels] at read time.** The next person who changes the tile
 /// size must re-check whether one tile still fits under 16.67 ms at the new
@@ -122,7 +129,7 @@ const int kBakeBudgetDevicePixels = 262144;
 ///
 /// 96 MiB, not 64, for two reasons. A retired generation lives on as one
 /// viewport-sized composite (29.3 MiB on the reference viewport) beside the
-/// incoming generation's tiles (38.5 MiB at 256 px). And 96 MiB is the figure
+/// incoming generation's tiles (48.0 MiB at 512 px). And 96 MiB is the figure
 /// this cache may *replace*: the vertex buffer's high-water mark at 500,000
 /// entities, which falls to a single tile's geometry once bakes flush per tile.
 const int kTileCacheBytes = 96 * 1024 * 1024;
@@ -475,8 +482,24 @@ class TileCache {
   /// printing its configuration beside its counters, say -- reads the number
   /// [paintFrame] actually acted on instead of a second computation of it
   /// that could drift from the first.
-  int get budgetedTilesPerFrame =>
-      bakeBudgetDevicePixels ~/ _tileDevicePixelArea;
+  ///
+  /// **Floored at one tile whenever the budget is nonzero.** A plain
+  /// truncating division silently disables tiling for any
+  /// [tileDevicePixels] whose area exceeds [bakeBudgetDevicePixels] --
+  /// `TILE_PX=1024` under the harness's default budget divides to `0` and
+  /// the run would spend its whole life on the live-walk fallback,
+  /// publishing the untiled baseline under a tiled heading, which is exactly
+  /// the failure `main.dart`'s defines throw to prevent for an unrecognised
+  /// *string*. One tile per frame is the minimum meaningful budget for any
+  /// configuration that asked to bake at all, so the floor applies whenever
+  /// [bakeBudgetDevicePixels] is positive. Zero stays zero -- that value is
+  /// the zoom-path tests' deliberate "bake nothing" configuration
+  /// ([bakeBudgetDevicePixels]'s own doc comment), and flooring it would
+  /// silence the one budget those tests exist to exercise.
+  int get budgetedTilesPerFrame {
+    final tiles = bakeBudgetDevicePixels ~/ _tileDevicePixelArea;
+    return bakeBudgetDevicePixels > 0 && tiles == 0 ? 1 : tiles;
+  }
 
   /// Tiles rasterised since [resetCounters].
   int get bakeCount => _bakes;

@@ -70,6 +70,46 @@ void main() {
             'the live path this cache replaces');
   });
 
+  test('budgetedTilesPerFrame floors a nonzero budget at one tile, never zero',
+      () {
+    // I1: a plain truncating division silently disables tiling for any
+    // tileDevicePixels whose area exceeds the budget -- TILE_PX=1024 under
+    // the harness's default kBakeBudgetDevicePixels divides to zero and the
+    // run would spend its whole life on the live-walk fallback, publishing
+    // the untiled baseline under a tiled heading.
+    final tooSmall = TileCache(
+        tileDevicePixels: 1024,
+        bakeBudgetDevicePixels: kBakeBudgetDevicePixels);
+    addTearDown(tooSmall.dispose);
+    expect(kBakeBudgetDevicePixels, lessThan(1024 * 1024),
+        reason: 'the fixture only proves the floor if the raw division '
+            'really would have been zero');
+    expect(tooSmall.budgetedTilesPerFrame, 1,
+        reason: 'floored, not silently disabled');
+
+    final zero = TileCache(tileDevicePixels: 1024, bakeBudgetDevicePixels: 0);
+    addTearDown(zero.dispose);
+    expect(zero.budgetedTilesPerFrame, 0,
+        reason: 'zero is the zoom-path tests\' deliberate "bake nothing" '
+            'configuration and must not be floored away');
+  });
+
+  test('a tile larger than the default budget still bakes one, not none',
+      () async {
+    final rig = TileRig(tileDevicePixels: 1024, tilesBakedPerFrame: 1000);
+    addTearDown(rig.dispose);
+    // Overwritten after construction: TileRig's own bridge always produces
+    // an exact multiple of the tile's area, which cannot reproduce the
+    // truncation this budget's floor exists to catch.
+    rig.cache.bakeBudgetDevicePixels = kBakeBudgetDevicePixels;
+
+    rig.paintOnce();
+
+    expect(rig.cache.bakeCount, greaterThanOrEqualTo(1),
+        reason: 'a nonzero budget must bake something, not fall back to a '
+            'live walk on every frame');
+  });
+
   test('a warm frame bakes nothing and blits the whole visible set', () async {
     final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
     addTearDown(rig.dispose);
