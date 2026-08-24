@@ -719,6 +719,48 @@ on the device pixel grid. A device-side check is **owed and not delivered by thi
 plan**, and the results note must say so in those words rather than publishing a
 green criterion 2 as a settled seam.
 
+### G7 — Criterion 11 MISSES, and per-tile clipping is gated by nothing
+
+**Added 2026-08-24 from Task 12, the plan's exit measurement. Machine verified
+`lowpowermode 0` on AC before all six runs; the control reproduced Plan 3d's
+clean row at build 7.26 / raster 8.56.**
+
+**Criterion 10 PASSES** — a settled frame reads a `totalSpan` median of
+**1.58 ms** against a 4.00 ms threshold, and **26x** the same runs' untiled
+41.09 ms. That is the claim this plan was built to make and it holds.
+
+**Criterion 11 MISSES by 2.1x.** A baking pan frame reads a median of
+**35.67 ms** against 16.67. The threshold was **not** moved.
+
+**And the cause is not the bake.** The probe puts a bake walk at 5.7–6.4 ms per
+tile; the frame's roughly 32 ms of excess is the **live fallback drawing the
+still-uncovered strip** — `liveDraws=10`, live walk 31–42 ms. The spec's own
+prescribed remedy is spent: it said the response to an unreachable threshold is
+a smaller bake budget, and the budget is **already one tile**. A pan frame that
+exposes more than one tile falls back to a live walk for the remainder, and that
+walk is the whole cost. **Plan 3h inherits this as a design question, not a
+tuning one.**
+
+**M7 was fired on device and did not collapse either criterion.** Criterion 10 is
+*structurally blind* to it — `bakeFrames=0/60`, so the mutated clip never runs in
+a settled frame — and criterion 11 degraded (35.67 → 49.90) from an already-red
+state, so there is no green-to-red transition anywhere.
+
+**Nothing in Plan 3g gates per-tile clipping.** M7 was demonstrably live:
+triangles 734,442 → 1,183,035 and build 23.10 → 38.47, twice. This spec named M7
+as "the mutation that passes every correctness gate and destroys the plan's
+entire reason for existing" and said a suite that cannot kill it is not gating
+this plan. **That sentence stands, and the suite does not kill it.**
+
+Worse, the rig's `overdraw` column reads an identical 4.185 under M7, because
+`_probeBake` reimplements the bake geometry rather than calling `_bake` — so the
+instrument built to measure the shipped clip cannot see it either.
+
+**Owed:** a gate for per-tile clipping that does not depend on a device timing.
+The obvious shape is a bake-time assertion that the geometry handed to a tile is
+bounded by that tile's rect — the command-time-assertion shape trap 5 already
+recommends for this repository, rather than another frame-path measurement.
+
 ### G5 — A tiled frame is not bit-identical for every slope, and the bound is measured
 
 **Added 2026-08-24, from Task 6a. This qualifies criteria 1 and 2 and it is the
