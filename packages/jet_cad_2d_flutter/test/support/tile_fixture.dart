@@ -81,6 +81,10 @@ class TileRig {
       painter: painter,
       sink: sink,
       vertices: vertices,
+      // Read live rather than pinned: a rig that mutates a table between two
+      // frames must see the second frame invalidate, and a constant here would
+      // make that untestable through the rig.
+      tablesRevision: doc.tables.mutationRevision,
     );
     recorder.endRecording().dispose();
   }

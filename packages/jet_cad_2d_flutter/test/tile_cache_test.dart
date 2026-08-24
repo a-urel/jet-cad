@@ -124,6 +124,7 @@ void main() {
       painter: rig.painter,
       sink: rig.sink,
       vertices: rig.vertices,
+      tablesRevision: rig.doc.tables.mutationRevision,
     );
 
     final calls = spy.named('drawImageRect').toList();
@@ -221,6 +222,7 @@ void main() {
       painter: painter,
       sink: fallback,
       vertices: vertices,
+      tablesRevision: doc.tables.mutationRevision,
     );
     recorder.endRecording().dispose();
 
@@ -341,6 +343,7 @@ void main() {
       painter: rig.painter,
       sink: rig.sink,
       vertices: rig.vertices,
+      tablesRevision: rig.doc.tables.mutationRevision,
     );
     final picture = recorder.endRecording();
     final image = await picture.toImage(width, height);

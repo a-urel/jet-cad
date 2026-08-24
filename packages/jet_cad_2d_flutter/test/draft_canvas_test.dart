@@ -439,4 +439,91 @@ void main() {
     // A canvas that cleared on dispose would take its sibling's cache with it.
     expect(measurer.liveParagraphCount, live);
   });
+
+  // A record whose every field is off its default: `IndexedColor(3)` is not
+  // `ByLayer`, 50 is not `kLineweightDefault`, and 40 is not the transparency
+  // identity of 0. `DraftColor` is sealed and has no `indexed` factory.
+  const walls = LayerRecord(
+    handle: Handle(900),
+    name: 'WALLS',
+    color: IndexedColor(3),
+    linetype: ReservedHandles.continuousLinetype,
+    lineweight: 50,
+    transparency: 40,
+  );
+
+  testWidgets('a table edit repaints with tiles off too', (tester) async {
+    // The tile cache is not what makes a layer edit matter. A layer carries
+    // the colour, lineweight and linetype of every entity that references it,
+    // and `TableSection.add` reaches no command and so no `DocChange` -- so
+    // without the table adapter this canvas would go on drawing the old layer
+    // until something unrelated moved the camera, tiles or no tiles.
+    await tester.pumpWidget(
+        wrap(DraftCanvas(document: doc, index: index, camera: camera)));
+    await tester.pump();
+    final state = tester.state<DraftCanvasState>(find.byType(DraftCanvas));
+    expect(state.tileCache, isNull, reason: 'tiles is off by default');
+
+    doc.tables.layers.add(walls);
+
+    expect(paintBoxOf(tester).debugNeedsPaint, isTrue,
+        reason: 'the drawing changed, so a frame is owed');
+    await tester.pump();
+  });
+
+  testWidgets('the table adapter detaches on both teardown paths',
+      (tester) async {
+    // **`DocumentTables` has no `dispose` and its listener list has no
+    // automatic cleanup**, so the adapter is the only thing that can
+    // unsubscribe. The `didUpdateWidget` path is the one that fails silently:
+    // `_attach` runs again there, and an adapter that only detached in
+    // `dispose` would leave one dead listener on the document per re-attach,
+    // for the life of the document, with nothing in the drawing to show for
+    // it. `debugListenerCount` exists because there is no other instrument.
+    expect(doc.tables.debugListenerCount, 0,
+        reason: 'the baseline must be zero, or every count below is relative '
+            'to something this test never examined');
+
+    await tester.pumpWidget(wrap(DraftCanvas(
+        document: doc,
+        index: index,
+        camera: camera,
+        tiles: true,
+        tileDevicePixels: 64)));
+    expect(doc.tables.debugListenerCount, 1);
+    final firstCache =
+        tester.state<DraftCanvasState>(find.byType(DraftCanvas)).tileCache;
+    expect(firstCache, isNotNull, reason: 'tiles: true builds a cache');
+
+    // Path one, twice. Once would leave "leaks one per re-attach" and "attaches
+    // one, correctly" indistinguishable to an assertion phrased as
+    // `greaterThan(0)`, and a second re-attach makes the growth itself the
+    // thing being measured.
+    for (final size in const [128, 256]) {
+      await tester.pumpWidget(wrap(DraftCanvas(
+          document: doc,
+          index: index,
+          camera: camera,
+          tiles: true,
+          tileDevicePixels: size)));
+      expect(doc.tables.debugListenerCount, 1,
+          reason: 're-attaching must replace the listener, not add one');
+    }
+    expect(tester.state<DraftCanvasState>(find.byType(DraftCanvas)).tileCache,
+        isNot(same(firstCache)),
+        reason: 'tileDevicePixels is fixed at the cache\'s construction, so a '
+            'changed value that reused the cache would be ignored outright');
+
+    // Path two.
+    await tester.pumpWidget(wrap(const SizedBox()));
+    expect(doc.tables.debugListenerCount, 0,
+        reason: 'an unmounted canvas must leave nothing on the document');
+
+    // And a removal, not merely a disposal. A `ChangeNotifier` disposed while
+    // still subscribed does not go quiet: the next table mutation calls it and
+    // `notifyListeners` throws, out of the caller's `add`.
+    expect(() => doc.tables.layers.add(walls), returnsNormally,
+        reason: 'a document outlives its canvases; editing one after the last '
+            'canvas is gone is ordinary');
+  });
 }

@@ -251,6 +251,16 @@ class TileCache {
   int _generation = 0;
   int _invalidations = 0;
 
+  /// `DocumentTables.mutationRevision` as of the last [paintFrame].
+  ///
+  /// **Negative before the first frame, and deliberately so.** A revision
+  /// starts at zero and only ever increases, so no document can present this
+  /// value and the first frame always takes the drop branch — over an empty
+  /// cache, where it costs nothing and asserts nothing. A sentinel of `0`
+  /// would instead make the first frame's behaviour depend on whether the
+  /// document had been given its standard tables yet.
+  int _tablesRevision = -1;
+
   /// Tiles rasterised since [resetCounters].
   int get bakeCount => _bakes;
 
@@ -269,11 +279,17 @@ class TileCache {
 
   int get generation => _generation;
 
-  /// Tiles thrown away by [applyChange] over this cache's whole life.
+  /// Tiles thrown away by [applyChange], or by a table revision that moved,
+  /// over this cache's whole life.
   ///
   /// Not reset by [resetCounters], which zeroes the three per-frame counters:
   /// this one counts edits, not frames, and a caller reading it across a
   /// frame boundary is asking a different question.
+  ///
+  /// The table arm is counted here rather than kept separate because it is the
+  /// same event seen through a different door: a table mutation reaches no
+  /// command and therefore no [DocChange], so [paintFrame] observes it as a
+  /// revision instead of being told. What was invalidated is identical.
   int get invalidationCount => _invalidations;
 
   /// Whether [key] is currently blittable. Test-only.
@@ -309,7 +325,26 @@ class TileCache {
     required DraftPainter painter,
     required CanvasDrawSink sink,
     required VerticesDrawSink? vertices,
+    required int tablesRevision,
   }) {
+    // **A table edit arrives as a number, not as a change.** `TableSection`
+    // mutates outside the command system, so `applyChange` never hears about a
+    // layer colour, a lineweight or a linetype pattern — every one of which
+    // every tile may have baked. It is pulled here, once per frame, so a
+    // document mutated between two frames still invalidates.
+    //
+    // **The tiles go and the lattice stays**, for exactly the reason
+    // `_dropGeneration` gives on a definition edit: a table edit is not a
+    // scale change, the anchor still describes the camera on screen, and
+    // clearing the grid would renumber every key and start a generation for
+    // nothing. Dropping the whole generation rather than a subset is the same
+    // trade too — a lineweight change moves a stroke's extent, so a tile that
+    // never baked the entity can still owe pixels for it.
+    if (tablesRevision != _tablesRevision) {
+      _tablesRevision = tablesRevision;
+      _dropGeneration();
+    }
+
     final quantised = quantiseCamera(camera, devicePixelRatio);
     final grid = _gridFor(quantised, devicePixelRatio);
 

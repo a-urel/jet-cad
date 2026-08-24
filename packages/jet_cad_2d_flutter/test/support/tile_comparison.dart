@@ -99,6 +99,7 @@ Future<InkReport> measureTiledAgreement(TileRig rig) async {
       painter: rig.painter,
       sink: rig.sink,
       vertices: rig.vertices,
+      tablesRevision: rig.doc.tables.mutationRevision,
     );
   });
 

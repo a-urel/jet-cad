@@ -9,6 +9,7 @@ import 'vertices_draw_sink.dart';
 import 'draft_painter.dart';
 import 'flutter_text_measurer.dart';
 import 'render_backend.dart';
+import 'tile_cache.dart';
 
 /// Logical pixels per millimetre at Flutter's nominal 96 dpi.
 ///
@@ -47,6 +48,39 @@ class DocChangeNotifier extends ChangeNotifier {
   }
 }
 
+/// Re-fires the engine's table notifications as a Flutter [Listenable].
+///
+/// `package:jet_cad_2d` is pure Dart and declares its own two-method
+/// `TableListenable` rather than depending on Flutter for one interface. This
+/// is the single point where the two meet, and it exists because a table
+/// mutation reaches the command system not at all: `TableSection.add`, `remove`
+/// and `clear` emit no `DocChange`, so without this a layer edit causes no
+/// frame and the tile cache's own invalidation — correct as it is — is never
+/// reached.
+///
+/// **The source has no `dispose` and its listener list has no automatic
+/// cleanup**, so unsubscribing is this adapter's entire responsibility, on
+/// *both* teardown paths. `DraftCanvas` re-attaches its derived state whenever
+/// a prop change demands it, and an adapter that only detached in `dispose`
+/// would leave one dead listener on the document per re-attach, for the life
+/// of the document. `DocumentTables.debugListenerCount` is what makes that
+/// visible to a test.
+class _TableListenableAdapter extends ChangeNotifier {
+  _TableListenableAdapter(this.source) {
+    source.addListener(_forward);
+  }
+
+  final TableListenable source;
+
+  void _forward() => notifyListeners();
+
+  @override
+  void dispose() {
+    source.removeListener(_forward);
+    super.dispose();
+  }
+}
+
 /// Draws a document, repainting on camera and document changes and on nothing
 /// else.
 ///
@@ -64,6 +98,9 @@ class DraftCanvas extends StatefulWidget {
     this.drawText = true,
     this.minTextCapPixels = kMinTextCapPixels,
     this.backend,
+    this.tiles = false,
+    this.tileDevicePixels = kTileDevicePixels,
+    this.onPaintForTest,
   });
 
   final DraftDocument document;
@@ -101,6 +138,23 @@ class DraftCanvas extends StatefulWidget {
   /// what it was given would make that measurement report the wrong thing.
   final RenderBackend? backend;
 
+  /// Whether the frame is drawn from cached tiles.
+  ///
+  /// Off by default: the cache is a pan-and-settle optimisation with a memory
+  /// budget attached ([kTileCacheBytes]), and a canvas that never pans pays for
+  /// it without collecting.
+  final bool tiles;
+
+  /// Forwarded to [TileCache.tileDevicePixels]. Inert unless [tiles] is on.
+  final int tileDevicePixels;
+
+  /// **Test-only.** Called at the top of every paint.
+  ///
+  /// Counting frames is the only way to separate "invalidated correctly" from
+  /// "was ever asked to", and those are exactly the two halves of a table edit:
+  /// a revision read inside the paint can be right and unreachable.
+  final void Function()? onPaintForTest;
+
   @override
   State<DraftCanvas> createState() => DraftCanvasState();
 }
@@ -122,7 +176,15 @@ class DraftCanvasState extends State<DraftCanvas> {
   /// [sink], which keeps taking every op the vertices sink does not batch.
   VerticesDrawSink? vertices;
 
+  /// Non-null only while [DraftCanvas.tiles] is on.
+  ///
+  /// Public for the same reason [painter] is: a test that has to tell "the
+  /// cache invalidated" from "the cache was never asked" needs to read the
+  /// counters of the cache this widget actually built.
+  TileCache? tileCache;
+
   late DocChangeNotifier _changes;
+  late _TableListenableAdapter _tables;
   late Listenable _repaint;
 
   @override
@@ -179,10 +241,35 @@ class DraftCanvasState extends State<DraftCanvas> {
       drawText: widget.drawText,
       minTextCapPixels: widget.minTextCapPixels,
     );
-    // No derived state left to update before listeners run: the map that
-    // needed it was the cull floor's, and the cull floor is gone.
-    _changes = DocChangeNotifier(widget.document);
-    _repaint = Listenable.merge([widget.camera, _changes]);
+    _tables = _TableListenableAdapter(widget.document.tables.changes);
+    tileCache = widget.tiles
+        ? TileCache(tileDevicePixels: widget.tileDevicePixels)
+        : null;
+    // The cache's derived state is updated before listeners run, for the
+    // reason `DocChangeNotifier` gives: a listener repaints, and a repaint that
+    // read the cache before `applyChange` had run would blit a tile the edit
+    // already invalidated.
+    _changes = DocChangeNotifier(widget.document,
+        onChange: (change) => tileCache?.applyChange(change, widget.document));
+    // **The table adapter is here and not a nicety.** Without it a layer edit
+    // causes no frame at all, so the cache's own invalidation — correct as it
+    // is — is never reached and stale pixels sit there until the camera moves.
+    _repaint = Listenable.merge([widget.camera, _changes, _tables]);
+  }
+
+  /// Releases everything [_attach] built. Called from both teardown paths.
+  ///
+  /// One method rather than two lists: the `didUpdateWidget` path is the one
+  /// that leaks silently — a missing `dispose` there costs a listener on the
+  /// document and a set of `ui.Image`s per prop change, and nothing goes wrong
+  /// until it has happened many times.
+  void _detach() {
+    _changes.dispose();
+    _tables.dispose();
+    // A `ui.Image` holds native memory past its Dart object, and the cache
+    // holds a viewport's worth of them.
+    tileCache?.dispose();
+    tileCache = null;
   }
 
   @override
@@ -196,17 +283,19 @@ class DraftCanvasState extends State<DraftCanvas> {
         widget.lineweightScale != oldWidget.lineweightScale ||
         widget.drawText != oldWidget.drawText ||
         widget.minTextCapPixels != oldWidget.minTextCapPixels ||
-        widget.backend != oldWidget.backend) {
+        widget.backend != oldWidget.backend ||
+        widget.tiles != oldWidget.tiles ||
+        widget.tileDevicePixels != oldWidget.tileDevicePixels) {
       // Guard before teardown: see the note on `_requireMeasurer`.
       _requireMeasurer();
-      _changes.dispose();
+      _detach();
       _attach();
     }
   }
 
   @override
   void dispose() {
-    _changes.dispose();
+    _detach();
     // The measurer is **not** disposed here. The document owns it, two canvases
     // over one document share it, and clearing on dispose would wipe the
     // sibling's cache along with every native `Paragraph` in it. The
@@ -221,7 +310,8 @@ class DraftCanvasState extends State<DraftCanvas> {
     // changes when the window moves between displays, and a sink that cached
     // it at construction would keep drawing an external monitor's line widths
     // after the window moved back to the built-in one.
-    vertices?.devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+    vertices?.devicePixelRatio = devicePixelRatio;
     return RepaintBoundary(
         child: CustomPaint(
       painter: _DraftCustomPainter(
@@ -229,6 +319,10 @@ class DraftCanvasState extends State<DraftCanvas> {
         camera: widget.camera,
         sink: sink,
         vertices: vertices,
+        tileCache: tileCache,
+        document: widget.document,
+        devicePixelRatio: devicePixelRatio,
+        onPaintForTest: widget.onPaintForTest,
         repaint: _repaint,
       ),
       size: Size.infinite,
@@ -242,6 +336,10 @@ class _DraftCustomPainter extends CustomPainter {
     required this.camera,
     required this.sink,
     required this.vertices,
+    required this.tileCache,
+    required this.document,
+    required this.devicePixelRatio,
+    required this.onPaintForTest,
     required super.repaint,
   });
 
@@ -253,20 +351,53 @@ class _DraftCustomPainter extends CustomPainter {
   /// See [DraftCanvas.backend].
   final VerticesDrawSink? vertices;
 
+  /// Null unless [DraftCanvas.tiles] is on.
+  final TileCache? tileCache;
+
+  /// Read for `tables.mutationRevision` only. See [DraftCanvas.tiles].
+  final DraftDocument document;
+
+  final double devicePixelRatio;
+
+  /// See [DraftCanvas.onPaintForTest].
+  final void Function()? onPaintForTest;
+
   @override
   void paint(Canvas canvas, Size size) {
+    onPaintForTest?.call();
     canvas.clipRect(Offset.zero & size);
+    final cache = tileCache;
+    if (cache != null) {
+      cache.paintFrame(
+        canvas: canvas,
+        viewport: size,
+        devicePixelRatio: devicePixelRatio,
+        camera: camera.value,
+        painter: painter,
+        sink: sink,
+        vertices: vertices,
+        // Pulled per frame because a table mutation reaches no command and so
+        // no `DocChange`; `applyChange` is never told about a layer edit.
+        tablesRevision: document.tables.mutationRevision,
+      );
+      return;
+    }
+    // **The live path quantises too.** This is the rule, not a concession to
+    // the tiled path: both paths draw the same camera, so the tiled frame *is*
+    // the live frame, and a live path on the raw camera would make criterion 1
+    // — zero differing pixels between the two — unmeetable.
+    final quantised = quantiseCamera(camera.value, devicePixelRatio);
     sink.canvas = canvas;
     final batching = vertices;
     if (batching == null) {
-      painter.paint(sink, camera.value, size);
+      painter.paint(sink, quantised, size);
       return;
     }
     // The flush is here and not in the painter because it is a fact about this
     // sink, not about the walk: the painter hands ops to a `DrawSink` and has
     // no opinion on when one of them reaches the `Canvas`.
     batching.canvas = canvas;
-    painter.paint(batching, camera.value, size);
+    painter.paint(batching, quantised, size);
     batching.flush();
   }
 

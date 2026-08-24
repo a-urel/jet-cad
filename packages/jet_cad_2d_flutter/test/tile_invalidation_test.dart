@@ -23,6 +23,7 @@
 
 import 'dart:typed_data';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -446,5 +447,79 @@ void main() {
     rig.paintOnce();
     expect(rig.cache.generation, generation + 2,
         reason: 'a purge rewrites the entity store wholesale');
+  });
+
+  testWidgets('criterion 7: a layer edit repaints and drops the generation',
+      (tester) async {
+    // **Two claims, and the second is the one an integer counter alone would
+    // fail.** `TableSection.add` and friends emit no `DocChange`, and
+    // `DraftCanvas` repaints only for `Listenable.merge([camera, _changes])`
+    // where `_changes` is command-backed. A revision read inside `paint` would
+    // invalidate correctly and never be reached, leaving stale pixels until an
+    // unrelated camera move. So the frame count is asserted first, and the
+    // cache's own drop second -- and the two are separable mutants, which the
+    // report records as M8 and M8b.
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final doc = DraftDocument.empty(measurer: measurer);
+    addLine(doc, doc.rootHandle, const Handle(1001), 20, 20, 260, 180);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final camera = CameraController(tileCamera());
+    addTearDown(camera.dispose);
+
+    var paints = 0;
+    await tester.pumpWidget(MediaQuery(
+      data: const MediaQueryData(devicePixelRatio: kTileDpr),
+      child: Directionality(
+        textDirection: TextDirection.ltr,
+        child: SizedBox(
+          width: kTileViewport.width,
+          height: kTileViewport.height,
+          child: DraftCanvas(
+            document: doc,
+            index: index,
+            camera: camera,
+            tiles: true,
+            tileDevicePixels: 64,
+            onPaintForTest: () => paints++,
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+    final paintsBefore = paints;
+
+    final cache =
+        tester.state<DraftCanvasState>(find.byType(DraftCanvas)).tileCache!;
+    final tilesBefore = cache.liveTileCount;
+    // Not vacuous: with nothing baked, "every tile was dropped" is true of an
+    // implementation that reads no revision at all.
+    expect(tilesBefore, greaterThan(0),
+        reason: 'the frame before the edit must have left tiles to drop');
+    final invalidationsBefore = cache.invalidationCount;
+
+    doc.tables.layers.add(LayerRecord(
+      handle: const Handle(900),
+      name: 'WALLS',
+      // `DraftColor` is sealed and has no `indexed` factory. Every field below
+      // is deliberately off its default -- a record built at the defaults is
+      // this repository's dominant failure mode.
+      color: const IndexedColor(3),
+      linetype: ReservedHandles.continuousLinetype,
+      lineweight: 50,
+      transparency: 40,
+    ));
+    await tester.pump();
+
+    expect(paints, greaterThan(paintsBefore),
+        reason: 'a layer edit must cause a frame at all -- the half a counter '
+            'inside paint could never reach');
+    // And the half the frame count cannot see. `_dropGeneration` counts what
+    // it threw away, so this is exact rather than "more than none": every tile
+    // the previous frame baked is gone, whatever the new frame rebaked.
+    expect(cache.invalidationCount, invalidationsBefore + tilesBefore,
+        reason: 'every tile baked before the edit was drawn against the old '
+            'layer table and must have been thrown away');
   });
 }

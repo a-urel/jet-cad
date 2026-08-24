@@ -47,6 +47,16 @@ class _TablesNotifier implements TableListenable {
   @override
   void removeListener(VoidCallback listener) => _listeners.remove(listener);
 
+  /// How many listeners are attached. **Test-only.**
+  ///
+  /// This list has no automatic cleanup and this class has no `dispose`, so
+  /// every subscriber is responsible for its own removal. The only subscriber
+  /// is `DraftCanvas`'s adapter, which re-attaches whenever a prop change
+  /// rebuilds its derived state; an adapter that unsubscribed on `dispose`
+  /// alone would leak one listener per re-attach, forever, and nothing else
+  /// in the system could see it happening. This is what makes that visible.
+  int get listenerCount => _listeners.length;
+
   void fire() {
     // Copied before iteration: a listener that removes itself while being
     // notified would otherwise mutate the list under the loop.
@@ -557,6 +567,13 @@ class DocumentTables {
 
   /// Notifies after any table mutation.
   TableListenable get changes => _changes;
+
+  /// How many listeners [changes] currently holds. **Test-only.**
+  ///
+  /// See `_TablesNotifier.listenerCount`: the leak this exposes is a
+  /// subscriber that re-attaches without detaching, and there is no other
+  /// instrument for it.
+  int get debugListenerCount => _changes.listenerCount;
 
   void _bump() {
     _revision++;

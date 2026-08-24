@@ -16,6 +16,20 @@ library;
 // glyphs only land inside the box the document thinks they occupy while they
 // agree. A golden built on a model measurer would pin a drawing nothing in
 // production ever produces.
+//
+// **These PNGs were re-recorded in Plan 3g Task 8, and the reason is exact.**
+// `DraftCanvas` now snaps its camera's screen translation to whole device
+// pixels on the live path as well as the tiled one -- `quantiseCamera`, the
+// rule the tiled frame's "zero differing pixels against the live frame" claim
+// rests on, and a live path left on the raw camera would make toggling
+// `DraftCanvas.tiles` shift the drawing. `ViewportTransform.fit(kWorld,
+// kGoldenViewport)` puts this ladder's camera at `f = 292.5`, which at the
+// harness `dpr` of 3 is **exactly** the half-device-pixel tie, the worst case
+// of the +/-0.5 device pixel `quantiseCamera` documents; `e = 10.0` is already
+// integral, so the frame moved down by half a device pixel and not sideways at
+// all. Glyph coverage is resampled at a new subpixel phase, which is why the
+// text ladders moved (0.00%-0.46% of pixels) and the stroke, dash and fill
+// ladders did not move at all.
 
 import 'dart:io';
 import 'dart:typed_data';
