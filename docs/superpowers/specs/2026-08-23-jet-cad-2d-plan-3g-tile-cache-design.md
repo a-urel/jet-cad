@@ -589,6 +589,8 @@ Each must turn a stated criterion red.
 | M14 | skip text when baking a tile | a tiled frame silently loses its labels — criterion 3 |
 | M15 | offset a tile's bake camera by one device pixel | a row of missing and duplicated pixels along every seam — criterion 2, **and this one the instrument can fire** |
 | M16 | record only leaf handles per tile, dropping the node list | a dragged instance leaves a ghost in the tile it left — criterion 5 |
+| M18 | remove `kTileSlack` from both sides | the vanishing stroke column returns — three tests |
+| M19 | pad only the bake, not `_worldRectOf` (Task 9's reverted patch) | the arrival oracle and the invalidation geometry disagree — five tests |
 | M17 | bake tiles with a per-tile rebase origin instead of the frame-global one | **not criterion 1** — see the note below. Fired by a wiring test that reads the coordinate `_bake` hands the sink |
 
 **Seventeen mutants against thirteen criteria. Sixteen can be fired in this
@@ -735,7 +737,39 @@ one-pixel `destRectFor` error (3192 against a bound of 60).
 does not transfer to a GPU backend, in either direction. Whether Impeller
 exhibits it, and at what magnitude, is owed alongside G1's device seam check.
 
-### G6 — Invalidation's second direction is geometric, and a stroke is wider than its geometry — **CLOSED, Task 9a**
+### G6 — ~~Invalidation's second direction is geometric~~ — **CLOSED by Task 9a, 2026-08-24**
+
+**Closed together with a visible defect that shares its cause.** Task 9 found
+that at **6 of 41 swept zoom factors a whole stroke column vanished** from the
+tiled frame. `DraftPainter.paint` derives its index query from
+`camera.visibleWorld(viewport)` with no slack (`draft_painter.dart:338`, used raw
+at `:357` and `:369`) while inflating the *screen clip* by `kScreenClipInflate`
+at `:345-351` — and a clip only **keeps**, so it cannot return an entity the
+query never yielded. On a full frame the missed entities are off-screen; on a
+tile the edge is interior to the drawing. **A pre-existing latent defect in the
+painter that tiling made visible.**
+
+G6 is the same mismatch seen from the other side, so one constant closes both:
+`kTileSlack = kScreenClipInflate`. `_bake` widens its cull by it; `_worldRectOf`
+grows the tile rect by it in screen space before inverting. The clip is
+untouched, so a tile still keeps only its own pixels.
+
+**Measured:** the sweep goes 6 of 41 to **0 of 41**. Three of the four
+direction-two assertions that Task 9's bake-only patch reddened went green with
+**no test change** — they had reddened only because the arrival oracle
+over-reported against an unpadded rule. The fourth is the file's separability
+guard, untouched; its fixture moved from two tile columns clear to five, because
+each position now claims a ring. F1's group tightened from `<= 600` uncovered
+pixels to `== 0`, and criterion 1's zoom list stopped excluding the six killers.
+
+**The cost, measured rather than argued.** Invalidation over-drops by a ring: at
+the 64 px test tile a leaf move goes from 15 to 32 tiles of 130 and a dragged
+instance from 8 to 28. **At the production 256 px tile the dragged instance
+costs nothing extra.** A hit-rate cost, not a correctness one.
+
+The old text follows, for the record.
+
+### ~~G6, as originally accepted~~ — **CLOSED, Task 9a**
 
 **Added 2026-08-24, from Task 7. Closed 2026-08-24, in Task 9a.**
 
