@@ -16,11 +16,50 @@ import 'viewport_transform.dart';
 /// 256 is a starting value with a measured shape behind it and a sweep still
 /// owed. Memory and bake cost pull in opposite directions: at a `dpr` of 2 on a
 /// 3200x2400 device viewport, 128 px costs 32.5 MiB of visible set but bakes
-/// **4.00x** its own area, because `kScreenClipInflate` is 32 *logical* pixels
-/// and a 128 px tile is only 64 logical wide; 512 px costs 48.0 MiB and bakes
-/// 1.56x. 1024 px is excluded outright — its 80.0 MiB visible set leaves no
+/// **4.00x** its own area, because [kTileSlack] is 32 *logical* pixels and a
+/// 128 px tile is only 64 logical wide; 512 px costs 48.0 MiB and bakes 1.56x.
+/// Those multipliers were a prediction when this was written and are the real
+/// cost since Task 9a: the padded bake is what closed defect F1. 1024 px is excluded outright — its 80.0 MiB visible set leaves no
 /// room under [kTileCacheBytes] for the carry-over composite.
 const int kTileDevicePixels = 256;
+
+/// The slack a tile's **arrival** rule and its **invalidation** rule share, in
+/// logical pixels.
+///
+/// **One constant, because they are one question asked from two sides.** A
+/// stroke is wider than its geometry: an entity whose centreline sits just
+/// outside a tile still inks pixels inside it. [DraftPainter] already knows
+/// this and inflates its *screen clip* by [kScreenClipInflate] — "half the
+/// widest stroke the frame can draw" in that constant's own words — but its
+/// index query carries no slack at all, and on a full frame that costs
+/// nothing because the missed entity is off-screen. A tile's edge is interior
+/// to the drawing, and there the two halves diverge:
+///
+/// * **Arrival.** [_bake] passes the tile as the viewport, so an unpadded
+///   query hands the painter nothing for a stroke whose centreline is 0.2
+///   device pixels the wrong side of the seam. A clip only *keeps*; it cannot
+///   return what the query never yielded, so the half of the stroke reaching
+///   back into the tile was drawn by nobody. That was defect F1: six of
+///   forty-one swept zoom factors lost a whole stroke column.
+/// * **Invalidation.** Direction two condemned the tiles whose *exact* world
+///   rect met a touched entity's *geometric* box, so the same stroke arriving
+///   from just outside left a tile inked and unconditioned. That was accepted
+///   gap G6.
+///
+/// Padding one alone makes them disagree: a tile's `_baked` record would list
+/// entities whose geometry never entered it while the geometry that condemns
+/// it stayed exact, and the arrival oracle would over-report against an
+/// invalidation rule that under-condemns. So both use this, and the number is
+/// [kScreenClipInflate] because that is the painter's *published* culling
+/// slack — the amount of extra ink the frame is entitled to draw.
+///
+/// **What it costs.** Invalidation now over-drops by a ring: at the production
+/// 256 device-pixel tile and a `dpr` of 2 the ring is a quarter of a tile
+/// wide, and at the 64-pixel tile the tests use it is a whole tile. That is a
+/// hit-rate cost, never a correctness one — a tile dropped that need not have
+/// been is rebaked, a tile kept that should have been dropped is a visible
+/// defect.
+const double kTileSlack = kScreenClipInflate;
 
 /// Tiles baked per frame while a generation fills in.
 ///
@@ -829,14 +868,16 @@ class TileCache {
   /// so the enclosing space is the document root and the accumulated transform
   /// of the owner is the whole of the placement.
   ///
-  /// **The bound is geometric, not rasterised.** A bake's own index query is
-  /// widened by the index's narrow-phase slack — half a stroke width and the
-  /// like — so a tile whose bake drew a hairline spilling in from just outside
-  /// its world rect is not found here. Direction one catches that case
-  /// wherever the handle was already in the tile; what is left is a handle
-  /// arriving at a position that misses a tile geometrically while its stroke
-  /// clips into it, bounded by half the stroke width in world units. Recorded
-  /// rather than papered over with an arbitrary inflation.
+  /// **The bound is geometric, not rasterised, and that is why the *tile* box
+  /// is the padded one.** A stroke puts ink up to half its width beyond this
+  /// box, so a handle arriving at a position that misses a tile geometrically
+  /// can still clip into it — accepted gap G6, until Task 9a. The remedy is
+  /// not here: inflating this box by a resolved lineweight would need the
+  /// style resolution the caller does not have, and would be a *different*
+  /// number from the one [_bake] queries with. [_worldRectOf] grows the tile
+  /// instead, by [kTileSlack], which is the same slack the bake uses — so the
+  /// record of what a tile holds and the geometry that condemns it are one
+  /// rectangle rather than two that nearly agree.
   Aabb2? _worldBoxOf(DraftDocument document, Handle handle,
       Map<Handle, List<int>>? leavesByOwner) {
     final tree = document.tree;
@@ -888,7 +929,22 @@ class TileCache {
         tree.accumulatedTransform(document.entities.ownerAt(slot)));
   }
 
-  /// The world-space box of tile [key] under [grid]'s anchor camera.
+  /// The world-space box tile [key] can hold ink from, under [grid]'s anchor
+  /// camera: its own rectangle grown by [kTileSlack] on every side.
+  ///
+  /// **The slack is the same one [_bake] queries with, and that is the point.**
+  /// A tile's `_baked` record lists what the padded query yielded; this is the
+  /// geometry that condemns the tile. Inflate one and not the other and the
+  /// two halves of invalidation disagree by a ring — direction one drops tiles
+  /// whose record names a handle that direction two's box does not reach, and
+  /// a stroke arriving from just outside a tile leaves it stale. [kTileSlack]
+  /// carries the whole argument.
+  ///
+  /// **Grown in screen space, not in world units.** The pad is a fact about
+  /// stroke widths, which are a screen-space quantity, so it is applied to the
+  /// tile rectangle before the inversion. Adding a world-space margin
+  /// afterwards would be the wrong size by the camera's scale, and by
+  /// different amounts on the two axes under an anisotropic one.
   ///
   /// **All four corners, not two.** `ViewportTransform.visibleWorld` documents
   /// the reason and this is the same inversion: under a rotated or skewed
@@ -896,15 +952,17 @@ class TileCache {
   /// genuinely inside the tile, and the tiles it omits are the ones this
   /// method exists to condemn.
   Aabb2 _worldRectOf(TileKey key, TileGrid grid) {
+    const pad = kTileSlack;
     final side = grid._tileLogical;
-    final left = key.x * side;
-    final top = key.y * side;
+    final left = key.x * side - pad;
+    final top = key.y * side - pad;
+    final span = side + 2 * pad;
     var box = Aabb2.empty();
     for (final p in <Vector2>[
       Vector2(left, top),
-      Vector2(left + side, top),
-      Vector2(left, top + side),
-      Vector2(left + side, top + side),
+      Vector2(left + span, top),
+      Vector2(left, top + span),
+      Vector2(left + span, top + span),
     ]) {
       box = box.expandedToPoint(grid.anchor.screenToWorld(p));
     }
@@ -975,8 +1033,27 @@ class TileCache {
       }
     }
 
-    _drawInto(into, Size(side, side), grid.bakeCameraFor(key), painter, sink,
-        vertices, origin, (handle) {
+    // **The query is padded; the clip is not.** [kTileSlack] is why: the tile
+    // keeps exactly the pixels it owns (the hard clip above is untouched) but
+    // the painter is asked about a rectangle [kTileSlack] logical pixels
+    // larger on every side, so a stroke whose centreline is just outside still
+    // reaches the sink and contributes the part of itself that falls inside.
+    // The canvas is pulled back by the same amount, so the padded viewport's
+    // origin lands where the tile's origin was.
+    const pad = kTileSlack;
+    final bake = grid.bakeCameraFor(key).worldToScreenMatrix;
+    into.save();
+    into.translate(-pad, -pad);
+    _drawInto(
+        into,
+        Size(side + 2 * pad, side + 2 * pad),
+        ViewportTransform(
+            worldToScreenMatrix: Transform2(
+                bake.a, bake.b, bake.c, bake.d, bake.e + pad, bake.f + pad)),
+        painter,
+        sink,
+        vertices,
+        origin, (handle) {
       visited.add(handle.value);
       final slot = document.entities.slotOf(handle);
       if (slot != null) {
@@ -991,6 +1068,7 @@ class TileCache {
       final node = document.tree[handle];
       if (node != null && !node.parent.isNone) recordOwners(node.parent);
     });
+    into.restore();
     visited.sort();
     _baked[key] = Uint32List.fromList(visited);
     final picture = recorder.endRecording();

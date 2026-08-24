@@ -27,8 +27,10 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
 
 import 'support/fixtures.dart';
+import 'support/tile_comparison.dart';
 import 'support/tile_fixture.dart';
 
 /// A root leaf on the left, and a definition placed twice: once on the left,
@@ -150,8 +152,20 @@ void main() {
 
     // A *move*, not an extension. See the header: an extension makes the new
     // tile set a superset of the old one and M1 becomes unobservable.
+    //
+    // **How far the move has to be is set by [kTileSlack].** It was
+    // `(100, 20)-(140, 60)`, two tile columns clear of the old position, and
+    // that was enough while a tile's record held only what its own rectangle
+    // enclosed. Both halves of invalidation now carry the painter's published
+    // culling slack -- 32 logical pixels, a whole tile at this rig's 64
+    // device-pixel size -- so each position claims a one-tile ring and the two
+    // rings met on column 2. The guard is not loosened; the fixture is moved
+    // out to `(150, 20)-(190, 60)`, five columns clear, so the two directions
+    // stay as separable as they were. Task 9a; the ring is the price of
+    // closing gap G6 and defect F1, and it is a hit-rate cost rather than a
+    // correctness one.
     rig.doc.commands.execute(
-        SetEntityGeometryCommand(const Handle(1001), lineAt(100, 20, 140, 60)));
+        SetEntityGeometryCommand(const Handle(1001), lineAt(150, 20, 190, 60)));
     final newTiles = tilesFor(rig.doc, const Handle(1001)).toSet();
     expect(newTiles, isNotEmpty);
     expect(newTiles.intersection(oldTiles), isEmpty,
@@ -449,6 +463,109 @@ void main() {
         reason: 'a purge rewrites the entity store wholesale');
   });
 
+  // **Accepted gap G6, closed.** "Invalidation's second direction is geometric,
+  // and a stroke is wider than its geometry."
+  //
+  // Direction two used to condemn the tiles whose *exact* world rect met the
+  // touched entity's *geometric* box. A stroke puts ink up to half its width
+  // beyond that box, so an entity arriving with its centreline just outside a
+  // tile inks pixels inside it while the tile keeps its pre-edit image: a
+  // stale column, and no assertion in this file could see it.
+  //
+  // It is defect F1 seen from the other side. F1 was the *arrival* half — a
+  // cold bake culling the same stroke — and the remedy is one constant used in
+  // both places: `_bake` widens its cull by `kScreenClipInflate` and direction
+  // two widens its tile rect by the same amount, so the record of what a tile
+  // holds and the geometry that condemns it are the same rectangle.
+  //
+  // The fixture is arithmetic, not luck. At [tileCamera] a logical screen x of
+  // `192.125` is the seam between tile columns 5 and 6 plus an eighth of a
+  // logical pixel; the line's stroke is 2 device pixels wide, so it covers
+  // device x 383 and 384 — one pixel each side of the seam at device 384.
+  // Column 5 owns device x 383 and its world rect stops 0.089 world units
+  // short of the centreline.
+  test(
+      'criterion 5 / gap G6: a stroke reaching into a tile its geometry '
+      'misses invalidates it', () async {
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final rig = rigOver(strokeReachFixture(measurer));
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    final before = rig.cache.liveTileCount;
+    expect(before, greaterThan(30),
+        reason: 'anti-degenerate clause 3: a single-tile viewport makes every '
+            'claim below vacuous');
+
+    final anchor = quantiseCamera(tileCamera(), kTileDpr);
+    // An eighth of a logical pixel right of the column 5 / column 6 seam.
+    // Derived through the camera rather than written down, so the claim
+    // survives a change to the camera it is stated against. `b` and `c` are
+    // zero here, so the world x this returns does not depend on the y.
+    final newX = anchor.screenToWorld(Vector2(6 * 32.0 + 0.125, 0)).x;
+
+    final oldTiles = rig.cache.tilesHolding(const Handle(1001)).toSet();
+    expect(oldTiles, isNotEmpty, reason: 'the probe must be findable');
+    // The rows the moved line spans, taken well inside its extent so the
+    // claim does not rest on where its two endcaps land.
+    final targets = <TileKey>[for (var y = 2; y <= 7; y++) TileKey(5, y)];
+    for (final key in targets) {
+      expect(rig.cache.holds(key), isTrue,
+          reason: 'the floor at $key: a tile that was never baked cannot go '
+              'stale, and "it was dropped" would be true of it for the wrong '
+              'reason');
+      expect(oldTiles.contains(key), isFalse,
+          reason: '$key must not already carry the probe, or direction one '
+              'condemns it and direction two is never asked');
+    }
+
+    rig.doc.commands.execute(SetEntityGeometryCommand(
+        const Handle(1001), lineAt(newX, 30, newX, 200)));
+
+    // **Premise one: the geometry genuinely misses these tiles.** This is the
+    // box direction two used to test, and it does not reach them — so a pass
+    // below cannot come from the old rule accidentally being right.
+    final probeBox =
+        Aabb2.fromPoints(<Vector2>[Vector2(newX, 30), Vector2(newX, 200)]);
+    for (final key in targets) {
+      expect(exactTileWorldRect(anchor, key).intersects(probeBox), isFalse,
+          reason: '$key: the exact tile rect must not meet the new geometry, '
+              'or this test is measuring direction two as it already was');
+    }
+
+    // **Premise two: the stroke genuinely inks them.** Device column 383 is
+    // the last pixel of tile column 5, and the live frame — the oracle the
+    // whole plan is measured against — puts ink there.
+    final live = await captureLiveFrame(rig);
+    const deviceWidth = 800;
+    for (final key in targets) {
+      var inked = 0;
+      for (var y = key.y * 64; y < key.y * 64 + 64; y++) {
+        if (live[((y * deviceWidth) + 383) * 4 + 3] != 0) inked++;
+      }
+      expect(inked, greaterThan(0),
+          reason: '$key: the stroke must actually reach device column 383, or '
+              'there is no stale ink for invalidation to owe');
+    }
+
+    rig.cache.applyChange(
+        const CommandApplied(label: 'move', touched: {Handle(1001)}), rig.doc);
+
+    for (final key in targets) {
+      expect(rig.cache.holds(key), isFalse,
+          reason: 'stale stroke at $key: the arriving line inks device column '
+              '383, which only this tile can write, and the tile still holds '
+              'the image it had before the edit');
+    }
+    // And still not a generation drop: the definition placement is four tile
+    // columns clear of the widest ring this edit can condemn.
+    for (final key in rig.cache.tilesHolding(const Handle(300))) {
+      expect(rig.cache.holds(key), isTrue, reason: 'untouched placement, $key');
+    }
+    expect(rig.cache.liveTileCount, greaterThan(before ~/ 2),
+        reason: 'the slack is a ring, not a generation drop');
+  });
+
   testWidgets('criterion 7: a layer edit repaints and drops the generation',
       (tester) async {
     // **Two claims, and the second is the one an integer counter alone would
@@ -522,4 +639,43 @@ void main() {
         reason: 'every tile baked before the edit was drawn against the old '
             'layer table and must have been thrown away');
   });
+}
+
+/// One vertical line eight tile rows tall, and a definition placed clear of it.
+///
+/// The line is the probe for accepted gap G6. Anti-degenerate clause 1 holds
+/// structurally: at a 64 device-pixel tile and `dpr` 2 the line spans about
+/// eight rows, so it cannot sit inside one tile. Clause 4 is why the
+/// definition is here at all — a root-only fixture never reaches the
+/// definition arm — and the placement sits in tile columns 9-10, four columns
+/// clear of anything this test condemns, so "and still not a generation drop"
+/// is a question the geometry can answer.
+DraftDocument strokeReachFixture(FlutterTextMeasurer measurer) {
+  final doc = DraftDocument.empty(measurer: measurer);
+  // World x 60 is logical screen x 47, device x 94: tile column 1.
+  addLine(doc, doc.rootHandle, const Handle(1001), 60, 30, 60, 200);
+  addDefinition(doc, const Handle(210), 'PLATE');
+  addLine(doc, const Handle(210), const Handle(1002), 0, 0, 25, 25);
+  addInstance(doc, doc.rootHandle, const Handle(300), const Handle(210),
+      Transform2(1, 0, 0, 1, 240, 30));
+  return doc;
+}
+
+/// Tile [key]'s **exact** world rectangle under [anchor] — the box direction
+/// two used to test before this gap was closed, reproduced here so the test
+/// can prove its own premise rather than assert it.
+Aabb2 exactTileWorldRect(ViewportTransform anchor, TileKey key) {
+  const side = 64 / kTileDpr;
+  final left = key.x * side;
+  final top = key.y * side;
+  var box = Aabb2.empty();
+  for (final p in <Vector2>[
+    Vector2(left, top),
+    Vector2(left + side, top),
+    Vector2(left, top + side),
+    Vector2(left + side, top + side),
+  ]) {
+    box = box.expandedToPoint(anchor.screenToWorld(p));
+  }
+  return box;
 }

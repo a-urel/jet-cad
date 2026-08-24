@@ -478,14 +478,15 @@ void main() {
     // scale of 1.4 -- a pan cannot change a scale -- so nothing in this plan
     // had ever asked whether a *different* scale tiles exactly.
     //
-    // It does, at thirty-five of the forty-one factors swept from 0.70 to 1.50
-    // in steps of 0.02. The six that do not are defect F1, which the group
-    // below measures and the report diagnoses; the factors here are drawn from
-    // the clean thirty-five, both directions, and are a criterion-1 claim
-    // rather than a demonstration -- mutant M4 reddens every one of them,
-    // because a generation replayed at the old scale carries the old stroke
-    // widths and the old dash phase and no pan test can see either.
-    for (final factor in <double>[0.74, 0.83, 1.16, 1.18, 1.30]) {
+    // It does, at all forty-one factors swept from 0.70 to 1.50 in steps of
+    // 0.02. Six of them used to lose a whole stroke column -- defect F1, which
+    // the group below now gates at zero rather than at a bound -- so the list
+    // here no longer excludes anything: **1.22 and 1.10 are two of the six**,
+    // and they are in it deliberately. These are a criterion-1 claim rather
+    // than a demonstration -- mutant M4 reddens every one of them, because a
+    // generation replayed at the old scale carries the old stroke widths and
+    // the old dash phase and no pan test can see either.
+    for (final factor in <double>[0.74, 0.83, 1.10, 1.16, 1.22, 1.30]) {
       final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
       addTearDown(rig.dispose);
       rig.paintOnce();
@@ -505,13 +506,13 @@ void main() {
     }
   });
 
-  // Defect F1, measured on every run rather than rediscovered, and **not an
-  // accepted gap**: this one loses ink.
+  // **Defect F1, closed in Task 9a.** This group was a measurement of a live
+  // defect; it is now the gate that keeps it closed.
   //
-  // **What happens.** At six of the forty-one zoom factors swept from 0.70 to
-  // 1.50 in steps of 0.02, one whole one-device-pixel stroke column is absent
-  // from the tiled frame -- 370 to 561 pixels of pure `uncovered` with zero
-  // `stray`. A line simply is not drawn.
+  // **What used to happen.** At six of the forty-one zoom factors swept from
+  // 0.70 to 1.50 in steps of 0.02, one whole one-device-pixel stroke column
+  // was absent from the tiled frame -- 370 to 561 pixels of pure `uncovered`
+  // with zero `stray`. A line simply was not drawn.
   //
   // **The mechanism, measured.** At factor 1.17 the quantised camera is
   // `a = 1.638, e = -77.5`, which puts `crossingGrid`'s vertical line at world
@@ -519,7 +520,7 @@ void main() {
   // 192. Its stroke is 2 device pixels wide, so it covers pixel centres 191.5
   // and 192.5, and the live frame inks both. Pixel 191 belongs to tile column
   // 2, whose device range is `[128, 192)`; `cache.tilesHolding(Handle(1009))`
-  // returns `[3]`. Column 2 never received the entity at all.
+  // returned `[3]`. Column 2 never received the entity at all.
   //
   // **Why.** `DraftPainter.paint` derives its index query from
   // `camera.visibleWorld(viewport)` with no slack whatsoever
@@ -527,27 +528,24 @@ void main() {
   // `kScreenClipInflate`, which is defined as "half the widest stroke the
   // frame can draw" precisely so a centreline just outside still contributes
   // its edge. A tile bake passes the tile as the viewport, so the tile's world
-  // rect ends 0.08 world units left of the centreline and the half of the
-  // stroke that reaches back inside is never drawn by anyone: the neighbouring
-  // tile owns different pixels, and a device column can only be written by the
-  // tile containing it.
+  // rect ended 0.08 world units left of the centreline and the half of the
+  // stroke that reaches back inside was drawn by nobody: the neighbouring tile
+  // owns different pixels, and a device column can only be written by the tile
+  // containing it. A clip only *keeps*; it cannot return what the query never
+  // yielded.
   //
-  // **The fix is one call and it is not this task's.** Padding `_bake`'s
-  // viewport by `kScreenClipInflate` and pulling the canvas back by the same
-  // amount takes the sweep from 6 of 41 to **0 of 41** (built, measured and
-  // reverted in Task 9; the patch is in the report). It also widens every
-  // tile's `_baked` record by a one-tile ring at this tile size, which breaks
-  // four direction-two assertions in `tile_invalidation_test.dart`: the
-  // arrival oracle over-reports while `_invalidateTouched`'s own geometry does
-  // not inflate. Making the two agree is a decision about how much
-  // over-invalidation is acceptable, and that belongs to a task of its own.
-  group('defect F1: a stroke centreline just outside a tile is culled from it',
-      () {
-    test('the loss is one stroke column, and it is ink lost rather than moved',
+  // **The fix.** `_bake` pads its cull by `kTileSlack`, and direction two of
+  // invalidation pads its tile box by the same constant -- see that constant's
+  // own documentation for why one number has to serve both, and for what the
+  // padding costs. The sweep goes from **6 of 41 to 0 of 41**, which is why
+  // the assertions below are exact zeros rather than the bounds they were.
+  // `criterion 1: a settled frame equals the live frame after a zoom` now runs
+  // two of these six factors as well.
+  group(
+      'defect F1 stays closed: a stroke centreline just outside a tile '
+      'still inks it', () {
+    test('the six factors that used to lose a stroke column agree exactly',
         () async {
-      // Both halves matter. The bound says the damage has not grown; the
-      // second assertion says what kind of damage it is, and would catch a
-      // colour or blend regression hiding inside the same count.
       for (final factor in <double>[0.72, 0.78, 0.82, 1.06, 1.10, 1.22]) {
         final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
         addTearDown(rig.dispose);
@@ -556,16 +554,19 @@ void main() {
         final report = await measureTiledAgreement(rig);
         expect(report.liveInk, greaterThan(5000),
             reason: 'factor $factor: the floor first: $report');
-        // Measured 2026-08-24: 370, 415, 436, 527, 484 and 561 uncovered.
-        expect(report.uncoveredPixels, lessThanOrEqualTo(600),
-            reason: 'factor $factor: $report');
+        // Measured before the fix: 370, 415, 436, 527, 484 and 561 uncovered,
+        // in that order. Zero now, and a bound rather than a zero here would
+        // let the whole column come back.
+        expect(report.uncoveredPixels, 0,
+            reason: 'factor $factor: a stroke whose centreline sits just '
+                'outside a tile still inks the pixel column inside it, and no '
+                'other tile can write that column: $report');
         expect(report.strayPixels, 0,
-            reason: 'factor $factor: the tiled frame draws nothing the live '
-                'frame does not -- the loss is a cull, not a displacement, '
-                'and a displacement would mean a different defect: $report');
-        expect(report.differingPixels, report.uncoveredPixels,
-            reason: 'factor $factor: and every differing pixel is one of the '
-                'lost ones, so no pixel disagrees on colour: $report');
+            reason: 'factor $factor: and the padded bake draws nothing the '
+                'live frame does not -- the hard clip still holds each tile '
+                'to exactly the pixels it owns, which is what stops the wider '
+                'query double-inking a seam: $report');
+        expect(report.differingPixels, 0, reason: 'factor $factor: $report');
       }
     });
   });

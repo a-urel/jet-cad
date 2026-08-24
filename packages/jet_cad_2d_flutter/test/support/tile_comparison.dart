@@ -141,3 +141,21 @@ Future<InkReport> expectTiledEqualsLive(TileRig rig,
   expect(report.differingPixels, 0, reason: '$report');
   return report;
 }
+
+/// The **live** frame's device pixels, RGBA, row-major at [kTileDpr].
+///
+/// The differential gate above reduces two captures to counts; a test that
+/// needs to ask *where* the ink is — "does this stroke really reach into the
+/// tile column its centreline is not in" — needs the pixels themselves. Same
+/// quantised camera as [measureTiledAgreement]'s live arm, for the same
+/// reason: the two arms must be one drawing seen twice.
+Future<Uint8List> captureLiveFrame(TileRig rig) => _capture((canvas) {
+      final quantised = quantiseCamera(rig.camera, kTileDpr);
+      rig.painter.debugRebaseOrigin =
+          rebaseOriginFor(quantised.visibleWorld(kTileViewport));
+      rig.sink.canvas = canvas;
+      rig.vertices.canvas = canvas;
+      rig.painter.paint(rig.vertices, quantised, kTileViewport);
+      rig.vertices.flush();
+      rig.painter.debugRebaseOrigin = null;
+    });

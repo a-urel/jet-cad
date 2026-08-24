@@ -735,24 +735,39 @@ one-pixel `destRectFor` error (3192 against a bound of 60).
 does not transfer to a GPU backend, in either direction. Whether Impeller
 exhibits it, and at what magnitude, is owed alongside G1's device seam check.
 
-### G6 — Invalidation's second direction is geometric, and a stroke is wider than its geometry
+### G6 — Invalidation's second direction is geometric, and a stroke is wider than its geometry — **CLOSED, Task 9a**
 
-**Added 2026-08-24, from Task 7.**
+**Added 2026-08-24, from Task 7. Closed 2026-08-24, in Task 9a.**
 
-Direction two invalidates tiles intersecting a touched handle's **new world
+Direction two invalidated tiles intersecting a touched handle's **new world
 box**, and that box is the entity's geometry. A stroke is drawn with width, so
 it can put ink into a tile its geometry does not reach — by up to **half a
-stroke width**. An edit to such an entity leaves that tile stale.
+stroke width**. An edit to such an entity left that tile stale.
 
-The bound is exactly half the rendered stroke width in device pixels, which at
-the default lineweight is sub-pixel and at a heavy lineweight is a few pixels
-along one edge. It is not closable from the tile cache: the spatial index
-carries its own margin for this and does not expose it.
+**It was one half of defect F1**, which Task 9 found from the other side: a
+cold bake culled the same stroke, because `DraftPainter.paint` derives its
+index query from `camera.visibleWorld(viewport)` with no slack while only its
+*screen clip* carries `kScreenClipInflate` — and a clip can only keep, never
+return what the query never yielded. On a full frame the missed entity is
+off-screen; on a tile the edge is interior to the drawing, and six of the
+forty-one zoom factors swept from 0.70 to 1.50 lost a whole stroke column.
 
-Recorded rather than fixed. Whoever owns eviction, the carry-over composite, or
-a future plan touching invalidation should know it exists, and closing it means
-either exposing the index's margin or inflating the box by the resolved
-lineweight at invalidation time.
+The remedy is one constant, `kTileSlack = kScreenClipInflate`, used in both
+places: `_bake` widens its cull by it, and `_worldRectOf` grows the tile
+rectangle by it *in screen space* before inverting. Padding only one makes the
+two halves disagree by a ring — the record over-reports against a rule that
+under-condemns — which is why F1 and G6 were one task. The zoom sweep goes from
+**6 of 41 to 0 of 41**.
+
+**What it costs, measured.** Invalidation over-drops by a ring. At the 64
+device-pixel tile the tests use, the ring is a whole tile and a representative
+edit drops roughly two to three and a half times as many tiles (leaf move
+15 → 32 of 130; dragged instance 8 → 28; dragged group 8 → 24). The ring is a
+fixed 32 logical pixels, so it shrinks against a larger tile: at 128 device
+pixels the same leaf move goes 6 → 10 of 35, and at the production 256 it goes
+4 → 6 of 12 while the dragged instance does not change at all. A hit-rate cost,
+never a correctness one — a tile dropped that need not have been is rebaked,
+and a tile kept that should have been dropped is a visible defect.
 
 ### G2 — In-place table record mutation, now nearly closed
 
