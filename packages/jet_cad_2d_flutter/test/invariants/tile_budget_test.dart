@@ -442,8 +442,19 @@ void main() {
     // it reached one are protected by the very guard I2 is about and survive
     // the frame -- eleven of them here. The second frame pans past them and
     // the ceiling is left holding exactly what it cannot evict.
+    final beforeSqueeze = rig.cache.evictionCount;
     rig.panBy(-64, -32);
     rig.paintOnce();
+    // **The number `_makeRoomForOneTile`'s own doc comment cites.** One call
+    // reclaims every held tile whose serial is older than this frame's, not
+    // one and not one per bake -- an earlier version of that comment claimed
+    // "at most one such eviction per bake" and this fixture is what falsifies
+    // it. Asserted as a floor rather than as the exact 119, which would be a
+    // statement about map iteration order.
+    expect(rig.cache.evictionCount - beforeSqueeze, greaterThan(50),
+        reason: 'a single frame under a ceiling it cannot satisfy empties '
+            'everything the blitted-this-frame guard does not protect');
+
     rig.cache.resetCounters();
     rig.panBy(-64, -32);
     rig.paintOnce();

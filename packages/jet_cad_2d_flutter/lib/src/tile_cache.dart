@@ -711,17 +711,35 @@ class TileCache {
   /// **"Blitted", not "visible": the guard is weaker than a first reading
   /// suggests, and deliberately.** A tile that is visible this frame but sits
   /// later in [TileGrid.visibleKeys] than the miss being served still carries
-  /// the *previous* frame's serial, so it is a legal victim. What that costs
-  /// is bounded and it is a hit rate, never a pixel: the victim is rebaked or
-  /// left to the live fallback like any other miss, which is what
-  /// `tile_budget_test.dart`'s pixel comparison at the cap exercises. The
-  /// bound is **at most one such eviction per bake** — each pass frees
-  /// exactly one tile and the freed slot is filled immediately — and at
-  /// production sizes it is usually none, because the LRU order puts every
-  /// off-screen tile ahead of every on-screen one. Tightening it to *visible*
-  /// would mean sweeping `visibleKeys` once more before the bake loop to mark
-  /// the whole visible set, on every warm frame, to buy back a few bakes on
-  /// the frames that overrun. Not worth a second pass over the frame path.
+  /// the *previous* frame's serial, so it is a legal victim.
+  ///
+  /// **The bound, stated as the loop below actually behaves.** One call
+  /// reclaims **every** held tile whose serial is older than this frame's,
+  /// until either the ceiling admits one more tile or no such tile is left —
+  /// not one, and not one per bake. The only quantity it is bounded by is the
+  /// number of tiles this frame has not yet blitted, which is the whole cache
+  /// at the first miss of a frame. Measured rather than reasoned: the
+  /// sub-composite fixture in `tile_budget_test.dart` reads **119 evictions in
+  /// a single frame**, because there the ceiling cannot admit a tile at all
+  /// and the first miss empties everything the guard does not protect.
+  ///
+  /// What *is* exact is the guard itself: a tile already blitted this frame is
+  /// never reclaimed, whatever the ceiling demands, which is what stops the
+  /// evict-rebake-evict cycle above. And the case where on-screen tiles are
+  /// taken needs a ceiling **below the visible set** to arise at all — at a
+  /// `cacheBytes` that holds the working set, `bytes > ceiling` is false on
+  /// entry and the loop never runs, so there is no eviction of any kind to
+  /// choose a victim for.
+  ///
+  /// The cost is a hit rate, never a pixel. A victim taken before it is
+  /// reached becomes an ordinary miss: rebaked if the budget allows, otherwise
+  /// added to the frame's uncovered rectangle and drawn by the live fallback.
+  /// That is the path `tile_budget_test.dart`'s pixel comparison at the cap
+  /// exercises, and it reads zero differing pixels. Tightening the guard to
+  /// *visible* would mean sweeping `visibleKeys` once more before the bake
+  /// loop to mark the whole visible set, on every warm frame, to buy back
+  /// bakes only on frames that were already overrunning. Not worth a second
+  /// pass over the frame path.
   ///
   /// **The composite is never a candidate.** It is not in [_tiles] at all, and
   /// deliberately: [paintFrame] reads it every frame it stands, so a
