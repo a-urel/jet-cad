@@ -148,6 +148,57 @@ final RenderBackend? kBackend =
     throw StateError('BACKEND must be canvas, vertices or unset; got "$other"'),
 };
 
+/// Whether the canvas draws its frame from cached tiles.
+///
+/// **A `String.fromEnvironment`, and it stays one**, for [kBackend]'s reason
+/// and one sharper than [kBackend]'s. Plan 3c lost a full device run to
+/// `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as false while
+/// printing entirely plausible numbers. Here the plausible numbers would be
+/// *the control's*: a `TILES=1` that read as false would publish the untiled
+/// baseline a second time and the sweep would call it a measurement of the
+/// cache. An unrecognised value throws instead.
+///
+/// Inert at its default of `off`: the canvas builds no [TileCache] at all, and
+/// every rig before this one measures exactly what it measured before.
+final bool kTiles =
+    switch (const String.fromEnvironment('TILES', defaultValue: 'off')) {
+  'off' => false,
+  'on' => true,
+  final other => throw StateError('TILES must be on or off; got "$other"'),
+};
+
+/// A tile's side in device pixels, forwarded to [TileCache.tileDevicePixels].
+///
+/// **Not an `int.fromEnvironment`, and that is the same rule stated for an
+/// integer.** `int.fromEnvironment` silently yields its default for anything
+/// it cannot parse -- `TILE_PX=256px`, `TILE_PX=` -- so a mistyped sweep arm
+/// would run at [kTileDevicePixels] and be written into the table under
+/// whichever size the command line claimed. Two rows of the same run is the
+/// exact failure the flag above is worded against.
+final int kTilePx = _intDefine(
+    'TILE_PX', const String.fromEnvironment('TILE_PX'), kTileDevicePixels,
+    minimum: 1);
+
+/// Tiles baked per frame, forwarded to [TileCache.tilesBakedPerFrame].
+///
+/// `0` is a legitimate value -- it is the budget the zoom-path tests take away
+/// to prove a frame blitted the carry-over composite rather than a tile -- so
+/// the floor here is zero and not one.
+final int kTileBake = _intDefine(
+    'TILE_BAKE', const String.fromEnvironment('TILE_BAKE'), kTilesBakedPerFrame,
+    minimum: 0);
+
+/// Parses an integer define, or throws. Never falls back on a malformed value:
+/// see [kTilePx].
+int _intDefine(String name, String raw, int fallback, {required int minimum}) {
+  if (raw.isEmpty) return fallback;
+  final value = int.tryParse(raw);
+  if (value == null || value < minimum) {
+    throw StateError('$name must be an integer >= $minimum; got "$raw"');
+  }
+  return value;
+}
+
 /// The one measurer the harness document is built with, reachable from
 /// `_HarnessState.dispose` so the native paragraphs it holds are released.
 ///
@@ -320,9 +371,10 @@ void main() {
   }
   runApp(HarnessApp(
     document: doc,
-    onReady: (camera, index, painter, sink, vertices, resolvedBackend) {
-      unawaited(
-          _driveR2(doc, camera, painter, sink, vertices, resolvedBackend));
+    onReady:
+        (camera, index, painter, sink, vertices, resolvedBackend, tileCache) {
+      unawaited(_driveR2(
+          doc, camera, painter, sink, vertices, resolvedBackend, tileCache));
     },
   ));
 }
@@ -344,6 +396,7 @@ Future<void> _driveR2(
   CanvasDrawSink sink,
   VerticesDrawSink? vertices,
   RenderBackend resolvedBackend,
+  TileCache? tileCache,
 ) async {
   print('R2 app-run: driving started');
   final e = doc.extents;
@@ -369,6 +422,7 @@ Future<void> _driveR2(
     sink: sink,
     vertices: vertices,
     resolvedBackend: resolvedBackend,
+    tileCache: tileCache,
     pumpFrame: _pumpFrame,
     settle: _settle,
   );
@@ -421,13 +475,17 @@ class HarnessApp extends StatefulWidget {
   /// `RenderBackend.vertices`; a rig reads its batch and flush counters the
   /// same way it reads the painter's. [resolvedBackend] is what
   /// `DraftCanvasState` actually built, not what [kBackend] asked for.
+  /// [tileCache] is non-null exactly when [kTiles] is on -- the cache
+  /// `DraftCanvasState` actually built, not the flag that asked for one, for
+  /// the reason [resolvedBackend] is the resolved backend and not [kBackend].
   final void Function(
       CameraController camera,
       SpatialIndex index,
       DraftPainter painter,
       CanvasDrawSink sink,
       VerticesDrawSink? vertices,
-      RenderBackend resolvedBackend)? onReady;
+      RenderBackend resolvedBackend,
+      TileCache? tileCache)? onReady;
 
   @override
   State<HarnessApp> createState() => _HarnessAppState();
@@ -444,8 +502,18 @@ class _HarnessAppState extends State<HarnessApp> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final canvasState = _canvasKey.currentState!;
-      widget.onReady?.call(camera, index, canvasState.painter, canvasState.sink,
-          canvasState.vertices, canvasState.resolvedBackend);
+      // `tilesBakedPerFrame` is a mutable field on the cache rather than a
+      // `DraftCanvas` property, so the define is applied here -- after the
+      // first frame, and before any frame a rig measures.
+      canvasState.tileCache?.tilesBakedPerFrame = kTileBake;
+      widget.onReady?.call(
+          camera,
+          index,
+          canvasState.painter,
+          canvasState.sink,
+          canvasState.vertices,
+          canvasState.resolvedBackend,
+          canvasState.tileCache);
     });
   }
 
@@ -482,7 +550,9 @@ class _HarnessAppState extends State<HarnessApp> {
                 lineweightScale: kLineweightScale,
                 drawText: kDrawText,
                 minTextCapPixels: kMinTextCap,
-                backend: kBackend),
+                backend: kBackend,
+                tiles: kTiles,
+                tileDevicePixels: kTilePx),
           ),
         ),
       );

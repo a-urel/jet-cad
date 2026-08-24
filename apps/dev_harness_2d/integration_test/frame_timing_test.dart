@@ -112,6 +112,7 @@ void main() {
         CanvasDrawSink sink,
         VerticesDrawSink? vertices,
         RenderBackend resolvedBackend,
+        TileCache? tileCache,
         Handle? dashedLinetype
       })> boot(WidgetTester tester) async {
     final doc = harnessDocument(kEntities);
@@ -121,15 +122,17 @@ void main() {
     late CanvasDrawSink sink;
     VerticesDrawSink? vertices;
     late RenderBackend resolvedBackend;
+    TileCache? tileCache;
     await tester.pumpWidget(HarnessApp(
       document: doc,
-      onReady: (c, i, p, s, v, b) {
+      onReady: (c, i, p, s, v, b, t) {
         camera = c;
         index = i;
         painter = p;
         sink = s;
         vertices = v;
         resolvedBackend = b;
+        tileCache = t;
       },
     ));
     // Zoom to the working set. Fitting the whole drawing measures a frame
@@ -184,6 +187,7 @@ void main() {
       sink: sink,
       vertices: vertices,
       resolvedBackend: resolvedBackend,
+      tileCache: tileCache,
       dashedLinetype: dashedLinetypes.singleOrNull?.handle
     );
   }
@@ -206,6 +210,7 @@ void main() {
       sink: app.sink,
       vertices: app.vertices,
       resolvedBackend: app.resolvedBackend,
+      tileCache: app.tileCache,
       pumpFrame: () => tester.pump(const Duration(milliseconds: 16)),
       settle: tester.pumpAndSettle,
     );
@@ -273,7 +278,7 @@ void main() {
         'rebuilds=${app.index.rebuildCount - rebuildsBefore} '
         'handles burned=${app.doc.handleSeed.current.value - handlesBefore}');
     requireRepaint(app.sink, app.vertices);
-    printInvariants(app.painter, app.sink);
+    printInvariants(app.painter, app.sink, tileCache: app.tileCache);
     printBackend(app.resolvedBackend, app.vertices);
     printTextCounters(app.painter, app.sink,
         textCorpus: kTextCorpus,
@@ -330,7 +335,7 @@ void main() {
     print('  command ${clock.summary}');
     print('  rebuilds=${app.index.rebuildCount - before} over $kSteps frames');
     requireRepaint(app.sink, app.vertices);
-    printInvariants(app.painter, app.sink);
+    printInvariants(app.painter, app.sink, tileCache: app.tileCache);
     printBackend(app.resolvedBackend, app.vertices);
     printTextCounters(app.painter, app.sink,
         textCorpus: kTextCorpus,
