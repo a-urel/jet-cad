@@ -1,18 +1,25 @@
 # jet-cad — project status
 
-**Last updated:** 2026-08-23
-**Verified against:** `main` at `b1e9ec1` — Plan 3f.1's last task commit (Task
-7 produced no commit; the tree at `b1e9ec1` is what its full revert restored
-and both a task reviewer and a re-reviewer confirmed byte-identical), the
-exact tree the suites below were run against — **pushed on 2026-08-23**, the
-branch landing at `c6437e9` with the ledger archive on top of it, working
-tree clean apart from the three files the traps below say never to commit.
-Every suite count below was produced by running the suite on the **merged**
-result, not by reading a report and not on the branch before it landed.
+**Last updated:** 2026-08-24
+**Verified against:** `main` at `1b7ea04` — the gap G7 containment gate, one
+commit past Plan 3g's ledger archive at `2367a20`. **Plan 3g was pushed on
+2026-08-24**, 45 commits, `6c6dc42..2367a20`; the tree is clean apart from the
+three files the traps below say never to commit. Every suite count below was
+produced by running that suite on this tree on 2026-08-24, not by reading a
+report — with the one exception the table marks as not re-run.
 
 ---
 
 ## TL;DR — where you left off
+
+**Plan 3g (the rasterised tile cache) is done and pushed, sixteen tasks, worked
+directly on `main` at `477d4c5..2367a20`, nothing in flight.** **Its exit gate
+is 11 of 13.** Criterion 10 passes at **1.58 ms against 4.00** — 26× the same
+runs' untiled 41.09 ms. **Criterion 11 misses by 2.1× and the threshold was not
+moved**; its cause is isolated to the live fallback drawing the uncovered strip,
+and it is Plan 3h's design question. **Gap G7 closed on 2026-08-24**, one commit
+past the ledger archive. See [Plan 3g](#plan-3g--the-definitiontile-picture-cache)
+and [Resume here](#resume-here).
 
 **Plan 3f.1 (hardening before the picture cache) is done, eight tasks, worked
 directly on `main` at `c078677..b1e9ec1`, nothing in flight.** **Its exit gate
@@ -79,13 +86,13 @@ turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open
 
 Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
 
-| Suite | State (on `main` at `b1e9ec1`, run, not read off a report) |
+| Suite | State (on `main` at `1b7ea04`, run, not read off a report) |
 |---|---|
-| `packages/jet_cad_2d` — engine | **793 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **304 tests pass, 1 skipped**, analyze/format clean |
+| `packages/jet_cad_2d` — engine | **797 tests, all pass**, analyze/format clean |
+| `packages/jet_cad_2d_flutter` — widgets | **365 tests pass, 1 skipped**, analyze/format clean |
 | `flutter test --tags golden` | **35 pass**, 40 PNGs (20 fixtures × 2 backends, 3 fills and 3 text-LOD rungs); no pre-existing PNG regenerated |
 | `apps/dev_harness_2d` | analyze/format clean |
-| `benchmark/query_throughput.dart` | **GATE: PASS** — every gated row under its threshold on 2026-08-23, `snap at dirty threshold` included (p50 0.552 ms against 1.0 ms). That row is Plan 2's carried failure and it is a **timing on a shared machine**: recorded as passing today, not declared fixed |
+| `benchmark/query_throughput.dart` | **NOT RE-RUN on 2026-08-24.** Last read 2026-08-23: **GATE: PASS**, every gated row under its threshold, `snap at dirty threshold` included (p50 0.552 ms against 1.0 ms). That row is Plan 2's carried failure and it is a **timing on a shared machine**: recorded as passing that day, not declared fixed |
 
 The widget suite's one skip is `test/rig/paint_microbench_test.dart`, skipped at
 suite level by the `rig` tag in `dart_test.yaml` — pre-existing and by design.
@@ -365,11 +372,39 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
+**Plan 3g (the rasterised tile cache) is done and pushed, worked directly on
+`main` at `477d4c5..2367a20`, nothing in flight. Its exit gate is 11 of 13,
+and gap G7 closed on 2026-08-24 at `1b7ea04`, after the plan.** Its ledger is
+archived at
+[docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/](docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/)
+and `.superpowers/sdd/` is empty — **no ledger chore is outstanding for any
+plan.**
+
+**What 3h starts from**, in the order the results note argues it:
+
+1. **Criterion 11's miss, cause isolated, remedy spent.** 35.67 ms against
+   16.67, reproduced three times, and the bake is under a fifth of it. The
+   excess is the **live fallback drawing the still-uncovered strip**. The
+   budget is already floored at one tile, so lowering it leaves the strip
+   uncovered for more frames, each paying the fallback again. **A pan frame
+   that exposes more than one tile has no covered path today.**
+2. **G3, the zoom, with a number on it.** 32.06 ms at 500,000 entities with
+   tiles on. **No caching scheme touches it** — the triangles are genuinely
+   being drawn — so the answer is level-of-detail geometry, and the tile cache
+   can already hold it: a generation is keyed by scale, so a coarser bake can
+   never outlive the scale it was simplified for.
+3. **One measurement that was never taken and is owed before 3h sets a memory
+   budget:** `debugCapacityVertices` with tiles on against tiles off at
+   500,000 entities. Baking per tile flushes and rewinds the buffer between
+   tiles, so the **96.00 MiB high-water mark** this file records should fall to
+   a single tile's geometry. If it does, the tile budget **replaces** that
+   memory rather than adding to it, and 3h starts from the new number instead
+   of from 96 + 96. It needs a device.
+
 **Plan 3f.1 (hardening before the picture cache) is done, worked directly on
-`main` at `c078677..b1e9ec1`, nothing in flight. Its exit gate is 16 of 17,
-the one miss being its own pre-committed stop clause firing on the
-allocation-meter probe.** Everything below about 3f is still true and still
-worth reading; this is what changed on top of it.
+`main` at `c078677..b1e9ec1`. Its exit gate is 16 of 17, the one miss being its
+own pre-committed stop clause firing on the allocation-meter probe.**
+Everything below about 3f is still true and still worth reading.
 
 **Nothing here is waiting on a human.** `StyleContext` is now correctly keyed
 (trap 4, closed), `linetypeScale` reaches the drawing, and 3g knows before it
@@ -382,10 +417,11 @@ every number, including the plan's own recurring failure mode (a stated cause
 stronger than its evidence, three times, each caught by running something
 rather than reading it) and the three plan premises corrected mid-flight.
 
-**A resumer's ledger chore:** 3f.1 had no worktree, so its
-`.superpowers/sdd/2026-08-23-jet-cad-2d-plan-3f1-hardening/` material is
-**not yet archived** to `docs/superpowers/ledgers/`. Do that before clearing
-it — the ordering is the lesson 3e's and 3f's archives both record.
+~~**A resumer's ledger chore:** 3f.1's `.superpowers/sdd/` material is not yet
+archived.~~ **Done.** Archived at
+[docs/superpowers/ledgers/2026-08-23-jet-cad-2d-plan-3f1-hardening/](docs/superpowers/ledgers/2026-08-23-jet-cad-2d-plan-3f1-hardening/),
+and 3g's beside it. The ordering is still the lesson 3e's and 3f's archives
+both record: **archive onto the branch before the workspace is deleted.**
 
 **Plan 3f (text wiring and level of detail) is done, worked directly on
 `main`, nothing in flight. Its exit gate is 11 of 13.** Everything below about
@@ -966,9 +1002,10 @@ onto instance resolution rather than fixed, an accepted gap from the spec.
 
 ### Plan 3g — the definition/tile picture cache
 
-> **Plan 3g is executed. Exit gate: 11 of 13.** Thirteen planned tasks became
-> sixteen — 6a, 9a and 11a were inserted mid-flight — across
-> `477d4c5..3071096` on `main`, worked directly, nothing in flight.
+> **Plan 3g is executed and pushed. Exit gate: 11 of 13, and gap G7 closed
+> after it.** Thirteen planned tasks became sixteen — 6a, 9a and 11a were
+> inserted mid-flight — across `477d4c5..2367a20` on `main`, worked directly,
+> nothing in flight. Pushed 2026-08-24, `6c6dc42..2367a20`, 45 commits.
 >
 > Results:
 > [docs/superpowers/notes/2026-08-24-plan-3g-results.md](docs/superpowers/notes/2026-08-24-plan-3g-results.md).
@@ -996,17 +1033,33 @@ onto instance resolution rather than fixed, an accepted gap from the spec.
 > is spent: it said the answer was a smaller bake budget, and the budget is
 > already one tile. **Plan 3h inherits a design question, not a tuning one.**
 >
-> **And one gap is worse than a miss.** **Nothing in Plan 3g gates per-tile
-> clipping** (gap G7). M7 — clip each tile to the viewport instead of its own
-> rect — was fired on device and collapsed nothing: criterion 10 is
-> *structurally blind* to it (`bakeFrames=0/60`), and criterion 11 was already
-> red, so there is no green-to-red transition anywhere. M7 was demonstrably
-> live: triangles 734,442 -> 1,183,035. The spec named M7 "the mutation that
-> passes every correctness gate and destroys the plan's entire reason for
-> existing" and said "a suite that cannot kill it is not gating this plan".
-> **That sentence stands.** What is owed is a bake-time assertion that a tile's
-> geometry is bounded by its own rect — the command-time-assertion shape trap 5
-> already recommends here, not another frame-path timing.
+> **And the gap that read worst turned out to be a gap in what had been run.**
+> Plan 3g closed recording **G7 — nothing gates per-tile clipping**. M7 (clip
+> each tile to the viewport instead of its own rect) was fired **on device** and
+> collapsed nothing: criterion 10 is *structurally blind* to it
+> (`bakeFrames=0/60`) and criterion 11 was already red, so neither timing could
+> show a green-to-red transition. Both of those readings stand. What did not
+> stand is the conclusion drawn from them — that **no** transition existed
+> anywhere. The widget suite was never executed under M7; the line covering it
+> read "criteria 1–9, 12 and 13 pass under M7 **by construction**", and "by
+> construction" was the tell.
+>
+> **Run on 2026-08-24, M7 reddens five widget tests.** Four already existed:
+> the **criterion 5** rows in `tile_invalidation_test.dart`, which assert that
+> an edit invalidates its own tiles **and no others** — under M7 every tile
+> records every visited handle, so every edit invalidates every tile. The
+> containment claim was reachable from the invalidation side and was already
+> gated there.
+>
+> **G7 is closed.** The bake-time assertion the spec asked for was landed anyway
+> at `1b7ea04` —
+> [`test/invariants/tile_containment_test.dart`](packages/jet_cad_2d_flutter/test/invariants/tile_containment_test.dart)
+> — because the four state that *invalidation is precise* while it states that
+> *a bake is bounded*, and Plan 3h may loosen the first in good faith. Nine
+> short segments 90 world units apart; a bake queries its own tile grown by
+> `kTileSlack`, 68.57 world units across at that rig, while two segments span
+> 96. Clean reads one segment per tile, M7 reads nine on tile (0,0). No new
+> production API and no fourth knob.
 >
 > **Read the results note's last section before starting 3h.** The dominant
 > finding of this execution was not any single defect: **twelve times a gate
@@ -1019,11 +1072,17 @@ onto instance resolution rather than fixed, an accepted gap from the spec.
 > corroborated the 512 decision; the pan p95 and the live-walk fallback counts
 > decided it.
 >
+> **And a thirteenth, which is the inverse and was found after the plan
+> closed:** a gate that *could* see what it claimed to measure, recorded as
+> blind because a different instrument was the only one fired. Its question
+> joins the seven — *did I run this, or did I reason that it passes?* See the
+> G7 correction above.
+>
 > Traps 1, 2, 3 and 4 are closed, and so are F1 (a whole stroke column vanished
-> at 6 of 41 zoom factors) and G6. Gaps G1, G2, G3, G4, G5 and G7 are open and
-> each names what it owes.
+> at 6 of 41 zoom factors), G6 and — since 2026-08-24 — **G7**. Gaps G1, G2,
+> G3, G4 and G5 are open and each names what it owes.
 
-**What 3f hands it, and one question it must answer first.****What 3f hands it, and one question it must answer first.**
+**What 3f hands it, and one question it must answer first.**
 
 - **A working text LOD** — `kMinTextCapPixels = 3.0`, `0.0` disables it, wired
   from `DraftPainter` through `DraftCanvas` to the harness's `LOD` define,

@@ -43,7 +43,7 @@ with the report they came from named alongside.
 | M4 | `TileGrid.matchesScale` returns `true` always | 9 | red, 6 tests |
 | M5 | `_isDefinitionOwned` always false | 7 | red, 2 tests |
 | M6 | the eviction call deleted | 10 | red, 4 tests |
-| M7 | clip each tile to the viewport instead of its own rect | 12 | **FIRED on device, killed nothing** — no green-to-red transition exists. See below |
+| M7 | clip each tile to the viewport instead of its own rect | 12 | **KILLED.** Blind on device; reddens 5 widget tests. Corrected 2026-08-24, see below |
 | M8 | the table `Listenable` dropped from `_repaint` | 8 | red, 2 tests |
 | M8b | the merge kept, the generation drop deleted | 8 | red, 1 assertion |
 | M8c | the adapter disposes without unsubscribing | 8 | red |
@@ -444,7 +444,7 @@ that makes the same journey and compares pixels.
 
 # M7 — clip each tile to the viewport instead of to its own rect
 
-## FIRED on device, Task 12. Killed nothing. There is no green-to-red transition anywhere in this suite.
+## FIRED on device, Task 12, where it killed nothing. **Fired against the widget suite on 2026-08-24, where it kills five tests.** Read the correction at the end.
 
 This is the worst outcome available. M3 could not be fired; M7 *was* fired,
 twice, and the suite did not notice.
@@ -511,6 +511,19 @@ that fails on clean source cannot distinguish the mutant from the original.
 Criteria 1–9, 12 and 13 pass under M7 **by construction**: the blit shows only a
 tile's own rect and `toImageSync` crops the rest, so the pixels are identical
 and only the work differs.
+
+> **Correction, 2026-08-24.** "By construction" is the tell: that line was
+> reasoned, not run. The widget suite was never executed under M7. It was on
+> 2026-08-24 and **M7 reddens five tests** — the new
+> `test/invariants/tile_containment_test.dart` and four **criterion 5** rows in
+> `tile_invalidation_test.dart`. Criterion 5 asserts that an edit invalidates
+> its own tiles **and no others**; under M7 every tile records every visited
+> handle, so every edit invalidates every tile. Clean: 365 pass, 1 skip;
+> restored from a copy, not by `git checkout`. The two device timings are still
+> blind and everything above about them stands — the conclusion drawn from them
+> about the suite as a whole does not. Gap **G7 is closed**; the results note's
+> G7 section carries the full correction and says why the direct containment
+> gate was landed anyway (`1b7ea04`).
 
 **M7 run A, verbatim** (its shell was backgrounded mid-build; see below):
 

@@ -514,7 +514,7 @@ twelve tiles at 256, so those rows are a *trend*, not a production figure — an
 the production tile is now 512, where the ring is an eighth of a tile's width
 rather than a quarter.
 
-### G7 — nothing in Plan 3g gates per-tile clipping. **OPEN, and it is the largest gap here.**
+### G7 — per-tile clipping. **CLOSED 2026-08-24. The claim below was measured on the wrong suite; read the correction at the end of this section.**
 
 **Added 2026-08-24, from Task 12.** M7 — clip each tile to the viewport instead
 of to its own rect — was fired on device, twice, and **killed nothing.**
@@ -555,6 +555,64 @@ repository — **not another frame-path timing.** Two device timings were the
 plan's answer for M7 and both turned out unable to deliver: one blind by
 construction, the other red on clean source. A third timing would be a fourth
 attempt at the same wrong instrument.
+
+---
+
+#### Correction, 2026-08-24, after the plan closed
+
+**"There is no green-to-red transition anywhere in this suite" is false, and the
+sentence above it — "Criteria 1–9, 12 and 13 pass under M7 by construction" —
+is where it came from.** That line was *reasoned*, not run. M7 was fired on
+device and nowhere else; the widget suite was never executed under it.
+
+It was, on 2026-08-24. **M7 reddens five tests.** Four of them already existed:
+
+```
+Failing tests:
+  test/invariants/tile_containment_test.dart: no tile bakes geometry from beyond its own rect
+  test/tile_invalidation_test.dart: criterion 5: a dragged group leaves no ghost either
+  test/tile_invalidation_test.dart: criterion 5: a dragged instance drops the tiles it left
+  test/tile_invalidation_test.dart: criterion 5: a leaf edit invalidates its own tiles and no others
+  test/tile_invalidation_test.dart: criterion 5: the undo of an instance transform invalidates both ends
+```
+
+Clean: 365 pass, 1 skip. Restored from a copy, not by `git checkout`.
+
+**The mechanism, and why criterion 5 sees what criteria 1–13 could not.**
+Criterion 5 does not assert that an edit invalidates its own tiles; it asserts
+that it invalidates its own tiles **and no others**. Under M7 every tile's bake
+walks the whole viewport, so every tile records every visited handle, so every
+edit invalidates every tile. The containment claim is reachable from the
+invalidation side, and it was already gated there — by a criterion nobody was
+looking at while two timings were failing to deliver.
+
+**So G7 was never the largest gap here.** It was a gap in what had been *run*.
+The two device timings are still unable to kill M7 and everything this section
+says about them stands; what does not stand is the conclusion drawn from them
+about the suite as a whole.
+
+**What is owed was still built**, at `1b7ea04`:
+`test/invariants/tile_containment_test.dart` states the containment claim
+directly rather than as a consequence of invalidation precision. Nine short
+segments 90 world units apart, each 6 long; a bake queries its own tile grown by
+`kTileSlack` on every side, which at the rig's 64-device-pixel tile is 96
+logical pixels and so 68.57 world units, while two neighbouring segments span 96
+world units. No bake can see two. Clean reads one segment per tile; M7 reads
+nine on tile (0,0). It adds no production API and no fourth knob — it inverts
+the existing `TileCache.tilesHolding`.
+
+**Why it is worth landing beside the four.** The four state that invalidation is
+precise; this one states that a bake is bounded. If a later plan loosens
+invalidation precision as a deliberate design change — and Plan 3h may, since
+the pan-frame question is about covering more ground per bake — the four can be
+rewritten in good faith and the containment claim would vanish with them,
+unnamed and unnoticed.
+
+**The disguise, for the taxonomy below.** Every entry in that list is a gate
+that could not see what it claimed to measure. This is its inverse: **a gate
+that could see, recorded as blind because a different instrument was the only
+one fired.** The question it adds to the seven: *did I run this, or did I reason
+that it passes?*
 
 ---
 
