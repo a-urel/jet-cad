@@ -33,35 +33,141 @@ git diff --stat 37918c5 -- packages/jet_cad_2d_flutter/test/golden   (empty)
 | 7 | a table mutation drops the generation | **PASS** |
 | 8 | a scale change drops the generation; a pan drops nothing | **PASS** |
 | 9 | all five `DocChange` arms, none omitted | **PASS** |
-| 10 | 500,000-entity settled frame from `totalSpan` ≤ 4.00 ms | **PENDING** |
-| 11 | a pan frame baking a newly exposed strip ≤ 16.67 ms | **PENDING** |
+| 10 | 500,000-entity settled frame from `totalSpan` ≤ 4.00 ms | **PASS** — 1.58 ms |
+| 11 | a pan frame baking a newly exposed strip ≤ 16.67 ms | **MISS** — 35.67 ms, 2.1× over |
 | 12 | peak live cache bytes under `kTileCacheBytes = 96 MiB` | **PASS** |
 | 13 | frame-path allocation: nothing per entity, viewport-bounded per frame | **PASS** |
 
-### Criteria 10 and 11 are PENDING, and that is an honest state
+**Eleven of thirteen.** Criterion 11 is the miss, it is named rather than tuned
+away, and its cause is isolated below. And one criterion passing is not the same
+as one criterion gating: **criterion 10 passes and is structurally blind to M7**
+— see G7, which is the largest gap in this plan.
 
-**They are not estimated here, and no number for them may be written until Task
-12 runs.** They are device timings. At the time of writing the machine reads:
+### Criterion 10 — PASS at 1.58 ms, a 26× reduction
+
+**The machine was verified first.** `lowpowermode 0` on AC power, checked
+immediately before the control and before each of the five measurement runs —
+six checks, all reading identically, each printed as the first lines of its own
+command. The charger never came out.
+
+**The control reproduced Plan 3d's clean `50,000 / vertices` row**, with
+`tiles=off` on the control arm so it is provably untiled:
 
 ```
-$ pmset -g | grep -i lowpowermode
- lowpowermode         1
-$ pmset -g ps | head -2
-Now drawing from 'Battery Power'
- -InternalBattery-0 (id=22282339)	100%; discharging; 5:49 remaining present: true
+flutter: R2 (50000) frames=242
+flutter:   build  p50=7.26ms p95=8.57ms max=313.67ms mean=8.61ms
+flutter:   raster p50=8.56ms p95=18.83ms max=114.72ms mean=9.35ms
+flutter:   total  p50=15.13ms p95=31.45ms max=436.54ms mean=20.34ms
+flutter:   tiles=off
+flutter:   backend=vertices triangles=217758 drawVerticesCalls=20
 ```
 
-Low Power Mode is on and the machine is on battery. Plan 3c's contamination on
-this corpus was +30% on build and +47% on raster; a timing taken in this state is
-not a measurement, and a plausible-looking figure derived from Task 11's sweep
-would be a fabrication. **A PENDING row is an honest state. An estimate would
-not be.**
+build p50 **7.26** inside `[7.06, 7.38]`; raster p50 **8.56** inside
+`[8.22, 8.63]`. Everything below stands on that.
 
-**Consequence for the mutation log: M7 is unfired.** M7 — clip each tile to the
-viewport instead of to its own rect — is the mutation that passes every
-correctness criterion and destroys the frame. Criteria 10 and 11 are the only
-gates that can see it. Until they run, this plan has **no evidence** that a
-per-tile clip is doing the work its design claims.
+Shipped constants confirmed by the rig's own line in every transcript:
+`tiles=on tilePx=512 bakeBudgetPx=262144 bakeBudgetTiles=1`.
+
+Criterion 10 is the `tile hold` phase — 60 frames at a fixed camera against a
+warm generation, `bakeFrames=0/60`, so the frame is blits and nothing else.
+
+| `totalSpan` | run 1 | run 2 | run 3 | **median** |
+|---|---|---|---|---|
+| p50 | 1.64 | 1.58 | 0.91 | **1.58 ms** |
+| p95 | 2.40 | 1.85 | 1.96 | **1.96 ms** |
+| max | 30.77 | 1.93 | 33.44 | 30.77 ms |
+
+**PASS: 1.58 ms median against a ≤ 4.00 ms threshold**, and **26×** below the
+same runs' untiled 500,000-entity `totalSpan` of 41.09 ms.
+
+**The `max` column is a bucket-boundary artefact, recorded rather than dropped.**
+The two runs showing it (30.77, 33.44) are exactly the two whose hold phase
+reports `frames=59` for 60 pumped frames: a `FrameTiming` is delivered after its
+frame rasterised, so the phase's own last frame landed in the next bucket and a
+frame from before the swap landed in this one. It cannot be a hold frame — the
+phase reports `bakeFrames=0/60`, `liveDraws=0` and 720 blits for 60 frames, and
+no frame that only blits twelve tiles costs 30 ms when the same phase's p95 is
+1.96. **Its most likely origin is the settle that precedes the phase**, which
+matters below.
+
+### Criterion 11 — MISS by 2.1×. The threshold was not moved.
+
+Criterion 11 is the `tile pan` phase. Only **14 of 120** frames bake, so the
+phase's p50 is a pure-blit frame and the criterion — *"a pan frame that is
+baking a newly exposed strip"* — is read from p95 (rank 114 of 120 sits inside
+the top 14), with `max` beside it.
+
+| `totalSpan` | run 1 | run 2 | run 3 | **median** |
+|---|---|---|---|---|
+| p95 (a baking frame) | 37.38 | 35.67 | 35.00 | **35.67 ms** |
+| max | 65.77 | 66.86 | 65.22 | **65.77 ms** |
+| mean | 4.96 | 5.08 | 5.20 | 5.08 ms |
+| p50 (a pure-blit frame) | 0.83 | 1.29 | 1.48 | 1.29 ms |
+
+**MISS: 35.67 ms median against a 16.67 ms threshold — 2.1× over at p95, 3.9×
+at `max`.** Reproduced in all three runs, spread 35.00–37.38, so it is not
+noise. **The threshold does not move and this note does not soften the miss.**
+This repository records misses rather than tuning them away: Plan 3f shipped 11
+of 13 and Plan 3f.1 shipped 16 of 17, both with the misses named.
+
+#### And the cause is not the bake
+
+This is the part that changes what the miss means. By the rig's own differencing
+identity `mean = blit + bakesPerFrame × bakeFrameCost`, run 2 gives
+`(5.08 − 1.29) × 120 / 14 = 32.5 ms` of excess per baking frame. The tile probe
+puts a bake's **walk at 5.7–6.4 ms per tile** — under a fifth of it.
+
+**The rest is the live fallback.** The same 120 frames report `liveDraws=10`: a
+frame whose newly exposed strip is not yet baked draws the uncovered remainder
+**live**, and the probe measures a full live viewport walk at **31.5–41.6 ms**.
+**Criterion 11 is missed by the live fallback, not by the bake.**
+
+#### The spec's own prescribed remedy is spent
+
+The spec says that if 16.67 ms proves unreachable the answer is a smaller bake
+budget, **not** a larger threshold. **The budget is already floored at one tile
+per frame** — `bakeBudgetTiles=1`, printed in every transcript — so that lever
+is spent. And it points the wrong way regardless: baking *fewer* tiles per frame
+leaves the exposed strip uncovered for *more* frames, each of which then pays the
+live fallback. `kTileClipInflate` does not help either; the overdraw column
+already reads 4.185 against an area factor of 1.563, and Task 11 established that
+crossing multiplicity, not the pad, is the larger term.
+
+**So this is a design question for Plan 3h, not a tuning one.** A pan frame that
+exposes more than one tile falls back to a live walk for the remainder, and no
+value of any existing constant removes that. It is handed over as such below.
+
+### The one-tile budget's settle, which nobody had measured
+
+`kBakeBudgetDevicePixels` was floored at one 512 px tile *after* Task 11's sweep,
+which ran at eight. **The settle takes 11 frames** — `tile warm: frames=11` in
+all five 500,000-entity runs, clean and mutated, five for five with no variance.
+The rig warms until a frame bakes nothing, and it takes 11 to refill the 12-tile
+visible set after the zoom phase drops the generation.
+
+**Whether those frames miss the budget is an inference, and it stays labelled as
+one.** The rig does not report per-frame timings for the warm loop — its frames
+land in a bucket already reported — so this is not promoted to a measurement.
+Its three supports:
+
+1. A settle frame does strictly more work than a pan frame that bakes: after a
+   zoom the generation is empty, so each of the 11 frames bakes its one permitted
+   tile **and** draws the uncovered remainder live, and a full live viewport walk
+   measures **31.5–41.6 ms**.
+2. A pan frame baking one tile with a *mostly covered* viewport already costs
+   **35.67 ms**. A settle frame's viewport is not mostly covered.
+3. The direct sighting: two of three clean runs put a **30.77 ms** and a
+   **33.44 ms** frame in the hold bucket — a phase with `bakeFrames=0/60`,
+   `liveDraws=0` and p95 1.96 ms. That frame is not a hold frame, and the settle
+   is what immediately precedes it. 30–33 ms is exactly what a settle frame
+   predicts.
+
+On that evidence, the one-tile budget converts what an eight-tile budget would
+have made a short expensive burst into **roughly 11 consecutive frames of 30–40 ms
+— about 350–450 ms of visible catch-up after every zoom**, each missing the
+budget by 2× or more. **The budget change removed the single-frame hiccup
+criterion 11 was written against and spread the same work across a settle no
+criterion in the exit gate measures.** Reporting only; no fix attempted.
 
 ### What backs each PASS
 
@@ -90,6 +196,11 @@ per-tile clip is doing the work its design claims.
   `drawImageRect` call, plus a per-frame destination count pinned against the
   blit count with the composite's own blit included. Killed by M13, M-E, M-H,
   M-Q. **Not** killed by the identity getter, which is a tautology.
+- **10** — three device runs behind a reproduced control, `tile hold` phase,
+  `bakeFrames=0/60`. **Killed by no mutant.** M7 is the mutant it was chartered
+  against and the phase bakes nothing, so the clip M7 breaks never executes in
+  the frame this criterion measures. A PASS with no killing mutant is a reading,
+  not a gate — G7.
 
 ---
 
@@ -234,8 +345,11 @@ silently incomparable with Task 11's sweep. Closed by naming
 `kBakeBudgetDevicePixels` in `main.dart` and by having the rig **print the budget
 it ran with**, in device pixels *and* in tiles, beside its counters.
 
-**Carried to Task 12: the 1-tile default's pan-settle behaviour has not been
-re-verified against Task 11's sweep, which ran at 8.**
+**Answered by Task 12, and the answer is a finding of its own.** The 1-tile
+default's pan-settle behaviour had not been re-verified against Task 11's sweep,
+which ran at 8. It has been now: the settle is **11 frames**, five for five
+across every 500,000-entity run, and on the evidence most of them miss the frame
+budget. See "The one-tile budget's settle" above.
 
 ### Memory, at the reference viewport
 
@@ -394,6 +508,48 @@ twelve tiles at 256, so those rows are a *trend*, not a production figure — an
 the production tile is now 512, where the ring is an eighth of a tile's width
 rather than a quarter.
 
+### G7 — nothing in Plan 3g gates per-tile clipping. **OPEN, and it is the largest gap here.**
+
+**Added 2026-08-24, from Task 12.** M7 — clip each tile to the viewport instead
+of to its own rect — was fired on device, twice, and **killed nothing.**
+
+The spec named M7 **"the mutation that passes every correctness gate and
+destroys the plan's entire reason for existing"** and said **"a suite that
+cannot kill it is not gating this plan"**. That sentence stands, and this suite
+does not kill it.
+
+**The mutant was demonstrably live**, on fields that count actual drawing and
+independently of any timing: `triangles` **734442 → 1183035** (+61%),
+`canvasCalls` **97 → 150**, and R2 `build p50` **23.10 → 38.47**, all reproduced
+in two runs.
+
+| reading | clean (median of 3) | M7 run A | M7 run B | verdict |
+|---|---|---|---|---|
+| criterion 10, hold p50 | 1.58 | 1.47 | 1.24 | **unchanged** |
+| criterion 10, hold p95 | 1.96 | 1.75 | 2.32 | **unchanged** |
+| criterion 11, pan p95 | 35.67 | 49.90 | 63.62 | 1.4×–1.8× worse |
+| criterion 11, pan max | 65.77 | 89.13 | 90.03 | 1.35× worse |
+
+**Criterion 10 is structurally blind to M7, and no threshold change could fix
+it.** The settled frame bakes nothing — `bakeFrames=0/60` in every run, clean and
+mutated alike — so **the clip M7 breaks is never executed in the frame criterion
+10 measures.** The mutated hold column sits inside the clean run-to-run spread.
+
+**Criterion 11 degraded but did not turn red, because it was already red.** A
+criterion that fails on clean source cannot distinguish the mutant from the
+original. **There is no green-to-red transition anywhere in this suite.**
+
+Criteria 1–9, 12 and 13 pass under M7 **by construction**: the blit shows only a
+tile's own rect and `toImageSync` crops the rest, so the pixels are identical and
+only the work differs.
+
+**What is owed: a bake-time assertion that a tile's geometry is bounded by its
+own rect** — the command-time-assertion shape trap 5 already recommends for this
+repository — **not another frame-path timing.** Two device timings were the
+plan's answer for M7 and both turned out unable to deliver: one blind by
+construction, the other red on clean source. A third timing would be a fourth
+attempt at the same wrong instrument.
+
 ---
 
 ## Two things owed to `draft_painter.dart`'s owner, not to this plan
@@ -421,6 +577,22 @@ them.
 
 ## What Plan 3h inherits
 
+- **Criterion 11's miss, with its cause isolated.** 35.67 ms against a 16.67 ms
+  budget, 2.1× over, reproduced three times — **and the bake is under a fifth of
+  it.** The excess is the live fallback drawing the still-uncovered strip
+  (`liveDraws=10`, a full live walk at 31.5–41.6 ms). **The spec's prescribed
+  remedy is spent**: the budget is already floored at one tile, and lowering it
+  further leaves the strip uncovered for more frames, each paying the fallback
+  again. A pan frame that exposes more than one tile has no covered path today.
+  **That is a design question, not a tuning one, and it is 3h's.**
+- **And its companion, the settle.** The one-tile budget removed the single-frame
+  hiccup and spread the work across roughly 11 frames of 30–40 ms — about
+  350–450 ms of catch-up after every zoom — which no criterion in this exit gate
+  measures. Labelled an inference with three supports, not a measurement,
+  because the rig cannot time warm frames.
+- **G7: nothing here gates per-tile clipping**, and the fix is a bake-time
+  assertion rather than a timing. If 3h changes what a tile contains, it changes
+  the thing that has no gate.
 - **A measured zoom problem with a number on it.** 32.06 ms at 500,000 entities
   with tiles on, against a 16.67 ms budget, and the knowledge that **no caching
   scheme touches it** because the triangles are genuinely being drawn. That is
@@ -437,8 +609,8 @@ them.
   geometry. **If it does, the tile budget replaces that memory rather than adding
   to it**, and 3h's budget starts from the new number rather than from 96 + 96.
   This is `debugCapacityVertices` with tiles on against tiles off at 500,000
-  entities, and it has not been read — it is a device measurement and shares
-  Task 12's blocker.
+  entities. **It was not read.** Task 12 measured criteria 10 and 11 and fired
+  M7; this reading was not in its brief and remains owed. It needs a device.
 - **G1's device seam check**, which 3h needs anyway if it changes what a tile
   contains — and with it **the standing lesson that this repository's software
   rasteriser cannot produce an antialiasing artefact, so no green result from it
@@ -456,14 +628,16 @@ them.
 
 The dominant finding of this execution was not any single defect.
 
-**Eleven times, a gate turned out unable to see the thing it claimed to measure
+**Twelve times, a gate turned out unable to see the thing it claimed to measure
 — each time in a different disguise.** Every one was found by a person looking at
-a green run and refusing to accept it. None was found by reading the code.
+a green run and refusing to accept it. None was found by reading the code. The
+twelfth was found on the last task of the plan, which is the honest note to end
+on: the list was never going to close itself.
 
 That is the part worth keeping, so here is the taxonomy, and then the questions
 that produce it.
 
-## The eleven disguises
+## The twelve disguises
 
 **1. A getter reading its own field.** *(M13, Task 4.)* Criterion 13 asserted
 `identical(cache.debugBlitPaint, first)`. `debugBlitPaint` returns the cache's own
@@ -566,9 +740,27 @@ device run to `TEXT=1` reading as false. That guard works at the string level.
 **Same failure, numeric disguise, two years later. The guard's type was right;
 its scope was not.**
 
+**12. An instrument that reimplements what it measures.** *(Task 12.)* The rig's
+`tile probe` reports **`overdraw=4.185` bit-for-bit identically in the clean and
+the M7-mutated runs** — a mutation that moved the real triangle count by 61%.
+`_probeBake` in `measurement_rig.dart` reimplements the bake geometry rather than
+calling `TileCache._bake`, so **the overdraw column measures what the cache
+should do, never what it does.** Anyone reading that column as evidence about the
+shipped clip is reading a copy of the specification. This is not a defect in
+`_probeBake` — a probe that called the real `_bake` could not sum per-tile leaf
+counts the way this one does — but it is a boundary nobody had written down, and
+the column that chose `kTileDevicePixels` is the same column.
+
+It is distinct from disguise 1 (a getter reading its own field) in the way that
+matters for finding it: a tautological getter is visible in one line of source,
+while a reimplementation is a **second correct-looking implementation** that
+agrees with the first for every input anyone tries. It is closest to disguise 3,
+but where an instrument that cannot produce the artefact fails loudly the moment
+you ask it to, this one answers confidently and wrongly.
+
 ## The questions, which are the part that transfers
 
-A list of eleven defects is a curiosity. The method that produces them is the
+A list of twelve defects is a curiosity. The method that produces them is the
 asset, and Task 10's implementer demonstrated it: **given these questions in its
 dispatch, it found three at once, in one task, each confirmed by firing a mutant
 rather than by argument.** That is the difference.
@@ -621,10 +813,25 @@ And two more that this execution earned the hard way:
 > values that divide, truncate or clamp the feature into doing nothing — and make
 > the failure loud or make the value work. (Disguise 11.)
 
+> **7. Does this instrument observe the shipped path, or a copy of it?**
+>
+> Follow the measurement back to the production function it claims to be about.
+> If the probe has its own implementation of the thing under test, it will agree
+> with the specification forever and with the code never. Mutate the production
+> path and check the instrument *moves*. (Disguise 12.)
+
 **A closing note on cost, because it is the honest counterweight.** Chasing these
 was not free: Task 5 spent 340k tokens and 139 tool uses on M17 alone, Task 6a
 was an entire unplanned task that changed no production line, and Tasks 7, 9 and
-10 each took fix rounds. What was bought is that **criteria 1 through 9, 12 and
-13 mean what they say**, and that the two places where they do not — G1's seam
-and G5's slope bound — are written down with numbers instead of being implied by
-a green run.
+10 each took fix rounds. What was bought is that **criteria 1 through 10, 12 and
+13 mean what they say**, and that the places where they do not — G1's seam, G5's
+slope bound, G7's unkilled M7 — are written down with numbers instead of being
+implied by a green run.
+
+**And the last one is the reason the method matters more than the list.**
+Disguise 12 was found on the plan's final task, by firing a mutant nobody
+expected to survive and then noticing that a *column in the report* had not
+moved. Twelve tasks of practice did not exhaust the supply. **The tally is 11
+of 13 criteria, with criterion 11's miss named and its cause isolated, and one
+mutant the suite cannot kill.** That is what shipped, and it is written this way
+so that the next plan starts from the truth rather than from a green run.

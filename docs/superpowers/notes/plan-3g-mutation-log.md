@@ -43,7 +43,7 @@ with the report they came from named alongside.
 | M4 | `TileGrid.matchesScale` returns `true` always | 9 | red, 6 tests |
 | M5 | `_isDefinitionOwned` always false | 7 | red, 2 tests |
 | M6 | the eviction call deleted | 10 | red, 4 tests |
-| M7 | clip each tile to the viewport instead of its own rect | 12 | **NOT FIRED — Task 12 is blocked.** See below |
+| M7 | clip each tile to the viewport instead of its own rect | 12 | **FIRED on device, killed nothing** — no green-to-red transition exists. See below |
 | M8 | the table `Listenable` dropped from `_repaint` | 8 | red, 2 tests |
 | M8b | the merge kept, the generation drop deleted | 8 | red, 1 assertion |
 | M8c | the adapter disposes without unsubscribing | 8 | red |
@@ -77,8 +77,9 @@ with the report they came from named alongside.
 | M-Q | the composite `Paint` built at the call site | 9 fix 1 | red |
 | M-R | `budgetedTilesPerFrame` truncating to zero | 11a fix 1 | red — **no transcript in the report** |
 
-**Forty-one mutants named. Thirty-nine fired. Two — M3 and M7 — were not, and
-each has its own section saying why.**
+**Forty-one mutants named. Forty fired. One — M3 — was not, and it has its own
+section saying why. M7 *was* fired, on device, and killed nothing: it has its own
+section saying why that is worse than not firing it.**
 
 ---
 
@@ -443,17 +444,170 @@ that makes the same journey and compares pixels.
 
 # M7 — clip each tile to the viewport instead of to its own rect
 
-## NOT FIRED. Task 12 is blocked on machine power state.
+## FIRED on device, Task 12. Killed nothing. There is no green-to-red transition anywhere in this suite.
 
-M7 is the mutation that passes every correctness criterion and destroys the
-frame: every tile draws everything, criteria 1 through 9 stay green, and only
-criteria 10 and 11 — the device timings — can see it. The plan assigns it to
-Task 12.
+This is the worst outcome available. M3 could not be fired; M7 *was* fired,
+twice, and the suite did not notice.
 
-**Task 12 has not run.** `pmset` reads `lowpowermode 1` on Battery Power, and
-the plan requires the control run to reproduce Plan 3d's clean row before any
-number is published. So M7 is unfired, and it stays unfired until criteria 10
-and 11 are measured. It is recorded as pending, not as coverage.
+The spec named M7 **"the mutation that passes every correctness gate and
+destroys the plan's entire reason for existing"** and said **"a suite that
+cannot kill it is not gating this plan"**. That sentence stands, and this suite
+does not kill it. It is accepted gap **G7**.
+
+**The edit** (`git diff` before the restore):
+
+```diff
+@@ -724,7 +724,7 @@ class TileCache {
+       if (image == null && budget > 0 && _makeRoomForOneTile()) {
+-        image = _bake(key, grid, painter, sink, vertices, origin);
++        image = _bake(key, grid, painter, sink, vertices, origin, viewport);
+@@ -1353,6 +1353,7 @@ class TileCache {
+     Vector2 origin,
++    Size viewport,
+   ) {
+@@ -1365,7 +1366,10 @@ class TileCache {
+-    into.clipRect(Rect.fromLTWH(0, 0, side, side), doAntiAlias: false);
++    // M7: clip each tile to the viewport instead of to its own rect.
++    into.clipRect(
++        Rect.fromLTWH(0, 0, viewport.width, viewport.height),
++        doAntiAlias: false);
+@@ -1407,7 +1411,7 @@ class TileCache {
+     _drawInto(
+         into,
+-        Size(side + 2 * pad, side + 2 * pad),
++        Size(viewport.width + 2 * pad, viewport.height + 2 * pad),
+```
+
+**Both expressions of "its own rect" had to change**, and that is worth its own
+sentence. The clip alone is not the mutant the spec describes: `_drawInto`'s
+`Size` argument is what the painter culls against, so widening only the clip
+would have left every bake walking the same leaves it walks today — **a no-op
+that would have reported "M7 changes nothing" for entirely the wrong reason.**
+
+**The mutant was demonstrably live**, on fields that count actual drawing and
+independently of any timing: `triangles` **734442 → 1183035** (+61%) and
+`canvasCalls` **97 → 150**, identically in both M7 runs.
+
+## What it moved, and what it did not
+
+| reading | clean (median of 3) | M7 run A | M7 run B | verdict |
+|---|---|---|---|---|
+| criterion 10, hold p50 | 1.58 | 1.47 | 1.24 | **unchanged** |
+| criterion 10, hold p95 | 1.96 | 1.75 | 2.32 | **unchanged** |
+| criterion 11, pan p95 | 35.67 | 49.90 | 63.62 | 1.4×–1.8× worse |
+| criterion 11, pan max | 65.77 | 89.13 | 90.03 | 1.35× worse |
+| R2 build p50 | 23.10 | 38.47 | 39.04 | 1.67× worse |
+| R2 total p50 | 41.09 | 56.76 | 58.19 | 1.4× worse |
+
+**Criterion 10 is structurally blind to M7, and no threshold could fix that.**
+The settled frame bakes nothing — `bakeFrames=0/60` in every run, clean and
+mutated alike — so **the clip M7 breaks is never executed in the frame criterion
+10 measures.** The hold column under M7 sits inside the clean run-to-run spread.
+
+**Criterion 11 degraded but did not turn red, because it was already red.**
+35.67 ms clean against a 16.67 ms threshold, before any mutation. A criterion
+that fails on clean source cannot distinguish the mutant from the original.
+
+Criteria 1–9, 12 and 13 pass under M7 **by construction**: the blit shows only a
+tile's own rect and `toImageSync` crops the rest, so the pixels are identical
+and only the work differs.
+
+**M7 run A, verbatim** (its shell was backgrounded mid-build; see below):
+
+```
+flutter: R2 (500000) frames=242
+flutter:   build  p50=38.47ms p95=44.59ms max=1462.95ms mean=30.39ms
+flutter:   raster p50=9.17ms p95=42.76ms max=144.74ms mean=13.92ms
+flutter:   total  p50=56.76ms p95=89.36ms max=1721.78ms mean=53.09ms
+flutter:   screenSpaceLeafCount=4612 dashSpans=146358 collapsed=345 canvasCalls=150 (…)
+flutter:   tiles=on tilePx=512 bakeBudgetPx=262144 bakeBudgetTiles=1 liveTiles=2 generation=122 carryOver=true
+flutter:   bakes=148 blits=1651 carryOverBlits=121 liveDraws=135 blitDests=3197 evictions=0(life) invalidations=0(life) tileBytes=9777152
+flutter:   backend=vertices triangles=1183035 drawVerticesCalls=42
+flutter:   tile warm: frames=11 liveTiles=12 tileBytes=12582912 evictions=0(life)
+flutter:   tile hold frames=60
+flutter:   build  p50=0.30ms p95=0.40ms max=0.44ms mean=0.26ms
+flutter:   raster p50=0.97ms p95=1.17ms max=1.38ms mean=0.85ms
+flutter:   total  p50=1.47ms p95=1.75ms max=2.05ms mean=1.30ms
+flutter:     bakeFrames=0/60 maxBakesInAFrame=0
+flutter:     bakes=0 perFrame=0.000 blits=720 carryOverBlits=0 liveDraws=0 newEvictions=0 liveTiles=12 tileBytes=12582912
+flutter:   tile pan frames=123
+flutter:   build  p50=0.24ms p95=40.65ms max=72.55ms mean=4.92ms
+flutter:   raster p50=0.90ms p95=8.78ms max=11.27ms mean=1.43ms
+flutter:   total  p50=1.37ms p95=49.90ms max=89.13ms mean=7.00ms
+flutter:     bakeFrames=14/120 maxBakesInAFrame=1
+flutter:     bakes=14 perFrame=0.117 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter:   tile probe: tilePx=512 dpr=2.0 viewport=800x600 tileLogical=256.0 pad=32.0
+flutter:     tiles=12 liveLeaves=4350 tileLeaves=18204 overdraw=4.185 areaFactor=1.563
+flutter:     liveWalkMs=38.84 tileWalkMsTotal=74.00 walkMsPerTile=6.167 visibleSetBytes=12582912
+```
+
+**M7 run B, verbatim** (foreground, confirmation):
+
+```
+flutter: R2 (500000) frames=242
+flutter:   build  p50=39.04ms p95=47.14ms max=1591.95ms mean=31.36ms
+flutter:   raster p50=10.69ms p95=37.55ms max=147.71ms mean=13.54ms
+flutter:   total  p50=58.19ms p95=84.51ms max=1833.17ms mean=53.80ms
+flutter:   screenSpaceLeafCount=4612 dashSpans=146358 collapsed=345 canvasCalls=150 (…)
+flutter:   tiles=on tilePx=512 bakeBudgetPx=262144 bakeBudgetTiles=1 liveTiles=2 generation=122 carryOver=true
+flutter:   bakes=148 blits=1651 carryOverBlits=121 liveDraws=135 blitDests=3197 evictions=0(life) invalidations=0(life) tileBytes=9777152
+flutter:   backend=vertices triangles=1183035 drawVerticesCalls=42
+flutter:   tile warm: frames=11 liveTiles=12 tileBytes=12582912 evictions=0(life)
+flutter:   tile hold frames=60
+flutter:   build  p50=0.28ms p95=0.50ms max=0.54ms mean=0.28ms
+flutter:   raster p50=0.71ms p95=1.47ms max=1.51ms mean=0.80ms
+flutter:   total  p50=1.24ms p95=2.32ms max=2.44ms mean=1.32ms
+flutter:     bakeFrames=0/60 maxBakesInAFrame=0
+flutter:     bakes=0 perFrame=0.000 blits=720 carryOverBlits=0 liveDraws=0 newEvictions=0 liveTiles=12 tileBytes=12582912
+flutter:   tile pan frames=122
+flutter:   build  p50=0.20ms p95=51.70ms max=69.98ms mean=5.83ms
+flutter:   raster p50=0.50ms p95=10.83ms max=14.49ms mean=1.46ms
+flutter:   total  p50=0.93ms p95=63.62ms max=90.03ms mean=8.02ms
+flutter:     bakeFrames=14/120 maxBakesInAFrame=1
+flutter:     bakes=14 perFrame=0.117 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter:   tile probe: tilePx=512 dpr=2.0 viewport=800x600 tileLogical=256.0 pad=32.0
+flutter:     tiles=12 liveLeaves=4350 tileLeaves=18204 overdraw=4.185 areaFactor=1.563
+flutter:     liveWalkMs=34.21 tileWalkMsTotal=89.63 walkMsPerTile=7.469 visibleSetBytes=12582912
+```
+
+**Restore proof.** Copy-aside taken before the mutation, `shasum` matching the
+tree at `394f63ef67a6576e728eac7c5846f7caaff6bcbb`; restored by `cp` from the
+copy-aside, never `git checkout`; `diff` printed `DIFF CLEAN`, the `shasum`
+matched again, and `git status --short` and `git diff --stat` both printed
+nothing.
+
+**Run A's deviation, recorded rather than dropped.** The mutation forces a full
+macOS app rebuild and the command exceeded the 600 s tool timeout during it, so
+the shell was moved to the background and the run finished there. The failure
+mode the foreground rule exists to prevent — a background-*launched* run
+stalling at 0% CPU waiting for a frame the windowing system never requests — did
+not occur: the app was sampled at 42.6% CPU mid-run and produced a full
+transcript. It was nonetheless re-run in the foreground as run B, and both agree
+on every conclusion.
+
+## The instrument that reimplements what it measures
+
+**The rig's `tile probe` reports `overdraw=4.185` bit-for-bit identically in the
+clean and the mutated runs.** `_probeBake` in `measurement_rig.dart`
+reimplements the bake geometry rather than calling `TileCache._bake`, so the
+overdraw column measures **what the cache should do, never what it does.**
+Anyone reading that column as evidence about the shipped clip is reading a copy
+of the specification.
+
+This is the **twelfth** disguise in this plan's catalogue of gates that cannot
+see what they claim to measure, and it is a new one: *an instrument that
+reimplements what it measures*. It is not a bug in `_probeBake` — a probe that
+called the real `_bake` could not sum per-tile leaf counts the way this one does
+— but it is a boundary nobody had written down.
+
+## What is owed
+
+**A bake-time assertion that a tile's geometry is bounded by its own rect** —
+the command-time-assertion shape trap 5 already recommends for this repository —
+**not another frame-path timing.** Two device timings were the plan's answer for
+M7 and both turned out unable to deliver: one is blind by construction, the
+other is red on clean source. A third timing would be a fourth attempt at the
+same wrong instrument.
 
 Two tasks touched M7 without firing it, and both said so explicitly: Task 6a's
 rejected region-based-culling experiment preserved per-tile culling and was
@@ -730,8 +884,11 @@ moved rather than removed.
 *correctness* criterion — criteria 1 to 8 all pass a cache that bakes everything
 at once, because the *pixels* are correct. It is not invisible to every test:
 Task 4's first-frame budget test catches it too, as do the two zero-budget
-gesture tests. **Criterion 11 is still the one that names the property**, and
-criterion 11 is PENDING.
+gesture tests. **Criterion 11 is still the one that names the property** — and
+criterion 11 is a **MISS**, at 35.67 ms against 16.67. M9 defends against the
+single-frame hiccup, and the shipped one-tile budget removes that hiccup by
+spreading the same work across a settle no criterion measures. See G7's
+neighbour in the results note.
 
 **Restored.** Restored from a copy, `diff` clean, green again.
 
@@ -2198,10 +2355,10 @@ years later. The guard's type was right; its scope was not.**
 
 ## What the count actually is
 
-**Forty-one mutants named. Thirty-nine fired.**
+**Forty-one mutants named. Forty fired. Thirty-nine killed something.**
 
-- **Nineteen** from the spec's table (M1–M19), of which **seventeen fired**: M3
-  is unfirable in this instrument and M7 waits on Task 12.
+- **Nineteen** from the spec's table (M1–M19), of which **eighteen fired**: M3
+  is unfirable in this instrument. M7 fired and killed nothing — see G7.
 - **Twenty-two** minted during execution: M8b, M8c, M8d, M12b, M-A, M-B, M-C,
   M-D, M-E, M-F, M-G, M-H, M-J, M-K, M-L, M-M, M-N (fired twice), M-P, M-Q, M-R,
   and the two firings of M17 at different sites. All fired.
@@ -2212,3 +2369,8 @@ years later. The guard's type was right; its scope was not.**
   M11, M13, M17 and M-E. A fifth, M-A, survived a gate that was degenerate as
   written. Every one of those five is a section of the successor's note in
   `2026-08-24-plan-3g-results.md`.
+- **One mutant survived the gates it was aimed at and no test was written for
+  it: M7.** Criterion 10 is structurally blind to it and criterion 11 is red
+  before any mutation, so there is no green-to-red transition anywhere in this
+  suite. That is accepted gap **G7**, and what it owes is a bake-time assertion,
+  not another timing.
