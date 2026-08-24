@@ -382,22 +382,28 @@ class _DraftCustomPainter extends CustomPainter {
       );
       return;
     }
-    // **The live path quantises too.** This is the rule, not a concession to
-    // the tiled path: both paths draw the same camera, so the tiled frame *is*
-    // the live frame, and a live path on the raw camera would make criterion 1
-    // — zero differing pixels between the two — unmeetable.
-    final quantised = quantiseCamera(camera.value, devicePixelRatio);
+    // **The camera is not quantised here, and the asymmetry is deliberate.**
+    // `quantiseCamera` belongs to the tiled path and is applied inside
+    // [TileCache.paintFrame] — once, covering both the blits and the live draw
+    // over the uncovered region, so a tiled frame is internally consistent.
+    // Applying it here as well would buy nothing: criterion 1's instrument
+    // quantises its own live arm explicitly
+    // (`test/support/tile_comparison.dart`), so the tiled-equals-live gate
+    // never depended on this branch doing it. What it would cost is a change
+    // to the **default** rendering path, which every caller with `tiles` off
+    // uses — up to half a device pixel of global position, for nothing. This
+    // branch draws what it drew before Plan 3g, pixel for pixel.
     sink.canvas = canvas;
     final batching = vertices;
     if (batching == null) {
-      painter.paint(sink, quantised, size);
+      painter.paint(sink, camera.value, size);
       return;
     }
     // The flush is here and not in the painter because it is a fact about this
     // sink, not about the walk: the painter hands ops to a `DrawSink` and has
     // no opinion on when one of them reaches the `Canvas`.
     batching.canvas = canvas;
-    painter.paint(batching, quantised, size);
+    painter.paint(batching, camera.value, size);
     batching.flush();
   }
 
