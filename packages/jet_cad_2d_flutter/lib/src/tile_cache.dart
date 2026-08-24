@@ -165,7 +165,7 @@ class TileKey {
 /// tiled frame be required to equal the live frame with zero differing pixels.
 ///
 /// [DraftCanvas]'s default (non-tiled) path does **not** call this — see
-/// `draft_canvas.dart:384-392` for why not. The one production call site is
+/// `draft_canvas.dart:392-402` for why not. The one production call site is
 /// inside the tiled branch, at this file's `paintFrame`. The comparison
 /// instrument that proves tiled equals live quantises its own live arm
 /// separately, at `test/support/tile_comparison.dart:81`, rather than relying

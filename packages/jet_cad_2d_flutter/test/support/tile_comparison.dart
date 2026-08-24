@@ -74,9 +74,12 @@ Future<Uint8List> _capture(void Function(Canvas canvas) draw) async {
 /// Paints [rig] both ways and compares.
 ///
 /// The live arm goes through the **quantised** camera, not the raw one: that is
-/// the rule, not a concession to the tiled arm. `DraftCanvas` quantises the
-/// camera it hands the live path for exactly this reason, so the two arms are
-/// the same drawing seen twice and not two different drawings.
+/// the rule, not a concession to the tiled arm. This instrument quantises its
+/// own live arm, deliberately, at the call below -- `DraftCanvas` is not
+/// involved and is not on this path at all. `DraftCanvas` itself quantises
+/// only inside its tiled branch; its default (non-tiled) path draws the raw
+/// camera untouched. Quantising here is what makes the two arms the same
+/// drawing seen twice rather than two different drawings.
 Future<InkReport> measureTiledAgreement(TileRig rig) async {
   final quantised = quantiseCamera(rig.camera, kTileDpr);
 
