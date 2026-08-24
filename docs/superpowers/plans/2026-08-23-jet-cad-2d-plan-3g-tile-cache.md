@@ -2940,7 +2940,18 @@ git commit -m "docs: Plan 3g results, mutation log, and STATUS"
 
 **Spec coverage.** D1 → Task 1. D2, D5 → Task 3. D3, D13 → Task 9. D4 is a rejection and needs no task. D6 → Task 11. D7 → Tasks 4–6 (the injectable tile size, used at 64 throughout). D8 → Task 4, gated in Task 5. D9 → Tasks 3 and 8. D10, D11 → Task 7. D12 → Tasks 2 and 8. D14 → Task 8. Criteria 1–4 → Tasks 5, 6. Criteria 5, 6, 9 → Task 7. Criterion 7 → Task 8. Criterion 8 → Task 9. Criteria 12, 13 → Task 10. Criteria 10, 11 → Task 12. G1–G4 → Task 13. **No spec section is unclaimed.**
 
-**Mutant coverage.** M1, M2, M5, M12, M16 → Task 7. M3 → deferred, recorded in Task 13. M4, M9 → Task 9. M6 → Task 10. M7 → Task 12. M8 → Tasks 2 and 8. M10 → Task 3. M11, M14 → Task 6. M13 → Tasks 4 and 10. M15, M17 → Task 5. **Sixteen fired, one recorded as unfirable.**
+**Mutant coverage, as planned.** M1, M2, M5, M12, M16 → Task 7. M3 → deferred, recorded in Task 13. M4, M9 → Task 9. M6 → Task 10. M7 → Task 12. M8 → Tasks 2 and 8. M10 → Task 3. M11, M14 → Task 6. M13 → Tasks 4 and 10. M15, M17 → Task 5.
+
+> **Superseded 2026-08-24 by execution.** This paragraph ended "sixteen fired,
+> one recorded as unfirable". **The true count is 41 named and 39 fired**, and
+> the record of it is
+> [docs/superpowers/notes/plan-3g-mutation-log.md](../notes/plan-3g-mutation-log.md),
+> not this line. Execution added M18 and M19 and roughly twenty more that
+> individual tasks named locally, because repeatedly the mutant a task was given
+> could not fire and a working one had to be built. Two remain unfired: **M3**,
+> which `flutter_test`'s software Skia cannot produce an artefact for, and
+> **M7**, which only criteria 10 and 11 can see. M17's killer is a wiring test
+> and **not** criterion 1.
 
 **Anti-degenerate coverage.** Clause 1 → the 64 px tile everywhere and `crossingGrid`'s 266-logical-pixel lines (190 world units at the fixture camera's 1.4 scale), spanning about eight 32-logical-pixel tiles. Clause 2 → `tileCamera()`, never `fit`. Clause 3 → asserted at `blitCount > 30`. Clauses 4 and 5 → `instancedFixture` and the dragged-instance test. Clauses 6 and 7 → Task 10's two eviction tests.
 
