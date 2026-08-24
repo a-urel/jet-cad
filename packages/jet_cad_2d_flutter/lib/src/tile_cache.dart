@@ -288,6 +288,29 @@ class TileCache {
   /// one without removing from the other.
   final Map<TileKey, Uint32List> _baked = <TileKey, Uint32List>{};
 
+  /// The frame ordinal each live tile was last blitted on. The LRU order.
+  ///
+  /// Keyed identically to [_tiles], like [_baked]: [paintFrame] writes here
+  /// where it writes there, [_evict] and [_invalidateTouched] remove from both,
+  /// and [_disposeTiles] clears both. A tile missing from here would be
+  /// invisible to [_makeRoomForOneTile] and could never be reclaimed.
+  ///
+  /// **A parallel map rather than a reordered [_tiles].** The obvious LRU is
+  /// to `remove` and re-insert on use, since Dart's `Map` iterates in
+  /// insertion order — but that allocates a fresh entry per blit, every frame,
+  /// on the frame path. Assigning to a key that is already present does not,
+  /// and small integers are not boxed, so a warm frame's whole LRU bookkeeping
+  /// allocates nothing at all.
+  final Map<TileKey, int> _lastUsedFrame = <TileKey, int>{};
+
+  /// [paintFrame] calls since construction, used only to order [_lastUsedFrame].
+  ///
+  /// Starts at zero and is incremented *before* anything reads it, so no tile
+  /// can carry the current frame's ordinal before this frame put it there —
+  /// which is what makes "not blitted this frame" a decidable question in
+  /// [_makeRoomForOneTile].
+  int _frameSerial = 0;
+
   /// One `Paint` for the life of the cache.
   ///
   /// `FilterQuality.none`: every blit is a 1:1 texel-to-pixel copy by
@@ -363,6 +386,9 @@ class TileCache {
   int _liveDraws = 0;
   int _generation = 0;
   int _invalidations = 0;
+  int _evictions = 0;
+  int _blitDestinations = 0;
+  int _imagesAlive = 0;
 
   /// `DocumentTables.mutationRevision` as of the last [paintFrame].
   ///
@@ -389,6 +415,67 @@ class TileCache {
   int get liveDrawCount => _liveDraws;
 
   int get liveTileCount => _tiles.length;
+
+  /// Every byte of native image memory this cache is holding open, against
+  /// which [cacheBytes] is the ceiling.
+  ///
+  /// **The composite counts, and a cap that ignored it would not be a cap.**
+  /// The carry-over is one *viewport-sized* image — 1.9 MB on the test
+  /// viewport, 29.3 MiB on the reference one, whatever the tile size — so it
+  /// is worth more than a hundred tiles on its own. [kTileCacheBytes] is 96
+  /// MiB rather than 64 precisely because it has to hold a generation *and* a
+  /// composite, and a `liveBytes` that summed only [_tiles] would report the
+  /// cache using a third of what it really holds. Measured from the image's
+  /// own `width` and `height` rather than from `viewport`, because the
+  /// composite's device size is a `ceil` of the viewport and it outlives the
+  /// camera it was recorded against.
+  ///
+  /// A tile is `tileDevicePixels` square, RGBA, one byte a channel: exactly
+  /// what `Picture.toImageSync` allocates in [_bake].
+  int get liveBytes {
+    final carryOver = _carryOver;
+    return _tiles.length * _tileBytes +
+        (carryOver == null ? 0 : carryOver.width * carryOver.height * 4);
+  }
+
+  /// Tiles the ceiling reclaimed over this cache's whole life.
+  ///
+  /// Not reset by [resetCounters], for [invalidationCount]'s reason: this
+  /// counts a cache-lifetime event, not a per-frame one. **Distinct from
+  /// [invalidationCount] deliberately** — an invalidated tile held wrong
+  /// pixels, an evicted one held perfectly good pixels there was no room for,
+  /// and a test that could not tell them apart would read a thrashing cap as a
+  /// busy editor.
+  int get evictionCount => _evictions;
+
+  /// Destination `Rect`s this frame computed for an image blit, since
+  /// [resetCounters]. Criterion 13's per-frame allocation quantity.
+  ///
+  /// Counted at the point of allocation rather than at `drawImageRect`, which
+  /// is the difference that makes it an allocation measurement: a visible tile
+  /// the budget could not bake still costs its destination rect, and it is
+  /// still bounded by the viewport over the tile size. The composite's
+  /// destination counts too.
+  ///
+  /// **A field read, not a heap measurement.** `STATUS.md` records trap 5:
+  /// there is no working Flutter-side allocation meter, and
+  /// `paint_allocation_test.dart` reads one field —
+  /// `VerticesDrawSink.debugCapacityVertices` — which can see neither a
+  /// `Paint` nor a `Rect`. This is the `Rect` half, the same shape
+  /// `VerticesDrawSink.debugPaint` uses for the other.
+  int get blitDestinationCount => _blitDestinations;
+
+  /// `ui.Image`s this cache has created and not yet disposed. Test-only.
+  ///
+  /// **The one instrument that can see a leaked image.** A `ui.Image` holds
+  /// native memory past its Dart object, so a path that drops a tile from
+  /// [_tiles] without disposing it frees nothing and no counter above would
+  /// notice: [liveTileCount] falls, [liveBytes] falls, [evictionCount] rises,
+  /// and the process grows. Eviction is where that mistake compounds, because
+  /// it is the only path that runs *per frame* forever. Held equal to
+  /// `liveTileCount + (hasCarryOver ? 1 : 0)` by construction, which is what a
+  /// test asserts.
+  int get debugImagesAlive => _imagesAlive;
 
   int get generation => _generation;
 
@@ -446,6 +533,7 @@ class TileCache {
     _blits = 0;
     _liveDraws = 0;
     _carryOverBlits = 0;
+    _blitDestinations = 0;
   }
 
   void paintFrame({
@@ -476,6 +564,10 @@ class TileCache {
       _dropGeneration();
     }
 
+    // Before anything reads it, so no tile can be carrying this frame's
+    // ordinal before this frame blits it. `_makeRoomForOneTile` rests on that.
+    _frameSerial++;
+
     final quantised = quantiseCamera(camera, devicePixelRatio);
     // The viewport reaches `_gridFor` because retiring a generation is now a
     // composite and not just a `dispose`: the outgoing tiles have to be
@@ -499,6 +591,7 @@ class TileCache {
     final carryOver = _carryOver;
     if (carryOver != null) {
       final dest = _carryOverDestRect(quantised);
+      _blitDestinations++;
       canvas.drawImageRect(
           carryOver,
           Rect.fromLTWH(
@@ -519,17 +612,29 @@ class TileCache {
 
     for (final key in grid.visibleKeys(quantised, viewport)) {
       var image = _tiles[key];
-      if (image == null && budget > 0) {
+      // **The ceiling is consulted before the bake, not after the frame.** A
+      // small cap against a viewport of many tiles means the visible set alone
+      // overruns it, so a sweep at the end of `paintFrame` would have nothing
+      // left to reclaim -- every tile it could take was blitted this frame --
+      // and `liveBytes` would settle wherever the visible set happened to put
+      // it. Asking first makes the ceiling hold at every point inside the
+      // frame as well as at its edges.
+      if (image == null && budget > 0 && _makeRoomForOneTile()) {
         image = _bake(key, grid, painter, sink, vertices, origin);
         _tiles[key] = image;
+        _lastUsedFrame[key] = _frameSerial;
         budget--;
         baked++;
       }
       final dest = grid.destRectFor(key, quantised);
+      _blitDestinations++;
       if (image == null) {
         uncovered = uncovered == null ? dest : uncovered.expandToInclude(dest);
         continue;
       }
+      // The recency the ceiling orders by, and the guard that stops a tile
+      // this frame is using from being reclaimed later in the same loop.
+      _lastUsedFrame[key] = _frameSerial;
       canvas.drawImageRect(image, _tileSourceRect, dest, _blitPaint);
       _blits++;
     }
@@ -568,8 +673,79 @@ class TileCache {
     _liveDraws++;
   }
 
-  Rect get _tileSourceRect => Rect.fromLTWH(
+  /// Every tile is the same square, so this is built once rather than per
+  /// blit. It was a getter until Task 10, which allocated a fresh `Rect` on
+  /// each of a frame's ~130 blits — bounded by the viewport, so never a rule
+  /// break, but the wrong side of the criterion this task lands.
+  late final Rect _tileSourceRect = Rect.fromLTWH(
       0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble());
+
+  /// Bytes one tile's image occupies: RGBA, one byte a channel, exactly what
+  /// `Picture.toImageSync` allocates in [_bake].
+  int get _tileBytes => tileDevicePixels * tileDevicePixels * 4;
+
+  /// Reclaims least-recently-blitted tiles until one more will fit under
+  /// [cacheBytes], and reports whether it succeeded.
+  ///
+  /// **Never a tile this frame already blitted, and that guard is the whole
+  /// difference between a cap and a thrash.** A viewport holds far more tiles
+  /// than a small cap does, so without it the bake loop would evict the tile
+  /// it blitted two iterations ago to make room for the next one, walk the
+  /// entire visible set doing that, and arrive at the next frame with every
+  /// tile it needs already gone — evict, rebake, evict, forever, with the
+  /// frame path doing the evicting. With it, the loop simply runs out of room
+  /// and leaves the remainder to the live fallback, which is a bounded cost.
+  ///
+  /// **The composite is never a candidate.** It is not in [_tiles] at all, and
+  /// deliberately: [paintFrame] reads it every frame it stands, so a
+  /// recency-ordered policy would never choose it anyway, and reclaiming it
+  /// would replace stale pixels with blank ones. It still *counts* against the
+  /// ceiling through [liveBytes] — so a cap smaller than one composite simply
+  /// bakes nothing, which is the honest answer rather than a silent overrun.
+  ///
+  /// Returning `false` rather than baking anyway is what keeps [liveBytes] a
+  /// ceiling and not a suggestion.
+  bool _makeRoomForOneTile() {
+    // Computed from `liveBytes` so the composite is counted, then tracked
+    // locally: the loop's only effect on it is one tile's worth per eviction.
+    var bytes = liveBytes;
+    final ceiling = cacheBytes - _tileBytes;
+    while (bytes > ceiling) {
+      TileKey? victim;
+      var oldest = 0;
+      // A linear scan, not a heap. This runs only when the cache is full, the
+      // map it walks is bounded by the ceiling itself, and a priority queue
+      // would need per-blit maintenance on the frame path to save a scan that
+      // a warm frame never performs.
+      for (final entry in _lastUsedFrame.entries) {
+        if (entry.value == _frameSerial) continue;
+        if (victim == null || entry.value < oldest) {
+          victim = entry.key;
+          oldest = entry.value;
+        }
+      }
+      if (victim == null) return false;
+      _evict(victim);
+      bytes -= _tileBytes;
+    }
+    return true;
+  }
+
+  /// Reclaims one tile: its image, its bake record and its recency, together.
+  void _evict(TileKey key) {
+    _disposeImage(_tiles.remove(key));
+    _baked.remove(key);
+    _lastUsedFrame.remove(key);
+    _evictions++;
+  }
+
+  /// The single door every `ui.Image` this cache owns leaves by, so
+  /// [debugImagesAlive] can see one that never does.
+  void _disposeImage(Image? image) {
+    if (image == null) return;
+    image.dispose();
+    _imagesAlive--;
+  }
 
   /// Where [_carryOver] lands under [camera].
   ///
@@ -665,6 +841,7 @@ class TileCache {
       // native memory past its Dart object.
       _dropCarryOver();
       _carryOver = picture.toImageSync(width, height);
+      _imagesAlive++;
       _carryOverAnchor = camera;
       _carryOverRect = rect;
       picture.dispose();
@@ -679,16 +856,17 @@ class TileCache {
   /// composite an empty generation.
   void _disposeTiles() {
     for (final image in _tiles.values) {
-      image.dispose();
+      _disposeImage(image);
     }
     _tiles.clear();
     _baked.clear();
+    _lastUsedFrame.clear();
     _viewportCovered = false;
   }
 
   /// Releases the composite's native memory. Idempotent.
   void _dropCarryOver() {
-    _carryOver?.dispose();
+    _disposeImage(_carryOver);
     _carryOver = null;
     _carryOverAnchor = null;
     _carryOverRect = Rect.zero;
@@ -801,19 +979,26 @@ class TileCache {
     }
 
     for (final key in doomed) {
-      _tiles.remove(key)?.dispose();
+      _disposeImage(_tiles.remove(key));
       _baked.remove(key);
+      // Keyed identically to `_tiles`: a recency left behind here would name a
+      // tile that no longer exists, and `_makeRoomForOneTile` would pick it as
+      // its victim and free nothing.
+      _lastUsedFrame.remove(key);
       _invalidations++;
     }
   }
 
   /// Drops every tile and the lattice they were baked on.
   ///
-  /// The carry-over composite is cleared here too, and it is the only drop
-  /// path that clears it. It is anchored to a camera over a document that no
-  /// longer exists, so replaying it would show the previous drawing scaled
-  /// over the new one — and it holds native memory that nothing else on this
-  /// path would ever release.
+  /// The carry-over composite is cleared here too — not uniquely, since
+  /// [_dropGeneration] and [applyChange]'s hoisted call clear it as well; the
+  /// call below is redundant with the one [_dropGeneration] already makes and
+  /// is kept because this method's contract is "nothing survives", not
+  /// "whatever the callee happens to do". It is anchored to a camera over a
+  /// document that no longer exists, so replaying it would show the previous
+  /// drawing scaled over the new one — and it holds native memory nothing else
+  /// would release.
   void _dropEverything() {
     _dropGeneration();
     _dropCarryOver();
@@ -1108,6 +1293,7 @@ class TileCache {
     _baked[key] = Uint32List.fromList(visited);
     final picture = recorder.endRecording();
     final image = picture.toImageSync(tileDevicePixels, tileDevicePixels);
+    _imagesAlive++;
     picture.dispose();
     _bakes++;
     return image;
