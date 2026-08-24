@@ -170,7 +170,46 @@ Larger tiles cost **more** memory, not less: the partial-coverage waste grows
 with the square. 1024 px spends 2.5× what 128 px does — and D6 shows the bake
 cost running the other way, which is why neither number picks the size alone.
 
-### D6 — `kTileDevicePixels` starts at 256 and the plan measures it
+### D6 — ~~starts at 256~~ **measured: `kTileDevicePixels = 512`**, and the bake budget becomes device pixels
+
+**Settled 2026-08-24 by Task 11's sweep, on a machine verified `lowpowermode 0` on
+AC power, with the control run reproducing Plan 3d's clean `50,000 / vertices`
+row (7.17 / 8.48 against `[7.06, 7.38]` / `[8.22, 8.63]`).**
+
+At `ENTITIES=500000`, `BACKEND=vertices`, `RIG=pan`, `TILES=on`:
+
+| | 128 | 256 | **512** |
+|---|---|---|---|
+| blit per frame | 1.45 ms | 1.44 ms | 1.52 ms |
+| bake per tile | 5.70 ms | 7.23 ms | 12.56 ms |
+| whole-generation walk | 265.53 ms | 105.31 ms | **71.97 ms** |
+| pan `total` p95 | 65.19 ms | 47.42 ms | **2.31 ms** |
+| live-walk fallbacks during pan | 18 | 1 | **0** |
+| measured overdraw | 17.983 | 6.888 | **4.185** |
+
+**512 is the only size whose pan p95 fits the 16.67 ms budget**, by a factor of
+twenty over its nearest rival.
+
+**The three-column requirement earned itself.** Blit cost is *flat* — 1.45,
+1.44, 1.52 — across a **16× range of tile count**. A sweep reading only the
+column the spike had measured would have decided nothing at all.
+
+**And the overdraw model was wrong.** The area factors are as predicted —
+4.000 / 2.250 / 1.563 with `_bake` padding its cull by `kTileSlack` — but the
+*measured* leaf overdraw is 17.983 / 6.888 / 4.185, leaving residues of
+4.50× / 3.06× / 2.68× the pad does not explain. The cause is not the pad at
+all: **an entity is walked once per tile it crosses.** Crossing multiplicity is
+the dominant term.
+
+**So `kTileClipInflate` is dead**, and this section's earlier invitation to name
+it if the overdraw column justified it is withdrawn. It could only attack the
+smaller term, and shrinking the pad reopens the vanishing-stroke defect that
+`kTileSlack` closed.
+
+**`kTilesBakedPerFrame` must become a device-pixel budget, not a tile count.**
+Eight tiles at 128 px is a modest strip; eight tiles at 512 px is 8 × 12.56 ms
+≈ **100 ms of bake in one frame** — six budgets. The constant's unit was chosen
+when the tile size was, and choosing 512 invalidates it.
 
 Probe D measured **one** viewport-sized blit at 0.97 ms of raster. Whether 154
 blits of 1/154 the area cost the same total, or whether per-call overhead
