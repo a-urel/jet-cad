@@ -378,9 +378,10 @@ Future<InkReport> measureFallbackAgreement(
     final report =
         measured.withStripInk(inkInside(await captureLiveFrame(rig), strip!));
     expect(report.liveStripInk, greaterThanOrEqualTo(minimumStripInk),
-        reason: 'pan $pan: the live frame carries no ink inside the band the '
-            'fallback owes ($strip), so every pixel assertion below is '
-            'satisfied by a fallback that could have drawn nothing: $report');
+        reason: 'pan $pan: the live frame carries no ink inside the padded '
+            'strip ($strip) -- weaker than the band the fallback owes -- so '
+            'every pixel assertion below is satisfied by a fallback that '
+            'could have drawn nothing: $report');
     expect(report.liveInk, greaterThan(minimumInk), reason: '$report');
     expect(report.tiledInk, greaterThan(minimumInk), reason: '$report');
     // Pixels alone cannot see this: a fallback query padded back out to the

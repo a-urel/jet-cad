@@ -48,9 +48,11 @@ void main() {
     // ratio proves it did not re-tessellate the whole viewport to do it (see
     // `kTriangleBudgetRatio`'s doc comment for the bracket behind the bound)
     // -- and `minimumStripInk` is what makes each sample non-vacuous, by
-    // requiring the live frame to carry ink inside the band the fallback
-    // owes. `criterion 2b` below is the one caller that opts out of either,
-    // and says why.
+    // requiring the live frame to carry ink inside the padded strip
+    // (`TileCache.debugLastStrip`), weaker than the band the fallback
+    // actually owes -- see `InkReport.liveStripInk`'s doc comment and gap H7
+    // in STATUS.md. `criterion 2b` below is the one caller that opts out of
+    // either, and says why.
     final reports = await sweepFallbackAgreement(
         of: fillingGrid, offsets: kFallbackOffsets);
 

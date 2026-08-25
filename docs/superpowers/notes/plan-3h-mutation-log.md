@@ -220,16 +220,16 @@ Failing tests:
   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_cache_test.dart: stripFor pads an interior rect on every side
 ```
 
-**Re-fired again 2026-08-26 for the final record re-review**, which had
-measured `+370 ~1 -3` twice and flagged the `+369 ~1 -3` above as possibly
-off by one. This re-fire copied `lib/src/tile_cache.dart` aside, applied the
-same four-site `kTileSlack → 0.0` edit, ran `CI=true flutter test` (whole
-`packages/jet_cad_2d_flutter` package) once, and restored the file from the
-copy (never `git checkout`). Result: **`+369 ~1 -3: Some tests failed.`**,
-digit-identical to the transcript above, same three failing test names. This
-matches what this log already recorded, not the re-reviewer's `+370 ~1 -3`;
-recorded per "never synthesize test output" rather than silently adopting
-either prior figure.
+**Settled 2026-08-26: `+369 ~1 -3` is confirmed, `+370 ~1 -3` is ruled
+out.** Three independent sources agree on `+369 ~1 -3`: this log's original
+transcript above, a re-fire for the final record re-review (copied
+`lib/src/tile_cache.dart` aside, applied the same four-site
+`kTileSlack → 0.0` edit, ran `CI=true flutter test` once, restored from the
+copy — never `git checkout`), and a second, independent re-fire by the
+controller using the same method. A fourth measurement read `+370 ~1 -3`
+twice; the total-count identity rules it out rather than a majority vote:
+`369 passed + 3 failed + 1 skipped = 373`, this suite's exact size, while
+`370 + 3 + 1 = 374` implies one test more than exists.
 
 **Ruling: SURVIVES THE PIXEL SWEEP; DIES AT THE SUITE LEVEL on the pad's
 value.** Those are two different claims and the earlier bare "SURVIVES" in
@@ -386,15 +386,16 @@ test/tile_fallback_test.dart: criterion 2 and 2c: a partly baked frame equals th
 test/tile_fallback_test.dart: criterion 2b: the near-axis arm stays inside the tiled path's bound
 ```
 
-**Re-fired again 2026-08-26 for the final record re-review**, which had
-measured `+366 ~1 -7` twice and flagged the `+365 ~1 -7` above as possibly
-off by one. This re-fire copied `lib/src/tile_cache.dart` aside, applied the
-same four-site `kTileSlack → -20.0` edit, ran `CI=true flutter test` (whole
-`packages/jet_cad_2d_flutter` package) once, and restored the file from the
-copy (never `git checkout`). Result: **`+365 ~1 -7: Some tests failed.`**,
-the same seven failing test names as above. This matches what this log
-already recorded, not the re-reviewer's `+366 ~1 -7`; recorded per "never
-synthesize test output" rather than silently adopting either prior figure.
+**Settled 2026-08-26: `+365 ~1 -7` is confirmed, `+366 ~1 -7` is ruled
+out.** This log's original transcript above and a second, independent re-fire
+for the final record re-review (copied `lib/src/tile_cache.dart` aside,
+applied the same four-site `kTileSlack → -20.0` edit, ran
+`CI=true flutter test` once, restored from the copy — never `git checkout`)
+both read `+365 ~1 -7`, the same seven failing test names each time. A third
+source, the total-count identity, rules out the `+366 ~1 -7` a fourth
+measurement read twice, rather than a majority vote deciding it:
+`365 passed + 7 failed + 1 skipped = 373`, this suite's exact size, while
+`366 + 7 + 1 = 374` implies one test more than exists.
 
 `criterion 2b` is digit-identical to every earlier firing —
 `Expected: a value less than or equal to <60>`, `Actual: <417>`,
