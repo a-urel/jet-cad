@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
@@ -89,6 +90,34 @@ const int kTileDevicePixels = 512;
 /// been is rebaked, a tile kept that should have been dropped is a visible
 /// defect.
 const double kTileSlack = kScreenClipInflate;
+
+/// The rectangle the live fallback walks: [uncovered] grown by [kTileSlack] on
+/// every side, then clamped to [viewport].
+///
+/// **The pad**, for `_bake`'s reason: a stroke whose centreline is outside the
+/// rectangle still inks pixels inside it, and the painter's index query is a
+/// rect intersection on entity bounds. `_bake` states the rule at its own call
+/// site -- "The query is padded; the clip is not." Plan 3g's F1 is what an
+/// unpadded query cost, at six of forty-one swept zoom factors.
+///
+/// **The clamp**, and it was found by measuring rather than by reasoning.
+/// `uncovered` is a *bounding rectangle* (`paintFrame` accumulates it with
+/// `expandToInclude`), so an L-shaped uncovered set bounds to the whole frame;
+/// padding that asks for 464 x 364 logical pixels where the untiled path asks
+/// for 400 x 300. An unclamped arm doubled the vertex buffer's high-water mark
+/// from 192.00 MiB to 384.00 on a run whose every other counter matched.
+/// **The pad belongs on interior edges; on the viewport's own edge the
+/// full-frame walk is the ceiling.**
+///
+/// Pure, so the clamp has a unit witness. Nothing else in this plan can see
+/// it: the fallback's pixels are identical clamped or not, and only its cost
+/// moves.
+Rect stripFor(Rect uncovered, Size viewport) => Rect.fromLTRB(
+      math.max(0.0, uncovered.left - kTileSlack),
+      math.max(0.0, uncovered.top - kTileSlack),
+      math.min(viewport.width, uncovered.right + kTileSlack),
+      math.min(viewport.height, uncovered.bottom + kTileSlack),
+    );
 
 /// The device-pixel area a frame may spend baking tiles, while a generation
 /// fills in.

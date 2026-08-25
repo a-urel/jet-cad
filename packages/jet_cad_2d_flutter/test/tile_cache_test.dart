@@ -939,6 +939,40 @@ void main() {
       expect(report.differingPixels, 0, reason: '$report');
     });
   });
+
+  group('stripFor', () {
+    const viewport = Size(400, 300);
+
+    test('pads an interior rect on every side', () {
+      // kTileSlack is 32.0. An interior rect keeps the whole pad, because a
+      // stroke whose centreline is outside the strip still inks pixels inside
+      // it -- the reason `_bake` pads its own query.
+      expect(stripFor(const Rect.fromLTRB(100, 80, 200, 180), viewport),
+          const Rect.fromLTRB(68, 48, 232, 212));
+    });
+
+    test('clamps to the viewport rather than growing past it', () {
+      // The mutant this exists for. A union that already spans the frame,
+      // padded, would ask for 464 x 364 where the untiled path asks for
+      // 400 x 300 -- a third more area than the baseline the narrowing is
+      // meant to undercut, measured as the vertex buffer doubling to 384 MiB.
+      expect(
+          stripFor(Offset.zero & viewport, viewport), Offset.zero & viewport);
+    });
+
+    test('clamps one edge at a time', () {
+      // A band entering from the left: clamped on the left, padded on the
+      // right. Asserting the whole rect rather than one edge, so a mutation
+      // that clamped all four sides unconditionally is also caught.
+      expect(stripFor(const Rect.fromLTRB(0, 0, 40, 300), viewport),
+          const Rect.fromLTRB(0, 0, 72, 300));
+    });
+
+    test('a strip touching the bottom-right clamps there and pads inward', () {
+      expect(stripFor(const Rect.fromLTRB(360, 260, 400, 300), viewport),
+          const Rect.fromLTRB(328, 228, 400, 300));
+    });
+  });
 }
 
 /// Non-transparent pixels in one tiled frame of [rig].
