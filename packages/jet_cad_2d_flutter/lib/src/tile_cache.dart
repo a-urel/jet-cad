@@ -644,9 +644,8 @@ class TileCache {
           if (_contains(entry.value, handle.value)) entry.key
       ];
 
-  /// The rectangle the fallback owes on the most recent frame -- `uncovered`
-  /// padded and clamped by [stripFor] -- or `null` if no fallback ran.
-  /// Test-only, and **read-only**.
+  /// The rectangle the fallback walked on the most recent frame, or `null` if
+  /// no fallback ran. Test-only, and **read-only**.
   ///
   /// Read from the shipped `paintFrame` rather than recomputed by a test, and
   /// that is the whole point of it. Plan 3g's rig reimplemented the bake
@@ -825,10 +824,33 @@ class TileCache {
     // in one frame would be slower than the live path this cache exists to
     // replace. Clipped, so the covered tiles keep the pixels they just blitted.
     canvas.save();
+    // **The clip is unchanged, and that is a decision.** `_bake` states the
+    // rule for itself -- "The query is padded; the clip is not." Drop this
+    // line and the pad becomes overdraw onto tiles already blitted: the pixels
+    // stay correct, so the sweep still reads zero, and the cost this whole
+    // change exists to remove comes back silently.
     canvas.clipRect(uncovered, doAntiAlias: false);
-    _lastStrip = stripFor(uncovered, viewport);
+    // **Walk the union, not the viewport.** The clip above only discards
+    // drawing; the walk below is what costs. `DraftPainter.paint` derives its
+    // index query from `camera.visibleWorld(viewport)`, so handing it the full
+    // viewport tessellates the whole frame and throws most of it away -- which
+    // is what every fallback did before this line, and why the frame's excess
+    // read as a full live walk.
+    final strip = stripFor(uncovered, viewport);
+    _lastStrip = strip;
+    canvas.translate(strip.left, strip.top);
+    final q = quantised.worldToScreenMatrix;
     _drawInto(
-        canvas, viewport, quantised, painter, sink, vertices, origin, null);
+        canvas,
+        Size(strip.width, strip.height),
+        ViewportTransform(
+            worldToScreenMatrix: Transform2(
+                q.a, q.b, q.c, q.d, q.e - strip.left, q.f - strip.top)),
+        painter,
+        sink,
+        vertices,
+        origin,
+        null);
     canvas.restore();
     _liveDraws++;
   }
