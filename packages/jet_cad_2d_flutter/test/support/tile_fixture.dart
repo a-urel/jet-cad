@@ -294,13 +294,21 @@ DraftDocument nearAxisDiagonals(FlutterTextMeasurer measurer) {
 /// **What the predecessor extent (20..320 by 10..240) did.** It contained the
 /// resting visible box on all four edges, but by only about 9 to 13 *screen*
 /// pixels, against a sweep that pans 37 to 71. At `Offset(-41, 0)` and
-/// `Offset(0, -41)` the entering strip therefore landed on bare canvas: the
-/// live fallback drew **nothing** there and the sweep's zero-differing-pixel
-/// assertions were satisfied vacuously. Those two offsets are also precisely
-/// the ones whose strip does not start at (0, 0) -- the only ones where
-/// `TileCache.paintFrame`'s `canvas.translate(strip.left, strip.top)` is not
-/// a no-op -- so deleting that line left the whole widget suite green. The
-/// extent above is what gives that line a witness.
+/// `Offset(0, -41)` the entering `uncovered` region therefore landed on bare
+/// canvas: the live fallback drew **nothing** there and the sweep's
+/// zero-differing-pixel assertions were satisfied vacuously. Those two
+/// offsets are also precisely the ones whose strip does not start at (0, 0)
+/// -- the only ones where `TileCache.paintFrame`'s
+/// `canvas.translate(strip.left, strip.top)` is not a no-op -- so deleting
+/// that line left the whole widget suite green. The extent above is what
+/// gives that line a witness -- **not** the ink-inside-the-strip clause
+/// added alongside it (`InkReport.liveStripInk` in `tile_comparison.dart`):
+/// that clause measures `TileCache.debugLastStrip`, which pads `uncovered`
+/// outward, so it can find ink in already-blitted area even when the band
+/// the fallback owes is itself bare. A re-review confirmed that clause could
+/// not have supplied this witness on its own: restoring the predecessor
+/// extent with that clause live still lets `canvas.translate`'s deletion
+/// pass the whole suite. See gap H7 in STATUS.md.
 ///
 /// Lines rather than a fill, and axis-aligned rather than diagonal: this
 /// fixture carries the arm that must agree **exactly**, so it must not import

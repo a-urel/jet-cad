@@ -68,17 +68,28 @@ class InkReport {
   /// for rather than ignored.
   final int tiledTriangleCount;
 
-  /// Non-transparent pixels of the **live** capture that lie inside the band
-  /// the fallback owes — `TileCache.debugLastStrip`, in device pixels.
+  /// Non-transparent pixels of the **live** capture that lie inside
+  /// `TileCache.debugLastStrip`, in device pixels — [uncovered] padded
+  /// outward by `kTileSlack`, **not** `uncovered` itself. `uncovered` is the
+  /// band the fallback actually owes; the pad reaches back into area the
+  /// frame already blitted, so this field is weaker than its name might
+  /// suggest and does not prove the band owed carried any ink.
   ///
-  /// **This is the anti-vacuity clause the other six could not supply, and it
-  /// was earned.** [liveInk] counts the whole frame, which at a fallback
-  /// sample is dominated by the tiles the frame blitted; a fallback that
-  /// walked the strip and found nothing in it still leaves [liveInk] in the
-  /// tens of thousands and every pixel count at zero. Two of the eight swept
-  /// offsets were exactly that until `fillingGrid`'s extent was widened —
-  /// see its doc comment. Zero here means the sample proves nothing about
-  /// the fallback, however green it reads.
+  /// **A weaker anti-vacuity clause than the other six, and the gap is
+  /// named (gap H7 in STATUS.md).** [liveInk] counts the whole frame, which
+  /// at a fallback sample is dominated by the tiles the frame blitted; a
+  /// fallback that walked the strip and found nothing in it still leaves
+  /// [liveInk] in the tens of thousands and every pixel count at zero. What
+  /// actually closes that gap is `fillingGrid`'s extent, not this field: two
+  /// of the eight swept offsets carried no ink in the band owed until that
+  /// fixture was widened — see its doc comment — and a re-review confirmed
+  /// this clause alone would not have caught it: on the old, narrower
+  /// extent, with this clause live at a floor of 200, deleting
+  /// `canvas.translate` from `TileCache.paintFrame` still left the whole
+  /// widget suite green. The one place this field is demonstrably
+  /// load-bearing is under M3, where it reads `0` on the inverted rect
+  /// `Rect.fromLTRB(395.0, 52.0, 387.0, 300.0)` (`left > right`, so
+  /// `inkInside` returns `0` by construction) — see the mutation log.
   ///
   /// Zero on an arm that is not measured for it: [measureFallbackAgreement]
   /// only fills this in when it is asked to gate on it.
@@ -306,11 +317,13 @@ const double kTriangleBudgetRatio = 0.97;
 /// the ratio -- see [kTriangleBudgetRatio].
 ///
 /// [minimumStripInk] is the floor on [InkReport.liveStripInk], the ink the
-/// live frame carries **inside the band the fallback owes**. Passing `0`
-/// disables the clause and makes the sample vacuous as to the fallback; only
-/// `criterion 2b` does, because `nearAxisDiagonals` leaves five of the eight
-/// swept bands empty and widening it would import a different fixture's
-/// contract.
+/// live frame carries **inside `TileCache.debugLastStrip`** — the strip
+/// padded outward by `kTileSlack`, a weaker region than the band the
+/// fallback actually owes (`uncovered`); see [InkReport.liveStripInk].
+/// Passing `0` disables the clause and makes the sample vacuous as to the
+/// fallback; only `criterion 2b` does, because `nearAxisDiagonals` leaves
+/// five of the eight swept bands empty and widening it would import a
+/// different fixture's contract.
 Future<InkReport> measureFallbackAgreement(
   DraftDocument Function(FlutterTextMeasurer) of,
   FlutterTextMeasurer measurer,
@@ -347,16 +360,21 @@ Future<InkReport> measureFallbackAgreement(
     // across.
     expect(strip != Offset.zero & kTileViewport, isTrue,
         reason: 'pan $pan left no interior strip edge: strip=$strip');
-    // **Ink inside the band, not merely somewhere in the frame.** The two
+    // **Ink inside the padded strip, not merely somewhere in the frame --
+    // and weaker than ink inside the band the fallback owes.** The two
     // clauses above see the strip's *shape*; the two below see the frame's
     // *total* ink, which at a fallback sample is dominated by blitted tiles.
-    // None of them notices a strip that entered across bare canvas, and two
-    // of the eight swept offsets did exactly that until `fillingGrid`'s
-    // extent was widened -- passing every other clause here while the
-    // fallback drew nothing at all. A separate capture rather than a
-    // by-product of the comparison above: `measureTiledAgreement` reduces its
-    // two captures to counts, and this clause needs to know *where* the ink
-    // is.
+    // This clause measures `strip` (`debugLastStrip`, `uncovered` padded
+    // outward by `kTileSlack`), and the pad reaches back into area the frame
+    // already blitted, so ink here does not prove `uncovered` -- the band
+    // actually owed -- carried any. What protects this sweep from a vacuous
+    // band is `fillingGrid`'s extent, not this clause: two of the eight
+    // swept offsets entered across bare canvas until that fixture's extent
+    // was widened -- passing every other clause here while the fallback drew
+    // nothing at all -- see gap H7 in STATUS.md. A separate capture rather
+    // than a by-product of the comparison above: `measureTiledAgreement`
+    // reduces its two captures to counts, and this clause needs to know
+    // *where* the ink is.
     final report =
         measured.withStripInk(inkInside(await captureLiveFrame(rig), strip!));
     expect(report.liveStripInk, greaterThanOrEqualTo(minimumStripInk),

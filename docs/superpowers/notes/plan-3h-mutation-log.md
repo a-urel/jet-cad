@@ -49,9 +49,14 @@ Three things changed in the test tree (no production code changed):
    which clears the sweep by at least 24 screen pixels on every edge. The
    derivation is in the fixture's own doc comment.
 2. **A seventh anti-vacuity clause**, `InkReport.liveStripInk`: the live frame
-   must carry ink **inside the band the fallback owes**
-   (`TileCache.debugLastStrip`), not merely somewhere in the frame. The six
-   existing clauses all passed on the two vacuous samples.
+   must carry ink **inside `TileCache.debugLastStrip`** -- `uncovered` padded
+   outward by `kTileSlack`, a weaker region than the band the fallback
+   actually owes, since the pad reaches into area the frame already
+   blitted -- not merely somewhere in the frame. The six existing clauses all
+   passed on the two vacuous samples. **This clause did not, by itself, give
+   the fixture widening its witness**: what actually closes the vacuous-band
+   case is the widened extent below, not this clause -- see gap H7 in
+   STATUS.md.
 3. **`kTriangleBudgetRatio` re-bracketed**, `0.9` → `0.97`, because the wider
    fixture moved correct code's worst ratio from 0.833 to 0.9375. Both
    endpoints of the new bracket are recorded in the constant's doc comment and
@@ -215,6 +220,17 @@ Failing tests:
   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_cache_test.dart: stripFor pads an interior rect on every side
 ```
 
+**Re-fired again 2026-08-26 for the final record re-review**, which had
+measured `+370 ~1 -3` twice and flagged the `+369 ~1 -3` above as possibly
+off by one. This re-fire copied `lib/src/tile_cache.dart` aside, applied the
+same four-site `kTileSlack → 0.0` edit, ran `CI=true flutter test` (whole
+`packages/jet_cad_2d_flutter` package) once, and restored the file from the
+copy (never `git checkout`). Result: **`+369 ~1 -3: Some tests failed.`**,
+digit-identical to the transcript above, same three failing test names. This
+matches what this log already recorded, not the re-reviewer's `+370 ~1 -3`;
+recorded per "never synthesize test output" rather than silently adopting
+either prior figure.
+
 **Ruling: SURVIVES THE PIXEL SWEEP; DIES AT THE SUITE LEVEL on the pad's
 value.** Those are two different claims and the earlier bare "SURVIVES" in
 this log conflated them. The claim that matters for criterion 1b and gap H5 is
@@ -256,10 +272,17 @@ place:
 `stray`, `uncovered` and `differing` are all `0` at every one of the eight
 swept offsets, and `live` equals `tiled` at each (41464, except 42992 at the
 two `(0, 37)`/`(0, 53)` offsets). **The band-ink column is what makes this a
-result rather than an artefact**: every one of the eight bands the fallback
-owes carries between 2224 and 9696 device pixels of live ink, so the sweep had
-something to lose at every offset and did not lose it. Under the *old*
-fixture two of these bands were empty and the zeros there meant nothing.
+result rather than an artefact, and it is weaker than it sounds**: it
+measures ink inside the `strip` column above (`TileCache.debugLastStrip`,
+`uncovered` padded outward by `kTileSlack`), not inside `uncovered` itself --
+the band the fallback actually owes -- so a nonzero reading here does not by
+itself prove the band owed carried ink. On this fixture it did not need to:
+every one of the eight padded strips carries between 2224 and 9696 device
+pixels of live ink, so the sweep had something to lose at every offset and
+did not lose it. Under the *old* fixture two of these strips were empty and
+the zeros there meant nothing. What actually protects this sweep from a
+vacuous band is `fillingGrid`'s extent, not the band-ink column -- see gap H7
+in STATUS.md.
 
 **Why this is not a gate of this plan's own.** `kTileSlack`'s own history
 says how conditional the miss is: it is the same constant `_bake` already
@@ -362,6 +385,16 @@ test/tile_cache_test.dart: stripFor a strip touching the bottom-right clamps the
 test/tile_fallback_test.dart: criterion 2 and 2c: a partly baked frame equals the live frame
 test/tile_fallback_test.dart: criterion 2b: the near-axis arm stays inside the tiled path's bound
 ```
+
+**Re-fired again 2026-08-26 for the final record re-review**, which had
+measured `+366 ~1 -7` twice and flagged the `+365 ~1 -7` above as possibly
+off by one. This re-fire copied `lib/src/tile_cache.dart` aside, applied the
+same four-site `kTileSlack → -20.0` edit, ran `CI=true flutter test` (whole
+`packages/jet_cad_2d_flutter` package) once, and restored the file from the
+copy (never `git checkout`). Result: **`+365 ~1 -7: Some tests failed.`**,
+the same seven failing test names as above. This matches what this log
+already recorded, not the re-reviewer's `+366 ~1 -7`; recorded per "never
+synthesize test output" rather than silently adopting either prior figure.
 
 `criterion 2b` is digit-identical to every earlier firing —
 `Expected: a value less than or equal to <60>`, `Actual: <417>`,

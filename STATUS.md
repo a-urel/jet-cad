@@ -1,14 +1,15 @@
 # jet-cad — project status
 
-**Last updated:** 2026-08-25
-**Verified against:** `main` at `838c454` — Plan 3h's fix round 1, the last
-commit before this file's own Plan 3h close-out commit. **Plan 3h ran directly
-on `main`, `f642202..838c454`, eight tasks (the eighth split into 8a and 8b),
-nothing in flight** — no worktree, on the human's standing consent, the same
-as Plans 3e, 3f, 3f.1 and 3g. The tree is clean apart from the three files the
-traps below say never to commit. Every suite count below was produced by
-running that suite on this tree on 2026-08-25, not by reading a report — with
-the one exception the table marks as not re-run.
+**Last updated:** 2026-08-26
+**Verified against:** `main` at `122b6e3` — Plan 3h's fixture widening and
+full mutant re-measurement, the last code commit before this file's own
+record-only correction commit. **Plan 3h ran directly on `main`,
+`f642202..122b6e3`, eight tasks (the eighth split into 8a and 8b), nothing in
+flight** — no worktree, on the human's standing consent, the same as Plans
+3e, 3f, 3f.1 and 3g. The tree is clean apart from the three files the traps
+below say never to commit. Every suite count below was produced by running
+that suite on this tree on 2026-08-25 or 2026-08-26, not by reading a
+report — with the one exception the table marks as not re-run.
 
 ---
 
@@ -113,7 +114,7 @@ turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open
 
 Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
 
-| Suite | State (on `main` at `838c454`, run, not read off a report) |
+| Suite | State (on `main` at `122b6e3`, run, not read off a report) |
 |---|---|
 | `packages/jet_cad_2d` — engine | **797 tests, all pass**, analyze/format clean |
 | `packages/jet_cad_2d_flutter` — widgets | **372 tests pass, 1 skipped**, analyze/format clean |
@@ -403,14 +404,14 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 ## Resume here
 
 **Plan 3h (the fallback walk and its instrument) is done, worked directly on
-`main` at `f642202..838c454`, eight tasks (the eighth split into 8a and 8b),
+`main` at `f642202..122b6e3`, eight tasks (the eighth split into 8a and 8b),
 nothing in flight — and its headline criterion MISSES.** Criterion 3's ratio
 reads **2.35x against a gate of ≥ 2.4x**; criterion 6 misses too. Both are
 recorded as misses, not adjusted or re-run to chase their thresholds. At n=3
 per arm the measurement cannot settle whether 2.35 is real or noise, the 2.4
 gate was itself mis-derived across sessions, and the mean shows the effect is
 real and large but is offered as evidence, not a gate. Read the full account,
-including where each of the six mutants died and gaps H1–H6, at
+including where each of the six mutants died and gaps H1–H7, at
 [Plan 3h](#plan-3h--the-fallback-walk-and-its-instrument).
 
 **A resumer's ledger chore:** Plan 3g's ledger is already archived at
@@ -1248,7 +1249,7 @@ is owed first is a back-to-back, same-session re-run.
 
 ### Plan 3h — the fallback walk and its instrument
 
-**Done, worked directly on `main`, `f642202..838c454`, eight tasks (the eighth
+**Done, worked directly on `main`, `f642202..122b6e3`, eight tasks (the eighth
 split into 8a and 8b), nothing in flight** — no worktree, the same standing
 consent as Plans 3e, 3f, 3f.1 and 3g. Spec:
 [docs/superpowers/specs/2026-08-25-jet-cad-2d-plan-3h-pan-frame-design.md](docs/superpowers/specs/2026-08-25-jet-cad-2d-plan-3h-pan-frame-design.md).
@@ -1356,8 +1357,9 @@ transcript).**
   change what is queried, so the triangle count cannot either. Recorded as
   **gap H6**.
 
-**Gaps H1–H6** — H1–H5 carried from the spec's own accepted-gap list, H3 and
-H5 restated and H6 added by the whole-branch review's fix round (2026-08-26).
+**Gaps H1–H7** — H1–H5 carried from the spec's own accepted-gap list, H3 and
+H5 restated and H6 added by the whole-branch review's fix round (2026-08-26),
+H7 added by the final record re-review (2026-08-26).
 - **H1.** Criteria 4 and 5 (`PAN_STEP=30/60`) are recorded, not gated, per
   design. Recorded: `perFrame` rises 0.117 → 0.500 → 0.967 as `PAN_STEP` goes
   7.6 → 30 → 60 px/frame, `liveDraws` rises 10 → 47 → 115, and at 60 px/frame
@@ -1398,6 +1400,20 @@ H5 restated and H6 added by the whole-branch review's fix round (2026-08-26).
   demonstrably not. Open. **The tally is six fired, four killed, two
   survivors**, over a chosen six — not a claim about every mutant that could
   be written.
+- **H7.** The anti-vacuity clause added alongside `fillingGrid`'s widening
+  (`InkReport.liveStripInk`) measures ink inside `TileCache.debugLastStrip`
+  — `uncovered` padded outward by `kTileSlack` — not inside `uncovered`
+  itself, the band the fallback actually owes. The pad reaches back into
+  area the frame already blitted, so the clause is weaker than its own
+  comment claimed: a re-review showed that on the predecessor, too-narrow
+  `fillingGrid` extent, with this clause live at a floor of 200, deleting
+  `TileCache.paintFrame`'s `canvas.translate` still left the whole widget
+  suite green. Measuring ink inside `uncovered` rather than the padded strip
+  would need a debug accessor on `TileCache` that does not exist. Until
+  then, the sweep's protection against a vacuous band rests on
+  `fillingGrid` clearing the largest swept pan offset, not on this clause.
+  Added 2026-08-26 by the final record re-review; not a gate this plan
+  built.
 
 **One deferred minor, and one closed.** Still open: the triangle-budget gate
 has **2** triangles of headroom at its tightest swept offset (60 of 62
