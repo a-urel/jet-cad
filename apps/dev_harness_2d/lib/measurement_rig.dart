@@ -104,16 +104,32 @@ void report(String rig, List<FrameTiming> timings) {
 /// per flush -- so summing them makes the guard say "something was drawn" on
 /// either backend.
 ///
+/// **And under `TILES=on` neither counter is the answer.** A frame whose
+/// viewport is fully covered by live tiles blits and draws nothing at all --
+/// that is the entire point of the cache -- so both counters read zero for the
+/// healthiest frame the cache can produce. Measured, not reasoned: on
+/// 2026-08-25 R4b at 500,000 entities with tiles on threw here, which means
+/// **R4b had never once been measured with tiles on**; Plan 3g ran R2's tile
+/// phases and never this configuration. [TileCache.blitCount] and
+/// [TileCache.liveDrawCount] are the tiled path's evidence that a frame
+/// happened, and the guard still bites: they are reset beside the sinks at
+/// each call site, so a frame that never ran leaves all four at zero.
+///
 /// Shared rather than copied, because copying it is how R4a and R4b came to
 /// keep the canvas-only form after R2's was fixed.
-void requireRepaint(CanvasDrawSink sink, VerticesDrawSink? vertices) {
+void requireRepaint(CanvasDrawSink sink, VerticesDrawSink? vertices,
+    {TileCache? tileCache}) {
   // The counters above are read from a frame that has to actually have
   // happened. `panBy(Offset.zero)` forces one only because Transform2 has no
   // operator== for ValueNotifier to dedupe against -- a property these rigs
   // depend on and do not own. If that ever changes, a rig would print a
   // plausible-looking zero rather than fail, and a zero is the one wrong
   // number nobody questions.
-  if (sink.canvasCallCount + (vertices?.totalFlushCount ?? 0) == 0) {
+  final drew = sink.canvasCallCount +
+      (vertices?.totalFlushCount ?? 0) +
+      (tileCache?.blitCount ?? 0) +
+      (tileCache?.liveDrawCount ?? 0);
+  if (drew == 0) {
     throw StateError('no repaint happened: the forced frame did not draw');
   }
 }
@@ -224,7 +240,34 @@ void printBackend(RenderBackend backend, VerticesDrawSink? vertices) {
   }
   print('  backend=${backend.name} '
       'triangles=${vertices.frameTriangleCount} '
-      'drawVerticesCalls=${vertices.totalFlushCount}');
+      'drawVerticesCalls=${vertices.totalFlushCount} '
+      '${capacity(vertices)}');
+}
+
+/// The vertex buffer's high-water mark, in vertices and in bytes.
+///
+/// **Owed to Plan 3h and never taken by Plan 3g.** Baking per tile flushes and
+/// rewinds the buffer between tiles, so a tiled run's mark should fall to a
+/// single tile's geometry -- and if it does, a tile budget *replaces* that
+/// memory rather than adding to it, which is the difference between 3h
+/// starting from 96 MiB and starting from 96 + 96.
+///
+/// **Read it as a run-to-run comparison and never as a within-run one.**
+/// `VerticesDrawSink` never gives capacity back (`vertices_draw_sink.dart:163`
+/// says so and `paint_allocation_test.dart` depends on it), so this number is
+/// monotone for the life of the sink: one live walk anywhere -- a warm-up
+/// frame, or the fallback drawing an uncovered strip -- pins it at the
+/// full-frame figure for every later phase. It is printed at several points
+/// below so that *when* it was reached is visible, but the answer to the
+/// question above is `TILES=off` against `TILES=on` in two separate runs.
+///
+/// Twelve bytes a vertex: `_positions` is two `Float32`s and `_colors` one
+/// `Int32`. The 96.00 MiB `STATUS.md` records is 8,388,608 vertices exactly.
+String capacity(VerticesDrawSink? vertices) {
+  if (vertices == null) return 'capacityVertices=n/a';
+  final v = vertices.debugCapacityVertices;
+  return 'capacityVertices=$v '
+      'capacityMiB=${(v * 12 / (1024 * 1024)).toStringAsFixed(2)}';
 }
 
 /// The text counters, printed by every rig so the on/off delta is one define
@@ -430,7 +473,8 @@ Future<void> runTilePhases({
   print('  tile warm: frames=$warmFrames '
       'liveTiles=${cache.liveTileCount} '
       'tileBytes=${cache.liveBytes} '
-      'evictions=${cache.evictionCount}(life)');
+      'evictions=${cache.evictionCount}(life) '
+      '${capacity(vertices)}');
 
   Future<void> phase(String name, int frames, Offset step) async {
     // Two throwaway frames, then the bucket swap: a `FrameTiming` is reported
@@ -470,6 +514,9 @@ Future<void> runTilePhases({
         'newEvictions=${cache.evictionCount - evictionsBefore} '
         'liveTiles=${cache.liveTileCount} '
         'tileBytes=${cache.liveBytes}');
+    // Monotone, so this reads "was more needed during this phase", never "is
+    // this what the phase needs". See [capacity].
+    print('    ${capacity(vertices)}');
   }
 
   await phase('tile hold', 60, Offset.zero);

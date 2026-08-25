@@ -672,6 +672,10 @@ them.
   `STATUS.md:1066` records** at 500,000 entities should fall to a single tile's
   geometry. **If it does, the tile budget replaces that memory rather than adding
   to it**, and 3h's budget starts from the new number rather than from 96 + 96.
+  **Taken 2026-08-25. The answer is no** — 192.00 MiB with tiles on and with
+  them off, and the same at 50,000 entities, so the budget adds rather than
+  replaces and the figure is not a per-entity cost. See
+  [2026-08-25-vertex-buffer-high-water.md](2026-08-25-vertex-buffer-high-water.md).
   This is `debugCapacityVertices` with tiles on against tiles off at 500,000
   entities. **It was not read.** Task 12 measured criteria 10 and 11 and fired
   M7; this reading was not in its brief and remains owed. It needs a device.

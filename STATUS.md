@@ -180,7 +180,10 @@ nothing per entity in steady state, and O(1) per flush", measured by
 on the paint path.
 
 **Costs and gaps the note records rather than smooths over:** 96.00 MiB of
-vertex buffer pinned for the widget's life at 500,000 entities; the web rows are
+vertex buffer pinned for the widget's life at 500,000 entities (**a Plan 3d
+figure; the tree read 192.00 MiB on 2026-08-25, and not as a function of entity
+count** — see
+[the high-water note](docs/superpowers/notes/2026-08-25-vertex-buffer-high-water.md)); the web rows are
 **not reproducible from what was committed** (raw artifacts committed at
 `docs/superpowers/notes/2026-08-21-plan-3d-web-raw/`); the seam join and the
 point-shape fix have **no coverage through any frame path**; the permitted
@@ -393,13 +396,16 @@ plan.**
    being drawn — so the answer is level-of-detail geometry, and the tile cache
    can already hold it: a generation is keyed by scale, so a coarser bake can
    never outlive the scale it was simplified for.
-3. **One measurement that was never taken and is owed before 3h sets a memory
-   budget:** `debugCapacityVertices` with tiles on against tiles off at
-   500,000 entities. Baking per tile flushes and rewinds the buffer between
-   tiles, so the **96.00 MiB high-water mark** this file records should fall to
-   a single tile's geometry. If it does, the tile budget **replaces** that
-   memory rather than adding to it, and 3h starts from the new number instead
-   of from 96 + 96. It needs a device.
+3. **The memory measurement, taken 2026-08-25 — and the answer is no.**
+   `debugCapacityVertices` reads **16,777,216 vertices, 192.00 MiB, in all five
+   configurations measured**: 50,000 and 500,000 entities, tiles on and off.
+   **Tiles change nothing, so the tile budget adds to that memory rather than
+   replacing it** — 3h budgets 192 + tiles. **And the mark is not a function of
+   entity count**, which is how both places below still phrase it: a tenfold
+   corpus reads the same number. The steady frame uses an eighth of what stays
+   pinned; the mark is set by the sweep's worst camera and never released,
+   because capacity is deliberately never given back. Full measurement:
+   [docs/superpowers/notes/2026-08-25-vertex-buffer-high-water.md](docs/superpowers/notes/2026-08-25-vertex-buffer-high-water.md).
 
 **Plan 3f.1 (hardening before the picture cache) is done, worked directly on
 `main` at `c078677..b1e9ec1`. Its exit gate is 16 of 17, the one miss being its
@@ -1130,7 +1136,11 @@ picture flushes the vertex buffer at its boundary. There is **no crossover
 number** to work against — the vertices backend's raster margin is still
 widening at 500,000 entities — and there is **96.00 MiB of vertex buffer pinned
 for the widget's life** at that corpus size, which is the arithmetic a tiling
-scheme changes. Read the margin against **canvas calls**, not entity count: a
+scheme changes. **Both halves of that last clause were measured false on
+2026-08-25:** the figure is 192.00 MiB on today's tree, it is the same at
+50,000 entities so it is not "at that corpus size" at all, and **tiling does not
+change it** — see
+[the high-water note](docs/superpowers/notes/2026-08-25-vertex-buffer-high-water.md). Read the margin against **canvas calls**, not entity count: a
 10× entity rise moves `screenSpaceLeafCount` only 2.13× and `dashSpans` 3.03×.
 
 The prize is real: the dominant cost is leaf-count-bound GPU vertex work, and

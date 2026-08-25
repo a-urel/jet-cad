@@ -266,6 +266,10 @@ void main() {
     // per-frame figures is a wrong comparison waiting to be published.
     app.sink.resetCounters();
     app.vertices?.resetCounters();
+    // Under TILES=on a fully covered frame draws into neither sink; the
+    // cache's own counters are what say the frame happened. See
+    // `requireRepaint`.
+    app.tileCache?.resetCounters();
     final layoutsBefore = app.sink.measurer.layoutCount;
     final paragraphEvictionsBefore = app.sink.measurer.paragraphEvictionCount;
     final metricsEvictionsBefore = app.sink.measurer.metricsEvictionCount;
@@ -277,7 +281,7 @@ void main() {
         'threshold=${app.index.rootIndex.rebuildThreshold} '
         'rebuilds=${app.index.rebuildCount - rebuildsBefore} '
         'handles burned=${app.doc.handleSeed.current.value - handlesBefore}');
-    requireRepaint(app.sink, app.vertices);
+    requireRepaint(app.sink, app.vertices, tileCache: app.tileCache);
     printInvariants(app.painter, app.sink, tileCache: app.tileCache);
     printBackend(app.resolvedBackend, app.vertices);
     printTextCounters(app.painter, app.sink,
@@ -326,6 +330,10 @@ void main() {
     // per-frame figures is a wrong comparison waiting to be published.
     app.sink.resetCounters();
     app.vertices?.resetCounters();
+    // Under TILES=on a fully covered frame draws into neither sink; the
+    // cache's own counters are what say the frame happened. See
+    // `requireRepaint`.
+    app.tileCache?.resetCounters();
     final layoutsBefore = app.sink.measurer.layoutCount;
     final paragraphEvictionsBefore = app.sink.measurer.paragraphEvictionCount;
     final metricsEvictionsBefore = app.sink.measurer.metricsEvictionCount;
@@ -334,7 +342,7 @@ void main() {
     report('R4b ($kEntities)', timings);
     print('  command ${clock.summary}');
     print('  rebuilds=${app.index.rebuildCount - before} over $kSteps frames');
-    requireRepaint(app.sink, app.vertices);
+    requireRepaint(app.sink, app.vertices, tileCache: app.tileCache);
     printInvariants(app.painter, app.sink, tileCache: app.tileCache);
     printBackend(app.resolvedBackend, app.vertices);
     printTextCounters(app.painter, app.sink,
