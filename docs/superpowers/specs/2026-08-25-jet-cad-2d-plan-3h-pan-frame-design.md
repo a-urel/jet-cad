@@ -3,8 +3,10 @@
 **Date:** 2026-08-25. **Base:** `main` at `dfeb240`. **Revised** the same day
 after three reviews; §8 records what was removed and why.
 
-**Goal.** Make a panning frame at 500,000 entities clear its 16.67 ms budget
-**repeatably** — every run of a three-run set, not a median that straddles it.
+**Goal.** Take the waste out of the panning frame's fallback walk at 500,000
+entities, and gate the result on a **ratio that is measured and reachable**
+rather than on an absolute threshold this plan's scope cannot deliver. Three
+runs per arm.
 
 **Inherited from Plan 3g:** criterion 11 missed by 2.1x and its remedy was
 recorded as spent. **That diagnosis is superseded by a measurement**, and this
@@ -73,7 +75,8 @@ waste, not work.**
 
 Clamped arm, three runs: 16.66 / 15.26 / 17.40, median **16.66**, against a
 16.67 ms threshold. **That reaches the threshold; it does not pass it**, and
-one run of three lands over. Criterion 3 is written against exactly that.
+one run of three lands over. §4 explains why criterion 3 is therefore a ratio
+and not that threshold.
 
 ---
 
@@ -99,6 +102,18 @@ for 400 x 300. Measured: the vertex buffer doubled to 384.00 MiB on a run whose
 every other counter matched. **The pad belongs on interior edges; on the
 viewport's own edge the full-frame walk is the ceiling.**
 
+**And `uncovered` is a bounding rectangle, not the uncovered set.** `paintFrame`
+accumulates it with `expandToInclude` (`tile_cache.dart:742-744`), so a
+diagonal pan that brings in both a column and a row yields an L-shaped set
+whose bounding rectangle can be the entire viewport. **This is load-bearing
+twice over**: it is why a padded union routinely exceeds the baseline on the
+device rig rather than only on a cold cache, and it is why §3's samples must
+prove their own strip has an interior edge instead of assuming a pan produces
+one. The vertex-buffer step is a *doubling* of a geometric growth policy
+(`vertices_draw_sink.dart:510`, capacity is never returned at `:163`), so
+**192.00 MiB sits on the boundary with no headroom** — any future widening of
+any walk re-doubles it. That is a handoff to Plan 3j, not a footnote.
+
 **D4. The strip computation is a pure function, `stripFor(uncovered, viewport)`.**
 This splits the narrowing's gatable half from its ungatable half: D3 becomes a
 unit assertion instead of a device observation.
@@ -123,10 +138,16 @@ implementer's bar was that a third should trigger revisiting the design. A
 that are each a defect if omitted:
 
 - **A magnitude in logical pixels per frame, not a component.** The rig's step
-  is `Offset(-7, -3)`, magnitude 7.616. `PAN_STEP` scales that vector:
-  `Offset(-7, -3) * (PAN_STEP / sqrt(58))`. **The direction is preserved**, so
-  every arm meets the tile lattice at the angle every prior number was taken
-  at; an axis-aligned fast pan would measure a different interaction.
+  is `Offset(-7, -3)`, magnitude `sqrt(58)` = 7.615773. `PAN_STEP` scales that
+  vector: `Offset(-7, -3) * (PAN_STEP / sqrt(58))`. **The direction is
+  preserved**, so every arm meets the tile lattice at the angle every prior
+  number was taken at; an axis-aligned fast pan would measure a different
+  interaction.
+- **Unset means no scaling at all**, not `PAN_STEP=7.6`. `7.6 / sqrt(58)` is
+  0.99793, so passing the rounded figure would rescale the historical step and
+  make the 7.6 arm incomparable with every row already recorded at it. The
+  criteria table's "7.6 px/frame" is shorthand for the unscaled
+  `Offset(-7, -3)`.
 - **It applies to the tile phase only** (`measurement_rig.dart:523`), **not to
   R2's own pan** (`:357`). Taking both would make every prior plan's R2 row
   incomparable.
@@ -190,16 +211,31 @@ each sample:
 2. resets counters and drops the budget to one tile;
 3. sets the **absolute** pan offset for this sample;
 4. renders exactly one comparison frame;
-5. **asserts `bakeCount == 1` and `liveDrawCount == 1` before its pixel report
-   is accepted.**
+5. **asserts `bakeCount == 1` and `liveDrawCount == 1`**; and
+6. **asserts the strip it actually walked has at least one strictly interior
+   edge** — `strip != viewport` is the minimum, and the offsets are chosen so a
+   single band enters rather than an L.
 
-Step 5 is what makes an M2 or M3 failure attributable to the narrowing rather
-than to a fallback that never ran.
+**Step 6 is not redundant with step 5, and D3 says why.** `uncovered` is a
+bounding rectangle, so a diagonal pan's L-shaped uncovered set can bound to the
+whole viewport; after `stripFor` clamps it there is no interior boundary at
+all, and dropping the pad or shrinking the query stays pixel-correct for that
+sample while both counters read exactly what step 5 demands. **A sample that
+passes step 5 alone can be vacuous.**
+
+**The strip must be read from the shipped `paintFrame` path**, exposed as a
+read-only getter beside `tilesHolding` — never recomputed in the test from the
+grid. Plan 3g's rig computed its own bake geometry in `_probeBake` instead of
+calling `_bake`, and its overdraw column consequently described a
+reimplementation rather than the shipped code. A read-only getter is not the
+third mutable knob D7 refuses; `tilesHolding` is the precedent.
 
 **A sweep of offsets, not one fixture.** Where the boundary falls relative to
 the geometry is incidental in any single pan. The sweep steps the offset on
-both axes by amounts that are not multiples of the tile size, so the boundary
-never aligns with the lattice, and reports the worst case.
+both axes by amounts that are not multiples of **the tile's logical size**
+(`tileDevicePixels / devicePixelRatio` — 32 logical pixels at the rig's 64
+device-pixel tile and `kTileDpr` of 2, not 64), so the boundary never aligns
+with the lattice, and reports the worst case.
 
 **Two arms, two claims.**
 
@@ -222,26 +258,46 @@ behind H3's bound was done offline.
 
 | # | criterion | threshold | layer |
 |---|---|---|---|
-| 1 | the sweep reddens under a query shrunk 20 logical px | must fail | unit |
+| 1 | the sweep reddens under a query shrunk 20 logical px (M3) | must fail | unit |
+| 1b | the sweep reddens with the pad dropped (M2) | must fail, **or becomes H5** | unit |
 | 2 | partly baked frame equals live, axis-aligned arm, every sample | 0 stray, 0 uncovered, 0 differing | unit |
 | 2b | near-axis arm | `differingPixels <= 60`, ratio < 0.01 | unit |
-| 2c | every sample proved its own fallback | `bakeCount == 1`, `liveDrawCount == 1` | unit |
-| 3 | `tile pan` p95 at 7.6 px/frame, **three runs of three** | **every run ≤ 16.67 ms** | device |
-| 4 | `tile pan` p95 at 30 px/frame | **recorded, not a gate** | device |
-| 5 | `tile pan` p95 at 60 px/frame | **recorded, not a gate** | device |
+| 2c | every sample proved its own fallback **and an interior strip edge** | `bakeCount == 1`, `liveDrawCount == 1`, `strip != viewport` | unit |
+| **3** | **`tile pan` p95, baseline over narrowed, same machine, three runs each** | **ratio ≥ 2.4x** | device |
+| 3b | `tile pan` p95 absolute, three runs | **recorded, not a gate** | device |
+| 4 | `tile pan` p95 at 30 px/frame | recorded, not a gate | device |
+| 5 | `tile pan` p95 at 60 px/frame | recorded, not a gate | device |
 | 6 | `tile hold` p50 and p95 do not regress | p50 ≤ 2.0 ms, p95 ≤ 2.5 ms | device |
 | 7 | peak tile bytes | ≤ 96 MiB | unit + device |
+| 8 | vertex-buffer high-water, narrowed arm | **192.00 MiB expected; any increase explained** | device |
 
-**Criterion 3 asks for repeatability, not margin, and that is the honest
-target.** The spike read 16.66 / 15.26 / 17.40 — a median under the threshold
-and one run over it. Requiring all three under is a real gate: **the current
-code fails it**, at 17.40. It also cannot be met by tuning a threshold, only by
-finding the remaining milliseconds.
+### Criterion 3 is a ratio, and the two reasons are the same reason
 
-**A 12.0 ms target was considered and dropped.** It was silently a bet on
-prefetch closing 4.7 ms, and prefetch left this plan (§8). No measurement
-supports 12.0 for the narrowing alone, so writing it would be a threshold
-without evidence.
+**An absolute threshold cannot be met inside this plan's scope.** The spike
+already measured what the narrowing gives — 16.66 / 15.26 / 17.40 — and §7's
+six files contain nothing that produces a millisecond the spike did not. A
+first draft gated three-of-three at ≤ 16.67 ms and **specified the plan to fail
+its own headline criterion**, which is precisely how Plan 3g's criterion 11
+reached this document.
+
+**And an absolute threshold cannot witness M4.** Correct code reads 17.40 at
+worst and M4 reads 43.13: both FAIL a 16.67 ms gate, so it distinguishes
+nothing. That is the shape §8.3 condemns in prefetch, reproduced one table
+away from the condemnation.
+
+**The ratio answers both.** It is measured (43.13 / 16.66 = **2.59x**),
+robust to machine load because both arms run on one machine in one session, it
+is reachable, and **M4 reads ≈ 1.0 and dies on it** — M4 is "narrow the clip,
+not the query", which is the unnarrowed walk wearing the narrowing's clip.
+
+**The baseline arm is produced by the plan, not quoted.** Its first task
+re-measures `tile pan` p95 at the base commit on the implementer's own machine.
+Quoting 43.13 across machines and days would make the ratio a cross-session
+comparison, which is the weakness criterion 3 exists to avoid.
+
+**16.67 ms itself stays visible as criterion 3b, recorded and ungated.** The
+plan is expected to land near it and not reliably under it; saying so here is
+the difference between a known miss and Plan 3g's kind.
 
 **Criteria 4 and 5 are recorded, not gates, and for two reasons.** No
 measurement exists at those speeds, so any threshold would be invented. And
@@ -257,6 +313,10 @@ blindness that made Plan 3g's criterion 10 unable to see its M7. Nothing in
 this plan is expected to move the hold phase at all, which is exactly why a
 tail gate is cheap here.
 
+**Criterion 8 is the clamp's only device witness.** M1 checks `stripFor`'s
+arithmetic and nothing else observes what D3 exists to protect; the unclamped
+arm's 384.00 MiB is what it is watching for.
+
 ---
 
 ## 5. Mutants
@@ -266,13 +326,25 @@ tail gate is cheap here.
 | M1 | drop the clamp — strip is union + pad, unbounded | **unit**, via `stripFor` |
 | M2 | drop the pad (`pad = 0`) | **unit**, the sweep |
 | M3 | shrink the query 20 logical px | **unit**, the sweep (criterion 1) |
-| M4 | narrow the clip but **not** the query | **device only**, criterion 3 |
+| M4 | narrow the clip but **not** the query | **device**, criterion 3's ratio |
 
-**M4 is the original defect this plan fixes, and it is the one the new
-instrument still cannot kill.** Its pixels are correct — only the cost moves.
-Naming it with "device only" is the point of D9: after §3's work it would be
-easy to believe the narrowing is fully unit-gated, and only its **arithmetic**
-is.
+**M4 is the original defect this plan fixes, and no unit gate can kill it.**
+Its pixels are correct — only the cost moves. It dies on criterion 3 **because
+that criterion is a ratio**: M4 is the unnarrowed walk wearing the narrowing's
+clip, so it reads ≈ 1.0 where the fix reads ≥ 2.4. Under the first draft's
+absolute threshold it died nowhere, since correct code failed that threshold
+too.
+
+**M2 may not be killable, and the plan pre-commits to saying so.** Criterion 1b
+requires it to redden the sweep. But `pad = 0` does not delete geometry the way
+M3's 20-pixel shrink does: the query is a rect intersection on entity bounds,
+so dropping the pad loses only entities lying wholly outside the strip whose
+**half stroke width** bleeds into it. `kTileSlack`'s own history says how
+conditional that is — F1 appeared at six of forty-one swept zoom factors — and
+`fillingGrid` is axis-aligned thin lines swept over offsets, not zoom. **If
+criterion 1b cannot be made to fail, M2 becomes gap H5 and D2's pad is retained
+on `_bake`'s argument rather than on a gate.** Writing that here is cheaper than
+discovering it in a fix round.
 
 ---
 
@@ -287,7 +359,11 @@ is.
 some slopes. Bounded on the near-axis arm against the tiled path's existing
 number; not eliminated.
 
-**H4. M4 has no unit witness.** Per §5.
+**H4. M4 has no unit witness.** It dies only on criterion 3's device ratio.
+
+**H5. M2 may be unkillable.** Conditional on criterion 1b; per §5. If it opens,
+D2's pad rests on `_bake`'s argument and F1's history rather than on a gate of
+this plan's own.
 
 ---
 
@@ -301,8 +377,15 @@ number; not eliminated.
 | `packages/jet_cad_2d_flutter/test/tile_cache_test.dart` | the sweep's tests |
 | `apps/dev_harness_2d/lib/measurement_rig.dart` | `PAN_STEP` at the tile phase |
 | `apps/dev_harness_2d/lib/main.dart` | `_doubleDefine`, `PAN_STEP` |
+| `STATUS.md` | record that Plan 3g's G3 moves to 3i and the vertex buffer to 3j |
 
 `packages/jet_cad_2d` is not touched.
+
+**The `STATUS.md` row is not bookkeeping.** `STATUS.md` and the Plan 3g results
+note both still read "G3 — zoom stays where it is. OPEN. **It is Plan 3h**". A
+session that resumes from `STATUS.md` — which `CLAUDE.md` instructs every
+session to read first — would resume on the old map. The renumbering lands with
+this plan's first task, not its last.
 
 ---
 
