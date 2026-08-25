@@ -1,16 +1,37 @@
 # jet-cad — project status
 
-**Last updated:** 2026-08-24
-**Verified against:** `main` at `1b7ea04` — the gap G7 containment gate, one
-commit past Plan 3g's ledger archive at `2367a20`. **Plan 3g was pushed on
-2026-08-24**, 45 commits, `6c6dc42..2367a20`; the tree is clean apart from the
-three files the traps below say never to commit. Every suite count below was
-produced by running that suite on this tree on 2026-08-24, not by reading a
-report — with the one exception the table marks as not re-run.
+**Last updated:** 2026-08-25
+**Verified against:** `main` at `838c454` — Plan 3h's fix round 1, the last
+commit before this file's own Plan 3h close-out commit. **Plan 3h ran directly
+on `main`, `f642202..838c454`, eight tasks (the eighth split into 8a and 8b),
+nothing in flight** — no worktree, on the human's standing consent, the same
+as Plans 3e, 3f, 3f.1 and 3g. The tree is clean apart from the three files the
+traps below say never to commit. Every suite count below was produced by
+running that suite on this tree on 2026-08-25, not by reading a report — with
+the one exception the table marks as not re-run.
 
 ---
 
 ## TL;DR — where you left off
+
+**Plan 3h (the fallback walk and its instrument) is done, worked directly on
+`main`, nothing in flight — and its headline criterion MISSES.** Criterion 3,
+the `tile pan` p95 ratio (M4 arm over narrowed, same session), reads **2.35x
+against a gate of ≥ 2.4x**. Criterion 6 also **MISSES** (`tile hold` p95,
+2.77 ms against 2.5 ms on one of three runs). Neither is adjusted or re-run to
+chase its threshold. At n=3 per arm the measurement **cannot settle** whether
+2.35 is real or noise — nine pairwise ratios span 1.82 to 2.84, straddling 2.4
+in the middle — and the **2.4 gate was itself mis-derived** from a
+cross-session numerator, the exact comparison a ratio measured in one session
+exists to prevent. The **mean**, offered as evidence rather than a gate, shows
+a real, large, non-overlapping effect (≈16.6 ms saved per fallback frame).
+Five mutants: four killed in the widget suite (M1, M3, and M5 — found by a
+reviewer, not planned), one survives as the plan's own pre-committed gap
+(M2 → H5), and **M4 — which the plan itself said "has no unit witness" —
+turns out to die doubly**, in the widget suite and on the device ratio; that
+correction is this task's most important line. See
+[Plan 3h](#plan-3h--the-fallback-walk-and-its-instrument) and
+[Resume here](#resume-here).
 
 **Plan 3g (the rasterised tile cache) is done and pushed, sixteen tasks, worked
 directly on `main` at `477d4c5..2367a20`, nothing in flight.** **Its exit gate
@@ -86,13 +107,13 @@ turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open
 
 Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
 
-| Suite | State (on `main` at `1b7ea04`, run, not read off a report) |
+| Suite | State (on `main` at `838c454`, run, not read off a report) |
 |---|---|
 | `packages/jet_cad_2d` — engine | **797 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **365 tests pass, 1 skipped**, analyze/format clean |
-| `flutter test --tags golden` | **35 pass**, 40 PNGs (20 fixtures × 2 backends, 3 fills and 3 text-LOD rungs); no pre-existing PNG regenerated |
+| `packages/jet_cad_2d_flutter` — widgets | **372 tests pass, 1 skipped**, analyze/format clean |
+| `flutter test --tags golden` | **35 pass**, no pre-existing PNG regenerated |
 | `apps/dev_harness_2d` | analyze/format clean |
-| `benchmark/query_throughput.dart` | **NOT RE-RUN on 2026-08-24.** Last read 2026-08-23: **GATE: PASS**, every gated row under its threshold, `snap at dirty threshold` included (p50 0.552 ms against 1.0 ms). That row is Plan 2's carried failure and it is a **timing on a shared machine**: recorded as passing that day, not declared fixed |
+| `benchmark/query_throughput.dart` | **NOT RE-RUN on 2026-08-25.** Last read 2026-08-23: **GATE: PASS**, every gated row under its threshold, `snap at dirty threshold` included (p50 0.552 ms against 1.0 ms). That row is Plan 2's carried failure and it is a **timing on a shared machine**: recorded as passing that day, not declared fixed |
 
 The widget suite's one skip is `test/rig/paint_microbench_test.dart`, skipped at
 suite level by the `rig` tag in `dart_test.yaml` — pre-existing and by design.
@@ -375,47 +396,51 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Plan 3g (the rasterised tile cache) is done and pushed, worked directly on
-`main` at `477d4c5..2367a20`, nothing in flight. Its exit gate is 11 of 13,
-and gap G7 closed on 2026-08-24 at `1b7ea04`, after the plan.** Its ledger is
-archived at
-[docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/](docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/)
-and `.superpowers/sdd/` is empty — **no ledger chore is outstanding for any
-plan.**
+**Plan 3h (the fallback walk and its instrument) is done, worked directly on
+`main` at `f642202..838c454`, eight tasks (the eighth split into 8a and 8b),
+nothing in flight — and its headline criterion MISSES.** Criterion 3's ratio
+reads **2.35x against a gate of ≥ 2.4x**; criterion 6 misses too. Both are
+recorded as misses, not adjusted or re-run to chase their thresholds. At n=3
+per arm the measurement cannot settle whether 2.35 is real or noise, the 2.4
+gate was itself mis-derived across sessions, and the mean shows the effect is
+real and large but is offered as evidence, not a gate. Read the full account,
+including where each of the five mutants died and gaps H1–H5, at
+[Plan 3h](#plan-3h--the-fallback-walk-and-its-instrument).
 
-**Renumbered 2026-08-25.** This section originally read G3 and the vertex
-buffer as Plan 3h's own starting points. They are not. **Plan 3h is the
-fallback walk and its instrument, nothing else** — item 1 below. Plan 3g
-assigned G3 to 3h; **G3 now belongs to Plan 3i** (item 2), and the 192 MiB
-vertex buffer is **Plan 3j**'s question (item 3), not 3h's. The reassignment
-is licensed by item 3's own finding: the 2026-08-25 high-water measurement
-showed memory is not a consequence of the pan frame, so the pan frame could
-be finished without settling zoom first.
+**A resumer's ledger chore:** Plan 3g's ledger is already archived at
+[docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/](docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/).
+Plan 3h had no worktree, so its own
+`.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/` material is **not
+yet archived** to `docs/superpowers/ledgers/` — the one ledger chore now
+outstanding. Do that before clearing it — the ordering is the lesson every
+prior archive note in this file records: archive onto the branch before the
+workspace is deleted, never after.
 
-**What 3h starts from**, in the order the results note argues it:
+**Next: Plan 3i and Plan 3j — Plan 3h did not choose an order between them,
+and each is independent of the other.**
 
-1. **Criterion 11's miss, cause isolated, remedy spent.** 35.67 ms against
-   16.67, reproduced three times, and the bake is under a fifth of it. The
-   excess is the **live fallback drawing the still-uncovered strip**. The
-   budget is already floored at one tile, so lowering it leaves the strip
-   uncovered for more frames, each paying the fallback again. **A pan frame
-   that exposes more than one tile has no covered path today.** This, and
-   only this, is Plan 3h's scope.
-2. **G3, the zoom, with a number on it — now Plan 3i's.** 32.06 ms at
-   500,000 entities with tiles on. **No caching scheme touches it** — the
-   triangles are genuinely being drawn — so the answer is level-of-detail
-   geometry, and the tile cache can already hold it: a generation is keyed by
-   scale, so a coarser bake can never outlive the scale it was simplified for.
-3. **The memory measurement, taken 2026-08-25 — and the answer is no.**
-   `debugCapacityVertices` reads **16,777,216 vertices, 192.00 MiB, in all five
-   configurations measured**: 50,000 and 500,000 entities, tiles on and off.
-   **Tiles change nothing, so the tile budget adds to that memory rather than
-   replacing it** — the 192 MiB figure and the tile budget it must add to are
-   **Plan 3j**'s starting point. **And the mark is not a function of
-   entity count**, which is how both places below still phrase it: a tenfold
-   corpus reads the same number. The steady frame uses an eighth of what stays
-   pinned; the mark is set by the sweep's worst camera and never released,
-   because capacity is deliberately never given back. Full measurement:
+1. **Plan 3i — zoom, G3, and level-of-detail geometry**, assigned by Plan 3g
+   and confirmed here (2026-08-25's memory measurement showed zoom's cost is
+   not a caching problem, which is what licensed finishing the pan frame
+   without settling it first). **G3 has a number**: 32.06 ms at 500,000
+   entities with tiles on. **No caching scheme touches it** — the triangles
+   are genuinely being drawn — so the answer is level-of-detail geometry, and
+   the tile cache can already hold it: a generation is keyed by scale, so a
+   coarser bake can never outlive the scale it was simplified for. **Plan 3h
+   adds one more thing for 3i to carry**: settling criterion 3 needs
+   re-measuring at **n=7–9, interleaved (narrow, M4, narrow, M4, …), not
+   blocked (three-then-three)** — the only arrangement that removes the
+   thermal/session-drift ordering bias this task's own numbers show.
+2. **Plan 3j — the 192 MiB vertex buffer.** `debugCapacityVertices` reads
+   **16,777,216 vertices, 192.00 MiB, in all five configurations measured**:
+   50,000 and 500,000 entities, tiles on and off. **Tiles change nothing, so
+   the tile budget adds to that memory rather than replacing it** — that
+   addition is Plan 3j's starting point, and **the figure sits on a doubling
+   boundary with no headroom.** The mark is not a function of entity count: a
+   tenfold corpus reads the same number. The steady frame uses an eighth of
+   what stays pinned; the mark is set by the sweep's worst camera and never
+   released, because capacity is deliberately never given back. Full
+   measurement:
    [docs/superpowers/notes/2026-08-25-vertex-buffer-high-water.md](docs/superpowers/notes/2026-08-25-vertex-buffer-high-water.md).
 
 **Plan 3f.1 (hardening before the picture cache) is done, worked directly on
@@ -1214,6 +1239,139 @@ otherwise never see it:
 abort is reproducible but its trigger is unknown — a memory- or
 session-dependent CanvasKit failure explains it with no code at fault. What 3g
 is owed first is a back-to-back, same-session re-run.
+
+### Plan 3h — the fallback walk and its instrument
+
+**Done, worked directly on `main`, `f642202..838c454`, eight tasks (the eighth
+split into 8a and 8b), nothing in flight** — no worktree, the same standing
+consent as Plans 3e, 3f, 3f.1 and 3g. Spec:
+[docs/superpowers/specs/2026-08-25-jet-cad-2d-plan-3h-pan-frame-design.md](docs/superpowers/specs/2026-08-25-jet-cad-2d-plan-3h-pan-frame-design.md).
+Plan:
+[docs/superpowers/plans/2026-08-25-jet-cad-2d-plan-3h-pan-frame.md](docs/superpowers/plans/2026-08-25-jet-cad-2d-plan-3h-pan-frame.md).
+Results:
+[docs/superpowers/notes/2026-08-25-plan-3h-results.md](docs/superpowers/notes/2026-08-25-plan-3h-results.md).
+Mutation log:
+[docs/superpowers/notes/plan-3h-mutation-log.md](docs/superpowers/notes/plan-3h-mutation-log.md).
+
+**Read this before anything below that sounds like a clean close: the
+headline criterion MISSES, and a second criterion misses beside it.**
+Criterion 3 — `tile pan` p95 ratio, the M4 arm (pre-narrowing behaviour) over
+the narrowed arm, same session, three runs each — reads **2.35x against a
+gate of ≥ 2.4x**. Criterion 6 (`tile hold` p50 ≤ 2.0 ms, p95 ≤ 2.5 ms, scored
+per run, not by median) also **MISSES**: run 1's p95 is 2.77 ms. Per
+instruction, neither number is adjusted or re-run to chase its threshold.
+
+**The measurement cannot settle criterion 3 either way, at n=3 per arm.**
+Narrowed `tile pan` p95: {13.43, 15.99, 19.86} ms, mean 16.43, CV 19.7%. M4
+arm p95: {36.14, 37.59, 38.14} ms, mean 37.29, CV 2.8%. Pairing every M4 run
+against every narrowed run gives nine ratios, sorted: 1.82, 1.89, 1.92, 2.26,
+2.35, 2.39, 2.69, 2.80, 2.84 — a span that **straddles 2.4 in the middle, not
+near either edge**. Re-running this exact arrangement and hoping the median
+lands ≥ 2.4 would be close to a coin flip, not a confirmation of either
+result. The M4 arm also ran last, in a visibly noisier session (`tile hold`
+max, a phase M4 cannot touch at all, reads an order of magnitude higher on
+the M4 arm than the narrowed arm), which biases the ratio's numerator
+**upward — against the miss, not for it.**
+
+**The 2.4 gate itself was mis-derived, in exactly the way a ratio measured in
+one session exists to prevent.** It comes from the spike's 2.59x, whose
+numerator (43.13 ms) was measured in a *different* machine session from its
+own 16.66 ms denominator. Against this task's M4 figure (37.59 ms) that
+numerator reads −12.8%; against this task's narrowed median (15.99 ms) the
+spike's own denominator reads only −4%. The gap between sessions sits almost
+entirely in the numerator — a cross-session comparison is the exact weakness
+criterion 3's own design argument gives for making it a ratio in the first
+place.
+
+**The mean is evidence, not a gate, and it shows the effect is real and
+large.** Narrowed `tile pan` means: {3.71, 3.89, 3.27} ms, CV 8.8%. M4 means:
+{5.02, 5.17, 5.09} ms, CV 1.5%. The two sets do not overlap at all — narrowed's
+highest (3.89) sits below M4's lowest (5.02) — and `bakes=14 liveDraws=10` in
+the same 120-frame phase on both arms, so the delta concentrates onto the
+same roughly-ten fallback frames either way: **≈16.6 ms saved per fallback
+frame**, non-overlapping, low-noise. This is not a substitute score for
+criterion 3, which is defined on p95 and stays a **MISS**.
+
+**Criterion 3b, the absolute figure, is a near-miss and is not smoothed.**
+Narrowed `tile pan` p95: 19.86, 15.99, 13.43 ms, against the spec's own
+ungated 16.67 ms budget. The **median** (15.99 ms) lands under budget, but
+**one of three runs (19.86 ms) misses it outright, by 3.19 ms** — a larger
+overshoot than the spike's own worst sample (17.40 ms, 0.73 ms over).
+Recorded plainly, per spec, ungated: "median under budget, one run clearly
+over, more variance tonight than the spike showed."
+
+**Five mutants, and where each died.**
+- **M1 — drop the clamp.** Unit, killed: `tile_cache_test.dart`'s `stripFor`
+  group reddens on 3 of its 4 cases, exactly as designed.
+- **M2 — drop the pad (`kTileSlack → 0`).** Unit, **survives** — the plan's
+  own pre-committed second outcome. Recorded as **gap H5**; D2's pad rests on
+  `_bake`'s argument and Plan 3g's F1 history, not on a gate this plan built.
+- **M3 — shrink the query 20px.** Unit, killed — and **fuller than the plan's
+  own text claimed**: under the whole widget suite, criterion 2b also reddens
+  (`differing: 417` against a bound of 60), not only criteria 2 and 2c, plus
+  three `stripFor` cases and a `tile_budget_test.dart` row.
+- **M4 — narrow the clip, not the query.** **The plan's own claim that it
+  "has no unit witness" is FALSE — the most important correction in this
+  close-out.** A reviewer's M5 (below) prompted a triangle-count-ratio gate
+  that, as a side effect neither mutant's author anticipated, also kills M4:
+  it dies **doubly**, in the widget suite (`liveTri: 60, tiledTri: 70` against
+  a bound of 54, whole-package run `+371 ~1 -1`, exactly one failure) and on
+  the device ratio (2.35x — short of the 2.4 gate, but nowhere near the 1.0x a
+  true non-regression would read, and an absolute 16.67 ms gate could not have
+  told the two apart at all, since the narrowed arm's own p95 already
+  straddles it).
+- **M5 — grow the walk to the viewport, found by a reviewer, not planned.**
+  Unit. First fired **green** against the entire widget package: the pixel
+  sweep cannot see a query that *grows*, only one that *shrinks*, because the
+  unchanged clip absorbs the excess. Killed once the triangle-count-ratio gate
+  landed (`kTriangleBudgetRatio`). **This is the plan's own evidence that the
+  review loop caught something the design did not — a five-mutant plan's
+  fifth mutant, and it was found after the narrowing had already landed.**
+
+**Gaps H1–H5, carried from the spec's own accepted-gap list.**
+- **H1.** Criteria 4 and 5 (`PAN_STEP=30/60`) are recorded, not gated, per
+  design. Recorded: `perFrame` rises 0.117 → 0.500 → 0.967 as `PAN_STEP` goes
+  7.6 → 30 → 60 px/frame, `liveDraws` rises 10 → 47 → 115, and at 60 px/frame
+  `tileBytes` reaches exactly 96.00 MiB — the cap, not merely approached.
+- **H2.** The three `PAN_STEP` arms are still not distance-matched (120 frames
+  at 7.6/30/60 px/frame cover three different total distances). Open,
+  unaddressed by this task, inherited by whoever gates that band next.
+- **H3.** G5, the fallback strip's `Float32`/`Float64` asymmetry from its
+  `canvas.translate`. Bounded on the near-axis arm against the tiled path's
+  existing number, not eliminated. Open.
+- **H4.** The spec's own text, "M4 has no unit witness," is **now known
+  false** — see M4 above. Recorded here as corrected rather than left standing.
+- **H5.** M2 survives exactly as the plan pre-committed. Measured zeros
+  (`stray: 0, uncovered: 0, differing: 0` at all eight swept offsets) confirm
+  the pixel sweep cannot see it on this fixture; D2's pad is retained on
+  `_bake`'s argument and F1's history, not on a gate of this plan's own.
+
+**Two deferred minors, recorded rather than fixed:** the triangle-budget gate
+has 4 triangles of headroom at its tightest swept offset (50 of 54 allowed,
+out of 60 live) — deterministic, not a flake, but brittle to any future edit
+of `fillingGrid` or the swept offsets; and `checkTriangleBudget` defaults to
+`false`, so a future third caller of `sweepFallbackAgreement` gets no
+triangle-count gate unless it opts in explicitly.
+
+**Exit gate.** Of the criteria table's 12 rows, 3 (3b, 4, 5) are recorded
+only, per spec, not gates. **Of the 9 that are gates: 7 PASS, 2 MISS**
+(criteria 3 and 6, both above). Criterion 1b is not a binary pass or fail: per
+its own pre-commitment it resolves to accepted gap H5 (M2 survives) rather
+than either outcome. Criteria 1, 2, 2b and 2c pass on the shipped tree
+(confirmed by the mutation log above); criterion 7 (peak `tileBytes`
+27262976 bytes = 26.00 MiB against ≤ 96 MiB) and criterion 8 (`capacityMiB`
+exactly 192.00 in every configuration, no increase to explain) both PASS.
+
+**Plan 3i inherits three things, named here so no future session has to
+reconstruct them:**
+1. **G3 — zoom and level-of-detail geometry** — already renumbered onto 3i by
+   Task 8a; see [Resume here](#resume-here).
+2. **Settling criterion 3**, by re-measuring at **n=7–9, interleaved
+   (narrow, M4, narrow, M4, …), not blocked (three-then-three)** — the only
+   arrangement that removes the thermal/session-drift ordering bias this
+   task's own numbers show biased the ratio *against* the miss, not for it.
+3. **Plan 3j** owns the **192 MiB vertex buffer**, whose figure sits on a
+   doubling boundary with no headroom.
 
 ---
 

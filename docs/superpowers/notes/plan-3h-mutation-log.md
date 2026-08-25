@@ -2,22 +2,26 @@
 
 Five mutants are named for this plan (`docs/superpowers/specs/2026-08-25-jet-cad-2d-plan-3h-pan-frame-design.md`,
 §5, plus M5, found by a reviewer after the narrowing landed and folded into
-Task 5's fix round). **This log is written by Task 8a, which is the
+Task 5's fix round). **This log was started by Task 8a, the
 machine-independent half of Task 8** — the device arm needed mains power and
 the machine was on battery with Low Power Mode auto-enabled, so M4 could not
-be fired here. Four of five mutants — M1, M2, M3 and M5 — live entirely in
+be fired there. Four of five mutants — M1, M2, M3 and M5 — live entirely in
 the widget suite (`packages/jet_cad_2d_flutter`) and are recorded below in
 full, each with the diff applied, the layer it was fired in, the verbatim
-output, and the ruling. **M4's section is a placeholder in name only**: it is
-a device mutant, it has not been fired, and Task 8b fills it in when mains
-power is available. It is listed here so that a mutation log missing a named
-mutant does not read as a mutant that was never planned.
+output, and the ruling. **M4 is now fired too, by Task 8b, the plan's
+close-out**, once mains power was available for its device arm. It is listed
+here so that a mutation log missing a named mutant does not read as a mutant
+that was never planned.
 
 Every figure below was produced by an implementer and independently
 reproduced by a reviewer, both transcripts in
 `.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/task-4-report.md`
 (M1) and `task-5-report.md` (M2, M3, and — under "Fix round 1" — M5), except
-where a section says otherwise.
+where a section says otherwise. **M4's figures are Task 8b's own** — fired
+directly against today's tree, not read off an earlier report — and are also
+independently cross-checked against
+`docs/superpowers/notes/2026-08-25-plan-3h-results.md`, which fired the same
+mutation in the same session that produced the device arm.
 
 All commands below ran from `packages/jet_cad_2d_flutter`, prefixed
 `CI=true`, against `lib/src/tile_cache.dart`.
@@ -317,26 +321,142 @@ passed!`
 
 ---
 
-## M4 — narrow the clip but not the query (placeholder)
+## M4 — narrow the clip but not the query
 
-**Status: not fired. This section exists so the log names all five mutants;
-it carries no result.**
+**Fired by Task 8b, the plan's close-out.** M4 isolates the original defect
+this plan fixes: keep the narrower clip `_bake` already uses, but hand the
+fallback's *query* (what is walked, not what is drawn) the full viewport
+instead of the strip — "narrow the clip, not the query," per the spec's
+mutant table.
 
-M4 is the mutant that isolates the original defect this plan fixes: apply
-the narrower clip `_bake` already uses, but leave the fallback's *query*
-(what is walked, not what is drawn) at the full viewport — "narrow the clip,
-not the query," per the spec's mutant table. Its pixels are correct in every
-mutated case; only the cost moves, so **no unit gate can kill it** (per the
-spec's own §5: "M4 is the original defect this plan fixes, and no unit gate
-can kill it"). It dies only on **criterion 3's device ratio** — the mutated
-tree reads a tiled/untiled pan ratio of ≈ 1.0 against the narrowed code's
-≥ 2.4 — which requires `flutter drive` on a real device.
+**The plan's own claim, and the log's earlier placeholder, said "no unit gate
+can kill it" and that M4 "dies only on criterion 3's device ratio." That
+claim is FALSE, and correcting it is the most important thing this section
+records.** After the plan was written, a reviewer found M5 — grow the walk to
+the viewport, leaving the clip narrow — and Task 5's fix round added a
+triangle-count-ratio gate to `test/tile_fallback_test.dart`'s "criterion 2 and
+2c" test specifically to kill it. M4 also ends up handing `_drawInto` the full
+viewport (arrived at from a different starting mutation than M5: M4 keeps the
+narrow clip and drops the strip-sized query, while M5 grows the query and
+leaves the clip untouched — see M5's section below), and the triangle-count
+gate counts geometry, not pixels, so it cannot distinguish the two routes to
+the same end state. **The same gate that was built to kill M5 kills M4 as
+well.** M4 dies **doubly**: in the widget suite, and on the device ratio.
 
-**Why it is not fired in this dispatch.** The device arm (Task 7) is blocked:
-the measuring machine is on battery with Low Power Mode auto-enabled, and no
-`flutter drive` run was attempted or waited for, per this task's explicit
-scope. **Task 8b fires M4 and fills this section in** once mains power is
-available.
+**Diff**, applied to `packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`
+(backed up first to `/tmp/tile_cache_8b_backup.dart`, restored from that copy
+afterward — **never `git checkout`**): kept `canvas.clipRect(uncovered,
+doAntiAlias: false)` and `_lastStrip = strip;`, dropped `canvas.translate`,
+and passed `viewport` and `quantised` to `_drawInto` in place of the
+strip-sized `Size` and the shifted `ViewportTransform`:
+
+```diff
+     final strip = stripFor(uncovered, viewport);
+     _lastStrip = strip;
+-    canvas.translate(strip.left, strip.top);
+-    final q = quantised.worldToScreenMatrix;
+     _drawInto(
+         canvas,
+-        Size(strip.width, strip.height),
+-        ViewportTransform(
+-            worldToScreenMatrix: Transform2(
+-                q.a, q.b, q.c, q.d, q.e - strip.left, q.f - strip.top)),
++        viewport,
++        quantised,
+         painter,
+         sink,
+         vertices,
+         origin,
+         null);
+```
+
+**Layer fired in: unit (targeted), unit (whole package), and device.** All
+three are recorded below; the device figures are the M4 arm from
+`docs/superpowers/notes/2026-08-25-plan-3h-results.md`, reproduced here as
+the ratio's numerator rather than re-measured.
+
+**Verbatim output, targeted** —
+`CI=true flutter test test/tile_fallback_test.dart`, from
+`packages/jet_cad_2d_flutter` — **RED**:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart
+00:00 +0: criterion 2 and 2c: a partly baked frame equals the live frame
+00:00 +0 -1: criterion 2 and 2c: a partly baked frame equals the live frame [E]
+  Expected: a value less than <54.0>
+    Actual: <70>
+     Which: is not a value less than <54.0>
+  pan Offset(37.0, 0.0): the tiled arm emitted as much geometry as the full-frame live arm, so the fallback walked far more than the strip: InkReport(live: 38886, tiled: 38886, stray: 0, uncovered: 0, differing: 0, liveTri: 60, tiledTri: 70)
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/support/tile_comparison.dart 275:7             measureFallbackAgreement
+
+00:00 +0 -1: criterion 2b: the near-axis arm stays inside the tiled path's bound
+00:00 +1 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart: criterion 2 and 2c: a partly baked frame equals the live frame
+```
+
+`criterion 2 and 2c` fails with `liveTri: 60, tiledTri: 70` against a bound of
+54 — digit-identical to the results note's own firing. `criterion 2b` still
+passes (listed `+1` after the failure, i.e. green). Full log:
+`/tmp/3h_m4_8b_tile_fallback_test.log`.
+
+**Verbatim output, whole package** — `CI=true flutter test`, all of
+`packages/jet_cad_2d_flutter`, not one file — **RED, exactly one failure**:
+
+```
+00:05 +371 ~1 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart: criterion 2 and 2c: a partly baked frame equals the live frame
+```
+
+**371 passed, 1 skipped (pre-existing, unrelated), 1 failed** — the same
+"criterion 2 and 2c" test, the only failure anywhere in the package. This
+matches, digit for digit, both of the two independent runs that preceded
+this one (the results note's own firing, and the reviewer's prior
+reproduction): `+371 ~1 -1` with exactly one failure, every time. Full log:
+`/tmp/3h_m4_8b_full_suite.log`.
+
+**Restore, verified.** `cp /tmp/tile_cache_8b_backup.dart
+lib/src/tile_cache.dart` (not `git checkout` — the file was never staged or
+committed during this mutation, so this copies the mutant's own pre-image
+back). `diff /tmp/tile_cache_8b_backup.dart lib/src/tile_cache.dart` produced
+no output; `git diff -- lib/src/tile_cache.dart` and `git status --porcelain
+-- lib/src/tile_cache.dart` were both empty immediately after. `CI=true
+flutter test test/tile_fallback_test.dart` on the restored tree: `+2: All
+tests passed!` (both `criterion 2 and 2c` and `criterion 2b` green).
+
+**Device arm** (from `docs/superpowers/notes/2026-08-25-plan-3h-results.md`,
+Step 4, not re-measured here — Task 8b's own device time went to the widget
+suite above, which is the new finding; the timing figures already exist and
+rerunning `flutter drive` would not change what they say): `tile pan` p95
+across three runs, {38.14, 36.14, 37.59} ms, median **37.59 ms**, against the
+narrowed arm's median of **15.99 ms** — **ratio 2.35**, short of the ≥ 2.4
+gate (see `STATUS.md`'s Plan 3h section and the results note for the full
+discussion of that miss, including why n=3 cannot settle it and why the gate
+itself was mis-derived). `capacityMiB=192.00` and peak `tileBytes=27262976`
+(26.00 MiB) in all three runs, identical to the narrowed arm — M4 changes
+only how much the fallback walks, not the vertex sink's capacity or the tile
+geometry. `bakes=14 liveDraws=10` in the `tile pan` phase in all three,
+identical to the narrowed arm too, confirming M4 changes *how much* each
+fallback walks, not *how often* one happens.
+
+**Ruling: DIES — doubly.** The widget suite kills M4 directly (RED above,
+same gate M5's fix round added). The device ratio separates it too: 2.35× is
+short of the 2.4 gate, but it is nowhere near 1.0×, which is what a true
+non-regression would read (the mutated tree reads its own p95 against
+itself, which is trivially 1.0 — the ratio that matters is the *shipped*
+narrowed code's 2.35× over what M4 represents; see the results note's Step 4
+for that framing). **An absolute 16.67 ms threshold could not have witnessed
+M4 either**: the narrowed arm's own p95 figures (19.86, 15.99, 13.43 ms)
+straddle 16.67 ms on the correct tree, while M4's p95 figures (38.14, 36.14,
+37.59 ms) are more than double that — a single absolute gate would fail both
+the correct tree and M4 on some runs and cannot tell them apart. Only the
+ratio, read against the same-session narrowed arm, separates them.
 
 ---
 
