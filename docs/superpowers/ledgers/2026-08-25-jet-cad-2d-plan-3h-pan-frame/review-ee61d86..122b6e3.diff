@@ -1,0 +1,1348 @@
+# Review package: ee61d86..122b6e3
+
+## Commits
+122b6e3 test: the fallback's translate gets a witness, and every mutant is re-measured
+
+## Files changed
+ STATUS.md                                          | 132 +++++--
+ .../notes/2026-08-25-plan-3h-results.md            |  17 +
+ docs/superpowers/notes/plan-3h-mutation-log.md     | 398 ++++++++++++++++++---
+ .../test/support/tile_comparison.dart              | 155 ++++++--
+ .../test/support/tile_fixture.dart                 |  51 ++-
+ .../test/tile_fallback_test.dart                   |  41 ++-
+ 6 files changed, 662 insertions(+), 132 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 55680ba..4132278 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -18,25 +18,31 @@ the one exception the table marks as not re-run.
+ `main`, nothing in flight — and its headline criterion MISSES.** Criterion 3,
+ the `tile pan` p95 ratio (M4 arm over narrowed, same session), reads **2.35x
+ against a gate of ≥ 2.4x**. Criterion 6 also **MISSES** (`tile hold` p95,
+ 2.77 ms against 2.5 ms on one of three runs). Neither is adjusted or re-run to
+ chase its threshold. At n=3 per arm the measurement **cannot settle** whether
+ 2.35 is real or noise — nine pairwise ratios span 1.82 to 2.84, straddling 2.4
+ in the middle — and the **2.4 gate was itself mis-derived** from a
+ cross-session numerator, the exact comparison a ratio measured in one session
+ exists to prevent. The **mean**, offered as evidence rather than a gate, shows
+ a real, large, non-overlapping effect (≈16.6 ms saved per fallback frame).
+-Five mutants: four killed in the widget suite (M1, M3, and M5 — found by a
+-reviewer, not planned), one survives as the plan's own pre-committed gap
+-(M2 → H5), and **M4 — which the plan itself said "has no unit witness" —
+-turns out to die doubly**, in the widget suite and on the device ratio; that
+-correction is this task's most important line. See
++Six mutants, all re-fired 2026-08-26 against a widened fixture: four killed
++in the widget suite (M1, M3, M4 and M5 — M5 found by a reviewer, not
++planned), M2 survives the **pixel sweep** as the plan's pre-committed gap
++(→ H5) while dying at suite level on the pad's value, and M6 — clip the
++padded strip rather than the uncovered union, found by the whole-branch
++review — survives outright (→ H6). **M4, which the plan itself said "has no
++unit witness," dies doubly**, in the widget suite and on the device ratio;
++that correction is this task's most important line. The widening itself was a
++finding: `canvas.translate(strip.left, strip.top)` had **no witness** until
++it landed, and the two swept offsets that exercise that line were both
++vacuous. See
+ [Plan 3h](#plan-3h--the-fallback-walk-and-its-instrument) and
+ [Resume here](#resume-here).
+ 
+ **Plan 3g (the rasterised tile cache) is done and pushed, sixteen tasks, worked
+ directly on `main` at `477d4c5..2367a20`, nothing in flight.** **Its exit gate
+ is 11 of 13.** Criterion 10 passes at **1.58 ms against 4.00** — 26× the same
+ runs' untiled 41.09 ms. **Criterion 11 misses by 2.1× and the threshold was not
+ moved**; its cause is isolated to the live fallback drawing the uncovered strip,
+ and it is Plan 3h's design question. **Gap G7 closed on 2026-08-24**, one commit
+ past the ledger archive. See [Plan 3g](#plan-3g--the-definitiontile-picture-cache)
+@@ -397,21 +403,21 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
+ ## Resume here
+ 
+ **Plan 3h (the fallback walk and its instrument) is done, worked directly on
+ `main` at `f642202..838c454`, eight tasks (the eighth split into 8a and 8b),
+ nothing in flight — and its headline criterion MISSES.** Criterion 3's ratio
+ reads **2.35x against a gate of ≥ 2.4x**; criterion 6 misses too. Both are
+ recorded as misses, not adjusted or re-run to chase their thresholds. At n=3
+ per arm the measurement cannot settle whether 2.35 is real or noise, the 2.4
+ gate was itself mis-derived across sessions, and the mean shows the effect is
+ real and large but is offered as evidence, not a gate. Read the full account,
+-including where each of the five mutants died and gaps H1–H5, at
++including where each of the six mutants died and gaps H1–H6, at
+ [Plan 3h](#plan-3h--the-fallback-walk-and-its-instrument).
+ 
+ **A resumer's ledger chore:** Plan 3g's ledger is already archived at
+ [docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/](docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/).
+ Plan 3h had no worktree, so its own
+ `.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/` material is **not
+ yet archived** to `docs/superpowers/ledgers/` — the one ledger chore now
+ outstanding. Do that before clearing it — the ordering is the lesson every
+ prior archive note in this file records: archive onto the branch before the
+ workspace is deleted, never after.
+@@ -1293,72 +1299,122 @@ frame**, non-overlapping, low-noise. This is not a substitute score for
+ criterion 3, which is defined on p95 and stays a **MISS**.
+ 
+ **Criterion 3b, the absolute figure, is a near-miss and is not smoothed.**
+ Narrowed `tile pan` p95: 19.86, 15.99, 13.43 ms, against the spec's own
+ ungated 16.67 ms budget. The **median** (15.99 ms) lands under budget, but
+ **one of three runs (19.86 ms) misses it outright, by 3.19 ms** — a larger
+ overshoot than the spike's own worst sample (17.40 ms, 0.73 ms over).
+ Recorded plainly, per spec, ungated: "median under budget, one run clearly
+ over, more variance tonight than the spike showed."
+ 
+-**Five mutants, and where each died.**
+-- **M1 — drop the clamp.** Unit, killed: `tile_cache_test.dart`'s `stripFor`
+-  group reddens on 3 of its 4 cases, exactly as designed.
+-- **M2 — drop the pad (`kTileSlack → 0`).** Unit, **survives** — the plan's
+-  own pre-committed second outcome. Recorded as **gap H5**; D2's pad rests on
+-  `_bake`'s argument and Plan 3g's F1 history, not on a gate this plan built.
++**Six mutants, and where each died — all re-fired 2026-08-26 against the
++widened `fillingGrid` (fix round 2; see the mutation log for every
++transcript).**
++- **M1 — drop the clamp.** Unit, killed, and **more fully than before**: the
++  three `stripFor` cases it always reddened, **plus** `criterion 2 and 2c` on
++  the triangle ratio (`liveTri: 62, tiledTri: 66`), which the predecessor
++  fixture could not see. Whole suite `+368 ~1 -4`.
++- **M2 — drop the pad (`kTileSlack → 0`).** **Survives the pixel sweep;
++  dies at the suite level on the pad's value.** The narrow claim — the
++  `fillingGrid` sweep cannot see `pad = 0` — is what criterion 1b and gap H5
++  rest on and it holds, now non-vacuously (every one of the eight bands
++  carries 2224–9696 device pixels of live ink and the sweep still reads
++  `stray: 0, uncovered: 0, differing: 0`). But `tile_cache_test.dart`'s
++  `stripFor` group asserts the pad's *value* and reddens on three cases:
++  whole suite `+369 ~1 -3`. The earlier bare "survives" here conflated the
++  two claims and scored those same three cases for M3 while dropping them for
++  M2; that is corrected. D2's pad rests on `_bake`'s argument and Plan 3g's
++  F1 history, not on a gate this plan built.
+ - **M3 — shrink the query 20px.** Unit, killed — and **fuller than the plan's
+   own text claimed**: under the whole widget suite, criterion 2b also reddens
+   (`differing: 417` against a bound of 60), not only criteria 2 and 2c, plus
+-  three `stripFor` cases and a `tile_budget_test.dart` row.
++  three `stripFor` cases and a `tile_budget_test.dart` row. Whole suite
++  `+365 ~1 -7`, the same seven tests as before the fixture change.
+ - **M4 — narrow the clip, not the query.** **The plan's own claim that it
+   "has no unit witness" is FALSE — the most important correction in this
+   close-out.** A reviewer's M5 (below) prompted a triangle-count-ratio gate
+   that, as a side effect neither mutant's author anticipated, also kills M4:
+-  it dies **doubly**, in the widget suite (`liveTri: 60, tiledTri: 70` against
+-  a bound of 54, whole-package run `+371 ~1 -1`, exactly one failure) and on
+-  the device ratio (2.35x — short of the 2.4 gate, but nowhere near the 1.0x a
+-  true non-regression would read, and an absolute 16.67 ms gate could not have
+-  told the two apart at all, since the narrowed arm's own p95 already
+-  straddles it).
++  it dies **doubly**, in the widget suite (`liveTri: 62, tiledTri: 80` against
++  a bound of 60.14, whole-package run `+371 ~1 -1`, exactly one failure, on a
++  sample carrying `stripInk: 7032`) and on the device ratio (2.35x — short of
++  the 2.4 gate, but nowhere near the 1.0x a true non-regression would read,
++  and an absolute 16.67 ms gate could not have told the two apart at all,
++  since the narrowed arm's own p95 already straddles it). The device figures
++  are unchanged and were not re-run: a fixture cannot move a timing.
+ - **M5 — grow the walk to the viewport, found by a reviewer, not planned.**
+   Unit. First fired **green** against the entire widget package: the pixel
+   sweep cannot see a query that *grows*, only one that *shrinks*, because the
+-  unchanged clip absorbs the excess. Killed once the triangle-count-ratio gate
+-  landed (`kTriangleBudgetRatio`). **This is the plan's own evidence that the
+-  review loop caught something the design did not — a five-mutant plan's
+-  fifth mutant, and it was found after the narrowing had already landed.**
+-
+-**Gaps H1–H5, carried from the spec's own accepted-gap list.**
++  unchanged clip absorbs the excess. Killed by the triangle-count-ratio gate
++  (`kTriangleBudgetRatio`, re-bracketed to **0.97** on the new fixture:
++  correct code's worst ratio is 0.9375 and the mutant's lowest visible ratio
++  is 1.0000, both measured). **This is the plan's own evidence that the
++  review loop caught something the design did not.**
++- **M6 — clip the padded strip instead of the uncovered union, found by the
++  whole-branch review, not planned.** Unit, **survives** the entire widget
++  package (`+372 ~1`, identical to baseline). `tile_cache.dart:825-830`
++  predicts it in so many words. The difference is pure overdraw of pixels that
++  already carry the same ink, so no pixel oracle can see it, and it does not
++  change what is queried, so the triangle count cannot either. Recorded as
++  **gap H6**.
++
++**Gaps H1–H6** — H1–H5 carried from the spec's own accepted-gap list, H3 and
++H5 restated and H6 added by the whole-branch review's fix round (2026-08-26).
+ - **H1.** Criteria 4 and 5 (`PAN_STEP=30/60`) are recorded, not gated, per
+   design. Recorded: `perFrame` rises 0.117 → 0.500 → 0.967 as `PAN_STEP` goes
+   7.6 → 30 → 60 px/frame, `liveDraws` rises 10 → 47 → 115, and at 60 px/frame
+   `tileBytes` reaches exactly 96.00 MiB — the cap, not merely approached.
+ - **H2.** The three `PAN_STEP` arms are still not distance-matched (120 frames
+   at 7.6/30/60 px/frame cover three different total distances). Open,
+   unaddressed by this task, inherited by whoever gates that band next.
+ - **H3.** G5, the fallback strip's `Float32`/`Float64` asymmetry from its
+-  `canvas.translate`. Bounded on the near-axis arm against the tiled path's
+-  existing number, not eliminated. Open.
++  `canvas.translate`. **Restated 2026-08-26; the previous wording claimed a
++  bound the near-axis arm cannot produce.** Measured per offset, every
++  `nearAxisDiagonals` offset that carries any ink in the entering band —
++  `(37,0)`, `(53,0)`, `(71,0)`, band ink 1654 each — has
++  `strip.topLeft == (0, 0)`, where `canvas.translate` is a no-op; the other
++  five bands are empty (that fixture spans world 20..220 by 30..150). **The
++  near-axis arm therefore never exercises the translate at all**, and
++  "bounded on the near-axis arm" was not a statement about G5. What the tree
++  now has instead: the widened `fillingGrid` carries ink in the band at all
++  eight offsets, including the two whose strips start at (343, 0) and
++  (0, 247), and criterion 2 gates those at **exactly zero** differing pixels
++  — a stronger claim than a bound, but only for **axis-aligned** geometry.
++  The combination this gap is actually about — a near-axis slope walked
++  through a translated strip — is **untested**, by either arm. Open, and
++  narrower than it was recorded as being.
+ - **H4.** The spec's own text, "M4 has no unit witness," is **now known
+   false** — see M4 above. Recorded here as corrected rather than left standing.
+-- **H5.** M2 survives exactly as the plan pre-committed. Measured zeros
+-  (`stray: 0, uncovered: 0, differing: 0` at all eight swept offsets) confirm
+-  the pixel sweep cannot see it on this fixture; D2's pad is retained on
+-  `_bake`'s argument and F1's history, not on a gate of this plan's own.
+-
+-**Two deferred minors, recorded rather than fixed:** the triangle-budget gate
+-has 4 triangles of headroom at its tightest swept offset (50 of 54 allowed,
+-out of 60 live) — deterministic, not a flake, but brittle to any future edit
+-of `fillingGrid` or the swept offsets; and `checkTriangleBudget` defaults to
+-`false`, so a future third caller of `sweepFallbackAgreement` gets no
+-triangle-count gate unless it opts in explicitly.
++- **H5.** M2 survives the **pixel sweep** exactly as the plan pre-committed —
++  and no longer vacuously. Measured zeros (`stray: 0, uncovered: 0,
++  differing: 0` at all eight swept offsets) now sit on bands carrying
++  2224–9696 device pixels of live ink apiece, so the sweep had something to
++  lose at every offset. It is not a suite-level survivor: `stripFor`'s three
++  pad-value cases redden (see M2 above). D2's pad is retained on `_bake`'s
++  argument and F1's history, not on a gate of this plan's own.
++- **H6.** M6 — clipping the padded strip rather than the uncovered union —
++  survives the whole widget suite, and `tile_cache.dart`'s own comment
++  predicts exactly that. Closing it needs an oracle this plan does not have:
++  a fill-rate counter (nothing here counts pixels written) or a device timing
++  sensitive to a `kTileSlack`-sized overdraw, which criterion 3 at n=3 is
++  demonstrably not. Open. **The tally is six fired, four killed, two
++  survivors**, over a chosen six — not a claim about every mutant that could
++  be written.
++
++**One deferred minor, and one closed.** Still open: the triangle-budget gate
++has **2** triangles of headroom at its tightest swept offset (60 of 62
++allowed, out of 64 live, at `Offset(0, 53)`) — deterministic, not a flake, but
++brittle to any future edit of `fillingGrid` or the swept offsets, and tighter
++than the 4 it had before the fixture widened. Closed 2026-08-26:
++`checkTriangleBudget` now defaults to **`true`**, joined by a new
++`minimumStripInk` gate that also defaults on, so a future caller of
++`sweepFallbackAgreement` gets both unless it opts out in writing;
++`criterion 2b` is the one caller that does, and says why at the call site.
+ 
+ **Exit gate.** Of the criteria table's 12 rows, 3 (3b, 4, 5) are recorded
+ only, per spec, not gates. **Of the 9 that are gates: 6 PASS, 2 MISS, and
+ criterion 1b resolves to accepted gap H5 rather than to either outcome** —
+ per its own pre-commitment, it is not a binary pass or fail: M2 survives, so
+ 1b lands on the plan's pre-declared third path, not on "pass" or "fail."
+ The 2 MISS are criteria 3 and 6, both above. The 6 PASS are criteria 1, 2,
+ 2b and 2c on the shipped tree (confirmed by the mutation log above),
+ criterion 7 (peak `tileBytes` 27262976 bytes = 26.00 MiB against ≤ 96 MiB),
+ and criterion 8 (`capacityMiB` exactly 192.00 in every configuration, no
+diff --git a/docs/superpowers/notes/2026-08-25-plan-3h-results.md b/docs/superpowers/notes/2026-08-25-plan-3h-results.md
+index 8c6d6b0..653e79a 100644
+--- a/docs/superpowers/notes/2026-08-25-plan-3h-results.md
++++ b/docs/superpowers/notes/2026-08-25-plan-3h-results.md
+@@ -280,20 +280,37 @@ out of the whole suite:
+ ```
+ 00:05 +371 ~1 -1: Some tests failed.
+ 
+ Failing tests:
+   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart: criterion 2 and 2c: a partly baked frame equals the live frame
+ ```
+ 371 passed, 1 skipped (`~1`, pre-existing and unrelated to this mutation), 1
+ failed — the same "criterion 2 and 2c" test, the only failure anywhere in the
+ package. Full log: `/tmp/3h_m4_full_suite.log`.
+ 
++> **Amendment, 2026-08-26 (widget suite only; the device sections below are
++> untouched and were not re-run).** The whole-branch review found that
++> `paintFrame`'s `canvas.translate(strip.left, strip.top)` had no witness on
++> the `fillingGrid` of the day — deleting it left the suite green — because
++> the fixture cleared the resting viewport by only 9 to 13 screen pixels
++> while the sweep pans 37 to 71, so the two offsets that exercise the
++> translate entered across bare canvas. `fillingGrid` was widened to world
++> x ∈ [-52, 380], y ∈ [-52, 300], an anti-vacuity clause on ink inside the
++> band was added, and `kTriangleBudgetRatio` was re-bracketed 0.9 → 0.97.
++> **The two transcripts above are therefore history.** M4 re-fired on the new
++> fixture reads `Expected: a value less than <60.14>`, `Actual: <80>`,
++> `InkReport(live: 41464, tiled: 41464, stray: 0, uncovered: 0, differing: 0,
++> liveTri: 62, tiledTri: 80, stripInk: 7032)`, and the whole-package figure is
++> unchanged at `+371 ~1 -1` with `criterion 2 and 2c` the single failure. The
++> ruling — M4 dies in the widget suite — is unchanged and is now measured on a
++> non-vacuous sample. See `plan-3h-mutation-log.md`, "Fix round 2".
++
+ **This is the finding to report prominently**: M4 gained a unit witness the
+ plan did not anticipate, contradicted by the retroactive M5 fix round. The
+ mutation log's M4 placeholder section ("no unit gate can kill it... It dies
+ only on criterion 3's device ratio") needs correction — that text is now
+ false and Task 8b (which owns that file) should update it to say M4 dies on
+ both the widget suite and the device ratio.
+ 
+ ### Device arm, three runs, taken after the widget-suite finding
+ 
+ Fired anyway, per instruction — the pixels being wrong (which the widget
+diff --git a/docs/superpowers/notes/plan-3h-mutation-log.md b/docs/superpowers/notes/plan-3h-mutation-log.md
+index 0c176cf..7dd2628 100644
+--- a/docs/superpowers/notes/plan-3h-mutation-log.md
++++ b/docs/superpowers/notes/plan-3h-mutation-log.md
+@@ -1,15 +1,18 @@
+ # Plan 3h mutation log — the fallback walk
+ 
+ Five mutants are named for this plan (`docs/superpowers/specs/2026-08-25-jet-cad-2d-plan-3h-pan-frame-design.md`,
+ §5, plus M5, found by a reviewer after the narrowing landed and folded into
+-Task 5's fix round). **This log was started by Task 8a, the
++Task 5's fix round). **A sixth, M6, was found by the whole-branch review and
++is recorded below as a survivor**, so that "five mutants, four killed" is not
++read as a count over everything that could have been fired — it is a count
++over a chosen five. **This log was started by Task 8a, the
+ machine-independent half of Task 8** — the device arm needed mains power and
+ the machine was on battery with Low Power Mode auto-enabled, so M4 could not
+ be fired there. Four of five mutants — M1, M2, M3 and M5 — live entirely in
+ the widget suite (`packages/jet_cad_2d_flutter`) and are recorded below in
+ full, each with the diff applied, the layer it was fired in, the verbatim
+ output, and the ruling. **M4 is now fired too, by Task 8b, the plan's
+ close-out**, once mains power was available for its device arm. It is listed
+ here so that a mutation log missing a named mutant does not read as a mutant
+ that was never planned.
+ 
+@@ -21,20 +24,74 @@ where a section says otherwise. **M4's figures are Task 8b's own** — fired
+ directly against today's tree, not read off an earlier report — and are also
+ independently cross-checked against
+ `docs/superpowers/notes/2026-08-25-plan-3h-results.md`, which fired the same
+ mutation in the same session that produced the device arm.
+ 
+ All commands below ran from `packages/jet_cad_2d_flutter`, prefixed
+ `CI=true`, against `lib/src/tile_cache.dart`.
+ 
+ ---
+ 
++## Fix round 2 (2026-08-26) — every figure below was re-measured
++
++**The whole-branch review found that `paintFrame`'s
++`canvas.translate(strip.left, strip.top)` had no witness: deleting it left the
++entire widget suite green.** The cause was the fixture, not the gate.
++`fillingGrid` cleared the resting visible box by only about 9 to 13 screen
++pixels while the sweep pans 37 to 71, so at `Offset(-41, 0)` and
++`Offset(0, -41)` the entering strip landed on bare canvas and every pixel
++assertion was satisfied by a fallback that drew nothing — and those two
++offsets are precisely the only ones whose strip does not start at (0, 0), the
++only ones where the translate is not a no-op.
++
++Three things changed in the test tree (no production code changed):
++
++1. **`fillingGrid`'s extent widened** to world x ∈ [-52, 380], y ∈ [-52, 300],
++   which clears the sweep by at least 24 screen pixels on every edge. The
++   derivation is in the fixture's own doc comment.
++2. **A seventh anti-vacuity clause**, `InkReport.liveStripInk`: the live frame
++   must carry ink **inside the band the fallback owes**
++   (`TileCache.debugLastStrip`), not merely somewhere in the frame. The six
++   existing clauses all passed on the two vacuous samples.
++3. **`kTriangleBudgetRatio` re-bracketed**, `0.9` → `0.97`, because the wider
++   fixture moved correct code's worst ratio from 0.833 to 0.9375. Both
++   endpoints of the new bracket are recorded in the constant's doc comment and
++   under M5 below.
++
++**Consequently every mutant figure in this log has been re-fired against the
++new fixture on 2026-08-26 and the numbers below are those runs**, not the
++Task 4/5/8a/8b figures they replace. Where a historical figure is retained it
++is labelled as history. The baseline the runs below are read against is
++`+372 ~1: All tests passed!` (372 passed, 1 skipped, 0 failed) — unchanged by
++the fixture change. `lib/src/tile_cache.dart` was copied to
++`/tmp/3h_fix/tile_cache.dart.orig` before the first mutation and restored from
++that copy after each one (**never `git checkout`**), with `diff` and
++`git status --porcelain` verified empty each time.
++
++**The proof that the fix works.** With the new fixture in place, deleting
++`canvas.translate(strip.left, strip.top);` from `paintFrame` — nothing else —
++is **RED**:
++
++```
++00:00 +0 -1: criterion 2 and 2c: a partly baked frame equals the live frame [E]
++  Expected: <0>
++    Actual: <2224>
++  Offset(-41.0, 0.0): InkReport(live: 41464, tiled: 39240, stray: 0, uncovered: 2224, differing: 2224, liveTri: 62, tiledTri: 48, stripInk: 5260)
++```
++
++and under the whole widget suite, `+371 ~1 -1: Some tests failed.` with
++`test/tile_fallback_test.dart: criterion 2 and 2c` the single failure. On the
++**old** fixture the same deletion was green at `+372 ~1`. The line now has a
++witness.
++
++---
++
+ ## M1 — drop the clamp
+ 
+ **What it targets:** `stripFor`'s clamp to the viewport (decision D3 in the
+ spec). The pad can ask for a rectangle larger than the viewport when
+ `uncovered` (a bounding rectangle built with `expandToInclude`) spans most of
+ the frame; the clamp is what keeps the strip inside `[0, viewport]`.
+ 
+ **Layer fired in:** unit — `packages/jet_cad_2d_flutter/test/tile_cache_test.dart`,
+ the `stripFor` group, via
+ `CI=true flutter test test/tile_cache_test.dart --plain-name "stripFor"`.
+@@ -81,20 +138,40 @@ is untouched by this change and was not run for this mutant specifically.
+ 00:00 +1 -3: Some tests failed.
+ ```
+ 
+ **Ruling: KILLED.** Exactly 3 of the 4 `stripFor` cases redden — `pads an
+ interior rect on every side` stays green because it never touches an edge
+ close enough for the clamp to bind, matching the brief's prediction exactly.
+ Restored and re-confirmed green (`+4` on the group, `+370 ~1` / later `+372 ~1`
+ on the full suite depending on which task's baseline is quoted), `flutter
+ analyze` clean, `dart format` clean.
+ 
++### Re-fired on the new fixture (fix round 2, 2026-08-26) — a **fuller** kill
++
++The transcript above is history. Re-fired against the widened `fillingGrid`,
++M1 dies on **four** tests rather than three: the same three `stripFor` cases,
++**plus `tile_fallback_test.dart`'s `criterion 2 and 2c`**, which the old
++fixture could not see. An unclamped strip is larger than the viewport, so the
++fallback walks more geometry than the full-frame live arm — exactly what the
++re-bracketed triangle-count ratio measures:
++
++```
++00:00 +0 -1: criterion 2 and 2c: a partly baked frame equals the live frame [E]
++  Expected: a value less than <60.14>
++    Actual: <66>
++     Which: is not a value less than <60.14>
++  pan Offset(37.0, 0.0): the tiled arm emitted as much geometry as the full-frame live arm, so the fallback walked far more than the strip: InkReport(live: 41464, tiled: 41464, stray: 0, uncovered: 0, differing: 0, liveTri: 62, tiledTri: 66, stripInk: 7032)
++```
++
++Whole widget suite under M1, `CI=true flutter test`: **`+368 ~1 -4: Some tests
++failed.`** — the three `stripFor` cases and `criterion 2 and 2c`.
++
+ ---
+ 
+ ## M2 — drop the pad (`kTileSlack` → `0.0`)
+ 
+ **What it targets:** decision D2 — the strip is padded by `kTileSlack` before
+ it is walked, because a stroke whose centreline sits just outside `uncovered`
+ still inks pixels inside it.
+ 
+ **Layer fired in:** unit — `packages/jet_cad_2d_flutter/test/tile_fallback_test.dart`,
+ `criterion 2 and 2c` (the `fillingGrid` sweep, eight offsets), via
+@@ -109,57 +186,87 @@ Also run under the full widget suite before and after.
+ -      math.max(0.0, uncovered.top - kTileSlack),
+ -      math.min(viewport.width, uncovered.right + kTileSlack),
+ -      math.min(viewport.height, uncovered.bottom + kTileSlack),
+ +      math.max(0.0, uncovered.left - 0.0),
+ +      math.max(0.0, uncovered.top - 0.0),
+ +      math.min(viewport.width, uncovered.right + 0.0),
+ +      math.min(viewport.height, uncovered.bottom + 0.0),
+      );
+ ```
+ 
+-**Verbatim output:**
++**Verbatim output, the pixel sweep** (fix round 2, 2026-08-26, new fixture) —
++`CI=true flutter test test/tile_fallback_test.dart`, **GREEN**:
+ 
+ ```
+ 00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart
+ 00:00 +0: criterion 2 and 2c: a partly baked frame equals the live frame
+-00:00 +1: All tests passed!
++00:00 +1: criterion 2b: the near-axis arm stays inside the tiled path's bound
++00:00 +2: All tests passed!
++```
++
++**Verbatim output, the whole widget suite** — `CI=true flutter test`, all of
++`packages/jet_cad_2d_flutter` — **RED, three failures**:
++
++```
++00:04 +369 ~1 -3: Some tests failed.
++
++Failing tests:
++  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_cache_test.dart: stripFor a strip touching the bottom-right clamps there and pads inward
++  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_cache_test.dart: stripFor clamps one edge at a time
++  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_cache_test.dart: stripFor pads an interior rect on every side
+ ```
+ 
+-**Ruling: SURVIVES. Recorded as gap H5, per the plan's own pre-commitment
+-(spec §5, H5): "M2 may not be killable... If criterion 1b cannot be made to
+-fail, M2 becomes gap H5 and D2's pad is retained on `_bake`'s argument rather
+-than on a gate."** `pad = 0` does not delete geometry the way M3's 20-pixel
++**Ruling: SURVIVES THE PIXEL SWEEP; DIES AT THE SUITE LEVEL on the pad's
++value.** Those are two different claims and the earlier bare "SURVIVES" in
++this log conflated them. The claim that matters for criterion 1b and gap H5 is
++the narrow one — **the `fillingGrid` pixel sweep cannot see `pad = 0`** — and
++it holds, non-vacuously, on the new fixture (the per-offset table below shows
++every band carrying ink). But `tile_cache_test.dart`'s `stripFor` group
++asserts the pad's *value* directly and reddens on three cases, so M2 is not a
++mutant that walks past the whole suite. Those same three cases are also
++counted in M3's kill below; scoring them for one mutant and dropping them for
++the other, in one document, is the inconsistency this section now removes.
++
++Per the plan's own pre-commitment (spec §5, H5): "M2 may not be killable... If
++criterion 1b cannot be made to fail, M2 becomes gap H5 and D2's pad is
++retained on `_bake`'s argument rather than on a gate."** `pad = 0` does not delete geometry the way M3's 20-pixel
+ shrink does — the query is a rect intersection on entity bounds, so dropping
+ the pad only loses entities lying wholly outside the strip whose half stroke
+ width bleeds into it, and `fillingGrid`'s axis-aligned thin lines swept over
+ *offsets* (not zoom) do not happen to exercise that geometry at the eight
+ offsets tested. No fixture was invented to force a kill, per the brief's
+ explicit instruction not to.
+ 
+-**H5's measured zeros.** `test/tile_fallback_test.dart` was temporarily
+-edited to print each `InkReport` right after `sweepFallbackAgreement`
+-returned (added, used, then reverted — verified byte-identical to the
+-pre-edit copy afterward; not part of any commit). With M2 in place:
+-
+-```
+-TEMP-DEBUG Offset(37.0, 0.0): InkReport(live: 38886, tiled: 38886, stray: 0, uncovered: 0, differing: 0)
+-TEMP-DEBUG Offset(53.0, 0.0): InkReport(live: 36906, tiled: 36906, stray: 0, uncovered: 0, differing: 0)
+-TEMP-DEBUG Offset(71.0, 0.0): InkReport(live: 35970, tiled: 35970, stray: 0, uncovered: 0, differing: 0)
+-TEMP-DEBUG Offset(0.0, 37.0): InkReport(live: 38208, tiled: 38208, stray: 0, uncovered: 0, differing: 0)
+-TEMP-DEBUG Offset(0.0, 53.0): InkReport(live: 37056, tiled: 37056, stray: 0, uncovered: 0, differing: 0)
+-TEMP-DEBUG Offset(0.0, 71.0): InkReport(live: 34232, tiled: 34232, stray: 0, uncovered: 0, differing: 0)
+-TEMP-DEBUG Offset(-41.0, 0.0): InkReport(live: 37608, tiled: 37608, stray: 0, uncovered: 0, differing: 0)
+-TEMP-DEBUG Offset(0.0, -41.0): InkReport(live: 37668, tiled: 37668, stray: 0, uncovered: 0, differing: 0)
+-```
++**H5's measured zeros, re-measured on the new fixture and now
++non-vacuous.** A throwaway harness (`test/tmp_measure_test.dart`, added, used
++and deleted; never staged) reproduced the sweep's own arrangement per offset
++and printed the strip, the live ink inside it, and the report. With M2 in
++place:
++
++| pan | strip | band ink | tiled/live tri | stray | uncovered | differing |
++|---|---|---|---|---|---|---|
++| (37, 0)  | LTRB(0, 0, 37, 300)     | 3072 | 46/62 | 0 | 0 | 0 |
++| (53, 0)  | LTRB(0, 0, 53, 300)     | 5052 | 48/62 | 0 | 0 | 0 |
++| (71, 0)  | LTRB(0, 0, 71, 300)     | 7136 | 50/62 | 0 | 0 | 0 |
++| (0, 37)  | LTRB(0, 0, 400, 37)     | 5720 | 56/64 | 0 | 0 | 0 |
++| (0, 53)  | LTRB(0, 0, 400, 53)     | 8400 | 58/64 | 0 | 0 | 0 |
++| (0, 71)  | LTRB(0, 0, 400, 71)     | 9696 | 56/62 | 0 | 0 | 0 |
++| (-41, 0) | LTRB(375, 32, 400, 300) | 2224 | 44/62 | 0 | 0 | 0 |
++| (0, -41) | LTRB(32, 279, 400, 300) | 2752 | 50/62 | 0 | 0 | 0 |
+ 
+ `stray`, `uncovered` and `differing` are all `0` at every one of the eight
+-swept offsets, `live` and `tiled` ink counts equal at each.
++swept offsets, and `live` equals `tiled` at each (41464, except 42992 at the
++two `(0, 37)`/`(0, 53)` offsets). **The band-ink column is what makes this a
++result rather than an artefact**: every one of the eight bands the fallback
++owes carries between 2224 and 9696 device pixels of live ink, so the sweep had
++something to lose at every offset and did not lose it. Under the *old*
++fixture two of these bands were empty and the zeros there meant nothing.
+ 
+ **Why this is not a gate of this plan's own.** `kTileSlack`'s own history
+ says how conditional the miss is: it is the same constant `_bake` already
+ pads its arrival query by, and dropping that padding was Plan 3g's defect
+ **F1** — a whole stroke column lost at six of forty-one swept zoom factors on
+ a differently constructed fixture. **D2's pad rests on `_bake`'s argument and
+ on F1's history, not on a gate this plan built** — this plan inherited the
+ constant and the reasoning behind it rather than re-deriving a bound of its
+ own, and `fillingGrid` swept at the offsets this plan's criteria use does not
+ happen to reproduce F1's geometry.
+@@ -227,24 +334,83 @@ fix round 1):**
+ ```
+ 
+ Same `uncoveredPixels: 1642` both times — the pixel assertion (which appears
+ earlier in the test body) fires first and identically; the triangle-budget
+ assertion added for M5 never gets a chance to run against this mutant.
+ 
+ **Ruling: KILLED**, targeted, before and after the triangle-budget gate
+ existed, and — see immediately below — under the whole widget suite on
+ today's tree.
+ 
+-### Full widget suite under M3 (Task 8a, fix round 1, today's tree)
++### Full widget suite under M3 (fix round 2, 2026-08-26, the new fixture)
++
++**Everything above this line is history**, measured on the predecessor
++`fillingGrid`. Re-fired against the widened fixture, M3 still dies, on the same
++seven tests, with two of the figures changed:
++
++```
++00:04 +365 ~1 -7: Some tests failed.
++```
++
++**All seven failures by name**, from `CI=true flutter test`:
++
++```
++test/invariants/tile_budget_test.dart: criterion 12: a frame at the cap still equals the live frame
++test/tile_cache_test.dart: stripFor pads an interior rect on every side
++test/tile_cache_test.dart: stripFor clamps to the viewport rather than growing past it
++test/tile_cache_test.dart: stripFor clamps one edge at a time
++test/tile_cache_test.dart: stripFor a strip touching the bottom-right clamps there and pads inward
++test/tile_fallback_test.dart: criterion 2 and 2c: a partly baked frame equals the live frame
++test/tile_fallback_test.dart: criterion 2b: the near-axis arm stays inside the tiled path's bound
++```
++
++`criterion 2b` is digit-identical to every earlier firing —
++`Expected: a value less than or equal to <60>`, `Actual: <417>`,
++`Offset(37.0, 0.0): InkReport(live: 10703, tiled: 10344, stray: 29,
++uncovered: 388, differing: 417, liveTri: 20, tiledTri: 0, stripInk: 0)` — its
++fixture did not change.
++
++**`criterion 2 and 2c` now dies on the *new* anti-vacuity clause first**, at
++`Offset(-41, 0)`, because a query shrunk by 20 px inverts the strip there:
++
++```
++00:00 +0 -1: criterion 2 and 2c: a partly baked frame equals the live frame [E]
++  Expected: a value greater than or equal to <200>
++    Actual: <0>
++  pan Offset(-41.0, 0.0): the live frame carries no ink inside the band the fallback owes (Rect.fromLTRB(395.0, 52.0, 387.0, 300.0)), so every pixel assertion below is satisfied by a fallback that could have drawn nothing: InkReport(live: 41464, tiled: 40340, stray: 0, uncovered: 1124, differing: 1124, liveTri: 62, tiledTri: 40, stripInk: 0)
++```
++
++`Rect.fromLTRB(395.0, 52.0, 387.0, 300.0)` has `left > right` — an empty band,
++which trivially contains no ink. The same report line carries the pixel
++evidence too (`uncovered: 1124, differing: 1124`).
+ 
+-**This subsection is a property of the tree as it stands today, reproduced
+-directly, not a historical record like M5's first-fired result below.** The
++**The pixel path still kills M3 on its own**, and this was measured rather
++than assumed: with the band clause temporarily switched off
++(`minimumStripInk: 0`, reverted immediately, never staged), M3 reddens the
++sweep's own pixel assertion at the very first offset —
++
++```
++00:00 +0 -1: criterion 2 and 2c: a partly baked frame equals the live frame [E]
++  Expected: <0>
++    Actual: <124>
++  Offset(37.0, 0.0): InkReport(live: 41464, tiled: 41340, stray: 0, uncovered: 124, differing: 124, liveTri: 62, tiledTri: 44, stripInk: 1352)
++```
++
++— 124 lost pixels where the old fixture read 1642. The magnitude fell because
++the wider grid's lines are spaced the same but the strip that M3 shrinks now
++enters across a denser interior; the kill is unchanged.
++
++### Full widget suite under M3 (Task 8a, fix round 1 — historical)
++
++**This subsection was a property of the tree as it stood on 2026-08-25, on
++the predecessor fixture; fix round 2's re-firing above supersedes its figures
++and is the record of today's tree.** The
+ mutant was applied fresh to the current `lib/src/tile_cache.dart`, the whole
+ widget suite was run under it, and the mutant was then restored from a `/tmp`
+ copy (never `git checkout`) and the suite re-confirmed green before this
+ sentence was written.
+ 
+ Command: `CI=true flutter test` (whole package, from
+ `packages/jet_cad_2d_flutter`).
+ 
+ Final summary line: `+365 ~1 -7: Some tests failed.` — **365 passed, 1
+ skipped, 7 failed**, against the baseline's 372 passed / 1 skipped / 0
+@@ -423,20 +589,45 @@ reproduction): `+371 ~1 -1` with exactly one failure, every time. Full log:
+ 
+ **Restore, verified.** `cp /tmp/tile_cache_8b_backup.dart
+ lib/src/tile_cache.dart` (not `git checkout` — the file was never staged or
+ committed during this mutation, so this copies the mutant's own pre-image
+ back). `diff /tmp/tile_cache_8b_backup.dart lib/src/tile_cache.dart` produced
+ no output; `git diff -- lib/src/tile_cache.dart` and `git status --porcelain
+ -- lib/src/tile_cache.dart` were both empty immediately after. `CI=true
+ flutter test test/tile_fallback_test.dart` on the restored tree: `+2: All
+ tests passed!` (both `criterion 2 and 2c` and `criterion 2b` green).
+ 
++### Re-fired on the new fixture (fix round 2, 2026-08-26)
++
++The two transcripts above are history, measured on the predecessor
++`fillingGrid` and against `kTriangleBudgetRatio = 0.9`. Re-fired against the
++widened fixture and the re-bracketed `0.97`, M4 dies in exactly the same
++place, with the numbers moved:
++
++```
++00:00 +0 -1: criterion 2 and 2c: a partly baked frame equals the live frame [E]
++  Expected: a value less than <60.14>
++    Actual: <80>
++     Which: is not a value less than <60.14>
++  pan Offset(37.0, 0.0): the tiled arm emitted as much geometry as the full-frame live arm, so the fallback walked far more than the strip: InkReport(live: 41464, tiled: 41464, stray: 0, uncovered: 0, differing: 0, liveTri: 62, tiledTri: 80, stripInk: 7032)
++```
++
++Whole widget suite, `CI=true flutter test`: **`+371 ~1 -1: Some tests
++failed.`**, `test/tile_fallback_test.dart: criterion 2 and 2c` the only
++failure anywhere in the package — the same shape as the historical run, one
++failure, same test. Note `stripInk: 7032`: M4 is now killed on a sample that
++is itself non-vacuous, which the historical run could not claim.
++
++**The device arm below is unchanged and was not re-run** — it is a timing
++measurement, unaffected by a test fixture, and this fix round ran no
++`flutter drive`.
++
+ **Device arm** (from `docs/superpowers/notes/2026-08-25-plan-3h-results.md`,
+ Step 4, not re-measured here — Task 8b's own device time went to the widget
+ suite above, which is the new finding; the timing figures already exist and
+ rerunning `flutter drive` would not change what they say): `tile pan` p95
+ across three runs, {38.14, 36.14, 37.59} ms, median **37.59 ms**, against the
+ narrowed arm's median of **15.99 ms** — **ratio 2.35**, short of the ≥ 2.4
+ gate (see `STATUS.md`'s Plan 3h section and the results note for the full
+ discussion of that miss, including why n=3 cannot settle it and why the gate
+ itself was mis-derived). `capacityMiB=192.00` and peak `tileBytes=27262976`
+ (26.00 MiB) in all three runs, identical to the narrowed arm — M4 changes
+@@ -516,68 +707,174 @@ recorded one.
+   Expected: a value less than <54.0>
+     Actual: <70>
+      Which: is not a value less than <54.0>
+   pan Offset(37.0, 0.0): the tiled arm emitted as much geometry as the full-frame live arm, so the fallback walked far more than the strip: InkReport(live: 38886, tiled: 38886, stray: 0, uncovered: 0, differing: 0, liveTri: 60, tiledTri: 70)
+   ...
+ 00:00 +0 -1: criterion 2b: the near-axis arm stays inside the tiled path's bound
+ 00:00 +1 -1: Some tests failed.
+ ```
+ 
+ `criterion 2b` is unaffected (listed `+1`, i.e. passed) — confirming the
+-triangle-budget gate's opt-in scoping holds under this mutation too.
++triangle-budget gate's scoping holds under this mutation too.
++
++### Re-fired on the new fixture (fix round 2, 2026-08-26), and the new bracket
++
++The transcript above is history (`kTriangleBudgetRatio = 0.9`, predecessor
++fixture). Re-fired against the widened fixture and `0.97`:
++
++```
++00:00 +0 -1: criterion 2 and 2c: a partly baked frame equals the live frame [E]
++  Expected: a value less than <60.14>
++    Actual: <80>
++     Which: is not a value less than <60.14>
++  pan Offset(37.0, 0.0): the tiled arm emitted as much geometry as the full-frame live arm, so the fallback walked far more than the strip: InkReport(live: 41464, tiled: 41464, stray: 0, uncovered: 0, differing: 0, liveTri: 62, tiledTri: 80, stripInk: 7032)
++```
++
++Whole widget suite: **`+371 ~1 -1: Some tests failed.`**, `criterion 2 and 2c`
++the only failure.
++
++**The bracket, both endpoints, measured on the new fixture.** The wider
++fixture moved correct code's tiled/live triangle ratio up, so `0.9` had to be
++re-derived rather than carried over. Swept over `kFallbackOffsets`:
++
++| pan | correct code | under M5 |
++|---|---|---|
++| (37, 0)  | 50/62 = 0.8065 | 80/62 = 1.2903 |
++| (53, 0)  | 52/62 = 0.8387 | 80/62 = 1.2903 |
++| (71, 0)  | 54/62 = 0.8710 | 80/62 = 1.2903 |
++| (0, 37)  | 58/64 = 0.9063 | 80/64 = 1.2500 |
++| (0, 53)  | 60/64 = **0.9375** | 80/64 = 1.2500 |
++| (0, 71)  | 58/62 = 0.9355 | 76/62 = 1.2258 |
++| (-41, 0) | 48/62 = 0.7742 | 54/62 = 0.8710 |
++| (0, -41) | 56/62 = 0.9032 | 62/62 = **1.0000** |
++
++- **Lower endpoint — where correct code first fails: 0.9375.** The assertion
++  is strict (`tiledTri < liveTri * ratio`), so at `Offset(0, 53)` correct code
++  fails at any bound ≤ 0.9375. Measured, not derived: setting the constant to
++  `0.9375` reddens `criterion 2 and 2c` —
++  `Expected: a value less than <60.0>`, `Actual: <60>`,
++  `pan Offset(0.0, 53.0): ... liveTri: 64, tiledTri: 60, stripInk: 12232` —
++  and setting it to `0.94` is green (`+2: All tests passed!`).
++- **Upper endpoint — the lowest ratio the mutant produces at an offset the
++  gate can see: 1.0000**, at `Offset(0, -41)`.
++- **Chosen: `0.97`**, the midpoint — 0.0325 above the first value that fails
++  correct code, 0.0300 below the first value the mutant would slip past. In
++  triangles, at the tightest offset it allows 62 of 64 where correct code
++  emits 60: **two triangles of headroom** (the old bound had four).
++- **`Offset(-41, 0)` is a hole in this gate**: M5 only moves it 0.7742 →
++  0.8710, both under any usable bound, because that strip already contains
++  nearly every entity the full viewport would find. The gate kills M5 at seven
++  of eight offsets and would not have killed it at that one alone.
+ 
+ **Ruling: KILLED** by the triangle-count-ratio gate added in Task 5's fix
+-round (`kTriangleBudgetRatio = 0.9`, `VerticesDrawSink.frameTriangleCount`
+-compared per arm), which did not exist when M5 was found. **It was green
+-against the entire widget package when first fired.**
++round (`VerticesDrawSink.frameTriangleCount` compared per arm), which did not
++exist when M5 was found. **It was green against the entire widget package when
++first fired.**
+ 
+ **What this records about the sweep's own shape.** The pixel-agreement sweep
+ (criteria 2, 2b, 2c) catches a fallback query *shrunk* (M3) but structurally
+ cannot catch one *grown*, because the unchanged `clipRect(uncovered)`
+ discards every extra pixel the larger query would have drawn — "the pixels
+ stay correct, so the sweep still reads zero, and the cost this whole change
+ exists to remove comes back silently" (`tile_cache.dart`'s own comment on the
+ clip warns of exactly this asymmetry, applied there to the clip; M5 is the
+ same asymmetry applied to the `Size` argument one line below it). The
+ asymmetry is inherent to a pixel-only oracle watching a cost-only change, not
+ a defect in how the pixel sweep was written.
+ 
+ ---
+ 
++## M6 — clip the padded strip instead of the uncovered union (found by the whole-branch review)
++
++**What it targets:** the line `paintFrame`'s own comment predicts a mutant
++for, at `tile_cache.dart:825-830`: *"The clip is unchanged, and that is a
++decision... Drop this line and the pad becomes overdraw onto tiles already
++blitted: the pixels stay correct, so the sweep still reads zero, and the cost
++this whole change exists to remove comes back silently."* M6 is that sentence
++fired as a mutation.
++
++**Layer fired in:** unit — the whole widget suite, `CI=true flutter test`.
++
++**Diff** (the clip moves below the strip and takes the strip as its argument;
++`strip` is `stripFor(uncovered, viewport)`, which is `uncovered` padded by
++`kTileSlack` and clamped, so this *widens* what the fallback may paint):
++
++```diff
++     canvas.save();
++-    canvas.clipRect(uncovered, doAntiAlias: false);
++     final strip = stripFor(uncovered, viewport);
++     _lastStrip = strip;
+++    canvas.clipRect(strip, doAntiAlias: false);
++     canvas.translate(strip.left, strip.top);
++```
++
++**Verbatim output (GREEN — the mutant survives):**
++
++```
++00:05 +372 ~1: All tests passed!
++```
++
++**Ruling: SURVIVES**, on the widened fixture, against the entire widget
++package — identical to the baseline. **Recorded as accepted gap H6.** Nothing
++in this repository distinguishes clipping to `uncovered` from clipping to the
++padded strip, because the difference is pure overdraw of pixels that already
++carry the same ink: the tiles under the pad were blitted this frame from the
++same geometry the fallback is re-walking, and software Skia does not
++antialias `drawVertices` (see `tile_comparison.dart`'s header), so the
++overdraw is byte-identical. The cost it adds — up to `kTileSlack` (32 logical
++px) of extra fill on every side of every fallback strip — is a *cost*, and
++this plan's only cost oracle is the triangle count, which M6 does not move
++because it does not change what is queried.
++
++**Why it is recorded rather than fixed.** Closing it needs an oracle this plan
++does not have: either a fill-rate counter (nothing in the repository counts
++pixels written) or a device timing sensitive enough to see a pad-sized
++overdraw, which criterion 3 at n=3 demonstrably is not. It is named here so
++that the tally reads honestly: **six mutants fired, four killed, two
++survivors (M2 on the pixel sweep, M6 outright).**
++
++---
++
+ ## Deferred minors (Task 5's fix round and Task 3)
+ 
+ Recorded here per this task's controller amendment, items 5 and 6, since
+ they concern the mutation apparatus above rather than the exit gate itself:
+ 
+-1. **The triangle gate is tight.** At its tightest offset on `fillingGrid`
+-   (`Offset(0.0, 37.0)`), correct code reads `tiledTri: 50` against
+-   `liveTri: 60` — a ratio of 0.8333, four triangles of headroom under the
+-   `kTriangleBudgetRatio = 0.9` bound (54 allowed). This is deterministic,
+-   not a flake — the re-reviewer bracketed it directly, `0.84` green and
+-   `0.83` red at that offset — but it is brittle to any future edit of
+-   `fillingGrid`'s fixture geometry or `kFallbackOffsets`'s swept offsets,
+-   either of which could shift the correct-code ratio without any change to
+-   `tile_cache.dart`.
+-2. **`checkTriangleBudget` defaults to `false`.** `measureFallbackAgreement`
+-   and `sweepFallbackAgreement` both take it as an opt-in parameter because
+-   it carries no signal on `nearAxisDiagonals` (ratios of exactly `1.0` or
+-   `0` under correct code). Only `criterion 2 and 2c` passes `true` today. A
+-   future third caller of either function gets no triangle-count gate unless
+-   it opts in explicitly and remembers to.
++1. **The triangle gate is tighter than it was, and still open.** At its
++   tightest offset on the widened `fillingGrid` (`Offset(0.0, 53.0)`),
++   correct code reads `tiledTri: 60` against `liveTri: 64` — a ratio of
++   0.9375, **two** triangles of headroom under the re-bracketed
++   `kTriangleBudgetRatio = 0.97` bound (62 allowed), where the old fixture and
++   bound left four. Deterministic rather than flaky — fix round 2 bracketed it
++   directly, `0.9375` red and `0.94` green at that offset — but brittle to any
++   future edit of `fillingGrid`'s geometry or `kFallbackOffsets`'s swept
++   offsets, either of which could shift the correct-code ratio with no change
++   to `tile_cache.dart` at all. Fix round 2 chose the midpoint of the measured
++   bracket rather than a wider bound because a bound above 1.0 would say "the
++   tiled arm may emit more geometry than the full-frame live arm," which is
++   the opposite of what the gate exists to assert.
++2. **`checkTriangleBudget` now defaults to `true`** (fix round 2, closing this
++   minor). It was deferred on the reasoning that the pixel gate carried the
++   load; the `canvas.translate` finding showed the pixel gate was thinner than
++   assumed, so both fallback gates now default to on and a caller has to opt
++   out in writing. `criterion 2b` is the only caller that does, passing
++   `checkTriangleBudget: false` and `minimumStripInk: 0` with the reasons at
++   the call site: `nearAxisDiagonals` reads a ratio of exactly 1.0 or 0 under
++   correct code, and leaves five of the eight entering bands empty.
+ 3. **Task 3's per-offset table has no in-tree provenance.** The per-offset
+    figures in that task's report were produced with a throwaway, unstaged
+    debug file, and nothing committed to the repository records how the table
+    was generated or lets it be regenerated.
+ 
+ ---
+ 
+-## Figures not independently reproduced by Task 8a
++## Figures not independently reproduced
+ 
+ At initial writing, no mutant had been re-fired and no new measurement had
+ been taken for this log — every figure was read from
+ `.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/task-4-report.md`,
+ `task-5-report.md`, or (for two figures) the plan's ledger, per the brief's
+ instruction to read rather than re-run. **Fix round 1 changed this for one
+ of the two:**
+ 
+ - **M3's criterion 2b figure, `differing: 417` against a bound of 60**, was
+   not in `task-4-report.md` or `task-5-report.md` when this log was first
+@@ -595,10 +892,19 @@ of the two:**
+   triangle-budget gate already existed (Task 5's "Fix round 1"), not the
+   reviewer's original discovery run. **Unlike M3's figure above, this one
+   cannot be independently reproduced today**: the triangle-budget gate now
+   exists in the committed tree, so firing M5 again reddens `criterion 2 and
+   2c` (as shown in the M5 section above) rather than reproducing the
+   historical all-green result. The `+372 ~1` figure remains a record of what
+   the tree looked like before the fix round, not a claim about the tree as
+   it stands now.
+ 
+ No other figure needed for this log was missing from the two named reports.
++
++**Fix round 2 (2026-08-26) supersedes both bullets for the tree as it stands.**
++Every mutant in this log — M1, M2, M3, M4's widget arm, M5, and the newly
++recorded M6 — was re-fired directly against today's tree on the widened
++`fillingGrid`, and the figures under each section's "re-fired" subheading are
++those runs. What remains read off earlier reports is explicitly labelled
++history: the pre-fix-round-2 transcripts, and **M4's device arm**, which is a
++timing measurement no fixture change can affect and which this fix round did
++not re-run (no `flutter drive` was executed).
+diff --git a/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart b/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
+index d1dd12b..313ae45 100644
+--- a/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
++++ b/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
+@@ -30,20 +30,21 @@ import 'tile_fixture.dart';
+ 
+ class InkReport {
+   const InkReport({
+     required this.liveInk,
+     required this.tiledInk,
+     required this.strayPixels,
+     required this.uncoveredPixels,
+     required this.differingPixels,
+     required this.liveTriangleCount,
+     required this.tiledTriangleCount,
++    this.liveStripInk = 0,
+   });
+ 
+   /// Non-transparent pixels in the live capture.
+   final int liveInk;
+   final int tiledInk;
+ 
+   /// Tiled pixels with ink where live has none.
+   final int strayPixels;
+ 
+   /// Live pixels with ink where tiled has none.
+@@ -60,25 +61,51 @@ class InkReport {
+   /// `TileCache.paintFrame` actually emitted through the sink that frame.
+   ///
+   /// **Not the fallback alone.** At this rig's one-tile bake budget the same
+   /// frame bakes one tile *and* runs the live fallback, and `_bake` draws
+   /// through this same sink, so this count is "one tile's worth of geometry"
+   /// plus whatever the fallback walked. See the comment on the ratio these
+   /// numbers feed, in `measureFallbackAgreement`, for how that is accounted
+   /// for rather than ignored.
+   final int tiledTriangleCount;
+ 
++  /// Non-transparent pixels of the **live** capture that lie inside the band
++  /// the fallback owes — `TileCache.debugLastStrip`, in device pixels.
++  ///
++  /// **This is the anti-vacuity clause the other six could not supply, and it
++  /// was earned.** [liveInk] counts the whole frame, which at a fallback
++  /// sample is dominated by the tiles the frame blitted; a fallback that
++  /// walked the strip and found nothing in it still leaves [liveInk] in the
++  /// tens of thousands and every pixel count at zero. Two of the eight swept
++  /// offsets were exactly that until `fillingGrid`'s extent was widened —
++  /// see its doc comment. Zero here means the sample proves nothing about
++  /// the fallback, however green it reads.
++  ///
++  /// Zero on an arm that is not measured for it: [measureFallbackAgreement]
++  /// only fills this in when it is asked to gate on it.
++  final int liveStripInk;
++
++  InkReport withStripInk(int ink) => InkReport(
++      liveInk: liveInk,
++      tiledInk: tiledInk,
++      strayPixels: strayPixels,
++      uncoveredPixels: uncoveredPixels,
++      differingPixels: differingPixels,
++      liveTriangleCount: liveTriangleCount,
++      tiledTriangleCount: tiledTriangleCount,
++      liveStripInk: ink);
++
+   @override
+   String toString() => 'InkReport(live: $liveInk, tiled: $tiledInk, '
+       'stray: $strayPixels, uncovered: $uncoveredPixels, '
+       'differing: $differingPixels, liveTri: $liveTriangleCount, '
+-      'tiledTri: $tiledTriangleCount)';
++      'tiledTri: $tiledTriangleCount, stripInk: $liveStripInk)';
+ }
+ 
+ Future<Uint8List> _capture(void Function(Canvas canvas) draw) async {
+   final width = (kTileViewport.width * kTileDpr).round();
+   final height = (kTileViewport.height * kTileDpr).round();
+   final recorder = PictureRecorder();
+   final canvas = Canvas(recorder);
+   canvas.scale(kTileDpr);
+   canvas.clipRect(Offset.zero & kTileViewport);
+   draw(canvas);
+@@ -183,95 +210,166 @@ Future<Uint8List> captureLiveFrame(TileRig rig) => _capture((canvas) {
+       final quantised = quantiseCamera(rig.camera, kTileDpr);
+       rig.painter.debugRebaseOrigin =
+           rebaseOriginFor(quantised.visibleWorld(kTileViewport));
+       rig.sink.canvas = canvas;
+       rig.vertices.canvas = canvas;
+       rig.painter.paint(rig.vertices, quantised, kTileViewport);
+       rig.vertices.flush();
+       rig.painter.debugRebaseOrigin = null;
+     });
+ 
++/// Non-transparent pixels of [pixels] inside [logical], a rectangle in
++/// **logical** pixels that is scaled by [kTileDpr] and clipped to the capture.
++///
++/// The capture is the device-pixel buffer [captureLiveFrame] returns;
++/// `TileCache.debugLastStrip` is logical, like every rectangle `paintFrame`
++/// works in, so the conversion belongs here rather than at the call site.
++int inkInside(Uint8List pixels, Rect logical) {
++  final width = (kTileViewport.width * kTileDpr).round();
++  final height = (kTileViewport.height * kTileDpr).round();
++  final x0 = (logical.left * kTileDpr).floor().clamp(0, width);
++  final x1 = (logical.right * kTileDpr).ceil().clamp(0, width);
++  final y0 = (logical.top * kTileDpr).floor().clamp(0, height);
++  final y1 = (logical.bottom * kTileDpr).ceil().clamp(0, height);
++  var ink = 0;
++  for (var y = y0; y < y1; y++) {
++    for (var x = x0; x < x1; x++) {
++      if (pixels[(y * width + x) * 4 + 3] != 0) ink++;
++    }
++  }
++  return ink;
++}
++
+ /// The tiled arm's `frameTriangleCount` may not exceed the live arm's by more
+ /// than this fraction, when [measureFallbackAgreement] is asked to check it.
+ ///
+ /// **Not a bound on the fallback alone.** At this rig's one-tile bake budget
+ /// the tiled frame also bakes one 64x64 tile through the same sink, so
+ /// `tiledTriangleCount` is that tile's geometry plus whatever the fallback
+ /// walked -- never the fallback in isolation. The bound below has to hold
+ /// against that combined total, not an idealised fallback-only count.
+ ///
+-/// **Measured, not guessed.** Swept over `kFallbackOffsets` on `fillingGrid`
+-/// (the fixture `criterion 2 and 2c` uses), the shipped narrowing's
+-/// tiled/live ratio ran 0.517-0.833 (30/58 .. 50/60 triangles). Reverting
+-/// `_drawInto`'s `Size` argument from the strip back to the full `viewport`
+-/// -- leaving the translate and the camera offset alone, so `debugLastStrip`
+-/// still reports the strip and every pixel still lands correctly under the
+-/// clip -- pushed six of the eight ratios to 1.0-1.172; the other two were
+-/// unchanged, because those two offsets' strips already contained every
+-/// entity the full viewport would have found. `0.9` sits with margin on both
+-/// sides of that gap: above every ratio the correct code measured, below
+-/// every ratio the mutant moved.
++/// **Bracketed, not guessed — and re-bracketed when `fillingGrid`'s extent
++/// changed.** The bound was found the way a bound has to be: by locating the
++/// value at which *correct* code first fails, then the value the *mutant*
++/// produces, and sitting between them.
++///
++/// Swept over `kFallbackOffsets` on `fillingGrid` (the fixture
++/// `criterion 2 and 2c` uses), the shipped narrowing's tiled/live ratio runs
++/// **0.7742 to 0.9375** (48/62 .. 60/64 triangles), worst at
++/// `Offset(0, 53)`. The assertion is strict, so correct code fails at any
++/// bound **≤ 0.9375** and passes at 0.94 — measured, not derived: `0.9375`
++/// reddens `criterion 2 and 2c` at that offset and `0.94` is green.
+ ///
+-/// **Fixture-dependent, and that is why it is opt-in.** `nearAxisDiagonals`
+-/// (`criterion 2b`) is a handful of long diagonals spanning most of the
+-/// viewport; a query the size of the strip and a query the size of the full
+-/// viewport catch the *same* entities there, so the ratio sits at 1.0 (or
+-/// 0/20 where the strip misses the diagonals entirely) even under the
+-/// correct implementation. That fixture carries no signal for this check, so
+-/// applying the bound to it would fail correct code, not catch a mutant.
+-const double kTriangleBudgetRatio = 0.9;
++/// Growing `_drawInto`'s `Size` argument from the strip back to the full
++/// `viewport` (mutant M5, and the end state M4 also reaches) — leaving the
++/// clip, the translate and the camera offset alone, so `debugLastStrip` still
++/// reports the strip and every pixel still lands correctly — moves the sweep
++/// to **0.8710 to 1.2903**, and to **1.0000 or above at seven of the eight
++/// offsets**. The lowest of those seven is the binding endpoint.
++///
++/// So the bracket is **(0.9375, 1.0000]** and `0.97` is its midpoint,
++/// 0.0325 above the highest ratio correct code produces and 0.0300 below the
++/// lowest ratio the mutant produces at an offset the gate can see. In
++/// triangles, at the tightest offset it allows 62 of 64 where correct code
++/// emits 60: two triangles of headroom, deterministic rather than flaky, and
++/// brittle to any future edit of `fillingGrid`'s geometry or of the swept
++/// offsets — recorded as such in `plan-3h-mutation-log.md`.
++///
++/// **The eighth offset, `Offset(-41, 0)`, is a hole in this gate and is
++/// named rather than hidden.** Its strip already contains almost every entity
++/// the full viewport would find, so the mutant only moves it 0.7742 → 0.8710,
++/// both below the bound. The gate is a *sweep*-level gate: it kills the
++/// mutant at seven offsets and would not have killed it at that one alone.
++///
++/// **Fixture-dependent, and that is why it can be switched off.**
++/// `nearAxisDiagonals` (`criterion 2b`) is a handful of long diagonals
++/// spanning most of the viewport; a query the size of the strip and a query
++/// the size of the full viewport catch the *same* entities there, so the
++/// ratio sits at exactly 1.0 (or 0/20 where the strip misses the diagonals
++/// entirely) even under the correct implementation. That fixture carries no
++/// signal for this check, so applying the bound to it would fail correct
++/// code, not catch a mutant. It is the only caller that opts out.
++const double kTriangleBudgetRatio = 0.97;
+ 
+ /// One fallback sample: a frame that is part blit and part live walk, compared
+ /// against the live frame at the same camera.
+ ///
+ /// **Each sample owns its cache.** A sweep that panned one rig across offsets
+ /// would inherit tiles from the previous offset and become a warm-tile
+ /// comparison -- one of the three arrangements that failed to detect a
+ /// crippled query before this instrument existed.
+ ///
+-/// [checkTriangleBudget] gates the [kTriangleBudgetRatio] assertion -- see
+-/// its doc comment for why this is opt-in rather than unconditional.
++/// [checkTriangleBudget] gates the [kTriangleBudgetRatio] assertion. **It
++/// defaults to on**, so a caller that wants no triangle gate has to say so and
++/// justify it, rather than getting a thinner sample by omission; the only
++/// caller that opts out is `criterion 2b`, whose fixture carries no signal for
++/// the ratio -- see [kTriangleBudgetRatio].
++///
++/// [minimumStripInk] is the floor on [InkReport.liveStripInk], the ink the
++/// live frame carries **inside the band the fallback owes**. Passing `0`
++/// disables the clause and makes the sample vacuous as to the fallback; only
++/// `criterion 2b` does, because `nearAxisDiagonals` leaves five of the eight
++/// swept bands empty and widening it would import a different fixture's
++/// contract.
+ Future<InkReport> measureFallbackAgreement(
+   DraftDocument Function(FlutterTextMeasurer) of,
+   FlutterTextMeasurer measurer,
+   Offset pan, {
+   int minimumInk = 500,
+-  bool checkTriangleBudget = false,
++  int minimumStripInk = 200,
++  bool checkTriangleBudget = true,
+ }) async {
+   final rig = TileRig(
+       tileDevicePixels: 64, tilesBakedPerFrame: 1000, document: of(measurer));
+   try {
+     // Cover the viewport, so the strip that enters next has blitted tiles on
+     // its interior side.
+     rig.paintOnce();
+     rig.cache.resetCounters();
+     // One tile a frame, so the entering band stays uncovered and the fallback
+     // owes it.
+     rig.cache.bakeBudgetDevicePixels = 64 * 64;
+     rig.panBy(pan.dx, pan.dy);
+ 
+-    final report = await measureTiledAgreement(rig);
++    final measured = await measureTiledAgreement(rig);
+ 
+     // Anti-vacuity, and every clause of it was earned by an arrangement that
+     // passed while proving nothing.
+     expect(rig.cache.liveDrawCount, greaterThan(0),
+-        reason: 'pan $pan ran no fallback: $report');
++        reason: 'pan $pan ran no fallback: $measured');
+     expect(rig.cache.blitCount, greaterThan(0),
+         reason: 'pan $pan blitted nothing, so nothing was partly baked');
+     final strip = rig.cache.debugLastStrip;
+     expect(strip, isNotNull, reason: 'pan $pan recorded no strip');
+     // The clause `bakeCount`/`liveDrawCount` cannot supply: `uncovered` is a
+     // bounding rectangle, so an L-shaped uncovered set bounds to the whole
+     // viewport and leaves no interior edge for a crippled query to lose ink
+     // across.
+     expect(strip != Offset.zero & kTileViewport, isTrue,
+         reason: 'pan $pan left no interior strip edge: strip=$strip');
++    // **Ink inside the band, not merely somewhere in the frame.** The two
++    // clauses above see the strip's *shape*; the two below see the frame's
++    // *total* ink, which at a fallback sample is dominated by blitted tiles.
++    // None of them notices a strip that entered across bare canvas, and two
++    // of the eight swept offsets did exactly that until `fillingGrid`'s
++    // extent was widened -- passing every other clause here while the
++    // fallback drew nothing at all. A separate capture rather than a
++    // by-product of the comparison above: `measureTiledAgreement` reduces its
++    // two captures to counts, and this clause needs to know *where* the ink
++    // is.
++    final report =
++        measured.withStripInk(inkInside(await captureLiveFrame(rig), strip!));
++    expect(report.liveStripInk, greaterThanOrEqualTo(minimumStripInk),
++        reason: 'pan $pan: the live frame carries no ink inside the band the '
++            'fallback owes ($strip), so every pixel assertion below is '
++            'satisfied by a fallback that could have drawn nothing: $report');
+     expect(report.liveInk, greaterThan(minimumInk), reason: '$report');
+     expect(report.tiledInk, greaterThan(minimumInk), reason: '$report');
+     // Pixels alone cannot see this: a fallback query padded back out to the
+     // full viewport still clips to `uncovered` and lands every pixel right,
+     // so it reads as a pixel-perfect frame while re-tessellating the whole
+     // scene underneath. This is what caught it -- see [kTriangleBudgetRatio].
+     if (checkTriangleBudget) {
+       expect(report.tiledTriangleCount,
+           lessThan(report.liveTriangleCount * kTriangleBudgetRatio),
+           reason: 'pan $pan: the tiled arm emitted as much geometry as the '
+@@ -282,24 +380,27 @@ Future<InkReport> measureFallbackAgreement(
+   } finally {
+     rig.dispose();
+   }
+ }
+ 
+ /// [measureFallbackAgreement] over a set of pan offsets, each independent.
+ Future<List<InkReport>> sweepFallbackAgreement({
+   required DraftDocument Function(FlutterTextMeasurer) of,
+   required List<Offset> offsets,
+   int minimumInk = 500,
+-  bool checkTriangleBudget = false,
++  int minimumStripInk = 200,
++  bool checkTriangleBudget = true,
+ }) async {
+   final reports = <InkReport>[];
+   for (final offset in offsets) {
+     final measurer = FlutterTextMeasurer();
+     try {
+       reports.add(await measureFallbackAgreement(of, measurer, offset,
+-          minimumInk: minimumInk, checkTriangleBudget: checkTriangleBudget));
++          minimumInk: minimumInk,
++          minimumStripInk: minimumStripInk,
++          checkTriangleBudget: checkTriangleBudget));
+     } finally {
+       measurer.clear();
+     }
+   }
+   return reports;
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart b/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart
+index 17d9f70..0b15d43 100644
+--- a/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart
++++ b/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart
+@@ -250,41 +250,74 @@ DraftDocument translucentOverlap(FlutterTextMeasurer measurer) {
+ DraftDocument nearAxisDiagonals(FlutterTextMeasurer measurer) {
+   final doc = DraftDocument.empty(measurer: measurer);
+   var handle = 1000;
+   for (var i = 0; i < 10; i++) {
+     addLine(doc, doc.rootHandle, Handle(handle++), 20, 30 + i * 6.0, 220,
+         150 - i * 6.0);
+   }
+   return doc;
+ }
+ 
+-/// A grid that fills [kTileViewport] at [tileCamera], which no other fixture
+-/// here does.
++/// A grid that fills [kTileViewport] at [tileCamera] **and goes on filling it
++/// at every offset the fallback sweep pans to**, which no other fixture here
++/// does.
+ ///
+ /// **This is the property that makes a crippled query detectable, and its
+ /// absence is why three earlier arrangements could not detect one.** A loss in
+ /// the live fallback is only visible where the uncovered union's boundary is
+ /// *interior to the drawing*: a strip entering across empty canvas has no ink
+ /// to lose. [crossingGrid] spans world x 10..200, which at this camera's 1.4
+ /// is screen -23..243 inside a 400 px viewport -- off the left edge and short
+ /// of the right -- so a pan in any direction brings in empty space.
+ ///
+-/// The visible world box here is x in [26.4, 312.1] and y in [16.4, 230.7];
+-/// 20..320 by 10..240 strictly contains it on all four edges.
++/// **The extent is derived from the sweep rather than from the resting
++/// camera, and the predecessor extent that was not cost this plan its witness
++/// for `canvas.translate`.** [tileCamera] maps world to screen as
++/// `sx = 1.4 * wx - 37` and `sy = -1.4 * wy + 323`, so **one world unit is
++/// 1.4 screen pixels** and the resting visible world box is x in
++/// [26.4, 312.1], y in [16.4, 230.7]. `TileRig.panBy` adds its offset to the
++/// camera's translation, so a pan of `d` screen pixels slides this drawing by
++/// `d` on screen: an edge of the grid stays outside the viewport under that
++/// pan only while its own screen distance past that viewport edge exceeds
++/// `|d|`. At the extent below, those four distances are
++///
++/// | edge   | world   | screen | past the viewport edge by |
++/// |--------|---------|--------|---------------------------|
++/// | left   | x = -52 | -109.8 | 109.8 px                  |
++/// | right  | x = 380 |  495.0 |  95.0 px                  |
++/// | top    | y = 300 |  -97.0 |  97.0 px                  |
++/// | bottom | y = -52 |  395.8 |  95.8 px                  |
++///
++/// and the largest offset the fallback sweep pans is **71 screen pixels**, so
++/// every edge clears the whole sweep by at least 24 screen pixels and the
++/// viewport stays strictly interior to the drawing at all eight offsets.
++///
++/// **What the predecessor extent (20..320 by 10..240) did.** It contained the
++/// resting visible box on all four edges, but by only about 9 to 13 *screen*
++/// pixels, against a sweep that pans 37 to 71. At `Offset(-41, 0)` and
++/// `Offset(0, -41)` the entering strip therefore landed on bare canvas: the
++/// live fallback drew **nothing** there and the sweep's zero-differing-pixel
++/// assertions were satisfied vacuously. Those two offsets are also precisely
++/// the ones whose strip does not start at (0, 0) -- the only ones where
++/// `TileCache.paintFrame`'s `canvas.translate(strip.left, strip.top)` is not
++/// a no-op -- so deleting that line left the whole widget suite green. The
++/// extent above is what gives that line a witness.
+ ///
+ /// Lines rather than a fill, and axis-aligned rather than diagonal: this
+ /// fixture carries the arm that must agree **exactly**, so it must not import
+ /// the near-axis slope disagreement [nearAxisDiagonals] measures.
+ DraftDocument fillingGrid(FlutterTextMeasurer measurer) {
+   final doc = DraftDocument.empty(measurer: measurer);
+   var handle = 1000;
+   // 16 units apart: half a tile's 32 logical pixels at this camera's 1.4 is
+   // 22.9 world units, so no tile-sized strip anywhere in the frame can be
+-  // empty of ink.
+-  for (var t = 10.0; t <= 240.0; t += 16.0) {
+-    addLine(doc, doc.rootHandle, Handle(handle++), 20, t, 320, t);
++  // empty of ink. The bounds are a whole number of steps apart end to end
++  // (-52 + 16*22 = 300, -52 + 16*27 = 380), so the outermost line lands
++  // exactly on the extent the table above measures rather than short of it.
++  for (var t = -52.0; t <= 300.0; t += 16.0) {
++    addLine(doc, doc.rootHandle, Handle(handle++), -52, t, 380, t);
+   }
+-  for (var t = 20.0; t <= 320.0; t += 16.0) {
+-    addLine(doc, doc.rootHandle, Handle(handle++), t, 10, t, 240);
++  for (var t = -52.0; t <= 380.0; t += 16.0) {
++    addLine(doc, doc.rootHandle, Handle(handle++), t, -52, t, 300);
+   }
+   return doc;
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart b/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart
+index 6c34088..c319948 100644
+--- a/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart
+@@ -35,52 +35,69 @@ const List<Offset> kFallbackOffsets = <Offset>[
+   Offset(0, 37),
+   Offset(0, 53),
+   Offset(0, 71),
+   Offset(-41, 0),
+   Offset(0, -41),
+ ];
+ 
+ void main() {
+   test('criterion 2 and 2c: a partly baked frame equals the live frame',
+       () async {
+-    // `checkTriangleBudget: true` is criterion 1's other half: the pixel
+-    // assertions below prove the fallback lands the right pixels, and this
+-    // flag proves it did not re-tessellate the whole viewport to do it. See
+-    // `kTriangleBudgetRatio`'s doc comment for the measured numbers behind
+-    // the bound and why `criterion 2b` below does not also carry this flag.
++    // Both gates default to on, and this call takes them as they come: the
++    // triangle-count ratio is criterion 1's other half -- the pixel
++    // assertions below prove the fallback lands the right pixels, and the
++    // ratio proves it did not re-tessellate the whole viewport to do it (see
++    // `kTriangleBudgetRatio`'s doc comment for the bracket behind the bound)
++    // -- and `minimumStripInk` is what makes each sample non-vacuous, by
++    // requiring the live frame to carry ink inside the band the fallback
++    // owes. `criterion 2b` below is the one caller that opts out of either,
++    // and says why.
+     final reports = await sweepFallbackAgreement(
+-        of: fillingGrid, offsets: kFallbackOffsets, checkTriangleBudget: true);
++        of: fillingGrid, offsets: kFallbackOffsets);
+ 
+     expect(reports, hasLength(kFallbackOffsets.length));
+     for (var i = 0; i < reports.length; i++) {
+       final report = reports[i];
+       expect(report.strayPixels, 0, reason: '${kFallbackOffsets[i]}: $report');
+       expect(report.uncoveredPixels, 0,
+           reason: '${kFallbackOffsets[i]}: $report');
+       expect(report.differingPixels, 0,
+           reason: '${kFallbackOffsets[i]}: $report');
+     }
+   });
+ 
+   test('criterion 2b: the near-axis arm stays inside the tiled path\'s bound',
+       () async {
+     // The reference is not invented here: `tile_cache_test.dart` gates the
+     // tiled path on this same fixture at `differingPixels <= 60` against a
+     // measured 36 of 10342 ink, 0.348%. The fallback arm is held to the same
+     // number, so an increase is a tripwire rather than a silent record.
+-    // No `checkTriangleBudget` here, deliberately: this fixture is a handful
+-    // of long diagonals spanning most of the viewport, so a strip-sized query
+-    // and a full-viewport query catch the same entities and the ratio sits at
+-    // 1.0 (or 0/20 where the strip misses the diagonals) even under correct
+-    // code. See `kTriangleBudgetRatio`'s doc comment.
++    // `checkTriangleBudget: false` here, deliberately and against the
++    // default: this fixture is a handful of long diagonals spanning most of
++    // the viewport, so a strip-sized query and a full-viewport query catch
++    // the same entities and the ratio sits at 1.0 (or 0/20 where the strip
++    // misses the diagonals) even under correct code. See
++    // `kTriangleBudgetRatio`'s doc comment.
++    //
++    // `minimumStripInk: 0` is the second opt-out, and it is an admission
++    // rather than a design: `nearAxisDiagonals` spans world 20..220 by
++    // 30..150 and leaves five of these eight entering bands empty, so this
++    // arm cannot carry the clause `criterion 2 and 2c` above relies on. It is
++    // recorded as an accepted gap in `STATUS.md` (H3) rather than papered
++    // over -- widening this fixture would change the `<= 60` bound it shares
++    // with `tile_cache_test.dart`, which is a different contract.
+     final reports = await sweepFallbackAgreement(
+-        of: nearAxisDiagonals, offsets: kFallbackOffsets, minimumInk: 200);
++        of: nearAxisDiagonals,
++        offsets: kFallbackOffsets,
++        minimumInk: 200,
++        minimumStripInk: 0,
++        checkTriangleBudget: false);
+ 
+     for (var i = 0; i < reports.length; i++) {
+       final report = reports[i];
+       expect(report.differingPixels, lessThanOrEqualTo(60),
+           reason: '${kFallbackOffsets[i]}: $report');
+       expect(report.differingPixels / report.liveInk, lessThan(0.01),
+           reason: '${kFallbackOffsets[i]}: $report');
+     }
+   });
+ }

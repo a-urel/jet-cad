@@ -1,0 +1,224 @@
+# Review package: b7ff8f5..1f2af06
+
+## Commits
+1f2af06 docs: Plan 3h mutation log -- M3's section states its suite scope
+
+## Files changed
+ docs/superpowers/notes/plan-3h-mutation-log.md | 150 ++++++++++++++++++++-----
+ 1 file changed, 122 insertions(+), 28 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/notes/plan-3h-mutation-log.md b/docs/superpowers/notes/plan-3h-mutation-log.md
+index 753a8d8..f858019 100644
+--- a/docs/superpowers/notes/plan-3h-mutation-log.md
++++ b/docs/superpowers/notes/plan-3h-mutation-log.md
+@@ -161,24 +161,31 @@ own, and `fillingGrid` swept at the offsets this plan's criteria use does not
+ happen to reproduce F1's geometry.
+ 
+ ---
+ 
+ ## M3 — shrink the query 20 logical pixels (`kTileSlack` → `-20.0`)
+ 
+ **What it targets:** criterion 1, the mutation gate that proves the sweep
+ measures something real — a query shrunk below what the geometry needs must
+ be caught.
+ 
+-**Layer fired in:** unit — `test/tile_fallback_test.dart`, `criterion 2 and
+-2c`, via the same command as M2. Re-fired a second time in Task 5's fix round
+-1 with the triangle-budget gate (below, M5) already in place, to confirm the
+-new gate did not change M3's kill path.
++**Layer fired in:** unit — targeted first against
++`test/tile_fallback_test.dart`'s `criterion 2 and 2c` alone, via the same
++command as M2. Re-fired a second time in Task 5's fix round 1 with the
++triangle-budget gate (below, M5) already in place, still targeted at
++`criterion 2 and 2c`, to confirm the new gate did not change M3's kill path.
++**Fired a third time in Task 8a's own fix round 1 (2026-08-25) against the
++whole widget suite** — `CI=true flutter test`, all of
++`packages/jet_cad_2d_flutter`, not one file — plus `flutter analyze` and
++`dart format --output=none --set-exit-if-changed .` under the mutant. That
++full-suite run is what the rest of this section is built from; see "Full
++widget suite under M3" below.
+ 
+ **Diff (all four call sites in `stripFor`):**
+ 
+ ```diff
+  Rect stripFor(Rect uncovered, Size viewport) => Rect.fromLTRB(
+ -      math.max(0.0, uncovered.left - kTileSlack),
+ -      math.max(0.0, uncovered.top - kTileSlack),
+ -      math.min(viewport.width, uncovered.right + kTileSlack),
+ -      math.min(viewport.height, uncovered.bottom + kTileSlack),
+ +      math.max(0.0, uncovered.left - -20.0),
+@@ -212,33 +219,108 @@ fix round 1):**
+     Actual: <1642>
+   Offset(37.0, 0.0): InkReport(live: 38886, tiled: 37244, stray: 0, uncovered: 1642, differing: 1642, liveTri: 60, tiledTri: 10)
+   ...
+ 00:00 +0 -1: Some tests failed.
+ ```
+ 
+ Same `uncoveredPixels: 1642` both times — the pixel assertion (which appears
+ earlier in the test body) fires first and identically; the triangle-budget
+ assertion added for M5 never gets a chance to run against this mutant.
+ 
+-**Ruling: KILLED**, both before and after the triangle-budget gate existed.
++**Ruling: KILLED**, targeted, before and after the triangle-budget gate
++existed, and — see immediately below — under the whole widget suite on
++today's tree.
++
++### Full widget suite under M3 (Task 8a, fix round 1, today's tree)
++
++**This subsection is a property of the tree as it stands today, reproduced
++directly, not a historical record like M5's first-fired result below.** The
++mutant was applied fresh to the current `lib/src/tile_cache.dart`, the whole
++widget suite was run under it, and the mutant was then restored from a `/tmp`
++copy (never `git checkout`) and the suite re-confirmed green before this
++sentence was written.
++
++Command: `CI=true flutter test` (whole package, from
++`packages/jet_cad_2d_flutter`).
++
++Final summary line: `+365 ~1 -7: Some tests failed.` — **365 passed, 1
++skipped, 7 failed**, against the baseline's 372 passed / 1 skipped / 0
++failed (373 total both times; 7 of the 373 flip from pass to fail under this
++mutant).
++
++**All seven failures by name, each confirmed by its own `[E]` block in the
++transcript:**
++
++1. `test/invariants/tile_budget_test.dart`: *criterion 12: a frame at the cap
++   still equals the live frame* — `Expected: <0>`, `Actual: <1000>`,
++   `InkReport(live: 19860, tiled: 18860, stray: 0, uncovered: 1000,
++   differing: 1000, liveTri: 40, tiledTri: 36)`. **New relative to every
++   prior record of M3** — neither `task-5-report.md` nor the ledger's M3
++   entries mention `tile_budget_test.dart` reddening.
++2. `test/tile_cache_test.dart`: *stripFor pads an interior rect on every
++   side* — `Expected: Rect:<Rect.fromLTRB(68.0, 48.0, 232.0, 212.0)>`,
++   `Actual: Rect:<Rect.fromLTRB(120.0, 100.0, 180.0, 160.0)>`. This is the
++   one `stripFor` case M1 (drop the clamp) could **not** redden; M3 reddens
++   it because M3 replaces the pad's *value*, not just its clamp, so even an
++   interior rect far from every edge is padded by the wrong amount.
++3. `test/tile_cache_test.dart`: *stripFor clamps to the viewport rather than
++   growing past it* — `Expected: Rect:<Rect.fromLTRB(0.0, 0.0, 400.0,
++   300.0)>`, `Actual: Rect:<Rect.fromLTRB(20.0, 20.0, 380.0, 280.0)>`.
++4. `test/tile_cache_test.dart`: *stripFor clamps one edge at a time* —
++   `Expected: Rect:<Rect.fromLTRB(0.0, 0.0, 72.0, 300.0)>`,
++   `Actual: Rect:<Rect.fromLTRB(20.0, 20.0, 20.0, 280.0)>`.
++5. `test/tile_cache_test.dart`: *stripFor a strip touching the bottom-right
++   clamps there and pads inward* — `Expected: Rect:<Rect.fromLTRB(328.0,
++   228.0, 400.0, 300.0)>`, `Actual: Rect:<Rect.fromLTRB(380.0, 280.0, 380.0,
++   280.0)>`.
++6. `test/tile_fallback_test.dart`: *criterion 2 and 2c: a partly baked frame
++   equals the live frame* — `Expected: <0>`, `Actual: <1642>`,
++   `Offset(37.0, 0.0): InkReport(live: 38886, tiled: 37244, stray: 0,
++   uncovered: 1642, differing: 1642, liveTri: 60, tiledTri: 10)`. Digit-
++   identical to every prior firing of M3 on this offset.
++7. `test/tile_fallback_test.dart`: *criterion 2b: the near-axis arm stays
++   inside the tiled path's bound* — `Expected: a value less than or equal to
++   <60>`, `Actual: <417>`, `Offset(37.0, 0.0): InkReport(live: 10703, tiled:
++   10344, stray: 29, uncovered: 388, differing: 417, liveTri: 20,
++   tiledTri: 0)`.
++
++**Failure 7 is the fuller kill amendment 1 asked to be recorded: under M3,
++criterion 2b reddens with `differing: 417` against a bound of 60, not only
++criteria 2 and 2c as the plan's own text claimed.** That figure was
++previously known only from this plan's ledger
++(`.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/progress.md`, line
++89) and restated in `task-8-brief.md`'s controller amendment 1, item 3 — **it
++is now independently reproduced by Task 8a directly, digit-identical
++(`differing: 417`)**, not merely read off the brief. See the "Figures"
++section at the end of this log for the corrected status.
++
++**`flutter analyze` and `dart format` under M3:** run rather than assumed.
++Both clean —
++
++```
++Analyzing jet_cad_2d_flutter...
++No issues found! (ran in 1.2s)
++```
++
++```
++Formatted 65 files (0 changed) in 0.12 seconds.
++```
++
++— confirming M3 is a value change, not a structural one, exactly as
++expected but not taken on faith.
+ 
+-**The fuller kill amendment 1 requires recorded here.** Under M3, **criterion
+-2b also reddens** — `differing: 417` against a bound of 60 — not only
+-criteria 2 and 2c as the plan's own text claimed. This figure is not in
+-`task-4-report.md` or `task-5-report.md`; it is recorded in this plan's
+-ledger (`.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/progress.md`,
+-line 89: "Task 5: out of scope, carry to Task 8: under M3, criterion 2b also
+-reddens (`differing: 417` against a bound of 60). The plan's M3 record claims
+-only criteria 2 and 2c; the mutation log should record the fuller kill.") and
+-restated verbatim in this task's own brief (`task-8-brief.md`, controller
+-amendment 1, item 3). Task 8a did not re-run this measurement — see "Figures
+-not independently reproduced by Task 8a" at the end of this log.
++**Restore, verified.** `lib/src/tile_cache.dart` was copied aside to `/tmp`
++before the mutant was applied and copied back afterward (never `git
++checkout`); `diff` against the pre-mutation copy produced no output. `git
++status --porcelain` was clean immediately after restoring. `CI=true flutter
++test` was re-run and returned to the baseline exactly: `+372 ~1: All tests
++passed!`
+ 
+ ---
+ 
+ ## M4 — narrow the clip but not the query (placeholder)
+ 
+ **Status: not fired. This section exists so the log names all five mutants;
+ it carries no result.**
+ 
+ M4 is the mutant that isolates the original defect this plan fixes: apply
+ the narrower clip `_bake` already uses, but leave the fallback's *query*
+@@ -363,28 +445,40 @@ they concern the mutation apparatus above rather than the exit gate itself:
+    it opts in explicitly and remembers to.
+ 3. **Task 3's per-offset table has no in-tree provenance.** The per-offset
+    figures in that task's report were produced with a throwaway, unstaged
+    debug file, and nothing committed to the repository records how the table
+    was generated or lets it be regenerated.
+ 
+ ---
+ 
+ ## Figures not independently reproduced by Task 8a
+ 
+-Per this task's scope, no mutant was re-fired and no new measurement was
+-taken — every figure above is read from
++At initial writing, no mutant had been re-fired and no new measurement had
++been taken for this log — every figure was read from
+ `.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/task-4-report.md`,
+-`task-5-report.md`, or (for the one figure below) the plan's ledger, per the
+-brief's instruction to read rather than re-run.
+-
+-- **M3's criterion 2b figure, `differing: 417` against a bound of 60**, is
+-  not in `task-4-report.md` or `task-5-report.md`. It is recorded in
+-  `progress.md` (line 89) and restated in `task-8-brief.md`'s controller
+-  amendment 1. Task 8a took both as given, per the brief's own instruction,
+-  and did not re-run the M3 mutation to reproduce it a third time.
++`task-5-report.md`, or (for two figures) the plan's ledger, per the brief's
++instruction to read rather than re-run. **Fix round 1 changed this for one
++of the two:**
++
++- **M3's criterion 2b figure, `differing: 417` against a bound of 60**, was
++  not in `task-4-report.md` or `task-5-report.md` when this log was first
++  written; it was recorded only in `progress.md` (line 89) and restated in
++  `task-8-brief.md`'s controller amendment 1. **Fix round 1 (2026-08-25) has
++  since fired M3 against the whole widget suite on today's tree and
++  reproduced this figure directly, digit-identical** — see "Full widget
++  suite under M3" in the M3 section above. It is no longer a figure taken on
++  the brief's word alone; it is a property of today's tree, independently
++  confirmed by both an implementer and, per the reviewer's fix-round-1
++  message, a reviewer.
+ - **M5's first-fired result, `+372 ~1` green against the whole package**, is
+-  likewise from `progress.md` (line 79) rather than from either named task
++  still from `progress.md` (line 79) rather than from either named task
+   report — `task-5-report.md` documents M5 only from the point the
+   triangle-budget gate already existed (Task 5's "Fix round 1"), not the
+-  reviewer's original discovery run.
++  reviewer's original discovery run. **Unlike M3's figure above, this one
++  cannot be independently reproduced today**: the triangle-budget gate now
++  exists in the committed tree, so firing M5 again reddens `criterion 2 and
++  2c` (as shown in the M5 section above) rather than reproducing the
++  historical all-green result. The `+372 ~1` figure remains a record of what
++  the tree looked like before the fix round, not a claim about the tree as
++  it stands now.
+ 
+ No other figure needed for this log was missing from the two named reports.

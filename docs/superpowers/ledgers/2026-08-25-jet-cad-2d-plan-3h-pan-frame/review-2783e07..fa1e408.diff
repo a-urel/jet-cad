@@ -1,0 +1,219 @@
+# Review package: 2783e07..fa1e408
+
+## Commits
+fa1e408 feat(rig): PAN_STEP, a magnitude along the rig's existing direction
+
+## Files changed
+ .../integration_test/frame_timing_test.dart        |  1 +
+ apps/dev_harness_2d/lib/main.dart                  | 32 ++++++++++++++++++++++
+ apps/dev_harness_2d/lib/measurement_rig.dart       | 15 +++++++++-
+ 3 files changed, 47 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/integration_test/frame_timing_test.dart b/apps/dev_harness_2d/integration_test/frame_timing_test.dart
+index 56304f6..42a88bc 100644
+--- a/apps/dev_harness_2d/integration_test/frame_timing_test.dart
++++ b/apps/dev_harness_2d/integration_test/frame_timing_test.dart
+@@ -206,20 +206,21 @@ void main() {
+       textCorpus: kTextCorpus,
+       drawText: kDrawText,
+       camera: app.camera,
+       painter: app.painter,
+       sink: app.sink,
+       vertices: app.vertices,
+       resolvedBackend: app.resolvedBackend,
+       tileCache: app.tileCache,
+       pumpFrame: () => tester.pump(const Duration(milliseconds: 16)),
+       settle: tester.pumpAndSettle,
++      panStep: kPanStep,
+     );
+   });
+ 
+   testWidgets('R4a leaf edit per frame', (tester) async {
+     if (!runs('leaf')) return;
+     if (kDashedFraction == 0) {
+       print('R4a skipped: DASHED=0 seeds no dashed linetype to edit with.');
+       return;
+     }
+     refuseDebugMode();
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index 9677bc0..9e7c7f4 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -200,20 +200,51 @@ final int kTileBake = _intDefine('TILE_BAKE',
+ /// see [kTilePx].
+ int _intDefine(String name, String raw, int fallback, {required int minimum}) {
+   if (raw.isEmpty) return fallback;
+   final value = int.tryParse(raw);
+   if (value == null || value < minimum) {
+     throw StateError('$name must be an integer >= $minimum; got "$raw"');
+   }
+   return value;
+ }
+ 
++/// [_intDefine]'s sibling, for a define that is not an integer.
++///
++/// Same rule and the same reason: a silent default writes one run into the
++/// table under a heading the command line claimed and the run did not use.
++double _doubleDefine(String name, String raw, double fallback,
++    {double? minimum}) {
++  if (raw.isEmpty) return fallback;
++  final value = double.tryParse(raw);
++  if (value == null || !value.isFinite) {
++    throw ArgumentError.value(raw, name, 'not a finite number');
++  }
++  if (minimum != null && value < minimum) {
++    throw ArgumentError.value(raw, name, 'below $minimum');
++  }
++  return value;
++}
++
++/// The tile-pan phase's speed, in logical pixels per frame.
++///
++/// **A magnitude along the rig's existing direction, and unset means no
++/// scaling at all.** The historical step is `Offset(-7, -3)`, magnitude
++/// `sqrt(58)` = 7.615773; `PAN_STEP=7.6` would scale it by 0.99793 and make
++/// the arm incomparable with every row already recorded at it. `NaN` is the
++/// sentinel for unset because zero is a legal magnitude to ask about.
++///
++/// It reaches the **tile phase only**. R2's own pan keeps `Offset(-7, -3)`
++/// unconditionally, or every prior plan's R2 row becomes incomparable.
++final double kPanStep = _doubleDefine(
++    'PAN_STEP', const String.fromEnvironment('PAN_STEP'), double.nan,
++    minimum: 0);
++
+ /// The one measurer the harness document is built with, reachable from
+ /// `_HarnessState.dispose` so the native paragraphs it holds are released.
+ ///
+ /// A field rather than an inline argument because `DraftCanvas` no longer
+ /// disposes the cache: the document owns it and the application releases it.
+ final FlutterTextMeasurer harnessMeasurer = FlutterTextMeasurer();
+ 
+ /// The corpus the rigs measure on: the same shape as R1's, so the two sets of
+ /// numbers describe one drawing.
+ ///
+@@ -426,20 +457,21 @@ Future<void> _driveR2(
+     textCorpus: kTextCorpus,
+     drawText: kDrawText,
+     camera: camera,
+     painter: painter,
+     sink: sink,
+     vertices: vertices,
+     resolvedBackend: resolvedBackend,
+     tileCache: tileCache,
+     pumpFrame: _pumpFrame,
+     settle: _settle,
++    panStep: kPanStep,
+   );
+   print('R2 app-run: done');
+ }
+ 
+ /// Renders exactly one frame and completes after it.
+ ///
+ /// This is called from inside `_HarnessAppState`'s own post-frame callback —
+ /// [SchedulerBinding.instance.schedulerPhase] is `postFrameCallbacks`, not
+ /// `idle`, at that point, and [SchedulerBinding.endOfFrame] only calls
+ /// [SchedulerBinding.scheduleFrame] for you when the phase is idle. Relying
+diff --git a/apps/dev_harness_2d/lib/measurement_rig.dart b/apps/dev_harness_2d/lib/measurement_rig.dart
+index ea2fa63..b982709 100644
+--- a/apps/dev_harness_2d/lib/measurement_rig.dart
++++ b/apps/dev_harness_2d/lib/measurement_rig.dart
+@@ -333,20 +333,21 @@ Future<void> runR2Rig({
+   required bool textCorpus,
+   required bool drawText,
+   required CameraController camera,
+   required DraftPainter painter,
+   required CanvasDrawSink sink,
+   required VerticesDrawSink? vertices,
+   required RenderBackend resolvedBackend,
+   required TileCache? tileCache,
+   required Future<void> Function() pumpFrame,
+   required Future<void> Function() settle,
++  required double panStep,
+ }) async {
+   refuseDebugMode();
+   final timings = <FrameTiming>[];
+   // The bucket the callback appends to, swapped between phases rather than
+   // re-registered: `addTimingsCallback` reports a frame *after* it rasterised,
+   // so removing and re-adding the callback around a phase boundary drops the
+   // tail of one phase instead of moving it. A swapped bucket keeps every frame
+   // and lands at most a frame or two of one phase in the next -- which is why
+   // each phase below pumps two throwaway frames at its boundary.
+   var bucket = timings;
+@@ -395,20 +396,21 @@ Future<void> runR2Rig({
+     if (tileCache != null) {
+       await runTilePhases(
+         cache: tileCache,
+         camera: camera,
+         painter: painter,
+         sink: sink,
+         vertices: vertices,
+         pumpFrame: pumpFrame,
+         settle: settle,
+         setBucket: (b) => bucket = b,
++        panStep: panStep,
+       );
+     }
+   } finally {
+     SchedulerBinding.instance.removeTimingsCallback(collect);
+   }
+ }
+ 
+ /// The three columns the tile-size sweep is for, measured in three regimes.
+ ///
+ /// **Blit cost and bake cost move in opposite directions as the tile grows,
+@@ -449,20 +451,21 @@ Future<void> runR2Rig({
+ /// regime above is what carries the rasterisation.
+ Future<void> runTilePhases({
+   required TileCache cache,
+   required CameraController camera,
+   required DraftPainter painter,
+   required CanvasDrawSink sink,
+   required VerticesDrawSink? vertices,
+   required Future<void> Function() pumpFrame,
+   required Future<void> Function() settle,
+   required void Function(List<FrameTiming>) setBucket,
++  required double panStep,
+ }) async {
+   // Fill the generation the zoom phase left stale. Bounded, and the bound is
+   // reported: a run that hit it never reached a warm cache and its hold
+   // regime would be measuring a refill.
+   const maxWarmFrames = 400;
+   var warmFrames = 0;
+   var lastBakes = -1;
+   while (warmFrames < maxWarmFrames && cache.bakeCount != lastBakes) {
+     lastBakes = cache.bakeCount;
+     camera.panBy(Offset.zero);
+@@ -513,21 +516,31 @@ Future<void> runTilePhases({
+         'liveDraws=${cache.liveDrawCount} '
+         'newEvictions=${cache.evictionCount - evictionsBefore} '
+         'liveTiles=${cache.liveTileCount} '
+         'tileBytes=${cache.liveBytes}');
+     // Monotone, so this reads "was more needed during this phase", never "is
+     // this what the phase needs". See [capacity].
+     print('    ${capacity(vertices)}');
+   }
+ 
+   await phase('tile hold', 60, Offset.zero);
+-  await phase('tile pan', 120, const Offset(-7, -3));
++  // `PAN_STEP` unset leaves the historical step untouched -- see `kPanStep`.
++  const historical = Offset(-7, -3);
++  final magnitude = historical.distance;
++  final step = panStep.isNaN
++      ? historical
++      : Offset(historical.dx * panStep / magnitude,
++          historical.dy * panStep / magnitude);
++  print('  tile pan step: dx=${step.dx.toStringAsFixed(4)} '
++      'dy=${step.dy.toStringAsFixed(4)} '
++      'magnitude=${step.distance.toStringAsFixed(4)}');
++  await phase('tile pan', 120, step);
+   _probeBake(cache, camera, painter, sink, vertices);
+ }
+ 
+ /// One live walk and one walk per covering tile, at the current camera.
+ ///
+ /// Reproduces [TileCache]'s bake geometry rather than approximating it: the
+ /// grid is a real [TileGrid] anchored at [quantiseCamera]'s output, the bake
+ /// camera comes from [TileGrid.bakeCameraFor], the pad is [kTileSlack], the
+ /// clip is the same hard unantialiased square, and the rebase origin is
+ /// derived once for the frame the way `paintFrame` derives it. A probe that

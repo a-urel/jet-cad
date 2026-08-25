@@ -1,0 +1,468 @@
+# Review package: 6cca683..b7ff8f5
+
+## Commits
+b7ff8f5 docs: Plan 3h's mutation log, and G3 moves to 3i
+
+## Files changed
+ STATUS.md                                      |  25 +-
+ docs/superpowers/notes/plan-3h-mutation-log.md | 390 +++++++++++++++++++++++++
+ 2 files changed, 408 insertions(+), 7 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 22524c2..b8ee11e 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -376,38 +376,49 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
+ ## Resume here
+ 
+ **Plan 3g (the rasterised tile cache) is done and pushed, worked directly on
+ `main` at `477d4c5..2367a20`, nothing in flight. Its exit gate is 11 of 13,
+ and gap G7 closed on 2026-08-24 at `1b7ea04`, after the plan.** Its ledger is
+ archived at
+ [docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/](docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/)
+ and `.superpowers/sdd/` is empty — **no ledger chore is outstanding for any
+ plan.**
+ 
++**Renumbered 2026-08-25.** This section originally read G3 and the vertex
++buffer as Plan 3h's own starting points. They are not. **Plan 3h is the
++fallback walk and its instrument, nothing else** — item 1 below. Plan 3g
++assigned G3 to 3h; **G3 now belongs to Plan 3i** (item 2), and the 192 MiB
++vertex buffer is **Plan 3j**'s question (item 3), not 3h's. The reassignment
++is licensed by item 3's own finding: the 2026-08-25 high-water measurement
++showed memory is not a consequence of the pan frame, so the pan frame could
++be finished without settling zoom first.
++
+ **What 3h starts from**, in the order the results note argues it:
+ 
+ 1. **Criterion 11's miss, cause isolated, remedy spent.** 35.67 ms against
+    16.67, reproduced three times, and the bake is under a fifth of it. The
+    excess is the **live fallback drawing the still-uncovered strip**. The
+    budget is already floored at one tile, so lowering it leaves the strip
+    uncovered for more frames, each paying the fallback again. **A pan frame
+-   that exposes more than one tile has no covered path today.**
+-2. **G3, the zoom, with a number on it.** 32.06 ms at 500,000 entities with
+-   tiles on. **No caching scheme touches it** — the triangles are genuinely
+-   being drawn — so the answer is level-of-detail geometry, and the tile cache
+-   can already hold it: a generation is keyed by scale, so a coarser bake can
+-   never outlive the scale it was simplified for.
++   that exposes more than one tile has no covered path today.** This, and
++   only this, is Plan 3h's scope.
++2. **G3, the zoom, with a number on it — now Plan 3i's.** 32.06 ms at
++   500,000 entities with tiles on. **No caching scheme touches it** — the
++   triangles are genuinely being drawn — so the answer is level-of-detail
++   geometry, and the tile cache can already hold it: a generation is keyed by
++   scale, so a coarser bake can never outlive the scale it was simplified for.
+ 3. **The memory measurement, taken 2026-08-25 — and the answer is no.**
+    `debugCapacityVertices` reads **16,777,216 vertices, 192.00 MiB, in all five
+    configurations measured**: 50,000 and 500,000 entities, tiles on and off.
+    **Tiles change nothing, so the tile budget adds to that memory rather than
+-   replacing it** — 3h budgets 192 + tiles. **And the mark is not a function of
++   replacing it** — the 192 MiB figure and the tile budget it must add to are
++   **Plan 3j**'s starting point. **And the mark is not a function of
+    entity count**, which is how both places below still phrase it: a tenfold
+    corpus reads the same number. The steady frame uses an eighth of what stays
+    pinned; the mark is set by the sweep's worst camera and never released,
+    because capacity is deliberately never given back. Full measurement:
+    [docs/superpowers/notes/2026-08-25-vertex-buffer-high-water.md](docs/superpowers/notes/2026-08-25-vertex-buffer-high-water.md).
+ 
+ **Plan 3f.1 (hardening before the picture cache) is done, worked directly on
+ `main` at `c078677..b1e9ec1`. Its exit gate is 16 of 17, the one miss being its
+ own pre-committed stop clause firing on the allocation-meter probe.**
+ Everything below about 3f is still true and still worth reading.
+diff --git a/docs/superpowers/notes/plan-3h-mutation-log.md b/docs/superpowers/notes/plan-3h-mutation-log.md
+new file mode 100644
+index 0000000..753a8d8
+--- /dev/null
++++ b/docs/superpowers/notes/plan-3h-mutation-log.md
+@@ -0,0 +1,390 @@
++# Plan 3h mutation log — the fallback walk
++
++Five mutants are named for this plan (`docs/superpowers/specs/2026-08-25-jet-cad-2d-plan-3h-pan-frame-design.md`,
++§5, plus M5, found by a reviewer after the narrowing landed and folded into
++Task 5's fix round). **This log is written by Task 8a, which is the
++machine-independent half of Task 8** — the device arm needed mains power and
++the machine was on battery with Low Power Mode auto-enabled, so M4 could not
++be fired here. Four of five mutants — M1, M2, M3 and M5 — live entirely in
++the widget suite (`packages/jet_cad_2d_flutter`) and are recorded below in
++full, each with the diff applied, the layer it was fired in, the verbatim
++output, and the ruling. **M4's section is a placeholder in name only**: it is
++a device mutant, it has not been fired, and Task 8b fills it in when mains
++power is available. It is listed here so that a mutation log missing a named
++mutant does not read as a mutant that was never planned.
++
++Every figure below was produced by an implementer and independently
++reproduced by a reviewer, both transcripts in
++`.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/task-4-report.md`
++(M1) and `task-5-report.md` (M2, M3, and — under "Fix round 1" — M5), except
++where a section says otherwise.
++
++All commands below ran from `packages/jet_cad_2d_flutter`, prefixed
++`CI=true`, against `lib/src/tile_cache.dart`.
++
++---
++
++## M1 — drop the clamp
++
++**What it targets:** `stripFor`'s clamp to the viewport (decision D3 in the
++spec). The pad can ask for a rectangle larger than the viewport when
++`uncovered` (a bounding rectangle built with `expandToInclude`) spans most of
++the frame; the clamp is what keeps the strip inside `[0, viewport]`.
++
++**Layer fired in:** unit — `packages/jet_cad_2d_flutter/test/tile_cache_test.dart`,
++the `stripFor` group, via
++`CI=true flutter test test/tile_cache_test.dart --plain-name "stripFor"`.
++Also run and confirmed clean under the full widget suite
++(`CI=true flutter test`, `flutter analyze`, `dart format`) both before and
++after the mutant was applied and restored. The pure-Dart `jet_cad_2d` suite
++is untouched by this change and was not run for this mutant specifically.
++
++**Diff:**
++
++```diff
++ Rect stripFor(Rect uncovered, Size viewport) => Rect.fromLTRB(
++-      math.max(0.0, uncovered.left - kTileSlack),
++-      math.max(0.0, uncovered.top - kTileSlack),
++-      math.min(viewport.width, uncovered.right + kTileSlack),
++-      math.min(viewport.height, uncovered.bottom + kTileSlack),
+++      uncovered.left - kTileSlack,
+++      uncovered.top - kTileSlack,
+++      uncovered.right + kTileSlack,
+++      uncovered.bottom + kTileSlack,
++     );
++```
++
++**Verbatim output (RED):**
++
++```
++00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_cache_test.dart
++00:00 +0: stripFor pads an interior rect on every side
++00:00 +1: stripFor clamps to the viewport rather than growing past it
++00:00 +1 -1: stripFor clamps to the viewport rather than growing past it [E]
++  Expected: Rect:<Rect.fromLTRB(0.0, 0.0, 400.0, 300.0)>
++    Actual: Rect:<Rect.fromLTRB(-32.0, -32.0, 432.0, 332.0)>
++  ...
++00:00 +1 -1: stripFor clamps one edge at a time
++00:00 +1 -2: stripFor clamps one edge at a time [E]
++  Expected: Rect:<Rect.fromLTRB(0.0, 0.0, 72.0, 300.0)>
++    Actual: Rect:<Rect.fromLTRB(-32.0, -32.0, 72.0, 332.0)>
++  ...
++00:00 +1 -2: stripFor a strip touching the bottom-right clamps there and pads inward
++00:00 +1 -3: stripFor a strip touching the bottom-right clamps there and pads inward [E]
++  Expected: Rect:<Rect.fromLTRB(328.0, 228.0, 400.0, 300.0)>
++    Actual: Rect:<Rect.fromLTRB(328.0, 228.0, 432.0, 332.0)>
++  ...
++00:00 +1 -3: Some tests failed.
++```
++
++**Ruling: KILLED.** Exactly 3 of the 4 `stripFor` cases redden — `pads an
++interior rect on every side` stays green because it never touches an edge
++close enough for the clamp to bind, matching the brief's prediction exactly.
++Restored and re-confirmed green (`+4` on the group, `+370 ~1` / later `+372 ~1`
++on the full suite depending on which task's baseline is quoted), `flutter
++analyze` clean, `dart format` clean.
++
++---
++
++## M2 — drop the pad (`kTileSlack` → `0.0`)
++
++**What it targets:** decision D2 — the strip is padded by `kTileSlack` before
++it is walked, because a stroke whose centreline sits just outside `uncovered`
++still inks pixels inside it.
++
++**Layer fired in:** unit — `packages/jet_cad_2d_flutter/test/tile_fallback_test.dart`,
++`criterion 2 and 2c` (the `fillingGrid` sweep, eight offsets), via
++`CI=true flutter test test/tile_fallback_test.dart --plain-name "criterion 2 and 2c"`.
++Also run under the full widget suite before and after.
++
++**Diff (all four call sites in `stripFor`):**
++
++```diff
++ Rect stripFor(Rect uncovered, Size viewport) => Rect.fromLTRB(
++-      math.max(0.0, uncovered.left - kTileSlack),
++-      math.max(0.0, uncovered.top - kTileSlack),
++-      math.min(viewport.width, uncovered.right + kTileSlack),
++-      math.min(viewport.height, uncovered.bottom + kTileSlack),
+++      math.max(0.0, uncovered.left - 0.0),
+++      math.max(0.0, uncovered.top - 0.0),
+++      math.min(viewport.width, uncovered.right + 0.0),
+++      math.min(viewport.height, uncovered.bottom + 0.0),
++     );
++```
++
++**Verbatim output:**
++
++```
++00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart
++00:00 +0: criterion 2 and 2c: a partly baked frame equals the live frame
++00:00 +1: All tests passed!
++```
++
++**Ruling: SURVIVES. Recorded as gap H5, per the plan's own pre-commitment
++(spec §5, H5): "M2 may not be killable... If criterion 1b cannot be made to
++fail, M2 becomes gap H5 and D2's pad is retained on `_bake`'s argument rather
++than on a gate."** `pad = 0` does not delete geometry the way M3's 20-pixel
++shrink does — the query is a rect intersection on entity bounds, so dropping
++the pad only loses entities lying wholly outside the strip whose half stroke
++width bleeds into it, and `fillingGrid`'s axis-aligned thin lines swept over
++*offsets* (not zoom) do not happen to exercise that geometry at the eight
++offsets tested. No fixture was invented to force a kill, per the brief's
++explicit instruction not to.
++
++**H5's measured zeros.** `test/tile_fallback_test.dart` was temporarily
++edited to print each `InkReport` right after `sweepFallbackAgreement`
++returned (added, used, then reverted — verified byte-identical to the
++pre-edit copy afterward; not part of any commit). With M2 in place:
++
++```
++TEMP-DEBUG Offset(37.0, 0.0): InkReport(live: 38886, tiled: 38886, stray: 0, uncovered: 0, differing: 0)
++TEMP-DEBUG Offset(53.0, 0.0): InkReport(live: 36906, tiled: 36906, stray: 0, uncovered: 0, differing: 0)
++TEMP-DEBUG Offset(71.0, 0.0): InkReport(live: 35970, tiled: 35970, stray: 0, uncovered: 0, differing: 0)
++TEMP-DEBUG Offset(0.0, 37.0): InkReport(live: 38208, tiled: 38208, stray: 0, uncovered: 0, differing: 0)
++TEMP-DEBUG Offset(0.0, 53.0): InkReport(live: 37056, tiled: 37056, stray: 0, uncovered: 0, differing: 0)
++TEMP-DEBUG Offset(0.0, 71.0): InkReport(live: 34232, tiled: 34232, stray: 0, uncovered: 0, differing: 0)
++TEMP-DEBUG Offset(-41.0, 0.0): InkReport(live: 37608, tiled: 37608, stray: 0, uncovered: 0, differing: 0)
++TEMP-DEBUG Offset(0.0, -41.0): InkReport(live: 37668, tiled: 37668, stray: 0, uncovered: 0, differing: 0)
++```
++
++`stray`, `uncovered` and `differing` are all `0` at every one of the eight
++swept offsets, `live` and `tiled` ink counts equal at each.
++
++**Why this is not a gate of this plan's own.** `kTileSlack`'s own history
++says how conditional the miss is: it is the same constant `_bake` already
++pads its arrival query by, and dropping that padding was Plan 3g's defect
++**F1** — a whole stroke column lost at six of forty-one swept zoom factors on
++a differently constructed fixture. **D2's pad rests on `_bake`'s argument and
++on F1's history, not on a gate this plan built** — this plan inherited the
++constant and the reasoning behind it rather than re-deriving a bound of its
++own, and `fillingGrid` swept at the offsets this plan's criteria use does not
++happen to reproduce F1's geometry.
++
++---
++
++## M3 — shrink the query 20 logical pixels (`kTileSlack` → `-20.0`)
++
++**What it targets:** criterion 1, the mutation gate that proves the sweep
++measures something real — a query shrunk below what the geometry needs must
++be caught.
++
++**Layer fired in:** unit — `test/tile_fallback_test.dart`, `criterion 2 and
++2c`, via the same command as M2. Re-fired a second time in Task 5's fix round
++1 with the triangle-budget gate (below, M5) already in place, to confirm the
++new gate did not change M3's kill path.
++
++**Diff (all four call sites in `stripFor`):**
++
++```diff
++ Rect stripFor(Rect uncovered, Size viewport) => Rect.fromLTRB(
++-      math.max(0.0, uncovered.left - kTileSlack),
++-      math.max(0.0, uncovered.top - kTileSlack),
++-      math.min(viewport.width, uncovered.right + kTileSlack),
++-      math.min(viewport.height, uncovered.bottom + kTileSlack),
+++      math.max(0.0, uncovered.left - -20.0),
+++      math.max(0.0, uncovered.top - -20.0),
+++      math.min(viewport.width, uncovered.right + -20.0),
+++      math.min(viewport.height, uncovered.bottom + -20.0),
++     );
++```
++
++**Verbatim output (RED, before the triangle gate existed):**
++
++```
++00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart
++00:00 +0: criterion 2 and 2c: a partly baked frame equals the live frame
++00:00 +0 -1: criterion 2 and 2c: a partly baked frame equals the live frame [E]
++  Expected: <0>
++    Actual: <1642>
++  Offset(37.0, 0.0): InkReport(live: 38886, tiled: 37244, stray: 0, uncovered: 1642, differing: 1642)
++  ...
++00:00 +0 -1: Some tests failed.
++```
++
++**Verbatim output (RED, re-confirmed after the triangle gate landed, Task 5
++fix round 1):**
++
++```
++00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart
++00:00 +0: criterion 2 and 2c: a partly baked frame equals the live frame
++00:00 +0 -1: criterion 2 and 2c: a partly baked frame equals the live frame [E]
++  Expected: <0>
++    Actual: <1642>
++  Offset(37.0, 0.0): InkReport(live: 38886, tiled: 37244, stray: 0, uncovered: 1642, differing: 1642, liveTri: 60, tiledTri: 10)
++  ...
++00:00 +0 -1: Some tests failed.
++```
++
++Same `uncoveredPixels: 1642` both times — the pixel assertion (which appears
++earlier in the test body) fires first and identically; the triangle-budget
++assertion added for M5 never gets a chance to run against this mutant.
++
++**Ruling: KILLED**, both before and after the triangle-budget gate existed.
++
++**The fuller kill amendment 1 requires recorded here.** Under M3, **criterion
++2b also reddens** — `differing: 417` against a bound of 60 — not only
++criteria 2 and 2c as the plan's own text claimed. This figure is not in
++`task-4-report.md` or `task-5-report.md`; it is recorded in this plan's
++ledger (`.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/progress.md`,
++line 89: "Task 5: out of scope, carry to Task 8: under M3, criterion 2b also
++reddens (`differing: 417` against a bound of 60). The plan's M3 record claims
++only criteria 2 and 2c; the mutation log should record the fuller kill.") and
++restated verbatim in this task's own brief (`task-8-brief.md`, controller
++amendment 1, item 3). Task 8a did not re-run this measurement — see "Figures
++not independently reproduced by Task 8a" at the end of this log.
++
++---
++
++## M4 — narrow the clip but not the query (placeholder)
++
++**Status: not fired. This section exists so the log names all five mutants;
++it carries no result.**
++
++M4 is the mutant that isolates the original defect this plan fixes: apply
++the narrower clip `_bake` already uses, but leave the fallback's *query*
++(what is walked, not what is drawn) at the full viewport — "narrow the clip,
++not the query," per the spec's mutant table. Its pixels are correct in every
++mutated case; only the cost moves, so **no unit gate can kill it** (per the
++spec's own §5: "M4 is the original defect this plan fixes, and no unit gate
++can kill it"). It dies only on **criterion 3's device ratio** — the mutated
++tree reads a tiled/untiled pan ratio of ≈ 1.0 against the narrowed code's
++≥ 2.4 — which requires `flutter drive` on a real device.
++
++**Why it is not fired in this dispatch.** The device arm (Task 7) is blocked:
++the measuring machine is on battery with Low Power Mode auto-enabled, and no
++`flutter drive` run was attempted or waited for, per this task's explicit
++scope. **Task 8b fires M4 and fills this section in** once mains power is
++available.
++
++---
++
++## M5 — grow the walk instead of shrinking it (found by a reviewer)
++
++**What it targets:** the sweep's blind side. M1–M3 all *shrink* what the
++fallback queries; nothing in the plan as designed tested what happens if the
++query is *grown* back toward the full viewport, which is exactly the
++narrowing this plan exists to reverse.
++
++**Layer fired in:** unit — the whole `test/tile_fallback_test.dart` file
++(both `criterion 2 and 2c` and `criterion 2b`), via
++`CI=true flutter test test/tile_fallback_test.dart`. **First fired against
++the full package suite** (`CI=true flutter test`) before any gate existed for
++it, per the plan's ledger
++(`.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/progress.md`, line
++79): "The reviewer replaced `Size(strip.width, strip.height)` with
++`viewport` — leaving the translate, the camera offset and `_lastStrip` alone
++— and the whole package stayed green at `+372 ~1`."
++
++**Diff (`paintFrame`'s fallback branch, the `_drawInto` call):**
++
++```diff
++     _drawInto(
++         canvas,
++-        Size(strip.width, strip.height),
+++        viewport,
++         ViewportTransform(
++             worldToScreenMatrix: Transform2(
++                 q.a, q.b, q.c, q.d, q.e - strip.left, q.f - strip.top)),
++         painter,
++         sink,
++         vertices,
++         origin,
++         null);
++```
++
++The translate, the camera offset (`q.e - strip.left`, `q.f - strip.top`) and
++`_lastStrip` are all left untouched — only the `Size` handed to `_drawInto`
++grows back to the full viewport.
++
++**Verbatim output, first fired (GREEN — the gap as found):** every pixel
++comparison passes, because the mutant walks a *superset* of `uncovered` and
++the unchanged `clipRect(uncovered)` absorbs the excess — the frame is
++pixel-identical to the correct tree even though it tessellates the whole
++viewport again, which is precisely the cost this plan exists to remove.
++`debugLastStrip` still reports the (correct, narrow) strip, because
++`_lastStrip = strip` is untouched — only the drawn extent grew, not the
++recorded one.
++
++**Verbatim output, after the fix round's triangle-budget gate (RED):**
++
++```
++00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart
++00:00 +0: criterion 2 and 2c: a partly baked frame equals the live frame
++00:00 +0 -1: criterion 2 and 2c: a partly baked frame equals the live frame [E]
++  Expected: a value less than <54.0>
++    Actual: <70>
++     Which: is not a value less than <54.0>
++  pan Offset(37.0, 0.0): the tiled arm emitted as much geometry as the full-frame live arm, so the fallback walked far more than the strip: InkReport(live: 38886, tiled: 38886, stray: 0, uncovered: 0, differing: 0, liveTri: 60, tiledTri: 70)
++  ...
++00:00 +0 -1: criterion 2b: the near-axis arm stays inside the tiled path's bound
++00:00 +1 -1: Some tests failed.
++```
++
++`criterion 2b` is unaffected (listed `+1`, i.e. passed) — confirming the
++triangle-budget gate's opt-in scoping holds under this mutation too.
++
++**Ruling: KILLED** by the triangle-count-ratio gate added in Task 5's fix
++round (`kTriangleBudgetRatio = 0.9`, `VerticesDrawSink.frameTriangleCount`
++compared per arm), which did not exist when M5 was found. **It was green
++against the entire widget package when first fired.**
++
++**What this records about the sweep's own shape.** The pixel-agreement sweep
++(criteria 2, 2b, 2c) catches a fallback query *shrunk* (M3) but structurally
++cannot catch one *grown*, because the unchanged `clipRect(uncovered)`
++discards every extra pixel the larger query would have drawn — "the pixels
++stay correct, so the sweep still reads zero, and the cost this whole change
++exists to remove comes back silently" (`tile_cache.dart`'s own comment on the
++clip warns of exactly this asymmetry, applied there to the clip; M5 is the
++same asymmetry applied to the `Size` argument one line below it). The
++asymmetry is inherent to a pixel-only oracle watching a cost-only change, not
++a defect in how the pixel sweep was written.
++
++---
++
++## Deferred minors (Task 5's fix round and Task 3)
++
++Recorded here per this task's controller amendment, items 5 and 6, since
++they concern the mutation apparatus above rather than the exit gate itself:
++
++1. **The triangle gate is tight.** At its tightest offset on `fillingGrid`
++   (`Offset(0.0, 37.0)`), correct code reads `tiledTri: 50` against
++   `liveTri: 60` — a ratio of 0.8333, four triangles of headroom under the
++   `kTriangleBudgetRatio = 0.9` bound (54 allowed). This is deterministic,
++   not a flake — the re-reviewer bracketed it directly, `0.84` green and
++   `0.83` red at that offset — but it is brittle to any future edit of
++   `fillingGrid`'s fixture geometry or `kFallbackOffsets`'s swept offsets,
++   either of which could shift the correct-code ratio without any change to
++   `tile_cache.dart`.
++2. **`checkTriangleBudget` defaults to `false`.** `measureFallbackAgreement`
++   and `sweepFallbackAgreement` both take it as an opt-in parameter because
++   it carries no signal on `nearAxisDiagonals` (ratios of exactly `1.0` or
++   `0` under correct code). Only `criterion 2 and 2c` passes `true` today. A
++   future third caller of either function gets no triangle-count gate unless
++   it opts in explicitly and remembers to.
++3. **Task 3's per-offset table has no in-tree provenance.** The per-offset
++   figures in that task's report were produced with a throwaway, unstaged
++   debug file, and nothing committed to the repository records how the table
++   was generated or lets it be regenerated.
++
++---
++
++## Figures not independently reproduced by Task 8a
++
++Per this task's scope, no mutant was re-fired and no new measurement was
++taken — every figure above is read from
++`.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/task-4-report.md`,
++`task-5-report.md`, or (for the one figure below) the plan's ledger, per the
++brief's instruction to read rather than re-run.
++
++- **M3's criterion 2b figure, `differing: 417` against a bound of 60**, is
++  not in `task-4-report.md` or `task-5-report.md`. It is recorded in
++  `progress.md` (line 89) and restated in `task-8-brief.md`'s controller
++  amendment 1. Task 8a took both as given, per the brief's own instruction,
++  and did not re-run the M3 mutation to reproduce it a third time.
++- **M5's first-fired result, `+372 ~1` green against the whole package**, is
++  likewise from `progress.md` (line 79) rather than from either named task
++  report — `task-5-report.md` documents M5 only from the point the
++  triangle-budget gate already existed (Task 5's "Fix round 1"), not the
++  reviewer's original discovery run.
++
++No other figure needed for this log was missing from the two named reports.

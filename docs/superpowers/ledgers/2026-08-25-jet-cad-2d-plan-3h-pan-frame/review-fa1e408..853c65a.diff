@@ -1,0 +1,90 @@
+# Review package: fa1e408..853c65a
+
+## Commits
+853c65a perf: the live fallback walks the uncovered strip, not the viewport
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/tile_cache.dart     | 32 ++++++++++++++++++----
+ 1 file changed, 27 insertions(+), 5 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+index a82c16b..5b13430 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -637,23 +637,22 @@ class TileCache {
+ 
+   /// Whether [key] is currently blittable. Test-only.
+   bool holds(TileKey key) => _tiles.containsKey(key);
+ 
+   /// Every live tile whose bake touched [handle]. Test-only.
+   List<TileKey> tilesHolding(Handle handle) => <TileKey>[
+         for (final entry in _baked.entries)
+           if (_contains(entry.value, handle.value)) entry.key
+       ];
+ 
+-  /// The rectangle the fallback owes on the most recent frame -- `uncovered`
+-  /// padded and clamped by [stripFor] -- or `null` if no fallback ran.
+-  /// Test-only, and **read-only**.
++  /// The rectangle the fallback walked on the most recent frame, or `null` if
++  /// no fallback ran. Test-only, and **read-only**.
+   ///
+   /// Read from the shipped `paintFrame` rather than recomputed by a test, and
+   /// that is the whole point of it. Plan 3g's rig reimplemented the bake
+   /// geometry in `_probeBake` instead of calling `_bake`, so its overdraw
+   /// column described the reimplementation and not the code that ships. A
+   /// sweep that derived this rectangle from [TileGrid] would repeat that.
+   ///
+   /// **A getter, not a mutable field.** `TileCache` already carries two
+   /// mutable test-only fields and the standing bar is that a third triggers
+   /// revisiting the design; `tilesHolding` is the precedent for reading state
+@@ -818,24 +817,47 @@ class TileCache {
+     }
+     // Stale scaled pixels rather than a live walk, deliberately: replaying the
+     // whole painter is the ~60 ms stall this cache exists to remove, and a
+     // gesture frame is precisely where it must not happen.
+     if (carryOverCovers) return;
+     // One walk for the union, not one per tile: at 512 px a full visible set is
+     // about 48 tiles (see the 48.0 MiB figure above), and 48 painter invocations
+     // in one frame would be slower than the live path this cache exists to
+     // replace. Clipped, so the covered tiles keep the pixels they just blitted.
+     canvas.save();
++    // **The clip is unchanged, and that is a decision.** `_bake` states the
++    // rule for itself -- "The query is padded; the clip is not." Drop this
++    // line and the pad becomes overdraw onto tiles already blitted: the pixels
++    // stay correct, so the sweep still reads zero, and the cost this whole
++    // change exists to remove comes back silently.
+     canvas.clipRect(uncovered, doAntiAlias: false);
+-    _lastStrip = stripFor(uncovered, viewport);
++    // **Walk the union, not the viewport.** The clip above only discards
++    // drawing; the walk below is what costs. `DraftPainter.paint` derives its
++    // index query from `camera.visibleWorld(viewport)`, so handing it the full
++    // viewport tessellates the whole frame and throws most of it away -- which
++    // is what every fallback did before this line, and why the frame's excess
++    // read as a full live walk.
++    final strip = stripFor(uncovered, viewport);
++    _lastStrip = strip;
++    canvas.translate(strip.left, strip.top);
++    final q = quantised.worldToScreenMatrix;
+     _drawInto(
+-        canvas, viewport, quantised, painter, sink, vertices, origin, null);
++        canvas,
++        Size(strip.width, strip.height),
++        ViewportTransform(
++            worldToScreenMatrix: Transform2(
++                q.a, q.b, q.c, q.d, q.e - strip.left, q.f - strip.top)),
++        painter,
++        sink,
++        vertices,
++        origin,
++        null);
+     canvas.restore();
+     _liveDraws++;
+   }
+ 
+   /// Every tile is the same square, so this is built once rather than per
+   /// blit. It was a getter until Task 10, which allocated a fresh `Rect` on
+   /// each of a frame's ~48 blits — bounded by the viewport, so never a rule
+   /// break, but the wrong side of the criterion this task lands.
+   late final Rect _tileSourceRect = Rect.fromLTWH(
+       0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble());

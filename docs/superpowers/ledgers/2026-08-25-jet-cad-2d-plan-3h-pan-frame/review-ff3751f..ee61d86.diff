@@ -1,0 +1,51 @@
+# Review package: ff3751f..ee61d86
+
+## Commits
+ee61d86 docs: Plan 3h's exit-gate tally makes its three-way split visible
+
+## Files changed
+ STATUS.md | 16 +++++++++-------
+ 1 file changed, 9 insertions(+), 7 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 929e98b..55680ba 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1347,27 +1347,29 @@ over, more variance tonight than the spike showed."
+   `_bake`'s argument and F1's history, not on a gate of this plan's own.
+ 
+ **Two deferred minors, recorded rather than fixed:** the triangle-budget gate
+ has 4 triangles of headroom at its tightest swept offset (50 of 54 allowed,
+ out of 60 live) — deterministic, not a flake, but brittle to any future edit
+ of `fillingGrid` or the swept offsets; and `checkTriangleBudget` defaults to
+ `false`, so a future third caller of `sweepFallbackAgreement` gets no
+ triangle-count gate unless it opts in explicitly.
+ 
+ **Exit gate.** Of the criteria table's 12 rows, 3 (3b, 4, 5) are recorded
+-only, per spec, not gates. **Of the 9 that are gates: 7 PASS, 2 MISS**
+-(criteria 3 and 6, both above). Criterion 1b is not a binary pass or fail: per
+-its own pre-commitment it resolves to accepted gap H5 (M2 survives) rather
+-than either outcome. Criteria 1, 2, 2b and 2c pass on the shipped tree
+-(confirmed by the mutation log above); criterion 7 (peak `tileBytes`
+-27262976 bytes = 26.00 MiB against ≤ 96 MiB) and criterion 8 (`capacityMiB`
+-exactly 192.00 in every configuration, no increase to explain) both PASS.
++only, per spec, not gates. **Of the 9 that are gates: 6 PASS, 2 MISS, and
++criterion 1b resolves to accepted gap H5 rather than to either outcome** —
++per its own pre-commitment, it is not a binary pass or fail: M2 survives, so
++1b lands on the plan's pre-declared third path, not on "pass" or "fail."
++The 2 MISS are criteria 3 and 6, both above. The 6 PASS are criteria 1, 2,
++2b and 2c on the shipped tree (confirmed by the mutation log above),
++criterion 7 (peak `tileBytes` 27262976 bytes = 26.00 MiB against ≤ 96 MiB),
++and criterion 8 (`capacityMiB` exactly 192.00 in every configuration, no
++increase to explain).
+ 
+ **Plan 3i inherits three things, named here so no future session has to
+ reconstruct them:**
+ 1. **G3 — zoom and level-of-detail geometry** — already renumbered onto 3i by
+    Task 8a; see [Resume here](#resume-here).
+ 2. **Settling criterion 3**, by re-measuring at **n=7–9, interleaved
+    (narrow, M4, narrow, M4, …), not blocked (three-then-three)** — the only
+    arrangement that removes the thermal/session-drift ordering bias this
+    task's own numbers show biased the ratio *against* the miss, not for it.
+ 3. **Plan 3j** owns the **192 MiB vertex buffer**, whose figure sits on a

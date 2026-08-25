@@ -1,0 +1,286 @@
+# Review package: 18cdf90..2783e07
+
+## Commits
+2783e07 test: a sweep that executes the live fallback, which no pixel gate ever has
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/tile_cache.dart     | 20 ++++++
+ .../test/support/tile_comparison.dart              | 69 ++++++++++++++++++++
+ .../test/tile_fallback_test.dart                   | 76 ++++++++++++++++++++++
+ 3 files changed, 165 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+index 47dd449..a82c16b 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -637,20 +637,38 @@ class TileCache {
+ 
+   /// Whether [key] is currently blittable. Test-only.
+   bool holds(TileKey key) => _tiles.containsKey(key);
+ 
+   /// Every live tile whose bake touched [handle]. Test-only.
+   List<TileKey> tilesHolding(Handle handle) => <TileKey>[
+         for (final entry in _baked.entries)
+           if (_contains(entry.value, handle.value)) entry.key
+       ];
+ 
++  /// The rectangle the fallback owes on the most recent frame -- `uncovered`
++  /// padded and clamped by [stripFor] -- or `null` if no fallback ran.
++  /// Test-only, and **read-only**.
++  ///
++  /// Read from the shipped `paintFrame` rather than recomputed by a test, and
++  /// that is the whole point of it. Plan 3g's rig reimplemented the bake
++  /// geometry in `_probeBake` instead of calling `_bake`, so its overdraw
++  /// column described the reimplementation and not the code that ships. A
++  /// sweep that derived this rectangle from [TileGrid] would repeat that.
++  ///
++  /// **A getter, not a mutable field.** `TileCache` already carries two
++  /// mutable test-only fields and the standing bar is that a third triggers
++  /// revisiting the design; `tilesHolding` is the precedent for reading state
++  /// out without adding a way to write it.
++  Rect? get debugLastStrip => _lastStrip;
++
++  Rect? _lastStrip;
++
+   /// The blit `Paint`'s identity, for criterion 13.
+   ///
+   /// Exposed the way `VerticesDrawSink.debugPaint` is, and for the same
+   /// reason: `paint_allocation_test.dart` reads
+   /// `VerticesDrawSink.debugCapacityVertices` and that field can see neither a
+   /// `Paint` nor a `Rect`. `STATUS.md` records why there is no heap-level
+   /// instrument on this side — trap 5 — so the allocation criterion is a field
+   /// read or it is prose.
+   Paint get debugBlitPaint => _blitPaint;
+ 
+@@ -697,20 +715,21 @@ class TileCache {
+     // trade too — a lineweight change moves a stroke's extent, so a tile that
+     // never baked the entity can still owe pixels for it.
+     if (tablesRevision != _tablesRevision) {
+       _tablesRevision = tablesRevision;
+       _dropGeneration();
+     }
+ 
+     // Before anything reads it, so no tile can be carrying this frame's
+     // ordinal before this frame blits it. `_makeRoomForOneTile` rests on that.
+     _frameSerial++;
++    _lastStrip = null;
+ 
+     final quantised = quantiseCamera(camera, devicePixelRatio);
+     // The viewport reaches `_gridFor` because retiring a generation is now a
+     // composite and not just a `dispose`: the outgoing tiles have to be
+     // flattened into one viewport-sized image *before* they go.
+     final grid = _gridFor(quantised, devicePixelRatio, viewport);
+     _lastCamera = quantised;
+ 
+     // Derived once and handed to every bake. Rebasing is frame-global by
+     // construction; a per-tile origin would give each tile its own
+@@ -800,20 +819,21 @@ class TileCache {
+     // Stale scaled pixels rather than a live walk, deliberately: replaying the
+     // whole painter is the ~60 ms stall this cache exists to remove, and a
+     // gesture frame is precisely where it must not happen.
+     if (carryOverCovers) return;
+     // One walk for the union, not one per tile: at 512 px a full visible set is
+     // about 48 tiles (see the 48.0 MiB figure above), and 48 painter invocations
+     // in one frame would be slower than the live path this cache exists to
+     // replace. Clipped, so the covered tiles keep the pixels they just blitted.
+     canvas.save();
+     canvas.clipRect(uncovered, doAntiAlias: false);
++    _lastStrip = stripFor(uncovered, viewport);
+     _drawInto(
+         canvas, viewport, quantised, painter, sink, vertices, origin, null);
+     canvas.restore();
+     _liveDraws++;
+   }
+ 
+   /// Every tile is the same square, so this is built once rather than per
+   /// blit. It was a getter until Task 10, which allocated a fresh `Rect` on
+   /// each of a frame's ~48 blits — bounded by the viewport, so never a rule
+   /// break, but the wrong side of the criterion this task lands.
+diff --git a/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart b/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
+index 2bb18a5..05f1875 100644
+--- a/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
++++ b/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
+@@ -16,20 +16,21 @@
+ // is partly a property of the instrument. It proves geometric completeness:
+ // no pixel missing, none drawn twice, no clipping arithmetic error. Accepted
+ // gap G1 owns the rest, and mutant M3 is deferred to it. **M15 is the mutant
+ // this instrument fires**, and it moves pixels software Skia renders perfectly
+ // well.
+ 
+ import 'dart:typed_data';
+ import 'dart:ui';
+ 
+ import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'tile_fixture.dart';
+ 
+ class InkReport {
+   const InkReport({
+     required this.liveInk,
+     required this.tiledInk,
+     required this.strayPixels,
+     required this.uncoveredPixels,
+@@ -155,10 +156,78 @@ Future<InkReport> expectTiledEqualsLive(TileRig rig,
+ Future<Uint8List> captureLiveFrame(TileRig rig) => _capture((canvas) {
+       final quantised = quantiseCamera(rig.camera, kTileDpr);
+       rig.painter.debugRebaseOrigin =
+           rebaseOriginFor(quantised.visibleWorld(kTileViewport));
+       rig.sink.canvas = canvas;
+       rig.vertices.canvas = canvas;
+       rig.painter.paint(rig.vertices, quantised, kTileViewport);
+       rig.vertices.flush();
+       rig.painter.debugRebaseOrigin = null;
+     });
++
++/// One fallback sample: a frame that is part blit and part live walk, compared
++/// against the live frame at the same camera.
++///
++/// **Each sample owns its cache.** A sweep that panned one rig across offsets
++/// would inherit tiles from the previous offset and become a warm-tile
++/// comparison -- one of the three arrangements that failed to detect a
++/// crippled query before this instrument existed.
++Future<InkReport> measureFallbackAgreement(
++  DraftDocument Function(FlutterTextMeasurer) of,
++  FlutterTextMeasurer measurer,
++  Offset pan, {
++  int minimumInk = 500,
++}) async {
++  final rig = TileRig(
++      tileDevicePixels: 64, tilesBakedPerFrame: 1000, document: of(measurer));
++  try {
++    // Cover the viewport, so the strip that enters next has blitted tiles on
++    // its interior side.
++    rig.paintOnce();
++    rig.cache.resetCounters();
++    // One tile a frame, so the entering band stays uncovered and the fallback
++    // owes it.
++    rig.cache.bakeBudgetDevicePixels = 64 * 64;
++    rig.panBy(pan.dx, pan.dy);
++
++    final report = await measureTiledAgreement(rig);
++
++    // Anti-vacuity, and every clause of it was earned by an arrangement that
++    // passed while proving nothing.
++    expect(rig.cache.liveDrawCount, greaterThan(0),
++        reason: 'pan $pan ran no fallback: $report');
++    expect(rig.cache.blitCount, greaterThan(0),
++        reason: 'pan $pan blitted nothing, so nothing was partly baked');
++    final strip = rig.cache.debugLastStrip;
++    expect(strip, isNotNull, reason: 'pan $pan recorded no strip');
++    // The clause `bakeCount`/`liveDrawCount` cannot supply: `uncovered` is a
++    // bounding rectangle, so an L-shaped uncovered set bounds to the whole
++    // viewport and leaves no interior edge for a crippled query to lose ink
++    // across.
++    expect(strip != Offset.zero & kTileViewport, isTrue,
++        reason: 'pan $pan left no interior strip edge: strip=$strip');
++    expect(report.liveInk, greaterThan(minimumInk), reason: '$report');
++    expect(report.tiledInk, greaterThan(minimumInk), reason: '$report');
++    return report;
++  } finally {
++    rig.dispose();
++  }
++}
++
++/// [measureFallbackAgreement] over a set of pan offsets, each independent.
++Future<List<InkReport>> sweepFallbackAgreement({
++  required DraftDocument Function(FlutterTextMeasurer) of,
++  required List<Offset> offsets,
++  int minimumInk = 500,
++}) async {
++  final reports = <InkReport>[];
++  for (final offset in offsets) {
++    final measurer = FlutterTextMeasurer();
++    try {
++      reports.add(await measureFallbackAgreement(of, measurer, offset,
++          minimumInk: minimumInk));
++    } finally {
++      measurer.clear();
++    }
++  }
++  return reports;
++}
+diff --git a/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart b/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart
+new file mode 100644
+index 0000000..7b99e9a
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/tile_fallback_test.dart
+@@ -0,0 +1,76 @@
++// Criteria 1, 1b, 2, 2b and 2c: the live fallback, which no pixel gate in this
++// repository has ever executed.
++//
++// **Every pixel comparison in `tile_cache_test.dart` runs at
++// `tilesBakedPerFrame: 1000`**, where the first frame bakes the whole visible
++// set, `uncovered` is null, and `paintFrame`'s fallback never runs at all. The
++// two restricted-budget tests that do reach it assert counters. So the one
++// composition this cache produces that nothing checked the pixels of is the
++// frame that is part blit and part live walk -- which is also the frame where
++// the two paths meet along a seam.
++
++import 'package:flutter_test/flutter_test.dart';
++
++import 'support/tile_comparison.dart';
++import 'support/tile_fixture.dart';
++
++// **No `jet_cad_2d_flutter` import here**, and it is not an oversight: this
++// file names no symbol from it, and `unused_import` is an **error** in this
++// package rather than a warning. Add one only when a symbol needs it.
++
++/// Offsets that are not multiples of the tile's **logical** size.
++///
++/// A tile is `tileDevicePixels / devicePixelRatio` logical pixels -- 32 at this
++/// rig's 64 device pixels and [kTileDpr] of 2, not 64. An offset on that
++/// lattice would put the strip boundary exactly on a tile edge at every
++/// sample and the sweep would measure one arrangement N times.
++///
++/// Each is a single-axis pan. A diagonal pan brings in a row *and* a column,
++/// and `uncovered` is a bounding rectangle, so the union bounds to the whole
++/// viewport and the sample has no interior edge to lose anything across.
++const List<Offset> kFallbackOffsets = <Offset>[
++  Offset(37, 0),
++  Offset(53, 0),
++  Offset(71, 0),
++  Offset(0, 37),
++  Offset(0, 53),
++  Offset(0, 71),
++  Offset(-41, 0),
++  Offset(0, -41),
++];
++
++void main() {
++  test('criterion 2 and 2c: a partly baked frame equals the live frame',
++      () async {
++    final reports = await sweepFallbackAgreement(
++        of: fillingGrid, offsets: kFallbackOffsets);
++
++    expect(reports, hasLength(kFallbackOffsets.length));
++    for (var i = 0; i < reports.length; i++) {
++      final report = reports[i];
++      expect(report.strayPixels, 0, reason: '${kFallbackOffsets[i]}: $report');
++      expect(report.uncoveredPixels, 0,
++          reason: '${kFallbackOffsets[i]}: $report');
++      expect(report.differingPixels, 0,
++          reason: '${kFallbackOffsets[i]}: $report');
++    }
++  });
++
++  test('criterion 2b: the near-axis arm stays inside the tiled path\'s bound',
++      () async {
++    // The reference is not invented here: `tile_cache_test.dart` gates the
++    // tiled path on this same fixture at `differingPixels <= 60` against a
++    // measured 36 of 10342 ink, 0.348%. The fallback arm is held to the same
++    // number, so an increase is a tripwire rather than a silent record.
++    final reports = await sweepFallbackAgreement(
++        of: nearAxisDiagonals, offsets: kFallbackOffsets, minimumInk: 200);
++
++    for (var i = 0; i < reports.length; i++) {
++      final report = reports[i];
++      expect(report.differingPixels, lessThanOrEqualTo(60),
++          reason: '${kFallbackOffsets[i]}: $report');
++      expect(report.differingPixels / report.liveInk, lessThan(0.01),
++          reason: '${kFallbackOffsets[i]}: $report');
++    }
++  });
++}

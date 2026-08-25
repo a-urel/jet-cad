@@ -1,0 +1,135 @@
+# Review package: e23d912..18cdf90
+
+## Commits
+18cdf90 feat: stripFor, the fallback walk's padded and clamped rectangle
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/tile_cache.dart     | 29 ++++++++++++++++++
+ .../jet_cad_2d_flutter/test/tile_cache_test.dart   | 34 ++++++++++++++++++++++
+ 2 files changed, 63 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+index cf8a872..47dd449 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -1,10 +1,11 @@
++import 'dart:math' as math;
+ import 'dart:typed_data';
+ import 'dart:ui';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:meta/meta.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+ 
+ import 'camera_controller.dart';
+ import 'canvas_draw_sink.dart';
+ import 'draft_painter.dart';
+@@ -83,20 +84,48 @@ const int kTileDevicePixels = 512;
+ /// slack — the amount of extra ink the frame is entitled to draw.
+ ///
+ /// **What it costs.** Invalidation now over-drops by a ring: at the production
+ /// 512 device-pixel tile and a `dpr` of 2 the ring is an eighth of a tile
+ /// wide, and at the 64-pixel tile the tests use it is a whole tile. That is a
+ /// hit-rate cost, never a correctness one — a tile dropped that need not have
+ /// been is rebaked, a tile kept that should have been dropped is a visible
+ /// defect.
+ const double kTileSlack = kScreenClipInflate;
+ 
++/// The rectangle the live fallback walks: [uncovered] grown by [kTileSlack] on
++/// every side, then clamped to [viewport].
++///
++/// **The pad**, for `_bake`'s reason: a stroke whose centreline is outside the
++/// rectangle still inks pixels inside it, and the painter's index query is a
++/// rect intersection on entity bounds. `_bake` states the rule at its own call
++/// site -- "The query is padded; the clip is not." Plan 3g's F1 is what an
++/// unpadded query cost, at six of forty-one swept zoom factors.
++///
++/// **The clamp**, and it was found by measuring rather than by reasoning.
++/// `uncovered` is a *bounding rectangle* (`paintFrame` accumulates it with
++/// `expandToInclude`), so an L-shaped uncovered set bounds to the whole frame;
++/// padding that asks for 464 x 364 logical pixels where the untiled path asks
++/// for 400 x 300. An unclamped arm doubled the vertex buffer's high-water mark
++/// from 192.00 MiB to 384.00 on a run whose every other counter matched.
++/// **The pad belongs on interior edges; on the viewport's own edge the
++/// full-frame walk is the ceiling.**
++///
++/// Pure, so the clamp has a unit witness. Nothing else in this plan can see
++/// it: the fallback's pixels are identical clamped or not, and only its cost
++/// moves.
++Rect stripFor(Rect uncovered, Size viewport) => Rect.fromLTRB(
++      math.max(0.0, uncovered.left - kTileSlack),
++      math.max(0.0, uncovered.top - kTileSlack),
++      math.min(viewport.width, uncovered.right + kTileSlack),
++      math.min(viewport.height, uncovered.bottom + kTileSlack),
++    );
++
+ /// The device-pixel area a frame may spend baking tiles, while a generation
+ /// fills in.
+ ///
+ /// **Not a tile count, because a tile count stopped meaning anything once
+ /// [kTileDevicePixels] became 512.** Eight tiles at 128 px was a modest
+ /// strip; eight tiles at 512 px is `8 x 12.56 ms` of measured bake cost —
+ /// roughly 100 ms in one frame, six times the 16.67 ms budget this plan
+ /// exists to hold. Expressing the budget as an area in device pixels instead
+ /// lets the number of tiles a frame bakes fall out of
+ /// [TileCache.tileDevicePixels] — see [TileCache.bakeBudgetDevicePixels] —
+diff --git a/packages/jet_cad_2d_flutter/test/tile_cache_test.dart b/packages/jet_cad_2d_flutter/test/tile_cache_test.dart
+index a0986fe..4062b02 100644
+--- a/packages/jet_cad_2d_flutter/test/tile_cache_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tile_cache_test.dart
+@@ -932,20 +932,54 @@ void main() {
+     });
+ 
+     test('the same camera and tile size agree exactly on axis-aligned ink',
+         () async {
+       // The control that makes the slope the variable rather than the tiling:
+       // `crossingGrid` crosses just as many seams and disagrees on nothing.
+       final report = await measure(crossingGrid, minimumInk: 5000);
+       expect(report.differingPixels, 0, reason: '$report');
+     });
+   });
++
++  group('stripFor', () {
++    const viewport = Size(400, 300);
++
++    test('pads an interior rect on every side', () {
++      // kTileSlack is 32.0. An interior rect keeps the whole pad, because a
++      // stroke whose centreline is outside the strip still inks pixels inside
++      // it -- the reason `_bake` pads its own query.
++      expect(stripFor(const Rect.fromLTRB(100, 80, 200, 180), viewport),
++          const Rect.fromLTRB(68, 48, 232, 212));
++    });
++
++    test('clamps to the viewport rather than growing past it', () {
++      // The mutant this exists for. A union that already spans the frame,
++      // padded, would ask for 464 x 364 where the untiled path asks for
++      // 400 x 300 -- a third more area than the baseline the narrowing is
++      // meant to undercut, measured as the vertex buffer doubling to 384 MiB.
++      expect(
++          stripFor(Offset.zero & viewport, viewport), Offset.zero & viewport);
++    });
++
++    test('clamps one edge at a time', () {
++      // A band entering from the left: clamped on the left, padded on the
++      // right. Asserting the whole rect rather than one edge, so a mutation
++      // that clamped all four sides unconditionally is also caught.
++      expect(stripFor(const Rect.fromLTRB(0, 0, 40, 300), viewport),
++          const Rect.fromLTRB(0, 0, 72, 300));
++    });
++
++    test('a strip touching the bottom-right clamps there and pads inward', () {
++      expect(stripFor(const Rect.fromLTRB(360, 260, 400, 300), viewport),
++          const Rect.fromLTRB(328, 228, 400, 300));
++    });
++  });
+ }
+ 
+ /// Non-transparent pixels in one tiled frame of [rig].
+ ///
+ /// A separate instrument from `measureTiledAgreement`, and deliberately so:
+ /// that one compares two arms and is blind to a frame both arms leave blank.
+ /// This one asks the question that gates the carry-over -- did anything at all
+ /// reach the canvas -- which is the only way to tell a composite that painted
+ /// from a `drawImageRect` into a degenerate rect.
+ Future<int> frameInk(TileRig rig) async {
