@@ -644,6 +644,24 @@ class TileCache {
           if (_contains(entry.value, handle.value)) entry.key
       ];
 
+  /// The rectangle the fallback owes on the most recent frame -- `uncovered`
+  /// padded and clamped by [stripFor] -- or `null` if no fallback ran.
+  /// Test-only, and **read-only**.
+  ///
+  /// Read from the shipped `paintFrame` rather than recomputed by a test, and
+  /// that is the whole point of it. Plan 3g's rig reimplemented the bake
+  /// geometry in `_probeBake` instead of calling `_bake`, so its overdraw
+  /// column described the reimplementation and not the code that ships. A
+  /// sweep that derived this rectangle from [TileGrid] would repeat that.
+  ///
+  /// **A getter, not a mutable field.** `TileCache` already carries two
+  /// mutable test-only fields and the standing bar is that a third triggers
+  /// revisiting the design; `tilesHolding` is the precedent for reading state
+  /// out without adding a way to write it.
+  Rect? get debugLastStrip => _lastStrip;
+
+  Rect? _lastStrip;
+
   /// The blit `Paint`'s identity, for criterion 13.
   ///
   /// Exposed the way `VerticesDrawSink.debugPaint` is, and for the same
@@ -704,6 +722,7 @@ class TileCache {
     // Before anything reads it, so no tile can be carrying this frame's
     // ordinal before this frame blits it. `_makeRoomForOneTile` rests on that.
     _frameSerial++;
+    _lastStrip = null;
 
     final quantised = quantiseCamera(camera, devicePixelRatio);
     // The viewport reaches `_gridFor` because retiring a generation is now a
@@ -807,6 +826,7 @@ class TileCache {
     // replace. Clipped, so the covered tiles keep the pixels they just blitted.
     canvas.save();
     canvas.clipRect(uncovered, doAntiAlias: false);
+    _lastStrip = stripFor(uncovered, viewport);
     _drawInto(
         canvas, viewport, quantised, painter, sink, vertices, origin, null);
     canvas.restore();

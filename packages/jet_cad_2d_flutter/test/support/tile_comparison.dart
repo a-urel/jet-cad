@@ -23,6 +23,7 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'tile_fixture.dart';
@@ -162,3 +163,71 @@ Future<Uint8List> captureLiveFrame(TileRig rig) => _capture((canvas) {
       rig.vertices.flush();
       rig.painter.debugRebaseOrigin = null;
     });
+
+/// One fallback sample: a frame that is part blit and part live walk, compared
+/// against the live frame at the same camera.
+///
+/// **Each sample owns its cache.** A sweep that panned one rig across offsets
+/// would inherit tiles from the previous offset and become a warm-tile
+/// comparison -- one of the three arrangements that failed to detect a
+/// crippled query before this instrument existed.
+Future<InkReport> measureFallbackAgreement(
+  DraftDocument Function(FlutterTextMeasurer) of,
+  FlutterTextMeasurer measurer,
+  Offset pan, {
+  int minimumInk = 500,
+}) async {
+  final rig = TileRig(
+      tileDevicePixels: 64, tilesBakedPerFrame: 1000, document: of(measurer));
+  try {
+    // Cover the viewport, so the strip that enters next has blitted tiles on
+    // its interior side.
+    rig.paintOnce();
+    rig.cache.resetCounters();
+    // One tile a frame, so the entering band stays uncovered and the fallback
+    // owes it.
+    rig.cache.bakeBudgetDevicePixels = 64 * 64;
+    rig.panBy(pan.dx, pan.dy);
+
+    final report = await measureTiledAgreement(rig);
+
+    // Anti-vacuity, and every clause of it was earned by an arrangement that
+    // passed while proving nothing.
+    expect(rig.cache.liveDrawCount, greaterThan(0),
+        reason: 'pan $pan ran no fallback: $report');
+    expect(rig.cache.blitCount, greaterThan(0),
+        reason: 'pan $pan blitted nothing, so nothing was partly baked');
+    final strip = rig.cache.debugLastStrip;
+    expect(strip, isNotNull, reason: 'pan $pan recorded no strip');
+    // The clause `bakeCount`/`liveDrawCount` cannot supply: `uncovered` is a
+    // bounding rectangle, so an L-shaped uncovered set bounds to the whole
+    // viewport and leaves no interior edge for a crippled query to lose ink
+    // across.
+    expect(strip != Offset.zero & kTileViewport, isTrue,
+        reason: 'pan $pan left no interior strip edge: strip=$strip');
+    expect(report.liveInk, greaterThan(minimumInk), reason: '$report');
+    expect(report.tiledInk, greaterThan(minimumInk), reason: '$report');
+    return report;
+  } finally {
+    rig.dispose();
+  }
+}
+
+/// [measureFallbackAgreement] over a set of pan offsets, each independent.
+Future<List<InkReport>> sweepFallbackAgreement({
+  required DraftDocument Function(FlutterTextMeasurer) of,
+  required List<Offset> offsets,
+  int minimumInk = 500,
+}) async {
+  final reports = <InkReport>[];
+  for (final offset in offsets) {
+    final measurer = FlutterTextMeasurer();
+    try {
+      reports.add(await measureFallbackAgreement(of, measurer, offset,
+          minimumInk: minimumInk));
+    } finally {
+      measurer.clear();
+    }
+  }
+  return reports;
+}
