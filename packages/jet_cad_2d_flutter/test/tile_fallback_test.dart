@@ -42,8 +42,13 @@ const List<Offset> kFallbackOffsets = <Offset>[
 void main() {
   test('criterion 2 and 2c: a partly baked frame equals the live frame',
       () async {
+    // `checkTriangleBudget: true` is criterion 1's other half: the pixel
+    // assertions below prove the fallback lands the right pixels, and this
+    // flag proves it did not re-tessellate the whole viewport to do it. See
+    // `kTriangleBudgetRatio`'s doc comment for the measured numbers behind
+    // the bound and why `criterion 2b` below does not also carry this flag.
     final reports = await sweepFallbackAgreement(
-        of: fillingGrid, offsets: kFallbackOffsets);
+        of: fillingGrid, offsets: kFallbackOffsets, checkTriangleBudget: true);
 
     expect(reports, hasLength(kFallbackOffsets.length));
     for (var i = 0; i < reports.length; i++) {
@@ -62,6 +67,11 @@ void main() {
     // tiled path on this same fixture at `differingPixels <= 60` against a
     // measured 36 of 10342 ink, 0.348%. The fallback arm is held to the same
     // number, so an increase is a tripwire rather than a silent record.
+    // No `checkTriangleBudget` here, deliberately: this fixture is a handful
+    // of long diagonals spanning most of the viewport, so a strip-sized query
+    // and a full-viewport query catch the same entities and the ratio sits at
+    // 1.0 (or 0/20 where the strip misses the diagonals) even under correct
+    // code. See `kTriangleBudgetRatio`'s doc comment.
     final reports = await sweepFallbackAgreement(
         of: nearAxisDiagonals, offsets: kFallbackOffsets, minimumInk: 200);
 

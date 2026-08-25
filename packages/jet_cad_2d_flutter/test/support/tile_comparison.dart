@@ -35,6 +35,8 @@ class InkReport {
     required this.strayPixels,
     required this.uncoveredPixels,
     required this.differingPixels,
+    required this.liveTriangleCount,
+    required this.tiledTriangleCount,
   });
 
   /// Non-transparent pixels in the live capture.
@@ -50,10 +52,26 @@ class InkReport {
   /// Pixels whose four bytes differ at all, stray and uncovered included.
   final int differingPixels;
 
+  /// `VerticesDrawSink.frameTriangleCount` for the live arm: one
+  /// `DraftPainter.paint` call over the whole viewport.
+  final int liveTriangleCount;
+
+  /// `VerticesDrawSink.frameTriangleCount` for the tiled arm: whatever
+  /// `TileCache.paintFrame` actually emitted through the sink that frame.
+  ///
+  /// **Not the fallback alone.** At this rig's one-tile bake budget the same
+  /// frame bakes one tile *and* runs the live fallback, and `_bake` draws
+  /// through this same sink, so this count is "one tile's worth of geometry"
+  /// plus whatever the fallback walked. See the comment on the ratio these
+  /// numbers feed, in `measureFallbackAgreement`, for how that is accounted
+  /// for rather than ignored.
+  final int tiledTriangleCount;
+
   @override
   String toString() => 'InkReport(live: $liveInk, tiled: $tiledInk, '
       'stray: $strayPixels, uncovered: $uncoveredPixels, '
-      'differing: $differingPixels)';
+      'differing: $differingPixels, liveTri: $liveTriangleCount, '
+      'tiledTri: $tiledTriangleCount)';
 }
 
 Future<Uint8List> _capture(void Function(Canvas canvas) draw) async {
@@ -84,6 +102,9 @@ Future<Uint8List> _capture(void Function(Canvas canvas) draw) async {
 Future<InkReport> measureTiledAgreement(TileRig rig) async {
   final quantised = quantiseCamera(rig.camera, kTileDpr);
 
+  // Reset around each arm rather than once, so each capture's count is that
+  // arm's own emission and not the running total across both.
+  rig.vertices.resetCounters();
   final live = await _capture((canvas) {
     rig.painter.debugRebaseOrigin =
         rebaseOriginFor(quantised.visibleWorld(kTileViewport));
@@ -93,7 +114,9 @@ Future<InkReport> measureTiledAgreement(TileRig rig) async {
     rig.vertices.flush();
     rig.painter.debugRebaseOrigin = null;
   });
+  final liveTriangleCount = rig.vertices.frameTriangleCount;
 
+  rig.vertices.resetCounters();
   final tiled = await _capture((canvas) {
     rig.cache.paintFrame(
       canvas: canvas,
@@ -106,6 +129,7 @@ Future<InkReport> measureTiledAgreement(TileRig rig) async {
       tablesRevision: rig.doc.tables.mutationRevision,
     );
   });
+  final tiledTriangleCount = rig.vertices.frameTriangleCount;
 
   var liveInk = 0, tiledInk = 0, stray = 0, uncovered = 0, differing = 0;
   for (var i = 0; i < live.length; i += 4) {
@@ -127,7 +151,9 @@ Future<InkReport> measureTiledAgreement(TileRig rig) async {
       tiledInk: tiledInk,
       strayPixels: stray,
       uncoveredPixels: uncovered,
-      differingPixels: differing);
+      differingPixels: differing,
+      liveTriangleCount: liveTriangleCount,
+      tiledTriangleCount: tiledTriangleCount);
 }
 
 /// The gate. Zero stray, zero uncovered, zero differing — and a real drawing.
@@ -164,6 +190,36 @@ Future<Uint8List> captureLiveFrame(TileRig rig) => _capture((canvas) {
       rig.painter.debugRebaseOrigin = null;
     });
 
+/// The tiled arm's `frameTriangleCount` may not exceed the live arm's by more
+/// than this fraction, when [measureFallbackAgreement] is asked to check it.
+///
+/// **Not a bound on the fallback alone.** At this rig's one-tile bake budget
+/// the tiled frame also bakes one 64x64 tile through the same sink, so
+/// `tiledTriangleCount` is that tile's geometry plus whatever the fallback
+/// walked -- never the fallback in isolation. The bound below has to hold
+/// against that combined total, not an idealised fallback-only count.
+///
+/// **Measured, not guessed.** Swept over `kFallbackOffsets` on `fillingGrid`
+/// (the fixture `criterion 2 and 2c` uses), the shipped narrowing's
+/// tiled/live ratio ran 0.517-0.833 (30/58 .. 50/60 triangles). Reverting
+/// `_drawInto`'s `Size` argument from the strip back to the full `viewport`
+/// -- leaving the translate and the camera offset alone, so `debugLastStrip`
+/// still reports the strip and every pixel still lands correctly under the
+/// clip -- pushed six of the eight ratios to 1.0-1.172; the other two were
+/// unchanged, because those two offsets' strips already contained every
+/// entity the full viewport would have found. `0.9` sits with margin on both
+/// sides of that gap: above every ratio the correct code measured, below
+/// every ratio the mutant moved.
+///
+/// **Fixture-dependent, and that is why it is opt-in.** `nearAxisDiagonals`
+/// (`criterion 2b`) is a handful of long diagonals spanning most of the
+/// viewport; a query the size of the strip and a query the size of the full
+/// viewport catch the *same* entities there, so the ratio sits at 1.0 (or
+/// 0/20 where the strip misses the diagonals entirely) even under the
+/// correct implementation. That fixture carries no signal for this check, so
+/// applying the bound to it would fail correct code, not catch a mutant.
+const double kTriangleBudgetRatio = 0.9;
+
 /// One fallback sample: a frame that is part blit and part live walk, compared
 /// against the live frame at the same camera.
 ///
@@ -171,11 +227,15 @@ Future<Uint8List> captureLiveFrame(TileRig rig) => _capture((canvas) {
 /// would inherit tiles from the previous offset and become a warm-tile
 /// comparison -- one of the three arrangements that failed to detect a
 /// crippled query before this instrument existed.
+///
+/// [checkTriangleBudget] gates the [kTriangleBudgetRatio] assertion -- see
+/// its doc comment for why this is opt-in rather than unconditional.
 Future<InkReport> measureFallbackAgreement(
   DraftDocument Function(FlutterTextMeasurer) of,
   FlutterTextMeasurer measurer,
   Offset pan, {
   int minimumInk = 500,
+  bool checkTriangleBudget = false,
 }) async {
   final rig = TileRig(
       tileDevicePixels: 64, tilesBakedPerFrame: 1000, document: of(measurer));
@@ -207,6 +267,17 @@ Future<InkReport> measureFallbackAgreement(
         reason: 'pan $pan left no interior strip edge: strip=$strip');
     expect(report.liveInk, greaterThan(minimumInk), reason: '$report');
     expect(report.tiledInk, greaterThan(minimumInk), reason: '$report');
+    // Pixels alone cannot see this: a fallback query padded back out to the
+    // full viewport still clips to `uncovered` and lands every pixel right,
+    // so it reads as a pixel-perfect frame while re-tessellating the whole
+    // scene underneath. This is what caught it -- see [kTriangleBudgetRatio].
+    if (checkTriangleBudget) {
+      expect(report.tiledTriangleCount,
+          lessThan(report.liveTriangleCount * kTriangleBudgetRatio),
+          reason: 'pan $pan: the tiled arm emitted as much geometry as the '
+              'full-frame live arm, so the fallback walked far more than the '
+              'strip: $report');
+    }
     return report;
   } finally {
     rig.dispose();
@@ -218,13 +289,14 @@ Future<List<InkReport>> sweepFallbackAgreement({
   required DraftDocument Function(FlutterTextMeasurer) of,
   required List<Offset> offsets,
   int minimumInk = 500,
+  bool checkTriangleBudget = false,
 }) async {
   final reports = <InkReport>[];
   for (final offset in offsets) {
     final measurer = FlutterTextMeasurer();
     try {
       reports.add(await measureFallbackAgreement(of, measurer, offset,
-          minimumInk: minimumInk));
+          minimumInk: minimumInk, checkTriangleBudget: checkTriangleBudget));
     } finally {
       measurer.clear();
     }
