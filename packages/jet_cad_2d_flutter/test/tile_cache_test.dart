@@ -841,6 +841,41 @@ void main() {
   // gap is harmless on a GPU backend, and it does not prove the bound holds
   // at every camera and every slope -- Task 6a swept 82 slopes at one camera
   // and one tile size. See `nearAxisDiagonals` for the mechanism.
+  test('fillingGrid covers every edge of the viewport', () async {
+    // The property three earlier fixtures lacked, asserted rather than
+    // assumed: ink within one tile of all four viewport edges. Without it a
+    // strip entering from an edge lands outside the drawing and no crippled
+    // query can lose anything -- which is exactly what `crossingGrid`,
+    // a pan, and a zoom-then-pan each demonstrated.
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final rig = TileRig(
+        tileDevicePixels: 64,
+        tilesBakedPerFrame: 1000,
+        document: fillingGrid(measurer));
+    addTearDown(rig.dispose);
+
+    final pixels = await captureLiveFrame(rig);
+    final width = (kTileViewport.width * kTileDpr).round();
+    final height = (kTileViewport.height * kTileDpr).round();
+    // 64 device pixels: one tile at this rig's size.
+    const band = 64;
+
+    bool inkIn(int x0, int y0, int x1, int y1) {
+      for (var y = y0; y < y1; y++) {
+        for (var x = x0; x < x1; x++) {
+          if (pixels[(y * width + x) * 4 + 3] != 0) return true;
+        }
+      }
+      return false;
+    }
+
+    expect(inkIn(0, 0, band, height), isTrue, reason: 'left edge');
+    expect(inkIn(width - band, 0, width, height), isTrue, reason: 'right edge');
+    expect(inkIn(0, 0, width, band), isTrue, reason: 'top edge');
+    expect(inkIn(0, height - band, width, height), isTrue, reason: 'bottom');
+  });
+
   group('accepted gap: near-axis strokes displace a bounded number of pixels',
       () {
     Future<InkReport> measure(DraftDocument Function(FlutterTextMeasurer) of,

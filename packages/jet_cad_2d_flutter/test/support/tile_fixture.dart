@@ -256,3 +256,35 @@ DraftDocument nearAxisDiagonals(FlutterTextMeasurer measurer) {
   }
   return doc;
 }
+
+/// A grid that fills [kTileViewport] at [tileCamera], which no other fixture
+/// here does.
+///
+/// **This is the property that makes a crippled query detectable, and its
+/// absence is why three earlier arrangements could not detect one.** A loss in
+/// the live fallback is only visible where the uncovered union's boundary is
+/// *interior to the drawing*: a strip entering across empty canvas has no ink
+/// to lose. [crossingGrid] spans world x 10..200, which at this camera's 1.4
+/// is screen -23..243 inside a 400 px viewport -- off the left edge and short
+/// of the right -- so a pan in any direction brings in empty space.
+///
+/// The visible world box here is x in [26.4, 312.1] and y in [16.4, 230.7];
+/// 20..320 by 10..240 strictly contains it on all four edges.
+///
+/// Lines rather than a fill, and axis-aligned rather than diagonal: this
+/// fixture carries the arm that must agree **exactly**, so it must not import
+/// the near-axis slope disagreement [nearAxisDiagonals] measures.
+DraftDocument fillingGrid(FlutterTextMeasurer measurer) {
+  final doc = DraftDocument.empty(measurer: measurer);
+  var handle = 1000;
+  // 16 units apart: half a tile's 32 logical pixels at this camera's 1.4 is
+  // 22.9 world units, so no tile-sized strip anywhere in the frame can be
+  // empty of ink.
+  for (var t = 10.0; t <= 240.0; t += 16.0) {
+    addLine(doc, doc.rootHandle, Handle(handle++), 20, t, 320, t);
+  }
+  for (var t = 20.0; t <= 320.0; t += 16.0) {
+    addLine(doc, doc.rootHandle, Handle(handle++), t, 10, t, 240);
+  }
+  return doc;
+}
