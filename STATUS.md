@@ -1354,13 +1354,15 @@ of `fillingGrid` or the swept offsets; and `checkTriangleBudget` defaults to
 triangle-count gate unless it opts in explicitly.
 
 **Exit gate.** Of the criteria table's 12 rows, 3 (3b, 4, 5) are recorded
-only, per spec, not gates. **Of the 9 that are gates: 7 PASS, 2 MISS**
-(criteria 3 and 6, both above). Criterion 1b is not a binary pass or fail: per
-its own pre-commitment it resolves to accepted gap H5 (M2 survives) rather
-than either outcome. Criteria 1, 2, 2b and 2c pass on the shipped tree
-(confirmed by the mutation log above); criterion 7 (peak `tileBytes`
-27262976 bytes = 26.00 MiB against ≤ 96 MiB) and criterion 8 (`capacityMiB`
-exactly 192.00 in every configuration, no increase to explain) both PASS.
+only, per spec, not gates. **Of the 9 that are gates: 6 PASS, 2 MISS, and
+criterion 1b resolves to accepted gap H5 rather than to either outcome** —
+per its own pre-commitment, it is not a binary pass or fail: M2 survives, so
+1b lands on the plan's pre-declared third path, not on "pass" or "fail."
+The 2 MISS are criteria 3 and 6, both above. The 6 PASS are criteria 1, 2,
+2b and 2c on the shipped tree (confirmed by the mutation log above),
+criterion 7 (peak `tileBytes` 27262976 bytes = 26.00 MiB against ≤ 96 MiB),
+and criterion 8 (`capacityMiB` exactly 192.00 in every configuration, no
+increase to explain).
 
 **Plan 3i inherits three things, named here so no future session has to
 reconstruct them:**
