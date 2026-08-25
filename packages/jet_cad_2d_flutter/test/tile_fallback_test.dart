@@ -42,13 +42,17 @@ const List<Offset> kFallbackOffsets = <Offset>[
 void main() {
   test('criterion 2 and 2c: a partly baked frame equals the live frame',
       () async {
-    // `checkTriangleBudget: true` is criterion 1's other half: the pixel
-    // assertions below prove the fallback lands the right pixels, and this
-    // flag proves it did not re-tessellate the whole viewport to do it. See
-    // `kTriangleBudgetRatio`'s doc comment for the measured numbers behind
-    // the bound and why `criterion 2b` below does not also carry this flag.
+    // Both gates default to on, and this call takes them as they come: the
+    // triangle-count ratio is criterion 1's other half -- the pixel
+    // assertions below prove the fallback lands the right pixels, and the
+    // ratio proves it did not re-tessellate the whole viewport to do it (see
+    // `kTriangleBudgetRatio`'s doc comment for the bracket behind the bound)
+    // -- and `minimumStripInk` is what makes each sample non-vacuous, by
+    // requiring the live frame to carry ink inside the band the fallback
+    // owes. `criterion 2b` below is the one caller that opts out of either,
+    // and says why.
     final reports = await sweepFallbackAgreement(
-        of: fillingGrid, offsets: kFallbackOffsets, checkTriangleBudget: true);
+        of: fillingGrid, offsets: kFallbackOffsets);
 
     expect(reports, hasLength(kFallbackOffsets.length));
     for (var i = 0; i < reports.length; i++) {
@@ -67,13 +71,26 @@ void main() {
     // tiled path on this same fixture at `differingPixels <= 60` against a
     // measured 36 of 10342 ink, 0.348%. The fallback arm is held to the same
     // number, so an increase is a tripwire rather than a silent record.
-    // No `checkTriangleBudget` here, deliberately: this fixture is a handful
-    // of long diagonals spanning most of the viewport, so a strip-sized query
-    // and a full-viewport query catch the same entities and the ratio sits at
-    // 1.0 (or 0/20 where the strip misses the diagonals) even under correct
-    // code. See `kTriangleBudgetRatio`'s doc comment.
+    // `checkTriangleBudget: false` here, deliberately and against the
+    // default: this fixture is a handful of long diagonals spanning most of
+    // the viewport, so a strip-sized query and a full-viewport query catch
+    // the same entities and the ratio sits at 1.0 (or 0/20 where the strip
+    // misses the diagonals) even under correct code. See
+    // `kTriangleBudgetRatio`'s doc comment.
+    //
+    // `minimumStripInk: 0` is the second opt-out, and it is an admission
+    // rather than a design: `nearAxisDiagonals` spans world 20..220 by
+    // 30..150 and leaves five of these eight entering bands empty, so this
+    // arm cannot carry the clause `criterion 2 and 2c` above relies on. It is
+    // recorded as an accepted gap in `STATUS.md` (H3) rather than papered
+    // over -- widening this fixture would change the `<= 60` bound it shares
+    // with `tile_cache_test.dart`, which is a different contract.
     final reports = await sweepFallbackAgreement(
-        of: nearAxisDiagonals, offsets: kFallbackOffsets, minimumInk: 200);
+        of: nearAxisDiagonals,
+        offsets: kFallbackOffsets,
+        minimumInk: 200,
+        minimumStripInk: 0,
+        checkTriangleBudget: false);
 
     for (var i = 0; i < reports.length; i++) {
       final report = reports[i];

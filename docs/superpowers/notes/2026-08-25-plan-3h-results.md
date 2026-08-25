@@ -287,6 +287,23 @@ Failing tests:
 failed — the same "criterion 2 and 2c" test, the only failure anywhere in the
 package. Full log: `/tmp/3h_m4_full_suite.log`.
 
+> **Amendment, 2026-08-26 (widget suite only; the device sections below are
+> untouched and were not re-run).** The whole-branch review found that
+> `paintFrame`'s `canvas.translate(strip.left, strip.top)` had no witness on
+> the `fillingGrid` of the day — deleting it left the suite green — because
+> the fixture cleared the resting viewport by only 9 to 13 screen pixels
+> while the sweep pans 37 to 71, so the two offsets that exercise the
+> translate entered across bare canvas. `fillingGrid` was widened to world
+> x ∈ [-52, 380], y ∈ [-52, 300], an anti-vacuity clause on ink inside the
+> band was added, and `kTriangleBudgetRatio` was re-bracketed 0.9 → 0.97.
+> **The two transcripts above are therefore history.** M4 re-fired on the new
+> fixture reads `Expected: a value less than <60.14>`, `Actual: <80>`,
+> `InkReport(live: 41464, tiled: 41464, stray: 0, uncovered: 0, differing: 0,
+> liveTri: 62, tiledTri: 80, stripInk: 7032)`, and the whole-package figure is
+> unchanged at `+371 ~1 -1` with `criterion 2 and 2c` the single failure. The
+> ruling — M4 dies in the widget suite — is unchanged and is now measured on a
+> non-vacuous sample. See `plan-3h-mutation-log.md`, "Fix round 2".
+
 **This is the finding to report prominently**: M4 gained a unit witness the
 plan did not anticipate, contradicted by the retroactive M5 fix round. The
 mutation log's M4 placeholder section ("no unit gate can kill it... It dies

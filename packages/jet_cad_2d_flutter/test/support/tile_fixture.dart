@@ -257,8 +257,9 @@ DraftDocument nearAxisDiagonals(FlutterTextMeasurer measurer) {
   return doc;
 }
 
-/// A grid that fills [kTileViewport] at [tileCamera], which no other fixture
-/// here does.
+/// A grid that fills [kTileViewport] at [tileCamera] **and goes on filling it
+/// at every offset the fallback sweep pans to**, which no other fixture here
+/// does.
 ///
 /// **This is the property that makes a crippled query detectable, and its
 /// absence is why three earlier arrangements could not detect one.** A loss in
@@ -268,8 +269,38 @@ DraftDocument nearAxisDiagonals(FlutterTextMeasurer measurer) {
 /// is screen -23..243 inside a 400 px viewport -- off the left edge and short
 /// of the right -- so a pan in any direction brings in empty space.
 ///
-/// The visible world box here is x in [26.4, 312.1] and y in [16.4, 230.7];
-/// 20..320 by 10..240 strictly contains it on all four edges.
+/// **The extent is derived from the sweep rather than from the resting
+/// camera, and the predecessor extent that was not cost this plan its witness
+/// for `canvas.translate`.** [tileCamera] maps world to screen as
+/// `sx = 1.4 * wx - 37` and `sy = -1.4 * wy + 323`, so **one world unit is
+/// 1.4 screen pixels** and the resting visible world box is x in
+/// [26.4, 312.1], y in [16.4, 230.7]. `TileRig.panBy` adds its offset to the
+/// camera's translation, so a pan of `d` screen pixels slides this drawing by
+/// `d` on screen: an edge of the grid stays outside the viewport under that
+/// pan only while its own screen distance past that viewport edge exceeds
+/// `|d|`. At the extent below, those four distances are
+///
+/// | edge   | world   | screen | past the viewport edge by |
+/// |--------|---------|--------|---------------------------|
+/// | left   | x = -52 | -109.8 | 109.8 px                  |
+/// | right  | x = 380 |  495.0 |  95.0 px                  |
+/// | top    | y = 300 |  -97.0 |  97.0 px                  |
+/// | bottom | y = -52 |  395.8 |  95.8 px                  |
+///
+/// and the largest offset the fallback sweep pans is **71 screen pixels**, so
+/// every edge clears the whole sweep by at least 24 screen pixels and the
+/// viewport stays strictly interior to the drawing at all eight offsets.
+///
+/// **What the predecessor extent (20..320 by 10..240) did.** It contained the
+/// resting visible box on all four edges, but by only about 9 to 13 *screen*
+/// pixels, against a sweep that pans 37 to 71. At `Offset(-41, 0)` and
+/// `Offset(0, -41)` the entering strip therefore landed on bare canvas: the
+/// live fallback drew **nothing** there and the sweep's zero-differing-pixel
+/// assertions were satisfied vacuously. Those two offsets are also precisely
+/// the ones whose strip does not start at (0, 0) -- the only ones where
+/// `TileCache.paintFrame`'s `canvas.translate(strip.left, strip.top)` is not
+/// a no-op -- so deleting that line left the whole widget suite green. The
+/// extent above is what gives that line a witness.
 ///
 /// Lines rather than a fill, and axis-aligned rather than diagonal: this
 /// fixture carries the arm that must agree **exactly**, so it must not import
@@ -279,12 +310,14 @@ DraftDocument fillingGrid(FlutterTextMeasurer measurer) {
   var handle = 1000;
   // 16 units apart: half a tile's 32 logical pixels at this camera's 1.4 is
   // 22.9 world units, so no tile-sized strip anywhere in the frame can be
-  // empty of ink.
-  for (var t = 10.0; t <= 240.0; t += 16.0) {
-    addLine(doc, doc.rootHandle, Handle(handle++), 20, t, 320, t);
+  // empty of ink. The bounds are a whole number of steps apart end to end
+  // (-52 + 16*22 = 300, -52 + 16*27 = 380), so the outermost line lands
+  // exactly on the extent the table above measures rather than short of it.
+  for (var t = -52.0; t <= 300.0; t += 16.0) {
+    addLine(doc, doc.rootHandle, Handle(handle++), -52, t, 380, t);
   }
-  for (var t = 20.0; t <= 320.0; t += 16.0) {
-    addLine(doc, doc.rootHandle, Handle(handle++), t, 10, t, 240);
+  for (var t = -52.0; t <= 380.0; t += 16.0) {
+    addLine(doc, doc.rootHandle, Handle(handle++), t, -52, t, 300);
   }
   return doc;
 }
