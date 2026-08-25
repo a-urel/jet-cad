@@ -383,6 +383,15 @@ archived at
 and `.superpowers/sdd/` is empty — **no ledger chore is outstanding for any
 plan.**
 
+**Renumbered 2026-08-25.** This section originally read G3 and the vertex
+buffer as Plan 3h's own starting points. They are not. **Plan 3h is the
+fallback walk and its instrument, nothing else** — item 1 below. Plan 3g
+assigned G3 to 3h; **G3 now belongs to Plan 3i** (item 2), and the 192 MiB
+vertex buffer is **Plan 3j**'s question (item 3), not 3h's. The reassignment
+is licensed by item 3's own finding: the 2026-08-25 high-water measurement
+showed memory is not a consequence of the pan frame, so the pan frame could
+be finished without settling zoom first.
+
 **What 3h starts from**, in the order the results note argues it:
 
 1. **Criterion 11's miss, cause isolated, remedy spent.** 35.67 ms against
@@ -390,17 +399,19 @@ plan.**
    excess is the **live fallback drawing the still-uncovered strip**. The
    budget is already floored at one tile, so lowering it leaves the strip
    uncovered for more frames, each paying the fallback again. **A pan frame
-   that exposes more than one tile has no covered path today.**
-2. **G3, the zoom, with a number on it.** 32.06 ms at 500,000 entities with
-   tiles on. **No caching scheme touches it** — the triangles are genuinely
-   being drawn — so the answer is level-of-detail geometry, and the tile cache
-   can already hold it: a generation is keyed by scale, so a coarser bake can
-   never outlive the scale it was simplified for.
+   that exposes more than one tile has no covered path today.** This, and
+   only this, is Plan 3h's scope.
+2. **G3, the zoom, with a number on it — now Plan 3i's.** 32.06 ms at
+   500,000 entities with tiles on. **No caching scheme touches it** — the
+   triangles are genuinely being drawn — so the answer is level-of-detail
+   geometry, and the tile cache can already hold it: a generation is keyed by
+   scale, so a coarser bake can never outlive the scale it was simplified for.
 3. **The memory measurement, taken 2026-08-25 — and the answer is no.**
    `debugCapacityVertices` reads **16,777,216 vertices, 192.00 MiB, in all five
    configurations measured**: 50,000 and 500,000 entities, tiles on and off.
    **Tiles change nothing, so the tile budget adds to that memory rather than
-   replacing it** — 3h budgets 192 + tiles. **And the mark is not a function of
+   replacing it** — the 192 MiB figure and the tile budget it must add to are
+   **Plan 3j**'s starting point. **And the mark is not a function of
    entity count**, which is how both places below still phrase it: a tenfold
    corpus reads the same number. The steady frame uses an eighth of what stays
    pinned; the mark is set by the sweep's worst camera and never released,
