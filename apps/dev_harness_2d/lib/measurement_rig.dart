@@ -340,6 +340,7 @@ Future<void> runR2Rig({
   required TileCache? tileCache,
   required Future<void> Function() pumpFrame,
   required Future<void> Function() settle,
+  required double panStep,
 }) async {
   refuseDebugMode();
   final timings = <FrameTiming>[];
@@ -402,6 +403,7 @@ Future<void> runR2Rig({
         pumpFrame: pumpFrame,
         settle: settle,
         setBucket: (b) => bucket = b,
+        panStep: panStep,
       );
     }
   } finally {
@@ -456,6 +458,7 @@ Future<void> runTilePhases({
   required Future<void> Function() pumpFrame,
   required Future<void> Function() settle,
   required void Function(List<FrameTiming>) setBucket,
+  required double panStep,
 }) async {
   // Fill the generation the zoom phase left stale. Bounded, and the bound is
   // reported: a run that hit it never reached a warm cache and its hold
@@ -520,7 +523,17 @@ Future<void> runTilePhases({
   }
 
   await phase('tile hold', 60, Offset.zero);
-  await phase('tile pan', 120, const Offset(-7, -3));
+  // `PAN_STEP` unset leaves the historical step untouched -- see `kPanStep`.
+  const historical = Offset(-7, -3);
+  final magnitude = historical.distance;
+  final step = panStep.isNaN
+      ? historical
+      : Offset(historical.dx * panStep / magnitude,
+          historical.dy * panStep / magnitude);
+  print('  tile pan step: dx=${step.dx.toStringAsFixed(4)} '
+      'dy=${step.dy.toStringAsFixed(4)} '
+      'magnitude=${step.distance.toStringAsFixed(4)}');
+  await phase('tile pan', 120, step);
   _probeBake(cache, camera, painter, sink, vertices);
 }
 

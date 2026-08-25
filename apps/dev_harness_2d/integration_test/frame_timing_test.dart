@@ -213,6 +213,7 @@ void main() {
       tileCache: app.tileCache,
       pumpFrame: () => tester.pump(const Duration(milliseconds: 16)),
       settle: tester.pumpAndSettle,
+      panStep: kPanStep,
     );
   });
 

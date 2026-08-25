@@ -207,6 +207,37 @@ int _intDefine(String name, String raw, int fallback, {required int minimum}) {
   return value;
 }
 
+/// [_intDefine]'s sibling, for a define that is not an integer.
+///
+/// Same rule and the same reason: a silent default writes one run into the
+/// table under a heading the command line claimed and the run did not use.
+double _doubleDefine(String name, String raw, double fallback,
+    {double? minimum}) {
+  if (raw.isEmpty) return fallback;
+  final value = double.tryParse(raw);
+  if (value == null || !value.isFinite) {
+    throw ArgumentError.value(raw, name, 'not a finite number');
+  }
+  if (minimum != null && value < minimum) {
+    throw ArgumentError.value(raw, name, 'below $minimum');
+  }
+  return value;
+}
+
+/// The tile-pan phase's speed, in logical pixels per frame.
+///
+/// **A magnitude along the rig's existing direction, and unset means no
+/// scaling at all.** The historical step is `Offset(-7, -3)`, magnitude
+/// `sqrt(58)` = 7.615773; `PAN_STEP=7.6` would scale it by 0.99793 and make
+/// the arm incomparable with every row already recorded at it. `NaN` is the
+/// sentinel for unset because zero is a legal magnitude to ask about.
+///
+/// It reaches the **tile phase only**. R2's own pan keeps `Offset(-7, -3)`
+/// unconditionally, or every prior plan's R2 row becomes incomparable.
+final double kPanStep = _doubleDefine(
+    'PAN_STEP', const String.fromEnvironment('PAN_STEP'), double.nan,
+    minimum: 0);
+
 /// The one measurer the harness document is built with, reachable from
 /// `_HarnessState.dispose` so the native paragraphs it holds are released.
 ///
@@ -433,6 +464,7 @@ Future<void> _driveR2(
     tileCache: tileCache,
     pumpFrame: _pumpFrame,
     settle: _settle,
+    panStep: kPanStep,
   );
   print('R2 app-run: done');
 }
