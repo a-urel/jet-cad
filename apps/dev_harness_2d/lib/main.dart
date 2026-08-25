@@ -537,6 +537,27 @@ class _HarnessAppState extends State<HarnessApp> {
       ViewportTransform.fit(widget.document.extents, const Size(1600, 1200)));
   final GlobalKey<DraftCanvasState> _canvasKey = GlobalKey<DraftCanvasState>();
 
+  /// The zoom factor already applied from the trackpad gesture in progress.
+  ///
+  /// `pan` and `scale` on a `PointerPanZoomUpdateEvent` are **cumulative since
+  /// the gesture began**, not per-event deltas. Applying the reported value
+  /// directly on every update compounds it -- three updates of a steady pinch
+  /// to 1.5 would zoom by 1.5^3 -- so each update applies only the ratio it
+  /// adds over this.
+  ///
+  /// Reset when a gesture starts rather than when one ends: a start event is
+  /// guaranteed to precede every update, an end event is not guaranteed to
+  /// arrive at all.
+  double _gestureZoom = 1.0;
+
+  /// Where the trackpad gesture began, in this widget's coordinates.
+  ///
+  /// The anchor is held still for the whole gesture instead of tracking the
+  /// drifting pointer, which is what `ScaleGestureRecognizer.focalPoint` does
+  /// once trackpad scrolling causes scale. A moving anchor makes a two-finger
+  /// scroll translate the view as a side effect of zooming it.
+  Offset _gestureAnchor = Offset.zero;
+
   @override
   void initState() {
     super.initState();
@@ -579,8 +600,31 @@ class _HarnessAppState extends State<HarnessApp> {
               if (event is! PointerScrollEvent) return;
               // 1.1 per notch, in the direction the wheel turned. Scroll up is
               // negative dy on every platform Flutter reports.
+              //
+              // This is the **mouse wheel** path and only that. A macOS
+              // trackpad sends no pointer signal at all: two-finger scroll and
+              // pinch both arrive as the pan/zoom events handled below.
               camera.zoomAt(event.localPosition,
                   event.scrollDelta.dy < 0 ? 1.1 : 1 / 1.1);
+            },
+            onPointerPanZoomStart: (event) {
+              _gestureZoom = 1.0;
+              _gestureAnchor = event.localPosition;
+            },
+            onPointerPanZoomUpdate: (event) {
+              // Pinch reports `scale`; two-finger scroll reports `pan` and
+              // leaves `scale` at 1. One expression covers both, and covers a
+              // pinch that drifts and reports the two together.
+              //
+              // The pan conversion is Flutter's own, from
+              // `kDefaultTrackpadScrollToScaleFactor`: exp(pan.dy / -200),
+              // whose sign carries the convention that scrolling up zooms in.
+              final factor = event.scale * math.exp(event.localPan.dy / -200.0);
+              // `zoomAt` ignores a non-positive or non-finite factor, but the
+              // running value must not be poisoned by one either.
+              if (!factor.isFinite || factor <= 0) return;
+              camera.zoomAt(_gestureAnchor, factor / _gestureZoom);
+              _gestureZoom = factor;
             },
             child: DraftCanvas(
                 key: _canvasKey,
