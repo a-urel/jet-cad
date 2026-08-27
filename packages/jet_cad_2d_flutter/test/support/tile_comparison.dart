@@ -343,6 +343,12 @@ Future<InkReport> measureFallbackAgreement(
     // owes it.
     rig.cache.bakeBudgetDevicePixels = 64 * 64;
     rig.panBy(pan.dx, pan.dy);
+    // Plan 3i Task 2: the frame right after a pan is the gate's moving frame
+    // and draws only the carry-over composite, baking and live-drawing
+    // nothing -- this fixture is about the partly baked frame *after* that,
+    // where the reduced budget leaves a genuine entering strip for the live
+    // fallback to own.
+    rig.paintOnce();
 
     final measured = await measureTiledAgreement(rig);
 

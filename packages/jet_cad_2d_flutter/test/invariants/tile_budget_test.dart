@@ -57,6 +57,16 @@ const int _compositeBytes = 800 * 600 * 4;
 /// already covered could not reach between them.
 const int _capWithComposite = 138 * _tileBytes;
 
+/// One more frame at the same camera `rig` just painted.
+///
+/// Plan 3i Task 2: a frame whose camera just changed is *moving* and draws
+/// only the carry-over composite -- no bake, no tile blit, no live walk.
+/// Every pan or zoom in this file used to bake and evict on the very next
+/// frame; now that frame is the moving one, and this second, unchanged-camera
+/// call is the one that actually bakes, blits and evicts, matching this
+/// file's pre-Plan-3i counts again.
+void settle(TileRig rig) => rig.paintOnce();
+
 void main() {
   test('criterion 12: the cap holds and eviction is real, not theoretical',
       () async {
@@ -70,6 +80,7 @@ void main() {
     for (var i = 0; i < 6; i++) {
       rig.panBy(-64, -32);
       rig.paintOnce();
+      settle(rig);
       expect(rig.cache.liveBytes, lessThanOrEqualTo(131072), reason: 'pan $i');
     }
     expect(rig.cache.evictionCount, greaterThan(0),
@@ -87,11 +98,13 @@ void main() {
     for (var i = 0; i < 6; i++) {
       rig.panBy(-64, 0);
       rig.paintOnce();
+      settle(rig);
     }
     rig.cache.resetCounters();
     for (var i = 0; i < 6; i++) {
       rig.panBy(64, 0);
       rig.paintOnce();
+      settle(rig);
     }
     expect(rig.cache.liveDrawCount, greaterThan(0),
         reason: 'the camera returned to tiles the cap reclaimed');
@@ -279,6 +292,7 @@ void main() {
     for (var i = 0; i < 6; i++) {
       rig.panBy(-64, 0);
       rig.paintOnce();
+      settle(rig);
     }
     expect(rig.cache.evictionCount, greaterThan(0),
         reason: 'setup: the pan really did overrun the cap');
@@ -298,6 +312,7 @@ void main() {
     for (var i = 0; i < 6; i++) {
       rig.panBy(64, 0);
       rig.paintOnce();
+      settle(rig);
     }
     final reclaimed = atFarEnd.where((k) => !rig.cache.holds(k)).toList();
     expect(reclaimed, isNotEmpty,
@@ -322,6 +337,7 @@ void main() {
     for (var i = 0; i < 6; i++) {
       rig.panBy(-64, -32);
       rig.paintOnce();
+      settle(rig);
       expect(rig.cache.debugImagesAlive, rig.cache.liveTileCount,
           reason: 'pan $i: every image this cache created and did not dispose '
               'is a tile it can still blit');
@@ -337,6 +353,7 @@ void main() {
     zoomed.paintOnce();
     zoomed.zoomBy(1.19);
     zoomed.paintOnce();
+    settle(zoomed);
     expect(zoomed.cache.hasCarryOver, isTrue, reason: 'setup');
     expect(zoomed.cache.debugImagesAlive, zoomed.cache.liveTileCount + 1);
 
@@ -373,6 +390,7 @@ void main() {
 
     rig.zoomBy(1.19);
     rig.paintOnce();
+    settle(rig);
     expect(rig.cache.hasCarryOver, isTrue,
         reason: 'setup: the scale change minted one');
     // **Not `liveDrawCount` here.** A zoom *in* magnifies the composite past
@@ -396,6 +414,7 @@ void main() {
     for (var i = 0; i < 6; i++) {
       rig.panBy(-64, -32);
       rig.paintOnce();
+      settle(rig);
       expect(rig.cache.hasCarryOver, isTrue,
           reason: 'pan $i: the composite is never a victim. The frame path '
               'reads it every frame it stands, and reclaiming it would put a '
@@ -426,6 +445,7 @@ void main() {
     rig.paintOnce();
     rig.zoomBy(1.19);
     rig.paintOnce();
+    settle(rig);
     expect(rig.cache.hasCarryOver, isTrue, reason: 'setup: a composite stands');
     expect(rig.cache.liveTileCount, greaterThan(30),
         reason: 'setup: and there are tiles for the ceiling to take');
@@ -445,6 +465,10 @@ void main() {
     final beforeSqueeze = rig.cache.evictionCount;
     rig.panBy(-64, -32);
     rig.paintOnce();
+    // The pan above is the moving frame the gate now inserts and it bakes
+    // and evicts nothing; `settle` below is the frame the rest of this test's
+    // comment is about.
+    settle(rig);
     // **The number `_makeRoomForOneTile`'s own doc comment cites.** One call
     // reclaims every held tile whose serial is older than this frame's, not
     // one and not one per bake -- an earlier version of that comment claimed
@@ -458,6 +482,7 @@ void main() {
     rig.cache.resetCounters();
     rig.panBy(-64, -32);
     rig.paintOnce();
+    settle(rig);
 
     expect(rig.cache.hasCarryOver, isTrue,
         reason: 'the composite survives a ceiling it does not fit under: it '

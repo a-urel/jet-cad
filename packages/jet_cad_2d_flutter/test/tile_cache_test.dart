@@ -202,6 +202,10 @@ void main() {
     // *tiles*, at this rig's 64 px tile: the field is a device-pixel budget.
     zoomed.cache.bakeBudgetDevicePixels = 4 * 64 * 64;
     zoomed.zoomBy(1.19);
+    // The gate's moving frame: it retires the old generation into a
+    // composite and bakes nothing of the new one. The spy call below needs
+    // the settled frame after it -- both kinds of blit in the same frame.
+    zoomed.paintOnce();
     zoomed.cache.resetCounters();
     final zoomedSpy = SpyCanvas();
     zoomed.cache.paintFrame(
@@ -560,6 +564,9 @@ void main() {
     addTearDown(rig.dispose);
     rig.paintOnce();
     rig.zoomBy(1.03);
+    // The moving frame the gate now inserts: it retires the (uncovered, so
+    // composite-less) old generation and bakes nothing of the new one.
+    rig.paintOnce();
     rig.cache.resetCounters();
     // Settled: the scale stops moving, so the new generation fills in.
     for (var i = 0; i < 3; i++) {
@@ -600,11 +607,14 @@ void main() {
       addTearDown(rig.dispose);
       rig.paintOnce();
       rig.zoomBy(factor);
-      // Two frames. The first anchors the new generation and fills it, with
-      // the composite blitted underneath; the second bakes nothing, finds the
-      // viewport covered, and retires the composite. Only the third frame --
-      // the comparison's own -- is a clean generation, and that is the frame
-      // criterion 1 is a claim about.
+      // Three frames now, the first of them new: the gate's moving frame,
+      // which retires the old (covered) generation into a composite and
+      // bakes nothing. Of the two after it, the first anchors the new
+      // generation and fills it, with the composite blitted underneath; the
+      // second bakes nothing, finds the viewport covered, and retires the
+      // composite. Only the fourth frame -- the comparison's own -- is a
+      // clean generation, and that is the frame criterion 1 is a claim about.
+      rig.paintOnce();
       rig.paintOnce();
       rig.paintOnce();
       expect(rig.cache.hasCarryOver, isFalse,

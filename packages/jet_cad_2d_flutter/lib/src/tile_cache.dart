@@ -512,6 +512,21 @@ class TileCache {
   /// The quantised camera of the last [paintFrame].
   ViewportTransform? _lastCamera;
 
+  /// The previous frame's quantised camera, for the rest gate.
+  ViewportTransform? _lastQuantised;
+
+  /// Consecutive frames whose quantised camera did not change.
+  ///
+  /// Zero on the frame that changed. **One** is the frame in between, which
+  /// draws like a moving frame. **Two** arms the rest bake. The second frame
+  /// is the mouse wheel's: a wheel delivers isolated notches, so without it
+  /// every notch is one moving frame followed immediately by a resting frame,
+  /// a full bake per notch discarded by the next.
+  int _restGateSteps = 0;
+
+  /// The rest gate's counter, for tests. See [_restGateSteps].
+  int get debugRestGateSteps => _restGateSteps;
+
   int _bakes = 0;
   int _carryOverBlits = 0;
   int _blits = 0;
@@ -767,6 +782,41 @@ class TileCache {
     final grid = _gridFor(quantised, devicePixelRatio, viewport);
     _lastCamera = quantised;
 
+    // **Three frame kinds, and only one of them bakes.** A frame whose camera
+    // changed is *moving*. A frame that has matched once and not yet twice is
+    // the one in between. Both draw the composite and nothing else: no bake,
+    // and no live walk.
+    //
+    // The live walk is excluded deliberately and the measurement is why. On a
+    // moving frame the new generation is empty, so every visible key misses
+    // and `uncovered` accumulates by `expandToInclude` into the **whole
+    // viewport** rather than a ring; `stripFor` then clamps to the viewport.
+    // "Walk the uncovered region" is therefore a full-viewport live walk --
+    // 31.5-41.6 ms at 500,000 entities -- on every zoom-out frame.
+    final previous = _lastQuantised;
+    _restGateSteps =
+        previous != null && sameQuantisedCamera(previous, quantised)
+            ? _restGateSteps + 1
+            : 0;
+    _lastQuantised = quantised;
+    // **`previous == null` is not a moving frame.** It is the very first
+    // frame this cache has ever painted, with nothing behind it to have
+    // moved away from. Gating it on the literal `_restGateSteps >= 1` would
+    // leave a brand-new cache blank -- no bake, and no composite either,
+    // since nothing has ever been retired -- until some later frame
+    // fortuitously repeated the same camera.
+    //
+    // **Not `&& !_viewportCovered` either.** A frame whose camera matches the
+    // last one but whose generation already covers the viewport still has to
+    // run the loop below: every visible key already holds an image, so the
+    // loop bakes nothing on its own, but it still has to *blit* those images
+    // onto this frame's canvas. `TileCache.paintFrame`'s only other exit from
+    // that loop is the coverage check inside it, which already makes baking
+    // a no-op once covered -- gating the loop itself here would additionally
+    // skip the blit, and a repeated call at an unchanged, already-settled
+    // camera would draw nothing at all.
+    final resting = previous == null || _restGateSteps >= 1;
+
     // Derived once and handed to every bake. Rebasing is frame-global by
     // construction; a per-tile origin would give each tile its own
     // quantisation step and `float32` residuals the live frame does not have.
@@ -803,6 +853,12 @@ class TileCache {
           dest.top <= 0 &&
           dest.right >= viewport.width &&
           dest.bottom >= viewport.height;
+    }
+
+    if (!resting) {
+      // Nothing else this frame. The composite is already down; a zoom out
+      // leaves its ring as background until the gesture ends (spec D3).
+      return;
     }
 
     for (final key in grid.visibleKeys(quantised, viewport)) {
