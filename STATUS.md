@@ -446,7 +446,7 @@ below landed in its scope.
 **Spec:** [2026-08-26-jet-cad-2d-plan-3i-zoom-frame-design.md](docs/superpowers/specs/2026-08-26-jet-cad-2d-plan-3i-zoom-frame-design.md),
 written 2026-08-26 and revised twice against five external reviews.
 **Plan:** [2026-08-26-jet-cad-2d-plan-3i-zoom-frame.md](docs/superpowers/plans/2026-08-26-jet-cad-2d-plan-3i-zoom-frame.md).
-**Range:** `468e310..863b359`, twenty-one commits, directly on `main`, no
+**Range:** `468e310..cf0c425`, thirty-four commits, directly on `main`, no
 worktree, on the human's standing consent — the arrangement of 3e through 3h.
 Executed with subagent-driven development: a fresh implementer per task, an
 independent reviewer after each, and the controller running the full gate
@@ -469,19 +469,23 @@ tile set's own area — `visibleKeys` yields a full rectangle — so a single
 source plus the tiles sliced from it peaks at exactly `kTileCacheBytes` with
 no headroom.
 
-**Blocked, and it is the machine.** At `863b359` the laptop reads
+**Blocked, and it is the machine.** At `cf0c425` the laptop reads
 `lowpowermode 1` and "Now drawing from 'Battery Power'". Either alone
 invalidates a frame-timing measurement and Plan 3h's record documents losing
 time to each separately. **Tasks 12 and 13 resume when `pmset -g | grep
 lowpowermode` reads 0 and `pmset -g ps` says AC Power.** Nothing about the
 code is waiting.
 
-**Suites at `863b359`,** each run by the controller rather than read from a
-report: **797** engine, **405** widget with 1 pre-existing skip, **23**
+**Suites at `cf0c425`,** each run by the controller rather than read from a
+report: **797** engine, **413** widget with 1 pre-existing skip, **47**
 harness. Analyze and format clean in all three.
 
-**Sixteen mutants fired so far.** M1, M2, M3, M4, M4b, M5, M6, M6b, M7, M9,
-M9b, M10, M12, M13, M14, M15 and M16 killed. **Mutant numbering is per-plan:
+**Twenty-four mutants fired so far.** M1-M7, M9-M23 killed (with M4b, M6b,
+M9b, M19a-e, M22b and M22c as sub-arms). **M24 survived and provably must** --
+the ceiling property it targets is held by the rest bake's up-front pricing,
+not by the recency stamp it deletes, so the gating arm cannot be built; the
+derivation is in the log, with the note that relaxing the pricing to count only
+the *missing* tiles would make the stamp load-bearing and the arm buildable. **Mutant numbering is per-plan:
 `M4` and `M5` name different mutations in Plan 3h's log and Plan 3i's, so any
 citation must name the plan.** **M8 survived as declared** — with integral source
 rectangles a bilinear and a nearest sample read the same texels, and it was
@@ -505,6 +509,38 @@ mutant and noticing it did not die.**
    helper since Task 2 ran at 800x600 logical rather than 400x300 — 475 tiles,
    not 130 — and the fixture left 38% of each frame blank. No assertion value
    moved when it was fixed; several comments became true.
+
+**The whole-branch review ran before the device runs, and that ordering is
+the single most valuable thing about this plan's record.** Two independent
+lenses — production correctness, and instrument honesty — surfaced **two
+production defects, one Blocking measurement defect that then recurred one
+frame away after its own fix, and four instruments that could not fail.** Every
+one of them would have become a retraction had the numbers been taken first.
+
+1. **A pan straight after a zoom drew only the stale composite, for the whole
+   pan.** `panBy` copies the matrix's `a,b,c,d` bit-identically, so
+   `matchesScale` held, `_gridFor` never retired, and the composite minted by
+   the zoom survived the pan while `_restGateSteps` sat at 0 — composite
+   blitted, early return, no tile blit, no live walk. Pre-3i the same frame
+   paid a full-viewport live walk: expensive, but correct pixels. A regression
+   against D8, reachable directly from a macOS trackpad.
+2. **One missing tile made the rest bake walk *every* band and discard all but
+   the ones it needed** — a whole-viewport walk on the ordinary edit path,
+   every frame of a drag.
+3. **The settle timing named the wrong frame, twice.** `FrameTiming` is
+   delivered after a frame rasterises; `pumpFrame` returns before it. First the
+   callback was re-registered per idle frame, so frame *i*'s bucket held frame
+   *i-1*'s timing. That was fixed — and the same defect returned one frame away,
+   because the *caller* pumped a camera-reset frame before the log was armed.
+   The published "frame that covered the viewport" was the in-between composite
+   blit that draws nothing. **The function's own comment had the mechanism
+   right; the defect moved to its caller.**
+4. **Four instruments could not fail**: criterion 7's headline ceiling assertion
+   ran with 43x headroom; `a` and `d` in `sameQuantisedCamera` were each
+   individually deletable (every fixture tied `d` to `-a`); the skipped-band
+   guard ran at a cap that never evicted; and `ZOOM_ARMS` printed N identical
+   arms under labels that read exactly like the interleaved measurement, with
+   the flag never flipped and every ratio at 1.00.
 
 **Two rulings a later reader must not mistake for drift.**
 
