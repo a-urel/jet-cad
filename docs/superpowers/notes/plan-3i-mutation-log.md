@@ -1630,3 +1630,151 @@ re-run green:
 00:00 +2: debugFullViewportQuery grows the fallback walk to the whole viewport
 00:00 +3: All tests passed!
 ```
+
+---
+
+## M20 — the settle reads the frame before the one that covered
+
+**Task:** fix wave B, the Blocking finding of Plan 3i's final whole-branch
+review. Gates `apps/dev_harness_2d/test/settle_attribution_test.dart`.
+
+**Why this mutant and not another.** `settleMs` is the only time value
+criteria 3 and 4 are read off, and it named the wrong frame *systematically*,
+not occasionally. A `FrameTiming` is delivered only after its frame has
+rasterised; `pumpFrame` completes at `SchedulerBinding.endOfFrame`, the
+frame's post-frame phase, *before* its scene rasterises. The idle loop
+registered a fresh `collectIdle` callback around a single `await pumpFrame()`
+and read `.last` out of it, so the timings it saw for idle frame *i* were
+frame *i-1*'s, or none. On correct code coverage first reads true at idle
+frame **2** (Ruling 15), so the published figure was idle frame 1: the
+in-between composite blit that draws nothing and is essentially free. The
+number would have looked exactly like the one-frame settle criterion 3 wants,
+and would have been a measurement of a blit. M20 restores that attribution as
+a one-ordinal shift, which is precisely what the old code did.
+
+**Mutation**, applied to
+`apps/dev_harness_2d/lib/measurement_rig.dart`, in `runSettlePhase`:
+
+```diff
+--- a/apps/dev_harness_2d/lib/measurement_rig.dart
++++ b/apps/dev_harness_2d/lib/measurement_rig.dart
+@@ -876,1 +876,1 @@
+-  final ms = log.msRange(firstOrdinal, firstOrdinal + frames);
++  final ms = log.msRange(firstOrdinal - 1, firstOrdinal + frames - 1);
+```
+
+**Procedure:** copied `measurement_rig.dart` aside to the scratchpad
+(`measurement_rig_m20.bak`), edited the working file, ran
+`CI=true flutter test --concurrency=1 test/settle_attribution_test.dart` from
+`apps/dev_harness_2d`, confirmed red, then restored the working file with `cp`
+from the scratchpad copy and confirmed `diff` produced no output. **Never
+`git checkout`.**
+
+**Result:** red, six of the nine tests, and the named mutation the brief asked
+for dies on the figure moving: with the covering frame made arbitrarily
+expensive, `coveringFrameMs` reads **4.0** -- the cheap frame before it -- in
+both the 9 ms arm and the 900 ms arm. The settle figure is inert under the
+mutant, which is the whole point: a number that cannot move is not a
+measurement. Criterion 4's wall clock dies alongside it (**6.0** where the
+three-frame settle is 5 + 6 + 90 = 101.0), and the drain test dies on the hole
+rather than on a value, because a shifted window leaves the last frame
+unattributed.
+
+Two tests survive M20 and are meant to: `'the gesture window excludes the
+warm-up frames and keeps its tail'` reads a different window (the gesture's,
+not the settle's), and `'a frame that never reports is a hole, not a zero'`
+asserts a shortfall that a shift by one does not change.
+
+**Verbatim output** (the `flutter pub get` preamble, identical to every other
+entry in this file, is trimmed):
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart
+00:00 +0: the covering frame is the one reported, not the frame before it
+00:00 +0 -1: the covering frame is the one reported, not the frame before it [E]
+  Expected: <0>
+    Actual: <1>
+  both settle frames must have reported a timing
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/settle_attribution_test.dart 104:5             main.<fn>
+  
+00:00 +0 -1: the settle frame moves the reported figure
+00:00 +0 -2: the settle frame moves the reported figure [E]
+  Expected: a numeric value within <1e-9> of <9.0>
+    Actual: <4.0>
+     Which:  differs by <5.0>
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/settle_attribution_test.dart 134:5             main.<fn>
+  
+00:00 +0 -2: wall clock over the settle is the sum, not the last frame
+00:00 +0 -3: wall clock over the settle is the sum, not the last frame [E]
+  Expected: a numeric value within <1e-9> of <90.0>
+    Actual: <6.0>
+     Which:  differs by <84.0>
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/settle_attribution_test.dart 159:5             main.<fn>
+  
+00:00 +0 -3: the idle frames after coverage are not charged to the settle
+00:00 +0 -4: the idle frames after coverage are not charged to the settle [E]
+  Expected: a numeric value within <1e-9> of <11.0>
+    Actual: <5.0>
+     Which:  differs by <6.0>
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/settle_attribution_test.dart 186:5             main.<fn>
+  
+00:00 +0 -4: the last idle frame is drained rather than dropped
+00:00 +0 -5: the last idle frame is drained rather than dropped [E]
+  Expected: <0>
+    Actual: <1>
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/settle_attribution_test.dart 211:5             main.<fn>
+  
+00:00 +0 -5: a settle that never covers says so
+00:00 +0 -6: a settle that never covers says so [E]
+  Expected: a numeric value within <1e-9> of <21.0>
+    Actual: <14.0>
+     Which:  differs by <7.0>
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/settle_attribution_test.dart 234:5             main.<fn>
+  
+00:00 +0 -6: a frame that never reports is a hole, not a zero
+00:00 +1 -6: the gesture window excludes the warm-up frames and keeps its tail
+00:00 +2 -6: a short sample is counted, and length plus missing is the script
+00:00 +3 -6: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart: a settle that never covers says so
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart: the covering frame is the one reported, not the frame before it
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart: the idle frames after coverage are not charged to the settle
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart: the last idle frame is drained rather than dropped
+  ... and 2 more
+```
+
+**Restore, verified.** `cp` from the scratchpad copy, `diff` against it empty,
+and the same file re-run green:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart
+00:00 +0: the covering frame is the one reported, not the frame before it
+00:00 +1: the settle frame moves the reported figure
+00:00 +2: wall clock over the settle is the sum, not the last frame
+00:00 +3: the idle frames after coverage are not charged to the settle
+00:00 +4: the last idle frame is drained rather than dropped
+00:00 +5: a settle that never covers says so
+00:00 +6: a frame that never reports is a hole, not a zero
+00:00 +7: the gesture window excludes the warm-up frames and keeps its tail
+00:00 +8: a short sample is counted, and length plus missing is the script
+00:00 +9: All tests passed!
+```
