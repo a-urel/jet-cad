@@ -2495,3 +2495,232 @@ byte-identical to the pre-M22 copy:
 00:00 +14: All tests passed!
 ```
 
+---
+
+> **Fix wave D opens here.** `M23` and `M24` were fired in
+> `packages/jet_cad_2d_flutter/`, against the two Major findings of the
+> fix-wave review. Numbering in this file is shared between the waves;
+> `M22c` was the last number taken when these were fired.
+
+## M23 — the frame after a pan is not told it followed a pan
+
+**Fix wave D, the first Major finding.** The flash the review describes:
+`correct -> blank -> correct`, one frame long, on every pan that follows a
+zoom out. A pan frame changes the camera, so `_restGateSteps` is 0 and
+`resting`'s third disjunct sends it through the ordinary bake-and-live-walk
+path — correct pixels, ring included. Then the pan stops. The next frame
+repeats the same quantised camera, so the count reads **1**: too late for the
+`== 0` disjunct, too early for `>= kRestGateFrames`. `_carryOver` is still
+standing, because it is dropped only on a frame that covers *and* bakes
+nothing, so `resting` is false and the frame returns after the composite blit
+alone. The strip the composite has slid off is background for that one frame.
+
+The fix is the one bit the review named: `_lastChangeWasPan`, written only on a
+frame that changed something, so `resting` can tell "matched once after a pan"
+from "matched once after a zoom". Widening `resting` instead would have taken
+D1's wheel clause and D3's zoom-out ring with it, which is Ruling 17's mistake.
+
+**The gate this fires** is the new `the frame the pan stops on still fills what
+the composite does not cover`, in `test/tile_regime_test.dart`. It is a rig
+test and not a widget test on purpose: an uncovered cache asks `DraftCanvas`
+for another frame from a post-frame callback, so the repaint boundary is dirty
+the moment this frame ends and `captureTiled`'s `toImage` asserts on
+`!debugNeedsPaint` — and that same fact is what makes this frame reach the
+screen at all, so it cannot be arranged away. `captureTiledFrame` was added
+beside `captureLiveFrame` for it: the capture *is* the frame.
+
+**Mutation:** the bit, all three of it — the field, the write and the read:
+
+```diff
+-  bool _lastChangeWasPan = false;
+
+-    if (!cameraHeld || scaleChanged) _lastChangeWasPan = !scaleChanged;
+
+     final resting = previous == null ||
+         _carryOver == null ||
+         (!scaleChanged && _restGateSteps == 0) ||
+-        _lastChangeWasPan ||
+         _restGateSteps >= kRestGateFrames;
+```
+
+**Procedure:** as M17. `cp lib/src/tile_cache.dart /tmp/.../tile_cache.bak`,
+edit, run, restore by `cp`, `diff` to prove the restore, run again.
+
+**Result:** red, one test, and the measured ink in the strip is **literally
+zero** — not a shortfall but background, which is what the finding says the
+frame shows.
+
+**Verbatim output:**
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
+00:00 +0: the same camera compares same
+00:00 +1: a scale change compares different
+00:00 +2: a translation change compares different
+00:00 +3: the two scale terms are compared independently
+00:00 +4: the skew terms are compared too
+00:00 +5: a moving frame bakes nothing and walks nothing
+00:00 +6: a moving frame with no composite falls through and draws something
+00:00 +7: a steadily spun wheel never arms the rest gate
+00:00 +8: a pan after a zoom fills the region the composite slides off
+00:00 +9: the frame the pan stops on still fills what the composite does not cover
+00:00 +9 -1: the frame the pan stops on still fills what the composite does not cover [E]
+  Expected: a value greater than <200>
+    Actual: <0>
+     Which: is not a value greater than <200>
+  the one frame between the last pan and the rest bake must draw what the pan frames before it drew, or the strip flashes background for a frame and comes back
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/tile_regime_test.dart 357:5                    main.<fn>
+  
+00:00 +9 -1: a zoom out leaves its ring as background, the frame after the last notch included
+00:00 +10 -1: an edit inside one band rebakes that band alone
+00:00 +11 -1: a skipped band keeps its tiles out of the ceiling's reach
+00:00 +12 -1: the gate is two unchanged frames, and the constant says so
+00:00 +13 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart: the frame the pan stops on still fills what the composite does not cover
+```
+
+**The two tests that must stay green under this mutant, and did.** `a steadily
+spun wheel never arms the rest gate` (D1's two-frame clause) and the new `a
+zoom out leaves its ring as background, the frame after the last notch
+included` (D3) are both in the transcript above, both passing while the pan
+arm fails. They gate the opposite direction: a fix that widened `resting`
+enough to catch the pan tail would redden one or both.
+
+**Restore, verified.** Empty `diff` against the pre-mutation copy, and:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
+00:00 +0: the same camera compares same
+00:00 +1: a scale change compares different
+00:00 +2: a translation change compares different
+00:00 +3: the two scale terms are compared independently
+00:00 +4: the skew terms are compared too
+00:00 +5: a moving frame bakes nothing and walks nothing
+00:00 +6: a moving frame with no composite falls through and draws something
+00:00 +7: a steadily spun wheel never arms the rest gate
+00:00 +8: a pan after a zoom fills the region the composite slides off
+00:00 +9: the frame the pan stops on still fills what the composite does not cover
+00:00 +10: a zoom out leaves its ring as background, the frame after the last notch included
+00:00 +11: an edit inside one band rebakes that band alone
+00:00 +12: a skipped band keeps its tiles out of the ceiling's reach
+00:00 +13: the gate is two unchanged frames, and the constant says so
+00:00 +14: All tests passed!
+```
+
+---
+
+## M24 — a skipped band's keys are not stamped with the frame's serial — **a survivor, and the reason is arithmetic**
+
+**Fix wave D, the second Major finding.** The review is right that
+`tile_regime_test.dart`'s `a skipped band keeps its tiles out of the ceiling's
+reach` cannot fail: `pumpTiled` never sets `cacheBytes`, so the cache runs at
+`kTileCacheBytes` against ~2.1 MB of tiles and `_makeRoomForBytes` exits before
+its first iteration. The arm it asks for — a cap tight enough that the only
+remaining eviction victims are a skipped band's keys — **cannot be built**, and
+not for want of a tight enough cap. Under every cap the rest bake will run
+under, a skipped band's key can never be selected as a victim at all.
+
+**The derivation.** Write `t` for `_tileBytes`, `V` for the visible tiles held
+at the moment of a room request, `St` for the stale off-viewport tiles held.
+
+1. `_restBake` refuses to start unless `bandBytes + visibleTiles * t <=
+   cacheBytes` (`tile_cache.dart:1306`). At the harness's viewport that is
+   `13t + 130t = 143t`, and it is the smallest cap the rest bake runs under.
+2. Every room request inside the rest bake is made while a visible key is
+   still missing — `_makeRoomForBytes(bandBytes + t)` runs only when the band
+   has a missing key, `_makeRoomForOneTile()` only for a key not in `_tiles` —
+   so `V <= visibleTiles - 1`.
+3. The ceiling for `_makeRoomForBytes(bandBytes + t)` is `cacheBytes -
+   14t >= 129t`, and `liveBytes` is `(V + St) * t` there (`_band` is not yet
+   assigned, and the composite was dropped before the loop). Evictions needed:
+   `V + St - 129 <= St`. For `_makeRoomForOneTile` inside the slice loop the
+   band image is resident, and the same subtraction gives the same bound.
+4. **Every stale key's serial is strictly older than every visible key's.** A
+   key is stamped only on a frame it is visible on, and the frame that made a
+   key stale is by definition a frame whose camera changed — which resets the
+   rest gate, so no rest bake happens on it.
+
+So the demand never exceeds the stale supply, and the victim policy is
+oldest-first: `_makeRoomForBytes` takes stale keys and stops before it reaches
+any visible key, skipped band or otherwise. The stamp is unobservable through
+`viewportCovered`, `evictionCount`, `liveTileCount` or `liveBytes` — and by the
+end of the frame every visible key carries the serial anyway, because the tile
+loop stamps each one it blits.
+
+**Mutation:** the three lines the review names:
+
+```diff
+       if (!bandMissing) {
+-        for (final key in band.keys) {
+-          _lastUsedFrame[key] = _frameSerial;
+-        }
+         continue;
+       }
+```
+
+**Procedure:** as M23, plus a scratch probe built to be the arm and run under
+both variants. The probe is `bandCrossingGrid` settled from bands, then *n*
+pans of exactly one tile (64 device pixels, so the visible key count stays 130
+and the pricing minimum stays `143t`), each settled — which leaves 10 stale
+keys per pan and nothing else — then `cacheBytes = 143 * 16384 = 2342912`, then
+`moveOneEntityWithinOneBand` and a settle. That is the tightest legal cap with
+a real eviction load inside a rest bake that skips nine of its ten bands. It
+was **not landed**: it distinguishes nothing, and a test that cannot fail is
+the finding it was written to close.
+
+**Result: survives.** Identical numbers under both variants, to the byte.
+
+Before the mutation:
+
+```
+PROBE pans=0 held=130 afterCap=130 bytesAfterCap=2129920 evictionsDuringEdit=0 liveTiles=130 covered=true liveDraws=2 bakes=142 liveBytes=2129920 cap=2342912
+PROBE pans=1 held=140 afterCap=140 bytesAfterCap=2293760 evictionsDuringEdit=0 liveTiles=137 covered=true liveDraws=2 bakes=185 liveBytes=2244608 cap=2342912
+PROBE pans=3 held=160 afterCap=160 bytesAfterCap=2621440 evictionsDuringEdit=8 liveTiles=143 covered=true liveDraws=2 bakes=199 liveBytes=2342912 cap=2342912
+PROBE pans=6 held=190 afterCap=190 bytesAfterCap=3112960 evictionsDuringEdit=29 liveTiles=143 covered=true liveDraws=2 bakes=220 liveBytes=2342912 cap=2342912
+00:00 +4: All tests passed!
+```
+
+After it:
+
+```
+PROBE pans=0 held=130 afterCap=130 bytesAfterCap=2129920 evictionsDuringEdit=0 liveTiles=130 covered=true liveDraws=2 bakes=142 liveBytes=2129920 cap=2342912
+PROBE pans=1 held=140 afterCap=140 bytesAfterCap=2293760 evictionsDuringEdit=0 liveTiles=137 covered=true liveDraws=2 bakes=185 liveBytes=2244608 cap=2342912
+PROBE pans=3 held=160 afterCap=160 bytesAfterCap=2621440 evictionsDuringEdit=8 liveTiles=143 covered=true liveDraws=2 bakes=199 liveBytes=2342912 cap=2342912
+PROBE pans=6 held=190 afterCap=190 bytesAfterCap=3112960 evictionsDuringEdit=29 liveTiles=143 covered=true liveDraws=2 bakes=220 liveBytes=2342912 cap=2342912
+00:00 +4: All tests passed!
+```
+
+The `pans=3` and `pans=6` rows are the ones that matter: 8 and 29 evictions
+happen *during* the edit frame, at a `liveBytes` that lands exactly on the cap,
+with nine bands skipped — and the coverage, the tile count and the eviction
+count are the same with the stamp and without it. Clause 4 above is why: those
+victims are stale keys, and the demand stopped before the visible set.
+
+The whole package suite also stays green under the mutation — 413 passing, 1
+skipped, the same as with it.
+
+**Restore, verified.** Empty `diff` against the pre-mutation copy, and the
+package suite green again (the gate transcript in the fix-wave report).
+
+**What was done instead of the arm.** The production stamp stays: it is what
+the ceiling proof cites, and it costs one map write per key of a skipped band.
+The test's comment was rewritten to say what it actually gates — that a skipped
+band's tiles are still standing and still blitted afterwards — and to record
+that the stamp itself is unobservable, with the derivation and a pointer here.
+Gating it would need an instrument that can see intra-frame victim selection,
+which is a production seam, and the brief for this wave forbids adding one for
+it.
+
+**A second thing the derivation settles**, recorded because the review's arm
+was framed around it: a hole left by such an eviction would not be a blank
+region even if one could be produced. A missing key becomes part of `uncovered`
+and the live fallback draws it — correct pixels at a cost — and the one path
+that would show background instead, `carryOverCovers` returning early, is
+unreachable here: a frame that skips a band holds tiles from a previous fill,
+and a standing composite implies a scale change, which disposes every tile. So
+`viewportCovered` was never the observable this proof needed.
