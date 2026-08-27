@@ -999,3 +999,105 @@ whole package suite with `CI=true flutter test`, then restored from the copy.
 ```
 00:06 +399 ~1: All tests passed!
 ```
+
+---
+
+## M5 — the sliced tile is never given the band's `_baked` record
+
+**Task 10.** `_invalidateTouched` condemns tiles by iterating `_baked` in both
+directions: what a handle *was* baked into, and what its new geometry
+*reaches*. A tile sliced out of a band shares one `Uint32List` record with
+every other tile the band cut, written by `_baked[key] = record;` inside the
+slice loop. Deleting that one line leaves every sliced tile absent from
+`_baked` entirely — invisible to both directions of invalidation — while the
+tile's pixels stay resident and keep blitting.
+
+**Fixture note.** The test drives its first settle through
+`settleFromBands`, not a plain `settle`. Measured directly: at this harness's
+budget (`kBakeBudgetDevicePixels`, 64 tiles of 64 device pixels per frame) a
+plain `settle` over `bandCrossingGrid` bakes 128 of the viewport's 130 tiles
+through the ordinary per-tile `_bake` path across its first two frames, before
+the rest gate ever arms, and slices only the 2 tiles the rest bake finds
+missing — confirmed by instrumenting `debugOnSliceForTest` on a throwaway
+probe (`plain settle: liveTileCount=130 slices=2`; `settleFromBands:
+liveTileCount=130 slices=130`). `kMovableHandle`'s resting tile (column 2, row
+4) is nowhere near that bottom-right corner, so a test built on a plain
+`settle` exercises the ordinary `_bake` path's own (separate) `_baked[key] =
+...` write and never reaches the line this mutant deletes — the mutation
+would survive for a reason unconnected to the code under test. `settleFromBands`
+forces a table edit that drops every tile at the same, unmoved camera, so the
+next frame's rest bake slices the whole viewport (130 of 130, asserted in the
+test as `slices == tilesBefore`), and `kMovableHandle`'s tile is necessarily
+among them.
+
+**Mutation:**
+
+```diff
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -1209,7 +1209,7 @@
+         if (!_makeRoomForOneTile()) break;
+         final tile = _sliceTile(image, band, key, grid);
+         _tiles[key] = tile;
+-        _baked[key] = record;
++        // M5, deliberately absent: _baked[key] = record;
+         _lastUsedFrame[key] = _frameSerial;
+       }
+       _band = null;
+```
+
+**Procedure:** copied `tile_cache.dart` aside to
+`/private/tmp/claude-501/-Users-ahmeturel-Projects-oss-jet-cad/d5e851c1-248d-41da-b1c1-19632c9b5179/scratchpad/tile_cache.green.dart`,
+applied the edit, ran `CI=true flutter test test/tile_invalidation_test.dart`,
+then restored from the copy and diffed to confirm the restore was exact.
+**Never `git checkout`.**
+
+**Result:** red, as expected — and red for the intended reason: the movable
+entity is unfindable in the settled cache at all, because its tile carries no
+`_baked` record for anything.
+
+**Verbatim output:**
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart
+00:00 +0: criterion 5: a leaf edit invalidates its own tiles and no others
+00:00 +1: criterion 5: a dragged instance drops the tiles it left
+00:00 +2: criterion 5: a dragged group leaves no ghost either
+00:00 +3: criterion 6: a group and an instance nested inside a definition
+00:00 +4: criterion 5: the undo of an instance transform invalidates both ends
+00:00 +5: criterion 6: a definition edit drops the generation, and less does not
+00:00 +6: criterion 9: all five change arms, none omitted
+00:00 +7: criterion 9: a load starts a new generation, an edit does not
+00:00 +8: criterion 5 / gap G6: a stroke reaching into a tile its geometry misses invalidates it
+00:00 +9: criterion 7: a layer edit repaints and drops the generation
+00:00 +10: an edit after a sliced settle condemns the sliced tiles
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: non-empty
+  Actual: Set:[]
+the movable entity must be findable in the settled cache
+
+When the exception was thrown, this was the stack:
+#4      main.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart:690:5)
+<asynchronous suspension>
+#5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+This was caught by the test expectation on the following line:
+  file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart line 690
+The test description was:
+  an edit after a sliced settle condemns the sliced tiles
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:00 +10 -1: an edit after a sliced settle condemns the sliced tiles [E]
+  Test failed. See exception logs above.
+  The test description was: an edit after a sliced settle condemns the sliced tiles
+  
+00:00 +10 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart: an edit after a sliced settle condemns the sliced tiles
+```

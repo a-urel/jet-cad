@@ -32,6 +32,7 @@ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
 import 'support/fixtures.dart';
 import 'support/tile_comparison.dart';
 import 'support/tile_fixture.dart';
+import 'support/tile_harness.dart';
 
 /// A root leaf on the left, and a definition placed twice: once on the left,
 /// once far to the right.
@@ -638,6 +639,74 @@ void main() {
     expect(cache.invalidationCount, invalidationsBefore + tilesBefore,
         reason: 'every tile baked before the edit was drawn against the old '
             'layer table and must have been thrown away');
+  });
+
+  // Criterion 10. `_invalidateTouched` condemns tiles by iterating `_baked`
+  // in both directions -- see this file's own header -- and a *sliced* tile
+  // has no record of its own unless the rest bake shares one band-wide record
+  // across every tile it cuts. A tile with no record is invisible to both
+  // directions: edit an entity after a settle and the stale tile keeps
+  // blitting over the corrected drawing, with `invalidationCount` reading
+  // zero. M5 is exactly that mutation -- deleting `_baked[key] = record;` in
+  // `_restBake`.
+  testWidgets('an edit after a sliced settle condemns the sliced tiles',
+      (t) async {
+    final h = await pumpTiled(t, document: bandCrossingGrid);
+    // **`settle` alone is not enough, and this is measured rather than
+    // assumed.** At this harness's budget (`kBakeBudgetDevicePixels`, 64
+    // tiles of 64 device pixels each) the ordinary per-tile loop bakes all
+    // but two of the viewport's 130 tiles across the first two frames, before
+    // the rest gate ever arms -- `settleFromBands`'s own doc comment says so,
+    // and a probe run confirmed it: a plain `settle` here slices exactly 2 of
+    // 130 tiles, in the bottom-right corner, nowhere near `kMovableHandle`'s
+    // resting tile at column 2, row 4. A test built on a plain `settle` would
+    // pass with `_baked[key] = record;` deleted for no reason connected to
+    // the code under test -- M5 would survive silently. `settleFromBands`
+    // forces a table edit that drops every tile at the same, unmoved camera,
+    // so the very next frame's rest bake slices the *whole* viewport -- 130
+    // of 130, asserted below -- and `kMovableHandle`'s tile is necessarily
+    // among them.
+    final slices = await settleFromBands(t, h);
+    final tilesBefore = h.cache.liveTileCount;
+    expect(tilesBefore, greaterThan(0),
+        reason: 'not vacuous: there must be tiles to condemn');
+    expect(slices, tilesBefore,
+        reason: 'every visible tile must have come from the band-sliced '
+            'path, or the movable entity might be sitting on one that '
+            "did not -- exactly the gap `settle` alone leaves");
+    final invalidationsBefore = h.cache.invalidationCount;
+
+    // The fixture guard, exactly as every test above states it: the old and
+    // new tile sets must be disjoint, or direction one and direction two
+    // cannot be told apart and deleting either goes unnoticed. `oldTiles` is
+    // the harness's own settled record -- the tiles the sliced band bake
+    // actually wrote `kMovableHandle` into; `newTiles` is a fresh oracle's
+    // answer for where the document's edited state paints it, exactly the
+    // way `tilesFor` above answers direction two for the unsliced tests. See
+    // `bandCrossingGrid`'s and `moveOneEntityOntoDisjointTiles`'s doc
+    // comments for the arithmetic: tile column 2, row 4 against tile column
+    // 9, row 1, seven columns and three rows clear.
+    final oldTiles = h.cache.tilesHolding(kMovableHandle).toSet();
+    expect(oldTiles, isNotEmpty,
+        reason: 'the movable entity must be findable in the settled cache');
+
+    h.moveOneEntityOntoDisjointTiles();
+    final newTiles = tilesFor(h.document, kMovableHandle).toSet();
+    expect(newTiles, isNotEmpty);
+    expect(newTiles.intersection(oldTiles), isEmpty,
+        reason: 'fixture guard: unless the edit lands the entity on tiles it '
+            'did not occupy, direction one and direction two cannot be told '
+            'apart and deleting either goes unnoticed');
+
+    await t.pump();
+
+    expect(h.cache.invalidationCount, greaterThan(invalidationsBefore),
+        reason: 'sliced tiles carry the band record, so the edit reaches them');
+    await settle(t, h);
+    expect(
+        differingPixels(await captureTiled(t, h), await captureLive(t, h)), 0,
+        reason: 'and the drawing is correct afterwards, which is the half a '
+            'counter alone cannot show');
   });
 }
 

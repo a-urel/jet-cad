@@ -435,5 +435,32 @@ DraftDocument bandCrossingGrid(FlutterTextMeasurer measurer) {
     addLine(doc, doc.rootHandle, Handle(handle++), x, -52, x, 300,
         lineweight: kBandStrokeLineweight);
   }
+
+  // [kMovableHandle]'s resting position, for Task 10's edit-after-a-settle
+  // test. A group, not a bare leaf: `TransformNodeCommand` only accepts a
+  // node handle (`commands.dart:292`, `target.tree[handle]`), and only a
+  // group or an instance is one.
+  //
+  // Screen (80, 144), through the same inversion as the boundary strokes
+  // above: tile column 2 spans device x [128, 192) -- logical [64, 96) -- and
+  // row 4 spans device y [256, 320) -- logical [128, 160). 80 and 144 sit 16
+  // and 16 logical pixels inside those ranges respectively, comfortably clear
+  // of [kTileSlack]'s one-tile ring. The leaf's local (0, 0)-(6, 6) diagonal
+  // moves the far endpoint to screen (88.4, 135.6) -- still inside the same
+  // tile -- so the whole entity rests in one place:
+  // [TiledHarness.moveOneEntityOntoDisjointTiles] moves it to tile column 9,
+  // row 1, seven columns and three rows clear.
+  addGroup(doc, doc.rootHandle, kMovableHandle,
+      Transform2(1, 0, 0, 1, worldX(80), worldY(144)));
+  addLine(doc, kMovableHandle, Handle(handle++), 0, 0, 6, 6);
   return doc;
 }
+
+/// The node [TiledHarness.moveOneEntityOntoDisjointTiles] moves, and
+/// [bandCrossingGrid]'s doc comment for its resting position and the
+/// arithmetic behind the move.
+///
+/// A [GroupNode] handle, deliberately: `TransformNodeCommand.apply`
+/// (`commands.dart:292-300`) accepts only a node already in
+/// `DraftDocument.tree`, and a leaf entity is not one.
+const Handle kMovableHandle = Handle(1100);

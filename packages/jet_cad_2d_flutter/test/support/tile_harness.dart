@@ -27,6 +27,33 @@ class TiledHarness {
   /// there would compare two frames drawn from two different trees, and a
   /// query-order difference between them would read as a tiling defect.
   final SpatialIndex index;
+
+  /// Moves [kMovableHandle] onto tiles it did not occupy, for Task 10's
+  /// edit-after-a-settle test.
+  ///
+  /// **Onto disjoint tiles, not merely somewhere else.** An edit that extends
+  /// a line rather than moving it makes the new tile set a superset of the
+  /// old one, and then "the old position was condemned" is true of an
+  /// implementation that condemns nothing -- the trap
+  /// `tile_invalidation_test.dart` documents at its own head.
+  ///
+  /// `TransformNodeCommand` **replaces** the node's transform rather than
+  /// composing with it, so the destination below is an absolute world point,
+  /// not an offset from wherever [kMovableHandle] happens to rest. Screen
+  /// (300, 48), through [tileCamera]'s own inversion (`sx = 1.4 wx - 37`,
+  /// `sy = -1.4 wy + 323`): tile column 9 spans device x [576, 640) -- logical
+  /// [288, 320) -- and row 1 spans device y [64, 128) -- logical [32, 64).
+  /// [bandCrossingGrid]'s doc comment places [kMovableHandle]'s resting
+  /// position at tile column 2, row 4 -- seven columns and three rows clear
+  /// of this destination, far outside [kTileSlack]'s one-tile ring, so the
+  /// two tile sets are disjoint by construction and the test only has to
+  /// confirm it.
+  void moveOneEntityOntoDisjointTiles() {
+    double worldX(double screenX) => (screenX + 37.0) / 1.4;
+    double worldY(double screenY) => (323.0 - screenY) / 1.4;
+    document.commands.execute(TransformNodeCommand(
+        kMovableHandle, Transform2(1, 0, 0, 1, worldX(300), worldY(48))));
+  }
 }
 
 /// Pumps a tiled canvas over `fillingGrid`, which inks every tile of
