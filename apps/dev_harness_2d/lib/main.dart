@@ -281,6 +281,35 @@ final int kZoomArms = _intDefine(
     'ZOOM_ARMS', const String.fromEnvironment('ZOOM_ARMS'), 0,
     minimum: 0);
 
+/// What [kZoomArms] repeats of the zoom phase are *for*.
+///
+/// - `plain` -- one configuration, repeated. Criterion 2's p95 and nothing
+///   else. **No flag is flipped**, so these are not criterion 4's or
+///   criterion 8's arms, and the transcript says so on every line.
+/// - `criterion4` -- the rest bake against `debugRestBakeDisabled`,
+///   interleaved.
+/// - `criterion8` -- the narrowed band query against `debugFullViewportQuery`
+///   (Plan **3h**'s M4), interleaved.
+///
+/// **A `String.fromEnvironment` with an explicit throw**, the rule [kBackend]
+/// and [kTilePx] already follow and that Plan 3c lost a full device run to by
+/// not following: a define that silently falls back to its default writes one
+/// run into the table under a heading the command line claimed and the run did
+/// not use. `ZOOM_MODE=criterion_4` must stop the session, not quietly measure
+/// nine repetitions of one arm.
+enum ZoomMode { plain, criterion4, criterion8 }
+
+ZoomMode parseZoomMode(String raw) => switch (raw) {
+      'plain' => ZoomMode.plain,
+      'criterion4' => ZoomMode.criterion4,
+      'criterion8' => ZoomMode.criterion8,
+      final other => throw StateError(
+          'ZOOM_MODE must be plain, criterion4 or criterion8; got "$other"'),
+    };
+
+final ZoomMode kZoomMode = parseZoomMode(
+    const String.fromEnvironment('ZOOM_MODE', defaultValue: 'plain'));
+
 /// The one measurer the harness document is built with, reachable from
 /// `_HarnessState.dispose` so the native paragraphs it holds are released.
 ///
@@ -522,23 +551,72 @@ Future<void> _driveR2(
   // pinned script, each starting fresh from the same fitted camera `runR2Rig`
   // itself started from, so this arm and Plan 3h's tile-pan arm inside
   // `runR2Rig` describe the same starting state. Off by default -- see
-  // [kZoomArms].
+  // [kZoomArms]. What the repeats are *for* is [kZoomMode].
   if (tileCache != null && kZoomArms > 0) {
     // The pinned reference viewport (§5), not `viewport` above -- see
     // `runTileZoomPhase`'s doc comment for what a differently sized real
     // window means for these numbers.
     const zoomViewport = Size(1600, 1200);
     warnIfZoomViewportMismatch(viewport, zoomViewport);
-    for (var arm = 0; arm < kZoomArms; arm++) {
+
+    // One arm: back to the fitted camera, then the whole pinned script. The
+    // camera reset is here rather than inside the phase because the arms of a
+    // ratio must start from the same camera, and the phase does not own it.
+    Future<ZoomReport> runArm() async {
       camera.value = fittedCamera;
       await _pumpFrame();
-      final zoomReport = await runTileZoomPhase(
+      return runTileZoomPhase(
         camera: camera,
         cache: tileCache,
         pumpFrame: _pumpFrame,
         viewport: zoomViewport,
       );
-      printZoomReport('R2 tile zoom arm $arm ($kEntities)', zoomReport);
+    }
+
+    switch (kZoomMode) {
+      // **Relabelled rather than refused.** Repeats of one configuration are a
+      // real capability -- criterion 2 is a p95 over gesture frames and wants
+      // repeats, not arms -- so refusing here would remove a measurement to
+      // prevent a mislabelling. What made the old output dangerous was that it
+      // printed `arm 0..8` with no flag flipped and nothing naming which arm
+      // was which: the exact shape and labelling of the n=9 interleaved
+      // transcript criteria 4 and 8 call for, with every ratio reading 1.00.
+      // The word "arm" is gone, every line says which flag state it ran at,
+      // and the heading below says what this mode is not.
+      case ZoomMode.plain:
+        print('R2 tile zoom: ZOOM_MODE=plain -- $kZoomArms repeats of the '
+            'pinned script in ONE configuration (no measurement flag '
+            'flipped). This is criterion 2 only. It is NOT criterion 4 or '
+            'criterion 8: those need two arms interleaved, and are '
+            'ZOOM_MODE=criterion4 and ZOOM_MODE=criterion8.');
+        for (var repeat = 0; repeat < kZoomArms; repeat++) {
+          printZoomReport(
+              zoomPlainLabel(
+                  repeat: repeat, repeats: kZoomArms, entities: kEntities),
+              await runArm());
+        }
+      case ZoomMode.criterion4:
+        print('R2 tile zoom: ZOOM_MODE=criterion4 -- $kZoomArms repeats of '
+            "arm A then arm B, interleaved, in one session. Criterion 4's "
+            'ratio is settleWallMs(arm B) / settleWallMs(arm A), per arm.');
+        await runZoomCriterionArms(
+          criterion: ZoomCriterion.four,
+          repeats: kZoomArms,
+          entities: kEntities,
+          cache: tileCache,
+          runArm: runArm,
+        );
+      case ZoomMode.criterion8:
+        print('R2 tile zoom: ZOOM_MODE=criterion8 -- $kZoomArms repeats of '
+            "arm A then arm B, interleaved, in one session. Arm B is Plan "
+            "3h's M4 as a runtime flag, not this plan's M4.");
+        await runZoomCriterionArms(
+          criterion: ZoomCriterion.eight,
+          repeats: kZoomArms,
+          entities: kEntities,
+          cache: tileCache,
+          runArm: runArm,
+        );
     }
   }
   print('R2 app-run: done');

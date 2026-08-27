@@ -1214,3 +1214,184 @@ Future<void> runInterleaved({
     await tiled();
   }
 }
+
+/// One arm of an interleaved zoom measurement: which criterion it belongs to,
+/// which side of that criterion's ratio it is, and the runtime flag that makes
+/// it that side.
+///
+/// **An arm is a whole configuration, not a flag.** [applyTo] writes *both*
+/// measurement flags on every arm, so an arm's label describes the cache
+/// completely and no leftover from a previous criterion's run can sit under a
+/// label that does not mention it.
+enum ZoomArm {
+  /// Criterion 4's numerator: the rest bake this plan added.
+  restBakeOn(
+    criterion: 4,
+    side: 'A',
+    flag: 'debugRestBakeDisabled=false',
+    description: "rest bake ON -- criterion 4's numerator",
+  ),
+
+  /// Criterion 4's denominator: "today's behaviour with the rest bake
+  /// disabled", which is the tiled fill the rest bake replaces.
+  restBakeOff(
+    criterion: 4,
+    side: 'B',
+    flag: 'debugRestBakeDisabled=true',
+    description: "rest bake OFF -- criterion 4's denominator, the tiled fill",
+  ),
+
+  /// Criterion 8's numerator: the narrowed band query.
+  narrowQuery(
+    criterion: 8,
+    side: 'A',
+    flag: 'debugFullViewportQuery=false',
+    description: "narrow band query -- criterion 8's numerator",
+  ),
+
+  /// Criterion 8's denominator, which is **Plan 3h's M4** and not this plan's:
+  /// mutant numbering is per-plan and M4/M5 collide between the two logs, so
+  /// the label says whose M4 it is.
+  fullViewportQuery(
+    criterion: 8,
+    side: 'B',
+    flag: 'debugFullViewportQuery=true',
+    description: "full-viewport query (Plan 3h's M4) -- criterion 8's "
+        'denominator',
+  );
+
+  const ZoomArm({
+    required this.criterion,
+    required this.side,
+    required this.flag,
+    required this.description,
+  });
+
+  /// Which numbered criterion in design spec §4 this arm belongs to.
+  final int criterion;
+
+  /// `A` for the criterion's numerator, `B` for its denominator.
+  final String side;
+
+  /// The flag state that defines this arm, printed verbatim in its label so a
+  /// reader never has to infer which switch was flipped.
+  final String flag;
+
+  /// What the arm is, in the criterion's own words.
+  final String description;
+
+  /// Puts [cache] into this arm's configuration.
+  ///
+  /// **No generation reset, deliberately.** A zoom round trip leaves no warm
+  /// tiles: the excursion's first zoom frame already fails
+  /// `TileGrid.matchesScale`, the generation is retired and its tiles disposed,
+  /// and the trip lands on scale `1.4000000000000017` rather than `1.4`. That
+  /// was settled by test rather than by argument -- see
+  /// `tile_zoom_warmth_test.dart` in `jet_cad_2d_flutter` -- so each arm
+  /// genuinely re-bakes and neither arm's settle is trivially covered. Only
+  /// the flags are written here.
+  void applyTo(TileCache cache) {
+    cache.debugRestBakeDisabled = this == ZoomArm.restBakeOff;
+    cache.debugFullViewportQuery = this == ZoomArm.fullViewportQuery;
+  }
+}
+
+/// A criterion measured as a ratio between two interleaved [ZoomArm]s.
+enum ZoomCriterion {
+  /// Criterion 4: rest-bake wall clock against the tiled fill it replaces.
+  four(numerator: ZoomArm.restBakeOn, denominator: ZoomArm.restBakeOff),
+
+  /// Criterion 8: Plan 3h's criterion 3, re-measured at n=7-9 interleaved.
+  eight(numerator: ZoomArm.narrowQuery, denominator: ZoomArm.fullViewportQuery);
+
+  const ZoomCriterion({required this.numerator, required this.denominator});
+
+  final ZoomArm numerator;
+  final ZoomArm denominator;
+}
+
+/// The label every line of an arm's report is printed under.
+///
+/// It names the criterion, the repeat, the side of the ratio, the exact flag
+/// state and the entity count -- everything a reader needs to attribute the
+/// numbers without reading the source that produced them. A transcript a
+/// reader cannot attribute is the failure mode this measurement has already
+/// been bitten by: nine repetitions of one arm, printed as `arm 0..8`, with
+/// nothing naming which arm was which and every ratio reading 1.00.
+String zoomArmLabel(
+  ZoomArm arm, {
+  required int repeat,
+  required int repeats,
+  required int entities,
+}) =>
+    'R2 tile zoom c${arm.criterion} repeat ${repeat + 1}/$repeats '
+    'arm ${arm.side} [${arm.flag}] ${arm.description} ($entities)';
+
+/// The label a repeat of the **plain** zoom mode prints under: one
+/// configuration, repeated, with no measurement flag flipped.
+///
+/// **It must not be mistakable for [zoomArmLabel]'s output.** The word "arm"
+/// appears only in the phrase that denies it, both flag states are printed
+/// even though neither was flipped, and the criterion named is 2. What this
+/// replaces printed `R2 tile zoom arm 0..8` -- the shape and the labelling of
+/// the n=9 interleaved transcript criteria 4 and 8 call for, produced by a run
+/// in which no flag was ever flipped and every ratio would read 1.00.
+String zoomPlainLabel({
+  required int repeat,
+  required int repeats,
+  required int entities,
+}) =>
+    'R2 tile zoom plain repeat ${repeat + 1}/$repeats '
+    '[debugRestBakeDisabled=false debugFullViewportQuery=false] '
+    'criterion 2 only, NOT an interleaved arm ($entities)';
+
+/// Drives [criterion]'s two arms, [repeats] times, alternating them and
+/// flipping the flag that makes each arm the arm its label names.
+///
+/// This is the *arrangement* design spec §4 pins as part of criterion 4 and
+/// criterion 8: same session, interleaved, never blocked, and every arm's
+/// number reported rather than only the aggregate. [runInterleaved] owns the
+/// ordering; this owns the configuration and the labelling.
+///
+/// [runArm] runs one whole zoom phase and returns its report -- it is
+/// responsible for restoring the camera to the fitted state first, because
+/// the arms of a ratio must start from the same camera. [emit] is
+/// [printZoomReport] in production and a recorder in tests.
+///
+/// The flags are restored to their defaults when the run ends, however it
+/// ends: a later phase in the same session must not inherit a measurement
+/// switch. The cache's *generations* are deliberately left alone -- see
+/// [ZoomArm.applyTo].
+Future<void> runZoomCriterionArms({
+  required ZoomCriterion criterion,
+  required int repeats,
+  required int entities,
+  required TileCache cache,
+  required Future<ZoomReport> Function() runArm,
+  void Function(String label, ZoomReport report) emit = printZoomReport,
+}) async {
+  var repeat = 0;
+  try {
+    await runInterleaved(
+      arms: repeats,
+      rest: () async {
+        final arm = criterion.numerator;
+        arm.applyTo(cache);
+        final label = zoomArmLabel(arm,
+            repeat: repeat, repeats: repeats, entities: entities);
+        emit(label, await runArm());
+      },
+      tiled: () async {
+        final arm = criterion.denominator;
+        arm.applyTo(cache);
+        final label = zoomArmLabel(arm,
+            repeat: repeat, repeats: repeats, entities: entities);
+        emit(label, await runArm());
+        repeat++;
+      },
+    );
+  } finally {
+    cache.debugRestBakeDisabled = false;
+    cache.debugFullViewportQuery = false;
+  }
+}
