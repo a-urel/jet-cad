@@ -1411,3 +1411,120 @@ that is what makes the flag M4 rather than M5, and it is held by the source
 ...)` is on the line above it) and by the flag's own doc comment, not by a
 test. A future edit that widened the clip under the flag would keep this test
 green while publishing an "M4" arm that is not M4.
+
+---
+
+## M15 — a retired generation keeps its tiles
+
+**Task:** the criterion 4 warmth investigation. Gates
+`test/tile_zoom_warmth_test.dart`'s `'a zoom round trip leaves the next arm
+nothing warm to settle on'`.
+
+**Why this mutant.** Criterion 4 runs two arms of `runTileZoomPhase` against
+**one** `TileCache`, and each arm's script is symmetric: `kZoomSteps` steps at
+`kZoomFactor` then the same number at `1 / kZoomFactor`, ending arithmetically
+where it began. If a settled generation could survive an arm's gesture, the
+next arm's settle would find the viewport already covered and report its
+`settleFrames` **trivially**, in both arms, whatever the flag between them
+did — the ratio would read cache warmth rather than the rest bake, and be
+published as if it were the effect. That is exactly the degenerate fixture
+`CLAUDE.md` names as this codebase's dominant failure mode, and M15 is that
+failure applied on purpose: the one line that makes a retired generation
+actually go away.
+
+**Mutation**, applied to
+`packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`:
+
+```diff
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -1577,7 +1577,7 @@
+       picture.dispose();
+     }
+-    _disposeTiles();
++    // M15: _disposeTiles();
+   }
+```
+
+**Procedure:** copied `tile_cache.dart` aside to the scratchpad
+(`tile_cache_m15.bak`), edited the working file, ran
+`CI=true flutter test test/tile_zoom_warmth_test.dart`, confirmed red, then
+restored the working file with `cp` from the scratchpad copy and confirmed
+`diff` produced no output. **Never `git checkout`.**
+
+**Result:** red at the first frame of the first arm's excursion, on
+`liveTileCount`. Correct code reads **0** there — one 3% zoom step is enough
+to fail `TileGrid.matchesScale`, so `_gridFor` retires the generation and
+`_retireGeneration` disposes its tiles — while under M15 all **130** tiles of
+the settled generation are still live. That is the leftover warmth the
+concern described, made real; the assertion that catches it is the one the
+whole file exists for.
+
+The assertion order matters and is deliberate: the test could have been
+written to check only the second arm's `settleFrames`, and it does check that
+too, but the *first frame of the first arm* is the only place where a single
+scale step has to have been sufficient. By the end of an 80-frame excursion
+"no tiles" is over-determined.
+
+**Verbatim output** (the `flutter pub get` preamble, identical to every other
+entry in this file, is trimmed):
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_zoom_warmth_test.dart
+00:00 +0: a zoom round trip leaves the next arm nothing warm to settle on
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <130>
+retiring the generation disposes its tiles -- the warm set the previous settle left behind cannot
+survive into this arm
+
+When the exception was thrown, this was the stack:
+#4      main.runArm (file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_zoom_warmth_test.dart:109:9)
+<asynchronous suspension>
+#5      main.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_zoom_warmth_test.dart:164:18)
+<asynchronous suspension>
+#6      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#7      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+This was caught by the test expectation on the following line:
+  file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_zoom_warmth_test.dart line 109
+The test description was:
+  a zoom round trip leaves the next arm nothing warm to settle on
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:00 +0 -1: a zoom round trip leaves the next arm nothing warm to settle on [E]
+  Test failed. See exception logs above.
+  The test description was: a zoom round trip leaves the next arm nothing warm to settle on
+  
+00:00 +0 -1: the zoom round trip does not return to the starting scale
+00:00 +1 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_zoom_warmth_test.dart: a zoom round trip leaves the next arm nothing warm to settle on
+```
+
+**Restore, verified.** `cp` from the scratchpad copy, `diff` against it empty,
+`git status --porcelain` showing only this task's own new test file, and the
+file re-run green:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_zoom_warmth_test.dart
+00:00 +0: a zoom round trip leaves the next arm nothing warm to settle on
+00:00 +1: the zoom round trip does not return to the starting scale
+00:00 +2: All tests passed!
+```
+
+**The second, independent reason, which M15 does not touch.** The file's other
+test pins that the round trip does not return to the starting camera at all:
+`zoomAt` composes `about * m`, which for an unskewed camera is a scalar
+multiply of the scale term once per step, so 40 multiplies by `1.03` followed
+by 40 by `1 / 1.03` take **1.4 to 1.4000000000000017**, and `matchesScale` —
+like every stored-value comparison in `tile_cache.dart` — is exact `==`. That
+test is killed by a different mutant (`matchesScale` comparing with a
+`Tolerance` instead of `==`), not by M15, and it is deliberately kept separate:
+under M15 it stays green, which is what shows the two reasons are independent
+rather than one reason asserted twice.
