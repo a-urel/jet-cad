@@ -1,9 +1,9 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-26
-**Verified against:** `main` at `122b6e3` — Plan 3h's fixture widening and
-full mutant re-measurement, the last code commit before this file's own
-record-only correction commit. **Plan 3h ran directly on `main`,
+**Verified against:** `main` at `967fa3b` — the tile-settle fix, landed after
+Plan 3h from looking at the running window rather than from any plan. Plan 3h
+itself ends at `122b6e3`. **Plan 3h ran directly on `main`,
 `f642202..122b6e3`, eight tasks (the eighth split into 8a and 8b), nothing in
 flight** — no worktree, on the human's standing consent, the same as Plans
 3e, 3f, 3f.1 and 3g. The tree is clean apart from the three files the traps
@@ -414,17 +414,22 @@ real and large but is offered as evidence, not a gate. Read the full account,
 including where each of the six mutants died and gaps H1–H7, at
 [Plan 3h](#plan-3h--the-fallback-walk-and-its-instrument).
 
-**A resumer's ledger chore:** Plan 3g's ledger is already archived at
-[docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/](docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/).
-Plan 3h had no worktree, so its own
-`.superpowers/sdd/2026-08-25-jet-cad-2d-plan-3h-pan-frame/` material is **not
-yet archived** to `docs/superpowers/ledgers/` — the one ledger chore now
-outstanding. Do that before clearing it — the ordering is the lesson every
-prior archive note in this file records: archive onto the branch before the
-workspace is deleted, never after.
+~~**A resumer's ledger chore:** Plan 3h's `.superpowers/sdd/` material is not
+yet archived.~~ **Done**, at
+[docs/superpowers/ledgers/2026-08-25-jet-cad-2d-plan-3h-pan-frame/](docs/superpowers/ledgers/2026-08-25-jet-cad-2d-plan-3h-pan-frame/),
+with 3g's and 3f.1's beside it. The git-ignored workspace is gone. **No ledger
+chore is outstanding.** The ordering is still the lesson every archive note in
+this file records: archive onto the branch before the workspace is deleted,
+never after.
 
-**Next: Plan 3i and Plan 3j — Plan 3h did not choose an order between them,
-and each is independent of the other.**
+**Since Plan 3h, four findings came out of running the harness by hand** —
+two fixed (`fc05076`, `967fa3b`), two measured and deliberately left for 3i.
+Read them before writing 3i's spec:
+[After Plan 3h](#after-plan-3h--what-the-window-showed-2026-08-26).
+
+**Next: Plan 3i, then Plan 3j.** Plan 3h did not choose an order and each is
+independent of the other; **the human chose 3i on 2026-08-26**, after the
+zoom measurements below landed in its scope.
 
 1. **Plan 3i — zoom, G3, and level-of-detail geometry**, assigned by Plan 3g
    and confirmed here (2026-08-25's memory measurement showed zoom's cost is
@@ -437,7 +442,10 @@ and each is independent of the other.**
    adds one more thing for 3i to carry**: settling criterion 3 needs
    re-measuring at **n=7–9, interleaved (narrow, M4, narrow, M4, …), not
    blocked (three-then-three)** — the only arrangement that removes the
-   thermal/session-drift ordering bias this task's own numbers show.
+   thermal/session-drift ordering bias this task's own numbers show. **And
+   2026-08-26 adds the zoom *gesture* path to 3i's scope**, measured rather
+   than assumed — see
+   [After Plan 3h](#after-plan-3h--what-the-window-showed-2026-08-26) below.
 2. **Plan 3j — the 192 MiB vertex buffer.** `debugCapacityVertices` reads
    **16,777,216 vertices, 192.00 MiB, in all five configurations measured**:
    50,000 and 500,000 entities, tiles on and off. **Tiles change nothing, so
@@ -449,6 +457,103 @@ and each is independent of the other.**
    released, because capacity is deliberately never given back. Full
    measurement:
    [docs/superpowers/notes/2026-08-25-vertex-buffer-high-water.md](docs/superpowers/notes/2026-08-25-vertex-buffer-high-water.md).
+
+---
+
+## After Plan 3h — what the window showed (2026-08-26)
+
+**Not a plan. Four findings from running the harness by hand and looking at
+it**, at the human's request, before deciding what 3i should be. Two were
+fixed on the spot; two are 3i's input and are deliberately **not** fixed here.
+
+Every defect below was alive under a green suite. `CLAUDE.md` already says
+defects here surface through mutation and differential testing rather than
+reading; this session adds a third instrument — **looking at the running
+window** — which is exactly what gap G1 predicted would be needed and the only
+one that found any of these.
+
+### Fixed
+
+1. **A macOS trackpad never sends the event zoom listened for** — `fc05076`.
+   The harness bound zoom to `Listener.onPointerSignal`, which only a real
+   mouse wheel reaches. Instrumenting every pointer callback and driving the
+   trackpad logged **709 `PointerPanZoomUpdateEvent`s and zero pointer
+   signals**. Two-finger scroll additionally reports its motion as `pan` with
+   `scale` at exactly 1.0, so handling `scale` alone would have fixed pinch
+   and left scrolling dead. Eight tests, three mutants killed.
+
+2. **The settle needed frames nothing was asking for** — `967fa3b`. A defect,
+   not a limitation, and **it was not on any gap list**. `paintFrame` bakes at
+   most `budgetedTilesPerFrame` tiles — exactly one at the production defaults
+   — so a viewport fills over many frames; Flutter produces a frame only when
+   something asks, and only the camera, the document and the layer tables were
+   asking. A gesture that ended ended the settle with it, leaving the
+   magnified carry-over on screen until an unrelated edit happened to cause a
+   frame. The measurement rig never saw it because `_pumpFrame` drives frames
+   itself. `TileCache._viewportCovered` already held the answer and was only
+   read internally; it becomes `viewportCovered`, and `DraftCanvas` asks for
+   one more frame while it is false. **This is `_TableListenableAdapter`'s
+   defect from the other side** — there the cache was never told, here it was
+   told and could do nothing.
+
+### Measured, and left for Plan 3i
+
+3. **A zoom step retires the whole generation, and a gesture is all waste.**
+   `_gridFor` calls `_retireGeneration` whenever `matchesScale` fails, so
+   every scale change drops every baked tile. Measured at 800x600, dpr 2,
+   512-pixel tiles against `fillingGrid`:
+
+   | | |
+   |---|---|
+   | cold settle | 11 frames, 12 tiles |
+   | **one zoom step** | 12 tiles → **1**, generation 1 → 2 |
+   | settle after that step | 12 frames |
+   | a 20-step gesture | generation 2 → **22**, tile count never above 1 |
+
+   The gesture bakes twenty tiles and discards twenty. Against Task 11's
+   measured **12.56 ms to bake one 512-pixel tile**, that is ~12.56 ms of
+   per-frame work thrown away for one frame's worth of one tile in twelve.
+
+   **Two rival answers, and choosing between them is 3i's job, not a
+   follow-up commit's.** Either skip baking on a frame whose scale changed
+   (the tile dies next frame anyway), or bake something *cheaper* at that
+   scale — which is level-of-detail geometry, G3, and the reason 3i exists.
+   Landing the first ad hoc would pre-decide the second. **Nothing here was
+   fixed for that reason**, and the settle fix above is not the same call: "no
+   frames at all" is a defect, "what to bake during a zoom" is a policy.
+
+4. **The settle is bounded at one tile per frame, and that bound is
+   measured, not arbitrary.** `kBakeBudgetDevicePixels = 262144` is exactly
+   one 512-pixel tile because one bake (12.56 ms) plus the hold-frame blit
+   (1.52 ms) is 14.08 ms against a 16.67 ms budget, and two bakes are 25.12 ms
+   outright. So a ~40-tile viewport needs ~40 frames — about 0.7 s of stale
+   pixels after every zoom. **Raising the budget is not free and the number
+   that forbids it is already recorded**; whether a *resting* camera may spend
+   more than a moving one is a question 3i should answer with the rest of the
+   zoom path, since a still screen cannot show a dropped frame.
+
+### Also established, and not a defect
+
+**`drawVertices` ignores `isAntiAlias`, and `defaultRenderBackend()` is
+`RenderBackend.vertices`.** There is no `isAntiAlias` anywhere in
+`vertices_draw_sink.dart`, `canvas_draw_sink.dart` or `tile_cache.dart`,
+because that path cannot honour it — edge quality is the surface's MSAA and
+nothing else. Gap G1 said software Skia does not antialias `drawVertices`;
+what the window adds is that **the default production backend does not get
+per-primitive antialiasing on a GPU either**. `BACKEND=canvas` is the A/B, and
+Skia's `Paint.isAntiAlias` defaults to true there. Whether that matters to a
+CAD drawing at plot lineweights is a question for a human with the two windows
+side by side, not for a test.
+
+**The instrument now exists.** `--dart-define=CORPUS=simple` builds
+`seamCorpus()` — about sixty entities at the measurement corpus's own far
+origin, a hairline grid whose pitch is deliberately not a divisor of the tile
+pitch, a fan weighted toward shallow angles, and two lineweight regimes in one
+frame. `.vscode/launch.json` carries `2d: seam check -- tiles ON` and its
+tiles-off control. Gap **G1 is now reachable by anyone who presses F5**, which
+is the whole of what it asked for.
+
+---
 
 **Plan 3f.1 (hardening before the picture cache) is done, worked directly on
 `main` at `c078677..b1e9ec1`. Its exit gate is 16 of 17, the one miss being its
