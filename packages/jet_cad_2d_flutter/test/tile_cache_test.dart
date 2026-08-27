@@ -564,11 +564,12 @@ void main() {
     addTearDown(rig.dispose);
     rig.paintOnce();
     rig.zoomBy(1.03);
-    // The moving frame the gate now inserts: it retires the (uncovered, so
-    // composite-less) old generation and bakes nothing of the new one.
-    rig.paintOnce();
+    // No moving-frame absorber needed: generation one never covered the
+    // viewport at a budget of four, so `_retireGeneration` never minted a
+    // composite from it -- the very first call below has no composite to
+    // fall back on and falls through to the ordinary bake path unGated,
+    // exactly like the three after it.
     rig.cache.resetCounters();
-    // Settled: the scale stops moving, so the new generation fills in.
     for (var i = 0; i < 3; i++) {
       rig.paintOnce();
     }

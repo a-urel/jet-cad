@@ -80,7 +80,10 @@ void main() {
     for (var i = 0; i < 6; i++) {
       rig.panBy(-64, -32);
       rig.paintOnce();
-      settle(rig);
+      // No `settle` here: this test only pans, so no generation is ever
+      // retired and `_carryOver` stays null throughout -- the rest gate's
+      // fallback for a moving frame with nothing to fall back on keeps this
+      // call unGated, matching pre-Plan-3i counts on the very first call.
       expect(rig.cache.liveBytes, lessThanOrEqualTo(131072), reason: 'pan $i');
     }
     expect(rig.cache.evictionCount, greaterThan(0),
@@ -95,16 +98,17 @@ void main() {
         tileDevicePixels: 64, tilesBakedPerFrame: 2, cacheBytes: 131072);
     addTearDown(rig.dispose);
     rig.paintOnce();
+    // No `settle` in either loop below: this test only pans, so `_carryOver`
+    // stays null throughout and every one of these calls falls through
+    // unGated.
     for (var i = 0; i < 6; i++) {
       rig.panBy(-64, 0);
       rig.paintOnce();
-      settle(rig);
     }
     rig.cache.resetCounters();
     for (var i = 0; i < 6; i++) {
       rig.panBy(64, 0);
       rig.paintOnce();
-      settle(rig);
     }
     expect(rig.cache.liveDrawCount, greaterThan(0),
         reason: 'the camera returned to tiles the cap reclaimed');
@@ -288,11 +292,12 @@ void main() {
 
     rig.paintOnce();
     // Twelve tiles of travel against an eight-tile ring: the long-pan fixture
-    // has to leave the retained set behind, or "reclaimed" names nothing.
+    // has to leave the retained set behind, or "reclaimed" names nothing. No
+    // `settle`: this test only pans, so `_carryOver` stays null throughout
+    // and every call below falls through unGated.
     for (var i = 0; i < 6; i++) {
       rig.panBy(-64, 0);
       rig.paintOnce();
-      settle(rig);
     }
     expect(rig.cache.evictionCount, greaterThan(0),
         reason: 'setup: the pan really did overrun the cap');
@@ -312,7 +317,6 @@ void main() {
     for (var i = 0; i < 6; i++) {
       rig.panBy(64, 0);
       rig.paintOnce();
-      settle(rig);
     }
     final reclaimed = atFarEnd.where((k) => !rig.cache.holds(k)).toList();
     expect(reclaimed, isNotEmpty,
@@ -334,10 +338,11 @@ void main() {
         tileDevicePixels: 64, tilesBakedPerFrame: 1000, cacheBytes: _smallCap);
     addTearDown(rig.dispose);
 
+    // No `settle`: this loop only pans, so `_carryOver` stays null throughout
+    // and every call below falls through unGated.
     for (var i = 0; i < 6; i++) {
       rig.panBy(-64, -32);
       rig.paintOnce();
-      settle(rig);
       expect(rig.cache.debugImagesAlive, rig.cache.liveTileCount,
           reason: 'pan $i: every image this cache created and did not dispose '
               'is a tile it can still blit');

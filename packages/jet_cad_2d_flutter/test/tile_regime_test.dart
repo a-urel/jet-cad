@@ -118,4 +118,49 @@ void main() {
     expect(h.cache.carryOverBlitCount, greaterThan(0),
         reason: 'and it must still show something');
   });
+
+  testWidgets(
+      'a moving frame with no composite falls through and draws something',
+      (t) async {
+    final h = await pumpTiled(t);
+    // A one-tile budget: the first generation this cache ever bakes cannot
+    // cover `fillingGrid`'s ~130 tiles at this viewport within a handful of
+    // frames, so no generation is ever retired into a composite before the
+    // zooms below -- the review's state (2), reached without ever settling
+    // once. `settle` is not called here on purpose: settling would either
+    // finish covering (defeating the setup) or, if it never can, hang the
+    // suite -- neither is wanted.
+    h.cache.bakeBudgetDevicePixels = 64 * 64;
+    await t.pump();
+    // Non-vacuous setup, asserted rather than assumed: if this generation
+    // somehow did cover, the zoom below would mint a composite the normal
+    // way and the frames after it would pass for a reason that has nothing
+    // to do with the guard this test exists to catch.
+    expect(h.cache.hasCarryOver, isFalse,
+        reason: 'setup: nothing has ever been retired into a composite yet');
+    expect(h.cache.viewportCovered, isFalse,
+        reason: 'setup: the one-tile budget cannot have covered the '
+            'viewport already, or the composite above would be real for '
+            'the wrong reason');
+
+    h.cache.resetCounters();
+    // Two zooms, with no settling frame in between: the generation the first
+    // zoom leaves behind never gets a chance to cover either, so the second
+    // zoom's own retire attempt also has nothing to mint from.
+    h.camera.zoomAt(const Offset(120, 90), 1.05);
+    await t.pump();
+    h.camera.zoomAt(const Offset(120, 90), 1.05);
+    await t.pump();
+
+    expect(h.cache.hasCarryOver, isFalse,
+        reason: 'the outgoing generation for both zooms never covered, so '
+            '`_retireGeneration` minted nothing to fall back on -- this is '
+            'the state the guard has to survive without painting nothing');
+    expect(
+        h.cache.blitCount + h.cache.liveDrawCount + h.cache.carryOverBlitCount,
+        greaterThan(0),
+        reason: 'a moving frame with no composite to show must still draw '
+            'something -- the ordinary bake-and-live-walk path -- rather '
+            'than leave the viewport blank for the length of the gesture');
+  });
 }

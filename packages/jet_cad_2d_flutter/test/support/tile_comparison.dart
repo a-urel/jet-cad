@@ -343,13 +343,11 @@ Future<InkReport> measureFallbackAgreement(
     // owes it.
     rig.cache.bakeBudgetDevicePixels = 64 * 64;
     rig.panBy(pan.dx, pan.dy);
-    // Plan 3i Task 2: the frame right after a pan is the gate's moving frame
-    // and draws only the carry-over composite, baking and live-drawing
-    // nothing -- this fixture is about the partly baked frame *after* that,
-    // where the reduced budget leaves a genuine entering strip for the live
-    // fallback to own.
-    rig.paintOnce();
-
+    // No settle needed here: this fixture only pans, so no generation is
+    // ever retired and `_carryOver` stays null throughout -- the rest gate's
+    // fallback for a moving frame with nothing to fall back on keeps this
+    // call unGated, so the reduced budget below still leaves a genuine
+    // entering strip for the live fallback to own on this very call.
     final measured = await measureTiledAgreement(rig);
 
     // Anti-vacuity, and every clause of it was earned by an arrangement that

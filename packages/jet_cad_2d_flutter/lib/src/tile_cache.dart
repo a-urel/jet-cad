@@ -815,7 +815,24 @@ class TileCache {
     // a no-op once covered -- gating the loop itself here would additionally
     // skip the blit, and a repeated call at an unchanged, already-settled
     // camera would draw nothing at all.
-    final resting = previous == null || _restGateSteps >= 1;
+    //
+    // **Nor on a moving frame with no composite to fall back on.** The early
+    // return below is only honest when the carry-over blit just above it
+    // actually put something on screen. `_carryOver` is null on a moving
+    // frame in at least three real situations: the first frame this cache
+    // has ever painted (already exempted above); the outgoing generation
+    // never covered the viewport, so `_retireGeneration` minted nothing --
+    // which is exactly the state a second zoom reaches when it lands before
+    // the first one's settle completes; and any of `applyChange`,
+    // `_dropGeneration` or `_dropEverything` dropping a standing composite
+    // outright, if a camera change then lands before a rested frame. Gating
+    // a frame with no composite would paint nothing at all -- not a stale
+    // frame but a blank one -- for as long as the gesture continued. A blank
+    // viewport is worse than an expensive one, so this falls through to the
+    // ordinary bake-and-live-walk path instead: where there is nothing stale
+    // to show, drawing the real thing is the honest fallback.
+    final resting =
+        previous == null || _carryOver == null || _restGateSteps >= 1;
 
     // Derived once and handed to every bake. Rebasing is frame-global by
     // construction; a per-tile origin would give each tile its own
@@ -856,8 +873,11 @@ class TileCache {
     }
 
     if (!resting) {
-      // Nothing else this frame. The composite is already down; a zoom out
-      // leaves its ring as background until the gesture ends (spec D3).
+      // Nothing else this frame. `resting` is false here only because the
+      // camera is moving and a composite is already down to show for it --
+      // that is the third disjunct in `resting`'s own definition above, not
+      // an assumption made again here. A zoom out leaves that composite's
+      // ring as background until the gesture ends (spec D3).
       return;
     }
 
