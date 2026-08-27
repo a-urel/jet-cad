@@ -175,6 +175,17 @@ void main() {
     for (var notch = 0; notch < 6; notch++) {
       h.camera.zoomAt(const Offset(120, 90), 1.1); // the moving frame
       await t.pump();
+
+      // After the first notch, a composite is minted by the settled generation.
+      // Asserting it exists proves the gate's threshold term is under test: if
+      // the composite were null, the guard's middle disjunct would decide every
+      // frame and the threshold value would be unreachable.
+      if (notch == 0) {
+        expect(h.cache.hasCarryOver, isTrue,
+            reason: 'the first zoom retires the settled generation into a '
+                'composite; without it this test is vacuous');
+      }
+
       await t.pump(); // one unchanged frame before the next notch
     }
 

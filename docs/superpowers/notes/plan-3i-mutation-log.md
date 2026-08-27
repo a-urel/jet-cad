@@ -114,3 +114,42 @@ Expected: <0>
   Actual: <768>
 a wheel that keeps turning must never reach two consecutive unchanged frames, so it must never bake
 ```
+
+## M4b — the rest gate at one frame instead of two
+
+**Task:** Task 3, "The wheel clause — two unchanged frames, not one."
+
+**Mutation:** In `packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`,
+changed the constant:
+
+```dart
+const int kRestGateFrames = 1;
+```
+
+(instead of 2)
+
+This tests whether the threshold itself is correct, independent of the guard's
+other terms. M4 proved the gate is load-bearing; M4b proves the threshold must
+be 2.
+
+**Procedure:** copied `tile_cache.dart` aside, edited the constant from 2 to 1,
+ran the tests, then restored from the copy. **Never `git checkout`.**
+
+**Result:** red, as expected — both affected tests fail:
+
+**Verbatim output:**
+
+```
+00:00 +6 -1: a steadily spun wheel never arms the rest gate [E]
+Expected: <0>
+  Actual: <384>
+a wheel that keeps turning must never reach two consecutive unchanged frames,
+so it must never bake
+
+00:00 +6 -2: the gate needs two unchanged frames, not one [E]
+Expected: <2>
+  Actual: <1>
+```
+
+With kRestGateFrames = 1, the wheel test bakes on every other notch (384 tiles
+instead of 0), confirming the threshold of 2 is necessary to meet the spec.

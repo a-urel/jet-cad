@@ -810,8 +810,8 @@ class TileCache {
     _lastQuantised = quantised;
     // **`previous == null` is not a moving frame.** It is the very first
     // frame this cache has ever painted, with nothing behind it to have
-    // moved away from. Gating it on the literal `_restGateSteps >= kRestGateFrames` would
-    // leave a brand-new cache blank -- no bake, and no composite either,
+    // moved away from. Gating it on the literal `_restGateSteps >=
+    // kRestGateFrames` would leave a brand-new cache blank -- no bake, and
     // since nothing has ever been retired -- until some later frame
     // fortuitously repeated the same camera.
     //
