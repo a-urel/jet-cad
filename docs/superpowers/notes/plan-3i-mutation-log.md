@@ -71,3 +71,46 @@ with the guard gone, every one of the 8 zoom frames bakes as many tiles as
 its budget permits over a viewport this size, not one each — but the failure
 mode (baking resumes on a moving frame) is exactly the one the test is
 chartered to catch.
+
+## M4
+
+**Task:** Task 3, "The wheel clause — two unchanged frames, not one."
+
+**Mutation:** In `packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`'s
+`paintFrame`, replaced the `resting` guard:
+
+```dart
+    final resting = previous == null || _carryOver == null || _restGateSteps >= kRestGateFrames;
+```
+
+with:
+
+```dart
+    final resting = !_viewportCovered;
+```
+
+This breaks the rest gate and causes the cache to bake on every frame where
+the viewport is not fully covered, even if the camera is moving.
+
+**Procedure:** copied `tile_cache.dart` aside to the scratchpad, edited the
+working file to replace the resting expression with `!_viewportCovered`, ran
+the test, then restored the working file from the copy. **Never `git checkout`.**
+
+**Result:** red, as expected — both "a moving frame bakes nothing and walks
+nothing" and "a steadily spun wheel never arms the rest gate" tests fail:
+
+**Verbatim output:**
+
+```
+00:00 +4 -1: a moving frame bakes nothing and walks nothing [E]
+  Test failed. See exception logs above.
+Expected: <0>
+  Actual: <512>
+a moving frame must bake nothing
+
+00:00 +5 -2: a steadily spun wheel never arms the rest gate [E]
+  Test failed. See exception logs above.
+Expected: <0>
+  Actual: <768>
+a wheel that keeps turning must never reach two consecutive unchanged frames, so it must never bake
+```

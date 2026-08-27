@@ -163,4 +163,29 @@ void main() {
             'something -- the ordinary bake-and-live-walk path -- rather '
             'than leave the viewport blank for the length of the gesture');
   });
+
+  // A wheel spun steadily: one scale change per frame, with a single
+  // unchanged frame between notches. Under a one-frame gate this bakes on
+  // every second frame.
+  testWidgets('a steadily spun wheel never arms the rest gate', (t) async {
+    final h = await pumpTiled(t);
+    await settle(t, h);
+    h.cache.resetCounters();
+
+    for (var notch = 0; notch < 6; notch++) {
+      h.camera.zoomAt(const Offset(120, 90), 1.1); // the moving frame
+      await t.pump();
+      await t.pump(); // one unchanged frame before the next notch
+    }
+
+    expect(h.cache.bakeCount, 0,
+        reason: 'a wheel that keeps turning must never reach two consecutive '
+            'unchanged frames, so it must never bake');
+  });
+
+  test('the gate needs two unchanged frames, not one', () {
+    // The threshold itself, stated where a reader can see it: one unchanged
+    // frame is the in-between frame and draws like a moving one.
+    expect(kRestGateFrames, 2);
+  });
 }

@@ -163,6 +163,15 @@ const int kBakeBudgetDevicePixels = 262144;
 /// entities, which falls to a single tile's geometry once bakes flush per tile.
 const int kTileCacheBytes = 96 * 1024 * 1024;
 
+/// Consecutive unchanged frames before a rest bake is permitted.
+///
+/// **Two, and the mouse wheel is why.** A wheel delivers isolated notches, so
+/// at one every notch would be a moving frame followed immediately by a
+/// resting frame: a full bake per notch, discarded by the next, and invisible
+/// to any criterion that only watches moving frames. Two costs one frame of
+/// latency (~16.7 ms) and makes a continuously spun wheel bake nothing.
+const int kRestGateFrames = 2;
+
 /// One tile's position in its generation's grid. Not world coordinates: the
 /// grid is anchored to the generation's own device-pixel lattice.
 @immutable
@@ -801,7 +810,7 @@ class TileCache {
     _lastQuantised = quantised;
     // **`previous == null` is not a moving frame.** It is the very first
     // frame this cache has ever painted, with nothing behind it to have
-    // moved away from. Gating it on the literal `_restGateSteps >= 1` would
+    // moved away from. Gating it on the literal `_restGateSteps >= kRestGateFrames` would
     // leave a brand-new cache blank -- no bake, and no composite either,
     // since nothing has ever been retired -- until some later frame
     // fortuitously repeated the same camera.
@@ -831,8 +840,9 @@ class TileCache {
     // viewport is worse than an expensive one, so this falls through to the
     // ordinary bake-and-live-walk path instead: where there is nothing stale
     // to show, drawing the real thing is the honest fallback.
-    final resting =
-        previous == null || _carryOver == null || _restGateSteps >= 1;
+    final resting = previous == null ||
+        _carryOver == null ||
+        _restGateSteps >= kRestGateFrames;
 
     // Derived once and handed to every bake. Rebasing is frame-global by
     // construction; a per-tile origin would give each tile its own
