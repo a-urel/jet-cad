@@ -197,9 +197,12 @@ void main() {
     final zoomed = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
     addTearDown(zoomed.dispose);
     zoomed.paintOnce();
-    // Four, not zero: the frame under the spy must contain *both* kinds of
-    // blit, or the two-object claim is made over one object again. Four
-    // *tiles*, at this rig's 64 px tile: the field is a device-pixel budget.
+    // A crippled budget, kept from the pre-Plan-3i version of this test and
+    // now inert on the frame under the spy: Task 8's rest bake fills the
+    // viewport in bands and the band bake is not rationed by
+    // `bakeBudgetDevicePixels` at all. It stays because it still rations the
+    // two frames *before* the spy's, which is what keeps them from covering
+    // early and retiring the composite out from under the assertion below.
     zoomed.cache.bakeBudgetDevicePixels = 4 * 64 * 64;
     zoomed.zoomBy(1.19);
     // The gate's moving frame: it retires the old generation into a
@@ -225,11 +228,16 @@ void main() {
     );
 
     expect(zoomed.cache.carryOverBlitCount, 1);
-    expect(zoomed.cache.blitCount, 4);
+    // 130, not the four the budget used to allow: the rest frame bands the
+    // whole visible set in one go. The composite is blitted first and dropped
+    // inside the same frame, so both kinds of blit are still here -- which is
+    // the only property this test is about, and it is now made over a larger
+    // set of tile blits rather than a smaller one.
+    expect(zoomed.cache.blitCount, 130);
     final zoomedCalls = zoomedSpy.named('drawImageRect').toList();
-    expect(zoomedCalls.length, 5,
-        reason: 'one composite and four tiles: the state is real, not a '
-            'second cold frame under another name');
+    expect(zoomedCalls.length, 131,
+        reason: 'one composite and the whole visible set: the state is real, '
+            'not a second cold frame under another name');
     final zoomedPaints =
         zoomedCalls.map((c) => c.args.whereType<Paint>().single).toList();
     expect(
@@ -564,7 +572,7 @@ void main() {
             'against a warm $warmInk');
   });
 
-  test('the settle spreads its bakes across frames', () async {
+  test('the settle spreads its bakes across frames, until it rests', () async {
     final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 4);
     addTearDown(rig.dispose);
     rig.paintOnce();
@@ -573,24 +581,46 @@ void main() {
     // viewport at a budget of four, so `_retireGeneration` never minted a
     // composite from it -- the very first call below has no composite to
     // fall back on and falls through to the ordinary bake path unGated,
-    // exactly like the three after it.
+    // exactly like the one after it.
+    //
+    // **Two frames and not three, because the third one is no longer a
+    // budgeted frame.** `kRestGateFrames` is two, so the third call at this
+    // unchanged camera is the *resting* frame Plan 3i Task 8 added, and a
+    // resting frame does not ration: it bands the whole visible region in
+    // one go, which is the entire point of that plan. The ration itself is
+    // unchanged -- still four tiles per frame -- and the two frames below are
+    // where it is still the thing that decides. The third frame is asserted
+    // separately underneath, because "the budget throttles" and "the rest
+    // frame finishes" are now two different claims and a single loop over
+    // three frames could no longer distinguish them.
     rig.cache.resetCounters();
-    for (var i = 0; i < 3; i++) {
+    for (var i = 0; i < 2; i++) {
       rig.paintOnce();
     }
-    expect(rig.cache.bakeCount, 12, reason: 'four per frame, three frames');
-    expect(rig.cache.liveTileCount, 12,
-        reason: 'and every bake was kept, so 12 is a throttle rather than a '
-            'recount of four tiles rebaked three times');
+    expect(rig.cache.bakeCount, 8, reason: 'four per frame, two frames');
+    expect(rig.cache.liveTileCount, 8,
+        reason: 'and every bake was kept, so 8 is a throttle rather than a '
+            'recount of four tiles rebaked twice');
     expect(rig.cache.hasCarryOver, isFalse,
         reason: 'and no composite stands: generation one never covered the '
             'viewport at a budget of four, so nothing was minted -- which is '
             'what makes the live-draw count below a statement about coverage '
             'rather than about suppression');
-    expect(rig.cache.liveDrawCount, 3,
-        reason: 'anti-vacuity: all three frames still left ink uncovered, so '
-            'the visible set is larger than 12 and the budget is what bounded '
+    expect(rig.cache.liveDrawCount, 2,
+        reason: 'anti-vacuity: both frames still left ink uncovered, so '
+            'the visible set is larger than 8 and the budget is what bounded '
             'the count');
+
+    // And the frame the gate now arms finishes the fill on its own, from the
+    // eight tiles the ration left it -- the behaviour the two assertions
+    // above would otherwise read as a regression.
+    rig.paintOnce();
+    expect(rig.cache.viewportCovered, isTrue,
+        reason: 'the resting frame bands the rest of the viewport in one '
+            'frame rather than four more tiles of it');
+    expect(rig.cache.liveTileCount, greaterThan(8),
+        reason: 'and it kept what it cut, so the coverage above is tiles and '
+            'not a live walk');
   });
 
   test('criterion 1: a settled frame equals the live frame after a zoom',

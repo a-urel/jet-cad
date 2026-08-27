@@ -4,6 +4,8 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import '../support/tile_harness.dart';
+
 void main() {
   test('a live band image is counted in liveBytes', () {
     final cache = TileCache(tileDevicePixels: 64);
@@ -25,5 +27,25 @@ void main() {
     cache.debugSetBand(null);
     expect(cache.liveBytes, before);
     band.dispose();
+  });
+
+  testWidgets('the ceiling holds at every point inside the rest frame',
+      (t) async {
+    final h = await pumpTiled(t);
+    await settle(t, h);
+    h.cache.debugOnSliceForTest = () {
+      expect(h.cache.liveBytes, lessThanOrEqualTo(kTileCacheBytes),
+          reason: 'the band image is resident here and the meter counts it');
+    };
+    addTearDown(() => h.cache.debugOnSliceForTest = null);
+
+    h.camera.zoomAt(const Offset(120, 90), 1.3);
+    await t.pump();
+    await t.pump();
+    await t.pump();
+
+    expect(h.cache.debugImagesAlive, h.cache.liveTileCount,
+        reason: 'no band image outlives its band, and the composite was '
+            'dropped before the bake');
   });
 }

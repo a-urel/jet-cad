@@ -363,13 +363,29 @@ void main() {
 
     // And the composite is tracked too, so the same equality keeps meaning
     // "nothing leaked" once one stands.
-    final zoomed = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+    //
+    // **At [_capWithComposite] and not the production ceiling, since Plan 3i
+    // Task 8.** A resting frame now drops the composite before it bands, and
+    // it is licensed to do so exactly when the ceiling can hold a band plus
+    // the whole visible set -- which the production ceiling can. This one
+    // cannot (a band is 13 tiles and a covering generation 130, against 138
+    // tiles of ceiling), so the rest bake declines, the composite stands, and
+    // the budgeted tile loop fills what is left of the ceiling beside it:
+    // the state this assertion has always been about, reached at the one
+    // ceiling that still reaches it.
+    final zoomed = TileRig(
+        tileDevicePixels: 64,
+        tilesBakedPerFrame: 1000,
+        cacheBytes: _capWithComposite);
     addTearDown(zoomed.dispose);
     zoomed.paintOnce();
     zoomed.zoomBy(1.19);
     zoomed.paintOnce();
     settle(zoomed);
     expect(zoomed.cache.hasCarryOver, isTrue, reason: 'setup');
+    expect(zoomed.cache.liveTileCount, greaterThan(0),
+        reason: 'setup: and tiles stand beside it, so the equality below is '
+            'about more than the composite alone');
     expect(zoomed.cache.debugImagesAlive, zoomed.cache.liveTileCount + 1);
 
     zoomed.cache.dispose();
@@ -455,13 +471,26 @@ void main() {
     // `false` rather than baking anyway is what keeps `liveBytes` a ceiling
     // and not a suggestion, and this is the only state where that arm is the
     // only thing running.
+    // **Two rigs, since Plan 3i Task 8, and the split is not a weakening.**
+    // This test used to make both of its claims over one journey, because one
+    // journey could reach a state that held a composite *and* a covering
+    // generation at once. It cannot any more: a resting frame drops the
+    // composite before it bands, licensed by the ceiling being able to hold a
+    // band plus the whole visible set, so at the production ceiling the
+    // settle below ends with 130 tiles and no composite. The composite is
+    // 117 tiles' worth against a band's 13, so no ceiling exists that admits
+    // a covering generation beside a composite but not a band beside one --
+    // the state is gone, not merely harder to reach. Each claim is therefore
+    // made where it now lives, with every number it asserted before intact.
+    //
+    // Claim one: one frame under a ceiling it cannot satisfy empties
+    // everything the blitted-this-frame guard does not protect.
     final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
     addTearDown(rig.dispose);
     rig.paintOnce();
     rig.zoomBy(1.19);
     rig.paintOnce();
     settle(rig);
-    expect(rig.cache.hasCarryOver, isTrue, reason: 'setup: a composite stands');
     expect(rig.cache.liveTileCount, greaterThan(30),
         reason: 'setup: and there are tiles for the ceiling to take');
 
@@ -494,22 +523,42 @@ void main() {
         reason: 'a single frame under a ceiling it cannot satisfy empties '
             'everything the blitted-this-frame guard does not protect');
 
-    rig.cache.resetCounters();
-    rig.panBy(-64, -32);
-    rig.paintOnce();
-    settle(rig);
+    // Claim two: a ceiling smaller than the composite bakes nothing and keeps
+    // the composite. The squeeze happens on the *moving* frame after the
+    // zoom, where the composite has just been minted and the incoming
+    // generation is still empty -- the one point at which a ceiling this
+    // small can be imposed with a composite standing.
+    final squeezed = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+    addTearDown(squeezed.dispose);
+    squeezed.paintOnce();
+    squeezed.zoomBy(1.19);
+    squeezed.paintOnce();
+    expect(squeezed.cache.hasCarryOver, isTrue,
+        reason: 'setup: a composite stands');
+    squeezed.cache.cacheBytes = 4 * _tileBytes;
 
-    expect(rig.cache.hasCarryOver, isTrue,
+    squeezed.cache.resetCounters();
+    // The pan is what owes the live walk: a zoom *in* magnifies the composite
+    // past the viewport's edges and `paintFrame` skips the walk entirely, so
+    // without moving off that edge the last assertion below would read zero
+    // for a reason that has nothing to do with the ceiling.
+    squeezed.panBy(-64, -32);
+    squeezed.paintOnce();
+    settle(squeezed);
+
+    expect(squeezed.cache.hasCarryOver, isTrue,
         reason: 'the composite survives a ceiling it does not fit under: it '
             'is not in the tile map and eviction cannot reach it');
-    expect(rig.cache.liveBytes, _compositeBytes,
+    expect(squeezed.cache.liveBytes, _compositeBytes,
         reason: 'and it is all the cache holds -- every tile went, and the '
             'ceiling stayed a ceiling rather than being quietly exceeded');
-    expect(rig.cache.liveTileCount, 0);
-    expect(rig.cache.bakeCount, 0,
+    expect(squeezed.cache.liveTileCount, 0);
+    expect(squeezed.cache.bakeCount, 0,
         reason: 'baking under a ceiling that cannot hold the result is the '
-            'silent overrun this arm exists to refuse');
-    expect(rig.cache.liveDrawCount, 1,
+            'silent overrun this arm exists to refuse -- and the rest bake '
+            'refuses it too, band and all, rather than banding into a '
+            'ceiling that cannot keep the slices');
+    expect(squeezed.cache.liveDrawCount, 1,
         reason: 'and the live walk is what stops the frame going blank '
             'instead');
   });

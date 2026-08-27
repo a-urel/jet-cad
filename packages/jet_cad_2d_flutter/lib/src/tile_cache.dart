@@ -549,6 +549,13 @@ class TileCache {
   @visibleForTesting
   void debugSetBand(Image? band) => _band = band;
 
+  /// Called once per sliced tile, while the band image is resident.
+  ///
+  /// The only point at which the byte ceiling can be observed at its peak;
+  /// a check after the frame would always read the steady state.
+  @visibleForTesting
+  void Function()? debugOnSliceForTest;
+
   /// The screen space [_carryOver] was recorded in: the quantised camera of
   /// the last frame the retired generation covered.
   ///
@@ -962,6 +969,20 @@ class TileCache {
       return;
     }
 
+    // **The literal gate here, and not `resting`.** `resting` is true on two
+    // frames that are not at rest at all: the very first frame this cache
+    // paints, and any moving frame with no composite to fall back on. Both
+    // disjuncts exist to stop a frame painting *nothing* -- the comment above
+    // says so in as many words: they "fall through to the ordinary
+    // bake-and-live-walk path". That path is budgeted and the band bake is
+    // not, so handing those two frames to the band bake would spend a
+    // full-viewport walk on the first frame of a still-moving gesture, which
+    // is precisely the zoom-regime cost this cache exists to refuse. A band
+    // is for a camera that has actually stopped.
+    if (_restGateSteps >= kRestGateFrames) {
+      _restBake(grid, quantised, viewport, painter, sink, vertices, origin);
+    }
+
     for (final key in grid.visibleKeys(quantised, viewport)) {
       var image = _tiles[key];
       // **The ceiling is consulted before the bake, not after the frame.** A
@@ -1049,6 +1070,197 @@ class TileCache {
     _liveDraws++;
   }
 
+  /// Fills the visible region a **tile row at a time**, on a resting frame.
+  ///
+  /// **One walk per band, not one per tile.** A 512-pixel tile costs 12.56 ms
+  /// to bake (see [kTileDevicePixels]) and two of them overrun the frame
+  /// budget, so the tiled fill baked one tile per frame: after a zoom that is
+  /// about forty frames of stale, magnified pixels. A band is one walk of the
+  /// painter for a whole row, rasterised once and then *copied* into its
+  /// tiles -- a texture copy, not a raster -- so a viewport fills in one
+  /// frame.
+  ///
+  /// **Only when a visible key is actually missing.** A resting frame is not
+  /// necessarily an unfilled one: `paintFrame` reaches here on every frame
+  /// whose camera has stood still, including ones that already hold every tile
+  /// they need. Rebaking those would replace good images with identical ones,
+  /// leak the images it overwrote, and pay a full walk for nothing. This is
+  /// the "viewport not covered" half of the resting regime, tested against the
+  /// tiles themselves rather than against [_viewportCovered], which is a
+  /// statement about the *previous* frame's camera.
+  void _restBake(
+    TileGrid grid,
+    ViewportTransform quantised,
+    Size viewport,
+    DraftPainter painter,
+    CanvasDrawSink sink,
+    VerticesDrawSink? vertices,
+    Vector2 origin,
+  ) {
+    var missing = false;
+    for (final key in grid.visibleKeys(quantised, viewport)) {
+      if (!_tiles.containsKey(key)) {
+        missing = true;
+        break;
+      }
+    }
+    if (!missing) return;
+
+    final bands = grid.bandsFor(quantised, viewport);
+    if (bands.isEmpty) return;
+    final bandBytes = _bandBytesOf(bands.first);
+    var visibleTiles = 0;
+    for (final band in bands) {
+      visibleTiles += band.keys.length;
+    }
+    // **The whole fill is priced before any of it happens, and that is what
+    // makes dropping the composite safe.** A rest bake is all-or-nothing by
+    // intent: it exists to replace every pixel the composite serves in one
+    // frame. Under a ceiling that cannot hold a band plus the visible set,
+    // it would instead evict its own output slice by slice, arrive covering
+    // nothing, and have thrown the composite away to do it -- replacing
+    // stale pixels with a live walk, forever, which is the state
+    // [_makeRoomForOneTile]'s "bakes nothing rather than overrun" arm exists
+    // to refuse. So a ceiling that small leaves the whole frame to the
+    // budgeted tile loop below, composite and all.
+    //
+    // The peak this prices is the one the design was costed against: one band
+    // plus a full generation, 8 + 48 MiB at the reference viewport, against a
+    // 96 MiB cap. The *source* picture is not in it and cannot be -- it is
+    // freed by `endRecording` inside [_bakeBand] before the image exists.
+    if (bandBytes + visibleTiles * _tileBytes > cacheBytes) return;
+
+    // **The composite goes first.** The frame is about to draw real content
+    // and does not need it: it was blitted onto this canvas already, and the
+    // tiles below land on the same pixels. At the reference viewport the
+    // source picture and the tile set are each about 48 MiB against a 96 MiB
+    // cap, so the composite's 29.3 MiB on top is exactly what banding exists
+    // to avoid -- dropping it before the bake is the other half of the same
+    // arithmetic, and it is what leaves the ceiling room for the band. It is
+    // the same rule the covered-frame drop below states ("the incoming
+    // generation now covers every pixel the composite served"), decided
+    // ahead of the fill rather than after it, which the check above is what
+    // licenses.
+    _dropCarryOver();
+
+    for (final band in bands) {
+      // **Asked before the band is allocated, not after.** The ceiling is a
+      // ceiling and not a suggestion (see [_makeRoomForOneTile]), and a band
+      // is a whole row -- thirteen tiles' worth here, 8 MiB at the reference
+      // viewport. Baking one and discovering afterwards that nothing could be
+      // kept is the silent overrun that arm exists to refuse, so a ceiling
+      // that cannot hold a band leaves the whole rest bake to the ordinary
+      // budgeted tile loop and the live fallback below.
+      if (!_makeRoomForBytes(bandBytes + _tileBytes)) return;
+
+      final visited = <int>[];
+      final image = _bakeBand(
+          band, grid, quantised, painter, sink, vertices, origin, visited);
+      _band = image;
+      // [_bakeBand]'s `onVisit` records only what the painter visited
+      // directly; [_bake]'s climbs owners so that a *container's* transform
+      // reaches the tile through invalidation's direction one. This is where
+      // the band makes up the difference -- once per band rather than once
+      // per tile, which is the whole reason the band callback is the simpler
+      // one.
+      _recordOwners(visited, painter.document);
+      visited.sort();
+      // **One record per band, shared by reference.** `_invalidateTouched`
+      // condemns tiles by iterating `_baked`, and a sliced tile with no record
+      // is invisible to it: edit an entity after a settle and the stale tile
+      // keeps blitting over the corrected drawing. Sharing makes invalidation
+      // band-coarse, which is right because a band is exactly the unit a
+      // rebake walks.
+      final record = Uint32List.fromList(visited);
+      for (final key in band.keys) {
+        // A key this frame's tile map already serves keeps its own image and
+        // its own, narrower record. Overwriting it would leak the image it
+        // replaced -- `_tiles[key] = tile` disposes nothing -- and a pan
+        // within one generation reaches this loop with most of the row
+        // already held.
+        if (_tiles.containsKey(key)) {
+          _lastUsedFrame[key] = _frameSerial;
+          continue;
+        }
+        debugOnSliceForTest?.call();
+        // The ceiling is consulted before the write, not after the frame --
+        // the rule the tile loop already follows. The slice bypasses
+        // `budgetedTilesPerFrame`, which rations bakes; a slice is not a bake.
+        if (!_makeRoomForOneTile()) break;
+        final tile = _sliceTile(image, band, key, grid);
+        _tiles[key] = tile;
+        _baked[key] = record;
+        _lastUsedFrame[key] = _frameSerial;
+      }
+      _band = null;
+      _disposeImage(image);
+      _bakes++;
+    }
+  }
+
+  /// [_bake]'s owner climb, applied once to a whole band's visit list.
+  ///
+  /// **Direction one of the invalidation rule, which the band walk cannot
+  /// record for itself.** A tile's `_baked` record has to name not only the
+  /// entities drawn on it but every container they hang under, or a transform
+  /// applied to a group never condemns the tiles its children inked and the
+  /// drawing goes stale after an edit. [_bake] does this inside its own
+  /// `onVisit`; a band's `onVisit` records the direct visit alone and this
+  /// closes the gap over the accumulated list.
+  ///
+  /// Only the prefix that was there on entry is read, so the owners appended
+  /// below are not themselves re-climbed -- they cannot add anything, because
+  /// [climb] already walks each chain to its root.
+  void _recordOwners(List<int> visited, DraftDocument document) {
+    // Container nodes already recorded. Both a memo and the termination
+    // guard, exactly as in [_bake]: once a node is in, every ancestor of it is
+    // in too, so the climb stops there -- which keeps the pass linear in
+    // visits rather than O(visits x depth), and makes a malformed cyclic
+    // parent chain terminate instead of hanging the bake.
+    final containers = <int>{};
+
+    void climb(Handle from) {
+      var current = from;
+      while (true) {
+        final node = document.tree[current];
+        // A definition handle lives outside the node map, and a definition is
+        // not a placement: an edit inside one takes the generation-drop path
+        // and never consults this list.
+        if (node == null) return;
+        if (!containers.add(current.value)) return;
+        visited.add(current.value);
+        if (node.parent.isNone) return;
+        current = node.parent;
+      }
+    }
+
+    final direct = visited.length;
+    for (var i = 0; i < direct; i++) {
+      final handle = Handle(visited[i]);
+      final slot = document.entities.slotOf(handle);
+      if (slot != null) {
+        // A leaf names its container by owner; the root is a `GroupNode` like
+        // any other and is recorded too, so a transform of the root reaches
+        // every tile through direction one.
+        climb(document.entities.ownerAt(slot));
+        continue;
+      }
+      // An instance node the painter descended into: it is already recorded
+      // by the direct visit, and what is missing is the groups it hangs under.
+      final node = document.tree[handle];
+      if (node != null && !node.parent.isNone) climb(node.parent);
+    }
+  }
+
+  /// One band image's footprint: RGBA over its device rectangle, exactly what
+  /// `Picture.toImageSync` allocates in [_bakeBand].
+  ///
+  /// Every band of one grid is the same height and the visible region is a
+  /// full rectangle, so [TileGrid.bandsFor] yields rows of equal width and one
+  /// band's size answers for all of them.
+  int _bandBytesOf(TileBand band) =>
+      band.deviceRect.width.round() * band.deviceRect.height.round() * 4;
+
   /// Every tile is the same square, so this is built once rather than per
   /// blit. It was a getter until Task 10, which allocated a fresh `Rect` on
   /// each of a frame's ~48 blits — bounded by the viewport, so never a rule
@@ -1118,11 +1330,22 @@ class TileCache {
   ///
   /// Returning `false` rather than baking anyway is what keeps [liveBytes] a
   /// ceiling and not a suggestion.
-  bool _makeRoomForOneTile() {
+  bool _makeRoomForOneTile() => _makeRoomForBytes(_tileBytes);
+
+  /// [_makeRoomForOneTile] generalised to an allocation that is not a tile.
+  ///
+  /// **A band is a whole tile row**, so the rest bake cannot ask this question
+  /// in units of one tile: it would be told yes, allocate thirteen tiles'
+  /// worth, and blow past [cacheBytes] before the first slice. Every word of
+  /// [_makeRoomForOneTile]'s doc comment applies unchanged -- the victim
+  /// policy, the blitted-this-frame guard, and the refusal to allocate at all
+  /// rather than overrun -- with only the size of the hole being made
+  /// different.
+  bool _makeRoomForBytes(int wanted) {
     // Computed from `liveBytes` so the composite is counted, then tracked
     // locally: the loop's only effect on it is one tile's worth per eviction.
     var bytes = liveBytes;
-    final ceiling = cacheBytes - _tileBytes;
+    final ceiling = cacheBytes - wanted;
     while (bytes > ceiling) {
       TileKey? victim;
       var oldest = 0;

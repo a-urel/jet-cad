@@ -21,6 +21,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'support/tile_fixture.dart';
+import 'support/tile_harness.dart';
 
 void main() {
   /// Pumps a canvas whose viewport needs more tiles than one frame may bake.
@@ -85,5 +86,23 @@ void main() {
     expect(t.binding.hasScheduledFrame, isFalse,
         reason: 'a covered viewport owes nothing, and a canvas that keeps '
             'asking burns the GPU on a still screen');
+  });
+
+  testWidgets('the settle completes in one frame', (t) async {
+    final h = await pumpTiled(t);
+    await settle(t, h);
+    expect(h.cache.viewportCovered, isTrue);
+
+    h.camera.zoomAt(const Offset(120, 90), 1.3);
+    await t.pump(); // moving
+    await t.pump(); // in between
+    final tilesBefore = h.cache.liveTileCount;
+    await t.pump(); // the rest frame
+    expect(h.cache.viewportCovered, isTrue,
+        reason: 'one rest frame covers the viewport; the tiled fill it '
+            'replaces took one frame per tile');
+    expect(h.cache.liveTileCount, greaterThan(tilesBefore));
+    expect(t.binding.hasScheduledFrame, isFalse,
+        reason: 'and nothing is owed afterwards');
   });
 }

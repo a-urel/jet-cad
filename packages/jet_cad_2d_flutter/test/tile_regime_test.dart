@@ -1,67 +1,8 @@
-import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
-import 'support/tile_fixture.dart';
-
-/// Everything a tiled-frame test needs to drive and read one canvas.
-class TiledHarness {
-  TiledHarness(this.cache, this.camera, this.document);
-  final TileCache cache;
-  final CameraController camera;
-  final DraftDocument document;
-}
-
-/// Pumps a tiled canvas over `fillingGrid`, which inks every tile of
-/// [kTileViewport] at [tileCamera] -- so "nothing was drawn" can never be
-/// mistaken for "there was nothing to draw".
-Future<TiledHarness> pumpTiled(
-  WidgetTester t, {
-  DraftDocument Function(FlutterTextMeasurer)? document,
-  ViewportTransform? camera,
-}) async {
-  final measurer = FlutterTextMeasurer();
-  addTearDown(measurer.clear);
-  final doc = (document ?? fillingGrid)(measurer);
-  final index = SpatialIndex(doc);
-  addTearDown(index.dispose);
-  final controller = CameraController(camera ?? tileCamera());
-  addTearDown(controller.dispose);
-
-  await t.pumpWidget(MediaQuery(
-    data: const MediaQueryData(devicePixelRatio: kTileDpr),
-    child: Directionality(
-      textDirection: TextDirection.ltr,
-      child: SizedBox(
-        width: kTileViewport.width,
-        height: kTileViewport.height,
-        child: DraftCanvas(
-          document: doc,
-          index: index,
-          camera: controller,
-          tiles: true,
-          tileDevicePixels: 64,
-        ),
-      ),
-    ),
-  ));
-  await t.pump();
-  final state = t.state<DraftCanvasState>(find.byType(DraftCanvas));
-  return TiledHarness(state.tileCache!, controller, doc);
-}
-
-/// Pumps until the canvas stops asking for frames, bounded.
-///
-/// The bound is not decoration: an implementation that asks forever would
-/// otherwise hang the suite instead of failing it.
-Future<void> settle(WidgetTester t, TiledHarness h) async {
-  for (var i = 0; i < 40 && t.binding.hasScheduledFrame; i++) {
-    await t.pump();
-  }
-  expect(t.binding.hasScheduledFrame, isFalse,
-      reason: 'the settle must terminate');
-}
+import 'support/tile_harness.dart';
 
 void main() {
   ViewportTransform at(double scale, double e, double f) => ViewportTransform(
@@ -131,6 +72,16 @@ void main() {
     // finish covering (defeating the setup) or, if it never can, hang the
     // suite -- neither is wanted.
     h.cache.bakeBudgetDevicePixels = 64 * 64;
+    // **And a ceiling below one band, which is what actually holds the
+    // generation short now.** Plan 3i Task 8's rest bake is not rationed by
+    // `bakeBudgetDevicePixels` -- it fills the viewport a tile row at a time
+    // -- so the budget alone no longer keeps a generation from covering. It
+    // declines to run at all when the ceiling cannot hold a band plus the
+    // visible set, and eight tiles cannot hold a thirteen-tile row, so this
+    // is the knob that produces the never-covering generation the setup
+    // needs. Both are kept: the budget is what bounds the frames the rest
+    // bake declines.
+    h.cache.cacheBytes = 8 * 64 * 64 * 4;
     await t.pump();
     // Non-vacuous setup, asserted rather than assumed: if this generation
     // somehow did cover, the zoom below would mint a composite the normal
