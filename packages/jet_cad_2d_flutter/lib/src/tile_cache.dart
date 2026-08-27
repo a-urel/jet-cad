@@ -480,6 +480,19 @@ class TileCache {
   /// pixels once, not eight times.
   Image? _carryOver;
 
+  /// The band image the current rest bake is slicing, if one is resident.
+  ///
+  /// Null on every frame that is not inside a band's slice loop. Held as a
+  /// field rather than a local **so that [liveBytes] can see it**: the ceiling
+  /// is consulted per sliced tile, and a source image invisible to the meter
+  /// would let the peak run past `kTileCacheBytes` inside the one frame the
+  /// meter exists to bound.
+  Image? _band;
+
+  /// Test seam for the byte meter. See [_band].
+  @visibleForTesting
+  void debugSetBand(Image? band) => _band = band;
+
   /// The screen space [_carryOver] was recorded in: the quantised camera of
   /// the last frame the retired generation covered.
   ///
@@ -617,8 +630,10 @@ class TileCache {
   /// what `Picture.toImageSync` allocates in [_bake].
   int get liveBytes {
     final carryOver = _carryOver;
+    final band = _band;
     return _tiles.length * _tileBytes +
-        (carryOver == null ? 0 : carryOver.width * carryOver.height * 4);
+        (carryOver == null ? 0 : carryOver.width * carryOver.height * 4) +
+        (band == null ? 0 : band.width * band.height * 4);
   }
 
   /// Tiles the ceiling reclaimed over this cache's whole life.
