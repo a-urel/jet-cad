@@ -668,6 +668,29 @@ const double kZoomFactor = 1.03;
 Offset zoomFocusFor(Size viewport) =>
     Offset(viewport.width * 0.30, viewport.height * 0.70);
 
+/// Warns, loudly, when the window a caller is about to run [runTileZoomPhase]
+/// against is not [pinned] -- the 1600x1200 logical reference every number in
+/// design spec §5, and every figure in this plan's measurement notes, is
+/// priced against.
+///
+/// **A warning, not a throw.** [runTileZoomPhase] accepts any finite viewport
+/// and still produces a report -- refusing to run would trade a labelled
+/// number for no number at all, which is worse for an operator mid-session
+/// than a number they have to read the label on. Before this check, the only
+/// way to notice a mismatch was the unrelated `R2 app-run: window=...` print
+/// upstream -- easy to have scrolled past by the time the zoom arm's numbers
+/// print. This check sits at the call site itself, so the warning lands right
+/// next to the numbers it is warning about.
+void warnIfZoomViewportMismatch(Size real, Size pinned) {
+  if (real == pinned) return;
+  print('  !!! WARNING: tile zoom phase run at window='
+      '${real.width.toStringAsFixed(0)}x${real.height.toStringAsFixed(0)}, '
+      'not the pinned reference ${pinned.width.toStringAsFixed(0)}x'
+      '${pinned.height.toStringAsFixed(0)} -- the numbers below are measured '
+      'at the WRONG VIEWPORT and are not comparable to design spec §5 or to '
+      'any run at the pinned size !!!');
+}
+
 /// What [runTileZoomPhase] reports: the gesture's frame times and the
 /// cache's counters over it, then the settle that follows.
 class ZoomReport {

@@ -29,6 +29,14 @@ void main() {
   /// 400x300 logical at dpr 2 is 800x600 device pixels; at a 64-pixel tile
   /// that is 13 x 10 = 130 tiles against a budget of 262144 / 4096 = 64 per
   /// frame. Two frames minimum, and the fixture inks all of them.
+  ///
+  /// **The `Center` is load-bearing, the same finding `pumpTiled` in
+  /// `support/tile_harness.dart` documents.** `pumpWidget` hands its child the
+  /// surface's *tight* constraints, and a `SizedBox` under tight constraints
+  /// is inert -- so without `Center` this canvas ran at 800x600 logical
+  /// (1600x1200 device pixels, 475 tiles), not the 400x300 the comment above
+  /// describes, and the "ten is slack" bound below was really spent on eight
+  /// of its ten iterations.
   Future<TileCache> pumpFilling(WidgetTester tester) async {
     final measurer = FlutterTextMeasurer();
     addTearDown(measurer.clear);
@@ -42,15 +50,17 @@ void main() {
       data: const MediaQueryData(devicePixelRatio: kTileDpr),
       child: Directionality(
         textDirection: TextDirection.ltr,
-        child: SizedBox(
-          width: kTileViewport.width,
-          height: kTileViewport.height,
-          child: DraftCanvas(
-            document: doc,
-            index: index,
-            camera: camera,
-            tiles: true,
-            tileDevicePixels: 64,
+        child: Center(
+          child: SizedBox(
+            width: kTileViewport.width,
+            height: kTileViewport.height,
+            child: DraftCanvas(
+              document: doc,
+              index: index,
+              camera: camera,
+              tiles: true,
+              tileDevicePixels: 64,
+            ),
           ),
         ),
       ),

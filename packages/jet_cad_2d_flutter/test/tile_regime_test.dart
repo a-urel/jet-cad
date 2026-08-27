@@ -32,6 +32,15 @@ void main() {
     final b = ViewportTransform(
         worldToScreenMatrix: Transform2(1.4, 0.2, 0, -1.4, 10, 20));
     expect(sameQuantisedCamera(a, b), isFalse);
+
+    // The other skew term. Every other fixture in this file, including `a`
+    // and `b` above, leaves `c` at 0 -- so without a case that varies it,
+    // deleting `x.c == y.c` from the comparison kills no test here.
+    final c1 = ViewportTransform(
+        worldToScreenMatrix: Transform2(1.4, 0, 0.1, -1.4, 10, 20));
+    final c2 = ViewportTransform(
+        worldToScreenMatrix: Transform2(1.4, 0, 0.2, -1.4, 10, 20));
+    expect(sameQuantisedCamera(c1, c2), isFalse);
   });
 
   testWidgets('a moving frame bakes nothing and walks nothing', (t) async {
@@ -107,9 +116,14 @@ void main() {
         reason: 'the outgoing generation for both zooms never covered, so '
             '`_retireGeneration` minted nothing to fall back on -- this is '
             'the state the guard has to survive without painting nothing');
-    expect(
-        h.cache.blitCount + h.cache.liveDrawCount + h.cache.carryOverBlitCount,
-        greaterThan(0),
+    // `liveDrawCount` alone, not the three-way sum: a single blitted tile
+    // satisfies "not gated" without proving the frame drew any geometry, and
+    // the live walk is what the ordinary bake-and-live-walk path this guard
+    // falls through to actually promises. Confirmed to still die to the
+    // guard's own mutation (deleting `_carryOver == null ||`): with no
+    // composite and the clause gone, `resting` reads false, the early return
+    // fires, and `liveDrawCount` stays 0.
+    expect(h.cache.liveDrawCount, greaterThan(0),
         reason: 'a moving frame with no composite to show must still draw '
             'something -- the ordinary bake-and-live-walk path -- rather '
             'than leave the viewport blank for the length of the gesture');

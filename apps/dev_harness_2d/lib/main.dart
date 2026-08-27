@@ -528,6 +528,7 @@ Future<void> _driveR2(
     // `runTileZoomPhase`'s doc comment for what a differently sized real
     // window means for these numbers.
     const zoomViewport = Size(1600, 1200);
+    warnIfZoomViewportMismatch(viewport, zoomViewport);
     for (var arm = 0; arm < kZoomArms; arm++) {
       camera.value = fittedCamera;
       await _pumpFrame();

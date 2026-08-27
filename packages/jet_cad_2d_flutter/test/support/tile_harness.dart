@@ -162,12 +162,16 @@ Future<int> settleFromBands(WidgetTester t, TiledHarness h) async {
   await t.pump();
   await settle(t, h);
   h.cache.debugOnSliceForTest = null;
-  // Anti-vacuity, and the clause the whole helper exists for: an arm that
-  // compared two frames after a settle that sliced nothing would be a gate on
-  // the per-tile bake wearing the band path's name.
-  expect(slices, greaterThan(0),
-      reason: 'the rest frame sliced no tile at '
-          'all, so nothing below measures the band path');
+  // Pinned to equality, not merely non-zero: this helper's own doc comment
+  // promises **every** visible tile was cut out of a band, and a rest bake
+  // that filled some tiles through the band path and backfilled the rest
+  // through the ordinary per-tile `_bake` would satisfy `greaterThan(0)`
+  // while breaking that promise. Measured on this harness: `slices ==
+  // liveTileCount == 130`.
+  expect(slices, equals(h.cache.liveTileCount),
+      reason: 'every visible tile must have been cut from a band -- a '
+          'partial band bake backfilled through the ordinary per-tile path '
+          'must not pass as a band settle');
   expect(h.cache.viewportCovered, isTrue,
       reason: 'the rest bake must have refilled the generation it dropped');
   return slices;

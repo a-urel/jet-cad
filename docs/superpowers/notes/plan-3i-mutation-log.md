@@ -1,5 +1,23 @@
 # Plan 3i — mutation log
 
+> **Note, added once the batch-minors pass understood the discrepancy below:**
+> M2, M6 and M6b were all measured under Task 8, before Task 9's `Center` fix
+> to `pumpTiled` (`support/tile_harness.dart`, commit `1e2f891`) landed.
+> Before that fix, `pumpWidget` handed the canvas its surface's *tight*
+> constraints and the un-centred `SizedBox` was inert against them, so the
+> canvas those three mutants ran on was 800x600 logical -- 1600x1200 device
+> pixels at `kTileDpr`, 25 x 19 = 475 tiles, ~19 one-tile-row bands -- not the
+> 400x300 logical / 130 tile / ~10 band canvas the fix made every later entry
+> in this file true of. The kills stand and are **not re-run**: each mutation
+> still produces exactly the failure its own entry describes, on whatever
+> canvas the suite ran against that day, and a canvas size does not decide
+> whether a band image leaks or a slice loop drops eleven tiles. What the note
+> is for is the raw counts those three entries print -- `475`, `513`, `38`,
+> `19 bands`, and the `800x600`/`BoxConstraints(w=800.0, h=600.0)` seen in one
+> stack trace -- so a reader does not mistake them for the fixed canvas's
+> figures (130 tiles, ~10 bands) or wonder why they disagree with every later
+> entry.
+
 ## M1
 
 **Task:** Task 2, "A moving frame draws the composite and nothing else."
@@ -158,6 +176,9 @@ instead of 0), confirming the threshold of 2 is necessary to meet the spec.
 
 ## M2 — the slice loop emits only the first tile of each band
 
+> Measured at the pre-fix 800x600-logical canvas -- see the note at the top
+> of this file. The kill stands; it is not re-run.
+
 **Task 8.** A band is walked and rasterised in full, but only its leftmost tile
 is cut out of it. Every other visible key is left to the budgeted tile loop, so
 a resting frame no longer covers the viewport in one frame — which is the whole
@@ -226,6 +247,11 @@ Failing tests:
 ---
 
 ## M6 — the band image is never disposed
+
+> Measured at the pre-fix 800x600-logical canvas -- see the note at the top
+> of this file. `475`, `513` and `19 bands` below are that canvas's counts,
+> not the fixed canvas's 130 tiles / ~10 bands. The kill stands; it is not
+> re-run.
 
 **Task 8.** The band image is dropped from `_band` but its native memory is
 never released. The brief spells this mutation as deleting `image.dispose();`
@@ -297,6 +323,10 @@ Failing tests:
 ---
 
 ## M6b — the band image is never assigned to `_band`
+
+> Measured at the pre-fix 800x600-logical canvas -- see the note at the top
+> of this file (the `BoxConstraints(w=800.0, h=600.0)` in the transcript
+> below is that canvas). The kill stands; it is not re-run.
 
 **Task 8, fix round 1.** The band is baked, sliced and disposed correctly, but
 `_band` is never set, so `liveBytes` cannot see the one image the whole banding
@@ -1101,3 +1131,87 @@ The test description was:
 Failing tests:
   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart: an edit after a sliced settle condemns the sliced tiles
 ```
+
+---
+
+## M12 — the skew term c is not compared
+
+**Batch-minors pass, found by review of `tile_regime_test.dart`.** Every
+fixture in that file — the `at()` helper and the skew test's own literals —
+sets `c = 0`, including both sides of `'the skew terms are compared too'`.
+Deleting `x.c == y.c` from `sameQuantisedCamera` therefore killed no test: `c`
+never varied, so the field being ignored was indistinguishable from the field
+being equal. Fixed by extending that test with a second pair that varies `c`
+and holds every other field fixed.
+
+**Mutation:**
+
+```diff
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -240,7 +240,6 @@
+   return x.a == y.a &&
+       x.b == y.b &&
+-      x.c == y.c &&
+       x.d == y.d &&
+       x.e == y.e &&
+       x.f == y.f;
+```
+
+**Procedure:** copied `tile_cache.dart` aside to the scratchpad, edited the
+working file to delete `x.c == y.c &&`, ran
+`CI=true flutter test test/tile_regime_test.dart`, confirmed red, then
+restored the working file from the scratchpad copy. **Never `git checkout`.**
+
+**Result:** red, as expected — the new `c1`/`c2` case in `'the skew terms are
+compared too'` fails because two transforms differing only in `c` now compare
+equal.
+
+**Verbatim output:**
+
+```
+Resolving dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (105.0.0 available)
+  analyzer 13.3.0 (14.1.0 available)
+  code_assets 1.2.1 (2.0.0 available)
+  hooks 2.1.0 (2.2.0 available)
+  lucide_icons_flutter 3.1.15 (3.1.17 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  objective_c 9.5.0 (9.6.0 available)
+  package_config 2.2.0 (3.0.0 available)
+  record_use 1.1.0 (1.1.1 available)
+  shadcn_ui 0.55.1 (0.56.2 available)
+  source_maps 0.10.13 (0.10.14 available)
+  test 1.31.1 (1.31.2 available)
+  test_api 0.7.12 (0.7.13 available)
+  test_core 0.6.18 (0.6.19 available)
+  vm_service 15.2.0 (15.3.0 available)
+Got dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`!
+15 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
+00:00 +0: the same camera compares same
+00:00 +1: a scale change compares different
+00:00 +2: a translation change compares different
+00:00 +3: the skew terms are compared too
+00:00 +3 -1: the skew terms are compared too [E]
+  Expected: false
+    Actual: <true>
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/tile_regime_test.dart 43:5                     main.<fn>
+  
+00:00 +3 -1: a moving frame bakes nothing and walks nothing
+00:00 +4 -1: a moving frame with no composite falls through and draws something
+00:00 +5 -1: a steadily spun wheel never arms the rest gate
+00:00 +6 -1: the gate needs two unchanged frames, not one
+00:00 +7 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart: the skew terms are compared too
+```
+
+Restored from the scratchpad copy and re-ran the same file green (`+8: All
+tests passed!`) before moving on.
