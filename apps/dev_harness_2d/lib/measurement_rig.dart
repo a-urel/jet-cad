@@ -637,3 +637,230 @@ void _probeBake(TileCache cache, CameraController camera, DraftPainter painter,
       'walkMsPerTile=${(walkMs / tiles).toStringAsFixed(3)} '
       'visibleSetBytes=${tiles * cache.tileDevicePixels * cache.tileDevicePixels * 4}');
 }
+
+/// Steps in each direction of the `tile zoom` phase's script. See Plan 3i's
+/// Task 11 for why 40 and not fewer: `kZoomFactor ^ kZoomSteps` = 3.26x,
+/// which cannot sit inside one power-of-two rebase step
+/// ([rebaseOriginFor] in `camera_controller.dart`) -- a script that stays
+/// inside one step never re-quantises and the anti-degenerate rule (clause
+/// 3) is unmet.
+///
+/// Pinned by the spec, §5. Not the implementer's to adjust -- see the task
+/// brief and the design spec before changing either constant.
+const int kZoomSteps = 40;
+
+/// Per-step zoom factor, matching what one trackpad update delivers. Pinned
+/// alongside [kZoomSteps].
+const double kZoomFactor = 1.03;
+
+/// The `tile zoom` phase's focal point: deliberately off-centre, at 30%/70%
+/// of the viewport.
+///
+/// A focal point at the viewport's centre is the degenerate case -- the
+/// anchor would coincide with [rebaseOriginFor]'s own centre and half the
+/// residual arithmetic the zoom exercises would never run (anti-degenerate
+/// rule, clause 5).
+///
+/// [viewport] is the size the script's own numbers are priced against --
+/// the pinned **1600x1200 logical at `devicePixelRatio` 2** reference
+/// viewport (§5), not necessarily whatever the real window happens to be.
+/// See [runTileZoomPhase]'s doc comment for what that means for a caller.
+Offset zoomFocusFor(Size viewport) =>
+    Offset(viewport.width * 0.30, viewport.height * 0.70);
+
+/// What [runTileZoomPhase] reports: the gesture's frame times and the
+/// cache's counters over it, then the settle that follows.
+class ZoomReport {
+  ZoomReport({
+    required this.gestureFrameMs,
+    required this.gestureBakes,
+    required this.gestureLiveDraws,
+    required this.settleMs,
+    required this.settleFrames,
+  });
+
+  /// `totalSpan`, one entry per gesture frame -- 80 entries at the pinned
+  /// script (`2 * kZoomSteps`). p95 over this list is criterion 2.
+  final List<double> gestureFrameMs;
+
+  /// [TileCache.bakeCount] since the counters were reset at the start of the
+  /// gesture, read at the gesture's end.
+  ///
+  /// **This is the budgeted path's unit: once per tile, not once per band.**
+  /// Every frame in the 80-frame gesture is a *moving* frame -- the camera
+  /// changes every frame by construction -- so [TileCache.paintFrame]'s rest
+  /// branch (`_restBake`, counted once per band) never runs during the
+  /// gesture; only the ordinary budgeted tile loop could contribute here.
+  /// Criterion 1 expects this at zero. A reader comparing this figure
+  /// against a settle-phase bake count (band-counted) would be comparing two
+  /// different units -- see `TileCache.bakeCount`'s own doc comment.
+  final int gestureBakes;
+
+  /// [TileCache.liveDrawCount] over the same window as [gestureBakes].
+  /// Criterion 1 expects this at zero too.
+  final int gestureLiveDraws;
+
+  /// `totalSpan` of the one idle frame at which [TileCache.viewportCovered]
+  /// first became true, or of the last idle frame pumped if 30 idle frames
+  /// never reached coverage. Criterion 3 reads this.
+  final double settleMs;
+
+  /// How many idle frames elapsed before [TileCache.viewportCovered] first
+  /// read true (1 if the very first idle frame after the gesture already
+  /// covers, which is what criterion 3 asserts), or 30 if coverage was never
+  /// reached within the pinned idle-frame budget.
+  final int settleFrames;
+}
+
+/// The `tile zoom` phase, pinned by the design spec (§5) and not the
+/// implementer's to choose: [kZoomSteps] frames zooming in at [kZoomFactor]
+/// about [zoomFocusFor], then [kZoomSteps] zooming back out at
+/// `1 / kZoomFactor` about the same point -- one camera change per frame,
+/// matching what a trackpad delivers -- then 30 idle frames, where the
+/// settle is read.
+///
+/// **[camera] must already be at R2's fitted camera** (the same
+/// `ViewportTransform.fit` the caller's R2 rig used, before that rig's own
+/// scripted motion), so the zoom arm and Plan 3h's tile-pan arm are
+/// comparable measurements of the same starting state, not of two different
+/// cameras.
+///
+/// **[viewport] is the pinned reference size, 1600x1200 logical at
+/// `devicePixelRatio` 2 -- not necessarily the real window.** Every number
+/// in the design spec's §5 is priced against that size; [zoomFocusFor] turns
+/// it into a screen-space anchor the same way `runR2Rig`'s own zoom step
+/// anchors at the fixed `Offset(800, 600)` (that phase's viewport centre)
+/// regardless of what window the app is actually running in. A caller on a
+/// real window of a different size gets a phase that still runs -- `zoomAt`
+/// accepts any finite, positive factor at any screen point -- but the
+/// focal point then sits at a different fraction of the *real* viewport than
+/// 30%/70%, and comparing its numbers against another run's figures, or
+/// against the design spec's priced predictions, is only sound once the
+/// window is confirmed to actually be the reference size. `main.dart`'s
+/// `RUN_R2` mode prints the real window size for exactly this reason; a
+/// caller of this phase should do the same.
+///
+/// The idle frames drive no camera change at all -- unlike the forced
+/// no-op `panBy(Offset.zero)` this file's other phases use to force a final
+/// repaint once nothing is dirty, an idle frame here is a bare [pumpFrame]
+/// call. `DraftCanvasState`'s own settle notifier
+/// (`draft_canvas.dart:_requestSettleFrame`) is what keeps requesting a real
+/// frame for as long as the cache owes tiles; forcing one artificially would
+/// measure a phase this rig does not actually drive on a real trackpad
+/// gesture's tail.
+Future<ZoomReport> runTileZoomPhase({
+  required CameraController camera,
+  required TileCache cache,
+  required Future<void> Function() pumpFrame,
+  required Size viewport,
+}) async {
+  refuseDebugMode();
+  final focus = zoomFocusFor(viewport);
+
+  // Two throwaway frames before the counters reset, the same boundary slack
+  // `runTilePhases`'s own `phase()` helper takes: a `FrameTiming` is reported
+  // after its frame rasterises, so the phase boundary needs a frame or two of
+  // slack the gesture itself must not be charged for.
+  for (var i = 0; i < 2; i++) {
+    camera.panBy(Offset.zero);
+    await pumpFrame();
+  }
+
+  final gestureTimings = <FrameTiming>[];
+  void collectGesture(List<FrameTiming> t) => gestureTimings.addAll(t);
+  SchedulerBinding.instance.addTimingsCallback(collectGesture);
+  // Warm-up excluded: reset only after the fitted camera has settled (the
+  // two throwaway frames above), per §5.
+  cache.resetCounters();
+  try {
+    for (var i = 0; i < kZoomSteps; i++) {
+      camera.zoomAt(focus, kZoomFactor);
+      await pumpFrame();
+    }
+    for (var i = 0; i < kZoomSteps; i++) {
+      camera.zoomAt(focus, 1 / kZoomFactor);
+      await pumpFrame();
+    }
+  } finally {
+    SchedulerBinding.instance.removeTimingsCallback(collectGesture);
+  }
+  final gestureBakes = cache.bakeCount;
+  final gestureLiveDraws = cache.liveDrawCount;
+  final gestureFrameMs = [
+    for (final t in gestureTimings) t.totalSpan.inMicroseconds / 1000.0
+  ];
+
+  // 30 idle frames. No camera nudge -- see the doc comment above for why a
+  // bare pumpFrame is the honest idle frame here. Tracks the first frame at
+  // which the viewport becomes covered, which is what criterion 3 reads;
+  // still pumps the full 30 so a cache that keeps asking for frames after
+  // coverage (which it must not) is exercised the same way a real trackpad
+  // gesture's tail would exercise it.
+  const idleFrames = 30;
+  var settleFrames = idleFrames;
+  var settleMs = 0.0;
+  var covered = false;
+  for (var i = 0; i < idleFrames; i++) {
+    final idleTimings = <FrameTiming>[];
+    void collectIdle(List<FrameTiming> t) => idleTimings.addAll(t);
+    SchedulerBinding.instance.addTimingsCallback(collectIdle);
+    try {
+      await pumpFrame();
+    } finally {
+      SchedulerBinding.instance.removeTimingsCallback(collectIdle);
+    }
+    final frameMs = idleTimings.isEmpty
+        ? 0.0
+        : idleTimings.last.totalSpan.inMicroseconds / 1000.0;
+    if (!covered && cache.viewportCovered) {
+      covered = true;
+      settleFrames = i + 1;
+      settleMs = frameMs;
+    } else if (!covered) {
+      // Not yet covered: keep the running "last frame pumped" figure, so a
+      // script that never reaches coverage within the idle budget still
+      // reports something rather than 0.0.
+      settleMs = frameMs;
+    }
+  }
+
+  return ZoomReport(
+    gestureFrameMs: gestureFrameMs,
+    gestureBakes: gestureBakes,
+    gestureLiveDraws: gestureLiveDraws,
+    settleMs: settleMs,
+    settleFrames: settleFrames,
+  );
+}
+
+/// Prints a [ZoomReport] the way [report] prints a plain frame-timing list,
+/// plus the counters [report] alone cannot see.
+///
+/// **`gestureBakes` is the budgeted, per-tile unit of [TileCache.bakeCount],
+/// not the per-band unit the rest bake counts in.** See [ZoomReport
+/// .gestureBakes]'s own doc comment for why: every gesture frame is moving,
+/// so the rest path never contributes to it. A reader comparing this figure
+/// against a Plan 3g or 3h transcript, where `bakeCount` always meant tiles,
+/// is comparing like with like here -- but comparing it against this same
+/// cache's post-settle `bakeCount` would not be, because a rest bake (if one
+/// fired during the idle frames this report also covers) counts bands.
+void printZoomReport(String label, ZoomReport r) {
+  if (r.gestureFrameMs.isEmpty) {
+    print('$label: no gesture frames recorded');
+  } else {
+    final sorted = [...r.gestureFrameMs]..sort();
+    var sum = 0.0;
+    for (final v in sorted) {
+      sum += v;
+    }
+    print('$label gestureFrames=${sorted.length} '
+        'p50=${sorted[(sorted.length * 0.5).floor()].toStringAsFixed(2)}ms '
+        'p95=${sorted[(sorted.length * 0.95).floor()].toStringAsFixed(2)}ms '
+        'max=${sorted.last.toStringAsFixed(2)}ms '
+        'mean=${(sum / sorted.length).toStringAsFixed(2)}ms');
+  }
+  print('  gestureBakes=${r.gestureBakes}(tiles, budgeted path) '
+      'gestureLiveDraws=${r.gestureLiveDraws}');
+  print('  settleFrames=${r.settleFrames} '
+      'settleMs=${r.settleMs.toStringAsFixed(2)}');
+}

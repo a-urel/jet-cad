@@ -265,6 +265,22 @@ final double kPanStep = _doubleDefine(
     'PAN_STEP', const String.fromEnvironment('PAN_STEP'), double.nan,
     minimum: 0);
 
+/// How many times `RUN_R2` repeats the `tile zoom` phase
+/// ([runTileZoomPhase]) after `runR2Rig` finishes, each run starting fresh
+/// from R2's own fitted camera. Zero means the phase never runs at all.
+///
+/// **An `int.fromEnvironment` would be wrong here for [_intDefine]'s
+/// standing reason**: it silently reads anything it cannot parse as the
+/// default, and `ZOOM_ARMS=4` mistyped as `ZOOM_ARMS=4x` would run zero arms
+/// while looking like a run that asked for four.
+///
+/// Inert at its default of zero: an ordinary `RUN_R2` session is unaffected,
+/// and this is additive to `runR2Rig`'s own pan and zoom phases, not a
+/// replacement for either.
+final int kZoomArms = _intDefine(
+    'ZOOM_ARMS', const String.fromEnvironment('ZOOM_ARMS'), 0,
+    minimum: 0);
+
 /// The one measurer the harness document is built with, reachable from
 /// `_HarnessState.dispose` so the native paragraphs it holds are released.
 ///
@@ -481,6 +497,11 @@ Future<void> _driveR2(
   print('R2 app-run: window=${viewport.width.toStringAsFixed(0)}x'
       '${viewport.height.toStringAsFixed(0)} dpr=${view.devicePixelRatio}');
 
+  // R2's fitted camera, held so the `tile zoom` phase below can restart from
+  // it — [runR2Rig] moves `camera` through its own 240-frame script, and by
+  // the time it returns the fitted state above is long gone.
+  final fittedCamera = camera.value;
+
   await runR2Rig(
     entities: kEntities,
     lineweightScale: kLineweightScale,
@@ -496,6 +517,29 @@ Future<void> _driveR2(
     settle: _settle,
     panStep: kPanStep,
   );
+
+  // The `tile zoom` phase (Plan 3i, Task 11): `ZOOM_ARMS` repeats of the
+  // pinned script, each starting fresh from the same fitted camera `runR2Rig`
+  // itself started from, so this arm and Plan 3h's tile-pan arm inside
+  // `runR2Rig` describe the same starting state. Off by default -- see
+  // [kZoomArms].
+  if (tileCache != null && kZoomArms > 0) {
+    // The pinned reference viewport (§5), not `viewport` above -- see
+    // `runTileZoomPhase`'s doc comment for what a differently sized real
+    // window means for these numbers.
+    const zoomViewport = Size(1600, 1200);
+    for (var arm = 0; arm < kZoomArms; arm++) {
+      camera.value = fittedCamera;
+      await _pumpFrame();
+      final zoomReport = await runTileZoomPhase(
+        camera: camera,
+        cache: tileCache,
+        pumpFrame: _pumpFrame,
+        viewport: zoomViewport,
+      );
+      printZoomReport('R2 tile zoom arm $arm ($kEntities)', zoomReport);
+    }
+  }
   print('R2 app-run: done');
 }
 
