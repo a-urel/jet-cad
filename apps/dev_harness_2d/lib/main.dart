@@ -20,6 +20,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
 
 import 'measurement_rig.dart';
+import 'seam_corpus.dart';
 
 /// Entity count, so one binary serves both corpus sizes.
 const int kEntities = int.fromEnvironment('ENTITIES', defaultValue: 50000);
@@ -166,6 +167,32 @@ final bool kTiles =
   'on' => true,
   final other => throw StateError('TILES must be on or off; got "$other"'),
 };
+
+/// Which document the harness builds.
+enum HarnessCorpus {
+  /// [harnessDocument]: 50,000 entities of generated clutter. What every
+  /// measurement in `docs/superpowers/notes/` was taken against.
+  measure,
+
+  /// [seamCorpus]: about sixty entities, built to be looked at. Reaches gap
+  /// G1 -- the antialiased seam no widget test in this repository can produce.
+  simple,
+}
+
+/// **A `String.fromEnvironment`, and it stays one**, for the reason stated at
+/// [kBackend] and [kTiles]: Plan 3c lost a full device run to
+/// `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as false.
+/// An unrecognised value throws rather than falling back to the default, so a
+/// typo cannot silently measure the wrong corpus.
+HarnessCorpus parseCorpus(String raw) => switch (raw) {
+      'measure' => HarnessCorpus.measure,
+      'simple' => HarnessCorpus.simple,
+      final other =>
+        throw StateError('CORPUS must be measure or simple; got "$other"'),
+    };
+
+final HarnessCorpus kCorpus = parseCorpus(
+    const String.fromEnvironment('CORPUS', defaultValue: 'measure'));
 
 /// A tile's side in device pixels, forwarded to [TileCache.tileDevicePixels].
 ///
@@ -403,7 +430,10 @@ void _addFillRegions(DraftDocument doc, int entityCount) {
 const bool kRunR2 = bool.fromEnvironment('RUN_R2');
 
 void main() {
-  final doc = harnessDocument();
+  final doc = switch (kCorpus) {
+    HarnessCorpus.measure => harnessDocument(),
+    HarnessCorpus.simple => seamCorpus(measurer: harnessMeasurer),
+  };
   if (!kRunR2) {
     runApp(HarnessApp(document: doc));
     return;

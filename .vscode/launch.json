@@ -5,12 +5,54 @@
     "version": "0.2.0",
     "configurations": [
         {
-            // First in the list, so a fresh window's F5 lands here.
+            // First in the list, so F5 lands here.
+            //
+            // Ordering alone is not enough: VS Code remembers the selected
+            // configuration by name, and a remembered name wins over list
+            // order. Every configuration here was renamed once for exactly
+            // that reason -- a remembered name that no longer exists is
+            // discarded, and the first entry becomes the default again. If
+            // F5 ever opens the wrong one, pick it once from the Run and
+            // Debug dropdown; the choice sticks from then on.
+            //
+            // The naked-eye corpus: ~60 entities, built to make a tile seam
+            // visible. `ENTITIES` is not passed -- it does not reach this
+            // corpus, and passing it would suggest otherwise.
+            "name": "2d: seam check -- tiles ON",
+            "cwd": "apps/dev_harness_2d",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "macos",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "--dart-define=TILES=on",
+                "--dart-define=CORPUS=simple"
+            ]
+        },
+        {
+            // The control the seam check is read against: same drawing, same
+            // camera, no tile cache. A line that differs between the two is
+            // the cache's doing.
+            "name": "2d: seam check -- tiles off (control)",
+            "cwd": "apps/dev_harness_2d",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "macos",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "--dart-define=CORPUS=simple"
+            ]
+        },
+        {
+            // The measurement corpus: 50,000 entities, what every number in
+            // `docs/superpowers/notes/` was taken against.
             //
             // TILES defaults to `off` in `main.dart`, so without the define
             // below the tile cache never runs and the frame path under test
             // is not the one being exercised.
-            "name": "dev_harness_2d (tiles on, profile)",
+            "name": "2d: measure 50k -- tiles ON, profile",
             "cwd": "apps/dev_harness_2d",
             "program": "lib/main.dart",
             "request": "launch",
@@ -25,7 +67,7 @@
         {
             // The control: same app, same document, tile cache off. What a
             // seam looks like here is what it looked like before the cache.
-            "name": "dev_harness_2d (tiles off, profile)",
+            "name": "2d: measure 50k -- tiles off, profile",
             "cwd": "apps/dev_harness_2d",
             "program": "lib/main.dart",
             "request": "launch",
@@ -41,7 +83,7 @@
             // that mean nothing -- `refuseDebugMode()` in the rig refuses to
             // record from a debug build, and the same caution applies to
             // anything you judge by eye here.
-            "name": "dev_harness_2d (tiles on, debug)",
+            "name": "2d: measure 50k -- tiles ON, debug",
             "cwd": "apps/dev_harness_2d",
             "program": "lib/main.dart",
             "request": "launch",
