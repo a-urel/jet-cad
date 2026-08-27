@@ -1,13 +1,13 @@
 # Plan 3i — the zoom frame
 
-**Date:** 2026-08-26. **Base:** `main` at `6630cd4`. **Revised** the same day
-after three external reviews; §10 records what each one changed and the one
-finding that was rejected.
+**Date:** 2026-08-26. **Base:** `main` at `026b873`. **Revised twice** the same
+day, after three external reviews and then two more; §10 records what each
+round changed and the one finding that was rejected.
 
 **Goal.** Make the zoom gesture cheap and the sharpening that follows it
 immediate, by splitting the tiled frame into two regimes: a **moving** frame
-that draws only the carry-over composite, and a **resting** frame that bakes
-once and slices the result into tiles. Measured at 50,000 and 500,000
+that draws only the carry-over composite, and a **resting** frame that walks
+the visible region in tile-row bands and slices each band into tiles. Measured at 50,000 and 500,000
 entities.
 
 **What this plan does not do.** It does not deliver level-of-detail geometry.
@@ -80,19 +80,39 @@ unnecessary.
 
 ## 2. Decisions
 
-**D1 — Two regimes, and the resting one has a precondition.** A frame is
+**D1 — Three frame kinds, and the resting one has a precondition.** A frame is
 *moving* if its quantised scale fails `matchesScale` against the current
 generation's anchor. A frame qualifies for a **rest bake** only when all three
 hold: the scale matched, the generation does not cover the viewport, and the
-scale has now matched for **two consecutive frames**.
+**whole quantised camera** — scale *and* translation — has been unchanged for
+two consecutive frames.
 
-The third clause is the wheel's. A mouse wheel delivers isolated notches, so
-without it every notch is one moving frame followed immediately by a resting
-frame — a 32 ms bake per notch, thrown away by the next notch, and invisible
-to any criterion that only watches moving frames. Two consecutive matches cost
-one frame of latency (~16.7 ms) and make a continuously spun wheel bake
-nothing. **A pan is not a rest bake**: a pan keeps the scale and covers the
-viewport, so clause two excludes it, which is what keeps D7 true.
+**Translation is in that clause and not only scale.** Immediately after a
+zoom the generation is empty, so a pan that follows keeps the scale and does
+*not* cover the viewport: under a scale-only rule two same-scale pan frames
+would satisfy every condition and spend a full bake while the camera is still
+moving. Requiring the camera to be unchanged excludes that, and still excludes
+an ordinary pan over a covered generation by the second clause, which is what
+keeps D8 true.
+
+**The third kind is the frame in between**, which matched once and has not yet
+matched twice. It draws exactly what a moving frame draws: the composite, and
+nothing else. Left undefined it would fall through to the ordinary tile loop —
+bake one tile, `uncovered` bounds to the whole viewport, and on a zoom out a
+full-viewport live walk lands once per gesture, which is the frame D3 exists to
+prevent.
+
+**A scale-changing frame does not count toward the two matches.** It fails
+against the outgoing grid and would match the grid it just installed; the
+counter resets on any change and starts from the first frame that changed
+nothing.
+
+**The two-frame clause is the wheel's.** A mouse wheel delivers isolated
+notches, so without it every notch is one moving frame followed immediately by
+a resting frame — a full bake per notch, discarded by the next notch, and
+invisible to any criterion that only watches moving frames. Two consecutive
+unchanged cameras cost one frame of latency (~16.7 ms) and make a continuously
+spun wheel bake nothing.
 
 **D2 — No gesture-end event.** The regime is derived, not reported. A mouse
 wheel has no gesture-end event and a trackpad does; deriving serves both and
@@ -112,39 +132,76 @@ uncovered region" is therefore a full-viewport live walk — 31.5–41.6 ms at
 direction would have hidden exactly the worst case §6 clause 1 exists to
 expose.
 
-**D4 — A resting frame bakes once, over a tile-aligned region, and slices
-it.** The source is **not** the viewport. It is the union of the visible tile
-keys' rectangles, which is tile-aligned and up to one tile larger on each
-edge. `visibleKeys` yields every tile the viewport touches, including tiles
-that extend past it (`:264-278`); a viewport-sized source has no pixels for
-those overhangs, and a tile marked present with a transparent overhang blits
-that transparency on the next small pan.
+**D4 — A resting frame bakes the tile-aligned region in bands and slices each
+band.** The source is **not** the viewport. `visibleKeys` yields "every key
+covering the viewport, as a full rectangle" (`:263-278`), including tiles that
+extend past it; a viewport-sized source has no pixels for those overhangs, and
+a tile marked present with a transparent overhang blits that transparency on
+the next small pan.
+
+**Bands, not one image, and D5 says why.** The region is walked one tile row
+at a time. Each band is the union's full width and one tile tall.
 
 The sequence inside the frame:
 
 1. Drop the carry-over composite. The frame is about to draw real content and
-   does not need it — and this is what keeps the peak under the cap (D5).
-2. One walk into one `Picture` over the tile-aligned region, then one
-   `toImageSync`.
-3. For each visible key: a `PictureRecorder`, one `drawImageRect` from the
-   source image at that key's integral device rectangle, one `toImageSync`.
-4. Release the source image.
+   does not need it.
+2. For each band: one walk into one `Picture`, one `toImageSync`, then one
+   `PictureRecorder` + `drawImageRect` + `toImageSync` per key in that band,
+   then release the band image before starting the next.
+3. No band image outlives its band.
 
-**Step 3 is a texture copy, not a geometry raster**, and that is the whole
-difference from the rejected Approach B. Both use a recorder and
-`toImageSync`; B re-rasterises geometry per tile, C copies pixels. The first
-draft's "one `toImageSync`" was wrong and is corrected here: the call count is
-**1 + N**.
+Four things about that walk are load-bearing and are decided here rather than
+left to the implementer:
 
-**D5 — Memory: drop before bake, and the ceiling holds inside the frame.**
-At the reference viewport the composite is ~29.3 MiB, a full tile set ~48 MiB,
-and the source image ~29.3 MiB. All three at once is ~106 MiB against
-`kTileCacheBytes = 96 MiB` (`:164`), and `liveBytes` counts the composite
-(`:572`). Dropping the composite first (D4 step 1) leaves ~83 MiB at peak.
-The slice **bypasses `budgetedTilesPerFrame`** — the budget rations bakes, and
-the slice is not a bake — but it does not bypass the ceiling: the same
-"consult before, not after" rule the tile loop already follows applies to each
-sliced tile.
+- **The query is padded, the clip is not.** A stroke whose centreline lies
+  just outside a band still inks inside it. `_bake` already handles this by
+  querying padded and clipping hard (`:1442-1535`), and the band pass does the
+  same: query the band expanded by `kTileSlack`, clip to the unexpanded band.
+  Dropping this is M9.
+- **The rebase origin is the viewport's**, `rebaseOriginFor(quantised.
+  visibleWorld(viewport))`, exactly as `paintFrame` derives it today. Deriving
+  it from a band's own region gives each band a different `float32` residual —
+  the thing the frame-global rule exists to prevent — and can cross a
+  power-of-two step. Dropping this is M11.
+- **Slice rectangles are source-local.** A key's device rectangle is in grid
+  space and goes negative as soon as a same-scale pan moves the key range, so
+  the copy reads `keyDeviceRect - bandDeviceRect.topLeft`, never the grid-space
+  rectangle. Dropping this is M10.
+- **Step 2's per-key work is a texture copy, not a geometry raster**, and that
+  is the whole difference from the rejected Approach B. Both use a recorder and
+  `toImageSync`; B re-rasterises geometry per tile, C copies pixels. The first
+  draft's "one `toImageSync`" was wrong: the call count is **bands + keys**.
+
+**D5 — Memory: bands exist because one image does not fit.** The first
+revision priced the source at the viewport's ~29.3 MiB while D4 had already
+made it the union of visible keys. Those are not the same thing:
+`visibleKeys` yields a full rectangle, so the union has **exactly the area of
+the tile set it will be sliced into** — 48 MiB at the 3200x2400 reference
+viewport, not 29.3.
+
+One source image therefore peaks at source 48 + tiles 48 = **96 MiB against a
+`kTileCacheBytes` of exactly 96 MiB** (`:164`), with the composite already
+dropped. Zero headroom, and the failure is not a soft overrun:
+`_makeRoomForOneTile` refuses any tile whose last-used frame is the current
+one (`:942`), which is every tile the slice loop just wrote, so at the cap it
+returns false, the tail of the loop emits nothing, and the generation never
+covers. Criterion 3 fails — and M2 stops being distinguishable from correct
+code under a cap.
+
+**One tile row at a time is the answer, and raising the cap is not.** A band is
+8 MiB at the reference viewport, so the peak is 8 + 48 = **56 MiB**. The cost
+is one walk per band instead of one for the region; bands are full width, so
+crossing multiplicity is paid on horizontal boundaries only and is nothing like
+the 4.185x a 48-tile pass pays. Raising `kTileCacheBytes` was rejected because
+Plan 3j already inherits a 192 MiB vertex buffer sitting on a doubling boundary
+with no headroom, and spending memory here would prejudge that reckoning.
+
+**The ceiling holds inside the frame.** The slice **bypasses
+`budgetedTilesPerFrame`** — the budget rations bakes and a slice is not a bake
+— but it does not bypass the ceiling: the "consult before, not after" rule the
+tile loop already follows applies to each sliced tile, and criterion 7 gates it
+with an instrument that can actually see the band image.
 
 **D6 — Sliced tiles inherit the walk's visited set, so invalidation still
 works.** `_invalidateTouched` condemns tiles by iterating `_baked` in both
@@ -155,20 +212,28 @@ corrected drawing, with `invalidationCount` reading zero. **This is a
 correctness defect, not a performance one, and the first draft did not mention
 `_baked` at all.**
 
-The single walk produces one visited set for the whole region. Every sliced
-tile takes **that same set, shared by reference** — one `Uint32List`, N map
-entries. Invalidation therefore becomes generation-coarse: any touched handle
-condemns every sliced tile, and the next resting frame rebakes the region in
-one walk. That is the right trade here, because rebaking the region costs one
-walk and not N.
+Each band's walk produces one visited set, and **every tile sliced from that
+band takes that same set, shared by reference** — one `Uint32List` per band,
+one map entry per tile. Invalidation therefore becomes band-coarse rather than
+tile-precise: a touched handle condemns its whole band, and the next resting
+frame rebakes. That is the right trade, because a band is exactly the unit a
+rebake walks anyway, so condemning one costs one walk and never N.
 
-**D7 — Slicing has no seam class, and that is an observation, not an
-action.** `kTileSlack` pads a *query*; the slice performs no per-tile query,
-so there is no pad to remove. The observation worth recording is why the pad
-exists at all: separately rasterised neighbours sample one stroke twice at
-different sub-pixel offsets. Tiles cut from one rasterisation cannot. The pad
-stays where it still does work — the live fallback's query — and is simply
-absent from this path.
+Direction two is unaffected and stays geometrically precise: it iterates
+`_baked.keys` and asks what the edit's new geometry reaches (`:1203`), which
+is a question about tile rectangles, not about what a bake visited.
+
+**D7 — Slicing removes the seam *between tiles*, and the pad still does work
+at the region's edge.** The first revision said the pad was simply absent from
+this path. That is wrong at the boundary: the band pass performs one query, and
+a stroke centred just outside the band inks inside it, so the query is padded
+by `kTileSlack` and the clip is hard — D4 states it and M9 fires at it.
+
+What slicing does remove is the seam *class*: separately rasterised
+neighbours sample one stroke twice at different sub-pixel offsets, and tiles
+cut from one rasterisation cannot. `_bake`'s own comment states the rule the
+pad follows — the query is padded, the clip is not (`:1490`). Inside a band
+there are no per-tile queries and therefore no per-tile clips to disagree.
 
 **D8 — The pan path is untouched.** After a rest bake the tiles are ordinary
 tiles, complete out to their own boundaries (D4), blitted while they cover and
@@ -210,10 +275,26 @@ Ten, all failable, every threshold named here.
 | 4 | Rest-bake wall clock **>= 3x** cheaper than the tiled fill it replaces | same session, interleaved |
 | 5 | A sliced generation is **identical to a live frame** | 3g/3h's differential instrument |
 | 6 | **Zero** difference at tile boundaries in a settled generation | pixel sweep against a live capture |
-| 7 | `liveBytes <= kTileCacheBytes` at **every point inside** the rest frame, and the source image is released | the existing ceiling argument, extended |
+| 7 | `liveBytes <= kTileCacheBytes` at **every point inside** the rest frame, **counting the band image**, and every band image is released | `liveBytes` extended to count the live band, cross-checked against `debugImagesAlive` |
 | 8 | Plan 3h's criterion 3, re-measured at **n=7–9 interleaved** | rig |
 | 9 | The pan path does not regress | Plan 3h's existing gate |
 | 10 | An edit **after** a settle invalidates the sliced tiles | `invalidationCount`, the 3g/3h invalidation matrix |
+| 11 | A settled generation is identical to live **after a sub-tile pan**, and after a pan taken *between* the last scale change and the rest bake | differential, two extra arms |
+
+**Criterion 7's instrument had to be extended, not merely pointed at.**
+`liveBytes` sums `_tiles` and `_carryOver` and nothing else (`:572`), so a
+resident band image is invisible to it and the criterion would have read green
+inside exactly the window it exists for. It counts the live band image for as
+long as one exists, and `debugImagesAlive` (`:615`) is the cross-check.
+
+**Criterion 11 exists because criterion 9 cannot see a transparent blit.**
+M7 — the source is the viewport rather than the tile-aligned union — leaves an
+edge tile with a transparent overhang, and a transparent blit costs exactly
+what an opaque one costs, so Plan 3h's p95 pan gate is blind to it. It needs a
+differential: rest-bake, pan by less than one tile, compare against live. The
+second arm is M10's: a pan taken between the last scale change and the rest
+bake moves the visible key range so the first key's grid-space rectangle goes
+negative, which a pure zoom script never produces.
 
 **Criterion 3 must read `totalSpan`.** The price-spike note this spec argues
 from records that `toImageSync` returns before the raster it schedules, that
@@ -234,7 +315,9 @@ passes after the fact is exactly what §4 exists to prevent.
 criterion missed at 2.35 against a gate of 2.4 that had been mis-derived from
 a cross-session numerator. Criterion 4 is therefore *same session, interleaved
 (rest, tiled, rest, tiled, …), never blocked*, and 3x is chosen with headroom
-against a predicted ~11x.
+against a prediction that is **~40x at the pinned reference viewport** — the
+~11x a reader might carry over belongs to the 800x600 viewport where the
+generation is 12 tiles, not 48.
 
 **Criterion 6 has to name the alignment rule or it is a restatement of M3.**
 The slice source rectangle is `destRectFor(key)` scaled by `devicePixelRatio`,
@@ -255,6 +338,12 @@ is an answer and is recorded as one.
 A gate whose script is not reproducible is not failable. The `tile zoom` phase
 is defined here and not left to the implementer:
 
+- **Viewport 1600x1200 logical at `devicePixelRatio` 2** — the 3200x2400
+  reference viewport every memory figure in this spec is priced against, and
+  **not** the 800x600 test viewport the 2026-08-26 frame counts were taken at.
+  The first revision quoted both without saying which was which, reproducing
+  inside a freshly pinned script the very omission §9 flags in the 32.06 ms
+  figure.
 - **Start** from R2's existing fitted camera, so the zoom arm and the pan arm
   share a starting state.
 - **Focal point** off-centre, at 30% / 70% of the viewport, so the anchor is
@@ -295,8 +384,7 @@ Five clauses. A gate whose fixture or script fails any of them is vacuous.
 
 ## 7. Named mutants
 
-Eight. Seven must die; the eighth is written down as a survivor **before** it
-is fired.
+Eleven. Ten must die; M8 is written down as a survivor **before** it is fired.
 
 | | Mutation | Killed by |
 |---|---|---|
@@ -306,8 +394,11 @@ is fired.
 | M4 | the rest bake fires on every frame, not only at rest | criterion 2 |
 | M5 | the sliced tiles record no `_baked` | criterion 10 |
 | M6 | the source image is never released | criterion 7 |
-| M7 | the source is the viewport, not the tile-aligned union | criterion 9 — an edge tile blits its transparent overhang after a small pan |
+| M7 | the source is the viewport, not the tile-aligned union | criterion 11 — an edge tile blits its transparent overhang after a sub-tile pan |
 | M8 | slice at `FilterQuality.low` | **nothing — a deliberate survivor** |
+| M9 | the band query is not expanded by `kTileSlack` | criterion 5, on a fixture with strokes thick enough to cross a band edge |
+| M10 | slice rectangles stay in grid space instead of band-local | criterion 11's second arm |
+| M11 | the rebase origin is derived from the band, not the viewport | criterion 5, on an arm placed near a power-of-two rebase boundary |
 
 **M8 survives by construction and is recorded, not gated.** With integral
 source rectangles a bilinear sample and a nearest sample read the same texels,
@@ -315,9 +406,15 @@ so no pixel changes; only a sampler is paid for. Plan 3h's M6 — narrowing the
 clip — had exactly this shape and was recorded as gap H6 rather than dressed
 in a gate that could not see it.
 
-**The first draft's M5 was "keep the pad when slicing" and was meaningless**,
-because the slice performs no query and there is no pad in that path. It is
-replaced above.
+**The first draft's M5 was "keep the pad when slicing" and was meaningless.**
+It was replaced in the second revision, and the third corrected the reasoning
+behind it too: the slice performs no query, but the *band pass* does, and that
+query is padded. M9 is the mutant that belongs there.
+
+**M7's killer moved.** It was pointed at criterion 9, Plan 3h's p95 pan gate,
+which cannot see it: a transparent blit costs exactly what an opaque one
+costs. One of the four blocking findings from the second round had landed on a
+gate blind to it, which is the shape §7 exists to catch.
 
 ---
 
@@ -356,34 +453,88 @@ Stated here rather than left for a reader to discover.
   this spec should not be read as having measured the shipped path.
 - **350–450 ms was labelled an inference by the note that produced it.** The
   frame *count* was measured on 2026-08-26; the milliseconds were not.
+- **The per-key texture copy is unmeasured.** D9 rejects Approach B on the
+  argument that the recorder is not the cost, the geometry is. That is almost
+  certainly right, but `bands + keys` recorder-and-`toImageSync` calls have
+  never been timed here; the nearest datum is 1.61 ms for one whole-viewport
+  blit. It is the one number the rejected review finding turns on, and the
+  results note should measure it rather than inherit the argument.
 
 ---
 
 ## 10. What the reviews changed
 
-Three external reviews. Eleven findings accepted, one rejected.
+Five external reviews over two rounds. Nineteen findings accepted, one
+rejected, none deferred.
 
-**Accepted, blocking:** `_baked` was never mentioned and dropping it is a
+**Round one, blocking:** `_baked` was never mentioned and dropping it is a
 correctness defect (D6, criterion 10, M5); `visibleKeys` yields tiles that
 overhang the viewport, so a viewport-sized source produces incomplete edge
-tiles (D4, M7); the peak of composite plus tiles plus source exceeds the byte
-cap (D5, criterion 7); a moving frame's "live walk over the uncovered region"
-is a full-viewport walk, so criterion 2 was unmeetable on every zoom-out frame
-(D3, and the human's decision to leave the ring).
+tiles (D4, M7); the peak exceeds the byte cap (D5); a moving frame's "live walk
+over the uncovered region" is a full-viewport walk, so criterion 2 was
+unmeetable on every zoom-out frame (D3, and the human's decision to leave the
+ring).
 
-**Accepted, structural:** D4 had no precondition, which made every pan frame
-resting and contradicted D8 (D1); a mouse wheel would bake once per notch
-(D1's two-frame clause); criterion 4's ratio had two readings that straddled
-its own gate (§4); §1 fact 3 stated a cause stronger than its evidence (§1);
-criterion 3 could not see raster spill (§4, `totalSpan`); criterion 6
-contradicted D4 by requiring the source image to be retained (§4, live
-capture); the first M5 was meaningless (§7); the script was not pinned (§5).
+**Round one, structural:** the resting regime had no precondition (D1); a
+mouse wheel would bake once per notch (D1); criterion 4's ratio had two
+readings straddling its own gate (§4); §1 fact 3 stated a cause stronger than
+its evidence (§1); criterion 3 could not see raster spill (§4); criterion 6
+required the source image the design releases (§4); the old M5 was meaningless
+(§7); the script was not pinned (§5).
 
-**Rejected:** that Approach C collapses into Approach B because both need a
-recorder and `toImageSync` per tile. The recorder is not the cost. B
-rasterises geometry per tile; C copies texels. D9 states this.
+**Round two, blocking, and every one of them is the same shape — a gate that
+went blind when the design changed under it:**
 
----
+- **The memory arithmetic was internally inconsistent.** D4 made the source
+  the union of visible keys; D5 kept pricing it as the viewport. The union is
+  a full rectangle, so it has the tile set's own area: 48 MiB, not 29.3, and
+  one source image peaks at exactly the 96 MiB cap with no headroom. The
+  failure is hard, not soft — `_makeRoomForOneTile` cannot evict a tile this
+  frame wrote, so the slice loop's tail emits nothing and M2 becomes
+  indistinguishable from correct code under a cap. **Bands are the answer**
+  (D5), and raising the cap was rejected because Plan 3j inherits a memory
+  reckoning this plan must not prejudge.
+- **Criterion 7's instrument could not see what criterion 7 gates.**
+  `liveBytes` counts tiles and the composite and nothing else, so a resident
+  source image is invisible to it (§4).
+- **M7's killer could not see M7.** A transparent blit costs what an opaque
+  one costs, so criterion 9's p95 gate is blind to an edge tile's overhang.
+  Criterion 11 was added for it.
+- **The slice rectangle was specified in the wrong coordinate space.** A key's
+  device rectangle is grid-space and goes negative after a same-scale pan;
+  the copy must read band-local. The pinned pure-zoom script would never have
+  produced the case, so criterion 11 carries a second arm and M10 fires at it.
+- **The band query still needs the pad.** D7 had concluded the pad was simply
+  absent because there are no per-tile queries. There is still one query per
+  band, and a stroke centred just outside it inks inside it. D4 states the
+  rule `_bake` already follows and M9 fires at its removal.
+- **The rest pass's rebase origin was unpinned.** Deriving it from the band
+  rather than the viewport gives each band its own `float32` residual and can
+  cross a power-of-two step — the exact thing the frame-global rule prevents.
+  M11 fires at it.
+- **A pan straight after a zoom would have rest-baked mid-pan.** The
+  generation is empty then, so two same-scale pan frames satisfied every
+  condition. D1 now requires the whole quantised camera to be unchanged.
+- **A third frame kind was undefined.** The frame that matched once and not
+  yet twice fell through to the ordinary tile loop and, on a zoom out, took a
+  full-viewport live walk once per gesture — the frame D3 exists to prevent.
+
+**Round two, minor:** the spec quoted two viewports without distinguishing
+them, inside the section that pins the script (§5), and the ~11x prediction
+belongs to the smaller one (§4); criterion 6 attributed slice integrality to
+`quantiseCamera` when it comes from `deviceDeltaFrom`'s `.round()` (§4); the
+per-key texture-copy cost is unmeasured and now says so (§9).
+
+**Rejected, both rounds:** that Approach C collapses into Approach B because
+both need a recorder and `toImageSync` per tile. The recorder is not the cost.
+B rasterises geometry per tile; C copies texels. §9 records that this argument
+is unmeasured, which is the honest form of holding the position.
+
+**Left for the plan, not the spec:** `STATUS.md` still describes 3i as "zoom,
+G3, and level-of-detail geometry" and says the answer is level-of-detail
+geometry. This spec declines LOD in its second paragraph. That is reconciled
+when the plan lands, not before, so the two documents are never
+half-updated against each other.
 
 ## 11. Files
 
