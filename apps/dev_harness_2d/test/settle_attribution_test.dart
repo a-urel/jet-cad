@@ -451,6 +451,47 @@ void main() {
     }
   });
 
+  test(
+      'the baseline rebases to the observed maximum, not the last-delivered '
+      'timing', () async {
+    // The engine gives no delivery-order guarantee within a batch. This
+    // batch arrives with its true maximum frame number (7) buried in the
+    // middle, and a smaller one (5) last -- the shape that distinguishes
+    // `_reported.fold` (the maximum) from `_reported.last` (whatever the
+    // batch happened to end with).
+    final log = FrameTimingLog()..arm();
+    var batchDelivered = false;
+    try {
+      await log.establishBaseline(
+        () async {}, // Nothing to pump: this test drives delivery directly.
+        framesPerRound: 1,
+        batchWindow: Duration.zero,
+        waitForBatch: (_) async {
+          if (batchDelivered) return;
+          batchDelivered = true;
+          SchedulerBinding.instance.platformDispatcher.onReportTimings!(
+            <FrameTiming>[_timing(1.0, 3), _timing(1.0, 7), _timing(1.0, 5)],
+          );
+        },
+      );
+      expect(log.baselineEstablished, isTrue);
+
+      // Frame 6 predates the true maximum (7) but postdates the last-in-batch
+      // entry (5). A `.last`-derived baseline would wrongly admit it as a
+      // post-baseline frame; the maximum-derived baseline must still drop it
+      // as a pre-baseline straggler.
+      SchedulerBinding.instance.platformDispatcher.onReportTimings!(
+        <FrameTiming>[_timing(999.0, 6)],
+      );
+      expect(log.reportedFrames, 0,
+          reason: 'frame 6 is below the observed maximum (7) and must be '
+              'dropped, not admitted because it exceeds the last-delivered '
+              'entry (5)');
+    } finally {
+      log.disarm();
+    }
+  });
+
   test('a backlog reported after arming does not take the settle ordinals',
       () async {
     // The Blocking defect, one frame over. Costs 1.0 are the baseline frames;

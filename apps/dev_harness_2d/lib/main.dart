@@ -580,50 +580,65 @@ Future<void> _driveR2(
       );
     }
 
-    switch (kZoomMode) {
-      // **Relabelled rather than refused.** Repeats of one configuration are a
-      // real capability -- criterion 2 is a p95 over gesture frames and wants
-      // repeats, not arms -- so refusing here would remove a measurement to
-      // prevent a mislabelling. What made the old output dangerous was that it
-      // printed `arm 0..8` with no flag flipped and nothing naming which arm
-      // was which: the exact shape and labelling of the n=9 interleaved
-      // transcript criteria 4 and 8 call for, with every ratio reading 1.00.
-      // The word "arm" is gone, every line says which flag state it ran at,
-      // and the heading below says what this mode is not.
-      case ZoomMode.plain:
-        print('R2 tile zoom: ZOOM_MODE=plain -- $kZoomArms repeats of the '
-            'pinned script in ONE configuration (no measurement flag '
-            'flipped). This is criterion 2 only. It is NOT criterion 4 or '
-            'criterion 8: those need two arms interleaved, and are '
-            'ZOOM_MODE=criterion4 and ZOOM_MODE=criterion8.');
-        for (var repeat = 0; repeat < kZoomArms; repeat++) {
-          printZoomReport(
-              zoomPlainLabel(
-                  repeat: repeat, repeats: kZoomArms, entities: kEntities),
-              await runArm());
-        }
-      case ZoomMode.criterion4:
-        print('R2 tile zoom: ZOOM_MODE=criterion4 -- $kZoomArms repeats of '
-            "arm A then arm B, interleaved, in one session. Criterion 4's "
-            'ratio is settleWallMs(arm B) / settleWallMs(arm A), per arm.');
-        await runZoomCriterionArms(
-          criterion: ZoomCriterion.four,
-          repeats: kZoomArms,
-          entities: kEntities,
-          cache: tileCache,
-          runArm: runArm,
-        );
-      case ZoomMode.criterion8:
-        print('R2 tile zoom: ZOOM_MODE=criterion8 -- $kZoomArms repeats of '
-            "arm A then arm B, interleaved, in one session. Arm B is Plan "
-            "3h's M4 as a runtime flag, not this plan's M4.");
-        await runZoomCriterionArms(
-          criterion: ZoomCriterion.eight,
-          repeats: kZoomArms,
-          entities: kEntities,
-          cache: tileCache,
-          runArm: runArm,
-        );
+    // Ruling 18 accepts that a shifted timing stream throws and aborts the
+    // arm rather than publishing a wrong number -- but `_driveR2` is launched
+    // with `unawaited` and had no `catch` of its own, so that throw used to
+    // reach the operator as a bare `StateError` with none of this
+    // transcript's own prefixes: no `R2 tile zoom:` line naming which mode
+    // aborted, no `R2 app-run: done` closing it out. This label is
+    // cosmetic -- it changes nothing about which arms ran or which are
+    // lost -- and exists only so the abort reads like the rest of the
+    // transcript before it rethrows.
+    try {
+      switch (kZoomMode) {
+        // **Relabelled rather than refused.** Repeats of one configuration are
+        // a real capability -- criterion 2 is a p95 over gesture frames and
+        // wants repeats, not arms -- so refusing here would remove a
+        // measurement to prevent a mislabelling. What made the old output
+        // dangerous was that it printed `arm 0..8` with no flag flipped and
+        // nothing naming which arm was which: the exact shape and labelling
+        // of the n=9 interleaved transcript criteria 4 and 8 call for, with
+        // every ratio reading 1.00. The word "arm" is gone, every line says
+        // which flag state it ran at, and the heading below says what this
+        // mode is not.
+        case ZoomMode.plain:
+          print('R2 tile zoom: ZOOM_MODE=plain -- $kZoomArms repeats of the '
+              'pinned script in ONE configuration (no measurement flag '
+              'flipped). This is criterion 2 only. It is NOT criterion 4 or '
+              'criterion 8: those need two arms interleaved, and are '
+              'ZOOM_MODE=criterion4 and ZOOM_MODE=criterion8.');
+          for (var repeat = 0; repeat < kZoomArms; repeat++) {
+            printZoomReport(
+                zoomPlainLabel(
+                    repeat: repeat, repeats: kZoomArms, entities: kEntities),
+                await runArm());
+          }
+        case ZoomMode.criterion4:
+          print('R2 tile zoom: ZOOM_MODE=criterion4 -- $kZoomArms repeats of '
+              "arm A then arm B, interleaved, in one session. Criterion 4's "
+              'ratio is settleWallMs(arm B) / settleWallMs(arm A), per arm.');
+          await runZoomCriterionArms(
+            criterion: ZoomCriterion.four,
+            repeats: kZoomArms,
+            entities: kEntities,
+            cache: tileCache,
+            runArm: runArm,
+          );
+        case ZoomMode.criterion8:
+          print('R2 tile zoom: ZOOM_MODE=criterion8 -- $kZoomArms repeats of '
+              "arm A then arm B, interleaved, in one session. Arm B is Plan "
+              "3h's M4 as a runtime flag, not this plan's M4.");
+          await runZoomCriterionArms(
+            criterion: ZoomCriterion.eight,
+            repeats: kZoomArms,
+            entities: kEntities,
+            cache: tileCache,
+            runArm: runArm,
+          );
+      }
+    } catch (e) {
+      print('!!! ARM ABORTED: $e');
+      rethrow;
     }
   }
   print('R2 app-run: done');

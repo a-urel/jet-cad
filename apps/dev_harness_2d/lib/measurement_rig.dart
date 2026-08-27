@@ -875,7 +875,18 @@ class FrameTimingLog {
       await wait(batchWindow);
       if (_reported.length != settledCount || _reported.isEmpty) continue;
       // Quiet, and non-empty: everything the engine owed has landed. Rebase.
-      _baselineFrameNumber = _reported.last.frameNumber;
+      //
+      // The maximum, not `.last` -- this rig's governing decision (see fix
+      // wave C) is to build attribution only on properties it can observe,
+      // and delivery order is not one of them: nothing here verifies that a
+      // drained batch reports in `frameNumber` order. A `.last` that assumed
+      // it would be the same unverified-assumption class one line deep --
+      // silently rebasing below the true maximum and admitting a
+      // pre-baseline straggler above it, undetected because the
+      // `reportedFrames <= pumpedFrames` latch only trips once the count
+      // actually runs ahead.
+      _baselineFrameNumber = _reported.fold<int>(0,
+          (max, timing) => timing.frameNumber > max ? timing.frameNumber : max);
       _reported.clear();
       _pumped = 0;
       _sawBacklog = false;
