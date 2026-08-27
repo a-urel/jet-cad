@@ -19,6 +19,7 @@
 // repeat's, and the flags do not outlive the run.
 import 'dart:async';
 
+import 'package:dev_harness_2d/main.dart';
 import 'package:dev_harness_2d/measurement_rig.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -229,5 +230,18 @@ void main() {
     expect(text, contains('never covered'));
     expect(text, contains('SHORT SAMPLE'));
     expect(text, contains('gesture 3 of ${2 * kZoomSteps}'));
+  });
+
+  test('ZOOM_MODE accepts its three values and rejects anything else', () {
+    expect(parseZoomMode('plain'), ZoomMode.plain);
+    expect(parseZoomMode('criterion4'), ZoomMode.criterion4);
+    expect(parseZoomMode('criterion8'), ZoomMode.criterion8);
+    // The Plan 3c failure, in this define's own terms: a value that looks
+    // right and selects the default would print nine repeats of one arm under
+    // a heading the command line asked criterion 4 for.
+    expect(() => parseZoomMode('criterion_4'), throwsStateError);
+    expect(() => parseZoomMode('4'), throwsStateError);
+    expect(() => parseZoomMode('true'), throwsStateError);
+    expect(() => parseZoomMode(''), throwsStateError);
   });
 }
