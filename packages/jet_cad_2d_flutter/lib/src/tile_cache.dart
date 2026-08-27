@@ -1033,6 +1033,26 @@ class TileCache {
     // Stale scaled pixels rather than a live walk, deliberately: replaying the
     // whole painter is the ~60 ms stall this cache exists to remove, and a
     // gesture frame is precisely where it must not happen.
+    //
+    // **`carryOverCovers` was measured before [_restBake] may have dropped
+    // the composite, and that combination cannot leave this frame blank.**
+    // Read literally the pair is alarming: a `true` here plus a released
+    // composite plus an uncovered key would return with neither stale pixels
+    // nor a live walk -- blank, which is worse than either. It is
+    // unreachable, and the reason is [_restBake]'s own precondition rather
+    // than anything on this line. `_restBake` releases the composite only
+    // after pricing one band plus **every visible tile** against
+    // [cacheBytes], and `_makeRoomForOneTile` can then always find room,
+    // because the only tiles carrying this frame's serial are ones the same
+    // rest bake just cut. So a frame that dropped the composite is a frame
+    // that filled every visible key, `uncovered` is null, and control took
+    // the covered return above without ever reaching this line. The assert
+    // states it so a future change to that pricing fails loudly here instead
+    // of shipping an intermittently blank viewport.
+    assert(
+        !carryOverCovers || hasCarryOver,
+        'a frame that released the composite must have covered the viewport, '
+        'or this return leaves neither stale pixels nor a live walk');
     if (carryOverCovers) return;
     // One walk for the union, not one per tile: at 512 px a full visible set is
     // about 48 tiles (see the 48.0 MiB figure above), and 48 painter invocations
@@ -2026,8 +2046,14 @@ class TileCache {
     return image;
   }
 
-  /// Test seam for [_bakeBand], and its only caller until the band bake is
-  /// wired into [paintFrame].
+  /// Test seam for [_bakeBand], which [_restBake] now also calls on the frame
+  /// path.
+  ///
+  /// **It was the only caller until Plan 3i Task 8 wired the band bake in**,
+  /// and it was introduced because `unused_element` is an error in this
+  /// package. That justification is gone; the wrapper stays because Task 6's
+  /// tests are written against it, and because what it lets them do is still
+  /// worth doing:
   ///
   /// What the band bake decides -- where the band camera puts a world point,
   /// how far past the band's edge the query reaches, and which origin the walk
@@ -2071,11 +2097,14 @@ class TileCache {
     return image;
   }
 
-  /// Test seam for [_sliceTile]. Like [debugBakeBand], this has no production
-  /// caller yet -- the slice is not wired into [paintFrame] until a later
-  /// task -- so without this wrapper the analyzer's `unused_element` (an
-  /// error in this package) would fail the gate on a private method nothing
-  /// calls.
+  /// Test seam for [_sliceTile], which [_restBake] now also calls on the frame
+  /// path.
+  ///
+  /// Like [debugBakeBand] this existed because the slice had no production
+  /// caller until Plan 3i Task 8 and `unused_element` is an error in this
+  /// package. Kept because Task 7's tests call it directly, which is how they
+  /// slice a band they built themselves rather than one a whole frame
+  /// produced.
   @visibleForTesting
   Image debugSliceTile(Image band, TileBand from, TileKey key, TileGrid grid) =>
       _sliceTile(band, from, key, grid);

@@ -33,9 +33,21 @@ void main() {
       (t) async {
     final h = await pumpTiled(t);
     await settle(t, h);
+    // One tile of `pumpTiled`'s canvas: 64 device pixels square, RGBA.
+    const tileBytes = 64 * 64 * 4;
     h.cache.debugOnSliceForTest = () {
       expect(h.cache.liveBytes, lessThanOrEqualTo(kTileCacheBytes),
           reason: 'the band image is resident here and the meter counts it');
+      // **The lower bound, and it is the half that has a witness.** The
+      // ceiling above is one-sided: a `paintFrame` that never assigned
+      // `_band` would leave `liveBytes` reading tiles alone, which is
+      // smaller still and satisfies it. Task 4's seam could only prove
+      // `liveBytes` counts a band handed to `debugSetBand`; this is what
+      // proves the production path puts one there. Fired as M6b.
+      expect(h.cache.liveBytes, greaterThan(h.cache.liveTileCount * tileBytes),
+          reason: 'the band image is in the total, not merely permitted by '
+              'it: a rest frame that never assigned _band would read exactly '
+              'the tile sum here');
     };
     addTearDown(() => h.cache.debugOnSliceForTest = null);
 

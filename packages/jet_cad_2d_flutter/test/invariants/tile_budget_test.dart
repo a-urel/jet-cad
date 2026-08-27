@@ -493,6 +493,21 @@ void main() {
     settle(rig);
     expect(rig.cache.liveTileCount, greaterThan(30),
         reason: 'setup: and there are tiles for the ceiling to take');
+    // **And no composite stands, which is chosen rather than left to
+    // chance.** Before Plan 3i Task 8 this arm asserted `isTrue` here, and
+    // that assertion was the only thing pinning the mass eviction below to
+    // running beside a standing composite. A resting frame now drops the
+    // composite before it bands, so the settle above ends with a covering
+    // generation and nothing else -- which is the right state for this claim
+    // (the eviction it measures is about the tile map alone) but has to be
+    // said, or a reader cannot tell whether the state was designed or
+    // drifted. The composite's own arm is claim two below, and the
+    // "eviction runs with a composite standing, and never takes it" test in
+    // this file covers the intersection.
+    expect(rig.cache.hasCarryOver, isFalse,
+        reason: 'setup: the settle covered the viewport, so the rest bake '
+            'released the composite -- this claim is about evicting tiles, '
+            'and it is measured with no composite in the total');
 
     // **Unreachable through the constructor**, which is why `cacheBytes` is
     // not final: a composite is minted only from a generation that covered,
@@ -550,9 +565,20 @@ void main() {
         reason: 'the composite survives a ceiling it does not fit under: it '
             'is not in the tile map and eviction cannot reach it');
     expect(squeezed.cache.liveBytes, _compositeBytes,
-        reason: 'and it is all the cache holds -- every tile went, and the '
-            'ceiling stayed a ceiling rather than being quietly exceeded');
-    expect(squeezed.cache.liveTileCount, 0);
+        reason: 'and it is all the cache holds -- nothing was added beside '
+            'it, and the ceiling stayed a ceiling rather than being quietly '
+            'exceeded');
+    // **"Nothing was ever baked", not "every tile went".** The ceiling is
+    // imposed on the moving frame, where the incoming generation is already
+    // empty, so this witnesses a refusal to allocate and not a reclaim. The
+    // reclaim from a populated cache down to the composite alone is the
+    // "eviction runs with a composite standing, and never takes it" test
+    // above, which pans repeatedly under a ceiling most of which is the
+    // composite; nothing is lost by this one measuring the other half.
+    expect(squeezed.cache.liveTileCount, 0,
+        reason: 'the ceiling admitted no tile at all: not one was baked '
+            'beside the composite, which is what "bakes nothing rather than '
+            'overrun" means on a frame whose generation starts empty');
     expect(squeezed.cache.bakeCount, 0,
         reason: 'baking under a ceiling that cannot hold the result is the '
             'silent overrun this arm exists to refuse -- and the rest bake '

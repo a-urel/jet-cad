@@ -293,3 +293,150 @@ The test description was:
 Failing tests:
   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart: the ceiling holds at every point inside the rest frame
 ```
+
+---
+
+## M6b — the band image is never assigned to `_band`
+
+**Task 8, fix round 1.** The band is baked, sliced and disposed correctly, but
+`_band` is never set, so `liveBytes` cannot see the one image the whole banding
+design exists to bound.
+
+**Why it needed its own mutant.** Task 4 landed `_band` and `debugSetBand` and
+proved `liveBytes` counts a band *handed to the seam*. It could not prove the
+production path puts one there. Task 8 assigns `_band` on the real path, but
+the ceiling assertion it shipped with -- `liveBytes <= kTileCacheBytes` inside
+the slice -- is one-sided: with `_band` unassigned `liveBytes` reads the tile
+sum, which is smaller still and satisfies it, and
+`debugImagesAlive == liveTileCount` is indifferent to `_band` either way. The
+gap Task 4 opened therefore stayed open through Task 8's first round, closed
+only by reading. The lower bound added in this round is what closes it, and
+this mutant is what proves the lower bound is load-bearing.
+
+**Mutation:**
+
+```diff
+@@ -1176,7 +1176,6 @@
+       final visited = <int>[];
+       final image = _bakeBand(
+           band, grid, quantised, painter, sink, vertices, origin, visited);
+-      _band = image;
+       // [_bakeBand]'s `onVisit` records only what the painter visited
+       // directly; [_bake]'s climbs owners so that a *container's* transform
+       // reaches the tile through invalidation's direction one. This is where
+```
+
+**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran
+`CI=true flutter test test/invariants/tile_bytes_test.dart`, then restored from
+the copy. **Never `git checkout`.**
+
+**Result:** red, as expected. The new lower bound fires on the first slice of
+the first band, where `liveTileCount` is still 0 and `liveBytes` reads 0
+instead of the resident band's bytes. The second failure in the transcript is a
+knock-on and not an independent signal: the assertion throws out of the slice
+loop, so `_disposeImage(image)` never runs and one band image is left alive.
+
+**Verbatim output:**
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart
+00:00 +0: a live band image is counted in liveBytes
+00:00 +1: the ceiling holds at every point inside the rest frame
+══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞═════════════════════════════════════════════════════════
+The following TestFailure was thrown during paint():
+Expected: a value greater than <0>
+  Actual: <0>
+   Which: is not a value greater than <0>
+the band image is in the total, not merely permitted by it: a rest frame that never assigned _band
+would read exactly the tile sum here
+
+The relevant error-causing widget was:
+  CustomPaint
+  CustomPaint:file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart:359:16
+
+When the exception was thrown, this was the stack:
+#0      fail (package:matcher/src/expect/expect.dart:187:31)
+#1      _expect (package:matcher/src/expect/expect.dart:182:3)
+#2      expect (package:matcher/src/expect/expect.dart:65:3)
+#3      expect (package:flutter_test/src/widget_tester.dart:473:18)
+#4      main.<anonymous closure>.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart:47:7)
+#5      TileCache._restBake (package:jet_cad_2d_flutter/src/tile_cache.dart:1204:30)
+#6      TileCache.paintFrame (package:jet_cad_2d_flutter/src/tile_cache.dart:983:7)
+#7      _DraftCustomPainter.paint (package:jet_cad_2d_flutter/src/draft_canvas.dart:427:13)
+#8      RenderCustomPaint._paintWithPainter (package:flutter/src/rendering/custom_paint.dart:593:13)
+#9      RenderCustomPaint.paint (package:flutter/src/rendering/custom_paint.dart:641:7)
+#10     RenderObject._paintWithContext (package:flutter/src/rendering/object.dart:3580:7)
+#11     PaintingContext.paintChild (package:flutter/src/rendering/object.dart:265:13)
+#12     RenderProxyBoxMixin.paint (package:flutter/src/rendering/proxy_box.dart:143:13)
+#13     RenderObject._paintWithContext (package:flutter/src/rendering/object.dart:3580:7)
+#14     PaintingContext._repaintCompositedChild (package:flutter/src/rendering/object.dart:180:11)
+#15     PaintingContext.repaintCompositedChild (package:flutter/src/rendering/object.dart:125:5)
+#16     PipelineOwner.flushPaint (package:flutter/src/rendering/object.dart:1325:31)
+#17     PipelineOwner.flushPaint (package:flutter/src/rendering/object.dart:1335:15)
+#18     AutomatedTestWidgetsFlutterBinding.drawFrame (package:flutter_test/src/binding.dart:2438:31)
+#19     RendererBinding._handlePersistentFrameCallback (package:flutter/src/rendering/binding.dart:558:5)
+#20     SchedulerBinding._invokeFrameCallback (package:flutter/src/scheduler/binding.dart:1430:15)
+#21     SchedulerBinding.handleDrawFrame (package:flutter/src/scheduler/binding.dart:1345:9)
+#22     AutomatedTestWidgetsFlutterBinding.pump.<anonymous closure> (package:flutter_test/src/binding.dart:2261:9)
+#25     TestAsyncUtils.guard (package:flutter_test/src/test_async_utils.dart:74:41)
+#26     AutomatedTestWidgetsFlutterBinding.pump (package:flutter_test/src/binding.dart:2250:27)
+#27     WidgetTester.pump.<anonymous closure> (package:flutter_test/src/widget_tester.dart:652:53)
+#30     TestAsyncUtils.guard (package:flutter_test/src/test_async_utils.dart:74:41)
+#31     WidgetTester.pump (package:flutter_test/src/widget_tester.dart:652:27)
+#32     main.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart:57:13)
+<asynchronous suspension>
+#33     testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#34     TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided 5 frames from dart:async and package:stack_trace)
+
+The following RenderObject was being processed when the exception was fired: RenderCustomPaint#2342a:
+  creator: CustomPaint ← RepaintBoundary ← DraftCanvas ← SizedBox ← Directionality ← MediaQuery ←
+    _FocusInheritedScope ← _FocusScopeWithExternalFocusNode ← _FocusInheritedScope ← Focus ←
+    FocusTraversalGroup ← MediaQuery ← ⋯
+  parentData: <none> (can use size)
+  constraints: BoxConstraints(w=800.0, h=600.0)
+  size: Size(800.0, 600.0)
+  painter: _DraftCustomPainter#c6044(Listenable.merge([CameraController#36307(Instance of
+    'ViewportTransform'), Instance of 'DocChangeNotifier', Instance of '_TableListenableAdapter',
+    Instance of '_SettleNotifier']))
+  preferredSize: Size(Infinity, Infinity)
+This RenderObject has no descendants.
+════════════════════════════════════════════════════════════════════════════════════════════════════
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <1>
+no band image outlives its band, and the composite was dropped before the bake
+
+When the exception was thrown, this was the stack:
+#4      main.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart:59:5)
+<asynchronous suspension>
+#5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+This was caught by the test expectation on the following line:
+  file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart line 59
+The test description was:
+  the ceiling holds at every point inside the rest frame
+════════════════════════════════════════════════════════════════════════════════════════════════════
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following message was thrown:
+Multiple exceptions (2) were detected during the running of the current test, and at least one was
+unexpected.
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:00 +1 -1: the ceiling holds at every point inside the rest frame [E]
+  Test failed. See exception logs above.
+  The test description was: the ceiling holds at every point inside the rest frame
+  
+00:00 +1 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart: the ceiling holds at every point inside the rest frame
+```
