@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
@@ -194,6 +195,37 @@ class DraftCanvasState extends State<DraftCanvas> {
   late _TableListenableAdapter _tables;
   late Listenable _repaint;
 
+  /// Fires once per frame while the cache still owes tiles.
+  ///
+  /// Merged into [_repaint] beside the camera and the document, because it is
+  /// the same kind of thing: a reason the canvas has to draw again.
+  final _SettleNotifier _settle = _SettleNotifier();
+
+  /// Whether a settle frame is already on the way.
+  ///
+  /// Without it every paint during a settle would queue its own callback and
+  /// the queue would grow with the settle rather than staying one deep.
+  bool _settleScheduled = false;
+
+  /// Asks for one more frame, after this one finishes.
+  ///
+  /// **A post-frame callback, not a direct notify.** [_requestSettleFrame] is
+  /// called from inside `paint`, and marking the tree dirty mid-paint is the
+  /// error Flutter reports as "setState() or markNeedsBuild() called during
+  /// build".
+  ///
+  /// Allocates one closure per settle frame -- O(1), and only while the cache
+  /// owes tiles. A covered viewport allocates nothing, which is the state the
+  /// frame-path allocation invariant measures.
+  void _requestSettleFrame() {
+    if (_settleScheduled || !mounted) return;
+    _settleScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _settleScheduled = false;
+      if (mounted) _settle.ping();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -261,7 +293,7 @@ class DraftCanvasState extends State<DraftCanvas> {
     // **The table adapter is here and not a nicety.** Without it a layer edit
     // causes no frame at all, so the cache's own invalidation — correct as it
     // is — is never reached and stale pixels sit there until the camera moves.
-    _repaint = Listenable.merge([widget.camera, _changes, _tables]);
+    _repaint = Listenable.merge([widget.camera, _changes, _tables, _settle]);
   }
 
   /// Releases everything [_attach] built. Called from both teardown paths.
@@ -303,6 +335,10 @@ class DraftCanvasState extends State<DraftCanvas> {
   @override
   void dispose() {
     _detach();
+    // Disposed here and not in `_detach`: the settle notifier belongs to the
+    // state, not to one attachment, and survives a `didUpdateWidget` the way
+    // the camera it sits beside in the merge does.
+    _settle.dispose();
     // The measurer is **not** disposed here. The document owns it, two canvases
     // over one document share it, and clearing on dispose would wipe the
     // sibling's cache along with every native `Paragraph` in it. The
@@ -330,11 +366,17 @@ class DraftCanvasState extends State<DraftCanvas> {
         document: widget.document,
         devicePixelRatio: devicePixelRatio,
         onPaintForTest: widget.onPaintForTest,
+        onUnsettled: tileCache == null ? null : _requestSettleFrame,
         repaint: _repaint,
       ),
       size: Size.infinite,
     ));
   }
+}
+
+/// A [Listenable] the canvas pokes to ask itself for another frame.
+class _SettleNotifier extends ChangeNotifier {
+  void ping() => notifyListeners();
 }
 
 class _DraftCustomPainter extends CustomPainter {
@@ -347,6 +389,7 @@ class _DraftCustomPainter extends CustomPainter {
     required this.document,
     required this.devicePixelRatio,
     required this.onPaintForTest,
+    required this.onUnsettled,
     required super.repaint,
   });
 
@@ -369,6 +412,12 @@ class _DraftCustomPainter extends CustomPainter {
   /// See [DraftCanvas.onPaintForTest].
   final void Function()? onPaintForTest;
 
+  /// Called when a tiled frame ends with tiles still missing.
+  ///
+  /// Null when [tileCache] is, because the untiled path finishes every frame it
+  /// starts and has nothing to settle.
+  final VoidCallback? onUnsettled;
+
   @override
   void paint(Canvas canvas, Size size) {
     onPaintForTest?.call();
@@ -387,6 +436,10 @@ class _DraftCustomPainter extends CustomPainter {
         // no `DocChange`; `applyChange` is never told about a layer edit.
         tablesRevision: document.tables.mutationRevision,
       );
+      // The settle needs frames and nothing else will produce them once the
+      // camera stops. Asked here rather than inside the cache: scheduling is
+      // the widget layer's business, and `TileCache` has no binding to ask.
+      if (!cache.viewportCovered) onUnsettled?.call();
       return;
     }
     // **The camera is not quantised here, and the asymmetry is deliberate.**

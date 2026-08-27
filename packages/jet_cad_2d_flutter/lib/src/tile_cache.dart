@@ -619,6 +619,21 @@ class TileCache {
   /// Whether a retired generation is still standing in for the incoming one.
   bool get hasCarryOver => _carryOver != null;
 
+  /// Whether the last [paintFrame] left every visible tile baked.
+  ///
+  /// False means the cache still owes work only another frame can do:
+  /// [budgetedTilesPerFrame] caps what one frame may bake, so a viewport of
+  /// many tiles fills over several frames.
+  ///
+  /// **This is not a diagnostic. The frame path reads it.** Flutter produces a
+  /// frame only when something asks for one, and the camera asks only while it
+  /// is moving, so a gesture that ends would end the settle with it -- leaving
+  /// whatever had not baked unbaked, and the magnified composite a zoom
+  /// carries over on screen until an unrelated edit happened to cause a frame.
+  /// `DraftCanvas` reads this after every tiled frame and asks for the next
+  /// one itself.
+  bool get viewportCovered => _viewportCovered;
+
   /// Composite blits issued since [resetCounters]. One per gesture frame.
   int get carryOverBlitCount => _carryOverBlits;
 
