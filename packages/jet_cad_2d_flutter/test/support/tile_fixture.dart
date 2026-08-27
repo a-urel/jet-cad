@@ -329,3 +329,111 @@ DraftDocument fillingGrid(FlutterTextMeasurer measurer) {
   }
   return doc;
 }
+
+/// Which side of boundary [n] its thick stroke sits on: **one stroke, not a
+/// pair**, alternating so both directions of the pad are exercised across the
+/// fixture.
+///
+/// **A stroke either side of the same boundary masks the loss it was placed to
+/// expose, and it did.** The two centrelines are 2 logical pixels apart
+/// against a 3.780 half-width, so their ink overlaps by 5.56 logical pixels
+/// and the union covers the boundary either way: the stroke centred at
+/// `32k - 1` inks `32k .. 32k + 2.780` inside band `k`, and the stroke centred
+/// at `32k + 1` -- which band `k`'s own query finds, padded or not -- inks
+/// `32k - 2.780 .. 32k + 4.780` over the top of it. Measured: with the pair in
+/// place, `const pad = 0.0` in `_bakeBand` (M9) changed **zero** pixels at
+/// [tileCamera]. With one stroke a boundary it changes thousands.
+double _sideFor(int n) => n.isOdd ? -1.0 : 1.0;
+
+/// The lineweight the band-boundary strokes in [bandCrossingGrid] carry, in
+/// 1/100 mm on paper.
+///
+/// **Chosen so the stroke is wider than its distance to the boundary, which is
+/// the whole of what M9 tests.** `CanvasDrawSink` and `VerticesDrawSink` both
+/// turn a lineweight into pixels as `hundredths / 100 * pixelsPerPaperMm`, and
+/// [kLogicalPixelsPerMm] is `96 / 25.4 = 3.7795`. At `200` that is
+/// `2.0 * 3.7795 = 7.559` logical pixels wide, so the half-width is **3.780
+/// logical pixels** — 7.559 device pixels at [kTileDpr]. A centreline placed
+/// one logical pixel outside a band's edge therefore inks 2.780 logical
+/// pixels (5.56 device rows) *inside* that band, across the band's whole
+/// width, and an unpadded band query drops every one of them.
+///
+/// The default `25` every other fixture here carries is 0.945 logical pixels
+/// wide — a half-width of 0.47, less than the one-pixel offset — so this
+/// fixture cannot be built out of it.
+const int kBandStrokeLineweight = 200;
+
+/// [fillingGrid]'s extent and spacing, plus **thick strokes centred just
+/// outside a band boundary**: the fixture the slice differential runs on.
+///
+/// **Anti-degenerate clause 2 — entities larger than one tile.** A 64
+/// device-pixel tile is 32 logical pixels at [kTileDpr]. Every horizontal line
+/// here spans world x `-52 .. 380`, which at [tileCamera]'s 1.4 scale is
+/// **604.8 logical pixels — 18.9 tiles**; every vertical spans world y
+/// `-52 .. 300`, **492.8 logical pixels, 15.4 tiles**. Crossing multiplicity
+/// is what the band design attacks (`kTileDevicePixels`' own doc comment
+/// measures it as the larger term), and a fixture of tile-sized entities would
+/// make the win invisible: no entity would ever be walked into two bands, and
+/// a slice arithmetic error would have nothing to disagree about.
+///
+/// **M9's target — a stroke whose centreline is outside the band it inks.**
+/// [tileCamera] maps world to screen as `sy = -1.4 * wy + 323`, and a band is
+/// one tile row: band `k` owns device rows `[64k, 64k + 64)`, which is logical
+/// screen y `[32k, 32k + 32)`. For each `k` in `1..9` this fixture places
+/// **one** [kBandStrokeLineweight] stroke, at logical screen y `32k - 1` for
+/// odd `k` and `32k + 1` for even `k` — one logical pixel outside a boundary,
+/// against a half-width of 3.780, so it inks 2.780 logical pixels (5.56 device
+/// rows) into the band on the far side. That entity's *bounds* do not
+/// intersect that band at all, and the painter's index query is an exact rect
+/// intersection on bounds — measured: a line 0.1 world units outside a query
+/// rect is not returned — so with `const pad = 0.0` in `_bakeBand` the band
+/// loses those rows across its full 800-device-pixel width. See [_sideFor] for
+/// why it is one stroke and not two.
+///
+/// The same is done one logical pixel outside each **column** boundary, which
+/// is not a band edge but is a tile edge: those strokes are what the per-tile
+/// `_bake` path's own pad owes, and they put ink on the columns
+/// `differingPixelsOnTileEdges` sweeps.
+///
+/// **Never (0, 0) and never the identity.** The extent, the spacing and the
+/// reasoning behind all three are [fillingGrid]'s — see its doc comment for
+/// why the drawing has to stay strictly wider than the viewport under every
+/// pan these arms take. The thick strokes are laid out by inverting
+/// [tileCamera], so their world coordinates are the far-from-origin,
+/// non-round numbers that camera implies rather than a hand-picked grid.
+DraftDocument bandCrossingGrid(FlutterTextMeasurer measurer) {
+  final doc = DraftDocument.empty(measurer: measurer);
+  var handle = 1000;
+  // [fillingGrid]'s geometry verbatim: the viewport stays interior to the
+  // drawing under every pan these arms take.
+  for (var t = -52.0; t <= 300.0; t += 16.0) {
+    addLine(doc, doc.rootHandle, Handle(handle++), -52, t, 380, t);
+  }
+  for (var t = -52.0; t <= 380.0; t += 16.0) {
+    addLine(doc, doc.rootHandle, Handle(handle++), t, -52, t, 300);
+  }
+
+  // [tileCamera] inverted. Written as the inverse rather than as literals so
+  // the strokes track the camera if it ever moves, instead of silently
+  // drifting off the boundaries they exist to straddle.
+  double worldY(double screenY) => (323.0 - screenY) / 1.4;
+  double worldX(double screenX) => (screenX + 37.0) / 1.4;
+
+  // Rows 1..9. Row 0's top edge is the viewport's own edge and row 10 is
+  // past the bottom of a 600 device-pixel viewport, so neither is a band
+  // boundary with a band on both sides of it.
+  for (var row = 1; row <= 9; row++) {
+    final y = worldY(row * 32.0 + _sideFor(row));
+    addLine(doc, doc.rootHandle, Handle(handle++), -52, y, 380, y,
+        lineweight: kBandStrokeLineweight);
+  }
+  // Columns 1..12 at 32 logical pixels: the last tile column starts at device
+  // x 768 and the viewport is 800 wide, so column 12's own left edge is the
+  // final one inside it.
+  for (var col = 1; col <= 12; col++) {
+    final x = worldX(col * 32.0 + _sideFor(col));
+    addLine(doc, doc.rootHandle, Handle(handle++), x, -52, x, 300,
+        lineweight: kBandStrokeLineweight);
+  }
+  return doc;
+}

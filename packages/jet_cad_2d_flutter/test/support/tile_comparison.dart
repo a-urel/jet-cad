@@ -22,11 +22,14 @@
 import 'dart:typed_data';
 import 'dart:ui';
 
+import 'package:flutter/rendering.dart';
+import 'package:flutter/widgets.dart' hide Image;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'tile_fixture.dart';
+import 'tile_harness.dart';
 
 class InkReport {
   const InkReport({
@@ -426,4 +429,208 @@ Future<List<InkReport>> sweepFallbackAgreement({
     }
   }
   return reports;
+}
+
+/// The camera whose view span sits **just past a power-of-two rebase step**.
+///
+/// `rebaseOriginFor` (`camera_controller.dart`) takes the larger of the
+/// visible world box's two spans, floors its base-2 logarithm to get a step,
+/// and floors the view *centre* onto that step. A band is a fraction of the
+/// frame's height, so a `_bakeBand` that derived its own origin instead of
+/// using the one handed in would floor a different centre — and only lands on
+/// a *different* step cell when a cell boundary actually falls inside the
+/// frame. At an ordinary camera it usually does not, and the mutation is
+/// invisible; this camera is chosen so it does.
+///
+/// **The arithmetic, and how it is known to straddle.** The viewport is
+/// [kTileViewport], 400x300 logical. At the scale 3.0 below the visible world
+/// box is `400 / 3 = 133.333` by `300 / 3 = 100`, so the span is **133.333**,
+/// `floor(log2(133.333)) = 7`, and the step is **128** — the view is 1.042
+/// steps wide, so exactly one cell boundary lies inside it. The translations
+/// put the centre at
+///
+///     cx = (200 - e) / 3   = (200 + 184.5) / 3 = 128.1667
+///     cy = (f - 150) / 3   = (534.5 - 150) / 3 = 128.1667
+///
+/// which is **0.1667 world units — one device pixel — past the 128 boundary**,
+/// so the frame origin is `(128, 128)` and any band whose own centre falls
+/// below 128 takes `(128, 0)` or `(0, 128)` instead. The visible world y runs
+/// `78.167 .. 178.167`, so the 128 line is 50 world units inside it and the
+/// bands genuinely fall on both sides.
+///
+/// Both translations are whole device pixels at [kTileDpr] (`-184.5 * 2 =
+/// -369`, `534.5 * 2 = 1069`), so `quantiseCamera` leaves this camera exactly
+/// as written and the tiled and live arms see the same matrix. The visible
+/// world box, `x 61.5 .. 194.833` by `y 78.167 .. 178.167`, is strictly inside
+/// [bandCrossingGrid]'s `-52 .. 380` by `-52 .. 300` extent, so the drawing
+/// fills the viewport here rather than leaving a blank margin the comparison
+/// would pass on for free.
+ViewportTransform rebaseBoundaryCamera() => ViewportTransform(
+    worldToScreenMatrix: Transform2(3.0, 0, 0, -3.0, -184.5, 534.5));
+
+/// The [kTileViewport] at [kTileDpr], in device pixels — the size both
+/// captures come back at.
+///
+/// **Asserted rather than assumed, by every helper that takes them.** The
+/// edge sweeps below index a flat buffer as `(y * width + x) * 4`, so a
+/// capture of a different size is not a failure but a *silent* reinterpretation
+/// of the wrong quarter of the image, and the sweep goes on reporting zero.
+/// That is not hypothetical: `pumpTiled`'s `SizedBox` was inert under
+/// `pumpWidget`'s tight constraints until this task, so the canvas really was
+/// 800x600 logical and these captures really were 1600x1200.
+const int kCaptureWidth = 800;
+const int kCaptureHeight = 600;
+
+Future<ByteData> _captureBoundary(WidgetTester t) async {
+  final boundary = t.renderObject<RenderRepaintBoundary>(find.descendant(
+      of: find.byType(DraftCanvas), matching: find.byType(RepaintBoundary)));
+  late ByteData data;
+  // `toImage` is a real async rasterisation and deadlocks under the fake async
+  // zone a `testWidgets` body runs in; `runAsync` is the documented way out
+  // and is the pattern this file's `_capture` already relies on through
+  // `Picture.toImage`.
+  await t.runAsync(() async {
+    final image = await boundary.toImage(pixelRatio: kTileDpr);
+    data = (await image.toByteData())!;
+    image.dispose();
+  });
+  return data;
+}
+
+/// The tiled canvas exactly as it stands, at [kTileDpr].
+///
+/// Nothing is pumped here: a pump would give the cache another frame, and the
+/// state under test is the one the caller settled into.
+Future<ByteData> captureTiled(WidgetTester t, TiledHarness h) =>
+    _captureBoundary(t);
+
+/// The same document, index and camera, drawn with `tiles: false`.
+///
+/// **The camera is quantised and that is the rule, not a concession.**
+/// `TileCache.paintFrame` quantises once, covering the blits and the live
+/// fallback alike, so a tiled frame is internally consistent;
+/// `DraftCanvas`'s untiled branch deliberately does not (see its own comment
+/// — quantising there would move the *default* rendering path by up to half a
+/// device pixel for nothing). Handing the untiled tree the quantised camera is
+/// what makes the two captures one drawing seen twice rather than two
+/// drawings, and it is exactly what [measureTiledAgreement] does for its own
+/// live arm.
+///
+/// **This replaces the widget tree**, so the tiled cache behind [h] is
+/// disposed by the time it returns. Capture the tiled arm first — every caller
+/// here does, and Dart evaluates arguments left to right, so
+/// `differingPixels(await captureTiled(...), await captureLive(...))` is
+/// ordered correctly by the language rather than by luck.
+///
+/// **The key is the whole reason this returns a different image at all, and
+/// without it this instrument was blind to every mutant.**
+/// `_DraftCustomPainter.shouldRepaint` returns `false` unconditionally and
+/// says why — `repaint` is the only trigger, and answering `true` there would
+/// repaint on every unrelated rebuild. Pumping a tree that differs only in
+/// `tiles` therefore re-runs `didUpdateWidget` (which does tear the cache
+/// down) and then **keeps the retained picture**: the "live" capture came back
+/// byte-for-byte equal to the tiled one, and `differingPixels` read zero under
+/// M3, M7, M9, M9b, M10 and M11 alike. A key the tiled tree does not carry
+/// makes this a different element, so the render object is new and has no
+/// picture to retain.
+Future<ByteData> captureLive(WidgetTester t, TiledHarness h) async {
+  final controller = CameraController(quantiseCamera(h.camera.value, kTileDpr));
+  addTearDown(controller.dispose);
+  // The same `Center` `pumpTiled` needs, and for the same reason: without it
+  // this tree would be 800x600 logical and the two captures would be the same
+  // size as each other but not the size either arm's arithmetic assumes.
+  await t.pumpWidget(MediaQuery(
+    data: const MediaQueryData(devicePixelRatio: kTileDpr),
+    child: Directionality(
+      textDirection: TextDirection.ltr,
+      child: Center(
+          child: SizedBox(
+        width: kTileViewport.width,
+        height: kTileViewport.height,
+        child: DraftCanvas(
+          key: const ValueKey('captureLive'),
+          document: h.document,
+          index: h.index,
+          camera: controller,
+          tiles: false,
+          tileDevicePixels: 64,
+        ),
+      )),
+    ),
+  ));
+  await t.pump();
+  return _captureBoundary(t);
+}
+
+/// Pixels whose RGBA differs, over two captures of the same size.
+///
+/// Exact `==` on stored bytes, never a tolerance: these are recorded values,
+/// and a tolerance here is how a seam of one unit hides.
+int differingPixels(ByteData a, ByteData b) {
+  expect(a.lengthInBytes, b.lengthInBytes);
+  var differing = 0;
+  for (var i = 0; i < a.lengthInBytes; i += 4) {
+    if (a.getUint32(i) != b.getUint32(i)) differing++;
+  }
+  return differing;
+}
+
+bool _onEdge(int v, int tileDevicePixels) {
+  final m = v % tileDevicePixels;
+  return m == 0 || m == 1 || m == tileDevicePixels - 1;
+}
+
+/// The same comparison, restricted to the columns and rows a tile boundary
+/// falls on and the pixel either side of each.
+///
+/// A whole-frame count is dominated by tile interiors, where a seam cannot be:
+/// a slice that lost one column out of 64 moves 1.5% of the frame and reads as
+/// a small number beside a large one. This asks the question where the answer
+/// lives.
+int differingPixelsOnTileEdges(ByteData a, ByteData b,
+    {required int tileDevicePixels, required int width, required int height}) {
+  expect(a.lengthInBytes, width * height * 4,
+      reason: 'the sweep indexes rows by [width]; a capture of another size '
+          'is read as the wrong quarter of itself and still reports zero');
+  expect(b.lengthInBytes, a.lengthInBytes);
+  var differing = 0;
+  for (var y = 0; y < height; y++) {
+    for (var x = 0; x < width; x++) {
+      if (!_onEdge(x, tileDevicePixels) && !_onEdge(y, tileDevicePixels)) {
+        continue;
+      }
+      final i = (y * width + x) * 4;
+      if (a.getUint32(i) != b.getUint32(i)) differing++;
+    }
+  }
+  return differing;
+}
+
+/// Ink on those same rows and columns, so the sweep above cannot pass by
+/// having looked at background. [live] is the untiled capture.
+///
+/// **Non-transparent, not "not white", and the difference inverts the
+/// answer.** A `DraftCanvas` paints no background, so the page is
+/// `0x00000000`; layer zero's colour is white, so the *strokes* are
+/// `0xFFFFFFFF`. A predicate of `!= 0xFFFFFFFF` counts every background pixel
+/// and no drawn one — it read 11,660 where the true figure is 1,868, and it
+/// would have passed a floor of 200 on a capture with nothing in it at all.
+/// Alpha is what the rest of this file tests (`inkInside`, `measureTiled‐
+/// Agreement`) and it is what is tested here.
+int inkOnTileEdges(ByteData live,
+    {required int tileDevicePixels, required int width, required int height}) {
+  expect(live.lengthInBytes, width * height * 4,
+      reason: 'the sweep indexes rows by [width]; a capture of another size '
+          'is read as the wrong quarter of itself');
+  var ink = 0;
+  for (var y = 0; y < height; y++) {
+    for (var x = 0; x < width; x++) {
+      if (!_onEdge(x, tileDevicePixels) && !_onEdge(y, tileDevicePixels)) {
+        continue;
+      }
+      // Not the transparent page: a drawn pixel.
+      if (live.getUint8((y * width + x) * 4 + 3) != 0) ink++;
+    }
+  }
+  return ink;
 }

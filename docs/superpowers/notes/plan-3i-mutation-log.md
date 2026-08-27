@@ -440,3 +440,562 @@ unexpected.
 Failing tests:
   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart: the ceiling holds at every point inside the rest frame
 ```
+
+## M3 — the slice rectangle is always the band's first tile
+
+**Task 9.** `TileGrid.sliceSourceRect` returns `Rect.fromLTWH(0, 0, tile, tile)`
+whatever key it is asked about, so every tile in a band is cut from the band's
+leftmost 64 device pixels.
+
+**Mutation:**
+
+```diff
+@@ -339,7 +339,7 @@
+   /// numbered. Integral by construction -- [deviceDeltaFrom] rounds, and a
+   /// tile side is `tileDevicePixels` exactly.
+   Rect sliceSourceRect(TileBand band, TileKey key) => Rect.fromLTWH(
+-        key.x * tileDevicePixels.toDouble() - band.deviceRect.left,
++        0,
+         0,
+         tileDevicePixels.toDouble(),
+         tileDevicePixels.toDouble(),
+```
+
+**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
+whole package suite with `CI=true flutter test`, then restored from the copy.
+**Never `git checkout`.**
+
+**Result:** red on **four of the five differential arms** and on Task 7's
+`sliceSourceRect` unit test. The counts are the whole point: 58,424 to 78,387
+differing pixels out of 480,000 on the three whole-frame arms, and 10,684 on
+the tile-edge sweep alone. Arm 3's number (68,370) is smaller than arm 1's
+because its band's first key is `-3`, so a fixed `(0, 0)` source happens to be
+right for that one column.
+
+**Verbatim output:**
+
+```
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <58424>
+a band is queried with a pad and clipped without one, and the tiles cut out of it have to hold what
+the live frame draws
+
+  [stack trace elided]
+The test description was:
+  a settled generation is identical to a live frame
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <68370>
+rebasing is frame-global: every band must be walked against the frame origin, not one it derived for
+itself
+
+  [stack trace elided]
+The test description was:
+  and at a camera on a power-of-two rebase boundary
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <59892>
+an edge tile sliced from a viewport-sized source blits its transparent overhang here, and costs the
+same as an opaque one, so no timing gate can see it
+
+  [stack trace elided]
+The test description was:
+  and stays identical after a pan smaller than one tile
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <78387>
+a grid-space slice rectangle reads off the wrong part of the band image as soon as the visible key
+range moves
+
+  [stack trace elided]
+The test description was:
+  and when a pan lands between the scale change and the bake
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <10684>
+a seam lives on the boundary, and a whole-frame count buries it under 62 interior columns out of
+every 64
+
+  [stack trace elided]
+The test description was:
+  tile boundaries carry no difference of their own
+
+00:06 +392 ~1 -7: Some tests failed.
+Failing tests:
+  test/tile_band_test.dart: the band bake a slice rectangle is band-local and integral
+  test/tile_cache_test.dart: criterion 1: a settled frame equals the live frame after a zoom
+  test/tile_slice_differential_test.dart: a settled generation is identical to a live frame
+  test/tile_slice_differential_test.dart: and at a camera on a power-of-two rebase boundary
+  ... and 3 more
+```
+
+## M7 — `bandsFor` clamps its band rectangles to the viewport
+
+**Task 9.** A band is cut to the viewport instead of to the tiles it holds, so
+the last row's band image is 24 device pixels tall where its tiles are 64. The
+slice then reads 40 rows that are not in the image and gets transparency.
+
+**Why arm 2 is its only pixel gate, and why that mattered.** Task 5's overhang
+test asserts `greaterThanOrEqualTo`, so a band truncated exactly *to* the
+viewport edge satisfies it. The truncated rows also sit outside the viewport at
+the camera the band was cut at, so arm 1 cannot see them either: a transparent
+blit costs exactly what an opaque one costs, which is why Plan 3h's p95 pan
+gate is blind to this as well. It takes a pan smaller than one tile -- 7
+logical, 14 device pixels here -- to drag those rows inside the viewport, and
+that is arm 2.
+
+**Mutation:**
+
+```diff
+@@ -368,11 +368,18 @@
+             row * tileDevicePixels.toDouble(),
+             byRow[row]!.length * tileDevicePixels.toDouble(),
+             tileDevicePixels.toDouble(),
+-          ),
++          ).intersect(_viewportDeviceRect(camera, viewport)),
+         ),
+     ];
+   }
+ 
++  /// M7: the viewport in the grid's own device space.
++  Rect _viewportDeviceRect(ViewportTransform camera, Size viewport) {
++    final (dx, dy) = deviceDeltaFrom(camera);
++    return Rect.fromLTWH(-dx.toDouble(), -dy.toDouble(),
++        viewport.width * devicePixelRatio, viewport.height * devicePixelRatio);
++  }
++
+   /// Floor division that stays correct for negative numerators.
+   ///
+   /// Dart's `~/` truncates toward zero, so `-1 ~/ 64` is `0` and the tile to
+```
+
+**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
+whole package suite with `CI=true flutter test`, then restored from the copy.
+**Never `git checkout`.**
+
+**Result:** red on arm 2 (3,780 differing pixels -- 14 device rows across 270
+columns of the bottom edge) and on arm 3 (8,692). Arm 1, arm 5 and the tile-edge
+sweep are all green under it, which is the measurement Task 5's `>=` bound
+predicted.
+
+**Verbatim output:**
+
+```
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <8692>
+an edge tile sliced from a viewport-sized source blits its transparent overhang here, and costs the
+same as an opaque one, so no timing gate can see it
+
+  [stack trace elided]
+The test description was:
+  and stays identical after a pan smaller than one tile
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <3780>
+a grid-space slice rectangle reads off the wrong part of the band image as soon as the visible key
+range moves
+
+  [stack trace elided]
+The test description was:
+  and when a pan lands between the scale change and the bake
+
+00:07 +395 ~1 -4: Some tests failed.
+Failing tests:
+  test/tile_band_test.dart: a band is one tile tall and the full union width
+  test/tile_band_test.dart: the band bake a slice rectangle is band-local and integral
+  test/tile_slice_differential_test.dart: and stays identical after a pan smaller than one tile
+  test/tile_slice_differential_test.dart: and when a pan lands between the scale change and the bake
+```
+
+## M9 — the band query is not padded
+
+**Task 9.** `const pad = 0.0` in `_bakeBand`, so the band walks exactly its own
+rectangle and drops every entity whose *bounds* fall outside it. A stroke is
+wider than its geometry: an entity whose centreline sits just outside a band
+still inks pixels inside it, and the painter's index query is an exact rect
+intersection on bounds -- measured, a line 0.1 world units outside a query rect
+is not returned.
+
+**The fixture is what makes this visible, and its first arrangement did not.**
+`bandCrossingGrid` places one 2.00 mm stroke (3.780 logical pixels of
+half-width) one logical pixel outside each band boundary, so it inks 2.780
+logical pixels -- 5.56 device rows -- into the band on the far side. The
+arrangement that shipped first placed a stroke on *both* sides of every
+boundary; those two centrelines are 2 logical pixels apart against a 3.780
+half-width, so the inner stroke's ink covers exactly what the outer one's loss
+would have exposed and **M9 changed zero pixels at `tileCamera`**. One stroke a
+boundary, alternating sides, is what makes the loss reachable. Recorded on
+`_sideFor` in `tile_fixture.dart`.
+
+**Mutation:**
+
+```diff
+@@ -2006,7 +2006,7 @@
+     // uses -- padding one alone makes them disagree. The canvas is pulled back
+     // by the same amount, so the padded viewport's origin lands where the
+     // band's own origin was.
+-    const pad = kTileSlack;
++    const pad = 0.0;
+     into.save();
+     into.translate(-pad, -pad);
+```
+
+**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
+whole package suite with `CI=true flutter test`, then restored from the copy.
+**Never `git checkout`.**
+
+**Result:** red on all five differential arms and on both of Task 6's band-query
+unit tests. 30,160 differing pixels on arms 1 and 5, 8,196 and 9,170 on arms 2
+and 3, 3,475 on the tile-edge sweep.
+
+**Verbatim output:**
+
+```
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <30160>
+a band is queried with a pad and clipped without one, and the tiles cut out of it have to hold what
+the live frame draws
+
+  [stack trace elided]
+The test description was:
+  a settled generation is identical to a live frame
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <3475>
+rebasing is frame-global: every band must be walked against the frame origin, not one it derived for
+itself
+
+  [stack trace elided]
+The test description was:
+  and at a camera on a power-of-two rebase boundary
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <30160>
+an edge tile sliced from a viewport-sized source blits its transparent overhang here, and costs the
+same as an opaque one, so no timing gate can see it
+
+  [stack trace elided]
+The test description was:
+  and stays identical after a pan smaller than one tile
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <9170>
+a grid-space slice rectangle reads off the wrong part of the band image as soon as the visible key
+range moves
+
+  [stack trace elided]
+The test description was:
+  and when a pan lands between the scale change and the bake
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <8196>
+a seam lives on the boundary, and a whole-frame count buries it under 62 interior columns out of
+every 64
+
+  [stack trace elided]
+The test description was:
+  tile boundaries carry no difference of their own
+
+00:06 +391 ~1 -8: Some tests failed.
+Failing tests:
+  test/tile_band_test.dart: the band bake the band camera puts a world point at the band-local pixel
+  test/tile_band_test.dart: the band bake the padded query reaches kTileSlack past the band on every side
+  test/tile_cache_test.dart: criterion 1: a settled frame equals the live frame after a zoom
+  test/tile_slice_differential_test.dart: a settled generation is identical to a live frame
+  ... and 4 more
+```
+
+## M9b — the band pad is applied to the camera but not to the canvas
+
+**Task 9.** `into.translate(-pad, -pad)` is dropped from `_bakeBand` while the
+band camera keeps its `+pad`. The query still reaches `kTileSlack` past the
+band on every side -- Task 6's two unit tests both stay green -- but every pixel
+the band draws lands 32 logical pixels down and right of where it belongs.
+
+**Why it needs its own mutant beside M9.** M9 removes the pad from both halves
+at once, which is a *consistent* mistake: the band is then simply narrower than
+it should be. This one is the inconsistent half, and it is the failure mode the
+pad's own comment warns about ("The canvas is pulled back by the same amount, so
+the padded viewport's origin lands where the band's own origin was"). No
+query-side assertion can see it.
+
+**Mutation:**
+
+```diff
+@@ -2008,7 +2008,6 @@
+     // band's own origin was.
+     const pad = kTileSlack;
+     into.save();
+-    into.translate(-pad, -pad);
+ 
+     final m = grid.anchor.worldToScreenMatrix;
+     final bandCamera = ViewportTransform(
+```
+
+**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
+whole package suite with `CI=true flutter test`, then restored from the copy.
+**Never `git checkout`.**
+
+**Result:** red on all five differential arms, at the largest counts of any
+mutant here -- 140,032 to 227,695 differing pixels of 480,000, because every
+band's whole content is displaced rather than a few rows of it lost.
+
+**Verbatim output:**
+
+```
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <140032>
+a band is queried with a pad and clipped without one, and the tiles cut out of it have to hold what
+the live frame draws
+
+  [stack trace elided]
+The test description was:
+  a settled generation is identical to a live frame
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <192258>
+rebasing is frame-global: every band must be walked against the frame origin, not one it derived for
+itself
+
+  [stack trace elided]
+The test description was:
+  and at a camera on a power-of-two rebase boundary
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <140060>
+an edge tile sliced from a viewport-sized source blits its transparent overhang here, and costs the
+same as an opaque one, so no timing gate can see it
+
+  [stack trace elided]
+The test description was:
+  and stays identical after a pan smaller than one tile
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <227695>
+a grid-space slice rectangle reads off the wrong part of the band image as soon as the visible key
+range moves
+
+  [stack trace elided]
+The test description was:
+  and when a pan lands between the scale change and the bake
+
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <8469>
+a seam lives on the boundary, and a whole-frame count buries it under 62 interior columns out of
+every 64
+
+  [stack trace elided]
+The test description was:
+  tile boundaries carry no difference of their own
+
+00:07 +393 ~1 -6: Some tests failed.
+Failing tests:
+  test/tile_cache_test.dart: criterion 1: a settled frame equals the live frame after a zoom
+  test/tile_slice_differential_test.dart: a settled generation is identical to a live frame
+  test/tile_slice_differential_test.dart: and at a camera on a power-of-two rebase boundary
+  test/tile_slice_differential_test.dart: and stays identical after a pan smaller than one tile
+  ... and 2 more
+```
+
+## M10 — the slice rectangle is measured in grid space, not band space
+
+**Task 9.** `sliceSourceRect` drops `- band.deviceRect.left`, so a key's source
+rectangle is measured from the generation's anchor rather than from the band
+image's own origin.
+
+**Why arm 3 is its only pixel gate.** `TileBand.deviceRect.left` is
+`keys.first.x * tileDevicePixels` by definition, so it is **zero exactly when
+the visible key range starts at column 0** -- and then band-local and
+grid-space arithmetic are the same arithmetic and this mutation is the identity.
+Every arm that does not move the key range is therefore blind to it, and the
+plan's pinned pure-zoom script never moves it: a zoom re-anchors the grid on the
+camera it zoomed to, so the range starts at 0 again. Arm 3 takes the pan
+**between** the scale change and the rest bake -- `Offset(90, 60)`, 180 x 120
+device pixels -- which drives the range to `x0 = -3`, `y0 = -2` and
+`deviceRect.left` to -192. Verified on the shipped code, not assumed:
+`bands.first.keys.first.x = -3`, `deviceRect = Rect.fromLTRB(-192.0, -128.0,
+640.0, -64.0)`.
+
+**Mutation:**
+
+```diff
+@@ -339,7 +339,7 @@
+   /// numbered. Integral by construction -- [deviceDeltaFrom] rounds, and a
+   /// tile side is `tileDevicePixels` exactly.
+   Rect sliceSourceRect(TileBand band, TileKey key) => Rect.fromLTWH(
+-        key.x * tileDevicePixels.toDouble() - band.deviceRect.left,
++        key.x * tileDevicePixels.toDouble(),
+         0,
+         tileDevicePixels.toDouble(),
+         tileDevicePixels.toDouble(),
+```
+
+**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
+whole package suite with `CI=true flutter test`, then restored from the copy.
+**Never `git checkout`.**
+
+**Result:** red on arm 3 (132,650 differing pixels) and on Task 7's
+`sliceSourceRect` unit test. Green on arms 1, 2, 4 and 5, exactly as the
+`deviceRect.left == 0` degeneracy predicts.
+
+**Verbatim output:**
+
+```
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <132650>
+a grid-space slice rectangle reads off the wrong part of the band image as soon as the visible key
+range moves
+
+  [stack trace elided]
+The test description was:
+  and when a pan lands between the scale change and the bake
+
+00:07 +397 ~1 -2: Some tests failed.
+Failing tests:
+  test/tile_band_test.dart: the band bake a slice rectangle is band-local and integral
+  test/tile_slice_differential_test.dart: and when a pan lands between the scale change and the bake
+```
+
+## M11 — the band derives its own rebase origin — **survives every pixel arm**
+
+**Task 9.** `_bakeBand` calls `rebaseOriginFor` on its own padded band viewport
+instead of using the frame-global origin handed in. Killed by Task 6's
+`every band is rebased against the origin handed in`, which observes the origin
+directly. **Not killed by any of the five differential arms, including the one
+built for it**, and that is a measurement rather than an omission.
+
+**The arm that was supposed to kill it, and why it cannot.**
+`rebaseBoundaryCamera` puts the view span at 133.333 world units -- `floor(log2)
+= 7`, step 128 -- with the view centre at 128.1667, one device pixel past the
+128 cell boundary, and the visible world y running 78.167 to 178.167 so that
+bands genuinely fall on both sides of it. Under M11 the bands therefore *do*
+take different origins from the frame: `(128, 128)` for some rows, `(128, 0)`
+for others. The frame still comes out **pixel-identical** -- `differingPixels`
+reads 0 -- and the reason is in `DraftPainter._emitScreenSpace`: it computes
+`p_screen - _screenOrigin` in `float64` and hands the sink
+`beginResidual(translation(_screenOrigin))`, and `VerticesDrawSink` adds the
+residual back in `float64` before storing an **absolute** screen coordinate in
+its `Float32List`. The origin cancels algebraically before anything is rounded
+to `float32`, so at this fixture's magnitudes the residual difference is around
+`1e-13` device pixels -- fourteen orders of magnitude below the `1.1e-05` that
+Task 6a measured as the threshold for flipping a single pixel on a near-axis
+slope, and this fixture is axis-aligned by construction.
+
+**What this means for the origin argument.** A pixel comparison is the wrong
+instrument for it at ordinary world magnitudes; the direct observation Task 6
+ships is the right one, and it is the gate of record. The origin's value is
+paid for at 4.5e6-scale coordinates (`large_coordinate_test.dart`), where the
+`float64` cancellation above is no longer exact -- a fixture at those
+magnitudes could plausibly make a pixel arm see it, and none of this plan's
+fixtures is at those magnitudes.
+
+**Mutation:**
+
+```diff
+@@ -1988,6 +1988,7 @@
+         grid.matchesScale(quantised),
+         'a band belongs to one generation, so the frame camera and the grid '
+         'anchor must agree on scale');
++    assert(origin.x == origin.x);
+     final dpr = grid.devicePixelRatio;
+     final width = band.deviceRect.width / dpr;
+     final height = band.deviceRect.height / dpr;
+@@ -2029,11 +2030,9 @@
+       painter,
+       sink,
+       vertices,
+-      // **The viewport's origin, never the band's.** Rebasing is frame-global
+-      // by construction: a per-band origin gives each band its own
+-      // quantisation step and `float32` residuals the live frame does not
+-      // have, and can cross a power-of-two step between one row and the next.
+-      origin,
++      // ignore: dead_code
++      rebaseOriginFor(bandCamera
++          .visibleWorld(Size(width + 2 * pad, height + 2 * pad))),
+       (handle) => visitedInto.add(handle.value),
+     );
+     into.restore();
+```
+
+**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
+whole package suite with `CI=true flutter test`, then restored from the copy.
+**Never `git checkout`.**
+
+**Result:** red on Task 6's origin test only. The differential arms are green.
+
+**Verbatim output:**
+
+```
+00:06 +398 ~1 -1: Some tests failed.
+Failing tests:
+  test/tile_band_test.dart: the band bake every band is rebased against the origin handed in
+```
+
+## M8 — the slice blits through a `FilterQuality.low` paint — **a declared survivor**
+
+**Task 9, and green by design.** `_sliceTile` blits through a paint with
+`filterQuality = FilterQuality.low` instead of `none`. Recorded here as a
+**declared survivor**, not as a gate's failure: `sliceSourceRect` is integral by
+construction and the destination is the same size, so a bilinear sample and a
+nearest sample read the same texels and the only difference is that a sampler
+was paid for. Plan 3h's M6 had this shape and was recorded as gap H6.
+
+**It dying would have been the finding.** A death here would mean the source
+rectangles are *not* integral -- that a slice is resampling -- and the whole
+"texture copy, not a raster" claim would be wrong. The full suite is green under
+it, which is the positive statement the mutation makes: the rectangles are
+integral.
+
+**Mutation:**
+
+```diff
+@@ -2080,6 +2080,9 @@
+   /// from the rejected Approach B. `FilterQuality.none`: the source rectangle
+   /// is integral and the destination is the same size, so there is nothing to
+   /// interpolate and a sampler would be pure cost.
++  final Paint _sliceFilterPaint = Paint()
++    ..filterQuality = FilterQuality.low;
++
+   Image _sliceTile(Image band, TileBand from, TileKey key, TileGrid grid) {
+     final recorder = PictureRecorder();
+     final into = Canvas(recorder);
+@@ -2088,7 +2091,7 @@
+       grid.sliceSourceRect(from, key),
+       Rect.fromLTWH(
+           0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble()),
+-      _blitPaint,
++      _sliceFilterPaint,
+     );
+     final picture = recorder.endRecording();
+     final image = picture.toImageSync(tileDevicePixels, tileDevicePixels);
+```
+
+**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
+whole package suite with `CI=true flutter test`, then restored from the copy.
+**Never `git checkout`.**
+
+**Result:** green, as declared. 399 passed, 1 skipped.
+
+**Verbatim output:**
+
+```
+00:06 +399 ~1: All tests passed!
+```

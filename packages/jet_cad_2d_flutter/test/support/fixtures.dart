@@ -17,6 +17,7 @@ Handle addEntity(
   List<double> scalars, {
   DraftColor color = const ByLayerColor(),
   int transparency = 0,
+  int lineweight = 25,
 }) {
   doc.commands.execute(AddEntityCommand(
     record: EntityRecord(
@@ -28,7 +29,7 @@ Handle addEntity(
       linetypeScale: 1.0,
       geomIndex: 0,
       color: color,
-      lineweight: 25,
+      lineweight: lineweight,
       transparency: transparency,
       flags: 0,
     ),
@@ -148,10 +149,17 @@ DraftDocument differentialFixture(
 /// [transparency] defaults to `0`, this channel's identity, so every existing
 /// caller is unaffected; a caller exercising translucency must pass a
 /// non-zero value explicitly.
+///
+/// [lineweight] is 1/100 mm on paper and defaults to the `25` every entity
+/// this file builds has always carried, so no existing fixture moves by a
+/// pixel. A caller that needs a stroke wide enough to ink across a boundary
+/// its centreline does not cross -- `bandCrossingGrid` is the one -- passes
+/// its own.
 Handle addLine(DraftDocument doc, Handle owner, Handle handle, double x0,
-        double y0, double x1, double y1, {int transparency = 0}) =>
+        double y0, double x1, double y1,
+        {int transparency = 0, int lineweight = 25}) =>
     addEntity(doc, owner, handle, EntityKind.line, [x0, y0, x1, y1], const [],
-        transparency: transparency);
+        transparency: transparency, lineweight: lineweight);
 
 /// Adds an empty block definition named [name].
 Handle addDefinition(DraftDocument doc, Handle handle, String name) {
