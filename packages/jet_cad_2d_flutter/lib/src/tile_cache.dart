@@ -1698,6 +1698,119 @@ class TileCache {
     return image;
   }
 
+  /// Walks one band into one image.
+  ///
+  /// Modelled on [_bake] and sharing all three of its rules, at band scale.
+  ///
+  /// **The `onVisit` callback is deliberately simpler than [_bake]'s.**
+  /// `_bake` climbs owners so a container transform reaches the tile through
+  /// direction one. A band records the same information for a wider region,
+  /// and its caller shares one record across the band's tiles, so the owner
+  /// climb happens once there rather than once per tile.
+  Image _bakeBand(
+    TileBand band,
+    TileGrid grid,
+    ViewportTransform quantised,
+    DraftPainter painter,
+    CanvasDrawSink sink,
+    VerticesDrawSink? vertices,
+    Vector2 origin,
+    List<int> visitedInto,
+  ) {
+    // **The scale is the frame camera's; the translation is the anchor's.**
+    // [TileBand.deviceRect] lives in the grid's device space, whose origin is
+    // [TileGrid.anchor] and not this frame's camera -- exactly as a tile key
+    // does, and [TileGrid.bakeCameraFor] rebases a single tile off the anchor
+    // for the same reason. A generation outlives many pans, so at a rest bake
+    // the frame camera sits a whole number of device pixels away from the
+    // anchor; taking the translation from it would slide the band by that pan
+    // and the tiles cut out of it would not hold what [_bake] puts in the
+    // same keys. The frame camera is still required to belong to this
+    // generation, which is what the assert below states.
+    assert(
+        grid.matchesScale(quantised),
+        'a band belongs to one generation, so the frame camera and the grid '
+        'anchor must agree on scale');
+    final dpr = grid.devicePixelRatio;
+    final width = band.deviceRect.width / dpr;
+    final height = band.deviceRect.height / dpr;
+    final recorder = PictureRecorder();
+    final into = Canvas(recorder);
+    into.scale(dpr);
+    // **Hard, and for [_bake]'s reason.** An antialiased clip edge would make
+    // two adjacent bands' `source-over` fall short of full coverage along the
+    // row they share: a seam, in the one place this design exists to remove
+    // one.
+    into.clipRect(Rect.fromLTWH(0, 0, width, height), doAntiAlias: false);
+
+    // **The query is padded; the clip is not.** A stroke whose centreline lies
+    // just outside the band still inks inside it. [kTileSlack] is the same
+    // slack [_bake] queries with and the same slack the invalidation rule
+    // uses -- padding one alone makes them disagree. The canvas is pulled back
+    // by the same amount, so the padded viewport's origin lands where the
+    // band's own origin was.
+    const pad = kTileSlack;
+    into.save();
+    into.translate(-pad, -pad);
+
+    final m = grid.anchor.worldToScreenMatrix;
+    final bandCamera = ViewportTransform(
+      worldToScreenMatrix: Transform2(
+        m.a,
+        m.b,
+        m.c,
+        m.d,
+        m.e - band.deviceRect.left / dpr + pad,
+        m.f - band.deviceRect.top / dpr + pad,
+      ),
+    );
+
+    _drawInto(
+      into,
+      Size(width + 2 * pad, height + 2 * pad),
+      bandCamera,
+      painter,
+      sink,
+      vertices,
+      // **The viewport's origin, never the band's.** Rebasing is frame-global
+      // by construction: a per-band origin gives each band its own
+      // quantisation step and `float32` residuals the live frame does not
+      // have, and can cross a power-of-two step between one row and the next.
+      origin,
+      (handle) => visitedInto.add(handle.value),
+    );
+    into.restore();
+
+    final picture = recorder.endRecording();
+    final image = picture.toImageSync(
+        band.deviceRect.width.round(), band.deviceRect.height.round());
+    _imagesAlive++;
+    picture.dispose();
+    return image;
+  }
+
+  /// Test seam for [_bakeBand], and its only caller until the band bake is
+  /// wired into [paintFrame].
+  ///
+  /// What the band bake decides -- where the band camera puts a world point,
+  /// how far past the band's edge the query reaches, and which origin the walk
+  /// is rebased against -- is checkable without rasterising anything, and this
+  /// is what lets it be checked. The returned image is the caller's to
+  /// dispose.
+  @visibleForTesting
+  Image debugBakeBand(
+    TileBand band,
+    TileGrid grid,
+    ViewportTransform quantised,
+    DraftPainter painter,
+    CanvasDrawSink sink,
+    VerticesDrawSink? vertices,
+    Vector2 origin,
+    List<int> visitedInto,
+  ) =>
+      _bakeBand(
+          band, grid, quantised, painter, sink, vertices, origin, visitedInto);
+
   void _drawInto(
     Canvas canvas,
     Size size,
