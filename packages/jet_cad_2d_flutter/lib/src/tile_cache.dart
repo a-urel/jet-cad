@@ -612,6 +612,43 @@ class TileCache {
   /// The rest gate's counter, for tests. See [_restGateSteps].
   int get debugRestGateSteps => _restGateSteps;
 
+  /// **Suppresses the rest bake. A measurement switch, not a correctness
+  /// switch.**
+  ///
+  /// Set, the resting frame never calls `_restBake`, and the cache fills the
+  /// viewport the way it did before Plan 3i: the ordinary budgeted per-tile
+  /// path, `budgetedTilesPerFrame` tiles a frame, over as many frames as that
+  /// takes. That is not an alternative configuration of the rest bake — it is
+  /// an earlier revision of `paintFrame`, and it is **precisely how criterion
+  /// 4's denominator arm is defined**.
+  ///
+  /// **It exists so one binary can run both arms of criterion 4's ratio in a
+  /// single session, interleaved.** That is the only reason a production
+  /// field carries a measurement switch. The two alternatives are both worse
+  /// and both have been tried in this repository: two binaries cannot
+  /// interleave, so session drift and thermal drift concentrate on whichever
+  /// arm ran last (`docs/superpowers/notes/2026-08-25-plan-3h-results.md`
+  /// records exactly that happening); and a rig that reconstructed the
+  /// per-tile arm for itself would be measuring its own reimplementation
+  /// rather than the code that ships, which is the mistake Plan 3g's `_probeBake`
+  /// made and [debugLastStrip]'s doc comment exists to keep from recurring.
+  /// `runInterleaved` in `dev_harness_2d`'s `measurement_rig.dart` alternates
+  /// whole arms; this field is the half of that arrangement the cache owes.
+  ///
+  /// **Pixels are the same either way; only the number of frames coverage
+  /// takes changes.** Both paths walk the same painter over the same scene
+  /// and bake into the same tile lattice — the band path does one walk per
+  /// tile row and copies the result into tiles, the per-tile path does one
+  /// walk per tile. A viewport that settles in one resting frame with the
+  /// bake enabled settles in tens of frames with it disabled, which is the
+  /// whole quantity criterion 4 scores. `tile_measurement_seam_test.dart`
+  /// pins that reading: with the flag set the cache still reaches
+  /// [viewportCovered] and still bakes tiles, having sliced none.
+  ///
+  /// Defaults to `false`. No non-debug caller sets it — `DraftCanvas` never
+  /// touches it, and the writers are that test and the measurement rig.
+  bool debugRestBakeDisabled = false;
+
   int _bakes = 0;
   int _carryOverBlits = 0;
   int _blits = 0;
@@ -800,6 +837,42 @@ class TileCache {
 
   Rect? _lastStrip;
 
+  /// **Hands the live fallback's query the full viewport instead of the
+  /// strip. This field ships a known defect behind a flag, and that is what
+  /// it is for.**
+  ///
+  /// It reproduces **Plan 3h's mutant M4** at runtime — defined in
+  /// `docs/superpowers/notes/plan-3h-mutation-log.md`, §"M4 — narrow the clip
+  /// but not the query": keep the narrow clip, and hand the query — what is
+  /// *walked*, not what is *drawn* — the whole viewport. Every pixel still
+  /// lands where it belongs, because the clip discards the surplus; what
+  /// changes is how much geometry the frame tessellates to produce them. That
+  /// is why the gate which kills M4 counts triangles and not pixels — see
+  /// `kTriangleBudgetRatio` in `test/support/tile_comparison.dart`.
+  ///
+  /// **The clip stays narrow, and that is what makes this M4 and not M5.**
+  /// The `canvas.clipRect(uncovered, doAntiAlias: false)` immediately above
+  /// the query is outside this field's reach and must stay that way. M5, in
+  /// the same log, reaches the same end state from the other direction — it
+  /// grows the query and leaves the clip untouched — so widening the clip
+  /// here would be neither mutant, and the M4 arm of a published ratio would
+  /// not be M4.
+  ///
+  /// **It exists so criterion 8's two arms can interleave inside one
+  /// session**, at n=9 per arm. Plan 3h could only run "narrow" and "M4" as
+  /// two binaries, three-then-three, because M4 was a source edit with no
+  /// runtime switch; its own results
+  /// (`docs/superpowers/notes/2026-08-25-plan-3h-results.md`) record what that
+  /// cost — the M4 arm ran last, in a visibly noisier session, on a phase M4
+  /// is inert on, so the arm ordering and not the mutation moved the numbers.
+  /// Removing that bias is Plan 3i's Task 13, and it needs a runtime switch or
+  /// it needs two binaries again.
+  ///
+  /// Defaults to `false`. No non-debug caller sets it: a frame that reaches
+  /// the fallback with this standing is doing measurably more work than it has
+  /// to, deliberately.
+  bool debugFullViewportQuery = false;
+
   /// The blit `Paint`'s identity, for criterion 13.
   ///
   /// Exposed the way `VerticesDrawSink.debugPaint` is, and for the same
@@ -979,7 +1052,7 @@ class TileCache {
     // full-viewport walk on the first frame of a still-moving gesture, which
     // is precisely the zoom-regime cost this cache exists to refuse. A band
     // is for a camera that has actually stopped.
-    if (_restGateSteps >= kRestGateFrames) {
+    if (_restGateSteps >= kRestGateFrames && !debugRestBakeDisabled) {
       _restBake(grid, quantised, viewport, painter, sink, vertices, origin);
     }
 
@@ -1071,7 +1144,9 @@ class TileCache {
     // viewport tessellates the whole frame and throws most of it away -- which
     // is what every fallback did before this line, and why the frame's excess
     // read as a full live walk.
-    final strip = stripFor(uncovered, viewport);
+    final strip = debugFullViewportQuery
+        ? Offset.zero & viewport
+        : stripFor(uncovered, viewport);
     _lastStrip = strip;
     canvas.translate(strip.left, strip.top);
     final q = quantised.worldToScreenMatrix;

@@ -1215,3 +1215,199 @@ Failing tests:
 
 Restored from the scratchpad copy and re-ran the same file green (`+8: All
 tests passed!`) before moving on.
+
+---
+
+## M13 — the rest bake ignores `debugRestBakeDisabled`
+
+**Task:** Task 12a, "the two measurement seams" (Ruling 14). Gates
+`test/tile_measurement_seam_test.dart`'s `'debugRestBakeDisabled slices
+nothing and still covers'`.
+
+**Why this mutant and not another.** `TileCache.debugRestBakeDisabled` is a
+measurement switch: criterion 4's denominator arm is *this cache without the
+rest bake*, and the only way to reach it inside one interleaved session is a
+runtime flag. A flag that is declared, documented and read — but whose read
+changes nothing the frame path does — fails silently and in the worst
+possible place: both arms of the ratio would run identical code, the ratio
+would read exactly **1.00**, and the number would be written into a document
+of record with nothing to contradict it. M13 is that failure, applied on
+purpose.
+
+**Mutation**, applied to
+`packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`:
+
+```diff
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -1055,7 +1055,7 @@
+-    if (_restGateSteps >= kRestGateFrames && !debugRestBakeDisabled) {
++    if (_restGateSteps >= kRestGateFrames) {
+       _restBake(grid, quantised, viewport, painter, sink, vertices, origin);
+     }
+```
+
+**Procedure:** copied `tile_cache.dart` aside to the scratchpad
+(`tile_cache_m13.bak`), edited the working file, ran
+`CI=true flutter test test/tile_measurement_seam_test.dart`, confirmed red,
+then restored the working file with `cp` from the scratchpad copy and
+confirmed `diff` produced no output. **Never `git checkout`.**
+
+**Result:** red, on the slice count and not on the flag's own value. The
+flagged arm slices **130** — every visible tile — where correct code slices
+**0**. The other two tests in the file stay green, which is the point of the
+first one: `'the rest bake fires, and debugRestBakeDisabled suppresses it'`
+is the unflagged arm, and under M13 it is still true, so a reader can see
+that the mutation removed the *difference between the arms* rather than
+breaking the bake.
+
+**Verbatim output** (the `flutter pub get` preamble, identical to every other
+entry in this file, is trimmed):
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_measurement_seam_test.dart
+00:00 +0: the rest bake fires, and debugRestBakeDisabled suppresses it
+00:00 +1: debugRestBakeDisabled slices nothing and still covers
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: <0>
+  Actual: <130>
+with the rest bake disabled no tile may be cut from a band -- criterion 4's denominator arm is the
+budgeted per-tile path, and an arm that still slices is the numerator arm under a different name,
+which would put the ratio at 1.00
+
+When the exception was thrown, this was the stack:
+#4      main.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_measurement_seam_test.dart:169:5)
+<asynchronous suspension>
+#5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+This was caught by the test expectation on the following line:
+  file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_measurement_seam_test.dart line 169
+The test description was:
+  debugRestBakeDisabled slices nothing and still covers
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:00 +1 -1: debugRestBakeDisabled slices nothing and still covers [E]
+  Test failed. See exception logs above.
+  The test description was: debugRestBakeDisabled slices nothing and still covers
+  
+00:00 +1 -1: debugFullViewportQuery grows the fallback walk to the whole viewport
+00:00 +2 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_measurement_seam_test.dart: debugRestBakeDisabled slices nothing and still covers
+```
+
+**Restore, verified.** `cp` from the scratchpad copy, `diff` against it empty,
+and the same file re-run green:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_measurement_seam_test.dart
+00:00 +0: the rest bake fires, and debugRestBakeDisabled suppresses it
+00:00 +1: debugRestBakeDisabled slices nothing and still covers
+00:00 +2: debugFullViewportQuery grows the fallback walk to the whole viewport
+00:00 +3: All tests passed!
+```
+
+---
+
+## M14 — the live fallback ignores `debugFullViewportQuery`
+
+**Task:** Task 12a (Ruling 14). Gates
+`test/tile_measurement_seam_test.dart`'s `'debugFullViewportQuery grows the
+fallback walk to the whole viewport'`.
+
+**Why this mutant.** `TileCache.debugFullViewportQuery` reproduces **Plan
+3h's M4** — see `plan-3h-mutation-log.md` §"M4 — narrow the clip but not the
+query" — at runtime, so that criterion 8's "narrow" and "M4" arms can
+interleave inside one session instead of being two binaries run
+three-then-three. **Note the numbering collision:** this file's own M4 is a
+different mutation entirely; the flag reproduces *3h's* M4.
+
+A flag that is read but inert here is the same silent 1.00 as M13, with an
+extra trap of its own: M4 is pixel-invisible by construction. The clip stays
+narrow, so every pixel lands exactly where it belongs whether the query is
+the strip or the viewport; only the *amount of geometry tessellated to
+produce them* changes. So no pixel gate can see this switch fail, and the
+test that gates it has to read the strip the frame actually walked
+(`debugLastStrip`, written by `paintFrame` itself) and the triangles it
+actually emitted (`VerticesDrawSink.frameTriangleCount`) — which is the same
+instrument `kTriangleBudgetRatio` uses to kill 3h's M4 as a source edit.
+
+**Mutation**, applied to
+`packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`:
+
+```diff
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -1147,9 +1147,7 @@
+-    final strip = debugFullViewportQuery
+-        ? Offset.zero & viewport
+-        : stripFor(uncovered, viewport);
++    final strip = stripFor(uncovered, viewport);
+     _lastStrip = strip;
+```
+
+**Procedure:** copied `tile_cache.dart` aside to the scratchpad
+(`tile_cache_m14.bak`), edited the working file, ran
+`CI=true flutter test test/tile_measurement_seam_test.dart`, confirmed red,
+then restored with `cp` and confirmed `diff` produced no output. **Never `git
+checkout`.**
+
+**Result:** red on the recorded strip. At the swept pan `Offset(0, 53)` on
+`fillingGrid` — the offset `kTriangleBudgetRatio`'s doc comment identifies as
+the tightest sample in that sweep — correct code produces
+
+- narrow arm: strip `Rect.fromLTRB(0, 0, 400, 85)`, **60** triangles
+- M4 arm: strip `Rect.fromLTRB(0, 0, 400, 300)`, **80** triangles
+
+so the flag moves the walk by 215 logical rows and the geometry by a third.
+Under M14 the M4 arm collapses onto the narrow arm exactly — same strip, same
+60 triangles — which is the reading the test refuses.
+
+**Verbatim output** (preamble trimmed as above):
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_measurement_seam_test.dart
+00:00 +0: the rest bake fires, and debugRestBakeDisabled suppresses it
+00:00 +1: debugRestBakeDisabled slices nothing and still covers
+00:00 +2: debugFullViewportQuery grows the fallback walk to the whole viewport
+00:00 +2 -1: debugFullViewportQuery grows the fallback walk to the whole viewport [E]
+  Expected: Rect:<Rect.fromLTRB(0.0, 0.0, 400.0, 300.0)>
+    Actual: Rect:<Rect.fromLTRB(0.0, 0.0, 400.0, 85.0)>
+  with the flag set the query is the full viewport -- that is what Plan 3h's M4 is: _FallbackArm(strip: Rect.fromLTRB(0.0, 0.0, 400.0, 85.0), triangles: 60, liveDraws: 1)
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/tile_measurement_seam_test.dart 211:5          main.<fn>
+  
+00:00 +2 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_measurement_seam_test.dart: debugFullViewportQuery grows the fallback walk to the whole viewport
+```
+
+**Restore, verified.** `cp` from the scratchpad copy, `diff` against it empty,
+`git status --porcelain` showing only this task's own two paths, and the file
+re-run green:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_measurement_seam_test.dart
+00:00 +0: the rest bake fires, and debugRestBakeDisabled suppresses it
+00:00 +1: debugRestBakeDisabled slices nothing and still covers
+00:00 +2: debugFullViewportQuery grows the fallback walk to the whole viewport
+00:00 +3: All tests passed!
+```
+
+**One thing M14 does not gate, named rather than hidden.** The test asserts
+the M4 arm's strip *equals* the full viewport and that its triangle count
+*exceeds* the narrow arm's. It does not assert that the clip stayed narrow —
+that is what makes the flag M4 rather than M5, and it is held by the source
+(the flag's ternary touches only `strip`, and `canvas.clipRect(uncovered,
+...)` is on the line above it) and by the flag's own doc comment, not by a
+test. A future edit that widened the clip under the flag would keep this test
+green while publishing an "M4" arm that is not M4.
