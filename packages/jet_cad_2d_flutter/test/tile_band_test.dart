@@ -226,6 +226,40 @@ void main() {
               'and the rows disagree along their shared edge');
     });
 
+    test('a slice rectangle is band-local and integral', () {
+      for (final key in band.keys) {
+        final src = grid.sliceSourceRect(band, key);
+        expect(src.left, greaterThanOrEqualTo(0.0),
+            reason: 'band-local, so never negative however the keys are '
+                'numbered -- a same-scale pan takes key.x negative');
+        expect(src.top, 0.0);
+        expect(src.width, 64.0);
+        expect(src.height, 64.0);
+        expect(src.left, src.left.roundToDouble(),
+            reason: 'integral by construction: `deviceDeltaFrom` rounds, '
+                'and a tile side is `tileDevicePixels` exactly');
+      }
+      expect(grid.sliceSourceRect(band, band.keys.first).left, 0.0);
+
+      // Necessary but weak on its own: `band.deviceRect.left` is *defined*
+      // as `band.keys.first.x * tileDevicePixels` (see `TileGrid.bandsFor`),
+      // so a grid-space implementation -- reading `key.x * tileDevicePixels`
+      // with no subtraction -- would give the same 0 for the first key
+      // whenever a band happens to start at grid column 0. This fixture's
+      // pan already puts `band.keys.first.x` at 1, so that assertion alone
+      // already catches it here; the next one is the general form and keeps
+      // catching it even against a fixture where the first key does not,
+      // because it pins the spacing between two consecutive keys rather than
+      // a single boundary value.
+      expect(band.keys.length, greaterThanOrEqualTo(2),
+          reason: 'a second key is required below, or this test is vacuous');
+      expect(grid.sliceSourceRect(band, band.keys[1]).left, 64.0,
+          reason: 'band-local: exactly one tile width in from the first key, '
+              'whatever grid column the band starts at -- a grid-space '
+              'implementation reads key.x * tileDevicePixels here and gets '
+              '128.0 instead');
+    });
+
     test('the walk reports the handles it touched into visitedInto', () {
       // The real painter here, not the recorder: this is the one claim that
       // needs the walk to actually happen.

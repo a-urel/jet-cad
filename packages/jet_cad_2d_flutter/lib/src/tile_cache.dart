@@ -331,6 +331,20 @@ class TileGrid {
     );
   }
 
+  /// Where [key]'s pixels sit **inside** [band]'s image.
+  ///
+  /// Band-local, not grid-space. A key's device rectangle is measured from the
+  /// generation's anchor and goes negative as soon as a same-scale pan moves
+  /// the visible range; the band image starts at (0, 0) whatever the keys are
+  /// numbered. Integral by construction -- [deviceDeltaFrom] rounds, and a
+  /// tile side is `tileDevicePixels` exactly.
+  Rect sliceSourceRect(TileBand band, TileKey key) => Rect.fromLTWH(
+        key.x * tileDevicePixels.toDouble() - band.deviceRect.left,
+        0,
+        tileDevicePixels.toDouble(),
+        tileDevicePixels.toDouble(),
+      );
+
   /// [visibleKeys] grouped into one band per tile row.
   ///
   /// **A band and not the whole union**, because the union has the tile set's
@@ -1810,6 +1824,38 @@ class TileCache {
   ) =>
       _bakeBand(
           band, grid, quantised, painter, sink, vertices, origin, visitedInto);
+
+  /// Copies one tile's pixels out of a band image.
+  ///
+  /// A texture copy, not a geometry raster -- which is the whole difference
+  /// from the rejected Approach B. `FilterQuality.none`: the source rectangle
+  /// is integral and the destination is the same size, so there is nothing to
+  /// interpolate and a sampler would be pure cost.
+  Image _sliceTile(Image band, TileBand from, TileKey key, TileGrid grid) {
+    final recorder = PictureRecorder();
+    final into = Canvas(recorder);
+    into.drawImageRect(
+      band,
+      grid.sliceSourceRect(from, key),
+      Rect.fromLTWH(
+          0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble()),
+      _blitPaint,
+    );
+    final picture = recorder.endRecording();
+    final image = picture.toImageSync(tileDevicePixels, tileDevicePixels);
+    _imagesAlive++;
+    picture.dispose();
+    return image;
+  }
+
+  /// Test seam for [_sliceTile]. Like [debugBakeBand], this has no production
+  /// caller yet -- the slice is not wired into [paintFrame] until a later
+  /// task -- so without this wrapper the analyzer's `unused_element` (an
+  /// error in this package) would fail the gate on a private method nothing
+  /// calls.
+  @visibleForTesting
+  Image debugSliceTile(Image band, TileBand from, TileKey key, TileGrid grid) =>
+      _sliceTile(band, from, key, grid);
 
   void _drawInto(
     Canvas canvas,
