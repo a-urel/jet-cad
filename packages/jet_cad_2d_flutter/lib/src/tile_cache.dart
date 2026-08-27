@@ -331,12 +331,54 @@ class TileGrid {
     );
   }
 
+  /// [visibleKeys] grouped into one band per tile row.
+  ///
+  /// **A band and not the whole union**, because the union has the tile set's
+  /// own area — `visibleKeys` yields a full rectangle — so one image for it
+  /// plus the tiles it is sliced into peaks at exactly `kTileCacheBytes` with
+  /// no headroom. One row at a time is 8 MiB at the reference viewport against
+  /// the union's 48.
+  List<TileBand> bandsFor(ViewportTransform camera, Size viewport) {
+    final byRow = <int, List<TileKey>>{};
+    for (final key in visibleKeys(camera, viewport)) {
+      (byRow[key.y] ??= <TileKey>[]).add(key);
+    }
+    final rows = byRow.keys.toList()..sort();
+    return [
+      for (final row in rows)
+        TileBand(
+          row: row,
+          keys: byRow[row]!..sort((a, b) => a.x.compareTo(b.x)),
+          deviceRect: Rect.fromLTWH(
+            byRow[row]!.first.x * tileDevicePixels.toDouble(),
+            row * tileDevicePixels.toDouble(),
+            byRow[row]!.length * tileDevicePixels.toDouble(),
+            tileDevicePixels.toDouble(),
+          ),
+        ),
+    ];
+  }
+
   /// Floor division that stays correct for negative numerators.
   ///
   /// Dart's `~/` truncates toward zero, so `-1 ~/ 64` is `0` and the tile to
   /// the left of the origin would share a key with the tile at it. A pan in
   /// either direction reaches negative keys within one tile of the anchor.
   static int _floorDiv(int a, int b) => (a / b).floor();
+}
+
+/// One tile row of the visible region: every key in it, and the device
+/// rectangle they span.
+class TileBand {
+  const TileBand(
+      {required this.row, required this.keys, required this.deviceRect});
+
+  final int row;
+  final List<TileKey> keys;
+
+  /// In the grid's device space — the space [TileGrid.deviceDeltaFrom]
+  /// returns, whose origin is the grid's anchor and not the viewport.
+  final Rect deviceRect;
 }
 
 /// A cache of rasterised viewport tiles.
