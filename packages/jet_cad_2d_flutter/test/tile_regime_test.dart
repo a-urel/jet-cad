@@ -1,7 +1,11 @@
+import 'dart:ui';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'support/tile_comparison.dart';
+import 'support/tile_fixture.dart';
 import 'support/tile_harness.dart';
 
 void main() {
@@ -24,6 +28,31 @@ void main() {
   test('a translation change compares different', () {
     expect(sameQuantisedCamera(at(1.4, 10, 20), at(1.4, 11, 20)), isFalse);
     expect(sameQuantisedCamera(at(1.4, 10, 20), at(1.4, 10, 21)), isFalse);
+  });
+
+  // **`a` and `d` are separate fields and every other fixture here ties them
+  // together.** The `at()` helper builds `Transform2(scale, 0, 0, -scale, ...)`
+  // and 'a scale change compares different' moves both at once, so deleting
+  // either `x.a == y.a &&` or `x.d == y.d &&` left the other one firing and
+  // the whole suite green -- M12's defect one field over, recorded as a
+  // deferred minor at Task 1 and closed here. An anisotropic camera is what
+  // separates them: `d != -a`, and each arm moves one term only.
+  test('the two scale terms are compared independently', () {
+    ViewportTransform anisotropic(double a, double d) =>
+        ViewportTransform(worldToScreenMatrix: Transform2(a, 0, 0, d, 10, 20));
+
+    expect(sameQuantisedCamera(anisotropic(1.4, -2.1), anisotropic(1.4, -2.1)),
+        isTrue,
+        reason: 'non-vacuity: two equal anisotropic cameras must still '
+            'compare same, or the two arms below pass for want of any '
+            'agreement at all');
+    expect(sameQuantisedCamera(anisotropic(1.4, -2.1), anisotropic(1.5, -2.1)),
+        isFalse,
+        reason: 'x scale alone, with y held: a generation anchored at one x '
+            'scale cannot blit at another');
+    expect(sameQuantisedCamera(anisotropic(1.4, -2.1), anisotropic(1.4, -2.2)),
+        isFalse,
+        reason: 'y scale alone, with x held');
   });
 
   test('the skew terms are compared too', () {
@@ -159,9 +188,174 @@ void main() {
             'unchanged frames, so it must never bake');
   });
 
-  test('the gate needs two unchanged frames, not one', () {
-    // The threshold itself, stated where a reader can see it: one unchanged
-    // frame is the in-between frame and draws like a moving one.
+  // **Spec D8: the pan path is untouched.** A pan straight after a zoom is the
+  // frame this whole test exists for, and it was drawing only the stale
+  // composite for the length of the gesture: `CameraController.panBy` copies
+  // `a, b, c, d` bit-identically, so `TileGrid.matchesScale` holds, `_gridFor`
+  // returns the standing grid without retiring, and the composite the zoom
+  // minted survives every pan frame. With the camera changing every frame the
+  // rest gate never armed, so `_tiles` stayed empty and the region the
+  // composite slid off stayed background until the user stopped moving.
+  //
+  // A macOS trackpad reaches this directly: any stretch of a gesture where the
+  // pan continues after the scale stops changing.
+  testWidgets('a pan after a zoom fills the region the composite slides off',
+      (t) async {
+    final h = await pumpTiled(t);
+    await settle(t, h);
+    expect(h.cache.viewportCovered, isTrue,
+        reason: 'setup: a generation that covers is what a zoom can retire '
+            'into a composite');
+
+    // One zoom step, and one only: the settled generation is flattened into
+    // the composite and every tile disposed, which is the state the pan below
+    // starts from.
+    h.camera.zoomAt(const Offset(120, 90), 1.3);
+    await t.pump();
+    expect(h.cache.hasCarryOver, isTrue,
+        reason: 'setup: the zoom minted the composite the pan then carries');
+    expect(h.cache.liveTileCount, 0,
+        reason: 'setup: and retired every tile, so anything the pan frames '
+            'put on screen below is theirs');
+
+    h.cache.resetCounters();
+    // Four pan frames at exactly the scale the zoom left. Enough that the
+    // composite -- magnified 1.3x about (120, 90), so it reaches x = 484 in a
+    // 400-wide viewport -- slides its right edge inside the viewport and
+    // stops covering.
+    for (var i = 0; i < 4; i++) {
+      h.camera.panBy(const Offset(-40, 0));
+      await t.pump();
+    }
+
+    expect(h.cache.bakeCount, greaterThan(0),
+        reason: 'a pan is not a moving frame (spec D1 defines moving by the '
+            'scale) and D8 leaves the pan path baking at its edge');
+    expect(h.cache.liveTileCount, greaterThan(0),
+        reason: 'and the tiles it bakes are what fill the revealed region '
+            'once the composite no longer covers it');
+
+    // **The pixels, not only the counters.** The strip below is the part of
+    // the viewport the composite has slid off: its right edge sits at
+    // 120 + 1.3 * 280 - 160 = 324 logical after the four pans, so
+    // [324, 400) x [0, 300) is served by the incoming generation alone. A
+    // frame that returned early leaves it transparent.
+    const revealed = Rect.fromLTRB(324, 0, 400, 300);
+    final tiled = await captureTiled(t, h);
+    final ink = inkInsideCapture(tiled, revealed);
+    // `captureLive` replaces the widget tree and disposes the cache behind
+    // `h`, so it comes last and nothing is read from the cache after it.
+    final live = await captureLive(t, h);
+    expect(inkInsideCapture(live, revealed), greaterThan(200),
+        reason: 'non-vacuity: the fixture must actually draw in the strip, '
+            'or "the tiled frame drew nothing there" is not a defect');
+    expect(ink, greaterThan(200),
+        reason: 'the region the composite slid off must carry the drawing, '
+            'not background: this is spec D3 accepting a ring on a zoom '
+            '*out* and nothing else');
+  });
+
+  // **Spec D6 and the rest bake's own doc comment, at the granularity the
+  // walk happens at.** One missing key anywhere in the viewport used to
+  // commit every band to a full painter walk, an owner climb, a
+  // `toImageSync` and a `_bakes++` -- and then to throw the image away,
+  // because the per-key skip inside the band loop skips only the slice.
+  //
+  // This is the ordinary edit path: after an `applyChange` the camera has not
+  // moved, so the gate is still armed and the next frame rest-bakes, while
+  // invalidation has typically condemned one band.
+  testWidgets('an edit inside one band rebakes that band alone', (t) async {
+    final h = await pumpTiled(t, document: bandCrossingGrid);
+    await settleFromBands(t, h);
+
+    // **The control, measured rather than assumed.** A whole-generation drop
+    // at the same camera is the same rest frame with every band missing, and
+    // the number it bakes is what "all of them" means on this viewport. The
+    // assertion below is only worth making because this one is larger.
+    h.cache.resetCounters();
+    h.document.tables.layers.add(const LayerRecord(
+      handle: Handle(901),
+      name: 'ALL-BANDS',
+      color: IndexedColor(3),
+      linetype: ReservedHandles.continuousLinetype,
+      lineweight: 50,
+      transparency: 0,
+    ));
+    await t.pump();
+    await settle(t, h);
+    final allBands = h.cache.bakeCount;
+    expect(allBands, greaterThan(5),
+        reason: 'non-vacuity: the viewport must span several bands, or "one '
+            'band, not all of them" is a distinction without a difference');
+    expect(h.cache.viewportCovered, isTrue,
+        reason: 'setup: the control frame refilled what it dropped');
+
+    // The measurement: one edit, inside one band.
+    h.cache.resetCounters();
+    final invalidatedBefore = h.cache.invalidationCount;
+    h.moveOneEntityWithinOneBand();
+    await t.pump();
+    await settle(t, h);
+
+    expect(h.cache.invalidationCount, greaterThan(invalidatedBefore),
+        reason: 'setup: the edit must have condemned tiles, or the rest bake '
+            'below had nothing to do for a reason that is not the probe');
+    // **Three of ten, and the three are derivable rather than observed.**
+    // Direction one of invalidation condemns every tile whose `_baked` record
+    // names the handle, and a sliced tile's record is its whole band's (spec
+    // D6). A band's walk is *queried* padded by [kTileSlack] and clipped hard
+    // (spec D4/D7), and `kTileSlack` is 32 logical pixels -- exactly one tile
+    // row at this harness's 64 device pixels and `kTileDpr` of 2 -- so a leaf
+    // resting in row 4 is visited by the walks for rows 3, 4 and 5 and named
+    // in all three records. Measured: 39 tiles condemned, 3 x 13. The number
+    // to compare it against is `allBands`, not one: the defect this pins is a
+    // rest bake that walked all ten and threw seven images away.
+    expect(h.cache.bakeCount, 3,
+        reason: 'only the bands the edit condemned owe a walk; the other '
+            '${allBands - 3} hold every key they need, and rebaking them '
+            'replaces good images with identical ones -- a whole-viewport '
+            'walk for three rows, on every frame of a drag');
+    expect(h.cache.bakeCount, lessThan(allBands),
+        reason: 'stated twice on purpose: the exact 3 pins the pad is reach, '
+            'and this clause is the one that fails if the frame-global probe '
+            'comes back and every band bakes again');
+    expect(h.cache.viewportCovered, isTrue,
+        reason: 'and skipping them must not leave a hole: a skipped band '
+            'keeps its tiles, and they are still blitted');
+  });
+
+  testWidgets('a skipped band keeps its tiles out of the ceiling\'s reach',
+      (t) async {
+    // The other half of the skip, and the half that is easy to get wrong.
+    // `_makeRoomForBytes` may evict any tile whose recency is older than this
+    // frame's, so a band skipped *without* touching its keys' recency would
+    // leave them evictable by a later band's own room-making -- and the frame
+    // would blit a hole in a row it had already decided it owned. The rest
+    // bake's up-front pricing rests on exactly that: at band `i` the
+    // un-evictable set is the keys of bands `0..i-1`.
+    final h = await pumpTiled(t, document: bandCrossingGrid);
+    await settleFromBands(t, h);
+    final tiles = h.cache.liveTileCount;
+
+    h.cache.resetCounters();
+    final evictedBefore = h.cache.evictionCount;
+    h.moveOneEntityWithinOneBand();
+    await t.pump();
+    await settle(t, h);
+
+    expect(h.cache.evictionCount, evictedBefore,
+        reason: 'nothing may be evicted here: every visible key carries this '
+            'frame is serial, skipped bands included');
+    expect(h.cache.liveTileCount, tiles,
+        reason: 'the generation is whole again and exactly as large as it '
+            'was: one band rebaked, nine left standing');
+  });
+
+  test('the gate is two unchanged frames, and the constant says so', () {
+    // A restatement of the constant and named as one. The *behaviour* it
+    // gates is 'a steadily spun wheel never arms the rest gate' above, which
+    // is what reddens under M4b; this line exists so a reader who changes the
+    // constant sees the threshold the wheel test was written against.
     expect(kRestGateFrames, 2);
   });
 }

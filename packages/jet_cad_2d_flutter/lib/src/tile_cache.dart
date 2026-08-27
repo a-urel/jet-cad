@@ -968,16 +968,29 @@ class TileCache {
     _lastClip = null;
 
     final quantised = quantiseCamera(camera, devicePixelRatio);
+    // Held across the call below because **`grid.matchesScale(quantised)` is
+    // true by construction once `_gridFor` has returned**: a scale change is
+    // exactly the case where it retires the generation and anchors a fresh
+    // grid *at this camera*. Spec D1 defines a *moving* frame as one whose
+    // quantised scale fails `matchesScale` against the current generation's
+    // anchor, and the only place that question can still be asked is here,
+    // against the generation the frame arrived at. Identity, not
+    // `matchesScale`, so a device-pixel-ratio or tile-size change -- which
+    // also re-anchors -- counts as the scale change it is.
+    final incoming = _grid;
     // The viewport reaches `_gridFor` because retiring a generation is now a
     // composite and not just a `dispose`: the outgoing tiles have to be
     // flattened into one viewport-sized image *before* they go.
     final grid = _gridFor(quantised, devicePixelRatio, viewport);
+    final scaleChanged = !identical(incoming, grid);
     _lastCamera = quantised;
 
-    // **Three frame kinds, and only one of them bakes.** A frame whose camera
-    // changed is *moving*. A frame that has matched once and not yet twice is
-    // the one in between. Both draw the composite and nothing else: no bake,
-    // and no live walk.
+    // **Three frame kinds, and only one of them bakes.** A frame whose
+    // *scale* changed is *moving* (spec D1). A frame that has matched once
+    // and not yet twice is the one in between. Both draw the composite and
+    // nothing else: no bake, and no live walk. A frame that changed only its
+    // translation is none of the three -- it is a pan, and D8 leaves the pan
+    // path exactly as it was.
     //
     // The live walk is excluded deliberately and the measurement is why. On a
     // moving frame the new generation is empty, so every visible key misses
@@ -1023,8 +1036,31 @@ class TileCache {
     // viewport is worse than an expensive one, so this falls through to the
     // ordinary bake-and-live-walk path instead: where there is nothing stale
     // to show, drawing the real thing is the honest fallback.
+    //
+    // **Nor on a pan, and that is spec D8.** A *moving* frame is one whose
+    // scale changed (D1); a frame that changed only its translation is a pan,
+    // and D8 says the pan path is untouched by this plan. Without the last
+    // disjunct below it was not: `CameraController.panBy` copies `a, b, c, d`
+    // bit-identically, so `_gridFor` returns the standing grid without
+    // retiring, a composite minted by the *preceding* zoom survives the whole
+    // pan, and every pan frame took the early return -- blitting that
+    // composite at the panned position while the region it uncovers at the
+    // leading edge stayed background, and `_tiles` stayed empty, until the
+    // camera happened to hold still for [kRestGateFrames] frames. D3's
+    // accepted ring is a zoom-out's ring and nothing else; an unfilled pan is
+    // a regression against D8, and before this plan the same frame paid a
+    // live walk over the uncovered region and got the pixels right.
+    //
+    // **`_restGateSteps == 0` is what makes this the pan and not the frame
+    // *between* two zoom notches.** D1's third frame kind -- matched once, not
+    // yet twice -- draws what a moving frame draws, and it is a frame whose
+    // camera did *not* change, so it carries a count of at least one. A pan
+    // frame changed the camera and reset the count to zero. Reading the count
+    // rather than the camera keeps the wheel's in-between frame cheap, which
+    // is the whole of D1's two-frame clause.
     final resting = previous == null ||
         _carryOver == null ||
+        (!scaleChanged && _restGateSteps == 0) ||
         _restGateSteps >= kRestGateFrames;
 
     // Derived once and handed to every bake. Rebasing is frame-global by
@@ -1067,23 +1103,26 @@ class TileCache {
 
     if (!resting) {
       // Nothing else this frame. `resting` is false here only because the
-      // camera is moving and a composite is already down to show for it --
-      // that is the third disjunct in `resting`'s own definition above, not
-      // an assumption made again here. A zoom out leaves that composite's
-      // ring as background until the gesture ends (spec D3).
+      // scale is moving, or moved one frame ago, and a composite is already
+      // down to show for it -- that is what the disjuncts in `resting`'s own
+      // definition above say, not an assumption made again here. A zoom out
+      // leaves that composite's ring as background until the gesture ends
+      // (spec D3); a *pan* does not reach this line at all (spec D8).
       return;
     }
 
-    // **The literal gate here, and not `resting`.** `resting` is true on two
+    // **The literal gate here, and not `resting`.** `resting` is true on three
     // frames that are not at rest at all: the very first frame this cache
-    // paints, and any moving frame with no composite to fall back on. Both
-    // disjuncts exist to stop a frame painting *nothing* -- the comment above
-    // says so in as many words: they "fall through to the ordinary
-    // bake-and-live-walk path". That path is budgeted and the band bake is
-    // not, so handing those two frames to the band bake would spend a
+    // paints, any moving frame with no composite to fall back on, and any pan
+    // frame. All three disjuncts exist to stop a frame painting *nothing* --
+    // the comment above says so in as many words: they "fall through to the
+    // ordinary bake-and-live-walk path". That path is budgeted and the band
+    // bake is not, so handing those frames to the band bake would spend a
     // full-viewport walk on the first frame of a still-moving gesture, which
-    // is precisely the zoom-regime cost this cache exists to refuse. A band
-    // is for a camera that has actually stopped.
+    // is precisely the zoom-regime cost this cache exists to refuse -- and on
+    // a pan it would spend one per frame for the length of the gesture. A
+    // band is for a camera that has actually stopped, which is what the
+    // count, and only the count, says.
     if (_restGateSteps >= kRestGateFrames && !debugRestBakeDisabled) {
       _restBake(grid, quantised, viewport, painter, sink, vertices, origin);
     }
@@ -1225,6 +1264,12 @@ class TileCache {
     VerticesDrawSink? vertices,
     Vector2 origin,
   ) {
+    // **Kept as a cheap frame-global early-out**, ahead of `bandsFor`'s
+    // allocation: a rest frame over a generation that is already whole is the
+    // common case (`paintFrame` reaches here on *every* frame whose camera has
+    // stood still), and this answers it without building the band list. It is
+    // not the probe that decides what gets baked -- that one is per band,
+    // inside the loop below.
     var missing = false;
     for (final key in grid.visibleKeys(quantised, viewport)) {
       if (!_tiles.containsKey(key)) {
@@ -1272,6 +1317,43 @@ class TileCache {
     _dropCarryOver();
 
     for (final band in bands) {
+      // **The probe is per band, and it has to be.** One missing key anywhere
+      // in the viewport used to commit *every* band to a full painter walk, a
+      // `_recordOwners` over its whole visit list, a `toImageSync` and a
+      // `_bakes++` -- and then to throw the image away, because the per-key
+      // `containsKey` below skips only the *slice*. That is the ordinary edit
+      // path, not an edge case: after an `applyChange` the camera has not
+      // moved, so the gate is still armed and the very next frame rest-bakes,
+      // while `_invalidateTouched` has typically condemned tiles in one band
+      // alone. A drag paid one whole-viewport walk a frame for it. This
+      // paragraph is the doc comment's own reasoning -- "rebaking those would
+      // replace good images with identical ones ... and pay a full walk for
+      // nothing" -- applied at the granularity the walk actually happens at.
+      //
+      // **The recency touch is not optional, and it is what keeps the ceiling
+      // proof intact.** The proof the up-front pricing rests on is that at
+      // band `i` the set `_makeRoomForBytes` may not evict is exactly the keys
+      // of bands `0..i-1`, which holds because every one of those keys was
+      // written with this frame's serial -- sliced, or already held and
+      // touched. A band skipped *without* the touch would leave its keys
+      // evictable by a later band's `_makeRoomForBytes`, and the frame would
+      // blit a hole it had already decided it owned. So a skipped band pays
+      // one map write per key and nothing else: no `_makeRoomForBytes`, no
+      // band image, no walk, no `_bakes++`.
+      var bandMissing = false;
+      for (final key in band.keys) {
+        if (!_tiles.containsKey(key)) {
+          bandMissing = true;
+          break;
+        }
+      }
+      if (!bandMissing) {
+        for (final key in band.keys) {
+          _lastUsedFrame[key] = _frameSerial;
+        }
+        continue;
+      }
+
       // **Asked before the band is allocated, not after.** The ceiling is a
       // ceiling and not a suggestion (see [_makeRoomForOneTile]), and a band
       // is a whole row -- thirteen tiles' worth here, 8 MiB at the reference
@@ -1285,43 +1367,54 @@ class TileCache {
       final image = _bakeBand(
           band, grid, quantised, painter, sink, vertices, origin, visited);
       _band = image;
-      // [_bakeBand]'s `onVisit` records only what the painter visited
-      // directly; [_bake]'s climbs owners so that a *container's* transform
-      // reaches the tile through invalidation's direction one. This is where
-      // the band makes up the difference -- once per band rather than once
-      // per tile, which is the whole reason the band callback is the simpler
-      // one.
-      _recordOwners(visited, painter.document);
-      visited.sort();
-      // **One record per band, shared by reference.** `_invalidateTouched`
-      // condemns tiles by iterating `_baked`, and a sliced tile with no record
-      // is invisible to it: edit an entity after a settle and the stale tile
-      // keeps blitting over the corrected drawing. Sharing makes invalidation
-      // band-coarse, which is right because a band is exactly the unit a
-      // rebake walks.
-      final record = Uint32List.fromList(visited);
-      for (final key in band.keys) {
-        // A key this frame's tile map already serves keeps its own image and
-        // its own, narrower record. Overwriting it would leak the image it
-        // replaced -- `_tiles[key] = tile` disposes nothing -- and a pan
-        // within one generation reaches this loop with most of the row
-        // already held.
-        if (_tiles.containsKey(key)) {
+      // **The band is released on every exit from here, including a throw.**
+      // `_band` is not a local: [liveBytes] counts it, so an image stranded in
+      // that field overstates the cache by a whole band for the rest of its
+      // life and `_makeRoomForBytes` over-evicts forever after -- a leaked
+      // image plus a permanently wrong meter, from one exception in
+      // [_recordOwners] or [_sliceTile]. No non-throwing path reaches it
+      // today; the `finally` is what keeps that true of paths added later.
+      try {
+        // [_bakeBand]'s `onVisit` records only what the painter visited
+        // directly; [_bake]'s climbs owners so that a *container's* transform
+        // reaches the tile through invalidation's direction one. This is where
+        // the band makes up the difference -- once per band rather than once
+        // per tile, which is the whole reason the band callback is the simpler
+        // one.
+        _recordOwners(visited, painter.document);
+        visited.sort();
+        // **One record per band, shared by reference.** `_invalidateTouched`
+        // condemns tiles by iterating `_baked`, and a sliced tile with no
+        // record is invisible to it: edit an entity after a settle and the
+        // stale tile keeps blitting over the corrected drawing. Sharing makes
+        // invalidation band-coarse, which is right because a band is exactly
+        // the unit a rebake walks.
+        final record = Uint32List.fromList(visited);
+        for (final key in band.keys) {
+          // A key this frame's tile map already serves keeps its own image and
+          // its own, narrower record. Overwriting it would leak the image it
+          // replaced -- `_tiles[key] = tile` disposes nothing -- and a pan
+          // within one generation reaches this loop with most of the row
+          // already held.
+          if (_tiles.containsKey(key)) {
+            _lastUsedFrame[key] = _frameSerial;
+            continue;
+          }
+          debugOnSliceForTest?.call();
+          // The ceiling is consulted before the write, not after the frame --
+          // the rule the tile loop already follows. The slice bypasses
+          // `budgetedTilesPerFrame`, which rations bakes; a slice is not a
+          // bake.
+          if (!_makeRoomForOneTile()) break;
+          final tile = _sliceTile(image, band, key, grid);
+          _tiles[key] = tile;
+          _baked[key] = record;
           _lastUsedFrame[key] = _frameSerial;
-          continue;
         }
-        debugOnSliceForTest?.call();
-        // The ceiling is consulted before the write, not after the frame --
-        // the rule the tile loop already follows. The slice bypasses
-        // `budgetedTilesPerFrame`, which rations bakes; a slice is not a bake.
-        if (!_makeRoomForOneTile()) break;
-        final tile = _sliceTile(image, band, key, grid);
-        _tiles[key] = tile;
-        _baked[key] = record;
-        _lastUsedFrame[key] = _frameSerial;
+      } finally {
+        _band = null;
+        _disposeImage(image);
       }
-      _band = null;
-      _disposeImage(image);
       _bakes++;
     }
   }
@@ -2253,5 +2346,12 @@ class TileCache {
     _dropCarryOver();
     _grid = null;
     _lastCamera = null;
+    // A band never outlives its own iteration of [_restBake]'s loop -- the
+    // `finally` there disposes the image and clears this field on every exit,
+    // throw included -- so this is belt and braces rather than a release.
+    // It is here because [liveBytes] reads the field: leaving a disposed
+    // image's dimensions in it would let a disposed cache still report a
+    // band's worth of bytes.
+    _band = null;
   }
 }

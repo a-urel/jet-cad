@@ -584,8 +584,20 @@ void main() {
             'silent overrun this arm exists to refuse -- and the rest bake '
             'refuses it too, band and all, rather than banding into a '
             'ceiling that cannot keep the slices');
-    expect(squeezed.cache.liveDrawCount, 1,
+    // **Two walks, one per frame that owed one, and the pan frame is the one
+    // that changed.** Before the D8 fix a same-scale pan with a composite
+    // standing took `paintFrame`'s moving-frame early return, so the three
+    // frames below were: pan -- composite only, no walk; the in-between
+    // frame; then the rest frame, whose rest bake the ceiling declines and
+    // whose tile loop the ceiling admits nothing to, leaving one live walk.
+    // The pan is a pan and not a zoom, so it is no longer a moving frame: it
+    // falls through and pays its own walk over a viewport the shrunken
+    // ceiling cannot tile. That is the whole point of the fix -- the region
+    // the composite slid off is drawn rather than left as background -- and
+    // the number moving from 1 to 2 is what records it.
+    expect(squeezed.cache.liveDrawCount, 2,
         reason: 'and the live walk is what stops the frame going blank '
-            'instead');
+            'instead -- once on the pan frame, which no longer hides behind '
+            'the composite, and once on the rest frame that follows it');
   });
 }

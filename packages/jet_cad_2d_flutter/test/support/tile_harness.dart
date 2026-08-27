@@ -54,6 +54,27 @@ class TiledHarness {
     document.commands.execute(TransformNodeCommand(
         kMovableHandle, Transform2(1, 0, 0, 1, worldX(300), worldY(48))));
   }
+
+  /// Moves [kMovableHandle] **along its own tile row**, so exactly one band is
+  /// condemned, for the per-band rest-bake probe.
+  ///
+  /// The same arithmetic as [moveOneEntityOntoDisjointTiles] and a different
+  /// destination, chosen so that both directions of invalidation land in the
+  /// same band. Direction one condemns every tile whose `_baked` record names
+  /// the handle, and a sliced tile's record is its **whole band's** (spec D6),
+  /// so the old position condemns row 4 entire. Direction two condemns the
+  /// tiles the new geometry reaches: screen (300, 144) with the leaf's local
+  /// (0, 0)-(6, 6) diagonal reaching screen (308.4, 135.6) -- both inside row
+  /// 4, which spans device y [256, 320), logical [128, 160). So the band set
+  /// this edit condemns is `{row 4}` and the other nine rows of the viewport
+  /// are untouched, which is the whole point: a rest bake that walks them
+  /// anyway is walking a whole viewport to replace one row.
+  void moveOneEntityWithinOneBand() {
+    double worldX(double screenX) => (screenX + 37.0) / 1.4;
+    double worldY(double screenY) => (323.0 - screenY) / 1.4;
+    document.commands.execute(TransformNodeCommand(
+        kMovableHandle, Transform2(1, 0, 0, 1, worldX(300), worldY(144))));
+  }
 }
 
 /// Pumps a tiled canvas over `fillingGrid`, which inks every tile of

@@ -562,6 +562,37 @@ Future<ByteData> captureLive(WidgetTester t, TiledHarness h) async {
   return _captureBoundary(t);
 }
 
+/// Non-transparent pixels of a **widget capture** inside [logical], a
+/// rectangle in logical pixels scaled by [kTileDpr] and clipped to the
+/// capture.
+///
+/// [inkInside] answers the same question for a [TileRig] capture, which is a
+/// `Uint8List`; this one takes the `ByteData` [captureTiled] and [captureLive]
+/// return, and is indexed against [kCaptureWidth] rather than against
+/// [kTileViewport], for the reason [differingPixelsOnTileEdges] states: a
+/// capture of another size is read as the wrong quarter of itself and still
+/// reports a number.
+///
+/// **Ink, not agreement.** The question it exists for is "did the frame draw
+/// anything here at all, or is this region background" -- which is what a
+/// blank strip left by a frame that returned early looks like, and which a
+/// whole-frame `differingPixels` buries under the tiles around it.
+int inkInsideCapture(ByteData capture, Rect logical) {
+  expect(capture.lengthInBytes, kCaptureWidth * kCaptureHeight * 4,
+      reason: 'the sweep indexes rows by kCaptureWidth');
+  final x0 = (logical.left * kTileDpr).floor().clamp(0, kCaptureWidth);
+  final x1 = (logical.right * kTileDpr).ceil().clamp(0, kCaptureWidth);
+  final y0 = (logical.top * kTileDpr).floor().clamp(0, kCaptureHeight);
+  final y1 = (logical.bottom * kTileDpr).ceil().clamp(0, kCaptureHeight);
+  var ink = 0;
+  for (var y = y0; y < y1; y++) {
+    for (var x = x0; x < x1; x++) {
+      if (capture.getUint8((y * kCaptureWidth + x) * 4 + 3) != 0) ink++;
+    }
+  }
+  return ink;
+}
+
 /// Pixels whose RGBA differs, over two captures of the same size.
 ///
 /// Exact `==` on stored bytes, never a tolerance: these are recorded values,
