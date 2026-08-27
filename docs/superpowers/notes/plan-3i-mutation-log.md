@@ -2640,10 +2640,18 @@ at the moment of a room request, `St` for the stale off-viewport tiles held.
    assigned, and the composite was dropped before the loop). Evictions needed:
    `V + St - 129 <= St`. For `_makeRoomForOneTile` inside the slice loop the
    band image is resident, and the same subtraction gives the same bound.
-4. **Every stale key's serial is strictly older than every visible key's.** A
-   key is stamped only on a frame it is visible on, and the frame that made a
-   key stale is by definition a frame whose camera changed — which resets the
-   rest gate, so no rest bake happens on it.
+4. **Every stale key's serial is strictly older than every visible key's.**
+   What orders the two sets is not the stamping rule alone but *when* a rest
+   bake is allowed to run at all: `_restBake` starts only once
+   `_restGateSteps >= kRestGateFrames`, i.e. the quantised camera has held
+   identical for two consecutive frames. The visible key set is therefore
+   fixed across those two frames, and every visible held key carries the
+   serial of frame N-1 or N-2, while any off-viewport (stale) key was last
+   visible no later than N-3 — strictly older. (A key is stamped only on a
+   frame it is visible on, but "the frame that made a key stale is a frame
+   whose camera changed" does not by itself order anything: plenty of frames
+   change the camera without gating a rest bake. The two-consecutive-frame
+   hold is what does the ordering work.)
 
 So the demand never exceeds the stale supply, and the victim policy is
 oldest-first: `_makeRoomForBytes` takes stale keys and stops before it reaches
@@ -2651,6 +2659,21 @@ any visible key, skipped band or otherwise. The stamp is unobservable through
 `viewportCovered`, `evictionCount`, `liveTileCount` or `liveBytes` — and by the
 end of the frame every visible key carries the serial anyway, because the tile
 loop stamps each one it blits.
+
+**Caveat on clause 4, found at final review — does not change the verdict.**
+The visible key set is a function of the camera *and* the viewport:
+`paintFrame` takes `viewport` from the widget, and `_gridFor` retires a
+generation only on a *scale* change (it returns the standing grid whenever
+`matchesScale` holds, regardless of `viewport`). A viewport that shrinks and
+regrows at a fixed camera therefore does not re-anchor — the generation and
+its tiles survive — which can bring a key that was off-viewport back into the
+visible set still carrying its old, pre-shrink serial. Clause 4 fails for
+that key: it is visible now but not among the two most recent frames' stamps.
+This does not reopen M24. The consequence is bounded — such a key is an
+ordinary cache miss, the live fallback draws it, and the result is correct
+pixels at a cost, not wrong ones — and bands *after* the current one are
+already unprotected by the stamp in both variants, stamped or not, so this
+adds no new exposure beyond what M24 already accepts.
 
 **Mutation:** the three lines the review names:
 
