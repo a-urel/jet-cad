@@ -691,20 +691,273 @@ void warnIfZoomViewportMismatch(Size real, Size pinned) {
       'any run at the pinned size !!!');
 }
 
+/// Every `FrameTiming` reported while this log is armed, in delivery order,
+/// attributed to the frames a phase pumped **by ordinal**.
+///
+/// **Why an ordinal and not an arrival window.** `addTimingsCallback` reports
+/// a frame only *after* it has rasterised, and a `pumpFrame` completes at
+/// `SchedulerBinding.endOfFrame` -- the frame's post-frame phase, *before* its
+/// scene rasterises. So the timings that arrive while frame *i* is being
+/// pumped are frame *i-1*'s, or none at all: reading "whatever arrived during
+/// this frame" names the wrong frame systematically rather than occasionally,
+/// and re-registering a callback around a phase boundary drops the tail of one
+/// phase instead of moving it. That is the hazard [runR2Rig] states at its own
+/// registration, and the reason this type exists.
+///
+/// **The rule.** One registration spans every frame the phase pumps; delivery
+/// order is pump order; frame *i*'s timing is the *i*-th one delivered. Frames
+/// pumped before [arm] are therefore poison -- their timings arrive *after*
+/// registration and would take the ordinals of frames that came later -- so a
+/// phase arms this log before its own warm-up frames and excludes the warm-up
+/// ordinals from its sample, rather than arming after them.
+///
+/// The last frames' timings are still in flight when the last pump returns,
+/// which is what [drain] is for.
+class FrameTimingLog {
+  final List<FrameTiming> _reported = <FrameTiming>[];
+  int _pumped = 0;
+  bool _armed = false;
+
+  void _collect(List<FrameTiming> timings) => _reported.addAll(timings);
+
+  /// Registers the one callback that spans the whole phase.
+  void arm() {
+    if (_armed) {
+      throw StateError('FrameTimingLog.arm() twice: one registration spans '
+          'the phase, and a second would double every timing');
+    }
+    SchedulerBinding.instance.addTimingsCallback(_collect);
+    _armed = true;
+  }
+
+  /// Unregisters the callback. Safe to call when never armed, so a caller can
+  /// put it in a `finally`.
+  void disarm() {
+    if (!_armed) return;
+    SchedulerBinding.instance.removeTimingsCallback(_collect);
+    _armed = false;
+  }
+
+  /// How many frames have been pumped through [pump] and [drain]. Also the
+  /// ordinal the next pumped frame will take.
+  int get pumpedFrames => _pumped;
+
+  /// How many timings have been reported so far, across every pumped frame.
+  int get reportedFrames => _reported.length;
+
+  /// Pumps one frame and gives it the next ordinal.
+  Future<void> pump(Future<void> Function() pumpFrame) async {
+    _pumped++;
+    await pumpFrame();
+  }
+
+  /// Pumps bare frames until the frames with ordinals below [upTo] have all
+  /// reported, or until [maxExtraFrames] have been pumped without getting
+  /// there.
+  ///
+  /// **This is the "one extra frame at the end" the attribution needs.** The
+  /// last frame of a phase cannot have reported by the time its own pump
+  /// returns; without a drain its timing is not late, it is *absent*, and the
+  /// phase's last sample would silently read as missing. The drained frames
+  /// take ordinals of their own, so a later phase sharing this log stays
+  /// aligned. It is a bound and not a wait loop: on a device that stops
+  /// reporting altogether this returns rather than hanging, and the shortfall
+  /// shows up as a missing sample the report prints.
+  ///
+  /// Returns how many extra frames it pumped.
+  Future<int> drain(
+    Future<void> Function() pumpFrame, {
+    required int upTo,
+    int maxExtraFrames = 4,
+  }) async {
+    var extra = 0;
+    while (_reported.length < upTo && extra < maxExtraFrames) {
+      await pump(pumpFrame);
+      extra++;
+    }
+    return extra;
+  }
+
+  /// `totalSpan` of the frame at [ordinal] in milliseconds, or null when no
+  /// timing was ever reported for it.
+  ///
+  /// Null rather than `0.0`: a frame that reported nothing is a hole in the
+  /// sample, and zero is a *fast frame*. Publishing one as the other is how a
+  /// composite blit that drew nothing gets read as a settle.
+  double? msAt(int ordinal) => ordinal >= 0 && ordinal < _reported.length
+      ? _reported[ordinal].totalSpan.inMicroseconds / 1000.0
+      : null;
+
+  /// [msAt] over the half-open ordinal range `[start, end)`, holes included.
+  List<double?> msRange(int start, int end) =>
+      <double?>[for (var i = start; i < end; i++) msAt(i)];
+}
+
+/// What [runSettlePhase] measured: the idle settle after a gesture.
+class SettleReport {
+  SettleReport({
+    required this.frames,
+    required this.covered,
+    required this.coveringFrameMs,
+    required this.wallMs,
+    required this.framesMissing,
+  });
+
+  /// How many idle frames elapsed before [TileCache.viewportCovered] first
+  /// read true, or the whole idle budget when it never did (see [covered]).
+  final int frames;
+
+  /// Whether coverage was reached at all inside the idle budget.
+  final bool covered;
+
+  /// `totalSpan` of the single frame at which coverage was first read -- **one
+  /// frame, not the settle**. See [ZoomReport.settleCoveringFrameMs].
+  final double coveringFrameMs;
+
+  /// Wall clock across [frames], summed. See [ZoomReport.settleWallMs].
+  final double wallMs;
+
+  /// How many of those [frames] never reported a timing. Nonzero means both
+  /// figures above are over a short sample and must not be published as they
+  /// stand.
+  final int framesMissing;
+}
+
+/// Idle frames pumped after the gesture, pinned by design spec §5.
+const int kIdleFrames = 30;
+
+/// Throwaway frames pumped at the phase boundary, before the gesture's
+/// counters are reset. Their ordinals are excluded from every published
+/// window -- see [runTileZoomPhase].
+const int kZoomWarmUpFrames = 2;
+
+/// The idle settle that follows the gesture: [idleFrames] bare frames, the
+/// first frame at which [covered] reads true, and the two time figures
+/// criteria 3 and 4 are read off.
+///
+/// **The idle frames drive no camera change at all** -- unlike the forced
+/// no-op `panBy(Offset.zero)` this file's other phases use to force a repaint
+/// once nothing is dirty, an idle frame here is a bare [pumpFrame] call.
+/// `DraftCanvasState`'s own settle notifier
+/// (`draft_canvas.dart:_requestSettleFrame`) is what keeps requesting a real
+/// frame for as long as the cache owes tiles; forcing one artificially would
+/// measure a phase this rig does not drive on a real trackpad gesture's tail.
+///
+/// It pumps the full [idleFrames] even after coverage, so a cache that keeps
+/// asking for frames after covering (which it must not) is exercised the same
+/// way a real gesture's tail would exercise it.
+///
+/// **[covered] is a predicate and not the cache itself** so that this
+/// attribution can be tested at all: [runTileZoomPhase] refuses to run outside
+/// a profile build, and a `TileCache` cannot be made to cover a viewport
+/// without a painted widget. The production call site passes
+/// `() => cache.viewportCovered`.
+Future<SettleReport> runSettlePhase({
+  required FrameTimingLog log,
+  required Future<void> Function() pumpFrame,
+  required bool Function() covered,
+  int idleFrames = kIdleFrames,
+}) async {
+  final firstOrdinal = log.pumpedFrames;
+  var frames = idleFrames;
+  var everCovered = false;
+  for (var i = 0; i < idleFrames; i++) {
+    await log.pump(pumpFrame);
+    // Coverage is read straight after the pump because it is *cache state*,
+    // written during the frame that just ran -- it is only the frame's
+    // *timing* that arrives late, and that is what the ordinal below is for.
+    if (!everCovered && covered()) {
+      everCovered = true;
+      frames = i + 1;
+    }
+  }
+  await log.drain(pumpFrame, upTo: firstOrdinal + idleFrames);
+
+  final ms = log.msRange(firstOrdinal, firstOrdinal + frames);
+  var wallMs = 0.0;
+  var missing = 0;
+  for (final v in ms) {
+    if (v == null) {
+      missing++;
+    } else {
+      wallMs += v;
+    }
+  }
+  return SettleReport(
+    frames: frames,
+    covered: everCovered,
+    coveringFrameMs: ms.isEmpty ? 0.0 : (ms.last ?? 0.0),
+    wallMs: wallMs,
+    framesMissing: missing,
+  );
+}
+
 /// What [runTileZoomPhase] reports: the gesture's frame times and the
 /// cache's counters over it, then the settle that follows.
 class ZoomReport {
   ZoomReport({
     required this.gestureFrameMs,
+    required this.gestureFramesMissing,
     required this.gestureBakes,
     required this.gestureLiveDraws,
-    required this.settleMs,
+    required this.settleCoveringFrameMs,
+    required this.settleWallMs,
     required this.settleFrames,
+    required this.settleCovered,
+    required this.settleFramesMissing,
   });
 
-  /// `totalSpan`, one entry per gesture frame -- 80 entries at the pinned
-  /// script (`2 * kZoomSteps`). p95 over this list is criterion 2.
+  /// Builds a report from a gesture window and the [SettleReport] that
+  /// followed it.
+  factory ZoomReport.from({
+    required List<double?> gestureMs,
+    required int gestureBakes,
+    required int gestureLiveDraws,
+    required SettleReport settle,
+  }) {
+    final frames = <double>[];
+    var missing = 0;
+    for (final v in gestureMs) {
+      if (v == null) {
+        missing++;
+      } else {
+        frames.add(v);
+      }
+    }
+    return ZoomReport(
+      gestureFrameMs: frames,
+      gestureFramesMissing: missing,
+      gestureBakes: gestureBakes,
+      gestureLiveDraws: gestureLiveDraws,
+      settleCoveringFrameMs: settle.coveringFrameMs,
+      settleWallMs: settle.wallMs,
+      settleFrames: settle.frames,
+      settleCovered: settle.covered,
+      settleFramesMissing: settle.framesMissing,
+    );
+  }
+
+  /// `totalSpan`, one entry per gesture frame whose timing was actually
+  /// reported. p95 over this list is criterion 2.
+  ///
+  /// **The 80-entry claim is enforced, not asserted.** The window is the
+  /// ordinal range of the `2 * kZoomSteps` frames the script pumped, so
+  /// `gestureFrameMs.length + gestureFramesMissing == 2 * kZoomSteps` always
+  /// holds, and a short sample shows up as [gestureFramesMissing] rather than
+  /// as a p95 over a silently truncated list. Before the ordinal window, the
+  /// count was 80 by coincidence: the callback was registered after the two
+  /// warm-up frames -- which rasterise before registration and are reported
+  /// after it -- and removed the instant the last frame was pumped, so the
+  /// sample was padded at the head with the two cheapest frames in the phase
+  /// and truncated at the tail by however many timings were still in flight.
+  /// Both errors push p95 down, which is the direction that makes criterion 2
+  /// pass.
   final List<double> gestureFrameMs;
+
+  /// How many of the `2 * kZoomSteps` gesture frames never reported a timing,
+  /// even after [FrameTimingLog.drain]. Zero on a healthy run; anything else
+  /// means [gestureFrameMs] is short and its p95 is not the criterion's.
+  final int gestureFramesMissing;
 
   /// [TileCache.bakeCount] since the counters were reset at the start of the
   /// gesture, read at the gesture's end.
@@ -723,16 +976,52 @@ class ZoomReport {
   /// Criterion 1 expects this at zero too.
   final int gestureLiveDraws;
 
-  /// `totalSpan` of the one idle frame at which [TileCache.viewportCovered]
-  /// first became true, or of the last idle frame pumped if 30 idle frames
-  /// never reached coverage. Criterion 3 reads this.
-  final double settleMs;
+  /// `totalSpan` of the **one** idle frame at which [TileCache.viewportCovered]
+  /// first became true, or of the last idle frame pumped if [kIdleFrames]
+  /// never reached coverage. Criterion 3 reads this, and criterion 3 only.
+  ///
+  /// **One frame, and never the settle's duration.** Criterion 4 is wall clock
+  /// across the whole settle and is [settleWallMs]; on the rest-bake arm the
+  /// settle is ~1 baking frame and the two nearly coincide, but on the
+  /// denominator arm the settle is many frames and this figure is the last of
+  /// them alone. A ratio formed from this field compares one frame against one
+  /// frame -- the "two readings straddling the gate" design spec §4 exists to
+  /// prevent.
+  final double settleCoveringFrameMs;
+
+  /// Criterion 4's numerator or denominator, quoting the criterion: **"wall
+  /// clock to a covered viewport, from the first frame after the gesture ends
+  /// to the frame that covers it"**.
+  ///
+  /// The sum of `totalSpan` over idle frames 1..[settleFrames] inclusive --
+  /// the frame that covers the viewport included, the idle frames after it
+  /// excluded. This is the only figure criterion 4's ratio may be formed
+  /// from; see [settleCoveringFrameMs] for why the per-frame figure is not.
+  final double settleWallMs;
 
   /// How many idle frames elapsed before [TileCache.viewportCovered] first
-  /// read true (1 if the very first idle frame after the gesture already
-  /// covers, which is what criterion 3 asserts), or 30 if coverage was never
-  /// reached within the pinned idle-frame budget.
+  /// read true, or [kIdleFrames] if coverage was never reached inside the
+  /// pinned idle-frame budget (which [settleCovered] distinguishes).
+  ///
+  /// **Correct code reads 2, not 1** (Ruling 15 in Plan 3i's ledger). The
+  /// arithmetic: `kRestGateFrames` is 2, so a bake needs two consecutive
+  /// frames on the same camera; the last gesture frame changed the camera, so
+  /// idle frame 1 can only reach `_restGateSteps == 1` and takes
+  /// `paintFrame`'s moving-frame early return; idle frame 2 is the first that
+  /// can bake. Criterion 3's stated "one frame" and the separately pinned
+  /// `kRestGateFrames = 2` cannot both hold, and 1 here is a value only broken
+  /// code produces. `tile_zoom_warmth_test.dart` pins `settleFrames == 2` in
+  /// the other package.
   final int settleFrames;
+
+  /// Whether coverage was reached at all within [kIdleFrames]. False makes
+  /// [settleFrames] a floor rather than a measurement, and both time figures
+  /// meaningless.
+  final bool settleCovered;
+
+  /// How many of the [settleFrames] never reported a timing. See
+  /// [gestureFramesMissing].
+  final int settleFramesMissing;
 }
 
 /// The `tile zoom` phase, pinned by the design spec (§5) and not the
@@ -763,14 +1052,16 @@ class ZoomReport {
 /// `RUN_R2` mode prints the real window size for exactly this reason; a
 /// caller of this phase should do the same.
 ///
-/// The idle frames drive no camera change at all -- unlike the forced
-/// no-op `panBy(Offset.zero)` this file's other phases use to force a final
-/// repaint once nothing is dirty, an idle frame here is a bare [pumpFrame]
-/// call. `DraftCanvasState`'s own settle notifier
-/// (`draft_canvas.dart:_requestSettleFrame`) is what keeps requesting a real
-/// frame for as long as the cache owes tiles; forcing one artificially would
-/// measure a phase this rig does not actually drive on a real trackpad
-/// gesture's tail.
+/// The idle settle after the gesture is [runSettlePhase]'s, and its doc
+/// comment carries why an idle frame here is a bare [pumpFrame] call.
+///
+/// **Every frame this phase pumps goes through one [FrameTimingLog].** The
+/// warm-up frames are pumped *after* the log is armed and then excluded by
+/// ordinal, rather than pumped before registration and silently charged to the
+/// gesture; the gesture window is an ordinal range rather than "whatever
+/// arrived between two registrations"; and the settle's last frames are
+/// drained rather than dropped. See [FrameTimingLog] for why every one of
+/// those is the same bug.
 Future<ZoomReport> runTileZoomPhase({
   required CameraController camera,
   required TileCache cache,
@@ -779,81 +1070,55 @@ Future<ZoomReport> runTileZoomPhase({
 }) async {
   refuseDebugMode();
   final focus = zoomFocusFor(viewport);
-
-  // Two throwaway frames before the counters reset, the same boundary slack
-  // `runTilePhases`'s own `phase()` helper takes: a `FrameTiming` is reported
-  // after its frame rasterises, so the phase boundary needs a frame or two of
-  // slack the gesture itself must not be charged for.
-  for (var i = 0; i < 2; i++) {
-    camera.panBy(Offset.zero);
-    await pumpFrame();
-  }
-
-  final gestureTimings = <FrameTiming>[];
-  void collectGesture(List<FrameTiming> t) => gestureTimings.addAll(t);
-  SchedulerBinding.instance.addTimingsCallback(collectGesture);
-  // Warm-up excluded: reset only after the fitted camera has settled (the
-  // two throwaway frames above), per §5.
-  cache.resetCounters();
+  final log = FrameTimingLog()..arm();
   try {
+    // Two throwaway frames before the counters reset, the same boundary slack
+    // `runTilePhases`'s own `phase()` helper takes -- but pumped *after* the
+    // log is armed, so their timings land on ordinals 0 and 1 and are excluded
+    // by the gesture window below. Pumped before arming, they would rasterise
+    // before registration, be reported after it, and take the first two
+    // gesture ordinals: a no-op repaint of a covered generation is the
+    // cheapest frame in the phase, and two of them at the head of the sample
+    // push p95 down.
+    for (var i = 0; i < kZoomWarmUpFrames; i++) {
+      camera.panBy(Offset.zero);
+      await log.pump(pumpFrame);
+    }
+
+    // Warm-up excluded: reset only after the fitted camera has settled (the
+    // two throwaway frames above), per §5.
+    final gestureStart = log.pumpedFrames;
+    cache.resetCounters();
     for (var i = 0; i < kZoomSteps; i++) {
       camera.zoomAt(focus, kZoomFactor);
-      await pumpFrame();
+      await log.pump(pumpFrame);
     }
     for (var i = 0; i < kZoomSteps; i++) {
       camera.zoomAt(focus, 1 / kZoomFactor);
-      await pumpFrame();
+      await log.pump(pumpFrame);
     }
+    // Read before the settle: the settle bakes, and these two counters are
+    // the gesture's.
+    final gestureBakes = cache.bakeCount;
+    final gestureLiveDraws = cache.liveDrawCount;
+
+    final settle = await runSettlePhase(
+      log: log,
+      pumpFrame: pumpFrame,
+      covered: () => cache.viewportCovered,
+    );
+
+    // The gesture window, read only now: the settle's own drain is what
+    // brought the last gesture frames' timings in.
+    return ZoomReport.from(
+      gestureMs: log.msRange(gestureStart, gestureStart + 2 * kZoomSteps),
+      gestureBakes: gestureBakes,
+      gestureLiveDraws: gestureLiveDraws,
+      settle: settle,
+    );
   } finally {
-    SchedulerBinding.instance.removeTimingsCallback(collectGesture);
+    log.disarm();
   }
-  final gestureBakes = cache.bakeCount;
-  final gestureLiveDraws = cache.liveDrawCount;
-  final gestureFrameMs = [
-    for (final t in gestureTimings) t.totalSpan.inMicroseconds / 1000.0
-  ];
-
-  // 30 idle frames. No camera nudge -- see the doc comment above for why a
-  // bare pumpFrame is the honest idle frame here. Tracks the first frame at
-  // which the viewport becomes covered, which is what criterion 3 reads;
-  // still pumps the full 30 so a cache that keeps asking for frames after
-  // coverage (which it must not) is exercised the same way a real trackpad
-  // gesture's tail would exercise it.
-  const idleFrames = 30;
-  var settleFrames = idleFrames;
-  var settleMs = 0.0;
-  var covered = false;
-  for (var i = 0; i < idleFrames; i++) {
-    final idleTimings = <FrameTiming>[];
-    void collectIdle(List<FrameTiming> t) => idleTimings.addAll(t);
-    SchedulerBinding.instance.addTimingsCallback(collectIdle);
-    try {
-      await pumpFrame();
-    } finally {
-      SchedulerBinding.instance.removeTimingsCallback(collectIdle);
-    }
-    final frameMs = idleTimings.isEmpty
-        ? 0.0
-        : idleTimings.last.totalSpan.inMicroseconds / 1000.0;
-    if (!covered && cache.viewportCovered) {
-      covered = true;
-      settleFrames = i + 1;
-      settleMs = frameMs;
-    } else if (!covered) {
-      // Not yet covered: keep the running "last frame pumped" figure, so a
-      // script that never reaches coverage within the idle budget still
-      // reports something rather than 0.0.
-      settleMs = frameMs;
-    }
-  }
-
-  return ZoomReport(
-    gestureFrameMs: gestureFrameMs,
-    gestureBakes: gestureBakes,
-    gestureLiveDraws: gestureLiveDraws,
-    settleMs: settleMs,
-    settleFrames: settleFrames,
-  );
 }
 
 /// Prints a [ZoomReport] the way [report] prints a plain frame-timing list,
@@ -867,6 +1132,10 @@ Future<ZoomReport> runTileZoomPhase({
 /// is comparing like with like here -- but comparing it against this same
 /// cache's post-settle `bakeCount` would not be, because a rest bake (if one
 /// fired during the idle frames this report also covers) counts bands.
+/// **Every line carries [label].** An interleaved run prints two arms per
+/// repeat and the arms differ only in which flag was flipped; a continuation
+/// line indented under the wrong heading is a number attributed to the wrong
+/// arm, which is the failure mode of this whole measurement.
 void printZoomReport(String label, ZoomReport r) {
   if (r.gestureFrameMs.isEmpty) {
     print('$label: no gesture frames recorded');
@@ -882,10 +1151,30 @@ void printZoomReport(String label, ZoomReport r) {
         'max=${sorted.last.toStringAsFixed(2)}ms '
         'mean=${(sum / sorted.length).toStringAsFixed(2)}ms');
   }
-  print('  gestureBakes=${r.gestureBakes}(tiles, budgeted path) '
+  print('$label   gestureBakes=${r.gestureBakes}(tiles, budgeted path) '
       'gestureLiveDraws=${r.gestureLiveDraws}');
-  print('  settleFrames=${r.settleFrames} '
-      'settleMs=${r.settleMs.toStringAsFixed(2)}');
+  // Two time figures, never one. `settleWallMs` is criterion 4's wall clock
+  // across the settle; `coveringFrameMs` is criterion 3's single frame. They
+  // coincide only when the settle is one frame long, which is the arm the
+  // ratio's numerator comes from and not the arm its denominator comes from.
+  print('$label   settleFrames=${r.settleFrames} '
+      'covered=${r.settleCovered} '
+      'settleWallMs=${r.settleWallMs.toStringAsFixed(2)}(criterion 4, '
+      'wall clock over the settle) '
+      'coveringFrameMs=${r.settleCoveringFrameMs.toStringAsFixed(2)}'
+      '(criterion 3, that one frame)');
+  if (!r.settleCovered) {
+    print('$label   !!! WARNING: the viewport never covered within '
+        '$kIdleFrames idle frames -- settleFrames is a floor, and neither '
+        'time figure above is a settle !!!');
+  }
+  final missing = r.gestureFramesMissing + r.settleFramesMissing;
+  if (missing > 0) {
+    print('$label   !!! WARNING: $missing frame(s) reported no FrameTiming '
+        '(gesture ${r.gestureFramesMissing} of ${2 * kZoomSteps}, settle '
+        '${r.settleFramesMissing} of ${r.settleFrames}) -- the figures above '
+        'are over a SHORT SAMPLE and are not comparable !!!');
+  }
 }
 
 /// Runs [rest] and [tiled] alternately — `rest, tiled, rest, tiled, …` — for
