@@ -156,5 +156,53 @@ void main() {
               Transform2(m.a + m.a * 1e-15, m.b, m.c, m.d, m.e, m.f));
       expect(grid.matchesScale(nudged), isFalse);
     });
+
+    // **Four fields, four arms, one field moved per arm.** `awkwardCamera`
+    // has `d == -a` and `b == c == 0`, so the arm above -- which moves `a`
+    // alone -- is the only one of the four comparisons it can fail: deleting
+    // `a.b == b.b`, `a.c == b.c` or `a.d == b.d` from `matchesScale` left the
+    // file green. This is `sameQuantisedCamera`'s own degeneracy (M19) at the
+    // other stored-value comparison in this file, closed the same way, and it
+    // needs its own fixture because no camera the tiled tests drive reaches
+    // `matchesScale` with `b`, `c` or an independent `d`.
+    test('every scale term is compared, one at a time', () {
+      // Anisotropic *and* skewed, so no two of the four terms are tied.
+      final grid = gridAt(ViewportTransform(
+          worldToScreenMatrix:
+              Transform2(2.5, 0.3, -0.7, -1.9, 17.31, 409.77)));
+      final m = grid.anchor.worldToScreenMatrix;
+      expect(grid.matchesScale(grid.anchor), isTrue,
+          reason: 'non-vacuity: the anchor matches itself, so the four arms '
+              'below fail for the field they move and not for the fixture');
+      expect(
+          grid.matchesScale(ViewportTransform(
+              worldToScreenMatrix: Transform2(2.6, m.b, m.c, m.d, m.e, m.f))),
+          isFalse,
+          reason: 'a: the x scale');
+      expect(
+          grid.matchesScale(ViewportTransform(
+              worldToScreenMatrix: Transform2(m.a, 0.4, m.c, m.d, m.e, m.f))),
+          isFalse,
+          reason: 'b: a generation baked without this shear cannot blit with '
+              'it');
+      expect(
+          grid.matchesScale(ViewportTransform(
+              worldToScreenMatrix: Transform2(m.a, m.b, -0.8, m.d, m.e, m.f))),
+          isFalse,
+          reason: 'c: the other shear term');
+      expect(
+          grid.matchesScale(ViewportTransform(
+              worldToScreenMatrix: Transform2(m.a, m.b, m.c, -2.0, m.e, m.f))),
+          isFalse,
+          reason: 'd: the y scale, which every tiled fixture ties to -a');
+      // And the translation is *not* in this comparison: a pan keeps the
+      // generation, which is the whole reason the key excludes translation.
+      expect(
+          grid.matchesScale(ViewportTransform(
+              worldToScreenMatrix:
+                  Transform2(m.a, m.b, m.c, m.d, m.e + 13, m.f - 7))),
+          isTrue,
+          reason: 'a pan does not retire a generation');
+    });
   });
 }

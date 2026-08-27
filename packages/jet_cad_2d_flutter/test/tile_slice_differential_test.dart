@@ -107,7 +107,25 @@ void main() {
     // asymmetry is real and belongs to `DraftPainter`, not to the tile path.
     h.camera.panBy(const Offset(90, 60));
     await t.pump(); // moving again, so the rest gate starts over
+    // **The slice count is what pins this arm to the slice path.** Arms 1, 2
+    // and 5 settle through `settleFromBands`, which asserts `slices ==
+    // liveTileCount`; this arm's second settle asserted only `hasCarryOver`
+    // and the pixel count, and was sound solely because `_restBake` runs
+    // ahead of the budgeted tile loop inside `paintFrame`. That is a property
+    // of statement order, not of anything this test checks: if the budgeted
+    // loop ever filled first, this arm would go green with no tile cut from a
+    // band at all and M10 -- the slice rectangle measured in grid space --
+    // would survive it silently, which is the one mutant the arm exists for.
+    var slices = 0;
+    h.cache.debugOnSliceForTest = () => slices++;
+    addTearDown(() => h.cache.debugOnSliceForTest = null);
     await settle(t, h);
+    h.cache.debugOnSliceForTest = null;
+    expect(slices, greaterThan(0),
+        reason: 'this arm judges the slice path at a negative key range, so '
+            'the settle it judges has to have cut tiles out of a band. '
+            'Measured: 66 of the 130 visible tiles, the other 64 being the '
+            'pan frame is own budgeted bakes');
     // The rest frame blitted the outgoing composite underneath the generation
     // it then dropped, so it is not a statement about the new tiles alone.
     // See `repaintOnce`; `tile_cache_test`'s criterion 1 pays for the same
