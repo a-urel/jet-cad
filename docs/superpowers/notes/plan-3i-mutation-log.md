@@ -396,7 +396,7 @@ image currently in `_band` -- and `_band` is reassigned at the top of every
 band iteration, so an image the loop failed to dispose stops being counted the
 moment the next band starts. No ceiling, however tight, can catch M6 through
 `liveBytes`; `debugImagesAlive` is its gate and always was. The new arm's own
-mutant is **M20**, which trips the ceiling clause directly.
+mutant is **M21**, which trips the ceiling clause directly.
 
 ---
 
@@ -2212,3 +2212,286 @@ Failing tests:
 00:00 +2: the ceiling binds inside the rest frame, and eviction holds it
 00:00 +3: All tests passed!
 ```
+
+---
+
+> **Fix wave C opens here.** `M22`, `M22b` and `M22c` were fired in
+> `apps/dev_harness_2d/`, against the Blocking finding and the first Minor of
+> the fix-wave review. Numbering in this file is shared between the waves;
+> `M21` was the last number taken when these were fired.
+
+## M22 — the ordinal scheme trusts a stream it never drained
+
+**Fix wave C, the Blocking finding.** One frame further along than M20, and
+the same defect. `FrameTimingLog.msAt(ordinal)` indexes `_reported` directly,
+so ordinal *k* is pumped frame *k* **only if `_reported[0]` is the first frame
+pumped after `arm()`**. Two things break that on the device, and neither is
+rare:
+
+1. **A guaranteed shift of one.** `main.dart`'s `runArm` does
+   `camera.value = fittedCamera; await _pumpFrame();` and *then* calls
+   `runTileZoomPhase`, which is where `FrameTimingLog()..arm()` runs.
+   `_pumpFrame` completes at `SchedulerBinding.endOfFrame` -- before the frame
+   rasterises -- so that camera-reset frame's `FrameTiming` is **guaranteed**
+   to arrive after `arm()` and to land at `_reported[0]`.
+2. **Engine batching.** `FrameTiming`s are delivered in batches
+   ("approximately once a second in release mode and approximately once every
+   100ms in debug and profile builds"), and `SchedulerBinding.initInstances`
+   registers its timings callback in `!kReleaseMode`, so reporting neither
+   starts nor stops at `arm()`. Every frame still unflushed at that moment
+   shifts the stream further: 0-6 at a 100 ms batch and 60 Hz.
+
+**Nothing detected it.** `framesMissing` looks for holes *inside* a window,
+and a window shifted whole has none, so no `SHORT SAMPLE` warning fires. With
+the guaranteed shift of one alone, `settleCoveringFrameMs` was the in-between
+composite blit -- exactly the frame M20 exists to keep out of that field --
+and the gesture window was padded at the head with the cheapest frame in the
+phase and truncated at the tail.
+
+`runTileZoomPhase`'s own comment stated this mechanism correctly and pumped
+its two warm-up frames *after* arming for exactly this reason. The reasoning
+was right and stopped at the function boundary; the defect moved to the
+caller.
+
+**The fix** is `FrameTimingLog.establishBaseline`, called by
+`runTileZoomPhase` immediately after `arm()`: rounds of "pump frames back to
+back, then stop pumping and wait a batch window" until the reported stream
+stops growing while nothing is being pumped, then drop `_reported` and reset
+`_pumped` **in the same synchronous step** so the two cannot disagree. The
+last frame number seen becomes a baseline, and a straggler at or below it is
+dropped rather than taking ordinal 0. The reviewer's invariant --
+`reportedFrames <= pumpedFrames` -- latches from the timings callback once the
+baseline is in place, and every read out of a log that saw a backlog throws.
+
+**Mutation**, applied to
+`apps/dev_harness_2d/lib/measurement_rig.dart`, in
+`FrameTimingLog.establishBaseline` -- the reconciliation removed, the direct
+index left as it was:
+
+```diff
+       // Quiet, and non-empty: everything the engine owed has landed. Rebase.
+-      _baselineFrameNumber = _reported.last.frameNumber;
+-      _reported.clear();
+-      _pumped = 0;
+       _sawBacklog = false;
+       _worstExcess = 0;
+-      _baselineEstablished = true;
+       return;
+```
+
+**Procedure:** copied `measurement_rig.dart` aside to the scratchpad
+(`measurement_rig_m22.bak`), edited the working file, ran
+`CI=true flutter test --concurrency=1 test/settle_attribution_test.dart` from
+`apps/dev_harness_2d`, confirmed red, then restored the working file with `cp`
+from the scratchpad copy and confirmed `diff` produced no output. **Never
+`git checkout`.**
+
+**Result:** red, four of the fourteen tests. The covering frame reads **1.0**
+under the mutant -- a baseline frame, cheaper than every gesture frame in the
+phase -- where the frame coverage was actually read at cost 90.0, and the
+gesture window's first entry reads **1.0** where the first gesture frame cost
+10.0.
+
+**The old fixture could not have caught it, which is why the driver changed.**
+`_FrameDriver` started `_delivered` at 0 and only ever delivered frames it had
+pumped itself: its stream modelled an **empty backlog at `arm()`**, the one
+case the device never gives you. It now takes a `backlogMs` list -- timings
+for frames pumped *before* the log was armed, delivered in one batch at the
+head of the stream, with engine frame numbers below every post-arm frame --
+and a `flush()` that stands in for a batch flush while nothing is pumped. The
+two pre-existing gesture-window and hole tests survive M22 and are meant to:
+they are written on drivers with no backlog, and a stream with no backlog is
+not shifted.
+
+**Verbatim output** (the `flutter pub get` preamble, identical to every other
+entry in this file, is trimmed):
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart
+00:00 +0: the covering frame is the one reported, not the frame before it
+00:00 +1: the settle frame moves the reported figure
+00:00 +2: wall clock over the settle is the sum, not the last frame
+00:00 +3: the idle frames after coverage are not charged to the settle
+00:00 +4: the last idle frame is drained rather than dropped
+00:00 +5: a settle that never covers says so
+00:00 +6: a frame that never reports is a hole, not a zero
+00:00 +7: the gesture window excludes the warm-up frames and keeps its tail
+00:00 +8: a short sample is counted, and length plus missing is the script
+00:00 +9: the baseline drains what arming did not, and rebases the ordinals
+00:00 +9 -1: the baseline drains what arming did not, and rebases the ordinals [E]
+  Expected: true
+    Actual: <false>
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/settle_attribution_test.dart 434:7             main.<fn>
+  
+00:00 +9 -1: a backlog reported after arming does not take the settle ordinals
+00:00 +9 -2: a backlog reported after arming does not take the settle ordinals [E]
+  Expected: a numeric value within <1e-9> of <90.0>
+    Actual: <1.0>
+     Which:  differs by <89.0>
+  the covering frame. 333.0 is the backlog, 1.0 is a baseline frame, and 4.0 is the composite blit before it
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/settle_attribution_test.dart 488:5             main.<fn>
+  
+00:00 +9 -2: a backlog reported after arming does not pad the gesture window
+00:00 +9 -3: a backlog reported after arming does not pad the gesture window [E]
+  Expected: a numeric value within <1e-9> of <10.0>
+    Actual: <1.0>
+     Which:  differs by <9.0>
+  the first gesture frame, not a backlog frame and not a baseline or warm-up frame
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/settle_attribution_test.dart 549:5             main.<fn>
+  
+00:00 +9 -3: a backlog after the baseline is refused rather than published
+00:00 +9 -4: a backlog after the baseline is refused rather than published [E]
+  Expected: true
+    Actual: <false>
+  two timings across zero pumped frames
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/settle_attribution_test.dart 581:7             main.<fn>
+  
+00:00 +9 -4: a stream that never goes quiet is refused, not measured
+00:00 +10 -4: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart: a backlog after the baseline is refused rather than published
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart: a backlog reported after arming does not pad the gesture window
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart: a backlog reported after arming does not take the settle ordinals
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart: the baseline drains what arming did not, and rebases the ordinals
+```
+
+**Restore, verified.** Empty `diff`, and the fourteen green transcript quoted
+under M22c below.
+
+---
+
+## M22b — the baseline gives up quietly instead of refusing
+
+**Fix wave C.** The companion clause to M22: when the timing stream never goes
+quiet, `establishBaseline` has no offset to hand back, and returning anyway
+would let the phase publish ordinals that are wrong by an unknown amount --
+the same failure M22 restores, arrived at from the other side. This mutant
+proves the refusal is load-bearing and not decoration.
+
+**Mutation:** the tail of `FrameTimingLog.establishBaseline`:
+
+```diff
+-    throw StateError('FrameTimingLog.establishBaseline(): the timing stream '
+-        'never went quiet in $maxRounds rounds of $framesPerRound frames and '
+-        '$batchWindow -- $reportedFrames timing(s) across $pumpedFrames '
+-        'pumped frames. Every ordinal below would be offset by an unknown '
+-        'amount, so there is no figure to publish.');
++    return;
+```
+
+**Procedure:** as M22, against
+`test/settle_attribution_test.dart` (`measurement_rig_m22b.bak`).
+
+**Result:** red, one test.
+
+**Verbatim output:**
+
+```
+00:00 +12: a backlog after the baseline is refused rather than published
+00:00 +13: a stream that never goes quiet is refused, not measured
+00:00 +13 -1: a stream that never goes quiet is refused, not measured [E]
+  Expected: throws <Instance of 'StateError'>
+    Actual: <Instance of 'Future<void>'>
+     Which: emitted <null>
+  
+  package:matcher                                    expectLater
+  package:flutter_test/src/widget_tester.dart 507:8  expectLater
+  test/settle_attribution_test.dart 600:13           main.<fn>
+  
+00:00 +13 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart: a stream that never goes quiet is refused, not measured
+```
+
+---
+
+## M22c — a hole published as a fast frame
+
+**Fix wave C, the first Minor.** `SettleReport.coveringFrameMs` was a
+non-nullable `double` filled from `ms.isEmpty ? 0.0 : (ms.last ?? 0.0)`.
+`FrameTimingLog.msAt`'s own doc forbids exactly that: *"Null rather than
+`0.0`: a frame that reported nothing is a hole in the sample, and zero is a
+**fast frame**. Publishing one as the other is how a composite blit that drew
+nothing gets read as a settle."* The field was guarded only by `framesMissing`
+and a printed warning, not by its type, so a reader taking the field alone got
+a zero where the doc promised a hole -- and zero is the fastest number the run
+can produce. The field and `ZoomReport.settleCoveringFrameMs` are now
+`double?`, and `printZoomReport` prints `coveringFrameMs=NONE` with its own
+warning line rather than `0.00`.
+
+**Mutation:** in `runSettlePhase`:
+
+```diff
+-    coveringFrameMs: ms.isEmpty ? null : ms.last,
++    coveringFrameMs: ms.isEmpty ? 0.0 : (ms.last ?? 0.0),
+```
+
+**Procedure:** as M22 (`measurement_rig_m22c.bak`).
+
+**Result:** red, one test -- `'a frame that never reports is a hole, not a
+zero'`, which asserted the shortfall and the wall clock but, until this fix,
+never asserted what the published per-frame figure was.
+
+**Verbatim output:**
+
+```
+00:00 +6: a frame that never reports is a hole, not a zero
+00:00 +6 -1: a frame that never reports is a hole, not a zero [E]
+  Expected: null
+    Actual: <0.0>
+  the field carries the hole. `0.0` here is a *fast frame*, and a reader who takes this field without also reading framesMissing would publish the fastest number in the run as criterion 3's settle
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/settle_attribution_test.dart 328:5             main.<fn>
+  
+00:00 +6 -1: the gesture window excludes the warm-up frames and keeps its tail
+00:00 +7 -1: a short sample is counted, and length plus missing is the script
+00:00 +8 -1: the baseline drains what arming did not, and rebases the ordinals
+00:00 +9 -1: a backlog reported after arming does not take the settle ordinals
+00:00 +10 -1: a backlog reported after arming does not pad the gesture window
+00:00 +11 -1: a backlog after the baseline is refused rather than published
+00:00 +12 -1: a stream that never goes quiet is refused, not measured
+00:00 +13 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart: a frame that never reports is a hole, not a zero
+```
+
+**Restore, verified** -- for all three mutants. Each was restored by `cp` from
+its own scratchpad copy with an empty `diff`, and the restored file is
+byte-identical to the pre-M22 copy:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/settle_attribution_test.dart
+00:00 +0: the covering frame is the one reported, not the frame before it
+00:00 +1: the settle frame moves the reported figure
+00:00 +2: wall clock over the settle is the sum, not the last frame
+00:00 +3: the idle frames after coverage are not charged to the settle
+00:00 +4: the last idle frame is drained rather than dropped
+00:00 +5: a settle that never covers says so
+00:00 +6: a frame that never reports is a hole, not a zero
+00:00 +7: the gesture window excludes the warm-up frames and keeps its tail
+00:00 +8: a short sample is counted, and length plus missing is the script
+00:00 +9: the baseline drains what arming did not, and rebases the ordinals
+00:00 +10: a backlog reported after arming does not take the settle ordinals
+00:00 +11: a backlog reported after arming does not pad the gesture window
+00:00 +12: a backlog after the baseline is refused rather than published
+00:00 +13: a stream that never goes quiet is refused, not measured
+00:00 +14: All tests passed!
+```
+
