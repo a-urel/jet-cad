@@ -43,37 +43,106 @@ FrameTiming _timing(double ms, int frameNumber) {
 }
 
 /// Pumps frames that report their timings one frame late, the way the engine
-/// does.
+/// does, and -- when [backlogMs] is non-empty -- opens with a batch of timings
+/// for frames that were pumped **before** the log was armed.
+///
+/// **The backlog is not decoration.** Without it this fixture models a stream
+/// whose backlog is empty at `arm()`, which is the one case the device never
+/// gives you: `main.dart`'s `runArm` pumps a camera-reset frame whose timing
+/// cannot have arrived by the time its own pump returns, and the engine
+/// batches its reports besides. A driver that only ever delivers frames it
+/// pumped itself cannot reproduce a shifted stream, so it cannot fail on one.
 class _FrameDriver {
-  _FrameDriver({required this.costMs, this.tailCostMs = 4.0});
+  _FrameDriver({
+    required this.costMs,
+    this.tailCostMs = 4.0,
+    this.backlogMs = const <double>[],
+  });
 
   /// `totalSpan` of frame *i*, by ordinal. Frames past the end cost
   /// [tailCostMs].
   final List<double> costMs;
   final double tailCostMs;
 
+  /// `totalSpan` of the frames pumped before the log was armed, oldest first.
+  /// They are all delivered in one batch on the first [pump], which is where
+  /// the engine would deliver them: after registration, at the head of the
+  /// stream, in front of every frame the phase goes on to pump.
+  final List<double> backlogMs;
+
   /// How many frames have been pumped.
   int pumped = 0;
 
   /// The ordinal of the next frame whose timing is still owed.
   int _delivered = 0;
+  bool _backlogReported = false;
+
+  /// Engine frame numbers are one sequence across both: the backlog takes
+  /// `0 .. backlogMs.length - 1`, and post-arm ordinal *i* takes
+  /// `backlogMs.length + i`. With no backlog this is the identity, which is
+  /// what it was before backlogs existed.
+  int get _frameNumberBase => backlogMs.length;
 
   double costOf(int ordinal) =>
       ordinal < costMs.length ? costMs[ordinal] : tailCostMs;
 
+  void _report(List<FrameTiming> timings) {
+    if (timings.isEmpty) return;
+    SchedulerBinding.instance.platformDispatcher.onReportTimings!(timings);
+  }
+
+  List<FrameTiming> _takeBacklog() {
+    if (_backlogReported) return const <FrameTiming>[];
+    _backlogReported = true;
+    return <FrameTiming>[
+      for (var i = 0; i < backlogMs.length; i++) _timing(backlogMs[i], i),
+    ];
+  }
+
   Future<void> pump() async {
     pumped++;
+    _report(_takeBacklog());
     // At most one frame in flight: pumping frame *i* is what lets frame *i-1*'s
     // timing arrive. The last frame pumped is therefore always still owed --
     // which is what `FrameTimingLog.drain` exists to collect.
     if (_delivered < pumped - 1) {
       final ordinal = _delivered++;
-      SchedulerBinding.instance.platformDispatcher.onReportTimings!(
-        <FrameTiming>[_timing(costOf(ordinal), ordinal)],
+      _report(
+        <FrameTiming>[_timing(costOf(ordinal), _frameNumberBase + ordinal)],
       );
     }
     await Future<void>.delayed(Duration.zero);
   }
+
+  /// Delivers every timing still owed, without pumping anything.
+  ///
+  /// This is what a batch flush looks like from the framework's side while the
+  /// rig is not pumping: the frames already rasterised report, and then the
+  /// stream goes quiet. `FrameTimingLog.establishBaseline` waits for exactly
+  /// that quiet, so a test hands this in as its `waitForBatch`.
+  Future<void> flush() async {
+    final owed = <FrameTiming>[..._takeBacklog()];
+    while (_delivered < pumped) {
+      final ordinal = _delivered++;
+      owed.add(_timing(costOf(ordinal), _frameNumberBase + ordinal));
+    }
+    _report(owed);
+    await Future<void>.delayed(Duration.zero);
+  }
+}
+
+/// Arms [log] and drains whatever the engine owed before it was armed, the way
+/// `runTileZoomPhase` does -- with [driver] standing in for the engine's batch
+/// flush, so no test has to sleep through a real [kTimingBatchWindow].
+Future<void> _armAndBaseline(FrameTimingLog log, _FrameDriver driver,
+    {int framesPerRound = 2}) async {
+  log.arm();
+  await log.establishBaseline(
+    driver.pump,
+    framesPerRound: framesPerRound,
+    batchWindow: Duration.zero,
+    waitForBatch: (_) => driver.flush(),
+  );
 }
 
 void main() {
@@ -133,7 +202,9 @@ void main() {
     final dear = await run(900.0);
     expect(cheap.coveringFrameMs, closeTo(9.0, 1e-9));
     expect(dear.coveringFrameMs, closeTo(900.0, 1e-9));
-    expect(dear.coveringFrameMs - cheap.coveringFrameMs, closeTo(891.0, 1e-9),
+    // Non-null in both arms: the two `closeTo`s above already fail on a hole,
+    // so the `!`s here cannot be what a broken attribution trips over.
+    expect(dear.coveringFrameMs! - cheap.coveringFrameMs!, closeTo(891.0, 1e-9),
         reason: 'the settle figure must track the settle frame');
   });
 
@@ -254,6 +325,11 @@ void main() {
     expect(settle.frames, 1);
     expect(settle.framesMissing, 1);
     expect(settle.wallMs, 0.0);
+    expect(settle.coveringFrameMs, isNull,
+        reason: 'the field carries the hole. `0.0` here is a *fast frame*, '
+            'and a reader who takes this field without also reading '
+            'framesMissing would publish the fastest number in the run as '
+            "criterion 3's settle");
   });
 
   test('the gesture window excludes the warm-up frames and keeps its tail',
@@ -337,5 +413,207 @@ void main() {
     expect(report.gestureFrameMs.length + report.gestureFramesMissing,
         2 * kZoomSteps);
     expect(report.gestureFramesMissing, kZoomSteps);
+  });
+
+  // --- The backlog: what `arm()` alone does not do. ----------------------
+
+  test('the baseline drains what arming did not, and rebases the ordinals',
+      () async {
+    // Three frames pumped before `arm()`: the camera reset `main.dart`'s
+    // `runArm` does, plus whatever batch the engine was still holding. Every
+    // one of them reports *after* registration.
+    final driver = _FrameDriver(
+      backlogMs: <double>[111.0, 222.0, 333.0],
+      costMs: <double>[1.0, 1.0],
+    );
+    final log = FrameTimingLog();
+    try {
+      expect(log.baselineEstablished, isFalse);
+      await _armAndBaseline(log, driver);
+
+      expect(log.baselineEstablished, isTrue);
+      expect(log.pumpedFrames, 0,
+          reason: 'ordinal 0 must be the next frame pumped, not the fourth '
+              'frame of somebody else\'s backlog');
+      expect(log.reportedFrames, 0,
+          reason: 'and nothing may already be sitting at that ordinal');
+      expect(log.sawBacklog, isFalse);
+
+      // A straggler from before the baseline, arriving after the reset: it is
+      // dropped by frame number rather than taking ordinal 0.
+      SchedulerBinding.instance.platformDispatcher.onReportTimings!(
+        <FrameTiming>[_timing(999.0, 0)],
+      );
+      expect(log.reportedFrames, 0);
+      expect(log.sawBacklog, isFalse);
+    } finally {
+      log.disarm();
+    }
+  });
+
+  test('a backlog reported after arming does not take the settle ordinals',
+      () async {
+    // The Blocking defect, one frame over. Costs 1.0 are the baseline frames;
+    // the settle is 4.0 then 90.0, and coverage is on the second idle frame
+    // (Ruling 15). Without the baseline, ordinal 0 of the settle is the
+    // backlog's third entry and the published figure is a frame from before
+    // the phase began.
+    final driver = _FrameDriver(
+      backlogMs: <double>[111.0, 222.0, 333.0],
+      costMs: <double>[1.0, 1.0, 4.0, 90.0],
+      tailCostMs: 3.0,
+    );
+    final log = FrameTimingLog();
+    final SettleReport settle;
+    // Counted here rather than off the log, so this predicate says the same
+    // thing whether or not the ordinals were rebased.
+    var idlePumps = 0;
+    try {
+      await _armAndBaseline(log, driver);
+      settle = await runSettlePhase(
+        log: log,
+        pumpFrame: () async {
+          idlePumps++;
+          await driver.pump();
+        },
+        covered: () => idlePumps >= 2,
+        idleFrames: 5,
+      );
+    } finally {
+      log.disarm();
+    }
+
+    expect(settle.frames, 2);
+    expect(settle.framesMissing, 0);
+    expect(settle.coveringFrameMs, closeTo(90.0, 1e-9),
+        reason: 'the covering frame. 333.0 is the backlog, 1.0 is a baseline '
+            'frame, and 4.0 is the composite blit before it');
+    expect(settle.wallMs, closeTo(94.0, 1e-9));
+  });
+
+  test('a backlog reported after arming does not pad the gesture window',
+      () async {
+    // The same shift, read off the other window: a sample padded at the head
+    // with somebody else's cheap frames and truncated at the tail is one whose
+    // p95 reads low.
+    const gestureFrames = 2 * kZoomSteps;
+    const backlogCost = 2.0;
+    final costs = <double>[
+      1.0, 1.0, // the two baseline frames
+      1.0, 1.0, // the two warm-up frames
+      for (var i = 0; i < gestureFrames - 1; i++) 10.0,
+      77.0, // the last gesture frame
+    ];
+    final driver = _FrameDriver(
+      backlogMs: <double>[for (var i = 0; i < 4; i++) backlogCost],
+      costMs: costs,
+      tailCostMs: 3.0,
+    );
+    final log = FrameTimingLog();
+    final List<double?> gestureMs;
+    try {
+      await _armAndBaseline(log, driver);
+      for (var i = 0; i < kZoomWarmUpFrames; i++) {
+        await log.pump(driver.pump);
+      }
+      final gestureStart = log.pumpedFrames;
+      for (var i = 0; i < gestureFrames; i++) {
+        await log.pump(driver.pump);
+      }
+      await runSettlePhase(
+        log: log,
+        pumpFrame: driver.pump,
+        covered: () => true,
+        idleFrames: 2,
+      );
+      gestureMs = log.msRange(gestureStart, gestureStart + gestureFrames);
+    } finally {
+      log.disarm();
+    }
+
+    final report = ZoomReport.from(
+      gestureMs: gestureMs,
+      gestureBakes: 0,
+      gestureLiveDraws: 0,
+      settle: SettleReport(
+        frames: 1,
+        covered: true,
+        coveringFrameMs: 3.0,
+        wallMs: 3.0,
+        framesMissing: 0,
+      ),
+    );
+
+    expect(report.gestureFramesMissing, 0);
+    expect(report.gestureFrameMs.length, gestureFrames);
+    expect(report.gestureFrameMs.first, closeTo(10.0, 1e-9),
+        reason: 'the first gesture frame, not a backlog frame and not a '
+            'baseline or warm-up frame');
+    expect(report.gestureFrameMs.last, closeTo(77.0, 1e-9),
+        reason: 'the last gesture frame, which a shifted window truncates');
+    expect(report.gestureFrameMs.where((v) => v == backlogCost), isEmpty,
+        reason: 'no frame from before the phase may appear in the sample');
+    expect(report.gestureFrameMs.where((v) => v == 1.0), isEmpty,
+        reason: 'and no baseline or warm-up frame either');
+  });
+
+  test('a backlog after the baseline is refused rather than published',
+      () async {
+    // `reportedFrames <= pumpedFrames` is what makes ordinal k the k-th frame
+    // pumped: a frame reports only after it has rasterised, and it cannot
+    // rasterise before it was pumped. More timings than pumps means frames
+    // this log never pumped are in the stream, and every ordinal past them is
+    // off by an amount nothing here can recover -- which is exactly the state
+    // that published a composite blit as a settle, undetected.
+    final driver = _FrameDriver(costMs: <double>[1.0, 1.0, 5.0, 6.0]);
+    final log = FrameTimingLog();
+    try {
+      await _armAndBaseline(log, driver);
+      expect(log.sawBacklog, isFalse);
+
+      // Two frames this log never pumped, of the shape a late engine batch
+      // has. Their frame numbers are past the baseline, so the frame-number
+      // filter does not catch them -- the invariant is what does.
+      SchedulerBinding.instance.platformDispatcher.onReportTimings!(
+        <FrameTiming>[_timing(7.0, 9000), _timing(8.0, 9001)],
+      );
+
+      expect(log.sawBacklog, isTrue,
+          reason: 'two timings across zero pumped frames');
+      expect(() => log.msAt(0), throwsStateError,
+          reason: 'a shifted stream yields no figure, loudly, rather than a '
+              'plausible one quietly');
+      expect(() => log.msRange(0, 2), throwsStateError);
+    } finally {
+      log.disarm();
+    }
+  });
+
+  test('a stream that never goes quiet is refused, not measured', () async {
+    // An engine that keeps reporting frames the rig never pumped never lets
+    // the baseline establish itself. There is no ordinal to hand back, so
+    // there is no figure -- and a rig that prints one anyway is the failure
+    // this whole file exists for.
+    var phantomFrameNumber = 9000;
+    final log = FrameTimingLog()..arm();
+    try {
+      await expectLater(
+        log.establishBaseline(
+          () async {},
+          framesPerRound: 1,
+          batchWindow: Duration.zero,
+          maxRounds: 3,
+          waitForBatch: (_) async {
+            SchedulerBinding.instance.platformDispatcher.onReportTimings!(
+              <FrameTiming>[_timing(5.0, phantomFrameNumber++)],
+            );
+          },
+        ),
+        throwsStateError,
+      );
+      expect(log.baselineEstablished, isFalse);
+    } finally {
+      log.disarm();
+    }
   });
 }

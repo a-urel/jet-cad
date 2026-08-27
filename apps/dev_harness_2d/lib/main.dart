@@ -562,6 +562,13 @@ Future<void> _driveR2(
     // One arm: back to the fitted camera, then the whole pinned script. The
     // camera reset is here rather than inside the phase because the arms of a
     // ratio must start from the same camera, and the phase does not own it.
+    //
+    // **This pump's `FrameTiming` lands inside the phase, not before it.**
+    // `_pumpFrame` completes at `SchedulerBinding.endOfFrame`, before the
+    // frame rasterises, so the timing arrives after `runTileZoomPhase` has
+    // armed its log. The phase drains it — see
+    // `FrameTimingLog.establishBaseline` — rather than this call site trying
+    // to order itself against a report that has not happened yet.
     Future<ZoomReport> runArm() async {
       camera.value = fittedCamera;
       await _pumpFrame();

@@ -33,7 +33,7 @@ ZoomReport _emptyReport() => ZoomReport.from(
       settle: SettleReport(
         frames: 2,
         covered: true,
-        coveringFrameMs: 0.0,
+        coveringFrameMs: null,
         wallMs: 0.0,
         framesMissing: 0,
       ),

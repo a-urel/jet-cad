@@ -711,6 +711,13 @@ void warnIfZoomViewportMismatch(Size real, Size pinned) {
 /// phase arms this log before its own warm-up frames and excludes the warm-up
 /// ordinals from its sample, rather than arming after them.
 ///
+/// **[arm] is not enough on its own, and a phase must call
+/// [establishBaseline] straight after it.** Arming does not empty the engine's
+/// queue: a caller's own pump just before the phase, and whatever the engine
+/// had not yet batched, both report *after* registration and take ordinals
+/// that belong to frames pumped later. [establishBaseline] is what drains
+/// them; [sawBacklog] is the invariant that says it failed to.
+///
 /// The last frames' timings are still in flight when the last pump returns,
 /// which is what [drain] is for.
 class FrameTimingLog {
@@ -718,7 +725,38 @@ class FrameTimingLog {
   int _pumped = 0;
   bool _armed = false;
 
-  void _collect(List<FrameTiming> timings) => _reported.addAll(timings);
+  /// The `frameNumber` of the last frame known to belong to the *pre-baseline*
+  /// stream, or null before [establishBaseline] has run. Every timing at or
+  /// below it is dropped rather than appended: a straggler from before the
+  /// baseline must not take an ordinal that belongs to a frame pumped after
+  /// it. See [establishBaseline].
+  int? _baselineFrameNumber;
+  bool _baselineEstablished = false;
+
+  /// Latched when [reportedFrames] exceeds [pumpedFrames] *after* the
+  /// baseline. See [sawBacklog].
+  bool _sawBacklog = false;
+  int _worstExcess = 0;
+
+  void _collect(List<FrameTiming> timings) {
+    final baseline = _baselineFrameNumber;
+    for (final timing in timings) {
+      if (baseline != null && timing.frameNumber <= baseline) continue;
+      _reported.add(timing);
+    }
+    // The invariant: a frame reports only after it has rasterised, and it
+    // cannot rasterise before it was pumped, so at most one timing per pumped
+    // frame can ever have arrived. More than that means timings this log did
+    // not pump are in the stream -- which is exactly a backlog, and exactly
+    // the thing that shifts every ordinal by an amount nothing else measures.
+    // Before the baseline a backlog is *expected* (it is what the baseline
+    // drains), so this only latches once the baseline is in place.
+    if (_baselineEstablished && _reported.length > _pumped) {
+      _sawBacklog = true;
+      final excess = _reported.length - _pumped;
+      if (excess > _worstExcess) _worstExcess = excess;
+    }
+  }
 
   /// Registers the one callback that spans the whole phase.
   void arm() {
@@ -745,10 +783,121 @@ class FrameTimingLog {
   /// How many timings have been reported so far, across every pumped frame.
   int get reportedFrames => _reported.length;
 
+  /// Whether [establishBaseline] has run and left this log with a known-empty
+  /// backlog.
+  bool get baselineEstablished => _baselineEstablished;
+
+  /// Whether [reportedFrames] has ever exceeded [pumpedFrames] since the
+  /// baseline was established -- the invariant that says every ordinal in this
+  /// log is off by an unknown amount.
+  ///
+  /// Reading a figure out of such a log throws; this getter is how a caller
+  /// (or a test) asks without throwing.
+  bool get sawBacklog => _sawBacklog;
+
   /// Pumps one frame and gives it the next ordinal.
   Future<void> pump(Future<void> Function() pumpFrame) async {
     _pumped++;
     await pumpFrame();
+  }
+
+  /// Drains whatever the engine still owes from before [arm], then rebases
+  /// this log so ordinal 0 is genuinely the next frame pumped.
+  ///
+  /// **Why any of this is needed.** Ordinals index [_reported] directly, so
+  /// ordinal *k* is pumped frame *k* only if `_reported[0]` is the first frame
+  /// pumped after [arm]. Two things break that on a device and neither is
+  /// rare:
+  ///
+  /// 1. *A guaranteed shift of one.* A caller that pumps a frame just before
+  ///    the phase -- `main.dart`'s `runArm` resets the camera and pumps --
+  ///    completes that pump at `SchedulerBinding.endOfFrame`, **before** the
+  ///    frame rasterises. Its `FrameTiming` therefore arrives *after* [arm]
+  ///    and lands at `_reported[0]`, pushing every ordinal along by one. The
+  ///    published "covering frame" then names the in-between composite blit
+  ///    that drew nothing, and the gesture window is padded at the head with
+  ///    the cheapest frame in the phase and truncated at the tail.
+  /// 2. *Engine batching.* `FrameTiming`s are delivered in batches
+  ///    (approximately once a second in release, once every ~100 ms in debug
+  ///    and profile), and `SchedulerBinding.initInstances` registers its own
+  ///    timings callback in `!kReleaseMode` -- so reporting neither starts nor
+  ///    stops at [arm]. Every frame still unflushed at that moment shifts the
+  ///    stream further: 0-6 of them at a 100 ms batch and 60 Hz.
+  ///
+  /// Nothing downstream can see either one. `framesMissing` looks for holes
+  /// *inside* a window, and a shifted-but-full window has none.
+  ///
+  /// **What this does.** Rounds of "pump [framesPerRound] frames back to back,
+  /// then stop pumping and wait a [batchWindow]" until the reported stream
+  /// stops growing while nothing is being pumped -- which is what "the engine
+  /// owes this log nothing" looks like from here -- and then drops [_reported]
+  /// and resets [_pumped] **in the same synchronous step**, so the two cannot
+  /// disagree. The last frame number seen becomes [_baselineFrameNumber], so a
+  /// straggler that arrives after the reset is dropped instead of stealing
+  /// ordinal 0.
+  ///
+  /// **Pumping is continuous inside a round** so that no frame the app
+  /// schedules for itself (`DraftCanvasState`'s settle notifier does) can
+  /// slip in unpumped; the wait that follows is what lets the batch flush.
+  ///
+  /// **[waitForBatch] is injectable so this is testable at all.** The default
+  /// is a real `Future.delayed`; a test drives a fake stream and hands in a
+  /// callback that flushes it instead of sleeping.
+  ///
+  /// Throws when the stream never goes quiet inside [maxRounds]. That is a
+  /// throw and not a warning because every figure the phase would go on to
+  /// publish is an ordinal read out of a stream whose offset is unknown: there
+  /// is no number to salvage, only a wrong one to print.
+  Future<void> establishBaseline(
+    Future<void> Function() pumpFrame, {
+    int framesPerRound = kBaselineFramesPerRound,
+    Duration batchWindow = kTimingBatchWindow,
+    int maxRounds = kBaselineMaxRounds,
+    Future<void> Function(Duration)? waitForBatch,
+  }) async {
+    if (!_armed) {
+      throw StateError('FrameTimingLog.establishBaseline() before arm(): '
+          'there is no stream to drain until the callback is registered');
+    }
+    if (_baselineEstablished) {
+      throw StateError('FrameTimingLog.establishBaseline() twice: the second '
+          'call would throw away a phase that is already being measured');
+    }
+    final wait = waitForBatch ?? (Duration d) => Future<void>.delayed(d);
+    for (var round = 0; round < maxRounds; round++) {
+      for (var i = 0; i < framesPerRound; i++) {
+        await pump(pumpFrame);
+      }
+      await wait(batchWindow);
+      final settledCount = _reported.length;
+      // A second window with nothing pumped into it. If the stream grew, the
+      // engine still owed timings a moment ago and may still owe more.
+      await wait(batchWindow);
+      if (_reported.length != settledCount || _reported.isEmpty) continue;
+      // Quiet, and non-empty: everything the engine owed has landed. Rebase.
+      _baselineFrameNumber = _reported.last.frameNumber;
+      _reported.clear();
+      _pumped = 0;
+      _sawBacklog = false;
+      _worstExcess = 0;
+      _baselineEstablished = true;
+      return;
+    }
+    throw StateError('FrameTimingLog.establishBaseline(): the timing stream '
+        'never went quiet in $maxRounds rounds of $framesPerRound frames and '
+        '$batchWindow -- $reportedFrames timing(s) across $pumpedFrames '
+        'pumped frames. Every ordinal below would be offset by an unknown '
+        'amount, so there is no figure to publish.');
+  }
+
+  /// Throws when this log has seen a backlog since its baseline.
+  void _refuseShiftedStream() {
+    if (!_sawBacklog) return;
+    throw StateError('FrameTimingLog: the reported stream ran ahead of the '
+        'pumped one by up to $_worstExcess frame(s) after the baseline. '
+        'reportedFrames <= pumpedFrames is what makes ordinal k the k-th '
+        'frame pumped; with a backlog every figure read out of this log names '
+        'the wrong frame, and by an amount nothing here can recover.');
   }
 
   /// Pumps bare frames until the frames with ordinals below [upTo] have all
@@ -784,14 +933,33 @@ class FrameTimingLog {
   /// Null rather than `0.0`: a frame that reported nothing is a hole in the
   /// sample, and zero is a *fast frame*. Publishing one as the other is how a
   /// composite blit that drew nothing gets read as a settle.
-  double? msAt(int ordinal) => ordinal >= 0 && ordinal < _reported.length
-      ? _reported[ordinal].totalSpan.inMicroseconds / 1000.0
-      : null;
+  double? msAt(int ordinal) {
+    _refuseShiftedStream();
+    return ordinal >= 0 && ordinal < _reported.length
+        ? _reported[ordinal].totalSpan.inMicroseconds / 1000.0
+        : null;
+  }
 
   /// [msAt] over the half-open ordinal range `[start, end)`, holes included.
   List<double?> msRange(int start, int end) =>
       <double?>[for (var i = start; i < end; i++) msAt(i)];
 }
+
+/// How long [FrameTimingLog.establishBaseline] waits for the engine to flush a
+/// batch of `FrameTiming`s.
+///
+/// The framework's own figure is "approximately once every 100ms in debug and
+/// profile builds"; this is that with margin, and the baseline waits two of
+/// them per round.
+const Duration kTimingBatchWindow = Duration(milliseconds: 150);
+
+/// How many frames [FrameTimingLog.establishBaseline] pumps per round, back to
+/// back, before it stops and waits.
+const int kBaselineFramesPerRound = 4;
+
+/// How many rounds [FrameTimingLog.establishBaseline] gives the stream to go
+/// quiet before it refuses to produce a baseline at all.
+const int kBaselineMaxRounds = 8;
 
 /// What [runSettlePhase] measured: the idle settle after a gesture.
 class SettleReport {
@@ -812,7 +980,14 @@ class SettleReport {
 
   /// `totalSpan` of the single frame at which coverage was first read -- **one
   /// frame, not the settle**. See [ZoomReport.settleCoveringFrameMs].
-  final double coveringFrameMs;
+  ///
+  /// **Null when that frame reported no timing at all**, which is the hole
+  /// [FrameTimingLog.msAt] takes such care to distinguish from a zero: zero is
+  /// a *fast frame*, and publishing a hole as one is how a composite blit that
+  /// drew nothing gets read as a settle. The type carries it, so a reader who
+  /// takes this field without also reading [framesMissing] still cannot get a
+  /// number where there was none.
+  final double? coveringFrameMs;
 
   /// Wall clock across [frames], summed. See [ZoomReport.settleWallMs].
   final double wallMs;
@@ -886,7 +1061,10 @@ Future<SettleReport> runSettlePhase({
   return SettleReport(
     frames: frames,
     covered: everCovered,
-    coveringFrameMs: ms.isEmpty ? 0.0 : (ms.last ?? 0.0),
+    // `ms.last` already carries the hole as null; there is nothing to
+    // substitute for it. An empty window (`frames` of zero, which only a zero
+    // idle budget produces) is the same absence.
+    coveringFrameMs: ms.isEmpty ? null : ms.last,
     wallMs: wallMs,
     framesMissing: missing,
   );
@@ -987,7 +1165,13 @@ class ZoomReport {
   /// them alone. A ratio formed from this field compares one frame against one
   /// frame -- the "two readings straddling the gate" design spec §4 exists to
   /// prevent.
-  final double settleCoveringFrameMs;
+  ///
+  /// **Null is a hole, not a fast frame.** See
+  /// [SettleReport.coveringFrameMs]: when the frame criterion 3 names reported
+  /// no timing at all there is no number, and this field says so in its type
+  /// rather than handing back a `0.0` that reads as the fastest frame in the
+  /// run.
+  final double? settleCoveringFrameMs;
 
   /// Criterion 4's numerator or denominator, quoting the criterion: **"wall
   /// clock to a covered viewport, from the first frame after the gesture ends
@@ -1059,7 +1243,9 @@ class ZoomReport {
 /// warm-up frames are pumped *after* the log is armed and then excluded by
 /// ordinal, rather than pumped before registration and silently charged to the
 /// gesture; the gesture window is an ordinal range rather than "whatever
-/// arrived between two registrations"; and the settle's last frames are
+/// arrived between two registrations"; the engine's backlog at arming time is
+/// drained and the ordinals rebased before the first warm-up frame, so
+/// ordinal 0 is a frame this phase pumped; and the settle's last frames are
 /// drained rather than dropped. See [FrameTimingLog] for why every one of
 /// those is the same bug.
 Future<ZoomReport> runTileZoomPhase({
@@ -1072,6 +1258,16 @@ Future<ZoomReport> runTileZoomPhase({
   final focus = zoomFocusFor(viewport);
   final log = FrameTimingLog()..arm();
   try {
+    // Arming registers a callback; it does not empty the engine's queue. The
+    // caller's own pump just before this phase (`main.dart`'s `runArm` resets
+    // the camera and pumps one frame) rasterises *after* its pump returns, so
+    // its timing is guaranteed to arrive here, and whatever else the engine
+    // had not batched arrives with it. Both would take ordinals belonging to
+    // frames pumped later, and nothing downstream can see it: a window shifted
+    // whole has no holes for `framesMissing` to find. This drains them and
+    // rebases the ordinals; see [FrameTimingLog.establishBaseline].
+    await log.establishBaseline(pumpFrame);
+
     // Two throwaway frames before the counters reset, the same boundary slack
     // `runTilePhases`'s own `phase()` helper takes -- but pumped *after* the
     // log is armed, so their timings land on ordinals 0 and 1 and are excluded
@@ -1161,8 +1357,16 @@ void printZoomReport(String label, ZoomReport r) {
       'covered=${r.settleCovered} '
       'settleWallMs=${r.settleWallMs.toStringAsFixed(2)}(criterion 4, '
       'wall clock over the settle) '
-      'coveringFrameMs=${r.settleCoveringFrameMs.toStringAsFixed(2)}'
+      // A hole prints as a hole. `0.00` here would be the fastest frame of the
+      // run, and criterion 3 would be read off a frame that never reported.
+      'coveringFrameMs='
+      '${r.settleCoveringFrameMs?.toStringAsFixed(2) ?? "NONE"}'
       '(criterion 3, that one frame)');
+  if (r.settleCoveringFrameMs == null) {
+    print('$label   !!! WARNING: criterion 3 has NO figure -- the frame that '
+        'coverage was read at reported no FrameTiming at all. That is a hole '
+        'in the sample and not a fast frame !!!');
+  }
   if (!r.settleCovered) {
     print('$label   !!! WARNING: the viewport never covered within '
         '$kIdleFrames idle frames -- settleFrames is a floor, and neither '
