@@ -215,6 +215,28 @@ ViewportTransform quantiseCamera(
       worldToScreenMatrix: Transform2(m.a, m.b, m.c, m.d, e, f));
 }
 
+/// Whether two quantised cameras describe the same view, field by field.
+///
+/// Not `operator ==` on [ViewportTransform]: that type is used as a map key
+/// and compared for identity elsewhere, and giving it value equality would
+/// change behaviour far outside this gate.
+///
+/// **Translation is compared, not only scale.** Immediately after a zoom the
+/// generation is empty, so a pan that follows keeps the scale and does not
+/// cover the viewport; a scale-only comparison would let two same-scale pan
+/// frames arm the rest gate and spend a full bake while the camera is still
+/// moving. These are stored values, so the comparison is exact `==` and not
+/// `Tolerance`.
+bool sameQuantisedCamera(ViewportTransform a, ViewportTransform b) {
+  final x = a.worldToScreenMatrix, y = b.worldToScreenMatrix;
+  return x.a == y.a &&
+      x.b == y.b &&
+      x.c == y.c &&
+      x.d == y.d &&
+      x.e == y.e &&
+      x.f == y.f;
+}
+
 /// One scale generation's lattice.
 ///
 /// Tile `(x, y)` occupies device pixels `[x*T, (x+1)*T) x [y*T, (y+1)*T)` in
