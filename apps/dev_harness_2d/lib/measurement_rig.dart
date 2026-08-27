@@ -887,3 +887,41 @@ void printZoomReport(String label, ZoomReport r) {
   print('  settleFrames=${r.settleFrames} '
       'settleMs=${r.settleMs.toStringAsFixed(2)}');
 }
+
+/// Runs [rest] and [tiled] alternately — `rest, tiled, rest, tiled, …` — for
+/// [arms] repeats of each, awaiting every callback before starting the next.
+///
+/// **The interleaved unit is one whole arm, not one frame.** An arm is a
+/// complete phase — a zoom script, its settle and its report — and splitting
+/// it finer would interleave two half-measured caches into each other's
+/// generations. What is refused here is the *blocked* ordering: all of one arm
+/// and then all of the other.
+///
+/// **Why it matters, in this repository's own numbers.** A measurement session
+/// drifts: the machine warms, other processes come and go, the shader cache
+/// fills. Under a blocked ordering every bit of that drift lands on whichever
+/// arm ran last, and the ratio reports the drift as if it were the effect.
+/// `docs/superpowers/notes/2026-08-25-plan-3h-results.md` records exactly that
+/// happening — its M4 arm ran last, in a visibly noisier session, on a phase
+/// M4 is inert on, so the ordering and not the mutation moved the numbers.
+/// Alternating puts the same drift on both arms, where a ratio divides it out.
+///
+/// It reports nothing itself and holds no state: each callback owns its own
+/// configuration and its own printing, so the two arms of criterion 4 (the
+/// rest bake against `TileCache.debugRestBakeDisabled`) and the two arms of
+/// criterion 8 (the narrowed query against `TileCache.debugFullViewportQuery`)
+/// can share this one driver without it knowing which switch it is driving.
+///
+/// `arms: 0` calls neither, rather than running one of each — the count is a
+/// number of repeats, and an off-by-one here would silently publish an n=1
+/// row under an n=0 heading.
+Future<void> runInterleaved({
+  required int arms,
+  required Future<void> Function() rest,
+  required Future<void> Function() tiled,
+}) async {
+  for (var i = 0; i < arms; i++) {
+    await rest();
+    await tiled();
+  }
+}
