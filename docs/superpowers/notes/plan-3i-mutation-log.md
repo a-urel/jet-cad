@@ -1,5 +1,13 @@
 # Plan 3i — mutation log
 
+> **Note: mutant numbering is per-plan, and `M4`/`M5` collide with
+> `plan-3h-mutation-log.md`.** This file's own `M4` (§"M4 — the wheel clause")
+> and `M5` name different mutations from Plan 3h's `M4` ("narrow the clip but
+> not the query") and `M5` ("grow the query and leave the clip untouched").
+> `TileCache.debugFullViewportQuery`, its doc comment and this file's `M14`
+> entry all say "Plan 3h's M4" explicitly for exactly this reason. Any
+> citation of `M4` or `M5` from either log must name the plan it belongs to.
+
 > **Note, added once the batch-minors pass understood the discrepancy below:**
 > M2, M6 and M6b were all measured under Task 8, before Task 9's `Center` fix
 > to `pumpTiled` (`support/tile_harness.dart`, commit `1e2f891`) landed.
@@ -1528,3 +1536,97 @@ test is killed by a different mutant (`matchesScale` comparing with a
 `Tolerance` instead of `==`), not by M15, and it is deliberately kept separate:
 under M15 it stays green, which is what shows the two reasons are independent
 rather than one reason asserted twice.
+
+---
+
+## M16 — the clip widens along with the query under `debugFullViewportQuery`
+
+**Task:** the batch-minors pass, closing the gap M14's own log entry named:
+"One thing M14 does not gate... It does not assert that the clip stayed
+narrow... A future edit that widened the clip under the flag would keep this
+test green while publishing an 'M4' arm that is not M4." Gates
+`test/tile_measurement_seam_test.dart`'s `'debugFullViewportQuery grows the
+fallback walk to the whole viewport'`, specifically its `debugLastClip`
+assertions.
+
+**Why this mutant.** `TileCache.debugFullViewportQuery` is Plan 3h's M4 and
+not its M5 *precisely because* the clip stays narrow while the query widens —
+the flag's own doc comment and `tile_cache.dart:1140`'s comment both say so.
+Before this task, nothing in the test suite read the clip independently of
+the strip: `debugLastStrip` sees only what the fallback *walked*. An edit that
+widened `canvas.clipRect` under the flag would keep every existing assertion
+green — the strip still reads the full viewport, the triangle count is still
+higher — while publishing an "M4" arm that is neither 3h's M4 nor its M5. This
+mutant is that edit, made on purpose, to prove the new `debugLastClip` read
+and its assertions are not vacuous.
+
+**Mutation**, applied to
+`packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`:
+
+```diff
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -1169,7 +1169,9 @@
+     // stay correct, so the sweep still reads zero, and the cost this whole
+     // change exists to remove comes back silently.
+-    canvas.clipRect(uncovered, doAntiAlias: false);
+-    _lastClip = uncovered;
++    final clip =
++        debugFullViewportQuery ? Offset.zero & viewport : uncovered;
++    canvas.clipRect(clip, doAntiAlias: false);
++    _lastClip = clip;
+     // **Walk the union, not the viewport.** The clip above only discards
+```
+
+**Procedure:** copied `tile_cache.dart` aside to the scratchpad
+(`tile_cache_m16.bak`), edited the working file, ran
+`CI=true flutter test test/tile_measurement_seam_test.dart`, confirmed red,
+then restored the working file with `cp` from the scratchpad copy and
+confirmed `diff` produced no output. **Never `git checkout`.**
+
+**Result:** red on `debugLastClip`, not on the strip or the triangle count —
+both of those stay exactly as M14's fix expects, because the mutation touches
+only the clip. At the same swept pan `Offset(0, 53)` on `fillingGrid`:
+
+- narrow arm: clip `Rect.fromLTRB(0.0, -11.0, 416.0, 53.0)` (the padded,
+  viewport-clamped `uncovered`)
+- M4 arm under the mutation: clip `Rect.fromLTRB(0.0, 0.0, 400.0, 300.0)` —
+  the full viewport, identical to its own (correctly widened) strip
+
+so under the mutation the clip moves with the flag and collapses onto the
+strip, which is exactly the "M4 that is neither M4 nor M5" state the new
+assertions exist to refuse.
+
+**Verbatim output** (preamble trimmed as in every other entry in this file):
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_measurement_seam_test.dart
+00:00 +0: the rest bake fires: the unflagged arm slices every visible tile
+00:00 +1: debugRestBakeDisabled slices nothing and still covers
+00:00 +2: debugFullViewportQuery grows the fallback walk to the whole viewport
+00:00 +2 -1: debugFullViewportQuery grows the fallback walk to the whole viewport [E]
+  Expected: Rect:<Rect.fromLTRB(0.0, -11.0, 416.0, 53.0)>
+    Actual: Rect:<Rect.fromLTRB(0.0, 0.0, 400.0, 300.0)>
+  the clip must not move when the flag is set -- only the query does: narrow=_FallbackArm(strip: Rect.fromLTRB(0.0, 0.0, 400.0, 85.0), clip: Rect.fromLTRB(0.0, -11.0, 416.0, 53.0), triangles: 60, liveDraws: 1) m4=_FallbackArm(strip: Rect.fromLTRB(0.0, 0.0, 400.0, 300.0), clip: Rect.fromLTRB(0.0, 0.0, 400.0, 300.0), triangles: 80, liveDraws: 1)
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/tile_measurement_seam_test.dart 229:5          main.<fn>
+  
+00:00 +2 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_measurement_seam_test.dart: debugFullViewportQuery grows the fallback walk to the whole viewport
+```
+
+**Restore, verified.** `cp` from the scratchpad copy, `diff` against it empty,
+`git status --porcelain` showing only this task's own paths, and the file
+re-run green:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_measurement_seam_test.dart
+00:00 +0: the rest bake fires: the unflagged arm slices every visible tile
+00:00 +1: debugRestBakeDisabled slices nothing and still covers
+00:00 +2: debugFullViewportQuery grows the fallback walk to the whole viewport
+00:00 +3: All tests passed!
+```

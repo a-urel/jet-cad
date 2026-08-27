@@ -80,10 +80,16 @@ Future<int> _restFromEmptyGeneration(WidgetTester t, TiledHarness h) async {
 
 /// What one live-fallback frame did, read off the shipped frame path.
 class _FallbackArm {
-  const _FallbackArm(this.strip, this.triangles, this.liveDraws);
+  const _FallbackArm(this.strip, this.clip, this.triangles, this.liveDraws);
 
   /// `TileCache.debugLastStrip`: the rectangle the fallback actually walked.
   final Rect? strip;
+
+  /// `TileCache.debugLastClip`: the rectangle the fallback's drawing was
+  /// clipped to. Under [debugFullViewportQuery] this must stay [strip]'s
+  /// narrow twin, `uncovered` -- that is what makes the flag Plan 3h's M4 and
+  /// not its M5.
+  final Rect? clip;
 
   /// `VerticesDrawSink.frameTriangleCount` for that frame — the quantity
   /// criterion 8's ratio is built on, and the one `kTriangleBudgetRatio`
@@ -92,8 +98,8 @@ class _FallbackArm {
   final int liveDraws;
 
   @override
-  String toString() => '_FallbackArm(strip: $strip, triangles: $triangles, '
-      'liveDraws: $liveDraws)';
+  String toString() => '_FallbackArm(strip: $strip, clip: $clip, '
+      'triangles: $triangles, liveDraws: $liveDraws)';
 }
 
 /// One partly-baked frame with an entering band the fallback owes.
@@ -130,7 +136,7 @@ _FallbackArm _fallbackArm({required bool fullViewportQuery}) {
       rig.cache.resetCounters();
       rig.vertices.resetCounters();
       rig.paintOnce();
-      return _FallbackArm(rig.cache.debugLastStrip,
+      return _FallbackArm(rig.cache.debugLastStrip, rig.cache.debugLastClip,
           rig.vertices.frameTriangleCount, rig.cache.liveDrawCount);
     } finally {
       rig.dispose();
@@ -141,7 +147,8 @@ _FallbackArm _fallbackArm({required bool fullViewportQuery}) {
 }
 
 void main() {
-  testWidgets('the rest bake fires, and debugRestBakeDisabled suppresses it',
+  testWidgets(
+      'the rest bake fires: the unflagged arm slices every visible tile',
       (t) async {
     // Arm 1: the flag off, which is every shipped frame. This half is the
     // anti-degenerate clause for arm 2 — without it, "no slices" would be
@@ -211,6 +218,20 @@ void main() {
     expect(m4.strip, equals(Offset.zero & kTileViewport),
         reason: 'with the flag set the query is the full viewport -- that is '
             'what Plan 3h\'s M4 is: $m4');
+
+    // **The clip is what separates this M4 from Plan 3h's M5.** M5 reaches
+    // the same end state from the other direction -- it grows the query and
+    // leaves the clip untouched -- so a flag that widened the clip along with
+    // the strip would publish an "M4" arm that is neither mutant. The clip
+    // must stay the same narrow `uncovered` rectangle whether the flag is set
+    // or not, and it must differ from the M4 arm's own (widened) strip.
+    expect(m4.clip, isNotNull, reason: 'm4=$m4');
+    expect(m4.clip, equals(narrow.clip),
+        reason: 'the clip must not move when the flag is set -- only the '
+            'query does: narrow=$narrow m4=$m4');
+    expect(m4.clip, isNot(equals(m4.strip)),
+        reason: 'a clip that widened along with the strip would be neither '
+            'Plan 3h\'s M4 nor its M5: m4=$m4');
 
     // And the quantity criterion 8 is actually a ratio of. The strip
     // assertions above see the rectangle; this sees the cost, which is the

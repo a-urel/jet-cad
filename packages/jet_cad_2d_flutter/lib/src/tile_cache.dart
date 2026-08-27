@@ -829,13 +829,34 @@ class TileCache {
   /// column described the reimplementation and not the code that ships. A
   /// sweep that derived this rectangle from [TileGrid] would repeat that.
   ///
-  /// **A getter, not a mutable field.** `TileCache` already carries two
-  /// mutable test-only fields and the standing bar is that a third triggers
-  /// revisiting the design; `tilesHolding` is the precedent for reading state
-  /// out without adding a way to write it.
+  /// **A getter, not a mutable field.** `TileCache` now carries four mutable
+  /// test-only fields (`debugOnSliceForTest`, `debugRestBakeDisabled`,
+  /// `debugFullViewportQuery`, `bakeBudgetDevicePixels`) -- the bar that a
+  /// third would trigger revisiting the design has already been crossed and
+  /// answered. The revisit is Ruling 14 in Plan 3i's progress ledger: Tasks
+  /// 12 and 13 each pin a measurement whose two arms are meant to interleave
+  /// inside one session, and interleaving requires switching behaviour at
+  /// runtime -- two binaries cannot interleave. `tilesHolding` remains the
+  /// precedent for reading state out without adding a way to write it.
   Rect? get debugLastStrip => _lastStrip;
 
   Rect? _lastStrip;
+
+  /// The rectangle the fallback clipped its drawing to on the most recent
+  /// frame, or `null` if no fallback ran. Test-only, and **read-only**, for
+  /// [debugLastStrip]'s own reasons — read from the shipped `paintFrame`
+  /// rather than recomputed by a test.
+  ///
+  /// **Distinct from [debugLastStrip] deliberately.** [debugFullViewportQuery]
+  /// widens the strip the fallback *walks* while `canvas.clipRect(uncovered,
+  /// ...)` above it stays narrow -- that is what makes the flag Plan 3h's M4
+  /// and not its M5, and nothing before this getter existed could see the
+  /// clip independently of the strip. A change that widened the clip under
+  /// the flag would keep the strip assertion green while publishing an "M4"
+  /// arm that is neither 3h's M4 nor its M5.
+  Rect? get debugLastClip => _lastClip;
+
+  Rect? _lastClip;
 
   /// **Hands the live fallback's query the full viewport instead of the
   /// strip. This field ships a known defect behind a flag, and that is what
@@ -867,6 +888,16 @@ class TileCache {
   /// is inert on, so the arm ordering and not the mutation moved the numbers.
   /// Removing that bias is Plan 3i's Task 13, and it needs a runtime switch or
   /// it needs two binaries again.
+  ///
+  /// **Not byte-identical to Plan 3h's M4, though everything measured agrees.**
+  /// 3h's M4 kept `_lastStrip` narrow and dropped `canvas.translate` outright;
+  /// this flag instead routes the full viewport *through* `_lastStrip` and
+  /// leaves `canvas.translate(strip.left, strip.top)` in place, evaluating to
+  /// `translate(0, 0)`. That is numerically inert (`q.e - 0.0` is exact) and
+  /// every measured quantity -- walk extent, triangle count, pixels -- is
+  /// equivalent, but it means a [debugLastStrip] reading taken from this
+  /// flag's M4 arm cannot be cross-read against Plan 3h's log, which recorded
+  /// a narrow `_lastStrip` on its own M4 arm.
   ///
   /// Defaults to `false`. No non-debug caller sets it: a frame that reaches
   /// the fallback with this standing is doing measurably more work than it has
@@ -934,6 +965,7 @@ class TileCache {
     // ordinal before this frame blits it. `_makeRoomForOneTile` rests on that.
     _frameSerial++;
     _lastStrip = null;
+    _lastClip = null;
 
     final quantised = quantiseCamera(camera, devicePixelRatio);
     // The viewport reaches `_gridFor` because retiring a generation is now a
@@ -1138,6 +1170,7 @@ class TileCache {
     // stay correct, so the sweep still reads zero, and the cost this whole
     // change exists to remove comes back silently.
     canvas.clipRect(uncovered, doAntiAlias: false);
+    _lastClip = uncovered;
     // **Walk the union, not the viewport.** The clip above only discards
     // drawing; the walk below is what costs. `DraftPainter.paint` derives its
     // index query from `camera.visibleWorld(viewport)`, so handing it the full
