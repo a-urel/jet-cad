@@ -1,7 +1,7 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-26
-**Verified against:** `main` at `967fa3b` — the tile-settle fix, landed after
+**Verified against:** `main` at `1aafb39` — the tile-settle fix, landed after
 Plan 3h from looking at the running window rather than from any plan. Plan 3h
 itself ends at `122b6e3`. **Plan 3h ran directly on `main`,
 `f642202..122b6e3`, eight tasks (the eighth split into 8a and 8b), nothing in
@@ -427,9 +427,96 @@ two fixed (`fc05076`, `967fa3b`), two measured and deliberately left for 3i.
 Read them before writing 3i's spec:
 [After Plan 3h](#after-plan-3h--what-the-window-showed-2026-08-26).
 
-**Next: Plan 3i, then Plan 3j.** Plan 3h did not choose an order and each is
-independent of the other; **the human chose 3i on 2026-08-26**, after the
-zoom measurements below landed in its scope.
+**Plan 3i is IN FLIGHT on `main`, 11 of 14 tasks done, pushed.** Tasks 12 and
+13 are blocked on the machine and not on the code — see
+[Plan 3i in flight](#plan-3i--in-flight-11-of-14) immediately below. **Read
+that before touching the tile cache**: the spec declined level-of-detail
+geometry, so the paragraph after it, written before 3i's spec existed, no
+longer describes what 3i is doing.
+
+**Then Plan 3j.** Plan 3h did not choose an order and each is independent of
+the other; **the human chose 3i on 2026-08-26**, after the zoom measurements
+below landed in its scope.
+
+---
+
+## Plan 3i — in flight, 11 of 14
+
+**Spec:** [2026-08-26-jet-cad-2d-plan-3i-zoom-frame-design.md](docs/superpowers/specs/2026-08-26-jet-cad-2d-plan-3i-zoom-frame-design.md),
+written 2026-08-26 and revised twice against five external reviews.
+**Plan:** [2026-08-26-jet-cad-2d-plan-3i-zoom-frame.md](docs/superpowers/plans/2026-08-26-jet-cad-2d-plan-3i-zoom-frame.md).
+**Range:** `468e310..1aafb39`, fifteen commits, directly on `main`, no
+worktree, on the human's standing consent — the arrangement of 3e through 3h.
+Executed with subagent-driven development: a fresh implementer per task, an
+independent reviewer after each, and the controller running the full gate
+itself after every task.
+
+**G3 is NOT this plan's subject, and the spec says why.** The human chose a
+map-application target — *the gesture stays smooth even if what it shows is
+stale, and the drawing snaps to full resolution when the gesture ends* — and
+under that target a correct frame during a pinch is never drawn, so the
+32.06 ms it costs stops blocking. **G3 becomes necessary the day the target
+changes to correct geometry while the fingers are still moving.**
+
+**What landed.** A tiled frame now has two regimes. A **moving** frame — one
+whose quantised camera changed, or that has not yet seen two unchanged frames
+— draws the carry-over composite and nothing else: no bake, and no live walk.
+A **resting** frame walks the visible region **one tile row at a time** into a
+band image and cuts tiles out of it, one walk per band instead of one per
+tile. Bands rather than one image because the union of visible keys has the
+tile set's own area — `visibleKeys` yields a full rectangle — so a single
+source plus the tiles sliced from it peaks at exactly `kTileCacheBytes` with
+no headroom.
+
+**Blocked, and it is the machine.** At `1aafb39` the laptop reads
+`lowpowermode 1` and "Now drawing from 'Battery Power'". Either alone
+invalidates a frame-timing measurement and Plan 3h's record documents losing
+time to each separately. **Tasks 12 and 13 resume when `pmset -g | grep
+lowpowermode` reads 0 and `pmset -g ps` says AC Power.** Nothing about the
+code is waiting.
+
+**Suites at `1aafb39`,** each run by the controller rather than read from a
+report: **797** engine, **400** widget with 1 pre-existing skip, **20**
+harness. Analyze and format clean in all three.
+
+**Thirteen mutants fired so far.** M1, M2, M3, M4, M4b, M5, M6, M6b, M7, M9,
+M9b and M10 killed. **M8 survived as declared** — with integral source
+rectangles a bilinear and a nearest sample read the same texels, and it was
+written down as a survivor before it was fired, the way Plan 3h recorded its
+own M6. **M11 turned out to be unreachable by pixels**: the rebase origin
+cancels in `float64` before anything reaches `float32`, about 1e-13 device
+pixels, so its gate of record is Task 6's direct origin-argument test rather
+than a differential arm.
+
+**Two defects were found in this plan's own instruments, both of the
+vacuous-gate class this repository exists to catch, and both found by firing a
+mutant and noticing it did not die.**
+
+1. **`captureLive` was returning the tiled image byte for byte.**
+   `shouldRepaint` is unconditionally false, so the "live" capture was the
+   tiled one. Six mutants read zero differing pixels until a distinct
+   `ValueKey` forced a separate element. A differential instrument was
+   comparing a frame with itself.
+2. **`pumpTiled`'s canvas was never the viewport it claimed.** A `SizedBox`
+   under `pumpWidget`'s tight constraints is inert, so every test built on that
+   helper since Task 2 ran at 800x600 logical rather than 400x300 — 475 tiles,
+   not 130 — and the fixture left 38% of each frame blank. No assertion value
+   moved when it was fixed; several comments became true.
+
+**Two findings for the record that are not this plan's to fix.**
+
+- **`DraftPainter` queries the index unslacked** (`draft_painter.dart:338`
+  sets `_worldRect` from `camera.visibleWorld(viewport)`) while a bake pads by
+  `kTileSlack`, so an untiled reference drops strokes centred just outside a
+  viewport edge — **measured 1,767 stray pixels**. Fixing it is a production
+  change that could move goldens, so Task 9 left it and routed its arms' ink
+  away from the blind window instead, saying so at the assertion.
+- **`bakeCount` now mixes units**: once per band on the rest path, once per
+  tile on the budgeted path. A reader comparing against Plan 3g and 3h
+  transcripts, where it meant tiles, will be misled unless the phase's own
+  label is read.
+
+---
 
 1. **Plan 3i — zoom, G3, and level-of-detail geometry**, assigned by Plan 3g
    and confirmed here (2026-08-25's memory measurement showed zoom's cost is
