@@ -26,6 +26,20 @@
 > figures (130 tiles, ~10 bands) or wonder why they disagree with every later
 > entry.
 
+> **Note, added by fix wave A: M1, M4 and M4b predate that fix too, and the
+> note above named only three entries.** A reader could not tell whether the
+> other three survived the refactor, so each is re-derived here against the
+> fixed canvas rather than re-run.
+>
+> * **M1** prints `512` for "a moving frame must bake nothing". That is
+>   `budgetedTilesPerFrame` -- `kBakeBudgetDevicePixels / (64 * 64) = 64`
+>   tiles a frame over the test's 8 zoom frames -- and it is budget-limited on
+>   either canvas, because 475 tiles and 130 tiles both exceed 64. **Re-derives
+>   unchanged: 512.**
+> * **M4** prints `512` and `768` for the same reason, at 8 and 12 budgeted
+>   frames respectively. **Both re-derive unchanged.**
+> * **M4b** does not: see the correction inside its own entry.
+
 ## M1
 
 **Task:** Task 2, "A moving frame draws the composite and nothing else."
@@ -180,6 +194,25 @@ Expected: <2>
 With kRestGateFrames = 1, the wheel test bakes on every other notch (384 tiles
 instead of 0), confirming the threshold of 2 is necessary to meet the spec.
 
+> **Correction, fix wave A: the kill number above is stale in value *and* in
+> unit, and the mutation still kills.** M4b was fired at Task 3, before Task 8
+> introduced `_restBake`, so `_bakes` then counted *tiles* and the transcript's
+> `384` is 6 notches x the 64-tile budget. At HEAD the frame after each notch
+> is a rest frame over a generation the notch just retired, so every band is
+> missing and `_bakes` increments **once per band**: 6 notches x 10 bands =
+> **60**, and the unit is bands, not tiles. The prose "384 tiles" should be
+> read as "60 bands". Nothing else about the entry changes -- the gate is
+> alive, the mutation is still red, and no new transcript is fabricated for
+> it. (Fix wave A's own per-band probe does not move this number either: after
+> a retire the generation is empty, so every band is missing and every band
+> bakes.)
+>
+> The second failing test in the transcript, `the gate needs two unchanged
+> frames, not one`, was renamed by fix wave A to **`the gate is two unchanged
+> frames, and the constant says so`** -- the finding was that its name claimed
+> a behavioural gate while its body asserts the constant's own value. Same
+> assertion, same kill.
+
 ---
 
 ## M2 — the slice loop emits only the first tile of each band
@@ -327,6 +360,43 @@ The test description was:
 Failing tests:
   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart: the ceiling holds at every point inside the rest frame
 ```
+
+### Added gate, fix wave A: re-fired against `the ceiling binds inside the rest frame, and eviction holds it`
+
+**Not a rewrite of the history above.** The whole-branch review found that the
+arm this mutant died on ran at 43x of headroom in its ceiling clause -- 130
+tiles plus one band, 2,342,912 bytes, against a `kTileCacheBytes` of
+100,663,296 -- so no mutation to the rest bake could move `liveBytes` far
+enough to trip that clause, and the entry above records the kill landing on
+`debugImagesAlive`, not on the ceiling. Fix wave A added a second arm at a cap
+the frame reaches on every slice, and re-fired this mutation against it.
+
+**Result:** red there too, and again on `debugImagesAlive` -- four leaked band
+images:
+
+```
+The following TestFailure was thrown running a test:
+Expected: <172>
+  Actual: <176>
+no band image outlives its band here either
+
+  [stack trace elided]
+The test description was:
+  the ceiling binds inside the rest frame, and eviction holds it
+
+00:00 +1 -2: Some tests failed.
+Failing tests:
+  test/invariants/tile_bytes_test.dart: the ceiling binds inside the rest frame, and eviction holds it
+  test/invariants/tile_bytes_test.dart: the ceiling holds at every point inside the rest frame
+```
+
+**And a finding worth recording rather than a gate: `liveBytes` is structurally
+blind to this mutant, at any cap.** It sums `_tiles`, `_carryOver` and the
+image currently in `_band` -- and `_band` is reassigned at the top of every
+band iteration, so an image the loop failed to dispose stops being counted the
+moment the next band starts. No ceiling, however tight, can catch M6 through
+`liveBytes`; `debugImagesAlive` is its gate and always was. The new arm's own
+mutant is **M20**, which trips the ceiling clause directly.
 
 ---
 
@@ -616,10 +686,20 @@ that is arm 2.
 whole package suite with `CI=true flutter test`, then restored from the copy.
 **Never `git checkout`.**
 
-**Result:** red on arm 2 (3,780 differing pixels -- 14 device rows across 270
-columns of the bottom edge) and on arm 3 (8,692). Arm 1, arm 5 and the tile-edge
-sweep are all green under it, which is the measurement Task 5's `>=` bound
-predicted.
+**Result:** red on two of the differential arms, **named here rather than
+numbered** -- 8,692 differing pixels on *"and stays identical after a pan
+smaller than one tile"*, and 3,780 (14 device rows across 270 columns of the
+bottom edge) on *"and when a pan lands between the scale change and the bake"*.
+The settled-generation arm, the rebase-boundary arm and the tile-edge sweep are
+all green under it, which is the measurement Task 5's `>=` bound predicted.
+
+> **Correction, fix wave A.** This paragraph read "red on arm 2 (3,780 ...)
+> and on arm 3 (8,692)", which is the two numbers swapped against this entry's
+> own transcript below: 8,692 is printed under *"and stays identical after a
+> pan smaller than one tile"* and 3,780 under *"and when a pan lands between
+> the scale change and the bake"*. The kill stands; the attribution did not.
+> Rewritten to name the arms, because the file's arms have been counted two
+> different ways.
 
 **Verbatim output:**
 
@@ -689,9 +769,19 @@ boundary, alternating sides, is what makes the loss reachable. Recorded on
 whole package suite with `CI=true flutter test`, then restored from the copy.
 **Never `git checkout`.**
 
-**Result:** red on all five differential arms and on both of Task 6's band-query
-unit tests. 30,160 differing pixels on arms 1 and 5, 8,196 and 9,170 on arms 2
-and 3, 3,475 on the tile-edge sweep.
+**Result:** red on all five differential arms and on both of Task 6's
+band-query unit tests. By name, from the transcript below: **30,160** differing
+pixels on *"a settled generation is identical to a live frame"* and again on
+*"and stays identical after a pan smaller than one tile"*; **3,475** on *"and
+at a camera on a power-of-two rebase boundary"*; **9,170** on *"and when a pan
+lands between the scale change and the bake"*; and **8,196** on the tile-edge
+sweep, *"tile boundaries carry no difference of their own"*.
+
+> **Correction, fix wave A.** This paragraph read "30,160 differing pixels on
+> arms 1 and 5, 8,196 and 9,170 on arms 2 and 3, 3,475 on the tile-edge
+> sweep". The transcript prints 3,475 against the rebase-boundary arm and
+> 8,196 against the tile-edge sweep -- the reverse. The kills stand; the
+> attribution did not, and the transcript is the record.
 
 **Verbatim output:**
 
@@ -1777,4 +1867,348 @@ and the same file re-run green:
 00:00 +7: the gesture window excludes the warm-up frames and keeps its tail
 00:00 +8: a short sample is counted, and length plus missing is the script
 00:00 +9: All tests passed!
+```
+
+---
+
+> **Fix wave A opens here.** Everything below was fired against the
+> whole-branch review's findings, on the fixed 400x300-logical canvas (130
+> tiles, 10 bands). `M20` is **not** in this run: it belongs to the parallel
+> wave working in `apps/dev_harness_2d/` and is recorded above. Numbering in
+> this file is shared between the two waves, which is why the ceiling mutant
+> below is `M21` and not `M20`.
+
+## M17 — a moving frame returns unconditionally, so a pan draws only the composite
+
+**Fix wave A, MAJOR 1.** The defect as shipped: `resting` was computed from
+`_restGateSteps` alone and never asked what spec D1 defines *moving* by --
+whether the scale changed. `CameraController.panBy` copies `a, b, c, d`
+bit-identically, so `TileGrid.matchesScale` holds, `_gridFor` returns the
+standing grid without retiring, and a composite minted by the preceding zoom
+survives the pan; with the camera changing every frame the rest gate never
+armed, so every pan frame blitted that composite at the panned position and
+returned with `_tiles` empty. This mutation restores that behaviour.
+
+**Mutation:** In `packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`'s
+`paintFrame`, deleted the pan disjunct from `resting`:
+
+```diff
+     final resting = previous == null ||
+         _carryOver == null ||
+-        (!scaleChanged && _restGateSteps == 0) ||
+         _restGateSteps >= kRestGateFrames;
+```
+
+**Procedure:** copied `tile_cache.dart` aside to the scratchpad, applied the
+edit, ran `CI=true flutter test test/tile_regime_test.dart`, then restored the
+working file from the copy and `diff`ed it clean. **Never `git checkout`.**
+
+**Result:** red — the pan frames bake nothing, so `bakeCount` reads 0. (The
+ink assertion on the revealed strip is behind it in the same test and never
+runs; the counter clause fails first.)
+
+**Verbatim output:**
+
+```
+00:00 +8: a pan after a zoom fills the region the composite slides off
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: a value greater than <0>
+  Actual: <0>
+   Which: is not a value greater than <0>
+a pan is not a moving frame (spec D1 defines moving by the scale) and D8 leaves the pan path baking
+at its edge
+
+  [stack trace elided]
+This was caught by the test expectation on the following line:
+  file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart line 231
+The test description was:
+  a pan after a zoom fills the region the composite slides off
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:00 +8 -1: a pan after a zoom fills the region the composite slides off [E]
+  Test failed. See exception logs above.
+00:00 +8 -1: an edit inside one band rebakes that band alone
+00:00 +9 -1: a skipped band keeps its tiles out of the ceiling's reach
+00:00 +10 -1: the gate is two unchanged frames, and the constant says so
+00:00 +11 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart: a pan after a zoom fills the region the composite slides off
+```
+
+**Restore, verified.** `cp` from the scratchpad copy, `diff` against it empty,
+the same file re-run green:
+
+```
+00:00 +10: a skipped band keeps its tiles out of the ceiling's reach
+00:00 +11: the gate is two unchanged frames, and the constant says so
+00:00 +12: All tests passed!
+```
+
+---
+
+## M18 — the rest bake's probe is frame-global, so one missing tile walks every band
+
+**Fix wave A, MAJOR 2.** `_restBake` computed a single `missing` boolean over
+all visible keys and then called `_bakeBand` for every band; the per-key
+`containsKey ... continue` inside the loop skips only the *slice*, so a band
+whose keys were all held still paid a painter walk, a `_recordOwners` over its
+whole visit list, a `toImageSync` and a `_bakes++` before throwing the image
+away.
+
+**Mutation:** deleted the per-band probe from the band loop, leaving the
+frame-global one in place:
+
+```diff
+     for (final band in bands) {
+-      var bandMissing = false;
+-      for (final key in band.keys) {
+-        if (!_tiles.containsKey(key)) {
+-          bandMissing = true;
+-          break;
+-        }
+-      }
+-      if (!bandMissing) {
+-        for (final key in band.keys) {
+-          _lastUsedFrame[key] = _frameSerial;
+-        }
+-        continue;
+-      }
+-
+       if (!_makeRoomForBytes(bandBytes + _tileBytes)) return;
+```
+
+**Procedure:** as M17, against `test/tile_regime_test.dart`.
+
+**Result:** red — the edit condemns three bands (direction one condemns every
+tile whose band record names the handle, and `kTileSlack` is one tile row at
+this tile size, so the leaf is visited by the walks for rows 3, 4 and 5), and
+the mutant bakes all ten.
+
+**Verbatim output:**
+
+```
+00:00 +9: an edit inside one band rebakes that band alone
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: <3>
+  Actual: <10>
+only the bands the edit condemned owe a walk; the other 7 hold every key they need, and rebaking
+them replaces good images with identical ones -- a whole-viewport walk for three rows, on every
+frame of a drag
+
+  [stack trace elided]
+The test description was:
+  an edit inside one band rebakes that band alone
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:00 +9 -1: an edit inside one band rebakes that band alone [E]
+00:00 +9 -1: a skipped band keeps its tiles out of the ceiling's reach
+00:00 +10 -1: the gate is two unchanged frames, and the constant says so
+00:00 +11 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart: an edit inside one band rebakes that band alone
+```
+
+**Restore, verified** — same `cp`, empty `diff`, and `+12: All tests passed!`
+on the same file.
+
+---
+
+## M19a / M19b — `a` and `d` in `sameQuantisedCamera` are each individually deletable
+
+**Fix wave A.** M12's defect one field over, recorded as a Task 1 deferred
+minor ("`a` and `d` are correlated in every fixture (`d == -a`), so deleting
+either check alone survives") and never closed. `tile_regime_test.dart`'s
+`at()` helper builds `Transform2(scale, 0, 0, -scale, e, f)`, so every fixture
+in the file tied `d` to `-a`, and the only other caller compares two `zoomAt`
+results where both terms move together. Closed with an anisotropic fixture and
+one arm per term.
+
+**Mutations:**
+
+```diff
+   return x.a == y.a &&        <- M19a deletes this line
+       x.b == y.b &&
+       x.c == y.c &&
+       x.d == y.d &&           <- M19b deletes this line
+       x.e == y.e &&
+       x.f == y.f;
+```
+
+**Procedure:** as M17, against `test/tile_regime_test.dart`, once per arm.
+
+**Result:** both red, and **only** on the new test -- `a scale change compares
+different` stays green under both, which is the degeneracy stated as a
+measurement.
+
+**Verbatim output, M19a:**
+
+```
+00:00 +3: the two scale terms are compared independently
+00:00 +3 -1: the two scale terms are compared independently [E]
+  Expected: false
+    Actual: <true>
+  x scale alone, with y held: a generation anchored at one x scale cannot blit at another
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/tile_regime_test.dart 49:5                     main.<fn>
+  
+00:00 +3 -1: the skew terms are compared too
+00:00 +11 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart: the two scale terms are compared independently
+```
+
+**Verbatim output, M19b:**
+
+```
+00:00 +3: the two scale terms are compared independently
+00:00 +3 -1: the two scale terms are compared independently [E]
+  Expected: false
+    Actual: <true>
+  y scale alone, with x held
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/tile_regime_test.dart 53:5                     main.<fn>
+  
+00:00 +11 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart: the two scale terms are compared independently
+```
+
+**Restore, verified** after each: empty `diff`, `+12: All tests passed!`.
+
+---
+
+## M19c / M19d / M19e — the same degeneracy in `TileGrid.matchesScale`
+
+**Fix wave A.** `matchesScale` compares `a`, `b`, `c` and `d`, and
+`awkwardCamera` -- the fixture every arm of `tile_grid_test.dart` uses -- has
+`d == -a` and `b == c == 0`. Its `matchesScale is exact, not tolerant` arm
+nudges `a` alone, so deleting the `b`, `c` or `d` comparison killed nothing.
+The `sameQuantisedCamera` fixture does **not** reach `matchesScale` -- they are
+different functions with different callers -- so this needed its own
+anisotropic, skewed fixture, added as `every scale term is compared, one at a
+time`.
+
+**Mutations:** in `TileGrid.matchesScale`, one term deleted per arm --
+**M19c** drops `a.d == b.d`, **M19d** drops `a.b == b.b`, **M19e** drops
+`a.c == b.c`.
+
+**Procedure:** as M17, against `test/tile_grid_test.dart`, once per arm.
+
+**Result:** all three red, each on its own clause of the new arm, with
+`matchesScale is exact, not tolerant` green throughout -- which is the
+statement that the old fixture could not tell these fields from constants.
+
+**Verbatim output, M19c:**
+
+```
+00:00 +7: TileGrid matchesScale is exact, not tolerant
+00:00 +8: TileGrid every scale term is compared, one at a time
+00:00 +8 -1: TileGrid every scale term is compared, one at a time [E]
+  Expected: false
+    Actual: <true>
+  d: the y scale, which every tiled fixture ties to -a
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/tile_grid_test.dart 193:7                      main.<fn>.<fn>
+  
+00:00 +8 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_grid_test.dart: TileGrid every scale term is compared, one at a time
+```
+
+M19d and M19e print the same failure against the `b:` and `c:` clauses of the
+same arm, verbatim:
+
+```
+  Expected: false
+    Actual: <true>
+  b: a generation baked without this shear cannot blit with it
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/tile_grid_test.dart 182:7                      main.<fn>.<fn>
+  
+00:00 +8 -1: Some tests failed.
+```
+
+```
+  Expected: false
+    Actual: <true>
+  c: the other shear term
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/tile_grid_test.dart 188:7                      main.<fn>.<fn>
+  
+00:00 +8 -1: Some tests failed.
+```
+
+**Restore, verified** after each: empty `diff`, `+9: All tests passed!`.
+
+---
+
+## M21 — the slice loop writes a tile without asking the ceiling
+
+**Fix wave A.** The gate this fires is the new `the ceiling binds inside the
+rest frame, and eviction holds it`, added because criterion 7's original
+headline clause could not fail: it ran at `kTileCacheBytes` (100,663,296
+bytes) against a fixture whose whole peak was 2,342,912 -- 43x of headroom.
+The new arm prices its cap off the tiles the frame is actually holding, so the
+frame runs *at* its ceiling from the first slice to the last: measured, 12
+slices, 12 evictions, and a peak of exactly `cap`.
+
+**Mutation:** in `_restBake`'s slice loop:
+
+```diff
+         debugOnSliceForTest?.call();
+-        if (!_makeRoomForOneTile()) break;
+         final tile = _sliceTile(image, band, key, grid);
+```
+
+**Procedure:** as M17, against `test/invariants/tile_bytes_test.dart`.
+
+**Result:** red, one tile over the cap, thrown from inside `paint()` -- which
+is the point of observing the ceiling from `debugOnSliceForTest` rather than
+after the frame.
+
+**Verbatim output:**
+
+```
+00:00 +2: the ceiling binds inside the rest frame, and eviction holds it
+══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞═════════════════════════════════════════════════════════
+The following TestFailure was thrown during paint():
+Expected: a value less than or equal to <3031040>
+  Actual: <3047424>
+   Which: is not a value less than or equal to <3031040>
+criterion 7, at a cap that can be reached: the band image is resident here and the meter counts it
+
+The relevant error-causing widget was:
+  CustomPaint
+  CustomPaint:file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart:359:16
+
+  [stack trace elided]
+00:00 +2 -1: the ceiling binds inside the rest frame, and eviction holds it [E]
+  Test failed. See exception logs above.
+00:00 +2 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart: the ceiling binds inside the rest frame, and eviction holds it
+```
+
+**Restore, verified.** Empty `diff`, and:
+
+```
+00:00 +1: the ceiling holds at every point inside the rest frame
+00:00 +2: the ceiling binds inside the rest frame, and eviction holds it
+00:00 +3: All tests passed!
 ```
