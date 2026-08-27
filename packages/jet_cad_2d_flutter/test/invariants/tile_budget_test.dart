@@ -584,20 +584,31 @@ void main() {
             'silent overrun this arm exists to refuse -- and the rest bake '
             'refuses it too, band and all, rather than banding into a '
             'ceiling that cannot keep the slices');
-    // **Two walks, one per frame that owed one, and the pan frame is the one
-    // that changed.** Before the D8 fix a same-scale pan with a composite
-    // standing took `paintFrame`'s moving-frame early return, so the three
-    // frames below were: pan -- composite only, no walk; the in-between
-    // frame; then the rest frame, whose rest bake the ceiling declines and
-    // whose tile loop the ceiling admits nothing to, leaving one live walk.
-    // The pan is a pan and not a zoom, so it is no longer a moving frame: it
-    // falls through and pays its own walk over a viewport the shrunken
-    // ceiling cannot tile. That is the whole point of the fix -- the region
-    // the composite slid off is drawn rather than left as background -- and
-    // the number moving from 1 to 2 is what records it.
-    expect(squeezed.cache.liveDrawCount, 2,
+    // **Three walks, one per frame that owed one, and both of the first two
+    // are fixes this plan landed.** The three frames below are: the pan; the
+    // frame the pan stops on -- matched once, not yet twice; then the rest
+    // frame, whose rest bake the ceiling declines and whose tile loop the
+    // ceiling admits nothing to.
+    //
+    // Before the D8 fix only the last of the three walked: a same-scale pan
+    // with a composite standing took `paintFrame`'s moving-frame early
+    // return, and so did the frame after it. The pan is a pan and not a zoom,
+    // so it is no longer a moving frame -- 1 became 2. The frame the pan
+    // stops on repeats that camera, which put `_restGateSteps` at 1: too late
+    // for the pan disjunct, too early for the rest gate, so it took the early
+    // return alone and the strip the composite had slid off was background
+    // for exactly that one frame, correct either side of it. `_lastChangeWasPan`
+    // is what carries the pan through it -- 2 became 3.
+    //
+    // **The count is one walk per frame and no more.** Each of these frames
+    // draws a viewport the shrunken ceiling cannot tile at all, so every one
+    // of them owes exactly one walk; a number above three here would mean a
+    // frame walking twice, and a number below it a frame showing background
+    // or stale pixels.
+    expect(squeezed.cache.liveDrawCount, 3,
         reason: 'and the live walk is what stops the frame going blank '
             'instead -- once on the pan frame, which no longer hides behind '
-            'the composite, and once on the rest frame that follows it');
+            'the composite, once on the frame the pan stops on, and once on '
+            'the rest frame that follows it');
   });
 }

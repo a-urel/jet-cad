@@ -12,6 +12,20 @@ void main() {
   ViewportTransform at(double scale, double e, double f) => ViewportTransform(
       worldToScreenMatrix: Transform2(scale, 0, 0, -scale, e, f));
 
+  /// Enough more frames at the camera [rig] just painted for the rest gate to
+  /// arm and a resting frame to actually bake.
+  ///
+  /// `tile_budget_test.dart` carries the same three lines for the same reason
+  /// and neither is imported by the other; both are written from
+  /// [kRestGateFrames] rather than from a literal, so the gate's threshold
+  /// stays the single bound. `tile_harness.dart`'s `settle` is the widget
+  /// harness's and pumps a tree; this one paints a rig.
+  void settleRig(TileRig rig) {
+    for (var i = 0; i < kRestGateFrames; i++) {
+      rig.paintOnce();
+    }
+  }
+
   test('the same camera compares same', () {
     expect(sameQuantisedCamera(at(1.4, 10, 20), at(1.4, 10, 20)), isTrue);
   });
@@ -255,6 +269,167 @@ void main() {
             '*out* and nothing else');
   });
 
+  // **The frame the pan stops on, which is a frame class of its own.** Every
+  // pan frame above changes the camera, so `_restGateSteps` reads 0 and the
+  // frame falls through to bake-and-live-walk. Then the user stops: the next
+  // frame repeats the same quantised camera, the count reads 1 -- too late for
+  // that disjunct, too early for the rest gate -- and with the composite still
+  // standing the frame returned after the composite blit alone. The strip the
+  // composite had slid off was background for exactly one frame and correct
+  // again on the next: correct -> blank -> correct, on every pan tail. The
+  // frame *before* it only became correct with the D8 fix above, which is what
+  // makes the flash stand out rather than what introduced it.
+  //
+  // Nothing but the remembered bit separates this frame from a wheel's
+  // in-between frame, which owes the opposite answer: the zoom-out test below
+  // holds that end and the wheel test above holds D1's.
+  //
+  // **A rig and not the widget harness, because of what the frame is.** An
+  // uncovered cache asks `DraftCanvas` for another frame from a post-frame
+  // callback, so the repaint boundary is dirty the moment this frame ends and
+  // `captureTiled`'s `toImage` asserts rather than capturing. The same fact is
+  // what makes this frame reach the screen at all, so it cannot be arranged
+  // away -- see [captureTiledFrame].
+  test(
+      'the frame the pan stops on still fills what the composite '
+      'does not cover', () async {
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    // **Four tiles a frame, and it is load-bearing twice over.** The rest bake
+    // ignores the budget, so the settle below still covers in one frame; the
+    // *pan* frames are budgeted, and a generation that caught up during the
+    // pan would both cover the viewport -- ending the settle, so the tail
+    // frame never happens -- and drop the composite the tail frame blits.
+    final rig = TileRig(
+        tileDevicePixels: 64,
+        tilesBakedPerFrame: 4,
+        document: fillingGrid(measurer));
+    addTearDown(rig.dispose);
+
+    rig.paintOnce();
+    settleRig(rig);
+    expect(rig.cache.viewportCovered, isTrue,
+        reason: 'setup: a generation that covers is what a zoom can retire '
+            'into a composite');
+
+    // A zoom **out**, so the composite cannot cover: it shrinks about the
+    // viewport centre to [50, 350] x [37.5, 262.5] logical, and D3 leaves the
+    // ring outside it as background for the length of the gesture. The strip
+    // this test reads is not that ring -- it is inside the composite's own
+    // rows and to the right of where the *pan* carried it, which is D8's
+    // business and not D3's.
+    rig.zoomBy(0.75);
+    rig.paintOnce();
+    expect(rig.cache.hasCarryOver, isTrue,
+        reason: 'setup: the zoom minted the composite the pan then carries');
+    expect(rig.cache.liveTileCount, 0,
+        reason: 'setup: and retired every tile, so anything on screen below '
+            'is the pan frames own');
+
+    for (var i = 0; i < 4; i++) {
+      rig.panBy(-40, 0);
+      rig.paintOnce();
+    }
+    expect(rig.cache.hasCarryOver, isTrue,
+        reason: 'setup: the composite is still standing, which is what makes '
+            'the frame below take the early return at all');
+    expect(rig.cache.viewportCovered, isFalse,
+        reason: 'setup: an uncovered cache is what asks `DraftCanvas` for the '
+            'tail frame -- covered, the flash frame would never be painted');
+    expect(rig.cache.debugRestGateSteps, 0,
+        reason: 'setup: every pan frame changed the camera');
+
+    // The tail frame: one more frame at exactly the camera the last pan left.
+    final tiled = await captureTiledFrame(rig);
+    expect(rig.cache.debugRestGateSteps, 1,
+        reason: 'the frame under test is the one that has matched once and '
+            'not yet twice -- neither a pan frame nor a rest frame');
+
+    // The strip the composite has slid off, taken inside the composite's own
+    // rows so that D3's accepted ring cannot account for it: the composite
+    // reaches x = 190 after four pans of 40 logical pixels, and the fixture
+    // inks out to x = 261 at this camera.
+    const revealed = Rect.fromLTRB(194, 40, 258, 240);
+    final live = await captureLiveFrame(rig);
+    expect(inkInside(live, revealed), greaterThan(200),
+        reason: 'non-vacuity: the fixture must actually draw in the strip, '
+            'or "the tiled frame drew nothing there" is not a defect');
+    expect(inkInside(tiled, revealed), greaterThan(200),
+        reason: 'the one frame between the last pan and the rest bake must '
+            'draw what the pan frames before it drew, or the strip flashes '
+            'background for a frame and comes back');
+  });
+
+  // **Spec D3, at the frame the test above could have broken.** A zoom out
+  // shrinks the composite and leaves a ring, and that ring stays background
+  // until the gesture ends: the alternative is a full-viewport live walk on
+  // every zoom-out frame -- 31.5-41.6 ms at 500,000 entities -- because the
+  // uncovered region bounds to the whole viewport while the incoming
+  // generation is empty.
+  //
+  // The frame after the last notch is the one at risk. It has matched once and
+  // not yet twice, exactly like the pan tail above, and it must still draw
+  // what a moving frame draws. **The pan before the gesture is not
+  // decoration**: it leaves the remembered bit set, so a bit a scale change
+  // fails to clear turns this frame into the full-viewport walk D3 refuses.
+  test(
+      'a zoom out leaves its ring as background, the frame after the '
+      'last notch included', () async {
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final rig = TileRig(
+        tileDevicePixels: 64,
+        tilesBakedPerFrame: 1000,
+        document: fillingGrid(measurer));
+    addTearDown(rig.dispose);
+
+    rig.paintOnce();
+    settleRig(rig);
+    rig.panBy(-24, 0);
+    rig.paintOnce();
+    settleRig(rig);
+    expect(rig.cache.viewportCovered, isTrue,
+        reason: 'setup: the pan settled, and left the last camera change a '
+            'pan rather than a zoom');
+
+    rig.cache.resetCounters();
+    for (var notch = 0; notch < 3; notch++) {
+      rig.zoomBy(0.9);
+      rig.paintOnce();
+      if (notch == 0) {
+        expect(rig.cache.hasCarryOver, isTrue,
+            reason: 'setup: the first notch retires the settled generation '
+                'into the composite the rest of the gesture blits');
+      }
+    }
+    expect(rig.cache.debugRestGateSteps, 0,
+        reason: 'setup: every notch changed the camera');
+
+    // The frame after the last notch.
+    final tiled = await captureTiledFrame(rig);
+    expect(rig.cache.debugRestGateSteps, 1,
+        reason: 'the frame under test has matched once and not yet twice');
+    expect(rig.cache.bakeCount, 0,
+        reason: 'a zoom gesture and the frame after it bake nothing (D1)');
+    expect(rig.cache.liveDrawCount, 0,
+        reason: 'and walk no live geometry: on a zoom-out frame the uncovered '
+            'region bounds to the whole viewport, so a walk here is a '
+            'full-viewport walk -- the frame D3 exists to prevent');
+    expect(rig.cache.carryOverBlitCount, greaterThan(0),
+        reason: 'non-vacuity: those frames did still show something');
+
+    // And the ring itself, in pixels. Three notches of 0.9 put the
+    // composite's right edge at 200 + 0.729 * 200 = 345.8 logical, while the
+    // fixture inks past the viewport's own edge at this camera.
+    const ring = Rect.fromLTRB(348, 30, 398, 270);
+    final live = await captureLiveFrame(rig);
+    expect(inkInside(live, ring), greaterThan(200),
+        reason: 'non-vacuity: there is drawing out there to have left out');
+    expect(inkInside(tiled, ring), 0,
+        reason: 'the ring is background until the gesture ends, and the frame '
+            'after the last notch is still inside the gesture');
+  });
+
   // **Spec D6 and the rest bake's own doc comment, at the granularity the
   // walk happens at.** One missing key anywhere in the viewport used to
   // commit every band to a full painter walk, an owner climb, a
@@ -326,13 +501,37 @@ void main() {
 
   testWidgets('a skipped band keeps its tiles out of the ceiling\'s reach',
       (t) async {
-    // The other half of the skip, and the half that is easy to get wrong.
-    // `_makeRoomForBytes` may evict any tile whose recency is older than this
-    // frame's, so a band skipped *without* touching its keys' recency would
-    // leave them evictable by a later band's own room-making -- and the frame
-    // would blit a hole in a row it had already decided it owned. The rest
-    // bake's up-front pricing rests on exactly that: at band `i` the
-    // un-evictable set is the keys of bands `0..i-1`.
+    // The other half of the skip: a rest bake that skips a band must leave
+    // that band's tiles standing and blittable, and this measures that they
+    // are -- nothing evicted, and the generation exactly as large afterwards
+    // as before.
+    //
+    // **What it does not gate, stated because it reads as though it does.**
+    // The skip branch also stamps every key of a skipped band with the
+    // frame's serial, and that stamp is what the ceiling proof cites -- at
+    // band `i` the set `_makeRoomForBytes` may not evict is the keys of bands
+    // `0..i-1`. Deleting the stamp changes nothing this test, or any other,
+    // can see, and the reason is arithmetic rather than headroom:
+    //
+    // * the rest bake refuses to start unless `cacheBytes` funds one band plus
+    //   **every** visible tile, so the ceiling for a room request inside it is
+    //   at least `visibleTiles - 1` tiles;
+    // * every room request inside it is made while a visible key is still
+    //   missing, so at most `visibleTiles - 1` visible tiles are held;
+    // * therefore the eviction demand never exceeds the number of *stale*
+    //   off-viewport keys held, and every stale key's serial is strictly
+    //   older than any visible key's -- a key is stamped only on a frame it is
+    //   visible on -- so `_makeRoomForBytes` takes stale keys and stops.
+    //
+    // Measured at the tightest cap the rest bake will run under
+    // (`13 + 130` tiles here), with 30 and 60 stale keys left by whole-tile
+    // pans: identical eviction counts, tile counts, coverage and byte peaks
+    // with the stamp and without it. See **M24** in
+    // `docs/superpowers/notes/plan-3i-mutation-log.md`, recorded there as a
+    // survivor with the derivation; the stamp stays in the production path as
+    // the belt to the pricing's braces, and gating it would need an
+    // instrument that can see intra-frame victim selection, which is a
+    // production seam this plan will not add for it.
     final h = await pumpTiled(t, document: bandCrossingGrid);
     await settleFromBands(t, h);
     final tiles = h.cache.liveTileCount;

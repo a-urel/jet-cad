@@ -612,6 +612,26 @@ class TileCache {
   /// The rest gate's counter, for tests. See [_restGateSteps].
   int get debugRestGateSteps => _restGateSteps;
 
+  /// Whether the camera's **last actual change** moved the translation alone.
+  ///
+  /// **The one bit that tells the frame after a pan from the frame between two
+  /// wheel notches.** Both are frames whose camera repeated the previous one,
+  /// so [_restGateSteps] reads 1 on both and the count alone cannot separate
+  /// them — and they owe opposite frames. After a zoom, D1's two-frame clause
+  /// says the in-between frame must stay as cheap as a moving frame, or a
+  /// steadily spun wheel bakes once per notch; after a pan, the same frame owes
+  /// the bake-and-live-walk every pan frame before it paid, or the strip the
+  /// composite has slid off goes background for exactly one frame and comes
+  /// back — the flash D8 does not permit and D3 does not cover, because D3's
+  /// accepted ring is a zoom *out*'s and nothing else.
+  ///
+  /// Written only on a frame that changed something, so it remembers the last
+  /// change across any number of unchanged frames. **A scale change always
+  /// writes `false` here**, whether or not the quantised camera also moved, so
+  /// this can never be true on a moving frame and the disjunct it feeds needs
+  /// no `!scaleChanged` of its own.
+  bool _lastChangeWasPan = false;
+
   /// **Suppresses the rest bake. A measurement switch, not a correctness
   /// switch.**
   ///
@@ -999,10 +1019,16 @@ class TileCache {
     // "Walk the uncovered region" is therefore a full-viewport live walk --
     // 31.5-41.6 ms at 500,000 entities -- on every zoom-out frame.
     final previous = _lastQuantised;
-    _restGateSteps =
-        previous != null && sameQuantisedCamera(previous, quantised)
-            ? _restGateSteps + 1
-            : 0;
+    final cameraHeld =
+        previous != null && sameQuantisedCamera(previous, quantised);
+    _restGateSteps = cameraHeld ? _restGateSteps + 1 : 0;
+    // **Only a frame that changed something writes the bit**, which is what
+    // makes it a memory rather than a second reading of this frame. A scale
+    // change writes `false` even when the quantised camera itself held --
+    // a device-pixel-ratio or tile-size change re-anchors the generation
+    // without moving the camera -- so [_lastChangeWasPan] is never true on a
+    // frame `resting` must treat as moving.
+    if (!cameraHeld || scaleChanged) _lastChangeWasPan = !scaleChanged;
     _lastQuantised = quantised;
     // **`previous == null` is not a moving frame.** It is the very first
     // frame this cache has ever painted, with nothing behind it to have
@@ -1058,9 +1084,21 @@ class TileCache {
     // frame changed the camera and reset the count to zero. Reading the count
     // rather than the camera keeps the wheel's in-between frame cheap, which
     // is the whole of D1's two-frame clause.
+    //
+    // **And [_lastChangeWasPan] is what carries the pan one frame further.**
+    // The count alone stops at the frame the pan stops on: the *next* frame
+    // repeats the same camera, so the count reads 1 -- too late for the
+    // disjunct above, too early for the gate below -- and with the composite
+    // still standing the frame returned after the blit alone. The strip the
+    // composite has slid off was background for that one frame and correct
+    // again on the next: correct -> blank -> correct, on every pan tail. The
+    // bit says which kind of change the count is counting away from, so a pan
+    // tail keeps drawing what its pan frames drew while a wheel's in-between
+    // frame stays exactly as cheap as the notch before it.
     final resting = previous == null ||
         _carryOver == null ||
         (!scaleChanged && _restGateSteps == 0) ||
+        _lastChangeWasPan ||
         _restGateSteps >= kRestGateFrames;
 
     // Derived once and handed to every bake. Rebasing is frame-global by

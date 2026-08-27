@@ -231,6 +231,34 @@ Future<Uint8List> captureLiveFrame(TileRig rig) => _capture((canvas) {
       rig.painter.debugRebaseOrigin = null;
     });
 
+/// The **tiled** frame's device pixels, RGBA, row-major at [kTileDpr].
+///
+/// [captureLiveFrame]'s counterpart, and the only instrument that can see the
+/// frame kinds a cache reaches by *standing still*. The widget capture
+/// (`captureTiled`) cannot: an uncovered cache asks `DraftCanvas` for another
+/// frame from a post-frame callback, so by the time `pump` returns the repaint
+/// boundary is dirty and `toImage` asserts on `!debugNeedsPaint`. Precisely
+/// the states this reads -- an unsettled cache one frame after the camera
+/// stopped -- are the ones that leave it dirty.
+///
+/// **The capture is itself a frame, and that is the point.** It calls
+/// `paintFrame` once at the rig's current camera, exactly as the next frame of
+/// the application would, and the cache advances accordingly: the pixels
+/// returned are that frame's, and the counters read afterwards are that
+/// frame's too.
+Future<Uint8List> captureTiledFrame(TileRig rig) => _capture((canvas) {
+      rig.cache.paintFrame(
+        canvas: canvas,
+        viewport: kTileViewport,
+        devicePixelRatio: kTileDpr,
+        camera: rig.camera,
+        painter: rig.painter,
+        sink: rig.sink,
+        vertices: rig.vertices,
+        tablesRevision: rig.doc.tables.mutationRevision,
+      );
+    });
+
 /// Non-transparent pixels of [pixels] inside [logical], a rectangle in
 /// **logical** pixels that is scaled by [kTileDpr] and clipped to the capture.
 ///
