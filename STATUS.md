@@ -427,8 +427,9 @@ two fixed (`fc05076`, `967fa3b`), two measured and deliberately left for 3i.
 Read them before writing 3i's spec:
 [After Plan 3h](#after-plan-3h--what-the-window-showed-2026-08-26).
 
-**Plan 3i is IN FLIGHT on `main`, 11 of 14 tasks done, pushed.** Tasks 12 and
-13 are blocked on the machine and not on the code — see
+**Plan 3i is IN FLIGHT on `main`, 12 of 14 tasks done plus the code halves of
+12 and 13.** Only the *device* halves of Tasks 12 and 13 are left, and they are
+blocked on the machine and not on the code — see
 [Plan 3i in flight](#plan-3i--in-flight-11-of-14) immediately below. **Read
 that before touching the tile cache**: the spec declined level-of-detail
 geometry, so the paragraph after it, written before 3i's spec existed, no
@@ -440,12 +441,12 @@ below landed in its scope.
 
 ---
 
-## Plan 3i — in flight, 11 of 14
+## Plan 3i — in flight, 12 of 14 plus two code halves
 
 **Spec:** [2026-08-26-jet-cad-2d-plan-3i-zoom-frame-design.md](docs/superpowers/specs/2026-08-26-jet-cad-2d-plan-3i-zoom-frame-design.md),
 written 2026-08-26 and revised twice against five external reviews.
 **Plan:** [2026-08-26-jet-cad-2d-plan-3i-zoom-frame.md](docs/superpowers/plans/2026-08-26-jet-cad-2d-plan-3i-zoom-frame.md).
-**Range:** `468e310..1aafb39`, fifteen commits, directly on `main`, no
+**Range:** `468e310..863b359`, twenty-one commits, directly on `main`, no
 worktree, on the human's standing consent — the arrangement of 3e through 3h.
 Executed with subagent-driven development: a fresh implementer per task, an
 independent reviewer after each, and the controller running the full gate
@@ -468,19 +469,21 @@ tile set's own area — `visibleKeys` yields a full rectangle — so a single
 source plus the tiles sliced from it peaks at exactly `kTileCacheBytes` with
 no headroom.
 
-**Blocked, and it is the machine.** At `1aafb39` the laptop reads
+**Blocked, and it is the machine.** At `863b359` the laptop reads
 `lowpowermode 1` and "Now drawing from 'Battery Power'". Either alone
 invalidates a frame-timing measurement and Plan 3h's record documents losing
 time to each separately. **Tasks 12 and 13 resume when `pmset -g | grep
 lowpowermode` reads 0 and `pmset -g ps` says AC Power.** Nothing about the
 code is waiting.
 
-**Suites at `1aafb39`,** each run by the controller rather than read from a
-report: **797** engine, **400** widget with 1 pre-existing skip, **20**
+**Suites at `863b359`,** each run by the controller rather than read from a
+report: **797** engine, **405** widget with 1 pre-existing skip, **23**
 harness. Analyze and format clean in all three.
 
-**Thirteen mutants fired so far.** M1, M2, M3, M4, M4b, M5, M6, M6b, M7, M9,
-M9b and M10 killed. **M8 survived as declared** — with integral source
+**Sixteen mutants fired so far.** M1, M2, M3, M4, M4b, M5, M6, M6b, M7, M9,
+M9b, M10, M12, M13, M14, M15 and M16 killed. **Mutant numbering is per-plan:
+`M4` and `M5` name different mutations in Plan 3h's log and Plan 3i's, so any
+citation must name the plan.** **M8 survived as declared** — with integral source
 rectangles a bilinear and a nearest sample read the same texels, and it was
 written down as a survivor before it was fired, the way Plan 3h recorded its
 own M6. **M11 turned out to be unreachable by pixels**: the rebase origin
@@ -502,6 +505,36 @@ mutant and noticing it did not die.**
    helper since Task 2 ran at 800x600 logical rather than 400x300 — 475 tiles,
    not 130 — and the fixture left 38% of each frame blank. No assertion value
    moved when it was fixed; several comments became true.
+
+**Two rulings a later reader must not mistake for drift.**
+
+- **Ruling 14 — the plan pinned two interleaved measurements and built no way
+  to run either.** Criterion 4 alternates a rest-bake arm with a "rest bake
+  disabled" arm; criterion 8 alternates a narrow arm with Plan **3h**'s M4
+  mutation. Both arrangements are *same session, interleaved*, and two
+  binaries cannot interleave — so both arms need a runtime switch, and neither
+  existed. `TileCache.debugRestBakeDisabled` and
+  `TileCache.debugFullViewportQuery` were added for exactly this, default
+  `false`, no `lib/` writer, each proved to actually change an observable
+  counter by its own mutant (M13, M14) and the second one's narrow clip — what
+  makes it 3h's M4 rather than its M5 — pinned by `debugLastClip` and M16.
+  **The second switch ships a known defect behind a flag**, which is stated at
+  the field. Without both switches, both arms of each ratio run identical code
+  and every reading is 1.00 — the degenerate fixture, landed in a document of
+  record.
+- **Ruling 15 — criterion 3 is scored as `settleFrames == 2`, not `== 1`, and
+  this is a spec contradiction rather than a moved threshold.** The criteria
+  table says the settle completes in **one** frame; `kRestGateFrames = 2` is
+  pinned separately in the same spec, for its own reason (a pan straight after
+  a zoom finds an empty generation and would otherwise arm the gate mid-pan).
+  The last gesture frame changes the camera, so idle frame 1 can only reach
+  `_restGateSteps == 1` and takes the moving-frame early return; idle frame 2
+  is the first that can bake. **On correct code `settleFrames` is always 2**,
+  so criterion 3 as literally written is a gate only broken code could pass.
+  The correction is derived from a pinned constant and was recorded **before
+  any device run**, so there is no result it could have been fitted to; the
+  results note must carry the reading and the arithmetic so a reader can
+  disagree without re-deriving it.
 
 **Two findings for the record that are not this plan's to fix.**
 
