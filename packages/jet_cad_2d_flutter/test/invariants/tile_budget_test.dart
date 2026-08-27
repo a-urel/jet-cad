@@ -57,15 +57,25 @@ const int _compositeBytes = 800 * 600 * 4;
 /// already covered could not reach between them.
 const int _capWithComposite = 138 * _tileBytes;
 
-/// One more frame at the same camera `rig` just painted.
+/// Enough more frames at the same camera `rig` just painted for the rest
+/// gate to arm and a resting frame to actually bake.
 ///
 /// Plan 3i Task 2: a frame whose camera just changed is *moving* and draws
 /// only the carry-over composite -- no bake, no tile blit, no live walk.
 /// Every pan or zoom in this file used to bake and evict on the very next
-/// frame; now that frame is the moving one, and this second, unchanged-camera
-/// call is the one that actually bakes, blits and evicts, matching this
-/// file's pre-Plan-3i counts again.
-void settle(TileRig rig) => rig.paintOnce();
+/// frame; now that frame is the moving one, and one more, unchanged-camera
+/// call used to be the one that actually bakes, blits and evicts, matching
+/// this file's pre-Plan-3i counts again.
+///
+/// Plan 3i Task 3 then raised the threshold from one unchanged frame to
+/// [kRestGateFrames] (two), so a single extra call now lands on the frame
+/// *in between* -- still not resting, so it also only blits the composite --
+/// and it takes `kRestGateFrames` of them to reach the one that bakes.
+void settle(TileRig rig) {
+  for (var i = 0; i < kRestGateFrames; i++) {
+    rig.paintOnce();
+  }
+}
 
 void main() {
   test('criterion 12: the cap holds and eviction is real, not theoretical',

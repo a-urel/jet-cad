@@ -203,8 +203,13 @@ void main() {
     zoomed.cache.bakeBudgetDevicePixels = 4 * 64 * 64;
     zoomed.zoomBy(1.19);
     // The gate's moving frame: it retires the old generation into a
-    // composite and bakes nothing of the new one. The spy call below needs
-    // the settled frame after it -- both kinds of blit in the same frame.
+    // composite and bakes nothing of the new one. Then one more unchanged
+    // camera, which kRestGateFrames now requires before a frame may bake --
+    // one used to be enough, so this used to be the settled frame itself; it
+    // still only blits the composite. The spy call below is the frame after
+    // it -- the one kRestGateFrames now arms -- and needs both kinds of
+    // blit in the same frame.
+    zoomed.paintOnce();
     zoomed.paintOnce();
     zoomed.cache.resetCounters();
     final zoomedSpy = SpyCanvas();
@@ -608,13 +613,18 @@ void main() {
       addTearDown(rig.dispose);
       rig.paintOnce();
       rig.zoomBy(factor);
-      // Three frames now, the first of them new: the gate's moving frame,
+      // Four frames now, the first two of them new: the gate's moving frame,
       // which retires the old (covered) generation into a composite and
-      // bakes nothing. Of the two after it, the first anchors the new
-      // generation and fills it, with the composite blitted underneath; the
-      // second bakes nothing, finds the viewport covered, and retires the
-      // composite. Only the fourth frame -- the comparison's own -- is a
-      // clean generation, and that is the frame criterion 1 is a claim about.
+      // bakes nothing, and the frame after it, which the Task 3 threshold
+      // still counts as not-yet-rested -- one unchanged camera used to be
+      // enough, kRestGateFrames now asks for two, so this second frame also
+      // bakes nothing and only blits the composite. Of the two after that,
+      // the first anchors the new generation and fills it, with the
+      // composite blitted underneath; the second bakes nothing, finds the
+      // viewport covered, and retires the composite. Only the fifth frame --
+      // the comparison's own -- is a clean generation, and that is the frame
+      // criterion 1 is a claim about.
+      rig.paintOnce();
       rig.paintOnce();
       rig.paintOnce();
       rig.paintOnce();
