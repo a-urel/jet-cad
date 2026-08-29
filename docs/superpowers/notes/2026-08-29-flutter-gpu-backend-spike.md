@@ -62,7 +62,7 @@ Three arms, interleaved, over a hold, a pan and a zoom.
 |---|---|
 | **A — painter (untiled)** | today's untiled path: the whole document walked per frame into one `drawVertices` |
 | **B — tiles (blit)** | today's *gesture* path: Plan 3i's tile cache, blitting the previous generation's composite, magnified. **Cheap and blurry** |
-| **C — flutter_gpu (resident)** | the geometry uploaded once as **instance data**, the camera a uniform. **Sharp** |
+| **C — flutter_gpu (resident)** | the geometry uploaded once as **instance data**, the camera a uniform. **Real geometry every frame** — see what "sharp" claims, below |
 
 Arm C's shape, since it is the whole claim:
 
@@ -79,6 +79,15 @@ Arm C's shape, since it is the whole claim:
   wrong level of detail, because the painter's LOD decisions read the camera's
   scale. The uniform matrix maps out of it:
   `mvp = ndcFromScreen(now) ∘ worldToScreen(now) ∘ screenToWorld(fit)`.
+
+**"Sharp" in this note means one thing and not another, and the difference is
+load-bearing.** It means the frame draws **real geometry under the current
+transform** instead of replaying magnified pixels — which is exactly the axis
+the tile cache trades away and the vector-replay spike could not afford. It
+does **not** mean visual parity with the painter: arm C draws no joins, no caps
+and no antialiasing, so its picture is *geometrically* correct and *visually*
+incomplete. No claim of full visual equivalence is made anywhere in this note,
+and none was measured.
 
 **Every cheat runs in arm C's favour and is stated so the numbers are read
 honestly:** no joins, no caps, no antialiasing, no fills, no text, and dash
@@ -150,7 +159,7 @@ One-time collection and upload: **19.5 ms** walk at 84 K segments,
   segments, 0.11–0.67 at 84 K, **0.17–0.26 at 2.38 M**. The per-frame CPU term
   is gone, which is the entire claim and it holds across two orders of
   magnitude. Arm A's build over the same span goes 3.99 → 10 → **383 ms**.
-- **Sharp now costs roughly what blurry costs.** At 500,000 entities the zoom
+- **Drawing real geometry now costs roughly what blitting pixels costs.** At 500,000 entities the zoom
   frame totals about **0.9 ms** for the blit and **1.3–3.6 ms** for real
   vector geometry — call it 1.5x to 4x. The replay spike measured **22.9x**
   for the same sharpness on the CPU. That is a difference in kind, not in
@@ -330,7 +339,15 @@ transpiler for arbitrary user shaders and this project has two hand-written
 ones whose ES 300 forms could simply be authored. That decision is deliberately
 left open; it needed these numbers first, and now it has them.
 
-## The web finding, and it decides the package question
+## The web finding that started it — superseded, and kept for its chronology
+
+**Superseded by "The web arm: measured" above, which was added later the same
+day. The paragraph this section originally ended with said the WebGL2 layer
+was a documentation claim and should be measured before it is relied on. It
+has since been measured; that sentence is struck below rather than deleted, so
+the note reads as the record of a decision rather than as a thing that was
+always known.** What survives unchanged is the constraint that made the web
+question pressing in the first place.
 
 **Bare `flutter_gpu` cannot compile for the web.** `bin/cache/pkg/flutter_gpu/lib/gpu.dart`
 imports `dart:ffi` and `dart:nativewrappers` at library level. There is no
@@ -349,8 +366,11 @@ the package question resolves the opposite way from where this spike started:
 > `flutter_scene`'s compatibility layer**, not around it. Bare `flutter_gpu`
 > is a native-only answer.
 
-Nothing here measured that layer. It is a documentation claim and it should be
-measured before it is relied on.
+~~Nothing here measured that layer. It is a documentation claim and it should
+be measured before it is relied on.~~ **It was measured the same day** — same
+shader bundle, same instanced draw, same one-phase frame, under CanvasKit. See
+"The web arm: measured" above for the numbers and for what the port had to
+change.
 
 ## Setup cost, recorded because it is not zero
 
@@ -397,13 +417,22 @@ measurement says the question is now worth a spec rather than another spike.**
 The one number that decides it: at 500,000 entities the per-frame CPU cost of
 a gesture is **0.2 ms and flat**, against 383 ms for the walk. The tile cache
 exists to hide exactly that walk, at the price of a blurry gesture; this
-removes the walk instead of hiding it, and the gesture stays sharp for roughly
-what the blit costs.
+removes the walk instead of hiding it, and the gesture keeps drawing real
+geometry for roughly what the blit costs — geometric sharpness, not the
+finished picture; see what "sharp" claims above.
 
-Against that: **82 MB resident**, a **one-second load** at that scale, **no
-web without `flutter_scene`'s WebGL2 layer**, and seven pieces of unbuilt work
-above — of which **dirty tracking under the ascending-handle draw-order
-invariant** is the one most likely to be harder than it looks.
+Against that: **82 MB resident**, a **one-second load** at that scale, a **web
+line that exists only through `flutter_scene`'s WebGL2 layer** — measured and
+working, but a dependency the project does not have today — and seven pieces
+of unbuilt work above, of which **dirty tracking under the ascending-handle
+draw-order invariant** is the one most likely to be harder than it looks.
+
+**What this note asks for, stated once so it cannot be read as more:
+approval to open a design spec, not approval to implement.** The 500,000-entity
+figures are n=3 with a raster p95 this note itself records as unstable and
+undiagnosed, and arm C is missing joins, caps, antialiasing, text, fills and
+culling. That is enough to justify designing the thing. It is not enough to
+justify building it, and no threshold here was ever proposed as a gate.
 
 If it is taken further, the order that respects what is already known.
 **Step 1 has since been done and its result is in the web section above** --
