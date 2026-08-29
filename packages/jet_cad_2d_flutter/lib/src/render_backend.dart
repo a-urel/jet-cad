@@ -1,3 +1,5 @@
+import 'gpu/gpu_facade.dart' show gpuAvailable;
+
 /// Which sink `DraftCanvas` draws through.
 ///
 /// An enum and not a `bool` because a third backend is foreseeable —
@@ -12,6 +14,14 @@ enum RenderBackend {
   /// `VerticesDrawSink`: the frame's strokes as one ordered `drawVertices`.
   /// The default on every platform, web included.
   vertices,
+
+  /// The GPU-resident backend: the document's geometry uploaded once, the
+  /// camera a uniform, one instanced draw call per frame.
+  ///
+  /// **Never a default and never automatic.** It is chosen explicitly, and
+  /// [resolveBackend] routes it back to [vertices] on a platform without
+  /// Flutter GPU rather than throwing per frame.
+  residentGpu,
 }
 
 /// The backend a platform gets when the caller does not say.
@@ -47,3 +57,13 @@ enum RenderBackend {
 /// open question this default was written against; the within-platform
 /// build ratio answers it.
 RenderBackend defaultRenderBackend() => RenderBackend.vertices;
+
+/// The backend that will actually run, given what the caller asked for.
+///
+/// **The fallback is here and nowhere else.** Two call sites that each decided
+/// would eventually disagree — the reason [defaultRenderBackend] gives for
+/// itself, applied to the same problem one layer up.
+RenderBackend resolveBackend(RenderBackend requested) {
+  if (requested != RenderBackend.residentGpu) return requested;
+  return gpuAvailable() ? RenderBackend.residentGpu : RenderBackend.vertices;
+}

@@ -462,6 +462,9 @@ void main() {
     ('5', _rung5),
   ]) {
     for (final backend in RenderBackend.values) {
+      // Skip the GPU-resident backend: it has no sink until Task 8 and will
+      // never render in a test environment without actual GPU support.
+      if (backend == RenderBackend.residentGpu) continue;
       testWidgets('text ladder rung $name ($backend)', (tester) async {
         await _rung(tester, fixture(), name, backend);
       });
