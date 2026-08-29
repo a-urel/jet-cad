@@ -1076,6 +1076,15 @@ class FrameTimingLog {
   /// [msAt] over the half-open ordinal range `[start, end)`, holes included.
   List<double?> msRange(int start, int end) =>
       <double?>[for (var i = start; i < end; i++) msAt(i)];
+
+  /// **Added by the throwaway `spike/widget-per-entity` branch.** The raw
+  /// timings, for a caller that needs the build/raster split rather than the
+  /// `totalSpan` [msAt] returns. Goes through the same shifted-stream refusal,
+  /// so it cannot hand back ordinals the log has already disowned.
+  List<FrameTiming> get debugTimings {
+    _refuseShiftedStream();
+    return List<FrameTiming>.unmodifiable(_reported);
+  }
 }
 
 /// How long [FrameTimingLog.establishBaseline] waits for the engine to flush a

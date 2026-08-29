@@ -20,6 +20,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
 
 import 'measurement_rig.dart';
+import 'widget_arm_rig.dart';
 import 'seam_corpus.dart';
 
 /// Entity count, so one binary serves both corpus sizes.
@@ -591,11 +592,43 @@ final Size kMeasurementViewport = parseMeasurementViewport(
 
 const bool kRunR2 = bool.fromEnvironment('RUN_R2');
 
+/// **Throwaway spike, branch `spike/widget-per-entity`.** Prices one render
+/// object per entity against the single `CustomPainter` walk. Takes over the
+/// app entirely: `RUN_WIDGET_SPIKE=true` builds [WidgetSpikeApp], not
+/// [HarnessApp].
+const bool kRunWidgetSpike = bool.fromEnvironment('RUN_WIDGET_SPIKE');
+
+/// Frames measured per phase, per arm, per repeat.
+final int kSpikeFrames = _intDefine(
+    'SPIKE_FRAMES', const String.fromEnvironment('SPIKE_FRAMES'), 60,
+    minimum: 8);
+
+/// How many times the three arms are cycled. Interleaving is what makes the
+/// ratios readable; one repeat is a single sample and says little.
+final int kSpikeRepeats = _intDefine(
+    'SPIKE_REPEATS', const String.fromEnvironment('SPIKE_REPEATS'), 3,
+    minimum: 1);
+
 void main() {
   final doc = switch (kCorpus) {
     HarnessCorpus.measure => harnessDocument(),
     HarnessCorpus.simple => seamCorpus(measurer: harnessMeasurer),
   };
+  if (kRunWidgetSpike) {
+    runApp(WidgetSpikeApp(
+      document: doc,
+      viewport: kMeasurementViewport,
+      lineweightScale: kLineweightScale,
+      onReady: (state) => unawaited(runWidgetSpike(
+        state,
+        entities: kEntities,
+        frames: kSpikeFrames,
+        repeats: kSpikeRepeats,
+        viewport: kMeasurementViewport,
+      )),
+    ));
+    return;
+  }
   if (!kRunR2) {
     runApp(HarnessApp(document: doc));
     return;
