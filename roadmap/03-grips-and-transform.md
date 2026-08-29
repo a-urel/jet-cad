@@ -82,6 +82,15 @@ paths are first exercised by a human rather than a test.
   compound command exists) — either solve it here and let 06 reuse it, or
   restrict v1 to single-object drags and let 06 solve it. Decide explicitly;
   do not discover it.
+- **Are the grips widgets or painted?** The 2026-08-29 widget-per-entity spike
+  ([note](../docs/superpowers/notes/2026-08-29-widget-per-entity-spike.md))
+  rejected one widget per *entity*, but its concession applies squarely here: a
+  selection has eight to twenty grips, not five thousand, so the scale argument
+  does not hold. As widgets they get hit testing, hover, cursor changes via
+  `MouseRegion`, focus, keyboard and accessibility for free; in a
+  `CustomPainter` every one of those is hand-written. **The recommended shape is
+  hybrid** — the painted canvas with a small number of widget overlays above it
+  — and this sub-project is where that is decided.
 - **Ortho and polar tracking** — in v1 or not?
 
 ## Exit criteria sketch
