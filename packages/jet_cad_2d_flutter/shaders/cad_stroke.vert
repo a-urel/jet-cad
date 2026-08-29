@@ -32,9 +32,13 @@ void main() {
 
   vec2 delta = px1 - px0;
   float length_px = length(delta);
-  // The collector drops zero-length segments, so this guard is defensive
-  // rather than reachable -- and it stays, because a NaN here is a whole
-  // frame of nothing.
+  // Reachable, not merely defensive. The collector's guard is an exact `==`
+  // on `double` (geometry_collector.dart:64), taken before the values are
+  // narrowed to float32 by the Float32List -- two distinct doubles can
+  // collapse to the same float and slip past it. Separately, two distinct
+  // floats can still project to the same device pixel at extreme zoom-out,
+  // giving `length_px == 0.0` here regardless of what the collector rejected.
+  // A NaN here is a whole frame of nothing, so the fallback direction stays.
   vec2 direction = length_px > 0.0 ? delta / length_px : vec2(1.0, 0.0);
   vec2 normal = vec2(-direction.y, direction.x);
 
@@ -45,6 +49,10 @@ void main() {
     px = mix(px0, px1, corner.x) + normal * half_width * corner.y;
   } else {
     // Unreachable while kKindStroke is the only tag the collector writes.
+    // `px = px0` collapses all six vertices of the quad to one point, a
+    // deliberate draw-nothing fallback -- not an unfinished stub -- for any
+    // future kind that reaches here before its own branch is written.
+    //
     // `kind` is read here deliberately: this build's `impellerc` fails
     // reflection ("Could not complete reflection on generated shader") when
     // a declared attribute is never consumed by something the optimizer
