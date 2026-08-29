@@ -28,6 +28,15 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+/// Every line [body] prints, captured.
+List<String> linesFrom(void Function() body) {
+  final lines = <String>[];
+  runZoned(body,
+      zoneSpecification:
+          ZoneSpecification(print: (_, __, ___, line) => lines.add(line)));
+  return lines;
+}
+
 void main() {
   /// A camera that is nothing like the identity: a 0.08 scale, the y axis
   /// flipped, a skew in both off-diagonal terms, and an origin six million
@@ -103,14 +112,6 @@ void main() {
   });
 
   group('every RUN_R2 run reports its window, and warns when it is wrong', () {
-    List<String> linesFrom(void Function() body) {
-      final lines = <String>[];
-      runZoned(body,
-          zoneSpecification:
-              ZoneSpecification(print: (_, __, ___, line) => lines.add(line)));
-      return lines;
-    }
-
     test('a window that is not the pinned size warns', () {
       final lines = linesFrom(() => reportR2Window(
           const Size(800, 600), const Size(1400, 900),
@@ -139,6 +140,92 @@ void main() {
           const Size(1728, 1117), kMeasurementViewport,
           devicePixelRatio: 2.0)).join('\n');
       expect(lines, contains('WARNING'));
+    });
+  });
+
+  group('the measurement window size is selectable, and refuses nonsense', () {
+    // The size is selectable because no single size can serve every criterion
+    // this plan scores. The design spec pins 1600x1200, which Ruling 20
+    // established this display cannot produce; criteria 2 and 4 were taken at
+    // the 1400x900 the human chose instead; and criterion 9 re-measures Plan
+    // 3h's `tile pan` and `tile hold` against 3h's own recorded figures, which
+    // were taken at the nib default of 800x600 because nothing in the harness
+    // set a window size until 2026-08-28. A larger viewport means more tiles,
+    // more bakes and more work per pan frame, so comparing 3h's numbers with a
+    // 1400x900 run measures the viewport change and calls it a regression.
+    // One run at 800x600 removes the confound; the request is how it is asked
+    // for.
+    test('a request is honoured, at sizes a constant could not be', () {
+      // Three sizes and not one: at 1400x900 alone a parser that returned the
+      // default and a parser that read its argument are indistinguishable.
+      expect(parseMeasurementViewport('800x600'), const Size(800, 600));
+      expect(parseMeasurementViewport('1400x900'), const Size(1400, 900));
+      expect(parseMeasurementViewport('1728x1117'), const Size(1728, 1117));
+    });
+
+    test('asking for nothing is 1400x900, exactly as before', () {
+      // These tests run with no `JC_WINDOW` define, so this is the real
+      // default path and not a restatement of the parser. Criteria 2 and 4
+      // are already measured at this size; a run that asks for nothing must
+      // stay reproducible against them.
+      expect(kMeasurementViewport, const Size(1400, 900));
+      expect(parseMeasurementViewport(kDefaultWindowRequest),
+          const Size(1400, 900));
+    });
+
+    // The house rule, and the reason for it, is `parseZoomMode`'s: a define
+    // that silently falls back to its default writes one run into the table
+    // under a heading the command line claimed and the run did not use. A
+    // measurement that silently ran at a size nobody asked for is the exact
+    // failure this whole area exists to prevent -- and here it is worse than
+    // for `ZOOM_MODE`, because the Swift side reads its own copy of the same
+    // request, so a fallback on one side of the language boundary and not the
+    // other is a run whose camera fit and whose window disagree.
+    test('a malformed request throws rather than falling back', () {
+      for (final raw in const <String>[
+        '', // the empty define
+        '800', // one number
+        '800x', // half a pair
+        'x600',
+        '800x600x2', // three
+        '800X900', // capital X: not the separator
+        'eight hundred by six hundred',
+        '800.0x600.0', // logical pixels are whole
+        '-800x600',
+      ]) {
+        expect(() => parseMeasurementViewport(raw), throwsStateError,
+            reason: 'JC_WINDOW="$raw" must stop the session');
+      }
+    });
+
+    test('an absurd request throws too', () {
+      // A size out of range is not a typo the operator will notice in the
+      // transcript: AppKit clamps a window it cannot place on the screen, so
+      // `4x4` and `100000x900` would both silently become some other size and
+      // the run would measure it.
+      for (final raw in const <String>[
+        '4x4',
+        '0x0',
+        '100000x900',
+        '1400x100000',
+      ]) {
+        expect(() => parseMeasurementViewport(raw), throwsStateError,
+            reason: 'JC_WINDOW="$raw" must stop the session');
+      }
+    });
+
+    // The two sides of the language boundary are configured separately --
+    // `--dart-define` reaches Dart only and `MainFlutterWindow.swift` is what
+    // sizes the window -- so `reportR2Window`'s warning is the only thing that
+    // catches them disagreeing. It has to keep working against a
+    // `kMeasurementViewport` that is no longer a literal.
+    test('a window that does not match the request still warns', () {
+      final lines = linesFrom(() => reportR2Window(
+          const Size(1400, 900), parseMeasurementViewport('800x600'),
+          devicePixelRatio: 2.0)).join('\n');
+      expect(lines, contains('R2 app-run: window=1400x900'));
+      expect(lines, contains('WARNING'));
+      expect(lines, contains('800x600'));
     });
   });
 }

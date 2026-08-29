@@ -17,6 +17,34 @@ flutter run --profile -d macos --dart-define=ENTITIES=500000
 
 Drag to pan, scroll to zoom.
 
+## The measurement window
+
+`macos/Runner/MainFlutterWindow.swift` pins the window on every launch, so a
+run cannot silently inherit the nib default or whatever size the operator last
+dragged. The default is **1400x900** — Ruling 20's choice, because the design
+spec's 1600x1200 is unreachable on this display.
+
+The size is selectable, because criterion 9 re-measures Plan 3h's `tile pan`
+and `tile hold` against 3h's own recorded figures and 3h ran at the nib default
+of **800x600**. A larger viewport means more tiles, more bakes and more work
+per pan frame, so that comparison at 1400x900 measures the viewport change and
+reads it as a regression.
+
+`--dart-define` reaches Dart only and Swift is what sizes the window, so **both
+sides are given the same value from one place in the shell**:
+
+```bash
+export JC_WINDOW=800x600
+flutter run -d macos --profile --dart-define=JC_WINDOW=$JC_WINDOW \
+  --dart-define=TILES=on --dart-define=ENTITIES=500000 --dart-define=RUN_R2=true
+```
+
+Ask for nothing and both sides use 1400x900. A malformed or out-of-range
+request stops the launch on both sides rather than falling back — `800X600`
+with a capital X is a refusal, not a near-miss. `R2 app-run: window=` prints
+the window the app really got and warns when it is not the size Dart was told
+to expect; that warning is the only check there is on the two sides agreeing.
+
 ## The rigs
 
 `flutter test --profile` does not exist; profile-mode frame timings only come

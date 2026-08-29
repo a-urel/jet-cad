@@ -472,9 +472,78 @@ void _addFillRegions(DraftDocument doc, int entityCount) {
 ///
 /// Inert at its default of `false`: an ordinary `flutter run`/`flutter
 /// drive` harness invocation is unaffected.
-/// The viewport every measurement in this harness is taken at: **1400x900
-/// logical**, which `macos/Runner/MainFlutterWindow.swift` pins the window to
-/// on every launch.
+/// The name of the window-size request, and it is the same name on **both**
+/// sides of the language boundary.
+///
+/// `--dart-define` reaches Dart only, and `macos/Runner/MainFlutterWindow.swift`
+/// is what actually sizes the window, so the two sides are configured
+/// separately and must be given the same value:
+///
+/// ```sh
+/// export JC_WINDOW=800x600
+/// flutter run -d macos --profile --dart-define=JC_WINDOW=$JC_WINDOW ...
+/// ```
+///
+/// The Swift side reads it from `ProcessInfo.processInfo.environment`, which
+/// `flutter run` forwards because it starts the app with the parent
+/// environment inherited. [reportR2Window] is what catches the two sides
+/// disagreeing: it prints the window the app really got and warns when that
+/// is not [kMeasurementViewport].
+const String kWindowRequestName = 'JC_WINDOW';
+
+/// What a run that asks for nothing gets, on both sides: the size Ruling 20
+/// chose. Criteria 2 and 4 are already measured here and must stay
+/// reproducible, so this default does not move.
+const String kDefaultWindowRequest = '1400x900';
+
+/// The smallest and largest side a window request may name, in logical
+/// pixels.
+///
+/// A size out of range is not a typo an operator catches in the transcript:
+/// AppKit places what it can and clamps the rest, so `4x4` and `100000x900`
+/// would both quietly become some other window and the run would measure
+/// that one. Refusing is the only outcome that cannot be mistaken for a
+/// measurement.
+const int kMinWindowSide = 100;
+const int kMaxWindowSide = 10000;
+
+/// Parses a `WIDTHxHEIGHT` window request into a viewport, or throws.
+///
+/// **A `String.fromEnvironment` with an explicit throw**, the rule
+/// [parseZoomMode] and [kTilePx] already follow and that Plan 3c lost a full
+/// device run to by not following: a define that silently falls back to its
+/// default writes one run into the table under a heading the command line
+/// claimed and the run did not use. Here it is worse than for `ZOOM_MODE`,
+/// because Swift reads its own copy of the same request: a fallback on one
+/// side of the language boundary and not the other is a run whose camera fit
+/// and whose window disagree, which is the failure this whole area exists to
+/// prevent.
+///
+/// Whole logical pixels and a lower-case `x`, so `800X600` and `800.0x600.0`
+/// are refusals and not near-misses.
+Size parseMeasurementViewport(String raw) {
+  final parts = raw.split('x');
+  if (parts.length == 2) {
+    final width = int.tryParse(parts[0]);
+    final height = int.tryParse(parts[1]);
+    if (width != null &&
+        height != null &&
+        width >= kMinWindowSide &&
+        width <= kMaxWindowSide &&
+        height >= kMinWindowSide &&
+        height <= kMaxWindowSide) {
+      return Size(width.toDouble(), height.toDouble());
+    }
+  }
+  throw StateError('$kWindowRequestName must be WIDTHxHEIGHT in whole logical '
+      'pixels, each side between $kMinWindowSide and $kMaxWindowSide; '
+      'got "$raw"');
+}
+
+/// The viewport every measurement in this harness is taken at:
+/// [kDefaultWindowRequest], **1400x900 logical**, unless a run asks for
+/// another size through [kWindowRequestName] -- which
+/// `macos/Runner/MainFlutterWindow.swift` reads too, and pins the window to.
 ///
 /// **This is not the size the design spec priced.** Plan 3i's design spec §5
 /// pins the measurement viewport at **1600x1200 logical at
@@ -488,22 +557,37 @@ void _addFillRegions(DraftDocument doc, int entityCount) {
 /// widest scaling mode gives 1728x1117 -- the height never reaches 1200 in
 /// any mode. 1600x1200 logical is unreachable on this display.
 ///
-/// **Ruling 20 chose this value**: the human was shown the trade -- an
+/// **Ruling 20 chose the default**: the human was shown the trade -- an
 /// external display, the 800x600 nib default, or the largest window that
 /// fits -- and chose the largest that fits. So:
 ///
-/// > **Every number taken at this size is NOT comparable to the design
+/// > **Every number taken at 1400x900 is NOT comparable to the design
 /// > spec's priced predictions**, and is not comparable to any earlier figure
 /// > from this harness either, because those were taken at the nib default of
 /// > 800x600. A figure from a run at this viewport must be published with the
 /// > viewport beside it, and §5's memory predictions remain untested.
 ///
-/// A reader who finds a number from this harness and follows it back to this
-/// constant has to be able to learn all of that here, which is why the
-/// comment is this long. [reportR2Window] prints the *real* window on every
-/// run and warns when it is not this size, so a figure can never be taken at
-/// a viewport nobody recorded.
-const Size kMeasurementViewport = Size(1400, 900);
+/// **And that is why the size is selectable rather than pinned to one
+/// literal.** Criterion 9 re-measures Plan 3h's `tile pan` and `tile hold`
+/// phases against **3h's own recorded figures**, and 3h ran at the nib
+/// default of 800x600, because nothing in this harness set a window size
+/// until 2026-08-28. A larger viewport means more tiles, more bakes and more
+/// work per pan frame, so scoring 3h's numbers against a 1400x900 run
+/// measures the viewport change and reports it as a regression -- the first
+/// 500,000-entity run read `tile pan` p95 = 23.16 ms against 3h's 19.86 /
+/// 15.99 / 13.43 ms for exactly that reason. The confound is removable by one
+/// run at `JC_WINDOW=800x600`, and removing it is the only reason this is a
+/// request and not a constant.
+///
+/// A reader who finds a number from this harness and follows it back here has
+/// to be able to learn all of that, which is why the comment is this long.
+/// [reportR2Window] prints the *real* window on every run and warns when it is
+/// not this size, so a figure can never be taken at a viewport nobody
+/// recorded -- and it is the only check on the two sides of the language
+/// boundary agreeing.
+final Size kMeasurementViewport = parseMeasurementViewport(
+    const String.fromEnvironment(kWindowRequestName,
+        defaultValue: kDefaultWindowRequest));
 
 const bool kRunR2 = bool.fromEnvironment('RUN_R2');
 
@@ -600,7 +684,7 @@ Future<void> _driveR2(
     // pinned size is 1400x900 and not the design spec's 1600x1200. The
     // mismatch warning is not repeated here: `reportR2Window` above fires it
     // on every run, arm or no arm.
-    const zoomViewport = kMeasurementViewport;
+    final zoomViewport = kMeasurementViewport;
 
     // One arm: back to the fitted camera, then the whole pinned script. The
     // camera reset is here rather than inside the phase because the arms of a
