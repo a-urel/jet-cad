@@ -1,0 +1,99 @@
+Resolving dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (105.0.0 available)
+  analyzer 13.3.0 (14.1.0 available)
+  clock 1.1.2 (1.1.3 available)
+  code_assets 1.2.1 (2.0.0 available)
+  hooks 2.1.0 (2.2.0 available)
+  lucide_icons_flutter 3.1.15 (3.1.17 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  mime 2.0.0 (2.1.0 available)
+  objective_c 9.5.0 (9.6.0 available)
+  package_config 2.2.0 (3.0.0 available)
+  pool 1.5.2 (1.5.3 available)
+  process 5.0.5 (5.0.6 available)
+  record_use 1.1.0 (1.1.1 available)
+  shadcn_ui 0.55.1 (0.56.2 available)
+  source_maps 0.10.13 (0.10.14 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  test 1.31.1 (1.31.2 available)
+  test_api 0.7.12 (0.7.13 available)
+  test_core 0.6.18 (0.6.19 available)
+  vm_service 15.2.0 (15.3.0 available)
+  yaml 3.1.3 (3.1.4 available)
+Got dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`!
+21 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Launching lib/main.dart on macOS in profile mode...
+Building macOS application...                                   
+✓ Built build/macos/Build/Products/Profile/dev_harness_2d.app (60.9MB)
+[IMPORTANT:flutter/shell/platform/embedder/embedder_surface_metal_impeller.mm(53)] Using the Impeller rendering backend (MetalSDF).
+Failed to foreground app; open returned 1
+
+Flutter run key commands.
+h List all available interactive commands.
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on macOS is available at: http://127.0.0.1:57659/xnoeQveg4VY=/
+The Flutter DevTools debugger and profiler on macOS is available at: http://127.0.0.1:57659/xnoeQveg4VY=/devtools/?uri=ws://127.0.0.1:57659/xnoeQveg4VY=/ws
+flutter: R2 app-run: driving started
+flutter: R2 app-run: window=1400x900 dpr=2.0
+flutter: R2 (500000) frames=242
+flutter:   build  p50=0.15ms p95=17.82ms max=32.46ms mean=2.81ms
+flutter:   raster p50=0.38ms p95=7.79ms max=18.86ms mean=1.35ms
+flutter:   total  p50=0.67ms p95=32.04ms max=1784.32ms mean=12.33ms
+flutter:   lineweightScale=1.0
+flutter:   screenSpaceLeafCount=3352 dashSpans=89542 collapsed=67 canvasCalls=0 (screenSpaceLeafCount/dashSpans/collapsed: last paint() call only under TILES=on, not the frame total -- see the tile probe for a frame figure; canvasCalls is unaffected)
+flutter:   fills=0 skippedFills=0
+flutter:   tiles=on tilePx=512 bakeBudgetPx=262144 bakeBudgetTiles=1 liveTiles=24 generation=122 carryOver=false
+flutter:   bakes=0 blits=24 carryOverBlits=0 liveDraws=0 blitDests=24 evictions=0(life) invalidations=0(life) tileBytes=25165824
+flutter:   backend=vertices triangles=0 drawVerticesCalls=0 capacityVertices=67108864 capacityMiB=768.00
+flutter:   text: corpus=off draw=on minTextCapPixels=3.0 textOps=0 skippedText=0 culledText=0
+flutter:   paragraphs: newLayouts=0 newParagraphEvictions=0 newMetricsEvictions=0 liveParagraphs=0 liveMetrics=1
+flutter:   tile warm: frames=1 liveTiles=24 tileBytes=25165824 evictions=0(life) capacityVertices=67108864 capacityMiB=768.00
+flutter:   tile hold frames=53
+flutter:   build  p50=0.10ms p95=0.23ms max=103.81ms mean=2.07ms
+flutter:   raster p50=0.28ms p95=0.59ms max=3.81ms mean=0.36ms
+flutter:   total  p50=0.51ms p95=1.12ms max=114.02ms mean=4.66ms
+flutter:     bakeFrames=0/60 maxBakesInAFrame=0
+flutter:     bakes=0 perFrame=0.000 blits=1440 carryOverBlits=0 liveDraws=0 newEvictions=0 liveTiles=24 tileBytes=25165824
+flutter:     capacityVertices=67108864 capacityMiB=768.00
+flutter:   tile pan step: dx=-7.0000 dy=-3.0000 magnitude=7.6158
+flutter:   tile pan frames=120
+flutter:   build  p50=0.11ms p95=13.22ms max=26.45ms mean=1.99ms
+flutter:   raster p50=0.31ms p95=2.79ms max=5.56ms mean=0.75ms
+flutter:   total  p50=0.58ms p95=23.16ms max=37.10ms mean=3.65ms
+flutter:     bakeFrames=19/120 maxBakesInAFrame=1
+flutter:     bakes=19 perFrame=0.158 blits=3328 carryOverBlits=0 liveDraws=15 newEvictions=0 liveTiles=43 tileBytes=45088768
+flutter:     capacityVertices=67108864 capacityMiB=768.00
+flutter:   tile probe: tilePx=512 dpr=2.0 viewport=1400x900 tileLogical=256.0 pad=32.0
+flutter:     tiles=24 liveLeaves=4949 tileLeaves=22393 overdraw=4.525 areaFactor=1.563
+flutter:     liveWalkMs=45.26 tileWalkMsTotal=94.20 walkMsPerTile=3.925 visibleSetBytes=25165824
+flutter: R2 tile zoom: ZOOM_MODE=criterion4 -- 4 repeats of arm A then arm B, interleaved, in one session. Criterion 4's ratio is settleWallMs(arm B) / settleWallMs(arm A), per arm.
+flutter: R2 tile zoom c4 repeat 1/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000) gestureFrames=80 p50=0.63ms p95=1.61ms max=4.69ms mean=0.89ms
+flutter: R2 tile zoom c4 repeat 1/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c4 repeat 1/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000)   settleFrames=2 covered=true settleWallMs=87.89(criterion 4, wall clock over the settle) coveringFrameMs=87.34(criterion 3, that one frame)
+flutter: R2 tile zoom c4 repeat 1/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000) gestureFrames=80 p50=1.54ms p95=2.25ms max=4.84ms mean=1.46ms
+flutter: R2 tile zoom c4 repeat 1/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c4 repeat 1/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000)   settleFrames=25 covered=true settleWallMs=822.44(criterion 4, wall clock over the settle) coveringFrameMs=7.01(criterion 3, that one frame)
+flutter: R2 tile zoom c4 repeat 2/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000) gestureFrames=80 p50=1.34ms p95=1.84ms max=5.38ms mean=1.28ms
+flutter: R2 tile zoom c4 repeat 2/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c4 repeat 2/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000)   settleFrames=2 covered=true settleWallMs=101.43(criterion 4, wall clock over the settle) coveringFrameMs=100.34(criterion 3, that one frame)
+flutter: R2 tile zoom c4 repeat 2/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000) gestureFrames=80 p50=1.02ms p95=1.71ms max=1.82ms mean=0.99ms
+flutter: R2 tile zoom c4 repeat 2/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c4 repeat 2/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000)   settleFrames=25 covered=true settleWallMs=799.31(criterion 4, wall clock over the settle) coveringFrameMs=6.48(criterion 3, that one frame)
+flutter: R2 tile zoom c4 repeat 3/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000) gestureFrames=80 p50=1.16ms p95=1.85ms max=5.30ms mean=1.16ms
+flutter: R2 tile zoom c4 repeat 3/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c4 repeat 3/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000)   settleFrames=2 covered=true settleWallMs=77.88(criterion 4, wall clock over the settle) coveringFrameMs=77.44(criterion 3, that one frame)
+flutter: R2 tile zoom c4 repeat 3/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000) gestureFrames=80 p50=1.22ms p95=1.92ms max=2.11ms mean=1.16ms
+flutter: R2 tile zoom c4 repeat 3/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c4 repeat 3/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000)   settleFrames=25 covered=true settleWallMs=741.29(criterion 4, wall clock over the settle) coveringFrameMs=6.52(criterion 3, that one frame)
+flutter: R2 tile zoom c4 repeat 4/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000) gestureFrames=80 p50=1.40ms p95=1.90ms max=3.80ms mean=1.41ms
+flutter: R2 tile zoom c4 repeat 4/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c4 repeat 4/4 arm A [debugRestBakeDisabled=false] rest bake ON -- criterion 4's numerator (500000)   settleFrames=2 covered=true settleWallMs=98.02(criterion 4, wall clock over the settle) coveringFrameMs=96.70(criterion 3, that one frame)
+flutter: R2 tile zoom c4 repeat 4/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000) gestureFrames=80 p50=1.12ms p95=1.92ms max=5.18ms mean=1.14ms
+flutter: R2 tile zoom c4 repeat 4/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c4 repeat 4/4 arm B [debugRestBakeDisabled=true] rest bake OFF -- criterion 4's denominator, the tiled fill (500000)   settleFrames=25 covered=true settleWallMs=781.35(criterion 4, wall clock over the settle) coveringFrameMs=6.75(criterion 3, that one frame)
+flutter: R2 app-run: done
+Application finished.

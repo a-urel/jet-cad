@@ -1,0 +1,467 @@
+# Review package: 63e8cc1..HEAD
+
+## Commits
+0cca785 fix(tests): six deferred Minor findings from Plan 3i's task reviews
+
+## Files changed
+ apps/dev_harness_2d/lib/main.dart                  |   1 +
+ apps/dev_harness_2d/lib/measurement_rig.dart       |  23 +++++
+ docs/superpowers/notes/plan-3i-mutation-log.md     | 114 +++++++++++++++++++++
+ .../test/support/tile_harness.dart                 |  16 +--
+ .../jet_cad_2d_flutter/test/tile_regime_test.dart  |  20 +++-
+ .../jet_cad_2d_flutter/test/tile_settle_test.dart  |  28 +++--
+ 6 files changed, 184 insertions(+), 18 deletions(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index bbc0a8c..94092b0 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -521,20 +521,21 @@ Future<void> _driveR2(
+   // The `tile zoom` phase (Plan 3i, Task 11): `ZOOM_ARMS` repeats of the
+   // pinned script, each starting fresh from the same fitted camera `runR2Rig`
+   // itself started from, so this arm and Plan 3h's tile-pan arm inside
+   // `runR2Rig` describe the same starting state. Off by default -- see
+   // [kZoomArms].
+   if (tileCache != null && kZoomArms > 0) {
+     // The pinned reference viewport (§5), not `viewport` above -- see
+     // `runTileZoomPhase`'s doc comment for what a differently sized real
+     // window means for these numbers.
+     const zoomViewport = Size(1600, 1200);
++    warnIfZoomViewportMismatch(viewport, zoomViewport);
+     for (var arm = 0; arm < kZoomArms; arm++) {
+       camera.value = fittedCamera;
+       await _pumpFrame();
+       final zoomReport = await runTileZoomPhase(
+         camera: camera,
+         cache: tileCache,
+         pumpFrame: _pumpFrame,
+         viewport: zoomViewport,
+       );
+       printZoomReport('R2 tile zoom arm $arm ($kEntities)', zoomReport);
+diff --git a/apps/dev_harness_2d/lib/measurement_rig.dart b/apps/dev_harness_2d/lib/measurement_rig.dart
+index 8959ec7..f5aa05f 100644
+--- a/apps/dev_harness_2d/lib/measurement_rig.dart
++++ b/apps/dev_harness_2d/lib/measurement_rig.dart
+@@ -661,20 +661,43 @@ const double kZoomFactor = 1.03;
+ /// residual arithmetic the zoom exercises would never run (anti-degenerate
+ /// rule, clause 5).
+ ///
+ /// [viewport] is the size the script's own numbers are priced against --
+ /// the pinned **1600x1200 logical at `devicePixelRatio` 2** reference
+ /// viewport (§5), not necessarily whatever the real window happens to be.
+ /// See [runTileZoomPhase]'s doc comment for what that means for a caller.
+ Offset zoomFocusFor(Size viewport) =>
+     Offset(viewport.width * 0.30, viewport.height * 0.70);
+ 
++/// Warns, loudly, when the window a caller is about to run [runTileZoomPhase]
++/// against is not [pinned] -- the 1600x1200 logical reference every number in
++/// design spec §5, and every figure in this plan's measurement notes, is
++/// priced against.
++///
++/// **A warning, not a throw.** [runTileZoomPhase] accepts any finite viewport
++/// and still produces a report -- refusing to run would trade a labelled
++/// number for no number at all, which is worse for an operator mid-session
++/// than a number they have to read the label on. Before this check, the only
++/// way to notice a mismatch was the unrelated `R2 app-run: window=...` print
++/// upstream -- easy to have scrolled past by the time the zoom arm's numbers
++/// print. This check sits at the call site itself, so the warning lands right
++/// next to the numbers it is warning about.
++void warnIfZoomViewportMismatch(Size real, Size pinned) {
++  if (real == pinned) return;
++  print('  !!! WARNING: tile zoom phase run at window='
++      '${real.width.toStringAsFixed(0)}x${real.height.toStringAsFixed(0)}, '
++      'not the pinned reference ${pinned.width.toStringAsFixed(0)}x'
++      '${pinned.height.toStringAsFixed(0)} -- the numbers below are measured '
++      'at the WRONG VIEWPORT and are not comparable to design spec §5 or to '
++      'any run at the pinned size !!!');
++}
++
+ /// What [runTileZoomPhase] reports: the gesture's frame times and the
+ /// cache's counters over it, then the settle that follows.
+ class ZoomReport {
+   ZoomReport({
+     required this.gestureFrameMs,
+     required this.gestureBakes,
+     required this.gestureLiveDraws,
+     required this.settleMs,
+     required this.settleFrames,
+   });
+diff --git a/docs/superpowers/notes/plan-3i-mutation-log.md b/docs/superpowers/notes/plan-3i-mutation-log.md
+index 4caa104..f36f386 100644
+--- a/docs/superpowers/notes/plan-3i-mutation-log.md
++++ b/docs/superpowers/notes/plan-3i-mutation-log.md
+@@ -1,12 +1,30 @@
+ # Plan 3i — mutation log
+ 
++> **Note, added once the batch-minors pass understood the discrepancy below:**
++> M2, M6 and M6b were all measured under Task 8, before Task 9's `Center` fix
++> to `pumpTiled` (`support/tile_harness.dart`, commit `1e2f891`) landed.
++> Before that fix, `pumpWidget` handed the canvas its surface's *tight*
++> constraints and the un-centred `SizedBox` was inert against them, so the
++> canvas those three mutants ran on was 800x600 logical -- 1600x1200 device
++> pixels at `kTileDpr`, 25 x 19 = 475 tiles, ~19 one-tile-row bands -- not the
++> 400x300 logical / 130 tile / ~10 band canvas the fix made every later entry
++> in this file true of. The kills stand and are **not re-run**: each mutation
++> still produces exactly the failure its own entry describes, on whatever
++> canvas the suite ran against that day, and a canvas size does not decide
++> whether a band image leaks or a slice loop drops eleven tiles. What the note
++> is for is the raw counts those three entries print -- `475`, `513`, `38`,
++> `19 bands`, and the `800x600`/`BoxConstraints(w=800.0, h=600.0)` seen in one
++> stack trace -- so a reader does not mistake them for the fixed canvas's
++> figures (130 tiles, ~10 bands) or wonder why they disagree with every later
++> entry.
++
+ ## M1
+ 
+ **Task:** Task 2, "A moving frame draws the composite and nothing else."
+ 
+ **Mutation:** In `packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`'s
+ `paintFrame`, deleted the guard block
+ 
+ ```dart
+     if (!resting) {
+       // Nothing else this frame. The composite is already down; a zoom out
+@@ -151,20 +169,23 @@ Expected: <2>
+   Actual: <1>
+ ```
+ 
+ With kRestGateFrames = 1, the wheel test bakes on every other notch (384 tiles
+ instead of 0), confirming the threshold of 2 is necessary to meet the spec.
+ 
+ ---
+ 
+ ## M2 — the slice loop emits only the first tile of each band
+ 
++> Measured at the pre-fix 800x600-logical canvas -- see the note at the top
++> of this file. The kill stands; it is not re-run.
++
+ **Task 8.** A band is walked and rasterised in full, but only its leftmost tile
+ is cut out of it. Every other visible key is left to the budgeted tile loop, so
+ a resting frame no longer covers the viewport in one frame — which is the whole
+ claim Task 8 lands.
+ 
+ **Mutation:**
+ 
+ ```diff
+ --- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+ +++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -220,20 +241,25 @@ The test description was:
+ 00:00 +2 -1: Some tests failed.
+ 
+ Failing tests:
+   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_settle_test.dart: the settle completes in one frame
+ ```
+ 
+ ---
+ 
+ ## M6 — the band image is never disposed
+ 
++> Measured at the pre-fix 800x600-logical canvas -- see the note at the top
++> of this file. `475`, `513` and `19 bands` below are that canvas's counts,
++> not the fixed canvas's 130 tiles / ~10 bands. The kill stands; it is not
++> re-run.
++
+ **Task 8.** The band image is dropped from `_band` but its native memory is
+ never released. The brief spells this mutation as deleting `image.dispose();`
+ and the `_imagesAlive--;` beside it; the shipped code routes both through
+ `_disposeImage`, "the single door every `ui.Image` this cache owns leaves by",
+ so deleting that one call is exactly the same mutation — it removes the
+ `dispose()` and the decrement together.
+ 
+ **Mutation:**
+ 
+ ```diff
+@@ -291,20 +317,24 @@ The test description was:
+ 00:00 +1 -1: Some tests failed.
+ 
+ Failing tests:
+   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart: the ceiling holds at every point inside the rest frame
+ ```
+ 
+ ---
+ 
+ ## M6b — the band image is never assigned to `_band`
+ 
++> Measured at the pre-fix 800x600-logical canvas -- see the note at the top
++> of this file (the `BoxConstraints(w=800.0, h=600.0)` in the transcript
++> below is that canvas). The kill stands; it is not re-run.
++
+ **Task 8, fix round 1.** The band is baked, sliced and disposed correctly, but
+ `_band` is never set, so `liveBytes` cannot see the one image the whole banding
+ design exists to bound.
+ 
+ **Why it needed its own mutant.** Task 4 landed `_band` and `debugSetBand` and
+ proved `liveBytes` counts a band *handed to the seam*. It could not prove the
+ production path puts one there. Task 8 assigns `_band` on the real path, but
+ the ceiling assertion it shipped with -- `liveBytes <= kTileCacheBytes` inside
+ the slice -- is one-sided: with `_band` unassigned `liveBytes` reads the tile
+ sum, which is smaller still and satisfies it, and
+@@ -1094,10 +1124,94 @@ The test description was:
+ ════════════════════════════════════════════════════════════════════════════════════════════════════
+ 00:00 +10 -1: an edit after a sliced settle condemns the sliced tiles [E]
+   Test failed. See exception logs above.
+   The test description was: an edit after a sliced settle condemns the sliced tiles
+   
+ 00:00 +10 -1: Some tests failed.
+ 
+ Failing tests:
+   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart: an edit after a sliced settle condemns the sliced tiles
+ ```
++
++---
++
++## M12 — the skew term c is not compared
++
++**Batch-minors pass, found by review of `tile_regime_test.dart`.** Every
++fixture in that file — the `at()` helper and the skew test's own literals —
++sets `c = 0`, including both sides of `'the skew terms are compared too'`.
++Deleting `x.c == y.c` from `sameQuantisedCamera` therefore killed no test: `c`
++never varied, so the field being ignored was indistinguishable from the field
++being equal. Fixed by extending that test with a second pair that varies `c`
++and holds every other field fixed.
++
++**Mutation:**
++
++```diff
++--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++@@ -240,7 +240,6 @@
++   return x.a == y.a &&
++       x.b == y.b &&
++-      x.c == y.c &&
++       x.d == y.d &&
++       x.e == y.e &&
++       x.f == y.f;
++```
++
++**Procedure:** copied `tile_cache.dart` aside to the scratchpad, edited the
++working file to delete `x.c == y.c &&`, ran
++`CI=true flutter test test/tile_regime_test.dart`, confirmed red, then
++restored the working file from the scratchpad copy. **Never `git checkout`.**
++
++**Result:** red, as expected — the new `c1`/`c2` case in `'the skew terms are
++compared too'` fails because two transforms differing only in `c` now compare
++equal.
++
++**Verbatim output:**
++
++```
++Resolving dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`...
++Downloading packages...
++  _fe_analyzer_shared 103.0.0 (105.0.0 available)
++  analyzer 13.3.0 (14.1.0 available)
++  code_assets 1.2.1 (2.0.0 available)
++  hooks 2.1.0 (2.2.0 available)
++  lucide_icons_flutter 3.1.15 (3.1.17 available)
++  material_color_utilities 0.13.0 (0.13.1 available)
++  objective_c 9.5.0 (9.6.0 available)
++  package_config 2.2.0 (3.0.0 available)
++  record_use 1.1.0 (1.1.1 available)
++  shadcn_ui 0.55.1 (0.56.2 available)
++  source_maps 0.10.13 (0.10.14 available)
++  test 1.31.1 (1.31.2 available)
++  test_api 0.7.12 (0.7.13 available)
++  test_core 0.6.18 (0.6.19 available)
++  vm_service 15.2.0 (15.3.0 available)
++Got dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`!
++15 packages have newer versions incompatible with dependency constraints.
++Try `flutter pub outdated` for more information.
++00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
++00:00 +0: the same camera compares same
++00:00 +1: a scale change compares different
++00:00 +2: a translation change compares different
++00:00 +3: the skew terms are compared too
++00:00 +3 -1: the skew terms are compared too [E]
++  Expected: false
++    Actual: <true>
++  
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/tile_regime_test.dart 43:5                     main.<fn>
++  
++00:00 +3 -1: a moving frame bakes nothing and walks nothing
++00:00 +4 -1: a moving frame with no composite falls through and draws something
++00:00 +5 -1: a steadily spun wheel never arms the rest gate
++00:00 +6 -1: the gate needs two unchanged frames, not one
++00:00 +7 -1: Some tests failed.
++
++Failing tests:
++  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart: the skew terms are compared too
++```
++
++Restored from the scratchpad copy and re-ran the same file green (`+8: All
++tests passed!`) before moving on.
+diff --git a/packages/jet_cad_2d_flutter/test/support/tile_harness.dart b/packages/jet_cad_2d_flutter/test/support/tile_harness.dart
+index 77d07c3..a6da311 100644
+--- a/packages/jet_cad_2d_flutter/test/support/tile_harness.dart
++++ b/packages/jet_cad_2d_flutter/test/support/tile_harness.dart
+@@ -155,26 +155,30 @@ Future<int> settleFromBands(WidgetTester t, TiledHarness h) async {
+     handle: Handle(900),
+     name: 'BAND-DROP',
+     color: IndexedColor(3),
+     linetype: ReservedHandles.continuousLinetype,
+     lineweight: 50,
+     transparency: 0,
+   ));
+   await t.pump();
+   await settle(t, h);
+   h.cache.debugOnSliceForTest = null;
+-  // Anti-vacuity, and the clause the whole helper exists for: an arm that
+-  // compared two frames after a settle that sliced nothing would be a gate on
+-  // the per-tile bake wearing the band path's name.
+-  expect(slices, greaterThan(0),
+-      reason: 'the rest frame sliced no tile at '
+-          'all, so nothing below measures the band path');
++  // Pinned to equality, not merely non-zero: this helper's own doc comment
++  // promises **every** visible tile was cut out of a band, and a rest bake
++  // that filled some tiles through the band path and backfilled the rest
++  // through the ordinary per-tile `_bake` would satisfy `greaterThan(0)`
++  // while breaking that promise. Measured on this harness: `slices ==
++  // liveTileCount == 130`.
++  expect(slices, equals(h.cache.liveTileCount),
++      reason: 'every visible tile must have been cut from a band -- a '
++          'partial band bake backfilled through the ordinary per-tile path '
++          'must not pass as a band settle');
+   expect(h.cache.viewportCovered, isTrue,
+       reason: 'the rest bake must have refilled the generation it dropped');
+   return slices;
+ }
+ 
+ /// One more painted frame at the camera [h] already has.
+ ///
+ /// **The frame a rest bake after a *scale change* leaves on screen is not a
+ /// clean generation, and this is the same allowance `tile_cache_test`'s
+ /// `criterion 1: a settled frame equals the live frame after a zoom` makes by
+diff --git a/packages/jet_cad_2d_flutter/test/tile_regime_test.dart b/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
+index 550abe3..b9de199 100644
+--- a/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
+@@ -25,20 +25,29 @@ void main() {
+     expect(sameQuantisedCamera(at(1.4, 10, 20), at(1.4, 11, 20)), isFalse);
+     expect(sameQuantisedCamera(at(1.4, 10, 20), at(1.4, 10, 21)), isFalse);
+   });
+ 
+   test('the skew terms are compared too', () {
+     final a = ViewportTransform(
+         worldToScreenMatrix: Transform2(1.4, 0.1, 0, -1.4, 10, 20));
+     final b = ViewportTransform(
+         worldToScreenMatrix: Transform2(1.4, 0.2, 0, -1.4, 10, 20));
+     expect(sameQuantisedCamera(a, b), isFalse);
++
++    // The other skew term. Every other fixture in this file, including `a`
++    // and `b` above, leaves `c` at 0 -- so without a case that varies it,
++    // deleting `x.c == y.c` from the comparison kills no test here.
++    final c1 = ViewportTransform(
++        worldToScreenMatrix: Transform2(1.4, 0, 0.1, -1.4, 10, 20));
++    final c2 = ViewportTransform(
++        worldToScreenMatrix: Transform2(1.4, 0, 0.2, -1.4, 10, 20));
++    expect(sameQuantisedCamera(c1, c2), isFalse);
+   });
+ 
+   testWidgets('a moving frame bakes nothing and walks nothing', (t) async {
+     final h = await pumpTiled(t);
+     // Settle first, so the failure below cannot be "there was nothing to do".
+     await settle(t, h);
+     expect(h.cache.viewportCovered, isTrue);
+ 
+     h.cache.resetCounters();
+     for (var i = 0; i < 8; i++) {
+@@ -100,23 +109,28 @@ void main() {
+     // zoom's own retire attempt also has nothing to mint from.
+     h.camera.zoomAt(const Offset(120, 90), 1.05);
+     await t.pump();
+     h.camera.zoomAt(const Offset(120, 90), 1.05);
+     await t.pump();
+ 
+     expect(h.cache.hasCarryOver, isFalse,
+         reason: 'the outgoing generation for both zooms never covered, so '
+             '`_retireGeneration` minted nothing to fall back on -- this is '
+             'the state the guard has to survive without painting nothing');
+-    expect(
+-        h.cache.blitCount + h.cache.liveDrawCount + h.cache.carryOverBlitCount,
+-        greaterThan(0),
++    // `liveDrawCount` alone, not the three-way sum: a single blitted tile
++    // satisfies "not gated" without proving the frame drew any geometry, and
++    // the live walk is what the ordinary bake-and-live-walk path this guard
++    // falls through to actually promises. Confirmed to still die to the
++    // guard's own mutation (deleting `_carryOver == null ||`): with no
++    // composite and the clause gone, `resting` reads false, the early return
++    // fires, and `liveDrawCount` stays 0.
++    expect(h.cache.liveDrawCount, greaterThan(0),
+         reason: 'a moving frame with no composite to show must still draw '
+             'something -- the ordinary bake-and-live-walk path -- rather '
+             'than leave the viewport blank for the length of the gesture');
+   });
+ 
+   // A wheel spun steadily: one scale change per frame, with a single
+   // unchanged frame between notches. Under a one-frame gate this bakes on
+   // every second frame.
+   testWidgets('a steadily spun wheel never arms the rest gate', (t) async {
+     final h = await pumpTiled(t);
+diff --git a/packages/jet_cad_2d_flutter/test/tile_settle_test.dart b/packages/jet_cad_2d_flutter/test/tile_settle_test.dart
+index 6ab1230..f6fbd68 100644
+--- a/packages/jet_cad_2d_flutter/test/tile_settle_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tile_settle_test.dart
+@@ -22,42 +22,52 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'support/tile_fixture.dart';
+ import 'support/tile_harness.dart';
+ 
+ void main() {
+   /// Pumps a canvas whose viewport needs more tiles than one frame may bake.
+   ///
+   /// 400x300 logical at dpr 2 is 800x600 device pixels; at a 64-pixel tile
+   /// that is 13 x 10 = 130 tiles against a budget of 262144 / 4096 = 64 per
+   /// frame. Two frames minimum, and the fixture inks all of them.
++  ///
++  /// **The `Center` is load-bearing, the same finding `pumpTiled` in
++  /// `support/tile_harness.dart` documents.** `pumpWidget` hands its child the
++  /// surface's *tight* constraints, and a `SizedBox` under tight constraints
++  /// is inert -- so without `Center` this canvas ran at 800x600 logical
++  /// (1600x1200 device pixels, 475 tiles), not the 400x300 the comment above
++  /// describes, and the "ten is slack" bound below was really spent on eight
++  /// of its ten iterations.
+   Future<TileCache> pumpFilling(WidgetTester tester) async {
+     final measurer = FlutterTextMeasurer();
+     addTearDown(measurer.clear);
+     final doc = fillingGrid(measurer);
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+     final camera = CameraController(tileCamera());
+     addTearDown(camera.dispose);
+ 
+     await tester.pumpWidget(MediaQuery(
+       data: const MediaQueryData(devicePixelRatio: kTileDpr),
+       child: Directionality(
+         textDirection: TextDirection.ltr,
+-        child: SizedBox(
+-          width: kTileViewport.width,
+-          height: kTileViewport.height,
+-          child: DraftCanvas(
+-            document: doc,
+-            index: index,
+-            camera: camera,
+-            tiles: true,
+-            tileDevicePixels: 64,
++        child: Center(
++          child: SizedBox(
++            width: kTileViewport.width,
++            height: kTileViewport.height,
++            child: DraftCanvas(
++              document: doc,
++              index: index,
++              camera: camera,
++              tiles: true,
++              tileDevicePixels: 64,
++            ),
+           ),
+         ),
+       ),
+     ));
+     await tester.pump();
+     return tester.state<DraftCanvasState>(find.byType(DraftCanvas)).tileCache!;
+   }
+ 
+   testWidgets('a frame that left tiles unbaked asks for another', (t) async {
+     final cache = await pumpFilling(t);

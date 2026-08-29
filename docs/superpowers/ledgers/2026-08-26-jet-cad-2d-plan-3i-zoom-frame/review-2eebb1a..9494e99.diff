@@ -1,0 +1,131 @@
+# Review package: 2eebb1a..HEAD
+
+## Commits
+9494e99 fix(tiles): Task 3 review findings — add hasCarryOver assertion, M4b mutation
+
+## Files changed
+ docs/superpowers/notes/plan-3i-mutation-log.md     | 39 ++++++++++++++++++++++
+ .../jet_cad_2d_flutter/lib/src/tile_cache.dart     |  4 +--
+ .../jet_cad_2d_flutter/test/tile_regime_test.dart  | 11 ++++++
+ 3 files changed, 52 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/notes/plan-3i-mutation-log.md b/docs/superpowers/notes/plan-3i-mutation-log.md
+index 5da4014..e3aebb5 100644
+--- a/docs/superpowers/notes/plan-3i-mutation-log.md
++++ b/docs/superpowers/notes/plan-3i-mutation-log.md
+@@ -107,10 +107,49 @@ nothing" and "a steadily spun wheel never arms the rest gate" tests fail:
+ Expected: <0>
+   Actual: <512>
+ a moving frame must bake nothing
+ 
+ 00:00 +5 -2: a steadily spun wheel never arms the rest gate [E]
+   Test failed. See exception logs above.
+ Expected: <0>
+   Actual: <768>
+ a wheel that keeps turning must never reach two consecutive unchanged frames, so it must never bake
+ ```
++
++## M4b — the rest gate at one frame instead of two
++
++**Task:** Task 3, "The wheel clause — two unchanged frames, not one."
++
++**Mutation:** In `packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`,
++changed the constant:
++
++```dart
++const int kRestGateFrames = 1;
++```
++
++(instead of 2)
++
++This tests whether the threshold itself is correct, independent of the guard's
++other terms. M4 proved the gate is load-bearing; M4b proves the threshold must
++be 2.
++
++**Procedure:** copied `tile_cache.dart` aside, edited the constant from 2 to 1,
++ran the tests, then restored from the copy. **Never `git checkout`.**
++
++**Result:** red, as expected — both affected tests fail:
++
++**Verbatim output:**
++
++```
++00:00 +6 -1: a steadily spun wheel never arms the rest gate [E]
++Expected: <0>
++  Actual: <384>
++a wheel that keeps turning must never reach two consecutive unchanged frames,
++so it must never bake
++
++00:00 +6 -2: the gate needs two unchanged frames, not one [E]
++Expected: <2>
++  Actual: <1>
++```
++
++With kRestGateFrames = 1, the wheel test bakes on every other notch (384 tiles
++instead of 0), confirming the threshold of 2 is necessary to meet the spec.
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+index 3236cfc..f127a62 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -803,22 +803,22 @@ class TileCache {
+     // "Walk the uncovered region" is therefore a full-viewport live walk --
+     // 31.5-41.6 ms at 500,000 entities -- on every zoom-out frame.
+     final previous = _lastQuantised;
+     _restGateSteps =
+         previous != null && sameQuantisedCamera(previous, quantised)
+             ? _restGateSteps + 1
+             : 0;
+     _lastQuantised = quantised;
+     // **`previous == null` is not a moving frame.** It is the very first
+     // frame this cache has ever painted, with nothing behind it to have
+-    // moved away from. Gating it on the literal `_restGateSteps >= kRestGateFrames` would
+-    // leave a brand-new cache blank -- no bake, and no composite either,
++    // moved away from. Gating it on the literal `_restGateSteps >=
++    // kRestGateFrames` would leave a brand-new cache blank -- no bake, and
+     // since nothing has ever been retired -- until some later frame
+     // fortuitously repeated the same camera.
+     //
+     // **Not `&& !_viewportCovered` either.** A frame whose camera matches the
+     // last one but whose generation already covers the viewport still has to
+     // run the loop below: every visible key already holds an image, so the
+     // loop bakes nothing on its own, but it still has to *blit* those images
+     // onto this frame's canvas. `TileCache.paintFrame`'s only other exit from
+     // that loop is the coverage check inside it, which already makes baking
+     // a no-op once covered -- gating the loop itself here would additionally
+diff --git a/packages/jet_cad_2d_flutter/test/tile_regime_test.dart b/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
+index 1da64be..0eaa22c 100644
+--- a/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
+@@ -168,20 +168,31 @@ void main() {
+   // unchanged frame between notches. Under a one-frame gate this bakes on
+   // every second frame.
+   testWidgets('a steadily spun wheel never arms the rest gate', (t) async {
+     final h = await pumpTiled(t);
+     await settle(t, h);
+     h.cache.resetCounters();
+ 
+     for (var notch = 0; notch < 6; notch++) {
+       h.camera.zoomAt(const Offset(120, 90), 1.1); // the moving frame
+       await t.pump();
++
++      // After the first notch, a composite is minted by the settled generation.
++      // Asserting it exists proves the gate's threshold term is under test: if
++      // the composite were null, the guard's middle disjunct would decide every
++      // frame and the threshold value would be unreachable.
++      if (notch == 0) {
++        expect(h.cache.hasCarryOver, isTrue,
++            reason: 'the first zoom retires the settled generation into a '
++                'composite; without it this test is vacuous');
++      }
++
+       await t.pump(); // one unchanged frame before the next notch
+     }
+ 
+     expect(h.cache.bakeCount, 0,
+         reason: 'a wheel that keeps turning must never reach two consecutive '
+             'unchanged frames, so it must never bake');
+   });
+ 
+   test('the gate needs two unchanged frames, not one', () {
+     // The threshold itself, stated where a reader can see it: one unchanged

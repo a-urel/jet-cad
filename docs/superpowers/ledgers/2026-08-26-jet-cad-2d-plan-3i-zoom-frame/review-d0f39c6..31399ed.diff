@@ -1,0 +1,352 @@
+# Review package: d0f39c6..HEAD
+
+## Commits
+31399ed fix(tiles): a moving frame with no composite falls through, not blank
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/tile_cache.dart     | 26 +++++++++++--
+ .../test/invariants/tile_budget_test.dart          | 19 +++++----
+ .../test/support/tile_comparison.dart              | 12 +++---
+ .../jet_cad_2d_flutter/test/tile_cache_test.dart   |  9 +++--
+ .../jet_cad_2d_flutter/test/tile_regime_test.dart  | 45 ++++++++++++++++++++++
+ 5 files changed, 90 insertions(+), 21 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+index 8cb8dc4..25d4e6f 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -808,21 +808,38 @@ class TileCache {
+     //
+     // **Not `&& !_viewportCovered` either.** A frame whose camera matches the
+     // last one but whose generation already covers the viewport still has to
+     // run the loop below: every visible key already holds an image, so the
+     // loop bakes nothing on its own, but it still has to *blit* those images
+     // onto this frame's canvas. `TileCache.paintFrame`'s only other exit from
+     // that loop is the coverage check inside it, which already makes baking
+     // a no-op once covered -- gating the loop itself here would additionally
+     // skip the blit, and a repeated call at an unchanged, already-settled
+     // camera would draw nothing at all.
+-    final resting = previous == null || _restGateSteps >= 1;
++    //
++    // **Nor on a moving frame with no composite to fall back on.** The early
++    // return below is only honest when the carry-over blit just above it
++    // actually put something on screen. `_carryOver` is null on a moving
++    // frame in at least three real situations: the first frame this cache
++    // has ever painted (already exempted above); the outgoing generation
++    // never covered the viewport, so `_retireGeneration` minted nothing --
++    // which is exactly the state a second zoom reaches when it lands before
++    // the first one's settle completes; and any of `applyChange`,
++    // `_dropGeneration` or `_dropEverything` dropping a standing composite
++    // outright, if a camera change then lands before a rested frame. Gating
++    // a frame with no composite would paint nothing at all -- not a stale
++    // frame but a blank one -- for as long as the gesture continued. A blank
++    // viewport is worse than an expensive one, so this falls through to the
++    // ordinary bake-and-live-walk path instead: where there is nothing stale
++    // to show, drawing the real thing is the honest fallback.
++    final resting =
++        previous == null || _carryOver == null || _restGateSteps >= 1;
+ 
+     // Derived once and handed to every bake. Rebasing is frame-global by
+     // construction; a per-tile origin would give each tile its own
+     // quantisation step and `float32` residuals the live frame does not have.
+     final origin = rebaseOriginFor(quantised.visibleWorld(viewport));
+ 
+     // The budget is device pixels; a tile costs its own area against it, so
+     // this is the number of *tiles* this frame may bake at the cache's
+     // current tile size. See [budgetedTilesPerFrame]'s own doc comment.
+     var budget = budgetedTilesPerFrame;
+@@ -849,22 +866,25 @@ class TileCache {
+       // genuine ring the live fallback owes. Asserting the containment rather
+       // than assuming the gesture's direction is the difference between a
+       // cheap gesture and a blank border.
+       carryOverCovers = dest.left <= 0 &&
+           dest.top <= 0 &&
+           dest.right >= viewport.width &&
+           dest.bottom >= viewport.height;
+     }
+ 
+     if (!resting) {
+-      // Nothing else this frame. The composite is already down; a zoom out
+-      // leaves its ring as background until the gesture ends (spec D3).
++      // Nothing else this frame. `resting` is false here only because the
++      // camera is moving and a composite is already down to show for it --
++      // that is the third disjunct in `resting`'s own definition above, not
++      // an assumption made again here. A zoom out leaves that composite's
++      // ring as background until the gesture ends (spec D3).
+       return;
+     }
+ 
+     for (final key in grid.visibleKeys(quantised, viewport)) {
+       var image = _tiles[key];
+       // **The ceiling is consulted before the bake, not after the frame.** A
+       // small cap against a viewport of many tiles means the visible set alone
+       // overruns it, so a sweep at the end of `paintFrame` would have nothing
+       // left to reclaim -- every tile it could take was blitted this frame --
+       // and `liveBytes` would settle wherever the visible set happened to put
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart b/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart
+index 1726e92..6fc1b38 100644
+--- a/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart
++++ b/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart
+@@ -73,45 +73,49 @@ void main() {
+     // A cap of eight tiles at 64 device pixels: 8 * 64 * 64 * 4 = 131,072 B.
+     // Small on purpose -- the point is that the policy runs, and a production
+     // cap would need a corpus this suite cannot afford.
+     final rig = TileRig(
+         tileDevicePixels: 64, tilesBakedPerFrame: 1000, cacheBytes: 131072);
+     addTearDown(rig.dispose);
+ 
+     for (var i = 0; i < 6; i++) {
+       rig.panBy(-64, -32);
+       rig.paintOnce();
+-      settle(rig);
++      // No `settle` here: this test only pans, so no generation is ever
++      // retired and `_carryOver` stays null throughout -- the rest gate's
++      // fallback for a moving frame with nothing to fall back on keeps this
++      // call unGated, matching pre-Plan-3i counts on the very first call.
+       expect(rig.cache.liveBytes, lessThanOrEqualTo(131072), reason: 'pan $i');
+     }
+     expect(rig.cache.evictionCount, greaterThan(0),
+         reason: 'anti-degenerate clause 7: a cap nothing reaches is not a cap');
+   });
+ 
+   test('criterion 12: a pan back to reclaimed tiles draws live, not blank',
+       () async {
+     // Anti-degenerate clause 7. This is the failure that would ship as an
+     // intermittent blank strip: no settled-frame criterion can see it.
+     final rig = TileRig(
+         tileDevicePixels: 64, tilesBakedPerFrame: 2, cacheBytes: 131072);
+     addTearDown(rig.dispose);
+     rig.paintOnce();
++    // No `settle` in either loop below: this test only pans, so `_carryOver`
++    // stays null throughout and every one of these calls falls through
++    // unGated.
+     for (var i = 0; i < 6; i++) {
+       rig.panBy(-64, 0);
+       rig.paintOnce();
+-      settle(rig);
+     }
+     rig.cache.resetCounters();
+     for (var i = 0; i < 6; i++) {
+       rig.panBy(64, 0);
+       rig.paintOnce();
+-      settle(rig);
+     }
+     expect(rig.cache.liveDrawCount, greaterThan(0),
+         reason: 'the camera returned to tiles the cap reclaimed');
+   });
+ 
+   test('criterion 13: allocation is viewport-bounded and the Paint is one',
+       () async {
+     final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+     addTearDown(rig.dispose);
+     rig.paintOnce();
+@@ -281,45 +285,45 @@ void main() {
+     //
+     // A blank strip where a reclaimed tile used to be shows up as
+     // `uncoveredPixels`, which `expectTiledEqualsLive` requires to be zero
+     // over a capture that is required to have real ink in it.
+     final rig = TileRig(
+         tileDevicePixels: 64, tilesBakedPerFrame: 2, cacheBytes: _smallCap);
+     addTearDown(rig.dispose);
+ 
+     rig.paintOnce();
+     // Twelve tiles of travel against an eight-tile ring: the long-pan fixture
+-    // has to leave the retained set behind, or "reclaimed" names nothing.
++    // has to leave the retained set behind, or "reclaimed" names nothing. No
++    // `settle`: this test only pans, so `_carryOver` stays null throughout
++    // and every call below falls through unGated.
+     for (var i = 0; i < 6; i++) {
+       rig.panBy(-64, 0);
+       rig.paintOnce();
+-      settle(rig);
+     }
+     expect(rig.cache.evictionCount, greaterThan(0),
+         reason: 'setup: the pan really did overrun the cap');
+     expect(rig.cache.holds(const TileKey(0, 0)), isFalse,
+         reason: 'setup: and the tile the first frame baked is gone');
+ 
+     // Every key here is inside the end camera's visible rectangle -- the
+     // anchor never moved, so that rectangle is x in 0..12, y in 0..9 -- and
+     // each was held at the far end of the pan.
+     final atFarEnd = <TileKey>[
+       for (var x = 6; x <= 12; x++)
+         if (rig.cache.holds(TileKey(x, 0))) TileKey(x, 0)
+     ];
+     expect(atFarEnd.length, greaterThan(2),
+         reason: 'setup: there have to be tiles to come back to');
+ 
+     for (var i = 0; i < 6; i++) {
+       rig.panBy(64, 0);
+       rig.paintOnce();
+-      settle(rig);
+     }
+     final reclaimed = atFarEnd.where((k) => !rig.cache.holds(k)).toList();
+     expect(reclaimed, isNotEmpty,
+         reason: 'setup: the camera is back over tiles the cap reclaimed on '
+             'the way, which is the state the pixel comparison is about');
+     expect(rig.cache.liveBytes, lessThanOrEqualTo(_smallCap));
+ 
+     await expectTiledEqualsLive(rig);
+   });
+ 
+@@ -327,24 +331,25 @@ void main() {
+     // **No other instrument in this plan can see a leaked `ui.Image`.** An
+     // image holds native memory past its Dart object, so a path that removes a
+     // tile from the map without disposing it frees nothing while every counter
+     // reports success: `liveTileCount` falls, `liveBytes` falls,
+     // `evictionCount` rises. Eviction is where that compounds, because it is
+     // the only reclaim path that runs every frame forever.
+     final rig = TileRig(
+         tileDevicePixels: 64, tilesBakedPerFrame: 1000, cacheBytes: _smallCap);
+     addTearDown(rig.dispose);
+ 
++    // No `settle`: this loop only pans, so `_carryOver` stays null throughout
++    // and every call below falls through unGated.
+     for (var i = 0; i < 6; i++) {
+       rig.panBy(-64, -32);
+       rig.paintOnce();
+-      settle(rig);
+       expect(rig.cache.debugImagesAlive, rig.cache.liveTileCount,
+           reason: 'pan $i: every image this cache created and did not dispose '
+               'is a tile it can still blit');
+     }
+     expect(rig.cache.evictionCount, greaterThan(0),
+         reason: 'setup: images were actually reclaimed, so the equality above '
+             'is a statement about a disposal that happened');
+ 
+     // And the composite is tracked too, so the same equality keeps meaning
+     // "nothing leaked" once one stands.
+diff --git a/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart b/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
+index 3795c81..6cfb12d 100644
+--- a/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
++++ b/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
+@@ -336,27 +336,25 @@ Future<InkReport> measureFallbackAgreement(
+       tileDevicePixels: 64, tilesBakedPerFrame: 1000, document: of(measurer));
+   try {
+     // Cover the viewport, so the strip that enters next has blitted tiles on
+     // its interior side.
+     rig.paintOnce();
+     rig.cache.resetCounters();
+     // One tile a frame, so the entering band stays uncovered and the fallback
+     // owes it.
+     rig.cache.bakeBudgetDevicePixels = 64 * 64;
+     rig.panBy(pan.dx, pan.dy);
+-    // Plan 3i Task 2: the frame right after a pan is the gate's moving frame
+-    // and draws only the carry-over composite, baking and live-drawing
+-    // nothing -- this fixture is about the partly baked frame *after* that,
+-    // where the reduced budget leaves a genuine entering strip for the live
+-    // fallback to own.
+-    rig.paintOnce();
+-
++    // No settle needed here: this fixture only pans, so no generation is
++    // ever retired and `_carryOver` stays null throughout -- the rest gate's
++    // fallback for a moving frame with nothing to fall back on keeps this
++    // call unGated, so the reduced budget below still leaves a genuine
++    // entering strip for the live fallback to own on this very call.
+     final measured = await measureTiledAgreement(rig);
+ 
+     // Anti-vacuity, and every clause of it was earned by an arrangement that
+     // passed while proving nothing.
+     expect(rig.cache.liveDrawCount, greaterThan(0),
+         reason: 'pan $pan ran no fallback: $measured');
+     expect(rig.cache.blitCount, greaterThan(0),
+         reason: 'pan $pan blitted nothing, so nothing was partly baked');
+     final strip = rig.cache.debugLastStrip;
+     expect(strip, isNotNull, reason: 'pan $pan recorded no strip');
+diff --git a/packages/jet_cad_2d_flutter/test/tile_cache_test.dart b/packages/jet_cad_2d_flutter/test/tile_cache_test.dart
+index 6095a9d..a1fd868 100644
+--- a/packages/jet_cad_2d_flutter/test/tile_cache_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tile_cache_test.dart
+@@ -557,25 +557,26 @@ void main() {
+     expect(gestureInk, greaterThan(5000),
+         reason: 'the composite must actually reach the canvas: $gestureInk '
+             'against a warm $warmInk');
+   });
+ 
+   test('the settle spreads its bakes across frames', () async {
+     final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 4);
+     addTearDown(rig.dispose);
+     rig.paintOnce();
+     rig.zoomBy(1.03);
+-    // The moving frame the gate now inserts: it retires the (uncovered, so
+-    // composite-less) old generation and bakes nothing of the new one.
+-    rig.paintOnce();
++    // No moving-frame absorber needed: generation one never covered the
++    // viewport at a budget of four, so `_retireGeneration` never minted a
++    // composite from it -- the very first call below has no composite to
++    // fall back on and falls through to the ordinary bake path unGated,
++    // exactly like the three after it.
+     rig.cache.resetCounters();
+-    // Settled: the scale stops moving, so the new generation fills in.
+     for (var i = 0; i < 3; i++) {
+       rig.paintOnce();
+     }
+     expect(rig.cache.bakeCount, 12, reason: 'four per frame, three frames');
+     expect(rig.cache.liveTileCount, 12,
+         reason: 'and every bake was kept, so 12 is a throttle rather than a '
+             'recount of four tiles rebaked three times');
+     expect(rig.cache.hasCarryOver, isFalse,
+         reason: 'and no composite stands: generation one never covered the '
+             'viewport at a budget of four, so nothing was minted -- which is '
+diff --git a/packages/jet_cad_2d_flutter/test/tile_regime_test.dart b/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
+index 58486ad..1774119 100644
+--- a/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
+@@ -111,11 +111,56 @@ void main() {
+     // the previous frame's number standing and the assertion would pass for
+     // the wrong reason. The cache's counter increments where the live walk
+     // actually happens.
+     expect(h.cache.liveDrawCount, 0,
+         reason: 'a moving frame must draw no live geometry either -- the '
+             'uncovered region bounds to the whole viewport, so a live walk '
+             'there is a full-viewport walk, 31.5-41.6 ms at 500,000 entities');
+     expect(h.cache.carryOverBlitCount, greaterThan(0),
+         reason: 'and it must still show something');
+   });
++
++  testWidgets(
++      'a moving frame with no composite falls through and draws something',
++      (t) async {
++    final h = await pumpTiled(t);
++    // A one-tile budget: the first generation this cache ever bakes cannot
++    // cover `fillingGrid`'s ~130 tiles at this viewport within a handful of
++    // frames, so no generation is ever retired into a composite before the
++    // zooms below -- the review's state (2), reached without ever settling
++    // once. `settle` is not called here on purpose: settling would either
++    // finish covering (defeating the setup) or, if it never can, hang the
++    // suite -- neither is wanted.
++    h.cache.bakeBudgetDevicePixels = 64 * 64;
++    await t.pump();
++    // Non-vacuous setup, asserted rather than assumed: if this generation
++    // somehow did cover, the zoom below would mint a composite the normal
++    // way and the frames after it would pass for a reason that has nothing
++    // to do with the guard this test exists to catch.
++    expect(h.cache.hasCarryOver, isFalse,
++        reason: 'setup: nothing has ever been retired into a composite yet');
++    expect(h.cache.viewportCovered, isFalse,
++        reason: 'setup: the one-tile budget cannot have covered the '
++            'viewport already, or the composite above would be real for '
++            'the wrong reason');
++
++    h.cache.resetCounters();
++    // Two zooms, with no settling frame in between: the generation the first
++    // zoom leaves behind never gets a chance to cover either, so the second
++    // zoom's own retire attempt also has nothing to mint from.
++    h.camera.zoomAt(const Offset(120, 90), 1.05);
++    await t.pump();
++    h.camera.zoomAt(const Offset(120, 90), 1.05);
++    await t.pump();
++
++    expect(h.cache.hasCarryOver, isFalse,
++        reason: 'the outgoing generation for both zooms never covered, so '
++            '`_retireGeneration` minted nothing to fall back on -- this is '
++            'the state the guard has to survive without painting nothing');
++    expect(
++        h.cache.blitCount + h.cache.liveDrawCount + h.cache.carryOverBlitCount,
++        greaterThan(0),
++        reason: 'a moving frame with no composite to show must still draw '
++            'something -- the ordinary bake-and-live-walk path -- rather '
++            'than leave the viewport blank for the length of the gesture');
++  });
+ }

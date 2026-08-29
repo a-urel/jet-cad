@@ -1,0 +1,4 @@
+# The repository root ignores `*.log`. These eight are evidence, not scratch:
+# they are the raw device transcripts behind every figure in
+# `notes/2026-08-26-plan-3i-results.md`, and they are archived deliberately.
+!*.log

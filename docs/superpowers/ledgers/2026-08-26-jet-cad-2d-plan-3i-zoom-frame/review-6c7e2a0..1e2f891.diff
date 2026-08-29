@@ -1,0 +1,1356 @@
+# Review package: 6c7e2a0..HEAD
+
+## Commits
+1e2f891 test(tiles): differential arms for the slice, the overhang and the pan
+
+## Files changed
+ docs/superpowers/notes/plan-3i-mutation-log.md     | 559 +++++++++++++++++++++
+ .../jet_cad_2d_flutter/test/support/fixtures.dart  |  14 +-
+ .../test/support/tile_comparison.dart              | 207 ++++++++
+ .../test/support/tile_fixture.dart                 | 108 ++++
+ .../test/support/tile_harness.dart                 | 108 +++-
+ .../test/tile_slice_differential_test.dart         | 143 ++++++
+ 6 files changed, 1132 insertions(+), 7 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/notes/plan-3i-mutation-log.md b/docs/superpowers/notes/plan-3i-mutation-log.md
+index dd1d793..7157415 100644
+--- a/docs/superpowers/notes/plan-3i-mutation-log.md
++++ b/docs/superpowers/notes/plan-3i-mutation-log.md
+@@ -433,10 +433,569 @@ unexpected.
+ ════════════════════════════════════════════════════════════════════════════════════════════════════
+ 00:00 +1 -1: the ceiling holds at every point inside the rest frame [E]
+   Test failed. See exception logs above.
+   The test description was: the ceiling holds at every point inside the rest frame
+   
+ 00:00 +1 -1: Some tests failed.
+ 
+ Failing tests:
+   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart: the ceiling holds at every point inside the rest frame
+ ```
++
++## M3 — the slice rectangle is always the band's first tile
++
++**Task 9.** `TileGrid.sliceSourceRect` returns `Rect.fromLTWH(0, 0, tile, tile)`
++whatever key it is asked about, so every tile in a band is cut from the band's
++leftmost 64 device pixels.
++
++**Mutation:**
++
++```diff
++@@ -339,7 +339,7 @@
++   /// numbered. Integral by construction -- [deviceDeltaFrom] rounds, and a
++   /// tile side is `tileDevicePixels` exactly.
++   Rect sliceSourceRect(TileBand band, TileKey key) => Rect.fromLTWH(
++-        key.x * tileDevicePixels.toDouble() - band.deviceRect.left,
+++        0,
++         0,
++         tileDevicePixels.toDouble(),
++         tileDevicePixels.toDouble(),
++```
++
++**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
++whole package suite with `CI=true flutter test`, then restored from the copy.
++**Never `git checkout`.**
++
++**Result:** red on **four of the five differential arms** and on Task 7's
++`sliceSourceRect` unit test. The counts are the whole point: 58,424 to 78,387
++differing pixels out of 480,000 on the three whole-frame arms, and 10,684 on
++the tile-edge sweep alone. Arm 3's number (68,370) is smaller than arm 1's
++because its band's first key is `-3`, so a fixed `(0, 0)` source happens to be
++right for that one column.
++
++**Verbatim output:**
++
++```
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <58424>
++a band is queried with a pad and clipped without one, and the tiles cut out of it have to hold what
++the live frame draws
++
++  [stack trace elided]
++The test description was:
++  a settled generation is identical to a live frame
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <68370>
++rebasing is frame-global: every band must be walked against the frame origin, not one it derived for
++itself
++
++  [stack trace elided]
++The test description was:
++  and at a camera on a power-of-two rebase boundary
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <59892>
++an edge tile sliced from a viewport-sized source blits its transparent overhang here, and costs the
++same as an opaque one, so no timing gate can see it
++
++  [stack trace elided]
++The test description was:
++  and stays identical after a pan smaller than one tile
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <78387>
++a grid-space slice rectangle reads off the wrong part of the band image as soon as the visible key
++range moves
++
++  [stack trace elided]
++The test description was:
++  and when a pan lands between the scale change and the bake
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <10684>
++a seam lives on the boundary, and a whole-frame count buries it under 62 interior columns out of
++every 64
++
++  [stack trace elided]
++The test description was:
++  tile boundaries carry no difference of their own
++
++00:06 +392 ~1 -7: Some tests failed.
++Failing tests:
++  test/tile_band_test.dart: the band bake a slice rectangle is band-local and integral
++  test/tile_cache_test.dart: criterion 1: a settled frame equals the live frame after a zoom
++  test/tile_slice_differential_test.dart: a settled generation is identical to a live frame
++  test/tile_slice_differential_test.dart: and at a camera on a power-of-two rebase boundary
++  ... and 3 more
++```
++
++## M7 — `bandsFor` clamps its band rectangles to the viewport
++
++**Task 9.** A band is cut to the viewport instead of to the tiles it holds, so
++the last row's band image is 24 device pixels tall where its tiles are 64. The
++slice then reads 40 rows that are not in the image and gets transparency.
++
++**Why arm 2 is its only pixel gate, and why that mattered.** Task 5's overhang
++test asserts `greaterThanOrEqualTo`, so a band truncated exactly *to* the
++viewport edge satisfies it. The truncated rows also sit outside the viewport at
++the camera the band was cut at, so arm 1 cannot see them either: a transparent
++blit costs exactly what an opaque one costs, which is why Plan 3h's p95 pan
++gate is blind to this as well. It takes a pan smaller than one tile -- 7
++logical, 14 device pixels here -- to drag those rows inside the viewport, and
++that is arm 2.
++
++**Mutation:**
++
++```diff
++@@ -368,11 +368,18 @@
++             row * tileDevicePixels.toDouble(),
++             byRow[row]!.length * tileDevicePixels.toDouble(),
++             tileDevicePixels.toDouble(),
++-          ),
+++          ).intersect(_viewportDeviceRect(camera, viewport)),
++         ),
++     ];
++   }
++ 
+++  /// M7: the viewport in the grid's own device space.
+++  Rect _viewportDeviceRect(ViewportTransform camera, Size viewport) {
+++    final (dx, dy) = deviceDeltaFrom(camera);
+++    return Rect.fromLTWH(-dx.toDouble(), -dy.toDouble(),
+++        viewport.width * devicePixelRatio, viewport.height * devicePixelRatio);
+++  }
+++
++   /// Floor division that stays correct for negative numerators.
++   ///
++   /// Dart's `~/` truncates toward zero, so `-1 ~/ 64` is `0` and the tile to
++```
++
++**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
++whole package suite with `CI=true flutter test`, then restored from the copy.
++**Never `git checkout`.**
++
++**Result:** red on arm 2 (3,780 differing pixels -- 14 device rows across 270
++columns of the bottom edge) and on arm 3 (8,692). Arm 1, arm 5 and the tile-edge
++sweep are all green under it, which is the measurement Task 5's `>=` bound
++predicted.
++
++**Verbatim output:**
++
++```
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <8692>
++an edge tile sliced from a viewport-sized source blits its transparent overhang here, and costs the
++same as an opaque one, so no timing gate can see it
++
++  [stack trace elided]
++The test description was:
++  and stays identical after a pan smaller than one tile
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <3780>
++a grid-space slice rectangle reads off the wrong part of the band image as soon as the visible key
++range moves
++
++  [stack trace elided]
++The test description was:
++  and when a pan lands between the scale change and the bake
++
++00:07 +395 ~1 -4: Some tests failed.
++Failing tests:
++  test/tile_band_test.dart: a band is one tile tall and the full union width
++  test/tile_band_test.dart: the band bake a slice rectangle is band-local and integral
++  test/tile_slice_differential_test.dart: and stays identical after a pan smaller than one tile
++  test/tile_slice_differential_test.dart: and when a pan lands between the scale change and the bake
++```
++
++## M9 — the band query is not padded
++
++**Task 9.** `const pad = 0.0` in `_bakeBand`, so the band walks exactly its own
++rectangle and drops every entity whose *bounds* fall outside it. A stroke is
++wider than its geometry: an entity whose centreline sits just outside a band
++still inks pixels inside it, and the painter's index query is an exact rect
++intersection on bounds -- measured, a line 0.1 world units outside a query rect
++is not returned.
++
++**The fixture is what makes this visible, and its first arrangement did not.**
++`bandCrossingGrid` places one 2.00 mm stroke (3.780 logical pixels of
++half-width) one logical pixel outside each band boundary, so it inks 2.780
++logical pixels -- 5.56 device rows -- into the band on the far side. The
++arrangement that shipped first placed a stroke on *both* sides of every
++boundary; those two centrelines are 2 logical pixels apart against a 3.780
++half-width, so the inner stroke's ink covers exactly what the outer one's loss
++would have exposed and **M9 changed zero pixels at `tileCamera`**. One stroke a
++boundary, alternating sides, is what makes the loss reachable. Recorded on
++`_sideFor` in `tile_fixture.dart`.
++
++**Mutation:**
++
++```diff
++@@ -2006,7 +2006,7 @@
++     // uses -- padding one alone makes them disagree. The canvas is pulled back
++     // by the same amount, so the padded viewport's origin lands where the
++     // band's own origin was.
++-    const pad = kTileSlack;
+++    const pad = 0.0;
++     into.save();
++     into.translate(-pad, -pad);
++```
++
++**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
++whole package suite with `CI=true flutter test`, then restored from the copy.
++**Never `git checkout`.**
++
++**Result:** red on all five differential arms and on both of Task 6's band-query
++unit tests. 30,160 differing pixels on arms 1 and 5, 8,196 and 9,170 on arms 2
++and 3, 3,475 on the tile-edge sweep.
++
++**Verbatim output:**
++
++```
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <30160>
++a band is queried with a pad and clipped without one, and the tiles cut out of it have to hold what
++the live frame draws
++
++  [stack trace elided]
++The test description was:
++  a settled generation is identical to a live frame
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <3475>
++rebasing is frame-global: every band must be walked against the frame origin, not one it derived for
++itself
++
++  [stack trace elided]
++The test description was:
++  and at a camera on a power-of-two rebase boundary
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <30160>
++an edge tile sliced from a viewport-sized source blits its transparent overhang here, and costs the
++same as an opaque one, so no timing gate can see it
++
++  [stack trace elided]
++The test description was:
++  and stays identical after a pan smaller than one tile
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <9170>
++a grid-space slice rectangle reads off the wrong part of the band image as soon as the visible key
++range moves
++
++  [stack trace elided]
++The test description was:
++  and when a pan lands between the scale change and the bake
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <8196>
++a seam lives on the boundary, and a whole-frame count buries it under 62 interior columns out of
++every 64
++
++  [stack trace elided]
++The test description was:
++  tile boundaries carry no difference of their own
++
++00:06 +391 ~1 -8: Some tests failed.
++Failing tests:
++  test/tile_band_test.dart: the band bake the band camera puts a world point at the band-local pixel
++  test/tile_band_test.dart: the band bake the padded query reaches kTileSlack past the band on every side
++  test/tile_cache_test.dart: criterion 1: a settled frame equals the live frame after a zoom
++  test/tile_slice_differential_test.dart: a settled generation is identical to a live frame
++  ... and 4 more
++```
++
++## M9b — the band pad is applied to the camera but not to the canvas
++
++**Task 9.** `into.translate(-pad, -pad)` is dropped from `_bakeBand` while the
++band camera keeps its `+pad`. The query still reaches `kTileSlack` past the
++band on every side -- Task 6's two unit tests both stay green -- but every pixel
++the band draws lands 32 logical pixels down and right of where it belongs.
++
++**Why it needs its own mutant beside M9.** M9 removes the pad from both halves
++at once, which is a *consistent* mistake: the band is then simply narrower than
++it should be. This one is the inconsistent half, and it is the failure mode the
++pad's own comment warns about ("The canvas is pulled back by the same amount, so
++the padded viewport's origin lands where the band's own origin was"). No
++query-side assertion can see it.
++
++**Mutation:**
++
++```diff
++@@ -2008,7 +2008,6 @@
++     // band's own origin was.
++     const pad = kTileSlack;
++     into.save();
++-    into.translate(-pad, -pad);
++ 
++     final m = grid.anchor.worldToScreenMatrix;
++     final bandCamera = ViewportTransform(
++```
++
++**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
++whole package suite with `CI=true flutter test`, then restored from the copy.
++**Never `git checkout`.**
++
++**Result:** red on all five differential arms, at the largest counts of any
++mutant here -- 140,032 to 227,695 differing pixels of 480,000, because every
++band's whole content is displaced rather than a few rows of it lost.
++
++**Verbatim output:**
++
++```
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <140032>
++a band is queried with a pad and clipped without one, and the tiles cut out of it have to hold what
++the live frame draws
++
++  [stack trace elided]
++The test description was:
++  a settled generation is identical to a live frame
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <192258>
++rebasing is frame-global: every band must be walked against the frame origin, not one it derived for
++itself
++
++  [stack trace elided]
++The test description was:
++  and at a camera on a power-of-two rebase boundary
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <140060>
++an edge tile sliced from a viewport-sized source blits its transparent overhang here, and costs the
++same as an opaque one, so no timing gate can see it
++
++  [stack trace elided]
++The test description was:
++  and stays identical after a pan smaller than one tile
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <227695>
++a grid-space slice rectangle reads off the wrong part of the band image as soon as the visible key
++range moves
++
++  [stack trace elided]
++The test description was:
++  and when a pan lands between the scale change and the bake
++
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <8469>
++a seam lives on the boundary, and a whole-frame count buries it under 62 interior columns out of
++every 64
++
++  [stack trace elided]
++The test description was:
++  tile boundaries carry no difference of their own
++
++00:07 +393 ~1 -6: Some tests failed.
++Failing tests:
++  test/tile_cache_test.dart: criterion 1: a settled frame equals the live frame after a zoom
++  test/tile_slice_differential_test.dart: a settled generation is identical to a live frame
++  test/tile_slice_differential_test.dart: and at a camera on a power-of-two rebase boundary
++  test/tile_slice_differential_test.dart: and stays identical after a pan smaller than one tile
++  ... and 2 more
++```
++
++## M10 — the slice rectangle is measured in grid space, not band space
++
++**Task 9.** `sliceSourceRect` drops `- band.deviceRect.left`, so a key's source
++rectangle is measured from the generation's anchor rather than from the band
++image's own origin.
++
++**Why arm 3 is its only pixel gate.** `TileBand.deviceRect.left` is
++`keys.first.x * tileDevicePixels` by definition, so it is **zero exactly when
++the visible key range starts at column 0** -- and then band-local and
++grid-space arithmetic are the same arithmetic and this mutation is the identity.
++Every arm that does not move the key range is therefore blind to it, and the
++plan's pinned pure-zoom script never moves it: a zoom re-anchors the grid on the
++camera it zoomed to, so the range starts at 0 again. Arm 3 takes the pan
++**between** the scale change and the rest bake -- `Offset(90, 60)`, 180 x 120
++device pixels -- which drives the range to `x0 = -3`, `y0 = -2` and
++`deviceRect.left` to -192. Verified on the shipped code, not assumed:
++`bands.first.keys.first.x = -3`, `deviceRect = Rect.fromLTRB(-192.0, -128.0,
++640.0, -64.0)`.
++
++**Mutation:**
++
++```diff
++@@ -339,7 +339,7 @@
++   /// numbered. Integral by construction -- [deviceDeltaFrom] rounds, and a
++   /// tile side is `tileDevicePixels` exactly.
++   Rect sliceSourceRect(TileBand band, TileKey key) => Rect.fromLTWH(
++-        key.x * tileDevicePixels.toDouble() - band.deviceRect.left,
+++        key.x * tileDevicePixels.toDouble(),
++         0,
++         tileDevicePixels.toDouble(),
++         tileDevicePixels.toDouble(),
++```
++
++**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
++whole package suite with `CI=true flutter test`, then restored from the copy.
++**Never `git checkout`.**
++
++**Result:** red on arm 3 (132,650 differing pixels) and on Task 7's
++`sliceSourceRect` unit test. Green on arms 1, 2, 4 and 5, exactly as the
++`deviceRect.left == 0` degeneracy predicts.
++
++**Verbatim output:**
++
++```
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <132650>
++a grid-space slice rectangle reads off the wrong part of the band image as soon as the visible key
++range moves
++
++  [stack trace elided]
++The test description was:
++  and when a pan lands between the scale change and the bake
++
++00:07 +397 ~1 -2: Some tests failed.
++Failing tests:
++  test/tile_band_test.dart: the band bake a slice rectangle is band-local and integral
++  test/tile_slice_differential_test.dart: and when a pan lands between the scale change and the bake
++```
++
++## M11 — the band derives its own rebase origin — **survives every pixel arm**
++
++**Task 9.** `_bakeBand` calls `rebaseOriginFor` on its own padded band viewport
++instead of using the frame-global origin handed in. Killed by Task 6's
++`every band is rebased against the origin handed in`, which observes the origin
++directly. **Not killed by any of the five differential arms, including the one
++built for it**, and that is a measurement rather than an omission.
++
++**The arm that was supposed to kill it, and why it cannot.**
++`rebaseBoundaryCamera` puts the view span at 133.333 world units -- `floor(log2)
++= 7`, step 128 -- with the view centre at 128.1667, one device pixel past the
++128 cell boundary, and the visible world y running 78.167 to 178.167 so that
++bands genuinely fall on both sides of it. Under M11 the bands therefore *do*
++take different origins from the frame: `(128, 128)` for some rows, `(128, 0)`
++for others. The frame still comes out **pixel-identical** -- `differingPixels`
++reads 0 -- and the reason is in `DraftPainter._emitScreenSpace`: it computes
++`p_screen - _screenOrigin` in `float64` and hands the sink
++`beginResidual(translation(_screenOrigin))`, and `VerticesDrawSink` adds the
++residual back in `float64` before storing an **absolute** screen coordinate in
++its `Float32List`. The origin cancels algebraically before anything is rounded
++to `float32`, so at this fixture's magnitudes the residual difference is around
++`1e-13` device pixels -- fourteen orders of magnitude below the `1.1e-05` that
++Task 6a measured as the threshold for flipping a single pixel on a near-axis
++slope, and this fixture is axis-aligned by construction.
++
++**What this means for the origin argument.** A pixel comparison is the wrong
++instrument for it at ordinary world magnitudes; the direct observation Task 6
++ships is the right one, and it is the gate of record. The origin's value is
++paid for at 4.5e6-scale coordinates (`large_coordinate_test.dart`), where the
++`float64` cancellation above is no longer exact -- a fixture at those
++magnitudes could plausibly make a pixel arm see it, and none of this plan's
++fixtures is at those magnitudes.
++
++**Mutation:**
++
++```diff
++@@ -1988,6 +1988,7 @@
++         grid.matchesScale(quantised),
++         'a band belongs to one generation, so the frame camera and the grid '
++         'anchor must agree on scale');
+++    assert(origin.x == origin.x);
++     final dpr = grid.devicePixelRatio;
++     final width = band.deviceRect.width / dpr;
++     final height = band.deviceRect.height / dpr;
++@@ -2029,11 +2030,9 @@
++       painter,
++       sink,
++       vertices,
++-      // **The viewport's origin, never the band's.** Rebasing is frame-global
++-      // by construction: a per-band origin gives each band its own
++-      // quantisation step and `float32` residuals the live frame does not
++-      // have, and can cross a power-of-two step between one row and the next.
++-      origin,
+++      // ignore: dead_code
+++      rebaseOriginFor(bandCamera
+++          .visibleWorld(Size(width + 2 * pad, height + 2 * pad))),
++       (handle) => visitedInto.add(handle.value),
++     );
++     into.restore();
++```
++
++**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
++whole package suite with `CI=true flutter test`, then restored from the copy.
++**Never `git checkout`.**
++
++**Result:** red on Task 6's origin test only. The differential arms are green.
++
++**Verbatim output:**
++
++```
++00:06 +398 ~1 -1: Some tests failed.
++Failing tests:
++  test/tile_band_test.dart: the band bake every band is rebased against the origin handed in
++```
++
++## M8 — the slice blits through a `FilterQuality.low` paint — **a declared survivor**
++
++**Task 9, and green by design.** `_sliceTile` blits through a paint with
++`filterQuality = FilterQuality.low` instead of `none`. Recorded here as a
++**declared survivor**, not as a gate's failure: `sliceSourceRect` is integral by
++construction and the destination is the same size, so a bilinear sample and a
++nearest sample read the same texels and the only difference is that a sampler
++was paid for. Plan 3h's M6 had this shape and was recorded as gap H6.
++
++**It dying would have been the finding.** A death here would mean the source
++rectangles are *not* integral -- that a slice is resampling -- and the whole
++"texture copy, not a raster" claim would be wrong. The full suite is green under
++it, which is the positive statement the mutation makes: the rectangles are
++integral.
++
++**Mutation:**
++
++```diff
++@@ -2080,6 +2080,9 @@
++   /// from the rejected Approach B. `FilterQuality.none`: the source rectangle
++   /// is integral and the destination is the same size, so there is nothing to
++   /// interpolate and a sampler would be pure cost.
+++  final Paint _sliceFilterPaint = Paint()
+++    ..filterQuality = FilterQuality.low;
+++
++   Image _sliceTile(Image band, TileBand from, TileKey key, TileGrid grid) {
++     final recorder = PictureRecorder();
++     final into = Canvas(recorder);
++@@ -2088,7 +2091,7 @@
++       grid.sliceSourceRect(from, key),
++       Rect.fromLTWH(
++           0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble()),
++-      _blitPaint,
+++      _sliceFilterPaint,
++     );
++     final picture = recorder.endRecording();
++     final image = picture.toImageSync(tileDevicePixels, tileDevicePixels);
++```
++
++**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran the
++whole package suite with `CI=true flutter test`, then restored from the copy.
++**Never `git checkout`.**
++
++**Result:** green, as declared. 399 passed, 1 skipped.
++
++**Verbatim output:**
++
++```
++00:06 +399 ~1: All tests passed!
++```
+diff --git a/packages/jet_cad_2d_flutter/test/support/fixtures.dart b/packages/jet_cad_2d_flutter/test/support/fixtures.dart
+index e9361ee..1d2852d 100644
+--- a/packages/jet_cad_2d_flutter/test/support/fixtures.dart
++++ b/packages/jet_cad_2d_flutter/test/support/fixtures.dart
+@@ -10,32 +10,33 @@ const Size kViewport = Size(800, 600);
+ 
+ Handle addEntity(
+   DraftDocument doc,
+   Handle owner,
+   Handle handle,
+   EntityKind kind,
+   List<double> coords,
+   List<double> scalars, {
+   DraftColor color = const ByLayerColor(),
+   int transparency = 0,
++  int lineweight = 25,
+ }) {
+   doc.commands.execute(AddEntityCommand(
+     record: EntityRecord(
+       handle: handle,
+       owner: owner,
+       kind: kind,
+       layer: ReservedHandles.layerZero,
+       linetype: ReservedHandles.byLayerLinetype,
+       linetypeScale: 1.0,
+       geomIndex: 0,
+       color: color,
+-      lineweight: 25,
++      lineweight: lineweight,
+       transparency: transparency,
+       flags: 0,
+     ),
+     payload: GeometryPayload(
+       coords: Float64List.fromList(coords),
+       scalars: Float64List.fromList(scalars),
+     ),
+   ));
+   return handle;
+ }
+@@ -141,24 +142,31 @@ DraftDocument differentialFixture(
+       [ox + 30, oy + 15], const []);
+ 
+   return doc;
+ }
+ 
+ /// Adds a line entity from ([x0], [y0]) to ([x1], [y1]), owned by [owner].
+ ///
+ /// [transparency] defaults to `0`, this channel's identity, so every existing
+ /// caller is unaffected; a caller exercising translucency must pass a
+ /// non-zero value explicitly.
++///
++/// [lineweight] is 1/100 mm on paper and defaults to the `25` every entity
++/// this file builds has always carried, so no existing fixture moves by a
++/// pixel. A caller that needs a stroke wide enough to ink across a boundary
++/// its centreline does not cross -- `bandCrossingGrid` is the one -- passes
++/// its own.
+ Handle addLine(DraftDocument doc, Handle owner, Handle handle, double x0,
+-        double y0, double x1, double y1, {int transparency = 0}) =>
++        double y0, double x1, double y1,
++        {int transparency = 0, int lineweight = 25}) =>
+     addEntity(doc, owner, handle, EntityKind.line, [x0, y0, x1, y1], const [],
+-        transparency: transparency);
++        transparency: transparency, lineweight: lineweight);
+ 
+ /// Adds an empty block definition named [name].
+ Handle addDefinition(DraftDocument doc, Handle handle, String name) {
+   doc.tree.addDefinition(Definition(
+       handle: handle,
+       name: name,
+       basePoint: Vector2.zero(),
+       children: const []));
+   return handle;
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart b/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
+index 6cfb12d..ed04196 100644
+--- a/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
++++ b/packages/jet_cad_2d_flutter/test/support/tile_comparison.dart
+@@ -15,25 +15,28 @@
+ // so this instrument cannot produce an antialiased seam and a zero result here
+ // is partly a property of the instrument. It proves geometric completeness:
+ // no pixel missing, none drawn twice, no clipping arithmetic error. Accepted
+ // gap G1 owns the rest, and mutant M3 is deferred to it. **M15 is the mutant
+ // this instrument fires**, and it moves pixels software Skia renders perfectly
+ // well.
+ 
+ import 'dart:typed_data';
+ import 'dart:ui';
+ 
++import 'package:flutter/rendering.dart';
++import 'package:flutter/widgets.dart' hide Image;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'tile_fixture.dart';
++import 'tile_harness.dart';
+ 
+ class InkReport {
+   const InkReport({
+     required this.liveInk,
+     required this.tiledInk,
+     required this.strayPixels,
+     required this.uncoveredPixels,
+     required this.differingPixels,
+     required this.liveTriangleCount,
+     required this.tiledTriangleCount,
+@@ -420,10 +423,214 @@ Future<List<InkReport>> sweepFallbackAgreement({
+       reports.add(await measureFallbackAgreement(of, measurer, offset,
+           minimumInk: minimumInk,
+           minimumStripInk: minimumStripInk,
+           checkTriangleBudget: checkTriangleBudget));
+     } finally {
+       measurer.clear();
+     }
+   }
+   return reports;
+ }
++
++/// The camera whose view span sits **just past a power-of-two rebase step**.
++///
++/// `rebaseOriginFor` (`camera_controller.dart`) takes the larger of the
++/// visible world box's two spans, floors its base-2 logarithm to get a step,
++/// and floors the view *centre* onto that step. A band is a fraction of the
++/// frame's height, so a `_bakeBand` that derived its own origin instead of
++/// using the one handed in would floor a different centre — and only lands on
++/// a *different* step cell when a cell boundary actually falls inside the
++/// frame. At an ordinary camera it usually does not, and the mutation is
++/// invisible; this camera is chosen so it does.
++///
++/// **The arithmetic, and how it is known to straddle.** The viewport is
++/// [kTileViewport], 400x300 logical. At the scale 3.0 below the visible world
++/// box is `400 / 3 = 133.333` by `300 / 3 = 100`, so the span is **133.333**,
++/// `floor(log2(133.333)) = 7`, and the step is **128** — the view is 1.042
++/// steps wide, so exactly one cell boundary lies inside it. The translations
++/// put the centre at
++///
++///     cx = (200 - e) / 3   = (200 + 184.5) / 3 = 128.1667
++///     cy = (f - 150) / 3   = (534.5 - 150) / 3 = 128.1667
++///
++/// which is **0.1667 world units — one device pixel — past the 128 boundary**,
++/// so the frame origin is `(128, 128)` and any band whose own centre falls
++/// below 128 takes `(128, 0)` or `(0, 128)` instead. The visible world y runs
++/// `78.167 .. 178.167`, so the 128 line is 50 world units inside it and the
++/// bands genuinely fall on both sides.
++///
++/// Both translations are whole device pixels at [kTileDpr] (`-184.5 * 2 =
++/// -369`, `534.5 * 2 = 1069`), so `quantiseCamera` leaves this camera exactly
++/// as written and the tiled and live arms see the same matrix. The visible
++/// world box, `x 61.5 .. 194.833` by `y 78.167 .. 178.167`, is strictly inside
++/// [bandCrossingGrid]'s `-52 .. 380` by `-52 .. 300` extent, so the drawing
++/// fills the viewport here rather than leaving a blank margin the comparison
++/// would pass on for free.
++ViewportTransform rebaseBoundaryCamera() => ViewportTransform(
++    worldToScreenMatrix: Transform2(3.0, 0, 0, -3.0, -184.5, 534.5));
++
++/// The [kTileViewport] at [kTileDpr], in device pixels — the size both
++/// captures come back at.
++///
++/// **Asserted rather than assumed, by every helper that takes them.** The
++/// edge sweeps below index a flat buffer as `(y * width + x) * 4`, so a
++/// capture of a different size is not a failure but a *silent* reinterpretation
++/// of the wrong quarter of the image, and the sweep goes on reporting zero.
++/// That is not hypothetical: `pumpTiled`'s `SizedBox` was inert under
++/// `pumpWidget`'s tight constraints until this task, so the canvas really was
++/// 800x600 logical and these captures really were 1600x1200.
++const int kCaptureWidth = 800;
++const int kCaptureHeight = 600;
++
++Future<ByteData> _captureBoundary(WidgetTester t) async {
++  final boundary = t.renderObject<RenderRepaintBoundary>(find.descendant(
++      of: find.byType(DraftCanvas), matching: find.byType(RepaintBoundary)));
++  late ByteData data;
++  // `toImage` is a real async rasterisation and deadlocks under the fake async
++  // zone a `testWidgets` body runs in; `runAsync` is the documented way out
++  // and is the pattern this file's `_capture` already relies on through
++  // `Picture.toImage`.
++  await t.runAsync(() async {
++    final image = await boundary.toImage(pixelRatio: kTileDpr);
++    data = (await image.toByteData())!;
++    image.dispose();
++  });
++  return data;
++}
++
++/// The tiled canvas exactly as it stands, at [kTileDpr].
++///
++/// Nothing is pumped here: a pump would give the cache another frame, and the
++/// state under test is the one the caller settled into.
++Future<ByteData> captureTiled(WidgetTester t, TiledHarness h) =>
++    _captureBoundary(t);
++
++/// The same document, index and camera, drawn with `tiles: false`.
++///
++/// **The camera is quantised and that is the rule, not a concession.**
++/// `TileCache.paintFrame` quantises once, covering the blits and the live
++/// fallback alike, so a tiled frame is internally consistent;
++/// `DraftCanvas`'s untiled branch deliberately does not (see its own comment
++/// — quantising there would move the *default* rendering path by up to half a
++/// device pixel for nothing). Handing the untiled tree the quantised camera is
++/// what makes the two captures one drawing seen twice rather than two
++/// drawings, and it is exactly what [measureTiledAgreement] does for its own
++/// live arm.
++///
++/// **This replaces the widget tree**, so the tiled cache behind [h] is
++/// disposed by the time it returns. Capture the tiled arm first — every caller
++/// here does, and Dart evaluates arguments left to right, so
++/// `differingPixels(await captureTiled(...), await captureLive(...))` is
++/// ordered correctly by the language rather than by luck.
++///
++/// **The key is the whole reason this returns a different image at all, and
++/// without it this instrument was blind to every mutant.**
++/// `_DraftCustomPainter.shouldRepaint` returns `false` unconditionally and
++/// says why — `repaint` is the only trigger, and answering `true` there would
++/// repaint on every unrelated rebuild. Pumping a tree that differs only in
++/// `tiles` therefore re-runs `didUpdateWidget` (which does tear the cache
++/// down) and then **keeps the retained picture**: the "live" capture came back
++/// byte-for-byte equal to the tiled one, and `differingPixels` read zero under
++/// M3, M7, M9, M9b, M10 and M11 alike. A key the tiled tree does not carry
++/// makes this a different element, so the render object is new and has no
++/// picture to retain.
++Future<ByteData> captureLive(WidgetTester t, TiledHarness h) async {
++  final controller = CameraController(quantiseCamera(h.camera.value, kTileDpr));
++  addTearDown(controller.dispose);
++  // The same `Center` `pumpTiled` needs, and for the same reason: without it
++  // this tree would be 800x600 logical and the two captures would be the same
++  // size as each other but not the size either arm's arithmetic assumes.
++  await t.pumpWidget(MediaQuery(
++    data: const MediaQueryData(devicePixelRatio: kTileDpr),
++    child: Directionality(
++      textDirection: TextDirection.ltr,
++      child: Center(
++          child: SizedBox(
++        width: kTileViewport.width,
++        height: kTileViewport.height,
++        child: DraftCanvas(
++          key: const ValueKey('captureLive'),
++          document: h.document,
++          index: h.index,
++          camera: controller,
++          tiles: false,
++          tileDevicePixels: 64,
++        ),
++      )),
++    ),
++  ));
++  await t.pump();
++  return _captureBoundary(t);
++}
++
++/// Pixels whose RGBA differs, over two captures of the same size.
++///
++/// Exact `==` on stored bytes, never a tolerance: these are recorded values,
++/// and a tolerance here is how a seam of one unit hides.
++int differingPixels(ByteData a, ByteData b) {
++  expect(a.lengthInBytes, b.lengthInBytes);
++  var differing = 0;
++  for (var i = 0; i < a.lengthInBytes; i += 4) {
++    if (a.getUint32(i) != b.getUint32(i)) differing++;
++  }
++  return differing;
++}
++
++bool _onEdge(int v, int tileDevicePixels) {
++  final m = v % tileDevicePixels;
++  return m == 0 || m == 1 || m == tileDevicePixels - 1;
++}
++
++/// The same comparison, restricted to the columns and rows a tile boundary
++/// falls on and the pixel either side of each.
++///
++/// A whole-frame count is dominated by tile interiors, where a seam cannot be:
++/// a slice that lost one column out of 64 moves 1.5% of the frame and reads as
++/// a small number beside a large one. This asks the question where the answer
++/// lives.
++int differingPixelsOnTileEdges(ByteData a, ByteData b,
++    {required int tileDevicePixels, required int width, required int height}) {
++  expect(a.lengthInBytes, width * height * 4,
++      reason: 'the sweep indexes rows by [width]; a capture of another size '
++          'is read as the wrong quarter of itself and still reports zero');
++  expect(b.lengthInBytes, a.lengthInBytes);
++  var differing = 0;
++  for (var y = 0; y < height; y++) {
++    for (var x = 0; x < width; x++) {
++      if (!_onEdge(x, tileDevicePixels) && !_onEdge(y, tileDevicePixels)) {
++        continue;
++      }
++      final i = (y * width + x) * 4;
++      if (a.getUint32(i) != b.getUint32(i)) differing++;
++    }
++  }
++  return differing;
++}
++
++/// Ink on those same rows and columns, so the sweep above cannot pass by
++/// having looked at background. [live] is the untiled capture.
++///
++/// **Non-transparent, not "not white", and the difference inverts the
++/// answer.** A `DraftCanvas` paints no background, so the page is
++/// `0x00000000`; layer zero's colour is white, so the *strokes* are
++/// `0xFFFFFFFF`. A predicate of `!= 0xFFFFFFFF` counts every background pixel
++/// and no drawn one — it read 11,660 where the true figure is 1,868, and it
++/// would have passed a floor of 200 on a capture with nothing in it at all.
++/// Alpha is what the rest of this file tests (`inkInside`, `measureTiled‐
++/// Agreement`) and it is what is tested here.
++int inkOnTileEdges(ByteData live,
++    {required int tileDevicePixels, required int width, required int height}) {
++  expect(live.lengthInBytes, width * height * 4,
++      reason: 'the sweep indexes rows by [width]; a capture of another size '
++          'is read as the wrong quarter of itself');
++  var ink = 0;
++  for (var y = 0; y < height; y++) {
++    for (var x = 0; x < width; x++) {
++      if (!_onEdge(x, tileDevicePixels) && !_onEdge(y, tileDevicePixels)) {
++        continue;
++      }
++      // Not the transparent page: a drawn pixel.
++      if (live.getUint8((y * width + x) * 4 + 3) != 0) ink++;
++    }
++  }
++  return ink;
++}
+diff --git a/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart b/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart
+index 1547857..3128084 100644
+--- a/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart
++++ b/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart
+@@ -322,10 +322,118 @@ DraftDocument fillingGrid(FlutterTextMeasurer measurer) {
+   // (-52 + 16*22 = 300, -52 + 16*27 = 380), so the outermost line lands
+   // exactly on the extent the table above measures rather than short of it.
+   for (var t = -52.0; t <= 300.0; t += 16.0) {
+     addLine(doc, doc.rootHandle, Handle(handle++), -52, t, 380, t);
+   }
+   for (var t = -52.0; t <= 380.0; t += 16.0) {
+     addLine(doc, doc.rootHandle, Handle(handle++), t, -52, t, 300);
+   }
+   return doc;
+ }
++
++/// Which side of boundary [n] its thick stroke sits on: **one stroke, not a
++/// pair**, alternating so both directions of the pad are exercised across the
++/// fixture.
++///
++/// **A stroke either side of the same boundary masks the loss it was placed to
++/// expose, and it did.** The two centrelines are 2 logical pixels apart
++/// against a 3.780 half-width, so their ink overlaps by 5.56 logical pixels
++/// and the union covers the boundary either way: the stroke centred at
++/// `32k - 1` inks `32k .. 32k + 2.780` inside band `k`, and the stroke centred
++/// at `32k + 1` -- which band `k`'s own query finds, padded or not -- inks
++/// `32k - 2.780 .. 32k + 4.780` over the top of it. Measured: with the pair in
++/// place, `const pad = 0.0` in `_bakeBand` (M9) changed **zero** pixels at
++/// [tileCamera]. With one stroke a boundary it changes thousands.
++double _sideFor(int n) => n.isOdd ? -1.0 : 1.0;
++
++/// The lineweight the band-boundary strokes in [bandCrossingGrid] carry, in
++/// 1/100 mm on paper.
++///
++/// **Chosen so the stroke is wider than its distance to the boundary, which is
++/// the whole of what M9 tests.** `CanvasDrawSink` and `VerticesDrawSink` both
++/// turn a lineweight into pixels as `hundredths / 100 * pixelsPerPaperMm`, and
++/// [kLogicalPixelsPerMm] is `96 / 25.4 = 3.7795`. At `200` that is
++/// `2.0 * 3.7795 = 7.559` logical pixels wide, so the half-width is **3.780
++/// logical pixels** — 7.559 device pixels at [kTileDpr]. A centreline placed
++/// one logical pixel outside a band's edge therefore inks 2.780 logical
++/// pixels (5.56 device rows) *inside* that band, across the band's whole
++/// width, and an unpadded band query drops every one of them.
++///
++/// The default `25` every other fixture here carries is 0.945 logical pixels
++/// wide — a half-width of 0.47, less than the one-pixel offset — so this
++/// fixture cannot be built out of it.
++const int kBandStrokeLineweight = 200;
++
++/// [fillingGrid]'s extent and spacing, plus **thick strokes centred just
++/// outside a band boundary**: the fixture the slice differential runs on.
++///
++/// **Anti-degenerate clause 2 — entities larger than one tile.** A 64
++/// device-pixel tile is 32 logical pixels at [kTileDpr]. Every horizontal line
++/// here spans world x `-52 .. 380`, which at [tileCamera]'s 1.4 scale is
++/// **604.8 logical pixels — 18.9 tiles**; every vertical spans world y
++/// `-52 .. 300`, **492.8 logical pixels, 15.4 tiles**. Crossing multiplicity
++/// is what the band design attacks (`kTileDevicePixels`' own doc comment
++/// measures it as the larger term), and a fixture of tile-sized entities would
++/// make the win invisible: no entity would ever be walked into two bands, and
++/// a slice arithmetic error would have nothing to disagree about.
++///
++/// **M9's target — a stroke whose centreline is outside the band it inks.**
++/// [tileCamera] maps world to screen as `sy = -1.4 * wy + 323`, and a band is
++/// one tile row: band `k` owns device rows `[64k, 64k + 64)`, which is logical
++/// screen y `[32k, 32k + 32)`. For each `k` in `1..9` this fixture places
++/// **one** [kBandStrokeLineweight] stroke, at logical screen y `32k - 1` for
++/// odd `k` and `32k + 1` for even `k` — one logical pixel outside a boundary,
++/// against a half-width of 3.780, so it inks 2.780 logical pixels (5.56 device
++/// rows) into the band on the far side. That entity's *bounds* do not
++/// intersect that band at all, and the painter's index query is an exact rect
++/// intersection on bounds — measured: a line 0.1 world units outside a query
++/// rect is not returned — so with `const pad = 0.0` in `_bakeBand` the band
++/// loses those rows across its full 800-device-pixel width. See [_sideFor] for
++/// why it is one stroke and not two.
++///
++/// The same is done one logical pixel outside each **column** boundary, which
++/// is not a band edge but is a tile edge: those strokes are what the per-tile
++/// `_bake` path's own pad owes, and they put ink on the columns
++/// `differingPixelsOnTileEdges` sweeps.
++///
++/// **Never (0, 0) and never the identity.** The extent, the spacing and the
++/// reasoning behind all three are [fillingGrid]'s — see its doc comment for
++/// why the drawing has to stay strictly wider than the viewport under every
++/// pan these arms take. The thick strokes are laid out by inverting
++/// [tileCamera], so their world coordinates are the far-from-origin,
++/// non-round numbers that camera implies rather than a hand-picked grid.
++DraftDocument bandCrossingGrid(FlutterTextMeasurer measurer) {
++  final doc = DraftDocument.empty(measurer: measurer);
++  var handle = 1000;
++  // [fillingGrid]'s geometry verbatim: the viewport stays interior to the
++  // drawing under every pan these arms take.
++  for (var t = -52.0; t <= 300.0; t += 16.0) {
++    addLine(doc, doc.rootHandle, Handle(handle++), -52, t, 380, t);
++  }
++  for (var t = -52.0; t <= 380.0; t += 16.0) {
++    addLine(doc, doc.rootHandle, Handle(handle++), t, -52, t, 300);
++  }
++
++  // [tileCamera] inverted. Written as the inverse rather than as literals so
++  // the strokes track the camera if it ever moves, instead of silently
++  // drifting off the boundaries they exist to straddle.
++  double worldY(double screenY) => (323.0 - screenY) / 1.4;
++  double worldX(double screenX) => (screenX + 37.0) / 1.4;
++
++  // Rows 1..9. Row 0's top edge is the viewport's own edge and row 10 is
++  // past the bottom of a 600 device-pixel viewport, so neither is a band
++  // boundary with a band on both sides of it.
++  for (var row = 1; row <= 9; row++) {
++    final y = worldY(row * 32.0 + _sideFor(row));
++    addLine(doc, doc.rootHandle, Handle(handle++), -52, y, 380, y,
++        lineweight: kBandStrokeLineweight);
++  }
++  // Columns 1..12 at 32 logical pixels: the last tile column starts at device
++  // x 768 and the viewport is 800 wide, so column 12's own left edge is the
++  // final one inside it.
++  for (var col = 1; col <= 12; col++) {
++    final x = worldX(col * 32.0 + _sideFor(col));
++    addLine(doc, doc.rootHandle, Handle(handle++), x, -52, x, 300,
++        lineweight: kBandStrokeLineweight);
++  }
++  return doc;
++}
+diff --git a/packages/jet_cad_2d_flutter/test/support/tile_harness.dart b/packages/jet_cad_2d_flutter/test/support/tile_harness.dart
+index ad38ce0..f7d0414 100644
+--- a/packages/jet_cad_2d_flutter/test/support/tile_harness.dart
++++ b/packages/jet_cad_2d_flutter/test/support/tile_harness.dart
+@@ -8,65 +8,165 @@
+ 
+ import 'package:flutter/widgets.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'tile_fixture.dart';
+ 
+ /// Everything a tiled-frame test needs to drive and read one canvas.
+ class TiledHarness {
+-  TiledHarness(this.cache, this.camera, this.document);
++  TiledHarness(this.cache, this.camera, this.document, this.index);
+   final TileCache cache;
+   final CameraController camera;
+   final DraftDocument document;
++
++  /// The index the tiled canvas was built over.
++  ///
++  /// Held so a second canvas can be pumped over the **same** document and the
++  /// same index — which is what `captureLive` does. Rebuilding the index
++  /// there would compare two frames drawn from two different trees, and a
++  /// query-order difference between them would read as a tiling defect.
++  final SpatialIndex index;
+ }
+ 
+ /// Pumps a tiled canvas over `fillingGrid`, which inks every tile of
+ /// [kTileViewport] at [tileCamera] -- so "nothing was drawn" can never be
+ /// mistaken for "there was nothing to draw".
+ Future<TiledHarness> pumpTiled(
+   WidgetTester t, {
+   DraftDocument Function(FlutterTextMeasurer)? document,
+   ViewportTransform? camera,
+ }) async {
+   final measurer = FlutterTextMeasurer();
+   addTearDown(measurer.clear);
+   final doc = (document ?? fillingGrid)(measurer);
+   final index = SpatialIndex(doc);
+   addTearDown(index.dispose);
+   final controller = CameraController(camera ?? tileCamera());
+   addTearDown(controller.dispose);
+ 
++  // **The `Center` is load-bearing and was missing.** `pumpWidget` hands its
++  // child the surface's *tight* constraints (800x600 logical), and a
++  // `SizedBox` under tight constraints is inert -- `additionalConstraints
++  // .enforce(constraints)` gives the incoming tight box back unchanged. So
++  // this canvas was 800x600 logical, not [kTileViewport]: 1600x1200 device
++  // pixels, 25 x 19 = 475 tiles, and `fillingGrid` -- whose extent is derived
++  // in its own doc comment against a 400x300 viewport, and which reaches only
++  // screen x -109.8..495 at [tileCamera] -- left the right-hand 38% of every
++  // frame blank. `Center` passes loose constraints, so the box takes the size
++  // it asks for and the harness is the viewport it documents. Measured before
++  // and after: 475 tiles and a 1600x1200 capture became 130 and 800x600.
+   await t.pumpWidget(MediaQuery(
+     data: const MediaQueryData(devicePixelRatio: kTileDpr),
+     child: Directionality(
+       textDirection: TextDirection.ltr,
+-      child: SizedBox(
++      child: Center(
++          child: SizedBox(
+         width: kTileViewport.width,
+         height: kTileViewport.height,
+         child: DraftCanvas(
+           document: doc,
+           index: index,
+           camera: controller,
+           tiles: true,
+           tileDevicePixels: 64,
+         ),
+-      ),
++      )),
+     ),
+   ));
+   await t.pump();
+   final state = t.state<DraftCanvasState>(find.byType(DraftCanvas));
+-  return TiledHarness(state.tileCache!, controller, doc);
++  return TiledHarness(state.tileCache!, controller, doc, index);
+ }
+ 
+ /// Pumps until the canvas stops asking for frames, bounded.
+ ///
+ /// The bound is not decoration: an implementation that asks forever would
+ /// otherwise hang the suite instead of failing it.
+ Future<void> settle(WidgetTester t, TiledHarness h) async {
+   for (var i = 0; i < 40 && t.binding.hasScheduledFrame; i++) {
+     await t.pump();
+   }
+   expect(t.binding.hasScheduledFrame, isFalse,
+       reason: 'the settle must terminate');
+ }
++
++/// Drives [h] to a rest whose **every** visible tile was cut out of a band,
++/// and returns how many were.
++///
++/// **[settle] alone does not reach that state, and every slice-path mutant
++/// would be judged on two tiles if this did not exist.** `paintFrame` bakes up
++/// to `budgetedTilesPerFrame` tiles a frame through the per-tile `_bake` path
++/// — `262144 / (64 * 64) = 64` at this harness's tile size — and the rest gate
++/// needs two consecutive unchanged cameras before `_restBake` runs at all. A
++/// 400x300 logical viewport at [kTileDpr] is 800x600 device pixels, 13 x 10 =
++/// **130 tiles**, so the first two frames bake 128 of them and the rest frame
++/// finds two keys missing. `_restBake` skips every key `_tiles` already
++/// serves, so the band path would own 2 tiles of 130 — in the bottom-right
++/// corner, 24 device rows tall — and `sliceSourceRect`, the band pad and the
++/// band origin would all be measured there or nowhere.
++///
++/// **A table edit is what puts the whole viewport back in the band's hands at
++/// the same camera.** `paintFrame` reads `tables.mutationRevision` every frame
++/// and calls `_dropGeneration` when it moves; that drops the tiles and the
++/// composite and **keeps the lattice and the anchor** ("the tiles go and the
++/// lattice stays"). The camera has not moved, so `_restGateSteps` keeps its
++/// count and the very next frame is a rest frame over an empty generation:
++/// one band per tile row, 130 slices, at exactly the camera the fixture was
++/// laid out against. A zoom would reach the same state but would move the
++/// camera, and [bandCrossingGrid]'s strokes are placed against [tileCamera]'s
++/// band boundaries specifically.
++///
++/// The layer added is referenced by nothing, so not one pixel changes with it:
++/// the drop is the whole point of the edit.
++Future<int> settleFromBands(WidgetTester t, TiledHarness h) async {
++  await settle(t, h);
++  var slices = 0;
++  h.cache.debugOnSliceForTest = () => slices++;
++  addTearDown(() => h.cache.debugOnSliceForTest = null);
++  h.document.tables.layers.add(const LayerRecord(
++    handle: Handle(900),
++    name: 'BAND-DROP',
++    color: IndexedColor(3),
++    linetype: ReservedHandles.continuousLinetype,
++    lineweight: 50,
++    transparency: 0,
++  ));
++  await t.pump();
++  await settle(t, h);
++  h.cache.debugOnSliceForTest = null;
++  // Anti-vacuity, and the clause the whole helper exists for: an arm that
++  // compared two frames after a settle that sliced nothing would be a gate on
++  // the per-tile bake wearing the band path's name.
++  expect(slices, greaterThan(0),
++      reason: 'the rest frame sliced no tile at '
++          'all, so nothing below measures the band path');
++  expect(h.cache.viewportCovered, isTrue,
++      reason: 'the rest bake must have refilled the generation it dropped');
++  return slices;
++}
++
++/// One more painted frame at the camera [h] already has.
++///
++/// **The frame a rest bake after a *scale change* leaves on screen is not a
++/// clean generation, and this is the same allowance `tile_cache_test`'s
++/// `criterion 1: a settled frame equals the live frame after a zoom` makes by
++/// painting a fifth frame.** `paintFrame` blits the outgoing composite first
++/// and underneath everything, before it decides the frame is resting;
++/// `_restBake` then calls `_dropCarryOver`, which frees the composite for
++/// every *later* frame but cannot un-draw the blit this one already made. So
++/// the settled frame carries stale, magnified ink wherever the incoming tiles
++/// are transparent — 67,509 differing pixels of it on this task's arm 3 — and
++/// the first frame that is a statement about the new generation alone is the
++/// one after. Nothing schedules that frame: `viewportCovered` is true, so the
++/// canvas stops asking.
++///
++/// A zero pan rather than a real one: [ViewportTransform] declares no `==`, so
++/// a fresh instance always notifies, and the camera it notifies with is
++/// numerically the one already on screen — no key moves, no tile is rebaked,
++/// and `_restBake` returns at its "nothing missing" guard.
++Future<void> repaintOnce(WidgetTester t, TiledHarness h) async {
++  h.camera.panBy(Offset.zero);
++  await t.pump();
++  await settle(t, h);
++}
+diff --git a/packages/jet_cad_2d_flutter/test/tile_slice_differential_test.dart b/packages/jet_cad_2d_flutter/test/tile_slice_differential_test.dart
+new file mode 100644
+index 0000000..010a05f
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/tile_slice_differential_test.dart
+@@ -0,0 +1,143 @@
++// The pixel instruments the slice path is judged by: criteria 5, 6 and 11.
++//
++// **Why four arms and not one.** Arm 1 compares a settled tiled frame against
++// the live frame at the same camera, and that is the criterion. It cannot see
++// two whole classes of defect on its own:
++//
++//   * A band cut wider than the viewport blits its **transparent overhang**
++//     off the right-hand edge, where nothing is looking. Plan 3h's p95 pan
++//     gate is blind to it too — a transparent blit costs exactly what an
++//     opaque one costs. Only a pan smaller than one tile brings that overhang
++//     inside the viewport, which is arm 2.
++//   * A slice rectangle measured in grid space rather than band space is the
++//     *same rectangle* whenever the visible key range starts at column 0,
++//     because `TileBand.deviceRect.left` is defined as
++//     `keys.first.x * tileDevicePixels`. The pinned pure-zoom script never
++//     moves that range. Arm 3 takes a pan between the scale change and the
++//     rest bake, which does.
++//
++// Arm 4 is criterion 6 with teeth: the same comparison restricted to the rows
++// and columns a tile boundary falls on, plus the clause that says the sweep
++// looked at ink rather than at background.
++//
++// **Every arm settles through `settleFromBands`, and that is load-bearing.**
++// A plain `settle` reaches its rest frame with 128 of 130 tiles already baked
++// by the per-tile path, so the band bake would slice two corner tiles and
++// every mutant below would be judged on those two. See `settleFromBands`.
++//
++// **Zero, never a tolerance.** `quantiseCamera` puts every tile destination on
++// whole device pixels, so a blit is a 1:1 texel copy; there is nothing for a
++// tolerance to absorb and a seam of one unit is exactly what one would hide.
++import 'package:flutter_test/flutter_test.dart';
++
++import 'support/tile_comparison.dart';
++import 'support/tile_fixture.dart';
++import 'support/tile_harness.dart';
++
++void main() {
++  testWidgets('a settled generation is identical to a live frame', (t) async {
++    final h = await pumpTiled(t, document: bandCrossingGrid);
++    await settleFromBands(t, h);
++    expect(
++        differingPixels(await captureTiled(t, h), await captureLive(t, h)), 0,
++        reason: 'a band is queried with a pad and clipped without one, and '
++            'the tiles cut out of it have to hold what the live frame draws');
++  });
++
++  // The same arm at a camera whose view span straddles a power-of-two rebase
++  // step, so a band that derived its own origin would land in a different
++  // cell of that step from the frame. See `rebaseBoundaryCamera`.
++  testWidgets('and at a camera on a power-of-two rebase boundary', (t) async {
++    final h = await pumpTiled(t,
++        document: bandCrossingGrid, camera: rebaseBoundaryCamera());
++    await settleFromBands(t, h);
++    expect(
++        differingPixels(await captureTiled(t, h), await captureLive(t, h)), 0,
++        reason: 'rebasing is frame-global: every band must be walked against '
++            'the frame origin, not one it derived for itself');
++  });
++
++  testWidgets('and stays identical after a pan smaller than one tile',
++      (t) async {
++    final h = await pumpTiled(t, document: bandCrossingGrid);
++    await settleFromBands(t, h);
++    // Under one 32-logical-pixel tile in both axes, so the visible key range
++    // does not move and no tile is rebaked: what changes is only *where* the
++    // tiles already held blit, which is what drags an edge tile's overhang
++    // into view.
++    h.camera.panBy(const Offset(-11, -7));
++    await settle(t, h);
++    expect(
++        differingPixels(await captureTiled(t, h), await captureLive(t, h)), 0,
++        reason: 'an edge tile sliced from a viewport-sized source blits its '
++            'transparent overhang here, and costs the same as an opaque one, '
++            'so no timing gate can see it');
++  });
++
++  testWidgets('and when a pan lands between the scale change and the bake',
++      (t) async {
++    final h = await pumpTiled(t, document: bandCrossingGrid);
++    await settleFromBands(t, h);
++    h.camera.zoomAt(const Offset(120, 90), 1.3);
++    await t.pump(); // moving: the generation is retired and a new one anchored
++    // 90 x 60 logical is 180 x 120 device pixels, two and a bit tiles in each
++    // axis, and **positive**, which drives the visible key range *negative*:
++    // `visibleKeys` starts at `-dx`, so `x0 = floorDiv(-180, 64) = -3` and
++    // `y0 = -2`, and the band's `deviceRect.left` is -192. Both halves matter.
++    // Without a pan at all, band-local and grid-space slice arithmetic are the
++    // *same arithmetic* -- `deviceRect.left` is `keys.first.x * 64`, which is
++    // zero when the range starts at column 0 -- and M10 is unwitnessable; with
++    // the range negative the grid-space rectangle is negative too and reads
++    // off the front of the band image, which is the case the pinned pure-zoom
++    // script never produces.
++    //
++    // **The sign is also what keeps the untiled reference honest here, and
++    // that is a measured constraint rather than a preference.** A tile bake
++    // queries the index padded by `kTileSlack`; `DraftPainter.paint` queries
++    // `camera.visibleWorld(viewport)` with no slack at all. So a stroke whose
++    // centreline lies within its own half-width *outside* a viewport edge is
++    // drawn by the tiled frame and missed by the live one -- the tiled frame
++    // is the correct one, and the difference is a property of the reference.
++    // At `Offset(-90, -60)` this fixture's thick stroke at world y 184.286
++    // lands at screen y -2.5 against a 3.78 half-width and the arm read 1,767
++    // stray pixels across the top three device rows. At `Offset(90, 60)` the
++    // four such windows are world y in (248.9, 250.98) and (82.0, 84.07) and
++    // world x in (-5.37, -3.30) and (216.48, 218.56), and no thick stroke this
++    // fixture places falls in any of them. Reported as a finding: the
++    // asymmetry is real and belongs to `DraftPainter`, not to the tile path.
++    h.camera.panBy(const Offset(90, 60));
++    await t.pump(); // moving again, so the rest gate starts over
++    await settle(t, h);
++    // The rest frame blitted the outgoing composite underneath the generation
++    // it then dropped, so it is not a statement about the new tiles alone.
++    // See `repaintOnce`; `tile_cache_test`'s criterion 1 pays for the same
++    // frame and asserts the same thing before comparing.
++    await repaintOnce(t, h);
++    expect(h.cache.hasCarryOver, isFalse,
++        reason: 'a composite still on screen composes the outgoing '
++            'generation under every transparent pixel of the incoming one');
++    expect(
++        differingPixels(await captureTiled(t, h), await captureLive(t, h)), 0,
++        reason: 'a grid-space slice rectangle reads off the wrong part of the '
++            'band image as soon as the visible key range moves');
++  });
++
++  // Criterion 6, with its teeth: the boundary columns and rows specifically.
++  testWidgets('tile boundaries carry no difference of their own', (t) async {
++    final h = await pumpTiled(t, document: bandCrossingGrid);
++    await settleFromBands(t, h);
++    final tiled = await captureTiled(t, h);
++    final live = await captureLive(t, h);
++    const w = kCaptureWidth, hgt = kCaptureHeight; // 800 x 600 device pixels
++    expect(
++        differingPixelsOnTileEdges(tiled, live,
++            tileDevicePixels: 64, width: w, height: hgt),
++        0,
++        reason: 'a seam lives on the boundary, and a whole-frame count buries '
++            'it under 62 interior columns out of every 64');
++    // Not vacuous: the sweep must have looked at ink, not at background.
++    expect(inkOnTileEdges(live, tileDevicePixels: 64, width: w, height: hgt),
++        greaterThan(200),
++        reason: 'two blank captures agree perfectly and prove nothing');
++  });
++}

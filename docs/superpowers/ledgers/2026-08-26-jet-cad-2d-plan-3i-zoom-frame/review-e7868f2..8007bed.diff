@@ -1,0 +1,374 @@
+# Review package: e7868f2..HEAD
+
+## Commits
+8007bed feat(tiles): walk one band into one image, padded query and hard clip
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/tile_cache.dart     | 113 ++++++++++++
+ .../jet_cad_2d_flutter/test/tile_band_test.dart    | 191 +++++++++++++++++++++
+ 2 files changed, 304 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+index 85d9a97..ce4dba9 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -1691,20 +1691,133 @@ class TileCache {
+     visited.sort();
+     _baked[key] = Uint32List.fromList(visited);
+     final picture = recorder.endRecording();
+     final image = picture.toImageSync(tileDevicePixels, tileDevicePixels);
+     _imagesAlive++;
+     picture.dispose();
+     _bakes++;
+     return image;
+   }
+ 
++  /// Walks one band into one image.
++  ///
++  /// Modelled on [_bake] and sharing all three of its rules, at band scale.
++  ///
++  /// **The `onVisit` callback is deliberately simpler than [_bake]'s.**
++  /// `_bake` climbs owners so a container transform reaches the tile through
++  /// direction one. A band records the same information for a wider region,
++  /// and its caller shares one record across the band's tiles, so the owner
++  /// climb happens once there rather than once per tile.
++  Image _bakeBand(
++    TileBand band,
++    TileGrid grid,
++    ViewportTransform quantised,
++    DraftPainter painter,
++    CanvasDrawSink sink,
++    VerticesDrawSink? vertices,
++    Vector2 origin,
++    List<int> visitedInto,
++  ) {
++    // **The scale is the frame camera's; the translation is the anchor's.**
++    // [TileBand.deviceRect] lives in the grid's device space, whose origin is
++    // [TileGrid.anchor] and not this frame's camera -- exactly as a tile key
++    // does, and [TileGrid.bakeCameraFor] rebases a single tile off the anchor
++    // for the same reason. A generation outlives many pans, so at a rest bake
++    // the frame camera sits a whole number of device pixels away from the
++    // anchor; taking the translation from it would slide the band by that pan
++    // and the tiles cut out of it would not hold what [_bake] puts in the
++    // same keys. The frame camera is still required to belong to this
++    // generation, which is what the assert below states.
++    assert(
++        grid.matchesScale(quantised),
++        'a band belongs to one generation, so the frame camera and the grid '
++        'anchor must agree on scale');
++    final dpr = grid.devicePixelRatio;
++    final width = band.deviceRect.width / dpr;
++    final height = band.deviceRect.height / dpr;
++    final recorder = PictureRecorder();
++    final into = Canvas(recorder);
++    into.scale(dpr);
++    // **Hard, and for [_bake]'s reason.** An antialiased clip edge would make
++    // two adjacent bands' `source-over` fall short of full coverage along the
++    // row they share: a seam, in the one place this design exists to remove
++    // one.
++    into.clipRect(Rect.fromLTWH(0, 0, width, height), doAntiAlias: false);
++
++    // **The query is padded; the clip is not.** A stroke whose centreline lies
++    // just outside the band still inks inside it. [kTileSlack] is the same
++    // slack [_bake] queries with and the same slack the invalidation rule
++    // uses -- padding one alone makes them disagree. The canvas is pulled back
++    // by the same amount, so the padded viewport's origin lands where the
++    // band's own origin was.
++    const pad = kTileSlack;
++    into.save();
++    into.translate(-pad, -pad);
++
++    final m = grid.anchor.worldToScreenMatrix;
++    final bandCamera = ViewportTransform(
++      worldToScreenMatrix: Transform2(
++        m.a,
++        m.b,
++        m.c,
++        m.d,
++        m.e - band.deviceRect.left / dpr + pad,
++        m.f - band.deviceRect.top / dpr + pad,
++      ),
++    );
++
++    _drawInto(
++      into,
++      Size(width + 2 * pad, height + 2 * pad),
++      bandCamera,
++      painter,
++      sink,
++      vertices,
++      // **The viewport's origin, never the band's.** Rebasing is frame-global
++      // by construction: a per-band origin gives each band its own
++      // quantisation step and `float32` residuals the live frame does not
++      // have, and can cross a power-of-two step between one row and the next.
++      origin,
++      (handle) => visitedInto.add(handle.value),
++    );
++    into.restore();
++
++    final picture = recorder.endRecording();
++    final image = picture.toImageSync(
++        band.deviceRect.width.round(), band.deviceRect.height.round());
++    _imagesAlive++;
++    picture.dispose();
++    return image;
++  }
++
++  /// Test seam for [_bakeBand], and its only caller until the band bake is
++  /// wired into [paintFrame].
++  ///
++  /// What the band bake decides -- where the band camera puts a world point,
++  /// how far past the band's edge the query reaches, and which origin the walk
++  /// is rebased against -- is checkable without rasterising anything, and this
++  /// is what lets it be checked. The returned image is the caller's to
++  /// dispose.
++  @visibleForTesting
++  Image debugBakeBand(
++    TileBand band,
++    TileGrid grid,
++    ViewportTransform quantised,
++    DraftPainter painter,
++    CanvasDrawSink sink,
++    VerticesDrawSink? vertices,
++    Vector2 origin,
++    List<int> visitedInto,
++  ) =>
++      _bakeBand(
++          band, grid, quantised, painter, sink, vertices, origin, visitedInto);
++
+   void _drawInto(
+     Canvas canvas,
+     Size size,
+     ViewportTransform camera,
+     DraftPainter painter,
+     CanvasDrawSink sink,
+     VerticesDrawSink? vertices,
+     Vector2 origin,
+     void Function(Handle handle)? onVisit,
+   ) {
+diff --git a/packages/jet_cad_2d_flutter/test/tile_band_test.dart b/packages/jet_cad_2d_flutter/test/tile_band_test.dart
+index 9fe4944..4e25b1e 100644
+--- a/packages/jet_cad_2d_flutter/test/tile_band_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tile_band_test.dart
+@@ -1,17 +1,50 @@
+ import 'dart:ui';
+ 
+ import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'support/tile_fixture.dart';
+ 
++/// A painter that records what the band bake handed it and draws nothing.
++///
++/// **Nothing is drawn on purpose.** What this task decides is arithmetic --
++/// which camera, which viewport size, which rebase origin -- and every one of
++/// those is visible at the moment [paint] is entered. Rasterising the fixture
++/// as well would only make the answer arrive through a pixel comparison that
++/// the later differential task owns and that this task cannot yet run.
++class _RecordingPainter extends DraftPainter {
++  _RecordingPainter(DraftDocument document, SpatialIndex index)
++      : super(
++            document: document,
++            index: index,
++            resolver: DocumentStyleResolver(document));
++
++  ViewportTransform? seenCamera;
++  Size? seenViewport;
++  Vector2? seenOrigin;
++  int paints = 0;
++
++  @override
++  void paint(DrawSink sink, ViewportTransform camera, Size viewport) {
++    paints++;
++    seenCamera = camera;
++    seenViewport = viewport;
++    // Read here rather than after the call: `_drawInto` clears it in a
++    // `finally`, so a test that looked afterwards would always see null and
++    // could never tell a passed-through origin from a dropped one.
++    seenOrigin = debugRebaseOrigin;
++  }
++}
++
+ void main() {
+   TileGrid gridAt(ViewportTransform camera) => TileGrid(
+       anchor: camera, devicePixelRatio: kTileDpr, tileDevicePixels: 64);
+ 
+   test('the bands partition the visible keys, in row order, without gaps', () {
+     final camera = quantiseCamera(tileCamera(), kTileDpr);
+     final grid = gridAt(camera);
+     final bands = grid.bandsFor(camera, kTileViewport);
+     final fromBands = bands.expand((b) => b.keys).toList();
+     final visible = grid.visibleKeys(camera, kTileViewport).toList();
+@@ -44,11 +77,169 @@ void main() {
+     final camera = quantiseCamera(tileCamera(), kTileDpr);
+     final bands = gridAt(camera).bandsFor(camera, kTileViewport);
+     final union =
+         bands.map((b) => b.deviceRect).reduce((a, b) => a.expandToInclude(b));
+     final device = Rect.fromLTWH(
+         0, 0, kTileViewport.width * kTileDpr, kTileViewport.height * kTileDpr);
+     expect(union.contains(device.topLeft), isTrue);
+     expect(union.right, greaterThanOrEqualTo(device.right));
+     expect(union.bottom, greaterThanOrEqualTo(device.bottom));
+   });
++
++  // The band bake's own arithmetic, checked without rasterising anything.
++  //
++  // **The fixture is deliberately off both axes and off the anchor.** The grid
++  // is anchored at the resting camera and the frame camera is then panned a
++  // whole number of device pixels away from it, so the visible key range
++  // starts at x = 1 rather than 0 and a band from a lower row has a non-zero
++  // `deviceRect.top` as well as a non-zero `left`. A band at (0, 0) under an
++  // anchor that equals the frame camera proves none of what follows.
++  group('the band bake', () {
++    // -50 logical at dpr 2 is exactly -100 device pixels, so the pan keeps
++    // the grid's whole-device-pixel invariant and `deviceDeltaFrom` stays
++    // integral.
++    const panX = -50.0;
++    const panY = -30.0;
++    const pad = kTileSlack;
++
++    late TileRig rig;
++    late ViewportTransform anchor;
++    late ViewportTransform frame;
++    late TileGrid grid;
++    late List<TileBand> bands;
++    late TileBand band;
++
++    setUp(() {
++      rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
++      anchor = quantiseCamera(tileCamera(), kTileDpr);
++      final m = anchor.worldToScreenMatrix;
++      frame = quantiseCamera(
++          ViewportTransform(
++              worldToScreenMatrix:
++                  Transform2(m.a, m.b, m.c, m.d, m.e + panX, m.f + panY)),
++          kTileDpr);
++      grid = TileGrid(
++          anchor: anchor, devicePixelRatio: kTileDpr, tileDevicePixels: 64);
++      bands = grid.bandsFor(frame, kTileViewport);
++      // A lower row, so neither offset is zero.
++      band = bands[3];
++    });
++
++    tearDown(() => rig.dispose());
++
++    test('the fixture puts the band off both axes and off the anchor', () {
++      expect(band.deviceRect.left, isNot(0.0));
++      expect(band.deviceRect.top, isNot(0.0));
++      expect(frame.worldToScreenMatrix.e,
++          isNot(closeTo(anchor.worldToScreenMatrix.e, 1e-9)),
++          reason: 'the frame camera must differ from the anchor, or the '
++              'anchor-versus-frame choice below is untestable');
++      expect(frame.worldToScreenMatrix.f,
++          isNot(closeTo(anchor.worldToScreenMatrix.f, 1e-9)));
++    });
++
++    test('the band camera puts a world point at the band-local pixel', () {
++      // Not the origin and not a grid node: a point whose screen position is
++      // fractional in both axes.
++      final point = Vector2(123.5, 77.25);
++      final painter = _RecordingPainter(rig.doc, rig.index);
++      final visited = <int>[];
++
++      final image = rig.cache.debugBakeBand(
++          band, grid, frame, painter, rig.sink, null, Vector2.zero(), visited);
++      addTearDown(image.dispose);
++
++      expect(painter.paints, 1);
++      final bandCamera = painter.seenCamera!;
++
++      // The band's rectangle is in the grid's device space, so the reference
++      // is where the *anchor* puts the point, not where this frame's camera
++      // does. The two differ by the pan above, which is what makes this an
++      // assertion rather than a tautology.
++      final inAnchor = anchor.worldToScreen(point);
++      final expected = Vector2(
++        inAnchor.x - band.deviceRect.left / kTileDpr + pad,
++        inAnchor.y - band.deviceRect.top / kTileDpr + pad,
++      );
++      final actual = bandCamera.worldToScreen(point);
++
++      expect(actual.x, closeTo(expected.x, 1e-9));
++      expect(actual.y, closeTo(expected.y, 1e-9));
++
++      // The mutation this pins: reading the translation off the frame camera
++      // instead of the anchor. It is a different number here by construction.
++      final fromFrame = frame.worldToScreen(point);
++      expect(
++          actual.x,
++          isNot(closeTo(
++              fromFrame.x - band.deviceRect.left / kTileDpr + pad, 1e-6)),
++          reason: 'the band camera must be anchored where the tile keys are');
++
++      // Scale and skew are the generation's and are carried untouched.
++      final a = anchor.worldToScreenMatrix;
++      final b = bandCamera.worldToScreenMatrix;
++      expect(b.a, a.a);
++      expect(b.b, a.b);
++      expect(b.c, a.c);
++      expect(b.d, a.d);
++    });
++
++    test('the padded query reaches kTileSlack past the band on every side', () {
++      final painter = _RecordingPainter(rig.doc, rig.index);
++      final image = rig.cache.debugBakeBand(
++          band, grid, frame, painter, rig.sink, null, Vector2.zero(), <int>[]);
++      addTearDown(image.dispose);
++
++      final width = band.deviceRect.width / kTileDpr;
++      final height = band.deviceRect.height / kTileDpr;
++      expect(width, greaterThan(0));
++      expect(height, greaterThan(0));
++      expect(painter.seenViewport, Size(width + 2 * pad, height + 2 * pad),
++          reason: 'an unpadded query drops the half of a boundary stroke that '
++              'belongs to the band, because its centreline is outside it');
++
++      // The pad is only reach if the camera moves with it: a larger viewport
++      // whose origin did not shift would query the same rectangle grown to
++      // the right and down alone.
++      final b = painter.seenCamera!.worldToScreenMatrix;
++      final a = anchor.worldToScreenMatrix;
++      expect(b.e, closeTo(a.e - band.deviceRect.left / kTileDpr + pad, 1e-9));
++      expect(b.f, closeTo(a.f - band.deviceRect.top / kTileDpr + pad, 1e-9));
++
++      // And the image is the band, not the padded query.
++      expect(image.width, band.deviceRect.width.round());
++      expect(image.height, band.deviceRect.height.round());
++    });
++
++    test('every band is rebased against the origin handed in', () {
++      // Far from zero, so a band-derived origin could not coincide with it.
++      final origin = Vector2(4500000.0, -3100000.0);
++      final seen = <Vector2?>[];
++      for (final each in [bands.first, bands[3], bands.last]) {
++        final painter = _RecordingPainter(rig.doc, rig.index);
++        final image = rig.cache.debugBakeBand(
++            each, grid, frame, painter, rig.sink, null, origin, <int>[]);
++        addTearDown(image.dispose);
++        seen.add(painter.seenOrigin);
++      }
++      expect(seen, everyElement(same(origin)),
++          reason: 'a per-band origin gives each band its own float32 residual '
++              'and the rows disagree along their shared edge');
++    });
++
++    test('the walk reports the handles it touched into visitedInto', () {
++      // The real painter here, not the recorder: this is the one claim that
++      // needs the walk to actually happen.
++      final visited = <int>[];
++      final image = rig.cache.debugBakeBand(band, grid, frame, rig.painter,
++          rig.sink, null, Vector2.zero(), visited);
++      addTearDown(image.dispose);
++      expect(visited, isNotEmpty);
++      expect(
++          visited.toSet().every((v) =>
++              rig.doc.tree[Handle(v)] != null ||
++              rig.doc.entities.slotOf(Handle(v)) != null),
++          isTrue,
++          reason: 'every recorded handle names something in the document');
++    });
++  });
+ }

@@ -1,0 +1,194 @@
+# Review package: 31399ed..HEAD
+
+## Commits
+2eebb1a feat(tiles): a rest bake needs two unchanged frames, for the wheel
+
+## Files changed
+ docs/superpowers/notes/plan-3i-mutation-log.md     | 43 ++++++++++++++++++++++
+ .../jet_cad_2d_flutter/lib/src/tile_cache.dart     | 16 ++++++--
+ .../jet_cad_2d_flutter/test/tile_regime_test.dart  | 25 +++++++++++++
+ 3 files changed, 81 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/notes/plan-3i-mutation-log.md b/docs/superpowers/notes/plan-3i-mutation-log.md
+index 3a167a1..5da4014 100644
+--- a/docs/superpowers/notes/plan-3i-mutation-log.md
++++ b/docs/superpowers/notes/plan-3i-mutation-log.md
+@@ -64,10 +64,53 @@ The test description was:
+ 
+ Failing tests:
+   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_regime_test.dart: a moving frame bakes nothing and walks nothing
+ ```
+ 
+ `bakeCount` is 512 rather than the brief's illustrative "8, one per frame" —
+ with the guard gone, every one of the 8 zoom frames bakes as many tiles as
+ its budget permits over a viewport this size, not one each — but the failure
+ mode (baking resumes on a moving frame) is exactly the one the test is
+ chartered to catch.
++
++## M4
++
++**Task:** Task 3, "The wheel clause — two unchanged frames, not one."
++
++**Mutation:** In `packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`'s
++`paintFrame`, replaced the `resting` guard:
++
++```dart
++    final resting = previous == null || _carryOver == null || _restGateSteps >= kRestGateFrames;
++```
++
++with:
++
++```dart
++    final resting = !_viewportCovered;
++```
++
++This breaks the rest gate and causes the cache to bake on every frame where
++the viewport is not fully covered, even if the camera is moving.
++
++**Procedure:** copied `tile_cache.dart` aside to the scratchpad, edited the
++working file to replace the resting expression with `!_viewportCovered`, ran
++the test, then restored the working file from the copy. **Never `git checkout`.**
++
++**Result:** red, as expected — both "a moving frame bakes nothing and walks
++nothing" and "a steadily spun wheel never arms the rest gate" tests fail:
++
++**Verbatim output:**
++
++```
++00:00 +4 -1: a moving frame bakes nothing and walks nothing [E]
++  Test failed. See exception logs above.
++Expected: <0>
++  Actual: <512>
++a moving frame must bake nothing
++
++00:00 +5 -2: a steadily spun wheel never arms the rest gate [E]
++  Test failed. See exception logs above.
++Expected: <0>
++  Actual: <768>
++a wheel that keeps turning must never reach two consecutive unchanged frames, so it must never bake
++```
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+index 25d4e6f..3236cfc 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -156,20 +156,29 @@ const int kBakeBudgetDevicePixels = 262144;
+ /// The cache's byte ceiling, counting the carry-over composite and every
+ /// generation's tiles together.
+ ///
+ /// 96 MiB, not 64, for two reasons. A retired generation lives on as one
+ /// viewport-sized composite (29.3 MiB on the reference viewport) beside the
+ /// incoming generation's tiles (48.0 MiB at 512 px). And 96 MiB is the figure
+ /// this cache may *replace*: the vertex buffer's high-water mark at 500,000
+ /// entities, which falls to a single tile's geometry once bakes flush per tile.
+ const int kTileCacheBytes = 96 * 1024 * 1024;
+ 
++/// Consecutive unchanged frames before a rest bake is permitted.
++///
++/// **Two, and the mouse wheel is why.** A wheel delivers isolated notches, so
++/// at one every notch would be a moving frame followed immediately by a
++/// resting frame: a full bake per notch, discarded by the next, and invisible
++/// to any criterion that only watches moving frames. Two costs one frame of
++/// latency (~16.7 ms) and makes a continuously spun wheel bake nothing.
++const int kRestGateFrames = 2;
++
+ /// One tile's position in its generation's grid. Not world coordinates: the
+ /// grid is anchored to the generation's own device-pixel lattice.
+ @immutable
+ class TileKey {
+   const TileKey(this.x, this.y);
+ 
+   final int x;
+   final int y;
+ 
+   @override
+@@ -794,21 +803,21 @@ class TileCache {
+     // "Walk the uncovered region" is therefore a full-viewport live walk --
+     // 31.5-41.6 ms at 500,000 entities -- on every zoom-out frame.
+     final previous = _lastQuantised;
+     _restGateSteps =
+         previous != null && sameQuantisedCamera(previous, quantised)
+             ? _restGateSteps + 1
+             : 0;
+     _lastQuantised = quantised;
+     // **`previous == null` is not a moving frame.** It is the very first
+     // frame this cache has ever painted, with nothing behind it to have
+-    // moved away from. Gating it on the literal `_restGateSteps >= 1` would
++    // moved away from. Gating it on the literal `_restGateSteps >= kRestGateFrames` would
+     // leave a brand-new cache blank -- no bake, and no composite either,
+     // since nothing has ever been retired -- until some later frame
+     // fortuitously repeated the same camera.
+     //
+     // **Not `&& !_viewportCovered` either.** A frame whose camera matches the
+     // last one but whose generation already covers the viewport still has to
+     // run the loop below: every visible key already holds an image, so the
+     // loop bakes nothing on its own, but it still has to *blit* those images
+     // onto this frame's canvas. `TileCache.paintFrame`'s only other exit from
+     // that loop is the coverage check inside it, which already makes baking
+@@ -824,22 +833,23 @@ class TileCache {
+     // never covered the viewport, so `_retireGeneration` minted nothing --
+     // which is exactly the state a second zoom reaches when it lands before
+     // the first one's settle completes; and any of `applyChange`,
+     // `_dropGeneration` or `_dropEverything` dropping a standing composite
+     // outright, if a camera change then lands before a rested frame. Gating
+     // a frame with no composite would paint nothing at all -- not a stale
+     // frame but a blank one -- for as long as the gesture continued. A blank
+     // viewport is worse than an expensive one, so this falls through to the
+     // ordinary bake-and-live-walk path instead: where there is nothing stale
+     // to show, drawing the real thing is the honest fallback.
+-    final resting =
+-        previous == null || _carryOver == null || _restGateSteps >= 1;
++    final resting = previous == null ||
++        _carryOver == null ||
++        _restGateSteps >= kRestGateFrames;
+ 
+     // Derived once and handed to every bake. Rebasing is frame-global by
+     // construction; a per-tile origin would give each tile its own
+     // quantisation step and `float32` residuals the live frame does not have.
+     final origin = rebaseOriginFor(quantised.visibleWorld(viewport));
+ 
+     // The budget is device pixels; a tile costs its own area against it, so
+     // this is the number of *tiles* this frame may bake at the cache's
+     // current tile size. See [budgetedTilesPerFrame]'s own doc comment.
+     var budget = budgetedTilesPerFrame;
+diff --git a/packages/jet_cad_2d_flutter/test/tile_regime_test.dart b/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
+index 1774119..1da64be 100644
+--- a/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tile_regime_test.dart
+@@ -156,11 +156,36 @@ void main() {
+         reason: 'the outgoing generation for both zooms never covered, so '
+             '`_retireGeneration` minted nothing to fall back on -- this is '
+             'the state the guard has to survive without painting nothing');
+     expect(
+         h.cache.blitCount + h.cache.liveDrawCount + h.cache.carryOverBlitCount,
+         greaterThan(0),
+         reason: 'a moving frame with no composite to show must still draw '
+             'something -- the ordinary bake-and-live-walk path -- rather '
+             'than leave the viewport blank for the length of the gesture');
+   });
++
++  // A wheel spun steadily: one scale change per frame, with a single
++  // unchanged frame between notches. Under a one-frame gate this bakes on
++  // every second frame.
++  testWidgets('a steadily spun wheel never arms the rest gate', (t) async {
++    final h = await pumpTiled(t);
++    await settle(t, h);
++    h.cache.resetCounters();
++
++    for (var notch = 0; notch < 6; notch++) {
++      h.camera.zoomAt(const Offset(120, 90), 1.1); // the moving frame
++      await t.pump();
++      await t.pump(); // one unchanged frame before the next notch
++    }
++
++    expect(h.cache.bakeCount, 0,
++        reason: 'a wheel that keeps turning must never reach two consecutive '
++            'unchanged frames, so it must never bake');
++  });
++
++  test('the gate needs two unchanged frames, not one', () {
++    // The threshold itself, stated where a reader can see it: one unchanged
++    // frame is the in-between frame and draws like a moving one.
++    expect(kRestGateFrames, 2);
++  });
+ }

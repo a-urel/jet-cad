@@ -1,0 +1,341 @@
+# Review package: 1e2f891..HEAD
+
+## Commits
+faf31b2 test(tiles): an edit after a sliced settle must condemn the slices
+
+## Files changed
+ docs/superpowers/notes/plan-3i-mutation-log.md     | 102 +++++++++++++++++++++
+ .../test/support/tile_fixture.dart                 |  27 ++++++
+ .../test/support/tile_harness.dart                 |  27 ++++++
+ .../test/tile_invalidation_test.dart               |  69 ++++++++++++++
+ 4 files changed, 225 insertions(+)
+
+## Diff
+diff --git a/docs/superpowers/notes/plan-3i-mutation-log.md b/docs/superpowers/notes/plan-3i-mutation-log.md
+index 7157415..4caa104 100644
+--- a/docs/superpowers/notes/plan-3i-mutation-log.md
++++ b/docs/superpowers/notes/plan-3i-mutation-log.md
+@@ -992,10 +992,112 @@ integral.
+ whole package suite with `CI=true flutter test`, then restored from the copy.
+ **Never `git checkout`.**
+ 
+ **Result:** green, as declared. 399 passed, 1 skipped.
+ 
+ **Verbatim output:**
+ 
+ ```
+ 00:06 +399 ~1: All tests passed!
+ ```
++
++---
++
++## M5 — the sliced tile is never given the band's `_baked` record
++
++**Task 10.** `_invalidateTouched` condemns tiles by iterating `_baked` in both
++directions: what a handle *was* baked into, and what its new geometry
++*reaches*. A tile sliced out of a band shares one `Uint32List` record with
++every other tile the band cut, written by `_baked[key] = record;` inside the
++slice loop. Deleting that one line leaves every sliced tile absent from
++`_baked` entirely — invisible to both directions of invalidation — while the
++tile's pixels stay resident and keep blitting.
++
++**Fixture note.** The test drives its first settle through
++`settleFromBands`, not a plain `settle`. Measured directly: at this harness's
++budget (`kBakeBudgetDevicePixels`, 64 tiles of 64 device pixels per frame) a
++plain `settle` over `bandCrossingGrid` bakes 128 of the viewport's 130 tiles
++through the ordinary per-tile `_bake` path across its first two frames, before
++the rest gate ever arms, and slices only the 2 tiles the rest bake finds
++missing — confirmed by instrumenting `debugOnSliceForTest` on a throwaway
++probe (`plain settle: liveTileCount=130 slices=2`; `settleFromBands:
++liveTileCount=130 slices=130`). `kMovableHandle`'s resting tile (column 2, row
++4) is nowhere near that bottom-right corner, so a test built on a plain
++`settle` exercises the ordinary `_bake` path's own (separate) `_baked[key] =
++...` write and never reaches the line this mutant deletes — the mutation
++would survive for a reason unconnected to the code under test. `settleFromBands`
++forces a table edit that drops every tile at the same, unmoved camera, so the
++next frame's rest bake slices the whole viewport (130 of 130, asserted in the
++test as `slices == tilesBefore`), and `kMovableHandle`'s tile is necessarily
++among them.
++
++**Mutation:**
++
++```diff
++--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++@@ -1209,7 +1209,7 @@
++         if (!_makeRoomForOneTile()) break;
++         final tile = _sliceTile(image, band, key, grid);
++         _tiles[key] = tile;
++-        _baked[key] = record;
+++        // M5, deliberately absent: _baked[key] = record;
++         _lastUsedFrame[key] = _frameSerial;
++       }
++       _band = null;
++```
++
++**Procedure:** copied `tile_cache.dart` aside to
++`/private/tmp/claude-501/-Users-ahmeturel-Projects-oss-jet-cad/d5e851c1-248d-41da-b1c1-19632c9b5179/scratchpad/tile_cache.green.dart`,
++applied the edit, ran `CI=true flutter test test/tile_invalidation_test.dart`,
++then restored from the copy and diffed to confirm the restore was exact.
++**Never `git checkout`.**
++
++**Result:** red, as expected — and red for the intended reason: the movable
++entity is unfindable in the settled cache at all, because its tile carries no
++`_baked` record for anything.
++
++**Verbatim output:**
++
++```
++00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart
++00:00 +0: criterion 5: a leaf edit invalidates its own tiles and no others
++00:00 +1: criterion 5: a dragged instance drops the tiles it left
++00:00 +2: criterion 5: a dragged group leaves no ghost either
++00:00 +3: criterion 6: a group and an instance nested inside a definition
++00:00 +4: criterion 5: the undo of an instance transform invalidates both ends
++00:00 +5: criterion 6: a definition edit drops the generation, and less does not
++00:00 +6: criterion 9: all five change arms, none omitted
++00:00 +7: criterion 9: a load starts a new generation, an edit does not
++00:00 +8: criterion 5 / gap G6: a stroke reaching into a tile its geometry misses invalidates it
++00:00 +9: criterion 7: a layer edit repaints and drops the generation
++00:00 +10: an edit after a sliced settle condemns the sliced tiles
++══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
++The following TestFailure was thrown running a test:
++Expected: non-empty
++  Actual: Set:[]
++the movable entity must be findable in the settled cache
++
++When the exception was thrown, this was the stack:
++#4      main.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart:690:5)
++<asynchronous suspension>
++#5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
++<asynchronous suspension>
++#6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)
++<asynchronous suspension>
++<asynchronous suspension>
++(elided one frame from package:stack_trace)
++
++This was caught by the test expectation on the following line:
++  file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart line 690
++The test description was:
++  an edit after a sliced settle condemns the sliced tiles
++════════════════════════════════════════════════════════════════════════════════════════════════════
++00:00 +10 -1: an edit after a sliced settle condemns the sliced tiles [E]
++  Test failed. See exception logs above.
++  The test description was: an edit after a sliced settle condemns the sliced tiles
++  
++00:00 +10 -1: Some tests failed.
++
++Failing tests:
++  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart: an edit after a sliced settle condemns the sliced tiles
++```
+diff --git a/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart b/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart
+index 3128084..7792009 100644
+--- a/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart
++++ b/packages/jet_cad_2d_flutter/test/support/tile_fixture.dart
+@@ -428,12 +428,39 @@ DraftDocument bandCrossingGrid(FlutterTextMeasurer measurer) {
+         lineweight: kBandStrokeLineweight);
+   }
+   // Columns 1..12 at 32 logical pixels: the last tile column starts at device
+   // x 768 and the viewport is 800 wide, so column 12's own left edge is the
+   // final one inside it.
+   for (var col = 1; col <= 12; col++) {
+     final x = worldX(col * 32.0 + _sideFor(col));
+     addLine(doc, doc.rootHandle, Handle(handle++), x, -52, x, 300,
+         lineweight: kBandStrokeLineweight);
+   }
++
++  // [kMovableHandle]'s resting position, for Task 10's edit-after-a-settle
++  // test. A group, not a bare leaf: `TransformNodeCommand` only accepts a
++  // node handle (`commands.dart:292`, `target.tree[handle]`), and only a
++  // group or an instance is one.
++  //
++  // Screen (80, 144), through the same inversion as the boundary strokes
++  // above: tile column 2 spans device x [128, 192) -- logical [64, 96) -- and
++  // row 4 spans device y [256, 320) -- logical [128, 160). 80 and 144 sit 16
++  // and 16 logical pixels inside those ranges respectively, comfortably clear
++  // of [kTileSlack]'s one-tile ring. The leaf's local (0, 0)-(6, 6) diagonal
++  // moves the far endpoint to screen (88.4, 135.6) -- still inside the same
++  // tile -- so the whole entity rests in one place:
++  // [TiledHarness.moveOneEntityOntoDisjointTiles] moves it to tile column 9,
++  // row 1, seven columns and three rows clear.
++  addGroup(doc, doc.rootHandle, kMovableHandle,
++      Transform2(1, 0, 0, 1, worldX(80), worldY(144)));
++  addLine(doc, kMovableHandle, Handle(handle++), 0, 0, 6, 6);
+   return doc;
+ }
++
++/// The node [TiledHarness.moveOneEntityOntoDisjointTiles] moves, and
++/// [bandCrossingGrid]'s doc comment for its resting position and the
++/// arithmetic behind the move.
++///
++/// A [GroupNode] handle, deliberately: `TransformNodeCommand.apply`
++/// (`commands.dart:292-300`) accepts only a node already in
++/// `DraftDocument.tree`, and a leaf entity is not one.
++const Handle kMovableHandle = Handle(1100);
+diff --git a/packages/jet_cad_2d_flutter/test/support/tile_harness.dart b/packages/jet_cad_2d_flutter/test/support/tile_harness.dart
+index f7d0414..77d07c3 100644
+--- a/packages/jet_cad_2d_flutter/test/support/tile_harness.dart
++++ b/packages/jet_cad_2d_flutter/test/support/tile_harness.dart
+@@ -20,20 +20,47 @@ class TiledHarness {
+   final CameraController camera;
+   final DraftDocument document;
+ 
+   /// The index the tiled canvas was built over.
+   ///
+   /// Held so a second canvas can be pumped over the **same** document and the
+   /// same index — which is what `captureLive` does. Rebuilding the index
+   /// there would compare two frames drawn from two different trees, and a
+   /// query-order difference between them would read as a tiling defect.
+   final SpatialIndex index;
++
++  /// Moves [kMovableHandle] onto tiles it did not occupy, for Task 10's
++  /// edit-after-a-settle test.
++  ///
++  /// **Onto disjoint tiles, not merely somewhere else.** An edit that extends
++  /// a line rather than moving it makes the new tile set a superset of the
++  /// old one, and then "the old position was condemned" is true of an
++  /// implementation that condemns nothing -- the trap
++  /// `tile_invalidation_test.dart` documents at its own head.
++  ///
++  /// `TransformNodeCommand` **replaces** the node's transform rather than
++  /// composing with it, so the destination below is an absolute world point,
++  /// not an offset from wherever [kMovableHandle] happens to rest. Screen
++  /// (300, 48), through [tileCamera]'s own inversion (`sx = 1.4 wx - 37`,
++  /// `sy = -1.4 wy + 323`): tile column 9 spans device x [576, 640) -- logical
++  /// [288, 320) -- and row 1 spans device y [64, 128) -- logical [32, 64).
++  /// [bandCrossingGrid]'s doc comment places [kMovableHandle]'s resting
++  /// position at tile column 2, row 4 -- seven columns and three rows clear
++  /// of this destination, far outside [kTileSlack]'s one-tile ring, so the
++  /// two tile sets are disjoint by construction and the test only has to
++  /// confirm it.
++  void moveOneEntityOntoDisjointTiles() {
++    double worldX(double screenX) => (screenX + 37.0) / 1.4;
++    double worldY(double screenY) => (323.0 - screenY) / 1.4;
++    document.commands.execute(TransformNodeCommand(
++        kMovableHandle, Transform2(1, 0, 0, 1, worldX(300), worldY(48))));
++  }
+ }
+ 
+ /// Pumps a tiled canvas over `fillingGrid`, which inks every tile of
+ /// [kTileViewport] at [tileCamera] -- so "nothing was drawn" can never be
+ /// mistaken for "there was nothing to draw".
+ Future<TiledHarness> pumpTiled(
+   WidgetTester t, {
+   DraftDocument Function(FlutterTextMeasurer)? document,
+   ViewportTransform? camera,
+ }) async {
+diff --git a/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart b/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart
+index 5c6a9fd..c841ac0 100644
+--- a/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tile_invalidation_test.dart
+@@ -25,20 +25,21 @@ import 'dart:typed_data';
+ 
+ import 'package:flutter/widgets.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+ 
+ import 'support/fixtures.dart';
+ import 'support/tile_comparison.dart';
+ import 'support/tile_fixture.dart';
++import 'support/tile_harness.dart';
+ 
+ /// A root leaf on the left, and a definition placed twice: once on the left,
+ /// once far to the right.
+ ///
+ /// At [tileCamera] the world→screen map is `x -> 1.4x - 37`, `y -> 323 - 1.4y`,
+ /// and a 64 device-pixel tile at `dpr` 2 is 32 logical pixels, so the two
+ /// placements land eight tiles apart on x: instance 300 covers tile columns
+ /// 0-1, instance 301 covers columns 8-9. "Did the other side survive" is
+ /// therefore a question the geometry can answer, and an implementation that
+ /// answers every edit by dropping the generation fails it.
+@@ -632,20 +633,88 @@ void main() {
+     expect(paints, greaterThan(paintsBefore),
+         reason: 'a layer edit must cause a frame at all -- the half a counter '
+             'inside paint could never reach');
+     // And the half the frame count cannot see. `_dropGeneration` counts what
+     // it threw away, so this is exact rather than "more than none": every tile
+     // the previous frame baked is gone, whatever the new frame rebaked.
+     expect(cache.invalidationCount, invalidationsBefore + tilesBefore,
+         reason: 'every tile baked before the edit was drawn against the old '
+             'layer table and must have been thrown away');
+   });
++
++  // Criterion 10. `_invalidateTouched` condemns tiles by iterating `_baked`
++  // in both directions -- see this file's own header -- and a *sliced* tile
++  // has no record of its own unless the rest bake shares one band-wide record
++  // across every tile it cuts. A tile with no record is invisible to both
++  // directions: edit an entity after a settle and the stale tile keeps
++  // blitting over the corrected drawing, with `invalidationCount` reading
++  // zero. M5 is exactly that mutation -- deleting `_baked[key] = record;` in
++  // `_restBake`.
++  testWidgets('an edit after a sliced settle condemns the sliced tiles',
++      (t) async {
++    final h = await pumpTiled(t, document: bandCrossingGrid);
++    // **`settle` alone is not enough, and this is measured rather than
++    // assumed.** At this harness's budget (`kBakeBudgetDevicePixels`, 64
++    // tiles of 64 device pixels each) the ordinary per-tile loop bakes all
++    // but two of the viewport's 130 tiles across the first two frames, before
++    // the rest gate ever arms -- `settleFromBands`'s own doc comment says so,
++    // and a probe run confirmed it: a plain `settle` here slices exactly 2 of
++    // 130 tiles, in the bottom-right corner, nowhere near `kMovableHandle`'s
++    // resting tile at column 2, row 4. A test built on a plain `settle` would
++    // pass with `_baked[key] = record;` deleted for no reason connected to
++    // the code under test -- M5 would survive silently. `settleFromBands`
++    // forces a table edit that drops every tile at the same, unmoved camera,
++    // so the very next frame's rest bake slices the *whole* viewport -- 130
++    // of 130, asserted below -- and `kMovableHandle`'s tile is necessarily
++    // among them.
++    final slices = await settleFromBands(t, h);
++    final tilesBefore = h.cache.liveTileCount;
++    expect(tilesBefore, greaterThan(0),
++        reason: 'not vacuous: there must be tiles to condemn');
++    expect(slices, tilesBefore,
++        reason: 'every visible tile must have come from the band-sliced '
++            'path, or the movable entity might be sitting on one that '
++            "did not -- exactly the gap `settle` alone leaves");
++    final invalidationsBefore = h.cache.invalidationCount;
++
++    // The fixture guard, exactly as every test above states it: the old and
++    // new tile sets must be disjoint, or direction one and direction two
++    // cannot be told apart and deleting either goes unnoticed. `oldTiles` is
++    // the harness's own settled record -- the tiles the sliced band bake
++    // actually wrote `kMovableHandle` into; `newTiles` is a fresh oracle's
++    // answer for where the document's edited state paints it, exactly the
++    // way `tilesFor` above answers direction two for the unsliced tests. See
++    // `bandCrossingGrid`'s and `moveOneEntityOntoDisjointTiles`'s doc
++    // comments for the arithmetic: tile column 2, row 4 against tile column
++    // 9, row 1, seven columns and three rows clear.
++    final oldTiles = h.cache.tilesHolding(kMovableHandle).toSet();
++    expect(oldTiles, isNotEmpty,
++        reason: 'the movable entity must be findable in the settled cache');
++
++    h.moveOneEntityOntoDisjointTiles();
++    final newTiles = tilesFor(h.document, kMovableHandle).toSet();
++    expect(newTiles, isNotEmpty);
++    expect(newTiles.intersection(oldTiles), isEmpty,
++        reason: 'fixture guard: unless the edit lands the entity on tiles it '
++            'did not occupy, direction one and direction two cannot be told '
++            'apart and deleting either goes unnoticed');
++
++    await t.pump();
++
++    expect(h.cache.invalidationCount, greaterThan(invalidationsBefore),
++        reason: 'sliced tiles carry the band record, so the edit reaches them');
++    await settle(t, h);
++    expect(
++        differingPixels(await captureTiled(t, h), await captureLive(t, h)), 0,
++        reason: 'and the drawing is correct afterwards, which is the half a '
++            'counter alone cannot show');
++  });
+ }
+ 
+ /// One vertical line eight tile rows tall, and a definition placed clear of it.
+ ///
+ /// The line is the probe for accepted gap G6. Anti-degenerate clause 1 holds
+ /// structurally: at a 64 device-pixel tile and `dpr` 2 the line spans about
+ /// eight rows, so it cannot sit inside one tile. Clause 4 is why the
+ /// definition is here at all — a root-only fixture never reaches the
+ /// definition arm — and the placement sits in tile columns 9-10, four columns
+ /// clear of anything this test condemns, so "and still not a generation drop"

@@ -1,0 +1,403 @@
+# Review package: 715b630..HEAD
+
+## Commits
+6c7e2a0 fix(tiles): pin the states the split test drifted from, and observe _band
+
+## Files changed
+ docs/superpowers/notes/plan-3i-mutation-log.md     | 147 +++++++++++++++++++++
+ .../jet_cad_2d_flutter/lib/src/tile_cache.dart     |  43 +++++-
+ .../test/invariants/tile_budget_test.dart          |  32 ++++-
+ .../test/invariants/tile_bytes_test.dart           |  12 ++
+ 4 files changed, 224 insertions(+), 10 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/notes/plan-3i-mutation-log.md b/docs/superpowers/notes/plan-3i-mutation-log.md
+index ba2a086..dd1d793 100644
+--- a/docs/superpowers/notes/plan-3i-mutation-log.md
++++ b/docs/superpowers/notes/plan-3i-mutation-log.md
+@@ -286,10 +286,157 @@ The test description was:
+ ════════════════════════════════════════════════════════════════════════════════════════════════════
+ 00:00 +1 -1: the ceiling holds at every point inside the rest frame [E]
+   Test failed. See exception logs above.
+   The test description was: the ceiling holds at every point inside the rest frame
+   
+ 00:00 +1 -1: Some tests failed.
+ 
+ Failing tests:
+   /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart: the ceiling holds at every point inside the rest frame
+ ```
++
++---
++
++## M6b — the band image is never assigned to `_band`
++
++**Task 8, fix round 1.** The band is baked, sliced and disposed correctly, but
++`_band` is never set, so `liveBytes` cannot see the one image the whole banding
++design exists to bound.
++
++**Why it needed its own mutant.** Task 4 landed `_band` and `debugSetBand` and
++proved `liveBytes` counts a band *handed to the seam*. It could not prove the
++production path puts one there. Task 8 assigns `_band` on the real path, but
++the ceiling assertion it shipped with -- `liveBytes <= kTileCacheBytes` inside
++the slice -- is one-sided: with `_band` unassigned `liveBytes` reads the tile
++sum, which is smaller still and satisfies it, and
++`debugImagesAlive == liveTileCount` is indifferent to `_band` either way. The
++gap Task 4 opened therefore stayed open through Task 8's first round, closed
++only by reading. The lower bound added in this round is what closes it, and
++this mutant is what proves the lower bound is load-bearing.
++
++**Mutation:**
++
++```diff
++@@ -1176,7 +1176,6 @@
++       final visited = <int>[];
++       final image = _bakeBand(
++           band, grid, quantised, painter, sink, vertices, origin, visited);
++-      _band = image;
++       // [_bakeBand]'s `onVisit` records only what the painter visited
++       // directly; [_bake]'s climbs owners so that a *container's* transform
++       // reaches the tile through invalidation's direction one. This is where
++```
++
++**Procedure:** copied `tile_cache.dart` aside, applied the edit, ran
++`CI=true flutter test test/invariants/tile_bytes_test.dart`, then restored from
++the copy. **Never `git checkout`.**
++
++**Result:** red, as expected. The new lower bound fires on the first slice of
++the first band, where `liveTileCount` is still 0 and `liveBytes` reads 0
++instead of the resident band's bytes. The second failure in the transcript is a
++knock-on and not an independent signal: the assertion throws out of the slice
++loop, so `_disposeImage(image)` never runs and one band image is left alive.
++
++**Verbatim output:**
++
++```
++00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart
++00:00 +0: a live band image is counted in liveBytes
++00:00 +1: the ceiling holds at every point inside the rest frame
++══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞═════════════════════════════════════════════════════════
++The following TestFailure was thrown during paint():
++Expected: a value greater than <0>
++  Actual: <0>
++   Which: is not a value greater than <0>
++the band image is in the total, not merely permitted by it: a rest frame that never assigned _band
++would read exactly the tile sum here
++
++The relevant error-causing widget was:
++  CustomPaint
++  CustomPaint:file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart:359:16
++
++When the exception was thrown, this was the stack:
++#0      fail (package:matcher/src/expect/expect.dart:187:31)
++#1      _expect (package:matcher/src/expect/expect.dart:182:3)
++#2      expect (package:matcher/src/expect/expect.dart:65:3)
++#3      expect (package:flutter_test/src/widget_tester.dart:473:18)
++#4      main.<anonymous closure>.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart:47:7)
++#5      TileCache._restBake (package:jet_cad_2d_flutter/src/tile_cache.dart:1204:30)
++#6      TileCache.paintFrame (package:jet_cad_2d_flutter/src/tile_cache.dart:983:7)
++#7      _DraftCustomPainter.paint (package:jet_cad_2d_flutter/src/draft_canvas.dart:427:13)
++#8      RenderCustomPaint._paintWithPainter (package:flutter/src/rendering/custom_paint.dart:593:13)
++#9      RenderCustomPaint.paint (package:flutter/src/rendering/custom_paint.dart:641:7)
++#10     RenderObject._paintWithContext (package:flutter/src/rendering/object.dart:3580:7)
++#11     PaintingContext.paintChild (package:flutter/src/rendering/object.dart:265:13)
++#12     RenderProxyBoxMixin.paint (package:flutter/src/rendering/proxy_box.dart:143:13)
++#13     RenderObject._paintWithContext (package:flutter/src/rendering/object.dart:3580:7)
++#14     PaintingContext._repaintCompositedChild (package:flutter/src/rendering/object.dart:180:11)
++#15     PaintingContext.repaintCompositedChild (package:flutter/src/rendering/object.dart:125:5)
++#16     PipelineOwner.flushPaint (package:flutter/src/rendering/object.dart:1325:31)
++#17     PipelineOwner.flushPaint (package:flutter/src/rendering/object.dart:1335:15)
++#18     AutomatedTestWidgetsFlutterBinding.drawFrame (package:flutter_test/src/binding.dart:2438:31)
++#19     RendererBinding._handlePersistentFrameCallback (package:flutter/src/rendering/binding.dart:558:5)
++#20     SchedulerBinding._invokeFrameCallback (package:flutter/src/scheduler/binding.dart:1430:15)
++#21     SchedulerBinding.handleDrawFrame (package:flutter/src/scheduler/binding.dart:1345:9)
++#22     AutomatedTestWidgetsFlutterBinding.pump.<anonymous closure> (package:flutter_test/src/binding.dart:2261:9)
++#25     TestAsyncUtils.guard (package:flutter_test/src/test_async_utils.dart:74:41)
++#26     AutomatedTestWidgetsFlutterBinding.pump (package:flutter_test/src/binding.dart:2250:27)
++#27     WidgetTester.pump.<anonymous closure> (package:flutter_test/src/widget_tester.dart:652:53)
++#30     TestAsyncUtils.guard (package:flutter_test/src/test_async_utils.dart:74:41)
++#31     WidgetTester.pump (package:flutter_test/src/widget_tester.dart:652:27)
++#32     main.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart:57:13)
++<asynchronous suspension>
++#33     testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
++<asynchronous suspension>
++#34     TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)
++<asynchronous suspension>
++<asynchronous suspension>
++(elided 5 frames from dart:async and package:stack_trace)
++
++The following RenderObject was being processed when the exception was fired: RenderCustomPaint#2342a:
++  creator: CustomPaint ← RepaintBoundary ← DraftCanvas ← SizedBox ← Directionality ← MediaQuery ←
++    _FocusInheritedScope ← _FocusScopeWithExternalFocusNode ← _FocusInheritedScope ← Focus ←
++    FocusTraversalGroup ← MediaQuery ← ⋯
++  parentData: <none> (can use size)
++  constraints: BoxConstraints(w=800.0, h=600.0)
++  size: Size(800.0, 600.0)
++  painter: _DraftCustomPainter#c6044(Listenable.merge([CameraController#36307(Instance of
++    'ViewportTransform'), Instance of 'DocChangeNotifier', Instance of '_TableListenableAdapter',
++    Instance of '_SettleNotifier']))
++  preferredSize: Size(Infinity, Infinity)
++This RenderObject has no descendants.
++════════════════════════════════════════════════════════════════════════════════════════════════════
++══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
++The following TestFailure was thrown running a test:
++Expected: <0>
++  Actual: <1>
++no band image outlives its band, and the composite was dropped before the bake
++
++When the exception was thrown, this was the stack:
++#4      main.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart:59:5)
++<asynchronous suspension>
++#5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
++<asynchronous suspension>
++#6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)
++<asynchronous suspension>
++<asynchronous suspension>
++(elided one frame from package:stack_trace)
++
++This was caught by the test expectation on the following line:
++  file:///Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart line 59
++The test description was:
++  the ceiling holds at every point inside the rest frame
++════════════════════════════════════════════════════════════════════════════════════════════════════
++══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
++The following message was thrown:
++Multiple exceptions (2) were detected during the running of the current test, and at least one was
++unexpected.
++════════════════════════════════════════════════════════════════════════════════════════════════════
++00:00 +1 -1: the ceiling holds at every point inside the rest frame [E]
++  Test failed. See exception logs above.
++  The test description was: the ceiling holds at every point inside the rest frame
++  
++00:00 +1 -1: Some tests failed.
++
++Failing tests:
++  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart: the ceiling holds at every point inside the rest frame
++```
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+index 2d4770e..e83281d 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -1026,20 +1026,40 @@ class TileCache {
+       // change of the same gesture with nothing to blit while its own
+       // generation is still empty. Surviving the frame that filled it costs
+       // one frame of stale ink under antialiased edges and buys a gesture that
+       // never blanks.
+       if (baked == 0) _dropCarryOver();
+       return;
+     }
+     // Stale scaled pixels rather than a live walk, deliberately: replaying the
+     // whole painter is the ~60 ms stall this cache exists to remove, and a
+     // gesture frame is precisely where it must not happen.
++    //
++    // **`carryOverCovers` was measured before [_restBake] may have dropped
++    // the composite, and that combination cannot leave this frame blank.**
++    // Read literally the pair is alarming: a `true` here plus a released
++    // composite plus an uncovered key would return with neither stale pixels
++    // nor a live walk -- blank, which is worse than either. It is
++    // unreachable, and the reason is [_restBake]'s own precondition rather
++    // than anything on this line. `_restBake` releases the composite only
++    // after pricing one band plus **every visible tile** against
++    // [cacheBytes], and `_makeRoomForOneTile` can then always find room,
++    // because the only tiles carrying this frame's serial are ones the same
++    // rest bake just cut. So a frame that dropped the composite is a frame
++    // that filled every visible key, `uncovered` is null, and control took
++    // the covered return above without ever reaching this line. The assert
++    // states it so a future change to that pricing fails loudly here instead
++    // of shipping an intermittently blank viewport.
++    assert(
++        !carryOverCovers || hasCarryOver,
++        'a frame that released the composite must have covered the viewport, '
++        'or this return leaves neither stale pixels nor a live walk');
+     if (carryOverCovers) return;
+     // One walk for the union, not one per tile: at 512 px a full visible set is
+     // about 48 tiles (see the 48.0 MiB figure above), and 48 painter invocations
+     // in one frame would be slower than the live path this cache exists to
+     // replace. Clipped, so the covered tiles keep the pixels they just blitted.
+     canvas.save();
+     // **The clip is unchanged, and that is a decision.** `_bake` states the
+     // rule for itself -- "The query is padded; the clip is not." Drop this
+     // line and the pad becomes overdraw onto tiles already blitted: the pixels
+     // stay correct, so the sweep still reads zero, and the cost this whole
+@@ -2019,22 +2039,28 @@ class TileCache {
+     into.restore();
+ 
+     final picture = recorder.endRecording();
+     final image = picture.toImageSync(
+         band.deviceRect.width.round(), band.deviceRect.height.round());
+     _imagesAlive++;
+     picture.dispose();
+     return image;
+   }
+ 
+-  /// Test seam for [_bakeBand], and its only caller until the band bake is
+-  /// wired into [paintFrame].
++  /// Test seam for [_bakeBand], which [_restBake] now also calls on the frame
++  /// path.
++  ///
++  /// **It was the only caller until Plan 3i Task 8 wired the band bake in**,
++  /// and it was introduced because `unused_element` is an error in this
++  /// package. That justification is gone; the wrapper stays because Task 6's
++  /// tests are written against it, and because what it lets them do is still
++  /// worth doing:
+   ///
+   /// What the band bake decides -- where the band camera puts a world point,
+   /// how far past the band's edge the query reaches, and which origin the walk
+   /// is rebased against -- is checkable without rasterising anything, and this
+   /// is what lets it be checked. The returned image is the caller's to
+   /// dispose.
+   @visibleForTesting
+   Image debugBakeBand(
+     TileBand band,
+     TileGrid grid,
+@@ -2064,25 +2090,28 @@ class TileCache {
+           0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble()),
+       _blitPaint,
+     );
+     final picture = recorder.endRecording();
+     final image = picture.toImageSync(tileDevicePixels, tileDevicePixels);
+     _imagesAlive++;
+     picture.dispose();
+     return image;
+   }
+ 
+-  /// Test seam for [_sliceTile]. Like [debugBakeBand], this has no production
+-  /// caller yet -- the slice is not wired into [paintFrame] until a later
+-  /// task -- so without this wrapper the analyzer's `unused_element` (an
+-  /// error in this package) would fail the gate on a private method nothing
+-  /// calls.
++  /// Test seam for [_sliceTile], which [_restBake] now also calls on the frame
++  /// path.
++  ///
++  /// Like [debugBakeBand] this existed because the slice had no production
++  /// caller until Plan 3i Task 8 and `unused_element` is an error in this
++  /// package. Kept because Task 7's tests call it directly, which is how they
++  /// slice a band they built themselves rather than one a whole frame
++  /// produced.
+   @visibleForTesting
+   Image debugSliceTile(Image band, TileBand from, TileKey key, TileGrid grid) =>
+       _sliceTile(band, from, key, grid);
+ 
+   void _drawInto(
+     Canvas canvas,
+     Size size,
+     ViewportTransform camera,
+     DraftPainter painter,
+     CanvasDrawSink sink,
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart b/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart
+index fcc665d..f35d997 100644
+--- a/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart
++++ b/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart
+@@ -486,20 +486,35 @@ void main() {
+     // Claim one: one frame under a ceiling it cannot satisfy empties
+     // everything the blitted-this-frame guard does not protect.
+     final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+     addTearDown(rig.dispose);
+     rig.paintOnce();
+     rig.zoomBy(1.19);
+     rig.paintOnce();
+     settle(rig);
+     expect(rig.cache.liveTileCount, greaterThan(30),
+         reason: 'setup: and there are tiles for the ceiling to take');
++    // **And no composite stands, which is chosen rather than left to
++    // chance.** Before Plan 3i Task 8 this arm asserted `isTrue` here, and
++    // that assertion was the only thing pinning the mass eviction below to
++    // running beside a standing composite. A resting frame now drops the
++    // composite before it bands, so the settle above ends with a covering
++    // generation and nothing else -- which is the right state for this claim
++    // (the eviction it measures is about the tile map alone) but has to be
++    // said, or a reader cannot tell whether the state was designed or
++    // drifted. The composite's own arm is claim two below, and the
++    // "eviction runs with a composite standing, and never takes it" test in
++    // this file covers the intersection.
++    expect(rig.cache.hasCarryOver, isFalse,
++        reason: 'setup: the settle covered the viewport, so the rest bake '
++            'released the composite -- this claim is about evicting tiles, '
++            'and it is measured with no composite in the total');
+ 
+     // **Unreachable through the constructor**, which is why `cacheBytes` is
+     // not final: a composite is minted only from a generation that covered,
+     // so any ceiling that permits one is already larger than one composite.
+     // Warm at a real ceiling, then take it away -- the manoeuvre the zoom
+     // tests use on the bake budget, for the same reason.
+     rig.cache.cacheBytes = 4 * _tileBytes;
+ 
+     // **Two frames, and the first one is not the steady state.** Eviction is
+     // asked only on a miss, so the tiles the loop had already blitted before
+@@ -543,23 +558,34 @@ void main() {
+     // without moving off that edge the last assertion below would read zero
+     // for a reason that has nothing to do with the ceiling.
+     squeezed.panBy(-64, -32);
+     squeezed.paintOnce();
+     settle(squeezed);
+ 
+     expect(squeezed.cache.hasCarryOver, isTrue,
+         reason: 'the composite survives a ceiling it does not fit under: it '
+             'is not in the tile map and eviction cannot reach it');
+     expect(squeezed.cache.liveBytes, _compositeBytes,
+-        reason: 'and it is all the cache holds -- every tile went, and the '
+-            'ceiling stayed a ceiling rather than being quietly exceeded');
+-    expect(squeezed.cache.liveTileCount, 0);
++        reason: 'and it is all the cache holds -- nothing was added beside '
++            'it, and the ceiling stayed a ceiling rather than being quietly '
++            'exceeded');
++    // **"Nothing was ever baked", not "every tile went".** The ceiling is
++    // imposed on the moving frame, where the incoming generation is already
++    // empty, so this witnesses a refusal to allocate and not a reclaim. The
++    // reclaim from a populated cache down to the composite alone is the
++    // "eviction runs with a composite standing, and never takes it" test
++    // above, which pans repeatedly under a ceiling most of which is the
++    // composite; nothing is lost by this one measuring the other half.
++    expect(squeezed.cache.liveTileCount, 0,
++        reason: 'the ceiling admitted no tile at all: not one was baked '
++            'beside the composite, which is what "bakes nothing rather than '
++            'overrun" means on a frame whose generation starts empty');
+     expect(squeezed.cache.bakeCount, 0,
+         reason: 'baking under a ceiling that cannot hold the result is the '
+             'silent overrun this arm exists to refuse -- and the rest bake '
+             'refuses it too, band and all, rather than banding into a '
+             'ceiling that cannot keep the slices');
+     expect(squeezed.cache.liveDrawCount, 1,
+         reason: 'and the live walk is what stops the frame going blank '
+             'instead');
+   });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart b/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart
+index 7dbb80d..657af33 100644
+--- a/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart
++++ b/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart
+@@ -26,23 +26,35 @@ void main() {
+ 
+     cache.debugSetBand(null);
+     expect(cache.liveBytes, before);
+     band.dispose();
+   });
+ 
+   testWidgets('the ceiling holds at every point inside the rest frame',
+       (t) async {
+     final h = await pumpTiled(t);
+     await settle(t, h);
++    // One tile of `pumpTiled`'s canvas: 64 device pixels square, RGBA.
++    const tileBytes = 64 * 64 * 4;
+     h.cache.debugOnSliceForTest = () {
+       expect(h.cache.liveBytes, lessThanOrEqualTo(kTileCacheBytes),
+           reason: 'the band image is resident here and the meter counts it');
++      // **The lower bound, and it is the half that has a witness.** The
++      // ceiling above is one-sided: a `paintFrame` that never assigned
++      // `_band` would leave `liveBytes` reading tiles alone, which is
++      // smaller still and satisfies it. Task 4's seam could only prove
++      // `liveBytes` counts a band handed to `debugSetBand`; this is what
++      // proves the production path puts one there. Fired as M6b.
++      expect(h.cache.liveBytes, greaterThan(h.cache.liveTileCount * tileBytes),
++          reason: 'the band image is in the total, not merely permitted by '
++              'it: a rest frame that never assigned _band would read exactly '
++              'the tile sum here');
+     };
+     addTearDown(() => h.cache.debugOnSliceForTest = null);
+ 
+     h.camera.zoomAt(const Offset(120, 90), 1.3);
+     await t.pump();
+     await t.pump();
+     await t.pump();
+ 
+     expect(h.cache.debugImagesAlive, h.cache.liveTileCount,
+         reason: 'no band image outlives its band, and the composite was '

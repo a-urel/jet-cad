@@ -1,0 +1,235 @@
+# Review package: 9494e99..HEAD
+
+## Commits
+527babd fix(tiles): give four tests the frame the two-frame rest gate now needs
+ccc7da2 feat(tiles): the byte meter sees a resident band image
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/tile_cache.dart     | 17 ++++++++++++-
+ .../test/invariants/tile_budget_test.dart          | 20 +++++++++++----
+ .../test/invariants/tile_bytes_test.dart           | 29 ++++++++++++++++++++++
+ .../jet_cad_2d_flutter/test/tile_cache_test.dart   | 26 +++++++++++++------
+ 4 files changed, 78 insertions(+), 14 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+index f127a62..1d2b55e 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -473,20 +473,33 @@ class TileCache {
+   /// every frame.
+   ///
+   /// **Never a resample of a resample.** A composite is minted only from a
+   /// generation that covered the viewport ([_viewportCovered]), so a gesture
+   /// frame — which anchors a fresh generation and bakes nothing into it —
+   /// carries the *same* composite forward rather than re-flattening the
+   /// already-scaled one. Eight gesture frames therefore filter the original
+   /// pixels once, not eight times.
+   Image? _carryOver;
+ 
++  /// The band image the current rest bake is slicing, if one is resident.
++  ///
++  /// Null on every frame that is not inside a band's slice loop. Held as a
++  /// field rather than a local **so that [liveBytes] can see it**: the ceiling
++  /// is consulted per sliced tile, and a source image invisible to the meter
++  /// would let the peak run past `kTileCacheBytes` inside the one frame the
++  /// meter exists to bound.
++  Image? _band;
++
++  /// Test seam for the byte meter. See [_band].
++  @visibleForTesting
++  void debugSetBand(Image? band) => _band = band;
++
+   /// The screen space [_carryOver] was recorded in: the quantised camera of
+   /// the last frame the retired generation covered.
+   ///
+   /// Not the grid's anchor. A generation outlives many pans, and the anchor
+   /// describes the camera the *first* of them ran at — its viewport rectangle
+   /// need not hold anything the user can currently see.
+   ViewportTransform? _carryOverAnchor;
+ 
+   /// [_carryOver]'s extent in [_carryOverAnchor]'s logical screen space.
+   ///
+@@ -610,22 +623,24 @@ class TileCache {
+   /// composite, and a `liveBytes` that summed only [_tiles] would report the
+   /// cache using a third of what it really holds. Measured from the image's
+   /// own `width` and `height` rather than from `viewport`, because the
+   /// composite's device size is a `ceil` of the viewport and it outlives the
+   /// camera it was recorded against.
+   ///
+   /// A tile is `tileDevicePixels` square, RGBA, one byte a channel: exactly
+   /// what `Picture.toImageSync` allocates in [_bake].
+   int get liveBytes {
+     final carryOver = _carryOver;
++    final band = _band;
+     return _tiles.length * _tileBytes +
+-        (carryOver == null ? 0 : carryOver.width * carryOver.height * 4);
++        (carryOver == null ? 0 : carryOver.width * carryOver.height * 4) +
++        (band == null ? 0 : band.width * band.height * 4);
+   }
+ 
+   /// Tiles the ceiling reclaimed over this cache's whole life.
+   ///
+   /// Not reset by [resetCounters], for [invalidationCount]'s reason: this
+   /// counts a cache-lifetime event, not a per-frame one. **Distinct from
+   /// [invalidationCount] deliberately** — an invalidated tile held wrong
+   /// pixels, an evicted one held perfectly good pixels there was no room for,
+   /// and a test that could not tell them apart would read a thrashing cap as a
+   /// busy editor.
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart b/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart
+index 6fc1b38..e1efe56 100644
+--- a/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart
++++ b/packages/jet_cad_2d_flutter/test/invariants/tile_budget_test.dart
+@@ -50,29 +50,39 @@ const int _compositeBytes = 800 * 600 * 4;
+ ///
+ /// 138 tiles. A covering generation at this viewport and tile size is 130, so
+ /// the first frame covers -- which is the precondition for minting a composite
+ /// at all. The composite is then 1,920,000 of the ceiling's 2,260,992 bytes,
+ /// leaving room for twenty tiles: a sixth of the viewport, so the generation
+ /// never covers again, the composite is never dropped, and every pan after the
+ /// zoom has to evict. That intersection is the state the two states this file
+ /// already covered could not reach between them.
+ const int _capWithComposite = 138 * _tileBytes;
+ 
+-/// One more frame at the same camera `rig` just painted.
++/// Enough more frames at the same camera `rig` just painted for the rest
++/// gate to arm and a resting frame to actually bake.
+ ///
+ /// Plan 3i Task 2: a frame whose camera just changed is *moving* and draws
+ /// only the carry-over composite -- no bake, no tile blit, no live walk.
+ /// Every pan or zoom in this file used to bake and evict on the very next
+-/// frame; now that frame is the moving one, and this second, unchanged-camera
+-/// call is the one that actually bakes, blits and evicts, matching this
+-/// file's pre-Plan-3i counts again.
+-void settle(TileRig rig) => rig.paintOnce();
++/// frame; now that frame is the moving one, and one more, unchanged-camera
++/// call used to be the one that actually bakes, blits and evicts, matching
++/// this file's pre-Plan-3i counts again.
++///
++/// Plan 3i Task 3 then raised the threshold from one unchanged frame to
++/// [kRestGateFrames] (two), so a single extra call now lands on the frame
++/// *in between* -- still not resting, so it also only blits the composite --
++/// and it takes `kRestGateFrames` of them to reach the one that bakes.
++void settle(TileRig rig) {
++  for (var i = 0; i < kRestGateFrames; i++) {
++    rig.paintOnce();
++  }
++}
+ 
+ void main() {
+   test('criterion 12: the cap holds and eviction is real, not theoretical',
+       () async {
+     // A cap of eight tiles at 64 device pixels: 8 * 64 * 64 * 4 = 131,072 B.
+     // Small on purpose -- the point is that the policy runs, and a production
+     // cap would need a corpus this suite cannot afford.
+     final rig = TileRig(
+         tileDevicePixels: 64, tilesBakedPerFrame: 1000, cacheBytes: 131072);
+     addTearDown(rig.dispose);
+diff --git a/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart b/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart
+new file mode 100644
+index 0000000..b7b2d3f
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/invariants/tile_bytes_test.dart
+@@ -0,0 +1,29 @@
++import 'dart:ui' as ui;
++
++import 'package:flutter/widgets.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++void main() {
++  test('a live band image is counted in liveBytes', () {
++    final cache = TileCache(tileDevicePixels: 64);
++    addTearDown(cache.dispose);
++    final before = cache.liveBytes;
++
++    final recorder = ui.PictureRecorder();
++    Canvas(recorder).drawRect(const Rect.fromLTWH(0, 0, 8, 8),
++        Paint()..color = const Color(0xFF00FF00));
++    final picture = recorder.endRecording();
++    final band = picture.toImageSync(256, 64);
++    picture.dispose();
++
++    cache.debugSetBand(band);
++    expect(cache.liveBytes, before + 256 * 64 * 4,
++        reason: 'a resident band image is 4 bytes a pixel like every other '
++            'image this cache holds, and the ceiling has to see it');
++
++    cache.debugSetBand(null);
++    expect(cache.liveBytes, before);
++    band.dispose();
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/tile_cache_test.dart b/packages/jet_cad_2d_flutter/test/tile_cache_test.dart
+index a1fd868..6ed3452 100644
+--- a/packages/jet_cad_2d_flutter/test/tile_cache_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tile_cache_test.dart
+@@ -196,22 +196,27 @@ void main() {
+     // report.
+     final zoomed = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+     addTearDown(zoomed.dispose);
+     zoomed.paintOnce();
+     // Four, not zero: the frame under the spy must contain *both* kinds of
+     // blit, or the two-object claim is made over one object again. Four
+     // *tiles*, at this rig's 64 px tile: the field is a device-pixel budget.
+     zoomed.cache.bakeBudgetDevicePixels = 4 * 64 * 64;
+     zoomed.zoomBy(1.19);
+     // The gate's moving frame: it retires the old generation into a
+-    // composite and bakes nothing of the new one. The spy call below needs
+-    // the settled frame after it -- both kinds of blit in the same frame.
++    // composite and bakes nothing of the new one. Then one more unchanged
++    // camera, which kRestGateFrames now requires before a frame may bake --
++    // one used to be enough, so this used to be the settled frame itself; it
++    // still only blits the composite. The spy call below is the frame after
++    // it -- the one kRestGateFrames now arms -- and needs both kinds of
++    // blit in the same frame.
++    zoomed.paintOnce();
+     zoomed.paintOnce();
+     zoomed.cache.resetCounters();
+     final zoomedSpy = SpyCanvas();
+     zoomed.cache.paintFrame(
+       canvas: zoomedSpy,
+       viewport: kTileViewport,
+       devicePixelRatio: kTileDpr,
+       camera: zoomed.camera,
+       painter: zoomed.painter,
+       sink: zoomed.sink,
+@@ -601,27 +606,32 @@ void main() {
+     // here no longer excludes anything: **1.22 and 1.10 are two of the six**,
+     // and they are in it deliberately. These are a criterion-1 claim rather
+     // than a demonstration -- mutant M4 reddens every one of them, because a
+     // generation replayed at the old scale carries the old stroke widths and
+     // the old dash phase and no pan test can see either.
+     for (final factor in <double>[0.74, 0.83, 1.10, 1.16, 1.22, 1.30]) {
+       final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 1000);
+       addTearDown(rig.dispose);
+       rig.paintOnce();
+       rig.zoomBy(factor);
+-      // Three frames now, the first of them new: the gate's moving frame,
++      // Four frames now, the first two of them new: the gate's moving frame,
+       // which retires the old (covered) generation into a composite and
+-      // bakes nothing. Of the two after it, the first anchors the new
+-      // generation and fills it, with the composite blitted underneath; the
+-      // second bakes nothing, finds the viewport covered, and retires the
+-      // composite. Only the fourth frame -- the comparison's own -- is a
+-      // clean generation, and that is the frame criterion 1 is a claim about.
++      // bakes nothing, and the frame after it, which the Task 3 threshold
++      // still counts as not-yet-rested -- one unchanged camera used to be
++      // enough, kRestGateFrames now asks for two, so this second frame also
++      // bakes nothing and only blits the composite. Of the two after that,
++      // the first anchors the new generation and fills it, with the
++      // composite blitted underneath; the second bakes nothing, finds the
++      // viewport covered, and retires the composite. Only the fifth frame --
++      // the comparison's own -- is a clean generation, and that is the frame
++      // criterion 1 is a claim about.
++      rig.paintOnce();
+       rig.paintOnce();
+       rig.paintOnce();
+       rig.paintOnce();
+       expect(rig.cache.hasCarryOver, isFalse,
+           reason: 'factor $factor: a covered viewport retires the composite, '
+               'and a composite still on screen would compose stale ink under '
+               'every antialiased tile edge');
+       await expectTiledEqualsLive(rig);
+     }
+   });

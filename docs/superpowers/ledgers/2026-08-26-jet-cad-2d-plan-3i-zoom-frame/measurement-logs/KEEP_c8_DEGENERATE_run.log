@@ -1,0 +1,130 @@
+Resolving dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (105.0.0 available)
+  analyzer 13.3.0 (14.1.0 available)
+  clock 1.1.2 (1.1.3 available)
+  code_assets 1.2.1 (2.0.0 available)
+  hooks 2.1.0 (2.2.0 available)
+  lucide_icons_flutter 3.1.15 (3.1.17 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  mime 2.0.0 (2.1.0 available)
+  objective_c 9.5.0 (9.6.0 available)
+  package_config 2.2.0 (3.0.0 available)
+  pool 1.5.2 (1.5.3 available)
+  process 5.0.5 (5.0.6 available)
+  record_use 1.1.0 (1.1.1 available)
+  shadcn_ui 0.55.1 (0.56.2 available)
+  source_maps 0.10.13 (0.10.14 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  test 1.31.1 (1.31.2 available)
+  test_api 0.7.12 (0.7.13 available)
+  test_core 0.6.18 (0.6.19 available)
+  vm_service 15.2.0 (15.3.0 available)
+  yaml 3.1.3 (3.1.4 available)
+Got dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`!
+21 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Launching lib/main.dart on macOS in profile mode...
+Building macOS application...                                   
+✓ Built build/macos/Build/Products/Profile/dev_harness_2d.app (60.9MB)
+[IMPORTANT:flutter/shell/platform/embedder/embedder_surface_metal_impeller.mm(53)] Using the Impeller rendering backend (MetalSDF).
+R2 app-run: JC_WINDOW=800x600
+Failed to foreground app; open returned 1
+
+Flutter run key commands.
+h List all available interactive commands.
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on macOS is available at: http://127.0.0.1:59125/CSl4vfwRTL4=/
+The Flutter DevTools debugger and profiler on macOS is available at: http://127.0.0.1:59125/CSl4vfwRTL4=/devtools/?uri=ws://127.0.0.1:59125/CSl4vfwRTL4=/ws
+flutter: R2 app-run: driving started
+flutter: R2 app-run: window=800x600 dpr=2.0
+flutter: R2 (500000) frames=242
+flutter:   build  p50=0.21ms p95=12.31ms max=28.50ms mean=1.71ms
+flutter:   raster p50=0.65ms p95=2.26ms max=11.96ms mean=0.85ms
+flutter:   total  p50=1.03ms p95=19.17ms max=1787.94ms mean=10.47ms
+flutter:   lineweightScale=1.0
+flutter:   screenSpaceLeafCount=3978 dashSpans=115140 collapsed=298 canvasCalls=0 (screenSpaceLeafCount/dashSpans/collapsed: last paint() call only under TILES=on, not the frame total -- see the tile probe for a frame figure; canvasCalls is unaffected)
+flutter:   fills=0 skippedFills=0
+flutter:   tiles=on tilePx=512 bakeBudgetPx=262144 bakeBudgetTiles=1 liveTiles=12 generation=122 carryOver=false
+flutter:   bakes=0 blits=12 carryOverBlits=0 liveDraws=0 blitDests=12 evictions=0(life) invalidations=0(life) tileBytes=12582912
+flutter:   backend=vertices triangles=0 drawVerticesCalls=0 capacityVertices=67108864 capacityMiB=768.00
+flutter:   text: corpus=off draw=on minTextCapPixels=3.0 textOps=0 skippedText=0 culledText=0
+flutter:   paragraphs: newLayouts=0 newParagraphEvictions=0 newMetricsEvictions=0 liveParagraphs=0 liveMetrics=1
+flutter:   tile warm: frames=1 liveTiles=12 tileBytes=12582912 evictions=0(life) capacityVertices=67108864 capacityMiB=768.00
+flutter:   tile hold frames=54
+flutter:   build  p50=0.09ms p95=0.47ms max=84.23ms mean=1.71ms
+flutter:   raster p50=0.35ms p95=1.09ms max=1.55ms mean=0.47ms
+flutter:   total  p50=0.91ms p95=4.12ms max=91.09ms mean=4.09ms
+flutter:     bakeFrames=0/60 maxBakesInAFrame=0
+flutter:     bakes=0 perFrame=0.000 blits=720 carryOverBlits=0 liveDraws=0 newEvictions=0 liveTiles=12 tileBytes=12582912
+flutter:     capacityVertices=67108864 capacityMiB=768.00
+flutter:   tile pan step: dx=-7.0000 dy=-3.0000 magnitude=7.6158
+flutter:   tile pan frames=131
+flutter:   build  p50=0.13ms p95=12.81ms max=29.62ms mean=1.66ms
+flutter:   raster p50=0.44ms p95=1.46ms max=3.44ms mean=0.59ms
+flutter:   total  p50=0.88ms p95=21.75ms max=36.48ms mean=3.20ms
+flutter:     bakeFrames=14/120 maxBakesInAFrame=1
+flutter:     bakes=14 perFrame=0.117 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter:     capacityVertices=67108864 capacityMiB=768.00
+flutter:   tile probe: tilePx=512 dpr=2.0 viewport=800x600 tileLogical=256.0 pad=32.0
+flutter:     tiles=12 liveLeaves=4395 tileLeaves=17977 overdraw=4.090 areaFactor=1.563
+flutter:     liveWalkMs=30.31 tileWalkMsTotal=72.34 walkMsPerTile=6.029 visibleSetBytes=12582912
+flutter: R2 tile zoom: ZOOM_MODE=criterion8 -- 9 repeats of arm A then arm B, interleaved, in one session. Arm B is Plan 3h's M4 as a runtime flag, not this plan's M4.
+flutter: R2 tile zoom c8 repeat 1/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) gestureFrames=80 p50=0.86ms p95=1.69ms max=3.57ms mean=0.92ms
+flutter: R2 tile zoom c8 repeat 1/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 1/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   settleFrames=2 covered=true settleWallMs=87.89(criterion 4, wall clock over the settle) coveringFrameMs=86.92(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 1/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) gestureFrames=80 p50=1.08ms p95=1.77ms max=4.02ms mean=1.09ms
+flutter: R2 tile zoom c8 repeat 1/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 1/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   settleFrames=2 covered=true settleWallMs=68.22(criterion 4, wall clock over the settle) coveringFrameMs=67.82(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 2/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) gestureFrames=80 p50=1.19ms p95=1.86ms max=3.95ms mean=1.26ms
+flutter: R2 tile zoom c8 repeat 2/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 2/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   settleFrames=2 covered=true settleWallMs=87.97(criterion 4, wall clock over the settle) coveringFrameMs=87.11(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 2/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) gestureFrames=80 p50=1.15ms p95=1.68ms max=1.99ms mean=1.03ms
+flutter: R2 tile zoom c8 repeat 2/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 2/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   settleFrames=2 covered=true settleWallMs=83.17(criterion 4, wall clock over the settle) coveringFrameMs=82.11(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 3/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) gestureFrames=80 p50=1.22ms p95=1.78ms max=3.60ms mean=1.19ms
+flutter: R2 tile zoom c8 repeat 3/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 3/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   settleFrames=2 covered=true settleWallMs=89.22(criterion 4, wall clock over the settle) coveringFrameMs=87.16(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 3/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) gestureFrames=80 p50=1.21ms p95=1.74ms max=4.19ms mean=1.19ms
+flutter: R2 tile zoom c8 repeat 3/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 3/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   settleFrames=2 covered=true settleWallMs=87.95(criterion 4, wall clock over the settle) coveringFrameMs=86.32(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 4/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) gestureFrames=80 p50=1.54ms p95=2.06ms max=2.31ms mean=1.52ms
+flutter: R2 tile zoom c8 repeat 4/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 4/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   settleFrames=2 covered=true settleWallMs=95.38(criterion 4, wall clock over the settle) coveringFrameMs=93.84(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 4/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) gestureFrames=80 p50=1.27ms p95=1.73ms max=3.33ms mean=1.30ms
+flutter: R2 tile zoom c8 repeat 4/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 4/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   settleFrames=2 covered=true settleWallMs=87.73(criterion 4, wall clock over the settle) coveringFrameMs=86.58(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 5/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) gestureFrames=80 p50=0.82ms p95=1.64ms max=3.79ms mean=0.92ms
+flutter: R2 tile zoom c8 repeat 5/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 5/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   settleFrames=2 covered=true settleWallMs=63.88(criterion 4, wall clock over the settle) coveringFrameMs=63.55(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 5/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) gestureFrames=80 p50=1.20ms p95=1.71ms max=49.02ms mean=2.20ms
+flutter: R2 tile zoom c8 repeat 5/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 5/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   settleFrames=2 covered=true settleWallMs=83.14(criterion 4, wall clock over the settle) coveringFrameMs=82.30(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 6/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) gestureFrames=80 p50=1.21ms p95=1.71ms max=1.76ms mean=1.18ms
+flutter: R2 tile zoom c8 repeat 6/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 6/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   settleFrames=2 covered=true settleWallMs=89.01(criterion 4, wall clock over the settle) coveringFrameMs=88.03(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 6/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) gestureFrames=80 p50=1.53ms p95=2.12ms max=3.57ms mean=1.52ms
+flutter: R2 tile zoom c8 repeat 6/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 6/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   settleFrames=2 covered=true settleWallMs=82.37(criterion 4, wall clock over the settle) coveringFrameMs=80.84(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 7/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) gestureFrames=80 p50=1.30ms p95=1.77ms max=4.50ms mean=1.36ms
+flutter: R2 tile zoom c8 repeat 7/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 7/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   settleFrames=2 covered=true settleWallMs=76.11(criterion 4, wall clock over the settle) coveringFrameMs=75.52(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 7/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) gestureFrames=80 p50=1.13ms p95=1.98ms max=4.30ms mean=1.26ms
+flutter: R2 tile zoom c8 repeat 7/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 7/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   settleFrames=2 covered=true settleWallMs=76.50(criterion 4, wall clock over the settle) coveringFrameMs=75.81(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 8/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) gestureFrames=80 p50=1.02ms p95=1.88ms max=3.60ms mean=1.09ms
+flutter: R2 tile zoom c8 repeat 8/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 8/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   settleFrames=2 covered=true settleWallMs=53.08(criterion 4, wall clock over the settle) coveringFrameMs=52.70(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 8/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) gestureFrames=80 p50=1.13ms p95=1.76ms max=4.07ms mean=1.12ms
+flutter: R2 tile zoom c8 repeat 8/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 8/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   settleFrames=2 covered=true settleWallMs=54.90(criterion 4, wall clock over the settle) coveringFrameMs=54.44(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 9/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) gestureFrames=80 p50=1.41ms p95=2.22ms max=21.18ms mean=1.68ms
+flutter: R2 tile zoom c8 repeat 9/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 9/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   settleFrames=2 covered=true settleWallMs=102.74(criterion 4, wall clock over the settle) coveringFrameMs=101.64(criterion 3, that one frame)
+flutter: R2 tile zoom c8 repeat 9/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) gestureFrames=80 p50=0.52ms p95=1.53ms max=1.88ms mean=0.77ms
+flutter: R2 tile zoom c8 repeat 9/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   gestureBakes=0(tiles, budgeted path) gestureLiveDraws=0
+flutter: R2 tile zoom c8 repeat 9/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   settleFrames=2 covered=true settleWallMs=75.39(criterion 4, wall clock over the settle) coveringFrameMs=74.92(criterion 3, that one frame)
+flutter: R2 app-run: done
+Application finished.

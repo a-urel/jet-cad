@@ -1,0 +1,166 @@
+Resolving dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (105.0.0 available)
+  analyzer 13.3.0 (14.1.0 available)
+  clock 1.1.2 (1.1.3 available)
+  code_assets 1.2.1 (2.0.0 available)
+  hooks 2.1.0 (2.2.0 available)
+  lucide_icons_flutter 3.1.15 (3.1.17 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  mime 2.0.0 (2.1.0 available)
+  objective_c 9.5.0 (9.6.0 available)
+  package_config 2.2.0 (3.0.0 available)
+  pool 1.5.2 (1.5.3 available)
+  process 5.0.5 (5.0.6 available)
+  record_use 1.1.0 (1.1.1 available)
+  shadcn_ui 0.55.1 (0.56.2 available)
+  source_maps 0.10.13 (0.10.14 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  test 1.31.1 (1.31.2 available)
+  test_api 0.7.12 (0.7.13 available)
+  test_core 0.6.18 (0.6.19 available)
+  vm_service 15.2.0 (15.3.0 available)
+  yaml 3.1.3 (3.1.4 available)
+Got dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`!
+21 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Launching lib/main.dart on macOS in profile mode...
+Building macOS application...                                   
+✓ Built build/macos/Build/Products/Profile/dev_harness_2d.app (60.9MB)
+[IMPORTANT:flutter/shell/platform/embedder/embedder_surface_metal_impeller.mm(53)] Using the Impeller rendering backend (MetalSDF).
+R2 app-run: JC_WINDOW=800x600
+Failed to foreground app; open returned 1
+
+Flutter run key commands.
+h List all available interactive commands.
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on macOS is available at: http://127.0.0.1:61203/3LENL1UNAeM=/
+The Flutter DevTools debugger and profiler on macOS is available at: http://127.0.0.1:61203/3LENL1UNAeM=/devtools/?uri=ws://127.0.0.1:61203/3LENL1UNAeM=/ws
+flutter: R2 app-run: driving started
+flutter: R2 app-run: window=800x600 dpr=2.0
+flutter: R2 (500000) frames=242
+flutter:   build  p50=0.10ms p95=12.06ms max=28.97ms mean=1.62ms
+flutter:   raster p50=0.27ms p95=2.08ms max=12.03ms mean=0.69ms
+flutter:   total  p50=0.56ms p95=17.60ms max=1890.97ms mean=10.67ms
+flutter:   lineweightScale=1.0
+flutter:   screenSpaceLeafCount=3978 dashSpans=115140 collapsed=298 canvasCalls=0 (screenSpaceLeafCount/dashSpans/collapsed: last paint() call only under TILES=on, not the frame total -- see the tile probe for a frame figure; canvasCalls is unaffected)
+flutter:   fills=0 skippedFills=0
+flutter:   tiles=on tilePx=512 bakeBudgetPx=262144 bakeBudgetTiles=1 liveTiles=12 generation=122 carryOver=false
+flutter:   bakes=0 blits=12 carryOverBlits=0 liveDraws=0 blitDests=12 evictions=0(life) invalidations=0(life) tileBytes=12582912
+flutter:   backend=vertices triangles=0 drawVerticesCalls=0 capacityVertices=67108864 capacityMiB=768.00
+flutter:   text: corpus=off draw=on minTextCapPixels=3.0 textOps=0 skippedText=0 culledText=0
+flutter:   paragraphs: newLayouts=0 newParagraphEvictions=0 newMetricsEvictions=0 liveParagraphs=0 liveMetrics=1
+flutter:   tile warm: frames=1 liveTiles=12 tileBytes=12582912 evictions=0(life) capacityVertices=67108864 capacityMiB=768.00
+flutter:   tile hold frames=53
+flutter:   build  p50=0.09ms p95=0.35ms max=93.24ms mean=1.88ms
+flutter:   raster p50=0.27ms p95=0.98ms max=2.58ms mean=0.41ms
+flutter:   total  p50=0.57ms p95=1.79ms max=102.04ms mean=4.37ms
+flutter:     bakeFrames=0/60 maxBakesInAFrame=0
+flutter:     bakes=0 perFrame=0.000 blits=720 carryOverBlits=0 liveDraws=0 newEvictions=0 liveTiles=12 tileBytes=12582912
+flutter:     capacityVertices=67108864 capacityMiB=768.00
+flutter:   tile pan step: dx=-7.0000 dy=-3.0000 magnitude=7.6158
+flutter:   tile pan frames=118
+flutter:   build  p50=0.08ms p95=14.75ms max=26.76ms mean=1.83ms
+flutter:   raster p50=0.23ms p95=1.70ms max=3.84ms mean=0.45ms
+flutter:   total  p50=0.50ms p95=23.70ms max=36.33ms mean=3.29ms
+flutter:     bakeFrames=14/120 maxBakesInAFrame=1
+flutter:     bakes=14 perFrame=0.117 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter:     capacityVertices=67108864 capacityMiB=768.00
+flutter:   tile probe: tilePx=512 dpr=2.0 viewport=800x600 tileLogical=256.0 pad=32.0
+flutter:     tiles=12 liveLeaves=4395 tileLeaves=17977 overdraw=4.090 areaFactor=1.563
+flutter:     liveWalkMs=33.55 tileWalkMsTotal=78.73 walkMsPerTile=6.561 visibleSetBytes=12582912
+flutter: R2 tile pan: ZOOM_MODE=criterion8 -- 9 repeats of arm A then arm B, interleaved, in one session, around the **tile pan** phase and NOT the zoom phase. Criterion 8 re-measures Plan 3h's criterion 3, which 3h measured on `tile pan`: that is where the live fallback runs and where Plan 3h's M4 bites. The statistic is `tile pan` p95, per arm, and `tile hold` beside it is the control M4 cannot touch. Arm B is Plan 3h's M4 as a runtime flag, not this plan's M4.
+flutter: R2 tile pan c8 repeat 1/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 1/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile hold frames=60 p50=0.51ms p95=1.69ms max=2.25ms mean=0.77ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 1/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 1/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile pan frames=120 p50=0.58ms p95=23.63ms max=41.58ms mean=3.60ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 1/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 1/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 1/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile hold frames=60 p50=1.27ms p95=1.93ms max=2.00ms mean=1.10ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 1/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 1/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile pan frames=120 p50=0.57ms p95=55.02ms max=85.27ms mean=6.70ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 1/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 2/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 2/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile hold frames=60 p50=0.70ms p95=1.55ms max=1.81ms mean=0.86ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 2/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 2/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile pan frames=120 p50=0.59ms p95=21.82ms max=36.77ms mean=3.29ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 2/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 2/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 2/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile hold frames=60 p50=0.66ms p95=1.74ms max=2.09ms mean=0.80ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 2/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 2/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile pan frames=120 p50=0.48ms p95=50.35ms max=80.26ms mean=5.97ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 2/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 3/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 3/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile hold frames=60 p50=1.08ms p95=2.13ms max=2.35ms mean=1.03ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 3/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 3/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile pan frames=120 p50=0.59ms p95=29.42ms max=40.01ms mean=3.61ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 3/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 3/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 3/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile hold frames=60 p50=1.15ms p95=1.61ms max=1.92ms mean=1.00ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 3/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 3/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile pan frames=120 p50=0.61ms p95=56.67ms max=88.95ms mean=6.67ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 3/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 4/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 4/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile hold frames=60 p50=0.59ms p95=1.62ms max=1.71ms mean=0.85ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 4/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 4/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile pan frames=120 p50=0.58ms p95=26.02ms max=40.61ms mean=3.59ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 4/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 4/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 4/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile hold frames=60 p50=0.59ms p95=1.92ms max=2.34ms mean=0.89ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 4/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 4/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile pan frames=120 p50=0.49ms p95=44.06ms max=74.00ms mean=5.81ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 4/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 5/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 5/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile hold frames=60 p50=0.67ms p95=1.72ms max=2.21ms mean=0.84ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 5/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 5/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile pan frames=120 p50=0.47ms p95=21.15ms max=37.28ms mean=3.08ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 5/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 5/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 5/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile hold frames=60 p50=0.75ms p95=1.90ms max=2.43ms mean=0.98ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 5/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 5/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile pan frames=120 p50=0.46ms p95=54.41ms max=84.36ms mean=5.87ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 5/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 6/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 6/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile hold frames=60 p50=1.17ms p95=1.67ms max=1.70ms mean=1.01ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 6/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 6/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile pan frames=120 p50=0.61ms p95=26.50ms max=38.12ms mean=3.58ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 6/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 6/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 6/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile hold frames=60 p50=0.65ms p95=2.19ms max=2.21ms mean=1.01ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 6/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 6/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile pan frames=120 p50=0.57ms p95=57.84ms max=85.13ms mean=6.54ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 6/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 7/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 7/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile hold frames=60 p50=0.54ms p95=0.85ms max=0.86ms mean=0.56ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 7/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 7/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile pan frames=120 p50=0.74ms p95=21.73ms max=39.56ms mean=3.43ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 7/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 7/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 7/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile hold frames=60 p50=1.05ms p95=2.08ms max=2.23ms mean=1.04ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 7/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 7/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile pan frames=120 p50=0.54ms p95=57.52ms max=79.69ms mean=6.15ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 7/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 8/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 8/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile hold frames=60 p50=1.20ms p95=2.19ms max=2.25ms mean=1.09ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 8/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 8/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile pan frames=120 p50=0.65ms p95=20.49ms max=38.56ms mean=3.46ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 8/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 8/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 8/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile hold frames=60 p50=0.57ms p95=1.86ms max=2.21ms mean=0.92ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 8/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 8/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile pan frames=120 p50=0.73ms p95=63.28ms max=92.06ms mean=6.86ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 8/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 9/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 9/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile hold frames=60 p50=1.01ms p95=1.88ms max=2.21ms mean=0.99ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 9/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 9/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000) tile pan frames=120 p50=0.56ms p95=21.42ms max=27.63ms mean=3.00ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 9/9 arm A [debugFullViewportQuery=false] narrow band query -- criterion 8's numerator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 tile pan c8 repeat 9/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) arm start: tilesAfterPurge=0 warmFrames=5 warmBakes=3 (the camera and generation this arm holds and pans from; a working purge reads 0 tiles and then warms from cold)
+flutter: R2 tile pan c8 repeat 9/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile hold frames=60 p50=0.52ms p95=1.46ms max=1.60ms mean=0.63ms (CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, so a systematic arm-to-arm difference here is session drift)
+flutter: R2 tile pan c8 repeat 9/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   hold bakes=0 liveDraws=0
+flutter: R2 tile pan c8 repeat 9/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000) tile pan frames=120 p50=0.52ms p95=62.55ms max=89.71ms mean=6.46ms (criterion 8's statistic is this p95, the same statistic Plan 3h's criterion 3 was scored on)
+flutter: R2 tile pan c8 repeat 9/9 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)   pan bakeFrames=14/120 maxBakesInAFrame=1 bakes=14 blits=1582 carryOverBlits=0 liveDraws=10 newEvictions=0 liveTiles=26 tileBytes=27262976
+flutter: R2 app-run: done
+Application finished.
