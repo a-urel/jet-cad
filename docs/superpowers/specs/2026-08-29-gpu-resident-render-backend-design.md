@@ -1,7 +1,15 @@
 # A GPU-resident render backend — design
 
-**Date:** 2026-08-29. **Status:** design, not yet a plan.
+**Date:** 2026-08-29. **Status:** design, **revision 2**, not yet a plan.
 **Evidence base:** [2026-08-29-flutter-gpu-backend-spike.md](../notes/2026-08-29-flutter-gpu-backend-spike.md).
+
+**Revision 2 was written from three independent reviews of revision 1.** Every
+finding they raised was checked against the code and every one of them held.
+Four were structural — occurrence identity, table-driven changes, where the
+stroke quad is built, and antialiasing contradicting the opaque pass — and they
+changed the design rather than the wording. What survived unchanged is the
+spine: collection as a `DrawSink`, rank as depth, two-pass transparency, and
+the one-file platform facade.
 
 ---
 
@@ -14,226 +22,306 @@ entities, and that *"the engine is not the risk; the risk is the three
 unwritten layers"*. This spec's own evidence agrees: at 1,500 entities the
 existing painter draws a zoom frame in about 6 ms against a 16.67 ms budget,
 and the GPU arm's advantage does not open until roughly 15,000 entities. The
-objection was raised and the human reaffirmed the work. It is recorded here
-because a spec that hides its own strongest counter-argument is worth less
-later.
+objection was raised and the human reaffirmed the work.
 
-**2. The scale this is designed for is an assumption, and it is the first
-thing spec review must confirm or replace.** Everything below is sized for
-**documents of 10,000 to 500,000 entities** — imported DXF drawings and
-site-scale plans, not a single floor plate. If the real target is the
-roadmap's 500-5,000, most of this design is unnecessary and the honest answer
-is to close it. Every threshold in the exit gate is derived from that
-assumption and must move with it.
+**2. The scale is an assumption and it gates everything below.** This is sized
+for **10,000 to 500,000 entities** — imported DXF drawings and site-scale
+plans. **If the real target is the roadmap's 500-5,000, the correct action is
+to close this spec, not to plan it**, and most of revision 2's added
+complexity exists only to serve the larger number. Every threshold below is
+derived from that assumption and moves with it. Settle this before anything
+else.
 
 ---
 
 ## The question this answers
 
-`DraftPainter.paint(sink, camera, viewport)` folds the camera into the
-residual chain it hands a sink. Every vertex a sink receives is therefore in
-screen space, and **the whole document is re-walked and re-transformed the
-moment the camera moves**. Plan 3g's tile cache hides that walk during a
-gesture by blitting a magnified bitmap; the drawing goes soft while the
-gesture lasts. The vector-replay spike priced the sharp alternative on the CPU
-at **22.9x the blit** and rejected it.
+`DraftPainter.paint(sink, camera, viewport)` folds the camera into the residual
+chain it hands a sink, so every vertex a sink receives is in screen space and
+**the whole document is re-walked the moment the camera moves**. Plan 3g's tile
+cache hides that walk during a gesture by blitting a magnified bitmap; the
+drawing goes soft while the gesture lasts. The vector-replay spike priced the
+sharp alternative on the CPU at **22.9x the blit** and rejected it.
 
 > Make a pan or a zoom cost a **uniform write** instead of a **document walk**,
 > without giving up the picture.
 
-The spike answered that it can be done. At 2,380,424 segments the per-frame
-CPU cost of a gesture was **0.17-0.26 ms and flat**, against **383 ms** for the
-walk, and it held on the web through `flutter_scene`'s WebGL2 layer. What the
-spike did *not* build is everything that makes it a backend rather than an
-arm. That is what this design is for.
+At 2,380,424 segments the spike's per-frame CPU cost was **0.17-0.26 ms and
+flat**, against **383 ms** for the walk, and it held on the web. What the spike
+did not build is everything that makes it a backend rather than an arm.
 
 ## Non-goals
 
-- **Replacing `VerticesDrawSink`.** It stays the default and the fallback. This
-  is a third backend, chosen explicitly, and every platform and document that
-  does not choose it is unaffected.
-- **Changing the document model.** Nothing in `packages/jet_cad_2d` changes.
-  The engine stays pure Dart with no `dart:ui` dependency.
-- **A scene graph.** `flutter_scene`'s `Node`/`Mesh`/material stack is not
-  used; see the spike note for why its instancing model does not fit.
-- **Matching the painter pixel for pixel.** See the visual-parity gate below:
-  parity is specified where it is cheap and explicitly bounded where it is not.
+- **Replacing `VerticesDrawSink`.** It stays the default and the fallback.
+- **Changing the document model.** `packages/jet_cad_2d` is untouched.
+- **A scene graph.** See the spike note for why `flutter_scene`'s instancing
+  model does not fit.
+- **Pixel-for-pixel parity with the painter.** Bounded explicitly in the exit
+  gate, not claimed generally.
+
+---
+
+## The governing principle revision 1 missed
+
+**Every screen-space decision the painter makes is frozen at the camera the
+collection ran under.** Revision 1 found one instance of this — arc
+tessellation — built a watermark for it, and treated it as a special case. It
+is not a special case. It is the design's central hazard, and the complete list
+is:
+
+| decision | where | frozen consequence |
+|---|---|---|
+| arc and circle chord count | `DrawSink.fillCircle` doc; sagitta bound | chords visible on zoom-in |
+| dash segmentation | `draft_painter.dart:630`, `_dashScale(style, toScreen)` | pattern stretches with the drawing; collapses to solid at small scale and never recovers |
+| level of detail | painter drops sub-pixel geometry at the collection scale | **dropped geometry never reappears on zoom-in** |
+| text culling | `draft_painter.dart:906`, `layout.height * chain.scaleMagnitude < minTextCapPixels` | culled text never reappears |
+| float32 coordinate resolution | buffer stores fit-camera screen space | quantization visible past deep zoom |
+
+**One mechanism serves all of them: the collection watermark.** The backend
+records the scale its collection ran under. When the live camera's scale leaves
+the band `[collectionScale / 4, collectionScale * 4]`, a **re-collection** is
+scheduled at the new scale — the same operation as a load, on the same
+machinery, off the frame path. Within the band, the frame is a uniform write.
+
+Two of the five are removed from the list instead of being served by it:
+
+- **Dashes move into the shader.** The instance carries the centerline plus the
+  pattern's period and phase in **paper-space** units; the fragment shader
+  computes arc length along the segment, converts with the camera-scale
+  uniform, and discards gaps. This is strictly better than re-collecting: it is
+  exact at every scale and it removes the span-per-dash geometry blowup that
+  makes dashed documents expensive today. `collapsedDashCount`'s
+  collapse-to-solid rule becomes a shader branch on the same threshold.
+- **Float32 resolution is bounded, not fixed.** Coordinates are stored relative
+  to the collection camera's screen space, which gives roughly 1e-4 px over a
+  1e3 px extent. **The supported zoom range is therefore ±4x from the
+  collection scale**, which the watermark already enforces, and re-collection
+  re-establishes precision at the new scale. The two constraints are the same
+  constraint.
+
+Arcs, level of detail and text culling are served by the watermark.
+
+**The 4x band is a pre-committed number and the plan must measure it**, not
+inherit it: too wide and the picture is wrong inside the band, too narrow and a
+gesture triggers re-collection mid-flight. The re-collection must never run on
+the frame path; if the camera leaves the band during a gesture, the frame draws
+with the stale collection and the re-collection lands after the gesture
+settles. **That staleness is visible and it is the design's accepted cost**,
+and criterion 13 measures it.
 
 ---
 
 ## Architecture
 
-### The seam: collection stays a `DrawSink`, it just stops being per-frame
+### Collection stays a `DrawSink`, and stops being per-frame
 
-The backend does **not** add a fourth `DrawSink`. It reuses the existing one
-and changes *when* it runs.
+The backend adds no fourth `DrawSink`. `RecordingDrawSink` equality is the
+project's primary correctness mechanism, and the spike showed a collector
+implementing `DrawSink` produces correct geometry with the residual applied. So
+collection is a `DrawSink` driven by `DraftPainter.paint`, called **on document
+change and on watermark exit**, not per frame.
 
-`DrawSink` is the project's primary correctness mechanism — `RecordingDrawSink`
-equality is what makes two implementations comparable — and the spike showed a
-collector implementing it produces correct geometry with the residual applied.
-So collection is a `DrawSink` implementation driven by `DraftPainter.paint`,
-called **on document change** rather than on every frame.
+### Identity is the occurrence, not the handle
+
+**Revision 1 keyed slabs by `Handle` and that is wrong.** `DraftPainter` emits a
+leaf through two different call sites — `draft_painter.dart:568` and `:712` —
+each with a different accumulated `chain`, so a leaf inside a block definition
+is emitted **once per instance path**, with a different transform and possibly a
+different inherited style each time. A leaf handle names none of those
+expansions.
+
+**The unit of residency is the occurrence:**
 
 ```
-DraftPainter.paint(collector, collectionCamera, extentsViewport)
-        │
-        ▼
-  ResidentGeometry            ← handle-keyed slabs, GPU-resident
-        │
-        ▼
-  one instanced draw per pipeline, camera as a uniform
+OccurrenceKey = (instancePath, leafHandle)
 ```
 
-**What this preserves:** the walk, the residual rebasing, the level-of-detail
-decisions, the fill triangulation, and every test that already covers them.
-**What it changes:** how often the walk runs.
+where `instancePath` is the chain of instance handles from the root to the
+leaf. The backend keeps two structures:
 
-### Draw order becomes a depth value, and that is the keystone
+1. `slabs: Map<OccurrenceKey, Slab>` — the GPU-resident geometry.
+2. `bySource: Map<Handle, Set<OccurrenceKey>>` — the **dirty closure**: for
+   every handle that can appear in a change signal, the occurrences it affects.
 
-**The rule is non-negotiable: draw order is ascending handle value, stable
-across undo, save, load and purge** (`draft_document.dart:317`). In a packed
-instance buffer the naive reading of that rule is "buffer order must equal
-handle order", which makes every insert a re-pack and every size-changing edit
-a memmove of everything after it.
+`bySource` is what makes an edit to a definition leaf reach all of its placed
+copies. Building and maintaining it is the piece the spike note predicted would
+be "harder than it looks", and it is now named rather than implied.
 
-Instead: **each emitted primitive carries a `depth` attribute equal to its rank
-in the walk's emission order.** The opaque pass runs with depth write on and
-`CompareFunction.greaterEqual`, so the fragment that survives is the one the
-painter would have drawn last. Submission order stops mattering.
+### Draw order becomes a depth value, and the rank is per occurrence
 
-Three things fall out of this, and they are the reason the design works:
+**Draw order is ascending handle value, stable across undo, save, load and
+purge** (`draft_document.dart:317`). Reading that as "buffer order equals handle
+order" makes every size-changing edit a memmove of everything after it.
 
-1. **Edits become local.** A changed entity's slab can be rewritten in place or
-   appended at the end and the old one freed. Buffer order no longer needs to
-   mean anything.
-2. **Culling becomes free to add later** without reordering hazards.
-3. **The invariant is testable as an invariant**, not as an accident of
-   submission: a differential test can shuffle slab order and assert the
-   rendered result is byte-identical.
+Instead, **each occurrence gets a depth code equal to its rank in the walk's
+emission order**, and every primitive in that occurrence carries the same code.
+Pass 1 runs depth write on, depth test on, `CompareFunction.greaterEqual`, so
+the fragment that survives is the one the painter would have drawn last.
+Submission order stops mattering.
 
-**Emission order, not handle order, is what is ranked.** Within one entity the
-walk emits joins before segments, and `VerticesDrawSink._runTo` documents why
-that matters. Ranking the emission preserves it.
+**One code per occurrence, not per primitive, and the reason matters.** Within
+one occurrence every primitive shares a single `ResolvedStyle`, so intra-
+occurrence overlap — a join over its own segment — is same-colour and its
+ordering is invisible. Ranking per primitive would buy nothing and would cost
+the rank space a factor of three or more.
 
-**Depth precision is a real limit and it gets a number.** The format is
-`d24UnormS8Uint`: 2^24 values spaced **uniformly** over [0, 1], which is
-exactly what a rank does — ranks are uniform, so a uniform encoding is the
-right one. The design budget is therefore **16,777,216 emitted primitives per
-document**, about seven times the spike's 2.38 M, and beyond it the backend
-must refuse and fall back rather than draw a wrong picture.
+**Rank space, with a number.** `d24UnormS8Uint` gives 2^24 codes spaced
+uniformly over [0, 1], and code 0 is the cleared background, so **16,777,215
+codes are usable**. Ranks are uniform, so a uniform encoding is the right one;
+`d32FloatS8UInt` has more bits but spends them non-uniformly, dense near 0 and
+sparse near 1, and mapping uniform ranks onto it wastes precision at one end
+and runs short at the other. Depth is written as an **integer code**, not a
+float ratio, so adjacent ranks cannot quantize together.
 
-`d32FloatS8UInt` is **not** used, and the reason is worth stating because the
-intuition runs the other way: a 32-bit float has more bits but spends them
-non-uniformly, dense near 0 and sparse near 1, so mapping uniform ranks onto it
-wastes precision at one end and runs short at the other. More bits is not more
-distinguishable ranks here.
+### Rank allocation is order maintenance, and it gets an algorithm
 
-The clear value is `0.0` — which is `DepthStencilAttachment`'s own default —
-and the comparison is `CompareFunction.greaterEqual`, so rank ascends with
-depth and the last-drawn fragment wins. Rank *r* of *N* maps to
-`(r + 1) / (N + 1)`, keeping every real primitive strictly above the cleared
-background.
+Revision 1 said a growing slab "borrows from a gap". That is not an algorithm:
+the gap must lie between that occurrence's immediate predecessor and successor,
+and a global free count says nothing about that.
 
-### Transparency is a second pass, because depth cannot order blending
+This is the **list-labeling / order-maintenance** problem, and it gets the
+standard solution:
 
-`ResolvedStyle.argb` carries alpha (`255 - transparency`), and Plan 3e already
-found a translucent seam question. Depth testing gives the correct *opaque*
-result in any order; blending does not commute, so:
+- At build time, occurrences are labelled with a **stride** — the usable code
+  space divided by the occurrence count, floored to a power of two.
+- An inserted occurrence takes the midpoint of its neighbours' codes.
+- When neighbours are adjacent, **relabel a bounded window**: double the window
+  around the insertion point until it contains enough slack, then redistribute
+  evenly within it. Amortized O(log n) relabels per insert.
+- Only when the window reaches the whole document does it become a full
+  rebuild — the same operation as `DocumentLoaded`, which the design already
+  supports.
 
-- **Pass 1 — opaque** (`alpha == 255`): depth write on, depth test on, blend
-  off, any submission order.
-- **Pass 2 — translucent** (`alpha < 255`): depth **test** on against pass 1's
-  buffer, depth **write off**, blend on, submitted in ascending emission rank.
+**Occupancy is the constraint that decides whether this holds.** At the design's
+top scale the occurrence count is roughly 700,000, giving a stride near 24. That
+is workable. **At three million occurrences the stride falls to 5 and inserts
+relabel constantly**, so the backend must refuse above a stated occupancy and
+fall back rather than thrash. Criterion 14 measures the relabel rate under an
+edit workload; the number is not assumed.
 
-Pass 2 must be ordered, so it keeps a sorted slab list. This is affordable
-because translucency is rare in this corpus; **if a document's translucent
-fraction exceeds 5%, pass 2's cost must be measured before the backend claims
-the frame.** That threshold is a stop clause, not a target.
+**A rebuild or a wide relabel must not fire on the frame path.** It is
+scheduled like a re-collection, and a gesture in flight draws with the current
+labels. Criteria 8 and 9 exclude frames in which a rebuild landed, and say so.
 
-### Dirty tracking
+### Transparency is a second, ordered pass
 
-`DocChange` is a sealed hierarchy of five and every command variant carries
-`Set<Handle> touched` (`doc_change.dart:11`). The tile cache already consumes
-exactly this through `DocChangeNotifier(onChange:)`, and the backend uses the
-same plumbing.
+`ResolvedStyle.argb` carries alpha (`255 - transparency`). Depth gives the
+correct opaque result in any order; blending does not commute.
 
-| change | response |
-|---|---|
-| `CommandApplied` / `CommandUndone` / `CommandRedone` | re-walk **only** the touched handles; rewrite or reallocate their slabs |
-| `DocumentLoaded` | drop everything, full rebuild |
-| `DocumentPurged` | drop everything — slots are rewritten wholesale, so every slab key is invalid |
+- **Pass 1 — opaque** (`alpha == 255`): depth write on, depth test on, **blend
+  off**, any submission order.
+- **Pass 2 — translucent** (`alpha < 255`): depth **test** on against pass 1,
+  depth **write off**, blend on, submitted in ascending rank.
 
-**A re-walk of one entity still needs the painter.** `DraftPainter` walks the
-document, not an entity, so this design needs a **handle-scoped walk** — the
-one piece of new engine-adjacent API here. It must produce, for a given handle
-set, exactly the emissions a full walk would produce for those handles, in the
-same relative order. That equivalence is a differential test, not an argument.
+If a document's translucent fraction exceeds **5%**, pass 2's cost must be
+measured before the backend claims the frame. A stop clause, not a target.
 
-**Emission ranks are not renumbered on edit.** A rewritten slab keeps its rank
-range; a slab that grows past its range borrows from a gap. Ranks are dense
-only at build time. A **rank-exhaustion compaction** runs when free ranks fall
-below a threshold, and it is a full rebuild — the same operation as
-`DocumentLoaded`, which the design already has to support.
+### Antialiasing is MSAA, because coverage-fade contradicts pass 1
 
-### Culling: none in version one, with the measurement that says so
+**Revision 1 specified both "blend off" and "the fragment shader fades the outer
+edge", and those are mutually exclusive.** An alpha fade *is* blending; with
+blend off a faded edge writes solid colour and there is no antialiasing at all.
+Turning blend on for pass 1 reintroduces the order dependence the depth
+keystone exists to remove, at every soft edge where two strokes overlap.
 
-The spike drew all 2,380,424 segments every frame, with no culling of any
-kind, and the zoom frame's raster cost was **1.00-3.46 ms**. Culling is
-therefore not required to meet the budget at the design's stated top scale, and
-adding it now would be building against a number the project does not have.
+**Decision: MSAA on the transient colour target, blend stays off.** Coverage
+resolves in the resolve step rather than through the blend equation, so pass 1
+keeps order independence and gets antialiased edges. It also removes the
+second half of the problem: a segment quad and its join quad overlap, and two
+independently blended coverage fades leave a visible seam down every joint,
+whereas two MSAA-covered primitives at the same depth and colour resolve
+cleanly.
 
-**The threshold at which this is revisited is pre-committed: a p50 raster above
-6 ms on the reference gesture.** Above it, the next move is spatial bucketing of
-slabs, which the depth decision above already made safe.
+**The sample count is 4 and it is a measured cost, not a free one.** It
+multiplies colour and depth bandwidth on the largest target in the frame, and
+the raster budget below is stated as provisional for exactly this reason.
+Alpha-to-coverage is the fallback if 4x MSAA misses the budget; it is cheaper
+and its quality on thin strokes is worse, and choosing between them is
+criterion 2's job rather than this document's.
 
-### Text stays on the Canvas
+### Where the quad is built: the shader, always
 
-`flutter_scene` has no text and neither does this backend. `DraftPainter`
-already emits `text()` ops through the sink and the project already has
-`FlutterTextMeasurer`. The GPU image is composited, then **a second Canvas pass
-draws text above it**, driven by the existing path.
+**This was the largest unstated mechanism in revision 1.** The stroke half-width
+is a **device-pixel** quantity — `vertices_draw_sink.dart:66`, and
+`resolved_style.dart:18` says the lineweight is paper-space 1/100 mm and
+explicitly "**not** a world quantity". It is therefore invariant under zoom. Any
+quad expanded at collection time thickens with the camera.
 
-This is chosen over an SDF atlas because text counts are small next to segment
-counts, the existing path is already tested, and an atlas is a
-level-of-detail problem in its own right. The cost is one extra Canvas pass per
-frame and it is measured, not assumed.
+So: **the instance record carries a centerline and a device half-width, and all
+expansion happens in the vertex shader.** This is what the spike already did;
+revision 1 simply failed to say so.
+
+The consequence revision 1 got wrong: **joins and caps cannot be "emitted as
+additional instances by the collector"**, because a miter's geometry is a
+function of the device half-width and would distort exactly like a baked quad.
+
+- **Caps** are a per-instance flag; the shader extends the quad along the
+  centerline by the half-width.
+- **Joins** are their own instance kind and their own pipeline: the record is
+  the shared vertex plus the two unit directions, and the shader builds the
+  wedge at the live device half-width. This mirrors
+  `VerticesDrawSink._emitJoin`, including the **seam join**, whose absence that
+  file records as putting a notch on every circle.
 
 ### Fills
 
-`DrawSink.fillPolygon` already arrives **pre-triangulated** — the doc comment
-says the triangulation is computed once, off the frame path, precisely so a
-batching sink can use it. Fills therefore get their own instance buffer and a
-trivially simple pipeline (position, colour, depth), and they cost no new
-geometry work. `fillCircle` is fanned at collection time under the arc rule
-below.
+`DrawSink.fillPolygon` arrives **pre-triangulated** — computed once, off the
+frame path, precisely so a batching sink can use it. Fills get their own
+instance buffer and a trivial pipeline (position, colour, depth code) and cost
+no new geometry work. `fillCircle` is fanned at collection time under the
+watermark.
 
-### Strokes: joins, caps, antialiasing
+### Text is a resident occurrence list, not "the existing path"
 
-The spike drew bare quads with butt ends and no antialiasing, and said so. The
-backend does not get to.
+Revision 1 said text would be drawn by "a second Canvas pass driven by the
+existing path". **The existing path is the document walk**, and calling it per
+frame reinstates the O(document) term this design exists to remove.
 
-- **Joins and caps** are emitted as additional instances by the collector,
-  mirroring `VerticesDrawSink._emitJoin` and `_endRun` — including the **seam
-  join**, whose absence that file records as putting a notch on every circle.
-  This is a constant factor on instance count, not a new per-frame term.
-- **Antialiasing** is a coverage varying: the quad is expanded by half a device
-  pixel and the fragment shader fades the outer edge. The reference is
-  `VerticesDrawSink`'s own output, and the gate is a pixel test, below.
+Instead, collection produces a **resident text-occurrence list** — the composed
+transform, the string and the style handle for every text op that survived
+collection — and the per-frame Canvas pass walks that list, not the document.
+Its cost is O(visible text), not O(document).
 
-### Arcs and circles
+Text culling reads the live scale (`draft_painter.dart:906`), so it is on the
+watermark's list: text culled at the collection scale reappears only after
+re-collection. Criterion 15 bounds the text pass and the exit gate states
+whether the 500,000-entity corpus contains text.
 
-A circle's tessellation is scale-dependent — `DrawSink.fillCircle` says so —
-and a buffer uploaded once cannot re-fan it. The rule:
+### Dirty tracking
 
-- Arcs are fanned at collection time for the **collection camera's** scale.
-- A **zoom-scale watermark** is kept. When the live camera's scale exceeds the
-  collection scale by more than **4x**, arcs whose device radius grew past the
-  quarter-pixel sagitta bound are re-fanned and their slabs rewritten. This is
-  a dirty-tracking event like any other and reuses that machinery.
+Revision 1's table listed only `DocChange` and was **wrong**, not merely
+incomplete. `tables.dart:559` states it plainly: *"Table mutations reach the
+command system not at all. `DocChange` is emitted only by `undo.dart`."*
+`DraftCanvas` merges a separate table listenable for exactly this reason, and
+without it a layer colour change produces no signal of any kind.
 
-An analytic arc shader was considered and deferred: it is a second pipeline
-with its own antialiasing story, and re-fanning reuses machinery this design
-already needs.
+The backend therefore consumes **three** signals:
+
+| signal | response |
+|---|---|
+| `CommandApplied` / `Undone` / `Redone` with `touched` non-empty | re-collect the occurrence closure `bySource[h]` for every touched `h` |
+| **any of those with `touched` empty** | **full rebuild** — `doc_change.dart:12` defines an empty set as "the whole document changed", and the tile cache has a shipping regression test for this arm |
+| `DocumentLoaded`, `DocumentPurged` | full rebuild; a purge rewrites slots, so every key is invalid |
+| **table revision counter** (`tables.dart`) | **v1: full rebuild.** A style-to-occurrence reverse index is an optimization, and it is not version one's job |
+
+**A re-collection of one occurrence still needs the painter**, which walks the
+document rather than an occurrence. This design therefore needs a
+**occurrence-scoped walk** producing, for a given occurrence set, exactly the
+emissions a full walk would produce for them, in the same relative order. That
+equivalence is criterion 1, a differential test, not an argument.
+
+`DraftPainter`'s per-entity machinery (`_drawInstance`, `_drawContainer`,
+`_drawLeafComposed`) is entirely private today, so this is a new public entry
+point or a refactor of those methods — not a small addition, and the plan
+should size it as such.
+
+### Culling: none in version one, with the measurement that says so
+
+The spike drew all 2,380,424 segments every frame with no culling and a zoom
+raster of **1.00-3.46 ms**. Culling is therefore not required to meet the
+budget at the stated top scale. **Pre-committed threshold for revisiting: a p50
+raster above 6 ms on the reference gesture.** The depth decision already made
+it safe to add.
 
 ---
 
@@ -255,148 +343,208 @@ lib/src/gpu/…                   ← everything else imports the facade
 
 Version one has the facade re-export `flutter_scene`'s shim. That is an
 off-contract `lib/src/` import of a pre-1.0 package whose minor releases carry
-breaking changes, and **it is confined to one file for exactly that reason.**
-
-The alternative — our own conditional export over our own WebGL2 backend — is
+breaking changes, and it is confined to one file for exactly that reason. The
+alternative — our own conditional export over our own WebGL2 backend — is
 smaller for this project than `flutter_scene`'s 130 KB, because they need a
 general GLSL transpiler for arbitrary user shaders and this project has two
-hand-written ones whose GLSL ES 300 forms can simply be authored. It is not
-version one's job, and the facade is what keeps that a later decision rather
-than a rewrite.
+hand-written ones whose GLSL ES 300 forms can simply be authored.
 
 **Pre-committed trigger for taking it in-house:** the first time a
 `flutter_scene` minor release breaks the facade, or the first time the backend
-needs an API the shim does not expose.
+needs an API the shim does not expose. **Depth and MSAA are both such APIs and
+neither has been run through the shim** — see open questions.
 
-### What the platform seam must carry
+Enablement belongs in the plan: `FLTEnableFlutterGPU` in `Info.plist` on
+iOS/macOS, `io.flutter.embedding.android.EnableFlutterGPU` in
+`AndroidManifest.xml` on Android, nothing on web, and **`flutter run` exposes no
+CLI flag**. A platform where enablement fails falls back to `VerticesDrawSink`
+and says so once.
 
-Enablement is not free and belongs in the plan: `FLTEnableFlutterGPU` in
-`Info.plist` on iOS/macOS, `io.flutter.embedding.android.EnableFlutterGPU` in
-`AndroidManifest.xml` on Android, nothing on web. **`flutter run` exposes no
-CLI flag.** A platform where enablement fails must fall back to
-`VerticesDrawSink` and say so once, not throw per frame.
-
-Two API traps the spike hit, recorded so the plan does not re-find them:
-`createImageSurface`'s optional format argument is mandatory in fact — its
-default resolves to `PixelFormat.unknown` on macOS Metal — and the web
-backend has no `createImageSurface` at all, so the render target is a
-`Texture`. `ShaderLibrary.fromAsset` throws on web; `loadShaderLibraryAsync`
-exists on both.
+Two API traps the spike hit: `createImageSurface`'s optional format argument is
+mandatory in fact — its default resolves to `PixelFormat.unknown` on macOS
+Metal — and the web backend has no `createImageSurface` at all, so the render
+target is a `Texture`. `ShaderLibrary.fromAsset` throws on web;
+`loadShaderLibraryAsync` exists on both.
 
 ---
 
 ## Budgets
 
-Derived from the assumption in "Two things to check", at **500,000 entities /
-2.38 M segments**, and each is a gate in the exit criteria.
+At **500,000 entities / 2,380,424 segments**. Revision 1's budgets were derived
+from the spike's record and did not account for the attributes and instances
+this design adds; revision 2 states a ledger instead.
 
-| quantity | spike measured | budget | how |
+### The byte ledger
+
+| pipeline | record | bytes | count | total |
+|---|---|---|---|---|
+| strokes | 2 endpoints ×2×f32 (16), colour u32 (4), half-width u16 (2), dash period/phase u16×2 (4), depth code u32 (4), flags u16 (2) | **32** | 2.38 M | 76.2 MB |
+| joins | shared vertex ×2×f32 (8), two unit dirs ×4×f32 (16), colour u32 (4), half-width u16 (2), depth u32 (4), pad (2) | **36** | ~2.38 M | 85.7 MB |
+| fills | position ×2×f32 (8), colour u32 (4), depth u32 (4) | **16** | corpus-dependent | — |
+
+**That is ~162 MB before fills, against revision 1's stated 64 MB budget, and
+the reviews are right that the old number was unreachable.** Joins alone run
+roughly one per segment. Three responses, in the order the plan should try
+them:
+
+1. **Joins are not always needed.** A join is invisible when the turn angle is
+   below the threshold at which the notch is sub-pixel at the *live* scale.
+   Emitting joins only above a stated angle removes most of them on
+   polyline-heavy DXF imports, and the threshold is a watermark input.
+2. **Strokes drop the dash fields when the style is solid**, via a second
+   pipeline. Solid is the common case; 32 becomes 28.
+3. **Culling, which version one declines**, converts a residency budget into a
+   working-set budget.
+
+**The honest budget is therefore stated as a measurement, not a target:
+criterion 6 becomes "≤ 96 MB with joins, caps and fills included, or a recorded
+miss with its number".** Setting a number the design cannot show it can hit
+would be the kind of threshold-chasing the project's notes exist to prevent.
+
+### Time
+
+| quantity | spike measured | budget | note |
 |---|---|---|---|
-| resident geometry | 81.73 MB | **≤ 64 MB** | pack colour as `uint32` and width as normalized `uint16` instead of four floats and one |
-| initial load, main thread | 1,040 ms walk | **≤ 150 ms on the platform thread** | build the byte buffers in an isolate; the upload alone stays on the platform thread |
-| gesture frame, p50 | 0.22 / 3.14 ms | **≤ 1.0 ms build, ≤ 6.0 ms raster** | — |
-| gesture frame, p95 | **unstable, 10-13 ms observed** | **≤ 8.0 ms raster** | requires the diagnosis named below |
+| gesture frame p50 build | 0.22 ms | **≤ 1.0 ms** | firm |
+| gesture frame p50 raster | 1.00-3.46 ms | **≤ 6.0 ms, provisional** | the spike measured no depth, no MSAA, no joins, no second pass, no text pass; this must be re-derived on a representative pipeline before it is a gate |
+| gesture frame p95 raster | **unstable, 10-13 ms** | **≤ 8.0 ms with the cause diagnosed** | see below |
+| initial load, platform thread | 1,040 ms walk | **≤ 150 ms, contingent** | see below |
 
-**The p95 row is the one that can fail this design.** The spike recorded arm
-C's raster p95 as unstable and undiagnosed, and drifting across repeats in a
-way arms A and B did not. The first task of any plan built from this spec is to
-diagnose it — the image surface's backing-texture pool reaching steady state is
-the standing hypothesis — because a gesture backend whose worst frame is
-unexplained is not a backend.
+**The p95 row can fail this design.** The spike recorded arm C's raster p95 as
+unstable, undiagnosed, and drifting across repeats in a way arms A and B did
+not. Diagnosing it is task 1 of any plan.
+
+**The load budget's isolate plan has a collision that must be resolved before
+it is a budget.** `draft_painter.dart:910` calls
+`document.textMeasurer.measure(...)` inside the walk, and `FlutterTextMeasurer`
+imports `dart:ui` and builds `Paragraph`s — so the collection walk **cannot run
+in a background isolate as written**. Substituting a metric-model measurer makes
+it run but changes layout and the `minTextCapPixels` culling decision, which
+breaks criterion 1 by construction. Open question 4.
 
 ---
 
 ## Invariants this must not break
 
-These are `CLAUDE.md` non-negotiables and each gets a test, not a claim.
-
-1. **The frame path allocates nothing per entity in steady state, and O(1) per
-   flush.** The GPU path's steady-state frame writes one uniform block and
-   submits; `paint_allocation_test.dart` is extended to cover it.
+1. **The frame path allocates nothing per entity in steady state, O(1) per
+   flush.** The steady-state frame writes one uniform block, submits, and walks
+   the resident text list. `paint_allocation_test.dart` is extended to cover it,
+   and the text list walk must be shown to be O(visible text) with no per-entity
+   allocation.
 2. **Draw order is ascending handle value**, stable across undo, save, load and
-   purge. Tested by shuffling slab order and asserting an identical rendering —
-   which is only meaningful *because* of the depth decision.
+   purge. Tested by shuffling slab submission order and asserting an identical
+   rendering — meaningful only *because* of the depth decision.
 3. **Geometric decisions use `Tolerance`; stored-value comparisons are exact
    `==`.** Unchanged; the collector inherits the painter's decisions.
-4. **The engine stays pure Dart.** Nothing here touches `packages/jet_cad_2d`
-   except the handle-scoped walk, which is `dart:ui`-free.
+4. **`packages/jet_cad_2d` is untouched.** `DraftPainter` and `DrawSink` already
+   live in `jet_cad_2d_flutter` and `paint` takes `dart:ui`'s `Size`, so the
+   occurrence-scoped walk goes beside the painter and the engine package does
+   not change. Revision 1 hedged this; the file layout settles it.
 
 ---
 
 ## Testing
 
-Per `CLAUDE.md`: defects here surface through **mutation and differential
-testing**, and the dominant failure mode is the degenerate fixture. Every
-fixture below is non-identity, off-origin, and non-uniformly scaled.
+Per `CLAUDE.md`, defects surface through **mutation and differential testing**,
+and the dominant failure mode is the degenerate fixture. Every fixture is
+non-identity, off-origin and non-uniformly scaled, and the corpus includes **a
+leaf inside a block definition placed at two instances**, without which the
+occurrence-identity findings above cannot be caught.
 
-**Differential, against `VerticesDrawSink`:**
-- same document, same camera → same `RecordingDrawSink` op stream from the
-  collector as from a full walk (this is what makes the handle-scoped walk
-  trustworthy)
-- rendered-pixel comparison at a stated tolerance, on a corpus that includes a
-  mirrored instance, a non-uniform scale, a dashed leaf, a translucent fill and
-  an arc at four zoom levels
+**Differential, against `VerticesDrawSink`:** identical `RecordingDrawSink` op
+streams between the occurrence-scoped walk and a full walk; rendered-pixel
+comparison on a corpus with a mirrored instance, a non-uniform scale, a dashed
+leaf at four zoom levels, a translucent fill, an arc at four zoom levels, and
+text near the culling threshold.
 
-**Mutations that must go red** (a non-exhaustive pre-commitment; the plan owns
-the full log):
-- drop the depth attribute → draw order test fails
-- rank by handle instead of emission order → the join-before-segment ordering
-  test fails
+**Mutations that must go red** (pre-committed; the plan owns the full log):
+
+- drop the depth attribute → draw-order test fails
+- rank per primitive instead of per occurrence → no test fails, and **that is
+  the point**: this is a declared equivalent mutation, recorded so a later
+  reader does not mistake it for a gap
+- key slabs by handle instead of occurrence → the two-instance definition test
+  fails
+- omit the `bySource` closure → editing a definition leaf leaves instances stale
+- treat empty `touched` as "nothing changed" → the whole-document arm fails
+- ignore the table revision counter → a layer colour change draws stale
 - write depth in pass 2 → translucent-over-translucent test fails
 - skip the seam join → the circle-notch test fails
-- keep a stale slab after `CommandUndone` → dirty-tracking test fails
-- re-fan arcs at the live scale instead of the watermark → allocation test
-  fails on the frame path
-- collect under an identity camera instead of the fit camera → level-of-detail
-  test fails
+- expand the stroke quad at collection scale → strokes thicken under zoom
+- bake dash spans instead of shading them → the four-zoom dashed test fails
+- widen the watermark band to infinity → the four-zoom arc and LOD tests fail
+- collect under an identity camera → level-of-detail test fails
 
-**Web is measured with a stated instrument.** The rig's `FrameTimingLog`
-refuses to report on web because ordinal alignment does not hold there; the
-spike relaxed it to a distribution over the phase window. **A gate may not rest
-on the relaxed instrument.** Deciding what the web instrument should be is
-listed as an open question and blocks any web exit criterion.
+**Web is measured with a stated instrument.** The rig's `FrameTimingLog` refuses
+to report on web because ordinal alignment does not hold there, and the spike
+relaxed it to a distribution over the phase window. **A gate may not rest on the
+relaxed instrument.** One nuance worth carrying: the spike recorded arm C at
+**excess 0 in every web phase** while arms A and B slipped, so the relaxation
+did not touch arm C's own figures. That weakens the blocker for absolute
+single-arm numbers without removing it for comparative ones.
 
 ---
 
 ## Exit gate
 
 Pre-committed. Thresholds are not moved to make a criterion pass; a miss is
-recorded as a miss, with its number.
+recorded as a miss with its number.
 
-1. Differential op-stream equality between the handle-scoped walk and a full
-   walk, on the mutation corpus.
-2. Pixel differential against `VerticesDrawSink` within the stated tolerance,
-   including joins, caps and antialiasing.
-3. Draw order survives a shuffled slab order, byte-identical.
+1. Op-stream equality between the occurrence-scoped walk and a full walk, on
+   the mutation corpus including the two-instance definition.
+2. Pixel differential against `VerticesDrawSink`: **per-channel difference ≤ 2
+   on ≥ 99.5% of pixels and ≤ 8 on the rest**, computed on premultiplied RGBA,
+   with **separate baselines for native and web** because the rasterizers
+   differ. Antialiasing choice (4x MSAA or alpha-to-coverage) is whichever meets
+   this and the raster budget.
+3. Draw order survives a shuffled slab submission order, byte-identical.
 4. Draw order survives undo, redo, save, load and purge.
-5. Steady-state frame allocates nothing per entity, O(1) per flush.
-6. Resident geometry ≤ 64 MB at 500,000 entities.
-7. Platform-thread load ≤ 150 ms at 500,000 entities.
-8. Gesture frame p50 ≤ 1.0 ms build and ≤ 6.0 ms raster at 500,000 entities.
-9. Gesture frame p95 ≤ 8.0 ms raster, **with the instability diagnosed**, not
-   merely observed to be lower.
-10. A platform without Flutter GPU falls back to `VerticesDrawSink`, once,
-    without throwing.
-11. Web renders the differential corpus correctly under CanvasKit and Skwasm.
-12. Every mutation above goes red.
+5. Steady-state frame allocates nothing per entity, O(1) per flush, including
+   the text pass.
+6. Resident geometry **≤ 96 MB** at 500,000 entities with joins, caps and fills
+   included, **or a recorded miss with its number and its ledger**.
+7. Platform-thread load ≤ 150 ms at 500,000 entities, **contingent on open
+   question 4**.
+8. Gesture p50 ≤ 1.0 ms build and ≤ 6.0 ms raster, on the full pipeline,
+   excluding frames in which a rebuild or wide relabel landed.
+9. Gesture p95 ≤ 8.0 ms raster **with the instability diagnosed**, not merely
+   observed to be lower.
+10. A platform without Flutter GPU falls back to `VerticesDrawSink` exactly
+    once, without throwing. **Tested through an injectable facade factory that
+    fails on demand**, with a one-shot observable diagnostic — hardware or
+    plist failure is not a deterministic fixture.
+11. Web renders the differential corpus correctly under CanvasKit **and**
+    Skwasm.
+12. Every mutation above goes red, and the declared equivalent mutation is
+    recorded as equivalent.
+13. Crossing the watermark band during a gesture does not drop a frame; the
+    re-collection lands after settle, and the stale interval is measured and
+    reported.
+14. Relabel rate under a stated edit workload stays below one wide relabel per
+    100 edits at the top scale, or the occupancy limit is lowered until it does.
+15. The text pass costs ≤ 0.5 ms p50 on a text-bearing corpus, or the corpus
+    used for criteria 6 to 9 states that it excludes text.
 
-Criterion 9 is the one most likely to miss. It is stated as a gate anyway,
-because the alternative is shipping a gesture path whose worst frame nobody can
-explain.
+Criteria 9 and 6 are the two most likely to miss, and both are stated as gates
+anyway.
 
 ---
 
 ## Open questions, to settle before a plan is written
 
-1. **The scale assumption.** See the top. If the target is 500-5,000 entities,
-   close this spec instead of planning it.
-2. **The web timing instrument.** No web criterion can rest on the relaxed
+1. **The scale assumption.** See the top. At 500-5,000 entities, close this spec.
+2. **Does the WebGL2 shim support a depth attachment, and MSAA?** The whole
+   keystone rests on depth, and **the spike ran with no depth attachment, no
+   depth test and no depth write, on any platform**. Both features are unproven
+   here and unproven through a pre-1.0 shim. This is task 1 alongside the p95
+   diagnosis, and a negative answer changes the design rather than the plan.
+3. **The web timing instrument.** No web criterion may rest on the relaxed
    unaligned instrument. What replaces it is unsolved.
-3. **Skwasm.** Criterion 11 names it and nothing has been run there. It may
-   simply work; it has not been checked.
-4. **Arm B's 46-47 ms max build on a web zoom**, found by the spike's web arm.
-   That is a defect in the *shipping* tile cache, not in this design, and it
-   needs its own investigation rather than being absorbed here.
-5. **Whether the handle-scoped walk belongs in `jet_cad_2d` or beside the
-   painter.** It is `dart:ui`-free either way; the question is whether the
-   engine should carry an API whose only consumer is a Flutter-side backend.
+4. **Can the collection walk run in an isolate given `FlutterTextMeasurer`?**
+   Criterion 7 is contingent on the answer. Splitting the walk — geometry in an
+   isolate, text on the platform thread — is the obvious candidate and has not
+   been designed.
+5. **Skwasm.** Criterion 11 names it and nothing has been run there.
+6. **Arm B's 46-47 ms max build on a web zoom**, found by the spike's web arm.
+   A defect in the *shipping* tile cache, not in this design; it needs its own
+   investigation rather than being absorbed here.
