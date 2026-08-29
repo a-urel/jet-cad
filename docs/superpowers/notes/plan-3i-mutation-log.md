@@ -2747,3 +2747,195 @@ that would show background instead, `carryOverCovers` returning early, is
 unreachable here: a frame that skips a band holds tiles from a previous fill,
 and a standing composite implies a scale change, which disposes every tile. So
 `viewportCovered` was never the observable this proof needed.
+
+---
+
+## M25 — the rig's own call site drops the tile cache — **killed by the signature, not by an assertion**
+
+**Fix wave E**, and unlike every entry above it this one is a defect found by
+*running the rig*, not by reading it. Before Plan 3i's device measurements the
+controller ran the harness once on a small corpus as a functional check. It
+died in its first phase:
+
+```
+[ERROR] Unhandled Exception: Bad state: no repaint happened: the forced frame did not draw
+  requireRepaint (measurement_rig.dart:133)
+  runR2Rig (measurement_rig.dart:387)
+```
+
+Two runs, decisive as a pair, both at `ENTITIES=5000`:
+`--dart-define=TILES=on --dart-define=RUN_R2=true` threw; the same run with
+tiles off printed `R2 app-run: done`. The control is what says this is the
+guard and not the frame: with tiles off the live walk feeds the vertices sink
+(`canvasCalls=0 drawVerticesCalls=1`) and the sum is nonzero for that reason
+alone.
+
+**The defect.** `requireRepaint`'s `tileCache` parameter was optional and was
+fed **from nowhere** in `measurement_rig.dart`: `integration_test/frame_timing_test.dart`
+passes it at both of its call sites, and `runR2Rig` — the whole of the app-run
+script, which is what Plan 3i's Task 12 command line drives — called
+`requireRepaint(sink, vertices)`. Under `TILES=on` the forced
+`panBy(Offset.zero)` frame is served from the cache, the painter is never
+walked, both sink counters read zero, and the guard threw on a frame that had
+drawn correctly.
+
+**Why no recorded run ever hit it.** Every Plan 3h device run passed
+`--dart-define=RIG=pan` (`2026-08-25-plan-3h-results.md:186`) — a selection
+that skipped this script. **That define does not exist in the harness today**:
+`grep -rn "RIG" apps/dev_harness_2d/lib/` returns nothing. Plan 3i's Task 12
+command therefore drives `runR2Rig`'s full script where Plan 3h drove a shorter
+one, and this path had never been driven by any recorded run.
+
+**Mutation:** revert the call site.
+
+```diff
+-    requireRepaint(sink, vertices, tileCache: tileCache);
++    requireRepaint(sink, vertices);
+```
+
+**Procedure:** `cp lib/measurement_rig.dart <scratch>/rig.orig.dart`, edit with
+`perl -0pi`, run, restore by `cp`, `diff` to prove the restore, run again.
+
+**Result: red — and by construction rather than by an assertion.** A unit test
+cannot reach this call site: `runR2Rig` opens with `refuseDebugMode()`,
+correctly, and `flutter test` is a debug build. So the call site is gated a
+different way — `tileCache` is now a **required** named parameter, nullable, so
+an untiled caller has to write `tileCache: null` and say so. The mutant is then
+not a wrong number but a compilation failure, which reddens `flutter test` (the
+whole harness suite fails to load, since every test imports the library that no
+longer compiles) *and* `flutter analyze`. That is a stronger gate than an
+assertion: an assertion can only fail on the one call site it exercises, and
+this fails on any call site in the package that forgets the argument.
+
+**Verbatim output**, `CI=true flutter test --concurrency=1 test/require_repaint_test.dart`:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/require_repaint_test.dart
+lib/measurement_rig.dart:420:19: Error: Required named parameter 'tileCache' must be provided.
+    requireRepaint(sink, vertices);
+                  ^
+lib/measurement_rig.dart:142:6: Context: Found this candidate, but the arguments don't match.
+void requireRepaint(CanvasDrawSink sink, VerticesDrawSink? vertices,
+     ^^^^^^^^^^^^^^
+00:00 +0 -1: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/require_repaint_test.dart [E]
+  Failed to load "/Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/require_repaint_test.dart":
+  Compilation failed for testPath=/Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/require_repaint_test.dart: lib/measurement_rig.dart:420:19: Error: Required named parameter 'tileCache' must be provided.
+      requireRepaint(sink, vertices);
+                    ^
+  lib/measurement_rig.dart:142:6: Context: Found this candidate, but the arguments don't match.
+  void requireRepaint(CanvasDrawSink sink, VerticesDrawSink? vertices,
+       ^^^^^^^^^^^^^^
+  .
+00:00 +0 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/require_repaint_test.dart: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/require_repaint_test.dart
+```
+
+and `CI=true flutter analyze`:
+
+```
+Analyzing dev_harness_2d...                                     
+
+  error • The named parameter 'tileCache' is required, but there's no corresponding argument. Try adding the required argument • lib/measurement_rig.dart:420:5 • missing_required_argument
+
+1 issue found. (ran in 0.8s)
+```
+
+**A second half of the same fix, not separately mutated.** The tile counters
+are per-frame — they count since the last `resetCounters` — and `runR2Rig`
+reset the two sinks before its forced frame and *not* the cache. Passing
+`tileCache` without that would have handed the guard four counters already in
+the thousands from the 240 frames of pan and zoom above, so it could never fail
+again, and `printTileCounters` would have gone on publishing four
+cache-lifetime totals under a heading that says per-frame. `tileCache?.resetCounters()`
+now sits beside `sink.resetCounters()`, which is what the integration test's
+call sites already did.
+
+**Restore, verified.** Empty `diff` against the pre-mutation copy, and:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/require_repaint_test.dart
+00:00 +0: a frame that never ran throws, on a warm cache
+00:00 +1: a carry-over composite alone counts as a repaint
+00:00 +2: All tests passed!
+```
+
+---
+
+## M26 — the guard counts tile blits and live walks, but not the composite
+
+**Fix wave E**, and the subtler half of M25: wiring the parameter through is
+not enough, because `blitCount + liveDrawCount` is **not the whole of "drew"**
+under Plan 3i's two-regime frame.
+
+A *moving* frame, and the in-between frame at `_restGateSteps == 1`, draw the
+carry-over composite and nothing else — no tile blit, no live walk, no painter
+call. On such a frame `blitCount == 0` **and** `liveDrawCount == 0` while the
+frame genuinely put pixels on screen, and `TileCache.carryOverBlitCount`
+(`tile_cache.dart:819`, incremented at `:1130`) is the only counter that saw
+it. That is not an exotic state: it is every frame of a zoom gesture, and it is
+one of the states the forced `panBy(Offset.zero)` frame can land in after
+`runR2Rig`'s zoom phase.
+
+**Mutation:** drop the term.
+
+```diff
+   final drew = sink.canvasCallCount +
+       (vertices?.totalFlushCount ?? 0) +
+       (tileCache?.blitCount ?? 0) +
+-      (tileCache?.carryOverBlitCount ?? 0) +
+       (tileCache?.liveDrawCount ?? 0);
+```
+
+**Procedure:** as M25.
+
+**The gate this fires** is the new `a carry-over composite alone counts as a
+repaint`, in `apps/dev_harness_2d/test/require_repaint_test.dart`. The fixture
+is a **real `TileCache`** driven into that state, never a hand-set counter: a
+60-entity `seamCorpus` at 64-device-pixel tiles on a 400x300 logical / dpr 2
+viewport (130 tiles, so no claim here is one tile's claim), warmed until
+`viewportCovered`, counters zeroed, then one `zoomBy(1.4)` frame about the
+viewport centre. Zooming *in* by that much is what makes the magnified
+composite run past all four edges so no ring is left for the live fallback to
+owe. The camera is built by hand at scale 0.1 with the y axis flipped and the
+corpus's own six-million-unit origin, so nothing here passes at the identity
+transform.
+
+The test asserts the fixture's own state before it asks the guard anything —
+`carryOverBlitCount > 0`, `blitCount == 0`, `liveDrawCount == 0`,
+`canvasCallCount == 0`. Without those four lines it would pass equally well on
+a frame that blitted tiles, and this mutant would survive.
+
+**Result:** red, one test — and with the guard's own message, which is the
+whole point: this is the exact failure the smoke run saw on the device.
+
+**Verbatim output:**
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/require_repaint_test.dart
+00:00 +0: a frame that never ran throws, on a warm cache
+00:00 +1: a carry-over composite alone counts as a repaint
+00:00 +1 -1: a carry-over composite alone counts as a repaint [E]
+  Bad state: no repaint happened: the forced frame did not draw
+  package:dev_harness_2d/measurement_rig.dart 155:5  requireRepaint
+  test/require_repaint_test.dart 202:5               main.<fn>
+  
+00:00 +1 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/require_repaint_test.dart: a carry-over composite alone counts as a repaint
+```
+
+**The test that must stay green under this mutant, and did.** `a frame that
+never ran throws, on a warm cache` is in the transcript above, passing while
+the other fails. It is the direction that matters here: widening a guard to
+count composite blits must not widen it into something that can no longer fail.
+That test warms the cache to coverage — baking, blitting, the lot — then resets
+every counter and pumps **no** frame, which is exactly the state a rig is in
+between its `resetCounters()` and its forced repaint. The guard still throws,
+because all five terms are per-frame and all five are zero. What it can no
+longer do is throw on a frame that drew.
+
+**Restore, verified.** Empty `diff` against the pre-mutation copy, and the
+transcript quoted at the end of M25.
