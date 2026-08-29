@@ -95,6 +95,31 @@ What this buys, for free and unchanged:
 What must be built to make it work is in **`06-parametric-layer.md`**, and it
 is the riskiest file in this folder. Read it before committing to the order.
 
+### "Why not one widget per entity?" — asked, measured, settled
+
+It will be asked again, so the answer is recorded rather than re-derived:
+[docs/superpowers/notes/2026-08-29-widget-per-entity-spike.md](../docs/superpowers/notes/2026-08-29-widget-per-entity-spike.md).
+
+First, the premise: **`DraftCanvas` already is a widget** —
+`RepaintBoundary(child: CustomPaint(...))` — on the same pipeline and the same
+Impeller as everything else. No accelerated path is being missed.
+
+Second, the measurement, and it went **against** the prediction: at ~4,800 drawn
+primitives, one render object per entity fits the frame budget comfortably, even
+in Low Power Mode on battery (~6-8 ms build+raster on a pan against 16.67 ms).
+Timing is not what decides this.
+
+Third, what does decide it, none of which a number can move: the columnar store
+exists to avoid exactly those objects (`entity_store.dart:23`); the spatial
+index is needed anyway, so a widget tree is a second model to keep in sync; the
+per-entity zero-allocation invariant dies by construction; draw order is
+ascending handle value, not tree order; and the engine stays pure Dart.
+
+**The painted-canvas architecture stays. The concession is real, though: grips
+and overlay UI should be widgets** — eight to twenty of them, not five thousand,
+and as widgets they get hit testing, hover, cursor and focus for free. That is an
+open question in `03-grips-and-transform.md`.
+
 ---
 
 ## The sub-projects
