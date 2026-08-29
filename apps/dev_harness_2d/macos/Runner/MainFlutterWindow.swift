@@ -28,14 +28,32 @@ class MainFlutterWindow: NSWindow {
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     self.contentViewController = flutterViewController
+
+    // **`awakeFromNib` alone is not enough, and this is the whole reason the
+    // first attempt at pinning the window silently did nothing.** AppKit
+    // window state restoration runs ~1.4 s *after* the nib is loaded --
+    // `NSPersistentUIRestorer` -> `-[NSWindow restoreStateWithCoder:]` ->
+    // `_setFrameFromString:` -- and puts the window back to the frame the
+    // last session left behind, which was observed resizing a correctly
+    // pinned 1400x900 window down to 800x600 before the first measured frame.
+    // A restored frame is exactly "whatever the operator last dragged", so a
+    // measurement harness must opt out of it rather than race it.
+    self.isRestorable = false
+
+    // Belt and braces, and the part that holds for the rest of the session:
+    // with the content min and max equal, AppKit clamps every later
+    // `setFrame:` -- restoration, a live drag, a zoom button -- back to the
+    // measurement size. Nothing can change the viewport mid-run.
+    self.contentMinSize = kMeasurementContentSize
+    self.contentMaxSize = kMeasurementContentSize
+
     // `setContentSize` and not `setFrame`: the frame includes the title bar,
-    // so sizing the frame to 1400x900 would leave Flutter a view ~28 points
+    // so sizing the frame to 1400x900 would leave Flutter a view 32 points
     // short and the harness would measure a viewport nobody named.
     self.setContentSize(kMeasurementContentSize)
-    // Centred rather than left where the autosaved frame put it, so a window
-    // pinned to a size cannot end up half off-screen and partly occluded.
+    // Centred rather than left wherever the nib put it, so a window pinned to
+    // a size larger than the nib's cannot end up part way off-screen.
     self.center()
-    self.setFrame(self.frame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
