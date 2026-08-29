@@ -1100,3 +1100,60 @@ Carried out of this plan, none of them fixable from inside it:
    budgeted path. Reported across two plans now, not fixed.
  - **Gap G1, the naked-eye seam check, is still owed by a human** and needs no
    hardware this machine lacks.
+
+REOPENED AFTER CLOSE (2026-08-28). The human ran the zoom by eye and reported:
+"Zoom'da düzelme YOK! Zoom sonrası görüntü bulanık, pan yaptıktan sonra
+düzeliyor." The plan had been declared closed at 9/11 criteria with the
+human's original complaint never tested by eye. Fixed at a79903b, M31 at
+93d451e. Gate verified by the controller: jet_cad_2d 797, jet_cad_2d_flutter
+414 with 1 skip, dev_harness_2d 72; analyze and format clean.
+
+**The controller's own trace was WRONG and the implementer corrected it by
+building a reproduction instead of coding to the trace.** Recorded because the
+correction is the more valuable half.
+  Controller's trace: `paintFrame`'s moving-frame early return sits above
+  `_viewportCovered = uncovered == null` (`:1197`), so the flag stays stale at
+  `true` and `draft_canvas.dart:442`'s `if (!cache.viewportCovered)
+  onUnsettled?.call()` never fires.
+  Why that is wrong: `_gridFor` -> `_retireGeneration` -> `_disposeTiles` sets
+  `_viewportCovered = false`, so moving frames DO schedule and the rest bake
+  DOES run.
+  The actual defect: `paintFrame` blits the composite **first and underneath
+  everything**. `_restBake` then fills the generation and calls
+  `_dropCarryOver`, but **cannot un-draw the blit already made**. That frame
+  ends `viewportCovered == true` while the screen still shows the OLD
+  generation, magnified and bilinearly filtered, through every transparent
+  pixel -- and nothing asks for the frame that would draw the clean one.
+  Had the fix been written to the controller's trace it would have changed
+  nothing visible AND broken `_retireGeneration`'s mint guard.
+
+New signal: **`TileCache.settlePending`** -- a frame owes another when it
+blitted the composite, or ended with visible keys unbaked. It cannot fold into
+`_viewportCovered` in either direction: reading coverage as the scheduling
+signal IS the bug (the tile set is complete while the screen is stale), and
+falsifying coverage on the moving path would break the mint guard and take the
+whole moving-frame regime with it.
+
+**Why every instrument in this repo was blind to it, which is the lesson:**
+every settle measurement pumps its own frames. `runTileZoomPhase` calls
+`pumpFrame()` 30 times whether or not the app asked; widget tests calling
+`t.pump()` do the same. `settleFrames=2 covered=true` read IDENTICALLY before
+and after the fix. **A harness cannot measure the thing it supplies.** The one
+helper that could see it -- `tile_harness.dart`'s `settle`, which pumps only
+while `hasScheduledFrame` -- existed and was not used on the zoom path.
+Worse: `'the settle completes in one frame'` asserted `hasScheduledFrame
+isFalse` immediately after the rest frame. **That assertion was the bug written
+down as a requirement.**
+And a reviewer had named the gap exactly (fix wave D, concern 4: the arms
+"never exercise `DraftCanvas`; the scheduling half is argued, not measured").
+It was recorded as a carried concern and not closed.
+
+Carried: one frame of stale ink still survives by design on the pan path
+(`baked == 0` guard, pre-existing); `settlePending` is now the frame path's
+scheduling contract and only a `hasScheduledFrame`-bounded settle can see a
+missing frame request -- a future helper that pumps blindly reintroduces this
+class silently, which may deserve a line in CLAUDE.md's testing bar (this plan
+may not amend it).
+
+**The gate this fix has to pass is the human's eye at the window, not any
+number in this repository.**
