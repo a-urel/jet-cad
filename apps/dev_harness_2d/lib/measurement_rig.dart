@@ -1785,6 +1785,33 @@ Future<void> runZoomCriterionArms({
 /// refill; the figure is reported per arm so that shows up rather than hides.
 const int kPanArmWarmMaxFrames = 400;
 
+/// Consecutive non-baking frames, on a covered viewport, that [runTilePanArm]
+/// takes as the end of its warm.
+///
+/// Three and not one: the frame straight after a camera change can never bake
+/// (`kRestGateFrames` is 2 -- Ruling 15's arithmetic), so a single non-baking
+/// frame is the normal state of the *first* frame of a warm and says nothing
+/// about whether the cache is full.
+const int kPanArmWarmIdleFrames = 3;
+
+/// The zoom factor [runTilePanArm]'s purge takes an excursion to, and back
+/// from, before it warms.
+///
+/// Any factor that cannot be mistaken for the current scale does; 2 is far
+/// outside `TileGrid.matchesScale`'s tolerance in a way no reader has to check
+/// the tolerance to be sure of.
+const double kPanArmPurgeZoom = 2.0;
+
+/// How many extra frames [runTilePanArm] pumps after its pan, waiting for the
+/// last pan frames' timings to arrive.
+///
+/// [FrameTimingLog.drain]'s default of 4 is 66 ms at 60 Hz and a profile build
+/// batches `FrameTiming`s about every 100 ms, so the default cannot span one
+/// batch: the first check run lost three to five pan frames in every arm. This
+/// is half a second of bare frames, which is cheap and is a bound, not a wait
+/// loop.
+const int kPanArmDrainFrames = 30;
+
 /// What [runTilePanArm] measured: the state the arm's pan began from, the
 /// `tile hold` control, and the `tile pan` window criterion 8's statistic is
 /// read off.
@@ -1802,6 +1829,7 @@ class PanArmReport {
   PanArmReport({
     required this.warmFrames,
     required this.warmBakes,
+    required this.tilesAfterPurge,
     required List<double?> holdMs,
     required this.holdBakes,
     required this.holdLiveDraws,
@@ -1823,16 +1851,21 @@ class PanArmReport {
   /// Frames the warm loop took to drive [TileCache.bakeCount] to a standstill
   /// at the arm's starting camera, and the bakes it paid for getting there.
   ///
-  /// **This is what makes the arms comparable, and it is reported rather than
-  /// assumed.** Every arm resets the camera to R2's fitted camera and then
-  /// warms to a standstill before it holds or pans, so the pan of every arm
-  /// starts at the same camera with a fully populated generation. Whether a
-  /// given arm got there from cold or inherited surviving tiles from an
-  /// earlier arm is exactly what these two numbers say: an arm that started
-  /// warm reads a low [warmBakes], one that started cold reads a high one, and
-  /// a reader can see it instead of taking it on trust.
+  /// **These are what say the arms started comparable, and they are reported
+  /// rather than assumed.** Every arm purges the generation, resets the camera
+  /// to R2's fitted camera and warms to a standstill before it holds or pans,
+  /// so the pan of every arm starts at the same camera with a generation built
+  /// from cold. A [warmBakes] of zero is the symptom of the failure the purge
+  /// exists to remove -- an arm that found the tiles already there -- and it is
+  /// visible in the transcript rather than left to trust.
   final int warmFrames;
   final int warmBakes;
+
+  /// [TileCache.liveTileCount] immediately after the purge and before the warm
+  /// loop. **Zero is what a working purge looks like**; anything else means the
+  /// generation the previous arm left behind survived into this one, and this
+  /// arm's pan is blitting rather than baking. See [runTilePanArm].
+  final int tilesAfterPurge;
 
   /// `totalSpan` per `tile hold` frame that reported a timing, and how many
   /// did not. The control regime -- see the class doc.
@@ -1919,9 +1952,19 @@ class PanArmReport {
 /// **[camera] must already be at the arm's starting camera** -- in production,
 /// R2's fitted camera, restored by the caller before every arm, because the
 /// arms of a ratio must start from the same camera and this phase does not own
-/// it. The warm loop below then rebuilds the generation *at that camera* in
-/// every arm, so no arm begins its pan on a generation the previous arm's pan
-/// left behind somewhere else.
+/// it.
+///
+/// **One arm is: purge, warm, hold, pan.** The purge is a two-frame scale
+/// excursion that makes `TileCache.paintFrame` retire the generation and
+/// dispose its tiles; the warm loop then rebuilds it from cold at the arm's own
+/// camera. Both halves are necessary and the second alone is not enough: the
+/// fitted camera and the pan path are identical in every arm by construction,
+/// nothing evicts, and without the purge every arm after the first pans over
+/// the tiles the previous arm's pan baked. The 2026-08-29 check run showed
+/// exactly that -- `bakes=14 liveDraws=10` in the first arm and `bakes=0
+/// liveDraws=0 blits=1600` in all three after it. `tilesAfterPurge` and
+/// `warmBakes` are reported per arm so a reader can see which of the two an
+/// arm actually got.
 ///
 /// **No `_probeBake`, unlike [runTilePhases].** The probe reimplements the bake
 /// geometry rather than calling `paintFrame`, so it cannot see
@@ -1951,15 +1994,58 @@ Future<PanArmReport> runTilePanArm({
     // [FrameTimingLog.establishBaseline].
     await log.establishBaseline(pumpFrame);
 
-    // Warm: pump until nothing more bakes. Bounded, and the bound is reported.
+    // **The purge, and the first run without it proves it is load-bearing.**
+    // Two frames at a scale the current generation cannot match, then back to
+    // the arm's exact starting camera. `TileCache.paintFrame` retires a
+    // generation whose grid fails `TileGrid.matchesScale` and disposes its
+    // tiles, and there is no public way to ask it to do that directly.
+    //
+    // Without this, every arm after the first pans over tiles the *previous*
+    // arm's pan baked: the fitted camera and the pan path are identical in
+    // every arm by construction, the cache is nowhere near its capacity, so
+    // nothing evicts and the second arm onwards bakes nothing at all. The
+    // 2026-08-29 check run at 50,000 read `bakes=14 liveDraws=10 p95=14.01ms`
+    // in the first arm and `bakes=0 liveDraws=0 blits=1600` -- a pure blit
+    // parade -- in all three after it. That is the "one arm inherits the
+    // previous arm's warm generation" failure exactly, and it makes the pan
+    // measure the wrong thing in a way no test can see.
+    //
+    // The camera is restored by assignment to the value captured on entry, so
+    // it is bit-identical to the arm's starting camera and not merely a zoom
+    // round trip's `1.0000000000000018` away from it.
+    final start = camera.value;
+    cache.resetCounters();
+    camera.zoomAt(Offset.zero, kPanArmPurgeZoom);
+    await log.pump(pumpFrame);
+    camera.value = start;
+    await log.pump(pumpFrame);
+    final tilesAfterPurge = cache.liveTileCount;
+
+    // Warm: pump until the viewport is covered and nothing more bakes.
+    // Bounded, and the bound is reported.
+    //
+    // **One frame that baked nothing is not a standstill, and reading it as
+    // one stops the warm before it starts.** `kRestGateFrames` is 2, so a bake
+    // needs two consecutive frames on the same camera; the purge's last frame
+    // changed the camera, so the very first warm frame can only reach
+    // `_restGateSteps == 1` and cannot bake whatever the cache holds. That is
+    // Ruling 15's arithmetic, and the first version of this loop -- exit as
+    // soon as `bakeCount` stops changing -- exited on exactly that frame,
+    // reported `warmFrames=1 warmBakes=0` in all four arms of the 2026-08-29
+    // re-check, and left the two boundary frames below to do the warming
+    // where no counter attributes it. Coverage plus
+    // [kPanArmWarmIdleFrames] consecutive non-baking frames is the condition
+    // that cannot be met by a frame that was never allowed to bake.
     cache.resetCounters();
     var warmFrames = 0;
-    var lastBakes = -1;
-    while (warmFrames < kPanArmWarmMaxFrames && cache.bakeCount != lastBakes) {
-      lastBakes = cache.bakeCount;
+    var idleFrames = 0;
+    while (warmFrames < kPanArmWarmMaxFrames) {
+      final bakesBefore = cache.bakeCount;
       camera.panBy(Offset.zero);
       await log.pump(pumpFrame);
       warmFrames++;
+      idleFrames = cache.bakeCount == bakesBefore ? idleFrames + 1 : 0;
+      if (cache.viewportCovered && idleFrames >= kPanArmWarmIdleFrames) break;
     }
     final warmBakes = cache.bakeCount;
 
@@ -2003,26 +2089,49 @@ Future<PanArmReport> runTilePanArm({
       if (delta > 0) bakeFrames++;
       if (delta > maxBakesInAFrame) maxBakesInAFrame = delta;
     }
+    // **Read before the drain, not after it.** The drain's frames are pumped
+    // and they paint: a bare frame straight after a pan is a *non-moving*
+    // frame, which is precisely the frame shape that runs the live fallback,
+    // so counting it would add the drain's own live draws to a figure labelled
+    // "over the pan" — and `liveDraws` is the counter that decides whether
+    // this arm measured anything at all.
+    final panBakes = cache.bakeCount;
+    final panBlits = cache.blitCount;
+    final panCarryOverBlits = cache.carryOverBlitCount;
+    final panLiveDraws = cache.liveDrawCount;
+    final panNewEvictions = cache.evictionCount - evictionsBefore;
+    final liveTiles = cache.liveTileCount;
+    final tileBytes = cache.liveBytes;
+
     // The last pan frames cannot have reported by the time their own pump
     // returned; without this their timings are absent, not late.
-    await log.drain(pumpFrame, upTo: panStart + panFrames);
+    //
+    // **[kPanArmDrainFrames] and not [FrameTimingLog.drain]'s default of 4.**
+    // `FrameTiming`s are delivered about every 100 ms in a profile build and
+    // four frames at 60 Hz is 66 ms, so the default cannot span one batch: the
+    // check run lost three to five pan frames in every arm and shouted SHORT
+    // SAMPLE on all four. The zoom phase never saw this because its 30 idle
+    // settle frames are its drain.
+    await log.drain(pumpFrame,
+        upTo: panStart + panFrames, maxExtraFrames: kPanArmDrainFrames);
 
     return PanArmReport(
       warmFrames: warmFrames,
       warmBakes: warmBakes,
+      tilesAfterPurge: tilesAfterPurge,
       holdMs: log.msRange(holdStart, holdStart + holdFrames),
       holdBakes: holdBakes,
       holdLiveDraws: holdLiveDraws,
       panMs: log.msRange(panStart, panStart + panFrames),
-      panBakes: cache.bakeCount,
+      panBakes: panBakes,
       panBakeFrames: bakeFrames,
       panMaxBakesInAFrame: maxBakesInAFrame,
-      panBlits: cache.blitCount,
-      panCarryOverBlits: cache.carryOverBlitCount,
-      panLiveDraws: cache.liveDrawCount,
-      panNewEvictions: cache.evictionCount - evictionsBefore,
-      liveTiles: cache.liveTileCount,
-      tileBytes: cache.liveBytes,
+      panBlits: panBlits,
+      panCarryOverBlits: panCarryOverBlits,
+      panLiveDraws: panLiveDraws,
+      panNewEvictions: panNewEvictions,
+      liveTiles: liveTiles,
+      tileBytes: tileBytes,
     );
   } finally {
     log.disarm();
@@ -2058,9 +2167,17 @@ String _msStats(List<double> ms) {
 /// 1.00 by construction. The eighteen arms of the degenerate run would have
 /// said so on every line.
 void printPanArmReport(String label, PanArmReport r) {
-  print('$label arm start: warmFrames=${r.warmFrames} '
-      'warmBakes=${r.warmBakes} '
-      '(the camera and generation this arm holds and pans from)');
+  print('$label arm start: tilesAfterPurge=${r.tilesAfterPurge} '
+      'warmFrames=${r.warmFrames} warmBakes=${r.warmBakes} '
+      '(the camera and generation this arm holds and pans from; a working '
+      'purge reads 0 tiles and then warms from cold)');
+  if (r.tilesAfterPurge > 0 || r.warmBakes == 0) {
+    print('$label   !!! WARNING: this arm did not start from a purged cache '
+        '(tilesAfterPurge=${r.tilesAfterPurge}, warmBakes=${r.warmBakes}). It '
+        "is panning over tiles an earlier arm baked, so its pan blits where "
+        'the measurement expects it to bake, and its figures are not '
+        "comparable with an arm that started cold !!!");
+  }
 
   if (r.holdFrameMs.isEmpty) {
     print('$label tile hold: no frames recorded');

@@ -42,10 +42,13 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 PanArmReport _report({
   List<double?> panMs = const <double?>[],
   int panLiveDraws = 10,
+  int tilesAfterPurge = 0,
+  int warmBakes = 12,
 }) =>
     PanArmReport(
       warmFrames: 13,
-      warmBakes: 12,
+      warmBakes: warmBakes,
+      tilesAfterPurge: tilesAfterPurge,
       holdMs: const <double?>[],
       holdBakes: 0,
       holdLiveDraws: 0,
@@ -231,6 +234,33 @@ void main() {
           _report(panMs: <double?>[for (var i = 0; i < 120; i++) 1.0]),
         )).join('\n');
     expect(healthy, isNot(contains('WARNING')));
+  });
+
+  test('an arm that inherited a warm generation shouts', () {
+    // The failure the 2026-08-29 check run found and the purge exists to
+    // remove: every arm after the first panned over the tiles the previous
+    // arm's pan had baked, so it blitted where the measurement expects it to
+    // bake. `bakes=14 liveDraws=10 p95=14.01ms` in arm A repeat 1, then
+    // `bakes=0 liveDraws=0 blits=1600` in all three arms after it.
+    final full = <double?>[for (var i = 0; i < 120; i++) 1.0];
+    final inherited = _capture(() => printPanArmReport(
+          'L',
+          _report(panMs: full, tilesAfterPurge: 26, warmBakes: 0),
+        )).join('\n');
+    expect(inherited, contains('did not start from a purged cache'));
+    expect(inherited, contains('tilesAfterPurge=26'));
+
+    // A purge that emptied the cache but a warm that then baked nothing is the
+    // same defect seen from the other end, and shouts too.
+    final noBakes = _capture(() => printPanArmReport(
+          'L',
+          _report(panMs: full, warmBakes: 0),
+        )).join('\n');
+    expect(noBakes, contains('did not start from a purged cache'));
+
+    final cold =
+        _capture(() => printPanArmReport('L', _report(panMs: full))).join('\n');
+    expect(cold, isNot(contains('WARNING')));
   });
 
   test('a short pan sample shouts rather than publishing its p95', () {
