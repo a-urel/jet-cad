@@ -3,8 +3,9 @@
 **Date:** 2026-08-29. **Status:** design, **revision 4**, not yet a plan.
 **Target scale: 10,000 entities**, set by the human on 2026-08-29.
 **Evidence of record:**
-[the spike note](../notes/2026-08-29-flutter-gpu-backend-spike.md) and
-[the 10,000-entity measurement](../notes/2026-08-29-gpu-arm-10k-measurement.md).
+[the spike note](../notes/2026-08-29-flutter-gpu-backend-spike.md),
+[the 10,000-entity measurement](../notes/2026-08-29-gpu-arm-10k-measurement.md),
+and [the settle-flicker probe](../notes/2026-08-29-settle-flicker-probe.md).
 
 **Revision 4 answers three independent reviews of revision 3.** They found
 three blocking defects, and two of them were the same defect seen from
@@ -55,15 +56,35 @@ settings, and neither corrects the other.
 
 ### What the tile cache does not solve
 
-The human, using the running product, reports **a visible flicker after every
-pan and zoom.** This repository has already fought part of that: `a79903b`
-fixed a frame that *"still carried the composite"*, and
-`tile_settle_test.dart:186` now pins the differing-pixel count of that specific
-defect at **0**. So the residual thing being reported is, on the repo's own
-evidence, most likely **the resolution change itself** — the moment a magnified
-composite is replaced by sharp tiles — rather than a stale frame. Criterion 12
-is written to tell those two apart, because the design's entire justification
-depends on which it is.
+The human, using the running product, reported **a visible flicker after every
+pan and zoom**, and that report has since been measured — see
+[the settle-flicker probe](../notes/2026-08-29-settle-flicker-probe.md). The
+measurement narrows it:
+
+| frame | differing pixels | of live ink |
+|---|---|---|
+| at rest | 0 | 0.0% |
+| last zoom gesture frame | 25,275 | **141.7%** |
+| settle frame 1 | 25,275 | **141.7%** |
+| settle frame 2 | 16,681 | **93.6%** |
+| settle frame 3 | 0 | 0.0% |
+| **pan, every frame, at any distance tested** | **0** | **0.0%** |
+
+**Three findings, and one of them narrows this spec's claim.**
+
+1. **There is no stale-frame defect.** `a79903b`'s fix holds; both gestures
+   reach zero and stay there.
+2. **The zoom flicker is real and it is the resolution change** — a
+   **three-frame** transition, two of them wrong by 141.7% and 93.6% of the
+   frame's ink. At 60 Hz that is a ~50 ms two-step change.
+3. **A pan does not flicker at all.** Structurally, not by luck: at constant
+   scale the lattice is reusable, and only a zoom forces the composite to be
+   magnified.
+
+**So this spec claims the zoom case and not the pan case.** Whether the product
+observation of a pan flicker is a different phenomenon this fixture does not
+model — a combined pan-and-zoom, a different corpus, a dpr change mid-gesture —
+or the zoom case misattributed, is unresolved and is open question 1.
 
 **Why a resident backend removes it is structural.** The tile path holds two
 representations of one drawing and the flicker is the frame that exchanges
@@ -532,17 +553,17 @@ rule stated under Budgets.
     demand, with a one-shot observable diagnostic.
 11. The text pass costs ≤ 0.5 ms p50 on the criterion-8 corpus, and the *N+1*
     draw-call count is reported.
-12. **The settle defect is named before it is fixed.** Using
-    `tile_settle_test.dart`'s instrument — drive frames while
-    `hasScheduledFrame`, then compare the settled frame against the live
-    reference at the same camera — the plan first identifies which defect the
-    human observes: a stale frame (which `a79903b` already drove to 0 differing
-    pixels) or the resolution change during the gesture. It then shows the
-    resident arm free of that specific defect. **A miss on the first half
-    invalidates this design's motivation and is reported as such.**
-    This criterion does not compare a frame with its predecessor: criterion 9
-    accepts a post-settle rebuild that changes pixels with no camera change, so
-    a predecessor test would fire on both arms.
+12. **The zoom settle transition is reproduced on the tiled arm and absent on
+    the resident arm.** The target numbers exist: on the tiled arm, across the
+    three frames after a twelve-step 1.02 zoom, **25,275 / 16,681 / 0**
+    differing pixels against a live reference at the same camera. The resident
+    arm must stay flat across the same gesture and settle.
+    **The instrument is the rig path, not the widget boundary** — `toImage`
+    asserts on `!debugNeedsPaint` and these are exactly the dirty states, which
+    cost the probe its first attempt. And it compares against a live reference
+    at the same camera, never against a predecessor frame: criterion 9 accepts
+    a post-settle rebuild that changes pixels with no camera change, so a
+    predecessor test would fire on both arms.
 13. Web renders the criterion-1 corpus under CanvasKit and Skwasm within
     criterion 1's thresholds, measured on that platform against a reference
     rendered on that platform.
@@ -553,8 +574,14 @@ rule stated under Budgets.
 
 ## Open questions
 
-1. **Which settle defect is the human seeing?** Criterion 12 exists to answer
-   it, and the answer decides whether this design is motivated. It is first.
+1. ~~**Which settle defect is the human seeing?**~~ **Measured** — see the
+   probe note. A zoom flickers over three frames; a pan does not flicker at
+   all. **What remains open is narrower and it is the human's to answer:** the
+   product report said "pan and zoom", and the pan half is not reproducible on
+   this fixture. Does the observed pan flicker survive a deliberate
+   pan-only gesture, or was it a combined pan-and-zoom? And does a 141.7%-of-ink
+   three-frame transition read as a flicker or as a sharpen? The second question
+   is perceptual and no measurement settles it.
 2. **The web timing instrument.** No web timing criterion is in the gate because
    none can be stated. Criterion 13 is correctness-only.
 3. **The reference scale**, and the band that follows from it (criterion 2).
