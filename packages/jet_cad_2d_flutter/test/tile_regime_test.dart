@@ -255,6 +255,32 @@ void main() {
     // [324, 400) x [0, 300) is served by the incoming generation alone. A
     // frame that returned early leaves it transparent.
     const revealed = Rect.fromLTRB(324, 0, 400, 300);
+
+    // **The settle below is forced on this arm and costs it nothing, and the
+    // two assertions around it are what make that true.** The fourth pan
+    // frame covers the viewport *and* leaves the composite standing --
+    // `_dropCarryOver` runs on the covered path only when `baked == 0`, and a
+    // pan frame bakes -- so the canvas now asks for the frames that replace
+    // those stale pixels (`TileCache.settlePending`, the zoom-blur fix), and
+    // `RenderRepaintBoundary.toImage` asserts rather than capturing while the
+    // boundary is dirty. That is the same fact the rig-based test below cites
+    // for using a rig at all.
+    //
+    // What the settle cannot do is put ink in the strip: the camera has not
+    // moved, every visible key already holds an image, so these frames bake
+    // nothing and walk nothing -- asserted, not assumed -- and the composite
+    // they drop never reached the strip in the first place, that being the
+    // strip's whole definition. So the ink measured below is still the four
+    // pan frames' own tiles, blitted again.
+    final bakedByPans = h.cache.bakeCount;
+    final walkedByPans = h.cache.liveDrawCount;
+    await settle(t, h);
+    expect(h.cache.bakeCount, bakedByPans,
+        reason: 'the settle frames must add no tiles, or the capture below '
+            'stops being a statement about the pan frames');
+    expect(h.cache.liveDrawCount, walkedByPans,
+        reason: 'and no live walk, for the same reason');
+
     final tiled = await captureTiled(t, h);
     final ink = inkInsideCapture(tiled, revealed);
     // `captureLive` replaces the widget tree and disposes the cache behind

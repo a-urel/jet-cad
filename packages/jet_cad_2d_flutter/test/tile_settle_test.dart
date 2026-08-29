@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'support/tile_comparison.dart';
 import 'support/tile_fixture.dart';
 import 'support/tile_harness.dart';
 
@@ -112,7 +113,80 @@ void main() {
         reason: 'one rest frame covers the viewport; the tiled fill it '
             'replaces took one frame per tile');
     expect(h.cache.liveTileCount, greaterThan(tilesBefore));
+
+    // **The rest frame covers the viewport and still owes one frame, and that
+    // is the zoom-blur fix rather than a regression against the claim above.**
+    // It blitted the outgoing composite first and underneath everything, then
+    // banded the incoming generation over it; it cannot un-draw the blit, so
+    // the pixels it leaves are the new tiles over the old generation magnified
+    // and filtered. Exactly one more frame is owed and not two, and the
+    // difference is `_restBake`: it releases the composite itself, having
+    // priced the whole viewport against the byte ceiling first, so the next
+    // frame has nothing to blit and nothing uncovered and stops. A pan tail
+    // owes two for want of that release -- see `tile_regime_test`'s D8 arm.
+    // The bound is slack so a third would be reported as a count rather than
+    // as a hang. See `TileCache.settlePending`.
+    var extra = 0;
+    while (t.binding.hasScheduledFrame && extra < 10) {
+      await t.pump();
+      extra++;
+    }
+    expect(extra, 1,
+        reason: 'the canvas has to ask for the frame that replaces the '
+            'composite it drew, and then stop');
+    expect(h.cache.hasCarryOver, isFalse);
     expect(t.binding.hasScheduledFrame, isFalse,
-        reason: 'and nothing is owed afterwards');
+        reason: 'and nothing is owed afterwards: a canvas that keeps asking '
+            'burns the GPU on a still screen');
+  });
+
+  // **The frame a zoom actually leaves on the user's screen, and nothing
+  // pumped it.**
+  //
+  // Every other settle assertion in this repository produces its own frames --
+  // `runTileZoomPhase` pumps thirty regardless of whether the app asked, and a
+  // widget test calling `t.pump()` a fixed number of times does the same -- so
+  // none of them can see a frame the canvas never *requested*. This one pumps
+  // only while `hasScheduledFrame`, through [settle], which is why it is the
+  // one that can.
+  //
+  // The rest frame blits the outgoing composite first and underneath
+  // everything, *then* bands the incoming generation over it and drops the
+  // composite. It cannot un-draw the blit it already made, so the frame it
+  // leaves on screen is the new tiles over the old generation magnified --
+  // stale, filtered ink through every transparent pixel, which is the blur the
+  // report describes. `repaintOnce` and `tile_cache_test`'s criterion 1 both
+  // buy the frame after it by hand; the application has no hand to buy it
+  // with, and until this test the canvas never asked for it.
+  testWidgets('a zoom settles to a clean generation on its own', (t) async {
+    final h = await pumpTiled(t);
+    await settle(t, h);
+    // Anti-vacuity, twice over: an uncovered generation mints no composite at
+    // all (`_retireGeneration`'s third guard), so there would be nothing stale
+    // to leave behind and the comparison below would pass over an empty claim.
+    expect(h.cache.viewportCovered, isTrue);
+
+    // Two notches, the way a trackpad delivers a zoom, and the gesture ends
+    // with the camera changed -- so the last frame the gesture itself produces
+    // is a moving one and every frame after it has to be asked for.
+    h.camera.zoomAt(const Offset(120, 90), 1.12);
+    await t.pump();
+    h.camera.zoomAt(const Offset(120, 90), 1.09);
+    await t.pump();
+
+    // **Not a fixed count.** This is the whole instrument.
+    await settle(t, h);
+
+    expect(h.cache.viewportCovered, isTrue,
+        reason: 'the settle has to have run at all');
+    expect(h.cache.hasCarryOver, isFalse,
+        reason: 'a composite still standing is a composite the next frame '
+            'blits again');
+    expect(
+        differingPixels(await captureTiled(t, h), await captureLive(t, h)), 0,
+        reason: 'the frame a zoom leaves on screen must be the incoming '
+            'generation alone -- a composite blitted underneath it shows the '
+            'outgoing generation, magnified and filtered, through every '
+            'transparent pixel of the new tiles');
   });
 }

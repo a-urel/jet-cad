@@ -412,7 +412,13 @@ class _DraftCustomPainter extends CustomPainter {
   /// See [DraftCanvas.onPaintForTest].
   final void Function()? onPaintForTest;
 
-  /// Called when a tiled frame ends with tiles still missing.
+  /// Called when a tiled frame ends owing another one.
+  ///
+  /// **Tiles still missing is not the only way to owe one**, and reading
+  /// `viewportCovered` here was the zoom-blur defect: a frame that completed
+  /// the settle still has the outgoing generation's composite blitted
+  /// underneath it, and stopped the canvas one frame early. See
+  /// [TileCache.settlePending].
   ///
   /// Null when [tileCache] is, because the untiled path finishes every frame it
   /// starts and has nothing to settle.
@@ -439,7 +445,7 @@ class _DraftCustomPainter extends CustomPainter {
       // The settle needs frames and nothing else will produce them once the
       // camera stops. Asked here rather than inside the cache: scheduling is
       // the widget layer's business, and `TileCache` has no binding to ask.
-      if (!cache.viewportCovered) onUnsettled?.call();
+      if (cache.settlePending) onUnsettled?.call();
       return;
     }
     // **The camera is not quantised here, and the asymmetry is deliberate.**

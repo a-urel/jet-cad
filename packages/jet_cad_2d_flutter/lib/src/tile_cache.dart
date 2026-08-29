@@ -594,6 +594,19 @@ class TileCache {
   /// instead of a stale one.
   bool _viewportCovered = false;
 
+  /// Whether the last [paintFrame] owes the canvas another frame.
+  ///
+  /// Written on every exit from [paintFrame] and nowhere else, so it is a
+  /// property of the frame just drawn rather than of the cache's state. See
+  /// [settlePending] for why this is a second field and not a second reading
+  /// of [_viewportCovered].
+  ///
+  /// **True before the first frame**, so a canvas that is mounted and then
+  /// asked nothing still gets its first settle: the value read after a frame
+  /// is always one that frame wrote, and the initial value is only ever seen
+  /// by a caller polling before any painting has happened.
+  bool _settlePending = true;
+
   /// The quantised camera of the last [paintFrame].
   ViewportTransform? _lastCamera;
 
@@ -806,14 +819,56 @@ class TileCache {
   /// [budgetedTilesPerFrame] caps what one frame may bake, so a viewport of
   /// many tiles fills over several frames.
   ///
+  /// **A statement about tiles, and only about tiles.** It answers
+  /// "is the incoming generation complete", which is what [_retireGeneration]
+  /// needs and what every coverage assertion in the suite is written against.
+  /// It does *not* answer "may the canvas stop asking for frames" -- see
+  /// [settlePending], which does, and whose doc comment says why the two
+  /// cannot be one field.
+  bool get viewportCovered => _viewportCovered;
+
+  /// Whether the frame just painted left something on screen that a later
+  /// frame must replace.
+  ///
   /// **This is not a diagnostic. The frame path reads it.** Flutter produces a
   /// frame only when something asks for one, and the camera asks only while it
-  /// is moving, so a gesture that ends would end the settle with it -- leaving
-  /// whatever had not baked unbaked, and the magnified composite a zoom
-  /// carries over on screen until an unrelated edit happened to cause a frame.
+  /// is moving, so a gesture that ends would end the settle with it.
   /// `DraftCanvas` reads this after every tiled frame and asks for the next
   /// one itself.
-  bool get viewportCovered => _viewportCovered;
+  ///
+  /// **Why this is not [viewportCovered], which is what the canvas read until
+  /// the zoom-blur report.** The two answer different questions and disagree
+  /// on exactly the frame the user complained about. `paintFrame` blits the
+  /// outgoing composite *first and underneath everything*, before it decides
+  /// the frame is resting; the rest bake then fills the generation and calls
+  /// `_dropCarryOver`, but it cannot un-draw the blit this frame already
+  /// made. So the frame that completes a zoom's settle is `viewportCovered ==
+  /// true` -- every tile is baked, and that reading is correct -- while the
+  /// pixels on screen are the new tiles composited over the old generation
+  /// magnified and bilinearly filtered, showing through every transparent
+  /// pixel of the incoming tiles. Measured on the harness fixture: 29,815
+  /// device pixels differing from the live frame. Reading coverage as the
+  /// scheduling signal stopped the canvas there, and the drawing stayed blurry
+  /// until an unrelated camera change happened to produce one more frame --
+  /// which is precisely "it sharpens when I pan".
+  ///
+  /// And the meanings cannot simply be merged the other way either.
+  /// [_retireGeneration] reads [_viewportCovered] as the guard that decides
+  /// whether a composite is worth minting at all: a half-filled generation,
+  /// flattened, is transparent where it never baked, and a transparent
+  /// composite in front of the live fallback is a *blank* strip rather than a
+  /// stale one. Forcing that flag false to make a moving frame reschedule
+  /// would stop composites being minted and take the whole moving-frame regime
+  /// with it -- the zero gesture bakes, the gesture p95, and spec D3's
+  /// zoom-out ring all rest on that composite existing.
+  ///
+  /// So: coverage is about the tile set, and this is about the canvas. A frame
+  /// owes another when it drew the composite (its pixels are stale by
+  /// construction) or when it ended with visible keys unbaked (the ordinary
+  /// budgeted settle). It terminates because a composite that survives a
+  /// covered frame is dropped by the very next one -- `baked == 0` there --
+  /// and a frame with no composite and nothing uncovered owes nothing.
+  bool get settlePending => _settlePending;
 
   /// Composite blits issued since [resetCounters]. One per gesture frame.
   int get carryOverBlitCount => _carryOverBlits;
@@ -1146,6 +1201,16 @@ class TileCache {
       // definition above say, not an assumption made again here. A zoom out
       // leaves that composite's ring as background until the gesture ends
       // (spec D3); a *pan* does not reach this line at all (spec D8).
+      //
+      // **And it owes another frame.** Everything this frame put on screen
+      // came from the composite -- `resting`'s second disjunct means one was
+      // standing, and the blit above therefore ran -- so every pixel of it is
+      // the outgoing generation, replayed at a scale it was never rasterised
+      // at. The gesture produces the next frame while it lasts; the frame
+      // *after* the last gesture event has no other source, and it is the one
+      // the rest gate needs in order to advance. Without this the settle
+      // simply never started. See [settlePending].
+      _settlePending = true;
       return;
     }
 
@@ -1195,6 +1260,16 @@ class TileCache {
     }
 
     _viewportCovered = uncovered == null;
+    // **Coverage is not the whole of what this frame owes, and the difference
+    // is the frame a zoom stops on.** `carryOver` was read before the blit at
+    // the top of this method and is non-null exactly when that blit ran, so
+    // this frame is showing the outgoing generation under every transparent
+    // pixel of the incoming one -- stale and filtered -- however complete the
+    // tile set now is. The rest bake just above may have dropped the composite
+    // for later frames, but the pixels are already on this canvas. One more
+    // frame replaces them, and by then there is no composite left to blit.
+    // See [settlePending].
+    _settlePending = uncovered != null || carryOver != null;
     if (uncovered == null) {
       // The incoming generation now covers every pixel the composite served,
       // so the composite is dead weight *and* a hazard: a tile's antialiased
