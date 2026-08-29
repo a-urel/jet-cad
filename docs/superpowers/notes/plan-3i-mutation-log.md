@@ -3517,3 +3517,121 @@ and the same file re-run green:
 00:00 +9: the pan step is the historical one unless PAN_STEP scales it
 00:00 +10: All tests passed!
 ```
+
+## M31 — the canvas asks for its next frame on coverage rather than on what it drew
+
+**Post-merge zoom-blur fix**, reported from the window: *"Zoom'da düzelme YOK!
+Zoom sonrası görüntü bulanık, pan yaptıktan sonra düzeliyor."* — after a
+trackpad zoom the drawing stays blurry and sharpens only on a pan. Gates
+`packages/jet_cad_2d_flutter/test/tile_settle_test.dart`'s
+`'a zoom settles to a clean generation on its own'` and
+`'the settle completes in one frame'`.
+
+**Why this mutant and not another.** The defect was a scheduling question read
+off a coverage flag. `paintFrame` blits the outgoing composite *first and
+underneath everything*, before it decides the frame is resting; `_restBake`
+then fills the incoming generation and calls `_dropCarryOver`, but it cannot
+un-draw the blit the same frame already made. So the frame that completes a
+zoom's settle is `viewportCovered == true` — every visible tile is baked, and
+that reading is correct — while the pixels on screen are the new tiles over the
+old generation, magnified and bilinearly filtered, showing through every
+transparent pixel of the incoming tiles. `DraftCanvas` asked for another frame
+only when coverage was *false*, so it stopped exactly there, and the drawing
+stayed stale until an unrelated camera change produced one more frame. That is
+"it sharpens when I pan", precisely.
+
+`repaintOnce` in `test/support/tile_harness.dart` and `tile_cache_test`'s
+`'criterion 1: a settled frame equals the live frame after a zoom'` both buy
+that frame **by hand** and both say in their own doc comments that nothing
+schedules it. The application has no hand to buy it with. The fix is
+`TileCache.settlePending`, a second field: a frame owes another when it blitted
+the composite or ended with visible keys unbaked. It cannot be folded into
+`_viewportCovered` in either direction — `_retireGeneration` reads that flag as
+the guard that decides whether a composite is worth minting at all, and forcing
+it false to make a moving frame reschedule would stop composites being minted
+and take the entire moving-frame regime with it.
+
+**Why the test could not have been written the usual way, which is the lesson
+this entry is really for.** *Every* settle measurement in this repository pumps
+its own frames — `runTileZoomPhase` pumps thirty regardless of whether the app
+asked, and a widget test calling `t.pump()` a fixed number of times does the
+same — so none of them can see a frame the canvas never *requested*. This is
+exactly how the defect shipped with `settleFrames=2` measured and published.
+The new test pumps only while `t.binding.hasScheduledFrame`, through
+`tile_harness.dart`'s `settle`, and compares the resulting frame against the
+live frame at the same camera. It reproduced at **29,815 differing device
+pixels** before the fix.
+
+**Mutation**, applied to `packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart`
+— the pre-fix line restored verbatim:
+
+```diff
+--- a/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
+@@ -448 +448 @@ class _DraftCustomPainter extends CustomPainter { void paint(...) {
+-      if (cache.settlePending) onUnsettled?.call();
++      if (!cache.viewportCovered) onUnsettled?.call();
+```
+
+**Procedure:** copied `draft_canvas.dart` aside to the scratchpad
+(`draft_canvas_m31.bak`), edited the working file with `sed`, confirmed the
+mutation with `diff`, ran `CI=true flutter test test/tile_settle_test.dart
+test/tile_regime_test.dart`, confirmed red, then restored the working file with
+`cp` from the scratchpad copy and confirmed `diff` produced no output. **Never
+`git checkout`.**
+
+**Result:** red, two tests, on the two faces of the same defect — the *pixels*
+the frame leaves on screen, and the *frame request* that was never made. The
+fourteen other tests in `tile_regime_test.dart` stay green under the mutation,
+including the D8 pan arm this fix also touched: its added `settle` pumps zero
+frames when nothing is scheduled, so that arm neither detects M31 nor is
+coupled to it.
+
+**Verbatim output** (the `flutter pub get` preamble, identical to every other
+entry in this file, is trimmed):
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_settle_test.dart
+00:00 +0: /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_settle_test.dart: a frame that left tiles unbaked asks for another
+00:00 +1: /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_settle_test.dart: the settle finishes, and then stops asking
+00:00 +2: /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_settle_test.dart: the settle completes in one frame
+  The following TestFailure was thrown running a test:
+  Expected: <1>
+    Actual: <0>
+  the canvas has to ask for the frame that replaces the composite it drew, and then stop
+  test/tile_settle_test.dart 134:5
+00:00 +2 -1: /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_settle_test.dart: a zoom settles to a clean generation on its own
+  The following TestFailure was thrown running a test:
+  Expected: <0>
+    Actual: <29815>
+  the frame a zoom leaves on screen must be the incoming generation alone -- a composite blitted
+  underneath it shows the outgoing generation, magnified and filtered, through every transparent pixel
+  of the new tiles
+  test/tile_settle_test.dart 185:5
+00:00 +2 -2: /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_settle_test.dart: a zoom settles to a clean generation on its own [E]
+00:00 +16 -2: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_settle_test.dart: a zoom settles to a clean generation on its own
+  /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_settle_test.dart: the settle completes in one frame
+```
+
+**What M31 does NOT gate, stated because the scripted device run reads clean
+either way.** `RUN_R2` drives its phases with `_pumpFrame`, which produces a
+frame per iteration whether or not the app asked for one, so the whole R2
+transcript is blind to this defect by construction — before the fix as much as
+after it. No number in this repository moved when the bug was introduced and
+none moves now. The gate this fix actually has to pass is the human's own eye
+at the window.
+
+**Restore, verified.** `cp` from the scratchpad copy, `diff` against it empty,
+and the same file re-run green:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/packages/jet_cad_2d_flutter/test/tile_settle_test.dart
+00:00 +0: a frame that left tiles unbaked asks for another
+00:00 +1: the settle finishes, and then stops asking
+00:00 +2: the settle completes in one frame
+00:00 +3: a zoom settles to a clean generation on its own
+00:00 +4: All tests passed!
+```
