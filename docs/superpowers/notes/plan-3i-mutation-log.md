@@ -3182,3 +3182,140 @@ no number at all. Hoisting the call changes *when* it fires, not what it does.
 00:00 +6: every RUN_R2 run reports its window, and warns when it is wrong a wrong window warns even where no zoom arm will ever run
 00:00 +7: All tests passed!
 ```
+
+## M29 — a malformed window request falls back to the default instead of throwing
+
+**Fix wave G**, the mutation for the mechanism that makes the measurement
+window size selectable at launch.
+
+Criteria 2 and 4 were measured at **1400x900** — Ruling 20's choice, because
+the design spec's 1600x1200 is unreachable on this display. **Criterion 9
+cannot be scored there.** It re-measures Plan 3h's `tile pan` and `tile hold`
+phases against 3h's own recorded figures, and 3h ran at the nib default of
+800x600 because nothing in this harness set a window size until 2026-08-28. A
+larger viewport means more tiles, more bakes and more work per pan frame, so
+the first 500,000-entity run reading `tile pan` p95 = 23.16 ms against 3h's
+19.86 / 15.99 / 13.43 ms is the viewport change and not a regression. The
+confound is removable by one run at 3h's own viewport, which is what
+`JC_WINDOW` exists for.
+
+**The request crosses a language boundary, and that is what makes the fallback
+dangerous here.** `--dart-define` reaches Dart only;
+`macos/Runner/MainFlutterWindow.swift` is what actually sizes the window, and
+reads the same name out of `ProcessInfo.processInfo.environment`. Two parsers,
+one string. A parser that falls back on a value it cannot read does not fall
+back on *both* sides at once in general — and even when it does, the run
+proceeds at a size nobody asked for, which is the failure this whole area
+exists to prevent. `parseZoomMode` and `_intDefine` already state the rule;
+this is the same rule at a place where a silent default resizes the window the
+numbers are priced against.
+
+**Mutation:** the house rule, undone — the throw becomes the default.
+
+```diff
+-  throw StateError('$kWindowRequestName must be WIDTHxHEIGHT in whole logical '
+-      'pixels, each side between $kMinWindowSide and $kMaxWindowSide; '
+-      'got "$raw"');
++  return const Size(1400, 900);
+```
+
+**Procedure:** `cp lib/main.dart <scratch>/main.orig.m29.dart`, mutate, run,
+restore by `cp`, `diff` to prove the restore, run again. Never `git checkout`.
+
+**The gate this fires** is `a malformed request throws rather than falling
+back` and `an absurd request throws too`, in
+`apps/dev_harness_2d/test/measurement_viewport_test.dart`.
+
+Note what the mutant does **not** redden, because it is the point of the other
+two tests in the group. `a request is honoured, at sizes a constant could not
+be` stays green — the mutant still parses `800x600` correctly, so a test that
+only checked the happy path would have missed it entirely. And `asking for
+nothing is 1400x900, exactly as before` stays green too, which is the
+direction that keeps the refusal honest: "throw on everything" is not a way to
+pass, because the default path must still yield the size criteria 2 and 4 were
+measured at. The happy path is tested at **three** sizes and not one for the
+standing reason — at 1400x900 alone, a parser that read its argument and a
+parser that returned the default are indistinguishable.
+
+**Result:** red, two tests.
+
+**Verbatim output**, `CI=true flutter test --concurrency=1 test/measurement_viewport_test.dart`:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart
+00:00 +0: the R2 zoom anchor is the centre of the viewport it is given Size(1400.0, 900.0)
+00:00 +1: the R2 zoom anchor is the centre of the viewport it is given Size(800.0, 600.0)
+00:00 +2: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(1400.0, 900.0)
+00:00 +3: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(800.0, 600.0)
+00:00 +4: every RUN_R2 run reports its window, and warns when it is wrong a window that is not the pinned size warns
+00:00 +5: every RUN_R2 run reports its window, and warns when it is wrong the pinned size warns about nothing
+00:00 +6: every RUN_R2 run reports its window, and warns when it is wrong a wrong window warns even where no zoom arm will ever run
+00:00 +7: the measurement window size is selectable, and refuses nonsense a request is honoured, at sizes a constant could not be
+00:00 +8: the measurement window size is selectable, and refuses nonsense asking for nothing is 1400x900, exactly as before
+00:00 +9: the measurement window size is selectable, and refuses nonsense a malformed request throws rather than falling back
+00:00 +9 -1: the measurement window size is selectable, and refuses nonsense a malformed request throws rather than falling back [E]
+  Expected: throws <Instance of 'StateError'>
+    Actual: <Closure: () => Size>
+     Which: returned Size:<Size(1400.0, 900.0)>
+  JC_WINDOW="" must stop the session
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/measurement_viewport_test.dart 196:9           main.<fn>.<fn>
+  
+00:00 +9 -1: the measurement window size is selectable, and refuses nonsense an absurd request throws too
+00:00 +9 -2: the measurement window size is selectable, and refuses nonsense an absurd request throws too [E]
+  Expected: throws <Instance of 'StateError'>
+    Actual: <Closure: () => Size>
+     Which: returned Size:<Size(1400.0, 900.0)>
+  JC_WINDOW="4x4" must stop the session
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/measurement_viewport_test.dart 212:9           main.<fn>.<fn>
+  
+00:00 +9 -2: the measurement window size is selectable, and refuses nonsense a window that does not match the request still warns
+00:00 +10 -2: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart: the measurement window size is selectable, and refuses nonsense a malformed request throws rather than falling back
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart: the measurement window size is selectable, and refuses nonsense an absurd request throws too
+```
+
+The mutant's `Actual` line is the defect in one phrase: `returned
+Size:<Size(1400.0, 900.0)>` for `JC_WINDOW=""` and for `JC_WINDOW="4x4"` — a
+run that asked for something and measured 1400x900, with nothing in the
+transcript to say so.
+
+**The Swift half is not reachable from a Dart test, and was verified on the
+real binary instead.** `MainFlutterWindow.swift` parses the same string by the
+same rules and refuses with `fatalError` rather than defaulting. Running the
+already-built profile app with a deliberately malformed request:
+
+```
+$ JC_WINDOW=800X600 build/macos/Build/Products/Profile/dev_harness_2d.app/Contents/MacOS/dev_harness_2d
+dev_harness_2d/MainFlutterWindow.swift:82: Fatal error: JC_WINDOW must be WIDTHxHEIGHT in whole logical pixels, each side between 100 and 10000; got "800X600"
+```
+
+A capital `X` is a refusal on both sides and not a near-miss, which is the
+point: the two parsers must reject the same strings, or the window and the
+camera fit disagree.
+
+**Restore, verified.** Empty `diff` against the pre-mutation copy, and:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart
+00:00 +0: the R2 zoom anchor is the centre of the viewport it is given Size(1400.0, 900.0)
+00:00 +1: the R2 zoom anchor is the centre of the viewport it is given Size(800.0, 600.0)
+00:00 +2: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(1400.0, 900.0)
+00:00 +3: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(800.0, 600.0)
+00:00 +4: every RUN_R2 run reports its window, and warns when it is wrong a window that is not the pinned size warns
+00:00 +5: every RUN_R2 run reports its window, and warns when it is wrong the pinned size warns about nothing
+00:00 +6: every RUN_R2 run reports its window, and warns when it is wrong a wrong window warns even where no zoom arm will ever run
+00:00 +7: the measurement window size is selectable, and refuses nonsense a request is honoured, at sizes a constant could not be
+00:00 +8: the measurement window size is selectable, and refuses nonsense asking for nothing is 1400x900, exactly as before
+00:00 +9: the measurement window size is selectable, and refuses nonsense a malformed request throws rather than falling back
+00:00 +10: the measurement window size is selectable, and refuses nonsense an absurd request throws too
+00:00 +11: the measurement window size is selectable, and refuses nonsense a window that does not match the request still warns
+00:00 +12: All tests passed!
+```
