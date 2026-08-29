@@ -5,13 +5,18 @@
 // `DraftCanvas` performs today?
 //
 // Nothing here is a proposal. It exists to produce a number.
+//
+// ignore_for_file: avoid_print -- the diagnostic in `_paintChildren` is what
+// proves the fixture is not degenerate, and printing it is the point.
 
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 /// Which arm of the spike a widget layer is running.
@@ -52,13 +57,34 @@ class ArmPrimitive {
 }
 
 /// Runs the painter once into a [RecordingDrawSink] and turns each stroke or
-/// fill op into an [ArmPrimitive].
+/// fill op into an [ArmPrimitive], **with the residual transform baked into
+/// the coordinates**.
 ///
-/// Residual and text ops are dropped: a residual is a transform marker with no
-/// geometry of its own, and text would need a paragraph per child, which is a
-/// different measurement. The dropped count is returned so the caller can
-/// report what the arms do **not** draw rather than let it go unmentioned.
-({List<ArmPrimitive> primitives, int droppedText, int droppedResidual})
+/// **Baking the residual is not optional and the first version of this
+/// function got it wrong.** `DraftPainter` rebases the origin so that a
+/// drawing far from `(0,0)` does not lose precision in float32, and it emits
+/// the remainder as a [BeginResidualOp] that `CanvasDrawSink` pushes onto the
+/// canvas. Every geometry op between a begin and an end is therefore in
+/// **residual-local** coordinates, not screen coordinates. Dropping the
+/// residual and keeping the geometry produced 399,000 primitives whose bounds
+/// all fell outside the viewport, so the layer's cull rejected every one of
+/// them and all six widget phases measured an empty screen. The `painted=0`
+/// warning is what caught it.
+///
+/// A residual does **not** nest: `CanvasDrawSink.beginResidual` assigns rather
+/// than pushes, so the current transform is the last begin until its end.
+///
+/// **A circle or arc under an anisotropic residual is approximated**, its
+/// radius scaled by `scaleMagnitude`, where the painter would draw an ellipse.
+/// The corpus's `nonUniformFraction` is 0.2, so this affects a fifth of the
+/// instances. It is left approximate on purpose: this measures *cost*, and an
+/// approximated circle is the same primitive doing the same class of GPU work.
+/// It would not be acceptable in anything that had to match pixels.
+///
+/// Text ops are dropped -- a paragraph per child is a different measurement --
+/// and the counts are returned so the caller can report what the arms do
+/// **not** draw rather than let it go unmentioned.
+({List<ArmPrimitive> primitives, int droppedText, int residuals})
     extractPrimitives(
   DraftPainter painter,
   ViewportTransform camera,
@@ -68,24 +94,74 @@ class ArmPrimitive {
   painter.paint(sink, camera, viewport);
   final out = <ArmPrimitive>[];
   var droppedText = 0;
-  var droppedResidual = 0;
+  var residuals = 0;
+  Transform2? current;
   for (final op in sink.ops) {
     switch (op) {
       case TextOp():
         droppedText++;
-      case BeginResidualOp():
+      case BeginResidualOp(:final residual):
+        current = residual;
+        residuals++;
       case EndResidualOp():
-        droppedResidual++;
+        current = null;
       default:
-        final b = _boundsOf(op);
-        if (b != null) out.add(ArmPrimitive(op, b));
+        final baked = _bake(op, current);
+        if (baked == null) continue;
+        final b = _boundsOf(baked);
+        if (b != null) out.add(ArmPrimitive(baked, b));
     }
   }
-  return (
-    primitives: out,
-    droppedText: droppedText,
-    droppedResidual: droppedResidual
-  );
+  return (primitives: out, droppedText: droppedText, residuals: residuals);
+}
+
+/// [op] with [t] applied to its coordinates, or [op] itself when [t] is null.
+DrawOp? _bake(DrawOp op, Transform2? t) {
+  if (t == null) return op;
+  final scale = t.scaleMagnitude;
+  Vector2 at(double x, double y) => t.transformPoint(Vector2(x, y));
+  switch (op) {
+    case PointOp(:final x, :final y, :final style):
+      final p = at(x, y);
+      return PointOp(p.x, p.y, style);
+    case PolylineOp(:final points, :final style, :final closed):
+      return PolylineOp(_bakePoints(points, t), style, closed: closed);
+    case CircleOp(:final cx, :final cy, :final r, :final style):
+      final c = at(cx, cy);
+      return CircleOp(c.x, c.y, r * scale, style);
+    case FillCircleOp(:final cx, :final cy, :final r, :final style):
+      final c = at(cx, cy);
+      return FillCircleOp(c.x, c.y, r * scale, style);
+    case ArcOp(
+        :final cx,
+        :final cy,
+        :final r,
+        :final start,
+        :final sweep,
+        :final style
+      ):
+      final c = at(cx, cy);
+      // The start angle is rotated by the residual's own rotation. A mirrored
+      // residual would also reverse the sweep; the corpus has a mirrored
+      // fraction, and this does not correct for it, which is one more way an
+      // arc is approximate here. See the doc comment above.
+      final rotation = math.atan2(t.b, t.a);
+      return ArcOp(c.x, c.y, r * scale, start + rotation, sweep, style);
+    case FillPolygonOp(:final points, :final triangles, :final style):
+      return FillPolygonOp(_bakePoints(points, t), triangles, style);
+    default:
+      return null;
+  }
+}
+
+List<double> _bakePoints(List<double> points, Transform2 t) {
+  final out = List<double>.filled(points.length, 0);
+  for (var i = 0; i + 1 < points.length; i += 2) {
+    final p = t.transformPoint(Vector2(points[i], points[i + 1]));
+    out[i] = p.x;
+    out[i + 1] = p.y;
+  }
+  return out;
 }
 
 Rect? _boundsOf(DrawOp op) => switch (op) {
@@ -389,8 +465,27 @@ class RenderEntityLayer extends RenderBox
     }
   }
 
+  /// Set once per layer so the diagnostic below prints on the first paint and
+  /// never again. Throwaway: it exists to find why the cull rejected every
+  /// child, and goes when that is understood.
+  bool _reported = false;
+
   void _paintChildren(PaintingContext context, Offset offset) {
     final visible = offset & size;
+    if (!_reported) {
+      _reported = true;
+      final first = firstChild;
+      final b = first is RenderEntity ? first.primitive.bounds : null;
+      String r(Rect? x) => x == null
+          ? 'null'
+          : '[${x.left.toStringAsFixed(1)},${x.top.toStringAsFixed(1)} '
+              '${x.right.toStringAsFixed(1)},${x.bottom.toStringAsFixed(1)}]';
+      print('WSPIKE DIAG ${mode.name}: visible=${r(visible)} '
+          'scale=${camera.scale.toStringAsFixed(3)} '
+          'offset=${camera.offset.dx.toStringAsFixed(1)},'
+          '${camera.offset.dy.toStringAsFixed(1)} '
+          'firstChildBounds=${r(b)} childCount=$childCount');
+    }
     var painted = 0;
     var child = firstChild;
     while (child != null) {

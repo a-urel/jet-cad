@@ -113,7 +113,7 @@ class WidgetSpikeState extends State<WidgetSpikeApp> {
 
   List<ArmPrimitive> primitives = const [];
   int droppedText = 0;
-  int droppedResidual = 0;
+  int residuals = 0;
 
   RenderEntityLayer? _layerFor(SpikeArm a) {
     final key = a == SpikeArm.transformed ? _bKey : _cKey;
@@ -136,7 +136,7 @@ class WidgetSpikeState extends State<WidgetSpikeApp> {
       setState(() {
         primitives = extracted.primitives;
         droppedText = extracted.droppedText;
-        droppedResidual = extracted.droppedResidual;
+        residuals = extracted.residuals;
       });
       widget.onReady(this);
     });
@@ -178,28 +178,42 @@ class WidgetSpikeState extends State<WidgetSpikeApp> {
         debugShowCheckedModeBanner: false,
         home: Scaffold(
           backgroundColor: const Color(0xFFFFFFFF),
-          body: ValueListenableBuilder<SpikeArm>(
-            valueListenable: arm,
-            builder: (context, a, _) => Stack(
-              children: [
-                // Arm A is always in the tree so that swapping arms does not
-                // also measure building and disposing a `DraftCanvas`. It is
-                // taken out of the paint path with `Offstage` when another arm
-                // is live, which stops it painting without rebuilding it.
-                Offstage(
-                  offstage: a != SpikeArm.painter,
-                  child: DraftCanvas(
-                    key: _canvasKey,
-                    document: widget.document,
-                    index: index,
-                    camera: camera,
-                    lineweightScale: widget.lineweightScale,
-                    tiles: false,
+          // **`SizedBox.expand` is load-bearing and its absence was a defect.**
+          // A `Stack` sizes itself to its *non-positioned* children, and the
+          // only non-positioned child here is the `Offstage` wrapping arm A --
+          // which is zero-sized exactly when a widget arm is live. The stack
+          // then collapsed, `Positioned.fill` handed the layer tight zero
+          // constraints, and the layer's cull rejected all 4,769 children
+          // against a zero-sized viewport: `painted=0` on every widget phase,
+          // with the build time of a full cull walk and the raster time of an
+          // empty screen. Arm A was unaffected because `DraftCanvas` paints at
+          // `size: Size.infinite`, so it gave the stack a size whenever it was
+          // the live arm -- which is why only the widget arms were blind.
+          body: SizedBox.expand(
+            child: ValueListenableBuilder<SpikeArm>(
+              valueListenable: arm,
+              builder: (context, a, _) => Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Arm A is always in the tree so that swapping arms does not
+                  // also measure building and disposing a `DraftCanvas`. It is
+                  // taken out of the paint path with `Offstage` when another
+                  // arm is live, which stops it painting without rebuilding it.
+                  Offstage(
+                    offstage: a != SpikeArm.painter,
+                    child: DraftCanvas(
+                      key: _canvasKey,
+                      document: widget.document,
+                      index: index,
+                      camera: camera,
+                      lineweightScale: widget.lineweightScale,
+                      tiles: false,
+                    ),
                   ),
-                ),
-                if (a != SpikeArm.painter && primitives.isNotEmpty)
-                  Positioned.fill(child: _widgetLayer(a)),
-              ],
+                  if (a != SpikeArm.painter && primitives.isNotEmpty)
+                    Positioned.fill(child: _widgetLayer(a)),
+                ],
+              ),
             ),
           ),
         ),
@@ -233,10 +247,20 @@ Future<void> runWidgetSpike(
 
   print('WSPIKE run: entities=$entities primitives=${state.primitives.length} '
       'droppedText=${state.droppedText} '
-      'droppedResidual=${state.droppedResidual} '
+      'residuals=${state.residuals} '
       'viewport=${viewport.width.toStringAsFixed(0)}x'
       '${viewport.height.toStringAsFixed(0)} '
       'frames=$frames repeats=$repeats');
+  if (state.primitives.isNotEmpty) {
+    var u = state.primitives.first.bounds;
+    for (final p in state.primitives) {
+      u = u.expandToInclude(p.bounds);
+    }
+    print('WSPIKE DIAG primitive union bounds = '
+        '[${u.left.toStringAsFixed(1)},${u.top.toStringAsFixed(1)} '
+        '${u.right.toStringAsFixed(1)},${u.bottom.toStringAsFixed(1)}] '
+        '(should sit inside the viewport if residuals were baked correctly)');
+  }
   print('WSPIKE note: text ops are not drawn by arms B or C, and dash spans '
       'recorded at the fit camera are never re-split by either -- both cheats '
       'favour the widget arms.');

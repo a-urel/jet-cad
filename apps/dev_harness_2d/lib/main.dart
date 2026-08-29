@@ -598,6 +598,38 @@ const bool kRunR2 = bool.fromEnvironment('RUN_R2');
 /// [HarnessApp].
 const bool kRunWidgetSpike = bool.fromEnvironment('RUN_WIDGET_SPIKE');
 
+/// **Spike corpus knobs.** [harnessDocument] places 20,000 instances, and at
+/// `ENTITIES=2000` that made the painter emit **399,000** primitives -- two
+/// orders of magnitude past the floor-plan scale this spike exists to measure.
+/// The scale that matters here is the number of *drawn primitives*, since that
+/// is what both a painter walk and a render-object-per-entity tree pay for, so
+/// the instance and definition counts are knobs rather than constants and the
+/// run prints the primitive count it actually got.
+final int kSpikeDefs = _intDefine(
+    'SPIKE_DEFS', const String.fromEnvironment('SPIKE_DEFS'), 20,
+    minimum: 1);
+final int kSpikeInstances = _intDefine(
+    'SPIKE_INSTANCES', const String.fromEnvironment('SPIKE_INSTANCES'), 200,
+    minimum: 0);
+
+/// The document the widget spike measures. Deliberately not [harnessDocument]:
+/// see [kSpikeDefs].
+DraftDocument spikeDocument() => generateDocument(
+      kEntities,
+      definitionCount: kSpikeDefs,
+      instanceCount: kSpikeInstances,
+      nestingDepth: 1,
+      mirroredFraction: 0.1,
+      nonUniformFraction: 0.2,
+      groupCount: 10,
+      layerCount: 8,
+      byBlockFraction: 0.3,
+      dashedFraction: kDashedFraction,
+      labelFraction: 0,
+      attributedInstanceFraction: 0,
+      measurer: harnessMeasurer,
+    );
+
 /// Frames measured per phase, per arm, per repeat.
 final int kSpikeFrames = _intDefine(
     'SPIKE_FRAMES', const String.fromEnvironment('SPIKE_FRAMES'), 60,
@@ -616,7 +648,7 @@ void main() {
   };
   if (kRunWidgetSpike) {
     runApp(WidgetSpikeApp(
-      document: doc,
+      document: spikeDocument(),
       viewport: kMeasurementViewport,
       lineweightScale: kLineweightScale,
       onReady: (state) => unawaited(runWidgetSpike(
