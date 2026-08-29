@@ -33,29 +33,45 @@ import 'resident_geometry.dart';
 /// device available to confirm the native path the same way; Task 7's
 /// harness run is where that confirmation actually happens.
 ///
-/// [collectionToScreen] takes a point in the buffer's space — the collection
-/// camera's screen space — to the live camera's screen space. This function
-/// finishes the job: screen to normalized device coordinates, y flipped.
+/// [collectionToDevice] takes a point in the buffer's space — the collection
+/// camera's screen space — all the way to the live camera's **device-pixel**
+/// screen space. This function finishes the job from there: device pixels to
+/// normalized device coordinates, y flipped.
+///
+/// **The parameter is device space, not logical space, and the name says
+/// so.** `widthPx`/`heightPx` are device pixels (the caller derives them as
+/// `(viewport.width * dpr).round()`), so `sx`/`sy` below divide by a
+/// device-pixel denominator. A transform still in logical pixels — which is
+/// what `ViewportTransform.worldToScreenMatrix` and `GeometryCollector`'s
+/// buffer both are, per `viewport_transform.dart`'s "screen coordinates are
+/// logical pixels" — divided by a device-pixel denominator silently drops
+/// exactly the `devicePixelRatio` factor: correct at `dpr == 1` and wrong by
+/// that factor everywhere else, which is why a `dpr == 1` fixture cannot
+/// tell the two apart. This function does not take `dpr` as a parameter and
+/// does not convert units itself — the caller (`GpuDrawBackend.render`)
+/// folds `dpr` into the transform *before* calling this function, by
+/// composing it with `Transform2.scale(dpr, dpr)`, so that what arrives here
+/// is already commensurate with `widthPx`/`heightPx`.
 ByteData buildFrameInfo(
-    Transform2 collectionToScreen, int widthPx, int heightPx) {
+    Transform2 collectionToDevice, int widthPx, int heightPx) {
   final sx = 2.0 / widthPx;
   final sy = -2.0 / heightPx;
   final data = ByteData(80);
   void f(int i, double v) => data.setFloat32(i * 4, v, Endian.host);
-  f(0, collectionToScreen.a * sx);
-  f(1, collectionToScreen.b * sy);
+  f(0, collectionToDevice.a * sx);
+  f(1, collectionToDevice.b * sy);
   f(2, 0);
   f(3, 0);
-  f(4, collectionToScreen.c * sx);
-  f(5, collectionToScreen.d * sy);
+  f(4, collectionToDevice.c * sx);
+  f(5, collectionToDevice.d * sy);
   f(6, 0);
   f(7, 0);
   f(8, 0);
   f(9, 0);
   f(10, 1);
   f(11, 0);
-  f(12, collectionToScreen.e * sx - 1);
-  f(13, collectionToScreen.f * sy + 1);
+  f(12, collectionToDevice.e * sx - 1);
+  f(13, collectionToDevice.f * sy + 1);
   f(14, 0);
   f(15, 1);
   f(16, widthPx / 2);
@@ -66,14 +82,19 @@ ByteData buildFrameInfo(
 }
 
 /// `outer ∘ inner`.
-Transform2 composeTransforms(Transform2 outer, Transform2 inner) => Transform2(
-      outer.a * inner.a + outer.c * inner.b,
-      outer.b * inner.a + outer.d * inner.b,
-      outer.a * inner.c + outer.c * inner.d,
-      outer.b * inner.c + outer.d * inner.d,
-      outer.a * inner.e + outer.c * inner.f + outer.e,
-      outer.b * inner.e + outer.d * inner.f + outer.f,
-    );
+///
+/// Delegates to [Transform2.multiply] rather than repeating its six-term
+/// formula: `multiply`'s own doc comment states "the argument is applied
+/// first, then the receiver, so `parent.multiply(child)` yields the child's
+/// transform expressed in the parent's space" — i.e. `parent.multiply(child)
+/// == parent ∘ child`, which is exactly `composeTransforms(outer,
+/// inner)`'s contract with `outer` as the receiver and `inner` as the
+/// argument. Verified by expansion, not assumed: both formulas multiply the
+/// receiver's `a, c` row against the argument's `a, b` column the same way,
+/// term for term. A second hand-written copy of the same formula in this
+/// file would be one more place for the two to silently diverge.
+Transform2 composeTransforms(Transform2 outer, Transform2 inner) =>
+    outer.multiply(inner);
 
 /// Draws [geometry] once per frame with the camera as a uniform.
 ///
@@ -100,6 +121,41 @@ class GpuDrawBackend {
   int frames = 0;
 
   ui.Image? render(ViewportTransform camera, Size viewport, double dpr) {
+    // **Reset first, unconditionally -- before the early returns below, and
+    // before anything that can throw.** `geometry.uniforms` is a
+    // `HostBuffer` -- a bump allocator over a small ring of device blocks
+    // (`flutter_gpu/lib/src/buffer.dart:208-223`; `_kFrameCount = 4`).
+    // `reset()` only mutates its own bookkeeping cursors (`_frameCursor`,
+    // `_bufferCursor`, `_offsetCursor`); it touches no `DeviceBuffer`
+    // contents and enqueues no GPU work, so calling it here rather than
+    // after `submit()` changes nothing about which physical slot a later
+    // `emplace` in *this* call lands in, or when the GPU is done reading a
+    // slot from `frameCount` (4) resets ago -- verified by reading `reset`'s
+    // body, which is exactly those three assignments and nothing else.
+    // Resetting after `submit()` instead left a real gap: `emplace` advances
+    // the bump cursor before `bindUniform` and `submit` run, and
+    // `bindUniform` throws on a failed bind
+    // (`flutter_gpu/lib/src/render_pass.dart`'s `bindUniform`), so a
+    // persistent bind failure would skip the post-submit `reset()` every
+    // frame -- Flutter catches a paint-time exception and repaints past it
+    // rather than stopping, so this is not a one-off crash but a leak of one
+    // emplacement per frame, forever, until the block fills and a fresh
+    // `DeviceBuffer` gets allocated every frame after that: exactly the
+    // per-frame allocation this project's frame-path non-negotiable forbids
+    // -- "the frame path allocates nothing per entity in steady state, and
+    // O(1) per flush" (CLAUDE.md). Resetting first is exception-safe against
+    // that failure mode, and it also covers the two early returns below for
+    // free: a call to `render` that draws nothing is still "this frame" and
+    // still needs the ring to advance once.
+    //
+    // `test/invariants/paint_allocation_test.dart` measures the O(1)-per-
+    // flush claim for the existing `Canvas` paint path; this class is not
+    // wired into a widget's `paint()` yet (a later task's job), so nothing
+    // in this package's suite exercises this method against that invariant
+    // today -- getting the reset right here is what keeps that true once it
+    // is wired in.
+    geometry.uniforms.reset();
+
     final widthPx = (viewport.width * dpr).round();
     final heightPx = (viewport.height * dpr).round();
     if (widthPx <= 0 || heightPx <= 0 || geometry.instanceCount == 0) {
@@ -132,12 +188,28 @@ class GpuDrawBackend {
         gpu.BufferView(geometry.instances,
             offsetInBytes: 0, lengthInBytes: geometry.instances.sizeInBytes),
         slot: 1);
+    // **`dpr` is folded in here, not inside `buildFrameInfo`.** The
+    // collector's buffer holds logical-pixel coordinates
+    // (`viewport_transform.dart`: "screen coordinates are logical pixels"),
+    // and so do `camera.worldToScreenMatrix` and `_collectionInverse` --
+    // `composeTransforms` of the two is still a logical-to-logical mapping.
+    // `buildFrameInfo` divides by `widthPx`/`heightPx`, which are *device*
+    // pixels; handing it a logical-space transform against a device-pixel
+    // denominator silently drops the `dpr` factor (correct only at `dpr ==
+    // 1`, which is why that case alone cannot catch the mistake). Composing
+    // with `Transform2.scale(dpr, dpr)` as the outermost transform converts
+    // the logical mapping into a device-pixel one before `buildFrameInfo`
+    // ever sees it -- matching the spike's own comment on the equivalent
+    // step, "Logical screen -> device pixels -> NDC"
+    // (`apps/dev_harness_2d/lib/gpu_arm.dart:423-426`).
+    final collectionToDevice = composeTransforms(
+      Transform2.scale(dpr, dpr),
+      composeTransforms(camera.worldToScreenMatrix, _collectionInverse),
+    );
     pass.bindUniform(
       geometry.vertexShader.getUniformSlot('FrameInfo'),
-      geometry.uniforms.emplace(buildFrameInfo(
-          composeTransforms(camera.worldToScreenMatrix, _collectionInverse),
-          widthPx,
-          heightPx)),
+      geometry.uniforms
+          .emplace(buildFrameInfo(collectionToDevice, widthPx, heightPx)),
     );
     // **One call. Six vertices, one instance per record, in buffer order.**
     // The buffer was written once, in walk order, by `GeometryCollector`
@@ -148,29 +220,6 @@ class GpuDrawBackend {
     pass.draw(6, instanceCount: geometry.instanceCount);
 
     commandBuffer.submit();
-    // **Reset once per frame, after submit.** `geometry.uniforms` is a
-    // `HostBuffer` -- a bump allocator over a small ring of device blocks
-    // (`flutter_gpu/lib/src/buffer.dart:208-223`; `_kFrameCount = 4`).
-    // `emplace` never rewinds it; only `reset` does, by advancing to the next
-    // frame's block and zeroing the bump cursor. Skipping this call would
-    // still *work* -- each `emplace` bump-allocates forward inside the
-    // current 1 MB block, and one `FrameInfo` per frame is small -- but the
-    // block would fill after roughly 12,800 frames (1,024,000 bytes /
-    // 80-byte-aligned emplacements) and then silently grow a fresh block per
-    // frame forever after, which is exactly the per-frame allocation this
-    // project's frame-path non-negotiable forbids -- "the frame path
-    // allocates nothing per entity in steady state, and O(1) per flush"
-    // (CLAUDE.md). `test/invariants/paint_allocation_test.dart` measures that
-    // claim for the existing `Canvas` paint path; this class is not wired
-    // into a widget's `paint()` yet (a later task's job), so nothing in this
-    // package's suite exercises `render` against that invariant today --
-    // getting the reset right here is what keeps that true once it is wired
-    // in. Resetting after
-    // `submit()` -- not before -- matters too: `reset()` advances the frame
-    // cursor that selects *this frame's* ring slot, and the emplace this
-    // frame just made must be read by the GPU under the slot it was written
-    // to, not the next one.
-    geometry.uniforms.reset();
     frames++;
     // Synchronous on both backends: the web shim's `Texture.asImage` states it
     // "matches flutter_gpu's synchronous `asImage`".

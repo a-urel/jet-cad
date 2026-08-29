@@ -48,11 +48,31 @@ class GeometryCollector implements DrawSink {
   /// visible as a number instead of as a missing picture.
   int get skippedOps => _skipped;
 
+  /// Half the stroke's width, **in device pixels** — the space the vertex
+  /// shader consumes `half_width` in (`shaders/cad_stroke.vert` documents
+  /// the attribute `// device pixels` and applies it directly against
+  /// `frame_info.half_viewport`, which `buildFrameInfo` also builds in
+  /// device pixels; `gpu_draw_backend.dart`).
+  ///
+  /// **This method's first version computed the *logical* half-width
+  /// instead, and every stroke drew at half weight under any
+  /// `devicePixelRatio` other than 1.** `VerticesDrawSink._halfWidthFor`
+  /// (`vertices_draw_sink.dart:544-552`) is correct for itself — Skia
+  /// strokes in logical space, and its own local variable is even named
+  /// `floorLogical` — and this method's original body copied that formula
+  /// verbatim into a shader that does not share Skia's space. The fix is not
+  /// a division relocated: the *logical* width is converted into device
+  /// pixels (`* devicePixelRatio`) before it is compared against the floor
+  /// or halved, and the floor is the device minimum
+  /// (`kMinStrokeDevicePixels`) applied directly, not that minimum divided
+  /// back down into logical space.
   double _halfWidthFor(int lineweightHundredths) {
     final logical =
         lineweightHundredths / 100.0 * pixelsPerPaperMm * lineweightScale;
-    final floor = kMinStrokeDevicePixels / devicePixelRatio;
-    final w = logical.isFinite && logical > floor ? logical : floor;
+    final device = logical * devicePixelRatio;
+    final w = device.isFinite && device > kMinStrokeDevicePixels
+        ? device
+        : kMinStrokeDevicePixels;
     return w / 2;
   }
 

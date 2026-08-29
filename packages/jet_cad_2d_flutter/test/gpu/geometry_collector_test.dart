@@ -44,12 +44,12 @@ void main() {
     final r = c.data.sublist(0, kFloatsPerInstance);
     expect(r[0], kKindStroke);
     expect(r.sublist(1, 5), [10.0, 16.5, 15.0, 21.0]);
-    // Pins `w / 2`, not the raw logical width: lineweightHundredths=50,
-    // pixelsPerPaperMm=4, lineweightScale=1 gives a logical width of
-    // 50/100 * 4 * 1 = 2.0, above the floor of
-    // kMinStrokeDevicePixels(1.0) / devicePixelRatio(2) = 0.5, so
-    // halfWidth = 2.0 / 2 = 1.0.
-    expect(r[5], 1.0);
+    // Pins `w / 2` **in device pixels**, not the raw logical width:
+    // lineweightHundredths=50, pixelsPerPaperMm=4, lineweightScale=1 gives a
+    // logical width of 50/100 * 4 * 1 = 2.0, which at devicePixelRatio=2 is
+    // 2.0 * 2 = 4.0 device pixels -- above the floor of
+    // kMinStrokeDevicePixels(1.0), so halfWidth = 4.0 / 2 = 2.0.
+    expect(r[5], 2.0);
   });
 
   test('emits one instance per segment, in walk order', () {
@@ -92,12 +92,12 @@ void main() {
     c.endResidual();
 
     expect(c.instanceCount, 1);
-    // lineweightHundredths=0 gives a logical width of 0, which is not
-    // greater than the floor of kMinStrokeDevicePixels(1.0) /
-    // devicePixelRatio(2) = 0.5, so the clamp takes over:
-    // halfWidth = 0.5 / 2 = 0.25. A mutation that drops the clamp entirely
+    // lineweightHundredths=0 gives a logical width of 0, which converts to
+    // 0 device pixels either way -- not greater than the floor of
+    // kMinStrokeDevicePixels(1.0), so the clamp takes over:
+    // halfWidth = 1.0 / 2 = 0.5. A mutation that drops the clamp entirely
     // would emit halfWidth = 0.0 instead.
-    expect(c.data[5], 0.25);
+    expect(c.data[5], 0.5);
   });
 
   test('lineweightScale multiplies the logical width before the clamp', () {
@@ -109,9 +109,12 @@ void main() {
 
     expect(c.instanceCount, 1);
     // lineweightHundredths=50, pixelsPerPaperMm=4, lineweightScale=2 gives a
-    // logical width of 50/100 * 4 * 2 = 4.0, above the floor of 0.5, so
-    // halfWidth = 4.0 / 2 = 2.0. At the default scale of 1.0 this would be
-    // 1.0 either way, which is why the default cannot pin the multiply.
-    expect(c.data[5], 2.0);
+    // logical width of 50/100 * 4 * 2 = 4.0, which at devicePixelRatio=2 is
+    // 4.0 * 2 = 8.0 device pixels -- above the floor of
+    // kMinStrokeDevicePixels(1.0), so halfWidth = 8.0 / 2 = 4.0. At the
+    // default scale of 1.0 this is 2.0 (the test above), so the multiply is
+    // still pinned: a dropped `lineweightScale` factor would make this test
+    // read 2.0 instead of 4.0.
+    expect(c.data[5], 4.0);
   });
 }
