@@ -686,6 +686,36 @@ Future<void> _driveR2(
     // on every run, arm or no arm.
     final zoomViewport = kMeasurementViewport;
 
+    // One criterion-8 arm: back to the fitted camera, then warm, hold and pan
+    // — Ruling 21. Criterion 8 re-measures Plan **3h**'s criterion 3 at n=7–9
+    // interleaved, and 3h measured that criterion on the `tile pan` phase.
+    // `debugFullViewportQuery` modifies the live fallback's query extent and
+    // nothing else, and the zoom phase never runs the fallback: every one of
+    // its frames is a moving frame, which blits the carry-over composite and
+    // returns. Wiring these arms around `runTileZoomPhase` produced a clean
+    // n=9 run at 500,000 entities with `gestureLiveDraws=0` in all eighteen
+    // arms and two indistinguishable columns of p95.
+    //
+    // The camera reset is here rather than inside the phase for the same
+    // reason it is here for the zoom arm: the arms of a ratio must start from
+    // the same camera, and the phase does not own it. What follows it is the
+    // arm's own warm loop, which rebuilds the generation *at that camera*, so
+    // no arm begins its pan on a generation an earlier arm's pan left
+    // somewhere else.
+    Future<PanArmReport> runPanArm() async {
+      camera.value = fittedCamera;
+      await _pumpFrame();
+      return runTilePanArm(
+        camera: camera,
+        cache: tileCache,
+        pumpFrame: _pumpFrame,
+        // The same step `runTilePhases` pans R2's own block with, from the
+        // same function: an arm and the block criterion 9 reads must not be
+        // two different measurements printed under one name.
+        panStep: tilePanStep(kPanStep),
+      );
+    }
+
     // One arm: back to the fitted camera, then the whole pinned script. The
     // camera reset is here rather than inside the phase because the arms of a
     // ratio must start from the same camera, and the phase does not own it.
@@ -751,16 +781,27 @@ Future<void> _driveR2(
             cache: tileCache,
             runArm: runArm,
           );
+        // **The `tile pan` phase, not the `tile zoom` phase** -- Ruling 21,
+        // and the heading says so because the previous heading did not and
+        // eighteen arms of nothing were published under it. See `runPanArm`
+        // above for the whole of the reason.
         case ZoomMode.criterion8:
-          print('R2 tile zoom: ZOOM_MODE=criterion8 -- $kZoomArms repeats of '
-              "arm A then arm B, interleaved, in one session. Arm B is Plan "
-              "3h's M4 as a runtime flag, not this plan's M4.");
-          await runZoomCriterionArms(
+          print('R2 tile pan: ZOOM_MODE=criterion8 -- $kZoomArms repeats of '
+              'arm A then arm B, interleaved, in one session, around the '
+              '**tile pan** phase and NOT the zoom phase. Criterion 8 '
+              "re-measures Plan 3h's criterion 3, which 3h measured on "
+              '`tile pan`: that is where the live fallback runs and where '
+              "Plan 3h's M4 bites. The statistic is `tile pan` p95, per arm, "
+              'and `tile hold` beside it is the control M4 cannot touch. '
+              "Arm B is Plan 3h's M4 as a runtime flag, not this plan's M4.");
+          await runCriterionArms<PanArmReport>(
             criterion: ZoomCriterion.eight,
             repeats: kZoomArms,
             entities: kEntities,
             cache: tileCache,
-            runArm: runArm,
+            phase: 'tile pan',
+            runArm: runPanArm,
+            emit: printPanArmReport,
           );
       }
     } catch (e) {

@@ -3319,3 +3319,137 @@ camera fit disagree.
 00:00 +11: the measurement window size is selectable, and refuses nonsense a window that does not match the request still warns
 00:00 +12: All tests passed!
 ```
+
+---
+
+## M30 — criterion 8's two arms both run with the flag false
+
+**Task:** fix wave H, "re-point criterion 8 at the pan phase" (Ruling 21).
+Gates `apps/dev_harness_2d/test/criterion8_pan_arm_test.dart`'s
+`'criterion 8 alternates whole arms around the pan phase'`,
+`'half the arms actually run with the flag set'` and
+`'the flag an arm ran at is the flag its label claims'`.
+
+**Why this mutant and not another.** Criterion 8 is a ratio between two arms
+that differ in exactly one thing: whether `TileCache.debugFullViewportQuery`
+is set. Fix wave H moved those arms off `runTileZoomPhase` and onto the new
+`runTilePanArm`, because Plan **3h**'s criterion 3 — the thing criterion 8
+re-measures at n=7–9 interleaved — was read off the `tile pan` phase, and the
+flag modifies only the live fallback, which the zoom phase never runs (Ruling
+21). The move rewrote the driver (`runCriterionArms<R>`), the label
+(`zoomArmLabel`'s now-required `phase`) and the report (`PanArmReport`,
+`printPanArmReport`). Every one of those is machinery *around* the flag, and a
+rewrite of the machinery around a flag is exactly where the flip gets dropped:
+the arms would still alternate, still print two distinct labels per repeat,
+still produce a `tile pan` p95 apiece — and both sides of the ratio would be
+the same configuration measured twice. The transcript would be
+indistinguishable from a working one except in the numbers, which is the
+condition the whole of Ruling 21 is about. **Note the numbering collision, as
+M14's entry notes it:** this file's own M4 is a different mutation entirely;
+the flag reproduces *Plan 3h's* M4.
+
+**Mutation**, applied to `apps/dev_harness_2d/lib/measurement_rig.dart`:
+
+```diff
+--- a/apps/dev_harness_2d/lib/measurement_rig.dart
++++ b/apps/dev_harness_2d/lib/measurement_rig.dart
+@@ -1633 +1633 @@ enum ZoomArm { ... void applyTo(TileCache cache) {
+-    cache.debugFullViewportQuery = this == ZoomArm.fullViewportQuery;
++    cache.debugFullViewportQuery = false;
+```
+
+**Procedure:** copied `measurement_rig.dart` aside to the scratchpad
+(`fixh/rig_m30.bak`), edited the working file, confirmed the mutation with
+`diff`, ran `CI=true flutter test --concurrency=1
+test/criterion8_pan_arm_test.dart`, confirmed red, then restored the working
+file with `cp` from the scratchpad copy and confirmed `diff` produced no
+output. **Never `git checkout`.**
+
+**Result:** red, three tests, and each one fails on a different face of the
+same defect — the *sequence* of flag states, the *count* of arms that ran with
+the flag set, and the disagreement between an arm's *label* and the cache it
+actually ran on. The last of those is the one that would have caught this in a
+transcript: `the label claims true and the cache ran at false`. The other
+seven tests in the file stay green, which is the point — the arms still
+alternate, the labels are still distinct, the report still prints its p95 and
+still shouts about a `liveDraws=0` pan. Under M30 everything about the
+instrument keeps working except the difference between its two arms.
+
+**Verbatim output** (the `flutter pub get` preamble, identical to every other
+entry in this file, is trimmed):
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/criterion8_pan_arm_test.dart
+00:00 +0: criterion 8 alternates whole arms around the pan phase
+00:00 +0 -1: criterion 8 alternates whole arms around the pan phase [E]
+  Expected: [false, true, false, true, false, true]
+    Actual: [false, false, false, false, false, false]
+     Which: at location [1] is <false> instead of <true>
+  narrow query for the numerator, Plan 3h M4 for the denominator, alternating -- never all of one arm and then all of the other, because session drift then lands entirely on whichever arm ran last
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/criterion8_pan_arm_test.dart 110:5             main.<fn>
+  
+00:00 +0 -1: half the arms actually run with the flag set
+00:00 +0 -2: half the arms actually run with the flag set [E]
+  Expected: <4>
+    Actual: <0>
+  four of the eight arms are the denominator and must run with debugFullViewportQuery=true; 0 did. Every arm at the same flag state is a ratio of 1.00 by construction
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/criterion8_pan_arm_test.dart 132:5             main.<fn>
+  
+00:00 +0 -2: the flag an arm ran at is the flag its label claims
+00:00 +0 -3: the flag an arm ran at is the flag its label claims [E]
+  Expected: <false>
+    Actual: <true>
+  the label claims true and the cache ran at false: R2 tile pan c8 repeat 1/2 arm B [debugFullViewportQuery=true] full-viewport query (Plan 3h's M4) -- criterion 8's denominator (500000)
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/criterion8_pan_arm_test.dart 144:7             main.<fn>
+  
+00:00 +0 -3: every arm names the pan phase, its criterion and its repeat
+00:00 +1 -3: the zoom driver still says tile zoom
+00:00 +2 -3: every printed line of a pan arm report carries its arm label
+00:00 +3 -3: the pan p95 is the statistic, and it is the p95 of the pan
+00:00 +4 -3: a pan that never ran the live fallback shouts
+00:00 +5 -3: a short pan sample shouts rather than publishing its p95
+00:00 +6 -3: the pan step is the historical one unless PAN_STEP scales it
+00:00 +7 -3: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/criterion8_pan_arm_test.dart: criterion 8 alternates whole arms around the pan phase
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/criterion8_pan_arm_test.dart: half the arms actually run with the flag set
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/criterion8_pan_arm_test.dart: the flag an arm ran at is the flag its label claims
+```
+
+**What M30 does NOT gate, stated because the previous wiring passed every test
+it had.** No test in this repository can see that the flag was flipped on a
+phase where it does nothing — that is what Ruling 21 cost a full n=9 device run
+to discover. The defence built in this wave is not a test but an assertion the
+*instrument* makes about itself: `printPanArmReport` shouts
+`liveDraws=0 ... this arm is DEGENERATE` when the pan it measured never ran the
+live fallback, which is precisely what the eighteen degenerate arms would have
+printed. `'a pan that never ran the live fallback shouts'` gates the warning;
+only a device run can gate the phase.
+
+**Restore, verified.** `cp` from the scratchpad copy, `diff` against it empty,
+and the same file re-run green:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/criterion8_pan_arm_test.dart
+00:00 +0: criterion 8 alternates whole arms around the pan phase
+00:00 +1: half the arms actually run with the flag set
+00:00 +2: the flag an arm ran at is the flag its label claims
+00:00 +3: every arm names the pan phase, its criterion and its repeat
+00:00 +4: the zoom driver still says tile zoom
+00:00 +5: every printed line of a pan arm report carries its arm label
+00:00 +6: the pan p95 is the statistic, and it is the p95 of the pan
+00:00 +7: a pan that never ran the live fallback shouts
+00:00 +8: a short pan sample shouts rather than publishing its p95
+00:00 +9: the pan step is the historical one unless PAN_STEP scales it
+00:00 +10: All tests passed!
+```

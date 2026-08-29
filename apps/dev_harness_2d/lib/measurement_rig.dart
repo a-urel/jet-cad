@@ -616,19 +616,47 @@ Future<void> runTilePhases({
     print('    ${capacity(vertices)}');
   }
 
-  await phase('tile hold', 60, Offset.zero);
-  // `PAN_STEP` unset leaves the historical step untouched -- see `kPanStep`.
-  const historical = Offset(-7, -3);
-  final magnitude = historical.distance;
-  final step = panStep.isNaN
-      ? historical
-      : Offset(historical.dx * panStep / magnitude,
-          historical.dy * panStep / magnitude);
+  await phase('tile hold', kTileHoldFrames, Offset.zero);
+  final step = tilePanStep(panStep);
   print('  tile pan step: dx=${step.dx.toStringAsFixed(4)} '
       'dy=${step.dy.toStringAsFixed(4)} '
       'magnitude=${step.distance.toStringAsFixed(4)}');
-  await phase('tile pan', 120, step);
+  await phase('tile pan', kTilePanFrames, step);
   _probeBake(cache, camera, painter, sink, vertices);
+}
+
+/// Frames the `tile hold` regime holds the camera still for, in [runTilePhases]
+/// and in one criterion-8 arm ([runTilePanArm]) alike.
+///
+/// The two must agree: criterion 8's control is only a control if it is the
+/// same phase Plan 3h's `tile hold` figures were read off.
+const int kTileHoldFrames = 60;
+
+/// Frames the `tile pan` regime pans for, in [runTilePhases] and in one
+/// criterion-8 arm ([runTilePanArm]) alike.
+///
+/// Criterion 8 is a ratio of `tile pan` p95 between two arms, and criterion 9
+/// reads the same statistic out of [runTilePhases]' block against Plan 3h's
+/// recorded figures. A pan arm of a different length would not be the same
+/// measurement under the same name.
+const int kTilePanFrames = 120;
+
+/// The camera step one `tile pan` frame takes: `Offset(-7, -3)` unless
+/// `PAN_STEP` asks for a different magnitude along the same direction.
+///
+/// **Extracted so the two callers cannot drift.** [runTilePhases] pans R2's
+/// own block with this, and [runTilePanArm] pans criterion 8's arms with it;
+/// two copies of the historical constant would eventually make the arm and the
+/// block two different measurements printed under one name. See `kPanStep` in
+/// `main.dart` for why a magnitude and not a pair, and why `NaN` is the
+/// sentinel for unset.
+Offset tilePanStep(double panStep) {
+  const historical = Offset(-7, -3);
+  final magnitude = historical.distance;
+  return panStep.isNaN
+      ? historical
+      : Offset(historical.dx * panStep / magnitude,
+          historical.dy * panStep / magnitude);
 }
 
 /// One live walk and one walk per covering tile, at the current camera.
@@ -1622,19 +1650,30 @@ enum ZoomCriterion {
 
 /// The label every line of an arm's report is printed under.
 ///
-/// It names the criterion, the repeat, the side of the ratio, the exact flag
-/// state and the entity count -- everything a reader needs to attribute the
-/// numbers without reading the source that produced them. A transcript a
-/// reader cannot attribute is the failure mode this measurement has already
-/// been bitten by: nine repetitions of one arm, printed as `arm 0..8`, with
-/// nothing naming which arm was which and every ratio reading 1.00.
+/// It names the phase, the criterion, the repeat, the side of the ratio, the
+/// exact flag state and the entity count -- everything a reader needs to
+/// attribute the numbers without reading the source that produced them. A
+/// transcript a reader cannot attribute is the failure mode this measurement
+/// has already been bitten by: nine repetitions of one arm, printed as
+/// `arm 0..8`, with nothing naming which arm was which and every ratio reading
+/// 1.00.
+///
+/// **[phase] is required and has no default, because the phase an arm ran on
+/// is exactly what Ruling 21 turned on.** Criterion 4 alternates around the
+/// `tile zoom` phase; criterion 8 alternates around `tile pan`, because
+/// `debugFullViewportQuery` modifies the live fallback and the zoom phase --
+/// this plan having removed its live walk, and criterion 1 having scored that
+/// as a PASS in the same session -- never runs one. A transcript that named
+/// the wrong phase would look exactly like the eighteen arms that measured
+/// nothing, so a default here would be a default on the load-bearing word.
 String zoomArmLabel(
   ZoomArm arm, {
   required int repeat,
   required int repeats,
   required int entities,
+  required String phase,
 }) =>
-    'R2 tile zoom c${arm.criterion} repeat ${repeat + 1}/$repeats '
+    'R2 $phase c${arm.criterion} repeat ${repeat + 1}/$repeats '
     'arm ${arm.side} [${arm.flag}] ${arm.description} ($entities)';
 
 /// The label a repeat of the **plain** zoom mode prints under: one
@@ -1663,22 +1702,32 @@ String zoomPlainLabel({
 /// number reported rather than only the aggregate. [runInterleaved] owns the
 /// ordering; this owns the configuration and the labelling.
 ///
-/// [runArm] runs one whole zoom phase and returns its report -- it is
-/// responsible for restoring the camera to the fitted state first, because
-/// the arms of a ratio must start from the same camera. [emit] is
-/// [printZoomReport] in production and a recorder in tests.
+/// **[R] is the arm's report type, and it differs between the two criteria
+/// because the two criteria are measured on different phases.** Criterion 4's
+/// arm is a [ZoomReport] from [runTileZoomPhase]; criterion 8's is a
+/// [PanArmReport] from [runTilePanArm], because Plan 3h's criterion 3 -- which
+/// criterion 8 re-measures at n=7-9 interleaved -- was read off the `tile pan`
+/// phase, and `debugFullViewportQuery` has no effect anywhere else. See
+/// Ruling 21, and [runTilePanArm]'s doc comment.
+///
+/// [runArm] runs one whole phase and returns its report -- it is responsible
+/// for restoring the camera to the fitted state first, because the arms of a
+/// ratio must start from the same camera. [emit] prints in production and
+/// records in tests. [phase] is the phase name every one of that arm's lines
+/// is labelled with; see [zoomArmLabel] for why it has no default.
 ///
 /// The flags are restored to their defaults when the run ends, however it
 /// ends: a later phase in the same session must not inherit a measurement
 /// switch. The cache's *generations* are deliberately left alone -- see
 /// [ZoomArm.applyTo].
-Future<void> runZoomCriterionArms({
+Future<void> runCriterionArms<R>({
   required ZoomCriterion criterion,
   required int repeats,
   required int entities,
   required TileCache cache,
-  required Future<ZoomReport> Function() runArm,
-  void Function(String label, ZoomReport report) emit = printZoomReport,
+  required String phase,
+  required Future<R> Function() runArm,
+  required void Function(String label, R report) emit,
 }) async {
   var repeat = 0;
   try {
@@ -1688,14 +1737,14 @@ Future<void> runZoomCriterionArms({
         final arm = criterion.numerator;
         arm.applyTo(cache);
         final label = zoomArmLabel(arm,
-            repeat: repeat, repeats: repeats, entities: entities);
+            repeat: repeat, repeats: repeats, entities: entities, phase: phase);
         emit(label, await runArm());
       },
       tiled: () async {
         final arm = criterion.denominator;
         arm.applyTo(cache);
         final label = zoomArmLabel(arm,
-            repeat: repeat, repeats: repeats, entities: entities);
+            repeat: repeat, repeats: repeats, entities: entities, phase: phase);
         emit(label, await runArm());
         repeat++;
       },
@@ -1703,5 +1752,357 @@ Future<void> runZoomCriterionArms({
   } finally {
     cache.debugRestBakeDisabled = false;
     cache.debugFullViewportQuery = false;
+  }
+}
+
+/// [runCriterionArms] around the `tile zoom` phase, which is criterion 4's.
+///
+/// Kept as its own entry point rather than folded into the generic call:
+/// criterion 4's numbers are already taken (four repeats at each of 50,000 and
+/// 500,000, recorded in Plan 3i's ledger) and its transcript has to stay
+/// reproducible line for line, so its phase name and its default [emit] are
+/// pinned here where a later edit to criterion 8 cannot reach them.
+Future<void> runZoomCriterionArms({
+  required ZoomCriterion criterion,
+  required int repeats,
+  required int entities,
+  required TileCache cache,
+  required Future<ZoomReport> Function() runArm,
+  void Function(String label, ZoomReport report) emit = printZoomReport,
+}) =>
+    runCriterionArms<ZoomReport>(
+      criterion: criterion,
+      repeats: repeats,
+      entities: entities,
+      cache: cache,
+      phase: 'tile zoom',
+      runArm: runArm,
+      emit: emit,
+    );
+
+/// The bound on the warm loop [runTilePanArm] opens with. A run that hits it
+/// never reached a warm cache and its `tile hold` regime would be measuring a
+/// refill; the figure is reported per arm so that shows up rather than hides.
+const int kPanArmWarmMaxFrames = 400;
+
+/// What [runTilePanArm] measured: the state the arm's pan began from, the
+/// `tile hold` control, and the `tile pan` window criterion 8's statistic is
+/// read off.
+///
+/// **Two phases and not one, deliberately.** `tile hold` is a phase Plan 3h's
+/// M4 -- the mutation `TileCache.debugFullViewportQuery` reproduces at runtime
+/// -- **cannot** touch: the camera does not move, every visible tile is a hit,
+/// the live fallback never runs, and the flag modifies nothing else. A
+/// systematic difference between the two arms' hold figures is therefore pure
+/// session drift, and it is the control that exposed Plan 3h's own ordering
+/// bias (its M4 arm ran last, in a visibly noisier session, and read an order
+/// of magnitude higher on `tile hold`). It costs [kTileHoldFrames] frames of
+/// almost pure blit, which is cheap enough to keep in every arm.
+class PanArmReport {
+  PanArmReport({
+    required this.warmFrames,
+    required this.warmBakes,
+    required List<double?> holdMs,
+    required this.holdBakes,
+    required this.holdLiveDraws,
+    required List<double?> panMs,
+    required this.panBakes,
+    required this.panBakeFrames,
+    required this.panMaxBakesInAFrame,
+    required this.panBlits,
+    required this.panCarryOverBlits,
+    required this.panLiveDraws,
+    required this.panNewEvictions,
+    required this.liveTiles,
+    required this.tileBytes,
+  })  : holdFrameMs = _present(holdMs),
+        holdFramesMissing = _missing(holdMs),
+        panFrameMs = _present(panMs),
+        panFramesMissing = _missing(panMs);
+
+  /// Frames the warm loop took to drive [TileCache.bakeCount] to a standstill
+  /// at the arm's starting camera, and the bakes it paid for getting there.
+  ///
+  /// **This is what makes the arms comparable, and it is reported rather than
+  /// assumed.** Every arm resets the camera to R2's fitted camera and then
+  /// warms to a standstill before it holds or pans, so the pan of every arm
+  /// starts at the same camera with a fully populated generation. Whether a
+  /// given arm got there from cold or inherited surviving tiles from an
+  /// earlier arm is exactly what these two numbers say: an arm that started
+  /// warm reads a low [warmBakes], one that started cold reads a high one, and
+  /// a reader can see it instead of taking it on trust.
+  final int warmFrames;
+  final int warmBakes;
+
+  /// `totalSpan` per `tile hold` frame that reported a timing, and how many
+  /// did not. The control regime -- see the class doc.
+  final List<double> holdFrameMs;
+  final int holdFramesMissing;
+
+  /// [TileCache.bakeCount] and [TileCache.liveDrawCount] over the hold window.
+  /// Both are expected at zero: a hold that bakes is a hold that was not warm,
+  /// and a hold that draws live is not the control this arm thinks it is.
+  final int holdBakes;
+  final int holdLiveDraws;
+
+  /// `totalSpan` per `tile pan` frame that reported a timing. **p95 over this
+  /// list is criterion 8's statistic**, on both sides of the ratio, and it is
+  /// the same statistic Plan 3h's criterion 3 was scored on.
+  final List<double> panFrameMs;
+
+  /// How many of the [kTilePanFrames] pan frames never reported a timing.
+  /// Anything but zero means [panFrameMs] is short and its p95 is not the
+  /// criterion's.
+  final int panFramesMissing;
+
+  /// The cache's own counters over the pan window. [panLiveDraws] is the one
+  /// that says whether this arm measured anything at all: see
+  /// [printPanArmReport].
+  final int panBakes;
+  final int panBakeFrames;
+  final int panMaxBakesInAFrame;
+  final int panBlits;
+  final int panCarryOverBlits;
+  final int panLiveDraws;
+  final int panNewEvictions;
+
+  /// The generation at the end of the pan, for the same reason
+  /// [runTilePhases]' block prints them: a pan that quietly evicted its way
+  /// through the phase is not the pan the figure claims.
+  final int liveTiles;
+  final int tileBytes;
+
+  /// p95 of [panFrameMs], or null when the pan reported nothing at all.
+  ///
+  /// **The quantile is `(n * 0.95).floor()`, matching [report]'s**, so a pan
+  /// arm's figure and an R2 `tile pan` block's figure are the same statistic
+  /// and can be read against each other. Criterion 9 reads the block; criterion
+  /// 8 reads these arms.
+  double? get panP95Ms {
+    if (panFrameMs.isEmpty) return null;
+    final sorted = [...panFrameMs]..sort();
+    return sorted[(sorted.length * 0.95).floor()];
+  }
+
+  static List<double> _present(List<double?> ms) => <double>[
+        for (final v in ms)
+          if (v != null) v
+      ];
+
+  static int _missing(List<double?> ms) {
+    var n = 0;
+    for (final v in ms) {
+      if (v == null) n++;
+    }
+    return n;
+  }
+}
+
+/// One arm of criterion 8: warm the cache at the arm's starting camera, hold
+/// [kTileHoldFrames] frames, then pan [kTilePanFrames] frames at [panStep].
+///
+/// **Why the pan phase and not the zoom phase (Ruling 21).** Criterion 8
+/// re-measures Plan **3h**'s criterion 3 at n=7-9 interleaved, and 3h measured
+/// that criterion on the `tile pan` phase -- see
+/// `docs/superpowers/notes/2026-08-25-plan-3h-results.md`, whose tables report
+/// it as narrowed `tile pan` p95 against M4 `tile pan` p95. The arm this
+/// replaces alternated `TileCache.debugFullViewportQuery` around
+/// [runTileZoomPhase] instead. That flag modifies exactly one thing, the live
+/// fallback's query extent in `TileCache.paintFrame`, and every frame of the
+/// zoom phase is a *moving* frame, which blits the carry-over composite and
+/// returns before the fallback can run. A full n=9 interleaved run at 500,000
+/// entities completed cleanly, printed `gestureLiveDraws=0` in all eighteen
+/// arms, and measured nothing. The irony is worth keeping: the zoom phase has
+/// no live walk *because this plan removed it*, and criterion 1 scored exactly
+/// that as a PASS in the same session.
+///
+/// **[camera] must already be at the arm's starting camera** -- in production,
+/// R2's fitted camera, restored by the caller before every arm, because the
+/// arms of a ratio must start from the same camera and this phase does not own
+/// it. The warm loop below then rebuilds the generation *at that camera* in
+/// every arm, so no arm begins its pan on a generation the previous arm's pan
+/// left behind somewhere else.
+///
+/// **No `_probeBake`, unlike [runTilePhases].** The probe reimplements the bake
+/// geometry rather than calling `paintFrame`, so it cannot see
+/// `debugFullViewportQuery` at all -- it would read bit-identical on both arms
+/// while costing a full live walk, a walk per tile and a `toImageSync` per tile
+/// in each of eighteen arms.
+///
+/// **No `settle()` either, and that is not an oversight.** Every frame this
+/// phase pumps goes through one [FrameTimingLog], and a frame pumped outside
+/// the log runs the reported stream ahead of the pumped one -- which is
+/// precisely the shifted-ordinal condition [FrameTimingLog] refuses to publish
+/// a figure from. The warm loop's own termination condition (a frame that
+/// baked nothing) is the settle it would have been asking for.
+Future<PanArmReport> runTilePanArm({
+  required CameraController camera,
+  required TileCache cache,
+  required Future<void> Function() pumpFrame,
+  required Offset panStep,
+  int holdFrames = kTileHoldFrames,
+  int panFrames = kTilePanFrames,
+}) async {
+  refuseDebugMode();
+  final log = FrameTimingLog()..arm();
+  try {
+    // The caller's own pump just before this phase rasterises after its pump
+    // returns, so its timing lands here and would take ordinal 0. See
+    // [FrameTimingLog.establishBaseline].
+    await log.establishBaseline(pumpFrame);
+
+    // Warm: pump until nothing more bakes. Bounded, and the bound is reported.
+    cache.resetCounters();
+    var warmFrames = 0;
+    var lastBakes = -1;
+    while (warmFrames < kPanArmWarmMaxFrames && cache.bakeCount != lastBakes) {
+      lastBakes = cache.bakeCount;
+      camera.panBy(Offset.zero);
+      await log.pump(pumpFrame);
+      warmFrames++;
+    }
+    final warmBakes = cache.bakeCount;
+
+    /// Two throwaway frames at a phase boundary, pumped *inside* the log and
+    /// excluded by ordinal: the same slack [runTilePhases]' own `phase()`
+    /// helper takes, for the same reason -- a `FrameTiming` is reported after
+    /// its frame rasterised, so the boundary needs frames the window does not
+    /// count.
+    Future<void> boundary() async {
+      for (var i = 0; i < kZoomWarmUpFrames; i++) {
+        camera.panBy(Offset.zero);
+        await log.pump(pumpFrame);
+      }
+    }
+
+    await boundary();
+    final holdStart = log.pumpedFrames;
+    cache.resetCounters();
+    for (var i = 0; i < holdFrames; i++) {
+      camera.panBy(Offset.zero);
+      await log.pump(pumpFrame);
+    }
+    final holdBakes = cache.bakeCount;
+    final holdLiveDraws = cache.liveDrawCount;
+
+    await boundary();
+    final panStart = log.pumpedFrames;
+    cache.resetCounters();
+    final evictionsBefore = cache.evictionCount;
+    // A pan bakes in bursts -- a whole column of tiles enters at once -- so the
+    // shape of the bake distribution decides whether a mean is a per-tile cost
+    // or an average over two different frames. Reported, not assumed.
+    var bakeFrames = 0;
+    var maxBakesInAFrame = 0;
+    var lastBakeCount = 0;
+    for (var i = 0; i < panFrames; i++) {
+      camera.panBy(panStep);
+      await log.pump(pumpFrame);
+      final delta = cache.bakeCount - lastBakeCount;
+      lastBakeCount = cache.bakeCount;
+      if (delta > 0) bakeFrames++;
+      if (delta > maxBakesInAFrame) maxBakesInAFrame = delta;
+    }
+    // The last pan frames cannot have reported by the time their own pump
+    // returned; without this their timings are absent, not late.
+    await log.drain(pumpFrame, upTo: panStart + panFrames);
+
+    return PanArmReport(
+      warmFrames: warmFrames,
+      warmBakes: warmBakes,
+      holdMs: log.msRange(holdStart, holdStart + holdFrames),
+      holdBakes: holdBakes,
+      holdLiveDraws: holdLiveDraws,
+      panMs: log.msRange(panStart, panStart + panFrames),
+      panBakes: cache.bakeCount,
+      panBakeFrames: bakeFrames,
+      panMaxBakesInAFrame: maxBakesInAFrame,
+      panBlits: cache.blitCount,
+      panCarryOverBlits: cache.carryOverBlitCount,
+      panLiveDraws: cache.liveDrawCount,
+      panNewEvictions: cache.evictionCount - evictionsBefore,
+      liveTiles: cache.liveTileCount,
+      tileBytes: cache.liveBytes,
+    );
+  } finally {
+    log.disarm();
+  }
+}
+
+/// p50, p95, max and mean of a list of frame times, in [report]'s own format
+/// and at [report]'s own quantiles.
+String _msStats(List<double> ms) {
+  var sum = 0.0;
+  for (final v in ms) {
+    sum += v;
+  }
+  final sorted = [...ms]..sort();
+  return 'p50=${sorted[(sorted.length * 0.5).floor()].toStringAsFixed(2)}ms '
+      'p95=${sorted[(sorted.length * 0.95).floor()].toStringAsFixed(2)}ms '
+      'max=${sorted.last.toStringAsFixed(2)}ms '
+      'mean=${(sum / sorted.length).toStringAsFixed(2)}ms';
+}
+
+/// Prints a [PanArmReport] under [label].
+///
+/// **Every line carries [label].** An interleaved run prints two arms per
+/// repeat, the arms differ only in which flag was flipped, and a continuation
+/// line indented under the wrong heading is a number attributed to the wrong
+/// arm. That is the failure mode this whole measurement has already been
+/// bitten by.
+///
+/// **The `liveDraws=0` warning is Ruling 21 caught by the instrument itself.**
+/// `debugFullViewportQuery` widens the live fallback's query and nothing else,
+/// so an arm whose pan never ran the fallback ran byte-identical code to its
+/// counterpart whatever its label said, and any ratio formed from the pair is
+/// 1.00 by construction. The eighteen arms of the degenerate run would have
+/// said so on every line.
+void printPanArmReport(String label, PanArmReport r) {
+  print('$label arm start: warmFrames=${r.warmFrames} '
+      'warmBakes=${r.warmBakes} '
+      '(the camera and generation this arm holds and pans from)');
+
+  if (r.holdFrameMs.isEmpty) {
+    print('$label tile hold: no frames recorded');
+  } else {
+    print('$label tile hold frames=${r.holdFrameMs.length} '
+        '${_msStats(r.holdFrameMs)} '
+        "(CONTROL: Plan 3h's M4 cannot touch a phase with no live fallback, "
+        'so a systematic arm-to-arm difference here is session drift)');
+  }
+  print('$label   hold bakes=${r.holdBakes} liveDraws=${r.holdLiveDraws}');
+
+  if (r.panFrameMs.isEmpty) {
+    print('$label tile pan: no frames recorded');
+  } else {
+    print('$label tile pan frames=${r.panFrameMs.length} '
+        '${_msStats(r.panFrameMs)} '
+        "(criterion 8's statistic is this p95, the same statistic Plan 3h's "
+        'criterion 3 was scored on)');
+  }
+  print(
+      '$label   pan bakeFrames=${r.panBakeFrames}/${r.panFrameMs.length + r.panFramesMissing} '
+      'maxBakesInAFrame=${r.panMaxBakesInAFrame} '
+      'bakes=${r.panBakes} '
+      'blits=${r.panBlits} '
+      'carryOverBlits=${r.panCarryOverBlits} '
+      'liveDraws=${r.panLiveDraws} '
+      'newEvictions=${r.panNewEvictions} '
+      'liveTiles=${r.liveTiles} '
+      'tileBytes=${r.tileBytes}');
+
+  if (r.panLiveDraws == 0) {
+    print('$label   !!! WARNING: liveDraws=0 over the pan. '
+        'debugFullViewportQuery modifies the live fallback\'s query extent and '
+        'NOTHING else, so an arm whose pan never ran the fallback measured the '
+        'same code as its counterpart and any ratio formed from the pair is '
+        '1.00 by construction. This is Ruling 21, and this arm is DEGENERATE '
+        '!!!');
+  }
+  final missing = r.holdFramesMissing + r.panFramesMissing;
+  if (missing > 0) {
+    print('$label   !!! WARNING: $missing frame(s) reported no FrameTiming '
+        '(hold ${r.holdFramesMissing}, pan ${r.panFramesMissing}) -- the '
+        'figures above are over a SHORT SAMPLE and are not comparable !!!');
   }
 }

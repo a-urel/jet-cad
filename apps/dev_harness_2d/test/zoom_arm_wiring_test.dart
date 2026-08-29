@@ -151,9 +151,9 @@ void main() {
   test('a plain repeat cannot be read as an interleaved arm', () {
     final plain = zoomPlainLabel(repeat: 0, repeats: 9, entities: 50000);
     final armA = zoomArmLabel(ZoomArm.restBakeOn,
-        repeat: 0, repeats: 9, entities: 50000);
+        repeat: 0, repeats: 9, entities: 50000, phase: 'tile zoom');
     final armB = zoomArmLabel(ZoomArm.restBakeOff,
-        repeat: 0, repeats: 9, entities: 50000);
+        repeat: 0, repeats: 9, entities: 50000, phase: 'tile zoom');
 
     expect(armA, contains('arm A'));
     expect(armB, contains('arm B'));
@@ -167,7 +167,7 @@ void main() {
 
   test('every printed line of a report carries its arm label', () {
     final label = zoomArmLabel(ZoomArm.fullViewportQuery,
-        repeat: 4, repeats: 9, entities: 500000);
+        repeat: 4, repeats: 9, entities: 500000, phase: 'tile pan');
     final lines = <String>[];
     runZoned(
       () => printZoomReport(
