@@ -115,10 +115,32 @@ void report(String rig, List<FrameTiming> timings) {
 /// happened, and the guard still bites: they are reset beside the sinks at
 /// each call site, so a frame that never ran leaves all four at zero.
 ///
+/// **And those two are still not the whole of "drew".** Plan 3i split the
+/// tiled frame into two regimes. A *moving* frame, and the in-between frame at
+/// `_restGateSteps == 1`, draw the carry-over composite and nothing else: no
+/// tile blit, no live walk, no painter call. On such a frame `blitCount` and
+/// `liveDrawCount` both read zero while the frame genuinely put pixels on
+/// screen, and [TileCache.carryOverBlitCount] is the only counter that saw it.
+/// That is not a rare state -- it is every frame of a zoom gesture, and it is
+/// what the frame `panBy(Offset.zero)` forces can settle into after R2's zoom
+/// phase. Measured, not reasoned: on 2026-08-29 a functional smoke run at
+/// `TILES=on ENTITIES=5000 RUN_R2=true` threw here on a frame that had drawn
+/// correctly.
+///
+/// **[tileCache] is required and nullable rather than optional**, and that is
+/// the second half of the same defect. The parameter existed, was documented
+/// as the tiled path's answer, and was fed by the integration test's two call
+/// sites and by *nothing else*: `runR2Rig` -- the whole of the app-run script
+/// -- called `requireRepaint(sink, vertices)` and got a guard that could only
+/// ever see two counters that a tiled frame is entitled to leave at zero. An
+/// optional parameter can be forgotten at a call site and the omission reads
+/// as a deliberate "no cache here". A required one cannot: an untiled caller
+/// has to write `tileCache: null` and say so.
+///
 /// Shared rather than copied, because copying it is how R4a and R4b came to
 /// keep the canvas-only form after R2's was fixed.
 void requireRepaint(CanvasDrawSink sink, VerticesDrawSink? vertices,
-    {TileCache? tileCache}) {
+    {required TileCache? tileCache}) {
   // The counters above are read from a frame that has to actually have
   // happened. `panBy(Offset.zero)` forces one only because Transform2 has no
   // operator== for ValueNotifier to dedupe against -- a property these rigs
@@ -128,6 +150,7 @@ void requireRepaint(CanvasDrawSink sink, VerticesDrawSink? vertices,
   final drew = sink.canvasCallCount +
       (vertices?.totalFlushCount ?? 0) +
       (tileCache?.blitCount ?? 0) +
+      (tileCache?.carryOverBlitCount ?? 0) +
       (tileCache?.liveDrawCount ?? 0);
   if (drew == 0) {
     throw StateError('no repaint happened: the forced frame did not draw');
@@ -377,6 +400,16 @@ Future<void> runR2Rig({
     // per-frame figures is a wrong comparison waiting to be published.
     sink.resetCounters();
     vertices?.resetCounters();
+    // **The tile counters reset here too, and without this line the guard
+    // below cannot fail at all.** `bakes`, `blits`, `carryOverBlits` and
+    // `liveDraws` count since the last `resetCounters` -- which, in this
+    // script, had never been called before the forced frame: the 240 frames of
+    // pan and zoom above had already driven every one of them into the
+    // thousands, so `requireRepaint` would read "something drew" from a frame
+    // that never ran, and `printTileCounters` would publish four
+    // cache-lifetime totals under a heading that says per-frame. The
+    // integration test's own call sites reset it here for exactly this reason.
+    tileCache?.resetCounters();
     final layoutsBefore = sink.measurer.layoutCount;
     final paragraphEvictionsBefore = sink.measurer.paragraphEvictionCount;
     final metricsEvictionsBefore = sink.measurer.metricsEvictionCount;
@@ -384,7 +417,7 @@ Future<void> runR2Rig({
     await pumpFrame();
     report('R2 ($entities)', timings);
     print('  lineweightScale=$lineweightScale');
-    requireRepaint(sink, vertices);
+    requireRepaint(sink, vertices, tileCache: tileCache);
     printInvariants(painter, sink, tileCache: tileCache);
     printBackend(resolvedBackend, vertices);
     printTextCounters(painter, sink,
