@@ -228,3 +228,21 @@ verifying.
    the budgeted path). `STATUS.md` already records this; it is a live trap for
    anyone comparing 3i's transcripts against 3g's or 3h's, and it is a code
    concern I am reporting rather than fixing.
+
+---
+
+## Commits
+
+- **`5c886a2`** — `docs: archive Plan 3i's ledger before the workspace is
+  cleared`. 70 files: the whole ledger verbatim, plus `measurement-logs/` with
+  the eight `KEEP_*.log` transcripts and a scoped `.gitignore` negating the
+  root's `*.log` rule (without it the evidence would have been silently
+  dropped from the commit), plus the `ledgers/README.md` row.
+- **`198e7db`** — `docs: Plan 3i's record -- criteria, mutants, and STATUS
+  reconciled`. `STATUS.md`, the results note, the mutation log.
+- **The commit immediately after `198e7db`** adds this report to the
+  archive. Its own SHA is deliberately not written here: a self-referential
+  SHA is falsified by the amend that would write it.
+
+The archive commit landed **first**, before `STATUS.md` or either note was
+staged.
