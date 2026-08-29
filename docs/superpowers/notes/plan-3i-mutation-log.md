@@ -2939,3 +2939,246 @@ longer do is throw on a frame that drew.
 
 **Restore, verified.** Empty `diff` against the pre-mutation copy, and the
 transcript quoted at the end of M25.
+
+---
+
+## M27 — the R2 zoom step anchors at a hardcoded `Offset(800, 600)`
+
+**Fix wave F**, and like M25 a defect the harness had carried through every
+recorded run rather than one introduced by this plan.
+
+`runR2Rig`'s own zoom phase zoomed about the literal `Offset(800, 600)`. That
+is the viewport centre at **1600x1200 and at no other size** — the reference
+viewport design spec §5 pins, and which Ruling 20 established the harness has
+never actually created. At the nib default of 800x600, which is the size every
+figure this harness has ever produced was really taken at, the constant is the
+**bottom-right corner**: a zoom about a corner drags the whole document across
+the screen instead of scaling about what an operator would be looking at, and
+the tile working set it touches is a different set. At the 1400x900 Ruling 20
+chose it is off-centre and low-right. Nothing in the transcript said so.
+
+**Mutation:** restore the hardcoded anchor at the call site.
+
+```diff
+ }) async {
+-  final anchor = r2ZoomAnchorFor(viewport);
++  const anchor = Offset(800, 600);
+   for (var i = 0; i < 120; i++) {
+     camera.zoomAt(anchor, i.isEven ? 1.03 : 0.97);
+```
+
+**Procedure:** `cp lib/measurement_rig.dart <scratch>/rig.orig.dart`, mutate
+with `perl -0pi`, run, restore by `cp`, `diff` to prove the restore, run again.
+Never `git checkout`.
+
+**The gate this fires** is `the step holds the viewport centre still at ...`,
+in `apps/dev_harness_2d/test/measurement_viewport_test.dart`.
+
+Two things about that test matter more than the assertion in it.
+
+*It reads the anchor off the camera, not off the formula.* `zoomAt(p, f)` is
+defined to hold the world point under `p` fixed, so a composition of them holds
+it fixed too: whatever point the script actually zoomed about is the one point
+that did not move. The test never mentions `r2ZoomAnchorFor` — it drives the
+step and asks the camera where the fixed point ended up. A mutant that
+hardcodes the anchor at the call site, as above, therefore dies even though the
+formula it bypasses is still correct.
+
+*It runs at two sizes, and neither is 1600x1200.* At 1400x900 and at 800x600 a
+hardcoded `Offset(800, 600)` and a derived centre are different points; at
+1600x1200 they are the same point and the test would pass under the mutant.
+That is exactly the degenerate fixture `CLAUDE.md` names as this repo's
+dominant failure mode, and the reason the loop is a `for` over a list of sizes
+rather than one `const viewport`.
+
+The fixture is also not at the identity: the camera is built by hand at scale
+0.08 with the y axis flipped, **both** off-diagonal skew terms non-zero, and an
+origin ~5e6 units out, so no assertion here passes because screen and world
+coordinates happen to coincide. And the test asserts the script really moved
+the camera — `scale` lands at 0.947 of where it started, because 60 steps of
+1.03 and 60 of 0.97 do not compose to 1 — and that the *old* anchor's world
+point moved by more than 100 units, five orders of magnitude past the 1e-3
+tolerance. Without those two lines "nothing moved at all" would pass it.
+
+**Result:** red, two tests, one per viewport size.
+
+**Verbatim output**, `CI=true flutter test --concurrency=1 test/measurement_viewport_test.dart`:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart
+00:00 +0: the R2 zoom anchor is the centre of the viewport it is given Size(1400.0, 900.0)
+00:00 +1: the R2 zoom anchor is the centre of the viewport it is given Size(800.0, 600.0)
+00:00 +2: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(1400.0, 900.0)
+00:00 +2 -1: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(1400.0, 900.0) [E]
+  Expected: a numeric value within <0.001> of <5039674.771076729>
+    Actual: <5039612.5476966165>
+     Which:  differs by <62.22338011208922>
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/measurement_viewport_test.dart 91:9            main.<fn>.<fn>
+  
+00:00 +2 -1: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(800.0, 600.0)
+00:00 +2 -2: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(800.0, 600.0) [E]
+  Expected: a numeric value within <0.001> of <5036027.786548784>
+    Actual: <5035763.118086909>
+     Which:  differs by <264.6684618750587>
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/measurement_viewport_test.dart 91:9            main.<fn>.<fn>
+  
+00:00 +2 -2: every RUN_R2 run reports its window, and warns when it is wrong a window that is not the pinned size warns
+00:00 +3 -2: every RUN_R2 run reports its window, and warns when it is wrong the pinned size warns about nothing
+00:00 +4 -2: every RUN_R2 run reports its window, and warns when it is wrong a wrong window warns even where no zoom arm will ever run
+00:00 +5 -2: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(1400.0, 900.0)
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(800.0, 600.0)
+```
+
+Note the *magnitude* in those two failures: 62 world units at 1400x900 and 265
+at 800x600, against a 1e-3 tolerance. The mutant is not marginally wrong, and
+the difference between the two sizes is the offset between the corner and the
+centre growing as the window shrinks — which is the defect stated numerically.
+
+**Restore, verified.** Empty `diff` against the pre-mutation copy, and:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart
+00:00 +0: the R2 zoom anchor is the centre of the viewport it is given Size(1400.0, 900.0)
+00:00 +1: the R2 zoom anchor is the centre of the viewport it is given Size(800.0, 600.0)
+00:00 +2: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(1400.0, 900.0)
+00:00 +3: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(800.0, 600.0)
+00:00 +4: every RUN_R2 run reports its window, and warns when it is wrong a window that is not the pinned size warns
+00:00 +5: every RUN_R2 run reports its window, and warns when it is wrong the pinned size warns about nothing
+00:00 +6: every RUN_R2 run reports its window, and warns when it is wrong a wrong window warns even where no zoom arm will ever run
+00:00 +7: All tests passed!
+```
+
+**A second half of the same fix, not separately mutated.** `viewport` is a
+**required** named parameter of `runR2Rig` and of `runR2ZoomStep`, not an
+optional one with a 1600x1200 default. A default would have let the two call
+sites — `main.dart`'s app-run and `integration_test/frame_timing_test.dart`'s
+widget test — silently keep measuring at a viewport neither of them is in,
+which is M25's failure shape exactly.
+
+---
+
+## M28 — the window warning fires only where a zoom arm runs
+
+**Fix wave F.** `warnIfZoomViewportMismatch` was called from one place:
+`main.dart`'s `if (tileCache != null && kZoomArms > 0)` branch. `kZoomArms`
+defaults to **0**, so the commonest run the harness has — a plain
+`RUN_R2=true` with no `ZOOM_ARMS` define, which is Plan 3i's Task 12 command
+line — printed `R2 app-run: window=800x600 dpr=2.0` and then said nothing
+whatever about that being the wrong window. The operator had to already know
+what size to expect in order to notice. Ruling 20 exists because a human read
+that line and knew; the check is there so the next reader does not have to.
+
+R2's own pan and zoom phases are as viewport-dependent as the tile phase — the
+anchor M27 is about is one of the things that moves with the window — so the
+check belongs on every run, not on the arms.
+
+**Mutation:** put the warning back in the branch. Two files.
+
+```diff
+ void reportR2Window(Size real, Size pinned,
+     {required double devicePixelRatio}) {
+   print('R2 app-run: window=${real.width.toStringAsFixed(0)}x'
+       '${real.height.toStringAsFixed(0)} dpr=$devicePixelRatio');
+-  warnIfZoomViewportMismatch(real, pinned);
+ }
+```
+
+```diff
+     const zoomViewport = kMeasurementViewport;
++    warnIfZoomViewportMismatch(viewport, zoomViewport);
+```
+
+**Procedure:** `cp lib/measurement_rig.dart <scratch>/rig.orig2.dart` and
+`cp lib/main.dart <scratch>/main.orig.dart`, mutate, run, restore both by `cp`,
+`diff` both to prove the restore, run again. Never `git checkout`.
+
+**The gate this fires** is `a window that is not the pinned size warns` and
+`a wrong window warns even where no zoom arm will ever run`, in
+`apps/dev_harness_2d/test/measurement_viewport_test.dart`.
+
+**Why the test can see a call-site question at all**, which is the part worth
+recording. `_driveR2` is private, unreachable from a unit test, and everything
+downstream of it opens with `refuseDebugMode()`. A test cannot assert "the
+warning is outside the branch" by running the branch. So the guarantee is moved
+into something a test *can* hold: the window line and the warning are emitted
+by **one function**, `reportR2Window`, and that function is what every
+`RUN_R2` run calls. `R2 app-run: window=` is the line every transcript of this
+harness is read by and no run can plausibly drop it — welding the warning to it
+means a call site cannot keep the line and quietly lose the warning. The mutant
+above has to reach into `reportR2Window` to silence the plain path, and that is
+in range of an assertion.
+
+The third test in the group, `the pinned size warns about nothing`, is the
+direction that keeps this honest: it asserts the window line still prints when
+the sizes match, so "warn on everything" is not a way to pass.
+
+**Result:** red, two tests.
+
+**Verbatim output**, `CI=true flutter test --concurrency=1 test/measurement_viewport_test.dart`:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart
+00:00 +0: the R2 zoom anchor is the centre of the viewport it is given Size(1400.0, 900.0)
+00:00 +1: the R2 zoom anchor is the centre of the viewport it is given Size(800.0, 600.0)
+00:00 +2: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(1400.0, 900.0)
+00:00 +3: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(800.0, 600.0)
+00:00 +4: every RUN_R2 run reports its window, and warns when it is wrong a window that is not the pinned size warns
+00:00 +4 -1: every RUN_R2 run reports its window, and warns when it is wrong a window that is not the pinned size warns [E]
+  Expected: contains 'WARNING'
+    Actual: 'R2 app-run: window=800x600 dpr=2.0'
+     Which: does not contain 'WARNING'
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/measurement_viewport_test.dart 119:7           main.<fn>.<fn>
+  
+00:00 +4 -1: every RUN_R2 run reports its window, and warns when it is wrong the pinned size warns about nothing
+00:00 +5 -1: every RUN_R2 run reports its window, and warns when it is wrong a wrong window warns even where no zoom arm will ever run
+00:00 +5 -2: every RUN_R2 run reports its window, and warns when it is wrong a wrong window warns even where no zoom arm will ever run [E]
+  Expected: contains 'WARNING'
+    Actual: 'R2 app-run: window=1728x1117 dpr=2.0'
+     Which: does not contain 'WARNING'
+  
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/measurement_viewport_test.dart 141:7           main.<fn>.<fn>
+  
+00:00 +5 -2: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart: every RUN_R2 run reports its window, and warns when it is wrong a window that is not the pinned size warns
+  /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart: every RUN_R2 run reports its window, and warns when it is wrong a wrong window warns even where no zoom arm will ever run
+```
+
+The mutant's `Actual` line is the defect verbatim: `R2 app-run: window=800x600`
+alone, which is what the 2026-08-29 smoke run printed and what every earlier
+run of this harness printed, with nothing beside it.
+
+**Still a warning, not a throw.** The reasoning in
+`warnIfZoomViewportMismatch`'s own doc comment is unchanged and still holds:
+every phase accepts any finite viewport and produces a labelled report, and
+refusing to run would trade a number an operator has to read the label on for
+no number at all. Hoisting the call changes *when* it fires, not what it does.
+
+**Restore, verified.** Empty `diff` against both pre-mutation copies, and:
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/apps/dev_harness_2d/test/measurement_viewport_test.dart
+00:00 +0: the R2 zoom anchor is the centre of the viewport it is given Size(1400.0, 900.0)
+00:00 +1: the R2 zoom anchor is the centre of the viewport it is given Size(800.0, 600.0)
+00:00 +2: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(1400.0, 900.0)
+00:00 +3: the R2 zoom anchor is the centre of the viewport it is given the step holds the viewport centre still at Size(800.0, 600.0)
+00:00 +4: every RUN_R2 run reports its window, and warns when it is wrong a window that is not the pinned size warns
+00:00 +5: every RUN_R2 run reports its window, and warns when it is wrong the pinned size warns about nothing
+00:00 +6: every RUN_R2 run reports its window, and warns when it is wrong a wrong window warns even where no zoom arm will ever run
+00:00 +7: All tests passed!
+```
