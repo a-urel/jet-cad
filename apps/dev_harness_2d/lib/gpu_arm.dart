@@ -33,7 +33,24 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_gpu/gpu.dart' as gpu;
+// **The shim, not `package:flutter_gpu` directly, and this import is the
+// whole point of the web arm.** `flutter_scene` carries an internal
+// `flutter_gpu` shim that re-exports the SDK package verbatim on native and
+// falls back to its own WebGL2 backend on web:
+//
+//     export 'stub/_gpu.dart'
+//         if (dart.library.io) 'impeller/_gpu.dart'
+//         if (dart.library.js_interop) 'web/_gpu.dart';
+//
+// Bare `flutter_gpu` imports `dart:ffi` and `dart:nativewrappers` at library
+// level, so it cannot compile for the web at all. This import is **off
+// contract** -- `lib/src/`, a pre-1.0 package whose minor releases carry
+// breaking changes -- and it is here as a *measuring instrument*, not as an
+// architecture. The point is to price the web line before choosing between
+// depending on this shim and reimplementing the technique.
+//
+// ignore: implementation_imports
+import 'package:flutter_scene/src/gpu/gpu.dart' as gpu;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math.dart' as vm;
@@ -240,7 +257,10 @@ class GpuLineRenderer {
   /// **The upload happens here and never again.** That is the whole claim
   /// being tested.
   static Future<GpuLineRenderer> create(GpuSegments segments) async {
-    final library = await gpu.ShaderLibrary.fromAsset(_bundlePath);
+    // **`ShaderLibrary.fromAsset` throws on web** -- it is synchronous, and
+    // web asset loading is not. `loadShaderLibraryAsync` is the shim's
+    // portable entry point and exists on both backends.
+    final library = await gpu.loadShaderLibraryAsync(_bundlePath);
     if (library == null) {
       throw StateError('cad.shaderbundle did not load');
     }
@@ -314,9 +334,9 @@ class GpuLineRenderer {
   final gpu.DeviceBuffer _segmentBuffer;
   final gpu.HostBuffer _hostBuffer;
 
-  gpu.GpuImageSurface? _surface;
-  int _surfaceWidth = 0;
-  int _surfaceHeight = 0;
+  gpu.Texture? _target;
+  int _targetWidth = 0;
+  int _targetHeight = 0;
 
   /// Frames rendered. Read by the rig to prove the arm drew anything.
   int frames = 0;
@@ -333,24 +353,21 @@ class GpuLineRenderer {
     final heightPx = (viewport.height * dpr).round();
     if (widthPx <= 0 || heightPx <= 0) return null;
 
-    if (_surface == null ||
-        _surfaceWidth != widthPx ||
-        _surfaceHeight != heightPx) {
-      _surface = _createSurface(widthPx, heightPx);
-      _surfaceWidth = widthPx;
-      _surfaceHeight = heightPx;
+    if (_target == null ||
+        _targetWidth != widthPx ||
+        _targetHeight != heightPx) {
+      _target = gpu.gpuContext.createTexture(
+          gpu.StorageMode.devicePrivate, widthPx, heightPx);
+      _targetWidth = widthPx;
+      _targetHeight = heightPx;
     }
-    final surface = _surface!;
-
-    // `GpuImageSurface` always vends a frame; the nullable result on the
-    // `GpuSurface` interface exists for swapchain destinations that can skip.
-    final frame = surface.acquireNextFrame();
+    final target = _target!;
 
     final commandBuffer = gpu.gpuContext.createCommandBuffer();
     final pass = commandBuffer.createRenderPass(
       gpu.RenderTarget.singleColor(
         gpu.ColorAttachment(
-          texture: frame.colorTexture,
+          texture: target,
           clearValue: vm.Vector4(1, 1, 1, 1),
         ),
       ),
@@ -373,51 +390,25 @@ class GpuLineRenderer {
     );
     pass.draw(4, instanceCount: _segments.count);
 
-    frame.present(commandBuffer);
     commandBuffer.submit();
     frames++;
-    return surface.currentImage;
+    // **Synchronous on both backends, and that was worth checking.** The web
+    // shim also carries an *asynchronous* bridge (`Surface.snapshot`,
+    // `presentTextureAsImage`) built on `ui_web.createImageFromTextureSource`,
+    // and a two-phase render would have made the frame accounting unreadable:
+    // the submit would land in one frame's numbers and the composite in the
+    // next. `Texture.asImage` on the web backend states it "matches
+    // flutter_gpu's synchronous `asImage`", so the one-phase arrangement this
+    // arm was built around survives the port.
+    return target.asImage();
   }
 
-  /// Builds the presentable surface, choosing a format it will actually take.
-  ///
-  /// **`createImageSurface`'s own default argument does not work, and finding
-  /// that out cost the first smoke run.** `createImageSurface` falls back to
-  /// `GpuContext.defaultColorFormat` when no format is given, and on this
-  /// macOS Metal context that getter returns **`PixelFormat.unknown`** -- the
-  /// value the enum documents as "an invalid or unspecified format ... never
-  /// the format of a real texture". The surface then throws
-  /// `Unsupported GpuSurface pixel format`. So the parameter is optional in
-  /// the signature and mandatory in fact. The candidates are tried in order
-  /// and the one that takes is printed, so the note records a measured fact
-  /// rather than a guess.
-  static gpu.GpuImageSurface _createSurface(int widthPx, int heightPx) {
-    const candidates = <gpu.PixelFormat>[
-      gpu.PixelFormat.r8g8b8a8UNormInt,
-      gpu.PixelFormat.b8g8r8a8UNormInt,
-      gpu.PixelFormat.r8g8b8a8UNormIntSRGB,
-      gpu.PixelFormat.b8g8r8a8UNormIntSRGB,
-    ];
-    Object? lastError;
-    for (final format in candidates) {
-      try {
-        final surface =
-            gpu.gpuContext.createImageSurface(widthPx, heightPx, format: format);
-        if (!_reportedFormat) {
-          _reportedFormat = true;
-          print('GSPIKE surface format: $format '
-              '(context default was ${gpu.gpuContext.defaultColorFormat})');
-        }
-        return surface;
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    throw StateError('no GpuSurface pixel format was accepted; last error: '
-        '$lastError');
-  }
-
-  static bool _reportedFormat = false;
+  // **The `createImageSurface` path this arm first used is gone, and its
+  // finding is kept in the note rather than in dead code:** called without a
+  // format it falls back to `GpuContext.defaultColorFormat`, which on this
+  // macOS Metal context returns `PixelFormat.unknown` and makes the surface
+  // throw. The render-target texture below replaces it because the web
+  // backend has no `createImageSurface` at all.
 
   /// The uniform block: `mat4 mvp` then `vec2 half_viewport`, std140.
   ///

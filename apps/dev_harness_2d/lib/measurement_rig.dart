@@ -1085,6 +1085,35 @@ class FrameTimingLog {
     _refuseShiftedStream();
     return List<FrameTiming>.unmodifiable(_reported);
   }
+
+  /// **Added by the throwaway `spike/flutter-gpu-backend` branch, for the web
+  /// arm and nothing else.** The timings without the shifted-stream refusal.
+  ///
+  /// On the web the stream shifts as a matter of course: the backlog latch
+  /// fires on the *plain painter* arm, before any GPU code runs, so the
+  /// refusal is not reporting a defect in what is being measured -- it is
+  /// reporting that ordinal alignment, which this log was built to guarantee
+  /// on native, does not hold there.
+  ///
+  /// **What this changes about the measurement, stated because it is not a
+  /// free pass.** With alignment, a figure is "the i-th frame this phase
+  /// pumped". Without it, a figure is "a frame reported inside this phase's
+  /// window", which may include a straggler from the phase before and may
+  /// miss one that lands after. That is sound for a *distribution* over tens
+  /// of frames and unsound for any statement about a particular frame. Every
+  /// caller of this getter must say so where it prints, and must report
+  /// [debugWorstExcess] beside the numbers.
+  ///
+  /// Wall-clock timing was considered first and rejected: `pumpFrame` waits
+  /// for vsync, so every frame cheaper than the refresh interval reads as the
+  /// refresh interval, and the whole question here is the difference between
+  /// half a millisecond and three.
+  List<FrameTiming> get debugTimingsUnaligned =>
+      List<FrameTiming>.unmodifiable(_reported);
+
+  /// The largest excess of reported frames over pumped frames seen after the
+  /// baseline. Zero means the stream never shifted.
+  int get debugWorstExcess => _worstExcess;
 }
 
 /// How long [FrameTimingLog.establishBaseline] waits for the engine to flush a

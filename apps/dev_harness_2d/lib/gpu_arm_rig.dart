@@ -9,6 +9,7 @@
 //
 // ignore_for_file: avoid_print -- printing the numbers is what a rig is for.
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -41,7 +42,8 @@ enum GpuSpikeArm {
 
 /// One phase's timings, in milliseconds.
 class GpuPhaseReport {
-  GpuPhaseReport(this.arm, this.phase, this.build, this.raster, this.submits);
+  GpuPhaseReport(this.arm, this.phase, this.build, this.raster, this.submits,
+      {this.unalignedExcess = 0});
 
   final GpuSpikeArm arm;
   final String phase;
@@ -51,6 +53,27 @@ class GpuPhaseReport {
   /// GPU frames arm C submitted during the phase. Zero on a hold is the arm
   /// working: nothing changed, so nothing was re-rendered.
   final int submits;
+
+  /// Web only: how far the reported-frame count ran ahead of the pumped count.
+  /// Zero means the stream never shifted and the figures are aligned after
+  /// all. Anything else is the size of the ordinal ambiguity.
+  final int unalignedExcess;
+}
+
+/// Every line the rig prints, kept so the run can also *show* them.
+///
+/// **This exists because `print` is not readable on the web.** A dart2js
+/// profile build sends `print` to the browser console, which `flutter run`
+/// does not forward to its stdout, so a web run posts its numbers where no
+/// terminal can see them. Rendering the report into the widget tree makes one
+/// screenshot the readable artefact on every platform, which is also what the
+/// native runs already had for free.
+final ValueNotifier<List<String>> reportLines =
+    ValueNotifier<List<String>>(const <String>[]);
+
+void report(String line) {
+  print(line);
+  reportLines.value = <String>[...reportLines.value, line];
 }
 
 String gpuStats(List<double> ms) {
@@ -146,7 +169,7 @@ class GpuSpikeState extends State<GpuSpikeApp> {
       renderer = built;
       uploadMs = stopwatch.elapsedMicroseconds / 1000.0;
     });
-    print('GSPIKE collect+upload: walk ${walkMs.toStringAsFixed(1)} ms, '
+    report('GSPIKE collect+upload: walk ${walkMs.toStringAsFixed(1)} ms, '
         'total ${uploadMs.toStringAsFixed(1)} ms, '
         'segments=${collected.count}, '
         'buffer=${(collected.byteLength / (1024 * 1024)).toStringAsFixed(2)} MB, '
@@ -202,6 +225,39 @@ class GpuSpikeState extends State<GpuSpikeApp> {
                       Positioned.fill(
                         child: GpuArmView(renderer: built, camera: camera),
                       ),
+                    // **Only after the last phase, and that is not cosmetic.**
+                    // An overlay in the tree while a phase is running would be
+                    // laid out and painted inside the frames being measured.
+                    // It appears when the run is over and the numbers are
+                    // already taken.
+                    Positioned.fill(
+                      child: ValueListenableBuilder<List<String>>(
+                        valueListenable: reportLines,
+                        builder: (context, lines, _) {
+                          if (lines.isEmpty ||
+                              !lines.last.contains('GSPIKE done')) {
+                            return const SizedBox.shrink();
+                          }
+                          return ColoredBox(
+                            color: const Color(0xF2FFFFFF),
+                            child: SingleChildScrollView(
+                              child: Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: Text(
+                                  lines.join('\n'),
+                                  style: const TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 11,
+                                    height: 1.25,
+                                    color: Color(0xFF000000),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                   ],
                 );
               },
@@ -233,11 +289,11 @@ Future<void> runGpuSpike(
   final centre = Offset(viewport.width / 2, viewport.height / 2);
   final resident = state.segments!;
 
-  print('GSPIKE run: entities=$entities segments=${resident.count} '
+  report('GSPIKE run: entities=$entities segments=${resident.count} '
       'viewport=${viewport.width.toStringAsFixed(0)}x'
       '${viewport.height.toStringAsFixed(0)} '
       'frames=$frames repeats=$repeats');
-  print('GSPIKE note: arm C draws no joins, no caps, no antialiasing, no '
+  report('GSPIKE note: arm C draws no joins, no caps, no antialiasing, no '
       'fills and no text, and its dash spans are baked at the fit camera. '
       'Every one of those favours arm C.');
 
@@ -269,6 +325,7 @@ Future<void> runGpuSpike(
     await _pumpFrame();
 
     final framesAtStart = state.renderer?.frames ?? 0;
+    var unalignedExcess = 0;
     final log = FrameTimingLog()..arm();
     try {
       await log.establishBaseline(_pumpFrame);
@@ -277,19 +334,31 @@ Future<void> runGpuSpike(
         await log.pump(_pumpFrame);
       }
       await log.drain(_pumpFrame, upTo: frames);
-      if (log.sawBacklog) {
+      // **The refusal stands on native and is relaxed on web, deliberately
+      // and only there.** On the web the latch fires on arm A -- the plain
+      // painter, no GPU code anywhere near it -- so it is not reporting a
+      // defect in what is being measured. It is reporting that ordinal
+      // alignment does not hold on that platform. See
+      // `FrameTimingLog.debugTimingsUnaligned` for what is given up: these
+      // become a distribution over the phase window rather than a statement
+      // about the i-th pumped frame, and the excess is printed beside them.
+      if (!kIsWeb && log.sawBacklog) {
         throw StateError('GSPIKE ${a.label}/$name: the timing stream ran a '
             'backlog after the baseline, so every ordinal is off by an '
             'unknown amount. No figure from this phase is reportable.');
       }
+      final timings =
+          kIsWeb ? log.debugTimingsUnaligned : log.debugTimings;
       final build = <double>[];
       final raster = <double>[];
-      for (final t in log.debugTimings) {
+      for (final t in timings) {
         build.add(t.buildDuration.inMicroseconds / 1000.0);
         raster.add(t.rasterDuration.inMicroseconds / 1000.0);
       }
+      if (kIsWeb) unalignedExcess = log.debugWorstExcess;
       return GpuPhaseReport(a, name, build, raster,
-          (state.renderer?.frames ?? 0) - framesAtStart);
+          (state.renderer?.frames ?? 0) - framesAtStart,
+          unalignedExcess: unalignedExcess);
     } finally {
       log.disarm();
     }
@@ -304,19 +373,24 @@ Future<void> runGpuSpike(
       reports.add(await phase(
           a, 'zoom', (i) => state.camera.zoomAt(centre, 1.02)));
     }
-    print('GSPIKE --- repeat ${r + 1} of $repeats ---');
+    report('GSPIKE --- repeat ${r + 1} of $repeats ---');
     for (final rep
         in reports.skip(reports.length - GpuSpikeArm.values.length * 3)) {
-      print('GSPIKE ${rep.arm.label} | ${rep.phase} | build  '
+      report('GSPIKE ${rep.arm.label} | ${rep.phase} | build  '
           '${gpuStats(rep.build)}');
-      print('GSPIKE ${rep.arm.label} | ${rep.phase} | raster '
+      report('GSPIKE ${rep.arm.label} | ${rep.phase} | raster '
           '${gpuStats(rep.raster)}');
+      if (kIsWeb) {
+        report('GSPIKE ${rep.arm.label} | ${rep.phase} | UNALIGNED '
+            '(distribution over the phase window, not per pumped frame); '
+            'worst excess=${rep.unalignedExcess} frame(s)');
+      }
       if (rep.arm == GpuSpikeArm.gpu) {
-        print('GSPIKE ${rep.arm.label} | ${rep.phase} | '
+        report('GSPIKE ${rep.arm.label} | ${rep.phase} | '
             'gpu submits=${rep.submits} of $frames frames');
       }
     }
   }
 
-  print('GSPIKE done: ${reports.length} phase reports above.');
+  report('GSPIKE done: ${reports.length} phase reports above.');
 }

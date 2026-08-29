@@ -673,13 +673,21 @@ void main() {
       document: spikeDocument(),
       viewport: kMeasurementViewport,
       lineweightScale: kLineweightScale,
+      // **The error is caught and printed, not left unhandled.** On the web a
+      // dart2js profile build reports an unhandled async error as a bare
+      // minified `Error` with no message, which says nothing about what
+      // failed. Catching it is the difference between a diagnosable run and a
+      // stack trace of `main.dart.js` line numbers.
       onReady: (state) => unawaited(runGpuSpike(
         state,
         entities: kEntities,
         frames: kSpikeFrames,
         repeats: kSpikeRepeats,
         viewport: kMeasurementViewport,
-      )),
+      ).then<void>((_) {}, onError: (Object error, StackTrace stack) {
+        print('GSPIKE RUN FAILED: $error');
+        print(stack);
+      })),
       onFailed: (error, stack) {
         // Printed rather than thrown: a failure to reach flutter_gpu at all is
         // this spike's most likely outcome and its most useful finding.

@@ -4,7 +4,8 @@
 `6367e13` (the widget spike's tip). Its code is throwaway; this note is what
 the spike produced.
 
-**Status: answered, positive, and it reverses a result from this morning.**
+**Status: answered, positive, and it reverses a result from this morning.
+Extended the same day with a measured web arm** -- see the web section.
 The vector-replay spike rejected sharp gesture frames on per-frame cost. Moving
 the geometry to the GPU removes that cost. The question the human asked was
 whether a 2D CAD drawing layer could be built on `flutter_scene`; the answer
@@ -172,6 +173,163 @@ One-time collection and upload: **19.5 ms** walk at 84 K segments,
   thread.** At floor-plan scale it is 19.5 ms and invisible; at 500,000
   entities it is a one-second jank unless it moves off the platform thread.
 
+## The web arm: measured, and the line survives
+
+**This section was added after the first result.** The spike above concluded
+"no web without `flutter_scene`'s WebGL2 layer" from reading. The human's
+direction was that web *will* be supported, so the layer was measured rather
+than assumed.
+
+### How the technique actually works
+
+`flutter_scene` carries the shim internally, at
+`packages/flutter_scene/lib/src/gpu/gpu.dart`:
+
+```dart
+export 'stub/_gpu.dart'
+    if (dart.library.io) 'impeller/_gpu.dart'
+    if (dart.library.js_interop) 'web/_gpu.dart';
+```
+
+Native re-exports `package:flutter_gpu` verbatim -- the shim is free there, and
+this arm's native figures confirm it: zoom p50 went 0.52 / 0.63 through
+`flutter_gpu` directly to 0.18 / 0.49 through the shim, the same numbers within
+this rig's noise. Web is a parallel implementation, thirteen files and roughly
+130 KB of Dart, including a GLSL transpiler and a flatbuffer reader for the
+shader bundle.
+
+**The public `package:flutter_scene/gpu.dart` is a curated subset** -- shader,
+texture and vertex-format types for the `ShaderMaterial` workflow -- and it
+does **not** carry `DeviceBuffer`, `RenderPass`, `RenderPipeline` or a surface.
+This arm therefore imports `lib/src/`, which is off contract, and does so as a
+measuring instrument rather than as an architecture.
+
+**Driving `flutter_scene` properly instead was considered and rejected on its
+source.** Its instancing is *node-transform* instancing: `scene_encoder.dart`
+packs per-node transforms and binds them at `geometry.vertexStreamCount`. This
+arm's instance record is a segment -- two endpoints, a width and a colour --
+which is not a transform, so the scene-graph path would have to be fought
+rather than used.
+
+### Three things the port had to change, and one it did not
+
+1. **`createImageSurface` does not exist on the web backend.** The arm moved to
+   `createTexture` plus a render target, which exists on both.
+2. **`ShaderLibrary.fromAsset` throws on web** -- it is synchronous, web asset
+   loading is not. `loadShaderLibraryAsync` is on both backends.
+3. **The bundle must carry the OpenGL ES stage.** The web loader reads
+   `entry.openglEs` and runs `transpileGlslEs100To300` over it. The bundle
+   this spike compiles carries `#version 100` GLSL with `attribute`/`varying`,
+   which is exactly that input. **The shaders themselves did not change.**
+4. **What did not change: the frame stayed one-phase.** The web shim also
+   carries an *asynchronous* bridge (`Surface.snapshot`,
+   `presentTextureAsImage`, built on `ui_web.createImageFromTextureSource`),
+   and a two-phase render would have split the submit and the composite across
+   two frames and made the accounting unreadable. But web `Texture.asImage`
+   states it "matches flutter_gpu's synchronous `asImage`", and it does.
+
+### The instrument had to change, and refusing was the right default
+
+**The rig's own backlog latch fires on the web, on arm A** -- the plain
+painter, with no GPU code anywhere near it:
+
+> `GSPIKE A painter (untiled)/pan: the timing stream ran a backlog after the
+> baseline, so every ordinal is off by an unknown amount.`
+
+That is the instrument working. It is not reporting a defect in what is being
+measured; it is reporting that **ordinal alignment, which `FrameTimingLog` was
+built to guarantee on native, does not hold on the web.** The refusal stands on
+native and is relaxed on web only, through
+`FrameTimingLog.debugTimingsUnaligned`, and every web figure below is a
+**distribution over the phase window rather than a statement about the i-th
+pumped frame**. The worst excess is printed beside each row.
+
+**Wall-clock timing was considered first and rejected.** `pumpFrame` waits for
+vsync, so every frame cheaper than the refresh interval reads as the refresh
+interval -- and the entire question here is the difference between half a
+millisecond and three.
+
+**Two further web-only obstacles, recorded because they cost real time.**
+`print` on a dart2js profile build goes to the browser console, which
+`flutter run` does not forward to its stdout, so a web run posts its numbers
+where no terminal can read them; the rig now renders its report into the
+widget tree *after* the last phase, and a screenshot is the artefact. And an
+unhandled async error surfaces as a bare minified `Error` with no message, so
+the spike gate now catches and prints it.
+
+### The web numbers
+
+Chrome 151 profile, CanvasKit, 1400x900, 19,504 segments (1,500 entities),
+30 frames per phase, one repeat. **Unaligned**; worst excess in the last
+column. Milliseconds.
+
+| arm | phase | build p50 / p95 | raster p50 / p95 | excess |
+|---|---|---|---|---|
+| A painter | hold | 0.60 / 1.40 | 1.00 / 1.80 | 2 |
+| A painter | pan | 3.10 / 7.80 | 0.50 / 0.90 | 0 |
+| A painter | zoom | 2.40 / 3.50 | 0.50 / 1.80 | 2 |
+| B tiles | hold | 0.80 / 1.10 | 0.50 / 1.10 | 1 |
+| B tiles | pan | 1.10 / 7.70 | 0.50 / 1.10 | 1 |
+| B tiles | zoom | 0.50 / **52.30** | 0.30 / 1.40 | 2 |
+| C gpu | hold | 1.00 / 1.60 | 0.60 / 0.90 | 0 |
+| C gpu | pan | 0.80 / 2.00 | 0.30 / 1.00 | 0 |
+| C gpu | zoom | **0.50 / 0.70** | **0.20 / 0.40** | 0 |
+
+Arm C submitted 30 of 30 GPU frames on both pan and zoom, and 0 of 30 on the
+hold -- the same shape as native, and the same reason.
+
+And at the larger scale: **84,299 segments (15,000 entities, 2.89 MB)**, same
+browser and viewport, 30 frames per phase, two repeats. Collection and upload
+took a 13.0 ms walk and 64.5 ms in total.
+
+| arm | phase | build p50 / p95 | raster p50 / p95 | max build |
+|---|---|---|---|---|
+| A painter | pan | 8.70 / 21.90 · 9.00 / 12.20 | 1.20 / 2.70 · 1.30 / 1.80 | 33.10 |
+| A painter | zoom | 7.40 / 14.60 · 7.70 / 14.50 | 1.10 / 3.30 · 1.20 / 2.00 | 27.90 |
+| B tiles | zoom | 0.50 / 1.50 · 0.40 / 1.20 | 0.20 / 0.90 | **47.20 · 46.00** |
+| C gpu | pan | 0.50 / 1.10 | 0.30 / 0.80 | 1.80 |
+| C gpu | zoom | **0.50 / 1.20** | **0.20 / 0.60** | 4.40 |
+
+- **Arm C is flat on the web too.** Its zoom build p50 is 0.50 ms at 19,504
+  segments and 0.50 ms at 84,299 -- a 4.3x larger drawing for the same
+  per-frame cost, which is the same result the native arm gave across two
+  orders of magnitude. Arm A over the same step goes 2.40 → 7.40.
+- **Arm B's worst frame is the story on web.** Its zoom build p50 is excellent
+  (0.40-0.50 ms) and its *max* is **46-47 ms** in both repeats, against arm
+  C's 4.40. Whatever the tile cache does on a bake costs three frames' budget
+  when it happens, and it happens on web where it did not on native. Not
+  diagnosed here, and it is the strongest single argument in the resident
+  buffer's favour on this platform.
+
+**Read within the platform, not across it.** Plan 3d Task 13's rule applies
+unchanged: the desktop and web tables are two separate confirmations, not one
+table doubled.
+
+- **Arm C works on the web and is the cheapest arm on a zoom**, at 0.7 ms of
+  build plus raster against arm A's 2.9 ms.
+- **Arm C's p95 is the tightest of the three** (0.70 / 0.40). Arm B's zoom
+  build p95 is **52.30 ms** -- the tile cache spikes on web where it does not
+  on native, and that is not diagnosed here.
+- **Arm C's excess is 0 in every phase**, while A and B shift by up to two
+  frames. The relaxation that made this table possible did not touch arm C's
+  own numbers: they were aligned already.
+
+### What this settles about the package question
+
+The recommendation below was written before this section and said a GPU
+backend would have to run "through `flutter_scene`'s compatibility layer, not
+around it". That still holds, and it is now measured rather than read: **the
+same shader bundle, the same instanced draw and the same one-phase frame run
+under CanvasKit through that layer.**
+
+What it does *not* settle is which of two ways to use it -- depending on
+`flutter_scene` and importing `lib/src/`, off contract and pre-1.0, or
+reimplementing the technique behind our own conditional export. The second is
+smaller for us than the 130 KB it costs them, because they need a general GLSL
+transpiler for arbitrary user shaders and this project has two hand-written
+ones whose ES 300 forms could simply be authored. That decision is deliberately
+left open; it needed these numbers first, and now it has them.
+
 ## The web finding, and it decides the package question
 
 **Bare `flutter_gpu` cannot compile for the web.** `bin/cache/pkg/flutter_gpu/lib/gpu.dart`
@@ -247,11 +405,20 @@ web without `flutter_scene`'s WebGL2 layer**, and seven pieces of unbuilt work
 above — of which **dirty tracking under the ascending-handle draw-order
 invariant** is the one most likely to be harder than it looks.
 
-If it is taken further, the order that respects what is already known:
+If it is taken further, the order that respects what is already known.
+**Step 1 has since been done and its result is in the web section above** --
+the layer works, and arm C is the cheapest and steadiest arm on a web zoom.
 
-1. Measure `flutter_scene`'s WebGL2 drop-in on the web, against Plan 3d Task
-   13's rows. The web line is the constraint that most changes the design.
+1. ~~Measure `flutter_scene`'s WebGL2 drop-in on the web.~~ **Done.** The
+   remaining web question is not whether but *how*: depend on the shim through
+   an off-contract `lib/src/` import, or reimplement the technique behind our
+   own conditional export.
 2. Diagnose arm C's raster p95 and the per-arm drift before trusting any
-   gesture figure at 500,000 entities.
+   gesture figure at 500,000 entities. Add to that **arm B's 46-47 ms max
+   build on web**, which the web arm turned up and which is a defect in
+   today's shipping gesture path, not in anything this spike proposes.
 3. Design dirty tracking against the draw-order invariant **before** anything
    else is built, because it is the piece that can invalidate the approach.
+4. Decide what the web measurement instrument should be. The relaxation this
+   spike added is sound for a distribution and unsound for a per-frame claim,
+   and anything that becomes a gate needs better than that.
