@@ -472,6 +472,39 @@ void _addFillRegions(DraftDocument doc, int entityCount) {
 ///
 /// Inert at its default of `false`: an ordinary `flutter run`/`flutter
 /// drive` harness invocation is unaffected.
+/// The viewport every measurement in this harness is taken at: **1400x900
+/// logical**, which `macos/Runner/MainFlutterWindow.swift` pins the window to
+/// on every launch.
+///
+/// **This is not the size the design spec priced.** Plan 3i's design spec §5
+/// pins the measurement viewport at **1600x1200 logical at
+/// `devicePixelRatio` 2** and prices every one of its memory predictions
+/// against the 3200x2400 device rectangle that implies, saying in as many
+/// words that it is *not* the 800x600 test viewport the 2026-08-26 frame
+/// counts were taken at.
+///
+/// **This machine cannot provide 1600x1200.** The logical desktop is
+/// 1496x967 and the panel is 3456x2234, so at `devicePixelRatio` 2 even the
+/// widest scaling mode gives 1728x1117 -- the height never reaches 1200 in
+/// any mode. 1600x1200 logical is unreachable on this display.
+///
+/// **Ruling 20 chose this value**: the human was shown the trade -- an
+/// external display, the 800x600 nib default, or the largest window that
+/// fits -- and chose the largest that fits. So:
+///
+/// > **Every number taken at this size is NOT comparable to the design
+/// > spec's priced predictions**, and is not comparable to any earlier figure
+/// > from this harness either, because those were taken at the nib default of
+/// > 800x600. A figure from a run at this viewport must be published with the
+/// > viewport beside it, and §5's memory predictions remain untested.
+///
+/// A reader who finds a number from this harness and follows it back to this
+/// constant has to be able to learn all of that here, which is why the
+/// comment is this long. [reportR2Window] prints the *real* window on every
+/// run and warns when it is not this size, so a figure can never be taken at
+/// a viewport nobody recorded.
+const Size kMeasurementViewport = Size(1400, 900);
+
 const bool kRunR2 = bool.fromEnvironment('RUN_R2');
 
 void main() {
@@ -523,8 +556,12 @@ Future<void> _driveR2(
       viewport);
   await _pumpFrame();
 
-  print('R2 app-run: window=${viewport.width.toStringAsFixed(0)}x'
-      '${viewport.height.toStringAsFixed(0)} dpr=${view.devicePixelRatio}');
+  // Every `RUN_R2` run, not only the ones that run a zoom arm: the window
+  // line and the mismatch warning against [kMeasurementViewport] come out
+  // together. R2's own pan and zoom phases are as viewport-dependent as the
+  // tile phase is.
+  reportR2Window(viewport, kMeasurementViewport,
+      devicePixelRatio: view.devicePixelRatio);
 
   // R2's fitted camera, held so the `tile zoom` phase below can restart from
   // it — [runR2Rig] moves `camera` through its own 240-frame script, and by
@@ -545,6 +582,10 @@ Future<void> _driveR2(
     pumpFrame: _pumpFrame,
     settle: _settle,
     panStep: kPanStep,
+    // The real window, not [kMeasurementViewport]: R2's zoom step anchors at
+    // the centre of the viewport it is actually running in. Handing it the
+    // pinned size would reintroduce the hardcoded anchor by another name.
+    viewport: viewport,
   );
 
   // The `tile zoom` phase (Plan 3i, Task 11): `ZOOM_ARMS` repeats of the
@@ -553,11 +594,13 @@ Future<void> _driveR2(
   // `runR2Rig` describe the same starting state. Off by default -- see
   // [kZoomArms]. What the repeats are *for* is [kZoomMode].
   if (tileCache != null && kZoomArms > 0) {
-    // The pinned reference viewport (§5), not `viewport` above -- see
+    // The pinned measurement viewport, not `viewport` above -- see
     // `runTileZoomPhase`'s doc comment for what a differently sized real
-    // window means for these numbers.
-    const zoomViewport = Size(1600, 1200);
-    warnIfZoomViewportMismatch(viewport, zoomViewport);
+    // window means for these numbers, and [kMeasurementViewport] for why the
+    // pinned size is 1400x900 and not the design spec's 1600x1200. The
+    // mismatch warning is not repeated here: `reportR2Window` above fires it
+    // on every run, arm or no arm.
+    const zoomViewport = kMeasurementViewport;
 
     // One arm: back to the fitted camera, then the whole pinned script. The
     // camera reset is here rather than inside the phase because the arms of a
@@ -709,7 +752,7 @@ class HarnessApp extends StatefulWidget {
 class _HarnessAppState extends State<HarnessApp> {
   late final SpatialIndex index = SpatialIndex(widget.document);
   late final CameraController camera = CameraController(
-      ViewportTransform.fit(widget.document.extents, const Size(1600, 1200)));
+      ViewportTransform.fit(widget.document.extents, kMeasurementViewport));
   final GlobalKey<DraftCanvasState> _canvasKey = GlobalKey<DraftCanvasState>();
 
   /// The zoom factor already applied from the trackpad gesture in progress.

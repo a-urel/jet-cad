@@ -214,6 +214,11 @@ void main() {
       pumpFrame: () => tester.pump(const Duration(milliseconds: 16)),
       settle: tester.pumpAndSettle,
       panStep: kPanStep,
+      // The test view's own size, not [kMeasurementViewport]: the widget-test
+      // row is taken in whatever synthetic viewport the binding provides, and
+      // the zoom anchor has to be that viewport's centre or the row describes
+      // a gesture no operator could make.
+      viewport: tester.view.physicalSize / tester.view.devicePixelRatio,
     );
   });
 

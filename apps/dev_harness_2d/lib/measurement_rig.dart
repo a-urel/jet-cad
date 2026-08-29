@@ -335,6 +335,68 @@ void printTextCounters(DraftPainter painter, CanvasDrawSink sink,
       'liveMetrics=${m.liveMetricsCount}');
 }
 
+/// The screen point R2's own zoom step zooms about: the **centre of the
+/// viewport it is given**.
+///
+/// This used to be a hardcoded `Offset(800, 600)`, written when the harness
+/// was believed to run at the design spec's pinned 1600x1200 reference
+/// viewport, of which it is the centre. The harness never created that
+/// window (Ruling 20), so the constant was the centre of a viewport that
+/// never existed: at 1400x900 it sits off-centre and low-right, and at the
+/// nib default of 800x600 -- the size every figure this harness has ever
+/// produced was actually taken at -- it is the bottom-right *corner*, where a
+/// zoom drags the whole document across the screen instead of scaling about
+/// what the operator is looking at.
+///
+/// A centre focus is deliberate here and is **not** the same choice as
+/// [zoomFocusFor]'s: this is R2's general-purpose zoom phase, whose 240-frame
+/// script six plans have published rows from, not the tile phase whose spec
+/// pins an off-centre focus so the rebase residual is exercised.
+Offset r2ZoomAnchorFor(Size viewport) =>
+    Offset(viewport.width / 2, viewport.height / 2);
+
+/// R2's zoom step: 120 frames alternating a 1.03 zoom in and a 0.97 zoom out
+/// about [r2ZoomAnchorFor], one camera change per frame.
+///
+/// Lifted out of [runR2Rig] so the anchor can be tested at all. [runR2Rig]
+/// opens with [refuseDebugMode] and `flutter test` is a debug build, so no
+/// unit test can reach the loop while it lives inside the rig -- and an
+/// anchor that is wrong by 500 logical pixels changes every number the zoom
+/// phase reports without changing the shape of the transcript.
+Future<void> runR2ZoomStep({
+  required CameraController camera,
+  required Size viewport,
+  required Future<void> Function() pumpFrame,
+}) async {
+  final anchor = r2ZoomAnchorFor(viewport);
+  for (var i = 0; i < 120; i++) {
+    camera.zoomAt(anchor, i.isEven ? 1.03 : 0.97);
+    await pumpFrame();
+  }
+}
+
+/// The one line every `RUN_R2` run prints about the window it is running in,
+/// **and the mismatch warning that belongs beside it**.
+///
+/// The two are emitted together, by one function, on purpose. The warning
+/// used to live at the `tile zoom` call site inside `main.dart`'s
+/// `ZOOM_ARMS > 0` branch, which is off by default: a plain `RUN_R2` run at
+/// the wrong window printed its size and said nothing else, and the operator
+/// had to know what size to expect in order to notice. R2's own pan and zoom
+/// phases are just as viewport-dependent as the tile phase -- the anchor
+/// [r2ZoomAnchorFor] derives is one of the things that moves -- so the check
+/// belongs on every run, not on the arms.
+///
+/// Keeping the warning welded to the window line is what makes that hard to
+/// undo: a caller cannot keep the line the transcript is read by and quietly
+/// drop the warning.
+void reportR2Window(Size real, Size pinned,
+    {required double devicePixelRatio}) {
+  print('R2 app-run: window=${real.width.toStringAsFixed(0)}x'
+      '${real.height.toStringAsFixed(0)} dpr=$devicePixelRatio');
+  warnIfZoomViewportMismatch(real, pinned);
+}
+
 /// R2: 120 frames of pan, then 120 of zoom across three scale bands, then one
 /// forced repaint whose counters are the ones printed.
 ///
@@ -364,6 +426,7 @@ Future<void> runR2Rig({
   required Future<void> Function() pumpFrame,
   required Future<void> Function() settle,
   required double panStep,
+  required Size viewport,
 }) async {
   refuseDebugMode();
   final timings = <FrameTiming>[];
@@ -381,10 +444,8 @@ Future<void> runR2Rig({
       camera.panBy(const Offset(-7, -3));
       await pumpFrame();
     }
-    for (var i = 0; i < 120; i++) {
-      camera.zoomAt(const Offset(800, 600), i.isEven ? 1.03 : 0.97);
-      await pumpFrame();
-    }
+    await runR2ZoomStep(
+        camera: camera, viewport: viewport, pumpFrame: pumpFrame);
     await settle();
     // All three counters now mean the same thing: this frame. dashSpanCount
     // and collapsedDashCount reset themselves every paint; canvasCallCount
@@ -701,27 +762,27 @@ const double kZoomFactor = 1.03;
 Offset zoomFocusFor(Size viewport) =>
     Offset(viewport.width * 0.30, viewport.height * 0.70);
 
-/// Warns, loudly, when the window a caller is about to run [runTileZoomPhase]
-/// against is not [pinned] -- the 1600x1200 logical reference every number in
-/// design spec §5, and every figure in this plan's measurement notes, is
-/// priced against.
+/// Warns, loudly, when the window a measurement run is about to happen in is
+/// not [pinned] -- the size every number the run produces is priced against.
 ///
-/// **A warning, not a throw.** [runTileZoomPhase] accepts any finite viewport
+/// **A warning, not a throw.** Every phase here accepts any finite viewport
 /// and still produces a report -- refusing to run would trade a labelled
 /// number for no number at all, which is worse for an operator mid-session
-/// than a number they have to read the label on. Before this check, the only
-/// way to notice a mismatch was the unrelated `R2 app-run: window=...` print
-/// upstream -- easy to have scrolled past by the time the zoom arm's numbers
-/// print. This check sits at the call site itself, so the warning lands right
-/// next to the numbers it is warning about.
+/// than a number they have to read the label on.
+///
+/// **Called from [reportR2Window], on every run.** It used to be called only
+/// from `main.dart`'s `ZOOM_ARMS > 0` branch, which is off by default, so the
+/// commonest run there is -- a plain `RUN_R2` -- printed its window size and
+/// then said nothing about it being the wrong one. See [reportR2Window] for
+/// why the warning and the window line are now emitted together.
 void warnIfZoomViewportMismatch(Size real, Size pinned) {
   if (real == pinned) return;
-  print('  !!! WARNING: tile zoom phase run at window='
+  print('  !!! WARNING: measurement run at window='
       '${real.width.toStringAsFixed(0)}x${real.height.toStringAsFixed(0)}, '
       'not the pinned reference ${pinned.width.toStringAsFixed(0)}x'
-      '${pinned.height.toStringAsFixed(0)} -- the numbers below are measured '
-      'at the WRONG VIEWPORT and are not comparable to design spec §5 or to '
-      'any run at the pinned size !!!');
+      '${pinned.height.toStringAsFixed(0)} -- the numbers from this run are '
+      'measured at the WRONG VIEWPORT and are not comparable to any run at '
+      'the pinned size !!!');
 }
 
 /// Every `FrameTiming` reported while this log is armed, in delivery order,
@@ -1268,9 +1329,10 @@ class ZoomReport {
 /// **[viewport] is the pinned reference size, 1600x1200 logical at
 /// `devicePixelRatio` 2 -- not necessarily the real window.** Every number
 /// in the design spec's §5 is priced against that size; [zoomFocusFor] turns
-/// it into a screen-space anchor the same way `runR2Rig`'s own zoom step
-/// anchors at the fixed `Offset(800, 600)` (that phase's viewport centre)
-/// regardless of what window the app is actually running in. A caller on a
+/// it into a screen-space anchor, the same shape of derivation `runR2Rig`'s
+/// own zoom step makes through [r2ZoomAnchorFor] -- except that this phase's
+/// anchor comes from the size the spec priced, and R2's comes from the window
+/// actually in use. A caller on a
 /// real window of a different size gets a phase that still runs -- `zoomAt`
 /// accepts any finite, positive factor at any screen point -- but the
 /// focal point then sits at a different fraction of the *real* viewport than
