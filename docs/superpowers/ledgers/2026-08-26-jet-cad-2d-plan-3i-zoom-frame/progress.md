@@ -1070,3 +1070,33 @@ three.
   including `KEEP_c8_DEGENERATE_run.log`, the Ruling 21 run taken, read and
   discarded. Committed BEFORE anything else was staged. The git-ignored original
   was NOT deleted; the controller clears it after verifying.
+
+PLAN 3i CLOSED (2026-08-28). Task 14 complete at 348a6c3; ledger archived at
+5c886a2 BEFORE the workspace was cleared, with the measurement logs beside it.
+Exit gate: **9 of 11 criteria pass, 2 miss** -- criterion 8 (median 2.328
+against a 2.4 gate) and criterion 9 (pan p95 mean 22.12 against Plan 3h's
+16.43, non-overlapping sets). Neither threshold was moved and neither miss was
+softened. 39 mutants across 36 log entries, 37 dead; survivors M8 (declared
+before it was fired) and M24 (provably unkillable -- the property it targets is
+held by the rest bake's up-front pricing, not by the stamp it deletes).
+Final gate, verified by the controller: jet_cad_2d 797, jet_cad_2d_flutter 413
+with 1 skip, dev_harness_2d 72; analyze and format clean in all three.
+
+Carried out of this plan, none of them fixable from inside it:
+ - **Criterion 9's regression is measured but not diagnosed.** Same work,
+   byte-identical counters, 1.35x the cost per expensive pan frame. Two
+   candidates named and neither ruled out; one (`_lastChangeWasPan`) is a
+   deliberate correctness fix that closed a one-frame background flash, so a
+   later plan cannot simply revert it.
+ - **Ruling 20 is broader than Plan 3i.** The harness never set its own window
+   until 2026-08-28, so EVERY figure it has ever produced -- Plan 3g's and 3h's
+   included -- was taken at the nib default of 800x600, not at any size a spec
+   priced. Check this before another plan reasons from those numbers.
+ - The spec's memory pricing at 3200x2400 is untested and cannot be tested on
+   this display.
+ - `ledgers/README.md`'s table was already missing rows for 3e, 3f, 3f.1 and
+   3g. Plan 3i's row was added; the four were not backfilled.
+ - `bakeCount` still mixes units -- bands on the rest path, tiles on the
+   budgeted path. Reported across two plans now, not fixed.
+ - **Gap G1, the naked-eye seam check, is still owed by a human** and needs no
+   hardware this machine lacks.
