@@ -16,7 +16,73 @@ void main() {
   });
 
   test('reports the byte length the instance count implies', () {
-    expect(
-        ResidentGeometry.byteLengthFor(59875), 59875 * kFloatsPerInstance * 4);
+    // The literal, not the production expression restated: 59875 records *
+    // 10 floats/record * 4 bytes/float. Asserting `59875 * kFloatsPerInstance
+    // * 4` here would move in lockstep with a broken `kFloatsPerInstance` (a
+    // stride mismatch against the shader's 40-byte record) and stay green.
+    expect(ResidentGeometry.byteLengthFor(59875), 2395000);
+  });
+
+  group('kCornerVertices', () {
+    test('is six vertices -- two triangles, not a strip', () {
+      // The exact list, not just its length: this is the only place this
+      // data is reachable without a GPU, so the assertion has to carry the
+      // whole thing rather than a derived property a wrong constant could
+      // still satisfy.
+      expect(ResidentGeometry.kCornerVertices, <double>[
+        0, -1, 0, 1, 1, -1, //
+        1, -1, 0, 1, 1, 1, //
+      ]);
+    });
+
+    test('covers exactly four distinct corners', () {
+      final points = <(double, double)>{
+        for (var i = 0; i < ResidentGeometry.kCornerVertices.length; i += 2)
+          (
+            ResidentGeometry.kCornerVertices[i],
+            ResidentGeometry.kCornerVertices[i + 1]
+          ),
+      };
+      expect(points, hasLength(4),
+          reason: 'six vertices sharing one diagonal make two triangles of '
+              'one quad; four distinct points is what that claim means');
+    });
+  });
+
+  group('kStrokeVertexLayout', () {
+    test('slot 0 carries corner, per vertex, stride 8', () {
+      final corner = ResidentGeometry.kStrokeVertexLayout.buffers[0];
+      expect(corner.strideInBytes, 8);
+      expect(corner.stepMode, VertexStepMode.vertex);
+      expect(corner.attributes, hasLength(1));
+      expect(corner.attributes.single.name, 'corner');
+      expect(corner.attributes.single.offsetInBytes, 0);
+    });
+
+    test(
+        'slot 1 carries the instance record at the record\'s own offsets, '
+        'per instance, stride 40', () {
+      final instance = ResidentGeometry.kStrokeVertexLayout.buffers[1];
+      // Stride: kFloatsPerInstance * 4. A wrong stride here disagrees with
+      // instance_record.dart's own 10-float layout silently, since nothing
+      // in the shader bundle enforces it from the Dart side.
+      expect(instance.strideInBytes, kFloatsPerInstance * 4);
+      expect(instance.stepMode, VertexStepMode.instance);
+
+      // Offsets are the record's own -- [kind, x0, y0, x1, y1, halfWidth, r,
+      // g, b, a] -- not impellerc's single-combined-buffer reflection
+      // (corner@0, kind@8, p0@12, p1@20, half_width@28, color@32), which
+      // describes a layout this code does not use.
+      final offsetsByName = {
+        for (final a in instance.attributes) a.name: a.offsetInBytes,
+      };
+      expect(offsetsByName, {
+        'kind': 0,
+        'p0': 4,
+        'p1': 12,
+        'half_width': 20,
+        'color': 24,
+      });
+    });
   });
 }
