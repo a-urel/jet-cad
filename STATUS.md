@@ -1,19 +1,40 @@
 # jet-cad — project status
 
-**Last updated:** 2026-08-26
-**Verified against:** `main` at `1aafb39` — the tile-settle fix, landed after
-Plan 3h from looking at the running window rather than from any plan. Plan 3h
-itself ends at `122b6e3`. **Plan 3h ran directly on `main`,
-`f642202..122b6e3`, eight tasks (the eighth split into 8a and 8b), nothing in
+**Last updated:** 2026-08-29
+**Verified against:** `main` at `dbc31e8` — Plan 3i's results note, the last
+commit of that plan's fourteen tasks. **Plan 3i's last *code* commit is
+`7aef7f9`**; everything after it is documentation. **Plan 3i ran directly on
+`main`, `468e310..dbc31e8`, fourteen tasks, and is DONE — nothing in
 flight** — no worktree, on the human's standing consent, the same as Plans
-3e, 3f, 3f.1 and 3g. The tree is clean apart from the three files the traps
-below say never to commit. Every suite count below was produced by running
-that suite on this tree on 2026-08-25 or 2026-08-26, not by reading a
-report — with the one exception the table marks as not re-run.
+3e, 3f, 3f.1, 3g and 3h. Plan 3h itself ends at `122b6e3`; `1aafb39` is the
+tile-settle fix that landed between the two from looking at the running window
+rather than from any plan. The tree is clean apart from the three files the
+traps below say never to commit. Every suite count below was produced by
+running that suite on this tree on 2026-08-29, not by reading a report — with
+the one exception the table marks as not re-run.
 
 ---
 
 ## TL;DR — where you left off
+
+**Plan 3i (the zoom frame) is DONE, fourteen tasks, worked directly on `main`
+at `468e310..dbc31e8`, nothing in flight. Its exit gate is 9 of 11 — criteria
+8 and 9 MISS, and neither threshold was moved.** Criterion 8 reads a median
+ratio of **2.328 against a gate of 2.4** at n=9 interleaved, which is the
+answer to Plan 3h's open question: 2.35 was real, not noise — and the gate
+sits *inside* the measurement's own noise, so no sample size settles it.
+Criterion 9 **regresses**: `tile pan` p95 reads 20.90 / 21.75 / 23.70 ms
+against 3h's 19.86 / 15.99 / 13.43, non-overlapping sets, 1.35x on means, with
+every tile counter byte-identical to 3h's. It is measured and **not
+diagnosed**. **The spec declined level-of-detail geometry** — see
+[Plan 3i](#plan-3i--done-14-of-14-exit-gate-9-of-11). Thirty-nine mutants
+fired, thirty-seven dead, two survivors (M8 declared, M24 provable).
+
+Results note:
+[docs/superpowers/notes/2026-08-26-plan-3i-results.md](docs/superpowers/notes/2026-08-26-plan-3i-results.md).
+Mutation log:
+[docs/superpowers/notes/plan-3i-mutation-log.md](docs/superpowers/notes/plan-3i-mutation-log.md) —
+it opens with a summary table naming every mutant, its verdict and its gate.
 
 **Plan 3h (the fallback walk and its instrument) is done, worked directly on
 `main`, nothing in flight — and its headline criterion MISSES.** Criterion 3,
@@ -114,12 +135,12 @@ turned out to be wrong. See [What Plan 3d leaves open](#what-plan-3d-leaves-open
 
 Plan 3c (**text**) is **merged into `main`** at `52c7a7b`, exit gate passing.
 
-| Suite | State (on `main` at `122b6e3`, run, not read off a report) |
+| Suite | State (on `main` at `dbc31e8`, run 2026-08-29, not read off a report) |
 |---|---|
 | `packages/jet_cad_2d` — engine | **797 tests, all pass**, analyze/format clean |
-| `packages/jet_cad_2d_flutter` — widgets | **372 tests pass, 1 skipped**, analyze/format clean |
-| `flutter test --tags golden` | **35 pass**, no pre-existing PNG regenerated |
-| `apps/dev_harness_2d` | analyze/format clean |
+| `packages/jet_cad_2d_flutter` — widgets | **413 tests pass, 1 skipped**, analyze/format clean |
+| `flutter test --tags golden` | **35 pass** as of `122b6e3`; **NOT re-run on 2026-08-29** |
+| `apps/dev_harness_2d` | **72 tests, all pass** (`flutter test --concurrency=1`), analyze/format clean |
 | `benchmark/query_throughput.dart` | **NOT RE-RUN on 2026-08-25.** Last read 2026-08-23: **GATE: PASS**, every gated row under its threshold, `snap at dirty threshold` included (p50 0.552 ms against 1.0 ms). That row is Plan 2's carried failure and it is a **timing on a shared machine**: recorded as passing that day, not declared fixed |
 
 The widget suite's one skip is `test/rig/paint_microbench_test.dart`, skipped at
@@ -427,37 +448,78 @@ two fixed (`fc05076`, `967fa3b`), two measured and deliberately left for 3i.
 Read them before writing 3i's spec:
 [After Plan 3h](#after-plan-3h--what-the-window-showed-2026-08-26).
 
-**Plan 3i is IN FLIGHT on `main`, 12 of 14 tasks done plus the code halves of
-12 and 13.** Only the *device* halves of Tasks 12 and 13 are left, and they are
-blocked on the machine and not on the code — see
-[Plan 3i in flight](#plan-3i--in-flight-11-of-14) immediately below. **Read
-that before touching the tile cache**: the spec declined level-of-detail
-geometry, so the paragraph after it, written before 3i's spec existed, no
-longer describes what 3i is doing.
+**Plan 3i is DONE on `main`, all fourteen tasks, exit gate 9 of 11.** See
+[Plan 3i](#plan-3i--done-14-of-14-exit-gate-9-of-11) immediately below. **Read
+that before touching the tile cache**: the spec **declined** level-of-detail
+geometry, so the numbered paragraph further down, written before 3i's spec
+existed, does not describe what 3i did — the correction is at the head of the
+3i section and G3 is on the open-gap list with the condition that reopens it.
 
-**Then Plan 3j.** Plan 3h did not choose an order and each is independent of
-the other; **the human chose 3i on 2026-08-26**, after the zoom measurements
-below landed in its scope.
+**A resumer's ledger chore: none outstanding.** Plan 3i's `.superpowers/sdd/`
+material is archived at
+[docs/superpowers/ledgers/2026-08-26-jet-cad-2d-plan-3i-zoom-frame/](docs/superpowers/ledgers/2026-08-26-jet-cad-2d-plan-3i-zoom-frame/),
+with the raw `KEEP_*.log` measurement logs behind every published figure
+beside it — including `KEEP_c8_DEGENERATE_run.log`, the run that was taken,
+read and discarded. **The ordering is the lesson: archive onto the branch
+before the workspace is deleted, never after.**
+
+**Next is Plan 3j** — the 192 MiB vertex buffer, below. Plan 3h did not choose
+an order between 3i and 3j and each is independent of the other; **the human
+chose 3i on 2026-08-26**, after the zoom measurements below landed in its
+scope. **3i leaves two things a later plan should pick up**: criterion 9's
+regression, measured and not diagnosed, and the spec's §5 memory pricing,
+untested because the reference viewport is unreachable on this machine
+(Ruling 20).
 
 ---
 
-## Plan 3i — in flight, 12 of 14 plus two code halves
+## Plan 3i — done, 14 of 14, exit gate 9 of 11
 
 **Spec:** [2026-08-26-jet-cad-2d-plan-3i-zoom-frame-design.md](docs/superpowers/specs/2026-08-26-jet-cad-2d-plan-3i-zoom-frame-design.md),
 written 2026-08-26 and revised twice against five external reviews.
 **Plan:** [2026-08-26-jet-cad-2d-plan-3i-zoom-frame.md](docs/superpowers/plans/2026-08-26-jet-cad-2d-plan-3i-zoom-frame.md).
-**Range:** `468e310..cf0c425`, thirty-four commits, directly on `main`, no
+**Results:** [2026-08-26-plan-3i-results.md](docs/superpowers/notes/2026-08-26-plan-3i-results.md).
+**Mutation log:** [plan-3i-mutation-log.md](docs/superpowers/notes/plan-3i-mutation-log.md).
+**Ledger:** [2026-08-26-jet-cad-2d-plan-3i-zoom-frame/](docs/superpowers/ledgers/2026-08-26-jet-cad-2d-plan-3i-zoom-frame/), **21 numbered rulings**.
+**Range:** `468e310..dbc31e8`, directly on `main`, no
 worktree, on the human's standing consent — the arrangement of 3e through 3h.
 Executed with subagent-driven development: a fresh implementer per task, an
 independent reviewer after each, and the controller running the full gate
 itself after every task.
 
-**G3 is NOT this plan's subject, and the spec says why.** The human chose a
-map-application target — *the gesture stays smooth even if what it shows is
-stale, and the drawing snaps to full resolution when the gesture ends* — and
-under that target a correct frame during a pinch is never drawn, so the
-32.06 ms it costs stops blocking. **G3 becomes necessary the day the target
-changes to correct geometry while the fingers are still moving.**
+**The exit gate is 9 of 11, and the two misses stand.**
+
+- **Criterion 8 MISSES**: the median ratio is **2.328 against a gate of 2.4**,
+  at n=9 interleaved, 500,000 entities, 800x600. Mean 2.407, range 1.693 to
+  3.088, four of nine pairs at or above 2.4. **This answers Plan 3h's open
+  question**: 2.35 was real, not noise — n=9 puts the median in essentially
+  the same place — but the distribution straddles the gate, so **no sample
+  size settles "2.35 or 2.4"; the gate sits inside the measurement's own
+  noise.** The `tile hold` control drifted +9.1% toward arm B, an order of
+  magnitude below the effect; 3h's blocked ordering had produced an
+  order-of-magnitude drift on the same inert phase.
+- **Criterion 9 MISSES**: `tile pan` p95 reads 20.90 / 21.75 / 23.70 ms
+  against 3h's 19.86 / 15.99 / 13.43. **The sets do not overlap**; 1.35x on
+  means. `tile hold` did not regress, and every counter (`bakes=14 blits=1582
+  liveDraws=10 liveTiles=26 tileBytes=27262976`) matches 3h's exactly — **the
+  same work, at a higher cost per expensive frame.** Two candidates are named
+  and not chosen between: the rest-gate bookkeeping every frame now performs,
+  and the `_lastChangeWasPan` frame the fix wave added, which converts the
+  frame a pan stops on from a composite blit into a live walk. **Measured, not
+  diagnosed.**
+
+**Criterion 3 passes as `settleFrames == 2`, not `== 1`** — Ruling 15 below;
+that is a spec contradiction resolved, not a threshold moved.
+
+**G3 was NOT this plan's subject, and the spec says why. The spec DECLINED
+level-of-detail geometry.** The human chose a map-application target — *the
+gesture stays smooth even if what it shows is stale, and the drawing snaps to
+full resolution when the gesture ends* — and under that target a correct frame
+during a pinch is never drawn, so the 32.06 ms it costs stops blocking.
+**G3 stays open, and it becomes necessary the day the target changes to
+correct geometry while the fingers are still moving.** Any older text in this
+file describing 3i as *delivering* level-of-detail geometry predates 3i's spec
+and is wrong.
 
 **What landed.** A tiled frame now has two regimes. A **moving** frame — one
 whose quantised camera changed, or that has not yet seen two unchanged frames
@@ -469,19 +531,16 @@ tile set's own area — `visibleKeys` yields a full rectangle — so a single
 source plus the tiles sliced from it peaks at exactly `kTileCacheBytes` with
 no headroom.
 
-**Blocked, and it is the machine.** At `cf0c425` the laptop reads
-`lowpowermode 1` and "Now drawing from 'Battery Power'". Either alone
-invalidates a frame-timing measurement and Plan 3h's record documents losing
-time to each separately. **Tasks 12 and 13 resume when `pmset -g | grep
-lowpowermode` reads 0 and `pmset -g ps` says AC Power.** Nothing about the
-code is waiting.
+**Suites at `dbc31e8`,** each run rather than read from a report: **797**
+engine, **413** widget with 1 pre-existing skip, **72** harness
+(`flutter test --concurrency=1`). Analyze and format clean in all three.
 
-**Suites at `cf0c425`,** each run by the controller rather than read from a
-report: **797** engine, **413** widget with 1 pre-existing skip, **47**
-harness. Analyze and format clean in all three.
-
-**Twenty-four mutants fired so far.** M1-M7, M9-M23 killed (with M4b, M6b,
-M9b, M19a-e, M22b and M22c as sub-arms). **M24 survived and provably must** --
+**Thirty-nine mutants fired, thirty-seven dead, two survivors.** The mutation
+log opens with a summary table naming every one, its verdict and its gate. Of
+the spec's own eleven, **ten died and M8 is the declared survivor** — the exit
+gate's mutation clause met exactly; the other twenty-eight came from
+reviewers, fix waves and the whole-branch review. **M24 survived and provably
+must** --
 the ceiling property it targets is held by the rest bake's up-front pricing,
 not by the recency stamp it deletes, so the gating arm cannot be built; the
 derivation is in the log, with the note that relaxing the pricing to count only
@@ -542,7 +601,8 @@ one of them would have become a retraction had the numbers been taken first.
    arms under labels that read exactly like the interleaved measurement, with
    the flag never flipped and every ratio at 1.00.
 
-**Two rulings a later reader must not mistake for drift.**
+**Five of the ledger's twenty-one rulings a later reader must not mistake for
+drift.** The other sixteen are in the archived ledger's `progress.md`.
 
 - **Ruling 14 — the plan pinned two interleaved measurements and built no way
   to run either.** Criterion 4 alternates a rest-bake arm with a "rest bake
@@ -571,6 +631,74 @@ one of them would have become a retraction had the numbers been taken first.
   any device run**, so there is no result it could have been fitted to; the
   results note must carry the reading and the arithmetic so a reader can
   disagree without re-deriving it.
+- **Ruling 17 — the controller's brief was wrong and the implementer's
+  pushback was right**, recorded because a brief that would have broken a spec
+  decision is worth more as a record than as a silent correction. Fix wave A's
+  brief said to gate the moving-frame fall-through on `!carryOverCovers`; that
+  would have made **every zoom-out frame pay the full-viewport live walk D3
+  names, prices at 31.5–41.6 ms and rejects in as many words.** The shipped
+  condition is `scaleChanged = !identical(incoming, _gridFor(...))`, which is
+  exactly spec D1's definition of *moving*, and the reviewer checked it is not
+  narrower than the defect on the three sequences the controller named.
+- **Ruling 20 — the spec's pinned 1600x1200 reference viewport is
+  UNREACHABLE on this machine, and criteria 2 and 4 were measured at 1400x900
+  by the human's decision.** The logical desktop is 1496x967 and the panel
+  3456x2234, so at dpr 2 the widest scaling gives 1728x1117 and the height
+  never reaches 1200 in any mode. The smoke run also found that **nothing in
+  the harness had ever set the window**: every figure it has ever produced was
+  taken at the nib default of 800x600 while `main.dart` fitted its camera to
+  `Size(1600, 1200)` — **the code had always assumed a window it never
+  created.** Three options were put to the human with the trade stated before
+  they chose. **Consequence, not buried: spec §5's memory pricing — 48 MiB of
+  tiles, 8 MiB bands, a 56 MiB peak, all priced against the 3200x2400 device
+  rectangle — remains untested**, and criterion 7's ceiling holding at the
+  sizes tested is the weaker statement that was actually earned.
+- **Ruling 21 — criterion 8's first n=9 run was DEGENERATE and its numbers
+  were not published.** The arms were wired around the **zoom** phase, where
+  `debugFullViewportQuery`'s only effect — the live fallback's query extent —
+  never runs, because a moving frame blits the composite and returns:
+  `gestureLiveDraws=0` in all eighteen arms and the two arms were
+  indistinguishable. **This is the 1.00 that Ruling 14 exists to prevent,
+  arriving through a different door**: not "the flag was never flipped" but
+  "the flag was flipped on code that never runs". Root cause was the
+  controller's brief — Plan 3h's criterion 3 measured the **pan** phase. **The
+  irony is exact: the zoom phase has no live walk because this plan removed
+  it, and criterion 1 scored that as a PASS in the same session.** The
+  discarded log is kept as `KEEP_c8_DEGENERATE_run.log` beside the archived
+  ledger and is named in the results note as a measurement taken, read and
+  discarded.
+
+**Gaps this plan accepted, and the new ones this plan produced.**
+
+Accepted by the spec, each ungated on purpose:
+
+- **G3 — level-of-detail geometry, still open.** After this plan it blocks
+  nothing: a correct frame during a gesture is still 32–40 ms at 500,000
+  entities, and this plan does not make that frame faster, it stops drawing
+  it during a gesture. **G3 becomes necessary the day the target changes to
+  correct geometry while the fingers are still moving.**
+- **The zoom-out background ring.** D3 leaves it, by the human's decision.
+  What it looks like at speed is a judgement for a human with the window open,
+  and no criterion here measures it.
+- **An edit landing mid-gesture.** `applyChange` drops the carry-over, so a
+  moving frame then has no composite and under D3 draws nothing at all until
+  the gesture ends. Rare, recorded, ungated.
+- **The resting frame's duration is not gated.** D5's *peak* is gated; its
+  length is not. A slower machine shows a longer hitch and this plan will not
+  have measured how much longer.
+
+New, from this plan's own session:
+
+- **Criterion 9's regression is measured and not diagnosed.** 1.35x on means
+  with byte-identical counters. Two candidates are named above; neither is
+  ruled in or out. The counters are where an investigation starts.
+- **The spec's §5 memory pricing at 3200x2400 device pixels is untested**,
+  because the window cannot be made that large on this display (Ruling 20).
+  Recoverable by a re-run on an external display.
+- **The naked-eye seam check (gap G1) is still owed by a human.** The
+  instrument exists — `.vscode/launch.json` carries `2d: seam check -- tiles
+  ON` and its tiles-off control — and nobody has stood at the window and
+  compared them.
 
 **Two findings for the record that are not this plan's to fix.**
 
@@ -587,21 +715,21 @@ one of them would have become a retraction had the numbers been taken first.
 
 ---
 
-1. **Plan 3i — zoom, G3, and level-of-detail geometry**, assigned by Plan 3g
-   and confirmed here (2026-08-25's memory measurement showed zoom's cost is
-   not a caching problem, which is what licensed finishing the pan frame
-   without settling it first). **G3 has a number**: 32.06 ms at 500,000
-   entities with tiles on. **No caching scheme touches it** — the triangles
-   are genuinely being drawn — so the answer is level-of-detail geometry, and
-   the tile cache can already hold it: a generation is keyed by scale, so a
-   coarser bake can never outlive the scale it was simplified for. **Plan 3h
-   adds one more thing for 3i to carry**: settling criterion 3 needs
-   re-measuring at **n=7–9, interleaved (narrow, M4, narrow, M4, …), not
-   blocked (three-then-three)** — the only arrangement that removes the
-   thermal/session-drift ordering bias this task's own numbers show. **And
-   2026-08-26 adds the zoom *gesture* path to 3i's scope**, measured rather
-   than assumed — see
-   [After Plan 3h](#after-plan-3h--what-the-window-showed-2026-08-26) below.
+1. ~~**Plan 3i — zoom, G3, and level-of-detail geometry**~~ — **DONE, and the
+   answer was not level-of-detail geometry.** This paragraph was written on
+   2026-08-25, before 3i had a spec, and it is kept struck through rather than
+   deleted because a later reader will otherwise re-derive the wrong premise
+   from Plan 3g's assignment. **3i's spec declined LOD** and took a map
+   application's target instead — a moving frame draws the carry-over
+   composite and nothing else — so **G3's 32.06 ms at 500,000 entities is
+   still there and still uncaught, and it now blocks nothing.** G3 stays on
+   the open-gap list, above, with the condition that reopens it: **the day the
+   target changes to correct geometry while the fingers are still moving.**
+   The two things this item said 3i must *carry* were both discharged:
+   criterion 3's re-measurement happened at n=9 interleaved (3i's criterion 8,
+   which **misses** at 2.328 and settles the question differently than
+   expected — the gate sits inside the noise), and the zoom gesture path is
+   what 3i rebuilt.
 2. **Plan 3j — the 192 MiB vertex buffer.** `debugCapacityVertices` reads
    **16,777,216 vertices, 192.00 MiB, in all five configurations measured**:
    50,000 and 500,000 entities, tiles on and off. **Tiles change nothing, so
@@ -653,6 +781,12 @@ one that found any of these.
    told and could do nothing.
 
 ### Measured, and left for Plan 3i
+
+> **Both are now answered, and the answer to the first was the *first* of the
+> two rival options below, not the second.** Plan 3i skips baking on a frame
+> whose scale changed and declines level-of-detail geometry; the resting
+> camera does spend more than a moving one, via the band bake. Read the two
+> items as the question 3i was handed, not as its conclusion.
 
 3. **A zoom step retires the whole generation, and a gesture is all waste.**
    `_gridFor` calls `_retireGeneration` whenever `matchesScale` fails, so
@@ -1697,16 +1831,20 @@ criterion 7 (peak `tileBytes` 27262976 bytes = 26.00 MiB against ≤ 96 MiB),
 and criterion 8 (`capacityMiB` exactly 192.00 in every configuration, no
 increase to explain).
 
-**Plan 3i inherits three things, named here so no future session has to
-reconstruct them:**
-1. **G3 — zoom and level-of-detail geometry** — already renumbered onto 3i by
-   Task 8a; see [Resume here](#resume-here).
+**Plan 3i inherited three things, named here so no future session has to
+reconstruct them — and 3i is now done, so each carries its outcome:**
+1. **G3 — zoom and level-of-detail geometry** — renumbered onto 3i by Task 8a.
+   **3i's spec DECLINED it**; G3 is still open and now blocks nothing. See
+   [Plan 3i](#plan-3i--done-14-of-14-exit-gate-9-of-11).
 2. **Settling criterion 3**, by re-measuring at **n=7–9, interleaved
    (narrow, M4, narrow, M4, …), not blocked (three-then-three)** — the only
    arrangement that removes the thermal/session-drift ordering bias this
    task's own numbers show biased the ratio *against* the miss, not for it.
+   **Done as 3i's criterion 8, at n=9: median 2.328, mean 2.407, range 1.693
+   to 3.088. It MISSES, and the finding is that the gate sits inside the
+   measurement's own noise, so no sample size settles it.**
 3. **Plan 3j** owns the **192 MiB vertex buffer**, whose figure sits on a
-   doubling boundary with no headroom.
+   doubling boundary with no headroom. **Still open — 3i did not touch it.**
 
 ---
 

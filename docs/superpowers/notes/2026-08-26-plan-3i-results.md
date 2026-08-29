@@ -1,6 +1,7 @@
 # Plan 3i — results of record
 
-**Two criteria miss, and both are named here rather than at the end.**
+**Nine of the eleven criteria pass. Two miss — criterion 8 and criterion 9 —
+and both are named here rather than at the end.**
 **Criterion 9 misses**: the `tile pan` p95 regressed against Plan 3h — 20.90,
 21.75 and 23.70 ms against 3h's recorded 19.86, 15.99 and 13.43 ms, measured at
 3h's own viewport with byte-identical tile counters. The two sets do not
@@ -13,7 +14,9 @@ this display cannot produce that window (Ruling 20). The spec's memory
 predictions, all priced against the 3200×2400 device rectangle 1600×1200
 implies, remain untested.
 
-Criteria 1, 2, 3 and 4 pass, at both corpora, with margin.
+Criteria 1, 2, 3 and 4 pass, at both corpora, with margin. Criteria 5, 6, 7,
+10 and 11 pass in the suite, each with the assertion and the mutant that gate
+it named below.
 
 ---
 
@@ -109,6 +112,18 @@ These five are unit and differential gates and were scored as tasks landed;
 they are not device measurements and no device run bears on them. Their
 instruments and their mutants are in
 [plan-3i-mutation-log.md](plan-3i-mutation-log.md).
+
+**Each is confirmed here from the gating test and the mutant that reddens it,
+not asserted.** Every test named below is in the 413-test
+`packages/jet_cad_2d_flutter` suite, green at this note's commit.
+
+| # | Criterion | Verdict | Gate, and the mutant that proves it can fail |
+|---|---|---|---|
+| 5 | A sliced generation is identical to a live frame | **PASS** | `tile_slice_differential_test.dart` — `a settled generation is identical to a live frame` and `and at a camera on a power-of-two rebase boundary`, plus `tile_cache_test.dart` — `criterion 1: a settled frame equals the live frame after a zoom`. Reddened by **M3**, **M9** and **M9b** |
+| 6 | Zero difference at tile boundaries in a settled generation | **PASS** | `tile_slice_differential_test.dart` — `tile boundaries carry no difference of their own`. Reddened by **M9** and **M9b**, both of which take all five differential arms |
+| 7 | `liveBytes <= kTileCacheBytes` at every point inside the rest frame, counting the band image, and every band image released | **PASS** | `invariants/tile_bytes_test.dart` — `the ceiling holds at every point inside the rest frame` (reddened by **M6** on `debugImagesAlive` and by **M6b** on the lower bound) and `the ceiling binds inside the rest frame, and eviction holds it` (reddened by **M21**), with `a live band image is counted in liveBytes` pinning the instrument extension the criterion required |
+| 10 | An edit **after** a settle invalidates the sliced tiles | **PASS** | `tile_invalidation_test.dart` — `an edit after a sliced settle condemns the sliced tiles`. Reddened by **M5** |
+| 11 | A settled generation is identical to live after a sub-tile pan, and after a pan taken between the last scale change and the rest bake | **PASS** | `tile_slice_differential_test.dart` — `and stays identical after a pan smaller than one tile` and `and when a pan lands between the scale change and the bake`. Reddened by **M7** (both arms) and **M10** (the second) |
 
 **One limit belongs here rather than in the log.** Criterion 7's headline
 ceiling assertion originally ran with 43× headroom and could not fail; a
@@ -215,6 +230,53 @@ second is a deliberate correctness fix — it closed a one-frame background flas
 
 **No threshold was moved and no reading was dropped to reach this.** Three
 samples were taken to match 3h's three.
+
+---
+
+## The tally: 9 pass, 2 miss
+
+| # | Criterion | Verdict |
+|---|---|---|
+| 1 | A moving frame bakes zero tiles and draws zero live geometry | **PASS** |
+| 2 | Moving-frame p95 within 16.67 ms, at 50,000 and 500,000 | **PASS** |
+| 3 | The settle completes in one frame | **PASS**, read as `settleFrames == 2` per Ruling 15 |
+| 4 | Rest-bake wall clock >= 3x cheaper | **PASS** |
+| 5 | A sliced generation is identical to a live frame | **PASS** |
+| 6 | Zero difference at tile boundaries | **PASS** |
+| 7 | `liveBytes <= kTileCacheBytes` inside the rest frame, band counted and released | **PASS** |
+| 8 | Plan 3h's criterion 3, re-measured at n=7–9 interleaved | **MISS** — 2.328 median against 2.4 |
+| 9 | The pan path does not regress | **MISS** — 22.12 ms mean against 3h's 16.43 |
+| 10 | An edit after a settle invalidates the sliced tiles | **PASS** |
+| 11 | Identical after a sub-tile pan, and after a pan between the scale change and the bake | **PASS** |
+
+**Neither miss was softened and no threshold was moved.** Criterion 3's
+reading is a spec contradiction resolved in the note above and in Ruling 15,
+not a relaxed gate; the arithmetic is there to be disagreed with.
+
+**The plan's other exit-gate clauses.** Mutants: thirty-nine fired across
+thirty-six entries in
+[plan-3i-mutation-log.md](plan-3i-mutation-log.md); of the spec's own eleven,
+**ten died and M8 is the declared survivor**, which is clause 2 met exactly.
+M24, fired by a fix wave rather than by the spec, is the second survivor and
+its entry derives why no gating arm can be built for it. The anti-degenerate
+rule's five clauses:
+
+1. **In and out.** `zoom_script_test.dart` — `the pinned script is 40 in, 40
+   out, at 1.03`, asserting `kZoomSteps == 40` and `kZoomFactor == 1.03`.
+2. **Entities larger than one tile.** Measured, not assumed: this plan's own
+   runs print `overdraw=4.525 areaFactor=1.563` at 500,000 and
+   `overdraw=3.687 areaFactor=1.563` at 50,000. The residue above the area
+   factor is crossing multiplicity, which only an entity larger than a tile
+   produces.
+3. **A power-of-two rebase boundary is crossed.** The same test asserts
+   `kZoomFactor ^ kZoomSteps > 2.0`; the span is 3.26x each way.
+4. **Both corpora.** Criteria 1, 2 and 4 are reported at 50,000 and 500,000
+   above, per arm.
+5. **Neither camera nor fixture at the identity or the origin.**
+   `zoom_script_test.dart` — `the focal point is off-centre` pins
+   `zoomFocusFor` at 30% / 70%; the fixture is the measurement corpus at its
+   own far origin and the camera is R2's fitted camera, never scale 1.0 at
+   (0, 0).
 
 ---
 

@@ -8,6 +8,70 @@
 > entry all say "Plan 3h's M4" explicitly for exactly this reason. Any
 > citation of `M4` or `M5` from either log must name the plan it belongs to.
 
+
+## Summary — every mutant, its verdict, and the gate that killed it
+
+**Thirty-nine mutations across thirty-six entries. Thirty-seven died; two
+survive, both deliberately.** The design spec named eleven (M1–M11); of those,
+**ten died and M8 is the declared survivor**, which is the plan's exit-gate
+clause 2 met exactly. The other twenty-eight were fired by reviewers, by fix
+waves and by the whole-branch review, and one of them — **M24** — is the
+second survivor, with a derivation rather than an excuse.
+
+"Layer" is where the mutation was applied, not where it was observed:
+**cache** is `packages/jet_cad_2d_flutter/lib/src/tile_cache.dart`, **rig** is
+`apps/dev_harness_2d/lib/measurement_rig.dart`, **app** is
+`apps/dev_harness_2d/lib/main.dart`.
+
+| Mutant | Layer | Verdict | Gate of record |
+|---|---|---|---|
+| M1 | cache | **dead** | `tile_regime_test.dart` — `a moving frame bakes nothing and walks nothing` |
+| M4 | cache | **dead** | the same test, plus `a steadily spun wheel never arms the rest gate` |
+| M4b | cache | **dead** | `tile_regime_test.dart` — `a steadily spun wheel never arms the rest gate` and `the gate is two unchanged frames, and the constant says so` |
+| M2 | cache | **dead** | `tile_settle_test.dart` — `the settle completes in one frame` |
+| M6 | cache | **dead** | `invariants/tile_bytes_test.dart` — `the ceiling holds at every point inside the rest frame`, on `debugImagesAlive` |
+| M6b | cache | **dead** | the same test, on the `liveBytes` lower bound added for it |
+| M3 | cache | **dead** | four of the five differential arms, and `tile_band_test.dart` — `a slice rectangle is band-local and integral` |
+| M7 | cache | **dead** | `tile_slice_differential_test.dart` — `and stays identical after a pan smaller than one tile`, `and when a pan lands between the scale change and the bake` |
+| M9 | cache | **dead** | all five differential arms, and both `tile_band_test.dart` band-camera arms |
+| M9b | cache | **dead** | all five differential arms, at the largest pixel counts in this log |
+| M10 | cache | **dead** | differential arm 3 (132,650 pixels), and `a slice rectangle is band-local and integral` |
+| M11 | cache | **dead — but by no pixel arm** | `tile_band_test.dart` — `every band is rebased against the origin handed in`. **Unreachable by pixels**: the rebase origin cancels in `float64` before anything reaches `float32`, ~1e-13 device px, so the direct origin-argument test is the gate and the differential arms are green by arithmetic, not by omission |
+| M8 | cache | **SURVIVOR — declared before it was fired** | none, and that is the point. Integral source rectangles make a bilinear and a nearest sample read the same texels; **its death would have been the finding**. Not a gate's failure |
+| M5 | cache | **dead** | `tile_invalidation_test.dart` — `an edit after a sliced settle condemns the sliced tiles` |
+| M12 | cache | **dead** | `tile_regime_test.dart` — `the skew terms are compared too` |
+| M13 | cache | **dead** | `tile_measurement_seam_test.dart` — `debugRestBakeDisabled slices nothing and still covers` |
+| M14 | cache | **dead** | `tile_measurement_seam_test.dart` — `debugFullViewportQuery grows the fallback walk to the whole viewport` |
+| M15 | cache | **dead** | `tile_zoom_warmth_test.dart` — `a zoom round trip leaves the next arm nothing warm to settle on` |
+| M16 | cache | **dead** | the same seam test, on `debugLastClip` — the clause that makes the flag Plan 3h's M4 and not its M5 |
+| M17 | cache | **dead** | `tile_regime_test.dart` — `a pan after a zoom fills the region the composite slides off` |
+| M18 | cache | **dead** | `tile_regime_test.dart` — `an edit inside one band rebakes that band alone` |
+| M19a | cache | **dead** | `tile_regime_test.dart` — `the two scale terms are compared independently` |
+| M19b | cache | **dead** | the same test |
+| M19c | cache | **dead** | `tile_grid_test.dart` — `every scale term is compared, one at a time` |
+| M19d | cache | **dead** | the same test, its own clause |
+| M19e | cache | **dead** | the same test, its own clause |
+| M21 | cache | **dead** | `invariants/tile_bytes_test.dart` — `the ceiling binds inside the rest frame, and eviction holds it` |
+| M23 | cache | **dead** | `tile_regime_test.dart` — `the frame the pan stops on still fills the region the composite slid off` |
+| M24 | cache | **SURVIVOR — and provably must be** | none is buildable. The ceiling property it targets is held by `_restBake`'s **up-front pricing** (`bandBytes + visibleTiles * t <= cacheBytes`), not by the recency stamp the mutation deletes: under every cap the rest bake will run under, a skipped band's key can never be selected as a victim. Derivation, caveat and both byte-identical probe transcripts are in its entry |
+| M20 | rig | **dead** | `settle_attribution_test.dart`, six of nine — including `the covering frame is the one reported, not the frame before it` |
+| M22 | rig | **dead** | `settle_attribution_test.dart`, four of fourteen — including `the baseline drains what arming did not, and rebases the ordinals` |
+| M22b | rig | **dead** | `settle_attribution_test.dart` — `a stream that never goes quiet is refused, not measured` |
+| M22c | rig | **dead** | `settle_attribution_test.dart` — `a frame that never reports is a hole, not a zero` |
+| M25 | rig | **dead — by the signature, not by an assertion** | `require_repaint_test.dart` fails to compile, and so does `flutter analyze`. `runR2Rig` opens with `refuseDebugMode()` and `flutter test` is a debug build, so the parameter was made required-nullable and the mutant became a compilation failure. Stated as such rather than claimed as an assertion kill |
+| M26 | rig | **dead** | `require_repaint_test.dart` — `a carry-over composite alone counts as a repaint` |
+| M30 | rig | **dead** | `criterion8_pan_arm_test.dart`, three tests, each on a different face of the arrangement |
+| M27 | app | **dead** | `measurement_viewport_test.dart` — `the step holds the viewport centre still at ...`, at both viewport sizes |
+| M28 | app | **dead** | `measurement_viewport_test.dart` — `a wrong window warns even where no zoom arm will ever run` |
+| M29 | app | **dead** | `measurement_viewport_test.dart` — `a malformed request throws rather than falling back` and `an absurd request throws too` |
+
+**Every entry below carries its own diff, its procedure, its verbatim output
+and its ruling.** Nothing in this file is summarised from memory; where a
+number in an older entry went stale, the entry carries a dated correction that
+re-derives it rather than a re-run transcript that was never taken.
+
+---
+
 > **Note, added once the batch-minors pass understood the discrepancy below:**
 > M2, M6 and M6b were all measured under Task 8, before Task 9's `Center` fix
 > to `pumpTiled` (`support/tile_harness.dart`, commit `1e2f891`) landed.
@@ -112,7 +176,7 @@ its budget permits over a viewport this size, not one each — but the failure
 mode (baking resumes on a moving frame) is exactly the one the test is
 chartered to catch.
 
-## M4
+## M4 — the wheel clause
 
 **Task:** Task 3, "The wheel clause — two unchanged frames, not one."
 
