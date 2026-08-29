@@ -56,35 +56,27 @@ settings, and neither corrects the other.
 
 ### What the tile cache does not solve
 
-The human, using the running product, reported **a visible flicker after every
-pan and zoom**, and that report has since been measured — see
-[the settle-flicker probe](../notes/2026-08-29-settle-flicker-probe.md). The
-measurement narrows it:
+The human, using the running product, reported a visible flicker after pan and
+zoom, and when asked which defect it was, said: **regions newly entering the
+screen are drawn late.** That has been measured — see
+[the settle-flicker probe](../notes/2026-08-29-settle-flicker-probe.md) — and
+the answer is three distinct behaviours, not one:
 
-| frame | differing pixels | of live ink |
+| gesture | what the tiled frame does | magnitude |
 |---|---|---|
-| at rest | 0 | 0.0% |
-| last zoom gesture frame | 25,275 | **141.7%** |
-| settle frame 1 | 25,275 | **141.7%** |
-| settle frame 2 | 16,681 | **93.6%** |
-| settle frame 3 | 0 | 0.0% |
-| **pan, every frame, at any distance tested** | **0** | **0.0%** |
+| **zoom out** | **leaves newly exposed regions unpainted** | up to **5,730 device pixels of missing ink**, persisting **one frame past the end of the gesture** |
+| **zoom in** | right ink, wrong resolution | **141.7%** then **93.6%** of the frame's ink differing, over **three frames** |
+| **pan** | neither | **0** on every frame, at every speed where content exists |
+| any, at rest | exact | 0 — `a79903b`'s fix holds, there is no stale frame |
 
-**Three findings, and one of them narrows this spec's claim.**
+**The zoom-out row is the reported defect.** Regions arriving late is exactly
+what "up to 5,730 pixels of ink that should be there and is not" looks like.
 
-1. **There is no stale-frame defect.** `a79903b`'s fix holds; both gestures
-   reach zero and stay there.
-2. **The zoom flicker is real and it is the resolution change** — a
-   **three-frame** transition, two of them wrong by 141.7% and 93.6% of the
-   frame's ink. At 60 Hz that is a ~50 ms two-step change.
-3. **A pan does not flicker at all.** Structurally, not by luck: at constant
-   scale the lattice is reusable, and only a zoom forces the composite to be
-   magnified.
-
-**So this spec claims the zoom case and not the pan case.** Whether the product
-observation of a pan flicker is a different phenomenon this fixture does not
-model — a combined pan-and-zoom, a different corpus, a dpr change mid-gesture —
-or the zoom case misattributed, is unresolved and is open question 1.
+**The first pass of that probe missed it, and the reason is worth carrying into
+the plan: it zoomed only *in*.** A zoom-in magnifies what is already on screen
+and can never expose anything new, so no arm of it could see the defect being
+reported. That is the degenerate fixture `CLAUDE.md` names, authored rather
+than inherited.
 
 **Why a resident backend removes it is structural.** The tile path holds two
 representations of one drawing and the flicker is the frame that exchanges
@@ -553,11 +545,16 @@ rule stated under Budgets.
     demand, with a one-shot observable diagnostic.
 11. The text pass costs ≤ 0.5 ms p50 on the criterion-8 corpus, and the *N+1*
     draw-call count is reported.
-12. **The zoom settle transition is reproduced on the tiled arm and absent on
-    the resident arm.** The target numbers exist: on the tiled arm, across the
-    three frames after a twelve-step 1.02 zoom, **25,275 / 16,681 / 0**
-    differing pixels against a live reference at the same camera. The resident
-    arm must stay flat across the same gesture and settle.
+12. **Both zoom defects are reproduced on the tiled arm and absent on the
+    resident arm.** The target numbers exist:
+    **zoom out** (twelve steps of 0.94) — `uncoveredPixels` reaching **5,730**
+    during the gesture and still **4,893** one frame after it ends, falling to
+    0 on the next; **zoom in** (twelve steps of 1.02) — **25,275 / 16,681 / 0**
+    differing pixels across the three settle frames. The resident arm must show
+    **zero uncovered pixels at every frame of both**, which is the property a
+    single representation gives by construction.
+    **The gate must include a zoom-out arm**: a zoom-in-only corpus cannot see
+    the uncovered defect at all, which is how the probe's first pass missed it.
     **The instrument is the rig path, not the widget boundary** — `toImage`
     asserts on `!debugNeedsPaint` and these are exactly the dirty states, which
     cost the probe its first attempt. And it compares against a live reference
