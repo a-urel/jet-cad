@@ -19,6 +19,7 @@ import 'package:jet_cad_2d/testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
 
+import 'gpu_arm_rig.dart';
 import 'measurement_rig.dart';
 import 'widget_arm_rig.dart';
 import 'seam_corpus.dart';
@@ -598,6 +599,12 @@ const bool kRunR2 = bool.fromEnvironment('RUN_R2');
 /// [HarnessApp].
 const bool kRunWidgetSpike = bool.fromEnvironment('RUN_WIDGET_SPIKE');
 
+/// **Throwaway spike, branch `spike/flutter-gpu-backend`.** Prices a
+/// GPU-resident geometry buffer, with the camera as a uniform, against the
+/// painter walk and against Plan 3i's tile blit. Takes over the app entirely:
+/// `RUN_GPU_SPIKE=true` builds [GpuSpikeApp], not [HarnessApp].
+const bool kRunGpuSpike = bool.fromEnvironment('RUN_GPU_SPIKE');
+
 /// **Spike corpus knobs.** [harnessDocument] places 20,000 instances, and at
 /// `ENTITIES=2000` that made the painter emit **399,000** primitives -- two
 /// orders of magnitude past the floor-plan scale this spike exists to measure.
@@ -658,6 +665,27 @@ void main() {
         repeats: kSpikeRepeats,
         viewport: kMeasurementViewport,
       )),
+    ));
+    return;
+  }
+  if (kRunGpuSpike) {
+    runApp(GpuSpikeApp(
+      document: spikeDocument(),
+      viewport: kMeasurementViewport,
+      lineweightScale: kLineweightScale,
+      onReady: (state) => unawaited(runGpuSpike(
+        state,
+        entities: kEntities,
+        frames: kSpikeFrames,
+        repeats: kSpikeRepeats,
+        viewport: kMeasurementViewport,
+      )),
+      onFailed: (error, stack) {
+        // Printed rather than thrown: a failure to reach flutter_gpu at all is
+        // this spike's most likely outcome and its most useful finding.
+        print('GSPIKE FAILED to build resident geometry: $error');
+        print(stack);
+      },
     ));
     return;
   }
