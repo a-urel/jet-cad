@@ -11,23 +11,45 @@ const _style = ResolvedStyle(
     linetype: Handle.none,
     linetypeScale: 1);
 
+const _hairlineStyle = ResolvedStyle(
+    argb: 0xFF203040,
+    lineweightHundredths: 0,
+    linetype: Handle.none,
+    linetypeScale: 1);
+
 void main() {
-  test('applies the residual, and a non-uniform one', () {
+  test('applies the residual, and a transposed one is not the same residual',
+      () {
     final c = GeometryCollector(
         pixelsPerPaperMm: 4, devicePixelRatio: 2, lineweightScale: 1);
 
-    // **Deliberately not the identity, not at the origin, and not uniform.**
-    // a=2, d=3 with a translation: a collector that drops the residual writes
-    // (1,1)->(2,2); one that applies it writes (12,13)->(14,16).
-    c.beginResidual(Transform2(2, 0, 0, 3, 10, 10));
-    final pts = Float64List.fromList([1, 1, 2, 2]);
+    // **Deliberately not the identity, not at the origin, not uniform, and
+    // not diagonal.** b=0.5 and c=-1 differ from each other (and from the
+    // 0 a diagonal residual would carry), and neither fixture point sits on
+    // x == y — so swapping t.b for t.c in the residual application changes
+    // the answer instead of leaving it invariant. That distinction matters
+    // because a rotated or sheared DXF INSERT produces exactly this shape of
+    // residual, not a diagonal one.
+    //
+    // px = a*x + c*y + e, py = b*x + d*y + f (`transform2.dart`'s own
+    // convention — c multiplies y into x, b multiplies x into y):
+    //   (1, 2) -> (2*1 + -1*2 + 10, 0.5*1 + 3*2 + 10) = (10, 16.5)
+    //   (4, 3) -> (2*4 + -1*3 + 10, 0.5*4 + 3*3 + 10) = (15, 21)
+    c.beginResidual(Transform2(2, 0.5, -1, 3, 10, 10));
+    final pts = Float64List.fromList([1, 2, 4, 3]);
     c.polyline(pts, 2, _style, closed: false);
     c.endResidual();
 
     expect(c.instanceCount, 1);
     final r = c.data.sublist(0, kFloatsPerInstance);
     expect(r[0], kKindStroke);
-    expect(r.sublist(1, 5), [12.0, 13.0, 14.0, 16.0]);
+    expect(r.sublist(1, 5), [10.0, 16.5, 15.0, 21.0]);
+    // Pins `w / 2`, not the raw logical width: lineweightHundredths=50,
+    // pixelsPerPaperMm=4, lineweightScale=1 gives a logical width of
+    // 50/100 * 4 * 1 = 2.0, above the floor of
+    // kMinStrokeDevicePixels(1.0) / devicePixelRatio(2) = 0.5, so
+    // halfWidth = 2.0 / 2 = 1.0.
+    expect(r[5], 1.0);
   });
 
   test('emits one instance per segment, in walk order', () {
@@ -60,5 +82,36 @@ void main() {
     c.endResidual();
     expect(c.instanceCount, 0);
     expect(c.skippedOps, 2);
+  });
+
+  test('clamps to the device-pixel floor at a hairline lineweight', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+    c.beginResidual(Transform2.identity());
+    c.polyline(Float64List.fromList([0, 0, 1, 0]), 2, _hairlineStyle,
+        closed: false);
+    c.endResidual();
+
+    expect(c.instanceCount, 1);
+    // lineweightHundredths=0 gives a logical width of 0, which is not
+    // greater than the floor of kMinStrokeDevicePixels(1.0) /
+    // devicePixelRatio(2) = 0.5, so the clamp takes over:
+    // halfWidth = 0.5 / 2 = 0.25. A mutation that drops the clamp entirely
+    // would emit halfWidth = 0.0 instead.
+    expect(c.data[5], 0.25);
+  });
+
+  test('lineweightScale multiplies the logical width before the clamp', () {
+    final c = GeometryCollector(
+        pixelsPerPaperMm: 4, devicePixelRatio: 2, lineweightScale: 2);
+    c.beginResidual(Transform2.identity());
+    c.polyline(Float64List.fromList([0, 0, 1, 0]), 2, _style, closed: false);
+    c.endResidual();
+
+    expect(c.instanceCount, 1);
+    // lineweightHundredths=50, pixelsPerPaperMm=4, lineweightScale=2 gives a
+    // logical width of 50/100 * 4 * 2 = 4.0, above the floor of 0.5, so
+    // halfWidth = 4.0 / 2 = 2.0. At the default scale of 1.0 this would be
+    // 1.0 either way, which is why the default cannot pin the multiply.
+    expect(c.data[5], 2.0);
   });
 }
