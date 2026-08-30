@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_flutter/src/gpu/gpu_facade.dart';
 
 Future<DraftCanvasState> _pump(WidgetTester tester,
     {RenderBackend? backend}) async {
@@ -49,9 +50,13 @@ void main() {
   testWidgets('an explicit backend is honoured, not clamped', (tester) async {
     // Phase C forces `vertices` on the web to measure it. A parameter that
     // silently ignored what it was given would make that measurement a lie.
+    // `residentGpu` is resolved through `resolveBackend()` and may differ from
+    // the requested backend when GPU is unavailable; check the final resolved
+    // backend against what `resolveBackend()` returns.
     for (final backend in RenderBackend.values) {
       final state = await _pump(tester, backend: backend);
-      expect(state.resolvedBackend, backend, reason: '$backend');
+      final expectedBackend = resolveBackend(backend);
+      expect(state.resolvedBackend, expectedBackend, reason: '$backend');
     }
   });
 
@@ -96,5 +101,18 @@ void main() {
     expect(key.currentState!.vertices, isNull);
     await tester.pumpWidget(build(RenderBackend.vertices));
     expect(key.currentState!.vertices, isNotNull);
+  });
+
+  testWidgets(
+      'an explicit residentGpu request resolves to vertices when unavailable',
+      (tester) async {
+    // MUTATION: if DraftCanvas does not route through `resolveBackend()`,
+    // `residentGpu` silently uses the canvas sink instead of vertices. This
+    // assertion fails: state.vertices would be null instead of notNull.
+    debugSetGpuFactory(() => throw StateError('no gpu'));
+    addTearDown(() => debugSetGpuFactory(null));
+    final state = await _pump(tester, backend: RenderBackend.residentGpu);
+    expect(state.resolvedBackend, RenderBackend.vertices);
+    expect(state.vertices, isNotNull);
   });
 }

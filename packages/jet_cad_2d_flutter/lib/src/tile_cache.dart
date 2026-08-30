@@ -18,7 +18,7 @@ import 'viewport_transform.dart';
 /// Task 11 measured at `ENTITIES=500000`, `BACKEND=vertices`, `RIG=pan`,
 /// `TILES=on`, on a machine verified `lowpowermode 0` on AC power, with the
 /// control run reproducing Plan 3d's clean row (full transcripts in
-/// `.superpowers/sdd/2026-08-23-jet-cad-2d-plan-3g-tile-cache/task-11-report.md`):
+/// `docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/task-11-report.md`):
 ///
 /// | | 128 | 256 | **512** |
 /// |---|---|---|---|

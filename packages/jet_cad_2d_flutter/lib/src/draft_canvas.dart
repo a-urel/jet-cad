@@ -180,8 +180,11 @@ class DraftCanvasState extends State<DraftCanvas> {
   /// One sink for the life of the widget, its `Canvas` rebound per paint.
   late CanvasDrawSink sink;
 
-  /// Non-null only when [resolvedBackend] is [RenderBackend.vertices]. Wraps
-  /// [sink], which keeps taking every op the vertices sink does not batch.
+  /// Non-null when [resolvedBackend] is [RenderBackend.vertices] or
+  /// [RenderBackend.residentGpu] — the latter has no GPU-resident sink of its
+  /// own to build yet (Plan F's work) and paints through this one until then.
+  /// Wraps [sink], which keeps taking every op the vertices sink does not
+  /// batch.
   VerticesDrawSink? vertices;
 
   /// Non-null only while [DraftCanvas.tiles] is on.
@@ -266,8 +269,20 @@ class DraftCanvasState extends State<DraftCanvas> {
         lineweightScale: widget.lineweightScale,
         measurer: measurer,
         textStyleOf: widget.document.textStyleOf);
-    resolvedBackend = widget.backend ?? defaultRenderBackend();
-    vertices = resolvedBackend == RenderBackend.vertices
+    resolvedBackend = resolveBackend(widget.backend ?? defaultRenderBackend());
+    // **`residentGpu` paints through `vertices` here too, until Plan F.**
+    // `resolveBackend` is the platform-capability decision and is left alone
+    // — on a GPU-capable platform it legitimately returns `residentGpu`, and
+    // `resolvedBackend` reports that faithfully. But this widget has no
+    // GPU-resident sink to hand it yet (that wiring is Plan F's work — see
+    // `RenderBackend.residentGpu`'s doc), and the alternative, falling
+    // through to `null` below, would paint through `CanvasDrawSink` — the
+    // one-`drawPath`-per-primitive sink `RenderBackend.canvas`'s own doc
+    // calls "no longer any platform's default". `vertices` is the closest
+    // approximation available today, so both backends that are not `canvas`
+    // build the same batching sink.
+    vertices = resolvedBackend == RenderBackend.vertices ||
+            resolvedBackend == RenderBackend.residentGpu
         ? VerticesDrawSink(
             pixelsPerPaperMm: widget.pixelsPerPaperMm,
             lineweightScale: widget.lineweightScale,
@@ -397,7 +412,8 @@ class _DraftCustomPainter extends CustomPainter {
   final CameraController camera;
   final CanvasDrawSink sink;
 
-  /// Null unless the resolved backend is [RenderBackend.vertices].
+  /// Null unless the resolved backend is [RenderBackend.vertices] or
+  /// [RenderBackend.residentGpu] (routed here until Plan F).
   /// See [DraftCanvas.backend].
   final VerticesDrawSink? vertices;
 
