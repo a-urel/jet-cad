@@ -135,6 +135,15 @@ void main() {
         _expectedInstancesFor(
             pts, pts.length ~/ 2, false, op.style, residual, expected);
       }
+      // A point is one instance, not a run -- no dedupe, no join, no seam.
+      // Its position is the residual applied to the op's own (already
+      // screen-rebased) coordinates, exactly as every other op's is above.
+      if (op is PointOp) {
+        expected.add(_ExpectedInstance.point(
+            op.style,
+            residual.a * op.x + residual.c * op.y + residual.e,
+            residual.b * op.x + residual.d * op.y + residual.f));
+      }
     }
 
     expect(expected, isNotEmpty,
@@ -155,14 +164,14 @@ void main() {
       final e = expected[i];
       final style = e.style;
 
-      // -- kind: a stroke and a join lay their geometry out differently
-      // (`InstanceFieldOffset` doc), so asserting only the strokes' kind
-      // would pass on a join emitted as a stroke with the wrong fields
-      // simply never being checked. Every instance's kind is asserted here,
-      // strokes and joins alike.
+      // -- kind: a stroke, a join and a point lay their geometry out
+      // differently (`InstanceFieldOffset` doc), so asserting only the
+      // strokes' kind would pass on a join or point emitted as a stroke with
+      // the wrong fields simply never being checked. Every instance's kind
+      // is asserted here, strokes, joins and points alike.
       expect(data[o + InstanceFieldOffset.kind], e.kind,
           reason: 'instance $i must be a '
-              '${e.kind == kKindJoin ? "join" : "stroke"}');
+              '${e.kind == kKindJoin ? "join" : e.kind == kKindPoint ? "point" : "stroke"}');
 
       // -- walk order & the residual -----------------------------------
       // A stroke's (x0,y0,x1,y1) is its segment; a join's is
@@ -247,6 +256,16 @@ class _ExpectedInstance {
         y1 = prevY,
         x2 = nextX,
         y2 = nextY;
+
+  // `writePoint` zeroes all four of x1/y1/x2/y2 -- see `instance_record.dart`
+  // -- so the expected entry matches, the same way a stroke's own x2/y2 are
+  // pinned to 0 above rather than left unchecked.
+  _ExpectedInstance.point(this.style, this.x0, this.y0)
+      : kind = kKindPoint,
+        x1 = 0,
+        y1 = 0,
+        x2 = 0,
+        y2 = 0;
 
   final double kind;
   final double x0, y0, x1, y1, x2, y2;

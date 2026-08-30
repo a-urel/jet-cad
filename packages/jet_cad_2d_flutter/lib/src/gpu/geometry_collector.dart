@@ -81,9 +81,8 @@ class GeometryCollector implements DrawSink {
   /// `text`. Counted rather than ignored so a corpus that needs Plan B
   /// through E is visible as a number instead of as a missing picture.
   ///
-  /// `circle` and `arc` stopped counting here in Task 5. `point` still
-  /// counts today and stops in Task 6, which is also where the test that
-  /// pins this whole sentence lands.
+  /// `circle` and `arc` stopped counting here in Task 5; `point` in Task 6,
+  /// which is also where the test that pins this whole sentence lands.
   int get skippedOps => _skipped;
 
   /// Half the stroke's width, **in device pixels** — the space the vertex
@@ -282,8 +281,23 @@ class GeometryCollector implements DrawSink {
     _endRun(closed: closed, half: half, argb: argb);
   }
 
+  /// A dot the width of the stroke.
+  ///
+  /// The reference draws it as a horizontal segment of the stroke's own
+  /// width, which is a square of it (`vertices_draw_sink.dart`, `point`);
+  /// here it is [kKindPoint] instead, because that `± half` is a **device**
+  /// quantity and this record holds collection space. See [kKindPoint]'s doc.
   @override
-  void point(double x, double y, ResolvedStyle style) => _skipped++;
+  void point(double x, double y, ResolvedStyle style) {
+    final t = _residual;
+    _reserve(_instances + 1);
+    writePoint(_buffer, _instances,
+        x: t.a * x + t.c * y + t.e,
+        y: t.b * x + t.d * y + t.f,
+        halfWidth: _halfWidthFor(style.lineweightHundredths),
+        argb: _coveredArgb(style.argb, style.lineweightHundredths));
+    _instances++;
+  }
 
   /// The chord error a flattened arc is allowed, in device pixels. The
   /// reference's own value, copied for the same reason
