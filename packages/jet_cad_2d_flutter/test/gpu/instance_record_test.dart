@@ -160,8 +160,24 @@ void main() {
     // `_patternFor` is ever called. `writePoint` therefore takes no dash
     // arguments at all, so a caller cannot express something the reference
     // cannot draw.
+    //
+    // The dash slots are pre-filled with a plausible dashed record's values
+    // before `writePoint` runs -- a fresh `Float32List` is already zero, so
+    // asserting zero afterward without this would only prove
+    // `Float32List`'s own zero-initialisation, not that `writePoint`
+    // actually clears the slots. This reads as "this index used to hold a
+    // dashed instance", the case `_writeDash`'s own doc calls out: a record
+    // reused across frames, or sliced from a buffer that once held a dashed
+    // instance at this index, is not guaranteed to already be zero here.
     final into = Float32List(kFloatsPerInstance);
+    into[InstanceFieldOffset.dashPeriod] = 18.0;
+    into[InstanceFieldOffset.dashPhase] = 4.0;
+    into[InstanceFieldOffset.dashFracStart] = 0.1;
+    into[InstanceFieldOffset.dashFracEnd] = 0.6667;
     writePoint(into, 0, x: 1, y: 2, halfWidth: 0.5, argb: 0xFF112233);
     expect(into[InstanceFieldOffset.dashPeriod], 0.0);
+    expect(into[InstanceFieldOffset.dashPhase], 0.0);
+    expect(into[InstanceFieldOffset.dashFracStart], 0.0);
+    expect(into[InstanceFieldOffset.dashFracEnd], 0.0);
   });
 }
