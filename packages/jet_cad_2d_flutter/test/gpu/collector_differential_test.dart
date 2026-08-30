@@ -114,7 +114,8 @@ void main() {
       // Task 5 that limb was exercised only by unit tests.
       if (op is CircleOp) {
         final pts = _flattenedLocalPoints(
-            op.cx, op.cy, op.r, 0, 2 * math.pi, residual, closed: true);
+            op.cx, op.cy, op.r, 0, 2 * math.pi, residual,
+            closed: true);
         _expectedInstancesFor(
             pts, pts.length ~/ 2, true, op.style, residual, expected);
       }
@@ -267,8 +268,8 @@ class _ExpectedInstance {
 ///    the segment `_endRun` draws back to the first point — sampling it here
 ///    would draw that chord twice and leave the seam a duplicated point
 ///    instead of a join.
-List<double> _flattenedLocalPoints(double cx, double cy, double r,
-    double start, double sweep, Transform2 residual,
+List<double> _flattenedLocalPoints(double cx, double cy, double r, double start,
+    double sweep, Transform2 residual,
     {required bool closed}) {
   if (r <= 0 || sweep == 0) return const <double>[];
   final deviceRadius = r * residual.scaleMagnitude;

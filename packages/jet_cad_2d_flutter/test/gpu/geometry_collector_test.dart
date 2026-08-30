@@ -117,8 +117,7 @@ void main() {
     expect(c.instanceCount, 0);
   });
 
-  test('counts the ops it does not draw instead of dropping them silently',
-      () {
+  test('counts the ops it does not draw instead of dropping them silently', () {
     // **This test used `circle` until Task 5.** A circle is drawn now, so the
     // two ops here are `fillCircle` and `text` -- chosen because they stay
     // skipped for the whole of Plan B (fills are Plan D, text is Plan E), so
@@ -435,18 +434,16 @@ void main() {
             linetype: Handle.none,
             linetypeScale: 1));
 
-    final steps = (2 *
-            math.pi *
-            math.sqrt(r / (8 * VerticesDrawSink.kFlattenTolerance)))
-        .ceil()
-        .clamp(1, VerticesDrawSink.kMaxFlattenSegments);
+    final steps =
+        (2 * math.pi * math.sqrt(r / (8 * VerticesDrawSink.kFlattenTolerance)))
+            .ceil()
+            .clamp(1, VerticesDrawSink.kMaxFlattenSegments);
     // A closed run of `steps` chords: `steps` segments, `steps - 1` interior
     // joins, and the seam. 2 * steps instances.
     expect(c.instanceCount, 2 * steps);
     expect(c.skippedOps, 0, reason: 'a circle is no longer skipped');
     expect(
-        c.data[(2 * steps - 1) * kFloatsPerInstance +
-            InstanceFieldOffset.kind],
+        c.data[(2 * steps - 1) * kFloatsPerInstance + InstanceFieldOffset.kind],
         kKindJoin,
         reason: 'the seam join is the last instance');
   });
