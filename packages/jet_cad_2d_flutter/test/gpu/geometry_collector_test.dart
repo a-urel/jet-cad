@@ -65,6 +65,30 @@ void main() {
         [1.0, 0.0, 1.0, 1.0]);
   });
 
+  test('closed: true emits a closing segment back to the first point', () {
+    // `DraftPainter` never passes `closed: true` today (there is no
+    // closed-polyline flag on the model yet), so nothing in the differential
+    // gate (`test/gpu/collector_differential_test.dart`) can exercise this
+    // branch through the real walk. This drives `GeometryCollector.polyline`
+    // directly, the way the residual-transposition test above already does,
+    // so the branch has a killable test regardless.
+    final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+    c.beginResidual(Transform2.identity());
+    c.polyline(Float64List.fromList([0, 0, 1, 0, 1, 1]), 3, _style,
+        closed: true);
+    c.endResidual();
+
+    expect(c.instanceCount, 3);
+    expect(c.data.sublist(1, 5), [0.0, 0.0, 1.0, 0.0]);
+    expect(c.data.sublist(kFloatsPerInstance + 1, kFloatsPerInstance + 5),
+        [1.0, 0.0, 1.0, 1.0]);
+    expect(
+        c.data.sublist(2 * kFloatsPerInstance + 1, 2 * kFloatsPerInstance + 5),
+        [1.0, 1.0, 0.0, 0.0],
+        reason: 'the closing segment must run from the last point back to '
+            'the first');
+  });
+
   test('drops a zero-length segment rather than handing the shader a NaN', () {
     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
     c.beginResidual(Transform2.identity());

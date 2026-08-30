@@ -24,10 +24,14 @@ void main() {
       'with the residual applied and half-width scaled by dpr', () {
     // `differentialFixture` is this suite's standing corpus, not a fixture
     // built for this test alone: two placements of the same "outer"
-    // definition (instances 820 and 830, the second mirrored and
-    // non-uniformly scaled), one of them carrying a nested instance of
-    // "inner" two levels deep, plus a root line and a grouped line. No
-    // transform anywhere in it is the identity -- `assertNoIdentityTransforms`
+    // definition (instance 820, non-uniformly scaled `scale(1.6, 1.1)`, and
+    // instance 830, mirrored but conformal `scale(-1.3, 1.3)` -- see
+    // `fixtures.dart:126-128`'s own "still conformal: anisotropyRatio 1").
+    // Both placements carry a nested instance of "inner" two levels deep
+    // (node 520 lives inside definition "outer", so it is placed once per
+    // placement of "outer" -- `fixtures.dart:86-96`), plus a root line and a
+    // grouped line. No transform anywhere in it is the identity --
+    // `assertNoIdentityTransforms`
     // pins that below, which is the guard this project's post-mortem asked
     // for after four fixtures hid a composition-order defect behind
     // transforms that happened to commute.
@@ -122,7 +126,9 @@ void main() {
 
     expect(expectedPoints, isNotEmpty,
         reason: 'a fixture with no polylines would make this test vacuous');
-    expect(collector.instanceCount, expectedPoints.length);
+    expect(collector.instanceCount, expectedPoints.length,
+        reason: 'the collector must emit exactly one instance per segment '
+            'the walk produced -- neither dropping nor duplicating one');
 
     // Captured once: `collector.data` copies `_buffer` on every access, so
     // the comparison loop below reads a single snapshot rather than a fresh
@@ -132,6 +138,10 @@ void main() {
     for (var i = 0; i < expectedPoints.length; i++) {
       final o = i * kFloatsPerInstance;
       final style = expectedStyles[i];
+
+      // -- kind: every record this task's collector writes is a stroke.
+      expect(data[o], kKindStroke,
+          reason: 'instance $i must tag itself a stroke');
 
       // -- walk order & the residual -----------------------------------
       expect(data[o + 1], closeTo(expectedPoints[i][0], _tolerance),
@@ -185,9 +195,14 @@ void main() {
 /// collector against a copy of its own formula.
 double _referenceLogicalHalfWidth(int lineweightHundredths) {
   const pixelsPerPaperMm = kLogicalPixelsPerMm;
-  const kMinStrokeDevicePixels = 1.0;
+  // The reference sink's own floor, not a third copy of it: the collector's
+  // module doc (`geometry_collector.dart:31-35`) claims raising either
+  // constant out of step with the other turns this test red, and that claim
+  // is only true if this side reads the sink's live constant rather than
+  // hardcoding its current value.
   final logical = lineweightHundredths / 100.0 * pixelsPerPaperMm;
-  final floorLogical = kMinStrokeDevicePixels / _devicePixelRatio;
+  final floorLogical =
+      VerticesDrawSink.kMinStrokeDevicePixels / _devicePixelRatio;
   final w = logical.isFinite && logical > floorLogical ? logical : floorLogical;
   return w / 2;
 }
