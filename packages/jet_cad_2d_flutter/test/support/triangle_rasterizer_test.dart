@@ -405,26 +405,42 @@ void main() {
     // weight paired with the vertex of the SAME index, not the opposite
     // one). (3, 2) goes dark: fract(0.9722) = 0.9722 is not in [0, 0.5).
     //
-    // A DIFFERENT single-letter rotation -- swapping only `w0` and `w1` in
-    // the correct line, `(w0 * ta + w2 * tb + w1 * tc) / sum`, leaving `w2`
-    // where it was -- is NOT a fixture this test (or any tolerance-based
-    // CENTROID probe) can catch: with t=0,1,2 equally spaced, that
-    // mutation's value and the correct value are always exactly
-    // equidistant from 1.0 on opposite sides, at every point in the plane,
-    // not only at the centroid (`correct - 1 == -(thatMutant - 1)`, an
-    // algebraic identity, not a fact about this fixture). More generally,
-    // AT the exact continuous centroid every one of `w0`/`w1`/`w2` equals
-    // the others (a fact about any triangle, independent of t-values or
-    // which permutation is tried), so no probe sampled exactly there can
-    // ever tell a rotated correspondence from the correct one -- the
-    // positional mutation above is both the more realistic bug -- it is
-    // what a reader would write by matching indices instead of reading
-    // `_fill`'s own comment -- and the one this fixture can actually kill.
-    // The genuine three-way rotation (`w0`->`w1`->`w2`->`w0` applied to
-    // every occurrence in the correct line) is a different permutation
-    // again, not self-cancelling the way the two-element swap above is --
-    // the next test samples off the centroid specifically to catch it.
-    // See task-9-report.md for the full derivation of all three.
+    // MUTATION, fired: swapping only `w0` and `w1` in the correct line --
+    // `final t = (w0 * ta + w2 * tb + w1 * tc) / sum;` -- ALSO reddens this
+    // test. At (3.5, 2.5): w0=22.5, w1=10.5, w2=21, sum=54; the swapped
+    // value is (22.5*0 + 21*1 + 10.5*2)/54 = 42/54 = 0.7778, fract 0.7778,
+    // outside [0, 0.5) -- run live (`flutter test
+    // test/support/triangle_rasterizer_test.dart` with the swap applied to
+    // `_fill`, `task-9-report.md`'s Fix-round-2 transcript), not derived.
+    //
+    // An earlier version of this comment claimed the opposite -- that this
+    // swap could never be caught by any centroid probe, for any triangle,
+    // because `correct - 1 == -(swap - 1)` (an equidistance identity that
+    // is itself true: both values ARE exactly 0.2222 from `tb`=1). That
+    // claim was never fired and was wrong: equidistance from `tb` only
+    // defeats a window CENTRED on `tb`'s own fract value. This test's
+    // window, `[0, 0.5)`, is anchored AT `tb`=1's fract (0, since `fract`
+    // of an exact integer is 0) rather than centred on it, and `tb`=1 sits
+    // exactly on a `fract`-cycle boundary -- so the correct value
+    // (1.2222, `floor`=1, fract 0.2222) and the swapped value (0.7778,
+    // `floor`=0, fract 0.7778) land in DIFFERENT unit cells despite being
+    // equidistant from `tb` in raw `t`. Equidistant-from-`tb` is not the
+    // same claim as equidistant-in-fract-space once the wraparound is
+    // involved, and this fixture's `tb` sitting on a cycle boundary is
+    // exactly what exposes that gap. See `task-9-report.md`'s corrected
+    // section for the original (wrong) argument, kept rather than deleted.
+    //
+    // At the exact continuous centroid, separately, every one of
+    // `w0`/`w1`/`w2` equals the others (true of any triangle, independent
+    // of t-values or which permutation is tried), so a probe sampled
+    // EXACTLY there cannot tell any rotated correspondence from the
+    // correct one -- which is why this test samples the nearest PIXEL to
+    // the centroid rather than the continuous centroid itself. The genuine
+    // three-way rotation (`w0`->`w1`->`w2`->`w0` applied to every
+    // occurrence in the correct line) is a different permutation again;
+    // the next test samples a further-off-centroid point built specifically
+    // for it. See `task-9-report.md` for the full derivation of all three
+    // permutations (positional, two-element swap, three-way rotation).
     final r = TriangleRasterizer(10, 8);
     r.observe(
       _tri([0, 0, 9, 0, 0, 6]),
