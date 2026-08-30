@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -245,6 +246,42 @@ DraftDocument _polylineOnlyFixture() {
   return (ops: recording.ops, collector: collector);
 }
 
+/// The fixture reduced to the entities in [keep].
+DraftDocument _onlyEntities(Iterable<int> keep) {
+  final doc = shadedDashFixture();
+  const all = <int>[910, 911, 912, 913, 914, 915, 916, 917];
+  for (final h in all) {
+    if (!keep.contains(h)) {
+      doc.commands.execute(RemoveEntityCommand(Handle(h)));
+    }
+  }
+  return doc;
+}
+
+/// Collects [doc] at its own fit camera and returns the buffer.
+Float32List _collect(DraftDocument doc) {
+  final index = SpatialIndex(doc);
+  addTearDown(index.dispose);
+  final collector =
+      GeometryCollector(pixelsPerPaperMm: _ppmm, devicePixelRatio: _dpr);
+  DraftPainter(
+    document: doc,
+    index: index,
+    resolver: DocumentStyleResolver(doc),
+  ).paint(collector, ViewportTransform.fit(doc.extents, kViewport), kViewport);
+  return collector.data;
+}
+
+void _expectSameBuffer(Float32List actual, Float32List baseline, String why) {
+  expect(actual.length, baseline.length, reason: why);
+  for (var i = 0; i < baseline.length; i++) {
+    expect(actual[i], baseline[i],
+        reason: '$why -- float $i '
+            '(instance ${i ~/ kFloatsPerInstance}, '
+            'field ${i % kFloatsPerInstance})');
+  }
+}
+
 void main() {
   test(
       'the collector writes exactly the instances the declarative rule '
@@ -301,5 +338,139 @@ void main() {
     expect(expected.where((e) => e.fracStart == e.fracEnd && e.period < 0),
         isNotEmpty,
         reason: 'entity 914 is ALLGAP: one instance, empty extent');
+  });
+
+  test(
+      "a primitive's dash instances are consecutive and ascending in cycle "
+      'position', () {
+    // Not merely "all D are present". A fan emitted in descending order, or
+    // interleaved across primitives, draws the same pixels today and stops
+    // doing so the moment a translucent dashed layer exists -- and draw
+    // order is a non-negotiable in this repository, not an optimisation.
+    final data = _collect(_polylineOnlyFixture());
+    final count = data.length ~/ kFloatsPerInstance;
+    var runStart = 0;
+    var runs = 0;
+    for (var i = 1; i <= count; i++) {
+      final sameGeometry = i < count &&
+          data[i * kFloatsPerInstance + InstanceFieldOffset.kind] ==
+              data[runStart * kFloatsPerInstance + InstanceFieldOffset.kind] &&
+          data[i * kFloatsPerInstance + InstanceFieldOffset.x0] ==
+              data[runStart * kFloatsPerInstance + InstanceFieldOffset.x0] &&
+          data[i * kFloatsPerInstance + InstanceFieldOffset.y0] ==
+              data[runStart * kFloatsPerInstance + InstanceFieldOffset.y0] &&
+          data[i * kFloatsPerInstance + InstanceFieldOffset.x1] ==
+              data[runStart * kFloatsPerInstance + InstanceFieldOffset.x1] &&
+          data[i * kFloatsPerInstance + InstanceFieldOffset.y1] ==
+              data[runStart * kFloatsPerInstance + InstanceFieldOffset.y1];
+      if (sameGeometry) continue;
+      // `runStart .. i-1` is one primitive's fan.
+      for (var k = runStart + 1; k < i; k++) {
+        expect(
+            data[k * kFloatsPerInstance + InstanceFieldOffset.dashFracStart],
+            greaterThan(data[(k - 1) * kFloatsPerInstance +
+                InstanceFieldOffset.dashFracStart]),
+            reason: 'instance $k must follow ${k - 1} in cycle position');
+      }
+      if (i - runStart > 1) runs++;
+      runStart = i;
+    }
+    expect(runs, greaterThan(0),
+        reason: 'a corpus with no multi-element fan cannot exercise this '
+            'ordering at all -- entity 913 is DASHDOT precisely so one exists');
+  });
+
+  test('exactly one instance per primitive carries the collapse mark', () {
+    final data = _collect(_polylineOnlyFixture());
+    final count = data.length ~/ kFloatsPerInstance;
+    var negatives = 0, dashedPrimitives = 0;
+    double? lastX0, lastY0;
+    for (var i = 0; i < count; i++) {
+      final o = i * kFloatsPerInstance;
+      final period = data[o + InstanceFieldOffset.dashPeriod];
+      if (period == 0) continue;
+      if (period < 0) negatives++;
+      final x0 = data[o + InstanceFieldOffset.x0];
+      final y0 = data[o + InstanceFieldOffset.y0];
+      if (x0 != lastX0 || y0 != lastY0) {
+        dashedPrimitives++;
+        lastX0 = x0;
+        lastY0 = y0;
+      }
+    }
+    expect(negatives, dashedPrimitives,
+        reason: 'two representatives draw a collapsed line twice over '
+            'itself, which with blending on is darker rather than merely '
+            'wasteful; none makes it vanish');
+  });
+
+  test('on a dashed arc the join still precedes its segment', () {
+    // Plan B's intra-entity ordering rule has to survive the element fan.
+    final data = _collect(_onlyEntities(const [912]));
+    final count = data.length ~/ kFloatsPerInstance;
+    expect(count, greaterThan(4), reason: 'the arc must have several chords');
+    final kinds = <double>[
+      for (var i = 0; i < count; i++)
+        data[i * kFloatsPerInstance + InstanceFieldOffset.kind]
+    ];
+    expect(kinds.first, kKindStroke,
+        reason: 'the first chord has no corner behind it');
+    // DASHED has one drawn element, so the fan is width 1 and the sequence
+    // is a strict alternation from there.
+    for (var i = 1; i < kinds.length; i++) {
+      expect(kinds[i], i.isOdd ? kKindJoin : kKindStroke,
+          reason: 'instance $i');
+    }
+    expect(kinds.where((k) => k == kKindJoin), isNotEmpty);
+  });
+
+  test('emission order survives undo, redo, save, load and purge', () {
+    final baseline = _collect(_polylineOnlyFixture());
+
+    final undone = _polylineOnlyFixture();
+    undone.commands.execute(RemoveEntityCommand(const Handle(915)));
+    undone.commands.undo();
+    _expectSameBuffer(_collect(undone), baseline, 'after undo');
+
+    final redone = _polylineOnlyFixture();
+    redone.commands.execute(RemoveEntityCommand(const Handle(915)));
+    redone.commands.undo();
+    redone.commands.redo();
+    redone.commands.undo();
+    _expectSameBuffer(_collect(redone), baseline, 'after redo then undo');
+
+    // **A round-trip defect in `packages/jet_cad_2d`, found by this gate and
+    // deliberately NOT fixed here.** `DraftDocumentCodec.encode` writes
+    // `globalLinetypeScale` into the header map, and
+    // `DocumentHeader.fromJson` parses it back correctly -- but
+    // `json_codec.dart`'s `_loadHeader` then copies only `units`, `scale`,
+    // `importedExtents` and `customVariables` onto the target document and
+    // drops `globalLinetypeScale` on the floor. So saving and loading a
+    // drawing silently resets it to 1.0, and every dashed entity in it
+    // changes its dash length. Nothing caught it before because no save/load
+    // test ever set the field to anything but 1.0 -- the degenerate fixture,
+    // in the engine's own suite.
+    //
+    // `packages/jet_cad_2d` is untouched by this plan, so the defect is
+    // recorded rather than repaired. The assertion below **pins** it: when
+    // somebody fixes `_loadHeader` this expectation goes red and points at
+    // the hand-restore under it as the thing to delete.
+    final roundTripped = DraftDocumentCodec.decode(
+        DraftDocumentCodec.encode(_polylineOnlyFixture()));
+    expect(roundTripped.header.globalLinetypeScale, 1.0,
+        reason: 'if this now reads 1.7, `_loadHeader` has been fixed -- '
+            'delete the hand-restore below and this expectation with it');
+    roundTripped.header.globalLinetypeScale = 1.7;
+    _expectSameBuffer(
+        _collect(roundTripped),
+        baseline,
+        'after save and load (globalLinetypeScale restored by hand -- see '
+        'the comment above)');
+
+    final purged = _polylineOnlyFixture();
+    purged.commands.execute(RemoveEntityCommand(const Handle(915)));
+    purged.commands.undo();
+    purged.purge();
+    _expectSameBuffer(_collect(purged), baseline, 'after purge');
   });
 }
