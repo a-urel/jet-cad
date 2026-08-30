@@ -49,7 +49,7 @@ void main() {
     // logical width of 50/100 * 4 * 1 = 2.0, which at devicePixelRatio=2 is
     // 2.0 * 2 = 4.0 device pixels -- above the floor of
     // kMinStrokeDevicePixels(1.0), so halfWidth = 4.0 / 2 = 2.0.
-    expect(r[5], 2.0);
+    expect(r[InstanceFieldOffset.halfWidth], 2.0);
   });
 
   test('emits one instance per segment, in walk order', () {
@@ -121,7 +121,7 @@ void main() {
     // kMinStrokeDevicePixels(1.0), so the clamp takes over:
     // halfWidth = 1.0 / 2 = 0.5. A mutation that drops the clamp entirely
     // would emit halfWidth = 0.0 instead.
-    expect(c.data[5], 0.5);
+    expect(c.data[InstanceFieldOffset.halfWidth], 0.5);
   });
 
   test('lineweightScale multiplies the logical width before the clamp', () {
@@ -139,6 +139,6 @@ void main() {
     // default scale of 1.0 this is 2.0 (the test above), so the multiply is
     // still pinned: a dropped `lineweightScale` factor would make this test
     // read 2.0 instead of 4.0.
-    expect(c.data[5], 4.0);
+    expect(c.data[InstanceFieldOffset.halfWidth], 4.0);
   });
 }

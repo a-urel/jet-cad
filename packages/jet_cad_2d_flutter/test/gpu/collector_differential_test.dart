@@ -139,17 +139,21 @@ void main() {
       final style = expectedStyles[i];
 
       // -- kind: every record this task's collector writes is a stroke.
-      expect(data[o], kKindStroke,
+      expect(data[o + InstanceFieldOffset.kind], kKindStroke,
           reason: 'instance $i must tag itself a stroke');
 
       // -- walk order & the residual -----------------------------------
-      expect(data[o + 1], closeTo(expectedPoints[i][0], _tolerance),
+      expect(data[o + InstanceFieldOffset.x0],
+          closeTo(expectedPoints[i][0], _tolerance),
           reason: 'instance $i x0 must be the walk\'s $i-th segment start');
-      expect(data[o + 2], closeTo(expectedPoints[i][1], _tolerance),
+      expect(data[o + InstanceFieldOffset.y0],
+          closeTo(expectedPoints[i][1], _tolerance),
           reason: 'instance $i y0 must be the walk\'s $i-th segment start');
-      expect(data[o + 3], closeTo(expectedPoints[i][2], _tolerance),
+      expect(data[o + InstanceFieldOffset.x1],
+          closeTo(expectedPoints[i][2], _tolerance),
           reason: 'instance $i x1 must be the walk\'s $i-th segment end');
-      expect(data[o + 4], closeTo(expectedPoints[i][3], _tolerance),
+      expect(data[o + InstanceFieldOffset.y1],
+          closeTo(expectedPoints[i][3], _tolerance),
           reason: 'instance $i y1 must be the walk\'s $i-th segment end');
 
       // -- half-width: the collector stores DEVICE pixels, the reference
@@ -158,7 +162,8 @@ void main() {
       // not a bug being tolerated, it is the fact this test pins (see the
       // module doc on `GeometryCollector._halfWidthFor`).
       final sinkHalf = _referenceLogicalHalfWidth(style.lineweightHundredths);
-      expect(data[o + 5], closeTo(sinkHalf * _devicePixelRatio, _tolerance),
+      expect(data[o + InstanceFieldOffset.halfWidth],
+          closeTo(sinkHalf * _devicePixelRatio, _tolerance),
           reason: 'instance $i half-width must be the reference sink\'s '
               'logical half-width scaled by devicePixelRatio, not the raw '
               'logical value copied straight across');
@@ -174,13 +179,17 @@ void main() {
       // (`geometry_collector.dart`'s module doc), and folding it in here
       // would smuggle that work into the wrong layer just to pass a test.
       final argb = style.argb;
-      expect(data[o + 6], closeTo(((argb >> 16) & 0xFF) / 255.0, _tolerance),
+      expect(data[o + InstanceFieldOffset.r],
+          closeTo(((argb >> 16) & 0xFF) / 255.0, _tolerance),
           reason: 'instance $i red channel');
-      expect(data[o + 7], closeTo(((argb >> 8) & 0xFF) / 255.0, _tolerance),
+      expect(data[o + InstanceFieldOffset.g],
+          closeTo(((argb >> 8) & 0xFF) / 255.0, _tolerance),
           reason: 'instance $i green channel');
-      expect(data[o + 8], closeTo((argb & 0xFF) / 255.0, _tolerance),
+      expect(data[o + InstanceFieldOffset.b],
+          closeTo((argb & 0xFF) / 255.0, _tolerance),
           reason: 'instance $i blue channel');
-      expect(data[o + 9], closeTo(((argb >> 24) & 0xFF) / 255.0, _tolerance),
+      expect(data[o + InstanceFieldOffset.a],
+          closeTo(((argb >> 24) & 0xFF) / 255.0, _tolerance),
           reason: 'instance $i alpha channel');
     }
   });

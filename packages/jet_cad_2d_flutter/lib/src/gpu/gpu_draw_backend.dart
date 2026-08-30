@@ -189,6 +189,17 @@ class GpuDrawBackend {
 
     pass.bindPipeline(geometry.pipeline);
     pass.setPrimitiveType(gpu.PrimitiveType.triangle);
+    // **Load-bearing from Plan B on, and it was not before.** A stroke quad's
+    // winding is invariant under reversing the segment — the direction and
+    // the normal flip together — so Plan A never had to think about this. A
+    // join's is not: `_emitJoin` picks the outer side with
+    // `s = cross > 0 ? -half : half` (`vertices_draw_sink.dart`), so a left
+    // turn and a right turn wind opposite ways and any culling would drop
+    // half the corners in a drawing. `CullMode.none` is also the enum's zero
+    // value, so this is pinning a default rather than changing behaviour —
+    // pinned because a default that becomes load-bearing and stays implicit
+    // is the kind of thing that changes under you in a package upgrade.
+    pass.setCullMode(gpu.CullMode.none);
     pass.setColorBlendEnable(true);
     pass.bindVertexBuffer(
         gpu.BufferView(geometry.corners,

@@ -38,22 +38,47 @@ class ResidentGeometry {
   static const String _bundlePath =
       'packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle';
 
-  /// The unit quad's six corners: two triangles, not a triangle strip,
-  /// because a strip cannot mix kinds and Plans B through D add kinds to
-  /// this same buffer. `x` picks the endpoint (0 = p0, 1 = p1), `y` picks the
-  /// side (-1 or +1) — see `cad_stroke.vert`'s `corner` comment. Four
-  /// distinct corners, (0,-1) (0,1) (1,-1) (1,1); the diagonal (0,1)-(1,-1)
-  /// is shared by both triangles, and both wind the same way (signed area
-  /// -2 for each, worked by hand).
+  /// The six per-vertex records: two triangles, not a triangle strip, because
+  /// a strip cannot mix kinds and Plans C and D add kinds to this same buffer.
+  ///
+  /// **Six floats per vertex: `corner.xy` then `join_weight.xyzw`.**
+  ///
+  /// `corner` is the quad parameterisation Plan A shipped — `x` picks the
+  /// endpoint (0 = p0, 1 = p1), `y` picks the side (-1 or +1) — and the
+  /// stroke and point branches still read only it.
+  ///
+  /// `join_weight` exists because the join branch needs **six distinct
+  /// vertex roles** and `corner` alone offers only four: `(1,-1)` and `(0,1)`
+  /// each appear twice, since the two triangles share the quad's diagonal.
+  /// A join's two triangles are the bevel `(V, A, B)` and the miter tip
+  /// `(A, M, B)` — four distinct points across six vertices, and the
+  /// duplicated corners need *different* roles in each triangle, so they
+  /// cannot be told apart by `corner`. The weight vector selects one of
+  /// `(V, A, B, M)` per vertex, and the shader reads the position as
+  /// `w.x*V + w.y*A + w.z*B + w.w*M` — no float-equality test on an index,
+  /// which ES 100 makes unpleasant.
+  ///
+  /// Triangle 0 is `(V, A, B)` and triangle 1 is `(A, M, B)`. Both wind
+  /// **either way** depending on the turn direction, because `_emitJoin`
+  /// flips the outer side with the sign of the cross product — which is why
+  /// `GpuDrawBackend.render` pins `CullMode.none`.
   ///
   /// `@visibleForTesting`: no test can reach this data through `create`
   /// itself (it runs only with a real GPU context), so it is hoisted here to
   /// be asserted directly by a plain `flutter test`.
   @visibleForTesting
   static const List<double> kCornerVertices = <double>[
-    0, -1, 0, 1, 1, -1, //
-    1, -1, 0, 1, 1, 1, //
+    // corner.x corner.y | join_weight V, A, B, M
+    0, -1, /*  */ 1, 0, 0, 0, // triangle 0, vertex 0 -> V
+    0, 1, /*   */ 0, 1, 0, 0, // triangle 0, vertex 1 -> A
+    1, -1, /*  */ 0, 0, 1, 0, // triangle 0, vertex 2 -> B
+    1, -1, /*  */ 0, 1, 0, 0, // triangle 1, vertex 0 -> A
+    0, 1, /*   */ 0, 0, 0, 1, // triangle 1, vertex 1 -> M
+    1, 1, /*   */ 0, 0, 1, 0, // triangle 1, vertex 2 -> B
   ];
+
+  /// Floats per entry in the corner buffer: `corner` (2) + `join_weight` (4).
+  static const int kFloatsPerCorner = 6;
 
   /// The pipeline's vertex input layout: `corner` in its own buffer at slot
   /// 0 (per vertex), the instance record in its own buffer at slot 1 (per
@@ -73,10 +98,16 @@ class ResidentGeometry {
   /// from its own buffer at slot 0 and the instance record from its own
   /// buffer at slot 1 means the instance attributes' offsets are the
   /// record's *own* offsets (`instance_record.dart`'s `[kind, x0, y0, x1,
-  /// y1, halfWidth, r, g, b, a]`), not the reflected ones shifted by
+  /// y1, x2, y2, halfWidth, r, g, b, a]`), not the reflected ones shifted by
   /// `corner`'s 8 bytes. This is the same two-buffer split the spike used
   /// (`git show 8c82208:apps/dev_harness_2d/lib/gpu_arm.dart:379-386` --
   /// that file was deleted in Task 9, before which it lived at this path).
+  ///
+  /// **Carries three kinds, not one**, since Plan B: slot 0 still holds a
+  /// single quad-corner buffer, but the instance buffer's records now
+  /// interleave strokes, joins and points (`instance_record.dart`'s
+  /// `kKindStroke`/`kKindJoin`/`kKindPoint`), so this one layout describes
+  /// every kind's vertex input rather than a stroke-only one.
   ///
   /// `@visibleForTesting`: same reason as [kCornerVertices] — this is pure
   /// configuration data, constructible and assertable without a GPU context,
@@ -90,15 +121,24 @@ class ResidentGeometry {
   /// confused import error. Same reasoning as the five getters below.
   @visibleForTesting
   @internal
-  static const gpu.VertexLayout kStrokeVertexLayout = gpu.VertexLayout(
+  static const gpu.VertexLayout kInstanceVertexLayout = gpu.VertexLayout(
     buffers: <gpu.VertexBuffer>[
-      gpu.VertexBuffer(strideInBytes: 8, attributes: <gpu.VertexAttribute>[
-        gpu.VertexAttribute(name: 'corner', format: gpu.VertexFormat.float32x2),
-      ]),
+      gpu.VertexBuffer(
+          strideInBytes: kFloatsPerCorner * 4,
+          attributes: <gpu.VertexAttribute>[
+            gpu.VertexAttribute(
+                name: 'corner',
+                format: gpu.VertexFormat.float32x2,
+                offsetInBytes: 0),
+            gpu.VertexAttribute(
+                name: 'join_weight',
+                format: gpu.VertexFormat.float32x4,
+                offsetInBytes: 8),
+          ]),
       gpu.VertexBuffer(
         strideInBytes: kFloatsPerInstance * 4,
         stepMode: gpu.VertexStepMode.instance,
-        // Offsets derive from `StrokeFieldOffset` (`instance_record.dart`),
+        // Offsets derive from `InstanceFieldOffset` (`instance_record.dart`),
         // not restated as bare literals — see that class's doc for why: a
         // reorder there moves these in lockstep instead of leaving them
         // pointing at the wrong bytes silently.
@@ -106,23 +146,27 @@ class ResidentGeometry {
           gpu.VertexAttribute(
               name: 'kind',
               format: gpu.VertexFormat.float32,
-              offsetInBytes: StrokeFieldOffset.kind * 4),
+              offsetInBytes: InstanceFieldOffset.kind * 4),
           gpu.VertexAttribute(
               name: 'p0',
               format: gpu.VertexFormat.float32x2,
-              offsetInBytes: StrokeFieldOffset.x0 * 4),
+              offsetInBytes: InstanceFieldOffset.x0 * 4),
           gpu.VertexAttribute(
               name: 'p1',
               format: gpu.VertexFormat.float32x2,
-              offsetInBytes: StrokeFieldOffset.x1 * 4),
+              offsetInBytes: InstanceFieldOffset.x1 * 4),
+          gpu.VertexAttribute(
+              name: 'p2',
+              format: gpu.VertexFormat.float32x2,
+              offsetInBytes: InstanceFieldOffset.x2 * 4),
           gpu.VertexAttribute(
               name: 'half_width',
               format: gpu.VertexFormat.float32,
-              offsetInBytes: StrokeFieldOffset.halfWidth * 4),
+              offsetInBytes: InstanceFieldOffset.halfWidth * 4),
           gpu.VertexAttribute(
               name: 'color',
               format: gpu.VertexFormat.float32x4,
-              offsetInBytes: StrokeFieldOffset.r * 4),
+              offsetInBytes: InstanceFieldOffset.r * 4),
         ],
       ),
     ],
@@ -219,7 +263,7 @@ class ResidentGeometry {
       context.createDeviceBufferWithCopy(ByteData.sublistView(corners)),
       context.createDeviceBufferWithCopy(instanceBytes),
       context.createRenderPipeline(vertex, fragment,
-          vertexLayout: kStrokeVertexLayout),
+          vertexLayout: kInstanceVertexLayout),
       vertex,
       context.createHostBuffer(),
     );

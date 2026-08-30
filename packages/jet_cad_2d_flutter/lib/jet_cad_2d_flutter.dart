@@ -20,7 +20,7 @@ export 'src/flutter_text_measurer.dart';
 // `jet_cad_2d_flutter`'s own public API, which is the thing this barrel
 // exists to not do; these members are not enough reason to accept
 // that. `ResidentGeometry`'s own handful of members that still resolve
-// through that shim (`kStrokeVertexLayout` and its five `gpu.*`-typed
+// through that shim (`kInstanceVertexLayout` and its five `gpu.*`-typed
 // getters) are marked `@internal` for the same reason, one file down.
 // `instance_record.dart` stays unexported too, for an unrelated reason: it is
 // `GeometryCollector`'s own wire format, not something a caller writes.
