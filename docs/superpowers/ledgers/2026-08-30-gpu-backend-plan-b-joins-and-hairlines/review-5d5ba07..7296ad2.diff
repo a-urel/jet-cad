@@ -1,0 +1,742 @@
+# Review package: 5d5ba07..7296ad2
+
+## Commits
+7296ad2 feat(gpu): the collector emits joins, in the reference's order
+
+## Files changed
+ .../lib/src/gpu/geometry_collector.dart            | 121 ++++++++++--
+ .../test/gpu/collector_differential_test.dart      | 203 +++++++++++++++------
+ .../test/gpu/geometry_collector_test.dart          | 157 +++++++++++++++-
+ 3 files changed, 411 insertions(+), 70 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+index b1ac4d7..98d71ad 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+@@ -1,10 +1,11 @@
++import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ 
+ import '../draw_sink.dart';
+ import 'instance_record.dart';
+ 
+ /// Collects a document's stroked segments into one buffer, in walk order.
+ ///
+ /// **This is a `DrawSink`, and that is deliberate.** `RecordingDrawSink`
+@@ -42,20 +43,36 @@ class GeometryCollector implements DrawSink {
+   /// `VerticesDrawSink.kMinStrokeDevicePixels` live (not hardcoded) on the
+   /// reference side specifically so that alarm stays real if either value
+   /// changes.
+   static const double kMinStrokeDevicePixels = 1.0;
+ 
+   Float32List _buffer = Float32List(0);
+   int _instances = 0;
+   int _skipped = 0;
+   Transform2 _residual = Transform2.identity();
+ 
++  // The run state machine, mirroring `VerticesDrawSink._beginRun` /
++  // `_runTo` / `_endRun`. It is duplicated rather than shared because these
++  // two classes are independent implementations of one `DrawSink` contract,
++  // cross-checked against each other by the differential gates -- the same
++  // reason `kMinStrokeDevicePixels` is a separate copy.
++  //
++  // Points, not directions: `_runBack` is the point BEFORE `_runPrev`, so a
++  // join is written as its three points and the shader normalises after the
++  // mvp. See `writeJoin`'s doc for why directions could not be stored here.
++  double _runFirstX = 0, _runFirstY = 0;
++  double _runSecondX = 0, _runSecondY = 0;
++  double _runPrevX = 0, _runPrevY = 0;
++  double _runBackX = 0, _runBackY = 0;
++  bool _runHasDirection = false;
++  int _runSegments = 0;
++
+   /// Copies `_buffer` on every access — `sublist` allocates a fresh
+   /// `Float32List`, not a view. At this plan's measured 10,000-entity scale
+   /// (59,875 segments; `resident_geometry_test.dart:23`) that is roughly 2.3 MB
+   /// copied per call (59,875 × [kFloatsPerInstance] × 4 bytes). Read it
+   /// once per rebuild, into `ResidentGeometry.create`, and hoist it out of
+   /// any per-frame path — Plan F's `paint()` call site included — or it
+   /// breaks this project's "the frame path allocates nothing per entity in
+   /// steady state" non-negotiable.
+   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
+   int get instanceCount => _instances;
+@@ -126,30 +143,112 @@ class GeometryCollector implements DrawSink {
+         deviceWidth >= kMinStrokeDevicePixels) {
+       return argb;
+     }
+     final coverage = (deviceWidth * 2).clamp(0.0, 1.0);
+     final alpha = (((argb >> 24) & 0xFF) * coverage).round();
+     return (alpha << 24) | (argb & 0x00FFFFFF);
+   }
+ 
+   void _emit(
+       double x0, double y0, double x1, double y1, double half, int argb) {
+-    // Exactly the sink's own test: `_emitSegment` bails on zero length
+-    // (`vertices_draw_sink.dart:503-507`). A degenerate segment has no
+-    // direction and the shader would divide by zero building its normal.
+-    if (x0 == x1 && y0 == y1) return;
++    // The reference's own test (`vertices_draw_sink.dart`, `_emitSegment`): a
++    // zero-length segment has no direction to take a normal from. Matching
++    // the formula, not the intention -- see `_runTo`.
++    final dx = x1 - x0, dy = y1 - y0;
++    if (math.sqrt(dx * dx + dy * dy) == 0) return;
+     _reserve(_instances + 1);
+     writeStroke(_buffer, _instances,
+         x0: x0, y0: y0, x1: x1, y1: y1, halfWidth: half, argb: argb);
+     _instances++;
+   }
+ 
++  /// Starts a connected run at a collection-space point.
++  void _beginRun(double x, double y) {
++    _runFirstX = x;
++    _runFirstY = y;
++    _runSecondX = x;
++    _runSecondY = y;
++    _runPrevX = x;
++    _runPrevY = y;
++    _runBackX = x;
++    _runBackY = y;
++    _runHasDirection = false;
++    _runSegments = 0;
++  }
++
++  /// Extends the run, emitting the join **before** the segment.
++  ///
++  /// The zero-length test is `length == 0` on the square root, not
++  /// `x == _runPrevX && y == _runPrevY`, because that is the reference's test
++  /// (`vertices_draw_sink.dart`, `_runTo`) and the two are not the same
++  /// predicate: for a displacement near the underflow boundary `dx * dx`
++  /// rounds to zero while `dx` itself is non-zero, so the equality form keeps
++  /// a step the reference drops. Matching the formula rather than the
++  /// intention is what keeps the two arms' instance lists identical.
++  void _runTo(double x, double y, double half, int argb) {
++    final dx = x - _runPrevX, dy = y - _runPrevY;
++    if (math.sqrt(dx * dx + dy * dy) == 0) return;
++
++    if (_runHasDirection) {
++      _emitJoin(_runPrevX, _runPrevY, _runBackX, _runBackY, x, y, half, argb);
++    } else {
++      _runSecondX = x;
++      _runSecondY = y;
++    }
++    _emit(_runPrevX, _runPrevY, x, y, half, argb);
++
++    _runBackX = _runPrevX;
++    _runBackY = _runPrevY;
++    _runPrevX = x;
++    _runPrevY = y;
++    _runHasDirection = true;
++    _runSegments++;
++  }
++
++  /// Ends the run.
++  ///
++  /// An open run gets butt caps, which is to say nothing at all — the
++  /// reference's own words, and the reason this plan emits no cap geometry.
++  /// A closed run gets the segment back to its first point and then the seam
++  /// join, the corner no vertex list contains and the one whose absence puts
++  /// a notch on every circle at its start angle.
++  void _endRun(
++      {required bool closed, required double half, required int argb}) {
++    if (!closed || !_runHasDirection) return;
++    _runTo(_runFirstX, _runFirstY, half, argb);
++    // Guarded for the same reason the reference guards it: today's callers
++    // cannot reach here with one segment, but that is a fact about the
++    // callers, not a promise the join arithmetic makes.
++    if (_runSegments >= 2) {
++      _emitJoin(_runFirstX, _runFirstY, _runBackX, _runBackY, _runSecondX,
++          _runSecondY, half, argb);
++    }
++  }
++
++  void _emitJoin(double vx, double vy, double prevX, double prevY, double nextX,
++      double nextY, double half, int argb) {
++    // No collinearity test here, deliberately: the bevel/miter/collinear
++    // decision belongs to the shader, in device pixels, where the reference
++    // makes it too. See this plan's Ruling B4.
++    _reserve(_instances + 1);
++    writeJoin(_buffer, _instances,
++        vx: vx,
++        vy: vy,
++        prevX: prevX,
++        prevY: prevY,
++        nextX: nextX,
++        nextY: nextY,
++        halfWidth: half,
++        argb: argb);
++    _instances++;
++  }
++
+   /// Doubling growth, mirroring `VerticesDrawSink._reserve`
+   /// (`vertices_draw_sink.dart:511-521`). A `List<double>` grown via its
+   /// `length` setter null-fills the new slots and throws for a non-nullable
+   /// element type — confirmed by hand — so the buffer is a `Float32List`
+   /// grown by copy, and `writeStroke` writes straight into it.
+   void _reserve(int instances) {
+     final needed = instances * kFloatsPerInstance;
+     if (needed <= _buffer.length) return;
+     var capacity = _buffer.isEmpty ? kFloatsPerInstance * 16 : _buffer.length;
+     while (capacity < needed) {
+@@ -168,31 +267,27 @@ class GeometryCollector implements DrawSink {
+   @override
+   void endResidual() {}
+ 
+   @override
+   void polyline(Float64List points, int count, ResolvedStyle style,
+       {required bool closed}) {
+     if (count < 2) return;
+     final half = _halfWidthFor(style.lineweightHundredths);
+     final argb = _coveredArgb(style.argb, style.lineweightHundredths);
+     final t = _residual;
+-    var px = t.a * points[0] + t.c * points[1] + t.e;
+-    var py = t.b * points[0] + t.d * points[1] + t.f;
+-    final firstX = px, firstY = py;
++    _beginRun(t.a * points[0] + t.c * points[1] + t.e,
++        t.b * points[0] + t.d * points[1] + t.f);
+     for (var i = 1; i < count; i++) {
+-      final qx = t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e;
+-      final qy = t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f;
+-      _emit(px, py, qx, qy, half, argb);
+-      px = qx;
+-      py = qy;
++      _runTo(t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e,
++          t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f, half, argb);
+     }
+-    if (closed) _emit(px, py, firstX, firstY, half, argb);
++    _endRun(closed: closed, half: half, argb: argb);
+   }
+ 
+   @override
+   void point(double x, double y, ResolvedStyle style) => _skipped++;
+ 
+   @override
+   void circle(double cx, double cy, double r, ResolvedStyle style) =>
+       _skipped++;
+ 
+   @override
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+index b96995c..548ad01 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+@@ -1,10 +1,12 @@
++import 'dart:math' as math;
++
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
+ 
+ import '../support/fixtures.dart';
+ 
+ const double _devicePixelRatio = 2.0;
+ 
+ /// Tighter than any of the mutations below by orders of magnitude, but far
+@@ -74,100 +76,93 @@ void main() {
+     // residual (`draft_painter.dart`, and its own comment that the general
+     // `_emit` polyline path is dead). So this loop's generic
+     // `a/b/c/d/e/f` application is honest, but a mutation that swaps the
+     // residual's off-diagonal terms (b <-> c) cannot be observed through
+     // *this* walk -- b and c are always 0 here, by construction, on every
+     // fixture. That mutation is covered instead by
+     // `geometry_collector_test.dart`'s "applies the residual, and a
+     // transposed one is not the same residual", which drives
+     // `GeometryCollector.polyline` directly with a genuine off-diagonal
+     // residual. See Task 8's report for the transcript proving that.
+-    final expectedPoints = <List<double>>[];
+-    final expectedStyles = <ResolvedStyle>[];
++    // The expected instance list, rebuilt by mirroring
++    // `GeometryCollector`'s run state machine (`_beginRun` / `_runTo` /
++    // `_endRun`) over each `PolylineOp` -- not just its raw segment list.
++    // Once the collector emits a join instance at every interior vertex
++    // (Task 4), a per-segment rebuild undercounts on every polyline with
++    // more than two points, so the oracle has to run the same state machine
++    // the collector runs, not merely walk the same points.
++    final expected = <_ExpectedInstance>[];
+     Transform2 residual = Transform2.identity();
+     for (final op in recording.ops) {
+       if (op is BeginResidualOp) residual = op.residual;
+       if (op is PolylineOp) {
+-        final t = residual;
+         // `PolylineOp.points` is already trimmed to the drawn point count
+         // (`draw_sink.dart`'s own doc comment) -- there is no separate
+         // `count` field on the op, unlike the brief's sample code assumed.
+         final pts = op.points;
+-        final count = pts.length ~/ 2;
+-        var px = t.a * pts[0] + t.c * pts[1] + t.e;
+-        var py = t.b * pts[0] + t.d * pts[1] + t.f;
+-        for (var i = 1; i < count; i++) {
+-          final qx = t.a * pts[i * 2] + t.c * pts[i * 2 + 1] + t.e;
+-          final qy = t.b * pts[i * 2] + t.d * pts[i * 2 + 1] + t.f;
+-          if (px != qx || py != qy) {
+-            expectedPoints.add([px, py, qx, qy]);
+-            expectedStyles.add(op.style);
+-          }
+-          px = qx;
+-          py = qy;
+-        }
+-        // `differentialFixture` never sets `closed: true` --
+-        // `draft_painter.dart`'s own `_emitScreenSpace` comment says the
+-        // model carries no closed-polyline flag yet, so every `PolylineOp`
+-        // in this walk has `closed == false` and this branch never runs on
+-        // this fixture. It mirrors `GeometryCollector.polyline`'s own
+-        // closing-segment emission anyway, so this builder does not start
+-        // silently under-counting the day a closed flag exists.
+-        if (op.closed && count > 1) {
+-          final fx = t.a * pts[0] + t.c * pts[1] + t.e;
+-          final fy = t.b * pts[0] + t.d * pts[1] + t.f;
+-          if (px != fx || py != fy) {
+-            expectedPoints.add([px, py, fx, fy]);
+-            expectedStyles.add(op.style);
+-          }
+-        }
++        _mirrorPolylineRun(
++            pts, pts.length ~/ 2, op.closed, op.style, residual, expected);
+       }
+     }
+ 
+-    expect(expectedPoints, isNotEmpty,
++    expect(expected, isNotEmpty,
+         reason: 'a fixture with no polylines would make this test vacuous');
+-    expect(collector.instanceCount, expectedPoints.length,
++    expect(collector.instanceCount, expected.length,
+         reason: 'the collector must emit exactly one instance per segment '
+-            'the walk produced -- neither dropping nor duplicating one');
++            'and per join the run state machine produces -- neither '
++            'dropping nor duplicating one');
+ 
+     // Captured once: `collector.data` copies `_buffer` on every access, so
+     // the comparison loop below reads a single snapshot rather than a fresh
+     // sublist per index.
+     final data = collector.data;
+ 
+-    for (var i = 0; i < expectedPoints.length; i++) {
++    for (var i = 0; i < expected.length; i++) {
+       final o = i * kFloatsPerInstance;
+-      final style = expectedStyles[i];
++      final e = expected[i];
++      final style = e.style;
+ 
+-      // -- kind: every record this task's collector writes is a stroke.
+-      expect(data[o + InstanceFieldOffset.kind], kKindStroke,
+-          reason: 'instance $i must tag itself a stroke');
++      // -- kind: a stroke and a join lay their geometry out differently
++      // (`InstanceFieldOffset` doc), so asserting only the strokes' kind
++      // would pass on a join emitted as a stroke with the wrong fields
++      // simply never being checked. Every instance's kind is asserted here,
++      // strokes and joins alike.
++      expect(data[o + InstanceFieldOffset.kind], e.kind,
++          reason: 'instance $i must be a '
++              '${e.kind == kKindJoin ? "join" : "stroke"}');
+ 
+       // -- walk order & the residual -----------------------------------
+-      expect(data[o + InstanceFieldOffset.x0],
+-          closeTo(expectedPoints[i][0], _tolerance),
+-          reason: 'instance $i x0 must be the walk\'s $i-th segment start');
+-      expect(data[o + InstanceFieldOffset.y0],
+-          closeTo(expectedPoints[i][1], _tolerance),
+-          reason: 'instance $i y0 must be the walk\'s $i-th segment start');
+-      expect(data[o + InstanceFieldOffset.x1],
+-          closeTo(expectedPoints[i][2], _tolerance),
+-          reason: 'instance $i x1 must be the walk\'s $i-th segment end');
+-      expect(data[o + InstanceFieldOffset.y1],
+-          closeTo(expectedPoints[i][3], _tolerance),
+-          reason: 'instance $i y1 must be the walk\'s $i-th segment end');
++      // A stroke's (x0,y0,x1,y1) is its segment; a join's is
++      // (vertex, previous point) and (x2,y2) is its next point. A stroke's
++      // own (x2,y2) is asserted too (against 0,0, `writeStroke`'s own
++      // constant) rather than left unchecked, so a join emitted where a
++      // stroke was expected -- carrying a non-zero neighbour in x2/y2 --
++      // fails here instead of only on the kind check above.
++      expect(data[o + InstanceFieldOffset.x0], closeTo(e.x0, _tolerance),
++          reason: 'instance $i x0');
++      expect(data[o + InstanceFieldOffset.y0], closeTo(e.y0, _tolerance),
++          reason: 'instance $i y0');
++      expect(data[o + InstanceFieldOffset.x1], closeTo(e.x1, _tolerance),
++          reason: 'instance $i x1');
++      expect(data[o + InstanceFieldOffset.y1], closeTo(e.y1, _tolerance),
++          reason: 'instance $i y1');
++      expect(data[o + InstanceFieldOffset.x2], closeTo(e.x2, _tolerance),
++          reason: 'instance $i x2');
++      expect(data[o + InstanceFieldOffset.y2], closeTo(e.y2, _tolerance),
++          reason: 'instance $i y2');
+ 
+       // -- half-width: the collector stores DEVICE pixels, the reference
+       // sink's own formula (`VerticesDrawSink._halfWidthFor`) stores LOGICAL
+       // pixels. They must differ by exactly `devicePixelRatio` -- this is
+       // not a bug being tolerated, it is the fact this test pins (see the
+-      // module doc on `GeometryCollector._halfWidthFor`).
++      // module doc on `GeometryCollector._halfWidthFor`). A join carries the
++      // same half-width as the segments either side of it.
+       final sinkHalf = _referenceLogicalHalfWidth(style.lineweightHundredths);
+       expect(data[o + InstanceFieldOffset.halfWidth],
+           closeTo(sinkHalf * _devicePixelRatio, _tolerance),
+           reason: 'instance $i half-width must be the reference sink\'s '
+               'logical half-width scaled by devicePixelRatio, not the raw '
+               'logical value copied straight across');
+ 
+       // -- colour: every entity in `differentialFixture` carries the
+       // default lineweight (25 hundredths-of-a-mm), which at
+       // `kLogicalPixelsPerMm` and dpr 2 computes to a device width above
+@@ -188,20 +183,124 @@ void main() {
+       expect(data[o + InstanceFieldOffset.b],
+           closeTo((argb & 0xFF) / 255.0, _tolerance),
+           reason: 'instance $i blue channel');
+       expect(data[o + InstanceFieldOffset.a],
+           closeTo(((argb >> 24) & 0xFF) / 255.0, _tolerance),
+           reason: 'instance $i alpha channel');
+     }
+   });
+ }
+ 
++/// One instance the oracle predicts, tagged with the [ResolvedStyle] it
++/// came from so the half-width and colour checks above can be per-instance.
++///
++/// Mirrors the two record shapes `GeometryCollector` actually writes: a
++/// stroke's `(x2, y2)` is always `(0, 0)` (`writeStroke` never touches those
++/// slots) and a join's `(x0, y0)` is the corner, `(x1, y1)` the previous
++/// point and `(x2, y2)` the next one (`writeJoin`'s doc).
++class _ExpectedInstance {
++  _ExpectedInstance.stroke(this.style, this.x0, this.y0, this.x1, this.y1)
++      : kind = kKindStroke,
++        x2 = 0,
++        y2 = 0;
++
++  _ExpectedInstance.join(this.style, double vx, double vy, double prevX,
++      double prevY, double nextX, double nextY)
++      : kind = kKindJoin,
++        x0 = vx,
++        y0 = vy,
++        x1 = prevX,
++        y1 = prevY,
++        x2 = nextX,
++        y2 = nextY;
++
++  final double kind;
++  final double x0, y0, x1, y1, x2, y2;
++  final ResolvedStyle style;
++}
++
++/// Mirrors `GeometryCollector`'s run state machine (`_beginRun` / `_runTo` /
++/// `_endRun`, `geometry_collector.dart`) over one `PolylineOp`'s points,
++/// after [residual] is applied, appending the instances the collector must
++/// emit for it to [out]: a join **before** every interior segment, and on a
++/// closed run the closing segment then the seam join, last.
++///
++/// A second, independent implementation of that state machine rather than a
++/// call into the collector's own -- an oracle that invoked the code under
++/// test to build its own expectation could not catch a defect in that code.
++void _mirrorPolylineRun(List<double> points, int count, bool closed,
++    ResolvedStyle style, Transform2 residual, List<_ExpectedInstance> out) {
++  if (count < 2) return;
++  final t = residual;
++  double px(int i) => t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e;
++  double py(int i) => t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f;
++
++  double runFirstX = 0, runFirstY = 0, runSecondX = 0, runSecondY = 0;
++  double runPrevX = 0, runPrevY = 0, runBackX = 0, runBackY = 0;
++  var runHasDirection = false;
++  var runSegments = 0;
++
++  void emitSeg(double x0, double y0, double x1, double y1) {
++    final dx = x1 - x0, dy = y1 - y0;
++    if (math.sqrt(dx * dx + dy * dy) == 0) return;
++    out.add(_ExpectedInstance.stroke(style, x0, y0, x1, y1));
++  }
++
++  void emitJoin(double vx, double vy, double prevX, double prevY, double nextX,
++      double nextY) {
++    out.add(_ExpectedInstance.join(style, vx, vy, prevX, prevY, nextX, nextY));
++  }
++
++  void beginRun(double x, double y) {
++    runFirstX = x;
++    runFirstY = y;
++    runSecondX = x;
++    runSecondY = y;
++    runPrevX = x;
++    runPrevY = y;
++    runBackX = x;
++    runBackY = y;
++    runHasDirection = false;
++    runSegments = 0;
++  }
++
++  void runTo(double x, double y) {
++    final dx = x - runPrevX, dy = y - runPrevY;
++    if (math.sqrt(dx * dx + dy * dy) == 0) return;
++    if (runHasDirection) {
++      emitJoin(runPrevX, runPrevY, runBackX, runBackY, x, y);
++    } else {
++      runSecondX = x;
++      runSecondY = y;
++    }
++    emitSeg(runPrevX, runPrevY, x, y);
++    runBackX = runPrevX;
++    runBackY = runPrevY;
++    runPrevX = x;
++    runPrevY = y;
++    runHasDirection = true;
++    runSegments++;
++  }
++
++  beginRun(px(0), py(0));
++  for (var i = 1; i < count; i++) {
++    runTo(px(i), py(i));
++  }
++  if (closed && runHasDirection) {
++    runTo(runFirstX, runFirstY);
++    if (runSegments >= 2) {
++      emitJoin(
++          runFirstX, runFirstY, runBackX, runBackY, runSecondX, runSecondY);
++    }
++  }
++}
++
+ /// `VerticesDrawSink._halfWidthFor`, reproduced here because that method is
+ /// private to its own file. Computes the half-width **in logical pixels** --
+ /// the reference sink's own space, per its `floorLogical` naming
+ /// (`vertices_draw_sink.dart:544-552`) -- so the test above can assert the
+ /// `x devicePixelRatio` relationship explicitly instead of checking the
+ /// collector against a copy of its own formula.
+ double _referenceLogicalHalfWidth(int lineweightHundredths) {
+   const pixelsPerPaperMm = kLogicalPixelsPerMm;
+   // The reference sink's own floor, not a third copy of it: the collector's
+   // module doc (`geometry_collector.dart:31-35`) claims raising either
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+index 4e7abbf..1f03668 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+@@ -10,20 +10,24 @@ const _style = ResolvedStyle(
+     lineweightHundredths: 50,
+     linetype: Handle.none,
+     linetypeScale: 1);
+ 
+ const _hairlineStyle = ResolvedStyle(
+     argb: 0xFF203040,
+     lineweightHundredths: 0,
+     linetype: Handle.none,
+     linetypeScale: 1);
+ 
++/// Reads the kind tag of instance [i].
++double _kindAt(GeometryCollector c, int i) =>
++    c.data[i * kFloatsPerInstance + InstanceFieldOffset.kind];
++
+ void main() {
+   test('applies the residual, and a transposed one is not the same residual',
+       () {
+     final c = GeometryCollector(
+         pixelsPerPaperMm: 4, devicePixelRatio: 2, lineweightScale: 1);
+ 
+     // **Deliberately not the identity, not at the origin, not uniform, and
+     // not diagonal.** b=0.5 and c=-1 differ from each other (and from the
+     // 0 a diagonal residual would carry), and neither fixture point sits on
+     // x == y — so swapping t.b for t.c in the residual application changes
+@@ -52,45 +56,60 @@ void main() {
+     expect(r[InstanceFieldOffset.halfWidth], 2.0);
+   });
+ 
+   test('emits one instance per segment, in walk order', () {
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.polyline(Float64List.fromList([0, 0, 1, 0, 1, 1]), 3, _style,
+         closed: false);
+     c.endResidual();
+ 
+-    expect(c.instanceCount, 2);
++    // Stroke, join (at the corner), stroke -- three instances now that the
++    // interior join is emitted between the two segments (Task 4); see 'an
++    // open three-point run is join-before-segment, and nothing else'.
++    expect(c.instanceCount, 3);
++    expect(c.data[InstanceFieldOffset.kind], kKindStroke);
+     expect(c.data.sublist(1, 5), [0.0, 0.0, 1.0, 0.0]);
+-    expect(c.data.sublist(kFloatsPerInstance + 1, kFloatsPerInstance + 5),
++    expect(c.data[kFloatsPerInstance + InstanceFieldOffset.kind], kKindJoin);
++    expect(
++        c.data[2 * kFloatsPerInstance + InstanceFieldOffset.kind], kKindStroke);
++    expect(
++        c.data.sublist(2 * kFloatsPerInstance + 1, 2 * kFloatsPerInstance + 5),
+         [1.0, 0.0, 1.0, 1.0]);
+   });
+ 
+   test('closed: true emits a closing segment back to the first point', () {
+     // `DraftPainter` never passes `closed: true` today (there is no
+     // closed-polyline flag on the model yet), so nothing in the differential
+     // gate (`test/gpu/collector_differential_test.dart`) can exercise this
+     // branch through the real walk. This drives `GeometryCollector.polyline`
+     // directly, the way the residual-transposition test above already does,
+     // so the branch has a killable test regardless.
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.polyline(Float64List.fromList([0, 0, 1, 0, 1, 1]), 3, _style,
+         closed: true);
+     c.endResidual();
+ 
+-    expect(c.instanceCount, 3);
++    // Stroke, join, stroke, join, closing stroke, seam join -- six
++    // instances now that joins are interleaved (Task 4); see 'a closed run
++    // emits the closing segment and then the seam join'. The three strokes
++    // sit at instances 0, 2 and 4 -- the joins at 1, 3 and 5 shift every
++    // later stroke's index, which is why this can no longer read
++    // consecutive slots.
++    expect(c.instanceCount, 6);
+     expect(c.data.sublist(1, 5), [0.0, 0.0, 1.0, 0.0]);
+-    expect(c.data.sublist(kFloatsPerInstance + 1, kFloatsPerInstance + 5),
+-        [1.0, 0.0, 1.0, 1.0]);
+     expect(
+         c.data.sublist(2 * kFloatsPerInstance + 1, 2 * kFloatsPerInstance + 5),
++        [1.0, 0.0, 1.0, 1.0]);
++    expect(
++        c.data.sublist(4 * kFloatsPerInstance + 1, 4 * kFloatsPerInstance + 5),
+         [1.0, 1.0, 0.0, 0.0],
+         reason: 'the closing segment must run from the last point back to '
+             'the first');
+   });
+ 
+   test('drops a zero-length segment rather than handing the shader a NaN', () {
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.polyline(Float64List.fromList([5, 5, 5, 5]), 2, _style, closed: false);
+     c.endResidual();
+@@ -211,11 +230,139 @@ void main() {
+         Float64List.fromList(<double>[0, 0, 40, 0]),
+         2,
+         const ResolvedStyle(
+             argb: 0xFF112233,
+             lineweightHundredths: 0,
+             linetype: Handle.none,
+             linetypeScale: 1),
+         closed: false);
+     expect(c.data[InstanceFieldOffset.a] * 255.0, closeTo(0xFF, 0.51));
+   });
++
++  test('an open three-point run is join-before-segment, and nothing else', () {
++    // Three points, one corner. The reference emits: segment(0,1),
++    // join(1), segment(1,2) -- in that order, with the join written before
++    // the segment it precedes. Butt caps mean there is nothing at either
++    // end (Ruling B2), so the count is exactly 3.
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    c.polyline(
++        Float64List.fromList(<double>[0, 0, 40, 0, 40, 30]),
++        3,
++        const ResolvedStyle(
++            argb: 0xFF000000,
++            lineweightHundredths: 25,
++            linetype: Handle.none,
++            linetypeScale: 1),
++        closed: false);
++    expect(c.instanceCount, 3,
++        reason: 'segment, join, segment -- no caps, no trailing join');
++    expect(<double>[
++      _kindAt(c, 0),
++      _kindAt(c, 1),
++      _kindAt(c, 2)
++    ], <double>[
++      kKindStroke,
++      kKindJoin,
++      kKindStroke
++    ], reason: 'the join is written BEFORE the segment that follows it');
++  });
++
++  test('the join carries the corner and both its neighbours', () {
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    c.polyline(
++        Float64List.fromList(<double>[0, 0, 40, 0, 40, 30]),
++        3,
++        const ResolvedStyle(
++            argb: 0xFF000000,
++            lineweightHundredths: 25,
++            linetype: Handle.none,
++            linetypeScale: 1),
++        closed: false);
++    final j = c.data.sublist(kFloatsPerInstance, 2 * kFloatsPerInstance);
++    expect(j[InstanceFieldOffset.x0], 40, reason: 'the vertex');
++    expect(j[InstanceFieldOffset.y0], 0);
++    expect(j[InstanceFieldOffset.x1], 0, reason: 'the previous point');
++    expect(j[InstanceFieldOffset.y1], 0);
++    expect(j[InstanceFieldOffset.x2], 40, reason: 'the next point');
++    expect(j[InstanceFieldOffset.y2], 30);
++  });
++
++  test('a closed run emits the closing segment and then the seam join', () {
++    // A triangle: three points, closed. Segments 0-1, 1-2, 2-0 with a join
++    // at vertices 1 and 2, then the seam join at vertex 0 -- LAST, after the
++    // closing segment. Six instances, and the last one is the seam.
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    c.polyline(
++        Float64List.fromList(<double>[0, 0, 60, 0, 30, 50]),
++        3,
++        const ResolvedStyle(
++            argb: 0xFF000000,
++            lineweightHundredths: 25,
++            linetype: Handle.none,
++            linetypeScale: 1),
++        closed: true);
++    expect(c.instanceCount, 6);
++    expect(List<double>.generate(6, (i) => _kindAt(c, i)), <double>[
++      kKindStroke, // 0 -> 1
++      kKindJoin, //   at 1
++      kKindStroke, // 1 -> 2
++      kKindJoin, //   at 2
++      kKindStroke, // 2 -> 0, the closing segment
++      kKindJoin, //   the seam, at 0, LAST
++    ]);
++    final seam = c.data.sublist(5 * kFloatsPerInstance);
++    expect(seam[InstanceFieldOffset.x0], 0,
++        reason: 'the seam is at the first point');
++    expect(seam[InstanceFieldOffset.y0], 0);
++    expect(seam[InstanceFieldOffset.x1], 30,
++        reason: 'incoming from the last point');
++    expect(seam[InstanceFieldOffset.y1], 50);
++    expect(seam[InstanceFieldOffset.x2], 60,
++        reason: 'outgoing to the second point');
++    expect(seam[InstanceFieldOffset.y2], 0);
++  });
++
++  test('a repeated point is spanned by the join, not turned into one', () {
++    // The reference's `_runTo` skips a zero-length step and KEEPS the
++    // previous direction, so a duplicated vertex produces the same corner a
++    // clean polyline would. A collector that reset its direction on the
++    // repeat would emit a join between two identical points and draw
++    // nothing there.
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    c.polyline(
++        Float64List.fromList(<double>[0, 0, 40, 0, 40, 0, 40, 30]),
++        4,
++        const ResolvedStyle(
++            argb: 0xFF000000,
++            lineweightHundredths: 25,
++            linetype: Handle.none,
++            linetypeScale: 1),
++        closed: false);
++    expect(c.instanceCount, 3, reason: 'the repeat adds no instance');
++    final j = c.data.sublist(kFloatsPerInstance, 2 * kFloatsPerInstance);
++    expect(j[InstanceFieldOffset.x1], 0,
++        reason: 'the incoming neighbour is still the first point');
++    expect(j[InstanceFieldOffset.y1], 0);
++  });
++
++  test('a two-point run has no join at all', () {
++    // The degenerate case a join implementation gets wrong in the other
++    // direction: emitting a join at the start or the end of an open run.
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    c.polyline(
++        Float64List.fromList(<double>[0, 0, 40, 30]),
++        2,
++        const ResolvedStyle(
++            argb: 0xFF000000,
++            lineweightHundredths: 25,
++            linetype: Handle.none,
++            linetypeScale: 1),
++        closed: false);
++    expect(c.instanceCount, 1);
++    expect(_kindAt(c, 0), kKindStroke);
++  });
+ }

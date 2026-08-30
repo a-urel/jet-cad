@@ -1,0 +1,393 @@
+# Review package: 469dc5c..6b8ed76
+
+## Commits
+6b8ed76 style(gpu): dart format the two Task 5 test files
+c73758e test(gpu): the differential oracle learns circles and arcs
+c9d7f73 feat(gpu): the collector flattens circles and arcs, seam join included
+
+## Files changed
+ .../lib/src/gpu/geometry_collector.dart            |  63 ++++++++++-
+ .../test/gpu/collector_differential_test.dart      |  71 +++++++++++++
+ .../test/gpu/geometry_collector_test.dart          | 118 ++++++++++++++++++++-
+ 3 files changed, 247 insertions(+), 5 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+index 98d71ad..191e656 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+@@ -279,28 +279,87 @@ class GeometryCollector implements DrawSink {
+     for (var i = 1; i < count; i++) {
+       _runTo(t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e,
+           t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f, half, argb);
+     }
+     _endRun(closed: closed, half: half, argb: argb);
+   }
+ 
+   @override
+   void point(double x, double y, ResolvedStyle style) => _skipped++;
+ 
++  /// The chord error a flattened arc is allowed, in device pixels. The
++  /// reference's own value, copied for the same reason
++  /// [kMinStrokeDevicePixels] is: two independent implementations that agree
++  /// are a differential test; one shared field is not.
++  static const double kFlattenTolerance = 0.25;
++
++  /// The chord ceiling, likewise copied.
++  static const int kMaxFlattenSegments = 512;
++
+   @override
+   void circle(double cx, double cy, double r, ResolvedStyle style) =>
+-      _skipped++;
++      _flatten(cx, cy, r, 0, 2 * math.pi, style, closed: true);
+ 
+   @override
+   void arc(double cx, double cy, double r, double start, double sweep,
+           ResolvedStyle style) =>
+-      _skipped++;
++      _flatten(cx, cy, r, start, sweep, style, closed: false);
++
++  /// Walks a circular arc in the residual's **local** space, emitting a chord
++  /// per step.
++  ///
++  /// Local space, not collection space, on purpose: the residual may be
++  /// non-uniform, and the arc that `Canvas` would draw under it is an
++  /// ellipse. Flattening here and transforming each point reproduces that
++  /// ellipse; flattening a collection-space circle would not. Only the
++  /// *count* is a scale decision, because the chord error the viewer sees is
++  /// a pixel quantity.
++  ///
++  /// **This is the op that turns on the general-affine residual.**
++  /// `draft_painter.dart:568` pushes `camera ∘ placement` here, where a
++  /// polyline gets only a translation — the path Plan A's transposition
++  /// test was written to guard and no Plan A fixture could reach.
++  void _flatten(double cx, double cy, double r, double start, double sweep,
++      ResolvedStyle style,
++      {required bool closed}) {
++    if (r <= 0 || sweep == 0) return;
++    final t = _residual;
++    final deviceRadius = r * t.scaleMagnitude;
++    if (deviceRadius <= 0) return;
++
++    final steps = _flattenSteps(deviceRadius, sweep.abs());
++    final half = _halfWidthFor(style.lineweightHundredths);
++    final argb = _coveredArgb(style.argb, style.lineweightHundredths);
++    final step = sweep / steps;
++
++    var lx = cx + r * math.cos(start);
++    var ly = cy + r * math.sin(start);
++    _beginRun(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f);
++    // A closed sweep stops one sample short: its last chord is the segment
++    // `_endRun` draws back to the first point, so closing here would draw
++    // that chord twice and leave the seam a duplicated point instead of a
++    // join.
++    final last = closed ? steps - 1 : steps;
++    for (var i = 1; i <= last; i++) {
++      final angle = start + step * i;
++      lx = cx + r * math.cos(angle);
++      ly = cy + r * math.sin(angle);
++      _runTo(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f, half, argb);
++    }
++    _endRun(closed: closed, half: half, argb: argb);
++  }
++
++  int _flattenSteps(double deviceRadius, double theta) {
++    final ideal =
++        (theta * math.sqrt(deviceRadius / (8 * kFlattenTolerance))).ceil();
++    return ideal.clamp(1, kMaxFlattenSegments);
++  }
+ 
+   @override
+   void fillPolygon(Float64List points, int count, Int32List triangles,
+           ResolvedStyle style) =>
+       _skipped++;
+ 
+   @override
+   void fillCircle(double cx, double cy, double r, ResolvedStyle style) =>
+       _skipped++;
+ 
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+index 4b41df1..664c269 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+@@ -97,20 +97,42 @@ void main() {
+     for (final op in recording.ops) {
+       if (op is BeginResidualOp) residual = op.residual;
+       if (op is PolylineOp) {
+         // `PolylineOp.points` is already trimmed to the drawn point count
+         // (`draw_sink.dart`'s own doc comment) -- there is no separate
+         // `count` field on the op, unlike the brief's sample code assumed.
+         final pts = op.points;
+         _expectedInstancesFor(
+             pts, pts.length ~/ 2, op.closed, op.style, residual, expected);
+       }
++      // A circle and an arc reach the collector as a flattened run, so the
++      // oracle flattens them too -- from the REFERENCE's formula
++      // (`_flattenedLocalPoints` below), never from
++      // `GeometryCollector._flatten` -- and then hands the resulting point
++      // list to the same declarative rule the polylines use. A circle is
++      // `closed`, so it is where the rule's seam limb finally comes under
++      // this gate at all: the fixture carries no closed polyline, so before
++      // Task 5 that limb was exercised only by unit tests.
++      if (op is CircleOp) {
++        final pts = _flattenedLocalPoints(
++            op.cx, op.cy, op.r, 0, 2 * math.pi, residual,
++            closed: true);
++        _expectedInstancesFor(
++            pts, pts.length ~/ 2, true, op.style, residual, expected);
++      }
++      if (op is ArcOp) {
++        final pts = _flattenedLocalPoints(
++            op.cx, op.cy, op.r, op.start, op.sweep, residual,
++            closed: false);
++        _expectedInstancesFor(
++            pts, pts.length ~/ 2, false, op.style, residual, expected);
++      }
+     }
+ 
+     expect(expected, isNotEmpty,
+         reason: 'a fixture with no polylines would make this test vacuous');
+     expect(collector.instanceCount, expected.length,
+         reason: 'the collector must emit exactly one instance per segment '
+             'and per join the declarative rule produces -- neither '
+             'dropping nor duplicating one');
+ 
+     // Captured once: `collector.data` copies `_buffer` on every access, so
+@@ -214,20 +236,69 @@ class _ExpectedInstance {
+         x1 = prevX,
+         y1 = prevY,
+         x2 = nextX,
+         y2 = nextY;
+ 
+   final double kind;
+   final double x0, y0, x1, y1, x2, y2;
+   final ResolvedStyle style;
+ }
+ 
++/// The point list a circle or arc flattens to, in the residual's **local**
++/// space — the space `_expectedInstancesFor` expects, since it applies the
++/// residual itself.
++///
++/// **Derived from the reference, not from the collector.** Every constant
++/// here is read live off `VerticesDrawSink` (`kFlattenTolerance`,
++/// `kMaxFlattenSegments`, both public), and the step count is the
++/// reference's own expression from `_flattenSteps`. `GeometryCollector`
++/// keeps its *own* copies of those two constants deliberately — two
++/// independent implementations that agree are a differential test, one
++/// shared field is not — so reading the reference's here is what makes the
++/// comparison mean something. Raise either arm's constant out of step with
++/// the other and this test goes red, which is the intended alarm.
++///
++/// Three properties reproduced from `_flatten`'s own doc, each because
++/// getting it wrong is a defect this gate exists to catch:
++///  - the walk is in **local** space, because a non-uniform residual turns
++///    the circle into an ellipse and flattening a transformed circle would
++///    not reproduce it;
++///  - only the **count** is a scale decision, so the radius that sets it is
++///    the on-screen one, `r * residual.scaleMagnitude`;
++///  - a closed sweep stops **one sample short**, because its last chord is
++///    the segment `_endRun` draws back to the first point — sampling it here
++///    would draw that chord twice and leave the seam a duplicated point
++///    instead of a join.
++List<double> _flattenedLocalPoints(double cx, double cy, double r, double start,
++    double sweep, Transform2 residual,
++    {required bool closed}) {
++  if (r <= 0 || sweep == 0) return const <double>[];
++  final deviceRadius = r * residual.scaleMagnitude;
++  if (deviceRadius <= 0) return const <double>[];
++
++  final theta = sweep.abs();
++  final steps = (theta *
++          math.sqrt(deviceRadius / (8 * VerticesDrawSink.kFlattenTolerance)))
++      .ceil()
++      .clamp(1, VerticesDrawSink.kMaxFlattenSegments);
++  final step = sweep / steps;
++  final last = closed ? steps - 1 : steps;
++
++  final out = <double>[];
++  for (var i = 0; i <= last; i++) {
++    final angle = start + step * i;
++    out.add(cx + r * math.cos(angle));
++    out.add(cy + r * math.sin(angle));
++  }
++  return out;
++}
++
+ /// The reference's own zero-length predicate (`vertices_draw_sink.dart`,
+ /// `_runTo`): a displacement whose square root is zero, not coordinate
+ /// equality -- see `geometry_collector.dart`'s `_runTo` doc on why the two
+ /// are not the same predicate near the underflow boundary.
+ bool _coincide(double x0, double y0, double x1, double y1) {
+   final dx = x1 - x0, dy = y1 - y0;
+   return math.sqrt(dx * dx + dy * dy) == 0;
+ }
+ 
+ /// Generates the instances one `PolylineOp` must produce, appending them to
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+index 0457111..62c529e 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+@@ -1,10 +1,11 @@
++import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
+ 
+ const _style = ResolvedStyle(
+     argb: 0xFF203040,
+     lineweightHundredths: 50,
+@@ -109,25 +110,32 @@ void main() {
+   });
+ 
+   test('drops a zero-length segment rather than handing the shader a NaN', () {
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.polyline(Float64List.fromList([5, 5, 5, 5]), 2, _style, closed: false);
+     c.endResidual();
+     expect(c.instanceCount, 0);
+   });
+ 
+-  test('counts the ops Plan A does not draw instead of dropping them silently',
+-      () {
++  test('counts the ops it does not draw instead of dropping them silently', () {
++    // **This test used `circle` until Task 5.** A circle is drawn now, so the
++    // two ops here are `fillCircle` and `text` -- chosen because they stay
++    // skipped for the whole of Plan B (fills are Plan D, text is Plan E), so
++    // this assertion does not have to be rewritten again at Task 6 the way it
++    // was rewritten here. Both assertions are kept: an op that starts being
++    // drawn without being taken off the skipped list would move
++    // `instanceCount`, and an op silently dropped would leave `skippedOps`
++    // short.
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+-    c.circle(0, 0, 5, _style);
++    c.fillCircle(0, 0, 5, _style);
+     c.text('x', Handle.none, _style);
+     c.endResidual();
+     expect(c.instanceCount, 0);
+     expect(c.skippedOps, 2);
+   });
+ 
+   test('clamps to the device-pixel floor at a hairline lineweight', () {
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.polyline(Float64List.fromList([0, 0, 1, 0]), 2, _hairlineStyle,
+@@ -400,11 +408,115 @@ void main() {
+     expect(seam[InstanceFieldOffset.x0], 0,
+         reason: 'the seam is at the first point');
+     expect(seam[InstanceFieldOffset.y0], 0);
+     expect(seam[InstanceFieldOffset.x1], 30,
+         reason: 'incoming from the last DISTINCT point, not the repeat');
+     expect(seam[InstanceFieldOffset.y1], 50);
+     expect(seam[InstanceFieldOffset.x2], 60,
+         reason: 'outgoing to the second point');
+     expect(seam[InstanceFieldOffset.y2], 0);
+   });
++
++  test('a circle is a closed run: N chords, N joins, seam last', () {
++    // The chord count comes from the reference's own formula, recomputed
++    // here rather than hardcoded, so the test tracks a tolerance change
++    // instead of pinning today's number.
++    const r = 50.0;
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    c.beginResidual(Transform2.identity());
++    c.circle(
++        0,
++        0,
++        r,
++        const ResolvedStyle(
++            argb: 0xFF000000,
++            lineweightHundredths: 25,
++            linetype: Handle.none,
++            linetypeScale: 1));
++
++    final steps =
++        (2 * math.pi * math.sqrt(r / (8 * VerticesDrawSink.kFlattenTolerance)))
++            .ceil()
++            .clamp(1, VerticesDrawSink.kMaxFlattenSegments);
++    // A closed run of `steps` chords: `steps` segments, `steps - 1` interior
++    // joins, and the seam. 2 * steps instances.
++    expect(c.instanceCount, 2 * steps);
++    expect(c.skippedOps, 0, reason: 'a circle is no longer skipped');
++    expect(
++        c.data[(2 * steps - 1) * kFloatsPerInstance + InstanceFieldOffset.kind],
++        kKindJoin,
++        reason: 'the seam join is the last instance');
++  });
++
++  test('an arc is an open run and has no seam', () {
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    c.beginResidual(Transform2.identity());
++    c.arc(
++        0,
++        0,
++        50,
++        0,
++        math.pi / 2,
++        const ResolvedStyle(
++            argb: 0xFF000000,
++            lineweightHundredths: 25,
++            linetype: Handle.none,
++            linetypeScale: 1));
++    // An open run of `steps` chords is `steps` segments and `steps - 1`
++    // joins: odd, and ending on a segment.
++    expect(c.instanceCount.isOdd, isTrue);
++    expect(
++        c.data[(c.instanceCount - 1) * kFloatsPerInstance +
++            InstanceFieldOffset.kind],
++        kKindStroke,
++        reason: 'an open run ends on a segment -- butt caps, no seam');
++  });
++
++  test('a non-uniform residual makes an ellipse, not a scaled circle', () {
++    // The degenerate-fixture guard for this op. Under `scale(3, 1)` a circle
++    // of radius 10 spans 60 in x and 20 in y; a collector that flattened in
++    // device space and transformed the CENTRE only would give a circle of
++    // some single radius, and every x-extent assertion below would fail.
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    c.beginResidual(const Transform2(3, 0, 0, 1, 0, 0));
++    c.circle(
++        0,
++        0,
++        10,
++        const ResolvedStyle(
++            argb: 0xFF000000,
++            lineweightHundredths: 25,
++            linetype: Handle.none,
++            linetypeScale: 1));
++    var minX = double.infinity, maxX = -double.infinity;
++    var minY = double.infinity, maxY = -double.infinity;
++    for (var i = 0; i < c.instanceCount; i++) {
++      final o = i * kFloatsPerInstance;
++      if (c.data[o + InstanceFieldOffset.kind] != kKindStroke) continue;
++      final x = c.data[o + InstanceFieldOffset.x0];
++      final y = c.data[o + InstanceFieldOffset.y0];
++      if (x < minX) minX = x;
++      if (x > maxX) maxX = x;
++      if (y < minY) minY = y;
++      if (y > maxY) maxY = y;
++    }
++    expect(maxX - minX, closeTo(60, 0.5));
++    expect(maxY - minY, closeTo(20, 0.5));
++  });
++
++  test('a zero or negative radius draws nothing', () {
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    c.beginResidual(Transform2.identity());
++    const style = ResolvedStyle(
++        argb: 0xFF000000,
++        lineweightHundredths: 25,
++        linetype: Handle.none,
++        linetypeScale: 1);
++    c.circle(0, 0, 0, style);
++    c.arc(0, 0, 10, 0, 0, style);
++    expect(c.instanceCount, 0);
++  });
+ }

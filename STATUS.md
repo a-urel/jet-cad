@@ -6,12 +6,27 @@ GPU-resident render backend**, the first of that spec's seven plans. Plan A ran
 on `plan-a/gpu-seam-and-strokes`, cut from `spike/flutter-gpu-backend`, nine
 tasks at `81529f0..cdf2a23`, merged `--no-ff` and the branch deleted. **Its last
 *code* commit is `d5c85f4`**; everything after it is documentation and citation
-repair. **Nothing is in flight.** Before it, Plan 3i ran directly on `main` at
+repair. Before it, Plan 3i ran directly on `main` at
 `468e310..dbc31e8` and is DONE. The tree is clean apart from the files the traps
 below say never to commit, plus untracked `.DS_Store` files a device run left
 behind — the repo has no `.gitignore` entry for them. Every suite count below
 was produced by running that suite on the merged tree on 2026-08-30, not by
 reading a report — with the one exception the table marks as not re-run.
+
+**Plan B (joins and hairlines), the second of the GPU-resident render
+backend's seven plans, is DONE — eleven tasks on
+`plan-b/joins-and-hairlines` (cut from `main` at `5c94e11`, one commit after
+Plan A's merge), code range `5c94e11..72b938a`, not merged.** Exit gate:
+**10 of 11 — criterion 11 is UNMET**, in those words: the device run
+happened but no human looked at the running window, and Plan 3h's session
+already proved that instrument catches what the other two (mutation
+testing, differential testing) do not. The device run also measured one
+real MISS (rebuild, 79.6 ms against 16.67 ms, cause a hypothesis, not
+confirmed) inside that otherwise-passing gate, while the buffer figure
+PASSES at 4.99 MB against 8 MB. See
+[Plan B](#plan-b--joins-and-hairlines) and
+[Resume here](#resume-here). `packages/jet_cad` is untouched, as every task
+in this plan was.
 
 ---
 
@@ -52,6 +67,85 @@ Ledger, nine task reports and all twenty-six rulings:
 [docs/superpowers/ledgers/2026-08-29-gpu-backend-plan-a-seam-and-strokes/](docs/superpowers/ledgers/2026-08-29-gpu-backend-plan-a-seam-and-strokes/).
 Spec: [2026-08-29-gpu-resident-render-backend-design.md](docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md)
 (revision 4). Plan: [2026-08-29-gpu-backend-plan-a-seam-and-strokes.md](docs/superpowers/plans/2026-08-29-gpu-backend-plan-a-seam-and-strokes.md).
+
+---
+
+## Plan B — joins and hairlines
+
+**Plan B taught the GPU-resident backend joins, seam joins, `point()` as its
+own kind, circle/arc flattening and the `_coveredArgb` hairline alpha fade —
+the second of the design spec's seven plans, on `plan-b/joins-and-hairlines`
+(cut from `main` at `5c94e11`), eleven tasks, code at `5c94e11..72b938a`, not
+merged.** Spec:
+[2026-08-29-gpu-resident-render-backend-design.md](docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md)
+(the same revision-4 spec Plan A used). Plan:
+[2026-08-30-gpu-backend-plan-b-joins-and-hairlines.md](docs/superpowers/plans/2026-08-30-gpu-backend-plan-b-joins-and-hairlines.md).
+Results:
+[2026-08-30-plan-b-results.md](docs/superpowers/notes/2026-08-30-plan-b-results.md).
+Mutation log:
+[plan-b-mutation-log.md](docs/superpowers/notes/plan-b-mutation-log.md) —
+fifteen named mutants, eighteen firings, sixteen dead, one proven equivalent
+(M-B3's guard-only arm), one declared structural survivor (M-B1', the pixel
+instrument cannot see a colour-only fade).
+
+**Exit gate: 10 of 11. Criterion 11 is UNMET, in those words**: the device
+run happened (macOS profile, three interleaved repeats, 27 phase reports,
+Low Power Mode confirmed OFF) but no human looked at the running window —
+corners filled, circle not notched at its start angle, dot square, nothing
+thickening under zoom. Plan 3h's session made looking at the window this
+project's third instrument, alongside mutation and differential testing, and
+it was the only one of the three that caught any of that session's four
+defects; a passing gate on the other ten criteria is not evidence for this
+one. Criteria 1 through 10 all pass — pixel differential, emission order
+(open run, closed run, flattened circle), the seam join's load-bearing test,
+half-width invariance, the three-way hairline fade, `point()`'s square shape,
+`skippedOps`'s exact accounting, the 8 MB buffer budget, the shader bundle's
+decoded OpenGL ES 100 stage, and all ten pre-committed mutants (exceeded —
+fifteen total fired).
+
+**Two results outside the eleven-criterion gate, reported as they measured,
+not smoothed toward either verdict.** The buffer **PASSES at 4.99 MB against
+≤ 8 MB** (109,068 instances, 12 floats each, up from Plan A's 2.06 MB at
+59,875 strokes-only segments — joins roughly doubled the instance count and
+circles/arcs/points are now collected where Plan A skipped them). The
+**rebuild MISSES**: `walk 5.7 ms, total 79.6 ms` against the spec's
+≤ 16.67 ms budget. The likely cause is cold pipeline-creation cost — Plan
+A's own design note records native rebuild at 82.3 ms first run, 6.5 ms
+warm, and 79.6 ms sits almost exactly on that first-run shape — **but only
+one rebuild happened in this session, so no warm figure exists, and the
+cause is recorded as a hypothesis, scored as a miss, not excused.** The walk
+itself also reads 5.7 ms against Plan A's 14.7 ms on a nominally same-size
+corpus while emitting *more* instances — a 2.6x divergence in the wrong
+direction, recorded as unexplained. Arm C's gesture timings pass with
+margin despite joins landing as predicted (zoom build median 0.51 ms
+against ≤ 1.2, zoom raster median 0.62 ms against ≤ 2.0, zoom raster p95s
+all under 3.0) — antialiasing has not landed (Ruling B3), which the spec's
+own budget discussion named as the other consumer of that margin.
+
+**Ruling B2's and B3's consequences, stated rather than smoothed over.**
+Caps are butt caps and Plan B emits no cap geometry — the spec's criterion 8
+corpus requirement naming "caps" is satisfied **vacuously**. The resident
+arm is **hard-edged**; the spec's own budget discussion assumed antialiasing
+would be consuming raster headroom by now, and it is not, which is part of
+why the gesture-timing margin held.
+
+**What was not measured, at minimum**: no warm rebuild, no web run, no
+text, no fills, no dashes, no per-channel colour comparison in the pixel
+differential (that instrument is coverage-only; colour is gated separately
+at the record level), and the pixel instrument's own structural blind spot
+— it cannot see geometry added inside a footprint already inked by
+something else, proven by M-B7 and M-B15 (a wrong-side join wedge and no
+join at all) producing the *identical* differential reading. Full account:
+[2026-08-30-plan-b-results.md](docs/superpowers/notes/2026-08-30-plan-b-results.md).
+
+**A harness defect this device run itself exposed, fixed in the same
+task**: the GSPIKE note printed by `apps/dev_harness_2d/lib/gpu_arm.dart`
+still claimed arm C "draws only strokes... No joins, no caps, no
+antialiasing" — false after Plan B, which shipped joins, points, circles and
+arcs. A transcript that misdescribes what it measured is exactly this
+repo's own standing failure mode; corrected at `72b938a`, keeping what
+stayed true (butt caps only, no antialiasing, dash spans baked at the
+collection camera).
 
 ---
 
@@ -333,9 +427,16 @@ docs/superpowers/
 
 | Location | Branch | State |
 |---|---|---|
-| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and **GPU Plan A** merged |
+| `/Users/ahmeturel/Projects/oss/jet-cad` | `plan-b/joins-and-hairlines` | clean apart from the untracked/traps this file already names; DONE, exit gate 10 of 11, **not merged** — criterion 11's human window check is still owed |
 
-**No worktrees.** Nothing is in flight.
+**No separate worktree — the primary checkout itself is on
+`plan-b/joins-and-hairlines`, at `72b938a`.** `main` is one branch back, at
+`5c94e11`, and carries Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and
+**GPU Plan A** merged, plus Plan B's own spec and plan documents (written
+directly onto `main` before the branch was cut, the pattern this file's
+other spec-writing commits also use). **Nothing is task-in-flight** — every
+one of Plan B's eleven tasks is finished and reviewed — but the branch
+itself is unmerged pending the human window check criterion 11 names.
 
 `plan-a/gpu-seam-and-strokes` was merged with `--no-ff` and deleted. **Three
 spike branches survive and are now all contained in `main`:**
@@ -467,27 +568,45 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Plan A of the GPU backend is done and merged at `cd5bc98`; nothing is in
-flight.** The next unit of work is **Plan B — joins, caps, `point()` and the
-`_coveredArgb` hairline alpha**, which is the first plan that turns on the
-general-affine residual path: Plan A's differential gate established that for
-stroked polylines the residual reaching the sink is always a pure translation
-(`draft_painter.dart:527-533` routes them unconditionally through
-`_emitScreenSpace`), while circles, arcs, fill circles and text push the general
-chain at `:568`, `:712` and `:918`. Plan A's residual-transposition test guards
-exactly that path.
+**A human must still look at the window.** That is the top of this list on
+purpose: Plan B's exit gate is 10 of 11 and the one UNMET criterion is
+exactly this — the device run happened (macOS profile, three interleaved
+repeats, Low Power Mode confirmed OFF) but nobody has looked at what it
+actually drew. Look for: filled corners, a circle **not** notched at its
+start angle, a square dot, and nothing thickening as you zoom in. Plan 3h's
+session proved this is not a formality — it was the only one of this
+project's three instruments (mutation testing, differential testing,
+looking at the window) that caught any of that session's four defects.
+Command:
 
-**Two things Plan A leaves for whoever writes Plan B, both recorded rather than
-hidden:**
+```
+cd apps/dev_harness_2d
+flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
+  --dart-define=ENTITIES=10000 --dart-define=SPIKE_DEFS=20 \
+  --dart-define=SPIKE_INSTANCES=150 --dart-define=SPIKE_FRAMES=30 \
+  --dart-define=SPIKE_REPEATS=3
+```
 
-- **`DraftCanvas` renders `residentGpu` as `vertices`.** The widget paint path
-  is deliberately not wired — it needs the rebuild triggers Plan F builds. The
-  enum value's own doc says so. Plan A's only runtime consumer is the dev
-  harness arm.
-- **The GPU arm is inlined in `apps/dev_harness_2d/lib/main.dart`** (1077 → 1611
-  lines) where the same app keeps the widget spike's arm in sibling files. The
-  final review called this a real inconsistency with zero correctness content
-  and said to move it as a standalone commit at the start of Plan B.
+**Plan B (joins and hairlines) is done, eleven tasks, on
+`plan-b/joins-and-hairlines` at `5c94e11..72b938a`, not merged; nothing is
+task-in-flight.** Full account:
+[Plan B](#plan-b--joins-and-hairlines) and
+[2026-08-30-plan-b-results.md](docs/superpowers/notes/2026-08-30-plan-b-results.md).
+Once a human has looked at the window and the merge decision is made, the
+next unit of work is **Plan C — dashes**, per the roadmap line Plan A and
+Plan B both cite: *"Plan A ships strokes only. Joins, caps, `point()` and
+`_coveredArgb` are Plan B; dashes C; fills D; the text split E; rebuild
+triggers and the watermark F; web G."*
+
+**One thing Plan A left for whoever writes Plan C, carried forward because
+Plan B did not touch it:** `DraftCanvas` still renders `residentGpu` as
+`vertices` — the widget paint path is deliberately not wired, since it
+needs the rebuild triggers Plan F builds. The enum value's own doc says so.
+The dev harness arm remains the only runtime consumer of the resident
+backend. **The GPU-arm-inlined-in-`main.dart` item Plan A also left is now
+closed**: Plan B's first commit (`0615eb0`) moved it into
+`apps/dev_harness_2d/lib/gpu_arm.dart`, a standalone file beside the widget
+spike's own sibling files, exactly as the final Plan A review asked.
 
 Fifteen findings were graded Minor during Plan A and triaged by the final
 whole-branch review: twelve left, three upgraded to Important and fixed. The

@@ -1,0 +1,268 @@
+# Review package: 733660f..c0062c3
+
+## Commits
+c0062c3 feat(gpu): point() is its own kind, not a baked horizontal stroke
+
+## Files changed
+ .../lib/src/gpu/geometry_collector.dart            | 22 +++++--
+ .../test/gpu/collector_differential_test.dart      | 31 ++++++++--
+ .../test/gpu/geometry_collector_test.dart          | 72 ++++++++++++++++++++++
+ 3 files changed, 115 insertions(+), 10 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+index c064b8f..6573937 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+@@ -74,23 +74,22 @@ class GeometryCollector implements DrawSink {
+   /// any per-frame path — Plan F's `paint()` call site included — or it
+   /// breaks this project's "the frame path allocates nothing per entity in
+   /// steady state" non-negotiable.
+   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
+   int get instanceCount => _instances;
+ 
+   /// Ops this plan does not draw yet — `fillPolygon`, `fillCircle` and
+   /// `text`. Counted rather than ignored so a corpus that needs Plan B
+   /// through E is visible as a number instead of as a missing picture.
+   ///
+-  /// `circle` and `arc` stopped counting here in Task 5. `point` still
+-  /// counts today and stops in Task 6, which is also where the test that
+-  /// pins this whole sentence lands.
++  /// `circle` and `arc` stopped counting here in Task 5; `point` in Task 6,
++  /// which is also where the test that pins this whole sentence lands.
+   int get skippedOps => _skipped;
+ 
+   /// Half the stroke's width, **in device pixels** — the space the vertex
+   /// shader consumes `half_width` in (`shaders/cad_stroke.vert` documents
+   /// the attribute `// device pixels` and applies it directly against
+   /// `frame_info.half_viewport`, which `buildFrameInfo` also builds in
+   /// device pixels; `gpu_draw_backend.dart`).
+   ///
+   /// **This method's first version computed the *logical* half-width
+   /// instead, and every stroke drew at half weight under any
+@@ -275,22 +274,37 @@ class GeometryCollector implements DrawSink {
+     final t = _residual;
+     _beginRun(t.a * points[0] + t.c * points[1] + t.e,
+         t.b * points[0] + t.d * points[1] + t.f);
+     for (var i = 1; i < count; i++) {
+       _runTo(t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e,
+           t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f, half, argb);
+     }
+     _endRun(closed: closed, half: half, argb: argb);
+   }
+ 
++  /// A dot the width of the stroke.
++  ///
++  /// The reference draws it as a horizontal segment of the stroke's own
++  /// width, which is a square of it (`vertices_draw_sink.dart`, `point`);
++  /// here it is [kKindPoint] instead, because that `± half` is a **device**
++  /// quantity and this record holds collection space. See [kKindPoint]'s doc.
+   @override
+-  void point(double x, double y, ResolvedStyle style) => _skipped++;
++  void point(double x, double y, ResolvedStyle style) {
++    final t = _residual;
++    _reserve(_instances + 1);
++    writePoint(_buffer, _instances,
++        x: t.a * x + t.c * y + t.e,
++        y: t.b * x + t.d * y + t.f,
++        halfWidth: _halfWidthFor(style.lineweightHundredths),
++        argb: _coveredArgb(style.argb, style.lineweightHundredths));
++    _instances++;
++  }
+ 
+   /// The chord error a flattened arc is allowed, in device pixels. The
+   /// reference's own value, copied for the same reason
+   /// [kMinStrokeDevicePixels] is: two independent implementations that agree
+   /// are a differential test; one shared field is not.
+   static const double kFlattenTolerance = 0.25;
+ 
+   /// The chord ceiling, likewise copied.
+   static const int kMaxFlattenSegments = 512;
+ 
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+index 23a56af..f54a21e 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+@@ -128,48 +128,57 @@ void main() {
+         _expectedInstancesFor(
+             pts, pts.length ~/ 2, true, op.style, residual, expected);
+       }
+       if (op is ArcOp) {
+         final pts = _flattenedLocalPoints(
+             op.cx, op.cy, op.r, op.start, op.sweep, residual,
+             closed: false);
+         _expectedInstancesFor(
+             pts, pts.length ~/ 2, false, op.style, residual, expected);
+       }
++      // A point is one instance, not a run -- no dedupe, no join, no seam.
++      // Its position is the residual applied to the op's own (already
++      // screen-rebased) coordinates, exactly as every other op's is above.
++      if (op is PointOp) {
++        expected.add(_ExpectedInstance.point(
++            op.style,
++            residual.a * op.x + residual.c * op.y + residual.e,
++            residual.b * op.x + residual.d * op.y + residual.f));
++      }
+     }
+ 
+     expect(expected, isNotEmpty,
+         reason: 'a fixture with no drawable geometry would make this test '
+             'vacuous -- polylines, circles and arcs all feed this list');
+     expect(collector.instanceCount, expected.length,
+         reason: 'the collector must emit exactly one instance per segment '
+             'and per join the declarative rule produces -- neither '
+             'dropping nor duplicating one');
+ 
+     // Captured once: `collector.data` copies `_buffer` on every access, so
+     // the comparison loop below reads a single snapshot rather than a fresh
+     // sublist per index.
+     final data = collector.data;
+ 
+     for (var i = 0; i < expected.length; i++) {
+       final o = i * kFloatsPerInstance;
+       final e = expected[i];
+       final style = e.style;
+ 
+-      // -- kind: a stroke and a join lay their geometry out differently
+-      // (`InstanceFieldOffset` doc), so asserting only the strokes' kind
+-      // would pass on a join emitted as a stroke with the wrong fields
+-      // simply never being checked. Every instance's kind is asserted here,
+-      // strokes and joins alike.
++      // -- kind: a stroke, a join and a point lay their geometry out
++      // differently (`InstanceFieldOffset` doc), so asserting only the
++      // strokes' kind would pass on a join or point emitted as a stroke with
++      // the wrong fields simply never being checked. Every instance's kind
++      // is asserted here, strokes, joins and points alike.
+       expect(data[o + InstanceFieldOffset.kind], e.kind,
+           reason: 'instance $i must be a '
+-              '${e.kind == kKindJoin ? "join" : "stroke"}');
++              '${e.kind == kKindJoin ? "join" : e.kind == kKindPoint ? "point" : "stroke"}');
+ 
+       // -- walk order & the residual -----------------------------------
+       // A stroke's (x0,y0,x1,y1) is its segment; a join's is
+       // (vertex, previous point) and (x2,y2) is its next point. A stroke's
+       // own (x2,y2) is asserted too (against 0,0, `writeStroke`'s own
+       // constant) rather than left unchecked, so a join emitted where a
+       // stroke was expected -- carrying a non-zero neighbour in x2/y2 --
+       // fails here instead of only on the kind check above.
+       expect(data[o + InstanceFieldOffset.x0], closeTo(e.x0, _tolerance),
+           reason: 'instance $i x0');
+@@ -241,20 +250,30 @@ class _ExpectedInstance {
+   _ExpectedInstance.join(this.style, double vx, double vy, double prevX,
+       double prevY, double nextX, double nextY)
+       : kind = kKindJoin,
+         x0 = vx,
+         y0 = vy,
+         x1 = prevX,
+         y1 = prevY,
+         x2 = nextX,
+         y2 = nextY;
+ 
++  // `writePoint` zeroes all four of x1/y1/x2/y2 -- see `instance_record.dart`
++  // -- so the expected entry matches, the same way a stroke's own x2/y2 are
++  // pinned to 0 above rather than left unchecked.
++  _ExpectedInstance.point(this.style, this.x0, this.y0)
++      : kind = kKindPoint,
++        x1 = 0,
++        y1 = 0,
++        x2 = 0,
++        y2 = 0;
++
+   final double kind;
+   final double x0, y0, x1, y1, x2, y2;
+   final ResolvedStyle style;
+ }
+ 
+ /// The point list a circle or arc flattens to, in the residual's **local**
+ /// space — the space `_expectedInstancesFor` expects, since it applies the
+ /// residual itself.
+ ///
+ /// **Derived from the reference, not from the collector.** Every constant
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+index 34138b2..6410c9c 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+@@ -561,11 +561,83 @@ void main() {
+         argb: 0xFF000000,
+         lineweightHundredths: 25,
+         linetype: Handle.none,
+         linetypeScale: 1);
+     c.circle(0, 0, 0, style);
+     c.circle(0, 0, -5, style);
+     c.arc(0, 0, 10, 0, 0, style);
+     c.arc(0, 0, -10, 0, 1, style);
+     expect(c.instanceCount, 0);
+   });
++
++  test('a point is one instance of its own kind, at the transformed position',
++      () {
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    // A general residual, so a collector that dropped the off-diagonal terms
++    // lands somewhere else: (2*4 + 0.5*(-1) + 10, ...) is not (2*4 + 10, ...).
++    c.beginResidual(const Transform2(2, 0.5, -1, 3, 10, 10));
++    c.point(
++        4,
++        -1,
++        const ResolvedStyle(
++            argb: 0xFF336699,
++            lineweightHundredths: 25,
++            linetype: Handle.none,
++            linetypeScale: 1));
++    expect(c.instanceCount, 1);
++    expect(c.skippedOps, 0);
++    final r = c.data;
++    expect(r[InstanceFieldOffset.kind], kKindPoint);
++    // x = a*4 + c*(-1) + e = 8 + 1 + 10 = 19
++    // y = b*4 + d*(-1) + f = 2 - 3 + 10 = 9
++    expect(r[InstanceFieldOffset.x0], closeTo(19, 1e-4));
++    expect(r[InstanceFieldOffset.y0], closeTo(9, 1e-4));
++    // The unused slots stay zero: a point that reused x1/y1 as a second
++    // endpoint would be a stroke wearing the wrong tag.
++    expect(r[InstanceFieldOffset.x1], 0);
++    expect(r[InstanceFieldOffset.y1], 0);
++    expect(r[InstanceFieldOffset.x2], 0);
++    expect(r[InstanceFieldOffset.y2], 0);
++  });
++
++  test('a point takes the hairline fade like a stroke', () {
++    // `point()` routes through `_coveredArgb` in the reference. A dot on a
++    // hairline layer fades with everything else on it.
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 1.0);
++    c.point(
++        0,
++        0,
++        const ResolvedStyle(
++            argb: 0xFF000000,
++            lineweightHundredths: 5,
++            linetype: Handle.none,
++            linetypeScale: 1));
++    expect(c.data[InstanceFieldOffset.a] * 255.0, lessThan(0xFF));
++  });
++
++  test('after Plan B, only fills and text are skipped', () {
++    // The sentence in `skippedOps`' doc, asserted. It goes red the day
++    // another op is silently dropped -- or the day Plan D lands and forgets
++    // to update the doc.
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    c.beginResidual(Transform2.identity());
++    const style = ResolvedStyle(
++        argb: 0xFF000000,
++        lineweightHundredths: 25,
++        linetype: Handle.none,
++        linetypeScale: 1);
++    c.polyline(Float64List.fromList(<double>[0, 0, 10, 10]), 2, style,
++        closed: false);
++    c.circle(0, 0, 20, style);
++    c.arc(0, 0, 20, 0, 1, style);
++    c.point(1, 1, style);
++    expect(c.skippedOps, 0, reason: 'four ops Plan B draws');
++    c.fillPolygon(Float64List.fromList(<double>[0, 0, 1, 0, 0, 1]), 3,
++        Int32List.fromList(<int>[0, 1, 2]), style);
++    c.fillCircle(0, 0, 5, style);
++    c.text('x', Handle.none, style);
++    expect(c.skippedOps, 3, reason: 'three ops Plans D and E draw');
++  });
+ }

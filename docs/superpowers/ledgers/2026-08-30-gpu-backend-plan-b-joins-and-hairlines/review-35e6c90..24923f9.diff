@@ -1,0 +1,949 @@
+# Review package: 35e6c90..24923f9
+
+## Commits
+24923f9 feat(gpu): the instance record carries three kinds and twelve floats
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart |   2 +-
+ .../lib/src/gpu/gpu_draw_backend.dart              |  11 ++
+ .../lib/src/gpu/instance_record.dart               | 155 +++++++++++++++++----
+ .../lib/src/gpu/resident_geometry.dart             |  86 +++++++++---
+ .../test/gpu/collector_differential_test.dart      |  29 ++--
+ .../test/gpu/geometry_collector_test.dart          |   6 +-
+ .../test/gpu/instance_record_test.dart             | 109 ++++++++++++---
+ .../test/gpu/resident_geometry_test.dart           |  98 +++++++++----
+ 8 files changed, 383 insertions(+), 113 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+index 55ed141..2c2fb2c 100644
+--- a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
++++ b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+@@ -13,21 +13,21 @@ export 'src/flutter_text_measurer.dart';
+ // carries more than the two small functions (`gpuAvailable`,
+ // `debugSetGpuFactory`) and the public typedef `GpuContextFactory` an app
+ // assembling a frame might want: its
+ // `export 'package:flutter_scene/src/gpu/gpu.dart';` republishes that
+ // package's *entire* internal GPU shim -- an off-contract, pre-1.0 `lib/src/`
+ // API this package depends on but does not control. Exporting
+ // `gpu_facade.dart` from this barrel would republish all of that through
+ // `jet_cad_2d_flutter`'s own public API, which is the thing this barrel
+ // exists to not do; these members are not enough reason to accept
+ // that. `ResidentGeometry`'s own handful of members that still resolve
+-// through that shim (`kStrokeVertexLayout` and its five `gpu.*`-typed
++// through that shim (`kInstanceVertexLayout` and its five `gpu.*`-typed
+ // getters) are marked `@internal` for the same reason, one file down.
+ // `instance_record.dart` stays unexported too, for an unrelated reason: it is
+ // `GeometryCollector`'s own wire format, not something a caller writes.
+ export 'src/gpu/geometry_collector.dart';
+ export 'src/gpu/gpu_draw_backend.dart';
+ export 'src/gpu/resident_geometry.dart';
+ export 'src/reference_walk.dart';
+ export 'src/render_backend.dart';
+ export 'src/tile_cache.dart';
+ export 'src/viewport_transform.dart';
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+index 2b1a584..9b6c0da 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+@@ -182,20 +182,31 @@ class GpuDrawBackend {
+     }
+     final target = _target!;
+ 
+     final commandBuffer = gpu.gpuContext.createCommandBuffer();
+     final pass = commandBuffer.createRenderPass(gpu.RenderTarget.singleColor(
+       gpu.ColorAttachment(texture: target, clearValue: vm.Vector4(1, 1, 1, 1)),
+     ));
+ 
+     pass.bindPipeline(geometry.pipeline);
+     pass.setPrimitiveType(gpu.PrimitiveType.triangle);
++    // **Load-bearing from Plan B on, and it was not before.** A stroke quad's
++    // winding is invariant under reversing the segment — the direction and
++    // the normal flip together — so Plan A never had to think about this. A
++    // join's is not: `_emitJoin` picks the outer side with
++    // `s = cross > 0 ? -half : half` (`vertices_draw_sink.dart`), so a left
++    // turn and a right turn wind opposite ways and any culling would drop
++    // half the corners in a drawing. `CullMode.none` is also the enum's zero
++    // value, so this is pinning a default rather than changing behaviour —
++    // pinned because a default that becomes load-bearing and stays implicit
++    // is the kind of thing that changes under you in a package upgrade.
++    pass.setCullMode(gpu.CullMode.none);
+     pass.setColorBlendEnable(true);
+     pass.bindVertexBuffer(
+         gpu.BufferView(geometry.corners,
+             offsetInBytes: 0, lengthInBytes: geometry.corners.sizeInBytes),
+         slot: 0);
+     pass.bindVertexBuffer(
+         gpu.BufferView(geometry.instances,
+             offsetInBytes: 0, lengthInBytes: geometry.instances.sizeInBytes),
+         slot: 1);
+     // **`dpr` is folded in here, not inside `buildFrameInfo`.** The
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
+index de5219c..2d98a35 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
+@@ -1,71 +1,166 @@
+ import 'dart:typed_data';
+ 
+ /// Floats per instance record.
+ ///
+-/// `[kind, x0, y0, x1, y1, halfWidth, r, g, b, a]`.
++/// `[kind, x0, y0, x1, y1, x2, y2, halfWidth, r, g, b, a]`.
+ ///
+-/// **Ten floats, and none of them packed, because of the web.** The shader
++/// **Twelve floats, and none of them packed, because of the web.** The shader
+ /// bundle must carry an OpenGL ES 100 stage — `flutter_scene`'s web loader
+ /// reads `entry.openglEs` and transpiles it to ES 300 — and ES 100 has neither
+ /// bitwise operators nor integer vertex attributes, so a `uint32` colour could
+-/// not be unpacked in the shader. 40 bytes per record against the spike's 36.
+-const int kFloatsPerInstance = 10;
++/// not be unpacked in the shader. 48 bytes per record.
++///
++/// **Ten became twelve in Plan B**, because a join carries a vertex and both
++/// its neighbours where a stroke carries two endpoints. The third point is
++/// stored rather than a pair of unit directions: a unit direction is only
++/// unit-length after a *conformal* transform, and nothing promises the camera
++/// is one. The reference takes its directions in device space, after the
++/// residual (`vertices_draw_sink.dart`, `_runTo`), so storing points and
++/// normalising in the shader after the mvp puts both arms in the same space
++/// by construction instead of by coincidence.
++const int kFloatsPerInstance = 12;
+ 
+ /// The kind tag, in slot 0 of every record.
+ ///
+ /// **One buffer and one draw call carry every kind**, because separate
+ /// pipelines are separate draw calls and three draw calls submit as "all
+ /// strokes, then all joins, then all fills" — not walk order.
+ /// `vertices_draw_sink.dart:41-57` records that defect being shipped and
+ /// reverted once already, partitioned by colour rather than by kind.
++///
++/// **The values are 0, 1, 2 and the order is load-bearing**, not merely
++/// distinct: `cad_stroke.vert` dispatches with `kind < 0.5` then
++/// `kind < 1.5`, because ES 100 has no integer attributes and no `switch` on
++/// one. Renumbering these without editing that shader silently draws every
++/// join as a stroke.
+ const double kKindStroke = 0;
+ 
++/// A corner between two segments. `(x0, y0)` is the vertex, `(x1, y1)` the
++/// previous point and `(x2, y2)` the next one; the shader builds the bevel
++/// and, where the turn is shallow enough, the miter tip.
++const double kKindJoin = 1;
++
++/// A `point()` op: a square of the stroke's own width centred on
++/// `(x0, y0)`. `(x1, y1)` and `(x2, y2)` are unused.
++///
++/// **Not a zero-length capped stroke, and not a tiny horizontal segment
++/// either.** The reference draws it as a horizontal segment from `px - half`
++/// to `px + half` — but it computes that offset in **device** space, where
++/// its residual has already been applied. This record holds *collection*
++/// space, and the shader expands `halfWidth` in device pixels after the mvp,
++/// so a `± half` baked into `x0`/`x1` here would scale with the camera on one
++/// axis while the other stayed fixed: the square would shear under zoom. Its
++/// own kind is what keeps both axes in the same space.
++const double kKindPoint = 2;
++
+ /// The record's field layout, as an offset in **floats** from the record's
+-/// start — [writeStroke] indexes by float, not byte.
++/// start — the writers below index by float, not byte.
+ ///
+ /// **The one place this order is declared for Dart.**
+-/// `ResidentGeometry.kStrokeVertexLayout` (`resident_geometry.dart`) derives
+-/// its `offsetInBytes` values from these same constants (`* 4`), so
+-/// reordering a field here moves both [writeStroke] and the vertex layout
+-/// together instead of leaving one behind. `cad_stroke.vert`'s attribute
+-/// list is a third, independent copy — GLSL cannot read a Dart constant —
+-/// and nothing in this package catches that copy drifting from these two;
+-/// only a device run, or hand-verifying against `impellerc`'s reflection the
+-/// way `kStrokeVertexLayout`'s own doc comment records having done once,
+-/// would.
+-abstract final class StrokeFieldOffset {
++/// `ResidentGeometry.kInstanceVertexLayout` derives its `offsetInBytes`
++/// values from these same constants (`* 4`), so reordering a field here moves
++/// the writers and the vertex layout together instead of leaving one behind.
++/// `cad_stroke.vert`'s attribute list is a third, independent copy — GLSL
++/// cannot read a Dart constant — and `test/support/instance_expander.dart` is
++/// a fourth. The expander is the one that is *gated*: it reads these same
++/// constants, and `test/gpu/expander_differential_test.dart` compares its
++/// output against the reference sink, so a drift between this file and the
++/// expander goes red in `flutter test`. A drift between either and the GLSL
++/// still needs a device run or a hand-check against `impellerc`'s reflection.
++abstract final class InstanceFieldOffset {
+   static const int kind = 0;
+   static const int x0 = 1;
+   static const int y0 = 2;
+   static const int x1 = 3;
+   static const int y1 = 4;
+-  static const int halfWidth = 5;
+-  static const int r = 6;
+-  static const int g = 7;
+-  static const int b = 8;
+-  static const int a = 9;
++  static const int x2 = 5;
++  static const int y2 = 6;
++  static const int halfWidth = 7;
++  static const int r = 8;
++  static const int g = 9;
++  static const int b = 10;
++  static const int a = 11;
++}
++
++/// Writes the four colour slots at record base [o]. [argb] is `0xAARRGGBB`.
++void _writeColor(Float32List into, int o, int argb) {
++  into[o + InstanceFieldOffset.r] = ((argb >> 16) & 0xFF) / 255.0;
++  into[o + InstanceFieldOffset.g] = ((argb >> 8) & 0xFF) / 255.0;
++  into[o + InstanceFieldOffset.b] = (argb & 0xFF) / 255.0;
++  into[o + InstanceFieldOffset.a] = ((argb >> 24) & 0xFF) / 255.0;
+ }
+ 
+ /// Writes the stroke record at [index]. [argb] is `0xAARRGGBB`.
+ void writeStroke(
+   Float32List into,
+   int index, {
+   required double x0,
+   required double y0,
+   required double x1,
+   required double y1,
+   required double halfWidth,
+   required int argb,
+ }) {
+   final o = index * kFloatsPerInstance;
+-  into[o + StrokeFieldOffset.kind] = kKindStroke;
+-  into[o + StrokeFieldOffset.x0] = x0;
+-  into[o + StrokeFieldOffset.y0] = y0;
+-  into[o + StrokeFieldOffset.x1] = x1;
+-  into[o + StrokeFieldOffset.y1] = y1;
+-  into[o + StrokeFieldOffset.halfWidth] = halfWidth;
+-  into[o + StrokeFieldOffset.r] = ((argb >> 16) & 0xFF) / 255.0;
+-  into[o + StrokeFieldOffset.g] = ((argb >> 8) & 0xFF) / 255.0;
+-  into[o + StrokeFieldOffset.b] = (argb & 0xFF) / 255.0;
+-  into[o + StrokeFieldOffset.a] = ((argb >> 24) & 0xFF) / 255.0;
++  into[o + InstanceFieldOffset.kind] = kKindStroke;
++  into[o + InstanceFieldOffset.x0] = x0;
++  into[o + InstanceFieldOffset.y0] = y0;
++  into[o + InstanceFieldOffset.x1] = x1;
++  into[o + InstanceFieldOffset.y1] = y1;
++  into[o + InstanceFieldOffset.x2] = 0;
++  into[o + InstanceFieldOffset.y2] = 0;
++  into[o + InstanceFieldOffset.halfWidth] = halfWidth;
++  _writeColor(into, o, argb);
++}
++
++/// Writes the join record at [index].
++///
++/// The three points are **not interchangeable**: the shader takes the
++/// incoming direction as `vertex - previous` and the outgoing as
++/// `next - vertex`, and swapping the neighbours reverses the turn, which
++/// puts the wedge on the inside of the corner where there is no notch to
++/// fill.
++void writeJoin(
++  Float32List into,
++  int index, {
++  required double vx,
++  required double vy,
++  required double prevX,
++  required double prevY,
++  required double nextX,
++  required double nextY,
++  required double halfWidth,
++  required int argb,
++}) {
++  final o = index * kFloatsPerInstance;
++  into[o + InstanceFieldOffset.kind] = kKindJoin;
++  into[o + InstanceFieldOffset.x0] = vx;
++  into[o + InstanceFieldOffset.y0] = vy;
++  into[o + InstanceFieldOffset.x1] = prevX;
++  into[o + InstanceFieldOffset.y1] = prevY;
++  into[o + InstanceFieldOffset.x2] = nextX;
++  into[o + InstanceFieldOffset.y2] = nextY;
++  into[o + InstanceFieldOffset.halfWidth] = halfWidth;
++  _writeColor(into, o, argb);
++}
++
++/// Writes the point record at [index].
++void writePoint(
++  Float32List into,
++  int index, {
++  required double x,
++  required double y,
++  required double halfWidth,
++  required int argb,
++}) {
++  final o = index * kFloatsPerInstance;
++  into[o + InstanceFieldOffset.kind] = kKindPoint;
++  into[o + InstanceFieldOffset.x0] = x;
++  into[o + InstanceFieldOffset.y0] = y;
++  into[o + InstanceFieldOffset.x1] = 0;
++  into[o + InstanceFieldOffset.y1] = 0;
++  into[o + InstanceFieldOffset.x2] = 0;
++  into[o + InstanceFieldOffset.y2] = 0;
++  into[o + InstanceFieldOffset.halfWidth] = halfWidth;
++  _writeColor(into, o, argb);
+ }
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+index 5f2ee04..7070b22 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+@@ -31,105 +31,149 @@ class ResidentGeometry {
+   /// there is no consuming app here to apply the `packages/` prefix. A
+   /// widget test in this package that tried to exercise `create`'s load path
+   /// against the prefixed key would fail to find the asset. That failure is
+   /// expected and is not evidence the path is wrong; do not "fix" it back to
+   /// the bare key to make such a test pass. Task 9's harness run (a real
+   /// app depending on this package) is where the prefixed key was actually
+   /// exercised, successfully -- see the task-9 report.
+   static const String _bundlePath =
+       'packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle';
+ 
+-  /// The unit quad's six corners: two triangles, not a triangle strip,
+-  /// because a strip cannot mix kinds and Plans B through D add kinds to
+-  /// this same buffer. `x` picks the endpoint (0 = p0, 1 = p1), `y` picks the
+-  /// side (-1 or +1) — see `cad_stroke.vert`'s `corner` comment. Four
+-  /// distinct corners, (0,-1) (0,1) (1,-1) (1,1); the diagonal (0,1)-(1,-1)
+-  /// is shared by both triangles, and both wind the same way (signed area
+-  /// -2 for each, worked by hand).
++  /// The six per-vertex records: two triangles, not a triangle strip, because
++  /// a strip cannot mix kinds and Plans C and D add kinds to this same buffer.
++  ///
++  /// **Six floats per vertex: `corner.xy` then `join_weight.xyzw`.**
++  ///
++  /// `corner` is the quad parameterisation Plan A shipped — `x` picks the
++  /// endpoint (0 = p0, 1 = p1), `y` picks the side (-1 or +1) — and the
++  /// stroke and point branches still read only it.
++  ///
++  /// `join_weight` exists because the join branch needs **six distinct
++  /// vertex roles** and `corner` alone offers only four: `(1,-1)` and `(0,1)`
++  /// each appear twice, since the two triangles share the quad's diagonal.
++  /// A join's two triangles are the bevel `(V, A, B)` and the miter tip
++  /// `(A, M, B)` — four distinct points across six vertices, and the
++  /// duplicated corners need *different* roles in each triangle, so they
++  /// cannot be told apart by `corner`. The weight vector selects one of
++  /// `(V, A, B, M)` per vertex, and the shader reads the position as
++  /// `w.x*V + w.y*A + w.z*B + w.w*M` — no float-equality test on an index,
++  /// which ES 100 makes unpleasant.
++  ///
++  /// Triangle 0 is `(V, A, B)` and triangle 1 is `(A, M, B)`. Both wind
++  /// **either way** depending on the turn direction, because `_emitJoin`
++  /// flips the outer side with the sign of the cross product — which is why
++  /// `GpuDrawBackend.render` pins `CullMode.none`.
+   ///
+   /// `@visibleForTesting`: no test can reach this data through `create`
+   /// itself (it runs only with a real GPU context), so it is hoisted here to
+   /// be asserted directly by a plain `flutter test`.
+   @visibleForTesting
+   static const List<double> kCornerVertices = <double>[
+-    0, -1, 0, 1, 1, -1, //
+-    1, -1, 0, 1, 1, 1, //
++    // corner.x corner.y | join_weight V, A, B, M
++    0, -1, /*  */ 1, 0, 0, 0, // triangle 0, vertex 0 -> V
++    0, 1, /*   */ 0, 1, 0, 0, // triangle 0, vertex 1 -> A
++    1, -1, /*  */ 0, 0, 1, 0, // triangle 0, vertex 2 -> B
++    1, -1, /*  */ 0, 1, 0, 0, // triangle 1, vertex 0 -> A
++    0, 1, /*   */ 0, 0, 0, 1, // triangle 1, vertex 1 -> M
++    1, 1, /*   */ 0, 0, 1, 0, // triangle 1, vertex 2 -> B
+   ];
+ 
++  /// Floats per entry in the corner buffer: `corner` (2) + `join_weight` (4).
++  static const int kFloatsPerCorner = 6;
++
+   /// The pipeline's vertex input layout: `corner` in its own buffer at slot
+   /// 0 (per vertex), the instance record in its own buffer at slot 1 (per
+   /// instance).
+   ///
+   /// **Two buffer slots, not one interleaved layout.** `impellerc`'s
+   /// reflection of this shader (verified against a fresh single-stage run:
+   /// `corner@0, kind@8, p0@12, p1@20, half_width@28, color@32`) describes the
+   /// offsets *only if every attribute came from one combined buffer* — that
+   /// is the layout the shader bundle declares by default, and `VertexLayout`
+   /// exists specifically to override it
+   /// (`flutter_gpu/src/vertex_layout.dart`: "override the default
+   /// interleaved layout that the shader bundle declares ... to bind ...
+   /// attributes from separate buffers", and `offsetInBytes` is defined there
+   /// as the offset "from the start of each element in the owning vertex
+   /// buffer" — a buffer-relative offset, not a global one). Binding `corner`
+   /// from its own buffer at slot 0 and the instance record from its own
+   /// buffer at slot 1 means the instance attributes' offsets are the
+   /// record's *own* offsets (`instance_record.dart`'s `[kind, x0, y0, x1,
+-  /// y1, halfWidth, r, g, b, a]`), not the reflected ones shifted by
++  /// y1, x2, y2, halfWidth, r, g, b, a]`), not the reflected ones shifted by
+   /// `corner`'s 8 bytes. This is the same two-buffer split the spike used
+   /// (`git show 8c82208:apps/dev_harness_2d/lib/gpu_arm.dart:379-386` --
+   /// that file was deleted in Task 9, before which it lived at this path).
+   ///
++  /// **Carries three kinds, not one**, since Plan B: slot 0 still holds a
++  /// single quad-corner buffer, but the instance buffer's records now
++  /// interleave strokes, joins and points (`instance_record.dart`'s
++  /// `kKindStroke`/`kKindJoin`/`kKindPoint`), so this one layout describes
++  /// every kind's vertex input rather than a stroke-only one.
++  ///
+   /// `@visibleForTesting`: same reason as [kCornerVertices] — this is pure
+   /// configuration data, constructible and assertable without a GPU context,
+   /// but only reachable through `create`'s GPU-gated path otherwise.
+   ///
+   /// `@internal` besides: its type, `gpu.VertexLayout`, resolves through
+   /// `gpu_facade.dart`'s re-export of `flutter_scene`'s internal GPU shim
+   /// (`gpu_facade.dart:21`) -- a consumer outside this package could not
+   /// declare a variable of this type even if it read the field, so this
+   /// annotation makes the analyzer say so rather than leaving that for a
+   /// confused import error. Same reasoning as the five getters below.
+   @visibleForTesting
+   @internal
+-  static const gpu.VertexLayout kStrokeVertexLayout = gpu.VertexLayout(
++  static const gpu.VertexLayout kInstanceVertexLayout = gpu.VertexLayout(
+     buffers: <gpu.VertexBuffer>[
+-      gpu.VertexBuffer(strideInBytes: 8, attributes: <gpu.VertexAttribute>[
+-        gpu.VertexAttribute(name: 'corner', format: gpu.VertexFormat.float32x2),
+-      ]),
++      gpu.VertexBuffer(
++          strideInBytes: kFloatsPerCorner * 4,
++          attributes: <gpu.VertexAttribute>[
++            gpu.VertexAttribute(
++                name: 'corner',
++                format: gpu.VertexFormat.float32x2,
++                offsetInBytes: 0),
++            gpu.VertexAttribute(
++                name: 'join_weight',
++                format: gpu.VertexFormat.float32x4,
++                offsetInBytes: 8),
++          ]),
+       gpu.VertexBuffer(
+         strideInBytes: kFloatsPerInstance * 4,
+         stepMode: gpu.VertexStepMode.instance,
+-        // Offsets derive from `StrokeFieldOffset` (`instance_record.dart`),
++        // Offsets derive from `InstanceFieldOffset` (`instance_record.dart`),
+         // not restated as bare literals — see that class's doc for why: a
+         // reorder there moves these in lockstep instead of leaving them
+         // pointing at the wrong bytes silently.
+         attributes: <gpu.VertexAttribute>[
+           gpu.VertexAttribute(
+               name: 'kind',
+               format: gpu.VertexFormat.float32,
+-              offsetInBytes: StrokeFieldOffset.kind * 4),
++              offsetInBytes: InstanceFieldOffset.kind * 4),
+           gpu.VertexAttribute(
+               name: 'p0',
+               format: gpu.VertexFormat.float32x2,
+-              offsetInBytes: StrokeFieldOffset.x0 * 4),
++              offsetInBytes: InstanceFieldOffset.x0 * 4),
+           gpu.VertexAttribute(
+               name: 'p1',
+               format: gpu.VertexFormat.float32x2,
+-              offsetInBytes: StrokeFieldOffset.x1 * 4),
++              offsetInBytes: InstanceFieldOffset.x1 * 4),
++          gpu.VertexAttribute(
++              name: 'p2',
++              format: gpu.VertexFormat.float32x2,
++              offsetInBytes: InstanceFieldOffset.x2 * 4),
+           gpu.VertexAttribute(
+               name: 'half_width',
+               format: gpu.VertexFormat.float32,
+-              offsetInBytes: StrokeFieldOffset.halfWidth * 4),
++              offsetInBytes: InstanceFieldOffset.halfWidth * 4),
+           gpu.VertexAttribute(
+               name: 'color',
+               format: gpu.VertexFormat.float32x4,
+-              offsetInBytes: StrokeFieldOffset.r * 4),
++              offsetInBytes: InstanceFieldOffset.r * 4),
+         ],
+       ),
+     ],
+   );
+ 
+   /// Bytes a buffer of [instances] records occupies.
+   static int byteLengthFor(int instances) => instances * kFloatsPerInstance * 4;
+ 
+   /// Uploads [instances], or returns null if this platform has no GPU, or if
+   /// the upload itself failed.
+@@ -212,21 +256,21 @@ class ResidentGeometry {
+     final instanceBytes = instanceCount == 0
+         ? ByteData(kFloatsPerInstance * 4)
+         : ByteData.sublistView(
+             instances, 0, instanceCount * kFloatsPerInstance);
+ 
+     return ResidentGeometry._(
+       instanceCount,
+       context.createDeviceBufferWithCopy(ByteData.sublistView(corners)),
+       context.createDeviceBufferWithCopy(instanceBytes),
+       context.createRenderPipeline(vertex, fragment,
+-          vertexLayout: kStrokeVertexLayout),
++          vertexLayout: kInstanceVertexLayout),
+       vertex,
+       context.createHostBuffer(),
+     );
+   }
+ 
+   final int instanceCount;
+   final gpu.DeviceBuffer _corners;
+   final gpu.DeviceBuffer _instances;
+   final gpu.RenderPipeline _pipeline;
+   final gpu.Shader _vertexShader;
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+index a294822..b96995c 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+@@ -132,62 +132,71 @@ void main() {
+     // Captured once: `collector.data` copies `_buffer` on every access, so
+     // the comparison loop below reads a single snapshot rather than a fresh
+     // sublist per index.
+     final data = collector.data;
+ 
+     for (var i = 0; i < expectedPoints.length; i++) {
+       final o = i * kFloatsPerInstance;
+       final style = expectedStyles[i];
+ 
+       // -- kind: every record this task's collector writes is a stroke.
+-      expect(data[o], kKindStroke,
++      expect(data[o + InstanceFieldOffset.kind], kKindStroke,
+           reason: 'instance $i must tag itself a stroke');
+ 
+       // -- walk order & the residual -----------------------------------
+-      expect(data[o + 1], closeTo(expectedPoints[i][0], _tolerance),
++      expect(data[o + InstanceFieldOffset.x0],
++          closeTo(expectedPoints[i][0], _tolerance),
+           reason: 'instance $i x0 must be the walk\'s $i-th segment start');
+-      expect(data[o + 2], closeTo(expectedPoints[i][1], _tolerance),
++      expect(data[o + InstanceFieldOffset.y0],
++          closeTo(expectedPoints[i][1], _tolerance),
+           reason: 'instance $i y0 must be the walk\'s $i-th segment start');
+-      expect(data[o + 3], closeTo(expectedPoints[i][2], _tolerance),
++      expect(data[o + InstanceFieldOffset.x1],
++          closeTo(expectedPoints[i][2], _tolerance),
+           reason: 'instance $i x1 must be the walk\'s $i-th segment end');
+-      expect(data[o + 4], closeTo(expectedPoints[i][3], _tolerance),
++      expect(data[o + InstanceFieldOffset.y1],
++          closeTo(expectedPoints[i][3], _tolerance),
+           reason: 'instance $i y1 must be the walk\'s $i-th segment end');
+ 
+       // -- half-width: the collector stores DEVICE pixels, the reference
+       // sink's own formula (`VerticesDrawSink._halfWidthFor`) stores LOGICAL
+       // pixels. They must differ by exactly `devicePixelRatio` -- this is
+       // not a bug being tolerated, it is the fact this test pins (see the
+       // module doc on `GeometryCollector._halfWidthFor`).
+       final sinkHalf = _referenceLogicalHalfWidth(style.lineweightHundredths);
+-      expect(data[o + 5], closeTo(sinkHalf * _devicePixelRatio, _tolerance),
++      expect(data[o + InstanceFieldOffset.halfWidth],
++          closeTo(sinkHalf * _devicePixelRatio, _tolerance),
+           reason: 'instance $i half-width must be the reference sink\'s '
+               'logical half-width scaled by devicePixelRatio, not the raw '
+               'logical value copied straight across');
+ 
+       // -- colour: every entity in `differentialFixture` carries the
+       // default lineweight (25 hundredths-of-a-mm), which at
+       // `kLogicalPixelsPerMm` and dpr 2 computes to a device width above
+       // `VerticesDrawSink.kMinStrokeDevicePixels` -- so `_coveredArgb` is a
+       // no-op on every one of these segments and the reference colour is
+       // `style.argb` unmodified. That is why this fixture's colour
+       // comparison is meaningful without the collector implementing
+       // `_coveredArgb` itself: hairline fading is Plan B's job
+       // (`geometry_collector.dart`'s module doc), and folding it in here
+       // would smuggle that work into the wrong layer just to pass a test.
+       final argb = style.argb;
+-      expect(data[o + 6], closeTo(((argb >> 16) & 0xFF) / 255.0, _tolerance),
++      expect(data[o + InstanceFieldOffset.r],
++          closeTo(((argb >> 16) & 0xFF) / 255.0, _tolerance),
+           reason: 'instance $i red channel');
+-      expect(data[o + 7], closeTo(((argb >> 8) & 0xFF) / 255.0, _tolerance),
++      expect(data[o + InstanceFieldOffset.g],
++          closeTo(((argb >> 8) & 0xFF) / 255.0, _tolerance),
+           reason: 'instance $i green channel');
+-      expect(data[o + 8], closeTo((argb & 0xFF) / 255.0, _tolerance),
++      expect(data[o + InstanceFieldOffset.b],
++          closeTo((argb & 0xFF) / 255.0, _tolerance),
+           reason: 'instance $i blue channel');
+-      expect(data[o + 9], closeTo(((argb >> 24) & 0xFF) / 255.0, _tolerance),
++      expect(data[o + InstanceFieldOffset.a],
++          closeTo(((argb >> 24) & 0xFF) / 255.0, _tolerance),
+           reason: 'instance $i alpha channel');
+     }
+   });
+ }
+ 
+ /// `VerticesDrawSink._halfWidthFor`, reproduced here because that method is
+ /// private to its own file. Computes the half-width **in logical pixels** --
+ /// the reference sink's own space, per its `floorLogical` naming
+ /// (`vertices_draw_sink.dart:544-552`) -- so the test above can assert the
+ /// `x devicePixelRatio` relationship explicitly instead of checking the
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+index 228c7e9..9887b75 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+@@ -42,21 +42,21 @@ void main() {
+ 
+     expect(c.instanceCount, 1);
+     final r = c.data.sublist(0, kFloatsPerInstance);
+     expect(r[0], kKindStroke);
+     expect(r.sublist(1, 5), [10.0, 16.5, 15.0, 21.0]);
+     // Pins `w / 2` **in device pixels**, not the raw logical width:
+     // lineweightHundredths=50, pixelsPerPaperMm=4, lineweightScale=1 gives a
+     // logical width of 50/100 * 4 * 1 = 2.0, which at devicePixelRatio=2 is
+     // 2.0 * 2 = 4.0 device pixels -- above the floor of
+     // kMinStrokeDevicePixels(1.0), so halfWidth = 4.0 / 2 = 2.0.
+-    expect(r[5], 2.0);
++    expect(r[InstanceFieldOffset.halfWidth], 2.0);
+   });
+ 
+   test('emits one instance per segment, in walk order', () {
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.polyline(Float64List.fromList([0, 0, 1, 0, 1, 1]), 3, _style,
+         closed: false);
+     c.endResidual();
+ 
+     expect(c.instanceCount, 2);
+@@ -114,31 +114,31 @@ void main() {
+     c.polyline(Float64List.fromList([0, 0, 1, 0]), 2, _hairlineStyle,
+         closed: false);
+     c.endResidual();
+ 
+     expect(c.instanceCount, 1);
+     // lineweightHundredths=0 gives a logical width of 0, which converts to
+     // 0 device pixels either way -- not greater than the floor of
+     // kMinStrokeDevicePixels(1.0), so the clamp takes over:
+     // halfWidth = 1.0 / 2 = 0.5. A mutation that drops the clamp entirely
+     // would emit halfWidth = 0.0 instead.
+-    expect(c.data[5], 0.5);
++    expect(c.data[InstanceFieldOffset.halfWidth], 0.5);
+   });
+ 
+   test('lineweightScale multiplies the logical width before the clamp', () {
+     final c = GeometryCollector(
+         pixelsPerPaperMm: 4, devicePixelRatio: 2, lineweightScale: 2);
+     c.beginResidual(Transform2.identity());
+     c.polyline(Float64List.fromList([0, 0, 1, 0]), 2, _style, closed: false);
+     c.endResidual();
+ 
+     expect(c.instanceCount, 1);
+     // lineweightHundredths=50, pixelsPerPaperMm=4, lineweightScale=2 gives a
+     // logical width of 50/100 * 4 * 2 = 4.0, which at devicePixelRatio=2 is
+     // 4.0 * 2 = 8.0 device pixels -- above the floor of
+     // kMinStrokeDevicePixels(1.0), so halfWidth = 8.0 / 2 = 4.0. At the
+     // default scale of 1.0 this is 2.0 (the test above), so the multiply is
+     // still pinned: a dropped `lineweightScale` factor would make this test
+     // read 2.0 instead of 4.0.
+-    expect(c.data[5], 4.0);
++    expect(c.data[InstanceFieldOffset.halfWidth], 4.0);
+   });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart b/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart
+index a65faa5..144d4c8 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart
+@@ -1,32 +1,99 @@
+ import 'dart:typed_data';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
+ 
+ void main() {
+-  test('writes a stroke at an offset without touching its neighbours', () {
+-    final buffer = Float32List(kFloatsPerInstance * 3);
+-    // Fill so an unwritten field is visible rather than coincidentally zero:
+-    // a record written into an all-zero buffer passes even if it writes
+-    // nothing, which is the degenerate fixture this guards.
+-    buffer.fillRange(0, buffer.length, -1);
++  test('the field offsets are contiguous and cover the stride', () {
++    // The offsets are read by three independent consumers -- the writers
++    // below, `ResidentGeometry.kInstanceVertexLayout`, and (as a fourth,
++    // uncheckable copy) `cad_stroke.vert`'s attribute list. A gap or an
++    // overlap here is silent on every one of them until a device run.
++    const offsets = <int>[
++      InstanceFieldOffset.kind,
++      InstanceFieldOffset.x0,
++      InstanceFieldOffset.y0,
++      InstanceFieldOffset.x1,
++      InstanceFieldOffset.y1,
++      InstanceFieldOffset.x2,
++      InstanceFieldOffset.y2,
++      InstanceFieldOffset.halfWidth,
++      InstanceFieldOffset.r,
++      InstanceFieldOffset.g,
++      InstanceFieldOffset.b,
++      InstanceFieldOffset.a,
++    ];
++    expect(offsets, List<int>.generate(kFloatsPerInstance, (i) => i),
++        reason: 'offsets must be 0..kFloatsPerInstance-1 with no gaps');
++  });
+ 
+-    writeStroke(buffer, 1,
+-        x0: 3, y0: 4, x1: 5, y1: 6, halfWidth: 0.75, argb: 0x80402010);
++  test('the three kind tags are distinct and ordered for the shader', () {
++    // `cad_stroke.vert` dispatches with `kind < 0.5` then `kind < 1.5`, so
++    // the tags must be 0, 1, 2 in that order -- not merely distinct.
++    expect(kKindStroke, 0.0);
++    expect(kKindJoin, 1.0);
++    expect(kKindPoint, 2.0);
++  });
+ 
+-    expect(buffer.sublist(0, kFloatsPerInstance), everyElement(-1.0),
+-        reason: 'record 0 must be untouched');
+-    expect(buffer.sublist(kFloatsPerInstance * 2), everyElement(-1.0),
+-        reason: 'record 2 must be untouched');
++  test('writeStroke fills every slot and leaves p2 zeroed', () {
++    final b = Float32List(kFloatsPerInstance * 2);
++    // Index 1, not 0: writing at a non-zero index is the only way to catch a
++    // writer that ignores its `index` argument, and the zero-fill of a fresh
++    // Float32List would hide it at index 0.
++    writeStroke(b, 1,
++        x0: 3, y0: -4, x1: 11, y1: 6, halfWidth: 1.25, argb: 0x80402010);
++    final r = b.sublist(kFloatsPerInstance);
++    expect(r[InstanceFieldOffset.kind], kKindStroke);
++    expect(r[InstanceFieldOffset.x0], 3);
++    expect(r[InstanceFieldOffset.y0], -4);
++    expect(r[InstanceFieldOffset.x1], 11);
++    expect(r[InstanceFieldOffset.y1], 6);
++    expect(r[InstanceFieldOffset.x2], 0);
++    expect(r[InstanceFieldOffset.y2], 0);
++    expect(r[InstanceFieldOffset.halfWidth], 1.25);
++    expect(r[InstanceFieldOffset.r], closeTo(0x40 / 255.0, 1e-6));
++    expect(r[InstanceFieldOffset.g], closeTo(0x20 / 255.0, 1e-6));
++    expect(r[InstanceFieldOffset.b], closeTo(0x10 / 255.0, 1e-6));
++    expect(r[InstanceFieldOffset.a], closeTo(0x80 / 255.0, 1e-6));
++    // The first record is untouched: a writer that ignored `index` would
++    // have written here instead.
++    expect(b.sublist(0, kFloatsPerInstance).every((v) => v == 0), isTrue);
++  });
++
++  test('writeJoin puts the vertex first and the neighbours after it', () {
++    // Order matters and is not symmetric: the shader takes the incoming
++    // direction as `p0 - p1` and the outgoing as `p2 - p0`. Swapping p1 and
++    // p2 reverses the turn and mirrors the wedge onto the wrong side.
++    final b = Float32List(kFloatsPerInstance);
++    writeJoin(b, 0,
++        vx: 10,
++        vy: 20,
++        prevX: 4,
++        prevY: 20,
++        nextX: 10,
++        nextY: 33,
++        halfWidth: 2,
++        argb: 0xFF010203);
++    expect(b[InstanceFieldOffset.kind], kKindJoin);
++    expect(b[InstanceFieldOffset.x0], 10);
++    expect(b[InstanceFieldOffset.y0], 20);
++    expect(b[InstanceFieldOffset.x1], 4);
++    expect(b[InstanceFieldOffset.y1], 20);
++    expect(b[InstanceFieldOffset.x2], 10);
++    expect(b[InstanceFieldOffset.y2], 33);
++    expect(b[InstanceFieldOffset.halfWidth], 2);
++  });
+ 
+-    final r = buffer.sublist(kFloatsPerInstance, kFloatsPerInstance * 2);
+-    expect(r[0], kKindStroke);
+-    expect(r.sublist(1, 5), [3.0, 4.0, 5.0, 6.0]);
+-    expect(r[5], 0.75);
+-    // 0x80402010 -> a=0x80, r=0x40, g=0x20, b=0x10
+-    expect(r[6], closeTo(0x40 / 255, 1e-6));
+-    expect(r[7], closeTo(0x20 / 255, 1e-6));
+-    expect(r[8], closeTo(0x10 / 255, 1e-6));
+-    expect(r[9], closeTo(0x80 / 255, 1e-6));
++  test('writePoint carries one position and zeroes the unused slots', () {
++    final b = Float32List(kFloatsPerInstance);
++    writePoint(b, 0, x: -7, y: 2.5, halfWidth: 0.5, argb: 0xFFFFFFFF);
++    expect(b[InstanceFieldOffset.kind], kKindPoint);
++    expect(b[InstanceFieldOffset.x0], -7);
++    expect(b[InstanceFieldOffset.y0], 2.5);
++    expect(b[InstanceFieldOffset.x1], 0);
++    expect(b[InstanceFieldOffset.y1], 0);
++    expect(b[InstanceFieldOffset.x2], 0);
++    expect(b[InstanceFieldOffset.y2], 0);
++    expect(b[InstanceFieldOffset.halfWidth], 0.5);
+   });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart b/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart
+index 249fed2..1cadf79 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart
+@@ -10,85 +10,127 @@ void main() {
+ 
+   test('returns null rather than throwing where there is no GPU', () async {
+     debugSetGpuFactory(() => throw StateError('no gpu'));
+     final g = await ResidentGeometry.create(Float32List(kFloatsPerInstance), 1);
+     expect(g, isNull,
+         reason: 'the caller falls back; it must not have to catch');
+   });
+ 
+   test('reports the byte length the instance count implies', () {
+     // The literal, not the production expression restated: 59875 records *
+-    // 10 floats/record * 4 bytes/float. Asserting `59875 * kFloatsPerInstance
++    // 12 floats/record * 4 bytes/float. Asserting `59875 * kFloatsPerInstance
+     // * 4` here would move in lockstep with a broken `kFloatsPerInstance` (a
+-    // stride mismatch against the shader's 40-byte record) and stay green.
+-    expect(ResidentGeometry.byteLengthFor(59875), 2395000);
++    // stride mismatch against the shader's 48-byte record) and stay green.
++    expect(ResidentGeometry.byteLengthFor(59875), 2874000);
+   });
+ 
+   group('kCornerVertices', () {
+     test('is six vertices -- two triangles, not a strip', () {
+       // The exact list, not just its length: this is the only place this
+       // data is reachable without a GPU, so the assertion has to carry the
+       // whole thing rather than a derived property a wrong constant could
+       // still satisfy.
+       expect(ResidentGeometry.kCornerVertices, <double>[
+-        0, -1, 0, 1, 1, -1, //
+-        1, -1, 0, 1, 1, 1, //
++        0, -1, 1, 0, 0, 0, //
++        0, 1, 0, 1, 0, 0, //
++        1, -1, 0, 0, 1, 0, //
++        1, -1, 0, 1, 0, 0, //
++        0, 1, 0, 0, 0, 1, //
++        1, 1, 0, 0, 1, 0, //
+       ]);
+     });
+ 
+     test('covers exactly four distinct corners', () {
+       final points = <(double, double)>{
+-        for (var i = 0; i < ResidentGeometry.kCornerVertices.length; i += 2)
++        for (var i = 0;
++            i < ResidentGeometry.kCornerVertices.length;
++            i += ResidentGeometry.kFloatsPerCorner)
+           (
+             ResidentGeometry.kCornerVertices[i],
+             ResidentGeometry.kCornerVertices[i + 1]
+           ),
+       };
+       expect(points, hasLength(4),
+           reason: 'six vertices sharing one diagonal make two triangles of '
+               'one quad; four distinct points is what that claim means');
+     });
++
++    test('the corner buffer is six vertices of six floats', () {
++      expect(ResidentGeometry.kCornerVertices.length,
++          6 * ResidentGeometry.kFloatsPerCorner);
++    });
++
++    test('every join weight selects exactly one of the four points', () {
++      // A weight vector that summed to anything but 1 would put the vertex
++      // somewhere between two roles, which draws a wedge of the wrong shape
++      // rather than failing loudly. A weight vector that was all zeroes would
++      // collapse it onto the origin.
++      for (var v = 0; v < 6; v++) {
++        final base = v * ResidentGeometry.kFloatsPerCorner + 2;
++        final w = ResidentGeometry.kCornerVertices.sublist(base, base + 4);
++        expect(w.reduce((a, b) => a + b), 1.0, reason: 'vertex $v weights $w');
++        expect(w.where((x) => x == 1.0).length, 1,
++            reason: 'vertex $v weights $w');
++      }
++    });
++
++    test('the two join triangles are (V, A, B) and (A, M, B)', () {
++      // Named so a reordering of kCornerVertices is a test failure with the
++      // role in the message, not a silently different wedge.
++      const v = 0, a = 1, b = 2, m = 3;
++      int roleOf(int vertex) {
++        final base = vertex * ResidentGeometry.kFloatsPerCorner + 2;
++        return ResidentGeometry.kCornerVertices
++            .sublist(base, base + 4)
++            .indexOf(1.0);
++      }
++
++      expect(<int>[roleOf(0), roleOf(1), roleOf(2)], <int>[v, a, b]);
++      expect(<int>[roleOf(3), roleOf(4), roleOf(5)], <int>[a, m, b]);
++    });
+   });
+ 
+-  group('kStrokeVertexLayout', () {
+-    test('slot 0 carries corner, per vertex, stride 8', () {
+-      final corner = ResidentGeometry.kStrokeVertexLayout.buffers[0];
+-      expect(corner.strideInBytes, 8);
++  group('kInstanceVertexLayout', () {
++    test('slot 0 carries corner and join_weight, per vertex, stride 24', () {
++      final corner = ResidentGeometry.kInstanceVertexLayout.buffers[0];
++      expect(corner.strideInBytes, ResidentGeometry.kFloatsPerCorner * 4);
+       expect(corner.stepMode, VertexStepMode.vertex);
+-      expect(corner.attributes, hasLength(1));
+-      expect(corner.attributes.single.name, 'corner');
+-      expect(corner.attributes.single.offsetInBytes, 0);
++      expect(corner.attributes, hasLength(2));
++      final byName = {
++        for (final a in corner.attributes) a.name: a.offsetInBytes,
++      };
++      expect(byName, {'corner': 0, 'join_weight': 8});
+     });
+ 
+     test(
+         'slot 1 carries the instance record at the record\'s own offsets, '
+-        'per instance, stride 40', () {
+-      final instance = ResidentGeometry.kStrokeVertexLayout.buffers[1];
++        'per instance, stride 48', () {
++      final instance = ResidentGeometry.kInstanceVertexLayout.buffers[1];
+       // Stride: kFloatsPerInstance * 4. A wrong stride here disagrees with
+-      // instance_record.dart's own 10-float layout silently, since nothing
++      // instance_record.dart's own 12-float layout silently, since nothing
+       // in the shader bundle enforces it from the Dart side.
+       expect(instance.strideInBytes, kFloatsPerInstance * 4);
+       expect(instance.stepMode, VertexStepMode.instance);
+ 
+-      // Offsets are the record's own -- [kind, x0, y0, x1, y1, halfWidth, r,
+-      // g, b, a] -- not impellerc's single-combined-buffer reflection
+-      // (corner@0, kind@8, p0@12, p1@20, half_width@28, color@32), which
+-      // describes a layout this code does not use.
++      // Offsets are the record's own -- [kind, x0, y0, x1, y1, x2, y2,
++      // halfWidth, r, g, b, a] -- not impellerc's single-combined-buffer
++      // reflection, which describes a layout this code does not use.
+       final offsetsByName = {
+         for (final a in instance.attributes) a.name: a.offsetInBytes,
+       };
+       expect(offsetsByName, {
+         'kind': 0,
+         'p0': 4,
+         'p1': 12,
+-        'half_width': 20,
+-        'color': 24,
++        'p2': 20,
++        'half_width': 28,
++        'color': 32,
+       });
+     });
+ 
+     test(
+         'writeStroke and the vertex layout agree on where every field '
+         'lands -- a derivation, not a restatement', () {
+       // Distinct values in every slot, so a field landing at the wrong
+       // offset reads a value that belongs to a different field rather than
+       // coincidentally matching (a fixture at 0.0 or a repeated value would
+       // hide exactly that mistake). writeStroke packs colour from `argb`
+@@ -97,37 +139,39 @@ void main() {
+       final record = Float32List(kFloatsPerInstance);
+       writeStroke(record, 0,
+           x0: 11.0,
+           y0: 22.0,
+           x1: 33.0,
+           y1: 44.0,
+           halfWidth: 5.5,
+           argb: 0x8060A0C0);
+       final bytes = ByteData.sublistView(record);
+ 
+-      // Read every field back through kStrokeVertexLayout's own attribute
+-      // offsets, never through StrokeFieldOffset's float indices directly --
+-      // that would only prove the layout agrees with itself. This is the
++      // Read every field back through kInstanceVertexLayout's own attribute
++      // offsets, never through InstanceFieldOffset's float indices directly
++      // -- that would only prove the layout agrees with itself. This is the
+       // cross-check the plain offset map above cannot make: it fails if
+-      // *either* writeStroke's write order or kStrokeVertexLayout's
++      // *either* writeStroke's write order or kInstanceVertexLayout's
+       // attribute offsets move without the other, because both are read
+       // through the one path a real upload would use.
+-      final instance = ResidentGeometry.kStrokeVertexLayout.buffers[1];
++      final instance = ResidentGeometry.kInstanceVertexLayout.buffers[1];
+       double byName(String name, int floatIndexWithinAttribute) {
+         final attr = instance.attributes.singleWhere((a) => a.name == name);
+         return bytes.getFloat32(
+             attr.offsetInBytes + floatIndexWithinAttribute * 4, Endian.host);
+       }
+ 
+       expect(byName('kind', 0), kKindStroke);
+       expect(byName('p0', 0), 11.0, reason: 'x0');
+       expect(byName('p0', 1), 22.0, reason: 'y0');
+       expect(byName('p1', 0), 33.0, reason: 'x1');
+       expect(byName('p1', 1), 44.0, reason: 'y1');
++      expect(byName('p2', 0), 0.0, reason: 'x2, unused by a stroke');
++      expect(byName('p2', 1), 0.0, reason: 'y2, unused by a stroke');
+       expect(byName('half_width', 0), 5.5);
+       expect(byName('color', 0), closeTo(0x60 / 255.0, 1e-6), reason: 'r');
+       expect(byName('color', 1), closeTo(0xA0 / 255.0, 1e-6), reason: 'g');
+       expect(byName('color', 2), closeTo(0xC0 / 255.0, 1e-6), reason: 'b');
+       expect(byName('color', 3), closeTo(0x80 / 255.0, 1e-6), reason: 'a');
+     });
+   });
+ }

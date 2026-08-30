@@ -1,0 +1,226 @@
+# Review package: fffefc5..f01ee5a
+
+## Commits
+f01ee5a test(gpu): fix round 1 -- degenerate fixture, two overclaims, one net
+
+## Files changed
+ .../lib/src/gpu/instance_record.dart               | 11 ++--
+ .../test/gpu/instance_expander_test.dart           | 69 ++++++++++++++++++++++
+ .../test/support/instance_expander.dart            | 36 +++++++----
+ 3 files changed, 102 insertions(+), 14 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
+index d30a3f2..ccc89ea 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
+@@ -56,24 +56,27 @@ const double kKindPoint = 2;
+ /// The record's field layout, as an offset in **floats** from the record's
+ /// start — the writers below index by float, not byte.
+ ///
+ /// **The one place this order is declared for Dart.**
+ /// `ResidentGeometry.kInstanceVertexLayout` derives its `offsetInBytes`
+ /// values from these same constants (`* 4`), so reordering a field here moves
+ /// the writers and the vertex layout together instead of leaving one behind.
+ /// `cad_stroke.vert`'s attribute list is a third, independent copy — GLSL
+ /// cannot read a Dart constant — and `test/support/instance_expander.dart` is
+ /// a fourth. The expander is the one that is *gated*: it reads these same
+-/// constants, and `test/gpu/instance_expander_test.dart` compares its
+-/// output against the reference sink, so a drift between this file and the
+-/// expander goes red in `flutter test`. A drift between either and the GLSL
+-/// still needs a device run or a hand-check against `impellerc`'s reflection.
++/// constants, and `test/gpu/instance_expander_test.dart` pins the
++/// expander's own arithmetic today, so a drift between this file and the
++/// expander goes red in `flutter test`. `test/gpu/resident_pixel_differential_test.dart`
++/// (Task 9, not written yet) is the one that will compare the expander's
++/// output against the reference sink pixel for pixel. A drift between
++/// either and the GLSL still needs a device run or a hand-check against
++/// `impellerc`'s reflection.
+ abstract final class InstanceFieldOffset {
+   static const int kind = 0;
+   static const int x0 = 1;
+   static const int y0 = 2;
+   static const int x1 = 3;
+   static const int y1 = 4;
+   static const int x2 = 5;
+   static const int y2 = 6;
+   static const int halfWidth = 7;
+   static const int r = 8;
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart b/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
+index 3233b2f..5570e1e 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
+@@ -1,10 +1,12 @@
++import 'dart:io';
++import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
+ 
+ import '../support/instance_expander.dart';
+ 
+ void main() {
+@@ -130,11 +132,78 @@ void main() {
+     // device pixels wide.
+     final data = Float32List(kFloatsPerInstance);
+     writeStroke(data, 0,
+         x0: 0, y0: 0, x1: 100, y1: 0, halfWidth: 4, argb: 0xFF000000);
+     final out = expandInstances(data, 1, Transform2.scale(5, 5));
+     expect(out.positions[4], closeTo(500, 1e-3),
+         reason: 'the centreline scaled');
+     expect(out.positions[3] - out.positions[1], closeTo(8, 1e-3),
+         reason: 'the width did not');
+   });
++
++  test(
++      'a stroke under a transform with every coefficient non-zero matches by hand',
++      () {
++    // Every other test in this file uses `identity()` or `scale(k,k)`, so
++    // `b`, `c`, `e` and `f` are zero everywhere -- the degenerate fixture
++    // CLAUDE.md names as this project's dominant failure mode. A transposed
++    // `toX`/`toY` (swapping which of `b`/`c` feeds which axis) or a dropped
++    // translation (`e`/`f`) passes every test above unnoticed. This uses the
++    // same hand-built, every-coefficient-non-zero transform
++    // `geometry_collector_test.dart` uses for its own residual tests, so a
++    // reader can cross-check the shape of the fixture against a working
++    // precedent in this package.
++    const t = Transform2(2, 0.5, -1, 3, 10, 10);
++    final data = Float32List(kFloatsPerInstance);
++    writeStroke(data, 0,
++        x0: 0, y0: 0, x1: 100, y1: 0, halfWidth: 4, argb: 0xFF000000);
++    final out = expandInstances(data, 1, t);
++
++    // toX(x,y) = t.a*x + t.c*y + t.e = 2x -  y + 10
++    // toY(x,y) = t.b*x + t.d*y + t.f = 0.5x + 3y + 10
++    // a = toPixels(0,0)   = (10, 10)
++    // b = toPixels(100,0) = (210, 60)
++    // delta = b - a = (200, 50); len = sqrt(200^2 + 50^2) = 50*sqrt(17)
++    // dir    = delta / len = (4/sqrt17, 1/sqrt17)
++    // normal = (-dir.y, dir.x) = (-1/sqrt17, 4/sqrt17)
++    // corner (0,-1): px = a - normal*4 = (10 + 4/sqrt17, 10 - 16/sqrt17)
++    // corner (0, 1): px = a + normal*4 = (10 - 4/sqrt17, 10 + 16/sqrt17)
++    // corner (1,-1): px = b - normal*4 = (210 + 4/sqrt17, 60 - 16/sqrt17)
++    final sqrt17 = math.sqrt(17);
++    expect(out.positions[0], closeTo(10 + 4 / sqrt17, 1e-3));
++    expect(out.positions[1], closeTo(10 - 16 / sqrt17, 1e-3));
++    expect(out.positions[2], closeTo(10 - 4 / sqrt17, 1e-3));
++    expect(out.positions[3], closeTo(10 + 16 / sqrt17, 1e-3));
++    expect(out.positions[4], closeTo(210 + 4 / sqrt17, 1e-3));
++    expect(out.positions[5], closeTo(60 - 16 / sqrt17, 1e-3));
++  });
++
++  test('cad_stroke.vert still carries the three renumber-prone constants', () {
++    // Partial net, not a substitute for Ruling B6's human diff: this pins
++    // the three literals a shader edit is most likely to silently renumber
++    // (`instance_record.dart`'s doc explains why the values and order of
++    // `kKindStroke`/`kKindJoin`/`kKindPoint` are load-bearing, and this
++    // file's own `kExpanderMinMiterCosine` is the fourth, Dart-side, copy
++    // of the miter-limit literal). It reads the GLSL as text and checks
++    // for the constants, not the arithmetic around them -- a change to the
++    // *formula* that keeps these three literals untouched (for example,
++    // Task 8's own M-B5/M-B6 mutations) is invisible to this test and
++    // remains a human diff against `instance_expander.dart`.
++    final source = File('shaders/cad_stroke.vert').readAsStringSync();
++    expect(
++      RegExp(r'kMinMiterCosine\s*=\s*-0\.875').hasMatch(source),
++      isTrue,
++      reason: 'the miter-limit literal instance_expander.dart mirrors as '
++          'kExpanderMinMiterCosine',
++    );
++    expect(
++      RegExp(r'kind\s*<\s*0\.5').hasMatch(source),
++      isTrue,
++      reason: 'the stroke/join dispatch threshold',
++    );
++    expect(
++      RegExp(r'kind\s*<\s*1\.5').hasMatch(source),
++      isTrue,
++      reason: 'the join/point dispatch threshold',
++    );
++  });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/support/instance_expander.dart b/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
+index dfb5e02..575211a 100644
+--- a/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
++++ b/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
+@@ -57,24 +57,36 @@ class ExpandedTriangles {
+   /// One `0xAARRGGBB` per vertex.
+   final Int32List colors;
+ 
+   int get vertexCount => colors.length;
+ }
+ 
+ /// Expands [instanceCount] records of [data] under [collectionToDevice].
+ ///
+ /// [collectionToDevice] stands in for the shader's `mvp` composed with
+ /// `half_viewport`: the shader maps collection space to device pixels in two
+-/// steps because a `mat4` is what a uniform block carries, and the
+-/// composition is the same affine map. Feeding it directly here removes a
+-/// clip-space round trip that has no observable effect and would only add a
+-/// place for the two copies to disagree.
++/// steps because a `mat4` is what a uniform block carries. `clip.xy *
++/// half_viewport` is viewport-centred and y-up, so it is not literally the
++/// same affine map as a direct collection-to-device-pixel `Transform2` --
++/// the two differ by a translation and a y-flip. The substitution is still
++/// sound: every branch below is equivariant under a translation outright,
++/// since each is built from *differences* of already-projected points
++/// (deltas, unit directions, the miter blend) and a shared translation
++/// cancels out of every difference. A y-flip is different -- it reverses
++/// the cross product's sign, and with it which side the `crossZ > 0` test
++/// calls the turn's outer side -- but consistently so, because `n0` and
++/// `n1` are both derived from the same flipped space, so the triangles that
++/// come out are the exact mirror image of the un-flipped ones, which is the
++/// geometrically correct picture for a y-flipped space. Feeding the
++/// composed transform directly here removes a clip-space round trip that
++/// has no observable effect and would only add a place for the two copies
++/// to disagree.
+ ExpandedTriangles expandInstances(
+     Float32List data, int instanceCount, Transform2 collectionToDevice) {
+   final corners = _corners();
+   final positions = Float32List(instanceCount * 6 * 2);
+   final colors = Int32List(instanceCount * 6);
+   final t = collectionToDevice;
+ 
+   double toX(double x, double y) => t.a * x + t.c * y + t.e;
+   double toY(double x, double y) => t.b * x + t.d * y + t.f;
+ 
+@@ -181,26 +193,30 @@ ExpandedTriangles expandInstances(
+ 
+           // **This blend poisons all six vertices -- including triangle 0
+           // (V, A, B), which does not read `m` at all -- if `m` is
+           // non-finite, because `0.0 * Inf` is `NaN` in IEEE 754, not `0.0`.**
+           // Transcribed as the shader has it anyway: the guard above bails
+           // to the bevel unless `dot(d0, d1) >= kExpanderMinMiterCosine`
+           // (-0.875), which bounds the half-angle under roughly 76 degrees
+           // and therefore bounds `reach = halfWidth / cosHalf` to at most
+           // `4 * halfWidth` -- `m` cannot go non-finite through this guard
+           // as written. It is unreachable *today*, not unreachable by
+-          // construction: a differential test comparing this file's output
+-          // against the reference sink would see both arms agree (both
+-          // finite, or in some future change to the guard, both NaN) and
+-          // report agreement even if this arithmetic were the thing that
+-          // regressed. Only a device run, or a change to the guard, would
+-          // catch that.
++          // construction: no differential test exercises this poisoning
++          // path at all while the guard holds, since `m` never goes
++          // non-finite for it to poison. (If it ever did, the two arms
++          // would *disagree*, not agree: the reference's triangle 0 never
++          // reads `m`, so it would stay finite while this triangle 0 went
++          // NaN -- a differential would catch that. What it cannot catch is
++          // a regression to *this* arithmetic while the guard still bounds
++          // `reach`, because nothing exercises the poisoning branch to
++          // begin with.) Only a device run, or a change to the guard, would
++          // catch a change here today.
+           px = c.wv * vx + c.wa * ax + c.wb * bx + c.wm * mx;
+           py = c.wv * vy + c.wa * ay + c.wb * by + c.wm * my;
+         }
+       } else {
+         // kKindPoint: a square of the stroke's width centred on p0. Both
+         // axes are expanded here, in device pixels, so the dot stays square
+         // and stays the same size at every zoom -- which is what the
+         // reference gets for free by computing its `+/- half` in device
+         // space.
+         final cx = toX(x0, y0), cy = toY(x0, y0);

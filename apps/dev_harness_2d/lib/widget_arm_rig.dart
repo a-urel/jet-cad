@@ -16,7 +16,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
@@ -220,11 +219,6 @@ class WidgetSpikeState extends State<WidgetSpikeApp> {
       );
 }
 
-Future<void> _pumpFrame() {
-  SchedulerBinding.instance.scheduleFrame();
-  return SchedulerBinding.instance.endOfFrame;
-}
-
 /// Runs every arm over every phase, interleaved, [repeats] times.
 ///
 /// **Interleaved and not blocked.** Plan 3h blocked its arms and the inert
@@ -275,9 +269,9 @@ Future<void> runWidgetSpike(
     // leaves the pipeline quiet before anything is measured.
     final sw = Stopwatch()..start();
     state.arm.value = a;
-    await _pumpFrame();
+    await pumpFrame();
     final buildMs = sw.elapsedMicroseconds / 1000.0;
-    await _pumpFrame();
+    await pumpFrame();
     sw.stop();
     print('WSPIKE ${a.label} | arm switch | first frame '
         '${buildMs.toStringAsFixed(1)} ms wall clock, '
@@ -292,16 +286,16 @@ Future<void> runWidgetSpike(
     // Reset both cameras to the same starting view for every phase.
     state.camera.value = baseCamera;
     state.armCamera.set(scale: baseScale, offset: Offset.zero);
-    await _pumpFrame();
+    await pumpFrame();
 
     final log = FrameTimingLog()..arm();
     try {
-      await log.establishBaseline(_pumpFrame);
+      await log.establishBaseline(pumpFrame);
       for (var i = 0; i < frames; i++) {
         step(i);
-        await log.pump(_pumpFrame);
+        await log.pump(pumpFrame);
       }
-      await log.drain(_pumpFrame, upTo: frames);
+      await log.drain(pumpFrame, upTo: frames);
       if (log.sawBacklog) {
         throw StateError('WSPIKE ${a.label}/$name: the timing stream ran a '
             'backlog after the baseline, so every ordinal is off by an '

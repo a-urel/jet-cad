@@ -1,3 +1,22 @@
+### Task 7: The shader learns three kinds
+
+**Files:**
+- Modify: `shaders/cad_stroke.vert`
+- Modify: `shaders/cad_stroke.frag` (comment only)
+- Regenerate: `assets/shaders/cad.shaderbundle`
+
+**Interfaces:**
+- Consumes: the record layout and the corner buffer (Task 2).
+- Produces: nothing Dart-visible. **Task 8's expander is the transcription of
+  this file and must be written from it, not beside it.**
+
+**Nothing in `flutter test` reaches this file.** The gate is Task 8's expander,
+Task 9's pixel differential and Task 11's device run. Write it carefully and
+read it twice.
+
+- [ ] **Step 1: Rewrite `cad_stroke.vert`**
+
+```glsl
 // Expands one instance into a screen-space primitive, branching on its kind.
 //
 // **Authored for OpenGL ES 100.** `impellerc` emits the `openglEs` stage the
@@ -135,3 +154,73 @@ void main() {
   gl_Position = vec4(px / frame_info.half_viewport, 0.0, 1.0);
   v_color = color;
 }
+```
+
+- [ ] **Step 2: Correct the fragment shader's comment**
+
+Replace `cad_stroke.frag`'s header with:
+
+```glsl
+// Hard-edged, and it stays that way for now.
+//
+// The gate this backend is measured by is a pixel differential against
+// `VerticesDrawSink`, which has no antialiasing path at all -- `flush()`
+// submits `Vertices.raw` through `drawVertices` with per-vertex colours, and
+// the word does not appear in the file. At one-to-two device-pixel stroke
+// widths, edge pixels are most of the ink, so a coverage fade here would
+// differ from the reference by most of a channel on most inked pixels and
+// break spec criterion 1 outright. Antialiasing becomes possible when
+// something other than the reference sink is the oracle.
+//
+// (An earlier version of this comment said antialiasing was Plan B's. It is
+// not; Plan B's Ruling B3 records why.)
+```
+
+- [ ] **Step 3: Rebuild the bundle**
+
+```bash
+cd packages/jet_cad_2d_flutter && ./tool/build_shaders.sh
+```
+
+Expected: `wrote assets/shaders/cad.shaderbundle`, exit 0.
+
+**If it fails with "Could not complete reflection on generated shader"**, an
+attribute is declared but folded away by the optimizer. Every one of `corner`,
+`join_weight`, `kind`, `p0`, `p1`, `p2`, `half_width` and `color` must be read
+on a path the compiler cannot prove dead. Report which attribute you had to
+touch and how.
+
+- [ ] **Step 4: Verify the bundle carries an ES 100 stage**
+
+The bundle is a flatbuffer; `strings` is not evidence, because the
+`openglDesktop` stage uses `#version 120` with identical `attribute` syntax and
+Plan A lost a review round to counting both. Decode it instead:
+
+```bash
+cd packages/jet_cad_2d_flutter
+python3 - <<'PY'
+import re
+b = open('assets/shaders/cad.shaderbundle','rb').read()
+print('size', len(b))
+for tag in (b'#version 100', b'#version 120', b'#version 300 es'):
+    print(tag.decode(), b.count(tag))
+print('entry points:', sorted(set(re.findall(rb'Cad\w+', b))))
+PY
+sha256sum assets/shaders/cad.shaderbundle 2>/dev/null || shasum -a 256 assets/shaders/cad.shaderbundle
+```
+
+Expected: at least one `#version 100` occurrence, and both entry points
+present. Paste the output and the new SHA-256 into the report; `STATUS.md` and
+Task 11's results note both record it.
+
+- [ ] **Step 5: Gate and commit**
+
+```bash
+cd packages/jet_cad_2d_flutter && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .
+echo "exit=$?"
+git add packages/jet_cad_2d_flutter/shaders packages/jet_cad_2d_flutter/assets
+git commit -m "feat(gpu): the vertex shader builds join wedges and point squares"
+```
+
+---
+
