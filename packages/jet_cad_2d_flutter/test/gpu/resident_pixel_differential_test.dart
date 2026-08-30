@@ -43,8 +43,31 @@ const ResolvedStyle _wideStroke = ResolvedStyle(
 ///    error in `s` shows on one of them;
 ///  - the hairpin turns past the miter limit, so the bevel path runs;
 ///  - the circle is closed, so the seam join runs and its absence is a notch;
-///  - the point is a `point()` op;
-///  - the hairline is under one device pixel, so `_coveredArgb` runs;
+///  - the point is a `point()` op. **Its mutation (a point emitted as a
+///    stroke, M-B8) cannot be seen here, on any corpus.** `VerticesDrawSink`
+///    draws a point as a horizontal half-width segment too -- "a horizontal
+///    segment of the stroke's own width is a square of it"
+///    (`vertices_draw_sink.dart`'s own `point()`) -- and the shader's
+///    `kKindPoint` branch builds the identical square directly in device
+///    space. Under any collection-to-device map this instrument can
+///    legitimately use (conformal: identity or `devicePixelRatio`-only, the
+///    only kind jet-cad's camera ever produces -- see `task-9-report.md` for
+///    the probe that found a rotated collection-to-device map *would*
+///    separate them, and that a rotated residual upstream of it would not,
+///    which is why this is a structural fact and not a corpus gap), the
+///    two squares are bit-identical, because
+///    both are built axis-aligned in the same frame. M-B8's gate is the
+///    record level: `geometry_collector_test.dart`'s "a point is one
+///    instance of its own kind" and `collector_differential_test.dart`'s
+///    per-instance `kind` assertion both fail immediately on it;
+///  - the hairline is under one device pixel, so `_coveredArgb` runs. **Its
+///    mutation (M-B1', `_coveredArgb` dropped) can survive here too**, for
+///    an unrelated reason: `TriangleRasterizer.inked` is coverage-only (see
+///    `gpu_comparison.dart`'s doc), so an alpha fade with no coverage change
+///    is invisible to this instrument by construction. Its gate is
+///    `geometry_collector_test.dart`'s "a sub-pixel stroke keeps its pixel
+///    and gives up alpha" and `collector_differential_test.dart`'s hairline
+///    fixture.
 ///  - the spur has a repeated interior point (its second and third raw
 ///    points coincide), so the join at the corner past the repeat must span
 ///    it and take its incoming direction from the last point that actually
