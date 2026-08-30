@@ -104,6 +104,27 @@ void main() {
         _expectedInstancesFor(
             pts, pts.length ~/ 2, op.closed, op.style, residual, expected);
       }
+      // A circle and an arc reach the collector as a flattened run, so the
+      // oracle flattens them too -- from the REFERENCE's formula
+      // (`_flattenedLocalPoints` below), never from
+      // `GeometryCollector._flatten` -- and then hands the resulting point
+      // list to the same declarative rule the polylines use. A circle is
+      // `closed`, so it is where the rule's seam limb finally comes under
+      // this gate at all: the fixture carries no closed polyline, so before
+      // Task 5 that limb was exercised only by unit tests.
+      if (op is CircleOp) {
+        final pts = _flattenedLocalPoints(
+            op.cx, op.cy, op.r, 0, 2 * math.pi, residual, closed: true);
+        _expectedInstancesFor(
+            pts, pts.length ~/ 2, true, op.style, residual, expected);
+      }
+      if (op is ArcOp) {
+        final pts = _flattenedLocalPoints(
+            op.cx, op.cy, op.r, op.start, op.sweep, residual,
+            closed: false);
+        _expectedInstancesFor(
+            pts, pts.length ~/ 2, false, op.style, residual, expected);
+      }
     }
 
     expect(expected, isNotEmpty,
@@ -219,6 +240,55 @@ class _ExpectedInstance {
   final double kind;
   final double x0, y0, x1, y1, x2, y2;
   final ResolvedStyle style;
+}
+
+/// The point list a circle or arc flattens to, in the residual's **local**
+/// space — the space `_expectedInstancesFor` expects, since it applies the
+/// residual itself.
+///
+/// **Derived from the reference, not from the collector.** Every constant
+/// here is read live off `VerticesDrawSink` (`kFlattenTolerance`,
+/// `kMaxFlattenSegments`, both public), and the step count is the
+/// reference's own expression from `_flattenSteps`. `GeometryCollector`
+/// keeps its *own* copies of those two constants deliberately — two
+/// independent implementations that agree are a differential test, one
+/// shared field is not — so reading the reference's here is what makes the
+/// comparison mean something. Raise either arm's constant out of step with
+/// the other and this test goes red, which is the intended alarm.
+///
+/// Three properties reproduced from `_flatten`'s own doc, each because
+/// getting it wrong is a defect this gate exists to catch:
+///  - the walk is in **local** space, because a non-uniform residual turns
+///    the circle into an ellipse and flattening a transformed circle would
+///    not reproduce it;
+///  - only the **count** is a scale decision, so the radius that sets it is
+///    the on-screen one, `r * residual.scaleMagnitude`;
+///  - a closed sweep stops **one sample short**, because its last chord is
+///    the segment `_endRun` draws back to the first point — sampling it here
+///    would draw that chord twice and leave the seam a duplicated point
+///    instead of a join.
+List<double> _flattenedLocalPoints(double cx, double cy, double r,
+    double start, double sweep, Transform2 residual,
+    {required bool closed}) {
+  if (r <= 0 || sweep == 0) return const <double>[];
+  final deviceRadius = r * residual.scaleMagnitude;
+  if (deviceRadius <= 0) return const <double>[];
+
+  final theta = sweep.abs();
+  final steps = (theta *
+          math.sqrt(deviceRadius / (8 * VerticesDrawSink.kFlattenTolerance)))
+      .ceil()
+      .clamp(1, VerticesDrawSink.kMaxFlattenSegments);
+  final step = sweep / steps;
+  final last = closed ? steps - 1 : steps;
+
+  final out = <double>[];
+  for (var i = 0; i <= last; i++) {
+    final angle = start + step * i;
+    out.add(cx + r * math.cos(angle));
+    out.add(cy + r * math.sin(angle));
+  }
+  return out;
 }
 
 /// The reference's own zero-length predicate (`vertices_draw_sink.dart`,
