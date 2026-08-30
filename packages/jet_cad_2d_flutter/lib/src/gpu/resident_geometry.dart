@@ -217,7 +217,7 @@ class ResidentGeometry {
   /// they return. `@internal` makes that an analyzer error at the call site
   /// instead of a confusing one at the type. `GpuDrawBackend` is this
   /// package's only caller of all five, one call site each
-  /// (`gpu_draw_backend.dart:157, 180, 184, 188, 210-211`), which stays
+  /// (`gpu_draw_backend.dart:167, 190, 194-195, 198-199, 224-225`), which stays
   /// legal: `@internal` only restricts use from *outside* this package.
   @internal
   gpu.DeviceBuffer get corners => _corners;

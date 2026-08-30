@@ -11,13 +11,14 @@ export 'src/flutter_text_measurer.dart';
 // The resident-GPU backend's own public surface. `gpu_facade.dart` stays
 // unexported -- it is the one file allowed to import a GPU package, and it
 // carries more than the two small functions (`gpuAvailable`,
-// `debugSetGpuFactory`) an app assembling a frame might want: its
+// `debugSetGpuFactory`) and the public typedef `GpuContextFactory` an app
+// assembling a frame might want: its
 // `export 'package:flutter_scene/src/gpu/gpu.dart';` republishes that
 // package's *entire* internal GPU shim -- an off-contract, pre-1.0 `lib/src/`
 // API this package depends on but does not control. Exporting
 // `gpu_facade.dart` from this barrel would republish all of that through
 // `jet_cad_2d_flutter`'s own public API, which is the thing this barrel
-// exists to not do; the two small functions are not enough reason to accept
+// exists to not do; these members are not enough reason to accept
 // that. `ResidentGeometry`'s own handful of members that still resolve
 // through that shim (`kStrokeVertexLayout` and its five `gpu.*`-typed
 // getters) are marked `@internal` for the same reason, one file down.
