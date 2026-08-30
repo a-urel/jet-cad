@@ -226,8 +226,10 @@ void main() {
     ('5', 4000.0),
   ]) {
     for (final backend in RenderBackend.values) {
-      // Skip the GPU-resident backend: it has no sink until Task 8 and will
-      // never render in a test environment without actual GPU support.
+      // Skip the GPU-resident backend: Plan A does not wire a resident-GPU
+      // sink into the widget paint path — that is Plan F's job. No sink exists
+      // for this backend in the widget rendering, so the golden harness cannot
+      // test it.
       if (backend == RenderBackend.residentGpu) continue;
       testWidgets('dash ladder rung $name ($backend)', (tester) async {
         await _rung(tester, dashLadderFixture(), halfSpan, name, backend);

@@ -49,9 +49,13 @@ void main() {
   testWidgets('an explicit backend is honoured, not clamped', (tester) async {
     // Phase C forces `vertices` on the web to measure it. A parameter that
     // silently ignored what it was given would make that measurement a lie.
+    // `residentGpu` is resolved through `resolveBackend()` and may differ from
+    // the requested backend when GPU is unavailable; check the final resolved
+    // backend against what `resolveBackend()` returns.
     for (final backend in RenderBackend.values) {
       final state = await _pump(tester, backend: backend);
-      expect(state.resolvedBackend, backend, reason: '$backend');
+      final expectedBackend = resolveBackend(backend);
+      expect(state.resolvedBackend, expectedBackend, reason: '$backend');
     }
   });
 
@@ -96,5 +100,14 @@ void main() {
     expect(key.currentState!.vertices, isNull);
     await tester.pumpWidget(build(RenderBackend.vertices));
     expect(key.currentState!.vertices, isNotNull);
+  });
+
+  testWidgets('an explicit residentGpu request resolves to vertices when unavailable', (tester) async {
+    // MUTATION: if DraftCanvas does not route through `resolveBackend()`,
+    // `residentGpu` silently uses the canvas sink instead of vertices.
+    // This pins that the widget correctly uses `resolveBackend()`.
+    final state = await _pump(tester, backend: RenderBackend.residentGpu);
+    expect(state.resolvedBackend, RenderBackend.vertices);
+    expect(state.vertices, isNotNull);
   });
 }

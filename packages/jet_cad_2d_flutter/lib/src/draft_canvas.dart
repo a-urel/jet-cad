@@ -266,7 +266,7 @@ class DraftCanvasState extends State<DraftCanvas> {
         lineweightScale: widget.lineweightScale,
         measurer: measurer,
         textStyleOf: widget.document.textStyleOf);
-    resolvedBackend = widget.backend ?? defaultRenderBackend();
+    resolvedBackend = resolveBackend(widget.backend ?? defaultRenderBackend());
     vertices = resolvedBackend == RenderBackend.vertices
         ? VerticesDrawSink(
             pixelsPerPaperMm: widget.pixelsPerPaperMm,
