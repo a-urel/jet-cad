@@ -83,13 +83,15 @@ void main() {
     // transposed one is not the same residual", which drives
     // `GeometryCollector.polyline` directly with a genuine off-diagonal
     // residual. See Task 8's report for the transcript proving that.
-    // The expected instance list, rebuilt by mirroring
-    // `GeometryCollector`'s run state machine (`_beginRun` / `_runTo` /
-    // `_endRun`) over each `PolylineOp` -- not just its raw segment list.
-    // Once the collector emits a join instance at every interior vertex
-    // (Task 4), a per-segment rebuild undercounts on every polyline with
-    // more than two points, so the oracle has to run the same state machine
-    // the collector runs, not merely walk the same points.
+    // The expected instance list, generated declaratively from each
+    // `PolylineOp`'s deduped point list by `_expectedInstancesFor` -- not by
+    // replaying `GeometryCollector`'s own `_beginRun` / `_runTo` / `_endRun`
+    // state machine a second time. A rebuild that re-typed that state
+    // machine would share every misreading of it with the code under test;
+    // this rebuild instead reads the reference's own *documented* ordering
+    // rule (`vertices_draw_sink.dart`'s doc comments on `_runTo` and
+    // `_endRun`) straight off the point list, with no run-state bookkeeping
+    // of its own to get wrong the same way twice.
     final expected = <_ExpectedInstance>[];
     Transform2 residual = Transform2.identity();
     for (final op in recording.ops) {
@@ -99,7 +101,7 @@ void main() {
         // (`draw_sink.dart`'s own doc comment) -- there is no separate
         // `count` field on the op, unlike the brief's sample code assumed.
         final pts = op.points;
-        _mirrorPolylineRun(
+        _expectedInstancesFor(
             pts, pts.length ~/ 2, op.closed, op.style, residual, expected);
       }
     }
@@ -108,7 +110,7 @@ void main() {
         reason: 'a fixture with no polylines would make this test vacuous');
     expect(collector.instanceCount, expected.length,
         reason: 'the collector must emit exactly one instance per segment '
-            'and per join the run state machine produces -- neither '
+            'and per join the declarative rule produces -- neither '
             'dropping nor duplicating one');
 
     // Captured once: `collector.data` copies `_buffer` on every access, so
@@ -194,9 +196,10 @@ void main() {
 /// came from so the half-width and colour checks above can be per-instance.
 ///
 /// Mirrors the two record shapes `GeometryCollector` actually writes: a
-/// stroke's `(x2, y2)` is always `(0, 0)` (`writeStroke` never touches those
-/// slots) and a join's `(x0, y0)` is the corner, `(x1, y1)` the previous
-/// point and `(x2, y2)` the next one (`writeJoin`'s doc).
+/// stroke's `(x2, y2)` is always `(0, 0)` -- `writeStroke` writes `0` to both
+/// explicitly (`instance_record.dart:110-111`), it does not merely leave
+/// them unset -- and a join's `(x0, y0)` is the corner, `(x1, y1)` the
+/// previous point and `(x2, y2)` the next one (`writeJoin`'s doc).
 class _ExpectedInstance {
   _ExpectedInstance.stroke(this.style, this.x0, this.y0, this.x1, this.y1)
       : kind = kKindStroke,
@@ -218,79 +221,93 @@ class _ExpectedInstance {
   final ResolvedStyle style;
 }
 
-/// Mirrors `GeometryCollector`'s run state machine (`_beginRun` / `_runTo` /
-/// `_endRun`, `geometry_collector.dart`) over one `PolylineOp`'s points,
-/// after [residual] is applied, appending the instances the collector must
-/// emit for it to [out]: a join **before** every interior segment, and on a
-/// closed run the closing segment then the seam join, last.
+/// The reference's own zero-length predicate (`vertices_draw_sink.dart`,
+/// `_runTo`): a displacement whose square root is zero, not coordinate
+/// equality -- see `geometry_collector.dart`'s `_runTo` doc on why the two
+/// are not the same predicate near the underflow boundary.
+bool _coincide(double x0, double y0, double x1, double y1) {
+  final dx = x1 - x0, dy = y1 - y0;
+  return math.sqrt(dx * dx + dy * dy) == 0;
+}
+
+/// Generates the instances one `PolylineOp` must produce, appending them to
+/// [out] -- **declaratively**, off a deduped point list, with no run state
+/// of its own to mis-thread the way a second implementation of
+/// `GeometryCollector`'s own `_beginRun` / `_runTo` / `_endRun` state
+/// machine could. That would still not be a call into the code under test,
+/// but it would be a transcription of it: the same private field names
+/// minus the underscore, the same statement order, the same zero-length
+/// guard copied verbatim -- close enough to share a misreading of the
+/// reference with the collector, which is exactly what an oracle exists to
+/// catch. This function is derived instead from the reference's own
+/// *documented* rule (`vertices_draw_sink.dart`'s doc comments on `_runTo`
+/// -- "the join comes before the segment" -- and `_endRun` -- "the corner no
+/// vertex list contains"), read directly off the point list rather than
+/// replayed as a walk.
 ///
-/// A second, independent implementation of that state machine rather than a
-/// call into the collector's own -- an oracle that invoked the code under
-/// test to build its own expectation could not catch a defect in that code.
-void _mirrorPolylineRun(List<double> points, int count, bool closed,
+/// [points] is [residual]-applied and deduped first: consecutive points
+/// closer together than the reference's own zero-length test collapse to
+/// one, and for a closed run a trailing point that coincides with the first
+/// is dropped too -- the reference's own closing step (`_endRun`'s call into
+/// `_runTo`) is a no-op on exactly that shape, so it contributes neither a
+/// stroke nor a join of its own, only the seam. What survives, `p[0..n-1]`,
+/// is then read straight down:
+///   - a stroke `(p[i], p[i+1])` for every `i` in `0..n-2`;
+///   - a join at `p[i]` carrying `(p[i-1], p[i+1])` for every interior `i`
+///     in `1..n-2`, each one written before the stroke leaving it
+///     (`S₀, J₁, S₁, J₂, S₂, …`);
+///   - closed and `n >= 3` only: the same ordinary join at `p[n-1]` --
+///     `_endRun`'s closing step is just another `_runTo`, and every
+///     `_runTo` writes its join before its segment, the last point included
+///     -- then the closing stroke `(p[n-1], p[0])`, then the seam join at
+///     `p[0]` carrying `(p[n-1], p[1])`, the corner the point list never
+///     names on its own.
+void _expectedInstancesFor(List<double> rawPoints, int rawCount, bool closed,
     ResolvedStyle style, Transform2 residual, List<_ExpectedInstance> out) {
-  if (count < 2) return;
+  if (rawCount < 2) return;
   final t = residual;
-  double px(int i) => t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e;
-  double py(int i) => t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f;
 
-  double runFirstX = 0, runFirstY = 0, runSecondX = 0, runSecondY = 0;
-  double runPrevX = 0, runPrevY = 0, runBackX = 0, runBackY = 0;
-  var runHasDirection = false;
-  var runSegments = 0;
+  // 1. Transform every point by the residual.
+  final xs = List<double>.generate(rawCount,
+      (i) => t.a * rawPoints[i * 2] + t.c * rawPoints[i * 2 + 1] + t.e);
+  final ys = List<double>.generate(rawCount,
+      (i) => t.b * rawPoints[i * 2] + t.d * rawPoints[i * 2 + 1] + t.f);
 
-  void emitSeg(double x0, double y0, double x1, double y1) {
-    final dx = x1 - x0, dy = y1 - y0;
-    if (math.sqrt(dx * dx + dy * dy) == 0) return;
-    out.add(_ExpectedInstance.stroke(style, x0, y0, x1, y1));
+  // 2. Dedupe consecutive points against the previous KEPT point.
+  final px = <double>[xs[0]];
+  final py = <double>[ys[0]];
+  for (var i = 1; i < rawCount; i++) {
+    if (_coincide(px.last, py.last, xs[i], ys[i])) continue;
+    px.add(xs[i]);
+    py.add(ys[i]);
+  }
+  // For a closed run, drop a trailing point that coincides with the first.
+  if (closed &&
+      px.length > 1 &&
+      _coincide(px.first, py.first, px.last, py.last)) {
+    px.removeLast();
+    py.removeLast();
   }
 
-  void emitJoin(double vx, double vy, double prevX, double prevY, double nextX,
-      double nextY) {
-    out.add(_ExpectedInstance.join(style, vx, vy, prevX, prevY, nextX, nextY));
-  }
+  final n = px.length;
+  if (n < 2) return;
 
-  void beginRun(double x, double y) {
-    runFirstX = x;
-    runFirstY = y;
-    runSecondX = x;
-    runSecondY = y;
-    runPrevX = x;
-    runPrevY = y;
-    runBackX = x;
-    runBackY = y;
-    runHasDirection = false;
-    runSegments = 0;
-  }
-
-  void runTo(double x, double y) {
-    final dx = x - runPrevX, dy = y - runPrevY;
-    if (math.sqrt(dx * dx + dy * dy) == 0) return;
-    if (runHasDirection) {
-      emitJoin(runPrevX, runPrevY, runBackX, runBackY, x, y);
-    } else {
-      runSecondX = x;
-      runSecondY = y;
+  // 3. Generate the instance list declaratively from p[0..n-1].
+  for (var i = 0; i < n - 1; i++) {
+    if (i >= 1) {
+      out.add(_ExpectedInstance.join(
+          style, px[i], py[i], px[i - 1], py[i - 1], px[i + 1], py[i + 1]));
     }
-    emitSeg(runPrevX, runPrevY, x, y);
-    runBackX = runPrevX;
-    runBackY = runPrevY;
-    runPrevX = x;
-    runPrevY = y;
-    runHasDirection = true;
-    runSegments++;
+    out.add(
+        _ExpectedInstance.stroke(style, px[i], py[i], px[i + 1], py[i + 1]));
   }
-
-  beginRun(px(0), py(0));
-  for (var i = 1; i < count; i++) {
-    runTo(px(i), py(i));
-  }
-  if (closed && runHasDirection) {
-    runTo(runFirstX, runFirstY);
-    if (runSegments >= 2) {
-      emitJoin(
-          runFirstX, runFirstY, runBackX, runBackY, runSecondX, runSecondY);
-    }
+  if (closed && n >= 3) {
+    out.add(_ExpectedInstance.join(
+        style, px[n - 1], py[n - 1], px[n - 2], py[n - 2], px[0], py[0]));
+    out.add(
+        _ExpectedInstance.stroke(style, px[n - 1], py[n - 1], px[0], py[0]));
+    out.add(_ExpectedInstance.join(
+        style, px[0], py[0], px[n - 1], py[n - 1], px[1], py[1]));
   }
 }
 

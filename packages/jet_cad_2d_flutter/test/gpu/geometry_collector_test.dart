@@ -365,4 +365,46 @@ void main() {
     expect(c.instanceCount, 1);
     expect(_kindAt(c, 0), kKindStroke);
   });
+
+  test(
+      'a closed run whose last point already repeats the first still finds '
+      'the last DISTINCT point for the seam', () {
+    // M-B11. `_endRun`'s seam join must read its incoming neighbour from
+    // `_runBack` AFTER the closing `_runTo` call, not from `_runPrev` as it
+    // stood BEFORE that call. The two coincide whenever the closing step
+    // actually moves -- `_runTo` sets `_runBack` to the pre-call `_runPrev`
+    // on its way through -- so nothing distinguishes them until the raw
+    // point list's last point already equals the first: then the closing
+    // `_runTo` is a zero-length skip that leaves `_runBack` untouched at
+    // the last DISTINCT point (30, 50), while `_runPrev` at that same
+    // moment already reads (0, 0) -- the vertex itself. A mutation that
+    // captured the "before" value instead of reading `_runBack` after the
+    // call would hand the seam a zero-length incoming direction, which the
+    // shader would turn into a NaN.
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.polyline(
+        Float64List.fromList(<double>[0, 0, 60, 0, 30, 50, 0, 0]),
+        4,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1),
+        closed: true);
+    expect(c.instanceCount, 6,
+        reason: 'the explicit trailing repeat of the first point adds no '
+            'instance of its own');
+    final seam = c.data.sublist(5 * kFloatsPerInstance);
+    expect(seam[InstanceFieldOffset.kind], kKindJoin);
+    expect(seam[InstanceFieldOffset.x0], 0,
+        reason: 'the seam is at the first point');
+    expect(seam[InstanceFieldOffset.y0], 0);
+    expect(seam[InstanceFieldOffset.x1], 30,
+        reason: 'incoming from the last DISTINCT point, not the repeat');
+    expect(seam[InstanceFieldOffset.y1], 50);
+    expect(seam[InstanceFieldOffset.x2], 60,
+        reason: 'outgoing to the second point');
+    expect(seam[InstanceFieldOffset.y2], 0);
+  });
 }
