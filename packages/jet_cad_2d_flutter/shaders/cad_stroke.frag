@@ -22,8 +22,19 @@
 // Plan B's Ruling B3 records why.)
 
 in vec4 v_color;
+in vec3 v_dash;   // (t, fracStart, fracEnd); a negative fracStart means solid
 out vec4 frag_color;
 
 void main() {
+  // `discard` rather than a zero alpha: a transparent fragment still writes
+  // depth on hardware that has it and still costs a blend. The spec's budget
+  // discussion already names the cost of this line -- "the shaded-dash
+  // `discard` defeats early-Z" -- so it is a known price, not a surprise.
+  if (v_dash.y >= 0.0) {
+    float f = fract(v_dash.x);
+    if (f < v_dash.y || f >= v_dash.z) {
+      discard;
+    }
+  }
   frag_color = v_color;
 }

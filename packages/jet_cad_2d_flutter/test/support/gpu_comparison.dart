@@ -139,6 +139,13 @@ ResidentAgreement measureResidentAgreement(
   required Size size,
   required double devicePixelRatio,
   required double pixelsPerPaperMm,
+
+  /// The `dashScale` `expandInstances` needs -- live logical pixels per
+  /// collection unit. Every caller today drives both arms at the same
+  /// camera the buffer was collected at, so the live-to-collection ratio is
+  /// exactly `1.0`; a caller that ever animates the camera between the two
+  /// arms would need to pass the real ratio here instead.
+  required double dashScale,
 }) {
   final w = (size.width * devicePixelRatio).round();
   final h = (size.height * devicePixelRatio).round();
@@ -178,7 +185,8 @@ ResidentAgreement measureResidentAgreement(
   draw(collector);
   collector.endResidual();
   final expanded = expandInstances(collector.data, collector.instanceCount,
-      Transform2.scale(devicePixelRatio, devicePixelRatio));
+      Transform2.scale(devicePixelRatio, devicePixelRatio),
+      dashScale: dashScale);
   final residentRaster = TriangleRasterizer(w, h)
     ..observe(expanded.positions, expanded.colors);
 

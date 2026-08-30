@@ -102,7 +102,14 @@ void _corpus(DrawSink sink) {
 void main() {
   test('the resident arm draws the reference drawing', () {
     final r = measureResidentAgreement(_corpus,
-        size: _size, devicePixelRatio: _dpr, pixelsPerPaperMm: _ppmm);
+        size: _size,
+        devicePixelRatio: _dpr,
+        pixelsPerPaperMm: _ppmm,
+        // Both arms are driven at the same camera the buffer is collected
+        // at (see `measureResidentAgreement`'s own doc), so the
+        // live-to-collection ratio is exactly 1. No dashed geometry is in
+        // this corpus yet -- Task 9 gives this file a real dashed arm.
+        dashScale: 1.0);
 
     // The anti-vacuity floor, the same one `tile_cache_test.dart:958-959`
     // uses: a comparison of two blank frames agrees perfectly and measures
@@ -197,11 +204,13 @@ void main() {
     // and radius 8 below are chosen for, not to make the assertion pass but
     // to make the corner it is asserting about visible to a rasterizer with
     // 1px granularity at all.
-    final closedAgreement = measureResidentAgreement(
-        (s) => s.circle(80, 220, 8, _wideStroke),
-        size: _size,
-        devicePixelRatio: _dpr,
-        pixelsPerPaperMm: _ppmm);
+    final closedAgreement =
+        measureResidentAgreement((s) => s.circle(80, 220, 8, _wideStroke),
+            size: _size,
+            devicePixelRatio: _dpr,
+            pixelsPerPaperMm: _ppmm,
+            // Same camera on both arms -- see the corpus test's own comment.
+            dashScale: 1.0);
     // A 2*pi arc is the same chords, open: no closing chord back to point 0
     // and no seam join. (Its OWN final `_runTo` still lands near the start
     // angle -- a full sweep's last sample is `start + sweep`, not a
@@ -215,7 +224,8 @@ void main() {
             (s) => s.arc(80, 220, 8, 0, 6.283185307179586, _wideStroke),
             size: _size,
             devicePixelRatio: _dpr,
-            pixelsPerPaperMm: _ppmm)
+            pixelsPerPaperMm: _ppmm,
+            dashScale: 1.0)
         .residentInk
         .toDouble();
 

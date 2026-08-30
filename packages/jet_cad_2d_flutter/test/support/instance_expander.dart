@@ -15,6 +15,13 @@
 /// It takes an instance buffer and a transform. It must never read the
 /// collector: the collector's output is the input, which is exactly what the
 /// GPU sees.
+///
+/// **Task 8 added the dash varying, transcribed the same way as everything
+/// else here.** `ExpandedTriangles.dashVaryings` is `v_dash` -- `(t,
+/// fracStart, fracEnd)` per vertex -- and [expandInstances] takes the same
+/// `dashScale` `cad_stroke.vert` reads off `frame_info.dash_scale`. Read the
+/// dash block in `expandInstances` beside the shader's own tail, in the same
+/// order: the sentinel, the period test, the collapse override.
 library;
 
 import 'dart:math' as math;
@@ -27,6 +34,13 @@ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
 /// The shader's `kMinMiterCosine` literal, mirrored so a test can assert it
 /// against `VerticesDrawSink.kMinMiterCosine`.
 const double kExpanderMinMiterCosine = -0.875;
+
+/// The shader's `kDashCollapsePx` literal, mirrored so a test can assert it
+/// against the engine's own `kDashCollapsePx` (`dasher.dart`) -- GLSL cannot
+/// read a Dart constant, so `cad_stroke.vert` restates `3.0` and this file
+/// restates it a second time, the same way `kExpanderMinMiterCosine` keeps
+/// the miter literal honest.
+const double kExpanderDashCollapsePx = 3.0;
 
 /// The corner table's six entries, `(corner.xy, join_weight.xyzw)`.
 ///
@@ -49,13 +63,18 @@ List<_Corner> _corners() {
 /// The triangle list the GPU would produce, in the shape
 /// `TriangleRasterizer.observe` takes.
 class ExpandedTriangles {
-  ExpandedTriangles(this.positions, this.colors);
+  ExpandedTriangles(this.positions, this.colors, this.dashVaryings);
 
   /// Two floats per vertex, six vertices per instance, in instance order.
   final Float32List positions;
 
   /// One `0xAARRGGBB` per vertex.
   final Int32List colors;
+
+  /// Three floats per vertex: `v_dash`'s `(t, fracStart, fracEnd)`. A
+  /// negative `fracStart` is the solid sentinel -- see `cad_stroke.vert`'s
+  /// `v_dash` doc.
+  final Float32List dashVaryings;
 
   int get vertexCount => colors.length;
 }
@@ -81,11 +100,13 @@ class ExpandedTriangles {
 /// has no observable effect and would only add a place for the two copies
 /// to disagree.
 ExpandedTriangles expandInstances(
-    Float32List data, int instanceCount, Transform2 collectionToDevice) {
+    Float32List data, int instanceCount, Transform2 collectionToDevice,
+    {required double dashScale}) {
   final corners = _corners();
   final cornerVertexCount = ResidentGeometry.cornerVertexCount;
   final positions = Float32List(instanceCount * cornerVertexCount * 2);
   final colors = Int32List(instanceCount * cornerVertexCount);
+  final dashVaryings = Float32List(instanceCount * cornerVertexCount * 3);
   final t = collectionToDevice;
 
   double toX(double x, double y) => t.a * x + t.c * y + t.e;
@@ -104,9 +125,23 @@ ExpandedTriangles expandInstances(
     final x2 = data[o + InstanceFieldOffset.x2];
     final y2 = data[o + InstanceFieldOffset.y2];
 
+    // `dash`: (period, phase, fracStart, fracEnd), collection units. Read
+    // once per instance, like `kind`/`halfWidth`/`x0`.. above -- the shader
+    // reads the same instance attribute fresh every vertex, which is
+    // equivalent since none of these four vary by vertex.
+    final dashPeriodSigned = data[o + InstanceFieldOffset.dashPeriod];
+    final dashPhase = data[o + InstanceFieldOffset.dashPhase];
+    final dashFracStart = data[o + InstanceFieldOffset.dashFracStart];
+    final dashFracEnd = data[o + InstanceFieldOffset.dashFracEnd];
+    final period = dashPeriodSigned.abs();
+
     for (var v = 0; v < cornerVertexCount; v++) {
       final c = corners[v];
       double px, py;
+
+      // Distance from the primitive's start to this vertex, in COLLECTION
+      // units.
+      var along = 0.0;
 
       if (kind < 0.5) {
         // kKindStroke: two triangles around a centreline.
@@ -121,6 +156,11 @@ ExpandedTriangles expandInstances(
         final nx = -dirY, ny = dirX;
         px = ax + (bx - ax) * c.x + nx * halfWidth * c.y;
         py = ay + (by - ay) * c.x + ny * halfWidth * c.y;
+        // Collection units, taken from the attributes rather than from `a`
+        // and `b`: `toX`/`toY` have already applied the live camera to
+        // those, and the camera must not appear in `t`.
+        final rawDx = x1 - x0, rawDy = y1 - y0;
+        along = c.x * math.sqrt(rawDx * rawDx + rawDy * rawDy);
       } else if (kind < 1.5) {
         // kKindJoin: the notch at a corner, as the bevel (V, A, B) plus the
         // miter tip (A, M, B). Exactly `VerticesDrawSink._emitJoin`, in
@@ -229,10 +269,33 @@ ExpandedTriangles expandInstances(
       positions[vi * 2] = px;
       positions[vi * 2 + 1] = py;
       colors[vi] = argb;
+
+      // The dash decision. `dash.x` (here `dashPeriodSigned`) is signed:
+      // zero is solid, and a negative value marks the one instance per
+      // primitive that draws solid when the pattern collapses.
+      var vDashT = 0.0, vDashFracStart = -1.0, vDashFracEnd = 0.0;
+      if (period > 0.0) {
+        if (period * dashScale < kExpanderDashCollapsePx) {
+          // Collapsed. The reference stops dashing and draws the whole
+          // primitive, so the representative keeps its solid varying and
+          // every sibling collapses to a point.
+          if (dashPeriodSigned > 0.0) {
+            positions[vi * 2] = 0.0;
+            positions[vi * 2 + 1] = 0.0;
+          }
+        } else {
+          vDashT = (dashPhase + along) / period;
+          vDashFracStart = dashFracStart;
+          vDashFracEnd = dashFracEnd;
+        }
+      }
+      dashVaryings[vi * 3] = vDashT;
+      dashVaryings[vi * 3 + 1] = vDashFracStart;
+      dashVaryings[vi * 3 + 2] = vDashFracEnd;
     }
   }
 
-  return ExpandedTriangles(positions, colors);
+  return ExpandedTriangles(positions, colors, dashVaryings);
 }
 
 /// Reads the record's four colour floats back to `0xAARRGGBB`.
