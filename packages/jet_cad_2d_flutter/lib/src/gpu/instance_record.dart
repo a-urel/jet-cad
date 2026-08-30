@@ -2,13 +2,12 @@ import 'dart:typed_data';
 
 /// Floats per instance record.
 ///
-/// `[kind, x0, y0, x1, y1, x2, y2, halfWidth, r, g, b, a]`.
+/// `[kind, halfWidth, x0, y0, x1, y1, x2, y2, r, g, b, a,
+///   dashPeriod, dashPhase, dashFracStart, dashFracEnd]`.
 ///
-/// **Twelve floats, and none of them packed, because of the web.** The shader
-/// bundle must carry an OpenGL ES 100 stage — `flutter_scene`'s web loader
-/// reads `entry.openglEs` and transpiles it to ES 300 — and ES 100 has neither
-/// bitwise operators nor integer vertex attributes, so a `uint32` colour could
-/// not be unpacked in the shader. 48 bytes per record.
+/// **Sixteen floats, none of them packed, because of the web.** ES 100 has
+/// neither bitwise operators nor integer vertex attributes, so a `uint32`
+/// colour could not be unpacked in the shader. 64 bytes per record.
 ///
 /// **Ten became twelve in Plan B**, because a join carries a vertex and both
 /// its neighbours where a stroke carries two endpoints. The third point is
@@ -18,7 +17,22 @@ import 'dart:typed_data';
 /// residual (`vertices_draw_sink.dart`, `_runTo`), so storing points and
 /// normalising in the shader after the mvp puts both arms in the same space
 /// by construction instead of by coincidence.
-const int kFloatsPerInstance = 12;
+///
+/// **Twelve became sixteen in Plan C**, and `kind` moved next to `halfWidth`
+/// in the same change. The four new slots carry the dash: the period in
+/// collection units, the phase at this instance's start, and the drawn
+/// pattern element's own extent as a fraction of the cycle. The move is
+/// Ruling C6: the shader reads `kind` and `half_width` as one `vec2`
+/// attribute, because `gl_MaxVertexAttribs` is guaranteed to be no more than
+/// 8 under GLSL ES 100 and the eighth slot is now the `dash` quad.
+///
+/// **`dashPeriod` is signed and the sign is data.** Zero means solid.
+/// Negative marks the one instance per primitive that draws solid when the
+/// live period falls under `kDashCollapsePx` -- see `cad_stroke.vert`'s
+/// collapse branch, and Plan C's record section for why the alternative
+/// (every instance of a collapsed primitive drawing solid) is visibly wrong
+/// rather than merely wasteful.
+const int kFloatsPerInstance = 16;
 
 /// The kind tag, in slot 0 of every record.
 ///
@@ -72,17 +86,21 @@ const double kKindPoint = 2;
 /// reflection.
 abstract final class InstanceFieldOffset {
   static const int kind = 0;
-  static const int x0 = 1;
-  static const int y0 = 2;
-  static const int x1 = 3;
-  static const int y1 = 4;
-  static const int x2 = 5;
-  static const int y2 = 6;
-  static const int halfWidth = 7;
+  static const int halfWidth = 1;
+  static const int x0 = 2;
+  static const int y0 = 3;
+  static const int x1 = 4;
+  static const int y1 = 5;
+  static const int x2 = 6;
+  static const int y2 = 7;
   static const int r = 8;
   static const int g = 9;
   static const int b = 10;
   static const int a = 11;
+  static const int dashPeriod = 12;
+  static const int dashPhase = 13;
+  static const int dashFracStart = 14;
+  static const int dashFracEnd = 15;
 }
 
 /// Writes the four colour slots at record base [o]. [argb] is `0xAARRGGBB`.
@@ -91,6 +109,24 @@ void _writeColor(Float32List into, int o, int argb) {
   into[o + InstanceFieldOffset.g] = ((argb >> 8) & 0xFF) / 255.0;
   into[o + InstanceFieldOffset.b] = (argb & 0xFF) / 255.0;
   into[o + InstanceFieldOffset.a] = ((argb >> 24) & 0xFF) / 255.0;
+}
+
+/// Writes the four dash slots at record base [o].
+///
+/// **Every writer calls this, `writePoint` included.** `writePoint` takes no
+/// dash arguments — a `point()` is never dashed, since `DraftPainter`
+/// returns before it ever looks up a linetype — but it still calls this with
+/// every argument at its default of zero, rather than relying on a fresh
+/// `Float32List`'s own zero-initialisation. A record reused across frames (or
+/// sliced from a larger buffer that once held a dashed instance at the same
+/// index) is not guaranteed to already be zero there; only an explicit write
+/// is.
+void _writeDash(Float32List into, int o, double period, double phase,
+    double fracStart, double fracEnd) {
+  into[o + InstanceFieldOffset.dashPeriod] = period;
+  into[o + InstanceFieldOffset.dashPhase] = phase;
+  into[o + InstanceFieldOffset.dashFracStart] = fracStart;
+  into[o + InstanceFieldOffset.dashFracEnd] = fracEnd;
 }
 
 /// Writes the stroke record at [index]. [argb] is `0xAARRGGBB`.
@@ -103,17 +139,25 @@ void writeStroke(
   required double y1,
   required double halfWidth,
   required int argb,
+
+  /// Collection units. 0 is solid; a negative value marks the collapse
+  /// representative and its magnitude is the period.
+  double dashPeriod = 0,
+  double dashPhase = 0,
+  double dashFracStart = 0,
+  double dashFracEnd = 0,
 }) {
   final o = index * kFloatsPerInstance;
   into[o + InstanceFieldOffset.kind] = kKindStroke;
+  into[o + InstanceFieldOffset.halfWidth] = halfWidth;
   into[o + InstanceFieldOffset.x0] = x0;
   into[o + InstanceFieldOffset.y0] = y0;
   into[o + InstanceFieldOffset.x1] = x1;
   into[o + InstanceFieldOffset.y1] = y1;
   into[o + InstanceFieldOffset.x2] = 0;
   into[o + InstanceFieldOffset.y2] = 0;
-  into[o + InstanceFieldOffset.halfWidth] = halfWidth;
   _writeColor(into, o, argb);
+  _writeDash(into, o, dashPeriod, dashPhase, dashFracStart, dashFracEnd);
 }
 
 /// Writes the join record at [index].
@@ -134,20 +178,36 @@ void writeJoin(
   required double nextY,
   required double halfWidth,
   required int argb,
+
+  /// Collection units. 0 is solid; a negative value marks the collapse
+  /// representative and its magnitude is the period.
+  double dashPeriod = 0,
+  double dashPhase = 0,
+  double dashFracStart = 0,
+  double dashFracEnd = 0,
 }) {
   final o = index * kFloatsPerInstance;
   into[o + InstanceFieldOffset.kind] = kKindJoin;
+  into[o + InstanceFieldOffset.halfWidth] = halfWidth;
   into[o + InstanceFieldOffset.x0] = vx;
   into[o + InstanceFieldOffset.y0] = vy;
   into[o + InstanceFieldOffset.x1] = prevX;
   into[o + InstanceFieldOffset.y1] = prevY;
   into[o + InstanceFieldOffset.x2] = nextX;
   into[o + InstanceFieldOffset.y2] = nextY;
-  into[o + InstanceFieldOffset.halfWidth] = halfWidth;
   _writeColor(into, o, argb);
+  _writeDash(into, o, dashPeriod, dashPhase, dashFracStart, dashFracEnd);
 }
 
 /// Writes the point record at [index].
+///
+/// **Takes no dash arguments, by design.** A `point()` is never dashed —
+/// `VerticesDrawSink.point` does not consult a linetype, and neither does the
+/// painter's point path: `_emitScreenSpace` returns before `_patternFor` is
+/// ever called. A caller therefore cannot express something the reference
+/// cannot draw. The four dash slots are still written, explicitly, to zero —
+/// see [_writeDash]'s own doc for why that write has to be explicit rather
+/// than left to a fresh buffer's zero-initialisation.
 void writePoint(
   Float32List into,
   int index, {
@@ -158,12 +218,13 @@ void writePoint(
 }) {
   final o = index * kFloatsPerInstance;
   into[o + InstanceFieldOffset.kind] = kKindPoint;
+  into[o + InstanceFieldOffset.halfWidth] = halfWidth;
   into[o + InstanceFieldOffset.x0] = x;
   into[o + InstanceFieldOffset.y0] = y;
   into[o + InstanceFieldOffset.x1] = 0;
   into[o + InstanceFieldOffset.y1] = 0;
   into[o + InstanceFieldOffset.x2] = 0;
   into[o + InstanceFieldOffset.y2] = 0;
-  into[o + InstanceFieldOffset.halfWidth] = halfWidth;
   _writeColor(into, o, argb);
+  _writeDash(into, o, 0, 0, 0, 0);
 }

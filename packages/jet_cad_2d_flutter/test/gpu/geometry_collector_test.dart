@@ -47,8 +47,9 @@ void main() {
 
     expect(c.instanceCount, 1);
     final r = c.data.sublist(0, kFloatsPerInstance);
-    expect(r[0], kKindStroke);
-    expect(r.sublist(1, 5), [10.0, 16.5, 15.0, 21.0]);
+    expect(r[InstanceFieldOffset.kind], kKindStroke);
+    expect(r.sublist(InstanceFieldOffset.x0, InstanceFieldOffset.x0 + 4),
+        [10.0, 16.5, 15.0, 21.0]);
     // Pins `w / 2` **in device pixels**, not the raw logical width:
     // lineweightHundredths=50, pixelsPerPaperMm=4, lineweightScale=1 gives a
     // logical width of 50/100 * 4 * 1 = 2.0, which at devicePixelRatio=2 is
@@ -69,12 +70,14 @@ void main() {
     // open three-point run is join-before-segment, and nothing else'.
     expect(c.instanceCount, 3);
     expect(c.data[InstanceFieldOffset.kind], kKindStroke);
-    expect(c.data.sublist(1, 5), [0.0, 0.0, 1.0, 0.0]);
+    expect(c.data.sublist(InstanceFieldOffset.x0, InstanceFieldOffset.x0 + 4),
+        [0.0, 0.0, 1.0, 0.0]);
     expect(c.data[kFloatsPerInstance + InstanceFieldOffset.kind], kKindJoin);
     expect(
         c.data[2 * kFloatsPerInstance + InstanceFieldOffset.kind], kKindStroke);
     expect(
-        c.data.sublist(2 * kFloatsPerInstance + 1, 2 * kFloatsPerInstance + 5),
+        c.data.sublist(2 * kFloatsPerInstance + InstanceFieldOffset.x0,
+            2 * kFloatsPerInstance + InstanceFieldOffset.x0 + 4),
         [1.0, 0.0, 1.0, 1.0]);
   });
 
@@ -98,12 +101,15 @@ void main() {
     // later stroke's index, which is why this can no longer read
     // consecutive slots.
     expect(c.instanceCount, 6);
-    expect(c.data.sublist(1, 5), [0.0, 0.0, 1.0, 0.0]);
+    expect(c.data.sublist(InstanceFieldOffset.x0, InstanceFieldOffset.x0 + 4),
+        [0.0, 0.0, 1.0, 0.0]);
     expect(
-        c.data.sublist(2 * kFloatsPerInstance + 1, 2 * kFloatsPerInstance + 5),
+        c.data.sublist(2 * kFloatsPerInstance + InstanceFieldOffset.x0,
+            2 * kFloatsPerInstance + InstanceFieldOffset.x0 + 4),
         [1.0, 0.0, 1.0, 1.0]);
     expect(
-        c.data.sublist(4 * kFloatsPerInstance + 1, 4 * kFloatsPerInstance + 5),
+        c.data.sublist(4 * kFloatsPerInstance + InstanceFieldOffset.x0,
+            4 * kFloatsPerInstance + InstanceFieldOffset.x0 + 4),
         [1.0, 1.0, 0.0, 0.0],
         reason: 'the closing segment must run from the last point back to '
             'the first');

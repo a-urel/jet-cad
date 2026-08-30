@@ -106,9 +106,10 @@ class ResidentGeometry {
   /// buffer" — a buffer-relative offset, not a global one). Binding `corner`
   /// from its own buffer at slot 0 and the instance record from its own
   /// buffer at slot 1 means the instance attributes' offsets are the
-  /// record's *own* offsets (`instance_record.dart`'s `[kind, x0, y0, x1,
-  /// y1, x2, y2, halfWidth, r, g, b, a]`), not the reflected ones shifted by
-  /// `corner`'s 8 bytes. This is the same two-buffer split the spike used
+  /// record's *own* offsets (`instance_record.dart`'s `[kind, halfWidth, x0,
+  /// y0, x1, y1, x2, y2, r, g, b, a, dashPeriod, dashPhase, dashFracStart,
+  /// dashFracEnd]`), not the reflected ones shifted by `corner`'s 8 bytes.
+  /// This is the same two-buffer split the spike used
   /// (`git show 8c82208:apps/dev_harness_2d/lib/gpu_arm.dart:379-386` --
   /// that file was deleted in Task 9, before which it lived at this path).
   ///
@@ -117,6 +118,21 @@ class ResidentGeometry {
   /// interleave strokes, joins and points (`instance_record.dart`'s
   /// `kKindStroke`/`kKindJoin`/`kKindPoint`), so this one layout describes
   /// every kind's vertex input rather than a stroke-only one.
+  ///
+  /// **`kind_half` and `dash`, not `kind`/`half_width` split and no dash at
+  /// all, since Plan C's Task 4.** `kind` and `halfWidth` are read as one
+  /// `vec2` attribute (Ruling C6 — GLSL ES 100 guarantees `gl_MaxVertexAttribs`
+  /// no lower than 8 and no higher either, and the new `dash` quad is the
+  /// eighth), and the four dash floats are the ninth-through-twelfth bytes
+  /// of the record read as one `vec4`. **This layout is knowingly ahead of
+  /// the committed shader bundle**: `shaders/cad_stroke.vert` and
+  /// `assets/shaders/cad.shaderbundle` still declare `kind` and `half_width`
+  /// as two separate attributes and carry no `dash` attribute at all, until
+  /// Task 8 regenerates the bundle. Pipeline creation
+  /// (`gpu.createRenderPipeline`, `_upload` below) will fail on a real GPU
+  /// between this task and Task 8 as a result — `flutter test` never reaches
+  /// it, so nothing here is blocked on the bundle, and no device run happens
+  /// in this window.
   ///
   /// `@visibleForTesting`: same reason as [kCornerVertices] — this is pure
   /// configuration data, constructible and assertable without a GPU context,
@@ -153,8 +169,8 @@ class ResidentGeometry {
         // pointing at the wrong bytes silently.
         attributes: <gpu.VertexAttribute>[
           gpu.VertexAttribute(
-              name: 'kind',
-              format: gpu.VertexFormat.float32,
+              name: 'kind_half',
+              format: gpu.VertexFormat.float32x2,
               offsetInBytes: InstanceFieldOffset.kind * 4),
           gpu.VertexAttribute(
               name: 'p0',
@@ -169,13 +185,13 @@ class ResidentGeometry {
               format: gpu.VertexFormat.float32x2,
               offsetInBytes: InstanceFieldOffset.x2 * 4),
           gpu.VertexAttribute(
-              name: 'half_width',
-              format: gpu.VertexFormat.float32,
-              offsetInBytes: InstanceFieldOffset.halfWidth * 4),
-          gpu.VertexAttribute(
               name: 'color',
               format: gpu.VertexFormat.float32x4,
               offsetInBytes: InstanceFieldOffset.r * 4),
+          gpu.VertexAttribute(
+              name: 'dash',
+              format: gpu.VertexFormat.float32x4,
+              offsetInBytes: InstanceFieldOffset.dashPeriod * 4),
         ],
       ),
     ],
