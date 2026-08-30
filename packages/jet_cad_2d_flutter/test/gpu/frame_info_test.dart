@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_flutter/src/gpu/gpu_draw_backend.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 void main() {
   group('buildFrameInfo', () {
@@ -19,7 +19,8 @@ void main() {
       // diagonal-matrix trap this codebase's own Task 3 fell into once
       // (`vertices_draw_sink.dart:41-57`'s sibling defect, one plan earlier).
       final collectionToDevice = Transform2(2, 3, 5, 7, 11, 13);
-      final data = buildFrameInfo(collectionToDevice, 200, 100);
+      final data =
+          buildFrameInfo(collectionToDevice, 200, 100, dashScale: 4.25);
       double at(int i) => data.getFloat32(i * 4, Endian.host);
 
       // sx = 2/200 = 0.01, sy = -2/100 = -0.02.
@@ -57,8 +58,10 @@ void main() {
       expect(at(11), 0);
       expect(at(14), 0);
       expect(at(15), 1, reason: 'homogeneous w -- see comment above');
-      expect(at(18), 0);
-      expect(at(19), 0);
+      expect(at(18), closeTo(4.25, 1e-6), reason: 'dash_scale');
+      expect(at(19), 0,
+          reason: 'the tail past dash_scale stays zero -- alignment '
+              'padding, not a second member');
     });
 
     test(
@@ -103,7 +106,8 @@ void main() {
       expect(collectionToDevice.e, 22);
       expect(collectionToDevice.f, 26);
 
-      final data = buildFrameInfo(collectionToDevice, widthPx, heightPx);
+      final data =
+          buildFrameInfo(collectionToDevice, widthPx, heightPx, dashScale: 1.0);
       double at(int i) => data.getFloat32(i * 4, Endian.host);
 
       // sx = 2/400 = 0.005, sy = -2/200 = -0.01.
@@ -140,6 +144,84 @@ void main() {
       expect(at(17), closeTo(100, 1e-6),
           reason: 'half viewport y -- device pixels, doubled from the '
               'dpr == 1 test');
+    });
+  });
+
+  group('buildFrameInfo dash_scale', () {
+    test('the block is still 80 bytes and dash_scale is at float 18', () {
+      // Kill: change `f(18, dashScale)` back to `f(18, 0)` -- lengthInBytes
+      // stays 80 either way (that comes from the mat4's std140 alignment,
+      // not from this member), but `at(18)` would read 0 instead of 2.5.
+      final data =
+          buildFrameInfo(Transform2.identity(), 800, 600, dashScale: 2.5);
+      expect(data.lengthInBytes, 80,
+          reason: 'the block does not grow -- byte 76..80 was always '
+              'alignment padding from the mat4, not new room');
+      expect(data.getFloat32(18 * 4, Endian.host), 2.5);
+      expect(data.getFloat32(19 * 4, Endian.host), 0.0,
+          reason: 'the tail past dash_scale stays zero; the block\'s size '
+              'comes from the mat4\'s alignment, not from a member sitting '
+              'there');
+    });
+
+    test('dash_scale does not disturb the mvp or the half viewport', () {
+      // Kill: have `f(18, dashScale)` overwrite index 17 instead of 18 (an
+      // off-by-one in the target index) -- `at(17)` would then move between
+      // `without` and `with3` and this loop would catch it, where the first
+      // test above (fixed dashScale) would not.
+      final camera = Transform2(2, 3, 5, 7, 11, 13);
+      final without = buildFrameInfo(camera, 800, 600, dashScale: 1.0);
+      final with3 = buildFrameInfo(camera, 800, 600, dashScale: 3.0);
+      for (var i = 0; i < 18; i++) {
+        expect(with3.getFloat32(i * 4, Endian.host),
+            without.getFloat32(i * 4, Endian.host),
+            reason: 'float $i');
+      }
+    });
+  });
+
+  group('dashScaleFor', () {
+    test('is logical, not device -- a dpr of 2 does not double it', () {
+      // Kill: change `dashScaleFor` to compose with `Transform2.scale(dpr,
+      // dpr)` (the device-space mistake) -- `dashScaleFor` would then need a
+      // dpr it does not take, so the simplest version of that mutation is
+      // reading it in `render`'s call site instead; the equivalent
+      // in-function mutation is asserted directly below by comparing against
+      // `wrongDeviceScale`, which *is* that device-space composition.
+      //
+      // Anisotropic and off-identity on purpose: `Transform2(3, 0, 0, 3, 10,
+      // 20)` composed with `Transform2(2, 0, 0, 2, 0, 0)` is not a scale of
+      // 1, so a dropped or swapped composition moves this number rather than
+      // leaving it at a self-consistent 1.
+      final camera = ViewportTransform(
+          worldToScreenMatrix: Transform2(3, 0, 0, 3, 10, 20));
+      final collectionInverse = Transform2(2, 0, 0, 2, 0, 0);
+
+      final logical = dashScaleFor(camera, collectionInverse);
+      expect(logical, closeTo(6.0, 1e-9),
+          reason: 'scaleMagnitude of a uniform (3*2)x scale is 6, not a '
+              'coincidental 1');
+
+      // What a collectionToDevice-based (wrong) implementation would read at
+      // a given dpr -- folding dpr into the composition the way `render`'s
+      // `collectionToDevice` does, before taking `scaleMagnitude`.
+      double wrongDeviceScale(double dpr) => composeTransforms(
+            Transform2.scale(dpr, dpr),
+            composeTransforms(camera.worldToScreenMatrix, collectionInverse),
+          ).scaleMagnitude;
+
+      // At dpr == 1 the wrong (device-space) computation happens to equal
+      // the right (logical) one -- a fixture stuck at dpr == 1 could not
+      // tell the two implementations apart from each other.
+      expect(wrongDeviceScale(1.0), closeTo(logical, 1e-9));
+
+      // At dpr == 2 a collectionToDevice-based dash scale would read double
+      // the correct number -- exactly the retina-display defect this task
+      // exists to prevent. `dashScaleFor` takes no dpr at all, so calling it
+      // again gives the same, unmoved answer.
+      expect(wrongDeviceScale(2.0), closeTo(logical * 2, 1e-9));
+      expect(wrongDeviceScale(2.0), isNot(closeTo(logical, 1e-9)));
+      expect(dashScaleFor(camera, collectionInverse), closeTo(logical, 1e-9));
     });
   });
 
