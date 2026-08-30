@@ -225,6 +225,7 @@ void main() {
             size: _size,
             devicePixelRatio: _dpr,
             pixelsPerPaperMm: _ppmm,
+            // Same camera on both arms -- see the corpus test's own comment.
             dashScale: 1.0)
         .residentInk
         .toDouble();
