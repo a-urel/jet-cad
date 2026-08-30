@@ -864,6 +864,60 @@ void main() {
   });
 
   test(
+      'the cycle comes from summing the dashes, never from a dishonest '
+      'totalLength', () {
+    // totalLength (99.0) deliberately disagrees with the summed dashes
+    // (12.0 + 6.0 = 18.0) -- exactly the disagreement `dasher.dart` warns a
+    // DXF importer could hand this class. Every other fixture in this file
+    // keeps an honest totalLength, so reading `.totalLength` instead of
+    // summing `pattern.dashes` would still pass every other test here; it
+    // would answer only this one wrong, with a period of 198.0 (99.0 x
+    // patternToLocal 2.0) instead of the correct 36.0 (18.0 x 2.0).
+    const dishonestTotal = DashPattern(dashes: [12.0, -6.0], totalLength: 99.0);
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dishonestTotal, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+    expect(c.data[InstanceFieldOffset.dashPeriod].abs(), closeTo(36.0, 1e-6),
+        reason: 'summed dashes (12 + 6) x patternToLocal 2.0 = 36.0, not '
+            '99.0 x 2.0 = 198.0 from the dishonest totalLength');
+  });
+
+  test(
+      'an anisotropic residual scales each segment by its OWN axis, not by '
+      'scaleMagnitude', () {
+    // `_residual.scaleMagnitude` is one number for the whole transform --
+    // under `scale(2, 5)` it is sqrt(2 * 5) regardless of a segment's own
+    // direction, so a collector that used it for every segment would give
+    // the x-running segment and the y-running segment the SAME period. The
+    // correct factor is per-segment: the x-segment's collection length grows
+    // by 2x, the y-segment's by 5x, so their periods must come back in a 2:5
+    // ratio. Asserting the ratio (not two magic numbers) fails loudly under
+    // the `scaleMagnitude` mutation, which collapses the ratio to 1.0, and
+    // survives an unrelated change to the pattern itself.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.scale(2.0, 5.0));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+
+    expect(c.instanceCount, 2,
+        reason: 'two segments, one drawn element each, no joins');
+    final xPeriod = c.data[InstanceFieldOffset.dashPeriod].abs();
+    final yPeriod =
+        c.data[kFloatsPerInstance + InstanceFieldOffset.dashPeriod].abs();
+    expect(yPeriod / xPeriod, closeTo(5.0 / 2.0, 1e-6),
+        reason: 'the x-running segment scales by 2, the y-running segment '
+            'by 5 -- scaleMagnitude would give both sqrt(10) and a ratio '
+            'of 1.0');
+  });
+
+  test(
       'the phase of every polyline segment is zero -- the pattern restarts '
       'at each vertex, which is dasher.dart:94-96', () {
     final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
