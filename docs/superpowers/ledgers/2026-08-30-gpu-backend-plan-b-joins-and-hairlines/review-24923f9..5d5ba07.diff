@@ -1,0 +1,247 @@
+# Review package: 24923f9..5d5ba07
+
+## Commits
+5d5ba07 feat(gpu): the collector fades sub-pixel strokes the way the reference does
+
+## Files changed
+ .../lib/src/gpu/geometry_collector.dart            | 49 ++++++++++++--
+ .../test/gpu/geometry_collector_test.dart          | 79 +++++++++++++++++++++-
+ 2 files changed, 122 insertions(+), 6 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+index 0b1a51d..b1ac4d7 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+@@ -53,23 +53,28 @@ class GeometryCollector implements DrawSink {
+   /// `Float32List`, not a view. At this plan's measured 10,000-entity scale
+   /// (59,875 segments; `resident_geometry_test.dart:23`) that is roughly 2.3 MB
+   /// copied per call (59,875 × [kFloatsPerInstance] × 4 bytes). Read it
+   /// once per rebuild, into `ResidentGeometry.create`, and hoist it out of
+   /// any per-frame path — Plan F's `paint()` call site included — or it
+   /// breaks this project's "the frame path allocates nothing per entity in
+   /// steady state" non-negotiable.
+   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
+   int get instanceCount => _instances;
+ 
+-  /// Ops this plan does not draw yet — arcs, circles, fills, text, points.
+-  /// Counted rather than ignored so a corpus that needs Plan B through E is
+-  /// visible as a number instead of as a missing picture.
++  /// Ops this plan does not draw yet — `fillPolygon`, `fillCircle` and
++  /// `text`. Counted rather than ignored so a corpus that needs Plan B
++  /// through E is visible as a number instead of as a missing picture.
++  ///
++  /// This is the post-Plan-B set, landing ahead of the code that makes it
++  /// true: `circle` and `arc` still count here today and stop counting in
++  /// Task 5, `point` stops counting in Task 6. Task 6 is also where the test
++  /// verifying this sentence lands.
+   int get skippedOps => _skipped;
+ 
+   /// Half the stroke's width, **in device pixels** — the space the vertex
+   /// shader consumes `half_width` in (`shaders/cad_stroke.vert` documents
+   /// the attribute `// device pixels` and applies it directly against
+   /// `frame_info.half_viewport`, which `buildFrameInfo` also builds in
+   /// device pixels; `gpu_draw_backend.dart`).
+   ///
+   /// **This method's first version computed the *logical* half-width
+   /// instead, and every stroke drew at half weight under any
+@@ -86,20 +91,53 @@ class GeometryCollector implements DrawSink {
+   double _halfWidthFor(int lineweightHundredths) {
+     final logical =
+         lineweightHundredths / 100.0 * pixelsPerPaperMm * lineweightScale;
+     final device = logical * devicePixelRatio;
+     final w = device.isFinite && device > kMinStrokeDevicePixels
+         ? device
+         : kMinStrokeDevicePixels;
+     return w / 2;
+   }
+ 
++  /// The colour a stroke of this width is actually drawn in.
++  ///
++  /// Mirrors `VerticesDrawSink._coveredArgb`, which mirrors Impeller's
++  /// `Geometry::ComputeStrokeAlphaCoverage`. A stroke thinner than one device
++  /// pixel keeps its pixel — [_halfWidthFor] floors the width — and gives up
++  /// alpha in proportion, so thinning a line fades it out instead of stopping
++  /// at one pixel and staying there.
++  ///
++  /// **A width of exactly zero keeps full alpha.** That is the hairline case,
++  /// and it is the first branch rather than an omission — the reference says
++  /// so in as many words.
++  ///
++  /// **This must never reach a fill.** `fillPolygon` and `fillCircle` pass
++  /// `style.argb` directly in the reference, because a fill entity's
++  /// `ResolvedStyle` still carries a lineweight from the shared column and
++  /// *"routing a fill through `_coveredArgb` would fade a filled room on a
++  /// hairline layer"*. Plan D adds those two ops; it inherits that rule.
++  int _coveredArgb(int argb, int lineweightHundredths) {
++    final deviceWidth = lineweightHundredths /
++        100.0 *
++        pixelsPerPaperMm *
++        lineweightScale *
++        devicePixelRatio;
++    if (!deviceWidth.isFinite ||
++        deviceWidth <= 0 ||
++        deviceWidth >= kMinStrokeDevicePixels) {
++      return argb;
++    }
++    final coverage = (deviceWidth * 2).clamp(0.0, 1.0);
++    final alpha = (((argb >> 24) & 0xFF) * coverage).round();
++    return (alpha << 24) | (argb & 0x00FFFFFF);
++  }
++
+   void _emit(
+       double x0, double y0, double x1, double y1, double half, int argb) {
+     // Exactly the sink's own test: `_emitSegment` bails on zero length
+     // (`vertices_draw_sink.dart:503-507`). A degenerate segment has no
+     // direction and the shader would divide by zero building its normal.
+     if (x0 == x1 && y0 == y1) return;
+     _reserve(_instances + 1);
+     writeStroke(_buffer, _instances,
+         x0: x0, y0: y0, x1: x1, y1: y1, halfWidth: half, argb: argb);
+     _instances++;
+@@ -128,32 +166,33 @@ class GeometryCollector implements DrawSink {
+   }
+ 
+   @override
+   void endResidual() {}
+ 
+   @override
+   void polyline(Float64List points, int count, ResolvedStyle style,
+       {required bool closed}) {
+     if (count < 2) return;
+     final half = _halfWidthFor(style.lineweightHundredths);
++    final argb = _coveredArgb(style.argb, style.lineweightHundredths);
+     final t = _residual;
+     var px = t.a * points[0] + t.c * points[1] + t.e;
+     var py = t.b * points[0] + t.d * points[1] + t.f;
+     final firstX = px, firstY = py;
+     for (var i = 1; i < count; i++) {
+       final qx = t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e;
+       final qy = t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f;
+-      _emit(px, py, qx, qy, half, style.argb);
++      _emit(px, py, qx, qy, half, argb);
+       px = qx;
+       py = qy;
+     }
+-    if (closed) _emit(px, py, firstX, firstY, half, style.argb);
++    if (closed) _emit(px, py, firstX, firstY, half, argb);
+   }
+ 
+   @override
+   void point(double x, double y, ResolvedStyle style) => _skipped++;
+ 
+   @override
+   void circle(double cx, double cy, double r, ResolvedStyle style) =>
+       _skipped++;
+ 
+   @override
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+index 9887b75..4e7abbf 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+@@ -1,15 +1,15 @@
+ import 'dart:typed_data';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+-import 'package:jet_cad_2d_flutter/src/gpu/geometry_collector.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
+ 
+ const _style = ResolvedStyle(
+     argb: 0xFF203040,
+     lineweightHundredths: 50,
+     linetype: Handle.none,
+     linetypeScale: 1);
+ 
+ const _hairlineStyle = ResolvedStyle(
+     argb: 0xFF203040,
+@@ -134,11 +134,88 @@ void main() {
+     expect(c.instanceCount, 1);
+     // lineweightHundredths=50, pixelsPerPaperMm=4, lineweightScale=2 gives a
+     // logical width of 50/100 * 4 * 2 = 4.0, which at devicePixelRatio=2 is
+     // 4.0 * 2 = 8.0 device pixels -- above the floor of
+     // kMinStrokeDevicePixels(1.0), so halfWidth = 8.0 / 2 = 4.0. At the
+     // default scale of 1.0 this is 2.0 (the test above), so the multiply is
+     // still pinned: a dropped `lineweightScale` factor would make this test
+     // read 2.0 instead of 4.0.
+     expect(c.data[InstanceFieldOffset.halfWidth], 4.0);
+   });
++
++  test('a sub-pixel stroke keeps its pixel and gives up alpha', () {
++    // 0.05 mm at 3.7795275590551185 px/mm and dpr 1 is 0.189 device pixels --
++    // under the one-pixel floor, so the reference fades it. The collector
++    // must fade it by the same factor or the two arms disagree on colour on
++    // every hairline layer, which is exactly what Task 9 rasterises.
++    const dpr = 1.0;
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: dpr);
++    const style = ResolvedStyle(
++        argb: 0xFF204060,
++        lineweightHundredths: 5,
++        linetype: Handle.none,
++        linetypeScale: 1);
++    c.polyline(Float64List.fromList(<double>[0, 0, 40, 0]), 2, style,
++        closed: false);
++
++    final deviceWidth = 5 / 100.0 * kLogicalPixelsPerMm * dpr;
++    expect(deviceWidth, lessThan(1.0),
++        reason:
++            'the fixture must actually be sub-pixel or this asserts nothing');
++    final coverage = (deviceWidth * 2).clamp(0.0, 1.0);
++    final expectedAlpha = (0xFF * coverage).round();
++
++    final r = c.data;
++    expect(r[InstanceFieldOffset.a] * 255.0, closeTo(expectedAlpha, 0.51));
++    // The colour channels are untouched: `_coveredArgb` gives up alpha, it
++    // does not darken. A implementation that multiplied the channels instead
++    // would pass an alpha-only assertion.
++    expect(r[InstanceFieldOffset.r] * 255.0, closeTo(0x20, 0.51));
++    expect(r[InstanceFieldOffset.g] * 255.0, closeTo(0x40, 0.51));
++    expect(r[InstanceFieldOffset.b] * 255.0, closeTo(0x60, 0.51));
++    // And the width still floors at one device pixel: the fade replaces the
++    // missing width, it does not accompany a thinner quad.
++    expect(r[InstanceFieldOffset.halfWidth],
++        closeTo(GeometryCollector.kMinStrokeDevicePixels / 2, 1e-6));
++  });
++
++  test('a stroke at or above one device pixel keeps full alpha', () {
++    // The other side of the branch. Without this, deleting the
++    // `deviceWidth >= kMinStrokeDevicePixels` guard -- fading *every* stroke
++    // -- goes unnoticed.
++    const dpr = 2.0;
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: dpr);
++    const style = ResolvedStyle(
++        argb: 0xC0204060,
++        lineweightHundredths: 25,
++        linetype: Handle.none,
++        linetypeScale: 1);
++    c.polyline(Float64List.fromList(<double>[0, 0, 40, 0]), 2, style,
++        closed: false);
++    final deviceWidth = 25 / 100.0 * kLogicalPixelsPerMm * dpr;
++    expect(deviceWidth, greaterThan(1.0),
++        reason: 'the fixture must actually be above the floor');
++    expect(c.data[InstanceFieldOffset.a] * 255.0, closeTo(0xC0, 0.51));
++  });
++
++  test('a zero lineweight is the hairline case and keeps full alpha', () {
++    // `_coveredArgb`'s first branch: `deviceWidth <= 0` returns argb
++    // unchanged. That is deliberate in the reference -- "A width of exactly
++    // zero is the hairline case and keeps full alpha -- that is the first
++    // branch there, not an omission" -- and a collector that clamped
++    // coverage from 0 would draw every hairline entity invisible.
++    final c = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
++    c.polyline(
++        Float64List.fromList(<double>[0, 0, 40, 0]),
++        2,
++        const ResolvedStyle(
++            argb: 0xFF112233,
++            lineweightHundredths: 0,
++            linetype: Handle.none,
++            linetypeScale: 1),
++        closed: false);
++    expect(c.data[InstanceFieldOffset.a] * 255.0, closeTo(0xFF, 0.51));
++  });
+ }

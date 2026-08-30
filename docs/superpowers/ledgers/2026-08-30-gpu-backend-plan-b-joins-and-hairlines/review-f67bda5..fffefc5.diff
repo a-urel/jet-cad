@@ -1,0 +1,424 @@
+# Review package: f67bda5..fffefc5
+
+## Commits
+fffefc5 test(gpu): the vertex shader, transcribed into Dart and gated
+
+## Files changed
+ .../lib/src/gpu/instance_record.dart               |   2 +-
+ .../test/gpu/instance_expander_test.dart           | 140 +++++++++++++
+ .../test/support/instance_expander.dart            | 233 +++++++++++++++++++++
+ 3 files changed, 374 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
+index 2d98a35..d30a3f2 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
+@@ -56,21 +56,21 @@ const double kKindPoint = 2;
+ /// The record's field layout, as an offset in **floats** from the record's
+ /// start — the writers below index by float, not byte.
+ ///
+ /// **The one place this order is declared for Dart.**
+ /// `ResidentGeometry.kInstanceVertexLayout` derives its `offsetInBytes`
+ /// values from these same constants (`* 4`), so reordering a field here moves
+ /// the writers and the vertex layout together instead of leaving one behind.
+ /// `cad_stroke.vert`'s attribute list is a third, independent copy — GLSL
+ /// cannot read a Dart constant — and `test/support/instance_expander.dart` is
+ /// a fourth. The expander is the one that is *gated*: it reads these same
+-/// constants, and `test/gpu/expander_differential_test.dart` compares its
++/// constants, and `test/gpu/instance_expander_test.dart` compares its
+ /// output against the reference sink, so a drift between this file and the
+ /// expander goes red in `flutter test`. A drift between either and the GLSL
+ /// still needs a device run or a hand-check against `impellerc`'s reflection.
+ abstract final class InstanceFieldOffset {
+   static const int kind = 0;
+   static const int x0 = 1;
+   static const int y0 = 2;
+   static const int x1 = 3;
+   static const int y1 = 4;
+   static const int x2 = 5;
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart b/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
+new file mode 100644
+index 0000000..3233b2f
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
+@@ -0,0 +1,140 @@
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
++
++import '../support/instance_expander.dart';
++
++void main() {
++  test('the miter cosine matches the reference constant', () {
++    // `cad_stroke.vert` restates -0.875 as a literal because GLSL cannot
++    // read a Dart constant. This is the assertion that keeps the literal
++    // honest if the reference's miter limit ever moves.
++    expect(kExpanderMinMiterCosine, VerticesDrawSink.kMinMiterCosine);
++  });
++
++  test('a horizontal stroke expands to the quad the reference builds', () {
++    final data = Float32List(kFloatsPerInstance);
++    writeStroke(data, 0,
++        x0: 0, y0: 0, x1: 100, y1: 0, halfWidth: 4, argb: 0xFF112233);
++    final out = expandInstances(data, 1, Transform2.identity());
++
++    expect(out.positions.length, 12, reason: 'six vertices, two floats each');
++    // Corner (0,-1) -> (0, -4); (0,1) -> (0, 4); (1,-1) -> (100, -4).
++    // The normal of a +x direction is (0, +1), so corner.y = -1 is y = -4.
++    expect(out.positions[0], closeTo(0, 1e-4));
++    expect(out.positions[1], closeTo(-4, 1e-4));
++    expect(out.positions[2], closeTo(0, 1e-4));
++    expect(out.positions[3], closeTo(4, 1e-4));
++    expect(out.positions[4], closeTo(100, 1e-4));
++    expect(out.positions[5], closeTo(-4, 1e-4));
++    // `colors` is `Int32List` (matching `TriangleRasterizer.observe` and
++    // `VerticesDrawSink._colors`), so a colour with the alpha byte's high
++    // bit set reads back negative -- `.toUnsigned(32)` before comparing
++    // against a positive ARGB literal is this codebase's established
++    // convention (`vertices_draw_sink_test.dart` does the same at every
++    // colour assertion).
++    expect(out.colors.every((c) => c.toUnsigned(32) == 0xFF112233), isTrue);
++  });
++
++  test('a right-angle join is mitred, and the tip is at the outer corner', () {
++    // Incoming +x, outgoing +y: a left turn, so the notch is on the right
++    // (negative y / positive x side). At 90 degrees the half-angle is 45,
++    // cos is sqrt(1/2), and the miter reach is half / cos = 4 * sqrt(2).
++    final data = Float32List(kFloatsPerInstance);
++    writeJoin(data, 0,
++        vx: 100,
++        vy: 0,
++        prevX: 0,
++        prevY: 0,
++        nextX: 100,
++        nextY: 100,
++        halfWidth: 4,
++        argb: 0xFF000000);
++    final out = expandInstances(data, 1, Transform2.identity());
++
++    // Vertex 4 of the six is M, the miter tip.
++    final mx = out.positions[8], my = out.positions[9];
++    // d0 = (1,0), d1 = (0,1), cross = 1 > 0, so s = -4.
++    // n0 = (-0,1)*-4 = (0,-4); n1 = (-1,0)*-4 = (4,0).
++    // sum = (4,-4), mu = (1,-1)/sqrt2, cos_half = dot(mu,n0)/4
++    //     = ((0*1 + -4*-1)/sqrt2)/4 = (4/sqrt2)/4 = 1/sqrt2.
++    // reach = 4 / (1/sqrt2) = 4*sqrt2. m = v + mu*reach = (100+4, 0-4).
++    expect(mx, closeTo(104, 1e-3));
++    expect(my, closeTo(-4, 1e-3));
++  });
++
++  test('a hairpin turn is bevelled: the tip triangle has zero area', () {
++    // Incoming +x, outgoing very nearly -x. dot is below -0.875, so the
++    // reference bails before the miter and emits the bevel alone.
++    final data = Float32List(kFloatsPerInstance);
++    writeJoin(data, 0,
++        vx: 100,
++        vy: 0,
++        prevX: 0,
++        prevY: 0,
++        nextX: 0,
++        nextY: 1,
++        halfWidth: 4,
++        argb: 0xFF000000);
++    final out = expandInstances(data, 1, Transform2.identity());
++    final ax = out.positions[6], ay = out.positions[7];
++    final mx = out.positions[8], my = out.positions[9];
++    expect(mx, closeTo(ax, 1e-4),
++        reason: 'M collapses onto A, so (A, M, B) has no area');
++    expect(my, closeTo(ay, 1e-4));
++  });
++
++  test('a collinear join collapses onto its vertex', () {
++    final data = Float32List(kFloatsPerInstance);
++    writeJoin(data, 0,
++        vx: 50,
++        vy: 50,
++        prevX: 0,
++        prevY: 50,
++        nextX: 100,
++        nextY: 50,
++        halfWidth: 4,
++        argb: 0xFF000000);
++    final out = expandInstances(data, 1, Transform2.identity());
++    for (var i = 0; i < 6; i++) {
++      expect(out.positions[i * 2], closeTo(50, 1e-4));
++      expect(out.positions[i * 2 + 1], closeTo(50, 1e-4));
++    }
++  });
++
++  test('a point expands to a square of the stroke width', () {
++    final data = Float32List(kFloatsPerInstance);
++    writePoint(data, 0, x: 10, y: 20, halfWidth: 3, argb: 0xFF000000);
++    final out = expandInstances(data, 1, Transform2.identity());
++    var minX = double.infinity, maxX = -double.infinity;
++    var minY = double.infinity, maxY = -double.infinity;
++    for (var i = 0; i < 6; i++) {
++      final x = out.positions[i * 2], y = out.positions[i * 2 + 1];
++      if (x < minX) minX = x;
++      if (x > maxX) maxX = x;
++      if (y < minY) minY = y;
++      if (y > maxY) maxY = y;
++    }
++    expect(maxX - minX, closeTo(6, 1e-4));
++    expect(maxY - minY, closeTo(6, 1e-4));
++    expect((minX + maxX) / 2, closeTo(10, 1e-4));
++    expect((minY + maxY) / 2, closeTo(20, 1e-4));
++  });
++
++  test('half-width does not scale with the transform', () {
++    // The whole reason joins and quads are built in the shader. Under a 5x
++    // camera the centreline moves five times as far and the quad stays four
++    // device pixels wide.
++    final data = Float32List(kFloatsPerInstance);
++    writeStroke(data, 0,
++        x0: 0, y0: 0, x1: 100, y1: 0, halfWidth: 4, argb: 0xFF000000);
++    final out = expandInstances(data, 1, Transform2.scale(5, 5));
++    expect(out.positions[4], closeTo(500, 1e-3),
++        reason: 'the centreline scaled');
++    expect(out.positions[3] - out.positions[1], closeTo(8, 1e-3),
++        reason: 'the width did not');
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/support/instance_expander.dart b/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
+new file mode 100644
+index 0000000..dfb5e02
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
+@@ -0,0 +1,233 @@
++/// `cad_stroke.vert`, in Dart, so `flutter test` can reach it.
++///
++/// **This is a deliberate second copy of a file no test can run.** The suite
++/// has no GPU, so every line of the vertex shader is otherwise unreachable —
++/// including the miter arithmetic, which is the part most likely to be
++/// wrong. Transcribing it here converts an untestable file into a tested one
++/// and reduces the risk to a single file diff.
++///
++/// **Read it beside the GLSL and keep the statement order.** Where the
++/// shader writes `dot(d0, d1) >= kMinMiterCosine`, so does this; where it
++/// collapses a corner onto the vertex, so does this. A "cleaner" Dart
++/// rewrite is worth nothing here — the value of this file is that a reader
++/// can diff it against the shader line by line.
++///
++/// It takes an instance buffer and a transform. It must never read the
++/// collector: the collector's output is the input, which is exactly what the
++/// GPU sees.
++library;
++
++import 'dart:math' as math;
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
++
++/// The shader's `kMinMiterCosine` literal, mirrored so a test can assert it
++/// against `VerticesDrawSink.kMinMiterCosine`.
++const double kExpanderMinMiterCosine = -0.875;
++
++/// The corner table's six entries, `(corner.xy, join_weight.xyzw)`.
++///
++/// Read from [ResidentGeometry.kCornerVertices] rather than restated, so a
++/// reordering there is a change here too.
++class _Corner {
++  const _Corner(this.x, this.y, this.wv, this.wa, this.wb, this.wm);
++  final double x, y, wv, wa, wb, wm;
++}
++
++List<_Corner> _corners() {
++  const stride = ResidentGeometry.kFloatsPerCorner;
++  final src = ResidentGeometry.kCornerVertices;
++  return List<_Corner>.generate(
++      6,
++      (i) => _Corner(src[i * stride], src[i * stride + 1], src[i * stride + 2],
++          src[i * stride + 3], src[i * stride + 4], src[i * stride + 5]));
++}
++
++/// The triangle list the GPU would produce, in the shape
++/// `TriangleRasterizer.observe` takes.
++class ExpandedTriangles {
++  ExpandedTriangles(this.positions, this.colors);
++
++  /// Two floats per vertex, six vertices per instance, in instance order.
++  final Float32List positions;
++
++  /// One `0xAARRGGBB` per vertex.
++  final Int32List colors;
++
++  int get vertexCount => colors.length;
++}
++
++/// Expands [instanceCount] records of [data] under [collectionToDevice].
++///
++/// [collectionToDevice] stands in for the shader's `mvp` composed with
++/// `half_viewport`: the shader maps collection space to device pixels in two
++/// steps because a `mat4` is what a uniform block carries, and the
++/// composition is the same affine map. Feeding it directly here removes a
++/// clip-space round trip that has no observable effect and would only add a
++/// place for the two copies to disagree.
++ExpandedTriangles expandInstances(
++    Float32List data, int instanceCount, Transform2 collectionToDevice) {
++  final corners = _corners();
++  final positions = Float32List(instanceCount * 6 * 2);
++  final colors = Int32List(instanceCount * 6);
++  final t = collectionToDevice;
++
++  double toX(double x, double y) => t.a * x + t.c * y + t.e;
++  double toY(double x, double y) => t.b * x + t.d * y + t.f;
++
++  for (var i = 0; i < instanceCount; i++) {
++    final o = i * kFloatsPerInstance;
++    final kind = data[o + InstanceFieldOffset.kind];
++    final halfWidth = data[o + InstanceFieldOffset.halfWidth];
++    final argb = _argbOf(data, o);
++
++    final x0 = data[o + InstanceFieldOffset.x0];
++    final y0 = data[o + InstanceFieldOffset.y0];
++    final x1 = data[o + InstanceFieldOffset.x1];
++    final y1 = data[o + InstanceFieldOffset.y1];
++    final x2 = data[o + InstanceFieldOffset.x2];
++    final y2 = data[o + InstanceFieldOffset.y2];
++
++    for (var v = 0; v < 6; v++) {
++      final c = corners[v];
++      double px, py;
++
++      if (kind < 0.5) {
++        // kKindStroke: two triangles around a centreline.
++        final ax = toX(x0, y0), ay = toY(x0, y0);
++        final bx = toX(x1, y1), by = toY(x1, y1);
++        final dx = bx - ax, dy = by - ay;
++        final len = math.sqrt(dx * dx + dy * dy);
++        // Reachable, not merely defensive -- see the join branch's identical
++        // guard below for why.
++        final dirX = len > 0 ? dx / len : 1.0;
++        final dirY = len > 0 ? dy / len : 0.0;
++        final nx = -dirY, ny = dirX;
++        px = ax + (bx - ax) * c.x + nx * halfWidth * c.y;
++        py = ay + (by - ay) * c.x + ny * halfWidth * c.y;
++      } else if (kind < 1.5) {
++        // kKindJoin: the notch at a corner, as the bevel (V, A, B) plus the
++        // miter tip (A, M, B). Exactly `VerticesDrawSink._emitJoin`, in
++        // device pixels, which is the space that function works in too.
++        final vx = toX(x0, y0), vy = toY(x0, y0);
++        final pxp = toX(x1, y1), pyp = toY(x1, y1);
++        final nxp = toX(x2, y2), nyp = toY(x2, y2);
++
++        final inX = vx - pxp, inY = vy - pyp;
++        final outX = nxp - vx, outY = nyp - vy;
++        final inLen = math.sqrt(inX * inX + inY * inY);
++        final outLen = math.sqrt(outX * outX + outY * outY);
++        final d0x = inLen > 0 ? inX / inLen : 1.0;
++        final d0y = inLen > 0 ? inY / inLen : 0.0;
++        final d1x = outLen > 0 ? outX / outLen : d0x;
++        final d1y = outLen > 0 ? outY / outLen : d0y;
++
++        final crossZ = d0x * d1y - d0y * d1x;
++        // Collinear: either straight through, where the quads already meet,
++        // or a reversal, where both the miter and the bevel are degenerate.
++        // The reference emits nothing; collapsing every corner onto the
++        // vertex gives two zero-area triangles, which is the same picture.
++        //
++        // **Transcribed verbatim, including `inLen == 0 || outLen == 0`, and
++        // it is a known, bounded divergence between the two arms, not an
++        // oversight.** The reference (`VerticesDrawSink._emitJoin`) computes
++        // its directions in `double`, already in device space, from a
++        // residual the collector maintains incrementally. This branch
++        // instead re-projects `p0`/`p1`/`p2` from collection space through
++        // `to_pixels` on every vertex -- exactly what the real shader does,
++        // in `float32`. At extreme zoom-out two distinct float32 device
++        // points can coincide (or two distinct collection-space points can
++        // project to the same float32 pixel) where the reference's `double`
++        // residual still sees them as separate, so the real GLSL can take
++        // this branch where the sink does not. This file runs the same
++        // formula in Dart `double`, so it will not reproduce that
++        // collapse on the same input -- it takes the *other* branch. That is
++        // expected: this file's job is to mirror the GLSL statement for
++        // statement, not to be correct where the GLSL is only approximate.
++        if (crossZ == 0 || inLen == 0 || outLen == 0) {
++          px = vx;
++          py = vy;
++        } else {
++          // The outer side of the turn is the one away from it: a left turn
++          // (cross > 0) opens a notch on the right.
++          final s = crossZ > 0 ? -halfWidth : halfWidth;
++          final n0x = -d0y * s, n0y = d0x * s;
++          final n1x = -d1y * s, n1y = d1x * s;
++          final ax = vx + n0x, ay = vy + n0y;
++          final bx = vx + n1x, by = vy + n1y;
++
++          // Bevel by default: with M at A the tip triangle (A, M, B) has
++          // zero area and disappears, which is what the reference's early
++          // return achieves by not emitting it.
++          var mx = ax, my = ay;
++          if (d0x * d1x + d0y * d1y >= kExpanderMinMiterCosine) {
++            final sumX = n0x + n1x, sumY = n0y + n1y;
++            final sumLen = math.sqrt(sumX * sumX + sumY * sumY);
++            if (sumLen > 0 && halfWidth > 0) {
++              final muX = sumX / sumLen, muY = sumY / sumLen;
++              // `n0` has length `halfWidth`, so this is the cosine of half
++              // the included angle.
++              final cosHalf = (muX * n0x + muY * n0y) / halfWidth;
++              if (cosHalf > 0) {
++                final reach = halfWidth / cosHalf;
++                mx = vx + muX * reach;
++                my = vy + muY * reach;
++              }
++            }
++          }
++
++          // **This blend poisons all six vertices -- including triangle 0
++          // (V, A, B), which does not read `m` at all -- if `m` is
++          // non-finite, because `0.0 * Inf` is `NaN` in IEEE 754, not `0.0`.**
++          // Transcribed as the shader has it anyway: the guard above bails
++          // to the bevel unless `dot(d0, d1) >= kExpanderMinMiterCosine`
++          // (-0.875), which bounds the half-angle under roughly 76 degrees
++          // and therefore bounds `reach = halfWidth / cosHalf` to at most
++          // `4 * halfWidth` -- `m` cannot go non-finite through this guard
++          // as written. It is unreachable *today*, not unreachable by
++          // construction: a differential test comparing this file's output
++          // against the reference sink would see both arms agree (both
++          // finite, or in some future change to the guard, both NaN) and
++          // report agreement even if this arithmetic were the thing that
++          // regressed. Only a device run, or a change to the guard, would
++          // catch that.
++          px = c.wv * vx + c.wa * ax + c.wb * bx + c.wm * mx;
++          py = c.wv * vy + c.wa * ay + c.wb * by + c.wm * my;
++        }
++      } else {
++        // kKindPoint: a square of the stroke's width centred on p0. Both
++        // axes are expanded here, in device pixels, so the dot stays square
++        // and stays the same size at every zoom -- which is what the
++        // reference gets for free by computing its `+/- half` in device
++        // space.
++        final cx = toX(x0, y0), cy = toY(x0, y0);
++        px = cx + (c.x * 2.0 - 1.0) * halfWidth;
++        py = cy + c.y * halfWidth;
++      }
++
++      final vi = (i * 6 + v);
++      positions[vi * 2] = px;
++      positions[vi * 2 + 1] = py;
++      colors[vi] = argb;
++    }
++  }
++
++  return ExpandedTriangles(positions, colors);
++}
++
++/// Reads the record's four colour floats back to `0xAARRGGBB`.
++///
++/// Exact round trip: the writer stored `channel / 255.0` and an 8-bit value
++/// divided by 255 then multiplied by 255 is that value again in float32,
++/// with the round only guarding against a representation surprise.
++int _argbOf(Float32List data, int o) {
++  int ch(int offset) =>
++      (data[o + offset] * 255.0).round().clamp(0, 255).toInt();
++  return (ch(InstanceFieldOffset.a) << 24) |
++      (ch(InstanceFieldOffset.r) << 16) |
++      (ch(InstanceFieldOffset.g) << 8) |
++      ch(InstanceFieldOffset.b);
++}

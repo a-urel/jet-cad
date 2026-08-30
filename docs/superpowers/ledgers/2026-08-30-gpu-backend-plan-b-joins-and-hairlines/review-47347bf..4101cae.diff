@@ -1,0 +1,617 @@
+# Review package: 47347bf..4101cae
+
+## Commits
+4101cae fix(gpu): the final review's five findings before Plan B merges
+
+## Files changed
+ docs/superpowers/notes/plan-b-mutation-log.md      | 82 +++++++++++++++++++-
+ .../lib/src/gpu/geometry_collector.dart            | 15 ++--
+ .../lib/src/gpu/gpu_draw_backend.dart              | 19 +++--
+ .../lib/src/gpu/instance_record.dart               |  8 +-
+ .../lib/src/gpu/resident_geometry.dart             |  9 +++
+ .../test/gpu/collector_differential_test.dart      | 90 +++++++++++++++++++++-
+ .../test/gpu/resident_geometry_test.dart           | 16 ++++
+ .../test/support/instance_expander.dart            | 11 +--
+ 8 files changed, 222 insertions(+), 28 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/notes/plan-b-mutation-log.md b/docs/superpowers/notes/plan-b-mutation-log.md
+index 2e24eac..aad32b6 100644
+--- a/docs/superpowers/notes/plan-b-mutation-log.md
++++ b/docs/superpowers/notes/plan-b-mutation-log.md
+@@ -10,27 +10,31 @@
+ > `geometry_collector_test.dart` and `instance_expander_test.dart` (record
+ > level, one class at a time), `collector_differential_test.dart` (record
+ > level, the collector against a declarative rule derived from
+ > `VerticesDrawSink`'s own behaviour) and `resident_pixel_differential_test.dart`
+ > (pixel level, the collector's buffer expanded through the Dart shader
+ > transcription, rasterised, and compared pixel-for-pixel against
+ > `VerticesDrawSink`'s own triangles — Task 9's instrument).
+ 
+ ## Summary — every mutant, its verdict, and the gate that killed it
+ 
+-**Eighteen mutation firings across fifteen named mutants (two of them fired
++**Nineteen mutation firings across sixteen named mutants (two of them fired
+ twice, under a `'` suffix, against the pixel instrument specifically).
+-Sixteen firings died. One is a declared survivor with a structural reason
++Seventeen firings died. One is a declared survivor with a structural reason
+ (`M-B1'`). One is a proven equivalent mutation, not a coverage gap
+ (`M-B3`'s guard-only arm).** All fifteen of the plan's pre-committed and
+ execution-added mutants (M-B1 through M-B15) are accounted for; the two
+-outstanding at the start of this task, M-B9 and M-B10, were fired here.
++outstanding at the start of the task that closed this table, M-B9 and
++M-B10, were fired there. **M-B16 is not one of the fifteen** — it was found
++by the whole-branch review that ran after Task 11, in the final fix wave
++before merge, and is recorded here for the same reason every other row is:
++it is a real mutant with a killing test, not a hypothetical.
+ 
+ | Mutant | File | Verdict | Gate of record |
+ |---|---|---|---|
+ | M-B1 | collector | **dead** | `geometry_collector_test.dart` — `a sub-pixel stroke keeps its pixel and gives up alpha` |
+ | M-B1' | collector | **SURVIVOR — structural, and correctly predicted** | none, by construction: `TriangleRasterizer` is coverage-only (a boolean per pixel), and `_coveredArgb`'s fade changes colour, not coverage. Gate of record is the record level: `geometry_collector_test.dart`'s same alpha test and `collector_differential_test.dart`'s hairline fixture |
+ | M-B2 | collector | **dead** | `geometry_collector_test.dart` (six tests, kind-sequence and ordering) **and**, re-fired independently in Task 4's fix round, `collector_differential_test.dart` — `instance 4 must be a join` |
+ | M-B3 (guard only — `if (_runSegments >= 2)` deleted, call left unconditional) | collector | **EQUIVALENT MUTATION — proved, not a survivor** | none is buildable; see derivation below |
+ | M-B3 (guard **and** body deleted — the seam join never emitted) | collector | **dead** | `geometry_collector_test.dart` — `closed: true emits a closing segment back to the first point` and `a closed run emits the closing segment and then the seam join` (6 expected, 5 actual, both times) |
+ | M-B3' | collector | **dead** | `resident_pixel_differential_test.dart` — `the seam join is load-bearing on the circle`, `differing: 14` against the `lessThan(4)` bound |
+ | M-B4 | collector | **dead** | `geometry_collector_test.dart`'s ellipse extent test (34.40 against 60) **and** `collector_differential_test.dart` (instance 3, off by 13.48) |
+@@ -38,20 +42,21 @@ outstanding at the start of this task, M-B9 and M-B10, were fired here.
+ | M-B6 | expander | **dead** | `instance_expander_test.dart` — `a hairpin turn is bevelled: the tip triangle has zero area` (900.02 against 100.0) |
+ | M-B7 | expander | **dead** | Originally only `resident_pixel_differential_test.dart`'s seam self-consistency probe; re-fired in Task 9's fix round and killed by the **differential itself**: `differing: 26` on the corpus test, `differing: 178` on the seam test |
+ | M-B8 | collector | **dead** | `geometry_collector_test.dart` and `collector_differential_test.dart` from Task 6 onward; the pixel differential's own verdict was **corrected** in Task 9's fix round from a wrong "survives, bit-identical" to `differing: 16` — a real kill, not a survivor |
+ | M-B9 | collector | **dead** | Fired in this task. `geometry_collector_test.dart` (nine tests red) **and** `collector_differential_test.dart`'s order assertion — `instance 0 x0`, expected 79.58, actual 503.87 |
+ | M-B10 | expander | **dead** | Fired in this task. `resident_pixel_differential_test.dart`'s corpus test (`differing: 95` against the `lessThan(81)`/1%-of-ink bound) **and** its seam test (`differing: 552` against `lessThan(4)`) — at this suite's own `devicePixelRatio: 2.0`, not at an identity transform, which turned out to matter; see the derivation below |
+ | M-B11 | collector | **dead** | `geometry_collector_test.dart` — `a closed run whose last point already repeats the first still finds the last DISTINCT point for the seam` |
+ | M-B12 | collector | **dead** | `geometry_collector_test.dart` — a negative-sweep arc test, expected −50, actual 50.0 |
+ | M-B13 | expander | **dead** | `instance_expander_test.dart` — `a stroke under a transform with every coefficient non-zero matches by hand` (8.211 against 10.970) |
+ | M-B14 | expander | **dead** | the same test (0.970 against 10.970, off by exactly the dropped translation `e = 10`) |
+ | M-B15 | collector | **dead** | `resident_pixel_differential_test.dart` — `differing: 26` on the corpus test, `differing: 178` on the seam test (identical numbers to M-B7 — see the structural note below) |
++| M-B16 (found in the final, whole-branch review, not pre-committed) | collector | **dead** | `collector_differential_test.dart` — `fades a hairline stroke by lineweightScale as well as by dpr, not just the identity default every other gate in this file exercises` (255.0 against 193.0) |
+ 
+ **Also recorded, because it bounds what every kill in this table means, not
+ because it is a mutation:** the pixel differential (`resident_pixel_differential_test.dart`
+ via `gpu_comparison.dart`) cannot see any defect that adds triangles wholly
+ inside the union of ink already on the canvas. M-B7 (wrong-side join wedge)
+ and M-B15 (no joins at all) produced the *identical* reading — 26 differing
+ pixels on the corpus, 178 on the seam test — because both satisfy
+ `differing == referenceInk - residentInk`: the resident set is a pure subset
+ of the reference's in both cases. See "The instrument's structural blind
+ spot" below.
+@@ -994,20 +999,91 @@ diffing the mutated file against the pristine backup — the `_emitJoin` body
+ is genuinely gone for this run. See "The instrument's structural blind
+ spot" below for why the two mutants read identically.
+ 
+ Restored; `diff` confirmed identical.
+ 
+ **Dead.** Gate of record: `resident_pixel_differential_test.dart`, the same
+ two assertions as M-B7's second firing.
+ 
+ ---
+ 
++## M-B16 — drop `lineweightScale` from `_coveredArgb`
++
++**The final, whole-branch review's fix wave (post Task 11, pre-merge).**
++Not one of the plan's pre-committed mutants — this one was found by a
++reviewer reading `_coveredArgb` beside `_halfWidthFor` and noticing the
++latter's `lineweightScale` factor is pinned by a dedicated test
++(`geometry_collector_test.dart` — `lineweightScale multiplies the logical
++width before the clamp`) while the former's has no equivalent. Every
++`GeometryCollector` this file and `geometry_collector_test.dart` construct
++for a colour assertion omits `lineweightScale`, so it defaults to `1.0` and
++the factor is the identity everywhere the two existing gates
++(`collector_differential_test.dart`, `resident_pixel_differential_test.dart`)
++already looked — deleting it was invisible to both, and to all fifteen
++mutants above.
++
++The oracle had to be fixed first: `collector_differential_test.dart`'s own
++`_referenceCoveredArgb` did not model `lineweightScale` at all, so it was
++given the parameter (mirroring `VerticesDrawSink._coveredArgb`'s own
++`lineweightScale *` term) before the new test was written — otherwise a
++collector that dropped the factor and an oracle that never modelled it
++would still agree, for the wrong reason.
++
++```diff
++   int _coveredArgb(int argb, int lineweightHundredths) {
++     final deviceWidth = lineweightHundredths /
++         100.0 *
++         pixelsPerPaperMm *
++-        lineweightScale *
++         devicePixelRatio;
++```
++
++New test, `collector_differential_test.dart` — `fades a hairline stroke by
++lineweightScale as well as by dpr, not just the identity default every
++other gate in this file exercises` (`pixelsPerPaperMm=kLogicalPixelsPerMm`,
++`devicePixelRatio=2.0`, `lineweightHundredths=25`, `lineweightScale=0.2` —
++chosen so the unscaled device width, `1.8898` px, sits above
++`kMinStrokeDevicePixels` while the scaled width, `0.3780` px, sits below
++it and off the `coverage` clamp boundary, so the two arms disagree on a
++genuine mid-range alpha rather than a 0/255 coincidence):
++
++```
++$ flutter test test/gpu/collector_differential_test.dart
++00:00 +2 -1: fades a hairline stroke by lineweightScale as well as by dpr, not just the identity default every other gate in this file exercises [E]
++  Expected: a numeric value within <0.51> of <193.0>
++    Actual: <255.0>
++     Which:  differs by <62.0>
++  a collector that dropped lineweightScale from the fade formula would leave this at 255, not 193
++exit=1
++```
++
++The correct arm fades to alpha 193 (`round(255 * 0.7559...)`); the mutant,
++having lost the factor entirely, computes the same device width regardless
++of the configured scale and stays above the floor, so it returns the
++style's alpha unchanged at 255 — exactly the defect this test exists to
++catch. `geometry_collector_test.dart` and `resident_pixel_differential_test.dart`
++were re-run against the same mutated file and stayed fully green, confirming
++the claim that every existing instrument on this branch is blind to this
++factor: it is the new test alone that kills it.
++
++Restored from a `cp` backup (never `git checkout --`); `md5` before
++mutating and after restoring matched exactly
++(`690b9f918f55df1da84060b1441c9a83`), and `git diff` against the working
++tree's pre-mutation state showed only the doc fix from I2 (below), nothing
++from the mutation itself.
++
++**Dead.** Gate of record: `collector_differential_test.dart` — `fades a
++hairline stroke by lineweightScale as well as by dpr, not just the
++identity default every other gate in this file exercises`.
++
++---
++
+ ## The instrument's structural blind spot
+ 
+ **Not a mutation — a property of `resident_pixel_differential_test.dart`
+ itself, recorded because it bounds what every pixel-level kill in this log
+ actually means.**
+ 
+ M-B7 (every join wedge built on the *wrong* side of its corner) and M-B15
+ (no join ever emitted, at all) produced the *identical* reading on both the
+ corpus test and the seam test — `differing: 26` and `differing: 178`,
+ respectively, to the pixel. Task 9's re-review proved this is forced, not
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+index cf48e4b..1ff76f6 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+@@ -61,26 +61,29 @@ class GeometryCollector implements DrawSink {
+   // mvp. See `writeJoin`'s doc for why directions could not be stored here.
+   double _runFirstX = 0, _runFirstY = 0;
+   double _runSecondX = 0, _runSecondY = 0;
+   double _runPrevX = 0, _runPrevY = 0;
+   double _runBackX = 0, _runBackY = 0;
+   bool _runHasDirection = false;
+   int _runSegments = 0;
+ 
+   /// Copies `_buffer` on every access — `sublist` allocates a fresh
+   /// `Float32List`, not a view. At this plan's measured 10,000-entity scale
+-  /// (59,875 segments; `resident_geometry_test.dart:23`) that is roughly 2.3 MB
+-  /// copied per call (59,875 × [kFloatsPerInstance] × 4 bytes). Read it
+-  /// once per rebuild, into `ResidentGeometry.create`, and hoist it out of
+-  /// any per-frame path — Plan F's `paint()` call site included — or it
+-  /// breaks this project's "the frame path allocates nothing per entity in
+-  /// steady state" non-negotiable.
++  /// (109,068 instances, strokes and joins together — the 59,875 in Plan A's
++  /// original version of this note was strokes only, before joins existed;
++  /// see `docs/superpowers/notes/2026-08-30-plan-b-results.md`) that is
++  /// roughly 5.23 MB copied per call (109,068 × [kFloatsPerInstance] × 4
++  /// bytes = 5,235,264 bytes). Read it once per rebuild, into
++  /// `ResidentGeometry.create`, and hoist it out of any per-frame path —
++  /// Plan F's `paint()` call site included — or it breaks this project's
++  /// "the frame path allocates nothing per entity in steady state"
++  /// non-negotiable.
+   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
+   int get instanceCount => _instances;
+ 
+   /// Ops this plan does not draw yet — `fillPolygon`, `fillCircle` and
+   /// `text`. Counted rather than ignored so a corpus that needs Plan B
+   /// through E is visible as a number instead of as a missing picture.
+   ///
+   /// `circle` and `arc` stopped counting here in Task 5; `point` in Task 6,
+   /// which is also where the test that pins this whole sentence lands.
+   int get skippedOps => _skipped;
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+index 9b6c0da..2748c02 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+@@ -229,27 +229,32 @@ class GpuDrawBackend {
+     // defect this fixes used to produce (see the task-9 report).
+     final collectionToDevice = composeTransforms(
+       Transform2.scale(dpr, dpr),
+       composeTransforms(camera.worldToScreenMatrix, _collectionInverse),
+     );
+     pass.bindUniform(
+       geometry.vertexShader.getUniformSlot('FrameInfo'),
+       geometry.uniforms
+           .emplace(buildFrameInfo(collectionToDevice, widthPx, heightPx)),
+     );
+-    // **One call. Six vertices, one instance per record, in buffer order.**
+-    // The buffer was written once, in walk order, by `GeometryCollector`
+-    // (Task 3); nothing here sorts or partitions it, so the buffer's order
+-    // *is* the draw order (`vertices_draw_sink.dart:41-57` is the standing
+-    // record of what happens when a past version of this codebase drew from
+-    // a buffer partitioned by attribute instead of by emission order).
+-    pass.draw(6, instanceCount: geometry.instanceCount);
++    // **One call. `cornerVertexCount` vertices, one instance per record, in
++    // buffer order.** The buffer was written once, in walk order, by
++    // `GeometryCollector` (Task 3); nothing here sorts or partitions it, so
++    // the buffer's order *is* the draw order (`vertices_draw_sink.dart:41-57`
++    // is the standing record of what happens when a past version of this
++    // codebase drew from a buffer partitioned by attribute instead of by
++    // emission order). The vertex count itself is read off
++    // `ResidentGeometry.kCornerVertices`, not restated as a literal `6`, so
++    // a kind Plans C or D add to that buffer cannot leave this call drawing
++    // one kind short.
++    pass.draw(ResidentGeometry.cornerVertexCount,
++        instanceCount: geometry.instanceCount);
+ 
+     commandBuffer.submit();
+     frames++;
+     // Synchronous on both backends: the web shim's `Texture.asImage` states it
+     // "matches flutter_gpu's synchronous `asImage`".
+     return target.asImage();
+   }
+ 
+   void dispose() => geometry.dispose();
+ }
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
+index ccc89ea..46c52f4 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
+@@ -59,24 +59,24 @@ const double kKindPoint = 2;
+ /// **The one place this order is declared for Dart.**
+ /// `ResidentGeometry.kInstanceVertexLayout` derives its `offsetInBytes`
+ /// values from these same constants (`* 4`), so reordering a field here moves
+ /// the writers and the vertex layout together instead of leaving one behind.
+ /// `cad_stroke.vert`'s attribute list is a third, independent copy — GLSL
+ /// cannot read a Dart constant — and `test/support/instance_expander.dart` is
+ /// a fourth. The expander is the one that is *gated*: it reads these same
+ /// constants, and `test/gpu/instance_expander_test.dart` pins the
+ /// expander's own arithmetic today, so a drift between this file and the
+ /// expander goes red in `flutter test`. `test/gpu/resident_pixel_differential_test.dart`
+-/// (Task 9, not written yet) is the one that will compare the expander's
+-/// output against the reference sink pixel for pixel. A drift between
+-/// either and the GLSL still needs a device run or a hand-check against
+-/// `impellerc`'s reflection.
++/// (Task 9) is the one that compares the expander's output against the
++/// reference sink pixel for pixel. A drift between either and the GLSL
++/// still needs a device run or a hand-check against `impellerc`'s
++/// reflection.
+ abstract final class InstanceFieldOffset {
+   static const int kind = 0;
+   static const int x0 = 1;
+   static const int y0 = 2;
+   static const int x1 = 3;
+   static const int y1 = 4;
+   static const int x2 = 5;
+   static const int y2 = 6;
+   static const int halfWidth = 7;
+   static const int r = 8;
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+index 7070b22..6db230e 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+@@ -73,20 +73,29 @@ class ResidentGeometry {
+     0, 1, /*   */ 0, 1, 0, 0, // triangle 0, vertex 1 -> A
+     1, -1, /*  */ 0, 0, 1, 0, // triangle 0, vertex 2 -> B
+     1, -1, /*  */ 0, 1, 0, 0, // triangle 1, vertex 0 -> A
+     0, 1, /*   */ 0, 0, 0, 1, // triangle 1, vertex 1 -> M
+     1, 1, /*   */ 0, 0, 1, 0, // triangle 1, vertex 2 -> B
+   ];
+ 
+   /// Floats per entry in the corner buffer: `corner` (2) + `join_weight` (4).
+   static const int kFloatsPerCorner = 6;
+ 
++  /// The number of per-vertex records in [kCornerVertices] — six today, two
++  /// triangles' worth. Derived rather than restated: `GpuDrawBackend.render`
++  /// reads this instead of a hardcoded `6` in its `pass.draw` call, and
++  /// `test/support/instance_expander.dart` reads it for the same reason, so
++  /// a kind Plans C or D add to this buffer moves the draw call and the
++  /// test expander together instead of leaving either at a stale count.
++  static int get cornerVertexCount =>
++      kCornerVertices.length ~/ kFloatsPerCorner;
++
+   /// The pipeline's vertex input layout: `corner` in its own buffer at slot
+   /// 0 (per vertex), the instance record in its own buffer at slot 1 (per
+   /// instance).
+   ///
+   /// **Two buffer slots, not one interleaved layout.** `impellerc`'s
+   /// reflection of this shader (verified against a fresh single-stage run:
+   /// `corner@0, kind@8, p0@12, p1@20, half_width@28, color@32`) describes the
+   /// offsets *only if every attribute came from one combined buffer* — that
+   /// is the layout the shader bundle declares by default, and `VertexLayout`
+   /// exists specifically to override it
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+index b06e6f5..7168fe5 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+@@ -1,11 +1,12 @@
+ import 'dart:math' as math;
++import 'dart:typed_data';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
+ 
+ import '../support/fixtures.dart';
+ 
+ const double _devicePixelRatio = 2.0;
+ 
+@@ -59,20 +60,90 @@ void main() {
+     // this file. Rather than add a hairline entity to `differentialFixture`
+     // -- shared by six other test files
+     // (`differential_test.dart`, `draft_canvas_test.dart`,
+     // `large_coordinate_test.dart`, `tile_invalidation_test.dart`,
+     // `vertices_differential_test.dart`, plus this one) whose entity counts,
+     // extents and tile boundaries a new entity could quietly move -- this is
+     // a second, local, single-purpose fixture instead.
+     final doc = _hairlineFixture();
+     _checkAgainstOracle(doc);
+   });
++
++  test(
++      'fades a hairline stroke by lineweightScale as well as by dpr, not '
++      'just the identity default every other gate in this file exercises', () {
++    // Every construction of `GeometryCollector` in this file --
++    // `_checkAgainstOracle`'s included -- omits `lineweightScale`, so it
++    // defaults to `1.0` and the factor `_coveredArgb` multiplies by is the
++    // identity everywhere else in this suite, and in
++    // `resident_pixel_differential_test.dart` too. Deleting
++    // `lineweightScale *` from `_coveredArgb` is invisible to every
++    // assertion above for exactly that reason (M-B16). This test is the one
++    // place in the package that pins the factor.
++    //
++    // The arithmetic (`pixelsPerPaperMm=kLogicalPixelsPerMm`
++    // (3.7795275590551185, matching `_referenceCoveredArgb`'s own hardcoded
++    // constant), `devicePixelRatio=_devicePixelRatio` (2.0, this file's own
++    // constant, which `_referenceCoveredArgb` also reads directly rather
++    // than taking dpr as a parameter), `lineweightHundredths=25` (this
++    // file's own default lineweight, `_style`'s and `differentialFixture`'s),
++    // `lineweightScale=0.2`):
++    //   * unscaled device width -- what a collector that dropped the factor
++    //     would compute, since removing `lineweightScale *` leaves the
++    //     expression as if the factor were always `1.0` regardless of what
++    //     was configured: 25/100 * 3.7795275590551185 * 2.0 =
++    //     1.8897637795275593 device px. That is above
++    //     `kMinStrokeDevicePixels` (1.0), so the mutant returns the style's
++    //     alpha unchanged (255).
++    //   * scaled device width -- correct: 25/100 * 3.7795275590551185 *
++    //     0.2 * 2.0 = 0.37795275590551186 device px. That is below the
++    //     floor, so the correct collector fades: coverage =
++    //     (0.37795275590551186 * 2).clamp(0, 1) = 0.7559055118110237,
++    //     alpha = round(255 * 0.7559055118110237) = 193 (0xC1).
++    // The two arms disagree on a non-boundary alpha (255 vs 193, not a
++    // clamp-to-0-or-255 coincidence), so the factor is load-bearing here,
++    // not incidental.
++    const lineweightHundredths = 25;
++    const argb = 0xFF204060;
++    const scale = 0.2;
++    final collector = GeometryCollector(
++        pixelsPerPaperMm: kLogicalPixelsPerMm,
++        devicePixelRatio: _devicePixelRatio,
++        lineweightScale: scale);
++    collector.polyline(
++        Float64List.fromList(<double>[0, 0, 40, 0]),
++        2,
++        const ResolvedStyle(
++            argb: argb,
++            lineweightHundredths: lineweightHundredths,
++            linetype: Handle.none,
++            linetypeScale: 1),
++        closed: false);
++
++    final expectedArgb = _referenceCoveredArgb(argb, lineweightHundredths,
++        lineweightScale: scale);
++    final expectedAlpha = (expectedArgb >> 24) & 0xFF;
++    expect(expectedAlpha, 193,
++        reason: 'the fixture above must actually land off the identity and '
++            'off a clamp boundary, or this test would not be load-bearing');
++
++    final data = collector.data;
++    expect(data[InstanceFieldOffset.a] * 255.0,
++        closeTo(expectedAlpha.toDouble(), 0.51),
++        reason: 'a collector that dropped lineweightScale from the fade '
++            'formula would leave this at 255, not 193');
++    // The colour channels are untouched -- `_coveredArgb` gives up alpha,
++    // it does not darken.
++    expect(data[InstanceFieldOffset.r] * 255.0, closeTo(0x20, 0.51));
++    expect(data[InstanceFieldOffset.g] * 255.0, closeTo(0x40, 0.51));
++    expect(data[InstanceFieldOffset.b] * 255.0, closeTo(0x60, 0.51));
++  });
+ }
+ 
+ /// Runs [doc] through the painter twice -- once recorded, once collected --
+ /// and checks every instance the collector wrote against the oracle built
+ /// declaratively from the recording. Shared by both tests in this file, so
+ /// the hairline fixture exercises the same oracle the main corpus does
+ /// rather than a second, possibly-diverging copy of it.
+ void _checkAgainstOracle(DraftDocument doc) {
+   final index = SpatialIndex(doc);
+   addTearDown(index.dispose);
+@@ -457,34 +528,47 @@ double _referenceLogicalHalfWidth(int lineweightHundredths) {
+   final w = logical.isFinite && logical > floorLogical ? logical : floorLogical;
+   return w / 2;
+ }
+ 
+ /// `VerticesDrawSink._coveredArgb`, reproduced here for the same reason
+ /// [_referenceLogicalHalfWidth] is: that method is private to its own file,
+ /// and reading a live copy of `kMinStrokeDevicePixels` off the public
+ /// constant keeps this a second, independent formula rather than a value
+ /// shared with the code under test.
+ ///
++/// **`lineweightScale` is a factor here, mirroring
++/// `VerticesDrawSink._coveredArgb`'s own `lineweightScale *` term.** Every
++/// call site in this file passes the default of `1.0`, at which the factor
++/// is the identity and every existing assertion is unchanged -- the sole
++/// caller that exercises a non-default value is the
++/// `lineweightScale != 1` fade test below, added specifically because a
++/// default-only oracle can never disagree with a collector that dropped
++/// this factor entirely.
++///
+ /// **Only the guard is read live; the `* 2` slope below is not.** Unlike
+ /// [_referenceLogicalHalfWidth], which reads `kMinStrokeDevicePixels` in
+ /// both the guard and the value it floors to, this function's fade slope
+ /// (`deviceWidth * 2`, mirroring the reference's own
+ /// `Geometry::ComputeStrokeAlphaCoverage`) is not derived from that
+ /// constant at all -- it happens to equal `2 / kMinStrokeDevicePixels`
+ /// today only because the floor is `1.0`. Raising
+ /// `VerticesDrawSink.kMinStrokeDevicePixels` would move the guard here
+ /// (correctly, since it is read live) but would leave the slope at a stale
+ /// `* 2`, silently wrong rather than caught by this test the way a floor
+ /// change is.
+-int _referenceCoveredArgb(int argb, int lineweightHundredths) {
+-  final deviceWidth =
+-      lineweightHundredths / 100.0 * kLogicalPixelsPerMm * _devicePixelRatio;
++int _referenceCoveredArgb(int argb, int lineweightHundredths,
++    {double lineweightScale = 1.0}) {
++  final deviceWidth = lineweightHundredths /
++      100.0 *
++      kLogicalPixelsPerMm *
++      lineweightScale *
++      _devicePixelRatio;
+   if (!deviceWidth.isFinite ||
+       deviceWidth <= 0 ||
+       deviceWidth >= VerticesDrawSink.kMinStrokeDevicePixels) {
+     return argb;
+   }
+   final coverage = (deviceWidth * 2).clamp(0.0, 1.0);
+   final alpha = (((argb >> 24) & 0xFF) * coverage).round();
+   return (alpha << 24) | (argb & 0x00FFFFFF);
+ }
+ 
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart b/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart
+index 1cadf79..8dd6bb4 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart
+@@ -32,20 +32,36 @@ void main() {
+       expect(ResidentGeometry.kCornerVertices, <double>[
+         0, -1, 1, 0, 0, 0, //
+         0, 1, 0, 1, 0, 0, //
+         1, -1, 0, 0, 1, 0, //
+         1, -1, 0, 1, 0, 0, //
+         0, 1, 0, 0, 0, 1, //
+         1, 1, 0, 0, 1, 0, //
+       ]);
+     });
+ 
++    test('cornerVertexCount is derived from the table, and equals six', () {
++      // Pins the relationship, not just today's value: a mutant that grows
++      // `kCornerVertices` by one vertex without updating
++      // `GpuDrawBackend.render`'s draw call would leave this assertion
++      // green (`cornerVertexCount` would report 7) but the standalone
++      // literal-6 test above would still pass too -- this is what lets
++      // `cornerVertexCount` itself be the thing asserted, so a future
++      // seventh corner shows up here as "6 -> 7", not as a silent
++      // under-draw only a device run would notice.
++      expect(ResidentGeometry.cornerVertexCount, 6);
++      expect(
++          ResidentGeometry.cornerVertexCount,
++          ResidentGeometry.kCornerVertices.length ~/
++              ResidentGeometry.kFloatsPerCorner);
++    });
++
+     test('covers exactly four distinct corners', () {
+       final points = <(double, double)>{
+         for (var i = 0;
+             i < ResidentGeometry.kCornerVertices.length;
+             i += ResidentGeometry.kFloatsPerCorner)
+           (
+             ResidentGeometry.kCornerVertices[i],
+             ResidentGeometry.kCornerVertices[i + 1]
+           ),
+       };
+diff --git a/packages/jet_cad_2d_flutter/test/support/instance_expander.dart b/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
+index 575211a..fc8105d 100644
+--- a/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
++++ b/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
+@@ -34,21 +34,21 @@ const double kExpanderMinMiterCosine = -0.875;
+ /// reordering there is a change here too.
+ class _Corner {
+   const _Corner(this.x, this.y, this.wv, this.wa, this.wb, this.wm);
+   final double x, y, wv, wa, wb, wm;
+ }
+ 
+ List<_Corner> _corners() {
+   const stride = ResidentGeometry.kFloatsPerCorner;
+   final src = ResidentGeometry.kCornerVertices;
+   return List<_Corner>.generate(
+-      6,
++      ResidentGeometry.cornerVertexCount,
+       (i) => _Corner(src[i * stride], src[i * stride + 1], src[i * stride + 2],
+           src[i * stride + 3], src[i * stride + 4], src[i * stride + 5]));
+ }
+ 
+ /// The triangle list the GPU would produce, in the shape
+ /// `TriangleRasterizer.observe` takes.
+ class ExpandedTriangles {
+   ExpandedTriangles(this.positions, this.colors);
+ 
+   /// Two floats per vertex, six vertices per instance, in instance order.
+@@ -76,41 +76,42 @@ class ExpandedTriangles {
+ /// calls the turn's outer side -- but consistently so, because `n0` and
+ /// `n1` are both derived from the same flipped space, so the triangles that
+ /// come out are the exact mirror image of the un-flipped ones, which is the
+ /// geometrically correct picture for a y-flipped space. Feeding the
+ /// composed transform directly here removes a clip-space round trip that
+ /// has no observable effect and would only add a place for the two copies
+ /// to disagree.
+ ExpandedTriangles expandInstances(
+     Float32List data, int instanceCount, Transform2 collectionToDevice) {
+   final corners = _corners();
+-  final positions = Float32List(instanceCount * 6 * 2);
+-  final colors = Int32List(instanceCount * 6);
++  final cornerVertexCount = ResidentGeometry.cornerVertexCount;
++  final positions = Float32List(instanceCount * cornerVertexCount * 2);
++  final colors = Int32List(instanceCount * cornerVertexCount);
+   final t = collectionToDevice;
+ 
+   double toX(double x, double y) => t.a * x + t.c * y + t.e;
+   double toY(double x, double y) => t.b * x + t.d * y + t.f;
+ 
+   for (var i = 0; i < instanceCount; i++) {
+     final o = i * kFloatsPerInstance;
+     final kind = data[o + InstanceFieldOffset.kind];
+     final halfWidth = data[o + InstanceFieldOffset.halfWidth];
+     final argb = _argbOf(data, o);
+ 
+     final x0 = data[o + InstanceFieldOffset.x0];
+     final y0 = data[o + InstanceFieldOffset.y0];
+     final x1 = data[o + InstanceFieldOffset.x1];
+     final y1 = data[o + InstanceFieldOffset.y1];
+     final x2 = data[o + InstanceFieldOffset.x2];
+     final y2 = data[o + InstanceFieldOffset.y2];
+ 
+-    for (var v = 0; v < 6; v++) {
++    for (var v = 0; v < cornerVertexCount; v++) {
+       final c = corners[v];
+       double px, py;
+ 
+       if (kind < 0.5) {
+         // kKindStroke: two triangles around a centreline.
+         final ax = toX(x0, y0), ay = toY(x0, y0);
+         final bx = toX(x1, y1), by = toY(x1, y1);
+         final dx = bx - ax, dy = by - ay;
+         final len = math.sqrt(dx * dx + dy * dy);
+         // Reachable, not merely defensive -- see the join branch's identical
+@@ -217,21 +218,21 @@ ExpandedTriangles expandInstances(
+         // kKindPoint: a square of the stroke's width centred on p0. Both
+         // axes are expanded here, in device pixels, so the dot stays square
+         // and stays the same size at every zoom -- which is what the
+         // reference gets for free by computing its `+/- half` in device
+         // space.
+         final cx = toX(x0, y0), cy = toY(x0, y0);
+         px = cx + (c.x * 2.0 - 1.0) * halfWidth;
+         py = cy + c.y * halfWidth;
+       }
+ 
+-      final vi = (i * 6 + v);
++      final vi = (i * cornerVertexCount + v);
+       positions[vi * 2] = px;
+       positions[vi * 2 + 1] = py;
+       colors[vi] = argb;
+     }
+   }
+ 
+   return ExpandedTriangles(positions, colors);
+ }
+ 
+ /// Reads the record's four colour floats back to `0xAARRGGBB`.

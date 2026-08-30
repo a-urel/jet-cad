@@ -1,0 +1,230 @@
+# Review package: 0615eb0..35e6c90
+
+## Commits
+35e6c90 fix(harness): break the main.dart <-> gpu_arm.dart import cycle
+
+## Files changed
+ apps/dev_harness_2d/lib/gpu_arm.dart         |  1 -
+ apps/dev_harness_2d/lib/main.dart            | 16 ----------------
+ apps/dev_harness_2d/lib/measurement_rig.dart | 19 +++++++++++++++++++
+ apps/dev_harness_2d/lib/widget_arm_rig.dart  | 18 ++++++------------
+ 4 files changed, 25 insertions(+), 29 deletions(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/lib/gpu_arm.dart b/apps/dev_harness_2d/lib/gpu_arm.dart
+index 30c271b..3c3fb1a 100644
+--- a/apps/dev_harness_2d/lib/gpu_arm.dart
++++ b/apps/dev_harness_2d/lib/gpu_arm.dart
+@@ -1,21 +1,20 @@
+ // ignore_for_file: avoid_print -- the GSPIKE diagnostics below print by
+ // design; see `measurement_rig.dart`.
+ 
+ import 'dart:async';
+ 
+ import 'package:flutter/foundation.dart' show kIsWeb;
+ import 'package:flutter/material.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+-import 'main.dart';
+ import 'measurement_rig.dart';
+ 
+ // --- The GPU arm: painter vs. tiles vs. jet_cad_2d_flutter's resident-GPU
+ // backend, interleaved. -----------------------------------------------
+ //
+ // Formerly `gpu_arm.dart` and `gpu_arm_rig.dart` (branch
+ // `spike/flutter-gpu-backend`), which hand-rolled a collector and their own
+ // `flutter_gpu` plumbing to answer one question: can a pan or a zoom cost a
+ // uniform write instead of a document walk, and still draw sharp? Plan A
+ // (`docs/superpowers/plans/2026-08-29-gpu-backend-plan-a-seam-and-strokes.md`)
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index 95eb221..af479cb 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -916,36 +916,20 @@ Future<void> _driveR2(
+           );
+       }
+     } catch (e) {
+       print('!!! ARM ABORTED: $e');
+       rethrow;
+     }
+   }
+   print('R2 app-run: done');
+ }
+ 
+-/// Renders exactly one frame and completes after it.
+-///
+-/// This is called from inside `_HarnessAppState`'s own post-frame callback —
+-/// [SchedulerBinding.instance.schedulerPhase] is `postFrameCallbacks`, not
+-/// `idle`, at that point, and [SchedulerBinding.endOfFrame] only calls
+-/// [SchedulerBinding.scheduleFrame] for you when the phase is idle. Relying
+-/// on `camera.value = ...`'s listener chain to schedule the next frame as a
+-/// side effect worked on the first call by chance and hung on every one
+-/// after it, once the phase genuinely was idle and nothing else nearby
+-/// happened to call `scheduleFrame`. Calling it explicitly first removes the
+-/// dependency on that side effect entirely.
+-Future<void> pumpFrame() {
+-  SchedulerBinding.instance.scheduleFrame();
+-  return SchedulerBinding.instance.endOfFrame;
+-}
+-
+ /// A running app has no synthetic clock to advance, so there is no exact
+ /// equivalent of `tester.pumpAndSettle()`. This pumps frames while one is
+ /// still scheduled, bounded, which is the same loop `pumpAndSettle` runs
+ /// internally minus its own timeout — the closest honest approximation
+ /// available outside a test.
+ Future<void> _settle() async {
+   const maxIdlePumps = 10;
+   for (var i = 0; i < maxIdlePumps; i++) {
+     if (!SchedulerBinding.instance.hasScheduledFrame) return;
+     await pumpFrame();
+diff --git a/apps/dev_harness_2d/lib/measurement_rig.dart b/apps/dev_harness_2d/lib/measurement_rig.dart
+index 2edad24..5e03a77 100644
+--- a/apps/dev_harness_2d/lib/measurement_rig.dart
++++ b/apps/dev_harness_2d/lib/measurement_rig.dart
+@@ -33,20 +33,39 @@ void refuseDebugMode() {
+   var isDebug = false;
+   assert(() {
+     isDebug = true;
+     return true;
+   }());
+   if (isDebug) {
+     throw StateError('run with --profile; debug frame times mean nothing');
+   }
+ }
+ 
++/// Renders exactly one frame and completes after it.
++///
++/// Shared by `main.dart` (`_driveR2` and the GPU arm in `gpu_arm.dart`) —
++/// moved here from `main.dart` so both could reach it without either
++/// importing the other. This is called from inside `_HarnessAppState`'s own
++/// post-frame callback — [SchedulerBinding.instance.schedulerPhase] is
++/// `postFrameCallbacks`, not `idle`, at that point, and
++/// [SchedulerBinding.endOfFrame] only calls [SchedulerBinding.scheduleFrame]
++/// for you when the phase is idle. Relying on `camera.value = ...`'s
++/// listener chain to schedule the next frame as a side effect worked on the
++/// first call by chance and hung on every one after it, once the phase
++/// genuinely was idle and nothing else nearby happened to call
++/// `scheduleFrame`. Calling it explicitly first removes the dependency on
++/// that side effect entirely.
++Future<void> pumpFrame() {
++  SchedulerBinding.instance.scheduleFrame();
++  return SchedulerBinding.instance.endOfFrame;
++}
++
+ /// p50, p95 and max of build, raster and total time, reported separately.
+ ///
+ /// A build-bound frame and a raster-bound frame call for opposite fixes in
+ /// Plan 3b — one wants less walking, the other fewer or cheaper draw calls —
+ /// so a single "frame time" would hide the only thing the number is for.
+ ///
+ /// **`totalSpan` is here because `build` and `raster` do not have to add up.**
+ /// The 2026-08-23 picture-cache spike rasterised 217,758 triangles into a
+ /// texture on every frame through `Picture.toImageSync` and *both* of those
+ /// columns stayed flat — raster read 0.87 ms, indistinguishable from a bare
+diff --git a/apps/dev_harness_2d/lib/widget_arm_rig.dart b/apps/dev_harness_2d/lib/widget_arm_rig.dart
+index f10cd07..7e35429 100644
+--- a/apps/dev_harness_2d/lib/widget_arm_rig.dart
++++ b/apps/dev_harness_2d/lib/widget_arm_rig.dart
+@@ -9,21 +9,20 @@
+ // after its frame rasterises, while `pumpFrame` completes at
+ // `SchedulerBinding.endOfFrame` before it, so a log that is not rebased names
+ // the wrong frame and says nothing about it. Anything that measures frames
+ // here goes through that class.
+ //
+ // ignore_for_file: avoid_print -- printing the numbers is what a rig is for.
+ 
+ import 'dart:async';
+ 
+ import 'package:flutter/material.dart';
+-import 'package:flutter/scheduler.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'measurement_rig.dart';
+ import 'widget_arm.dart';
+ 
+ /// The three arms.
+ enum SpikeArm {
+   /// Today's path: one `CustomPainter`, the whole document walked per frame.
+   painter,
+@@ -213,25 +212,20 @@ class WidgetSpikeState extends State<WidgetSpikeApp> {
+                   if (a != SpikeArm.painter && primitives.isNotEmpty)
+                     Positioned.fill(child: _widgetLayer(a)),
+                 ],
+               ),
+             ),
+           ),
+         ),
+       );
+ }
+ 
+-Future<void> _pumpFrame() {
+-  SchedulerBinding.instance.scheduleFrame();
+-  return SchedulerBinding.instance.endOfFrame;
+-}
+-
+ /// Runs every arm over every phase, interleaved, [repeats] times.
+ ///
+ /// **Interleaved and not blocked.** Plan 3h blocked its arms and the inert
+ /// control phase drifted by an order of magnitude between the two halves of
+ /// the session; Plan 3i interleaved and the same control drifted 9%. Three
+ /// arms measured one after another in one session is the only arrangement
+ /// whose ratios mean anything here.
+ Future<void> runWidgetSpike(
+   WidgetSpikeState state, {
+   required int entities,
+@@ -268,47 +262,47 @@ Future<void> runWidgetSpike(
+   final reports = <PhaseReport>[];
+ 
+   Future<void> setArm(SpikeArm a) async {
+     // Wall clock across the switch, reported because it is a real cost even
+     // though it is paid once: building 5,000 widgets, elements and render
+     // objects is what opening a drawing would cost on the widget path. The
+     // first of the two frames carries the build and the layout; the second
+     // leaves the pipeline quiet before anything is measured.
+     final sw = Stopwatch()..start();
+     state.arm.value = a;
+-    await _pumpFrame();
++    await pumpFrame();
+     final buildMs = sw.elapsedMicroseconds / 1000.0;
+-    await _pumpFrame();
++    await pumpFrame();
+     sw.stop();
+     print('WSPIKE ${a.label} | arm switch | first frame '
+         '${buildMs.toStringAsFixed(1)} ms wall clock, '
+         'two frames ${(sw.elapsedMicroseconds / 1000.0).toStringAsFixed(1)} ms');
+   }
+ 
+   Future<PhaseReport> phase(
+     SpikeArm a,
+     String name,
+     void Function(int i) step,
+   ) async {
+     // Reset both cameras to the same starting view for every phase.
+     state.camera.value = baseCamera;
+     state.armCamera.set(scale: baseScale, offset: Offset.zero);
+-    await _pumpFrame();
++    await pumpFrame();
+ 
+     final log = FrameTimingLog()..arm();
+     try {
+-      await log.establishBaseline(_pumpFrame);
++      await log.establishBaseline(pumpFrame);
+       for (var i = 0; i < frames; i++) {
+         step(i);
+-        await log.pump(_pumpFrame);
++        await log.pump(pumpFrame);
+       }
+-      await log.drain(_pumpFrame, upTo: frames);
++      await log.drain(pumpFrame, upTo: frames);
+       if (log.sawBacklog) {
+         throw StateError('WSPIKE ${a.label}/$name: the timing stream ran a '
+             'backlog after the baseline, so every ordinal is off by an '
+             'unknown amount. No figure from this phase is reportable.');
+       }
+       final build = <double>[];
+       final raster = <double>[];
+       for (final t in log.debugTimings) {
+         build.add(t.buildDuration.inMicroseconds / 1000.0);
+         raster.add(t.rasterDuration.inMicroseconds / 1000.0);
