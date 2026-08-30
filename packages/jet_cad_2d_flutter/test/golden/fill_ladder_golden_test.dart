@@ -320,10 +320,10 @@ void main() {
     ('3', 4000.0),
   ]) {
     for (final backend in RenderBackend.values) {
-      // Skip the GPU-resident backend: Plan A does not wire a resident-GPU
-      // sink into the widget paint path — that is Plan F's job. No sink exists
-      // for this backend in the widget rendering, so the golden harness cannot
-      // test it.
+      // Skip the GPU-resident backend: it resolves to vertices in a test
+      // environment where GPU is unavailable. Running it would pass the same
+      // vertices golden as the explicit vertices iteration, a redundant pass.
+      // Real widget wiring of a GPU-resident sink is Plan F's job.
       if (backend == RenderBackend.residentGpu) continue;
       testWidgets('fill ladder rung $name ($backend)', (tester) async {
         await _rung(tester, fillLadderFixture(), halfSpan, name, backend);

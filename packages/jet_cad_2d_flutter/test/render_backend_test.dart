@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_flutter/src/gpu/gpu_facade.dart';
 
 Future<DraftCanvasState> _pump(WidgetTester tester,
     {RenderBackend? backend}) async {
@@ -102,10 +103,14 @@ void main() {
     expect(key.currentState!.vertices, isNotNull);
   });
 
-  testWidgets('an explicit residentGpu request resolves to vertices when unavailable', (tester) async {
+  testWidgets(
+      'an explicit residentGpu request resolves to vertices when unavailable',
+      (tester) async {
     // MUTATION: if DraftCanvas does not route through `resolveBackend()`,
-    // `residentGpu` silently uses the canvas sink instead of vertices.
-    // This pins that the widget correctly uses `resolveBackend()`.
+    // `residentGpu` silently uses the canvas sink instead of vertices. This
+    // assertion fails: state.vertices would be null instead of notNull.
+    debugSetGpuFactory(() => throw StateError('no gpu'));
+    addTearDown(() => debugSetGpuFactory(null));
     final state = await _pump(tester, backend: RenderBackend.residentGpu);
     expect(state.resolvedBackend, RenderBackend.vertices);
     expect(state.vertices, isNotNull);
