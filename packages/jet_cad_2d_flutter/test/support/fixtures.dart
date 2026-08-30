@@ -471,6 +471,7 @@ Handle _addShadedEntity(
 /// | 914 | an `ALLGAP` line, so the collapse representative has a witness |
 /// | 915 | a **solid** line crossing 910, so dash gaps have something behind them |
 /// | 916 | a hairline dashed line (`lineweight: 1`), so `_coveredArgb` meets a dash |
+/// | 917 | a **solid** three-point polyline -- the control for Ruling C3 |
 ///
 /// [linetypeScale] multiplies entity 913's own `linetypeScale` field only, so
 /// a test can vary one entity's dash rate without rebuilding the corpus.
@@ -593,6 +594,25 @@ DraftDocument shadedDashFixture({double linetypeScale = 1.0}) {
     const [],
     linetype: const Handle(900),
     lineweight: 1,
+  );
+
+  // 917: a SOLID three-point polyline, and it is the control for Ruling C3
+  // rather than filler. Ruling C3 says a *dashed* run emits no joins; an
+  // assertion that a corpus contains no dashed joins is worth nothing unless
+  // the same corpus contains a solid run that *does* have one, or the rule
+  // is indistinguishable from "this collector never emits joins". Every
+  // other multi-segment entity here is dashed (910) and every solid one is a
+  // two-point line with no interior vertex at all, so before this entity the
+  // corpus could not tell those two readings apart -- found by Plan C Task
+  // 10's own vacuity check, not by review.
+  _addShadedEntity(
+    doc,
+    defs,
+    const Handle(917),
+    EntityKind.polyline,
+    const [-500, -450, -380, -390, -300, -480],
+    const [],
+    linetype: ReservedHandles.continuousLinetype,
   );
 
   // The one placement: rotated (0.62 rad) and non-uniformly scaled (1.8 vs
