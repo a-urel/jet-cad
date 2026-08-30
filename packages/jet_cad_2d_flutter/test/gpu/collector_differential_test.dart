@@ -77,12 +77,21 @@ void main() {
     // `_emit` polyline path is dead). So this loop's generic
     // `a/b/c/d/e/f` application is honest, but a mutation that swaps the
     // residual's off-diagonal terms (b <-> c) cannot be observed through
-    // *this* walk -- b and c are always 0 here, by construction, on every
-    // fixture. That mutation is covered instead by
+    // *this* walk's POLYLINE ops -- their b and c are always 0, by
+    // construction, on every fixture. That mutation was covered instead by
     // `geometry_collector_test.dart`'s "applies the residual, and a
     // transposed one is not the same residual", which drives
     // `GeometryCollector.polyline` directly with a genuine off-diagonal
-    // residual. See Task 8's report for the transcript proving that.
+    // residual.
+    //
+    // **That stopped being the whole story in Task 5.** Circle 701 and arc
+    // 703 reach the collector through `draft_painter.dart:568`'s general
+    // chain rather than through `_emitScreenSpace`, so they arrive under
+    // genuinely non-zero off-diagonal terms and a non-uniform scale -- the
+    // fixture's rotations at `fixtures.dart:88-96` and its two placements of
+    // `outer`. This gate covers the general-affine residual path from Task 5
+    // on, which is the path Plan A's transposition fix was written to guard
+    // and no Plan A fixture could reach.
     // The expected instance list, generated declaratively from each
     // `PolylineOp`'s deduped point list by `_expectedInstancesFor` -- not by
     // replaying `GeometryCollector`'s own `_beginRun` / `_runTo` / `_endRun`
@@ -129,7 +138,8 @@ void main() {
     }
 
     expect(expected, isNotEmpty,
-        reason: 'a fixture with no polylines would make this test vacuous');
+        reason: 'a fixture with no drawable geometry would make this test '
+            'vacuous -- polylines, circles and arcs all feed this list');
     expect(collector.instanceCount, expected.length,
         reason: 'the collector must emit exactly one instance per segment '
             'and per join the declarative rule produces -- neither '

@@ -81,10 +81,9 @@ class GeometryCollector implements DrawSink {
   /// `text`. Counted rather than ignored so a corpus that needs Plan B
   /// through E is visible as a number instead of as a missing picture.
   ///
-  /// This is the post-Plan-B set, landing ahead of the code that makes it
-  /// true: `circle` and `arc` still count here today and stop counting in
-  /// Task 5, `point` stops counting in Task 6. Task 6 is also where the test
-  /// verifying this sentence lands.
+  /// `circle` and `arc` stopped counting here in Task 5. `point` still
+  /// counts today and stops in Task 6, which is also where the test that
+  /// pins this whole sentence lands.
   int get skippedOps => _skipped;
 
   /// Half the stroke's width, **in device pixels** — the space the vertex

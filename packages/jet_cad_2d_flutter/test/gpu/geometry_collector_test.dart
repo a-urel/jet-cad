@@ -492,18 +492,65 @@ void main() {
             linetypeScale: 1));
     var minX = double.infinity, maxX = -double.infinity;
     var minY = double.infinity, maxY = -double.infinity;
+    // Hoisted: `data` copies the whole buffer on every access
+    // (`geometry_collector.dart`'s own doc says so), and reading it inside
+    // the loop would make ~190 copies. The differential test hoists it for
+    // the same reason.
+    final data = c.data;
     for (var i = 0; i < c.instanceCount; i++) {
       final o = i * kFloatsPerInstance;
-      if (c.data[o + InstanceFieldOffset.kind] != kKindStroke) continue;
-      final x = c.data[o + InstanceFieldOffset.x0];
-      final y = c.data[o + InstanceFieldOffset.y0];
+      if (data[o + InstanceFieldOffset.kind] != kKindStroke) continue;
+      final x = data[o + InstanceFieldOffset.x0];
+      final y = data[o + InstanceFieldOffset.y0];
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
     }
-    expect(maxX - minX, closeTo(60, 0.5));
-    expect(maxY - minY, closeTo(20, 0.5));
+    // The window is 1.0, not 0.5: a 19-chord polygon's own sagitta already
+    // eats ~0.4 of the extent, so a tighter window would be measuring the
+    // chord count rather than the flattening space. M-B4 misses by 25.6, so
+    // 1.0 still kills it by a wide margin.
+    expect(maxX - minX, closeTo(60, 1.0));
+    expect(maxY - minY, closeTo(20, 1.0));
+  });
+
+  test('a negative sweep runs clockwise, not mirrored', () {
+    // **The sign of the sweep is not covered by anything else.** Every arc
+    // in the corpus sweeps positive -- the fixture's arc 703 is +1.9, and
+    // the two tests above use 2*pi and pi/2 -- so `sweep / steps` could be
+    // written `sweep.abs() / steps` and no gate in this plan would notice.
+    // `draft_painter.dart` passes the sweep through unnormalised, so a
+    // clockwise arc is representable, and under that mutation it would be
+    // drawn mirrored across the start ray while the reference drew it
+    // correctly.
+    //
+    // Starting at angle 0 -- the point (50, 0) -- and sweeping -pi/2 must
+    // end at (0, -50), the FOURTH quadrant. Under `sweep.abs()` it would end
+    // at (0, +50) instead.
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.identity());
+    c.arc(
+        0,
+        0,
+        50,
+        0,
+        -math.pi / 2,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1));
+
+    final data = c.data;
+    final lastStroke = (c.instanceCount - 1) * kFloatsPerInstance;
+    expect(data[lastStroke + InstanceFieldOffset.kind], kKindStroke,
+        reason: 'an open run ends on a segment');
+    expect(data[lastStroke + InstanceFieldOffset.x1], closeTo(0, 1e-3));
+    expect(data[lastStroke + InstanceFieldOffset.y1], closeTo(-50, 1e-3),
+        reason: 'a negative sweep ends in the fourth quadrant; `sweep.abs()` '
+            'would put it at +50');
   });
 
   test('a zero or negative radius draws nothing', () {
@@ -516,7 +563,9 @@ void main() {
         linetype: Handle.none,
         linetypeScale: 1);
     c.circle(0, 0, 0, style);
+    c.circle(0, 0, -5, style);
     c.arc(0, 0, 10, 0, 0, style);
+    c.arc(0, 0, -10, 0, 1, style);
     expect(c.instanceCount, 0);
   });
 }
