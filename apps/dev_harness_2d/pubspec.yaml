@@ -19,13 +19,6 @@ dependencies:
   jet_cad_2d_flutter:
     path: ../../packages/jet_cad_2d_flutter
   vector_math: ^2.2.0
-  # THROWAWAY SPIKE, branch `spike/flutter-gpu-backend`.
-  flutter_gpu:
-    sdk: flutter
-  # THROWAWAY SPIKE. Depended on for its internal `flutter_gpu` shim, which is
-  # a verbatim re-export on native and a WebGL2 backend on web. Not for its
-  # scene graph -- see `gpu_arm.dart`'s import comment.
-  flutter_scene: ^0.23.0
 
 dev_dependencies:
   flutter_test:
@@ -36,6 +29,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    # THROWAWAY SPIKE, branch `spike/flutter-gpu-backend`.
-    - assets/shaders/cad.shaderbundle
