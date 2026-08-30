@@ -700,4 +700,183 @@ void main() {
     c.text('x', Handle.none, style);
     expect(c.skippedOps, 3, reason: 'three ops Plans D and E draw');
   });
+
+  // --- dashed polylines (Task 5) -------------------------------------------
+
+  const dashed = DashPattern(dashes: [12.0, -6.0], totalLength: 18.0);
+  const dashDot =
+      DashPattern(dashes: [12.0, -3.0, 0.5, -3.0], totalLength: 18.5);
+  const allGap = DashPattern(dashes: [-4.0], totalLength: 4.0);
+  const dashStyle = ResolvedStyle(
+      argb: 0xFF112233,
+      lineweightHundredths: 25,
+      linetype: Handle(900),
+      linetypeScale: 1.0);
+
+  test(
+      'a dashed polyline emits one instance per segment per drawn element, '
+      'and no joins at all', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+
+    // Two segments, one drawn element, no joins.
+    expect(c.instanceCount, 2);
+    for (var i = 0; i < 2; i++) {
+      expect(c.data[i * kFloatsPerInstance + InstanceFieldOffset.kind],
+          kKindStroke,
+          reason: 'a dashed run has no joins: the reference gives every span '
+              'its own polyline op and therefore its own run');
+    }
+  });
+
+  test(
+      'the same polyline undashed keeps its join -- so the assertion above '
+      'is about dashes, not about the fixture', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, dashStyle,
+        closed: false);
+    c.endResidual();
+    expect(c.instanceCount, 3); // segment, join, segment
+  });
+
+  test(
+      'a two-element pattern doubles the instances and the two elements '
+      'tile the cycle without overlapping', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashDot, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+
+    expect(c.instanceCount, 2);
+    final e0Start = c.data[InstanceFieldOffset.dashFracStart];
+    final e0End = c.data[InstanceFieldOffset.dashFracEnd];
+    final e1Start =
+        c.data[kFloatsPerInstance + InstanceFieldOffset.dashFracStart];
+    final e1End = c.data[kFloatsPerInstance + InstanceFieldOffset.dashFracEnd];
+    expect(e0Start, 0.0);
+    expect(e0End, closeTo(12.0 / 18.5, 1e-6));
+    expect(e1Start, closeTo(15.0 / 18.5, 1e-6));
+    expect(e1End, closeTo(15.5 / 18.5, 1e-6));
+    expect(e0End, lessThan(e1Start), reason: 'the gap between them is a gap');
+  });
+
+  test('the period is the cycle times the scale, in collection units', () {
+    // cycle 18, patternToLocal 2.0, residual a translation -> factor 1.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+    expect(c.data[InstanceFieldOffset.dashPeriod].abs(), closeTo(36.0, 1e-6));
+  });
+
+  test(
+      'a scaled residual scales the period, because the pattern is measured '
+      'in the space the points are in', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.scale(3.0, 3.0));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+    expect(c.data[InstanceFieldOffset.dashPeriod].abs(), closeTo(108.0, 1e-4),
+        reason: '18 x 2.0 x 3.0');
+  });
+
+  test('exactly one instance per primitive is the collapse representative', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashDot, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+
+    expect(c.instanceCount, 2, reason: 'dashDot has D == 2 drawn elements');
+    final periods = <double>[
+      c.data[InstanceFieldOffset.dashPeriod],
+      c.data[kFloatsPerInstance + InstanceFieldOffset.dashPeriod],
+    ];
+    expect(periods.where((p) => p < 0), hasLength(1),
+        reason: 'two representatives would draw the collapsed line twice, '
+            'and with blending on that is darker, not merely wasteful');
+    expect(periods.first, lessThan(0), reason: 'the first drawn element');
+  });
+
+  test(
+      'a pattern with no drawn element still emits one instance, so the '
+      'collapse case has something to draw', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(allGap, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+
+    expect(c.instanceCount, 1);
+    expect(c.data[InstanceFieldOffset.dashPeriod], lessThan(0));
+    expect(c.data[InstanceFieldOffset.dashFracStart],
+        c.data[InstanceFieldOffset.dashFracEnd],
+        reason: 'an empty extent draws nothing until the pattern collapses, '
+            'and the reference draws the whole line solid when it does');
+  });
+
+  test('endDash restores solid emission', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, dashStyle,
+        closed: false);
+    c.endResidual();
+    // The first polyline is one dashed segment with D == 1: one instance.
+    // The second polyline is a plain two-segment run: two segments, one join.
+    expect(c.instanceCount, 1 + 3);
+  });
+
+  test('a zero-cycle pattern is solid, matching dashPolyline returning false',
+      () {
+    const degenerate = DashPattern(dashes: [0.0], totalLength: 0.0);
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(degenerate, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+    expect(c.instanceCount, 1);
+    expect(c.data[InstanceFieldOffset.dashPeriod], 0.0);
+  });
+
+  test(
+      'the phase of every polyline segment is zero -- the pattern restarts '
+      'at each vertex, which is dasher.dart:94-96', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10]), 4, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+    expect(c.instanceCount, 3, reason: 'three segments, D == 1 each, no joins');
+    for (var i = 0; i < c.instanceCount; i++) {
+      expect(
+          c.data[i * kFloatsPerInstance + InstanceFieldOffset.dashPhase], 0.0);
+    }
+  });
 }

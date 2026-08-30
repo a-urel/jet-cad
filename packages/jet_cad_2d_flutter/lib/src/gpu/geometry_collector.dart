@@ -166,6 +166,16 @@ class GeometryCollector implements DrawSink {
     return (alpha << 24) | (argb & 0x00FFFFFF);
   }
 
+  /// Writes this primitive's instances: one, if it is solid; one per drawn
+  /// pattern element, if it is dashed; exactly one, if it is dashed with a
+  /// pattern that draws nothing.
+  ///
+  /// **The first instance carries a negative period.** That marks it as the
+  /// primitive's collapse representative -- the one the shader draws solid
+  /// when the live period falls under `kDashCollapsePx`, while its
+  /// siblings collapse to a degenerate vertex. Without the mark, all of them
+  /// draw solid and a collapsed translucent line is drawn D times over
+  /// itself.
   void _emit(
       double x0, double y0, double x1, double y1, double half, int argb) {
     // The reference's own test (`vertices_draw_sink.dart`, `_emitSegment`): a
@@ -173,10 +183,30 @@ class GeometryCollector implements DrawSink {
     // the formula, not the intention -- see `_runTo`.
     final dx = x1 - x0, dy = y1 - y0;
     if (math.sqrt(dx * dx + dy * dy) == 0) return;
-    _reserve(_instances + 1);
-    writeStroke(_buffer, _instances,
-        x0: x0, y0: y0, x1: x1, y1: y1, halfWidth: half, argb: argb);
-    _instances++;
+    final period = _pendingSegPeriod;
+    if (period == 0.0) {
+      _reserve(_instances + 1);
+      writeStroke(_buffer, _instances,
+          x0: x0, y0: y0, x1: x1, y1: y1, halfWidth: half, argb: argb);
+      _instances++;
+      return;
+    }
+    final n = _dashFracStart.isEmpty ? 1 : _dashFracStart.length;
+    _reserve(_instances + n);
+    for (var k = 0; k < n; k++) {
+      writeStroke(_buffer, _instances,
+          x0: x0,
+          y0: y0,
+          x1: x1,
+          y1: y1,
+          halfWidth: half,
+          argb: argb,
+          dashPeriod: k == 0 ? -period : period,
+          dashPhase: _pendingSegPhase,
+          dashFracStart: k < _dashFracStart.length ? _dashFracStart[k] : 0.0,
+          dashFracEnd: k < _dashFracEnd.length ? _dashFracEnd[k] : 0.0);
+      _instances++;
+    }
   }
 
   /// Starts a connected run at a collection-space point.
@@ -206,9 +236,9 @@ class GeometryCollector implements DrawSink {
     final dx = x - _runPrevX, dy = y - _runPrevY;
     if (math.sqrt(dx * dx + dy * dy) == 0) return;
 
-    if (_runHasDirection) {
+    if (_runHasDirection && !_suppressJoins) {
       _emitJoin(_runPrevX, _runPrevY, _runBackX, _runBackY, x, y, half, argb);
-    } else {
+    } else if (!_runHasDirection) {
       _runSecondX = x;
       _runSecondY = y;
     }
@@ -236,7 +266,7 @@ class GeometryCollector implements DrawSink {
     // Guarded for the same reason the reference guards it: today's callers
     // cannot reach here with one segment, but that is a fact about the
     // callers, not a promise the join arithmetic makes.
-    if (_runSegments >= 2) {
+    if (_runSegments >= 2 && !_suppressJoins) {
       _emitJoin(_runFirstX, _runFirstY, _runBackX, _runBackY, _runSecondX,
           _runSecondY, half, argb);
     }
@@ -256,19 +286,43 @@ class GeometryCollector implements DrawSink {
     if (crossZ == 0.0 ||
         (d0x == 0.0 && d0y == 0.0) ||
         (d1x == 0.0 && d1y == 0.0)) {
+      // Counted once per corner, not once per dashed element -- otherwise
+      // this diagnostic reports D times the corners the drawing has.
       _debugCollinearJoins++;
     }
-    _reserve(_instances + 1);
-    writeJoin(_buffer, _instances,
-        vx: vx,
-        vy: vy,
-        prevX: prevX,
-        prevY: prevY,
-        nextX: nextX,
-        nextY: nextY,
-        halfWidth: half,
-        argb: argb);
-    _instances++;
+    final period = _pendingJoinPeriod;
+    if (period == 0.0) {
+      _reserve(_instances + 1);
+      writeJoin(_buffer, _instances,
+          vx: vx,
+          vy: vy,
+          prevX: prevX,
+          prevY: prevY,
+          nextX: nextX,
+          nextY: nextY,
+          halfWidth: half,
+          argb: argb);
+      _instances++;
+      return;
+    }
+    final n = _dashFracStart.isEmpty ? 1 : _dashFracStart.length;
+    _reserve(_instances + n);
+    for (var k = 0; k < n; k++) {
+      writeJoin(_buffer, _instances,
+          vx: vx,
+          vy: vy,
+          prevX: prevX,
+          prevY: prevY,
+          nextX: nextX,
+          nextY: nextY,
+          halfWidth: half,
+          argb: argb,
+          dashPeriod: k == 0 ? -period : period,
+          dashPhase: _pendingJoinPhase,
+          dashFracStart: k < _dashFracStart.length ? _dashFracStart[k] : 0.0,
+          dashFracEnd: k < _dashFracEnd.length ? _dashFracEnd[k] : 0.0);
+      _instances++;
+    }
   }
 
   /// Doubling growth, mirroring `VerticesDrawSink._reserve`
@@ -288,17 +342,75 @@ class GeometryCollector implements DrawSink {
     _buffer = grown;
   }
 
+  // --- the dash bracket ---------------------------------------------------
+  //
+  // Set by `beginDash`, cleared by `endDash`. Kept as fields rather than
+  // threaded through `_runTo` for the same reason `DraftPainter` keeps
+  // `_spanSink` and `_spanStyle` as fields: the alternative is a closure or a
+  // widened signature on the hot path, and this class's contract is that a
+  // rebuild allocates per document, not per primitive.
+  bool _dashActive = false;
+  double _dashPeriodLocal = 0;
+
+  /// The drawn elements' extents, as fractions of the cycle. Two parallel
+  /// lists rather than a list of pairs: a pair object per element per
+  /// `beginDash` is an allocation per dashed entity per rebuild.
+  final List<double> _dashFracStart = <double>[];
+  final List<double> _dashFracEnd = <double>[];
+
+  /// Per-primitive values, set immediately before the `_emit` / `_emitJoin`
+  /// call that consumes them. Same idiom, same reason.
+  double _pendingSegPeriod = 0, _pendingSegPhase = 0;
+  double _pendingJoinPeriod = 0, _pendingJoinPhase = 0;
+  bool _suppressJoins = false;
+
   @override
   bool get shadesDashes => true;
 
   @override
   void beginDash(DashPattern pattern, double patternToLocal) {
-    // Task 5.
+    _dashFracStart.clear();
+    _dashFracEnd.clear();
+    // The cycle is summed from the array, never read from
+    // `pattern.totalLength` -- `dasher.dart` says why in as many words, and
+    // this class must agree with the dasher about where a cycle ends or the
+    // two draw different pictures from the same pattern.
+    var cycle = 0.0;
+    for (final d in pattern.dashes) {
+      cycle += d.abs();
+    }
+    if (!cycle.isFinite || cycle <= 0.0 || !patternToLocal.isFinite) {
+      // `dashPolyline` returns false here and the caller draws solid. This is
+      // the same decision, reached by the same test.
+      _dashActive = false;
+      return;
+    }
+    _dashPeriodLocal = cycle * patternToLocal;
+    var at = 0.0;
+    for (final d in pattern.dashes) {
+      // `beginDash` uses `|d|` for the extents where `dasher.dart` substitutes
+      // `1e-9` for a zero-length element (`dasher.dart:169`). The divergence
+      // is `1e-9` pattern units per zero element, which against a period the
+      // collapse rule floors at 3 device pixels is at most `3 x 10^-10` px --
+      // below any representable difference.
+      final w = d.abs();
+      if (d >= 0) {
+        _dashFracStart.add(at / cycle);
+        _dashFracEnd.add((at + w) / cycle);
+      }
+      at += w;
+    }
+    _dashActive = true;
   }
 
   @override
   void endDash() {
-    // Task 5.
+    _dashActive = false;
+    _suppressJoins = false;
+    _pendingSegPeriod = 0;
+    _pendingSegPhase = 0;
+    _pendingJoinPeriod = 0;
+    _pendingJoinPhase = 0;
   }
 
   @override
@@ -316,13 +428,35 @@ class GeometryCollector implements DrawSink {
     final half = _halfWidthFor(style.lineweightHundredths);
     final argb = _coveredArgb(style.argb, style.lineweightHundredths);
     final t = _residual;
-    _beginRun(t.a * points[0] + t.c * points[1] + t.e,
-        t.b * points[0] + t.d * points[1] + t.f);
+    _suppressJoins = _dashActive;
+    var px = t.a * points[0] + t.c * points[1] + t.e;
+    var py = t.b * points[0] + t.d * points[1] + t.f;
+    _beginRun(px, py);
     for (var i = 1; i < count; i++) {
-      _runTo(t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e,
-          t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f, half, argb);
+      final lx = points[i * 2], ly = points[i * 2 + 1];
+      final nx = t.a * lx + t.c * ly + t.e;
+      final ny = t.b * lx + t.d * ly + t.f;
+      if (_dashActive) {
+        // The phase restarts at every vertex (`dasher.dart:94-96`), so a
+        // polyline's segments all carry phase 0. The period is scaled by
+        // THIS segment's own local-to-collection length ratio rather than by
+        // the residual's scale magnitude: under an anisotropic residual the
+        // two disagree, and only the first one is right for this segment.
+        final llx = lx - points[i * 2 - 2], lly = ly - points[i * 2 - 1];
+        final localLen = math.sqrt(llx * llx + lly * lly);
+        final cdx = nx - px, cdy = ny - py;
+        final collectionLen = math.sqrt(cdx * cdx + cdy * cdy);
+        _pendingSegPeriod =
+            localLen > 0 ? _dashPeriodLocal * (collectionLen / localLen) : 0.0;
+        _pendingSegPhase = 0.0;
+      }
+      _runTo(nx, ny, half, argb);
+      px = nx;
+      py = ny;
     }
     _endRun(closed: closed, half: half, argb: argb);
+    _suppressJoins = false;
+    _pendingSegPeriod = 0;
   }
 
   /// A dot the width of the stroke.
