@@ -63,10 +63,13 @@ const double kKindPoint = 2;
 /// `cad_stroke.vert`'s attribute list is a third, independent copy — GLSL
 /// cannot read a Dart constant — and `test/support/instance_expander.dart` is
 /// a fourth. The expander is the one that is *gated*: it reads these same
-/// constants, and `test/gpu/instance_expander_test.dart` compares its
-/// output against the reference sink, so a drift between this file and the
-/// expander goes red in `flutter test`. A drift between either and the GLSL
-/// still needs a device run or a hand-check against `impellerc`'s reflection.
+/// constants, and `test/gpu/instance_expander_test.dart` pins the
+/// expander's own arithmetic today, so a drift between this file and the
+/// expander goes red in `flutter test`. `test/gpu/resident_pixel_differential_test.dart`
+/// (Task 9, not written yet) is the one that will compare the expander's
+/// output against the reference sink pixel for pixel. A drift between
+/// either and the GLSL still needs a device run or a hand-check against
+/// `impellerc`'s reflection.
 abstract final class InstanceFieldOffset {
   static const int kind = 0;
   static const int x0 = 1;

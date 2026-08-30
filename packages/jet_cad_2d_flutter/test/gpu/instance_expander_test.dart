@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -136,5 +138,72 @@ void main() {
         reason: 'the centreline scaled');
     expect(out.positions[3] - out.positions[1], closeTo(8, 1e-3),
         reason: 'the width did not');
+  });
+
+  test(
+      'a stroke under a transform with every coefficient non-zero matches by hand',
+      () {
+    // Every other test in this file uses `identity()` or `scale(k,k)`, so
+    // `b`, `c`, `e` and `f` are zero everywhere -- the degenerate fixture
+    // CLAUDE.md names as this project's dominant failure mode. A transposed
+    // `toX`/`toY` (swapping which of `b`/`c` feeds which axis) or a dropped
+    // translation (`e`/`f`) passes every test above unnoticed. This uses the
+    // same hand-built, every-coefficient-non-zero transform
+    // `geometry_collector_test.dart` uses for its own residual tests, so a
+    // reader can cross-check the shape of the fixture against a working
+    // precedent in this package.
+    const t = Transform2(2, 0.5, -1, 3, 10, 10);
+    final data = Float32List(kFloatsPerInstance);
+    writeStroke(data, 0,
+        x0: 0, y0: 0, x1: 100, y1: 0, halfWidth: 4, argb: 0xFF000000);
+    final out = expandInstances(data, 1, t);
+
+    // toX(x,y) = t.a*x + t.c*y + t.e = 2x -  y + 10
+    // toY(x,y) = t.b*x + t.d*y + t.f = 0.5x + 3y + 10
+    // a = toPixels(0,0)   = (10, 10)
+    // b = toPixels(100,0) = (210, 60)
+    // delta = b - a = (200, 50); len = sqrt(200^2 + 50^2) = 50*sqrt(17)
+    // dir    = delta / len = (4/sqrt17, 1/sqrt17)
+    // normal = (-dir.y, dir.x) = (-1/sqrt17, 4/sqrt17)
+    // corner (0,-1): px = a - normal*4 = (10 + 4/sqrt17, 10 - 16/sqrt17)
+    // corner (0, 1): px = a + normal*4 = (10 - 4/sqrt17, 10 + 16/sqrt17)
+    // corner (1,-1): px = b - normal*4 = (210 + 4/sqrt17, 60 - 16/sqrt17)
+    final sqrt17 = math.sqrt(17);
+    expect(out.positions[0], closeTo(10 + 4 / sqrt17, 1e-3));
+    expect(out.positions[1], closeTo(10 - 16 / sqrt17, 1e-3));
+    expect(out.positions[2], closeTo(10 - 4 / sqrt17, 1e-3));
+    expect(out.positions[3], closeTo(10 + 16 / sqrt17, 1e-3));
+    expect(out.positions[4], closeTo(210 + 4 / sqrt17, 1e-3));
+    expect(out.positions[5], closeTo(60 - 16 / sqrt17, 1e-3));
+  });
+
+  test('cad_stroke.vert still carries the three renumber-prone constants', () {
+    // Partial net, not a substitute for Ruling B6's human diff: this pins
+    // the three literals a shader edit is most likely to silently renumber
+    // (`instance_record.dart`'s doc explains why the values and order of
+    // `kKindStroke`/`kKindJoin`/`kKindPoint` are load-bearing, and this
+    // file's own `kExpanderMinMiterCosine` is the fourth, Dart-side, copy
+    // of the miter-limit literal). It reads the GLSL as text and checks
+    // for the constants, not the arithmetic around them -- a change to the
+    // *formula* that keeps these three literals untouched (for example,
+    // Task 8's own M-B5/M-B6 mutations) is invisible to this test and
+    // remains a human diff against `instance_expander.dart`.
+    final source = File('shaders/cad_stroke.vert').readAsStringSync();
+    expect(
+      RegExp(r'kMinMiterCosine\s*=\s*-0\.875').hasMatch(source),
+      isTrue,
+      reason: 'the miter-limit literal instance_expander.dart mirrors as '
+          'kExpanderMinMiterCosine',
+    );
+    expect(
+      RegExp(r'kind\s*<\s*0\.5').hasMatch(source),
+      isTrue,
+      reason: 'the stroke/join dispatch threshold',
+    );
+    expect(
+      RegExp(r'kind\s*<\s*1\.5').hasMatch(source),
+      isTrue,
+      reason: 'the join/point dispatch threshold',
+    );
   });
 }

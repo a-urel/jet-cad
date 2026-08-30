@@ -64,10 +64,22 @@ class ExpandedTriangles {
 ///
 /// [collectionToDevice] stands in for the shader's `mvp` composed with
 /// `half_viewport`: the shader maps collection space to device pixels in two
-/// steps because a `mat4` is what a uniform block carries, and the
-/// composition is the same affine map. Feeding it directly here removes a
-/// clip-space round trip that has no observable effect and would only add a
-/// place for the two copies to disagree.
+/// steps because a `mat4` is what a uniform block carries. `clip.xy *
+/// half_viewport` is viewport-centred and y-up, so it is not literally the
+/// same affine map as a direct collection-to-device-pixel `Transform2` --
+/// the two differ by a translation and a y-flip. The substitution is still
+/// sound: every branch below is equivariant under a translation outright,
+/// since each is built from *differences* of already-projected points
+/// (deltas, unit directions, the miter blend) and a shared translation
+/// cancels out of every difference. A y-flip is different -- it reverses
+/// the cross product's sign, and with it which side the `crossZ > 0` test
+/// calls the turn's outer side -- but consistently so, because `n0` and
+/// `n1` are both derived from the same flipped space, so the triangles that
+/// come out are the exact mirror image of the un-flipped ones, which is the
+/// geometrically correct picture for a y-flipped space. Feeding the
+/// composed transform directly here removes a clip-space round trip that
+/// has no observable effect and would only add a place for the two copies
+/// to disagree.
 ExpandedTriangles expandInstances(
     Float32List data, int instanceCount, Transform2 collectionToDevice) {
   final corners = _corners();
@@ -188,12 +200,16 @@ ExpandedTriangles expandInstances(
           // and therefore bounds `reach = halfWidth / cosHalf` to at most
           // `4 * halfWidth` -- `m` cannot go non-finite through this guard
           // as written. It is unreachable *today*, not unreachable by
-          // construction: a differential test comparing this file's output
-          // against the reference sink would see both arms agree (both
-          // finite, or in some future change to the guard, both NaN) and
-          // report agreement even if this arithmetic were the thing that
-          // regressed. Only a device run, or a change to the guard, would
-          // catch that.
+          // construction: no differential test exercises this poisoning
+          // path at all while the guard holds, since `m` never goes
+          // non-finite for it to poison. (If it ever did, the two arms
+          // would *disagree*, not agree: the reference's triangle 0 never
+          // reads `m`, so it would stay finite while this triangle 0 went
+          // NaN -- a differential would catch that. What it cannot catch is
+          // a regression to *this* arithmetic while the guard still bounds
+          // `reach`, because nothing exercises the poisoning branch to
+          // begin with.) Only a device run, or a change to the guard, would
+          // catch a change here today.
           px = c.wv * vx + c.wa * ax + c.wb * bx + c.wm * mx;
           py = c.wv * vy + c.wa * ay + c.wb * by + c.wm * my;
         }
