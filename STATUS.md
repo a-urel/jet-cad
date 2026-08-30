@@ -1,21 +1,59 @@
 # jet-cad — project status
 
-**Last updated:** 2026-08-29
-**Verified against:** `main` at `dbc31e8` — Plan 3i's results note, the last
-commit of that plan's fourteen tasks. **Plan 3i's last *code* commit is
-`7aef7f9`**; everything after it is documentation. **Plan 3i ran directly on
-`main`, `468e310..dbc31e8`, fourteen tasks, and is DONE — nothing in
-flight** — no worktree, on the human's standing consent, the same as Plans
-3e, 3f, 3f.1, 3g and 3h. Plan 3h itself ends at `122b6e3`; `1aafb39` is the
-tile-settle fix that landed between the two from looking at the running window
-rather than from any plan. The tree is clean apart from the three files the
-traps below say never to commit. Every suite count below was produced by
-running that suite on this tree on 2026-08-29, not by reading a report — with
-the one exception the table marks as not re-run.
+**Last updated:** 2026-08-30
+**Verified against:** `main` at `cd5bc98` — the merge commit for **Plan A of the
+GPU-resident render backend**, the first of that spec's seven plans. Plan A ran
+on `plan-a/gpu-seam-and-strokes`, cut from `spike/flutter-gpu-backend`, nine
+tasks at `81529f0..cdf2a23`, merged `--no-ff` and the branch deleted. **Its last
+*code* commit is `d5c85f4`**; everything after it is documentation and citation
+repair. **Nothing is in flight.** Before it, Plan 3i ran directly on `main` at
+`468e310..dbc31e8` and is DONE. The tree is clean apart from the files the traps
+below say never to commit, plus untracked `.DS_Store` files a device run left
+behind — the repo has no `.gitignore` entry for them. Every suite count below
+was produced by running that suite on the merged tree on 2026-08-30, not by
+reading a report — with the one exception the table marks as not re-run.
 
 ---
 
 ## TL;DR — where you left off
+
+**Plan A of the GPU-resident render backend is DONE and merged, nine tasks,
+`81529f0..cdf2a23`, merge `cd5bc98`.** A third `RenderBackend.residentGpu` draws
+a document's **stroked polylines** from GPU-resident geometry in **one instanced
+draw call**, camera as a uniform, falling back to `VerticesDrawSink` where
+Flutter GPU is absent. The document is walked **once per rebuild**, not per
+frame, into one `Float32List` uploaded once; draw order survives because the
+buffer is in walk order and there is exactly one call. Every GPU import is
+confined to `lib/src/gpu/gpu_facade.dart`, which re-exports `flutter_scene`'s
+conditional shim — so the package still compiles for web even though
+`flutter_gpu` cannot.
+
+**Plan A ships strokes only.** Joins, caps, `point()` and `_coveredArgb` are
+Plan B; dashes C; fills D; the text split E; rebuild triggers and the watermark
+F; web G. The collector **counts** every op it does not draw (`skippedOps`)
+rather than dropping it silently, so a corpus needing a later plan shows as a
+number, not a missing picture.
+
+**A device run happened** (macOS profile, three interleaved repeats, 27 phase
+reports) and settled three things code review could not: the **80-byte** uniform
+block against a reflection reporting 128, the **device-pixel-ratio fold**, and
+the **device half-width**. The last two were real bugs found *after* the spike's
+entire measurement campaign missed them — because that campaign measured
+timings and never looked at the picture.
+
+**The plan's own sample code carried four real defects**, each found by running
+it rather than reading it: a `List<double>` grown by assigning `.length` (throws
+for a non-nullable element type), a shader attribute declared but never read
+(fails `impellerc` reflection), a library asset path missing its
+`packages/<name>/` prefix, and a frame matrix missing its `dpr` factor. Written
+by the same author as the plan, caught by nine independent reviews.
+
+Ledger, nine task reports and all twenty-six rulings:
+[docs/superpowers/ledgers/2026-08-29-gpu-backend-plan-a-seam-and-strokes/](docs/superpowers/ledgers/2026-08-29-gpu-backend-plan-a-seam-and-strokes/).
+Spec: [2026-08-29-gpu-resident-render-backend-design.md](docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md)
+(revision 4). Plan: [2026-08-29-gpu-backend-plan-a-seam-and-strokes.md](docs/superpowers/plans/2026-08-29-gpu-backend-plan-a-seam-and-strokes.md).
+
+---
 
 **Plan 3i (the zoom frame) is DONE, fourteen tasks, worked directly on `main`
 at `468e310..dbc31e8`, nothing in flight. Its exit gate is 9 of 11 — criteria
@@ -295,11 +333,16 @@ docs/superpowers/
 
 | Location | Branch | State |
 |---|---|---|
-| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, Plans 1/2/3a/3b/**3c**/**3d**/**3e** merged |
+| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean, Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and **GPU Plan A** merged |
 
-**No worktrees.** `spike/vertices-sink` was merged with `--no-ff` and both the
-branch and `.claude/worktrees/vertices-spike` were removed. Nothing is in
-flight.
+**No worktrees.** Nothing is in flight.
+
+`plan-a/gpu-seam-and-strokes` was merged with `--no-ff` and deleted. **Three
+spike branches survive and are now all contained in `main`:**
+`spike/flutter-gpu-backend` (Plan A's parent — its throwaway arm was deleted by
+Plan A's own Task 9), `spike/picture-cache-price` and `spike/widget-per-entity`.
+They were left rather than deleted because deleting someone else's spike branch
+is not a merge's business; delete them when you no longer want the label.
 
 **This file states commit ranges and never a commit count, on purpose.** A
 count is falsified by the next commit — including the commit that writes the
@@ -423,6 +466,34 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 ---
 
 ## Resume here
+
+**Plan A of the GPU backend is done and merged at `cd5bc98`; nothing is in
+flight.** The next unit of work is **Plan B — joins, caps, `point()` and the
+`_coveredArgb` hairline alpha**, which is the first plan that turns on the
+general-affine residual path: Plan A's differential gate established that for
+stroked polylines the residual reaching the sink is always a pure translation
+(`draft_painter.dart:527-533` routes them unconditionally through
+`_emitScreenSpace`), while circles, arcs, fill circles and text push the general
+chain at `:568`, `:712` and `:918`. Plan A's residual-transposition test guards
+exactly that path.
+
+**Two things Plan A leaves for whoever writes Plan B, both recorded rather than
+hidden:**
+
+- **`DraftCanvas` renders `residentGpu` as `vertices`.** The widget paint path
+  is deliberately not wired — it needs the rebuild triggers Plan F builds. The
+  enum value's own doc says so. Plan A's only runtime consumer is the dev
+  harness arm.
+- **The GPU arm is inlined in `apps/dev_harness_2d/lib/main.dart`** (1077 → 1611
+  lines) where the same app keeps the widget spike's arm in sibling files. The
+  final review called this a real inconsistency with zero correctness content
+  and said to move it as a standalone commit at the start of Plan B.
+
+Fifteen findings were graded Minor during Plan A and triaged by the final
+whole-branch review: twelve left, three upgraded to Important and fixed. The
+survivors are listed in the ledger's deferred lines.
+
+---
 
 **Plan 3h (the fallback walk and its instrument) is done, worked directly on
 `main` at `f642202..122b6e3`, eight tasks (the eighth split into 8a and 8b),
