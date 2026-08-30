@@ -141,17 +141,22 @@ Transform2 composeTransforms(Transform2 outer, Transform2 inner) =>
 /// measured in the painter's logical screen-space points, and a device-space
 /// ratio would collapse patterns at `dpr` times the wrong zoom.
 ///
-/// **A test seam, not a second implementation.** `GpuDrawBackend.render`
-/// cannot run without a GPU, so this function exists to give
-/// `test/gpu/frame_info_test.dart` something to call directly. `render`
-/// itself does not call this function -- it already holds the composed
-/// `collectionToLogical` transform on its way to `collectionToDevice`, and
-/// reads `.scaleMagnitude` off that existing value rather than composing a
-/// second time, which would be a second per-frame `Transform2` allocation
-/// this codebase's frame-path invariant forbids ("the frame path allocates
-/// nothing per entity in steady state" -- CLAUDE.md). The formula here is
-/// exactly that same expression, so the two stay one implementation in
-/// substance even though `render` does not call this name.
+/// **`render` calls this directly -- it is the shipping implementation, not
+/// a parallel one.** `GpuDrawBackend.render` cannot run without a GPU, so
+/// nothing in `flutter test` can reach code written inline at its call
+/// site. A version of the ratio spelled out a second time there -- even one
+/// that reads identically today -- would leave the *tested* copy here and
+/// the *shipping* copy uncovered, and the exact mutation this function
+/// exists to catch (composing with `Transform2.scale(dpr, dpr)`, a
+/// device-space ratio that collapses dash patterns at `dpr` times the wrong
+/// zoom) is a small, plausible edit at an inline site that no test would
+/// then see. Calling this function from `render` is what makes the suite's
+/// witness cover the line that actually runs.
+///
+/// The extra `Transform2.multiply` this adds is one more composition per
+/// frame, not per entity -- squarely inside "the frame path allocates
+/// nothing per entity in steady state, and O(1) per flush" (CLAUDE.md):
+/// `render` already performs two compositions before this one.
 double dashScaleFor(ViewportTransform camera, Transform2 collectionInverse) =>
     composeTransforms(camera.worldToScreenMatrix, collectionInverse)
         .scaleMagnitude;
@@ -278,13 +283,22 @@ class GpuDrawBackend {
     // full viewport rather than the top-left quadrant the missing-`dpr`
     // defect this fixes used to produce (see the task-9 report).
     //
-    // **`collectionToLogical` is named, not inlined, because `dashScale`
-    // needs it too.** `dashScale` is `collectionToLogical.scaleMagnitude` --
-    // live logical pixels per collection unit, the same formula
-    // `dashScaleFor` (above) gives the test suite, read here off the
-    // transform `render` already builds rather than composed a second time.
-    // `scaleMagnitude` is one `sqrt` of a determinant on an existing value:
-    // no allocation, so this stays inside the frame-path invariant.
+    // **`collectionToLogical` is named because `collectionToDevice` needs
+    // it, and `dashScale` comes from `dashScaleFor`, not a second spelling
+    // of its formula here.** `render` cannot run without a GPU, so this is
+    // the one call site nothing in `flutter test` can reach directly; the
+    // only way the suite's coverage of the logical-vs-device distinction
+    // means anything for what actually ships is for this line to call the
+    // exact function the tests exercise, rather than restate
+    // `composeTransforms(...).scaleMagnitude` inline (see `dashScaleFor`'s
+    // own doc comment above). That does recompute the
+    // `camera.worldToScreenMatrix`/`_collectionInverse` composition a second
+    // time (once here as `collectionToLogical`, once inside `dashScaleFor`)
+    // rather than reusing the first result -- one extra `Transform2`
+    // composition per frame, not per entity, so it stays inside "the frame
+    // path allocates nothing per entity in steady state, and O(1) per
+    // flush" (CLAUDE.md): `render` already performs two compositions before
+    // this one.
     final collectionToLogical =
         composeTransforms(camera.worldToScreenMatrix, _collectionInverse);
     final collectionToDevice =
@@ -293,7 +307,7 @@ class GpuDrawBackend {
       geometry.vertexShader.getUniformSlot('FrameInfo'),
       geometry.uniforms.emplace(buildFrameInfo(
           collectionToDevice, widthPx, heightPx,
-          dashScale: collectionToLogical.scaleMagnitude)),
+          dashScale: dashScaleFor(camera, _collectionInverse))),
     );
     // **One call. `cornerVertexCount` vertices, one instance per record, in
     // buffer order.** The buffer was written once, in walk order, by
