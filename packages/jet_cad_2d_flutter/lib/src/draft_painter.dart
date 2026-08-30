@@ -619,6 +619,17 @@ class DraftPainter {
       sink.endResidual();
       return;
     }
+    if (sink.shadesDashes) {
+      // The sink evaluates the pattern itself, per fragment, at the live
+      // camera. Handing it spans instead would freeze the dash count at
+      // whatever camera this walk ran under -- which for the resident
+      // backend is a camera the viewer is not looking through.
+      sink.beginDash(pattern, _dashScale(style, toScreen));
+      sink.polyline(_points, count, style, closed: false);
+      sink.endDash();
+      sink.endResidual();
+      return;
+    }
     // The emitter is a field bound once (see `_emitSpan` above), not a closure
     // written here: a closure literal that captures `sink` and `style` is a
     // fresh object on every dashed leaf of every frame, against the global
@@ -782,6 +793,18 @@ class DraftPainter {
           sink.circle(coords[0] - ox, coords[1] - oy, r, style);
           return;
         }
+        if (sink.shadesDashes) {
+          // Local units, not screen: the coordinates below stay in the
+          // leaf's own space and the residual carries the scale, so the
+          // factor must not include `chain.scaleMagnitude` -- the same
+          // reason `dashArc` is passed this value and `pixelScale`
+          // separately.
+          sink.beginDash(pattern,
+              style.linetypeScale * document.header.globalLinetypeScale);
+          sink.circle(coords[0] - ox, coords[1] - oy, r, style);
+          sink.endDash();
+          return;
+        }
         _spanSink = sink;
         _spanStyle = style;
         _arcCx = coords[0] - ox;
@@ -823,6 +846,18 @@ class DraftPainter {
         final pattern = _patternFor(style);
         if (pattern == null) {
           sink.arc(coords[0] - ox, coords[1] - oy, r, start, sweep, style);
+          return;
+        }
+        if (sink.shadesDashes) {
+          // Local units, not screen: the coordinates below stay in the
+          // leaf's own space and the residual carries the scale, so the
+          // factor must not include `chain.scaleMagnitude` -- the same
+          // reason `dashArc` is passed this value and `pixelScale`
+          // separately.
+          sink.beginDash(pattern,
+              style.linetypeScale * document.header.globalLinetypeScale);
+          sink.arc(coords[0] - ox, coords[1] - oy, r, start, sweep, style);
+          sink.endDash();
           return;
         }
         _spanSink = sink;

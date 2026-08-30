@@ -249,6 +249,73 @@ void main() {
             'its whole length; the inflated clip must still draw it');
   });
 
+  test(
+      'a shading sink is handed the undashed polyline inside a bracket, '
+      'and the bracket carries the painter\'s own dash scale', () {
+    final doc = dashedFixture(
+        placement:
+            Transform2.translation(3, 2).multiply(Transform2.scale(2, 2)));
+    final sink = RecordingDrawSink(shadesDashes: true);
+    final camera = ViewportTransform.fit(doc.extents, kViewport);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    DraftPainter(
+            document: doc, index: index, resolver: DocumentStyleResolver(doc))
+        .paint(sink, camera, kViewport);
+
+    final begins = sink.ops.whereType<BeginDashOp>().toList();
+    expect(begins, hasLength(1),
+        reason: 'one dashed leaf, one bracket -- not one per span');
+    expect(sink.ops.whereType<EndDashOp>(), hasLength(1));
+
+    // The undashed geometry, whole: two points, not a span list.
+    final lines = sink.ops.whereType<PolylineOp>().toList();
+    expect(lines, hasLength(1));
+    expect(lines.single.points, hasLength(4));
+
+    // The scale is the painter's own `_dashScale`: linetypeScale ×
+    // globalLinetypeScale × toScreen.scaleMagnitude. Asserted as an
+    // arithmetic identity against the camera, not as a copied literal --
+    // a literal would survive the factor being dropped.
+    final expected = 1.0 *
+        doc.header.globalLinetypeScale *
+        (camera.worldToScreenMatrix.scaleMagnitude * 2.0 /* placement */);
+    expect(begins.single.patternToLocal, closeTo(expected, 1e-9));
+  });
+
+  test('a non-shading sink still gets spans, and no bracket', () {
+    final doc = dashedFixture(placement: Transform2.translation(3, 2));
+    final sink = RecordingDrawSink(); // shadesDashes: false
+    final camera = ViewportTransform.fit(doc.extents, kViewport);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    DraftPainter(
+            document: doc, index: index, resolver: DocumentStyleResolver(doc))
+        .paint(sink, camera, kViewport);
+
+    expect(sink.ops.whereType<BeginDashOp>(), isEmpty);
+    expect(sink.ops.whereType<PolylineOp>().length, greaterThan(1),
+        reason: 'the dasher cut this line into spans, as it always has');
+  });
+
+  test('a shading sink sees no dash-span counters move', () {
+    // `dashSpanCount` and `collapsedDashCount` describe the dasher's work,
+    // and a shading sink means the dasher never ran. Zero here is the
+    // correct reading, not a broken counter -- Task 12's results note says
+    // so where the harness prints them.
+    final doc = dashedFixture(placement: Transform2.translation(3, 2));
+    final sink = RecordingDrawSink(shadesDashes: true);
+    final camera = ViewportTransform.fit(doc.extents, kViewport);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final painter = DraftPainter(
+        document: doc, index: index, resolver: DocumentStyleResolver(doc));
+    painter.paint(sink, camera, kViewport);
+
+    expect(painter.dashSpanCount, 0);
+    expect(painter.collapsedDashCount, 0);
+  });
+
   // Radius 20 in the circle's own local space, centred at the local origin,
   // unless a test asks otherwise. Small enough to stay clear of both camera
   // boxes the tests below use (fixed, not fit to this doc's own extents —
