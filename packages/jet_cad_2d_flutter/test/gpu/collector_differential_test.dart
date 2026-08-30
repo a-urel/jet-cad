@@ -46,191 +46,218 @@ void main() {
     // order, produces a different sequence than the one asserted below.
     final doc = differentialFixture();
     assertNoIdentityTransforms(doc);
-    final index = SpatialIndex(doc);
-    addTearDown(index.dispose);
-
-    final resolver = DocumentStyleResolver(doc);
-    final camera = ViewportTransform.fit(doc.extents, kViewport);
-    final painter =
-        DraftPainter(document: doc, index: index, resolver: resolver);
-
-    // The reference: what the painter emits, recorded.
-    final recording = RecordingDrawSink();
-    painter.paint(recording, camera, kViewport);
-
-    // The arm: what the collector writes, from the same painter replaying
-    // the same camera over the same document.
-    final collector = GeometryCollector(
-        pixelsPerPaperMm: kLogicalPixelsPerMm,
-        devicePixelRatio: _devicePixelRatio);
-    painter.paint(collector, camera, kViewport);
-
-    // Rebuild the expected segment list from the recording, applying the
-    // residual exactly as the collector must, and keeping each segment's
-    // style alongside it so the half-width and colour checks below are
-    // per-segment.
-    // **What this residual actually is, in the real walk.** Every
-    // `beginResidual` a `PolylineOp` sees here carries a *pure translation*:
-    // `DraftPainter._emitScreenSpace` folds the full affine chain into the
-    // points themselves and leaves only the screen-origin rebase as the
-    // residual (`draft_painter.dart`, and its own comment that the general
-    // `_emit` polyline path is dead). So this loop's generic
-    // `a/b/c/d/e/f` application is honest, but a mutation that swaps the
-    // residual's off-diagonal terms (b <-> c) cannot be observed through
-    // *this* walk's POLYLINE ops -- their b and c are always 0, by
-    // construction, on every fixture. That mutation was covered instead by
-    // `geometry_collector_test.dart`'s "applies the residual, and a
-    // transposed one is not the same residual", which drives
-    // `GeometryCollector.polyline` directly with a genuine off-diagonal
-    // residual.
-    //
-    // **That stopped being the whole story in Task 5.** Circle 701 and arc
-    // 703 reach the collector through `draft_painter.dart:568`'s general
-    // chain rather than through `_emitScreenSpace`, so they arrive under
-    // genuinely non-zero off-diagonal terms and a non-uniform scale -- the
-    // fixture's rotations at `fixtures.dart:88-96` and its two placements of
-    // `outer`. This gate covers the general-affine residual path from Task 5
-    // on, which is the path Plan A's transposition fix was written to guard
-    // and no Plan A fixture could reach.
-    // The expected instance list, generated declaratively from each
-    // `PolylineOp`'s deduped point list by `_expectedInstancesFor` -- not by
-    // replaying `GeometryCollector`'s own `_beginRun` / `_runTo` / `_endRun`
-    // state machine a second time. A rebuild that re-typed that state
-    // machine would share every misreading of it with the code under test;
-    // this rebuild instead reads the reference's own *documented* ordering
-    // rule (`vertices_draw_sink.dart`'s doc comments on `_runTo` and
-    // `_endRun`) straight off the point list, with no run-state bookkeeping
-    // of its own to get wrong the same way twice.
-    final expected = <_ExpectedInstance>[];
-    Transform2 residual = Transform2.identity();
-    for (final op in recording.ops) {
-      if (op is BeginResidualOp) residual = op.residual;
-      if (op is PolylineOp) {
-        // `PolylineOp.points` is already trimmed to the drawn point count
-        // (`draw_sink.dart`'s own doc comment) -- there is no separate
-        // `count` field on the op, unlike the brief's sample code assumed.
-        final pts = op.points;
-        _expectedInstancesFor(
-            pts, pts.length ~/ 2, op.closed, op.style, residual, expected);
-      }
-      // A circle and an arc reach the collector as a flattened run, so the
-      // oracle flattens them too -- from the REFERENCE's formula
-      // (`_flattenedLocalPoints` below), never from
-      // `GeometryCollector._flatten` -- and then hands the resulting point
-      // list to the same declarative rule the polylines use. A circle is
-      // `closed`, so it is where the rule's seam limb finally comes under
-      // this gate at all: the fixture carries no closed polyline, so before
-      // Task 5 that limb was exercised only by unit tests.
-      if (op is CircleOp) {
-        final pts = _flattenedLocalPoints(
-            op.cx, op.cy, op.r, 0, 2 * math.pi, residual,
-            closed: true);
-        _expectedInstancesFor(
-            pts, pts.length ~/ 2, true, op.style, residual, expected);
-      }
-      if (op is ArcOp) {
-        final pts = _flattenedLocalPoints(
-            op.cx, op.cy, op.r, op.start, op.sweep, residual,
-            closed: false);
-        _expectedInstancesFor(
-            pts, pts.length ~/ 2, false, op.style, residual, expected);
-      }
-      // A point is one instance, not a run -- no dedupe, no join, no seam.
-      // Its position is the residual applied to the op's own (already
-      // screen-rebased) coordinates, exactly as every other op's is above.
-      if (op is PointOp) {
-        expected.add(_ExpectedInstance.point(
-            op.style,
-            residual.a * op.x + residual.c * op.y + residual.e,
-            residual.b * op.x + residual.d * op.y + residual.f));
-      }
-    }
-
-    expect(expected, isNotEmpty,
-        reason: 'a fixture with no drawable geometry would make this test '
-            'vacuous -- polylines, circles and arcs all feed this list');
-    expect(collector.instanceCount, expected.length,
-        reason: 'the collector must emit exactly one instance per segment '
-            'and per join the declarative rule produces -- neither '
-            'dropping nor duplicating one');
-
-    // Captured once: `collector.data` copies `_buffer` on every access, so
-    // the comparison loop below reads a single snapshot rather than a fresh
-    // sublist per index.
-    final data = collector.data;
-
-    for (var i = 0; i < expected.length; i++) {
-      final o = i * kFloatsPerInstance;
-      final e = expected[i];
-      final style = e.style;
-
-      // -- kind: a stroke, a join and a point lay their geometry out
-      // differently (`InstanceFieldOffset` doc), so asserting only the
-      // strokes' kind would pass on a join or point emitted as a stroke with
-      // the wrong fields simply never being checked. Every instance's kind
-      // is asserted here, strokes, joins and points alike.
-      expect(data[o + InstanceFieldOffset.kind], e.kind,
-          reason: 'instance $i must be a '
-              '${e.kind == kKindJoin ? "join" : e.kind == kKindPoint ? "point" : "stroke"}');
-
-      // -- walk order & the residual -----------------------------------
-      // A stroke's (x0,y0,x1,y1) is its segment; a join's is
-      // (vertex, previous point) and (x2,y2) is its next point. A stroke's
-      // own (x2,y2) is asserted too (against 0,0, `writeStroke`'s own
-      // constant) rather than left unchecked, so a join emitted where a
-      // stroke was expected -- carrying a non-zero neighbour in x2/y2 --
-      // fails here instead of only on the kind check above.
-      expect(data[o + InstanceFieldOffset.x0], closeTo(e.x0, _tolerance),
-          reason: 'instance $i x0');
-      expect(data[o + InstanceFieldOffset.y0], closeTo(e.y0, _tolerance),
-          reason: 'instance $i y0');
-      expect(data[o + InstanceFieldOffset.x1], closeTo(e.x1, _tolerance),
-          reason: 'instance $i x1');
-      expect(data[o + InstanceFieldOffset.y1], closeTo(e.y1, _tolerance),
-          reason: 'instance $i y1');
-      expect(data[o + InstanceFieldOffset.x2], closeTo(e.x2, _tolerance),
-          reason: 'instance $i x2');
-      expect(data[o + InstanceFieldOffset.y2], closeTo(e.y2, _tolerance),
-          reason: 'instance $i y2');
-
-      // -- half-width: the collector stores DEVICE pixels, the reference
-      // sink's own formula (`VerticesDrawSink._halfWidthFor`) stores LOGICAL
-      // pixels. They must differ by exactly `devicePixelRatio` -- this is
-      // not a bug being tolerated, it is the fact this test pins (see the
-      // module doc on `GeometryCollector._halfWidthFor`). A join carries the
-      // same half-width as the segments either side of it.
-      final sinkHalf = _referenceLogicalHalfWidth(style.lineweightHundredths);
-      expect(data[o + InstanceFieldOffset.halfWidth],
-          closeTo(sinkHalf * _devicePixelRatio, _tolerance),
-          reason: 'instance $i half-width must be the reference sink\'s '
-              'logical half-width scaled by devicePixelRatio, not the raw '
-              'logical value copied straight across');
-
-      // -- colour: every entity in `differentialFixture` carries the
-      // default lineweight (25 hundredths-of-a-mm), which at
-      // `kLogicalPixelsPerMm` and dpr 2 computes to a device width above
-      // `VerticesDrawSink.kMinStrokeDevicePixels` -- so `_coveredArgb` is a
-      // no-op on every one of these segments and the reference colour is
-      // `style.argb` unmodified. That is why this fixture's colour
-      // comparison is meaningful without the collector implementing
-      // `_coveredArgb` itself: hairline fading is Plan B's job
-      // (`geometry_collector.dart`'s module doc), and folding it in here
-      // would smuggle that work into the wrong layer just to pass a test.
-      final argb = style.argb;
-      expect(data[o + InstanceFieldOffset.r],
-          closeTo(((argb >> 16) & 0xFF) / 255.0, _tolerance),
-          reason: 'instance $i red channel');
-      expect(data[o + InstanceFieldOffset.g],
-          closeTo(((argb >> 8) & 0xFF) / 255.0, _tolerance),
-          reason: 'instance $i green channel');
-      expect(data[o + InstanceFieldOffset.b],
-          closeTo((argb & 0xFF) / 255.0, _tolerance),
-          reason: 'instance $i blue channel');
-      expect(data[o + InstanceFieldOffset.a],
-          closeTo(((argb >> 24) & 0xFF) / 255.0, _tolerance),
-          reason: 'instance $i alpha channel');
-    }
+    _checkAgainstOracle(doc);
   });
+
+  test(
+      'fades a hairline stroke exactly as the reference sink does, not just '
+      'strokes above the floor', () {
+    // The Plan A ledger deferred this comparison: `differentialFixture`'s
+    // entities all sit above `VerticesDrawSink.kMinStrokeDevicePixels`, so
+    // routing the oracle's expected colour through `_referenceCoveredArgb`
+    // (above) is a no-op there and the fade formula itself goes untested by
+    // this file. Rather than add a hairline entity to `differentialFixture`
+    // -- shared by six other test files
+    // (`differential_test.dart`, `draft_canvas_test.dart`,
+    // `large_coordinate_test.dart`, `tile_invalidation_test.dart`,
+    // `vertices_differential_test.dart`, plus this one) whose entity counts,
+    // extents and tile boundaries a new entity could quietly move -- this is
+    // a second, local, single-purpose fixture instead.
+    final doc = _hairlineFixture();
+    _checkAgainstOracle(doc);
+  });
+}
+
+/// Runs [doc] through the painter twice -- once recorded, once collected --
+/// and checks every instance the collector wrote against the oracle built
+/// declaratively from the recording. Shared by both tests in this file, so
+/// the hairline fixture exercises the same oracle the main corpus does
+/// rather than a second, possibly-diverging copy of it.
+void _checkAgainstOracle(DraftDocument doc) {
+  final index = SpatialIndex(doc);
+  addTearDown(index.dispose);
+
+  final resolver = DocumentStyleResolver(doc);
+  final camera = ViewportTransform.fit(doc.extents, kViewport);
+  final painter = DraftPainter(document: doc, index: index, resolver: resolver);
+
+  // The reference: what the painter emits, recorded.
+  final recording = RecordingDrawSink();
+  painter.paint(recording, camera, kViewport);
+
+  // The arm: what the collector writes, from the same painter replaying
+  // the same camera over the same document.
+  final collector = GeometryCollector(
+      pixelsPerPaperMm: kLogicalPixelsPerMm,
+      devicePixelRatio: _devicePixelRatio);
+  painter.paint(collector, camera, kViewport);
+
+  // Rebuild the expected segment list from the recording, applying the
+  // residual exactly as the collector must, and keeping each segment's
+  // style alongside it so the half-width and colour checks below are
+  // per-segment.
+  // **What this residual actually is, in the real walk.** Every
+  // `beginResidual` a `PolylineOp` sees here carries a *pure translation*:
+  // `DraftPainter._emitScreenSpace` folds the full affine chain into the
+  // points themselves and leaves only the screen-origin rebase as the
+  // residual (`draft_painter.dart`, and its own comment that the general
+  // `_emit` polyline path is dead). So this loop's generic
+  // `a/b/c/d/e/f` application is honest, but a mutation that swaps the
+  // residual's off-diagonal terms (b <-> c) cannot be observed through
+  // *this* walk's POLYLINE ops -- their b and c are always 0, by
+  // construction, on every fixture. That mutation was covered instead by
+  // `geometry_collector_test.dart`'s "applies the residual, and a
+  // transposed one is not the same residual", which drives
+  // `GeometryCollector.polyline` directly with a genuine off-diagonal
+  // residual.
+  //
+  // **That stopped being the whole story in Task 5.** Circle 701 and arc
+  // 703 reach the collector through `draft_painter.dart:568`'s general
+  // chain rather than through `_emitScreenSpace`, so they arrive under
+  // genuinely non-zero off-diagonal terms and a non-uniform scale -- the
+  // fixture's rotations at `fixtures.dart:88-96` and its two placements of
+  // `outer`. This gate covers the general-affine residual path from Task 5
+  // on, which is the path Plan A's transposition fix was written to guard
+  // and no Plan A fixture could reach.
+  // The expected instance list, generated declaratively from each
+  // `PolylineOp`'s deduped point list by `_expectedInstancesFor` -- not by
+  // replaying `GeometryCollector`'s own `_beginRun` / `_runTo` / `_endRun`
+  // state machine a second time. A rebuild that re-typed that state
+  // machine would share every misreading of it with the code under test;
+  // this rebuild instead reads the reference's own *documented* ordering
+  // rule (`vertices_draw_sink.dart`'s doc comments on `_runTo` and
+  // `_endRun`) straight off the point list, with no run-state bookkeeping
+  // of its own to get wrong the same way twice.
+  final expected = <_ExpectedInstance>[];
+  Transform2 residual = Transform2.identity();
+  for (final op in recording.ops) {
+    if (op is BeginResidualOp) residual = op.residual;
+    if (op is PolylineOp) {
+      // `PolylineOp.points` is already trimmed to the drawn point count
+      // (`draw_sink.dart`'s own doc comment) -- there is no separate
+      // `count` field on the op, unlike the brief's sample code assumed.
+      final pts = op.points;
+      _expectedInstancesFor(
+          pts, pts.length ~/ 2, op.closed, op.style, residual, expected);
+    }
+    // A circle and an arc reach the collector as a flattened run, so the
+    // oracle flattens them too -- from the REFERENCE's formula
+    // (`_flattenedLocalPoints` below), never from
+    // `GeometryCollector._flatten` -- and then hands the resulting point
+    // list to the same declarative rule the polylines use. A circle is
+    // `closed`, so it is where the rule's seam limb finally comes under
+    // this gate at all: the fixture carries no closed polyline, so before
+    // Task 5 that limb was exercised only by unit tests.
+    if (op is CircleOp) {
+      final pts = _flattenedLocalPoints(
+          op.cx, op.cy, op.r, 0, 2 * math.pi, residual,
+          closed: true);
+      _expectedInstancesFor(
+          pts, pts.length ~/ 2, true, op.style, residual, expected);
+    }
+    if (op is ArcOp) {
+      final pts = _flattenedLocalPoints(
+          op.cx, op.cy, op.r, op.start, op.sweep, residual,
+          closed: false);
+      _expectedInstancesFor(
+          pts, pts.length ~/ 2, false, op.style, residual, expected);
+    }
+    // A point is one instance, not a run -- no dedupe, no join, no seam.
+    // Its position is the residual applied to the op's own (already
+    // screen-rebased) coordinates, exactly as every other op's is above.
+    if (op is PointOp) {
+      expected.add(_ExpectedInstance.point(
+          op.style,
+          residual.a * op.x + residual.c * op.y + residual.e,
+          residual.b * op.x + residual.d * op.y + residual.f));
+    }
+  }
+
+  expect(expected, isNotEmpty,
+      reason: 'a fixture with no drawable geometry would make this test '
+          'vacuous -- polylines, circles and arcs all feed this list');
+  expect(collector.instanceCount, expected.length,
+      reason: 'the collector must emit exactly one instance per segment '
+          'and per join the declarative rule produces -- neither '
+          'dropping nor duplicating one');
+
+  // Captured once: `collector.data` copies `_buffer` on every access, so
+  // the comparison loop below reads a single snapshot rather than a fresh
+  // sublist per index.
+  final data = collector.data;
+
+  for (var i = 0; i < expected.length; i++) {
+    final o = i * kFloatsPerInstance;
+    final e = expected[i];
+    final style = e.style;
+
+    // -- kind: a stroke, a join and a point lay their geometry out
+    // differently (`InstanceFieldOffset` doc), so asserting only the
+    // strokes' kind would pass on a join or point emitted as a stroke with
+    // the wrong fields simply never being checked. Every instance's kind
+    // is asserted here, strokes, joins and points alike.
+    expect(data[o + InstanceFieldOffset.kind], e.kind,
+        reason: 'instance $i must be a '
+            '${e.kind == kKindJoin ? "join" : e.kind == kKindPoint ? "point" : "stroke"}');
+
+    // -- walk order & the residual -----------------------------------
+    // A stroke's (x0,y0,x1,y1) is its segment; a join's is
+    // (vertex, previous point) and (x2,y2) is its next point. A stroke's
+    // own (x2,y2) is asserted too (against 0,0, `writeStroke`'s own
+    // constant) rather than left unchecked, so a join emitted where a
+    // stroke was expected -- carrying a non-zero neighbour in x2/y2 --
+    // fails here instead of only on the kind check above.
+    expect(data[o + InstanceFieldOffset.x0], closeTo(e.x0, _tolerance),
+        reason: 'instance $i x0');
+    expect(data[o + InstanceFieldOffset.y0], closeTo(e.y0, _tolerance),
+        reason: 'instance $i y0');
+    expect(data[o + InstanceFieldOffset.x1], closeTo(e.x1, _tolerance),
+        reason: 'instance $i x1');
+    expect(data[o + InstanceFieldOffset.y1], closeTo(e.y1, _tolerance),
+        reason: 'instance $i y1');
+    expect(data[o + InstanceFieldOffset.x2], closeTo(e.x2, _tolerance),
+        reason: 'instance $i x2');
+    expect(data[o + InstanceFieldOffset.y2], closeTo(e.y2, _tolerance),
+        reason: 'instance $i y2');
+
+    // -- half-width: the collector stores DEVICE pixels, the reference
+    // sink's own formula (`VerticesDrawSink._halfWidthFor`) stores LOGICAL
+    // pixels. They must differ by exactly `devicePixelRatio` -- this is
+    // not a bug being tolerated, it is the fact this test pins (see the
+    // module doc on `GeometryCollector._halfWidthFor`). A join carries the
+    // same half-width as the segments either side of it.
+    final sinkHalf = _referenceLogicalHalfWidth(style.lineweightHundredths);
+    expect(data[o + InstanceFieldOffset.halfWidth],
+        closeTo(sinkHalf * _devicePixelRatio, _tolerance),
+        reason: 'instance $i half-width must be the reference sink\'s '
+            'logical half-width scaled by devicePixelRatio, not the raw '
+            'logical value copied straight across');
+
+    // -- colour: every entity in `differentialFixture` carries the
+    // default lineweight (25 hundredths-of-a-mm), which at
+    // `kLogicalPixelsPerMm` and dpr 2 computes to a device width above
+    // `VerticesDrawSink.kMinStrokeDevicePixels` -- so `_coveredArgb` is a
+    // no-op on every one of those segments and this line changes nothing
+    // for them. It is still routed through the reference's own fade
+    // formula rather than left as `style.argb`, because Plan B's hairline
+    // corpus (`_hairlineFixture`, below) needs exactly this comparison to
+    // be live: a hairline's alpha now differs from its `style.argb`, and a
+    // collector that forgot to fade it, or faded it by the wrong formula,
+    // must fail this loop rather than being invisible to it.
+    final argb = _referenceCoveredArgb(style.argb, style.lineweightHundredths);
+    expect(data[o + InstanceFieldOffset.r],
+        closeTo(((argb >> 16) & 0xFF) / 255.0, _tolerance),
+        reason: 'instance $i red channel');
+    expect(data[o + InstanceFieldOffset.g],
+        closeTo(((argb >> 8) & 0xFF) / 255.0, _tolerance),
+        reason: 'instance $i green channel');
+    expect(data[o + InstanceFieldOffset.b],
+        closeTo((argb & 0xFF) / 255.0, _tolerance),
+        reason: 'instance $i blue channel');
+    expect(data[o + InstanceFieldOffset.a],
+        closeTo(((argb >> 24) & 0xFF) / 255.0, _tolerance),
+        reason: 'instance $i alpha channel');
+  }
 }
 
 /// One instance the oracle predicts, tagged with the [ResolvedStyle] it
@@ -429,4 +456,55 @@ double _referenceLogicalHalfWidth(int lineweightHundredths) {
       VerticesDrawSink.kMinStrokeDevicePixels / _devicePixelRatio;
   final w = logical.isFinite && logical > floorLogical ? logical : floorLogical;
   return w / 2;
+}
+
+/// `VerticesDrawSink._coveredArgb`, reproduced here for the same reason
+/// [_referenceLogicalHalfWidth] is: that method is private to its own file,
+/// and reading a live copy of `kMinStrokeDevicePixels` off the public
+/// constant keeps this a second, independent formula rather than a value
+/// shared with the code under test.
+int _referenceCoveredArgb(int argb, int lineweightHundredths) {
+  final deviceWidth =
+      lineweightHundredths / 100.0 * kLogicalPixelsPerMm * _devicePixelRatio;
+  if (!deviceWidth.isFinite ||
+      deviceWidth <= 0 ||
+      deviceWidth >= VerticesDrawSink.kMinStrokeDevicePixels) {
+    return argb;
+  }
+  final coverage = (deviceWidth * 2).clamp(0.0, 1.0);
+  final alpha = (((argb >> 24) & 0xFF) * coverage).round();
+  return (alpha << 24) | (argb & 0x00FFFFFF);
+}
+
+/// A single hairline entity, isolated from `differentialFixture` so this
+/// file's colour comparison can exercise `_coveredArgb`'s fade without
+/// disturbing the six other suites that share the standing corpus.
+///
+/// Wrapped in a rotated, non-uniformly scaled group -- not dropped straight
+/// on the root -- so this fixture does not become the identity-transform
+/// degenerate case `assertNoIdentityTransforms` exists to rule out
+/// elsewhere in this file: a hairline drawn at the identity would still
+/// exercise the fade, but it would do so without the residual this file's
+/// other oracle checks (x0/y0/.../y2, half-width) also depend on being
+/// non-trivial.
+///
+/// Lineweight 5 (0.05 mm) is chosen deliberately, not the smallest value
+/// available: at `kLogicalPixelsPerMm` and dpr 2 it computes to a device
+/// width of about 0.38 px, which fades to roughly 76% alpha -- a mid-range
+/// value neither 0 nor 255, so a fade formula that is merely *present* but
+/// computed wrong (an off-by-a-factor, a missed `x2`) still shows as a wrong
+/// number rather than agreeing by coincidence at a boundary.
+DraftDocument _hairlineFixture() {
+  final doc = DraftDocument.empty();
+  final group = addGroup(
+      doc,
+      doc.rootHandle,
+      const Handle(900),
+      Transform2.translation(37, -14)
+          .multiply(Transform2.rotation(0.83))
+          .multiply(Transform2.scale(1.7, 0.6)));
+  addEntity(
+      doc, group, const Handle(901), EntityKind.line, [0, 0, 6, 3], const [],
+      lineweight: 5);
+  return doc;
 }
