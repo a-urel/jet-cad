@@ -60,9 +60,14 @@ class GeometryCollector implements DrawSink {
   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
   int get instanceCount => _instances;
 
-  /// Ops this plan does not draw yet — arcs, circles, fills, text, points.
-  /// Counted rather than ignored so a corpus that needs Plan B through E is
-  /// visible as a number instead of as a missing picture.
+  /// Ops this plan does not draw yet — `fillPolygon`, `fillCircle` and
+  /// `text`. Counted rather than ignored so a corpus that needs Plan B
+  /// through E is visible as a number instead of as a missing picture.
+  ///
+  /// This is the post-Plan-B set, landing ahead of the code that makes it
+  /// true: `circle` and `arc` still count here today and stop counting in
+  /// Task 5, `point` stops counting in Task 6. Task 6 is also where the test
+  /// verifying this sentence lands.
   int get skippedOps => _skipped;
 
   /// Half the stroke's width, **in device pixels** — the space the vertex
@@ -91,6 +96,39 @@ class GeometryCollector implements DrawSink {
         ? device
         : kMinStrokeDevicePixels;
     return w / 2;
+  }
+
+  /// The colour a stroke of this width is actually drawn in.
+  ///
+  /// Mirrors `VerticesDrawSink._coveredArgb`, which mirrors Impeller's
+  /// `Geometry::ComputeStrokeAlphaCoverage`. A stroke thinner than one device
+  /// pixel keeps its pixel — [_halfWidthFor] floors the width — and gives up
+  /// alpha in proportion, so thinning a line fades it out instead of stopping
+  /// at one pixel and staying there.
+  ///
+  /// **A width of exactly zero keeps full alpha.** That is the hairline case,
+  /// and it is the first branch rather than an omission — the reference says
+  /// so in as many words.
+  ///
+  /// **This must never reach a fill.** `fillPolygon` and `fillCircle` pass
+  /// `style.argb` directly in the reference, because a fill entity's
+  /// `ResolvedStyle` still carries a lineweight from the shared column and
+  /// *"routing a fill through `_coveredArgb` would fade a filled room on a
+  /// hairline layer"*. Plan D adds those two ops; it inherits that rule.
+  int _coveredArgb(int argb, int lineweightHundredths) {
+    final deviceWidth = lineweightHundredths /
+        100.0 *
+        pixelsPerPaperMm *
+        lineweightScale *
+        devicePixelRatio;
+    if (!deviceWidth.isFinite ||
+        deviceWidth <= 0 ||
+        deviceWidth >= kMinStrokeDevicePixels) {
+      return argb;
+    }
+    final coverage = (deviceWidth * 2).clamp(0.0, 1.0);
+    final alpha = (((argb >> 24) & 0xFF) * coverage).round();
+    return (alpha << 24) | (argb & 0x00FFFFFF);
   }
 
   void _emit(
@@ -135,6 +173,7 @@ class GeometryCollector implements DrawSink {
       {required bool closed}) {
     if (count < 2) return;
     final half = _halfWidthFor(style.lineweightHundredths);
+    final argb = _coveredArgb(style.argb, style.lineweightHundredths);
     final t = _residual;
     var px = t.a * points[0] + t.c * points[1] + t.e;
     var py = t.b * points[0] + t.d * points[1] + t.f;
@@ -142,11 +181,11 @@ class GeometryCollector implements DrawSink {
     for (var i = 1; i < count; i++) {
       final qx = t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e;
       final qy = t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f;
-      _emit(px, py, qx, qy, half, style.argb);
+      _emit(px, py, qx, qy, half, argb);
       px = qx;
       py = qy;
     }
-    if (closed) _emit(px, py, firstX, firstY, half, style.argb);
+    if (closed) _emit(px, py, firstX, firstY, half, argb);
   }
 
   @override

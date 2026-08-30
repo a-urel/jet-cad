@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_flutter/src/gpu/geometry_collector.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
 
 const _style = ResolvedStyle(
@@ -140,5 +140,82 @@ void main() {
     // still pinned: a dropped `lineweightScale` factor would make this test
     // read 2.0 instead of 4.0.
     expect(c.data[InstanceFieldOffset.halfWidth], 4.0);
+  });
+
+  test('a sub-pixel stroke keeps its pixel and gives up alpha', () {
+    // 0.05 mm at 3.7795275590551185 px/mm and dpr 1 is 0.189 device pixels --
+    // under the one-pixel floor, so the reference fades it. The collector
+    // must fade it by the same factor or the two arms disagree on colour on
+    // every hairline layer, which is exactly what Task 9 rasterises.
+    const dpr = 1.0;
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: dpr);
+    const style = ResolvedStyle(
+        argb: 0xFF204060,
+        lineweightHundredths: 5,
+        linetype: Handle.none,
+        linetypeScale: 1);
+    c.polyline(Float64List.fromList(<double>[0, 0, 40, 0]), 2, style,
+        closed: false);
+
+    final deviceWidth = 5 / 100.0 * kLogicalPixelsPerMm * dpr;
+    expect(deviceWidth, lessThan(1.0),
+        reason:
+            'the fixture must actually be sub-pixel or this asserts nothing');
+    final coverage = (deviceWidth * 2).clamp(0.0, 1.0);
+    final expectedAlpha = (0xFF * coverage).round();
+
+    final r = c.data;
+    expect(r[InstanceFieldOffset.a] * 255.0, closeTo(expectedAlpha, 0.51));
+    // The colour channels are untouched: `_coveredArgb` gives up alpha, it
+    // does not darken. A implementation that multiplied the channels instead
+    // would pass an alpha-only assertion.
+    expect(r[InstanceFieldOffset.r] * 255.0, closeTo(0x20, 0.51));
+    expect(r[InstanceFieldOffset.g] * 255.0, closeTo(0x40, 0.51));
+    expect(r[InstanceFieldOffset.b] * 255.0, closeTo(0x60, 0.51));
+    // And the width still floors at one device pixel: the fade replaces the
+    // missing width, it does not accompany a thinner quad.
+    expect(r[InstanceFieldOffset.halfWidth],
+        closeTo(GeometryCollector.kMinStrokeDevicePixels / 2, 1e-6));
+  });
+
+  test('a stroke at or above one device pixel keeps full alpha', () {
+    // The other side of the branch. Without this, deleting the
+    // `deviceWidth >= kMinStrokeDevicePixels` guard -- fading *every* stroke
+    // -- goes unnoticed.
+    const dpr = 2.0;
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: dpr);
+    const style = ResolvedStyle(
+        argb: 0xC0204060,
+        lineweightHundredths: 25,
+        linetype: Handle.none,
+        linetypeScale: 1);
+    c.polyline(Float64List.fromList(<double>[0, 0, 40, 0]), 2, style,
+        closed: false);
+    final deviceWidth = 25 / 100.0 * kLogicalPixelsPerMm * dpr;
+    expect(deviceWidth, greaterThan(1.0),
+        reason: 'the fixture must actually be above the floor');
+    expect(c.data[InstanceFieldOffset.a] * 255.0, closeTo(0xC0, 0.51));
+  });
+
+  test('a zero lineweight is the hairline case and keeps full alpha', () {
+    // `_coveredArgb`'s first branch: `deviceWidth <= 0` returns argb
+    // unchanged. That is deliberate in the reference -- "A width of exactly
+    // zero is the hairline case and keeps full alpha -- that is the first
+    // branch there, not an omission" -- and a collector that clamped
+    // coverage from 0 would draw every hairline entity invisible.
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.polyline(
+        Float64List.fromList(<double>[0, 0, 40, 0]),
+        2,
+        const ResolvedStyle(
+            argb: 0xFF112233,
+            lineweightHundredths: 0,
+            linetype: Handle.none,
+            linetypeScale: 1),
+        closed: false);
+    expect(c.data[InstanceFieldOffset.a] * 255.0, closeTo(0xFF, 0.51));
   });
 }
