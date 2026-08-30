@@ -29,10 +29,19 @@ class GeometryCollector implements DrawSink {
   final double lineweightScale;
 
   /// **A minimum stroke width in device pixels.** Copied from
-  /// `VerticesDrawSink.kMinStrokeDevicePixels` rather than shared, because that
-  /// one is a private implementation detail of a sink this class does not use.
-  /// If the two ever disagree the differential test in Task 8 goes red, which
-  /// is the intended alarm.
+  /// `VerticesDrawSink.kMinStrokeDevicePixels` rather than referenced —
+  /// that constant is public (`vertices_draw_sink.dart:527`), so this is not
+  /// a visibility workaround. It is kept a separate copy because these two
+  /// classes are independent implementations of the same `DrawSink`
+  /// contract, cross-checked by `collector_differential_test.dart` precisely
+  /// *because* they arrive at their numbers separately; sharing this field
+  /// would make that comparison partly circular, since both sides would be
+  /// reading one value rather than two that happen to agree. If the two
+  /// ever disagree the differential test (Task 8) goes red, which is the
+  /// intended alarm — and `collector_differential_test.dart:204` reads
+  /// `VerticesDrawSink.kMinStrokeDevicePixels` live (not hardcoded) on the
+  /// reference side specifically so that alarm stays real if either value
+  /// changes.
   static const double kMinStrokeDevicePixels = 1.0;
 
   Float32List _buffer = Float32List(0);
@@ -40,6 +49,14 @@ class GeometryCollector implements DrawSink {
   int _skipped = 0;
   Transform2 _residual = Transform2.identity();
 
+  /// Copies `_buffer` on every access — `sublist` allocates a fresh
+  /// `Float32List`, not a view. At this plan's measured 10,000-entity scale
+  /// (`resident_geometry.dart`'s doc) that is roughly 400 KB copied per call
+  /// (10,000 instances × [kFloatsPerInstance] floats × 4 bytes). Read it
+  /// once per rebuild, into `ResidentGeometry.create`, and hoist it out of
+  /// any per-frame path — Plan F's `paint()` call site included — or it
+  /// breaks this project's "the frame path allocates nothing per entity in
+  /// steady state" non-negotiable.
   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
   int get instanceCount => _instances;
 

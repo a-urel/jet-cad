@@ -98,22 +98,31 @@ class ResidentGeometry {
       gpu.VertexBuffer(
         strideInBytes: kFloatsPerInstance * 4,
         stepMode: gpu.VertexStepMode.instance,
+        // Offsets derive from `StrokeFieldOffset` (`instance_record.dart`),
+        // not restated as bare literals — see that class's doc for why: a
+        // reorder there moves these in lockstep instead of leaving them
+        // pointing at the wrong bytes silently.
         attributes: <gpu.VertexAttribute>[
-          gpu.VertexAttribute(name: 'kind', format: gpu.VertexFormat.float32),
           gpu.VertexAttribute(
-              name: 'p0', format: gpu.VertexFormat.float32x2, offsetInBytes: 4),
+              name: 'kind',
+              format: gpu.VertexFormat.float32,
+              offsetInBytes: StrokeFieldOffset.kind * 4),
+          gpu.VertexAttribute(
+              name: 'p0',
+              format: gpu.VertexFormat.float32x2,
+              offsetInBytes: StrokeFieldOffset.x0 * 4),
           gpu.VertexAttribute(
               name: 'p1',
               format: gpu.VertexFormat.float32x2,
-              offsetInBytes: 12),
+              offsetInBytes: StrokeFieldOffset.x1 * 4),
           gpu.VertexAttribute(
               name: 'half_width',
               format: gpu.VertexFormat.float32,
-              offsetInBytes: 20),
+              offsetInBytes: StrokeFieldOffset.halfWidth * 4),
           gpu.VertexAttribute(
               name: 'color',
               format: gpu.VertexFormat.float32x4,
-              offsetInBytes: 24),
+              offsetInBytes: StrokeFieldOffset.r * 4),
         ],
       ),
     ],
@@ -132,7 +141,8 @@ class ResidentGeometry {
   /// the GPU is confirmed present, so a failure there (a bad or missing
   /// shader-bundle asset key — `ShaderLibrary.fromAsset` throws `Exception
   /// ("Failed to initialize ShaderLibrary: ...")`,
-  /// `flutter_gpu/src/shader_library.dart:28-31` — or a device buffer
+  /// `flutter_gpu/src/shader_library.dart:28-31` — a present bundle missing a
+  /// named entry point, thrown explicitly below — or a device buffer
   /// allocation the driver rejected — `createDeviceBufferWithCopy` throws
   /// `Exception('DeviceBuffer creation failed')`,
   /// `flutter_gpu/src/context.dart:152-158`) is a real bug, not an expected
@@ -165,7 +175,25 @@ class ResidentGeometry {
     final library = await gpu.loadShaderLibraryAsync(_bundlePath);
     final vertex = library?['CadStrokeVertex'];
     final fragment = library?['CadStrokeFragment'];
-    if (vertex == null || fragment == null) return null;
+    if (vertex == null || fragment == null) {
+      // A bad asset *path* already throws inside `loadShaderLibraryAsync`
+      // (native: `ShaderLibrary.fromAsset` throws on a missing key; web: the
+      // library comes back null and is caught by `create`'s try/catch via
+      // `library?[...]` never populating). What reaches here instead is a
+      // present bundle missing a named entry point -- typically a rename or
+      // typo between this file's lookup keys and `tool/build_shaders.sh:57`'s
+      // `--shader-bundle` JSON. Throwing (rather than returning null) routes
+      // this through `create`'s catch at :149-158, so it is reported via
+      // `FlutterError.reportError` like every other upload failure instead of
+      // silently collapsing into the "no GPU on this platform" case.
+      final missing = <String>[
+        if (vertex == null) 'CadStrokeVertex',
+        if (fragment == null) 'CadStrokeFragment',
+      ];
+      throw StateError('shader bundle "$_bundlePath" is missing entry point(s) '
+          '${missing.join(', ')} -- check tool/build_shaders.sh\'s '
+          '--shader-bundle JSON against these lookup keys');
+    }
 
     final corners = Float32List.fromList(kCornerVertices);
 

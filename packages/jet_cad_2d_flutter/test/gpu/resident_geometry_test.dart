@@ -84,5 +84,50 @@ void main() {
         'color': 24,
       });
     });
+
+    test(
+        'writeStroke and the vertex layout agree on where every field '
+        'lands -- a derivation, not a restatement', () {
+      // Distinct values in every slot, so a field landing at the wrong
+      // offset reads a value that belongs to a different field rather than
+      // coincidentally matching (a fixture at 0.0 or a repeated value would
+      // hide exactly that mistake). writeStroke packs colour from `argb`
+      // (0xAARRGGBB); picking one byte per channel keeps every colour slot
+      // distinct too.
+      final record = Float32List(kFloatsPerInstance);
+      writeStroke(record, 0,
+          x0: 11.0,
+          y0: 22.0,
+          x1: 33.0,
+          y1: 44.0,
+          halfWidth: 5.5,
+          argb: 0x8060A0C0);
+      final bytes = ByteData.sublistView(record);
+
+      // Read every field back through kStrokeVertexLayout's own attribute
+      // offsets, never through StrokeFieldOffset's float indices directly --
+      // that would only prove the layout agrees with itself. This is the
+      // cross-check the plain offset map above cannot make: it fails if
+      // *either* writeStroke's write order or kStrokeVertexLayout's
+      // attribute offsets move without the other, because both are read
+      // through the one path a real upload would use.
+      final instance = ResidentGeometry.kStrokeVertexLayout.buffers[1];
+      double byName(String name, int floatIndexWithinAttribute) {
+        final attr = instance.attributes.singleWhere((a) => a.name == name);
+        return bytes.getFloat32(
+            attr.offsetInBytes + floatIndexWithinAttribute * 4, Endian.host);
+      }
+
+      expect(byName('kind', 0), kKindStroke);
+      expect(byName('p0', 0), 11.0, reason: 'x0');
+      expect(byName('p0', 1), 22.0, reason: 'y0');
+      expect(byName('p1', 0), 33.0, reason: 'x1');
+      expect(byName('p1', 1), 44.0, reason: 'y1');
+      expect(byName('half_width', 0), 5.5);
+      expect(byName('color', 0), closeTo(0x60 / 255.0, 1e-6), reason: 'r');
+      expect(byName('color', 1), closeTo(0xA0 / 255.0, 1e-6), reason: 'g');
+      expect(byName('color', 2), closeTo(0xC0 / 255.0, 1e-6), reason: 'b');
+      expect(byName('color', 3), closeTo(0x80 / 255.0, 1e-6), reason: 'a');
+    });
   });
 }

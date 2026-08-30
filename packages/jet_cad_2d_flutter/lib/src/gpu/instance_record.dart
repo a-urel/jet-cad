@@ -20,6 +20,32 @@ const int kFloatsPerInstance = 10;
 /// reverted once already, partitioned by colour rather than by kind.
 const double kKindStroke = 0;
 
+/// The record's field layout, as an offset in **floats** from the record's
+/// start — [writeStroke] indexes by float, not byte.
+///
+/// **The one place this order is declared for Dart.**
+/// `ResidentGeometry.kStrokeVertexLayout` (`resident_geometry.dart`) derives
+/// its `offsetInBytes` values from these same constants (`* 4`), so
+/// reordering a field here moves both [writeStroke] and the vertex layout
+/// together instead of leaving one behind. `cad_stroke.vert`'s attribute
+/// list is a third, independent copy — GLSL cannot read a Dart constant —
+/// and nothing in this package catches that copy drifting from these two;
+/// only a device run, or hand-verifying against `impellerc`'s reflection the
+/// way `kStrokeVertexLayout`'s own doc comment records having done once,
+/// would.
+abstract final class StrokeFieldOffset {
+  static const int kind = 0;
+  static const int x0 = 1;
+  static const int y0 = 2;
+  static const int x1 = 3;
+  static const int y1 = 4;
+  static const int halfWidth = 5;
+  static const int r = 6;
+  static const int g = 7;
+  static const int b = 8;
+  static const int a = 9;
+}
+
 /// Writes the stroke record at [index]. [argb] is `0xAARRGGBB`.
 void writeStroke(
   Float32List into,
@@ -32,14 +58,14 @@ void writeStroke(
   required int argb,
 }) {
   final o = index * kFloatsPerInstance;
-  into[o] = kKindStroke;
-  into[o + 1] = x0;
-  into[o + 2] = y0;
-  into[o + 3] = x1;
-  into[o + 4] = y1;
-  into[o + 5] = halfWidth;
-  into[o + 6] = ((argb >> 16) & 0xFF) / 255.0;
-  into[o + 7] = ((argb >> 8) & 0xFF) / 255.0;
-  into[o + 8] = (argb & 0xFF) / 255.0;
-  into[o + 9] = ((argb >> 24) & 0xFF) / 255.0;
+  into[o + StrokeFieldOffset.kind] = kKindStroke;
+  into[o + StrokeFieldOffset.x0] = x0;
+  into[o + StrokeFieldOffset.y0] = y0;
+  into[o + StrokeFieldOffset.x1] = x1;
+  into[o + StrokeFieldOffset.y1] = y1;
+  into[o + StrokeFieldOffset.halfWidth] = halfWidth;
+  into[o + StrokeFieldOffset.r] = ((argb >> 16) & 0xFF) / 255.0;
+  into[o + StrokeFieldOffset.g] = ((argb >> 8) & 0xFF) / 255.0;
+  into[o + StrokeFieldOffset.b] = (argb & 0xFF) / 255.0;
+  into[o + StrokeFieldOffset.a] = ((argb >> 24) & 0xFF) / 255.0;
 }
