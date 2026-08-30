@@ -17,6 +17,10 @@ const _hairlineStyle = ResolvedStyle(
     linetype: Handle.none,
     linetypeScale: 1);
 
+/// Reads the kind tag of instance [i].
+double _kindAt(GeometryCollector c, int i) =>
+    c.data[i * kFloatsPerInstance + InstanceFieldOffset.kind];
+
 void main() {
   test('applies the residual, and a transposed one is not the same residual',
       () {
@@ -59,9 +63,17 @@ void main() {
         closed: false);
     c.endResidual();
 
-    expect(c.instanceCount, 2);
+    // Stroke, join (at the corner), stroke -- three instances now that the
+    // interior join is emitted between the two segments (Task 4); see 'an
+    // open three-point run is join-before-segment, and nothing else'.
+    expect(c.instanceCount, 3);
+    expect(c.data[InstanceFieldOffset.kind], kKindStroke);
     expect(c.data.sublist(1, 5), [0.0, 0.0, 1.0, 0.0]);
-    expect(c.data.sublist(kFloatsPerInstance + 1, kFloatsPerInstance + 5),
+    expect(c.data[kFloatsPerInstance + InstanceFieldOffset.kind], kKindJoin);
+    expect(
+        c.data[2 * kFloatsPerInstance + InstanceFieldOffset.kind], kKindStroke);
+    expect(
+        c.data.sublist(2 * kFloatsPerInstance + 1, 2 * kFloatsPerInstance + 5),
         [1.0, 0.0, 1.0, 1.0]);
   });
 
@@ -78,12 +90,19 @@ void main() {
         closed: true);
     c.endResidual();
 
-    expect(c.instanceCount, 3);
+    // Stroke, join, stroke, join, closing stroke, seam join -- six
+    // instances now that joins are interleaved (Task 4); see 'a closed run
+    // emits the closing segment and then the seam join'. The three strokes
+    // sit at instances 0, 2 and 4 -- the joins at 1, 3 and 5 shift every
+    // later stroke's index, which is why this can no longer read
+    // consecutive slots.
+    expect(c.instanceCount, 6);
     expect(c.data.sublist(1, 5), [0.0, 0.0, 1.0, 0.0]);
-    expect(c.data.sublist(kFloatsPerInstance + 1, kFloatsPerInstance + 5),
-        [1.0, 0.0, 1.0, 1.0]);
     expect(
         c.data.sublist(2 * kFloatsPerInstance + 1, 2 * kFloatsPerInstance + 5),
+        [1.0, 0.0, 1.0, 1.0]);
+    expect(
+        c.data.sublist(4 * kFloatsPerInstance + 1, 4 * kFloatsPerInstance + 5),
         [1.0, 1.0, 0.0, 0.0],
         reason: 'the closing segment must run from the last point back to '
             'the first');
@@ -217,5 +236,133 @@ void main() {
             linetypeScale: 1),
         closed: false);
     expect(c.data[InstanceFieldOffset.a] * 255.0, closeTo(0xFF, 0.51));
+  });
+
+  test('an open three-point run is join-before-segment, and nothing else', () {
+    // Three points, one corner. The reference emits: segment(0,1),
+    // join(1), segment(1,2) -- in that order, with the join written before
+    // the segment it precedes. Butt caps mean there is nothing at either
+    // end (Ruling B2), so the count is exactly 3.
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.polyline(
+        Float64List.fromList(<double>[0, 0, 40, 0, 40, 30]),
+        3,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1),
+        closed: false);
+    expect(c.instanceCount, 3,
+        reason: 'segment, join, segment -- no caps, no trailing join');
+    expect(<double>[
+      _kindAt(c, 0),
+      _kindAt(c, 1),
+      _kindAt(c, 2)
+    ], <double>[
+      kKindStroke,
+      kKindJoin,
+      kKindStroke
+    ], reason: 'the join is written BEFORE the segment that follows it');
+  });
+
+  test('the join carries the corner and both its neighbours', () {
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.polyline(
+        Float64List.fromList(<double>[0, 0, 40, 0, 40, 30]),
+        3,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1),
+        closed: false);
+    final j = c.data.sublist(kFloatsPerInstance, 2 * kFloatsPerInstance);
+    expect(j[InstanceFieldOffset.x0], 40, reason: 'the vertex');
+    expect(j[InstanceFieldOffset.y0], 0);
+    expect(j[InstanceFieldOffset.x1], 0, reason: 'the previous point');
+    expect(j[InstanceFieldOffset.y1], 0);
+    expect(j[InstanceFieldOffset.x2], 40, reason: 'the next point');
+    expect(j[InstanceFieldOffset.y2], 30);
+  });
+
+  test('a closed run emits the closing segment and then the seam join', () {
+    // A triangle: three points, closed. Segments 0-1, 1-2, 2-0 with a join
+    // at vertices 1 and 2, then the seam join at vertex 0 -- LAST, after the
+    // closing segment. Six instances, and the last one is the seam.
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.polyline(
+        Float64List.fromList(<double>[0, 0, 60, 0, 30, 50]),
+        3,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1),
+        closed: true);
+    expect(c.instanceCount, 6);
+    expect(List<double>.generate(6, (i) => _kindAt(c, i)), <double>[
+      kKindStroke, // 0 -> 1
+      kKindJoin, //   at 1
+      kKindStroke, // 1 -> 2
+      kKindJoin, //   at 2
+      kKindStroke, // 2 -> 0, the closing segment
+      kKindJoin, //   the seam, at 0, LAST
+    ]);
+    final seam = c.data.sublist(5 * kFloatsPerInstance);
+    expect(seam[InstanceFieldOffset.x0], 0,
+        reason: 'the seam is at the first point');
+    expect(seam[InstanceFieldOffset.y0], 0);
+    expect(seam[InstanceFieldOffset.x1], 30,
+        reason: 'incoming from the last point');
+    expect(seam[InstanceFieldOffset.y1], 50);
+    expect(seam[InstanceFieldOffset.x2], 60,
+        reason: 'outgoing to the second point');
+    expect(seam[InstanceFieldOffset.y2], 0);
+  });
+
+  test('a repeated point is spanned by the join, not turned into one', () {
+    // The reference's `_runTo` skips a zero-length step and KEEPS the
+    // previous direction, so a duplicated vertex produces the same corner a
+    // clean polyline would. A collector that reset its direction on the
+    // repeat would emit a join between two identical points and draw
+    // nothing there.
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.polyline(
+        Float64List.fromList(<double>[0, 0, 40, 0, 40, 0, 40, 30]),
+        4,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1),
+        closed: false);
+    expect(c.instanceCount, 3, reason: 'the repeat adds no instance');
+    final j = c.data.sublist(kFloatsPerInstance, 2 * kFloatsPerInstance);
+    expect(j[InstanceFieldOffset.x1], 0,
+        reason: 'the incoming neighbour is still the first point');
+    expect(j[InstanceFieldOffset.y1], 0);
+  });
+
+  test('a two-point run has no join at all', () {
+    // The degenerate case a join implementation gets wrong in the other
+    // direction: emitting a join at the start or the end of an open run.
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.polyline(
+        Float64List.fromList(<double>[0, 0, 40, 30]),
+        2,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1),
+        closed: false);
+    expect(c.instanceCount, 1);
+    expect(_kindAt(c, 0), kKindStroke);
   });
 }

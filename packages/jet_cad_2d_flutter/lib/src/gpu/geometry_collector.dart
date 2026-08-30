@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -48,6 +49,22 @@ class GeometryCollector implements DrawSink {
   int _instances = 0;
   int _skipped = 0;
   Transform2 _residual = Transform2.identity();
+
+  // The run state machine, mirroring `VerticesDrawSink._beginRun` /
+  // `_runTo` / `_endRun`. It is duplicated rather than shared because these
+  // two classes are independent implementations of one `DrawSink` contract,
+  // cross-checked against each other by the differential gates -- the same
+  // reason `kMinStrokeDevicePixels` is a separate copy.
+  //
+  // Points, not directions: `_runBack` is the point BEFORE `_runPrev`, so a
+  // join is written as its three points and the shader normalises after the
+  // mvp. See `writeJoin`'s doc for why directions could not be stored here.
+  double _runFirstX = 0, _runFirstY = 0;
+  double _runSecondX = 0, _runSecondY = 0;
+  double _runPrevX = 0, _runPrevY = 0;
+  double _runBackX = 0, _runBackY = 0;
+  bool _runHasDirection = false;
+  int _runSegments = 0;
 
   /// Copies `_buffer` on every access — `sublist` allocates a fresh
   /// `Float32List`, not a view. At this plan's measured 10,000-entity scale
@@ -133,13 +150,95 @@ class GeometryCollector implements DrawSink {
 
   void _emit(
       double x0, double y0, double x1, double y1, double half, int argb) {
-    // Exactly the sink's own test: `_emitSegment` bails on zero length
-    // (`vertices_draw_sink.dart:503-507`). A degenerate segment has no
-    // direction and the shader would divide by zero building its normal.
-    if (x0 == x1 && y0 == y1) return;
+    // The reference's own test (`vertices_draw_sink.dart`, `_emitSegment`): a
+    // zero-length segment has no direction to take a normal from. Matching
+    // the formula, not the intention -- see `_runTo`.
+    final dx = x1 - x0, dy = y1 - y0;
+    if (math.sqrt(dx * dx + dy * dy) == 0) return;
     _reserve(_instances + 1);
     writeStroke(_buffer, _instances,
         x0: x0, y0: y0, x1: x1, y1: y1, halfWidth: half, argb: argb);
+    _instances++;
+  }
+
+  /// Starts a connected run at a collection-space point.
+  void _beginRun(double x, double y) {
+    _runFirstX = x;
+    _runFirstY = y;
+    _runSecondX = x;
+    _runSecondY = y;
+    _runPrevX = x;
+    _runPrevY = y;
+    _runBackX = x;
+    _runBackY = y;
+    _runHasDirection = false;
+    _runSegments = 0;
+  }
+
+  /// Extends the run, emitting the join **before** the segment.
+  ///
+  /// The zero-length test is `length == 0` on the square root, not
+  /// `x == _runPrevX && y == _runPrevY`, because that is the reference's test
+  /// (`vertices_draw_sink.dart`, `_runTo`) and the two are not the same
+  /// predicate: for a displacement near the underflow boundary `dx * dx`
+  /// rounds to zero while `dx` itself is non-zero, so the equality form keeps
+  /// a step the reference drops. Matching the formula rather than the
+  /// intention is what keeps the two arms' instance lists identical.
+  void _runTo(double x, double y, double half, int argb) {
+    final dx = x - _runPrevX, dy = y - _runPrevY;
+    if (math.sqrt(dx * dx + dy * dy) == 0) return;
+
+    if (_runHasDirection) {
+      _emitJoin(_runPrevX, _runPrevY, _runBackX, _runBackY, x, y, half, argb);
+    } else {
+      _runSecondX = x;
+      _runSecondY = y;
+    }
+    _emit(_runPrevX, _runPrevY, x, y, half, argb);
+
+    _runBackX = _runPrevX;
+    _runBackY = _runPrevY;
+    _runPrevX = x;
+    _runPrevY = y;
+    _runHasDirection = true;
+    _runSegments++;
+  }
+
+  /// Ends the run.
+  ///
+  /// An open run gets butt caps, which is to say nothing at all — the
+  /// reference's own words, and the reason this plan emits no cap geometry.
+  /// A closed run gets the segment back to its first point and then the seam
+  /// join, the corner no vertex list contains and the one whose absence puts
+  /// a notch on every circle at its start angle.
+  void _endRun(
+      {required bool closed, required double half, required int argb}) {
+    if (!closed || !_runHasDirection) return;
+    _runTo(_runFirstX, _runFirstY, half, argb);
+    // Guarded for the same reason the reference guards it: today's callers
+    // cannot reach here with one segment, but that is a fact about the
+    // callers, not a promise the join arithmetic makes.
+    if (_runSegments >= 2) {
+      _emitJoin(_runFirstX, _runFirstY, _runBackX, _runBackY, _runSecondX,
+          _runSecondY, half, argb);
+    }
+  }
+
+  void _emitJoin(double vx, double vy, double prevX, double prevY, double nextX,
+      double nextY, double half, int argb) {
+    // No collinearity test here, deliberately: the bevel/miter/collinear
+    // decision belongs to the shader, in device pixels, where the reference
+    // makes it too. See this plan's Ruling B4.
+    _reserve(_instances + 1);
+    writeJoin(_buffer, _instances,
+        vx: vx,
+        vy: vy,
+        prevX: prevX,
+        prevY: prevY,
+        nextX: nextX,
+        nextY: nextY,
+        halfWidth: half,
+        argb: argb);
     _instances++;
   }
 
@@ -175,17 +274,13 @@ class GeometryCollector implements DrawSink {
     final half = _halfWidthFor(style.lineweightHundredths);
     final argb = _coveredArgb(style.argb, style.lineweightHundredths);
     final t = _residual;
-    var px = t.a * points[0] + t.c * points[1] + t.e;
-    var py = t.b * points[0] + t.d * points[1] + t.f;
-    final firstX = px, firstY = py;
+    _beginRun(t.a * points[0] + t.c * points[1] + t.e,
+        t.b * points[0] + t.d * points[1] + t.f);
     for (var i = 1; i < count; i++) {
-      final qx = t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e;
-      final qy = t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f;
-      _emit(px, py, qx, qy, half, argb);
-      px = qx;
-      py = qy;
+      _runTo(t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e,
+          t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f, half, argb);
     }
-    if (closed) _emit(px, py, firstX, firstY, half, argb);
+    _endRun(closed: closed, half: half, argb: argb);
   }
 
   @override
