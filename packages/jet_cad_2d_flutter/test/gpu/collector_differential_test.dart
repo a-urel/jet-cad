@@ -64,6 +64,20 @@ void main() {
     // residual exactly as the collector must, and keeping each segment's
     // style alongside it so the half-width and colour checks below are
     // per-segment.
+    // **What this residual actually is, in the real walk.** Every
+    // `beginResidual` a `PolylineOp` sees here carries a *pure translation*:
+    // `DraftPainter._emitScreenSpace` folds the full affine chain into the
+    // points themselves and leaves only the screen-origin rebase as the
+    // residual (`draft_painter.dart`, and its own comment that the general
+    // `_emit` polyline path is dead). So this loop's generic
+    // `a/b/c/d/e/f` application is honest, but a mutation that swaps the
+    // residual's off-diagonal terms (b <-> c) cannot be observed through
+    // *this* walk -- b and c are always 0 here, by construction, on every
+    // fixture. That mutation is covered instead by
+    // `geometry_collector_test.dart`'s "applies the residual, and a
+    // transposed one is not the same residual", which drives
+    // `GeometryCollector.polyline` directly with a genuine off-diagonal
+    // residual. See Task 8's report for the transcript proving that.
     final expectedPoints = <List<double>>[];
     final expectedStyles = <ResolvedStyle>[];
     Transform2 residual = Transform2.identity();
