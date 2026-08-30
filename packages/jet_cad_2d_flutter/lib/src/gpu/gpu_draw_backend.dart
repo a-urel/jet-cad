@@ -40,7 +40,7 @@ import 'resident_geometry.dart';
 /// or vice versa for a garbled `mvp`. Task 9's picture was both correctly
 /// placed and correctly weighted, which is evidence both halves of the
 /// block reached the shader, not only that `bindUniform` accepted the bind
-/// (see `.superpowers/sdd/2026-08-29-gpu-backend-plan-a-seam-and-strokes/
+/// (see `docs/superpowers/ledgers/2026-08-29-gpu-backend-plan-a-seam-and-strokes/
 /// task-9-report.md`).
 ///
 /// [collectionToDevice] takes a point in the buffer's space — the collection
