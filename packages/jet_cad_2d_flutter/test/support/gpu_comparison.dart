@@ -30,6 +30,26 @@
 /// draw order can only be pinned by a record-order assertion
 /// (`collector_differential_test.dart`'s walk-order check), never by this
 /// instrument.
+///
+/// **Geometry added INSIDE the existing footprint is invisible, and this is
+/// proved rather than suspected.** [measureResidentAgreement] counts the
+/// symmetric difference of two coverage unions, so a defect that only adds
+/// triangles where ink already sits moves no pixel at all. The proof is
+/// M-B7 against M-B15 (`task-9-report.md`): flipping every join wedge to the
+/// wrong side of its corner and deleting every join outright produce the
+/// *identical* reading, 26 differing pixels, and in both cases
+/// `differing == referenceInk - residentInk` -- the resident set is a pure
+/// subset of the reference's. A wrong-side wedge is wholly invented geometry
+/// at every corner in the corpus and it contributes zero new pixels, because
+/// it lands entirely within the union of the two adjacent segment quads.
+///
+/// So this instrument cannot see: a join emitted on both sides, a duplicated
+/// instance, a segment quad overshooting into its neighbour's, or a miter
+/// tip over-reaching inward. `sink_comparison.dart` carries a
+/// `strayVerticesPixels` notion for exactly this class and this file has no
+/// analogue. Later plans lean on this instrument; they must not read
+/// agreement here as "the arms draw the same triangles", only as "the arms
+/// cover the same pixels".
 library;
 
 import 'dart:typed_data';

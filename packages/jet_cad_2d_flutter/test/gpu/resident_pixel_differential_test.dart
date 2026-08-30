@@ -132,12 +132,23 @@ void main() {
     // `1e3 * 1.19e-7 ~= 1.2e-4` device pixels -- far too small to move a
     // pixel's coverage in general, but not zero, and a pixel whose centre
     // happens to sit within that margin of a triangle edge could flip
-    // `TriangleRasterizer`'s half-open inside test on one side or the other.
-    // `lessThan(4)` admits a couple of such boundary flips -- plausible
-    // float32-rounding noise -- while staying two orders of magnitude below
-    // every named-mutation kill measured for this file (M-B3'/M-B7/M-B15 on
-    // the seam test below, M-B8 above): a future 1-2px drift here reads as
-    // rounding, not as a regression this bound was loosened to hide.
+    // `TriangleRasterizer`'s inside test on one side or the other. That test
+    // is CLOSED, not half-open -- `_fill` skips only on `w < 0` for all
+    // three edges, so a centre exactly on a shared edge is inked by both
+    // triangles -- which does not change the flip mechanism, only its name.
+    //
+    // Order of magnitude for the noise floor: ~1.2e-4 device pixels of
+    // margin against an inked boundary of order 2e3 pixels puts the expected
+    // number of centres inside that margin under one. `lessThan(4)` admits a
+    // few such flips.
+    //
+    // **The headroom, stated exactly rather than rounded up.** The smallest
+    // named-mutation kill measured for this file is M-B3' at 14 differing
+    // pixels, so this bound sits 3.5x under it -- NOT the "two orders of
+    // magnitude" an earlier version of this comment claimed. The others are
+    // M-B8 at 16 and M-B7/M-B15 at 26 (178 on the seam test). A future 1-2px
+    // drift reads as rounding; a 5px drift is close enough to a real kill
+    // that it should be investigated rather than absorbed.
     expect(r.differing, lessThan(4), reason: r.toString());
   });
 
@@ -162,17 +173,26 @@ void main() {
     // zero on (1) and (2) alike, and that is not this instrument
     // disagreeing with itself.** `GeometryCollector.kFlattenTolerance`
     // (0.25 device px) keeps every chord's sagitta error at or below a
-    // quarter of a pixel by construction, and the seam join's own notch is
-    // bounded by that same per-chord error -- so at a large radius, where
+    // quarter of a pixel by construction. The seam join's own notch is NOT
+    // bounded by that same error in general -- it scales with the square of
+    // the stroke half-width, which is exactly why a wide stroke is needed
+    // below -- but it does shrink with the turn angle, so at a large radius,
+    // where
     // each chord already subtends a shallow angle, the notch a coverage
     // rasterizer could ever register rounds to zero pixels almost
-    // everywhere on the circle (an independent area computation puts
-    // radius 90's notch at about 0.27 square device pixels -- provably
-    // invisible to a 1px-granularity rasteriser). A probe run across radii
+    // everywhere on the circle. Two independent derivations of radius 90's
+    // notch give 0.27 and 0.19 square device pixels; they disagree in the
+    // second digit and agree on the only thing the fixture choice rests on,
+    // which is that the figure is well under one pixel and therefore
+    // provably invisible to a 1px-granularity rasteriser. A probe run across radii
     // 8-90 and lineweights 50-200 (kept out of this file; see
     // `task-9-report.md`) found the notch becomes reliably multi-pixel only
-    // at a small radius with a wide stroke (radius 8's notch is about 14
-    // square device pixels), where each chord's turn angle is large enough
+    // at a small radius with a wide stroke. Radius 8's notch measures 14
+    // differing pixels empirically (the M-B3' probe); an area derivation
+    // puts it near 10 square device pixels. The 14 is a PIXEL COUNT, not an
+    // area, and the two are not the same quantity -- both are comfortably
+    // multi-pixel, which is what the fixture choice needs. Each chord's turn
+    // angle there is large enough
     // that the wedge is no longer sub-pixel -- which is what `_wideStroke`
     // and radius 8 below are chosen for, not to make the assertion pass but
     // to make the corner it is asserting about visible to a rasterizer with
