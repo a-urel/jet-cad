@@ -28,6 +28,44 @@ abstract class DrawSink {
   void arc(double cx, double cy, double r, double start, double sweep,
       ResolvedStyle style);
 
+  /// Whether this sink evaluates dash patterns itself.
+  ///
+  /// **False means "hand me the spans"; true means "hand me the geometry and
+  /// the pattern".** `DraftPainter` reads this and takes one of two routes: a
+  /// false sink is given the cut spans it has always been given, through
+  /// ordinary [polyline] and [arc] calls; a true sink is given the *undashed*
+  /// primitive, bracketed by [beginDash] and [endDash].
+  ///
+  /// **The information a span carries is strictly less than the pattern that
+  /// produced it.** A two-point span has no cycle, no phase and no element
+  /// index, so a sink that wants to decide dash coverage per fragment — at
+  /// the live camera, rather than at whatever camera cut the spans — cannot
+  /// recover what it needs from the span stream. That is the whole reason
+  /// this getter exists rather than a sink simply doing something different
+  /// with what it is given.
+  bool get shadesDashes;
+
+  /// Opens a dashed bracket. Every geometry op until [endDash] is dashed with
+  /// [pattern].
+  ///
+  /// [patternToLocal] converts pattern units to the units the bracketed ops'
+  /// coordinates are in — which is the residual's local space, by this
+  /// interface's own contract above. It is `linetypeScale ×
+  /// globalLinetypeScale` folded with whatever the caller has already applied
+  /// to the coordinates: for a polyline the painter has already carried the
+  /// points into screen space, so the factor includes the screen scale; for a
+  /// curve the coordinates stay in the leaf's own space and it does not.
+  ///
+  /// **Only called on a sink whose [shadesDashes] is true.** Every other sink
+  /// in this package throws here, deliberately: a wiring mistake that routed
+  /// undashed geometry to a span-consuming sink would otherwise draw a solid
+  /// line where the document says dashed, which is a picture nobody would
+  /// question. A throw is loud; a solid line is not.
+  void beginDash(DashPattern pattern, double patternToLocal);
+
+  /// Closes the bracket opened by [beginDash].
+  void endDash();
+
   /// Fills a closed loop.
   ///
   /// [points] is the boundary's loop in this residual's local space, [count]
@@ -285,8 +323,55 @@ final class TextOp extends DrawOp {
   String toString() => 'TextOp($text, $style)';
 }
 
+@immutable
+final class BeginDashOp extends DrawOp {
+  const BeginDashOp(this.pattern, this.patternToLocal);
+
+  final DashPattern pattern;
+
+  /// Part of `==` on purpose: two walks that dashed the same pattern at
+  /// different rates drew different pictures, and an oracle that compared
+  /// only the pattern would call them equal.
+  final double patternToLocal;
+
+  @override
+  bool operator ==(Object other) =>
+      other is BeginDashOp &&
+      other.pattern == pattern &&
+      other.patternToLocal == patternToLocal;
+
+  @override
+  int get hashCode => Object.hash(pattern, patternToLocal);
+
+  @override
+  String toString() => 'BeginDashOp($pattern, $patternToLocal)';
+}
+
+@immutable
+final class EndDashOp extends DrawOp {
+  const EndDashOp();
+
+  @override
+  bool operator ==(Object other) => other is EndDashOp;
+
+  @override
+  int get hashCode => (EndDashOp).hashCode;
+
+  @override
+  String toString() => 'EndDashOp()';
+}
+
 /// Keeps every op, for tests and for the differential oracle.
 class RecordingDrawSink implements DrawSink {
+  RecordingDrawSink({this.shadesDashes = false});
+
+  /// **Defaults to false so this class stays the oracle it already is.**
+  /// `draft_painter_test.dart` asserts span counts against a recording sink
+  /// over a dashed fixture; flipping the default would change what those
+  /// tests are looking at without changing a line of them.
+  @override
+  final bool shadesDashes;
+
   final List<DrawOp> _ops = <DrawOp>[];
 
   List<DrawOp> get ops => _ops;
@@ -335,12 +420,37 @@ class RecordingDrawSink implements DrawSink {
   @override
   void text(String text, Handle style, ResolvedStyle resolved) =>
       _ops.add(TextOp(text, style, resolved));
+
+  @override
+  void beginDash(DashPattern pattern, double patternToLocal) => shadesDashes
+      ? _ops.add(BeginDashOp(pattern, patternToLocal))
+      : throw UnsupportedError('this RecordingDrawSink does not shade dashes; '
+          'construct it with shadesDashes: true to record the bracket');
+
+  @override
+  void endDash() => shadesDashes
+      ? _ops.add(const EndDashOp())
+      : throw UnsupportedError('this RecordingDrawSink does not shade dashes');
 }
 
 /// Counts ops and keeps none, so a measurement rig can time the walk without
 /// timing the rasteriser.
 class NullDrawSink implements DrawSink {
   int opCount = 0;
+
+  @override
+  bool get shadesDashes => false;
+
+  @override
+  void beginDash(DashPattern pattern, double patternToLocal) =>
+      throw UnsupportedError(
+          'NullDrawSink consumes dash spans, not dash patterns; '
+          'DraftPainter must not open a dash bracket on a sink whose '
+          'shadesDashes is false');
+
+  @override
+  void endDash() =>
+      throw UnsupportedError('NullDrawSink does not shade dashes');
 
   @override
   void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) =>

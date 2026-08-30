@@ -289,6 +289,19 @@ class GeometryCollector implements DrawSink {
   }
 
   @override
+  bool get shadesDashes => true;
+
+  @override
+  void beginDash(DashPattern pattern, double patternToLocal) {
+    // Task 5.
+  }
+
+  @override
+  void endDash() {
+    // Task 5.
+  }
+
+  @override
   void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {
     _residual = residual;
   }

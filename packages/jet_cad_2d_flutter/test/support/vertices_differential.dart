@@ -160,6 +160,14 @@ List<InkSample> inkSamples(List<DrawOp> ops) {
       case TextOp():
         // Not batched: text goes to the fallback sink as a paragraph.
         break;
+      case BeginDashOp():
+      case EndDashOp():
+        // `VerticesDrawSink.shadesDashes` is false, so `DraftPainter` never
+        // opens a bracket on it -- this backend still receives cut spans
+        // through ordinary `polyline`/`arc` calls. Task 5 gives the shading
+        // sink its own reference; this switch stays exhaustive rather than
+        // reachable.
+        break;
     }
   }
   return out;

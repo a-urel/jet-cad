@@ -8,6 +8,7 @@ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import 'support/differential.dart';
 import 'support/spy_canvas.dart';
+import 'support/text_key_sink.dart';
 
 const ResolvedStyle _anyStyle = ResolvedStyle(
   argb: 0xFFFF0000,
@@ -435,6 +436,76 @@ void main() {
       final draws = canvas.named('drawCircle').toList();
       expect(draws, hasLength(2));
       expect(draws.last.paintingStyle, PaintingStyle.stroke);
+    });
+  });
+
+  group('dash bracket', () {
+    const pattern = DashPattern(dashes: [12.0, -6.0], totalLength: 18.0);
+
+    test(
+        'a recording sink defaults to not shading dashes, and says so by '
+        'refusing the bracket rather than by ignoring it', () {
+      final sink = RecordingDrawSink();
+      expect(sink.shadesDashes, isFalse);
+      expect(() => sink.beginDash(pattern, 2.5), throwsUnsupportedError);
+      expect(() => sink.endDash(), throwsUnsupportedError);
+    });
+
+    test('a shading recording sink records the bracket with its scale', () {
+      final sink = RecordingDrawSink(shadesDashes: true);
+      expect(sink.shadesDashes, isTrue);
+      sink.beginDash(pattern, 2.5);
+      sink.endDash();
+      expect(sink.ops, <DrawOp>[
+        const BeginDashOp(pattern, 2.5),
+        const EndDashOp(),
+      ]);
+    });
+
+    test('the bracket ops compare by value, scale included', () {
+      // The scale is part of `==` because the oracle asks whether two walks
+      // dashed at the same rate, not merely whether both dashed.
+      expect(const BeginDashOp(pattern, 2.5) == const BeginDashOp(pattern, 2.5),
+          isTrue);
+      expect(const BeginDashOp(pattern, 2.5) == const BeginDashOp(pattern, 2.6),
+          isFalse);
+    });
+
+    test(
+        'every non-shading sink in this package refuses the bracket '
+        '(CanvasDrawSink, VerticesDrawSink, RecordingDrawSink, NullDrawSink, '
+        'TextKeySink)', () {
+      final canvas = SpyCanvas();
+      final sinks = <DrawSink>[
+        CanvasDrawSink(
+            canvas: canvas,
+            pixelsPerPaperMm: 4.0,
+            measurer: FlutterTextMeasurer(),
+            textStyleOf: (Handle handle) => _standard),
+        VerticesDrawSink(pixelsPerPaperMm: 4.0, canvas: canvas),
+        RecordingDrawSink(),
+        NullDrawSink(),
+        TextKeySink(),
+      ];
+      for (final sink in sinks) {
+        expect(sink.shadesDashes, isFalse, reason: '$sink');
+        expect(() => sink.beginDash(pattern, 1.0), throwsUnsupportedError,
+            reason: '$sink');
+      }
+    });
+
+    test(
+        'GeometryCollector shades dashes and the bracket is a no-op today '
+        '(Task 5 implements it)', () {
+      final collector =
+          GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 1);
+      expect(collector.shadesDashes, isTrue);
+      // Neither call should throw, and neither should write an instance --
+      // this task is a declaration only.
+      collector.beginDash(pattern, 1.0);
+      expect(collector.instanceCount, 0);
+      collector.endDash();
+      expect(collector.instanceCount, 0);
     });
   });
 }

@@ -54,6 +54,17 @@ class TextKeySink implements DrawSink {
   }
 
   @override
+  bool get shadesDashes => false;
+  @override
+  void beginDash(DashPattern pattern, double patternToLocal) =>
+      throw UnsupportedError(
+          'TextKeySink consumes dash spans, not dash patterns; '
+          'DraftPainter must not open a dash bracket on a sink whose '
+          'shadesDashes is false');
+  @override
+  void endDash() => throw UnsupportedError('TextKeySink does not shade dashes');
+
+  @override
   void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {}
   @override
   void endResidual() {}
