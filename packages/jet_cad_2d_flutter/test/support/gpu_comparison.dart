@@ -22,6 +22,14 @@
 /// and `collector_differential_test.dart`, which compare colour channels a
 /// coverage rasterizer cannot see at all. Do not read a passing
 /// [ResidentAgreement] as a full criterion-1 measurement.
+///
+/// **Draw order is also unmeasured, and that is a repo non-negotiable, not
+/// a minor gap.** `TriangleRasterizer._fill` is last-write-wins over
+/// coverage with no depth test, so any permutation of emission order that
+/// preserves the union of triangle footprints paints the same pixels --
+/// draw order can only be pinned by a record-order assertion
+/// (`collector_differential_test.dart`'s walk-order check), never by this
+/// instrument.
 library;
 
 import 'dart:typed_data';

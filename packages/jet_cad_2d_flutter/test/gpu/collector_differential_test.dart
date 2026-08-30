@@ -463,6 +463,18 @@ double _referenceLogicalHalfWidth(int lineweightHundredths) {
 /// and reading a live copy of `kMinStrokeDevicePixels` off the public
 /// constant keeps this a second, independent formula rather than a value
 /// shared with the code under test.
+///
+/// **Only the guard is read live; the `* 2` slope below is not.** Unlike
+/// [_referenceLogicalHalfWidth], which reads `kMinStrokeDevicePixels` in
+/// both the guard and the value it floors to, this function's fade slope
+/// (`deviceWidth * 2`, mirroring the reference's own
+/// `Geometry::ComputeStrokeAlphaCoverage`) is not derived from that
+/// constant at all -- it happens to equal `2 / kMinStrokeDevicePixels`
+/// today only because the floor is `1.0`. Raising
+/// `VerticesDrawSink.kMinStrokeDevicePixels` would move the guard here
+/// (correctly, since it is read live) but would leave the slope at a stale
+/// `* 2`, silently wrong rather than caught by this test the way a floor
+/// change is.
 int _referenceCoveredArgb(int argb, int lineweightHundredths) {
   final deviceWidth =
       lineweightHundredths / 100.0 * kLogicalPixelsPerMm * _devicePixelRatio;

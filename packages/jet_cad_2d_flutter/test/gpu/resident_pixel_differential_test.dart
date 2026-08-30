@@ -43,23 +43,20 @@ const ResolvedStyle _wideStroke = ResolvedStyle(
 ///    error in `s` shows on one of them;
 ///  - the hairpin turns past the miter limit, so the bevel path runs;
 ///  - the circle is closed, so the seam join runs and its absence is a notch;
-///  - the point is a `point()` op. **Its mutation (a point emitted as a
-///    stroke, M-B8) cannot be seen here, on any corpus.** `VerticesDrawSink`
-///    draws a point as a horizontal half-width segment too -- "a horizontal
-///    segment of the stroke's own width is a square of it"
-///    (`vertices_draw_sink.dart`'s own `point()`) -- and the shader's
-///    `kKindPoint` branch builds the identical square directly in device
-///    space. Under any collection-to-device map this instrument can
-///    legitimately use (conformal: identity or `devicePixelRatio`-only, the
-///    only kind jet-cad's camera ever produces -- see `task-9-report.md` for
-///    the probe that found a rotated collection-to-device map *would*
-///    separate them, and that a rotated residual upstream of it would not,
-///    which is why this is a structural fact and not a corpus gap), the
-///    two squares are bit-identical, because
-///    both are built axis-aligned in the same frame. M-B8's gate is the
-///    record level: `geometry_collector_test.dart`'s "a point is one
-///    instance of its own kind" and `collector_differential_test.dart`'s
-///    per-instance `kind` assertion both fail immediately on it;
+///  - the point is a `point()` op, whose mutation (a point emitted as a
+///    stroke, M-B8) this instrument DOES see -- an earlier draft of this
+///    comment claimed the two arms drew bit-identical squares and that was
+///    wrong; see `task-9-report.md`'s "Fix round 1" section for the
+///    corrected arithmetic (a 7.56x3.78 device-pixel rectangle where both
+///    the reference and the correct resident arm draw a 3.78x3.78 square,
+///    because the mutated code subtracts a DEVICE-space half-width from a
+///    COLLECTION-space centre before `collectionToDevice` doubles that
+///    offset again -- exactly the shear `kKindPoint` exists to prevent, per
+///    `geometry_collector.dart:284-289`). It is still also gated at the
+///    record level, independently: `geometry_collector_test.dart`'s "a
+///    point is one instance of its own kind" and
+///    `collector_differential_test.dart`'s per-instance `kind` assertion
+///    both fail immediately on it;
 ///  - the hairline is under one device pixel, so `_coveredArgb` runs. **Its
 ///    mutation (M-B1', `_coveredArgb` dropped) can survive here too**, for
 ///    an unrelated reason: `TriangleRasterizer.inked` is coverage-only (see
@@ -117,45 +114,111 @@ void main() {
     // ink. This instrument is coverage-only, so this is the whole of what it
     // can assert -- the per-channel half of criterion 1 is gated by the
     // record-level colour assertions in `geometry_collector_test.dart` and
-    // `collector_differential_test.dart`.
+    // `collector_differential_test.dart`. Kept alongside the tight bound
+    // below because it is the spec's own criterion and should stay visible,
+    // even though on this corpus it is far looser than what the collector
+    // and shader actually achieve.
     expect(r.differing, lessThan(r.referenceInk ~/ 100), reason: r.toString());
+
+    // A tight absolute bound, not a threshold moved to make anything pass:
+    // the measured value on this corpus is 0 and stays 0 on every run, so
+    // `differing` is asserted near that, not near the 1%-of-ink slack above.
+    // `differing` is not asserted at exactly 0 because the two arms compute
+    // in different float precisions all the way to the rasteriser: the
+    // collector's record is `Float32List` (about 1.19e-7 relative
+    // precision) while `VerticesDrawSink` computes in `double` throughout,
+    // so at this corpus's device-pixel coordinate magnitudes (order 1e2-1e3)
+    // the two arms' triangle vertices can differ by roughly
+    // `1e3 * 1.19e-7 ~= 1.2e-4` device pixels -- far too small to move a
+    // pixel's coverage in general, but not zero, and a pixel whose centre
+    // happens to sit within that margin of a triangle edge could flip
+    // `TriangleRasterizer`'s half-open inside test on one side or the other.
+    // `lessThan(4)` admits a couple of such boundary flips -- plausible
+    // float32-rounding noise -- while staying two orders of magnitude below
+    // every named-mutation kill measured for this file (M-B3'/M-B7/M-B15 on
+    // the seam test below, M-B8 above): a future 1-2px drift here reads as
+    // rounding, not as a regression this bound was loosened to hide.
+    expect(r.differing, lessThan(4), reason: r.toString());
   });
 
   test('the seam join is load-bearing on the circle', () {
-    // Not a mutation run in a comment: this measures the notch the seam join
-    // fills, by drawing the same circle as an OPEN run of the same chords.
-    // If the numbers came out equal, the corpus test above could not see a
-    // missing seam either.
+    // Two assertions below, deliberately not one, and the differential
+    // goes FIRST:
+    //
+    //  1. The actual differential, on the closed draw: `r.differing` must
+    //     stay near zero. The reference draws this seam too, so a collector
+    //     that drops or misplaces the join disagrees with the REFERENCE
+    //     here.
+    //  2. A resident-arm SELF-consistency probe, second and supplementary:
+    //     the same circle drawn CLOSED must ink more than drawn as an OPEN
+    //     run of the same chords. This alone never reads `referenceInk` or
+    //     `r.differing` -- it would still pass if the resident arm agreed
+    //     with nothing at all, so long as it agreed with itself more when
+    //     closed, which is why it is not asserted first: `expect` throws on
+    //     its first failure, and a mutation that breaks both must be seen
+    //     failing the differential, not only this weaker probe.
     //
     // **Radius 90 with `_thick` -- the brief's sample numbers -- measures
-    // zero here, and that is not this instrument disagreeing with itself.**
-    // `GeometryCollector.kFlattenTolerance` (0.25 device px) keeps every
-    // chord's sagitta error at or below a quarter of a pixel by
-    // construction, and the seam join's own notch is bounded by that same
-    // per-chord error -- so at a large radius, where each chord already
-    // subtends a shallow angle, the notch a coverage rasterizer could ever
-    // register rounds to zero pixels almost everywhere on the circle. A
-    // probe run across radii 8-90 and lineweights 50-200 (kept out of this
-    // file; see `task-9-report.md`) found the notch becomes reliably
-    // multi-pixel only at a small radius with a wide stroke, where each
-    // chord's turn angle is large enough that the wedge is no longer
-    // sub-pixel -- which is what `_wideStroke` and radius 8 below are
-    // chosen for, not to make the assertion pass but to make the corner it
-    // is asserting about visible to a rasterizer with 1px granularity at
-    // all.
-    double inkOf(void Function(DrawSink) draw) => measureResidentAgreement(
-          draw,
-          size: _size,
-          devicePixelRatio: _dpr,
-          pixelsPerPaperMm: _ppmm,
-        ).residentInk.toDouble();
+    // zero on (1) and (2) alike, and that is not this instrument
+    // disagreeing with itself.** `GeometryCollector.kFlattenTolerance`
+    // (0.25 device px) keeps every chord's sagitta error at or below a
+    // quarter of a pixel by construction, and the seam join's own notch is
+    // bounded by that same per-chord error -- so at a large radius, where
+    // each chord already subtends a shallow angle, the notch a coverage
+    // rasterizer could ever register rounds to zero pixels almost
+    // everywhere on the circle (an independent area computation puts
+    // radius 90's notch at about 0.27 square device pixels -- provably
+    // invisible to a 1px-granularity rasteriser). A probe run across radii
+    // 8-90 and lineweights 50-200 (kept out of this file; see
+    // `task-9-report.md`) found the notch becomes reliably multi-pixel only
+    // at a small radius with a wide stroke (radius 8's notch is about 14
+    // square device pixels), where each chord's turn angle is large enough
+    // that the wedge is no longer sub-pixel -- which is what `_wideStroke`
+    // and radius 8 below are chosen for, not to make the assertion pass but
+    // to make the corner it is asserting about visible to a rasterizer with
+    // 1px granularity at all.
+    final closedAgreement = measureResidentAgreement(
+        (s) => s.circle(80, 220, 8, _wideStroke),
+        size: _size,
+        devicePixelRatio: _dpr,
+        pixelsPerPaperMm: _ppmm);
+    // A 2*pi arc is the same chords, open: no closing chord back to point 0
+    // and no seam join. (Its OWN final `_runTo` still lands near the start
+    // angle -- a full sweep's last sample is `start + sweep`, not a
+    // zero-length skip back to point 0 -- so both draws include a
+    // closing-length chord; only the closed draw adds the seam join on top
+    // of it. That is why M-B3'/M-B7/M-B15 below read the closed circle
+    // exactly `1484 == 1484`-style equal to the open one, rather than
+    // leaving some smaller chord-sized residue: the whole gap this
+    // assertion measures IS the one seam join, nothing else.)
+    final openInk = measureResidentAgreement(
+            (s) => s.arc(80, 220, 8, 0, 6.283185307179586, _wideStroke),
+            size: _size,
+            devicePixelRatio: _dpr,
+            pixelsPerPaperMm: _ppmm)
+        .residentInk
+        .toDouble();
 
-    final closed = inkOf((s) => s.circle(80, 220, 8, _wideStroke));
-    // A 2*pi arc is the same chords, open: no closing chord and no seam.
-    final open =
-        inkOf((s) => s.arc(80, 220, 8, 0, 6.283185307179586, _wideStroke));
-    expect(closed, greaterThan(open),
-        reason: 'the closed circle has the closing chord and the seam; '
-            'closed=$closed open=$open');
+    // The differential itself, asserted FIRST so a run that fails both
+    // this and the self-consistency check below reports on the
+    // differential specifically -- `expect` throws on its first failure,
+    // and the differential is the one this task's fix round asked to see
+    // redden. The reference draws this seam too (about 14 square device
+    // pixels at this radius/stroke), so a collector that drops the seam,
+    // collapses it onto its vertex, or gets its side wrong disagrees with
+    // the REFERENCE here, not only with its own open-run twin. Same bound
+    // and same reasoning as the corpus test's tight bound above.
+    expect(closedAgreement.differing, lessThan(4),
+        reason: 'the reference and resident arms must agree on the seam '
+            'itself; ${closedAgreement.toString()}');
+
+    // The resident-arm self-consistency probe, second: still worth keeping,
+    // because it is the only one of the two that says anything about the
+    // resident arm's OWN closed-vs-open behaviour independent of the
+    // reference.
+    expect(closedAgreement.residentInk.toDouble(), greaterThan(openInk),
+        reason: 'the closed circle has the seam join on top of the same '
+            'closing-length chord the open run already draws; '
+            'closed=${closedAgreement.residentInk} open=$openInk');
   });
 }
