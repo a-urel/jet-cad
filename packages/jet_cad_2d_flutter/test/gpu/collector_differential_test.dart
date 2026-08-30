@@ -540,7 +540,7 @@ double _referenceLogicalHalfWidth(int lineweightHundredths) {
 /// call site in this file passes the default of `1.0`, at which the factor
 /// is the identity and every existing assertion is unchanged -- the sole
 /// caller that exercises a non-default value is the
-/// `lineweightScale != 1` fade test below, added specifically because a
+/// `lineweightScale != 1` fade test above, added specifically because a
 /// default-only oracle can never disagree with a collector that dropped
 /// this factor entirely.
 ///

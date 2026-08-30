@@ -40,14 +40,21 @@ void main() {
     });
 
     test('cornerVertexCount is derived from the table, and equals six', () {
-      // Pins the relationship, not just today's value: a mutant that grows
-      // `kCornerVertices` by one vertex without updating
-      // `GpuDrawBackend.render`'s draw call would leave this assertion
-      // green (`cornerVertexCount` would report 7) but the standalone
-      // literal-6 test above would still pass too -- this is what lets
-      // `cornerVertexCount` itself be the thing asserted, so a future
-      // seventh corner shows up here as "6 -> 7", not as a silent
-      // under-draw only a device run would notice.
+      // **Pins the relationship, not just today's value.** The second
+      // assertion is the load-bearing one: it says `cornerVertexCount` IS
+      // the table's length over its stride, so the draw call at
+      // `GpuDrawBackend.render` cannot drift from the buffer it draws
+      // from. Before `cornerVertexCount` existed, `pass.draw(6, ...)` was
+      // a bare literal and a seventh corner vertex would have drawn 6 of 7
+      // -- green in this whole package, visible only on a device.
+      //
+      // A seventh corner now goes red HERE, on the first assertion, as
+      // "6 -> 7" -- and red in the literal-list test above as well, which
+      // asserts the full 36-element table rather than a length. Two
+      // independent alarms, which is the point: the list test catches a
+      // wrong VALUE, this one catches a broken RELATIONSHIP, and only the
+      // second would survive someone updating the list and forgetting the
+      // draw call.
       expect(ResidentGeometry.cornerVertexCount, 6);
       expect(
           ResidentGeometry.cornerVertexCount,
