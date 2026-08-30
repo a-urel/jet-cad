@@ -28,10 +28,20 @@ import 'resident_geometry.dart';
 /// block size only when the emplaced length is *smaller* than that -- "the
 /// emplaced length alone can be smaller than the driver's padded size" is
 /// this exact situation, anticipated and handled, not a bug. The spike
-/// (`apps/dev_harness_2d/lib/gpu_arm.dart:414`) already hand-packs this same
-/// 80-byte layout and runs correctly on macOS Metal. This project has no
-/// device available to confirm the native path the same way; Task 7's
-/// harness run is where that confirmation actually happens.
+/// (`git show 8c82208:apps/dev_harness_2d/lib/gpu_arm.dart:414` -- that file
+/// was deleted in Task 9, before which it lived at this path) already
+/// hand-packed this same 80-byte layout and ran correctly on macOS Metal.
+///
+/// **Task 9's device run confirmed the native path directly, on more than
+/// "no crash".** `mvp` occupies bytes 0-63 of this block and `half_viewport`
+/// bytes 64-71 -- the tail the shader divides by to expand each quad's
+/// corners into a stroke -- so a block whose tail was not read correctly
+/// would place geometry correctly but draw every stroke at the wrong width,
+/// or vice versa for a garbled `mvp`. Task 9's picture was both correctly
+/// placed and correctly weighted, which is evidence both halves of the
+/// block reached the shader, not only that `bindUniform` accepted the bind
+/// (see `.superpowers/sdd/2026-08-29-gpu-backend-plan-a-seam-and-strokes/
+/// task-9-report.md`).
 ///
 /// [collectionToDevice] takes a point in the buffer's space — the collection
 /// camera's screen space — all the way to the live camera's **device-pixel**
@@ -201,7 +211,11 @@ class GpuDrawBackend {
     // the logical mapping into a device-pixel one before `buildFrameInfo`
     // ever sees it -- matching the spike's own comment on the equivalent
     // step, "Logical screen -> device pixels -> NDC"
-    // (`apps/dev_harness_2d/lib/gpu_arm.dart:423-426`).
+    // (`git show 8c82208:apps/dev_harness_2d/lib/gpu_arm.dart:423-426` --
+    // that file was deleted in Task 9, before which it lived at this path).
+    // Task 9's device run confirmed the fold itself: the drawing filled the
+    // full viewport rather than the top-left quadrant the missing-`dpr`
+    // defect this fixes used to produce (see the task-9 report).
     final collectionToDevice = composeTransforms(
       Transform2.scale(dpr, dpr),
       composeTransforms(camera.worldToScreenMatrix, _collectionInverse),

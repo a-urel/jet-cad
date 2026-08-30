@@ -1229,6 +1229,26 @@ class GpuArmPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // **Ownership of `image`, spelled out.** `backend.render` returns a
+    // fresh `ui.Image` wrapper on every call, over the *same* GPU texture
+    // (`GpuDrawBackend._target`, reused across frames and only recreated on
+    // resize) -- so this is a new Dart-side handle each frame, not a new
+    // texture. `drawImageRect` below records that handle into the `Picture`
+    // this `paint` call builds; the picture is what needs the image to stay
+    // alive, for as long as the raster thread takes to consume it, which
+    // outlives this function returning. This method deliberately does not
+    // call `image.dispose()` -- doing so here, before the picture rasterises,
+    // would race the very thing that still needs it. Not disposing leaves
+    // the handle to the same lifetime the engine already manages for any
+    // image recorded into a picture: it is reclaimed once Dart's GC collects
+    // this `ui.Image` wrapper, no earlier than the frame that recorded it has
+    // rasterised. Over this harness's measured run that is up to 270
+    // short-lived per-frame handles (one per `render` call with a camera
+    // change); that is a real, accepted GC-pressure cost of a measurement
+    // widget creating one `ui.Image` per frame, not a leak, and not a claim
+    // about the package's own frame-path allocation budget (CLAUDE.md's
+    // non-negotiable governs `jet_cad_2d_flutter`'s frame path, which this
+    // ad hoc harness `CustomPainter` is not part of).
     final image = backend.render(camera.value, size, devicePixelRatio);
     if (image == null) return;
     canvas.drawImageRect(
@@ -1338,9 +1358,13 @@ class GpuSpikeState extends State<GpuSpikeApp> {
       document: widget.document,
       index: index,
       resolver: DocumentStyleResolver(widget.document),
-      // Text is not drawn by this arm; asking the painter not to emit it
-      // keeps the collector's skipped-op count honest about what a later
-      // plan's backend would still owe.
+      // Text is not drawn by this arm -- `GeometryCollector.text()` only
+      // counts it -- but `drawText: true` still asks the painter to *emit*
+      // text ops rather than suppress them. Suppressing them here would
+      // make the collector's `skippedOps` undercount: it can only count an
+      // op it is actually handed, so what keeps the count honest about what
+      // a later plan's backend would still owe is the painter emitting
+      // every op and the collector being the one that drops it.
       drawText: true,
     );
     final collector = GeometryCollector(

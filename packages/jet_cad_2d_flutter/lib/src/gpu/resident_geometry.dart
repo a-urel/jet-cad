@@ -18,8 +18,10 @@ class ResidentGeometry {
   /// the built asset bundle regardless of which package's code loads it — the
   /// asset key is a property of who *declared* the asset, not of who reads it.
   /// The spike's bare `assets/shaders/cad.shaderbundle`
-  /// (`apps/dev_harness_2d/lib/gpu_arm.dart:253`) only worked because the
-  /// harness app declared that same path in its own `pubspec.yaml`, which
+  /// (`git show 8c82208:apps/dev_harness_2d/lib/gpu_arm.dart:253` -- that
+  /// file was deleted in Task 9, before which it lived at this path) only
+  /// worked because the harness app declared that same path in its own
+  /// `pubspec.yaml`, which
   /// shadows the prefix for an app that owns the asset outright — this
   /// package does not have that luxury as a dependency of some other app.
   ///
@@ -30,9 +32,9 @@ class ResidentGeometry {
   /// widget test in this package that tried to exercise `create`'s load path
   /// against the prefixed key would fail to find the asset. That failure is
   /// expected and is not evidence the path is wrong; do not "fix" it back to
-  /// the bare key to make such a test pass. Task 7's harness run (a real app
-  /// depending on this package) is where the prefixed key is actually
-  /// exercised.
+  /// the bare key to make such a test pass. Task 9's harness run (a real
+  /// app depending on this package) is where the prefixed key was actually
+  /// exercised, successfully -- see the task-9 report.
   static const String _bundlePath =
       'packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle';
 
@@ -72,13 +74,22 @@ class ResidentGeometry {
   /// buffer at slot 1 means the instance attributes' offsets are the
   /// record's *own* offsets (`instance_record.dart`'s `[kind, x0, y0, x1,
   /// y1, halfWidth, r, g, b, a]`), not the reflected ones shifted by
-  /// `corner`'s 8 bytes. This is the same two-buffer split the spike uses
-  /// (`apps/dev_harness_2d/lib/gpu_arm.dart:379-386`).
+  /// `corner`'s 8 bytes. This is the same two-buffer split the spike used
+  /// (`git show 8c82208:apps/dev_harness_2d/lib/gpu_arm.dart:379-386` --
+  /// that file was deleted in Task 9, before which it lived at this path).
   ///
   /// `@visibleForTesting`: same reason as [kCornerVertices] — this is pure
   /// configuration data, constructible and assertable without a GPU context,
   /// but only reachable through `create`'s GPU-gated path otherwise.
+  ///
+  /// `@internal` besides: its type, `gpu.VertexLayout`, resolves through
+  /// `gpu_facade.dart`'s re-export of `flutter_scene`'s internal GPU shim
+  /// (`gpu_facade.dart:21`) -- a consumer outside this package could not
+  /// declare a variable of this type even if it read the field, so this
+  /// annotation makes the analyzer say so rather than leaving that for a
+  /// confused import error. Same reasoning as the five getters below.
   @visibleForTesting
+  @internal
   static const gpu.VertexLayout kStrokeVertexLayout = gpu.VertexLayout(
     buffers: <gpu.VertexBuffer>[
       gpu.VertexBuffer(strideInBytes: 8, attributes: <gpu.VertexAttribute>[
@@ -195,10 +206,28 @@ class ResidentGeometry {
 
   int get byteLength => byteLengthFor(instanceCount);
 
+  /// **`@internal`, all five.** Every return type here (`gpu.DeviceBuffer`,
+  /// `gpu.RenderPipeline`, `gpu.Shader`, `gpu.HostBuffer`) resolves through
+  /// `gpu_facade.dart`'s `export 'package:flutter_scene/src/gpu/gpu.dart';`
+  /// -- the off-contract, pre-1.0, `lib/src/` path that file exists to
+  /// confine. `gpu_facade.dart` itself is deliberately unexported from this
+  /// package's barrel, so without this annotation a consumer outside this
+  /// package could see these getters (`ResidentGeometry` itself is public,
+  /// for `GpuDrawBackend`'s sake) but could not name a variable to hold what
+  /// they return. `@internal` makes that an analyzer error at the call site
+  /// instead of a confusing one at the type. `GpuDrawBackend` is this
+  /// package's only caller of all five, one call site each
+  /// (`gpu_draw_backend.dart:157, 180, 184, 188, 210-211`), which stays
+  /// legal: `@internal` only restricts use from *outside* this package.
+  @internal
   gpu.DeviceBuffer get corners => _corners;
+  @internal
   gpu.DeviceBuffer get instances => _instances;
+  @internal
   gpu.RenderPipeline get pipeline => _pipeline;
+  @internal
   gpu.Shader get vertexShader => _vertexShader;
+  @internal
   gpu.HostBuffer get uniforms => _uniforms;
 
   /// **A deliberate no-op.** None of `flutter_gpu`'s `DeviceBuffer`,
