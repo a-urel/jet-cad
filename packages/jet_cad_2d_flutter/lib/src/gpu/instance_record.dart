@@ -63,7 +63,7 @@ const double kKindPoint = 2;
 /// `cad_stroke.vert`'s attribute list is a third, independent copy — GLSL
 /// cannot read a Dart constant — and `test/support/instance_expander.dart` is
 /// a fourth. The expander is the one that is *gated*: it reads these same
-/// constants, and `test/gpu/expander_differential_test.dart` compares its
+/// constants, and `test/gpu/instance_expander_test.dart` compares its
 /// output against the reference sink, so a drift between this file and the
 /// expander goes red in `flutter test`. A drift between either and the GLSL
 /// still needs a device run or a hand-check against `impellerc`'s reflection.
