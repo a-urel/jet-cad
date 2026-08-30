@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -116,11 +117,19 @@ void main() {
     expect(c.instanceCount, 0);
   });
 
-  test('counts the ops Plan A does not draw instead of dropping them silently',
+  test('counts the ops it does not draw instead of dropping them silently',
       () {
+    // **This test used `circle` until Task 5.** A circle is drawn now, so the
+    // two ops here are `fillCircle` and `text` -- chosen because they stay
+    // skipped for the whole of Plan B (fills are Plan D, text is Plan E), so
+    // this assertion does not have to be rewritten again at Task 6 the way it
+    // was rewritten here. Both assertions are kept: an op that starts being
+    // drawn without being taken off the skipped list would move
+    // `instanceCount`, and an op silently dropped would leave `skippedOps`
+    // short.
     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
     c.beginResidual(Transform2.identity());
-    c.circle(0, 0, 5, _style);
+    c.fillCircle(0, 0, 5, _style);
     c.text('x', Handle.none, _style);
     c.endResidual();
     expect(c.instanceCount, 0);
@@ -406,5 +415,111 @@ void main() {
     expect(seam[InstanceFieldOffset.x2], 60,
         reason: 'outgoing to the second point');
     expect(seam[InstanceFieldOffset.y2], 0);
+  });
+
+  test('a circle is a closed run: N chords, N joins, seam last', () {
+    // The chord count comes from the reference's own formula, recomputed
+    // here rather than hardcoded, so the test tracks a tolerance change
+    // instead of pinning today's number.
+    const r = 50.0;
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.identity());
+    c.circle(
+        0,
+        0,
+        r,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1));
+
+    final steps = (2 *
+            math.pi *
+            math.sqrt(r / (8 * VerticesDrawSink.kFlattenTolerance)))
+        .ceil()
+        .clamp(1, VerticesDrawSink.kMaxFlattenSegments);
+    // A closed run of `steps` chords: `steps` segments, `steps - 1` interior
+    // joins, and the seam. 2 * steps instances.
+    expect(c.instanceCount, 2 * steps);
+    expect(c.skippedOps, 0, reason: 'a circle is no longer skipped');
+    expect(
+        c.data[(2 * steps - 1) * kFloatsPerInstance +
+            InstanceFieldOffset.kind],
+        kKindJoin,
+        reason: 'the seam join is the last instance');
+  });
+
+  test('an arc is an open run and has no seam', () {
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.identity());
+    c.arc(
+        0,
+        0,
+        50,
+        0,
+        math.pi / 2,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1));
+    // An open run of `steps` chords is `steps` segments and `steps - 1`
+    // joins: odd, and ending on a segment.
+    expect(c.instanceCount.isOdd, isTrue);
+    expect(
+        c.data[(c.instanceCount - 1) * kFloatsPerInstance +
+            InstanceFieldOffset.kind],
+        kKindStroke,
+        reason: 'an open run ends on a segment -- butt caps, no seam');
+  });
+
+  test('a non-uniform residual makes an ellipse, not a scaled circle', () {
+    // The degenerate-fixture guard for this op. Under `scale(3, 1)` a circle
+    // of radius 10 spans 60 in x and 20 in y; a collector that flattened in
+    // device space and transformed the CENTRE only would give a circle of
+    // some single radius, and every x-extent assertion below would fail.
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.beginResidual(const Transform2(3, 0, 0, 1, 0, 0));
+    c.circle(
+        0,
+        0,
+        10,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1));
+    var minX = double.infinity, maxX = -double.infinity;
+    var minY = double.infinity, maxY = -double.infinity;
+    for (var i = 0; i < c.instanceCount; i++) {
+      final o = i * kFloatsPerInstance;
+      if (c.data[o + InstanceFieldOffset.kind] != kKindStroke) continue;
+      final x = c.data[o + InstanceFieldOffset.x0];
+      final y = c.data[o + InstanceFieldOffset.y0];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    expect(maxX - minX, closeTo(60, 0.5));
+    expect(maxY - minY, closeTo(20, 0.5));
+  });
+
+  test('a zero or negative radius draws nothing', () {
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.identity());
+    const style = ResolvedStyle(
+        argb: 0xFF000000,
+        lineweightHundredths: 25,
+        linetype: Handle.none,
+        linetypeScale: 1);
+    c.circle(0, 0, 0, style);
+    c.arc(0, 0, 10, 0, 0, style);
+    expect(c.instanceCount, 0);
   });
 }

@@ -286,14 +286,73 @@ class GeometryCollector implements DrawSink {
   @override
   void point(double x, double y, ResolvedStyle style) => _skipped++;
 
+  /// The chord error a flattened arc is allowed, in device pixels. The
+  /// reference's own value, copied for the same reason
+  /// [kMinStrokeDevicePixels] is: two independent implementations that agree
+  /// are a differential test; one shared field is not.
+  static const double kFlattenTolerance = 0.25;
+
+  /// The chord ceiling, likewise copied.
+  static const int kMaxFlattenSegments = 512;
+
   @override
   void circle(double cx, double cy, double r, ResolvedStyle style) =>
-      _skipped++;
+      _flatten(cx, cy, r, 0, 2 * math.pi, style, closed: true);
 
   @override
   void arc(double cx, double cy, double r, double start, double sweep,
           ResolvedStyle style) =>
-      _skipped++;
+      _flatten(cx, cy, r, start, sweep, style, closed: false);
+
+  /// Walks a circular arc in the residual's **local** space, emitting a chord
+  /// per step.
+  ///
+  /// Local space, not collection space, on purpose: the residual may be
+  /// non-uniform, and the arc that `Canvas` would draw under it is an
+  /// ellipse. Flattening here and transforming each point reproduces that
+  /// ellipse; flattening a collection-space circle would not. Only the
+  /// *count* is a scale decision, because the chord error the viewer sees is
+  /// a pixel quantity.
+  ///
+  /// **This is the op that turns on the general-affine residual.**
+  /// `draft_painter.dart:568` pushes `camera ∘ placement` here, where a
+  /// polyline gets only a translation — the path Plan A's transposition
+  /// test was written to guard and no Plan A fixture could reach.
+  void _flatten(double cx, double cy, double r, double start, double sweep,
+      ResolvedStyle style,
+      {required bool closed}) {
+    if (r <= 0 || sweep == 0) return;
+    final t = _residual;
+    final deviceRadius = r * t.scaleMagnitude;
+    if (deviceRadius <= 0) return;
+
+    final steps = _flattenSteps(deviceRadius, sweep.abs());
+    final half = _halfWidthFor(style.lineweightHundredths);
+    final argb = _coveredArgb(style.argb, style.lineweightHundredths);
+    final step = sweep / steps;
+
+    var lx = cx + r * math.cos(start);
+    var ly = cy + r * math.sin(start);
+    _beginRun(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f);
+    // A closed sweep stops one sample short: its last chord is the segment
+    // `_endRun` draws back to the first point, so closing here would draw
+    // that chord twice and leave the seam a duplicated point instead of a
+    // join.
+    final last = closed ? steps - 1 : steps;
+    for (var i = 1; i <= last; i++) {
+      final angle = start + step * i;
+      lx = cx + r * math.cos(angle);
+      ly = cy + r * math.sin(angle);
+      _runTo(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f, half, argb);
+    }
+    _endRun(closed: closed, half: half, argb: argb);
+  }
+
+  int _flattenSteps(double deviceRadius, double theta) {
+    final ideal =
+        (theta * math.sqrt(deviceRadius / (8 * kFlattenTolerance))).ceil();
+    return ideal.clamp(1, kMaxFlattenSegments);
+  }
 
   @override
   void fillPolygon(Float64List points, int count, Int32List triangles,
