@@ -108,7 +108,11 @@ void main() {
         // Both arms are driven at the same camera the buffer is collected
         // at (see `measureResidentAgreement`'s own doc), so the
         // live-to-collection ratio is exactly 1. No dashed geometry is in
-        // this corpus yet -- Task 9 gives this file a real dashed arm.
+        // this corpus -- Task 9 deferred that arm ("Task 10 would compare
+        // two arms neither of which dashed", `task-9-report.md`); Task 10's
+        // `test/gpu/dash_differential_test.dart` is the file that actually
+        // exercises `measurePaintedAgreement` and `shadedDashFixture()`
+        // together, this file's own comment above notwithstanding.
         dashScale: 1.0);
 
     // The anti-vacuity floor, the same one `tile_cache_test.dart:958-959`

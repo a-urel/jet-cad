@@ -233,6 +233,13 @@ ResidentAgreement measurePaintedAgreement(
   required Size size,
   required double devicePixelRatio,
   required double pixelsPerPaperMm,
+
+  /// Forwarded to the resident arm's [TriangleRasterizer] only -- see that
+  /// field's own doc. Test-only, defaults to `false` so every existing
+  /// caller is unaffected; Task 10's control arm is the sole caller that
+  /// passes `true`, to prove the pixel gate it sits beside can actually
+  /// fail.
+  bool debugDisableDashTest = false,
 }) {
   final w = (size.width * devicePixelRatio).round();
   final h = (size.height * devicePixelRatio).round();
@@ -274,7 +281,8 @@ ResidentAgreement measurePaintedAgreement(
       // Both arms are painted at `camera`, the same camera the buffer is
       // collected at -- see this function's own doc.
       dashScale: 1.0);
-  final residentRaster = TriangleRasterizer(w, h)
+  final residentRaster = TriangleRasterizer(w, h,
+      debugDisableDashTest: debugDisableDashTest)
     ..observe(expanded.positions, expanded.colors, dash: expanded.dashVaryings);
 
   return _agreementOf(referenceRaster, residentRaster, w, h);

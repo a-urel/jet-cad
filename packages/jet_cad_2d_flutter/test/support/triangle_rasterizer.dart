@@ -18,11 +18,22 @@ import 'dart:ui' as ui;
 ///
 /// Attach with `sink.observer = rasterizer.observe;`.
 class TriangleRasterizer {
-  TriangleRasterizer(this.width, this.height)
+  TriangleRasterizer(this.width, this.height,
+      {this.debugDisableDashTest = false})
       : pixels = Uint32List(width * height);
 
   final int width;
   final int height;
+
+  /// **Test-only, and it stays that way.** Setting this skips the
+  /// `fract(t)` keep/discard test in [_fill] entirely, so every fragment of
+  /// a dashed triangle inks as if it were solid -- the control arm Task 10's
+  /// pixel differential needs to prove its own gate can actually fail (Plan
+  /// 3i's Ruling 14: an interleaved control that cannot be switched on reads
+  /// 1.00 and proves nothing). This field has no counterpart in
+  /// `cad_stroke.frag` or `lib/` -- the real fragment shader has no such
+  /// escape hatch, and this one must never grow one either.
+  final bool debugDisableDashTest;
 
   /// Row-major, zero where nothing was drawn.
   ///
@@ -138,7 +149,7 @@ class TriangleRasterizer {
     // writes for an undashed instance -- the whole test is skipped for it,
     // not just widened, so a solid triangle sharing a buffer with dashed
     // ones is unaffected by them.
-    final hasDash = ta != null && startA! >= 0;
+    final hasDash = !debugDisableDashTest && ta != null && startA! >= 0;
 
     for (var y = minY; y <= maxY; y++) {
       final py = y + 0.5;
