@@ -28,17 +28,17 @@ import 'measurement_rig.dart';
 // spike, because interleaving three arms over a hold, a pan and a zoom is
 // measurement methodology, not backend-specific.
 //
-// **What arm C (the resident backend) does not draw, and why that is not a
-// bug in this harness.** `GeometryCollector` implements only
-// `DrawSink.polyline` -- `point`, `circle`, `arc`, `fillPolygon` and
-// `fillCircle` all fall through to its `skippedOps` counter. Plan A's own
-// self-review says so: joins, caps and `point()` are Plan B's job; dashed
-// *arcs* are Plan C's (a dashed *polyline*'s spans already reach the sink as
-// ordinary `polyline` calls, so straight dashed strokes draw today); fills
-// are Plan D's; text is Plan E's. A corpus with circles, arcs, fills or text
-// will show visibly less on arm C than on arm A or B -- `skippedOps` in the
-// `GSPIKE collect+upload` line says how much, so a thin picture reads as a
-// number instead of as a silent gap.
+// **What arm C (the resident backend) still does not draw, and why that is
+// not a bug in this harness.** `GeometryCollector` implements `polyline`
+// (with joins), `point`, `circle` and `arc` (flattened, seam join included
+// on a closed sweep) -- Plan B's job, done. `fillPolygon`, `fillCircle` and
+// `text` are the only ops that still fall through to its `skippedOps`
+// counter: dashed *arcs* are Plan C's (a dashed *polyline*'s spans already
+// reach the sink as ordinary `polyline` calls, so straight dashed strokes
+// draw today); fills are Plan D's; text is Plan E's. A corpus with fills or
+// text will show visibly less on arm C than on arm A or B -- `skippedOps` in
+// the `GSPIKE collect+upload` line says how much, so a thin picture reads as
+// a number instead of as a silent gap.
 //
 // **The buffer is collected once, at the arm's starting camera, and never
 // re-walked.** A dash pattern's spans are split at that camera's scale and
@@ -437,14 +437,15 @@ Future<void> runGpuSpike(
       'viewport=${viewport.width.toStringAsFixed(0)}x'
       '${viewport.height.toStringAsFixed(0)} '
       'frames=$frames repeats=$repeats');
-  gpuReport('GSPIKE note: arm C (residentGpu) draws only strokes -- '
-      '${state.skippedOps} op(s) this walk did not draw (points, circles, '
-      'arcs, fills, text: later plans\' job, see the section comment above '
-      'this rig). No joins, no caps, no antialiasing. Dash spans are baked at '
-      'the collection camera and never re-split under zoom, a consequence of '
-      'walking the document exactly once. Every one of those favours arm C '
-      'on a timing comparison, which is why the picture matters as much as '
-      'the numbers here.');
+  gpuReport('GSPIKE note: arm C (residentGpu) draws strokes, joins, points, '
+      'circles and arcs -- ${state.skippedOps} op(s) this walk did not draw '
+      '(fills, text: later plans\' job, see the section comment above this '
+      'rig). Butt caps only -- Plan B emits no cap geometry. No '
+      'antialiasing. Dash spans are baked at the collection camera and '
+      'never re-split under zoom, a consequence of walking the document '
+      'exactly once. Every one of those favours arm C on a timing '
+      'comparison, which is why the picture matters as much as the numbers '
+      'here.');
 
   final reports = <GpuPhaseReport>[];
 

@@ -616,6 +616,60 @@ void main() {
     expect(c.data[InstanceFieldOffset.a] * 255.0, lessThan(0xFF));
   });
 
+  test(
+      'debugCollinearJoins counts a straight-through vertex and not a '
+      'right-angle corner', () {
+    final corner = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    corner.polyline(
+        Float64List.fromList(<double>[0, 0, 40, 0, 40, 30]),
+        3,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1),
+        closed: false);
+    expect(corner.debugCollinearJoins, 0,
+        reason: 'a right-angle turn has a nonzero cross product');
+
+    final straight = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    straight.polyline(
+        Float64List.fromList(<double>[0, 0, 20, 0, 40, 0]),
+        3,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1),
+        closed: false);
+    expect(straight.debugCollinearJoins, 1,
+        reason: 'the middle vertex sits exactly on the line -- cross_z == '
+            '0, the same predicate the shader collapses to two zero-area '
+            'triangles for, but the collector still WRITES the instance');
+    expect(straight.instanceCount, 3,
+        reason: 'Ruling B4 keeps the decision in the shader, so the '
+            'counter above never changes what this collector emits');
+  });
+
+  test('debugCollinearJoins counts an exact reversal too', () {
+    final c = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+    c.polyline(
+        Float64List.fromList(<double>[0, 0, 40, 0, 0, 0]),
+        3,
+        const ResolvedStyle(
+            argb: 0xFF000000,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1),
+        closed: false);
+    expect(c.debugCollinearJoins, 1,
+        reason: 'a straight there-and-back also has cross_z == 0, the same '
+            'branch the shader\'s degenerate test takes');
+  });
+
   test('after Plan B, only fills and text are skipped', () {
     // The sentence in `skippedOps`' doc, asserted. It goes red the day
     // another op is silently dropped -- or the day Plan D lands and forgets

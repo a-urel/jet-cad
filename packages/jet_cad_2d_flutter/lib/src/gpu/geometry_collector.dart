@@ -85,6 +85,23 @@ class GeometryCollector implements DrawSink {
   /// which is also where the test that pins this whole sentence lands.
   int get skippedOps => _skipped;
 
+  /// **Diagnostic only — read by nobody in this class and never changes what
+  /// is written.** Ruling B4 keeps the bevel/miter/collinear decision in the
+  /// shader, in device pixels, on purpose: a collector-side test would run in
+  /// `double`, in collection space, against a reference that decides in
+  /// `float32`, in device space, and the two would disagree on exactly the
+  /// corners that are nearly straight. This counts, in collection-space
+  /// `double` arithmetic, how many of the joins this collector wrote carry a
+  /// zero (or reversed) cross product between their incoming and outgoing
+  /// arms — the same predicate the shader's own degenerate branch uses
+  /// (`cad_stroke.vert`'s `cross_z == 0.0 || in_len == 0.0 || out_len ==
+  /// 0.0`, transcribed at `test/support/instance_expander.dart`) — so Task
+  /// 11 can report the buffer's collinear cost against the 8 MB budget
+  /// without moving the decision itself. `debug`-prefixed for exactly that
+  /// reason: nothing downstream reads it.
+  int get debugCollinearJoins => _debugCollinearJoins;
+  int _debugCollinearJoins = 0;
+
   /// Half the stroke's width, **in device pixels** — the space the vertex
   /// shader consumes `half_width` in (`shaders/cad_stroke.vert` documents
   /// the attribute `// device pixels` and applies it directly against
@@ -224,9 +241,20 @@ class GeometryCollector implements DrawSink {
 
   void _emitJoin(double vx, double vy, double prevX, double prevY, double nextX,
       double nextY, double half, int argb) {
-    // No collinearity test here, deliberately: the bevel/miter/collinear
-    // decision belongs to the shader, in device pixels, where the reference
-    // makes it too. See this plan's Ruling B4.
+    // No collinearity test decides anything here, deliberately: the
+    // bevel/miter/collinear decision belongs to the shader, in device
+    // pixels, where the reference makes it too. See this plan's Ruling B4.
+    // `debugCollinearJoins` below is instrumentation, not a decision — it
+    // reads the same predicate back afterwards, in a different space, purely
+    // to report a count.
+    final d0x = vx - prevX, d0y = vy - prevY;
+    final d1x = nextX - vx, d1y = nextY - vy;
+    final crossZ = d0x * d1y - d0y * d1x;
+    if (crossZ == 0.0 ||
+        (d0x == 0.0 && d0y == 0.0) ||
+        (d1x == 0.0 && d1y == 0.0)) {
+      _debugCollinearJoins++;
+    }
     _reserve(_instances + 1);
     writeJoin(_buffer, _instances,
         vx: vx,
