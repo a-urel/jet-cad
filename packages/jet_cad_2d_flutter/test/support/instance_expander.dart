@@ -41,7 +41,7 @@ List<_Corner> _corners() {
   const stride = ResidentGeometry.kFloatsPerCorner;
   final src = ResidentGeometry.kCornerVertices;
   return List<_Corner>.generate(
-      6,
+      ResidentGeometry.cornerVertexCount,
       (i) => _Corner(src[i * stride], src[i * stride + 1], src[i * stride + 2],
           src[i * stride + 3], src[i * stride + 4], src[i * stride + 5]));
 }
@@ -83,8 +83,9 @@ class ExpandedTriangles {
 ExpandedTriangles expandInstances(
     Float32List data, int instanceCount, Transform2 collectionToDevice) {
   final corners = _corners();
-  final positions = Float32List(instanceCount * 6 * 2);
-  final colors = Int32List(instanceCount * 6);
+  final cornerVertexCount = ResidentGeometry.cornerVertexCount;
+  final positions = Float32List(instanceCount * cornerVertexCount * 2);
+  final colors = Int32List(instanceCount * cornerVertexCount);
   final t = collectionToDevice;
 
   double toX(double x, double y) => t.a * x + t.c * y + t.e;
@@ -103,7 +104,7 @@ ExpandedTriangles expandInstances(
     final x2 = data[o + InstanceFieldOffset.x2];
     final y2 = data[o + InstanceFieldOffset.y2];
 
-    for (var v = 0; v < 6; v++) {
+    for (var v = 0; v < cornerVertexCount; v++) {
       final c = corners[v];
       double px, py;
 
@@ -224,7 +225,7 @@ ExpandedTriangles expandInstances(
         py = cy + c.y * halfWidth;
       }
 
-      final vi = (i * 6 + v);
+      final vi = (i * cornerVertexCount + v);
       positions[vi * 2] = px;
       positions[vi * 2 + 1] = py;
       colors[vi] = argb;

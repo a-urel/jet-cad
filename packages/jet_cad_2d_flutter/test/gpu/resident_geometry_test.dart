@@ -39,6 +39,22 @@ void main() {
       ]);
     });
 
+    test('cornerVertexCount is derived from the table, and equals six', () {
+      // Pins the relationship, not just today's value: a mutant that grows
+      // `kCornerVertices` by one vertex without updating
+      // `GpuDrawBackend.render`'s draw call would leave this assertion
+      // green (`cornerVertexCount` would report 7) but the standalone
+      // literal-6 test above would still pass too -- this is what lets
+      // `cornerVertexCount` itself be the thing asserted, so a future
+      // seventh corner shows up here as "6 -> 7", not as a silent
+      // under-draw only a device run would notice.
+      expect(ResidentGeometry.cornerVertexCount, 6);
+      expect(
+          ResidentGeometry.cornerVertexCount,
+          ResidentGeometry.kCornerVertices.length ~/
+              ResidentGeometry.kFloatsPerCorner);
+    });
+
     test('covers exactly four distinct corners', () {
       final points = <(double, double)>{
         for (var i = 0;

@@ -17,13 +17,17 @@
 
 ## Summary — every mutant, its verdict, and the gate that killed it
 
-**Eighteen mutation firings across fifteen named mutants (two of them fired
+**Nineteen mutation firings across sixteen named mutants (two of them fired
 twice, under a `'` suffix, against the pixel instrument specifically).
-Sixteen firings died. One is a declared survivor with a structural reason
+Seventeen firings died. One is a declared survivor with a structural reason
 (`M-B1'`). One is a proven equivalent mutation, not a coverage gap
 (`M-B3`'s guard-only arm).** All fifteen of the plan's pre-committed and
 execution-added mutants (M-B1 through M-B15) are accounted for; the two
-outstanding at the start of this task, M-B9 and M-B10, were fired here.
+outstanding at the start of the task that closed this table, M-B9 and
+M-B10, were fired there. **M-B16 is not one of the fifteen** — it was found
+by the whole-branch review that ran after Task 11, in the final fix wave
+before merge, and is recorded here for the same reason every other row is:
+it is a real mutant with a killing test, not a hypothetical.
 
 | Mutant | File | Verdict | Gate of record |
 |---|---|---|---|
@@ -45,6 +49,7 @@ outstanding at the start of this task, M-B9 and M-B10, were fired here.
 | M-B13 | expander | **dead** | `instance_expander_test.dart` — `a stroke under a transform with every coefficient non-zero matches by hand` (8.211 against 10.970) |
 | M-B14 | expander | **dead** | the same test (0.970 against 10.970, off by exactly the dropped translation `e = 10`) |
 | M-B15 | collector | **dead** | `resident_pixel_differential_test.dart` — `differing: 26` on the corpus test, `differing: 178` on the seam test (identical numbers to M-B7 — see the structural note below) |
+| M-B16 (found in the final, whole-branch review, not pre-committed) | collector | **dead** | `collector_differential_test.dart` — `fades a hairline stroke by lineweightScale as well as by dpr, not just the identity default every other gate in this file exercises` (255.0 against 193.0) |
 
 **Also recorded, because it bounds what every kill in this table means, not
 because it is a mutation:** the pixel differential (`resident_pixel_differential_test.dart`
@@ -998,6 +1003,77 @@ Restored; `diff` confirmed identical.
 
 **Dead.** Gate of record: `resident_pixel_differential_test.dart`, the same
 two assertions as M-B7's second firing.
+
+---
+
+## M-B16 — drop `lineweightScale` from `_coveredArgb`
+
+**The final, whole-branch review's fix wave (post Task 11, pre-merge).**
+Not one of the plan's pre-committed mutants — this one was found by a
+reviewer reading `_coveredArgb` beside `_halfWidthFor` and noticing the
+latter's `lineweightScale` factor is pinned by a dedicated test
+(`geometry_collector_test.dart` — `lineweightScale multiplies the logical
+width before the clamp`) while the former's has no equivalent. Every
+`GeometryCollector` this file and `geometry_collector_test.dart` construct
+for a colour assertion omits `lineweightScale`, so it defaults to `1.0` and
+the factor is the identity everywhere the two existing gates
+(`collector_differential_test.dart`, `resident_pixel_differential_test.dart`)
+already looked — deleting it was invisible to both, and to all fifteen
+mutants above.
+
+The oracle had to be fixed first: `collector_differential_test.dart`'s own
+`_referenceCoveredArgb` did not model `lineweightScale` at all, so it was
+given the parameter (mirroring `VerticesDrawSink._coveredArgb`'s own
+`lineweightScale *` term) before the new test was written — otherwise a
+collector that dropped the factor and an oracle that never modelled it
+would still agree, for the wrong reason.
+
+```diff
+   int _coveredArgb(int argb, int lineweightHundredths) {
+     final deviceWidth = lineweightHundredths /
+         100.0 *
+         pixelsPerPaperMm *
+-        lineweightScale *
+         devicePixelRatio;
+```
+
+New test, `collector_differential_test.dart` — `fades a hairline stroke by
+lineweightScale as well as by dpr, not just the identity default every
+other gate in this file exercises` (`pixelsPerPaperMm=kLogicalPixelsPerMm`,
+`devicePixelRatio=2.0`, `lineweightHundredths=25`, `lineweightScale=0.2` —
+chosen so the unscaled device width, `1.8898` px, sits above
+`kMinStrokeDevicePixels` while the scaled width, `0.3780` px, sits below
+it and off the `coverage` clamp boundary, so the two arms disagree on a
+genuine mid-range alpha rather than a 0/255 coincidence):
+
+```
+$ flutter test test/gpu/collector_differential_test.dart
+00:00 +2 -1: fades a hairline stroke by lineweightScale as well as by dpr, not just the identity default every other gate in this file exercises [E]
+  Expected: a numeric value within <0.51> of <193.0>
+    Actual: <255.0>
+     Which:  differs by <62.0>
+  a collector that dropped lineweightScale from the fade formula would leave this at 255, not 193
+exit=1
+```
+
+The correct arm fades to alpha 193 (`round(255 * 0.7559...)`); the mutant,
+having lost the factor entirely, computes the same device width regardless
+of the configured scale and stays above the floor, so it returns the
+style's alpha unchanged at 255 — exactly the defect this test exists to
+catch. `geometry_collector_test.dart` and `resident_pixel_differential_test.dart`
+were re-run against the same mutated file and stayed fully green, confirming
+the claim that every existing instrument on this branch is blind to this
+factor: it is the new test alone that kills it.
+
+Restored from a `cp` backup (never `git checkout --`); `md5` before
+mutating and after restoring matched exactly
+(`690b9f918f55df1da84060b1441c9a83`), and `git diff` against the working
+tree's pre-mutation state showed only the doc fix from I2 (below), nothing
+from the mutation itself.
+
+**Dead.** Gate of record: `collector_differential_test.dart` — `fades a
+hairline stroke by lineweightScale as well as by dpr, not just the
+identity default every other gate in this file exercises`.
 
 ---
 

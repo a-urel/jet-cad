@@ -80,6 +80,15 @@ class ResidentGeometry {
   /// Floats per entry in the corner buffer: `corner` (2) + `join_weight` (4).
   static const int kFloatsPerCorner = 6;
 
+  /// The number of per-vertex records in [kCornerVertices] — six today, two
+  /// triangles' worth. Derived rather than restated: `GpuDrawBackend.render`
+  /// reads this instead of a hardcoded `6` in its `pass.draw` call, and
+  /// `test/support/instance_expander.dart` reads it for the same reason, so
+  /// a kind Plans C or D add to this buffer moves the draw call and the
+  /// test expander together instead of leaving either at a stale count.
+  static int get cornerVertexCount =>
+      kCornerVertices.length ~/ kFloatsPerCorner;
+
   /// The pipeline's vertex input layout: `corner` in its own buffer at slot
   /// 0 (per vertex), the instance record in its own buffer at slot 1 (per
   /// instance).

@@ -236,13 +236,18 @@ class GpuDrawBackend {
       geometry.uniforms
           .emplace(buildFrameInfo(collectionToDevice, widthPx, heightPx)),
     );
-    // **One call. Six vertices, one instance per record, in buffer order.**
-    // The buffer was written once, in walk order, by `GeometryCollector`
-    // (Task 3); nothing here sorts or partitions it, so the buffer's order
-    // *is* the draw order (`vertices_draw_sink.dart:41-57` is the standing
-    // record of what happens when a past version of this codebase drew from
-    // a buffer partitioned by attribute instead of by emission order).
-    pass.draw(6, instanceCount: geometry.instanceCount);
+    // **One call. `cornerVertexCount` vertices, one instance per record, in
+    // buffer order.** The buffer was written once, in walk order, by
+    // `GeometryCollector` (Task 3); nothing here sorts or partitions it, so
+    // the buffer's order *is* the draw order (`vertices_draw_sink.dart:41-57`
+    // is the standing record of what happens when a past version of this
+    // codebase drew from a buffer partitioned by attribute instead of by
+    // emission order). The vertex count itself is read off
+    // `ResidentGeometry.kCornerVertices`, not restated as a literal `6`, so
+    // a kind Plans C or D add to that buffer cannot leave this call drawing
+    // one kind short.
+    pass.draw(ResidentGeometry.cornerVertexCount,
+        instanceCount: geometry.instanceCount);
 
     commandBuffer.submit();
     frames++;

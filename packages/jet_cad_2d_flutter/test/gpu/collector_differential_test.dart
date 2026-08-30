@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -65,6 +66,76 @@ void main() {
     // a second, local, single-purpose fixture instead.
     final doc = _hairlineFixture();
     _checkAgainstOracle(doc);
+  });
+
+  test(
+      'fades a hairline stroke by lineweightScale as well as by dpr, not '
+      'just the identity default every other gate in this file exercises', () {
+    // Every construction of `GeometryCollector` in this file --
+    // `_checkAgainstOracle`'s included -- omits `lineweightScale`, so it
+    // defaults to `1.0` and the factor `_coveredArgb` multiplies by is the
+    // identity everywhere else in this suite, and in
+    // `resident_pixel_differential_test.dart` too. Deleting
+    // `lineweightScale *` from `_coveredArgb` is invisible to every
+    // assertion above for exactly that reason (M-B16). This test is the one
+    // place in the package that pins the factor.
+    //
+    // The arithmetic (`pixelsPerPaperMm=kLogicalPixelsPerMm`
+    // (3.7795275590551185, matching `_referenceCoveredArgb`'s own hardcoded
+    // constant), `devicePixelRatio=_devicePixelRatio` (2.0, this file's own
+    // constant, which `_referenceCoveredArgb` also reads directly rather
+    // than taking dpr as a parameter), `lineweightHundredths=25` (this
+    // file's own default lineweight, `_style`'s and `differentialFixture`'s),
+    // `lineweightScale=0.2`):
+    //   * unscaled device width -- what a collector that dropped the factor
+    //     would compute, since removing `lineweightScale *` leaves the
+    //     expression as if the factor were always `1.0` regardless of what
+    //     was configured: 25/100 * 3.7795275590551185 * 2.0 =
+    //     1.8897637795275593 device px. That is above
+    //     `kMinStrokeDevicePixels` (1.0), so the mutant returns the style's
+    //     alpha unchanged (255).
+    //   * scaled device width -- correct: 25/100 * 3.7795275590551185 *
+    //     0.2 * 2.0 = 0.37795275590551186 device px. That is below the
+    //     floor, so the correct collector fades: coverage =
+    //     (0.37795275590551186 * 2).clamp(0, 1) = 0.7559055118110237,
+    //     alpha = round(255 * 0.7559055118110237) = 193 (0xC1).
+    // The two arms disagree on a non-boundary alpha (255 vs 193, not a
+    // clamp-to-0-or-255 coincidence), so the factor is load-bearing here,
+    // not incidental.
+    const lineweightHundredths = 25;
+    const argb = 0xFF204060;
+    const scale = 0.2;
+    final collector = GeometryCollector(
+        pixelsPerPaperMm: kLogicalPixelsPerMm,
+        devicePixelRatio: _devicePixelRatio,
+        lineweightScale: scale);
+    collector.polyline(
+        Float64List.fromList(<double>[0, 0, 40, 0]),
+        2,
+        const ResolvedStyle(
+            argb: argb,
+            lineweightHundredths: lineweightHundredths,
+            linetype: Handle.none,
+            linetypeScale: 1),
+        closed: false);
+
+    final expectedArgb = _referenceCoveredArgb(argb, lineweightHundredths,
+        lineweightScale: scale);
+    final expectedAlpha = (expectedArgb >> 24) & 0xFF;
+    expect(expectedAlpha, 193,
+        reason: 'the fixture above must actually land off the identity and '
+            'off a clamp boundary, or this test would not be load-bearing');
+
+    final data = collector.data;
+    expect(data[InstanceFieldOffset.a] * 255.0,
+        closeTo(expectedAlpha.toDouble(), 0.51),
+        reason: 'a collector that dropped lineweightScale from the fade '
+            'formula would leave this at 255, not 193');
+    // The colour channels are untouched -- `_coveredArgb` gives up alpha,
+    // it does not darken.
+    expect(data[InstanceFieldOffset.r] * 255.0, closeTo(0x20, 0.51));
+    expect(data[InstanceFieldOffset.g] * 255.0, closeTo(0x40, 0.51));
+    expect(data[InstanceFieldOffset.b] * 255.0, closeTo(0x60, 0.51));
   });
 }
 
@@ -464,6 +535,15 @@ double _referenceLogicalHalfWidth(int lineweightHundredths) {
 /// constant keeps this a second, independent formula rather than a value
 /// shared with the code under test.
 ///
+/// **`lineweightScale` is a factor here, mirroring
+/// `VerticesDrawSink._coveredArgb`'s own `lineweightScale *` term.** Every
+/// call site in this file passes the default of `1.0`, at which the factor
+/// is the identity and every existing assertion is unchanged -- the sole
+/// caller that exercises a non-default value is the
+/// `lineweightScale != 1` fade test below, added specifically because a
+/// default-only oracle can never disagree with a collector that dropped
+/// this factor entirely.
+///
 /// **Only the guard is read live; the `* 2` slope below is not.** Unlike
 /// [_referenceLogicalHalfWidth], which reads `kMinStrokeDevicePixels` in
 /// both the guard and the value it floors to, this function's fade slope
@@ -475,9 +555,13 @@ double _referenceLogicalHalfWidth(int lineweightHundredths) {
 /// (correctly, since it is read live) but would leave the slope at a stale
 /// `* 2`, silently wrong rather than caught by this test the way a floor
 /// change is.
-int _referenceCoveredArgb(int argb, int lineweightHundredths) {
-  final deviceWidth =
-      lineweightHundredths / 100.0 * kLogicalPixelsPerMm * _devicePixelRatio;
+int _referenceCoveredArgb(int argb, int lineweightHundredths,
+    {double lineweightScale = 1.0}) {
+  final deviceWidth = lineweightHundredths /
+      100.0 *
+      kLogicalPixelsPerMm *
+      lineweightScale *
+      _devicePixelRatio;
   if (!deviceWidth.isFinite ||
       deviceWidth <= 0 ||
       deviceWidth >= VerticesDrawSink.kMinStrokeDevicePixels) {

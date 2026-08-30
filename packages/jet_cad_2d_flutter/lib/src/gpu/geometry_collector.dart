@@ -68,12 +68,15 @@ class GeometryCollector implements DrawSink {
 
   /// Copies `_buffer` on every access — `sublist` allocates a fresh
   /// `Float32List`, not a view. At this plan's measured 10,000-entity scale
-  /// (59,875 segments; `resident_geometry_test.dart:23`) that is roughly 2.3 MB
-  /// copied per call (59,875 × [kFloatsPerInstance] × 4 bytes). Read it
-  /// once per rebuild, into `ResidentGeometry.create`, and hoist it out of
-  /// any per-frame path — Plan F's `paint()` call site included — or it
-  /// breaks this project's "the frame path allocates nothing per entity in
-  /// steady state" non-negotiable.
+  /// (109,068 instances, strokes and joins together — the 59,875 in Plan A's
+  /// original version of this note was strokes only, before joins existed;
+  /// see `docs/superpowers/notes/2026-08-30-plan-b-results.md`) that is
+  /// roughly 5.23 MB copied per call (109,068 × [kFloatsPerInstance] × 4
+  /// bytes = 5,235,264 bytes). Read it once per rebuild, into
+  /// `ResidentGeometry.create`, and hoist it out of any per-frame path —
+  /// Plan F's `paint()` call site included — or it breaks this project's
+  /// "the frame path allocates nothing per entity in steady state"
+  /// non-negotiable.
   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
   int get instanceCount => _instances;
 
