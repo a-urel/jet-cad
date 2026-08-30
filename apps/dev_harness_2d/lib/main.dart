@@ -923,22 +923,6 @@ Future<void> _driveR2(
   print('R2 app-run: done');
 }
 
-/// Renders exactly one frame and completes after it.
-///
-/// This is called from inside `_HarnessAppState`'s own post-frame callback —
-/// [SchedulerBinding.instance.schedulerPhase] is `postFrameCallbacks`, not
-/// `idle`, at that point, and [SchedulerBinding.endOfFrame] only calls
-/// [SchedulerBinding.scheduleFrame] for you when the phase is idle. Relying
-/// on `camera.value = ...`'s listener chain to schedule the next frame as a
-/// side effect worked on the first call by chance and hung on every one
-/// after it, once the phase genuinely was idle and nothing else nearby
-/// happened to call `scheduleFrame`. Calling it explicitly first removes the
-/// dependency on that side effect entirely.
-Future<void> pumpFrame() {
-  SchedulerBinding.instance.scheduleFrame();
-  return SchedulerBinding.instance.endOfFrame;
-}
-
 /// A running app has no synthetic clock to advance, so there is no exact
 /// equivalent of `tester.pumpAndSettle()`. This pumps frames while one is
 /// still scheduled, bounded, which is the same loop `pumpAndSettle` runs

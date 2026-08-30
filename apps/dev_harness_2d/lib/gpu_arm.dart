@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
-import 'main.dart';
 import 'measurement_rig.dart';
 
 // --- The GPU arm: painter vs. tiles vs. jet_cad_2d_flutter's resident-GPU

@@ -40,6 +40,25 @@ void refuseDebugMode() {
   }
 }
 
+/// Renders exactly one frame and completes after it.
+///
+/// Shared by `main.dart` (`_driveR2` and the GPU arm in `gpu_arm.dart`) —
+/// moved here from `main.dart` so both could reach it without either
+/// importing the other. This is called from inside `_HarnessAppState`'s own
+/// post-frame callback — [SchedulerBinding.instance.schedulerPhase] is
+/// `postFrameCallbacks`, not `idle`, at that point, and
+/// [SchedulerBinding.endOfFrame] only calls [SchedulerBinding.scheduleFrame]
+/// for you when the phase is idle. Relying on `camera.value = ...`'s
+/// listener chain to schedule the next frame as a side effect worked on the
+/// first call by chance and hung on every one after it, once the phase
+/// genuinely was idle and nothing else nearby happened to call
+/// `scheduleFrame`. Calling it explicitly first removes the dependency on
+/// that side effect entirely.
+Future<void> pumpFrame() {
+  SchedulerBinding.instance.scheduleFrame();
+  return SchedulerBinding.instance.endOfFrame;
+}
+
 /// p50, p95 and max of build, raster and total time, reported separately.
 ///
 /// A build-bound frame and a raster-bound frame call for opposite fixes in
