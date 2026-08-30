@@ -22,6 +22,19 @@ const _hairlineStyle = ResolvedStyle(
 double _kindAt(GeometryCollector c, int i) =>
     c.data[i * kFloatsPerInstance + InstanceFieldOffset.kind];
 
+/// Counts instances of kind [kind] in [c]'s buffer.
+int _countKind(GeometryCollector c, double kind) {
+  final data = c.data;
+  var n = 0;
+  for (var i = 0; i < c.instanceCount; i++) {
+    if (data[i * kFloatsPerInstance + InstanceFieldOffset.kind] == kind) n++;
+  }
+  return n;
+}
+
+int _joinCount(GeometryCollector c) => _countKind(c, kKindJoin);
+int _strokeCount(GeometryCollector c) => _countKind(c, kKindStroke);
+
 void main() {
   test('applies the residual, and a transposed one is not the same residual',
       () {
@@ -932,5 +945,167 @@ void main() {
       expect(
           c.data[i * kFloatsPerInstance + InstanceFieldOffset.dashPhase], 0.0);
     }
+  });
+
+  // --- dashed circles and arcs (Task 6) ------------------------------------
+
+  test(
+      'a dashed arc carries a running phase, and consecutive chords advance '
+      'it by one chord of arc length', () {
+    const r = 40.0;
+    const sweep = 1.2;
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(5, 7));
+    c.beginDash(dashed, 0.5);
+    c.arc(0, 0, r, 0, sweep, dashStyle);
+    c.endDash();
+    c.endResidual();
+
+    // Read the phases off the stroke instances in order.
+    final data = c.data;
+    final phases = <double>[
+      for (var i = 0; i < c.instanceCount; i++)
+        if (data[i * kFloatsPerInstance + InstanceFieldOffset.kind] ==
+            kKindStroke)
+          data[i * kFloatsPerInstance + InstanceFieldOffset.dashPhase]
+    ];
+    expect(phases.first, 0.0);
+
+    // Each step advances by one chord's own local-arc length, scaled by that
+    // chord's own factor (chord/arc) -- the SAME factor and the SAME step for
+    // every chord here, because a residual that is a pure translation
+    // (scaleMagnitude == 1) leaves collection-space chord length equal to
+    // local chord length, and every chord of a circular arc flattened at a
+    // constant angular step has the same chord length. Recomputed from the
+    // reference's own flattening formula, not hardcoded, so the test tracks
+    // a tolerance change instead of pinning today's step count.
+    final steps =
+        (sweep.abs() * math.sqrt(r / (8 * VerticesDrawSink.kFlattenTolerance)))
+            .ceil()
+            .clamp(1, VerticesDrawSink.kMaxFlattenSegments);
+    final step = sweep / steps;
+    final arcStep = r * step.abs();
+    final chordLen = 2 * r * math.sin(step.abs() / 2);
+    final expectedAdvance = chordLen; // arcStep * (chordLen / arcStep)
+    // Ruling C4's own bound: the disagreement between arc and chord stays
+    // inside one chord, under a tenth of a pixel at this flattener's 0.25 px
+    // sagitta.
+    expect(arcStep - chordLen, lessThan(0.1));
+
+    final period = data[InstanceFieldOffset.dashPeriod].abs();
+    for (var i = 1; i < phases.length; i++) {
+      final delta = (phases[i] - phases[i - 1] + period) % period;
+      expect(delta, closeTo(expectedAdvance, 1e-3),
+          reason: 'a constant advance is what "running" means; a phase that '
+              'restarts per chord is dasher.dart\'s polyline rule applied '
+              'to a curve, which is the spec\'s own named mutation');
+    }
+  });
+
+  test('a dashed circle emits no seam join', () {
+    const r = 40.0;
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.identity());
+    c.beginDash(dashed, 0.5);
+    c.circle(0, 0, r, dashStyle);
+    c.endDash();
+    c.endResidual();
+
+    final solid =
+        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    solid.beginResidual(Transform2.identity());
+    solid.circle(0, 0, r, dashStyle);
+    solid.endResidual();
+
+    // The solid circle's join count is chords; the dashed one's is chords - 1
+    // (interior joins only, no seam).
+    expect(_joinCount(c), _joinCount(solid) - 1);
+  });
+
+  test(
+      'a solid circle still has its seam join -- the assertion above is '
+      'about dashes', () {
+    // Guards against "no joins at all" passing the test above.
+    final solid =
+        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    solid.beginResidual(Transform2.identity());
+    solid.circle(0, 0, 40, dashStyle);
+    solid.endResidual();
+    expect(_joinCount(solid), greaterThan(0));
+  });
+
+  test('the chord count does not change when a dash bracket is open', () {
+    // Flattening is a scale decision, not a linetype one. A dashed arc that
+    // chorded differently from a solid one would put the two arms' geometry
+    // in different places for a reason that has nothing to do with the
+    // pattern. dashDot has D == 2 drawn elements, so the dashed arm writes
+    // exactly two strokes per chord.
+    const r = 40.0;
+    const sweep = 1.2;
+    final dashedC =
+        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    dashedC.beginResidual(Transform2.identity());
+    dashedC.beginDash(dashDot, 0.5);
+    dashedC.arc(0, 0, r, 0, sweep, dashStyle);
+    dashedC.endDash();
+    dashedC.endResidual();
+
+    final solidC =
+        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    solidC.beginResidual(Transform2.identity());
+    solidC.arc(0, 0, r, 0, sweep, dashStyle);
+    solidC.endResidual();
+
+    expect(_strokeCount(dashedC) ~/ 2, _strokeCount(solidC));
+  });
+
+  test(
+      'an anisotropic residual scales each chord\'s period by that chord\'s '
+      'own ratio, not by one number for the whole arc', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.scale(3.0, 1.0)); // a circle becomes an ellipse
+    c.beginDash(dashed, 0.5);
+    c.arc(0, 0, 40, 0, math.pi, dashStyle);
+    c.endDash();
+    c.endResidual();
+    final data = c.data;
+    final periods = <double>[
+      for (var i = 0; i < c.instanceCount; i++)
+        if (data[i * kFloatsPerInstance + InstanceFieldOffset.kind] ==
+            kKindStroke)
+          data[i * kFloatsPerInstance + InstanceFieldOffset.dashPeriod].abs()
+    ];
+    expect(
+        periods.reduce(math.max) / periods.reduce(math.min), closeTo(3.0, 0.1),
+        reason: 'a chord along x is stretched 3x and a chord along y is not; '
+            'one period for the whole arc would read 1.0 here and would be '
+            'the scaleMagnitude approximation this fixture exists to reject');
+  });
+
+  test('the phase is reduced into [0, period) at collection', () {
+    // A long arc accumulates many periods; leaving them in the record spends
+    // float32 precision the fragment stage needs for `fract`. A full circle
+    // at period 9.0 (cycle 18.0 x patternToLocal 0.5) against a ~251-unit
+    // circumference wraps roughly 28 times, so an unreduced phase would run
+    // into the hundreds.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.identity());
+    c.beginDash(dashed, 0.5);
+    c.circle(0, 0, 40, dashStyle);
+    c.endDash();
+    c.endResidual();
+
+    final data = c.data;
+    var sawStroke = false;
+    for (var i = 0; i < c.instanceCount; i++) {
+      final o = i * kFloatsPerInstance;
+      if (data[o + InstanceFieldOffset.kind] != kKindStroke) continue;
+      sawStroke = true;
+      final phase = data[o + InstanceFieldOffset.dashPhase];
+      final period = data[o + InstanceFieldOffset.dashPeriod].abs();
+      expect(phase, greaterThanOrEqualTo(0.0));
+      expect(phase, lessThan(period));
+    }
+    expect(sawStroke, isTrue);
   });
 }

@@ -259,14 +259,28 @@ class GeometryCollector implements DrawSink {
   /// A closed run gets the segment back to its first point and then the seam
   /// join, the corner no vertex list contains and the one whose absence puts
   /// a notch on every circle at its start angle.
+  ///
+  /// [suppressSeam] suppresses only the closing corner's own join — the seam
+  /// — without touching the join `_runTo` writes for the closing *chord*
+  /// itself (the interior join at the vertex the closing chord starts from).
+  /// It is a separate parameter from [_suppressJoins] on purpose: a dashed
+  /// arc suppresses the seam alone (Ruling C3's interior joins stay live),
+  /// while a dashed polyline suppresses every join via [_suppressJoins],
+  /// including this one — setting [_suppressJoins] before this call, as a
+  /// dashed arc's first draft did, silently drops that interior join too,
+  /// since the `_runTo` call two lines below honours [_suppressJoins] as
+  /// well. `suppressSeam` reaches only the explicit call below.
   void _endRun(
-      {required bool closed, required double half, required int argb}) {
+      {required bool closed,
+      required double half,
+      required int argb,
+      bool suppressSeam = false}) {
     if (!closed || !_runHasDirection) return;
     _runTo(_runFirstX, _runFirstY, half, argb);
     // Guarded for the same reason the reference guards it: today's callers
     // cannot reach here with one segment, but that is a fact about the
     // callers, not a promise the join arithmetic makes.
-    if (_runSegments >= 2 && !_suppressJoins) {
+    if (_runSegments >= 2 && !_suppressJoins && !suppressSeam) {
       _emitJoin(_runFirstX, _runFirstY, _runBackX, _runBackY, _runSecondX,
           _runSecondY, half, argb);
     }
@@ -522,9 +536,20 @@ class GeometryCollector implements DrawSink {
     final argb = _coveredArgb(style.argb, style.lineweightHundredths);
     final step = sweep / steps;
 
+    // Arcs keep their interior joins -- Ruling B4/C3 leaves the
+    // bevel/miter/collinear decision to the shader regardless of the
+    // linetype, and unlike a dashed polyline (which suppresses every join
+    // via `_suppressJoins`), a dashed arc suppresses only the seam. So
+    // `_suppressJoins` itself stays false for the whole walk below --
+    // `_endRun`'s `suppressSeam` parameter is what turns off the seam alone.
+    _suppressJoins = false;
+    final arcStep = r * step.abs(); // local arc length per chord
+
     var lx = cx + r * math.cos(start);
     var ly = cy + r * math.sin(start);
-    _beginRun(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f);
+    var px = t.a * lx + t.c * ly + t.e;
+    var py = t.b * lx + t.d * ly + t.f;
+    _beginRun(px, py);
     // A closed sweep stops one sample short: its last chord is the segment
     // `_endRun` draws back to the first point, so closing here would draw
     // that chord twice and leave the seam a duplicated point instead of a
@@ -534,9 +559,46 @@ class GeometryCollector implements DrawSink {
       final angle = start + step * i;
       lx = cx + r * math.cos(angle);
       ly = cy + r * math.sin(angle);
-      _runTo(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f, half, argb);
+      final nx = t.a * lx + t.c * ly + t.e;
+      final ny = t.b * lx + t.d * ly + t.f;
+      if (_dashActive && arcStep > 0) {
+        final cdx = nx - px, cdy = ny - py;
+        // The pattern is measured along the ARC and drawn along the CHORD.
+        // Dividing the chord's collection length by the chord's LOCAL ARC
+        // length makes the two agree exactly at every chord endpoint and
+        // leaves the disagreement inside one chord, bounded by (arc - chord)
+        // -- under a tenth of a pixel at this flattener's 0.25 px sagitta.
+        // Ruling C4 records this rather than removing it: removing it means
+        // re-chording per span, which is chording at one camera, which is
+        // what this plan exists to stop doing.
+        final factor = math.sqrt(cdx * cdx + cdy * cdy) / arcStep;
+        _pendingSegPeriod = _dashPeriodLocal * factor;
+        // The reduction happens before the scaling -- parenthesised
+        // explicitly rather than relying on `%` and `*` sharing precedence
+        // and associating left to right, because a precedence argument left
+        // only in a comment is a defect waiting for a reader who does not
+        // check.
+        _pendingSegPhase = ((arcStep * (i - 1)) % _dashPeriodLocal) * factor;
+        // The join at the vertex this step arrives from sits at the START of
+        // this chord, so it takes this chord's phase and this chord's
+        // factor.
+        _pendingJoinPeriod = _pendingSegPeriod;
+        _pendingJoinPhase = _pendingSegPhase;
+      }
+      _runTo(nx, ny, half, argb);
+      px = nx;
+      py = ny;
     }
-    _endRun(closed: closed, half: half, argb: argb);
+    // Ruling C3, third clause: the reference emits every dash span as its
+    // own `arc()` op, so a dashed circle is a sequence of OPEN runs and no
+    // closed run -- and therefore no seam join -- exists anywhere in it.
+    // `suppressSeam` reproduces that without touching the interior join
+    // `_endRun`'s own `_runTo` call writes for the closing chord.
+    _endRun(closed: closed, half: half, argb: argb, suppressSeam: _dashActive);
+    _pendingSegPeriod = 0;
+    _pendingSegPhase = 0;
+    _pendingJoinPeriod = 0;
+    _pendingJoinPhase = 0;
   }
 
   int _flattenSteps(double deviceRadius, double theta) {
