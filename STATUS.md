@@ -1,22 +1,28 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-30
-**Verified against:** `main` at `cd5bc98` — the merge commit for **Plan A of the
-GPU-resident render backend**, the first of that spec's seven plans. Plan A ran
-on `plan-a/gpu-seam-and-strokes`, cut from `spike/flutter-gpu-backend`, nine
-tasks at `81529f0..cdf2a23`, merged `--no-ff` and the branch deleted. **Its last
-*code* commit is `d5c85f4`**; everything after it is documentation and citation
-repair. Before it, Plan 3i ran directly on `main` at
-`468e310..dbc31e8` and is DONE. The tree is clean apart from the files the traps
-below say never to commit, plus untracked `.DS_Store` files a device run left
-behind — the repo has no `.gitignore` entry for them. Every suite count below
-was produced by running that suite on the merged tree on 2026-08-30, not by
-reading a report — with the one exception the table marks as not re-run.
+**Verified against:** `main` at `72b162d` — the merge commit for **Plan B of
+the GPU-resident render backend**, the second of that spec's seven plans.
+Plan B ran on `plan-b/joins-and-hairlines`, cut from `main`, eleven tasks at
+`5c94e11..4892a01`, merged `--no-ff` and the branch deleted. Before it, Plan A
+merged at `cd5bc98` (nine tasks, `81529f0..cdf2a23`) and Plan 3i ran directly
+on `main` at `468e310..dbc31e8`. **Nothing is in flight.** The tree is clean
+apart from the files the traps below say never to commit; the `.DS_Store`
+files an earlier device run left behind are gone, and they are covered by a
+**global** git ignore (`~/.config/git/ignore`) rather than this repo's, since
+they are an OS artefact and not a project one.
+
+**Every suite count below was produced by running that suite on the MERGED
+tree on 2026-08-30** — `jet_cad_2d` 797, `jet_cad_2d_flutter` 479 (1
+pre-existing skip), `dev_harness_2d` 72, analyze and format clean in all
+three — not by reading a report, and not by trusting the branch's own green
+run. A green run only proves the tree it ran on.
 
 **Plan B (joins and hairlines), the second of the GPU-resident render
 backend's seven plans, is DONE — eleven tasks on
 `plan-b/joins-and-hairlines` (cut from `main` at `5c94e11`, one commit after
-Plan A's merge), code range `5c94e11..72b938a`, not merged.** Exit gate:
+Plan A's merge), range `5c94e11..4892a01`, merged `--no-ff` at `72b162d`.**
+Exit gate:
 **10 of 11 — criterion 11 is UNMET**, in those words: the device run
 happened but no human looked at the running window, and Plan 3h's session
 already proved that instrument catches what the other two (mutation
@@ -75,8 +81,8 @@ Spec: [2026-08-29-gpu-resident-render-backend-design.md](docs/superpowers/specs/
 **Plan B taught the GPU-resident backend joins, seam joins, `point()` as its
 own kind, circle/arc flattening and the `_coveredArgb` hairline alpha fade —
 the second of the design spec's seven plans, on `plan-b/joins-and-hairlines`
-(cut from `main` at `5c94e11`), eleven tasks, code at `5c94e11..72b938a`, not
-merged.** Spec:
+(cut from `main` at `5c94e11`), eleven tasks, `5c94e11..4892a01`, merged
+`--no-ff` at `72b162d` and the branch deleted.** Spec:
 [2026-08-29-gpu-resident-render-backend-design.md](docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md)
 (the same revision-4 spec Plan A used). Plan:
 [2026-08-30-gpu-backend-plan-b-joins-and-hairlines.md](docs/superpowers/plans/2026-08-30-gpu-backend-plan-b-joins-and-hairlines.md).
@@ -427,16 +433,15 @@ docs/superpowers/
 
 | Location | Branch | State |
 |---|---|---|
-| `/Users/ahmeturel/Projects/oss/jet-cad` | `plan-b/joins-and-hairlines` | clean apart from the untracked/traps this file already names; DONE, exit gate 10 of 11, **not merged** — criterion 11's human window check is still owed |
+| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and **GPU Plans A and B** merged |
 
-**No separate worktree — the primary checkout itself is on
-`plan-b/joins-and-hairlines`, at `72b938a`.** `main` is one branch back, at
-`5c94e11`, and carries Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and
-**GPU Plan A** merged, plus Plan B's own spec and plan documents (written
-directly onto `main` before the branch was cut, the pattern this file's
-other spec-writing commits also use). **Nothing is task-in-flight** — every
-one of Plan B's eleven tasks is finished and reviewed — but the branch
-itself is unmerged pending the human window check criterion 11 names.
+**No worktrees. Nothing is in flight.**
+
+`plan-b/joins-and-hairlines` was merged `--no-ff` at `72b162d` and deleted,
+after the full three-package gate was re-run on the merged tree. **Criterion
+11's human window check is still owed and merging did not discharge it** —
+see [Resume here](#resume-here). The human chose to merge with that gap open
+and it is recorded here rather than closed by the merge.
 
 `plan-a/gpu-seam-and-strokes` was merged with `--no-ff` and deleted. **Three
 spike branches survive and are now all contained in `main`:**
@@ -587,13 +592,15 @@ flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
   --dart-define=SPIKE_REPEATS=3
 ```
 
-**Plan B (joins and hairlines) is done, eleven tasks, on
-`plan-b/joins-and-hairlines` at `5c94e11..72b938a`, not merged; nothing is
-task-in-flight.** Full account:
+**Plan B (joins and hairlines) is DONE and MERGED**, eleven tasks,
+`5c94e11..4892a01`, merge `72b162d`, branch deleted; nothing is in flight.
+**Its criterion 11 is still UNMET and the merge did not change that:** the
+device run happened, but no human has looked at the running window. Full
+account:
 [Plan B](#plan-b--joins-and-hairlines) and
 [2026-08-30-plan-b-results.md](docs/superpowers/notes/2026-08-30-plan-b-results.md).
-Once a human has looked at the window and the merge decision is made, the
-next unit of work is **Plan C — dashes**, per the roadmap line Plan A and
+The merge decision is made. Once a human has looked at the window, the next
+unit of work is **Plan C — dashes**, per the roadmap line Plan A and
 Plan B both cite: *"Plan A ships strokes only. Joins, caps, `point()` and
 `_coveredArgb` are Plan B; dashes C; fills D; the text split E; rebuild
 triggers and the watermark F; web G."*
