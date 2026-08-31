@@ -31,20 +31,33 @@ import 'measurement_rig.dart';
 // **What arm C (the resident backend) still does not draw, and why that is
 // not a bug in this harness.** `GeometryCollector` implements `polyline`
 // (with joins), `point`, `circle` and `arc` (flattened, seam join included
-// on a closed sweep) -- Plan B's job, done. `fillPolygon`, `fillCircle` and
-// `text` are the only ops that still fall through to its `skippedOps`
-// counter: dashed *arcs* are Plan C's (a dashed *polyline*'s spans already
-// reach the sink as ordinary `polyline` calls, so straight dashed strokes
-// draw today); fills are Plan D's; text is Plan E's. A corpus with fills or
-// text will show visibly less on arm C than on arm A or B -- `skippedOps` in
-// the `GSPIKE collect+upload` line says how much, so a thin picture reads as
-// a number instead of as a silent gap.
+// on a closed sweep) -- Plan B's job, done -- and since Plan C it also
+// shades dash patterns per fragment, dashed arcs included. `fillPolygon`,
+// `fillCircle` and `text` are the only ops that still fall through to its
+// `skippedOps` counter: fills are Plan D's, text is Plan E's. A corpus with
+// fills or text will show visibly less on arm C than on arm A or B --
+// `skippedOps` in the `GSPIKE collect+upload` line says how much, so a thin
+// picture reads as a number instead of as a silent gap.
 //
 // **The buffer is collected once, at the arm's starting camera, and never
-// re-walked.** A dash pattern's spans are split at that camera's scale and
-// then baked into the resident buffer, so they stretch under zoom exactly
-// the way the spike's did -- not a cheat here, but the direct consequence of
-// "walked once" being the whole point of this backend.
+// re-walked.** Since Plan C that costs less than it used to, and the reason
+// is worth stating precisely, because the sentence this comment used to
+// carry was wrong.
+//
+// It said baked dash spans "stretch under zoom". They do not, and neither
+// does the reference: `DraftPainter._dashScale` folds in
+// `toScreen.scaleMagnitude` and the points it dashes are already in screen
+// space, so period and distance scale together and **the number of dashes
+// along an entity does not move with the camera at all**. Dash patterns are
+// anchored in world space. Plan C measured that three ways (see
+// `docs/superpowers/notes/2026-08-31-plan-c-results.md`).
+//
+// What baking a dash pattern actually froze was the **collapse** decision.
+// `kDashCollapsePx` is a screen-space threshold, so whether a pattern draws
+// solid depends on the live camera; a buffer that decided it once at
+// collection time drew dashes where the reference had collapsed to solid, or
+// the reverse. Plan C moved that branch into the vertex shader, where it is
+// re-decided every frame from one uniform.
 
 /// The three arms.
 enum GpuSpikeArm {
@@ -438,14 +451,14 @@ Future<void> runGpuSpike(
       '${viewport.height.toStringAsFixed(0)} '
       'frames=$frames repeats=$repeats');
   gpuReport('GSPIKE note: arm C (residentGpu) draws strokes, joins, points, '
-      'circles and arcs -- ${state.skippedOps} op(s) this walk did not draw '
-      '(fills, text: later plans\' job, see the section comment above this '
-      'rig). Butt caps only -- Plan B emits no cap geometry. No '
-      'antialiasing. Dash spans are baked at the collection camera and '
-      'never re-split under zoom, a consequence of walking the document '
-      'exactly once. Every one of those favours arm C on a timing '
-      'comparison, which is why the picture matters as much as the numbers '
-      'here.');
+      'circles, arcs and shaded dashes -- ${state.skippedOps} op(s) this '
+      'walk did not draw (fills, text: later plans\' job, see the section '
+      'comment above this rig). Butt caps only -- Plan B emits no cap '
+      'geometry. No antialiasing. Dash patterns are evaluated per fragment '
+      'against the live camera since Plan C, collapse rule included, so '
+      'nothing about them is baked. Every remaining gap favours arm C on a '
+      'timing comparison, which is why the picture matters as much as the '
+      'numbers here.');
 
   final reports = <GpuPhaseReport>[];
 

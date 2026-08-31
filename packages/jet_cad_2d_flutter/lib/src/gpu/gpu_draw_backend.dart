@@ -9,12 +9,17 @@ import '../viewport_transform.dart';
 import 'gpu_facade.dart' as gpu;
 import 'resident_geometry.dart';
 
-/// The uniform block: `mat4 mvp` then `vec2 half_viewport`, std140, 80 bytes.
+/// The uniform block: `mat4 mvp`, `vec2 half_viewport`, then `float
+/// dash_scale`, std140, 80 bytes.
 ///
 /// **80, not the 128 `impellerc` reflects.** Plain std140 arithmetic gives 80:
 /// `mat4` occupies 64 bytes (four 16-byte-aligned `vec4` columns), `vec2`
-/// needs only 8-byte alignment so it sits at offset 64..72 with no gap, and
-/// the struct's own alignment (16, from `mat4`) rounds 72 up to 80. The 128
+/// needs only 8-byte alignment so it sits at offset 64..72 with no gap, a
+/// trailing `float` needs only 4-byte alignment so it sits at 72..76 with no
+/// gap either, and the struct's own alignment (16, from `mat4`) rounds 76 up
+/// to 80 -- the same 80 the block was before this member existed, because
+/// that trailing 4 bytes (float index 19) was always pure alignment padding,
+/// never a second scalar. The 128
 /// `impellerc` reports (`resident_geometry.dart`'s doc comment) is real, but
 /// it is *reflected struct size*, not *bytes the runtime requires bound* --
 /// neither `RenderPass.bindUniform` nor `HostBuffer.emplace` on the native
@@ -62,8 +67,30 @@ import 'resident_geometry.dart';
 /// folds `dpr` into the transform *before* calling this function, by
 /// composing it with `Transform2.scale(dpr, dpr)`, so that what arrives here
 /// is already commensurate with `widthPx`/`heightPx`.
+///
+/// **[dashScale] is deliberately not device space.** It is live **logical**
+/// pixels per collection unit -- the factor the shader will compare a dash
+/// period against `kDashCollapsePx` to decide whether the pattern has
+/// collapsed and should draw solid. `kDashCollapsePx` is compared against a
+/// period measured in the painter's screen-space points, which are logical
+/// pixels (`viewport_transform.dart`: "screen coordinates are logical
+/// pixels"), and against `period * pixelScale` in `dashArc`, where
+/// `pixelScale` is `chain.scaleMagnitude`, also logical. A device-space
+/// ratio would collapse patterns at `dpr` times the wrong zoom -- correct at
+/// `dpr == 1`, wrong on every retina display, which is the shape of a defect
+/// a previous plan's device run found in the half-width. See
+/// [dashScaleFor] for the composition this value comes from.
+///
+/// **Required, not defaulted.** A defaulted `dashScale` is a silent 0, and a
+/// 0 collapses every dash pattern in the drawing to solid -- a
+/// whole-drawing defect hiding behind a default argument.
+///
+/// [dashScale] is written at float index 18 (byte 72), the block's only
+/// trailing scalar; float index 19 (byte 76) stays zero -- it is alignment
+/// padding, not a second member (see this function's doc comment above).
 ByteData buildFrameInfo(
-    Transform2 collectionToDevice, int widthPx, int heightPx) {
+    Transform2 collectionToDevice, int widthPx, int heightPx,
+    {required double dashScale}) {
   final sx = 2.0 / widthPx;
   final sy = -2.0 / heightPx;
   final data = ByteData(80);
@@ -86,7 +113,7 @@ ByteData buildFrameInfo(
   f(15, 1);
   f(16, widthPx / 2);
   f(17, heightPx / 2);
-  f(18, 0);
+  f(18, dashScale);
   f(19, 0);
   return data;
 }
@@ -105,6 +132,34 @@ ByteData buildFrameInfo(
 /// file would be one more place for the two to silently diverge.
 Transform2 composeTransforms(Transform2 outer, Transform2 inner) =>
     outer.multiply(inner);
+
+/// Live logical pixels per collection unit -- the factor the shader compares
+/// a dash period against `kDashCollapsePx`.
+///
+/// **Logical, deliberately.** See [buildFrameInfo]'s doc comment on
+/// `dashScale` for why: `kDashCollapsePx` is compared against periods
+/// measured in the painter's logical screen-space points, and a device-space
+/// ratio would collapse patterns at `dpr` times the wrong zoom.
+///
+/// **`render` calls this directly -- it is the shipping implementation, not
+/// a parallel one.** `GpuDrawBackend.render` cannot run without a GPU, so
+/// nothing in `flutter test` can reach code written inline at its call
+/// site. A version of the ratio spelled out a second time there -- even one
+/// that reads identically today -- would leave the *tested* copy here and
+/// the *shipping* copy uncovered, and the exact mutation this function
+/// exists to catch (composing with `Transform2.scale(dpr, dpr)`, a
+/// device-space ratio that collapses dash patterns at `dpr` times the wrong
+/// zoom) is a small, plausible edit at an inline site that no test would
+/// then see. Calling this function from `render` is what makes the suite's
+/// witness cover the line that actually runs.
+///
+/// The extra `Transform2.multiply` this adds is one more composition per
+/// frame, not per entity -- squarely inside "the frame path allocates
+/// nothing per entity in steady state, and O(1) per flush" (CLAUDE.md):
+/// `render` already performs two compositions before this one.
+double dashScaleFor(ViewportTransform camera, Transform2 collectionInverse) =>
+    composeTransforms(camera.worldToScreenMatrix, collectionInverse)
+        .scaleMagnitude;
 
 /// Draws [geometry] once per frame with the camera as a uniform.
 ///
@@ -227,14 +282,32 @@ class GpuDrawBackend {
     // Task 9's device run confirmed the fold itself: the drawing filled the
     // full viewport rather than the top-left quadrant the missing-`dpr`
     // defect this fixes used to produce (see the task-9 report).
-    final collectionToDevice = composeTransforms(
-      Transform2.scale(dpr, dpr),
-      composeTransforms(camera.worldToScreenMatrix, _collectionInverse),
-    );
+    //
+    // **`collectionToLogical` is named because `collectionToDevice` needs
+    // it, and `dashScale` comes from `dashScaleFor`, not a second spelling
+    // of its formula here.** `render` cannot run without a GPU, so this is
+    // the one call site nothing in `flutter test` can reach directly; the
+    // only way the suite's coverage of the logical-vs-device distinction
+    // means anything for what actually ships is for this line to call the
+    // exact function the tests exercise, rather than restate
+    // `composeTransforms(...).scaleMagnitude` inline (see `dashScaleFor`'s
+    // own doc comment above). That does recompute the
+    // `camera.worldToScreenMatrix`/`_collectionInverse` composition a second
+    // time (once here as `collectionToLogical`, once inside `dashScaleFor`)
+    // rather than reusing the first result -- one extra `Transform2`
+    // composition per frame, not per entity, so it stays inside "the frame
+    // path allocates nothing per entity in steady state, and O(1) per
+    // flush" (CLAUDE.md): `render` already performs two compositions before
+    // this one.
+    final collectionToLogical =
+        composeTransforms(camera.worldToScreenMatrix, _collectionInverse);
+    final collectionToDevice =
+        composeTransforms(Transform2.scale(dpr, dpr), collectionToLogical);
     pass.bindUniform(
       geometry.vertexShader.getUniformSlot('FrameInfo'),
-      geometry.uniforms
-          .emplace(buildFrameInfo(collectionToDevice, widthPx, heightPx)),
+      geometry.uniforms.emplace(buildFrameInfo(
+          collectionToDevice, widthPx, heightPx,
+          dashScale: dashScaleFor(camera, _collectionInverse))),
     );
     // **One call. `cornerVertexCount` vertices, one instance per record, in
     // buffer order.** The buffer was written once, in walk order, by

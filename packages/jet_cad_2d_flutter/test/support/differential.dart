@@ -131,6 +131,13 @@ List<DrawnItem> flatten(List<DrawOp> ops) {
           residual.transformPoint(Vector2(1, 0)),
           residual.transformPoint(Vector2(0, 1)),
         ]));
+      case BeginDashOp():
+      case EndDashOp():
+        // Neither op carries drawable geometry on its own -- it brackets the
+        // ops that follow. No sink compared through this oracle shades
+        // dashes yet, so the bracket never reaches here in practice; Task 5
+        // gives the shading sink its own differential reference.
+        break;
     }
   }
   return out;

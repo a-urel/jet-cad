@@ -83,6 +83,20 @@ class CanvasDrawSink implements DrawSink {
   void resetCounters() => _canvasCalls = 0;
 
   @override
+  bool get shadesDashes => false;
+
+  @override
+  void beginDash(DashPattern pattern, double patternToLocal) =>
+      throw UnsupportedError(
+          'CanvasDrawSink consumes dash spans, not dash patterns; '
+          'DraftPainter must not open a dash bracket on a sink whose '
+          'shadesDashes is false');
+
+  @override
+  void endDash() =>
+      throw UnsupportedError('CanvasDrawSink does not shade dashes');
+
+  @override
   void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {
     _residual = residual;
     _residualScale = residual.scaleMagnitude;

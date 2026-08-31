@@ -17,10 +17,14 @@ void main() {
 
   test('reports the byte length the instance count implies', () {
     // The literal, not the production expression restated: 59875 records *
-    // 12 floats/record * 4 bytes/float. Asserting `59875 * kFloatsPerInstance
+    // 16 floats/record * 4 bytes/float. Asserting `59875 * kFloatsPerInstance
     // * 4` here would move in lockstep with a broken `kFloatsPerInstance` (a
-    // stride mismatch against the shader's 48-byte record) and stay green.
-    expect(ResidentGeometry.byteLengthFor(59875), 2874000);
+    // stride mismatch against the shader's 64-byte record) and stay green.
+    expect(ResidentGeometry.byteLengthFor(59875), 3832000);
+  });
+
+  test('the buffer prices sixteen floats', () {
+    expect(ResidentGeometry.byteLengthFor(1000), 1000 * 16 * 4);
   });
 
   group('kCornerVertices', () {
@@ -125,29 +129,66 @@ void main() {
     });
 
     test(
+        'the vertex layout declares eight attributes, which is the ES 100 '
+        'floor the shader header claims', () {
+      final attributes = ResidentGeometry.kInstanceVertexLayout.buffers
+          .expand((b) => b.attributes)
+          .toList();
+      expect(attributes, hasLength(8),
+          reason: 'gl_MaxVertexAttribs is guaranteed to be at least 8 and no '
+              'more; a ninth binds on every platform this project runs on '
+              'today and falsifies the header');
+      expect(
+          attributes.map((a) => a.name),
+          containsAll(<String>[
+            'corner',
+            'join_weight',
+            'kind_half',
+            'p0',
+            'p1',
+            'p2',
+            'color',
+            'dash',
+          ]));
+    });
+
+    test(
         'slot 1 carries the instance record at the record\'s own offsets, '
-        'per instance, stride 48', () {
+        'per instance, stride 64', () {
       final instance = ResidentGeometry.kInstanceVertexLayout.buffers[1];
       // Stride: kFloatsPerInstance * 4. A wrong stride here disagrees with
-      // instance_record.dart's own 12-float layout silently, since nothing
+      // instance_record.dart's own 16-float layout silently, since nothing
       // in the shader bundle enforces it from the Dart side.
       expect(instance.strideInBytes, kFloatsPerInstance * 4);
       expect(instance.stepMode, VertexStepMode.instance);
 
-      // Offsets are the record's own -- [kind, x0, y0, x1, y1, x2, y2,
-      // halfWidth, r, g, b, a] -- not impellerc's single-combined-buffer
-      // reflection, which describes a layout this code does not use.
+      // Offsets are the record's own -- [kind, halfWidth, x0, y0, x1, y1,
+      // x2, y2, r, g, b, a, dashPeriod, dashPhase, dashFracStart,
+      // dashFracEnd] -- not impellerc's single-combined-buffer reflection,
+      // which describes a layout this code does not use, and which still
+      // describes the pre-Plan-C shader in any case.
       final offsetsByName = {
         for (final a in instance.attributes) a.name: a.offsetInBytes,
       };
       expect(offsetsByName, {
-        'kind': 0,
-        'p0': 4,
-        'p1': 12,
-        'p2': 20,
-        'half_width': 28,
+        'kind_half': 0,
+        'p0': 8,
+        'p1': 16,
+        'p2': 24,
         'color': 32,
+        'dash': 48,
       });
+    });
+
+    test('every instance attribute offset is derived from InstanceFieldOffset',
+        () {
+      final instanceBuffer = ResidentGeometry.kInstanceVertexLayout.buffers[1];
+      expect(instanceBuffer.strideInBytes, kFloatsPerInstance * 4);
+      expect(
+          instanceBuffer.attributes
+              .firstWhere((a) => a.name == 'dash')
+              .offsetInBytes,
+          InstanceFieldOffset.dashPeriod * 4);
     });
 
     test(
@@ -166,7 +207,11 @@ void main() {
           x1: 33.0,
           y1: 44.0,
           halfWidth: 5.5,
-          argb: 0x8060A0C0);
+          argb: 0x8060A0C0,
+          dashPeriod: 9.0,
+          dashPhase: 1.5,
+          dashFracStart: 0.25,
+          dashFracEnd: 0.75);
       final bytes = ByteData.sublistView(record);
 
       // Read every field back through kInstanceVertexLayout's own attribute
@@ -183,18 +228,22 @@ void main() {
             attr.offsetInBytes + floatIndexWithinAttribute * 4, Endian.host);
       }
 
-      expect(byName('kind', 0), kKindStroke);
+      expect(byName('kind_half', 0), kKindStroke);
+      expect(byName('kind_half', 1), 5.5, reason: 'halfWidth');
       expect(byName('p0', 0), 11.0, reason: 'x0');
       expect(byName('p0', 1), 22.0, reason: 'y0');
       expect(byName('p1', 0), 33.0, reason: 'x1');
       expect(byName('p1', 1), 44.0, reason: 'y1');
       expect(byName('p2', 0), 0.0, reason: 'x2, unused by a stroke');
       expect(byName('p2', 1), 0.0, reason: 'y2, unused by a stroke');
-      expect(byName('half_width', 0), 5.5);
       expect(byName('color', 0), closeTo(0x60 / 255.0, 1e-6), reason: 'r');
       expect(byName('color', 1), closeTo(0xA0 / 255.0, 1e-6), reason: 'g');
       expect(byName('color', 2), closeTo(0xC0 / 255.0, 1e-6), reason: 'b');
       expect(byName('color', 3), closeTo(0x80 / 255.0, 1e-6), reason: 'a');
+      expect(byName('dash', 0), 9.0, reason: 'dashPeriod');
+      expect(byName('dash', 1), 1.5, reason: 'dashPhase');
+      expect(byName('dash', 2), 0.25, reason: 'dashFracStart');
+      expect(byName('dash', 3), 0.75, reason: 'dashFracEnd');
     });
   });
 }

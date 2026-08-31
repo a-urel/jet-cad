@@ -16,10 +16,22 @@
 // **`test/support/instance_expander.dart` is this file, in Dart.** It is what
 // the suite can actually run. Any edit here that is not mirrored there is a
 // divergence no test in this package can see -- change them together.
+//
+// **Dashes are decided here and tested one line away.** The vertex stage
+// turns the instance's `dash` quad into a single varying, `t`, which is the
+// pattern-space coordinate at this vertex; the fragment stage keeps the
+// fragment when `fract(t)` lands inside the element's own extent. `t` is
+// measured in COLLECTION units, and the live camera does not appear in it at
+// all: the reference's on-screen period is proportional to the camera scale
+// (`draft_painter.dart`'s `_dashScale` folds in `toScreen.scaleMagnitude`)
+// and so is the distance along the primitive, so the ratio is scale-free.
+// The camera reaches this file for one purpose only -- deciding whether the
+// pattern has collapsed to solid.
 
 uniform FrameInfo {
   mat4 mvp;            // collection space -> normalized device coordinates
   vec2 half_viewport;  // device pixels / 2
+  float dash_scale;    // live LOGICAL pixels per collection unit
 } frame_info;
 
 // Per vertex: two triangles, six corners.
@@ -29,22 +41,27 @@ uniform FrameInfo {
 in vec2 corner;
 in vec4 join_weight;
 
-// Per instance.
-in float kind;
+// Per instance. `kind` and `half_width` share one attribute because GLSL
+// ES 100 guarantees only eight vertex attributes and `dash` takes the eighth.
+in vec2 kind_half;   // (kind, half width in device pixels)
 in vec2 p0;
 in vec2 p1;
 in vec2 p2;
-in float half_width;  // device pixels
 in vec4 color;
+in vec4 dash;        // (period, phase, fracStart, fracEnd), collection units
 
 out vec4 v_color;
 
-// Impeller's conversion of Flutter's default miter limit of 4:
-// `2 * (1 / limit)^2 - 1` (`stroke_path_geometry.cc:442`). A corner is
-// mitred up to about a 151-degree turn and bevelled past it. Restated as a
-// literal because GLSL cannot read `VerticesDrawSink.kMinMiterCosine`;
-// `instance_expander.dart` asserts the two agree.
+// (t, fracStart, fracEnd). A NEGATIVE fracStart means "solid" and the
+// fragment stage skips the test entirely -- one sentinel rather than a
+// second varying.
+out vec3 v_dash;
+
 const float kMinMiterCosine = -0.875;
+
+// `kDashCollapsePx`, restated because GLSL cannot read a Dart
+// constant; `instance_expander.dart` asserts the two agree.
+const float kDashCollapsePx = 3.0;
 
 vec2 to_pixels(vec2 p) {
   vec4 clip = frame_info.mvp * vec4(p, 0.0, 1.0);
@@ -52,7 +69,12 @@ vec2 to_pixels(vec2 p) {
 }
 
 void main() {
+  float kind = kind_half.x;
+  float half_width = kind_half.y;
   vec2 px;
+
+  // Distance from the primitive's start to this vertex, in COLLECTION units.
+  float along = 0.0;
 
   if (kind < 0.5) {
     // kKindStroke: two triangles around a centreline.
@@ -68,6 +90,10 @@ void main() {
     vec2 dir = len > 0.0 ? delta / len : vec2(1.0, 0.0);
     vec2 normal = vec2(-dir.y, dir.x);
     px = mix(a, b, corner.x) + normal * half_width * corner.y;
+    // Collection units, taken from the attributes rather than from `a` and
+    // `b`: `to_pixels` has already applied the live camera to those, and the
+    // camera must not appear in `t`.
+    along = corner.x * length(p1 - p0);
 
   } else if (kind < 1.5) {
     // kKindJoin: the notch at a corner, as the bevel (V, A, B) plus the
@@ -122,16 +148,38 @@ void main() {
       px = join_weight.x * v + join_weight.y * a + join_weight.z * b +
            join_weight.w * m;
     }
+    // `along` stays 0: every vertex of a join wedge sits at the corner, so
+    // the whole wedge is tested at the phase stored for that corner.
 
   } else {
     // kKindPoint: a square of the stroke's width centred on p0. Both axes
     // are expanded here, in device pixels, so the dot stays square and stays
     // the same size at every zoom -- which is what the reference gets for
-    // free by computing its `+/- half` in device space.
+    // free by computing its `+/- half` in device space. A point is never
+    // dashed.
     vec2 c = to_pixels(p0);
     px = c + vec2((corner.x * 2.0 - 1.0) * half_width, corner.y * half_width);
   }
 
   gl_Position = vec4(px / frame_info.half_viewport, 0.0, 1.0);
   v_color = color;
+
+  // The dash decision. `dash.x` is signed: zero is solid, and a negative
+  // value marks the one instance per primitive that draws solid when the
+  // pattern collapses.
+  v_dash = vec3(0.0, -1.0, 0.0);
+  float period = abs(dash.x);
+  if (period > 0.0) {
+    if (period * frame_info.dash_scale < kDashCollapsePx) {
+      // Collapsed. The reference stops dashing and draws the whole primitive
+      // (`draft_painter.dart:629-631` takes `dashPolyline`'s false return and
+      // calls `polyline` with the untouched points), so the representative
+      // keeps its solid `v_dash` and every sibling collapses to a point.
+      if (dash.x > 0.0) {
+        gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
+      }
+    } else {
+      v_dash = vec3((dash.y + along) / period, dash.z, dash.w);
+    }
+  }
 }

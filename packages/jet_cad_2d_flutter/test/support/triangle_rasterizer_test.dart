@@ -320,4 +320,265 @@ void main() {
     expect(roundTripped[32 * 64 + 5], 0,
         reason: 'and leaves an untouched pixel at zero');
   });
+
+  // --- Task 9: the fragment stage --------------------------------------
+
+  test('without dash varyings, nothing changes', () {
+    // Pins the contract explicitly, though every test above is this
+    // claim's real regression suite: `observe` called with no `dash`
+    // argument must ink exactly as it did before this task added a
+    // fragment stage at all.
+    //
+    // MUTATION (fired and confirmed to kill, by hand): swap the order of
+    // `hasDash`'s guard clauses in `_fill`,
+    // `!debugDisableDashTest && ta != null && startA! >= 0` to
+    // `!debugDisableDashTest && startA! >= 0 && ta != null` -- this
+    // fixture passes no `dash` array, so `ta` and `startA` are both
+    // `null`, and `startA!` evaluated before the `ta != null` check that
+    // was guarding it throws "Null check operator used on a null value"
+    // instead of filling the interior plainly. Confirmed: this test goes
+    // red with that swap and green again once it is undone.
+    //
+    // **A previously-committed version of this comment named a mutation
+    // that does NOT kill this test** (dropping the `startA! >= 0` half of
+    // the guard, leaving `hasDash = ta != null`): with `ta` already `null`
+    // in this fixture, that guard alone still evaluates to `false`, so
+    // nothing observable changes. That claim was argued, never fired --
+    // this file already had one such claim corrected during Task 9, and
+    // this is the second. (2, 2) is the same interior point `'a triangle
+    // covers its interior and not its outside'` above already pins; naming
+    // it here ties that coverage to this task's contract instead of
+    // leaving it implicit.
+    final r = TriangleRasterizer(8, 8)
+      ..observe(_tri([1, 1, 6, 1, 1, 6]), _rgb(0xFFFF0000));
+    expect(r.inked(2, 2), isTrue, reason: 'inside, no dash varyings supplied');
+    expect(r.inked(5, 5), isFalse, reason: 'past the hypotenuse');
+    expect(r.inked(7, 7), isFalse, reason: 'outside the bounding box');
+  });
+
+  test('a fragment outside the element\'s extent is not inked', () {
+    // One axis-aligned quad, x in [0, 20], y in [0, 8], split into the two
+    // triangles `drawVertices` would submit for a stroke band. `t = x / 10`
+    // at every vertex (an affine function of x alone), so a correct
+    // barycentric interpolation reproduces `x / 10` exactly at any interior
+    // point regardless of which triangle of the two it falls in --
+    // element [0, 0.5) then inks the left half of each 10px cycle and
+    // leaves the right half dark.
+    //
+    // MUTATION: test `t` directly against `[startA, endA)` instead of
+    // `fract(t)` -- (2, 4) and (7, 4) are unaffected (both still in the
+    // first cycle, t < 1), but (12, 4) and (17, 4) both go the SAME way
+    // (dark), because raw t = 1.25 and t = 1.75 both fail `t < 0.5`. This
+    // is why the fixture spans two cycles rather than one: a single-cycle
+    // quad cannot tell `fract(t)` apart from `t` itself.
+    final r = TriangleRasterizer(24, 8);
+    r.observe(
+      Float32List.fromList([
+        0, 0, 20, 0, 0, 8, // triangle 1: (A, B, C)
+        20, 0, 20, 8, 0, 8, // triangle 2: (B, D, C)
+      ]),
+      Int32List.fromList([
+        ...List.filled(3, 0xFF000000),
+        ...List.filled(3, 0xFF000000),
+      ]),
+      dash: Float32List.fromList([
+        0, 0, 0.5, // A: x=0,  t=0.0
+        2, 0, 0.5, // B: x=20, t=2.0
+        0, 0, 0.5, // C: x=0,  t=0.0
+        2, 0, 0.5, // B again
+        2, 0, 0.5, // D: x=20, t=2.0
+        0, 0, 0.5, // C again
+      ]),
+    );
+    expect(r.inked(2, 4), isTrue, reason: 'cycle 0, element');
+    expect(r.inked(7, 4), isFalse, reason: 'cycle 0, gap');
+    expect(r.inked(12, 4), isTrue, reason: 'cycle 1, element');
+    expect(r.inked(17, 4), isFalse, reason: 'cycle 1, gap');
+  });
+
+  test('t is interpolated barycentrically, not taken from a vertex', () {
+    // A = (0,0) carries t=0, B = (9,0) carries t=1, C = (0,6) carries t=2.
+    // The (continuous) centroid is (3, 2); this samples the nearest pixel
+    // centre, (3.5, 2.5) -- deliberately NOT the exact centroid, where
+    // every vertex's barycentric weight is exactly 1/3 and EVERY
+    // correspondence, right or rotated, reads the same average (1.0) --
+    // see this test's own MUTATION note. At (3.5, 2.5) the correct
+    // (opposite-vertex) interpolation reads t=11/9=1.2222, fract 0.2222.
+    // The plausible-but-wrong "positional" correspondence -- w0 paired
+    // with A, w1 with B, w2 with C, instead of each weight with its
+    // OPPOSITE vertex -- reads t=35/36=0.9722, fract 0.9722: on the FAR
+    // side of the [0, 1) cycle, not merely a nearby wrong number, so a
+    // half-open window this wide (a whole half of the pattern) is enough
+    // to tell the two apart without a hand-tuned tolerance.
+    //
+    // MUTATION: `final t = (w0 * ta + w1 * tb + w2 * tc) / sum;` (each
+    // weight paired with the vertex of the SAME index, not the opposite
+    // one). (3, 2) goes dark: fract(0.9722) = 0.9722 is not in [0, 0.5).
+    //
+    // MUTATION, fired: swapping only `w0` and `w1` in the correct line --
+    // `final t = (w0 * ta + w2 * tb + w1 * tc) / sum;` -- ALSO reddens this
+    // test. At (3.5, 2.5): w0=22.5, w1=10.5, w2=21, sum=54; the swapped
+    // value is (22.5*0 + 21*1 + 10.5*2)/54 = 42/54 = 0.7778, fract 0.7778,
+    // outside [0, 0.5) -- run live (`flutter test
+    // test/support/triangle_rasterizer_test.dart` with the swap applied to
+    // `_fill`, `task-9-report.md`'s Fix-round-2 transcript), not derived.
+    //
+    // An earlier version of this comment claimed the opposite -- that this
+    // swap could never be caught by any centroid probe, for any triangle,
+    // because `correct - 1 == -(swap - 1)` (an equidistance identity that
+    // is itself true: both values ARE exactly 0.2222 from `tb`=1). That
+    // claim was never fired and was wrong: equidistance from `tb` only
+    // defeats a window CENTRED on `tb`'s own fract value. This test's
+    // window, `[0, 0.5)`, is anchored AT `tb`=1's fract (0, since `fract`
+    // of an exact integer is 0) rather than centred on it, and `tb`=1 sits
+    // exactly on a `fract`-cycle boundary -- so the correct value
+    // (1.2222, `floor`=1, fract 0.2222) and the swapped value (0.7778,
+    // `floor`=0, fract 0.7778) land in DIFFERENT unit cells despite being
+    // equidistant from `tb` in raw `t`. Equidistant-from-`tb` is not the
+    // same claim as equidistant-in-fract-space once the wraparound is
+    // involved, and this fixture's `tb` sitting on a cycle boundary is
+    // exactly what exposes that gap. See `task-9-report.md`'s corrected
+    // section for the original (wrong) argument, kept rather than deleted.
+    //
+    // At the exact continuous centroid, separately, every one of
+    // `w0`/`w1`/`w2` equals the others (true of any triangle, independent
+    // of t-values or which permutation is tried), so a probe sampled
+    // EXACTLY there cannot tell any rotated correspondence from the
+    // correct one -- which is why this test samples the nearest PIXEL to
+    // the centroid rather than the continuous centroid itself. The genuine
+    // three-way rotation (`w0`->`w1`->`w2`->`w0` applied to every
+    // occurrence in the correct line) is a different permutation again;
+    // the next test samples a further-off-centroid point built specifically
+    // for it. See `task-9-report.md` for the full derivation of all three
+    // permutations (positional, two-element swap, three-way rotation).
+    final r = TriangleRasterizer(10, 8);
+    r.observe(
+      _tri([0, 0, 9, 0, 0, 6]),
+      _rgb(0xFF000000),
+      dash: Float32List.fromList([
+        0, 0, 0.5, // A: t=0
+        1, 0, 0.5, // B: t=1
+        2, 0, 0.5, // C: t=2
+      ]),
+    );
+    expect(r.inked(3, 2), isTrue,
+        reason: 'barycentric t at (3.5, 2.5) is 11/9, fract 0.2222, inside '
+            '[0, 0.5)');
+  });
+
+  test(
+      'a full rotation of the correspondence is caught off the centroid, '
+      'where the correct test above cannot reach it', () {
+    // The centroid test above cannot distinguish a rotated correspondence
+    // from the correct one -- see its own comment -- because at the exact
+    // centroid `w0 == w1 == w2` for ANY triangle, which makes every
+    // permutation of the three weights agree there. This test samples a
+    // point where the weights are genuinely unequal instead.
+    //
+    // Same triangle, A=(0,0) t=0, B=(9,0) t=1, C=(0,6) t=2, sampled at
+    // (3.5, 0.5) -- pixel (3, 0), near edge AB and away from the median
+    // lines the centroid sits on. The expected value is derived here from
+    // the same edge-function arithmetic `_fill` uses, not hardcoded, so
+    // the window below is provably the right one rather than a number
+    // copied out of a comment:
+    //
+    //   w0 = (bx-ax)(py-ay) - (by-ay)(px-ax) = 9*0.5 - 0*3.5   = 4.5
+    //   w1 = (cx-bx)(py-by) - (cy-by)(px-bx) = -9*0.5 - 6*-5.5 = 28.5
+    //   w2 = (ax-cx)(py-cy) - (ay-cy)(px-cx) = 0 - (-6*3.5)    = 21.0
+    //   sum = w0 + w1 + w2 = 54.0 (the triangle's own area)
+    //
+    // Opposite-vertex (correct): t = (w1*ta + w2*tb + w0*tc) / sum
+    //                              = (0 + 21 + 9) / 54 = 30/54 = 0.5556
+    //
+    // A full rotation of the correspondence -- substitute w0->w1, w1->w2,
+    // w2->w0 into the correct line -- reads (w2*ta + w0*tb + w1*tc)/sum
+    // instead: (0 + 4.5 + 57)/54 = 61.5/54 = 1.1389, fract 0.1389. (The
+    // "positional" mapping the earlier test targets would read
+    // (w0*ta+w1*tb+w2*tc)/sum = 70.5/54 = 1.3056, fract 0.3056, also
+    // excluded below -- this fixture happens to separate all three, though
+    // only the rotation is this test's job.)
+    //
+    // fracStart/fracEnd are a narrow window built AROUND the derived
+    // correct fract (0.5556 +/- 0.05), not a wide half-pattern like the
+    // earlier tests use: the window only has to exclude 0.1389 and 0.3056,
+    // both comfortably outside it, so a tight window is not fragile here.
+    //
+    // MUTATION: `final t = (w2 * ta + w0 * tb! + w1 * tc!) / sum;` in
+    // `_fill` (the rotation described above). (3, 0) goes dark: fract
+    // 0.1389 is not in [0.5056, 0.6056).
+    const ax = 0.0, ay = 0.0, bx = 9.0, by = 0.0, cx = 0.0, cy = 6.0;
+    const px = 3.5, py = 0.5;
+    const w0 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+    const w1 = (cx - bx) * (py - by) - (cy - by) * (px - bx);
+    const w2 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx);
+    const sum = w0 + w1 + w2;
+    const ta = 0.0, tb = 1.0, tc = 2.0;
+    const correctT = (w1 * ta + w2 * tb + w0 * tc) / sum;
+    final correctFrac = correctT - correctT.floorToDouble();
+    const margin = 0.05;
+
+    final r = TriangleRasterizer(10, 8);
+    r.observe(
+      _tri([ax, ay, bx, by, cx, cy]),
+      _rgb(0xFF000000),
+      dash: Float32List.fromList([
+        ta, correctFrac - margin, correctFrac + margin, // A
+        tb, correctFrac - margin, correctFrac + margin, // B
+        tc, correctFrac - margin, correctFrac + margin, // C
+      ]),
+    );
+    expect(r.inked(3, 0), isTrue,
+        reason: 'barycentric t at (3.5, 0.5) is 30/54 = 0.5556, fract '
+            '0.5556, inside the derived window '
+            '[${correctFrac - margin}, ${correctFrac + margin})');
+  });
+
+  test('a negative fracStart disables the test for that triangle only', () {
+    // Two axis-aligned quads submitted in one observe() call: the first
+    // solid -- carrying the sentinel `instance_expander.dart` writes for an
+    // undashed instance (fracStart = -1, fracEnd = 0) -- the second dashed
+    // exactly as the quad test above, shifted 30px right so the two never
+    // overlap. The solid quad's "gap" position, (7, 4), is a position that
+    // WOULD be excluded under the dashed quad's own [0, 0.5) window; the
+    // sentinel means it is never tested at all.
+    //
+    // MUTATION: compute `hasDash` once per observe() call from whether ANY
+    // dash array was supplied, instead of per-triangle from `startA >= 0`
+    // -- (7, 4) on the solid quad goes dark, wrongly picking up the [0,
+    // 0.5) test the dashed quad's own vertices carry.
+    final r = TriangleRasterizer(54, 8);
+    r.observe(
+      Float32List.fromList([
+        // solid quad, x in [0, 20]
+        0, 0, 20, 0, 0, 8,
+        20, 0, 20, 8, 0, 8,
+        // dashed quad, x in [30, 50] -- the quad test above, shifted +30
+        30, 0, 50, 0, 30, 8,
+        50, 0, 50, 8, 30, 8,
+      ]),
+      Int32List.fromList([
+        ...List.filled(3, 0xFF000000),
+        ...List.filled(3, 0xFF000000),
+        ...List.filled(3, 0xFF000000),
+        ...List.filled(3, 0xFF000000),
+      ]),
+      dash: Float32List.fromList([
+        // solid quad: the sentinel, disables the test for these two
+        // triangles regardless of the (unused) t value.
+        0, -1, 0, 0, -1, 0, 0, -1, 0,
+        0, -1, 0, 0, -1, 0, 0, -1, 0,
+        // dashed quad: t = (x - 30) / 10, element [0, 0.5)
+        0, 0, 0.5, 2, 0, 0.5, 0, 0, 0.5,
+        2, 0, 0.5, 2, 0, 0.5, 0, 0, 0.5,
+      ]),
+    );
+
+    expect(r.inked(7, 4), isTrue,
+        reason: 'solid: the sentinel disables the test, so the position a '
+            'dash pattern would have cut inks anyway');
+    expect(r.inked(2, 4), isTrue, reason: 'solid: an ordinary interior point');
+    expect(r.inked(37, 4), isFalse,
+        reason: 'dashed: the real gap position stays dark');
+    expect(r.inked(32, 4), isTrue, reason: 'dashed: the real element position');
+  });
 }

@@ -9,7 +9,162 @@ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
 
 import '../support/instance_expander.dart';
 
+/// A single solid stroke: `dashPeriod` stays at its default, `0`, so
+/// `dash.x` is exactly `0` and the shader's default sentinel
+/// `v_dash = vec3(0, -1, 0)` survives untouched.
+final Float32List solidStrokeBuffer = (() {
+  final data = Float32List(kFloatsPerInstance);
+  writeStroke(data, 0,
+      x0: 0, y0: 0, x1: 10, y1: 0, halfWidth: 4, argb: 0xFF000000);
+  return data;
+})();
+
+/// A 30-unit segment, period 18, phase 3, with one drawn element spanning
+/// the whole primitive (`fracStart` 0, `fracEnd` 1) so the test can read
+/// `t` alone without also exercising the fragment-side extent test.
+final Float32List oneDashedStroke = (() {
+  final data = Float32List(kFloatsPerInstance);
+  writeStroke(data, 0,
+      x0: 0,
+      y0: 0,
+      x1: 30,
+      y1: 0,
+      halfWidth: 4,
+      argb: 0xFF000000,
+      dashPeriod: 18,
+      dashPhase: 3,
+      dashFracStart: 0,
+      dashFracEnd: 1);
+  return data;
+})();
+
+/// Two instances of one dashed primitive's element chain, both at period
+/// 18 collection units: instance 0 carries the negative period that marks
+/// it the collapse representative, instance 1 an ordinary positive-period
+/// sibling. At `dashScale: 0.1` the live period is `18 * 0.1 == 1.8`,
+/// under `kDashCollapsePx` (3.0), so the primitive has collapsed.
+final Float32List twoElementDashedStroke = (() {
+  final data = Float32List(kFloatsPerInstance * 2);
+  writeStroke(data, 0,
+      x0: 0,
+      y0: 0,
+      x1: 30,
+      y1: 0,
+      halfWidth: 4,
+      argb: 0xFF000000,
+      dashPeriod: -18,
+      dashPhase: 3,
+      dashFracStart: 0,
+      dashFracEnd: 0.5);
+  writeStroke(data, 1,
+      x0: 30,
+      y0: 0,
+      x1: 60,
+      y1: 0,
+      halfWidth: 4,
+      argb: 0xFF000000,
+      dashPeriod: 18,
+      dashPhase: 0,
+      dashFracStart: 0,
+      dashFracEnd: 0.5);
+  return data;
+})();
+
+/// A `point()` record. Never dashed -- `writePoint` takes no dash
+/// arguments and writes all four dash slots to zero.
+final Float32List pointBuffer = (() {
+  final data = Float32List(kFloatsPerInstance);
+  writePoint(data, 0, x: 10, y: 20, halfWidth: 3, argb: 0xFF000000);
+  return data;
+})();
+
+/// The three vertices of [triangle] (0 or 1) of [instance]'s expanded quad,
+/// read straight off `ExpandedTriangles.positions` -- the per-instance
+/// stride and vertex order match `ResidentGeometry.kCornerVertices`.
+List<Offset> triangleOf(ExpandedTriangles e,
+    {required int instance, required int triangle}) {
+  final stride = ResidentGeometry.cornerVertexCount;
+  final base = (instance * stride + triangle * 3) * 2;
+  return <Offset>[
+    Offset(e.positions[base], e.positions[base + 1]),
+    Offset(e.positions[base + 2], e.positions[base + 3]),
+    Offset(e.positions[base + 4], e.positions[base + 5]),
+  ];
+}
+
+/// Twice-signed area via the shoelace formula, absolute -- winding is not
+/// under test here, only whether the triangle has collapsed to a point.
+double area(List<Offset> triangle) {
+  final a = triangle[0], b = triangle[1], c = triangle[2];
+  return ((b.dx - a.dx) * (c.dy - a.dy) - (c.dx - a.dx) * (b.dy - a.dy)).abs() /
+      2.0;
+}
+
 void main() {
+  test('a solid instance signals solid with a negative fracStart', () {
+    final e = expandInstances(solidStrokeBuffer, 1, Transform2.identity(),
+        dashScale: 1.0);
+    for (var v = 0; v < ResidentGeometry.cornerVertexCount; v++) {
+      expect(e.dashVaryings[v * 3 + 1], lessThan(0.0));
+    }
+  });
+
+  test('t runs from phase/period to (phase + length)/period across the quad',
+      () {
+    // A 30-unit segment, period 18, phase 3.
+    final e = expandInstances(oneDashedStroke, 1, Transform2.identity(),
+        dashScale: 1.0);
+    final ts = <double>[
+      for (var v = 0; v < ResidentGeometry.cornerVertexCount; v++)
+        e.dashVaryings[v * 3],
+    ];
+    expect(ts.reduce(math.min), closeTo(3.0 / 18.0, 1e-6));
+    expect(ts.reduce(math.max), closeTo((3.0 + 30.0) / 18.0, 1e-6));
+  });
+
+  test('t is measured in COLLECTION units, so the camera cancels', () {
+    // The same instance expanded at two different device scales must give
+    // the same t at every vertex. This is the design's central claim: the
+    // reference's period grows with the camera and so does the distance, so
+    // the ratio does not move. A t that changed here would mean the pattern
+    // stretching or compressing under zoom -- the defect this plan exists
+    // to remove, reintroduced in the shader.
+    final a = expandInstances(oneDashedStroke, 1, Transform2.scale(1.0, 1.0),
+        dashScale: 1.0);
+    final b = expandInstances(oneDashedStroke, 1, Transform2.scale(4.0, 4.0),
+        dashScale: 4.0);
+    for (var i = 0; i < a.dashVaryings.length; i += 3) {
+      expect(b.dashVaryings[i], closeTo(a.dashVaryings[i], 1e-6));
+    }
+  });
+
+  test(
+      'a collapsed non-representative instance produces a degenerate '
+      'triangle', () {
+    // period 18 collection units at dashScale 0.1 -> 1.8 live logical px,
+    // under kDashCollapsePx.
+    final e = expandInstances(twoElementDashedStroke, 2, Transform2.identity(),
+        dashScale: 0.1);
+    // Instance 0 is the representative: real positions, solid varying.
+    expect(e.dashVaryings[1], lessThan(0.0));
+    expect(area(triangleOf(e, instance: 0, triangle: 0)), greaterThan(0.0));
+    // Instance 1 collapses to a point.
+    expect(area(triangleOf(e, instance: 1, triangle: 0)), 0.0);
+  });
+
+  test('the collapse threshold is the dasher\'s own value', () {
+    expect(kExpanderDashCollapsePx, kDashCollapsePx,
+        reason: 'GLSL cannot read a Dart constant, so cad_stroke.vert '
+            'restates 3.0 as a literal; this assertion is what keeps the '
+            'restatement honest, the same way kMinMiterCosine is kept');
+  });
+
+  test('a point instance is never dashed', () {
+    final e =
+        expandInstances(pointBuffer, 1, Transform2.identity(), dashScale: 1.0);
+    expect(e.dashVaryings[1], lessThan(0.0));
+  });
+
   test('the miter cosine matches the reference constant', () {
     // `cad_stroke.vert` restates -0.875 as a literal because GLSL cannot
     // read a Dart constant. This is the assertion that keeps the literal
@@ -21,7 +176,7 @@ void main() {
     final data = Float32List(kFloatsPerInstance);
     writeStroke(data, 0,
         x0: 0, y0: 0, x1: 100, y1: 0, halfWidth: 4, argb: 0xFF112233);
-    final out = expandInstances(data, 1, Transform2.identity());
+    final out = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
 
     expect(out.positions.length, 12, reason: 'six vertices, two floats each');
     // Corner (0,-1) -> (0, -4); (0,1) -> (0, 4); (1,-1) -> (100, -4).
@@ -55,7 +210,7 @@ void main() {
         nextY: 100,
         halfWidth: 4,
         argb: 0xFF000000);
-    final out = expandInstances(data, 1, Transform2.identity());
+    final out = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
 
     // Vertex 4 of the six is M, the miter tip.
     final mx = out.positions[8], my = out.positions[9];
@@ -81,7 +236,7 @@ void main() {
         nextY: 1,
         halfWidth: 4,
         argb: 0xFF000000);
-    final out = expandInstances(data, 1, Transform2.identity());
+    final out = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
     final ax = out.positions[6], ay = out.positions[7];
     final mx = out.positions[8], my = out.positions[9];
     expect(mx, closeTo(ax, 1e-4),
@@ -100,7 +255,7 @@ void main() {
         nextY: 50,
         halfWidth: 4,
         argb: 0xFF000000);
-    final out = expandInstances(data, 1, Transform2.identity());
+    final out = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
     for (var i = 0; i < 6; i++) {
       expect(out.positions[i * 2], closeTo(50, 1e-4));
       expect(out.positions[i * 2 + 1], closeTo(50, 1e-4));
@@ -110,7 +265,7 @@ void main() {
   test('a point expands to a square of the stroke width', () {
     final data = Float32List(kFloatsPerInstance);
     writePoint(data, 0, x: 10, y: 20, halfWidth: 3, argb: 0xFF000000);
-    final out = expandInstances(data, 1, Transform2.identity());
+    final out = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
     var minX = double.infinity, maxX = -double.infinity;
     var minY = double.infinity, maxY = -double.infinity;
     for (var i = 0; i < 6; i++) {
@@ -133,7 +288,8 @@ void main() {
     final data = Float32List(kFloatsPerInstance);
     writeStroke(data, 0,
         x0: 0, y0: 0, x1: 100, y1: 0, halfWidth: 4, argb: 0xFF000000);
-    final out = expandInstances(data, 1, Transform2.scale(5, 5));
+    final out =
+        expandInstances(data, 1, Transform2.scale(5, 5), dashScale: 1.0);
     expect(out.positions[4], closeTo(500, 1e-3),
         reason: 'the centreline scaled');
     expect(out.positions[3] - out.positions[1], closeTo(8, 1e-3),
@@ -156,7 +312,7 @@ void main() {
     final data = Float32List(kFloatsPerInstance);
     writeStroke(data, 0,
         x0: 0, y0: 0, x1: 100, y1: 0, halfWidth: 4, argb: 0xFF000000);
-    final out = expandInstances(data, 1, t);
+    final out = expandInstances(data, 1, t, dashScale: 1.0);
 
     // toX(x,y) = t.a*x + t.c*y + t.e = 2x -  y + 10
     // toY(x,y) = t.b*x + t.d*y + t.f = 0.5x + 3y + 10

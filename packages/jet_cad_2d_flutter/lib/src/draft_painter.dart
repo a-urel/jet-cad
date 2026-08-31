@@ -619,6 +619,25 @@ class DraftPainter {
       sink.endResidual();
       return;
     }
+    if (sink.shadesDashes) {
+      // The sink evaluates the pattern itself, per fragment, at the live
+      // camera. The dash COUNT is camera-invariant either way: `_dashScale`
+      // folds in `toScreen.scaleMagnitude` and the points below are already
+      // in screen space, so period and distance scale together, and the
+      // number of dashes along an entity does not move with the camera at
+      // all -- measured three ways, see
+      // `docs/superpowers/notes/2026-08-31-plan-c-results.md`. What handing
+      // it baked spans instead would freeze is the COLLAPSE decision:
+      // `kDashCollapsePx` is a screen-space threshold, so whether a pattern
+      // draws solid depends on the live camera, and a buffer that decided
+      // that once at collection time would draw dashes where the live
+      // camera has collapsed to solid, or the reverse.
+      sink.beginDash(pattern, _dashScale(style, toScreen));
+      sink.polyline(_points, count, style, closed: false);
+      sink.endDash();
+      sink.endResidual();
+      return;
+    }
     // The emitter is a field bound once (see `_emitSpan` above), not a closure
     // written here: a closure literal that captures `sink` and `style` is a
     // fresh object on every dashed leaf of every frame, against the global
@@ -782,6 +801,18 @@ class DraftPainter {
           sink.circle(coords[0] - ox, coords[1] - oy, r, style);
           return;
         }
+        if (sink.shadesDashes) {
+          // Local units, not screen: the coordinates below stay in the
+          // leaf's own space and the residual carries the scale, so the
+          // factor must not include `chain.scaleMagnitude` -- the same
+          // reason `dashArc` is passed this value and `pixelScale`
+          // separately.
+          sink.beginDash(pattern,
+              style.linetypeScale * document.header.globalLinetypeScale);
+          sink.circle(coords[0] - ox, coords[1] - oy, r, style);
+          sink.endDash();
+          return;
+        }
         _spanSink = sink;
         _spanStyle = style;
         _arcCx = coords[0] - ox;
@@ -823,6 +854,18 @@ class DraftPainter {
         final pattern = _patternFor(style);
         if (pattern == null) {
           sink.arc(coords[0] - ox, coords[1] - oy, r, start, sweep, style);
+          return;
+        }
+        if (sink.shadesDashes) {
+          // Local units, not screen: the coordinates below stay in the
+          // leaf's own space and the residual carries the scale, so the
+          // factor must not include `chain.scaleMagnitude` -- the same
+          // reason `dashArc` is passed this value and `pixelScale`
+          // separately.
+          sink.beginDash(pattern,
+              style.linetypeScale * document.header.globalLinetypeScale);
+          sink.arc(coords[0] - ox, coords[1] - oy, r, start, sweep, style);
+          sink.endDash();
           return;
         }
         _spanSink = sink;

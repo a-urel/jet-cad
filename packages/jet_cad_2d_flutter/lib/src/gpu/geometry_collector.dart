@@ -166,6 +166,16 @@ class GeometryCollector implements DrawSink {
     return (alpha << 24) | (argb & 0x00FFFFFF);
   }
 
+  /// Writes this primitive's instances: one, if it is solid; one per drawn
+  /// pattern element, if it is dashed; exactly one, if it is dashed with a
+  /// pattern that draws nothing.
+  ///
+  /// **The first instance carries a negative period.** That marks it as the
+  /// primitive's collapse representative -- the one the shader draws solid
+  /// when the live period falls under `kDashCollapsePx`, while its
+  /// siblings collapse to a degenerate vertex. Without the mark, all of them
+  /// draw solid and a collapsed translucent line is drawn D times over
+  /// itself.
   void _emit(
       double x0, double y0, double x1, double y1, double half, int argb) {
     // The reference's own test (`vertices_draw_sink.dart`, `_emitSegment`): a
@@ -173,10 +183,30 @@ class GeometryCollector implements DrawSink {
     // the formula, not the intention -- see `_runTo`.
     final dx = x1 - x0, dy = y1 - y0;
     if (math.sqrt(dx * dx + dy * dy) == 0) return;
-    _reserve(_instances + 1);
-    writeStroke(_buffer, _instances,
-        x0: x0, y0: y0, x1: x1, y1: y1, halfWidth: half, argb: argb);
-    _instances++;
+    final period = _pendingSegPeriod;
+    if (period == 0.0) {
+      _reserve(_instances + 1);
+      writeStroke(_buffer, _instances,
+          x0: x0, y0: y0, x1: x1, y1: y1, halfWidth: half, argb: argb);
+      _instances++;
+      return;
+    }
+    final n = _dashFracStart.isEmpty ? 1 : _dashFracStart.length;
+    _reserve(_instances + n);
+    for (var k = 0; k < n; k++) {
+      writeStroke(_buffer, _instances,
+          x0: x0,
+          y0: y0,
+          x1: x1,
+          y1: y1,
+          halfWidth: half,
+          argb: argb,
+          dashPeriod: k == 0 ? -period : period,
+          dashPhase: _pendingSegPhase,
+          dashFracStart: k < _dashFracStart.length ? _dashFracStart[k] : 0.0,
+          dashFracEnd: k < _dashFracEnd.length ? _dashFracEnd[k] : 0.0);
+      _instances++;
+    }
   }
 
   /// Starts a connected run at a collection-space point.
@@ -206,9 +236,9 @@ class GeometryCollector implements DrawSink {
     final dx = x - _runPrevX, dy = y - _runPrevY;
     if (math.sqrt(dx * dx + dy * dy) == 0) return;
 
-    if (_runHasDirection) {
+    if (_runHasDirection && !_suppressJoins) {
       _emitJoin(_runPrevX, _runPrevY, _runBackX, _runBackY, x, y, half, argb);
-    } else {
+    } else if (!_runHasDirection) {
       _runSecondX = x;
       _runSecondY = y;
     }
@@ -229,14 +259,28 @@ class GeometryCollector implements DrawSink {
   /// A closed run gets the segment back to its first point and then the seam
   /// join, the corner no vertex list contains and the one whose absence puts
   /// a notch on every circle at its start angle.
+  ///
+  /// [suppressSeam] suppresses only the closing corner's own join — the seam
+  /// — without touching the join `_runTo` writes for the closing *chord*
+  /// itself (the interior join at the vertex the closing chord starts from).
+  /// It is a separate parameter from [_suppressJoins] on purpose: a dashed
+  /// arc suppresses the seam alone (Ruling C3's interior joins stay live),
+  /// while a dashed polyline suppresses every join via [_suppressJoins],
+  /// including this one — setting [_suppressJoins] before this call, as a
+  /// dashed arc's first draft did, silently drops that interior join too,
+  /// since the `_runTo` call two lines below honours [_suppressJoins] as
+  /// well. `suppressSeam` reaches only the explicit call below.
   void _endRun(
-      {required bool closed, required double half, required int argb}) {
+      {required bool closed,
+      required double half,
+      required int argb,
+      bool suppressSeam = false}) {
     if (!closed || !_runHasDirection) return;
     _runTo(_runFirstX, _runFirstY, half, argb);
     // Guarded for the same reason the reference guards it: today's callers
     // cannot reach here with one segment, but that is a fact about the
     // callers, not a promise the join arithmetic makes.
-    if (_runSegments >= 2) {
+    if (_runSegments >= 2 && !_suppressJoins && !suppressSeam) {
       _emitJoin(_runFirstX, _runFirstY, _runBackX, _runBackY, _runSecondX,
           _runSecondY, half, argb);
     }
@@ -256,19 +300,43 @@ class GeometryCollector implements DrawSink {
     if (crossZ == 0.0 ||
         (d0x == 0.0 && d0y == 0.0) ||
         (d1x == 0.0 && d1y == 0.0)) {
+      // Counted once per corner, not once per dashed element -- otherwise
+      // this diagnostic reports D times the corners the drawing has.
       _debugCollinearJoins++;
     }
-    _reserve(_instances + 1);
-    writeJoin(_buffer, _instances,
-        vx: vx,
-        vy: vy,
-        prevX: prevX,
-        prevY: prevY,
-        nextX: nextX,
-        nextY: nextY,
-        halfWidth: half,
-        argb: argb);
-    _instances++;
+    final period = _pendingJoinPeriod;
+    if (period == 0.0) {
+      _reserve(_instances + 1);
+      writeJoin(_buffer, _instances,
+          vx: vx,
+          vy: vy,
+          prevX: prevX,
+          prevY: prevY,
+          nextX: nextX,
+          nextY: nextY,
+          halfWidth: half,
+          argb: argb);
+      _instances++;
+      return;
+    }
+    final n = _dashFracStart.isEmpty ? 1 : _dashFracStart.length;
+    _reserve(_instances + n);
+    for (var k = 0; k < n; k++) {
+      writeJoin(_buffer, _instances,
+          vx: vx,
+          vy: vy,
+          prevX: prevX,
+          prevY: prevY,
+          nextX: nextX,
+          nextY: nextY,
+          halfWidth: half,
+          argb: argb,
+          dashPeriod: k == 0 ? -period : period,
+          dashPhase: _pendingJoinPhase,
+          dashFracStart: k < _dashFracStart.length ? _dashFracStart[k] : 0.0,
+          dashFracEnd: k < _dashFracEnd.length ? _dashFracEnd[k] : 0.0);
+      _instances++;
+    }
   }
 
   /// Doubling growth, mirroring `VerticesDrawSink._reserve`
@@ -288,6 +356,77 @@ class GeometryCollector implements DrawSink {
     _buffer = grown;
   }
 
+  // --- the dash bracket ---------------------------------------------------
+  //
+  // Set by `beginDash`, cleared by `endDash`. Kept as fields rather than
+  // threaded through `_runTo` for the same reason `DraftPainter` keeps
+  // `_spanSink` and `_spanStyle` as fields: the alternative is a closure or a
+  // widened signature on the hot path, and this class's contract is that a
+  // rebuild allocates per document, not per primitive.
+  bool _dashActive = false;
+  double _dashPeriodLocal = 0;
+
+  /// The drawn elements' extents, as fractions of the cycle. Two parallel
+  /// lists rather than a list of pairs: a pair object per element per
+  /// `beginDash` is an allocation per dashed entity per rebuild.
+  final List<double> _dashFracStart = <double>[];
+  final List<double> _dashFracEnd = <double>[];
+
+  /// Per-primitive values, set immediately before the `_emit` / `_emitJoin`
+  /// call that consumes them. Same idiom, same reason.
+  double _pendingSegPeriod = 0, _pendingSegPhase = 0;
+  double _pendingJoinPeriod = 0, _pendingJoinPhase = 0;
+  bool _suppressJoins = false;
+
+  @override
+  bool get shadesDashes => true;
+
+  @override
+  void beginDash(DashPattern pattern, double patternToLocal) {
+    _dashFracStart.clear();
+    _dashFracEnd.clear();
+    // The cycle is summed from the array, never read from
+    // `pattern.totalLength` -- `dasher.dart` says why in as many words, and
+    // this class must agree with the dasher about where a cycle ends or the
+    // two draw different pictures from the same pattern.
+    var cycle = 0.0;
+    for (final d in pattern.dashes) {
+      cycle += d.abs();
+    }
+    if (!cycle.isFinite || cycle <= 0.0 || !patternToLocal.isFinite) {
+      // `dashPolyline` returns false here and the caller draws solid. This is
+      // the same decision, reached by the same test.
+      _dashActive = false;
+      return;
+    }
+    _dashPeriodLocal = cycle * patternToLocal;
+    var at = 0.0;
+    for (final d in pattern.dashes) {
+      // `beginDash` uses `|d|` for the extents where `dasher.dart` substitutes
+      // `1e-9` for a zero-length element (`dasher.dart:169`). The divergence
+      // is `1e-9` pattern units per zero element, which against a period the
+      // collapse rule floors at 3 device pixels is at most `3 x 10^-10` px --
+      // below any representable difference.
+      final w = d.abs();
+      if (d >= 0) {
+        _dashFracStart.add(at / cycle);
+        _dashFracEnd.add((at + w) / cycle);
+      }
+      at += w;
+    }
+    _dashActive = true;
+  }
+
+  @override
+  void endDash() {
+    _dashActive = false;
+    _suppressJoins = false;
+    _pendingSegPeriod = 0;
+    _pendingSegPhase = 0;
+    _pendingJoinPeriod = 0;
+    _pendingJoinPhase = 0;
+  }
+
   @override
   void beginResidual(Transform2 residual, {Handle debugHandle = Handle.none}) {
     _residual = residual;
@@ -303,13 +442,35 @@ class GeometryCollector implements DrawSink {
     final half = _halfWidthFor(style.lineweightHundredths);
     final argb = _coveredArgb(style.argb, style.lineweightHundredths);
     final t = _residual;
-    _beginRun(t.a * points[0] + t.c * points[1] + t.e,
-        t.b * points[0] + t.d * points[1] + t.f);
+    _suppressJoins = _dashActive;
+    var px = t.a * points[0] + t.c * points[1] + t.e;
+    var py = t.b * points[0] + t.d * points[1] + t.f;
+    _beginRun(px, py);
     for (var i = 1; i < count; i++) {
-      _runTo(t.a * points[i * 2] + t.c * points[i * 2 + 1] + t.e,
-          t.b * points[i * 2] + t.d * points[i * 2 + 1] + t.f, half, argb);
+      final lx = points[i * 2], ly = points[i * 2 + 1];
+      final nx = t.a * lx + t.c * ly + t.e;
+      final ny = t.b * lx + t.d * ly + t.f;
+      if (_dashActive) {
+        // The phase restarts at every vertex (`dasher.dart:94-96`), so a
+        // polyline's segments all carry phase 0. The period is scaled by
+        // THIS segment's own local-to-collection length ratio rather than by
+        // the residual's scale magnitude: under an anisotropic residual the
+        // two disagree, and only the first one is right for this segment.
+        final llx = lx - points[i * 2 - 2], lly = ly - points[i * 2 - 1];
+        final localLen = math.sqrt(llx * llx + lly * lly);
+        final cdx = nx - px, cdy = ny - py;
+        final collectionLen = math.sqrt(cdx * cdx + cdy * cdy);
+        _pendingSegPeriod =
+            localLen > 0 ? _dashPeriodLocal * (collectionLen / localLen) : 0.0;
+        _pendingSegPhase = 0.0;
+      }
+      _runTo(nx, ny, half, argb);
+      px = nx;
+      py = ny;
     }
     _endRun(closed: closed, half: half, argb: argb);
+    _suppressJoins = false;
+    _pendingSegPeriod = 0;
   }
 
   /// A dot the width of the stroke.
@@ -375,9 +536,20 @@ class GeometryCollector implements DrawSink {
     final argb = _coveredArgb(style.argb, style.lineweightHundredths);
     final step = sweep / steps;
 
+    // Arcs keep their interior joins -- Ruling B4/C3 leaves the
+    // bevel/miter/collinear decision to the shader regardless of the
+    // linetype, and unlike a dashed polyline (which suppresses every join
+    // via `_suppressJoins`), a dashed arc suppresses only the seam. So
+    // `_suppressJoins` itself stays false for the whole walk below --
+    // `_endRun`'s `suppressSeam` parameter is what turns off the seam alone.
+    _suppressJoins = false;
+    final arcStep = r * step.abs(); // local arc length per chord
+
     var lx = cx + r * math.cos(start);
     var ly = cy + r * math.sin(start);
-    _beginRun(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f);
+    var px = t.a * lx + t.c * ly + t.e;
+    var py = t.b * lx + t.d * ly + t.f;
+    _beginRun(px, py);
     // A closed sweep stops one sample short: its last chord is the segment
     // `_endRun` draws back to the first point, so closing here would draw
     // that chord twice and leave the seam a duplicated point instead of a
@@ -387,9 +559,63 @@ class GeometryCollector implements DrawSink {
       final angle = start + step * i;
       lx = cx + r * math.cos(angle);
       ly = cy + r * math.sin(angle);
-      _runTo(t.a * lx + t.c * ly + t.e, t.b * lx + t.d * ly + t.f, half, argb);
+      final nx = t.a * lx + t.c * ly + t.e;
+      final ny = t.b * lx + t.d * ly + t.f;
+      if (_dashActive && arcStep > 0) {
+        final cdx = nx - px, cdy = ny - py;
+        // The pattern is measured along the ARC and drawn along the CHORD.
+        // Dividing the chord's collection length by the chord's LOCAL ARC
+        // length makes the two agree exactly at every chord endpoint and
+        // leaves the disagreement inside one chord, bounded by (arc - chord)
+        // -- under a tenth of a pixel at this flattener's 0.25 px sagitta.
+        // Ruling C4 records this rather than removing it: removing it means
+        // re-chording per span, which is chording at one camera, which is
+        // what this plan exists to stop doing.
+        final factor = math.sqrt(cdx * cdx + cdy * cdy) / arcStep;
+        _pendingSegPeriod = _dashPeriodLocal * factor;
+        // The reduction happens before the scaling -- parenthesised
+        // explicitly rather than relying on `%` and `*` sharing precedence
+        // and associating left to right, because a precedence argument left
+        // only in a comment is a defect waiting for a reader who does not
+        // check.
+        _pendingSegPhase = ((arcStep * (i - 1)) % _dashPeriodLocal) * factor;
+        // The join at the vertex this step arrives from sits at the START of
+        // this chord, so it takes this chord's phase and this chord's
+        // factor.
+        _pendingJoinPeriod = _pendingSegPeriod;
+        _pendingJoinPhase = _pendingSegPhase;
+      }
+      _runTo(nx, ny, half, argb);
+      px = nx;
+      py = ny;
     }
-    _endRun(closed: closed, half: half, argb: argb);
+    // The loop above never assigns the pending values for the CLOSING
+    // chord -- it stops at `last = steps - 1`, so `_endRun`'s own `_runTo`
+    // call below (the segment back to the first point) would otherwise
+    // draw with whatever phase the loop's last iteration left behind: the
+    // phase belonging to chord `steps - 1`, not chord `steps`. Set them
+    // here, from the same phase law the loop uses, evaluated for the
+    // closing chord itself -- point `steps - 1` (left in `px`, `py` by the
+    // loop) to point `0` (`_runFirstX`, `_runFirstY`).
+    if (_dashActive && closed && arcStep > 0) {
+      final cdx = _runFirstX - px, cdy = _runFirstY - py;
+      final factor = math.sqrt(cdx * cdx + cdy * cdy) / arcStep;
+      _pendingSegPeriod = _dashPeriodLocal * factor;
+      // Same explicit parenthesisation as the loop, same reason.
+      _pendingSegPhase = ((arcStep * (steps - 1)) % _dashPeriodLocal) * factor;
+      _pendingJoinPeriod = _pendingSegPeriod;
+      _pendingJoinPhase = _pendingSegPhase;
+    }
+    // Ruling C3, third clause: the reference emits every dash span as its
+    // own `arc()` op, so a dashed circle is a sequence of OPEN runs and no
+    // closed run -- and therefore no seam join -- exists anywhere in it.
+    // `suppressSeam` reproduces that without touching the interior join
+    // `_endRun`'s own `_runTo` call writes for the closing chord.
+    _endRun(closed: closed, half: half, argb: argb, suppressSeam: _dashActive);
+    _pendingSegPeriod = 0;
+    _pendingSegPhase = 0;
+    _pendingJoinPeriod = 0;
+    _pendingJoinPhase = 0;
   }
 
   int _flattenSteps(double deviceRadius, double theta) {

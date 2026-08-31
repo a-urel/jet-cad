@@ -378,6 +378,260 @@ Handle addText(
 /// If a change here stops them straddling 3.0, **the heights move, never
 /// [kMinTextCapPixels]** — a fixture tuned by moving the threshold tests
 /// nothing.
+/// Registers linetype [handle] named [name] with [dashes] under [doc].
+///
+/// [totalLength] is derived as the sum of `dashes`' absolute values, kept
+/// *consistent* with `dashes` on purpose: `dasher.dart` deliberately never
+/// reads the stored total (see its own comments), so this fixture must not be
+/// the place that hides a disagreement between the two.
+Handle _addShadedLinetype(
+    DraftDocument doc, Handle handle, String name, List<double> dashes) {
+  final total = dashes.fold<double>(0, (sum, d) => sum + d.abs());
+  doc.tables.linetypes.add(LinetypeRecord(
+    handle: handle,
+    name: name,
+    description: name,
+    pattern: DashPattern(dashes: dashes, totalLength: total),
+  ));
+  return handle;
+}
+
+/// Adds an entity with an explicit [linetype] and [linetypeScale].
+///
+/// The shared [addEntity] above always resolves `ByLayer` at scale 1.0,
+/// which cannot build a dashed fixture -- every dashed entity here needs its
+/// own linetype handle and, for entity 913, its own scale.
+Handle _addShadedEntity(
+  DraftDocument doc,
+  Handle owner,
+  Handle handle,
+  EntityKind kind,
+  List<double> coords,
+  List<double> scalars, {
+  required Handle linetype,
+  double linetypeScale = 1.0,
+  int lineweight = 25,
+}) {
+  doc.commands.execute(AddEntityCommand(
+    record: EntityRecord(
+      handle: handle,
+      owner: owner,
+      kind: kind,
+      layer: ReservedHandles.layerZero,
+      linetype: linetype,
+      linetypeScale: linetypeScale,
+      geomIndex: 0,
+      color: const ByLayerColor(),
+      lineweight: lineweight,
+      transparency: 0,
+      flags: 0,
+    ),
+    payload: GeometryPayload(
+      coords: Float64List.fromList(coords),
+      scalars: Float64List.fromList(scalars),
+    ),
+  ));
+  return handle;
+}
+
+/// The corpus for shaded dashes.
+///
+/// **Separate from [differentialFixture] on purpose, and the reason is not
+/// tidiness.** `test/differential_test.dart` compares [DraftPainter] against
+/// `reference_walk.dart`, and the reference walk does not dash at all -- it
+/// emits raw `polyline` and `arc` ops. A dashed entity in
+/// [differentialFixture] would make the painter emit spans and the reference
+/// walk emit whole polylines, reddening this project's oldest correctness
+/// gate over a difference that is not a defect. Task 3's own report carries
+/// the transcript: a dashed probe long enough to actually span more than one
+/// pattern element reddens "the painter draws a superset of the reference
+/// walk, in order" and three tests downstream of it, for a reason that has
+/// nothing to do with either walk being wrong. The cost of the split is that
+/// every gate which should see dashes needs a dashed arm written for it
+/// explicitly; Plan C's results note lists the gates that have one.
+///
+/// **Nothing here sits at the identity, the origin, or a uniform scale.**
+/// Every entity lives in one definition placed by a single instance whose
+/// transform carries a rotation and a distinct non-uniform scale --
+/// `CLAUDE.md`'s named dominant failure mode is the degenerate fixture, and a
+/// dashed run under an anisotropic placement is exactly the case Ruling C4
+/// bounds.
+///
+/// Handles, so a test can name what it is looking at:
+///
+/// | handle | what |
+/// |---|---|
+/// | 900 | the `DASHED` linetype, `[12, -6]` -- one drawn element |
+/// | 901 | the `DASHDOT` linetype, `[12, -3, 0.5, -3]` -- two drawn elements |
+/// | 902 | the `ALLGAP` linetype, `[-4]` -- **no** drawn element |
+/// | 910 | a five-vertex dashed polyline, three interior corners |
+/// | 911 | a dashed circle -- a closed run, so the seam join is in play |
+/// | 912 | a dashed arc under the non-uniform instance |
+/// | 913 | a `DASHDOT` line, so `D == 2` has a witness |
+/// | 914 | an `ALLGAP` line, so the collapse representative has a witness |
+/// | 915 | a **solid** line crossing 910, so dash gaps have something behind them |
+/// | 916 | a hairline dashed line (`lineweight: 1`), so `_coveredArgb` meets a dash |
+/// | 917 | a **solid** three-point polyline -- the control for Ruling C3 |
+///
+/// [linetypeScale] multiplies entity 913's own `linetypeScale` field only, so
+/// a test can vary one entity's dash rate without rebuilding the corpus.
+DraftDocument shadedDashFixture({double linetypeScale = 1.0}) {
+  final doc = DraftDocument.empty();
+
+  // A multiplicand, not the identity -- it is folded into `_dashScale` at
+  // three separate call sites in `draft_painter.dart`, and a fixture that
+  // left it at 1.0 could not tell it from a dropped term.
+  doc.header.globalLinetypeScale = 1.7;
+
+  // --- linetypes -----------------------------------------------------------
+  _addShadedLinetype(doc, const Handle(900), 'DASHED', const [12.0, -6.0]);
+  _addShadedLinetype(
+      doc, const Handle(901), 'DASHDOT', const [12.0, -3.0, 0.5, -3.0]);
+  // All gap, no dash: nothing draws until the whole pattern collapses below
+  // three screen pixels, at which point the reference walk's rule -- draw it
+  // solid -- takes over. That collapse is a live case, not a degenerate one.
+  _addShadedLinetype(doc, const Handle(902), 'ALLGAP', const [-4.0]);
+
+  // --- the shaded corpus, all in one definition -----------------------------
+  const defs = Handle(990);
+  doc.tree.addDefinition(Definition(
+      handle: defs,
+      name: 'shadedDefs',
+      basePoint: Vector2.zero(),
+      children: const []));
+
+  // 910: five-point polyline, three interior vertices. The turn at P1 is
+  // 130 deg (interior 50 deg -- sharp, under 90); the turn at P2 is 3 deg
+  // (interior 177 deg -- nearly straight, under 5). Ruling C3 says a dashed
+  // run emits no joins; a fixture whose corners are all shallow cannot tell
+  // a missing join from a collinear one. The turn at P3 (67 deg) is a third,
+  // ordinary corner. Total path length 360 local units, so at the default
+  // scale (DASHED's 18-unit cycle x globalLinetypeScale 1.7) the pattern
+  // repeats about 11.8 times -- comfortably past four.
+  _addShadedEntity(
+    doc,
+    defs,
+    const Handle(910),
+    EntityKind.polyline,
+    const [0, 0, 90, 0, 32.15, 68.94, -29.23, 134.77, -113.8, 103.98],
+    const [],
+    linetype: const Handle(900),
+  );
+
+  // 911: a dashed circle -- a closed run, so the seam join is in play.
+  // Circumference ~408 local units, several periods of DASHED.
+  _addShadedEntity(
+    doc,
+    defs,
+    const Handle(911),
+    EntityKind.circle,
+    const [400, -250],
+    const [65],
+    linetype: const Handle(900),
+  );
+
+  // 912: a dashed arc under the fixture's non-uniform instance. Arc length
+  // 85 * 3.3 = 280.5 local units, several periods of DASHED. The running
+  // phase per chord is `GeometryCollector`'s concern, not this fixture's --
+  // this only has to give it enough chords to advance across.
+  _addShadedEntity(
+    doc,
+    defs,
+    const Handle(912),
+    EntityKind.arc,
+    const [-350, 300],
+    const [85, 0.2, 3.3],
+    linetype: const Handle(900),
+  );
+
+  // 913: a DASHDOT line, so D == 2 (two positive entries in the pattern) has
+  // a witness. [linetypeScale] touches only this entity's own field.
+  _addShadedEntity(
+    doc,
+    defs,
+    const Handle(913),
+    EntityKind.line,
+    const [500, 300, 750, 300],
+    const [],
+    linetype: const Handle(901),
+    linetypeScale: linetypeScale,
+  );
+
+  // 914: an ALLGAP line, so the collapse representative -- D == 0 -- has a
+  // witness.
+  _addShadedEntity(
+    doc,
+    defs,
+    const Handle(914),
+    EntityKind.line,
+    const [500, -300, 650, -300],
+    const [],
+    linetype: const Handle(902),
+  );
+
+  // 915: a solid line crossing 910's second segment (P1-P2 passes through
+  // local (39.64, 60) at t=0.87), so dash gaps have something behind them.
+  _addShadedEntity(
+    doc,
+    defs,
+    const Handle(915),
+    EntityKind.line,
+    const [-140, 60, 110, 60],
+    const [],
+    linetype: ReservedHandles.continuousLinetype,
+  );
+
+  // 916: a hairline dashed line -- lineweight 1, below one device pixel at
+  // dpr 1, so it routes through `_coveredArgb`. Plan B's final review found
+  // `lineweightScale` sitting at the identity in every instrument; a dashed
+  // hairline is a second, independent place that factor has to be right.
+  _addShadedEntity(
+    doc,
+    defs,
+    const Handle(916),
+    EntityKind.line,
+    const [500, 500, 700, 500],
+    const [],
+    linetype: const Handle(900),
+    lineweight: 1,
+  );
+
+  // 917: a SOLID three-point polyline, and it is the control for Ruling C3
+  // rather than filler. Ruling C3 says a *dashed* run emits no joins; an
+  // assertion that a corpus contains no dashed joins is worth nothing unless
+  // the same corpus contains a solid run that *does* have one, or the rule
+  // is indistinguishable from "this collector never emits joins". Every
+  // other multi-segment entity here is dashed (910) and every solid one is a
+  // two-point line with no interior vertex at all, so before this entity the
+  // corpus could not tell those two readings apart -- found by Plan C Task
+  // 10's own vacuity check, not by review.
+  _addShadedEntity(
+    doc,
+    defs,
+    const Handle(917),
+    EntityKind.polyline,
+    const [-500, -450, -380, -390, -300, -480],
+    const [],
+    linetype: ReservedHandles.continuousLinetype,
+  );
+
+  // The one placement: rotated (0.62 rad) and non-uniformly scaled (1.8 vs
+  // 0.65 -- ratio far from 1), so nothing in this fixture sits at the
+  // identity, the origin, or a uniform scale.
+  doc.commands.execute(AddNodeCommand(InstanceNode(
+    handle: const Handle(991),
+    parent: doc.rootHandle,
+    transform: Transform2.translation(1000, -600)
+        .multiply(Transform2.rotation(0.62))
+        .multiply(Transform2.scale(1.8, 0.65)),
+    definition: defs,
+    layer: ReservedHandles.layerZero,
+    color: const ByBlockColor(),
+  )));
+
+  return doc;
+}
+
 DraftDocument textLodDifferentialDocument(TextMeasurer measurer) {
   final doc = DraftDocument.empty(measurer: measurer);
 

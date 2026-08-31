@@ -11,20 +11,31 @@ void main() {
     // overlap here is silent on every one of them until a device run.
     const offsets = <int>[
       InstanceFieldOffset.kind,
+      InstanceFieldOffset.halfWidth,
       InstanceFieldOffset.x0,
       InstanceFieldOffset.y0,
       InstanceFieldOffset.x1,
       InstanceFieldOffset.y1,
       InstanceFieldOffset.x2,
       InstanceFieldOffset.y2,
-      InstanceFieldOffset.halfWidth,
       InstanceFieldOffset.r,
       InstanceFieldOffset.g,
       InstanceFieldOffset.b,
       InstanceFieldOffset.a,
+      InstanceFieldOffset.dashPeriod,
+      InstanceFieldOffset.dashPhase,
+      InstanceFieldOffset.dashFracStart,
+      InstanceFieldOffset.dashFracEnd,
     ];
     expect(offsets, List<int>.generate(kFloatsPerInstance, (i) => i),
         reason: 'offsets must be 0..kFloatsPerInstance-1 with no gaps');
+  });
+
+  test('the record is sixteen floats and kind_half is adjacent', () {
+    expect(kFloatsPerInstance, 16);
+    expect(InstanceFieldOffset.halfWidth, InstanceFieldOffset.kind + 1,
+        reason: 'the shader reads them as one vec2 attribute, which is what '
+            'keeps the attribute count at ES 100\'s floor of eight');
   });
 
   test('the three kind tags are distinct and ordered for the shader', () {
@@ -95,5 +106,78 @@ void main() {
     expect(b[InstanceFieldOffset.x2], 0);
     expect(b[InstanceFieldOffset.y2], 0);
     expect(b[InstanceFieldOffset.halfWidth], 0.5);
+  });
+
+  test('a solid stroke writes zero into all four dash slots', () {
+    final into = Float32List(kFloatsPerInstance);
+    writeStroke(into, 0,
+        x0: 1, y0: 2, x1: 3, y1: 4, halfWidth: 0.5, argb: 0xFF112233);
+    expect(into[InstanceFieldOffset.dashPeriod], 0.0);
+    expect(into[InstanceFieldOffset.dashPhase], 0.0);
+    expect(into[InstanceFieldOffset.dashFracStart], 0.0);
+    expect(into[InstanceFieldOffset.dashFracEnd], 0.0);
+  });
+
+  test('a dashed stroke carries its element extent and its phase', () {
+    final into = Float32List(kFloatsPerInstance);
+    writeStroke(into, 0,
+        x0: 1,
+        y0: 2,
+        x1: 3,
+        y1: 4,
+        halfWidth: 0.5,
+        argb: 0xFF112233,
+        dashPeriod: 18.0,
+        dashPhase: 4.0,
+        dashFracStart: 0.0,
+        dashFracEnd: 12.0 / 18.0);
+    expect(into[InstanceFieldOffset.dashPeriod], 18.0);
+    expect(into[InstanceFieldOffset.dashPhase], 4.0);
+    expect(into[InstanceFieldOffset.dashFracEnd], closeTo(0.6667, 1e-4));
+  });
+
+  test(
+      'a negative period is preserved bit for bit -- it is the collapse '
+      'representative marker, not a magnitude', () {
+    final into = Float32List(kFloatsPerInstance);
+    writeJoin(into, 0,
+        vx: 0,
+        vy: 0,
+        prevX: -1,
+        prevY: 0,
+        nextX: 0,
+        nextY: 1,
+        halfWidth: 1,
+        argb: 0xFF000000,
+        dashPeriod: -18.0);
+    expect(into[InstanceFieldOffset.dashPeriod], -18.0);
+    expect(into[InstanceFieldOffset.dashPeriod].isNegative, isTrue);
+  });
+
+  test('a point is never dashed', () {
+    // `VerticesDrawSink.point` does not consult a linetype, and neither does
+    // the painter's point path -- `_emitScreenSpace` returns before
+    // `_patternFor` is ever called. `writePoint` therefore takes no dash
+    // arguments at all, so a caller cannot express something the reference
+    // cannot draw.
+    //
+    // The dash slots are pre-filled with a plausible dashed record's values
+    // before `writePoint` runs -- a fresh `Float32List` is already zero, so
+    // asserting zero afterward without this would only prove
+    // `Float32List`'s own zero-initialisation, not that `writePoint`
+    // actually clears the slots. This reads as "this index used to hold a
+    // dashed instance", the case `_writeDash`'s own doc calls out: a record
+    // reused across frames, or sliced from a buffer that once held a dashed
+    // instance at this index, is not guaranteed to already be zero here.
+    final into = Float32List(kFloatsPerInstance);
+    into[InstanceFieldOffset.dashPeriod] = 18.0;
+    into[InstanceFieldOffset.dashPhase] = 4.0;
+    into[InstanceFieldOffset.dashFracStart] = 0.1;
+    into[InstanceFieldOffset.dashFracEnd] = 0.6667;
+    writePoint(into, 0, x: 1, y: 2, halfWidth: 0.5, argb: 0xFF112233);
+    expect(into[InstanceFieldOffset.dashPeriod], 0.0);
+    expect(into[InstanceFieldOffset.dashPhase], 0.0);
+    expect(into[InstanceFieldOffset.dashFracStart], 0.0);
+    expect(into[InstanceFieldOffset.dashFracEnd], 0.0);
   });
 }

@@ -1,38 +1,70 @@
 # jet-cad — project status
 
-**Last updated:** 2026-08-30
-**Verified against:** `main` at `72b162d` — the merge commit for **Plan B of
-the GPU-resident render backend**, the second of that spec's seven plans.
-Plan B ran on `plan-b/joins-and-hairlines`, cut from `main`, eleven tasks at
-`5c94e11..4892a01`, merged `--no-ff` and the branch deleted. Before it, Plan A
-merged at `cd5bc98` (nine tasks, `81529f0..cdf2a23`) and Plan 3i ran directly
-on `main` at `468e310..dbc31e8`. **Nothing is in flight.** The tree is clean
-apart from the files the traps below say never to commit; the `.DS_Store`
-files an earlier device run left behind are gone, and they are covered by a
-**global** git ignore (`~/.config/git/ignore`) rather than this repo's, since
-they are an OS artefact and not a project one.
+**Last updated:** 2026-08-31
+**Verified against:** `plan-c/shaded-dashes` at `18330a9` — **Plan C of the
+GPU-resident render backend, the third of that spec's seven plans, is
+complete and NOT YET MERGED.** Twelve tasks, `d52d2a9..18330a9`, cut from
+`main` at `d52d2a9`. Before it, Plan B merged at `72b162d` (eleven tasks,
+`5c94e11..4892a01`), Plan A at `cd5bc98` (nine tasks) and Plan 3i ran
+directly on `main` at `468e310..dbc31e8`.
 
-**Every suite count below was produced by running that suite on the MERGED
-tree on 2026-08-30** — `jet_cad_2d` 797, `jet_cad_2d_flutter` 479 (1
-pre-existing skip), `dev_harness_2d` 72, analyze and format clean in all
-three — not by reading a report, and not by trusting the branch's own green
-run. A green run only proves the tree it ran on.
+**Plan C (dashes in the shader) is DONE on its branch. Exit gate: 10 of 11 —
+criterion 11 is UNMET**, in those words: the device run happened and produced
+every number below, but **no human has looked at the running window**.
+**Plan B's criterion 11 is still owed too**, and has been since its merge.
+Both are one act — see [Resume here](#resume-here).
 
-**Plan B (joins and hairlines), the second of the GPU-resident render
-backend's seven plans, is DONE — eleven tasks on
-`plan-b/joins-and-hairlines` (cut from `main` at `5c94e11`, one commit after
-Plan A's merge), range `5c94e11..4892a01`, merged `--no-ff` at `72b162d`.**
-Exit gate:
-**10 of 11 — criterion 11 is UNMET**, in those words: the device run
-happened but no human looked at the running window, and Plan 3h's session
-already proved that instrument catches what the other two (mutation
-testing, differential testing) do not. The device run also measured one
-real MISS (rebuild, 79.6 ms against 16.67 ms, cause a hypothesis, not
-confirmed) inside that otherwise-passing gate, while the buffer figure
-PASSES at 4.99 MB against 8 MB. See
-[Plan B](#plan-b--joins-and-hairlines) and
-[Resume here](#resume-here). `packages/jet_cad` is untouched, as every task
-in this plan was.
+### Plan C's headline is a correction to its own premise
+
+**Plan C's plan says a buffer with dash spans baked in "still shows eight
+dashes at 4x zoom instead of the thirty-two the reference draws". That is
+false — the reference draws eight too.** `DraftPainter._dashScale` folds in
+`toScreen.scaleMagnitude` and the points it dashes are already in screen
+space, so period and distance both scale with the camera and their quotient —
+the dash count — does not move. **Dash patterns are anchored in world space,
+not screen space.** Measured three ways (`Dasher` directly, the algebra, and
+a painter probe at four cameras).
+
+**What baking a dash pattern actually froze was the collapse decision.**
+`kDashCollapsePx` is a screen-space threshold, so whether a pattern draws
+solid is camera-dependent; a buffer that decided it once drew dashes where
+the reference had collapsed to solid, or the reverse. That is what Plan C
+moved into the shader. A reader who believes the original sentence will look
+for the wrong defect in the window.
+
+### What Plan C measured
+
+| quantity | value |
+|---|---|
+| straight-geometry pixel differential | **differing = 0** — exact, not a budget |
+| control (dash test disabled) | differs by exactly the 433-pixel gap |
+| dashed circle / arc | 16.5% / 17.0% — **MISS against criterion 1**, measured not gated |
+| buffer | **6.41 MB** against 8 MB, **105,076 instances, down from Plan B's 109,068** |
+| gesture p50 / p95 raster | 0.43 build, 0.57 raster, 0.86 p95 — all PASS, `discard` live |
+| rebuild | **115.0 ms against 16.67 — MISS**, same shape as Plan B's 79.6 ms |
+| mutations | **14 fired, 13 killed**, 1 survivor pre-declared |
+
+**macOS Low Power Mode was ON for the device run** and every timing in it is
+contaminated. Contamination inflates times, so the gesture rows passing under
+it is the stronger reading; it does not rescue the rebuild row.
+
+### Plan C found a defect in `packages/jet_cad_2d` and did NOT fix it
+
+**Saving and loading a drawing silently resets `header.globalLinetypeScale`
+to 1.0, so every dashed entity changes its dash length.**
+`DraftDocumentCodec.encode` writes the field and `DocumentHeader.fromJson`
+parses it, but `json_codec.dart`'s `_loadHeader` copies only `units`,
+`scale`, `importedExtents` and `customVariables` — a one-line omission two
+lines below the `fromJson` call that read the value. Nothing caught it
+because no save/load test in the engine's own suite ever set the field to
+anything but 1.0. `packages/jet_cad_2d` is untouched by this plan, so
+`dash_differential_test.dart` **pins** it: it asserts the decoded value is
+1.0, restores 1.7 by hand, and its `reason` says a fix makes it red.
+
+Results: [2026-08-31-plan-c-results.md](docs/superpowers/notes/2026-08-31-plan-c-results.md).
+Mutation log: [plan-c-mutation-log.md](docs/superpowers/notes/plan-c-mutation-log.md).
+Raw device log: [2026-08-31-plan-c-device-run.log](docs/superpowers/notes/2026-08-31-plan-c-device-run.log).
+Plan: [2026-08-31-gpu-backend-plan-c-shaded-dashes.md](docs/superpowers/plans/2026-08-31-gpu-backend-plan-c-shaded-dashes.md).
 
 ---
 
@@ -572,6 +604,25 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 ---
 
 ## Resume here
+
+**A human must still look at the window — for TWO plans now.** Plan B's
+criterion 11 has been owed since `72b162d` and Plan C's is owed as of
+`18330a9`. One run of the harness discharges both; the checks are listed in
+[Plan C's results note](docs/superpowers/notes/2026-08-31-plan-c-results.md#criterion-11-is-unmet-in-those-words).
+
+**Plan C's five, and the first one is the opposite of what its own plan
+said:** zoom in and the dashes must get *longer* and stay the same in number;
+zoom out and they must collapse to solid at the same zoom as arm A; a dashed
+corner must be **notched**, not filled; a dashed circle must be **notched** at
+its start angle while a solid one is not; and panning along a long dashed line
+must move the dashes *with* the line, not slide them along it.
+
+**Plan B's four, still owed:** corners filled, a circle **not** notched at its
+start angle, a square dot, nothing thickening as you zoom.
+
+**Plan C is NOT merged.** It sits on `plan-c/shaded-dashes` at `18330a9`.
+
+---
 
 **A human must still look at the window.** That is the top of this list on
 purpose: Plan B's exit gate is 10 of 11 and the one UNMET criterion is

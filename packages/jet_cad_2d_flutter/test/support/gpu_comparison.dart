@@ -43,6 +43,15 @@
 /// at every corner in the corpus and it contributes zero new pixels, because
 /// it lands entirely within the union of the two adjacent segment quads.
 ///
+/// **Task 9 makes this limit sharper, not smaller.** A dash GAP is visible
+/// to this instrument -- it removes ink from inside a footprint that used to
+/// be solid, which is exactly the kind of change [differing] does count. But
+/// a fragment that is wrongly KEPT where it sits inside another primitive's
+/// footprint is the same invisible case as before: the union of covered
+/// pixels does not move, only which triangle (or, now, which fragment
+/// decision) put the ink there. A dashed join wrongly drawn solid where a
+/// solid segment already covers it is exactly this case.
+///
 /// So this instrument cannot see: a join emitted on both sides, a duplicated
 /// instance, a segment quad overshooting into its neighbour's, or a miter
 /// tip over-reaching inward. `sink_comparison.dart` carries a
@@ -139,6 +148,13 @@ ResidentAgreement measureResidentAgreement(
   required Size size,
   required double devicePixelRatio,
   required double pixelsPerPaperMm,
+
+  /// The `dashScale` `expandInstances` needs -- live logical pixels per
+  /// collection unit. Every caller today drives both arms at the same
+  /// camera the buffer was collected at, so the live-to-collection ratio is
+  /// exactly `1.0`; a caller that ever animates the camera between the two
+  /// arms would need to pass the real ratio here instead.
+  required double dashScale,
 }) {
   final w = (size.width * devicePixelRatio).round();
   final h = (size.height * devicePixelRatio).round();
@@ -178,15 +194,108 @@ ResidentAgreement measureResidentAgreement(
   draw(collector);
   collector.endResidual();
   final expanded = expandInstances(collector.data, collector.instanceCount,
-      Transform2.scale(devicePixelRatio, devicePixelRatio));
+      Transform2.scale(devicePixelRatio, devicePixelRatio),
+      dashScale: dashScale);
   final residentRaster = TriangleRasterizer(w, h)
-    ..observe(expanded.positions, expanded.colors);
+    ..observe(expanded.positions, expanded.colors, dash: expanded.dashVaryings);
 
+  return _agreementOf(referenceRaster, residentRaster, w, h);
+}
+
+/// Draws [document] through both arms with the real painter, at [camera].
+///
+/// **The two arms take different routes through `DraftPainter` and that is
+/// the point.** [measureResidentAgreement] drives each sink with the same
+/// hand-written closure, which is sound only because neither
+/// `VerticesDrawSink` nor `GeometryCollector` branches on `shadesDashes` --
+/// the closure itself never has to. A dash does: `VerticesDrawSink
+/// .shadesDashes` is false, so `DraftPainter` cuts the spans before handing
+/// them to it; `GeometryCollector.shadesDashes` is true, so the painter
+/// hands it the whole pattern via `beginDash`/`endDash` instead
+/// (`draft_painter.dart`, the `sink.shadesDashes` branches). A closure
+/// written here that dashed for one arm and not the other would be a THIRD
+/// implementation of that branch, alongside the painter's own and the
+/// pattern the shader (and `expandInstances`) reads -- and the branch is
+/// exactly what this comparison exists to check. So this entry point drives
+/// the real [DraftPainter] into both sinks instead of a hand-written
+/// closure, and is a second, separate function rather than a replacement
+/// for [measureResidentAgreement]: existing callers pass their own closures
+/// to that one and do not go through a painter at all.
+///
+/// [dashScale] is always `1.0` here, not a parameter: both arms are painted
+/// at [camera], the same camera the buffer is collected at, so the
+/// live-to-collection ratio `expandInstances` needs is exactly `1.0` by
+/// construction -- there is no second, "live" camera for either arm to
+/// diverge from.
+ResidentAgreement measurePaintedAgreement(
+  DraftDocument document, {
+  required ViewportTransform camera,
+  required Size size,
+  required double devicePixelRatio,
+  required double pixelsPerPaperMm,
+
+  /// Forwarded to the resident arm's [TriangleRasterizer] only -- see that
+  /// field's own doc. Test-only, defaults to `false` so every existing
+  /// caller is unaffected; Task 10's control arm is the sole caller that
+  /// passes `true`, to prove the pixel gate it sits beside can actually
+  /// fail.
+  bool debugDisableDashTest = false,
+}) {
+  final w = (size.width * devicePixelRatio).round();
+  final h = (size.height * devicePixelRatio).round();
+  final index = SpatialIndex(document);
+  final resolver = DocumentStyleResolver(document);
+  final painter =
+      DraftPainter(document: document, index: index, resolver: resolver);
+
+  // The reference arm: the real painter drives `VerticesDrawSink`, which
+  // cuts dash gaps into separate spans (`shadesDashes == false`) before this
+  // sink ever sees them -- so what reaches `observe` here is already solid
+  // per-span geometry, same as `measureResidentAgreement`'s reference arm.
+  final referenceRaster = TriangleRasterizer(w, h);
+  final recorder = PictureRecorder();
+  final sink = VerticesDrawSink(
+    canvas: Canvas(recorder),
+    pixelsPerPaperMm: pixelsPerPaperMm,
+    devicePixelRatio: devicePixelRatio,
+  )..observer = (positions, colors) {
+      final scaled = Float32List(positions.length);
+      for (var i = 0; i < positions.length; i++) {
+        scaled[i] = positions[i] * devicePixelRatio;
+      }
+      referenceRaster.observe(scaled, colors);
+    };
+  painter.paint(sink, camera, size);
+  sink.flush();
+  recorder.endRecording().dispose();
+
+  // The resident arm: the same painter drives `GeometryCollector`, which
+  // keeps the whole pattern (`shadesDashes == true`) and hands it to the
+  // shader as `v_dash` -- reproduced here by `expandInstances`, exactly as
+  // in `measureResidentAgreement`.
+  final collector = GeometryCollector(
+      pixelsPerPaperMm: pixelsPerPaperMm, devicePixelRatio: devicePixelRatio);
+  painter.paint(collector, camera, size);
+  final expanded = expandInstances(collector.data, collector.instanceCount,
+      Transform2.scale(devicePixelRatio, devicePixelRatio),
+      // Both arms are painted at `camera`, the same camera the buffer is
+      // collected at -- see this function's own doc.
+      dashScale: 1.0);
+  final residentRaster = TriangleRasterizer(w, h,
+      debugDisableDashTest: debugDisableDashTest)
+    ..observe(expanded.positions, expanded.colors, dash: expanded.dashVaryings);
+
+  return _agreementOf(referenceRaster, residentRaster, w, h);
+}
+
+/// The pixel-by-pixel coverage comparison both entry points share.
+ResidentAgreement _agreementOf(
+    TriangleRasterizer reference, TriangleRasterizer resident, int w, int h) {
   var referenceInk = 0, residentInk = 0, differing = 0;
   for (var y = 0; y < h; y++) {
     for (var x = 0; x < w; x++) {
-      final a = referenceRaster.inked(x, y);
-      final b = residentRaster.inked(x, y);
+      final a = reference.inked(x, y);
+      final b = resident.inked(x, y);
       if (a) referenceInk++;
       if (b) residentInk++;
       if (a != b) differing++;

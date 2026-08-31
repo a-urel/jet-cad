@@ -22,6 +22,19 @@ const _hairlineStyle = ResolvedStyle(
 double _kindAt(GeometryCollector c, int i) =>
     c.data[i * kFloatsPerInstance + InstanceFieldOffset.kind];
 
+/// Counts instances of kind [kind] in [c]'s buffer.
+int _countKind(GeometryCollector c, double kind) {
+  final data = c.data;
+  var n = 0;
+  for (var i = 0; i < c.instanceCount; i++) {
+    if (data[i * kFloatsPerInstance + InstanceFieldOffset.kind] == kind) n++;
+  }
+  return n;
+}
+
+int _joinCount(GeometryCollector c) => _countKind(c, kKindJoin);
+int _strokeCount(GeometryCollector c) => _countKind(c, kKindStroke);
+
 void main() {
   test('applies the residual, and a transposed one is not the same residual',
       () {
@@ -47,8 +60,9 @@ void main() {
 
     expect(c.instanceCount, 1);
     final r = c.data.sublist(0, kFloatsPerInstance);
-    expect(r[0], kKindStroke);
-    expect(r.sublist(1, 5), [10.0, 16.5, 15.0, 21.0]);
+    expect(r[InstanceFieldOffset.kind], kKindStroke);
+    expect(r.sublist(InstanceFieldOffset.x0, InstanceFieldOffset.x0 + 4),
+        [10.0, 16.5, 15.0, 21.0]);
     // Pins `w / 2` **in device pixels**, not the raw logical width:
     // lineweightHundredths=50, pixelsPerPaperMm=4, lineweightScale=1 gives a
     // logical width of 50/100 * 4 * 1 = 2.0, which at devicePixelRatio=2 is
@@ -69,12 +83,14 @@ void main() {
     // open three-point run is join-before-segment, and nothing else'.
     expect(c.instanceCount, 3);
     expect(c.data[InstanceFieldOffset.kind], kKindStroke);
-    expect(c.data.sublist(1, 5), [0.0, 0.0, 1.0, 0.0]);
+    expect(c.data.sublist(InstanceFieldOffset.x0, InstanceFieldOffset.x0 + 4),
+        [0.0, 0.0, 1.0, 0.0]);
     expect(c.data[kFloatsPerInstance + InstanceFieldOffset.kind], kKindJoin);
     expect(
         c.data[2 * kFloatsPerInstance + InstanceFieldOffset.kind], kKindStroke);
     expect(
-        c.data.sublist(2 * kFloatsPerInstance + 1, 2 * kFloatsPerInstance + 5),
+        c.data.sublist(2 * kFloatsPerInstance + InstanceFieldOffset.x0,
+            2 * kFloatsPerInstance + InstanceFieldOffset.x0 + 4),
         [1.0, 0.0, 1.0, 1.0]);
   });
 
@@ -98,12 +114,15 @@ void main() {
     // later stroke's index, which is why this can no longer read
     // consecutive slots.
     expect(c.instanceCount, 6);
-    expect(c.data.sublist(1, 5), [0.0, 0.0, 1.0, 0.0]);
+    expect(c.data.sublist(InstanceFieldOffset.x0, InstanceFieldOffset.x0 + 4),
+        [0.0, 0.0, 1.0, 0.0]);
     expect(
-        c.data.sublist(2 * kFloatsPerInstance + 1, 2 * kFloatsPerInstance + 5),
+        c.data.sublist(2 * kFloatsPerInstance + InstanceFieldOffset.x0,
+            2 * kFloatsPerInstance + InstanceFieldOffset.x0 + 4),
         [1.0, 0.0, 1.0, 1.0]);
     expect(
-        c.data.sublist(4 * kFloatsPerInstance + 1, 4 * kFloatsPerInstance + 5),
+        c.data.sublist(4 * kFloatsPerInstance + InstanceFieldOffset.x0,
+            4 * kFloatsPerInstance + InstanceFieldOffset.x0 + 4),
         [1.0, 1.0, 0.0, 0.0],
         reason: 'the closing segment must run from the last point back to '
             'the first');
@@ -693,5 +712,453 @@ void main() {
     c.fillCircle(0, 0, 5, style);
     c.text('x', Handle.none, style);
     expect(c.skippedOps, 3, reason: 'three ops Plans D and E draw');
+  });
+
+  // --- dashed polylines (Task 5) -------------------------------------------
+
+  const dashed = DashPattern(dashes: [12.0, -6.0], totalLength: 18.0);
+  const dashDot =
+      DashPattern(dashes: [12.0, -3.0, 0.5, -3.0], totalLength: 18.5);
+  const allGap = DashPattern(dashes: [-4.0], totalLength: 4.0);
+  const dashStyle = ResolvedStyle(
+      argb: 0xFF112233,
+      lineweightHundredths: 25,
+      linetype: Handle(900),
+      linetypeScale: 1.0);
+
+  test(
+      'a dashed polyline emits one instance per segment per drawn element, '
+      'and no joins at all', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+
+    // Two segments, one drawn element, no joins.
+    expect(c.instanceCount, 2);
+    for (var i = 0; i < 2; i++) {
+      expect(c.data[i * kFloatsPerInstance + InstanceFieldOffset.kind],
+          kKindStroke,
+          reason: 'a dashed run has no joins: the reference gives every span '
+              'its own polyline op and therefore its own run');
+    }
+  });
+
+  test(
+      'the same polyline undashed keeps its join -- so the assertion above '
+      'is about dashes, not about the fixture', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, dashStyle,
+        closed: false);
+    c.endResidual();
+    expect(c.instanceCount, 3); // segment, join, segment
+  });
+
+  test(
+      'a two-element pattern doubles the instances and the two elements '
+      'tile the cycle without overlapping', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashDot, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+
+    expect(c.instanceCount, 2);
+    final e0Start = c.data[InstanceFieldOffset.dashFracStart];
+    final e0End = c.data[InstanceFieldOffset.dashFracEnd];
+    final e1Start =
+        c.data[kFloatsPerInstance + InstanceFieldOffset.dashFracStart];
+    final e1End = c.data[kFloatsPerInstance + InstanceFieldOffset.dashFracEnd];
+    expect(e0Start, 0.0);
+    expect(e0End, closeTo(12.0 / 18.5, 1e-6));
+    expect(e1Start, closeTo(15.0 / 18.5, 1e-6));
+    expect(e1End, closeTo(15.5 / 18.5, 1e-6));
+    expect(e0End, lessThan(e1Start), reason: 'the gap between them is a gap');
+  });
+
+  test('the period is the cycle times the scale, in collection units', () {
+    // cycle 18, patternToLocal 2.0, residual a translation -> factor 1.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+    expect(c.data[InstanceFieldOffset.dashPeriod].abs(), closeTo(36.0, 1e-6));
+  });
+
+  test(
+      'a scaled residual scales the period, because the pattern is measured '
+      'in the space the points are in', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.scale(3.0, 3.0));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+    expect(c.data[InstanceFieldOffset.dashPeriod].abs(), closeTo(108.0, 1e-4),
+        reason: '18 x 2.0 x 3.0');
+  });
+
+  test('exactly one instance per primitive is the collapse representative', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashDot, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+
+    expect(c.instanceCount, 2, reason: 'dashDot has D == 2 drawn elements');
+    final periods = <double>[
+      c.data[InstanceFieldOffset.dashPeriod],
+      c.data[kFloatsPerInstance + InstanceFieldOffset.dashPeriod],
+    ];
+    expect(periods.where((p) => p < 0), hasLength(1),
+        reason: 'two representatives would draw the collapsed line twice, '
+            'and with blending on that is darker, not merely wasteful');
+    expect(periods.first, lessThan(0), reason: 'the first drawn element');
+  });
+
+  test(
+      'a pattern with no drawn element still emits one instance, so the '
+      'collapse case has something to draw', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(allGap, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+
+    expect(c.instanceCount, 1);
+    expect(c.data[InstanceFieldOffset.dashPeriod], lessThan(0));
+    expect(c.data[InstanceFieldOffset.dashFracStart],
+        c.data[InstanceFieldOffset.dashFracEnd],
+        reason: 'an empty extent draws nothing until the pattern collapses, '
+            'and the reference draws the whole line solid when it does');
+  });
+
+  test('endDash restores solid emission', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, dashStyle,
+        closed: false);
+    c.endResidual();
+    // The first polyline is one dashed segment with D == 1: one instance.
+    // The second polyline is a plain two-segment run: two segments, one join.
+    expect(c.instanceCount, 1 + 3);
+  });
+
+  test('a zero-cycle pattern is solid, matching dashPolyline returning false',
+      () {
+    const degenerate = DashPattern(dashes: [0.0], totalLength: 0.0);
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(degenerate, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+    expect(c.instanceCount, 1);
+    expect(c.data[InstanceFieldOffset.dashPeriod], 0.0);
+  });
+
+  test(
+      'the cycle comes from summing the dashes, never from a dishonest '
+      'totalLength', () {
+    // totalLength (99.0) deliberately disagrees with the summed dashes
+    // (12.0 + 6.0 = 18.0) -- exactly the disagreement `dasher.dart` warns a
+    // DXF importer could hand this class. Every other fixture in this file
+    // keeps an honest totalLength, so reading `.totalLength` instead of
+    // summing `pattern.dashes` would still pass every other test here; it
+    // would answer only this one wrong, with a period of 198.0 (99.0 x
+    // patternToLocal 2.0) instead of the correct 36.0 (18.0 x 2.0).
+    const dishonestTotal = DashPattern(dashes: [12.0, -6.0], totalLength: 99.0);
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dishonestTotal, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0]), 2, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+    expect(c.data[InstanceFieldOffset.dashPeriod].abs(), closeTo(36.0, 1e-6),
+        reason: 'summed dashes (12 + 6) x patternToLocal 2.0 = 36.0, not '
+            '99.0 x 2.0 = 198.0 from the dishonest totalLength');
+  });
+
+  test(
+      'an anisotropic residual scales each segment by its OWN axis, not by '
+      'scaleMagnitude', () {
+    // `_residual.scaleMagnitude` is one number for the whole transform --
+    // under `scale(2, 5)` it is sqrt(2 * 5) regardless of a segment's own
+    // direction, so a collector that used it for every segment would give
+    // the x-running segment and the y-running segment the SAME period. The
+    // correct factor is per-segment: the x-segment's collection length grows
+    // by 2x, the y-segment's by 5x, so their periods must come back in a 2:5
+    // ratio. Asserting the ratio (not two magic numbers) fails loudly under
+    // the `scaleMagnitude` mutation, which collapses the ratio to 1.0, and
+    // survives an unrelated change to the pattern itself.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.scale(2.0, 5.0));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0, 10, 10]), 3, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+
+    expect(c.instanceCount, 2,
+        reason: 'two segments, one drawn element each, no joins');
+    final xPeriod = c.data[InstanceFieldOffset.dashPeriod].abs();
+    final yPeriod =
+        c.data[kFloatsPerInstance + InstanceFieldOffset.dashPeriod].abs();
+    expect(yPeriod / xPeriod, closeTo(5.0 / 2.0, 1e-6),
+        reason: 'the x-running segment scales by 2, the y-running segment '
+            'by 5 -- scaleMagnitude would give both sqrt(10) and a ratio '
+            'of 1.0');
+  });
+
+  test(
+      'the phase of every polyline segment is zero -- the pattern restarts '
+      'at each vertex, which is dasher.dart:94-96', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(10, 20));
+    c.beginDash(dashed, 2.0);
+    c.polyline(Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10]), 4, dashStyle,
+        closed: false);
+    c.endDash();
+    c.endResidual();
+    expect(c.instanceCount, 3, reason: 'three segments, D == 1 each, no joins');
+    for (var i = 0; i < c.instanceCount; i++) {
+      expect(
+          c.data[i * kFloatsPerInstance + InstanceFieldOffset.dashPhase], 0.0);
+    }
+  });
+
+  // --- dashed circles and arcs (Task 6) ------------------------------------
+
+  test(
+      'a dashed arc carries a running phase, and consecutive chords advance '
+      'it by one chord of arc length', () {
+    const r = 40.0;
+    const sweep = 1.2;
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(5, 7));
+    c.beginDash(dashed, 0.5);
+    c.arc(0, 0, r, 0, sweep, dashStyle);
+    c.endDash();
+    c.endResidual();
+
+    // Read the phases off the stroke instances in order.
+    final data = c.data;
+    final phases = <double>[
+      for (var i = 0; i < c.instanceCount; i++)
+        if (data[i * kFloatsPerInstance + InstanceFieldOffset.kind] ==
+            kKindStroke)
+          data[i * kFloatsPerInstance + InstanceFieldOffset.dashPhase]
+    ];
+    expect(phases.first, 0.0);
+
+    // Each step advances by one chord's own local-arc length, scaled by that
+    // chord's own factor (chord/arc) -- the SAME factor and the SAME step for
+    // every chord here, because a residual that is a pure translation
+    // (scaleMagnitude == 1) leaves collection-space chord length equal to
+    // local chord length, and every chord of a circular arc flattened at a
+    // constant angular step has the same chord length. Recomputed from the
+    // reference's own flattening formula, not hardcoded, so the test tracks
+    // a tolerance change instead of pinning today's step count.
+    final steps =
+        (sweep.abs() * math.sqrt(r / (8 * VerticesDrawSink.kFlattenTolerance)))
+            .ceil()
+            .clamp(1, VerticesDrawSink.kMaxFlattenSegments);
+    final step = sweep / steps;
+    final arcStep = r * step.abs();
+    final chordLen = 2 * r * math.sin(step.abs() / 2);
+    final expectedAdvance = chordLen; // arcStep * (chordLen / arcStep)
+    // Ruling C4's own bound: the disagreement between arc and chord stays
+    // inside one chord, under a tenth of a pixel at this flattener's 0.25 px
+    // sagitta.
+    expect(arcStep - chordLen, lessThan(0.1));
+
+    final period = data[InstanceFieldOffset.dashPeriod].abs();
+    for (var i = 1; i < phases.length; i++) {
+      final delta = (phases[i] - phases[i - 1] + period) % period;
+      expect(delta, closeTo(expectedAdvance, 1e-3),
+          reason: 'a constant advance is what "running" means; a phase that '
+              'restarts per chord is dasher.dart\'s polyline rule applied '
+              'to a curve, which is the spec\'s own named mutation');
+    }
+  });
+
+  test(
+      'a dashed circle carries a running phase all the way through its '
+      'closing chord -- the pair the loop never assigns', () {
+    // The open-arc version of this test (above) cannot reach the closing
+    // chord at all: `_endRun` returns early for an open run, so the seam
+    // this defect lives in never exists there. A CLOSED sweep is the only
+    // fixture that exercises `_endRun`'s own `_runTo` call, which draws the
+    // chord from the loop's last point back to the first.
+    //
+    // The wrap from the CLOSING chord back to chord one is deliberately not
+    // asserted here: the circle's true circumference is not, in general, an
+    // exact multiple of the dash period, so that one seam has a genuine,
+    // expected discontinuity. Every OTHER adjacency -- including the pair
+    // this defect corrupts, chord `steps - 1` to the closing chord `steps`
+    // -- must not.
+    const r = 65.0;
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(5, 7));
+    c.beginDash(dashed, 1.7);
+    c.circle(0, 0, r, dashStyle);
+    c.endDash();
+    c.endResidual();
+
+    final data = c.data;
+    final phases = <double>[
+      for (var i = 0; i < c.instanceCount; i++)
+        if (data[i * kFloatsPerInstance + InstanceFieldOffset.kind] ==
+            kKindStroke)
+          data[i * kFloatsPerInstance + InstanceFieldOffset.dashPhase]
+    ];
+
+    final steps =
+        (2 * math.pi * math.sqrt(r / (8 * VerticesDrawSink.kFlattenTolerance)))
+            .ceil()
+            .clamp(1, VerticesDrawSink.kMaxFlattenSegments);
+    expect(phases.length, steps,
+        reason: 'one stroke per chord -- `dashed` has D == 1');
+    final step = (2 * math.pi) / steps;
+    final chordLen = 2 * r * math.sin(step.abs() / 2);
+    final expectedAdvance = chordLen; // same law as the open-arc test above
+
+    final period = data[InstanceFieldOffset.dashPeriod].abs();
+    for (var i = 0; i < phases.length - 1; i++) {
+      final delta = (phases[i + 1] - phases[i] + period) % period;
+      expect(delta, closeTo(expectedAdvance, 1e-3),
+          reason: 'chord $i to chord ${i + 1} must advance by the same '
+              'one-chord step everywhere, including into the closing '
+              'chord at the very end of this list; a stale phase left '
+              'behind on the closing chord shows up as a near-zero (or '
+              'doubled) delta at exactly that one pair');
+    }
+  });
+
+  test('a dashed circle emits no seam join', () {
+    const r = 40.0;
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.identity());
+    c.beginDash(dashed, 0.5);
+    c.circle(0, 0, r, dashStyle);
+    c.endDash();
+    c.endResidual();
+
+    final solid =
+        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    solid.beginResidual(Transform2.identity());
+    solid.circle(0, 0, r, dashStyle);
+    solid.endResidual();
+
+    // The solid circle's join count is chords; the dashed one's is chords - 1
+    // (interior joins only, no seam).
+    expect(_joinCount(c), _joinCount(solid) - 1);
+  });
+
+  test(
+      'a solid circle still has its seam join -- the assertion above is '
+      'about dashes', () {
+    // Guards against "no joins at all" passing the test above.
+    final solid =
+        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    solid.beginResidual(Transform2.identity());
+    solid.circle(0, 0, 40, dashStyle);
+    solid.endResidual();
+    expect(_joinCount(solid), greaterThan(0));
+  });
+
+  test('the chord count does not change when a dash bracket is open', () {
+    // Flattening is a scale decision, not a linetype one. A dashed arc that
+    // chorded differently from a solid one would put the two arms' geometry
+    // in different places for a reason that has nothing to do with the
+    // pattern. dashDot has D == 2 drawn elements, so the dashed arm writes
+    // exactly two strokes per chord.
+    const r = 40.0;
+    const sweep = 1.2;
+    final dashedC =
+        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    dashedC.beginResidual(Transform2.identity());
+    dashedC.beginDash(dashDot, 0.5);
+    dashedC.arc(0, 0, r, 0, sweep, dashStyle);
+    dashedC.endDash();
+    dashedC.endResidual();
+
+    final solidC =
+        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    solidC.beginResidual(Transform2.identity());
+    solidC.arc(0, 0, r, 0, sweep, dashStyle);
+    solidC.endResidual();
+
+    expect(_strokeCount(dashedC) ~/ 2, _strokeCount(solidC));
+  });
+
+  test(
+      'an anisotropic residual scales each chord\'s period by that chord\'s '
+      'own ratio, not by one number for the whole arc', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.scale(3.0, 1.0)); // a circle becomes an ellipse
+    c.beginDash(dashed, 0.5);
+    c.arc(0, 0, 40, 0, math.pi, dashStyle);
+    c.endDash();
+    c.endResidual();
+    final data = c.data;
+    final periods = <double>[
+      for (var i = 0; i < c.instanceCount; i++)
+        if (data[i * kFloatsPerInstance + InstanceFieldOffset.kind] ==
+            kKindStroke)
+          data[i * kFloatsPerInstance + InstanceFieldOffset.dashPeriod].abs()
+    ];
+    expect(
+        periods.reduce(math.max) / periods.reduce(math.min), closeTo(3.0, 0.1),
+        reason: 'a chord along x is stretched 3x and a chord along y is not; '
+            'one period for the whole arc would read 1.0 here and would be '
+            'the scaleMagnitude approximation this fixture exists to reject');
+  });
+
+  test('the phase is reduced into [0, period) at collection', () {
+    // A long arc accumulates many periods; leaving them in the record spends
+    // float32 precision the fragment stage needs for `fract`. A full circle
+    // at period 9.0 (cycle 18.0 x patternToLocal 0.5) against a ~251-unit
+    // circumference wraps roughly 28 times, so an unreduced phase would run
+    // into the hundreds.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.identity());
+    c.beginDash(dashed, 0.5);
+    c.circle(0, 0, 40, dashStyle);
+    c.endDash();
+    c.endResidual();
+
+    final data = c.data;
+    var sawStroke = false;
+    for (var i = 0; i < c.instanceCount; i++) {
+      final o = i * kFloatsPerInstance;
+      if (data[o + InstanceFieldOffset.kind] != kKindStroke) continue;
+      sawStroke = true;
+      final phase = data[o + InstanceFieldOffset.dashPhase];
+      final period = data[o + InstanceFieldOffset.dashPeriod].abs();
+      expect(phase, greaterThanOrEqualTo(0.0));
+      expect(phase, lessThan(period));
+    }
+    expect(sawStroke, isTrue);
   });
 }
