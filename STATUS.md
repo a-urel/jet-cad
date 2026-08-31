@@ -1,12 +1,19 @@
 # jet-cad — project status
 
 **Last updated:** 2026-08-31
-**Verified against:** `plan-c/shaded-dashes` at `18330a9` — **Plan C of the
-GPU-resident render backend, the third of that spec's seven plans, is
-complete and NOT YET MERGED.** Twelve tasks, `d52d2a9..18330a9`, cut from
-`main` at `d52d2a9`. Before it, Plan B merged at `72b162d` (eleven tasks,
-`5c94e11..4892a01`), Plan A at `cd5bc98` (nine tasks) and Plan 3i ran
-directly on `main` at `468e310..dbc31e8`.
+**Verified against:** `main` at `3a61b45` — the merge commit for **Plan C of
+the GPU-resident render backend**, the third of that spec's seven plans.
+Plan C ran on `plan-c/shaded-dashes`, cut from `main` at `d52d2a9`, twelve
+tasks at `d52d2a9..db4dd5f`, merged `--no-ff` and the branch deleted. Before
+it, Plan B merged at `72b162d` (eleven tasks, `5c94e11..4892a01`), Plan A at
+`cd5bc98` (nine tasks) and Plan 3i ran directly on `main` at
+`468e310..dbc31e8`. **Nothing is in flight.**
+
+**Every suite count below was produced by running that suite on the MERGED
+tree on 2026-08-31** — `jet_cad_2d` **797**, `jet_cad_2d_flutter` **540** (1
+pre-existing skip), `dev_harness_2d` **72**, analyze and format clean in all
+three — not by reading a report, and not by trusting the branch's own green
+run. A green run only proves the tree it ran on.
 
 **Plan C (dashes in the shader) is DONE on its branch. Exit gate: 10 of 11 —
 criterion 11 is UNMET**, in those words: the device run happened and produced
@@ -620,7 +627,9 @@ must move the dashes *with* the line, not slide them along it.
 **Plan B's four, still owed:** corners filled, a circle **not** notched at its
 start angle, a square dot, nothing thickening as you zoom.
 
-**Plan C is NOT merged.** It sits on `plan-c/shaded-dashes` at `18330a9`.
+**Plan C is merged** at `3a61b45` and its branch is deleted. The merge did
+not discharge criterion 11 and this file says so rather than letting it
+lapse.
 
 ---
 
