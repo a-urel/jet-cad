@@ -7,6 +7,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
 
 import '../support/fixtures.dart';
+import '../support/gpu_comparison.dart';
 
 const double _dpr = 2.0;
 const double _ppmm = 3.78;
@@ -472,5 +473,107 @@ void main() {
     purged.commands.undo();
     purged.purge();
     _expectSameBuffer(_collect(purged), baseline, 'after purge');
+  });
+
+  test(
+      'on straight geometry the resident arm is pixel-EXACT against the '
+      'reference', () {
+    // Not "within 1%": zero differing pixels. The dash coordinate `t` is
+    // measured in collection units and the fragment test is a half-open
+    // compare on `fract(t)`, so for a segment there is no approximation
+    // anywhere in the chain -- and a gate that accepted a small budget here
+    // would accept a real defect too.
+    final doc = _polylineOnlyFixture();
+    final camera = ViewportTransform.fit(doc.extents, kViewport);
+    final measured = measurePaintedAgreement(doc,
+        camera: camera,
+        size: kViewport,
+        devicePixelRatio: _dpr,
+        pixelsPerPaperMm: _ppmm);
+    final control = measurePaintedAgreement(doc,
+        camera: camera,
+        size: kViewport,
+        devicePixelRatio: _dpr,
+        pixelsPerPaperMm: _ppmm,
+        debugDisableDashTest: true);
+    final gapPixels = control.residentInk - measured.residentInk;
+
+    // ignore: avoid_print
+    print('PLAN-C straight: referenceInk=${measured.referenceInk} '
+        'residentInk=${measured.residentInk} differing=${measured.differing} '
+        'gapPixels=$gapPixels controlDiffering=${control.differing}');
+
+    expect(gapPixels, greaterThan(0),
+        reason: 'if the dash test removes no ink, this corpus draws nothing '
+            'dashed and the assertion below is vacuous');
+    expect(measured.differing, 0);
+  });
+
+  test(
+      'the control: with the fragment dash test disabled, the straight-'
+      'geometry gate fails by the whole dash gap', () {
+    // The gate above is only evidence if the instrument can see the defect
+    // it is aimed at. This arm is that proof, run in the suite rather than
+    // claimed in a report -- Plan 3i's Ruling 14 records what an interleaved
+    // control that cannot actually be switched on is worth. Against a gate
+    // of exactly 0, any non-zero reading is a failure, so the assertion is
+    // on the magnitude: the disabled arm must differ by essentially the
+    // entire gap the dash test cuts.
+    final doc = _polylineOnlyFixture();
+    final camera = ViewportTransform.fit(doc.extents, kViewport);
+    final measured = measurePaintedAgreement(doc,
+        camera: camera,
+        size: kViewport,
+        devicePixelRatio: _dpr,
+        pixelsPerPaperMm: _ppmm);
+    final control = measurePaintedAgreement(doc,
+        camera: camera,
+        size: kViewport,
+        devicePixelRatio: _dpr,
+        pixelsPerPaperMm: _ppmm,
+        debugDisableDashTest: true);
+    final gapPixels = control.residentInk - measured.residentInk;
+
+    expect(control.differing, greaterThan(gapPixels * 0.9),
+        reason: 'the disabled arm inks every gap the dash test cuts, so its '
+            'disagreement is the gap itself');
+    expect(control.differing, greaterThan(100),
+        reason: 'an absolute floor, so a corpus that shrank to a handful of '
+            'dash gaps could not make this control pass on noise');
+  });
+
+  test('curves diverge, and the divergence is MEASURED rather than gated', () {
+    // **Ruling C4, and the plan got its size wrong.** The plan expected a
+    // dashed curve to agree at ratio 1.0 and to diverge only as the camera
+    // left the collection scale. It diverges at ratio 1.0 too, and the
+    // reason is not the sagitta: the reference emits every dash span as its
+    // own `arc()` op and re-chords each one independently
+    // (`vertices_draw_sink.dart`), so its chord vertices sit in different
+    // places from the resident arm's, which chords the whole sweep once.
+    // Different vertices at the same camera, not a different tolerance.
+    //
+    // This is not gated, because the threshold that would bound it is the
+    // watermark band and the band belongs to a later plan. It is asserted
+    // loosely, as a regression tripwire, and reported as a number.
+    for (final probe in <(String, List<int>)>[
+      ('circle 911', <int>[911]),
+      ('arc 912', <int>[912]),
+    ]) {
+      final doc = _onlyEntities(probe.$2);
+      final camera = ViewportTransform.fit(doc.extents, kViewport);
+      final m = measurePaintedAgreement(doc,
+          camera: camera,
+          size: kViewport,
+          devicePixelRatio: _dpr,
+          pixelsPerPaperMm: _ppmm);
+      // ignore: avoid_print
+      print('PLAN-C curve ${probe.$1}: referenceInk=${m.referenceInk} '
+          'residentInk=${m.residentInk} differing=${m.differing} '
+          '(${(100 * m.differing / m.referenceInk).toStringAsFixed(1)}%)');
+      expect(m.differing, lessThan(m.referenceInk * 0.25),
+          reason: '${probe.$1}: a tripwire, not a criterion -- a curve whose '
+              'disagreement passed a quarter of its own ink would mean '
+              'something worse than re-chording');
+    }
   });
 }
