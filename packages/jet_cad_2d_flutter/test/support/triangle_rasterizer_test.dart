@@ -329,16 +329,26 @@ void main() {
     // argument must ink exactly as it did before this task added a
     // fragment stage at all.
     //
-    // MUTATION: default `hasDash` to `ta != null` alone, dropping the
-    // `startA! >= 0` half of the guard, or read `startA` as `0.0` when the
-    // caller passed no dash array instead of leaving it `null` -- either
-    // way this triangle has no varyings to test in the first place, so a
-    // `_fill` that tries to run the dash test anyway would hit a null
-    // check failure or a bogus comparison rather than filling the interior
-    // plainly. (2, 2) is the same interior point `'a triangle covers its
-    // interior and not its outside'` above already pins; naming it here
-    // ties that coverage to this task's contract instead of leaving it
-    // implicit.
+    // MUTATION (fired and confirmed to kill, by hand): swap the order of
+    // `hasDash`'s guard clauses in `_fill`,
+    // `!debugDisableDashTest && ta != null && startA! >= 0` to
+    // `!debugDisableDashTest && startA! >= 0 && ta != null` -- this
+    // fixture passes no `dash` array, so `ta` and `startA` are both
+    // `null`, and `startA!` evaluated before the `ta != null` check that
+    // was guarding it throws "Null check operator used on a null value"
+    // instead of filling the interior plainly. Confirmed: this test goes
+    // red with that swap and green again once it is undone.
+    //
+    // **A previously-committed version of this comment named a mutation
+    // that does NOT kill this test** (dropping the `startA! >= 0` half of
+    // the guard, leaving `hasDash = ta != null`): with `ta` already `null`
+    // in this fixture, that guard alone still evaluates to `false`, so
+    // nothing observable changes. That claim was argued, never fired --
+    // this file already had one such claim corrected during Task 9, and
+    // this is the second. (2, 2) is the same interior point `'a triangle
+    // covers its interior and not its outside'` above already pins; naming
+    // it here ties that coverage to this task's contract instead of
+    // leaving it implicit.
     final r = TriangleRasterizer(8, 8)
       ..observe(_tri([1, 1, 6, 1, 1, 6]), _rgb(0xFFFF0000));
     expect(r.inked(2, 2), isTrue, reason: 'inside, no dash varyings supplied');
