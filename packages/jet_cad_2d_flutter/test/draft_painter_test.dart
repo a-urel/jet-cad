@@ -81,7 +81,8 @@ void main() {
             'more than one means a placement is still riding along');
   });
 
-  DraftDocument dashedFixture({required Transform2 placement}) {
+  DraftDocument dashedFixture(
+      {required Transform2 placement, double linetypeScale = 1.0}) {
     final doc = DraftDocument.empty();
     final dashed = doc.handleSeed.next();
     doc.tables.linetypes.add(LinetypeRecord(
@@ -100,7 +101,7 @@ void main() {
         kind: EntityKind.line,
         layer: ReservedHandles.layerZero,
         linetype: dashed,
-        linetypeScale: 1.0,
+        linetypeScale: linetypeScale,
         geomIndex: 0,
         color: const ByLayerColor(),
         lineweight: 25,
@@ -252,9 +253,14 @@ void main() {
   test(
       'a shading sink is handed the undashed polyline inside a bracket, '
       'and the bracket carries the painter\'s own dash scale', () {
+    // linetypeScale is pinned away from 1.0 (the identity every other
+    // fixture in this suite uses) so this test cannot pass with
+    // `style.linetypeScale *` deleted from `_dashScale` -- the exact shape
+    // of defect this repo's mutation discipline exists to catch.
     final doc = dashedFixture(
         placement:
-            Transform2.translation(3, 2).multiply(Transform2.scale(2, 2)));
+            Transform2.translation(3, 2).multiply(Transform2.scale(2, 2)),
+        linetypeScale: 2.5);
     final sink = RecordingDrawSink(shadesDashes: true);
     final camera = ViewportTransform.fit(doc.extents, kViewport);
     final index = SpatialIndex(doc);
@@ -276,8 +282,11 @@ void main() {
     // The scale is the painter's own `_dashScale`: linetypeScale ×
     // globalLinetypeScale × toScreen.scaleMagnitude. Asserted as an
     // arithmetic identity against the camera, not as a copied literal --
-    // a literal would survive the factor being dropped.
-    final expected = 1.0 *
+    // a literal would survive the factor being dropped. `2.5`, not `1.0`:
+    // an entity-level linetypeScale left at the identity is exactly what
+    // let `style.linetypeScale *` be deleted from all five call sites in
+    // `draft_painter.dart` and leave this suite green.
+    final expected = 2.5 *
         doc.header.globalLinetypeScale *
         (camera.worldToScreenMatrix.scaleMagnitude * 2.0 /* placement */);
     expect(begins.single.patternToLocal, closeTo(expected, 1e-9));

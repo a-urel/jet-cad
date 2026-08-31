@@ -84,5 +84,15 @@ void main() {
       2,
       0
     });
+
+    // 5. entity 913's own linetypeScale is a real multiplicand, not left at
+    //    the identity -- the same shape of check as (1), for the per-entity
+    //    factor `_dashScale` folds in beside `globalLinetypeScale`. The
+    //    default-constructed fixture above cannot exercise this by itself
+    //    ([linetypeScale] defaults to 1.0), so a second fixture pins it.
+    final scaled = shadedDashFixture(linetypeScale: 2.5);
+    final slot = scaled.entities.slotOf(const Handle(913));
+    expect(slot, isNotNull, reason: 'entity 913 went missing');
+    expect(scaled.entities.read(slot!).linetypeScale, isNot(1.0));
   });
 }
