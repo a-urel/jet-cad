@@ -3,11 +3,14 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
 
 import '../support/fixtures.dart';
 import '../support/gpu_comparison.dart';
+import '../support/instance_expander.dart';
+import '../support/triangle_rasterizer.dart';
 
 const double _dpr = 2.0;
 const double _ppmm = 3.78;
@@ -576,4 +579,257 @@ void main() {
               'something worse than re-chording');
     }
   });
+
+  test(
+      'the dash count is CAMERA-INVARIANT, and the resident arm matches the '
+      'engine dasher at every scale from one buffer collected once', () {
+    // **The plan's premise was wrong and this test is what corrected it.**
+    // Plan C's own prose says a frozen buffer "still shows eight dashes at 4x
+    // zoom instead of the thirty-two the reference draws". It does not: the
+    // reference draws eight too. `_dashScale` folds in
+    // `toScreen.scaleMagnitude` (`draft_painter.dart`), and the points it
+    // dashes are already in screen space, so BOTH the period and the
+    // distance scale with the camera and the quotient -- the dash count
+    // along a given entity -- does not move. **Dash patterns are anchored in
+    // world space, not screen space**: zooming in makes each dash longer on
+    // screen and leaves their number alone.
+    //
+    // That is exactly the invariance this backend's design relies on, and it
+    // is why `t` needs no camera term. What this test proves is that the
+    // resident arm has the same invariance AND lands on the same count as
+    // the engine's own dasher -- from one buffer, expanded at four scales.
+    // The genuinely camera-dependent half of dashing is the collapse rule,
+    // and the test after this one covers it.
+    //
+    // The oracle is `Dasher` itself, the class `DraftPainter` uses to cut
+    // spans for every non-shading sink. It shares no code with the
+    // collector, the expander or the rasterizer.
+    final doc = _onlyEntities(const [910]);
+    final camera = ViewportTransform.fit(doc.extents, kViewport);
+
+    final recording = RecordingDrawSink(shadesDashes: true);
+    final collector =
+        GeometryCollector(pixelsPerPaperMm: _ppmm, devicePixelRatio: _dpr);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    for (final sink in <DrawSink>[recording, collector]) {
+      DraftPainter(
+        document: doc,
+        index: index,
+        resolver: DocumentStyleResolver(doc),
+      ).paint(sink, camera, kViewport);
+    }
+    final data = collector.data;
+    final instances = collector.instanceCount;
+
+    final begin = recording.ops.whereType<BeginDashOp>().single;
+    final line = recording.ops.whereType<PolylineOp>().single;
+    final residual = recording.ops.whereType<BeginResidualOp>().first.residual;
+    double cx(int i) =>
+        residual.a * line.points[i * 2] +
+        residual.c * line.points[i * 2 + 1] +
+        residual.e;
+    double cy(int i) =>
+        residual.b * line.points[i * 2] +
+        residual.d * line.points[i * 2 + 1] +
+        residual.f;
+    // The longest segment, so the count is as large as this fixture can make
+    // it and a stretched pattern would be loud.
+    var best = 0;
+    var bestLen = 0.0;
+    for (var i = 0; i + 1 < line.points.length ~/ 2; i++) {
+      final dx = cx(i + 1) - cx(i), dy = cy(i + 1) - cy(i);
+      final len = math.sqrt(dx * dx + dy * dy);
+      if (len > bestLen) {
+        bestLen = len;
+        best = i;
+      }
+    }
+    final ax = cx(best), ay = cy(best), bx = cx(best + 1), by = cy(best + 1);
+
+    final counts = <double, (int, int)>{};
+    for (final ratio in <double>[0.5, 1.0, 2.0, 4.0]) {
+      final k = ratio * _dpr;
+
+      var referenceRuns = 0;
+      Dasher().dashPolyline(
+          Float64List.fromList(<double>[ax * k, ay * k, bx * k, by * k]),
+          2,
+          begin.pattern,
+          begin.patternToLocal * k,
+          Aabb2(Vector2(-1e9, -1e9), Vector2(1e9, 1e9)),
+          (x0, y0, x1, y1) => referenceRuns++);
+
+      counts[ratio] = (
+        referenceRuns,
+        _residentRuns(data, instances, ratio, ax, ay, bx, by)
+      );
+    }
+
+    // ignore: avoid_print
+    print('PLAN-C four-scale dash count (dasher, resident): $counts');
+
+    // **The invariance, asserted exactly: one buffer, four scales, one
+    // answer.** This is the whole claim, and it is the assertion a buffer
+    // whose dash coordinate carried any camera term would fail.
+    expect(counts.values.map((c) => c.$2).toSet(), hasLength(1),
+        reason: 'the resident count must not move with the camera');
+    expect(counts.values.first.$2, greaterThan(3),
+        reason: 'a segment carrying fewer than four dashes cannot tell an '
+            'invariant count from a coincidence');
+
+    // **The dasher's own count is invariant too, which is the point about
+    // the reference** -- dashes are anchored in world space, so zooming
+    // lengthens each dash and leaves their number alone.
+    expect(counts.values.map((c) => c.$1).toSet(), hasLength(1),
+        reason: 'the reference is scale-invariant here too; a reading that '
+            'moved would mean the premise this test corrects was right '
+            'after all');
+
+    // **The two counts differ by one, and that is this PROBE's boundary
+    // behaviour rather than a disagreement between the arms.** The
+    // authority on whether the arms agree is the pixel differential above,
+    // which reads `differing == 0` on exactly this geometry -- identical
+    // ink, pixel for pixel. A count taken by walking a centreline and a
+    // count of spans emitted by `Dasher` treat the last, clipped element of
+    // a segment differently, and no amount of sampling reconciles that
+    // without re-implementing the clip. Bounded and recorded rather than
+    // tuned away.
+    counts.forEach((ratio, c) {
+      expect((c.$2 - c.$1).abs(), lessThanOrEqualTo(1),
+          reason: 'at ratio $ratio the resident arm drew ${c.$2} runs where '
+              'the engine dasher cuts ${c.$1} spans');
+    });
+  });
+
+  test(
+      'the collapse rule is LIVE, which is the half of dashing that does '
+      'depend on the camera', () {
+    // Zoomed far enough out, `kDashCollapsePx` says a pattern is drawn solid
+    // -- the reference decides that per frame, at the live scale
+    // (`dasher.dart`, `draft_painter.dart`). A buffer with the decision baked
+    // in at collection time gets it wrong at every other zoom, and this is
+    // the behaviour Plan C actually moved into the shader.
+    final doc = _onlyEntities(const [910]);
+    final camera = ViewportTransform.fit(doc.extents, kViewport);
+    final collector =
+        GeometryCollector(pixelsPerPaperMm: _ppmm, devicePixelRatio: _dpr);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    DraftPainter(
+      document: doc,
+      index: index,
+      resolver: DocumentStyleResolver(doc),
+    ).paint(collector, camera, kViewport);
+
+    final recording = RecordingDrawSink(shadesDashes: true);
+    DraftPainter(
+      document: doc,
+      index: index,
+      resolver: DocumentStyleResolver(doc),
+    ).paint(recording, camera, kViewport);
+    final line = recording.ops.whereType<PolylineOp>().single;
+    final residual = recording.ops.whereType<BeginResidualOp>().first.residual;
+    double cx(int i) =>
+        residual.a * line.points[i * 2] +
+        residual.c * line.points[i * 2 + 1] +
+        residual.e;
+    double cy(int i) =>
+        residual.b * line.points[i * 2] +
+        residual.d * line.points[i * 2 + 1] +
+        residual.f;
+    var best = 0;
+    var bestLen = 0.0;
+    for (var i = 0; i + 1 < line.points.length ~/ 2; i++) {
+      final dx = cx(i + 1) - cx(i), dy = cy(i + 1) - cy(i);
+      final len = math.sqrt(dx * dx + dy * dy);
+      if (len > bestLen) {
+        bestLen = len;
+        best = i;
+      }
+    }
+    final data = collector.data;
+    // The collection-space period of the first dashed instance, so the
+    // collapse ratio is derived from the buffer rather than guessed.
+    final period = data[InstanceFieldOffset.dashPeriod].abs();
+    expect(period, greaterThan(0));
+    // `dashScale` is live LOGICAL pixels per collection unit; the shader
+    // collapses when `period * dashScale < 3.0`.
+    final collapsingScale = 1.0 / period; // gives a live period of 1.0 px
+    final openScale = 8.0 / period; // gives a live period of 8.0 px
+
+    final collapsed = _residentRuns(data, collector.instanceCount, 1.0,
+        cx(best), cy(best), cx(best + 1), cy(best + 1),
+        dashScaleOverride: collapsingScale);
+    final open = _residentRuns(data, collector.instanceCount, 1.0, cx(best),
+        cy(best), cx(best + 1), cy(best + 1),
+        dashScaleOverride: openScale);
+
+    // ignore: avoid_print
+    print('PLAN-C collapse: period=$period collapsedRuns=$collapsed '
+        'openRuns=$open');
+
+    expect(collapsed, 1,
+        reason: 'below kDashCollapsePx the whole segment is one solid run, '
+            'which is what the reference draws when dashPolyline returns '
+            'false');
+    expect(open, greaterThan(1),
+        reason: 'above the threshold the same buffer draws a dashed run, so '
+            'the branch is decided live rather than baked');
+  });
+}
+
+/// Maximal inked runs along the segment, in the resident arm, with the buffer
+/// expanded at [ratio].
+///
+/// **Samples a 3x3 neighbourhood, not a single pixel.** A stroke here is one
+/// to two device pixels wide and the centreline is rational, so rounding the
+/// sample point drifts off the quad and reads speckle -- an early version of
+/// this helper counted 92 runs where the truth was 5, which is measurement
+/// noise dressed as a signal.
+int _residentRuns(Float32List data, int instances, double ratio, double ax,
+    double ay, double bx, double by,
+    {double? dashScaleOverride}) {
+  final k = ratio * _dpr;
+  final dax = ax * k, day = ay * k, dbx = bx * k, dby = by * k;
+  const margin = 8.0;
+  final minX = math.min(dax, dbx) - margin;
+  final minY = math.min(day, dby) - margin;
+  final w = (math.max(dax, dbx) - minX + margin).ceil();
+  final h = (math.max(day, dby) - minY + margin).ceil();
+  final expanded = expandInstances(data, instances,
+      Transform2.translation(-minX, -minY).multiply(Transform2.scale(k, k)),
+      dashScale: dashScaleOverride ?? ratio);
+  final raster = TriangleRasterizer(w, h)
+    ..observe(expanded.positions, expanded.colors, dash: expanded.dashVaryings);
+
+  final sx = dax - minX, sy = day - minY;
+  final ex = dbx - minX, ey = dby - minY;
+  final length = math.sqrt((ex - sx) * (ex - sx) + (ey - sy) * (ey - sy));
+  final steps = (length * 4).ceil();
+  // **Trim four device pixels off each end.** The segment shares its
+  // endpoints with the polyline's neighbours, and a 3x3 probe there reaches
+  // into the adjacent segment's ink and counts it as a run of this one. An
+  // untrimmed version of this helper read 6 where the dasher cuts 5, every
+  // time, which is that bleed and not a dash.
+  final trim = length > 24 ? 4.0 / length : 0.0;
+  var runs = 0;
+  var wasInked = false;
+  for (var i = 0; i <= steps; i++) {
+    final t = trim + (i / steps) * (1 - 2 * trim);
+    final px = (sx + (ex - sx) * t).round();
+    final py = (sy + (ey - sy) * t).round();
+    var on = false;
+    for (var oy = -1; oy <= 1 && !on; oy++) {
+      for (var ox = -1; ox <= 1 && !on; ox++) {
+        final qx = px + ox, qy = py + oy;
+        if (qx >= 0 && qx < w && qy >= 0 && qy < h && raster.inked(qx, qy)) {
+          on = true;
+        }
+      }
+    }
+    if (on && !wasInked) runs++;
+    wasInked = on;
+  }
+  return runs;
 }
