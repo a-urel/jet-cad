@@ -55,8 +55,11 @@ in advance rather than explaining it afterwards.
 
 **It is a survivor, not an equivalent mutation.** The two programs are
 distinguishable in principle — a fragment landing exactly on `fracEnd` inks
-under the mutant and not under the original — so the honest label is "no gate
-in this suite can reach it", which is what the plan predicted.
+under the mutant and not under the original — so the honest label is "no
+*pixel* gate can reach it, and no targeted unit test was written", not "no
+gate in this suite can reach it": `triangle_rasterizer_test.dart` drives
+`v_dash` directly and could set all three vertices' `t` to exactly `endA`,
+so a gate that *could* reach this mutant exists in the suite, unfired.
 
 ## M-C5 — a predicted survivor that died
 
