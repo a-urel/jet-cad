@@ -123,16 +123,11 @@ class ResidentGeometry {
   /// all, since Plan C's Task 4.** `kind` and `halfWidth` are read as one
   /// `vec2` attribute (Ruling C6 — GLSL ES 100 guarantees `gl_MaxVertexAttribs`
   /// no lower than 8 and no higher either, and the new `dash` quad is the
-  /// eighth), and the four dash floats are the ninth-through-twelfth bytes
-  /// of the record read as one `vec4`. **This layout is knowingly ahead of
-  /// the committed shader bundle**: `shaders/cad_stroke.vert` and
-  /// `assets/shaders/cad.shaderbundle` still declare `kind` and `half_width`
-  /// as two separate attributes and carry no `dash` attribute at all, until
-  /// Task 8 regenerates the bundle. Pipeline creation
-  /// (`gpu.createRenderPipeline`, `_upload` below) will fail on a real GPU
-  /// between this task and Task 8 as a result — `flutter test` never reaches
-  /// it, so nothing here is blocked on the bundle, and no device run happens
-  /// in this window.
+  /// eighth), and the four dash floats are floats 13–16 of the record
+  /// (`InstanceFieldOffset.dashPeriod` through `dashFracEnd`), i.e. bytes
+  /// 48–63, read as one `vec4`. `shaders/cad_stroke.vert` and
+  /// `assets/shaders/cad.shaderbundle` have declared `kind_half` and `dash`
+  /// to match since Task 8 regenerated the bundle.
   ///
   /// `@visibleForTesting`: same reason as [kCornerVertices] — this is pure
   /// configuration data, constructible and assertable without a GPU context,

@@ -621,9 +621,17 @@ class DraftPainter {
     }
     if (sink.shadesDashes) {
       // The sink evaluates the pattern itself, per fragment, at the live
-      // camera. Handing it spans instead would freeze the dash count at
-      // whatever camera this walk ran under -- which for the resident
-      // backend is a camera the viewer is not looking through.
+      // camera. The dash COUNT is camera-invariant either way: `_dashScale`
+      // folds in `toScreen.scaleMagnitude` and the points below are already
+      // in screen space, so period and distance scale together, and the
+      // number of dashes along an entity does not move with the camera at
+      // all -- measured three ways, see
+      // `docs/superpowers/notes/2026-08-31-plan-c-results.md`. What handing
+      // it baked spans instead would freeze is the COLLAPSE decision:
+      // `kDashCollapsePx` is a screen-space threshold, so whether a pattern
+      // draws solid depends on the live camera, and a buffer that decided
+      // that once at collection time would draw dashes where the live
+      // camera has collapsed to solid, or the reverse.
       sink.beginDash(pattern, _dashScale(style, toScreen));
       sink.polyline(_points, count, style, closed: false);
       sink.endDash();
