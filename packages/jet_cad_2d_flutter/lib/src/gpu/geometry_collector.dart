@@ -589,6 +589,23 @@ class GeometryCollector implements DrawSink {
       px = nx;
       py = ny;
     }
+    // The loop above never assigns the pending values for the CLOSING
+    // chord -- it stops at `last = steps - 1`, so `_endRun`'s own `_runTo`
+    // call below (the segment back to the first point) would otherwise
+    // draw with whatever phase the loop's last iteration left behind: the
+    // phase belonging to chord `steps - 1`, not chord `steps`. Set them
+    // here, from the same phase law the loop uses, evaluated for the
+    // closing chord itself -- point `steps - 1` (left in `px`, `py` by the
+    // loop) to point `0` (`_runFirstX`, `_runFirstY`).
+    if (_dashActive && closed && arcStep > 0) {
+      final cdx = _runFirstX - px, cdy = _runFirstY - py;
+      final factor = math.sqrt(cdx * cdx + cdy * cdy) / arcStep;
+      _pendingSegPeriod = _dashPeriodLocal * factor;
+      // Same explicit parenthesisation as the loop, same reason.
+      _pendingSegPhase = ((arcStep * (steps - 1)) % _dashPeriodLocal) * factor;
+      _pendingJoinPeriod = _pendingSegPeriod;
+      _pendingJoinPhase = _pendingSegPhase;
+    }
     // Ruling C3, third clause: the reference emits every dash span as its
     // own `arc()` op, so a dashed circle is a sequence of OPEN runs and no
     // closed run -- and therefore no seam join -- exists anywhere in it.

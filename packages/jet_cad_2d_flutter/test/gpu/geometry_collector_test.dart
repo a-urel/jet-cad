@@ -1002,6 +1002,59 @@ void main() {
     }
   });
 
+  test(
+      'a dashed circle carries a running phase all the way through its '
+      'closing chord -- the pair the loop never assigns', () {
+    // The open-arc version of this test (above) cannot reach the closing
+    // chord at all: `_endRun` returns early for an open run, so the seam
+    // this defect lives in never exists there. A CLOSED sweep is the only
+    // fixture that exercises `_endRun`'s own `_runTo` call, which draws the
+    // chord from the loop's last point back to the first.
+    //
+    // The wrap from the CLOSING chord back to chord one is deliberately not
+    // asserted here: the circle's true circumference is not, in general, an
+    // exact multiple of the dash period, so that one seam has a genuine,
+    // expected discontinuity. Every OTHER adjacency -- including the pair
+    // this defect corrupts, chord `steps - 1` to the closing chord `steps`
+    // -- must not.
+    const r = 65.0;
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    c.beginResidual(Transform2.translation(5, 7));
+    c.beginDash(dashed, 1.7);
+    c.circle(0, 0, r, dashStyle);
+    c.endDash();
+    c.endResidual();
+
+    final data = c.data;
+    final phases = <double>[
+      for (var i = 0; i < c.instanceCount; i++)
+        if (data[i * kFloatsPerInstance + InstanceFieldOffset.kind] ==
+            kKindStroke)
+          data[i * kFloatsPerInstance + InstanceFieldOffset.dashPhase]
+    ];
+
+    final steps =
+        (2 * math.pi * math.sqrt(r / (8 * VerticesDrawSink.kFlattenTolerance)))
+            .ceil()
+            .clamp(1, VerticesDrawSink.kMaxFlattenSegments);
+    expect(phases.length, steps,
+        reason: 'one stroke per chord -- `dashed` has D == 1');
+    final step = (2 * math.pi) / steps;
+    final chordLen = 2 * r * math.sin(step.abs() / 2);
+    final expectedAdvance = chordLen; // same law as the open-arc test above
+
+    final period = data[InstanceFieldOffset.dashPeriod].abs();
+    for (var i = 0; i < phases.length - 1; i++) {
+      final delta = (phases[i + 1] - phases[i] + period) % period;
+      expect(delta, closeTo(expectedAdvance, 1e-3),
+          reason: 'chord $i to chord ${i + 1} must advance by the same '
+              'one-chord step everywhere, including into the closing '
+              'chord at the very end of this list; a stale phase left '
+              'behind on the closing chord shows up as a near-zero (or '
+              'doubled) delta at exactly that one pair');
+    }
+  });
+
   test('a dashed circle emits no seam join', () {
     const r = 40.0;
     final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
