@@ -1,0 +1,115 @@
+Resolving dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (105.0.0 available)
+  analyzer 13.3.0 (14.1.0 available)
+  clock 1.1.2 (1.1.3 available)
+  code_assets 1.2.1 (2.0.0 available)
+  glob 2.1.3 (2.2.0 available)
+  hooks 2.1.0 (2.2.0 available)
+  io 1.0.5 (1.1.0 available)
+  lucide_icons_flutter 3.1.15 (3.1.17 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  mime 2.0.0 (2.1.0 available)
+  objective_c 9.5.0 (9.6.0 available)
+  package_config 2.2.0 (3.0.0 available)
+  pool 1.5.2 (1.5.3 available)
+  process 5.0.5 (5.0.6 available)
+  pub_semver 2.2.0 (2.2.1 available)
+  record_use 1.1.0 (1.1.1 available)
+  shadcn_ui 0.55.1 (0.56.2 available)
+  source_maps 0.10.13 (0.10.14 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  test 1.31.1 (1.31.2 available)
+  test_api 0.7.12 (0.7.13 available)
+  test_core 0.6.18 (0.6.19 available)
+  two_dimensional_scrollables 0.5.3 (0.5.4 available)
+  vm_service 15.2.0 (15.3.0 available)
+  yaml 3.1.3 (3.1.4 available)
+Got dependencies in `/Users/ahmeturel/Projects/oss/jet-cad`!
+25 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Launching lib/main.dart on macOS in profile mode...
+Building macOS application...                                   
+✓ Built build/macos/Build/Products/Profile/dev_harness_2d.app (70.4MB)
+[IMPORTANT:flutter/shell/platform/embedder/embedder_surface_metal_impeller.mm(53)] Using the Impeller rendering backend (MetalSDF).
+R2 app-run: JC_WINDOW=1400x900
+Failed to foreground app; open returned 1
+
+Flutter run key commands.
+h List all available interactive commands.
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on macOS is available at: http://127.0.0.1:49567/4nXLmuu0qo4=/
+The Flutter DevTools debugger and profiler on macOS is available at: http://127.0.0.1:49567/4nXLmuu0qo4=/devtools/?uri=ws://127.0.0.1:49567/4nXLmuu0qo4=/ws
+flutter: GSPIKE collect+upload: walk 9.5 ms, total 115.0 ms, instances=105076, buffer=6.41 MB, skippedOps=0
+flutter: GSPIKE run: entities=10000 instances=105076 viewport=1400x900 frames=30 repeats=3
+flutter: GSPIKE note: arm C (residentGpu) draws strokes, joins, points, circles and arcs -- 0 op(s) this walk did not draw (fills, text: later plans' job, see the section comment above this rig). Butt caps only -- Plan B emits no cap geometry. No antialiasing. Dash spans are baked at the collection camera and never re-split under zoom, a consequence of walking the document exactly once. Every one of those favours arm C on a timing comparison, which is why the picture matters as much as the numbers here.
+flutter: GSPIKE --- repeat 1 of 3 ---
+flutter: GSPIKE A painter (untiled) | hold | build  p50=0.05 p95=0.10 max=0.11 mean=0.06 (ms, n=26)
+flutter: GSPIKE A painter (untiled) | hold | raster p50=5.28 p95=6.29 max=7.31 mean=5.28 (ms, n=26)
+flutter: GSPIKE A painter (untiled) | pan | build  p50=10.32 p95=13.32 max=25.38 mean=10.90 (ms, n=28)
+flutter: GSPIKE A painter (untiled) | pan | raster p50=5.29 p95=6.62 max=6.70 mean=5.34 (ms, n=28)
+flutter: GSPIKE A painter (untiled) | zoom | build  p50=11.24 p95=15.76 max=21.76 mean=10.94 (ms, n=28)
+flutter: GSPIKE A painter (untiled) | zoom | raster p50=5.35 p95=7.47 max=8.38 mean=5.48 (ms, n=28)
+flutter: GSPIKE B tiles (blit) | hold | build  p50=0.05 p95=0.09 max=0.10 mean=0.05 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | hold | raster p50=0.22 p95=0.41 max=0.58 mean=0.25 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | build  p50=0.26 p95=0.53 max=0.68 mean=0.32 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | raster p50=0.73 p95=1.19 max=1.23 mean=0.78 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | build  p50=0.19 p95=0.29 max=0.79 mean=0.22 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | raster p50=0.52 p95=0.75 max=3.91 mean=0.65 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | build  p50=0.15 p95=0.30 max=0.38 mean=0.17 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | raster p50=0.55 p95=1.24 max=1.58 mean=0.66 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | gpu submits=0 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | build  p50=0.47 p95=1.04 max=1.06 mean=0.56 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | raster p50=0.62 p95=1.02 max=1.06 mean=0.67 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | gpu submits=30 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | build  p50=0.10 p95=0.26 max=0.27 mean=0.12 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | raster p50=0.14 p95=0.25 max=0.25 mean=0.15 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | gpu submits=30 of 30 frames
+flutter: GSPIKE --- repeat 2 of 3 ---
+flutter: GSPIKE A painter (untiled) | hold | build  p50=0.06 p95=0.23 max=0.44 mean=0.09 (ms, n=27)
+flutter: GSPIKE A painter (untiled) | hold | raster p50=5.36 p95=8.07 max=15.21 mean=5.99 (ms, n=27)
+flutter: GSPIKE A painter (untiled) | pan | build  p50=10.37 p95=14.49 max=24.76 mean=10.98 (ms, n=29)
+flutter: GSPIKE A painter (untiled) | pan | raster p50=5.57 p95=6.72 max=6.95 mean=5.53 (ms, n=29)
+flutter: GSPIKE A painter (untiled) | zoom | build  p50=10.19 p95=11.91 max=12.55 mean=9.43 (ms, n=30)
+flutter: GSPIKE A painter (untiled) | zoom | raster p50=5.41 p95=6.16 max=6.38 mean=5.09 (ms, n=30)
+flutter: GSPIKE B tiles (blit) | hold | build  p50=0.19 p95=0.23 max=0.24 mean=0.19 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | hold | raster p50=0.87 p95=1.09 max=1.32 mean=0.89 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | build  p50=0.25 p95=0.57 max=0.77 mean=0.32 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | raster p50=0.71 p95=1.34 max=1.42 mean=0.80 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | build  p50=0.10 p95=0.27 max=0.94 mean=0.15 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | raster p50=0.31 p95=0.92 max=4.62 mean=0.53 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | build  p50=0.18 p95=0.29 max=0.37 mean=0.18 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | raster p50=0.72 p95=1.29 max=1.59 mean=0.69 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | gpu submits=0 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | build  p50=0.43 p95=0.69 max=0.71 mean=0.46 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | raster p50=0.54 p95=0.69 max=0.71 mean=0.54 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | gpu submits=30 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | build  p50=0.33 p95=0.98 max=1.16 mean=0.42 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | raster p50=0.31 p95=1.01 max=1.09 mean=0.43 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | gpu submits=30 of 30 frames
+flutter: GSPIKE --- repeat 3 of 3 ---
+flutter: GSPIKE A painter (untiled) | hold | build  p50=0.05 p95=0.14 max=0.34 mean=0.06 (ms, n=27)
+flutter: GSPIKE A painter (untiled) | hold | raster p50=5.02 p95=7.91 max=13.96 mean=5.63 (ms, n=27)
+flutter: GSPIKE A painter (untiled) | pan | build  p50=10.26 p95=13.75 max=23.51 mean=10.85 (ms, n=29)
+flutter: GSPIKE A painter (untiled) | pan | raster p50=5.39 p95=6.55 max=7.08 mean=5.48 (ms, n=29)
+flutter: GSPIKE A painter (untiled) | zoom | build  p50=9.88 p95=11.96 max=15.28 mean=8.73 (ms, n=33)
+flutter: GSPIKE A painter (untiled) | zoom | raster p50=5.45 p95=6.19 max=6.28 mean=5.09 (ms, n=33)
+flutter: GSPIKE B tiles (blit) | hold | build  p50=0.23 p95=0.36 max=0.37 mean=0.23 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | hold | raster p50=0.97 p95=1.66 max=1.75 mean=1.05 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | build  p50=0.26 p95=0.39 max=0.42 mean=0.27 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | raster p50=0.67 p95=1.08 max=1.08 mean=0.69 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | build  p50=0.27 p95=0.38 max=0.73 mean=0.28 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | raster p50=0.78 p95=2.11 max=3.81 mean=0.92 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | build  p50=0.19 p95=0.32 max=0.39 mean=0.20 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | raster p50=0.70 p95=1.21 max=1.50 mean=0.77 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | gpu submits=0 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | build  p50=0.43 p95=0.75 max=0.76 mean=0.47 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | raster p50=0.57 p95=0.86 max=0.89 mean=0.59 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | gpu submits=30 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | build  p50=0.17 p95=0.41 max=0.42 mean=0.20 (ms, n=25)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | raster p50=0.18 p95=0.36 max=0.37 mean=0.19 (ms, n=25)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | gpu submits=30 of 30 frames
+flutter: GSPIKE done: 27 phase reports above.
+Lost connection to device.

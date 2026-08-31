@@ -107,6 +107,81 @@ rather than tuned away.
 
 ---
 
+## The device run
+
+macOS, `--profile`, 10,000 entities, `DASHED=0.35`, viewport 1400x900, 30
+frames, **three interleaved repeats**. Raw log archived beside this note at
+[2026-08-31-plan-c-device-run.log](2026-08-31-plan-c-device-run.log).
+
+> **macOS Low Power Mode was ON for this run** (`pmset -g` reports
+> `lowpowermode 1`), and it could not be turned off from this session. **Every
+> timing below is contaminated.** This project requires that statement on any
+> device note -- Plan 3b's entire results note is compromised for lacking it,
+> and the contamination was later measured at roughly 24% on raster and build.
+> The direction matters for how to read the gesture rows: contamination
+> *inflates* times, so arm C clearing its budgets **under** contamination is
+> the stronger reading, not the weaker one. It does not rescue the rebuild
+> row, which misses anyway.
+
+### Buffer and instance count — the clearest win in the plan
+
+```
+GSPIKE collect+upload: walk 9.5 ms, total 115.0 ms,
+                       instances=105076, buffer=6.41 MB, skippedOps=0
+```
+
+| quantity | Plan B | Plan C | |
+|---|---|---|---|
+| instances | 109,068 | **105,076** | **down 3,992** |
+| floats per instance | 12 | 16 | +33% |
+| buffer | 4.99 MB | **6.41 MB** | **PASS** against 8 MB |
+| `skippedOps` | fills, text | **0** | this corpus has neither |
+
+`105,076 x 16 x 4 = 6,724,864` bytes = 6.41 MB, exact.
+
+**The instance count went DOWN while the record got 33% wider**, which is
+Ruling C2's claim measured: a dashed primitive costs *D* instances -- its
+pattern's drawn-element count -- instead of one instance per dash. On a
+corpus that is 35% dashed, that saving outweighs four extra floats on every
+record. The buffer still grew, because the widening applies to all 105,076
+records and the saving only to the dashed ones.
+
+### Gesture frames — all three criteria PASS
+
+Median of three interleaved per-repeat p50s, the project's stated
+aggregation rule.
+
+| phase | build p50 | raster p50 | raster p95 |
+|---|---|---|---|
+| hold | 0.18 | 0.70 | 1.24 |
+| pan | 0.43 | 0.57 | 0.86 |
+| zoom | 0.17 | 0.18 | 0.36 |
+| **budget** | **<= 1.2** | **<= 2.0** | **<= 3.0** |
+
+**Every row passes, with `discard` live in the fragment shader.** The spec's
+budget discussion named the shaded-dash `discard` as a consumer of the raster
+margin, since it defeats early-Z; on this corpus it did not consume enough to
+matter. Antialiasing has still not landed (Plan B's Ruling B3), which the
+same discussion named as the other consumer -- so the margin here is not
+evidence that both would fit.
+
+`gpu submits=0 of 30` on every hold phase, `30 of 30` on every pan and zoom.
+That is the arm working: a frame whose camera did not change re-renders
+nothing.
+
+### Rebuild — MISS, and the same miss Plan B recorded
+
+`total 115.0 ms` against the spec's **16.67 ms** budget. Plan B measured
+79.6 ms and named cold pipeline creation as a hypothesis it could not test,
+because only one rebuild happened in that session. **The same is true here:
+one rebuild, no warm figure, so the cause remains a hypothesis and the
+criterion is scored as a MISS, not excused.** The walk itself reads 9.5 ms
+against Plan B's 5.7 ms and Plan A's 14.7 ms on a nominally comparable
+corpus; the three figures have never been reconciled and this run does not
+reconcile them either.
+
+---
+
 ## A defect this plan found in `packages/jet_cad_2d` and did NOT fix
 
 **Saving and loading a drawing silently resets `globalLinetypeScale` to 1.0,
@@ -183,3 +258,65 @@ hand-restore.
   dashes at all, per Ruling C5's stated cost: `differential_test.dart`,
   `vertices_differential_test.dart`, `draft_canvas_test.dart`,
   `large_coordinate_test.dart`, `tile_invalidation_test.dart`.
+
+---
+
+## Exit gate — 10 of 11
+
+Pre-committed in the plan. **A miss is recorded as a miss with its number. No
+threshold was moved.**
+
+| # | criterion | verdict |
+|---|---|---|
+| 1 | pixel differential, resident vs `VerticesDrawSink` | **SPLIT — PASS on straight geometry in its strongest form (`differing == 0`), MISS on curves (16.5% / 17.0%)** |
+| 2 | the gate can fail: control exceeds its budget by > 4x | **PASS** — control differs by exactly the 433-pixel gap |
+| 3 | the dash count follows the camera at ratios 0.5/1/2/4 | **PASS, with the premise corrected** — the count is *invariant* on both arms, and the resident arm reads 6,6,6,6 from one buffer |
+| 4 | `t` is scale-free across device scales | **PASS** |
+| 5 | emission order survives undo, redo, save, load, purge | **PASS**, with a `packages/jet_cad_2d` codec defect pinned (below) |
+| 6 | collapse is live and single | **PASS** — 1 solid run below the threshold, 6 above; exactly one representative per primitive |
+| 7 | Ruling C3 in pixels: dashed corner and dashed circle notched, solid circle not | **PASS** at the record level; the pixel half is inside criterion 1's curve miss |
+| 8 | resident geometry <= 8 MB | **PASS — 6.41 MB**, instances 105,076 (down from 109,068) |
+| 9 | gesture p50 <= 1.2 build / <= 2.0 raster, p95 raster <= 3.0 | **PASS** — 0.43 / 0.57 / 0.86 worst medians, `discard` live, under Low Power Mode contamination |
+| 10 | >= 10 of 14 mutations red, survivors declared | **PASS — 14 fired, 13 killed**, one survivor pre-declared |
+| 11 | a human has looked at the running window | **UNMET** |
+
+### Criterion 11 is UNMET, in those words
+
+The device run happened and produced every number above. **No human has
+looked at what it drew.** Plan 3h's session made looking at the window this
+project's third instrument, alongside mutation and differential testing, and
+it was the only one of the three that caught any of that session's four
+defects. A passing gate on the other ten criteria is not evidence for this
+one.
+
+**Plan B's criterion 11 is also still owed** and has been since its merge at
+`72b162d`.
+
+Command:
+
+```sh
+cd apps/dev_harness_2d
+flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
+  --dart-define=ENTITIES=10000 --dart-define=DASHED=0.35 \
+  --dart-define=SPIKE_DEFS=20 --dart-define=SPIKE_INSTANCES=150 \
+  --dart-define=SPIKE_FRAMES=30 --dart-define=SPIKE_REPEATS=3
+```
+
+**What to look for, Plan C's five:**
+
+1. **Zoom in two stops.** The dashes must get *longer*, and there must be the
+   same number of them. **This is the opposite of what the plan originally
+   said to look for** — see the premise correction at the top of this note.
+2. **Zoom out until the dashes disappear into solid.** That is the collapse
+   branch, and it must happen at the same zoom on arm C as on arm A. Flip
+   between the arms and watch the transition, not the endpoints.
+3. **A dashed corner must be notched, not filled.** Ruling C3: the reference
+   leaves it open, and a filled corner means the join suppression was lost.
+4. **A dashed circle must be notched at its start angle** — the opposite of
+   the solid circle's requirement. The pair is the check.
+5. **Pan slowly along a long dashed line.** The dashes must move *with* the
+   line. A pattern that slides along its own line under a pan means the phase
+   is anchored to the screen rather than to the geometry.
+
+**Plan B's four, still owed:** corners filled, a circle **not** notched at its
+start angle, a square dot, nothing thickening as you zoom.

@@ -451,14 +451,14 @@ Future<void> runGpuSpike(
       '${viewport.height.toStringAsFixed(0)} '
       'frames=$frames repeats=$repeats');
   gpuReport('GSPIKE note: arm C (residentGpu) draws strokes, joins, points, '
-      'circles and arcs -- ${state.skippedOps} op(s) this walk did not draw '
-      '(fills, text: later plans\' job, see the section comment above this '
-      'rig). Butt caps only -- Plan B emits no cap geometry. No '
-      'antialiasing. Dash spans are baked at the collection camera and '
-      'never re-split under zoom, a consequence of walking the document '
-      'exactly once. Every one of those favours arm C on a timing '
-      'comparison, which is why the picture matters as much as the numbers '
-      'here.');
+      'circles, arcs and shaded dashes -- ${state.skippedOps} op(s) this '
+      'walk did not draw (fills, text: later plans\' job, see the section '
+      'comment above this rig). Butt caps only -- Plan B emits no cap '
+      'geometry. No antialiasing. Dash patterns are evaluated per fragment '
+      'against the live camera since Plan C, collapse rule included, so '
+      'nothing about them is baked. Every remaining gap favours arm C on a '
+      'timing comparison, which is why the picture matters as much as the '
+      'numbers here.');
 
   final reports = <GpuPhaseReport>[];
 
