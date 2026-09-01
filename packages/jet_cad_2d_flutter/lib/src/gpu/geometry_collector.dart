@@ -80,7 +80,7 @@ class GeometryCollector implements DrawSink {
   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
   int get instanceCount => _instances;
 
-  /// Ops this plan does not draw yet — `text` and `fillCircle`, since Plan D.
+  /// Ops this plan does not draw yet — `text` only, since Plan D.
   ///
   /// Counted rather than ignored so a corpus that needs Plan E is visible as
   /// a number instead of as a missing picture.
@@ -668,9 +668,41 @@ class GeometryCollector implements DrawSink {
     }
   }
 
+  /// A triangle fan around the circle's centre, at the same step count
+  /// [_flatten] would give the circle's own outline.
+  ///
+  /// **The shared `_flattenSteps` call is the point** (Ruling D5): a filled
+  /// circle's silhouette is tessellated by the same expression as its own
+  /// boundary stroke, so the two never disagree at any zoom. The rim starts
+  /// at angle 0, i.e. `(cx + r, cy)`, exactly as
+  /// `VerticesDrawSink.fillCircle` does.
   @override
-  void fillCircle(double cx, double cy, double r, ResolvedStyle style) =>
-      _skipped++;
+  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {
+    if (r <= 0) return;
+    final t = _residual;
+    final deviceRadius = r * t.scaleMagnitude;
+    if (deviceRadius <= 0) return;
+    const theta = 2 * math.pi;
+    final steps = _flattenSteps(deviceRadius, theta);
+    // `style.argb` directly, never `_coveredArgb` -- Ruling D3.
+    final argb = style.argb;
+    final ccx = t.a * cx + t.c * cy + t.e;
+    final ccy = t.b * cx + t.d * cy + t.f;
+    var px = cx + r, py = cy;
+    var dx = t.a * px + t.c * py + t.e, dy = t.b * px + t.d * py + t.f;
+    _reserve(_instances + steps);
+    for (var i = 1; i <= steps; i++) {
+      final angle = theta * i / steps;
+      px = cx + r * math.cos(angle);
+      py = cy + r * math.sin(angle);
+      final nx = t.a * px + t.c * py + t.e, ny = t.b * px + t.d * py + t.f;
+      writeFill(_buffer, _instances,
+          x0: ccx, y0: ccy, x1: dx, y1: dy, x2: nx, y2: ny, argb: argb);
+      _instances++;
+      dx = nx;
+      dy = ny;
+    }
+  }
 
   @override
   void text(String text, Handle style, ResolvedStyle resolved) => _skipped++;
