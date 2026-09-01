@@ -22,6 +22,14 @@
 /// `dashScale` `cad_stroke.vert` reads off `frame_info.dash_scale`. Read the
 /// dash block in `expandInstances` beside the shader's own tail, in the same
 /// order: the sentinel, the period test, the collapse override.
+///
+/// **Plan D's Task 5 added the fill branch, transcribed the same way.** A
+/// fill instance (`kKindFill`) reads no `halfWidth` and expands nothing: its
+/// three corners are projected and selected by `join_weight`'s V, A and B,
+/// with M folded onto A so the six-vertex corner table's second triangle is
+/// degenerate. The point branch is narrowed to `kind < 2.5` in both files so
+/// the fill branch's bare `else` cannot swallow it -- see the branch's own
+/// comment below for the failure that guards against.
 library;
 
 import 'dart:math' as math;
@@ -254,7 +262,7 @@ ExpandedTriangles expandInstances(
           px = c.wv * vx + c.wa * ax + c.wb * bx + c.wm * mx;
           py = c.wv * vy + c.wa * ay + c.wb * by + c.wm * my;
         }
-      } else {
+      } else if (kind < 2.5) {
         // kKindPoint: a square of the stroke's width centred on p0. Both
         // axes are expanded here, in device pixels, so the dot stays square
         // and stays the same size at every zoom -- which is what the
@@ -263,6 +271,17 @@ ExpandedTriangles expandInstances(
         final cx = toX(x0, y0), cy = toY(x0, y0);
         px = cx + (c.x * 2.0 - 1.0) * halfWidth;
         py = cy + c.y * halfWidth;
+      } else {
+        // kKindFill: one triangle of a pre-triangulated fill. Nothing is
+        // expanded -- a fill has no width -- so `halfWidth` is not read here
+        // at all. `join_weight` selects the corner: V -> p0, A -> p1,
+        // B -> p2, and M folded onto p1, which makes the second triangle
+        // (A, M, B) = (p1, p1, p2) degenerate.
+        final a0x = toX(x0, y0), a0y = toY(x0, y0);
+        final a1x = toX(x1, y1), a1y = toY(x1, y1);
+        final a2x = toX(x2, y2), a2y = toY(x2, y2);
+        px = c.wv * a0x + (c.wa + c.wm) * a1x + c.wb * a2x;
+        py = c.wv * a0y + (c.wa + c.wm) * a1y + c.wb * a2y;
       }
 
       final vi = (i * cornerVertexCount + v);

@@ -63,6 +63,23 @@ class ResidentGeometry {
   /// flips the outer side with the sign of the cross product — which is why
   /// `GpuDrawBackend.render` pins `CullMode.none`.
   ///
+  /// **A fill (Plan D's Ruling D1) reads this same table, with its own role
+  /// mapping.** A fill has only three points, not a join's four, so `M` is
+  /// folded onto `A` rather than computed:
+  ///
+  /// | role | join reads      | fill reads |
+  /// |------|------------------|------------|
+  /// | V    | the corner       | `p0`       |
+  /// | A    | the incoming leg | `p1`       |
+  /// | B    | the outgoing leg | `p2`       |
+  /// | M    | the miter tip    | `p1` (== A)|
+  ///
+  /// Triangle 0 is therefore `(p0, p1, p2)` — the fill's real triangle — and
+  /// triangle 1 is `(p1, p1, p2)` — zero area, so it rasterises nothing. A
+  /// reader who has only seen the join-branch explanation above would not
+  /// know this table is shared with a fourth kind; this paragraph is that
+  /// pointer.
+  ///
   /// `@visibleForTesting`: no test can reach this data through `create`
   /// itself (it runs only with a real GPU context), so it is hoisted here to
   /// be asserted directly by a plain `flutter test`.
