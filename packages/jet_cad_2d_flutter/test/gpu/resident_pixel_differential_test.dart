@@ -256,4 +256,37 @@ void main() {
             'closing-length chord the open run already draws; '
             'closed=${closedAgreement.residentInk} open=$openInk');
   });
+
+  test('the two arms agree per channel, not merely on coverage', () {
+    final r = measureResidentColor(_corpus,
+        size: _size, devicePixelRatio: _dpr, pixelsPerPaperMm: _ppmm);
+    // Spec criterion 1: per-channel difference <= 2 on >= 99.5% of pixels,
+    // <= 8 on the rest.
+    expect(r.withinTwoFraction, greaterThanOrEqualTo(0.995),
+        reason: r.toString());
+    expect(r.overEight, 0, reason: r.toString());
+    // Anti-vacuity: an instrument that measured an empty picture would pass
+    // both lines above.
+    expect(r.referenceInk, greaterThan(5000), reason: r.toString());
+  });
+
+  test('the colour measurement can actually fail', () {
+    // The control arm Plan 3i's Ruling 14 requires: an instrument whose
+    // failing case is never exercised reads 1.00 and proves nothing. Here
+    // the resident arm is fed a deliberately recoloured buffer -- every
+    // written colour has 0x00202020 added to it (R, G and B each up by 32),
+    // chosen against this corpus's own `_thick`/`_hairline` colour
+    // (0xFF102030, R=0x30 G=0x20 B=0x10) so none of the three channels
+    // carries into its neighbour: 0x30+0x20=0x50, 0x20+0x20=0x40,
+    // 0x10+0x20=0x30, each comfortably inside a byte and each a distance of
+    // exactly 32 from the reference, 16x past the `<= 2` threshold and 4x
+    // past the `<= 8` one -- so this is not a threshold nudged to make the
+    // assertion pass, it is the same tint the brief's own sample names.
+    final r = measureResidentColor(_corpus,
+        size: _size,
+        devicePixelRatio: _dpr,
+        pixelsPerPaperMm: _ppmm,
+        debugTintResident: 0x00202020);
+    expect(r.withinTwoFraction, lessThan(0.995), reason: r.toString());
+  });
 }
