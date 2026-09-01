@@ -629,23 +629,57 @@ final int kSpikeInstances = _intDefine(
     'SPIKE_INSTANCES', const String.fromEnvironment('SPIKE_INSTANCES'), 200,
     minimum: 0);
 
-/// The document the widget spike measures. Deliberately not [harnessDocument]:
-/// see [kSpikeDefs].
-DraftDocument spikeDocument() => generateDocument(
-      kEntities,
-      definitionCount: kSpikeDefs,
-      instanceCount: kSpikeInstances,
-      nestingDepth: 1,
-      mirroredFraction: 0.1,
-      nonUniformFraction: 0.2,
-      groupCount: 10,
-      layerCount: 8,
-      byBlockFraction: 0.3,
-      dashedFraction: kDashedFraction,
-      labelFraction: 0,
-      attributedInstanceFraction: 0,
-      measurer: harnessMeasurer,
-    );
+/// Whether the GPU spike corpus carries filled regions, [_addFillRegions]'s
+/// job -- Plan D's Task 9. Same shape as [kFillsEnabled] and the same reason:
+/// a `String.fromEnvironment`, not `bool.fromEnvironment` -- an unrecognised
+/// value throws rather than silently reading as off, the footgun this file's
+/// other defines are all worded against.
+///
+/// **Inert at its default of `false`**: [spikeDocument] calls
+/// `generateDocument` exactly as it did before this knob existed and
+/// [_addFillRegions] never runs, so `ENTITIES=10000 SPIKE_DEFS=20
+/// SPIKE_INSTANCES=150` reproduces every number a run took before this
+/// define existed, unchanged. Pass `SPIKE_FILLS=true` to add rooms in
+/// [kFillFraction]'s proportion, the same fraction [kFillsEnabled] uses for
+/// the R2 corpus.
+final bool kSpikeFills = switch (
+    const String.fromEnvironment('SPIKE_FILLS', defaultValue: 'false')) {
+  'false' => false,
+  'true' => true,
+  final other =>
+    throw StateError('SPIKE_FILLS must be true or false; got "$other"'),
+};
+
+/// The document the widget and GPU spikes measure. Deliberately not
+/// [harnessDocument]: see [kSpikeDefs].
+///
+/// [entityCount] and [fillsEnabled] default to the top-level defines
+/// ([kEntities], [kSpikeFills]) so an ordinary `flutter run`/`flutter drive`
+/// invocation is driven by `--dart-define` exactly as before; a test can
+/// override either directly, which is what
+/// `test/fill_buffer_budget_test.dart` does to measure a fixed 10,000-entity,
+/// fills-on corpus without depending on how the binary happened to be
+/// launched.
+DraftDocument spikeDocument({int? entityCount, bool? fillsEnabled}) {
+  final count = entityCount ?? kEntities;
+  final doc = generateDocument(
+    count,
+    definitionCount: kSpikeDefs,
+    instanceCount: kSpikeInstances,
+    nestingDepth: 1,
+    mirroredFraction: 0.1,
+    nonUniformFraction: 0.2,
+    groupCount: 10,
+    layerCount: 8,
+    byBlockFraction: 0.3,
+    dashedFraction: kDashedFraction,
+    labelFraction: 0,
+    attributedInstanceFraction: 0,
+    measurer: harnessMeasurer,
+  );
+  if (fillsEnabled ?? kSpikeFills) _addFillRegions(doc, count);
+  return doc;
+}
 
 /// Frames measured per phase, per arm, per repeat.
 final int kSpikeFrames = _intDefine(

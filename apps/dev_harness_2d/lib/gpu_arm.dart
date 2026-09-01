@@ -31,13 +31,25 @@ import 'measurement_rig.dart';
 // **What arm C (the resident backend) still does not draw, and why that is
 // not a bug in this harness.** `GeometryCollector` implements `polyline`
 // (with joins), `point`, `circle` and `arc` (flattened, seam join included
-// on a closed sweep) -- Plan B's job, done -- and since Plan C it also
-// shades dash patterns per fragment, dashed arcs included. `fillPolygon`,
-// `fillCircle` and `text` are the only ops that still fall through to its
-// `skippedOps` counter: fills are Plan D's, text is Plan E's. A corpus with
-// fills or text will show visibly less on arm C than on arm A or B --
+// on a closed sweep) -- Plan B's job, done -- since Plan C it also shades
+// dash patterns per fragment, dashed arcs included, and since Plan D it draws
+// `fillPolygon` and `fillCircle` too: one pre-triangulated instance per
+// triangle, or per fan slice at the outline's own step count, in the fill
+// kind (`kKindFill`) the shader's third branch reads. `text` is the only op
+// that still falls through to its `skippedOps` counter -- Plan E's job. A
+// corpus with text will show visibly less on arm C than on arm A or B --
 // `skippedOps` in the `GSPIKE collect+upload` line says how much, so a thin
 // picture reads as a number instead of as a silent gap.
+//
+// **Whether the harness corpus itself carries fills is a separate question
+// from whether the collector can draw them, and `SPIKE_FILLS` is that
+// switch.** `spikeDocument()` in `main.dart` calls `_addFillRegions` only
+// when `SPIKE_FILLS=true`; at its default of `false` the corpus is exactly
+// what it was before Plan D, so every number taken before this knob existed
+// stays reproducible. On, it adds closed-polyline rooms in the same
+// `kFillFraction` proportion `FILLS=true` already uses for the R2 corpus,
+// roughly 40% of them filled and the rest boundary-only, so the picture shows
+// both the fillable-and-filled and the fillable-but-not path.
 //
 // **The buffer is collected once, at the arm's starting camera, and never
 // re-walked.** Since Plan C that costs less than it used to, and the reason
@@ -451,14 +463,16 @@ Future<void> runGpuSpike(
       '${viewport.height.toStringAsFixed(0)} '
       'frames=$frames repeats=$repeats');
   gpuReport('GSPIKE note: arm C (residentGpu) draws strokes, joins, points, '
-      'circles, arcs and shaded dashes -- ${state.skippedOps} op(s) this '
-      'walk did not draw (fills, text: later plans\' job, see the section '
-      'comment above this rig). Butt caps only -- Plan B emits no cap '
-      'geometry. No antialiasing. Dash patterns are evaluated per fragment '
-      'against the live camera since Plan C, collapse rule included, so '
-      'nothing about them is baked. Every remaining gap favours arm C on a '
-      'timing comparison, which is why the picture matters as much as the '
-      'numbers here.');
+      'circles, arcs, shaded dashes and (since Plan D) fills -- '
+      '${state.skippedOps} op(s) this walk did not draw (text: Plan E\'s '
+      'job, see the section comment above this rig). Fills are only in this '
+      'corpus when SPIKE_FILLS=true; at its default the corpus carries none '
+      'and skippedOps is 0 on this account regardless. Butt caps only -- '
+      'Plan B emits no cap geometry. No antialiasing. Dash patterns are '
+      'evaluated per fragment against the live camera since Plan C, '
+      'collapse rule included, so nothing about them is baked. Every '
+      'remaining gap favours arm C on a timing comparison, which is why the '
+      'picture matters as much as the numbers here.');
 
   final reports = <GpuPhaseReport>[];
 
