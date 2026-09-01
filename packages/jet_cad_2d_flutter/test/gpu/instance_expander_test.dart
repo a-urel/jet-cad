@@ -333,15 +333,96 @@ void main() {
     expect(out.positions[5], closeTo(60 - 16 / sqrt17, 1e-3));
   });
 
-  test('cad_stroke.vert still carries the three renumber-prone constants', () {
+  test('a fill expands to its three corners and one degenerate triangle', () {
+    final data = Float32List(kFloatsPerInstance);
+    writeFill(data, 0,
+        x0: 10, y0: 10, x1: 40, y1: 12, x2: 25, y2: 38, argb: 0xFF2E7D32);
+    final e = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
+
+    // Triangle 0 is (p0, p1, p2), in that vertex order.
+    expect(e.positions[0], closeTo(10, 1e-6));
+    expect(e.positions[1], closeTo(10, 1e-6));
+    expect(e.positions[2], closeTo(40, 1e-6));
+    expect(e.positions[3], closeTo(12, 1e-6));
+    expect(e.positions[4], closeTo(25, 1e-6));
+    expect(e.positions[5], closeTo(38, 1e-6));
+
+    // Triangle 1 is (p1, p1, p2): zero area, so it rasterises nothing.
+    final area = (e.positions[8] - e.positions[6]) *
+            (e.positions[11] - e.positions[7]) -
+        (e.positions[9] - e.positions[7]) * (e.positions[10] - e.positions[6]);
+    expect(area, 0.0,
+        reason: 'the second triangle of a fill instance must be degenerate');
+
+    // The area check above cannot tell "M folded onto p1" from "M folded
+    // onto p2" apart: the corner table's M-weighted vertex always
+    // duplicates whichever point it is folded onto, so triangle 1 comes out
+    // zero-area either way -- (p1, p1, p2) or (p1, p2, p2) both have zero
+    // area. Pin the M vertex (positions[8..9], the row wired to `wm`) to
+    // its documented value, `p1`, directly -- this is the assertion that
+    // actually distinguishes the two, and it is what M-D4 (Task 8's mutant
+    // table) needs to die.
+    expect(e.positions[8], closeTo(40, 1e-6),
+        reason: 'M must fold onto p1 (A), not p2 (B)');
+    expect(e.positions[9], closeTo(12, 1e-6));
+  });
+
+  test('a fill is not expanded by a half-width, at any camera', () {
+    // The defect this catches: a fill routed through the stroke branch, or a
+    // fill branch that read `half_width`. Either one grows the triangle by a
+    // device-pixel margin, so its corners move away from the projected
+    // points -- and the amount would change with the camera.
+    final data = Float32List(kFloatsPerInstance);
+    writeFill(data, 0,
+        x0: 10, y0: 10, x1: 40, y1: 12, x2: 25, y2: 38, argb: 0xFF2E7D32);
+    // Deliberately poison the half-width slot: a correct fill branch ignores
+    // it. `writeFill` writes zero there, so without this the assertion could
+    // not tell "ignored" from "zero".
+    data[InstanceFieldOffset.halfWidth] = 9.0;
+
+    final t = Transform2.translation(120, -35)
+        .multiply(Transform2.rotation(0.4))
+        .multiply(Transform2.scale(1.7, 0.6));
+    final e = expandInstances(data, 1, t, dashScale: 1.0);
+    expect(e.positions[0], closeTo(t.a * 10 + t.c * 10 + t.e, 1e-4));
+    expect(e.positions[1], closeTo(t.b * 10 + t.d * 10 + t.f, 1e-4));
+  });
+
+  test('a fill is solid: the dash test never runs on it', () {
+    final data = Float32List(kFloatsPerInstance);
+    writeFill(data, 0,
+        x0: 10, y0: 10, x1: 40, y1: 12, x2: 25, y2: 38, argb: 0xFF2E7D32);
+    final e = expandInstances(data, 1, Transform2.identity(), dashScale: 0.01);
+    for (var v = 0; v < ResidentGeometry.cornerVertexCount; v++) {
+      expect(e.dashVaryings[v * 3 + 1], lessThan(0.0),
+          reason: 'a negative fracStart is the solid sentinel; a fill must '
+              'carry it at every camera, collapse scale included');
+    }
+  });
+
+  test('a point is still a point after the fill branch lands', () {
+    // The regression this guards: adding `else { fill }` without narrowing
+    // the point branch to `else if (kind < 2.5)` draws every fill as a
+    // one-pixel square -- or, with the branches swapped, every point as a
+    // triangle. Both directions are silent.
+    final data = Float32List(kFloatsPerInstance);
+    writePoint(data, 0, x: 20, y: 30, halfWidth: 4, argb: 0xFF102030);
+    final e = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
+    final xs = <double>[for (var v = 0; v < 6; v++) e.positions[v * 2]];
+    final ys = <double>[for (var v = 0; v < 6; v++) e.positions[v * 2 + 1]];
+    expect(xs.reduce(math.max) - xs.reduce(math.min), closeTo(8, 1e-6));
+    expect(ys.reduce(math.max) - ys.reduce(math.min), closeTo(8, 1e-6));
+  });
+
+  test('cad_stroke.vert still carries the four renumber-prone constants', () {
     // Partial net, not a substitute for Ruling B6's human diff: this pins
-    // the three literals a shader edit is most likely to silently renumber
+    // the four literals a shader edit is most likely to silently renumber
     // (`instance_record.dart`'s doc explains why the values and order of
-    // `kKindStroke`/`kKindJoin`/`kKindPoint` are load-bearing, and this
-    // file's own `kExpanderMinMiterCosine` is the fourth, Dart-side, copy
-    // of the miter-limit literal). It reads the GLSL as text and checks
+    // `kKindStroke`/`kKindJoin`/`kKindPoint`/`kKindFill` are load-bearing,
+    // and this file's own `kExpanderMinMiterCosine` is the fifth, Dart-side,
+    // copy of the miter-limit literal). It reads the GLSL as text and checks
     // for the constants, not the arithmetic around them -- a change to the
-    // *formula* that keeps these three literals untouched (for example,
+    // *formula* that keeps these four literals untouched (for example,
     // Task 8's own M-B5/M-B6 mutations) is invisible to this test and
     // remains a human diff against `instance_expander.dart`.
     final source = File('shaders/cad_stroke.vert').readAsStringSync();
@@ -360,6 +441,14 @@ void main() {
       RegExp(r'kind\s*<\s*1\.5').hasMatch(source),
       isTrue,
       reason: 'the join/point dispatch threshold',
+    );
+    expect(
+      RegExp(r'kind\s*<\s*2\.5').hasMatch(source),
+      isTrue,
+      reason: 'the point/fill dispatch threshold -- without it a reverted '
+          "`else` draws every fill as a point, or the reverse, and every "
+          'pixel and expander test in this package runs through the Dart '
+          'transcription, so a GLSL-only regression here turns nothing red',
     );
   });
 }

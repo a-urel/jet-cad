@@ -12,24 +12,41 @@
 /// changes. A GPU comparison is Task 11's device run; this is what
 /// `flutter test` can gate before that.
 ///
-/// **This instrument is coverage-only, and that is a real limit, not a
-/// caveat.** `TriangleRasterizer.inked` is a boolean -- see its own doc,
-/// "there is no partial coverage to threshold" -- so [differing] and
-/// [overEight] below are always the same number and neither one measures
-/// *colour* agreement. The per-channel half of the design document's
-/// criterion 1 is not something this file can gate; it is gated separately,
-/// by the record-level `argb` assertions in `geometry_collector_test.dart`
-/// and `collector_differential_test.dart`, which compare colour channels a
-/// coverage rasterizer cannot see at all. Do not read a passing
-/// [ResidentAgreement] as a full criterion-1 measurement.
+/// **[ResidentAgreement] is coverage-only, and that is a real limit, not a
+/// caveat -- but it is no longer this whole file's limit.** `TriangleRasterizer
+/// .inked` is a boolean -- see its own doc, "there is no partial coverage to
+/// threshold" -- so [ResidentAgreement.differing] and
+/// [ResidentAgreement.overEight] are always the same number and neither one
+/// measures *colour* agreement. That was once recorded here as something this
+/// file could not gate at all; **Plan D's Task 6 makes it something this file
+/// gates directly**, with [ResidentColorAgreement] and [measureResidentColor]
+/// below, which read `TriangleRasterizer.pixels` instead of `.inked` and
+/// compare per channel. [ResidentAgreement] itself is unchanged and stays a
+/// coverage instrument -- do not read a passing one as a full criterion-1
+/// measurement -- but a passing [ResidentColorAgreement] now is one, for the
+/// per-channel clause. The record-level `argb` assertions in
+/// `geometry_collector_test.dart` and `collector_differential_test.dart`
+/// still exist and still matter; they check the instance buffer's colour
+/// before rasterisation, where this file's colour check runs after it.
 ///
-/// **Draw order is also unmeasured, and that is a repo non-negotiable, not
-/// a minor gap.** `TriangleRasterizer._fill` is last-write-wins over
-/// coverage with no depth test, so any permutation of emission order that
-/// preserves the union of triangle footprints paints the same pixels --
-/// draw order can only be pinned by a record-order assertion
-/// (`collector_differential_test.dart`'s walk-order check), never by this
-/// instrument.
+/// **Draw order was likewise unmeasured, and for the same reason: nothing
+/// upstream of the rasterizer's last-write-wins fill could disagree in
+/// *colour* over ground both arms had already inked.** `TriangleRasterizer
+/// ._fill` is last-write-wins over coverage with no depth test, so any
+/// permutation of emission order that preserves the union of triangle
+/// footprints paints the same *coverage* -- [ResidentAgreement] cannot see it,
+/// and before a fill kind existed neither could anything else in this file,
+/// because two overlapping *strokes* of the same corpus still ink the same
+/// pixels regardless of which one is inked last. A fill changes that: a large
+/// opaque shape drawn over a stroke repaints that stroke's pixels to the
+/// fill's colour without moving the union of ink at all, so
+/// [measureResidentColor] -- which reads colour, not coverage -- is the first
+/// instrument in this file able to see order, and only for a corpus that puts
+/// a fill over something else. `test/gpu/fill_order_test.dart` is the gate
+/// that draws such a corpus; a record-order assertion
+/// (`collector_differential_test.dart`'s walk-order check) still exists
+/// alongside it and remains the only one that pins order **directly**, on
+/// the buffer, rather than as a pixel-colour side effect of it.
 ///
 /// **Geometry added INSIDE the existing footprint is invisible, and this is
 /// proved rather than suspected.** [measureResidentAgreement] counts the
@@ -66,7 +83,10 @@ import 'dart:ui';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart'
+    show kFloatsPerInstance;
 
+import 'fixtures.dart' show fillFixture, kViewport;
 import 'instance_expander.dart';
 import 'triangle_rasterizer.dart';
 
@@ -308,4 +328,315 @@ ResidentAgreement _agreementOf(
       // Coverage-only: see the class doc. Equal to `differing` by
       // construction, not a second, looser threshold.
       overEight: differing);
+}
+
+/// A per-channel comparison of the two arms' rasterised colour.
+///
+/// **This is the half of spec criterion 1 that coverage cannot reach.**
+/// `TriangleRasterizer._fill` is last-write-wins with no blending, so a
+/// pixel's final colour is the colour of the *last* triangle to cover it --
+/// which makes this the only measurement in the suite that can see emission
+/// order at all. Both arms share the rasterizer, so the absence of blending
+/// cancels exactly the way MSAA does in the device comparison.
+class ResidentColorAgreement {
+  ResidentColorAgreement(
+      this.union, this.withinTwo, this.overEight, this.referenceInk);
+
+  /// Pixels either arm inked. The comparison runs over these: a pixel
+  /// neither arm touched is background on both sides and says nothing.
+  final int union;
+
+  /// Pixels whose every channel differs by at most 2.
+  final int withinTwo;
+
+  /// Pixels with any channel differing by more than 8 -- spec criterion 1
+  /// allows none.
+  final int overEight;
+
+  /// Pixels the reference arm inked, for the same anti-vacuity purpose
+  /// [ResidentAgreement.referenceInk] serves: a comparison of two blank
+  /// frames agrees perfectly on every count above and measures nothing.
+  final int referenceInk;
+
+  double get withinTwoFraction => union == 0 ? 1.0 : withinTwo / union;
+
+  @override
+  String toString() => 'ResidentColorAgreement(union: $union, '
+      'withinTwo: $withinTwo '
+      '(${(withinTwoFraction * 100).toStringAsFixed(3)}%), '
+      'overEight: $overEight, referenceInk: $referenceInk)';
+}
+
+/// Draws [corpus] through both arms at [size] and compares their rasterised
+/// colour, per channel, over the union of pixels either one inked.
+///
+/// Runs the same two arms [measureResidentAgreement] does -- see that
+/// function's own doc for why each arm is driven at an identity residual
+/// with the device scale applied separately, and why that split is not
+/// stylistic. The difference is what happens after: where
+/// [_agreementOf] asks `TriangleRasterizer.inked` a yes/no question,
+/// this walks both `pixels` buffers and takes a per-channel distance,
+/// reading each `Uint32` as the packed little-endian `0xAABBGGRR`
+/// `TriangleRasterizer.pixels`' own doc comment describes -- the shift
+/// amounts below unpack the same four bytes that doc names, in no
+/// particular channel order, because the worst single-channel distance is
+/// symmetric in which byte is which.
+///
+/// [permute] reorders the *instance* buffer before expansion, so a caller
+/// can submit the same instances out of walk order -- `null` for every
+/// ordinary measurement; Task 7 is its only caller, to prove this
+/// instrument can see order at all once a fill is in the corpus.
+///
+/// [debugTintResident] adds its argument to the resident arm's every
+/// written colour before rasterisation. **Test-only, and it must never
+/// appear in `lib/`** -- exactly as `TriangleRasterizer
+/// .debugDisableDashTest` is documented on that field. It exists for one
+/// reason: an instrument whose failing case is never exercised reads 1.00
+/// and proves nothing (Plan 3i's Ruling 14, the same ruling
+/// `debugDisableDashTest` answers). `0` is a no-op -- every ordinary
+/// measurement passes it implicitly by omission.
+///
+/// **A clean per-channel offset only while no channel carries across a
+/// byte boundary.** The tint is added to the packed `0xAARRGGBB` `Uint32`
+/// as a whole, not lane by lane, so a value picked without checking each
+/// byte against the corpus's own colour can carry from one channel into
+/// its neighbour -- the result stops being "every channel up by N" and
+/// becomes an arbitrary recolouring the caller did not intend. Choose the
+/// tint against the actual colour under test, not in the abstract.
+ResidentColorAgreement measureResidentColor(
+  void Function(DrawSink sink) corpus, {
+  required Size size,
+  required double devicePixelRatio,
+  required double pixelsPerPaperMm,
+  List<int> Function(List<int> order)? permute,
+  int debugTintResident = 0,
+}) {
+  final w = (size.width * devicePixelRatio).round();
+  final h = (size.height * devicePixelRatio).round();
+
+  // The reference arm: identical to `measureResidentAgreement`'s.
+  final referenceRaster = TriangleRasterizer(w, h);
+  final recorder = PictureRecorder();
+  final sink = VerticesDrawSink(
+    canvas: Canvas(recorder),
+    pixelsPerPaperMm: pixelsPerPaperMm,
+    devicePixelRatio: devicePixelRatio,
+  )..observer = (positions, colors) {
+      final scaled = Float32List(positions.length);
+      for (var i = 0; i < positions.length; i++) {
+        scaled[i] = positions[i] * devicePixelRatio;
+      }
+      referenceRaster.observe(scaled, colors);
+    };
+  sink.beginResidual(Transform2.identity());
+  corpus(sink);
+  sink.endResidual();
+  sink.flush();
+  recorder.endRecording().dispose();
+
+  // The resident arm: the collector's buffer, optionally reordered by
+  // [permute] before expansion.
+  final collector = GeometryCollector(
+      pixelsPerPaperMm: pixelsPerPaperMm, devicePixelRatio: devicePixelRatio);
+  collector.beginResidual(Transform2.identity());
+  corpus(collector);
+  collector.endResidual();
+
+  var data = collector.data;
+  final instanceCount = collector.instanceCount;
+  if (permute != null) {
+    final order = permute(List<int>.generate(instanceCount, (i) => i));
+    data = reorderedInstances(data, instanceCount, order);
+  }
+
+  final expanded = expandInstances(
+      data, instanceCount, Transform2.scale(devicePixelRatio, devicePixelRatio),
+      dashScale: 1.0);
+
+  Int32List colors = expanded.colors;
+  if (debugTintResident != 0) {
+    colors = Int32List.fromList(expanded.colors);
+    for (var i = 0; i < colors.length; i++) {
+      colors[i] = (colors[i] + debugTintResident).toSigned(32);
+    }
+  }
+
+  final residentRaster = TriangleRasterizer(w, h)
+    ..observe(expanded.positions, colors, dash: expanded.dashVaryings);
+
+  return _colorAgreementOf(referenceRaster, residentRaster);
+}
+
+/// The per-channel colour comparison [measureResidentColor] runs.
+ResidentColorAgreement _colorAgreementOf(
+    TriangleRasterizer reference, TriangleRasterizer resident) {
+  var union = 0, withinTwo = 0, overEight = 0, referenceInk = 0;
+  for (var i = 0; i < reference.pixels.length; i++) {
+    final a = reference.pixels[i], b = resident.pixels[i];
+    if (a != 0) referenceInk++;
+    if (a == 0 && b == 0) continue;
+    union++;
+    var worst = 0;
+    for (var shift = 0; shift < 32; shift += 8) {
+      final d = (((a >> shift) & 0xFF) - ((b >> shift) & 0xFF)).abs();
+      if (d > worst) worst = d;
+    }
+    if (worst <= 2) withinTwo++;
+    if (worst > 8) overEight++;
+  }
+  return ResidentColorAgreement(union, withinTwo, overEight, referenceInk);
+}
+
+/// Moves [order].length whole instance records from [data] into a fresh
+/// buffer: the record at result index `i` is [data]'s record `order[i]`,
+/// copied [kFloatsPerInstance] floats at a time -- position, colour, dash,
+/// everything a record carries, moved together at the record's own stride.
+///
+/// **Shared by [measureResidentColor]'s `permute` and [renderFillFixture]'s,
+/// so there is exactly one place this arithmetic can drift.** Task 6 shipped
+/// `permute` with no caller exercising it; before Task 7 trusted a number
+/// this produced, a throwaway corpus of three full-width, fully-overlapping
+/// strokes in red/green/blue was permuted with a plain `.reversed` and
+/// measured through the real [measureResidentColor]: unpermuted the two arms
+/// agreed exactly (`withinTwo` 100%, `overEight` 0, both ending on blue,
+/// the closure's own last draw); reversed, the resident arm ended on red
+/// instead (`withinTwo` 0%, `overEight` = the whole 8000-pixel union) --
+/// which is only possible if every one of the sixteen floats per record,
+/// not merely `kind` or `argb`, moved to its new index together. See
+/// `task-7-report.md` for the captured run. `fill_order_test.dart`'s own
+/// "sortByKind is a multiset-equal reordering" test pins the same property
+/// permanently, at 16-float granularity, rather than resting on that
+/// throwaway run alone.
+///
+/// [order] must have exactly [instanceCount] elements -- a `permute` that
+/// returns a short or over-long list would otherwise silently duplicate or
+/// truncate records (a short list undershoots `reordered`'s length and
+/// leaves a tail of zeros; a long one is simply never read past
+/// `instanceCount`) or throw a bare `RangeError` with no indication of
+/// which caller's `permute` produced the bad list. The assert below fails
+/// at the actual cause instead.
+Float32List reorderedInstances(
+    Float32List data, int instanceCount, List<int> order) {
+  assert(
+      order.length == instanceCount,
+      'permute must return a permutation of all $instanceCount instance '
+      'indices; got ${order.length}');
+  final reordered = Float32List(instanceCount * kFloatsPerInstance);
+  for (var i = 0; i < instanceCount; i++) {
+    final from = order[i] * kFloatsPerInstance;
+    final to = i * kFloatsPerInstance;
+    reordered.setRange(to, to + kFloatsPerInstance, data, from);
+  }
+  return reordered;
+}
+
+/// Device pixel ratio [paintFillFixture], [collectFillFixture] and
+/// [renderFillFixture] paint and rasterise at. Not a parameter on any of the
+/// three: none of `fill_order_test.dart`'s three tests needs a second value,
+/// and a shared constant is what keeps `collectFillFixture`'s buffer and
+/// `renderFillFixture`'s raster surface honestly describing the same camera
+/// -- see [paintFillFixture]'s own doc for why the *viewport* the two share
+/// is not a free parameter either.
+const double kFillFixtureDevicePixelRatio = 2.0;
+
+/// Paints [fillFixture] through the real [DraftPainter], camera fit to
+/// [kViewport] -- the same viewport `fillFixture`'s own guard tests
+/// (`fixtures_test.dart`'s `strokeInkInsideFill`) fit to, so the 337-logical
+/// -pixel stroke-over-fill overlap that guard already measured (at dpr 1,
+/// the same dpr `strokeInkInsideFill` rasterises at) is the overlap this
+/// file's helpers paint too, not a second, unmeasured camera.
+///
+/// **Goes through [DraftPainter], not hand-rolled `sink.fillPolygon` /
+/// `sink.circle` calls.** A fill entity only resolves to its boundary's
+/// triangulation by way of `DraftPainter._drawFill` reading
+/// `doc.fills.trianglesFor(boundary)` -- `AddRegionCommand.apply` is what
+/// materialises that triangulation in the first place. A corpus built by
+/// calling sink methods directly, the way `resident_pixel_differential_test
+/// .dart`'s own `_corpus` does for strokes, would never exercise `_drawFill`
+/// at all and this whole plan's fill path would go untested by the pixel
+/// gate. This is the shape [measureResidentColor]'s `corpus` parameter
+/// takes (`void Function(DrawSink sink)`), so it can be handed to that
+/// function directly, as `fill_order_test.dart`'s third test does.
+///
+/// [fillFixture] is rebuilt fresh on every call -- it is a plain function,
+/// not a cached document -- so two calls (the reference sink's pass and the
+/// resident collector's, inside [measureResidentColor]) each paint their own
+/// copy rather than replaying a mutated one.
+void paintFillFixture(DrawSink sink) {
+  final doc = fillFixture();
+  final camera = ViewportTransform.fit(doc.extents, kViewport);
+  final index = SpatialIndex(doc);
+  final resolver = DocumentStyleResolver(doc);
+  DraftPainter(document: doc, index: index, resolver: resolver)
+      .paint(sink, camera, kViewport);
+  index.dispose();
+}
+
+/// [paintFillFixture], collected into a fresh [GeometryCollector] instead of
+/// painted straight to an arbitrary sink, so a caller can read `.data` and
+/// `.instanceCount` directly. `fill_order_test.dart`'s first test -- the
+/// corpus's own proof that a stroke is emitted after a fill, without which
+/// the rest of that file would pass vacuously -- reads the walk order this
+/// returns.
+GeometryCollector collectFillFixture() {
+  final collector = GeometryCollector(
+      pixelsPerPaperMm: kLogicalPixelsPerMm,
+      devicePixelRatio: kFillFixtureDevicePixelRatio);
+  paintFillFixture(collector);
+  return collector;
+}
+
+/// Renders [fillFixture] through the resident arm ONLY -- the collector's
+/// buffer, optionally reordered by [permute] exactly as
+/// [measureResidentColor]'s own `permute` reorders it (both go through
+/// [reorderedInstances]), expanded by [expandInstances] and rasterised.
+/// **No reference-sink render happens here.**
+///
+/// This is deliberately narrower than [measureResidentColor]:
+/// `fill_order_test.dart`'s second test asks only whether reordering the
+/// SAME arm's own buffer moves a pixel at all -- a question the resident arm
+/// answers on its own, with nothing to compare against. [measureResidentColor]
+/// is what compares the result to the reference, in that file's third test.
+TriangleRasterizer renderFillFixture(
+    {List<int> Function(List<int> order)? permute}) {
+  final collector = collectFillFixture();
+  var data = collector.data;
+  final instanceCount = collector.instanceCount;
+  if (permute != null) {
+    final order = permute(List<int>.generate(instanceCount, (i) => i));
+    data = reorderedInstances(data, instanceCount, order);
+  }
+  final expanded = expandInstances(
+      data,
+      instanceCount,
+      Transform2.scale(
+          kFillFixtureDevicePixelRatio, kFillFixtureDevicePixelRatio),
+      dashScale: 1.0);
+  final w = (kViewport.width * kFillFixtureDevicePixelRatio).round();
+  final h = (kViewport.height * kFillFixtureDevicePixelRatio).round();
+  return TriangleRasterizer(w, h)
+    ..observe(expanded.positions, expanded.colors, dash: expanded.dashVaryings);
+}
+
+/// Counts device pixels where [a] and [b] disagree, on the packed colour --
+/// not coverage. A plain `!=` on each pixel: a pixel both rasterisations
+/// inked, but with a different last-write-wins colour, counts as differing
+/// here even though a coverage instrument like [ResidentAgreement] would
+/// call the two identical. That is the whole point of this comparison --
+/// `fill_order_test.dart`'s second test asks whether a permutation of the
+/// fill-fixture buffer moves a pixel, and on this corpus (a stroke that
+/// crosses a fill) the strokes' union of covered pixels is exactly the same
+/// either way; only which primitive is on top, and therefore which colour
+/// survives, can move.
+int countDifferingPixels(TriangleRasterizer a, TriangleRasterizer b) {
+  assert(
+      a.pixels.length == b.pixels.length,
+      'countDifferingPixels compares two rasterisations of the same corpus '
+      'at the same surface size; a length mismatch means the caller '
+      'rendered them at two different sizes');
+  var differing = 0;
+  for (var i = 0; i < a.pixels.length; i++) {
+    if (a.pixels[i] != b.pixels[i]) differing++;
+  }
+  return differing;
 }

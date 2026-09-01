@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import '../support/fixtures.dart' show kViewport;
 import '../support/gpu_comparison.dart';
 
 const Size _size = Size(400, 300);
@@ -255,5 +256,67 @@ void main() {
         reason: 'the closed circle has the seam join on top of the same '
             'closing-length chord the open run already draws; '
             'closed=${closedAgreement.residentInk} open=$openInk');
+  });
+
+  test('the two arms agree per channel, not merely on coverage', () {
+    final r = measureResidentColor(_corpus,
+        size: _size, devicePixelRatio: _dpr, pixelsPerPaperMm: _ppmm);
+    // Spec criterion 1: per-channel difference <= 2 on >= 99.5% of pixels,
+    // <= 8 on the rest.
+    expect(r.withinTwoFraction, greaterThanOrEqualTo(0.995),
+        reason: r.toString());
+    expect(r.overEight, 0, reason: r.toString());
+    // Anti-vacuity: an instrument that measured an empty picture would pass
+    // both lines above.
+    expect(r.referenceInk, greaterThan(5000), reason: r.toString());
+  });
+
+  test('the colour measurement can actually fail', () {
+    // The control arm Plan 3i's Ruling 14 requires: an instrument whose
+    // failing case is never exercised reads 1.00 and proves nothing. Here
+    // the resident arm is fed a deliberately recoloured buffer -- every
+    // written colour has 0x00202020 added to it (R, G and B each up by 32),
+    // chosen against this corpus's own `_thick`/`_hairline` colour
+    // (0xFF102030, 0xAARRGGBB, so R=0x10 G=0x20 B=0x30) so none of the three
+    // channels carries into its neighbour: 0x10+0x20=0x30, 0x20+0x20=0x40,
+    // 0x30+0x20=0x50, each comfortably inside a byte and each a distance of
+    // exactly 32 from the reference, 16x past the `<= 2` threshold and 4x
+    // past the `<= 8` one -- so this is not a threshold nudged to make the
+    // assertion pass, it is the same tint the brief's own sample names.
+    final r = measureResidentColor(_corpus,
+        size: _size,
+        devicePixelRatio: _dpr,
+        pixelsPerPaperMm: _ppmm,
+        debugTintResident: 0x00202020);
+    expect(r.withinTwoFraction, lessThan(0.995), reason: r.toString());
+  });
+
+  test('the fill corpus agrees per channel', () {
+    // Plan D's own corpus, not `_corpus` above: `paintFillFixture` goes
+    // through the real `DraftPainter`, at a camera fit to `kViewport`, so
+    // the buffer this measures is exactly the one `fill_order_test.dart`'s
+    // "walk order" case measures too -- the same fixture, the same camera,
+    // the same device pixel ratio, just unpermuted.
+    //
+    // **A fill's colour is gated here as well as in `fill_order_test.dart`,
+    // and the reason belongs on this test, not only on the record-level
+    // one.** Only the resident arm has `_coveredArgb` within reach of a
+    // fill at all -- `GeometryCollector.fillPolygon` and `.fillCircle` both
+    // route `style.argb` straight through, unfaded, but a REGRESSION that
+    // routed either through `_coveredArgb` instead would only show up here
+    // (or in the record-level `argb` assertion `collector_differential_test
+    // .dart` adds for this same fixture): the reference sink's own
+    // `fillPolygon`/`fillCircle` (`vertices_draw_sink.dart:750-755`) never
+    // had a fade formula to begin with, so a faded resident fill would be a
+    // real disagreement this per-channel comparison is built to see, not an
+    // artefact of two independently-correct implementations.
+    final r = measureResidentColor(paintFillFixture,
+        size: kViewport,
+        devicePixelRatio: kFillFixtureDevicePixelRatio,
+        pixelsPerPaperMm: kLogicalPixelsPerMm);
+    expect(r.withinTwoFraction, greaterThanOrEqualTo(0.995),
+        reason: r.toString());
+    expect(r.overEight, 0, reason: r.toString());
+    expect(r.referenceInk, greaterThan(5000), reason: r.toString());
   });
 }

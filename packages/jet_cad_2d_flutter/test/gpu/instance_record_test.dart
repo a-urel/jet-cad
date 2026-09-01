@@ -180,4 +180,60 @@ void main() {
     expect(into[InstanceFieldOffset.dashFracStart], 0.0);
     expect(into[InstanceFieldOffset.dashFracEnd], 0.0);
   });
+
+  test('a fill record carries three corners, no width and no dash', () {
+    // Pre-filled with garbage so a writer that leaves a slot untouched is
+    // caught. A fresh Float32List is all zeros, and most of this record's
+    // expected values are zero, so a zero-initialised buffer would let a
+    // missing write pass -- the degenerate-fixture trap, at the record
+    // level.
+    final data = Float32List(kFloatsPerInstance)
+      ..fillRange(0, kFloatsPerInstance, 17.5);
+    writeFill(data, 0,
+        x0: 3.5,
+        y0: -4.25,
+        x1: 11.0,
+        y1: 2.5,
+        x2: -6.75,
+        y2: 9.5,
+        argb: 0x8033CC66);
+
+    expect(data[InstanceFieldOffset.kind], kKindFill);
+    expect(data[InstanceFieldOffset.halfWidth], 0.0,
+        reason: 'a fill has no width and the shader must not expand it');
+    expect(data[InstanceFieldOffset.x0], 3.5);
+    expect(data[InstanceFieldOffset.y0], -4.25);
+    expect(data[InstanceFieldOffset.x1], 11.0);
+    expect(data[InstanceFieldOffset.y1], 2.5);
+    expect(data[InstanceFieldOffset.x2], -6.75);
+    expect(data[InstanceFieldOffset.y2], 9.5);
+    expect(data[InstanceFieldOffset.r], closeTo(0x33 / 255.0, 1e-6));
+    expect(data[InstanceFieldOffset.g], closeTo(0xCC / 255.0, 1e-6));
+    expect(data[InstanceFieldOffset.b], closeTo(0x66 / 255.0, 1e-6));
+    expect(data[InstanceFieldOffset.a], closeTo(0x80 / 255.0, 1e-6));
+    expect(data[InstanceFieldOffset.dashPeriod], 0.0);
+    expect(data[InstanceFieldOffset.dashPhase], 0.0);
+    expect(data[InstanceFieldOffset.dashFracStart], 0.0);
+    expect(data[InstanceFieldOffset.dashFracEnd], 0.0);
+  });
+
+  test('the four kind tags are distinct and ordered for a < dispatch', () {
+    // The shader dispatches `kind < 0.5`, `< 1.5`, `< 2.5`, else. These
+    // values are not merely distinct: renumbering them without editing
+    // cad_stroke.vert draws one kind as another, silently.
+    expect(<double>[kKindStroke, kKindJoin, kKindPoint, kKindFill],
+        <double>[0, 1, 2, 3]);
+  });
+
+  test('a fill at index 2 writes only its own record', () {
+    final data = Float32List(kFloatsPerInstance * 4)
+      ..fillRange(0, kFloatsPerInstance * 4, 17.5);
+    writeFill(data, 2,
+        x0: 1, y0: 2, x1: 3, y1: 4, x2: 5, y2: 6, argb: 0xFF000000);
+    expect(data[kFloatsPerInstance * 1], 17.5,
+        reason: 'the record before it is untouched');
+    expect(data[kFloatsPerInstance * 3], 17.5,
+        reason: 'the record after it is untouched');
+    expect(data[kFloatsPerInstance * 2 + InstanceFieldOffset.kind], kKindFill);
+  });
 }

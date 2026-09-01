@@ -1,0 +1,51 @@
+# Review package: 8338fd5..HEAD
+
+## Commits
+d6d5c58 docs(plan-d): fire fill_buffer_budget_test's killability, per review round 1
+
+## Files changed
+ docs/superpowers/notes/2026-09-01-plan-d-results.md | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+## Diff
+diff --git a/docs/superpowers/notes/2026-09-01-plan-d-results.md b/docs/superpowers/notes/2026-09-01-plan-d-results.md
+index 9cc0f87..2f087a7 100644
+--- a/docs/superpowers/notes/2026-09-01-plan-d-results.md
++++ b/docs/superpowers/notes/2026-09-01-plan-d-results.md
+@@ -151,20 +151,36 @@ exactly what `--dart-define=RUN_GPU_SPIKE` would report on a device,
+ obtained without a device.
+ 
+ **Method**: `apps/dev_harness_2d/test/fill_buffer_budget_test.dart` (new,
+ this task). It calls `spikeDocument(entityCount: 10000, fillsEnabled: true)`
+ — the same corpus builder `GpuSpikeState._buildResidentGeometry` uses in
+ `gpu_arm.dart` — then makes the same three calls that method does, up to
+ and not including `ResidentGeometry.create`: builds a `SpatialIndex`, fits
+ `ViewportTransform` to the document's extents, walks it through
+ `DraftPainter` into a `GeometryCollector`, and reads `collector.data`.
+ 
++**This test is measured against the testing bar, not merely asserted.** Its
++`expect(fills, greaterThan(0))` guard was fired: `main.dart`'s
++`spikeDocument` was mutated so `_addFillRegions` never runs
++(`if (false && (fillsEnabled ?? kSpikeFills)) _addFillRegions(doc, count);`),
++`flutter test test/fill_buffer_budget_test.dart` then failed with
++`Expected: a value greater than <0> / Actual: <0>` on that exact assertion,
++and the file was restored from a `/tmp` backup (`git status --short` clean
++afterward) — this is the guard against `SPIKE_FILLS` (or the fill path
++behind it) silently going dark and the buffer measurement staying vacuous
++about the one thing this task adds. The companion guard,
++`expect(other, 0)` (every instance must carry a known kind tag), was not
++independently fired this round — it would need a mutation inside
++`GeometryCollector`/`instance_record.dart` rather than in the harness, which
++is a real mutation to try but wasn't; it is reported here as untested rather
++than as either killed or unkillable.
++
+ Reproducible two ways:
+ 
+ ```sh
+ cd apps/dev_harness_2d
+ # Default knobs (SPIKE_DEFS=20, SPIKE_INSTANCES=200 -- spikeDocument()'s own defaults):
+ flutter test test/fill_buffer_budget_test.dart
+ 
+ # Matched to Plan C's own device-run parameters, for a direct comparison:
+ flutter test test/fill_buffer_budget_test.dart \
+   --dart-define=SPIKE_INSTANCES=150 --dart-define=SPIKE_DEFS=20 --dart-define=DASHED=0.35

@@ -42,11 +42,11 @@ const int kFloatsPerInstance = 16;
 /// `vertices_draw_sink.dart:41-57` records that defect being shipped and
 /// reverted once already, partitioned by colour rather than by kind.
 ///
-/// **The values are 0, 1, 2 and the order is load-bearing**, not merely
-/// distinct: `cad_stroke.vert` dispatches with `kind < 0.5` then
-/// `kind < 1.5`, because ES 100 has no integer attributes and no `switch` on
-/// one. Renumbering these without editing that shader silently draws every
-/// join as a stroke.
+/// **The values are 0, 1, 2, 3 and the order is load-bearing**, not merely
+/// distinct: `cad_stroke.vert` dispatches with `kind < 0.5`, then
+/// `kind < 1.5`, then `kind < 2.5`, because ES 100 has no integer attributes
+/// and no `switch` on one. Renumbering these without editing that shader
+/// silently draws every join as a stroke, or every fill as a point.
 const double kKindStroke = 0;
 
 /// A corner between two segments. `(x0, y0)` is the vertex, `(x1, y1)` the
@@ -66,6 +66,19 @@ const double kKindJoin = 1;
 /// axis while the other stayed fixed: the square would shear under zoom. Its
 /// own kind is what keeps both axes in the same space.
 const double kKindPoint = 2;
+
+/// One triangle of a fill. `(x0, y0)`, `(x1, y1)` and `(x2, y2)` are its
+/// three corners in collection space, and [InstanceFieldOffset.halfWidth] is
+/// zero — a fill has no width, so unlike every other kind nothing here is
+/// expanded in device pixels. The shader reads the three corners through the
+/// `join_weight` roles `V`, `A` and `B`, and folds `M` onto `A` so the second
+/// triangle of the six-vertex quad is degenerate (Plan D's Ruling D1).
+///
+/// **A fill is never dashed and never fades.** `DraftPainter._drawFill` opens
+/// no dash bracket, and the colour is `style.argb` rather than
+/// `_coveredArgb`'s — routing a fill through the sub-pixel alpha fade would
+/// fade a filled room on a hairline layer (`vertices_draw_sink.dart:752-757`).
+const double kKindFill = 3;
 
 /// The record's field layout, as an offset in **floats** from the record's
 /// start — the writers below index by float, not byte.
@@ -225,6 +238,37 @@ void writePoint(
   into[o + InstanceFieldOffset.y1] = 0;
   into[o + InstanceFieldOffset.x2] = 0;
   into[o + InstanceFieldOffset.y2] = 0;
+  _writeColor(into, o, argb);
+  _writeDash(into, o, 0, 0, 0, 0);
+}
+
+/// Writes the fill-triangle record at [index]. [argb] is `0xAARRGGBB`.
+///
+/// **Takes no half-width and no dash arguments, by design.** A fill has no
+/// width to expand (Ruling D2) and cannot be dashed (Ruling D4): the painter
+/// reaches `fillPolygon` and `fillCircle` outside any `beginDash` bracket. All
+/// five slots are still written explicitly — see [_writeDash]'s own doc for
+/// why an explicit zero is not the same as a fresh buffer's zero.
+void writeFill(
+  Float32List into,
+  int index, {
+  required double x0,
+  required double y0,
+  required double x1,
+  required double y1,
+  required double x2,
+  required double y2,
+  required int argb,
+}) {
+  final o = index * kFloatsPerInstance;
+  into[o + InstanceFieldOffset.kind] = kKindFill;
+  into[o + InstanceFieldOffset.halfWidth] = 0;
+  into[o + InstanceFieldOffset.x0] = x0;
+  into[o + InstanceFieldOffset.y0] = y0;
+  into[o + InstanceFieldOffset.x1] = x1;
+  into[o + InstanceFieldOffset.y1] = y1;
+  into[o + InstanceFieldOffset.x2] = x2;
+  into[o + InstanceFieldOffset.y2] = y2;
   _writeColor(into, o, argb);
   _writeDash(into, o, 0, 0, 0, 0);
 }

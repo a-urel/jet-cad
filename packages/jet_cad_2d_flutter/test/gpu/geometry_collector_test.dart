@@ -137,9 +137,9 @@ void main() {
   });
 
   test('counts the ops it does not draw instead of dropping them silently', () {
-    // **This test used `circle` until Task 5.** A circle is drawn now, so the
-    // two ops here are `fillCircle` and `text` -- chosen because they stay
-    // skipped for the whole of Plan B (fills are Plan D, text is Plan E), so
+    // **This test used `circle` until Task 5, then `fillCircle` until Task 3
+    // of Plan D.** Now fillCircle is drawn, so only `text` is skipped -- chosen
+    // because it stays skipped for the whole of Plan D (text is Plan E), so
     // this assertion does not have to be rewritten again at Task 6 the way it
     // was rewritten here. Both assertions are kept: an op that starts being
     // drawn without being taken off the skipped list would move
@@ -150,8 +150,9 @@ void main() {
     c.fillCircle(0, 0, 5, _style);
     c.text('x', Handle.none, _style);
     c.endResidual();
-    expect(c.instanceCount, 0);
-    expect(c.skippedOps, 2);
+    expect(c.instanceCount, greaterThan(0),
+        reason: 'fillCircle now draws instances');
+    expect(c.skippedOps, 1, reason: 'only text is skipped now');
   });
 
   test('clamps to the device-pixel floor at a hairline lineweight', () {
@@ -689,10 +690,9 @@ void main() {
             'branch the shader\'s degenerate test takes');
   });
 
-  test('after Plan B, only fills and text are skipped', () {
-    // The sentence in `skippedOps`' doc, asserted. It goes red the day
-    // another op is silently dropped -- or the day Plan D lands and forgets
-    // to update the doc.
+  test('after Plan D Task 3, text is the only skipped op', () {
+    // fillPolygon draws in Task 2; fillCircle draws in Task 3; text still does
+    // not. It goes red the day text is drawn or another op is silently dropped.
     final c = GeometryCollector(
         pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
     c.beginResidual(Transform2.identity());
@@ -711,7 +711,7 @@ void main() {
         Int32List.fromList(<int>[0, 1, 2]), style);
     c.fillCircle(0, 0, 5, style);
     c.text('x', Handle.none, style);
-    expect(c.skippedOps, 3, reason: 'three ops Plans D and E draw');
+    expect(c.skippedOps, 1, reason: 'text not yet drawn');
   });
 
   // --- dashed polylines (Task 5) -------------------------------------------
@@ -1160,5 +1160,209 @@ void main() {
       expect(phase, lessThan(period));
     }
     expect(sawStroke, isTrue);
+  });
+
+  test('a fill polygon is one instance per triangle, in triangulation order',
+      () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    // A non-identity, non-uniform, off-origin residual: the identity would
+    // hide a transposed matrix element, which is the defect Plan A's
+    // post-mortem names.
+    c.beginResidual(Transform2.translation(120, -35)
+        .multiply(Transform2.rotation(0.4))
+        .multiply(Transform2.scale(1.7, 0.6)));
+    c.fillPolygon(
+        Float64List.fromList(<double>[0, 0, 10, 0, 10, 6, 0, 6]),
+        4,
+        Int32List.fromList(<int>[0, 1, 2, 0, 2, 3]),
+        const ResolvedStyle(
+            argb: 0xFF3366CC,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1));
+    c.endResidual();
+
+    expect(c.instanceCount, 2);
+    expect(c.skippedOps, 0, reason: 'a fill is drawn now, not counted');
+
+    final data = c.data;
+    for (var i = 0; i < 2; i++) {
+      expect(
+          data[i * kFloatsPerInstance + InstanceFieldOffset.kind], kKindFill);
+      expect(data[i * kFloatsPerInstance + InstanceFieldOffset.halfWidth], 0.0);
+    }
+
+    // The residual, applied by hand to point 1 (10, 0), against the first
+    // triangle's second corner. Computed here rather than read from the
+    // collector so the assertion is an independent derivation.
+    final t = Transform2.translation(120, -35)
+        .multiply(Transform2.rotation(0.4))
+        .multiply(Transform2.scale(1.7, 0.6));
+    expect(
+        data[InstanceFieldOffset.x1], closeTo(t.a * 10 + t.c * 0 + t.e, 1e-3));
+    expect(
+        data[InstanceFieldOffset.y1], closeTo(t.b * 10 + t.d * 0 + t.f, 1e-3));
+
+    // Triangulation order: the second instance is (0, 2, 3), so its second
+    // corner is point 2 (10, 6) and its third is point 3 (0, 6). A
+    // collector that walked the triangle list backwards, or that sorted it,
+    // fails here -- and draw order is emission order.
+    final o = kFloatsPerInstance;
+    expect(data[o + InstanceFieldOffset.x1],
+        closeTo(t.a * 10 + t.c * 6 + t.e, 1e-3));
+    expect(data[o + InstanceFieldOffset.x2],
+        closeTo(t.a * 0 + t.c * 6 + t.e, 1e-3));
+  });
+
+  test('a fill keeps its own colour on a hairline layer', () {
+    // The lineweight is sub-pixel, which is exactly what `_coveredArgb`
+    // fades for a stroke. A fill must not fade: routing it through that
+    // function would fade a filled room on a hairline layer.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
+    c.beginResidual(Transform2.translation(5, 7));
+    c.fillPolygon(
+        Float64List.fromList(<double>[0, 0, 8, 0, 4, 9]),
+        3,
+        Int32List.fromList(<int>[0, 1, 2]),
+        const ResolvedStyle(
+            argb: 0xFF884422,
+            lineweightHundredths: 1,
+            linetype: Handle.none,
+            linetypeScale: 1));
+    c.endResidual();
+
+    final data = c.data;
+    expect(data[InstanceFieldOffset.a], closeTo(1.0, 1e-6),
+        reason: 'a fill never goes through _coveredArgb');
+    expect(data[InstanceFieldOffset.r], closeTo(0x88 / 255.0, 1e-6));
+  });
+
+  test('a degenerate triangle is written, not dropped', () {
+    // `VerticesDrawSink._emitTriangle` has no zero-area test, so neither
+    // does this: matching the formula rather than the intention is what
+    // keeps the two arms' instance lists identical. Both rasterisers drop
+    // it at raster time instead.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
+    c.beginResidual(Transform2.translation(5, 7));
+    c.fillPolygon(
+        Float64List.fromList(<double>[0, 0, 8, 0, 4, 9]),
+        3,
+        Int32List.fromList(<int>[0, 1, 1]),
+        const ResolvedStyle(
+            argb: 0xFF884422,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1));
+    c.endResidual();
+    expect(c.instanceCount, 1);
+  });
+
+  test('a filled circle is a fan at the same step count as its own outline',
+      () {
+    // The fill and the stroke of the same circle must tessellate
+    // identically, or the fill peeks out from under its own boundary at
+    // some zoom. Both go through _flattenSteps; this asserts they agree
+    // rather than that either equals a hardcoded number.
+    const style = ResolvedStyle(
+        argb: 0xFF224466,
+        lineweightHundredths: 25,
+        linetype: Handle.none,
+        linetypeScale: 1);
+    final residual = Transform2.translation(300, 90)
+        .multiply(Transform2.rotation(-0.6))
+        .multiply(Transform2.scale(1.35, 1.35));
+
+    final outline =
+        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0)
+          ..beginResidual(residual)
+          ..circle(12, -5, 7.5, style)
+          ..endResidual();
+    // A closed run: `steps` segments and `steps` joins (the seam included).
+    final chords = outline.instanceCount ~/ 2;
+
+    final fill =
+        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0)
+          ..beginResidual(residual)
+          ..fillCircle(12, -5, 7.5, style)
+          ..endResidual();
+
+    expect(fill.instanceCount, chords,
+        reason: 'the fan and the outline must use one step count');
+    expect(fill.skippedOps, 0);
+  });
+
+  test('the fan shares one centre and walks the rim in ascending angle', () {
+    const style = ResolvedStyle(
+        argb: 0xFF224466,
+        lineweightHundredths: 25,
+        linetype: Handle.none,
+        linetypeScale: 1);
+    final t = Transform2.translation(300, 90).multiply(Transform2.scale(2, 3));
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0)
+      ..beginResidual(t)
+      ..fillCircle(12, -5, 7.5, style)
+      ..endResidual();
+
+    final data = c.data;
+    final centreX = t.a * 12 + t.c * -5 + t.e;
+    final centreY = t.b * 12 + t.d * -5 + t.f;
+    for (var i = 0; i < c.instanceCount; i++) {
+      final o = i * kFloatsPerInstance;
+      expect(data[o + InstanceFieldOffset.kind], kKindFill);
+      expect(data[o + InstanceFieldOffset.x0], closeTo(centreX, 1e-3),
+          reason: 'every triangle of a fan starts at the centre');
+      expect(data[o + InstanceFieldOffset.y0], closeTo(centreY, 1e-3));
+    }
+    // Triangle 0's second corner is the rim at angle 0: (cx + r, cy).
+    expect(data[InstanceFieldOffset.x1],
+        closeTo(t.a * (12 + 7.5) + t.c * -5 + t.e, 1e-3));
+    expect(data[InstanceFieldOffset.y1],
+        closeTo(t.b * (12 + 7.5) + t.d * -5 + t.f, 1e-3));
+    // Consecutive triangles share an edge: triangle i's third corner is
+    // triangle i+1's second. A fan written out of order fails here.
+    final o1 = kFloatsPerInstance;
+    expect(data[o1 + InstanceFieldOffset.x1],
+        closeTo(data[InstanceFieldOffset.x2], 1e-6));
+    expect(data[o1 + InstanceFieldOffset.y1],
+        closeTo(data[InstanceFieldOffset.y2], 1e-6));
+  });
+
+  test('a zero or negative radius fills nothing', () {
+    const style = ResolvedStyle(
+        argb: 0xFF224466,
+        lineweightHundredths: 25,
+        linetype: Handle.none,
+        linetypeScale: 1);
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0)
+      ..beginResidual(Transform2.translation(3, 4))
+      ..fillCircle(1, 1, 0, style)
+      ..fillCircle(1, 1, -2, style)
+      ..endResidual();
+    expect(c.instanceCount, 0);
+  });
+
+  test('a fill circle keeps its own colour on a hairline layer', () {
+    // The lineweight is sub-pixel, which is exactly what `_coveredArgb`
+    // fades for a stroke. A filled circle must not fade: routing it through
+    // that function would fade a filled room on a hairline layer.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
+    c.beginResidual(Transform2.translation(5, 7));
+    c.fillCircle(
+        0,
+        0,
+        8,
+        const ResolvedStyle(
+            argb: 0xFF884422,
+            lineweightHundredths: 1,
+            linetype: Handle.none,
+            linetypeScale: 1));
+    c.endResidual();
+
+    final data = c.data;
+    expect(data[InstanceFieldOffset.a], closeTo(1.0, 1e-6),
+        reason: 'a filled circle never goes through _coveredArgb');
+    expect(data[InstanceFieldOffset.r], closeTo(0x88 / 255.0, 1e-6));
+    expect(data[InstanceFieldOffset.g], closeTo(0x44 / 255.0, 1e-6));
+    expect(data[InstanceFieldOffset.b], closeTo(0x22 / 255.0, 1e-6));
   });
 }

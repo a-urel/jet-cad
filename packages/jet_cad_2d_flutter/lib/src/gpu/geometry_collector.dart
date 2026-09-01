@@ -80,12 +80,14 @@ class GeometryCollector implements DrawSink {
   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
   int get instanceCount => _instances;
 
-  /// Ops this plan does not draw yet — `fillPolygon`, `fillCircle` and
-  /// `text`. Counted rather than ignored so a corpus that needs Plan B
-  /// through E is visible as a number instead of as a missing picture.
+  /// Ops this plan does not draw yet — `text` only, since Plan D.
   ///
-  /// `circle` and `arc` stopped counting here in Task 5; `point` in Task 6,
-  /// which is also where the test that pins this whole sentence lands.
+  /// Counted rather than ignored so a corpus that needs Plan E is visible as
+  /// a number instead of as a missing picture.
+  ///
+  /// `circle` and `arc` stopped counting here in Plan B's Task 5; `point` in
+  /// its Task 6; `fillPolygon` in Plan D's Task 2; `fillCircle` stops counting
+  /// in Task 3.
   int get skippedOps => _skipped;
 
   /// **Diagnostic only — read by nobody in this class and never changes what
@@ -624,14 +626,83 @@ class GeometryCollector implements DrawSink {
     return ideal.clamp(1, kMaxFlattenSegments);
   }
 
+  /// One instance per triangle, in the triangulation's own order.
+  ///
+  /// **Read, never computed** — the triangulation was materialised by the
+  /// command, the codec or undo, and `DraftPainter._drawFill` passes it
+  /// through. This transcribes `VerticesDrawSink.fillPolygon`, including
+  /// that `triangles` triple-indexes into `points`' *point* numbering, so
+  /// each index is doubled to reach a coordinate pair.
+  ///
+  /// **`style.argb` directly, NOT `_coveredArgb`** (Ruling D3): a fill has no
+  /// width to fade, and a fill entity's `ResolvedStyle` still carries a
+  /// lineweight because the column is shared with strokes.
+  ///
+  /// **No degenerate-triangle test** (Ruling D6): the reference's
+  /// `_emitTriangle` has none, and adding one here would make the two arms'
+  /// instance lists differ on a triangulation that contains one.
   @override
-  void fillPolygon(Float64List points, int count, Int32List triangles,
-          ResolvedStyle style) =>
-      _skipped++;
+  void fillPolygon(
+      Float64List points, int count, Int32List triangles, ResolvedStyle style) {
+    if (triangles.isEmpty) return;
+    final t = _residual;
+    final argb = style.argb;
+    _reserve(_instances + triangles.length ~/ 3);
+    // Loop bound requires a complete triple: drops an incomplete tail where
+    // the oracle (VerticesDrawSink) would throw, because the contract is
+    // complete triples only.
+    for (var i = 0; i + 2 < triangles.length; i += 3) {
+      final a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+      final ax = points[a * 2], ay = points[a * 2 + 1];
+      final bx = points[b * 2], by = points[b * 2 + 1];
+      final cx = points[c * 2], cy = points[c * 2 + 1];
+      writeFill(_buffer, _instances,
+          x0: t.a * ax + t.c * ay + t.e,
+          y0: t.b * ax + t.d * ay + t.f,
+          x1: t.a * bx + t.c * by + t.e,
+          y1: t.b * bx + t.d * by + t.f,
+          x2: t.a * cx + t.c * cy + t.e,
+          y2: t.b * cx + t.d * cy + t.f,
+          argb: argb);
+      _instances++;
+    }
+  }
 
+  /// A triangle fan around the circle's centre, at the same step count
+  /// [_flatten] would give the circle's own outline.
+  ///
+  /// **The shared `_flattenSteps` call is the point** (Ruling D5): a filled
+  /// circle's silhouette is tessellated by the same expression as its own
+  /// boundary stroke, so the two never disagree at any zoom. The rim starts
+  /// at angle 0, i.e. `(cx + r, cy)`, exactly as
+  /// `VerticesDrawSink.fillCircle` does.
   @override
-  void fillCircle(double cx, double cy, double r, ResolvedStyle style) =>
-      _skipped++;
+  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {
+    if (r <= 0) return;
+    final t = _residual;
+    final deviceRadius = r * t.scaleMagnitude;
+    if (deviceRadius <= 0) return;
+    const theta = 2 * math.pi;
+    final steps = _flattenSteps(deviceRadius, theta);
+    // `style.argb` directly, never `_coveredArgb` -- Ruling D3.
+    final argb = style.argb;
+    final ccx = t.a * cx + t.c * cy + t.e;
+    final ccy = t.b * cx + t.d * cy + t.f;
+    var px = cx + r, py = cy;
+    var dx = t.a * px + t.c * py + t.e, dy = t.b * px + t.d * py + t.f;
+    _reserve(_instances + steps);
+    for (var i = 1; i <= steps; i++) {
+      final angle = theta * i / steps;
+      px = cx + r * math.cos(angle);
+      py = cy + r * math.sin(angle);
+      final nx = t.a * px + t.c * py + t.e, ny = t.b * px + t.d * py + t.f;
+      writeFill(_buffer, _instances,
+          x0: ccx, y0: ccy, x1: dx, y1: dy, x2: nx, y2: ny, argb: argb);
+      _instances++;
+      dx = nx;
+      dy = ny;
+    }
+  }
 
   @override
   void text(String text, Handle style, ResolvedStyle resolved) => _skipped++;

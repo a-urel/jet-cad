@@ -1,0 +1,111 @@
+# Review package: e128fe5..HEAD
+
+## Commits
+3094312 fix(gpu): correct the fillPolygon doc, drop non-killing test, add loop comment
+
+## Files changed
+ .../lib/src/gpu/geometry_collector.dart                  |  8 ++++++--
+ .../test/gpu/geometry_collector_test.dart                | 16 ----------------
+ 2 files changed, 6 insertions(+), 18 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+index 17dd373..2eee384 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+@@ -73,27 +73,28 @@ class GeometryCollector implements DrawSink {
+   /// see `docs/superpowers/notes/2026-08-30-plan-b-results.md`) that is
+   /// roughly 5.23 MB copied per call (109,068 × [kFloatsPerInstance] × 4
+   /// bytes = 5,235,264 bytes). Read it once per rebuild, into
+   /// `ResidentGeometry.create`, and hoist it out of any per-frame path —
+   /// Plan F's `paint()` call site included — or it breaks this project's
+   /// "the frame path allocates nothing per entity in steady state"
+   /// non-negotiable.
+   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
+   int get instanceCount => _instances;
+ 
+-  /// Ops this plan does not draw yet — `text` alone, since Plan D.
++  /// Ops this plan does not draw yet — `text` and `fillCircle`, since Plan D.
+   ///
+   /// Counted rather than ignored so a corpus that needs Plan E is visible as
+   /// a number instead of as a missing picture.
+   ///
+   /// `circle` and `arc` stopped counting here in Plan B's Task 5; `point` in
+-  /// its Task 6; `fillPolygon` and `fillCircle` in Plan D's Tasks 2 and 3.
++  /// its Task 6; `fillPolygon` in Plan D's Task 2; `fillCircle` stops counting
++  /// in Task 3.
+   int get skippedOps => _skipped;
+ 
+   /// **Diagnostic only — read by nobody in this class and never changes what
+   /// is written.** Ruling B4 keeps the bevel/miter/collinear decision in the
+   /// shader, in device pixels, on purpose: a collector-side test would run in
+   /// `double`, in collection space, against a reference that decides in
+   /// `float32`, in device space, and the two would disagree on exactly the
+   /// corners that are nearly straight. This counts, in collection-space
+   /// `double` arithmetic, how many of the joins this collector wrote carry a
+   /// zero (or reversed) cross product between their incoming and outgoing
+@@ -640,20 +641,23 @@ class GeometryCollector implements DrawSink {
+   /// **No degenerate-triangle test** (Ruling D6): the reference's
+   /// `_emitTriangle` has none, and adding one here would make the two arms'
+   /// instance lists differ on a triangulation that contains one.
+   @override
+   void fillPolygon(
+       Float64List points, int count, Int32List triangles, ResolvedStyle style) {
+     if (triangles.isEmpty) return;
+     final t = _residual;
+     final argb = style.argb;
+     _reserve(_instances + triangles.length ~/ 3);
++    // Loop bound requires a complete triple: drops an incomplete tail where
++    // the oracle (VerticesDrawSink) would throw, because the contract is
++    // complete triples only.
+     for (var i = 0; i + 2 < triangles.length; i += 3) {
+       final a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+       final ax = points[a * 2], ay = points[a * 2 + 1];
+       final bx = points[b * 2], by = points[b * 2 + 1];
+       final cx = points[c * 2], cy = points[c * 2 + 1];
+       writeFill(_buffer, _instances,
+           x0: t.a * ax + t.c * ay + t.e,
+           y0: t.b * ax + t.d * ay + t.f,
+           x1: t.a * bx + t.c * by + t.e,
+           y1: t.b * bx + t.d * by + t.f,
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+index 6e14589..89c8590 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+@@ -1229,36 +1229,20 @@ void main() {
+             linetype: Handle.none,
+             linetypeScale: 1));
+     c.endResidual();
+ 
+     final data = c.data;
+     expect(data[InstanceFieldOffset.a], closeTo(1.0, 1e-6),
+         reason: 'a fill never goes through _coveredArgb');
+     expect(data[InstanceFieldOffset.r], closeTo(0x88 / 255.0, 1e-6));
+   });
+ 
+-  test('an empty triangulation writes nothing', () {
+-    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
+-    c.beginResidual(Transform2.translation(5, 7));
+-    c.fillPolygon(
+-        Float64List.fromList(<double>[0, 0, 8, 0, 4, 9]),
+-        3,
+-        Int32List(0),
+-        const ResolvedStyle(
+-            argb: 0xFF884422,
+-            lineweightHundredths: 25,
+-            linetype: Handle.none,
+-            linetypeScale: 1));
+-    c.endResidual();
+-    expect(c.instanceCount, 0);
+-  });
+-
+   test('a degenerate triangle is written, not dropped', () {
+     // `VerticesDrawSink._emitTriangle` has no zero-area test, so neither
+     // does this: matching the formula rather than the intention is what
+     // keeps the two arms' instance lists identical. Both rasterisers drop
+     // it at raster time instead.
+     final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
+     c.beginResidual(Transform2.translation(5, 7));
+     c.fillPolygon(
+         Float64List.fromList(<double>[0, 0, 8, 0, 4, 9]),
+         3,

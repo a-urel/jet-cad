@@ -1,36 +1,86 @@
 # jet-cad — project status
 
-**Last updated:** 2026-08-31
-**Verified against:** `main` at `3a61b45` — the merge commit for **Plan C of
-the GPU-resident render backend**, the third of that spec's seven plans.
-Plan C ran on `plan-c/shaded-dashes`, cut from `main` at `d52d2a9`, twelve
-tasks at `d52d2a9..db4dd5f`, merged `--no-ff` and the branch deleted. Before
-it, Plan B merged at `72b162d` (eleven tasks, `5c94e11..4892a01`), Plan A at
-`cd5bc98` (nine tasks) and Plan 3i ran directly on `main` at
-`468e310..dbc31e8`. **Nothing is in flight.**
+**Last updated:** 2026-09-01
+**Verified against:** `main` at `bde9196`. `main` is **not** unchanged since
+Plan C's merge commit `3a61b45`: two commits landed after it — a codec fix
+(`5069a6e`, `_loadHeader` now carries `globalLinetypeScale`) and its merge
+(`e347238`), which together add exactly one new test to `packages/jet_cad_2d`
+(`json_codec_test.dart`'s `every header field survives save and load`) — and
+Plan D's plan document is the commit after that, `bde9196` itself. **Plan D
+(fills), the fourth plan, is IN FLIGHT on `plan-d/fills`**, cut from `main` at
+`bde9196`, nine tasks at `bde9196..36dfb7e` plus this task's own commit —
+**not yet merged.** Before Plan C, Plan B merged at `72b162d` (eleven tasks,
+`5c94e11..4892a01`), Plan A at `cd5bc98` (nine tasks) and Plan 3i ran
+directly on `main` at `468e310..dbc31e8`.
 
-**Every suite count below was produced by running that suite on the MERGED
-tree on 2026-08-31** — `jet_cad_2d` **797**, `jet_cad_2d_flutter` **540** (1
-pre-existing skip), `dev_harness_2d` **72**, analyze and format clean in all
-three — not by reading a report, and not by trusting the branch's own green
-run. A green run only proves the tree it ran on.
+**Every suite count below for `packages/jet_cad_2d`, `packages/jet_cad_2d_flutter`
+and `apps/dev_harness_2d` was produced by running that suite on
+`plan-d/fills` on 2026-09-01** — `jet_cad_2d` **798**, `jet_cad_2d_flutter`
+**565** (1 pre-existing skip), `dev_harness_2d` **73**, analyze and format
+clean in all three — not by reading a report, and not by trusting the
+branch's own green run. A green run only proves the tree it ran on. **The
+`jet_cad_2d` figure of 798 is inherited from `main` at `bde9196`, not
+produced by Plan D — Plan D touches nothing under `packages/jet_cad_2d` at
+all** (confirm with `git diff --stat bde9196..plan-d/fills -- packages/jet_cad_2d/`,
+which is empty); the +1 over Plan C's 797 is the codec-fix test above. `main`'s
+own counts are 798 / 540 / 72 as of `bde9196` and unchanged since — `jet_cad_2d_flutter`
+and `dev_harness_2d` did not move past Plan C's merge — until Plan D merges.
 
-**Plan C (dashes in the shader) is DONE on its branch. Exit gate: 10 of 11 —
-criterion 11 is UNMET**, in those words: the device run happened and produced
-every number below, but **no human has looked at the running window**.
-**Plan B's criterion 11 is still owed too**, and has been since its merge.
-Both are one act — see [Resume here](#resume-here).
+**Plan D (fills) is DONE on its branch. Exit gate: 8 of 9 — criterion 8 is
+OWED**, in those words: this task's controller ruling (D-9a) forbids
+simulating a device run or a human's visual judgement, so no device run
+happened this session and none could have. **The window-check debt now
+stands at FOURTEEN checks across three plans** — Plan B's four (owed since
+`72b162d`), Plan C's five (owed since `18330a9`), and Plan D's own five, all
+new — discharged by one harness run. See [Resume here](#resume-here).
 
-### Plan C's headline is a correction to its own premise
+### What Plan D's own premises measured false
 
-**Plan C's plan says a buffer with dash spans baked in "still shows eight
-dashes at 4x zoom instead of the thirty-two the reference draws". That is
-false — the reference draws eight too.** `DraftPainter._dashScale` folds in
+Three corrections, none a threshold moved: Task 4's brief specified a
+lineweight that gave only 172 device pixels of stroke-over-fill overlap
+against a 200-pixel floor, raised to 120 and re-measured at 337; Task 5's
+brief predicted the compiled shader bundle would show `attribute ` eight
+times, and the real count is sixteen occurrences of eight unique names,
+because this repo's bundle embeds the shader source twice; Task 7's brief
+supplied a sample test loop with a lock-in bug that read a false negative
+(`Expected: a value greater than <58> / Actual: <3>`) against a real,
+correctly-ordered corpus, fixed by scanning for the *last* stroke rather
+than the first post-fill one.
+
+### What Plan D measured
+
+| quantity | value |
+|---|---|
+| record-level differential, fill corpus | **exact match** — kind, argb, three points, instance for instance |
+| pixel differential, colour, fill corpus | **100.000% within 2**, `overEight = 0`, `referenceInk = 393,051` |
+| pixel differential, colour, stroke corpus | **100.000% within 2**, `overEight = 0`, `referenceInk = 8,183` |
+| spec criterion 4, kind-sorted vs. walk order | walk order **100.000%**, kind-sorted **97.635%** (`< 0.995` gate) — **PASS**, order is provably load-bearing |
+| `skippedOps` on the fill corpus | **0** — text alone is ever counted, and this corpus carries none |
+| resident buffer, 10,000 entities, fills on | **6.51 MB** (106,636 instances, matched to Plan C's own params) / **7.00 MB** (114,717 instances, default knobs) — both **PASS** against 8 MB, up from Plan C's fills-off 6.41 MB / 105,076 |
+| mutations | **12 fired, 12 killed** — 11 on the first shot, M-D4 after a missing assertion was added for a real coverage gap |
+
+**This buffer figure is measured on the CPU, not on a device.**
+`GeometryCollector` builds the exact bytes a device upload would receive;
+only the upload itself was not exercised. See the results note for the
+method and both reproduction commands.
+
+Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
+Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
+Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
+
+---
+
+## Plan C — dashes in the shader (merged, `main` at `3a61b45`)
+
+**Plan C's headline is a correction to its own premise.** Plan C's plan says
+a buffer with dash spans baked in "still shows eight dashes at 4x zoom
+instead of the thirty-two the reference draws". That is false — the
+reference draws eight too. `DraftPainter._dashScale` folds in
 `toScreen.scaleMagnitude` and the points it dashes are already in screen
-space, so period and distance both scale with the camera and their quotient —
-the dash count — does not move. **Dash patterns are anchored in world space,
-not screen space.** Measured three ways (`Dasher` directly, the algebra, and
-a painter probe at four cameras).
+space, so period and distance both scale with the camera and their quotient
+— the dash count — does not move. **Dash patterns are anchored in world
+space, not screen space.** Measured three ways (`Dasher` directly, the
+algebra, and a painter probe at four cameras).
 
 **What baking a dash pattern actually froze was the collapse decision.**
 `kDashCollapsePx` is a screen-space threshold, so whether a pattern draws
@@ -619,10 +669,21 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**A human must still look at the window — for TWO plans now.** Plan B's
-criterion 11 has been owed since `72b162d` and Plan C's is owed as of
-`18330a9`. One run of the harness discharges both; the checks are listed in
-[Plan C's results note](docs/superpowers/notes/2026-08-31-plan-c-results.md#criterion-11-is-unmet-in-those-words).
+**A human must still look at the window — for THREE plans now.** Plan B's
+criterion has been owed since `72b162d`, Plan C's since `18330a9`, and Plan D
+adds its own five as of this task, none discharged yet. One harness run
+discharges all fourteen; the checks and the corrected command are listed in
+[Plan D's results note](docs/superpowers/notes/2026-09-01-plan-d-results.md#the-window-checks--owed-fourteen-across-three-plans).
+**The command in Plan D's own task brief is missing `SPIKE_FILLS=true`** —
+run exactly as the brief wrote it, the corpus draws no fills at all and none
+of Plan D's five checks have anything to look at; the corrected command is
+below.
+
+**Plan D's five, all new:** a filled region is filled, not outlined and
+hollow; the higher-handle stroke crossing it is visible over the fill, not
+hidden under it; a filled circle's fill reaches exactly to its own boundary
+stroke at every zoom, with no rim of background and no spill; a fill on a
+hairline layer is not faded; and a translucent fill shows what is under it.
 
 **Plan C's five, and the first one is the opposite of what its own plan
 said:** zoom in and the dashes must get *longer* and stay the same in number;
@@ -634,9 +695,17 @@ must move the dashes *with* the line, not slide them along it.
 **Plan B's four, still owed:** corners filled, a circle **not** notched at its
 start angle, a square dot, nothing thickening as you zoom.
 
-**Plan C is merged** at `3a61b45` and its branch is deleted. The merge did
-not discharge criterion 11 and this file says so rather than letting it
-lapse.
+**Plan C is merged** at `3a61b45` and its branch is deleted; the merge did not
+discharge its criterion. **Plan D is DONE on its own branch, `plan-d/fills`,
+and not yet merged.** Command:
+
+```sh
+cd apps/dev_harness_2d
+flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
+  --dart-define=ENTITIES=10000 --dart-define=SPIKE_DEFS=20 \
+  --dart-define=SPIKE_INSTANCES=150 --dart-define=SPIKE_FRAMES=30 \
+  --dart-define=SPIKE_REPEATS=3 --dart-define=SPIKE_FILLS=true
+```
 
 ---
 

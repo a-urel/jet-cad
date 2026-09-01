@@ -17,6 +17,12 @@
 // the suite can actually run. Any edit here that is not mirrored there is a
 // divergence no test in this package can see -- change them together.
 //
+// **A fill is the one kind that expands nothing.** Its three corners are
+// projected and used; `half_width` is zero and is not read. The six-vertex
+// corner table is reused unchanged: `join_weight`'s V, A and B select the
+// three corners and M is folded onto A, so the second triangle is
+// degenerate and rasterises nothing (Plan D's Ruling D1).
+//
 // **Dashes are decided here and tested one line away.** The vertex stage
 // turns the instance's `dash` quad into a single varying, `t`, which is the
 // pattern-space coordinate at this vertex; the fragment stage keeps the
@@ -151,7 +157,7 @@ void main() {
     // `along` stays 0: every vertex of a join wedge sits at the corner, so
     // the whole wedge is tested at the phase stored for that corner.
 
-  } else {
+  } else if (kind < 2.5) {
     // kKindPoint: a square of the stroke's width centred on p0. Both axes
     // are expanded here, in device pixels, so the dot stays square and stays
     // the same size at every zoom -- which is what the reference gets for
@@ -159,6 +165,20 @@ void main() {
     // dashed.
     vec2 c = to_pixels(p0);
     px = c + vec2((corner.x * 2.0 - 1.0) * half_width, corner.y * half_width);
+
+  } else {
+    // kKindFill: one triangle of a pre-triangulated fill. Nothing is
+    // expanded -- a fill has no width -- so `half_width` is not read here at
+    // all. `join_weight` selects the corner: V -> p0, A -> p1, B -> p2, and
+    // M folded onto p1, which makes the second triangle (A, M, B) =
+    // (p1, p1, p2) degenerate.
+    vec2 a0 = to_pixels(p0);
+    vec2 a1 = to_pixels(p1);
+    vec2 a2 = to_pixels(p2);
+    px = join_weight.x * a0 + (join_weight.y + join_weight.w) * a1 +
+         join_weight.z * a2;
+    // `along` stays 0 and `dash` is all zeros on a fill, so the tail's
+    // `period > 0.0` test fails and `v_dash` keeps its solid sentinel.
   }
 
   gl_Position = vec4(px / frame_info.half_viewport, 0.0, 1.0);
