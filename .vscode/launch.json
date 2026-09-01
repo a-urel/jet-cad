@@ -79,6 +79,60 @@
             ]
         },
         {
+            // **The fills eyeball run.** Plan D's five window checks -- a
+            // fill is filled, the higher-handle stroke stays visible OVER
+            // it, a filled circle meets its own outline at every zoom, a
+            // hairline-layer fill does not fade, a translucent fill shows
+            // what is under it -- and Plan B's four and Plan C's five, which
+            // one run discharges together. See STATUS.md's "Resume here".
+            //
+            // `SPIKE_FILL_SCALE=20` is what makes them checkable at all: at
+            // the corpus's own room size a fill lands on screen at 0.7 to
+            // 2.7 logical pixels. **Do not read timings off this run** --
+            // the drawing is not the measured one. Use the configuration
+            // below for that.
+            "name": "2d: GPU spike -- fills ON, eyeball scale",
+            "cwd": "apps/dev_harness_2d",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "macos",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "--dart-define=RUN_GPU_SPIKE=true",
+                "--dart-define=ENTITIES=10000",
+                "--dart-define=SPIKE_DEFS=20",
+                "--dart-define=SPIKE_INSTANCES=150",
+                "--dart-define=SPIKE_FRAMES=30",
+                "--dart-define=SPIKE_REPEATS=3",
+                "--dart-define=SPIKE_FILLS=true",
+                "--dart-define=SPIKE_FILL_SCALE=20"
+            ]
+        },
+        {
+            // The same run at the corpus's own room size -- no
+            // `SPIKE_FILL_SCALE`, so the drawing is the one every number in
+            // `docs/superpowers/notes/2026-09-01-plan-d-results.md` was
+            // taken against. This is the configuration whose GSPIKE lines
+            // are worth recording; the one above is for the eye only.
+            "name": "2d: GPU spike -- fills ON, measurement scale",
+            "cwd": "apps/dev_harness_2d",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "macos",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "--dart-define=RUN_GPU_SPIKE=true",
+                "--dart-define=ENTITIES=10000",
+                "--dart-define=SPIKE_DEFS=20",
+                "--dart-define=SPIKE_INSTANCES=150",
+                "--dart-define=SPIKE_FRAMES=30",
+                "--dart-define=SPIKE_REPEATS=3",
+                "--dart-define=SPIKE_FILLS=true"
+            ]
+        },
+        {
             // Debug mode: hot reload and breakpoints, at the cost of numbers
             // that mean nothing -- `refuseDebugMode()` in the rig refuses to
             // record from a debug build, and the same caution applies to
