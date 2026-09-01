@@ -250,6 +250,32 @@ DraftDocument _polylineOnlyFixture() {
   return (ops: recording.ops, collector: collector);
 }
 
+/// The fixture reduced to a SOLID twin of one of its curves.
+///
+/// [coords] and [scalars] are the curve's own, so the twin is the same
+/// geometry under the same placement and the same residual -- only the
+/// linetype differs. `addEntity` writes the by-layer linetype, which
+/// resolves to CONTINUOUS.
+///
+/// **This exists to split a divergence that was recorded without being
+/// decomposed.** Plan C measured the dashed curves diverging by ~16-17% of
+/// their ink and named a cause (the reference re-chords every dash span
+/// independently) without ever measuring the same geometry solid. The solid
+/// twin reads `differing == 0`, which is what makes "the flattener agrees
+/// exactly and the divergence is dash-only" a measurement rather than an
+/// assertion -- see
+/// `docs/superpowers/notes/2026-09-01-curve-divergence-probe.md`.
+DraftDocument _solidTwin(
+    EntityKind kind, List<double> coords, List<double> scalars) {
+  final doc = shadedDashFixture();
+  const all = <int>[910, 911, 912, 913, 914, 915, 916, 917];
+  for (final h in all) {
+    doc.commands.execute(RemoveEntityCommand(Handle(h)));
+  }
+  addEntity(doc, const Handle(990), const Handle(951), kind, coords, scalars);
+  return doc;
+}
+
 /// The fixture reduced to the entities in [keep].
 DraftDocument _onlyEntities(Iterable<int> keep) {
   final doc = shadedDashFixture();
@@ -541,9 +567,9 @@ void main() {
     // This is not gated, because the threshold that would bound it is the
     // watermark band and the band belongs to a later plan. It is asserted
     // loosely, as a regression tripwire, and reported as a number.
-    for (final probe in <(String, List<int>)>[
-      ('circle 911', <int>[911]),
-      ('arc 912', <int>[912]),
+    for (final probe in <(String, List<int>, int)>[
+      ('circle 911', <int>[911], 900),
+      ('arc 912', <int>[912], 550),
     ]) {
       final doc = _onlyEntities(probe.$2);
       final camera = ViewportTransform.fit(doc.extents, kViewport);
@@ -556,10 +582,57 @@ void main() {
       print('PLAN-C curve ${probe.$1}: referenceInk=${m.referenceInk} '
           'residentInk=${m.residentInk} differing=${m.differing} '
           '(${(100 * m.differing / m.referenceInk).toStringAsFixed(1)}%)');
-      expect(m.differing, lessThan(m.referenceInk * 0.25),
-          reason: '${probe.$1}: a tripwire, not a criterion -- a curve whose '
-              'disagreement passed a quarter of its own ink would mean '
-              'something worse than re-chording');
+      expect(m.differing, lessThan(probe.$3),
+          reason: '${probe.$1}: a tripwire, not a criterion. The bound is an '
+              'ABSOLUTE pixel count, not a fraction of ink, because the '
+              'fraction is meaningless on its own: the divergence is a '
+              'boundary band along the stroke whose size is set by the '
+              'flattener sagitta, so widening the stroke on IDENTICAL '
+              'geometry moves the same disagreement from 14.3% of ink to '
+              '1.9% without changing a single differing pixel\'s cause. '
+              'Measured 2026-09-01 at 607 (circle) and 365 (arc); these '
+              'bounds are roughly 1.5x that. See '
+              'docs/superpowers/notes/2026-09-01-curve-divergence-probe.md');
+    }
+  });
+
+  test('a SOLID curve is pixel-EXACT, so the divergence above is dash-only',
+      () {
+    // **The decomposition Plan C recorded a cause for without measuring.**
+    // The same circle and the same arc, same placement, same residual, same
+    // flattener -- solid instead of dashed. Both arms agree pixel for pixel.
+    //
+    // That is what makes the dashed divergence attributable: it is not the
+    // flattener, not the residual, not the ellipse path and not the chord
+    // count, because every one of those is exercised identically here and
+    // reads zero. What remains is the one difference between the two runs --
+    // the reference re-chords every dash span independently while the
+    // resident arm chords the whole sweep once, so the two polylines sit up
+    // to a sagitta apart laterally.
+    //
+    // Tightening the chord tolerance in BOTH arms from 0.25 px to 0.02 px
+    // collapses the dashed arc's disagreement from 81 differing pixels to 1,
+    // which is the same claim measured from the other side -- and costs the
+    // 10,000-entity buffer 6.51 MB -> 20.20 MB, which is why it is recorded
+    // rather than done.
+    for (final probe in <(String, EntityKind, List<double>, List<double>)>[
+      ('circle', EntityKind.circle, <double>[400, -250], <double>[65]),
+      ('arc', EntityKind.arc, <double>[-350, 300], <double>[85, 0.2, 3.3]),
+    ]) {
+      final doc = _solidTwin(probe.$2, probe.$3, probe.$4);
+      final camera = ViewportTransform.fit(doc.extents, kViewport);
+      final m = measurePaintedAgreement(doc,
+          camera: camera,
+          size: kViewport,
+          devicePixelRatio: _dpr,
+          pixelsPerPaperMm: _ppmm);
+      expect(m.referenceInk, greaterThan(500),
+          reason: '${probe.$1}: an empty picture would agree trivially');
+      expect(m.differing, 0,
+          reason: '${probe.$1}: a solid curve must be EXACT. A non-zero '
+              'reading here means the two arms have stopped chording the '
+              'same curve the same way, which would also mean the dashed '
+              'divergence beside it can no longer be attributed to dashing');
     }
   });
 

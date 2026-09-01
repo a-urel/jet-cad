@@ -94,7 +94,7 @@ for the wrong defect in the window.
 |---|---|
 | straight-geometry pixel differential | **differing = 0** — exact, not a budget |
 | control (dash test disabled) | differs by exactly the 433-pixel gap |
-| dashed circle / arc | 16.5% / 17.0% — **MISS against criterion 1**, measured not gated |
+| dashed circle / arc | 16.5% / 17.0% — **MISS against criterion 1**, measured not gated; **decomposed 2026-09-01**, see below |
 | buffer | **6.41 MB** against 8 MB, **105,076 instances, down from Plan B's 109,068** |
 | gesture p50 / p95 raster | 0.43 build, 0.57 raster, 0.86 p95 — all PASS, `discard` live |
 | rebuild | **115.0 ms against 16.67 — MISS**, same shape as Plan B's 79.6 ms |
@@ -521,6 +521,34 @@ docs/superpowers/
 `jet_cad_2d` is Dart-only (`meta`, `vector_math`; dev: `test`, `vm_service`).
 `jet_cad_2d_flutter` depends on Flutter + `jet_cad_2d` by path. Both are
 `resolution: workspace` members of the root pubspec.
+
+---
+
+---
+
+## The curve divergence is decomposed, and it is not a defect
+
+**A solid curve is pixel-EXACT on both arms** — same circle, same arc, same
+placement, same residual, same flattener, `differing == 0`. The 16.5% / 17.0%
+MISS enters entirely with dashing, and its mechanism is now measured rather
+than asserted: the reference re-chords every dash span independently while
+the resident arm chords the sweep once, so two different chordings of one
+curve sit up to a **sagitta** apart laterally. The disagreement is a boundary
+band along the stroke — flat in dash period (4× the edges, the same
+disagreement), flat in sweep, and nearly flat in absolute size as the stroke
+widens fifteenfold.
+
+**Tightening `kFlattenTolerance` from 0.25 to 0.02 px collapses it from 81
+differing pixels to 1 — and takes the 10,000-entity buffer from 6.51 MB to
+20.20 MB against an 8 MB budget.** Closing criterion 1 on curves that way
+costs criterion 6, 2.5× over. Recorded as the price, not taken.
+
+Two things changed as a result: the curve tripwire is now an **absolute pixel
+count** rather than a fraction of ink (the same disagreement reads 14.3% or
+1.9% depending only on stroke width), and a **solid twin of each curve is
+gated at `differing == 0`**, which turns the exonerating half of the probe
+into a standing test. Full account:
+[2026-09-01-curve-divergence-probe.md](docs/superpowers/notes/2026-09-01-curve-divergence-probe.md).
 
 ---
 
