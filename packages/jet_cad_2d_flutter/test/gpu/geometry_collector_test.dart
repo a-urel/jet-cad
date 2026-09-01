@@ -689,10 +689,9 @@ void main() {
             'branch the shader\'s degenerate test takes');
   });
 
-  test('after Plan B, only fills and text are skipped', () {
-    // The sentence in `skippedOps`' doc, asserted. It goes red the day
-    // another op is silently dropped -- or the day Plan D lands and forgets
-    // to update the doc.
+  test('after Plan D Task 2, fillCircle and text are skipped', () {
+    // fillPolygon now draws; fillCircle and text still do not. It goes red the
+    // day fillCircle is drawn (Task 3) or another op is silently dropped.
     final c = GeometryCollector(
         pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
     c.beginResidual(Transform2.identity());
@@ -711,7 +710,7 @@ void main() {
         Int32List.fromList(<int>[0, 1, 2]), style);
     c.fillCircle(0, 0, 5, style);
     c.text('x', Handle.none, style);
-    expect(c.skippedOps, 3, reason: 'three ops Plans D and E draw');
+    expect(c.skippedOps, 2, reason: 'fillCircle and text not yet drawn');
   });
 
   // --- dashed polylines (Task 5) -------------------------------------------
@@ -1160,5 +1159,116 @@ void main() {
       expect(phase, lessThan(period));
     }
     expect(sawStroke, isTrue);
+  });
+
+  test('a fill polygon is one instance per triangle, in triangulation order',
+      () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
+    // A non-identity, non-uniform, off-origin residual: the identity would
+    // hide a transposed matrix element, which is the defect Plan A's
+    // post-mortem names.
+    c.beginResidual(Transform2.translation(120, -35)
+        .multiply(Transform2.rotation(0.4))
+        .multiply(Transform2.scale(1.7, 0.6)));
+    c.fillPolygon(
+        Float64List.fromList(<double>[0, 0, 10, 0, 10, 6, 0, 6]),
+        4,
+        Int32List.fromList(<int>[0, 1, 2, 0, 2, 3]),
+        const ResolvedStyle(
+            argb: 0xFF3366CC,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1));
+    c.endResidual();
+
+    expect(c.instanceCount, 2);
+    expect(c.skippedOps, 0, reason: 'a fill is drawn now, not counted');
+
+    final data = c.data;
+    for (var i = 0; i < 2; i++) {
+      expect(
+          data[i * kFloatsPerInstance + InstanceFieldOffset.kind], kKindFill);
+      expect(data[i * kFloatsPerInstance + InstanceFieldOffset.halfWidth], 0.0);
+    }
+
+    // The residual, applied by hand to point 1 (10, 0), against the first
+    // triangle's second corner. Computed here rather than read from the
+    // collector so the assertion is an independent derivation.
+    final t = Transform2.translation(120, -35)
+        .multiply(Transform2.rotation(0.4))
+        .multiply(Transform2.scale(1.7, 0.6));
+    expect(
+        data[InstanceFieldOffset.x1], closeTo(t.a * 10 + t.c * 0 + t.e, 1e-3));
+    expect(
+        data[InstanceFieldOffset.y1], closeTo(t.b * 10 + t.d * 0 + t.f, 1e-3));
+
+    // Triangulation order: the second instance is (0, 2, 3), so its second
+    // corner is point 2 (10, 6) and its third is point 3 (0, 6). A
+    // collector that walked the triangle list backwards, or that sorted it,
+    // fails here -- and draw order is emission order.
+    final o = kFloatsPerInstance;
+    expect(data[o + InstanceFieldOffset.x1],
+        closeTo(t.a * 10 + t.c * 6 + t.e, 1e-3));
+    expect(data[o + InstanceFieldOffset.x2],
+        closeTo(t.a * 0 + t.c * 6 + t.e, 1e-3));
+  });
+
+  test('a fill keeps its own colour on a hairline layer', () {
+    // The lineweight is sub-pixel, which is exactly what `_coveredArgb`
+    // fades for a stroke. A fill must not fade: routing it through that
+    // function would fade a filled room on a hairline layer.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
+    c.beginResidual(Transform2.translation(5, 7));
+    c.fillPolygon(
+        Float64List.fromList(<double>[0, 0, 8, 0, 4, 9]),
+        3,
+        Int32List.fromList(<int>[0, 1, 2]),
+        const ResolvedStyle(
+            argb: 0xFF884422,
+            lineweightHundredths: 1,
+            linetype: Handle.none,
+            linetypeScale: 1));
+    c.endResidual();
+
+    final data = c.data;
+    expect(data[InstanceFieldOffset.a], closeTo(1.0, 1e-6),
+        reason: 'a fill never goes through _coveredArgb');
+    expect(data[InstanceFieldOffset.r], closeTo(0x88 / 255.0, 1e-6));
+  });
+
+  test('an empty triangulation writes nothing', () {
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
+    c.beginResidual(Transform2.translation(5, 7));
+    c.fillPolygon(
+        Float64List.fromList(<double>[0, 0, 8, 0, 4, 9]),
+        3,
+        Int32List(0),
+        const ResolvedStyle(
+            argb: 0xFF884422,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1));
+    c.endResidual();
+    expect(c.instanceCount, 0);
+  });
+
+  test('a degenerate triangle is written, not dropped', () {
+    // `VerticesDrawSink._emitTriangle` has no zero-area test, so neither
+    // does this: matching the formula rather than the intention is what
+    // keeps the two arms' instance lists identical. Both rasterisers drop
+    // it at raster time instead.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
+    c.beginResidual(Transform2.translation(5, 7));
+    c.fillPolygon(
+        Float64List.fromList(<double>[0, 0, 8, 0, 4, 9]),
+        3,
+        Int32List.fromList(<int>[0, 1, 1]),
+        const ResolvedStyle(
+            argb: 0xFF884422,
+            lineweightHundredths: 25,
+            linetype: Handle.none,
+            linetypeScale: 1));
+    c.endResidual();
+    expect(c.instanceCount, 1);
   });
 }

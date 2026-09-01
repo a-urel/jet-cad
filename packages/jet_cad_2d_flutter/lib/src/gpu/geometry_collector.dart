@@ -80,12 +80,13 @@ class GeometryCollector implements DrawSink {
   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
   int get instanceCount => _instances;
 
-  /// Ops this plan does not draw yet — `fillPolygon`, `fillCircle` and
-  /// `text`. Counted rather than ignored so a corpus that needs Plan B
-  /// through E is visible as a number instead of as a missing picture.
+  /// Ops this plan does not draw yet — `text` alone, since Plan D.
   ///
-  /// `circle` and `arc` stopped counting here in Task 5; `point` in Task 6,
-  /// which is also where the test that pins this whole sentence lands.
+  /// Counted rather than ignored so a corpus that needs Plan E is visible as
+  /// a number instead of as a missing picture.
+  ///
+  /// `circle` and `arc` stopped counting here in Plan B's Task 5; `point` in
+  /// its Task 6; `fillPolygon` and `fillCircle` in Plan D's Tasks 2 and 3.
   int get skippedOps => _skipped;
 
   /// **Diagnostic only — read by nobody in this class and never changes what
@@ -624,10 +625,44 @@ class GeometryCollector implements DrawSink {
     return ideal.clamp(1, kMaxFlattenSegments);
   }
 
+  /// One instance per triangle, in the triangulation's own order.
+  ///
+  /// **Read, never computed** — the triangulation was materialised by the
+  /// command, the codec or undo, and `DraftPainter._drawFill` passes it
+  /// through. This transcribes `VerticesDrawSink.fillPolygon`, including
+  /// that `triangles` triple-indexes into `points`' *point* numbering, so
+  /// each index is doubled to reach a coordinate pair.
+  ///
+  /// **`style.argb` directly, NOT `_coveredArgb`** (Ruling D3): a fill has no
+  /// width to fade, and a fill entity's `ResolvedStyle` still carries a
+  /// lineweight because the column is shared with strokes.
+  ///
+  /// **No degenerate-triangle test** (Ruling D6): the reference's
+  /// `_emitTriangle` has none, and adding one here would make the two arms'
+  /// instance lists differ on a triangulation that contains one.
   @override
-  void fillPolygon(Float64List points, int count, Int32List triangles,
-          ResolvedStyle style) =>
-      _skipped++;
+  void fillPolygon(
+      Float64List points, int count, Int32List triangles, ResolvedStyle style) {
+    if (triangles.isEmpty) return;
+    final t = _residual;
+    final argb = style.argb;
+    _reserve(_instances + triangles.length ~/ 3);
+    for (var i = 0; i + 2 < triangles.length; i += 3) {
+      final a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+      final ax = points[a * 2], ay = points[a * 2 + 1];
+      final bx = points[b * 2], by = points[b * 2 + 1];
+      final cx = points[c * 2], cy = points[c * 2 + 1];
+      writeFill(_buffer, _instances,
+          x0: t.a * ax + t.c * ay + t.e,
+          y0: t.b * ax + t.d * ay + t.f,
+          x1: t.a * bx + t.c * by + t.e,
+          y1: t.b * bx + t.d * by + t.f,
+          x2: t.a * cx + t.c * cy + t.e,
+          y2: t.b * cx + t.d * cy + t.f,
+          argb: argb);
+      _instances++;
+    }
+  }
 
   @override
   void fillCircle(double cx, double cy, double r, ResolvedStyle style) =>
