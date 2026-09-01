@@ -676,10 +676,18 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**A human must still look at the window — for THREE plans now.** Plan B's
-criterion has been owed since `72b162d`, Plan C's since `18330a9`, and Plan D
-adds its own five as of this task, none discharged yet. One harness run
-discharges all fourteen; the checks and the corrected command are listed in
+**A human has now looked at the window, informally, and reported the drawing
+correct — 2026-09-01, on the `SPIKE_FILL_SCALE=20` eyeball run.** That is
+written here as exactly what it is and no more: **the fourteen enumerated
+checks below were not reported one by one**, so this is a sign-off on the
+picture as a whole, not fourteen individual verdicts. **Criterion 8 therefore
+stays formally OWED**, and the way to close it is to walk the list below and
+say what each check showed. A record that upgraded "it looks right" into
+fourteen passes would be the one failure this file exists to prevent.
+
+Plan B's criterion has been owed since `72b162d`, Plan C's since `18330a9`,
+and Plan D added its own five at `de962bd`. One harness run covers all
+fourteen; the checks and the corrected command are listed in
 [Plan D's results note](docs/superpowers/notes/2026-09-01-plan-d-results.md#the-window-checks--owed-fourteen-across-three-plans).
 **The command in Plan D's own task brief is missing `SPIKE_FILLS=true`** —
 run exactly as the brief wrote it, the corpus draws no fills at all and none
