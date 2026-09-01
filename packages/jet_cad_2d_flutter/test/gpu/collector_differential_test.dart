@@ -137,6 +137,28 @@ void main() {
     expect(data[InstanceFieldOffset.g] * 255.0, closeTo(0x40, 0.51));
     expect(data[InstanceFieldOffset.b] * 255.0, closeTo(0x60, 0.51));
   });
+
+  test(
+      'the fill fixture -- every instance\'s kind, argb and three points '
+      'match the reference\'s triangle stream, in order', () {
+    // Plan D's own corpus, walked at the record level exactly the way
+    // `differentialFixture` is above: `_checkAgainstOracle` already handles
+    // `PolylineOp` and `CircleOp` generically (900, 903 are plain 2-point
+    // lines; 902 and 905, the two regions' own boundaries, are ordinary
+    // visible entities too -- `AddRegionCommand.apply` adds fill AND
+    // boundary to the tree, "fill first" -- so their outline strokes and
+    // joins are already covered by the existing PolylineOp/CircleOp
+    // handling below). What is new here is `FillPolygonOp` (901) and
+    // `FillCircleOp` (904), which this file had no case for until Plan D.
+    //
+    // **This is also where a fill's colour is checked, not only in
+    // `resident_pixel_differential_test.dart`'s pixel gate.** The pixel
+    // gate can only report a percentage; this loop names the wrong VALUE --
+    // a mutant that routed a fill's argb through `_coveredArgb` would fail
+    // here with the exact faded channel it produced, not just a coverage
+    // fraction.
+    _checkAgainstOracle(fillFixture());
+  });
 }
 
 /// Runs [doc] through the painter twice -- once recorded, once collected --
@@ -242,6 +264,61 @@ void _checkAgainstOracle(DraftDocument doc) {
           residual.a * op.x + residual.c * op.y + residual.e,
           residual.b * op.x + residual.d * op.y + residual.f));
     }
+    // A polygon fill: `triangles` triple-indexes `op.points`' own point
+    // numbering (`draw_sink.dart`'s doc on `FillPolygonOp`, and
+    // `VerticesDrawSink.fillPolygon`, which this expression mirrors), so
+    // each index is doubled to reach the coordinate pair before the
+    // residual is applied. One expected instance per triangle -- no
+    // dedupe, no join, no seam: a fill triangle is not a run.
+    if (op is FillPolygonOp) {
+      final pts = op.points;
+      final tris = op.triangles;
+      for (var t = 0; t + 2 < tris.length; t += 3) {
+        final a = tris[t], b = tris[t + 1], c = tris[t + 2];
+        final ax = pts[a * 2], ay = pts[a * 2 + 1];
+        final bx = pts[b * 2], by = pts[b * 2 + 1];
+        final cx = pts[c * 2], cy = pts[c * 2 + 1];
+        expected.add(_ExpectedInstance.fill(
+            op.style,
+            residual.a * ax + residual.c * ay + residual.e,
+            residual.b * ax + residual.d * ay + residual.f,
+            residual.a * bx + residual.c * by + residual.e,
+            residual.b * bx + residual.d * by + residual.f,
+            residual.a * cx + residual.c * cy + residual.e,
+            residual.b * cx + residual.d * cy + residual.f));
+      }
+    }
+    // A circle fill: a triangle fan around the centre, at the SAME step
+    // count the circle's own outline stroke would flatten to
+    // (`geometry_collector.dart`'s `fillCircle` doc, Ruling D5) -- so this
+    // reuses `_flattenedLocalPoints`, the same perimeter-point deriver the
+    // CircleOp case above already uses for a stroked circle, rather than a
+    // third copy of the step-count formula. The rim starts at angle 0, i.e.
+    // `(cx + r, cy)`, and each fan triangle is `(centre, previous rim point,
+    // next rim point)` -- `VerticesDrawSink.fillCircle`'s own order,
+    // transcribed by `GeometryCollector.fillCircle` too.
+    if (op is FillCircleOp) {
+      final rim = _flattenedLocalPoints(
+          op.cx, op.cy, op.r, 0, 2 * math.pi, residual,
+          closed: false);
+      final rimCount = rim.length ~/ 2;
+      if (rimCount >= 2) {
+        final ccx = residual.a * op.cx + residual.c * op.cy + residual.e;
+        final ccy = residual.b * op.cx + residual.d * op.cy + residual.f;
+        for (var i = 1; i < rimCount; i++) {
+          final px = rim[(i - 1) * 2], py = rim[(i - 1) * 2 + 1];
+          final nx = rim[i * 2], ny = rim[i * 2 + 1];
+          expected.add(_ExpectedInstance.fill(
+              op.style,
+              ccx,
+              ccy,
+              residual.a * px + residual.c * py + residual.e,
+              residual.b * px + residual.d * py + residual.f,
+              residual.a * nx + residual.c * ny + residual.e,
+              residual.b * nx + residual.d * ny + residual.f));
+        }
+      }
+    }
   }
 
   expect(expected, isNotEmpty,
@@ -262,14 +339,14 @@ void _checkAgainstOracle(DraftDocument doc) {
     final e = expected[i];
     final style = e.style;
 
-    // -- kind: a stroke, a join and a point lay their geometry out
+    // -- kind: a stroke, a join, a point and a fill lay their geometry out
     // differently (`InstanceFieldOffset` doc), so asserting only the
     // strokes' kind would pass on a join or point emitted as a stroke with
     // the wrong fields simply never being checked. Every instance's kind
-    // is asserted here, strokes, joins and points alike.
+    // is asserted here, strokes, joins, points and fills alike.
     expect(data[o + InstanceFieldOffset.kind], e.kind,
         reason: 'instance $i must be a '
-            '${e.kind == kKindJoin ? "join" : e.kind == kKindPoint ? "point" : "stroke"}');
+            '${e.kind == kKindJoin ? "join" : e.kind == kKindPoint ? "point" : e.kind == kKindFill ? "fill" : "stroke"}');
 
     // -- walk order & the residual -----------------------------------
     // A stroke's (x0,y0,x1,y1) is its segment; a join's is
@@ -297,12 +374,26 @@ void _checkAgainstOracle(DraftDocument doc) {
     // not a bug being tolerated, it is the fact this test pins (see the
     // module doc on `GeometryCollector._halfWidthFor`). A join carries the
     // same half-width as the segments either side of it.
-    final sinkHalf = _referenceLogicalHalfWidth(style.lineweightHundredths);
-    expect(data[o + InstanceFieldOffset.halfWidth],
-        closeTo(sinkHalf * _devicePixelRatio, _tolerance),
-        reason: 'instance $i half-width must be the reference sink\'s '
-            'logical half-width scaled by devicePixelRatio, not the raw '
-            'logical value copied straight across');
+    //
+    // **A fill has no width at all** (`instance_record.dart`'s `writeFill`
+    // doc, Ruling D2) -- `writeFill` writes a literal `0`, not a lineweight
+    // computation that happens to floor to zero, so the general formula
+    // below is not merely inapplicable to a fill, it would assert the WRONG
+    // thing: `style.argb`'s lineweight is real (fill 901 sits on the
+    // hairline layer) and `_referenceLogicalHalfWidth` would compute a
+    // non-zero floored value for it, which no fill instance ever carries.
+    if (e.kind == kKindFill) {
+      expect(data[o + InstanceFieldOffset.halfWidth], closeTo(0, _tolerance),
+          reason: 'instance $i is a fill and must carry no half-width at '
+              'all, not a floored stroke-width computation');
+    } else {
+      final sinkHalf = _referenceLogicalHalfWidth(style.lineweightHundredths);
+      expect(data[o + InstanceFieldOffset.halfWidth],
+          closeTo(sinkHalf * _devicePixelRatio, _tolerance),
+          reason: 'instance $i half-width must be the reference sink\'s '
+              'logical half-width scaled by devicePixelRatio, not the raw '
+              'logical value copied straight across');
+    }
 
     // -- colour: every entity in `differentialFixture` carries the
     // default lineweight (25 hundredths-of-a-mm), which at
@@ -315,7 +406,21 @@ void _checkAgainstOracle(DraftDocument doc) {
     // be live: a hairline's alpha now differs from its `style.argb`, and a
     // collector that forgot to fade it, or faded it by the wrong formula,
     // must fail this loop rather than being invisible to it.
-    final argb = _referenceCoveredArgb(style.argb, style.lineweightHundredths);
+    //
+    // **A fill's colour is `style.argb` directly, never `_coveredArgb`'s**
+    // (Ruling D3, `geometry_collector.dart:637-639`): a fill has no width
+    // to fade, and both `fillPolygon` and `fillCircle` pass `style.argb`
+    // straight through in the reference too
+    // (`vertices_draw_sink.dart:750-755`). Fill 901 sits on the "hairline"
+    // layer -- lineweight 1 hundredth-of-a-mm -- specifically so this branch
+    // is not vacuous: routing it through `_referenceCoveredArgb` the way the
+    // `else` below does would compute a REAL fade (well under
+    // `kMinStrokeDevicePixels`), so a collector that mistakenly faded a fill
+    // disagrees with a genuinely different number here, not a coincidence
+    // that happens to equal `style.argb` anyway.
+    final argb = e.kind == kKindFill
+        ? style.argb
+        : _referenceCoveredArgb(style.argb, style.lineweightHundredths);
     expect(data[o + InstanceFieldOffset.r],
         closeTo(((argb >> 16) & 0xFF) / 255.0, _tolerance),
         reason: 'instance $i red channel');
@@ -364,6 +469,13 @@ class _ExpectedInstance {
         y1 = 0,
         x2 = 0,
         y2 = 0;
+
+  // A fill triangle's three corners occupy all six coordinate slots --
+  // `writeFill` writes every one of x0/y0/x1/y1/x2/y2 (`instance_record.dart`
+  // -- unlike a stroke or a point, nothing here is pinned to zero.
+  _ExpectedInstance.fill(
+      this.style, this.x0, this.y0, this.x1, this.y1, this.x2, this.y2)
+      : kind = kKindFill;
 
   final double kind;
   final double x0, y0, x1, y1, x2, y2;

@@ -86,6 +86,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart'
     show kFloatsPerInstance;
 
+import 'fixtures.dart' show fillFixture, kViewport;
 import 'instance_expander.dart';
 import 'triangle_rasterizer.dart';
 
@@ -437,13 +438,7 @@ ResidentColorAgreement measureResidentColor(
   final instanceCount = collector.instanceCount;
   if (permute != null) {
     final order = permute(List<int>.generate(instanceCount, (i) => i));
-    final reordered = Float32List(instanceCount * kFloatsPerInstance);
-    for (var i = 0; i < instanceCount; i++) {
-      final from = order[i] * kFloatsPerInstance;
-      final to = i * kFloatsPerInstance;
-      reordered.setRange(to, to + kFloatsPerInstance, data, from);
-    }
-    data = reordered;
+    data = _reorderedInstances(data, instanceCount, order);
   }
 
   final expanded = expandInstances(
@@ -482,4 +477,142 @@ ResidentColorAgreement _colorAgreementOf(
     if (worst > 8) overEight++;
   }
   return ResidentColorAgreement(union, withinTwo, overEight, referenceInk);
+}
+
+/// Moves [order].length whole instance records from [data] into a fresh
+/// buffer: the record at result index `i` is [data]'s record `order[i]`,
+/// copied [kFloatsPerInstance] floats at a time -- position, colour, dash,
+/// everything a record carries, moved together at the record's own stride.
+///
+/// **Shared by [measureResidentColor]'s `permute` and [renderFillFixture]'s,
+/// so there is exactly one place this arithmetic can drift.** Task 6 shipped
+/// `permute` with no caller exercising it; before Task 7 trusted a number
+/// this produced, a throwaway corpus of three full-width, fully-overlapping
+/// strokes in red/green/blue was permuted with a plain `.reversed` and
+/// measured through the real [measureResidentColor]: unpermuted the two arms
+/// agreed exactly (`withinTwo` 100%, `overEight` 0, both ending on blue,
+/// the closure's own last draw); reversed, the resident arm ended on red
+/// instead (`withinTwo` 0%, `overEight` = the whole 8000-pixel union) --
+/// which is only possible if every one of the sixteen floats per record,
+/// not merely `kind` or `argb`, moved to its new index together. See
+/// `task-7-report.md` for the captured run.
+Float32List _reorderedInstances(
+    Float32List data, int instanceCount, List<int> order) {
+  final reordered = Float32List(instanceCount * kFloatsPerInstance);
+  for (var i = 0; i < instanceCount; i++) {
+    final from = order[i] * kFloatsPerInstance;
+    final to = i * kFloatsPerInstance;
+    reordered.setRange(to, to + kFloatsPerInstance, data, from);
+  }
+  return reordered;
+}
+
+/// Device pixel ratio [paintFillFixture], [collectFillFixture] and
+/// [renderFillFixture] paint and rasterise at. Not a parameter on any of the
+/// three: none of `fill_order_test.dart`'s three tests needs a second value,
+/// and a shared constant is what keeps `collectFillFixture`'s buffer and
+/// `renderFillFixture`'s raster surface honestly describing the same camera
+/// -- see [paintFillFixture]'s own doc for why the *viewport* the two share
+/// is not a free parameter either.
+const double kFillFixtureDevicePixelRatio = 2.0;
+
+/// Paints [fillFixture] through the real [DraftPainter], camera fit to
+/// [kViewport] -- the same viewport `fillFixture`'s own guard tests
+/// (`fixtures_test.dart`'s `strokeInkInsideFill`) fit to, so the 337-device
+/// -pixel stroke-over-fill overlap that guard already measured is the
+/// overlap this file's helpers paint too, not a second, unmeasured camera.
+///
+/// **Goes through [DraftPainter], not hand-rolled `sink.fillPolygon` /
+/// `sink.circle` calls.** A fill entity only resolves to its boundary's
+/// triangulation by way of `DraftPainter._drawFill` reading
+/// `doc.fills.trianglesFor(boundary)` -- `AddRegionCommand.apply` is what
+/// materialises that triangulation in the first place. A corpus built by
+/// calling sink methods directly, the way `resident_pixel_differential_test
+/// .dart`'s own `_corpus` does for strokes, would never exercise `_drawFill`
+/// at all and this whole plan's fill path would go untested by the pixel
+/// gate. This is the shape [measureResidentColor]'s `corpus` parameter
+/// takes (`void Function(DrawSink sink)`), so it can be handed to that
+/// function directly, as `fill_order_test.dart`'s third test does.
+///
+/// [fillFixture] is rebuilt fresh on every call -- it is a plain function,
+/// not a cached document -- so two calls (the reference sink's pass and the
+/// resident collector's, inside [measureResidentColor]) each paint their own
+/// copy rather than replaying a mutated one.
+void paintFillFixture(DrawSink sink) {
+  final doc = fillFixture();
+  final camera = ViewportTransform.fit(doc.extents, kViewport);
+  final index = SpatialIndex(doc);
+  final resolver = DocumentStyleResolver(doc);
+  DraftPainter(document: doc, index: index, resolver: resolver)
+      .paint(sink, camera, kViewport);
+  index.dispose();
+}
+
+/// [paintFillFixture], collected into a fresh [GeometryCollector] instead of
+/// painted straight to an arbitrary sink, so a caller can read `.data` and
+/// `.instanceCount` directly. `fill_order_test.dart`'s first test -- the
+/// corpus's own proof that a stroke is emitted after a fill, without which
+/// the rest of that file would pass vacuously -- reads the walk order this
+/// returns.
+GeometryCollector collectFillFixture() {
+  final collector = GeometryCollector(
+      pixelsPerPaperMm: kLogicalPixelsPerMm,
+      devicePixelRatio: kFillFixtureDevicePixelRatio);
+  paintFillFixture(collector);
+  return collector;
+}
+
+/// Renders [fillFixture] through the resident arm ONLY -- the collector's
+/// buffer, optionally reordered by [permute] exactly as
+/// [measureResidentColor]'s own `permute` reorders it (both go through
+/// [_reorderedInstances]), expanded by [expandInstances] and rasterised.
+/// **No reference-sink render happens here.**
+///
+/// This is deliberately narrower than [measureResidentColor]:
+/// `fill_order_test.dart`'s second test asks only whether reordering the
+/// SAME arm's own buffer moves a pixel at all -- a question the resident arm
+/// answers on its own, with nothing to compare against. [measureResidentColor]
+/// is what compares the result to the reference, in that file's third test.
+TriangleRasterizer renderFillFixture(
+    {List<int> Function(List<int> order)? permute}) {
+  final collector = collectFillFixture();
+  var data = collector.data;
+  final instanceCount = collector.instanceCount;
+  if (permute != null) {
+    final order = permute(List<int>.generate(instanceCount, (i) => i));
+    data = _reorderedInstances(data, instanceCount, order);
+  }
+  final expanded = expandInstances(
+      data,
+      instanceCount,
+      Transform2.scale(
+          kFillFixtureDevicePixelRatio, kFillFixtureDevicePixelRatio),
+      dashScale: 1.0);
+  final w = (kViewport.width * kFillFixtureDevicePixelRatio).round();
+  final h = (kViewport.height * kFillFixtureDevicePixelRatio).round();
+  return TriangleRasterizer(w, h)
+    ..observe(expanded.positions, expanded.colors, dash: expanded.dashVaryings);
+}
+
+/// Counts device pixels where [a] and [b] disagree, on the packed colour --
+/// not coverage. A plain `!=` on each pixel: a pixel both rasterisations
+/// inked, but with a different last-write-wins colour, counts as differing
+/// here even though a coverage instrument like [ResidentAgreement] would
+/// call the two identical. That is the whole point of this comparison --
+/// `fill_order_test.dart`'s second test asks whether a permutation of the
+/// fill-fixture buffer moves a pixel, and on this corpus (a stroke that
+/// crosses a fill) the strokes' union of covered pixels is exactly the same
+/// either way; only which primitive is on top, and therefore which colour
+/// survives, can move.
+int countDifferingPixels(TriangleRasterizer a, TriangleRasterizer b) {
+  assert(
+      a.pixels.length == b.pixels.length,
+      'countDifferingPixels compares two rasterisations of the same corpus '
+      'at the same surface size; a length mismatch means the caller '
+      'rendered them at two different sizes');
+  var differing = 0;
+  for (var i = 0; i < a.pixels.length; i++) {
+    if (a.pixels[i] != b.pixels[i]) differing++;
+  }
+  return differing;
 }
