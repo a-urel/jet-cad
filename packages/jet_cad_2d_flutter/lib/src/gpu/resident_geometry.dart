@@ -130,11 +130,11 @@ class ResidentGeometry {
   /// (`git show 8c82208:apps/dev_harness_2d/lib/gpu_arm.dart:379-386` --
   /// that file was deleted in Task 9, before which it lived at this path).
   ///
-  /// **Carries three kinds, not one**, since Plan B: slot 0 still holds a
+  /// **Carries four kinds, not one**, since Plan D: slot 0 still holds a
   /// single quad-corner buffer, but the instance buffer's records now
-  /// interleave strokes, joins and points (`instance_record.dart`'s
-  /// `kKindStroke`/`kKindJoin`/`kKindPoint`), so this one layout describes
-  /// every kind's vertex input rather than a stroke-only one.
+  /// interleave strokes, joins, points and fills (`instance_record.dart`'s
+  /// `kKindStroke`/`kKindJoin`/`kKindPoint`/`kKindFill`), so this one layout
+  /// describes every kind's vertex input rather than a stroke-only one.
   ///
   /// **`kind_half` and `dash`, not `kind`/`half_width` split and no dash at
   /// all, since Plan C's Task 4.** `kind` and `halfWidth` are read as one

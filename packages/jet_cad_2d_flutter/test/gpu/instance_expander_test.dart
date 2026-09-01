@@ -414,15 +414,15 @@ void main() {
     expect(ys.reduce(math.max) - ys.reduce(math.min), closeTo(8, 1e-6));
   });
 
-  test('cad_stroke.vert still carries the three renumber-prone constants', () {
+  test('cad_stroke.vert still carries the four renumber-prone constants', () {
     // Partial net, not a substitute for Ruling B6's human diff: this pins
-    // the three literals a shader edit is most likely to silently renumber
+    // the four literals a shader edit is most likely to silently renumber
     // (`instance_record.dart`'s doc explains why the values and order of
-    // `kKindStroke`/`kKindJoin`/`kKindPoint` are load-bearing, and this
-    // file's own `kExpanderMinMiterCosine` is the fourth, Dart-side, copy
-    // of the miter-limit literal). It reads the GLSL as text and checks
+    // `kKindStroke`/`kKindJoin`/`kKindPoint`/`kKindFill` are load-bearing,
+    // and this file's own `kExpanderMinMiterCosine` is the fifth, Dart-side,
+    // copy of the miter-limit literal). It reads the GLSL as text and checks
     // for the constants, not the arithmetic around them -- a change to the
-    // *formula* that keeps these three literals untouched (for example,
+    // *formula* that keeps these four literals untouched (for example,
     // Task 8's own M-B5/M-B6 mutations) is invisible to this test and
     // remains a human diff against `instance_expander.dart`.
     final source = File('shaders/cad_stroke.vert').readAsStringSync();
@@ -441,6 +441,14 @@ void main() {
       RegExp(r'kind\s*<\s*1\.5').hasMatch(source),
       isTrue,
       reason: 'the join/point dispatch threshold',
+    );
+    expect(
+      RegExp(r'kind\s*<\s*2\.5').hasMatch(source),
+      isTrue,
+      reason: 'the point/fill dispatch threshold -- without it a reverted '
+          "`else` draws every fill as a point, or the reverse, and every "
+          'pixel and expander test in this package runs through the Dart '
+          'transcription, so a GLSL-only regression here turns nothing red',
     );
   });
 }

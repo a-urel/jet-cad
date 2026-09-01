@@ -277,9 +277,9 @@ void main() {
     // the resident arm is fed a deliberately recoloured buffer -- every
     // written colour has 0x00202020 added to it (R, G and B each up by 32),
     // chosen against this corpus's own `_thick`/`_hairline` colour
-    // (0xFF102030, R=0x30 G=0x20 B=0x10) so none of the three channels
-    // carries into its neighbour: 0x30+0x20=0x50, 0x20+0x20=0x40,
-    // 0x10+0x20=0x30, each comfortably inside a byte and each a distance of
+    // (0xFF102030, 0xAARRGGBB, so R=0x10 G=0x20 B=0x30) so none of the three
+    // channels carries into its neighbour: 0x10+0x20=0x30, 0x20+0x20=0x40,
+    // 0x30+0x20=0x50, each comfortably inside a byte and each a distance of
     // exactly 32 from the reference, 16x past the `<= 2` threshold and 4x
     // past the `<= 8` one -- so this is not a threshold nudged to make the
     // assertion pass, it is the same tint the brief's own sample names.

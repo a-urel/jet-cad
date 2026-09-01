@@ -395,6 +395,14 @@ class ResidentColorAgreement {
 /// and proves nothing (Plan 3i's Ruling 14, the same ruling
 /// `debugDisableDashTest` answers). `0` is a no-op -- every ordinary
 /// measurement passes it implicitly by omission.
+///
+/// **A clean per-channel offset only while no channel carries across a
+/// byte boundary.** The tint is added to the packed `0xAARRGGBB` `Uint32`
+/// as a whole, not lane by lane, so a value picked without checking each
+/// byte against the corpus's own colour can carry from one channel into
+/// its neighbour -- the result stops being "every channel up by N" and
+/// becomes an arbitrary recolouring the caller did not intend. Choose the
+/// tint against the actual colour under test, not in the abstract.
 ResidentColorAgreement measureResidentColor(
   void Function(DrawSink sink) corpus, {
   required Size size,
