@@ -95,4 +95,55 @@ void main() {
     expect(slot, isNotNull, reason: 'entity 913 went missing');
     expect(scaled.entities.read(slot!).linetypeScale, isNot(1.0));
   });
+
+  group('fillFixture', () {
+    test('is not degenerate in any of the four ways that would hide a defect',
+        () {
+      final doc = fillFixture();
+
+      // 1. A fill exists and is indexed, so the painter can reach it, and
+      //    its boundary's triangulation was actually materialised --
+      //    `AddRegionCommand.apply` writes it, not this fixture.
+      final fillSlot = doc.entities.slotOf(const Handle(901))!;
+      expect(doc.entities.kindAt(fillSlot), EntityKind.fill);
+      expect(doc.fills.trianglesFor(const Handle(902)), isNotNull,
+          reason: 'an unfillable boundary is skipped by the painter and the '
+              'corpus would silently draw no fill at all');
+
+      // 2. Strokes on BOTH sides of the fill in handle order. Without the
+      //    higher one, permuting the buffer changes no pixel and the
+      //    criterion-4 test in Task 7 passes vacuously.
+      expect(const Handle(900).value, lessThan(const Handle(901).value));
+      expect(const Handle(903).value, greaterThan(const Handle(901).value));
+
+      // 3. The translucent fill is actually translucent -- neither opaque
+      //    nor invisible.
+      final translucentSlot = doc.entities.slotOf(const Handle(904))!;
+      final translucent = doc.entities.transparencyAt(translucentSlot);
+      expect(translucent, greaterThan(0));
+      expect(translucent, lessThan(255));
+
+      // 4. No identity transform: the fill sits under a rotated, non-uniform
+      //    instance well away from the origin. An axis-aligned fill at the
+      //    origin hides a transposed matrix element -- Plan 2's post-mortem.
+      final node = doc.tree[const Handle(910)]! as InstanceNode;
+      expect(node.transform.a, isNot(closeTo(node.transform.d, 1e-9)));
+      expect(node.transform.b, isNot(0.0));
+      expect(node.transform.e.abs(), greaterThan(1.0));
+    });
+
+    test('the fill and the higher-handle stroke actually overlap on screen',
+        () {
+      // A corpus whose "overlapping" shapes miss each other proves nothing.
+      // Painted through the reference sink, the stroke's ink must land
+      // inside the fill's bounding box.
+      final doc = fillFixture();
+      final fillBox = doc.extents;
+      expect(fillBox.min.x, lessThan(fillBox.max.x));
+      final overlap = strokeInkInsideFill(doc);
+      expect(overlap, greaterThan(200),
+          reason: 'fewer than 200 shared device pixels and the order gate '
+              'cannot see a permutation');
+    });
+  });
 }

@@ -1,10 +1,12 @@
 import 'dart:typed_data';
-import 'dart:ui' show Size;
+import 'dart:ui' show Canvas, PictureRecorder, Size;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+
+import 'triangle_rasterizer.dart';
 
 const Size kViewport = Size(800, 600);
 
@@ -672,4 +674,269 @@ DraftDocument textLodDifferentialDocument(TextMeasurer measurer) {
   )));
 
   return doc;
+}
+
+/// A corpus for Plan D: two fills, and strokes on both sides of one of them
+/// in handle order.
+///
+/// **Every element is here because a named mutation needs it:**
+///  - handle 900 is a thick stroke the fill covers, so a fill that failed to
+///    draw leaves it visible;
+///  - handle 901 is an opaque fill on a **hairline layer**, so a fill routed
+///    through `_coveredArgb` fades (M-D5) where a correct one does not --
+///    `lineweight: 1` on both the layer and the fill's own record resolves
+///    to a device width of about 0.038 px at `kLogicalPixelsPerMm` and
+///    `devicePixelRatio: 1.0`, comfortably under `kMinStrokeDevicePixels`
+///    (1.0) and comfortably above zero, which is the one width
+///    `_coveredArgb` leaves untouched -- see that function's own comment;
+///  - handle 903 is a thick stroke of HIGHER handle crossing the fill, so it
+///    is drawn *after* the fill and stays visible over it. Permuting the
+///    buffer to draw all fills last hides it -- which is spec criterion 4,
+///    and the reason this corpus exists at all. [strokeInkInsideFill] proves
+///    the overlap is real rather than assumed;
+///  - handle 904 is a translucent fill over a circle boundary, so the fan
+///    path (`fillCircle`) is exercised and the colour comparison has a
+///    non-opaque value to disagree about;
+///  - the whole thing sits under instance 910, rotated and non-uniformly
+///    scaled, far from the origin: an identity transform commutes and hides
+///    composition-order defects (Plan 2's post-mortem).
+///
+/// | handle | what |
+/// |---|---|
+/// | 900 | a thick stroke **under** the fill (lower handle) |
+/// | 901 | the fill entity, opaque, on a hairline layer |
+/// | 902 | its boundary polygon |
+/// | 903 | a thick stroke **over** the fill (higher handle), crossing it |
+/// | 904 | the translucent fill entity |
+/// | 905 | its boundary circle |
+/// | 910 | the placement: rotated, non-uniformly scaled, off-origin |
+///
+/// **The polygon boundary's triangulation is not supplied by hand.**
+/// `AddRegionCommand.apply` calls `triangulationFor` itself and, when the
+/// result is non-empty, writes it into `doc.fills` before returning --
+/// `packages/jet_cad_2d/lib/src/document/commands.dart`'s `apply` method,
+/// verified directly rather than assumed. `fillFixture`'s own guard test
+/// checks `doc.fills.trianglesFor(const Handle(902))` is non-null for
+/// exactly this reason: if a future change to `AddRegionCommand` ever stopped
+/// materialising it, this is where that would be caught.
+DraftDocument fillFixture() {
+  final doc = DraftDocument.empty();
+
+  const content = Handle(890);
+  doc.tree.addDefinition(Definition(
+      handle: content,
+      name: 'filled-room',
+      basePoint: Vector2.zero(),
+      children: const []));
+
+  // 900: under the fill.
+  addEntity(doc, content, const Handle(900), EntityKind.line, [1, 1, 19, 13],
+      const [],
+      lineweight: 120);
+
+  // 901 / 902: the opaque fill and its boundary, on a hairline layer.
+  //
+  // `AddLayerCommand` does not exist in this package -- layers are added
+  // directly to `doc.tables.layers`, the same way
+  // `test/document/style_resolver_test.dart`'s own `addLayer` helper does
+  // it. `LayerRecord` also requires `transparency`, which the brief's shape
+  // omitted.
+  const hairline = Handle(895);
+  doc.tables.layers.add(const LayerRecord(
+    handle: hairline,
+    name: 'hairline',
+    color: TrueColor(0x333333),
+    linetype: ReservedHandles.continuousLinetype,
+    lineweight: 1,
+    transparency: 0,
+  ));
+  doc.commands.execute(AddRegionCommand(
+    fill: const EntityRecord(
+      handle: Handle(901),
+      owner: content,
+      kind: EntityKind.fill,
+      layer: hairline,
+      linetype: ReservedHandles.continuousLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: TrueColor(0x2E7D32),
+      lineweight: 1,
+      transparency: 0,
+      flags: 0,
+    ),
+    boundary: const EntityRecord(
+      handle: Handle(902),
+      owner: content,
+      kind: EntityKind.polyline,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.continuousLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: TrueColor(0x000000),
+      lineweight: kLineweightDefault,
+      transparency: 0,
+      flags: 0,
+    ),
+    boundaryPayload: GeometryPayload(
+      coords: Float64List.fromList(<double>[
+        2, 2, //
+        17, 3, //
+        16, 12, //
+        3, 11, //
+        2, 2, // closing duplicate
+      ]),
+      scalars: Float64List(0),
+    ),
+  ));
+
+  // 903: over the fill, and crossing it.
+  addEntity(doc, content, const Handle(903), EntityKind.line, [3, 12, 17, 2],
+      const [],
+      lineweight: 120);
+
+  // 904 / 905: the translucent fill, over a circle boundary.
+  doc.commands.execute(AddRegionCommand(
+    fill: const EntityRecord(
+      handle: Handle(904),
+      owner: content,
+      kind: EntityKind.fill,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.continuousLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: TrueColor(0xC62828),
+      lineweight: kLineweightDefault,
+      transparency: 128,
+      flags: 0,
+    ),
+    boundary: const EntityRecord(
+      handle: Handle(905),
+      owner: content,
+      kind: EntityKind.circle,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.continuousLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: TrueColor(0x000000),
+      lineweight: kLineweightDefault,
+      transparency: 0,
+      flags: 0,
+    ),
+    boundaryPayload: GeometryPayload(
+      coords: Float64List.fromList(<double>[24, 7]),
+      scalars: Float64List.fromList(<double>[5.5]),
+    ),
+  ));
+
+  // The placement: rotated, non-uniformly scaled, far from the origin.
+  doc.commands.execute(AddNodeCommand(InstanceNode(
+    handle: const Handle(910),
+    parent: doc.rootHandle,
+    transform: Transform2.translation(37.5, 22.25)
+        .multiply(Transform2.rotation(0.44))
+        .multiply(Transform2.scale(1.8, 1.15)),
+    definition: content,
+    layer: ReservedHandles.layerZero,
+    color: const IndexedColor(7),
+  )));
+
+  return doc;
+}
+
+/// The screen-space AABB of entity [handle], folding in [node]'s placement
+/// and [camera]'s projection.
+///
+/// All four corners of the local box are transformed, not two: under
+/// rotation the axis-aligned image of two opposite corners omits area a
+/// rotated box actually covers -- the same reason
+/// `ViewportTransform.visibleWorld` transforms all four of its own.
+Aabb2 _screenBoxOf(DraftDocument doc, Handle handle, InstanceNode node,
+    ViewportTransform camera) {
+  final record = doc.entities.read(doc.entities.slotOf(handle)!);
+  final payload = doc.geometry.read(record.geomIndex);
+  final local = entityBounds(
+    kind: record.kind,
+    payload: payload,
+    measurer: doc.textMeasurer,
+    textStyle: doc.textStyleOf(record.textStyle),
+  );
+  var box = Aabb2.empty();
+  for (final corner in [
+    Vector2(local.minX, local.minY),
+    Vector2(local.maxX, local.minY),
+    Vector2(local.maxX, local.maxY),
+    Vector2(local.minX, local.maxY),
+  ]) {
+    box = box.expandedToPoint(
+        camera.worldToScreen(node.transform.transformPoint(corner)));
+  }
+  return box;
+}
+
+/// Paints [doc] through `VerticesDrawSink`, backed by a throwaway `Canvas`,
+/// and returns the coverage rasterizer that watched the flush.
+///
+/// `VerticesDrawSink.flush` always submits to a real `canvas.drawVertices`,
+/// so a `Canvas` backed by a `PictureRecorder` is required even though
+/// nothing here ever reads the resulting picture --
+/// `test/invariants/frame_accounting_test.dart` establishes the same pattern
+/// for the same reason.
+TriangleRasterizer _rasterizeFillFixture(
+    DraftDocument doc, ViewportTransform camera) {
+  final recorder = PictureRecorder();
+  final canvas = Canvas(recorder);
+  final index = SpatialIndex(doc);
+  final rasterizer =
+      TriangleRasterizer(kViewport.width.toInt(), kViewport.height.toInt());
+  final sink = VerticesDrawSink(
+    pixelsPerPaperMm: kLogicalPixelsPerMm,
+    canvas: canvas,
+  )..observer = rasterizer.observe;
+  DraftPainter(
+          document: doc, index: index, resolver: DocumentStyleResolver(doc))
+      .paint(sink, camera, kViewport);
+  sink.flush();
+  index.dispose();
+  recorder.endRecording().dispose();
+  return rasterizer;
+}
+
+/// Paints [fillFixture]'s corpus once as built and once with handle 903
+/// removed, and returns how many screen pixels inside the opaque fill's own
+/// box disagree between the two.
+///
+/// This is the corpus's own proof that 903 genuinely overlaps the fill
+/// rather than merely sitting near it: a pixel inked identically both times
+/// was never covered by 903 to begin with, and permuting the draw buffer
+/// later could never move it -- the exact property Task 7's order gate
+/// needs 903 to have. The camera is fixed **before** 903 is removed and
+/// reused for both renders; refitting it afterwards would let the smaller
+/// extents shift the camera and compare two different views of the drawing
+/// instead of the same view with and without one stroke.
+///
+/// [doc] is mutated -- entity 903 is removed from it -- so a caller must not
+/// paint or measure [doc] again afterwards.
+int strokeInkInsideFill(DraftDocument doc) {
+  final camera = ViewportTransform.fit(doc.extents, kViewport);
+  final node = doc.tree[const Handle(910)]! as InstanceNode;
+  final fillBox = _screenBoxOf(doc, const Handle(902), node, camera);
+
+  final withStroke = _rasterizeFillFixture(doc, camera);
+  doc.commands.execute(RemoveEntityCommand(const Handle(903)));
+  final withoutStroke = _rasterizeFillFixture(doc, camera);
+
+  final w = kViewport.width.toInt();
+  final h = kViewport.height.toInt();
+  final minX = fillBox.minX.floor().clamp(0, w - 1);
+  final maxX = fillBox.maxX.ceil().clamp(0, w - 1);
+  final minY = fillBox.minY.floor().clamp(0, h - 1);
+  final maxY = fillBox.maxY.ceil().clamp(0, h - 1);
+
+  var differing = 0;
+  for (var y = minY; y <= maxY; y++) {
+    for (var x = minX; x <= maxX; x++) {
+      if (withStroke.inked(x, y) != withoutStroke.inked(x, y)) differing++;
+    }
+  }
+  return differing;
 }
