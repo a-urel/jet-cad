@@ -119,6 +119,34 @@ void main() {
     expect(loaded.extents.min.x, closeTo(4.5e6, 1e-9));
   });
 
+  test('every header field survives save and load', () {
+    // `_loadHeader` copies the parsed header onto the target document field
+    // by field, so a field added to `DocumentHeader` and forgotten there is
+    // silently reset to its default by every load. That is what happened to
+    // `globalLinetypeScale`: it was written, parsed back, and then dropped,
+    // changing the dash length of every dashed entity in a saved drawing.
+    // Nothing caught it because every fixture in this suite left the field at
+    // its default -- so this one sets each header field to a value that is
+    // not its default, and asserts on the *re-encoded* header rather than on
+    // named fields, which makes the next forgotten field fail here too.
+    final source = DraftDocument.empty();
+    source.header
+      ..units = DrawingUnits.inches
+      ..scale = 2.5
+      ..globalLinetypeScale = 1.7
+      ..importedExtents = Aabb2(Vector2(-3, -4), Vector2(11, 12))
+      ..customVariables[r'$LUNITS'] = 4;
+
+    final encoded = DraftDocumentCodec.encode(source);
+    final loaded = DraftDocumentCodec.decode(encoded);
+
+    expect(DraftDocumentCodec.encode(loaded)['header'], encoded['header'],
+        reason: 'a header field the codec drops on load reads back here as '
+            'its default');
+    expect(loaded.header.globalLinetypeScale, 1.7,
+        reason: 'dropping it rescales every dashed entity in the drawing');
+  });
+
   test("an instance's colour survives save and load", () {
     final doc = DraftDocument.empty();
     const def = Handle(600);
