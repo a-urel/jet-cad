@@ -1316,6 +1316,8 @@ void main() {
     // Triangle 0's second corner is the rim at angle 0: (cx + r, cy).
     expect(data[InstanceFieldOffset.x1],
         closeTo(t.a * (12 + 7.5) + t.c * -5 + t.e, 1e-3));
+    expect(data[InstanceFieldOffset.y1],
+        closeTo(t.b * (12 + 7.5) + t.d * -5 + t.f, 1e-3));
     // Consecutive triangles share an edge: triangle i's third corner is
     // triangle i+1's second. A fan written out of order fails here.
     final o1 = kFloatsPerInstance;
@@ -1337,5 +1339,30 @@ void main() {
       ..fillCircle(1, 1, -2, style)
       ..endResidual();
     expect(c.instanceCount, 0);
+  });
+
+  test('a fill circle keeps its own colour on a hairline layer', () {
+    // The lineweight is sub-pixel, which is exactly what `_coveredArgb`
+    // fades for a stroke. A filled circle must not fade: routing it through
+    // that function would fade a filled room on a hairline layer.
+    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
+    c.beginResidual(Transform2.translation(5, 7));
+    c.fillCircle(
+        0,
+        0,
+        8,
+        const ResolvedStyle(
+            argb: 0xFF884422,
+            lineweightHundredths: 1,
+            linetype: Handle.none,
+            linetypeScale: 1));
+    c.endResidual();
+
+    final data = c.data;
+    expect(data[InstanceFieldOffset.a], closeTo(1.0, 1e-6),
+        reason: 'a filled circle never goes through _coveredArgb');
+    expect(data[InstanceFieldOffset.r], closeTo(0x88 / 255.0, 1e-6));
+    expect(data[InstanceFieldOffset.g], closeTo(0x44 / 255.0, 1e-6));
+    expect(data[InstanceFieldOffset.b], closeTo(0x22 / 255.0, 1e-6));
   });
 }
