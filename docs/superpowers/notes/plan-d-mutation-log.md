@@ -248,7 +248,9 @@ was then restored from its `/tmp` backup; the new assertions in
 
 ## M-D5 — the point branch stays `else` and the fill branch is added before it
 
-**File:** `test/support/instance_expander.dart`
+**File:** `test/support/instance_expander.dart` (Dart transcription, same
+reason as M-D3 and M-D4 — `flutter test` has no GPU, so this stands in for
+`shaders/cad_stroke.vert` itself).
 
 **Diff applied:**
 

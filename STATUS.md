@@ -1,12 +1,15 @@
 # jet-cad — project status
 
 **Last updated:** 2026-09-01
-**Verified against:** `main` at `3a61b45` — the merge commit for **Plan C of
-the GPU-resident render backend**, the third of that spec's seven plans.
-`main` itself is unchanged since that merge. **Plan D (fills), the fourth
-plan, is IN FLIGHT on `plan-d/fills`**, cut from `main` at `bde9196`, nine
-tasks at `bde9196..36dfb7e` plus this task's own commit — **not yet
-merged.** Before Plan C, Plan B merged at `72b162d` (eleven tasks,
+**Verified against:** `main` at `bde9196`. `main` is **not** unchanged since
+Plan C's merge commit `3a61b45`: two commits landed after it — a codec fix
+(`5069a6e`, `_loadHeader` now carries `globalLinetypeScale`) and its merge
+(`e347238`), which together add exactly one new test to `packages/jet_cad_2d`
+(`json_codec_test.dart`'s `every header field survives save and load`) — and
+Plan D's plan document is the commit after that, `bde9196` itself. **Plan D
+(fills), the fourth plan, is IN FLIGHT on `plan-d/fills`**, cut from `main` at
+`bde9196`, nine tasks at `bde9196..36dfb7e` plus this task's own commit —
+**not yet merged.** Before Plan C, Plan B merged at `72b162d` (eleven tasks,
 `5c94e11..4892a01`), Plan A at `cd5bc98` (nine tasks) and Plan 3i ran
 directly on `main` at `468e310..dbc31e8`.
 
@@ -15,9 +18,13 @@ and `apps/dev_harness_2d` was produced by running that suite on
 `plan-d/fills` on 2026-09-01** — `jet_cad_2d` **798**, `jet_cad_2d_flutter`
 **565** (1 pre-existing skip), `dev_harness_2d` **73**, analyze and format
 clean in all three — not by reading a report, and not by trusting the
-branch's own green run. A green run only proves the tree it ran on. `main`'s
-own counts are unchanged from Plan C's merge (797 / 540 / 72) until Plan D
-merges.
+branch's own green run. A green run only proves the tree it ran on. **The
+`jet_cad_2d` figure of 798 is inherited from `main` at `bde9196`, not
+produced by Plan D — Plan D touches nothing under `packages/jet_cad_2d` at
+all** (confirm with `git diff --stat bde9196..plan-d/fills -- packages/jet_cad_2d/`,
+which is empty); the +1 over Plan C's 797 is the codec-fix test above. `main`'s
+own counts are 798 / 540 / 72 as of `bde9196` and unchanged since — `jet_cad_2d_flutter`
+and `dev_harness_2d` did not move past Plan C's merge — until Plan D merges.
 
 **Plan D (fills) is DONE on its branch. Exit gate: 8 of 9 — criterion 8 is
 OWED**, in those words: this task's controller ruling (D-9a) forbids

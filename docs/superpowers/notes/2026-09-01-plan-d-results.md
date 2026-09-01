@@ -221,6 +221,17 @@ plan's fills add to Plan C's own measured buffer is small relative to the
 6.41 MB baseline** and stays comfortably inside the budget at either set of
 spike knobs measured here.
 
+**This corpus is 160 fill instances out of 114,717 — 0.14% — and the PASS
+above is a measurement of *that* mix, not of fills in general.** Ruling D7
+records that a fill instance wastes ten of its sixteen floats — 40 of the
+record's 64 bytes — and names Task 9, this measurement, as the way that
+waste gets priced. At 0.14% of the buffer, the wasted floats cost about 6.25
+KB here (160 × 40 bytes); a corpus with a materially higher fill fraction
+would pay the same per-instance waste at a proportionally larger share of
+the 8 MB budget, and this PASS says nothing about where that corpus would
+land. Read the 6.51 MB and 7.00 MB figures as "fills at this corpus's fill
+fraction fit," not as "fills fit."
+
 `SPIKE_FILLS`'s own default (`false`) leaves `spikeDocument()` calling
 `generateDocument` exactly as it did before this task, with no call to
 `_addFillRegions` — every number any earlier plan took through this harness
@@ -363,6 +374,11 @@ fourteen.** None has been discharged as of this note.
 Pre-committed in the plan. A miss would be recorded as a miss with its
 number; there is no miss to record — the one unmet row is OWED, not failed,
 and stays that way until a human runs the harness.
+
+**Criteria 1 through 4 are measured through the Dart transcription
+(`test/support/instance_expander.dart`) plus `TriangleRasterizer`, not on a
+GPU** — the same qualifier Criterion 6's buffer measurement carries above,
+restated here because the table is read on its own.
 
 | # | criterion | verdict |
 |---|---|---|
