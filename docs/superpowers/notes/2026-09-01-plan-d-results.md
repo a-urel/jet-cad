@@ -158,6 +158,22 @@ and not including `ResidentGeometry.create`: builds a `SpatialIndex`, fits
 `ViewportTransform` to the document's extents, walks it through
 `DraftPainter` into a `GeometryCollector`, and reads `collector.data`.
 
+**This test is measured against the testing bar, not merely asserted.** Its
+`expect(fills, greaterThan(0))` guard was fired: `main.dart`'s
+`spikeDocument` was mutated so `_addFillRegions` never runs
+(`if (false && (fillsEnabled ?? kSpikeFills)) _addFillRegions(doc, count);`),
+`flutter test test/fill_buffer_budget_test.dart` then failed with
+`Expected: a value greater than <0> / Actual: <0>` on that exact assertion,
+and the file was restored from a `/tmp` backup (`git status --short` clean
+afterward) — this is the guard against `SPIKE_FILLS` (or the fill path
+behind it) silently going dark and the buffer measurement staying vacuous
+about the one thing this task adds. The companion guard,
+`expect(other, 0)` (every instance must carry a known kind tag), was not
+independently fired this round — it would need a mutation inside
+`GeometryCollector`/`instance_record.dart` rather than in the harness, which
+is a real mutation to try but wasn't; it is reported here as untested rather
+than as either killed or unkillable.
+
 Reproducible two ways:
 
 ```sh
