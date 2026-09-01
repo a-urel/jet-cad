@@ -382,7 +382,8 @@ DraftDocument harnessDocument([int? entityCount]) {
 /// [generateDocument]'s two -- this runs after that function has already
 /// returned, so sharing either of its streams is not even available, and a
 /// fresh one keeps this addition's own output reproducible on its own.
-void _addFillRegions(DraftDocument doc, int entityCount) {
+void _addFillRegions(DraftDocument doc, int entityCount,
+    {double sizeScale = 1.0}) {
   final random = math.Random(0xFEEDFACE);
   final roomCount = math.max(200, entityCount ~/ 100);
   // The floor's own centre -- generateDocument's floor entities are
@@ -394,8 +395,12 @@ void _addFillRegions(DraftDocument doc, int entityCount) {
   final centerY = kOriginY + kFloorHeight / 2;
   var fillDue = 0.0;
   for (var i = 0; i < roomCount; i++) {
-    final w = 30.0 + random.nextDouble() * 90.0;
-    final h = 30.0 + random.nextDouble() * 70.0;
+    // `sizeScale` multiplies the size and nothing else: the two
+    // `nextDouble` calls stay in the same order, so room `i` is the same
+    // room at every scale, drawn larger. Its placement follows, since `x0`
+    // and `y0` below are derived from `w` and `h`.
+    final w = (30.0 + random.nextDouble() * 90.0) * sizeScale;
+    final h = (30.0 + random.nextDouble() * 70.0) * sizeScale;
     // Corridor: centred (centerX + 1750, centerY - 750), half-extents
     // (3500, 2100) -- see the doc comment above for how these were derived.
     final x0 = centerX + 1750.0 + (random.nextDouble() - 0.5) * 7000.0 - w / 2;
@@ -650,6 +655,34 @@ final bool kSpikeFills = switch (
     throw StateError('SPIKE_FILLS must be true or false; got "$other"'),
 };
 
+/// Multiplies the size of every room [_addFillRegions] adds, so a human can
+/// actually see one.
+///
+/// **This exists because the measurement corpus is unviewable, and the
+/// arithmetic says so rather than the eye.** The floor is 60,000 x 40,000
+/// units ([kFloorWidth], [kFloorHeight]) and the measurement window is
+/// 1400 x 900 logical pixels, so a fitted camera runs at 0.0225 px/unit. A
+/// room is 30-120 units wide, which lands on screen at **0.7 to 2.7 pixels**
+/// -- present, drawn, and far too small to judge. Plan D's five window
+/// checks (a fill is filled, the higher-handle stroke stays visible over it,
+/// a filled circle meets its own outline, a hairline-layer fill does not
+/// fade, a translucent fill shows what is under it) cannot be made against a
+/// two-pixel speck.
+///
+/// **Inert at its default of `1.0`**, which is not a courtesy: every number
+/// in `docs/superpowers/notes/2026-09-01-plan-d-results.md` was taken at this
+/// corpus's own room size, and a scale that silently defaulted to anything
+/// else would put a different drawing under the same heading. Pass
+/// `SPIKE_FILL_SCALE=20` for a run you intend to *look* at, and leave it
+/// unset for a run you intend to *measure*.
+///
+/// The floor is 0.01 rather than 0: a zero scale collapses every room to a
+/// degenerate rectangle, which is a corpus that tests nothing and a
+/// triangulation that means nothing.
+final double kSpikeFillScale = _doubleDefine(
+    'SPIKE_FILL_SCALE', const String.fromEnvironment('SPIKE_FILL_SCALE'), 1.0,
+    minimum: 0.01);
+
 /// The document the widget and GPU spikes measure. Deliberately not
 /// [harnessDocument]: see [kSpikeDefs].
 ///
@@ -660,7 +693,8 @@ final bool kSpikeFills = switch (
 /// `test/fill_buffer_budget_test.dart` does to measure a fixed 10,000-entity,
 /// fills-on corpus without depending on how the binary happened to be
 /// launched.
-DraftDocument spikeDocument({int? entityCount, bool? fillsEnabled}) {
+DraftDocument spikeDocument(
+    {int? entityCount, bool? fillsEnabled, double? fillScale}) {
   final count = entityCount ?? kEntities;
   final doc = generateDocument(
     count,
@@ -677,7 +711,9 @@ DraftDocument spikeDocument({int? entityCount, bool? fillsEnabled}) {
     attributedInstanceFraction: 0,
     measurer: harnessMeasurer,
   );
-  if (fillsEnabled ?? kSpikeFills) _addFillRegions(doc, count);
+  if (fillsEnabled ?? kSpikeFills) {
+    _addFillRegions(doc, count, sizeScale: fillScale ?? kSpikeFillScale);
+  }
   return doc;
 }
 
