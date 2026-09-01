@@ -353,6 +353,18 @@ void main() {
         (e.positions[9] - e.positions[7]) * (e.positions[10] - e.positions[6]);
     expect(area, 0.0,
         reason: 'the second triangle of a fill instance must be degenerate');
+
+    // The area check above cannot tell "M folded onto p1" from "M folded
+    // onto p2" apart: the corner table's M-weighted vertex always
+    // duplicates whichever point it is folded onto, so triangle 1 comes out
+    // zero-area either way -- (p1, p1, p2) or (p1, p2, p2) both have zero
+    // area. Pin the M vertex (positions[8..9], the row wired to `wm`) to
+    // its documented value, `p1`, directly -- this is the assertion that
+    // actually distinguishes the two, and it is what M-D4 (Task 8's mutant
+    // table) needs to die.
+    expect(e.positions[8], closeTo(40, 1e-6),
+        reason: 'M must fold onto p1 (A), not p2 (B)');
+    expect(e.positions[9], closeTo(12, 1e-6));
   });
 
   test('a fill is not expanded by a half-width, at any camera', () {

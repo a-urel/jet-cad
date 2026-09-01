@@ -1,0 +1,677 @@
+# Plan D's mutation log — Task 8
+
+Twelve pre-committed mutations, fired one at a time against the merged Plan D
+tree on `plan-d/fills`, each from a `cp` backup outside the repo
+(`/tmp/plan-d-mutation-backups/`, plus a per-mutation `/tmp/plan-d-backup*.dart`
+used for the actual restore) and restored the same way. No mutation was ever
+reverted with `git checkout --`; `git status --short` was clean after every
+restore except for the one file this task deliberately keeps changed
+(`test/gpu/instance_expander_test.dart`, for M-D4 — see below).
+
+All commands below ran from `packages/jet_cad_2d_flutter`.
+
+**Baseline, before any mutation:** `flutter test` — `+536 ~1` climbing to
+`+565 ~1: All tests passed!` (565 tests, 1 pre-existing skip).
+
+---
+
+## M-D1 — `fillPolygon` writes `_coveredArgb(style.argb, ...)` instead of `style.argb`
+
+**File:** `lib/src/gpu/geometry_collector.dart`
+
+**Diff applied:**
+
+```diff
+     if (triangles.isEmpty) return;
+     final t = _residual;
+-    final argb = style.argb;
++    final argb = _coveredArgb(style.argb, style.lineweightHundredths); // M-D1
+     _reserve(_instances + triangles.length ~/ 3);
+```
+
+**Command:** `flutter test test/gpu/geometry_collector_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +46: a fill keeps its own colour on a hairline layer
+00:00 +46 -1: a fill keeps its own colour on a hairline layer [E]
+  Expected: a numeric value within <0.000001> of <1.0>
+    Actual: <0.07450980693101883>
+     Which:  differs by <0.9254901930689812>
+  a fill never goes through _coveredArgb
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/geometry_collector_test.dart 1235:5        main.<fn>
+```
+
+**Verdict: KILLED**, by the named test (`geometry_collector_test.dart`, "a
+fill keeps its own colour on a hairline layer").
+
+---
+
+## M-D2 — `fillCircle` writes `_coveredArgb(...)`
+
+**File:** `lib/src/gpu/geometry_collector.dart`
+
+**Diff applied:**
+
+```diff
+     final steps = _flattenSteps(deviceRadius, theta);
+     // `style.argb` directly, never `_coveredArgb` -- Ruling D3.
+-    final argb = style.argb;
++    final argb = _coveredArgb(style.argb, style.lineweightHundredths); // M-D2
+```
+
+**Command:** `flutter test test/gpu/geometry_collector_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +51: a fill circle keeps its own colour on a hairline layer
+00:00 +51 -1: a fill circle keeps its own colour on a hairline layer [E]
+  Expected: a numeric value within <0.000001> of <1.0>
+    Actual: <0.07450980693101883>
+     Which:  differs by <0.9254901930689812>
+  a filled circle never goes through _coveredArgb
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/geometry_collector_test.dart 1362:5        main.<fn>
+```
+
+**Verdict: KILLED**, by the named test. This reproduces, exactly, the
+`0.0745` alpha value the earlier round recorded for this mutation — same
+fixture (`lineweightHundredths: 1`, `pixelsPerPaperMm: 3.78`,
+`devicePixelRatio: 1.0`), same arithmetic.
+
+---
+
+## M-D3 — the shader's fill branch reads `half_width` (expand each corner outward)
+
+`flutter test` has no GPU, so `shaders/cad_stroke.vert` itself cannot be
+exercised. Per the task's brief, this mutates the Dart transcription instead:
+**`test/support/instance_expander.dart`**, the file
+`instance_expander_test.dart` gates line-for-line against the shader.
+
+**Diff applied:**
+
+```diff
+         final a0x = toX(x0, y0), a0y = toY(x0, y0);
+         final a1x = toX(x1, y1), a1y = toY(x1, y1);
+         final a2x = toX(x2, y2), a2y = toY(x2, y2);
+-        px = c.wv * a0x + (c.wa + c.wm) * a1x + c.wb * a2x;
+-        py = c.wv * a0y + (c.wa + c.wm) * a1y + c.wb * a2y;
++        // M-D3: the fill branch reads half_width (expand each corner
++        // outward), which a fill must never do (Ruling D2).
++        px = c.wv * a0x + (c.wa + c.wm) * a1x + c.wb * a2x + halfWidth;
++        py = c.wv * a0y + (c.wa + c.wm) * a1y + c.wb * a2y + halfWidth;
+```
+
+**Command:** `flutter test test/gpu/instance_expander_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +15: a fill is not expanded by a half-width, at any camera
+00:00 +15 -1: a fill is not expanded by a half-width, at any camera [E]
+  Expected: a numeric value within <0.0001> of <133.32152684419714>
+    Actual: <142.321533203125>
+     Which:  differs by <9.000006358927862>
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/instance_expander_test.dart 375:5          main.<fn>
+```
+
+**Verdict: KILLED**, by the named test — the differential is exactly the 9.0
+half-width the test deliberately poisons into the record to make "ignored"
+distinguishable from "zero".
+
+---
+
+## M-D4 — the fill branch folds `M` onto `p2` instead of `p1`
+
+**File:** `test/support/instance_expander.dart` (Dart transcription, same
+reason as M-D3).
+
+**Diff applied:**
+
+```diff
+         final a0x = toX(x0, y0), a0y = toY(x0, y0);
+         final a1x = toX(x1, y1), a1y = toY(x1, y1);
+         final a2x = toX(x2, y2), a2y = toY(x2, y2);
+-        px = c.wv * a0x + (c.wa + c.wm) * a1x + c.wb * a2x;
+-        py = c.wv * a0y + (c.wa + c.wm) * a1y + c.wb * a2y;
++        // M-D4: fold M onto p2 (B) instead of p1 (A).
++        px = c.wv * a0x + c.wa * a1x + (c.wb + c.wm) * a2x;
++        py = c.wv * a0y + c.wa * a1y + (c.wb + c.wm) * a2y;
+```
+
+**Command:** `flutter test test/gpu/instance_expander_test.dart`
+
+**First shot — verbatim output:**
+
+```
+00:00 +14: a fill expands to its three corners and one degenerate triangle
+00:00 +15: a fill is not expanded by a half-width, at any camera
+00:00 +16: a fill is solid: the dash test never runs on it
+00:00 +17: a point is still a point after the fill branch lands
+00:00 +18: cad_stroke.vert still carries the three renumber-prone constants
+00:00 +19: All tests passed!
+```
+
+**Verdict on the first shot: SURVIVED.**
+
+### Why it survives, and it is not a fluke
+
+`ResidentGeometry.kCornerVertices` gives triangle 1 (the fold triangle)
+exactly one vertex with a non-zero `wm` and one each with `wa`/`wb`, so a
+fold onto *any single point* — p1 or p2 — makes triangle 1's three vertices
+`(p1, p1, p2)` or `(p1, p2, p2)`. Both have two coincident vertices, so both
+have **exactly zero signed area**. The existing test computed only that
+area:
+
+```dart
+final area = (e.positions[8] - e.positions[6]) *
+        (e.positions[11] - e.positions[7]) -
+    (e.positions[9] - e.positions[7]) * (e.positions[10] - e.positions[6]);
+expect(area, 0.0, ...);
+```
+
+— which is `0` under *either* fold target, algebraically (substituting
+`v4 = v5` gives `(v5x-v3x)(v5y-v3y) - (v5y-v3y)(v5x-v3x) = 0` by the same
+identity that makes `v4 = v3` give `0`). The brief's prediction ("the second
+triangle gains area") does not hold for this implementation: the corner
+table's structure makes M-D4 unobservable through triangle-1's area no
+matter which of the two real points the miter tip degenerates onto. This is
+a genuine coverage gap, not a mutation that happens to be equivalent to the
+correct program at the pixel level — the *value written* at the M vertex
+really does change (`a1` vs `a2`), the existing test just never reads it.
+
+### The missing test, added
+
+**File:** `test/gpu/instance_expander_test.dart`, appended to the existing
+test `'a fill expands to its three corners and one degenerate triangle'`:
+
+```diff
+     expect(area, 0.0,
+         reason: 'the second triangle of a fill instance must be degenerate');
++
++    // The area check above cannot tell "M folded onto p1" from "M folded
++    // onto p2" apart: the corner table's M-weighted vertex always
++    // duplicates whichever point it is folded onto, so triangle 1 comes out
++    // zero-area either way -- (p1, p1, p2) or (p1, p2, p2) both have zero
++    // area. Pin the M vertex (positions[8..9], the row wired to `wm`) to
++    // its documented value, `p1`, directly -- this is the assertion that
++    // actually distinguishes the two, and it is what M-D4 (Task 8's mutant
++    // table) needs to die.
++    expect(e.positions[8], closeTo(40, 1e-6),
++        reason: 'M must fold onto p1 (A), not p2 (B)');
++    expect(e.positions[9], closeTo(12, 1e-6));
+   });
+```
+
+Verified against the **correct** (unmutated) `instance_expander.dart` first —
+`flutter test test/gpu/instance_expander_test.dart` passed all 19 tests with
+this addition in place, confirming the new assertion is not itself wrong
+before using it to judge the mutant.
+
+### M-D4 re-fired, with the new test in place
+
+Same diff as above, re-applied to `test/support/instance_expander.dart` from
+its `/tmp` backup.
+
+**Command:** `flutter test test/gpu/instance_expander_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +14: a fill expands to its three corners and one degenerate triangle
+00:00 +14 -1: a fill expands to its three corners and one degenerate triangle [E]
+  Expected: a numeric value within <0.000001> of <40>
+    Actual: <25.0>
+     Which:  differs by <15.0>
+  M must fold onto p1 (A), not p2 (B)
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/instance_expander_test.dart 365:5          main.<fn>
+```
+
+**Verdict: KILLED (after the new test was added).** `instance_expander.dart`
+was then restored from its `/tmp` backup; the new assertions in
+`instance_expander_test.dart` are kept, and are part of this task's commit.
+
+---
+
+## M-D5 — the point branch stays `else` and the fill branch is added before it
+
+**File:** `test/support/instance_expander.dart`
+
+**Diff applied:**
+
+```diff
+       } else if (kind < 2.5) {
+-        // kKindPoint: a square of the stroke's width centred on p0. ...
+-        final cx = toX(x0, y0), cy = toY(x0, y0);
+-        px = cx + (c.x * 2.0 - 1.0) * halfWidth;
+-        py = cy + c.y * halfWidth;
+-      } else {
+-        // kKindFill: one triangle of a pre-triangulated fill. ...
++        // M-D5: fill branch moved here, ahead of the point branch, which
++        // now stays a bare `else` below.
+         final a0x = toX(x0, y0), a0y = toY(x0, y0);
+         final a1x = toX(x1, y1), a1y = toY(x1, y1);
+         final a2x = toX(x2, y2), a2y = toY(x2, y2);
+         px = c.wv * a0x + (c.wa + c.wm) * a1x + c.wb * a2x;
+         py = c.wv * a0y + (c.wa + c.wm) * a1y + c.wb * a2y;
++      } else {
++        // M-D5: point branch, now the bare else -- a fill (kind 3) reaches
++        // here instead of the branch above.
++        final cx = toX(x0, y0), cy = toY(x0, y0);
++        px = cx + (c.x * 2.0 - 1.0) * halfWidth;
++        py = cy + c.y * halfWidth;
+       }
+```
+
+**Command:** `flutter test test/gpu/instance_expander_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +14 -3: a point is still a point after the fill branch lands
+00:00 +14 -4: a point is still a point after the fill branch lands [E]
+  Expected: a numeric value within <0.000001> of <8>
+    Actual: <20.0>
+     Which:  differs by <12.0>
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/instance_expander_test.dart 413:5          main.<fn>
+
+00:00 +14 -4: cad_stroke.vert still carries the three renumber-prone constants
+00:00 +15 -4: Some tests failed.
+
+Failing tests:
+  test/gpu/instance_expander_test.dart: a fill expands to its three corners and one degenerate triangle
+  test/gpu/instance_expander_test.dart: a fill is not expanded by a half-width, at any camera
+  test/gpu/instance_expander_test.dart: a point expands to a square of the stroke width
+  test/gpu/instance_expander_test.dart: a point is still a point after the fill branch lands
+```
+
+**Verdict: KILLED**, by the named test ("a point is still a point after the
+fill branch lands") and three others besides — swapping the two branches'
+bodies corrupts both kinds at once, as expected.
+
+---
+
+## M-D6 — `fillCircle` fans at `_flattenSteps(deviceRadius, theta) + 1`
+
+**File:** `lib/src/gpu/geometry_collector.dart`
+
+**Diff applied:**
+
+```diff
+     const theta = 2 * math.pi;
+-    final steps = _flattenSteps(deviceRadius, theta);
++    final steps = _flattenSteps(deviceRadius, theta) + 1; // M-D6
+```
+
+**Command:** `flutter test test/gpu/geometry_collector_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +48: a filled circle is a fan at the same step count as its own outline
+00:00 +48 -1: a filled circle is a fan at the same step count as its own outline [E]
+  Expected: <15>
+    Actual: <16>
+  the fan and the outline must use one step count
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/geometry_collector_test.dart 1289:5        main.<fn>
+```
+
+**Verdict: KILLED**, by the named test.
+
+---
+
+## M-D7 — `fillPolygon` walks the triangulation backwards
+
+**File:** `lib/src/gpu/geometry_collector.dart`
+
+**Diff applied:**
+
+```diff
+     _reserve(_instances + triangles.length ~/ 3);
+     // Loop bound requires a complete triple: drops an incomplete tail where
+     // the oracle (VerticesDrawSink) would throw, because the contract is
+     // complete triples only.
+-    for (var i = 0; i + 2 < triangles.length; i += 3) {
++    // M-D7: walk the triangulation backwards.
++    final tripleCount = triangles.length ~/ 3;
++    for (var ti = tripleCount - 1; ti >= 0; ti--) {
++      final i = ti * 3;
+       final a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+```
+
+**Command:** `flutter test test/gpu/geometry_collector_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +45: a fill polygon is one instance per triangle, in triangulation order
+00:00 +45 -1: a fill polygon is one instance per triangle, in triangulation order [E]
+  Expected: a numeric value within <0.001> of <135.65803689804903>
+    Actual: <134.25613403320312>
+     Which:  differs by <1.4019028648459084>
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/geometry_collector_test.dart 1201:5        main.<fn>
+
+Failing tests:
+  test/gpu/geometry_collector_test.dart: a fill polygon is one instance per triangle, in triangulation order
+```
+
+**Verdict: KILLED**, by the named test (exactly one failure).
+
+---
+
+## M-D8 — `fillPolygon` drops zero-area triangles
+
+**File:** `lib/src/gpu/geometry_collector.dart`
+
+**Diff applied:**
+
+```diff
+       final a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+       final ax = points[a * 2], ay = points[a * 2 + 1];
+       final bx = points[b * 2], by = points[b * 2 + 1];
+       final cx = points[c * 2], cy = points[c * 2 + 1];
++      // M-D8: drop zero-area triangles instead of writing them.
++      final area2 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
++      if (area2 == 0.0) continue;
+       writeFill(_buffer, _instances,
+```
+
+**Command:** `flutter test test/gpu/geometry_collector_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +47: a degenerate triangle is written, not dropped
+00:00 +47 -1: a degenerate triangle is written, not dropped [E]
+  Expected: <1>
+    Actual: <0>
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/geometry_collector_test.dart 1257:5        main.<fn>
+
+Failing tests:
+  test/gpu/geometry_collector_test.dart: a degenerate triangle is written, not dropped
+```
+
+**Verdict: KILLED**, by the named test.
+
+---
+
+## M-D9 — the collector sorts the buffer by kind before `data` returns
+
+**File:** `lib/src/gpu/geometry_collector.dart`
+
+**Diff applied:**
+
+```diff
+-  Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
++  Float32List get data {
++    // M-D9: sort the buffer by kind before returning it.
++    final raw = _buffer.sublist(0, _instances * kFloatsPerInstance);
++    final order = List<int>.generate(_instances, (i) => i)
++      ..sort((x, y) => raw[x * kFloatsPerInstance + InstanceFieldOffset.kind]
++          .compareTo(raw[y * kFloatsPerInstance + InstanceFieldOffset.kind]));
++    final sorted = Float32List(raw.length);
++    for (var oi = 0; oi < _instances; oi++) {
++      final si = order[oi];
++      sorted.setRange(oi * kFloatsPerInstance, (oi + 1) * kFloatsPerInstance,
++          raw, si * kFloatsPerInstance);
++    }
++    return sorted;
++  }
+```
+
+**Command:** `flutter test test/gpu/fill_order_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +0: the fill corpus really does have a stroke drawn over a fill
+00:00 +0 -1: the fill corpus really does have a stroke drawn over a fill [E]
+  Expected: a value greater than <154>
+    Actual: <53>
+     Which: is not a value greater than <154>
+  no stroke is emitted after the last fill, so no permutation of this corpus could change a pixel and criterion 4 would pass vacuously
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/fill_order_test.dart 70:5                  main.<fn>
+
+00:00 +0 -1: submitting the buffer out of walk order changes the rendering
+00:00 +0 -2: submitting the buffer out of walk order changes the rendering [E]
+  Expected: a value greater than <200>
+    Actual: <0>
+     Which: is not a value greater than <200>
+  a permutation that changed no pixel would mean this gate cannot fail, whatever it reads
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/fill_order_test.dart 84:5                  main.<fn>
+
+00:00 +0 -2: the resident arm matches the reference in walk order and only there
+00:00 +0 -3: the resident arm matches the reference in walk order and only there [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.9762626224077792>
+     Which: is not a value greater than or equal to <0.995>
+  ResidentColorAgreement(union: 393051, withinTwo: 383721 (97.626%), overEight: 9330, referenceInk: 393051)
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/fill_order_test.dart 93:5                  main.<fn>
+
+Failing tests:
+  test/gpu/fill_order_test.dart: submitting the buffer out of walk order changes the rendering
+  test/gpu/fill_order_test.dart: the fill corpus really does have a stroke drawn over a fill
+  test/gpu/fill_order_test.dart: the resident arm matches the reference in walk order and only there
+```
+
+**Verdict: KILLED**, all three of `fill_order_test.dart`'s named
+assertions — matching the earlier round's record that this mutation kills
+"all three assertions in `fill_order_test.dart`".
+
+---
+
+## M-D10 — `writeFill` leaves `dashPeriod` unwritten
+
+**File:** `lib/src/gpu/instance_record.dart`
+
+**Diff applied:**
+
+```diff
+   into[o + InstanceFieldOffset.x2] = x2;
+   into[o + InstanceFieldOffset.y2] = y2;
+   _writeColor(into, o, argb);
+-  _writeDash(into, o, 0, 0, 0, 0);
++  // M-D10: dashPeriod left unwritten.
++  into[o + InstanceFieldOffset.dashPhase] = 0;
++  into[o + InstanceFieldOffset.dashFracStart] = 0;
++  into[o + InstanceFieldOffset.dashFracEnd] = 0;
+ }
+```
+
+(Only `writeFill`'s call to `_writeDash` was touched; `writePoint`'s
+identical-looking call three functions up was left alone.)
+
+**Command:** `flutter test test/gpu/instance_record_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +10: a fill record carries three corners, no width and no dash
+00:00 +10 -1: a fill record carries three corners, no width and no dash [E]
+  Expected: <0.0>
+    Actual: <17.5>
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/instance_record_test.dart 214:5            main.<fn>
+
+Failing tests:
+  test/gpu/instance_record_test.dart: a fill record carries three corners, no width and no dash
+```
+
+**Verdict: KILLED**, by the named test — the pre-filled garbage (`17.5`)
+survives in the `dashPeriod` slot exactly as the test's own doc comment
+predicts for a writer that leaves a slot untouched.
+
+---
+
+## M-D11 — `writeFill` writes `halfWidth: 1`
+
+**File:** `lib/src/gpu/instance_record.dart`
+
+**Diff applied:**
+
+```diff
+   final o = index * kFloatsPerInstance;
+   into[o + InstanceFieldOffset.kind] = kKindFill;
+-  into[o + InstanceFieldOffset.halfWidth] = 0;
++  into[o + InstanceFieldOffset.halfWidth] = 1; // M-D11
+```
+
+**Command:** `flutter test test/gpu/instance_record_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +10: a fill record carries three corners, no width and no dash
+00:00 +10 -1: a fill record carries three corners, no width and no dash [E]
+  Expected: <0.0>
+    Actual: <1.0>
+  a fill has no width and the shader must not expand it
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/instance_record_test.dart 202:5            main.<fn>
+
+Failing tests:
+  test/gpu/instance_record_test.dart: a fill record carries three corners, no width and no dash
+```
+
+**Verdict: KILLED**, by the named test.
+
+---
+
+## M-D12 — `fillCircle`'s fan starts at angle `2π/steps` rather than `0`
+
+**File:** `lib/src/gpu/geometry_collector.dart`
+
+**Diff applied:**
+
+```diff
+     final ccx = t.a * cx + t.c * cy + t.e;
+     final ccy = t.b * cx + t.d * cy + t.f;
+-    var px = cx + r, py = cy;
++    // M-D12: the fan starts at angle 2*pi/steps rather than 0.
++    final startAngle = theta / steps;
++    var px = cx + r * math.cos(startAngle), py = cy + r * math.sin(startAngle);
+     var dx = t.a * px + t.c * py + t.e, dy = t.b * px + t.d * py + t.f;
+```
+
+**Command:** `flutter test test/gpu/geometry_collector_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +49: the fan shares one centre and walks the rim in ascending angle
+00:00 +49 -1: the fan shares one centre and walks the rim in ascending angle [E]
+  Expected: a numeric value within <0.001> of <339.0>
+    Actual: <338.2658386230469>
+     Which:  differs by <0.734161376953125>
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/geometry_collector_test.dart 1317:5        main.<fn>
+
+Failing tests:
+  test/gpu/geometry_collector_test.dart: the fan shares one centre and walks the rim in ascending angle
+```
+
+**Verdict: KILLED**, by the named test (exactly one failure).
+
+---
+
+## Summary
+
+**12 of 12 mutations fired; 11 killed on the first shot, 1 (M-D4) survived
+its first shot and was killed after a missing assertion was added.**
+
+| id | verdict |
+|---|---|
+| M-D1 | KILLED — `geometry_collector_test.dart`, "a fill keeps its own colour on a hairline layer" |
+| M-D2 | KILLED — `geometry_collector_test.dart`, "a fill circle keeps its own colour on a hairline layer" |
+| M-D3 | KILLED — `instance_expander_test.dart`, "a fill is not expanded by a half-width, at any camera" |
+| M-D4 | **SURVIVED, then KILLED** — see below |
+| M-D5 | KILLED — `instance_expander_test.dart`, "a point is still a point after the fill branch lands" (+3 more) |
+| M-D6 | KILLED — `geometry_collector_test.dart`, "a filled circle is a fan at the same step count as its own outline" |
+| M-D7 | KILLED — `geometry_collector_test.dart`, "a fill polygon is one instance per triangle, in triangulation order" |
+| M-D8 | KILLED — `geometry_collector_test.dart`, "a degenerate triangle is written, not dropped" |
+| M-D9 | KILLED — `fill_order_test.dart`, all three assertions |
+| M-D10 | KILLED — `instance_record_test.dart`, "a fill record carries three corners, no width and no dash" |
+| M-D11 | KILLED — `instance_record_test.dart`, "a fill record carries three corners, no width and no dash" |
+| M-D12 | KILLED — `geometry_collector_test.dart`, "the fan shares one centre and walks the rim in ascending angle" |
+
+### The one survivor, in full: M-D4
+
+**What survived and why.** The corner table
+(`ResidentGeometry.kCornerVertices`) gives the fill fold triangle exactly one
+vertex wired to `wm`, and that vertex's weight is added onto whichever of
+`wa`/`wb` also participates. Folding onto *either* p1 or p2 makes two of
+triangle 1's three vertices literally coincide — `(p1, p1, p2)` if folded
+onto p1 (the correct program), `(p1, p2, p2)` if folded onto p2 (the
+mutant) — and a triangle with two coincident vertices has exactly zero
+signed area under both assignments, by the same algebraic identity in both
+cases. The existing test, `'a fill expands to its three corners and one
+degenerate triangle'`, checked only that area. It could not have told the
+two fold targets apart no matter how many times it was re-run, because the
+quantity it reads is genuinely insensitive to which real point the tip
+folds onto — this is a coverage gap in the assertion, not noise or a
+fluke of one run.
+
+**The fix.** The same test now also pins the M-weighted vertex's raw
+position (`positions[8]`, `positions[9]`) to `p1`'s known value directly,
+rather than inferring it from triangle 1's area. This is checked against the
+*correct* code first (passed, 19/19), then M-D4 was re-applied and it killed
+this new assertion specifically (`Expected: ... 40 / Actual: 25.0`, the `x`
+coordinate of `p2` instead of `p1`). `instance_expander.dart` was restored
+from its `/tmp` backup afterward; the two new `expect` lines in
+`test/gpu/instance_expander_test.dart` are the only source change this task
+keeps, and are included in this task's commit.
+
+### The three gate commands, on the fully restored tree
+
+```
+cd packages/jet_cad_2d && dart test && dart analyze && dart format --output=none --set-exit-if-changed .
+```
+→ `+798: All tests passed!`, `No issues found!`, `Formatted 113 files (0 changed)`.
+
+```
+cd packages/jet_cad_2d_flutter && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .
+```
+→ `+565 ~1: All tests passed!` (565 tests, 1 pre-existing skip — same count
+as the pre-mutation baseline, since M-D4's fix extended an existing test
+rather than adding a new one), `No issues found!`, `Formatted 92 files (0
+changed)`.
