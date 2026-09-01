@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -42,11 +43,23 @@ void main() {
     // own last instance) and reads a false negative -- exactly what an
     // earlier draft of this test did, printing `lastFill=58,
     // strokeAfterFill=3`. Scanning the whole buffer for the LAST stroke
-    // instead finds one at index 153, from 905's own boundary outline,
-    // which is what the corpus actually guarantees: 903's higher-handle
-    // stroke over fill 901 is the one `strokeInkInsideFill`'s 337-pixel
-    // overlap already measured, and it is not the only stroke after a fill
-    // in this walk, only the only one whose overlap is pinned by name.
+    // instead finds one at index 153, from 905's own boundary outline.
+    //
+    // **What this assertion does and does not prove.** `lastStroke >
+    // lastFill` only says a stroke instance exists somewhere after the
+    // last fill instance in walk order -- true of any document whose final
+    // region contributes a boundary outline after its own fill, regardless
+    // of whether that stroke or any other actually overlaps a fill on
+    // screen. It would stay true even if every fill covered only the
+    // strokes drawn BEFORE it, which would make criterion 4 unobservable
+    // here despite this line passing. It is kept as an anti-vacuity floor
+    // -- a corpus with no stroke anywhere after its last fill could not
+    // show a permutation-order effect at all, and this does redden under
+    // the sorted-buffer mutation (`task-7-report.md`) -- but the actual
+    // overlap property criterion 4 depends on (903's higher-handle stroke
+    // genuinely sharing screen pixels with fill 901) is proved separately,
+    // by `fixtures_test.dart`'s `strokeInkInsideFill`-based guard test,
+    // which measures 337 logical pixels of shared ink between them.
     var lastFill = -1, lastStroke = -1;
     for (var i = 0; i < c.instanceCount; i++) {
       final kind = data[i * kFloatsPerInstance + InstanceFieldOffset.kind];
@@ -89,6 +102,79 @@ void main() {
         reason: 'if a kind-sorted buffer still matched the reference, this '
             'backend would have no order to preserve and the single-draw-call '
             'design would be unnecessary: ${permuted.toString()}');
+  });
+
+  // The three tests above measure PIXELS, and a wrong-stride reorder could
+  // move `differing` past 200 and `withinTwoFraction` under 0.995 for
+  // entirely the wrong reason -- garbled records still paint a different,
+  // wrong picture, which reads as "the gate works" without the gate ever
+  // having tested a real permutation. `reorderedInstances` was only
+  // verified once, by a throwaway test written and deleted for
+  // `task-7-report.md`; the two tests below pin the same property
+  // permanently, at the RECORD level, so the pixel gate's premise rests on
+  // the suite rather than on that review-time run.
+  test('the identity permutation renders the same picture as no permutation',
+      () {
+    // Kills a stride or off-by-one bug in the reorder loop directly: for
+    // `order[i] == i` (every index, in place) any correct implementation
+    // must reproduce the input exactly. A mutant that shifted the copy
+    // range by one float, or read `order[i +/- 1]`, would move a record
+    // even under the identity permutation and this would redden -- where
+    // the pixel tests above could not tell an off-by-one from a genuine
+    // reorder, since both move pixels.
+    final inOrder = renderFillFixture();
+    final identity = renderFillFixture(permute: (order) => order);
+    expect(countDifferingPixels(inOrder, identity), 0,
+        reason: 'permute: (order) => order must be a true no-op');
+  });
+
+  test(
+      'sortByKind is a multiset-equal reordering of the walk-order buffer, '
+      'not a scramble', () {
+    // Kills a NON-BIJECTIVE `sortByKind` -- one that silently duplicates one
+    // instance index into two output slots and drops another -- which the
+    // tests above cannot see: the pixel gates would still likely read
+    // "different enough" (a duplicated record still paints something, just
+    // the wrong thing), and the identity-permutation test above never calls
+    // `sortByKind` at all, so a bug confined to its own sort/dedupe logic is
+    // invisible to it. (A pure index-stride bug in the reorder COPY itself,
+    // composed with any genuine permutation, stays bijective and would NOT
+    // fail this multiset check -- verified by firing exactly that mutation
+    // in `reorderedInstances` during review: it passed this test and failed
+    // only the identity-permutation one above, which is why both tests are
+    // needed rather than either alone. See `task-7-report.md`.) Comparing
+    // whole records as a multiset -- every one present in the sorted buffer
+    // exactly as many times as in the walk-order buffer -- catches a
+    // duplicate-and-drop directly, independent of what picture it paints.
+    final c = collectFillFixture();
+    final data = c.data;
+    final n = c.instanceCount;
+    final order = sortByKind(List<int>.generate(n, (i) => i));
+    expect(order.length, n,
+        reason: 'sortByKind must return one index per instance, or '
+            'reorderedInstances would truncate or duplicate records');
+
+    final reordered = reorderedInstances(data, n, order);
+
+    // Every whole 16-float record, as its own key -- not `kind` alone, so
+    // a mutant that grouped by kind correctly but corrupted a position or
+    // a colour along the way still fails this.
+    Map<String, int> recordCounts(Float32List buf) {
+      final counts = <String, int>{};
+      for (var i = 0; i < n; i++) {
+        final record =
+            buf.sublist(i * kFloatsPerInstance, (i + 1) * kFloatsPerInstance);
+        final key = record.join(',');
+        counts[key] = (counts[key] ?? 0) + 1;
+      }
+      return counts;
+    }
+
+    expect(recordCounts(reordered), equals(recordCounts(data)),
+        reason: 'sortByKind must be a bijection on instance indices: every '
+            'record in the walk-order buffer must appear in the sorted one '
+            'exactly as many times, whole and unmodified -- not garbled, '
+            'dropped or duplicated by a wrong-stride copy');
   });
 }
 

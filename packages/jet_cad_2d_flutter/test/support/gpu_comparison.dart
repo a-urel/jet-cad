@@ -438,7 +438,7 @@ ResidentColorAgreement measureResidentColor(
   final instanceCount = collector.instanceCount;
   if (permute != null) {
     final order = permute(List<int>.generate(instanceCount, (i) => i));
-    data = _reorderedInstances(data, instanceCount, order);
+    data = reorderedInstances(data, instanceCount, order);
   }
 
   final expanded = expandInstances(
@@ -495,9 +495,24 @@ ResidentColorAgreement _colorAgreementOf(
 /// instead (`withinTwo` 0%, `overEight` = the whole 8000-pixel union) --
 /// which is only possible if every one of the sixteen floats per record,
 /// not merely `kind` or `argb`, moved to its new index together. See
-/// `task-7-report.md` for the captured run.
-Float32List _reorderedInstances(
+/// `task-7-report.md` for the captured run. `fill_order_test.dart`'s own
+/// "sortByKind is a multiset-equal reordering" test pins the same property
+/// permanently, at 16-float granularity, rather than resting on that
+/// throwaway run alone.
+///
+/// [order] must have exactly [instanceCount] elements -- a `permute` that
+/// returns a short or over-long list would otherwise silently duplicate or
+/// truncate records (a short list undershoots `reordered`'s length and
+/// leaves a tail of zeros; a long one is simply never read past
+/// `instanceCount`) or throw a bare `RangeError` with no indication of
+/// which caller's `permute` produced the bad list. The assert below fails
+/// at the actual cause instead.
+Float32List reorderedInstances(
     Float32List data, int instanceCount, List<int> order) {
+  assert(
+      order.length == instanceCount,
+      'permute must return a permutation of all $instanceCount instance '
+      'indices; got ${order.length}');
   final reordered = Float32List(instanceCount * kFloatsPerInstance);
   for (var i = 0; i < instanceCount; i++) {
     final from = order[i] * kFloatsPerInstance;
@@ -518,9 +533,10 @@ const double kFillFixtureDevicePixelRatio = 2.0;
 
 /// Paints [fillFixture] through the real [DraftPainter], camera fit to
 /// [kViewport] -- the same viewport `fillFixture`'s own guard tests
-/// (`fixtures_test.dart`'s `strokeInkInsideFill`) fit to, so the 337-device
-/// -pixel stroke-over-fill overlap that guard already measured is the
-/// overlap this file's helpers paint too, not a second, unmeasured camera.
+/// (`fixtures_test.dart`'s `strokeInkInsideFill`) fit to, so the 337-logical
+/// -pixel stroke-over-fill overlap that guard already measured (at dpr 1,
+/// the same dpr `strokeInkInsideFill` rasterises at) is the overlap this
+/// file's helpers paint too, not a second, unmeasured camera.
 ///
 /// **Goes through [DraftPainter], not hand-rolled `sink.fillPolygon` /
 /// `sink.circle` calls.** A fill entity only resolves to its boundary's
@@ -565,7 +581,7 @@ GeometryCollector collectFillFixture() {
 /// Renders [fillFixture] through the resident arm ONLY -- the collector's
 /// buffer, optionally reordered by [permute] exactly as
 /// [measureResidentColor]'s own `permute` reorders it (both go through
-/// [_reorderedInstances]), expanded by [expandInstances] and rasterised.
+/// [reorderedInstances]), expanded by [expandInstances] and rasterised.
 /// **No reference-sink render happens here.**
 ///
 /// This is deliberately narrower than [measureResidentColor]:
@@ -580,7 +596,7 @@ TriangleRasterizer renderFillFixture(
   final instanceCount = collector.instanceCount;
   if (permute != null) {
     final order = permute(List<int>.generate(instanceCount, (i) => i));
-    data = _reorderedInstances(data, instanceCount, order);
+    data = reorderedInstances(data, instanceCount, order);
   }
   final expanded = expandInstances(
       data,
