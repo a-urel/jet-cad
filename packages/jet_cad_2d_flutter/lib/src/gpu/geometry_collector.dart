@@ -80,13 +80,14 @@ class GeometryCollector implements DrawSink {
   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
   int get instanceCount => _instances;
 
-  /// Ops this plan does not draw yet — `text` alone, since Plan D.
+  /// Ops this plan does not draw yet — `text` and `fillCircle`, since Plan D.
   ///
   /// Counted rather than ignored so a corpus that needs Plan E is visible as
   /// a number instead of as a missing picture.
   ///
   /// `circle` and `arc` stopped counting here in Plan B's Task 5; `point` in
-  /// its Task 6; `fillPolygon` and `fillCircle` in Plan D's Tasks 2 and 3.
+  /// its Task 6; `fillPolygon` in Plan D's Task 2; `fillCircle` stops counting
+  /// in Task 3.
   int get skippedOps => _skipped;
 
   /// **Diagnostic only — read by nobody in this class and never changes what
@@ -647,6 +648,9 @@ class GeometryCollector implements DrawSink {
     final t = _residual;
     final argb = style.argb;
     _reserve(_instances + triangles.length ~/ 3);
+    // Loop bound requires a complete triple: drops an incomplete tail where
+    // the oracle (VerticesDrawSink) would throw, because the contract is
+    // complete triples only.
     for (var i = 0; i + 2 < triangles.length; i += 3) {
       final a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
       final ax = points[a * 2], ay = points[a * 2 + 1];

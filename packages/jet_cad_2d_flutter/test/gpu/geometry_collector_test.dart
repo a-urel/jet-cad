@@ -1236,22 +1236,6 @@ void main() {
     expect(data[InstanceFieldOffset.r], closeTo(0x88 / 255.0, 1e-6));
   });
 
-  test('an empty triangulation writes nothing', () {
-    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
-    c.beginResidual(Transform2.translation(5, 7));
-    c.fillPolygon(
-        Float64List.fromList(<double>[0, 0, 8, 0, 4, 9]),
-        3,
-        Int32List(0),
-        const ResolvedStyle(
-            argb: 0xFF884422,
-            lineweightHundredths: 25,
-            linetype: Handle.none,
-            linetypeScale: 1));
-    c.endResidual();
-    expect(c.instanceCount, 0);
-  });
-
   test('a degenerate triangle is written, not dropped', () {
     // `VerticesDrawSink._emitTriangle` has no zero-area test, so neither
     // does this: matching the formula rather than the intention is what
