@@ -1,7 +1,7 @@
 # jet-cad — project status
 
 **Last updated:** 2026-09-01
-**Verified against:** `main` at `de962bd`. **Plan D (fills), the fourth plan,
+**Verified against:** `main` at `a5833b4`. **Plan D (fills), the fourth plan,
 is MERGED**: it ran on `plan-d/fills`, cut from `main` at `bde9196`, nine
 tasks at `bde9196..eabca9e` with its ledger archived at `27b2122`, merged
 `--no-ff` at `de962bd`, branch deleted. The two commits before it on `main`
@@ -712,8 +712,21 @@ cd apps/dev_harness_2d
 flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
   --dart-define=ENTITIES=10000 --dart-define=SPIKE_DEFS=20 \
   --dart-define=SPIKE_INSTANCES=150 --dart-define=SPIKE_FRAMES=30 \
-  --dart-define=SPIKE_REPEATS=3 --dart-define=SPIKE_FILLS=true
+  --dart-define=SPIKE_REPEATS=3 --dart-define=SPIKE_FILLS=true \
+  --dart-define=SPIKE_FILL_SCALE=20
 ```
+
+**`SPIKE_FILL_SCALE` is not optional for the eye, and it is forbidden for the
+numbers.** At the corpus's own room size a fill lands on screen at **0.7 to
+2.7 logical pixels** — the floor is 60,000 × 40,000 units, the measurement
+window 1400 × 900, so a fitted camera runs at 0.0225 px/unit against a
+30–120 unit room. The fills were drawn correctly from Plan D's merge and were
+too small to judge, which is what the first attempt at this run found. At
+`SPIKE_FILL_SCALE=20` they are 13–54 px and the five checks below can
+actually be made. **Do not read a timing off a scaled run** — it is not the
+drawing any recorded number was taken against. Both runs are in
+`.vscode/launch.json` as *2d: GPU spike — fills ON, eyeball scale* and
+*… measurement scale*, and the split exists so the two cannot be confused.
 
 ---
 
