@@ -1,0 +1,3971 @@
+# Review package: bde91960aa9e11ae88e810174cdf21bc57f62ce9..HEAD
+
+## Commits
+d6d5c58 docs(plan-d): fire fill_buffer_budget_test's killability, per review round 1
+8338fd5 docs: Plan D's results, and what the window showed
+36dfb7e docs: Plan D's mutation log
+ca89212 test(gpu): fix round 1 -- permute's stride gets a permanent test
+9c639b5 test(gpu): emission order is the drawing, and a fill proves it
+76518fd test(gpu): the pixel instrument compares colour, not only coverage
+5074475 feat(gpu): the vertex shader draws a fill triangle
+6c1b980 test(gpu): a fill corpus with strokes on both sides of the fill
+a102be5 fix(tests): add fillCircle colour-preservation test and y1 angle-0 assertion
+ef5b834 feat(gpu): the collector fans a filled circle at the outline's step count
+3094312 fix(gpu): correct the fillPolygon doc, drop non-killing test, add loop comment
+e128fe5 feat(gpu): the collector writes a pre-triangulated fill
+2dbaf15 feat(gpu): the instance record learns a fill kind
+
+## Files changed
+ STATUS.md                                          | 132 ++--
+ apps/dev_harness_2d/lib/gpu_arm.dart               |  40 +-
+ apps/dev_harness_2d/lib/main.dart                  |  68 ++-
+ .../test/fill_buffer_budget_test.dart              | 132 ++++
+ .../superpowers/notes/2026-09-01-plan-d-results.md | 452 ++++++++++++++
+ docs/superpowers/notes/plan-d-mutation-log.md      | 677 +++++++++++++++++++++
+ .../assets/shaders/cad.shaderbundle                | Bin 34304 -> 37200 bytes
+ .../lib/src/gpu/geometry_collector.dart            |  91 ++-
+ .../lib/src/gpu/instance_record.dart               |  54 +-
+ .../lib/src/gpu/resident_geometry.dart             |  17 +
+ .../jet_cad_2d_flutter/shaders/cad_stroke.vert     |  22 +-
+ .../test/gpu/collector_differential_test.dart      | 132 +++-
+ .../test/gpu/fill_order_test.dart                  | 211 +++++++
+ .../test/gpu/geometry_collector_test.dart          | 224 ++++++-
+ .../test/gpu/instance_expander_test.dart           |  81 +++
+ .../test/gpu/instance_record_test.dart             |  56 ++
+ .../test/gpu/resident_pixel_differential_test.dart |  63 ++
+ .../jet_cad_2d_flutter/test/support/fixtures.dart  | 269 +++++++-
+ .../test/support/fixtures_test.dart                |  51 ++
+ .../test/support/gpu_comparison.dart               | 357 ++++++++++-
+ .../test/support/instance_expander.dart            |  21 +-
+ 21 files changed, 3030 insertions(+), 120 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 7f75fc2..4f7a480 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,43 +1,86 @@
+ # jet-cad — project status
+ 
+-**Last updated:** 2026-08-31
++**Last updated:** 2026-09-01
+ **Verified against:** `main` at `3a61b45` — the merge commit for **Plan C of
+ the GPU-resident render backend**, the third of that spec's seven plans.
+-Plan C ran on `plan-c/shaded-dashes`, cut from `main` at `d52d2a9`, twelve
+-tasks at `d52d2a9..db4dd5f`, merged `--no-ff` and the branch deleted. Before
+-it, Plan B merged at `72b162d` (eleven tasks, `5c94e11..4892a01`), Plan A at
+-`cd5bc98` (nine tasks) and Plan 3i ran directly on `main` at
+-`468e310..dbc31e8`. **Nothing is in flight.**
+-
+-**Every suite count below was produced by running that suite on the MERGED
+-tree on 2026-08-31** — `jet_cad_2d` **797**, `jet_cad_2d_flutter` **540** (1
+-pre-existing skip), `dev_harness_2d` **72**, analyze and format clean in all
+-three — not by reading a report, and not by trusting the branch's own green
+-run. A green run only proves the tree it ran on.
+-
+-**Plan C (dashes in the shader) is DONE on its branch. Exit gate: 10 of 11 —
+-criterion 11 is UNMET**, in those words: the device run happened and produced
+-every number below, but **no human has looked at the running window**.
+-**Plan B's criterion 11 is still owed too**, and has been since its merge.
+-Both are one act — see [Resume here](#resume-here).
+-
+-### Plan C's headline is a correction to its own premise
+-
+-**Plan C's plan says a buffer with dash spans baked in "still shows eight
+-dashes at 4x zoom instead of the thirty-two the reference draws". That is
+-false — the reference draws eight too.** `DraftPainter._dashScale` folds in
++`main` itself is unchanged since that merge. **Plan D (fills), the fourth
++plan, is IN FLIGHT on `plan-d/fills`**, cut from `main` at `bde9196`, nine
++tasks at `bde9196..36dfb7e` plus this task's own commit — **not yet
++merged.** Before Plan C, Plan B merged at `72b162d` (eleven tasks,
++`5c94e11..4892a01`), Plan A at `cd5bc98` (nine tasks) and Plan 3i ran
++directly on `main` at `468e310..dbc31e8`.
++
++**Every suite count below for `packages/jet_cad_2d`, `packages/jet_cad_2d_flutter`
++and `apps/dev_harness_2d` was produced by running that suite on
++`plan-d/fills` on 2026-09-01** — `jet_cad_2d` **798**, `jet_cad_2d_flutter`
++**565** (1 pre-existing skip), `dev_harness_2d` **73**, analyze and format
++clean in all three — not by reading a report, and not by trusting the
++branch's own green run. A green run only proves the tree it ran on. `main`'s
++own counts are unchanged from Plan C's merge (797 / 540 / 72) until Plan D
++merges.
++
++**Plan D (fills) is DONE on its branch. Exit gate: 8 of 9 — criterion 8 is
++OWED**, in those words: this task's controller ruling (D-9a) forbids
++simulating a device run or a human's visual judgement, so no device run
++happened this session and none could have. **The window-check debt now
++stands at FOURTEEN checks across three plans** — Plan B's four (owed since
++`72b162d`), Plan C's five (owed since `18330a9`), and Plan D's own five, all
++new — discharged by one harness run. See [Resume here](#resume-here).
++
++### What Plan D's own premises measured false
++
++Three corrections, none a threshold moved: Task 4's brief specified a
++lineweight that gave only 172 device pixels of stroke-over-fill overlap
++against a 200-pixel floor, raised to 120 and re-measured at 337; Task 5's
++brief predicted the compiled shader bundle would show `attribute ` eight
++times, and the real count is sixteen occurrences of eight unique names,
++because this repo's bundle embeds the shader source twice; Task 7's brief
++supplied a sample test loop with a lock-in bug that read a false negative
++(`Expected: a value greater than <58> / Actual: <3>`) against a real,
++correctly-ordered corpus, fixed by scanning for the *last* stroke rather
++than the first post-fill one.
++
++### What Plan D measured
++
++| quantity | value |
++|---|---|
++| record-level differential, fill corpus | **exact match** — kind, argb, three points, instance for instance |
++| pixel differential, colour, fill corpus | **100.000% within 2**, `overEight = 0`, `referenceInk = 393,051` |
++| pixel differential, colour, stroke corpus | **100.000% within 2**, `overEight = 0`, `referenceInk = 8,183` |
++| spec criterion 4, kind-sorted vs. walk order | walk order **100.000%**, kind-sorted **97.635%** (`< 0.995` gate) — **PASS**, order is provably load-bearing |
++| `skippedOps` on the fill corpus | **0** — text alone is ever counted, and this corpus carries none |
++| resident buffer, 10,000 entities, fills on | **6.51 MB** (106,636 instances, matched to Plan C's own params) / **7.00 MB** (114,717 instances, default knobs) — both **PASS** against 8 MB, up from Plan C's fills-off 6.41 MB / 105,076 |
++| mutations | **12 fired, 12 killed** — 11 on the first shot, M-D4 after a missing assertion was added for a real coverage gap |
++
++**This buffer figure is measured on the CPU, not on a device.**
++`GeometryCollector` builds the exact bytes a device upload would receive;
++only the upload itself was not exercised. See the results note for the
++method and both reproduction commands.
++
++Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
++Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
++Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
++
++---
++
++## Plan C — dashes in the shader (merged, `main` at `3a61b45`)
++
++**Plan C's headline is a correction to its own premise.** Plan C's plan says
++a buffer with dash spans baked in "still shows eight dashes at 4x zoom
++instead of the thirty-two the reference draws". That is false — the
++reference draws eight too. `DraftPainter._dashScale` folds in
+ `toScreen.scaleMagnitude` and the points it dashes are already in screen
+-space, so period and distance both scale with the camera and their quotient —
+-the dash count — does not move. **Dash patterns are anchored in world space,
+-not screen space.** Measured three ways (`Dasher` directly, the algebra, and
+-a painter probe at four cameras).
++space, so period and distance both scale with the camera and their quotient
++— the dash count — does not move. **Dash patterns are anchored in world
++space, not screen space.** Measured three ways (`Dasher` directly, the
++algebra, and a painter probe at four cameras).
+ 
+ **What baking a dash pattern actually froze was the collapse decision.**
+ `kDashCollapsePx` is a screen-space threshold, so whether a pattern draws
+ solid is camera-dependent; a buffer that decided it once drew dashes where
+ the reference had collapsed to solid, or the reverse. That is what Plan C
+ moved into the shader. A reader who believes the original sentence will look
+ for the wrong defect in the window.
+ 
+ ### What Plan C measured
+ 
+@@ -612,38 +655,57 @@ So the paragraph cache key carries no height, angle or width factor. It is
+ | 12 | Rigs, counters, the number the gate depends on | ⬜ not started |
+ | 13 | Mutation testing | ⬜ not started |
+ | 14 | Exit gate and the results note | ⬜ not started |
+ 
+ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
+ 
+ ---
+ 
+ ## Resume here
+ 
+-**A human must still look at the window — for TWO plans now.** Plan B's
+-criterion 11 has been owed since `72b162d` and Plan C's is owed as of
+-`18330a9`. One run of the harness discharges both; the checks are listed in
+-[Plan C's results note](docs/superpowers/notes/2026-08-31-plan-c-results.md#criterion-11-is-unmet-in-those-words).
++**A human must still look at the window — for THREE plans now.** Plan B's
++criterion has been owed since `72b162d`, Plan C's since `18330a9`, and Plan D
++adds its own five as of this task, none discharged yet. One harness run
++discharges all fourteen; the checks and the corrected command are listed in
++[Plan D's results note](docs/superpowers/notes/2026-09-01-plan-d-results.md#the-window-checks--owed-fourteen-across-three-plans).
++**The command in Plan D's own task brief is missing `SPIKE_FILLS=true`** —
++run exactly as the brief wrote it, the corpus draws no fills at all and none
++of Plan D's five checks have anything to look at; the corrected command is
++below.
++
++**Plan D's five, all new:** a filled region is filled, not outlined and
++hollow; the higher-handle stroke crossing it is visible over the fill, not
++hidden under it; a filled circle's fill reaches exactly to its own boundary
++stroke at every zoom, with no rim of background and no spill; a fill on a
++hairline layer is not faded; and a translucent fill shows what is under it.
+ 
+ **Plan C's five, and the first one is the opposite of what its own plan
+ said:** zoom in and the dashes must get *longer* and stay the same in number;
+ zoom out and they must collapse to solid at the same zoom as arm A; a dashed
+ corner must be **notched**, not filled; a dashed circle must be **notched** at
+ its start angle while a solid one is not; and panning along a long dashed line
+ must move the dashes *with* the line, not slide them along it.
+ 
+ **Plan B's four, still owed:** corners filled, a circle **not** notched at its
+ start angle, a square dot, nothing thickening as you zoom.
+ 
+-**Plan C is merged** at `3a61b45` and its branch is deleted. The merge did
+-not discharge criterion 11 and this file says so rather than letting it
+-lapse.
++**Plan C is merged** at `3a61b45` and its branch is deleted; the merge did not
++discharge its criterion. **Plan D is DONE on its own branch, `plan-d/fills`,
++and not yet merged.** Command:
++
++```sh
++cd apps/dev_harness_2d
++flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
++  --dart-define=ENTITIES=10000 --dart-define=SPIKE_DEFS=20 \
++  --dart-define=SPIKE_INSTANCES=150 --dart-define=SPIKE_FRAMES=30 \
++  --dart-define=SPIKE_REPEATS=3 --dart-define=SPIKE_FILLS=true
++```
+ 
+ ---
+ 
+ **A human must still look at the window.** That is the top of this list on
+ purpose: Plan B's exit gate is 10 of 11 and the one UNMET criterion is
+ exactly this — the device run happened (macOS profile, three interleaved
+ repeats, Low Power Mode confirmed OFF) but nobody has looked at what it
+ actually drew. Look for: filled corners, a circle **not** notched at its
+ start angle, a square dot, and nothing thickening as you zoom in. Plan 3h's
+ session proved this is not a formality — it was the only one of this
+diff --git a/apps/dev_harness_2d/lib/gpu_arm.dart b/apps/dev_harness_2d/lib/gpu_arm.dart
+index bf5ca12..92b4139 100644
+--- a/apps/dev_harness_2d/lib/gpu_arm.dart
++++ b/apps/dev_harness_2d/lib/gpu_arm.dart
+@@ -24,28 +24,40 @@ import 'measurement_rig.dart';
+ // deleted the spike's two files in the same commit that pointed this arm at
+ // them. What remains here is harness-side glue only: the widget that hosts
+ // the backend and turns its output into a `ui.Image` on the canvas, and the
+ // three-arm phase rig `runGpuSpike` drives -- unchanged in shape from the
+ // spike, because interleaving three arms over a hold, a pan and a zoom is
+ // measurement methodology, not backend-specific.
+ //
+ // **What arm C (the resident backend) still does not draw, and why that is
+ // not a bug in this harness.** `GeometryCollector` implements `polyline`
+ // (with joins), `point`, `circle` and `arc` (flattened, seam join included
+-// on a closed sweep) -- Plan B's job, done -- and since Plan C it also
+-// shades dash patterns per fragment, dashed arcs included. `fillPolygon`,
+-// `fillCircle` and `text` are the only ops that still fall through to its
+-// `skippedOps` counter: fills are Plan D's, text is Plan E's. A corpus with
+-// fills or text will show visibly less on arm C than on arm A or B --
++// on a closed sweep) -- Plan B's job, done -- since Plan C it also shades
++// dash patterns per fragment, dashed arcs included, and since Plan D it draws
++// `fillPolygon` and `fillCircle` too: one pre-triangulated instance per
++// triangle, or per fan slice at the outline's own step count, in the fill
++// kind (`kKindFill`) the shader's third branch reads. `text` is the only op
++// that still falls through to its `skippedOps` counter -- Plan E's job. A
++// corpus with text will show visibly less on arm C than on arm A or B --
+ // `skippedOps` in the `GSPIKE collect+upload` line says how much, so a thin
+ // picture reads as a number instead of as a silent gap.
+ //
++// **Whether the harness corpus itself carries fills is a separate question
++// from whether the collector can draw them, and `SPIKE_FILLS` is that
++// switch.** `spikeDocument()` in `main.dart` calls `_addFillRegions` only
++// when `SPIKE_FILLS=true`; at its default of `false` the corpus is exactly
++// what it was before Plan D, so every number taken before this knob existed
++// stays reproducible. On, it adds closed-polyline rooms in the same
++// `kFillFraction` proportion `FILLS=true` already uses for the R2 corpus,
++// roughly 40% of them filled and the rest boundary-only, so the picture shows
++// both the fillable-and-filled and the fillable-but-not path.
++//
+ // **The buffer is collected once, at the arm's starting camera, and never
+ // re-walked.** Since Plan C that costs less than it used to, and the reason
+ // is worth stating precisely, because the sentence this comment used to
+ // carry was wrong.
+ //
+ // It said baked dash spans "stretch under zoom". They do not, and neither
+ // does the reference: `DraftPainter._dashScale` folds in
+ // `toScreen.scaleMagnitude` and the points it dashes are already in screen
+ // space, so period and distance scale together and **the number of dashes
+ // along an entity does not move with the camera at all**. Dash patterns are
+@@ -444,28 +456,30 @@ Future<void> runGpuSpike(
+   refuseDebugMode();
+ 
+   final baseCamera = state.camera.value;
+   final centre = Offset(viewport.width / 2, viewport.height / 2);
+ 
+   gpuReport('GSPIKE run: entities=$entities instances=${state.instanceCount} '
+       'viewport=${viewport.width.toStringAsFixed(0)}x'
+       '${viewport.height.toStringAsFixed(0)} '
+       'frames=$frames repeats=$repeats');
+   gpuReport('GSPIKE note: arm C (residentGpu) draws strokes, joins, points, '
+-      'circles, arcs and shaded dashes -- ${state.skippedOps} op(s) this '
+-      'walk did not draw (fills, text: later plans\' job, see the section '
+-      'comment above this rig). Butt caps only -- Plan B emits no cap '
+-      'geometry. No antialiasing. Dash patterns are evaluated per fragment '
+-      'against the live camera since Plan C, collapse rule included, so '
+-      'nothing about them is baked. Every remaining gap favours arm C on a '
+-      'timing comparison, which is why the picture matters as much as the '
+-      'numbers here.');
++      'circles, arcs, shaded dashes and (since Plan D) fills -- '
++      '${state.skippedOps} op(s) this walk did not draw (text: Plan E\'s '
++      'job, see the section comment above this rig). Fills are only in this '
++      'corpus when SPIKE_FILLS=true; at its default the corpus carries none '
++      'and skippedOps is 0 on this account regardless. Butt caps only -- '
++      'Plan B emits no cap geometry. No antialiasing. Dash patterns are '
++      'evaluated per fragment against the live camera since Plan C, '
++      'collapse rule included, so nothing about them is baked. Every '
++      'remaining gap favours arm C on a timing comparison, which is why the '
++      'picture matters as much as the numbers here.');
+ 
+   final reports = <GpuPhaseReport>[];
+ 
+   Future<void> setArm(GpuSpikeArm a) async {
+     final before = state.backend?.frames ?? 0;
+     state.arm.value = a;
+     await pumpFrame();
+     await pumpFrame();
+     // **The `painted=0` check belongs here, not in a phase.** Arm C renders
+     // only when the camera changes, so a hold legitimately submits nothing --
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index af479cb..46e2029 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -622,37 +622,71 @@ const bool kRunGpuSpike = bool.fromEnvironment('RUN_GPU_SPIKE');
+ /// is what both a painter walk and a render-object-per-entity tree pay for, so
+ /// the instance and definition counts are knobs rather than constants and the
+ /// run prints the primitive count it actually got.
+ final int kSpikeDefs = _intDefine(
+     'SPIKE_DEFS', const String.fromEnvironment('SPIKE_DEFS'), 20,
+     minimum: 1);
+ final int kSpikeInstances = _intDefine(
+     'SPIKE_INSTANCES', const String.fromEnvironment('SPIKE_INSTANCES'), 200,
+     minimum: 0);
+ 
+-/// The document the widget spike measures. Deliberately not [harnessDocument]:
+-/// see [kSpikeDefs].
+-DraftDocument spikeDocument() => generateDocument(
+-      kEntities,
+-      definitionCount: kSpikeDefs,
+-      instanceCount: kSpikeInstances,
+-      nestingDepth: 1,
+-      mirroredFraction: 0.1,
+-      nonUniformFraction: 0.2,
+-      groupCount: 10,
+-      layerCount: 8,
+-      byBlockFraction: 0.3,
+-      dashedFraction: kDashedFraction,
+-      labelFraction: 0,
+-      attributedInstanceFraction: 0,
+-      measurer: harnessMeasurer,
+-    );
++/// Whether the GPU spike corpus carries filled regions, [_addFillRegions]'s
++/// job -- Plan D's Task 9. Same shape as [kFillsEnabled] and the same reason:
++/// a `String.fromEnvironment`, not `bool.fromEnvironment` -- an unrecognised
++/// value throws rather than silently reading as off, the footgun this file's
++/// other defines are all worded against.
++///
++/// **Inert at its default of `false`**: [spikeDocument] calls
++/// `generateDocument` exactly as it did before this knob existed and
++/// [_addFillRegions] never runs, so `ENTITIES=10000 SPIKE_DEFS=20
++/// SPIKE_INSTANCES=150` reproduces every number a run took before this
++/// define existed, unchanged. Pass `SPIKE_FILLS=true` to add rooms in
++/// [kFillFraction]'s proportion, the same fraction [kFillsEnabled] uses for
++/// the R2 corpus.
++final bool kSpikeFills = switch (
++    const String.fromEnvironment('SPIKE_FILLS', defaultValue: 'false')) {
++  'false' => false,
++  'true' => true,
++  final other =>
++    throw StateError('SPIKE_FILLS must be true or false; got "$other"'),
++};
++
++/// The document the widget and GPU spikes measure. Deliberately not
++/// [harnessDocument]: see [kSpikeDefs].
++///
++/// [entityCount] and [fillsEnabled] default to the top-level defines
++/// ([kEntities], [kSpikeFills]) so an ordinary `flutter run`/`flutter drive`
++/// invocation is driven by `--dart-define` exactly as before; a test can
++/// override either directly, which is what
++/// `test/fill_buffer_budget_test.dart` does to measure a fixed 10,000-entity,
++/// fills-on corpus without depending on how the binary happened to be
++/// launched.
++DraftDocument spikeDocument({int? entityCount, bool? fillsEnabled}) {
++  final count = entityCount ?? kEntities;
++  final doc = generateDocument(
++    count,
++    definitionCount: kSpikeDefs,
++    instanceCount: kSpikeInstances,
++    nestingDepth: 1,
++    mirroredFraction: 0.1,
++    nonUniformFraction: 0.2,
++    groupCount: 10,
++    layerCount: 8,
++    byBlockFraction: 0.3,
++    dashedFraction: kDashedFraction,
++    labelFraction: 0,
++    attributedInstanceFraction: 0,
++    measurer: harnessMeasurer,
++  );
++  if (fillsEnabled ?? kSpikeFills) _addFillRegions(doc, count);
++  return doc;
++}
+ 
+ /// Frames measured per phase, per arm, per repeat.
+ final int kSpikeFrames = _intDefine(
+     'SPIKE_FRAMES', const String.fromEnvironment('SPIKE_FRAMES'), 60,
+     minimum: 8);
+ 
+ /// How many times the three arms are cycled. Interleaving is what makes the
+ /// ratios readable; one repeat is a single sample and says little.
+ final int kSpikeRepeats = _intDefine(
+     'SPIKE_REPEATS', const String.fromEnvironment('SPIKE_REPEATS'), 3,
+diff --git a/apps/dev_harness_2d/test/fill_buffer_budget_test.dart b/apps/dev_harness_2d/test/fill_buffer_budget_test.dart
+new file mode 100644
+index 0000000..5cd08cf
+--- /dev/null
++++ b/apps/dev_harness_2d/test/fill_buffer_budget_test.dart
+@@ -0,0 +1,132 @@
++// Plan D, Task 9 -- the resident geometry buffer's size, measured on the CPU.
++//
++// **This is not a device run.** `GeometryCollector` builds the buffer that
++// would be uploaded to the GPU entirely on the CPU -- the upload itself
++// (`ResidentGeometry.create`) is the only step this test does not take, and
++// it does not change the buffer's byte length, only where the bytes live.
++// So `flutter test` measures the exact number `--dart-define=RUN_GPU_SPIKE`
++// would report on a device, without a device: this test's own corpus, camera
++// and collector calls are the same three lines `GpuSpikeState
++// ._buildResidentGeometry` in `gpu_arm.dart` makes.
++//
++// ignore_for_file: avoid_print -- the measurement below is meant to be read
++// off a `flutter test` transcript, the same convention `gpu_arm.dart`'s
++// GSPIKE lines use.
++
++import 'dart:typed_data';
++
++import 'package:dev_harness_2d/main.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++/// Mirrors `packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart`'s
++/// wire format, which that file's own barrel comment keeps unexported
++/// deliberately -- "`GeometryCollector`'s own wire format, not something a
++/// caller writes." A reader belongs there for anything that changes the
++/// layout; this is a read-only copy for one measurement, not a second
++/// producer of instances.
++///
++/// `kFloatsPerInstance = 16` and the four kind tags (`0` stroke, `1` join,
++/// `2` point, `3` fill) are declared `const` in that file and are exactly
++/// the numbers this task's own brief cites ("16 floats x 4 bytes per
++/// instance").
++const int _kFloatsPerInstance = 16;
++const int _kKindOffset = 0;
++const double _kKindStroke = 0;
++const double _kKindJoin = 1;
++const double _kKindPoint = 2;
++const double _kKindFill = 3;
++
++/// One entity count the whole task's measurement is taken at -- Step 2's own
++/// number, and the one Plan C's 105,076-instance / 6.41 MB figure is compared
++/// against.
++const int _kMeasuredEntities = 10000;
++
++void main() {
++  test(
++      'the resident buffer at 10,000 entities with fills, measured on the '
++      'CPU', () {
++    // The same corpus `spikeDocument()` builds for a real
++    // `--dart-define=RUN_GPU_SPIKE=true --dart-define=ENTITIES=10000
++    // --dart-define=SPIKE_FILLS=true` run -- entity count and
++    // `fillsEnabled` passed directly rather than through a define, so this
++    // number is fixed by the test rather than by however the binary happened
++    // to be launched. `SPIKE_DEFS` and `SPIKE_INSTANCES` are left at their
++    // own defaults (20, 200), matching an unqualified run of the command
++    // above.
++    final doc =
++        spikeDocument(entityCount: _kMeasuredEntities, fillsEnabled: true);
++    final liveEntities = doc.entities.liveSlots.length;
++
++    // The same three calls `GpuSpikeState._buildResidentGeometry` makes in
++    // `gpu_arm.dart`, up to and not including `ResidentGeometry.create` --
++    // the CPU-side buffer this test measures is `collector.data`, the exact
++    // bytes that call would upload.
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final camera = ViewportTransform.fit(doc.extents, kMeasurementViewport);
++    final painter = DraftPainter(
++      document: doc,
++      index: index,
++      resolver: DocumentStyleResolver(doc),
++      drawText: true,
++    );
++    final collector = GeometryCollector(
++      pixelsPerPaperMm: kLogicalPixelsPerMm,
++      devicePixelRatio: 1.0,
++      lineweightScale: 1.0,
++    );
++    painter.paint(collector, camera, kMeasurementViewport);
++
++    final data = collector.data;
++    final instances = collector.instanceCount;
++    expect(data.length, instances * _kFloatsPerInstance,
++        reason: 'the buffer must hold exactly one record per instance, no '
++            'slack past _instances');
++
++    var strokes = 0, joins = 0, points = 0, fills = 0, other = 0;
++    for (var i = 0; i < instances; i++) {
++      final kind = data[i * _kFloatsPerInstance + _kKindOffset];
++      if (kind == _kKindStroke) {
++        strokes++;
++      } else if (kind == _kKindJoin) {
++        joins++;
++      } else if (kind == _kKindPoint) {
++        points++;
++      } else if (kind == _kKindFill) {
++        fills++;
++      } else {
++        other++;
++      }
++    }
++    expect(other, 0,
++        reason: 'every instance must carry one of the four '
++            'known kind tags');
++    expect(fills, greaterThan(0),
++        reason: 'fillsEnabled: true must actually reach the collector as '
++            'fill instances, or this measurement is vacuous for the one '
++            'thing Task 9 adds');
++
++    final bytes = instances * _kFloatsPerInstance * Float32List.bytesPerElement;
++    const budgetBytes = 8 * 1024 * 1024;
++    final mb = bytes / (1024 * 1024);
++
++    print('PLAN-D buffer: entities=$liveEntities (requested '
++        '$_kMeasuredEntities) instances=$instances '
++        '(strokes=$strokes joins=$joins points=$points fills=$fills) '
++        'skippedOps=${collector.skippedOps} '
++        'bytes=$bytes (${mb.toStringAsFixed(2)} MB) '
++        'budget=${(budgetBytes / (1024 * 1024)).toStringAsFixed(2)} MB '
++        'margin=${(budgetBytes - bytes)} bytes');
++
++    // **Not gated against 8 MB here.** The brief is explicit: "if it exceeds
++    // 8 MB, record a miss with its number -- the threshold does not move to
++    // make a criterion pass." A `flutter test` assertion that failed past the
++    // budget would make the criterion self-enforcing rather than measured
++    // and reported, which is the opposite of what a miss is supposed to look
++    // like in this project. The PASS/MISS verdict is written by hand into
++    // `docs/superpowers/notes/2026-09-01-plan-d-results.md` from the number
++    // printed above.
++  });
++}
+diff --git a/docs/superpowers/notes/2026-09-01-plan-d-results.md b/docs/superpowers/notes/2026-09-01-plan-d-results.md
+new file mode 100644
+index 0000000..2f087a7
+--- /dev/null
++++ b/docs/superpowers/notes/2026-09-01-plan-d-results.md
+@@ -0,0 +1,452 @@
++# Plan D — fills: results
++
++**Plan:** [2026-09-01-gpu-backend-plan-d-fills.md](../plans/2026-09-01-gpu-backend-plan-d-fills.md).
++**Spec:** [2026-08-29-gpu-resident-render-backend-design.md](../specs/2026-08-29-gpu-resident-render-backend-design.md)
++(revision 4), the "Fills" section.
++**Mutation log:** [plan-d-mutation-log.md](plan-d-mutation-log.md).
++**Branch:** `plan-d/fills`, cut from `main` at `bde9196`.
++**Ledger (per-task briefs, reports and review diffs):**
++[.superpowers/sdd/2026-09-01-gpu-backend-plan-d-fills/](../../.superpowers/sdd/2026-09-01-gpu-backend-plan-d-fills/)
++(git-ignored; archive it onto the branch before the workspace is deleted, per
++every earlier plan's own recorded lesson).
++
++**What Plan D shipped**: the fill kind (`kKindFill = 3`) and its writer
++(`writeFill`), `fillPolygon` (pre-triangulated) and `fillCircle` (fanned at
++its own outline's step count) in `GeometryCollector`, the shader's fill
++branch and its Dart transcription (`test/support/instance_expander.dart`),
++the `_coveredArgb` exclusion (a fill never fades on a hairline layer), the
++order gate that proves walk order is load-bearing for a fill drawn under a
++later stroke, and (this task) fills in the dev harness corpus and the
++resident buffer's size measured with fills present.
++
++---
++
++## What this plan's own premises measured false
++
++Three places, none of them silently absorbed:
++
++1. **Task 4's brief specified `lineweightHundredths: 60` for the two
++   strokes the record-level overlap guard needs to cross a fill.** That
++   gave only **172 device pixels** of overlap, under the 200-pixel floor
++   the guard checks. The implementer raised both strokes to `120` and
++   re-measured **337 device pixels** — the plan's own literal was wrong,
++   and the guard is what caught it before it shipped as a vacuous check.
++2. **Task 5's brief predicted the compiled shader bundle would show the
++   string `attribute ` exactly 8 times.** The real count is **16
++   occurrences of 8 unique attribute names** — this repo's bundle embeds
++   the shader source twice. The reviewer verified this independently by
++   extracting and enumerating both copies (`kind_half, p0, p1, corner, p2,
++   join_weight, color, dash`). The check itself stands; its expected number
++   was corrected from 8 to 16 (Ruling D-5a).
++3. **Task 7's brief supplied a sample test loop with a lock-in bug.** It
++   tracked `lastFill` correctly but latched `strokeAfterFill` onto the
++   *first* stroke seen after *any* fill rather than the last stroke in the
++   corpus, because `AddRegionCommand.apply` draws a region's boundary as
++   its own independently-visible entity immediately after the fill —
++   "fill, then its own outline" is not "fill, then nothing else, then the
++   next primitive." Run verbatim it failed (`Expected: a value greater
++   than <58> / Actual: <3>`) against a real, correctly-ordered corpus. The
++   implementer fixed the loop to scan for the *last* stroke and documented
++   why in place — the underlying property (`strokeInkInsideFill`'s 337-pixel
++   overlap, above) was independently already true; only the sample loop's
++   ability to see it was wrong.
++
++None of these three needed a threshold moved. Each is a correction to a
++number or a loop the plan itself supplied, found by running it rather than
++reading it — the failure mode this project's mutation-and-differential
++testing bar exists to catch, this time catching the plan's own prose before
++it reached a gate.
++
++---
++
++## What was measured in `flutter test`
++
++All of the following were re-run for this task's report, from the fully
++merged Plan D tree on `plan-d/fills` — not read off an earlier task's
++report — except where a number is explicitly attributed to an earlier
++task's own measurement.
++
++### Criterion 1 — record-level differential, fill corpus (exact)
++
++`collector_differential_test.dart`: "the fill fixture -- every instance's
++kind, argb and three points match the reference's triangle stream, in
++order" — **PASS**, part of the file's 4/4 green run:
++
++```
++$ flutter test test/gpu/collector_differential_test.dart
++00:00 +0: emits every polyline segment the painter walks, in the same order, with the residual applied and half-width scaled by dpr
++00:00 +1: fades a hairline stroke exactly as the reference sink does, not just strokes above the floor
++00:00 +2: fades a hairline stroke by lineweightScale as well as by dpr, not just the identity default every other gate in this file exercises
++00:00 +3: the fill fixture -- every instance's kind, argb and three points match the reference's triangle stream, in order
++00:00 +4: All tests passed!
++```
++
++### Criterion 2 — pixel differential, colour (fill corpus and stroke corpus both)
++
++`resident_pixel_differential_test.dart` gates both corpora at
++`withinTwoFraction >= 0.995` and `overEight == 0`. Both pass; the exact
++figures, from Task 6's own measurement (stroke corpus) and a fresh
++temporary-`print` capture for this task (fill corpus, reverted before
++commit — `git diff` empty afterward):
++
++| corpus | union | withinTwo | overEight | referenceInk |
++|---|---|---|---|---|
++| stroke (Task 6) | 8,183 | 8,183 (**100.000%**) | 0 | 8,183 |
++| fill (this task, re-measured) | 393,051 | 393,051 (**100.000%**) | 0 | 393,051 |
++
++```
++$ flutter test test/gpu/resident_pixel_differential_test.dart
++00:00 +0: the resident arm draws the reference drawing
++00:00 +1: the seam join is load-bearing on the circle
++00:00 +2: the two arms agree per channel, not merely on coverage
++00:00 +3: the colour measurement can actually fail
++00:00 +4: the fill corpus agrees per channel
++00:00 +5: All tests passed!
++```
++
++### Criterion 3 — anti-vacuity
++
++`referenceInk` reads 8,183 (stroke corpus) and 393,051 (fill corpus), both
++`> 5000`. The instrument's own control arm, `debugTintResident`, reads
++`withinTwoFraction = 0.000%` (Task 6's measurement) — well below the 0.995
++gate, so a broken instrument that always passed would be caught.
++
++### Criterion 4 — spec criterion 4: kind-sorted vs. walk-ordered
++
++From Task 7's own measurement (`fill_order_test.dart`), re-confirmed green
++in this task's full suite run:
++
++```
++submitting the buffer out of walk order changes the rendering: differing = 9297 (gate: > 200)
++unpermuted (walk order):        ResidentColorAgreement(union: 393051, withinTwo: 393051 (100.000%), overEight: 0, referenceInk: 393051)
++permuted (sortByKind):          ResidentColorAgreement(union: 393051, withinTwo: 383754 (97.635%), overEight: 9297, referenceInk: 393051)
++```
++
++**PASS**: the resident arm matches the reference exactly in walk order
++(100.000%, gate `>= 0.995`) and **fails to** match under the kind-sorted
++permutation (97.635% `< 0.995`) — proving draw order, not merely draw
++content, is what the buffer's walk order protects.
++
++### Criterion 5 — `skippedOps` counts text alone, on the fill corpus
++
++`geometry_collector_test.dart`: "counts the ops it does not draw instead of
++dropping them silently" asserts `c.skippedOps == 1, reason: 'only text is
++skipped now'`; "a fill polygon is one instance per triangle, in
++triangulation order" asserts `c.skippedOps == 0, reason: 'a fill is drawn
++now, not counted'` on a fill-only corpus. Both pass, part of the file's 52/52
++green run (`+52: All tests passed!`). This task's own buffer measurement
++(below) confirms the same on a full 10,000-entity, fills-on corpus:
++`skippedOps=0` — no text is present in the harness spike corpus at all
++(`labelFraction: 0`), so there is nothing for `skippedOps` to count.
++
++---
++
++## Criterion 6 — the resident buffer, measured on the CPU
++
++**This is not a device run.** `GeometryCollector` builds the buffer that
++would be uploaded to the GPU entirely on the CPU; `ResidentGeometry.create`
++(the upload) is the only step not taken, and it does not change the
++buffer's byte length, only where the bytes live. The number below is
++exactly what `--dart-define=RUN_GPU_SPIKE` would report on a device,
++obtained without a device.
++
++**Method**: `apps/dev_harness_2d/test/fill_buffer_budget_test.dart` (new,
++this task). It calls `spikeDocument(entityCount: 10000, fillsEnabled: true)`
++— the same corpus builder `GpuSpikeState._buildResidentGeometry` uses in
++`gpu_arm.dart` — then makes the same three calls that method does, up to
++and not including `ResidentGeometry.create`: builds a `SpatialIndex`, fits
++`ViewportTransform` to the document's extents, walks it through
++`DraftPainter` into a `GeometryCollector`, and reads `collector.data`.
++
++**This test is measured against the testing bar, not merely asserted.** Its
++`expect(fills, greaterThan(0))` guard was fired: `main.dart`'s
++`spikeDocument` was mutated so `_addFillRegions` never runs
++(`if (false && (fillsEnabled ?? kSpikeFills)) _addFillRegions(doc, count);`),
++`flutter test test/fill_buffer_budget_test.dart` then failed with
++`Expected: a value greater than <0> / Actual: <0>` on that exact assertion,
++and the file was restored from a `/tmp` backup (`git status --short` clean
++afterward) — this is the guard against `SPIKE_FILLS` (or the fill path
++behind it) silently going dark and the buffer measurement staying vacuous
++about the one thing this task adds. The companion guard,
++`expect(other, 0)` (every instance must carry a known kind tag), was not
++independently fired this round — it would need a mutation inside
++`GeometryCollector`/`instance_record.dart` rather than in the harness, which
++is a real mutation to try but wasn't; it is reported here as untested rather
++than as either killed or unkillable.
++
++Reproducible two ways:
++
++```sh
++cd apps/dev_harness_2d
++# Default knobs (SPIKE_DEFS=20, SPIKE_INSTANCES=200 -- spikeDocument()'s own defaults):
++flutter test test/fill_buffer_budget_test.dart
++
++# Matched to Plan C's own device-run parameters, for a direct comparison:
++flutter test test/fill_buffer_budget_test.dart \
++  --dart-define=SPIKE_INSTANCES=150 --dart-define=SPIKE_DEFS=20 --dart-define=DASHED=0.35
++```
++
++Verbatim output, both runs:
++
++```
++PLAN-D buffer: entities=10280 (requested 10000) instances=114717 (strokes=65469 joins=49088 points=0 fills=160) skippedOps=0 bytes=7341888 (7.00 MB) budget=8.00 MB margin=1046720 bytes
++```
++
++```
++PLAN-D buffer: entities=10280 (requested 10000) instances=106636 (strokes=60798 joins=45678 points=0 fills=160) skippedOps=0 bytes=6824704 (6.51 MB) budget=8.00 MB margin=1563904 bytes
++```
++
++`entities=10280` on both runs: `spikeDocument` builds the base 10,000 and
++`_addFillRegions` adds 200 rooms in `kFillFraction`'s (0.4) proportion — 80
++filled (each an `AddRegionCommand` pair: a 4-edge boundary plus a
++2-triangle fill, 160 fill instances total, matching `fills=160` on both
++runs exactly) and 120 boundary-only, 280 entities in all.
++
++### Against the budget, and against Plan C
++
++| run | instances | bytes | MB | vs. 8 MB budget |
++|---|---|---|---|---|
++| default spike knobs | 114,717 | 7,341,888 | **7.00** | **PASS** — 1.00 MB margin |
++| matched to Plan C's device params (`SPIKE_INSTANCES=150`) | 106,636 | 6,824,704 | **6.51** | **PASS** — 1.49 MB margin |
++| Plan C, no fills, same matched params | 105,076 | 6,724,864 | 6.41 | PASS — 1.59 MB margin (recorded) |
++
++**PASS. Fills add roughly 1,560 instances and 0.10 MB to Plan C's own
++matched-parameter figure** (106,636 − 105,076 = 1,560; 6.51 − 6.41 = 0.10
++MB) — 160 of those instances are the fills themselves (2 triangles per
++filled room, 80 filled rooms), the remaining ~1,400 are the 120 unfilled
++rooms' own boundary strokes and joins, which exist in this corpus only
++because `_addFillRegions` adds them alongside the filled ones to exercise
++both the fillable-and-filled and the fillable-but-not path. **The delta this
++plan's fills add to Plan C's own measured buffer is small relative to the
++6.41 MB baseline** and stays comfortably inside the budget at either set of
++spike knobs measured here.
++
++`SPIKE_FILLS`'s own default (`false`) leaves `spikeDocument()` calling
++`generateDocument` exactly as it did before this task, with no call to
++`_addFillRegions` — every number any earlier plan took through this harness
++stays reproducible unchanged.
++
++---
++
++## Criterion 7 — mutation testing
++
++**12 of 12 pre-committed mutations fired; 11 killed on the first shot, 1
++(M-D4) survived its first shot and was killed after a missing assertion was
++added.** Full transcripts, diffs and verbatim `flutter test` output for
++every mutation: [plan-d-mutation-log.md](plan-d-mutation-log.md).
++
++| id | what it mutates | verdict |
++|---|---|---|
++| M-D1 | `fillPolygon` routes through `_coveredArgb` | KILLED |
++| M-D2 | `fillCircle` routes through `_coveredArgb` | KILLED |
++| M-D3 | shader fill branch adds `halfWidth` | KILLED |
++| M-D4 | fill fold lands on `p2` instead of `p1` | **SURVIVED, then KILLED** (real coverage gap — see below) |
++| M-D5 | fill/point shader branches swapped | KILLED (4 assertions) |
++| M-D6 | `fillCircle` fans at `steps + 1` | KILLED |
++| M-D7 | `fillPolygon` walks its triangulation backwards | KILLED |
++| M-D8 | `fillPolygon` drops zero-area triangles | KILLED |
++| M-D9 | the collector sorts its buffer by kind before returning | KILLED (3 assertions) |
++| M-D10 | `writeFill` leaves `dashPeriod` unwritten | KILLED |
++| M-D11 | `writeFill` writes `halfWidth: 1` | KILLED |
++| M-D12 | `fillCircle`'s fan starts off-angle | KILLED |
++
++**M-D4, in full.** The corner table (`ResidentGeometry.kCornerVertices`)
++gives the fill fold triangle exactly one vertex wired to the `wm` weight,
++added onto whichever of `wa`/`wb` also participates — so folding onto
++*either* p1 (correct) or p2 (M-D4) makes two of that triangle's three
++vertices literally coincide, and a triangle with two coincident vertices has
++exactly zero signed area under both assignments, by the same algebraic
++identity either way. The one test that existed, `'a fill expands to its
++three corners and one degenerate triangle'`, checked only that area — a
++genuine coverage gap, not an equivalent mutant: the value actually written
++at the M vertex really does change (`a1` vs `a2`), the test just never read
++it. Fixed by pinning the M-weighted vertex's raw position directly
++(`positions[8]`, `positions[9]`) to `p1`'s known value — verified against
++the *correct* code first (19/19 passed), then M-D4 re-applied and killed
++this new assertion specifically (`Expected: ... 40 / Actual: 25.0`).
++
++---
++
++## What was NOT measured
++
++- **No human has looked at the running window.** See below — Ruling D-9a of
++  this task's own brief forbids simulating that step.
++- **Text** (Plan E), **web** (Plan G), and **the `DraftCanvas` widget path**
++  are all out of scope, per the plan's own self-review: `DraftCanvas` still
++  renders `residentGpu` as `vertices` and needs Plan F's rebuild triggers
++  before it can be wired to the real backend. The dev harness's GPU arm
++  remains the only runtime consumer of fills through this backend.
++- **The instrument's standing structural blind spot**, carried unchanged
++  from Plan B: geometry added inside a footprint already inked by something
++  else moves no pixel in a coverage-only comparison. The per-channel colour
++  instrument (Task 6/7's `measureResidentColor`) narrows this for colour,
++  but a same-colour overdraw is still invisible to any of this project's
++  pixel instruments — not newly true of fills, but not newly false either.
++- **No warm rebuild, no gesture-timing numbers for this plan.** Fills are
++  static geometry with no per-frame branch of their own (a fill is never
++  dashed, `kKindFill`'s own doc says so), so this plan did not re-run the
++  gesture-phase measurement Plans B and C both took; nothing here suggests
++  it would move, but that is a statement about what was not measured, not a
++  result.
++
++---
++
++## The device run — OWED
++
++**Not run in this session, and this session could not have run it.** This
++task's controller ruling (D-9a) is explicit: the device run and the window
++check are a human's work, not an implementer's, and this repository's
++hardest rule is never writing down output that was not actually observed.
++What follows names exactly what must happen and what to look for — a real
++hole in this document, not a filled-in guess.
++
++**The command in this task's own brief is incomplete for what this task
++added, and this note says so rather than repeating it uncorrected.** The
++brief's Step 3 command is byte-for-byte Plan C's own device-run command — it
++does not pass `SPIKE_FILLS=true`, so run exactly as written it would draw
++*no* fills at all and none of Plan D's five checks below would have
++anything to look at. The corrected command:
++
++```sh
++cd apps/dev_harness_2d
++flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
++  --dart-define=ENTITIES=10000 --dart-define=SPIKE_DEFS=20 \
++  --dart-define=SPIKE_INSTANCES=150 --dart-define=SPIKE_FRAMES=30 \
++  --dart-define=SPIKE_REPEATS=3 --dart-define=SPIKE_FILLS=true
++```
++
++**Confirm Low Power Mode is off before the run** (`pmset -g | grep
++lowpowermode`) **and say so in whatever note records the run.** Plan C's
++device run was contaminated by it and every timing in that note carries the
++caveat; Plan D has not yet had a clean, uncontaminated device run of its
++own.
++
++---
++
++## The window checks — OWED, fourteen across three plans
++
++**One harness run, with the corrected command above, discharges all
++fourteen.** None has been discharged as of this note.
++
++### Plan D's five (this plan's own, all OWED)
++
++1. A filled region is **filled**, not outlined and hollow.
++2. The higher-handle stroke crossing it is **visible over** the fill, not
++   hidden under it.
++3. A filled circle's fill reaches exactly to its own boundary stroke at
++   every zoom — no rim of background between them, no fill spilling past.
++4. A fill on a hairline layer is **not faded**.
++5. A translucent fill shows what is under it.
++
++### Plan C's five, still owed since `18330a9`
++
++1. Zoom in two stops: the dashes must get **longer**, and there must be the
++   same number of them.
++2. Zoom out until the dashes disappear into solid, at the same zoom on arm
++   C as on arm A.
++3. A dashed corner must be **notched**, not filled.
++4. A dashed circle must be **notched** at its start angle.
++5. Pan slowly along a long dashed line: the dashes must move **with** the
++   line, not slide along it.
++
++### Plan B's four, still owed since `72b162d`
++
++1. Corners **filled** (a miter join, not a gap).
++2. A circle **not** notched at its start angle (unlike a dashed one).
++3. A `point()` draws a **square** dot.
++4. **Nothing thickens** as you zoom in — no antialiasing has landed.
++
++---
++
++## Exit gate — 8 of 9
++
++Pre-committed in the plan. A miss would be recorded as a miss with its
++number; there is no miss to record — the one unmet row is OWED, not failed,
++and stays that way until a human runs the harness.
++
++| # | criterion | verdict |
++|---|---|---|
++| 1 | record-level differential, fill corpus, exact | **PASS** — `collector_differential_test.dart`, all instances match on `kind`, `argb`, three points |
++| 2 | pixel differential, colour, fill corpus and stroke corpus both | **PASS** — both 100.000% within 2, `overEight = 0` |
++| 3 | anti-vacuity | **PASS** — `referenceInk` 8,183 / 393,051, both `> 5000`; control arm 0.000% |
++| 4 | spec criterion 4: kind-sorted vs. walk order | **PASS** — 100.000% in walk order, 97.635% under permutation (`< 0.995`), differing = 9,297 (gate `> 200`) |
++| 5 | `skippedOps` counts text alone, fill corpus | **PASS** — `skippedOps = 1` on a corpus with text, `= 0` on a fills-only one, `= 0` on this task's own 10,000-entity fills-on corpus |
++| 6 | resident geometry `<= 8 MB`, 10,000 entities with fills, measured | **PASS** — **6.51 MB** at 106,636 instances (matched to Plan C's own parameters), **7.00 MB** at 114,717 instances (default knobs); both against 8.00 MB |
++| 7 | 12 of 12 mutations fire, survivors declared with a reason | **PASS** — 12/12 fired, 11 killed first shot, M-D4 survived its first shot for a real, declared reason and was killed after the fix |
++| 8 | a human looks at the window | **OWED** — Plan D's five, plus Plan B's four and Plan C's five, fourteen checks total, none discharged |
++| 9 | every gate green in all three packages | **PASS** — see below |
++
++### The nine gate commands, verbatim
++
++```
++$ cd packages/jet_cad_2d_flutter && flutter test
++...
++00:06 +565 ~1: All tests passed!
++```
++
++```
++$ flutter analyze
++Analyzing jet_cad_2d_flutter...
++No issues found! (ran in 1.3s)
++```
++
++```
++$ dart format --output=none --set-exit-if-changed .
++Formatted 92 files (0 changed) in 0.14 seconds.
++```
++
++```
++$ cd ../jet_cad_2d && dart test
++...
++00:02 +798: All tests passed!
++```
++
++```
++$ dart analyze
++Analyzing jet_cad_2d...
++No issues found!
++```
++
++```
++$ dart format --output=none --set-exit-if-changed .
++Formatted 113 files (0 changed) in 0.15 seconds.
++```
++
++```
++$ cd ../../apps/dev_harness_2d && flutter test --concurrency=1
++...
++00:13 +73: All tests passed!
++```
++
++```
++$ flutter analyze
++Analyzing dev_harness_2d...
++No issues found! (ran in 1.0s)
++```
++
++```
++$ dart format --output=none --set-exit-if-changed .
++Formatted 18 files (0 changed) in 0.08 seconds.
++```
++
++`+73` in `dev_harness_2d` is `+72` (the count at Plan C's merge) plus this
++task's one new test, `fill_buffer_budget_test.dart`.
++
++---
++
++## Files this task touched
++
++- `apps/dev_harness_2d/lib/main.dart` — `kSpikeFills` (a `String`-keyed
++  define, same shape as `kFillsEnabled` and for the same reason: an
++  unrecognised value throws rather than silently reading as off);
++  `spikeDocument()` takes optional `entityCount`/`fillsEnabled` overrides so
++  a test can fix the corpus directly rather than through a define, and calls
++  `_addFillRegions` when fills are enabled.
++- `apps/dev_harness_2d/lib/gpu_arm.dart` — the header comment and the
++  `GSPIKE note` line corrected: fills are no longer described as unsupported
++  by arm C (they were landed by this plan's earlier tasks); text is now the
++  only op left in `skippedOps`.
++- `apps/dev_harness_2d/test/fill_buffer_budget_test.dart` — new. The buffer
++  measurement above.
++- `docs/superpowers/notes/2026-09-01-plan-d-results.md` — this file.
++- `STATUS.md` — head rewritten; see the commit for this task.
+diff --git a/docs/superpowers/notes/plan-d-mutation-log.md b/docs/superpowers/notes/plan-d-mutation-log.md
+new file mode 100644
+index 0000000..fa9bcef
+--- /dev/null
++++ b/docs/superpowers/notes/plan-d-mutation-log.md
+@@ -0,0 +1,677 @@
++# Plan D's mutation log — Task 8
++
++Twelve pre-committed mutations, fired one at a time against the merged Plan D
++tree on `plan-d/fills`, each from a `cp` backup outside the repo
++(`/tmp/plan-d-mutation-backups/`, plus a per-mutation `/tmp/plan-d-backup*.dart`
++used for the actual restore) and restored the same way. No mutation was ever
++reverted with `git checkout --`; `git status --short` was clean after every
++restore except for the one file this task deliberately keeps changed
++(`test/gpu/instance_expander_test.dart`, for M-D4 — see below).
++
++All commands below ran from `packages/jet_cad_2d_flutter`.
++
++**Baseline, before any mutation:** `flutter test` — `+536 ~1` climbing to
++`+565 ~1: All tests passed!` (565 tests, 1 pre-existing skip).
++
++---
++
++## M-D1 — `fillPolygon` writes `_coveredArgb(style.argb, ...)` instead of `style.argb`
++
++**File:** `lib/src/gpu/geometry_collector.dart`
++
++**Diff applied:**
++
++```diff
++     if (triangles.isEmpty) return;
++     final t = _residual;
++-    final argb = style.argb;
+++    final argb = _coveredArgb(style.argb, style.lineweightHundredths); // M-D1
++     _reserve(_instances + triangles.length ~/ 3);
++```
++
++**Command:** `flutter test test/gpu/geometry_collector_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +46: a fill keeps its own colour on a hairline layer
++00:00 +46 -1: a fill keeps its own colour on a hairline layer [E]
++  Expected: a numeric value within <0.000001> of <1.0>
++    Actual: <0.07450980693101883>
++     Which:  differs by <0.9254901930689812>
++  a fill never goes through _coveredArgb
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/geometry_collector_test.dart 1235:5        main.<fn>
++```
++
++**Verdict: KILLED**, by the named test (`geometry_collector_test.dart`, "a
++fill keeps its own colour on a hairline layer").
++
++---
++
++## M-D2 — `fillCircle` writes `_coveredArgb(...)`
++
++**File:** `lib/src/gpu/geometry_collector.dart`
++
++**Diff applied:**
++
++```diff
++     final steps = _flattenSteps(deviceRadius, theta);
++     // `style.argb` directly, never `_coveredArgb` -- Ruling D3.
++-    final argb = style.argb;
+++    final argb = _coveredArgb(style.argb, style.lineweightHundredths); // M-D2
++```
++
++**Command:** `flutter test test/gpu/geometry_collector_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +51: a fill circle keeps its own colour on a hairline layer
++00:00 +51 -1: a fill circle keeps its own colour on a hairline layer [E]
++  Expected: a numeric value within <0.000001> of <1.0>
++    Actual: <0.07450980693101883>
++     Which:  differs by <0.9254901930689812>
++  a filled circle never goes through _coveredArgb
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/geometry_collector_test.dart 1362:5        main.<fn>
++```
++
++**Verdict: KILLED**, by the named test. This reproduces, exactly, the
++`0.0745` alpha value the earlier round recorded for this mutation — same
++fixture (`lineweightHundredths: 1`, `pixelsPerPaperMm: 3.78`,
++`devicePixelRatio: 1.0`), same arithmetic.
++
++---
++
++## M-D3 — the shader's fill branch reads `half_width` (expand each corner outward)
++
++`flutter test` has no GPU, so `shaders/cad_stroke.vert` itself cannot be
++exercised. Per the task's brief, this mutates the Dart transcription instead:
++**`test/support/instance_expander.dart`**, the file
++`instance_expander_test.dart` gates line-for-line against the shader.
++
++**Diff applied:**
++
++```diff
++         final a0x = toX(x0, y0), a0y = toY(x0, y0);
++         final a1x = toX(x1, y1), a1y = toY(x1, y1);
++         final a2x = toX(x2, y2), a2y = toY(x2, y2);
++-        px = c.wv * a0x + (c.wa + c.wm) * a1x + c.wb * a2x;
++-        py = c.wv * a0y + (c.wa + c.wm) * a1y + c.wb * a2y;
+++        // M-D3: the fill branch reads half_width (expand each corner
+++        // outward), which a fill must never do (Ruling D2).
+++        px = c.wv * a0x + (c.wa + c.wm) * a1x + c.wb * a2x + halfWidth;
+++        py = c.wv * a0y + (c.wa + c.wm) * a1y + c.wb * a2y + halfWidth;
++```
++
++**Command:** `flutter test test/gpu/instance_expander_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +15: a fill is not expanded by a half-width, at any camera
++00:00 +15 -1: a fill is not expanded by a half-width, at any camera [E]
++  Expected: a numeric value within <0.0001> of <133.32152684419714>
++    Actual: <142.321533203125>
++     Which:  differs by <9.000006358927862>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/instance_expander_test.dart 375:5          main.<fn>
++```
++
++**Verdict: KILLED**, by the named test — the differential is exactly the 9.0
++half-width the test deliberately poisons into the record to make "ignored"
++distinguishable from "zero".
++
++---
++
++## M-D4 — the fill branch folds `M` onto `p2` instead of `p1`
++
++**File:** `test/support/instance_expander.dart` (Dart transcription, same
++reason as M-D3).
++
++**Diff applied:**
++
++```diff
++         final a0x = toX(x0, y0), a0y = toY(x0, y0);
++         final a1x = toX(x1, y1), a1y = toY(x1, y1);
++         final a2x = toX(x2, y2), a2y = toY(x2, y2);
++-        px = c.wv * a0x + (c.wa + c.wm) * a1x + c.wb * a2x;
++-        py = c.wv * a0y + (c.wa + c.wm) * a1y + c.wb * a2y;
+++        // M-D4: fold M onto p2 (B) instead of p1 (A).
+++        px = c.wv * a0x + c.wa * a1x + (c.wb + c.wm) * a2x;
+++        py = c.wv * a0y + c.wa * a1y + (c.wb + c.wm) * a2y;
++```
++
++**Command:** `flutter test test/gpu/instance_expander_test.dart`
++
++**First shot — verbatim output:**
++
++```
++00:00 +14: a fill expands to its three corners and one degenerate triangle
++00:00 +15: a fill is not expanded by a half-width, at any camera
++00:00 +16: a fill is solid: the dash test never runs on it
++00:00 +17: a point is still a point after the fill branch lands
++00:00 +18: cad_stroke.vert still carries the three renumber-prone constants
++00:00 +19: All tests passed!
++```
++
++**Verdict on the first shot: SURVIVED.**
++
++### Why it survives, and it is not a fluke
++
++`ResidentGeometry.kCornerVertices` gives triangle 1 (the fold triangle)
++exactly one vertex with a non-zero `wm` and one each with `wa`/`wb`, so a
++fold onto *any single point* — p1 or p2 — makes triangle 1's three vertices
++`(p1, p1, p2)` or `(p1, p2, p2)`. Both have two coincident vertices, so both
++have **exactly zero signed area**. The existing test computed only that
++area:
++
++```dart
++final area = (e.positions[8] - e.positions[6]) *
++        (e.positions[11] - e.positions[7]) -
++    (e.positions[9] - e.positions[7]) * (e.positions[10] - e.positions[6]);
++expect(area, 0.0, ...);
++```
++
++— which is `0` under *either* fold target, algebraically (substituting
++`v4 = v5` gives `(v5x-v3x)(v5y-v3y) - (v5y-v3y)(v5x-v3x) = 0` by the same
++identity that makes `v4 = v3` give `0`). The brief's prediction ("the second
++triangle gains area") does not hold for this implementation: the corner
++table's structure makes M-D4 unobservable through triangle-1's area no
++matter which of the two real points the miter tip degenerates onto. This is
++a genuine coverage gap, not a mutation that happens to be equivalent to the
++correct program at the pixel level — the *value written* at the M vertex
++really does change (`a1` vs `a2`), the existing test just never reads it.
++
++### The missing test, added
++
++**File:** `test/gpu/instance_expander_test.dart`, appended to the existing
++test `'a fill expands to its three corners and one degenerate triangle'`:
++
++```diff
++     expect(area, 0.0,
++         reason: 'the second triangle of a fill instance must be degenerate');
+++
+++    // The area check above cannot tell "M folded onto p1" from "M folded
+++    // onto p2" apart: the corner table's M-weighted vertex always
+++    // duplicates whichever point it is folded onto, so triangle 1 comes out
+++    // zero-area either way -- (p1, p1, p2) or (p1, p2, p2) both have zero
+++    // area. Pin the M vertex (positions[8..9], the row wired to `wm`) to
+++    // its documented value, `p1`, directly -- this is the assertion that
+++    // actually distinguishes the two, and it is what M-D4 (Task 8's mutant
+++    // table) needs to die.
+++    expect(e.positions[8], closeTo(40, 1e-6),
+++        reason: 'M must fold onto p1 (A), not p2 (B)');
+++    expect(e.positions[9], closeTo(12, 1e-6));
++   });
++```
++
++Verified against the **correct** (unmutated) `instance_expander.dart` first —
++`flutter test test/gpu/instance_expander_test.dart` passed all 19 tests with
++this addition in place, confirming the new assertion is not itself wrong
++before using it to judge the mutant.
++
++### M-D4 re-fired, with the new test in place
++
++Same diff as above, re-applied to `test/support/instance_expander.dart` from
++its `/tmp` backup.
++
++**Command:** `flutter test test/gpu/instance_expander_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +14: a fill expands to its three corners and one degenerate triangle
++00:00 +14 -1: a fill expands to its three corners and one degenerate triangle [E]
++  Expected: a numeric value within <0.000001> of <40>
++    Actual: <25.0>
++     Which:  differs by <15.0>
++  M must fold onto p1 (A), not p2 (B)
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/instance_expander_test.dart 365:5          main.<fn>
++```
++
++**Verdict: KILLED (after the new test was added).** `instance_expander.dart`
++was then restored from its `/tmp` backup; the new assertions in
++`instance_expander_test.dart` are kept, and are part of this task's commit.
++
++---
++
++## M-D5 — the point branch stays `else` and the fill branch is added before it
++
++**File:** `test/support/instance_expander.dart`
++
++**Diff applied:**
++
++```diff
++       } else if (kind < 2.5) {
++-        // kKindPoint: a square of the stroke's width centred on p0. ...
++-        final cx = toX(x0, y0), cy = toY(x0, y0);
++-        px = cx + (c.x * 2.0 - 1.0) * halfWidth;
++-        py = cy + c.y * halfWidth;
++-      } else {
++-        // kKindFill: one triangle of a pre-triangulated fill. ...
+++        // M-D5: fill branch moved here, ahead of the point branch, which
+++        // now stays a bare `else` below.
++         final a0x = toX(x0, y0), a0y = toY(x0, y0);
++         final a1x = toX(x1, y1), a1y = toY(x1, y1);
++         final a2x = toX(x2, y2), a2y = toY(x2, y2);
++         px = c.wv * a0x + (c.wa + c.wm) * a1x + c.wb * a2x;
++         py = c.wv * a0y + (c.wa + c.wm) * a1y + c.wb * a2y;
+++      } else {
+++        // M-D5: point branch, now the bare else -- a fill (kind 3) reaches
+++        // here instead of the branch above.
+++        final cx = toX(x0, y0), cy = toY(x0, y0);
+++        px = cx + (c.x * 2.0 - 1.0) * halfWidth;
+++        py = cy + c.y * halfWidth;
++       }
++```
++
++**Command:** `flutter test test/gpu/instance_expander_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +14 -3: a point is still a point after the fill branch lands
++00:00 +14 -4: a point is still a point after the fill branch lands [E]
++  Expected: a numeric value within <0.000001> of <8>
++    Actual: <20.0>
++     Which:  differs by <12.0>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/instance_expander_test.dart 413:5          main.<fn>
++
++00:00 +14 -4: cad_stroke.vert still carries the three renumber-prone constants
++00:00 +15 -4: Some tests failed.
++
++Failing tests:
++  test/gpu/instance_expander_test.dart: a fill expands to its three corners and one degenerate triangle
++  test/gpu/instance_expander_test.dart: a fill is not expanded by a half-width, at any camera
++  test/gpu/instance_expander_test.dart: a point expands to a square of the stroke width
++  test/gpu/instance_expander_test.dart: a point is still a point after the fill branch lands
++```
++
++**Verdict: KILLED**, by the named test ("a point is still a point after the
++fill branch lands") and three others besides — swapping the two branches'
++bodies corrupts both kinds at once, as expected.
++
++---
++
++## M-D6 — `fillCircle` fans at `_flattenSteps(deviceRadius, theta) + 1`
++
++**File:** `lib/src/gpu/geometry_collector.dart`
++
++**Diff applied:**
++
++```diff
++     const theta = 2 * math.pi;
++-    final steps = _flattenSteps(deviceRadius, theta);
+++    final steps = _flattenSteps(deviceRadius, theta) + 1; // M-D6
++```
++
++**Command:** `flutter test test/gpu/geometry_collector_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +48: a filled circle is a fan at the same step count as its own outline
++00:00 +48 -1: a filled circle is a fan at the same step count as its own outline [E]
++  Expected: <15>
++    Actual: <16>
++  the fan and the outline must use one step count
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/geometry_collector_test.dart 1289:5        main.<fn>
++```
++
++**Verdict: KILLED**, by the named test.
++
++---
++
++## M-D7 — `fillPolygon` walks the triangulation backwards
++
++**File:** `lib/src/gpu/geometry_collector.dart`
++
++**Diff applied:**
++
++```diff
++     _reserve(_instances + triangles.length ~/ 3);
++     // Loop bound requires a complete triple: drops an incomplete tail where
++     // the oracle (VerticesDrawSink) would throw, because the contract is
++     // complete triples only.
++-    for (var i = 0; i + 2 < triangles.length; i += 3) {
+++    // M-D7: walk the triangulation backwards.
+++    final tripleCount = triangles.length ~/ 3;
+++    for (var ti = tripleCount - 1; ti >= 0; ti--) {
+++      final i = ti * 3;
++       final a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
++```
++
++**Command:** `flutter test test/gpu/geometry_collector_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +45: a fill polygon is one instance per triangle, in triangulation order
++00:00 +45 -1: a fill polygon is one instance per triangle, in triangulation order [E]
++  Expected: a numeric value within <0.001> of <135.65803689804903>
++    Actual: <134.25613403320312>
++     Which:  differs by <1.4019028648459084>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/geometry_collector_test.dart 1201:5        main.<fn>
++
++Failing tests:
++  test/gpu/geometry_collector_test.dart: a fill polygon is one instance per triangle, in triangulation order
++```
++
++**Verdict: KILLED**, by the named test (exactly one failure).
++
++---
++
++## M-D8 — `fillPolygon` drops zero-area triangles
++
++**File:** `lib/src/gpu/geometry_collector.dart`
++
++**Diff applied:**
++
++```diff
++       final a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
++       final ax = points[a * 2], ay = points[a * 2 + 1];
++       final bx = points[b * 2], by = points[b * 2 + 1];
++       final cx = points[c * 2], cy = points[c * 2 + 1];
+++      // M-D8: drop zero-area triangles instead of writing them.
+++      final area2 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+++      if (area2 == 0.0) continue;
++       writeFill(_buffer, _instances,
++```
++
++**Command:** `flutter test test/gpu/geometry_collector_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +47: a degenerate triangle is written, not dropped
++00:00 +47 -1: a degenerate triangle is written, not dropped [E]
++  Expected: <1>
++    Actual: <0>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/geometry_collector_test.dart 1257:5        main.<fn>
++
++Failing tests:
++  test/gpu/geometry_collector_test.dart: a degenerate triangle is written, not dropped
++```
++
++**Verdict: KILLED**, by the named test.
++
++---
++
++## M-D9 — the collector sorts the buffer by kind before `data` returns
++
++**File:** `lib/src/gpu/geometry_collector.dart`
++
++**Diff applied:**
++
++```diff
++-  Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
+++  Float32List get data {
+++    // M-D9: sort the buffer by kind before returning it.
+++    final raw = _buffer.sublist(0, _instances * kFloatsPerInstance);
+++    final order = List<int>.generate(_instances, (i) => i)
+++      ..sort((x, y) => raw[x * kFloatsPerInstance + InstanceFieldOffset.kind]
+++          .compareTo(raw[y * kFloatsPerInstance + InstanceFieldOffset.kind]));
+++    final sorted = Float32List(raw.length);
+++    for (var oi = 0; oi < _instances; oi++) {
+++      final si = order[oi];
+++      sorted.setRange(oi * kFloatsPerInstance, (oi + 1) * kFloatsPerInstance,
+++          raw, si * kFloatsPerInstance);
+++    }
+++    return sorted;
+++  }
++```
++
++**Command:** `flutter test test/gpu/fill_order_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +0: the fill corpus really does have a stroke drawn over a fill
++00:00 +0 -1: the fill corpus really does have a stroke drawn over a fill [E]
++  Expected: a value greater than <154>
++    Actual: <53>
++     Which: is not a value greater than <154>
++  no stroke is emitted after the last fill, so no permutation of this corpus could change a pixel and criterion 4 would pass vacuously
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/fill_order_test.dart 70:5                  main.<fn>
++
++00:00 +0 -1: submitting the buffer out of walk order changes the rendering
++00:00 +0 -2: submitting the buffer out of walk order changes the rendering [E]
++  Expected: a value greater than <200>
++    Actual: <0>
++     Which: is not a value greater than <200>
++  a permutation that changed no pixel would mean this gate cannot fail, whatever it reads
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/fill_order_test.dart 84:5                  main.<fn>
++
++00:00 +0 -2: the resident arm matches the reference in walk order and only there
++00:00 +0 -3: the resident arm matches the reference in walk order and only there [E]
++  Expected: a value greater than or equal to <0.995>
++    Actual: <0.9762626224077792>
++     Which: is not a value greater than or equal to <0.995>
++  ResidentColorAgreement(union: 393051, withinTwo: 383721 (97.626%), overEight: 9330, referenceInk: 393051)
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/fill_order_test.dart 93:5                  main.<fn>
++
++Failing tests:
++  test/gpu/fill_order_test.dart: submitting the buffer out of walk order changes the rendering
++  test/gpu/fill_order_test.dart: the fill corpus really does have a stroke drawn over a fill
++  test/gpu/fill_order_test.dart: the resident arm matches the reference in walk order and only there
++```
++
++**Verdict: KILLED**, all three of `fill_order_test.dart`'s named
++assertions — matching the earlier round's record that this mutation kills
++"all three assertions in `fill_order_test.dart`".
++
++---
++
++## M-D10 — `writeFill` leaves `dashPeriod` unwritten
++
++**File:** `lib/src/gpu/instance_record.dart`
++
++**Diff applied:**
++
++```diff
++   into[o + InstanceFieldOffset.x2] = x2;
++   into[o + InstanceFieldOffset.y2] = y2;
++   _writeColor(into, o, argb);
++-  _writeDash(into, o, 0, 0, 0, 0);
+++  // M-D10: dashPeriod left unwritten.
+++  into[o + InstanceFieldOffset.dashPhase] = 0;
+++  into[o + InstanceFieldOffset.dashFracStart] = 0;
+++  into[o + InstanceFieldOffset.dashFracEnd] = 0;
++ }
++```
++
++(Only `writeFill`'s call to `_writeDash` was touched; `writePoint`'s
++identical-looking call three functions up was left alone.)
++
++**Command:** `flutter test test/gpu/instance_record_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +10: a fill record carries three corners, no width and no dash
++00:00 +10 -1: a fill record carries three corners, no width and no dash [E]
++  Expected: <0.0>
++    Actual: <17.5>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/instance_record_test.dart 214:5            main.<fn>
++
++Failing tests:
++  test/gpu/instance_record_test.dart: a fill record carries three corners, no width and no dash
++```
++
++**Verdict: KILLED**, by the named test — the pre-filled garbage (`17.5`)
++survives in the `dashPeriod` slot exactly as the test's own doc comment
++predicts for a writer that leaves a slot untouched.
++
++---
++
++## M-D11 — `writeFill` writes `halfWidth: 1`
++
++**File:** `lib/src/gpu/instance_record.dart`
++
++**Diff applied:**
++
++```diff
++   final o = index * kFloatsPerInstance;
++   into[o + InstanceFieldOffset.kind] = kKindFill;
++-  into[o + InstanceFieldOffset.halfWidth] = 0;
+++  into[o + InstanceFieldOffset.halfWidth] = 1; // M-D11
++```
++
++**Command:** `flutter test test/gpu/instance_record_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +10: a fill record carries three corners, no width and no dash
++00:00 +10 -1: a fill record carries three corners, no width and no dash [E]
++  Expected: <0.0>
++    Actual: <1.0>
++  a fill has no width and the shader must not expand it
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/instance_record_test.dart 202:5            main.<fn>
++
++Failing tests:
++  test/gpu/instance_record_test.dart: a fill record carries three corners, no width and no dash
++```
++
++**Verdict: KILLED**, by the named test.
++
++---
++
++## M-D12 — `fillCircle`'s fan starts at angle `2π/steps` rather than `0`
++
++**File:** `lib/src/gpu/geometry_collector.dart`
++
++**Diff applied:**
++
++```diff
++     final ccx = t.a * cx + t.c * cy + t.e;
++     final ccy = t.b * cx + t.d * cy + t.f;
++-    var px = cx + r, py = cy;
+++    // M-D12: the fan starts at angle 2*pi/steps rather than 0.
+++    final startAngle = theta / steps;
+++    var px = cx + r * math.cos(startAngle), py = cy + r * math.sin(startAngle);
++     var dx = t.a * px + t.c * py + t.e, dy = t.b * px + t.d * py + t.f;
++```
++
++**Command:** `flutter test test/gpu/geometry_collector_test.dart`
++
++**Verbatim output:**
++
++```
++00:00 +49: the fan shares one centre and walks the rim in ascending angle
++00:00 +49 -1: the fan shares one centre and walks the rim in ascending angle [E]
++  Expected: a numeric value within <0.001> of <339.0>
++    Actual: <338.2658386230469>
++     Which:  differs by <0.734161376953125>
++
++  package:matcher                                     expect
++  package:flutter_test/src/widget_tester.dart 473:18  expect
++  test/gpu/geometry_collector_test.dart 1317:5        main.<fn>
++
++Failing tests:
++  test/gpu/geometry_collector_test.dart: the fan shares one centre and walks the rim in ascending angle
++```
++
++**Verdict: KILLED**, by the named test (exactly one failure).
++
++---
++
++## Summary
++
++**12 of 12 mutations fired; 11 killed on the first shot, 1 (M-D4) survived
++its first shot and was killed after a missing assertion was added.**
++
++| id | verdict |
++|---|---|
++| M-D1 | KILLED — `geometry_collector_test.dart`, "a fill keeps its own colour on a hairline layer" |
++| M-D2 | KILLED — `geometry_collector_test.dart`, "a fill circle keeps its own colour on a hairline layer" |
++| M-D3 | KILLED — `instance_expander_test.dart`, "a fill is not expanded by a half-width, at any camera" |
++| M-D4 | **SURVIVED, then KILLED** — see below |
++| M-D5 | KILLED — `instance_expander_test.dart`, "a point is still a point after the fill branch lands" (+3 more) |
++| M-D6 | KILLED — `geometry_collector_test.dart`, "a filled circle is a fan at the same step count as its own outline" |
++| M-D7 | KILLED — `geometry_collector_test.dart`, "a fill polygon is one instance per triangle, in triangulation order" |
++| M-D8 | KILLED — `geometry_collector_test.dart`, "a degenerate triangle is written, not dropped" |
++| M-D9 | KILLED — `fill_order_test.dart`, all three assertions |
++| M-D10 | KILLED — `instance_record_test.dart`, "a fill record carries three corners, no width and no dash" |
++| M-D11 | KILLED — `instance_record_test.dart`, "a fill record carries three corners, no width and no dash" |
++| M-D12 | KILLED — `geometry_collector_test.dart`, "the fan shares one centre and walks the rim in ascending angle" |
++
++### The one survivor, in full: M-D4
++
++**What survived and why.** The corner table
++(`ResidentGeometry.kCornerVertices`) gives the fill fold triangle exactly one
++vertex wired to `wm`, and that vertex's weight is added onto whichever of
++`wa`/`wb` also participates. Folding onto *either* p1 or p2 makes two of
++triangle 1's three vertices literally coincide — `(p1, p1, p2)` if folded
++onto p1 (the correct program), `(p1, p2, p2)` if folded onto p2 (the
++mutant) — and a triangle with two coincident vertices has exactly zero
++signed area under both assignments, by the same algebraic identity in both
++cases. The existing test, `'a fill expands to its three corners and one
++degenerate triangle'`, checked only that area. It could not have told the
++two fold targets apart no matter how many times it was re-run, because the
++quantity it reads is genuinely insensitive to which real point the tip
++folds onto — this is a coverage gap in the assertion, not noise or a
++fluke of one run.
++
++**The fix.** The same test now also pins the M-weighted vertex's raw
++position (`positions[8]`, `positions[9]`) to `p1`'s known value directly,
++rather than inferring it from triangle 1's area. This is checked against the
++*correct* code first (passed, 19/19), then M-D4 was re-applied and it killed
++this new assertion specifically (`Expected: ... 40 / Actual: 25.0`, the `x`
++coordinate of `p2` instead of `p1`). `instance_expander.dart` was restored
++from its `/tmp` backup afterward; the two new `expect` lines in
++`test/gpu/instance_expander_test.dart` are the only source change this task
++keeps, and are included in this task's commit.
++
++### The three gate commands, on the fully restored tree
++
++```
++cd packages/jet_cad_2d && dart test && dart analyze && dart format --output=none --set-exit-if-changed .
++```
++→ `+798: All tests passed!`, `No issues found!`, `Formatted 113 files (0 changed)`.
++
++```
++cd packages/jet_cad_2d_flutter && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .
++```
++→ `+565 ~1: All tests passed!` (565 tests, 1 pre-existing skip — same count
++as the pre-mutation baseline, since M-D4's fix extended an existing test
++rather than adding a new one), `No issues found!`, `Formatted 92 files (0
++changed)`.
+diff --git a/packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle b/packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle
+index c443fbf..cea47f1 100644
+Binary files a/packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle and b/packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle differ
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+index 7c19645..d8f8917 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+@@ -73,26 +73,28 @@ class GeometryCollector implements DrawSink {
+   /// see `docs/superpowers/notes/2026-08-30-plan-b-results.md`) that is
+   /// roughly 5.23 MB copied per call (109,068 × [kFloatsPerInstance] × 4
+   /// bytes = 5,235,264 bytes). Read it once per rebuild, into
+   /// `ResidentGeometry.create`, and hoist it out of any per-frame path —
+   /// Plan F's `paint()` call site included — or it breaks this project's
+   /// "the frame path allocates nothing per entity in steady state"
+   /// non-negotiable.
+   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
+   int get instanceCount => _instances;
+ 
+-  /// Ops this plan does not draw yet — `fillPolygon`, `fillCircle` and
+-  /// `text`. Counted rather than ignored so a corpus that needs Plan B
+-  /// through E is visible as a number instead of as a missing picture.
++  /// Ops this plan does not draw yet — `text` only, since Plan D.
+   ///
+-  /// `circle` and `arc` stopped counting here in Task 5; `point` in Task 6,
+-  /// which is also where the test that pins this whole sentence lands.
++  /// Counted rather than ignored so a corpus that needs Plan E is visible as
++  /// a number instead of as a missing picture.
++  ///
++  /// `circle` and `arc` stopped counting here in Plan B's Task 5; `point` in
++  /// its Task 6; `fillPolygon` in Plan D's Task 2; `fillCircle` stops counting
++  /// in Task 3.
+   int get skippedOps => _skipped;
+ 
+   /// **Diagnostic only — read by nobody in this class and never changes what
+   /// is written.** Ruling B4 keeps the bevel/miter/collinear decision in the
+   /// shader, in device pixels, on purpose: a collector-side test would run in
+   /// `double`, in collection space, against a reference that decides in
+   /// `float32`, in device space, and the two would disagree on exactly the
+   /// corners that are nearly straight. This counts, in collection-space
+   /// `double` arithmetic, how many of the joins this collector wrote carry a
+   /// zero (or reversed) cross product between their incoming and outgoing
+@@ -617,22 +619,91 @@ class GeometryCollector implements DrawSink {
+     _pendingJoinPeriod = 0;
+     _pendingJoinPhase = 0;
+   }
+ 
+   int _flattenSteps(double deviceRadius, double theta) {
+     final ideal =
+         (theta * math.sqrt(deviceRadius / (8 * kFlattenTolerance))).ceil();
+     return ideal.clamp(1, kMaxFlattenSegments);
+   }
+ 
++  /// One instance per triangle, in the triangulation's own order.
++  ///
++  /// **Read, never computed** — the triangulation was materialised by the
++  /// command, the codec or undo, and `DraftPainter._drawFill` passes it
++  /// through. This transcribes `VerticesDrawSink.fillPolygon`, including
++  /// that `triangles` triple-indexes into `points`' *point* numbering, so
++  /// each index is doubled to reach a coordinate pair.
++  ///
++  /// **`style.argb` directly, NOT `_coveredArgb`** (Ruling D3): a fill has no
++  /// width to fade, and a fill entity's `ResolvedStyle` still carries a
++  /// lineweight because the column is shared with strokes.
++  ///
++  /// **No degenerate-triangle test** (Ruling D6): the reference's
++  /// `_emitTriangle` has none, and adding one here would make the two arms'
++  /// instance lists differ on a triangulation that contains one.
+   @override
+-  void fillPolygon(Float64List points, int count, Int32List triangles,
+-          ResolvedStyle style) =>
+-      _skipped++;
++  void fillPolygon(
++      Float64List points, int count, Int32List triangles, ResolvedStyle style) {
++    if (triangles.isEmpty) return;
++    final t = _residual;
++    final argb = style.argb;
++    _reserve(_instances + triangles.length ~/ 3);
++    // Loop bound requires a complete triple: drops an incomplete tail where
++    // the oracle (VerticesDrawSink) would throw, because the contract is
++    // complete triples only.
++    for (var i = 0; i + 2 < triangles.length; i += 3) {
++      final a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
++      final ax = points[a * 2], ay = points[a * 2 + 1];
++      final bx = points[b * 2], by = points[b * 2 + 1];
++      final cx = points[c * 2], cy = points[c * 2 + 1];
++      writeFill(_buffer, _instances,
++          x0: t.a * ax + t.c * ay + t.e,
++          y0: t.b * ax + t.d * ay + t.f,
++          x1: t.a * bx + t.c * by + t.e,
++          y1: t.b * bx + t.d * by + t.f,
++          x2: t.a * cx + t.c * cy + t.e,
++          y2: t.b * cx + t.d * cy + t.f,
++          argb: argb);
++      _instances++;
++    }
++  }
+ 
++  /// A triangle fan around the circle's centre, at the same step count
++  /// [_flatten] would give the circle's own outline.
++  ///
++  /// **The shared `_flattenSteps` call is the point** (Ruling D5): a filled
++  /// circle's silhouette is tessellated by the same expression as its own
++  /// boundary stroke, so the two never disagree at any zoom. The rim starts
++  /// at angle 0, i.e. `(cx + r, cy)`, exactly as
++  /// `VerticesDrawSink.fillCircle` does.
+   @override
+-  void fillCircle(double cx, double cy, double r, ResolvedStyle style) =>
+-      _skipped++;
++  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {
++    if (r <= 0) return;
++    final t = _residual;
++    final deviceRadius = r * t.scaleMagnitude;
++    if (deviceRadius <= 0) return;
++    const theta = 2 * math.pi;
++    final steps = _flattenSteps(deviceRadius, theta);
++    // `style.argb` directly, never `_coveredArgb` -- Ruling D3.
++    final argb = style.argb;
++    final ccx = t.a * cx + t.c * cy + t.e;
++    final ccy = t.b * cx + t.d * cy + t.f;
++    var px = cx + r, py = cy;
++    var dx = t.a * px + t.c * py + t.e, dy = t.b * px + t.d * py + t.f;
++    _reserve(_instances + steps);
++    for (var i = 1; i <= steps; i++) {
++      final angle = theta * i / steps;
++      px = cx + r * math.cos(angle);
++      py = cy + r * math.sin(angle);
++      final nx = t.a * px + t.c * py + t.e, ny = t.b * px + t.d * py + t.f;
++      writeFill(_buffer, _instances,
++          x0: ccx, y0: ccy, x1: dx, y1: dy, x2: nx, y2: ny, argb: argb);
++      _instances++;
++      dx = nx;
++      dy = ny;
++    }
++  }
+ 
+   @override
+   void text(String text, Handle style, ResolvedStyle resolved) => _skipped++;
+ }
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
+index 700ee2e..5a3332f 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/instance_record.dart
+@@ -35,45 +35,58 @@ import 'dart:typed_data';
+ const int kFloatsPerInstance = 16;
+ 
+ /// The kind tag, in slot 0 of every record.
+ ///
+ /// **One buffer and one draw call carry every kind**, because separate
+ /// pipelines are separate draw calls and three draw calls submit as "all
+ /// strokes, then all joins, then all fills" — not walk order.
+ /// `vertices_draw_sink.dart:41-57` records that defect being shipped and
+ /// reverted once already, partitioned by colour rather than by kind.
+ ///
+-/// **The values are 0, 1, 2 and the order is load-bearing**, not merely
+-/// distinct: `cad_stroke.vert` dispatches with `kind < 0.5` then
+-/// `kind < 1.5`, because ES 100 has no integer attributes and no `switch` on
+-/// one. Renumbering these without editing that shader silently draws every
+-/// join as a stroke.
++/// **The values are 0, 1, 2, 3 and the order is load-bearing**, not merely
++/// distinct: `cad_stroke.vert` dispatches with `kind < 0.5`, then
++/// `kind < 1.5`, then `kind < 2.5`, because ES 100 has no integer attributes
++/// and no `switch` on one. Renumbering these without editing that shader
++/// silently draws every join as a stroke, or every fill as a point.
+ const double kKindStroke = 0;
+ 
+ /// A corner between two segments. `(x0, y0)` is the vertex, `(x1, y1)` the
+ /// previous point and `(x2, y2)` the next one; the shader builds the bevel
+ /// and, where the turn is shallow enough, the miter tip.
+ const double kKindJoin = 1;
+ 
+ /// A `point()` op: a square of the stroke's own width centred on
+ /// `(x0, y0)`. `(x1, y1)` and `(x2, y2)` are unused.
+ ///
+ /// **Not a zero-length capped stroke, and not a tiny horizontal segment
+ /// either.** The reference draws it as a horizontal segment from `px - half`
+ /// to `px + half` — but it computes that offset in **device** space, where
+ /// its residual has already been applied. This record holds *collection*
+ /// space, and the shader expands `halfWidth` in device pixels after the mvp,
+ /// so a `± half` baked into `x0`/`x1` here would scale with the camera on one
+ /// axis while the other stayed fixed: the square would shear under zoom. Its
+ /// own kind is what keeps both axes in the same space.
+ const double kKindPoint = 2;
+ 
++/// One triangle of a fill. `(x0, y0)`, `(x1, y1)` and `(x2, y2)` are its
++/// three corners in collection space, and [InstanceFieldOffset.halfWidth] is
++/// zero — a fill has no width, so unlike every other kind nothing here is
++/// expanded in device pixels. The shader reads the three corners through the
++/// `join_weight` roles `V`, `A` and `B`, and folds `M` onto `A` so the second
++/// triangle of the six-vertex quad is degenerate (Plan D's Ruling D1).
++///
++/// **A fill is never dashed and never fades.** `DraftPainter._drawFill` opens
++/// no dash bracket, and the colour is `style.argb` rather than
++/// `_coveredArgb`'s — routing a fill through the sub-pixel alpha fade would
++/// fade a filled room on a hairline layer (`vertices_draw_sink.dart:752-757`).
++const double kKindFill = 3;
++
+ /// The record's field layout, as an offset in **floats** from the record's
+ /// start — the writers below index by float, not byte.
+ ///
+ /// **The one place this order is declared for Dart.**
+ /// `ResidentGeometry.kInstanceVertexLayout` derives its `offsetInBytes`
+ /// values from these same constants (`* 4`), so reordering a field here moves
+ /// the writers and the vertex layout together instead of leaving one behind.
+ /// `cad_stroke.vert`'s attribute list is a third, independent copy — GLSL
+ /// cannot read a Dart constant — and `test/support/instance_expander.dart` is
+ /// a fourth. The expander is the one that is *gated*: it reads these same
+@@ -221,10 +234,41 @@ void writePoint(
+   into[o + InstanceFieldOffset.halfWidth] = halfWidth;
+   into[o + InstanceFieldOffset.x0] = x;
+   into[o + InstanceFieldOffset.y0] = y;
+   into[o + InstanceFieldOffset.x1] = 0;
+   into[o + InstanceFieldOffset.y1] = 0;
+   into[o + InstanceFieldOffset.x2] = 0;
+   into[o + InstanceFieldOffset.y2] = 0;
+   _writeColor(into, o, argb);
+   _writeDash(into, o, 0, 0, 0, 0);
+ }
++
++/// Writes the fill-triangle record at [index]. [argb] is `0xAARRGGBB`.
++///
++/// **Takes no half-width and no dash arguments, by design.** A fill has no
++/// width to expand (Ruling D2) and cannot be dashed (Ruling D4): the painter
++/// reaches `fillPolygon` and `fillCircle` outside any `beginDash` bracket. All
++/// five slots are still written explicitly — see [_writeDash]'s own doc for
++/// why an explicit zero is not the same as a fresh buffer's zero.
++void writeFill(
++  Float32List into,
++  int index, {
++  required double x0,
++  required double y0,
++  required double x1,
++  required double y1,
++  required double x2,
++  required double y2,
++  required int argb,
++}) {
++  final o = index * kFloatsPerInstance;
++  into[o + InstanceFieldOffset.kind] = kKindFill;
++  into[o + InstanceFieldOffset.halfWidth] = 0;
++  into[o + InstanceFieldOffset.x0] = x0;
++  into[o + InstanceFieldOffset.y0] = y0;
++  into[o + InstanceFieldOffset.x1] = x1;
++  into[o + InstanceFieldOffset.y1] = y1;
++  into[o + InstanceFieldOffset.x2] = x2;
++  into[o + InstanceFieldOffset.y2] = y2;
++  _writeColor(into, o, argb);
++  _writeDash(into, o, 0, 0, 0, 0);
++}
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+index 521986a..ca6b091 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+@@ -56,20 +56,37 @@ class ResidentGeometry {
+   /// cannot be told apart by `corner`. The weight vector selects one of
+   /// `(V, A, B, M)` per vertex, and the shader reads the position as
+   /// `w.x*V + w.y*A + w.z*B + w.w*M` — no float-equality test on an index,
+   /// which ES 100 makes unpleasant.
+   ///
+   /// Triangle 0 is `(V, A, B)` and triangle 1 is `(A, M, B)`. Both wind
+   /// **either way** depending on the turn direction, because `_emitJoin`
+   /// flips the outer side with the sign of the cross product — which is why
+   /// `GpuDrawBackend.render` pins `CullMode.none`.
+   ///
++  /// **A fill (Plan D's Ruling D1) reads this same table, with its own role
++  /// mapping.** A fill has only three points, not a join's four, so `M` is
++  /// folded onto `A` rather than computed:
++  ///
++  /// | role | join reads      | fill reads |
++  /// |------|------------------|------------|
++  /// | V    | the corner       | `p0`       |
++  /// | A    | the incoming leg | `p1`       |
++  /// | B    | the outgoing leg | `p2`       |
++  /// | M    | the miter tip    | `p1` (== A)|
++  ///
++  /// Triangle 0 is therefore `(p0, p1, p2)` — the fill's real triangle — and
++  /// triangle 1 is `(p1, p1, p2)` — zero area, so it rasterises nothing. A
++  /// reader who has only seen the join-branch explanation above would not
++  /// know this table is shared with a fourth kind; this paragraph is that
++  /// pointer.
++  ///
+   /// `@visibleForTesting`: no test can reach this data through `create`
+   /// itself (it runs only with a real GPU context), so it is hoisted here to
+   /// be asserted directly by a plain `flutter test`.
+   @visibleForTesting
+   static const List<double> kCornerVertices = <double>[
+     // corner.x corner.y | join_weight V, A, B, M
+     0, -1, /*  */ 1, 0, 0, 0, // triangle 0, vertex 0 -> V
+     0, 1, /*   */ 0, 1, 0, 0, // triangle 0, vertex 1 -> A
+     1, -1, /*  */ 0, 0, 1, 0, // triangle 0, vertex 2 -> B
+     1, -1, /*  */ 0, 1, 0, 0, // triangle 1, vertex 0 -> A
+diff --git a/packages/jet_cad_2d_flutter/shaders/cad_stroke.vert b/packages/jet_cad_2d_flutter/shaders/cad_stroke.vert
+index 0b8226f..9affc7e 100644
+--- a/packages/jet_cad_2d_flutter/shaders/cad_stroke.vert
++++ b/packages/jet_cad_2d_flutter/shaders/cad_stroke.vert
+@@ -10,20 +10,26 @@
+ // instance buffer holds a centreline, a corner or a centre in collection
+ // space plus a half-width in device pixels; expanding any of it at collection
+ // time would thicken the drawing with the camera. That is why joins are a
+ // kind and not collector geometry: a miter is a function of the live
+ // half-width.
+ //
+ // **`test/support/instance_expander.dart` is this file, in Dart.** It is what
+ // the suite can actually run. Any edit here that is not mirrored there is a
+ // divergence no test in this package can see -- change them together.
+ //
++// **A fill is the one kind that expands nothing.** Its three corners are
++// projected and used; `half_width` is zero and is not read. The six-vertex
++// corner table is reused unchanged: `join_weight`'s V, A and B select the
++// three corners and M is folded onto A, so the second triangle is
++// degenerate and rasterises nothing (Plan D's Ruling D1).
++//
+ // **Dashes are decided here and tested one line away.** The vertex stage
+ // turns the instance's `dash` quad into a single varying, `t`, which is the
+ // pattern-space coordinate at this vertex; the fragment stage keeps the
+ // fragment when `fract(t)` lands inside the element's own extent. `t` is
+ // measured in COLLECTION units, and the live camera does not appear in it at
+ // all: the reference's on-screen period is proportional to the camera scale
+ // (`draft_painter.dart`'s `_dashScale` folds in `toScreen.scaleMagnitude`)
+ // and so is the distance along the primitive, so the ratio is scale-free.
+ // The camera reaches this file for one purpose only -- deciding whether the
+ // pattern has collapsed to solid.
+@@ -144,28 +150,42 @@ void main() {
+           }
+         }
+       }
+ 
+       px = join_weight.x * v + join_weight.y * a + join_weight.z * b +
+            join_weight.w * m;
+     }
+     // `along` stays 0: every vertex of a join wedge sits at the corner, so
+     // the whole wedge is tested at the phase stored for that corner.
+ 
+-  } else {
++  } else if (kind < 2.5) {
+     // kKindPoint: a square of the stroke's width centred on p0. Both axes
+     // are expanded here, in device pixels, so the dot stays square and stays
+     // the same size at every zoom -- which is what the reference gets for
+     // free by computing its `+/- half` in device space. A point is never
+     // dashed.
+     vec2 c = to_pixels(p0);
+     px = c + vec2((corner.x * 2.0 - 1.0) * half_width, corner.y * half_width);
++
++  } else {
++    // kKindFill: one triangle of a pre-triangulated fill. Nothing is
++    // expanded -- a fill has no width -- so `half_width` is not read here at
++    // all. `join_weight` selects the corner: V -> p0, A -> p1, B -> p2, and
++    // M folded onto p1, which makes the second triangle (A, M, B) =
++    // (p1, p1, p2) degenerate.
++    vec2 a0 = to_pixels(p0);
++    vec2 a1 = to_pixels(p1);
++    vec2 a2 = to_pixels(p2);
++    px = join_weight.x * a0 + (join_weight.y + join_weight.w) * a1 +
++         join_weight.z * a2;
++    // `along` stays 0 and `dash` is all zeros on a fill, so the tail's
++    // `period > 0.0` test fails and `v_dash` keeps its solid sentinel.
+   }
+ 
+   gl_Position = vec4(px / frame_info.half_viewport, 0.0, 1.0);
+   v_color = color;
+ 
+   // The dash decision. `dash.x` is signed: zero is solid, and a negative
+   // value marks the one instance per primitive that draws solid when the
+   // pattern collapses.
+   v_dash = vec3(0.0, -1.0, 0.0);
+   float period = abs(dash.x);
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+index 1297ce8..f5b4e65 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+@@ -130,20 +130,42 @@ void main() {
+     expect(data[InstanceFieldOffset.a] * 255.0,
+         closeTo(expectedAlpha.toDouble(), 0.51),
+         reason: 'a collector that dropped lineweightScale from the fade '
+             'formula would leave this at 255, not 193');
+     // The colour channels are untouched -- `_coveredArgb` gives up alpha,
+     // it does not darken.
+     expect(data[InstanceFieldOffset.r] * 255.0, closeTo(0x20, 0.51));
+     expect(data[InstanceFieldOffset.g] * 255.0, closeTo(0x40, 0.51));
+     expect(data[InstanceFieldOffset.b] * 255.0, closeTo(0x60, 0.51));
+   });
++
++  test(
++      'the fill fixture -- every instance\'s kind, argb and three points '
++      'match the reference\'s triangle stream, in order', () {
++    // Plan D's own corpus, walked at the record level exactly the way
++    // `differentialFixture` is above: `_checkAgainstOracle` already handles
++    // `PolylineOp` and `CircleOp` generically (900, 903 are plain 2-point
++    // lines; 902 and 905, the two regions' own boundaries, are ordinary
++    // visible entities too -- `AddRegionCommand.apply` adds fill AND
++    // boundary to the tree, "fill first" -- so their outline strokes and
++    // joins are already covered by the existing PolylineOp/CircleOp
++    // handling below). What is new here is `FillPolygonOp` (901) and
++    // `FillCircleOp` (904), which this file had no case for until Plan D.
++    //
++    // **This is also where a fill's colour is checked, not only in
++    // `resident_pixel_differential_test.dart`'s pixel gate.** The pixel
++    // gate can only report a percentage; this loop names the wrong VALUE --
++    // a mutant that routed a fill's argb through `_coveredArgb` would fail
++    // here with the exact faded channel it produced, not just a coverage
++    // fraction.
++    _checkAgainstOracle(fillFixture());
++  });
+ }
+ 
+ /// Runs [doc] through the painter twice -- once recorded, once collected --
+ /// and checks every instance the collector wrote against the oracle built
+ /// declaratively from the recording. Shared by both tests in this file, so
+ /// the hairline fixture exercises the same oracle the main corpus does
+ /// rather than a second, possibly-diverging copy of it.
+ void _checkAgainstOracle(DraftDocument doc) {
+   final index = SpatialIndex(doc);
+   addTearDown(index.dispose);
+@@ -235,48 +257,103 @@ void _checkAgainstOracle(DraftDocument doc) {
+     }
+     // A point is one instance, not a run -- no dedupe, no join, no seam.
+     // Its position is the residual applied to the op's own (already
+     // screen-rebased) coordinates, exactly as every other op's is above.
+     if (op is PointOp) {
+       expected.add(_ExpectedInstance.point(
+           op.style,
+           residual.a * op.x + residual.c * op.y + residual.e,
+           residual.b * op.x + residual.d * op.y + residual.f));
+     }
++    // A polygon fill: `triangles` triple-indexes `op.points`' own point
++    // numbering (`draw_sink.dart`'s doc on `FillPolygonOp`, and
++    // `VerticesDrawSink.fillPolygon`, which this expression mirrors), so
++    // each index is doubled to reach the coordinate pair before the
++    // residual is applied. One expected instance per triangle -- no
++    // dedupe, no join, no seam: a fill triangle is not a run.
++    if (op is FillPolygonOp) {
++      final pts = op.points;
++      final tris = op.triangles;
++      for (var t = 0; t + 2 < tris.length; t += 3) {
++        final a = tris[t], b = tris[t + 1], c = tris[t + 2];
++        final ax = pts[a * 2], ay = pts[a * 2 + 1];
++        final bx = pts[b * 2], by = pts[b * 2 + 1];
++        final cx = pts[c * 2], cy = pts[c * 2 + 1];
++        expected.add(_ExpectedInstance.fill(
++            op.style,
++            residual.a * ax + residual.c * ay + residual.e,
++            residual.b * ax + residual.d * ay + residual.f,
++            residual.a * bx + residual.c * by + residual.e,
++            residual.b * bx + residual.d * by + residual.f,
++            residual.a * cx + residual.c * cy + residual.e,
++            residual.b * cx + residual.d * cy + residual.f));
++      }
++    }
++    // A circle fill: a triangle fan around the centre, at the SAME step
++    // count the circle's own outline stroke would flatten to
++    // (`geometry_collector.dart`'s `fillCircle` doc, Ruling D5) -- so this
++    // reuses `_flattenedLocalPoints`, the same perimeter-point deriver the
++    // CircleOp case above already uses for a stroked circle, rather than a
++    // third copy of the step-count formula. The rim starts at angle 0, i.e.
++    // `(cx + r, cy)`, and each fan triangle is `(centre, previous rim point,
++    // next rim point)` -- `VerticesDrawSink.fillCircle`'s own order,
++    // transcribed by `GeometryCollector.fillCircle` too.
++    if (op is FillCircleOp) {
++      final rim = _flattenedLocalPoints(
++          op.cx, op.cy, op.r, 0, 2 * math.pi, residual,
++          closed: false);
++      final rimCount = rim.length ~/ 2;
++      if (rimCount >= 2) {
++        final ccx = residual.a * op.cx + residual.c * op.cy + residual.e;
++        final ccy = residual.b * op.cx + residual.d * op.cy + residual.f;
++        for (var i = 1; i < rimCount; i++) {
++          final px = rim[(i - 1) * 2], py = rim[(i - 1) * 2 + 1];
++          final nx = rim[i * 2], ny = rim[i * 2 + 1];
++          expected.add(_ExpectedInstance.fill(
++              op.style,
++              ccx,
++              ccy,
++              residual.a * px + residual.c * py + residual.e,
++              residual.b * px + residual.d * py + residual.f,
++              residual.a * nx + residual.c * ny + residual.e,
++              residual.b * nx + residual.d * ny + residual.f));
++        }
++      }
++    }
+   }
+ 
+   expect(expected, isNotEmpty,
+       reason: 'a fixture with no drawable geometry would make this test '
+           'vacuous -- polylines, circles and arcs all feed this list');
+   expect(collector.instanceCount, expected.length,
+       reason: 'the collector must emit exactly one instance per segment '
+           'and per join the declarative rule produces -- neither '
+           'dropping nor duplicating one');
+ 
+   // Captured once: `collector.data` copies `_buffer` on every access, so
+   // the comparison loop below reads a single snapshot rather than a fresh
+   // sublist per index.
+   final data = collector.data;
+ 
+   for (var i = 0; i < expected.length; i++) {
+     final o = i * kFloatsPerInstance;
+     final e = expected[i];
+     final style = e.style;
+ 
+-    // -- kind: a stroke, a join and a point lay their geometry out
++    // -- kind: a stroke, a join, a point and a fill lay their geometry out
+     // differently (`InstanceFieldOffset` doc), so asserting only the
+     // strokes' kind would pass on a join or point emitted as a stroke with
+     // the wrong fields simply never being checked. Every instance's kind
+-    // is asserted here, strokes, joins and points alike.
++    // is asserted here, strokes, joins, points and fills alike.
+     expect(data[o + InstanceFieldOffset.kind], e.kind,
+         reason: 'instance $i must be a '
+-            '${e.kind == kKindJoin ? "join" : e.kind == kKindPoint ? "point" : "stroke"}');
++            '${e.kind == kKindJoin ? "join" : e.kind == kKindPoint ? "point" : e.kind == kKindFill ? "fill" : "stroke"}');
+ 
+     // -- walk order & the residual -----------------------------------
+     // A stroke's (x0,y0,x1,y1) is its segment; a join's is
+     // (vertex, previous point) and (x2,y2) is its next point. A stroke's
+     // own (x2,y2) is asserted too (against 0,0, `writeStroke`'s own
+     // constant) rather than left unchecked, so a join emitted where a
+     // stroke was expected -- carrying a non-zero neighbour in x2/y2 --
+     // fails here instead of only on the kind check above.
+     expect(data[o + InstanceFieldOffset.x0], closeTo(e.x0, _tolerance),
+         reason: 'instance $i x0');
+@@ -290,39 +367,67 @@ void _checkAgainstOracle(DraftDocument doc) {
+         reason: 'instance $i x2');
+     expect(data[o + InstanceFieldOffset.y2], closeTo(e.y2, _tolerance),
+         reason: 'instance $i y2');
+ 
+     // -- half-width: the collector stores DEVICE pixels, the reference
+     // sink's own formula (`VerticesDrawSink._halfWidthFor`) stores LOGICAL
+     // pixels. They must differ by exactly `devicePixelRatio` -- this is
+     // not a bug being tolerated, it is the fact this test pins (see the
+     // module doc on `GeometryCollector._halfWidthFor`). A join carries the
+     // same half-width as the segments either side of it.
+-    final sinkHalf = _referenceLogicalHalfWidth(style.lineweightHundredths);
+-    expect(data[o + InstanceFieldOffset.halfWidth],
+-        closeTo(sinkHalf * _devicePixelRatio, _tolerance),
+-        reason: 'instance $i half-width must be the reference sink\'s '
+-            'logical half-width scaled by devicePixelRatio, not the raw '
+-            'logical value copied straight across');
++    //
++    // **A fill has no width at all** (`instance_record.dart`'s `writeFill`
++    // doc, Ruling D2) -- `writeFill` writes a literal `0`, not a lineweight
++    // computation that happens to floor to zero, so the general formula
++    // below is not merely inapplicable to a fill, it would assert the WRONG
++    // thing: `style.argb`'s lineweight is real (fill 901 sits on the
++    // hairline layer) and `_referenceLogicalHalfWidth` would compute a
++    // non-zero floored value for it, which no fill instance ever carries.
++    if (e.kind == kKindFill) {
++      expect(data[o + InstanceFieldOffset.halfWidth], closeTo(0, _tolerance),
++          reason: 'instance $i is a fill and must carry no half-width at '
++              'all, not a floored stroke-width computation');
++    } else {
++      final sinkHalf = _referenceLogicalHalfWidth(style.lineweightHundredths);
++      expect(data[o + InstanceFieldOffset.halfWidth],
++          closeTo(sinkHalf * _devicePixelRatio, _tolerance),
++          reason: 'instance $i half-width must be the reference sink\'s '
++              'logical half-width scaled by devicePixelRatio, not the raw '
++              'logical value copied straight across');
++    }
+ 
+     // -- colour: every entity in `differentialFixture` carries the
+     // default lineweight (25 hundredths-of-a-mm), which at
+     // `kLogicalPixelsPerMm` and dpr 2 computes to a device width above
+     // `VerticesDrawSink.kMinStrokeDevicePixels` -- so `_coveredArgb` is a
+     // no-op on every one of those segments and this line changes nothing
+     // for them. It is still routed through the reference's own fade
+     // formula rather than left as `style.argb`, because Plan B's hairline
+     // corpus (`_hairlineFixture`, below) needs exactly this comparison to
+     // be live: a hairline's alpha now differs from its `style.argb`, and a
+     // collector that forgot to fade it, or faded it by the wrong formula,
+     // must fail this loop rather than being invisible to it.
+-    final argb = _referenceCoveredArgb(style.argb, style.lineweightHundredths);
++    //
++    // **A fill's colour is `style.argb` directly, never `_coveredArgb`'s**
++    // (Ruling D3, `geometry_collector.dart:637-639`): a fill has no width
++    // to fade, and both `fillPolygon` and `fillCircle` pass `style.argb`
++    // straight through in the reference too
++    // (`vertices_draw_sink.dart:750-755`). Fill 901 sits on the "hairline"
++    // layer -- lineweight 1 hundredth-of-a-mm -- specifically so this branch
++    // is not vacuous: routing it through `_referenceCoveredArgb` the way the
++    // `else` below does would compute a REAL fade (well under
++    // `kMinStrokeDevicePixels`), so a collector that mistakenly faded a fill
++    // disagrees with a genuinely different number here, not a coincidence
++    // that happens to equal `style.argb` anyway.
++    final argb = e.kind == kKindFill
++        ? style.argb
++        : _referenceCoveredArgb(style.argb, style.lineweightHundredths);
+     expect(data[o + InstanceFieldOffset.r],
+         closeTo(((argb >> 16) & 0xFF) / 255.0, _tolerance),
+         reason: 'instance $i red channel');
+     expect(data[o + InstanceFieldOffset.g],
+         closeTo(((argb >> 8) & 0xFF) / 255.0, _tolerance),
+         reason: 'instance $i green channel');
+     expect(data[o + InstanceFieldOffset.b],
+         closeTo((argb & 0xFF) / 255.0, _tolerance),
+         reason: 'instance $i blue channel');
+     expect(data[o + InstanceFieldOffset.a],
+@@ -358,20 +463,27 @@ class _ExpectedInstance {
+   // `writePoint` zeroes all four of x1/y1/x2/y2 -- see `instance_record.dart`
+   // -- so the expected entry matches, the same way a stroke's own x2/y2 are
+   // pinned to 0 above rather than left unchecked.
+   _ExpectedInstance.point(this.style, this.x0, this.y0)
+       : kind = kKindPoint,
+         x1 = 0,
+         y1 = 0,
+         x2 = 0,
+         y2 = 0;
+ 
++  // A fill triangle's three corners occupy all six coordinate slots --
++  // `writeFill` writes every one of x0/y0/x1/y1/x2/y2 (`instance_record.dart`
++  // -- unlike a stroke or a point, nothing here is pinned to zero.
++  _ExpectedInstance.fill(
++      this.style, this.x0, this.y0, this.x1, this.y1, this.x2, this.y2)
++      : kind = kKindFill;
++
+   final double kind;
+   final double x0, y0, x1, y1, x2, y2;
+   final ResolvedStyle style;
+ }
+ 
+ /// The point list a circle or arc flattens to, in the residual's **local**
+ /// space — the space `_expectedInstancesFor` expects, since it applies the
+ /// residual itself.
+ ///
+ /// **Derived from the reference, not from the collector.** Every constant
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/fill_order_test.dart b/packages/jet_cad_2d_flutter/test/gpu/fill_order_test.dart
+new file mode 100644
+index 0000000..6ec67df
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/gpu/fill_order_test.dart
+@@ -0,0 +1,211 @@
++import 'dart:typed_data';
++import 'dart:ui';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
++
++import '../support/fixtures.dart' show kViewport;
++import '../support/gpu_comparison.dart';
++
++const Size _size = kViewport;
++const double _dpr = kFillFixtureDevicePixelRatio;
++const double _ppmm = kLogicalPixelsPerMm;
++
++/// Spec criterion 4: emission order is the drawing, and a permutation of the
++/// buffer is a different picture.
++///
++/// **This file exists because of fills.** A permutation of strokes preserves
++/// the union of covered pixels, so the coverage instrument cannot see it --
++/// `gpu_comparison.dart` says so. A fill covers a stroke, so reordering the
++/// two changes the colour of every pixel they share. Without a fill in the
++/// corpus this whole file passes vacuously, which is why the first test
++/// below asserts the corpus's own overlap before the second asserts the
++/// permutation changes it.
++void main() {
++  test('the fill corpus really does have a stroke drawn over a fill', () {
++    final c = collectFillFixture();
++    final data = c.data;
++    // `lastFill` and `lastStroke` are each the LAST index of their kind in
++    // the whole walk, not the first stroke found after the first fill seen.
++    //
++    // **A single pass that locks `strokeAfterFill` in at the first
++    // qualifying instance measures the wrong thing on this corpus, and it
++    // is worth recording why rather than only fixing it.** `fillFixture`
++    // draws two regions (901 and 904), and `AddRegionCommand` adds a
++    // region's BOUNDARY as its own ordinary, independently visible entity
++    // (`commands.dart`'s `AddRegionCommand.apply`: "Allocates the pair,
++    // fill first" -- both halves land in the document tree) -- so 902's
++    // outline stroke is drawn immediately after fill 901, long before fill
++    // 904 is reached. A loop that stops at the first stroke seen after ANY
++    // fill locks onto 902's outline and never looks again, so it compares
++    // that early index against `lastFill` (which keeps advancing to 904's
++    // own last instance) and reads a false negative -- exactly what an
++    // earlier draft of this test did, printing `lastFill=58,
++    // strokeAfterFill=3`. Scanning the whole buffer for the LAST stroke
++    // instead finds one at index 153, from 905's own boundary outline.
++    //
++    // **What this assertion does and does not prove.** `lastStroke >
++    // lastFill` only says a stroke instance exists somewhere after the
++    // last fill instance in walk order -- true of any document whose final
++    // region contributes a boundary outline after its own fill, regardless
++    // of whether that stroke or any other actually overlaps a fill on
++    // screen. It would stay true even if every fill covered only the
++    // strokes drawn BEFORE it, which would make criterion 4 unobservable
++    // here despite this line passing. It is kept as an anti-vacuity floor
++    // -- a corpus with no stroke anywhere after its last fill could not
++    // show a permutation-order effect at all, and this does redden under
++    // the sorted-buffer mutation (`task-7-report.md`) -- but the actual
++    // overlap property criterion 4 depends on (903's higher-handle stroke
++    // genuinely sharing screen pixels with fill 901) is proved separately,
++    // by `fixtures_test.dart`'s `strokeInkInsideFill`-based guard test,
++    // which measures 337 logical pixels of shared ink between them.
++    var lastFill = -1, lastStroke = -1;
++    for (var i = 0; i < c.instanceCount; i++) {
++      final kind = data[i * kFloatsPerInstance + InstanceFieldOffset.kind];
++      if (kind == kKindFill) lastFill = i;
++      if (kind == kKindStroke) lastStroke = i;
++    }
++    expect(lastFill, greaterThanOrEqualTo(0), reason: 'no fill was collected');
++    expect(lastStroke, greaterThan(lastFill),
++        reason: 'no stroke is emitted after the last fill, so no permutation '
++            'of this corpus could change a pixel and criterion 4 would pass '
++            'vacuously');
++  });
++
++  test('submitting the buffer out of walk order changes the rendering', () {
++    // In walk order the higher-handle stroke is drawn after the fill and is
++    // visible over it. Sorted by kind -- which is what a separate pipeline
++    // per kind would submit -- every fill is drawn last and covers it.
++    final inOrder = renderFillFixture();
++    final byKind = renderFillFixture(permute: sortByKind);
++
++    final differing = countDifferingPixels(inOrder, byKind);
++    expect(differing, greaterThan(200),
++        reason: 'a permutation that changed no pixel would mean this gate '
++            'cannot fail, whatever it reads');
++  });
++
++  test('the resident arm matches the reference in walk order and only there',
++      () {
++    final ordered = measureResidentColor(paintFillFixture,
++        size: _size, devicePixelRatio: _dpr, pixelsPerPaperMm: _ppmm);
++    expect(ordered.withinTwoFraction, greaterThanOrEqualTo(0.995),
++        reason: ordered.toString());
++
++    final permuted = measureResidentColor(paintFillFixture,
++        size: _size,
++        devicePixelRatio: _dpr,
++        pixelsPerPaperMm: _ppmm,
++        permute: sortByKind);
++    expect(permuted.withinTwoFraction, lessThan(0.995),
++        reason: 'if a kind-sorted buffer still matched the reference, this '
++            'backend would have no order to preserve and the single-draw-call '
++            'design would be unnecessary: ${permuted.toString()}');
++  });
++
++  // The three tests above measure PIXELS, and a wrong-stride reorder could
++  // move `differing` past 200 and `withinTwoFraction` under 0.995 for
++  // entirely the wrong reason -- garbled records still paint a different,
++  // wrong picture, which reads as "the gate works" without the gate ever
++  // having tested a real permutation. `reorderedInstances` was only
++  // verified once, by a throwaway test written and deleted for
++  // `task-7-report.md`; the two tests below pin the same property
++  // permanently, at the RECORD level, so the pixel gate's premise rests on
++  // the suite rather than on that review-time run.
++  test('the identity permutation renders the same picture as no permutation',
++      () {
++    // Kills a stride or off-by-one bug in the reorder loop directly: for
++    // `order[i] == i` (every index, in place) any correct implementation
++    // must reproduce the input exactly. A mutant that shifted the copy
++    // range by one float, or read `order[i +/- 1]`, would move a record
++    // even under the identity permutation and this would redden -- where
++    // the pixel tests above could not tell an off-by-one from a genuine
++    // reorder, since both move pixels.
++    final inOrder = renderFillFixture();
++    final identity = renderFillFixture(permute: (order) => order);
++    expect(countDifferingPixels(inOrder, identity), 0,
++        reason: 'permute: (order) => order must be a true no-op');
++  });
++
++  test(
++      'sortByKind is a multiset-equal reordering of the walk-order buffer, '
++      'not a scramble', () {
++    // Kills a NON-BIJECTIVE `sortByKind` -- one that silently duplicates one
++    // instance index into two output slots and drops another -- which the
++    // tests above cannot see: the pixel gates would still likely read
++    // "different enough" (a duplicated record still paints something, just
++    // the wrong thing), and the identity-permutation test above never calls
++    // `sortByKind` at all, so a bug confined to its own sort/dedupe logic is
++    // invisible to it. (A pure index-stride bug in the reorder COPY itself,
++    // composed with any genuine permutation, stays bijective and would NOT
++    // fail this multiset check -- verified by firing exactly that mutation
++    // in `reorderedInstances` during review: it passed this test and failed
++    // only the identity-permutation one above, which is why both tests are
++    // needed rather than either alone. See `task-7-report.md`.) Comparing
++    // whole records as a multiset -- every one present in the sorted buffer
++    // exactly as many times as in the walk-order buffer -- catches a
++    // duplicate-and-drop directly, independent of what picture it paints.
++    final c = collectFillFixture();
++    final data = c.data;
++    final n = c.instanceCount;
++    final order = sortByKind(List<int>.generate(n, (i) => i));
++    expect(order.length, n,
++        reason: 'sortByKind must return one index per instance, or '
++            'reorderedInstances would truncate or duplicate records');
++
++    final reordered = reorderedInstances(data, n, order);
++
++    // Every whole 16-float record, as its own key -- not `kind` alone, so
++    // a mutant that grouped by kind correctly but corrupted a position or
++    // a colour along the way still fails this.
++    Map<String, int> recordCounts(Float32List buf) {
++      final counts = <String, int>{};
++      for (var i = 0; i < n; i++) {
++        final record =
++            buf.sublist(i * kFloatsPerInstance, (i + 1) * kFloatsPerInstance);
++        final key = record.join(',');
++        counts[key] = (counts[key] ?? 0) + 1;
++      }
++      return counts;
++    }
++
++    expect(recordCounts(reordered), equals(recordCounts(data)),
++        reason: 'sortByKind must be a bijection on instance indices: every '
++            'record in the walk-order buffer must appear in the sorted one '
++            'exactly as many times, whole and unmodified -- not garbled, '
++            'dropped or duplicated by a wrong-stride copy');
++  });
++}
++
++/// A stable permutation of instance indices ordered by the record's `kind`
++/// slot -- the order three separate pipelines (one draw call each for
++/// strokes, joins and fills) would submit in, since each pipeline drains
++/// every instance of its own kind before the next pipeline's call starts.
++/// **Test-only: this ordering must never appear in `lib/`** -- the whole bet
++/// this plan's single buffer and single draw call makes is that walk order
++/// is what a real frame needs, not a kind-sorted resubmission of it.
++///
++/// [order] arrives as the identity list `[0, 1, ..., n-1]` from every caller
++/// in this file ([measureResidentColor] and [renderFillFixture] both build
++/// it that way before calling their `permute`), so re-collecting the fixture
++/// here to read each index's `kind` reproduces the same walk -- collecting
++/// twice does not collect *differently*: `devicePixelRatio` moves a
++/// record's `halfWidth`, never its `kind` or its position in the walk.
++///
++/// **Stable, and not by accident of `List.sort`'s unspecified-when-equal
++/// behaviour**: Dart's `sort` is not documented stable, so ties are broken
++/// explicitly, on the original index, which is what actually makes this
++/// "the order three pipelines would submit in" rather than an arbitrary
++/// reshuffling of instances that share a kind.
++List<int> sortByKind(List<int> order) {
++  final data = collectFillFixture().data;
++  double kindOf(int i) =>
++      data[i * kFloatsPerInstance + InstanceFieldOffset.kind];
++  final sorted = List<int>.of(order)
++    ..sort((a, b) {
++      final byKind = kindOf(a).compareTo(kindOf(b));
++      return byKind != 0 ? byKind : a.compareTo(b);
++    });
++  return sorted;
++}
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+index 9d65296..a8098ba 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+@@ -130,35 +130,36 @@ void main() {
+ 
+   test('drops a zero-length segment rather than handing the shader a NaN', () {
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.polyline(Float64List.fromList([5, 5, 5, 5]), 2, _style, closed: false);
+     c.endResidual();
+     expect(c.instanceCount, 0);
+   });
+ 
+   test('counts the ops it does not draw instead of dropping them silently', () {
+-    // **This test used `circle` until Task 5.** A circle is drawn now, so the
+-    // two ops here are `fillCircle` and `text` -- chosen because they stay
+-    // skipped for the whole of Plan B (fills are Plan D, text is Plan E), so
++    // **This test used `circle` until Task 5, then `fillCircle` until Task 3
++    // of Plan D.** Now fillCircle is drawn, so only `text` is skipped -- chosen
++    // because it stays skipped for the whole of Plan D (text is Plan E), so
+     // this assertion does not have to be rewritten again at Task 6 the way it
+     // was rewritten here. Both assertions are kept: an op that starts being
+     // drawn without being taken off the skipped list would move
+     // `instanceCount`, and an op silently dropped would leave `skippedOps`
+     // short.
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.fillCircle(0, 0, 5, _style);
+     c.text('x', Handle.none, _style);
+     c.endResidual();
+-    expect(c.instanceCount, 0);
+-    expect(c.skippedOps, 2);
++    expect(c.instanceCount, greaterThan(0),
++        reason: 'fillCircle now draws instances');
++    expect(c.skippedOps, 1, reason: 'only text is skipped now');
+   });
+ 
+   test('clamps to the device-pixel floor at a hairline lineweight', () {
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.polyline(Float64List.fromList([0, 0, 1, 0]), 2, _hairlineStyle,
+         closed: false);
+     c.endResidual();
+ 
+     expect(c.instanceCount, 1);
+@@ -682,43 +683,42 @@ void main() {
+             argb: 0xFF000000,
+             lineweightHundredths: 25,
+             linetype: Handle.none,
+             linetypeScale: 1),
+         closed: false);
+     expect(c.debugCollinearJoins, 1,
+         reason: 'a straight there-and-back also has cross_z == 0, the same '
+             'branch the shader\'s degenerate test takes');
+   });
+ 
+-  test('after Plan B, only fills and text are skipped', () {
+-    // The sentence in `skippedOps`' doc, asserted. It goes red the day
+-    // another op is silently dropped -- or the day Plan D lands and forgets
+-    // to update the doc.
++  test('after Plan D Task 3, text is the only skipped op', () {
++    // fillPolygon draws in Task 2; fillCircle draws in Task 3; text still does
++    // not. It goes red the day text is drawn or another op is silently dropped.
+     final c = GeometryCollector(
+         pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+     c.beginResidual(Transform2.identity());
+     const style = ResolvedStyle(
+         argb: 0xFF000000,
+         lineweightHundredths: 25,
+         linetype: Handle.none,
+         linetypeScale: 1);
+     c.polyline(Float64List.fromList(<double>[0, 0, 10, 10]), 2, style,
+         closed: false);
+     c.circle(0, 0, 20, style);
+     c.arc(0, 0, 20, 0, 1, style);
+     c.point(1, 1, style);
+     expect(c.skippedOps, 0, reason: 'four ops Plan B draws');
+     c.fillPolygon(Float64List.fromList(<double>[0, 0, 1, 0, 0, 1]), 3,
+         Int32List.fromList(<int>[0, 1, 2]), style);
+     c.fillCircle(0, 0, 5, style);
+     c.text('x', Handle.none, style);
+-    expect(c.skippedOps, 3, reason: 'three ops Plans D and E draw');
++    expect(c.skippedOps, 1, reason: 'text not yet drawn');
+   });
+ 
+   // --- dashed polylines (Task 5) -------------------------------------------
+ 
+   const dashed = DashPattern(dashes: [12.0, -6.0], totalLength: 18.0);
+   const dashDot =
+       DashPattern(dashes: [12.0, -3.0, 0.5, -3.0], totalLength: 18.5);
+   const allGap = DashPattern(dashes: [-4.0], totalLength: 4.0);
+   const dashStyle = ResolvedStyle(
+       argb: 0xFF112233,
+@@ -1154,11 +1154,215 @@ void main() {
+       final o = i * kFloatsPerInstance;
+       if (data[o + InstanceFieldOffset.kind] != kKindStroke) continue;
+       sawStroke = true;
+       final phase = data[o + InstanceFieldOffset.dashPhase];
+       final period = data[o + InstanceFieldOffset.dashPeriod].abs();
+       expect(phase, greaterThanOrEqualTo(0.0));
+       expect(phase, lessThan(period));
+     }
+     expect(sawStroke, isTrue);
+   });
++
++  test('a fill polygon is one instance per triangle, in triangulation order',
++      () {
++    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0);
++    // A non-identity, non-uniform, off-origin residual: the identity would
++    // hide a transposed matrix element, which is the defect Plan A's
++    // post-mortem names.
++    c.beginResidual(Transform2.translation(120, -35)
++        .multiply(Transform2.rotation(0.4))
++        .multiply(Transform2.scale(1.7, 0.6)));
++    c.fillPolygon(
++        Float64List.fromList(<double>[0, 0, 10, 0, 10, 6, 0, 6]),
++        4,
++        Int32List.fromList(<int>[0, 1, 2, 0, 2, 3]),
++        const ResolvedStyle(
++            argb: 0xFF3366CC,
++            lineweightHundredths: 25,
++            linetype: Handle.none,
++            linetypeScale: 1));
++    c.endResidual();
++
++    expect(c.instanceCount, 2);
++    expect(c.skippedOps, 0, reason: 'a fill is drawn now, not counted');
++
++    final data = c.data;
++    for (var i = 0; i < 2; i++) {
++      expect(
++          data[i * kFloatsPerInstance + InstanceFieldOffset.kind], kKindFill);
++      expect(data[i * kFloatsPerInstance + InstanceFieldOffset.halfWidth], 0.0);
++    }
++
++    // The residual, applied by hand to point 1 (10, 0), against the first
++    // triangle's second corner. Computed here rather than read from the
++    // collector so the assertion is an independent derivation.
++    final t = Transform2.translation(120, -35)
++        .multiply(Transform2.rotation(0.4))
++        .multiply(Transform2.scale(1.7, 0.6));
++    expect(
++        data[InstanceFieldOffset.x1], closeTo(t.a * 10 + t.c * 0 + t.e, 1e-3));
++    expect(
++        data[InstanceFieldOffset.y1], closeTo(t.b * 10 + t.d * 0 + t.f, 1e-3));
++
++    // Triangulation order: the second instance is (0, 2, 3), so its second
++    // corner is point 2 (10, 6) and its third is point 3 (0, 6). A
++    // collector that walked the triangle list backwards, or that sorted it,
++    // fails here -- and draw order is emission order.
++    final o = kFloatsPerInstance;
++    expect(data[o + InstanceFieldOffset.x1],
++        closeTo(t.a * 10 + t.c * 6 + t.e, 1e-3));
++    expect(data[o + InstanceFieldOffset.x2],
++        closeTo(t.a * 0 + t.c * 6 + t.e, 1e-3));
++  });
++
++  test('a fill keeps its own colour on a hairline layer', () {
++    // The lineweight is sub-pixel, which is exactly what `_coveredArgb`
++    // fades for a stroke. A fill must not fade: routing it through that
++    // function would fade a filled room on a hairline layer.
++    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
++    c.beginResidual(Transform2.translation(5, 7));
++    c.fillPolygon(
++        Float64List.fromList(<double>[0, 0, 8, 0, 4, 9]),
++        3,
++        Int32List.fromList(<int>[0, 1, 2]),
++        const ResolvedStyle(
++            argb: 0xFF884422,
++            lineweightHundredths: 1,
++            linetype: Handle.none,
++            linetypeScale: 1));
++    c.endResidual();
++
++    final data = c.data;
++    expect(data[InstanceFieldOffset.a], closeTo(1.0, 1e-6),
++        reason: 'a fill never goes through _coveredArgb');
++    expect(data[InstanceFieldOffset.r], closeTo(0x88 / 255.0, 1e-6));
++  });
++
++  test('a degenerate triangle is written, not dropped', () {
++    // `VerticesDrawSink._emitTriangle` has no zero-area test, so neither
++    // does this: matching the formula rather than the intention is what
++    // keeps the two arms' instance lists identical. Both rasterisers drop
++    // it at raster time instead.
++    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
++    c.beginResidual(Transform2.translation(5, 7));
++    c.fillPolygon(
++        Float64List.fromList(<double>[0, 0, 8, 0, 4, 9]),
++        3,
++        Int32List.fromList(<int>[0, 1, 1]),
++        const ResolvedStyle(
++            argb: 0xFF884422,
++            lineweightHundredths: 25,
++            linetype: Handle.none,
++            linetypeScale: 1));
++    c.endResidual();
++    expect(c.instanceCount, 1);
++  });
++
++  test('a filled circle is a fan at the same step count as its own outline',
++      () {
++    // The fill and the stroke of the same circle must tessellate
++    // identically, or the fill peeks out from under its own boundary at
++    // some zoom. Both go through _flattenSteps; this asserts they agree
++    // rather than that either equals a hardcoded number.
++    const style = ResolvedStyle(
++        argb: 0xFF224466,
++        lineweightHundredths: 25,
++        linetype: Handle.none,
++        linetypeScale: 1);
++    final residual = Transform2.translation(300, 90)
++        .multiply(Transform2.rotation(-0.6))
++        .multiply(Transform2.scale(1.35, 1.35));
++
++    final outline =
++        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0)
++          ..beginResidual(residual)
++          ..circle(12, -5, 7.5, style)
++          ..endResidual();
++    // A closed run: `steps` segments and `steps` joins (the seam included).
++    final chords = outline.instanceCount ~/ 2;
++
++    final fill =
++        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0)
++          ..beginResidual(residual)
++          ..fillCircle(12, -5, 7.5, style)
++          ..endResidual();
++
++    expect(fill.instanceCount, chords,
++        reason: 'the fan and the outline must use one step count');
++    expect(fill.skippedOps, 0);
++  });
++
++  test('the fan shares one centre and walks the rim in ascending angle', () {
++    const style = ResolvedStyle(
++        argb: 0xFF224466,
++        lineweightHundredths: 25,
++        linetype: Handle.none,
++        linetypeScale: 1);
++    final t = Transform2.translation(300, 90).multiply(Transform2.scale(2, 3));
++    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0)
++      ..beginResidual(t)
++      ..fillCircle(12, -5, 7.5, style)
++      ..endResidual();
++
++    final data = c.data;
++    final centreX = t.a * 12 + t.c * -5 + t.e;
++    final centreY = t.b * 12 + t.d * -5 + t.f;
++    for (var i = 0; i < c.instanceCount; i++) {
++      final o = i * kFloatsPerInstance;
++      expect(data[o + InstanceFieldOffset.kind], kKindFill);
++      expect(data[o + InstanceFieldOffset.x0], closeTo(centreX, 1e-3),
++          reason: 'every triangle of a fan starts at the centre');
++      expect(data[o + InstanceFieldOffset.y0], closeTo(centreY, 1e-3));
++    }
++    // Triangle 0's second corner is the rim at angle 0: (cx + r, cy).
++    expect(data[InstanceFieldOffset.x1],
++        closeTo(t.a * (12 + 7.5) + t.c * -5 + t.e, 1e-3));
++    expect(data[InstanceFieldOffset.y1],
++        closeTo(t.b * (12 + 7.5) + t.d * -5 + t.f, 1e-3));
++    // Consecutive triangles share an edge: triangle i's third corner is
++    // triangle i+1's second. A fan written out of order fails here.
++    final o1 = kFloatsPerInstance;
++    expect(data[o1 + InstanceFieldOffset.x1],
++        closeTo(data[InstanceFieldOffset.x2], 1e-6));
++    expect(data[o1 + InstanceFieldOffset.y1],
++        closeTo(data[InstanceFieldOffset.y2], 1e-6));
++  });
++
++  test('a zero or negative radius fills nothing', () {
++    const style = ResolvedStyle(
++        argb: 0xFF224466,
++        lineweightHundredths: 25,
++        linetype: Handle.none,
++        linetypeScale: 1);
++    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0)
++      ..beginResidual(Transform2.translation(3, 4))
++      ..fillCircle(1, 1, 0, style)
++      ..fillCircle(1, 1, -2, style)
++      ..endResidual();
++    expect(c.instanceCount, 0);
++  });
++
++  test('a fill circle keeps its own colour on a hairline layer', () {
++    // The lineweight is sub-pixel, which is exactly what `_coveredArgb`
++    // fades for a stroke. A filled circle must not fade: routing it through
++    // that function would fade a filled room on a hairline layer.
++    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
++    c.beginResidual(Transform2.translation(5, 7));
++    c.fillCircle(
++        0,
++        0,
++        8,
++        const ResolvedStyle(
++            argb: 0xFF884422,
++            lineweightHundredths: 1,
++            linetype: Handle.none,
++            linetypeScale: 1));
++    c.endResidual();
++
++    final data = c.data;
++    expect(data[InstanceFieldOffset.a], closeTo(1.0, 1e-6),
++        reason: 'a filled circle never goes through _coveredArgb');
++    expect(data[InstanceFieldOffset.r], closeTo(0x88 / 255.0, 1e-6));
++    expect(data[InstanceFieldOffset.g], closeTo(0x44 / 255.0, 1e-6));
++    expect(data[InstanceFieldOffset.b], closeTo(0x22 / 255.0, 1e-6));
++  });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart b/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
+index 1f881b9..2505b06 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
+@@ -326,20 +326,101 @@ void main() {
+     // corner (1,-1): px = b - normal*4 = (210 + 4/sqrt17, 60 - 16/sqrt17)
+     final sqrt17 = math.sqrt(17);
+     expect(out.positions[0], closeTo(10 + 4 / sqrt17, 1e-3));
+     expect(out.positions[1], closeTo(10 - 16 / sqrt17, 1e-3));
+     expect(out.positions[2], closeTo(10 - 4 / sqrt17, 1e-3));
+     expect(out.positions[3], closeTo(10 + 16 / sqrt17, 1e-3));
+     expect(out.positions[4], closeTo(210 + 4 / sqrt17, 1e-3));
+     expect(out.positions[5], closeTo(60 - 16 / sqrt17, 1e-3));
+   });
+ 
++  test('a fill expands to its three corners and one degenerate triangle', () {
++    final data = Float32List(kFloatsPerInstance);
++    writeFill(data, 0,
++        x0: 10, y0: 10, x1: 40, y1: 12, x2: 25, y2: 38, argb: 0xFF2E7D32);
++    final e = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
++
++    // Triangle 0 is (p0, p1, p2), in that vertex order.
++    expect(e.positions[0], closeTo(10, 1e-6));
++    expect(e.positions[1], closeTo(10, 1e-6));
++    expect(e.positions[2], closeTo(40, 1e-6));
++    expect(e.positions[3], closeTo(12, 1e-6));
++    expect(e.positions[4], closeTo(25, 1e-6));
++    expect(e.positions[5], closeTo(38, 1e-6));
++
++    // Triangle 1 is (p1, p1, p2): zero area, so it rasterises nothing.
++    final area = (e.positions[8] - e.positions[6]) *
++            (e.positions[11] - e.positions[7]) -
++        (e.positions[9] - e.positions[7]) * (e.positions[10] - e.positions[6]);
++    expect(area, 0.0,
++        reason: 'the second triangle of a fill instance must be degenerate');
++
++    // The area check above cannot tell "M folded onto p1" from "M folded
++    // onto p2" apart: the corner table's M-weighted vertex always
++    // duplicates whichever point it is folded onto, so triangle 1 comes out
++    // zero-area either way -- (p1, p1, p2) or (p1, p2, p2) both have zero
++    // area. Pin the M vertex (positions[8..9], the row wired to `wm`) to
++    // its documented value, `p1`, directly -- this is the assertion that
++    // actually distinguishes the two, and it is what M-D4 (Task 8's mutant
++    // table) needs to die.
++    expect(e.positions[8], closeTo(40, 1e-6),
++        reason: 'M must fold onto p1 (A), not p2 (B)');
++    expect(e.positions[9], closeTo(12, 1e-6));
++  });
++
++  test('a fill is not expanded by a half-width, at any camera', () {
++    // The defect this catches: a fill routed through the stroke branch, or a
++    // fill branch that read `half_width`. Either one grows the triangle by a
++    // device-pixel margin, so its corners move away from the projected
++    // points -- and the amount would change with the camera.
++    final data = Float32List(kFloatsPerInstance);
++    writeFill(data, 0,
++        x0: 10, y0: 10, x1: 40, y1: 12, x2: 25, y2: 38, argb: 0xFF2E7D32);
++    // Deliberately poison the half-width slot: a correct fill branch ignores
++    // it. `writeFill` writes zero there, so without this the assertion could
++    // not tell "ignored" from "zero".
++    data[InstanceFieldOffset.halfWidth] = 9.0;
++
++    final t = Transform2.translation(120, -35)
++        .multiply(Transform2.rotation(0.4))
++        .multiply(Transform2.scale(1.7, 0.6));
++    final e = expandInstances(data, 1, t, dashScale: 1.0);
++    expect(e.positions[0], closeTo(t.a * 10 + t.c * 10 + t.e, 1e-4));
++    expect(e.positions[1], closeTo(t.b * 10 + t.d * 10 + t.f, 1e-4));
++  });
++
++  test('a fill is solid: the dash test never runs on it', () {
++    final data = Float32List(kFloatsPerInstance);
++    writeFill(data, 0,
++        x0: 10, y0: 10, x1: 40, y1: 12, x2: 25, y2: 38, argb: 0xFF2E7D32);
++    final e = expandInstances(data, 1, Transform2.identity(), dashScale: 0.01);
++    for (var v = 0; v < ResidentGeometry.cornerVertexCount; v++) {
++      expect(e.dashVaryings[v * 3 + 1], lessThan(0.0),
++          reason: 'a negative fracStart is the solid sentinel; a fill must '
++              'carry it at every camera, collapse scale included');
++    }
++  });
++
++  test('a point is still a point after the fill branch lands', () {
++    // The regression this guards: adding `else { fill }` without narrowing
++    // the point branch to `else if (kind < 2.5)` draws every fill as a
++    // one-pixel square -- or, with the branches swapped, every point as a
++    // triangle. Both directions are silent.
++    final data = Float32List(kFloatsPerInstance);
++    writePoint(data, 0, x: 20, y: 30, halfWidth: 4, argb: 0xFF102030);
++    final e = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
++    final xs = <double>[for (var v = 0; v < 6; v++) e.positions[v * 2]];
++    final ys = <double>[for (var v = 0; v < 6; v++) e.positions[v * 2 + 1]];
++    expect(xs.reduce(math.max) - xs.reduce(math.min), closeTo(8, 1e-6));
++    expect(ys.reduce(math.max) - ys.reduce(math.min), closeTo(8, 1e-6));
++  });
++
+   test('cad_stroke.vert still carries the three renumber-prone constants', () {
+     // Partial net, not a substitute for Ruling B6's human diff: this pins
+     // the three literals a shader edit is most likely to silently renumber
+     // (`instance_record.dart`'s doc explains why the values and order of
+     // `kKindStroke`/`kKindJoin`/`kKindPoint` are load-bearing, and this
+     // file's own `kExpanderMinMiterCosine` is the fourth, Dart-side, copy
+     // of the miter-limit literal). It reads the GLSL as text and checks
+     // for the constants, not the arithmetic around them -- a change to the
+     // *formula* that keeps these three literals untouched (for example,
+     // Task 8's own M-B5/M-B6 mutations) is invisible to this test and
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart b/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart
+index 1338e37..9086f14 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart
+@@ -173,11 +173,67 @@ void main() {
+     into[InstanceFieldOffset.dashPeriod] = 18.0;
+     into[InstanceFieldOffset.dashPhase] = 4.0;
+     into[InstanceFieldOffset.dashFracStart] = 0.1;
+     into[InstanceFieldOffset.dashFracEnd] = 0.6667;
+     writePoint(into, 0, x: 1, y: 2, halfWidth: 0.5, argb: 0xFF112233);
+     expect(into[InstanceFieldOffset.dashPeriod], 0.0);
+     expect(into[InstanceFieldOffset.dashPhase], 0.0);
+     expect(into[InstanceFieldOffset.dashFracStart], 0.0);
+     expect(into[InstanceFieldOffset.dashFracEnd], 0.0);
+   });
++
++  test('a fill record carries three corners, no width and no dash', () {
++    // Pre-filled with garbage so a writer that leaves a slot untouched is
++    // caught. A fresh Float32List is all zeros, and most of this record's
++    // expected values are zero, so a zero-initialised buffer would let a
++    // missing write pass -- the degenerate-fixture trap, at the record
++    // level.
++    final data = Float32List(kFloatsPerInstance)
++      ..fillRange(0, kFloatsPerInstance, 17.5);
++    writeFill(data, 0,
++        x0: 3.5,
++        y0: -4.25,
++        x1: 11.0,
++        y1: 2.5,
++        x2: -6.75,
++        y2: 9.5,
++        argb: 0x8033CC66);
++
++    expect(data[InstanceFieldOffset.kind], kKindFill);
++    expect(data[InstanceFieldOffset.halfWidth], 0.0,
++        reason: 'a fill has no width and the shader must not expand it');
++    expect(data[InstanceFieldOffset.x0], 3.5);
++    expect(data[InstanceFieldOffset.y0], -4.25);
++    expect(data[InstanceFieldOffset.x1], 11.0);
++    expect(data[InstanceFieldOffset.y1], 2.5);
++    expect(data[InstanceFieldOffset.x2], -6.75);
++    expect(data[InstanceFieldOffset.y2], 9.5);
++    expect(data[InstanceFieldOffset.r], closeTo(0x33 / 255.0, 1e-6));
++    expect(data[InstanceFieldOffset.g], closeTo(0xCC / 255.0, 1e-6));
++    expect(data[InstanceFieldOffset.b], closeTo(0x66 / 255.0, 1e-6));
++    expect(data[InstanceFieldOffset.a], closeTo(0x80 / 255.0, 1e-6));
++    expect(data[InstanceFieldOffset.dashPeriod], 0.0);
++    expect(data[InstanceFieldOffset.dashPhase], 0.0);
++    expect(data[InstanceFieldOffset.dashFracStart], 0.0);
++    expect(data[InstanceFieldOffset.dashFracEnd], 0.0);
++  });
++
++  test('the four kind tags are distinct and ordered for a < dispatch', () {
++    // The shader dispatches `kind < 0.5`, `< 1.5`, `< 2.5`, else. These
++    // values are not merely distinct: renumbering them without editing
++    // cad_stroke.vert draws one kind as another, silently.
++    expect(<double>[kKindStroke, kKindJoin, kKindPoint, kKindFill],
++        <double>[0, 1, 2, 3]);
++  });
++
++  test('a fill at index 2 writes only its own record', () {
++    final data = Float32List(kFloatsPerInstance * 4)
++      ..fillRange(0, kFloatsPerInstance * 4, 17.5);
++    writeFill(data, 2,
++        x0: 1, y0: 2, x1: 3, y1: 4, x2: 5, y2: 6, argb: 0xFF000000);
++    expect(data[kFloatsPerInstance * 1], 17.5,
++        reason: 'the record before it is untouched');
++    expect(data[kFloatsPerInstance * 3], 17.5,
++        reason: 'the record after it is untouched');
++    expect(data[kFloatsPerInstance * 2 + InstanceFieldOffset.kind], kKindFill);
++  });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart b/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart
+index d4fbd89..407414a 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart
+@@ -1,17 +1,18 @@
+ import 'dart:typed_data';
+ import 'dart:ui';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
++import '../support/fixtures.dart' show kViewport;
+ import '../support/gpu_comparison.dart';
+ 
+ const Size _size = Size(400, 300);
+ const double _dpr = 2.0;
+ const double _ppmm = 3.7795275590551185;
+ 
+ // The brief's sample `ResolvedStyle` literals gave only `argb` and
+ // `lineweightHundredths` -- `ResolvedStyle` actually requires all four named
+ // arguments (`linetype`, `linetypeScale` included), so both constants below
+ // add the two the sample dropped.
+@@ -249,11 +250,73 @@ void main() {
+ 
+     // The resident-arm self-consistency probe, second: still worth keeping,
+     // because it is the only one of the two that says anything about the
+     // resident arm's OWN closed-vs-open behaviour independent of the
+     // reference.
+     expect(closedAgreement.residentInk.toDouble(), greaterThan(openInk),
+         reason: 'the closed circle has the seam join on top of the same '
+             'closing-length chord the open run already draws; '
+             'closed=${closedAgreement.residentInk} open=$openInk');
+   });
++
++  test('the two arms agree per channel, not merely on coverage', () {
++    final r = measureResidentColor(_corpus,
++        size: _size, devicePixelRatio: _dpr, pixelsPerPaperMm: _ppmm);
++    // Spec criterion 1: per-channel difference <= 2 on >= 99.5% of pixels,
++    // <= 8 on the rest.
++    expect(r.withinTwoFraction, greaterThanOrEqualTo(0.995),
++        reason: r.toString());
++    expect(r.overEight, 0, reason: r.toString());
++    // Anti-vacuity: an instrument that measured an empty picture would pass
++    // both lines above.
++    expect(r.referenceInk, greaterThan(5000), reason: r.toString());
++  });
++
++  test('the colour measurement can actually fail', () {
++    // The control arm Plan 3i's Ruling 14 requires: an instrument whose
++    // failing case is never exercised reads 1.00 and proves nothing. Here
++    // the resident arm is fed a deliberately recoloured buffer -- every
++    // written colour has 0x00202020 added to it (R, G and B each up by 32),
++    // chosen against this corpus's own `_thick`/`_hairline` colour
++    // (0xFF102030, R=0x30 G=0x20 B=0x10) so none of the three channels
++    // carries into its neighbour: 0x30+0x20=0x50, 0x20+0x20=0x40,
++    // 0x10+0x20=0x30, each comfortably inside a byte and each a distance of
++    // exactly 32 from the reference, 16x past the `<= 2` threshold and 4x
++    // past the `<= 8` one -- so this is not a threshold nudged to make the
++    // assertion pass, it is the same tint the brief's own sample names.
++    final r = measureResidentColor(_corpus,
++        size: _size,
++        devicePixelRatio: _dpr,
++        pixelsPerPaperMm: _ppmm,
++        debugTintResident: 0x00202020);
++    expect(r.withinTwoFraction, lessThan(0.995), reason: r.toString());
++  });
++
++  test('the fill corpus agrees per channel', () {
++    // Plan D's own corpus, not `_corpus` above: `paintFillFixture` goes
++    // through the real `DraftPainter`, at a camera fit to `kViewport`, so
++    // the buffer this measures is exactly the one `fill_order_test.dart`'s
++    // "walk order" case measures too -- the same fixture, the same camera,
++    // the same device pixel ratio, just unpermuted.
++    //
++    // **A fill's colour is gated here as well as in `fill_order_test.dart`,
++    // and the reason belongs on this test, not only on the record-level
++    // one.** Only the resident arm has `_coveredArgb` within reach of a
++    // fill at all -- `GeometryCollector.fillPolygon` and `.fillCircle` both
++    // route `style.argb` straight through, unfaded, but a REGRESSION that
++    // routed either through `_coveredArgb` instead would only show up here
++    // (or in the record-level `argb` assertion `collector_differential_test
++    // .dart` adds for this same fixture): the reference sink's own
++    // `fillPolygon`/`fillCircle` (`vertices_draw_sink.dart:750-755`) never
++    // had a fade formula to begin with, so a faded resident fill would be a
++    // real disagreement this per-channel comparison is built to see, not an
++    // artefact of two independently-correct implementations.
++    final r = measureResidentColor(paintFillFixture,
++        size: kViewport,
++        devicePixelRatio: kFillFixtureDevicePixelRatio,
++        pixelsPerPaperMm: kLogicalPixelsPerMm);
++    expect(r.withinTwoFraction, greaterThanOrEqualTo(0.995),
++        reason: r.toString());
++    expect(r.overEight, 0, reason: r.toString());
++    expect(r.referenceInk, greaterThan(5000), reason: r.toString());
++  });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/support/fixtures.dart b/packages/jet_cad_2d_flutter/test/support/fixtures.dart
+index 56d5913..c97fb59 100644
+--- a/packages/jet_cad_2d_flutter/test/support/fixtures.dart
++++ b/packages/jet_cad_2d_flutter/test/support/fixtures.dart
+@@ -1,18 +1,20 @@
+ import 'dart:typed_data';
+-import 'dart:ui' show Size;
++import 'dart:ui' show Canvas, PictureRecorder, Size;
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
++import 'triangle_rasterizer.dart';
++
+ const Size kViewport = Size(800, 600);
+ 
+ Handle addEntity(
+   DraftDocument doc,
+   Handle owner,
+   Handle handle,
+   EntityKind kind,
+   List<double> coords,
+   List<double> scalars, {
+   DraftColor color = const ByLayerColor(),
+@@ -666,10 +668,275 @@ DraftDocument textLodDifferentialDocument(TextMeasurer measurer) {
+     transform: Transform2.translation(12000, 9000)
+         .multiply(Transform2.rotation(0.4))
+         .multiply(Transform2.scale(0.35, 0.35)),
+     definition: labels,
+     layer: ReservedHandles.layerZero,
+     color: const IndexedColor(3),
+   )));
+ 
+   return doc;
+ }
++
++/// A corpus for Plan D: two fills, and strokes on both sides of one of them
++/// in handle order.
++///
++/// **Every element is here because a named mutation needs it:**
++///  - handle 900 is a thick stroke the fill covers, so a fill that failed to
++///    draw leaves it visible;
++///  - handle 901 is an opaque fill on a **hairline layer**, so a fill routed
++///    through `_coveredArgb` fades (M-D5) where a correct one does not --
++///    `lineweight: 1` on both the layer and the fill's own record resolves
++///    to a device width of about 0.038 px at `kLogicalPixelsPerMm` and
++///    `devicePixelRatio: 1.0`, comfortably under `kMinStrokeDevicePixels`
++///    (1.0) and comfortably above zero, which is the one width
++///    `_coveredArgb` leaves untouched -- see that function's own comment;
++///  - handle 903 is a thick stroke of HIGHER handle crossing the fill, so it
++///    is drawn *after* the fill and stays visible over it. Permuting the
++///    buffer to draw all fills last hides it -- which is spec criterion 4,
++///    and the reason this corpus exists at all. [strokeInkInsideFill] proves
++///    the overlap is real rather than assumed;
++///  - handle 904 is a translucent fill over a circle boundary, so the fan
++///    path (`fillCircle`) is exercised and the colour comparison has a
++///    non-opaque value to disagree about;
++///  - the whole thing sits under instance 910, rotated and non-uniformly
++///    scaled, far from the origin: an identity transform commutes and hides
++///    composition-order defects (Plan 2's post-mortem).
++///
++/// | handle | what |
++/// |---|---|
++/// | 900 | a thick stroke **under** the fill (lower handle) |
++/// | 901 | the fill entity, opaque, on a hairline layer |
++/// | 902 | its boundary polygon |
++/// | 903 | a thick stroke **over** the fill (higher handle), crossing it |
++/// | 904 | the translucent fill entity |
++/// | 905 | its boundary circle |
++/// | 910 | the placement: rotated, non-uniformly scaled, off-origin |
++///
++/// **The polygon boundary's triangulation is not supplied by hand.**
++/// `AddRegionCommand.apply` calls `triangulationFor` itself and, when the
++/// result is non-empty, writes it into `doc.fills` before returning --
++/// `packages/jet_cad_2d/lib/src/document/commands.dart`'s `apply` method,
++/// verified directly rather than assumed. `fillFixture`'s own guard test
++/// checks `doc.fills.trianglesFor(const Handle(902))` is non-null for
++/// exactly this reason: if a future change to `AddRegionCommand` ever stopped
++/// materialising it, this is where that would be caught.
++DraftDocument fillFixture() {
++  final doc = DraftDocument.empty();
++
++  const content = Handle(890);
++  doc.tree.addDefinition(Definition(
++      handle: content,
++      name: 'filled-room',
++      basePoint: Vector2.zero(),
++      children: const []));
++
++  // 900: under the fill.
++  addEntity(doc, content, const Handle(900), EntityKind.line, [1, 1, 19, 13],
++      const [],
++      lineweight: 120);
++
++  // 901 / 902: the opaque fill and its boundary, on a hairline layer.
++  //
++  // `AddLayerCommand` does not exist in this package -- layers are added
++  // directly to `doc.tables.layers`, the same way
++  // `test/document/style_resolver_test.dart`'s own `addLayer` helper does
++  // it. `LayerRecord` also requires `transparency`, which the brief's shape
++  // omitted.
++  const hairline = Handle(895);
++  doc.tables.layers.add(const LayerRecord(
++    handle: hairline,
++    name: 'hairline',
++    color: TrueColor(0x333333),
++    linetype: ReservedHandles.continuousLinetype,
++    lineweight: 1,
++    transparency: 0,
++  ));
++  doc.commands.execute(AddRegionCommand(
++    fill: const EntityRecord(
++      handle: Handle(901),
++      owner: content,
++      kind: EntityKind.fill,
++      layer: hairline,
++      linetype: ReservedHandles.continuousLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: TrueColor(0x2E7D32),
++      lineweight: 1,
++      transparency: 0,
++      flags: 0,
++    ),
++    boundary: const EntityRecord(
++      handle: Handle(902),
++      owner: content,
++      kind: EntityKind.polyline,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.continuousLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: TrueColor(0x000000),
++      lineweight: kLineweightDefault,
++      transparency: 0,
++      flags: 0,
++    ),
++    boundaryPayload: GeometryPayload(
++      coords: Float64List.fromList(<double>[
++        2, 2, //
++        17, 3, //
++        16, 12, //
++        3, 11, //
++        2, 2, // closing duplicate
++      ]),
++      scalars: Float64List(0),
++    ),
++  ));
++
++  // 903: over the fill, and crossing it.
++  addEntity(doc, content, const Handle(903), EntityKind.line, [3, 12, 17, 2],
++      const [],
++      lineweight: 120);
++
++  // 904 / 905: the translucent fill, over a circle boundary.
++  doc.commands.execute(AddRegionCommand(
++    fill: const EntityRecord(
++      handle: Handle(904),
++      owner: content,
++      kind: EntityKind.fill,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.continuousLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: TrueColor(0xC62828),
++      lineweight: kLineweightDefault,
++      transparency: 128,
++      flags: 0,
++    ),
++    boundary: const EntityRecord(
++      handle: Handle(905),
++      owner: content,
++      kind: EntityKind.circle,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.continuousLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: TrueColor(0x000000),
++      lineweight: kLineweightDefault,
++      transparency: 0,
++      flags: 0,
++    ),
++    boundaryPayload: GeometryPayload(
++      coords: Float64List.fromList(<double>[24, 7]),
++      scalars: Float64List.fromList(<double>[5.5]),
++    ),
++  ));
++
++  // The placement: rotated, non-uniformly scaled, far from the origin.
++  doc.commands.execute(AddNodeCommand(InstanceNode(
++    handle: const Handle(910),
++    parent: doc.rootHandle,
++    transform: Transform2.translation(37.5, 22.25)
++        .multiply(Transform2.rotation(0.44))
++        .multiply(Transform2.scale(1.8, 1.15)),
++    definition: content,
++    layer: ReservedHandles.layerZero,
++    color: const IndexedColor(7),
++  )));
++
++  return doc;
++}
++
++/// The screen-space AABB of entity [handle], folding in [node]'s placement
++/// and [camera]'s projection.
++///
++/// All four corners of the local box are transformed, not two: under
++/// rotation the axis-aligned image of two opposite corners omits area a
++/// rotated box actually covers -- the same reason
++/// `ViewportTransform.visibleWorld` transforms all four of its own.
++Aabb2 _screenBoxOf(DraftDocument doc, Handle handle, InstanceNode node,
++    ViewportTransform camera) {
++  final record = doc.entities.read(doc.entities.slotOf(handle)!);
++  final payload = doc.geometry.read(record.geomIndex);
++  final local = entityBounds(
++    kind: record.kind,
++    payload: payload,
++    measurer: doc.textMeasurer,
++    textStyle: doc.textStyleOf(record.textStyle),
++  );
++  var box = Aabb2.empty();
++  for (final corner in [
++    Vector2(local.minX, local.minY),
++    Vector2(local.maxX, local.minY),
++    Vector2(local.maxX, local.maxY),
++    Vector2(local.minX, local.maxY),
++  ]) {
++    box = box.expandedToPoint(
++        camera.worldToScreen(node.transform.transformPoint(corner)));
++  }
++  return box;
++}
++
++/// Paints [doc] through `VerticesDrawSink`, backed by a throwaway `Canvas`,
++/// and returns the coverage rasterizer that watched the flush.
++///
++/// `VerticesDrawSink.flush` always submits to a real `canvas.drawVertices`,
++/// so a `Canvas` backed by a `PictureRecorder` is required even though
++/// nothing here ever reads the resulting picture --
++/// `test/invariants/frame_accounting_test.dart` establishes the same pattern
++/// for the same reason.
++TriangleRasterizer _rasterizeFillFixture(
++    DraftDocument doc, ViewportTransform camera) {
++  final recorder = PictureRecorder();
++  final canvas = Canvas(recorder);
++  final index = SpatialIndex(doc);
++  final rasterizer =
++      TriangleRasterizer(kViewport.width.toInt(), kViewport.height.toInt());
++  final sink = VerticesDrawSink(
++    pixelsPerPaperMm: kLogicalPixelsPerMm,
++    canvas: canvas,
++  )..observer = rasterizer.observe;
++  DraftPainter(
++          document: doc, index: index, resolver: DocumentStyleResolver(doc))
++      .paint(sink, camera, kViewport);
++  sink.flush();
++  index.dispose();
++  recorder.endRecording().dispose();
++  return rasterizer;
++}
++
++/// Paints [fillFixture]'s corpus once as built and once with handle 903
++/// removed, and returns how many screen pixels inside the opaque fill's own
++/// box disagree between the two.
++///
++/// This is the corpus's own proof that 903 genuinely overlaps the fill
++/// rather than merely sitting near it: a pixel inked identically both times
++/// was never covered by 903 to begin with, and permuting the draw buffer
++/// later could never move it -- the exact property Task 7's order gate
++/// needs 903 to have. The camera is fixed **before** 903 is removed and
++/// reused for both renders; refitting it afterwards would let the smaller
++/// extents shift the camera and compare two different views of the drawing
++/// instead of the same view with and without one stroke.
++///
++/// [doc] is mutated -- entity 903 is removed from it -- so a caller must not
++/// paint or measure [doc] again afterwards.
++int strokeInkInsideFill(DraftDocument doc) {
++  final camera = ViewportTransform.fit(doc.extents, kViewport);
++  final node = doc.tree[const Handle(910)]! as InstanceNode;
++  final fillBox = _screenBoxOf(doc, const Handle(902), node, camera);
++
++  final withStroke = _rasterizeFillFixture(doc, camera);
++  doc.commands.execute(RemoveEntityCommand(const Handle(903)));
++  final withoutStroke = _rasterizeFillFixture(doc, camera);
++
++  final w = kViewport.width.toInt();
++  final h = kViewport.height.toInt();
++  final minX = fillBox.minX.floor().clamp(0, w - 1);
++  final maxX = fillBox.maxX.ceil().clamp(0, w - 1);
++  final minY = fillBox.minY.floor().clamp(0, h - 1);
++  final maxY = fillBox.maxY.ceil().clamp(0, h - 1);
++
++  var differing = 0;
++  for (var y = minY; y <= maxY; y++) {
++    for (var x = minX; x <= maxX; x++) {
++      if (withStroke.inked(x, y) != withoutStroke.inked(x, y)) differing++;
++    }
++  }
++  return differing;
++}
+diff --git a/packages/jet_cad_2d_flutter/test/support/fixtures_test.dart b/packages/jet_cad_2d_flutter/test/support/fixtures_test.dart
+index 8dd942b..e18d0ea 100644
+--- a/packages/jet_cad_2d_flutter/test/support/fixtures_test.dart
++++ b/packages/jet_cad_2d_flutter/test/support/fixtures_test.dart
+@@ -88,11 +88,62 @@ void main() {
+     // 5. entity 913's own linetypeScale is a real multiplicand, not left at
+     //    the identity -- the same shape of check as (1), for the per-entity
+     //    factor `_dashScale` folds in beside `globalLinetypeScale`. The
+     //    default-constructed fixture above cannot exercise this by itself
+     //    ([linetypeScale] defaults to 1.0), so a second fixture pins it.
+     final scaled = shadedDashFixture(linetypeScale: 2.5);
+     final slot = scaled.entities.slotOf(const Handle(913));
+     expect(slot, isNotNull, reason: 'entity 913 went missing');
+     expect(scaled.entities.read(slot!).linetypeScale, isNot(1.0));
+   });
++
++  group('fillFixture', () {
++    test('is not degenerate in any of the four ways that would hide a defect',
++        () {
++      final doc = fillFixture();
++
++      // 1. A fill exists and is indexed, so the painter can reach it, and
++      //    its boundary's triangulation was actually materialised --
++      //    `AddRegionCommand.apply` writes it, not this fixture.
++      final fillSlot = doc.entities.slotOf(const Handle(901))!;
++      expect(doc.entities.kindAt(fillSlot), EntityKind.fill);
++      expect(doc.fills.trianglesFor(const Handle(902)), isNotNull,
++          reason: 'an unfillable boundary is skipped by the painter and the '
++              'corpus would silently draw no fill at all');
++
++      // 2. Strokes on BOTH sides of the fill in handle order. Without the
++      //    higher one, permuting the buffer changes no pixel and the
++      //    criterion-4 test in Task 7 passes vacuously.
++      expect(const Handle(900).value, lessThan(const Handle(901).value));
++      expect(const Handle(903).value, greaterThan(const Handle(901).value));
++
++      // 3. The translucent fill is actually translucent -- neither opaque
++      //    nor invisible.
++      final translucentSlot = doc.entities.slotOf(const Handle(904))!;
++      final translucent = doc.entities.transparencyAt(translucentSlot);
++      expect(translucent, greaterThan(0));
++      expect(translucent, lessThan(255));
++
++      // 4. No identity transform: the fill sits under a rotated, non-uniform
++      //    instance well away from the origin. An axis-aligned fill at the
++      //    origin hides a transposed matrix element -- Plan 2's post-mortem.
++      final node = doc.tree[const Handle(910)]! as InstanceNode;
++      expect(node.transform.a, isNot(closeTo(node.transform.d, 1e-9)));
++      expect(node.transform.b, isNot(0.0));
++      expect(node.transform.e.abs(), greaterThan(1.0));
++    });
++
++    test('the fill and the higher-handle stroke actually overlap on screen',
++        () {
++      // A corpus whose "overlapping" shapes miss each other proves nothing.
++      // Painted through the reference sink, the stroke's ink must land
++      // inside the fill's bounding box.
++      final doc = fillFixture();
++      final fillBox = doc.extents;
++      expect(fillBox.min.x, lessThan(fillBox.max.x));
++      final overlap = strokeInkInsideFill(doc);
++      expect(overlap, greaterThan(200),
++          reason: 'fewer than 200 shared device pixels and the order gate '
++              'cannot see a permutation');
++    });
++  });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart b/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
+index ff109dc..ba7525c 100644
+--- a/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
++++ b/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
+@@ -5,38 +5,55 @@
+ /// pixel by pixel; this file is its sibling for the pair Plan B built --
+ /// `VerticesDrawSink`'s own triangles (the reference) against the collector's
+ /// buffer expanded through the Dart transcription of the vertex shader (the
+ /// resident arm). **Both arms go through the same rasterizer.** The question
+ /// this answers is whether the collector plus the vertex shader produce the
+ /// same triangles as `VerticesDrawSink`, not whether two rasterizers agree --
+ /// so `TriangleRasterizer` is held fixed and only the triangle source
+ /// changes. A GPU comparison is Task 11's device run; this is what
+ /// `flutter test` can gate before that.
+ ///
+-/// **This instrument is coverage-only, and that is a real limit, not a
+-/// caveat.** `TriangleRasterizer.inked` is a boolean -- see its own doc,
+-/// "there is no partial coverage to threshold" -- so [differing] and
+-/// [overEight] below are always the same number and neither one measures
+-/// *colour* agreement. The per-channel half of the design document's
+-/// criterion 1 is not something this file can gate; it is gated separately,
+-/// by the record-level `argb` assertions in `geometry_collector_test.dart`
+-/// and `collector_differential_test.dart`, which compare colour channels a
+-/// coverage rasterizer cannot see at all. Do not read a passing
+-/// [ResidentAgreement] as a full criterion-1 measurement.
++/// **[ResidentAgreement] is coverage-only, and that is a real limit, not a
++/// caveat -- but it is no longer this whole file's limit.** `TriangleRasterizer
++/// .inked` is a boolean -- see its own doc, "there is no partial coverage to
++/// threshold" -- so [ResidentAgreement.differing] and
++/// [ResidentAgreement.overEight] are always the same number and neither one
++/// measures *colour* agreement. That was once recorded here as something this
++/// file could not gate at all; **Plan D's Task 6 makes it something this file
++/// gates directly**, with [ResidentColorAgreement] and [measureResidentColor]
++/// below, which read `TriangleRasterizer.pixels` instead of `.inked` and
++/// compare per channel. [ResidentAgreement] itself is unchanged and stays a
++/// coverage instrument -- do not read a passing one as a full criterion-1
++/// measurement -- but a passing [ResidentColorAgreement] now is one, for the
++/// per-channel clause. The record-level `argb` assertions in
++/// `geometry_collector_test.dart` and `collector_differential_test.dart`
++/// still exist and still matter; they check the instance buffer's colour
++/// before rasterisation, where this file's colour check runs after it.
+ ///
+-/// **Draw order is also unmeasured, and that is a repo non-negotiable, not
+-/// a minor gap.** `TriangleRasterizer._fill` is last-write-wins over
+-/// coverage with no depth test, so any permutation of emission order that
+-/// preserves the union of triangle footprints paints the same pixels --
+-/// draw order can only be pinned by a record-order assertion
+-/// (`collector_differential_test.dart`'s walk-order check), never by this
+-/// instrument.
++/// **Draw order was likewise unmeasured, and for the same reason: nothing
++/// upstream of the rasterizer's last-write-wins fill could disagree in
++/// *colour* over ground both arms had already inked.** `TriangleRasterizer
++/// ._fill` is last-write-wins over coverage with no depth test, so any
++/// permutation of emission order that preserves the union of triangle
++/// footprints paints the same *coverage* -- [ResidentAgreement] cannot see it,
++/// and before a fill kind existed neither could anything else in this file,
++/// because two overlapping *strokes* of the same corpus still ink the same
++/// pixels regardless of which one is inked last. A fill changes that: a large
++/// opaque shape drawn over a stroke repaints that stroke's pixels to the
++/// fill's colour without moving the union of ink at all, so
++/// [measureResidentColor] -- which reads colour, not coverage -- is the first
++/// instrument in this file able to see order, and only for a corpus that puts
++/// a fill over something else. `test/gpu/fill_order_test.dart` is the gate
++/// that draws such a corpus; a record-order assertion
++/// (`collector_differential_test.dart`'s walk-order check) still exists
++/// alongside it and remains the only one that pins order **directly**, on
++/// the buffer, rather than as a pixel-colour side effect of it.
+ ///
+ /// **Geometry added INSIDE the existing footprint is invisible, and this is
+ /// proved rather than suspected.** [measureResidentAgreement] counts the
+ /// symmetric difference of two coverage unions, so a defect that only adds
+ /// triangles where ink already sits moves no pixel at all. The proof is
+ /// M-B7 against M-B15 (`task-9-report.md`): flipping every join wedge to the
+ /// wrong side of its corner and deleting every join outright produce the
+ /// *identical* reading, 26 differing pixels, and in both cases
+ /// `differing == referenceInk - residentInk` -- the resident set is a pure
+ /// subset of the reference's. A wrong-side wedge is wholly invented geometry
+@@ -59,21 +76,24 @@
+ /// analogue. Later plans lean on this instrument; they must not read
+ /// agreement here as "the arms draw the same triangles", only as "the arms
+ /// cover the same pixels".
+ library;
+ 
+ import 'dart:typed_data';
+ import 'dart:ui';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart'
++    show kFloatsPerInstance;
+ 
++import 'fixtures.dart' show fillFixture, kViewport;
+ import 'instance_expander.dart';
+ import 'triangle_rasterizer.dart';
+ 
+ /// What a resident-versus-reference comparison counted.
+ class ResidentAgreement {
+   ResidentAgreement({
+     required this.referenceInk,
+     required this.residentInk,
+     required this.differing,
+     required this.overEight,
+@@ -302,10 +322,313 @@ ResidentAgreement _agreementOf(
+     }
+   }
+   return ResidentAgreement(
+       referenceInk: referenceInk,
+       residentInk: residentInk,
+       differing: differing,
+       // Coverage-only: see the class doc. Equal to `differing` by
+       // construction, not a second, looser threshold.
+       overEight: differing);
+ }
++
++/// A per-channel comparison of the two arms' rasterised colour.
++///
++/// **This is the half of spec criterion 1 that coverage cannot reach.**
++/// `TriangleRasterizer._fill` is last-write-wins with no blending, so a
++/// pixel's final colour is the colour of the *last* triangle to cover it --
++/// which makes this the only measurement in the suite that can see emission
++/// order at all. Both arms share the rasterizer, so the absence of blending
++/// cancels exactly the way MSAA does in the device comparison.
++class ResidentColorAgreement {
++  ResidentColorAgreement(
++      this.union, this.withinTwo, this.overEight, this.referenceInk);
++
++  /// Pixels either arm inked. The comparison runs over these: a pixel
++  /// neither arm touched is background on both sides and says nothing.
++  final int union;
++
++  /// Pixels whose every channel differs by at most 2.
++  final int withinTwo;
++
++  /// Pixels with any channel differing by more than 8 -- spec criterion 1
++  /// allows none.
++  final int overEight;
++
++  /// Pixels the reference arm inked, for the same anti-vacuity purpose
++  /// [ResidentAgreement.referenceInk] serves: a comparison of two blank
++  /// frames agrees perfectly on every count above and measures nothing.
++  final int referenceInk;
++
++  double get withinTwoFraction => union == 0 ? 1.0 : withinTwo / union;
++
++  @override
++  String toString() => 'ResidentColorAgreement(union: $union, '
++      'withinTwo: $withinTwo '
++      '(${(withinTwoFraction * 100).toStringAsFixed(3)}%), '
++      'overEight: $overEight, referenceInk: $referenceInk)';
++}
++
++/// Draws [corpus] through both arms at [size] and compares their rasterised
++/// colour, per channel, over the union of pixels either one inked.
++///
++/// Runs the same two arms [measureResidentAgreement] does -- see that
++/// function's own doc for why each arm is driven at an identity residual
++/// with the device scale applied separately, and why that split is not
++/// stylistic. The difference is what happens after: where
++/// [_agreementOf] asks `TriangleRasterizer.inked` a yes/no question,
++/// this walks both `pixels` buffers and takes a per-channel distance,
++/// reading each `Uint32` as the packed little-endian `0xAABBGGRR`
++/// `TriangleRasterizer.pixels`' own doc comment describes -- the shift
++/// amounts below unpack the same four bytes that doc names, in no
++/// particular channel order, because the worst single-channel distance is
++/// symmetric in which byte is which.
++///
++/// [permute] reorders the *instance* buffer before expansion, so a caller
++/// can submit the same instances out of walk order -- `null` for every
++/// ordinary measurement; Task 7 is its only caller, to prove this
++/// instrument can see order at all once a fill is in the corpus.
++///
++/// [debugTintResident] adds its argument to the resident arm's every
++/// written colour before rasterisation. **Test-only, and it must never
++/// appear in `lib/`** -- exactly as `TriangleRasterizer
++/// .debugDisableDashTest` is documented on that field. It exists for one
++/// reason: an instrument whose failing case is never exercised reads 1.00
++/// and proves nothing (Plan 3i's Ruling 14, the same ruling
++/// `debugDisableDashTest` answers). `0` is a no-op -- every ordinary
++/// measurement passes it implicitly by omission.
++ResidentColorAgreement measureResidentColor(
++  void Function(DrawSink sink) corpus, {
++  required Size size,
++  required double devicePixelRatio,
++  required double pixelsPerPaperMm,
++  List<int> Function(List<int> order)? permute,
++  int debugTintResident = 0,
++}) {
++  final w = (size.width * devicePixelRatio).round();
++  final h = (size.height * devicePixelRatio).round();
++
++  // The reference arm: identical to `measureResidentAgreement`'s.
++  final referenceRaster = TriangleRasterizer(w, h);
++  final recorder = PictureRecorder();
++  final sink = VerticesDrawSink(
++    canvas: Canvas(recorder),
++    pixelsPerPaperMm: pixelsPerPaperMm,
++    devicePixelRatio: devicePixelRatio,
++  )..observer = (positions, colors) {
++      final scaled = Float32List(positions.length);
++      for (var i = 0; i < positions.length; i++) {
++        scaled[i] = positions[i] * devicePixelRatio;
++      }
++      referenceRaster.observe(scaled, colors);
++    };
++  sink.beginResidual(Transform2.identity());
++  corpus(sink);
++  sink.endResidual();
++  sink.flush();
++  recorder.endRecording().dispose();
++
++  // The resident arm: the collector's buffer, optionally reordered by
++  // [permute] before expansion.
++  final collector = GeometryCollector(
++      pixelsPerPaperMm: pixelsPerPaperMm, devicePixelRatio: devicePixelRatio);
++  collector.beginResidual(Transform2.identity());
++  corpus(collector);
++  collector.endResidual();
++
++  var data = collector.data;
++  final instanceCount = collector.instanceCount;
++  if (permute != null) {
++    final order = permute(List<int>.generate(instanceCount, (i) => i));
++    data = reorderedInstances(data, instanceCount, order);
++  }
++
++  final expanded = expandInstances(
++      data, instanceCount, Transform2.scale(devicePixelRatio, devicePixelRatio),
++      dashScale: 1.0);
++
++  Int32List colors = expanded.colors;
++  if (debugTintResident != 0) {
++    colors = Int32List.fromList(expanded.colors);
++    for (var i = 0; i < colors.length; i++) {
++      colors[i] = (colors[i] + debugTintResident).toSigned(32);
++    }
++  }
++
++  final residentRaster = TriangleRasterizer(w, h)
++    ..observe(expanded.positions, colors, dash: expanded.dashVaryings);
++
++  return _colorAgreementOf(referenceRaster, residentRaster);
++}
++
++/// The per-channel colour comparison [measureResidentColor] runs.
++ResidentColorAgreement _colorAgreementOf(
++    TriangleRasterizer reference, TriangleRasterizer resident) {
++  var union = 0, withinTwo = 0, overEight = 0, referenceInk = 0;
++  for (var i = 0; i < reference.pixels.length; i++) {
++    final a = reference.pixels[i], b = resident.pixels[i];
++    if (a != 0) referenceInk++;
++    if (a == 0 && b == 0) continue;
++    union++;
++    var worst = 0;
++    for (var shift = 0; shift < 32; shift += 8) {
++      final d = (((a >> shift) & 0xFF) - ((b >> shift) & 0xFF)).abs();
++      if (d > worst) worst = d;
++    }
++    if (worst <= 2) withinTwo++;
++    if (worst > 8) overEight++;
++  }
++  return ResidentColorAgreement(union, withinTwo, overEight, referenceInk);
++}
++
++/// Moves [order].length whole instance records from [data] into a fresh
++/// buffer: the record at result index `i` is [data]'s record `order[i]`,
++/// copied [kFloatsPerInstance] floats at a time -- position, colour, dash,
++/// everything a record carries, moved together at the record's own stride.
++///
++/// **Shared by [measureResidentColor]'s `permute` and [renderFillFixture]'s,
++/// so there is exactly one place this arithmetic can drift.** Task 6 shipped
++/// `permute` with no caller exercising it; before Task 7 trusted a number
++/// this produced, a throwaway corpus of three full-width, fully-overlapping
++/// strokes in red/green/blue was permuted with a plain `.reversed` and
++/// measured through the real [measureResidentColor]: unpermuted the two arms
++/// agreed exactly (`withinTwo` 100%, `overEight` 0, both ending on blue,
++/// the closure's own last draw); reversed, the resident arm ended on red
++/// instead (`withinTwo` 0%, `overEight` = the whole 8000-pixel union) --
++/// which is only possible if every one of the sixteen floats per record,
++/// not merely `kind` or `argb`, moved to its new index together. See
++/// `task-7-report.md` for the captured run. `fill_order_test.dart`'s own
++/// "sortByKind is a multiset-equal reordering" test pins the same property
++/// permanently, at 16-float granularity, rather than resting on that
++/// throwaway run alone.
++///
++/// [order] must have exactly [instanceCount] elements -- a `permute` that
++/// returns a short or over-long list would otherwise silently duplicate or
++/// truncate records (a short list undershoots `reordered`'s length and
++/// leaves a tail of zeros; a long one is simply never read past
++/// `instanceCount`) or throw a bare `RangeError` with no indication of
++/// which caller's `permute` produced the bad list. The assert below fails
++/// at the actual cause instead.
++Float32List reorderedInstances(
++    Float32List data, int instanceCount, List<int> order) {
++  assert(
++      order.length == instanceCount,
++      'permute must return a permutation of all $instanceCount instance '
++      'indices; got ${order.length}');
++  final reordered = Float32List(instanceCount * kFloatsPerInstance);
++  for (var i = 0; i < instanceCount; i++) {
++    final from = order[i] * kFloatsPerInstance;
++    final to = i * kFloatsPerInstance;
++    reordered.setRange(to, to + kFloatsPerInstance, data, from);
++  }
++  return reordered;
++}
++
++/// Device pixel ratio [paintFillFixture], [collectFillFixture] and
++/// [renderFillFixture] paint and rasterise at. Not a parameter on any of the
++/// three: none of `fill_order_test.dart`'s three tests needs a second value,
++/// and a shared constant is what keeps `collectFillFixture`'s buffer and
++/// `renderFillFixture`'s raster surface honestly describing the same camera
++/// -- see [paintFillFixture]'s own doc for why the *viewport* the two share
++/// is not a free parameter either.
++const double kFillFixtureDevicePixelRatio = 2.0;
++
++/// Paints [fillFixture] through the real [DraftPainter], camera fit to
++/// [kViewport] -- the same viewport `fillFixture`'s own guard tests
++/// (`fixtures_test.dart`'s `strokeInkInsideFill`) fit to, so the 337-logical
++/// -pixel stroke-over-fill overlap that guard already measured (at dpr 1,
++/// the same dpr `strokeInkInsideFill` rasterises at) is the overlap this
++/// file's helpers paint too, not a second, unmeasured camera.
++///
++/// **Goes through [DraftPainter], not hand-rolled `sink.fillPolygon` /
++/// `sink.circle` calls.** A fill entity only resolves to its boundary's
++/// triangulation by way of `DraftPainter._drawFill` reading
++/// `doc.fills.trianglesFor(boundary)` -- `AddRegionCommand.apply` is what
++/// materialises that triangulation in the first place. A corpus built by
++/// calling sink methods directly, the way `resident_pixel_differential_test
++/// .dart`'s own `_corpus` does for strokes, would never exercise `_drawFill`
++/// at all and this whole plan's fill path would go untested by the pixel
++/// gate. This is the shape [measureResidentColor]'s `corpus` parameter
++/// takes (`void Function(DrawSink sink)`), so it can be handed to that
++/// function directly, as `fill_order_test.dart`'s third test does.
++///
++/// [fillFixture] is rebuilt fresh on every call -- it is a plain function,
++/// not a cached document -- so two calls (the reference sink's pass and the
++/// resident collector's, inside [measureResidentColor]) each paint their own
++/// copy rather than replaying a mutated one.
++void paintFillFixture(DrawSink sink) {
++  final doc = fillFixture();
++  final camera = ViewportTransform.fit(doc.extents, kViewport);
++  final index = SpatialIndex(doc);
++  final resolver = DocumentStyleResolver(doc);
++  DraftPainter(document: doc, index: index, resolver: resolver)
++      .paint(sink, camera, kViewport);
++  index.dispose();
++}
++
++/// [paintFillFixture], collected into a fresh [GeometryCollector] instead of
++/// painted straight to an arbitrary sink, so a caller can read `.data` and
++/// `.instanceCount` directly. `fill_order_test.dart`'s first test -- the
++/// corpus's own proof that a stroke is emitted after a fill, without which
++/// the rest of that file would pass vacuously -- reads the walk order this
++/// returns.
++GeometryCollector collectFillFixture() {
++  final collector = GeometryCollector(
++      pixelsPerPaperMm: kLogicalPixelsPerMm,
++      devicePixelRatio: kFillFixtureDevicePixelRatio);
++  paintFillFixture(collector);
++  return collector;
++}
++
++/// Renders [fillFixture] through the resident arm ONLY -- the collector's
++/// buffer, optionally reordered by [permute] exactly as
++/// [measureResidentColor]'s own `permute` reorders it (both go through
++/// [reorderedInstances]), expanded by [expandInstances] and rasterised.
++/// **No reference-sink render happens here.**
++///
++/// This is deliberately narrower than [measureResidentColor]:
++/// `fill_order_test.dart`'s second test asks only whether reordering the
++/// SAME arm's own buffer moves a pixel at all -- a question the resident arm
++/// answers on its own, with nothing to compare against. [measureResidentColor]
++/// is what compares the result to the reference, in that file's third test.
++TriangleRasterizer renderFillFixture(
++    {List<int> Function(List<int> order)? permute}) {
++  final collector = collectFillFixture();
++  var data = collector.data;
++  final instanceCount = collector.instanceCount;
++  if (permute != null) {
++    final order = permute(List<int>.generate(instanceCount, (i) => i));
++    data = reorderedInstances(data, instanceCount, order);
++  }
++  final expanded = expandInstances(
++      data,
++      instanceCount,
++      Transform2.scale(
++          kFillFixtureDevicePixelRatio, kFillFixtureDevicePixelRatio),
++      dashScale: 1.0);
++  final w = (kViewport.width * kFillFixtureDevicePixelRatio).round();
++  final h = (kViewport.height * kFillFixtureDevicePixelRatio).round();
++  return TriangleRasterizer(w, h)
++    ..observe(expanded.positions, expanded.colors, dash: expanded.dashVaryings);
++}
++
++/// Counts device pixels where [a] and [b] disagree, on the packed colour --
++/// not coverage. A plain `!=` on each pixel: a pixel both rasterisations
++/// inked, but with a different last-write-wins colour, counts as differing
++/// here even though a coverage instrument like [ResidentAgreement] would
++/// call the two identical. That is the whole point of this comparison --
++/// `fill_order_test.dart`'s second test asks whether a permutation of the
++/// fill-fixture buffer moves a pixel, and on this corpus (a stroke that
++/// crosses a fill) the strokes' union of covered pixels is exactly the same
++/// either way; only which primitive is on top, and therefore which colour
++/// survives, can move.
++int countDifferingPixels(TriangleRasterizer a, TriangleRasterizer b) {
++  assert(
++      a.pixels.length == b.pixels.length,
++      'countDifferingPixels compares two rasterisations of the same corpus '
++      'at the same surface size; a length mismatch means the caller '
++      'rendered them at two different sizes');
++  var differing = 0;
++  for (var i = 0; i < a.pixels.length; i++) {
++    if (a.pixels[i] != b.pixels[i]) differing++;
++  }
++  return differing;
++}
+diff --git a/packages/jet_cad_2d_flutter/test/support/instance_expander.dart b/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
+index af74813..1c5778b 100644
+--- a/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
++++ b/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
+@@ -15,20 +15,28 @@
+ /// It takes an instance buffer and a transform. It must never read the
+ /// collector: the collector's output is the input, which is exactly what the
+ /// GPU sees.
+ ///
+ /// **Task 8 added the dash varying, transcribed the same way as everything
+ /// else here.** `ExpandedTriangles.dashVaryings` is `v_dash` -- `(t,
+ /// fracStart, fracEnd)` per vertex -- and [expandInstances] takes the same
+ /// `dashScale` `cad_stroke.vert` reads off `frame_info.dash_scale`. Read the
+ /// dash block in `expandInstances` beside the shader's own tail, in the same
+ /// order: the sentinel, the period test, the collapse override.
++///
++/// **Plan D's Task 5 added the fill branch, transcribed the same way.** A
++/// fill instance (`kKindFill`) reads no `halfWidth` and expands nothing: its
++/// three corners are projected and selected by `join_weight`'s V, A and B,
++/// with M folded onto A so the six-vertex corner table's second triangle is
++/// degenerate. The point branch is narrowed to `kind < 2.5` in both files so
++/// the fill branch's bare `else` cannot swallow it -- see the branch's own
++/// comment below for the failure that guards against.
+ library;
+ 
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
+ 
+ /// The shader's `kMinMiterCosine` literal, mirrored so a test can assert it
+@@ -247,29 +255,40 @@ ExpandedTriangles expandInstances(
+           // would *disagree*, not agree: the reference's triangle 0 never
+           // reads `m`, so it would stay finite while this triangle 0 went
+           // NaN -- a differential would catch that. What it cannot catch is
+           // a regression to *this* arithmetic while the guard still bounds
+           // `reach`, because nothing exercises the poisoning branch to
+           // begin with.) Only a device run, or a change to the guard, would
+           // catch a change here today.
+           px = c.wv * vx + c.wa * ax + c.wb * bx + c.wm * mx;
+           py = c.wv * vy + c.wa * ay + c.wb * by + c.wm * my;
+         }
+-      } else {
++      } else if (kind < 2.5) {
+         // kKindPoint: a square of the stroke's width centred on p0. Both
+         // axes are expanded here, in device pixels, so the dot stays square
+         // and stays the same size at every zoom -- which is what the
+         // reference gets for free by computing its `+/- half` in device
+         // space.
+         final cx = toX(x0, y0), cy = toY(x0, y0);
+         px = cx + (c.x * 2.0 - 1.0) * halfWidth;
+         py = cy + c.y * halfWidth;
++      } else {
++        // kKindFill: one triangle of a pre-triangulated fill. Nothing is
++        // expanded -- a fill has no width -- so `halfWidth` is not read here
++        // at all. `join_weight` selects the corner: V -> p0, A -> p1,
++        // B -> p2, and M folded onto p1, which makes the second triangle
++        // (A, M, B) = (p1, p1, p2) degenerate.
++        final a0x = toX(x0, y0), a0y = toY(x0, y0);
++        final a1x = toX(x1, y1), a1y = toY(x1, y1);
++        final a2x = toX(x2, y2), a2y = toY(x2, y2);
++        px = c.wv * a0x + (c.wa + c.wm) * a1x + c.wb * a2x;
++        py = c.wv * a0y + (c.wa + c.wm) * a1y + c.wb * a2y;
+       }
+ 
+       final vi = (i * cornerVertexCount + v);
+       positions[vi * 2] = px;
+       positions[vi * 2 + 1] = py;
+       colors[vi] = argb;
+ 
+       // The dash decision. `dash.x` (here `dashPeriodSigned`) is signed:
+       // zero is solid, and a negative value marks the one instance per
+       // primitive that draws solid when the pattern collapses.

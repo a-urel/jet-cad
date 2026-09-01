@@ -1,0 +1,277 @@
+# Review package: 3094312..HEAD
+
+## Commits
+ef5b834 feat(gpu): the collector fans a filled circle at the outline's step count
+
+## Files changed
+ .../lib/src/gpu/geometry_collector.dart            |  38 +++++++-
+ .../test/gpu/geometry_collector_test.dart          | 101 +++++++++++++++++++--
+ 2 files changed, 127 insertions(+), 12 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+index 2eee384..d8f8917 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+@@ -73,21 +73,21 @@ class GeometryCollector implements DrawSink {
+   /// see `docs/superpowers/notes/2026-08-30-plan-b-results.md`) that is
+   /// roughly 5.23 MB copied per call (109,068 × [kFloatsPerInstance] × 4
+   /// bytes = 5,235,264 bytes). Read it once per rebuild, into
+   /// `ResidentGeometry.create`, and hoist it out of any per-frame path —
+   /// Plan F's `paint()` call site included — or it breaks this project's
+   /// "the frame path allocates nothing per entity in steady state"
+   /// non-negotiable.
+   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
+   int get instanceCount => _instances;
+ 
+-  /// Ops this plan does not draw yet — `text` and `fillCircle`, since Plan D.
++  /// Ops this plan does not draw yet — `text` only, since Plan D.
+   ///
+   /// Counted rather than ignored so a corpus that needs Plan E is visible as
+   /// a number instead of as a missing picture.
+   ///
+   /// `circle` and `arc` stopped counting here in Plan B's Task 5; `point` in
+   /// its Task 6; `fillPolygon` in Plan D's Task 2; `fillCircle` stops counting
+   /// in Task 3.
+   int get skippedOps => _skipped;
+ 
+   /// **Diagnostic only — read by nobody in this class and never changes what
+@@ -661,17 +661,49 @@ class GeometryCollector implements DrawSink {
+           y0: t.b * ax + t.d * ay + t.f,
+           x1: t.a * bx + t.c * by + t.e,
+           y1: t.b * bx + t.d * by + t.f,
+           x2: t.a * cx + t.c * cy + t.e,
+           y2: t.b * cx + t.d * cy + t.f,
+           argb: argb);
+       _instances++;
+     }
+   }
+ 
++  /// A triangle fan around the circle's centre, at the same step count
++  /// [_flatten] would give the circle's own outline.
++  ///
++  /// **The shared `_flattenSteps` call is the point** (Ruling D5): a filled
++  /// circle's silhouette is tessellated by the same expression as its own
++  /// boundary stroke, so the two never disagree at any zoom. The rim starts
++  /// at angle 0, i.e. `(cx + r, cy)`, exactly as
++  /// `VerticesDrawSink.fillCircle` does.
+   @override
+-  void fillCircle(double cx, double cy, double r, ResolvedStyle style) =>
+-      _skipped++;
++  void fillCircle(double cx, double cy, double r, ResolvedStyle style) {
++    if (r <= 0) return;
++    final t = _residual;
++    final deviceRadius = r * t.scaleMagnitude;
++    if (deviceRadius <= 0) return;
++    const theta = 2 * math.pi;
++    final steps = _flattenSteps(deviceRadius, theta);
++    // `style.argb` directly, never `_coveredArgb` -- Ruling D3.
++    final argb = style.argb;
++    final ccx = t.a * cx + t.c * cy + t.e;
++    final ccy = t.b * cx + t.d * cy + t.f;
++    var px = cx + r, py = cy;
++    var dx = t.a * px + t.c * py + t.e, dy = t.b * px + t.d * py + t.f;
++    _reserve(_instances + steps);
++    for (var i = 1; i <= steps; i++) {
++      final angle = theta * i / steps;
++      px = cx + r * math.cos(angle);
++      py = cy + r * math.sin(angle);
++      final nx = t.a * px + t.c * py + t.e, ny = t.b * px + t.d * py + t.f;
++      writeFill(_buffer, _instances,
++          x0: ccx, y0: ccy, x1: dx, y1: dy, x2: nx, y2: ny, argb: argb);
++      _instances++;
++      dx = nx;
++      dy = ny;
++    }
++  }
+ 
+   @override
+   void text(String text, Handle style, ResolvedStyle resolved) => _skipped++;
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+index 89c8590..0f9b8ae 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/geometry_collector_test.dart
+@@ -130,35 +130,36 @@ void main() {
+ 
+   test('drops a zero-length segment rather than handing the shader a NaN', () {
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.polyline(Float64List.fromList([5, 5, 5, 5]), 2, _style, closed: false);
+     c.endResidual();
+     expect(c.instanceCount, 0);
+   });
+ 
+   test('counts the ops it does not draw instead of dropping them silently', () {
+-    // **This test used `circle` until Task 5.** A circle is drawn now, so the
+-    // two ops here are `fillCircle` and `text` -- chosen because they stay
+-    // skipped for the whole of Plan B (fills are Plan D, text is Plan E), so
++    // **This test used `circle` until Task 5, then `fillCircle` until Task 3
++    // of Plan D.** Now fillCircle is drawn, so only `text` is skipped -- chosen
++    // because it stays skipped for the whole of Plan D (text is Plan E), so
+     // this assertion does not have to be rewritten again at Task 6 the way it
+     // was rewritten here. Both assertions are kept: an op that starts being
+     // drawn without being taken off the skipped list would move
+     // `instanceCount`, and an op silently dropped would leave `skippedOps`
+     // short.
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.fillCircle(0, 0, 5, _style);
+     c.text('x', Handle.none, _style);
+     c.endResidual();
+-    expect(c.instanceCount, 0);
+-    expect(c.skippedOps, 2);
++    expect(c.instanceCount, greaterThan(0),
++        reason: 'fillCircle now draws instances');
++    expect(c.skippedOps, 1, reason: 'only text is skipped now');
+   });
+ 
+   test('clamps to the device-pixel floor at a hairline lineweight', () {
+     final c = GeometryCollector(pixelsPerPaperMm: 4, devicePixelRatio: 2);
+     c.beginResidual(Transform2.identity());
+     c.polyline(Float64List.fromList([0, 0, 1, 0]), 2, _hairlineStyle,
+         closed: false);
+     c.endResidual();
+ 
+     expect(c.instanceCount, 1);
+@@ -682,42 +683,42 @@ void main() {
+             argb: 0xFF000000,
+             lineweightHundredths: 25,
+             linetype: Handle.none,
+             linetypeScale: 1),
+         closed: false);
+     expect(c.debugCollinearJoins, 1,
+         reason: 'a straight there-and-back also has cross_z == 0, the same '
+             'branch the shader\'s degenerate test takes');
+   });
+ 
+-  test('after Plan D Task 2, fillCircle and text are skipped', () {
+-    // fillPolygon now draws; fillCircle and text still do not. It goes red the
+-    // day fillCircle is drawn (Task 3) or another op is silently dropped.
++  test('after Plan D Task 3, text is the only skipped op', () {
++    // fillPolygon draws in Task 2; fillCircle draws in Task 3; text still does
++    // not. It goes red the day text is drawn or another op is silently dropped.
+     final c = GeometryCollector(
+         pixelsPerPaperMm: kLogicalPixelsPerMm, devicePixelRatio: 2.0);
+     c.beginResidual(Transform2.identity());
+     const style = ResolvedStyle(
+         argb: 0xFF000000,
+         lineweightHundredths: 25,
+         linetype: Handle.none,
+         linetypeScale: 1);
+     c.polyline(Float64List.fromList(<double>[0, 0, 10, 10]), 2, style,
+         closed: false);
+     c.circle(0, 0, 20, style);
+     c.arc(0, 0, 20, 0, 1, style);
+     c.point(1, 1, style);
+     expect(c.skippedOps, 0, reason: 'four ops Plan B draws');
+     c.fillPolygon(Float64List.fromList(<double>[0, 0, 1, 0, 0, 1]), 3,
+         Int32List.fromList(<int>[0, 1, 2]), style);
+     c.fillCircle(0, 0, 5, style);
+     c.text('x', Handle.none, style);
+-    expect(c.skippedOps, 2, reason: 'fillCircle and text not yet drawn');
++    expect(c.skippedOps, 1, reason: 'text not yet drawn');
+   });
+ 
+   // --- dashed polylines (Task 5) -------------------------------------------
+ 
+   const dashed = DashPattern(dashes: [12.0, -6.0], totalLength: 18.0);
+   const dashDot =
+       DashPattern(dashes: [12.0, -3.0, 0.5, -3.0], totalLength: 18.5);
+   const allGap = DashPattern(dashes: [-4.0], totalLength: 4.0);
+   const dashStyle = ResolvedStyle(
+       argb: 0xFF112233,
+@@ -1248,11 +1249,93 @@ void main() {
+         3,
+         Int32List.fromList(<int>[0, 1, 1]),
+         const ResolvedStyle(
+             argb: 0xFF884422,
+             lineweightHundredths: 25,
+             linetype: Handle.none,
+             linetypeScale: 1));
+     c.endResidual();
+     expect(c.instanceCount, 1);
+   });
++
++  test('a filled circle is a fan at the same step count as its own outline',
++      () {
++    // The fill and the stroke of the same circle must tessellate
++    // identically, or the fill peeks out from under its own boundary at
++    // some zoom. Both go through _flattenSteps; this asserts they agree
++    // rather than that either equals a hardcoded number.
++    const style = ResolvedStyle(
++        argb: 0xFF224466,
++        lineweightHundredths: 25,
++        linetype: Handle.none,
++        linetypeScale: 1);
++    final residual = Transform2.translation(300, 90)
++        .multiply(Transform2.rotation(-0.6))
++        .multiply(Transform2.scale(1.35, 1.35));
++
++    final outline =
++        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0)
++          ..beginResidual(residual)
++          ..circle(12, -5, 7.5, style)
++          ..endResidual();
++    // A closed run: `steps` segments and `steps` joins (the seam included).
++    final chords = outline.instanceCount ~/ 2;
++
++    final fill =
++        GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0)
++          ..beginResidual(residual)
++          ..fillCircle(12, -5, 7.5, style)
++          ..endResidual();
++
++    expect(fill.instanceCount, chords,
++        reason: 'the fan and the outline must use one step count');
++    expect(fill.skippedOps, 0);
++  });
++
++  test('the fan shares one centre and walks the rim in ascending angle', () {
++    const style = ResolvedStyle(
++        argb: 0xFF224466,
++        lineweightHundredths: 25,
++        linetype: Handle.none,
++        linetypeScale: 1);
++    final t = Transform2.translation(300, 90).multiply(Transform2.scale(2, 3));
++    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 2.0)
++      ..beginResidual(t)
++      ..fillCircle(12, -5, 7.5, style)
++      ..endResidual();
++
++    final data = c.data;
++    final centreX = t.a * 12 + t.c * -5 + t.e;
++    final centreY = t.b * 12 + t.d * -5 + t.f;
++    for (var i = 0; i < c.instanceCount; i++) {
++      final o = i * kFloatsPerInstance;
++      expect(data[o + InstanceFieldOffset.kind], kKindFill);
++      expect(data[o + InstanceFieldOffset.x0], closeTo(centreX, 1e-3),
++          reason: 'every triangle of a fan starts at the centre');
++      expect(data[o + InstanceFieldOffset.y0], closeTo(centreY, 1e-3));
++    }
++    // Triangle 0's second corner is the rim at angle 0: (cx + r, cy).
++    expect(data[InstanceFieldOffset.x1],
++        closeTo(t.a * (12 + 7.5) + t.c * -5 + t.e, 1e-3));
++    // Consecutive triangles share an edge: triangle i's third corner is
++    // triangle i+1's second. A fan written out of order fails here.
++    final o1 = kFloatsPerInstance;
++    expect(data[o1 + InstanceFieldOffset.x1],
++        closeTo(data[InstanceFieldOffset.x2], 1e-6));
++    expect(data[o1 + InstanceFieldOffset.y1],
++        closeTo(data[InstanceFieldOffset.y2], 1e-6));
++  });
++
++  test('a zero or negative radius fills nothing', () {
++    const style = ResolvedStyle(
++        argb: 0xFF224466,
++        lineweightHundredths: 25,
++        linetype: Handle.none,
++        linetypeScale: 1);
++    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0)
++      ..beginResidual(Transform2.translation(3, 4))
++      ..fillCircle(1, 1, 0, style)
++      ..fillCircle(1, 1, -2, style)
++      ..endResidual();
++    expect(c.instanceCount, 0);
++  });
+ }

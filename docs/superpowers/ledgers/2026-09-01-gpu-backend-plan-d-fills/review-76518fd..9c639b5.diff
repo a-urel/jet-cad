@@ -1,0 +1,669 @@
+# Review package: 76518fd..HEAD
+
+## Commits
+9c639b5 test(gpu): emission order is the drawing, and a fill proves it
+
+## Files changed
+ .../test/gpu/collector_differential_test.dart      | 132 ++++++++++++++++--
+ .../test/gpu/fill_order_test.dart                  | 125 ++++++++++++++++++
+ .../test/gpu/resident_pixel_differential_test.dart |  30 +++++
+ .../test/support/gpu_comparison.dart               | 147 ++++++++++++++++++++-
+ 4 files changed, 417 insertions(+), 17 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+index 1297ce8..f5b4e65 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/collector_differential_test.dart
+@@ -130,20 +130,42 @@ void main() {
+     expect(data[InstanceFieldOffset.a] * 255.0,
+         closeTo(expectedAlpha.toDouble(), 0.51),
+         reason: 'a collector that dropped lineweightScale from the fade '
+             'formula would leave this at 255, not 193');
+     // The colour channels are untouched -- `_coveredArgb` gives up alpha,
+     // it does not darken.
+     expect(data[InstanceFieldOffset.r] * 255.0, closeTo(0x20, 0.51));
+     expect(data[InstanceFieldOffset.g] * 255.0, closeTo(0x40, 0.51));
+     expect(data[InstanceFieldOffset.b] * 255.0, closeTo(0x60, 0.51));
+   });
++
++  test(
++      'the fill fixture -- every instance\'s kind, argb and three points '
++      'match the reference\'s triangle stream, in order', () {
++    // Plan D's own corpus, walked at the record level exactly the way
++    // `differentialFixture` is above: `_checkAgainstOracle` already handles
++    // `PolylineOp` and `CircleOp` generically (900, 903 are plain 2-point
++    // lines; 902 and 905, the two regions' own boundaries, are ordinary
++    // visible entities too -- `AddRegionCommand.apply` adds fill AND
++    // boundary to the tree, "fill first" -- so their outline strokes and
++    // joins are already covered by the existing PolylineOp/CircleOp
++    // handling below). What is new here is `FillPolygonOp` (901) and
++    // `FillCircleOp` (904), which this file had no case for until Plan D.
++    //
++    // **This is also where a fill's colour is checked, not only in
++    // `resident_pixel_differential_test.dart`'s pixel gate.** The pixel
++    // gate can only report a percentage; this loop names the wrong VALUE --
++    // a mutant that routed a fill's argb through `_coveredArgb` would fail
++    // here with the exact faded channel it produced, not just a coverage
++    // fraction.
++    _checkAgainstOracle(fillFixture());
++  });
+ }
+ 
+ /// Runs [doc] through the painter twice -- once recorded, once collected --
+ /// and checks every instance the collector wrote against the oracle built
+ /// declaratively from the recording. Shared by both tests in this file, so
+ /// the hairline fixture exercises the same oracle the main corpus does
+ /// rather than a second, possibly-diverging copy of it.
+ void _checkAgainstOracle(DraftDocument doc) {
+   final index = SpatialIndex(doc);
+   addTearDown(index.dispose);
+@@ -235,48 +257,103 @@ void _checkAgainstOracle(DraftDocument doc) {
+     }
+     // A point is one instance, not a run -- no dedupe, no join, no seam.
+     // Its position is the residual applied to the op's own (already
+     // screen-rebased) coordinates, exactly as every other op's is above.
+     if (op is PointOp) {
+       expected.add(_ExpectedInstance.point(
+           op.style,
+           residual.a * op.x + residual.c * op.y + residual.e,
+           residual.b * op.x + residual.d * op.y + residual.f));
+     }
++    // A polygon fill: `triangles` triple-indexes `op.points`' own point
++    // numbering (`draw_sink.dart`'s doc on `FillPolygonOp`, and
++    // `VerticesDrawSink.fillPolygon`, which this expression mirrors), so
++    // each index is doubled to reach the coordinate pair before the
++    // residual is applied. One expected instance per triangle -- no
++    // dedupe, no join, no seam: a fill triangle is not a run.
++    if (op is FillPolygonOp) {
++      final pts = op.points;
++      final tris = op.triangles;
++      for (var t = 0; t + 2 < tris.length; t += 3) {
++        final a = tris[t], b = tris[t + 1], c = tris[t + 2];
++        final ax = pts[a * 2], ay = pts[a * 2 + 1];
++        final bx = pts[b * 2], by = pts[b * 2 + 1];
++        final cx = pts[c * 2], cy = pts[c * 2 + 1];
++        expected.add(_ExpectedInstance.fill(
++            op.style,
++            residual.a * ax + residual.c * ay + residual.e,
++            residual.b * ax + residual.d * ay + residual.f,
++            residual.a * bx + residual.c * by + residual.e,
++            residual.b * bx + residual.d * by + residual.f,
++            residual.a * cx + residual.c * cy + residual.e,
++            residual.b * cx + residual.d * cy + residual.f));
++      }
++    }
++    // A circle fill: a triangle fan around the centre, at the SAME step
++    // count the circle's own outline stroke would flatten to
++    // (`geometry_collector.dart`'s `fillCircle` doc, Ruling D5) -- so this
++    // reuses `_flattenedLocalPoints`, the same perimeter-point deriver the
++    // CircleOp case above already uses for a stroked circle, rather than a
++    // third copy of the step-count formula. The rim starts at angle 0, i.e.
++    // `(cx + r, cy)`, and each fan triangle is `(centre, previous rim point,
++    // next rim point)` -- `VerticesDrawSink.fillCircle`'s own order,
++    // transcribed by `GeometryCollector.fillCircle` too.
++    if (op is FillCircleOp) {
++      final rim = _flattenedLocalPoints(
++          op.cx, op.cy, op.r, 0, 2 * math.pi, residual,
++          closed: false);
++      final rimCount = rim.length ~/ 2;
++      if (rimCount >= 2) {
++        final ccx = residual.a * op.cx + residual.c * op.cy + residual.e;
++        final ccy = residual.b * op.cx + residual.d * op.cy + residual.f;
++        for (var i = 1; i < rimCount; i++) {
++          final px = rim[(i - 1) * 2], py = rim[(i - 1) * 2 + 1];
++          final nx = rim[i * 2], ny = rim[i * 2 + 1];
++          expected.add(_ExpectedInstance.fill(
++              op.style,
++              ccx,
++              ccy,
++              residual.a * px + residual.c * py + residual.e,
++              residual.b * px + residual.d * py + residual.f,
++              residual.a * nx + residual.c * ny + residual.e,
++              residual.b * nx + residual.d * ny + residual.f));
++        }
++      }
++    }
+   }
+ 
+   expect(expected, isNotEmpty,
+       reason: 'a fixture with no drawable geometry would make this test '
+           'vacuous -- polylines, circles and arcs all feed this list');
+   expect(collector.instanceCount, expected.length,
+       reason: 'the collector must emit exactly one instance per segment '
+           'and per join the declarative rule produces -- neither '
+           'dropping nor duplicating one');
+ 
+   // Captured once: `collector.data` copies `_buffer` on every access, so
+   // the comparison loop below reads a single snapshot rather than a fresh
+   // sublist per index.
+   final data = collector.data;
+ 
+   for (var i = 0; i < expected.length; i++) {
+     final o = i * kFloatsPerInstance;
+     final e = expected[i];
+     final style = e.style;
+ 
+-    // -- kind: a stroke, a join and a point lay their geometry out
++    // -- kind: a stroke, a join, a point and a fill lay their geometry out
+     // differently (`InstanceFieldOffset` doc), so asserting only the
+     // strokes' kind would pass on a join or point emitted as a stroke with
+     // the wrong fields simply never being checked. Every instance's kind
+-    // is asserted here, strokes, joins and points alike.
++    // is asserted here, strokes, joins, points and fills alike.
+     expect(data[o + InstanceFieldOffset.kind], e.kind,
+         reason: 'instance $i must be a '
+-            '${e.kind == kKindJoin ? "join" : e.kind == kKindPoint ? "point" : "stroke"}');
++            '${e.kind == kKindJoin ? "join" : e.kind == kKindPoint ? "point" : e.kind == kKindFill ? "fill" : "stroke"}');
+ 
+     // -- walk order & the residual -----------------------------------
+     // A stroke's (x0,y0,x1,y1) is its segment; a join's is
+     // (vertex, previous point) and (x2,y2) is its next point. A stroke's
+     // own (x2,y2) is asserted too (against 0,0, `writeStroke`'s own
+     // constant) rather than left unchecked, so a join emitted where a
+     // stroke was expected -- carrying a non-zero neighbour in x2/y2 --
+     // fails here instead of only on the kind check above.
+     expect(data[o + InstanceFieldOffset.x0], closeTo(e.x0, _tolerance),
+         reason: 'instance $i x0');
+@@ -290,39 +367,67 @@ void _checkAgainstOracle(DraftDocument doc) {
+         reason: 'instance $i x2');
+     expect(data[o + InstanceFieldOffset.y2], closeTo(e.y2, _tolerance),
+         reason: 'instance $i y2');
+ 
+     // -- half-width: the collector stores DEVICE pixels, the reference
+     // sink's own formula (`VerticesDrawSink._halfWidthFor`) stores LOGICAL
+     // pixels. They must differ by exactly `devicePixelRatio` -- this is
+     // not a bug being tolerated, it is the fact this test pins (see the
+     // module doc on `GeometryCollector._halfWidthFor`). A join carries the
+     // same half-width as the segments either side of it.
+-    final sinkHalf = _referenceLogicalHalfWidth(style.lineweightHundredths);
+-    expect(data[o + InstanceFieldOffset.halfWidth],
+-        closeTo(sinkHalf * _devicePixelRatio, _tolerance),
+-        reason: 'instance $i half-width must be the reference sink\'s '
+-            'logical half-width scaled by devicePixelRatio, not the raw '
+-            'logical value copied straight across');
++    //
++    // **A fill has no width at all** (`instance_record.dart`'s `writeFill`
++    // doc, Ruling D2) -- `writeFill` writes a literal `0`, not a lineweight
++    // computation that happens to floor to zero, so the general formula
++    // below is not merely inapplicable to a fill, it would assert the WRONG
++    // thing: `style.argb`'s lineweight is real (fill 901 sits on the
++    // hairline layer) and `_referenceLogicalHalfWidth` would compute a
++    // non-zero floored value for it, which no fill instance ever carries.
++    if (e.kind == kKindFill) {
++      expect(data[o + InstanceFieldOffset.halfWidth], closeTo(0, _tolerance),
++          reason: 'instance $i is a fill and must carry no half-width at '
++              'all, not a floored stroke-width computation');
++    } else {
++      final sinkHalf = _referenceLogicalHalfWidth(style.lineweightHundredths);
++      expect(data[o + InstanceFieldOffset.halfWidth],
++          closeTo(sinkHalf * _devicePixelRatio, _tolerance),
++          reason: 'instance $i half-width must be the reference sink\'s '
++              'logical half-width scaled by devicePixelRatio, not the raw '
++              'logical value copied straight across');
++    }
+ 
+     // -- colour: every entity in `differentialFixture` carries the
+     // default lineweight (25 hundredths-of-a-mm), which at
+     // `kLogicalPixelsPerMm` and dpr 2 computes to a device width above
+     // `VerticesDrawSink.kMinStrokeDevicePixels` -- so `_coveredArgb` is a
+     // no-op on every one of those segments and this line changes nothing
+     // for them. It is still routed through the reference's own fade
+     // formula rather than left as `style.argb`, because Plan B's hairline
+     // corpus (`_hairlineFixture`, below) needs exactly this comparison to
+     // be live: a hairline's alpha now differs from its `style.argb`, and a
+     // collector that forgot to fade it, or faded it by the wrong formula,
+     // must fail this loop rather than being invisible to it.
+-    final argb = _referenceCoveredArgb(style.argb, style.lineweightHundredths);
++    //
++    // **A fill's colour is `style.argb` directly, never `_coveredArgb`'s**
++    // (Ruling D3, `geometry_collector.dart:637-639`): a fill has no width
++    // to fade, and both `fillPolygon` and `fillCircle` pass `style.argb`
++    // straight through in the reference too
++    // (`vertices_draw_sink.dart:750-755`). Fill 901 sits on the "hairline"
++    // layer -- lineweight 1 hundredth-of-a-mm -- specifically so this branch
++    // is not vacuous: routing it through `_referenceCoveredArgb` the way the
++    // `else` below does would compute a REAL fade (well under
++    // `kMinStrokeDevicePixels`), so a collector that mistakenly faded a fill
++    // disagrees with a genuinely different number here, not a coincidence
++    // that happens to equal `style.argb` anyway.
++    final argb = e.kind == kKindFill
++        ? style.argb
++        : _referenceCoveredArgb(style.argb, style.lineweightHundredths);
+     expect(data[o + InstanceFieldOffset.r],
+         closeTo(((argb >> 16) & 0xFF) / 255.0, _tolerance),
+         reason: 'instance $i red channel');
+     expect(data[o + InstanceFieldOffset.g],
+         closeTo(((argb >> 8) & 0xFF) / 255.0, _tolerance),
+         reason: 'instance $i green channel');
+     expect(data[o + InstanceFieldOffset.b],
+         closeTo((argb & 0xFF) / 255.0, _tolerance),
+         reason: 'instance $i blue channel');
+     expect(data[o + InstanceFieldOffset.a],
+@@ -358,20 +463,27 @@ class _ExpectedInstance {
+   // `writePoint` zeroes all four of x1/y1/x2/y2 -- see `instance_record.dart`
+   // -- so the expected entry matches, the same way a stroke's own x2/y2 are
+   // pinned to 0 above rather than left unchecked.
+   _ExpectedInstance.point(this.style, this.x0, this.y0)
+       : kind = kKindPoint,
+         x1 = 0,
+         y1 = 0,
+         x2 = 0,
+         y2 = 0;
+ 
++  // A fill triangle's three corners occupy all six coordinate slots --
++  // `writeFill` writes every one of x0/y0/x1/y1/x2/y2 (`instance_record.dart`
++  // -- unlike a stroke or a point, nothing here is pinned to zero.
++  _ExpectedInstance.fill(
++      this.style, this.x0, this.y0, this.x1, this.y1, this.x2, this.y2)
++      : kind = kKindFill;
++
+   final double kind;
+   final double x0, y0, x1, y1, x2, y2;
+   final ResolvedStyle style;
+ }
+ 
+ /// The point list a circle or arc flattens to, in the residual's **local**
+ /// space — the space `_expectedInstancesFor` expects, since it applies the
+ /// residual itself.
+ ///
+ /// **Derived from the reference, not from the collector.** Every constant
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/fill_order_test.dart b/packages/jet_cad_2d_flutter/test/gpu/fill_order_test.dart
+new file mode 100644
+index 0000000..51e3c66
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/gpu/fill_order_test.dart
+@@ -0,0 +1,125 @@
++import 'dart:ui';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
++
++import '../support/fixtures.dart' show kViewport;
++import '../support/gpu_comparison.dart';
++
++const Size _size = kViewport;
++const double _dpr = kFillFixtureDevicePixelRatio;
++const double _ppmm = kLogicalPixelsPerMm;
++
++/// Spec criterion 4: emission order is the drawing, and a permutation of the
++/// buffer is a different picture.
++///
++/// **This file exists because of fills.** A permutation of strokes preserves
++/// the union of covered pixels, so the coverage instrument cannot see it --
++/// `gpu_comparison.dart` says so. A fill covers a stroke, so reordering the
++/// two changes the colour of every pixel they share. Without a fill in the
++/// corpus this whole file passes vacuously, which is why the first test
++/// below asserts the corpus's own overlap before the second asserts the
++/// permutation changes it.
++void main() {
++  test('the fill corpus really does have a stroke drawn over a fill', () {
++    final c = collectFillFixture();
++    final data = c.data;
++    // `lastFill` and `lastStroke` are each the LAST index of their kind in
++    // the whole walk, not the first stroke found after the first fill seen.
++    //
++    // **A single pass that locks `strokeAfterFill` in at the first
++    // qualifying instance measures the wrong thing on this corpus, and it
++    // is worth recording why rather than only fixing it.** `fillFixture`
++    // draws two regions (901 and 904), and `AddRegionCommand` adds a
++    // region's BOUNDARY as its own ordinary, independently visible entity
++    // (`commands.dart`'s `AddRegionCommand.apply`: "Allocates the pair,
++    // fill first" -- both halves land in the document tree) -- so 902's
++    // outline stroke is drawn immediately after fill 901, long before fill
++    // 904 is reached. A loop that stops at the first stroke seen after ANY
++    // fill locks onto 902's outline and never looks again, so it compares
++    // that early index against `lastFill` (which keeps advancing to 904's
++    // own last instance) and reads a false negative -- exactly what an
++    // earlier draft of this test did, printing `lastFill=58,
++    // strokeAfterFill=3`. Scanning the whole buffer for the LAST stroke
++    // instead finds one at index 153, from 905's own boundary outline,
++    // which is what the corpus actually guarantees: 903's higher-handle
++    // stroke over fill 901 is the one `strokeInkInsideFill`'s 337-pixel
++    // overlap already measured, and it is not the only stroke after a fill
++    // in this walk, only the only one whose overlap is pinned by name.
++    var lastFill = -1, lastStroke = -1;
++    for (var i = 0; i < c.instanceCount; i++) {
++      final kind = data[i * kFloatsPerInstance + InstanceFieldOffset.kind];
++      if (kind == kKindFill) lastFill = i;
++      if (kind == kKindStroke) lastStroke = i;
++    }
++    expect(lastFill, greaterThanOrEqualTo(0), reason: 'no fill was collected');
++    expect(lastStroke, greaterThan(lastFill),
++        reason: 'no stroke is emitted after the last fill, so no permutation '
++            'of this corpus could change a pixel and criterion 4 would pass '
++            'vacuously');
++  });
++
++  test('submitting the buffer out of walk order changes the rendering', () {
++    // In walk order the higher-handle stroke is drawn after the fill and is
++    // visible over it. Sorted by kind -- which is what a separate pipeline
++    // per kind would submit -- every fill is drawn last and covers it.
++    final inOrder = renderFillFixture();
++    final byKind = renderFillFixture(permute: sortByKind);
++
++    final differing = countDifferingPixels(inOrder, byKind);
++    expect(differing, greaterThan(200),
++        reason: 'a permutation that changed no pixel would mean this gate '
++            'cannot fail, whatever it reads');
++  });
++
++  test('the resident arm matches the reference in walk order and only there',
++      () {
++    final ordered = measureResidentColor(paintFillFixture,
++        size: _size, devicePixelRatio: _dpr, pixelsPerPaperMm: _ppmm);
++    expect(ordered.withinTwoFraction, greaterThanOrEqualTo(0.995),
++        reason: ordered.toString());
++
++    final permuted = measureResidentColor(paintFillFixture,
++        size: _size,
++        devicePixelRatio: _dpr,
++        pixelsPerPaperMm: _ppmm,
++        permute: sortByKind);
++    expect(permuted.withinTwoFraction, lessThan(0.995),
++        reason: 'if a kind-sorted buffer still matched the reference, this '
++            'backend would have no order to preserve and the single-draw-call '
++            'design would be unnecessary: ${permuted.toString()}');
++  });
++}
++
++/// A stable permutation of instance indices ordered by the record's `kind`
++/// slot -- the order three separate pipelines (one draw call each for
++/// strokes, joins and fills) would submit in, since each pipeline drains
++/// every instance of its own kind before the next pipeline's call starts.
++/// **Test-only: this ordering must never appear in `lib/`** -- the whole bet
++/// this plan's single buffer and single draw call makes is that walk order
++/// is what a real frame needs, not a kind-sorted resubmission of it.
++///
++/// [order] arrives as the identity list `[0, 1, ..., n-1]` from every caller
++/// in this file ([measureResidentColor] and [renderFillFixture] both build
++/// it that way before calling their `permute`), so re-collecting the fixture
++/// here to read each index's `kind` reproduces the same walk -- collecting
++/// twice does not collect *differently*: `devicePixelRatio` moves a
++/// record's `halfWidth`, never its `kind` or its position in the walk.
++///
++/// **Stable, and not by accident of `List.sort`'s unspecified-when-equal
++/// behaviour**: Dart's `sort` is not documented stable, so ties are broken
++/// explicitly, on the original index, which is what actually makes this
++/// "the order three pipelines would submit in" rather than an arbitrary
++/// reshuffling of instances that share a kind.
++List<int> sortByKind(List<int> order) {
++  final data = collectFillFixture().data;
++  double kindOf(int i) =>
++      data[i * kFloatsPerInstance + InstanceFieldOffset.kind];
++  final sorted = List<int>.of(order)
++    ..sort((a, b) {
++      final byKind = kindOf(a).compareTo(kindOf(b));
++      return byKind != 0 ? byKind : a.compareTo(b);
++    });
++  return sorted;
++}
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart b/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart
+index 274b2af..407414a 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart
+@@ -1,17 +1,18 @@
+ import 'dart:typed_data';
+ import 'dart:ui';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
++import '../support/fixtures.dart' show kViewport;
+ import '../support/gpu_comparison.dart';
+ 
+ const Size _size = Size(400, 300);
+ const double _dpr = 2.0;
+ const double _ppmm = 3.7795275590551185;
+ 
+ // The brief's sample `ResolvedStyle` literals gave only `argb` and
+ // `lineweightHundredths` -- `ResolvedStyle` actually requires all four named
+ // arguments (`linetype`, `linetypeScale` included), so both constants below
+ // add the two the sample dropped.
+@@ -282,11 +283,40 @@ void main() {
+     // exactly 32 from the reference, 16x past the `<= 2` threshold and 4x
+     // past the `<= 8` one -- so this is not a threshold nudged to make the
+     // assertion pass, it is the same tint the brief's own sample names.
+     final r = measureResidentColor(_corpus,
+         size: _size,
+         devicePixelRatio: _dpr,
+         pixelsPerPaperMm: _ppmm,
+         debugTintResident: 0x00202020);
+     expect(r.withinTwoFraction, lessThan(0.995), reason: r.toString());
+   });
++
++  test('the fill corpus agrees per channel', () {
++    // Plan D's own corpus, not `_corpus` above: `paintFillFixture` goes
++    // through the real `DraftPainter`, at a camera fit to `kViewport`, so
++    // the buffer this measures is exactly the one `fill_order_test.dart`'s
++    // "walk order" case measures too -- the same fixture, the same camera,
++    // the same device pixel ratio, just unpermuted.
++    //
++    // **A fill's colour is gated here as well as in `fill_order_test.dart`,
++    // and the reason belongs on this test, not only on the record-level
++    // one.** Only the resident arm has `_coveredArgb` within reach of a
++    // fill at all -- `GeometryCollector.fillPolygon` and `.fillCircle` both
++    // route `style.argb` straight through, unfaded, but a REGRESSION that
++    // routed either through `_coveredArgb` instead would only show up here
++    // (or in the record-level `argb` assertion `collector_differential_test
++    // .dart` adds for this same fixture): the reference sink's own
++    // `fillPolygon`/`fillCircle` (`vertices_draw_sink.dart:750-755`) never
++    // had a fade formula to begin with, so a faded resident fill would be a
++    // real disagreement this per-channel comparison is built to see, not an
++    // artefact of two independently-correct implementations.
++    final r = measureResidentColor(paintFillFixture,
++        size: kViewport,
++        devicePixelRatio: kFillFixtureDevicePixelRatio,
++        pixelsPerPaperMm: kLogicalPixelsPerMm);
++    expect(r.withinTwoFraction, greaterThanOrEqualTo(0.995),
++        reason: r.toString());
++    expect(r.overEight, 0, reason: r.toString());
++    expect(r.referenceInk, greaterThan(5000), reason: r.toString());
++  });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart b/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
+index d033f6d..265285d 100644
+--- a/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
++++ b/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
+@@ -79,20 +79,21 @@
+ library;
+ 
+ import 'dart:typed_data';
+ import 'dart:ui';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart'
+     show kFloatsPerInstance;
+ 
++import 'fixtures.dart' show fillFixture, kViewport;
+ import 'instance_expander.dart';
+ import 'triangle_rasterizer.dart';
+ 
+ /// What a resident-versus-reference comparison counted.
+ class ResidentAgreement {
+   ResidentAgreement({
+     required this.referenceInk,
+     required this.residentInk,
+     required this.differing,
+     required this.overEight,
+@@ -430,27 +431,21 @@ ResidentColorAgreement measureResidentColor(
+   final collector = GeometryCollector(
+       pixelsPerPaperMm: pixelsPerPaperMm, devicePixelRatio: devicePixelRatio);
+   collector.beginResidual(Transform2.identity());
+   corpus(collector);
+   collector.endResidual();
+ 
+   var data = collector.data;
+   final instanceCount = collector.instanceCount;
+   if (permute != null) {
+     final order = permute(List<int>.generate(instanceCount, (i) => i));
+-    final reordered = Float32List(instanceCount * kFloatsPerInstance);
+-    for (var i = 0; i < instanceCount; i++) {
+-      final from = order[i] * kFloatsPerInstance;
+-      final to = i * kFloatsPerInstance;
+-      reordered.setRange(to, to + kFloatsPerInstance, data, from);
+-    }
+-    data = reordered;
++    data = _reorderedInstances(data, instanceCount, order);
+   }
+ 
+   final expanded = expandInstances(
+       data, instanceCount, Transform2.scale(devicePixelRatio, devicePixelRatio),
+       dashScale: 1.0);
+ 
+   Int32List colors = expanded.colors;
+   if (debugTintResident != 0) {
+     colors = Int32List.fromList(expanded.colors);
+     for (var i = 0; i < colors.length; i++) {
+@@ -476,10 +471,148 @@ ResidentColorAgreement _colorAgreementOf(
+     var worst = 0;
+     for (var shift = 0; shift < 32; shift += 8) {
+       final d = (((a >> shift) & 0xFF) - ((b >> shift) & 0xFF)).abs();
+       if (d > worst) worst = d;
+     }
+     if (worst <= 2) withinTwo++;
+     if (worst > 8) overEight++;
+   }
+   return ResidentColorAgreement(union, withinTwo, overEight, referenceInk);
+ }
++
++/// Moves [order].length whole instance records from [data] into a fresh
++/// buffer: the record at result index `i` is [data]'s record `order[i]`,
++/// copied [kFloatsPerInstance] floats at a time -- position, colour, dash,
++/// everything a record carries, moved together at the record's own stride.
++///
++/// **Shared by [measureResidentColor]'s `permute` and [renderFillFixture]'s,
++/// so there is exactly one place this arithmetic can drift.** Task 6 shipped
++/// `permute` with no caller exercising it; before Task 7 trusted a number
++/// this produced, a throwaway corpus of three full-width, fully-overlapping
++/// strokes in red/green/blue was permuted with a plain `.reversed` and
++/// measured through the real [measureResidentColor]: unpermuted the two arms
++/// agreed exactly (`withinTwo` 100%, `overEight` 0, both ending on blue,
++/// the closure's own last draw); reversed, the resident arm ended on red
++/// instead (`withinTwo` 0%, `overEight` = the whole 8000-pixel union) --
++/// which is only possible if every one of the sixteen floats per record,
++/// not merely `kind` or `argb`, moved to its new index together. See
++/// `task-7-report.md` for the captured run.
++Float32List _reorderedInstances(
++    Float32List data, int instanceCount, List<int> order) {
++  final reordered = Float32List(instanceCount * kFloatsPerInstance);
++  for (var i = 0; i < instanceCount; i++) {
++    final from = order[i] * kFloatsPerInstance;
++    final to = i * kFloatsPerInstance;
++    reordered.setRange(to, to + kFloatsPerInstance, data, from);
++  }
++  return reordered;
++}
++
++/// Device pixel ratio [paintFillFixture], [collectFillFixture] and
++/// [renderFillFixture] paint and rasterise at. Not a parameter on any of the
++/// three: none of `fill_order_test.dart`'s three tests needs a second value,
++/// and a shared constant is what keeps `collectFillFixture`'s buffer and
++/// `renderFillFixture`'s raster surface honestly describing the same camera
++/// -- see [paintFillFixture]'s own doc for why the *viewport* the two share
++/// is not a free parameter either.
++const double kFillFixtureDevicePixelRatio = 2.0;
++
++/// Paints [fillFixture] through the real [DraftPainter], camera fit to
++/// [kViewport] -- the same viewport `fillFixture`'s own guard tests
++/// (`fixtures_test.dart`'s `strokeInkInsideFill`) fit to, so the 337-device
++/// -pixel stroke-over-fill overlap that guard already measured is the
++/// overlap this file's helpers paint too, not a second, unmeasured camera.
++///
++/// **Goes through [DraftPainter], not hand-rolled `sink.fillPolygon` /
++/// `sink.circle` calls.** A fill entity only resolves to its boundary's
++/// triangulation by way of `DraftPainter._drawFill` reading
++/// `doc.fills.trianglesFor(boundary)` -- `AddRegionCommand.apply` is what
++/// materialises that triangulation in the first place. A corpus built by
++/// calling sink methods directly, the way `resident_pixel_differential_test
++/// .dart`'s own `_corpus` does for strokes, would never exercise `_drawFill`
++/// at all and this whole plan's fill path would go untested by the pixel
++/// gate. This is the shape [measureResidentColor]'s `corpus` parameter
++/// takes (`void Function(DrawSink sink)`), so it can be handed to that
++/// function directly, as `fill_order_test.dart`'s third test does.
++///
++/// [fillFixture] is rebuilt fresh on every call -- it is a plain function,
++/// not a cached document -- so two calls (the reference sink's pass and the
++/// resident collector's, inside [measureResidentColor]) each paint their own
++/// copy rather than replaying a mutated one.
++void paintFillFixture(DrawSink sink) {
++  final doc = fillFixture();
++  final camera = ViewportTransform.fit(doc.extents, kViewport);
++  final index = SpatialIndex(doc);
++  final resolver = DocumentStyleResolver(doc);
++  DraftPainter(document: doc, index: index, resolver: resolver)
++      .paint(sink, camera, kViewport);
++  index.dispose();
++}
++
++/// [paintFillFixture], collected into a fresh [GeometryCollector] instead of
++/// painted straight to an arbitrary sink, so a caller can read `.data` and
++/// `.instanceCount` directly. `fill_order_test.dart`'s first test -- the
++/// corpus's own proof that a stroke is emitted after a fill, without which
++/// the rest of that file would pass vacuously -- reads the walk order this
++/// returns.
++GeometryCollector collectFillFixture() {
++  final collector = GeometryCollector(
++      pixelsPerPaperMm: kLogicalPixelsPerMm,
++      devicePixelRatio: kFillFixtureDevicePixelRatio);
++  paintFillFixture(collector);
++  return collector;
++}
++
++/// Renders [fillFixture] through the resident arm ONLY -- the collector's
++/// buffer, optionally reordered by [permute] exactly as
++/// [measureResidentColor]'s own `permute` reorders it (both go through
++/// [_reorderedInstances]), expanded by [expandInstances] and rasterised.
++/// **No reference-sink render happens here.**
++///
++/// This is deliberately narrower than [measureResidentColor]:
++/// `fill_order_test.dart`'s second test asks only whether reordering the
++/// SAME arm's own buffer moves a pixel at all -- a question the resident arm
++/// answers on its own, with nothing to compare against. [measureResidentColor]
++/// is what compares the result to the reference, in that file's third test.
++TriangleRasterizer renderFillFixture(
++    {List<int> Function(List<int> order)? permute}) {
++  final collector = collectFillFixture();
++  var data = collector.data;
++  final instanceCount = collector.instanceCount;
++  if (permute != null) {
++    final order = permute(List<int>.generate(instanceCount, (i) => i));
++    data = _reorderedInstances(data, instanceCount, order);
++  }
++  final expanded = expandInstances(
++      data,
++      instanceCount,
++      Transform2.scale(
++          kFillFixtureDevicePixelRatio, kFillFixtureDevicePixelRatio),
++      dashScale: 1.0);
++  final w = (kViewport.width * kFillFixtureDevicePixelRatio).round();
++  final h = (kViewport.height * kFillFixtureDevicePixelRatio).round();
++  return TriangleRasterizer(w, h)
++    ..observe(expanded.positions, expanded.colors, dash: expanded.dashVaryings);
++}
++
++/// Counts device pixels where [a] and [b] disagree, on the packed colour --
++/// not coverage. A plain `!=` on each pixel: a pixel both rasterisations
++/// inked, but with a different last-write-wins colour, counts as differing
++/// here even though a coverage instrument like [ResidentAgreement] would
++/// call the two identical. That is the whole point of this comparison --
++/// `fill_order_test.dart`'s second test asks whether a permutation of the
++/// fill-fixture buffer moves a pixel, and on this corpus (a stroke that
++/// crosses a fill) the strokes' union of covered pixels is exactly the same
++/// either way; only which primitive is on top, and therefore which colour
++/// survives, can move.
++int countDifferingPixels(TriangleRasterizer a, TriangleRasterizer b) {
++  assert(
++      a.pixels.length == b.pixels.length,
++      'countDifferingPixels compares two rasterisations of the same corpus '
++      'at the same surface size; a length mismatch means the caller '
++      'rendered them at two different sizes');
++  var differing = 0;
++  for (var i = 0; i < a.pixels.length; i++) {
++    if (a.pixels[i] != b.pixels[i]) differing++;
++  }
++  return differing;
++}

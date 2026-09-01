@@ -1,0 +1,303 @@
+# Review package: 6c1b980..HEAD
+
+## Commits
+5074475 feat(gpu): the vertex shader draws a fill triangle
+
+## Files changed
+ .../assets/shaders/cad.shaderbundle                | Bin 34304 -> 37200 bytes
+ .../lib/src/gpu/resident_geometry.dart             |  17 +++++
+ .../jet_cad_2d_flutter/shaders/cad_stroke.vert     |  22 ++++++-
+ .../test/gpu/instance_expander_test.dart           |  69 +++++++++++++++++++++
+ .../test/support/instance_expander.dart            |  21 ++++++-
+ 5 files changed, 127 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle b/packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle
+index c443fbf..cea47f1 100644
+Binary files a/packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle and b/packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle differ
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+index 521986a..ca6b091 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+@@ -56,20 +56,37 @@ class ResidentGeometry {
+   /// cannot be told apart by `corner`. The weight vector selects one of
+   /// `(V, A, B, M)` per vertex, and the shader reads the position as
+   /// `w.x*V + w.y*A + w.z*B + w.w*M` — no float-equality test on an index,
+   /// which ES 100 makes unpleasant.
+   ///
+   /// Triangle 0 is `(V, A, B)` and triangle 1 is `(A, M, B)`. Both wind
+   /// **either way** depending on the turn direction, because `_emitJoin`
+   /// flips the outer side with the sign of the cross product — which is why
+   /// `GpuDrawBackend.render` pins `CullMode.none`.
+   ///
++  /// **A fill (Plan D's Ruling D1) reads this same table, with its own role
++  /// mapping.** A fill has only three points, not a join's four, so `M` is
++  /// folded onto `A` rather than computed:
++  ///
++  /// | role | join reads      | fill reads |
++  /// |------|------------------|------------|
++  /// | V    | the corner       | `p0`       |
++  /// | A    | the incoming leg | `p1`       |
++  /// | B    | the outgoing leg | `p2`       |
++  /// | M    | the miter tip    | `p1` (== A)|
++  ///
++  /// Triangle 0 is therefore `(p0, p1, p2)` — the fill's real triangle — and
++  /// triangle 1 is `(p1, p1, p2)` — zero area, so it rasterises nothing. A
++  /// reader who has only seen the join-branch explanation above would not
++  /// know this table is shared with a fourth kind; this paragraph is that
++  /// pointer.
++  ///
+   /// `@visibleForTesting`: no test can reach this data through `create`
+   /// itself (it runs only with a real GPU context), so it is hoisted here to
+   /// be asserted directly by a plain `flutter test`.
+   @visibleForTesting
+   static const List<double> kCornerVertices = <double>[
+     // corner.x corner.y | join_weight V, A, B, M
+     0, -1, /*  */ 1, 0, 0, 0, // triangle 0, vertex 0 -> V
+     0, 1, /*   */ 0, 1, 0, 0, // triangle 0, vertex 1 -> A
+     1, -1, /*  */ 0, 0, 1, 0, // triangle 0, vertex 2 -> B
+     1, -1, /*  */ 0, 1, 0, 0, // triangle 1, vertex 0 -> A
+diff --git a/packages/jet_cad_2d_flutter/shaders/cad_stroke.vert b/packages/jet_cad_2d_flutter/shaders/cad_stroke.vert
+index 0b8226f..9affc7e 100644
+--- a/packages/jet_cad_2d_flutter/shaders/cad_stroke.vert
++++ b/packages/jet_cad_2d_flutter/shaders/cad_stroke.vert
+@@ -10,20 +10,26 @@
+ // instance buffer holds a centreline, a corner or a centre in collection
+ // space plus a half-width in device pixels; expanding any of it at collection
+ // time would thicken the drawing with the camera. That is why joins are a
+ // kind and not collector geometry: a miter is a function of the live
+ // half-width.
+ //
+ // **`test/support/instance_expander.dart` is this file, in Dart.** It is what
+ // the suite can actually run. Any edit here that is not mirrored there is a
+ // divergence no test in this package can see -- change them together.
+ //
++// **A fill is the one kind that expands nothing.** Its three corners are
++// projected and used; `half_width` is zero and is not read. The six-vertex
++// corner table is reused unchanged: `join_weight`'s V, A and B select the
++// three corners and M is folded onto A, so the second triangle is
++// degenerate and rasterises nothing (Plan D's Ruling D1).
++//
+ // **Dashes are decided here and tested one line away.** The vertex stage
+ // turns the instance's `dash` quad into a single varying, `t`, which is the
+ // pattern-space coordinate at this vertex; the fragment stage keeps the
+ // fragment when `fract(t)` lands inside the element's own extent. `t` is
+ // measured in COLLECTION units, and the live camera does not appear in it at
+ // all: the reference's on-screen period is proportional to the camera scale
+ // (`draft_painter.dart`'s `_dashScale` folds in `toScreen.scaleMagnitude`)
+ // and so is the distance along the primitive, so the ratio is scale-free.
+ // The camera reaches this file for one purpose only -- deciding whether the
+ // pattern has collapsed to solid.
+@@ -144,28 +150,42 @@ void main() {
+           }
+         }
+       }
+ 
+       px = join_weight.x * v + join_weight.y * a + join_weight.z * b +
+            join_weight.w * m;
+     }
+     // `along` stays 0: every vertex of a join wedge sits at the corner, so
+     // the whole wedge is tested at the phase stored for that corner.
+ 
+-  } else {
++  } else if (kind < 2.5) {
+     // kKindPoint: a square of the stroke's width centred on p0. Both axes
+     // are expanded here, in device pixels, so the dot stays square and stays
+     // the same size at every zoom -- which is what the reference gets for
+     // free by computing its `+/- half` in device space. A point is never
+     // dashed.
+     vec2 c = to_pixels(p0);
+     px = c + vec2((corner.x * 2.0 - 1.0) * half_width, corner.y * half_width);
++
++  } else {
++    // kKindFill: one triangle of a pre-triangulated fill. Nothing is
++    // expanded -- a fill has no width -- so `half_width` is not read here at
++    // all. `join_weight` selects the corner: V -> p0, A -> p1, B -> p2, and
++    // M folded onto p1, which makes the second triangle (A, M, B) =
++    // (p1, p1, p2) degenerate.
++    vec2 a0 = to_pixels(p0);
++    vec2 a1 = to_pixels(p1);
++    vec2 a2 = to_pixels(p2);
++    px = join_weight.x * a0 + (join_weight.y + join_weight.w) * a1 +
++         join_weight.z * a2;
++    // `along` stays 0 and `dash` is all zeros on a fill, so the tail's
++    // `period > 0.0` test fails and `v_dash` keeps its solid sentinel.
+   }
+ 
+   gl_Position = vec4(px / frame_info.half_viewport, 0.0, 1.0);
+   v_color = color;
+ 
+   // The dash decision. `dash.x` is signed: zero is solid, and a negative
+   // value marks the one instance per primitive that draws solid when the
+   // pattern collapses.
+   v_dash = vec3(0.0, -1.0, 0.0);
+   float period = abs(dash.x);
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart b/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
+index 1f881b9..343a458 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
+@@ -326,20 +326,89 @@ void main() {
+     // corner (1,-1): px = b - normal*4 = (210 + 4/sqrt17, 60 - 16/sqrt17)
+     final sqrt17 = math.sqrt(17);
+     expect(out.positions[0], closeTo(10 + 4 / sqrt17, 1e-3));
+     expect(out.positions[1], closeTo(10 - 16 / sqrt17, 1e-3));
+     expect(out.positions[2], closeTo(10 - 4 / sqrt17, 1e-3));
+     expect(out.positions[3], closeTo(10 + 16 / sqrt17, 1e-3));
+     expect(out.positions[4], closeTo(210 + 4 / sqrt17, 1e-3));
+     expect(out.positions[5], closeTo(60 - 16 / sqrt17, 1e-3));
+   });
+ 
++  test('a fill expands to its three corners and one degenerate triangle', () {
++    final data = Float32List(kFloatsPerInstance);
++    writeFill(data, 0,
++        x0: 10, y0: 10, x1: 40, y1: 12, x2: 25, y2: 38, argb: 0xFF2E7D32);
++    final e = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
++
++    // Triangle 0 is (p0, p1, p2), in that vertex order.
++    expect(e.positions[0], closeTo(10, 1e-6));
++    expect(e.positions[1], closeTo(10, 1e-6));
++    expect(e.positions[2], closeTo(40, 1e-6));
++    expect(e.positions[3], closeTo(12, 1e-6));
++    expect(e.positions[4], closeTo(25, 1e-6));
++    expect(e.positions[5], closeTo(38, 1e-6));
++
++    // Triangle 1 is (p1, p1, p2): zero area, so it rasterises nothing.
++    final area = (e.positions[8] - e.positions[6]) *
++            (e.positions[11] - e.positions[7]) -
++        (e.positions[9] - e.positions[7]) * (e.positions[10] - e.positions[6]);
++    expect(area, 0.0,
++        reason: 'the second triangle of a fill instance must be degenerate');
++  });
++
++  test('a fill is not expanded by a half-width, at any camera', () {
++    // The defect this catches: a fill routed through the stroke branch, or a
++    // fill branch that read `half_width`. Either one grows the triangle by a
++    // device-pixel margin, so its corners move away from the projected
++    // points -- and the amount would change with the camera.
++    final data = Float32List(kFloatsPerInstance);
++    writeFill(data, 0,
++        x0: 10, y0: 10, x1: 40, y1: 12, x2: 25, y2: 38, argb: 0xFF2E7D32);
++    // Deliberately poison the half-width slot: a correct fill branch ignores
++    // it. `writeFill` writes zero there, so without this the assertion could
++    // not tell "ignored" from "zero".
++    data[InstanceFieldOffset.halfWidth] = 9.0;
++
++    final t = Transform2.translation(120, -35)
++        .multiply(Transform2.rotation(0.4))
++        .multiply(Transform2.scale(1.7, 0.6));
++    final e = expandInstances(data, 1, t, dashScale: 1.0);
++    expect(e.positions[0], closeTo(t.a * 10 + t.c * 10 + t.e, 1e-4));
++    expect(e.positions[1], closeTo(t.b * 10 + t.d * 10 + t.f, 1e-4));
++  });
++
++  test('a fill is solid: the dash test never runs on it', () {
++    final data = Float32List(kFloatsPerInstance);
++    writeFill(data, 0,
++        x0: 10, y0: 10, x1: 40, y1: 12, x2: 25, y2: 38, argb: 0xFF2E7D32);
++    final e = expandInstances(data, 1, Transform2.identity(), dashScale: 0.01);
++    for (var v = 0; v < ResidentGeometry.cornerVertexCount; v++) {
++      expect(e.dashVaryings[v * 3 + 1], lessThan(0.0),
++          reason: 'a negative fracStart is the solid sentinel; a fill must '
++              'carry it at every camera, collapse scale included');
++    }
++  });
++
++  test('a point is still a point after the fill branch lands', () {
++    // The regression this guards: adding `else { fill }` without narrowing
++    // the point branch to `else if (kind < 2.5)` draws every fill as a
++    // one-pixel square -- or, with the branches swapped, every point as a
++    // triangle. Both directions are silent.
++    final data = Float32List(kFloatsPerInstance);
++    writePoint(data, 0, x: 20, y: 30, halfWidth: 4, argb: 0xFF102030);
++    final e = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
++    final xs = <double>[for (var v = 0; v < 6; v++) e.positions[v * 2]];
++    final ys = <double>[for (var v = 0; v < 6; v++) e.positions[v * 2 + 1]];
++    expect(xs.reduce(math.max) - xs.reduce(math.min), closeTo(8, 1e-6));
++    expect(ys.reduce(math.max) - ys.reduce(math.min), closeTo(8, 1e-6));
++  });
++
+   test('cad_stroke.vert still carries the three renumber-prone constants', () {
+     // Partial net, not a substitute for Ruling B6's human diff: this pins
+     // the three literals a shader edit is most likely to silently renumber
+     // (`instance_record.dart`'s doc explains why the values and order of
+     // `kKindStroke`/`kKindJoin`/`kKindPoint` are load-bearing, and this
+     // file's own `kExpanderMinMiterCosine` is the fourth, Dart-side, copy
+     // of the miter-limit literal). It reads the GLSL as text and checks
+     // for the constants, not the arithmetic around them -- a change to the
+     // *formula* that keeps these three literals untouched (for example,
+     // Task 8's own M-B5/M-B6 mutations) is invisible to this test and
+diff --git a/packages/jet_cad_2d_flutter/test/support/instance_expander.dart b/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
+index af74813..1c5778b 100644
+--- a/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
++++ b/packages/jet_cad_2d_flutter/test/support/instance_expander.dart
+@@ -15,20 +15,28 @@
+ /// It takes an instance buffer and a transform. It must never read the
+ /// collector: the collector's output is the input, which is exactly what the
+ /// GPU sees.
+ ///
+ /// **Task 8 added the dash varying, transcribed the same way as everything
+ /// else here.** `ExpandedTriangles.dashVaryings` is `v_dash` -- `(t,
+ /// fracStart, fracEnd)` per vertex -- and [expandInstances] takes the same
+ /// `dashScale` `cad_stroke.vert` reads off `frame_info.dash_scale`. Read the
+ /// dash block in `expandInstances` beside the shader's own tail, in the same
+ /// order: the sentinel, the period test, the collapse override.
++///
++/// **Plan D's Task 5 added the fill branch, transcribed the same way.** A
++/// fill instance (`kKindFill`) reads no `halfWidth` and expands nothing: its
++/// three corners are projected and selected by `join_weight`'s V, A and B,
++/// with M folded onto A so the six-vertex corner table's second triangle is
++/// degenerate. The point branch is narrowed to `kind < 2.5` in both files so
++/// the fill branch's bare `else` cannot swallow it -- see the branch's own
++/// comment below for the failure that guards against.
+ library;
+ 
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
+ 
+ /// The shader's `kMinMiterCosine` literal, mirrored so a test can assert it
+@@ -247,29 +255,40 @@ ExpandedTriangles expandInstances(
+           // would *disagree*, not agree: the reference's triangle 0 never
+           // reads `m`, so it would stay finite while this triangle 0 went
+           // NaN -- a differential would catch that. What it cannot catch is
+           // a regression to *this* arithmetic while the guard still bounds
+           // `reach`, because nothing exercises the poisoning branch to
+           // begin with.) Only a device run, or a change to the guard, would
+           // catch a change here today.
+           px = c.wv * vx + c.wa * ax + c.wb * bx + c.wm * mx;
+           py = c.wv * vy + c.wa * ay + c.wb * by + c.wm * my;
+         }
+-      } else {
++      } else if (kind < 2.5) {
+         // kKindPoint: a square of the stroke's width centred on p0. Both
+         // axes are expanded here, in device pixels, so the dot stays square
+         // and stays the same size at every zoom -- which is what the
+         // reference gets for free by computing its `+/- half` in device
+         // space.
+         final cx = toX(x0, y0), cy = toY(x0, y0);
+         px = cx + (c.x * 2.0 - 1.0) * halfWidth;
+         py = cy + c.y * halfWidth;
++      } else {
++        // kKindFill: one triangle of a pre-triangulated fill. Nothing is
++        // expanded -- a fill has no width -- so `halfWidth` is not read here
++        // at all. `join_weight` selects the corner: V -> p0, A -> p1,
++        // B -> p2, and M folded onto p1, which makes the second triangle
++        // (A, M, B) = (p1, p1, p2) degenerate.
++        final a0x = toX(x0, y0), a0y = toY(x0, y0);
++        final a1x = toX(x1, y1), a1y = toY(x1, y1);
++        final a2x = toX(x2, y2), a2y = toY(x2, y2);
++        px = c.wv * a0x + (c.wa + c.wm) * a1x + c.wb * a2x;
++        py = c.wv * a0y + (c.wa + c.wm) * a1y + c.wb * a2y;
+       }
+ 
+       final vi = (i * cornerVertexCount + v);
+       positions[vi * 2] = px;
+       positions[vi * 2 + 1] = py;
+       colors[vi] = argb;
+ 
+       // The dash decision. `dash.x` (here `dashPeriodSigned`) is signed:
+       // zero is solid, and a negative value marks the one instance per
+       // primitive that draws solid when the pattern collapses.

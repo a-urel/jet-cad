@@ -1,0 +1,316 @@
+# Review package: d6d5c58..HEAD
+
+## Commits
+eabca9e docs: correct STATUS.md's main position and round out Plan D's notes
+3b5e55b fix(gpu): extend the shader/Dart-transcription guard to the fill threshold
+
+## Files changed
+ STATUS.md                                          | 25 ++++++++++++++--------
+ .../superpowers/notes/2026-09-01-plan-d-results.md | 16 ++++++++++++++
+ docs/superpowers/notes/plan-d-mutation-log.md      |  4 +++-
+ .../lib/src/gpu/resident_geometry.dart             |  8 +++----
+ .../test/gpu/instance_expander_test.dart           | 20 +++++++++++------
+ .../test/gpu/resident_pixel_differential_test.dart |  6 +++---
+ .../test/support/gpu_comparison.dart               |  8 +++++++
+ 7 files changed, 64 insertions(+), 23 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 4f7a480..e7ae109 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,30 +1,37 @@
+ # jet-cad — project status
+ 
+ **Last updated:** 2026-09-01
+-**Verified against:** `main` at `3a61b45` — the merge commit for **Plan C of
+-the GPU-resident render backend**, the third of that spec's seven plans.
+-`main` itself is unchanged since that merge. **Plan D (fills), the fourth
+-plan, is IN FLIGHT on `plan-d/fills`**, cut from `main` at `bde9196`, nine
+-tasks at `bde9196..36dfb7e` plus this task's own commit — **not yet
+-merged.** Before Plan C, Plan B merged at `72b162d` (eleven tasks,
++**Verified against:** `main` at `bde9196`. `main` is **not** unchanged since
++Plan C's merge commit `3a61b45`: two commits landed after it — a codec fix
++(`5069a6e`, `_loadHeader` now carries `globalLinetypeScale`) and its merge
++(`e347238`), which together add exactly one new test to `packages/jet_cad_2d`
++(`json_codec_test.dart`'s `every header field survives save and load`) — and
++Plan D's plan document is the commit after that, `bde9196` itself. **Plan D
++(fills), the fourth plan, is IN FLIGHT on `plan-d/fills`**, cut from `main` at
++`bde9196`, nine tasks at `bde9196..36dfb7e` plus this task's own commit —
++**not yet merged.** Before Plan C, Plan B merged at `72b162d` (eleven tasks,
+ `5c94e11..4892a01`), Plan A at `cd5bc98` (nine tasks) and Plan 3i ran
+ directly on `main` at `468e310..dbc31e8`.
+ 
+ **Every suite count below for `packages/jet_cad_2d`, `packages/jet_cad_2d_flutter`
+ and `apps/dev_harness_2d` was produced by running that suite on
+ `plan-d/fills` on 2026-09-01** — `jet_cad_2d` **798**, `jet_cad_2d_flutter`
+ **565** (1 pre-existing skip), `dev_harness_2d` **73**, analyze and format
+ clean in all three — not by reading a report, and not by trusting the
+-branch's own green run. A green run only proves the tree it ran on. `main`'s
+-own counts are unchanged from Plan C's merge (797 / 540 / 72) until Plan D
+-merges.
++branch's own green run. A green run only proves the tree it ran on. **The
++`jet_cad_2d` figure of 798 is inherited from `main` at `bde9196`, not
++produced by Plan D — Plan D touches nothing under `packages/jet_cad_2d` at
++all** (confirm with `git diff --stat bde9196..plan-d/fills -- packages/jet_cad_2d/`,
++which is empty); the +1 over Plan C's 797 is the codec-fix test above. `main`'s
++own counts are 798 / 540 / 72 as of `bde9196` and unchanged since — `jet_cad_2d_flutter`
++and `dev_harness_2d` did not move past Plan C's merge — until Plan D merges.
+ 
+ **Plan D (fills) is DONE on its branch. Exit gate: 8 of 9 — criterion 8 is
+ OWED**, in those words: this task's controller ruling (D-9a) forbids
+ simulating a device run or a human's visual judgement, so no device run
+ happened this session and none could have. **The window-check debt now
+ stands at FOURTEEN checks across three plans** — Plan B's four (owed since
+ `72b162d`), Plan C's five (owed since `18330a9`), and Plan D's own five, all
+ new — discharged by one harness run. See [Resume here](#resume-here).
+ 
+ ### What Plan D's own premises measured false
+diff --git a/docs/superpowers/notes/2026-09-01-plan-d-results.md b/docs/superpowers/notes/2026-09-01-plan-d-results.md
+index 2f087a7..739ea91 100644
+--- a/docs/superpowers/notes/2026-09-01-plan-d-results.md
++++ b/docs/superpowers/notes/2026-09-01-plan-d-results.md
+@@ -214,20 +214,31 @@ runs exactly) and 120 boundary-only, 280 entities in all.
+ matched-parameter figure** (106,636 − 105,076 = 1,560; 6.51 − 6.41 = 0.10
+ MB) — 160 of those instances are the fills themselves (2 triangles per
+ filled room, 80 filled rooms), the remaining ~1,400 are the 120 unfilled
+ rooms' own boundary strokes and joins, which exist in this corpus only
+ because `_addFillRegions` adds them alongside the filled ones to exercise
+ both the fillable-and-filled and the fillable-but-not path. **The delta this
+ plan's fills add to Plan C's own measured buffer is small relative to the
+ 6.41 MB baseline** and stays comfortably inside the budget at either set of
+ spike knobs measured here.
+ 
++**This corpus is 160 fill instances out of 114,717 — 0.14% — and the PASS
++above is a measurement of *that* mix, not of fills in general.** Ruling D7
++records that a fill instance wastes ten of its sixteen floats — 40 of the
++record's 64 bytes — and names Task 9, this measurement, as the way that
++waste gets priced. At 0.14% of the buffer, the wasted floats cost about 6.25
++KB here (160 × 40 bytes); a corpus with a materially higher fill fraction
++would pay the same per-instance waste at a proportionally larger share of
++the 8 MB budget, and this PASS says nothing about where that corpus would
++land. Read the 6.51 MB and 7.00 MB figures as "fills at this corpus's fill
++fraction fit," not as "fills fit."
++
+ `SPIKE_FILLS`'s own default (`false`) leaves `spikeDocument()` calling
+ `generateDocument` exactly as it did before this task, with no call to
+ `_addFillRegions` — every number any earlier plan took through this harness
+ stays reproducible unchanged.
+ 
+ ---
+ 
+ ## Criterion 7 — mutation testing
+ 
+ **12 of 12 pre-committed mutations fired; 11 killed on the first shot, 1
+@@ -357,20 +368,25 @@ fourteen.** None has been discharged as of this note.
+ 4. **Nothing thickens** as you zoom in — no antialiasing has landed.
+ 
+ ---
+ 
+ ## Exit gate — 8 of 9
+ 
+ Pre-committed in the plan. A miss would be recorded as a miss with its
+ number; there is no miss to record — the one unmet row is OWED, not failed,
+ and stays that way until a human runs the harness.
+ 
++**Criteria 1 through 4 are measured through the Dart transcription
++(`test/support/instance_expander.dart`) plus `TriangleRasterizer`, not on a
++GPU** — the same qualifier Criterion 6's buffer measurement carries above,
++restated here because the table is read on its own.
++
+ | # | criterion | verdict |
+ |---|---|---|
+ | 1 | record-level differential, fill corpus, exact | **PASS** — `collector_differential_test.dart`, all instances match on `kind`, `argb`, three points |
+ | 2 | pixel differential, colour, fill corpus and stroke corpus both | **PASS** — both 100.000% within 2, `overEight = 0` |
+ | 3 | anti-vacuity | **PASS** — `referenceInk` 8,183 / 393,051, both `> 5000`; control arm 0.000% |
+ | 4 | spec criterion 4: kind-sorted vs. walk order | **PASS** — 100.000% in walk order, 97.635% under permutation (`< 0.995`), differing = 9,297 (gate `> 200`) |
+ | 5 | `skippedOps` counts text alone, fill corpus | **PASS** — `skippedOps = 1` on a corpus with text, `= 0` on a fills-only one, `= 0` on this task's own 10,000-entity fills-on corpus |
+ | 6 | resident geometry `<= 8 MB`, 10,000 entities with fills, measured | **PASS** — **6.51 MB** at 106,636 instances (matched to Plan C's own parameters), **7.00 MB** at 114,717 instances (default knobs); both against 8.00 MB |
+ | 7 | 12 of 12 mutations fire, survivors declared with a reason | **PASS** — 12/12 fired, 11 killed first shot, M-D4 survived its first shot for a real, declared reason and was killed after the fix |
+ | 8 | a human looks at the window | **OWED** — Plan D's five, plus Plan B's four and Plan C's five, fourteen checks total, none discharged |
+diff --git a/docs/superpowers/notes/plan-d-mutation-log.md b/docs/superpowers/notes/plan-d-mutation-log.md
+index fa9bcef..b74f46b 100644
+--- a/docs/superpowers/notes/plan-d-mutation-log.md
++++ b/docs/superpowers/notes/plan-d-mutation-log.md
+@@ -241,21 +241,23 @@ its `/tmp` backup.
+ ```
+ 
+ **Verdict: KILLED (after the new test was added).** `instance_expander.dart`
+ was then restored from its `/tmp` backup; the new assertions in
+ `instance_expander_test.dart` are kept, and are part of this task's commit.
+ 
+ ---
+ 
+ ## M-D5 — the point branch stays `else` and the fill branch is added before it
+ 
+-**File:** `test/support/instance_expander.dart`
++**File:** `test/support/instance_expander.dart` (Dart transcription, same
++reason as M-D3 and M-D4 — `flutter test` has no GPU, so this stands in for
++`shaders/cad_stroke.vert` itself).
+ 
+ **Diff applied:**
+ 
+ ```diff
+        } else if (kind < 2.5) {
+ -        // kKindPoint: a square of the stroke's width centred on p0. ...
+ -        final cx = toX(x0, y0), cy = toY(x0, y0);
+ -        px = cx + (c.x * 2.0 - 1.0) * halfWidth;
+ -        py = cy + c.y * halfWidth;
+ -      } else {
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+index ca6b091..66838e8 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+@@ -123,25 +123,25 @@ class ResidentGeometry {
+   /// buffer" — a buffer-relative offset, not a global one). Binding `corner`
+   /// from its own buffer at slot 0 and the instance record from its own
+   /// buffer at slot 1 means the instance attributes' offsets are the
+   /// record's *own* offsets (`instance_record.dart`'s `[kind, halfWidth, x0,
+   /// y0, x1, y1, x2, y2, r, g, b, a, dashPeriod, dashPhase, dashFracStart,
+   /// dashFracEnd]`), not the reflected ones shifted by `corner`'s 8 bytes.
+   /// This is the same two-buffer split the spike used
+   /// (`git show 8c82208:apps/dev_harness_2d/lib/gpu_arm.dart:379-386` --
+   /// that file was deleted in Task 9, before which it lived at this path).
+   ///
+-  /// **Carries three kinds, not one**, since Plan B: slot 0 still holds a
++  /// **Carries four kinds, not one**, since Plan D: slot 0 still holds a
+   /// single quad-corner buffer, but the instance buffer's records now
+-  /// interleave strokes, joins and points (`instance_record.dart`'s
+-  /// `kKindStroke`/`kKindJoin`/`kKindPoint`), so this one layout describes
+-  /// every kind's vertex input rather than a stroke-only one.
++  /// interleave strokes, joins, points and fills (`instance_record.dart`'s
++  /// `kKindStroke`/`kKindJoin`/`kKindPoint`/`kKindFill`), so this one layout
++  /// describes every kind's vertex input rather than a stroke-only one.
+   ///
+   /// **`kind_half` and `dash`, not `kind`/`half_width` split and no dash at
+   /// all, since Plan C's Task 4.** `kind` and `halfWidth` are read as one
+   /// `vec2` attribute (Ruling C6 — GLSL ES 100 guarantees `gl_MaxVertexAttribs`
+   /// no lower than 8 and no higher either, and the new `dash` quad is the
+   /// eighth), and the four dash floats are floats 13–16 of the record
+   /// (`InstanceFieldOffset.dashPeriod` through `dashFracEnd`), i.e. bytes
+   /// 48–63, read as one `vec4`. `shaders/cad_stroke.vert` and
+   /// `assets/shaders/cad.shaderbundle` have declared `kind_half` and `dash`
+   /// to match since Task 8 regenerated the bundle.
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart b/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
+index 2505b06..dd79639 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/instance_expander_test.dart
+@@ -407,40 +407,48 @@ void main() {
+     // triangle. Both directions are silent.
+     final data = Float32List(kFloatsPerInstance);
+     writePoint(data, 0, x: 20, y: 30, halfWidth: 4, argb: 0xFF102030);
+     final e = expandInstances(data, 1, Transform2.identity(), dashScale: 1.0);
+     final xs = <double>[for (var v = 0; v < 6; v++) e.positions[v * 2]];
+     final ys = <double>[for (var v = 0; v < 6; v++) e.positions[v * 2 + 1]];
+     expect(xs.reduce(math.max) - xs.reduce(math.min), closeTo(8, 1e-6));
+     expect(ys.reduce(math.max) - ys.reduce(math.min), closeTo(8, 1e-6));
+   });
+ 
+-  test('cad_stroke.vert still carries the three renumber-prone constants', () {
++  test('cad_stroke.vert still carries the four renumber-prone constants', () {
+     // Partial net, not a substitute for Ruling B6's human diff: this pins
+-    // the three literals a shader edit is most likely to silently renumber
++    // the four literals a shader edit is most likely to silently renumber
+     // (`instance_record.dart`'s doc explains why the values and order of
+-    // `kKindStroke`/`kKindJoin`/`kKindPoint` are load-bearing, and this
+-    // file's own `kExpanderMinMiterCosine` is the fourth, Dart-side, copy
+-    // of the miter-limit literal). It reads the GLSL as text and checks
++    // `kKindStroke`/`kKindJoin`/`kKindPoint`/`kKindFill` are load-bearing,
++    // and this file's own `kExpanderMinMiterCosine` is the fifth, Dart-side,
++    // copy of the miter-limit literal). It reads the GLSL as text and checks
+     // for the constants, not the arithmetic around them -- a change to the
+-    // *formula* that keeps these three literals untouched (for example,
++    // *formula* that keeps these four literals untouched (for example,
+     // Task 8's own M-B5/M-B6 mutations) is invisible to this test and
+     // remains a human diff against `instance_expander.dart`.
+     final source = File('shaders/cad_stroke.vert').readAsStringSync();
+     expect(
+       RegExp(r'kMinMiterCosine\s*=\s*-0\.875').hasMatch(source),
+       isTrue,
+       reason: 'the miter-limit literal instance_expander.dart mirrors as '
+           'kExpanderMinMiterCosine',
+     );
+     expect(
+       RegExp(r'kind\s*<\s*0\.5').hasMatch(source),
+       isTrue,
+       reason: 'the stroke/join dispatch threshold',
+     );
+     expect(
+       RegExp(r'kind\s*<\s*1\.5').hasMatch(source),
+       isTrue,
+       reason: 'the join/point dispatch threshold',
+     );
++    expect(
++      RegExp(r'kind\s*<\s*2\.5').hasMatch(source),
++      isTrue,
++      reason: 'the point/fill dispatch threshold -- without it a reverted '
++          "`else` draws every fill as a point, or the reverse, and every "
++          'pixel and expander test in this package runs through the Dart '
++          'transcription, so a GLSL-only regression here turns nothing red',
++    );
+   });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart b/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart
+index 407414a..b3fcdef 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/resident_pixel_differential_test.dart
+@@ -270,23 +270,23 @@ void main() {
+     // both lines above.
+     expect(r.referenceInk, greaterThan(5000), reason: r.toString());
+   });
+ 
+   test('the colour measurement can actually fail', () {
+     // The control arm Plan 3i's Ruling 14 requires: an instrument whose
+     // failing case is never exercised reads 1.00 and proves nothing. Here
+     // the resident arm is fed a deliberately recoloured buffer -- every
+     // written colour has 0x00202020 added to it (R, G and B each up by 32),
+     // chosen against this corpus's own `_thick`/`_hairline` colour
+-    // (0xFF102030, R=0x30 G=0x20 B=0x10) so none of the three channels
+-    // carries into its neighbour: 0x30+0x20=0x50, 0x20+0x20=0x40,
+-    // 0x10+0x20=0x30, each comfortably inside a byte and each a distance of
++    // (0xFF102030, 0xAARRGGBB, so R=0x10 G=0x20 B=0x30) so none of the three
++    // channels carries into its neighbour: 0x10+0x20=0x30, 0x20+0x20=0x40,
++    // 0x30+0x20=0x50, each comfortably inside a byte and each a distance of
+     // exactly 32 from the reference, 16x past the `<= 2` threshold and 4x
+     // past the `<= 8` one -- so this is not a threshold nudged to make the
+     // assertion pass, it is the same tint the brief's own sample names.
+     final r = measureResidentColor(_corpus,
+         size: _size,
+         devicePixelRatio: _dpr,
+         pixelsPerPaperMm: _ppmm,
+         debugTintResident: 0x00202020);
+     expect(r.withinTwoFraction, lessThan(0.995), reason: r.toString());
+   });
+diff --git a/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart b/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
+index ba7525c..a21472a 100644
+--- a/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
++++ b/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
+@@ -388,20 +388,28 @@ class ResidentColorAgreement {
+ /// instrument can see order at all once a fill is in the corpus.
+ ///
+ /// [debugTintResident] adds its argument to the resident arm's every
+ /// written colour before rasterisation. **Test-only, and it must never
+ /// appear in `lib/`** -- exactly as `TriangleRasterizer
+ /// .debugDisableDashTest` is documented on that field. It exists for one
+ /// reason: an instrument whose failing case is never exercised reads 1.00
+ /// and proves nothing (Plan 3i's Ruling 14, the same ruling
+ /// `debugDisableDashTest` answers). `0` is a no-op -- every ordinary
+ /// measurement passes it implicitly by omission.
++///
++/// **A clean per-channel offset only while no channel carries across a
++/// byte boundary.** The tint is added to the packed `0xAARRGGBB` `Uint32`
++/// as a whole, not lane by lane, so a value picked without checking each
++/// byte against the corpus's own colour can carry from one channel into
++/// its neighbour -- the result stops being "every channel up by N" and
++/// becomes an arbitrary recolouring the caller did not intend. Choose the
++/// tint against the actual colour under test, not in the abstract.
+ ResidentColorAgreement measureResidentColor(
+   void Function(DrawSink sink) corpus, {
+   required Size size,
+   required double devicePixelRatio,
+   required double pixelsPerPaperMm,
+   List<int> Function(List<int> order)? permute,
+   int debugTintResident = 0,
+ }) {
+   final w = (size.width * devicePixelRatio).round();
+   final h = (size.height * devicePixelRatio).round();
