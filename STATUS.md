@@ -1,33 +1,32 @@
 # jet-cad — project status
 
 **Last updated:** 2026-09-01
-**Verified against:** `main` at `bde9196`. `main` is **not** unchanged since
-Plan C's merge commit `3a61b45`: two commits landed after it — a codec fix
-(`5069a6e`, `_loadHeader` now carries `globalLinetypeScale`) and its merge
-(`e347238`), which together add exactly one new test to `packages/jet_cad_2d`
-(`json_codec_test.dart`'s `every header field survives save and load`) — and
-Plan D's plan document is the commit after that, `bde9196` itself. **Plan D
-(fills), the fourth plan, is IN FLIGHT on `plan-d/fills`**, cut from `main` at
-`bde9196`, nine tasks at `bde9196..36dfb7e` plus this task's own commit —
-**not yet merged.** Before Plan C, Plan B merged at `72b162d` (eleven tasks,
+**Verified against:** `main` at `de962bd`. **Plan D (fills), the fourth plan,
+is MERGED**: it ran on `plan-d/fills`, cut from `main` at `bde9196`, nine
+tasks at `bde9196..eabca9e` with its ledger archived at `27b2122`, merged
+`--no-ff` at `de962bd`, branch deleted. The two commits before it on `main`
+were a codec fix (`5069a6e`, `_loadHeader` now carries
+`globalLinetypeScale`) and its merge (`e347238`), which together add exactly
+one test to `packages/jet_cad_2d` (`json_codec_test.dart`'s `every header
+field survives save and load`); `bde9196` is Plan D's own plan document.
+Before that, Plan C merged at `3a61b45`, Plan B at `72b162d` (eleven tasks,
 `5c94e11..4892a01`), Plan A at `cd5bc98` (nine tasks) and Plan 3i ran
 directly on `main` at `468e310..dbc31e8`.
 
-**Every suite count below for `packages/jet_cad_2d`, `packages/jet_cad_2d_flutter`
-and `apps/dev_harness_2d` was produced by running that suite on
-`plan-d/fills` on 2026-09-01** — `jet_cad_2d` **798**, `jet_cad_2d_flutter`
-**565** (1 pre-existing skip), `dev_harness_2d` **73**, analyze and format
-clean in all three — not by reading a report, and not by trusting the
-branch's own green run. A green run only proves the tree it ran on. **The
-`jet_cad_2d` figure of 798 is inherited from `main` at `bde9196`, not
-produced by Plan D — Plan D touches nothing under `packages/jet_cad_2d` at
-all** (confirm with `git diff --stat bde9196..plan-d/fills -- packages/jet_cad_2d/`,
-which is empty); the +1 over Plan C's 797 is the codec-fix test above. `main`'s
-own counts are 798 / 540 / 72 as of `bde9196` and unchanged since — `jet_cad_2d_flutter`
-and `dev_harness_2d` did not move past Plan C's merge — until Plan D merges.
+**Every suite count below was produced by running that suite on the MERGED
+tree at `de962bd` on 2026-09-01** — `jet_cad_2d` **798**,
+`jet_cad_2d_flutter` **565** (1 pre-existing skip), `dev_harness_2d` **73** —
+not by reading a report and not by trusting the branch's own green run. A
+green run only proves the tree it ran on. **The `jet_cad_2d` figure of 798 is
+inherited from `main`, not produced by Plan D — Plan D touches nothing under
+`packages/jet_cad_2d` at all** (confirm with
+`git diff --stat bde9196..27b2122 -- packages/jet_cad_2d/`, which is empty);
+the +1 over Plan C's 797 is the codec-fix test above. Plan D's own additions
+are the +25 in `jet_cad_2d_flutter` (540 → 565) and the +1 in
+`dev_harness_2d` (72 → 73).
 
-**Plan D (fills) is DONE on its branch. Exit gate: 8 of 9 — criterion 8 is
-OWED**, in those words: this task's controller ruling (D-9a) forbids
+**Plan D (fills) is MERGED. Exit gate: 8 of 9 — criterion 8 is
+OWED, and the merge did not discharge it**, in those words: this task's controller ruling (D-9a) forbids
 simulating a device run or a human's visual judgement, so no device run
 happened this session and none could have. **The window-check debt now
 stands at FOURTEEN checks across three plans** — Plan B's four (owed since
@@ -529,9 +528,17 @@ docs/superpowers/
 
 | Location | Branch | State |
 |---|---|---|
-| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and **GPU Plans A and B** merged |
+| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and **GPU Plans A, B, C and D** merged |
 
 **No worktrees. Nothing is in flight.**
+
+`plan-d/fills` was merged `--no-ff` at `de962bd` and deleted (it was at
+`27b2122`), after the full three-package gate was re-run on the merged tree.
+**Its criterion 8 — a human looking at the running window — is still owed and
+merging did not discharge it.** The ledger was archived onto the branch at
+`27b2122` before the workspace was cleared, and is at
+[docs/superpowers/ledgers/2026-09-01-gpu-backend-plan-d-fills/](docs/superpowers/ledgers/2026-09-01-gpu-backend-plan-d-fills/):
+thirty-five files, including `progress.md` with its eleven rulings.
 
 `plan-b/joins-and-hairlines` was merged `--no-ff` at `72b162d` and deleted,
 after the full three-package gate was re-run on the merged tree. **Criterion
@@ -695,9 +702,10 @@ must move the dashes *with* the line, not slide them along it.
 **Plan B's four, still owed:** corners filled, a circle **not** notched at its
 start angle, a square dot, nothing thickening as you zoom.
 
-**Plan C is merged** at `3a61b45` and its branch is deleted; the merge did not
-discharge its criterion. **Plan D is DONE on its own branch, `plan-d/fills`,
-and not yet merged.** Command:
+**Plan C is merged** at `3a61b45` and **Plan D at `de962bd`**; both branches
+are deleted and neither merge discharged its criterion. Command — note the
+`SPIKE_FILLS=true` on the last line, without which the run shows no fills at
+all and Plan D's five checks cannot be made:
 
 ```sh
 cd apps/dev_harness_2d
