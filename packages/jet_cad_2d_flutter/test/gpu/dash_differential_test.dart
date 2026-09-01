@@ -443,33 +443,16 @@ void main() {
     redone.commands.undo();
     _expectSameBuffer(_collect(redone), baseline, 'after redo then undo');
 
-    // **A round-trip defect in `packages/jet_cad_2d`, found by this gate and
-    // deliberately NOT fixed here.** `DraftDocumentCodec.encode` writes
-    // `globalLinetypeScale` into the header map, and
-    // `DocumentHeader.fromJson` parses it back correctly -- but
-    // `json_codec.dart`'s `_loadHeader` then copies only `units`, `scale`,
-    // `importedExtents` and `customVariables` onto the target document and
-    // drops `globalLinetypeScale` on the floor. So saving and loading a
-    // drawing silently resets it to 1.0, and every dashed entity in it
-    // changes its dash length. Nothing caught it before because no save/load
-    // test ever set the field to anything but 1.0 -- the degenerate fixture,
-    // in the engine's own suite.
-    //
-    // `packages/jet_cad_2d` is untouched by this plan, so the defect is
-    // recorded rather than repaired. The assertion below **pins** it: when
-    // somebody fixes `_loadHeader` this expectation goes red and points at
-    // the hand-restore under it as the thing to delete.
+    // Save and load carries the header through too. This arm caught a
+    // `_loadHeader` defect that dropped `globalLinetypeScale` on load and so
+    // rescaled every dashed entity in a saved drawing; the fixture's 1.7 is
+    // what makes the arm able to see it, and json_codec_test.dart's
+    // `every header field survives save and load` now guards the codec side.
     final roundTripped = DraftDocumentCodec.decode(
         DraftDocumentCodec.encode(_polylineOnlyFixture()));
-    expect(roundTripped.header.globalLinetypeScale, 1.0,
-        reason: 'if this now reads 1.7, `_loadHeader` has been fixed -- '
-            'delete the hand-restore below and this expectation with it');
-    roundTripped.header.globalLinetypeScale = 1.7;
-    _expectSameBuffer(
-        _collect(roundTripped),
-        baseline,
-        'after save and load (globalLinetypeScale restored by hand -- see '
-        'the comment above)');
+    expect(roundTripped.header.globalLinetypeScale, 1.7,
+        reason: 'the fixture sets it to 1.7 and load must not reset it');
+    _expectSameBuffer(_collect(roundTripped), baseline, 'after save and load');
 
     final purged = _polylineOnlyFixture();
     purged.commands.execute(RemoveEntityCommand(const Handle(915)));

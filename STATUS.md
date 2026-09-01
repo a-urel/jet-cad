@@ -55,18 +55,25 @@ for the wrong defect in the window.
 contaminated. Contamination inflates times, so the gesture rows passing under
 it is the stronger reading; it does not rescue the rebuild row.
 
-### Plan C found a defect in `packages/jet_cad_2d` and did NOT fix it
+### Plan C found a defect in `packages/jet_cad_2d` — fixed 2026-09-01
 
-**Saving and loading a drawing silently resets `header.globalLinetypeScale`
-to 1.0, so every dashed entity changes its dash length.**
-`DraftDocumentCodec.encode` writes the field and `DocumentHeader.fromJson`
-parses it, but `json_codec.dart`'s `_loadHeader` copies only `units`,
+**Saving and loading a drawing silently reset `header.globalLinetypeScale`
+to 1.0, so every dashed entity changed its dash length.**
+`DraftDocumentCodec.encode` wrote the field and `DocumentHeader.fromJson`
+parsed it, but `json_codec.dart`'s `_loadHeader` copied only `units`,
 `scale`, `importedExtents` and `customVariables` — a one-line omission two
 lines below the `fromJson` call that read the value. Nothing caught it
 because no save/load test in the engine's own suite ever set the field to
-anything but 1.0. `packages/jet_cad_2d` is untouched by this plan, so
-`dash_differential_test.dart` **pins** it: it asserts the decoded value is
-1.0, restores 1.7 by hand, and its `reason` says a fix makes it red.
+anything but 1.0. Plan C left `packages/jet_cad_2d` untouched and **pinned**
+the defect in `dash_differential_test.dart` instead.
+
+Fixed on `fix/header-global-linetype-scale`: `_loadHeader` copies the field,
+and the pin in `dash_differential_test.dart` is gone — that arm now asserts
+1.7 survives the round trip. The guard against the *next* forgotten header
+field is `json_codec_test.dart`'s `every header field survives save and
+load`, which sets every header field off its default and compares the
+**re-encoded header map**, not named fields. Removing the one-line fix makes
+it red.
 
 Results: [2026-08-31-plan-c-results.md](docs/superpowers/notes/2026-08-31-plan-c-results.md).
 Mutation log: [plan-c-mutation-log.md](docs/superpowers/notes/plan-c-mutation-log.md).

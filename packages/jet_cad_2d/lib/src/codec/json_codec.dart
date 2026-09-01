@@ -164,6 +164,7 @@ class DraftDocumentCodec {
     doc.header
       ..units = header.units
       ..scale = header.scale
+      ..globalLinetypeScale = header.globalLinetypeScale
       ..importedExtents = header.importedExtents
       ..customVariables.addAll(header.customVariables);
   }
