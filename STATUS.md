@@ -704,6 +704,23 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
+**Plan E (the text split) is next, and its spec section was rewritten before
+a line of it was planned — 2026-09-04, spec revision 5.** Revision 4 counted
+the split in *draw calls*; a Canvas text draw can only land between two
+*images*, and `asImage()` of one texture shows that texture's final contents
+however many times it is taken, so what revision 4 had actually specified was
+*N+1* viewport-sized render targets at **20 MB each** on a 2× display —
+400–500 MB for the harness corpus's own `textOps=19–24`. Revision 5 keeps one
+render target, draws text through the reference sink's own paragraph path,
+and restores emission order only where later geometry actually covers a label,
+with a **patch** per such label: a rebuild-time classification, a sub-buffer
+per patch, a box-sized pass per frame, composited with `srcATop` so the later
+geometry lands on the label's ink and nowhere else. Read the spec's
+"Text: one render target, and a patch where later geometry covers a label"
+before writing the plan; criterion 11, invariant 1, the budget row, the corpus
+and the mutation list moved with it. **No Plan E plan exists yet** — the next
+unit of work is writing it, from that section, with `superpowers:writing-plans`.
+
 **A human has now looked at the window, informally, and reported the drawing
 correct — 2026-09-01, on the `SPIKE_FILL_SCALE=20` eyeball run.** That is
 written here as exactly what it is and no more: **the fourteen enumerated

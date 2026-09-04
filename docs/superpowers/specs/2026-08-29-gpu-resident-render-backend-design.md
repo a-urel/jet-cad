@@ -1,6 +1,6 @@
 # A GPU-resident render backend — design
 
-**Date:** 2026-08-29. **Status:** design, **revision 4**, not yet a plan.
+**Date:** 2026-08-29. **Status:** design, **revision 5**, not yet a plan.
 **Target scale: 10,000 entities**, set by the human on 2026-08-29.
 **Evidence of record:**
 [the spike note](../notes/2026-08-29-flutter-gpu-backend-spike.md),
@@ -15,6 +15,24 @@ that collection is viewport-culled, so a pan draws into empty buffer. Both are
 fixed below. Revision 3's headline numbers were also wrong in the spec's own
 favour, twice; the corrected figures are in the measurement note and repeated
 here.
+
+**Revision 5 (2026-09-04) corrects the text section, and nothing else.** It
+was found while writing Plan E, before any code: revision 4 counted the text
+split in *draw calls*, and a Canvas text draw cannot land between two draw
+calls into one render target — `Texture.asImage()` of one texture shows that
+texture's final contents however many times it is taken, so *N+1* draw calls
+into one target interleave with nothing. What revision 4 had actually
+specified was *N+1* viewport-sized render targets, **20 MB each** at
+1400 × 900 on a 2× display, which is unaffordable past a handful of labels
+and contradicts its own demand that the criterion-8 corpus contain text. The
+replacement keeps one render target, draws text through the reference sink's
+own paragraph path, and restores emission order only where it is actually
+violated — where geometry emitted *after* a label covers that label — with a
+**patch** per such label. Ordering is exact, memory is bounded by the labels
+that are covered rather than by the labels that exist, and the cost is
+proportional to what overlaps. Criterion 11, invariant 1, the budget row, the
+corpus and the mutation list are amended to match; every other section stands
+as revision 4 wrote it.
 
 ---
 
@@ -247,32 +265,113 @@ own `rebaseOriginFor` (`draft_painter.dart:341`) so float32 precision is a
 document-extent question rather than a world-origin one — the same problem the
 painter already solves, solved the same way.
 
-### Text: the submission splits at text boundaries
+### Text: one render target, and a patch where later geometry covers a label
 
-**The third blocking finding.** Revision 3 drew text as one Canvas pass over a
-resident list. The GPU geometry reaches the canvas as a single composited image,
-so one text pass puts **all** text above or below **all** geometry. The
+**The third blocking finding of revision 3, and revision 4's answer to it did
+not survive being planned.** Revision 3 drew text as one Canvas pass over a
+resident list. The GPU geometry reaches the canvas as a single composited
+image, so one text pass puts **all** text above or below **all** geometry. The
 reference interleaves: `VerticesDrawSink.text` flushes the batch first
-(`:719-722`), and `:627-632` says why — *"without this the unbatchable op would
-reach the `Canvas` immediately while every stroke before it waited for the end
-of the frame, which is the reordering the class comment's history describes."*
+(`vertices_draw_sink.dart:733-736`), and `:640-646` says why — *"without this
+the unbatchable op would reach the `Canvas` immediately while every stroke
+before it waited for the end of the frame, which is the reordering the class
+comment's history describes."*
 
-**Decision: the resident stream is split at every text op.** *N* text ops
-produce *N+1* GPU draw calls interleaved with *N* Canvas text draws, in emission
-order. Ordering is then exact, and it is exactly the discipline the reference
-sink already applies.
+Revision 4 answered with *N+1* draw calls interleaved with *N* Canvas text
+draws. **That cannot be built, and the reason is a fact about render targets,
+not about this codebase.** A draw call lands in a render target; a Canvas draw
+lands in a `Picture`; the only thing that can sit between two Canvas draws is
+an `Image`. `GpuDrawBackend.render` draws into one texture and returns
+`target.asImage()` — a handle over the texture, not a copy — and every such
+handle shows the texture's *final* contents when the picture rasterises. So
+"*N+1* draw calls into one target" interleaves with nothing, and the design
+revision 4 actually described is *N+1* **viewport-sized targets**, one image
+per segment: 1400 × 900 logical at a 2× ratio is 2800 × 1800 × 4 bytes =
+**20.16 MB per target**. Plan 3d's device rows recorded `textOps=19` to `24`
+on the harness corpus after culling; that is 400–500 MB of render targets for
+one frame, and a floor plan with two hundred labels is four gigabytes. The
+sentence *"the plan must bound it"* would have bounded *N* at three or four,
+which contradicts criterion 8's own demand that the corpus contain text.
 
-The cost is one draw call per text op, and **the plan must bound it**: this is
-affordable at floor-plan text counts and is not at arbitrary ones. Criterion 11
-gates the text pass, and the corpus for the gesture criteria is required to
-contain text — revision 3 let that be waived and a reviewer showed the waiver
-made the budget unfalsifiable.
+**Decision: one render target, text drawn over it through the reference
+sink's own path, and a *patch* for every label that geometry emitted after it
+actually covers.** In emission order the reference draws geometry before a
+label under it and geometry after it over it. With one texture and text
+composited on top, the first half is right by construction and the second
+half is wrong only inside the label's own glyphs, and only when some later
+instance reaches them. A patch restores exactly that:
 
-The resident text record carries the composed transform's six floats **flat**
-(composing `Transform2.multiply` per op per frame would allocate —
-`transform2.dart:62-69` — and invariant 1 forbids it), the string, the style
-handle, and `resolved.argb`, which is part of the paragraph cache key
-(`canvas_draw_sink.dart:204-207`).
+- **The resident text list** is written by the collector at rebuild, one
+  record per text op, in emission order. A record carries the composed
+  transform's six floats **flat** (composing `Transform2.multiply` per op per
+  frame would allocate — `transform2.dart:62-69` — and invariant 1 forbids
+  it), the string, the style handle, `resolved.argb` (part of the paragraph
+  cache key, `flutter_text_measurer.dart:160`), **the instance index at which
+  the op occurred**, and **the label's glyph box in collection space** —
+  `TextLayout.layOutBox` on the same `TextMeasurer.measure` the reference sink
+  uses, transformed by the residual, and stored as four floats. The collector
+  therefore takes the document's `TextMeasurer` and its `textStyleOf`, exactly
+  as `CanvasDrawSink` does (`canvas_draw_sink.dart:218-221`). Measurement
+  happens at rebuild, never on the frame path, and its cache is the one the
+  reference already warms.
+- **Classification, at rebuild.** For each label, every instance written
+  *after* its index is tested against the label's box, in collection space:
+  the instance's own box — its points, **expanded by the kind's reach**: the
+  half-width for a stroke and a `point()`, the miter reach for a join, nothing
+  for a fill — meets the label's box or it does not. A label with at least one
+  such instance is a **patch**; the instances that met it, **in emission
+  order**, are the patch's own sub-buffer, a by-product of the test that costs
+  no second pass. The reach is a device-pixel quantity and the test runs in
+  collection units, so it is expanded by the **band's lower scale bound**
+  (open question 3) — the over-approximating direction: a stroke that would
+  touch the label at *any* live scale inside the band is in the patch, and a
+  stroke that could not is not. An instance emitted *before* the label is
+  never in its patch; that is the whole point of the index.
+- **Per frame, in emission order.** The main pass draws the whole buffer into
+  the one target as today. Then, for each patch, a second pass draws that
+  patch's sub-buffer alone into a **patch target** sized to the label's box
+  under the live camera — the same pipeline, the same shader, the same
+  `FrameInfo` block built for the box's own origin and size instead of the
+  viewport's (`buildFrameInfo`'s `half_viewport` is the box's, so the
+  half-width expansion is still in device pixels), the sub-buffer bound as its
+  own `BufferView` at slot 1, cleared to transparent. Then the canvas: the main
+  image, and the text list walked in order — for a plain label,
+  `drawParagraph` through the reference's own paragraph cache and baseline
+  flip (`canvas_draw_sink.dart:222-243`); for a patch, `saveLayer` over the
+  box, the paragraph, then the patch image composited with **`srcATop`** —
+  which paints the later geometry over the label's ink and **nowhere else**,
+  so a translucent fill emitted after a label is blended once outside the
+  glyphs (in the main image) and once inside them (in the patch), never
+  twice in the same pixel — then `restore`. Both branches apply the stored
+  six floats through one reused matrix buffer under a single outer
+  `canvas.transform` of the collection-to-logical map: no `Transform2` is
+  built per op.
+- **Nothing is allocated per frame.** A patch target is allocated at rebuild,
+  at the box's size at the band's *upper* scale bound clamped to the viewport,
+  and reused; a frame renders into a sub-rectangle of it through the pass's
+  viewport and scissor and draws only that sub-rectangle. A zoom inside the
+  band changes the sub-rectangle, never the texture. `saveLayer` is one
+  engine-side allocation per **patch**, not per entity, which is what
+  invariant 1 governs.
+
+**What this costs, stated so the plan can measure it rather than argue it.**
+Per frame: one main pass, plus one small pass per patch whose vertex work is
+the patch's sub-buffer — the instances that actually reach the label, not the
+drawing; plus one `saveLayer` and two image draws per patch. Per rebuild: the
+classification, *labels × later instances* box tests in `double` — 24 labels
+against 107,000 instances is 2.6 million comparisons, on the rebuild path
+that criterion 7 already budgets at one frame, and the plan reports it inside
+that figure. Memory: the sub-buffers count against the 8 MB of criterion 6;
+the patch targets are reported beside the render target and, like it,
+excluded from that figure. **A label nothing later covers costs one
+`drawParagraph`, which is exactly what the reference spends on it** — and on
+a floor plan that is nearly every label, since annotation is drawn last.
+
+**What it keeps from revision 4.** The text list is still resident and still
+walked per frame; text culling is still frozen at the reference scale (the
+watermark table below); the paragraph cache is still the reference's, keyed
+by `resolved.argb`. What changes is only the unit the split is counted in:
+**patches, not draw calls**, and criterion 11 counts them.
 
 ### Where the quad is built: the shader, always
 
@@ -424,7 +523,7 @@ happens without one.
 
 | quantity | measured | budget |
 |---|---|---|
-| resident geometry, all kinds plus the text list | 2.06 MB strokes-only | **≤ 8 MB**, defined as GPU buffers plus the resident text list, excluding the render target |
+| resident geometry, all kinds plus the text list | 2.06 MB strokes-only | **≤ 8 MB**, defined as GPU buffers — the instance buffer and every patch sub-buffer — plus the resident text list, excluding the render target and the patch targets, which are reported beside it |
 | rebuild, platform thread, native | 15.7 ms | **≤ 16.67 ms** — one frame, not 1.2 |
 | rebuild, web | **unmeasured** | no budget until measured |
 | gesture frame p50 | 0.61 build / 0.63 raster | **≤ 1.2 ms build, ≤ 2.0 ms raster** |
@@ -449,8 +548,9 @@ phenomenon and this target does not reach it.
 ## Invariants
 
 1. **The frame path allocates nothing per entity in steady state.** The frame
-   writes one uniform block, submits *N+1* draw calls, and walks the resident
-   text list.
+   writes one uniform block per pass, submits one draw call for the buffer
+   and one per **patch**, walks the resident text list, and allocates a
+   `saveLayer` per patch — per patch, never per entity.
    **The instrument does not exist and revision 3 understated this.**
    `paint_allocation_test.dart:190-216` measures `VerticesDrawSink`-specific
    fields — a growing vertex buffer and `Paint` identity — neither of which a
@@ -479,13 +579,20 @@ inside a block definition placed at two instances; a mirrored instance; a
 non-uniform scale; a dashed polyline and **a dashed arc** at four scales inside
 the band; an arc at four scales; **an opaque fill overlapping strokes of both
 lower and higher handle**; a translucent fill; **text overlapped by a stroke of
-higher handle**; text near the culling threshold; a hairline below one device
+higher handle**, and by a **translucent fill** of higher handle; **text a
+stroke of higher handle passes within its width of but whose centerline misses
+the glyphs**; text overlapped by a stroke of *lower* handle only; text near
+the culling threshold; a hairline below one device
 pixel; and a `point()`.
 
 **Mutations that must go red:**
 
 - give strokes, joins and fills separate draw calls → the fill-overlap test fails
 - draw all text in one pass before or after the geometry → the text-overlap test fails
+- admit an instance emitted *before* the label into its patch → the lower-handle-stroke label draws under a stroke it should cover
+- test the label's box against the instance's centerline instead of its reach-expanded box → the within-its-width stroke draws under the label
+- expand the reach at the reference scale instead of the band's lower bound → the four-scale label test fails at the band's edge
+- composite a patch with `srcOver` instead of `srcATop` → the translucent-fill-over-label test blends twice outside the glyphs
 - expand the stroke quad at collection scale → strokes thicken under zoom
 - emit joins as collector geometry at the collection width → miters distort
 - skip the seam join → the circle-notch test fails
@@ -543,8 +650,13 @@ rule stated under Budgets.
 10. A platform without Flutter GPU falls back to `VerticesDrawSink` exactly
     once, without throwing, through an injectable facade factory that fails on
     demand, with a one-shot observable diagnostic.
-11. The text pass costs ≤ 0.5 ms p50 on the criterion-8 corpus, and the *N+1*
-    draw-call count is reported.
+11. The text pass — the text list walk, the patch passes and their composites,
+    measured as the build and raster p50 difference between the criterion-8
+    corpus drawn with and without its text (`DRAW_TEXT`, which the harness
+    already has) — costs ≤ 0.5 ms p50. **The corpus must contain at least one
+    patch** — a label some later instance reaches — or the number measures
+    nothing; the patch count, the text-op count, the classification's share of
+    the rebuild and the patch targets' bytes are all reported.
 12. **Both zoom defects are reproduced on the tiled arm and absent on the
     resident arm.** The target numbers exist:
     **zoom out** (twelve steps of 0.94) — `uncoveredPixels` reaching **5,730**
