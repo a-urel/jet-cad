@@ -718,8 +718,13 @@ per patch, a box-sized pass per frame, composited with `srcATop` so the later
 geometry lands on the label's ink and nowhere else. Read the spec's
 "Text: one render target, and a patch where later geometry covers a label"
 before writing the plan; criterion 11, invariant 1, the budget row, the corpus
-and the mutation list moved with it. **No Plan E plan exists yet** — the next
-unit of work is writing it, from that section, with `superpowers:writing-plans`.
+and the mutation list moved with it. Two independent CLI reviews (Codex,
+Copilot) of the revision's first draft were folded in at `d2095e7`. **The
+plan is written:**
+[2026-09-04-gpu-backend-plan-e-text-patches.md](docs/superpowers/plans/2026-09-04-gpu-backend-plan-e-text-patches.md)
+— nine tasks, ten rulings, fourteen mutations, no shader change. **Not
+started.** Execute it with `superpowers:subagent-driven-development` on a
+worktree, `plan-e/text-patches`, cut from `main`.
 
 **A human has now looked at the window, informally, and reported the drawing
 correct — 2026-09-01, on the `SPIKE_FILL_SCALE=20` eyeball run.** That is
