@@ -19,20 +19,28 @@ here.
 **Revision 5 (2026-09-04) corrects the text section, and nothing else.** It
 was found while writing Plan E, before any code: revision 4 counted the text
 split in *draw calls*, and a Canvas text draw cannot land between two draw
-calls into one render target — `Texture.asImage()` of one texture shows that
-texture's final contents however many times it is taken, so *N+1* draw calls
-into one target interleave with nothing. What revision 4 had actually
-specified was *N+1* viewport-sized render targets, **20 MB each** at
-1400 × 900 on a 2× display, which is unaffordable past a handful of labels
-and contradicts its own demand that the criterion-8 corpus contain text. The
+calls into one render target: only an *image* can sit between two Canvas
+draws, and on native `Texture.asImage()` is a handle over the live texture,
+not a copy, so every handle taken from one target shows that target's final
+contents (the web shim does copy — `snapshotTextureSync` blits per call — at
+the price of a full-viewport copy per split, per frame). What revision 4 had
+actually specified was *N+1* viewport-sized targets or copies, **20 MB each**
+at 1400 × 900 on a 2× display, which is unaffordable past a handful of
+labels and contradicts its own demand that the criterion-8 corpus contain
+text. The
 replacement keeps one render target, draws text through the reference sink's
 own paragraph path, and restores emission order only where it is actually
 violated — where geometry emitted *after* a label covers that label — with a
 **patch** per such label. Ordering is exact, memory is bounded by the labels
 that are covered rather than by the labels that exist, and the cost is
 proportional to what overlaps. Criterion 11, invariant 1, the budget row, the
-corpus and the mutation list are amended to match; every other section stands
-as revision 4 wrote it.
+corpus and the mutation list are amended to match, and "One buffer, one kind
+tag, one draw call" gains the one sentence that reconciles it with the
+patches; every other section stands as revision 4 wrote it. Two independent
+CLI reviews (Codex, Copilot, 2026-09-04) of the first draft of this revision
+produced the backend qualification above, the explicit per-patch exception in
+invariant 1, the conservative wording of the classification, the miter bound,
+the patch pass's coordinate convention and the four-scale label fixture.
 
 ---
 
@@ -224,7 +232,10 @@ with the transform in the shader:**
 - **One record format**, carrying a `kind` tag: stroke segment, join wedge,
   fill triangle, point.
 - **One instanced draw call**, one pipeline, one vertex shader that branches on
-  `kind`.
+  `kind`. (Since revision 5, plus one small pass per **patch** — see the text
+  section. A patch never partitions this buffer; it re-draws a sub-buffer of
+  it, in the same order, into its own target, and the ordering argument here
+  is untouched.)
 - The unit primitive is a **triangle**; a stroke quad is two instances, a join
   wedge one or two, a fill triangle one. This mirrors what `drawVertices`
   receives today.
@@ -282,11 +293,15 @@ draws. **That cannot be built, and the reason is a fact about render targets,
 not about this codebase.** A draw call lands in a render target; a Canvas draw
 lands in a `Picture`; the only thing that can sit between two Canvas draws is
 an `Image`. `GpuDrawBackend.render` draws into one texture and returns
-`target.asImage()` — a handle over the texture, not a copy — and every such
-handle shows the texture's *final* contents when the picture rasterises. So
-"*N+1* draw calls into one target" interleaves with nothing, and the design
-revision 4 actually described is *N+1* **viewport-sized targets**, one image
-per segment: 1400 × 900 logical at a 2× ratio is 2800 × 1800 × 4 bytes =
+`target.asImage()`. On native that is a handle over the live texture, not a
+copy (`flutter_gpu/texture.cc`'s `Texture::AsImage` wraps `texture_` in a
+`DlImageImpeller`), so every such handle shows the texture's *final* contents
+when the picture rasterises and "*N+1* draw calls into one target"
+interleaves with nothing. The web shim does copy — `snapshotTextureSync`
+blits the texture to an offscreen canvas per call — so there the split would
+work, at a full-viewport copy per split per frame. Either way the design
+revision 4 actually described is *N+1* **viewport-sized targets or copies**,
+one image per segment: 1400 × 900 logical at a 2× ratio is 2800 × 1800 × 4 bytes =
 **20.16 MB per target**. Plan 3d's device rows recorded `textOps=19` to `24`
 on the harness corpus after culling; that is 400–500 MB of render targets for
 one frame, and a floor plan with two hundred labels is four gigabytes. The
@@ -314,51 +329,79 @@ instance reaches them. A patch restores exactly that:
   as `CanvasDrawSink` does (`canvas_draw_sink.dart:218-221`). Measurement
   happens at rebuild, never on the frame path, and its cache is the one the
   reference already warms.
-- **Classification, at rebuild.** For each label, every instance written
-  *after* its index is tested against the label's box, in collection space:
-  the instance's own box — its points, **expanded by the kind's reach**: the
-  half-width for a stroke and a `point()`, the miter reach for a join, nothing
+- **Classification, at rebuild — conservative, box on box.** The label's
+  box is `TextLayout.layOutBox`'s glyph box with all four corners transformed
+  by the residual and re-bounded (the axis-aligned box of a rotated, sheared
+  or mirrored label, exactly as `extents.dart:67` does it), padded by one
+  device pixel at the band's upper scale bound so antialiased glyph edges and
+  glyph overhang past the advance box are inside it. For each label, every
+  instance written *after* its index is tested against that box, in
+  collection space: the instance's own box — its points, **expanded by the
+  kind's reach**: the half-width for a stroke and a `point()`, **`half-width
+  × kMiterLimit` (4.0) for a join — the shader's own bound on a miter tip
+  (`vertices_draw_sink.dart:460, 544`), not a per-instance angle** — nothing
   for a fill — meets the label's box or it does not. A label with at least one
   such instance is a **patch**; the instances that met it, **in emission
   order**, are the patch's own sub-buffer, a by-product of the test that costs
   no second pass. The reach is a device-pixel quantity and the test runs in
   collection units, so it is expanded by the **band's lower scale bound**
   (open question 3) — the over-approximating direction: a stroke that would
-  touch the label at *any* live scale inside the band is in the patch, and a
-  stroke that could not is not. An instance emitted *before* the label is
-  never in its patch; that is the whole point of the index.
+  touch the label's box at *any* live scale inside the band is in the patch,
+  and a stroke that could not is not. An instance emitted *before* the label
+  is never in its patch; that is the whole point of the index. **This is a
+  candidate test, not an ink test**: a stroke through the whitespace between
+  two glyphs, or a dashed instance whose gap crosses the box, is a patch
+  candidate although no pixel of it covers label ink. Over-inclusion is
+  correct — the composite below makes an unneeded patch a no-op — and its
+  cost is what criterion 11 measures.
 - **Per frame, in emission order.** The main pass draws the whole buffer into
   the one target as today. Then, for each patch, a second pass draws that
-  patch's sub-buffer alone into a **patch target** sized to the label's box
-  under the live camera — the same pipeline, the same shader, the same
-  `FrameInfo` block built for the box's own origin and size instead of the
-  viewport's (`buildFrameInfo`'s `half_viewport` is the box's, so the
-  half-width expansion is still in device pixels), the sub-buffer bound as its
-  own `BufferView` at slot 1, cleared to transparent. Then the canvas: the main
-  image, and the text list walked in order — for a plain label,
-  `drawParagraph` through the reference's own paragraph cache and baseline
-  flip (`canvas_draw_sink.dart:222-243`); for a patch, `saveLayer` over the
-  box, the paragraph, then the patch image composited with **`srcATop`** —
-  which paints the later geometry over the label's ink and **nowhere else**,
-  so a translucent fill emitted after a label is blended once outside the
-  glyphs (in the main image) and once inside them (in the patch), never
-  twice in the same pixel — then `restore`. Both branches apply the stored
-  six floats through one reused matrix buffer under a single outer
-  `canvas.transform` of the collection-to-logical map: no `Transform2` is
-  built per op.
-- **Nothing is allocated per frame.** A patch target is allocated at rebuild,
-  at the box's size at the band's *upper* scale bound clamped to the viewport,
-  and reused; a frame renders into a sub-rectangle of it through the pass's
-  viewport and scissor and draws only that sub-rectangle. A zoom inside the
-  band changes the sub-rectangle, never the texture. `saveLayer` is one
-  engine-side allocation per **patch**, not per entity, which is what
-  invariant 1 governs.
+  patch's sub-buffer alone into a **patch target** — the same pipeline, the
+  same shader, the sub-buffer bound as its own `BufferView` at slot 1,
+  cleared to transparent. **The pass's coordinate convention, stated because
+  `Viewport` and `Scissor` throw on a negative origin
+  (`flutter_gpu/lib/src/render_pass.dart:201-207`):** the region drawn is the
+  intersection of the label's box under the live camera with the viewport,
+  in device pixels; it is rendered **anchored at the patch texture's own
+  origin**, through a viewport and scissor of the intersection's size, with
+  the `FrameInfo` block built from `collectionToDevice` composed with a
+  translation by the intersection's negated device origin and the
+  intersection's size as `widthPx`/`heightPx` (so `half_viewport` is the
+  region's and the half-width expansion is still in device pixels). Where the
+  region sits on screen matters only to the canvas step below. Then the
+  canvas, under one outer `canvas.transform` of the collection-to-logical
+  map, the main image first, then the text list walked in order. A plain
+  label: `canvas.transform` of its stored six floats through one reused
+  matrix buffer, then `drawParagraph` through the reference's own paragraph
+  cache and baseline flip (`canvas_draw_sink.dart:222-243`) — **one helper,
+  used by both branches, so the flip cannot be forgotten on one of them**. A
+  patch: `saveLayer` over the label's box **expressed in collection space,
+  under the outer transform only and before the label's own six floats are
+  applied**, then the same paragraph helper, then the patch image drawn at
+  the region's collection-space rectangle with **`srcATop`** — which paints
+  the later geometry over the label's ink and **nowhere else**, so a
+  translucent fill emitted after a label is blended once outside the glyphs
+  (in the main image) and once inside them (in the patch), never twice in
+  the same pixel — then `restore`. No `Transform2` is built per op.
+- **No GPU resource is allocated per frame, and the engine-side cost per
+  patch is named rather than waved at.** A patch target is allocated at
+  rebuild, at the box's size at the band's *upper* scale bound clamped to the
+  viewport, and reused; a frame renders into a sub-rectangle of it and draws
+  only that sub-rectangle. A zoom inside the band changes the sub-rectangle,
+  never the texture. Per frame a patch still costs the engine **one layer**
+  (`saveLayer`, which `dart:ui`'s own doc calls expensive) and **one
+  `ui.Image` handle** (`asImage()` creates a fresh wrapper per call on native
+  — the same handle the main image already costs every frame today). That is
+  a per-*patch* allocation, and a patch is a label, which is an entity: it is
+  the **one exception** invariant 1 now states, bounded by the labels later
+  geometry reaches rather than by the drawing, and criterion 11 counts it.
 
 **What this costs, stated so the plan can measure it rather than argue it.**
 Per frame: one main pass, plus one small pass per patch whose vertex work is
 the patch's sub-buffer — the instances that actually reach the label, not the
-drawing; plus one `saveLayer` and two image draws per patch. Per rebuild: the
-classification, *labels × later instances* box tests in `double` — 24 labels
+drawing; plus one `saveLayer` and two image draws per patch — proportional to what overlaps
+the label's **axis-aligned** box, which for a rotated label is more than its
+glyphs. Per rebuild: the classification, *labels × later instances* box tests in `double` — 24 labels
 against 107,000 instances is 2.6 million comparisons, on the rebuild path
 that criterion 7 already budgets at one frame, and the plan reports it inside
 that figure. Memory: the sub-buffers count against the 8 MB of criterion 6;
@@ -549,8 +592,12 @@ phenomenon and this target does not reach it.
 
 1. **The frame path allocates nothing per entity in steady state.** The frame
    writes one uniform block per pass, submits one draw call for the buffer
-   and one per **patch**, walks the resident text list, and allocates a
-   `saveLayer` per patch — per patch, never per entity.
+   and one per **patch**, and walks the resident text list. **The one stated
+   exception:** a patch costs the engine one layer and one image handle per
+   frame, and a patch is a label. That allocation is per label later geometry
+   reaches, not per entity drawn; it is counted by criterion 11, and a plan
+   that finds it on the criterion-8 corpus's frame numbers records that
+   rather than redefining "entity".
    **The instrument does not exist and revision 3 understated this.**
    `paint_allocation_test.dart:190-216` measures `VerticesDrawSink`-specific
    fields — a growing vertex buffer and `Paint` identity — neither of which a
@@ -581,8 +628,9 @@ the band; an arc at four scales; **an opaque fill overlapping strokes of both
 lower and higher handle**; a translucent fill; **text overlapped by a stroke of
 higher handle**, and by a **translucent fill** of higher handle; **text a
 stroke of higher handle passes within its width of but whose centerline misses
-the glyphs**; text overlapped by a stroke of *lower* handle only; text near
-the culling threshold; a hairline below one device
+the glyphs**; text overlapped by a stroke of *lower* handle only; **the
+overlapped label at four scales inside the band, including its lower edge**;
+text near the culling threshold; a hairline below one device
 pixel; and a `point()`.
 
 **Mutations that must go red:**
@@ -593,6 +641,8 @@ pixel; and a `point()`.
 - test the label's box against the instance's centerline instead of its reach-expanded box → the within-its-width stroke draws under the label
 - expand the reach at the reference scale instead of the band's lower bound → the four-scale label test fails at the band's edge
 - composite a patch with `srcOver` instead of `srcATop` → the translucent-fill-over-label test blends twice outside the glyphs
+- classify every label as a patch → the lower-handle-only label reports a nonzero patch count
+- use a per-instance miter length instead of the shader's `4 × half-width` bound → a join near the miter limit draws under the label
 - expand the stroke quad at collection scale → strokes thicken under zoom
 - emit joins as collector geometry at the collection width → miters distort
 - skip the seam join → the circle-notch test fails
@@ -654,8 +704,9 @@ rule stated under Budgets.
     measured as the build and raster p50 difference between the criterion-8
     corpus drawn with and without its text (`DRAW_TEXT`, which the harness
     already has) — costs ≤ 0.5 ms p50. **The corpus must contain at least one
-    patch** — a label some later instance reaches — or the number measures
-    nothing; the patch count, the text-op count, the classification's share of
+    patch whose later instance is a solid stroke crossing the glyphs** — a
+    candidate through whitespace or a dash gap is a patch that composites
+    nothing, and a number taken on it measures nothing; the patch count, the text-op count, the classification's share of
     the rebuild and the patch targets' bytes are all reported.
 12. **Both zoom defects are reproduced on the tiled arm and absent on the
     resident arm.** The target numbers exist:
