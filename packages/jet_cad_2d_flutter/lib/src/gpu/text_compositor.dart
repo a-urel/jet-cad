@@ -33,12 +33,12 @@ class PatchImage {
 ///
 /// The four corners are [boundTransformedBox]'s (Ruling P2) -- one bound
 /// loop, shared with [patchRegionFor], not a second copy of it -- so a
-/// rotated camera or a mirrored label bounds correctly here too. The
-/// `Float64List(4)` scratch is local and allocated per call: invariant 1's
-/// per-patch exception (a patch is one per label per frame, not per
-/// entity).
-Rect labelBoundsLogical(ResidentTextRecord t, Transform2 m) {
-  final bound = Float64List(4);
+/// rotated camera or a mirrored label bounds correctly here too. The caller
+/// passes a reused scratch on the frame path; a null scratch allocates one
+/// -- test callers.
+Rect labelBoundsLogical(ResidentTextRecord t, Transform2 m,
+    {Float64List? scratch}) {
+  final bound = scratch ?? Float64List(4);
   boundTransformedBox(t.boxMinX, t.boxMinY, t.boxMaxX, t.boxMaxY, m, bound);
   return Rect.fromLTRB(bound[0], bound[1], bound[2], bound[3]);
 }
@@ -105,6 +105,14 @@ class TextCompositor {
       // the label's own six floats are applied inside `_drawLabel`, after
       // this call. A layer opened after the residual would be transformed
       // twice (a Copilot review finding on revision 5's first draft).
+      //
+      // **`saveLayer` clips to `patch.layerBounds`** -- the label's padded
+      // box (`kTextBoxPadDevicePixels`, `text_patches.dart`) -- so any glyph
+      // overhang beyond the paragraph's advance box, ascent or descent that
+      // reaches past the pad would clip on a PATCHED label only, never on a
+      // plain one drawn by [_drawLabel] alone. An assumption the corpus does
+      // not exercise: nothing in this codebase's fixtures has a glyph whose
+      // ink reaches that far.
       canvas.saveLayer(patch.layerBounds, _layerPaint);
       _drawLabel(canvas, texts[i], collectionToLogical);
       canvas.drawImageRect(patch.image, patch.src, patch.dst, _patchPaint);

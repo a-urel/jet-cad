@@ -393,7 +393,11 @@ instance reaches them. A patch restores exactly that:
   never the texture. Per frame a patch still costs the engine **one layer**
   (`saveLayer`, which `dart:ui`'s own doc calls expensive) and **one
   `ui.Image` handle** (`asImage()` creates a fresh wrapper per call on native
-  — the same handle the main image already costs every frame today). That is
+  — the same handle the main image already costs every frame today). Plan E's
+  results measured the Dart-side cost beside the engine's own two, the same
+  per-patch list: a `PatchRegion`, a `(ResidentPatch, PatchRegion)` record, a
+  `PatchImage` carrying three `Rect`s, one `Transform2` and one 80-byte
+  uniform block — all of it per patch. That is
   a per-*patch* allocation, and a patch is a label, which is an entity: it is
   the **one exception** invariant 1 now states, bounded by the labels later
   geometry reaches rather than by the drawing, and criterion 11 counts it.
@@ -596,7 +600,8 @@ phenomenon and this target does not reach it.
    writes one uniform block per pass, submits one draw call for the buffer
    and one per **patch**, and walks the resident text list. **The one stated
    exception:** a patch costs the engine one layer and one image handle per
-   frame, and a patch is a label. That allocation is per label later geometry
+   frame, and a patch is a label, plus the small per-patch Dart objects Plan
+   E's results note enumerates. That allocation is per label later geometry
    reaches, not per entity drawn; it is counted by criterion 11, and a plan
    that finds it on the criterion-8 corpus's frame numbers records that
    rather than redefining "entity".

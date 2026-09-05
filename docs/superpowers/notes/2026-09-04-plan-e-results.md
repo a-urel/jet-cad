@@ -124,9 +124,11 @@ Full transcripts: Task 5's own report in the ledger; mutation transcripts in
 
 ## The device run
 
-**Method**: `apps/dev_harness_2d`, `flutter run -d macos --profile`, macOS
-Low Power Mode confirmed OFF twice — once before the crashing first attempt,
-again before the post-fix reruns (`pmset -g | grep lowpowermode` →
+**Method**: `apps/dev_harness_2d`, `flutter run -d macos --profile`, three
+interleaved repeats (`SPIKE_REPEATS=3`, arms A/B/C run in turn within each
+repeat — `runGpuSpike`'s own loop order), macOS Low Power Mode confirmed OFF
+twice — once before the crashing first attempt, again before the post-fix
+reruns (`pmset -g | grep lowpowermode` →
 `lowpowermode 0` both times) — and `flutter devices` listed `macOS
 (desktop)`. **`flutter run` does not exit on its own** (Plan B's own
 lesson): each invocation ran in the background with output captured to a
@@ -357,7 +359,7 @@ shot; zero survivors.** Full transcripts:
 | 5 | criterion 11: hold + pan ≤ 0.5 ms, `patches ≥ 8` | **MISS** — hold +1.79 ms, pan +4.22 ms; `patches=87 ≥ 8` (that sub-condition alone passes) |
 | 6 | criterion 6: `buffer + subBuffer ≤ 8 MB` | **PASS** — 7.06 MB, 0.94 MB margin |
 | 7 | 14/14 mutations fire, survivors declared | **PASS** — 14/14 killed on the first shot, zero survivors |
-| 8 | no shader or bundle change | **PASS** — `git diff --stat main..HEAD -- packages/jet_cad_2d_flutter/shaders packages/jet_cad_2d_flutter/assets` empty |
+| 8 | no shader or bundle change | **PASS** — `git diff --stat 8dde4fb..HEAD -- packages/jet_cad_2d_flutter/shaders packages/jet_cad_2d_flutter/assets` empty |
 | 9 | a human looks at the window | **OWED** — Plan E's five plus fourteen older, nineteen total, none discharged |
 | 10 | every gate green, all three packages | **PASS** — see below |
 

@@ -690,5 +690,16 @@ Future<void> runGpuSpike(
     }
   }
 
+  // Ruling E2's discipline, surfaced here too: a backend built without a
+  // measurer drops every label silently, and `textsDropped` is that "so" as
+  // a number rather than a missing picture. This harness always builds
+  // `state.backend` WITH a measurer (`_buildResidentGeometry` above), so the
+  // count is always 0 here -- printed only when it is not, for a future
+  // caller that omits the measurer.
+  final textsDropped = state.backend?.textsDropped ?? 0;
+  if (textsDropped > 0) {
+    gpuReport('GSPIKE note: textsDropped=$textsDropped -- labels the last '
+        'frame drew nothing for, no compositor wired in.');
+  }
   gpuReport('GSPIKE done: ${reports.length} phase reports above.');
 }

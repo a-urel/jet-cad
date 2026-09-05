@@ -60,6 +60,13 @@ void main() {
   /// Where the label alone has ink, and where inside its box it has none --
   /// found by rendering, never assumed: `flutter test`'s font is not the
   /// device's.
+  ///
+  /// **Cannot see a baseline-flip bug.** Every caller in this file passes
+  /// `collectionToLogical: Transform2.identity()` (or a pure translation),
+  /// so a dropped `scale(1, -1)` in `_drawLabel` (M-E10) would move the
+  /// glyphs but this method would still find ink and a blank pixel and every
+  /// assertion built on it would still pass -- `text_order_test.dart` is
+  /// what kills M-E10, not this file.
   Future<(Point<int>, Point<int>)> samplePoints() async {
     final alone = await _rgba(await _image((c) => compositor.paint(c,
         main: null,
@@ -217,6 +224,12 @@ void main() {
     // Under `translation(30, 0)` every pixel of the label's row moves by
     // exactly 30: a compositor that applied the outer transform twice moves
     // it by 60, one that ignored it by 0, and neither reproduces the row.
+    //
+    // Runs with `patches: const []` throughout, so THIS test cannot see a
+    // `saveLayer`-ordering bug (M-E9, opening the layer after the residual
+    // transform) -- that is a covered-label bug, and this test has no
+    // covered label. M-E9 is killed elsewhere in this file (the srcATop
+    // test, which does patch) and by `text_order_test.dart`.
     final (ink, _) = await samplePoints();
     Future<Uint8List> under(Transform2 outer) async =>
         _rgba(await _image((c) => compositor.paint(c,

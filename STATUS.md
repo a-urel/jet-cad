@@ -791,11 +791,9 @@ flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
 ```
 
 Also in `.vscode/launch.json` as *"2d: GPU spike — text ON (criterion 11,
-DRAW_TEXT=true)"* and its `DRAW_TEXT=false` pair — **but neither entry
-passes `SPIKE_FILLS=true`, so run as committed they show no fills and
-Plan D's five checks have nothing to look at**; add
-`--dart-define=SPIKE_FILLS=true` to `toolArgs`, or use the command above,
-per the results note.
+DRAW_TEXT=true)"* and its `DRAW_TEXT=false` pair — both entries now carry
+`--dart-define=SPIKE_FILLS=true` (final-review fix wave), so either one runs
+the same corpus the command above does.
 
 **Plan F is next**: rebuild triggers, the band, and `DraftCanvas`'s
 `residentGpu` path — which Plan A left rendering as `vertices` and now, for
@@ -816,6 +814,25 @@ independent CLI reviews (Codex, Copilot) of the revision's first draft were
 folded in at `d2095e7`. Plan:
 [2026-09-04-gpu-backend-plan-e-text-patches.md](docs/superpowers/plans/2026-09-04-gpu-backend-plan-e-text-patches.md)
 — nine tasks, ten rulings, fourteen mutations, no shader change.
+
+**Plan F inherits, with numbers** — the final whole-branch review's minors,
+left as levers rather than fixed blind in this wave (Ruling RF-1):
+
+- `classify` costs **27.4 ms** at this task's device corpus (`labels ×
+  later instances` box tests, no pruning at all) — 164% of the 16.67 ms
+  rebuild budget on its own; bucketing by y or an early-reject on a device
+  box are the cheap levers.
+- `TextCompositor.paint` walks all **165** resident labels every frame,
+  off-viewport ones included; viewport rejection is the cheapest move
+  against criterion 11's MISS.
+- R6-2 (parked, not fixed): **1 + P** `ui.Image` handles churn per frame,
+  never disposed — `P = 87` measured on this task's corpus.
+- The frozen-culling divergence the four-scale differential gate leaves
+  ungated at `minTextCapPixels: 0` (Task 5's corpus never sets it
+  otherwise).
+- The spec's eighth text mutation — "leave the resident text list stale
+  across a rebuild" — is Plan F's to fire; nothing in Plan E's own rebuild
+  path can trigger it.
 
 **A human has now looked at the window, informally, and reported the drawing
 correct — 2026-09-01, on the `SPIKE_FILL_SCALE=20` eyeball run.** That is

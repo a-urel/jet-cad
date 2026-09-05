@@ -171,14 +171,28 @@ double dashScaleFor(ViewportTransform camera, Transform2 collectionInverse) =>
 /// document was already walked once, at construction of [geometry]
 /// (`ResidentGeometry`, Task 5); every subsequent frame re-derives only the
 /// small `FrameInfo` uniform from the current [ViewportTransform] and
-/// re-issues the main draw call the buffer's instance count implies. Each
-/// covered label's patch (`ResidentGeometry.patches`) then adds one more
-/// `FrameInfo`, one more draw call, one `patchRegionFor` and one
-/// `labelBoundsLogical` call (each its own `Float64List(4)` scratch, per
-/// their own doc comments), one `PatchRegion`, one `(ResidentPatch,
-/// PatchRegion)` record, one `PatchImage` and three `Rect`s -- still O(1)
-/// per flush, not per entity: every one of those is one per PATCH, never one
-/// per instance inside it.
+/// re-issues the main draw call the buffer's instance count implies.
+///
+/// **What a covered label's patch still allocates, per frame, exactly.**
+/// This wave (the final whole-branch review's fix, Ruling RF-1) hoisted the
+/// two `Float64List(4)` scratches [patchRegionFor] and `labelBoundsLogical`
+/// used to allocate per call into [_regionScratch] and [_boundsScratch]
+/// below -- fields, reused every frame, passed as each function's `scratch`
+/// argument -- so those two are OFF this list now. What remains, one of
+/// each per patch, never per entity and never per plain (uncovered) label:
+/// a `PatchRegion`, a `(ResidentPatch, PatchRegion)` record (in
+/// [_pendingRegions]), a `PatchImage`, three `Rect`s (`PatchImage.src`,
+/// `.dst`, `.layerBounds`), the `Transform2` [composeTransforms] builds for
+/// `toPatch`, the `ByteData(80)` uniform block [buildFrameInfo] returns, one
+/// `saveLayer` (`TextCompositor.paint`) and one `ui.Image` handle
+/// (`asImage()`) -- the same list the spec's text-section exception and
+/// `## Invariants` item 1 now name. Still O(1) per flush, not per entity.
+/// Plan F's two cheapest remaining reuse moves, named but not taken here
+/// (Ruling RF-1 -- a rewrite unmeasured is a rewrite this wave will not
+/// make): a mutable `PatchRegion` (collapsing the `(ResidentPatch,
+/// PatchRegion)` record above to a reused pair) and a reused uniform
+/// `ByteData` (so [buildFrameInfo] writes into a field instead of
+/// allocating one per patch per frame).
 class GpuDrawBackend {
   GpuDrawBackend(this.geometry, this.collectionCamera,
       {FlutterTextMeasurer? measurer,
@@ -210,6 +224,15 @@ class GpuDrawBackend {
   final List<(ResidentPatch, PatchRegion)> _pendingRegions =
       <(ResidentPatch, PatchRegion)>[];
 
+  /// Reused every frame by [patchRegionFor]'s `scratch` argument, one patch
+  /// at a time -- the frame path's own copy of the scratch its doc comment
+  /// says a null argument would otherwise allocate per call.
+  final Float64List _regionScratch = Float64List(4);
+
+  /// Reused every frame by `labelBoundsLogical`'s `scratch` argument, same
+  /// reasoning as [_regionScratch].
+  final Float64List _boundsScratch = Float64List(4);
+
   /// Painted with `filterQuality: none`, same as [TextCompositor]'s own --
   /// allocated once, reused by every `drawImageRect` call [paint] makes when
   /// there is no [_compositor] to draw through instead.
@@ -233,6 +256,25 @@ class GpuDrawBackend {
   /// Patches drawn, clamped to the target's size, or entirely off screen,
   /// last frame -- diagnostics only, reset at the top of every [render].
   int patchesRendered = 0, patchesClipped = 0, patchesOffscreen = 0;
+
+  /// Labels [paint] drew nothing for, last call, because [_compositor] was
+  /// `null` -- `geometry.texts.length` on a call that finds no compositor
+  /// wired in. Ruling E2's discipline made concrete: a backend built without
+  /// a [FlutterTextMeasurer] and a text-style lookup silently drew no text
+  /// at all (see [_compositor]'s own doc comment) and nothing said so; this
+  /// counter is that "so" -- a backend wired without a measurer shows as a
+  /// number, not a missing picture. Reset to 0 at the top of every [paint]
+  /// call, not [render]: the `_compositor == null` check this counter
+  /// reports on lives in [paint], not [render].
+  ///
+  /// **Untested by `flutter test`.** [GpuDrawBackend]'s constructor takes a
+  /// [ResidentGeometry], and [ResidentGeometry.create] needs a live GPU
+  /// (`gpu.gpuContext`, unavailable off a device/simulator run) -- nothing
+  /// in this package's `flutter test` suite can construct a [GpuDrawBackend]
+  /// at all, compositor-less or otherwise, so no unit test exercises this
+  /// field. Confirmed by reading `resident_geometry.dart` and this file's
+  /// own constructor, not asserted from a failed attempt to write one.
+  int textsDropped = 0;
 
   ui.Image? render(ViewportTransform camera, Size viewport, double dpr) {
     // **Reset first, unconditionally -- before the early returns below, and
@@ -446,7 +488,9 @@ class GpuDrawBackend {
     for (final patch in geometry.patches) {
       final t = geometry.texts[patch.textIndex];
       final region = patchRegionFor(t, collectionToDevice, widthPx, heightPx,
-          maxWidth: patch.targetWidth, maxHeight: patch.targetHeight);
+          maxWidth: patch.targetWidth,
+          maxHeight: patch.targetHeight,
+          scratch: _regionScratch);
       if (region == null) {
         patchesOffscreen++;
         continue;
@@ -558,7 +602,8 @@ class GpuDrawBackend {
         dst: Rect.fromLTWH(region.x / dpr, region.y / dpr, region.width / dpr,
             region.height / dpr),
         layerBounds: labelBoundsLogical(
-            geometry.texts[patch.textIndex], _collectionToLogical),
+            geometry.texts[patch.textIndex], _collectionToLogical,
+            scratch: _boundsScratch),
       ));
     }
     // `_pendingRegions` is intentionally left populated here, rather than
@@ -580,9 +625,13 @@ class GpuDrawBackend {
   /// resident or patched, until both are supplied.
   void paint(
       Canvas canvas, ViewportTransform camera, Size viewport, double dpr) {
+    textsDropped = 0;
     final main = render(camera, viewport, dpr);
     final compositor = _compositor;
     if (compositor == null) {
+      if (geometry.texts.isNotEmpty) {
+        textsDropped += geometry.texts.length;
+      }
       if (main != null) {
         canvas.drawImageRect(
             main,

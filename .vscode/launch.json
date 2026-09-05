@@ -155,6 +155,7 @@
                 "--dart-define=SPIKE_INSTANCES=150",
                 "--dart-define=SPIKE_FRAMES=30",
                 "--dart-define=SPIKE_REPEATS=3",
+                "--dart-define=SPIKE_FILLS=true",
                 "--dart-define=SPIKE_TEXT=true"
             ]
         },
@@ -179,6 +180,7 @@
                 "--dart-define=SPIKE_INSTANCES=150",
                 "--dart-define=SPIKE_FRAMES=30",
                 "--dart-define=SPIKE_REPEATS=3",
+                "--dart-define=SPIKE_FILLS=true",
                 "--dart-define=SPIKE_TEXT=true",
                 "--dart-define=DRAW_TEXT=false"
             ]

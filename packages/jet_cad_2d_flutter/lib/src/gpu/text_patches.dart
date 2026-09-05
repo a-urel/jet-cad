@@ -8,10 +8,10 @@ import 'resident_text.dart';
 /// **Provisional, and Plan F's to move.** The spec leaves the watermark band
 /// un-committed as a number (open question 3); Plan E needs a floor to expand
 /// an instance's reach at and a ceiling to size a patch target at, and takes
-/// these two until Plan F measures the band. Every classification function in
-/// this file (`classifyTextPatches`, and Task 4's region and size functions)
-/// takes them as parameters with these defaults, so a test can pin either
-/// edge and Plan F can move them without touching a call site.
+/// these two until Plan F measures the band. `classifyTextPatches` (the
+/// floor) and `patchTargetSizeFor` (the ceiling) take them as parameters
+/// with these defaults, so a test can pin either edge and Plan F can move
+/// them without touching a call site -- `patchRegionFor` takes neither.
 const double kBandLowerScale = 0.5;
 const double kBandUpperScale = 2.0;
 
@@ -202,13 +202,12 @@ class PatchRegion {
 /// origin anyway; this region's `x, y` are for the compositor's `dst`.
 ///
 /// The four corners are [boundTransformedBox]'s (Ruling P2) -- one bound
-/// loop, not a second copy of it. The `Float64List(4)` scratch is local and
-/// allocated per call: invariant 1's per-patch exception (a patch is one
-/// per label per frame, not per entity).
+/// loop, not a second copy of it. The caller passes a reused scratch on the
+/// frame path; a null scratch allocates one -- test callers.
 PatchRegion? patchRegionFor(ResidentTextRecord t, Transform2 collectionToDevice,
     int widthPx, int heightPx,
-    {required int maxWidth, required int maxHeight}) {
-  final bound = Float64List(4);
+    {required int maxWidth, required int maxHeight, Float64List? scratch}) {
+  final bound = scratch ?? Float64List(4);
   boundTransformedBox(
       t.boxMinX, t.boxMinY, t.boxMaxX, t.boxMaxY, collectionToDevice, bound);
   final x0 = bound[0].floor().clamp(0, widthPx);
