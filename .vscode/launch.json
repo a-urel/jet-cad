@@ -133,6 +133,57 @@
             ]
         },
         {
+            // **Criterion 11's pair, arm one.** `SPIKE_TEXT=true` puts labels
+            // in the corpus -- `kPatchedLabelCount` of them deliberately
+            // patched -- and `DRAW_TEXT` (unset here, so its own default of
+            // `true`) means arm C draws them. Read this configuration and the
+            // one below as a DIFFERENCE, not as two numbers on their own:
+            // neither run's timings mean anything by itself, only the gap
+            // between this run's and the control's isolates the cost of
+            // drawing text.
+            "name": "2d: GPU spike -- text ON (criterion 11, DRAW_TEXT=true)",
+            "cwd": "apps/dev_harness_2d",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "macos",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "--dart-define=RUN_GPU_SPIKE=true",
+                "--dart-define=ENTITIES=10000",
+                "--dart-define=SPIKE_DEFS=20",
+                "--dart-define=SPIKE_INSTANCES=150",
+                "--dart-define=SPIKE_FRAMES=30",
+                "--dart-define=SPIKE_REPEATS=3",
+                "--dart-define=SPIKE_TEXT=true"
+            ]
+        },
+        {
+            // **Criterion 11's pair, arm two -- the control.** The same
+            // corpus (`SPIKE_TEXT=true`, so the labels and their patches are
+            // still there to composite around) but `DRAW_TEXT=false`: the
+            // painter suppresses every text op, so arm C draws nothing text
+            // touches. Read only as a difference against the configuration
+            // above -- see its comment for why.
+            "name": "2d: GPU spike -- text ON, DRAW_TEXT=false (criterion 11 control)",
+            "cwd": "apps/dev_harness_2d",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "macos",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "--dart-define=RUN_GPU_SPIKE=true",
+                "--dart-define=ENTITIES=10000",
+                "--dart-define=SPIKE_DEFS=20",
+                "--dart-define=SPIKE_INSTANCES=150",
+                "--dart-define=SPIKE_FRAMES=30",
+                "--dart-define=SPIKE_REPEATS=3",
+                "--dart-define=SPIKE_TEXT=true",
+                "--dart-define=DRAW_TEXT=false"
+            ]
+        },
+        {
             // Debug mode: hot reload and breakpoints, at the cost of numbers
             // that mean nothing -- `refuseDebugMode()` in the rig refuses to
             // record from a debug build, and the same caution applies to

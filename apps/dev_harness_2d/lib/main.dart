@@ -655,6 +655,95 @@ final bool kSpikeFills = switch (
     throw StateError('SPIKE_FILLS must be true or false; got "$other"'),
 };
 
+/// Whether the GPU spike corpus carries text -- Plan E's Task 7. Same shape
+/// and same reason as [kSpikeFills]: a `String.fromEnvironment` that throws
+/// on anything but `true`/`false`, inert at `false` so every number a run
+/// took before this define existed is reproducible unchanged.
+///
+/// On, [spikeDocument] generates labels at [harnessDocument]'s own fractions
+/// (`labelFraction: 0.02`, `attributedInstanceFraction: 0.2`) and adds
+/// [kPatchedLabelCount] deliberate **patched** labels through
+/// [_addPatchedLabels]: a label, then a thick solid stroke of higher handle
+/// through its middle. Criterion 11 requires at least one such label or the
+/// text-pass number measures nothing.
+final bool kSpikeText =
+    switch (const String.fromEnvironment('SPIKE_TEXT', defaultValue: 'false')) {
+  'false' => false,
+  'true' => true,
+  final other =>
+    throw StateError('SPIKE_TEXT must be true or false; got "$other"'),
+};
+
+/// Deliberate patched labels [_addPatchedLabels] adds. Eight: enough to put
+/// a patch on screen at the fitted camera and under every pan step, few
+/// enough that the corpus is still the measured corpus plus text.
+const int kPatchedLabelCount = 8;
+
+/// A label the fitted camera can read -- 600 units is ~13.5 logical px at
+/// 0.0225 px/unit, above `kMinTextCapPixels` at every band scale.
+const double kPatchedLabelHeight = 600.0;
+
+/// Adds [kPatchedLabelCount] labels, each followed (higher handle) by a solid
+/// stroke of lineweight 100 through its middle -- so each is a patch by
+/// construction. Placed in the corridor `_addFillRegions` uses, spaced along
+/// x, so a pan of `(4, 0)` per frame keeps at least one on screen.
+void _addPatchedLabels(DraftDocument doc, int entityCount) {
+  final centerX = kDefaultOriginX + kFloorWidth / 2;
+  final centerY = kOriginY + kFloorHeight / 2;
+  for (var i = 0; i < kPatchedLabelCount; i++) {
+    final x = centerX - 3000.0 + i * 800.0;
+    final y = centerY - 750.0;
+    final label = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: label,
+        owner: doc.rootHandle,
+        kind: EntityKind.text,
+        layer: ReservedHandles.layerZero,
+        linetype: ReservedHandles.byLayerLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: kByLayer,
+        transparency: 0,
+        flags: 0,
+        text: 'ROOM ${i + 1}',
+        textStyle: ReservedHandles.standardTextStyle,
+        textAttrs: packTextAttrs(),
+      ),
+      payload: GeometryPayload(
+        coords: Float64List.fromList([x, y]),
+        scalars: Float64List.fromList([kPatchedLabelHeight, 0, 1, 0]),
+      ),
+    ));
+    final stroke = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: stroke,
+        owner: doc.rootHandle,
+        kind: EntityKind.line,
+        layer: ReservedHandles.layerZero,
+        linetype: ReservedHandles.byLayerLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: 100,
+        transparency: 0,
+        flags: 0,
+      ),
+      payload: GeometryPayload(
+        coords: Float64List.fromList([
+          x - 100,
+          y + kPatchedLabelHeight * 0.4,
+          x + 2500,
+          y + kPatchedLabelHeight * 0.4
+        ]),
+        scalars: Float64List(0),
+      ),
+    ));
+  }
+}
+
 /// Multiplies the size of every room [_addFillRegions] adds, so a human can
 /// actually see one.
 ///
@@ -694,8 +783,9 @@ final double kSpikeFillScale = _doubleDefine(
 /// fills-on corpus without depending on how the binary happened to be
 /// launched.
 DraftDocument spikeDocument(
-    {int? entityCount, bool? fillsEnabled, double? fillScale}) {
+    {int? entityCount, bool? fillsEnabled, double? fillScale, bool? text}) {
   final count = entityCount ?? kEntities;
+  final withText = text ?? kSpikeText;
   final doc = generateDocument(
     count,
     definitionCount: kSpikeDefs,
@@ -707,13 +797,14 @@ DraftDocument spikeDocument(
     layerCount: 8,
     byBlockFraction: 0.3,
     dashedFraction: kDashedFraction,
-    labelFraction: 0,
-    attributedInstanceFraction: 0,
+    labelFraction: withText ? 0.02 : 0,
+    attributedInstanceFraction: withText ? 0.2 : 0,
     measurer: harnessMeasurer,
   );
   if (fillsEnabled ?? kSpikeFills) {
     _addFillRegions(doc, count, sizeScale: fillScale ?? kSpikeFillScale);
   }
+  if (withText) _addPatchedLabels(doc, count);
   return doc;
 }
 
@@ -753,6 +844,7 @@ void main() {
       document: spikeDocument(),
       viewport: kMeasurementViewport,
       lineweightScale: kLineweightScale,
+      drawText: kDrawText,
       // **The error is caught and printed, not left unhandled.** On the web a
       // dart2js profile build reports an unhandled async error as a bare
       // minified `Error` with no message, which says nothing about what
