@@ -119,7 +119,8 @@ instrument to catch.
 not adjusted; criterion 9 (a human looks at the window) is **eighteen of
 nineteen discharged on 2026-09-05** — Plan E's checks 1–4 and all fourteen
 older ones seen by a human, no problem reported — and still open on Plan
-E's fifth check, the `DRAW_TEXT=false` control, whose run was not made.
+E's fifth check, the `DRAW_TEXT=false` control — its run was made and
+looked at, and the human answered "could not see".
 See [Resume here](#resume-here).
 
 ---
@@ -787,8 +788,11 @@ since `de962bd`) and Plan E's checks 1–4. It is a blanket verdict over an
 enumerated list, recorded as exactly that in
 [Plan E's results note](docs/superpowers/notes/2026-09-04-plan-e-results.md#the-window--eighteen-of-nineteen-checks-discharged-2026-09-05-one-still-owed).
 **Still OWED: Plan E's fifth check** — `DRAW_TEXT=false` shows the same
-drawing with no labels and no patches — because that control run was not
-made. The command, with the one flag that is missing for check 5:
+drawing with no labels and no patches. Its control run WAS made the same
+day (`textOps=0 patches=0`, no crash, log in Plan E's raw folder) and the
+human, asked yes / no / could not see, answered **could not see** — so it
+stays open, neither passed nor failed. The command, with the flag for
+check 5:
 
 ```sh
 cd apps/dev_harness_2d

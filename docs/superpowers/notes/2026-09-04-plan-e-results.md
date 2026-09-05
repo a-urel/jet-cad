@@ -312,10 +312,10 @@ was reported failed, and no item was reported unseen. It is stronger than
 2026-09-01's "the drawing looks right" (which had no list in front of it),
 and weaker than an item-by-item transcript would be.
 
-**Check 5 is excluded from the verdict and stays OWED**: it needs a
-`DRAW_TEXT=false` run of the same corpus, and that run did not happen on
-2026-09-05. The human could not have seen it. Eighteen discharged, one
-owed.
+**Check 5 is excluded from that verdict and stays OWED**: it needs a
+`DRAW_TEXT=false` run of the same corpus, made separately later the same
+day — and on it the human answered "could not see" (details under check 5
+below). Eighteen discharged, one owed.
 
 `SPIKE_FILL_SCALE=20` was on, as Plan D's note requires for the eye — the
 timings in this run are therefore not comparable to any recorded number and
@@ -334,10 +334,19 @@ none was taken from it.
    paragraph, not a bitmap) and the stroke over it at every step. — **seen,
    no problem reported** (2026-09-05)
 5. `DRAW_TEXT=false` shows the same drawing with no labels and no patches.
-   — **OWED**: the control run was not made on 2026-09-05. Command: the one
-   above with `--dart-define=DRAW_TEXT=false` appended (also in
+   — **OWED, looked at and not judged.** The control run WAS made later on
+   2026-09-05 (command above with `--dart-define=DRAW_TEXT=false`; log:
+   [2026-09-04-plan-e-raw/eyeball-text-off-run.log](2026-09-04-plan-e-raw/eyeball-text-off-run.log);
+   `textOps=0 patches=0 subBuffer=0.00 MB`, `buffer=6.52 MB`, 27 phase
+   reports, no crash, `patches rendered=0` on every arm-C phase). Asked
+   "same drawing, no labels, no residue where labels would be — yes / no /
+   could not see", the human answered **could not see**. That is recorded
+   as given: not a pass, not a fail, the check stays open. What the log
+   alone proves is only that the text path was off (`textOps=0`) and the
+   frame path ran zero patch passes; whether the picture matched is what
+   the eye was for, and the eye did not settle it. Also in
    `.vscode/launch.json` as *"2d: GPU spike — text ON, DRAW_TEXT=false
-   (criterion 11 control)"*).
+   (criterion 11 control)"*.
 
 ### Plan D's five, Plan C's five and Plan B's four — discharged 2026-09-05
 
@@ -401,7 +410,7 @@ shot; zero survivors.** Full transcripts:
 | 6 | criterion 6: `buffer + subBuffer ≤ 8 MB` | **PASS** — 7.06 MB, 0.94 MB margin |
 | 7 | 14/14 mutations fire, survivors declared | **PASS** — 14/14 killed on the first shot, zero survivors |
 | 8 | no shader or bundle change | **PASS** — `git diff --stat 8dde4fb..HEAD -- packages/jet_cad_2d_flutter/shaders packages/jet_cad_2d_flutter/assets` empty |
-| 9 | a human looks at the window | **18 of 19 discharged 2026-09-05** — Plan E's checks 1–4 and all fourteen older ones seen, no problem reported; check 5 (`DRAW_TEXT=false` control) still **OWED**, its run was not made |
+| 9 | a human looks at the window | **18 of 19 discharged 2026-09-05** — Plan E's checks 1–4 and all fourteen older ones seen, no problem reported; check 5 (`DRAW_TEXT=false` control) still **OWED** — its run was made and looked at, the human answered "could not see" |
 | 10 | every gate green, all three packages | **PASS** — see below |
 
 **8 of 10.** Criterion 5 (criterion 11) is a measured MISS, not adjusted;
