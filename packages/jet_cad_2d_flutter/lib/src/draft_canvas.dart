@@ -9,6 +9,7 @@ import 'canvas_draw_sink.dart';
 import 'vertices_draw_sink.dart';
 import 'draft_painter.dart';
 import 'flutter_text_measurer.dart';
+import 'gpu/resident_rebuilder.dart';
 import 'render_backend.dart';
 import 'tile_cache.dart';
 
@@ -102,6 +103,7 @@ class DraftCanvas extends StatefulWidget {
     this.tiles = false,
     this.tileDevicePixels = kTileDevicePixels,
     this.onPaintForTest,
+    this.residentUploader,
   });
 
   final DraftDocument document;
@@ -163,8 +165,44 @@ class DraftCanvas extends StatefulWidget {
   /// a revision read inside the paint can be right and unreachable.
   final void Function()? onPaintForTest;
 
+  /// **Test-only.** Replaces the production uploader
+  /// (`uploadResidentCollection`) on the `residentGpu` path, so a widget test
+  /// can take that path without a GPU (Ruling F14). Not compared in
+  /// [DraftCanvasState.didUpdateWidget]: a test that re-pumps the same canvas
+  /// passes a fresh tear-off each time, and a re-attach on that alone would
+  /// make "a resize does not rebuild" untestable.
+  final ResidentUploader? residentUploader;
+
   @override
   State<DraftCanvas> createState() => DraftCanvasState();
+
+  static bool _residentFallbackReported = false;
+
+  /// How many times [_reportResidentFallback] has reported. **Test-only.**
+  /// Zero or one: criterion 10 says once per process.
+  static int debugResidentFallbackReports = 0;
+
+  /// **Test-only.** Rearms the one-shot so the next fallback reports again.
+  static void debugResetResidentFallbackReport() {
+    _residentFallbackReported = false;
+    debugResidentFallbackReports = 0;
+  }
+
+  /// The spec's "falls back to `VerticesDrawSink` and says so once" (Ruling
+  /// F5). One `FlutterError.reportError` per process, whichever of the two
+  /// fallbacks fires first: no GPU on this platform, or an upload that
+  /// returned null. Observable through `FlutterError.onError` and
+  /// [debugResidentFallbackReports]; never thrown.
+  static void _reportResidentFallback(String message) {
+    if (_residentFallbackReported) return;
+    _residentFallbackReported = true;
+    debugResidentFallbackReports++;
+    FlutterError.reportError(FlutterErrorDetails(
+        exception: FlutterError(message),
+        library: 'jet_cad_2d_flutter',
+        context:
+            ErrorDescription('choosing the render backend for DraftCanvas')));
+  }
 }
 
 /// Public so a test — or a tool that needs the painter's counters — can reach
@@ -193,6 +231,22 @@ class DraftCanvasState extends State<DraftCanvas> {
   /// cache invalidated" from "the cache was never asked" needs to read the
   /// counters of the cache this widget actually built.
   TileCache? tileCache;
+
+  /// Non-null exactly when [resolvedBackend] is [RenderBackend.residentGpu]:
+  /// the rebuild schedule and the backend the frame paints through once one
+  /// has landed. Public so a rig reads what actually rebuilt and when.
+  ResidentRebuilder? resident;
+
+  void _onResidentLanded() {
+    final r = resident;
+    if (r != null && r.uploadFailed) {
+      DraftCanvas._reportResidentFallback(
+          'DraftCanvas was asked for RenderBackend.residentGpu and the upload '
+          'failed (ResidentGeometry.create returned null; its FlutterError, if '
+          'any, is above this one). Drawing through VerticesDrawSink from now '
+          'on. Reported once per process.');
+    }
+  }
 
   late DocChangeNotifier _changes;
   late _TableListenableAdapter _tables;
@@ -269,18 +323,19 @@ class DraftCanvasState extends State<DraftCanvas> {
         lineweightScale: widget.lineweightScale,
         measurer: measurer,
         textStyleOf: widget.document.textStyleOf);
-    resolvedBackend = resolveBackend(widget.backend ?? defaultRenderBackend());
-    // **`residentGpu` paints through `vertices` here too, until Plan F.**
-    // `resolveBackend` is the platform-capability decision and is left alone
-    // — on a GPU-capable platform it legitimately returns `residentGpu`, and
-    // `resolvedBackend` reports that faithfully. But this widget has no
-    // GPU-resident sink to hand it yet (that wiring is Plan F's work — see
-    // `RenderBackend.residentGpu`'s doc), and the alternative, falling
-    // through to `null` below, would paint through `CanvasDrawSink` — the
-    // one-`drawPath`-per-primitive sink `RenderBackend.canvas`'s own doc
-    // calls "no longer any platform's default". `vertices` is the closest
-    // approximation available today, so both backends that are not `canvas`
-    // build the same batching sink.
+    final requested = widget.backend ?? defaultRenderBackend();
+    resolvedBackend = resolveBackend(requested);
+    if (requested == RenderBackend.residentGpu &&
+        resolvedBackend != RenderBackend.residentGpu) {
+      DraftCanvas._reportResidentFallback(
+          'DraftCanvas was asked for RenderBackend.residentGpu, but this '
+          'platform has no Flutter GPU (gpuAvailable() is false). Drawing '
+          'through VerticesDrawSink instead. Reported once per process.');
+    }
+    // **`residentGpu` still builds the vertices sink** -- it is what draws
+    // before the first rebuild lands and after an upload fails (Ruling F5).
+    // `canvas` stays the one-`drawPath`-per-primitive fallback an explicit
+    // `backend:` can still choose.
     vertices = resolvedBackend == RenderBackend.vertices ||
             resolvedBackend == RenderBackend.residentGpu
         ? VerticesDrawSink(
@@ -295,20 +350,50 @@ class DraftCanvasState extends State<DraftCanvas> {
       drawText: widget.drawText,
       minTextCapPixels: widget.minTextCapPixels,
     );
+    resident = resolvedBackend == RenderBackend.residentGpu
+        ? ResidentRebuilder(
+            document: widget.document,
+            painter: painter,
+            uploader: widget.residentUploader ??
+                (collection, viewport) => uploadResidentCollection(
+                    collection, viewport,
+                    measurer: measurer,
+                    textStyleOf: widget.document.textStyleOf),
+            pixelsPerPaperMm: widget.pixelsPerPaperMm,
+            lineweightScale: widget.lineweightScale,
+            measurer: measurer,
+            textStyleOf: widget.document.textStyleOf)
+        : null;
+    resident?.addListener(_onResidentLanded);
     _tables = _TableListenableAdapter(widget.document.tables.changes);
-    tileCache = widget.tiles
+    // **No tile cache beside the resident backend.** Both are gesture paths
+    // and they answer the same frame; the resident one holds the whole
+    // drawing and needs no tiles. `tiles: true` on a `residentGpu` canvas is
+    // honoured by the fallback path only if the resident one never lands --
+    // and it is not, deliberately: the cache would be built, invalidated
+    // and never painted. Ignored, and said so here.
+    tileCache = widget.tiles && resident == null
         ? TileCache(tileDevicePixels: widget.tileDevicePixels)
         : null;
     // The cache's derived state is updated before listeners run, for the
     // reason `DocChangeNotifier` gives: a listener repaints, and a repaint that
     // read the cache before `applyChange` had run would blit a tile the edit
-    // already invalidated.
-    _changes = DocChangeNotifier(widget.document,
-        onChange: (change) => tileCache?.applyChange(change, widget.document));
+    // already invalidated. The rebuilder is marked here too: every DocChange
+    // subclass, `touched` unread (the spec's declared-equivalent mutation).
+    _changes = DocChangeNotifier(widget.document, onChange: (change) {
+      tileCache?.applyChange(change, widget.document);
+      resident?.markDirty(RebuildTrigger.document);
+    });
     // **The table adapter is here and not a nicety.** Without it a layer edit
-    // causes no frame at all, so the cache's own invalidation — correct as it
-    // is — is never reached and stale pixels sit there until the camera moves.
-    _repaint = Listenable.merge([widget.camera, _changes, _tables, _settle]);
+    // causes no frame at all, so neither the cache's invalidation nor the
+    // rebuilder's revision check is ever reached.
+    _repaint = Listenable.merge([
+      widget.camera,
+      _changes,
+      _tables,
+      _settle,
+      if (resident != null) resident!,
+    ]);
   }
 
   /// Releases everything [_attach] built. Called from both teardown paths.
@@ -320,6 +405,9 @@ class DraftCanvasState extends State<DraftCanvas> {
   void _detach() {
     _changes.dispose();
     _tables.dispose();
+    resident?.removeListener(_onResidentLanded);
+    resident?.dispose();
+    resident = null;
     // A `ui.Image` holds native memory past its Dart object, and the cache
     // holds a viewport's worth of them.
     tileCache?.dispose();
@@ -378,6 +466,7 @@ class DraftCanvasState extends State<DraftCanvas> {
         sink: sink,
         vertices: vertices,
         tileCache: tileCache,
+        resident: resident,
         document: widget.document,
         devicePixelRatio: devicePixelRatio,
         onPaintForTest: widget.onPaintForTest,
@@ -401,6 +490,7 @@ class _DraftCustomPainter extends CustomPainter {
     required this.sink,
     required this.vertices,
     required this.tileCache,
+    required this.resident,
     required this.document,
     required this.devicePixelRatio,
     required this.onPaintForTest,
@@ -419,6 +509,9 @@ class _DraftCustomPainter extends CustomPainter {
 
   /// Null unless [DraftCanvas.tiles] is on.
   final TileCache? tileCache;
+
+  /// Non-null exactly when [resolvedBackend] is [RenderBackend.residentGpu].
+  final ResidentRebuilder? resident;
 
   /// Read for `tables.mutationRevision` only. See [DraftCanvas.tiles].
   final DraftDocument document;
@@ -444,6 +537,24 @@ class _DraftCustomPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     onPaintForTest?.call();
     canvas.clipRect(Offset.zero & size);
+    final resident = this.resident;
+    if (resident != null) {
+      // O(1), never walks: stores the frame's camera, viewport and dpr for
+      // the next rebuild and fires the three frame-read triggers. The
+      // table revision is pulled per frame for the reason the tiled branch
+      // gives below -- a table mutation reaches no command and so no
+      // `DocChange`.
+      resident.noteFrame(camera.value, size, devicePixelRatio,
+          document.tables.mutationRevision);
+      final backend = resident.backend;
+      if (backend != null) {
+        backend.paint(canvas, camera.value, size, devicePixelRatio);
+        return;
+      }
+      // Before the first landing, or after a failed upload: the vertices
+      // path below, which is the drawing every `residentGpu` canvas made
+      // before this plan (Ruling F5).
+    }
     final cache = tileCache;
     if (cache != null) {
       cache.paintFrame(
@@ -489,12 +600,29 @@ class _DraftCustomPainter extends CustomPainter {
     batching.flush();
   }
 
-  /// Always false: [repaint] is the only trigger.
+  /// False, except for the two resident-path facts a rebuild can carry that
+  /// [repaint] itself has no way to see.
   ///
   /// `shouldRepaint` is asked on every rebuild, and a rebuild happens for
   /// reasons — a parent laying out, a theme change — that have nothing to do
-  /// with the drawing having changed. Answering true there is what "repaint
-  /// every vsync" looks like in Flutter's vocabulary.
+  /// with the drawing having changed. Answering true there in general is what
+  /// "repaint every vsync" looks like in Flutter's vocabulary, so this stays
+  /// false except when [resident] is non-null and either the device pixel
+  /// ratio or the rebuilder identity changed since the last build: those are
+  /// exactly the two triggers [ResidentRebuilder.noteFrame] cannot detect on
+  /// its own, because it is only ever told about a frame from inside `paint`,
+  /// and this delegate's [repaint] listenable never fires for either of
+  /// them by itself -- a device pixel ratio change carries no `DocChange`,
+  /// no table mutation and no camera move, and a freshly re-attached
+  /// rebuilder starts with no listener of its own wired into anything yet.
+  /// Without this, a `residentGpu` canvas whose device pixel ratio changed,
+  /// or whose rebuilder was just replaced by [DraftCanvasState.didUpdateWidget],
+  /// would sit on a stale frame until some unrelated cause happened to repaint
+  /// it.
   @override
-  bool shouldRepaint(_DraftCustomPainter old) => false;
+  bool shouldRepaint(_DraftCustomPainter old) {
+    final r = resident;
+    if (r == null) return false;
+    return old.resident != r || old.devicePixelRatio != devicePixelRatio;
+  }
 }

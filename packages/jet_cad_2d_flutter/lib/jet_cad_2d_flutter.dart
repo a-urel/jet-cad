@@ -24,6 +24,14 @@ export 'src/flutter_text_measurer.dart';
 // getters) are marked `@internal` for the same reason, one file down.
 // `instance_record.dart` stays unexported too, for an unrelated reason: it is
 // `GeometryCollector`'s own wire format, not something a caller writes.
+//
+// One symbol from that file is the exception: `debugSetGpuAvailable` (Ruling
+// F14) is the seam a `DraftCanvas` widget test needs to take the
+// `residentGpu` path without a GPU, and callers reach it through this
+// barrel like everything else. `show` filters the export down to that one
+// name -- it does not re-admit the wildcard `flutter_scene` re-export the
+// paragraph above is about.
+export 'src/gpu/gpu_facade.dart' show debugSetGpuAvailable;
 export 'src/gpu/collection_frame.dart';
 export 'src/gpu/geometry_collector.dart';
 export 'src/gpu/gpu_draw_backend.dart';

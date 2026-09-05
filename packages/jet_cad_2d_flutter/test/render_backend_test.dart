@@ -33,6 +33,10 @@ Future<DraftCanvasState> _pump(WidgetTester tester,
 }
 
 void main() {
+  // Independent of test order: an earlier test's fallback report (Ruling F5)
+  // must not silently suppress a later test's own.
+  setUp(DraftCanvas.debugResetResidentFallbackReport);
+
   test('the platform default is vertices, unconditionally', () {
     // Plan 3d Phase C (Task 13) measured the web: CanvasKit's `drawVertices`
     // beat `drawPath` by 17-60x at 10,000-50,000 entities, wider than the
@@ -53,11 +57,18 @@ void main() {
     // `residentGpu` is resolved through `resolveBackend()` and may differ from
     // the requested backend when GPU is unavailable; check the final resolved
     // backend against what `resolveBackend()` returns.
+    //
     for (final backend in RenderBackend.values) {
       final state = await _pump(tester, backend: backend);
       final expectedBackend = resolveBackend(backend);
       expect(state.resolvedBackend, expectedBackend, reason: '$backend');
     }
+    // The `residentGpu` iteration above is exactly the fallback Ruling F5
+    // reports through `FlutterError.reportError` (this platform has no GPU
+    // under `flutter test`); expected here, not a defect. `flutter_test`
+    // fails a test that ends with a reported error still pending, so it is
+    // consumed here rather than left for teardown to trip over.
+    expect(tester.takeException(), isA<FlutterError>());
   });
 
   testWidgets('only the resolved backend builds a sink', (tester) async {
@@ -114,5 +125,8 @@ void main() {
     final state = await _pump(tester, backend: RenderBackend.residentGpu);
     expect(state.resolvedBackend, RenderBackend.vertices);
     expect(state.vertices, isNotNull);
+    // This request is the fallback Ruling F5 reports (see the comment on the
+    // test above); consumed for the same reason.
+    expect(tester.takeException(), isA<FlutterError>());
   });
 }
