@@ -405,41 +405,34 @@ class GpuDrawBackend {
       patchPass.setPrimitiveType(gpu.PrimitiveType.triangle);
       patchPass.setCullMode(gpu.CullMode.none);
       patchPass.setColorBlendEnable(true);
-      // Ruling E8: anchored at the target's origin. `Viewport`/`Scissor`
-      // throw on a negative origin, and the region's on-screen position is
-      // the compositor's business. Both are load-bearing when `region` is
-      // smaller than the patch target (a live scale below the band's
-      // ceiling): `Viewport` alone maps NDC to the region's rect, but only
-      // `Scissor` guarantees the rasteriser discards fragments the region
-      // excludes, so a stroke whose quad reaches past the region into the
-      // rest of the (larger, reused) target does not paint there.
+      // Ruling E8: anchored at the target's origin. `Viewport` throws on a
+      // negative origin, and the region's on-screen position is the
+      // compositor's business.
+      //
+      // **No `Scissor` -- the viewport alone bounds the draw, and that is
+      // enough.** `FrameInfo` (`buildFrameInfo`, built from `toPatch` below)
+      // maps the region's own device-pixel rect to NDC `[-1, 1]` on both
+      // axes; every vertex this pass emits is clipped against that NDC
+      // volume before rasterisation runs at all, which is what actually
+      // keeps a stroke's quad from painting outside the region when
+      // `region` is smaller than the reused target (a live scale below the
+      // band's ceiling) -- clipping happens at the primitive stage,
+      // upstream of any per-fragment scissor test, so a scissor identical
+      // to the viewport rect would have discarded nothing a correct NDC
+      // mapping does not already discard. A `setScissor` call was here
+      // originally (Ruling E8's letter) but was removed: the web backend's
+      // `RenderPass` (`flutter_scene/lib/src/gpu/web/render_pass.dart`)
+      // declares a `Scissor` data class yet never gives `RenderPass` a
+      // `setScissor` method at all, so calling it would have been a
+      // `NoSuchMethodError` waiting for whichever plan first targets web --
+      // a real gap on that backend, not one a call site here can paper
+      // over, and not worth suppressing the analyzer for (`flutter
+      // analyze`'s own generic stand-in,
+      // `flutter_scene/lib/src/gpu/stub/shim_stubs.dart`, is missing the
+      // same method, for the same reason its own doc comment gives: "the
+      // analyzer fallback is a throwing stub").
       patchPass.setViewport(
           gpu.Viewport(x: 0, y: 0, width: region.width, height: region.height));
-      // **`// ignore: undefined_method`, and why it is safe here.**
-      // `RenderPass` has three concrete shapes behind `gpu_facade.dart`'s
-      // conditional export (`flutter_scene/src/gpu/gpu.dart`): native
-      // (verbatim `package:flutter_gpu`, which declares `setScissor` --
-      // `flutter_gpu/lib/src/render_pass.dart:607`, confirmed against the
-      // Flutter SDK this package builds against), the web shim
-      // (`flutter_scene/lib/src/gpu/web/render_pass.dart`, which declares
-      // `Scissor` as a data class but never gives `RenderPass` a
-      // `setScissor` method -- a real gap on that backend, not one this
-      // call can paper over), and the analyzer's own generic stand-in
-      // (`flutter_scene/lib/src/gpu/stub/shim_stubs.dart`, its own doc
-      // comment: "the analyzer fallback is a throwing stub"), which
-      // `flutter analyze` resolves to for exactly this reason -- it has to
-      // type-check this file without picking a runtime platform. That stub
-      // declares `setViewport` (the sibling call above raises no
-      // diagnostic) but not `setScissor` either, an omission in the pinned
-      // `flutter_scene: ^0.23.0` (the newest published version, per `flutter
-      // pub outdated`) rather than a defect in this call. This device the
-      // harness targets (Task 7, macOS Metal) resolves the native shape, so
-      // this call reaches a real `setScissor` there; only the stand-in the
-      // analyzer statically type-checks against is missing it. A future web
-      // target would need this revisited -- it is not exercised today.
-      // ignore: undefined_method
-      patchPass.setScissor(
-          gpu.Scissor(x: 0, y: 0, width: region.width, height: region.height));
       patchPass.bindVertexBuffer(
           gpu.BufferView(geometry.corners,
               offsetInBytes: 0, lengthInBytes: geometry.corners.sizeInBytes),
