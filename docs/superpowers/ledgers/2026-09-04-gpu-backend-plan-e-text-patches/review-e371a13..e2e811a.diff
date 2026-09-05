@@ -1,0 +1,181 @@
+# Review package: e371a13..e2e811a
+
+## Commits
+e2e811a test(harness): the deliberate labels are the patches, by construction (Ruling R7-1)
+
+## Files changed
+ apps/dev_harness_2d/lib/gpu_arm.dart          | 11 ++++++++---
+ apps/dev_harness_2d/lib/main.dart             |  4 ++--
+ apps/dev_harness_2d/test/spike_text_test.dart | 22 ++++++++++++++++++++++
+ 3 files changed, 32 insertions(+), 5 deletions(-)
+
+## Diff
+diff --git a/apps/dev_harness_2d/lib/gpu_arm.dart b/apps/dev_harness_2d/lib/gpu_arm.dart
+index 22d14d2..5377423 100644
+--- a/apps/dev_harness_2d/lib/gpu_arm.dart
++++ b/apps/dev_harness_2d/lib/gpu_arm.dart
+@@ -1,21 +1,20 @@
+ // ignore_for_file: avoid_print -- the GSPIKE diagnostics below print by
+ // design; see `measurement_rig.dart`.
+ 
+ import 'dart:async';
+ 
+ import 'package:flutter/foundation.dart' show kIsWeb;
+ import 'package:flutter/material.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+-import 'main.dart' show harnessMeasurer;
+ import 'measurement_rig.dart';
+ 
+ // --- The GPU arm: painter vs. tiles vs. jet_cad_2d_flutter's resident-GPU
+ // backend, interleaved. -----------------------------------------------
+ //
+ // Formerly `gpu_arm.dart` and `gpu_arm_rig.dart` (branch
+ // `spike/flutter-gpu-backend`), which hand-rolled a collector and their own
+ // `flutter_gpu` plumbing to answer one question: can a pan or a zoom cost a
+ // uniform write instead of a document walk, and still draw sharp? Plan A
+ // (`docs/superpowers/plans/2026-08-29-gpu-backend-plan-a-seam-and-strokes.md`)
+@@ -359,21 +358,23 @@ class GpuSpikeState extends State<GpuSpikeApp> {
+     // Read once, beside the collector's own read below: both this and
+     // `ResidentGeometry.create`'s `maxPatchWidth`/`maxPatchHeight` need the
+     // same device pixel ratio, and reading it twice from `MediaQuery` would
+     // invite the two to drift if a future edit changed one call site and not
+     // the other.
+     final dpr = MediaQuery.of(context).devicePixelRatio;
+     final collector = GeometryCollector(
+       pixelsPerPaperMm: kLogicalPixelsPerMm,
+       devicePixelRatio: dpr,
+       lineweightScale: widget.lineweightScale,
+-      measurer: harnessMeasurer,
++      // The document's own measurer, not a harness global -- `GeometryCollector`
++      // takes the abstract `TextMeasurer?`, so no cast is needed here.
++      measurer: widget.document.textMeasurer,
+       textStyleOf: widget.document.textStyleOf,
+     );
+     // **Collected under the fit camera, not an identity one.** `DraftPainter`
+     // folds the camera into the residuals it hands a sink, and its
+     // level-of-detail decisions read the camera's scale. Collecting under an
+     // identity camera would give world coordinates and the *wrong* level of
+     // detail. Collecting under the fit camera gives the level of detail a
+     // fitted view would draw, and the buffer's space is then that camera's
+     // screen space -- which is also the space `collectionCamera` below tells
+     // `GpuDrawBackend` to map back out of every frame.
+@@ -401,22 +402,26 @@ class GpuSpikeState extends State<GpuSpikeApp> {
+     stopwatch.stop();
+ 
+     setState(() {
+       instanceCount = collector.instanceCount;
+       skippedOps = collector.skippedOps;
+       textOps = collector.texts.length;
+       patches = patchList.length;
+       classifyMs = classifyWatch.elapsedMicroseconds / 1000.0;
+       backend = geometry == null
+           ? null
++          // The cast is safe by construction: every document this harness
++          // hands `GpuSpikeApp` -- `spikeDocument()` -- is built on
++          // `harnessMeasurer`, a `FlutterTextMeasurer`, which is exactly what
++          // `GpuDrawBackend` requires for its own `measurer:`.
+           : GpuDrawBackend(geometry, collectionCamera,
+-              measurer: harnessMeasurer,
++              measurer: widget.document.textMeasurer as FlutterTextMeasurer,
+               textStyleOf: widget.document.textStyleOf);
+       subBufferBytes = geometry == null
+           ? 0
+           : geometry.byteLength - ResidentGeometry.byteLengthFor(instanceCount);
+       patchTargetBytes = geometry?.patchTargetBytes ?? 0;
+       uploadMs = stopwatch.elapsedMicroseconds / 1000.0;
+     });
+ 
+     if (geometry == null) {
+       gpuReport(
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index 56870ee..d211f69 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -680,21 +680,21 @@ final bool kSpikeText =
+ const int kPatchedLabelCount = 8;
+ 
+ /// A label the fitted camera can read -- 600 units is ~13.5 logical px at
+ /// 0.0225 px/unit, above `kMinTextCapPixels` at every band scale.
+ const double kPatchedLabelHeight = 600.0;
+ 
+ /// Adds [kPatchedLabelCount] labels, each followed (higher handle) by a solid
+ /// stroke of lineweight 100 through its middle -- so each is a patch by
+ /// construction. Placed in the corridor `_addFillRegions` uses, spaced along
+ /// x, so a pan of `(4, 0)` per frame keeps at least one on screen.
+-void _addPatchedLabels(DraftDocument doc, int entityCount) {
++void _addPatchedLabels(DraftDocument doc) {
+   final centerX = kDefaultOriginX + kFloorWidth / 2;
+   final centerY = kOriginY + kFloorHeight / 2;
+   for (var i = 0; i < kPatchedLabelCount; i++) {
+     final x = centerX - 3000.0 + i * 800.0;
+     final y = centerY - 750.0;
+     final label = doc.handleSeed.next();
+     doc.commands.execute(AddEntityCommand(
+       record: EntityRecord(
+         handle: label,
+         owner: doc.rootHandle,
+@@ -797,21 +797,21 @@ DraftDocument spikeDocument(
+     layerCount: 8,
+     byBlockFraction: 0.3,
+     dashedFraction: kDashedFraction,
+     labelFraction: withText ? 0.02 : 0,
+     attributedInstanceFraction: withText ? 0.2 : 0,
+     measurer: harnessMeasurer,
+   );
+   if (fillsEnabled ?? kSpikeFills) {
+     _addFillRegions(doc, count, sizeScale: fillScale ?? kSpikeFillScale);
+   }
+-  if (withText) _addPatchedLabels(doc, count);
++  if (withText) _addPatchedLabels(doc);
+   return doc;
+ }
+ 
+ /// Frames measured per phase, per arm, per repeat.
+ final int kSpikeFrames = _intDefine(
+     'SPIKE_FRAMES', const String.fromEnvironment('SPIKE_FRAMES'), 60,
+     minimum: 8);
+ 
+ /// How many times the three arms are cycled. Interleaving is what makes the
+ /// ratios readable; one repeat is a single sample and says little.
+diff --git a/apps/dev_harness_2d/test/spike_text_test.dart b/apps/dev_harness_2d/test/spike_text_test.dart
+index 18f8865..2709d91 100644
+--- a/apps/dev_harness_2d/test/spike_text_test.dart
++++ b/apps/dev_harness_2d/test/spike_text_test.dart
+@@ -65,13 +65,35 @@ void main() {
+         measurer: harnessMeasurer,
+         textStyleOf: doc.textStyleOf);
+     final camera = ViewportTransform.fit(doc.extents, kMeasurementViewport);
+     painter.paint(collector, camera, kMeasurementViewport);
+     final patches = classifyTextPatches(
+         collector.data, collector.instanceCount, collector.texts,
+         devicePixelRatio: 1.0);
+     expect(collector.skippedOps, 0, reason: 'text is drawn now');
+     expect(patches.length, greaterThanOrEqualTo(kPatchedLabelCount),
+         reason: 'every deliberate patched label is a patch');
++    // The count above is not enough on its own: this corpus's vocabulary
++    // labels (`labelFraction: 0.02`) land patches of their own -- 29 of them,
++    // measured directly against `kPatchedLabelCount = 8` (37 total) -- so a
++    // mutation that deletes `if (withText) _addPatchedLabels(doc);` in
++    // `spikeDocument` would still leave `patches.length >=
++    // kPatchedLabelCount` green. What has to be true, and what only the two
++    // checks below actually pin down, is that [_addPatchedLabels]'s own
++    // labels -- identified by their `'ROOM '` text, which neither the plain
++    // floor texts (empty string) nor the vocabulary labels (no `'ROOM'`
++    // entry) ever produce -- are themselves *among* the patches, by
++    // construction.
++    final roomTextIndices = <int>[
++      for (var i = 0; i < collector.texts.length; i++)
++        if (collector.texts[i].text.startsWith('ROOM ')) i,
++    ];
++    expect(roomTextIndices.length, kPatchedLabelCount,
++        reason: 'every deliberate patched label reached the collector');
++    final patchedTextIndices = patches.map((p) => p.textIndex).toSet();
++    for (final i in roomTextIndices) {
++      expect(patchedTextIndices, contains(i),
++          reason: 'ROOM label $i (collector.texts[$i]) must be a patch');
++    }
+     index.dispose();
+   });
+ }

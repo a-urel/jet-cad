@@ -146,4 +146,59 @@ void main() {
               'cannot see a permutation');
     });
   });
+
+  group('textOverlapFixture', () {
+    late DraftDocument doc;
+    setUp(() => doc = textOverlapFixture(FlutterTextMeasurer()));
+
+    test('has the handles the table names, and the strokes are thick', () {
+      for (final h in [900, 901, 903, 904, 905, 910, 911, 921, 922, 931]) {
+        expect(doc.entities.slotOf(Handle(h)), isNotNull, reason: 'handle $h');
+      }
+      int lineweightOf(int h) =>
+          doc.entities.lineweightAt(doc.entities.slotOf(Handle(h))!);
+      expect(lineweightOf(903), 120);
+      expect(lineweightOf(922), 400);
+    });
+
+    test('the placement is mirrored, rotated and non-uniform', () {
+      // `DocumentTree.operator []` is the lookup by handle (`tree.dart:12`).
+      final t = (doc.tree[const Handle(990)]! as InstanceNode).transform;
+      expect(t.determinant, lessThan(0), reason: 'mirrored');
+      expect(t.b, isNot(0.0), reason: 'rotated');
+      expect(t.anisotropyRatio, isNot(closeTo(1.0, 1e-6)),
+          reason: 'non-uniform');
+    });
+
+    test('stroke 903 actually crosses label 901 at the fitted camera',
+        () async {
+      // The overlap is measured, not assumed: the label alone is painted
+      // through the reference and its ink read back; then the stroke alone;
+      // the two must share at least 200 device pixels. `strokeInkInsideLabel`
+      // is the same instrument Task 5's gate reads.
+      expect(
+          await strokeInkInsideLabel(doc, const Handle(903), const Handle(901)),
+          greaterThan(200));
+      expect(
+          await strokeInkInsideLabel(doc, const Handle(900), const Handle(901)),
+          greaterThan(200));
+    });
+
+    test("stroke 922's centerline misses label 921 but its width reaches it",
+        () async {
+      expect(
+          await strokeInkInsideLabel(doc, const Handle(922), const Handle(921)),
+          greaterThan(50));
+      // The same corpus rebuilt with 922 at hairline width: there is no
+      // modify-lineweight command in this package, so the fixture takes the
+      // lineweight as a parameter and the test builds it twice.
+      final hairline =
+          textOverlapFixture(FlutterTextMeasurer(), grazeLineweight: 1);
+      expect(
+          await strokeInkInsideLabel(
+              hairline, const Handle(922), const Handle(921)),
+          0,
+          reason: 'at hairline width the same centerline touches no glyph');
+    });
+  });
 }

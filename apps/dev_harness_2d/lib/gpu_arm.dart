@@ -32,14 +32,22 @@ import 'measurement_rig.dart';
 // not a bug in this harness.** `GeometryCollector` implements `polyline`
 // (with joins), `point`, `circle` and `arc` (flattened, seam join included
 // on a closed sweep) -- Plan B's job, done -- since Plan C it also shades
-// dash patterns per fragment, dashed arcs included, and since Plan D it draws
+// dash patterns per fragment, dashed arcs included, since Plan D it draws
 // `fillPolygon` and `fillCircle` too: one pre-triangulated instance per
 // triangle, or per fan slice at the outline's own step count, in the fill
-// kind (`kKindFill`) the shader's third branch reads. `text` is the only op
-// that still falls through to its `skippedOps` counter -- Plan E's job. A
-// corpus with text will show visibly less on arm C than on arm A or B --
-// `skippedOps` in the `GSPIKE collect+upload` line says how much, so a thin
-// picture reads as a number instead of as a silent gap.
+// kind (`kKindFill`) the shader's third branch reads, and since Plan E it
+// draws `text` too -- resident labels the vertex shader positions from a
+// per-frame uniform, and any label a later stroke covers goes through a
+// per-label "patch": a small offscreen render of just that label and the
+// instances found to cover it (`classifyTextPatches`), composited back after
+// the main pass so the covering geometry still wins. `DRAW_TEXT=false` is
+// now the criterion-11 control -- see the `GSPIKE note` line below for how
+// many patches this corpus carries. **What arm C still does not draw is
+// nothing** -- every op `DraftPainter` emits, this collector turns into
+// resident geometry. What remains unwired into this harness is
+// `DraftCanvas`'s own tiled/blit path drawing *through* this backend rather
+// than beside it, which is Plan F's job, not a gap in what the backend
+// itself can draw.
 //
 // **Whether the harness corpus itself carries fills is a separate question
 // from whether the collector can draw them, and `SPIKE_FILLS` is that
@@ -98,7 +106,10 @@ enum GpuSpikeArm {
 /// One phase's timings, in milliseconds.
 class GpuPhaseReport {
   GpuPhaseReport(this.arm, this.phase, this.build, this.raster, this.submits,
-      {this.unalignedExcess = 0});
+      {this.unalignedExcess = 0,
+      this.patchesRendered = 0,
+      this.patchesClipped = 0,
+      this.patchesOffscreen = 0});
 
   final GpuSpikeArm arm;
   final String phase;
@@ -113,6 +124,16 @@ class GpuPhaseReport {
   /// Zero means the stream never shifted and the figures are aligned after
   /// all. Anything else is the size of the ordinal ambiguity.
   final int unalignedExcess;
+
+  /// [GpuDrawBackend.patchesRendered]/`patchesClipped`/`patchesOffscreen`,
+  /// read right after the phase -- so these describe the phase's **last
+  /// frame only**, not a sum or an average over it, the same way `submits`
+  /// is the only per-phase figure that is a genuine total. Zero on every arm
+  /// but `gpu`, and zero on arm `gpu` too whenever `SPIKE_TEXT` is off or the
+  /// corpus's labels are not covered by anything at this phase's camera.
+  final int patchesRendered;
+  final int patchesClipped;
+  final int patchesOffscreen;
 }
 
 /// Every line the rig prints, kept so the run can also *show* them.
@@ -168,34 +189,33 @@ class GpuArmPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // **Ownership of `image`, spelled out.** `backend.render` returns a
-    // fresh `ui.Image` wrapper on every call, over the *same* GPU texture
-    // (`GpuDrawBackend._target`, reused across frames and only recreated on
-    // resize) -- so this is a new Dart-side handle each frame, not a new
-    // texture. `drawImageRect` below records that handle into the `Picture`
-    // this `paint` call builds; the picture is what needs the image to stay
-    // alive, for as long as the raster thread takes to consume it, which
-    // outlives this function returning. This method deliberately does not
-    // call `image.dispose()` -- doing so here, before the picture rasterises,
-    // would race the very thing that still needs it. Not disposing leaves
-    // the handle to the same lifetime the engine already manages for any
+    // **Ownership of the images `backend.paint` records, spelled out.**
+    // `GpuDrawBackend.paint` calls `render` for the main image, exactly as
+    // this method used to call it directly, and -- since Plan E -- builds one
+    // more `ui.Image` per covered label from that frame's patch textures. All
+    // of them are fresh Dart-side handles over GPU textures the backend
+    // itself owns and reuses across frames (the main render target, and each
+    // patch's own, resized only when the geometry that needs it changes);
+    // none of these calls allocate a new texture. Every handle is recorded
+    // into the `Picture` this `paint` call builds -- the compositor's own
+    // `drawImageRect` calls, one per image -- so the picture is what needs
+    // each one to stay alive, for as long as the raster thread takes to
+    // consume it, which outlives this function returning. Neither this
+    // method nor `GpuDrawBackend.paint` disposes any of them -- doing so here,
+    // before the picture rasterises, would race the very thing that still
+    // needs them (**Controller ruling R6-2**, in force). Not disposing leaves
+    // each handle to the same lifetime the engine already manages for any
     // image recorded into a picture: it is reclaimed once Dart's GC collects
-    // this `ui.Image` wrapper, no earlier than the frame that recorded it has
-    // rasterised. Over this harness's measured run that is up to 270
-    // short-lived per-frame handles (one per `render` call with a camera
-    // change); that is a real, accepted GC-pressure cost of a measurement
-    // widget creating one `ui.Image` per frame, not a leak, and not a claim
-    // about the package's own frame-path allocation budget (CLAUDE.md's
-    // non-negotiable governs `jet_cad_2d_flutter`'s frame path, which this
-    // ad hoc harness `CustomPainter` is not part of).
-    final image = backend.render(camera.value, size, devicePixelRatio);
-    if (image == null) return;
-    canvas.drawImageRect(
-      image,
-      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..filterQuality = FilterQuality.none,
-    );
+    // that `ui.Image` wrapper, no earlier than the frame that recorded it has
+    // rasterised. Over this harness's measured run that is now up to `1 + P`
+    // short-lived per-frame handles per camera-changed frame, where `P` is
+    // this frame's patch count, instead of one -- that is a real, accepted
+    // GC-pressure cost of a measurement widget creating these images per
+    // frame, not a leak, and not a claim about the package's own frame-path
+    // allocation budget (CLAUDE.md's non-negotiable governs
+    // `jet_cad_2d_flutter`'s frame path, which this ad hoc harness
+    // `CustomPainter` is not part of). Task 9 measures the churn this adds.
+    backend.paint(canvas, camera.value, size, devicePixelRatio);
   }
 
   @override
@@ -236,6 +256,7 @@ class GpuSpikeApp extends StatefulWidget {
     required this.document,
     required this.viewport,
     required this.lineweightScale,
+    required this.drawText,
     required this.onReady,
     required this.onFailed,
   });
@@ -243,6 +264,13 @@ class GpuSpikeApp extends StatefulWidget {
   final DraftDocument document;
   final Size viewport;
   final double lineweightScale;
+
+  /// Whether the painter emits text ops for arm C to draw, and arm C's own
+  /// backend to composite -- criterion 11's control. See `main.dart`'s
+  /// `kDrawText` doc comment: with text drawn by this arm since Plan E,
+  /// `DRAW_TEXT=false` isolates the cost of drawing it rather than merely
+  /// undercounting what the painter walk emits.
+  final bool drawText;
   final void Function(GpuSpikeState state) onReady;
   final void Function(Object error, StackTrace stack) onFailed;
 
@@ -263,6 +291,28 @@ class GpuSpikeState extends State<GpuSpikeApp> {
   GpuDrawBackend? backend;
   int instanceCount = 0;
   int skippedOps = 0;
+
+  /// Text ops the walk emitted -- `collector.texts.length`, one per resident
+  /// label. Zero unless `SPIKE_TEXT=true` put labels in the corpus.
+  int textOps = 0;
+
+  /// Labels [classifyTextPatches] found at least one covering instance for,
+  /// at this arm's collection camera. The number criterion 11 measures the
+  /// cost of drawing.
+  int patches = 0;
+
+  /// `geometry.byteLength - ResidentGeometry.byteLengthFor(instanceCount)` --
+  /// the device memory every patch's sub-buffer of instances occupies, beside
+  /// the main buffer [ResidentGeometry.byteLength] already counts.
+  int subBufferBytes = 0;
+
+  /// `geometry.patchTargetBytes` -- the device memory every patch's own
+  /// render target occupies, a cost with no analogue before Plan E.
+  int patchTargetBytes = 0;
+
+  /// Wall-clock cost of [classifyTextPatches], in milliseconds -- read
+  /// against criterion 7's rebuild budget, beside [uploadMs].
+  double classifyMs = 0;
 
   /// Wall-clock cost of the one-time collection and upload, in milliseconds.
   double uploadMs = 0;
@@ -297,19 +347,28 @@ class GpuSpikeState extends State<GpuSpikeApp> {
       document: widget.document,
       index: index,
       resolver: DocumentStyleResolver(widget.document),
-      // Text is not drawn by this arm -- `GeometryCollector.text()` only
-      // counts it -- but `drawText: true` still asks the painter to *emit*
-      // text ops rather than suppress them. Suppressing them here would
-      // make the collector's `skippedOps` undercount: it can only count an
-      // op it is actually handed, so what keeps the count honest about what
-      // a later plan's backend would still owe is the painter emitting
-      // every op and the collector being the one that drops it.
-      drawText: true,
+      // `widget.drawText`, not a hard-coded `true`: with text drawn by this
+      // arm since Plan E, this is now criterion 11's control, not a way to
+      // undercount what the painter walk emits. At `DRAW_TEXT=false` the
+      // painter suppresses text ops entirely -- `collector.texts` is empty,
+      // no patch is ever classified, and the difference against a
+      // `DRAW_TEXT=true` run at the same corpus is the cost of drawing text.
+      drawText: widget.drawText,
     );
+    // Read once, beside the collector's own read below: both this and
+    // `ResidentGeometry.create`'s `maxPatchWidth`/`maxPatchHeight` need the
+    // same device pixel ratio, and reading it twice from `MediaQuery` would
+    // invite the two to drift if a future edit changed one call site and not
+    // the other.
+    final dpr = MediaQuery.of(context).devicePixelRatio;
     final collector = GeometryCollector(
       pixelsPerPaperMm: kLogicalPixelsPerMm,
-      devicePixelRatio: MediaQuery.of(context).devicePixelRatio,
+      devicePixelRatio: dpr,
       lineweightScale: widget.lineweightScale,
+      // The document's own measurer, not a harness global -- `GeometryCollector`
+      // takes the abstract `TextMeasurer?`, so no cast is needed here.
+      measurer: widget.document.textMeasurer,
+      textStyleOf: widget.document.textStyleOf,
     );
     // **Collected under the fit camera, not an identity one.** `DraftPainter`
     // folds the camera into the residuals it hands a sink, and its
@@ -323,15 +382,44 @@ class GpuSpikeState extends State<GpuSpikeApp> {
     painter.paint(collector, collectionCamera, widget.viewport);
     final walkMs = stopwatch.elapsedMicroseconds / 1000.0;
 
-    final geometry =
-        await ResidentGeometry.create(collector.data, collector.instanceCount);
+    // Classified once, at rebuild, exactly like the collection walk above --
+    // not re-run per frame. `patches` says how many of this corpus's labels
+    // a later stroke covers; at `SPIKE_TEXT=true` that includes every one of
+    // `_addPatchedLabels`'s deliberate patches, by construction.
+    final classifyWatch = Stopwatch()..start();
+    final patchList = classifyTextPatches(
+        collector.data, collector.instanceCount, collector.texts,
+        devicePixelRatio: dpr);
+    classifyWatch.stop();
+
+    final geometry = await ResidentGeometry.create(
+        collector.data, collector.instanceCount,
+        texts: collector.texts,
+        patches: patchList,
+        devicePixelRatio: dpr,
+        maxPatchWidth: (widget.viewport.width * dpr).round(),
+        maxPatchHeight: (widget.viewport.height * dpr).round());
     stopwatch.stop();
 
     setState(() {
       instanceCount = collector.instanceCount;
       skippedOps = collector.skippedOps;
-      backend =
-          geometry == null ? null : GpuDrawBackend(geometry, collectionCamera);
+      textOps = collector.texts.length;
+      patches = patchList.length;
+      classifyMs = classifyWatch.elapsedMicroseconds / 1000.0;
+      backend = geometry == null
+          ? null
+          // The cast is safe by construction: every document this harness
+          // hands `GpuSpikeApp` -- `spikeDocument()` -- is built on
+          // `harnessMeasurer`, a `FlutterTextMeasurer`, which is exactly what
+          // `GpuDrawBackend` requires for its own `measurer:`.
+          : GpuDrawBackend(geometry, collectionCamera,
+              measurer: widget.document.textMeasurer as FlutterTextMeasurer,
+              textStyleOf: widget.document.textStyleOf);
+      subBufferBytes = geometry == null
+          ? 0
+          : geometry.byteLength - ResidentGeometry.byteLengthFor(instanceCount);
+      patchTargetBytes = geometry?.patchTargetBytes ?? 0;
       uploadMs = stopwatch.elapsedMicroseconds / 1000.0;
     });
 
@@ -348,7 +436,10 @@ class GpuSpikeState extends State<GpuSpikeApp> {
         'total ${uploadMs.toStringAsFixed(1)} ms, '
         'instances=$instanceCount, '
         'buffer=${(geometry.byteLength / (1024 * 1024)).toStringAsFixed(2)} MB, '
-        'skippedOps=$skippedOps');
+        'skippedOps=$skippedOps, textOps=$textOps patches=$patches '
+        'subBuffer=${(subBufferBytes / (1024 * 1024)).toStringAsFixed(2)} MB '
+        'patchTargets=${(patchTargetBytes / (1024 * 1024)).toStringAsFixed(2)} MB '
+        'classify=${classifyMs.toStringAsFixed(1)} ms');
   }
 
   @override
@@ -463,16 +554,26 @@ Future<void> runGpuSpike(
       '${viewport.height.toStringAsFixed(0)} '
       'frames=$frames repeats=$repeats');
   gpuReport('GSPIKE note: arm C (residentGpu) draws strokes, joins, points, '
-      'circles, arcs, shaded dashes and (since Plan D) fills -- '
-      '${state.skippedOps} op(s) this walk did not draw (text: Plan E\'s '
-      'job, see the section comment above this rig). Fills are only in this '
-      'corpus when SPIKE_FILLS=true; at its default the corpus carries none '
-      'and skippedOps is 0 on this account regardless. Butt caps only -- '
-      'Plan B emits no cap geometry. No antialiasing. Dash patterns are '
-      'evaluated per fragment against the live camera since Plan C, '
-      'collapse rule included, so nothing about them is baked. Every '
-      'remaining gap favours arm C on a timing comparison, which is why the '
-      'picture matters as much as the numbers here.');
+      'circles, arcs, shaded dashes, (since Plan D) fills and (since Plan E) '
+      'text -- ${state.skippedOps} op(s) this walk did not draw. Text is '
+      'drawn through the compositor: resident labels position from a '
+      'per-frame uniform, and this corpus has ${state.textOps} label(s), of '
+      'which ${state.patches} are patches -- a label a later stroke covers, '
+      'redrawn into its own small offscreen target and composited back after '
+      'the main pass so the covering geometry still wins. Only present when '
+      'SPIKE_TEXT=true; at its default the corpus carries no text and both '
+      'counts are 0. DRAW_TEXT=false is criterion 11\'s control: it asks the '
+      'painter to suppress every text op, so a run at DRAW_TEXT=false against '
+      'the same SPIKE_TEXT=true corpus isolates the cost of drawing text as a '
+      'difference between the two runs, not a single number read alone. '
+      'Fills are only in this corpus when SPIKE_FILLS=true; at its default '
+      'the corpus carries none and skippedOps is 0 on this account '
+      'regardless. Butt caps only -- Plan B emits no cap geometry. No '
+      'antialiasing. Dash patterns are evaluated per fragment against the '
+      'live camera since Plan C, collapse rule included, so nothing about '
+      'them is baked. Every remaining gap favours arm C on a timing '
+      'comparison, which is why the picture matters as much as the numbers '
+      'here.');
 
   final reports = <GpuPhaseReport>[];
 
@@ -537,9 +638,18 @@ Future<void> runGpuSpike(
         raster.add(t.rasterDuration.inMicroseconds / 1000.0);
       }
       if (kIsWeb) unalignedExcess = log.debugWorstExcess;
+      // Read right after the phase's last frame, not summed or averaged over
+      // it -- `GpuDrawBackend` resets these three at the top of every
+      // `render`, so they already describe one frame and not the phase as a
+      // whole. `state.backend` is only non-null on arm `gpu`; the other two
+      // arms report zero, which [GpuPhaseReport]'s own doc comment explains.
+      final b = state.backend;
       return GpuPhaseReport(
           a, name, build, raster, (state.backend?.frames ?? 0) - framesAtStart,
-          unalignedExcess: unalignedExcess);
+          unalignedExcess: unalignedExcess,
+          patchesRendered: b?.patchesRendered ?? 0,
+          patchesClipped: b?.patchesClipped ?? 0,
+          patchesOffscreen: b?.patchesOffscreen ?? 0);
     } finally {
       log.disarm();
     }
@@ -569,9 +679,27 @@ Future<void> runGpuSpike(
       if (rep.arm == GpuSpikeArm.gpu) {
         gpuReport('GSPIKE ${rep.arm.label} | ${rep.phase} | '
             'gpu submits=${rep.submits} of $frames frames');
+        // The counters this phase's *last* frame left behind, not a sum or
+        // an average over it -- see [GpuPhaseReport.patchesRendered]'s doc
+        // comment for why a per-phase total would be the wrong statistic
+        // here.
+        gpuReport('GSPIKE ${rep.arm.label} | ${rep.phase} | patches '
+            'rendered=${rep.patchesRendered} clipped=${rep.patchesClipped} '
+            'offscreen=${rep.patchesOffscreen}');
       }
     }
   }
 
+  // Ruling E2's discipline, surfaced here too: a backend built without a
+  // measurer drops every label silently, and `textsDropped` is that "so" as
+  // a number rather than a missing picture. This harness always builds
+  // `state.backend` WITH a measurer (`_buildResidentGeometry` above), so the
+  // count is always 0 here -- printed only when it is not, for a future
+  // caller that omits the measurer.
+  final textsDropped = state.backend?.textsDropped ?? 0;
+  if (textsDropped > 0) {
+    gpuReport('GSPIKE note: textsDropped=$textsDropped -- labels the last '
+        'frame drew nothing for, no compositor wired in.');
+  }
   gpuReport('GSPIKE done: ${reports.length} phase reports above.');
 }

@@ -1,0 +1,80 @@
+[IMPORTANT:flutter/shell/platform/embedder/embedder_surface_metal_impeller.mm(53)] Using the Impeller rendering backend (MetalSDF).
+GSPIKE collect+upload: walk 7.0 ms, total 8.9 ms, instances=106852, buffer=6.52 MB, skippedOps=0, textOps=0 patches=0 subBuffer=0.00 MB patchTargets=0.00 MB classify=0.4 ms
+GSPIKE run: entities=10000 instances=106852 viewport=1400x900 frames=30 repeats=3
+GSPIKE note: arm C (residentGpu) draws strokes, joins, points, circles, arcs, shaded dashes, (since Plan D) fills and (since Plan E) text -- 0 op(s) this walk did not draw. Text is drawn through the compositor: resident labels position from a per-frame uniform, and this corpus has 0 label(s), of which 0 are patches -- a label a later stroke covers, redrawn into its own small offscreen target and composited back after the main pass so the covering geometry still wins. Only present when SPIKE_TEXT=true; at its default the corpus carries no text and both counts are 0. DRAW_TEXT=false is criterion 11's control: it asks the painter to suppress every text op, so a run at DRAW_TEXT=false against the same SPIKE_TEXT=true corpus isolates the cost of drawing text as a difference between the two runs, not a single number read alone. Fills are only in this corpus when SPIKE_FILLS=true; at its default the corpus carries none and skippedOps is 0 on this account regardless. Butt caps only -- Plan B emits no cap geometry. No antialiasing. Dash patterns are evaluated per fragment against the live camera since Plan C, collapse rule included, so nothing about them is baked. Every remaining gap favours arm C on a timing comparison, which is why the picture matters as much as the numbers here.
+GSPIKE --- repeat 1 of 3 ---
+GSPIKE A painter (untiled) | hold | build  p50=0.04 p95=0.06 max=0.10 mean=0.04 (ms, n=26)
+GSPIKE A painter (untiled) | hold | raster p50=4.45 p95=6.08 max=7.63 mean=4.68 (ms, n=26)
+GSPIKE A painter (untiled) | pan | build  p50=7.36 p95=14.86 max=28.98 mean=8.90 (ms, n=24)
+GSPIKE A painter (untiled) | pan | raster p50=3.40 p95=6.29 max=7.07 mean=3.75 (ms, n=24)
+GSPIKE A painter (untiled) | zoom | build  p50=7.62 p95=15.13 max=27.86 mean=8.71 (ms, n=25)
+GSPIKE A painter (untiled) | zoom | raster p50=5.53 p95=9.52 max=14.17 mean=5.89 (ms, n=25)
+GSPIKE B tiles (blit) | hold | build  p50=0.29 p95=0.41 max=0.42 mean=0.30 (ms, n=26)
+GSPIKE B tiles (blit) | hold | raster p50=1.39 p95=1.75 max=2.02 mean=1.41 (ms, n=26)
+GSPIKE B tiles (blit) | pan | build  p50=0.49 p95=0.69 max=0.75 mean=0.48 (ms, n=26)
+GSPIKE B tiles (blit) | pan | raster p50=1.19 p95=1.38 max=1.44 mean=1.12 (ms, n=26)
+GSPIKE B tiles (blit) | zoom | build  p50=0.05 p95=0.13 max=0.17 mean=0.07 (ms, n=26)
+GSPIKE B tiles (blit) | zoom | raster p50=0.20 p95=0.38 max=0.97 mean=0.24 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | build  p50=0.21 p95=0.32 max=0.38 mean=0.19 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | raster p50=0.90 p95=1.15 max=1.55 mean=0.81 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | gpu submits=0 of 30 frames
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | patches rendered=0 clipped=0 offscreen=0
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | build  p50=0.60 p95=0.81 max=0.83 mean=0.60 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | raster p50=0.77 p95=0.97 max=1.03 mean=0.77 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | gpu submits=30 of 30 frames
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | patches rendered=0 clipped=0 offscreen=0
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | build  p50=0.53 p95=0.66 max=0.68 mean=0.53 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | raster p50=0.74 p95=0.88 max=1.01 mean=0.72 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | gpu submits=30 of 30 frames
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | patches rendered=0 clipped=0 offscreen=0
+GSPIKE --- repeat 2 of 3 ---
+GSPIKE A painter (untiled) | hold | build  p50=0.05 p95=0.27 max=0.46 mean=0.08 (ms, n=27)
+GSPIKE A painter (untiled) | hold | raster p50=4.43 p95=8.39 max=15.97 mean=5.19 (ms, n=27)
+GSPIKE A painter (untiled) | pan | build  p50=7.42 p95=14.69 max=25.17 mean=8.84 (ms, n=24)
+GSPIKE A painter (untiled) | pan | raster p50=3.44 p95=6.67 max=6.73 mean=3.79 (ms, n=24)
+GSPIKE A painter (untiled) | zoom | build  p50=7.49 p95=14.36 max=27.24 mean=8.38 (ms, n=25)
+GSPIKE A painter (untiled) | zoom | raster p50=3.52 p95=5.01 max=6.72 mean=3.59 (ms, n=25)
+GSPIKE B tiles (blit) | hold | build  p50=0.24 p95=0.31 max=0.34 mean=0.24 (ms, n=26)
+GSPIKE B tiles (blit) | hold | raster p50=0.99 p95=1.18 max=1.32 mean=0.99 (ms, n=26)
+GSPIKE B tiles (blit) | pan | build  p50=0.35 p95=0.52 max=0.74 mean=0.36 (ms, n=26)
+GSPIKE B tiles (blit) | pan | raster p50=0.83 p95=1.19 max=1.22 mean=0.86 (ms, n=26)
+GSPIKE B tiles (blit) | zoom | build  p50=0.28 p95=0.43 max=0.97 mean=0.26 (ms, n=26)
+GSPIKE B tiles (blit) | zoom | raster p50=0.84 p95=1.14 max=3.37 mean=0.76 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | build  p50=0.26 p95=0.33 max=0.39 mean=0.26 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | raster p50=0.99 p95=1.13 max=1.64 mean=1.00 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | gpu submits=0 of 30 frames
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | patches rendered=0 clipped=0 offscreen=0
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | build  p50=0.65 p95=0.83 max=0.85 mean=0.66 (ms, n=25)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | raster p50=0.86 p95=1.09 max=1.10 mean=0.84 (ms, n=25)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | gpu submits=30 of 30 frames
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | patches rendered=0 clipped=0 offscreen=0
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | build  p50=0.41 p95=0.56 max=0.59 mean=0.33 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | raster p50=0.53 p95=0.68 max=0.78 mean=0.42 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | gpu submits=30 of 30 frames
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | patches rendered=0 clipped=0 offscreen=0
+GSPIKE --- repeat 3 of 3 ---
+GSPIKE A painter (untiled) | hold | build  p50=0.04 p95=0.07 max=0.07 mean=0.04 (ms, n=27)
+GSPIKE A painter (untiled) | hold | raster p50=3.47 p95=4.51 max=4.68 mean=3.57 (ms, n=27)
+GSPIKE A painter (untiled) | pan | build  p50=7.44 p95=13.88 max=24.39 mean=8.66 (ms, n=25)
+GSPIKE A painter (untiled) | pan | raster p50=3.39 p95=5.38 max=6.26 mean=3.66 (ms, n=25)
+GSPIKE A painter (untiled) | zoom | build  p50=7.24 p95=13.81 max=26.22 mean=8.24 (ms, n=25)
+GSPIKE A painter (untiled) | zoom | raster p50=3.47 p95=4.94 max=6.32 mean=3.49 (ms, n=25)
+GSPIKE B tiles (blit) | hold | build  p50=0.20 p95=0.26 max=0.28 mean=0.19 (ms, n=25)
+GSPIKE B tiles (blit) | hold | raster p50=0.90 p95=1.18 max=1.18 mean=0.87 (ms, n=25)
+GSPIKE B tiles (blit) | pan | build  p50=0.47 p95=0.61 max=0.78 mean=0.46 (ms, n=26)
+GSPIKE B tiles (blit) | pan | raster p50=1.15 p95=1.29 max=1.41 mean=1.11 (ms, n=26)
+GSPIKE B tiles (blit) | zoom | build  p50=0.36 p95=0.46 max=0.84 mean=0.38 (ms, n=25)
+GSPIKE B tiles (blit) | zoom | raster p50=1.04 p95=1.21 max=3.60 mean=1.12 (ms, n=25)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | build  p50=0.27 p95=0.35 max=0.37 mean=0.26 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | raster p50=1.02 p95=1.15 max=1.44 mean=1.01 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | gpu submits=0 of 30 frames
+GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | patches rendered=0 clipped=0 offscreen=0
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | build  p50=0.48 p95=0.86 max=1.06 mean=0.44 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | raster p50=0.89 p95=1.16 max=2.23 mean=0.63 (ms, n=26)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | gpu submits=30 of 30 frames
+GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | patches rendered=0 clipped=0 offscreen=0
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | build  p50=0.52 p95=0.80 max=0.89 mean=0.46 (ms, n=25)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | raster p50=0.68 p95=1.06 max=1.12 mean=0.60 (ms, n=25)
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | gpu submits=30 of 30 frames
+GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | patches rendered=0 clipped=0 offscreen=0
+GSPIKE done: 27 phase reports above.

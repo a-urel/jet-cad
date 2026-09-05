@@ -1,0 +1,839 @@
+# Plan E's mutation log — Task 8
+
+Fourteen mutations (M-E1..M-E14), fired one at a time against the Plan E
+tree on `plan-e/text-patches`, each from a `cp <file> <file>.bak` backup
+made immediately before editing and restored the same way afterward. No
+mutation was ever reverted with `git checkout --`. `git status --short` was
+clean after every restore — this log is the only file this task's commit
+carries.
+
+All commands below ran from `packages/jet_cad_2d_flutter`.
+
+**Baseline, before any mutation:** `flutter test test/gpu/` — `+182: All
+tests passed!` (182 tests).
+
+Files mutated: `lib/src/gpu/text_patches.dart` (M-E1..M-E4, M-E6..M-E8,
+M-E13, M-E14), `lib/src/gpu/text_compositor.dart` (M-E5, M-E9, M-E10,
+M-E12), `lib/src/gpu/geometry_collector.dart` (M-E11).
+
+---
+
+## M-E1 — `classifyTextPatches` returns `[]` (the source edit, not the seam)
+
+**File:** `lib/src/gpu/text_patches.dart`
+
+The brief gives two forms of this mutation: the seam
+(`mutatePatches: (_) => const []`, already exercised by
+`text_order_test.dart`'s "drawing all text in one pass" test) and the
+SOURCE edit below. Only the source edit is fired here, per the brief's
+instruction; the seam test is not itself mutated.
+
+**Diff applied:**
+
+```diff
+ }) {
++  return <TextPatch>[]; // M-E1
+   // Collection units per device pixel, at the band's floor -- the LARGEST
+   // a device-pixel reach is anywhere inside the band.
+   final unitsPerDevicePixel = 1.0 / (devicePixelRatio * bandLowerScale);
+```
+
+**Command:** `flutter test test/gpu/text_patches_test.dart test/gpu/text_order_test.dart`
+
+**Verbatim output (representative failures — 15 of text_patches_test's 19
+tests failed, and all four scale rows plus the patchCount row of
+text_order_test failed; 11 tests passed total, both files combined):**
+
+```
+00:00 +0: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 0.5
+00:00 +0 -1: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 0.5 [E]
+  Expected: a value greater than or equal to <1>
+    Actual: <0>
+     Which: is not a value greater than or equal to <1>
+  COVERED must be a patch or this test sees no ordering
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_order_test.dart 60:7                  main.<fn>
+
+00:00 +0 -4: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 2.0 [E]
+  Expected: a value greater than or equal to <1>
+    Actual: <0>
+     Which: is not a value greater than or equal to <1>
+  COVERED must be a patch or this test sees no ordering
+  ...
+
+00:00 +0 -5: /.../test/gpu/text_order_test.dart: with level of detail on, both arms cull TINY the same way at scale 1 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.8722627737226277>
+     Which: is not a value greater than or equal to <0.995>
+
+00:00 +1 -6: /.../test/gpu/text_order_test.dart: the label nothing later reaches is not a patch, and still matches [E]
+  Expected: <2>
+    Actual: <0>
+  a classifier that patches every label reads 4 here
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_order_test.dart 118:5                 main.<fn>
+
+00:00 +1 -7: /.../test/gpu/text_patches_test.dart: an instance emitted after the label and crossing its box is a patch [E]
+  Expected: an object with length of <1>
+    Actual: []
+     Which: has length of <0>
+
+Some tests failed.
+
+Failing tests:
+  .../text_order_test.dart: the composited picture matches the reference at scale 0.5
+  .../text_order_test.dart: the composited picture matches the reference at scale 0.8
+  .../text_order_test.dart: the composited picture matches the reference at scale 1.25
+  .../text_order_test.dart: the composited picture matches the reference at scale 2.0
+  ... and 11 more
+```
+
+**Verdict: KILLED** — the source edit fails all four scale rows and the
+"the label nothing later reaches" (`patchCount 2 -> 0`) row of
+`text_order_test.dart`, exactly the two rows the brief names, plus 15 of 19
+`text_patches_test.dart` assertions. **The seam and the source edit agree**
+(both drive the picture wrong / `patchCount` to 0): no defect in Task 5's
+seam.
+
+---
+
+## M-E2 — the inner loop starts at `0` instead of `t.instanceIndex`
+
+**File:** `lib/src/gpu/text_patches.dart`
+
+**Diff applied:**
+
+```diff
+-    for (var i = t.instanceIndex; i < instanceCount; i++) {
++    for (var i = 0; i < instanceCount; i++) { // M-E2
+       if (_reaches(data, i, t, unitsPerDevicePixel)) hits.add(i);
+     }
+```
+
+**Command:** `flutter test test/gpu/text_patches_test.dart test/gpu/text_order_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +6 -1: /.../test/gpu/text_order_test.dart: the label nothing later reaches is not a patch, and still matches [E]
+  Expected: <2>
+    Actual: <3>
+  a classifier that patches every label reads 4 here
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_order_test.dart 118:5                 main.<fn>
+
+00:00 +7 -2: /.../test/gpu/text_patches_test.dart: an instance emitted BEFORE the label never enters its patch [E]
+  Expected: empty
+    Actual: [Instance of 'TextPatch']
+  the reference draws it under the label; so must we
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_patches_test.dart 95:5                main.<fn>
+
+Failing tests:
+  .../text_order_test.dart: the label nothing later reaches is not a patch, and still matches
+  .../text_patches_test.dart: an instance emitted BEFORE the label never enters its patch
+```
+
+**Verdict: KILLED**, by both named tests. `text_order_test`'s "the label
+nothing later reaches" row runs at scale 1 (base camera, no zoom) and is
+the one the brief calls out ("stroke 900 over COVERED") — with the loop
+admitting instances before the label, `UNDER`'s lower-handle covering
+stroke (910) is now wrongly admitted, taking `patchCount` from 2 to 3.
+
+---
+
+## M-E3 — `reachDevice = 0` for every kind
+
+**File:** `lib/src/gpu/text_patches.dart`
+
+**Diff applied:**
+
+```diff
+   final int points;
+-  final double reachDevice;
++  double reachDevice;
+   if (kind < 0.5) {
+     points = 2;
+     reachDevice = half;
+   ...
+   } else {
+     points = 3;
+     reachDevice = 0;
+   }
++  reachDevice = 0; // M-E3
+   final reach = reachDevice * unitsPerDevicePixel;
+```
+
+**Command:** `flutter test test/gpu/text_patches_test.dart test/gpu/text_order_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +10 -1: /.../test/gpu/text_patches_test.dart: a stroke whose centerline misses the box but whose width reaches it is a patch [E]
+  Expected: an object with length of <1>
+    Actual: []
+     Which: has length of <0>
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_patches_test.dart 122:5               main.<fn>
+
+00:00 +10 -2: /.../test/gpu/text_patches_test.dart: a join's reach is the miter bound, 4 x half-width [E]
+  Expected: an object with length of <1>
+    Actual: []
+     Which: has length of <0>
+  reach = half * kMiterLimit = 12 >= 10
+
+00:00 +11 -3: /.../test/gpu/text_patches_test.dart: a point's box is its one point -- never the origin (Ruling E4) [E]
+  Expected: an object with length of <1>
+    Actual: []
+     Which: has length of <0>
+
+00:00 +11 -4: /.../test/gpu/text_patches_test.dart: the reach is expanded at the band floor, in collection units [E]
+  Expected: an object with length of <1>
+    Actual: []
+     Which: has length of <0>
+
+00:00 +22 -4: Some tests failed.
+
+Failing tests:
+  .../text_patches_test.dart: a join's reach is the miter bound, 4 x half-width
+  .../text_patches_test.dart: a point's box is its one point -- never the origin (Ruling E4)
+  .../text_patches_test.dart: a stroke whose centerline misses the box but whose width reaches it is a patch
+  .../text_patches_test.dart: the reach is expanded at the band floor, in collection units
+```
+
+**Verdict: KILLED**, by `text_patches_test`'s "centerline misses" test (and
+three others — every reach-dependent unit test). **Note (a judgment call,
+not a mutation-widening):** `text_order_test.dart`'s "GRAZED" row, which
+the brief also names, did NOT go red under this mutation — all 7 of its
+tests passed. Investigated rather than dismissed: `textOverlapFixture`
+places the grazing stroke's centerline at `y=5700`, one unit below "the box
+top is at 5000 + ascent" (fixture's own comment). With `FlutterTextMeasurer`
+reading real font metrics (not the fixed-metrics double `resident_text_test`
+uses), the actual ascent for a 600-unit-high label already pushes the
+padded box top past `y=5700`, so GRAZED's centerline alone — with no width
+reach at all — already falls inside the box. The integration fixture's
+margin is not tight enough to isolate the reach term at real font metrics;
+the unit test is. Not widened or edited; recorded as a partial miss on a
+named test that the primary named test already kills the mutation without.
+
+---
+
+## M-E4 — `unitsPerDevicePixel = 1.0 / devicePixelRatio` (drops `bandLowerScale`)
+
+**File:** `lib/src/gpu/text_patches.dart`
+
+**Diff applied:**
+
+```diff
+-  final unitsPerDevicePixel = 1.0 / (devicePixelRatio * bandLowerScale);
++  final unitsPerDevicePixel = 1.0 / devicePixelRatio; // M-E4
+```
+
+**Command:** `flutter test test/gpu/text_patches_test.dart test/gpu/text_order_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +7 -1: /.../test/gpu/text_patches_test.dart: the reach is expanded at the band floor, in collection units [E]
+  Expected: an object with length of <1>
+    Actual: []
+     Which: has length of <0>
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_patches_test.dart 183:5               main.<fn>
+
+00:00 +25 -1: Some tests failed.
+
+Failing tests:
+  .../text_patches_test.dart: the reach is expanded at the band floor, in collection units
+```
+
+**Verdict: KILLED**, by `text_patches_test`'s "expanded at the band floor"
+test. **Note:** `text_order_test.dart`'s scale-0.5 row, also named by the
+brief, did NOT go red here (all 7 of its tests passed) — the corpus's
+overlap margins at the fitted camera and scale 0.5 are wide enough that
+under-expanding the reach (`bandLowerScale=1.0` vs `0.5`, a 2x difference at
+this dpr) does not flip any of that row's classifications. Recorded, not
+chased with a wider mutation.
+
+---
+
+## M-E5 — `_patchPaint.blendMode = BlendMode.srcOver` (spec: `srcATop`)
+
+**File:** `lib/src/gpu/text_compositor.dart`
+
+**Diff applied:**
+
+```diff
+   final Paint _patchPaint = Paint()
+     ..filterQuality = FilterQuality.none
+-    ..blendMode = BlendMode.srcATop;
++    ..blendMode = BlendMode.srcOver; // M-E5
+```
+
+**Command:** `flutter test test/gpu/text_compositor_test.dart test/gpu/text_order_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +1 -1: /.../test/gpu/text_compositor_test.dart: a patch puts later geometry over the ink and nowhere else (srcATop) [E]
+  Expected: a value greater than <200>
+    Actual: <0>
+     Which: is not a value greater than <200>
+  beside the glyph: the main image, untouched -- srcOver would paint blue here
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_compositor_test.dart 129:5            main.<fn>
+
+00:00 +1 -2: /.../test/gpu/text_compositor_test.dart: a translucent later fill blends once inside the ink, never twice [E]
+  Expected: be in range from 118 (inclusive) to 138 (inclusive)
+    Actual: <63>
+
+00:00 +1 -3: /.../test/gpu/text_compositor_test.dart: labels and patches walk in list order, with one cursor [E]
+  Expected: a value less than <60>
+    Actual: <255>
+     Which: is not a value less than <60>
+  the first label's ink is not patched
+
+00:00 +4 -4: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 0.5 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.985312631137222>
+  spec criterion 1, per channel <= 2 on >= 99.5% of the union; scale 0.5: withinTwo=2348 union=2383 overEight=31
+
+00:00 +4 -5: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 0.8 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.9822542901716068>
+
+00:00 +4 -6: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 1.25 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.9794959804895673>
+
+00:00 +4 -7: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 2.0 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.9779361381389612>
+
+00:00 +4 -8: /.../test/gpu/text_order_test.dart: with level of detail on, both arms cull TINY the same way at scale 1 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.9806704514733712>
+
+Failing tests:
+  .../text_compositor_test.dart: a patch puts later geometry over the ink and nowhere else (srcATop)
+  .../text_compositor_test.dart: a translucent later fill blends once inside the ink, never twice
+  .../text_compositor_test.dart: labels and patches walk in list order, with one cursor
+  .../text_order_test.dart: the composited picture matches the reference at scale 0.5
+  ... and 4 more
+```
+
+**Verdict: KILLED**, decisively — `text_compositor_test`'s "translucent
+later fill" test named by the brief fails, plus 2 more compositor tests,
+plus 5 of `text_order_test`'s 7 rows (the fill-904 mutation the brief
+predicts).
+
+---
+
+## M-E6 — `hits.add(i)` unconditionally
+
+**File:** `lib/src/gpu/text_patches.dart`
+
+**Diff applied:**
+
+```diff
+-      if (_reaches(data, i, t, unitsPerDevicePixel)) hits.add(i);
++      hits.add(i); // M-E6: unconditional
+```
+
+**Command:** `flutter test test/gpu/text_order_test.dart test/gpu/text_patches_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +1 -1: /.../test/gpu/text_patches_test.dart: an instance emitted BEFORE the label never enters its patch [E]
+  Expected: empty
+    Actual: [Instance of 'TextPatch']
+  the reference draws it under the label; so must we
+
+00:00 +2 -2: /.../test/gpu/text_patches_test.dart: a label nothing reaches has no patch, and one that is reached does [E]
+  Expected: [0]
+    Actual: MappedListIterable<TextPatch, int>:[0, 1]
+     Which: at location [1] is MappedListIterable<TextPatch, int>:[0, 1] which longer than expected
+
+00:00 +7 -8: /.../test/gpu/text_patches_test.dart: a sub-buffer keeps main-buffer order and skips non-reaching instances [E]
+  Expected: <3>
+    Actual: <4>
+
+00:00 +17 -9: /.../test/gpu/text_order_test.dart: the label nothing later reaches is not a patch, and still matches [E]
+  Expected: <2>
+    Actual: <3>
+  a classifier that patches every label reads 4 here
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_order_test.dart 118:5                 main.<fn>
+
+Failing tests:
+  .../text_order_test.dart: the label nothing later reaches is not a patch, and still matches
+  .../text_patches_test.dart: a fill has no reach: its corners are the whole of it
+  .../text_patches_test.dart: a join's reach is the miter bound, 4 x half-width
+  .../text_patches_test.dart: a label nothing reaches has no patch, and one that is reached does
+  ... and 5 more
+```
+
+**Verdict: KILLED**, by `text_order_test`'s named "the label nothing later
+reaches" test (`patchCount 2 -> 3`, not 4 — with `TINY` (handle 931) the
+last label emitted before the placement instance, it has no instances after
+it at all, so its `hits` list stays empty even unconditionally; `COVERED`,
+`UNDER` and `GRAZED` all pick up every later instance, landing at 3, not
+the brief's predicted 4). Also fails 8 of 19 `text_patches_test.dart`
+assertions. Reported as observed, not adjusted to match the brief's number.
+
+---
+
+## M-E7 — join reach `half` instead of `half * kMiterLimit`
+
+**File:** `lib/src/gpu/text_patches.dart`
+
+**Diff applied:**
+
+```diff
+   } else if (kind < 1.5) {
+     points = 3;
+-    reachDevice = half * kMiterLimit;
++    reachDevice = half; // M-E7
+```
+
+**Command:** `flutter test test/gpu/text_patches_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +4 -1: a join's reach is the miter bound, 4 x half-width [E]
+  Expected: an object with length of <1>
+    Actual: []
+     Which: has length of <0>
+  reach = half * kMiterLimit = 12 >= 10
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_patches_test.dart 139:5               main.<fn>
+
+Failing tests:
+  test/gpu/text_patches_test.dart: a join's reach is the miter bound, 4 x half-width
+```
+
+**Verdict: KILLED**, by exactly the named test, one failure only.
+
+---
+
+## M-E8 — `points = 3` for a point (Ruling E4)
+
+**File:** `lib/src/gpu/text_patches.dart`
+
+**Diff applied:**
+
+```diff
+   } else if (kind < 2.5) {
+-    points = 1;
++    points = 3; // M-E8
+     reachDevice = half;
+```
+
+**Command:** `flutter test test/gpu/text_patches_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +6 -1: a point's box is its one point -- never the origin (Ruling E4) [E]
+  Expected: empty
+    Actual: [Instance of 'TextPatch']
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_patches_test.dart 166:5               main.<fn>
+
+Failing tests:
+  test/gpu/text_patches_test.dart: a point's box is its one point -- never the origin (Ruling E4)
+```
+
+**Verdict: KILLED**, by exactly the named test, one failure only.
+
+---
+
+## M-E9 — `saveLayer` opened after `canvas.transform(_matrix)` (Copilot finding 4)
+
+**File:** `lib/src/gpu/text_compositor.dart`
+
+The `saveLayer` call is moved out of `paint` and into `_drawLabel`, called
+after `canvas.transform(_matrix)` rather than before it, exactly as the
+brief names.
+
+**Diff applied:**
+
+```diff
+-      // The layer's bounds are in the OUTER frame -- logical pixels -- and
+-      // the label's own six floats are applied inside `_drawLabel`, after
+-      // this call. A layer opened after the residual would be transformed
+-      // twice (a Copilot review finding on revision 5's first draft).
+-      canvas.saveLayer(patch.layerBounds, _layerPaint);
+-      _drawLabel(canvas, texts[i], collectionToLogical);
++      // M-E9: the saveLayer call moved into `_drawLabel`, after the
++      // transform, instead of before it here.
++      _drawLabel(canvas, texts[i], collectionToLogical,
++          layerBounds: patch.layerBounds);
+       canvas.drawImageRect(patch.image, patch.src, patch.dst, _patchPaint);
+       canvas.restore();
+```
+
+```diff
+-  void _drawLabel(Canvas canvas, ResidentTextRecord t, Transform2 o) {
++  void _drawLabel(Canvas canvas, ResidentTextRecord t, Transform2 o,
++      {Rect? layerBounds}) {
+     final paragraph = ...
+     ...
+     canvas.save();
+     canvas.transform(_matrix);
++    // M-E9: opened after the transform, not before it.
++    if (layerBounds != null) canvas.saveLayer(layerBounds, _layerPaint);
+     canvas.translate(0, paragraph.alphabeticBaseline);
+     canvas.scale(1, -1);
+     canvas.drawParagraph(paragraph, Offset.zero);
+     canvas.restore();
+   }
+```
+
+**Command:** `flutter test test/gpu/text_compositor_test.dart test/gpu/text_order_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +1 -1: /.../test/gpu/text_compositor_test.dart: a patch puts later geometry over the ink and nowhere else (srcATop) [E]
+  Expected: a value greater than <200>
+    Actual: <0>
+     Which: is not a value greater than <200>
+  beside the glyph: the main image, untouched -- srcOver would paint blue here
+
+00:00 +1 -2: /.../test/gpu/text_compositor_test.dart: a translucent later fill blends once inside the ink, never twice [E]
+  Expected: be in range from 118 (inclusive) to 138 (inclusive)
+    Actual: <63>
+
+00:00 +5 -3: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 0.5 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.8283676038606799>
+  spec criterion 1, per channel <= 2 on >= 99.5% of the union; scale 0.5: withinTwo=1974 union=2383 overEight=399
+
+00:00 +5 -4: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 0.8 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.7008580343213728>
+
+00:00 +5 -5: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 1.25 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.5969650438081474>
+
+00:00 +5 -6: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 2.0 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.5218582979306564>
+
+00:00 +5 -7: /.../test/gpu/text_order_test.dart: with level of detail on, both arms cull TINY the same way at scale 1 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.6428764530954312>
+
+Failing tests:
+  .../text_compositor_test.dart: a patch puts later geometry over the ink and nowhere else (srcATop)
+  .../text_compositor_test.dart: a translucent later fill blends once inside the ink, never twice
+  .../text_order_test.dart: the composited picture matches the reference at scale 0.5
+  .../text_order_test.dart: the composited picture matches the reference at scale 0.8
+  ... and 3 more
+```
+
+**Verdict: KILLED**, decisively — the named "srcATop" test fails, plus the
+translucent-fill test, plus 5 of 7 `text_order_test.dart` rows. **Note (a
+judgment call):** the brief also names "outer transform once" as a killer;
+the actual test with that description
+(`'the outer transform moves the label, and is applied once'`) and the
+composed-matrix test both draw with `patches: const []`, so `_drawLabel` is
+called with `layerBounds: null` and the mutation is a no-op on that path —
+neither failed. The realisation kills the mutation regardless, through the
+patched path's own tests.
+
+---
+
+## M-E10 — drop the baseline flip in `_drawLabel`
+
+**File:** `lib/src/gpu/text_compositor.dart`
+
+**Diff applied:**
+
+```diff
+     canvas.save();
+     canvas.transform(_matrix);
+-    canvas.translate(0, paragraph.alphabeticBaseline);
+-    canvas.scale(1, -1);
++    // M-E10: baseline flip dropped.
+     canvas.drawParagraph(paragraph, Offset.zero);
+     canvas.restore();
+```
+
+**Command:** `flutter test test/gpu/text_order_test.dart test/gpu/text_compositor_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +7 -1: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 0.5 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.709126213592233>
+  spec criterion 1, per channel <= 2 on >= 99.5% of the union; scale 0.5: withinTwo=1826 union=2575 overEight=712
+
+00:00 +7 -2: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 0.8 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.6937163375224417>
+
+00:00 +7 -3: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 1.25 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.6725569162488699>
+
+00:00 +7 -4: /.../test/gpu/text_order_test.dart: the composited picture matches the reference at scale 2.0 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.6780872871549016>
+
+00:00 +7 -5: /.../test/gpu/text_order_test.dart: with level of detail on, both arms cull TINY the same way at scale 1 [E]
+  Expected: a value greater than or equal to <0.995>
+    Actual: <0.6829147593715205>
+
+00:00 +9 -5: Some tests failed.
+
+Failing tests:
+  .../text_order_test.dart: the composited picture matches the reference at scale 0.5
+  .../text_order_test.dart: the composited picture matches the reference at scale 0.8
+  .../text_order_test.dart: the composited picture matches the reference at scale 1.25
+  .../text_order_test.dart: the composited picture matches the reference at scale 2.0
+  .../text_order_test.dart: with level of detail on, both arms cull TINY the same way at scale 1
+```
+
+**Verdict: KILLED** — every agreement-checking row of `text_order_test.dart`
+fails (all 5), matching the brief's "every row (the reference flips)".
+**Note:** all 7 of `text_compositor_test.dart`'s own tests passed — that
+file's `samplePoints()` scans for ink/blank pixels dynamically rather than
+at fixed coordinates, so it still finds *some* ink and *some* blank pixel
+even with the glyph rendered upside-down, and the tests that compare colour
+channels at those two found points still hold. A coverage gap in that unit
+file, not a survivor of this mutation (which the reference-differential
+test kills outright).
+
+---
+
+## M-E11 — the box pad at the band ceiling (`kBandUpperScale` for `kBandLowerScale`)
+
+**File:** `lib/src/gpu/geometry_collector.dart`
+
+**Diff applied:**
+
+```diff
+-    final pad = kTextBoxPadDevicePixels / (devicePixelRatio * kBandLowerScale);
++    final pad = kTextBoxPadDevicePixels / (devicePixelRatio * kBandUpperScale); // M-E11
+```
+
+**Command:** `flutter test test/gpu/resident_text_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +2 -1: the box is the four transformed corners, padded at the band floor [E]
+  Expected: a numeric value within <0.000001> of <91>
+    Actual: <91.75>
+     Which:  differs by <0.75>
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/resident_text_test.dart 82:5               main.<fn>
+
+00:00 +2 -2: the pad is one device pixel at the band floor, not at the ceiling [E]
+  Expected: a numeric value within <1e-9> of <-2.0>
+    Actual: <-0.5>
+     Which:  differs by <1.5>
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/resident_text_test.dart 97:5               main.<fn>
+
+00:00 +2 -3: a mirrored residual still yields min <= max [E]
+  Expected: a numeric value within <0.000001> of <-41>
+    Actual: <-40.25>
+     Which:  differs by <0.75>
+
+Failing tests:
+  test/gpu/resident_text_test.dart: a mirrored residual still yields min <= max
+  test/gpu/resident_text_test.dart: the box is the four transformed corners, padded at the band floor
+  test/gpu/resident_text_test.dart: the pad is one device pixel at the band floor, not at the ceiling
+```
+
+**Verdict: KILLED**, by exactly the named test ("the pad is one device
+pixel at the band floor, not at the ceiling"), plus two more pad-dependent
+tests in the same file.
+
+---
+
+## M-E12 — the compositor matches patches by position (`patches[i]`) instead of by `textIndex`
+
+**File:** `lib/src/gpu/text_compositor.dart`
+
+**Diff applied:**
+
+```diff
+-    var p = 0;
+     for (var i = 0; i < texts.length; i++) {
+-      final patch =
+-          p < patches.length && patches[p].textIndex == i ? patches[p++] : null;
++      // M-E12: matched by position instead of by textIndex.
++      final patch = i < patches.length ? patches[i] : null;
+```
+
+**Command:** `flutter test test/gpu/text_compositor_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +3 -1: labels and patches walk in list order, with one cursor [E]
+  Expected: a value less than <60>
+    Actual: <255>
+     Which: is not a value less than <60>
+  the first label's ink is not patched
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_compositor_test.dart 212:5            main.<fn>
+
+Failing tests:
+  test/gpu/text_compositor_test.dart: labels and patches walk in list order, with one cursor
+```
+
+**Verdict: KILLED**, by exactly the named test, one failure only.
+
+---
+
+## M-E13 — `patchRegionFor` clamps `x0 = minX.floor()` unclamped
+
+**File:** `lib/src/gpu/text_patches.dart`
+
+**Diff applied:**
+
+```diff
+-  final x0 = bound[0].floor().clamp(0, widthPx);
++  final x0 = bound[0].floor(); // M-E13: unclamped
+```
+
+**Command:** `flutter test test/gpu/text_patches_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +13 -1: patchRegionFor a label partly off the top-left edge is clamped, not negative [E]
+  Expected: [0, 0, 40, 20]
+    Actual: [-40, 0, 80, 20]
+     Which: at location [0] is <-40> instead of <0>
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_patches_test.dart 274:7               main.<fn>.<fn>
+
+Failing tests:
+  test/gpu/text_patches_test.dart: patchRegionFor a label partly off the top-left edge is clamped, not negative
+```
+
+**Verdict: KILLED**, by exactly the named test, one failure only.
+
+---
+
+## M-E14 — `sub.setRange` copies `hits[k]` in reverse
+
+**File:** `lib/src/gpu/text_patches.dart`
+
+**Diff applied:**
+
+```diff
+     final sub = Float32List(hits.length * kFloatsPerInstance);
++    final reversedHits = hits.reversed.toList(); // M-E14
+     for (var k = 0; k < hits.length; k++) {
+       sub.setRange(k * kFloatsPerInstance, (k + 1) * kFloatsPerInstance, data,
+-          hits[k] * kFloatsPerInstance);
++          reversedHits[k] * kFloatsPerInstance);
+     }
+```
+
+**Command:** `flutter test test/gpu/text_patches_test.dart`
+
+**Verbatim output:**
+
+```
+00:00 +8 -1: a sub-buffer keeps main-buffer order and skips non-reaching instances [E]
+  Expected: [50, 0, 45]
+    Actual: [45.0, 0.0, 50.0]
+     Which: at location [0] is <45.0> instead of <50>
+  emission order, not sorted, not reversed
+
+  package:matcher                                     expect
+  package:flutter_test/src/widget_tester.dart 473:18  expect
+  test/gpu/text_patches_test.dart 208:5               main.<fn>
+
+Failing tests:
+  test/gpu/text_patches_test.dart: a sub-buffer keeps main-buffer order and skips non-reaching instances
+```
+
+**Verdict: KILLED**, by exactly the named test, one failure only.
+
+---
+
+## Summary
+
+**14 of 14 mutations fired; 14 of 14 killed on the first shot; zero
+survivors.** Every restore was verified with `git status --short` showing
+no diff before the next mutation.
+
+| id | verdict |
+|---|---|
+| M-E1 | KILLED — source edit fails the four scale rows and the `patchCount` row of `text_order_test.dart`, agreeing with the seam |
+| M-E2 | KILLED — `text_patches_test.dart`, "an instance emitted BEFORE"; `text_order_test.dart`, "the label nothing later reaches" (patchCount 2→3) |
+| M-E3 | KILLED — `text_patches_test.dart`, "centerline misses" (+3 more). `text_order_test.dart` (GRAZED) did not additionally fire — see note above |
+| M-E4 | KILLED — `text_patches_test.dart`, "expanded at the band floor". `text_order_test.dart` (scale 0.5) did not additionally fire — see note above |
+| M-E5 | KILLED — `text_compositor_test.dart`, "a translucent later fill" (+2 more); `text_order_test.dart`, 5 of 7 rows |
+| M-E6 | KILLED — `text_order_test.dart`, "the label nothing later reaches" (patchCount 2→3, not 4 — see note above); `text_patches_test.dart`, 8 assertions |
+| M-E7 | KILLED — `text_patches_test.dart`, "a join's reach is the miter bound" |
+| M-E8 | KILLED — `text_patches_test.dart`, "a point's box is its one point" |
+| M-E9 | KILLED — `text_compositor_test.dart`, "a patch puts later geometry over the ink and nowhere else (srcATop)" (+2 more); `text_order_test.dart`, 5 of 7 rows |
+| M-E10 | KILLED — `text_order_test.dart`, all 5 agreement rows. `text_compositor_test.dart` did not fire — see note above |
+| M-E11 | KILLED — `resident_text_test.dart`, "the pad is one device pixel at the band floor, not at the ceiling" (+2 more) |
+| M-E12 | KILLED — `text_compositor_test.dart`, "labels and patches walk in list order, with one cursor" |
+| M-E13 | KILLED — `text_patches_test.dart`, "patchRegionFor a label partly off the top-left edge is clamped, not negative" |
+| M-E14 | KILLED — `text_patches_test.dart`, "a sub-buffer keeps main-buffer order and skips non-reaching instances" |
+
+### Four mutations where the brief named a second test that did not additionally fire
+
+M-E3, M-E4, M-E6 and M-E10 each name a `text_order_test.dart` integration
+row alongside a `text_patches_test.dart` (or `text_compositor_test.dart`)
+unit test. In every case the unit test killed the mutation outright; in
+three of the four (M-E3, M-E4, M-E10-vs-`text_compositor_test`) the second
+named test did not also go red, and the transcript above records why in
+each case rather than widening the mutation or editing the test to force
+it. M-E6's `text_order_test.dart` row DID fire, but at a different number
+(`patchCount` 3, not the brief's predicted 4) — recorded as observed.
+
+### The gate, on the fully restored tree
+
+```
+cd packages/jet_cad_2d_flutter && flutter test test/gpu/
+```
+→ `+182: All tests passed!` (182 tests — the same count as the
+pre-mutation baseline).
+
+`git status --short` after every restore, and after this final run, showed
+no diff outside this log file.

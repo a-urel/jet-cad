@@ -5,9 +5,12 @@ import 'package:flutter/painting.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
+import '../flutter_text_measurer.dart';
 import '../viewport_transform.dart';
 import 'gpu_facade.dart' as gpu;
 import 'resident_geometry.dart';
+import 'text_compositor.dart';
+import 'text_patches.dart';
 
 /// The uniform block: `mat4 mvp`, `vec2 half_viewport`, then `float
 /// dash_scale`, std140, 80 bytes.
@@ -161,20 +164,85 @@ double dashScaleFor(ViewportTransform camera, Transform2 collectionInverse) =>
     composeTransforms(camera.worldToScreenMatrix, collectionInverse)
         .scaleMagnitude;
 
-/// Draws [geometry] once per frame with the camera as a uniform.
+/// Draws [geometry] once per frame with the camera as a uniform, plus one
+/// more pass per patch.
 ///
-/// **The matrix is the only per-frame CPU work.** The document was already
-/// walked once, at construction of [geometry] (`ResidentGeometry`, Task 5);
-/// every subsequent frame re-derives only the small `FrameInfo` uniform from
-/// the current [ViewportTransform] and re-issues the one draw call the
-/// buffer's instance count implies.
+/// **Per-frame CPU work is bounded by patches, never by entities.** The
+/// document was already walked once, at construction of [geometry]
+/// (`ResidentGeometry`, Task 5); every subsequent frame re-derives only the
+/// small `FrameInfo` uniform from the current [ViewportTransform] and
+/// re-issues the main draw call the buffer's instance count implies.
+///
+/// **What a covered label's patch still allocates, per frame, exactly.**
+/// This wave (the final whole-branch review's fix, Ruling RF-1) hoisted the
+/// two `Float64List(4)` scratches [patchRegionFor] and `labelBoundsLogical`
+/// used to allocate per call into [_regionScratch] and [_boundsScratch]
+/// below -- fields, reused every frame, passed as each function's `scratch`
+/// argument -- so those two are OFF this list now. What remains, one of
+/// each per patch, never per entity and never per plain (uncovered) label:
+/// a `PatchRegion`, a `(ResidentPatch, PatchRegion)` record (in
+/// [_pendingRegions]), a `PatchImage`, three `Rect`s (`PatchImage.src`,
+/// `.dst`, `.layerBounds`), the `Transform2` [composeTransforms] builds for
+/// `toPatch`, the `ByteData(80)` uniform block [buildFrameInfo] returns, one
+/// `saveLayer` (`TextCompositor.paint`) and one `ui.Image` handle
+/// (`asImage()`) -- the same list the spec's text-section exception and
+/// `## Invariants` item 1 now name. Still O(1) per flush, not per entity.
+/// Plan F's two cheapest remaining reuse moves, named but not taken here
+/// (Ruling RF-1 -- a rewrite unmeasured is a rewrite this wave will not
+/// make): a mutable `PatchRegion` (collapsing the `(ResidentPatch,
+/// PatchRegion)` record above to a reused pair) and a reused uniform
+/// `ByteData` (so [buildFrameInfo] writes into a field instead of
+/// allocating one per patch per frame).
 class GpuDrawBackend {
-  GpuDrawBackend(this.geometry, this.collectionCamera)
-      : _collectionInverse = collectionCamera.worldToScreenMatrix.invert();
+  GpuDrawBackend(this.geometry, this.collectionCamera,
+      {FlutterTextMeasurer? measurer,
+      TextStyleRecord Function(Handle)? textStyleOf})
+      : _collectionInverse = collectionCamera.worldToScreenMatrix.invert(),
+        _compositor = measurer != null && textStyleOf != null
+            ? TextCompositor(measurer: measurer, textStyleOf: textStyleOf)
+            : null;
 
   final ResidentGeometry geometry;
   final ViewportTransform collectionCamera;
   final Transform2 _collectionInverse;
+
+  /// Composites the main image with every patch, in emission order --
+  /// `null` without a [FlutterTextMeasurer] and a text-style lookup, in
+  /// which case [paint] draws the main image alone and no text at all
+  /// (Ruling E2's shape again: a caller that never supplies the two stays on
+  /// the pre-Plan-E path with no behaviour change).
+  final TextCompositor? _compositor;
+
+  /// Reused every frame -- one `PatchImage` per patch this frame drew,
+  /// built after `submit()` (see [render]'s tail) and consumed by
+  /// [_compositor] in [paint].
+  final List<PatchImage> _patchImages = <PatchImage>[];
+
+  /// Reused per frame: `(patch, region)` pairs the patch loop in [render]
+  /// found, drained into [_patchImages] after `submit()` -- see [render]'s
+  /// tail for why the split matters.
+  final List<(ResidentPatch, PatchRegion)> _pendingRegions =
+      <(ResidentPatch, PatchRegion)>[];
+
+  /// Reused every frame by [patchRegionFor]'s `scratch` argument, one patch
+  /// at a time -- the frame path's own copy of the scratch its doc comment
+  /// says a null argument would otherwise allocate per call.
+  final Float64List _regionScratch = Float64List(4);
+
+  /// Reused every frame by `labelBoundsLogical`'s `scratch` argument, same
+  /// reasoning as [_regionScratch].
+  final Float64List _boundsScratch = Float64List(4);
+
+  /// Painted with `filterQuality: none`, same as [TextCompositor]'s own --
+  /// allocated once, reused by every `drawImageRect` call [paint] makes when
+  /// there is no [_compositor] to draw through instead.
+  final Paint _imagePaint = Paint()..filterQuality = FilterQuality.none;
+
+  /// This frame's `collectionToLogical`, set once per [render] -- at the
+  /// top, before its early returns, so it is current even on a frame that
+  /// draws nothing -- and read by [paint]; see [paint]'s doc comment for why
+  /// it is not recomputed there.
+  Transform2 _collectionToLogical = Transform2.identity();
 
   gpu.Texture? _target;
   int _w = 0;
@@ -184,6 +252,29 @@ class GpuDrawBackend {
   /// is drawing nothing, and a timing figure taken from it is the cost of an
   /// empty screen.
   int frames = 0;
+
+  /// Patches drawn, clamped to the target's size, or entirely off screen,
+  /// last frame -- diagnostics only, reset at the top of every [render].
+  int patchesRendered = 0, patchesClipped = 0, patchesOffscreen = 0;
+
+  /// Labels [paint] drew nothing for, last call, because [_compositor] was
+  /// `null` -- `geometry.texts.length` on a call that finds no compositor
+  /// wired in. Ruling E2's discipline made concrete: a backend built without
+  /// a [FlutterTextMeasurer] and a text-style lookup silently drew no text
+  /// at all (see [_compositor]'s own doc comment) and nothing said so; this
+  /// counter is that "so" -- a backend wired without a measurer shows as a
+  /// number, not a missing picture. Reset to 0 at the top of every [paint]
+  /// call, not [render]: the `_compositor == null` check this counter
+  /// reports on lives in [paint], not [render].
+  ///
+  /// **Untested by `flutter test`.** [GpuDrawBackend]'s constructor takes a
+  /// [ResidentGeometry], and [ResidentGeometry.create] needs a live GPU
+  /// (`gpu.gpuContext`, unavailable off a device/simulator run) -- nothing
+  /// in this package's `flutter test` suite can construct a [GpuDrawBackend]
+  /// at all, compositor-less or otherwise, so no unit test exercises this
+  /// field. Confirmed by reading `resident_geometry.dart` and this file's
+  /// own constructor, not asserted from a failed attempt to write one.
+  int textsDropped = 0;
 
   ui.Image? render(ViewportTransform camera, Size viewport, double dpr) {
     // **Reset first, unconditionally -- before the early returns below, and
@@ -220,6 +311,39 @@ class GpuDrawBackend {
     // today -- getting the reset right here is what keeps that true once it
     // is wired in.
     geometry.uniforms.reset();
+
+    // **The same "reset first, before the early returns" reasoning extends
+    // to every other per-frame field below (Task 6 review, round 2,
+    // finding 1) -- it did not, until this fix.** `_collectionToLogical`
+    // does not depend on `widthPx`/`heightPx`, so nothing stops computing it
+    // here; the counters and the two patch lists do not depend on anything
+    // computed below either. A document with zero instances but a
+    // non-empty `texts` list is legitimate (an all-text drawing, or one just
+    // rebuilt to remove its last stroke) and hits the `instanceCount == 0`
+    // branch below on every subsequent frame -- forever, not once -- so
+    // anything reset only past that branch would never reset again.
+    // Previously that meant `_collectionToLogical` stayed pinned at its
+    // `Transform2.identity()` field initialiser (the camera silently
+    // ignored) and `_patchImages` kept whichever patches the LAST geometry
+    // WITH instances had produced, composited by `paint` over `main: null`
+    // against a `texts` list that may not even belong to the same document
+    // any more. The hoist also folds in `_pendingRegions`, previously
+    // cleared only after a successful drain at this method's tail: a throw
+    // between the first `.add` there and that drain (a LATER patch's own
+    // `patchCommandBuffer.submit()`, or `patch.target.asImage()`/
+    // `target.asImage()` in the drain itself) used to strand entries for the
+    // next frame's single-cursor merge with `geometry.texts` to trip over.
+    // Resetting unconditionally, on every call, means a throw can now only ever
+    // strand entries until the very next `render` -- never for a frame that
+    // legitimately draws nothing, which is exactly what "still needs the
+    // ring to advance once" above already argues for `geometry.uniforms`.
+    _collectionToLogical =
+        composeTransforms(camera.worldToScreenMatrix, _collectionInverse);
+    _patchImages.clear();
+    _pendingRegions.clear();
+    patchesRendered = 0;
+    patchesClipped = 0;
+    patchesOffscreen = 0;
 
     final widthPx = (viewport.width * dpr).round();
     final heightPx = (viewport.height * dpr).round();
@@ -283,26 +407,26 @@ class GpuDrawBackend {
     // full viewport rather than the top-left quadrant the missing-`dpr`
     // defect this fixes used to produce (see the task-9 report).
     //
-    // **`collectionToLogical` is named because `collectionToDevice` needs
-    // it, and `dashScale` comes from `dashScaleFor`, not a second spelling
-    // of its formula here.** `render` cannot run without a GPU, so this is
-    // the one call site nothing in `flutter test` can reach directly; the
-    // only way the suite's coverage of the logical-vs-device distinction
-    // means anything for what actually ships is for this line to call the
-    // exact function the tests exercise, rather than restate
-    // `composeTransforms(...).scaleMagnitude` inline (see `dashScaleFor`'s
-    // own doc comment above). That does recompute the
-    // `camera.worldToScreenMatrix`/`_collectionInverse` composition a second
-    // time (once here as `collectionToLogical`, once inside `dashScaleFor`)
-    // rather than reusing the first result -- one extra `Transform2`
-    // composition per frame, not per entity, so it stays inside "the frame
-    // path allocates nothing per entity in steady state, and O(1) per
-    // flush" (CLAUDE.md): `render` already performs two compositions before
-    // this one.
-    final collectionToLogical =
-        composeTransforms(camera.worldToScreenMatrix, _collectionInverse);
+    // **`_collectionToLogical` -- set once, at the top of this method,
+    // before the early returns (see that comment) -- is what
+    // `collectionToDevice` composes here, not a second computation of it,
+    // and `dashScale` comes from `dashScaleFor`, not a second spelling of
+    // its formula here.** `render` cannot run without a GPU, so this is the
+    // one call site nothing in `flutter test` can reach directly; the only
+    // way the suite's coverage of the logical-vs-device distinction means
+    // anything for what actually ships is for this line to build
+    // `collectionToDevice` through the exact function the tests exercise
+    // (`composeTransforms`) against the field's own value, rather than
+    // restate `composeTransforms(...).scaleMagnitude` inline (see
+    // `dashScaleFor`'s own doc comment above). `dashScaleFor` below still
+    // recomputes the same `camera.worldToScreenMatrix`/`_collectionInverse`
+    // composition internally, once more (see its own doc comment for why it
+    // takes `camera` and `_collectionInverse` rather than a precomputed
+    // transform) -- one extra `Transform2` composition per frame, not per
+    // entity, so it stays inside "the frame path allocates nothing per
+    // entity in steady state, and O(1) per flush" (CLAUDE.md).
     final collectionToDevice =
-        composeTransforms(Transform2.scale(dpr, dpr), collectionToLogical);
+        composeTransforms(Transform2.scale(dpr, dpr), _collectionToLogical);
     pass.bindUniform(
       geometry.vertexShader.getUniformSlot('FrameInfo'),
       geometry.uniforms.emplace(buildFrameInfo(
@@ -322,11 +446,215 @@ class GpuDrawBackend {
     pass.draw(ResidentGeometry.cornerVertexCount,
         instanceCount: geometry.instanceCount);
 
+    // **Submitted here, before any patch pass is created -- one command
+    // buffer per RENDER PASS, not one per frame.** Task 9's first device run
+    // with patches aborted on the very first frame that had one:
+    // `-[AGXG15XFamilyCommandBuffer renderCommandEncoderWithDescriptor:]:967:
+    // failed assertion 'A command encoder is already encoding to this
+    // command buffer'`. Cause: `flutter_gpu`'s `RenderPass` opens its Metal
+    // encoder at *construction*
+    // (`flutter_gpu/lib/src/command_buffer.dart:130`'s `createRenderPass`),
+    // and a `CommandBuffer` accepts exactly one `submit()`
+    // (`flutter_gpu/lib/src/command_buffer.dart:240-248` throws
+    // `StateError` on a second call) -- so a second `createRenderPass` on
+    // the SAME buffer, which the patch loop below used to do once per
+    // patch, opened a second encoder Metal refuses outright. The control
+    // run (`patches=0`) completed normally, which isolated the crash to the
+    // patch passes specifically. The fix is one command buffer per pass:
+    // this one submits now, and each patch pass below gets its own fresh
+    // `gpu.gpuContext.createCommandBuffer()`, submitted in turn, right after
+    // its own `draw`. On the web shim this costs nothing extra --
+    // `CommandBuffer` there is "a thin convenience wrapper... `submit` is a
+    // no-op and `createRenderPass` returns a pass that drives the GL context
+    // in place" (`flutter_scene/lib/src/gpu/web/command_buffer.dart`'s own
+    // doc comment) -- multiple buffers per frame are exactly as cheap as one
+    // there, which is also why the original (Metal-incompatible) shape had
+    // passed every check that does not run on a real device.
     commandBuffer.submit();
+
+    // **One more render pass per patch, each on its OWN command buffer,
+    // submitted right after its own draw -- still O(1) per flush, one pair
+    // per patch, never per entity.** Each covered label gets its own target,
+    // so its pass starts with `RenderTarget.singleColor` against
+    // `patch.target` rather than the main `target`; everything else about a
+    // patch pass mirrors the main one above (same pipeline, same corner
+    // buffer, same culling and blend state), reading `patch.instances` in
+    // place of `geometry.instances` and a `FrameInfo` built from a
+    // transform that maps the region's own device-pixel origin to the patch
+    // target's top-left instead of the viewport's. `_patchImages` and the
+    // three counters below were already reset at the top of this method,
+    // before the early returns (see that comment) -- not reset again here.
+    final dashScale = dashScaleFor(camera, _collectionInverse);
+    for (final patch in geometry.patches) {
+      final t = geometry.texts[patch.textIndex];
+      final region = patchRegionFor(t, collectionToDevice, widthPx, heightPx,
+          maxWidth: patch.targetWidth,
+          maxHeight: patch.targetHeight,
+          scratch: _regionScratch);
+      if (region == null) {
+        patchesOffscreen++;
+        continue;
+      }
+      // The region reached the target's size: either the live scale is past
+      // the band's ceiling and Plan F's rebuild has not landed, or it sits
+      // exactly at the ceiling. Drawn anyway, short if clamped; counted so
+      // the harness can say how often. A diagnostic, not a decision.
+      if (region.width == patch.targetWidth ||
+          region.height == patch.targetHeight) {
+        patchesClipped++;
+      }
+      final patchCommandBuffer = gpu.gpuContext.createCommandBuffer();
+      final patchPass =
+          patchCommandBuffer.createRenderPass(gpu.RenderTarget.singleColor(
+        gpu.ColorAttachment(
+            texture: patch.target, clearValue: vm.Vector4(0, 0, 0, 0)),
+      ));
+      patchPass.bindPipeline(geometry.pipeline);
+      patchPass.setPrimitiveType(gpu.PrimitiveType.triangle);
+      patchPass.setCullMode(gpu.CullMode.none);
+      patchPass.setColorBlendEnable(true);
+      // Ruling E8: anchored at the target's origin. `Viewport` throws on a
+      // negative origin, and the region's on-screen position is the
+      // compositor's business.
+      //
+      // **No `Scissor` -- the viewport alone bounds the draw, and that is
+      // enough.** `FrameInfo` (`buildFrameInfo`, built from `toPatch` below)
+      // maps the region's own device-pixel rect to NDC `[-1, 1]` on both
+      // axes; every vertex this pass emits is clipped against that NDC
+      // volume before rasterisation runs at all, which is what actually
+      // keeps a stroke's quad from painting outside the region when
+      // `region` is smaller than the reused target (a live scale below the
+      // band's ceiling) -- clipping happens at the primitive stage,
+      // upstream of any per-fragment scissor test, so a scissor identical
+      // to the viewport rect would have discarded nothing a correct NDC
+      // mapping does not already discard. A `setScissor` call was here
+      // originally (Ruling E8's letter) but was removed: the web backend's
+      // `RenderPass` (`flutter_scene/lib/src/gpu/web/render_pass.dart`)
+      // declares a `Scissor` data class yet never gives `RenderPass` a
+      // `setScissor` method at all, so calling it would have been a
+      // `NoSuchMethodError` waiting for whichever plan first targets web --
+      // a real gap on that backend, not one a call site here can paper
+      // over, and not worth suppressing the analyzer for (`flutter
+      // analyze`'s own generic stand-in,
+      // `flutter_scene/lib/src/gpu/stub/shim_stubs.dart`, is missing the
+      // same method, for the same reason its own doc comment gives: "the
+      // analyzer fallback is a throwing stub").
+      //
+      // **Framebuffer-origin assumption.** Anchoring at `(0, 0)` here, then
+      // reading the same corner back below as `src = Rect.fromLTWH(0, 0,
+      // region.width, region.height)` (this method's tail, after `submit`),
+      // is only the same physical corner of `patch.target` if the backend's
+      // framebuffer origin is top-left -- load-bearing exactly when `region`
+      // is smaller than the target (a live scale below the band's ceiling),
+      // since then the two corners of a bottom-left-origin backend would
+      // disagree. Confirmed top-left for Impeller/Metal (Task 9's device run
+      // placed geometry correctly, which a flipped origin would not have);
+      // unverified for the WebGL shim, which nothing in this codebase has
+      // run against yet.
+      patchPass.setViewport(
+          gpu.Viewport(x: 0, y: 0, width: region.width, height: region.height));
+      patchPass.bindVertexBuffer(
+          gpu.BufferView(geometry.corners,
+              offsetInBytes: 0, lengthInBytes: geometry.corners.sizeInBytes),
+          slot: 0);
+      patchPass.bindVertexBuffer(
+          gpu.BufferView(patch.instances,
+              offsetInBytes: 0, lengthInBytes: patch.instances.sizeInBytes),
+          slot: 1);
+      final toPatch = composeTransforms(
+          Transform2.translation(-region.x.toDouble(), -region.y.toDouble()),
+          collectionToDevice);
+      patchPass.bindUniform(
+        geometry.vertexShader.getUniformSlot('FrameInfo'),
+        geometry.uniforms.emplace(buildFrameInfo(
+            toPatch, region.width, region.height,
+            dashScale: dashScale)),
+      );
+      patchPass.draw(ResidentGeometry.cornerVertexCount,
+          instanceCount: patch.instanceCount);
+      // Submitted immediately, on this patch's own command buffer -- see
+      // the main pass's `submit()` above for why one buffer cannot carry
+      // more than one render pass on Metal.
+      patchCommandBuffer.submit();
+      patchesRendered++;
+      _pendingRegions.add((patch, region));
+    }
+
     frames++;
-    // Synchronous on both backends: the web shim's `Texture.asImage` states it
-    // "matches flutter_gpu's synchronous `asImage`".
+
+    // **`asImage()` only after the LAST `submit()`, on purpose.** By this
+    // point every command buffer this frame created -- the main pass's and
+    // each patch's own -- has already been submitted, in order, above; nothing
+    // below submits anything. On native the image is a handle over the live
+    // texture (`flutter_gpu/texture.cc`'s `Texture::AsImage`) and reads
+    // whatever the texture holds when the picture rasterises, so the order
+    // would not matter there. On the web shim `asImage()` SNAPSHOTS the
+    // texture now (`snapshotTextureSync`), so taken before a target's own
+    // submit it would show last frame's contents. One order that is right on
+    // both backends -- the finding Codex made against revision 5's first
+    // draft, still true now that there are `1 + P` submits instead of one.
+    for (final (patch, region) in _pendingRegions) {
+      _patchImages.add(PatchImage(
+        textIndex: patch.textIndex,
+        image: patch.target.asImage(),
+        src: Rect.fromLTWH(
+            0, 0, region.width.toDouble(), region.height.toDouble()),
+        dst: Rect.fromLTWH(region.x / dpr, region.y / dpr, region.width / dpr,
+            region.height / dpr),
+        layerBounds: labelBoundsLogical(
+            geometry.texts[patch.textIndex], _collectionToLogical,
+            scratch: _boundsScratch),
+      ));
+    }
+    // `_pendingRegions` is intentionally left populated here, rather than
+    // cleared again -- the next `render` call clears it unconditionally, at
+    // the top, before its own early returns (see that comment): a single
+    // reset point that covers both a frame that legitimately draws nothing
+    // and a frame that throws between the `.add` above and this point,
+    // which a clear only here could not.
     return target.asImage();
+  }
+
+  /// One frame onto [canvas]: [render], then the compositor. This is the
+  /// call site a widget uses (Plan F) and the harness uses (Task 7).
+  ///
+  /// **Without a [_compositor], the main image alone -- no text, and no
+  /// patches.** A [GpuDrawBackend] built without a [FlutterTextMeasurer] and
+  /// a text-style lookup (Ruling E2's shape again) still draws every stroke,
+  /// join, point and fill exactly as before Plan E; it draws no glyph at all,
+  /// resident or patched, until both are supplied.
+  void paint(
+      Canvas canvas, ViewportTransform camera, Size viewport, double dpr) {
+    textsDropped = 0;
+    final main = render(camera, viewport, dpr);
+    final compositor = _compositor;
+    if (compositor == null) {
+      if (geometry.texts.isNotEmpty) {
+        textsDropped += geometry.texts.length;
+      }
+      if (main != null) {
+        canvas.drawImageRect(
+            main,
+            Rect.fromLTWH(0, 0, main.width.toDouble(), main.height.toDouble()),
+            Rect.fromLTWH(0, 0, viewport.width, viewport.height),
+            _imagePaint);
+      }
+      return;
+    }
+    // `_collectionToLogical` is this frame's -- set once by the [render] call
+    // just above, not recomputed here. `render` already builds this exact
+    // composition for its own `collectionToDevice`, and `dashScaleFor` builds
+    // it a second time internally; a third `composeTransforms` call here,
+    // per frame rather than per entity, would still sit inside "the frame
+    // path allocates nothing per entity in steady state, and O(1) per flush"
+    // (CLAUDE.md) -- but there is no reason to pay it when [render] already
+    // has the answer.
+    compositor.paint(canvas,
+        main: main,
+        viewport: viewport,
+        collectionToLogical: _collectionToLogical,
+        texts: geometry.texts,
+        patches: _patchImages);
   }
 
   void dispose() => geometry.dispose();

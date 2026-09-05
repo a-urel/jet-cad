@@ -38,6 +38,28 @@ void main() {
             'keeps the attribute count at ES 100\'s floor of eight');
   });
 
+  test('x0..y2 are contiguous at offsets 2..7', () {
+    // `classifyTextPatches` (`text_patches.dart`) reads a kind's points with
+    // `InstanceFieldOffset.x0 + p * 2`, relying on x0, y0, x1, y1, x2, y2
+    // being six consecutive floats in that order. This pins the layout that
+    // arithmetic depends on.
+    expect([
+      InstanceFieldOffset.x0,
+      InstanceFieldOffset.y0,
+      InstanceFieldOffset.x1,
+      InstanceFieldOffset.y1,
+      InstanceFieldOffset.x2,
+      InstanceFieldOffset.y2,
+    ], [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ]);
+  });
+
   test('the three kind tags are distinct and ordered for the shader', () {
     // `cad_stroke.vert` dispatches with `kind < 0.5` then `kind < 1.5`, so
     // the tags must be 0, 1, 2 in that order -- not merely distinct.

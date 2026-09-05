@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'dart:ui' show Canvas, PictureRecorder, Size;
+import 'dart:ui' show Canvas, ImageByteFormat, PictureRecorder, Size;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -841,6 +841,252 @@ DraftDocument fillFixture() {
   )));
 
   return doc;
+}
+
+/// A label's height in this corpus, in definition units. ~16 logical px at
+/// the fitted 800x600 camera; see [textOverlapFixture].
+const double kTextOverlapLabelHeight = 600.0;
+
+/// A corpus for Plan E: three labels and what does or does not cover them.
+///
+/// **Every element is here because a named mutation needs it** -- see the
+/// plan's Task 3 table for the full reasoning; summarised in the handle table
+/// below.
+///
+/// | handle | what | why |
+/// |---|---|---|
+/// | 900 | a thick solid stroke, lineweight 120, crossing the middle of label 901 | **lower** handle: must stay UNDER the label; a classifier admitting earlier instances draws it over |
+/// | 901 | label `'COVERED'`, height 600 | the patched label: 903 and 905 reach it |
+/// | 903 | a thick solid stroke, lineweight 120, crossing the middle of label 901 | **higher** handle: must draw OVER the label -- the spec's headline mutation |
+/// | 904/905 | a translucent fill (transparency 128) and its polygon boundary, over the right half of label 901 | `srcATop` vs `srcOver` -- a double blend shows outside the glyphs |
+/// | 911 | label `'UNDER'`, height 600 | overlapped by 910 only |
+/// | 910 | a thick stroke crossing label 911, **lower** handle | the label nothing later reaches: zero patches, drawn as a plain paragraph |
+/// | 921 | label `'GRAZED'`, height 600 | |
+/// | 922 | a stroke whose centerline runs just above label 921's box, within its width of the glyphs | the centerline-vs-reach mutation; [grazeLineweight] narrows it to a hairline that misses entirely |
+/// | 931 | label `'TINY'`, height 140 | near `kMinTextCapPixels` at the fitted camera: culled or not, both arms must agree |
+/// | 990 | the placement instance: rotated 0.3 rad, **mirrored** (`scale(-0.9, 1.1)`), off-origin | an identity placement hides a transposed box corner |
+///
+/// All entities live in one definition (`Handle(890)`) placed by instance
+/// 990, so every label sits under a non-uniform, mirrored, rotated residual --
+/// `CLAUDE.md`'s named dominant failure mode is the degenerate fixture, and an
+/// axis-aligned label at the origin hides a transposed matrix element the way
+/// [fillFixture]'s own class comment describes. The definition's floor is a
+/// 30,000 x 20,000 unit rectangle (handle 899, a thin line across its
+/// diagonal) so the fitted camera at 800 x 600 logical is about 0.026 px/unit
+/// and a 600-unit label is ~16 px tall -- comfortably above
+/// `kMinTextCapPixels` (3) at every band scale from 0.5 to 2.0, while `'TINY'`
+/// at 140 units is ~3.6 px at scale 1 and crosses the threshold inside the
+/// band.
+///
+/// [grazeLineweight] is entity 922's own lineweight. There is no
+/// modify-lineweight command in `jet_cad_2d`, so a test that needs the same
+/// corpus at two different widths -- the grazing stroke drawn thick, then
+/// hairline -- rebuilds the document with a different value here rather than
+/// mutating one in place.
+DraftDocument textOverlapFixture(TextMeasurer measurer,
+    {int grazeLineweight = 400}) {
+  final doc = DraftDocument.empty(measurer: measurer);
+
+  const content = Handle(890);
+  doc.tree.addDefinition(Definition(
+      handle: content,
+      name: 'labelled-floor',
+      basePoint: Vector2.zero(),
+      children: const []));
+
+  // The floor's extent, so the fit is decided by this and not by a label.
+  addEntity(doc, content, const Handle(899), EntityKind.line,
+      [0, 0, 30000, 20000], const [],
+      lineweight: 1);
+
+  // --- COVERED: under 900, over 903 and the translucent fill 904 ---------
+  addEntity(doc, content, const Handle(900), EntityKind.line,
+      [3000, 5300, 9000, 5300], const [],
+      lineweight: 120);
+  addText(doc, content, const Handle(901), 'COVERED', 3000, 5000,
+      kTextOverlapLabelHeight);
+  addEntity(doc, content, const Handle(903), EntityKind.line,
+      [3000, 5250, 9000, 5250], const [],
+      lineweight: 120);
+  doc.commands.execute(AddRegionCommand(
+    fill: const EntityRecord(
+      handle: Handle(904),
+      owner: content,
+      kind: EntityKind.fill,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.continuousLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: TrueColor(0xCC3311),
+      lineweight: kLineweightDefault,
+      transparency: 128,
+      flags: 0,
+    ),
+    boundary: const EntityRecord(
+      handle: Handle(905),
+      owner: content,
+      kind: EntityKind.polyline,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.continuousLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: TrueColor(0x000000),
+      lineweight: kLineweightDefault,
+      transparency: 0,
+      flags: 0,
+    ),
+    boundaryPayload: GeometryPayload(
+      coords: Float64List.fromList(<double>[
+        4300, 4800, // COVERED at height 600 spans x ~3000..5500; the fill
+        7000, 4800, // covers its right half and runs past it
+        7000, 5800, //
+        4300, 5800, //
+        4300, 4800, // closing duplicate
+      ]),
+      scalars: Float64List(0),
+    ),
+  ));
+
+  // --- UNDER: a lower-handle stroke only -- no patch ---------------------
+  addEntity(doc, content, const Handle(910), EntityKind.line,
+      [3000, 9300, 9000, 9300], const [],
+      lineweight: 120);
+  addText(doc, content, const Handle(911), 'UNDER', 3000, 9000,
+      kTextOverlapLabelHeight);
+
+  // --- GRAZED: centerline above the box, width reaches into it -----------
+  addText(doc, content, const Handle(921), 'GRAZED', 12000, 5000,
+      kTextOverlapLabelHeight);
+  // The box top is at 5000 + ascent; ascent for a 600 high label is about
+  // 600 * (ascent / capHeight) -- the guard test measures the overlap
+  // rather than deriving it, so this y only needs to be near the box's top.
+  addEntity(doc, content, const Handle(922), EntityKind.line,
+      [12000, 5700, 18000, 5700], const [],
+      lineweight: grazeLineweight);
+
+  // --- TINY: near the culling threshold ---------------------------------
+  addText(doc, content, const Handle(931), 'TINY', 12000, 9000, 140);
+
+  doc.commands.execute(AddNodeCommand(InstanceNode(
+    handle: const Handle(990),
+    parent: doc.rootHandle,
+    transform: Transform2.translation(400000, -250000)
+        .multiply(Transform2.rotation(0.3))
+        .multiply(Transform2.scale(-0.9, 1.1)),
+    definition: content,
+    layer: ReservedHandles.layerZero,
+    color: const IndexedColor(7),
+  )));
+
+  return doc;
+}
+
+/// Every handle currently live in [doc]'s entity store, snapshotted rather
+/// than streamed: [strokeInkInsideLabel] removes entities while it works, and
+/// a live view over [EntityStore.liveSlots] would be invalidated mid-walk by
+/// its own removals.
+List<Handle> _entityHandles(DraftDocument doc) =>
+    [for (final slot in doc.entities.liveSlots) doc.entities.handleAt(slot)];
+
+/// Paints only [keep] -- truly alone, not even alongside the fixture's own
+/// hairline floor (handle 899) -- through [CanvasDrawSink] over a real
+/// [FlutterTextMeasurer], and returns the rendered alpha channel.
+///
+/// **899 is removed too, on purpose.** An earlier version of this helper left
+/// it in place on the theory that a one-pixel-wide hairline could never push
+/// a shared count past any floor this file's callers check against. Review
+/// caught the actual hazard: with 899 present, unremoved, in *both* isolated
+/// renders, any pixel where it happened to cross alpha 128 would be
+/// double-counted as "shared" by [strokeInkInsideLabel]'s whole-frame count
+/// regardless of whether the stroke and the label themselves overlap there --
+/// nothing in this file asserted that never happens. Removing it closes that
+/// gap outright rather than relying on an argument about its width: [camera]
+/// is computed once, from the full document's extents, before either isolated
+/// paint, so removing 899 here moves no pixel on screen. The one entity node
+/// that does legitimately stay across every render is 990, the placement
+/// instance -- it is never a candidate for removal because [RemoveEntityCommand]
+/// only ever targets entities, and 990 is a node.
+///
+/// Every other live entity is removed with [RemoveEntityCommand] and the
+/// removals are undone again before returning, so [doc] is left exactly as
+/// it was found -- the caller calls this twice, once per entity, from the
+/// same document.
+Future<Uint8List> _paintAloneAlpha(
+    DraftDocument doc, Handle keep, ViewportTransform camera) async {
+  final toRemove = _entityHandles(doc).where((h) => h != keep).toList();
+  var removed = 0;
+  for (final h in toRemove) {
+    // A boundary's removal cascades onto its fill (`RemoveEntityCommand`'s
+    // own doc comment): by the time this loop reaches the fill half of such
+    // a pair, it may already be gone.
+    if (doc.entities.containsHandle(h)) {
+      doc.commands.execute(RemoveEntityCommand(h));
+      removed++;
+    }
+  }
+
+  // No background fill: the canvas starts fully transparent, so the alpha
+  // channel is exactly which pixels this one entity inked -- a white
+  // backdrop, as `fill_seam_test.dart` paints for a channel-value comparison,
+  // would leave every pixel's alpha at 255 and this helper unable to tell
+  // ink from empty space.
+  final recorder = PictureRecorder();
+  final canvas = Canvas(recorder);
+  final index = SpatialIndex(doc);
+  final sink = CanvasDrawSink(
+    canvas: canvas,
+    pixelsPerPaperMm: kLogicalPixelsPerMm,
+    measurer: FlutterTextMeasurer(),
+    textStyleOf: doc.textStyleOf,
+  );
+  DraftPainter(
+          document: doc, index: index, resolver: DocumentStyleResolver(doc))
+      .paint(sink, camera, kViewport);
+  index.dispose();
+  final picture = recorder.endRecording();
+  final image =
+      await picture.toImage(kViewport.width.toInt(), kViewport.height.toInt());
+  final bytes = (await image.toByteData(format: ImageByteFormat.rawRgba))!;
+  image.dispose();
+  picture.dispose();
+
+  for (var i = 0; i < removed; i++) {
+    doc.commands.undo();
+  }
+
+  return bytes.buffer.asUint8List();
+}
+
+/// Device pixels where [stroke]'s ink and [label]'s glyph ink both exceed
+/// alpha 128, each painted ALONE through the reference (`CanvasDrawSink` over
+/// a real `FlutterTextMeasurer`) at the fitted 800x600 camera, dpr 1. The
+/// camera is fixed once, before either entity is isolated, so both renders
+/// share the same view.
+///
+/// The one helper in the GPU suite that can see text ink, because it reads
+/// Skia's own output rather than `TriangleRasterizer`'s -- see
+/// `strokeInkInsideFill`'s class comment for why the rasterizer cannot stand
+/// in here.
+Future<int> strokeInkInsideLabel(
+    DraftDocument doc, Handle stroke, Handle label) async {
+  final camera = ViewportTransform.fit(doc.extents, kViewport);
+  final strokeBytes = await _paintAloneAlpha(doc, stroke, camera);
+  final labelBytes = await _paintAloneAlpha(doc, label, camera);
+
+  final w = kViewport.width.toInt();
+  final h = kViewport.height.toInt();
+  // Whole-frame, with no bounding box of either entity's own: safe only
+  // because `_paintAloneAlpha` now removes every other entity -- 899's
+  // hairline floor included -- so each byte array's alpha is exactly one
+  // entity's ink and nothing else in the frame can contribute a false
+  // "shared" pixel outside their actual overlap.
+  var shared = 0;
+  for (var i = 0; i < w * h; i++) {
+    final strokeAlpha = strokeBytes[i * 4 + 3];
+    final labelAlpha = labelBytes[i * 4 + 3];
+    if (strokeAlpha > 128 && labelAlpha > 128) shared++;
+  }
+  return shared;
 }
 
 /// The screen-space AABB of entity [handle], folding in [node]'s placement

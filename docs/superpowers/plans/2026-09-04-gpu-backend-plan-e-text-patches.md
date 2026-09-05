@@ -249,7 +249,9 @@ requirements implicitly include this section.
 - **The frame path allocates nothing per entity in steady state, and O(1) per
   flush.** Revision 5's stated exception: **a patch costs the engine one
   `saveLayer` and one `ui.Image` handle per frame**, per label later geometry
-  reaches. Nothing else per label, and nothing per instance. The compositor's
+  reaches. The remaining per-patch Dart allocations are enumerated in
+  `GpuDrawBackend`'s class doc and the spec's exception; nothing per
+  instance, nothing per plain label. The compositor's
   matrix buffer and its three `Paint`s are fields, allocated once.
 - **Draw order is emission order** — *not* "ascending handle value". **Never
   sort the buffer.** A patch's sub-buffer is a **subsequence** of the main

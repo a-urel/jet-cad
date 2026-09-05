@@ -2,15 +2,52 @@ import 'package:flutter/foundation.dart';
 
 import 'gpu_facade.dart' as gpu;
 import 'instance_record.dart';
+import 'resident_text.dart';
+import 'text_patches.dart';
+
+/// One covered label's GPU-side patch: its sub-buffer and its target.
+///
+/// Both allocated at upload and reused every frame -- the target at the
+/// label's size at the band's ceiling (`patchTargetSizeFor`), so a zoom
+/// inside the band never reallocates it.
+class ResidentPatch {
+  ResidentPatch._(this.textIndex, this.instanceCount, this._instances,
+      this._target, this.targetWidth, this.targetHeight);
+
+  final int textIndex;
+  final int instanceCount;
+  final gpu.DeviceBuffer _instances;
+  final gpu.Texture _target;
+  final int targetWidth;
+  final int targetHeight;
+
+  @internal
+  gpu.DeviceBuffer get instances => _instances;
+  @internal
+  gpu.Texture get target => _target;
+}
 
 /// The document's geometry, uploaded once and read every frame.
 ///
 /// **Uploaded once is the whole claim.** The spike measured a 14.7 ms
 /// collection walk at 10,000 entities against a 0.61 ms frame; this class is
 /// where the walk stops being per-frame.
+///
+/// **Now also every label's patch (Plan E, Task 6).** Each `TextPatch` the
+/// classifier found becomes one `ResidentPatch`: its own sub-buffer, its own
+/// render target, both uploaded here and reused every frame the same way the
+/// main buffer is -- the walk that finds and copies the covering instances
+/// still happens once, at construction, not per frame.
 class ResidentGeometry {
-  ResidentGeometry._(this.instanceCount, this._corners, this._instances,
-      this._pipeline, this._vertexShader, this._uniforms);
+  ResidentGeometry._(
+      this.instanceCount,
+      this._corners,
+      this._instances,
+      this._pipeline,
+      this._vertexShader,
+      this._uniforms,
+      this.texts,
+      this.patches);
 
   /// **Package-prefixed, because this is a library asset.** `jet_cad_2d_flutter`
   /// declares `assets/shaders/cad.shaderbundle` in its own `pubspec.yaml`, and
@@ -209,8 +246,11 @@ class ResidentGeometry {
     ],
   );
 
-  /// Bytes a buffer of [instances] records occupies.
-  static int byteLengthFor(int instances) => instances * kFloatsPerInstance * 4;
+  /// Bytes a buffer of [instances] records occupies, plus [patchInstances]
+  /// more records -- every patch sub-buffer's instances, summed, at the same
+  /// per-record price as the main buffer's.
+  static int byteLengthFor(int instances, {int patchInstances = 0}) =>
+      (instances + patchInstances) * kFloatsPerInstance * 4;
 
   /// Uploads [instances], or returns null if this platform has no GPU, or if
   /// the upload itself failed.
@@ -232,11 +272,31 @@ class ResidentGeometry {
   /// reported through [FlutterError.reportError] first, so it reaches
   /// `FlutterError.onError` and whatever crash reporting an app wires to it,
   /// rather than surfacing only as "nothing drew" with no diagnostic at all.
+  ///
+  /// [texts] and [patches] are the frame's resident labels and their
+  /// classified patches (`classifyTextPatches`); both default to empty, so a
+  /// caller that draws no text calls this exactly as before. [maxPatchWidth]
+  /// and [maxPatchHeight] cap every patch target's size.
+  ///
+  /// **Why [maxPatchWidth]/[maxPatchHeight] default to 4096 and not the
+  /// viewport:** `create` does not know the viewport -- it runs once, at
+  /// document rebuild, well before any frame's `render` call. The harness
+  /// passes the viewport in device pixels (Task 7); the default here is only
+  /// a ceiling that keeps a mis-wired caller from asking the driver for a
+  /// texture it refuses.
   static Future<ResidentGeometry?> create(
-      Float32List instances, int instanceCount) async {
+    Float32List instances,
+    int instanceCount, {
+    List<ResidentTextRecord> texts = const <ResidentTextRecord>[],
+    List<TextPatch> patches = const <TextPatch>[],
+    double devicePixelRatio = 1.0,
+    int maxPatchWidth = 4096,
+    int maxPatchHeight = 4096,
+  }) async {
     if (!gpu.gpuAvailable()) return null;
     try {
-      return await _upload(instances, instanceCount);
+      return await _upload(instances, instanceCount, texts, patches,
+          devicePixelRatio, maxPatchWidth, maxPatchHeight);
     } catch (error, stackTrace) {
       FlutterError.reportError(FlutterErrorDetails(
         exception: error,
@@ -250,7 +310,13 @@ class ResidentGeometry {
   }
 
   static Future<ResidentGeometry?> _upload(
-      Float32List instances, int instanceCount) async {
+      Float32List instances,
+      int instanceCount,
+      List<ResidentTextRecord> texts,
+      List<TextPatch> patches,
+      double devicePixelRatio,
+      int maxPatchWidth,
+      int maxPatchHeight) async {
     // **The async loader, not `fromAsset`.** `ShaderLibrary.fromAsset` is
     // synchronous and throws on web, where asset loading is not.
     final library = await gpu.loadShaderLibraryAsync(_bundlePath);
@@ -295,6 +361,26 @@ class ResidentGeometry {
         : ByteData.sublistView(
             instances, 0, instanceCount * kFloatsPerInstance);
 
+    final residentPatches = <ResidentPatch>[];
+    for (final p in patches) {
+      final (tw, th) = patchTargetSizeFor(texts[p.textIndex], devicePixelRatio,
+          maxWidth: maxPatchWidth, maxHeight: maxPatchHeight);
+      residentPatches.add(ResidentPatch._(
+        p.textIndex,
+        p.instanceCount,
+        context.createDeviceBufferWithCopy(ByteData.sublistView(
+            p.instances, 0, p.instanceCount * kFloatsPerInstance)),
+        // A patch target must be shader-readable: the compositor draws it
+        // through `asImage()`, which the web shim refuses on a texture
+        // without `enableShaderReadUsage` (`web/texture.dart:358`). It is the
+        // default on both backends; passed explicitly so it cannot drift.
+        context.createTexture(gpu.StorageMode.devicePrivate, tw, th,
+            enableShaderReadUsage: true),
+        tw,
+        th,
+      ));
+    }
+
     return ResidentGeometry._(
       instanceCount,
       context.createDeviceBufferWithCopy(ByteData.sublistView(corners)),
@@ -303,6 +389,8 @@ class ResidentGeometry {
           vertexLayout: kInstanceVertexLayout),
       vertex,
       context.createHostBuffer(),
+      texts,
+      residentPatches,
     );
   }
 
@@ -313,7 +401,23 @@ class ResidentGeometry {
   final gpu.Shader _vertexShader;
   final gpu.HostBuffer _uniforms;
 
-  int get byteLength => byteLengthFor(instanceCount);
+  /// This frame's resident labels, in emission order -- `TextCompositor`
+  /// walks this list to draw the ones no patch covers and to interleave the
+  /// ones that do.
+  final List<ResidentTextRecord> texts;
+
+  /// Every covered label's device-side patch, one per [TextPatch] the
+  /// classifier found at rebuild -- `GpuDrawBackend.render` draws each one's
+  /// sub-buffer into its own target, after the main pass.
+  final List<ResidentPatch> patches;
+
+  int get byteLength => byteLengthFor(instanceCount,
+      patchInstances: patches.fold(0, (sum, p) => sum + p.instanceCount));
+
+  /// Sum of every patch target's `width * height * 4` -- the device memory
+  /// the patch textures occupy, beside [byteLength]'s buffers.
+  int get patchTargetBytes =>
+      patches.fold(0, (sum, p) => sum + p.targetWidth * p.targetHeight * 4);
 
   /// **`@internal`, all five.** Every return type here (`gpu.DeviceBuffer`,
   /// `gpu.RenderPipeline`, `gpu.Shader`, `gpu.HostBuffer`) resolves through
@@ -325,9 +429,13 @@ class ResidentGeometry {
   /// for `GpuDrawBackend`'s sake) but could not name a variable to hold what
   /// they return. `@internal` makes that an analyzer error at the call site
   /// instead of a confusing one at the type. `GpuDrawBackend` is this
-  /// package's only caller of all five, one call site each
-  /// (`gpu_draw_backend.dart:167, 190, 194-195, 198-199, 224-225`), which stays
-  /// legal: `@internal` only restricts use from *outside* this package.
+  /// package's only caller of all five -- `instances` once, in the main pass
+  /// (Task 6's patch loop binds each patch's own `ResidentPatch.instances`
+  /// instead, never this one); `corners`, `pipeline` and `vertexShader`
+  /// twice each, once in the main pass and once per patch; `uniforms` those
+  /// same two call sites plus one more for its per-frame `reset()`
+  /// (`gpu_draw_backend.dart`'s `render`) -- which stays legal: `@internal`
+  /// only restricts use from *outside* this package.
   @internal
   gpu.DeviceBuffer get corners => _corners;
   @internal
@@ -340,11 +448,14 @@ class ResidentGeometry {
   gpu.HostBuffer get uniforms => _uniforms;
 
   /// **A deliberate no-op.** None of `flutter_gpu`'s `DeviceBuffer`,
-  /// `RenderPipeline`, `Shader` or `HostBuffer` expose a `dispose` method
-  /// (`flutter_gpu/lib/src/{buffer,render_pipeline,shader,context}.dart`
-  /// carry none) — their native peers are reclaimed by the engine's own
-  /// finalizers. This method exists as the seam `GpuDrawBackend.dispose`
-  /// (Task 6) calls, so a future native resource with a real teardown has
-  /// somewhere to plug in without changing that call site.
+  /// `RenderPipeline`, `Shader`, `HostBuffer` or `Texture` (including the `P`
+  /// patch targets this class now owns, Plan E's Task 6) expose a `dispose`
+  /// method (`flutter_gpu/lib/src/{buffer,render_pipeline,shader,context,
+  /// texture}.dart` carry none, checked against `Texture` specifically for
+  /// this addition, not assumed from the other four) — their native peers
+  /// are reclaimed by the engine's own finalizers. This method exists as the
+  /// seam `GpuDrawBackend.dispose` (Task 6) calls, so a future native
+  /// resource with a real teardown has somewhere to plug in without changing
+  /// that call site.
   void dispose() {}
 }

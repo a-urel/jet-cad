@@ -69,6 +69,59 @@ Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01
 
 ---
 
+## Plan E — text patches (DONE, `plan-e/text-patches` at `4af35bf`, not yet merged)
+
+**Plan E gave the GPU-resident backend text**, the fifth of the design
+spec's seven plans, nine tasks, `8dde4fb..4af35bf`. Spec:
+[2026-08-29-gpu-resident-render-backend-design.md](docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md)
+(revision 5, `d2095e7`), the text section. Plan:
+[2026-09-04-gpu-backend-plan-e-text-patches.md](docs/superpowers/plans/2026-09-04-gpu-backend-plan-e-text-patches.md).
+Results:
+[2026-09-04-plan-e-results.md](docs/superpowers/notes/2026-09-04-plan-e-results.md).
+Mutation log:
+[plan-e-mutation-log.md](docs/superpowers/notes/plan-e-mutation-log.md) —
+fourteen named mutations, 14/14 killed on the first shot, zero survivors.
+
+**Task 9's own device run found a real defect before it recorded a single
+number.** The first attempt crashed on arm C's very first frame with
+patches present:
+`-[AGXG15XFamilyCommandBuffer renderCommandEncoderWithDescriptor:]:967:
+failed assertion 'A command encoder is already encoding to this command
+buffer'`. `GpuDrawBackend.render` opened one render pass per patch (87 on
+this corpus) on the SAME `CommandBuffer` as the main pass, never ending the
+previous one — `flutter_gpu`'s `RenderPassMTL` opens its live Metal encoder
+in its native constructor and the Dart `RenderPass` class exposes no
+`end()`/`dispose()` at all, so the encoder only closes via a mechanism
+unreachable between two `createRenderPass` calls in one frame. The control
+run (`DRAW_TEXT=false`, `patches=0`, one render pass per frame) completed
+cleanly on the SAME crashing tree, isolating the defect to the patch-pass
+loop. **Fixed at `4af35bf`, Ruling R6-3: one `CommandBuffer` per render
+pass, each submitted immediately after its own draw** — reproduced clean
+before any criterion-11 number was taken. This was unreachable by any unit
+test (`render`'s own doc comment already said `flutter test` cannot reach
+it) — exactly the class of defect a device run is this project's third
+instrument to catch.
+
+### What Plan E measured
+
+| quantity | value |
+|---|---|
+| composited differential, text corpus, four band scales + LOD-on | **100% agreement, all five rows** — `referenceInk` 2,383–21,891 and 7,398, each above its row's own anti-vacuity floor (Ruling R5-1) |
+| the order gate | no-patch corpus **87.23%** agreement / `overEight=941` (fails, as required); patched corpus **100%** (passes) |
+| `patchCount` on the fixture | **2** (COVERED, GRAZED), never 4 |
+| `skippedOps` | **0** on every corpus measured, device corpus included |
+| criterion 11 — hold + pan difference, arm C, median of three | **MISS**: hold **+1.79 ms**, pan **+4.22 ms**, both over the 0.5 ms budget; zoom +3.93 ms beside it; `patches=87 ≥ 8` |
+| criterion 6 — resident buffer `buffer + subBuffer` | **7.06 MB** (6.79 + 0.27) against 8 MB — **PASS**, 0.94 MB margin; `patchTargets` 1.77 MB extra device texture memory, uncounted in the budget |
+| criterion 7's share — `classify` ms | **27.4 ms against the 16.67 ms rebuild budget** — 164% of the budget from classification alone, adding to Plan C's already-recorded 115 ms rebuild MISS |
+| mutations | **14 fired, 14 killed**, zero survivors |
+
+**Exit gate: 8 of 10.** Criterion 11 is a measured MISS with its number,
+not adjusted; criterion 9 (a human looks at the window) is formally OWED —
+Plan E's five checks plus the fourteen older ones, nineteen total, none
+discharged. See [Resume here](#resume-here) for the command.
+
+---
+
 ## Plan C — dashes in the shader (merged, `main` at `3a61b45`)
 
 **Plan C's headline is a correction to its own premise.** Plan C's plan says
@@ -704,27 +757,82 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Plan E (the text split) is next, and its spec section was rewritten before
-a line of it was planned — 2026-09-04, spec revision 5.** Revision 4 counted
-the split in *draw calls*; a Canvas text draw can only land between two
-*images*, and `asImage()` of one texture shows that texture's final contents
-however many times it is taken, so what revision 4 had actually specified was
-*N+1* viewport-sized render targets at **20 MB each** on a 2× display —
-400–500 MB for the harness corpus's own `textOps=19–24`. Revision 5 keeps one
+**Plan E (the text split) is DONE, all nine tasks, `8dde4fb..4af35bf` on
+`plan-e/text-patches` — not yet merged.** Its exit gate is **8 of 10**:
+criterion 11 (hold + pan text-pass difference ≤ 0.5 ms) **MISSES** —
+measured **+1.79 ms on hold, +4.22 ms on pan** (arm C, median of three,
+87 patches on the corpus), both well over the budget — and criterion 9 (a
+human looks at the window) is **OWED**, not simulated. The other eight
+pass, including the buffer (7.06 MB against 8 MB) and all fourteen
+mutations (14/14 killed, zero survivors). Full account:
+[2026-09-04-plan-e-results.md](docs/superpowers/notes/2026-09-04-plan-e-results.md).
+**Task 9's own device run found a real defect before recording any
+number**: the first attempt crashed on arm C's first frame with patches
+present (`A command encoder is already encoding to this command buffer` —
+`GpuDrawBackend.render` opened a second Metal render-pass encoder on one
+command buffer while the first was still open), fixed at `4af35bf`
+(Ruling R6-3: one `CommandBuffer` per render pass) and reproduced clean on
+the fixed tree before any criterion-11 number was taken — see the results
+note's "What this plan's own premises measured false" §1.
+
+**The window-check debt now stands at NINETEEN checks across four plans**
+— Plan B's four (owed since `72b162d`), Plan C's five (owed since
+`18330a9`), Plan D's five (owed since `de962bd`) and Plan E's own five, all
+new, none discharged. One harness run discharges all nineteen:
+
+```sh
+cd apps/dev_harness_2d
+flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
+  --dart-define=ENTITIES=10000 --dart-define=SPIKE_DEFS=20 \
+  --dart-define=SPIKE_INSTANCES=150 --dart-define=SPIKE_FRAMES=30 \
+  --dart-define=SPIKE_REPEATS=3 --dart-define=SPIKE_FILLS=true \
+  --dart-define=SPIKE_TEXT=true
+# then --dart-define=DRAW_TEXT=false, for Plan E's fifth check
+```
+
+Also in `.vscode/launch.json` as *"2d: GPU spike — text ON (criterion 11,
+DRAW_TEXT=true)"* and its `DRAW_TEXT=false` pair — both entries now carry
+`--dart-define=SPIKE_FILLS=true` (final-review fix wave), so either one runs
+the same corpus the command above does.
+
+**Plan F is next**: rebuild triggers, the band, and `DraftCanvas`'s
+`residentGpu` path — which Plan A left rendering as `vertices` and now, for
+the first time, has a real `GpuDrawBackend.paint` to call once Plan F wires
+it in. Plan E's spec section was rewritten before a line of it was planned
+— 2026-09-04, spec revision 5. Revision 4 counted the split in *draw
+calls*; a Canvas text draw can only land between two *images*, and
+`asImage()` of one texture shows that texture's final contents however many
+times it is taken, so what revision 4 had actually specified was *N+1*
+viewport-sized render targets at **20 MB each** on a 2× display — 400–500
+MB for the harness corpus's own `textOps=19–24`. Revision 5 keeps one
 render target, draws text through the reference sink's own paragraph path,
-and restores emission order only where later geometry actually covers a label,
-with a **patch** per such label: a rebuild-time classification, a sub-buffer
-per patch, a box-sized pass per frame, composited with `srcATop` so the later
-geometry lands on the label's ink and nowhere else. Read the spec's
-"Text: one render target, and a patch where later geometry covers a label"
-before writing the plan; criterion 11, invariant 1, the budget row, the corpus
-and the mutation list moved with it. Two independent CLI reviews (Codex,
-Copilot) of the revision's first draft were folded in at `d2095e7`. **The
-plan is written:**
+and restores emission order only where later geometry actually covers a
+label, with a **patch** per such label: a rebuild-time classification, a
+sub-buffer per patch, a box-sized pass per frame, composited with `srcATop`
+so the later geometry lands on the label's ink and nowhere else. Two
+independent CLI reviews (Codex, Copilot) of the revision's first draft were
+folded in at `d2095e7`. Plan:
 [2026-09-04-gpu-backend-plan-e-text-patches.md](docs/superpowers/plans/2026-09-04-gpu-backend-plan-e-text-patches.md)
-— nine tasks, ten rulings, fourteen mutations, no shader change. **Not
-started.** Execute it with `superpowers:subagent-driven-development` on a
-worktree, `plan-e/text-patches`, cut from `main`.
+— nine tasks, ten rulings, fourteen mutations, no shader change.
+
+**Plan F inherits, with numbers** — the final whole-branch review's minors,
+left as levers rather than fixed blind in this wave (Ruling RF-1):
+
+- `classify` costs **27.4 ms** at this task's device corpus (`labels ×
+  later instances` box tests, no pruning at all) — 164% of the 16.67 ms
+  rebuild budget on its own; bucketing by y or an early-reject on a device
+  box are the cheap levers.
+- `TextCompositor.paint` walks all **165** resident labels every frame,
+  off-viewport ones included; viewport rejection is the cheapest move
+  against criterion 11's MISS.
+- R6-2 (parked, not fixed): **1 + P** `ui.Image` handles churn per frame,
+  never disposed — `P = 87` measured on this task's corpus.
+- The frozen-culling divergence the four-scale differential gate leaves
+  ungated at `minTextCapPixels: 0` (Task 5's corpus never sets it
+  otherwise).
+- The spec's eighth text mutation — "leave the resident text list stale
+  across a rebuild" — is Plan F's to fire; nothing in Plan E's own rebuild
+  path can trigger it.
 
 **A human has now looked at the window, informally, and reported the drawing
 correct — 2026-09-01, on the `SPIKE_FILL_SCALE=20` eyeball run.** That is
