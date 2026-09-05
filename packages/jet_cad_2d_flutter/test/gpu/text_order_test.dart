@@ -41,6 +41,9 @@ void main() {
       // spec's table), so with it on the two arms legitimately disagree
       // about TINY away from scale 1; that disagreement is Plan F's band
       // statement, not this gate's. The LOD-on case is the next test.
+      // Ruling R5-1: the anti-vacuity floor is per row, not one constant
+      // across the band -- the scale-1 calibration of 5000 lives on the
+      // LOD-on row below, and each scale here gets its own floor instead.
       final base = _fit(doc);
       final m = await measureCompositedAgreement(doc,
           collectionCamera: base,
@@ -50,7 +53,10 @@ void main() {
           pixelsPerPaperMm: _ppmm,
           measurer: measurer,
           minTextCapPixels: 0.0);
-      expect(m.referenceInk, greaterThan(5000), reason: 'anti-vacuity');
+      expect(m.referenceInk, greaterThan(1000),
+          reason: 'anti-vacuity -- the scale-1 floor of 5000 lives on the '
+              'LOD-on row; this corpus at 0.5 is a quarter of that '
+              'picture');
       expect(m.patchCount, greaterThanOrEqualTo(1),
           reason: 'COVERED must be a patch or this test sees no ordering');
       expect(m.agreement, greaterThanOrEqualTo(0.995),
@@ -70,6 +76,8 @@ void main() {
         devicePixelRatio: _dpr,
         pixelsPerPaperMm: _ppmm,
         measurer: measurer);
+    expect(m.referenceInk, greaterThan(5000),
+        reason: 'anti-vacuity at the scale the floor was calibrated on');
     expect(m.agreement, greaterThanOrEqualTo(0.995));
   });
 
