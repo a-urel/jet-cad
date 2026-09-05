@@ -34,9 +34,10 @@ const double kMiterLimit = 4.0;
 /// [t]: all four corners transformed and re-bounded, so a rotated, sheared
 /// or mirrored box bounds correctly (`Aabb2.transformedBy`'s own rule),
 /// written into [out] as `[minX, minY, maxX, maxY]`. Allocation-free --
-/// [out] is caller-owned and reused. Today's caller is on the rebuild walk;
-/// a frame-path caller (`labelBoundsLogical`, `patchRegionFor`) arrives in
-/// Task 4, where the allocation-free contract starts to matter.
+/// [out] is caller-owned and reused. Called from the rebuild walk (the
+/// collector's `text()`, sizing a label's box) and, per frame, from
+/// [patchRegionFor] and `text_compositor.dart`'s `labelBoundsLogical` --
+/// the frame-path callers this doc once named as future work.
 void boundTransformedBox(double minX, double minY, double maxX, double maxY,
     Transform2 t, Float64List out) {
   var lo0 = double.infinity, lo1 = double.infinity;
@@ -184,4 +185,63 @@ bool _reaches(
       maxX + reach >= t.boxMinX &&
       minY - reach <= t.boxMaxY &&
       maxY + reach >= t.boxMinY;
+}
+
+/// Where a patch draws on screen this frame: device pixels, on the viewport.
+class PatchRegion {
+  const PatchRegion(this.x, this.y, this.width, this.height);
+  final int x, y, width, height;
+}
+
+/// The label's box under the live camera, intersected with the viewport,
+/// rounded outward and clamped to the patch target's size (Ruling E8).
+///
+/// Returns null when the label is entirely off screen -- no pass, no
+/// composite. Never returns a negative origin: `flutter_gpu`'s `Viewport`
+/// and `Scissor` throw on one, and the pass is anchored at the target's own
+/// origin anyway; this region's `x, y` are for the compositor's `dst`.
+///
+/// The four corners are [boundTransformedBox]'s (Ruling P2) -- one bound
+/// loop, not a second copy of it. The `Float64List(4)` scratch is local and
+/// allocated per call: invariant 1's per-patch exception (a patch is one
+/// per label per frame, not per entity).
+PatchRegion? patchRegionFor(ResidentTextRecord t, Transform2 collectionToDevice,
+    int widthPx, int heightPx,
+    {required int maxWidth, required int maxHeight}) {
+  final bound = Float64List(4);
+  boundTransformedBox(
+      t.boxMinX, t.boxMinY, t.boxMaxX, t.boxMaxY, collectionToDevice, bound);
+  final x0 = bound[0].floor().clamp(0, widthPx);
+  final y0 = bound[1].floor().clamp(0, heightPx);
+  final x1 = bound[2].ceil().clamp(0, widthPx);
+  final y1 = bound[3].ceil().clamp(0, heightPx);
+  if (x1 <= x0 || y1 <= y0) return null;
+  final w = (x1 - x0).clamp(0, maxWidth);
+  final h = (y1 - y0).clamp(0, maxHeight);
+  return PatchRegion(x0, y0, w, h);
+}
+
+/// The patch target's size: the label's box at the band's CEILING, in
+/// device pixels, rounded up and clamped to the viewport -- the largest
+/// region [patchRegionFor] can return inside the band, so a zoom inside it
+/// resizes the region and never the texture. Never zero in either
+/// dimension: a zero-sized texture is a per-backend question this plan does
+/// not ask (the same rule `ResidentGeometry._upload` applies to an empty
+/// instance buffer).
+///
+/// **A rotated box under a rotating camera:** this sizes by the collection
+/// box's width and height, but under a rotated live camera the device
+/// region is the rotated box's bound and can be up to sqrt(2) larger in
+/// each dimension. `CameraController` in this codebase pans and zooms and
+/// does not rotate; if that changes, [patchRegionFor]'s clamp-to-target
+/// keeps the pass legal (the drawn region shrinks) and the harness's
+/// `patchClipped` counter (Task 6) reports it.
+(int, int) patchTargetSizeFor(ResidentTextRecord t, double devicePixelRatio,
+    {double bandUpperScale = kBandUpperScale,
+    required int maxWidth,
+    required int maxHeight}) {
+  final k = devicePixelRatio * bandUpperScale;
+  final w = ((t.boxMaxX - t.boxMinX) * k).ceil().clamp(1, maxWidth);
+  final h = ((t.boxMaxY - t.boxMinY) * k).ceil().clamp(1, maxHeight);
+  return (w, h);
 }

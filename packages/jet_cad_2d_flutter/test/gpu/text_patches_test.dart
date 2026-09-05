@@ -243,4 +243,73 @@ void main() {
         hasLength(1),
         reason: 'the record carries the segment; over-inclusion is correct');
   });
+
+  group('patchRegionFor', () {
+    // A label whose collection box is (10, 20) .. (50, 40); the camera maps
+    // collection to device by scale 2 and a translation, so on screen the
+    // box is (120, 240) .. (200, 280).
+    final t = _label(minX: 10, minY: 20, maxX: 50, maxY: 40, at: 0);
+    const cam = Transform2(2, 0, 0, 2, 100, 200);
+
+    test('is the box under the camera, rounded outward, on screen', () {
+      final r =
+          patchRegionFor(t, cam, 800, 600, maxWidth: 800, maxHeight: 600)!;
+      expect([r.x, r.y, r.width, r.height], [120, 240, 80, 40]);
+    });
+
+    test('rounds outward, never inward', () {
+      const cam2 = Transform2(2, 0, 0, 2, 100.4, 200.6);
+      final r =
+          patchRegionFor(t, cam2, 800, 600, maxWidth: 800, maxHeight: 600)!;
+      // 120.4 -> 120, 240.6 -> 240, right edge 200.4 -> 201, bottom 280.6 -> 281
+      expect([r.x, r.y, r.width, r.height], [120, 240, 81, 41]);
+    });
+
+    test('a label partly off the top-left edge is clamped, not negative', () {
+      // `Viewport` and `Scissor` throw on a negative origin. Box on screen:
+      // (-40, -20) .. (40, 20) -> the visible part is (0, 0) .. (40, 20).
+      const cam3 = Transform2(2, 0, 0, 2, -60, -60);
+      final r =
+          patchRegionFor(t, cam3, 800, 600, maxWidth: 800, maxHeight: 600)!;
+      expect([r.x, r.y, r.width, r.height], [0, 0, 40, 20]);
+      // Box on screen: (-280, -360) .. (-200, -320) -> entirely off: null.
+      const cam4 = Transform2(2, 0, 0, 2, -300, -400);
+      expect(patchRegionFor(t, cam4, 800, 600, maxWidth: 800, maxHeight: 600),
+          isNull);
+    });
+
+    test('a region larger than the target is clamped to the target', () {
+      final r = patchRegionFor(t, cam, 800, 600, maxWidth: 30, maxHeight: 30)!;
+      expect([r.width, r.height], [30, 30]);
+    });
+
+    test('a rotated camera bounds all four corners', () {
+      // 90-degree rotation: the 40x20 box becomes 20x40 on screen; a region
+      // built from two corners only would have a negative size.
+      final rot = Transform2.translation(300, 300)
+          .multiply(Transform2.rotation(3.141592653589793 / 2));
+      final r =
+          patchRegionFor(t, rot, 800, 600, maxWidth: 800, maxHeight: 600)!;
+      expect(r.width, 20);
+      expect(r.height, 40);
+    });
+  });
+
+  group('patchTargetSizeFor', () {
+    final t = _label(minX: 10, minY: 20, maxX: 50, maxY: 40, at: 0);
+    test('is the box at the band ceiling, in device pixels, rounded up', () {
+      // 40x20 collection units * dpr 2 * ceiling 2 = 160x80.
+      expect(patchTargetSizeFor(t, 2.0, maxWidth: 4000, maxHeight: 4000),
+          (160, 80));
+    });
+    test('is clamped to the viewport', () {
+      expect(
+          patchTargetSizeFor(t, 2.0, maxWidth: 100, maxHeight: 50), (100, 50));
+    });
+    test('is never zero', () {
+      final thin = _label(minX: 10, minY: 20, maxX: 10, maxY: 20, at: 0);
+      expect(
+          patchTargetSizeFor(thin, 1.0, maxWidth: 100, maxHeight: 100), (1, 1));
+    });
+  });
 }
