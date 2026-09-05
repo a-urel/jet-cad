@@ -80,8 +80,13 @@ void main() {
     r.markDirty(RebuildTrigger.tables);
     expect(r.pending, RebuildTrigger.document);
     await land(t);
-    // MUTATION (M-F6): schedule a callback per markDirty -> rebuilds is 4.
+    // MUTATION (M-F6): drop markDirty's early return -> three callbacks are
+    // registered and schedules reads 4; rebuilds stays 2 only because
+    // _run's pending re-check absorbs the extra callbacks.
     expect(r.rebuilds, 2);
+    expect(r.schedules, 2,
+        reason: 'one schedule for initial, one for the three coalesced '
+            'marks');
     expect(r.lastTrigger, RebuildTrigger.document);
   });
 

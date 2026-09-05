@@ -128,6 +128,10 @@ class ResidentRebuilder extends ChangeNotifier {
   int rebuilds = 0;
   int landed = 0;
 
+  /// Post-frame callbacks registered. One per coalesced rebuild; a value
+  /// above [landed] means marks were not coalesced.
+  int schedules = 0;
+
   /// Frames [noteFrame] saw with the camera outside the band -- drawn from
   /// a collection the band has already condemned. Criterion 9's number.
   int bandStaleFrames = 0;
@@ -195,6 +199,7 @@ class ResidentRebuilder extends ChangeNotifier {
 
   void _schedule() {
     _scheduled = true;
+    schedules++;
     final binding = SchedulerBinding.instance;
     binding.addPostFrameCallback((_) {
       _scheduled = false;
