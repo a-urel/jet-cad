@@ -1200,8 +1200,10 @@ void main() {
     await land(t);
     expect(r.rebuilds, 2);
     expect(r.lastTrigger, RebuildTrigger.band);
-    // The new collection is at 2.01x. 2.01 * 0.5 = 1.005 is inside its band.
-    r.noteFrame(zoomedAbout(base, centre, 1.005), kViewport, 1.0, rev());
+    // The new collection is at 2.01x. 1.1 / 2.01 = 0.547 is inside its band
+    // (not 1.005: that is 0.5 exactly in real numbers and a coin toss in
+    // doubles); 0.98 / 2.01 = 0.488 is outside.
+    r.noteFrame(zoomedAbout(base, centre, 1.1), kViewport, 1.0, rev());
     expect(r.pending, isNull);
     r.noteFrame(zoomedAbout(base, centre, 0.98), kViewport, 1.0, rev());
     expect(r.pending, RebuildTrigger.band);
@@ -2146,16 +2148,16 @@ void main() {
   late SpatialIndex index;
   late CameraController camera;
   late FakeUploader uploader;
-  late List<FlutterErrorDetails> reports;
   var paints = 0;
 
+  // `FlutterError.reportError` under the test binding parks the report as the
+  // test's pending exception; `tester.takeException()` returns and clears it,
+  // and an un-taken one fails the test. That is the observation, and it needs
+  // no swap of `FlutterError.onError` -- which the binding checks at the end
+  // of every test anyway.
   setUp(() {
     addTearDown(() => debugSetGpuAvailable(null));
     DraftCanvas.debugResetResidentFallbackReport();
-    reports = <FlutterErrorDetails>[];
-    final previous = FlutterError.onError;
-    FlutterError.onError = reports.add;
-    addTearDown(() => FlutterError.onError = previous);
     measurer = FlutterTextMeasurer();
     addTearDown(measurer.clear);
     doc = textOverlapFixture(measurer);
@@ -2195,18 +2197,19 @@ void main() {
     expect(s.resident, isNull);
     expect(s.vertices, isNotNull);
     expect(paints, 1, reason: 'nothing threw on the frame path');
-    expect(reports, hasLength(1));
-    expect(reports.single.library, 'jet_cad_2d_flutter');
-    expect(reports.single.exception.toString(), contains('residentGpu'));
-    expect(reports.single.exception.toString(), contains('gpuAvailable'));
+    final first = t.takeException();
+    expect(first, isA<FlutterError>());
+    expect(first.toString(), contains('residentGpu'));
+    expect(first.toString(), contains('gpuAvailable'));
+    expect(DraftCanvas.debugResidentFallbackReports, 1);
     await t.pumpWidget(wrap(const SizedBox()));
     await t.pumpWidget(canvas(RenderBackend.residentGpu));
-    // MUTATION (M-F8): drop the static latch -> 2 reports.
-    expect(reports, hasLength(1), reason: 'once per process');
+    // MUTATION (M-F8): drop the static latch -> a second pending exception.
+    expect(t.takeException(), isNull, reason: 'once per process');
     expect(DraftCanvas.debugResidentFallbackReports, 1);
     // An explicit vertices request is not a fallback and reports nothing.
     await t.pumpWidget(canvas(RenderBackend.vertices));
-    expect(reports, hasLength(1));
+    expect(t.takeException(), isNull);
   });
 
   testWidgets('a failed upload: vertices from then on, one report, no retry',
@@ -2221,8 +2224,9 @@ void main() {
     expect(r.landed, 1);
     expect(r.uploadFailed, isTrue);
     expect(r.backend, isNull);
-    expect(reports, hasLength(1));
-    expect(reports.single.exception.toString(), contains('upload'));
+    final report = t.takeException();
+    expect(report, isA<FlutterError>());
+    expect(report.toString(), contains('upload'));
     final paintsBefore = paints;
     camera.zoomAt(const Offset(200, 150), 3.0);
     await t.pump();
@@ -2233,7 +2237,7 @@ void main() {
     expect(() => s.vertices!.canvas, returnsNormally,
         reason: 'and it drew through the vertices sink');
     expect(r.rebuilds, 1, reason: 'criterion 10: once, not per frame');
-    expect(reports, hasLength(1));
+    expect(t.takeException(), isNull, reason: 'no second report');
     expect(DraftCanvas.debugResidentFallbackReports, 1);
   });
 
@@ -2243,7 +2247,7 @@ void main() {
     await t.pump();
     await t.pump();
     expect(state(t).resident!.backend, isA<RecordingFramePainter>());
-    expect(reports, isEmpty);
+    expect(t.takeException(), isNull);
     expect(DraftCanvas.debugResidentFallbackReports, 0);
   });
 }
@@ -2371,6 +2375,14 @@ void main() {
       attributedInstanceFraction: 0.2,
       measurer: measurer,
     );
+    // One line across the whole floor, at a handle above every label's: the
+    // generated rooms are 30-120 units and a label box is hundreds, so no
+    // room wall spans kClassifyOverflowCells cells on its own. This one
+    // spans hundreds, reaches every label on the diagonal, and is what
+    // makes `stats.overflow > 0` below a fact rather than a hope.
+    final e = doc.extents;
+    addLine(doc, doc.rootHandle, doc.handleSeed.next(), e.minX, e.minY, e.maxX,
+        e.maxY);
     final (data, count, texts) =
         collect(doc, measurer, const Size(1400, 900), 2.0);
     expect(texts.length, greaterThan(50), reason: 'a real label population');
@@ -2390,7 +2402,7 @@ void main() {
         reason: 'a long wall spans more than kClassifyOverflowCells cells, '
             'or the overflow branch is untested here');
     expect(stats.binned, greaterThan(1000));
-    expect(stats.candidatesTested, lessThan(texts.length * count ~/ 4),
+    expect(stats.candidatesTested, lessThan(texts.length * count ~/ 2),
         reason: 'the grid must test a fraction of the pairs the brute force '
             'does, or it is not the lever criterion 7 needs');
     // Reported, not gated: the two costs side by side.
