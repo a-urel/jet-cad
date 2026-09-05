@@ -1,0 +1,486 @@
+# Review package: 26184f3..be31724
+
+## Commits
+be31724 feat(gpu): classify which labels later geometry reaches
+
+## Files changed
+ .../lib/src/gpu/text_patches.dart                  | 121 +++++++++-
+ .../test/gpu/instance_record_test.dart             |  22 ++
+ .../test/gpu/text_patches_test.dart                | 246 +++++++++++++++++++++
+ 3 files changed, 386 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+index 78f32f1..50b1805 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+@@ -1,18 +1,22 @@
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ 
++import 'instance_record.dart';
++import 'resident_text.dart';
++
+ /// **Provisional, and Plan F's to move.** The spec leaves the watermark band
+ /// un-committed as a number (open question 3); Plan E needs a floor to expand
+ /// an instance's reach at and a ceiling to size a patch target at, and takes
+-/// these two until Plan F measures the band. Every function in this file
++/// these two until Plan F measures the band. Every classification function in
++/// this file (`classifyTextPatches`, and Task 4's region and size functions)
+ /// takes them as parameters with these defaults, so a test can pin either
+ /// edge and Plan F can move them without touching a call site.
+ const double kBandLowerScale = 0.5;
+ const double kBandUpperScale = 2.0;
+ 
+ /// The label box is padded by this many device pixels, taken at the band's
+ /// LOWER scale (Ruling E9): one device pixel is most collection units at the
+ /// band's floor, so that is the conservative pad. It covers antialiased glyph
+ /// edges and glyph overhang past the advance box.
+ const double kTextBoxPadDevicePixels = 1.0;
+@@ -23,22 +27,23 @@ const double kTextBoxPadDevicePixels = 1.0;
+ /// the same rule `GeometryCollector.kMinStrokeDevicePixels` states: the two
+ /// arms arrive at their numbers separately and the differential is what
+ /// catches a drift. `resident_text_test.dart` pins this to
+ /// `VerticesDrawSink.kMiterLimit`.
+ const double kMiterLimit = 4.0;
+ 
+ /// The axis-aligned bound of the box `(minX, minY)..(maxX, maxY)` under
+ /// [t]: all four corners transformed and re-bounded, so a rotated, sheared
+ /// or mirrored box bounds correctly (`Aabb2.transformedBy`'s own rule),
+ /// written into [out] as `[minX, minY, maxX, maxY]`. Allocation-free --
+-/// [out] is caller-owned and reused -- because one caller is on the
+-/// rebuild walk and another is on the frame path.
++/// [out] is caller-owned and reused. Today's caller is on the rebuild walk;
++/// a frame-path caller (`labelBoundsLogical`, `patchRegionFor`) arrives in
++/// Task 4, where the allocation-free contract starts to matter.
+ void boundTransformedBox(double minX, double minY, double maxX, double maxY,
+     Transform2 t, Float64List out) {
+   var lo0 = double.infinity, lo1 = double.infinity;
+   var hi0 = double.negativeInfinity, hi1 = double.negativeInfinity;
+ 
+   final c0x = t.a * minX + t.c * minY + t.e,
+       c0y = t.b * minX + t.d * minY + t.f;
+   if (c0x < lo0) lo0 = c0x;
+   if (c0x > hi0) hi0 = c0x;
+   if (c0y < lo1) lo1 = c0y;
+@@ -63,10 +68,120 @@ void boundTransformedBox(double minX, double minY, double maxX, double maxY,
+   if (c3x < lo0) lo0 = c3x;
+   if (c3x > hi0) hi0 = c3x;
+   if (c3y < lo1) lo1 = c3y;
+   if (c3y > hi1) hi1 = c3y;
+ 
+   out[0] = lo0;
+   out[1] = lo1;
+   out[2] = hi0;
+   out[3] = hi1;
+ }
++
++/// A label some later instance reaches, and the instances that reach it.
++///
++/// [instances] is a **subsequence** of the main buffer in the main buffer's
++/// order -- `kFloatsPerInstance * instanceCount` floats, copied record by
++/// record. Draw order is emission order (CLAUDE.md), and a patch is drawn
++/// from this alone, so its order is the main buffer's or the patch draws a
++/// different picture from the reference.
++class TextPatch {
++  const TextPatch(
++      {required this.textIndex,
++      required this.instances,
++      required this.instanceCount});
++
++  final int textIndex;
++  final Float32List instances;
++  final int instanceCount;
++}
++
++/// Classifies every label in [texts] against every instance written after
++/// it, in collection space -- the spec's "conservative, box on box" test.
++///
++/// For each label, instances `[instanceIndex, instanceCount)` are tested:
++/// the instance's own points (per kind, Ruling E4), expanded by the kind's
++/// reach (Ruling E5) at the band's **lower** scale bound, meet the label's
++/// box or they do not. A label at least one instance meets is a [TextPatch]
++/// whose sub-buffer is exactly those instances, in order.
++///
++/// **A candidate test, not an ink test.** A stroke through the whitespace
++/// between two glyphs, or a dashed instance whose gap crosses the box, is a
++/// candidate although no pixel of it covers label ink. Over-inclusion is
++/// correct -- `TextCompositor` makes an unneeded patch a no-op -- and its
++/// cost is what criterion 11 measures.
++///
++/// Cost: `labels x later instances` box tests in `double`, at rebuild.
++/// Reported by the harness against criterion 7's budget (Task 7).
++List<TextPatch> classifyTextPatches(
++  Float32List data,
++  int instanceCount,
++  List<ResidentTextRecord> texts, {
++  required double devicePixelRatio,
++  double bandLowerScale = kBandLowerScale,
++}) {
++  // Collection units per device pixel, at the band's floor -- the LARGEST
++  // a device-pixel reach is anywhere inside the band.
++  final unitsPerDevicePixel = 1.0 / (devicePixelRatio * bandLowerScale);
++  final patches = <TextPatch>[];
++  final hits = <int>[];
++  for (var ti = 0; ti < texts.length; ti++) {
++    final t = texts[ti];
++    hits.clear();
++    for (var i = t.instanceIndex; i < instanceCount; i++) {
++      if (_reaches(data, i, t, unitsPerDevicePixel)) hits.add(i);
++    }
++    if (hits.isEmpty) continue;
++    final sub = Float32List(hits.length * kFloatsPerInstance);
++    for (var k = 0; k < hits.length; k++) {
++      sub.setRange(k * kFloatsPerInstance, (k + 1) * kFloatsPerInstance, data,
++          hits[k] * kFloatsPerInstance);
++    }
++    patches.add(
++        TextPatch(textIndex: ti, instances: sub, instanceCount: hits.length));
++  }
++  return patches;
++}
++
++/// Whether instance [i]'s reach-expanded box meets [t]'s box.
++///
++/// Points per kind (Ruling E4): a stroke's two, a join's three, a point's
++/// ONE -- `writePoint` zeroes the other slots and reading them would pull
++/// every point's box to the origin -- a fill's three. Reach per kind
++/// (Ruling E5): half-width for a stroke and a point, `halfWidth *
++/// kMiterLimit` for a join, nothing for a fill. The kind dispatch is the
++/// shader's own chain of `<` comparisons.
++bool _reaches(
++    Float32List d, int i, ResidentTextRecord t, double unitsPerDevicePixel) {
++  final o = i * kFloatsPerInstance;
++  final kind = d[o + InstanceFieldOffset.kind];
++  final half = d[o + InstanceFieldOffset.halfWidth];
++  final int points;
++  final double reachDevice;
++  if (kind < 0.5) {
++    points = 2;
++    reachDevice = half;
++  } else if (kind < 1.5) {
++    points = 3;
++    reachDevice = half * kMiterLimit;
++  } else if (kind < 2.5) {
++    points = 1;
++    reachDevice = half;
++  } else {
++    points = 3;
++    reachDevice = 0;
++  }
++  final reach = reachDevice * unitsPerDevicePixel;
++  var minX = double.infinity, minY = double.infinity;
++  var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
++  for (var p = 0; p < points; p++) {
++    final x = d[o + InstanceFieldOffset.x0 + p * 2];
++    final y = d[o + InstanceFieldOffset.y0 + p * 2];
++    if (x < minX) minX = x;
++    if (x > maxX) maxX = x;
++    if (y < minY) minY = y;
++    if (y > maxY) maxY = y;
++  }
++  return minX - reach <= t.boxMaxX &&
++      maxX + reach >= t.boxMinX &&
++      minY - reach <= t.boxMaxY &&
++      maxY + reach >= t.boxMinY;
++}
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart b/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart
+index 9086f14..7f9ff2d 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/instance_record_test.dart
+@@ -31,20 +31,42 @@ void main() {
+         reason: 'offsets must be 0..kFloatsPerInstance-1 with no gaps');
+   });
+ 
+   test('the record is sixteen floats and kind_half is adjacent', () {
+     expect(kFloatsPerInstance, 16);
+     expect(InstanceFieldOffset.halfWidth, InstanceFieldOffset.kind + 1,
+         reason: 'the shader reads them as one vec2 attribute, which is what '
+             'keeps the attribute count at ES 100\'s floor of eight');
+   });
+ 
++  test('x0..y2 are contiguous at offsets 2..7', () {
++    // `classifyTextPatches` (`text_patches.dart`) reads a kind's points with
++    // `InstanceFieldOffset.x0 + p * 2`, relying on x0, y0, x1, y1, x2, y2
++    // being six consecutive floats in that order. This pins the layout that
++    // arithmetic depends on.
++    expect([
++      InstanceFieldOffset.x0,
++      InstanceFieldOffset.y0,
++      InstanceFieldOffset.x1,
++      InstanceFieldOffset.y1,
++      InstanceFieldOffset.x2,
++      InstanceFieldOffset.y2,
++    ], [
++      2,
++      3,
++      4,
++      5,
++      6,
++      7
++    ]);
++  });
++
+   test('the three kind tags are distinct and ordered for the shader', () {
+     // `cad_stroke.vert` dispatches with `kind < 0.5` then `kind < 1.5`, so
+     // the tags must be 0, 1, 2 in that order -- not merely distinct.
+     expect(kKindStroke, 0.0);
+     expect(kKindJoin, 1.0);
+     expect(kKindPoint, 2.0);
+   });
+ 
+   test('writeStroke fills every slot and leaves p2 zeroed', () {
+     final b = Float32List(kFloatsPerInstance * 2);
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/text_patches_test.dart b/packages/jet_cad_2d_flutter/test/gpu/text_patches_test.dart
+new file mode 100644
+index 0000000..43ca6da
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/gpu/text_patches_test.dart
+@@ -0,0 +1,246 @@
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
++
++/// A label with a box and an index -- nothing else matters to the classifier.
++ResidentTextRecord _label(
++        {required double minX,
++        required double minY,
++        required double maxX,
++        required double maxY,
++        required int at}) =>
++    ResidentTextRecord(
++        text: 'L',
++        style: const Handle(11),
++        argb: 0xFF000000,
++        a: 1,
++        b: 0,
++        c: 0,
++        d: 1,
++        e: 0,
++        f: 0,
++        boxMinX: minX,
++        boxMinY: minY,
++        boxMaxX: maxX,
++        boxMaxY: maxY,
++        instanceIndex: at);
++
++/// A buffer built record by record through the real writers, so the
++/// classifier is read against the layout the shader reads, not a hand-rolled
++/// one.
++class _Buf {
++  final Float32List data = Float32List(kFloatsPerInstance * 32);
++  int count = 0;
++  void stroke(double x0, double y0, double x1, double y1, {double half = 1}) {
++    writeStroke(data, count++,
++        x0: x0, y0: y0, x1: x1, y1: y1, halfWidth: half, argb: 0xFF000000);
++  }
++
++  void join(double vx, double vy, double px, double py, double nx, double ny,
++      {double half = 1}) {
++    writeJoin(data, count++,
++        vx: vx,
++        vy: vy,
++        prevX: px,
++        prevY: py,
++        nextX: nx,
++        nextY: ny,
++        halfWidth: half,
++        argb: 0xFF000000);
++  }
++
++  void point(double x, double y, {double half = 1}) {
++    writePoint(data, count++, x: x, y: y, halfWidth: half, argb: 0xFF000000);
++  }
++
++  void fill(double x0, double y0, double x1, double y1, double x2, double y2) {
++    writeFill(data, count++,
++        x0: x0, y0: y0, x1: x1, y1: y1, x2: x2, y2: y2, argb: 0xFF000000);
++  }
++}
++
++void main() {
++  // dpr 1, band floor 1: reach in collection units == reach in device pixels,
++  // so every number below is readable without a conversion. Tests that are
++  // ABOUT the conversion pass their own floor.
++  const dpr = 1.0;
++  const floor = 1.0;
++
++  test('an instance emitted after the label and crossing its box is a patch',
++      () {
++    final b = _Buf()
++      ..stroke(0, 0, 10, 0) // index 0: before the label
++      ..stroke(0, 50, 100, 50); // index 1: after, crosses the box
++    final texts = [_label(minX: 40, minY: 40, maxX: 60, maxY: 60, at: 1)];
++    final patches = classifyTextPatches(b.data, b.count, texts,
++        devicePixelRatio: dpr, bandLowerScale: floor);
++    expect(patches, hasLength(1));
++    expect(patches.single.textIndex, 0);
++    expect(patches.single.instanceCount, 1);
++    // The sub-buffer is a verbatim copy of record 1, all sixteen floats.
++    final sub = patches.single.instances;
++    for (var i = 0; i < kFloatsPerInstance; i++) {
++      expect(sub[i], b.data[kFloatsPerInstance + i], reason: 'float $i');
++    }
++  });
++
++  test('an instance emitted BEFORE the label never enters its patch', () {
++    final b = _Buf()
++      ..stroke(0, 50, 100, 50) // crosses the box, but index 0 < 1
++      ..stroke(0, 0, 10, 0);
++    final texts = [_label(minX: 40, minY: 40, maxX: 60, maxY: 60, at: 1)];
++    expect(
++        classifyTextPatches(b.data, b.count, texts,
++            devicePixelRatio: dpr, bandLowerScale: floor),
++        isEmpty,
++        reason: 'the reference draws it under the label; so must we');
++  });
++
++  test('a label nothing reaches has no patch, and one that is reached does',
++      () {
++    final b = _Buf()..stroke(0, 50, 100, 50); // index 0
++    final texts = [
++      _label(minX: 40, minY: 40, maxX: 60, maxY: 60, at: 0), // reached
++      _label(minX: 40, minY: 400, maxX: 60, maxY: 420, at: 0), // not
++    ];
++    final patches = classifyTextPatches(b.data, b.count, texts,
++        devicePixelRatio: dpr, bandLowerScale: floor);
++    expect(patches.map((p) => p.textIndex), [0]);
++  });
++
++  test(
++      'a stroke whose centerline misses the box but whose width reaches it '
++      'is a patch', () {
++    // Centerline at y = 65, box top at 60, half-width 6: the stroke's lower
++    // edge is at 59, inside the box. A classifier that tested the centerline
++    // (reach 0) would miss it.
++    final b = _Buf()..stroke(0, 65, 100, 65, half: 6);
++    final texts = [_label(minX: 40, minY: 40, maxX: 60, maxY: 60, at: 0)];
++    expect(
++        classifyTextPatches(b.data, b.count, texts,
++            devicePixelRatio: dpr, bandLowerScale: floor),
++        hasLength(1));
++    // And with half-width 4 (edge at 61) it is not.
++    final n = _Buf()..stroke(0, 65, 100, 65, half: 4);
++    expect(
++        classifyTextPatches(n.data, n.count, texts,
++            devicePixelRatio: dpr, bandLowerScale: floor),
++        isEmpty);
++  });
++
++  test("a join's reach is the miter bound, 4 x half-width", () {
++    // Vertex at (50, 70), box top at 60: distance 10. Half-width 3 reaches
++    // 12 with the miter bound (in), and 3 without it (out).
++    final b = _Buf()..join(50, 70, 0, 70, 100, 70, half: 3);
++    final texts = [_label(minX: 40, minY: 40, maxX: 60, maxY: 60, at: 0)];
++    expect(
++        classifyTextPatches(b.data, b.count, texts,
++            devicePixelRatio: dpr, bandLowerScale: floor),
++        hasLength(1),
++        reason: 'reach = half * kMiterLimit = 12 >= 10');
++    final far = _Buf()..join(50, 73, 0, 73, 100, 73, half: 3);
++    expect(
++        classifyTextPatches(far.data, far.count, texts,
++            devicePixelRatio: dpr, bandLowerScale: floor),
++        isEmpty,
++        reason: '12 < 13');
++  });
++
++  test('a fill has no reach: its corners are the whole of it', () {
++    final b = _Buf()..fill(0, 61, 100, 61, 50, 90); // 1 unit above the box
++    final texts = [_label(minX: 40, minY: 40, maxX: 60, maxY: 60, at: 0)];
++    expect(
++        classifyTextPatches(b.data, b.count, texts,
++            devicePixelRatio: dpr, bandLowerScale: floor),
++        isEmpty);
++  });
++
++  test("a point's box is its one point -- never the origin (Ruling E4)", () {
++    // The point is far from the label; the label sits AT the origin, where
++    // `writePoint`'s zeroed x1, y1, x2, y2 would land if they were read.
++    final b = _Buf()..point(500, 500, half: 2);
++    final texts = [_label(minX: -5, minY: -5, maxX: 5, maxY: 5, at: 0)];
++    expect(
++        classifyTextPatches(b.data, b.count, texts,
++            devicePixelRatio: dpr, bandLowerScale: floor),
++        isEmpty);
++    final near = _Buf()..point(6, 0, half: 2);
++    expect(
++        classifyTextPatches(near.data, near.count, texts,
++            devicePixelRatio: dpr, bandLowerScale: floor),
++        hasLength(1));
++  });
++
++  test('the reach is expanded at the band floor, in collection units', () {
++    // Half-width 4 device px; dpr 2; floor 0.5: reach = 4 / (2 * 0.5) = 4.0
++    // collection units. Centerline 3.5 above the box: in at the floor, out
++    // if expanded at the reference scale (4 / 2 = 2.0).
++    final b = _Buf()..stroke(0, 63.5, 100, 63.5, half: 4);
++    final texts = [_label(minX: 40, minY: 40, maxX: 60, maxY: 60, at: 0)];
++    expect(
++        classifyTextPatches(b.data, b.count, texts,
++            devicePixelRatio: 2.0, bandLowerScale: 0.5),
++        hasLength(1));
++    expect(
++        classifyTextPatches(b.data, b.count, texts,
++            devicePixelRatio: 2.0, bandLowerScale: 1.0),
++        isEmpty,
++        reason: 'expanding at the reference scale is the named mutation');
++  });
++
++  test('a sub-buffer keeps main-buffer order and skips non-reaching instances',
++      () {
++    final b = _Buf()
++      ..stroke(0, 50, 100, 50) // 0 in
++      ..stroke(0, 500, 100, 500) // 1 out
++      ..stroke(50, 0, 50, 100) // 2 in
++      ..stroke(0, 45, 100, 45); // 3 in
++    final texts = [_label(minX: 40, minY: 40, maxX: 60, maxY: 60, at: 0)];
++    final p = classifyTextPatches(b.data, b.count, texts,
++            devicePixelRatio: dpr, bandLowerScale: floor)
++        .single;
++    expect(p.instanceCount, 3);
++    double y0(int k) =>
++        p.instances[k * kFloatsPerInstance + InstanceFieldOffset.y0];
++    expect([y0(0), y0(1), y0(2)], [50, 0, 45],
++        reason: 'emission order, not sorted, not reversed');
++  });
++
++  test('patches come back in ascending text index, one per covered label', () {
++    final b = _Buf()
++      ..stroke(0, 50, 100, 50) // 0
++      ..stroke(0, 250, 100, 250); // 1
++    final texts = [
++      _label(minX: 40, minY: 240, maxX: 60, maxY: 260, at: 0), // hit by 1
++      _label(minX: 40, minY: 40, maxX: 60, maxY: 60, at: 0), // hit by 0
++    ];
++    final patches = classifyTextPatches(b.data, b.count, texts,
++        devicePixelRatio: dpr, bandLowerScale: floor);
++    expect(patches.map((p) => p.textIndex), [0, 1]);
++  });
++
++  test('a dashed stroke is a candidate over its whole segment, gaps included',
++      () {
++    final b = _Buf();
++    writeStroke(b.data, b.count++,
++        x0: 0,
++        y0: 50,
++        x1: 100,
++        y1: 50,
++        halfWidth: 1,
++        argb: 0xFF000000,
++        dashPeriod: -20,
++        dashPhase: 0,
++        dashFracStart: 0.0,
++        dashFracEnd: 0.1);
++    final texts = [_label(minX: 40, minY: 40, maxX: 60, maxY: 60, at: 0)];
++    expect(
++        classifyTextPatches(b.data, b.count, texts,
++            devicePixelRatio: dpr, bandLowerScale: floor),
++        hasLength(1),
++        reason: 'the record carries the segment; over-inclusion is correct');
++  });
++}

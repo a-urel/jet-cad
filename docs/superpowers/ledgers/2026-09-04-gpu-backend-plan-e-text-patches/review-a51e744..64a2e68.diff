@@ -1,0 +1,701 @@
+# Review package: a51e744..64a2e68
+
+## Commits
+64a2e68 fix(gpu): the patch pass is bounded by its viewport, not a scissor the web shim lacks
+87529e8 feat(gpu): patch targets and sub-buffers on the device, and a paint that composites them
+
+## Files changed
+ .../lib/src/gpu/gpu_draw_backend.dart              | 212 ++++++++++++++++++++-
+ .../lib/src/gpu/resident_geometry.dart             | 130 +++++++++++--
+ .../test/gpu/frame_info_test.dart                  |  23 +++
+ .../test/gpu/resident_geometry_test.dart           |  20 ++
+ 4 files changed, 364 insertions(+), 21 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+index 4e83849..8ad16ff 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+@@ -1,20 +1,23 @@
+ import 'dart:typed_data';
+ import 'dart:ui' as ui;
+ 
+ import 'package:flutter/painting.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:vector_math/vector_math.dart' as vm;
+ 
++import '../flutter_text_measurer.dart';
+ import '../viewport_transform.dart';
+ import 'gpu_facade.dart' as gpu;
+ import 'resident_geometry.dart';
++import 'text_compositor.dart';
++import 'text_patches.dart';
+ 
+ /// The uniform block: `mat4 mvp`, `vec2 half_viewport`, then `float
+ /// dash_scale`, std140, 80 bytes.
+ ///
+ /// **80, not the 128 `impellerc` reflects.** Plain std140 arithmetic gives 80:
+ /// `mat4` occupies 64 bytes (four 16-byte-aligned `vec4` columns), `vec2`
+ /// needs only 8-byte alignment so it sits at offset 64..72 with no gap, a
+ /// trailing `float` needs only 4-byte alignment so it sits at 72..76 with no
+ /// gap either, and the struct's own alignment (16, from `mat4`) rounds 76 up
+ /// to 80 -- the same 80 the block was before this member existed, because
+@@ -154,44 +157,84 @@ Transform2 composeTransforms(Transform2 outer, Transform2 inner) =>
+ /// witness cover the line that actually runs.
+ ///
+ /// The extra `Transform2.multiply` this adds is one more composition per
+ /// frame, not per entity -- squarely inside "the frame path allocates
+ /// nothing per entity in steady state, and O(1) per flush" (CLAUDE.md):
+ /// `render` already performs two compositions before this one.
+ double dashScaleFor(ViewportTransform camera, Transform2 collectionInverse) =>
+     composeTransforms(camera.worldToScreenMatrix, collectionInverse)
+         .scaleMagnitude;
+ 
+-/// Draws [geometry] once per frame with the camera as a uniform.
++/// Draws [geometry] once per frame with the camera as a uniform, plus one
++/// more pass per patch.
+ ///
+-/// **The matrix is the only per-frame CPU work.** The document was already
+-/// walked once, at construction of [geometry] (`ResidentGeometry`, Task 5);
+-/// every subsequent frame re-derives only the small `FrameInfo` uniform from
+-/// the current [ViewportTransform] and re-issues the one draw call the
+-/// buffer's instance count implies.
++/// **The matrix is the only per-frame CPU work, once per pass.** The
++/// document was already walked once, at construction of [geometry]
++/// (`ResidentGeometry`, Task 5); every subsequent frame re-derives only the
++/// small `FrameInfo` uniform from the current [ViewportTransform] and
++/// re-issues the main draw call the buffer's instance count implies, plus one
++/// more `FrameInfo` and one more draw call per covered label's patch
++/// (`ResidentGeometry.patches`) -- still O(1) per flush, not per entity: a
++/// patch is one pass per LABEL, never per instance inside it.
+ class GpuDrawBackend {
+-  GpuDrawBackend(this.geometry, this.collectionCamera)
+-      : _collectionInverse = collectionCamera.worldToScreenMatrix.invert();
++  GpuDrawBackend(this.geometry, this.collectionCamera,
++      {FlutterTextMeasurer? measurer,
++      TextStyleRecord Function(Handle)? textStyleOf})
++      : _collectionInverse = collectionCamera.worldToScreenMatrix.invert(),
++        _compositor = measurer != null && textStyleOf != null
++            ? TextCompositor(measurer: measurer, textStyleOf: textStyleOf)
++            : null;
+ 
+   final ResidentGeometry geometry;
+   final ViewportTransform collectionCamera;
+   final Transform2 _collectionInverse;
+ 
++  /// Composites the main image with every patch, in emission order --
++  /// `null` without a [FlutterTextMeasurer] and a text-style lookup, in
++  /// which case [paint] draws the main image alone and no text at all
++  /// (Ruling E2's shape again: a caller that never supplies the two stays on
++  /// the pre-Plan-E path with no behaviour change).
++  final TextCompositor? _compositor;
++
++  /// Reused every frame -- one `PatchImage` per patch this frame drew,
++  /// built after `submit()` (see [render]'s tail) and consumed by
++  /// [_compositor] in [paint].
++  final List<PatchImage> _patchImages = <PatchImage>[];
++
++  /// Reused per frame: `(patch, region)` pairs the patch loop in [render]
++  /// found, drained into [_patchImages] after `submit()` -- see [render]'s
++  /// tail for why the split matters.
++  final List<(ResidentPatch, PatchRegion)> _pendingRegions =
++      <(ResidentPatch, PatchRegion)>[];
++
++  /// Painted with `filterQuality: none`, same as [TextCompositor]'s own --
++  /// allocated once, reused by every `drawImageRect` call [paint] makes when
++  /// there is no [_compositor] to draw through instead.
++  final Paint _imagePaint = Paint()..filterQuality = FilterQuality.none;
++
++  /// This frame's `collectionToLogical`, set once per [render] and read by
++  /// [paint] -- see [paint]'s doc comment for why it is not recomputed there.
++  Transform2 _collectionToLogical = Transform2.identity();
++
+   gpu.Texture? _target;
+   int _w = 0;
+   int _h = 0;
+ 
+   /// Frames submitted. A backend in the paint path that never increments this
+   /// is drawing nothing, and a timing figure taken from it is the cost of an
+   /// empty screen.
+   int frames = 0;
+ 
++  /// Patches drawn, clamped to the target's size, or entirely off screen,
++  /// last frame -- diagnostics only, reset at the top of every [render].
++  int patchesRendered = 0, patchesClipped = 0, patchesOffscreen = 0;
++
+   ui.Image? render(ViewportTransform camera, Size viewport, double dpr) {
+     // **Reset first, unconditionally -- before the early returns below, and
+     // before anything that can throw.** `geometry.uniforms` is a
+     // `HostBuffer` -- a bump allocator over a small ring of device blocks
+     // (`flutter_gpu/lib/src/buffer.dart:208-223`; `_kFrameCount = 4`).
+     // `reset()` only mutates its own bookkeeping cursors (`_frameCursor`,
+     // `_bufferCursor`, `_offsetCursor`); it touches no `DeviceBuffer`
+     // contents and enqueues no GPU work, so calling it here rather than
+     // after `submit()` changes nothing about which physical slot a later
+     // `emplace` in *this* call lands in, or when the GPU is done reading a
+@@ -294,20 +337,21 @@ class GpuDrawBackend {
+     // own doc comment above). That does recompute the
+     // `camera.worldToScreenMatrix`/`_collectionInverse` composition a second
+     // time (once here as `collectionToLogical`, once inside `dashScaleFor`)
+     // rather than reusing the first result -- one extra `Transform2`
+     // composition per frame, not per entity, so it stays inside "the frame
+     // path allocates nothing per entity in steady state, and O(1) per
+     // flush" (CLAUDE.md): `render` already performs two compositions before
+     // this one.
+     final collectionToLogical =
+         composeTransforms(camera.worldToScreenMatrix, _collectionInverse);
++    _collectionToLogical = collectionToLogical;
+     final collectionToDevice =
+         composeTransforms(Transform2.scale(dpr, dpr), collectionToLogical);
+     pass.bindUniform(
+       geometry.vertexShader.getUniformSlot('FrameInfo'),
+       geometry.uniforms.emplace(buildFrameInfo(
+           collectionToDevice, widthPx, heightPx,
+           dashScale: dashScaleFor(camera, _collectionInverse))),
+     );
+     // **One call. `cornerVertexCount` vertices, one instance per record, in
+     // buffer order.** The buffer was written once, in walk order, by
+@@ -315,19 +359,167 @@ class GpuDrawBackend {
+     // the buffer's order *is* the draw order (`vertices_draw_sink.dart:41-57`
+     // is the standing record of what happens when a past version of this
+     // codebase drew from a buffer partitioned by attribute instead of by
+     // emission order). The vertex count itself is read off
+     // `ResidentGeometry.kCornerVertices`, not restated as a literal `6`, so
+     // a kind Plans C or D add to that buffer cannot leave this call drawing
+     // one kind short.
+     pass.draw(ResidentGeometry.cornerVertexCount,
+         instanceCount: geometry.instanceCount);
+ 
++    // **One more render pass per patch, on the SAME command buffer -- still
++    // one submit per frame.** Each covered label gets its own target, so its
++    // pass starts with `RenderTarget.singleColor` against `patch.target`
++    // rather than the main `target`; everything else about a patch pass
++    // mirrors the main one above (same pipeline, same corner buffer, same
++    // culling and blend state), reading `patch.instances` in place of
++    // `geometry.instances` and a `FrameInfo` built from a transform that maps
++    // the region's own device-pixel origin to the patch target's top-left
++    // instead of the viewport's.
++    _patchImages.clear();
++    patchesRendered = 0;
++    patchesClipped = 0;
++    patchesOffscreen = 0;
++    final dashScale = dashScaleFor(camera, _collectionInverse);
++    for (final patch in geometry.patches) {
++      final t = geometry.texts[patch.textIndex];
++      final region = patchRegionFor(t, collectionToDevice, widthPx, heightPx,
++          maxWidth: patch.targetWidth, maxHeight: patch.targetHeight);
++      if (region == null) {
++        patchesOffscreen++;
++        continue;
++      }
++      // The region reached the target's size: either the live scale is past
++      // the band's ceiling and Plan F's rebuild has not landed, or it sits
++      // exactly at the ceiling. Drawn anyway, short if clamped; counted so
++      // the harness can say how often. A diagnostic, not a decision.
++      if (region.width == patch.targetWidth ||
++          region.height == patch.targetHeight) {
++        patchesClipped++;
++      }
++      final patchPass =
++          commandBuffer.createRenderPass(gpu.RenderTarget.singleColor(
++        gpu.ColorAttachment(
++            texture: patch.target, clearValue: vm.Vector4(0, 0, 0, 0)),
++      ));
++      patchPass.bindPipeline(geometry.pipeline);
++      patchPass.setPrimitiveType(gpu.PrimitiveType.triangle);
++      patchPass.setCullMode(gpu.CullMode.none);
++      patchPass.setColorBlendEnable(true);
++      // Ruling E8: anchored at the target's origin. `Viewport` throws on a
++      // negative origin, and the region's on-screen position is the
++      // compositor's business.
++      //
++      // **No `Scissor` -- the viewport alone bounds the draw, and that is
++      // enough.** `FrameInfo` (`buildFrameInfo`, built from `toPatch` below)
++      // maps the region's own device-pixel rect to NDC `[-1, 1]` on both
++      // axes; every vertex this pass emits is clipped against that NDC
++      // volume before rasterisation runs at all, which is what actually
++      // keeps a stroke's quad from painting outside the region when
++      // `region` is smaller than the reused target (a live scale below the
++      // band's ceiling) -- clipping happens at the primitive stage,
++      // upstream of any per-fragment scissor test, so a scissor identical
++      // to the viewport rect would have discarded nothing a correct NDC
++      // mapping does not already discard. A `setScissor` call was here
++      // originally (Ruling E8's letter) but was removed: the web backend's
++      // `RenderPass` (`flutter_scene/lib/src/gpu/web/render_pass.dart`)
++      // declares a `Scissor` data class yet never gives `RenderPass` a
++      // `setScissor` method at all, so calling it would have been a
++      // `NoSuchMethodError` waiting for whichever plan first targets web --
++      // a real gap on that backend, not one a call site here can paper
++      // over, and not worth suppressing the analyzer for (`flutter
++      // analyze`'s own generic stand-in,
++      // `flutter_scene/lib/src/gpu/stub/shim_stubs.dart`, is missing the
++      // same method, for the same reason its own doc comment gives: "the
++      // analyzer fallback is a throwing stub").
++      patchPass.setViewport(
++          gpu.Viewport(x: 0, y: 0, width: region.width, height: region.height));
++      patchPass.bindVertexBuffer(
++          gpu.BufferView(geometry.corners,
++              offsetInBytes: 0, lengthInBytes: geometry.corners.sizeInBytes),
++          slot: 0);
++      patchPass.bindVertexBuffer(
++          gpu.BufferView(patch.instances,
++              offsetInBytes: 0, lengthInBytes: patch.instances.sizeInBytes),
++          slot: 1);
++      final toPatch = composeTransforms(
++          Transform2.translation(-region.x.toDouble(), -region.y.toDouble()),
++          collectionToDevice);
++      patchPass.bindUniform(
++        geometry.vertexShader.getUniformSlot('FrameInfo'),
++        geometry.uniforms.emplace(buildFrameInfo(
++            toPatch, region.width, region.height,
++            dashScale: dashScale)),
++      );
++      patchPass.draw(ResidentGeometry.cornerVertexCount,
++          instanceCount: patch.instanceCount);
++      patchesRendered++;
++      _pendingRegions.add((patch, region));
++    }
++
+     commandBuffer.submit();
+     frames++;
+-    // Synchronous on both backends: the web shim's `Texture.asImage` states it
+-    // "matches flutter_gpu's synchronous `asImage`".
++
++    // **`asImage()` only after `submit()`, on purpose.** On native the image
++    // is a handle over the live texture (`flutter_gpu/texture.cc`'s
++    // `Texture::AsImage`) and reads whatever the texture holds when the
++    // picture rasterises, so the order would not matter there. On the web
++    // shim `asImage()` SNAPSHOTS the texture now (`snapshotTextureSync`), so
++    // taken before the submit it would show last frame's patch. One order
++    // that is right on both backends -- the finding Codex made against
++    // revision 5's first draft.
++    for (final (patch, region) in _pendingRegions) {
++      _patchImages.add(PatchImage(
++        textIndex: patch.textIndex,
++        image: patch.target.asImage(),
++        src: Rect.fromLTWH(
++            0, 0, region.width.toDouble(), region.height.toDouble()),
++        dst: Rect.fromLTWH(region.x / dpr, region.y / dpr, region.width / dpr,
++            region.height / dpr),
++        layerBounds: labelBoundsLogical(
++            geometry.texts[patch.textIndex], collectionToLogical),
++      ));
++    }
++    _pendingRegions.clear();
+     return target.asImage();
+   }
+ 
++  /// One frame onto [canvas]: [render], then the compositor. This is the
++  /// call site a widget uses (Plan F) and the harness uses (Task 7).
++  ///
++  /// **Without a [_compositor], the main image alone -- no text, and no
++  /// patches.** A [GpuDrawBackend] built without a [FlutterTextMeasurer] and
++  /// a text-style lookup (Ruling E2's shape again) still draws every stroke,
++  /// join, point and fill exactly as before Plan E; it draws no glyph at all,
++  /// resident or patched, until both are supplied.
++  void paint(
++      Canvas canvas, ViewportTransform camera, Size viewport, double dpr) {
++    final main = render(camera, viewport, dpr);
++    final compositor = _compositor;
++    if (compositor == null) {
++      if (main != null) {
++        canvas.drawImageRect(
++            main,
++            Rect.fromLTWH(0, 0, main.width.toDouble(), main.height.toDouble()),
++            Rect.fromLTWH(0, 0, viewport.width, viewport.height),
++            _imagePaint);
++      }
++      return;
++    }
++    // `_collectionToLogical` is this frame's -- set once by the [render] call
++    // just above, not recomputed here. `render` already builds this exact
++    // composition for its own `collectionToDevice`, and `dashScaleFor` builds
++    // it a second time internally; a third `composeTransforms` call here,
++    // per frame rather than per entity, would still sit inside "the frame
++    // path allocates nothing per entity in steady state, and O(1) per flush"
++    // (CLAUDE.md) -- but there is no reason to pay it when [render] already
++    // has the answer.
++    compositor.paint(canvas,
++        main: main,
++        viewport: viewport,
++        collectionToLogical: _collectionToLogical,
++        texts: geometry.texts,
++        patches: _patchImages);
++  }
++
+   void dispose() => geometry.dispose();
+ }
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+index 66838e8..ea0eab5 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_geometry.dart
+@@ -1,23 +1,60 @@
+ import 'package:flutter/foundation.dart';
+ 
+ import 'gpu_facade.dart' as gpu;
+ import 'instance_record.dart';
++import 'resident_text.dart';
++import 'text_patches.dart';
++
++/// One covered label's GPU-side patch: its sub-buffer and its target.
++///
++/// Both allocated at upload and reused every frame -- the target at the
++/// label's size at the band's ceiling (`patchTargetSizeFor`), so a zoom
++/// inside the band never reallocates it.
++class ResidentPatch {
++  ResidentPatch._(this.textIndex, this.instanceCount, this._instances,
++      this._target, this.targetWidth, this.targetHeight);
++
++  final int textIndex;
++  final int instanceCount;
++  final gpu.DeviceBuffer _instances;
++  final gpu.Texture _target;
++  final int targetWidth;
++  final int targetHeight;
++
++  @internal
++  gpu.DeviceBuffer get instances => _instances;
++  @internal
++  gpu.Texture get target => _target;
++}
+ 
+ /// The document's geometry, uploaded once and read every frame.
+ ///
+ /// **Uploaded once is the whole claim.** The spike measured a 14.7 ms
+ /// collection walk at 10,000 entities against a 0.61 ms frame; this class is
+ /// where the walk stops being per-frame.
++///
++/// **Now also every label's patch (Plan E, Task 6).** Each `TextPatch` the
++/// classifier found becomes one `ResidentPatch`: its own sub-buffer, its own
++/// render target, both uploaded here and reused every frame the same way the
++/// main buffer is -- the walk that finds and copies the covering instances
++/// still happens once, at construction, not per frame.
+ class ResidentGeometry {
+-  ResidentGeometry._(this.instanceCount, this._corners, this._instances,
+-      this._pipeline, this._vertexShader, this._uniforms);
++  ResidentGeometry._(
++      this.instanceCount,
++      this._corners,
++      this._instances,
++      this._pipeline,
++      this._vertexShader,
++      this._uniforms,
++      this.texts,
++      this.patches);
+ 
+   /// **Package-prefixed, because this is a library asset.** `jet_cad_2d_flutter`
+   /// declares `assets/shaders/cad.shaderbundle` in its own `pubspec.yaml`, and
+   /// Flutter namespaces a package-declared asset under `packages/<name>/` in
+   /// the built asset bundle regardless of which package's code loads it — the
+   /// asset key is a property of who *declared* the asset, not of who reads it.
+   /// The spike's bare `assets/shaders/cad.shaderbundle`
+   /// (`git show 8c82208:apps/dev_harness_2d/lib/gpu_arm.dart:253` -- that
+   /// file was deleted in Task 9, before which it lived at this path) only
+   /// worked because the harness app declared that same path in its own
+@@ -202,22 +239,25 @@ class ResidentGeometry {
+               offsetInBytes: InstanceFieldOffset.r * 4),
+           gpu.VertexAttribute(
+               name: 'dash',
+               format: gpu.VertexFormat.float32x4,
+               offsetInBytes: InstanceFieldOffset.dashPeriod * 4),
+         ],
+       ),
+     ],
+   );
+ 
+-  /// Bytes a buffer of [instances] records occupies.
+-  static int byteLengthFor(int instances) => instances * kFloatsPerInstance * 4;
++  /// Bytes a buffer of [instances] records occupies, plus [patchInstances]
++  /// more records -- every patch sub-buffer's instances, summed, at the same
++  /// per-record price as the main buffer's.
++  static int byteLengthFor(int instances, {int patchInstances = 0}) =>
++      (instances + patchInstances) * kFloatsPerInstance * 4;
+ 
+   /// Uploads [instances], or returns null if this platform has no GPU, or if
+   /// the upload itself failed.
+   ///
+   /// **Two different reasons collapse to the same `null`, deliberately, and
+   /// that split is worth spelling out.** A platform with no GPU is routine —
+   /// `gpuAvailable()` covers it above, silently, and is expected to be false
+   /// on most CI and many devices. Everything past that guard runs only once
+   /// the GPU is confirmed present, so a failure there (a bad or missing
+   /// shader-bundle asset key — `ShaderLibrary.fromAsset` throws `Exception
+@@ -225,39 +265,65 @@ class ResidentGeometry {
+   /// `flutter_gpu/src/shader_library.dart:28-31` — a present bundle missing a
+   /// named entry point, thrown explicitly below — or a device buffer
+   /// allocation the driver rejected — `createDeviceBufferWithCopy` throws
+   /// `Exception('DeviceBuffer creation failed')`,
+   /// `flutter_gpu/src/context.dart:152-158`) is a real bug, not an expected
+   /// fallback. It is still returned as `null`, because the whole point of a
+   /// nullable return is that the caller does not have to catch — but it is
+   /// reported through [FlutterError.reportError] first, so it reaches
+   /// `FlutterError.onError` and whatever crash reporting an app wires to it,
+   /// rather than surfacing only as "nothing drew" with no diagnostic at all.
++  ///
++  /// [texts] and [patches] are the frame's resident labels and their
++  /// classified patches (`classifyTextPatches`); both default to empty, so a
++  /// caller that draws no text calls this exactly as before. [maxPatchWidth]
++  /// and [maxPatchHeight] cap every patch target's size.
++  ///
++  /// **Why [maxPatchWidth]/[maxPatchHeight] default to 4096 and not the
++  /// viewport:** `create` does not know the viewport -- it runs once, at
++  /// document rebuild, well before any frame's `render` call. The harness
++  /// passes the viewport in device pixels (Task 7); the default here is only
++  /// a ceiling that keeps a mis-wired caller from asking the driver for a
++  /// texture it refuses.
+   static Future<ResidentGeometry?> create(
+-      Float32List instances, int instanceCount) async {
++    Float32List instances,
++    int instanceCount, {
++    List<ResidentTextRecord> texts = const <ResidentTextRecord>[],
++    List<TextPatch> patches = const <TextPatch>[],
++    double devicePixelRatio = 1.0,
++    int maxPatchWidth = 4096,
++    int maxPatchHeight = 4096,
++  }) async {
+     if (!gpu.gpuAvailable()) return null;
+     try {
+-      return await _upload(instances, instanceCount);
++      return await _upload(instances, instanceCount, texts, patches,
++          devicePixelRatio, maxPatchWidth, maxPatchHeight);
+     } catch (error, stackTrace) {
+       FlutterError.reportError(FlutterErrorDetails(
+         exception: error,
+         stack: stackTrace,
+         library: 'jet_cad_2d_flutter',
+         context:
+             ErrorDescription('uploading the resident GPU geometry backend'),
+       ));
+       return null;
+     }
+   }
+ 
+   static Future<ResidentGeometry?> _upload(
+-      Float32List instances, int instanceCount) async {
++      Float32List instances,
++      int instanceCount,
++      List<ResidentTextRecord> texts,
++      List<TextPatch> patches,
++      double devicePixelRatio,
++      int maxPatchWidth,
++      int maxPatchHeight) async {
+     // **The async loader, not `fromAsset`.** `ShaderLibrary.fromAsset` is
+     // synchronous and throws on web, where asset loading is not.
+     final library = await gpu.loadShaderLibraryAsync(_bundlePath);
+     final vertex = library?['CadStrokeVertex'];
+     final fragment = library?['CadStrokeFragment'];
+     if (vertex == null || fragment == null) {
+       // A bad asset *path* already throws inside `loadShaderLibraryAsync`
+       // (native: `ShaderLibrary.fromAsset` throws on a missing key; web: the
+       // library comes back null and is caught by `create`'s try/catch via
+       // `library?[...]` never populating). What reaches here instead is a
+@@ -288,53 +354,95 @@ class ResidentGeometry {
+     // `flutter_gpu/src/context.dart:152-158`), so this never asks: with zero
+     // instances the upload is one record's worth of zeroed bytes instead of
+     // zero bytes. It is never read — `GpuDrawBackend.render` already skips
+     // the draw call whenever `geometry.instanceCount == 0` — so its content
+     // does not matter, only that the allocation succeeds.
+     final instanceBytes = instanceCount == 0
+         ? ByteData(kFloatsPerInstance * 4)
+         : ByteData.sublistView(
+             instances, 0, instanceCount * kFloatsPerInstance);
+ 
++    final residentPatches = <ResidentPatch>[];
++    for (final p in patches) {
++      final (tw, th) = patchTargetSizeFor(texts[p.textIndex], devicePixelRatio,
++          maxWidth: maxPatchWidth, maxHeight: maxPatchHeight);
++      residentPatches.add(ResidentPatch._(
++        p.textIndex,
++        p.instanceCount,
++        context.createDeviceBufferWithCopy(ByteData.sublistView(
++            p.instances, 0, p.instanceCount * kFloatsPerInstance)),
++        // A patch target must be shader-readable: the compositor draws it
++        // through `asImage()`, which the web shim refuses on a texture
++        // without `enableShaderReadUsage` (`web/texture.dart:358`). It is the
++        // default on both backends; passed explicitly so it cannot drift.
++        context.createTexture(gpu.StorageMode.devicePrivate, tw, th,
++            enableShaderReadUsage: true),
++        tw,
++        th,
++      ));
++    }
++
+     return ResidentGeometry._(
+       instanceCount,
+       context.createDeviceBufferWithCopy(ByteData.sublistView(corners)),
+       context.createDeviceBufferWithCopy(instanceBytes),
+       context.createRenderPipeline(vertex, fragment,
+           vertexLayout: kInstanceVertexLayout),
+       vertex,
+       context.createHostBuffer(),
++      texts,
++      residentPatches,
+     );
+   }
+ 
+   final int instanceCount;
+   final gpu.DeviceBuffer _corners;
+   final gpu.DeviceBuffer _instances;
+   final gpu.RenderPipeline _pipeline;
+   final gpu.Shader _vertexShader;
+   final gpu.HostBuffer _uniforms;
+ 
+-  int get byteLength => byteLengthFor(instanceCount);
++  /// This frame's resident labels, in emission order -- `TextCompositor`
++  /// walks this list to draw the ones no patch covers and to interleave the
++  /// ones that do.
++  final List<ResidentTextRecord> texts;
++
++  /// Every covered label's device-side patch, one per [TextPatch] the
++  /// classifier found at rebuild -- `GpuDrawBackend.render` draws each one's
++  /// sub-buffer into its own target, after the main pass.
++  final List<ResidentPatch> patches;
++
++  int get byteLength => byteLengthFor(instanceCount,
++      patchInstances: patches.fold(0, (sum, p) => sum + p.instanceCount));
++
++  /// Sum of every patch target's `width * height * 4` -- the device memory
++  /// the patch textures occupy, beside [byteLength]'s buffers.
++  int get patchTargetBytes =>
++      patches.fold(0, (sum, p) => sum + p.targetWidth * p.targetHeight * 4);
+ 
+   /// **`@internal`, all five.** Every return type here (`gpu.DeviceBuffer`,
+   /// `gpu.RenderPipeline`, `gpu.Shader`, `gpu.HostBuffer`) resolves through
+   /// `gpu_facade.dart`'s `export 'package:flutter_scene/src/gpu/gpu.dart';`
+   /// -- the off-contract, pre-1.0, `lib/src/` path that file exists to
+   /// confine. `gpu_facade.dart` itself is deliberately unexported from this
+   /// package's barrel, so without this annotation a consumer outside this
+   /// package could see these getters (`ResidentGeometry` itself is public,
+   /// for `GpuDrawBackend`'s sake) but could not name a variable to hold what
+   /// they return. `@internal` makes that an analyzer error at the call site
+   /// instead of a confusing one at the type. `GpuDrawBackend` is this
+-  /// package's only caller of all five, one call site each
+-  /// (`gpu_draw_backend.dart:167, 190, 194-195, 198-199, 224-225`), which stays
+-  /// legal: `@internal` only restricts use from *outside* this package.
++  /// package's only caller of all five -- `instances` once, in the main pass
++  /// (Task 6's patch loop binds each patch's own `ResidentPatch.instances`
++  /// instead, never this one); `corners`, `pipeline` and `vertexShader`
++  /// twice each, once in the main pass and once per patch; `uniforms` those
++  /// same two call sites plus one more for its per-frame `reset()`
++  /// (`gpu_draw_backend.dart`'s `render`) -- which stays legal: `@internal`
++  /// only restricts use from *outside* this package.
+   @internal
+   gpu.DeviceBuffer get corners => _corners;
+   @internal
+   gpu.DeviceBuffer get instances => _instances;
+   @internal
+   gpu.RenderPipeline get pipeline => _pipeline;
+   @internal
+   gpu.Shader get vertexShader => _vertexShader;
+   @internal
+   gpu.HostBuffer get uniforms => _uniforms;
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart b/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart
+index 9b64c59..7c4c53c 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart
+@@ -218,20 +218,43 @@ void main() {
+       // At dpr == 2 a collectionToDevice-based dash scale would read double
+       // the correct number -- exactly the retina-display defect this task
+       // exists to prevent. `dashScaleFor` takes no dpr at all, so calling it
+       // again gives the same, unmoved answer.
+       expect(wrongDeviceScale(2.0), closeTo(logical * 2, 1e-9));
+       expect(wrongDeviceScale(2.0), isNot(closeTo(logical, 1e-9)));
+       expect(dashScaleFor(camera, collectionInverse), closeTo(logical, 1e-9));
+     });
+   });
+ 
++  group('patch FrameInfo', () {
++    test('a patch FrameInfo maps the region origin to the NDC corner', () {
++      // Region at device (120, 240), 80x40; collectionToDevice scale 2 +
++      // (100, 200). Composed with translation(-120, -240) OUTSIDE, the
++      // collection point that lands at device (120, 240) must land at NDC
++      // (-1, +1): the top-left of an 80x40 target.
++      const cam = Transform2(2, 0, 0, 2, 100, 200);
++      final toPatch =
++          composeTransforms(Transform2.translation(-120, -240), cam);
++      final data = buildFrameInfo(toPatch, 80, 40, dashScale: 1.0);
++      double at(int i) => data.getFloat32(i * 4, Endian.host);
++      // collection (10, 20) -> device (120, 240) -> patch (0, 0) -> NDC (-1, 1)
++      final x = at(0) * 10 + at(4) * 20 + at(12);
++      final y = at(1) * 10 + at(5) * 20 + at(13);
++      expect(x, closeTo(-1, 1e-6));
++      expect(y, closeTo(1, 1e-6));
++      expect(at(16), 40,
++          reason: 'half_viewport is the REGION\'s, so the '
++              'half-width expansion stays in device pixels');
++      expect(at(17), 20);
++    });
++  });
++
+   group('composeTransforms', () {
+     test('outer ∘ inner, every term of both operands load-bearing', () {
+       // Six distinct primes on each side: a shared value anywhere would let
+       // a transposed pair of terms (e.g. b and c swapped) compute the same
+       // wrong answer as the right one and pass by accident.
+       const outer = Transform2(2, 3, 5, 7, 11, 13);
+       const inner = Transform2(17, 19, 23, 29, 31, 37);
+ 
+       final result = composeTransforms(outer, inner);
+ 
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart b/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart
+index 71622ec..42f5338 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/resident_geometry_test.dart
+@@ -1,16 +1,17 @@
+ import 'dart:typed_data';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/gpu_facade.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
+ import 'package:jet_cad_2d_flutter/src/gpu/resident_geometry.dart';
++import 'package:jet_cad_2d_flutter/src/gpu/text_patches.dart';
+ 
+ void main() {
+   tearDown(() => debugSetGpuFactory(null));
+ 
+   test('returns null rather than throwing where there is no GPU', () async {
+     debugSetGpuFactory(() => throw StateError('no gpu'));
+     final g = await ResidentGeometry.create(Float32List(kFloatsPerInstance), 1);
+     expect(g, isNull,
+         reason: 'the caller falls back; it must not have to catch');
+   });
+@@ -20,20 +21,39 @@ void main() {
+     // 16 floats/record * 4 bytes/float. Asserting `59875 * kFloatsPerInstance
+     // * 4` here would move in lockstep with a broken `kFloatsPerInstance` (a
+     // stride mismatch against the shader's 64-byte record) and stay green.
+     expect(ResidentGeometry.byteLengthFor(59875), 3832000);
+   });
+ 
+   test('the buffer prices sixteen floats', () {
+     expect(ResidentGeometry.byteLengthFor(1000), 1000 * 16 * 4);
+   });
+ 
++  test('the byte length prices every sub-buffer beside the main buffer', () {
++    // 1000 main instances + 37 patch instances, 64 bytes each.
++    expect(ResidentGeometry.byteLengthFor(1000, patchInstances: 37),
++        (1000 + 37) * 64);
++  });
++
++  test('create still returns null with no GPU, patches or not', () async {
++    debugSetGpuFactory(() => throw StateError('no gpu'));
++    final g = await ResidentGeometry.create(Float32List(kFloatsPerInstance), 1,
++        texts: const [],
++        patches: [
++          TextPatch(
++              textIndex: 0,
++              instances: Float32List(kFloatsPerInstance),
++              instanceCount: 1)
++        ]);
++    expect(g, isNull);
++  });
++
+   group('kCornerVertices', () {
+     test('is six vertices -- two triangles, not a strip', () {
+       // The exact list, not just its length: this is the only place this
+       // data is reachable without a GPU, so the assertion has to carry the
+       // whole thing rather than a derived property a wrong constant could
+       // still satisfy.
+       expect(ResidentGeometry.kCornerVertices, <double>[
+         0, -1, 1, 0, 0, 0, //
+         0, 1, 0, 1, 0, 0, //
+         1, -1, 0, 0, 1, 0, //

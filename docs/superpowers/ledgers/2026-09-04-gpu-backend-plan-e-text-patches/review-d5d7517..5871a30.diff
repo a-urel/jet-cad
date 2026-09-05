@@ -1,0 +1,700 @@
+# Review package: d5d7517..5871a30
+
+## Commits
+5871a30 fix(gpu): the final review's fixes -- launch defines, per-patch scratches hoisted, dropped-text counter, records amended
+
+## Files changed
+ .vscode/launch.json                                |  2 +
+ STATUS.md                                          | 27 +++++++--
+ apps/dev_harness_2d/lib/gpu_arm.dart               | 11 ++++
+ .../superpowers/notes/2026-09-04-plan-e-results.md | 10 ++--
+ .../2026-09-04-gpu-backend-plan-e-text-patches.md  |  4 +-
+ ...026-08-29-gpu-resident-render-backend-design.md |  9 ++-
+ .../lib/src/gpu/gpu_draw_backend.dart              | 69 ++++++++++++++++++----
+ .../lib/src/gpu/text_compositor.dart               | 20 +++++--
+ .../lib/src/gpu/text_patches.dart                  | 17 +++---
+ .../test/gpu/text_compositor_test.dart             | 13 ++++
+ 10 files changed, 145 insertions(+), 37 deletions(-)
+
+## Diff
+diff --git a/.vscode/launch.json b/.vscode/launch.json
+index 9828517..e7a7508 100644
+--- a/.vscode/launch.json
++++ b/.vscode/launch.json
+@@ -148,20 +148,21 @@
+             "type": "dart",
+             "deviceId": "macos",
+             "flutterMode": "profile",
+             "toolArgs": [
+                 "--dart-define=RUN_GPU_SPIKE=true",
+                 "--dart-define=ENTITIES=10000",
+                 "--dart-define=SPIKE_DEFS=20",
+                 "--dart-define=SPIKE_INSTANCES=150",
+                 "--dart-define=SPIKE_FRAMES=30",
+                 "--dart-define=SPIKE_REPEATS=3",
++                "--dart-define=SPIKE_FILLS=true",
+                 "--dart-define=SPIKE_TEXT=true"
+             ]
+         },
+         {
+             // **Criterion 11's pair, arm two -- the control.** The same
+             // corpus (`SPIKE_TEXT=true`, so the labels and their patches are
+             // still there to composite around) but `DRAW_TEXT=false`: the
+             // painter suppresses every text op, so arm C draws nothing text
+             // touches. Read only as a difference against the configuration
+             // above -- see its comment for why.
+@@ -172,20 +173,21 @@
+             "type": "dart",
+             "deviceId": "macos",
+             "flutterMode": "profile",
+             "toolArgs": [
+                 "--dart-define=RUN_GPU_SPIKE=true",
+                 "--dart-define=ENTITIES=10000",
+                 "--dart-define=SPIKE_DEFS=20",
+                 "--dart-define=SPIKE_INSTANCES=150",
+                 "--dart-define=SPIKE_FRAMES=30",
+                 "--dart-define=SPIKE_REPEATS=3",
++                "--dart-define=SPIKE_FILLS=true",
+                 "--dart-define=SPIKE_TEXT=true",
+                 "--dart-define=DRAW_TEXT=false"
+             ]
+         },
+         {
+             // Debug mode: hot reload and breakpoints, at the cost of numbers
+             // that mean nothing -- `refuseDebugMode()` in the rig refuses to
+             // record from a debug build, and the same caution applies to
+             // anything you judge by eye here.
+             "name": "2d: measure 50k -- tiles ON, debug",
+diff --git a/STATUS.md b/STATUS.md
+index 2a78320..b19910a 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -784,25 +784,23 @@ new, none discharged. One harness run discharges all nineteen:
+ cd apps/dev_harness_2d
+ flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
+   --dart-define=ENTITIES=10000 --dart-define=SPIKE_DEFS=20 \
+   --dart-define=SPIKE_INSTANCES=150 --dart-define=SPIKE_FRAMES=30 \
+   --dart-define=SPIKE_REPEATS=3 --dart-define=SPIKE_FILLS=true \
+   --dart-define=SPIKE_TEXT=true
+ # then --dart-define=DRAW_TEXT=false, for Plan E's fifth check
+ ```
+ 
+ Also in `.vscode/launch.json` as *"2d: GPU spike — text ON (criterion 11,
+-DRAW_TEXT=true)"* and its `DRAW_TEXT=false` pair — **but neither entry
+-passes `SPIKE_FILLS=true`, so run as committed they show no fills and
+-Plan D's five checks have nothing to look at**; add
+-`--dart-define=SPIKE_FILLS=true` to `toolArgs`, or use the command above,
+-per the results note.
++DRAW_TEXT=true)"* and its `DRAW_TEXT=false` pair — both entries now carry
++`--dart-define=SPIKE_FILLS=true` (final-review fix wave), so either one runs
++the same corpus the command above does.
+ 
+ **Plan F is next**: rebuild triggers, the band, and `DraftCanvas`'s
+ `residentGpu` path — which Plan A left rendering as `vertices` and now, for
+ the first time, has a real `GpuDrawBackend.paint` to call once Plan F wires
+ it in. Plan E's spec section was rewritten before a line of it was planned
+ — 2026-09-04, spec revision 5. Revision 4 counted the split in *draw
+ calls*; a Canvas text draw can only land between two *images*, and
+ `asImage()` of one texture shows that texture's final contents however many
+ times it is taken, so what revision 4 had actually specified was *N+1*
+ viewport-sized render targets at **20 MB each** on a 2× display — 400–500
+@@ -810,20 +808,39 @@ MB for the harness corpus's own `textOps=19–24`. Revision 5 keeps one
+ render target, draws text through the reference sink's own paragraph path,
+ and restores emission order only where later geometry actually covers a
+ label, with a **patch** per such label: a rebuild-time classification, a
+ sub-buffer per patch, a box-sized pass per frame, composited with `srcATop`
+ so the later geometry lands on the label's ink and nowhere else. Two
+ independent CLI reviews (Codex, Copilot) of the revision's first draft were
+ folded in at `d2095e7`. Plan:
+ [2026-09-04-gpu-backend-plan-e-text-patches.md](docs/superpowers/plans/2026-09-04-gpu-backend-plan-e-text-patches.md)
+ — nine tasks, ten rulings, fourteen mutations, no shader change.
+ 
++**Plan F inherits, with numbers** — the final whole-branch review's minors,
++left as levers rather than fixed blind in this wave (Ruling RF-1):
++
++- `classify` costs **27.4 ms** at this task's device corpus (`labels ×
++  later instances` box tests, no pruning at all) — 164% of the 16.67 ms
++  rebuild budget on its own; bucketing by y or an early-reject on a device
++  box are the cheap levers.
++- `TextCompositor.paint` walks all **165** resident labels every frame,
++  off-viewport ones included; viewport rejection is the cheapest move
++  against criterion 11's MISS.
++- R6-2 (parked, not fixed): **1 + P** `ui.Image` handles churn per frame,
++  never disposed — `P = 87` measured on this task's corpus.
++- The frozen-culling divergence the four-scale differential gate leaves
++  ungated at `minTextCapPixels: 0` (Task 5's corpus never sets it
++  otherwise).
++- The spec's eighth text mutation — "leave the resident text list stale
++  across a rebuild" — is Plan F's to fire; nothing in Plan E's own rebuild
++  path can trigger it.
++
+ **A human has now looked at the window, informally, and reported the drawing
+ correct — 2026-09-01, on the `SPIKE_FILL_SCALE=20` eyeball run.** That is
+ written here as exactly what it is and no more: **the fourteen enumerated
+ checks below were not reported one by one**, so this is a sign-off on the
+ picture as a whole, not fourteen individual verdicts. **Criterion 8 therefore
+ stays formally OWED**, and the way to close it is to walk the list below and
+ say what each check showed. A record that upgraded "it looks right" into
+ fourteen passes would be the one failure this file exists to prevent.
+ 
+ Plan B's criterion has been owed since `72b162d`, Plan C's since `18330a9`,
+diff --git a/apps/dev_harness_2d/lib/gpu_arm.dart b/apps/dev_harness_2d/lib/gpu_arm.dart
+index 5377423..909d27c 100644
+--- a/apps/dev_harness_2d/lib/gpu_arm.dart
++++ b/apps/dev_harness_2d/lib/gpu_arm.dart
+@@ -683,12 +683,23 @@ Future<void> runGpuSpike(
+         // an average over it -- see [GpuPhaseReport.patchesRendered]'s doc
+         // comment for why a per-phase total would be the wrong statistic
+         // here.
+         gpuReport('GSPIKE ${rep.arm.label} | ${rep.phase} | patches '
+             'rendered=${rep.patchesRendered} clipped=${rep.patchesClipped} '
+             'offscreen=${rep.patchesOffscreen}');
+       }
+     }
+   }
+ 
++  // Ruling E2's discipline, surfaced here too: a backend built without a
++  // measurer drops every label silently, and `textsDropped` is that "so" as
++  // a number rather than a missing picture. This harness always builds
++  // `state.backend` WITH a measurer (`_buildResidentGeometry` above), so the
++  // count is always 0 here -- printed only when it is not, for a future
++  // caller that omits the measurer.
++  final textsDropped = state.backend?.textsDropped ?? 0;
++  if (textsDropped > 0) {
++    gpuReport('GSPIKE note: textsDropped=$textsDropped -- labels the last '
++        'frame drew nothing for, no compositor wired in.');
++  }
+   gpuReport('GSPIKE done: ${reports.length} phase reports above.');
+ }
+diff --git a/docs/superpowers/notes/2026-09-04-plan-e-results.md b/docs/superpowers/notes/2026-09-04-plan-e-results.md
+index 229c25f..588076a 100644
+--- a/docs/superpowers/notes/2026-09-04-plan-e-results.md
++++ b/docs/superpowers/notes/2026-09-04-plan-e-results.md
+@@ -117,23 +117,25 @@ part of the ledger this note is required to report:
+ | `patchCount` on the fixture (Task 5) | **2** (COVERED, GRAZED), never 4 — criterion 3 |
+ | mutations (Task 8) | **14 of 14 fired, 14 of 14 killed on the first shot, zero survivors** |
+ 
+ Full transcripts: Task 5's own report in the ledger; mutation transcripts in
+ [plan-e-mutation-log.md](plan-e-mutation-log.md).
+ 
+ ---
+ 
+ ## The device run
+ 
+-**Method**: `apps/dev_harness_2d`, `flutter run -d macos --profile`, macOS
+-Low Power Mode confirmed OFF twice — once before the crashing first attempt,
+-again before the post-fix reruns (`pmset -g | grep lowpowermode` →
++**Method**: `apps/dev_harness_2d`, `flutter run -d macos --profile`, three
++interleaved repeats (`SPIKE_REPEATS=3`, arms A/B/C run in turn within each
++repeat — `runGpuSpike`'s own loop order), macOS Low Power Mode confirmed OFF
++twice — once before the crashing first attempt, again before the post-fix
++reruns (`pmset -g | grep lowpowermode` →
+ `lowpowermode 0` both times) — and `flutter devices` listed `macOS
+ (desktop)`. **`flutter run` does not exit on its own** (Plan B's own
+ lesson): each invocation ran in the background with output captured to a
+ log, polled for the `GSPIKE done` marker under a 20-minute timeout, then
+ `pkill -f dev_harness_2d` and `pkill -f "flutter run"` — verified with
+ `pgrep -fl "dev_harness_2d|flutter run"` after every run, this task's
+ included.
+ 
+ **Two attempts.** The first attempt (tree at `fda4e04`, before the fix)
+ crashed on arm C's first frame — see "What this plan's own premises
+@@ -350,21 +352,21 @@ shot; zero survivors.** Full transcripts:
+ 
+ | # | criterion | verdict |
+ |---|---|---|
+ | 1 | composited differential, text corpus, four band scales | **PASS** — 100% agreement at all five rows (Task 5) |
+ | 2 | the order gate | **PASS** — no-patch corpus 87.23% / `overEight=941`, patched corpus 100% (Task 5) |
+ | 3 | exactly the covered labels are patches | **PASS** — `patchCount == 2` on the fixture (Task 5) |
+ | 4 | `skippedOps == 0` | **PASS** — every corpus measured, this task's device corpus included |
+ | 5 | criterion 11: hold + pan ≤ 0.5 ms, `patches ≥ 8` | **MISS** — hold +1.79 ms, pan +4.22 ms; `patches=87 ≥ 8` (that sub-condition alone passes) |
+ | 6 | criterion 6: `buffer + subBuffer ≤ 8 MB` | **PASS** — 7.06 MB, 0.94 MB margin |
+ | 7 | 14/14 mutations fire, survivors declared | **PASS** — 14/14 killed on the first shot, zero survivors |
+-| 8 | no shader or bundle change | **PASS** — `git diff --stat main..HEAD -- packages/jet_cad_2d_flutter/shaders packages/jet_cad_2d_flutter/assets` empty |
++| 8 | no shader or bundle change | **PASS** — `git diff --stat 8dde4fb..HEAD -- packages/jet_cad_2d_flutter/shaders packages/jet_cad_2d_flutter/assets` empty |
+ | 9 | a human looks at the window | **OWED** — Plan E's five plus fourteen older, nineteen total, none discharged |
+ | 10 | every gate green, all three packages | **PASS** — see below |
+ 
+ **8 of 10.** Criterion 5 (criterion 11) is a measured MISS, not adjusted;
+ criterion 9 is formally OWED, not simulated.
+ 
+ ### The gate commands, verbatim
+ 
+ ```
+ $ cd packages/jet_cad_2d_flutter && flutter test
+diff --git a/docs/superpowers/plans/2026-09-04-gpu-backend-plan-e-text-patches.md b/docs/superpowers/plans/2026-09-04-gpu-backend-plan-e-text-patches.md
+index 7da71f5..5ebe51f 100644
+--- a/docs/superpowers/plans/2026-09-04-gpu-backend-plan-e-text-patches.md
++++ b/docs/superpowers/plans/2026-09-04-gpu-backend-plan-e-text-patches.md
+@@ -242,21 +242,23 @@ measures nothing and says so.
+ ---
+ 
+ ## Global Constraints
+ 
+ Copied verbatim from `CLAUDE.md`, the spec, and Plans A–D. Every task's
+ requirements implicitly include this section.
+ 
+ - **The frame path allocates nothing per entity in steady state, and O(1) per
+   flush.** Revision 5's stated exception: **a patch costs the engine one
+   `saveLayer` and one `ui.Image` handle per frame**, per label later geometry
+-  reaches. Nothing else per label, and nothing per instance. The compositor's
++  reaches. The remaining per-patch Dart allocations are enumerated in
++  `GpuDrawBackend`'s class doc and the spec's exception; nothing per
++  instance, nothing per plain label. The compositor's
+   matrix buffer and its three `Paint`s are fields, allocated once.
+ - **Draw order is emission order** — *not* "ascending handle value". **Never
+   sort the buffer.** A patch's sub-buffer is a **subsequence** of the main
+   buffer in the main buffer's order; the compositor walks the text list in
+   list order; `classifyTextPatches` returns patches in ascending `textIndex`.
+ - **Geometric decisions use `Tolerance`; stored value comparisons are exact
+   `==`.** The box-meets-box test is a geometric decision made with plain
+   `<=`/`>=` on doubles, like `Aabb2.intersects`; it is conservative by
+   construction and a tolerance would only widen it further.
+ - **Never commit `analysis_options.yaml`** — `flutter pub get` rewrites three
+diff --git a/docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md b/docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md
+index 1f01fa7..228ff1e 100644
+--- a/docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md
++++ b/docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md
+@@ -386,21 +386,25 @@ instance reaches them. A patch restores exactly that:
+   (in the main image) and once inside them (in the patch), never twice in
+   the same pixel — then `restore`. No `Transform2` is built per op.
+ - **No GPU resource is allocated per frame, and the engine-side cost per
+   patch is named rather than waved at.** A patch target is allocated at
+   rebuild, at the box's size at the band's *upper* scale bound clamped to the
+   viewport, and reused; a frame renders into a sub-rectangle of it and draws
+   only that sub-rectangle. A zoom inside the band changes the sub-rectangle,
+   never the texture. Per frame a patch still costs the engine **one layer**
+   (`saveLayer`, which `dart:ui`'s own doc calls expensive) and **one
+   `ui.Image` handle** (`asImage()` creates a fresh wrapper per call on native
+-  — the same handle the main image already costs every frame today). That is
++  — the same handle the main image already costs every frame today). Plan E's
++  results measured the Dart-side cost beside the engine's own two, the same
++  per-patch list: a `PatchRegion`, a `(ResidentPatch, PatchRegion)` record, a
++  `PatchImage` carrying three `Rect`s, one `Transform2` and one 80-byte
++  uniform block — all of it per patch. That is
+   a per-*patch* allocation, and a patch is a label, which is an entity: it is
+   the **one exception** invariant 1 now states, bounded by the labels later
+   geometry reaches rather than by the drawing, and criterion 11 counts it.
+ 
+ **What this costs, stated so the plan can measure it rather than argue it.**
+ Per frame: one main pass, plus one small pass per patch whose vertex work is
+ the patch's sub-buffer — the instances that actually reach the label, not the
+ drawing; plus one `saveLayer` and two image draws per patch — proportional to what overlaps
+ the label's **axis-aligned** box, which for a rotated label is more than its
+ glyphs. Per rebuild: the classification, *labels × later instances* box tests in `double` — 24 labels
+@@ -589,21 +593,22 @@ the spike recorded arm C's raster p95 as unstable and undiagnosed, 10-13 ms. At
+ phenomenon and this target does not reach it.
+ 
+ ---
+ 
+ ## Invariants
+ 
+ 1. **The frame path allocates nothing per entity in steady state.** The frame
+    writes one uniform block per pass, submits one draw call for the buffer
+    and one per **patch**, and walks the resident text list. **The one stated
+    exception:** a patch costs the engine one layer and one image handle per
+-   frame, and a patch is a label. That allocation is per label later geometry
++   frame, and a patch is a label, plus the small per-patch Dart objects Plan
++   E's results note enumerates. That allocation is per label later geometry
+    reaches, not per entity drawn; it is counted by criterion 11, and a plan
+    that finds it on the criterion-8 corpus's frame numbers records that
+    rather than redefining "entity".
+    **The instrument does not exist and revision 3 understated this.**
+    `paint_allocation_test.dart:190-216` measures `VerticesDrawSink`-specific
+    fields — a growing vertex buffer and `Paint` identity — neither of which a
+    resident backend has, and `text_paint_allocation_test.dart:4-12` records that
+    `jet_cad_2d_flutter` has *"no `vm_service` dependency and no access to this
+    directory's `AllocationMeter`"*. Criterion 4 therefore requires a **new
+    mechanism**, and the plan must size it as its own task. The word "flush" is
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+index 174a42f..fe351f1 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+@@ -164,28 +164,42 @@ double dashScaleFor(ViewportTransform camera, Transform2 collectionInverse) =>
+     composeTransforms(camera.worldToScreenMatrix, collectionInverse)
+         .scaleMagnitude;
+ 
+ /// Draws [geometry] once per frame with the camera as a uniform, plus one
+ /// more pass per patch.
+ ///
+ /// **Per-frame CPU work is bounded by patches, never by entities.** The
+ /// document was already walked once, at construction of [geometry]
+ /// (`ResidentGeometry`, Task 5); every subsequent frame re-derives only the
+ /// small `FrameInfo` uniform from the current [ViewportTransform] and
+-/// re-issues the main draw call the buffer's instance count implies. Each
+-/// covered label's patch (`ResidentGeometry.patches`) then adds one more
+-/// `FrameInfo`, one more draw call, one `patchRegionFor` and one
+-/// `labelBoundsLogical` call (each its own `Float64List(4)` scratch, per
+-/// their own doc comments), one `PatchRegion`, one `(ResidentPatch,
+-/// PatchRegion)` record, one `PatchImage` and three `Rect`s -- still O(1)
+-/// per flush, not per entity: every one of those is one per PATCH, never one
+-/// per instance inside it.
++/// re-issues the main draw call the buffer's instance count implies.
++///
++/// **What a covered label's patch still allocates, per frame, exactly.**
++/// This wave (the final whole-branch review's fix, Ruling RF-1) hoisted the
++/// two `Float64List(4)` scratches [patchRegionFor] and `labelBoundsLogical`
++/// used to allocate per call into [_regionScratch] and [_boundsScratch]
++/// below -- fields, reused every frame, passed as each function's `scratch`
++/// argument -- so those two are OFF this list now. What remains, one of
++/// each per patch, never per entity and never per plain (uncovered) label:
++/// a `PatchRegion`, a `(ResidentPatch, PatchRegion)` record (in
++/// [_pendingRegions]), a `PatchImage`, three `Rect`s (`PatchImage.src`,
++/// `.dst`, `.layerBounds`), the `Transform2` [composeTransforms] builds for
++/// `toPatch`, the `ByteData(80)` uniform block [buildFrameInfo] returns, one
++/// `saveLayer` (`TextCompositor.paint`) and one `ui.Image` handle
++/// (`asImage()`) -- the same list the spec's text-section exception and
++/// `## Invariants` item 1 now name. Still O(1) per flush, not per entity.
++/// Plan F's two cheapest remaining reuse moves, named but not taken here
++/// (Ruling RF-1 -- a rewrite unmeasured is a rewrite this wave will not
++/// make): a mutable `PatchRegion` (collapsing the `(ResidentPatch,
++/// PatchRegion)` record above to a reused pair) and a reused uniform
++/// `ByteData` (so [buildFrameInfo] writes into a field instead of
++/// allocating one per patch per frame).
+ class GpuDrawBackend {
+   GpuDrawBackend(this.geometry, this.collectionCamera,
+       {FlutterTextMeasurer? measurer,
+       TextStyleRecord Function(Handle)? textStyleOf})
+       : _collectionInverse = collectionCamera.worldToScreenMatrix.invert(),
+         _compositor = measurer != null && textStyleOf != null
+             ? TextCompositor(measurer: measurer, textStyleOf: textStyleOf)
+             : null;
+ 
+   final ResidentGeometry geometry;
+@@ -203,20 +217,29 @@ class GpuDrawBackend {
+   /// built after `submit()` (see [render]'s tail) and consumed by
+   /// [_compositor] in [paint].
+   final List<PatchImage> _patchImages = <PatchImage>[];
+ 
+   /// Reused per frame: `(patch, region)` pairs the patch loop in [render]
+   /// found, drained into [_patchImages] after `submit()` -- see [render]'s
+   /// tail for why the split matters.
+   final List<(ResidentPatch, PatchRegion)> _pendingRegions =
+       <(ResidentPatch, PatchRegion)>[];
+ 
++  /// Reused every frame by [patchRegionFor]'s `scratch` argument, one patch
++  /// at a time -- the frame path's own copy of the scratch its doc comment
++  /// says a null argument would otherwise allocate per call.
++  final Float64List _regionScratch = Float64List(4);
++
++  /// Reused every frame by `labelBoundsLogical`'s `scratch` argument, same
++  /// reasoning as [_regionScratch].
++  final Float64List _boundsScratch = Float64List(4);
++
+   /// Painted with `filterQuality: none`, same as [TextCompositor]'s own --
+   /// allocated once, reused by every `drawImageRect` call [paint] makes when
+   /// there is no [_compositor] to draw through instead.
+   final Paint _imagePaint = Paint()..filterQuality = FilterQuality.none;
+ 
+   /// This frame's `collectionToLogical`, set once per [render] -- at the
+   /// top, before its early returns, so it is current even on a frame that
+   /// draws nothing -- and read by [paint]; see [paint]'s doc comment for why
+   /// it is not recomputed there.
+   Transform2 _collectionToLogical = Transform2.identity();
+@@ -227,20 +250,39 @@ class GpuDrawBackend {
+ 
+   /// Frames submitted. A backend in the paint path that never increments this
+   /// is drawing nothing, and a timing figure taken from it is the cost of an
+   /// empty screen.
+   int frames = 0;
+ 
+   /// Patches drawn, clamped to the target's size, or entirely off screen,
+   /// last frame -- diagnostics only, reset at the top of every [render].
+   int patchesRendered = 0, patchesClipped = 0, patchesOffscreen = 0;
+ 
++  /// Labels [paint] drew nothing for, last call, because [_compositor] was
++  /// `null` -- `geometry.texts.length` on a call that finds no compositor
++  /// wired in. Ruling E2's discipline made concrete: a backend built without
++  /// a [FlutterTextMeasurer] and a text-style lookup silently drew no text
++  /// at all (see [_compositor]'s own doc comment) and nothing said so; this
++  /// counter is that "so" -- a backend wired without a measurer shows as a
++  /// number, not a missing picture. Reset to 0 at the top of every [paint]
++  /// call, not [render]: the `_compositor == null` check this counter
++  /// reports on lives in [paint], not [render].
++  ///
++  /// **Untested by `flutter test`.** [GpuDrawBackend]'s constructor takes a
++  /// [ResidentGeometry], and [ResidentGeometry.create] needs a live GPU
++  /// (`gpu.gpuContext`, unavailable off a device/simulator run) -- nothing
++  /// in this package's `flutter test` suite can construct a [GpuDrawBackend]
++  /// at all, compositor-less or otherwise, so no unit test exercises this
++  /// field. Confirmed by reading `resident_geometry.dart` and this file's
++  /// own constructor, not asserted from a failed attempt to write one.
++  int textsDropped = 0;
++
+   ui.Image? render(ViewportTransform camera, Size viewport, double dpr) {
+     // **Reset first, unconditionally -- before the early returns below, and
+     // before anything that can throw.** `geometry.uniforms` is a
+     // `HostBuffer` -- a bump allocator over a small ring of device blocks
+     // (`flutter_gpu/lib/src/buffer.dart:208-223`; `_kFrameCount = 4`).
+     // `reset()` only mutates its own bookkeeping cursors (`_frameCursor`,
+     // `_bufferCursor`, `_offsetCursor`); it touches no `DeviceBuffer`
+     // contents and enqueues no GPU work, so calling it here rather than
+     // after `submit()` changes nothing about which physical slot a later
+     // `emplace` in *this* call lands in, or when the GPU is done reading a
+@@ -439,21 +481,23 @@ class GpuDrawBackend {
+     // buffer, same culling and blend state), reading `patch.instances` in
+     // place of `geometry.instances` and a `FrameInfo` built from a
+     // transform that maps the region's own device-pixel origin to the patch
+     // target's top-left instead of the viewport's. `_patchImages` and the
+     // three counters below were already reset at the top of this method,
+     // before the early returns (see that comment) -- not reset again here.
+     final dashScale = dashScaleFor(camera, _collectionInverse);
+     for (final patch in geometry.patches) {
+       final t = geometry.texts[patch.textIndex];
+       final region = patchRegionFor(t, collectionToDevice, widthPx, heightPx,
+-          maxWidth: patch.targetWidth, maxHeight: patch.targetHeight);
++          maxWidth: patch.targetWidth,
++          maxHeight: patch.targetHeight,
++          scratch: _regionScratch);
+       if (region == null) {
+         patchesOffscreen++;
+         continue;
+       }
+       // The region reached the target's size: either the live scale is past
+       // the band's ceiling and Plan F's rebuild has not landed, or it sits
+       // exactly at the ceiling. Drawn anyway, short if clamped; counted so
+       // the harness can say how often. A diagnostic, not a decision.
+       if (region.width == patch.targetWidth ||
+           region.height == patch.targetHeight) {
+@@ -551,21 +595,22 @@ class GpuDrawBackend {
+     // draft, still true now that there are `1 + P` submits instead of one.
+     for (final (patch, region) in _pendingRegions) {
+       _patchImages.add(PatchImage(
+         textIndex: patch.textIndex,
+         image: patch.target.asImage(),
+         src: Rect.fromLTWH(
+             0, 0, region.width.toDouble(), region.height.toDouble()),
+         dst: Rect.fromLTWH(region.x / dpr, region.y / dpr, region.width / dpr,
+             region.height / dpr),
+         layerBounds: labelBoundsLogical(
+-            geometry.texts[patch.textIndex], _collectionToLogical),
++            geometry.texts[patch.textIndex], _collectionToLogical,
++            scratch: _boundsScratch),
+       ));
+     }
+     // `_pendingRegions` is intentionally left populated here, rather than
+     // cleared again -- the next `render` call clears it unconditionally, at
+     // the top, before its own early returns (see that comment): a single
+     // reset point that covers both a frame that legitimately draws nothing
+     // and a frame that throws between the `.add` above and this point,
+     // which a clear only here could not.
+     return target.asImage();
+   }
+@@ -573,23 +618,27 @@ class GpuDrawBackend {
+   /// One frame onto [canvas]: [render], then the compositor. This is the
+   /// call site a widget uses (Plan F) and the harness uses (Task 7).
+   ///
+   /// **Without a [_compositor], the main image alone -- no text, and no
+   /// patches.** A [GpuDrawBackend] built without a [FlutterTextMeasurer] and
+   /// a text-style lookup (Ruling E2's shape again) still draws every stroke,
+   /// join, point and fill exactly as before Plan E; it draws no glyph at all,
+   /// resident or patched, until both are supplied.
+   void paint(
+       Canvas canvas, ViewportTransform camera, Size viewport, double dpr) {
++    textsDropped = 0;
+     final main = render(camera, viewport, dpr);
+     final compositor = _compositor;
+     if (compositor == null) {
++      if (geometry.texts.isNotEmpty) {
++        textsDropped += geometry.texts.length;
++      }
+       if (main != null) {
+         canvas.drawImageRect(
+             main,
+             Rect.fromLTWH(0, 0, main.width.toDouble(), main.height.toDouble()),
+             Rect.fromLTWH(0, 0, viewport.width, viewport.height),
+             _imagePaint);
+       }
+       return;
+     }
+     // `_collectionToLogical` is this frame's -- set once by the [render] call
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/text_compositor.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/text_compositor.dart
+index 7e7b2c8..ed8adc2 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/text_compositor.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/text_compositor.dart
+@@ -26,26 +26,26 @@ class PatchImage {
+   final Image image;
+   final Rect src;
+   final Rect dst;
+   final Rect layerBounds;
+ }
+ 
+ /// The label's box under the outer transform, as a logical-pixel `Rect`.
+ ///
+ /// The four corners are [boundTransformedBox]'s (Ruling P2) -- one bound
+ /// loop, shared with [patchRegionFor], not a second copy of it -- so a
+-/// rotated camera or a mirrored label bounds correctly here too. The
+-/// `Float64List(4)` scratch is local and allocated per call: invariant 1's
+-/// per-patch exception (a patch is one per label per frame, not per
+-/// entity).
+-Rect labelBoundsLogical(ResidentTextRecord t, Transform2 m) {
+-  final bound = Float64List(4);
++/// rotated camera or a mirrored label bounds correctly here too. The caller
++/// passes a reused scratch on the frame path; a null scratch allocates one
++/// -- test callers.
++Rect labelBoundsLogical(ResidentTextRecord t, Transform2 m,
++    {Float64List? scratch}) {
++  final bound = scratch ?? Float64List(4);
+   boundTransformedBox(t.boxMinX, t.boxMinY, t.boxMaxX, t.boxMaxY, m, bound);
+   return Rect.fromLTRB(bound[0], bound[1], bound[2], bound[3]);
+ }
+ 
+ /// Composites one frame: the main image, then the resident text list in
+ /// emission order, with a patch composited over each covered label.
+ ///
+ /// **GPU-free** (Ruling E6): images in, canvas calls out. That is what lets
+ /// the composited differential run both arms through Skia in `flutter test`.
+ ///
+@@ -98,20 +98,28 @@ class TextCompositor {
+       final patch =
+           p < patches.length && patches[p].textIndex == i ? patches[p++] : null;
+       if (patch == null) {
+         _drawLabel(canvas, texts[i], collectionToLogical);
+         continue;
+       }
+       // The layer's bounds are in the OUTER frame -- logical pixels -- and
+       // the label's own six floats are applied inside `_drawLabel`, after
+       // this call. A layer opened after the residual would be transformed
+       // twice (a Copilot review finding on revision 5's first draft).
++      //
++      // **`saveLayer` clips to `patch.layerBounds`** -- the label's padded
++      // box (`kTextBoxPadDevicePixels`, `text_patches.dart`) -- so any glyph
++      // overhang beyond the paragraph's advance box, ascent or descent that
++      // reaches past the pad would clip on a PATCHED label only, never on a
++      // plain one drawn by [_drawLabel] alone. An assumption the corpus does
++      // not exercise: nothing in this codebase's fixtures has a glyph whose
++      // ink reaches that far.
+       canvas.saveLayer(patch.layerBounds, _layerPaint);
+       _drawLabel(canvas, texts[i], collectionToLogical);
+       canvas.drawImageRect(patch.image, patch.src, patch.dst, _patchPaint);
+       canvas.restore();
+       _patchesComposited++;
+     }
+   }
+ 
+   /// `outer ∘ residual`, composed by hand into [_matrix] -- six multiplies,
+   /// no `Transform2` built per op (invariant 1) -- then the reference's
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+index aa0dea4..9483c39 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+@@ -1,24 +1,24 @@
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ 
+ import 'instance_record.dart';
+ import 'resident_text.dart';
+ 
+ /// **Provisional, and Plan F's to move.** The spec leaves the watermark band
+ /// un-committed as a number (open question 3); Plan E needs a floor to expand
+ /// an instance's reach at and a ceiling to size a patch target at, and takes
+-/// these two until Plan F measures the band. Every classification function in
+-/// this file (`classifyTextPatches`, and Task 4's region and size functions)
+-/// takes them as parameters with these defaults, so a test can pin either
+-/// edge and Plan F can move them without touching a call site.
++/// these two until Plan F measures the band. `classifyTextPatches` (the
++/// floor) and `patchTargetSizeFor` (the ceiling) take them as parameters
++/// with these defaults, so a test can pin either edge and Plan F can move
++/// them without touching a call site -- `patchRegionFor` takes neither.
+ const double kBandLowerScale = 0.5;
+ const double kBandUpperScale = 2.0;
+ 
+ /// The label box is padded by this many device pixels, taken at the band's
+ /// LOWER scale (Ruling E9): one device pixel is most collection units at the
+ /// band's floor, so that is the conservative pad. It covers antialiased glyph
+ /// edges and glyph overhang past the advance box.
+ const double kTextBoxPadDevicePixels = 1.0;
+ 
+ /// The miter limit the shader's join branch is bounded by -- a miter tip is
+@@ -195,27 +195,26 @@ class PatchRegion {
+ 
+ /// The label's box under the live camera, intersected with the viewport,
+ /// rounded outward and clamped to the patch target's size (Ruling E8).
+ ///
+ /// Returns null when the label is entirely off screen -- no pass, no
+ /// composite. Never returns a negative origin: `flutter_gpu`'s `Viewport`
+ /// and `Scissor` throw on one, and the pass is anchored at the target's own
+ /// origin anyway; this region's `x, y` are for the compositor's `dst`.
+ ///
+ /// The four corners are [boundTransformedBox]'s (Ruling P2) -- one bound
+-/// loop, not a second copy of it. The `Float64List(4)` scratch is local and
+-/// allocated per call: invariant 1's per-patch exception (a patch is one
+-/// per label per frame, not per entity).
++/// loop, not a second copy of it. The caller passes a reused scratch on the
++/// frame path; a null scratch allocates one -- test callers.
+ PatchRegion? patchRegionFor(ResidentTextRecord t, Transform2 collectionToDevice,
+     int widthPx, int heightPx,
+-    {required int maxWidth, required int maxHeight}) {
+-  final bound = Float64List(4);
++    {required int maxWidth, required int maxHeight, Float64List? scratch}) {
++  final bound = scratch ?? Float64List(4);
+   boundTransformedBox(
+       t.boxMinX, t.boxMinY, t.boxMaxX, t.boxMaxY, collectionToDevice, bound);
+   final x0 = bound[0].floor().clamp(0, widthPx);
+   final y0 = bound[1].floor().clamp(0, heightPx);
+   final x1 = bound[2].ceil().clamp(0, widthPx);
+   final y1 = bound[3].ceil().clamp(0, heightPx);
+   if (x1 <= x0 || y1 <= y0) return null;
+   final w = (x1 - x0).clamp(0, maxWidth);
+   final h = (y1 - y0).clamp(0, maxHeight);
+   return PatchRegion(x0, y0, w, h);
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/text_compositor_test.dart b/packages/jet_cad_2d_flutter/test/gpu/text_compositor_test.dart
+index 575ecd1..205175c 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/text_compositor_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/text_compositor_test.dart
+@@ -53,20 +53,27 @@ void main() {
+   late TextCompositor compositor;
+   setUp(() {
+     measurer = FlutterTextMeasurer();
+     compositor = TextCompositor(
+         measurer: measurer, textStyleOf: (Handle h) => _standard);
+   });
+ 
+   /// Where the label alone has ink, and where inside its box it has none --
+   /// found by rendering, never assumed: `flutter test`'s font is not the
+   /// device's.
++  ///
++  /// **Cannot see a baseline-flip bug.** Every caller in this file passes
++  /// `collectionToLogical: Transform2.identity()` (or a pure translation),
++  /// so a dropped `scale(1, -1)` in `_drawLabel` (M-E10) would move the
++  /// glyphs but this method would still find ink and a blank pixel and every
++  /// assertion built on it would still pass -- `text_order_test.dart` is
++  /// what kills M-E10, not this file.
+   Future<(Point<int>, Point<int>)> samplePoints() async {
+     final alone = await _rgba(await _image((c) => compositor.paint(c,
+         main: null,
+         viewport: Size(_w.toDouble(), _h.toDouble()),
+         collectionToLogical: Transform2.identity(),
+         texts: [_label(instanceIndex: 0)],
+         patches: const [])));
+     Point<int>? ink, blank;
+     for (var y = 20; y < 100 && (ink == null || blank == null); y++) {
+       for (var x = 20; x < 180; x++) {
+@@ -210,20 +217,26 @@ void main() {
+                       Rect.fromLTWH(0, 0, _w.toDouble(), _h.toDouble())),
+             ])));
+     expect(_blue(out, ink.x, ink.y), lessThan(60),
+         reason: "the first label's ink is not patched");
+   });
+ 
+   test('the outer transform moves the label, and is applied once', () async {
+     // Under `translation(30, 0)` every pixel of the label's row moves by
+     // exactly 30: a compositor that applied the outer transform twice moves
+     // it by 60, one that ignored it by 0, and neither reproduces the row.
++    //
++    // Runs with `patches: const []` throughout, so THIS test cannot see a
++    // `saveLayer`-ordering bug (M-E9, opening the layer after the residual
++    // transform) -- that is a covered-label bug, and this test has no
++    // covered label. M-E9 is killed elsewhere in this file (the srcATop
++    // test, which does patch) and by `text_order_test.dart`.
+     final (ink, _) = await samplePoints();
+     Future<Uint8List> under(Transform2 outer) async =>
+         _rgba(await _image((c) => compositor.paint(c,
+             main: null,
+             viewport: Size(_w.toDouble(), _h.toDouble()),
+             collectionToLogical: outer,
+             texts: [_label(instanceIndex: 0)],
+             patches: const [])));
+     final identity = await under(Transform2.identity());
+     final shifted = await under(Transform2.translation(30, 0));

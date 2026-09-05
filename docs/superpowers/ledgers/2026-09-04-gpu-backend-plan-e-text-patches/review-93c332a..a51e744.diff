@@ -1,0 +1,106 @@
+# Review package: 93c332a..a51e744
+
+## Commits
+a51e744 test(gpu): the composited instrument disposes every Picture it records
+
+## Files changed
+ .../jet_cad_2d_flutter/test/support/gpu_comparison.dart | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart b/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
+index 1eeec16..1d2b094 100644
+--- a/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
++++ b/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
+@@ -727,21 +727,23 @@ Future<CompositedAgreement> measureCompositedAgreement(
+       pixelsPerPaperMm: pixelsPerPaperMm,
+       measurer: measurer,
+       textStyleOf: document.textStyleOf);
+   final reference = VerticesDrawSink(
+       canvas: refCanvas,
+       pixelsPerPaperMm: pixelsPerPaperMm,
+       devicePixelRatio: devicePixelRatio,
+       fallback: fallback);
+   painter.paint(reference, liveCamera, size);
+   reference.flush();
+-  final refImage = await refRecorder.endRecording().toImage(w, h);
++  final refPicture = refRecorder.endRecording();
++  final refImage = await refPicture.toImage(w, h);
++  refPicture.dispose();
+ 
+   // --- resident: collect at the collection camera, classify, expand ------
+   final collector = GeometryCollector(
+       pixelsPerPaperMm: pixelsPerPaperMm,
+       devicePixelRatio: devicePixelRatio,
+       measurer: measurer,
+       textStyleOf: document.textStyleOf);
+   painter.paint(collector, collectionCamera, size);
+   final data = collector.data;
+   final texts = collector.texts;
+@@ -750,35 +752,38 @@ Future<CompositedAgreement> measureCompositedAgreement(
+   if (mutatePatches != null) patches = mutatePatches(patches);
+ 
+   final collectionInverse = collectionCamera.worldToScreenMatrix.invert();
+   final collectionToLogical =
+       composeTransforms(liveCamera.worldToScreenMatrix, collectionInverse);
+   final collectionToDevice = composeTransforms(
+       Transform2.scale(devicePixelRatio, devicePixelRatio),
+       collectionToLogical);
+   final dashScale = dashScaleFor(liveCamera, collectionInverse);
+ 
+-  Future<Image> triangles(
+-      Float32List buf, int count, Transform2 toDevice, int width, int height) {
++  Future<Image> triangles(Float32List buf, int count, Transform2 toDevice,
++      int width, int height) async {
+     final expanded =
+         expandInstances(buf, count, toDevice, dashScale: dashScale);
+     final recorder = PictureRecorder();
+     final canvas = Canvas(recorder);
+     if (count > 0) {
+       final vertices = Vertices.raw(VertexMode.triangles, expanded.positions,
+           colors: expanded.colors);
+       // As `VerticesDrawSink.flush` draws: the vertex colour is the colour,
+       // the paint contributes alpha only.
+       canvas.drawVertices(vertices, BlendMode.dst, Paint());
+       vertices.dispose();
+     }
+-    return recorder.endRecording().toImage(width, height);
++    final picture = recorder.endRecording();
++    final image = await picture.toImage(width, height);
++    picture.dispose();
++    return image;
+   }
+ 
+   final mainImage =
+       await triangles(data, collector.instanceCount, collectionToDevice, w, h);
+   final patchImages = <PatchImage>[];
+   for (final p in patches) {
+     final t = texts[p.textIndex];
+     final region =
+         patchRegionFor(t, collectionToDevice, w, h, maxWidth: w, maxHeight: h);
+     if (region == null) continue;
+@@ -804,21 +809,23 @@ Future<CompositedAgreement> measureCompositedAgreement(
+   final outCanvas = Canvas(outRecorder)
+     ..scale(devicePixelRatio, devicePixelRatio);
+   final compositor =
+       TextCompositor(measurer: measurer, textStyleOf: document.textStyleOf);
+   compositor.paint(outCanvas,
+       main: mainImage,
+       viewport: size,
+       collectionToLogical: collectionToLogical,
+       texts: texts,
+       patches: patchImages);
+-  final outImage = await outRecorder.endRecording().toImage(w, h);
++  final outPicture = outRecorder.endRecording();
++  final outImage = await outPicture.toImage(w, h);
++  outPicture.dispose();
+ 
+   final a = (await refImage.toByteData(format: ImageByteFormat.rawRgba))!;
+   final b = (await outImage.toByteData(format: ImageByteFormat.rawRgba))!;
+   var union = 0, withinTwo = 0, overEight = 0, referenceInk = 0;
+   for (var i = 0; i < w * h; i++) {
+     final o = i * 4;
+     final inkA = a.getUint8(o + 3) != 0, inkB = b.getUint8(o + 3) != 0;
+     if (inkA) referenceInk++;
+     if (!inkA && !inkB) continue;
+     union++;

@@ -1,0 +1,544 @@
+# Review package: 8dde4fb..26184f3
+
+## Commits
+26184f3 feat(gpu): the collector records text as a resident list
+
+## Files changed
+ ...026-08-29-gpu-resident-render-backend-design.md |   4 +-
+ .../jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart |   2 +
+ .../lib/src/gpu/geometry_collector.dart            |  82 +++++++++--
+ .../lib/src/gpu/resident_text.dart                 |  45 ++++++
+ .../lib/src/gpu/text_patches.dart                  |  72 ++++++++++
+ .../test/gpu/resident_text_test.dart               | 160 +++++++++++++++++++++
+ 6 files changed, 356 insertions(+), 9 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md b/docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md
+index 29d7b67..1f01fa7 100644
+--- a/docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md
++++ b/docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md
+@@ -326,21 +326,23 @@ instance reaches them. A patch restores exactly that:
+   `TextLayout.layOutBox` on the same `TextMeasurer.measure` the reference sink
+   uses, transformed by the residual, and stored as four floats. The collector
+   therefore takes the document's `TextMeasurer` and its `textStyleOf`, exactly
+   as `CanvasDrawSink` does (`canvas_draw_sink.dart:218-221`). Measurement
+   happens at rebuild, never on the frame path, and its cache is the one the
+   reference already warms.
+ - **Classification, at rebuild — conservative, box on box.** The label's
+   box is `TextLayout.layOutBox`'s glyph box with all four corners transformed
+   by the residual and re-bounded (the axis-aligned box of a rotated, sheared
+   or mirrored label, exactly as `extents.dart:67` does it), padded by one
+-  device pixel at the band's upper scale bound so antialiased glyph edges and
++  device pixel at the band's **lower** scale bound (Plan E's Ruling E9 -- one
++  device pixel is most collection units at the band's floor, the same direction
++  the reach takes) so antialiased glyph edges and
+   glyph overhang past the advance box are inside it. For each label, every
+   instance written *after* its index is tested against that box, in
+   collection space: the instance's own box — its points, **expanded by the
+   kind's reach**: the half-width for a stroke and a `point()`, **`half-width
+   × kMiterLimit` (4.0) for a join — the shader's own bound on a miter tip
+   (`vertices_draw_sink.dart:460, 544`), not a per-instance angle** — nothing
+   for a fill — meets the label's box or it does not. A label with at least one
+   such instance is a **patch**; the instances that met it, **in emission
+   order**, are the patch's own sub-buffer, a by-product of the test that costs
+   no second pass. The reach is a device-pixel quantity and the test runs in
+diff --git a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+index 2c2fb2c..6fc60ad 100644
+--- a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
++++ b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+@@ -20,14 +20,16 @@ export 'src/flutter_text_measurer.dart';
+ // `jet_cad_2d_flutter`'s own public API, which is the thing this barrel
+ // exists to not do; these members are not enough reason to accept
+ // that. `ResidentGeometry`'s own handful of members that still resolve
+ // through that shim (`kInstanceVertexLayout` and its five `gpu.*`-typed
+ // getters) are marked `@internal` for the same reason, one file down.
+ // `instance_record.dart` stays unexported too, for an unrelated reason: it is
+ // `GeometryCollector`'s own wire format, not something a caller writes.
+ export 'src/gpu/geometry_collector.dart';
+ export 'src/gpu/gpu_draw_backend.dart';
+ export 'src/gpu/resident_geometry.dart';
++export 'src/gpu/resident_text.dart';
++export 'src/gpu/text_patches.dart';
+ export 'src/reference_walk.dart';
+ export 'src/render_backend.dart';
+ export 'src/tile_cache.dart';
+ export 'src/viewport_transform.dart';
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+index d8f8917..17689df 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+@@ -1,41 +1,53 @@
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ 
+ import '../draw_sink.dart';
+ import 'instance_record.dart';
++import 'resident_text.dart';
++import 'text_patches.dart';
+ 
+ /// Collects a document's stroked segments into one buffer, in walk order.
+ ///
+ /// **This is a `DrawSink`, and that is deliberate.** `RecordingDrawSink`
+ /// equality is this project's primary correctness mechanism; a backend that
+ /// invented its own traversal would give it up. What changes is not the
+ /// interface but *when* it runs — on a rebuild, not on a frame.
+ ///
+ /// **Walk order is the draw order and nothing may reorder it.** The buffer is
+ /// submitted in the order written, in one draw call, and that is the whole
+ /// reason this design needs no depth buffer. Sorting it — by handle, by colour,
+ /// by anything — reintroduces the defect `vertices_draw_sink.dart:41-57`
+ /// records.
+ class GeometryCollector implements DrawSink {
+   GeometryCollector({
+     required this.pixelsPerPaperMm,
+     required this.devicePixelRatio,
+     this.lineweightScale = 1.0,
++    this.measurer,
++    this.textStyleOf,
+   });
+ 
+   final double pixelsPerPaperMm;
+   final double devicePixelRatio;
+   final double lineweightScale;
+ 
++  /// The measurer the label's glyph box is read through, and the style
++  /// lookup its `fontFamily` comes from -- the same pair `CanvasDrawSink`
++  /// requires. **Optional (Ruling E2):** with either null, [text] counts the
++  /// op in [skippedOps] exactly as it did before Plan E, so a collector wired
++  /// without a measurer shows as a number rather than a missing picture.
++  final TextMeasurer? measurer;
++  final TextStyleRecord Function(Handle)? textStyleOf;
++
+   /// **A minimum stroke width in device pixels.** Copied from
+   /// `VerticesDrawSink.kMinStrokeDevicePixels` rather than referenced —
+   /// that constant is public (`vertices_draw_sink.dart:527`), so this is not
+   /// a visibility workaround. It is kept a separate copy because these two
+   /// classes are independent implementations of the same `DrawSink`
+   /// contract, cross-checked by `collector_differential_test.dart` precisely
+   /// *because* they arrive at their numbers separately; sharing this field
+   /// would make that comparison partly circular, since both sides would be
+   /// reading one value rather than two that happen to agree. If the two
+   /// ever disagree the differential test (Task 8) goes red, which is the
+@@ -43,20 +55,31 @@ class GeometryCollector implements DrawSink {
+   /// `VerticesDrawSink.kMinStrokeDevicePixels` live (not hardcoded) on the
+   /// reference side specifically so that alarm stays real if either value
+   /// changes.
+   static const double kMinStrokeDevicePixels = 1.0;
+ 
+   Float32List _buffer = Float32List(0);
+   int _instances = 0;
+   int _skipped = 0;
+   Transform2 _residual = Transform2.identity();
+ 
++  final List<ResidentTextRecord> _texts = <ResidentTextRecord>[];
++
++  /// Reused per text op, never per frame: `TextLayout` is caller-owned and
++  /// refilled in place (`text_geometry.dart`'s own ownership rule).
++  final TextLayout _textLayout = TextLayout();
++
++  /// Reused per text op: [boundTransformedBox]'s caller-owned scratch, so
++  /// [text] allocates nothing per label beyond the [ResidentTextRecord]
++  /// itself.
++  final Float64List _boxScratch = Float64List(4);
++
+   // The run state machine, mirroring `VerticesDrawSink._beginRun` /
+   // `_runTo` / `_endRun`. It is duplicated rather than shared because these
+   // two classes are independent implementations of one `DrawSink` contract,
+   // cross-checked against each other by the differential gates -- the same
+   // reason `kMinStrokeDevicePixels` is a separate copy.
+   //
+   // Points, not directions: `_runBack` is the point BEFORE `_runPrev`, so a
+   // join is written as its three points and the shader normalises after the
+   // mvp. See `writeJoin`'s doc for why directions could not be stored here.
+   double _runFirstX = 0, _runFirstY = 0;
+@@ -73,28 +96,32 @@ class GeometryCollector implements DrawSink {
+   /// see `docs/superpowers/notes/2026-08-30-plan-b-results.md`) that is
+   /// roughly 5.23 MB copied per call (109,068 × [kFloatsPerInstance] × 4
+   /// bytes = 5,235,264 bytes). Read it once per rebuild, into
+   /// `ResidentGeometry.create`, and hoist it out of any per-frame path —
+   /// Plan F's `paint()` call site included — or it breaks this project's
+   /// "the frame path allocates nothing per entity in steady state"
+   /// non-negotiable.
+   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
+   int get instanceCount => _instances;
+ 
+-  /// Ops this plan does not draw yet — `text` only, since Plan D.
+-  ///
+-  /// Counted rather than ignored so a corpus that needs Plan E is visible as
+-  /// a number instead of as a missing picture.
++  /// Every text op this walk recorded, in emission order. A view: the list
++  /// is the draw order and nobody reorders it.
+   ///
+-  /// `circle` and `arc` stopped counting here in Plan B's Task 5; `point` in
+-  /// its Task 6; `fillPolygon` in Plan D's Task 2; `fillCircle` stops counting
+-  /// in Task 3.
++  /// **Copies on every access**, the same rule [data] states: `List.unmodifiable`
++  /// allocates a fresh list. Called by tests and once per rebuild by the
++  /// harness, never per frame.
++  List<ResidentTextRecord> get texts => List.unmodifiable(_texts);
++
++  /// Ops this walk could not draw. **Zero on a collector built with a
++  /// measurer**, since Plan E: `text` was the last op counted here, and it
++  /// now records a [ResidentTextRecord] instead -- unless [measurer] or
++  /// [textStyleOf] is null (Ruling E2), in which case it still counts.
+   int get skippedOps => _skipped;
+ 
+   /// **Diagnostic only — read by nobody in this class and never changes what
+   /// is written.** Ruling B4 keeps the bevel/miter/collinear decision in the
+   /// shader, in device pixels, on purpose: a collector-side test would run in
+   /// `double`, in collection space, against a reference that decides in
+   /// `float32`, in device space, and the two would disagree on exactly the
+   /// corners that are nearly straight. This counts, in collection-space
+   /// `double` arithmetic, how many of the joins this collector wrote carry a
+   /// zero (or reversed) cross product between their incoming and outgoing
+@@ -697,13 +724,52 @@ class GeometryCollector implements DrawSink {
+       py = cy + r * math.sin(angle);
+       final nx = t.a * px + t.c * py + t.e, ny = t.b * px + t.d * py + t.f;
+       writeFill(_buffer, _instances,
+           x0: ccx, y0: ccy, x1: dx, y1: dy, x2: nx, y2: ny, argb: argb);
+       _instances++;
+       dx = nx;
+       dy = ny;
+     }
+   }
+ 
++  /// Records the label for the compositor (Plan E); draws nothing itself.
++  ///
++  /// The glyph box is `TextLayout.layOutBox` on the same `measure` the
++  /// reference sink's paragraph is laid out against, taken through all four
++  /// corners of the residual so a rotated, sheared or mirrored label bounds
++  /// correctly (`boundTransformedBox`'s own rule, written out there to avoid
++  /// allocating two `Aabb2`s and four `Vector2`s per label at rebuild --
++  /// cheap, but this method is on the walk and the walk is measured).
+   @override
+-  void text(String text, Handle style, ResolvedStyle resolved) => _skipped++;
++  void text(String text, Handle style, ResolvedStyle resolved) {
++    final measurer = this.measurer;
++    final textStyleOf = this.textStyleOf;
++    if (measurer == null || textStyleOf == null) {
++      _skipped++;
++      return;
++    }
++    _textLayout
++        .layOutBox(measurer.measure(text: text, style: textStyleOf(style)));
++    final t = _residual;
++    boundTransformedBox(_textLayout.minX, _textLayout.minY, _textLayout.maxX,
++        _textLayout.maxY, t, _boxScratch);
++    // Ruling E9: one device pixel at the band's FLOOR, the most collection
++    // units a device pixel is anywhere inside the band.
++    final pad = kTextBoxPadDevicePixels / (devicePixelRatio * kBandLowerScale);
++    _texts.add(ResidentTextRecord(
++      text: text,
++      style: style,
++      argb: resolved.argb,
++      a: t.a,
++      b: t.b,
++      c: t.c,
++      d: t.d,
++      e: t.e,
++      f: t.f,
++      boxMinX: _boxScratch[0] - pad,
++      boxMinY: _boxScratch[1] - pad,
++      boxMaxX: _boxScratch[2] + pad,
++      boxMaxY: _boxScratch[3] + pad,
++      instanceIndex: _instances,
++    ));
++  }
+ }
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_text.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_text.dart
+new file mode 100644
+index 0000000..5a23a17
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_text.dart
+@@ -0,0 +1,45 @@
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++
++/// One text op, as the resident backend keeps it between rebuilds.
++///
++/// **Allocated at rebuild, read on the frame** (Ruling E1). The frame walks
++/// the list and reads fields; nothing here is built per frame.
++///
++/// [a]..[f] are the residual the painter pushed for this op -- `chain ∘
++/// textLocal` (`draft_painter.dart:960-966`), glyph space (y up, origin on
++/// the baseline) to **collection** space. Stored flat rather than as a
++/// `Transform2` so a frame never composes one per op (invariant 1).
++///
++/// [boxMinX]..[boxMaxY] is the label's glyph box in collection space: the
++/// four corners of `TextLayout.layOutBox`'s box under the residual,
++/// re-bounded (a rotated label's axis-aligned bound), padded by
++/// `kTextBoxPadDevicePixels` at the band's floor (Ruling E9).
++///
++/// [instanceIndex] is the number of instances the collector had written when
++/// this op arrived. Instances at or past it were emitted **after** the
++/// label; that index is the whole basis of `classifyTextPatches`.
++class ResidentTextRecord {
++  const ResidentTextRecord({
++    required this.text,
++    required this.style,
++    required this.argb,
++    required this.a,
++    required this.b,
++    required this.c,
++    required this.d,
++    required this.e,
++    required this.f,
++    required this.boxMinX,
++    required this.boxMinY,
++    required this.boxMaxX,
++    required this.boxMaxY,
++    required this.instanceIndex,
++  });
++
++  final String text;
++  final Handle style;
++  final int argb;
++  final double a, b, c, d, e, f;
++  final double boxMinX, boxMinY, boxMaxX, boxMaxY;
++  final int instanceIndex;
++}
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+new file mode 100644
+index 0000000..78f32f1
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+@@ -0,0 +1,72 @@
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++
++/// **Provisional, and Plan F's to move.** The spec leaves the watermark band
++/// un-committed as a number (open question 3); Plan E needs a floor to expand
++/// an instance's reach at and a ceiling to size a patch target at, and takes
++/// these two until Plan F measures the band. Every function in this file
++/// takes them as parameters with these defaults, so a test can pin either
++/// edge and Plan F can move them without touching a call site.
++const double kBandLowerScale = 0.5;
++const double kBandUpperScale = 2.0;
++
++/// The label box is padded by this many device pixels, taken at the band's
++/// LOWER scale (Ruling E9): one device pixel is most collection units at the
++/// band's floor, so that is the conservative pad. It covers antialiased glyph
++/// edges and glyph overhang past the advance box.
++const double kTextBoxPadDevicePixels = 1.0;
++
++/// The miter limit the shader's join branch is bounded by -- a miter tip is
++/// never further than `halfWidth * kMiterLimit` from its vertex
++/// (`vertices_draw_sink.dart:460, 544-552`). **A copy, not a reference**, by
++/// the same rule `GeometryCollector.kMinStrokeDevicePixels` states: the two
++/// arms arrive at their numbers separately and the differential is what
++/// catches a drift. `resident_text_test.dart` pins this to
++/// `VerticesDrawSink.kMiterLimit`.
++const double kMiterLimit = 4.0;
++
++/// The axis-aligned bound of the box `(minX, minY)..(maxX, maxY)` under
++/// [t]: all four corners transformed and re-bounded, so a rotated, sheared
++/// or mirrored box bounds correctly (`Aabb2.transformedBy`'s own rule),
++/// written into [out] as `[minX, minY, maxX, maxY]`. Allocation-free --
++/// [out] is caller-owned and reused -- because one caller is on the
++/// rebuild walk and another is on the frame path.
++void boundTransformedBox(double minX, double minY, double maxX, double maxY,
++    Transform2 t, Float64List out) {
++  var lo0 = double.infinity, lo1 = double.infinity;
++  var hi0 = double.negativeInfinity, hi1 = double.negativeInfinity;
++
++  final c0x = t.a * minX + t.c * minY + t.e,
++      c0y = t.b * minX + t.d * minY + t.f;
++  if (c0x < lo0) lo0 = c0x;
++  if (c0x > hi0) hi0 = c0x;
++  if (c0y < lo1) lo1 = c0y;
++  if (c0y > hi1) hi1 = c0y;
++
++  final c1x = t.a * maxX + t.c * minY + t.e,
++      c1y = t.b * maxX + t.d * minY + t.f;
++  if (c1x < lo0) lo0 = c1x;
++  if (c1x > hi0) hi0 = c1x;
++  if (c1y < lo1) lo1 = c1y;
++  if (c1y > hi1) hi1 = c1y;
++
++  final c2x = t.a * minX + t.c * maxY + t.e,
++      c2y = t.b * minX + t.d * maxY + t.f;
++  if (c2x < lo0) lo0 = c2x;
++  if (c2x > hi0) hi0 = c2x;
++  if (c2y < lo1) lo1 = c2y;
++  if (c2y > hi1) hi1 = c2y;
++
++  final c3x = t.a * maxX + t.c * maxY + t.e,
++      c3y = t.b * maxX + t.d * maxY + t.f;
++  if (c3x < lo0) lo0 = c3x;
++  if (c3x > hi0) hi0 = c3x;
++  if (c3y < lo1) lo1 = c3y;
++  if (c3y > hi1) hi1 = c3y;
++
++  out[0] = lo0;
++  out[1] = lo1;
++  out[2] = hi0;
++  out[3] = hi1;
++}
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/resident_text_test.dart b/packages/jet_cad_2d_flutter/test/gpu/resident_text_test.dart
+new file mode 100644
+index 0000000..1bc73d0
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/gpu/resident_text_test.dart
+@@ -0,0 +1,160 @@
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++const TextStyleRecord _standard =
++    TextStyleRecord(handle: Handle(11), name: 'Standard', fontFamily: 'Roboto');
++
++/// Fixed metrics, so the box below is arithmetic rather than font trivia:
++/// advance 40, ascent 8, descent 2 -> glyph box (0, -2) .. (40, 8).
++class _FixedMeasurer implements TextMeasurer {
++  const _FixedMeasurer();
++  @override
++  TextMetrics measure({required String text, required TextStyleRecord style}) =>
++      const TextMetrics(advanceWidth: 40, ascent: 8, descent: 2, capHeight: 7);
++}
++
++const ResolvedStyle _style = ResolvedStyle(
++    argb: 0xFF112233,
++    lineweightHundredths: 25,
++    linetype: Handle.none,
++    linetypeScale: 1);
++
++GeometryCollector _collector({double dpr = 2.0}) => GeometryCollector(
++    pixelsPerPaperMm: 3.78,
++    devicePixelRatio: dpr,
++    measurer: const _FixedMeasurer(),
++    textStyleOf: (Handle h) => _standard);
++
++void main() {
++  test('a text op becomes one record carrying the residual, flat', () {
++    final c = _collector();
++    // Rotated, sheared, non-uniform, off-origin: an identity residual would
++    // leave b == c == 0 and hide a transposed element.
++    const t = Transform2(2, 3, 5, 7, 110, -40);
++    c.beginResidual(t, debugHandle: const Handle(901));
++    c.text('WC', const Handle(11), _style);
++    c.endResidual();
++
++    expect(c.texts, hasLength(1));
++    expect(c.skippedOps, 0, reason: 'text is recorded now, not counted');
++    final r = c.texts.single;
++    expect(r.text, 'WC');
++    expect(r.style, const Handle(11));
++    expect(r.argb, 0xFF112233);
++    expect([r.a, r.b, r.c, r.d, r.e, r.f], [2, 3, 5, 7, 110, -40]);
++  });
++
++  test('the instance index is the number of instances written before it', () {
++    final c = _collector();
++    c.beginResidual(Transform2.translation(10, 10));
++    c.polyline(Float64List.fromList([0, 0, 50, 0, 50, 40]), 3, _style,
++        closed: false);
++    c.endResidual();
++    final before = c.instanceCount;
++    expect(before, greaterThan(0));
++    c.beginResidual(Transform2.translation(20, 20));
++    c.text('A', const Handle(11), _style);
++    c.endResidual();
++    c.beginResidual(Transform2.translation(10, 10));
++    c.polyline(Float64List.fromList([0, 0, 5, 5]), 2, _style, closed: false);
++    c.endResidual();
++    expect(c.texts.single.instanceIndex, before,
++        reason: 'instances at or past this index were emitted AFTER the label');
++  });
++
++  test('the box is the four transformed corners, padded at the band floor', () {
++    // dpr 2, band floor 0.5: one device pixel is 1 / (2 * 0.5) = 1.0
++    // collection unit of padding.
++    final c = _collector(dpr: 2.0);
++    // A pure rotation by 90 degrees about the origin, then a translation:
++    // glyph box (0,-2)..(40,8) rotates to (-8,0)..(2,40), so a classifier
++    // that transformed only min and max corners (instead of all four) gets
++    // a box with a negative width.
++    final t = Transform2.translation(100, 200)
++        .multiply(Transform2.rotation(3.141592653589793 / 2));
++    c.beginResidual(t);
++    c.text('WC', const Handle(11), _style);
++    c.endResidual();
++    final r = c.texts.single;
++    expect(r.boxMinX, closeTo(100 - 8 - 1, 1e-6));
++    expect(r.boxMaxX, closeTo(100 + 2 + 1, 1e-6));
++    expect(r.boxMinY, closeTo(200 + 0 - 1, 1e-6));
++    expect(r.boxMaxY, closeTo(200 + 40 + 1, 1e-6));
++  });
++
++  test('the pad is one device pixel at the band floor, not at the ceiling', () {
++    // The pad must be the LARGEST one device pixel is inside the band:
++    // 1 / (dpr * kBandLowerScale). At dpr 1 and floor 0.5 that is 2.0
++    // collection units; a pad taken at the ceiling would be 0.5.
++    final c = _collector(dpr: 1.0);
++    c.beginResidual(Transform2.identity());
++    c.text('WC', const Handle(11), _style);
++    c.endResidual();
++    final r = c.texts.single;
++    expect(r.boxMinX, closeTo(0 - 1 / (1.0 * kBandLowerScale), 1e-9));
++    expect(r.boxMaxX, closeTo(40 + 1 / (1.0 * kBandLowerScale), 1e-9));
++  });
++
++  test('a mirrored residual still yields min <= max', () {
++    final c = _collector();
++    c.beginResidual(const Transform2(-1, 0, 0, 1, 0, 0));
++    c.text('WC', const Handle(11), _style);
++    c.endResidual();
++    final r = c.texts.single;
++    expect(r.boxMinX, lessThan(r.boxMaxX));
++    expect(r.boxMinX, closeTo(-40 - 1, 1e-6));
++  });
++
++  test('without a measurer, text is counted and not recorded (Ruling E2)', () {
++    final c = GeometryCollector(pixelsPerPaperMm: 3.78, devicePixelRatio: 1.0);
++    c.beginResidual(Transform2.identity());
++    c.text('WC', const Handle(11), _style);
++    c.endResidual();
++    expect(c.texts, isEmpty);
++    expect(c.skippedOps, 1);
++  });
++
++  test('the text list is in emission order and is not sortable by handle', () {
++    final c = _collector();
++    for (final s in ['C', 'A', 'B']) {
++      c.beginResidual(Transform2.identity());
++      c.text(s, const Handle(11), _style);
++      c.endResidual();
++    }
++    expect(c.texts.map((r) => r.text), ['C', 'A', 'B']);
++    expect(() => c.texts.add(c.texts.first), throwsUnsupportedError,
++        reason: 'the list handed out is a view; nobody reorders it');
++  });
++
++  test('the band constants and the pad are what the spec says', () {
++    expect(kBandLowerScale, 0.5);
++    expect(kBandUpperScale, 2.0);
++    expect(kTextBoxPadDevicePixels, 1.0);
++    expect(kMiterLimit, VerticesDrawSink.kMiterLimit,
++        reason: 'a copy, pinned to the oracle so it cannot drift');
++  });
++
++  test('boundTransformedBox: a 90-degree rotation of the box re-bounds it', () {
++    // (0,-2)..(40,8) rotated 90 degrees about the origin -> (-8,0)..(2,40),
++    // the same rotation the box test above checks end to end. A classifier
++    // that transformed only two corners (instead of all four) would get a
++    // box with a negative width here.
++    final out = Float64List(4);
++    boundTransformedBox(
++        0, -2, 40, 8, Transform2.rotation(3.141592653589793 / 2), out);
++    expect(out[0], closeTo(-8, 1e-9));
++    expect(out[1], closeTo(0, 1e-9));
++    expect(out[2], closeTo(2, 1e-9));
++    expect(out[3], closeTo(40, 1e-9));
++  });
++
++  test('boundTransformedBox: a mirror still yields min <= max', () {
++    final out = Float64List(4);
++    boundTransformedBox(0, -2, 40, 8, const Transform2(-1, 0, 0, 1, 0, 0), out);
++    expect(out[0], lessThanOrEqualTo(out[2]));
++    expect(out[1], lessThanOrEqualTo(out[3]));
++  });
++}
