@@ -59,3 +59,16 @@ bool gpuAvailable() {
     return _available = false;
   }
 }
+
+/// **Test seam.** Pins [gpuAvailable]'s cached answer; `null` clears it so
+/// the next call probes again.
+///
+/// [debugSetGpuFactory] can only make the answer `false` -- a factory that
+/// throws -- because no test can construct a `gpu.GpuContext`. A widget test
+/// that wants `DraftCanvas` to take the `residentGpu` path GPU-free (Ruling
+/// F14) needs the answer `true`, and this is the only honest way to say it:
+/// the path it enables still cannot upload, so such a test also injects a
+/// `ResidentUploader` that never touches a GPU.
+void debugSetGpuAvailable(bool? available) {
+  _available = available;
+}

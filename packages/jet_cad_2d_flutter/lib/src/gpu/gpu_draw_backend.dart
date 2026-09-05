@@ -9,6 +9,7 @@ import '../flutter_text_measurer.dart';
 import '../viewport_transform.dart';
 import 'gpu_facade.dart' as gpu;
 import 'resident_geometry.dart';
+import 'resident_rebuilder.dart' show ResidentFramePainter;
 import 'text_compositor.dart';
 import 'text_patches.dart';
 
@@ -193,7 +194,7 @@ double dashScaleFor(ViewportTransform camera, Transform2 collectionInverse) =>
 /// PatchRegion)` record above to a reused pair) and a reused uniform
 /// `ByteData` (so [buildFrameInfo] writes into a field instead of
 /// allocating one per patch per frame).
-class GpuDrawBackend {
+class GpuDrawBackend implements ResidentFramePainter {
   GpuDrawBackend(this.geometry, this.collectionCamera,
       {FlutterTextMeasurer? measurer,
       TextStyleRecord Function(Handle)? textStyleOf})
@@ -623,6 +624,7 @@ class GpuDrawBackend {
   /// a text-style lookup (Ruling E2's shape again) still draws every stroke,
   /// join, point and fill exactly as before Plan E; it draws no glyph at all,
   /// resident or patched, until both are supplied.
+  @override
   void paint(
       Canvas canvas, ViewportTransform camera, Size viewport, double dpr) {
     textsDropped = 0;
@@ -657,5 +659,6 @@ class GpuDrawBackend {
         patches: _patchImages);
   }
 
+  @override
   void dispose() => geometry.dispose();
 }

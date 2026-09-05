@@ -29,6 +29,7 @@ export 'src/gpu/geometry_collector.dart';
 export 'src/gpu/gpu_draw_backend.dart';
 export 'src/gpu/resident_collection.dart';
 export 'src/gpu/resident_geometry.dart';
+export 'src/gpu/resident_rebuilder.dart';
 export 'src/gpu/resident_text.dart';
 export 'src/gpu/text_compositor.dart';
 export 'src/gpu/text_patches.dart';
