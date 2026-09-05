@@ -225,6 +225,29 @@ void main() {
     });
   });
 
+  group('patch FrameInfo', () {
+    test('a patch FrameInfo maps the region origin to the NDC corner', () {
+      // Region at device (120, 240), 80x40; collectionToDevice scale 2 +
+      // (100, 200). Composed with translation(-120, -240) OUTSIDE, the
+      // collection point that lands at device (120, 240) must land at NDC
+      // (-1, +1): the top-left of an 80x40 target.
+      const cam = Transform2(2, 0, 0, 2, 100, 200);
+      final toPatch =
+          composeTransforms(Transform2.translation(-120, -240), cam);
+      final data = buildFrameInfo(toPatch, 80, 40, dashScale: 1.0);
+      double at(int i) => data.getFloat32(i * 4, Endian.host);
+      // collection (10, 20) -> device (120, 240) -> patch (0, 0) -> NDC (-1, 1)
+      final x = at(0) * 10 + at(4) * 20 + at(12);
+      final y = at(1) * 10 + at(5) * 20 + at(13);
+      expect(x, closeTo(-1, 1e-6));
+      expect(y, closeTo(1, 1e-6));
+      expect(at(16), 40,
+          reason: 'half_viewport is the REGION\'s, so the '
+              'half-width expansion stays in device pixels');
+      expect(at(17), 20);
+    });
+  });
+
   group('composeTransforms', () {
     test('outer ∘ inner, every term of both operands load-bearing', () {
       // Six distinct primes on each side: a shared value anywhere would let

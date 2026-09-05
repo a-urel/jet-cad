@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_flutter/src/gpu/gpu_facade.dart';
 import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
 import 'package:jet_cad_2d_flutter/src/gpu/resident_geometry.dart';
+import 'package:jet_cad_2d_flutter/src/gpu/text_patches.dart';
 
 void main() {
   tearDown(() => debugSetGpuFactory(null));
@@ -25,6 +26,25 @@ void main() {
 
   test('the buffer prices sixteen floats', () {
     expect(ResidentGeometry.byteLengthFor(1000), 1000 * 16 * 4);
+  });
+
+  test('the byte length prices every sub-buffer beside the main buffer', () {
+    // 1000 main instances + 37 patch instances, 64 bytes each.
+    expect(ResidentGeometry.byteLengthFor(1000, patchInstances: 37),
+        (1000 + 37) * 64);
+  });
+
+  test('create still returns null with no GPU, patches or not', () async {
+    debugSetGpuFactory(() => throw StateError('no gpu'));
+    final g = await ResidentGeometry.create(Float32List(kFloatsPerInstance), 1,
+        texts: const [],
+        patches: [
+          TextPatch(
+              textIndex: 0,
+              instances: Float32List(kFloatsPerInstance),
+              instanceCount: 1)
+        ]);
+    expect(g, isNull);
   });
 
   group('kCornerVertices', () {
