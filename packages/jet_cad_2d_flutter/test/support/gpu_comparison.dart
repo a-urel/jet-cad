@@ -734,7 +734,9 @@ Future<CompositedAgreement> measureCompositedAgreement(
       fallback: fallback);
   painter.paint(reference, liveCamera, size);
   reference.flush();
-  final refImage = await refRecorder.endRecording().toImage(w, h);
+  final refPicture = refRecorder.endRecording();
+  final refImage = await refPicture.toImage(w, h);
+  refPicture.dispose();
 
   // --- resident: collect at the collection camera, classify, expand ------
   final collector = GeometryCollector(
@@ -757,8 +759,8 @@ Future<CompositedAgreement> measureCompositedAgreement(
       collectionToLogical);
   final dashScale = dashScaleFor(liveCamera, collectionInverse);
 
-  Future<Image> triangles(
-      Float32List buf, int count, Transform2 toDevice, int width, int height) {
+  Future<Image> triangles(Float32List buf, int count, Transform2 toDevice,
+      int width, int height) async {
     final expanded =
         expandInstances(buf, count, toDevice, dashScale: dashScale);
     final recorder = PictureRecorder();
@@ -771,7 +773,10 @@ Future<CompositedAgreement> measureCompositedAgreement(
       canvas.drawVertices(vertices, BlendMode.dst, Paint());
       vertices.dispose();
     }
-    return recorder.endRecording().toImage(width, height);
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(width, height);
+    picture.dispose();
+    return image;
   }
 
   final mainImage =
@@ -811,7 +816,9 @@ Future<CompositedAgreement> measureCompositedAgreement(
       collectionToLogical: collectionToLogical,
       texts: texts,
       patches: patchImages);
-  final outImage = await outRecorder.endRecording().toImage(w, h);
+  final outPicture = outRecorder.endRecording();
+  final outImage = await outPicture.toImage(w, h);
+  outPicture.dispose();
 
   final a = (await refImage.toByteData(format: ImageByteFormat.rawRgba))!;
   final b = (await outImage.toByteData(format: ImageByteFormat.rawRgba))!;
