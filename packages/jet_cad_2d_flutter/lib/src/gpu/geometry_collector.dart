@@ -5,6 +5,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import '../draw_sink.dart';
 import 'instance_record.dart';
+import 'resident_text.dart';
+import 'text_patches.dart';
 
 /// Collects a document's stroked segments into one buffer, in walk order.
 ///
@@ -23,11 +25,21 @@ class GeometryCollector implements DrawSink {
     required this.pixelsPerPaperMm,
     required this.devicePixelRatio,
     this.lineweightScale = 1.0,
+    this.measurer,
+    this.textStyleOf,
   });
 
   final double pixelsPerPaperMm;
   final double devicePixelRatio;
   final double lineweightScale;
+
+  /// The measurer the label's glyph box is read through, and the style
+  /// lookup its `fontFamily` comes from -- the same pair `CanvasDrawSink`
+  /// requires. **Optional (Ruling E2):** with either null, [text] counts the
+  /// op in [skippedOps] exactly as it did before Plan E, so a collector wired
+  /// without a measurer shows as a number rather than a missing picture.
+  final TextMeasurer? measurer;
+  final TextStyleRecord Function(Handle)? textStyleOf;
 
   /// **A minimum stroke width in device pixels.** Copied from
   /// `VerticesDrawSink.kMinStrokeDevicePixels` rather than referenced —
@@ -49,6 +61,17 @@ class GeometryCollector implements DrawSink {
   int _instances = 0;
   int _skipped = 0;
   Transform2 _residual = Transform2.identity();
+
+  final List<ResidentTextRecord> _texts = <ResidentTextRecord>[];
+
+  /// Reused per text op, never per frame: `TextLayout` is caller-owned and
+  /// refilled in place (`text_geometry.dart`'s own ownership rule).
+  final TextLayout _textLayout = TextLayout();
+
+  /// Reused per text op: [boundTransformedBox]'s caller-owned scratch, so
+  /// [text] allocates nothing per label beyond the [ResidentTextRecord]
+  /// itself.
+  final Float64List _boxScratch = Float64List(4);
 
   // The run state machine, mirroring `VerticesDrawSink._beginRun` /
   // `_runTo` / `_endRun`. It is duplicated rather than shared because these
@@ -80,14 +103,18 @@ class GeometryCollector implements DrawSink {
   Float32List get data => _buffer.sublist(0, _instances * kFloatsPerInstance);
   int get instanceCount => _instances;
 
-  /// Ops this plan does not draw yet — `text` only, since Plan D.
+  /// Every text op this walk recorded, in emission order. A view: the list
+  /// is the draw order and nobody reorders it.
   ///
-  /// Counted rather than ignored so a corpus that needs Plan E is visible as
-  /// a number instead of as a missing picture.
-  ///
-  /// `circle` and `arc` stopped counting here in Plan B's Task 5; `point` in
-  /// its Task 6; `fillPolygon` in Plan D's Task 2; `fillCircle` stops counting
-  /// in Task 3.
+  /// **Copies on every access**, the same rule [data] states: `List.unmodifiable`
+  /// allocates a fresh list. Called by tests and once per rebuild by the
+  /// harness, never per frame.
+  List<ResidentTextRecord> get texts => List.unmodifiable(_texts);
+
+  /// Ops this walk could not draw. **Zero on a collector built with a
+  /// measurer**, since Plan E: `text` was the last op counted here, and it
+  /// now records a [ResidentTextRecord] instead -- unless [measurer] or
+  /// [textStyleOf] is null (Ruling E2), in which case it still counts.
   int get skippedOps => _skipped;
 
   /// **Diagnostic only — read by nobody in this class and never changes what
@@ -704,6 +731,45 @@ class GeometryCollector implements DrawSink {
     }
   }
 
+  /// Records the label for the compositor (Plan E); draws nothing itself.
+  ///
+  /// The glyph box is `TextLayout.layOutBox` on the same `measure` the
+  /// reference sink's paragraph is laid out against, taken through all four
+  /// corners of the residual so a rotated, sheared or mirrored label bounds
+  /// correctly (`boundTransformedBox`'s own rule, written out there to avoid
+  /// allocating two `Aabb2`s and four `Vector2`s per label at rebuild --
+  /// cheap, but this method is on the walk and the walk is measured).
   @override
-  void text(String text, Handle style, ResolvedStyle resolved) => _skipped++;
+  void text(String text, Handle style, ResolvedStyle resolved) {
+    final measurer = this.measurer;
+    final textStyleOf = this.textStyleOf;
+    if (measurer == null || textStyleOf == null) {
+      _skipped++;
+      return;
+    }
+    _textLayout
+        .layOutBox(measurer.measure(text: text, style: textStyleOf(style)));
+    final t = _residual;
+    boundTransformedBox(_textLayout.minX, _textLayout.minY, _textLayout.maxX,
+        _textLayout.maxY, t, _boxScratch);
+    // Ruling E9: one device pixel at the band's FLOOR, the most collection
+    // units a device pixel is anywhere inside the band.
+    final pad = kTextBoxPadDevicePixels / (devicePixelRatio * kBandLowerScale);
+    _texts.add(ResidentTextRecord(
+      text: text,
+      style: style,
+      argb: resolved.argb,
+      a: t.a,
+      b: t.b,
+      c: t.c,
+      d: t.d,
+      e: t.e,
+      f: t.f,
+      boxMinX: _boxScratch[0] - pad,
+      boxMinY: _boxScratch[1] - pad,
+      boxMaxX: _boxScratch[2] + pad,
+      boxMaxY: _boxScratch[3] + pad,
+      instanceIndex: _instances,
+    ));
+  }
 }

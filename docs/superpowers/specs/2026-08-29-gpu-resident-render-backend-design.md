@@ -333,7 +333,9 @@ instance reaches them. A patch restores exactly that:
   box is `TextLayout.layOutBox`'s glyph box with all four corners transformed
   by the residual and re-bounded (the axis-aligned box of a rotated, sheared
   or mirrored label, exactly as `extents.dart:67` does it), padded by one
-  device pixel at the band's upper scale bound so antialiased glyph edges and
+  device pixel at the band's **lower** scale bound (Plan E's Ruling E9 -- one
+  device pixel is most collection units at the band's floor, the same direction
+  the reach takes) so antialiased glyph edges and
   glyph overhang past the advance box are inside it. For each label, every
   instance written *after* its index is tested against that box, in
   collection space: the instance's own box — its points, **expanded by the

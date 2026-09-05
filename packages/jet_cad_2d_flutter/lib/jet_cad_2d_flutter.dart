@@ -27,6 +27,8 @@ export 'src/flutter_text_measurer.dart';
 export 'src/gpu/geometry_collector.dart';
 export 'src/gpu/gpu_draw_backend.dart';
 export 'src/gpu/resident_geometry.dart';
+export 'src/gpu/resident_text.dart';
+export 'src/gpu/text_patches.dart';
 export 'src/reference_walk.dart';
 export 'src/render_backend.dart';
 export 'src/tile_cache.dart';
