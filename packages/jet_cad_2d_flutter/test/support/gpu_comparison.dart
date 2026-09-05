@@ -640,3 +640,205 @@ int countDifferingPixels(TriangleRasterizer a, TriangleRasterizer b) {
   }
   return differing;
 }
+
+/// The per-channel agreement of two Skia-rendered pictures, plus how many
+/// patches the resident arm composited. Same fields and the same 2/8
+/// thresholds as [ResidentColorAgreement]; a separate class because the
+/// instrument is different -- this one sees text.
+class CompositedAgreement {
+  const CompositedAgreement(this.union, this.withinTwo, this.overEight,
+      this.referenceInk, this.patchCount);
+  final int union, withinTwo, overEight, referenceInk, patchCount;
+  double get agreement => union == 0 ? 1.0 : withinTwo / union;
+}
+
+/// Both arms through Skia, text included -- the first instrument in this
+/// suite that can. See the plan's Task 5 for the arrangement.
+///
+/// **Both arms are rasterised by Skia**, not [TriangleRasterizer]: the
+/// reference is the painter driving [VerticesDrawSink] (with a
+/// [CanvasDrawSink] fallback for text, on the same `Canvas`) at [liveCamera];
+/// the resident arm is the painter driving [GeometryCollector] at
+/// [collectionCamera], then [classifyTextPatches], then [expandInstances]
+/// (the vertex shader's Dart transcription) turning the main buffer and each
+/// patch's sub-buffer into device-space triangles Skia's own
+/// `Canvas.drawVertices` rasterises into images, composited by
+/// [TextCompositor.paint]. Per-channel comparison as `_colorAgreementOf`
+/// does it, over the union of pixels either arm inked.
+///
+/// **The corpus this runs is undashed, and that is a real limit of this
+/// instrument, not this call's.** `expandInstances` writes dash varyings the
+/// same way it always does, but nothing downstream of it here reads them --
+/// `Canvas.drawVertices` has no notion of a per-fragment dash discard, so a
+/// dashed instance would rasterise solid on the resident arm while the
+/// reference sink still cut its gaps. `textOverlapFixture` never dashes;
+/// dash correctness stays Plan C's gates, on [TriangleRasterizer], which
+/// does honour `dash`.
+///
+/// `dashScale` for [expandInstances] is `dashScaleFor(liveCamera,
+/// collectionCamera.worldToScreenMatrix.invert())` -- the live-to-collection
+/// ratio -- because, unlike every other function in this file, the two
+/// cameras here are allowed to differ: that is the four-scale test's whole
+/// point, proving the resident arm's patches track a live camera that has
+/// moved away from the one the buffer was collected at.
+///
+/// Both canvases are scaled by [devicePixelRatio] before painting, so
+/// logical positions land on device pixels the same way on both arms; the
+/// compositor then draws the (device-sized) main image into the logical
+/// viewport rect under that same scale, 1:1.
+///
+/// Both pictures are recorded onto a transparent ground and stay
+/// transparent wherever neither arm paints -- the per-pixel comparison below
+/// reads that shared transparency off the alpha channel to decide which
+/// pixels are "ink" at all.
+Future<CompositedAgreement> measureCompositedAgreement(
+  DraftDocument document, {
+  required ViewportTransform collectionCamera,
+  required ViewportTransform liveCamera,
+  required Size size,
+  required double devicePixelRatio,
+  required double pixelsPerPaperMm,
+  required FlutterTextMeasurer measurer,
+
+  /// Test seam: the classifier's own output, reordered or discarded before
+  /// the resident arm composites. `(_) => const []` is the spec's headline
+  /// mutation, "draw all text in one pass" -- with no patches, every label
+  /// draws as a plain paragraph and whatever later geometry reaches it in
+  /// the reference picture stays UNDER it in the resident one instead.
+  List<TextPatch> Function(List<TextPatch>)? mutatePatches,
+  double minTextCapPixels = kMinTextCapPixels,
+}) async {
+  final w = (size.width * devicePixelRatio).round();
+  final h = (size.height * devicePixelRatio).round();
+  final index = SpatialIndex(document);
+  final resolver = DocumentStyleResolver(document);
+  final painter = DraftPainter(
+      document: document,
+      index: index,
+      resolver: resolver,
+      minTextCapPixels: minTextCapPixels);
+
+  // --- reference: the widget's own arrangement, at the live camera -------
+  final refRecorder = PictureRecorder();
+  final refCanvas = Canvas(refRecorder)
+    ..scale(devicePixelRatio, devicePixelRatio);
+  final fallback = CanvasDrawSink(
+      canvas: refCanvas,
+      pixelsPerPaperMm: pixelsPerPaperMm,
+      measurer: measurer,
+      textStyleOf: document.textStyleOf);
+  final reference = VerticesDrawSink(
+      canvas: refCanvas,
+      pixelsPerPaperMm: pixelsPerPaperMm,
+      devicePixelRatio: devicePixelRatio,
+      fallback: fallback);
+  painter.paint(reference, liveCamera, size);
+  reference.flush();
+  final refImage = await refRecorder.endRecording().toImage(w, h);
+
+  // --- resident: collect at the collection camera, classify, expand ------
+  final collector = GeometryCollector(
+      pixelsPerPaperMm: pixelsPerPaperMm,
+      devicePixelRatio: devicePixelRatio,
+      measurer: measurer,
+      textStyleOf: document.textStyleOf);
+  painter.paint(collector, collectionCamera, size);
+  final data = collector.data;
+  final texts = collector.texts;
+  var patches = classifyTextPatches(data, collector.instanceCount, texts,
+      devicePixelRatio: devicePixelRatio);
+  if (mutatePatches != null) patches = mutatePatches(patches);
+
+  final collectionInverse = collectionCamera.worldToScreenMatrix.invert();
+  final collectionToLogical =
+      composeTransforms(liveCamera.worldToScreenMatrix, collectionInverse);
+  final collectionToDevice = composeTransforms(
+      Transform2.scale(devicePixelRatio, devicePixelRatio),
+      collectionToLogical);
+  final dashScale = dashScaleFor(liveCamera, collectionInverse);
+
+  Future<Image> triangles(
+      Float32List buf, int count, Transform2 toDevice, int width, int height) {
+    final expanded =
+        expandInstances(buf, count, toDevice, dashScale: dashScale);
+    final recorder = PictureRecorder();
+    final canvas = Canvas(recorder);
+    if (count > 0) {
+      final vertices = Vertices.raw(VertexMode.triangles, expanded.positions,
+          colors: expanded.colors);
+      // As `VerticesDrawSink.flush` draws: the vertex colour is the colour,
+      // the paint contributes alpha only.
+      canvas.drawVertices(vertices, BlendMode.dst, Paint());
+      vertices.dispose();
+    }
+    return recorder.endRecording().toImage(width, height);
+  }
+
+  final mainImage =
+      await triangles(data, collector.instanceCount, collectionToDevice, w, h);
+  final patchImages = <PatchImage>[];
+  for (final p in patches) {
+    final t = texts[p.textIndex];
+    final region =
+        patchRegionFor(t, collectionToDevice, w, h, maxWidth: w, maxHeight: h);
+    if (region == null) continue;
+    final toPatch = composeTransforms(
+        Transform2.translation(-region.x.toDouble(), -region.y.toDouble()),
+        collectionToDevice);
+    final img = await triangles(
+        p.instances, p.instanceCount, toPatch, region.width, region.height);
+    patchImages.add(PatchImage(
+        textIndex: p.textIndex,
+        image: img,
+        src: Rect.fromLTWH(
+            0, 0, region.width.toDouble(), region.height.toDouble()),
+        dst: Rect.fromLTWH(
+            region.x / devicePixelRatio,
+            region.y / devicePixelRatio,
+            region.width / devicePixelRatio,
+            region.height / devicePixelRatio),
+        layerBounds: labelBoundsLogical(t, collectionToLogical)));
+  }
+
+  final outRecorder = PictureRecorder();
+  final outCanvas = Canvas(outRecorder)
+    ..scale(devicePixelRatio, devicePixelRatio);
+  final compositor =
+      TextCompositor(measurer: measurer, textStyleOf: document.textStyleOf);
+  compositor.paint(outCanvas,
+      main: mainImage,
+      viewport: size,
+      collectionToLogical: collectionToLogical,
+      texts: texts,
+      patches: patchImages);
+  final outImage = await outRecorder.endRecording().toImage(w, h);
+
+  final a = (await refImage.toByteData(format: ImageByteFormat.rawRgba))!;
+  final b = (await outImage.toByteData(format: ImageByteFormat.rawRgba))!;
+  var union = 0, withinTwo = 0, overEight = 0, referenceInk = 0;
+  for (var i = 0; i < w * h; i++) {
+    final o = i * 4;
+    final inkA = a.getUint8(o + 3) != 0, inkB = b.getUint8(o + 3) != 0;
+    if (inkA) referenceInk++;
+    if (!inkA && !inkB) continue;
+    union++;
+    var worst = 0;
+    for (var ch = 0; ch < 4; ch++) {
+      final d = (a.getUint8(o + ch) - b.getUint8(o + ch)).abs();
+      if (d > worst) worst = d;
+    }
+    if (worst <= 2) withinTwo++;
+    if (worst > 8) overEight++;
+  }
+
+  index.dispose();
+  refImage.dispose();
+  mainImage.dispose();
+  for (final p in patchImages) {
+    p.image.dispose();
+  }
+  outImage.dispose();
+
+  return CompositedAgreement(
+      union, withinTwo, overEight, referenceInk, compositor.patchesComposited);
+}
