@@ -448,11 +448,14 @@ class ResidentGeometry {
   gpu.HostBuffer get uniforms => _uniforms;
 
   /// **A deliberate no-op.** None of `flutter_gpu`'s `DeviceBuffer`,
-  /// `RenderPipeline`, `Shader` or `HostBuffer` expose a `dispose` method
-  /// (`flutter_gpu/lib/src/{buffer,render_pipeline,shader,context}.dart`
-  /// carry none) — their native peers are reclaimed by the engine's own
-  /// finalizers. This method exists as the seam `GpuDrawBackend.dispose`
-  /// (Task 6) calls, so a future native resource with a real teardown has
-  /// somewhere to plug in without changing that call site.
+  /// `RenderPipeline`, `Shader`, `HostBuffer` or `Texture` (including the `P`
+  /// patch targets this class now owns, Plan E's Task 6) expose a `dispose`
+  /// method (`flutter_gpu/lib/src/{buffer,render_pipeline,shader,context,
+  /// texture}.dart` carry none, checked against `Texture` specifically for
+  /// this addition, not assumed from the other four) — their native peers
+  /// are reclaimed by the engine's own finalizers. This method exists as the
+  /// seam `GpuDrawBackend.dispose` (Task 6) calls, so a future native
+  /// resource with a real teardown has somewhere to plug in without changing
+  /// that call site.
   void dispose() {}
 }
