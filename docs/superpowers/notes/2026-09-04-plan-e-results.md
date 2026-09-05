@@ -279,32 +279,73 @@ measurement of that hypothesis.
 
 ---
 
-## The window — Plan E's five checks, and nineteen still OWED
+## The window — eighteen of nineteen checks discharged 2026-09-05, one still OWED
 
-**Not discharged in this session.** A human has not looked at the running
-window for this task. What follows names exactly what to look for, per
-this task's own brief, and leaves every check as OWED.
+**A human looked at the running window on 2026-09-05** — the eyeball run
+below, on `main` at `b5b6131` (Plan E merged), macOS profile, three
+interleaved repeats, `GSPIKE done: 27 phase reports`, no crash. The
+`collect+upload` line read `instances=106852, buffer=6.80 MB,
+skippedOps=0, textOps=165 patches=87 subBuffer=0.28 MB patchTargets=1.77
+MB classify=27.7 ms`; arm C reported `patches rendered=87 clipped=0
+offscreen=0` on hold and pan and `rendered=49 offscreen=38` on zoom, all
+three repeats. Log:
+[2026-09-04-plan-e-raw/eyeball-text-run.log](2026-09-04-plan-e-raw/eyeball-text-run.log).
 
-### Plan E's five (new)
+```sh
+cd apps/dev_harness_2d
+flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
+  --dart-define=ENTITIES=10000 --dart-define=SPIKE_DEFS=20 \
+  --dart-define=SPIKE_INSTANCES=150 --dart-define=SPIKE_FRAMES=30 \
+  --dart-define=SPIKE_REPEATS=3 --dart-define=SPIKE_FILLS=true \
+  --dart-define=SPIKE_FILL_SCALE=20 --dart-define=SPIKE_TEXT=true
+```
+
+**How the verdict was taken, exactly.** The nineteen checks were put to
+the human as an enumerated list (Plan E's five, Plan D's five, Plan C's
+five, Plan B's four, each in its own words, one verdict asked per item:
+yes / no / could not see). After looking, the human was offered two
+recordings — "all nineteen seen, no problem" or "name the exceptions" —
+and chose the first. **This is a blanket verdict over an enumerated list,
+not eighteen separately spoken sentences**, and is recorded as that: every
+item below was in front of the human when the answer was given, no item
+was reported failed, and no item was reported unseen. It is stronger than
+2026-09-01's "the drawing looks right" (which had no list in front of it),
+and weaker than an item-by-item transcript would be.
+
+**Check 5 is excluded from the verdict and stays OWED**: it needs a
+`DRAW_TEXT=false` run of the same corpus, and that run did not happen on
+2026-09-05. The human could not have seen it. Eighteen discharged, one
+owed.
+
+`SPIKE_FILL_SCALE=20` was on, as Plan D's note requires for the eye — the
+timings in this run are therefore not comparable to any recorded number and
+none was taken from it.
+
+### Plan E's five — four discharged, one OWED
 
 1. Labels are **drawn**, right way up, at the size and place arm A draws
-   them.
+   them. — **seen, no problem reported** (2026-09-05)
 2. A `ROOM n` label's crossing stroke is visible **over** its glyphs — and
    the same stroke is **not** drawn over the empty space beside the glyphs
-   any differently from arm A.
+   any differently from arm A. — **seen, no problem reported** (2026-09-05)
 3. Panning keeps the patched stroke over the label with no lag and no seam
-   at the label's box edge.
+   at the label's box edge. — **seen, no problem reported** (2026-09-05)
 4. Zooming in to 2× and out to 0.5× keeps the label sharp (it is a
-   paragraph, not a bitmap) and the stroke over it at every step.
+   paragraph, not a bitmap) and the stroke over it at every step. — **seen,
+   no problem reported** (2026-09-05)
 5. `DRAW_TEXT=false` shows the same drawing with no labels and no patches.
+   — **OWED**: the control run was not made on 2026-09-05. Command: the one
+   above with `--dart-define=DRAW_TEXT=false` appended (also in
+   `.vscode/launch.json` as *"2d: GPU spike — text ON, DRAW_TEXT=false
+   (criterion 11 control)"*).
 
-### Plan D's five, Plan C's five and Plan B's four — still owed
+### Plan D's five, Plan C's five and Plan B's four — discharged 2026-09-05
 
-Unchanged from STATUS.md's "Resume here"; listed there in full. One harness
-run (Run 1's command above) can discharge Plan E's five and, together with
-the `DRAW_TEXT=false` control for check 5, sits alongside — not instead of
-— the fourteen older checks, which need the SAME corpus's fills and dashes
-visible too (`SPIKE_FILLS=true`, already in the command above).
+All fourteen were on the same list, in the same run, under the same blanket
+verdict: seen, no problem reported. Listed in full in STATUS.md's "Resume
+here" and in each plan's own results note, which now carry the pointer
+back here. Plan D's five were made at `SPIKE_FILL_SCALE=20`, the only
+scale at which they can be made (Plan D's note explains why).
 
 **A `.vscode/launch.json` inconsistency, found while assembling this
 section, corrected here rather than repeated uncorrected**: Task 7 added
@@ -360,11 +401,13 @@ shot; zero survivors.** Full transcripts:
 | 6 | criterion 6: `buffer + subBuffer ≤ 8 MB` | **PASS** — 7.06 MB, 0.94 MB margin |
 | 7 | 14/14 mutations fire, survivors declared | **PASS** — 14/14 killed on the first shot, zero survivors |
 | 8 | no shader or bundle change | **PASS** — `git diff --stat 8dde4fb..HEAD -- packages/jet_cad_2d_flutter/shaders packages/jet_cad_2d_flutter/assets` empty |
-| 9 | a human looks at the window | **OWED** — Plan E's five plus fourteen older, nineteen total, none discharged |
+| 9 | a human looks at the window | **18 of 19 discharged 2026-09-05** — Plan E's checks 1–4 and all fourteen older ones seen, no problem reported; check 5 (`DRAW_TEXT=false` control) still **OWED**, its run was not made |
 | 10 | every gate green, all three packages | **PASS** — see below |
 
 **8 of 10.** Criterion 5 (criterion 11) is a measured MISS, not adjusted;
-criterion 9 is formally OWED, not simulated.
+criterion 9 is eighteen-nineteenths discharged by a human on 2026-09-05
+and still formally open on its `DRAW_TEXT=false` control — not scored as
+passed on eighteen.
 
 ### The gate commands, verbatim
 

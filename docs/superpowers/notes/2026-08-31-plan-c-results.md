@@ -282,6 +282,14 @@ threshold was moved.**
 
 ### Criterion 11 is UNMET, in those words
 
+> **Discharged 2026-09-05.** A human looked at the running window on the
+> Plan E eyeball run (`main` at `b5b6131`, `SPIKE_FILLS=true
+> SPIKE_FILL_SCALE=20 SPIKE_TEXT=true`) with all nineteen outstanding
+> checks enumerated, including this plan's, and reported them all seen
+> with no problem — a blanket verdict over the enumerated list. Record:
+> [2026-09-04-plan-e-results.md](2026-09-04-plan-e-results.md#the-window--eighteen-of-nineteen-checks-discharged-2026-09-05-one-still-owed).
+> The text below is what was owed at the time this note was written.
+
 The device run happened and produced every number above. **No human has
 looked at what it drew.** Plan 3h's session made looking at the window this
 project's third instrument, alongside mutation and differential testing, and

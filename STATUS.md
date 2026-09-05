@@ -25,13 +25,13 @@ the +1 over Plan C's 797 is the codec-fix test above. Plan D's own additions
 are the +25 in `jet_cad_2d_flutter` (540 → 565) and the +1 in
 `dev_harness_2d` (72 → 73).
 
-**Plan D (fills) is MERGED. Exit gate: 8 of 9 — criterion 8 is
+**Plan D (fills) is MERGED. Exit gate: 8 of 9 at merge — criterion 8 was
 OWED, and the merge did not discharge it**, in those words: this task's controller ruling (D-9a) forbids
 simulating a device run or a human's visual judgement, so no device run
-happened this session and none could have. **The window-check debt now
-stands at FOURTEEN checks across three plans** — Plan B's four (owed since
-`72b162d`), Plan C's five (owed since `18330a9`), and Plan D's own five, all
-new — discharged by one harness run. See [Resume here](#resume-here).
+happened that session and none could have. **Discharged 2026-09-05**: a
+human looked at the window on the Plan E eyeball run and reported Plan D's
+five checks, with Plan B's four and Plan C's five, seen and without
+problem. See [Resume here](#resume-here).
 
 ### What Plan D's own premises measured false
 
@@ -116,9 +116,11 @@ instrument to catch.
 | mutations | **14 fired, 14 killed**, zero survivors |
 
 **Exit gate: 8 of 10.** Criterion 11 is a measured MISS with its number,
-not adjusted; criterion 9 (a human looks at the window) is formally OWED —
-Plan E's five checks plus the fourteen older ones, nineteen total, none
-discharged. See [Resume here](#resume-here) for the command.
+not adjusted; criterion 9 (a human looks at the window) is **eighteen of
+nineteen discharged on 2026-09-05** — Plan E's checks 1–4 and all fourteen
+older ones seen by a human, no problem reported — and still open on Plan
+E's fifth check, the `DRAW_TEXT=false` control, whose run was not made.
+See [Resume here](#resume-here).
 
 ---
 
@@ -775,10 +777,18 @@ command buffer while the first was still open), fixed at `4af35bf`
 the fixed tree before any criterion-11 number was taken — see the results
 note's "What this plan's own premises measured false" §1.
 
-**The window-check debt now stands at NINETEEN checks across four plans**
-— Plan B's four (owed since `72b162d`), Plan C's five (owed since
-`18330a9`), Plan D's five (owed since `de962bd`) and Plan E's own five, all
-new, none discharged. One harness run discharges all nineteen:
+**The window-check debt is down to ONE check.** On 2026-09-05 a human
+looked at the running window — the command below, `SPIKE_FILL_SCALE=20`,
+`main` at `b5b6131`, no crash, 165 labels, 87 patches — with all nineteen
+checks in front of them as an enumerated list, and chose "all seen, no
+problem" over "name the exceptions". That discharges Plan B's four (owed
+since `72b162d`), Plan C's five (owed since `18330a9`), Plan D's five (owed
+since `de962bd`) and Plan E's checks 1–4. It is a blanket verdict over an
+enumerated list, recorded as exactly that in
+[Plan E's results note](docs/superpowers/notes/2026-09-04-plan-e-results.md#the-window--eighteen-of-nineteen-checks-discharged-2026-09-05-one-still-owed).
+**Still OWED: Plan E's fifth check** — `DRAW_TEXT=false` shows the same
+drawing with no labels and no patches — because that control run was not
+made. The command, with the one flag that is missing for check 5:
 
 ```sh
 cd apps/dev_harness_2d
@@ -786,8 +796,9 @@ flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
   --dart-define=ENTITIES=10000 --dart-define=SPIKE_DEFS=20 \
   --dart-define=SPIKE_INSTANCES=150 --dart-define=SPIKE_FRAMES=30 \
   --dart-define=SPIKE_REPEATS=3 --dart-define=SPIKE_FILLS=true \
-  --dart-define=SPIKE_TEXT=true
-# then --dart-define=DRAW_TEXT=false, for Plan E's fifth check
+  --dart-define=SPIKE_FILL_SCALE=20 --dart-define=SPIKE_TEXT=true
+# for Plan E's fifth check, the only one still owed, append:
+#   --dart-define=DRAW_TEXT=false
 ```
 
 Also in `.vscode/launch.json` as *"2d: GPU spike — text ON (criterion 11,
@@ -834,42 +845,44 @@ left as levers rather than fixed blind in this wave (Ruling RF-1):
   across a rebuild" — is Plan F's to fire; nothing in Plan E's own rebuild
   path can trigger it.
 
-**A human has now looked at the window, informally, and reported the drawing
-correct — 2026-09-01, on the `SPIKE_FILL_SCALE=20` eyeball run.** That is
-written here as exactly what it is and no more: **the fourteen enumerated
-checks below were not reported one by one**, so this is a sign-off on the
-picture as a whole, not fourteen individual verdicts. **Criterion 8 therefore
-stays formally OWED**, and the way to close it is to walk the list below and
-say what each check showed. A record that upgraded "it looks right" into
-fourteen passes would be the one failure this file exists to prevent.
+**The fourteen older checks — discharged 2026-09-05.** Two looks were
+taken, and the record keeps them apart. On 2026-09-01 a human looked at the
+`SPIKE_FILL_SCALE=20` eyeball run and reported the drawing correct **without
+the list in front of them** — a sign-off on the picture as a whole, which
+this file refused to upgrade into fourteen passes. On 2026-09-05 the same
+run, now with `SPIKE_TEXT=true` on top, was looked at **with all nineteen
+checks enumerated**, and the human chose "all seen, no problem" over "name
+the exceptions". The fourteen below are discharged on that second look,
+as a blanket verdict over an enumerated list — not as fourteen spoken
+sentences. Kept here for the record of what was asked:
 
-Plan B's criterion has been owed since `72b162d`, Plan C's since `18330a9`,
-and Plan D added its own five at `de962bd`. One harness run covers all
-fourteen; the checks and the corrected command are listed in
+Plan B's criterion had been owed since `72b162d`, Plan C's since `18330a9`,
+and Plan D added its own five at `de962bd`; the checks were first listed in
 [Plan D's results note](docs/superpowers/notes/2026-09-01-plan-d-results.md#the-window-checks--owed-fourteen-across-three-plans).
 **The command in Plan D's own task brief is missing `SPIKE_FILLS=true`** —
 run exactly as the brief wrote it, the corpus draws no fills at all and none
 of Plan D's five checks have anything to look at; the corrected command is
 below.
 
-**Plan D's five, all new:** a filled region is filled, not outlined and
+**Plan D's five (seen 2026-09-05):** a filled region is filled, not outlined and
 hollow; the higher-handle stroke crossing it is visible over the fill, not
 hidden under it; a filled circle's fill reaches exactly to its own boundary
 stroke at every zoom, with no rim of background and no spill; a fill on a
 hairline layer is not faded; and a translucent fill shows what is under it.
 
-**Plan C's five, and the first one is the opposite of what its own plan
-said:** zoom in and the dashes must get *longer* and stay the same in number;
+**Plan C's five (seen 2026-09-05), and the first one is the opposite of
+what its own plan said:** zoom in and the dashes must get *longer* and stay the same in number;
 zoom out and they must collapse to solid at the same zoom as arm A; a dashed
 corner must be **notched**, not filled; a dashed circle must be **notched** at
 its start angle while a solid one is not; and panning along a long dashed line
 must move the dashes *with* the line, not slide them along it.
 
-**Plan B's four, still owed:** corners filled, a circle **not** notched at its
+**Plan B's four (seen 2026-09-05):** corners filled, a circle **not** notched at its
 start angle, a square dot, nothing thickening as you zoom.
 
 **Plan C is merged** at `3a61b45` and **Plan D at `de962bd`**; both branches
-are deleted and neither merge discharged its criterion. Command — note the
+are deleted; neither merge discharged its criterion — the 2026-09-05 look
+did. Command — note the
 `SPIKE_FILLS=true` on the last line, without which the run shows no fills at
 all and Plan D's five checks cannot be made:
 
@@ -896,11 +909,11 @@ drawing any recorded number was taken against. Both runs are in
 
 ---
 
-**A human must still look at the window.** That is the top of this list on
-purpose: Plan B's exit gate is 10 of 11 and the one UNMET criterion is
-exactly this — the device run happened (macOS profile, three interleaved
-repeats, Low Power Mode confirmed OFF) but nobody has looked at what it
-actually drew. Look for: filled corners, a circle **not** notched at its
+**Plan B's window check — discharged 2026-09-05** (see above; kept as
+written at the time). Plan B's exit gate was 10 of 11 at merge and the one
+UNMET criterion was exactly this — the device run happened (macOS profile,
+three interleaved repeats, Low Power Mode confirmed OFF) but nobody had
+looked at what it actually drew. Looked for: filled corners, a circle **not** notched at its
 start angle, a square dot, and nothing thickening as you zoom in. Plan 3h's
 session proved this is not a formality — it was the only one of this
 project's three instruments (mutation testing, differential testing,
@@ -917,13 +930,12 @@ flutter run -d macos --profile --dart-define=RUN_GPU_SPIKE=true \
 
 **Plan B (joins and hairlines) is DONE and MERGED**, eleven tasks,
 `5c94e11..4892a01`, merge `72b162d`, branch deleted; nothing is in flight.
-**Its criterion 11 is still UNMET and the merge did not change that:** the
-device run happened, but no human has looked at the running window. Full
-account:
+**Its criterion 11 was UNMET at merge and the merge did not change that;
+a human's look on 2026-09-05 did** (recorded above). Full account:
 [Plan B](#plan-b--joins-and-hairlines) and
 [2026-08-30-plan-b-results.md](docs/superpowers/notes/2026-08-30-plan-b-results.md).
-The merge decision is made. Once a human has looked at the window, the next
-unit of work is **Plan C — dashes**, per the roadmap line Plan A and
+The merge decision is made. The next unit of work after it was **Plan C —
+dashes**, per the roadmap line Plan A and
 Plan B both cite: *"Plan A ships strokes only. Joins, caps, `point()` and
 `_coveredArgb` are Plan B; dashes C; fills D; the text split E; rebuild
 triggers and the watermark F; web G."*
