@@ -988,11 +988,24 @@ DraftDocument textOverlapFixture(TextMeasurer measurer,
 List<Handle> _entityHandles(DraftDocument doc) =>
     [for (final slot in doc.entities.liveSlots) doc.entities.handleAt(slot)];
 
-/// Paints only [keep] (plus the fixture's own hairline floor, handle 899 --
-/// thin enough to sit under every floor this helper's callers check against,
-/// so leaving it in place costs nothing and saves a redundant remove/undo
-/// round trip) through [CanvasDrawSink] over a real [FlutterTextMeasurer],
-/// and returns the rendered alpha channel.
+/// Paints only [keep] -- truly alone, not even alongside the fixture's own
+/// hairline floor (handle 899) -- through [CanvasDrawSink] over a real
+/// [FlutterTextMeasurer], and returns the rendered alpha channel.
+///
+/// **899 is removed too, on purpose.** An earlier version of this helper left
+/// it in place on the theory that a one-pixel-wide hairline could never push
+/// a shared count past any floor this file's callers check against. Review
+/// caught the actual hazard: with 899 present, unremoved, in *both* isolated
+/// renders, any pixel where it happened to cross alpha 128 would be
+/// double-counted as "shared" by [strokeInkInsideLabel]'s whole-frame count
+/// regardless of whether the stroke and the label themselves overlap there --
+/// nothing in this file asserted that never happens. Removing it closes that
+/// gap outright rather than relying on an argument about its width: [camera]
+/// is computed once, from the full document's extents, before either isolated
+/// paint, so removing 899 here moves no pixel on screen. The one entity node
+/// that does legitimately stay across every render is 990, the placement
+/// instance -- it is never a candidate for removal because [RemoveEntityCommand]
+/// only ever targets entities, and 990 is a node.
 ///
 /// Every other live entity is removed with [RemoveEntityCommand] and the
 /// removals are undone again before returning, so [doc] is left exactly as
@@ -1000,9 +1013,7 @@ List<Handle> _entityHandles(DraftDocument doc) =>
 /// same document.
 Future<Uint8List> _paintAloneAlpha(
     DraftDocument doc, Handle keep, ViewportTransform camera) async {
-  const floor = Handle(899);
-  final toRemove =
-      _entityHandles(doc).where((h) => h != keep && h != floor).toList();
+  final toRemove = _entityHandles(doc).where((h) => h != keep).toList();
   var removed = 0;
   for (final h in toRemove) {
     // A boundary's removal cascades onto its fill (`RemoveEntityCommand`'s
@@ -1064,6 +1075,11 @@ Future<int> strokeInkInsideLabel(
 
   final w = kViewport.width.toInt();
   final h = kViewport.height.toInt();
+  // Whole-frame, with no bounding box of either entity's own: safe only
+  // because `_paintAloneAlpha` now removes every other entity -- 899's
+  // hairline floor included -- so each byte array's alpha is exactly one
+  // entity's ink and nothing else in the frame can contribute a false
+  // "shared" pixel outside their actual overlap.
   var shared = 0;
   for (var i = 0; i < w * h; i++) {
     final strokeAlpha = strokeBytes[i * 4 + 3];
