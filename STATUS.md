@@ -69,7 +69,7 @@ Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01
 
 ---
 
-## Plan E — text patches (DONE, `plan-e/text-patches` at `4af35bf`, not yet merged)
+## Plan E — text patches (DONE, merged into `main` at `4921619`, branch deleted)
 
 **Plan E gave the GPU-resident backend text**, the fifth of the design
 spec's seven plans, nine tasks, `8dde4fb..4af35bf`. Spec:
@@ -758,7 +758,7 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 ## Resume here
 
 **Plan E (the text split) is DONE, all nine tasks, `8dde4fb..4af35bf` on
-`plan-e/text-patches` — not yet merged.** Its exit gate is **8 of 10**:
+merged into `main` at `4921619` (final review clean, three gates green on the merged tree, branch and worktree deleted).** Its exit gate is **8 of 10**:
 criterion 11 (hold + pan text-pass difference ≤ 0.5 ms) **MISSES** —
 measured **+1.79 ms on hold, +4.22 ms on pan** (arm C, median of three,
 87 patches on the corpus), both well over the budget — and criterion 9 (a
