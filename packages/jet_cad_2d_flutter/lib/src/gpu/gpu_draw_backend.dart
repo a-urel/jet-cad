@@ -287,10 +287,11 @@ class GpuDrawBackend {
     // against a `texts` list that may not even belong to the same document
     // any more. The hoist also folds in `_pendingRegions`, previously
     // cleared only after a successful drain at this method's tail: a throw
-    // between the first `.add` there and that drain (`commandBuffer.submit`,
-    // `patch.target.asImage()`) used to strand entries for the next frame's
-    // single-cursor merge with `geometry.texts` to trip over. Resetting
-    // unconditionally, on every call, means a throw can now only ever
+    // between the first `.add` there and that drain (a LATER patch's own
+    // `patchCommandBuffer.submit()`, or `patch.target.asImage()`/
+    // `target.asImage()` in the drain itself) used to strand entries for the
+    // next frame's single-cursor merge with `geometry.texts` to trip over.
+    // Resetting unconditionally, on every call, means a throw can now only ever
     // strand entries until the very next `render` -- never for a frame that
     // legitimately draws nothing, which is exactly what "still needs the
     // ring to advance once" above already argues for `geometry.uniforms`.
@@ -403,17 +404,44 @@ class GpuDrawBackend {
     pass.draw(ResidentGeometry.cornerVertexCount,
         instanceCount: geometry.instanceCount);
 
-    // **One more render pass per patch, on the SAME command buffer -- still
-    // one submit per frame.** Each covered label gets its own target, so its
-    // pass starts with `RenderTarget.singleColor` against `patch.target`
-    // rather than the main `target`; everything else about a patch pass
-    // mirrors the main one above (same pipeline, same corner buffer, same
-    // culling and blend state), reading `patch.instances` in place of
-    // `geometry.instances` and a `FrameInfo` built from a transform that maps
-    // the region's own device-pixel origin to the patch target's top-left
-    // instead of the viewport's. `_patchImages` and the three counters below
-    // were already reset at the top of this method, before the early
-    // returns (see that comment) -- not reset again here.
+    // **Submitted here, before any patch pass is created -- one command
+    // buffer per RENDER PASS, not one per frame.** Task 9's first device run
+    // with patches aborted on the very first frame that had one:
+    // `-[AGXG15XFamilyCommandBuffer renderCommandEncoderWithDescriptor:]:967:
+    // failed assertion 'A command encoder is already encoding to this
+    // command buffer'`. Cause: `flutter_gpu`'s `RenderPass` opens its Metal
+    // encoder at *construction*
+    // (`flutter_gpu/lib/src/command_buffer.dart:130`'s `createRenderPass`),
+    // and a `CommandBuffer` accepts exactly one `submit()`
+    // (`flutter_gpu/lib/src/command_buffer.dart:240-248` throws
+    // `StateError` on a second call) -- so a second `createRenderPass` on
+    // the SAME buffer, which the patch loop below used to do once per
+    // patch, opened a second encoder Metal refuses outright. The control
+    // run (`patches=0`) completed normally, which isolated the crash to the
+    // patch passes specifically. The fix is one command buffer per pass:
+    // this one submits now, and each patch pass below gets its own fresh
+    // `gpu.gpuContext.createCommandBuffer()`, submitted in turn, right after
+    // its own `draw`. On the web shim this costs nothing extra --
+    // `CommandBuffer` there is "a thin convenience wrapper... `submit` is a
+    // no-op and `createRenderPass` returns a pass that drives the GL context
+    // in place" (`flutter_scene/lib/src/gpu/web/command_buffer.dart`'s own
+    // doc comment) -- multiple buffers per frame are exactly as cheap as one
+    // there, which is also why the original (Metal-incompatible) shape had
+    // passed every check that does not run on a real device.
+    commandBuffer.submit();
+
+    // **One more render pass per patch, each on its OWN command buffer,
+    // submitted right after its own draw -- still O(1) per flush, one pair
+    // per patch, never per entity.** Each covered label gets its own target,
+    // so its pass starts with `RenderTarget.singleColor` against
+    // `patch.target` rather than the main `target`; everything else about a
+    // patch pass mirrors the main one above (same pipeline, same corner
+    // buffer, same culling and blend state), reading `patch.instances` in
+    // place of `geometry.instances` and a `FrameInfo` built from a
+    // transform that maps the region's own device-pixel origin to the patch
+    // target's top-left instead of the viewport's. `_patchImages` and the
+    // three counters below were already reset at the top of this method,
+    // before the early returns (see that comment) -- not reset again here.
     final dashScale = dashScaleFor(camera, _collectionInverse);
     for (final patch in geometry.patches) {
       final t = geometry.texts[patch.textIndex];
@@ -431,8 +459,9 @@ class GpuDrawBackend {
           region.height == patch.targetHeight) {
         patchesClipped++;
       }
+      final patchCommandBuffer = gpu.gpuContext.createCommandBuffer();
       final patchPass =
-          commandBuffer.createRenderPass(gpu.RenderTarget.singleColor(
+          patchCommandBuffer.createRenderPass(gpu.RenderTarget.singleColor(
         gpu.ColorAttachment(
             texture: patch.target, clearValue: vm.Vector4(0, 0, 0, 0)),
       ));
@@ -499,21 +528,27 @@ class GpuDrawBackend {
       );
       patchPass.draw(ResidentGeometry.cornerVertexCount,
           instanceCount: patch.instanceCount);
+      // Submitted immediately, on this patch's own command buffer -- see
+      // the main pass's `submit()` above for why one buffer cannot carry
+      // more than one render pass on Metal.
+      patchCommandBuffer.submit();
       patchesRendered++;
       _pendingRegions.add((patch, region));
     }
 
-    commandBuffer.submit();
     frames++;
 
-    // **`asImage()` only after `submit()`, on purpose.** On native the image
-    // is a handle over the live texture (`flutter_gpu/texture.cc`'s
-    // `Texture::AsImage`) and reads whatever the texture holds when the
-    // picture rasterises, so the order would not matter there. On the web
-    // shim `asImage()` SNAPSHOTS the texture now (`snapshotTextureSync`), so
-    // taken before the submit it would show last frame's patch. One order
-    // that is right on both backends -- the finding Codex made against
-    // revision 5's first draft.
+    // **`asImage()` only after the LAST `submit()`, on purpose.** By this
+    // point every command buffer this frame created -- the main pass's and
+    // each patch's own -- has already been submitted, in order, above; nothing
+    // below submits anything. On native the image is a handle over the live
+    // texture (`flutter_gpu/texture.cc`'s `Texture::AsImage`) and reads
+    // whatever the texture holds when the picture rasterises, so the order
+    // would not matter there. On the web shim `asImage()` SNAPSHOTS the
+    // texture now (`snapshotTextureSync`), so taken before a target's own
+    // submit it would show last frame's contents. One order that is right on
+    // both backends -- the finding Codex made against revision 5's first
+    // draft, still true now that there are `1 + P` submits instead of one.
     for (final (patch, region) in _pendingRegions) {
       _patchImages.add(PatchImage(
         textIndex: patch.textIndex,
