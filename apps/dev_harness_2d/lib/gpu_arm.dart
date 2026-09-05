@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
-import 'main.dart' show harnessMeasurer;
 import 'measurement_rig.dart';
 
 // --- The GPU arm: painter vs. tiles vs. jet_cad_2d_flutter's resident-GPU
@@ -366,7 +365,9 @@ class GpuSpikeState extends State<GpuSpikeApp> {
       pixelsPerPaperMm: kLogicalPixelsPerMm,
       devicePixelRatio: dpr,
       lineweightScale: widget.lineweightScale,
-      measurer: harnessMeasurer,
+      // The document's own measurer, not a harness global -- `GeometryCollector`
+      // takes the abstract `TextMeasurer?`, so no cast is needed here.
+      measurer: widget.document.textMeasurer,
       textStyleOf: widget.document.textStyleOf,
     );
     // **Collected under the fit camera, not an identity one.** `DraftPainter`
@@ -408,8 +409,12 @@ class GpuSpikeState extends State<GpuSpikeApp> {
       classifyMs = classifyWatch.elapsedMicroseconds / 1000.0;
       backend = geometry == null
           ? null
+          // The cast is safe by construction: every document this harness
+          // hands `GpuSpikeApp` -- `spikeDocument()` -- is built on
+          // `harnessMeasurer`, a `FlutterTextMeasurer`, which is exactly what
+          // `GpuDrawBackend` requires for its own `measurer:`.
           : GpuDrawBackend(geometry, collectionCamera,
-              measurer: harnessMeasurer,
+              measurer: widget.document.textMeasurer as FlutterTextMeasurer,
               textStyleOf: widget.document.textStyleOf);
       subBufferBytes = geometry == null
           ? 0

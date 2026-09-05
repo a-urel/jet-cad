@@ -72,6 +72,28 @@ void main() {
     expect(collector.skippedOps, 0, reason: 'text is drawn now');
     expect(patches.length, greaterThanOrEqualTo(kPatchedLabelCount),
         reason: 'every deliberate patched label is a patch');
+    // The count above is not enough on its own: this corpus's vocabulary
+    // labels (`labelFraction: 0.02`) land patches of their own -- 29 of them,
+    // measured directly against `kPatchedLabelCount = 8` (37 total) -- so a
+    // mutation that deletes `if (withText) _addPatchedLabels(doc);` in
+    // `spikeDocument` would still leave `patches.length >=
+    // kPatchedLabelCount` green. What has to be true, and what only the two
+    // checks below actually pin down, is that [_addPatchedLabels]'s own
+    // labels -- identified by their `'ROOM '` text, which neither the plain
+    // floor texts (empty string) nor the vocabulary labels (no `'ROOM'`
+    // entry) ever produce -- are themselves *among* the patches, by
+    // construction.
+    final roomTextIndices = <int>[
+      for (var i = 0; i < collector.texts.length; i++)
+        if (collector.texts[i].text.startsWith('ROOM ')) i,
+    ];
+    expect(roomTextIndices.length, kPatchedLabelCount,
+        reason: 'every deliberate patched label reached the collector');
+    final patchedTextIndices = patches.map((p) => p.textIndex).toSet();
+    for (final i in roomTextIndices) {
+      expect(patchedTextIndices, contains(i),
+          reason: 'ROOM label $i (collector.texts[$i]) must be a patch');
+    }
     index.dispose();
   });
 }

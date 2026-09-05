@@ -687,7 +687,7 @@ const double kPatchedLabelHeight = 600.0;
 /// stroke of lineweight 100 through its middle -- so each is a patch by
 /// construction. Placed in the corridor `_addFillRegions` uses, spaced along
 /// x, so a pan of `(4, 0)` per frame keeps at least one on screen.
-void _addPatchedLabels(DraftDocument doc, int entityCount) {
+void _addPatchedLabels(DraftDocument doc) {
   final centerX = kDefaultOriginX + kFloorWidth / 2;
   final centerY = kOriginY + kFloorHeight / 2;
   for (var i = 0; i < kPatchedLabelCount; i++) {
@@ -804,7 +804,7 @@ DraftDocument spikeDocument(
   if (fillsEnabled ?? kSpikeFills) {
     _addFillRegions(doc, count, sizeScale: fillScale ?? kSpikeFillScale);
   }
-  if (withText) _addPatchedLabels(doc, count);
+  if (withText) _addPatchedLabels(doc);
   return doc;
 }
 
