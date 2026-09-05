@@ -24,8 +24,10 @@ export 'src/flutter_text_measurer.dart';
 // getters) are marked `@internal` for the same reason, one file down.
 // `instance_record.dart` stays unexported too, for an unrelated reason: it is
 // `GeometryCollector`'s own wire format, not something a caller writes.
+export 'src/gpu/collection_frame.dart';
 export 'src/gpu/geometry_collector.dart';
 export 'src/gpu/gpu_draw_backend.dart';
+export 'src/gpu/resident_collection.dart';
 export 'src/gpu/resident_geometry.dart';
 export 'src/gpu/resident_text.dart';
 export 'src/gpu/text_compositor.dart';
