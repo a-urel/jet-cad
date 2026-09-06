@@ -1,6 +1,8 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:meta/meta.dart';
 
 import 'instance_record.dart';
 import 'resident_text.dart';
@@ -14,6 +16,24 @@ import 'resident_text.dart';
 /// them without touching a call site -- `patchRegionFor` takes neither.
 const double kBandLowerScale = 0.5;
 const double kBandUpperScale = 2.0;
+
+/// Cells an instance's reach-expanded box may span before it leaves the
+/// grid for the overflow list, which every label tests. A long wall through
+/// a floor plan would otherwise be appended to hundreds of buckets.
+const int kClassifyOverflowCells = 16;
+
+/// What one `classifyTextPatches` call did -- diagnostics, for the tests and
+/// the harness. Zero everywhere when there are no labels.
+class ClassifyStats {
+  int cellsX = 0, cellsY = 0;
+
+  /// Instances binned into cells; instances sent to the overflow list;
+  /// instances whose expanded box misses every label's union (never tested).
+  int binned = 0, overflow = 0, skipped = 0;
+
+  /// `_reaches` calls made. The brute force makes `labels x later instances`.
+  int candidatesTested = 0;
+}
 
 /// The label box is padded by this many device pixels, taken at the band's
 /// LOWER scale (Ruling E9): one device pixel is most collection units at the
@@ -112,7 +132,12 @@ class TextPatch {
 ///
 /// Cost: `labels x later instances` box tests in `double`, at rebuild.
 /// Reported by the harness against criterion 7's budget (Task 7).
-List<TextPatch> classifyTextPatches(
+///
+/// **The oracle.** `classifyTextPatches` is the grid; this is Plan E's loop,
+/// kept so `classify_grid_test.dart` can prove the two return the same list
+/// byte for byte.
+@visibleForTesting
+List<TextPatch> classifyTextPatchesBruteForce(
   Float32List data,
   int instanceCount,
   List<ResidentTextRecord> texts, {
@@ -140,6 +165,174 @@ List<TextPatch> classifyTextPatches(
         TextPatch(textIndex: ti, instances: sub, instanceCount: hits.length));
   }
   return patches;
+}
+
+/// Classifies every label in [texts] against every instance written after
+/// it, in collection space -- the spec's "conservative, box on box" test.
+///
+/// For each label, instances `[instanceIndex, instanceCount)` are tested:
+/// the instance's own points (per kind, Ruling E4), expanded by the kind's
+/// reach (Ruling E5) at the band's **lower** scale bound, meet the label's
+/// box or they do not. A label at least one instance meets is a [TextPatch]
+/// whose sub-buffer is exactly those instances, in order.
+///
+/// **A candidate test, not an ink test.** A stroke through the whitespace
+/// between two glyphs, or a dashed instance whose gap crosses the box, is a
+/// candidate although no pixel of it covers label ink. Over-inclusion is
+/// correct -- `TextCompositor` makes an unneeded patch a no-op -- and its
+/// cost is what criterion 11 measures.
+///
+/// Cost: `labels x later instances` box tests in `double`, at rebuild.
+/// Reported by the harness against criterion 7's budget (Task 7).
+///
+/// **A uniform grid over the labels' union** (Ruling F7). Cell size is the
+/// largest label box; an instance's reach-expanded box is binned into every
+/// cell it touches, or into the overflow list past [kClassifyOverflowCells];
+/// a label tests only the instances in the cells its box touches,
+/// deduplicated by a stamp array, plus the overflow list. Hit indices are
+/// **sorted** so the sub-buffer stays a subsequence of the main buffer in
+/// the main buffer's order -- indices, never the buffer.
+List<TextPatch> classifyTextPatches(
+  Float32List data,
+  int instanceCount,
+  List<ResidentTextRecord> texts, {
+  required double devicePixelRatio,
+  double bandLowerScale = kBandLowerScale,
+  ClassifyStats? stats,
+}) {
+  if (texts.isEmpty) return const <TextPatch>[];
+  final unitsPerDevicePixel = 1.0 / (devicePixelRatio * bandLowerScale);
+
+  // The labels' union, and the largest label box: the cell.
+  var uMinX = double.infinity, uMinY = double.infinity;
+  var uMaxX = double.negativeInfinity, uMaxY = double.negativeInfinity;
+  var cell = 0.0;
+  for (final t in texts) {
+    if (t.boxMinX < uMinX) uMinX = t.boxMinX;
+    if (t.boxMinY < uMinY) uMinY = t.boxMinY;
+    if (t.boxMaxX > uMaxX) uMaxX = t.boxMaxX;
+    if (t.boxMaxY > uMaxY) uMaxY = t.boxMaxY;
+    final w = t.boxMaxX - t.boxMinX, h = t.boxMaxY - t.boxMinY;
+    if (w > cell) cell = w;
+    if (h > cell) cell = h;
+  }
+  if (!(cell > 0)) cell = 1.0;
+  // No more than 256 cells a side: a huge union over tiny labels would
+  // otherwise build a grid nobody can afford at rebuild.
+  final cellW = math.max(cell, (uMaxX - uMinX) / 256);
+  final cellH = math.max(cell, (uMaxY - uMinY) / 256);
+  final nx = math.max(1, ((uMaxX - uMinX) / cellW).ceil());
+  final ny = math.max(1, ((uMaxY - uMinY) / cellH).ceil());
+  if (stats != null) {
+    stats.cellsX = nx;
+    stats.cellsY = ny;
+  }
+  int cellX(double x) => ((x - uMinX) / cellW).floor().clamp(0, nx - 1);
+  int cellY(double y) => ((y - uMinY) / cellH).floor().clamp(0, ny - 1);
+
+  final buckets = List<List<int>>.generate(nx * ny, (_) => <int>[]);
+  final overflow = <int>[];
+  final box = Float64List(4);
+  for (var i = 0; i < instanceCount; i++) {
+    _expandedBox(data, i, unitsPerDevicePixel, box);
+    if (box[2] < uMinX || box[0] > uMaxX || box[3] < uMinY || box[1] > uMaxY) {
+      if (stats != null) stats.skipped++;
+      continue;
+    }
+    final cx0 = cellX(box[0]), cx1 = cellX(box[2]);
+    final cy0 = cellY(box[1]), cy1 = cellY(box[3]);
+    if ((cx1 - cx0 + 1) * (cy1 - cy0 + 1) > kClassifyOverflowCells) {
+      overflow.add(i);
+      if (stats != null) stats.overflow++;
+      continue;
+    }
+    for (var cy = cy0; cy <= cy1; cy++) {
+      for (var cx = cx0; cx <= cx1; cx++) {
+        buckets[cy * nx + cx].add(i);
+      }
+    }
+    if (stats != null) stats.binned++;
+  }
+
+  // Stamp: the 1-based index of the label that last saw instance i. Zero is
+  // "never", so no fill is needed.
+  final stamp = Int32List(instanceCount);
+  final patches = <TextPatch>[];
+  final hits = <int>[];
+  for (var ti = 0; ti < texts.length; ti++) {
+    final t = texts[ti];
+    final mark = ti + 1;
+    hits.clear();
+    final cx0 = cellX(t.boxMinX), cx1 = cellX(t.boxMaxX);
+    final cy0 = cellY(t.boxMinY), cy1 = cellY(t.boxMaxY);
+    for (var cy = cy0; cy <= cy1; cy++) {
+      for (var cx = cx0; cx <= cx1; cx++) {
+        for (final i in buckets[cy * nx + cx]) {
+          if (i < t.instanceIndex || stamp[i] == mark) continue;
+          stamp[i] = mark;
+          if (stats != null) stats.candidatesTested++;
+          if (_reaches(data, i, t, unitsPerDevicePixel)) hits.add(i);
+        }
+      }
+    }
+    for (final i in overflow) {
+      if (i < t.instanceIndex) continue;
+      if (stats != null) stats.candidatesTested++;
+      if (_reaches(data, i, t, unitsPerDevicePixel)) hits.add(i);
+    }
+    if (hits.isEmpty) continue;
+    // Indices, not the buffer: main-buffer order is the draw order.
+    hits.sort();
+    final sub = Float32List(hits.length * kFloatsPerInstance);
+    for (var k = 0; k < hits.length; k++) {
+      sub.setRange(k * kFloatsPerInstance, (k + 1) * kFloatsPerInstance, data,
+          hits[k] * kFloatsPerInstance);
+    }
+    patches.add(
+        TextPatch(textIndex: ti, instances: sub, instanceCount: hits.length));
+  }
+  return patches;
+}
+
+/// Instance [i]'s reach-expanded box into [out] as `minX, minY, maxX, maxY`
+/// -- the same points-per-kind and reach-per-kind as [_reaches] (Rulings
+/// E4, E5), written out rather than shared so [_reaches] stays Plan E's
+/// oracle word for word; `classify_grid_test.dart` proves they agree.
+void _expandedBox(
+    Float32List d, int i, double unitsPerDevicePixel, Float64List out) {
+  final o = i * kFloatsPerInstance;
+  final kind = d[o + InstanceFieldOffset.kind];
+  final half = d[o + InstanceFieldOffset.halfWidth];
+  final int points;
+  final double reachDevice;
+  if (kind < 0.5) {
+    points = 2;
+    reachDevice = half;
+  } else if (kind < 1.5) {
+    points = 3;
+    reachDevice = half * kMiterLimit;
+  } else if (kind < 2.5) {
+    points = 1;
+    reachDevice = half;
+  } else {
+    points = 3;
+    reachDevice = 0;
+  }
+  final reach = reachDevice * unitsPerDevicePixel;
+  var minX = double.infinity, minY = double.infinity;
+  var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+  for (var p = 0; p < points; p++) {
+    final x = d[o + InstanceFieldOffset.x0 + p * 2];
+    final y = d[o + InstanceFieldOffset.y0 + p * 2];
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  out[0] = minX - reach;
+  out[1] = minY - reach;
+  out[2] = maxX + reach;
+  out[3] = maxY + reach;
 }
 
 /// Whether instance [i]'s reach-expanded box meets [t]'s box.
