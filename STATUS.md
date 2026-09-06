@@ -1,7 +1,12 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-01
-**Verified against:** `main` at `a5833b4`. **Plan D (fills), the fourth plan,
+**Last updated:** 2026-09-06
+**Verified against:** `main` at `a5833b4`, plus branch
+`plan-f/rebuild-and-band` at Plan F's Task 10 (worktree
+`.worktrees/plan-f-rebuild-and-band`). **Plan F is IMPLEMENTED and NOT
+MERGED** — exit gate 7 of 14, the window OWED, the merge the human's
+decision. See [Plan F](#plan-f--rebuild-triggers-and-the-band-implemented-on-plan-frebuild-and-band-not-merged)
+and [Resume here](#resume-here). **Plan D (fills), the fourth plan,
 is MERGED**: it ran on `plan-d/fills`, cut from `main` at `bde9196`, nine
 tasks at `bde9196..eabca9e` with its ledger archived at `27b2122`, merged
 `--no-ff` at `de962bd`, branch deleted. The two commits before it on `main`
@@ -66,6 +71,87 @@ method and both reproduction commands.
 Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
 Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
 Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
+
+---
+
+## Plan F — rebuild triggers and the band (IMPLEMENTED on `plan-f/rebuild-and-band`, **NOT merged**)
+
+**Plan F gave the GPU-resident backend its rebuild triggers, the watermark
+band, and `DraftCanvas`'s real `residentGpu` path** — the sixth of the design
+spec's seven plans, ten tasks, `c5b8ee8..HEAD` on branch
+`plan-f/rebuild-and-band`, worktree `.worktrees/plan-f-rebuild-and-band`.
+**The merge is the human's decision at the finish; nothing has been merged.**
+Spec:
+[2026-08-29-gpu-resident-render-backend-design.md](docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md)
+(revision 5, `d2095e7`), the trigger table, the collection and watermark
+sections. Plan:
+[2026-09-05-gpu-backend-plan-f-rebuild-and-band.md](docs/superpowers/plans/2026-09-05-gpu-backend-plan-f-rebuild-and-band.md).
+Results:
+[2026-09-05-plan-f-results.md](docs/superpowers/notes/2026-09-05-plan-f-results.md).
+Mutation log:
+[plan-f-mutation-log.md](docs/superpowers/notes/plan-f-mutation-log.md) —
+fourteen named mutations plus a replacement witness, 14 killed, two declared
+equivalent and fired to record their green runs, **zero true survivors**.
+Raw device and suite logs:
+[2026-09-05-plan-f-raw/](docs/superpowers/notes/2026-09-05-plan-f-raw/).
+
+**Spec open question 3 is answered and struck** (Ruling F1): **the reference
+scale is the live camera's scale at the moment of the rebuild — there is no
+reference-scale constant.** Any fixed parameter puts some working zoom
+permanently outside its band; the live scale never does.
+
+**The headline is a design failure the spec itself named in advance.**
+Criterion 2 asks for the widest scale ratio at which criterion 1 still holds,
+and calls a band narrower than 2× a design failure. Measured, it is
+**`[1.0, 1.0]` = 1.00×**, and it is not a fact about band width at all:
+criterion 1 on a curve corpus is a **step function at the tessellation
+threshold**, not a drift curve — a 0.1% zoom is pixel-exact and a **1% zoom
+already fails**. The only ratio at which two independently-correct
+tessellations of a curve coincide is exactly 1.0. So no choice of constants
+widens it. **Ruling F6-a**: the constants stay at `0.5 / 2.0`, the failure is
+recorded as the spec's own, and it is **decomposed** into its two frozen
+watermark rows rather than reported as one opaque number — a straight-only
+control corpus reads **`[0.25, 4.0]` = 16×** (the affine path is bit-exact
+wherever no decision is frozen), the text row limits to `[0.35, 1.0]`, the
+curve row to `[1.0, 1.0]`. The text row is proven by **one changed argument**:
+at ratio 1.4 the same fixture reads `uncovered=153` FAIL with the
+level-of-detail cull on and `agreement=1.00000` PASS with it off.
+
+### What Plan F measured
+
+| quantity | value |
+|---|---|
+| criterion 2 — the reported band | **`[1.0, 1.0]` = 1.00×** against `hi/lo ≥ 2` — **the design failure the spec names**, decomposed (straight control 16×; text-lod `[0.35, 1.0]`; curves `[1.0, 1.0]`). Constants **unchanged** at 0.5 / 2.0 |
+| criterion 7 — the ten trigger rebuilds, median of three | **MISS, 6 of 10 over 16.67 ms.** Worst `CommandApplied` **22.64 ms** (136% of budget); narrowest miss a table edit at **16.70** (+0.03); cold first rebuild **25.3 ms**, reported not gated. Against Plan C's 115 ms rebuild this is a **5.1× reduction** |
+| criterion 7 — `classify`, Ruling F7's uniform grid | **6.7 ms against Plan E's 27.4 ms on the identical corpus — 4.1× faster**; 164% of the rebuild budget → **40%**. The grid is the single biggest win, and beat `flutter test`'s 1.9× prediction on the device |
+| where the rebuild now goes | `walk` **8.0–12.9 ms** is the dominant term; `upload` **1.26–1.65 ms**, flat. **1.5–2.8 ms of every *edit*-triggered rebuild is an uncounted `document.extents` recomputation** (the cache a mutation invalidates), inside the budget and outside every printed sub-timer |
+| criterion 8 — arm D (`DraftCanvas`) p50, median of three | **MISS, 5 of 6 cells** — hold 0.09/3.57, pan 2.23/2.95, zoom 2.17/2.91 against ≤ 1.2 build / ≤ 2.0 raster |
+| **the widget path's own cost (Ruling F9's control)** | **≤ +0.37 ms anywhere, ≤ +15%.** Every criterion-8 miss is inherited from arm C — Plan E's text-compositor cost — and **none of it comes from putting the backend behind `DraftCanvas`** |
+| criterion 9 — arm D p95 raster | **MISS on all three**: 6.57 / 4.75 / 7.36 against ≤ 3.0. Arm C misses too (5.98 / 4.05 / 3.60), so this is inherited as well |
+| criterion 9 — the band-exit stale interval | **`staleFrames = 1`** (`exitStep=36`, `landedAtStep=37`), reported without a threshold. **Leaving the band costs one stale frame, not a blank one** — the design's intent, measured |
+| criterion 6 — resident buffer at a rebuilt scale | **MISS at 2.5× fit: 9.57 MB against 8 MB** (153,215 instances, +43% over fit). **PASS at fit: 6.79 MB**, 1.21 MB margin. The memory price of Ruling F1's live-scale collection |
+| criterion 5 — the frame-path allocation probe | **UNEVALUABLE** (Ruling F8's pre-committed outcome, never faked): `SocketException: Connection failed (OS Error: Operation not permitted, errno = 1), address = 127.0.0.1, port = 63309`. None of the fifteen class lines printed. Diagnosed as the macOS App Sandbox refusing the app an outbound loopback connection — invariant 1 still has **no device measurement** |
+| criterion 12 — both zoom defects | **PASS as amended (Ruling F13-a).** Tiled reproduces at the probe's exact numbers (zoom-out peak **5,730**, **4,893** one frame after; zoom-in **25,275 / 16,681 / 0**); resident **`uncovered ≤ 2`** per frame, 0 on 14 of 18, `rebuilds == 1` out and `0` in. The spec's literal zero is met within float32-vs-float64 tie jitter, with the numbers |
+| mutations | **14 killed + M-F10′; M-F10 and E-F1 equivalent, fired and recorded; zero true survivors** |
+| the window | **all four Plan F checks OWED — not looked at by a human**; Plan E's fifth also still OWED |
+
+**Exit gate: 7 of 14.** Five measured MISSes (criteria 2, 7, 8, 9 and 6), each
+recorded with its number and **no threshold moved**; one UNEVALUABLE
+(criterion 5) with the refusal quoted; one OWED (the window). Full account:
+[2026-09-05-plan-f-results.md](docs/superpowers/notes/2026-09-05-plan-f-results.md).
+
+**Correcting a number in the record while reading the field that proves it:**
+`ResidentGeometry.byteLength` already *includes* the patch sub-buffers, and the
+harness computes `subBuffer` as a component of the printed `buffer=`, not as an
+addend. Plan E's note reported criterion 6 as "6.79 + 0.27 = 7.06 MB"; the
+correct figure is **6.79 MB**. Confirmed arithmetically on this run
+(106,852 × 16 floats × 4 B = 6.52 MB, exactly what Plan E's `DRAW_TEXT=false`
+control printed with `patches=0`). The verdict does not change — the margin is
+wider than recorded.
+
+**Three gates green on the branch**, all nine commands exit 0:
+`jet_cad_2d_flutter` **664** (1 pre-existing skip), `jet_cad_2d` **798**
+(unchanged — Plan F touches nothing there), `dev_harness_2d` **82**.
 
 ---
 
@@ -760,13 +846,55 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Plan E (the text split) is DONE, all nine tasks, `8dde4fb..4af35bf` on
-merged into `main` at `4921619` (final review clean, three gates green on the merged tree, branch and worktree deleted).** Its exit gate is **8 of 10**:
-criterion 11 (hold + pan text-pass difference ≤ 0.5 ms) **MISSES** —
-measured **+1.79 ms on hold, +4.22 ms on pan** (arm C, median of three,
-87 patches on the corpus), both well over the budget — and criterion 9 (a
-human looks at the window) is **OWED**, not simulated. The other eight
-pass, including the buffer (7.06 MB against 8 MB) and all fourteen
+**Plan F (rebuild triggers and the band) is IMPLEMENTED, all ten tasks,
+`c5b8ee8..HEAD` on branch `plan-f/rebuild-and-band`, worktree
+`.worktrees/plan-f-rebuild-and-band` — and it is NOT merged. It is awaiting
+two things from the human: a look at the window, and the merge decision.**
+Neither is the controller's to make. Its exit gate is **7 of 14**, with five
+measured MISSes, one UNEVALUABLE and one OWED, and **no threshold moved to
+make anything pass**:
+
+- **Criterion 2 — the band is `[1.0, 1.0]` = 1.00×** against `hi/lo ≥ 2`:
+  **the design failure the spec itself names**, recorded as one and
+  decomposed into its two frozen watermark rows. Constants unchanged at
+  `0.5 / 2.0` (Ruling F6-a). **This is a design decision waiting for the
+  human**: either unfreeze the two rows (re-tessellate curves and re-evaluate
+  the text cull per frame in the shader) or accept a 1.00× band and rebuild
+  on every scale change.
+- **Criterion 7 — 6 of 10 triggers over 16.67 ms**, worst `CommandApplied` at
+  **22.64 ms**. But `classify` fell from Plan E's **27.4 ms to 6.7 ms**
+  (4.1×, Ruling F7's uniform grid) and the whole rebuild is **5.1× faster
+  than Plan C's 115 ms**. `walk` is now the dominant term, and **1.5–2.8 ms
+  of every edit-triggered rebuild is an uncounted `document.extents`
+  recomputation**.
+- **Criteria 8 and 9 MISS, and the control proves they are not the widget's
+  fault**: the arm C → arm D difference is **≤ +0.37 ms anywhere** (≤ +15%).
+  Every miss is inherited from Plan E's already-recorded text-compositor cost.
+- **Criterion 6 MISSes at a rebuilt scale** — 9.57 MB at 2.5× fit against
+  8 MB — and passes at fit (6.79 MB). That is the memory price of Ruling F1.
+- **Criterion 5 is UNEVALUABLE**, Ruling F8's pre-committed outcome, never
+  faked: the harness's VM-service probe was refused an outbound loopback
+  connection (`SocketException ... Operation not permitted, errno = 1`),
+  diagnosed as the macOS App Sandbox. **Invariant 1 has no device
+  measurement.**
+- **Criterion 12 PASSES** as amended (Ruling F13-a): both zoom defects
+  reproduce on tiles at the probe's exact numbers and are absent on the
+  resident arm.
+- **Spec open question 3 is answered and struck** (Ruling F1): the reference
+  scale is the live camera's scale at the moment of the rebuild — no
+  constant.
+
+Full account:
+[2026-09-05-plan-f-results.md](docs/superpowers/notes/2026-09-05-plan-f-results.md).
+Three gates green on the branch, all nine commands exit 0 (`jet_cad_2d_flutter`
+664, `jet_cad_2d` 798, `dev_harness_2d` 82).
+
+**Plan E (the text split) is DONE and merged into `main` at `4921619`** (nine
+tasks, `8dde4fb..4af35bf`, branch and worktree deleted). Its exit gate is
+**8 of 10**: criterion 11 (hold + pan text-pass difference ≤ 0.5 ms)
+**MISSES** — measured **+1.79 ms on hold, +4.22 ms on pan** (arm C, median of
+three, 87 patches) — and criterion 9 (a human looks at the window) is still
+one check short. The other eight pass, including the buffer and all fourteen
 mutations (14/14 killed, zero survivors). Full account:
 [2026-09-04-plan-e-results.md](docs/superpowers/notes/2026-09-04-plan-e-results.md).
 **Task 9's own device run found a real defect before recording any
@@ -775,17 +903,41 @@ present (`A command encoder is already encoding to this command buffer` —
 `GpuDrawBackend.render` opened a second Metal render-pass encoder on one
 command buffer while the first was still open), fixed at `4af35bf`
 (Ruling R6-3: one `CommandBuffer` per render pass) and reproduced clean on
-the fixed tree before any criterion-11 number was taken — see the results
-note's "What this plan's own premises measured false" §1.
+the fixed tree before any criterion-11 number was taken. **One number in that
+note is wrong and is corrected under [Plan F](#plan-f--rebuild-triggers-and-the-band-implemented-on-plan-frebuild-and-band-not-merged)**:
+criterion 6 read "6.79 + 0.27 = 7.06 MB", but `byteLength` already includes
+the sub-buffer, so the figure is **6.79 MB** — a wider margin, same verdict.
 
-**The window-check debt is down to ONE check.** On 2026-09-05 a human
-looked at the running window — the command below, `SPIKE_FILL_SCALE=20`,
-`main` at `b5b6131`, no crash, 165 labels, 87 patches — with all nineteen
-checks in front of them as an enumerated list, and chose "all seen, no
-problem" over "name the exceptions". That discharges Plan B's four (owed
-since `72b162d`), Plan C's five (owed since `18330a9`), Plan D's five (owed
-since `de962bd`) and Plan E's checks 1–4. It is a blanket verdict over an
-enumerated list, recorded as exactly that in
+**The window-check debt is FIVE checks: Plan F's four, and Plan E's fifth.**
+Nothing was looked at in the Plan F session — the controller cannot see a
+window and did not simulate one. **Plan F's four, all OWED:**
+
+1. **Arm D draws the same picture as arm C** — watch the switch between the
+   two in the spike; nothing moves, nothing appears, nothing vanishes.
+2. **The probe line** — during arm D's `CommandApplied` rebuild a heavy
+   diagonal appears across the floor's centre; it is gone after
+   `CommandUndone`, back after `CommandRedone`, and still there after
+   `DocumentLoaded` and `DocumentPurged`.
+3. **A band exit sharpens without a blank** — in the main view, zoom in past
+   2× in one gesture: the picture stays drawn on every frame, and within a
+   few frames the arcs and dashes re-tessellate at the new scale. No white
+   frame, no flicker. (Measured companion, which is *not* the check:
+   `staleFrames = 1`, no blank frame in the band-exit window's 38 frames.)
+4. **A pan reveals no empty edge** — in the main view, at a working zoom
+   (4×–8×), pan the drawing off where it was fitted and keep going; the
+   spec's *"33 logical pixels into the first pan"* defect would show as a
+   hard edge past which nothing is drawn.
+
+Run them through the `2d: main view -- BACKEND=residentGpu` launch entry and
+the Plan F spike entry, from the worktree.
+
+**On 2026-09-05 a human looked at the running window** — the command below,
+`SPIKE_FILL_SCALE=20`, `main` at `b5b6131`, no crash, 165 labels, 87 patches —
+with all nineteen checks in front of them as an enumerated list, and chose
+"all seen, no problem" over "name the exceptions". That discharges Plan B's
+four (owed since `72b162d`), Plan C's five (owed since `18330a9`), Plan D's
+five (owed since `de962bd`) and Plan E's checks 1–4. It is a blanket verdict
+over an enumerated list, recorded as exactly that in
 [Plan E's results note](docs/superpowers/notes/2026-09-04-plan-e-results.md#the-window--eighteen-of-nineteen-checks-discharged-2026-09-05-one-still-owed).
 **Still OWED: Plan E's fifth check** — `DRAW_TEXT=false` shows the same
 drawing with no labels and no patches. Its control run WAS made the same
@@ -810,10 +962,44 @@ DRAW_TEXT=true)"* and its `DRAW_TEXT=false` pair — both entries now carry
 `--dart-define=SPIKE_FILLS=true` (final-review fix wave), so either one runs
 the same corpus the command above does.
 
-**Plan F is next**: rebuild triggers, the band, and `DraftCanvas`'s
-`residentGpu` path — which Plan A left rendering as `vertices` and now, for
-the first time, has a real `GpuDrawBackend.paint` to call once Plan F wires
-it in. Plan E's spec section was rewritten before a line of it was planned
+**~~Plan F is next~~ — Plan F is done and on its branch (above). PLAN G (WEB)
+IS NEXT**, the seventh and last of the design spec's plans, and it inherits:
+
+- **Web itself — criterion 13, and spec open questions 2, 4 and 5.** Nothing
+  has run on web at all: the web **timing instrument** (question 2, why no web
+  timing criterion is in the gate), the **warm rebuild cost on web**
+  (question 4, which Decision 1 needs and no measurement separates from
+  one-time setup), and **Skwasm** (question 5, named by criterion 13 and never
+  run).
+- **Criterion 5, UNEVALUABLE and diagnosed.** The harness's VM-service
+  allocation probe is refused an outbound loopback connection by the macOS App
+  Sandbox (`EPERM` on connect, while the service is reachable from *outside*
+  the app — the port is in the run's own banner). The fix is very likely one
+  entitlement in `apps/dev_harness_2d/macos/Runner/*.entitlements`; Task 10
+  does not edit `apps/**`. **Invariant 1's "new mechanism" still has no device
+  measurement.**
+- **Criterion 7's MISS, with its lever named.** Six of ten triggers over
+  16.67 ms, worst 22.64. `classify` is no longer the problem (6.7 ms, 40% of
+  budget, down from Plan E's 27.4). `walk` is (8.0–12.9 ms), and **1.5–2.8 ms
+  of every edit-triggered rebuild is an uncounted `document.extents`
+  recomputation** — the cache a document mutation invalidates, inside the
+  budget and outside every printed sub-timer.
+- **Criterion 6's MISS at a rebuilt scale** — 9.57 MB at 2.5× fit against an
+  8 MB budget (+43% instances over fit), a direct consequence of Ruling F1's
+  live-scale collection.
+- **Criteria 8 and 9's MISSes, which are Plan E's, not the widget's** — the
+  arm C → arm D difference is ≤ +0.37 ms everywhere. The cost is the text
+  compositor's 87–92 per-frame patch passes, already Plan E's criterion-11
+  MISS.
+- **The criterion-2 design failure as a decision, not a task** (above).
+- **R6-2 stays parked** (Ruling F10), now with no new evidence either way,
+  because the probe that would have produced it is UNEVALUABLE.
+- **Harness minors**: `submits` reads negative across a backend swap (the
+  band-exit line printed `submits=-1` — a counter-identity artifact, not a
+  render failure); the rebuild line's `walk + classify + upload` does not
+  partition `total`.
+
+Plan E's spec section was rewritten before a line of it was planned
 — 2026-09-04, spec revision 5. Revision 4 counted the split in *draw
 calls*; a Canvas text draw can only land between two *images*, and
 `asImage()` of one texture shows that texture's final contents however many
@@ -830,24 +1016,31 @@ folded in at `d2095e7`. Plan:
 [2026-09-04-gpu-backend-plan-e-text-patches.md](docs/superpowers/plans/2026-09-04-gpu-backend-plan-e-text-patches.md)
 — nine tasks, ten rulings, fourteen mutations, no shader change.
 
-**Plan F inherits, with numbers** — the final whole-branch review's minors,
-left as levers rather than fixed blind in this wave (Ruling RF-1):
+**What Plan F inherited from Plan E (the final whole-branch review's minors,
+left as levers rather than fixed blind in that wave, Ruling RF-1) — and what
+became of each:**
 
-- `classify` costs **27.4 ms** at this task's device corpus (`labels ×
-  later instances` box tests, no pruning at all) — 164% of the 16.67 ms
-  rebuild budget on its own; bucketing by y or an early-reject on a device
-  box are the cheap levers.
+- `classify` cost **27.4 ms**, 164% of the 16.67 ms rebuild budget on its own;
+  bucketing or an early-reject were named as the cheap levers. **DONE** —
+  Ruling F7's uniform grid took it to **6.7 ms on the device, 4.1× faster**,
+  40% of the budget, with the brute force kept as the oracle in a differential.
 - `TextCompositor.paint` walks all **165** resident labels every frame,
-  off-viewport ones included; viewport rejection is the cheapest move
-  against criterion 11's MISS.
-- R6-2 (parked, not fixed): **1 + P** `ui.Image` handles churn per frame,
-  never disposed — `P = 87` measured on this task's corpus.
-- The frozen-culling divergence the four-scale differential gate leaves
-  ungated at `minTextCapPixels: 0` (Task 5's corpus never sets it
-  otherwise).
-- The spec's eighth text mutation — "leave the resident text list stale
-  across a rebuild" — is Plan F's to fire; nothing in Plan E's own rebuild
-  path can trigger it.
+  off-viewport ones included; viewport rejection was named as the cheapest move
+  against criterion 11's MISS. **NOT taken** — still open for Plan G, and it is
+  what criteria 8 and 9 are now paying for (87–92 patch passes per frame).
+- R6-2 (parked, not fixed): **1 + P** `ui.Image` handles churn per frame, never
+  disposed — `P = 87`. **STILL PARKED** (Ruling F10), and the allocation probe
+  that would have produced the deciding evidence came back UNEVALUABLE.
+- The frozen-culling divergence the four-scale differential gate left ungated at
+  `minTextCapPixels: 0`. **MEASURED** — it is one half of criterion 2's
+  decomposition, and the argument that proves it: cull on `uncovered=153` FAIL,
+  cull off `agreement=1.00000` PASS, same fixture, same ratio.
+- The spec's eighth text mutation — "leave the resident text list stale across a
+  rebuild" — was Plan F's to fire. **FIRED and KILLED** (M-F4: `texts` still
+  contains `'COVERED'` and lacks `'EDITED'`).
+- The two RF-1 reuses (a mutable `PatchRegion`, a reused uniform `ByteData`).
+  **DONE** in Task 6, witnessed by M-F12 and M-F14 (`identical(...)` false), but
+  **their frame-path effect is unmeasured** — that was criterion 5's job.
 
 **The fourteen older checks — discharged 2026-09-05.** Two looks were
 taken, and the record keeps them apart. On 2026-09-01 a human looked at the

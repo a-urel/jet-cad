@@ -751,7 +751,11 @@ rule stated under Budgets.
    is perceptual and no measurement settles it.
 2. **The web timing instrument.** No web timing criterion is in the gate because
    none can be stated. Criterion 13 is correctness-only.
-3. **The reference scale**, and the band that follows from it (criterion 2).
+3. ~~**The reference scale**, and the band that follows from it (criterion 2).~~
+   **Answered by Plan F** (Ruling F1): the reference scale is the live
+   camera's scale at the moment of the rebuild -- no constant -- and the
+   band is the measured run recorded in
+   [2026-09-05-plan-f-results.md](../notes/2026-09-05-plan-f-results.md).
 4. **Warm rebuild cost on web**, which Decision 1 needs and no measurement
    separates from one-time setup.
 5. **Skwasm.** Criterion 13 names it and nothing has been run there.

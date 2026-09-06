@@ -1,0 +1,106 @@
+Resolving dependencies in `/Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band`...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (107.0.0 available)
+  analyzer 13.3.0 (14.3.0 available)
+  code_assets 1.2.1 (2.0.0 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  objective_c 9.5.0 (9.6.0 available)
+  package_config 2.2.0 (3.0.0 available)
+  shadcn_ui 0.55.1 (0.56.3 available)
+  test 1.31.1 (1.32.0 available)
+  test_api 0.7.12 (0.7.14 available)
+  test_core 0.6.18 (0.6.20 available)
+Got dependencies in `/Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band`!
+10 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart
+00:00 +0: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/zoom_defect_test.dart: zoom out, twelve steps of 0.94 the tiled arm leaves ink uncovered during the gesture and one frame after it
+00:00 +0: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart: straight geometry meets criterion 1 at every ratio but the identity, where two exact rasterisations tie
+BAND straight@fit ratio=0.25 PASS CompositedAgreement(agreement=1.00000 withinTwo=2399 union=2399 overEight=0 uncovered=0 referenceInk=2399 patches=0)
+BAND straight@fit ratio=0.35 PASS CompositedAgreement(agreement=1.00000 withinTwo=3392 union=3392 overEight=0 uncovered=0 referenceInk=3392 patches=0)
+BAND straight@fit ratio=0.5 PASS CompositedAgreement(agreement=1.00000 withinTwo=4876 union=4876 overEight=0 uncovered=0 referenceInk=4876 patches=0)
+BAND straight@fit ratio=0.7 PASS CompositedAgreement(agreement=1.00000 withinTwo=6844 union=6844 overEight=0 uncovered=0 referenceInk=6844 patches=0)
+BAND straight@fit ratio=1.0 FAIL CompositedAgreement(agreement=0.99918 withinTwo=9784 union=9792 overEight=8 uncovered=8 referenceInk=9792 patches=0)
+BAND straight@fit ratio=1.4 PASS CompositedAgreement(agreement=1.00000 withinTwo=10244 union=10244 overEight=0 uncovered=0 referenceInk=10244 patches=0)
+BAND straight@fit ratio=2.0 PASS CompositedAgreement(agreement=1.00000 withinTwo=8270 union=8270 overEight=0 uncovered=0 referenceInk=8270 patches=0)
+BAND straight@fit ratio=2.8 PASS CompositedAgreement(agreement=1.00000 withinTwo=6584 union=6584 overEight=0 uncovered=0 referenceInk=6584 patches=0)
+BAND straight@fit ratio=4.0 PASS CompositedAgreement(agreement=1.00000 withinTwo=3992 union=3992 overEight=0 uncovered=0 referenceInk=3992 patches=0)
+BAND straight@fit run=[0.25, 4.0] = 16.00x
+00:00 +1: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/zoom_defect_test.dart: zoom out, twelve steps of 0.94 the tiled arm leaves ink uncovered during the gesture and one frame after it
+ZOOM-OUT tiled uncovered: gesture=[1656, 2833, 3586, 2949, 2330, 4322, 4375, 4204, 4456, 2836, 5730, 4893] settle=[4893, 0, 0, 0, 0, 0]
+00:00 +2: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart: text with level of detail on: exact inside [0.5, 1.0], and the 1.4 failure is the frozen cull by construction
+BAND text-lod@fit ratio=0.25 FAIL CompositedAgreement(agreement=0.93919 withinTwo=834 union=888 overEight=45 uncovered=0 referenceInk=835 patches=2)
+BAND text-lod@fit ratio=0.35 PASS CompositedAgreement(agreement=1.00000 withinTwo=1364 union=1364 overEight=0 uncovered=0 referenceInk=1364 patches=2)
+BAND text-lod@fit ratio=0.5 PASS CompositedAgreement(agreement=1.00000 withinTwo=2356 union=2356 overEight=0 uncovered=0 referenceInk=2356 patches=2)
+BAND text-lod@fit ratio=0.7 PASS CompositedAgreement(agreement=1.00000 withinTwo=4048 union=4048 overEight=0 uncovered=0 referenceInk=4048 patches=2)
+BAND text-lod@fit ratio=1.0 PASS CompositedAgreement(agreement=1.00000 withinTwo=7398 union=7398 overEight=0 uncovered=0 referenceInk=7398 patches=2)
+BAND text-lod@fit ratio=1.4 FAIL CompositedAgreement(agreement=0.98879 withinTwo=13315 union=13466 overEight=148 uncovered=153 referenceInk=13466 patches=2)
+BAND text-lod@fit ratio=2.0 FAIL CompositedAgreement(agreement=0.98671 withinTwo=21600 union=21891 overEight=289 uncovered=293 referenceInk=21891 patches=2)
+BAND text-lod@fit ratio=2.8 FAIL CompositedAgreement(agreement=0.97226 withinTwo=19100 union=19645 overEight=540 uncovered=545 referenceInk=19645 patches=2)
+BAND text-lod@fit ratio=4.0 FAIL CompositedAgreement(agreement=0.53611 withinTwo=1247 union=2326 overEight=1071 uncovered=1081 referenceInk=2326 patches=1)
+BAND text-nolod@fit ratio=1.4 PASS CompositedAgreement(agreement=1.00000 withinTwo=13466 union=13466 overEight=0 uncovered=0 referenceInk=13466 patches=2)
+00:00 +3: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/zoom_defect_test.dart: zoom out, twelve steps of 0.94 the resident arm leaves nothing uncovered at any frame
+00:00 +3: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart: solid curves at fit: exact at 1.0, and the chord-count step is real
+BAND curves@fit ratio=0.25 FAIL CompositedAgreement(agreement=0.90605 withinTwo=434 union=479 overEight=45 uncovered=23 referenceInk=457 patches=0)
+BAND curves@fit ratio=0.35 FAIL CompositedAgreement(agreement=0.89680 withinTwo=617 union=688 overEight=71 uncovered=38 referenceInk=655 patches=0)
+BAND curves@fit ratio=0.5 FAIL CompositedAgreement(agreement=0.92731 withinTwo=893 union=963 overEight=70 uncovered=41 referenceInk=934 patches=0)
+BAND curves@fit ratio=0.7 FAIL CompositedAgreement(agreement=0.93443 withinTwo=1254 union=1342 overEight=88 uncovered=47 referenceInk=1301 patches=0)
+BAND curves@fit ratio=1.0 PASS CompositedAgreement(agreement=1.00000 withinTwo=1873 union=1873 overEight=0 uncovered=0 referenceInk=1873 patches=0)
+00:00 +3: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/zoom_defect_test.dart: zoom out, twelve steps of 0.94 the resident arm leaves nothing uncovered at any frame
+ZOOM-OUT resident uncovered=[0, 0, 2, 2, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0] rebuilds=1 stale=1
+ZOOM-OUT resident frame 0: CompositedAgreement(agreement=1.00000 withinTwo=20410 union=20410 overEight=0 uncovered=0 referenceInk=20410 patches=0)
+00:00 +4: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart: solid curves at fit: exact at 1.0, and the chord-count step is real
+BAND curves@fit ratio=1.4 FAIL CompositedAgreement(agreement=0.90128 withinTwo=2182 union=2421 overEight=239 uncovered=115 referenceInk=2297 patches=0)
+BAND curves@fit ratio=2.0 FAIL CompositedAgreement(agreement=0.84739 withinTwo=1477 union=1743 overEight=266 uncovered=140 referenceInk=1617 patches=0)
+BAND curves@fit ratio=2.8 FAIL CompositedAgreement(agreement=0.82645 withinTwo=1381 union=1671 overEight=290 uncovered=137 referenceInk=1518 patches=0)
+BAND curves@fit ratio=4.0 FAIL CompositedAgreement(agreement=0.80822 withinTwo=767 union=949 overEight=182 uncovered=90 referenceInk=857 patches=0)
+BAND curves@fit run=[1.0, 1.0] = 1.00x
+00:00 +5: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/zoom_defect_test.dart: zoom in, twelve steps of 1.02 the tiled arm shows the wrong resolution over the settle
+00:00 +5: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart: solid curves at a working zoom (8x): Ruling F2's precision, measured
+BAND curves@8x ratio=0.25 FAIL CompositedAgreement(agreement=0.89142 withinTwo=1527 union=1713 overEight=186 uncovered=90 referenceInk=1617 patches=0)
+BAND curves@8x ratio=0.35 FAIL CompositedAgreement(agreement=0.92303 withinTwo=1463 union=1585 overEight=122 uncovered=55 referenceInk=1518 patches=0)
+BAND curves@8x ratio=0.5 FAIL CompositedAgreement(agreement=0.96441 withinTwo=840 union=871 overEight=31 uncovered=17 referenceInk=857 patches=0)
+BAND curves@8x ratio=0.7 PASS CompositedAgreement(agreement=1.00000 withinTwo=569 union=569 overEight=0 uncovered=0 referenceInk=569 patches=0)
+BAND curves@8x ratio=1.0 FAIL CompositedAgreement(agreement=0.98747 withinTwo=473 union=479 overEight=6 uncovered=0 referenceInk=473 patches=0)
+BAND curves@8x ratio=1.4 PASS CompositedAgreement(agreement=1.00000 withinTwo=497 union=497 overEight=0 uncovered=0 referenceInk=497 patches=0)
+BAND curves@8x ratio=2.0 PASS CompositedAgreement(agreement=1.00000 withinTwo=248 union=248 overEight=0 uncovered=0 referenceInk=248 patches=0)
+BAND curves@8x ratio=2.8 FAIL CompositedAgreement(agreement=1.00000 withinTwo=0 union=0 overEight=0 uncovered=0 referenceInk=0 patches=0)
+BAND curves@8x ratio=4.0 FAIL CompositedAgreement(agreement=1.00000 withinTwo=0 union=0 overEight=0 uncovered=0 referenceInk=0 patches=0)
+00:00 +6: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/zoom_defect_test.dart: zoom in, twelve steps of 1.02 the tiled arm shows the wrong resolution over the settle
+00:00 +6: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart: the reported band is the intersection of the passing runs
+BAND straight@fit ratio=0.25 PASS CompositedAgreement(agreement=1.00000 withinTwo=2399 union=2399 overEight=0 uncovered=0 referenceInk=2399 patches=0)
+BAND straight@fit ratio=0.35 PASS CompositedAgreement(agreement=1.00000 withinTwo=3392 union=3392 overEight=0 uncovered=0 referenceInk=3392 patches=0)
+BAND straight@fit ratio=0.5 PASS CompositedAgreement(agreement=1.00000 withinTwo=4876 union=4876 overEight=0 uncovered=0 referenceInk=4876 patches=0)
+BAND straight@fit ratio=0.7 PASS CompositedAgreement(agreement=1.00000 withinTwo=6844 union=6844 overEight=0 uncovered=0 referenceInk=6844 patches=0)
+BAND straight@fit ratio=1.0 FAIL CompositedAgreement(agreement=0.99918 withinTwo=9784 union=9792 overEight=8 uncovered=8 referenceInk=9792 patches=0)
+BAND straight@fit ratio=1.4 PASS CompositedAgreement(agreement=1.00000 withinTwo=10244 union=10244 overEight=0 uncovered=0 referenceInk=10244 patches=0)
+BAND straight@fit ratio=2.0 PASS CompositedAgreement(agreement=1.00000 withinTwo=8270 union=8270 overEight=0 uncovered=0 referenceInk=8270 patches=0)
+BAND straight@fit ratio=2.8 PASS CompositedAgreement(agreement=1.00000 withinTwo=6584 union=6584 overEight=0 uncovered=0 referenceInk=6584 patches=0)
+BAND straight@fit ratio=4.0 PASS CompositedAgreement(agreement=1.00000 withinTwo=3992 union=3992 overEight=0 uncovered=0 referenceInk=3992 patches=0)
+BAND straight@fit run=[0.25, 4.0] = 16.00x
+BAND text-lod@fit ratio=0.25 FAIL CompositedAgreement(agreement=0.93919 withinTwo=834 union=888 overEight=45 uncovered=0 referenceInk=835 patches=2)
+BAND text-lod@fit ratio=0.35 PASS CompositedAgreement(agreement=1.00000 withinTwo=1364 union=1364 overEight=0 uncovered=0 referenceInk=1364 patches=2)
+BAND text-lod@fit ratio=0.5 PASS CompositedAgreement(agreement=1.00000 withinTwo=2356 union=2356 overEight=0 uncovered=0 referenceInk=2356 patches=2)
+BAND text-lod@fit ratio=0.7 PASS CompositedAgreement(agreement=1.00000 withinTwo=4048 union=4048 overEight=0 uncovered=0 referenceInk=4048 patches=2)
+BAND text-lod@fit ratio=1.0 PASS CompositedAgreement(agreement=1.00000 withinTwo=7398 union=7398 overEight=0 uncovered=0 referenceInk=7398 patches=2)
+00:00 +6: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/zoom_defect_test.dart: zoom in, twelve steps of 1.02 the tiled arm shows the wrong resolution over the settle
+ZOOM-IN tiled differing over the settle: [25275, 16681, 0, 0, 0, 0]
+00:00 +7: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart: the reported band is the intersection of the passing runs
+BAND text-lod@fit ratio=1.4 FAIL CompositedAgreement(agreement=0.98879 withinTwo=13315 union=13466 overEight=148 uncovered=153 referenceInk=13466 patches=2)
+BAND text-lod@fit ratio=2.0 FAIL CompositedAgreement(agreement=0.98671 withinTwo=21600 union=21891 overEight=289 uncovered=293 referenceInk=21891 patches=2)
+BAND text-lod@fit ratio=2.8 FAIL CompositedAgreement(agreement=0.97226 withinTwo=19100 union=19645 overEight=540 uncovered=545 referenceInk=19645 patches=2)
+BAND text-lod@fit ratio=4.0 FAIL CompositedAgreement(agreement=0.53611 withinTwo=1247 union=2326 overEight=1071 uncovered=1081 referenceInk=2326 patches=1)
+BAND text-lod@fit run=[0.35, 1.0] = 2.86x
+BAND curves@fit ratio=0.25 FAIL CompositedAgreement(agreement=0.90605 withinTwo=434 union=479 overEight=45 uncovered=23 referenceInk=457 patches=0)
+BAND curves@fit ratio=0.35 FAIL CompositedAgreement(agreement=0.89680 withinTwo=617 union=688 overEight=71 uncovered=38 referenceInk=655 patches=0)
+BAND curves@fit ratio=0.5 FAIL CompositedAgreement(agreement=0.92731 withinTwo=893 union=963 overEight=70 uncovered=41 referenceInk=934 patches=0)
+BAND curves@fit ratio=0.7 FAIL CompositedAgreement(agreement=0.93443 withinTwo=1254 union=1342 overEight=88 uncovered=47 referenceInk=1301 patches=0)
+BAND curves@fit ratio=1.0 PASS CompositedAgreement(agreement=1.00000 withinTwo=1873 union=1873 overEight=0 uncovered=0 referenceInk=1873 patches=0)
+BAND curves@fit ratio=1.4 FAIL CompositedAgreement(agreement=0.90128 withinTwo=2182 union=2421 overEight=239 uncovered=115 referenceInk=2297 patches=0)
+BAND curves@fit ratio=2.0 FAIL CompositedAgreement(agreement=0.84739 withinTwo=1477 union=1743 overEight=266 uncovered=140 referenceInk=1617 patches=0)
+BAND curves@fit ratio=2.8 FAIL CompositedAgreement(agreement=0.82645 withinTwo=1381 union=1671 overEight=290 uncovered=137 referenceInk=1518 patches=0)
+BAND curves@fit ratio=4.0 FAIL CompositedAgreement(agreement=0.80822 withinTwo=767 union=949 overEight=182 uncovered=90 referenceInk=857 patches=0)
+BAND curves@fit run=[1.0, 1.0] = 1.00x
+BAND reported: [1.0, 1.0] = 1.00x  (curves and text-lod limit it; straight: [0.25, 4.0])
+00:00 +8: /Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band/packages/jet_cad_2d_flutter/test/gpu/zoom_defect_test.dart: zoom in, twelve steps of 1.02 the resident arm matches the reference at every frame, with no rebuild
+00:00 +9: All tests passed!
