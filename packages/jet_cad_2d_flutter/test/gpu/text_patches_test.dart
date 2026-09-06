@@ -293,6 +293,36 @@ void main() {
       expect(r.width, 20);
       expect(r.height, 40);
     });
+
+    test('patchRegionFor writes into `out` and leaves it alone when off screen',
+        () {
+      final t = ResidentTextRecord(
+          text: 'X',
+          style: const Handle(11),
+          argb: 0xFF000000,
+          a: 1,
+          b: 0,
+          c: 0,
+          d: -1,
+          e: 0,
+          f: 0,
+          boxMinX: 10,
+          boxMinY: 20,
+          boxMaxX: 50,
+          boxMaxY: 40,
+          instanceIndex: 0);
+      final out = PatchRegion(7, 7, 7, 7);
+      final onScreen = patchRegionFor(t, Transform2.scale(2, 2), 800, 600,
+          maxWidth: 4096, maxHeight: 4096, out: out);
+      expect(identical(onScreen, out), isTrue);
+      expect((out.x, out.y, out.width, out.height), (20, 40, 80, 40));
+      final offScreen = patchRegionFor(
+          t, Transform2.translation(-1000, 0), 800, 600,
+          maxWidth: 4096, maxHeight: 4096, out: out);
+      expect(offScreen, isNull);
+      expect((out.x, out.y, out.width, out.height), (20, 40, 80, 40),
+          reason: 'an off-screen answer must not scribble on the pool entry');
+    });
   });
 
   group('patchTargetSizeFor', () {

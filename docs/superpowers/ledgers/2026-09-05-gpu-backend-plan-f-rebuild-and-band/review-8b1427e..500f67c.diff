@@ -1,0 +1,229 @@
+# Review package: 8b1427e..500f67c
+
+## Commits
+500f67c test(gpu): the uniform block's reuse and the compositor's four sides have witnesses
+
+## Files changed
+ .../test/gpu/frame_info_test.dart                  |   8 ++
+ .../test/gpu/text_compositor_viewport_test.dart    | 135 ++++++++++++++++++---
+ 2 files changed, 123 insertions(+), 20 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart b/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart
+index 185ac01..176d4bf 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart
+@@ -144,20 +144,28 @@ void main() {
+       expect(at(17), closeTo(100, 1e-6),
+           reason: 'half viewport y -- device pixels, doubled from the '
+               'dpr == 1 test');
+     });
+ 
+     test('buildFrameInfo writes into `out` when given one of the right size',
+         () {
+       final m = Transform2(2, 0.5, -0.5, 2, 30, -40);
+       final fresh = buildFrameInfo(m, 800, 600, dashScale: 1.7);
+       final out = ByteData(80);
++      // A reused block must be fully overwritten: every byte starts dirty,
++      // so a byte the function only ever writes as a literal 0 (`f(2, 0)`,
++      // `f(19, 0)`, and the other structural zeros) still has to come back
++      // 0 -- a virgin, already-zeroed `ByteData` could not tell "explicitly
++      // written" from "never touched" apart.
++      for (var i = 0; i < 80; i++) {
++        out.setUint8(i, 0xFF);
++      }
+       final written = buildFrameInfo(m, 800, 600, dashScale: 1.7, out: out);
+       expect(identical(written, out), isTrue);
+       for (var i = 0; i < 80; i++) {
+         expect(out.getUint8(i), fresh.getUint8(i), reason: 'byte $i');
+       }
+       // The wrong size is not trusted: a fresh block, not a partial write.
+       final wrong = ByteData(64);
+       expect(
+           identical(
+               buildFrameInfo(m, 800, 600, dashScale: 1.7, out: wrong), wrong),
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/text_compositor_viewport_test.dart b/packages/jet_cad_2d_flutter/test/gpu/text_compositor_viewport_test.dart
+index c2381ea..5664bad 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/text_compositor_viewport_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/text_compositor_viewport_test.dart
+@@ -1,10 +1,11 @@
++import 'dart:math' as math;
+ import 'dart:ui';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import '../support/spy_canvas.dart';
+ 
+ const TextStyleRecord _roboto =
+     TextStyleRecord(handle: Handle(11), name: 'Standard', fontFamily: 'Roboto');
+@@ -24,54 +25,148 @@ ResidentTextRecord label(double minX, double minY, double maxX, double maxY) =>
+         e: minX,
+         f: maxY,
+         boxMinX: minX,
+         boxMinY: minY,
+         boxMaxX: maxX,
+         boxMaxY: maxY,
+         instanceIndex: 0);
+ 
+ void main() {
+   test(
+-      'labels outside the viewport are skipped; inside and straddling are drawn',
+-      () {
++      'labels outside the viewport are skipped on all four sides; inside and '
++      'straddling are drawn', () {
+     final measurer = FlutterTextMeasurer();
+     addTearDown(measurer.clear);
+     final compositor =
+         TextCompositor(measurer: measurer, textStyleOf: (_) => _roboto);
+-    const viewport = Size(400, 300);
+-    // The outer transform is a pan of (-1000, 0): a label at x 1020..1100 in
+-    // collection space lands at 20..100 on screen (inside), one at 400..480
+-    // lands at -600..-520 (outside, left), one at 970..1030 straddles x = 0,
+-    // one at 1000..1080 / y 900..950 is below the viewport (outside).
+-    final outer = Transform2.translation(-1000, 0);
++    // Deliberately asymmetric (400 wide, 2000 tall), not a square -- so an
++    // x/y-swapped rejection (comparing `_bound[1]` against `width` and
++    // `_bound[0]` against `height` instead of the other way round) cannot
++    // hide behind a coincidence where a label far outside on one axis is
++    // ALSO past the other axis's threshold, which a square or near-square
++    // viewport would let happen (worked out below, at `offRight`).
++    const viewport = Size(400, 2000);
++    // The outer transform is a pan of (-1000, -1000): screen = collection -
++    // (1000, 1000). Six labels, one per rejection clause plus the two that
++    // must still draw -- each classified by EXACTLY one of
++    // `boundTransformedBox`'s four bounds, so a swapped axis or a swapped
++    // sign in the rejection (e.g. testing `_bound[1] > width` instead of
++    // `_bound[0] > width`) moves a specific label's outcome rather than
++    // being masked by another clause firing on the same label.
++    final outer = Transform2.translation(-1000, -1000);
++    // inside: collection (1020, 1100)..(1100, 1130) -> screen (20, 100)..
++    // (100, 130) -- fully inside 400x2000.
++    final inside = label(1020, 1100, 1100, 1130);
++    // off LEFT: collection (400, 1100)..(480, 1130) -> screen (-600, 100)..
++    // (-520, 130) -- maxX < 0, the only clause that fires.
++    final offLeft = label(400, 1100, 480, 1130);
++    // straddling x = 0: collection (970, 1200)..(1030, 1230) -> screen
++    // (-30, 200)..(30, 230) -- overlaps the left edge but no clause fires
++    // (maxX = 30 >= 0, minX = -30 <= width, both y in range), so it draws.
++    final straddleLeft = label(970, 1200, 1030, 1230);
++    // off RIGHT: collection (1500, 1100)..(1580, 1130) -> screen
++    // (500, 100)..(580, 130) -- minX = 500 > 400 (width), the only clause
++    // that fires. Chosen so a swap is actually visible: minX = 500 is NOT
++    // greater than height (2000), and minY = 100 is NOT greater than width
++    // (400), so a mutant testing `minY > width || minX > height` instead of
++    // `minX > width || minY > height` draws this label instead of skipping
++    // it -- neither swapped comparison fires by coincidence.
++    final offRight = label(1500, 1100, 1580, 1130);
++    // off TOP: collection (1020, 900)..(1100, 930) -> screen (20, -100)..
++    // (100, -70) -- maxY < 0, the only clause that fires; x is in range.
++    final offTop = label(1020, 900, 1100, 930);
++    // off BOTTOM: collection (1000, 3100)..(1080, 3150) -> screen
++    // (0, 2100)..(80, 2150) -- minY = 2100 > 2000 (height), the only clause
++    // that fires; x is in range.
++    final offBottom = label(1000, 3100, 1080, 3150);
+     final texts = <ResidentTextRecord>[
+-      label(1020, 100, 1100, 130),
+-      label(400, 100, 480, 130),
+-      label(970, 200, 1030, 230),
+-      label(1000, 900, 1080, 950),
++      inside,
++      offLeft,
++      straddleLeft,
++      offRight,
++      offTop,
++      offBottom,
+     ];
+     final spy = SpyCanvas();
+     compositor.paint(spy,
+         main: null,
+         viewport: viewport,
+         collectionToLogical: outer,
+         texts: texts,
+         patches: const <PatchImage>[]);
+-    // MUTATION (M-F11): invert the rejection -> 2 paragraphs skipped, 2 drawn
+-    // -- the wrong two, and `text_order_test.dart`'s composited differential
++    // MUTATION (M-F11): invert the rejection -> the wrong four skip and the
++    // wrong two draw, and `text_order_test.dart`'s composited differential
+     // goes red with it.
++    //
++    // MUTATION (axis swap, hand-fired and confirmed red -- see the task
++    // report): swap which bound each threshold compares against
++    // (`_bound[1] > viewport.width` and `_bound[0] > viewport.height`
++    // instead of `_bound[0] > viewport.width` and `_bound[1] >
++    // viewport.height`) -- `offRight` above is drawn instead of skipped
++    // under that mutant, so `drawParagraph` count moves to 3 and
++    // `labelsSkipped` to 3, failing both assertions below.
+     expect(spy.named('drawParagraph').length, 2,
+-        reason: 'the inside label and the straddling one');
+-    expect(compositor.labelsSkipped, 2);
+-    // Anti-vacuity: with a pan that brings every label on screen, all four
+-    // draw and nothing is skipped.
++        reason: 'inside and straddleLeft');
++    expect(compositor.labelsSkipped, 4,
++        reason: 'offLeft, offRight, offTop, offBottom');
++
++    // Anti-vacuity: every collection-space box above sits inside
++    // [0, 2000] x [0, 3200] (the widest, offRight, reaches x = 1580; the
++    // tallest, offBottom, reaches y = 3150) -- checked by hand against each
++    // label's collection coordinates above, not against their screen
++    // coordinates under `outer`. A 2000x3200 viewport under the identity
++    // transform therefore contains all six, and nothing is skipped.
+     final all = SpyCanvas();
+     compositor.paint(all,
+         main: null,
+-        viewport: const Size(2000, 2000),
++        viewport: const Size(2000, 3200),
+         collectionToLogical: Transform2.identity(),
+         texts: texts,
+         patches: const <PatchImage>[]);
+-    expect(all.named('drawParagraph').length, 4);
++    expect(all.named('drawParagraph').length, 6);
+     expect(compositor.labelsSkipped, 0);
+   });
++
++  test(
++      'a rotated outer transform is bounded correctly, not just a pan -- '
++      'boundTransformedBox\'s min/max ordering under rotation', () {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final compositor =
++        TextCompositor(measurer: measurer, textStyleOf: (_) => _roboto);
++    const viewport = Size(400, 300);
++    // `Transform2.rotation(pi/2)` is `(a, b, c, d, e, f) = (0, 1, -1, 0, 0,
++    // 0)` (`transform2.dart`'s own factory: `cos(pi/2) = 0`, `sin(pi/2) =
++    // 1`), so it maps `(x, y) -> (a*x + c*y, b*x + d*y) = (-y, x)`.
++    // `Transform2.translation(50, 50).multiply(rotation)` composes as
++    // "rotation first, then the translation" (`Transform2.multiply`'s own
++    // doc comment: the argument is applied first) -- worked out by hand via
++    // the `multiply` formula: `composed = (0, 1, -1, 0, 50, 50)`, i.e.
++    // `(x, y) -> (50 - y, 50 + x)`.
++    final composed = Transform2.translation(50, 50)
++        .multiply(Transform2.rotation(math.pi / 2));
++
++    // onScreen: collection (0, 0)..(50, 20). Corners under `composed`:
++    // (0,0)->(50,50); (50,0)->(50,100); (0,20)->(30,50); (50,20)->(30,100).
++    // Bound: (30, 50)..(50, 100) -- fully inside 400x300, and a two-corner
++    // bound (skipping the box's min/max mixed corners) would have missed
++    // that the box's WIDTH becomes its screen HEIGHT under a 90-degree turn.
++    final onScreen = label(0, 0, 50, 20);
++    // offScreen: collection (1000, 0)..(1050, 20). Corners under `composed`:
++    // (1000,0)->(50,1050); (1050,0)->(50,1100); (1000,20)->(30,1050);
++    // (1050,20)->(30,1100). Bound: (30, 1050)..(50, 1100) -- minY = 1050 >
++    // 300 (height), the same clause a pan already exercises above, but
++    // reached here only because the rotation's min/max were taken over all
++    // four transformed corners, not the box's own untransformed corners.
++    final offScreen = label(1000, 0, 1050, 20);
++
++    final spy = SpyCanvas();
++    compositor.paint(spy,
++        main: null,
++        viewport: viewport,
++        collectionToLogical: composed,
++        texts: <ResidentTextRecord>[onScreen, offScreen],
++        patches: const <PatchImage>[]);
++    expect(spy.named('drawParagraph').length, 1, reason: 'onScreen only');
++    expect(compositor.labelsSkipped, 1, reason: 'offScreen, past the bottom');
++  });
+ }

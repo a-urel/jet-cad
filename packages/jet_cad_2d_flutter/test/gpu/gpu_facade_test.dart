@@ -22,4 +22,16 @@ void main() {
         reason: 'the probe is cached: a platform without Flutter GPU must not '
             'pay a throwing call per frame');
   });
+
+  test('debugSetGpuAvailable pins the answer, and null clears it', () {
+    addTearDown(() => debugSetGpuAvailable(null));
+    debugSetGpuAvailable(true);
+    expect(gpuAvailable(), isTrue);
+    debugSetGpuAvailable(false);
+    expect(gpuAvailable(), isFalse);
+    debugSetGpuAvailable(null);
+    debugSetGpuFactory(() => throw StateError('no gpu'));
+    addTearDown(() => debugSetGpuFactory(null));
+    expect(gpuAvailable(), isFalse, reason: 'cleared: the factory probes');
+  });
 }

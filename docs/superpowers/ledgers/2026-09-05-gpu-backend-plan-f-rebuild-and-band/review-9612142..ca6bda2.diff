@@ -1,0 +1,74 @@
+# Review package: 9612142..ca6bda2
+
+## Commits
+ca6bda2 test(gpu): M-F10 is equivalent; the cell arithmetic's witness bins by the min corner
+
+## Files changed
+ packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart    |  3 +++
+ packages/jet_cad_2d_flutter/test/gpu/classify_grid_test.dart | 10 +++++++---
+ 2 files changed, 10 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+index 491dd5f..e178c99 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+@@ -336,20 +336,23 @@ void _expandedBox(
+ }
+ 
+ /// Whether instance [i]'s reach-expanded box meets [t]'s box.
+ ///
+ /// Points per kind (Ruling E4): a stroke's two, a join's three, a point's
+ /// ONE -- `writePoint` zeroes the other slots and reading them would pull
+ /// every point's box to the origin -- a fill's three. Reach per kind
+ /// (Ruling E5): half-width for a stroke and a point, `halfWidth *
+ /// kMiterLimit` for a join, nothing for a fill. The kind dispatch is the
+ /// shader's own chain of `<` comparisons.
++///
++/// If the dispatch or the reach here changes, change [_expandedBox] too --
++/// it must never bound less than this function does.
+ bool _reaches(
+     Float32List d, int i, ResidentTextRecord t, double unitsPerDevicePixel) {
+   final o = i * kFloatsPerInstance;
+   final kind = d[o + InstanceFieldOffset.kind];
+   final half = d[o + InstanceFieldOffset.halfWidth];
+   final int points;
+   final double reachDevice;
+   if (kind < 0.5) {
+     points = 2;
+     reachDevice = half;
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/classify_grid_test.dart b/packages/jet_cad_2d_flutter/test/gpu/classify_grid_test.dart
+index d1b2652..09a4d08 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/classify_grid_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/classify_grid_test.dart
+@@ -92,23 +92,27 @@ void main() {
+         e.maxY);
+     final (data, count, texts) =
+         collect(doc, measurer, const Size(1400, 900), 2.0);
+     expect(texts.length, greaterThan(50), reason: 'a real label population');
+     final stats = ClassifyStats();
+     final grid = classifyTextPatches(data, count, texts,
+         devicePixelRatio: 2.0, stats: stats);
+     final brute = classifyTextPatchesBruteForce(data, count, texts,
+         devicePixelRatio: 2.0);
+     // MUTATION (M-F9): skip the overflow list -> a long wall through a label
+-    // is missing from its patch. MUTATION (M-F10): `.floor()` -> `.round()`
+-    // on the cell range -> an instance in a cell's lower half is binned one
+-    // cell late and a label at that edge misses it.
++    // is missing from its patch. MUTATION (M-F10): bin by the min corner
++    // only -- `cx1 = cx0` (and/or `cy1 = cy0`) at the binning site -- so a
++    // multi-cell instance lands in one cell and a label in its other cells
++    // misses it. (The plan's original M-F10, `.floor()` -> `.round()`, is
++    // EQUIVALENT: one closure pair serves binning and lookup, and a
++    // monotone shift of the whole grid stays conservative; recorded as
++    // equivalent in the mutation log.)
+     expectSamePatches(grid, brute);
+     expect(grid.length, greaterThan(3));
+     expect(grid.any((p) => p.instanceCount > 1), isTrue);
+     expect(stats.overflow, greaterThan(0),
+         reason: 'a long wall spans more than kClassifyOverflowCells cells, '
+             'or the overflow branch is untested here');
+     expect(stats.binned, greaterThan(1000));
+     expect(stats.candidatesTested, lessThan(texts.length * count ~/ 2),
+         reason: 'the grid must test a fraction of the pairs the brute force '
+             'does, or it is not the lever criterion 7 needs');

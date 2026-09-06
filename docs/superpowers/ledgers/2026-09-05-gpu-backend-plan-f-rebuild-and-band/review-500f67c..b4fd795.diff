@@ -1,0 +1,655 @@
+# Review package: 500f67c..b4fd795
+
+## Commits
+b4fd795 test(gpu): the band is measured -- a step at every frozen decision -- and both zoom defects reproduce on tiles and vanish on the resident arm
+
+## Files changed
+ .../test/gpu/band_sweep_test.dart                  | 299 +++++++++++++++++++++
+ .../test/gpu/zoom_defect_test.dart                 | 135 ++++++++++
+ .../test/support/gpu_comparison.dart               |  25 +-
+ .../test/support/resident_zoom_rig.dart            |  61 +++++
+ 4 files changed, 516 insertions(+), 4 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart b/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart
+new file mode 100644
+index 0000000..81493a2
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart
+@@ -0,0 +1,299 @@
++import 'dart:ui';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import '../support/fixtures.dart';
++import '../support/gpu_comparison.dart';
++import '../support/recording_frame_painter.dart';
++import '../support/tile_fixture.dart';
++
++/// Live-over-collection ratios, the band's two provisional edges among them.
++const List<double> kRatios = [0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0];
++const Size _size = Size(800, 600);
++const Offset _centre = Offset(400, 300);
++const double _dpr = 1.0;
++
++/// Criterion 1, literally: per-channel <= 2 on >= 99.5% of the union, <= 8
++/// on the rest, and differing pixels below 1% of live ink.
++bool criterionOne(CompositedAgreement m) =>
++    m.union > 0 &&
++    m.withinTwo / m.union >= 0.995 &&
++    m.overEight == 0 &&
++    (m.union - m.withinTwo) < 0.01 * m.referenceInk;
++
++Future<Map<double, CompositedAgreement>> sweep(
++  DraftDocument doc,
++  FlutterTextMeasurer measurer, {
++  required String name,
++  required ViewportTransform collection,
++  required double minTextCapPixels,
++}) async {
++  final frame = collectionFrameFor(collection, doc.extents);
++  final rows = <double, CompositedAgreement>{};
++  for (final r in kRatios) {
++    final m = await measureCompositedAgreement(doc,
++        collectionCamera: frame.camera,
++        collectionViewport: frame.viewport,
++        liveCamera: zoomedAbout(collection, _centre, r),
++        size: _size,
++        devicePixelRatio: _dpr,
++        pixelsPerPaperMm: kLogicalPixelsPerMm,
++        measurer: measurer,
++        minTextCapPixels: minTextCapPixels);
++    rows[r] = m;
++    // ignore: avoid_print
++    print('BAND $name ratio=$r ${criterionOne(m) ? "PASS" : "FAIL"} $m');
++  }
++  return rows;
++}
++
++/// The widest contiguous run of passing ratios containing 1.0.
++///
++/// **1.0 itself must pass.** The first draft of this helper seeded
++/// `lo = hi = 1.0` and walked outward without ever testing `rows[1.0]`, so on
++/// a corpus whose centre fails it reported a run with a failing ratio inside
++/// it -- `curves@8x` read `[0.7, 2.0]` while 1.0 itself was red. A run that
++/// does not hold at the reference scale is not a band at all, so it collapses
++/// to a point and says so.
++/// [passes] defaults to criterion 1 itself. The straight corpus overrides it
++/// at ratio 1.0 alone, for the tie-jitter reason test 1 documents; every
++/// other corpus and every other ratio is criterion 1, literally.
++(double, double) passingRun(String name, Map<double, CompositedAgreement> rows,
++    {bool Function(double ratio, CompositedAgreement m)? passes}) {
++  final ok = passes ?? ((_, CompositedAgreement m) => criterionOne(m));
++  if (!ok(1.0, rows[1.0]!)) {
++    // ignore: avoid_print
++    print('BAND $name run=[1.0, 1.0] = 1.00x '
++        '(ratio 1.0 itself fails criterion 1, so there is no run)');
++    return (1.0, 1.0);
++  }
++  var lo = 1.0, hi = 1.0;
++  final i1 = kRatios.indexOf(1.0);
++  for (var i = i1 - 1; i >= 0 && ok(kRatios[i], rows[kRatios[i]]!); i--) {
++    lo = kRatios[i];
++  }
++  for (var i = i1 + 1;
++      i < kRatios.length && ok(kRatios[i], rows[kRatios[i]]!);
++      i++) {
++    hi = kRatios[i];
++  }
++  // ignore: avoid_print
++  print('BAND $name run=[$lo, $hi] = ${(hi / lo).toStringAsFixed(2)}x');
++  return (lo, hi);
++}
++
++/// Criterion 1 everywhere except the identity, where [straightTieJitter]
++/// stands in. See test 1 for why the reference scale is the one ratio of the
++/// sweep where two exact rasterisations disagree at all.
++bool straightPasses(double ratio, CompositedAgreement m) =>
++    ratio == 1.0 ? straightTieJitter(m) : criterionOne(m);
++
++bool straightTieJitter(CompositedAgreement m) =>
++    m.agreement >= 0.999 && m.uncovered * 1000 < m.referenceInk;
++
++void main() {
++  late FlutterTextMeasurer measurer;
++  setUp(() {
++    measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++  });
++
++  // The positive statement, and the control for every negative one below:
++  // where the collection freezes NO scale-dependent decision, the resident
++  // arm reproduces the reference exactly over the whole 16x sweep. A corpus
++  // of straight strokes has no chord count to freeze and no label to cull,
++  // so the frame transform, `expandInstances` and the compositor are the
++  // only things under test -- and they are exact. Every failure in the tests
++  // that follow is therefore attributable to a frozen decision, not to the
++  // arrangement.
++  test('straight geometry meets criterion 1 at every ratio of the sweep',
++      () async {
++    final doc = crossingGrid(measurer);
++    final fit = ViewportTransform.fit(doc.extents, _size);
++    final rows = await sweep(doc, measurer,
++        name: 'straight@fit', collection: fit, minTextCapPixels: 0);
++    for (final r in kRatios) {
++      expect(rows[r]!.referenceInk, greaterThan(1000),
++          reason: 'anti-vacuity at ratio $r: ${rows[r]}');
++      if (r == 1.0) continue;
++      expect(criterionOne(rows[r]!), isTrue, reason: 'ratio $r: ${rows[r]}');
++    }
++
++    // Ruling F13-b. The reference scale is the ONE ratio of this sweep where
++    // the two arms disagree at all -- 8 pixels of 9,792 -- and the reason is
++    // a tie, not a frozen decision.
++    //
++    // `crossingGrid` is axis-aligned. At ratio exactly 1.0 its stroke edges
++    // land on device-pixel boundaries, and there a 1-ulp difference between
++    // the resident arm's float32 collection vertices (plus the offscreen
++    // image round-trip the compositor adds, which the reference does not
++    // have) and the reference's float64 direct draw flips the pixel to the
++    // other side. Off the identity the same edges land mid-pixel, both arms
++    // compute the same antialiased coverage, and the disagreement is gone:
++    // 0.999 and 1.001 both measure exact, in both directions.
++    //
++    // Three candidate causes were eliminated by measurement, not by
++    // argument: the count is identical with the collection frame's
++    // fractional shift, with NO shift at all (collection camera == live
++    // camera, `collectionToLogical` the identity), and with the shift
++    // rounded to whole device pixels. So it is not `collectionFrameFor`'s
++    // translation, and rounding that translation would not fix it.
++    //
++    // `criterionOne` admits no jitter (`overEight == 0`) and stays that way
++    // -- it is the spec's literal criterion 1. This ratio is bounded
++    // instead, tightly and in the same unit as the zoom-out defect.
++    expect(straightTieJitter(rows[1.0]!), isTrue,
++        reason: 'tie jitter at the identity: ${rows[1.0]}');
++
++    expect(
++        passingRun('straight@fit', rows, passes: straightPasses), (0.25, 4.0));
++  });
++
++  // The decomposition, and the whole of criterion 2's text half: text and
++  // geometry are pixel-exact across the band, and what fails past it is one
++  // named frozen row -- the level-of-detail cull.
++  //
++  // `textOverlapFixture`'s TINY label sits under `kMinTextCapPixels` at the
++  // reference scale and above it at a 1.4x live scale, so the live reference
++  // draws it while the frozen collection -- which culled it -- does not.
++  // That is `uncovered` ink, and it stands until the band exit rebuilds. Run
++  // the same ratio with the cull switched off and criterion 1 holds, which
++  // is what makes this a statement about the frozen row rather than about
++  // text rendering: Plan E's `text_order_test.dart` already proved 1.25 and
++  // 2.0 exact at level of detail off.
++  test(
++      'text with level of detail on: exact inside [0.5, 1.0], and the 1.4 '
++      'failure is the frozen cull by construction', () async {
++    final doc = textOverlapFixture(measurer);
++    final fit = ViewportTransform.fit(doc.extents, _size);
++    final rows = await sweep(doc, measurer,
++        name: 'text-lod@fit',
++        collection: fit,
++        minTextCapPixels: kMinTextCapPixels);
++    for (final r in [0.5, 0.7, 1.0]) {
++      expect(criterionOne(rows[r]!), isTrue, reason: 'ratio $r: ${rows[r]}');
++    }
++    expect(rows[1.0]!.patchCount, greaterThanOrEqualTo(1));
++    expect(rows[1.4]!.uncovered, greaterThan(0),
++        reason: 'the frozen cull leaves the reference label blank: '
++            '${rows[1.4]}');
++
++    final frame = collectionFrameFor(fit, doc.extents);
++    final lodOff = await measureCompositedAgreement(doc,
++        collectionCamera: frame.camera,
++        collectionViewport: frame.viewport,
++        liveCamera: zoomedAbout(fit, _centre, 1.4),
++        size: _size,
++        devicePixelRatio: _dpr,
++        pixelsPerPaperMm: kLogicalPixelsPerMm,
++        measurer: measurer,
++        minTextCapPixels: 0);
++    // ignore: avoid_print
++    print('BAND text-nolod@fit ratio=1.4 '
++        '${criterionOne(lodOff) ? "PASS" : "FAIL"} $lodOff');
++    expect(criterionOne(lodOff), isTrue,
++        reason: 'with the cull off, 1.4 is exact -- so the 1.4 failure above '
++            'is the frozen cull and nothing else: $lodOff');
++  });
++
++  // The geometry half of the same decomposition. A curve's chord count is
++  // chosen at the collection scale and frozen; at any other scale the two
++  // arms are two independent, individually-correct polygonal approximations
++  // of one curve, differing by a fraction of a pixel along the outline. On a
++  // corpus that is almost entirely curve outline that moves ~7-10% of the ink
++  // past criterion 1's per-channel tolerance, in BOTH directions and at any
++  // step across a refinement threshold -- measured at 1% of zoom, not merely
++  // at the band's edges. The step is asserted here in both directions; its
++  // sharpness is recorded in the results note.
++  //
++  // The floor is 1,000, not the plan's 5,000: this fixture inks 1,873 at
++  // ratio 1.0 in an 800x600 viewport at dpr 1. The 5,000 figure belongs to
++  // Plan E's `resident_pixel_differential_test.dart`, which measures a
++  // different corpus at dpr 2.0, and was carried into this plan by mistake.
++  test('solid curves at fit: exact at 1.0, and the chord-count step is real',
++      () async {
++    final doc = differentialFixture(measurer: measurer);
++    final fit = ViewportTransform.fit(doc.extents, _size);
++    final rows = await sweep(doc, measurer,
++        name: 'curves@fit', collection: fit, minTextCapPixels: 0);
++    expect(criterionOne(rows[1.0]!), isTrue, reason: 'ratio 1.0: ${rows[1.0]}');
++    expect(rows[1.0]!.referenceInk, greaterThan(1000),
++        reason: 'anti-vacuity: ${rows[1.0]}');
++    expect(rows[1.4]!.agreement, lessThan(rows[1.0]!.agreement),
++        reason: 'the step on zoom in: ${rows[1.4]}');
++    expect(rows[0.7]!.agreement, lessThan(rows[1.0]!.agreement),
++        reason: 'and on zoom out: ${rows[0.7]}');
++    passingRun('curves@fit', rows);
++  });
++
++  // Ruling F2's cost, measured. The buffer holds absolute frame coordinates,
++  // so a collection at 8x the fit scale stores coordinates 8x larger and
++  // spends float32 mantissa on them. At ratio 1.0 that shows as 6 differing
++  // pixels out of a 479-pixel union -- the measured price of the shifted
++  // float32 frame at a working scale, and the reason this asserts 0.98 rather
++  // than criterion 1's 0.995.
++  //
++  // Ratios 2.8 and 4.0 ink nothing at all (`union=0`): zooming the fit camera
++  // 8x about the viewport centre puts the drawing off screen, and zooming
++  // further in keeps it there. Those rows are printed, not asserted.
++  test('solid curves at a working zoom (8x): Ruling F2\'s precision, measured',
++      () async {
++    final doc = differentialFixture(measurer: measurer);
++    final working =
++        zoomedAbout(ViewportTransform.fit(doc.extents, _size), _centre, 8.0);
++    final rows = await sweep(doc, measurer,
++        name: 'curves@8x', collection: working, minTextCapPixels: 0);
++    expect(rows[1.0]!.agreement, greaterThanOrEqualTo(0.98),
++        reason: 'float32 at 8x: ${rows[1.0]}');
++    expect(rows[1.0]!.referenceInk, greaterThan(400),
++        reason: 'anti-vacuity: ${rows[1.0]}');
++  });
++
++  // Criterion 2's reported number. The intersection is what the spec asks
++  // for; that it is 1.00x is the design failure the spec names, recorded in
++  // the results note with the rows above rather than asserted here as a
++  // threshold. What IS asserted is the shape of the result: the unfrozen
++  // corpus spans the whole sweep, and the intersection contains the
++  // reference scale.
++  test('the reported band is the intersection of the passing runs', () async {
++    final straightDoc = crossingGrid(measurer);
++    final straightFit = ViewportTransform.fit(straightDoc.extents, _size);
++    final straight = passingRun(
++        'straight@fit',
++        await sweep(straightDoc, measurer,
++            name: 'straight@fit', collection: straightFit, minTextCapPixels: 0),
++        passes: straightPasses);
++
++    final textDoc = textOverlapFixture(measurer);
++    final textFit = ViewportTransform.fit(textDoc.extents, _size);
++    final text = passingRun(
++        'text-lod@fit',
++        await sweep(textDoc, measurer,
++            name: 'text-lod@fit',
++            collection: textFit,
++            minTextCapPixels: kMinTextCapPixels));
++
++    final curveDoc = differentialFixture(measurer: measurer);
++    final curveFit = ViewportTransform.fit(curveDoc.extents, _size);
++    final curves = passingRun(
++        'curves@fit',
++        await sweep(curveDoc, measurer,
++            name: 'curves@fit', collection: curveFit, minTextCapPixels: 0));
++
++    final lo =
++        [straight.$1, text.$1, curves.$1].reduce((a, b) => a > b ? a : b);
++    final hi =
++        [straight.$2, text.$2, curves.$2].reduce((a, b) => a < b ? a : b);
++    // ignore: avoid_print
++    print('BAND reported: [$lo, $hi] = ${(hi / lo).toStringAsFixed(2)}x  '
++        '(curves and text-lod limit it; straight: '
++        '[${straight.$1}, ${straight.$2}])');
++
++    expect(straight, (0.25, 4.0),
++        reason: 'the unfrozen corpus spans the whole sweep');
++    expect(lo, lessThanOrEqualTo(1.0));
++    expect(hi, greaterThanOrEqualTo(1.0));
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/zoom_defect_test.dart b/packages/jet_cad_2d_flutter/test/gpu/zoom_defect_test.dart
+new file mode 100644
+index 0000000..d68f56a
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/gpu/zoom_defect_test.dart
+@@ -0,0 +1,135 @@
++import 'dart:math' as math;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import '../support/recording_frame_painter.dart';
++import '../support/resident_zoom_rig.dart';
++import '../support/tile_comparison.dart';
++import '../support/tile_fixture.dart';
++
++/// The probe's own gestures (`2026-08-29-settle-flicker-probe.md`): twelve
++/// steps, then six settle frames, about the viewport centre.
++const int kSteps = 12;
++const int kSettle = 6;
++const double kZoomOut = 0.94;
++const double kZoomIn = 1.02;
++const Offset kCentre = Offset(200, 150);
++
++Future<void> warm(TileRig rig) async {
++  for (var i = 0; i < 40 && !rig.cache.viewportCovered; i++) {
++    await measureTiledAgreement(rig);
++  }
++  expect(rig.cache.viewportCovered, isTrue, reason: 'the warm-up must cover');
++}
++
++void main() {
++  group('zoom out, twelve steps of 0.94', () {
++    test(
++        'the tiled arm leaves ink uncovered during the gesture and one frame '
++        'after it', () async {
++      final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 64);
++      addTearDown(rig.dispose);
++      await warm(rig);
++      final gesture = <int>[];
++      for (var i = 0; i < kSteps; i++) {
++        rig.camera = zoomedAbout(rig.camera, kCentre, kZoomOut);
++        gesture.add((await measureTiledAgreement(rig)).uncoveredPixels);
++      }
++      final settle = <int>[];
++      for (var i = 0; i < kSettle; i++) {
++        settle.add((await measureTiledAgreement(rig)).uncoveredPixels);
++      }
++      // ignore: avoid_print
++      print('ZOOM-OUT tiled uncovered: gesture=$gesture settle=$settle');
++      expect(gesture.reduce(math.max), greaterThan(0),
++          reason: 'the reproduction: the probe read 5,730 at the worst frame');
++      expect(settle.first, greaterThan(0),
++          reason: 'still uncovered one frame after the gesture (4,893)');
++      expect(settle.last, 0, reason: 'and settled');
++    });
++
++    test('the resident arm leaves nothing uncovered at any frame', () async {
++      final measurer = FlutterTextMeasurer();
++      addTearDown(measurer.clear);
++      final doc = crossingGrid(measurer);
++      final rig = ResidentZoomRig(doc, measurer, tileCamera());
++      var camera = tileCamera();
++      final uncovered = <int>[];
++      final agreement = <double>[];
++      Future<void> frame() async {
++        final m = await rig.frame(camera);
++        expect(m.referenceInk, greaterThan(1000), reason: 'anti-vacuity: $m');
++        // Ruling F13-a. One or two pixels of edge jitter between two exact
++        // rasterisations -- the resident arm's float32 collection vertices
++        // against the reference's float64 -- is not the zoom-out defect. The
++        // defect reads 5,730 uncovered pixels on the tiled arm in the test
++        // above, three orders of magnitude away; this is bounded both
++        // absolutely and as a fraction of live ink (0.05%), so it cannot
++        // grow into one unnoticed. The spec's "zero uncovered" is recorded
++        // as met within that jitter.
++        expect(m.uncovered, lessThanOrEqualTo(4), reason: '$m');
++        expect(m.uncovered * 2000, lessThan(m.referenceInk), reason: '$m');
++        uncovered.add(m.uncovered);
++        agreement.add(m.agreement);
++      }
++
++      for (var i = 0; i < kSteps; i++) {
++        camera = zoomedAbout(camera, kCentre, kZoomOut);
++        await frame();
++      }
++      for (var i = 0; i < kSettle; i++) {
++        await frame();
++      }
++      // ignore: avoid_print
++      print('ZOOM-OUT resident uncovered=$uncovered rebuilds=${rig.rebuilds} '
++          'stale=${rig.staleFrames}');
++      // MUTATION (M-F5): collect under the live camera and kTileViewport ->
++      // the first zoom-out step reveals uncovered ink at the viewport's rim,
++      // in the thousands of pixels, and the per-frame bounds above go red.
++      expect(agreement, everyElement(greaterThanOrEqualTo(0.995)));
++      expect(rig.rebuilds, 1,
++          reason: '0.94^12 = 0.476 leaves the band at the last step');
++    });
++  });
++
++  group('zoom in, twelve steps of 1.02', () {
++    test('the tiled arm shows the wrong resolution over the settle', () async {
++      final rig = TileRig(tileDevicePixels: 64, tilesBakedPerFrame: 64);
++      addTearDown(rig.dispose);
++      await warm(rig);
++      for (var i = 0; i < kSteps; i++) {
++        rig.camera = zoomedAbout(rig.camera, kCentre, kZoomIn);
++        await measureTiledAgreement(rig);
++      }
++      final settle = <int>[];
++      for (var i = 0; i < kSettle; i++) {
++        settle.add((await measureTiledAgreement(rig)).differingPixels);
++      }
++      // ignore: avoid_print
++      print('ZOOM-IN tiled differing over the settle: $settle');
++      expect(settle.first, greaterThan(0),
++          reason: 'the reproduction: the probe read 25,275 / 16,681 / 0');
++      expect(settle.last, 0);
++    });
++
++    test(
++        'the resident arm matches the reference at every frame, with no '
++        'rebuild', () async {
++      final measurer = FlutterTextMeasurer();
++      addTearDown(measurer.clear);
++      final doc = crossingGrid(measurer);
++      final rig = ResidentZoomRig(doc, measurer, tileCamera());
++      var camera = tileCamera();
++      for (var i = 0; i < kSteps + kSettle; i++) {
++        if (i < kSteps) camera = zoomedAbout(camera, kCentre, kZoomIn);
++        final m = await rig.frame(camera);
++        expect(m.referenceInk, greaterThan(1000));
++        expect(m.uncovered, 0, reason: 'frame $i: $m');
++        expect(m.agreement, greaterThanOrEqualTo(0.995),
++            reason: 'frame $i: $m');
++      }
++      expect(rig.rebuilds, 0, reason: '1.02^12 = 1.27 stays inside the band');
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart b/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
+index 1d2b094..2b3bae6 100644
+--- a/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
++++ b/packages/jet_cad_2d_flutter/test/support/gpu_comparison.dart
+@@ -640,23 +640,33 @@ int countDifferingPixels(TriangleRasterizer a, TriangleRasterizer b) {
+   }
+   return differing;
+ }
+ 
+ /// The per-channel agreement of two Skia-rendered pictures, plus how many
+ /// patches the resident arm composited. Same fields and the same 2/8
+ /// thresholds as [ResidentColorAgreement]; a separate class because the
+ /// instrument is different -- this one sees text.
+ class CompositedAgreement {
+   const CompositedAgreement(this.union, this.withinTwo, this.overEight,
+-      this.referenceInk, this.patchCount);
++      this.referenceInk, this.patchCount, this.uncovered);
+   final int union, withinTwo, overEight, referenceInk, patchCount;
++
++  /// Reference ink the resident arm left blank -- the zoom-out defect's own
++  /// unit (`InkReport.uncoveredPixels` on the tiled arm).
++  final int uncovered;
+   double get agreement => union == 0 ? 1.0 : withinTwo / union;
++
++  @override
++  String toString() =>
++      'CompositedAgreement(agreement=${agreement.toStringAsFixed(5)} '
++      'withinTwo=$withinTwo union=$union overEight=$overEight '
++      'uncovered=$uncovered referenceInk=$referenceInk patches=$patchCount)';
+ }
+ 
+ /// Both arms through Skia, text included -- the first instrument in this
+ /// suite that can. See the plan's Task 5 for the arrangement.
+ ///
+ /// **Both arms are rasterised by Skia**, not [TriangleRasterizer]: the
+ /// reference is the painter driving [VerticesDrawSink] (with a
+ /// [CanvasDrawSink] fallback for text, on the same `Canvas`) at [liveCamera];
+ /// the resident arm is the painter driving [GeometryCollector] at
+ /// [collectionCamera], then [classifyTextPatches], then [expandInstances]
+@@ -700,20 +710,25 @@ Future<CompositedAgreement> measureCompositedAgreement(
+   required double pixelsPerPaperMm,
+   required FlutterTextMeasurer measurer,
+ 
+   /// Test seam: the classifier's own output, reordered or discarded before
+   /// the resident arm composites. `(_) => const []` is the spec's headline
+   /// mutation, "draw all text in one pass" -- with no patches, every label
+   /// draws as a plain paragraph and whatever later geometry reaches it in
+   /// the reference picture stays UNDER it in the resident one instead.
+   List<TextPatch> Function(List<TextPatch>)? mutatePatches,
+   double minTextCapPixels = kMinTextCapPixels,
++
++  /// The viewport the collector walks under -- `collectionFrameFor(...)
++  /// .viewport` for a rebuild's arrangement; defaults to [size], Plan E's
++  /// arrangement.
++  Size? collectionViewport,
+ }) async {
+   final w = (size.width * devicePixelRatio).round();
+   final h = (size.height * devicePixelRatio).round();
+   final index = SpatialIndex(document);
+   final resolver = DocumentStyleResolver(document);
+   final painter = DraftPainter(
+       document: document,
+       index: index,
+       resolver: resolver,
+       minTextCapPixels: minTextCapPixels);
+@@ -737,21 +752,21 @@ Future<CompositedAgreement> measureCompositedAgreement(
+   final refPicture = refRecorder.endRecording();
+   final refImage = await refPicture.toImage(w, h);
+   refPicture.dispose();
+ 
+   // --- resident: collect at the collection camera, classify, expand ------
+   final collector = GeometryCollector(
+       pixelsPerPaperMm: pixelsPerPaperMm,
+       devicePixelRatio: devicePixelRatio,
+       measurer: measurer,
+       textStyleOf: document.textStyleOf);
+-  painter.paint(collector, collectionCamera, size);
++  painter.paint(collector, collectionCamera, collectionViewport ?? size);
+   final data = collector.data;
+   final texts = collector.texts;
+   var patches = classifyTextPatches(data, collector.instanceCount, texts,
+       devicePixelRatio: devicePixelRatio);
+   if (mutatePatches != null) patches = mutatePatches(patches);
+ 
+   final collectionInverse = collectionCamera.worldToScreenMatrix.invert();
+   final collectionToLogical =
+       composeTransforms(liveCamera.worldToScreenMatrix, collectionInverse);
+   final collectionToDevice = composeTransforms(
+@@ -816,36 +831,38 @@ Future<CompositedAgreement> measureCompositedAgreement(
+       collectionToLogical: collectionToLogical,
+       texts: texts,
+       patches: patchImages);
+   final outPicture = outRecorder.endRecording();
+   final outImage = await outPicture.toImage(w, h);
+   outPicture.dispose();
+ 
+   final a = (await refImage.toByteData(format: ImageByteFormat.rawRgba))!;
+   final b = (await outImage.toByteData(format: ImageByteFormat.rawRgba))!;
+   var union = 0, withinTwo = 0, overEight = 0, referenceInk = 0;
++  var uncovered = 0;
+   for (var i = 0; i < w * h; i++) {
+     final o = i * 4;
+     final inkA = a.getUint8(o + 3) != 0, inkB = b.getUint8(o + 3) != 0;
+     if (inkA) referenceInk++;
++    if (inkA && !inkB) uncovered++;
+     if (!inkA && !inkB) continue;
+     union++;
+     var worst = 0;
+     for (var ch = 0; ch < 4; ch++) {
+       final d = (a.getUint8(o + ch) - b.getUint8(o + ch)).abs();
+       if (d > worst) worst = d;
+     }
+     if (worst <= 2) withinTwo++;
+     if (worst > 8) overEight++;
+   }
+ 
+   index.dispose();
+   refImage.dispose();
+   mainImage.dispose();
+   for (final p in patchImages) {
+     p.image.dispose();
+   }
+   outImage.dispose();
+ 
+-  return CompositedAgreement(
+-      union, withinTwo, overEight, referenceInk, compositor.patchesComposited);
++  return CompositedAgreement(union, withinTwo, overEight, referenceInk,
++      compositor.patchesComposited, uncovered);
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/support/resident_zoom_rig.dart b/packages/jet_cad_2d_flutter/test/support/resident_zoom_rig.dart
+new file mode 100644
+index 0000000..d5224fe
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/support/resident_zoom_rig.dart
+@@ -0,0 +1,61 @@
++import 'dart:ui';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import 'gpu_comparison.dart';
++import 'tile_fixture.dart';
++
++/// The resident arm as a rig (Ruling F13): the collection frame a rebuild
++/// would take at the gesture's start, re-collected whenever a frame's ratio
++/// leaves the band -- `ResidentRebuilder`'s policy applied in-rig -- and
++/// every frame compared against a live reference at the same camera.
++///
++/// **A frame out of band is drawn from the collection the rig has**, counted
++/// in [staleFrames], and the re-collection lands for the NEXT frame, exactly
++/// as the rebuilder's post-frame callback would order it.
++class ResidentZoomRig {
++  ResidentZoomRig(this.doc, this.measurer, ViewportTransform start,
++      {this.bandLowerScale = kBandLowerScale,
++      this.bandUpperScale = kBandUpperScale,
++      this.size = kTileViewport,
++      this.dpr = kTileDpr}) {
++    _collectAt(start);
++  }
++
++  final DraftDocument doc;
++  final FlutterTextMeasurer measurer;
++  final double bandLowerScale, bandUpperScale;
++  final Size size;
++  final double dpr;
++
++  late CollectionFrame collectionFrame;
++  int rebuilds = 0;
++  int staleFrames = 0;
++
++  void _collectAt(ViewportTransform live) {
++    collectionFrame = collectionFrameFor(live, doc.extents);
++  }
++
++  bool inBand(ViewportTransform live) {
++    final ratio = live.scale / collectionFrame.camera.scale;
++    return ratio >= bandLowerScale && ratio <= bandUpperScale;
++  }
++
++  Future<CompositedAgreement> frame(ViewportTransform live) async {
++    final m = await measureCompositedAgreement(doc,
++        collectionCamera: collectionFrame.camera,
++        collectionViewport: collectionFrame.viewport,
++        liveCamera: live,
++        size: size,
++        devicePixelRatio: dpr,
++        pixelsPerPaperMm: kLogicalPixelsPerMm,
++        measurer: measurer);
++    if (!inBand(live)) {
++      staleFrames++;
++      _collectAt(live);
++      rebuilds++;
++    }
++    return m;
++  }
++}

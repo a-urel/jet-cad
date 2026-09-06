@@ -1,0 +1,627 @@
+# Review package: ca6bda2..8b1427e
+
+## Commits
+8b1427e perf(gpu): the compositor skips off-viewport labels; PatchRegion and the uniform block are reused fields
+
+## Files changed
+ .../lib/src/gpu/gpu_draw_backend.dart              | 92 ++++++++++++++--------
+ .../lib/src/gpu/text_compositor.dart               | 26 +++++-
+ .../lib/src/gpu/text_patches.dart                  | 22 +++++-
+ .../test/gpu/frame_info_test.dart                  | 18 +++++
+ .../test/gpu/text_compositor_viewport_test.dart    | 77 ++++++++++++++++++
+ .../test/gpu/text_patches_test.dart                | 30 +++++++
+ 6 files changed, 226 insertions(+), 39 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+index 9c47d72..4bd1d52 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+@@ -85,26 +85,29 @@ import 'text_patches.dart';
+ /// a previous plan's device run found in the half-width. See
+ /// [dashScaleFor] for the composition this value comes from.
+ ///
+ /// **Required, not defaulted.** A defaulted `dashScale` is a silent 0, and a
+ /// 0 collapses every dash pattern in the drawing to solid -- a
+ /// whole-drawing defect hiding behind a default argument.
+ ///
+ /// [dashScale] is written at float index 18 (byte 72), the block's only
+ /// trailing scalar; float index 19 (byte 76) stays zero -- it is alignment
+ /// padding, not a second member (see this function's doc comment above).
++///
++/// `out`, when given and 80 bytes long, is written in place and returned --
++/// the frame path's own block; a fresh one otherwise.
+ ByteData buildFrameInfo(
+     Transform2 collectionToDevice, int widthPx, int heightPx,
+-    {required double dashScale}) {
++    {required double dashScale, ByteData? out}) {
+   final sx = 2.0 / widthPx;
+   final sy = -2.0 / heightPx;
+-  final data = ByteData(80);
++  final data = out != null && out.lengthInBytes == 80 ? out : ByteData(80);
+   void f(int i, double v) => data.setFloat32(i * 4, v, Endian.host);
+   f(0, collectionToDevice.a * sx);
+   f(1, collectionToDevice.b * sy);
+   f(2, 0);
+   f(3, 0);
+   f(4, collectionToDevice.c * sx);
+   f(5, collectionToDevice.d * sy);
+   f(6, 0);
+   f(7, 0);
+   f(8, 0);
+@@ -172,35 +175,35 @@ double dashScaleFor(ViewportTransform camera, Transform2 collectionInverse) =>
+ /// document was already walked once, at construction of [geometry]
+ /// (`ResidentGeometry`, Task 5); every subsequent frame re-derives only the
+ /// small `FrameInfo` uniform from the current [ViewportTransform] and
+ /// re-issues the main draw call the buffer's instance count implies.
+ ///
+ /// **What a covered label's patch still allocates, per frame, exactly.**
+ /// This wave (the final whole-branch review's fix, Ruling RF-1) hoisted the
+ /// two `Float64List(4)` scratches [patchRegionFor] and `labelBoundsLogical`
+ /// used to allocate per call into [_regionScratch] and [_boundsScratch]
+ /// below -- fields, reused every frame, passed as each function's `scratch`
+-/// argument -- so those two are OFF this list now. What remains, one of
+-/// each per patch, never per entity and never per plain (uncovered) label:
+-/// a `PatchRegion`, a `(ResidentPatch, PatchRegion)` record (in
+-/// [_pendingRegions]), a `PatchImage`, three `Rect`s (`PatchImage.src`,
+-/// `.dst`, `.layerBounds`), the `Transform2` [composeTransforms] builds for
+-/// `toPatch`, the `ByteData(80)` uniform block [buildFrameInfo] returns, one
+-/// `saveLayer` (`TextCompositor.paint`) and one `ui.Image` handle
+-/// (`asImage()`) -- the same list the spec's text-section exception and
+-/// `## Invariants` item 1 now name. Still O(1) per flush, not per entity.
+-/// Plan F's two cheapest remaining reuse moves, named but not taken here
+-/// (Ruling RF-1 -- a rewrite unmeasured is a rewrite this wave will not
+-/// make): a mutable `PatchRegion` (collapsing the `(ResidentPatch,
+-/// PatchRegion)` record above to a reused pair) and a reused uniform
+-/// `ByteData` (so [buildFrameInfo] writes into a field instead of
+-/// allocating one per patch per frame).
++/// argument -- so those two are OFF this list now. Task 6 (Ruling F10) took
++/// the two moves this doc used to name but not take: [_frameInfo] is one
++/// `ByteData(80)` field [buildFrameInfo]'s `out` writes in place for every
++/// pass of a frame, main and patch alike, and [_regionPool] is one
++/// `PatchRegion` per patch, grown once and written in place by
++/// `patchRegionFor`'s `out` -- so `PatchRegion` and the uniform block are
++/// OFF this list too now. What remains, one of each per patch, never per
++/// entity and never per plain (uncovered) label: a `PatchImage`, three
++/// `Rect`s (`PatchImage.src`, `.dst`, `.layerBounds`), the `Transform2`
++/// [composeTransforms] builds for `toPatch`, one `saveLayer`
++/// (`TextCompositor.paint`) and one `ui.Image` handle (`asImage()`) --
++/// alongside `gpu.Viewport`, `vm.Vector4`, `gpu.BufferView`, the command
++/// buffer and the render pass, which are the GPU shim's own per-pass
++/// objects, not this class's, and which Task 8's probe reports beside ours.
++/// Still O(1) per flush, not per entity.
+ class GpuDrawBackend implements ResidentFramePainter {
+   GpuDrawBackend(this.geometry, this.collectionCamera,
+       {FlutterTextMeasurer? measurer,
+       TextStyleRecord Function(Handle)? textStyleOf})
+       : _collectionInverse = collectionCamera.worldToScreenMatrix.invert(),
+         _compositor = measurer != null && textStyleOf != null
+             ? TextCompositor(measurer: measurer, textStyleOf: textStyleOf)
+             : null;
+ 
+   final ResidentGeometry geometry;
+@@ -212,25 +215,36 @@ class GpuDrawBackend implements ResidentFramePainter {
+   /// which case [paint] draws the main image alone and no text at all
+   /// (Ruling E2's shape again: a caller that never supplies the two stays on
+   /// the pre-Plan-E path with no behaviour change).
+   final TextCompositor? _compositor;
+ 
+   /// Reused every frame -- one `PatchImage` per patch this frame drew,
+   /// built after `submit()` (see [render]'s tail) and consumed by
+   /// [_compositor] in [paint].
+   final List<PatchImage> _patchImages = <PatchImage>[];
+ 
+-  /// Reused per frame: `(patch, region)` pairs the patch loop in [render]
+-  /// found, drained into [_patchImages] after `submit()` -- see [render]'s
+-  /// tail for why the split matters.
+-  final List<(ResidentPatch, PatchRegion)> _pendingRegions =
+-      <(ResidentPatch, PatchRegion)>[];
++  /// The frame's uniform block, written in place by `buildFrameInfo(out:)`
++  /// once for the main pass and once per patch; `HostBuffer.emplace` copies
++  /// the bytes, so one block serves every pass of a frame.
++  final ByteData _frameInfo = ByteData(80);
++
++  /// One `PatchRegion` per patch, for the backend's life -- grown to
++  /// `geometry.patches.length` on the first frame that needs each slot and
++  /// never past it, then written in place by `patchRegionFor(out:)`.
++  final List<PatchRegion> _regionPool = <PatchRegion>[];
++
++  /// Parallel lists, reused per frame: the patches this frame drew and the
++  /// pool entry each drew into, drained into [_patchImages] after the last
++  /// `submit()` (see [render]'s tail). Two lists rather than a list of
++  /// records, so the drain allocates no record per patch.
++  final List<ResidentPatch> _pendingPatches = <ResidentPatch>[];
++  final List<PatchRegion> _pendingRegions = <PatchRegion>[];
+ 
+   /// Reused every frame by [patchRegionFor]'s `scratch` argument, one patch
+   /// at a time -- the frame path's own copy of the scratch its doc comment
+   /// says a null argument would otherwise allocate per call.
+   final Float64List _regionScratch = Float64List(4);
+ 
+   /// Reused every frame by `labelBoundsLogical`'s `scratch` argument, same
+   /// reasoning as [_regionScratch].
+   final Float64List _boundsScratch = Float64List(4);
+ 
+@@ -334,20 +348,21 @@ class GpuDrawBackend implements ResidentFramePainter {
+     // `patchCommandBuffer.submit()`, or `patch.target.asImage()`/
+     // `target.asImage()` in the drain itself) used to strand entries for the
+     // next frame's single-cursor merge with `geometry.texts` to trip over.
+     // Resetting unconditionally, on every call, means a throw can now only ever
+     // strand entries until the very next `render` -- never for a frame that
+     // legitimately draws nothing, which is exactly what "still needs the
+     // ring to advance once" above already argues for `geometry.uniforms`.
+     _collectionToLogical =
+         composeTransforms(camera.worldToScreenMatrix, _collectionInverse);
+     _patchImages.clear();
++    _pendingPatches.clear();
+     _pendingRegions.clear();
+     patchesRendered = 0;
+     patchesClipped = 0;
+     patchesOffscreen = 0;
+ 
+     final widthPx = (viewport.width * dpr).round();
+     final heightPx = (viewport.height * dpr).round();
+     if (widthPx <= 0 || heightPx <= 0 || geometry.instanceCount == 0) {
+       return null;
+     }
+@@ -425,21 +440,22 @@ class GpuDrawBackend implements ResidentFramePainter {
+     // takes `camera` and `_collectionInverse` rather than a precomputed
+     // transform) -- one extra `Transform2` composition per frame, not per
+     // entity, so it stays inside "the frame path allocates nothing per
+     // entity in steady state, and O(1) per flush" (CLAUDE.md).
+     final collectionToDevice =
+         composeTransforms(Transform2.scale(dpr, dpr), _collectionToLogical);
+     pass.bindUniform(
+       geometry.vertexShader.getUniformSlot('FrameInfo'),
+       geometry.uniforms.emplace(buildFrameInfo(
+           collectionToDevice, widthPx, heightPx,
+-          dashScale: dashScaleFor(camera, _collectionInverse))),
++          dashScale: dashScaleFor(camera, _collectionInverse),
++          out: _frameInfo)),
+     );
+     // **One call. `cornerVertexCount` vertices, one instance per record, in
+     // buffer order.** The buffer was written once, in walk order, by
+     // `GeometryCollector` (Task 3); nothing here sorts or partitions it, so
+     // the buffer's order *is* the draw order (`vertices_draw_sink.dart:41-57`
+     // is the standing record of what happens when a past version of this
+     // codebase drew from a buffer partitioned by attribute instead of by
+     // emission order). The vertex count itself is read off
+     // `ResidentGeometry.kCornerVertices`, not restated as a literal `6`, so
+     // a kind Plans C or D add to that buffer cannot leave this call drawing
+@@ -479,26 +495,31 @@ class GpuDrawBackend implements ResidentFramePainter {
+     // so its pass starts with `RenderTarget.singleColor` against
+     // `patch.target` rather than the main `target`; everything else about a
+     // patch pass mirrors the main one above (same pipeline, same corner
+     // buffer, same culling and blend state), reading `patch.instances` in
+     // place of `geometry.instances` and a `FrameInfo` built from a
+     // transform that maps the region's own device-pixel origin to the patch
+     // target's top-left instead of the viewport's. `_patchImages` and the
+     // three counters below were already reset at the top of this method,
+     // before the early returns (see that comment) -- not reset again here.
+     final dashScale = dashScaleFor(camera, _collectionInverse);
+-    for (final patch in geometry.patches) {
++    for (var p = 0; p < geometry.patches.length; p++) {
++      final patch = geometry.patches[p];
+       final t = geometry.texts[patch.textIndex];
++      while (_regionPool.length <= p) {
++        _regionPool.add(PatchRegion(0, 0, 0, 0));
++      }
+       final region = patchRegionFor(t, collectionToDevice, widthPx, heightPx,
+           maxWidth: patch.targetWidth,
+           maxHeight: patch.targetHeight,
+-          scratch: _regionScratch);
++          scratch: _regionScratch,
++          out: _regionPool[p]);
+       if (region == null) {
+         patchesOffscreen++;
+         continue;
+       }
+       // The region reached the target's size: either the live scale is past
+       // the band's ceiling and Plan F's rebuild has not landed, or it sits
+       // exactly at the ceiling. Drawn anyway, short if clamped; counted so
+       // the harness can say how often. A diagnostic, not a decision.
+       if (region.width == patch.targetWidth ||
+           region.height == patch.targetHeight) {
+@@ -562,64 +583,67 @@ class GpuDrawBackend implements ResidentFramePainter {
+           gpu.BufferView(patch.instances,
+               offsetInBytes: 0, lengthInBytes: patch.instances.sizeInBytes),
+           slot: 1);
+       final toPatch = composeTransforms(
+           Transform2.translation(-region.x.toDouble(), -region.y.toDouble()),
+           collectionToDevice);
+       patchPass.bindUniform(
+         geometry.vertexShader.getUniformSlot('FrameInfo'),
+         geometry.uniforms.emplace(buildFrameInfo(
+             toPatch, region.width, region.height,
+-            dashScale: dashScale)),
++            dashScale: dashScale, out: _frameInfo)),
+       );
+       patchPass.draw(ResidentGeometry.cornerVertexCount,
+           instanceCount: patch.instanceCount);
+       // Submitted immediately, on this patch's own command buffer -- see
+       // the main pass's `submit()` above for why one buffer cannot carry
+       // more than one render pass on Metal.
+       patchCommandBuffer.submit();
+       patchesRendered++;
+-      _pendingRegions.add((patch, region));
++      _pendingPatches.add(patch);
++      _pendingRegions.add(region);
+     }
+ 
+     frames++;
+ 
+     // **`asImage()` only after the LAST `submit()`, on purpose.** By this
+     // point every command buffer this frame created -- the main pass's and
+     // each patch's own -- has already been submitted, in order, above; nothing
+     // below submits anything. On native the image is a handle over the live
+     // texture (`flutter_gpu/texture.cc`'s `Texture::AsImage`) and reads
+     // whatever the texture holds when the picture rasterises, so the order
+     // would not matter there. On the web shim `asImage()` SNAPSHOTS the
+     // texture now (`snapshotTextureSync`), so taken before a target's own
+     // submit it would show last frame's contents. One order that is right on
+     // both backends -- the finding Codex made against revision 5's first
+     // draft, still true now that there are `1 + P` submits instead of one.
+-    for (final (patch, region) in _pendingRegions) {
++    for (var k = 0; k < _pendingPatches.length; k++) {
++      final patch = _pendingPatches[k];
++      final region = _pendingRegions[k];
+       _patchImages.add(PatchImage(
+         textIndex: patch.textIndex,
+         image: patch.target.asImage(),
+         src: Rect.fromLTWH(
+             0, 0, region.width.toDouble(), region.height.toDouble()),
+         dst: Rect.fromLTWH(region.x / dpr, region.y / dpr, region.width / dpr,
+             region.height / dpr),
+         layerBounds: labelBoundsLogical(
+             geometry.texts[patch.textIndex], _collectionToLogical,
+             scratch: _boundsScratch),
+       ));
+     }
+-    // `_pendingRegions` is intentionally left populated here, rather than
+-    // cleared again -- the next `render` call clears it unconditionally, at
+-    // the top, before its own early returns (see that comment): a single
+-    // reset point that covers both a frame that legitimately draws nothing
+-    // and a frame that throws between the `.add` above and this point,
+-    // which a clear only here could not.
++    // `_pendingPatches` and `_pendingRegions` are intentionally left
++    // populated here, rather than cleared again -- the next `render` call
++    // clears both unconditionally, at the top, before its own early returns
++    // (see that comment): a single reset point that covers both a frame
++    // that legitimately draws nothing and a frame that throws between the
++    // `.add` above and this point, which a clear only here could not.
+     return target.asImage();
+   }
+ 
+   /// One frame onto [canvas]: [render], then the compositor. This is the
+   /// call site a widget uses (Plan F) and the harness uses (Task 7).
+   ///
+   /// **Without a [_compositor], the main image alone -- no text, and no
+   /// patches.** A [GpuDrawBackend] built without a [FlutterTextMeasurer] and
+   /// a text-style lookup (Ruling E2's shape again) still draws every stroke,
+   /// join, point and fill exactly as before Plan E; it draws no glyph at all,
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/text_compositor.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/text_compositor.dart
+index ed8adc2..0cb8e83 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/text_compositor.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/text_compositor.dart
+@@ -70,42 +70,66 @@ class TextCompositor {
+   final Paint _imagePaint = Paint()..filterQuality = FilterQuality.none;
+   final Paint _patchPaint = Paint()
+     ..filterQuality = FilterQuality.none
+     ..blendMode = BlendMode.srcATop;
+   final Paint _layerPaint = Paint();
+ 
+   /// Patches composited by the last [paint]. Diagnostics; reset per call.
+   int get patchesComposited => _patchesComposited;
+   int _patchesComposited = 0;
+ 
++  /// Reused per plain label by the viewport test: [boundTransformedBox]'s
++  /// caller-owned scratch, so rejecting an off-screen label allocates
++  /// nothing.
++  final Float64List _bound = Float64List(4);
++
++  /// Plain labels the last [paint] did not draw because their box, under the
++  /// outer transform, missed the viewport entirely. Diagnostics; reset per
++  /// call. A patched label whose patch was off screen is not in `patches`,
++  /// takes the plain branch, and is counted here too.
++  int labelsSkipped = 0;
++
+   void paint(
+     Canvas canvas, {
+     required Image? main,
+     required Size viewport,
+     required Transform2 collectionToLogical,
+     required List<ResidentTextRecord> texts,
+     required List<PatchImage> patches,
+   }) {
+     _patchesComposited = 0;
++    labelsSkipped = 0;
+     if (main != null) {
+       canvas.drawImageRect(
+           main,
+           Rect.fromLTWH(0, 0, main.width.toDouble(), main.height.toDouble()),
+           Rect.fromLTWH(0, 0, viewport.width, viewport.height),
+           _imagePaint);
+     }
+     var p = 0;
+     for (var i = 0; i < texts.length; i++) {
+       final patch =
+           p < patches.length && patches[p].textIndex == i ? patches[p++] : null;
+       if (patch == null) {
+-        _drawLabel(canvas, texts[i], collectionToLogical);
++        final t = texts[i];
++        boundTransformedBox(t.boxMinX, t.boxMinY, t.boxMaxX, t.boxMaxY,
++            collectionToLogical, _bound);
++        // Wholly off screen: nothing to draw. A box touching the edge is
++        // drawn -- the paragraph clips itself.
++        if (_bound[2] < 0 ||
++            _bound[0] > viewport.width ||
++            _bound[3] < 0 ||
++            _bound[1] > viewport.height) {
++          labelsSkipped++;
++          continue;
++        }
++        _drawLabel(canvas, t, collectionToLogical);
+         continue;
+       }
+       // The layer's bounds are in the OUTER frame -- logical pixels -- and
+       // the label's own six floats are applied inside `_drawLabel`, after
+       // this call. A layer opened after the residual would be transformed
+       // twice (a Copilot review finding on revision 5's first draft).
+       //
+       // **`saveLayer` clips to `patch.layerBounds`** -- the label's padded
+       // box (`kTextBoxPadDevicePixels`, `text_patches.dart`) -- so any glyph
+       // overhang beyond the paragraph's advance box, ascent or descent that
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+index e178c99..3ac02c0 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+@@ -377,50 +377,64 @@ bool _reaches(
+     if (y < minY) minY = y;
+     if (y > maxY) maxY = y;
+   }
+   return minX - reach <= t.boxMaxX &&
+       maxX + reach >= t.boxMinX &&
+       minY - reach <= t.boxMaxY &&
+       maxY + reach >= t.boxMinY;
+ }
+ 
+ /// Where a patch draws on screen this frame: device pixels, on the viewport.
++///
++/// **Mutable, and pooled by `GpuDrawBackend`** (Ruling F10, Plan E's RF-1):
++/// one instance per patch for the backend's life, written in place by
++/// [patchRegionFor]'s `out` each frame. Rebuild-time callers and tests pass
++/// no `out` and get a fresh one.
+ class PatchRegion {
+-  const PatchRegion(this.x, this.y, this.width, this.height);
+-  final int x, y, width, height;
++  PatchRegion(this.x, this.y, this.width, this.height);
++  int x, y, width, height;
+ }
+ 
+ /// The label's box under the live camera, intersected with the viewport,
+ /// rounded outward and clamped to the patch target's size (Ruling E8).
+ ///
+ /// Returns null when the label is entirely off screen -- no pass, no
+ /// composite. Never returns a negative origin: `flutter_gpu`'s `Viewport`
+ /// and `Scissor` throw on one, and the pass is anchored at the target's own
+ /// origin anyway; this region's `x, y` are for the compositor's `dst`.
+ ///
+ /// The four corners are [boundTransformedBox]'s (Ruling P2) -- one bound
+ /// loop, not a second copy of it. The caller passes a reused scratch on the
+ /// frame path; a null scratch allocates one -- test callers.
+ PatchRegion? patchRegionFor(ResidentTextRecord t, Transform2 collectionToDevice,
+     int widthPx, int heightPx,
+-    {required int maxWidth, required int maxHeight, Float64List? scratch}) {
++    {required int maxWidth,
++    required int maxHeight,
++    Float64List? scratch,
++    PatchRegion? out}) {
+   final bound = scratch ?? Float64List(4);
+   boundTransformedBox(
+       t.boxMinX, t.boxMinY, t.boxMaxX, t.boxMaxY, collectionToDevice, bound);
+   final x0 = bound[0].floor().clamp(0, widthPx);
+   final y0 = bound[1].floor().clamp(0, heightPx);
+   final x1 = bound[2].ceil().clamp(0, widthPx);
+   final y1 = bound[3].ceil().clamp(0, heightPx);
+   if (x1 <= x0 || y1 <= y0) return null;
+   final w = (x1 - x0).clamp(0, maxWidth);
+   final h = (y1 - y0).clamp(0, maxHeight);
+-  return PatchRegion(x0, y0, w, h);
++  if (out == null) return PatchRegion(x0, y0, w, h);
++  out
++    ..x = x0
++    ..y = y0
++    ..width = w
++    ..height = h;
++  return out;
+ }
+ 
+ /// The patch target's size: the label's box at the band's CEILING, in
+ /// device pixels, rounded up and clamped to the viewport -- the largest
+ /// region [patchRegionFor] can return inside the band, so a zoom inside it
+ /// resizes the region and never the texture. Never zero in either
+ /// dimension: a zero-sized texture is a per-backend question this plan does
+ /// not ask (the same rule `ResidentGeometry._upload` applies to an empty
+ /// instance buffer).
+ ///
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart b/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart
+index 7c4c53c..185ac01 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/frame_info_test.dart
+@@ -138,20 +138,38 @@ void main() {
+           reason: 'e * sx - 1, dpr folded in');
+       expect(at(13), closeTo(26 * -0.01 + 1, 1e-6),
+           reason: 'f * sy + 1, dpr folded in');
+       expect(at(16), closeTo(200, 1e-6),
+           reason: 'half viewport x -- device pixels, doubled from the '
+               'dpr == 1 test');
+       expect(at(17), closeTo(100, 1e-6),
+           reason: 'half viewport y -- device pixels, doubled from the '
+               'dpr == 1 test');
+     });
++
++    test('buildFrameInfo writes into `out` when given one of the right size',
++        () {
++      final m = Transform2(2, 0.5, -0.5, 2, 30, -40);
++      final fresh = buildFrameInfo(m, 800, 600, dashScale: 1.7);
++      final out = ByteData(80);
++      final written = buildFrameInfo(m, 800, 600, dashScale: 1.7, out: out);
++      expect(identical(written, out), isTrue);
++      for (var i = 0; i < 80; i++) {
++        expect(out.getUint8(i), fresh.getUint8(i), reason: 'byte $i');
++      }
++      // The wrong size is not trusted: a fresh block, not a partial write.
++      final wrong = ByteData(64);
++      expect(
++          identical(
++              buildFrameInfo(m, 800, 600, dashScale: 1.7, out: wrong), wrong),
++          isFalse);
++    });
+   });
+ 
+   group('buildFrameInfo dash_scale', () {
+     test('the block is still 80 bytes and dash_scale is at float 18', () {
+       // Kill: change `f(18, dashScale)` back to `f(18, 0)` -- lengthInBytes
+       // stays 80 either way (that comes from the mat4's std140 alignment,
+       // not from this member), but `at(18)` would read 0 instead of 2.5.
+       final data =
+           buildFrameInfo(Transform2.identity(), 800, 600, dashScale: 2.5);
+       expect(data.lengthInBytes, 80,
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/text_compositor_viewport_test.dart b/packages/jet_cad_2d_flutter/test/gpu/text_compositor_viewport_test.dart
+new file mode 100644
+index 0000000..c2381ea
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/gpu/text_compositor_viewport_test.dart
+@@ -0,0 +1,77 @@
++import 'dart:ui';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import '../support/spy_canvas.dart';
++
++const TextStyleRecord _roboto =
++    TextStyleRecord(handle: Handle(11), name: 'Standard', fontFamily: 'Roboto');
++
++/// A label whose collection-space box is [minX, minY]..[maxX, maxY], upright,
++/// baseline at its box's bottom. Text, style and colour are the same for all
++/// three; only the box moves.
++ResidentTextRecord label(double minX, double minY, double maxX, double maxY) =>
++    ResidentTextRecord(
++        text: 'LABEL',
++        style: const Handle(11),
++        argb: 0xFF000000,
++        a: 1,
++        b: 0,
++        c: 0,
++        d: -1,
++        e: minX,
++        f: maxY,
++        boxMinX: minX,
++        boxMinY: minY,
++        boxMaxX: maxX,
++        boxMaxY: maxY,
++        instanceIndex: 0);
++
++void main() {
++  test(
++      'labels outside the viewport are skipped; inside and straddling are drawn',
++      () {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final compositor =
++        TextCompositor(measurer: measurer, textStyleOf: (_) => _roboto);
++    const viewport = Size(400, 300);
++    // The outer transform is a pan of (-1000, 0): a label at x 1020..1100 in
++    // collection space lands at 20..100 on screen (inside), one at 400..480
++    // lands at -600..-520 (outside, left), one at 970..1030 straddles x = 0,
++    // one at 1000..1080 / y 900..950 is below the viewport (outside).
++    final outer = Transform2.translation(-1000, 0);
++    final texts = <ResidentTextRecord>[
++      label(1020, 100, 1100, 130),
++      label(400, 100, 480, 130),
++      label(970, 200, 1030, 230),
++      label(1000, 900, 1080, 950),
++    ];
++    final spy = SpyCanvas();
++    compositor.paint(spy,
++        main: null,
++        viewport: viewport,
++        collectionToLogical: outer,
++        texts: texts,
++        patches: const <PatchImage>[]);
++    // MUTATION (M-F11): invert the rejection -> 2 paragraphs skipped, 2 drawn
++    // -- the wrong two, and `text_order_test.dart`'s composited differential
++    // goes red with it.
++    expect(spy.named('drawParagraph').length, 2,
++        reason: 'the inside label and the straddling one');
++    expect(compositor.labelsSkipped, 2);
++    // Anti-vacuity: with a pan that brings every label on screen, all four
++    // draw and nothing is skipped.
++    final all = SpyCanvas();
++    compositor.paint(all,
++        main: null,
++        viewport: const Size(2000, 2000),
++        collectionToLogical: Transform2.identity(),
++        texts: texts,
++        patches: const <PatchImage>[]);
++    expect(all.named('drawParagraph').length, 4);
++    expect(compositor.labelsSkipped, 0);
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/text_patches_test.dart b/packages/jet_cad_2d_flutter/test/gpu/text_patches_test.dart
+index da0cdbe..9eeacb1 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/text_patches_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/text_patches_test.dart
+@@ -286,20 +286,50 @@ void main() {
+     test('a rotated camera bounds all four corners', () {
+       // 90-degree rotation: the 40x20 box becomes 20x40 on screen; a region
+       // built from two corners only would have a negative size.
+       final rot = Transform2.translation(300, 300)
+           .multiply(Transform2.rotation(3.141592653589793 / 2));
+       final r =
+           patchRegionFor(t, rot, 800, 600, maxWidth: 800, maxHeight: 600)!;
+       expect(r.width, 20);
+       expect(r.height, 40);
+     });
++
++    test('patchRegionFor writes into `out` and leaves it alone when off screen',
++        () {
++      final t = ResidentTextRecord(
++          text: 'X',
++          style: const Handle(11),
++          argb: 0xFF000000,
++          a: 1,
++          b: 0,
++          c: 0,
++          d: -1,
++          e: 0,
++          f: 0,
++          boxMinX: 10,
++          boxMinY: 20,
++          boxMaxX: 50,
++          boxMaxY: 40,
++          instanceIndex: 0);
++      final out = PatchRegion(7, 7, 7, 7);
++      final onScreen = patchRegionFor(t, Transform2.scale(2, 2), 800, 600,
++          maxWidth: 4096, maxHeight: 4096, out: out);
++      expect(identical(onScreen, out), isTrue);
++      expect((out.x, out.y, out.width, out.height), (20, 40, 80, 40));
++      final offScreen = patchRegionFor(
++          t, Transform2.translation(-1000, 0), 800, 600,
++          maxWidth: 4096, maxHeight: 4096, out: out);
++      expect(offScreen, isNull);
++      expect((out.x, out.y, out.width, out.height), (20, 40, 80, 40),
++          reason: 'an off-screen answer must not scribble on the pool entry');
++    });
+   });
+ 
+   group('patchTargetSizeFor', () {
+     final t = _label(minX: 10, minY: 20, maxX: 50, maxY: 40, at: 0);
+     test('is the box at the band ceiling, in device pixels, rounded up', () {
+       // 40x20 collection units * dpr 2 * ceiling 2 = 160x80.
+       expect(patchTargetSizeFor(t, 2.0, maxWidth: 4000, maxHeight: 4000),
+           (160, 80));
+     });
+     test('is clamped to the viewport', () {

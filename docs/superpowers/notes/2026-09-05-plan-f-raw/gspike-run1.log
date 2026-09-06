@@ -1,0 +1,181 @@
+Resolving dependencies in `/Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band`...
+Downloading packages...
+  _fe_analyzer_shared 103.0.0 (107.0.0 available)
+  analyzer 13.3.0 (14.3.0 available)
+  code_assets 1.2.1 (2.0.0 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  objective_c 9.5.0 (9.6.0 available)
+  package_config 2.2.0 (3.0.0 available)
+  shadcn_ui 0.55.1 (0.56.3 available)
+  test 1.31.1 (1.32.0 available)
+  test_api 0.7.12 (0.7.14 available)
+  test_core 0.6.18 (0.6.20 available)
+Got dependencies in `/Users/ahmeturel/Projects/oss/jet-cad/.worktrees/plan-f-rebuild-and-band`!
+10 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Launching lib/main.dart on macOS in profile mode...
+Building macOS application...                                   
+warning: Run script build phase 'Run Script' will be run during every build because it does not specify any outputs. To address this issue, either add output dependencies to the script phase, or configure it to run in every build by unchecking "Based on dependency analysis" in the script phase. (in target 'Flutter Assemble' from project 'Runner')
+✓ Built build/macos/Build/Products/Profile/dev_harness_2d.app (72.0MB)
+[IMPORTANT:flutter/shell/platform/embedder/embedder_surface_metal_impeller.mm(53)] Using the Impeller rendering backend (MetalSDF).
+R2 app-run: JC_WINDOW=1400x900
+Failed to foreground app; open returned 1
+
+Flutter run key commands.
+h List all available interactive commands.
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on macOS is available at: http://127.0.0.1:63309/YeXmgFNoiKM=/
+The Flutter DevTools debugger and profiler on macOS is available at: http://127.0.0.1:63309/YeXmgFNoiKM=/devtools/?uri=ws://127.0.0.1:63309/YeXmgFNoiKM=/ws
+flutter: GSPIKE collect+upload: walk 8.0 ms, total 96.4 ms, instances=106852, buffer=6.79 MB, skippedOps=0, textOps=165 patches=87 subBuffer=0.27 MB patchTargets=1.77 MB classify=6.7 ms
+flutter: GSPIKE run: entities=10000 instances=106852 viewport=1400x900 frames=30 repeats=3
+flutter: GSPIKE note: arm C (residentGpu) draws strokes, joins, points, circles, arcs, shaded dashes, (since Plan D) fills and (since Plan E) text -- 0 op(s) this walk did not draw. Text is drawn through the compositor: resident labels position from a per-frame uniform, and this corpus has 165 label(s), of which 87 are patches -- a label a later stroke covers, redrawn into its own small offscreen target and composited back after the main pass so the covering geometry still wins. Only present when SPIKE_TEXT=true; at its default the corpus carries no text and both counts are 0. DRAW_TEXT=false is criterion 11's control: it asks the painter to suppress every text op, so a run at DRAW_TEXT=false against the same SPIKE_TEXT=true corpus isolates the cost of drawing text as a difference between the two runs, not a single number read alone. Fills are only in this corpus when SPIKE_FILLS=true; at its default the corpus carries none and skippedOps is 0 on this account regardless. Butt caps only -- Plan B emits no cap geometry. No antialiasing. Dash patterns are evaluated per fragment against the live camera since Plan C, collapse rule included, so nothing about them is baked. Every remaining gap favours arm C on a timing comparison, which is why the picture matters as much as the numbers here.
+flutter: GSPIKE D residentGpu (DraftCanvas): first rebuild landed after 0 frame(s) -- walk 13.8 classify 9.0 upload 2.4 total 25.3 ms (COLD: the first GPU call of the process pays pipeline creation)
+flutter: GSPIKE --- repeat 1 of 3 ---
+flutter: GSPIKE A painter (untiled) | hold | build  p50=0.08 p95=0.09 max=0.09 mean=0.08 (ms, n=26)
+flutter: GSPIKE A painter (untiled) | hold | raster p50=4.35 p95=4.87 max=5.02 mean=4.43 (ms, n=26)
+flutter: GSPIKE A painter (untiled) | pan | build  p50=8.04 p95=10.23 max=12.39 mean=8.39 (ms, n=25)
+flutter: GSPIKE A painter (untiled) | pan | raster p50=4.20 p95=4.93 max=6.85 mean=4.27 (ms, n=25)
+flutter: GSPIKE A painter (untiled) | zoom | build  p50=8.21 p95=16.09 max=26.50 mean=9.24 (ms, n=24)
+flutter: GSPIKE A painter (untiled) | zoom | raster p50=6.27 p95=10.41 max=15.35 mean=6.50 (ms, n=24)
+flutter: GSPIKE B tiles (blit) | hold | build  p50=0.18 p95=0.30 max=0.36 mean=0.18 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | hold | raster p50=0.71 p95=1.12 max=1.16 mean=0.69 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | build  p50=0.33 p95=0.55 max=0.56 mean=0.34 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | raster p50=0.85 p95=1.26 max=1.28 mean=0.85 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | build  p50=0.31 p95=0.57 max=0.97 mean=0.32 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | raster p50=0.80 p95=4.61 max=4.92 mean=1.08 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | build  p50=0.08 p95=0.18 max=0.30 mean=0.09 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | raster p50=2.92 p95=5.50 max=13.21 mean=3.43 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | gpu submits=0 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | patches rendered=87 clipped=0 offscreen=0
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | build  p50=2.60 p95=7.37 max=10.49 mean=2.98 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | raster p50=2.44 p95=3.99 max=12.63 mean=2.93 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | gpu submits=30 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | patches rendered=87 clipped=0 offscreen=0
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | build  p50=2.23 p95=2.79 max=3.55 mean=2.07 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | raster p50=2.54 p95=3.32 max=4.04 mean=2.56 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | gpu submits=30 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | patches rendered=49 clipped=0 offscreen=38
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | build  p50=0.09 p95=0.23 max=0.34 mean=0.10 (ms, n=26)
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | raster p50=3.62 p95=6.57 max=7.93 mean=4.11 (ms, n=26)
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | gpu submits=0 of 30 frames
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | patches rendered=92 clipped=0 offscreen=0
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | build  p50=2.53 p95=7.37 max=9.41 mean=3.01 (ms, n=26)
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | raster p50=3.13 p95=4.75 max=8.37 mean=3.32 (ms, n=26)
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | gpu submits=30 of 30 frames
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | patches rendered=92 clipped=0 offscreen=0
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | build  p50=2.17 p95=6.96 max=9.21 mean=2.76 (ms, n=27)
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | raster p50=2.91 p95=9.86 max=13.53 mean=3.98 (ms, n=27)
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | gpu submits=30 of 30 frames
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | patches rendered=50 clipped=0 offscreen=42
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r1 | CommandApplied | trigger=document walk 11.20 classify 7.05 upload 1.56 total 22.27 ms | landed after 2 frame(s) | instances=106853 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r1 | CommandUndone | trigger=document walk 9.44 classify 5.82 upload 1.39 total 18.16 ms | landed after 2 frame(s) | instances=106852 patches=87 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r1 | CommandRedone | trigger=document walk 9.23 classify 6.10 upload 1.39 total 18.34 ms | landed after 2 frame(s) | instances=106853 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r1 | DocumentLoaded | trigger=document walk 6.90 classify 6.12 upload 1.37 total 14.39 ms | landed after 2 frame(s) | instances=106853 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r1 | DocumentPurged | trigger=document walk 7.33 classify 5.45 upload 1.29 total 15.59 ms | landed after 2 frame(s) | instances=106853 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r1 | tables | trigger=tables walk 7.29 classify 6.08 upload 1.45 total 14.82 ms | landed after 2 frame(s) | instances=106853 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r1 | devicePixelRatio | trigger=devicePixelRatio walk 6.96 classify 5.38 upload 1.36 total 13.70 ms | landed after 2 frame(s) | instances=106853 patches=90 buffer=6.78 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r1 | devicePixelRatio back | trigger=devicePixelRatio walk 9.37 classify 5.43 upload 1.28 total 16.09 ms | landed after 2 frame(s) | instances=106853 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r1 | band out | trigger=band walk 13.28 classify 7.61 upload 1.48 total 22.37 ms | landed after 2 frame(s) | instances=153215 patches=87 buffer=9.57 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r1 | band back | trigger=band walk 9.26 classify 5.70 upload 1.30 total 16.28 ms | landed after 2 frame(s) | instances=106853 patches=90 buffer=6.79 MB
+flutter: GSPIKE --- repeat 2 of 3 ---
+flutter: GSPIKE A painter (untiled) | hold | build  p50=0.04 p95=0.11 max=0.24 mean=0.05 (ms, n=27)
+flutter: GSPIKE A painter (untiled) | hold | raster p50=3.78 p95=7.32 max=9.15 mean=4.13 (ms, n=27)
+flutter: GSPIKE A painter (untiled) | pan | build  p50=8.39 p95=15.78 max=24.48 mean=9.65 (ms, n=23)
+flutter: GSPIKE A painter (untiled) | pan | raster p50=4.39 p95=6.61 max=8.40 mean=4.77 (ms, n=23)
+flutter: GSPIKE A painter (untiled) | zoom | build  p50=8.56 p95=15.08 max=23.16 mean=8.87 (ms, n=24)
+flutter: GSPIKE A painter (untiled) | zoom | raster p50=4.18 p95=5.62 max=7.37 mean=4.24 (ms, n=24)
+flutter: GSPIKE B tiles (blit) | hold | build  p50=0.23 p95=0.32 max=0.36 mean=0.23 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | hold | raster p50=0.89 p95=1.67 max=5.66 mean=1.14 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | build  p50=0.41 p95=0.54 max=0.56 mean=0.38 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | raster p50=0.96 p95=1.37 max=1.74 mean=0.95 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | build  p50=0.26 p95=0.56 max=0.57 mean=0.28 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | raster p50=0.76 p95=3.77 max=4.59 mean=1.02 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | build  p50=0.09 p95=0.16 max=0.27 mean=0.10 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | raster p50=3.56 p95=5.98 max=8.71 mean=4.01 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | gpu submits=0 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | patches rendered=87 clipped=0 offscreen=0
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | build  p50=2.20 p95=8.34 max=10.10 mean=2.91 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | raster p50=2.80 p95=4.05 max=10.78 mean=3.17 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | gpu submits=30 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | patches rendered=87 clipped=0 offscreen=0
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | build  p50=1.75 p95=4.08 max=5.30 mean=1.97 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | raster p50=2.49 p95=3.60 max=6.27 mean=2.60 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | gpu submits=30 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | patches rendered=49 clipped=0 offscreen=38
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | build  p50=0.08 p95=0.22 max=0.33 mean=0.10 (ms, n=27)
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | raster p50=3.57 p95=7.07 max=8.35 mean=4.02 (ms, n=27)
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | gpu submits=0 of 30 frames
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | patches rendered=90 clipped=0 offscreen=0
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | build  p50=2.23 p95=7.89 max=8.03 mean=2.72 (ms, n=26)
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | raster p50=2.75 p95=4.90 max=10.22 mean=3.14 (ms, n=26)
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | gpu submits=30 of 30 frames
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | patches rendered=90 clipped=0 offscreen=0
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | build  p50=2.31 p95=6.89 max=7.07 mean=2.66 (ms, n=27)
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | raster p50=3.00 p95=6.78 max=9.54 mean=3.47 (ms, n=27)
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | gpu submits=30 of 30 frames
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | patches rendered=52 clipped=0 offscreen=38
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r2 | CommandApplied | trigger=document walk 11.31 classify 7.29 upload 1.45 total 22.64 ms | landed after 2 frame(s) | instances=106854 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r2 | CommandUndone | trigger=document walk 10.30 classify 6.02 upload 1.45 total 19.39 ms | landed after 2 frame(s) | instances=106853 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r2 | CommandRedone | trigger=document walk 10.51 classify 5.61 upload 1.43 total 19.26 ms | landed after 2 frame(s) | instances=106854 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r2 | DocumentLoaded | trigger=document walk 9.00 classify 5.77 upload 1.49 total 16.26 ms | landed after 2 frame(s) | instances=106854 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r2 | DocumentPurged | trigger=document walk 9.98 classify 6.59 upload 1.52 total 19.74 ms | landed after 2 frame(s) | instances=106854 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r2 | tables | trigger=tables walk 9.67 classify 5.58 upload 1.45 total 16.70 ms | landed after 2 frame(s) | instances=106854 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r2 | devicePixelRatio | trigger=devicePixelRatio walk 9.83 classify 6.41 upload 1.44 total 17.69 ms | landed after 2 frame(s) | instances=106854 patches=90 buffer=6.78 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r2 | devicePixelRatio back | trigger=devicePixelRatio walk 8.51 classify 5.51 upload 1.27 total 15.29 ms | landed after 2 frame(s) | instances=106854 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r2 | band out | trigger=band walk 10.63 classify 7.42 upload 1.58 total 19.63 ms | landed after 2 frame(s) | instances=153216 patches=87 buffer=9.57 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r2 | band back | trigger=band walk 8.02 classify 6.93 upload 1.26 total 16.20 ms | landed after 2 frame(s) | instances=106854 patches=90 buffer=6.79 MB
+flutter: GSPIKE --- repeat 3 of 3 ---
+flutter: GSPIKE A painter (untiled) | hold | build  p50=0.06 p95=0.21 max=0.34 mean=0.07 (ms, n=27)
+flutter: GSPIKE A painter (untiled) | hold | raster p50=4.69 p95=8.66 max=16.91 mean=5.44 (ms, n=27)
+flutter: GSPIKE A painter (untiled) | pan | build  p50=7.96 p95=15.46 max=25.22 mean=9.31 (ms, n=23)
+flutter: GSPIKE A painter (untiled) | pan | raster p50=3.94 p95=6.08 max=7.21 mean=4.17 (ms, n=23)
+flutter: GSPIKE A painter (untiled) | zoom | build  p50=7.46 p95=9.19 max=9.31 mean=7.49 (ms, n=25)
+flutter: GSPIKE A painter (untiled) | zoom | raster p50=3.70 p95=4.00 max=4.01 mean=3.46 (ms, n=25)
+flutter: GSPIKE B tiles (blit) | hold | build  p50=0.21 p95=0.30 max=0.39 mean=0.21 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | hold | raster p50=0.82 p95=1.19 max=4.43 mean=0.94 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | build  p50=0.33 p95=0.53 max=0.54 mean=0.37 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | pan | raster p50=0.88 p95=1.17 max=5.21 mean=1.03 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | build  p50=0.27 p95=0.46 max=0.59 mean=0.29 (ms, n=26)
+flutter: GSPIKE B tiles (blit) | zoom | raster p50=0.73 p95=1.78 max=4.04 mean=0.90 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | build  p50=0.07 p95=0.16 max=0.29 mean=0.09 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | raster p50=3.49 p95=6.11 max=7.93 mean=3.92 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | gpu submits=0 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | hold | patches rendered=87 clipped=0 offscreen=0
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | build  p50=2.21 p95=7.71 max=8.33 mean=2.74 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | raster p50=2.78 p95=5.09 max=10.13 mean=3.12 (ms, n=26)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | gpu submits=30 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | pan | patches rendered=87 clipped=0 offscreen=0
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | build  p50=2.00 p95=8.05 max=9.81 mean=2.49 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | raster p50=2.69 p95=5.95 max=10.27 mean=3.20 (ms, n=27)
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | gpu submits=30 of 30 frames
+flutter: GSPIKE C residentGpu (jet_cad_2d_flutter) | zoom | patches rendered=49 clipped=0 offscreen=38
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | build  p50=0.09 p95=0.18 max=0.34 mean=0.10 (ms, n=27)
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | raster p50=3.53 p95=6.15 max=8.14 mean=4.13 (ms, n=27)
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | gpu submits=0 of 30 frames
+flutter: GSPIKE D residentGpu (DraftCanvas) | hold | patches rendered=90 clipped=0 offscreen=0
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | build  p50=2.15 p95=6.39 max=9.35 mean=2.66 (ms, n=26)
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | raster p50=2.95 p95=4.58 max=8.18 mean=3.20 (ms, n=26)
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | gpu submits=30 of 30 frames
+flutter: GSPIKE D residentGpu (DraftCanvas) | pan | patches rendered=90 clipped=0 offscreen=0
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | build  p50=2.16 p95=7.45 max=8.62 mean=2.58 (ms, n=27)
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | raster p50=2.78 p95=7.36 max=10.64 mean=3.29 (ms, n=27)
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | gpu submits=30 of 30 frames
+flutter: GSPIKE D residentGpu (DraftCanvas) | zoom | patches rendered=52 clipped=0 offscreen=38
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r3 | CommandApplied | trigger=document walk 11.43 classify 7.46 upload 1.49 total 23.15 ms | landed after 2 frame(s) | instances=106855 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r3 | CommandUndone | trigger=document walk 10.90 classify 5.96 upload 1.44 total 19.94 ms | landed after 2 frame(s) | instances=106854 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r3 | CommandRedone | trigger=document walk 10.14 classify 5.53 upload 1.42 total 18.66 ms | landed after 2 frame(s) | instances=106855 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r3 | DocumentLoaded | trigger=document walk 8.38 classify 5.86 upload 1.30 total 15.55 ms | landed after 2 frame(s) | instances=106855 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r3 | DocumentPurged | trigger=document walk 9.40 classify 6.70 upload 1.49 total 19.08 ms | landed after 2 frame(s) | instances=106855 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r3 | tables | trigger=tables walk 9.60 classify 5.74 upload 1.42 total 16.77 ms | landed after 2 frame(s) | instances=106855 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r3 | devicePixelRatio | trigger=devicePixelRatio walk 9.55 classify 5.51 upload 1.34 total 16.41 ms | landed after 2 frame(s) | instances=106855 patches=90 buffer=6.78 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r3 | devicePixelRatio back | trigger=devicePixelRatio walk 9.65 classify 5.53 upload 1.39 total 16.57 ms | landed after 2 frame(s) | instances=106855 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r3 | band out | trigger=band walk 12.90 classify 7.55 upload 1.65 total 22.10 ms | landed after 2 frame(s) | instances=153217 patches=87 buffer=9.57 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) rebuild | r3 | band back | trigger=band walk 7.12 classify 7.67 upload 1.35 total 16.14 ms | landed after 2 frame(s) | instances=106855 patches=90 buffer=6.79 MB
+flutter: GSPIKE D residentGpu (DraftCanvas) | bandexit | build  p50=1.75 p95=7.72 max=8.44 mean=2.06 (ms, n=38)
+flutter: GSPIKE D residentGpu (DraftCanvas) | bandexit | raster p50=3.01 p95=7.31 max=11.49 mean=3.32 (ms, n=38)
+flutter: GSPIKE D residentGpu (DraftCanvas) | bandexit | exitStep=36 landedAtStep=37 staleFrames=1 submits=-1 lastTrigger=band (criterion 9: the stale interval after a mid-gesture band exit, reported without a threshold)
+flutter: GSPIKE alloc: UNEVALUABLE -- SocketException: Connection failed (OS Error: Operation not permitted, errno = 1), address = 127.0.0.1, port = 63309
+flutter: GSPIKE done: 36 phase reports above.
+Application finished.

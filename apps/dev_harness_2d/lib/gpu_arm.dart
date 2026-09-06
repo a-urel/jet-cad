@@ -2,12 +2,18 @@
 // design; see `measurement_rig.dart`.
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+// `kDefaultOriginX`, `kOriginY`, `kFloorWidth`, `kFloorHeight` -- the floor
+// [fireDocumentTrigger] puts its probe line across, the same constants
+// `main.dart`'s `_addPatchedLabels` reads.
+import 'package:jet_cad_2d/testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'allocation_probe.dart';
 import 'measurement_rig.dart';
 
 // --- The GPU arm: painter vs. tiles vs. jet_cad_2d_flutter's resident-GPU
@@ -79,7 +85,7 @@ import 'measurement_rig.dart';
 // the reverse. Plan C moved that branch into the vertex shader, where it is
 // re-decided every frame from one uniform.
 
-/// The three arms.
+/// The four arms.
 enum GpuSpikeArm {
   /// Today's untiled path: the whole document walked per frame into one
   /// `drawVertices`.
@@ -94,14 +100,34 @@ enum GpuSpikeArm {
   /// the camera a per-frame uniform, one instanced draw call. Sharp, and the
   /// question is what it costs -- and, on a device for the first time here,
   /// whether it draws the right picture at all.
-  gpu;
+  gpu,
+
+  /// `DraftCanvas(backend: RenderBackend.residentGpu)`: the same backend as
+  /// arm C, reached through the widget path Plan F wired -- collected over
+  /// the extents at the live scale, rebuilt on the five triggers. Arm C
+  /// stays as the control (Ruling F9); a widget-path regression shows as a
+  /// C-to-D gap, not as a mystery.
+  widget;
 
   String get label => switch (this) {
         GpuSpikeArm.painter => 'A painter (untiled)',
         GpuSpikeArm.tiled => 'B tiles (blit)',
         GpuSpikeArm.gpu => 'C residentGpu (jet_cad_2d_flutter)',
+        GpuSpikeArm.widget => 'D residentGpu (DraftCanvas)',
       };
 }
+
+/// Criterion 5's gate (Ruling F8): per-frame allocations on arm D's pan
+/// phase, `<= kAllocFixed + kAllocPerPatch * P`. The per-patch set the spec's
+/// exception enumerates -- `PatchImage`, three `Rect`s, the `asImage()`
+/// handle, plus the GPU shim's own `Viewport`, `Vector4`, two `BufferView`s,
+/// a command buffer and a render pass -- is under twelve; the fixed set --
+/// `composeTransforms` twice, the main image and its two `Rect`s, the main
+/// pass's shim objects -- is under twenty. Both doubled: a per-INSTANCE
+/// allocation is ~110,000 per frame on the measured corpus and no slack
+/// here can hide it.
+const int kAllocFixed = 40;
+const int kAllocPerPatch = 24;
 
 /// One phase's timings, in milliseconds.
 class GpuPhaseReport {
@@ -116,8 +142,9 @@ class GpuPhaseReport {
   final List<double> build;
   final List<double> raster;
 
-  /// GPU frames arm C submitted during the phase. Zero on a hold is the arm
-  /// working: nothing changed, so nothing was re-rendered.
+  /// GPU frames arm C -- or, since Plan F, arm D -- submitted during the
+  /// phase. Zero on a hold is the arm working: nothing changed, so nothing
+  /// was re-rendered.
   final int submits;
 
   /// Web only: how far the reported-frame count ran ahead of the pumped count.
@@ -128,9 +155,10 @@ class GpuPhaseReport {
   /// [GpuDrawBackend.patchesRendered]/`patchesClipped`/`patchesOffscreen`,
   /// read right after the phase -- so these describe the phase's **last
   /// frame only**, not a sum or an average over it, the same way `submits`
-  /// is the only per-phase figure that is a genuine total. Zero on every arm
-  /// but `gpu`, and zero on arm `gpu` too whenever `SPIKE_TEXT` is off or the
-  /// corpus's labels are not covered by anything at this phase's camera.
+  /// is the only per-phase figure that is a genuine total. Zero on arms A and
+  /// B, which have no resident backend at all, and zero on `gpu` and `widget`
+  /// too whenever `SPIKE_TEXT` is off or the corpus's labels are not covered
+  /// by anything at this phase's camera.
   final int patchesRendered;
   final int patchesClipped;
   final int patchesOffscreen;
@@ -284,6 +312,23 @@ class GpuSpikeState extends State<GpuSpikeApp> {
       ViewportTransform.fit(widget.document.extents, widget.viewport));
 
   final ValueNotifier<GpuSpikeArm> arm = ValueNotifier(GpuSpikeArm.painter);
+
+  /// Arm D's canvas, so the rig can read its rebuilder.
+  final GlobalKey<DraftCanvasState> widgetKey = GlobalKey<DraftCanvasState>();
+
+  /// Non-null while the rig is exercising the `devicePixelRatio` trigger:
+  /// arm D's `MediaQuery` reports this ratio instead of the window's.
+  final ValueNotifier<double?> dprOverride = ValueNotifier<double?>(null);
+
+  ResidentRebuilder? get widgetRebuilder => widgetKey.currentState?.resident;
+
+  /// The `GpuDrawBackend` an arm draws through, or null: arm C's is
+  /// [backend]; arm D's is its rebuilder's, once landed; A and B have none.
+  GpuDrawBackend? backendOf(GpuSpikeArm a) => switch (a) {
+        GpuSpikeArm.gpu => backend,
+        GpuSpikeArm.widget => widgetRebuilder?.backend as GpuDrawBackend?,
+        _ => null,
+      };
 
   /// Null until [_buildResidentGeometry] finishes, and possibly still null
   /// after that -- see the doc comment there. Arm C draws through this, when
@@ -447,6 +492,7 @@ class GpuSpikeState extends State<GpuSpikeApp> {
     index.dispose();
     camera.dispose();
     arm.dispose();
+    dprOverride.dispose();
     backend?.dispose();
     super.dispose();
   }
@@ -491,6 +537,42 @@ class GpuSpikeState extends State<GpuSpikeApp> {
                       Positioned.fill(
                         child: GpuArmView(backend: built, camera: camera),
                       ),
+                    // **`Offstage`, not `if (a == GpuSpikeArm.widget)`**, and
+                    // that is the whole difference between arm D and arm C
+                    // above. Arm C's widget is created and destroyed with
+                    // every switch, which is free because its backend lives
+                    // on [backend] out here; arm D's rebuilder lives inside
+                    // its `DraftCanvasState`, so a widget that came and went
+                    // would tear the collection down and re-upload it on
+                    // every switch and measure nothing but first builds.
+                    // Offstage keeps one state alive for the whole run. An
+                    // `Offstage` canvas is laid out and never painted, so arm
+                    // D's first `noteFrame` -- and its first rebuild --
+                    // happens when the rig switches to it.
+                    Offstage(
+                      offstage: a != GpuSpikeArm.widget,
+                      child: ValueListenableBuilder<double?>(
+                        valueListenable: dprOverride,
+                        builder: (context, dpr, _) {
+                          final data = MediaQuery.of(context);
+                          return MediaQuery(
+                            data: dpr == null
+                                ? data
+                                : data.copyWith(devicePixelRatio: dpr),
+                            child: DraftCanvas(
+                              key: widgetKey,
+                              document: widget.document,
+                              index: index,
+                              camera: camera,
+                              lineweightScale: widget.lineweightScale,
+                              drawText: widget.drawText,
+                              backend: RenderBackend.residentGpu,
+                              tiles: false,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                     // **Only after the last phase, and that is not cosmetic.**
                     // An overlay in the tree while a phase is running would be
                     // laid out and painted inside the frames being measured.
@@ -533,6 +615,69 @@ class GpuSpikeState extends State<GpuSpikeApp> {
       );
 }
 
+/// Fires one of the document-side triggers by name. `probe` is the handle
+/// the `CommandApplied` line is added under (and undone, and redone); the
+/// caller allocates it once per trigger sweep from `doc.handleSeed`.
+///
+/// **One fresh handle per sweep, not one per run.** `AddEntityCommand` throws
+/// `DuplicateHandleError` on a handle the document already carries, and the
+/// sweep leaves its line behind: `CommandRedone` puts it back and neither
+/// `DocumentLoaded` nor `DocumentPurged` removes it. A second sweep reusing
+/// the same handle would throw rather than fire a trigger.
+void fireDocumentTrigger(DraftDocument doc, String name,
+    {required Handle probe}) {
+  switch (name) {
+    case 'CommandApplied':
+      final cx = kDefaultOriginX + kFloorWidth / 2;
+      final cy = kOriginY + kFloorHeight / 2;
+      doc.commands.execute(AddEntityCommand(
+        record: EntityRecord(
+          handle: probe,
+          owner: doc.rootHandle,
+          kind: EntityKind.line,
+          layer: ReservedHandles.layerZero,
+          linetype: ReservedHandles.byLayerLinetype,
+          linetypeScale: 1.0,
+          geomIndex: 0,
+          color: const ByLayerColor(),
+          lineweight: 100,
+          transparency: 0,
+          flags: 0,
+        ),
+        payload: GeometryPayload(
+            coords: Float64List.fromList(
+                [cx - 8000, cy - 5000, cx + 8000, cy + 5000]),
+            scalars: Float64List(0)),
+      ));
+    case 'CommandUndone':
+      doc.commands.undo();
+    case 'CommandRedone':
+      doc.commands.redo();
+    case 'DocumentLoaded':
+      doc.commands.notifyLoaded();
+    case 'DocumentPurged':
+      doc.purge();
+    case 'tables':
+      final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+      final next =
+          zero.color is IndexedColor && (zero.color as IndexedColor).aci == 1
+              ? 2
+              : 1;
+      doc.tables.layers.remove(zero.handle);
+      doc.tables.layers.add(LayerRecord(
+          handle: zero.handle,
+          name: zero.name,
+          color: IndexedColor(next),
+          linetype: zero.linetype,
+          lineweight: zero.lineweight,
+          transparency: zero.transparency,
+          visible: zero.visible,
+          locked: zero.locked));
+    default:
+      throw ArgumentError.value(name, 'name', 'not a document trigger');
+  }
+}
+
 /// Runs every arm over every phase, interleaved, [repeats] times.
 ///
 /// **Interleaved and not blocked**, for the reason Plan 3i recorded: blocked
@@ -548,6 +693,7 @@ Future<void> runGpuSpike(
 
   final baseCamera = state.camera.value;
   final centre = Offset(viewport.width / 2, viewport.height / 2);
+  final baseDpr = MediaQuery.devicePixelRatioOf(state.context);
 
   gpuReport('GSPIKE run: entities=$entities instances=${state.instanceCount} '
       'viewport=${viewport.width.toStringAsFixed(0)}x'
@@ -578,10 +724,47 @@ Future<void> runGpuSpike(
   final reports = <GpuPhaseReport>[];
 
   Future<void> setArm(GpuSpikeArm a) async {
-    final before = state.backend?.frames ?? 0;
+    final before = state.backendOf(a)?.frames ?? 0;
+    // Whether this is arm D's FIRST switch -- the one that pays the cold
+    // rebuild, and the only one the "no GPU frame" guard below can read.
+    final coldWidget =
+        a == GpuSpikeArm.widget && (state.widgetRebuilder?.landed ?? 0) == 0;
     state.arm.value = a;
     await pumpFrame();
     await pumpFrame();
+    if (a == GpuSpikeArm.widget) {
+      // Arm D rebuilds on its first painted frame; nothing it draws before
+      // the landing is the resident backend. Wait for it, bounded, and refuse
+      // to measure a canvas that fell back.
+      var waited = 0;
+      while ((state.widgetRebuilder?.landed ?? 0) == 0 && waited < 300) {
+        await pumpFrame();
+        waited++;
+      }
+      final r = state.widgetRebuilder;
+      if (r == null || r.landed == 0) {
+        throw StateError('GSPIKE ${a.label}: no rebuild landed in $waited '
+            'frames -- the widget path is not wired, or the upload hangs.');
+      }
+      if (r.uploadFailed) {
+        throw StateError('GSPIKE ${a.label}: the upload failed and the canvas '
+            'fell back to vertices; every number it would post is arm A\'s.');
+      }
+      if (coldWidget) {
+        // The landing happens in a post-frame callback, so the loop above
+        // exits BEFORE any frame has painted through the new backend. Two
+        // more, so `frames` below reads a backend that is actually in the
+        // paint path.
+        await pumpFrame();
+        await pumpFrame();
+        gpuReport('GSPIKE ${a.label}: first rebuild landed after $waited '
+            'frame(s) -- walk ${(r.lastWalkMicros / 1000).toStringAsFixed(1)} '
+            'classify ${(r.lastClassifyMicros / 1000).toStringAsFixed(1)} '
+            'upload ${(r.lastUploadMicros / 1000).toStringAsFixed(1)} '
+            'total ${(r.lastTotalMicros / 1000).toStringAsFixed(1)} ms (COLD: '
+            'the first GPU call of the process pays pipeline creation)');
+      }
+    }
     // **The `painted=0` check belongs here, not in a phase.** Arm C renders
     // only when the camera changes, so a hold legitimately submits nothing --
     // that is the arm working, and the first smoke run's guard called it a
@@ -590,31 +773,46 @@ Future<void> runGpuSpike(
     // [GpuSpikeState.backend] never got built (`ResidentGeometry.create`
     // returned null): `state.backend?.frames` reads `null ?? 0` on every
     // frame, so `before` and the post-switch count are equal either way.
-    if (a == GpuSpikeArm.gpu && (state.backend?.frames ?? 0) == before) {
+    //
+    // **Arm D is checked on its COLD switch only**, and arm C on every one.
+    // Arm C's widget is rebuilt from scratch on each switch, so its render
+    // object always paints; arm D's lives behind an `Offstage` and keeps its
+    // layer, so a switch that changes neither the camera nor the collection
+    // -- `rebuildPhase` and the band-exit phase both call `setArm` when D is
+    // already the live arm -- legitimately paints nothing and would trip a
+    // guard that ran every time. What the guard is for is arm D never
+    // reaching the paint path at all, and the cold switch is where that
+    // shows; the per-phase `submits` line reports the warm case.
+    if ((a == GpuSpikeArm.gpu || coldWidget) &&
+        (state.backendOf(a)?.frames ?? 0) == before) {
       throw StateError('GSPIKE ${a.label}: switching to this arm submitted no '
           'GPU frame, so it is not in the paint path at all. Every number it '
           'would post is the cost of an empty screen.');
     }
   }
 
-  Future<GpuPhaseReport> phase(
+  /// The timing capture [phase] and `bandExitPhase` share: arm the stream,
+  /// establish a baseline, run [body] -- which pumps every measured frame
+  /// through the log itself and returns how many it pumped -- drain, and turn
+  /// the aligned timings into two millisecond lists.
+  ///
+  /// Factored out rather than duplicated because the band-exit phase does not
+  /// know its frame count in advance (it steps until the rebuild lands), so it
+  /// cannot go through [phase]'s fixed loop, and a second hand-rolled copy of
+  /// the backlog refusal is exactly the kind of drift that publishes two
+  /// numbers taken under different rules.
+  Future<({List<double> build, List<double> raster, int unalignedExcess})>
+      capture(
     GpuSpikeArm a,
     String name,
-    void Function(int i) step,
+    Future<int> Function(FrameTimingLog log) body,
   ) async {
-    state.camera.value = baseCamera;
-    await pumpFrame();
-
-    final framesAtStart = state.backend?.frames ?? 0;
     var unalignedExcess = 0;
     final log = FrameTimingLog()..arm();
     try {
       await log.establishBaseline(pumpFrame);
-      for (var i = 0; i < frames; i++) {
-        step(i);
-        await log.pump(pumpFrame);
-      }
-      await log.drain(pumpFrame, upTo: frames);
+      final pumped = await body(log);
+      await log.drain(pumpFrame, upTo: pumped);
       // **The refusal stands on native and is relaxed on web, deliberately
       // and only there.** On the web the latch fires on arm A -- the plain
       // painter, no GPU code anywhere near it -- so it is not reporting a
@@ -638,21 +836,179 @@ Future<void> runGpuSpike(
         raster.add(t.rasterDuration.inMicroseconds / 1000.0);
       }
       if (kIsWeb) unalignedExcess = log.debugWorstExcess;
-      // Read right after the phase's last frame, not summed or averaged over
-      // it -- `GpuDrawBackend` resets these three at the top of every
-      // `render`, so they already describe one frame and not the phase as a
-      // whole. `state.backend` is only non-null on arm `gpu`; the other two
-      // arms report zero, which [GpuPhaseReport]'s own doc comment explains.
-      final b = state.backend;
-      return GpuPhaseReport(
-          a, name, build, raster, (state.backend?.frames ?? 0) - framesAtStart,
-          unalignedExcess: unalignedExcess,
-          patchesRendered: b?.patchesRendered ?? 0,
-          patchesClipped: b?.patchesClipped ?? 0,
-          patchesOffscreen: b?.patchesOffscreen ?? 0);
+      return (build: build, raster: raster, unalignedExcess: unalignedExcess);
     } finally {
       log.disarm();
     }
+  }
+
+  Future<GpuPhaseReport> phase(
+    GpuSpikeArm a,
+    String name,
+    void Function(int i) step,
+  ) async {
+    state.camera.value = baseCamera;
+    await pumpFrame();
+
+    final framesAtStart = state.backendOf(a)?.frames ?? 0;
+    final t = await capture(a, name, (log) async {
+      for (var i = 0; i < frames; i++) {
+        step(i);
+        await log.pump(pumpFrame);
+      }
+      return frames;
+    });
+    // Read right after the phase's last frame, not summed or averaged over
+    // it -- `GpuDrawBackend` resets these three at the top of every
+    // `render`, so they already describe one frame and not the phase as a
+    // whole. `backendOf` is only non-null on arms C and D; the other two
+    // arms report zero, which [GpuPhaseReport]'s own doc comment explains.
+    final b = state.backendOf(a);
+    return GpuPhaseReport(
+        a, name, t.build, t.raster, (b?.frames ?? 0) - framesAtStart,
+        unalignedExcess: t.unalignedExcess,
+        patchesRendered: b?.patchesRendered ?? 0,
+        patchesClipped: b?.patchesClipped ?? 0,
+        patchesOffscreen: b?.patchesOffscreen ?? 0);
+  }
+
+  /// The trigger names, in the order the spec's table lists them, the dpr
+  /// pair and the band pair last.
+  const triggers = <String>[
+    'CommandApplied',
+    'CommandUndone',
+    'CommandRedone',
+    'DocumentLoaded',
+    'DocumentPurged',
+    'tables',
+    'devicePixelRatio',
+    'devicePixelRatio back',
+    'band out',
+    'band back',
+  ];
+
+  /// Fires each of the ten triggers on arm D and times the rebuild that
+  /// lands. **`band out` at 2.5x** collects at 2.5x the fit scale, so its
+  /// `instances` and `buffer` line is the first measurement of criterion 6 at
+  /// a rebuilt scale; `band back` returns to the base camera and the
+  /// collection follows.
+  Future<void> rebuildPhase(int repeat) async {
+    await setArm(GpuSpikeArm.widget);
+    state.camera.value = baseCamera;
+    await pumpFrame();
+    final r = state.widgetRebuilder!;
+    // One fresh handle per sweep: the sweep's `CommandApplied` line survives
+    // it, and `AddEntityCommand` refuses a handle the document already has.
+    final probe = state.widget.document.handleSeed.next();
+    for (final name in triggers) {
+      final before = r.landed;
+      switch (name) {
+        case 'devicePixelRatio':
+          state.dprOverride.value = baseDpr + 1;
+        case 'devicePixelRatio back':
+          state.dprOverride.value = null;
+        case 'band out':
+          state.camera.zoomAt(centre, 2.5);
+        case 'band back':
+          state.camera.zoomAt(centre, 1 / 2.5);
+        default:
+          fireDocumentTrigger(state.widget.document, name, probe: probe);
+      }
+      var waited = 0;
+      while (r.landed == before && waited < 300) {
+        await pumpFrame();
+        waited++;
+      }
+      // **Checked before the landing count, because it is the cause.**
+      // `rebuildNow` increments `landed` even when the upload returned null
+      // (`resident_rebuilder.dart`), so a failed upload reads as a perfectly
+      // ordinary landed rebuild here -- with no backend behind it, no retry,
+      // and every later trigger ignored. Named as the upload failure it is
+      // rather than blamed on whichever trigger happened to be next.
+      if (r.uploadFailed) {
+        throw StateError('GSPIKE ${GpuSpikeArm.widget.label} rebuild | $name | '
+            'the upload failed: the rebuilder has stopped (no backend, no '
+            'retry, every later trigger ignored) and the canvas is drawing '
+            'through VerticesDrawSink. Every number after this point would be '
+            "arm A's.");
+      }
+      if (r.landed == before) {
+        throw StateError('GSPIKE ${GpuSpikeArm.widget.label} rebuild | $name | '
+            'no rebuild landed in $waited frames');
+      }
+      final c = r.collection!;
+      gpuReport('GSPIKE ${GpuSpikeArm.widget.label} rebuild | r${repeat + 1} | '
+          '$name | '
+          'trigger=${r.lastTrigger!.name} '
+          'walk ${(r.lastWalkMicros / 1000).toStringAsFixed(2)} '
+          'classify ${(r.lastClassifyMicros / 1000).toStringAsFixed(2)} '
+          'upload ${(r.lastUploadMicros / 1000).toStringAsFixed(2)} '
+          'total ${(r.lastTotalMicros / 1000).toStringAsFixed(2)} ms | '
+          'landed after $waited frame(s) | instances=${c.instanceCount} '
+          'patches=${c.patches.length} '
+          'buffer=${(c.byteLength / (1024 * 1024)).toStringAsFixed(2)} MB');
+    }
+  }
+
+  /// Criterion 9. Zooms 1.02 per pumped frame until the rebuild the band
+  /// exit provokes has landed, and reports the interval between the two.
+  ///
+  /// Deliberately NOT appended to [reports]: it is one phase run once, with a
+  /// step count that is an outcome rather than a setting, so folding it into
+  /// the per-repeat table would put a variable-length window beside three
+  /// fixed-length ones.
+  Future<void> bandExitPhase() async {
+    await setArm(GpuSpikeArm.widget);
+    final r = state.widgetRebuilder!;
+    state.camera.value = baseCamera;
+    await pumpFrame();
+    await pumpFrame();
+    r.bandStaleFrames = 0;
+    final landedBefore = r.landed;
+    final framesAtStart = state.backendOf(GpuSpikeArm.widget)?.frames ?? 0;
+    // 1.02^36 = 2.04 leaves [0.5, 2.0], so the exit is around step 36 and the
+    // cap is five times the distance to it -- generous enough that hitting it
+    // means the rebuild never landed, not that the gesture was too short.
+    const cap = 200;
+    var exitStep = -1;
+    var landedAtStep = -1;
+    var staleFrames = 0;
+    final t = await capture(GpuSpikeArm.widget, 'bandexit', (log) async {
+      var steps = 0;
+      while (steps < cap) {
+        state.camera.zoomAt(centre, 1.02);
+        steps++;
+        // Read BEFORE the pump: this is the camera the frame about to be
+        // drawn carries, so `exitStep` names the first frame drawn out of
+        // band -- the same frame `noteFrame` will count into
+        // [ResidentRebuilder.bandStaleFrames].
+        if (exitStep < 0 && !r.inBand(state.camera.value)) exitStep = steps;
+        await log.pump(pumpFrame);
+        if (r.landed != landedBefore) {
+          landedAtStep = steps;
+          staleFrames = r.bandStaleFrames;
+          break;
+        }
+      }
+      return steps;
+    });
+    if (landedAtStep < 0) {
+      throw StateError('GSPIKE ${GpuSpikeArm.widget.label} | bandexit | no '
+          'rebuild landed within $cap steps (exitStep=$exitStep) -- the band '
+          'was left and nothing answered, so criterion 9 has no interval to '
+          'report.');
+    }
+    final submits =
+        (state.backendOf(GpuSpikeArm.widget)?.frames ?? 0) - framesAtStart;
+    gpuReport('GSPIKE ${GpuSpikeArm.widget.label} | bandexit | build  '
+        '${gpuStats(t.build)}');
+    gpuReport('GSPIKE ${GpuSpikeArm.widget.label} | bandexit | raster '
+        '${gpuStats(t.raster)}');
+    gpuReport('GSPIKE ${GpuSpikeArm.widget.label} | bandexit | '
+        'exitStep=$exitStep landedAtStep=$landedAtStep '
+        'staleFrames=$staleFrames submits=$submits '
+        'lastTrigger=${r.lastTrigger?.name} (criterion 9: the stale interval '
+        'after a mid-gesture band exit, reported without a threshold)');
   }
 
   for (var r = 0; r < repeats; r++) {
@@ -676,7 +1032,7 @@ Future<void> runGpuSpike(
             '(distribution over the phase window, not per pumped frame); '
             'worst excess=${rep.unalignedExcess} frame(s)');
       }
-      if (rep.arm == GpuSpikeArm.gpu) {
+      if (rep.arm == GpuSpikeArm.gpu || rep.arm == GpuSpikeArm.widget) {
         gpuReport('GSPIKE ${rep.arm.label} | ${rep.phase} | '
             'gpu submits=${rep.submits} of $frames frames');
         // The counters this phase's *last* frame left behind, not a sum or
@@ -687,6 +1043,104 @@ Future<void> runGpuSpike(
             'rendered=${rep.patchesRendered} clipped=${rep.patchesClipped} '
             'offscreen=${rep.patchesOffscreen}');
       }
+    }
+    await rebuildPhase(r);
+  }
+
+  // --- Criterion 9: the stale interval after a mid-gesture band exit. -----
+  //
+  // **The gesture does not stop at the band edge, and that is the whole
+  // point (Ruling F9-a).** A fixed 40-step phase would end while the rebuild
+  // it provoked was still in flight, and the stale interval -- the frames
+  // drawn from the collection the band has already condemned -- would be
+  // truncated by the phase's own length rather than measured. This steps
+  // 1.02 per pumped frame, through the same `FrameTimingLog` every other
+  // phase uses, PAST the exit and on until the rebuild lands.
+  await bandExitPhase();
+
+  // --- Criterion 5: per-frame allocations on arm D's pan. ----------------
+  await setArm(GpuSpikeArm.widget);
+  {
+    state.camera.value = baseCamera;
+    // **Settle before the probe arms, and this is not tidiness.** The
+    // band-exit phase above left the collection out past 2x the fit scale;
+    // coming back to the base camera is itself a band exit in the other
+    // direction (1/2.04 = 0.49, under `kBandLowerScale`), so it schedules a
+    // rebuild that walks the whole document. A walk inside the probe's window
+    // would swamp the per-frame figure with a one-off collection and the line
+    // would read MISS for a reason that has nothing to do with the frame
+    // path.
+    //
+    // **`inBand` is in the condition, not just `pending`/`inFlight`.** A
+    // rebuild that lands mid-loop schedules a repaint, and it is that
+    // repaint's `noteFrame` -- one frame later -- that reads the ratio and
+    // marks `band` again. A loop watching only the two in-flight flags would
+    // exit in the gap between the landing and the next mark, and the walk
+    // would run inside the probe's window after all. Watching the live ratio
+    // closes the gap: nothing can mark `band` while the camera is inside the
+    // collection's band.
+    //
+    // **Two CONSECUTIVE quiet pumps, re-checked after each.** One quiet frame
+    // proves nothing for the same reason: the mark can arrive on the next.
+    final settling = state.widgetRebuilder!;
+    var pumps = 0;
+    var quiet = 0;
+    while (quiet < 2) {
+      if (pumps >= 300) {
+        throw StateError('GSPIKE ${GpuSpikeArm.widget.label} | alloc: the '
+            'rebuilder did not go quiet in $pumps frames (pending='
+            '${settling.pending?.name} inFlight=${settling.inFlight} '
+            'inBand=${settling.inBand(state.camera.value)}). The probe would '
+            'have measured a document walk, not a frame.');
+      }
+      await pumpFrame();
+      pumps++;
+      final busy = settling.pending != null ||
+          settling.inFlight ||
+          !settling.inBand(state.camera.value);
+      quiet = busy ? 0 : quiet + 1;
+    }
+    // **One `try` around the whole probe, not just `connect`.** `reset`,
+    // `read` and `dispose` are RPCs over the same socket and can fail the way
+    // `connect` can; a throw from any of them must end as one UNEVALUABLE
+    // line, not as an exception that takes the rest of the run -- and the
+    // `GSPIKE done` line -- with it.
+    try {
+      final probe = await AllocationProbe.connect();
+      const allocFrames = 30;
+      await probe.reset();
+      for (var i = 0; i < allocFrames; i++) {
+        state.camera.panBy(const Offset(4, 0));
+        await pumpFrame();
+      }
+      final counts = await probe.read();
+      final b = state.backendOf(GpuSpikeArm.widget)!;
+      final patches = b.patchesRendered;
+      var total = 0;
+      for (final n in counts.values) {
+        total += n;
+      }
+      final perFrame = total / allocFrames;
+      final budget = kAllocFixed + kAllocPerPatch * patches;
+      final top = counts.entries.toList()
+        ..sort((x, y) => y.value.compareTo(x.value));
+      for (final e in top.take(15)) {
+        gpuReport('GSPIKE alloc | ${(e.value / allocFrames).toStringAsFixed(1)}'
+            '/frame | ${e.key}');
+      }
+      gpuReport('GSPIKE alloc: arm=${GpuSpikeArm.widget.label} '
+          'perFrame=${perFrame.toStringAsFixed(1)} '
+          'patches=$patches (the LAST frame\'s patchesRendered, not a sum) '
+          'budget=$budget '
+          '(kAllocFixed=$kAllocFixed + kAllocPerPatch=$kAllocPerPatch x P) '
+          '-> ${perFrame <= budget ? "PASS" : "MISS"} | frames=$allocFrames '
+          'classes=${counts.length} total=$total -- read the per-class lines '
+          'above before believing a MISS: the sum includes the rig\'s own '
+          'per-frame ViewportTransform (camera.panBy) and dart:ui compositing '
+          'objects, which are not the resident frame path');
+      await probe.dispose();
+    } catch (error) {
+      gpuReport('GSPIKE alloc: UNEVALUABLE -- $error');
     }
   }
 

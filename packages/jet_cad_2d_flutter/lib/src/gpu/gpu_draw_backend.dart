@@ -9,6 +9,7 @@ import '../flutter_text_measurer.dart';
 import '../viewport_transform.dart';
 import 'gpu_facade.dart' as gpu;
 import 'resident_geometry.dart';
+import 'resident_rebuilder.dart' show ResidentFramePainter;
 import 'text_compositor.dart';
 import 'text_patches.dart';
 
@@ -91,12 +92,15 @@ import 'text_patches.dart';
 /// [dashScale] is written at float index 18 (byte 72), the block's only
 /// trailing scalar; float index 19 (byte 76) stays zero -- it is alignment
 /// padding, not a second member (see this function's doc comment above).
+///
+/// `out`, when given and 80 bytes long, is written in place and returned --
+/// the frame path's own block; a fresh one otherwise.
 ByteData buildFrameInfo(
     Transform2 collectionToDevice, int widthPx, int heightPx,
-    {required double dashScale}) {
+    {required double dashScale, ByteData? out}) {
   final sx = 2.0 / widthPx;
   final sy = -2.0 / heightPx;
-  final data = ByteData(80);
+  final data = out != null && out.lengthInBytes == 80 ? out : ByteData(80);
   void f(int i, double v) => data.setFloat32(i * 4, v, Endian.host);
   f(0, collectionToDevice.a * sx);
   f(1, collectionToDevice.b * sy);
@@ -178,22 +182,26 @@ double dashScaleFor(ViewportTransform camera, Transform2 collectionInverse) =>
 /// two `Float64List(4)` scratches [patchRegionFor] and `labelBoundsLogical`
 /// used to allocate per call into [_regionScratch] and [_boundsScratch]
 /// below -- fields, reused every frame, passed as each function's `scratch`
-/// argument -- so those two are OFF this list now. What remains, one of
-/// each per patch, never per entity and never per plain (uncovered) label:
-/// a `PatchRegion`, a `(ResidentPatch, PatchRegion)` record (in
-/// [_pendingRegions]), a `PatchImage`, three `Rect`s (`PatchImage.src`,
-/// `.dst`, `.layerBounds`), the `Transform2` [composeTransforms] builds for
-/// `toPatch`, the `ByteData(80)` uniform block [buildFrameInfo] returns, one
-/// `saveLayer` (`TextCompositor.paint`) and one `ui.Image` handle
-/// (`asImage()`) -- the same list the spec's text-section exception and
-/// `## Invariants` item 1 now name. Still O(1) per flush, not per entity.
-/// Plan F's two cheapest remaining reuse moves, named but not taken here
-/// (Ruling RF-1 -- a rewrite unmeasured is a rewrite this wave will not
-/// make): a mutable `PatchRegion` (collapsing the `(ResidentPatch,
-/// PatchRegion)` record above to a reused pair) and a reused uniform
-/// `ByteData` (so [buildFrameInfo] writes into a field instead of
-/// allocating one per patch per frame).
-class GpuDrawBackend {
+/// argument -- so those two are OFF this list now. Task 6 (Ruling F10) took
+/// the two moves this doc used to name but not take: [_frameInfo] is one
+/// `ByteData(80)` field [buildFrameInfo]'s `out` writes in place for every
+/// pass of a frame, main and patch alike, and [_regionPool] is one
+/// `PatchRegion` per patch, grown once and written in place by
+/// `patchRegionFor`'s `out` -- so `PatchRegion` and the uniform block are
+/// OFF this list too now. What remains, one of each per patch, never per
+/// entity and never per plain (uncovered) label: a `PatchImage`, three
+/// `Rect`s (`PatchImage.src`, `.dst`, `.layerBounds`), two `Transform2`s for
+/// `toPatch` (the translation [composeTransforms] takes and the composed
+/// result it builds), one `saveLayer` (`TextCompositor.paint`) and one
+/// `ui.Image` handle (`asImage()`) -- alongside `gpu.Viewport`, `vm.Vector4`,
+/// the three `gpu.BufferView`s a patch pass binds (the corner buffer, the
+/// patch's instance buffer, and the one `HostBuffer.emplace` returns for its
+/// uniform block), `gpu.RenderTarget` and `gpu.ColorAttachment` (both
+/// measured at 88.0/frame by the device probe, one pair per patch), the
+/// command buffer and the render pass, which are the GPU shim's own per-pass
+/// objects, not this class's, and which Task 8's probe reports beside ours.
+/// Still O(1) per flush, not per entity.
+class GpuDrawBackend implements ResidentFramePainter {
   GpuDrawBackend(this.geometry, this.collectionCamera,
       {FlutterTextMeasurer? measurer,
       TextStyleRecord Function(Handle)? textStyleOf})
@@ -218,11 +226,22 @@ class GpuDrawBackend {
   /// [_compositor] in [paint].
   final List<PatchImage> _patchImages = <PatchImage>[];
 
-  /// Reused per frame: `(patch, region)` pairs the patch loop in [render]
-  /// found, drained into [_patchImages] after `submit()` -- see [render]'s
-  /// tail for why the split matters.
-  final List<(ResidentPatch, PatchRegion)> _pendingRegions =
-      <(ResidentPatch, PatchRegion)>[];
+  /// The frame's uniform block, written in place by `buildFrameInfo(out:)`
+  /// once for the main pass and once per patch; `HostBuffer.emplace` copies
+  /// the bytes, so one block serves every pass of a frame.
+  final ByteData _frameInfo = ByteData(80);
+
+  /// One `PatchRegion` per patch, for the backend's life -- grown to
+  /// `geometry.patches.length` on the first frame that needs each slot and
+  /// never past it, then written in place by `patchRegionFor(out:)`.
+  final List<PatchRegion> _regionPool = <PatchRegion>[];
+
+  /// Parallel lists, reused per frame: the patches this frame drew and the
+  /// pool entry each drew into, drained into [_patchImages] after the last
+  /// `submit()` (see [render]'s tail). Two lists rather than a list of
+  /// records, so the drain allocates no record per patch.
+  final List<ResidentPatch> _pendingPatches = <ResidentPatch>[];
+  final List<PatchRegion> _pendingRegions = <PatchRegion>[];
 
   /// Reused every frame by [patchRegionFor]'s `scratch` argument, one patch
   /// at a time -- the frame path's own copy of the scratch its doc comment
@@ -340,6 +359,7 @@ class GpuDrawBackend {
     _collectionToLogical =
         composeTransforms(camera.worldToScreenMatrix, _collectionInverse);
     _patchImages.clear();
+    _pendingPatches.clear();
     _pendingRegions.clear();
     patchesRendered = 0;
     patchesClipped = 0;
@@ -431,7 +451,8 @@ class GpuDrawBackend {
       geometry.vertexShader.getUniformSlot('FrameInfo'),
       geometry.uniforms.emplace(buildFrameInfo(
           collectionToDevice, widthPx, heightPx,
-          dashScale: dashScaleFor(camera, _collectionInverse))),
+          dashScale: dashScaleFor(camera, _collectionInverse),
+          out: _frameInfo)),
     );
     // **One call. `cornerVertexCount` vertices, one instance per record, in
     // buffer order.** The buffer was written once, in walk order, by
@@ -485,12 +506,17 @@ class GpuDrawBackend {
     // three counters below were already reset at the top of this method,
     // before the early returns (see that comment) -- not reset again here.
     final dashScale = dashScaleFor(camera, _collectionInverse);
-    for (final patch in geometry.patches) {
+    for (var p = 0; p < geometry.patches.length; p++) {
+      final patch = geometry.patches[p];
       final t = geometry.texts[patch.textIndex];
+      while (_regionPool.length <= p) {
+        _regionPool.add(PatchRegion(0, 0, 0, 0));
+      }
       final region = patchRegionFor(t, collectionToDevice, widthPx, heightPx,
           maxWidth: patch.targetWidth,
           maxHeight: patch.targetHeight,
-          scratch: _regionScratch);
+          scratch: _regionScratch,
+          out: _regionPool[p]);
       if (region == null) {
         patchesOffscreen++;
         continue;
@@ -568,7 +594,7 @@ class GpuDrawBackend {
         geometry.vertexShader.getUniformSlot('FrameInfo'),
         geometry.uniforms.emplace(buildFrameInfo(
             toPatch, region.width, region.height,
-            dashScale: dashScale)),
+            dashScale: dashScale, out: _frameInfo)),
       );
       patchPass.draw(ResidentGeometry.cornerVertexCount,
           instanceCount: patch.instanceCount);
@@ -577,7 +603,8 @@ class GpuDrawBackend {
       // more than one render pass on Metal.
       patchCommandBuffer.submit();
       patchesRendered++;
-      _pendingRegions.add((patch, region));
+      _pendingPatches.add(patch);
+      _pendingRegions.add(region);
     }
 
     frames++;
@@ -593,7 +620,9 @@ class GpuDrawBackend {
     // submit it would show last frame's contents. One order that is right on
     // both backends -- the finding Codex made against revision 5's first
     // draft, still true now that there are `1 + P` submits instead of one.
-    for (final (patch, region) in _pendingRegions) {
+    for (var k = 0; k < _pendingPatches.length; k++) {
+      final patch = _pendingPatches[k];
+      final region = _pendingRegions[k];
       _patchImages.add(PatchImage(
         textIndex: patch.textIndex,
         image: patch.target.asImage(),
@@ -606,12 +635,12 @@ class GpuDrawBackend {
             scratch: _boundsScratch),
       ));
     }
-    // `_pendingRegions` is intentionally left populated here, rather than
-    // cleared again -- the next `render` call clears it unconditionally, at
-    // the top, before its own early returns (see that comment): a single
-    // reset point that covers both a frame that legitimately draws nothing
-    // and a frame that throws between the `.add` above and this point,
-    // which a clear only here could not.
+    // `_pendingPatches` and `_pendingRegions` are intentionally left
+    // populated here, rather than cleared again -- the next `render` call
+    // clears both unconditionally, at the top, before its own early returns
+    // (see that comment): a single reset point that covers both a frame
+    // that legitimately draws nothing and a frame that throws between the
+    // `.add` above and this point, which a clear only here could not.
     return target.asImage();
   }
 
@@ -623,6 +652,7 @@ class GpuDrawBackend {
   /// a text-style lookup (Ruling E2's shape again) still draws every stroke,
   /// join, point and fill exactly as before Plan E; it draws no glyph at all,
   /// resident or patched, until both are supplied.
+  @override
   void paint(
       Canvas canvas, ViewportTransform camera, Size viewport, double dpr) {
     textsDropped = 0;
@@ -657,5 +687,6 @@ class GpuDrawBackend {
         patches: _patchImages);
   }
 
+  @override
   void dispose() => geometry.dispose();
 }

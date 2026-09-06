@@ -22,15 +22,13 @@ enum RenderBackend {
   /// [resolveBackend] routes it back to [vertices] on a platform without
   /// Flutter GPU rather than throwing per frame.
   ///
-  /// **Wiring a GPU-resident sink into `DraftCanvas` is Plan F's work.**
-  /// [resolveBackend] answers only the platform-capability question above;
-  /// it does not decide what the widget paints through. Until Plan F,
-  /// `DraftCanvas` renders this value — including on a platform where
-  /// [resolveBackend] leaves it as `residentGpu` because a GPU is actually
-  /// present — the same way it renders [vertices]: there is no GPU-resident
-  /// sink yet, and painting through `CanvasDrawSink` instead would be a
-  /// regression to the backend this enum's doc already calls "no longer any
-  /// platform's default".
+  /// `DraftCanvas` builds a `ResidentRebuilder` for this value (Plan F):
+  /// the document is collected over its whole extents at the live scale,
+  /// rebuilt on the spec's five triggers and never on a pan, and painted
+  /// through `GpuDrawBackend` once the first rebuild lands. Before that,
+  /// and after an upload that fails, the canvas paints through
+  /// `VerticesDrawSink` and says so once -- see
+  /// `DraftCanvas.debugResidentFallbackReports`.
   residentGpu,
 }
 
