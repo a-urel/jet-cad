@@ -108,8 +108,9 @@ void main() {
   // only things under test -- and they are exact. Every failure in the tests
   // that follow is therefore attributable to a frozen decision, not to the
   // arrangement.
-  test('straight geometry meets criterion 1 at every ratio of the sweep',
-      () async {
+  test(
+      'straight geometry meets criterion 1 at every ratio but the identity, '
+      'where two exact rasterisations tie', () async {
     final doc = crossingGrid(measurer);
     final fit = ViewportTransform.fit(doc.extents, _size);
     final rows = await sweep(doc, measurer,
@@ -152,8 +153,9 @@ void main() {
   });
 
   // The decomposition, and the whole of criterion 2's text half: text and
-  // geometry are pixel-exact across the band, and what fails past it is one
-  // named frozen row -- the level-of-detail cull.
+  // geometry are pixel-exact wherever the frozen cull does not fire -- inside
+  // [0.35, 1.0] on this corpus; 1.4 and 2.0 sit inside the constants' band
+  // and FAIL, which is the criterion-2 finding.
   //
   // `textOverlapFixture`'s TINY label sits under `kMinTextCapPixels` at the
   // reference scale and above it at a 1.4x live scale, so the live reference

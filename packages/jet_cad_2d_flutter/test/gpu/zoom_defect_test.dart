@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import '../support/gpu_comparison.dart';
 import '../support/recording_frame_painter.dart';
 import '../support/resident_zoom_rig.dart';
 import '../support/tile_comparison.dart';
@@ -57,8 +58,10 @@ void main() {
       var camera = tileCamera();
       final uncovered = <int>[];
       final agreement = <double>[];
+      CompositedAgreement? first;
       Future<void> frame() async {
         final m = await rig.frame(camera);
+        first ??= m;
         expect(m.referenceInk, greaterThan(1000), reason: 'anti-vacuity: $m');
         // Ruling F13-a. One or two pixels of edge jitter between two exact
         // rasterisations -- the resident arm's float32 collection vertices
@@ -83,10 +86,12 @@ void main() {
       }
       // ignore: avoid_print
       print('ZOOM-OUT resident uncovered=$uncovered rebuilds=${rig.rebuilds} '
-          'stale=${rig.staleFrames}');
+          'stale=${rig.staleFrames}\n'
+          'ZOOM-OUT resident frame 0: $first');
       // MUTATION (M-F5): collect under the live camera and kTileViewport ->
-      // the first zoom-out step reveals uncovered ink at the viewport's rim,
-      // in the thousands of pixels, and the per-frame bounds above go red.
+      // the first zoom-out step reveals uncovered ink at the viewport's rim
+      // -- 418 pixels on the first zoom-out step when measured, against <= 4
+      // here -- and `rebuilds` reads 0 because the ratio is 1.0 every frame.
       expect(agreement, everyElement(greaterThanOrEqualTo(0.995)));
       expect(rig.rebuilds, 1,
           reason: '0.94^12 = 0.476 leaves the band at the last step');
