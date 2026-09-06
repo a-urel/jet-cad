@@ -133,8 +133,9 @@ final bool kFillsEnabled =
   final other => throw StateError('FILLS must be true or false; got "$other"'),
 };
 
-/// Which sink the harness draws through: `canvas`, `vertices`, or unset for
-/// the platform's own choice.
+/// Parses `BACKEND=canvas|vertices|residentGpu`, or `''` for the platform's
+/// own choice. A function, not an inline switch, so a test can check the
+/// parse without a `--dart-define`.
 ///
 /// **A `String.fromEnvironment`, and it stays one.** Plan 3c lost a full device
 /// run to `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as
@@ -142,14 +143,19 @@ final bool kFillsEnabled =
 /// it was a line printing `corpus=on/off`. A string has no such hazard, and an
 /// unrecognised value throws at startup rather than falling back to something
 /// that looks fine.
+RenderBackend? parseBackend(String value) => switch (value) {
+      '' => null,
+      'canvas' => RenderBackend.canvas,
+      'vertices' => RenderBackend.vertices,
+      'residentGpu' => RenderBackend.residentGpu,
+      final other => throw StateError(
+          'BACKEND must be canvas, vertices, residentGpu or unset; got "$other"'),
+    };
+
+/// Which sink the harness draws through: `canvas`, `vertices`, `residentGpu`,
+/// or unset for the platform's own choice. See [parseBackend].
 final RenderBackend? kBackend =
-    switch (const String.fromEnvironment('BACKEND', defaultValue: '')) {
-  '' => null,
-  'canvas' => RenderBackend.canvas,
-  'vertices' => RenderBackend.vertices,
-  final other =>
-    throw StateError('BACKEND must be canvas, vertices or unset; got "$other"'),
-};
+    parseBackend(const String.fromEnvironment('BACKEND', defaultValue: ''));
 
 /// Whether the canvas draws its frame from cached tiles.
 ///

@@ -186,6 +186,44 @@
             ]
         },
         {
+            // Plan F: four arms (D is DraftCanvas on residentGpu), the ten
+            // trigger rebuilds per repeat, the band-exit phase and the
+            // allocation probe. The same corpus as the criterion-11 run.
+            "name": "2d: GPU spike -- Plan F (arm D, triggers, band exit, probe)",
+            "cwd": "apps/dev_harness_2d",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "macos",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "--dart-define=RUN_GPU_SPIKE=true",
+                "--dart-define=ENTITIES=10000",
+                "--dart-define=SPIKE_DEFS=20",
+                "--dart-define=SPIKE_INSTANCES=150",
+                "--dart-define=SPIKE_FRAMES=30",
+                "--dart-define=SPIKE_REPEATS=3",
+                "--dart-define=SPIKE_FILLS=true",
+                "--dart-define=SPIKE_TEXT=true"
+            ]
+        },
+        {
+            // The main view on the resident backend, for the eye: pan and
+            // zoom by hand, watch the rebuild land past 2x, pan far off the
+            // fitted view and look for an empty edge.
+            "name": "2d: main view -- BACKEND=residentGpu",
+            "cwd": "apps/dev_harness_2d",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "macos",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "--dart-define=BACKEND=residentGpu",
+                "--dart-define=ENTITIES=10000"
+            ]
+        },
+        {
             // Debug mode: hot reload and breakpoints, at the cost of numbers
             // that mean nothing -- `refuseDebugMode()` in the rig refuses to
             // record from a debug build, and the same caution applies to
