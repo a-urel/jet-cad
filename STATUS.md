@@ -93,7 +93,19 @@ Mutation log:
 fourteen named mutations plus a replacement witness, 14 killed, two declared
 equivalent and fired to record their green runs, **zero true survivors**.
 Raw device and suite logs:
-[2026-09-05-plan-f-raw/](docs/superpowers/notes/2026-09-05-plan-f-raw/).
+[2026-09-05-plan-f-raw/](docs/superpowers/notes/2026-09-05-plan-f-raw/) —
+`gspike-run2.log` is **the run of record**, `gspike-run1.log` the first run
+(kept as the evidence for the criterion-5 diagnosis), `band-and-zoom.log` the
+suite rows.
+
+**One `apps/` change, under Ruling F8-a**:
+`com.apple.security.network.client` added to
+`apps/dev_harness_2d/macos/Runner/DebugProfile.entitlements` and
+`Release.entitlements`, two lines each. The sandboxed harness carried
+`network.server` but not `network.client`, so it could not open a loopback
+socket to **its own** VM service and criterion 5 could not be evaluated at all.
+This is enablement of the same class as `FLTEnableFlutterGPU`, which the spec
+puts in the plan.
 
 **Spec open question 3 is answered and struck** (Ruling F1): **the reference
 scale is the live camera's scale at the moment of the rebuild — there is no
@@ -122,22 +134,25 @@ level-of-detail cull on and `agreement=1.00000` PASS with it off.
 | quantity | value |
 |---|---|
 | criterion 2 — the reported band | **`[1.0, 1.0]` = 1.00×** against `hi/lo ≥ 2` — **the design failure the spec names**, decomposed (straight control 16×; text-lod `[0.35, 1.0]`; curves `[1.0, 1.0]`). Constants **unchanged** at 0.5 / 2.0 |
-| criterion 7 — the ten trigger rebuilds, median of three | **MISS, 6 of 10 over 16.67 ms.** Worst `CommandApplied` **22.64 ms** (136% of budget); narrowest miss a table edit at **16.70** (+0.03); cold first rebuild **25.3 ms**, reported not gated. Against Plan C's 115 ms rebuild this is a **5.1× reduction** |
-| criterion 7 — `classify`, Ruling F7's uniform grid | **6.7 ms against Plan E's 27.4 ms on the identical corpus — 4.1× faster**; 164% of the rebuild budget → **40%**. The grid is the single biggest win, and beat `flutter test`'s 1.9× prediction on the device |
-| where the rebuild now goes | `walk` **8.0–12.9 ms** is the dominant term; `upload` **1.26–1.65 ms**, flat. **1.5–2.8 ms of every *edit*-triggered rebuild is an uncounted `document.extents` recomputation** (the cache a mutation invalidates), inside the budget and outside every printed sub-timer |
-| criterion 8 — arm D (`DraftCanvas`) p50, median of three | **MISS, 5 of 6 cells** — hold 0.09/3.57, pan 2.23/2.95, zoom 2.17/2.91 against ≤ 1.2 build / ≤ 2.0 raster |
-| **the widget path's own cost (Ruling F9's control)** | **≤ +0.37 ms anywhere, ≤ +15%.** Every criterion-8 miss is inherited from arm C — Plan E's text-compositor cost — and **none of it comes from putting the backend behind `DraftCanvas`** |
-| criterion 9 — arm D p95 raster | **MISS on all three**: 6.57 / 4.75 / 7.36 against ≤ 3.0. Arm C misses too (5.98 / 4.05 / 3.60), so this is inherited as well |
+| criterion 7 — the ten trigger rebuilds, median of three | **MISS, 6 of 10 over 16.67 ms.** Worst `CommandApplied` **26.93 ms** (162% of budget); best `band back` **13.53**; cold first rebuild **22.4 ms**, reported not gated. Against Plan C's 115 ms rebuild this is a **4.3× reduction**. Both runs put exactly 6 of 10 over, but two borderline rows (`tables`, `DocumentLoaded`, each within ±0.7 ms of the line) swap sides between them — the four clear misses do not |
+| criterion 7 — `classify`, Ruling F7's uniform grid | **6.3 ms against Plan E's 27.4 ms on the identical corpus — 4.3× faster**; 164% of the rebuild budget → **38%**. The grid is the single biggest win, and beat `flutter test`'s 1.9× prediction on the device |
+| where the rebuild now goes | `walk` **6.94–12.64 ms** is the dominant term; `upload` **1.09–1.75 ms**, flat. **An uncounted `document.extents` recomputation costs 1.43–9.64 ms on exactly the four *edit* triggers** (the cache a mutation invalidates) — on `CommandApplied` it reached 8.97 and 9.64 ms, more than a third of that row's whole rebuild — inside the budget and outside every printed sub-timer |
+| criterion 8 — arm D (`DraftCanvas`) p50, median of three | **MISS, 5 of 6 cells** — hold 0.04/3.37, pan 2.60/3.32, zoom 2.34/3.16 against ≤ 1.2 build / ≤ 2.0 raster |
+| **the widget path's own cost (Ruling F9's control)** | **≤ +0.20 ms anywhere at p50, ≤ +8%** — and −0.01 on hold build, where arm D is fractionally *faster* than the control. Every criterion-8 miss is inherited from arm C — Plan E's text-compositor cost — and **none of it comes from putting the backend behind `DraftCanvas`** |
+| criterion 9 — arm D p95 raster | **MISS on all three**: 8.73 / 7.25 / 7.46 against ≤ 3.0. Arm C misses too (5.26 / 4.05 / 7.27), so this is inherited as well. The p50-to-p95 gap on both arms says these are **tail** misses, not a uniformly slow frame path |
 | criterion 9 — the band-exit stale interval | **`staleFrames = 1`** (`exitStep=36`, `landedAtStep=37`), reported without a threshold. **Leaving the band costs one stale frame, not a blank one** — the design's intent, measured |
 | criterion 6 — resident buffer at a rebuilt scale | **MISS at 2.5× fit: 9.57 MB against 8 MB** (153,215 instances, +43% over fit). **PASS at fit: 6.79 MB**, 1.21 MB margin. The memory price of Ruling F1's live-scale collection |
-| criterion 5 — the frame-path allocation probe | **UNEVALUABLE** (Ruling F8's pre-committed outcome, never faked): `SocketException: Connection failed (OS Error: Operation not permitted, errno = 1), address = 127.0.0.1, port = 63309`. None of the fifteen class lines printed. Diagnosed as the macOS App Sandbox refusing the app an outbound loopback connection — invariant 1 still has **no device measurement** |
+| criterion 5 — the frame-path allocation probe | **MISS: `perFrame = 2333.2` against `budget = 2200`** (`kAllocFixed 40 + kAllocPerPatch 24 × P` at `P = 90`), over by 6.1% — evaluable only after **Ruling F8-a** added `com.apple.security.network.client` to the harness's entitlements (run 1 read UNEVALUABLE, the sandbox refusing the app a loopback socket to its own VM service). **But the ten enumerated per-patch classes sum to 1,107.7/frame = 12.3 per patch against the 24 allowed**; the overage is in non-per-patch classes, and `ResidentTextRecord` at 11.0/frame — a class constructed at exactly one site, inside a walk — shows **≈2 collection walks landed inside the probe's window**. MISS as printed, contamination recorded, window to be fixed before anyone acts on it |
 | criterion 12 — both zoom defects | **PASS as amended (Ruling F13-a).** Tiled reproduces at the probe's exact numbers (zoom-out peak **5,730**, **4,893** one frame after; zoom-in **25,275 / 16,681 / 0**); resident **`uncovered ≤ 2`** per frame, 0 on 14 of 18, `rebuilds == 1` out and `0` in. The spec's literal zero is met within float32-vs-float64 tie jitter, with the numbers |
 | mutations | **14 killed + M-F10′; M-F10 and E-F1 equivalent, fired and recorded; zero true survivors** |
 | the window | **all four Plan F checks OWED — not looked at by a human**; Plan E's fifth also still OWED |
 
-**Exit gate: 7 of 14.** Five measured MISSes (criteria 2, 7, 8, 9 and 6), each
-recorded with its number and **no threshold moved**; one UNEVALUABLE
-(criterion 5) with the refusal quoted; one OWED (the window). Full account:
+**Exit gate: 7 of 14.** Six measured MISSes (criteria 2, 5, 6, 7, 8 and 9),
+each recorded with its number and **no threshold moved**; one OWED (the
+window). **No criterion is UNEVALUABLE** — criterion 5 moved from UNEVALUABLE
+to a measured MISS once Ruling F8-a let the harness open its own VM service.
+Two device runs were made and **run 2 is the run of record**; run 1 is kept as
+the evidence for the criterion-5 diagnosis. Full account:
 [2026-09-05-plan-f-results.md](docs/superpowers/notes/2026-09-05-plan-f-results.md).
 
 **Correcting a number in the record while reading the field that proves it:**
@@ -850,8 +865,8 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 `c5b8ee8..HEAD` on branch `plan-f/rebuild-and-band`, worktree
 `.worktrees/plan-f-rebuild-and-band` — and it is NOT merged. It is awaiting
 two things from the human: a look at the window, and the merge decision.**
-Neither is the controller's to make. Its exit gate is **7 of 14**, with five
-measured MISSes, one UNEVALUABLE and one OWED, and **no threshold moved to
+Neither is the controller's to make. Its exit gate is **7 of 14**, with six
+measured MISSes and one OWED (nothing UNEVALUABLE), and **no threshold moved to
 make anything pass**:
 
 - **Criterion 2 — the band is `[1.0, 1.0]` = 1.00×** against `hi/lo ≥ 2`:
@@ -862,21 +877,27 @@ make anything pass**:
   the text cull per frame in the shader) or accept a 1.00× band and rebuild
   on every scale change.
 - **Criterion 7 — 6 of 10 triggers over 16.67 ms**, worst `CommandApplied` at
-  **22.64 ms**. But `classify` fell from Plan E's **27.4 ms to 6.7 ms**
-  (4.1×, Ruling F7's uniform grid) and the whole rebuild is **5.1× faster
-  than Plan C's 115 ms**. `walk` is now the dominant term, and **1.5–2.8 ms
-  of every edit-triggered rebuild is an uncounted `document.extents`
-  recomputation**.
+  **26.93 ms**. But `classify` fell from Plan E's **27.4 ms to 6.3 ms**
+  (4.3×, Ruling F7's uniform grid) and the whole rebuild is **4.3× faster
+  than Plan C's 115 ms**. `walk` is now the dominant term, and an uncounted
+  `document.extents` recomputation costs **1.43–9.64 ms on the four edit
+  triggers**.
 - **Criteria 8 and 9 MISS, and the control proves they are not the widget's
-  fault**: the arm C → arm D difference is **≤ +0.37 ms anywhere** (≤ +15%).
-  Every miss is inherited from Plan E's already-recorded text-compositor cost.
+  fault**: the arm C → arm D difference is **≤ +0.20 ms at p50 anywhere**
+  (≤ +8%, and −0.01 on hold build). Every miss is inherited from Plan E's
+  already-recorded text-compositor cost.
 - **Criterion 6 MISSes at a rebuilt scale** — 9.57 MB at 2.5× fit against
   8 MB — and passes at fit (6.79 MB). That is the memory price of Ruling F1.
-- **Criterion 5 is UNEVALUABLE**, Ruling F8's pre-committed outcome, never
-  faked: the harness's VM-service probe was refused an outbound loopback
-  connection (`SocketException ... Operation not permitted, errno = 1`),
-  diagnosed as the macOS App Sandbox. **Invariant 1 has no device
-  measurement.**
+- **Criterion 5 MISSES, 2333.2 against a 2200 budget** — 6.1% over. It was
+  UNEVALUABLE on run 1 (the sandbox refused the harness a loopback socket to
+  its own VM service) until **Ruling F8-a** added
+  `com.apple.security.network.client` to the harness's two entitlement files.
+  **Read the decomposition before acting on the MISS**: the ten enumerated
+  per-patch classes cost 12.3 per patch against the 24 allowed, and
+  `ResidentTextRecord` at 11.0/frame proves **≈2 collection walks landed inside
+  the probe's 30-frame window**, which the settle loop was written to exclude.
+  **Fix the window first, then re-read** — a clean window would very likely
+  read PASS.
 - **Criterion 12 PASSES** as amended (Ruling F13-a): both zoom defects
   reproduce on tiles at the probe's exact numbers and are absent on the
   resident arm.
@@ -971,29 +992,32 @@ IS NEXT**, the seventh and last of the design spec's plans, and it inherits:
   (question 4, which Decision 1 needs and no measurement separates from
   one-time setup), and **Skwasm** (question 5, named by criterion 13 and never
   run).
-- **Criterion 5, UNEVALUABLE and diagnosed.** The harness's VM-service
-  allocation probe is refused an outbound loopback connection by the macOS App
-  Sandbox (`EPERM` on connect, while the service is reachable from *outside*
-  the app — the port is in the run's own banner). The fix is very likely one
-  entitlement in `apps/dev_harness_2d/macos/Runner/*.entitlements`; Task 10
-  does not edit `apps/**`. **Invariant 1's "new mechanism" still has no device
-  measurement.**
+- **Criterion 5's MISS, and the harness bug under it.** `perFrame = 2333.2`
+  against a 2,200 budget, but the ten enumerated per-patch classes account for
+  only 1,107.7 of it (**12.3 per patch against 24 allowed**), and
+  `ResidentTextRecord` at 11.0/frame — constructed at exactly one site, inside
+  `GeometryCollector.drawText` — proves **≈2 collection walks were accumulated
+  inside the probe's 30-frame window**. **Fix the window first** (assert
+  `rebuilder.rebuilds` is unchanged across the probe and throw if not), then
+  re-read. Nobody should act on either verdict until it is clean.
 - **Criterion 7's MISS, with its lever named.** Six of ten triggers over
-  16.67 ms, worst 22.64. `classify` is no longer the problem (6.7 ms, 40% of
-  budget, down from Plan E's 27.4). `walk` is (8.0–12.9 ms), and **1.5–2.8 ms
-  of every edit-triggered rebuild is an uncounted `document.extents`
-  recomputation** — the cache a document mutation invalidates, inside the
-  budget and outside every printed sub-timer.
+  16.67 ms, worst 26.93. `classify` is no longer the problem (6.3 ms, 38% of
+  budget, down from Plan E's 27.4). `walk` is (6.94–12.64 ms), and **an
+  uncounted `document.extents` recomputation costs 1.43–9.64 ms on exactly the
+  four edit triggers** — up to a third of `CommandApplied`'s whole rebuild,
+  inside the budget and outside every printed sub-timer.
 - **Criterion 6's MISS at a rebuilt scale** — 9.57 MB at 2.5× fit against an
   8 MB budget (+43% instances over fit), a direct consequence of Ruling F1's
   live-scale collection.
 - **Criteria 8 and 9's MISSes, which are Plan E's, not the widget's** — the
-  arm C → arm D difference is ≤ +0.37 ms everywhere. The cost is the text
-  compositor's 87–92 per-frame patch passes, already Plan E's criterion-11
-  MISS.
+  arm C → arm D difference is ≤ +0.20 ms at p50 everywhere. The cost is the
+  text compositor's 87–92 per-frame patch passes, already Plan E's criterion-11
+  MISS. The p50-to-p95 gap on both arms says these are **tail** misses.
 - **The criterion-2 design failure as a decision, not a task** (above).
-- **R6-2 stays parked** (Ruling F10), now with no new evidence either way,
-  because the probe that would have produced it is UNEVALUABLE.
+- **R6-2 stays parked** (Ruling F10) — but it now has its number:
+  **95.6 `ui.Image` + 95.6 `_Image` allocations per frame**, one handle per
+  patch, never disposed. That is the evidence the ruling said a later plan
+  would act on.
 - **Harness minors**: `submits` reads negative across a backend swap (the
   band-exit line printed `submits=-1` — a counter-identity artifact, not a
   render failure); the rebuild line's `walk + classify + upload` does not
@@ -1030,7 +1054,8 @@ became of each:**
   what criteria 8 and 9 are now paying for (87–92 patch passes per frame).
 - R6-2 (parked, not fixed): **1 + P** `ui.Image` handles churn per frame, never
   disposed — `P = 87`. **STILL PARKED** (Ruling F10), and the allocation probe
-  that would have produced the deciding evidence came back UNEVALUABLE.
+  that would have produced the deciding evidence now reports it: 95.6 + 95.6
+  handles per frame, one per patch.
 - The frozen-culling divergence the four-scale differential gate left ungated at
   `minTextCapPixels: 0`. **MEASURED** — it is one half of criterion 2's
   decomposition, and the argument that proves it: cull on `uncovered=153` FAIL,
