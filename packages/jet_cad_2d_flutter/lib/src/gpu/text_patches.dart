@@ -343,6 +343,9 @@ void _expandedBox(
 /// (Ruling E5): half-width for a stroke and a point, `halfWidth *
 /// kMiterLimit` for a join, nothing for a fill. The kind dispatch is the
 /// shader's own chain of `<` comparisons.
+///
+/// If the dispatch or the reach here changes, change [_expandedBox] too --
+/// it must never bound less than this function does.
 bool _reaches(
     Float32List d, int i, ResidentTextRecord t, double unitsPerDevicePixel) {
   final o = i * kFloatsPerInstance;
