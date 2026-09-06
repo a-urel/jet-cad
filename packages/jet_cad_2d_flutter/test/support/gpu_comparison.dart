@@ -647,9 +647,19 @@ int countDifferingPixels(TriangleRasterizer a, TriangleRasterizer b) {
 /// instrument is different -- this one sees text.
 class CompositedAgreement {
   const CompositedAgreement(this.union, this.withinTwo, this.overEight,
-      this.referenceInk, this.patchCount);
+      this.referenceInk, this.patchCount, this.uncovered);
   final int union, withinTwo, overEight, referenceInk, patchCount;
+
+  /// Reference ink the resident arm left blank -- the zoom-out defect's own
+  /// unit (`InkReport.uncoveredPixels` on the tiled arm).
+  final int uncovered;
   double get agreement => union == 0 ? 1.0 : withinTwo / union;
+
+  @override
+  String toString() =>
+      'CompositedAgreement(agreement=${agreement.toStringAsFixed(5)} '
+      'withinTwo=$withinTwo union=$union overEight=$overEight '
+      'uncovered=$uncovered referenceInk=$referenceInk patches=$patchCount)';
 }
 
 /// Both arms through Skia, text included -- the first instrument in this
@@ -707,6 +717,11 @@ Future<CompositedAgreement> measureCompositedAgreement(
   /// the reference picture stays UNDER it in the resident one instead.
   List<TextPatch> Function(List<TextPatch>)? mutatePatches,
   double minTextCapPixels = kMinTextCapPixels,
+
+  /// The viewport the collector walks under -- `collectionFrameFor(...)
+  /// .viewport` for a rebuild's arrangement; defaults to [size], Plan E's
+  /// arrangement.
+  Size? collectionViewport,
 }) async {
   final w = (size.width * devicePixelRatio).round();
   final h = (size.height * devicePixelRatio).round();
@@ -744,7 +759,7 @@ Future<CompositedAgreement> measureCompositedAgreement(
       devicePixelRatio: devicePixelRatio,
       measurer: measurer,
       textStyleOf: document.textStyleOf);
-  painter.paint(collector, collectionCamera, size);
+  painter.paint(collector, collectionCamera, collectionViewport ?? size);
   final data = collector.data;
   final texts = collector.texts;
   var patches = classifyTextPatches(data, collector.instanceCount, texts,
@@ -823,10 +838,12 @@ Future<CompositedAgreement> measureCompositedAgreement(
   final a = (await refImage.toByteData(format: ImageByteFormat.rawRgba))!;
   final b = (await outImage.toByteData(format: ImageByteFormat.rawRgba))!;
   var union = 0, withinTwo = 0, overEight = 0, referenceInk = 0;
+  var uncovered = 0;
   for (var i = 0; i < w * h; i++) {
     final o = i * 4;
     final inkA = a.getUint8(o + 3) != 0, inkB = b.getUint8(o + 3) != 0;
     if (inkA) referenceInk++;
+    if (inkA && !inkB) uncovered++;
     if (!inkA && !inkB) continue;
     union++;
     var worst = 0;
@@ -846,6 +863,6 @@ Future<CompositedAgreement> measureCompositedAgreement(
   }
   outImage.dispose();
 
-  return CompositedAgreement(
-      union, withinTwo, overEight, referenceInk, compositor.patchesComposited);
+  return CompositedAgreement(union, withinTwo, overEight, referenceInk,
+      compositor.patchesComposited, uncovered);
 }
