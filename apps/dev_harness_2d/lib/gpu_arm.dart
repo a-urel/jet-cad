@@ -736,14 +736,14 @@ Future<void> runGpuSpike(
       // Arm D rebuilds on its first painted frame; nothing it draws before
       // the landing is the resident backend. Wait for it, bounded, and refuse
       // to measure a canvas that fell back.
-      var frames = 0;
-      while ((state.widgetRebuilder?.landed ?? 0) == 0 && frames < 300) {
+      var waited = 0;
+      while ((state.widgetRebuilder?.landed ?? 0) == 0 && waited < 300) {
         await pumpFrame();
-        frames++;
+        waited++;
       }
       final r = state.widgetRebuilder;
       if (r == null || r.landed == 0) {
-        throw StateError('GSPIKE ${a.label}: no rebuild landed in $frames '
+        throw StateError('GSPIKE ${a.label}: no rebuild landed in $waited '
             'frames -- the widget path is not wired, or the upload hangs.');
       }
       if (r.uploadFailed) {
@@ -757,7 +757,7 @@ Future<void> runGpuSpike(
         // paint path.
         await pumpFrame();
         await pumpFrame();
-        gpuReport('GSPIKE ${a.label}: first rebuild landed after $frames '
+        gpuReport('GSPIKE ${a.label}: first rebuild landed after $waited '
             'frame(s) -- walk ${(r.lastWalkMicros / 1000).toStringAsFixed(1)} '
             'classify ${(r.lastClassifyMicros / 1000).toStringAsFixed(1)} '
             'upload ${(r.lastUploadMicros / 1000).toStringAsFixed(1)} '
@@ -791,29 +791,28 @@ Future<void> runGpuSpike(
     }
   }
 
-  /// [frameCount] overrides the run's [frames] for this one phase -- the
-  /// band-exit phase needs exactly 40 steps of 1.02 to leave the band, which
-  /// is not the run's frame count.
-  Future<GpuPhaseReport> phase(
+  /// The timing capture [phase] and `bandExitPhase` share: arm the stream,
+  /// establish a baseline, run [body] -- which pumps every measured frame
+  /// through the log itself and returns how many it pumped -- drain, and turn
+  /// the aligned timings into two millisecond lists.
+  ///
+  /// Factored out rather than duplicated because the band-exit phase does not
+  /// know its frame count in advance (it steps until the rebuild lands), so it
+  /// cannot go through [phase]'s fixed loop, and a second hand-rolled copy of
+  /// the backlog refusal is exactly the kind of drift that publishes two
+  /// numbers taken under different rules.
+  Future<({List<double> build, List<double> raster, int unalignedExcess})>
+      capture(
     GpuSpikeArm a,
     String name,
-    void Function(int i) step, {
-    int? frameCount,
-  }) async {
-    final n = frameCount ?? frames;
-    state.camera.value = baseCamera;
-    await pumpFrame();
-
-    final framesAtStart = state.backendOf(a)?.frames ?? 0;
+    Future<int> Function(FrameTimingLog log) body,
+  ) async {
     var unalignedExcess = 0;
     final log = FrameTimingLog()..arm();
     try {
       await log.establishBaseline(pumpFrame);
-      for (var i = 0; i < n; i++) {
-        step(i);
-        await log.pump(pumpFrame);
-      }
-      await log.drain(pumpFrame, upTo: n);
+      final pumped = await body(log);
+      await log.drain(pumpFrame, upTo: pumped);
       // **The refusal stands on native and is relaxed on web, deliberately
       // and only there.** On the web the latch fires on arm A -- the plain
       // painter, no GPU code anywhere near it -- so it is not reporting a
@@ -837,21 +836,40 @@ Future<void> runGpuSpike(
         raster.add(t.rasterDuration.inMicroseconds / 1000.0);
       }
       if (kIsWeb) unalignedExcess = log.debugWorstExcess;
-      // Read right after the phase's last frame, not summed or averaged over
-      // it -- `GpuDrawBackend` resets these three at the top of every
-      // `render`, so they already describe one frame and not the phase as a
-      // whole. `state.backend` is only non-null on arm `gpu`; the other two
-      // arms report zero, which [GpuPhaseReport]'s own doc comment explains.
-      final b = state.backendOf(a);
-      return GpuPhaseReport(
-          a, name, build, raster, (b?.frames ?? 0) - framesAtStart,
-          unalignedExcess: unalignedExcess,
-          patchesRendered: b?.patchesRendered ?? 0,
-          patchesClipped: b?.patchesClipped ?? 0,
-          patchesOffscreen: b?.patchesOffscreen ?? 0);
+      return (build: build, raster: raster, unalignedExcess: unalignedExcess);
     } finally {
       log.disarm();
     }
+  }
+
+  Future<GpuPhaseReport> phase(
+    GpuSpikeArm a,
+    String name,
+    void Function(int i) step,
+  ) async {
+    state.camera.value = baseCamera;
+    await pumpFrame();
+
+    final framesAtStart = state.backendOf(a)?.frames ?? 0;
+    final t = await capture(a, name, (log) async {
+      for (var i = 0; i < frames; i++) {
+        step(i);
+        await log.pump(pumpFrame);
+      }
+      return frames;
+    });
+    // Read right after the phase's last frame, not summed or averaged over
+    // it -- `GpuDrawBackend` resets these three at the top of every
+    // `render`, so they already describe one frame and not the phase as a
+    // whole. `backendOf` is only non-null on arms C and D; the other two
+    // arms report zero, which [GpuPhaseReport]'s own doc comment explains.
+    final b = state.backendOf(a);
+    return GpuPhaseReport(
+        a, name, t.build, t.raster, (b?.frames ?? 0) - framesAtStart,
+        unalignedExcess: t.unalignedExcess,
+        patchesRendered: b?.patchesRendered ?? 0,
+        patchesClipped: b?.patchesClipped ?? 0,
+        patchesOffscreen: b?.patchesOffscreen ?? 0);
   }
 
   /// The trigger names, in the order the spec's table lists them, the dpr
@@ -896,26 +914,101 @@ Future<void> runGpuSpike(
         default:
           fireDocumentTrigger(state.widget.document, name, probe: probe);
       }
-      var frames = 0;
-      while (r.landed == before && frames < 300) {
+      var waited = 0;
+      while (r.landed == before && waited < 300) {
         await pumpFrame();
-        frames++;
+        waited++;
+      }
+      // **Checked before the landing count, because it is the cause.**
+      // `rebuildNow` increments `landed` even when the upload returned null
+      // (`resident_rebuilder.dart`), so a failed upload reads as a perfectly
+      // ordinary landed rebuild here -- with no backend behind it, no retry,
+      // and every later trigger ignored. Named as the upload failure it is
+      // rather than blamed on whichever trigger happened to be next.
+      if (r.uploadFailed) {
+        throw StateError('GSPIKE ${GpuSpikeArm.widget.label} rebuild | $name | '
+            'the upload failed: the rebuilder has stopped (no backend, no '
+            'retry, every later trigger ignored) and the canvas is drawing '
+            'through VerticesDrawSink. Every number after this point would be '
+            "arm A's.");
       }
       if (r.landed == before) {
-        throw StateError('GSPIKE D rebuild | $name | no rebuild landed in '
-            '$frames frames');
+        throw StateError('GSPIKE ${GpuSpikeArm.widget.label} rebuild | $name | '
+            'no rebuild landed in $waited frames');
       }
       final c = r.collection!;
-      gpuReport('GSPIKE D rebuild | r${repeat + 1} | $name | '
+      gpuReport('GSPIKE ${GpuSpikeArm.widget.label} rebuild | r${repeat + 1} | '
+          '$name | '
           'trigger=${r.lastTrigger!.name} '
           'walk ${(r.lastWalkMicros / 1000).toStringAsFixed(2)} '
           'classify ${(r.lastClassifyMicros / 1000).toStringAsFixed(2)} '
           'upload ${(r.lastUploadMicros / 1000).toStringAsFixed(2)} '
           'total ${(r.lastTotalMicros / 1000).toStringAsFixed(2)} ms | '
-          'landed after $frames frame(s) | instances=${c.instanceCount} '
+          'landed after $waited frame(s) | instances=${c.instanceCount} '
           'patches=${c.patches.length} '
           'buffer=${(c.byteLength / (1024 * 1024)).toStringAsFixed(2)} MB');
     }
+  }
+
+  /// Criterion 9. Zooms 1.02 per pumped frame until the rebuild the band
+  /// exit provokes has landed, and reports the interval between the two.
+  ///
+  /// Deliberately NOT appended to [reports]: it is one phase run once, with a
+  /// step count that is an outcome rather than a setting, so folding it into
+  /// the per-repeat table would put a variable-length window beside three
+  /// fixed-length ones.
+  Future<void> bandExitPhase() async {
+    await setArm(GpuSpikeArm.widget);
+    final r = state.widgetRebuilder!;
+    state.camera.value = baseCamera;
+    await pumpFrame();
+    await pumpFrame();
+    r.bandStaleFrames = 0;
+    final landedBefore = r.landed;
+    final framesAtStart = state.backendOf(GpuSpikeArm.widget)?.frames ?? 0;
+    // 1.02^36 = 2.04 leaves [0.5, 2.0], so the exit is around step 36 and the
+    // cap is five times the distance to it -- generous enough that hitting it
+    // means the rebuild never landed, not that the gesture was too short.
+    const cap = 200;
+    var exitStep = -1;
+    var landedAtStep = -1;
+    var staleFrames = 0;
+    final t = await capture(GpuSpikeArm.widget, 'bandexit', (log) async {
+      var steps = 0;
+      while (steps < cap) {
+        state.camera.zoomAt(centre, 1.02);
+        steps++;
+        // Read BEFORE the pump: this is the camera the frame about to be
+        // drawn carries, so `exitStep` names the first frame drawn out of
+        // band -- the same frame `noteFrame` will count into
+        // [ResidentRebuilder.bandStaleFrames].
+        if (exitStep < 0 && !r.inBand(state.camera.value)) exitStep = steps;
+        await log.pump(pumpFrame);
+        if (r.landed != landedBefore) {
+          landedAtStep = steps;
+          staleFrames = r.bandStaleFrames;
+          break;
+        }
+      }
+      return steps;
+    });
+    if (landedAtStep < 0) {
+      throw StateError('GSPIKE ${GpuSpikeArm.widget.label} | bandexit | no '
+          'rebuild landed within $cap steps (exitStep=$exitStep) -- the band '
+          'was left and nothing answered, so criterion 9 has no interval to '
+          'report.');
+    }
+    final submits =
+        (state.backendOf(GpuSpikeArm.widget)?.frames ?? 0) - framesAtStart;
+    gpuReport('GSPIKE ${GpuSpikeArm.widget.label} | bandexit | build  '
+        '${gpuStats(t.build)}');
+    gpuReport('GSPIKE ${GpuSpikeArm.widget.label} | bandexit | raster '
+        '${gpuStats(t.raster)}');
+    gpuReport('GSPIKE ${GpuSpikeArm.widget.label} | bandexit | '
+        'exitStep=$exitStep landedAtStep=$landedAtStep '
+        'staleFrames=$staleFrames submits=$submits '
+        'lastTrigger=${r.lastTrigger?.name} (criterion 9: the stale interval '
+        'after a mid-gesture band exit, reported without a threshold)');
   }
 
   for (var r = 0; r < repeats; r++) {
@@ -955,57 +1048,65 @@ Future<void> runGpuSpike(
   }
 
   // --- Criterion 9: the stale interval after a mid-gesture band exit. -----
-  await setArm(GpuSpikeArm.widget);
-  {
-    final r = state.widgetRebuilder!;
-    state.camera.value = baseCamera;
-    await pumpFrame();
-    await pumpFrame();
-    r.bandStaleFrames = 0;
-    final landedBefore = r.landed;
-    // 40 steps of 1.02 leave [0.5, 2.0] at step 36 (1.02^36 = 2.04); the
-    // frames from that step to the landing are criterion 9's stale interval.
-    final rep = await phase(GpuSpikeArm.widget, 'bandexit',
-        (i) => state.camera.zoomAt(centre, 1.02),
-        frameCount: 40);
-    gpuReport('GSPIKE D | bandexit | build  ${gpuStats(rep.build)}');
-    gpuReport('GSPIKE D | bandexit | raster ${gpuStats(rep.raster)}');
-    gpuReport(
-        'GSPIKE D | bandexit | rebuilds landed=${r.landed - landedBefore} '
-        'staleFrames=${r.bandStaleFrames} lastTrigger=${r.lastTrigger?.name} '
-        '(criterion 9: the stale interval after a mid-gesture band exit, '
-        'reported without a threshold)');
-  }
+  //
+  // **The gesture does not stop at the band edge, and that is the whole
+  // point (Ruling F9-a).** A fixed 40-step phase would end while the rebuild
+  // it provoked was still in flight, and the stale interval -- the frames
+  // drawn from the collection the band has already condemned -- would be
+  // truncated by the phase's own length rather than measured. This steps
+  // 1.02 per pumped frame, through the same `FrameTimingLog` every other
+  // phase uses, PAST the exit and on until the rebuild lands.
+  await bandExitPhase();
 
   // --- Criterion 5: per-frame allocations on arm D's pan. ----------------
   await setArm(GpuSpikeArm.widget);
   {
     state.camera.value = baseCamera;
-    await pumpFrame();
     // **Settle before the probe arms, and this is not tidiness.** The
-    // band-exit phase above left the collection at 2.04x the fit scale;
-    // coming back to the base camera is itself a band exit (1/2.04 = 0.49,
-    // under `kBandLowerScale`), so it schedules a rebuild that walks the
-    // whole document. A walk inside the probe's window would swamp the
-    // per-frame figure with a one-off collection and the line would read
-    // MISS for a reason that has nothing to do with the frame path.
+    // band-exit phase above left the collection out past 2x the fit scale;
+    // coming back to the base camera is itself a band exit in the other
+    // direction (1/2.04 = 0.49, under `kBandLowerScale`), so it schedules a
+    // rebuild that walks the whole document. A walk inside the probe's window
+    // would swamp the per-frame figure with a one-off collection and the line
+    // would read MISS for a reason that has nothing to do with the frame
+    // path.
+    //
+    // **`inBand` is in the condition, not just `pending`/`inFlight`.** A
+    // rebuild that lands mid-loop schedules a repaint, and it is that
+    // repaint's `noteFrame` -- one frame later -- that reads the ratio and
+    // marks `band` again. A loop watching only the two in-flight flags would
+    // exit in the gap between the landing and the next mark, and the walk
+    // would run inside the probe's window after all. Watching the live ratio
+    // closes the gap: nothing can mark `band` while the camera is inside the
+    // collection's band.
+    //
+    // **Two CONSECUTIVE quiet pumps, re-checked after each.** One quiet frame
+    // proves nothing for the same reason: the mark can arrive on the next.
     final settling = state.widgetRebuilder!;
-    var settle = 0;
-    while ((settling.pending != null || settling.inFlight) && settle < 300) {
+    var pumps = 0;
+    var quiet = 0;
+    while (quiet < 2) {
+      if (pumps >= 300) {
+        throw StateError('GSPIKE ${GpuSpikeArm.widget.label} | alloc: the '
+            'rebuilder did not go quiet in $pumps frames (pending='
+            '${settling.pending?.name} inFlight=${settling.inFlight} '
+            'inBand=${settling.inBand(state.camera.value)}). The probe would '
+            'have measured a document walk, not a frame.');
+      }
       await pumpFrame();
-      settle++;
+      pumps++;
+      final busy = settling.pending != null ||
+          settling.inFlight ||
+          !settling.inBand(state.camera.value);
+      quiet = busy ? 0 : quiet + 1;
     }
-    // Two quiet frames: the landing repaints, and that frame is the last one
-    // that is not steady state.
-    await pumpFrame();
-    await pumpFrame();
-    AllocationProbe? probe;
+    // **One `try` around the whole probe, not just `connect`.** `reset`,
+    // `read` and `dispose` are RPCs over the same socket and can fail the way
+    // `connect` can; a throw from any of them must end as one UNEVALUABLE
+    // line, not as an exception that takes the rest of the run -- and the
+    // `GSPIKE done` line -- with it.
     try {
-      probe = await AllocationProbe.connect();
-    } catch (error) {
-      gpuReport('GSPIKE alloc: UNEVALUABLE -- the VM service refused: $error');
-    }
-    if (probe != null) {
+      final probe = await AllocationProbe.connect();
       const allocFrames = 30;
       await probe.reset();
       for (var i = 0; i < allocFrames; i++) {
@@ -1027,12 +1128,19 @@ Future<void> runGpuSpike(
         gpuReport('GSPIKE alloc | ${(e.value / allocFrames).toStringAsFixed(1)}'
             '/frame | ${e.key}');
       }
-      gpuReport('GSPIKE alloc: perFrame=${perFrame.toStringAsFixed(1)} '
-          'patches=$patches budget=$budget '
+      gpuReport('GSPIKE alloc: arm=${GpuSpikeArm.widget.label} '
+          'perFrame=${perFrame.toStringAsFixed(1)} '
+          'patches=$patches (the LAST frame\'s patchesRendered, not a sum) '
+          'budget=$budget '
           '(kAllocFixed=$kAllocFixed + kAllocPerPatch=$kAllocPerPatch x P) '
           '-> ${perFrame <= budget ? "PASS" : "MISS"} | frames=$allocFrames '
-          'classes=${counts.length} total=$total');
+          'classes=${counts.length} total=$total -- read the per-class lines '
+          'above before believing a MISS: the sum includes the rig\'s own '
+          'per-frame ViewportTransform (camera.panBy) and dart:ui compositing '
+          'objects, which are not the resident frame path');
       await probe.dispose();
+    } catch (error) {
+      gpuReport('GSPIKE alloc: UNEVALUABLE -- $error');
     }
   }
 

@@ -51,6 +51,37 @@ void main() {
         throwsArgumentError);
   });
 
+  test(
+      'a sweep needs its own probe handle: the second CommandApplied under '
+      'the first one throws', () {
+    // The witness for `rebuildPhase` allocating a fresh handle per sweep
+    // rather than one per run. The sweep's `CommandApplied` line SURVIVES the
+    // sweep -- `CommandUndone` removes it, `CommandRedone` puts it back, and
+    // neither `DocumentLoaded` nor `DocumentPurged` removes it -- so a second
+    // sweep reusing the handle throws instead of firing a trigger, and the
+    // run dies at repeat 2 with `SPIKE_REPEATS=3`.
+    final doc = spikeDocument(entityCount: 500, text: false);
+    final first = doc.handleSeed.next();
+    fireDocumentTrigger(doc, 'CommandApplied', probe: first);
+    // The full sweep the harness fires, so this reproduces the real sequence
+    // and not merely two adds in a row.
+    for (final name in const <String>[
+      'CommandUndone',
+      'CommandRedone',
+      'DocumentLoaded',
+      'DocumentPurged',
+      'tables',
+    ]) {
+      fireDocumentTrigger(doc, name, probe: first);
+    }
+    expect(() => fireDocumentTrigger(doc, 'CommandApplied', probe: first),
+        throwsA(isA<DuplicateHandleError>()));
+    expect(
+        () => fireDocumentTrigger(doc, 'CommandApplied',
+            probe: doc.handleSeed.next()),
+        returnsNormally);
+  });
+
   test('the allocation budget is the enumerated exception set, generously', () {
     // A per-instance allocation on the measured corpus (~110,000 instances)
     // exceeds any P the corpus can have by orders of magnitude; the two
