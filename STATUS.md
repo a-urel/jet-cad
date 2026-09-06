@@ -96,7 +96,8 @@ Raw device and suite logs:
 [2026-09-05-plan-f-raw/](docs/superpowers/notes/2026-09-05-plan-f-raw/) —
 `gspike-run2.log` is **the run of record**, `gspike-run1.log` the first run
 (kept as the evidence for the criterion-5 diagnosis), `band-and-zoom.log` the
-suite rows.
+suite rows, `conditions.log` the machine state (re-run after the fact and
+labelled as such in the file).
 
 **One `apps/` change, under Ruling F8-a**:
 `com.apple.security.network.client` added to
@@ -140,14 +141,17 @@ level-of-detail cull on and `agreement=1.00000` PASS with it off.
 | criterion 8 — arm D (`DraftCanvas`) p50, median of three | **MISS, 5 of 6 cells** — hold 0.04/3.37, pan 2.60/3.32, zoom 2.34/3.16 against ≤ 1.2 build / ≤ 2.0 raster |
 | **the widget path's own cost (Ruling F9's control)** | **≤ +0.20 ms anywhere at p50, ≤ +8%** — and −0.01 on hold build, where arm D is fractionally *faster* than the control. Every criterion-8 miss is inherited from arm C — Plan E's text-compositor cost — and **none of it comes from putting the backend behind `DraftCanvas`** |
 | criterion 9 — arm D p95 raster | **MISS on all three**: 8.73 / 7.25 / 7.46 against ≤ 3.0. Arm C misses too (5.26 / 4.05 / 7.27), so this is inherited as well. The p50-to-p95 gap on both arms says these are **tail** misses, not a uniformly slow frame path |
-| criterion 9 — the band-exit stale interval | **`staleFrames = 1`** (`exitStep=36`, `landedAtStep=37`), reported without a threshold. **Leaving the band costs one stale frame, not a blank one** — the design's intent, measured |
-| criterion 6 — resident buffer at a rebuilt scale | **MISS at 2.5× fit: 9.57 MB against 8 MB** (153,215 instances, +43% over fit). **PASS at fit: 6.79 MB**, 1.21 MB margin. The memory price of Ruling F1's live-scale collection |
+| criterion 9 — the band-exit stale interval | **`staleFrames = 1`** (`exitStep=36`, `landedAtStep=37`), reported without a threshold, identical in both runs. **Leaving the band costs exactly one stale frame** — one frame drawn from the old collection before the new one landed. What that frame *looked like* is not measured: the harness reads timings and a stale count, never ink. That is window check 3, still OWED |
+| criterion 6 — resident buffer at a rebuilt scale | **MISS at 2.5× fit: 9.57 MB against 8 MB** (153,215 instances, +43% over fit). **PASS at fit: 6.78–6.79 MB**, ≥ 1.21 MB margin. The memory price of Ruling F1's live-scale collection |
 | criterion 5 — the frame-path allocation probe | **MISS: `perFrame = 2333.2` against `budget = 2200`** (`kAllocFixed 40 + kAllocPerPatch 24 × P` at `P = 90`), over by 6.1% — evaluable only after **Ruling F8-a** added `com.apple.security.network.client` to the harness's entitlements (run 1 read UNEVALUABLE, the sandbox refusing the app a loopback socket to its own VM service). **But the ten enumerated per-patch classes sum to 1,107.7/frame = 12.3 per patch against the 24 allowed**; the overage is in non-per-patch classes, and `ResidentTextRecord` at 11.0/frame — a class constructed at exactly one site, inside a walk — shows **≈2 collection walks landed inside the probe's window**. MISS as printed, contamination recorded, window to be fixed before anyone acts on it |
 | criterion 12 — both zoom defects | **PASS as amended (Ruling F13-a).** Tiled reproduces at the probe's exact numbers (zoom-out peak **5,730**, **4,893** one frame after; zoom-in **25,275 / 16,681 / 0**); resident **`uncovered ≤ 2`** per frame, 0 on 14 of 18, `rebuilds == 1` out and `0` in. The spec's literal zero is met within float32-vs-float64 tie jitter, with the numbers |
 | mutations | **14 killed + M-F10′; M-F10 and E-F1 equivalent, fired and recorded; zero true survivors** |
 | the window | **all four Plan F checks OWED — not looked at by a human**; Plan E's fifth also still OWED |
 
-**Exit gate: 7 of 14.** Six measured MISSes (criteria 2, 5, 6, 7, 8 and 9),
+**Exit gate: 7 of 14** — two of the passes are *as amended* (criterion 1's
+edge assertions under Ruling F6-b, criterion 12's resident zero under Ruling
+F13-a), the other five unqualified. **Six measured MISSes** (criteria 2, 5, 6,
+7, 8 and 9),
 each recorded with its number and **no threshold moved**; one OWED (the
 window). **No criterion is UNEVALUABLE** — criterion 5 moved from UNEVALUABLE
 to a measured MISS once Ruling F8-a let the harness open its own VM service.
@@ -942,8 +946,11 @@ window and did not simulate one. **Plan F's four, all OWED:**
 3. **A band exit sharpens without a blank** — in the main view, zoom in past
    2× in one gesture: the picture stays drawn on every frame, and within a
    few frames the arcs and dashes re-tessellate at the new scale. No white
-   frame, no flicker. (Measured companion, which is *not* the check:
-   `staleFrames = 1`, no blank frame in the band-exit window's 38 frames.)
+   frame, no flicker. (The run measures `staleFrames = 1` over a 37-frame
+   band-exit window — one frame drawn out of band before the landing. **It
+   does not measure blankness**: the harness reads frame timings and a stale
+   count, never ink. Whether that one frame was blank is exactly what the eye
+   is for.)
 4. **A pan reveals no empty edge** — in the main view, at a working zoom
    (4×–8×), pan the drawing off where it was fitted and keep going; the
    spec's *"33 logical pixels into the first pan"* defect would show as a
@@ -1046,8 +1053,8 @@ became of each:**
 
 - `classify` cost **27.4 ms**, 164% of the 16.67 ms rebuild budget on its own;
   bucketing or an early-reject were named as the cheap levers. **DONE** —
-  Ruling F7's uniform grid took it to **6.7 ms on the device, 4.1× faster**,
-  40% of the budget, with the brute force kept as the oracle in a differential.
+  Ruling F7's uniform grid took it to **6.3 ms on the device, 4.3× faster**,
+  38% of the budget, with the brute force kept as the oracle in a differential.
 - `TextCompositor.paint` walks all **165** resident labels every frame,
   off-viewport ones included; viewport rejection was named as the cheapest move
   against criterion 11's MISS. **NOT taken** — still open for Plan G, and it is

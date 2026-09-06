@@ -1,0 +1,45 @@
+# Plan F device-run conditions.
+#
+# HONEST PROVENANCE: the two commands below were run before each of the two
+# device runs and their output was read at the time, but it was not captured
+# to a file then. This file is a RE-RUN, made after both runs on the same
+# machine and the same day, at the reviewer's request. It is evidence that
+# the machine's state is what the note reports -- it is not the original
+# transcript, and it is not presented as one.
+#
+# Re-run date:
+Sun Sep  6 08:50:28 +03 2026
+
+$ pmset -g | grep -i lowpower
+ lowpowermode         0
+
+$ flutter devices
+Found 3 connected devices:
+  Ahmet iPhone’u (mobile) • 00008120-0011351411A20032 • ios            • iOS 26.6 23G71
+  macOS (desktop)         • macos                     • darwin-arm64   • macOS 26.5.1 25F80 darwin-arm64
+  Chrome (web)            • chrome                    • web-javascript • Google Chrome 152.0.7977.82
+
+Checking for wireless devices...
+
+No wireless devices were found.
+
+Error: Browsing on the local area network for Bahar iPhone’u. Ensure the device is unlocked and attached with a cable or associated with the same local area network as this Mac.
+The device must be opted into Developer Mode to connect wirelessly. (code -27)
+
+Error: Browsing on the local area network for Ahmet iPhone’u. Ensure the device is unlocked and attached with a cable or associated with the same local area network as this Mac.
+The device must be opted into Developer Mode to connect wirelessly. (code -27)
+
+Run "flutter emulators" to list and start any available device emulators.
+
+If you expected another device to be detected, please run "flutter doctor" to diagnose potential issues. You may also try increasing the time to wait for connected devices with the "--device-timeout" flag. Visit https://flutter.dev/setup/ for troubleshooting tips.
+
+# ---------------------------------------------------------------------------
+# ONE DIFFERENCE FROM THE ORIGINAL, RECORDED RATHER THAN SMOOTHED OVER:
+# at both device runs `flutter devices` reported "Found 2 connected devices"
+# (macOS and Chrome), with the paired-iPhone lines appearing as errors below.
+# This re-run reports 3 -- an iPhone finished pairing between the runs and
+# now. That device is irrelevant to a `-d macos` run and nothing in the note
+# depends on the count. The line the note actually quotes is identical in
+# both:
+#   macOS (desktop) • macos • darwin-arm64 • macOS 26.5.1 25F80 darwin-arm64
+# Low Power Mode read `lowpowermode 0` at both runs and again here.

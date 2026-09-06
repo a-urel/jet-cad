@@ -16,9 +16,12 @@ every earlier plan's own recorded lesson).
 **Raw logs:** [2026-09-05-plan-f-raw/](2026-09-05-plan-f-raw/) —
 `gspike-run2.log` (**the run of record**; every device number below is read
 from it, line numbers cited throughout), `gspike-run1.log` (the first run, kept
-as evidence — see [Two runs, and why](#two-runs-and-why)) and
+as evidence — see [Two runs, and why](#two-runs-and-why)),
 `band-and-zoom.log` (the `flutter test` run every band and zoom row below is
-read from).
+read from) and `conditions.log` (Low Power Mode and `flutter devices`, with
+their provenance stated in the file: they were read before each run but
+captured only afterwards, so that file is an explicitly-labelled re-run, not
+the original transcript).
 
 **What Plan F shipped**: `ResidentCollection` — the collection frame, the walk,
 the classification, the timings (Task 1); `ResidentRebuilder` — one post-frame
@@ -158,9 +161,11 @@ first threshold crossing.
 level-of-detail cull turned off (`minTextCapPixels: 0`):
 
 ```
-BAND text-lod@fit    ratio=1.4 FAIL agreement=0.98879 uncovered=153  referenceInk=13466
-BAND text-nolod@fit  ratio=1.4 PASS agreement=1.00000 uncovered=0    referenceInk=13466
+BAND text-lod@fit ratio=1.4 FAIL CompositedAgreement(agreement=0.98879 withinTwo=13315 union=13466 overEight=148 uncovered=153 referenceInk=13466 patches=2)
+BAND text-nolod@fit ratio=1.4 PASS CompositedAgreement(agreement=1.00000 withinTwo=13466 union=13466 overEight=0 uncovered=0 referenceInk=13466 patches=2)
 ```
+
+(`band-and-zoom.log` lines 37 and 41, verbatim.)
 
 A label sitting under `kMinTextCapPixels` at the reference scale and above it at
 1.4× live is culled from the collection and cannot come back until a rebuild.
@@ -445,9 +450,13 @@ step 36 (1.02³⁶ = 2.04, past `kBandUpperScale = 2.0`) and the rebuild landed 
 step 37 — **exactly one frame was painted out of band before the new collection
 was on screen**, out of a 37-frame window. Phase maxima over that window: build
 **9.32 ms**, raster **8.59 ms** — those include the landing frame itself, which
-is what criterion 9 asks to see (Ruling F9-a's stated cost). **The spec's design
-intent holds measurably here**: leaving the band costs one stale frame, not a
-blank one.
+is what criterion 9 asks to see (Ruling F9-a's stated cost). **What is measured
+is the interval: leaving the band costs one stale frame** — one frame drawn
+from the old collection before the new one landed. **What is not measured is
+what that frame looked like.** `staleFrames` counts frames, and the phase
+records build and raster times; neither reads a pixel. The spec's stronger
+claim — that a band exit sharpens without a blank — is window check 3, and it
+is OWED.
 
 **`submits=-1` is a counter-identity artifact, not a render failure.** The
 harness computes `submits` as `backendOf(widget).frames` after minus before; the
@@ -466,8 +475,17 @@ every patch sub-buffer, i.e. the budget row's own number (see premise 6 above).
 
 | collection | instances | `buffer` | vs 8 MB |
 |---|---|---|---|
-| at fit (every row but `band out`) | 106,852–106,855 | **6.79 MB** | **PASS**, 1.21 MB margin |
+| at fit (every row but `band out`) | 106,852–106,855 | **6.78–6.79 MB** | **PASS**, ≥ 1.21 MB margin |
 | at the `band out` rebuild (2.5× fit) | **153,215 / 153,216 / 153,217** | **9.57 MB** | **MISS**, 1.57 MB over (120% of budget) |
+
+(The two `devicePixelRatio` rows print **6.78 MB** and the other seven fit-scale
+rows **6.79 MB**. Both carry the *same* `instances=106853` and the *same*
+`patches=90`, so the difference is not in the main buffer or the patch count —
+it is in how many instances fall inside the patch boxes, which
+`classifyTextPatches` sizes in **device** pixels and the dpr trigger therefore
+changes. At 64 bytes an instance, 0.01 MB is ~164 instances of sub-buffer, and
+at two decimal places the true difference is somewhere under a few hundred.
+Both figures are well inside the budget.)
 
 **Criterion 6 at a rebuilt scale: MISS.** Collecting at 2.5× the fit scale grows
 the instance count by **43%** (106,853 → 153,215) and the buffer by the same
@@ -615,11 +633,15 @@ device runs above produced full transcripts but a transcript is not the eye.
 | — | **Plan E's fifth**: `DRAW_TEXT=false` shows the same drawing with no labels and no patches | **still OWED** — looked at on 2026-09-05 and answered "could not see"; not looked at again here |
 
 What the transcripts *do* support, and no more: check 3 has a measured companion
-(`staleFrames = 1`, no blank frame in the band-exit window's 37 frames, both
-runs) and check 2 has one (`CommandApplied` grows the collection by exactly one
+(`staleFrames = 1` over a 37-frame band-exit window, identical in both runs)
+and check 2 has one (`CommandApplied` grows the collection by exactly one
 instance — 106,852 → 106,853 — and `CommandUndone` returns it, in all three
-repeats of both runs). **Neither is the check.** The checks are about the
-picture, and the picture was not seen.
+repeats of both runs). **Neither is the check, and the gap is not rhetorical:
+the harness records frame timings, a stale count and instance counts — it never
+samples ink, so nothing in either transcript can say whether a frame was blank
+or whether an edge went undrawn.** That is precisely what checks 3 and 4 ask a
+human to look at. The checks are about the picture, and the picture was not
+seen.
 
 The command to run for all five, with `SPIKE_FILL_SCALE=20` so Plan D's fills
 are visible to the eye, is in [STATUS.md](../../../STATUS.md#resume-here).
@@ -670,13 +692,14 @@ Pre-committed in the plan. **No threshold was moved to make a criterion pass.**
 | 7 | Criterion 9: arm D p95 raster ≤ 3.0 on hold, pan, zoom; band-exit `staleFrames` reported | **MISS on all three** — 8.73 / 7.25 / 7.46 (arm C misses too: 5.26 / 4.05 / 7.27). `staleFrames = 1`, `exitStep=36`, `landedAtStep=37`, reported without a threshold, identical in both runs |
 | 8 | Criterion 10: both fallbacks, one report, no throw, no retry | **PASS** — `draft_canvas_fallback_test.dart` green |
 | 9 | Criterion 12: tiled reproductions nonzero, resident zero and agreement ≥ 0.995 | **PASS as amended by Ruling F13-a** — tiled reproduces at the probe's exact numbers (peak 5,730 / 4,893 one frame after; 25,275 / 16,681 / 0); resident `uncovered ≤ 2` per frame (0 on 14 of 18) with `rebuilds == 1` out and `0` in. The spec's literal zero is **met within float32-vs-float64 tie jitter**, with the numbers |
-| 10 | Criterion 6 at a rebuilt scale: `buffer` at the `band out` rebuild vs 8 MB | **MISS — 9.57 MB against 8 MB**, 1.57 MB over, at 153,215 instances (2.5× fit). **PASS at fit: 6.79 MB**, 1.21 MB margin |
+| 10 | Criterion 6 at a rebuilt scale: `buffer` at the `band out` rebuild vs 8 MB | **MISS — 9.57 MB against 8 MB**, 1.57 MB over, at 153,215 instances (2.5× fit). **PASS at fit: 6.78–6.79 MB**, ≥ 1.21 MB margin |
 | 11 | All fourteen mutations fire; E-F1 recorded equivalent with its green run | **PASS** — 14 killed plus M-F10′; M-F10 and E-F1 equivalent, fired and recorded; **zero true survivors** |
 | 12 | No shader or bundle change | **PASS** — `git diff --stat main..HEAD -- packages/jet_cad_2d_flutter/shaders packages/jet_cad_2d_flutter/assets` is empty |
 | 13 | A human looks at the window and reports Plan F's four checks | **OWED — not looked at by a human in this session.** All four open; Plan E's fifth also still owed |
 | 14 | Every gate green in all three packages | **PASS** — see below |
 
-**7 of 14 PASS. Six measured MISSes (2, 4, 5, 6, 7, 10), each with its number
+**7 of 14 PASS — two of them PASS *as amended*, rows 1 and 9 (Rulings F6-b and
+F13-a); the other five are unqualified. Six measured MISSes (2, 4, 5, 6, 7, 10), each with its number
 and none adjusted; one OWED (13). No criterion is UNEVALUABLE** — criterion 5
 moved from UNEVALUABLE to a measured MISS when Ruling F8-a let the harness open
 its own VM service.
@@ -690,7 +713,7 @@ $ cd packages/jet_cad_2d_flutter && flutter test
 00:08 +664 ~1: All tests passed!
 exit=0
 $ flutter analyze
-No issues found! (ran in 1.4s)
+No issues found! (ran in 1.3s)
 exit=0
 $ dart format --output=none --set-exit-if-changed .
 Formatted 113 files (0 changed) in 0.16 seconds.
@@ -705,13 +728,13 @@ $ dart analyze
 No issues found!
 exit=0
 $ dart format --output=none --set-exit-if-changed .
-Formatted 113 files (0 changed) in 0.14 seconds.
+Formatted 113 files (0 changed) in 0.15 seconds.
 exit=0
 ```
 
 ```
 $ cd ../../apps/dev_harness_2d && flutter test --concurrency=1
-00:15 +82: All tests passed!
+00:14 +82: All tests passed!
 exit=0
 $ flutter analyze
 No issues found! (ran in 0.8s)
@@ -795,6 +818,7 @@ named none, the consequence stated is derived from the ruling's own text.
 - `docs/superpowers/notes/2026-09-05-plan-f-raw/gspike-run2.log` — **the run of record**, every device number above.
 - `docs/superpowers/notes/2026-09-05-plan-f-raw/gspike-run1.log` — the first run, kept as the evidence for the criterion-5 diagnosis.
 - `docs/superpowers/notes/2026-09-05-plan-f-raw/band-and-zoom.log` — the `flutter test` run, every band and zoom row above.
+- `docs/superpowers/notes/2026-09-05-plan-f-raw/conditions.log` — Low Power Mode and `flutter devices`, re-run after the fact and labelled as such in the file.
 - `docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md` — open question 3 struck.
 - `STATUS.md` — a `## Plan F` section and the resume point rewritten.
 - `apps/dev_harness_2d/macos/Runner/DebugProfile.entitlements` and `Release.entitlements` — `com.apple.security.network.client`, two lines each, under Ruling F8-a. **The only `apps/` change; nothing under `packages/**` was edited.**
