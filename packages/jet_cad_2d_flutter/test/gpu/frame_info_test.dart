@@ -151,6 +151,14 @@ void main() {
       final m = Transform2(2, 0.5, -0.5, 2, 30, -40);
       final fresh = buildFrameInfo(m, 800, 600, dashScale: 1.7);
       final out = ByteData(80);
+      // A reused block must be fully overwritten: every byte starts dirty,
+      // so a byte the function only ever writes as a literal 0 (`f(2, 0)`,
+      // `f(19, 0)`, and the other structural zeros) still has to come back
+      // 0 -- a virgin, already-zeroed `ByteData` could not tell "explicitly
+      // written" from "never touched" apart.
+      for (var i = 0; i < 80; i++) {
+        out.setUint8(i, 0xFF);
+      }
       final written = buildFrameInfo(m, 800, 600, dashScale: 1.7, out: out);
       expect(identical(written, out), isTrue);
       for (var i = 0; i < 80; i++) {
