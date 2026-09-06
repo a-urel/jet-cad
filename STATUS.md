@@ -1,11 +1,10 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-06
-**Verified against:** `main` at `a5833b4`, plus branch
-`plan-f/rebuild-and-band` at Plan F's Task 10 (worktree
-`.worktrees/plan-f-rebuild-and-band`). **Plan F is IMPLEMENTED and NOT
-MERGED** — exit gate 7 of 14, the window OWED, the merge the human's
-decision. See [Plan F](#plan-f--rebuild-triggers-and-the-band-implemented-on-plan-frebuild-and-band-not-merged)
+**Last updated:** 2026-09-06 (Plan F merged)
+**Verified against:** `main` at `a8208d1`. **Plan F is MERGED** — `--no-ff`
+at `a8208d1` on 2026-09-06, on the human's decision, with its exit gate at
+7 of 14 and the window still OWED; branch and worktree deleted, ledger
+archived at `2535dce`. See [Plan F](#plan-f--rebuild-triggers-and-the-band-merged-into-main-at-a8208d1)
 and [Resume here](#resume-here). **Plan D (fills), the fourth plan,
 is MERGED**: it ran on `plan-d/fills`, cut from `main` at `bde9196`, nine
 tasks at `bde9196..eabca9e` with its ledger archived at `27b2122`, merged
@@ -74,13 +73,17 @@ Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01
 
 ---
 
-## Plan F — rebuild triggers and the band (IMPLEMENTED on `plan-f/rebuild-and-band`, **NOT merged**)
+## Plan F — rebuild triggers and the band (MERGED into `main` at `a8208d1`)
 
 **Plan F gave the GPU-resident backend its rebuild triggers, the watermark
 band, and `DraftCanvas`'s real `residentGpu` path** — the sixth of the design
-spec's seven plans, ten tasks, `c5b8ee8..HEAD` on branch
-`plan-f/rebuild-and-band`, worktree `.worktrees/plan-f-rebuild-and-band`.
-**The merge is the human's decision at the finish; nothing has been merged.**
+spec's seven plans, ten tasks, `c5b8ee8..2535dce` on branch
+`plan-f/rebuild-and-band` (cut from `main` at `c5b8ee8`), merged `--no-ff`
+at `a8208d1` on 2026-09-06 on the human's decision; the branch and its
+worktree are deleted and the ledger is archived at
+[docs/superpowers/ledgers/2026-09-05-gpu-backend-plan-f-rebuild-and-band/](docs/superpowers/ledgers/2026-09-05-gpu-backend-plan-f-rebuild-and-band/).
+**The merge did not discharge the window (still OWED) or decide criterion 2
+(the spec question below); it landed the code and the record.**
 Spec:
 [2026-08-29-gpu-resident-render-backend-design.md](docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md)
 (revision 5, `d2095e7`), the trigger table, the collection and watermark
@@ -865,11 +868,11 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Plan F (rebuild triggers and the band) is IMPLEMENTED, all ten tasks,
-`c5b8ee8..HEAD` on branch `plan-f/rebuild-and-band`, worktree
-`.worktrees/plan-f-rebuild-and-band` — and it is NOT merged. It is awaiting
-two things from the human: a look at the window, and the merge decision.**
-Neither is the controller's to make. Its exit gate is **7 of 14**, with six
+**Plan F (rebuild triggers and the band) is MERGED, all ten tasks,
+`c5b8ee8..2535dce` merged `--no-ff` at `a8208d1` on 2026-09-06 — the human
+chose the merge with the exit gate at 7 of 14. Still the human's, and still
+open: a look at the window (four Plan F checks plus Plan E's fifth), and the
+criterion-2 spec decision.** Its exit gate is **7 of 14**, with six
 measured MISSes and one OWED (nothing UNEVALUABLE), and **no threshold moved to
 make anything pass**:
 
