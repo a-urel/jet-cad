@@ -109,6 +109,53 @@ void main() {
     expect(DraftCanvas.debugResidentFallbackReports, 1);
   });
 
+  testWidgets(
+      'a throwing upload falls back for good: two reports, vertices still '
+      'paints', (t) async {
+    debugSetGpuAvailable(true);
+    uploader.throwing = true;
+    // Both reports below fire synchronously and in the same microtask, from
+    // inside the post-frame callback `pumpWidget`'s own frame schedules:
+    // `ResidentRebuilder._run`'s catch reports the `StateError` first, then
+    // its `notifyListeners()` call runs `DraftCanvas._onResidentLanded`
+    // synchronously (`ChangeNotifier.notifyListeners` calls every listener
+    // in the same call stack), which reports the `FlutterError` fallback
+    // second. Verified empirically: `tester.takeException()` after
+    // `pumpWidget` -- and again after a `pump()` on top of that -- returns
+    // the test binding's own synthetic "Multiple exceptions (2) were
+    // detected" error, never the two originals, because
+    // `TestWidgetsFlutterBinding`'s `FlutterError.onError` holds only ONE
+    // pending exception and collapses a second report that arrives before
+    // the first is taken; there is no point between these two synchronous
+    // `reportError` calls at which test code runs, so no number of pumps
+    // between `takeException()` calls can separate them. Intercepting
+    // `FlutterError.onError` directly, for this test's scope only, is what
+    // actually observes both reports, in order, without the binding's
+    // single-slot collapse.
+    final reported = <Object>[];
+    final previousOnError = FlutterError.onError;
+    FlutterError.onError = (details) => reported.add(details.exception);
+    await t.pumpWidget(canvas(RenderBackend.residentGpu));
+    FlutterError.onError = previousOnError;
+    expect(reported, hasLength(2));
+    expect(reported[0], isA<StateError>());
+    expect((reported[0] as StateError).message, contains('upload exploded'));
+    expect(reported[1], isA<FlutterError>());
+    expect(reported[1].toString(), contains('upload failed'));
+    final s = state(t);
+    expect(s.resident!.uploadFailed, isTrue);
+    expect(s.resident!.backend, isNull);
+    expect(DraftCanvas.debugResidentFallbackReports, 1);
+    final paintsBefore = paints;
+    camera.zoomAt(const Offset(200, 150), 3.0);
+    await t.pump();
+    await t.pump();
+    expect(paints, greaterThan(paintsBefore),
+        reason: 'the canvas kept drawing after the failure');
+    expect(() => s.vertices!.canvas, returnsNormally,
+        reason: 'and it drew through the vertices sink');
+  });
+
   testWidgets('a canvas whose upload succeeds reports nothing', (t) async {
     debugSetGpuAvailable(true);
     await t.pumpWidget(canvas(RenderBackend.residentGpu));

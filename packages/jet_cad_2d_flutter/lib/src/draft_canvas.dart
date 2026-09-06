@@ -153,6 +153,11 @@ class DraftCanvas extends StatefulWidget {
   /// ([quantiseCamera]) so every tile lands on an exact texel boundary; the
   /// default path does not and never has. Toggling this flag on an otherwise
   /// static scene can therefore shift the drawing by that much.
+  ///
+  /// **Ignored on a `residentGpu` canvas.** No tile cache is built beside the
+  /// resident backend ([DraftCanvasState.tileCache]'s own doc comment): both
+  /// are gesture paths answering the same frame, and the resident one
+  /// already holds the whole drawing.
   final bool tiles;
 
   /// Forwarded to [TileCache.tileDevicePixels]. Inert unless [tiles] is on.
@@ -219,10 +224,9 @@ class DraftCanvasState extends State<DraftCanvas> {
   late CanvasDrawSink sink;
 
   /// Non-null when [resolvedBackend] is [RenderBackend.vertices] or
-  /// [RenderBackend.residentGpu] — the latter has no GPU-resident sink of its
-  /// own to build yet (Plan F's work) and paints through this one until then.
-  /// Wraps [sink], which keeps taking every op the vertices sink does not
-  /// batch.
+  /// [RenderBackend.residentGpu] — the latter draws through this one before
+  /// its first rebuild lands and after an upload fails (Ruling F5). Wraps
+  /// [sink], which keeps taking every op the vertices sink does not batch.
   VerticesDrawSink? vertices;
 
   /// Non-null only while [DraftCanvas.tiles] is on.
@@ -503,8 +507,9 @@ class _DraftCustomPainter extends CustomPainter {
   final CanvasDrawSink sink;
 
   /// Null unless the resolved backend is [RenderBackend.vertices] or
-  /// [RenderBackend.residentGpu] (routed here until Plan F).
-  /// See [DraftCanvas.backend].
+  /// [RenderBackend.residentGpu] — the latter's vertices sink is what a
+  /// `residentGpu` canvas draws through before its first rebuild lands and
+  /// after an upload fails (Ruling F5). See [DraftCanvas.backend].
   final VerticesDrawSink? vertices;
 
   /// Null unless [DraftCanvas.tiles] is on.
@@ -619,10 +624,17 @@ class _DraftCustomPainter extends CustomPainter {
   /// or whose rebuilder was just replaced by [DraftCanvasState.didUpdateWidget],
   /// would sit on a stale frame until some unrelated cause happened to repaint
   /// it.
+  ///
+  /// **The identity check runs even when [resident] is `null`.** A prop
+  /// change that switches `backend:` AWAY from `residentGpu` mid-session
+  /// makes a delegate whose own [resident] is `null` but whose [old]
+  /// carried a non-null one; without comparing identities first, this would
+  /// still answer `false` and leave the last GPU frame painted underneath
+  /// the vertices or tile path that just took over, which is stale exactly
+  /// the way a never-updated dpr or a freshly re-attached rebuilder is.
   @override
   bool shouldRepaint(_DraftCustomPainter old) {
-    final r = resident;
-    if (r == null) return false;
-    return old.resident != r || old.devicePixelRatio != devicePixelRatio;
+    return old.resident != resident ||
+        (resident != null && old.devicePixelRatio != devicePixelRatio);
   }
 }

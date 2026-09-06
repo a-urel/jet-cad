@@ -30,10 +30,13 @@ class RecordingFramePainter implements ResidentFramePainter {
 }
 
 /// An uploader the test controls: hands back a [RecordingFramePainter] over
-/// the collection it was given, or `null` while [failing]; [gate], when set,
-/// holds the upload in flight until the test completes it.
+/// the collection it was given, `null` while [failing], or throws while
+/// [throwing] -- the fallback's other cause: an escape from the walk, the
+/// classifier or the upload itself, rather than a clean `null`.
+/// [gate], when set, holds the upload in flight until the test completes it.
 class FakeUploader {
   bool failing = false;
+  bool throwing = false;
   Completer<void>? gate;
   final List<ResidentCollection> collections = <ResidentCollection>[];
   final List<RecordingFramePainter> painters = <RecordingFramePainter>[];
@@ -43,6 +46,7 @@ class FakeUploader {
     collections.add(collection);
     final g = gate;
     if (g != null) await g.future;
+    if (throwing) throw StateError('upload exploded');
     if (failing) return null;
     final p = RecordingFramePainter(collection);
     painters.add(p);

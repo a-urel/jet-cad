@@ -226,6 +226,26 @@ class ResidentRebuilder extends ChangeNotifier {
     _inFlightTrigger = trigger;
     try {
       await rebuildNow(camera, viewport, _dpr, trigger);
+    } catch (error, stackTrace) {
+      // A throw from the walk (`ResidentCollection.collect`, the text
+      // measurement, the classifier) or from the uploader must not escape:
+      // this runs `unawaited` from `_schedule`'s post-frame callback, so an
+      // uncaught throw here becomes an unhandled async error that leaves the
+      // canvas painting the OLD collection forever, with `uploadFailed` never
+      // set and nothing reported. Terminal, the same state a `null` upload
+      // produces in `rebuildNow`: no backend, no retry, and
+      // `DraftCanvas._onResidentLanded` reports the one-shot fallback because
+      // `uploadFailed` is true.
+      _uploadFailed = true;
+      _pending = null;
+      _backend?.dispose();
+      _backend = null;
+      FlutterError.reportError(FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'jet_cad_2d_flutter',
+          context: ErrorDescription('rebuilding the resident GPU backend')));
+      if (!_disposed) notifyListeners();
     } finally {
       _inFlightTrigger = null;
     }

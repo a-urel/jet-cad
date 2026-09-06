@@ -99,7 +99,7 @@ void main() {
     final brute = classifyTextPatchesBruteForce(data, count, texts,
         devicePixelRatio: 2.0);
     // MUTATION (M-F9): skip the overflow list -> a long wall through a label
-    // is missing from its patch. MUTATION (M-F10): bin by the min corner
+    // is missing from its patch. MUTATION (M-F10′): bin by the min corner
     // only -- `cx1 = cx0` (and/or `cy1 = cy0`) at the binning site -- so a
     // multi-cell instance lands in one cell and a label in its other cells
     // misses it. (The plan's original M-F10, `.floor()` -> `.round()`, is

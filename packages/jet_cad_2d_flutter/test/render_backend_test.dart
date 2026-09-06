@@ -57,18 +57,23 @@ void main() {
     // `residentGpu` is resolved through `resolveBackend()` and may differ from
     // the requested backend when GPU is unavailable; check the final resolved
     // backend against what `resolveBackend()` returns.
-    //
     for (final backend in RenderBackend.values) {
       final state = await _pump(tester, backend: backend);
       final expectedBackend = resolveBackend(backend);
       expect(state.resolvedBackend, expectedBackend, reason: '$backend');
     }
     // The `residentGpu` iteration above is exactly the fallback Ruling F5
-    // reports through `FlutterError.reportError` (this platform has no GPU
-    // under `flutter test`); expected here, not a defect. `flutter_test`
-    // fails a test that ends with a reported error still pending, so it is
-    // consumed here rather than left for teardown to trip over.
-    expect(tester.takeException(), isA<FlutterError>());
+    // reports through `FlutterError.reportError`, but only on a platform
+    // with no GPU under `flutter test`; expected there, not a defect. On a
+    // platform where `resolveBackend(RenderBackend.residentGpu)` actually
+    // returns `residentGpu`, no fallback fires and there is nothing to
+    // consume. `flutter_test` fails a test that ends with a reported error
+    // still pending, so it is consumed here rather than left for teardown to
+    // trip over, guarded so the guard itself does not fail elsewhere.
+    if (resolveBackend(RenderBackend.residentGpu) !=
+        RenderBackend.residentGpu) {
+      expect(tester.takeException(), isA<FlutterError>());
+    }
   });
 
   testWidgets('only the resolved backend builds a sink', (tester) async {

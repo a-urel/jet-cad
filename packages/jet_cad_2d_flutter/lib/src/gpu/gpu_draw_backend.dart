@@ -190,11 +190,15 @@ double dashScaleFor(ViewportTransform camera, Transform2 collectionInverse) =>
 /// `patchRegionFor`'s `out` -- so `PatchRegion` and the uniform block are
 /// OFF this list too now. What remains, one of each per patch, never per
 /// entity and never per plain (uncovered) label: a `PatchImage`, three
-/// `Rect`s (`PatchImage.src`, `.dst`, `.layerBounds`), the `Transform2`
-/// [composeTransforms] builds for `toPatch`, one `saveLayer`
-/// (`TextCompositor.paint`) and one `ui.Image` handle (`asImage()`) --
-/// alongside `gpu.Viewport`, `vm.Vector4`, `gpu.BufferView`, the command
-/// buffer and the render pass, which are the GPU shim's own per-pass
+/// `Rect`s (`PatchImage.src`, `.dst`, `.layerBounds`), two `Transform2`s for
+/// `toPatch` (the translation [composeTransforms] takes and the composed
+/// result it builds), one `saveLayer` (`TextCompositor.paint`) and one
+/// `ui.Image` handle (`asImage()`) -- alongside `gpu.Viewport`, `vm.Vector4`,
+/// the three `gpu.BufferView`s a patch pass binds (the corner buffer, the
+/// patch's instance buffer, and the one `HostBuffer.emplace` returns for its
+/// uniform block), `gpu.RenderTarget` and `gpu.ColorAttachment` (both
+/// measured at 88.0/frame by the device probe, one pair per patch), the
+/// command buffer and the render pass, which are the GPU shim's own per-pass
 /// objects, not this class's, and which Task 8's probe reports beside ours.
 /// Still O(1) per flush, not per entity.
 class GpuDrawBackend implements ResidentFramePainter {

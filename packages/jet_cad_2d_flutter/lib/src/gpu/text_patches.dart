@@ -7,13 +7,21 @@ import 'package:meta/meta.dart';
 import 'instance_record.dart';
 import 'resident_text.dart';
 
-/// **Provisional, and Plan F's to move.** The spec leaves the watermark band
-/// un-committed as a number (open question 3); Plan E needs a floor to expand
-/// an instance's reach at and a ceiling to size a patch target at, and takes
-/// these two until Plan F measures the band. `classifyTextPatches` (the
-/// floor) and `patchTargetSizeFor` (the ceiling) take them as parameters
-/// with these defaults, so a test can pin either edge and Plan F can move
-/// them without touching a call site -- `patchRegionFor` takes neither.
+/// **The band WAS measured (Plan F, Task 7, `flutter test`), and these two
+/// stay where they were.** On straight geometry (`crossingGrid`) criterion 1
+/// holds across the whole `[0.25, 4.0]` sweep -- no constant limits it there.
+/// On a corpus that carries a curve or a near-threshold label, criterion 1 is
+/// a step at each frozen watermark decision (the chord count; text culling),
+/// not a drift that a wider or narrower band would trade off against, so the
+/// reported band is the degenerate `[1.0, 1.0]`. The constants below stay at
+/// `0.5` / `2.0` under Ruling F6-a: shrinking them would rebuild after every
+/// zoom step, which is a design change, not a controller tuning -- whether to
+/// unfreeze either watermark row is the human's decision, not this plan's.
+/// See `docs/superpowers/notes/2026-09-05-plan-f-results.md`.
+///
+/// `classifyTextPatches` (the floor) and `patchTargetSizeFor` (the ceiling)
+/// take them as parameters with these defaults, so a test can pin either edge
+/// without touching a call site -- `patchRegionFor` takes neither.
 const double kBandLowerScale = 0.5;
 const double kBandUpperScale = 2.0;
 

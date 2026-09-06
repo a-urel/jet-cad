@@ -166,7 +166,7 @@ void main() {
   // text rendering: Plan E's `text_order_test.dart` already proved 1.25 and
   // 2.0 exact at level of detail off.
   test(
-      'text with level of detail on: exact inside [0.5, 1.0], and the 1.4 '
+      'text with level of detail on: exact inside [0.35, 1.0], and the 1.4 '
       'failure is the frozen cull by construction', () async {
     final doc = textOverlapFixture(measurer);
     final fit = ViewportTransform.fit(doc.extents, _size);

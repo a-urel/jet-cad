@@ -232,4 +232,67 @@ void main() {
     expect(uploader.painters.every((p) => p.disposed), isTrue,
         reason: 'every backend the canvas ever installed is disposed with it');
   });
+
+  testWidgets(
+      'switching the backend away from residentGpu repaints instead of '
+      'leaving the last GPU frame on screen', (t) async {
+    await t.pumpWidget(canvas());
+    await land(t);
+    final paintsBefore = paints;
+    await t.pumpWidget(wrap(DraftCanvas(
+        document: doc,
+        index: index,
+        camera: camera,
+        backend: RenderBackend.vertices,
+        minTextCapPixels: 0,
+        onPaintForTest: () => paints++)));
+    // MUTATION: `shouldRepaint` answering `false` once `resident` is null
+    // leaves the resident backend's last frame composited underneath the
+    // vertices path that just took over -- `paints` would not grow, because
+    // `RenderCustomPaint` would never call `paint` again on its own.
+    expect(paints, greaterThan(paintsBefore));
+    expect(state(t).resident, isNull);
+  });
+
+  testWidgets(
+      'a new document replaces the rebuilder, and the new collection is '
+      "taken from the new document, not the old one's", (t) async {
+    await t.pumpWidget(canvas());
+    await land(t);
+    final first = state(t).resident!;
+    expect(doc.tables.debugListenerCount, 1);
+
+    final measurer2 = FlutterTextMeasurer();
+    addTearDown(measurer2.clear);
+    final doc2 = textOverlapFixture(measurer2);
+    final index2 = SpatialIndex(doc2);
+    addTearDown(index2.dispose);
+    // Edited before the swap: the new rebuilder's first walk must see this
+    // document's own state, not a snapshot the old collection carried over.
+    doc2.commands
+        .execute(SetEntityTextCommand(const Handle(901), 'SECOND', ''));
+
+    await t.pumpWidget(wrap(DraftCanvas(
+        document: doc2,
+        index: index2,
+        camera: camera,
+        backend: RenderBackend.residentGpu,
+        minTextCapPixels: 0,
+        residentUploader: uploader.call,
+        onPaintForTest: () => paints++)));
+    final s = state(t);
+    // MUTATION: reusing the old rebuilder across a document swap -- `isNot`
+    // catches identity survival, and `first.disposed` catches a swap that
+    // built a new one without tearing down the old.
+    expect(s.resident, isNot(same(first)));
+    expect(first.disposed, isTrue);
+    expect(doc.tables.debugListenerCount, 0);
+    expect(doc2.tables.debugListenerCount, 1);
+    await land(t);
+    final texts = s.resident!.collection!.texts.map((x) => x.text).toList();
+    // MUTATION: attaching the new rebuilder to the old document -- 'SECOND'
+    // would be absent and 'COVERED' would still be there.
+    expect(texts, contains('SECOND'));
+    expect(texts, isNot(contains('COVERED')));
+  });
 }

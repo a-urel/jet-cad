@@ -228,6 +228,23 @@ void main() {
     expect(r.pending, isNull);
   });
 
+  testWidgets(
+      'a throwing upload falls back for good, the same as a null upload',
+      (t) async {
+    uploader.throwing = true;
+    r.noteFrame(fit(), kViewport, 1.0, rev());
+    await land(t);
+    expect(r.uploadFailed, isTrue);
+    expect(r.backend, isNull);
+    final thrown = t.takeException();
+    expect(thrown, isA<StateError>());
+    expect((thrown as StateError).message, contains('upload exploded'));
+    r.markDirty(RebuildTrigger.document);
+    await land(t);
+    expect(r.rebuilds, 1,
+        reason: 'criterion 10: fall back once, not per frame');
+  });
+
   testWidgets('a painter that lands after dispose is disposed, not installed',
       (t) async {
     r.noteFrame(fit(), kViewport, 1.0, rev());
