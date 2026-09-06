@@ -1,0 +1,95 @@
+# Review package: 061fa67..97eccb9
+
+## Commits
+97eccb9 test(gpu): the coalescing guard has a witness -- a schedules counter
+
+## Files changed
+ packages/jet_cad_2d_flutter/lib/src/gpu/resident_rebuilder.dart   | 5 +++++
+ packages/jet_cad_2d_flutter/test/gpu/resident_rebuilder_test.dart | 7 ++++++-
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_rebuilder.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_rebuilder.dart
+index b2311de..8edbe0c 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_rebuilder.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_rebuilder.dart
+@@ -121,20 +121,24 @@ class ResidentRebuilder extends ChangeNotifier {
+   bool _disposed = false;
+   bool get disposed => _disposed;
+ 
+   bool _uploadFailed = false;
+   bool get uploadFailed => _uploadFailed;
+ 
+   /// Walks started. Every walk lands ([landed]) unless [dispose] ran first.
+   int rebuilds = 0;
+   int landed = 0;
+ 
++  /// Post-frame callbacks registered. One per coalesced rebuild; a value
++  /// above [landed] means marks were not coalesced.
++  int schedules = 0;
++
+   /// Frames [noteFrame] saw with the camera outside the band -- drawn from
+   /// a collection the band has already condemned. Criterion 9's number.
+   int bandStaleFrames = 0;
+ 
+   int lastWalkMicros = 0;
+   int lastClassifyMicros = 0;
+   int lastUploadMicros = 0;
+   int lastTotalMicros = 0;
+   RebuildTrigger? lastTrigger;
+ 
+@@ -188,20 +192,21 @@ class ResidentRebuilder extends ChangeNotifier {
+   /// name. Ignored after [dispose] and after a failed upload.
+   void markDirty(RebuildTrigger trigger) {
+     if (_disposed || _uploadFailed) return;
+     _pending ??= trigger;
+     if (_inFlightTrigger != null || _scheduled) return;
+     _schedule();
+   }
+ 
+   void _schedule() {
+     _scheduled = true;
++    schedules++;
+     final binding = SchedulerBinding.instance;
+     binding.addPostFrameCallback((_) {
+       _scheduled = false;
+       unawaited(_run());
+     });
+     // A DocChange arrives between frames; a post-frame callback needs a
+     // frame to be post to. From inside a frame's paint this is a no-op
+     // (`ensureVisualUpdate` returns during `persistentCallbacks`), which is
+     // exactly right: the frame is already running and its end is the
+     // callback's cue.
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/resident_rebuilder_test.dart b/packages/jet_cad_2d_flutter/test/gpu/resident_rebuilder_test.dart
+index 15857de..c29feae 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/resident_rebuilder_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/resident_rebuilder_test.dart
+@@ -73,22 +73,27 @@ void main() {
+   testWidgets(
+       'three marks before the frame ends are one rebuild, named for '
+       'the first', (t) async {
+     r.noteFrame(fit(), kViewport, 1.0, rev());
+     await land(t);
+     r.markDirty(RebuildTrigger.document);
+     r.markDirty(RebuildTrigger.band);
+     r.markDirty(RebuildTrigger.tables);
+     expect(r.pending, RebuildTrigger.document);
+     await land(t);
+-    // MUTATION (M-F6): schedule a callback per markDirty -> rebuilds is 4.
++    // MUTATION (M-F6): drop markDirty's early return -> three callbacks are
++    // registered and schedules reads 4; rebuilds stays 2 only because
++    // _run's pending re-check absorbs the extra callbacks.
+     expect(r.rebuilds, 2);
++    expect(r.schedules, 2,
++        reason: 'one schedule for initial, one for the three coalesced '
++            'marks');
+     expect(r.lastTrigger, RebuildTrigger.document);
+   });
+ 
+   testWidgets('a mark during an upload in flight queues exactly one more',
+       (t) async {
+     r.noteFrame(fit(), kViewport, 1.0, rev());
+     await land(t);
+     uploader.gate = Completer<void>();
+     r.markDirty(RebuildTrigger.document);
+     await t.pump();

@@ -1,0 +1,601 @@
+# Review package: 2b0dd0e..ea2a192
+
+## Commits
+ea2a192 fix(gpu): a throwing rebuild falls back like a failed upload; the docs say Plan F happened; the fix wave's minors
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/draft_canvas.dart   | 30 +++++++----
+ .../lib/src/gpu/gpu_draw_backend.dart              | 14 +++--
+ .../lib/src/gpu/resident_rebuilder.dart            | 20 +++++++
+ .../lib/src/gpu/text_patches.dart                  | 22 +++++---
+ .../test/gpu/band_sweep_test.dart                  |  2 +-
+ .../test/gpu/classify_grid_test.dart               |  2 +-
+ .../test/gpu/draft_canvas_fallback_test.dart       | 47 ++++++++++++++++
+ .../test/gpu/draft_canvas_resident_test.dart       | 63 ++++++++++++++++++++++
+ .../test/gpu/resident_rebuilder_test.dart          | 17 ++++++
+ .../test/render_backend_test.dart                  | 17 +++---
+ .../test/support/recording_frame_painter.dart      |  8 ++-
+ 11 files changed, 211 insertions(+), 31 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart b/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
+index 5b7fa4a..7ffe8ef 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
+@@ -146,20 +146,25 @@ class DraftCanvas extends StatefulWidget {
+   /// Off by default: the cache is a pan-and-settle optimisation with a memory
+   /// budget attached ([kTileCacheBytes]), and a canvas that never pans pays for
+   /// it without collecting.
+   ///
+   /// **A consequence worth knowing, not a requirement:** with [tiles] on, the
+   /// drawing sits up to half a device pixel from where it sits with [tiles]
+   /// off. The tiled path quantises the camera to whole device pixels
+   /// ([quantiseCamera]) so every tile lands on an exact texel boundary; the
+   /// default path does not and never has. Toggling this flag on an otherwise
+   /// static scene can therefore shift the drawing by that much.
++  ///
++  /// **Ignored on a `residentGpu` canvas.** No tile cache is built beside the
++  /// resident backend ([DraftCanvasState.tileCache]'s own doc comment): both
++  /// are gesture paths answering the same frame, and the resident one
++  /// already holds the whole drawing.
+   final bool tiles;
+ 
+   /// Forwarded to [TileCache.tileDevicePixels]. Inert unless [tiles] is on.
+   final int tileDevicePixels;
+ 
+   /// **Test-only.** Called at the top of every paint.
+   ///
+   /// Counting frames is the only way to separate "invalidated correctly" from
+   /// "was ever asked to", and those are exactly the two halves of a table edit:
+   /// a revision read inside the paint can be right and unreachable.
+@@ -212,24 +217,23 @@ class DraftCanvasState extends State<DraftCanvas> {
+ 
+   /// The backend this state actually built, resolved once in [_attach].
+   ///
+   /// Public so a rig reports what it measured rather than what it asked for.
+   late RenderBackend resolvedBackend;
+ 
+   /// One sink for the life of the widget, its `Canvas` rebound per paint.
+   late CanvasDrawSink sink;
+ 
+   /// Non-null when [resolvedBackend] is [RenderBackend.vertices] or
+-  /// [RenderBackend.residentGpu] — the latter has no GPU-resident sink of its
+-  /// own to build yet (Plan F's work) and paints through this one until then.
+-  /// Wraps [sink], which keeps taking every op the vertices sink does not
+-  /// batch.
++  /// [RenderBackend.residentGpu] — the latter draws through this one before
++  /// its first rebuild lands and after an upload fails (Ruling F5). Wraps
++  /// [sink], which keeps taking every op the vertices sink does not batch.
+   VerticesDrawSink? vertices;
+ 
+   /// Non-null only while [DraftCanvas.tiles] is on.
+   ///
+   /// Public for the same reason [painter] is: a test that has to tell "the
+   /// cache invalidated" from "the cache was never asked" needs to read the
+   /// counters of the cache this widget actually built.
+   TileCache? tileCache;
+ 
+   /// Non-null exactly when [resolvedBackend] is [RenderBackend.residentGpu]:
+@@ -496,22 +500,23 @@ class _DraftCustomPainter extends CustomPainter {
+     required this.onPaintForTest,
+     required this.onUnsettled,
+     required super.repaint,
+   });
+ 
+   final DraftPainter painter;
+   final CameraController camera;
+   final CanvasDrawSink sink;
+ 
+   /// Null unless the resolved backend is [RenderBackend.vertices] or
+-  /// [RenderBackend.residentGpu] (routed here until Plan F).
+-  /// See [DraftCanvas.backend].
++  /// [RenderBackend.residentGpu] — the latter's vertices sink is what a
++  /// `residentGpu` canvas draws through before its first rebuild lands and
++  /// after an upload fails (Ruling F5). See [DraftCanvas.backend].
+   final VerticesDrawSink? vertices;
+ 
+   /// Null unless [DraftCanvas.tiles] is on.
+   final TileCache? tileCache;
+ 
+   /// Non-null exactly when [resolvedBackend] is [RenderBackend.residentGpu].
+   final ResidentRebuilder? resident;
+ 
+   /// Read for `tables.mutationRevision` only. See [DraftCanvas.tiles].
+   final DraftDocument document;
+@@ -612,17 +617,24 @@ class _DraftCustomPainter extends CustomPainter {
+   /// exactly the two triggers [ResidentRebuilder.noteFrame] cannot detect on
+   /// its own, because it is only ever told about a frame from inside `paint`,
+   /// and this delegate's [repaint] listenable never fires for either of
+   /// them by itself -- a device pixel ratio change carries no `DocChange`,
+   /// no table mutation and no camera move, and a freshly re-attached
+   /// rebuilder starts with no listener of its own wired into anything yet.
+   /// Without this, a `residentGpu` canvas whose device pixel ratio changed,
+   /// or whose rebuilder was just replaced by [DraftCanvasState.didUpdateWidget],
+   /// would sit on a stale frame until some unrelated cause happened to repaint
+   /// it.
++  ///
++  /// **The identity check runs even when [resident] is `null`.** A prop
++  /// change that switches `backend:` AWAY from `residentGpu` mid-session
++  /// makes a delegate whose own [resident] is `null` but whose [old]
++  /// carried a non-null one; without comparing identities first, this would
++  /// still answer `false` and leave the last GPU frame painted underneath
++  /// the vertices or tile path that just took over, which is stale exactly
++  /// the way a never-updated dpr or a freshly re-attached rebuilder is.
+   @override
+   bool shouldRepaint(_DraftCustomPainter old) {
+-    final r = resident;
+-    if (r == null) return false;
+-    return old.resident != r || old.devicePixelRatio != devicePixelRatio;
++    return old.resident != resident ||
++        (resident != null && old.devicePixelRatio != devicePixelRatio);
+   }
+ }
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+index 4bd1d52..ed0a7d6 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/gpu_draw_backend.dart
+@@ -183,25 +183,29 @@ double dashScaleFor(ViewportTransform camera, Transform2 collectionInverse) =>
+ /// used to allocate per call into [_regionScratch] and [_boundsScratch]
+ /// below -- fields, reused every frame, passed as each function's `scratch`
+ /// argument -- so those two are OFF this list now. Task 6 (Ruling F10) took
+ /// the two moves this doc used to name but not take: [_frameInfo] is one
+ /// `ByteData(80)` field [buildFrameInfo]'s `out` writes in place for every
+ /// pass of a frame, main and patch alike, and [_regionPool] is one
+ /// `PatchRegion` per patch, grown once and written in place by
+ /// `patchRegionFor`'s `out` -- so `PatchRegion` and the uniform block are
+ /// OFF this list too now. What remains, one of each per patch, never per
+ /// entity and never per plain (uncovered) label: a `PatchImage`, three
+-/// `Rect`s (`PatchImage.src`, `.dst`, `.layerBounds`), the `Transform2`
+-/// [composeTransforms] builds for `toPatch`, one `saveLayer`
+-/// (`TextCompositor.paint`) and one `ui.Image` handle (`asImage()`) --
+-/// alongside `gpu.Viewport`, `vm.Vector4`, `gpu.BufferView`, the command
+-/// buffer and the render pass, which are the GPU shim's own per-pass
++/// `Rect`s (`PatchImage.src`, `.dst`, `.layerBounds`), two `Transform2`s for
++/// `toPatch` (the translation [composeTransforms] takes and the composed
++/// result it builds), one `saveLayer` (`TextCompositor.paint`) and one
++/// `ui.Image` handle (`asImage()`) -- alongside `gpu.Viewport`, `vm.Vector4`,
++/// the three `gpu.BufferView`s a patch pass binds (the corner buffer, the
++/// patch's instance buffer, and the one `HostBuffer.emplace` returns for its
++/// uniform block), `gpu.RenderTarget` and `gpu.ColorAttachment` (both
++/// measured at 88.0/frame by the device probe, one pair per patch), the
++/// command buffer and the render pass, which are the GPU shim's own per-pass
+ /// objects, not this class's, and which Task 8's probe reports beside ours.
+ /// Still O(1) per flush, not per entity.
+ class GpuDrawBackend implements ResidentFramePainter {
+   GpuDrawBackend(this.geometry, this.collectionCamera,
+       {FlutterTextMeasurer? measurer,
+       TextStyleRecord Function(Handle)? textStyleOf})
+       : _collectionInverse = collectionCamera.worldToScreenMatrix.invert(),
+         _compositor = measurer != null && textStyleOf != null
+             ? TextCompositor(measurer: measurer, textStyleOf: textStyleOf)
+             : null;
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_rebuilder.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_rebuilder.dart
+index 8edbe0c..28fd6b3 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/resident_rebuilder.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/resident_rebuilder.dart
+@@ -219,20 +219,40 @@ class ResidentRebuilder extends ChangeNotifier {
+     final viewport = _viewport;
+     // No frame has told us the camera yet: keep the reason, and the first
+     // noteFrame marks again with a camera in hand.
+     if (_disposed || trigger == null || camera == null || viewport == null) {
+       return;
+     }
+     _pending = null;
+     _inFlightTrigger = trigger;
+     try {
+       await rebuildNow(camera, viewport, _dpr, trigger);
++    } catch (error, stackTrace) {
++      // A throw from the walk (`ResidentCollection.collect`, the text
++      // measurement, the classifier) or from the uploader must not escape:
++      // this runs `unawaited` from `_schedule`'s post-frame callback, so an
++      // uncaught throw here becomes an unhandled async error that leaves the
++      // canvas painting the OLD collection forever, with `uploadFailed` never
++      // set and nothing reported. Terminal, the same state a `null` upload
++      // produces in `rebuildNow`: no backend, no retry, and
++      // `DraftCanvas._onResidentLanded` reports the one-shot fallback because
++      // `uploadFailed` is true.
++      _uploadFailed = true;
++      _pending = null;
++      _backend?.dispose();
++      _backend = null;
++      FlutterError.reportError(FlutterErrorDetails(
++          exception: error,
++          stack: stackTrace,
++          library: 'jet_cad_2d_flutter',
++          context: ErrorDescription('rebuilding the resident GPU backend')));
++      if (!_disposed) notifyListeners();
+     } finally {
+       _inFlightTrigger = null;
+     }
+     if (!_disposed && _pending != null && !_uploadFailed) _schedule();
+   }
+ 
+   /// The walk, the classification, the upload, the swap. Public for the
+   /// harness's trigger phases and the tests; the schedule calls it too.
+   ///
+   /// The walk and the classification run synchronously here (this is the
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+index 3ac02c0..7f85170 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/text_patches.dart
+@@ -1,26 +1,34 @@
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:meta/meta.dart';
+ 
+ import 'instance_record.dart';
+ import 'resident_text.dart';
+ 
+-/// **Provisional, and Plan F's to move.** The spec leaves the watermark band
+-/// un-committed as a number (open question 3); Plan E needs a floor to expand
+-/// an instance's reach at and a ceiling to size a patch target at, and takes
+-/// these two until Plan F measures the band. `classifyTextPatches` (the
+-/// floor) and `patchTargetSizeFor` (the ceiling) take them as parameters
+-/// with these defaults, so a test can pin either edge and Plan F can move
+-/// them without touching a call site -- `patchRegionFor` takes neither.
++/// **The band WAS measured (Plan F, Task 7, `flutter test`), and these two
++/// stay where they were.** On straight geometry (`crossingGrid`) criterion 1
++/// holds across the whole `[0.25, 4.0]` sweep -- no constant limits it there.
++/// On a corpus that carries a curve or a near-threshold label, criterion 1 is
++/// a step at each frozen watermark decision (the chord count; text culling),
++/// not a drift that a wider or narrower band would trade off against, so the
++/// reported band is the degenerate `[1.0, 1.0]`. The constants below stay at
++/// `0.5` / `2.0` under Ruling F6-a: shrinking them would rebuild after every
++/// zoom step, which is a design change, not a controller tuning -- whether to
++/// unfreeze either watermark row is the human's decision, not this plan's.
++/// See `docs/superpowers/notes/2026-09-05-plan-f-results.md`.
++///
++/// `classifyTextPatches` (the floor) and `patchTargetSizeFor` (the ceiling)
++/// take them as parameters with these defaults, so a test can pin either edge
++/// without touching a call site -- `patchRegionFor` takes neither.
+ const double kBandLowerScale = 0.5;
+ const double kBandUpperScale = 2.0;
+ 
+ /// Cells an instance's reach-expanded box may span before it leaves the
+ /// grid for the overflow list, which every label tests. A long wall through
+ /// a floor plan would otherwise be appended to hundreds of buckets.
+ const int kClassifyOverflowCells = 16;
+ 
+ /// What one `classifyTextPatches` call did -- diagnostics, for the tests and
+ /// the harness. Zero everywhere when there are no labels.
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart b/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart
+index 3563700..986d6df 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/band_sweep_test.dart
+@@ -159,21 +159,21 @@ void main() {
+   //
+   // `textOverlapFixture`'s TINY label sits under `kMinTextCapPixels` at the
+   // reference scale and above it at a 1.4x live scale, so the live reference
+   // draws it while the frozen collection -- which culled it -- does not.
+   // That is `uncovered` ink, and it stands until the band exit rebuilds. Run
+   // the same ratio with the cull switched off and criterion 1 holds, which
+   // is what makes this a statement about the frozen row rather than about
+   // text rendering: Plan E's `text_order_test.dart` already proved 1.25 and
+   // 2.0 exact at level of detail off.
+   test(
+-      'text with level of detail on: exact inside [0.5, 1.0], and the 1.4 '
++      'text with level of detail on: exact inside [0.35, 1.0], and the 1.4 '
+       'failure is the frozen cull by construction', () async {
+     final doc = textOverlapFixture(measurer);
+     final fit = ViewportTransform.fit(doc.extents, _size);
+     final rows = await sweep(doc, measurer,
+         name: 'text-lod@fit',
+         collection: fit,
+         minTextCapPixels: kMinTextCapPixels);
+     for (final r in [0.5, 0.7, 1.0]) {
+       expect(criterionOne(rows[r]!), isTrue, reason: 'ratio $r: ${rows[r]}');
+     }
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/classify_grid_test.dart b/packages/jet_cad_2d_flutter/test/gpu/classify_grid_test.dart
+index 09a4d08..d417134 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/classify_grid_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/classify_grid_test.dart
+@@ -92,21 +92,21 @@ void main() {
+         e.maxY);
+     final (data, count, texts) =
+         collect(doc, measurer, const Size(1400, 900), 2.0);
+     expect(texts.length, greaterThan(50), reason: 'a real label population');
+     final stats = ClassifyStats();
+     final grid = classifyTextPatches(data, count, texts,
+         devicePixelRatio: 2.0, stats: stats);
+     final brute = classifyTextPatchesBruteForce(data, count, texts,
+         devicePixelRatio: 2.0);
+     // MUTATION (M-F9): skip the overflow list -> a long wall through a label
+-    // is missing from its patch. MUTATION (M-F10): bin by the min corner
++    // is missing from its patch. MUTATION (M-F10′): bin by the min corner
+     // only -- `cx1 = cx0` (and/or `cy1 = cy0`) at the binning site -- so a
+     // multi-cell instance lands in one cell and a label in its other cells
+     // misses it. (The plan's original M-F10, `.floor()` -> `.round()`, is
+     // EQUIVALENT: one closure pair serves binning and lookup, and a
+     // monotone shift of the whole grid stays conservative; recorded as
+     // equivalent in the mutation log.)
+     expectSamePatches(grid, brute);
+     expect(grid.length, greaterThan(3));
+     expect(grid.any((p) => p.instanceCount > 1), isTrue);
+     expect(stats.overflow, greaterThan(0),
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/draft_canvas_fallback_test.dart b/packages/jet_cad_2d_flutter/test/gpu/draft_canvas_fallback_test.dart
+index 2da48f9..143a27f 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/draft_canvas_fallback_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/draft_canvas_fallback_test.dart
+@@ -102,20 +102,67 @@ void main() {
+     await t.pump();
+     expect(paints, greaterThan(paintsBefore),
+         reason: 'the canvas kept drawing after the failure');
+     expect(() => s.vertices!.canvas, returnsNormally,
+         reason: 'and it drew through the vertices sink');
+     expect(r.rebuilds, 1, reason: 'criterion 10: once, not per frame');
+     expect(t.takeException(), isNull, reason: 'no second report');
+     expect(DraftCanvas.debugResidentFallbackReports, 1);
+   });
+ 
++  testWidgets(
++      'a throwing upload falls back for good: two reports, vertices still '
++      'paints', (t) async {
++    debugSetGpuAvailable(true);
++    uploader.throwing = true;
++    // Both reports below fire synchronously and in the same microtask, from
++    // inside the post-frame callback `pumpWidget`'s own frame schedules:
++    // `ResidentRebuilder._run`'s catch reports the `StateError` first, then
++    // its `notifyListeners()` call runs `DraftCanvas._onResidentLanded`
++    // synchronously (`ChangeNotifier.notifyListeners` calls every listener
++    // in the same call stack), which reports the `FlutterError` fallback
++    // second. Verified empirically: `tester.takeException()` after
++    // `pumpWidget` -- and again after a `pump()` on top of that -- returns
++    // the test binding's own synthetic "Multiple exceptions (2) were
++    // detected" error, never the two originals, because
++    // `TestWidgetsFlutterBinding`'s `FlutterError.onError` holds only ONE
++    // pending exception and collapses a second report that arrives before
++    // the first is taken; there is no point between these two synchronous
++    // `reportError` calls at which test code runs, so no number of pumps
++    // between `takeException()` calls can separate them. Intercepting
++    // `FlutterError.onError` directly, for this test's scope only, is what
++    // actually observes both reports, in order, without the binding's
++    // single-slot collapse.
++    final reported = <Object>[];
++    final previousOnError = FlutterError.onError;
++    FlutterError.onError = (details) => reported.add(details.exception);
++    await t.pumpWidget(canvas(RenderBackend.residentGpu));
++    FlutterError.onError = previousOnError;
++    expect(reported, hasLength(2));
++    expect(reported[0], isA<StateError>());
++    expect((reported[0] as StateError).message, contains('upload exploded'));
++    expect(reported[1], isA<FlutterError>());
++    expect(reported[1].toString(), contains('upload failed'));
++    final s = state(t);
++    expect(s.resident!.uploadFailed, isTrue);
++    expect(s.resident!.backend, isNull);
++    expect(DraftCanvas.debugResidentFallbackReports, 1);
++    final paintsBefore = paints;
++    camera.zoomAt(const Offset(200, 150), 3.0);
++    await t.pump();
++    await t.pump();
++    expect(paints, greaterThan(paintsBefore),
++        reason: 'the canvas kept drawing after the failure');
++    expect(() => s.vertices!.canvas, returnsNormally,
++        reason: 'and it drew through the vertices sink');
++  });
++
+   testWidgets('a canvas whose upload succeeds reports nothing', (t) async {
+     debugSetGpuAvailable(true);
+     await t.pumpWidget(canvas(RenderBackend.residentGpu));
+     await t.pump();
+     await t.pump();
+     expect(state(t).resident!.backend, isA<RecordingFramePainter>());
+     expect(t.takeException(), isNull);
+     expect(DraftCanvas.debugResidentFallbackReports, 0);
+   });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/draft_canvas_resident_test.dart b/packages/jet_cad_2d_flutter/test/gpu/draft_canvas_resident_test.dart
+index 15bccf2..1fe2bf4 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/draft_canvas_resident_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/draft_canvas_resident_test.dart
+@@ -225,11 +225,74 @@ void main() {
+     expect(doc.tables.debugListenerCount, 1);
+     await land(t);
+     expect(s.resident!.landed, 1);
+     final second = s.resident!;
+     await t.pumpWidget(wrap(const SizedBox()));
+     expect(second.disposed, isTrue);
+     expect(doc.tables.debugListenerCount, 0);
+     expect(uploader.painters.every((p) => p.disposed), isTrue,
+         reason: 'every backend the canvas ever installed is disposed with it');
+   });
++
++  testWidgets(
++      'switching the backend away from residentGpu repaints instead of '
++      'leaving the last GPU frame on screen', (t) async {
++    await t.pumpWidget(canvas());
++    await land(t);
++    final paintsBefore = paints;
++    await t.pumpWidget(wrap(DraftCanvas(
++        document: doc,
++        index: index,
++        camera: camera,
++        backend: RenderBackend.vertices,
++        minTextCapPixels: 0,
++        onPaintForTest: () => paints++)));
++    // MUTATION: `shouldRepaint` answering `false` once `resident` is null
++    // leaves the resident backend's last frame composited underneath the
++    // vertices path that just took over -- `paints` would not grow, because
++    // `RenderCustomPaint` would never call `paint` again on its own.
++    expect(paints, greaterThan(paintsBefore));
++    expect(state(t).resident, isNull);
++  });
++
++  testWidgets(
++      'a new document replaces the rebuilder, and the new collection is '
++      "taken from the new document, not the old one's", (t) async {
++    await t.pumpWidget(canvas());
++    await land(t);
++    final first = state(t).resident!;
++    expect(doc.tables.debugListenerCount, 1);
++
++    final measurer2 = FlutterTextMeasurer();
++    addTearDown(measurer2.clear);
++    final doc2 = textOverlapFixture(measurer2);
++    final index2 = SpatialIndex(doc2);
++    addTearDown(index2.dispose);
++    // Edited before the swap: the new rebuilder's first walk must see this
++    // document's own state, not a snapshot the old collection carried over.
++    doc2.commands
++        .execute(SetEntityTextCommand(const Handle(901), 'SECOND', ''));
++
++    await t.pumpWidget(wrap(DraftCanvas(
++        document: doc2,
++        index: index2,
++        camera: camera,
++        backend: RenderBackend.residentGpu,
++        minTextCapPixels: 0,
++        residentUploader: uploader.call,
++        onPaintForTest: () => paints++)));
++    final s = state(t);
++    // MUTATION: reusing the old rebuilder across a document swap -- `isNot`
++    // catches identity survival, and `first.disposed` catches a swap that
++    // built a new one without tearing down the old.
++    expect(s.resident, isNot(same(first)));
++    expect(first.disposed, isTrue);
++    expect(doc.tables.debugListenerCount, 0);
++    expect(doc2.tables.debugListenerCount, 1);
++    await land(t);
++    final texts = s.resident!.collection!.texts.map((x) => x.text).toList();
++    // MUTATION: attaching the new rebuilder to the old document -- 'SECOND'
++    // would be absent and 'COVERED' would still be there.
++    expect(texts, contains('SECOND'));
++    expect(texts, isNot(contains('COVERED')));
++  });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/gpu/resident_rebuilder_test.dart b/packages/jet_cad_2d_flutter/test/gpu/resident_rebuilder_test.dart
+index c29feae..8e7f55a 100644
+--- a/packages/jet_cad_2d_flutter/test/gpu/resident_rebuilder_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gpu/resident_rebuilder_test.dart
+@@ -221,20 +221,37 @@ void main() {
+     expect(r.backend, isNull);
+     expect(r.uploadFailed, isTrue);
+     r.markDirty(RebuildTrigger.document);
+     r.noteFrame(zoomedAbout(fit(), centre, 3.0), kViewport, 1.0, rev());
+     await land(t);
+     expect(r.rebuilds, 1,
+         reason: 'criterion 10: fall back once, not per frame');
+     expect(r.pending, isNull);
+   });
+ 
++  testWidgets(
++      'a throwing upload falls back for good, the same as a null upload',
++      (t) async {
++    uploader.throwing = true;
++    r.noteFrame(fit(), kViewport, 1.0, rev());
++    await land(t);
++    expect(r.uploadFailed, isTrue);
++    expect(r.backend, isNull);
++    final thrown = t.takeException();
++    expect(thrown, isA<StateError>());
++    expect((thrown as StateError).message, contains('upload exploded'));
++    r.markDirty(RebuildTrigger.document);
++    await land(t);
++    expect(r.rebuilds, 1,
++        reason: 'criterion 10: fall back once, not per frame');
++  });
++
+   testWidgets('a painter that lands after dispose is disposed, not installed',
+       (t) async {
+     r.noteFrame(fit(), kViewport, 1.0, rev());
+     uploader.gate = Completer<void>();
+     await t.pump();
+     expect(r.inFlight, isTrue);
+     r.dispose();
+     uploader.gate!.complete();
+     uploader.gate = null;
+     await t.pump();
+diff --git a/packages/jet_cad_2d_flutter/test/render_backend_test.dart b/packages/jet_cad_2d_flutter/test/render_backend_test.dart
+index ca4c397..835b413 100644
+--- a/packages/jet_cad_2d_flutter/test/render_backend_test.dart
++++ b/packages/jet_cad_2d_flutter/test/render_backend_test.dart
+@@ -50,32 +50,37 @@ void main() {
+     final state = await _pump(tester);
+     expect(state.resolvedBackend, defaultRenderBackend());
+   });
+ 
+   testWidgets('an explicit backend is honoured, not clamped', (tester) async {
+     // Phase C forces `vertices` on the web to measure it. A parameter that
+     // silently ignored what it was given would make that measurement a lie.
+     // `residentGpu` is resolved through `resolveBackend()` and may differ from
+     // the requested backend when GPU is unavailable; check the final resolved
+     // backend against what `resolveBackend()` returns.
+-    //
+     for (final backend in RenderBackend.values) {
+       final state = await _pump(tester, backend: backend);
+       final expectedBackend = resolveBackend(backend);
+       expect(state.resolvedBackend, expectedBackend, reason: '$backend');
+     }
+     // The `residentGpu` iteration above is exactly the fallback Ruling F5
+-    // reports through `FlutterError.reportError` (this platform has no GPU
+-    // under `flutter test`); expected here, not a defect. `flutter_test`
+-    // fails a test that ends with a reported error still pending, so it is
+-    // consumed here rather than left for teardown to trip over.
+-    expect(tester.takeException(), isA<FlutterError>());
++    // reports through `FlutterError.reportError`, but only on a platform
++    // with no GPU under `flutter test`; expected there, not a defect. On a
++    // platform where `resolveBackend(RenderBackend.residentGpu)` actually
++    // returns `residentGpu`, no fallback fires and there is nothing to
++    // consume. `flutter_test` fails a test that ends with a reported error
++    // still pending, so it is consumed here rather than left for teardown to
++    // trip over, guarded so the guard itself does not fail elsewhere.
++    if (resolveBackend(RenderBackend.residentGpu) !=
++        RenderBackend.residentGpu) {
++      expect(tester.takeException(), isA<FlutterError>());
++    }
+   });
+ 
+   testWidgets('only the resolved backend builds a sink', (tester) async {
+     // MUTATION: build both sinks unconditionally and this reads non-null in
+     // the canvas row. Two live sinks is two paragraph caches and two buffers.
+     final vertices = await _pump(tester, backend: RenderBackend.vertices);
+     expect(vertices.vertices, isNotNull);
+ 
+     final canvas = await _pump(tester, backend: RenderBackend.canvas);
+     expect(canvas.vertices, isNull);
+diff --git a/packages/jet_cad_2d_flutter/test/support/recording_frame_painter.dart b/packages/jet_cad_2d_flutter/test/support/recording_frame_painter.dart
+index 477f86b..5f13f1b 100644
+--- a/packages/jet_cad_2d_flutter/test/support/recording_frame_painter.dart
++++ b/packages/jet_cad_2d_flutter/test/support/recording_frame_painter.dart
+@@ -23,33 +23,37 @@ class RecordingFramePainter implements ResidentFramePainter {
+     lastCamera = camera;
+     lastViewport = viewport;
+     lastDpr = dpr;
+   }
+ 
+   @override
+   void dispose() => disposed = true;
+ }
+ 
+ /// An uploader the test controls: hands back a [RecordingFramePainter] over
+-/// the collection it was given, or `null` while [failing]; [gate], when set,
+-/// holds the upload in flight until the test completes it.
++/// the collection it was given, `null` while [failing], or throws while
++/// [throwing] -- the fallback's other cause: an escape from the walk, the
++/// classifier or the upload itself, rather than a clean `null`.
++/// [gate], when set, holds the upload in flight until the test completes it.
+ class FakeUploader {
+   bool failing = false;
++  bool throwing = false;
+   Completer<void>? gate;
+   final List<ResidentCollection> collections = <ResidentCollection>[];
+   final List<RecordingFramePainter> painters = <RecordingFramePainter>[];
+ 
+   Future<ResidentFramePainter?> call(
+       ResidentCollection collection, Size viewport) async {
+     collections.add(collection);
+     final g = gate;
+     if (g != null) await g.future;
++    if (throwing) throw StateError('upload exploded');
+     if (failing) return null;
+     final p = RecordingFramePainter(collection);
+     painters.add(p);
+     return p;
+   }
+ }
+ 
+ /// [base] scaled by [s] about [centre], in screen space -- the same
+ /// composition `text_order_test.dart`'s `_scaled` uses.
+ ViewportTransform zoomedAbout(ViewportTransform base, Offset centre, double s) {

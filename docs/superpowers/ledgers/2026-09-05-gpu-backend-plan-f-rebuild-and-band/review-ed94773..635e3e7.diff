@@ -1,0 +1,1008 @@
+# Review package: ed94773..635e3e7
+
+## Commits
+635e3e7 feat(harness): arm D on DraftCanvas, the ten trigger rebuilds, the band exit, and a VM-service allocation probe
+
+## Files changed
+ .vscode/launch.json                               |  38 +++
+ apps/dev_harness_2d/lib/allocation_probe.dart     |  89 +++++
+ apps/dev_harness_2d/lib/gpu_arm.dart              | 380 +++++++++++++++++++++-
+ apps/dev_harness_2d/lib/main.dart                 |  24 +-
+ apps/dev_harness_2d/pubspec.yaml                  |   1 +
+ apps/dev_harness_2d/test/gpu_widget_arm_test.dart |  62 ++++
+ 6 files changed, 568 insertions(+), 26 deletions(-)
+
+## Diff
+diff --git a/.vscode/launch.json b/.vscode/launch.json
+index e7a7508..0fdd1a9 100644
+--- a/.vscode/launch.json
++++ b/.vscode/launch.json
+@@ -178,20 +178,58 @@
+                 "--dart-define=ENTITIES=10000",
+                 "--dart-define=SPIKE_DEFS=20",
+                 "--dart-define=SPIKE_INSTANCES=150",
+                 "--dart-define=SPIKE_FRAMES=30",
+                 "--dart-define=SPIKE_REPEATS=3",
+                 "--dart-define=SPIKE_FILLS=true",
+                 "--dart-define=SPIKE_TEXT=true",
+                 "--dart-define=DRAW_TEXT=false"
+             ]
+         },
++        {
++            // Plan F: four arms (D is DraftCanvas on residentGpu), the ten
++            // trigger rebuilds per repeat, the band-exit phase and the
++            // allocation probe. The same corpus as the criterion-11 run.
++            "name": "2d: GPU spike -- Plan F (arm D, triggers, band exit, probe)",
++            "cwd": "apps/dev_harness_2d",
++            "program": "lib/main.dart",
++            "request": "launch",
++            "type": "dart",
++            "deviceId": "macos",
++            "flutterMode": "profile",
++            "toolArgs": [
++                "--dart-define=RUN_GPU_SPIKE=true",
++                "--dart-define=ENTITIES=10000",
++                "--dart-define=SPIKE_DEFS=20",
++                "--dart-define=SPIKE_INSTANCES=150",
++                "--dart-define=SPIKE_FRAMES=30",
++                "--dart-define=SPIKE_REPEATS=3",
++                "--dart-define=SPIKE_FILLS=true",
++                "--dart-define=SPIKE_TEXT=true"
++            ]
++        },
++        {
++            // The main view on the resident backend, for the eye: pan and
++            // zoom by hand, watch the rebuild land past 2x, pan far off the
++            // fitted view and look for an empty edge.
++            "name": "2d: main view -- BACKEND=residentGpu",
++            "cwd": "apps/dev_harness_2d",
++            "program": "lib/main.dart",
++            "request": "launch",
++            "type": "dart",
++            "deviceId": "macos",
++            "flutterMode": "profile",
++            "toolArgs": [
++                "--dart-define=BACKEND=residentGpu",
++                "--dart-define=ENTITIES=10000"
++            ]
++        },
+         {
+             // Debug mode: hot reload and breakpoints, at the cost of numbers
+             // that mean nothing -- `refuseDebugMode()` in the rig refuses to
+             // record from a debug build, and the same caution applies to
+             // anything you judge by eye here.
+             "name": "2d: measure 50k -- tiles ON, debug",
+             "cwd": "apps/dev_harness_2d",
+             "program": "lib/main.dart",
+             "request": "launch",
+             "type": "dart",
+diff --git a/apps/dev_harness_2d/lib/allocation_probe.dart b/apps/dev_harness_2d/lib/allocation_probe.dart
+new file mode 100644
+index 0000000..88a6994
+--- /dev/null
++++ b/apps/dev_harness_2d/lib/allocation_probe.dart
+@@ -0,0 +1,89 @@
++// The frame-path allocation instrument the spec's invariant 1 calls a "new
++// mechanism" (Ruling F8). `flutter test` cannot host one --
++// `flutter_tester` launches with `--disable-vm-service` (STATUS, Plan 3g) --
++// but a `flutter run --profile` process serves the VM service for DevTools,
++// and this connects to its own isolate the way
++// `packages/jet_cad_2d/test/invariants/vm_allocation_meter.dart` does under
++// `dart test`, with `Service.getInfo()` first because the server is already
++// up here.
++import 'dart:developer' as dev;
++import 'dart:isolate' as iso;
++
++import 'package:vm_service/vm_service.dart' as vms;
++import 'package:vm_service/vm_service_io.dart' as vms_io;
++
++/// Library URIs whose classes the report counts: this project's own frame
++/// path, the two `dart:` libraries its per-frame objects live in, and the
++/// GPU shim's per-pass objects, reported beside ours.
++const List<String> kProbedLibraryPrefixes = <String>[
++  'package:jet_cad_2d_flutter/',
++  'dart:ui',
++  'dart:typed_data',
++  'package:flutter_gpu/',
++  'package:flutter_scene/',
++];
++
++class AllocationProbe {
++  AllocationProbe._(this._service, this._isolateId);
++  final vms.VmService _service;
++  final String _isolateId;
++
++  /// Connects to this process's VM service. Throws with the reason when the
++  /// service is not serving; the caller reports UNEVALUABLE, never a number.
++  static Future<AllocationProbe> connect() async {
++    var info = await dev.Service.getInfo();
++    if (info.serverUri == null) {
++      info = await dev.Service.controlWebServer(enable: true);
++    }
++    final http = info.serverUri;
++    if (http == null) {
++      throw StateError('the VM service is not serving (Service.getInfo and '
++          'controlWebServer gave no URI) -- is this a --profile run?');
++    }
++    final ws = http.replace(
++        scheme: 'ws',
++        path: http.path.endsWith('/') ? '${http.path}ws' : '${http.path}/ws');
++    final service = await vms_io.vmServiceConnectUri(ws.toString());
++    final isolateId = dev.Service.getIsolateId(iso.Isolate.current);
++    if (isolateId == null) {
++      await service.dispose();
++      throw StateError('Service.getIsolateId(Isolate.current) is null');
++    }
++    // The first RPC proves the connection; a refused one throws here, not
++    // in the middle of a measurement.
++    await service.getAllocationProfile(isolateId);
++    return AllocationProbe._(service, isolateId);
++  }
++
++  /// Two RPCs, not one -- the meter's own finding: `gc: true` and `reset:
++  /// true` on one call left the accumulators non-zero.
++  Future<void> reset() async {
++    await _service.getAllocationProfile(_isolateId, gc: true);
++    await _service.getAllocationProfile(_isolateId, reset: true);
++  }
++
++  /// `instancesAccumulated` since [reset], per class, for the probed
++  /// libraries. Keys are `<library uri> <class name>`.
++  ///
++  /// **Call this at most once per [reset].** The meter this file follows
++  /// measured a second read against the same epoch reading near-zero for
++  /// every class rather than the true accumulated count (failure mode 3 in
++  /// `vm_allocation_meter.dart`), because the first read re-bases the
++  /// baseline to itself.
++  Future<Map<String, int>> read() async {
++    final profile = await _service.getAllocationProfile(_isolateId);
++    final out = <String, int>{};
++    for (final m in profile.members ?? const <vms.ClassHeapStats>[]) {
++      final cls = m.classRef;
++      if (cls == null) continue;
++      final lib = cls.library?.uri ?? '';
++      if (!kProbedLibraryPrefixes.any(lib.startsWith)) continue;
++      final n = m.instancesAccumulated ?? 0;
++      if (n == 0) continue;
++      out['$lib ${cls.name}'] = n;
++    }
++    return out;
++  }
++
++  Future<void> dispose() => _service.dispose();
++}
+diff --git a/apps/dev_harness_2d/lib/gpu_arm.dart b/apps/dev_harness_2d/lib/gpu_arm.dart
+index 909d27c..28b5bbf 100644
+--- a/apps/dev_harness_2d/lib/gpu_arm.dart
++++ b/apps/dev_harness_2d/lib/gpu_arm.dart
+@@ -1,20 +1,26 @@
+ // ignore_for_file: avoid_print -- the GSPIKE diagnostics below print by
+ // design; see `measurement_rig.dart`.
+ 
+ import 'dart:async';
++import 'dart:typed_data';
+ 
+ import 'package:flutter/foundation.dart' show kIsWeb;
+ import 'package:flutter/material.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
++// `kDefaultOriginX`, `kOriginY`, `kFloorWidth`, `kFloorHeight` -- the floor
++// [fireDocumentTrigger] puts its probe line across, the same constants
++// `main.dart`'s `_addPatchedLabels` reads.
++import 'package:jet_cad_2d/testing.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
++import 'allocation_probe.dart';
+ import 'measurement_rig.dart';
+ 
+ // --- The GPU arm: painter vs. tiles vs. jet_cad_2d_flutter's resident-GPU
+ // backend, interleaved. -----------------------------------------------
+ //
+ // Formerly `gpu_arm.dart` and `gpu_arm_rig.dart` (branch
+ // `spike/flutter-gpu-backend`), which hand-rolled a collector and their own
+ // `flutter_gpu` plumbing to answer one question: can a pan or a zoom cost a
+ // uniform write instead of a document walk, and still draw sharp? Plan A
+ // (`docs/superpowers/plans/2026-08-29-gpu-backend-plan-a-seam-and-strokes.md`)
+@@ -72,72 +78,94 @@ import 'measurement_rig.dart';
+ // anchored in world space. Plan C measured that three ways (see
+ // `docs/superpowers/notes/2026-08-31-plan-c-results.md`).
+ //
+ // What baking a dash pattern actually froze was the **collapse** decision.
+ // `kDashCollapsePx` is a screen-space threshold, so whether a pattern draws
+ // solid depends on the live camera; a buffer that decided it once at
+ // collection time drew dashes where the reference had collapsed to solid, or
+ // the reverse. Plan C moved that branch into the vertex shader, where it is
+ // re-decided every frame from one uniform.
+ 
+-/// The three arms.
++/// The four arms.
+ enum GpuSpikeArm {
+   /// Today's untiled path: the whole document walked per frame into one
+   /// `drawVertices`.
+   painter,
+ 
+   /// Today's *gesture* path, and the one that matters: Plan 3i's tile cache,
+   /// which answers a moving frame by blitting the previous generation's
+   /// composite, magnified. Cheap and blurry.
+   tiled,
+ 
+   /// `jet_cad_2d_flutter`'s resident-GPU backend: the geometry uploaded once,
+   /// the camera a per-frame uniform, one instanced draw call. Sharp, and the
+   /// question is what it costs -- and, on a device for the first time here,
+   /// whether it draws the right picture at all.
+-  gpu;
++  gpu,
++
++  /// `DraftCanvas(backend: RenderBackend.residentGpu)`: the same backend as
++  /// arm C, reached through the widget path Plan F wired -- collected over
++  /// the extents at the live scale, rebuilt on the five triggers. Arm C
++  /// stays as the control (Ruling F9); a widget-path regression shows as a
++  /// C-to-D gap, not as a mystery.
++  widget;
+ 
+   String get label => switch (this) {
+         GpuSpikeArm.painter => 'A painter (untiled)',
+         GpuSpikeArm.tiled => 'B tiles (blit)',
+         GpuSpikeArm.gpu => 'C residentGpu (jet_cad_2d_flutter)',
++        GpuSpikeArm.widget => 'D residentGpu (DraftCanvas)',
+       };
+ }
+ 
++/// Criterion 5's gate (Ruling F8): per-frame allocations on arm D's pan
++/// phase, `<= kAllocFixed + kAllocPerPatch * P`. The per-patch set the spec's
++/// exception enumerates -- `PatchImage`, three `Rect`s, the `asImage()`
++/// handle, plus the GPU shim's own `Viewport`, `Vector4`, two `BufferView`s,
++/// a command buffer and a render pass -- is under twelve; the fixed set --
++/// `composeTransforms` twice, the main image and its two `Rect`s, the main
++/// pass's shim objects -- is under twenty. Both doubled: a per-INSTANCE
++/// allocation is ~110,000 per frame on the measured corpus and no slack
++/// here can hide it.
++const int kAllocFixed = 40;
++const int kAllocPerPatch = 24;
++
+ /// One phase's timings, in milliseconds.
+ class GpuPhaseReport {
+   GpuPhaseReport(this.arm, this.phase, this.build, this.raster, this.submits,
+       {this.unalignedExcess = 0,
+       this.patchesRendered = 0,
+       this.patchesClipped = 0,
+       this.patchesOffscreen = 0});
+ 
+   final GpuSpikeArm arm;
+   final String phase;
+   final List<double> build;
+   final List<double> raster;
+ 
+-  /// GPU frames arm C submitted during the phase. Zero on a hold is the arm
+-  /// working: nothing changed, so nothing was re-rendered.
++  /// GPU frames arm C -- or, since Plan F, arm D -- submitted during the
++  /// phase. Zero on a hold is the arm working: nothing changed, so nothing
++  /// was re-rendered.
+   final int submits;
+ 
+   /// Web only: how far the reported-frame count ran ahead of the pumped count.
+   /// Zero means the stream never shifted and the figures are aligned after
+   /// all. Anything else is the size of the ordinal ambiguity.
+   final int unalignedExcess;
+ 
+   /// [GpuDrawBackend.patchesRendered]/`patchesClipped`/`patchesOffscreen`,
+   /// read right after the phase -- so these describe the phase's **last
+   /// frame only**, not a sum or an average over it, the same way `submits`
+-  /// is the only per-phase figure that is a genuine total. Zero on every arm
+-  /// but `gpu`, and zero on arm `gpu` too whenever `SPIKE_TEXT` is off or the
+-  /// corpus's labels are not covered by anything at this phase's camera.
++  /// is the only per-phase figure that is a genuine total. Zero on arms A and
++  /// B, which have no resident backend at all, and zero on `gpu` and `widget`
++  /// too whenever `SPIKE_TEXT` is off or the corpus's labels are not covered
++  /// by anything at this phase's camera.
+   final int patchesRendered;
+   final int patchesClipped;
+   final int patchesOffscreen;
+ }
+ 
+ /// Every line the rig prints, kept so the run can also *show* them.
+ ///
+ /// **This exists because `print` is not readable on the web.** A dart2js
+ /// profile build sends `print` to the browser console, which `flutter run`
+ /// does not forward to its stdout, so a web run posts its numbers where no
+@@ -278,20 +306,37 @@ class GpuSpikeApp extends StatefulWidget {
+   State<GpuSpikeApp> createState() => GpuSpikeState();
+ }
+ 
+ class GpuSpikeState extends State<GpuSpikeApp> {
+   late final SpatialIndex index = SpatialIndex(widget.document);
+   late final CameraController camera = CameraController(
+       ViewportTransform.fit(widget.document.extents, widget.viewport));
+ 
+   final ValueNotifier<GpuSpikeArm> arm = ValueNotifier(GpuSpikeArm.painter);
+ 
++  /// Arm D's canvas, so the rig can read its rebuilder.
++  final GlobalKey<DraftCanvasState> widgetKey = GlobalKey<DraftCanvasState>();
++
++  /// Non-null while the rig is exercising the `devicePixelRatio` trigger:
++  /// arm D's `MediaQuery` reports this ratio instead of the window's.
++  final ValueNotifier<double?> dprOverride = ValueNotifier<double?>(null);
++
++  ResidentRebuilder? get widgetRebuilder => widgetKey.currentState?.resident;
++
++  /// The `GpuDrawBackend` an arm draws through, or null: arm C's is
++  /// [backend]; arm D's is its rebuilder's, once landed; A and B have none.
++  GpuDrawBackend? backendOf(GpuSpikeArm a) => switch (a) {
++        GpuSpikeArm.gpu => backend,
++        GpuSpikeArm.widget => widgetRebuilder?.backend as GpuDrawBackend?,
++        _ => null,
++      };
++
+   /// Null until [_buildResidentGeometry] finishes, and possibly still null
+   /// after that -- see the doc comment there. Arm C draws through this, when
+   /// it is not null.
+   GpuDrawBackend? backend;
+   int instanceCount = 0;
+   int skippedOps = 0;
+ 
+   /// Text ops the walk emitted -- `collector.texts.length`, one per resident
+   /// label. Zero unless `SPIKE_TEXT=true` put labels in the corpus.
+   int textOps = 0;
+@@ -440,20 +485,21 @@ class GpuSpikeState extends State<GpuSpikeApp> {
+         'subBuffer=${(subBufferBytes / (1024 * 1024)).toStringAsFixed(2)} MB '
+         'patchTargets=${(patchTargetBytes / (1024 * 1024)).toStringAsFixed(2)} MB '
+         'classify=${classifyMs.toStringAsFixed(1)} ms');
+   }
+ 
+   @override
+   void dispose() {
+     index.dispose();
+     camera.dispose();
+     arm.dispose();
++    dprOverride.dispose();
+     backend?.dispose();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) => MaterialApp(
+         debugShowCheckedModeBanner: false,
+         home: Scaffold(
+           backgroundColor: const Color(0xFFFFFFFF),
+           // `SizedBox.expand` for the reason the widget spike's rig records:
+@@ -484,20 +530,56 @@ class GpuSpikeState extends State<GpuSpikeApp> {
+                         index: index,
+                         camera: camera,
+                         lineweightScale: widget.lineweightScale,
+                         tiles: true,
+                       ),
+                     ),
+                     if (a == GpuSpikeArm.gpu && built != null)
+                       Positioned.fill(
+                         child: GpuArmView(backend: built, camera: camera),
+                       ),
++                    // **`Offstage`, not `if (a == GpuSpikeArm.widget)`**, and
++                    // that is the whole difference between arm D and arm C
++                    // above. Arm C's widget is created and destroyed with
++                    // every switch, which is free because its backend lives
++                    // on [backend] out here; arm D's rebuilder lives inside
++                    // its `DraftCanvasState`, so a widget that came and went
++                    // would tear the collection down and re-upload it on
++                    // every switch and measure nothing but first builds.
++                    // Offstage keeps one state alive for the whole run. An
++                    // `Offstage` canvas is laid out and never painted, so arm
++                    // D's first `noteFrame` -- and its first rebuild --
++                    // happens when the rig switches to it.
++                    Offstage(
++                      offstage: a != GpuSpikeArm.widget,
++                      child: ValueListenableBuilder<double?>(
++                        valueListenable: dprOverride,
++                        builder: (context, dpr, _) {
++                          final data = MediaQuery.of(context);
++                          return MediaQuery(
++                            data: dpr == null
++                                ? data
++                                : data.copyWith(devicePixelRatio: dpr),
++                            child: DraftCanvas(
++                              key: widgetKey,
++                              document: widget.document,
++                              index: index,
++                              camera: camera,
++                              lineweightScale: widget.lineweightScale,
++                              drawText: widget.drawText,
++                              backend: RenderBackend.residentGpu,
++                              tiles: false,
++                            ),
++                          );
++                        },
++                      ),
++                    ),
+                     // **Only after the last phase, and that is not cosmetic.**
+                     // An overlay in the tree while a phase is running would be
+                     // laid out and painted inside the frames being measured.
+                     // It appears when the run is over and the numbers are
+                     // already taken.
+                     Positioned.fill(
+                       child: ValueListenableBuilder<List<String>>(
+                         valueListenable: gpuReportLines,
+                         builder: (context, lines, _) {
+                           if (lines.isEmpty ||
+@@ -526,35 +608,99 @@ class GpuSpikeState extends State<GpuSpikeApp> {
+                     ),
+                   ],
+                 );
+               },
+             ),
+           ),
+         ),
+       );
+ }
+ 
++/// Fires one of the document-side triggers by name. `probe` is the handle
++/// the `CommandApplied` line is added under (and undone, and redone); the
++/// caller allocates it once per trigger sweep from `doc.handleSeed`.
++///
++/// **One fresh handle per sweep, not one per run.** `AddEntityCommand` throws
++/// `DuplicateHandleError` on a handle the document already carries, and the
++/// sweep leaves its line behind: `CommandRedone` puts it back and neither
++/// `DocumentLoaded` nor `DocumentPurged` removes it. A second sweep reusing
++/// the same handle would throw rather than fire a trigger.
++void fireDocumentTrigger(DraftDocument doc, String name,
++    {required Handle probe}) {
++  switch (name) {
++    case 'CommandApplied':
++      final cx = kDefaultOriginX + kFloorWidth / 2;
++      final cy = kOriginY + kFloorHeight / 2;
++      doc.commands.execute(AddEntityCommand(
++        record: EntityRecord(
++          handle: probe,
++          owner: doc.rootHandle,
++          kind: EntityKind.line,
++          layer: ReservedHandles.layerZero,
++          linetype: ReservedHandles.byLayerLinetype,
++          linetypeScale: 1.0,
++          geomIndex: 0,
++          color: const ByLayerColor(),
++          lineweight: 100,
++          transparency: 0,
++          flags: 0,
++        ),
++        payload: GeometryPayload(
++            coords: Float64List.fromList(
++                [cx - 8000, cy - 5000, cx + 8000, cy + 5000]),
++            scalars: Float64List(0)),
++      ));
++    case 'CommandUndone':
++      doc.commands.undo();
++    case 'CommandRedone':
++      doc.commands.redo();
++    case 'DocumentLoaded':
++      doc.commands.notifyLoaded();
++    case 'DocumentPurged':
++      doc.purge();
++    case 'tables':
++      final zero = doc.tables.layers[ReservedHandles.layerZero]!;
++      final next =
++          zero.color is IndexedColor && (zero.color as IndexedColor).aci == 1
++              ? 2
++              : 1;
++      doc.tables.layers.remove(zero.handle);
++      doc.tables.layers.add(LayerRecord(
++          handle: zero.handle,
++          name: zero.name,
++          color: IndexedColor(next),
++          linetype: zero.linetype,
++          lineweight: zero.lineweight,
++          transparency: zero.transparency,
++          visible: zero.visible,
++          locked: zero.locked));
++    default:
++      throw ArgumentError.value(name, 'name', 'not a document trigger');
++  }
++}
++
+ /// Runs every arm over every phase, interleaved, [repeats] times.
+ ///
+ /// **Interleaved and not blocked**, for the reason Plan 3i recorded: blocked
+ /// arms let session drift land entirely on one of them.
+ Future<void> runGpuSpike(
+   GpuSpikeState state, {
+   required int entities,
+   required int frames,
+   required int repeats,
+   required Size viewport,
+ }) async {
+   refuseDebugMode();
+ 
+   final baseCamera = state.camera.value;
+   final centre = Offset(viewport.width / 2, viewport.height / 2);
++  final baseDpr = MediaQuery.devicePixelRatioOf(state.context);
+ 
+   gpuReport('GSPIKE run: entities=$entities instances=${state.instanceCount} '
+       'viewport=${viewport.width.toStringAsFixed(0)}x'
+       '${viewport.height.toStringAsFixed(0)} '
+       'frames=$frames repeats=$repeats');
+   gpuReport('GSPIKE note: arm C (residentGpu) draws strokes, joins, points, '
+       'circles, arcs, shaded dashes, (since Plan D) fills and (since Plan E) '
+       'text -- ${state.skippedOps} op(s) this walk did not draw. Text is '
+       'drawn through the compositor: resident labels position from a '
+       'per-frame uniform, and this corpus has ${state.textOps} label(s), of '
+@@ -571,57 +717,110 @@ Future<void> runGpuSpike(
+       'regardless. Butt caps only -- Plan B emits no cap geometry. No '
+       'antialiasing. Dash patterns are evaluated per fragment against the '
+       'live camera since Plan C, collapse rule included, so nothing about '
+       'them is baked. Every remaining gap favours arm C on a timing '
+       'comparison, which is why the picture matters as much as the numbers '
+       'here.');
+ 
+   final reports = <GpuPhaseReport>[];
+ 
+   Future<void> setArm(GpuSpikeArm a) async {
+-    final before = state.backend?.frames ?? 0;
++    final before = state.backendOf(a)?.frames ?? 0;
++    // Whether this is arm D's FIRST switch -- the one that pays the cold
++    // rebuild, and the only one the "no GPU frame" guard below can read.
++    final coldWidget =
++        a == GpuSpikeArm.widget && (state.widgetRebuilder?.landed ?? 0) == 0;
+     state.arm.value = a;
+     await pumpFrame();
+     await pumpFrame();
++    if (a == GpuSpikeArm.widget) {
++      // Arm D rebuilds on its first painted frame; nothing it draws before
++      // the landing is the resident backend. Wait for it, bounded, and refuse
++      // to measure a canvas that fell back.
++      var frames = 0;
++      while ((state.widgetRebuilder?.landed ?? 0) == 0 && frames < 300) {
++        await pumpFrame();
++        frames++;
++      }
++      final r = state.widgetRebuilder;
++      if (r == null || r.landed == 0) {
++        throw StateError('GSPIKE ${a.label}: no rebuild landed in $frames '
++            'frames -- the widget path is not wired, or the upload hangs.');
++      }
++      if (r.uploadFailed) {
++        throw StateError('GSPIKE ${a.label}: the upload failed and the canvas '
++            'fell back to vertices; every number it would post is arm A\'s.');
++      }
++      if (coldWidget) {
++        // The landing happens in a post-frame callback, so the loop above
++        // exits BEFORE any frame has painted through the new backend. Two
++        // more, so `frames` below reads a backend that is actually in the
++        // paint path.
++        await pumpFrame();
++        await pumpFrame();
++        gpuReport('GSPIKE ${a.label}: first rebuild landed after $frames '
++            'frame(s) -- walk ${(r.lastWalkMicros / 1000).toStringAsFixed(1)} '
++            'classify ${(r.lastClassifyMicros / 1000).toStringAsFixed(1)} '
++            'upload ${(r.lastUploadMicros / 1000).toStringAsFixed(1)} '
++            'total ${(r.lastTotalMicros / 1000).toStringAsFixed(1)} ms (COLD: '
++            'the first GPU call of the process pays pipeline creation)');
++      }
++    }
+     // **The `painted=0` check belongs here, not in a phase.** Arm C renders
+     // only when the camera changes, so a hold legitimately submits nothing --
+     // that is the arm working, and the first smoke run's guard called it a
+     // defect. What would be a real defect is the arm never painting at all,
+     // and switching to it is exactly when that shows. It also fires when
+     // [GpuSpikeState.backend] never got built (`ResidentGeometry.create`
+     // returned null): `state.backend?.frames` reads `null ?? 0` on every
+     // frame, so `before` and the post-switch count are equal either way.
+-    if (a == GpuSpikeArm.gpu && (state.backend?.frames ?? 0) == before) {
++    //
++    // **Arm D is checked on its COLD switch only**, and arm C on every one.
++    // Arm C's widget is rebuilt from scratch on each switch, so its render
++    // object always paints; arm D's lives behind an `Offstage` and keeps its
++    // layer, so a switch that changes neither the camera nor the collection
++    // -- `rebuildPhase` and the band-exit phase both call `setArm` when D is
++    // already the live arm -- legitimately paints nothing and would trip a
++    // guard that ran every time. What the guard is for is arm D never
++    // reaching the paint path at all, and the cold switch is where that
++    // shows; the per-phase `submits` line reports the warm case.
++    if ((a == GpuSpikeArm.gpu || coldWidget) &&
++        (state.backendOf(a)?.frames ?? 0) == before) {
+       throw StateError('GSPIKE ${a.label}: switching to this arm submitted no '
+           'GPU frame, so it is not in the paint path at all. Every number it '
+           'would post is the cost of an empty screen.');
+     }
+   }
+ 
++  /// [frameCount] overrides the run's [frames] for this one phase -- the
++  /// band-exit phase needs exactly 40 steps of 1.02 to leave the band, which
++  /// is not the run's frame count.
+   Future<GpuPhaseReport> phase(
+     GpuSpikeArm a,
+     String name,
+-    void Function(int i) step,
+-  ) async {
++    void Function(int i) step, {
++    int? frameCount,
++  }) async {
++    final n = frameCount ?? frames;
+     state.camera.value = baseCamera;
+     await pumpFrame();
+ 
+-    final framesAtStart = state.backend?.frames ?? 0;
++    final framesAtStart = state.backendOf(a)?.frames ?? 0;
+     var unalignedExcess = 0;
+     final log = FrameTimingLog()..arm();
+     try {
+       await log.establishBaseline(pumpFrame);
+-      for (var i = 0; i < frames; i++) {
++      for (var i = 0; i < n; i++) {
+         step(i);
+         await log.pump(pumpFrame);
+       }
+-      await log.drain(pumpFrame, upTo: frames);
++      await log.drain(pumpFrame, upTo: n);
+       // **The refusal stands on native and is relaxed on web, deliberately
+       // and only there.** On the web the latch fires on arm A -- the plain
+       // painter, no GPU code anywhere near it -- so it is not reporting a
+       // defect in what is being measured. It is reporting that ordinal
+       // alignment does not hold on that platform. See
+       // `FrameTimingLog.debugTimingsUnaligned` for what is given up: these
+       // become a distribution over the phase window rather than a statement
+       // about the i-th pumped frame, and the excess is printed beside them.
+       // Not this task's platform -- Plan G owns web -- kept because it is
+       // cheap and this rig outlives the spike it was written for.
+@@ -636,32 +835,96 @@ Future<void> runGpuSpike(
+       for (final t in timings) {
+         build.add(t.buildDuration.inMicroseconds / 1000.0);
+         raster.add(t.rasterDuration.inMicroseconds / 1000.0);
+       }
+       if (kIsWeb) unalignedExcess = log.debugWorstExcess;
+       // Read right after the phase's last frame, not summed or averaged over
+       // it -- `GpuDrawBackend` resets these three at the top of every
+       // `render`, so they already describe one frame and not the phase as a
+       // whole. `state.backend` is only non-null on arm `gpu`; the other two
+       // arms report zero, which [GpuPhaseReport]'s own doc comment explains.
+-      final b = state.backend;
++      final b = state.backendOf(a);
+       return GpuPhaseReport(
+-          a, name, build, raster, (state.backend?.frames ?? 0) - framesAtStart,
++          a, name, build, raster, (b?.frames ?? 0) - framesAtStart,
+           unalignedExcess: unalignedExcess,
+           patchesRendered: b?.patchesRendered ?? 0,
+           patchesClipped: b?.patchesClipped ?? 0,
+           patchesOffscreen: b?.patchesOffscreen ?? 0);
+     } finally {
+       log.disarm();
+     }
+   }
+ 
++  /// The trigger names, in the order the spec's table lists them, the dpr
++  /// pair and the band pair last.
++  const triggers = <String>[
++    'CommandApplied',
++    'CommandUndone',
++    'CommandRedone',
++    'DocumentLoaded',
++    'DocumentPurged',
++    'tables',
++    'devicePixelRatio',
++    'devicePixelRatio back',
++    'band out',
++    'band back',
++  ];
++
++  /// Fires each of the ten triggers on arm D and times the rebuild that
++  /// lands. **`band out` at 2.5x** collects at 2.5x the fit scale, so its
++  /// `instances` and `buffer` line is the first measurement of criterion 6 at
++  /// a rebuilt scale; `band back` returns to the base camera and the
++  /// collection follows.
++  Future<void> rebuildPhase(int repeat) async {
++    await setArm(GpuSpikeArm.widget);
++    state.camera.value = baseCamera;
++    await pumpFrame();
++    final r = state.widgetRebuilder!;
++    // One fresh handle per sweep: the sweep's `CommandApplied` line survives
++    // it, and `AddEntityCommand` refuses a handle the document already has.
++    final probe = state.widget.document.handleSeed.next();
++    for (final name in triggers) {
++      final before = r.landed;
++      switch (name) {
++        case 'devicePixelRatio':
++          state.dprOverride.value = baseDpr + 1;
++        case 'devicePixelRatio back':
++          state.dprOverride.value = null;
++        case 'band out':
++          state.camera.zoomAt(centre, 2.5);
++        case 'band back':
++          state.camera.zoomAt(centre, 1 / 2.5);
++        default:
++          fireDocumentTrigger(state.widget.document, name, probe: probe);
++      }
++      var frames = 0;
++      while (r.landed == before && frames < 300) {
++        await pumpFrame();
++        frames++;
++      }
++      if (r.landed == before) {
++        throw StateError('GSPIKE D rebuild | $name | no rebuild landed in '
++            '$frames frames');
++      }
++      final c = r.collection!;
++      gpuReport('GSPIKE D rebuild | r${repeat + 1} | $name | '
++          'trigger=${r.lastTrigger!.name} '
++          'walk ${(r.lastWalkMicros / 1000).toStringAsFixed(2)} '
++          'classify ${(r.lastClassifyMicros / 1000).toStringAsFixed(2)} '
++          'upload ${(r.lastUploadMicros / 1000).toStringAsFixed(2)} '
++          'total ${(r.lastTotalMicros / 1000).toStringAsFixed(2)} ms | '
++          'landed after $frames frame(s) | instances=${c.instanceCount} '
++          'patches=${c.patches.length} '
++          'buffer=${(c.byteLength / (1024 * 1024)).toStringAsFixed(2)} MB');
++    }
++  }
++
+   for (var r = 0; r < repeats; r++) {
+     for (final a in GpuSpikeArm.values) {
+       await setArm(a);
+       reports.add(await phase(a, 'hold', (i) {}));
+       reports.add(
+           await phase(a, 'pan', (i) => state.camera.panBy(const Offset(4, 0))));
+       reports.add(
+           await phase(a, 'zoom', (i) => state.camera.zoomAt(centre, 1.02)));
+     }
+     gpuReport('GSPIKE --- repeat ${r + 1} of $repeats ---');
+@@ -669,32 +932,115 @@ Future<void> runGpuSpike(
+         in reports.skip(reports.length - GpuSpikeArm.values.length * 3)) {
+       gpuReport('GSPIKE ${rep.arm.label} | ${rep.phase} | build  '
+           '${gpuStats(rep.build)}');
+       gpuReport('GSPIKE ${rep.arm.label} | ${rep.phase} | raster '
+           '${gpuStats(rep.raster)}');
+       if (kIsWeb) {
+         gpuReport('GSPIKE ${rep.arm.label} | ${rep.phase} | UNALIGNED '
+             '(distribution over the phase window, not per pumped frame); '
+             'worst excess=${rep.unalignedExcess} frame(s)');
+       }
+-      if (rep.arm == GpuSpikeArm.gpu) {
++      if (rep.arm == GpuSpikeArm.gpu || rep.arm == GpuSpikeArm.widget) {
+         gpuReport('GSPIKE ${rep.arm.label} | ${rep.phase} | '
+             'gpu submits=${rep.submits} of $frames frames');
+         // The counters this phase's *last* frame left behind, not a sum or
+         // an average over it -- see [GpuPhaseReport.patchesRendered]'s doc
+         // comment for why a per-phase total would be the wrong statistic
+         // here.
+         gpuReport('GSPIKE ${rep.arm.label} | ${rep.phase} | patches '
+             'rendered=${rep.patchesRendered} clipped=${rep.patchesClipped} '
+             'offscreen=${rep.patchesOffscreen}');
+       }
+     }
++    await rebuildPhase(r);
++  }
++
++  // --- Criterion 9: the stale interval after a mid-gesture band exit. -----
++  await setArm(GpuSpikeArm.widget);
++  {
++    final r = state.widgetRebuilder!;
++    state.camera.value = baseCamera;
++    await pumpFrame();
++    await pumpFrame();
++    r.bandStaleFrames = 0;
++    final landedBefore = r.landed;
++    // 40 steps of 1.02 leave [0.5, 2.0] at step 36 (1.02^36 = 2.04); the
++    // frames from that step to the landing are criterion 9's stale interval.
++    final rep = await phase(GpuSpikeArm.widget, 'bandexit',
++        (i) => state.camera.zoomAt(centre, 1.02),
++        frameCount: 40);
++    gpuReport('GSPIKE D | bandexit | build  ${gpuStats(rep.build)}');
++    gpuReport('GSPIKE D | bandexit | raster ${gpuStats(rep.raster)}');
++    gpuReport(
++        'GSPIKE D | bandexit | rebuilds landed=${r.landed - landedBefore} '
++        'staleFrames=${r.bandStaleFrames} lastTrigger=${r.lastTrigger?.name} '
++        '(criterion 9: the stale interval after a mid-gesture band exit, '
++        'reported without a threshold)');
++  }
++
++  // --- Criterion 5: per-frame allocations on arm D's pan. ----------------
++  await setArm(GpuSpikeArm.widget);
++  {
++    state.camera.value = baseCamera;
++    await pumpFrame();
++    // **Settle before the probe arms, and this is not tidiness.** The
++    // band-exit phase above left the collection at 2.04x the fit scale;
++    // coming back to the base camera is itself a band exit (1/2.04 = 0.49,
++    // under `kBandLowerScale`), so it schedules a rebuild that walks the
++    // whole document. A walk inside the probe's window would swamp the
++    // per-frame figure with a one-off collection and the line would read
++    // MISS for a reason that has nothing to do with the frame path.
++    final settling = state.widgetRebuilder!;
++    var settle = 0;
++    while ((settling.pending != null || settling.inFlight) && settle < 300) {
++      await pumpFrame();
++      settle++;
++    }
++    // Two quiet frames: the landing repaints, and that frame is the last one
++    // that is not steady state.
++    await pumpFrame();
++    await pumpFrame();
++    AllocationProbe? probe;
++    try {
++      probe = await AllocationProbe.connect();
++    } catch (error) {
++      gpuReport('GSPIKE alloc: UNEVALUABLE -- the VM service refused: $error');
++    }
++    if (probe != null) {
++      const allocFrames = 30;
++      await probe.reset();
++      for (var i = 0; i < allocFrames; i++) {
++        state.camera.panBy(const Offset(4, 0));
++        await pumpFrame();
++      }
++      final counts = await probe.read();
++      final b = state.backendOf(GpuSpikeArm.widget)!;
++      final patches = b.patchesRendered;
++      var total = 0;
++      for (final n in counts.values) {
++        total += n;
++      }
++      final perFrame = total / allocFrames;
++      final budget = kAllocFixed + kAllocPerPatch * patches;
++      final top = counts.entries.toList()
++        ..sort((x, y) => y.value.compareTo(x.value));
++      for (final e in top.take(15)) {
++        gpuReport('GSPIKE alloc | ${(e.value / allocFrames).toStringAsFixed(1)}'
++            '/frame | ${e.key}');
++      }
++      gpuReport('GSPIKE alloc: perFrame=${perFrame.toStringAsFixed(1)} '
++          'patches=$patches budget=$budget '
++          '(kAllocFixed=$kAllocFixed + kAllocPerPatch=$kAllocPerPatch x P) '
++          '-> ${perFrame <= budget ? "PASS" : "MISS"} | frames=$allocFrames '
++          'classes=${counts.length} total=$total');
++      await probe.dispose();
++    }
+   }
+ 
+   // Ruling E2's discipline, surfaced here too: a backend built without a
+   // measurer drops every label silently, and `textsDropped` is that "so" as
+   // a number rather than a missing picture. This harness always builds
+   // `state.backend` WITH a measurer (`_buildResidentGeometry` above), so the
+   // count is always 0 here -- printed only when it is not, for a future
+   // caller that omits the measurer.
+   final textsDropped = state.backend?.textsDropped ?? 0;
+   if (textsDropped > 0) {
+diff --git a/apps/dev_harness_2d/lib/main.dart b/apps/dev_harness_2d/lib/main.dart
+index d211f69..9bbb48f 100644
+--- a/apps/dev_harness_2d/lib/main.dart
++++ b/apps/dev_harness_2d/lib/main.dart
+@@ -126,37 +126,43 @@ const double kFillFraction = 0.4;
+ /// returned, coordinate for coordinate -- fills-on and fills-off differ by
+ /// this one flag on one drawing, the same way `DRAW_TEXT` and `TEXT` are
+ /// inert at their defaults.
+ final bool kFillsEnabled =
+     switch (const String.fromEnvironment('FILLS', defaultValue: 'false')) {
+   'false' => false,
+   'true' => true,
+   final other => throw StateError('FILLS must be true or false; got "$other"'),
+ };
+ 
+-/// Which sink the harness draws through: `canvas`, `vertices`, or unset for
+-/// the platform's own choice.
++/// Parses `BACKEND=canvas|vertices|residentGpu`, or `''` for the platform's
++/// own choice. A function, not an inline switch, so a test can check the
++/// parse without a `--dart-define`.
+ ///
+ /// **A `String.fromEnvironment`, and it stays one.** Plan 3c lost a full device
+ /// run to `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as
+ /// false while printing entirely plausible numbers; the only thing that caught
+ /// it was a line printing `corpus=on/off`. A string has no such hazard, and an
+ /// unrecognised value throws at startup rather than falling back to something
+ /// that looks fine.
++RenderBackend? parseBackend(String value) => switch (value) {
++      '' => null,
++      'canvas' => RenderBackend.canvas,
++      'vertices' => RenderBackend.vertices,
++      'residentGpu' => RenderBackend.residentGpu,
++      final other => throw StateError(
++          'BACKEND must be canvas, vertices, residentGpu or unset; got "$other"'),
++    };
++
++/// Which sink the harness draws through: `canvas`, `vertices`, `residentGpu`,
++/// or unset for the platform's own choice. See [parseBackend].
+ final RenderBackend? kBackend =
+-    switch (const String.fromEnvironment('BACKEND', defaultValue: '')) {
+-  '' => null,
+-  'canvas' => RenderBackend.canvas,
+-  'vertices' => RenderBackend.vertices,
+-  final other =>
+-    throw StateError('BACKEND must be canvas, vertices or unset; got "$other"'),
+-};
++    parseBackend(const String.fromEnvironment('BACKEND', defaultValue: ''));
+ 
+ /// Whether the canvas draws its frame from cached tiles.
+ ///
+ /// **A `String.fromEnvironment`, and it stays one**, for [kBackend]'s reason
+ /// and one sharper than [kBackend]'s. Plan 3c lost a full device run to
+ /// `bool.fromEnvironment('TEXT')` reading `--dart-define=TEXT=1` as false while
+ /// printing entirely plausible numbers. Here the plausible numbers would be
+ /// *the control's*: a `TILES=1` that read as false would publish the untiled
+ /// baseline a second time and the sweep would call it a measurement of the
+ /// cache. An unrecognised value throws instead.
+diff --git a/apps/dev_harness_2d/pubspec.yaml b/apps/dev_harness_2d/pubspec.yaml
+index 47f55c8..8114296 100644
+--- a/apps/dev_harness_2d/pubspec.yaml
++++ b/apps/dev_harness_2d/pubspec.yaml
+@@ -12,20 +12,21 @@ environment:
+   flutter: ">=3.24.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+   jet_cad_2d:
+     path: ../../packages/jet_cad_2d
+   jet_cad_2d_flutter:
+     path: ../../packages/jet_cad_2d_flutter
+   vector_math: ^2.2.0
++  vm_service: ^15.2.0
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   integration_test:
+     sdk: flutter
+   lints: ^6.1.0
+ 
+ flutter:
+   uses-material-design: true
+diff --git a/apps/dev_harness_2d/test/gpu_widget_arm_test.dart b/apps/dev_harness_2d/test/gpu_widget_arm_test.dart
+new file mode 100644
+index 0000000..86b57d8
+--- /dev/null
++++ b/apps/dev_harness_2d/test/gpu_widget_arm_test.dart
+@@ -0,0 +1,62 @@
++import 'package:dev_harness_2d/gpu_arm.dart';
++import 'package:dev_harness_2d/main.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++void main() {
++  test('BACKEND parses residentGpu, and still refuses a typo', () {
++    expect(parseBackend('residentGpu'), RenderBackend.residentGpu);
++    expect(parseBackend('vertices'), RenderBackend.vertices);
++    expect(parseBackend(''), isNull);
++    expect(() => parseBackend('gpu'), throwsStateError);
++  });
++
++  test('four arms, four distinct labels, and D names the widget', () {
++    expect(GpuSpikeArm.values, hasLength(4));
++    expect(GpuSpikeArm.values.map((a) => a.label).toSet(), hasLength(4));
++    expect(GpuSpikeArm.widget.label, contains('DraftCanvas'));
++    expect(GpuSpikeArm.gpu.label, isNot(contains('DraftCanvas')));
++  });
++
++  test('fireDocumentTrigger emits the DocChange its name says', () async {
++    final doc = spikeDocument(entityCount: 500, text: false);
++    final probe = doc.handleSeed.next();
++    final seen = <DocChange>[];
++    final sub = doc.changes.listen(seen.add);
++    addTearDown(sub.cancel);
++    Future<Type> fire(String name) async {
++      seen.clear();
++      fireDocumentTrigger(doc, name, probe: probe);
++      await Future<void>.delayed(Duration.zero);
++      expect(seen, hasLength(1), reason: name);
++      return seen.single.runtimeType;
++    }
++
++    expect(await fire('CommandApplied'), CommandApplied);
++    expect(await fire('CommandUndone'), CommandUndone);
++    expect(await fire('CommandRedone'), CommandRedone);
++    expect(await fire('DocumentLoaded'), DocumentLoaded);
++    expect(await fire('DocumentPurged'), DocumentPurged);
++    final before = doc.tables.mutationRevision;
++    // `fire` clears at its start, not at its end, so the last one's
++    // `DocumentPurged` is still in `seen` -- cleared here, or the
++    // no-DocChange assertion below would only ever be reading that.
++    seen.clear();
++    fireDocumentTrigger(doc, 'tables', probe: probe);
++    await Future<void>.delayed(Duration.zero);
++    expect(doc.tables.mutationRevision, greaterThan(before));
++    expect(seen, isEmpty, reason: 'a table edit emits no DocChange (spec)');
++    expect(() => fireDocumentTrigger(doc, 'nonsense', probe: probe),
++        throwsArgumentError);
++  });
++
++  test('the allocation budget is the enumerated exception set, generously', () {
++    // A per-instance allocation on the measured corpus (~110,000 instances)
++    // exceeds any P the corpus can have by orders of magnitude; the two
++    // constants only have to be above the per-patch and fixed sets Plan E's
++    // results note and the GPU shim's own per-pass objects add up to.
++    expect(kAllocPerPatch, inInclusiveRange(12, 32));
++    expect(kAllocFixed, inInclusiveRange(16, 64));
++  });
++}
