@@ -384,9 +384,14 @@ bool _reaches(
 }
 
 /// Where a patch draws on screen this frame: device pixels, on the viewport.
+///
+/// **Mutable, and pooled by `GpuDrawBackend`** (Ruling F10, Plan E's RF-1):
+/// one instance per patch for the backend's life, written in place by
+/// [patchRegionFor]'s `out` each frame. Rebuild-time callers and tests pass
+/// no `out` and get a fresh one.
 class PatchRegion {
-  const PatchRegion(this.x, this.y, this.width, this.height);
-  final int x, y, width, height;
+  PatchRegion(this.x, this.y, this.width, this.height);
+  int x, y, width, height;
 }
 
 /// The label's box under the live camera, intersected with the viewport,
@@ -402,7 +407,10 @@ class PatchRegion {
 /// frame path; a null scratch allocates one -- test callers.
 PatchRegion? patchRegionFor(ResidentTextRecord t, Transform2 collectionToDevice,
     int widthPx, int heightPx,
-    {required int maxWidth, required int maxHeight, Float64List? scratch}) {
+    {required int maxWidth,
+    required int maxHeight,
+    Float64List? scratch,
+    PatchRegion? out}) {
   final bound = scratch ?? Float64List(4);
   boundTransformedBox(
       t.boxMinX, t.boxMinY, t.boxMaxX, t.boxMaxY, collectionToDevice, bound);
@@ -413,7 +421,13 @@ PatchRegion? patchRegionFor(ResidentTextRecord t, Transform2 collectionToDevice,
   if (x1 <= x0 || y1 <= y0) return null;
   final w = (x1 - x0).clamp(0, maxWidth);
   final h = (y1 - y0).clamp(0, maxHeight);
-  return PatchRegion(x0, y0, w, h);
+  if (out == null) return PatchRegion(x0, y0, w, h);
+  out
+    ..x = x0
+    ..y = y0
+    ..width = w
+    ..height = h;
+  return out;
 }
 
 /// The patch target's size: the label's box at the band's CEILING, in

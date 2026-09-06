@@ -77,6 +77,17 @@ class TextCompositor {
   int get patchesComposited => _patchesComposited;
   int _patchesComposited = 0;
 
+  /// Reused per plain label by the viewport test: [boundTransformedBox]'s
+  /// caller-owned scratch, so rejecting an off-screen label allocates
+  /// nothing.
+  final Float64List _bound = Float64List(4);
+
+  /// Plain labels the last [paint] did not draw because their box, under the
+  /// outer transform, missed the viewport entirely. Diagnostics; reset per
+  /// call. A patched label whose patch was off screen is not in `patches`,
+  /// takes the plain branch, and is counted here too.
+  int labelsSkipped = 0;
+
   void paint(
     Canvas canvas, {
     required Image? main,
@@ -86,6 +97,7 @@ class TextCompositor {
     required List<PatchImage> patches,
   }) {
     _patchesComposited = 0;
+    labelsSkipped = 0;
     if (main != null) {
       canvas.drawImageRect(
           main,
@@ -98,7 +110,19 @@ class TextCompositor {
       final patch =
           p < patches.length && patches[p].textIndex == i ? patches[p++] : null;
       if (patch == null) {
-        _drawLabel(canvas, texts[i], collectionToLogical);
+        final t = texts[i];
+        boundTransformedBox(t.boxMinX, t.boxMinY, t.boxMaxX, t.boxMaxY,
+            collectionToLogical, _bound);
+        // Wholly off screen: nothing to draw. A box touching the edge is
+        // drawn -- the paragraph clips itself.
+        if (_bound[2] < 0 ||
+            _bound[0] > viewport.width ||
+            _bound[3] < 0 ||
+            _bound[1] > viewport.height) {
+          labelsSkipped++;
+          continue;
+        }
+        _drawLabel(canvas, t, collectionToLogical);
         continue;
       }
       // The layer's bounds are in the OUTER frame -- logical pixels -- and

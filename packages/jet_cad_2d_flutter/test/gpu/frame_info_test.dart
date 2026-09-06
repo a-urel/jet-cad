@@ -145,6 +145,24 @@ void main() {
           reason: 'half viewport y -- device pixels, doubled from the '
               'dpr == 1 test');
     });
+
+    test('buildFrameInfo writes into `out` when given one of the right size',
+        () {
+      final m = Transform2(2, 0.5, -0.5, 2, 30, -40);
+      final fresh = buildFrameInfo(m, 800, 600, dashScale: 1.7);
+      final out = ByteData(80);
+      final written = buildFrameInfo(m, 800, 600, dashScale: 1.7, out: out);
+      expect(identical(written, out), isTrue);
+      for (var i = 0; i < 80; i++) {
+        expect(out.getUint8(i), fresh.getUint8(i), reason: 'byte $i');
+      }
+      // The wrong size is not trusted: a fresh block, not a partial write.
+      final wrong = ByteData(64);
+      expect(
+          identical(
+              buildFrameInfo(m, 800, 600, dashScale: 1.7, out: wrong), wrong),
+          isFalse);
+    });
   });
 
   group('buildFrameInfo dash_scale', () {
