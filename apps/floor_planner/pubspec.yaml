@@ -1,0 +1,29 @@
+name: floor_planner
+description: >-
+  The floor planner product application. Hosts a DraftCanvas behind a
+  CameraGestureDetector, with empty chrome slots that later sub-projects
+  fill. Not an instrument: the measurement harness is apps/dev_harness_2d.
+publish_to: none
+version: 0.0.1
+resolution: workspace
+
+environment:
+  sdk: ^3.5.0
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  jet_cad_2d:
+    path: ../../packages/jet_cad_2d
+  jet_cad_2d_flutter:
+    path: ../../packages/jet_cad_2d_flutter
+  vector_math: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

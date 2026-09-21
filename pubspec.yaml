@@ -8,3 +8,4 @@ workspace:
   - packages/jet_cad_2d_flutter
   - apps/dev_harness
   - apps/dev_harness_2d
+  - apps/floor_planner

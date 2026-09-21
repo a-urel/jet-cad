@@ -238,6 +238,17 @@
                 "--dart-define=TILES=on",
                 "--dart-define=ENTITIES=50000"
             ]
+        },
+        {
+            // The product application, sub-project 01. Not an instrument:
+            // nothing here is measured, and F5 should keep landing on the
+            // harness entries above it.
+            "name": "floor_planner: macOS",
+            "cwd": "apps/floor_planner",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "macos"
         }
     ]
 }
