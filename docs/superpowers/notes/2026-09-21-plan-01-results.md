@@ -188,6 +188,14 @@ looked at; the human looks after this branch is presented.**
 
 Exit-gate criterion 12 is therefore **OWED**, not PASS.
 
+**Addendum, 2026-09-21, after the merge (`bae5f73`).** The human ran the
+app on macOS from `main` (`flutter run -d macos`, debug) and judged the
+Step 1 look as a whole: **LGTM**. The seven Step 1 items were not itemised
+by the human, so they stay listed above as written; the verdict of record
+is the whole-run LGTM. Step 2 (Chrome or Safari, then Firefox on
+`build/web`) has not been looked at and stays OWED. Criterion 12 is
+therefore **half discharged**: macOS seen, browsers OWED.
+
 ---
 
 ## Mutation summary
@@ -351,9 +359,9 @@ pass.
 | 9 | All sixteen mutants fired and killed, E-01e′ fired and recorded equivalent | **PASS** — 16 killed (M-01b after round-1), E-01e′ equivalent (mutation log) |
 | 10 | Harness passes at its branch-point count; `git diff --stat main..HEAD -- apps/dev_harness_2d` empty | **PASS** — 82 at branch point, 82 at head; diff empty (verified in this task) |
 | 11 | All eleven gate commands exit 0; no `analysis_options.yaml` rewrite after Task 6's | **PASS with one recorded exception** — ten commands exit 0; `jet_cad_2d_flutter`'s `flutter test` exits 1 on the five pre-existing `text_ladder_golden_test.dart` failures, per the baseline ruling (golden drift from 2026-08-24, SDK 3.47.2), and on nothing else; `git status --short` clean in this task except the five files this commit carries |
-| 12 | A human looked, on macOS and in both browser families, and each item recorded seen/not seen/could not judge | **OWED — not looked at; the human looks after this branch is presented** |
+| 12 | A human looked, on macOS and in both browser families, and each item recorded seen/not seen/could not judge | **HALF — macOS looked at on 2026-09-21 after the merge, whole-run verdict LGTM (see the addendum above); both browser families still OWED** |
 
-**11 of 12 PASS, 1 OWED (criterion 12).** No criterion is a MISS.
+**11 of 12 PASS, 1 HALF (criterion 12: macOS LGTM, browsers OWED).** No criterion is a MISS.
 
 ---
 

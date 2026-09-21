@@ -1,8 +1,8 @@
 # jet-cad — project status
 
 **Last updated:** 2026-09-21 — **Plan 01 (the floor planner app skeleton) is
-MERGED at `bae5f73`**, the product line's first code on `main`; its human look
-is OWED. See [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73)
+MERGED at `bae5f73`**, the product line's first code on `main`; its macOS look
+was taken (LGTM), its browser look is OWED. See [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73)
 and [Resume here](#resume-here).
 **Verified against:** `main` at `bae5f73` for Plan 01's gate lines; the
 paragraphs below about Plan F were verified at `a8208d1`. **Plan F is MERGED** — `--no-ff`
@@ -90,7 +90,8 @@ on branch `plan-01/app-skeleton`, cut from `main` at `717b9cd`. **MERGED
 `--no-ff` at `bae5f73` on 2026-09-21, on the human's decision, with the exit
 gate at 11 of 12 and the twelfth (a human's look, on macOS and in two browser
 families) still OWED**; branch and worktree deleted, ledger archived at
-`79b0333`. The merged tree was re-gated on `main`: `jet_cad_2d` 798,
+`79b0333`. After the merge, on 2026-09-21, the human ran the app on macOS
+from `main` and judged it LGTM; the browser half of the look is still OWED. The merged tree was re-gated on `main`: `jet_cad_2d` 798,
 `jet_cad_2d_flutter` 704 pass / 1 skip / the same five pre-existing text-golden
 failures, `dev_harness_2d` 82, `floor_planner` 8 and both builds. Spec:
 [2026-09-21-floor-planner-app-skeleton-design.md](docs/superpowers/specs/2026-09-21-floor-planner-app-skeleton-design.md)
@@ -975,9 +976,9 @@ plan was written**, ten tasks:
 **executed on `plan-01/app-skeleton`, all ten tasks plus a final-review fix
 wave, and is MERGED into `main` at `bae5f73` on 2026-09-21.** The exit gate is
 11 of 12, with the twelfth — a human's look, on macOS and in both browser
-families — **still OWED after the merge**: run the `floor_planner: macOS`
-launch entry, then Chrome or Safari and Firefox on `build/web`, and judge the
-thirteen items in the results note. See
+families — **half discharged after the merge**: the macOS look was taken on
+2026-09-21 (LGTM); still owed is Chrome or Safari and then Firefox on
+`build/web`, judging the six browser items in the results note. See
 [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73) and
 [2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
 The other twelve sub-projects have not started.
