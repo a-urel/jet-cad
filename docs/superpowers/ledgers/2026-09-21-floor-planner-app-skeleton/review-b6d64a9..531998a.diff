@@ -1,0 +1,152 @@
+# Review package: b6d64a9..531998a
+
+## Commits
+531998a docs: Plan 01 results -- restate the plan's four rulings verbatim, fix the commit range
+
+## Files changed
+ STATUS.md                                          |  6 ++-
+ .../notes/2026-09-21-plan-01-results.md            | 44 ++++++++++++----------
+ 2 files changed, 29 insertions(+), 21 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index be103e2..83cdc8f 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -74,21 +74,22 @@ Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01
+ 
+ ---
+ 
+ ## Plan 01 — the app skeleton (on `plan-01/app-skeleton`, not merged)
+ 
+ **Plan 01 gave the product line its first sub-project** — `apps/floor_planner`,
+ a real product application that opens a resizable 1440×900 window, shows a
+ hand-written 523-entity floor plan on a `DraftCanvas`, and pans and zooms with
+ a trackpad and a mouse, on macOS and (its first-ever web build)
+ `jet_cad_2d_flutter` compiled for a browser. Ten tasks,
+-`717b9cd..5cab91a` on branch `plan-01/app-skeleton`, worktree
++`717b9cd..b6d64a9` (Tasks 1–9 at `..5cab91a`; Task 10, the results note, at
++`b6d64a9` and its fix) on branch `plan-01/app-skeleton`, worktree
+ `.claude/worktrees/plan-01-app-skeleton` (cut from `main` at `717b9cd`). **NOT
+ merged — the exit gate is 11 of 12 and the twelfth (a human's look, on macOS
+ and in two browser families) is OWED; the merge is the human's decision after
+ that look.** Spec:
+ [2026-09-21-floor-planner-app-skeleton-design.md](docs/superpowers/specs/2026-09-21-floor-planner-app-skeleton-design.md)
+ (revision 2). Plan:
+ [2026-09-21-floor-planner-app-skeleton.md](docs/superpowers/plans/2026-09-21-floor-planner-app-skeleton.md).
+ Results:
+ [2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
+ Mutation log:
+@@ -955,21 +956,22 @@ brainstormed with the human on 2026-09-21 and has a spec,
+ **reviewed the same day by three independent reviewers (Claude, Codex, Copilot
+ CLI) and revised to revision 2** — the review is
+ [2026-09-21-app-skeleton-spec-review-r1.md](docs/superpowers/notes/2026-09-21-app-skeleton-spec-review-r1.md).
+ The review's one blocker that reopened a decision (the web scroll rule: the
+ engine *does* tag browser wheel events trackpad-vs-mouse by a heuristic,
+ except on Firefox) was re-decided by the human as "wheel zooms and trackpad
+ scroll pans on desktop and Chromium/WebKit; everything pans on Firefox". **Its
+ plan was written**, ten tasks:
+ [2026-09-21-floor-planner-app-skeleton.md](docs/superpowers/plans/2026-09-21-floor-planner-app-skeleton.md),
+ **and has now executed on `plan-01/app-skeleton` in its own worktree, all ten
+-tasks, `717b9cd..5cab91a`. The exit gate is 11 of 12, with the twelfth — a
++tasks, `717b9cd..b6d64a9` (Tasks 1–9 at `..5cab91a`; Task 10 at `b6d64a9` and
++its fix). The exit gate is 11 of 12, with the twelfth — a
+ human's look, on macOS and in both browser families — OWED; merging is the
+ human's call after that look.** See
+ [Plan 01](#plan-01--the-app-skeleton-on-plan-01app-skeleton-not-merged) and
+ [2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
+ The other twelve sub-projects have not started.
+ 
+ **The web coupling is resolved and it went the expensive way.** This section
+ used to say "Plan G matters only if the product targets web". **The human
+ decided on 2026-09-21 that it does**, so **Plan G is on the critical path**:
+ it is the seventh of the GPU-resident spec's seven plans, it is unwritten, and
+diff --git a/docs/superpowers/notes/2026-09-21-plan-01-results.md b/docs/superpowers/notes/2026-09-21-plan-01-results.md
+index 3ead178..ad5b230 100644
+--- a/docs/superpowers/notes/2026-09-21-plan-01-results.md
++++ b/docs/superpowers/notes/2026-09-21-plan-01-results.md
+@@ -1,20 +1,21 @@
+ # Plan 01 — the app skeleton: results
+ 
+ **Plan:** [2026-09-21-floor-planner-app-skeleton.md](../plans/2026-09-21-floor-planner-app-skeleton.md).
+ **Spec:** [2026-09-21-floor-planner-app-skeleton-design.md](../specs/2026-09-21-floor-planner-app-skeleton-design.md)
+ (revision 2), D1–D8, the gesture table, the clamp, the startup document, the
+ window, the eleven gate commands, all sixteen named mutants and E-01e′.
+ **Mutation log:** [plan-01-mutation-log.md](plan-01-mutation-log.md).
+ **Branch:** `plan-01/app-skeleton`, worktree
+ `.claude/worktrees/plan-01-app-skeleton`, cut from `main` at `717b9cd`. **Ten
+-tasks done, `717b9cd..5cab91a`. NOT merged — the merge is the human's
++tasks done, `717b9cd..b6d64a9` (Tasks 1–9 at `..5cab91a`; Task 10, this note,
++at `b6d64a9` and its fix). NOT merged — the merge is the human's
+ decision, after the look this note leaves OWED.**
+ **Ledger (per-task briefs, reports, review diffs, every ruling):**
+ `.superpowers/sdd/2026-09-21-floor-planner-app-skeleton/`.
+ 
+ ---
+ 
+ ## What this plan's own premises measured false
+ 
+ Four corrections. No threshold was moved to make a criterion pass; each is
+ recorded with the task that found it.
+@@ -224,38 +225,43 @@ its green run recorded.** Full transcripts: `plan-01-mutation-log.md`.
+ (Verdicts and totals from `plan-01-mutation-log.md`'s Summary section and
+ the Task 9 report.)
+ 
+ ---
+ 
+ ## Rulings
+ 
+ Every ruling made on this plan, verbatim from the ledger and the plan
+ document.
+ 
+-**The plan's own rulings.**
+-
+-- **Ruling 01-1** — `analysis_options.yaml` is generated and committed once
+-  at scaffold (Task 6), never rewritten after. `CLAUDE.md`'s "never commit
+-  `analysis_options.yaml`" rule is about the workspace's *other* packages,
+-  whose files `flutter pub get` rewrites; the app's own is scaffold-once.
+-- **Ruling 01-2** — `PlannerView` fits the camera once to the real viewport
+-  size on first non-zero layout, not only to the nominal 1440×900 the shell
+-  constructs it with.
+-- **Ruling 01-3** — the harness's `exp(pan.dy / -200)` two-finger-scroll-to-
+-  zoom conversion does not lift into the package; the product's two-finger
+-  scroll pans (the human's decision), and only the cumulative-`scale`
+-  running-division handling lifts, because pan uses `localPanDelta` and
+-  needs no running state.
+-- **Ruling 01-4** — `_onPanZoomUpdate` coalesces on exact equality
+-  (`if (scale == _gestureZoom) return;`), which is why a repeated,
+-  non-rising `scale` witness cannot observe a mutation on the running
+-  division (this is the fixture Task 9's fix round 1 corrected).
++**The plan's own rulings**, from the plan document's "Rulings made here
++rather than left to an implementer" section, quoted.
++
++- **Ruling 01-1** — the app's `analysis_options.yaml` is committed once, at
++  scaffold, and never again. The spec's architecture block says "generated
++  and NOT committed"; what `CLAUDE.md`'s "never commit
++  `analysis_options.yaml`" has always meant in this repo is never commit
++  the rewrite `flutter pub get` makes to a tracked one.
++- **Ruling 01-2** — the first fit happens at the real viewport, once. The
++  spec says the app "shows the startup plan"; it does not say who fits the
++  camera — `PlannerShell` constructs the camera fitted to a nominal
++  1440×900, and `PlannerView` re-fits it once, on its first layout, to the
++  size it actually got.
++- **Ruling 01-3** — the bound decisions use `Tolerance.standard` (linear
++  `1e-9`), a `static const` in `camera_controller.dart`, not a constructor
++  parameter. The spec says `Tolerance`; it does not say which, and a scale
++  between `0.001` and `100` sits where `1e-9` is many ulps wide and far
++  below anything a gesture produces.
++- **Ruling 01-4** — a `PointerPanZoomUpdate` whose `scale` equals the
++  running value does not call `zoomAt`. A two-finger scroll reports
++  `scale == 1.0` on every update; calling `zoomAt(anchor, 1.0)` would build
++  a new transform and notify for nothing — the check is exact `==` on a
++  stored event field (spec invariant 6).
+ 
+ **Rulings made during execution.**
+ 
+ - **The golden-baseline ruling** (ledger, baseline section) — the five
+   text-golden failures in `jet_cad_2d_flutter` are pre-existing Skia/SDK
+   drift (goldens recorded 2026-08-24, SDK 3.47.2), out of this plan's
+   scope; this plan's flutter-package bar is "702 pass, 1 skip, the same
+   five golden failures and no other," recorded per task; re-recording
+   goldens is a separate decision for the human.
+ - **The worktree ruling** (ledger, baseline section) — Task 1 Step 1's

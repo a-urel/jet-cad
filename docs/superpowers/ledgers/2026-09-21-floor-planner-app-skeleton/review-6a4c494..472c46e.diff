@@ -1,0 +1,1959 @@
+# Review package: 6a4c494..472c46e
+
+## Commits
+472c46e build(floor_planner): scaffold the product app as a workspace member, 1440x900 window
+
+## Files changed
+ .vscode/launch.json                                |  11 +
+ apps/floor_planner/.gitignore                      |  48 ++
+ apps/floor_planner/.metadata                       |  33 +
+ apps/floor_planner/analysis_options.yaml           |  34 +
+ apps/floor_planner/lib/main.dart                   |  17 +
+ apps/floor_planner/macos/.gitignore                |   7 +
+ .../macos/Flutter/Flutter-Debug.xcconfig           |   1 +
+ .../macos/Flutter/Flutter-Release.xcconfig         |   1 +
+ .../macos/Runner.xcodeproj/project.pbxproj         | 729 +++++++++++++++++++++
+ .../xcshareddata/IDEWorkspaceChecks.plist          |   8 +
+ .../xcshareddata/xcschemes/Runner.xcscheme         | 117 ++++
+ .../Runner.xcworkspace/contents.xcworkspacedata    |   7 +
+ .../xcshareddata/IDEWorkspaceChecks.plist          |   8 +
+ apps/floor_planner/macos/Runner/AppDelegate.swift  |  13 +
+ .../AppIcon.appiconset/Contents.json               |  68 ++
+ .../AppIcon.appiconset/app_icon_1024.png           | Bin 0 -> 102994 bytes
+ .../AppIcon.appiconset/app_icon_128.png            | Bin 0 -> 5680 bytes
+ .../AppIcon.appiconset/app_icon_16.png             | Bin 0 -> 520 bytes
+ .../AppIcon.appiconset/app_icon_256.png            | Bin 0 -> 14142 bytes
+ .../AppIcon.appiconset/app_icon_32.png             | Bin 0 -> 1066 bytes
+ .../AppIcon.appiconset/app_icon_512.png            | Bin 0 -> 36406 bytes
+ .../AppIcon.appiconset/app_icon_64.png             | Bin 0 -> 2218 bytes
+ .../macos/Runner/Base.lproj/MainMenu.xib           | 343 ++++++++++
+ .../macos/Runner/Configs/AppInfo.xcconfig          |  14 +
+ .../macos/Runner/Configs/Debug.xcconfig            |   2 +
+ .../macos/Runner/Configs/Release.xcconfig          |   2 +
+ .../macos/Runner/Configs/Warnings.xcconfig         |  13 +
+ .../macos/Runner/DebugProfile.entitlements         |  12 +
+ apps/floor_planner/macos/Runner/Info.plist         |  32 +
+ .../macos/Runner/MainFlutterWindow.swift           |  15 +
+ .../macos/Runner/Release.entitlements              |   8 +
+ .../macos/RunnerTests/RunnerTests.swift            |  12 +
+ apps/floor_planner/pubspec.yaml                    |  29 +
+ apps/floor_planner/web/favicon.png                 | Bin 0 -> 917 bytes
+ apps/floor_planner/web/icons/Icon-192.png          | Bin 0 -> 5292 bytes
+ apps/floor_planner/web/icons/Icon-512.png          | Bin 0 -> 8252 bytes
+ apps/floor_planner/web/icons/Icon-maskable-192.png | Bin 0 -> 5594 bytes
+ apps/floor_planner/web/icons/Icon-maskable-512.png | Bin 0 -> 20998 bytes
+ apps/floor_planner/web/index.html                  |  46 ++
+ apps/floor_planner/web/manifest.json               |  35 +
+ pubspec.yaml                                       |   1 +
+ 41 files changed, 1666 insertions(+)
+
+## Diff
+diff --git a/.vscode/launch.json b/.vscode/launch.json
+index 0fdd1a9..c8e72bf 100644
+--- a/.vscode/launch.json
++++ b/.vscode/launch.json
+@@ -231,13 +231,24 @@
+             "name": "2d: measure 50k -- tiles ON, debug",
+             "cwd": "apps/dev_harness_2d",
+             "program": "lib/main.dart",
+             "request": "launch",
+             "type": "dart",
+             "deviceId": "macos",
+             "toolArgs": [
+                 "--dart-define=TILES=on",
+                 "--dart-define=ENTITIES=50000"
+             ]
++        },
++        {
++            // The product application, sub-project 01. Not an instrument:
++            // nothing here is measured, and F5 should keep landing on the
++            // harness entries above it.
++            "name": "floor_planner: macOS",
++            "cwd": "apps/floor_planner",
++            "program": "lib/main.dart",
++            "request": "launch",
++            "type": "dart",
++            "deviceId": "macos"
+         }
+     ]
+ }
+diff --git a/apps/floor_planner/.gitignore b/apps/floor_planner/.gitignore
+new file mode 100644
+index 0000000..79f7eca
+--- /dev/null
++++ b/apps/floor_planner/.gitignore
+@@ -0,0 +1,48 @@
++# Miscellaneous
++*.class
++*.log
++*.pyc
++*.swp
++.DS_Store
++.atom/
++.build/
++.buildlog/
++.history
++.svn/
++.swiftpm/
++migrate_working_dir/
++
++# IntelliJ related
++*.iml
++*.ipr
++*.iws
++.idea/
++
++# The .vscode folder contains launch configuration and tasks you configure in
++# VS Code which you may wish to be included in version control, so this line
++# is commented out by default.
++#.vscode/
++
++# Flutter/Dart/Pub related
++**/doc/api/
++**/ios/Flutter/.last_build_id
++.dart_tool/
++.flutter-plugins-dependencies
++.pub-cache/
++.pub/
++/build/
++/coverage/
++
++# Symbolication related
++app.*.symbols
++
++# Obfuscation related
++app.*.map.json
++
++# Android Studio will place build artifacts here
++/android/app/debug
++/android/app/profile
++/android/app/release
++
++# Widget Preview related
++.widget_preview/
+diff --git a/apps/floor_planner/.metadata b/apps/floor_planner/.metadata
+new file mode 100644
+index 0000000..edfa7eb
+--- /dev/null
++++ b/apps/floor_planner/.metadata
+@@ -0,0 +1,33 @@
++# This file tracks properties of this Flutter project.
++# Used by Flutter tool to assess capabilities and perform upgrades etc.
++#
++# This file should be version controlled and should not be manually edited.
++
++version:
++  revision: "d3b14c876900e553bc736ca19295fc09e3853e8e"
++  channel: "stable"
++
++project_type: app
++
++# Tracks metadata for the flutter migrate command
++migration:
++  platforms:
++    - platform: root
++      create_revision: d3b14c876900e553bc736ca19295fc09e3853e8e
++      base_revision: d3b14c876900e553bc736ca19295fc09e3853e8e
++    - platform: macos
++      create_revision: d3b14c876900e553bc736ca19295fc09e3853e8e
++      base_revision: d3b14c876900e553bc736ca19295fc09e3853e8e
++    - platform: web
++      create_revision: d3b14c876900e553bc736ca19295fc09e3853e8e
++      base_revision: d3b14c876900e553bc736ca19295fc09e3853e8e
++
++  # User provided section
++
++  # List of Local paths (relative to this file) that should be
++  # ignored by the migrate tool.
++  #
++  # Files that are not part of the templates will be ignored by default.
++  unmanaged_files:
++    - 'lib/main.dart'
++    - 'ios/Runner.xcodeproj/project.pbxproj'
+diff --git a/apps/floor_planner/analysis_options.yaml b/apps/floor_planner/analysis_options.yaml
+new file mode 100644
+index 0000000..4a13c8c
+--- /dev/null
++++ b/apps/floor_planner/analysis_options.yaml
+@@ -0,0 +1,34 @@
++# This file configures the analyzer, which statically analyzes Dart code to
++# check for errors, warnings, and lints.
++#
++# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
++# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
++# invoked from the command line by running `flutter analyze`.
++
++# The following line activates a set of recommended lints for Flutter apps,
++# packages, and plugins designed to encourage good coding practices.
++include: package:flutter_lints/flutter.yaml
++
++analyzer:
++  exclude:
++    - build/**
++    - web/**
++    - macos/**
++
++linter:
++  # The lint rules applied to this project can be customized in the
++  # section below to disable rules from the `package:flutter_lints/flutter.yaml`
++  # included above or to enable additional rules. A list of all available lints
++  # and their documentation is published at https://dart.dev/lints.
++  #
++  # Instead of disabling a lint rule for the entire project in the
++  # section below, it can also be suppressed for a single line of code
++  # or a specific dart file by using the `// ignore: name_of_lint` and
++  # `// ignore_for_file: name_of_lint` syntax on the line or in the file
++  # producing the lint.
++  rules:
++    # avoid_print: false  # Uncomment to disable the `avoid_print` rule
++    # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
++
++# Additional information about this file can be found at
++# https://dart.dev/guides/language/analysis-options
+diff --git a/apps/floor_planner/lib/main.dart b/apps/floor_planner/lib/main.dart
+new file mode 100644
+index 0000000..ab97320
+--- /dev/null
++++ b/apps/floor_planner/lib/main.dart
+@@ -0,0 +1,17 @@
++import 'package:flutter/material.dart';
++
++// Scaffold placeholder. Task 8 replaces this file with the real shell; it
++// exists only so the generated project builds under the workspace's
++// `sdk: ^3.5.0` floor, which the generator's own dot-shorthand syntax
++// does not.
++void main() => runApp(const FloorPlannerApp());
++
++class FloorPlannerApp extends StatelessWidget {
++  const FloorPlannerApp({super.key});
++
++  @override
++  Widget build(BuildContext context) => const MaterialApp(
++        title: 'Floor planner',
++        home: Scaffold(body: Center(child: Text('floor_planner'))),
++      );
++}
+diff --git a/apps/floor_planner/macos/.gitignore b/apps/floor_planner/macos/.gitignore
+new file mode 100644
+index 0000000..746adbb
+--- /dev/null
++++ b/apps/floor_planner/macos/.gitignore
+@@ -0,0 +1,7 @@
++# Flutter-related
++**/Flutter/ephemeral/
++**/Pods/
++
++# Xcode-related
++**/dgph
++**/xcuserdata/
+diff --git a/apps/floor_planner/macos/Flutter/Flutter-Debug.xcconfig b/apps/floor_planner/macos/Flutter/Flutter-Debug.xcconfig
+new file mode 100644
+index 0000000..c2efd0b
+--- /dev/null
++++ b/apps/floor_planner/macos/Flutter/Flutter-Debug.xcconfig
+@@ -0,0 +1 @@
++#include "ephemeral/Flutter-Generated.xcconfig"
+diff --git a/apps/floor_planner/macos/Flutter/Flutter-Release.xcconfig b/apps/floor_planner/macos/Flutter/Flutter-Release.xcconfig
+new file mode 100644
+index 0000000..c2efd0b
+--- /dev/null
++++ b/apps/floor_planner/macos/Flutter/Flutter-Release.xcconfig
+@@ -0,0 +1 @@
++#include "ephemeral/Flutter-Generated.xcconfig"
+diff --git a/apps/floor_planner/macos/Runner.xcodeproj/project.pbxproj b/apps/floor_planner/macos/Runner.xcodeproj/project.pbxproj
+new file mode 100644
+index 0000000..d1c610d
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner.xcodeproj/project.pbxproj
+@@ -0,0 +1,729 @@
++// !$*UTF8*$!
++{
++	archiveVersion = 1;
++	classes = {
++	};
++	objectVersion = 54;
++	objects = {
++
++/* Begin PBXAggregateTarget section */
++		33CC111A2044C6BA0003C045 /* Flutter Assemble */ = {
++			isa = PBXAggregateTarget;
++			buildConfigurationList = 33CC111B2044C6BA0003C045 /* Build configuration list for PBXAggregateTarget "Flutter Assemble" */;
++			buildPhases = (
++				33CC111E2044C6BF0003C045 /* ShellScript */,
++			);
++			dependencies = (
++			);
++			name = "Flutter Assemble";
++			productName = FLX;
++		};
++/* End PBXAggregateTarget section */
++
++/* Begin PBXBuildFile section */
++		331C80D8294CF71000263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C80D7294CF71000263BE5 /* RunnerTests.swift */; };
++		335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */; };
++		33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC10F02044A3C60003C045 /* AppDelegate.swift */; };
++		33CC10F32044A3C60003C045 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F22044A3C60003C045 /* Assets.xcassets */; };
++		33CC10F62044A3C60003C045 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F42044A3C60003C045 /* MainMenu.xib */; };
++		33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC11122044BFA00003C045 /* MainFlutterWindow.swift */; };
++		78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */; };
++/* End PBXBuildFile section */
++
++/* Begin PBXContainerItemProxy section */
++		331C80D9294CF71000263BE5 /* PBXContainerItemProxy */ = {
++			isa = PBXContainerItemProxy;
++			containerPortal = 33CC10E52044A3C60003C045 /* Project object */;
++			proxyType = 1;
++			remoteGlobalIDString = 33CC10EC2044A3C60003C045;
++			remoteInfo = Runner;
++		};
++		33CC111F2044C79F0003C045 /* PBXContainerItemProxy */ = {
++			isa = PBXContainerItemProxy;
++			containerPortal = 33CC10E52044A3C60003C045 /* Project object */;
++			proxyType = 1;
++			remoteGlobalIDString = 33CC111A2044C6BA0003C045;
++			remoteInfo = FLX;
++		};
++/* End PBXContainerItemProxy section */
++
++/* Begin PBXCopyFilesBuildPhase section */
++		33CC110E2044A8840003C045 /* Bundle Framework */ = {
++			isa = PBXCopyFilesBuildPhase;
++			buildActionMask = 2147483647;
++			dstPath = "";
++			dstSubfolderSpec = 10;
++			files = (
++			);
++			name = "Bundle Framework";
++			runOnlyForDeploymentPostprocessing = 0;
++		};
++/* End PBXCopyFilesBuildPhase section */
++
++/* Begin PBXFileReference section */
++		331C80D5294CF71000263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
++		331C80D7294CF71000263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
++		333000ED22D3DE5D00554162 /* Warnings.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Warnings.xcconfig; sourceTree = "<group>"; };
++		335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GeneratedPluginRegistrant.swift; sourceTree = "<group>"; };
++		33CC10ED2044A3C60003C045 /* floor_planner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "floor_planner.app"; sourceTree = BUILT_PRODUCTS_DIR; };
++		33CC10F02044A3C60003C045 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
++		33CC10F22044A3C60003C045 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Runner/Assets.xcassets; sourceTree = "<group>"; };
++		33CC10F52044A3C60003C045 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
++		33CC10F72044A3C60003C045 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = Runner/Info.plist; sourceTree = "<group>"; };
++		33CC11122044BFA00003C045 /* MainFlutterWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainFlutterWindow.swift; sourceTree = "<group>"; };
++		33CEB47222A05771004F2AC0 /* Flutter-Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Flutter-Debug.xcconfig"; sourceTree = "<group>"; };
++		33CEB47422A05771004F2AC0 /* Flutter-Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Flutter-Release.xcconfig"; sourceTree = "<group>"; };
++		33CEB47722A0578A004F2AC0 /* Flutter-Generated.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = "Flutter-Generated.xcconfig"; path = "ephemeral/Flutter-Generated.xcconfig"; sourceTree = "<group>"; };
++		33E51913231747F40026EE4D /* DebugProfile.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DebugProfile.entitlements; sourceTree = "<group>"; };
++		33E51914231749380026EE4D /* Release.entitlements */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.entitlements; path = Release.entitlements; sourceTree = "<group>"; };
++		33E5194F232828860026EE4D /* AppInfo.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = AppInfo.xcconfig; sourceTree = "<group>"; };
++		78E0A7A72DC9AD7400C4905E /* FlutterGeneratedPluginSwiftPackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = FlutterGeneratedPluginSwiftPackage; path = ephemeral/Packages/FlutterGeneratedPluginSwiftPackage; sourceTree = "<group>"; };
++		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
++		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
++/* End PBXFileReference section */
++
++/* Begin PBXFrameworksBuildPhase section */
++		331C80D2294CF70F00263BE5 /* Frameworks */ = {
++			isa = PBXFrameworksBuildPhase;
++			buildActionMask = 2147483647;
++			files = (
++			);
++			runOnlyForDeploymentPostprocessing = 0;
++		};
++		33CC10EA2044A3C60003C045 /* Frameworks */ = {
++			isa = PBXFrameworksBuildPhase;
++			buildActionMask = 2147483647;
++			files = (
++				78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */,
++			);
++			runOnlyForDeploymentPostprocessing = 0;
++		};
++/* End PBXFrameworksBuildPhase section */
++
++/* Begin PBXGroup section */
++		331C80D6294CF71000263BE5 /* RunnerTests */ = {
++			isa = PBXGroup;
++			children = (
++				331C80D7294CF71000263BE5 /* RunnerTests.swift */,
++			);
++			path = RunnerTests;
++			sourceTree = "<group>";
++		};
++		33BA886A226E78AF003329D5 /* Configs */ = {
++			isa = PBXGroup;
++			children = (
++				33E5194F232828860026EE4D /* AppInfo.xcconfig */,
++				9740EEB21CF90195004384FC /* Debug.xcconfig */,
++				7AFA3C8E1D35360C0083082E /* Release.xcconfig */,
++				333000ED22D3DE5D00554162 /* Warnings.xcconfig */,
++			);
++			path = Configs;
++			sourceTree = "<group>";
++		};
++		33CC10E42044A3C60003C045 = {
++			isa = PBXGroup;
++			children = (
++				33FAB671232836740065AC1E /* Runner */,
++				33CEB47122A05771004F2AC0 /* Flutter */,
++				331C80D6294CF71000263BE5 /* RunnerTests */,
++				33CC10EE2044A3C60003C045 /* Products */,
++				D73912EC22F37F3D000D13A0 /* Frameworks */,
++			);
++			sourceTree = "<group>";
++		};
++		33CC10EE2044A3C60003C045 /* Products */ = {
++			isa = PBXGroup;
++			children = (
++				33CC10ED2044A3C60003C045 /* floor_planner.app */,
++				331C80D5294CF71000263BE5 /* RunnerTests.xctest */,
++			);
++			name = Products;
++			sourceTree = "<group>";
++		};
++		33CC11242044D66E0003C045 /* Resources */ = {
++			isa = PBXGroup;
++			children = (
++				33CC10F22044A3C60003C045 /* Assets.xcassets */,
++				33CC10F42044A3C60003C045 /* MainMenu.xib */,
++				33CC10F72044A3C60003C045 /* Info.plist */,
++			);
++			name = Resources;
++			path = ..;
++			sourceTree = "<group>";
++		};
++		33CEB47122A05771004F2AC0 /* Flutter */ = {
++			isa = PBXGroup;
++			children = (
++				78E0A7A72DC9AD7400C4905E /* FlutterGeneratedPluginSwiftPackage */,
++				335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */,
++				33CEB47222A05771004F2AC0 /* Flutter-Debug.xcconfig */,
++				33CEB47422A05771004F2AC0 /* Flutter-Release.xcconfig */,
++				33CEB47722A0578A004F2AC0 /* Flutter-Generated.xcconfig */,
++			);
++			path = Flutter;
++			sourceTree = "<group>";
++		};
++		33FAB671232836740065AC1E /* Runner */ = {
++			isa = PBXGroup;
++			children = (
++				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
++				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
++				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
++				33E51914231749380026EE4D /* Release.entitlements */,
++				33CC11242044D66E0003C045 /* Resources */,
++				33BA886A226E78AF003329D5 /* Configs */,
++			);
++			path = Runner;
++			sourceTree = "<group>";
++		};
++		D73912EC22F37F3D000D13A0 /* Frameworks */ = {
++			isa = PBXGroup;
++			children = (
++			);
++			name = Frameworks;
++			sourceTree = "<group>";
++		};
++/* End PBXGroup section */
++
++/* Begin PBXNativeTarget section */
++		331C80D4294CF70F00263BE5 /* RunnerTests */ = {
++			isa = PBXNativeTarget;
++			buildConfigurationList = 331C80DE294CF71000263BE5 /* Build configuration list for PBXNativeTarget "RunnerTests" */;
++			buildPhases = (
++				331C80D1294CF70F00263BE5 /* Sources */,
++				331C80D2294CF70F00263BE5 /* Frameworks */,
++				331C80D3294CF70F00263BE5 /* Resources */,
++			);
++			buildRules = (
++			);
++			dependencies = (
++				331C80DA294CF71000263BE5 /* PBXTargetDependency */,
++			);
++			name = RunnerTests;
++			productName = RunnerTests;
++			productReference = 331C80D5294CF71000263BE5 /* RunnerTests.xctest */;
++			productType = "com.apple.product-type.bundle.unit-test";
++		};
++		33CC10EC2044A3C60003C045 /* Runner */ = {
++			isa = PBXNativeTarget;
++			buildConfigurationList = 33CC10FB2044A3C60003C045 /* Build configuration list for PBXNativeTarget "Runner" */;
++			buildPhases = (
++				33CC10E92044A3C60003C045 /* Sources */,
++				33CC10EA2044A3C60003C045 /* Frameworks */,
++				33CC10EB2044A3C60003C045 /* Resources */,
++				33CC110E2044A8840003C045 /* Bundle Framework */,
++				3399D490228B24CF009A79C7 /* ShellScript */,
++			);
++			buildRules = (
++			);
++			dependencies = (
++				33CC11202044C79F0003C045 /* PBXTargetDependency */,
++			);
++			name = Runner;
++			packageProductDependencies = (
++				78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */,
++			);
++			productName = Runner;
++			productReference = 33CC10ED2044A3C60003C045 /* floor_planner.app */;
++			productType = "com.apple.product-type.application";
++		};
++/* End PBXNativeTarget section */
++
++/* Begin PBXProject section */
++		33CC10E52044A3C60003C045 /* Project object */ = {
++			isa = PBXProject;
++			attributes = {
++				BuildIndependentTargetsInParallel = YES;
++				LastSwiftUpdateCheck = 0920;
++				LastUpgradeCheck = 1510;
++				ORGANIZATIONNAME = "";
++				TargetAttributes = {
++					331C80D4294CF70F00263BE5 = {
++						CreatedOnToolsVersion = 14.0;
++						TestTargetID = 33CC10EC2044A3C60003C045;
++					};
++					33CC10EC2044A3C60003C045 = {
++						CreatedOnToolsVersion = 9.2;
++						LastSwiftMigration = 1100;
++						ProvisioningStyle = Automatic;
++						SystemCapabilities = {
++							com.apple.Sandbox = {
++								enabled = 1;
++							};
++						};
++					};
++					33CC111A2044C6BA0003C045 = {
++						CreatedOnToolsVersion = 9.2;
++						ProvisioningStyle = Manual;
++					};
++				};
++			};
++			buildConfigurationList = 33CC10E82044A3C60003C045 /* Build configuration list for PBXProject "Runner" */;
++			compatibilityVersion = "Xcode 9.3";
++			developmentRegion = en;
++			hasScannedForEncodings = 0;
++			knownRegions = (
++				en,
++				Base,
++			);
++			mainGroup = 33CC10E42044A3C60003C045;
++			packageReferences = (
++				781AD8BC2B33823900A9FFBB /* XCLocalSwiftPackageReference "Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage" */,
++			);
++			productRefGroup = 33CC10EE2044A3C60003C045 /* Products */;
++			projectDirPath = "";
++			projectRoot = "";
++			targets = (
++				33CC10EC2044A3C60003C045 /* Runner */,
++				331C80D4294CF70F00263BE5 /* RunnerTests */,
++				33CC111A2044C6BA0003C045 /* Flutter Assemble */,
++			);
++		};
++/* End PBXProject section */
++
++/* Begin PBXResourcesBuildPhase section */
++		331C80D3294CF70F00263BE5 /* Resources */ = {
++			isa = PBXResourcesBuildPhase;
++			buildActionMask = 2147483647;
++			files = (
++			);
++			runOnlyForDeploymentPostprocessing = 0;
++		};
++		33CC10EB2044A3C60003C045 /* Resources */ = {
++			isa = PBXResourcesBuildPhase;
++			buildActionMask = 2147483647;
++			files = (
++				33CC10F32044A3C60003C045 /* Assets.xcassets in Resources */,
++				33CC10F62044A3C60003C045 /* MainMenu.xib in Resources */,
++			);
++			runOnlyForDeploymentPostprocessing = 0;
++		};
++/* End PBXResourcesBuildPhase section */
++
++/* Begin PBXShellScriptBuildPhase section */
++		3399D490228B24CF009A79C7 /* ShellScript */ = {
++			isa = PBXShellScriptBuildPhase;
++			alwaysOutOfDate = 1;
++			buildActionMask = 2147483647;
++			files = (
++			);
++			inputFileListPaths = (
++			);
++			inputPaths = (
++			);
++			outputFileListPaths = (
++			);
++			outputPaths = (
++			);
++			runOnlyForDeploymentPostprocessing = 0;
++			shellPath = /bin/sh;
++			shellScript = "echo \"$PRODUCT_NAME.app\" > \"$PROJECT_DIR\"/Flutter/ephemeral/.app_filename && \"$FLUTTER_ROOT\"/packages/flutter_tools/bin/macos_assemble.sh embed\n";
++		};
++		33CC111E2044C6BF0003C045 /* ShellScript */ = {
++			isa = PBXShellScriptBuildPhase;
++			buildActionMask = 2147483647;
++			files = (
++			);
++			inputFileListPaths = (
++				Flutter/ephemeral/FlutterInputs.xcfilelist,
++			);
++			inputPaths = (
++				Flutter/ephemeral/tripwire,
++			);
++			outputFileListPaths = (
++				Flutter/ephemeral/FlutterOutputs.xcfilelist,
++			);
++			outputPaths = (
++			);
++			runOnlyForDeploymentPostprocessing = 0;
++			shellPath = /bin/sh;
++			shellScript = "\"$FLUTTER_ROOT\"/packages/flutter_tools/bin/macos_assemble.sh && touch Flutter/ephemeral/tripwire";
++		};
++/* End PBXShellScriptBuildPhase section */
++
++/* Begin PBXSourcesBuildPhase section */
++		331C80D1294CF70F00263BE5 /* Sources */ = {
++			isa = PBXSourcesBuildPhase;
++			buildActionMask = 2147483647;
++			files = (
++				331C80D8294CF71000263BE5 /* RunnerTests.swift in Sources */,
++			);
++			runOnlyForDeploymentPostprocessing = 0;
++		};
++		33CC10E92044A3C60003C045 /* Sources */ = {
++			isa = PBXSourcesBuildPhase;
++			buildActionMask = 2147483647;
++			files = (
++				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
++				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
++				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,
++			);
++			runOnlyForDeploymentPostprocessing = 0;
++		};
++/* End PBXSourcesBuildPhase section */
++
++/* Begin PBXTargetDependency section */
++		331C80DA294CF71000263BE5 /* PBXTargetDependency */ = {
++			isa = PBXTargetDependency;
++			target = 33CC10EC2044A3C60003C045 /* Runner */;
++			targetProxy = 331C80D9294CF71000263BE5 /* PBXContainerItemProxy */;
++		};
++		33CC11202044C79F0003C045 /* PBXTargetDependency */ = {
++			isa = PBXTargetDependency;
++			target = 33CC111A2044C6BA0003C045 /* Flutter Assemble */;
++			targetProxy = 33CC111F2044C79F0003C045 /* PBXContainerItemProxy */;
++		};
++/* End PBXTargetDependency section */
++
++/* Begin PBXVariantGroup section */
++		33CC10F42044A3C60003C045 /* MainMenu.xib */ = {
++			isa = PBXVariantGroup;
++			children = (
++				33CC10F52044A3C60003C045 /* Base */,
++			);
++			name = MainMenu.xib;
++			path = Runner;
++			sourceTree = "<group>";
++		};
++/* End PBXVariantGroup section */
++
++/* Begin XCBuildConfiguration section */
++		331C80DB294CF71000263BE5 /* Debug */ = {
++			isa = XCBuildConfiguration;
++			buildSettings = {
++				BUNDLE_LOADER = "$(TEST_HOST)";
++				CURRENT_PROJECT_VERSION = 1;
++				GENERATE_INFOPLIST_FILE = YES;
++				MARKETING_VERSION = 1.0;
++				PRODUCT_BUNDLE_IDENTIFIER = dev.jetcad.floorPlanner.RunnerTests;
++				PRODUCT_NAME = "$(TARGET_NAME)";
++				SWIFT_VERSION = 5.0;
++				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/floor_planner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/floor_planner";
++			};
++			name = Debug;
++		};
++		331C80DC294CF71000263BE5 /* Release */ = {
++			isa = XCBuildConfiguration;
++			buildSettings = {
++				BUNDLE_LOADER = "$(TEST_HOST)";
++				CURRENT_PROJECT_VERSION = 1;
++				GENERATE_INFOPLIST_FILE = YES;
++				MARKETING_VERSION = 1.0;
++				PRODUCT_BUNDLE_IDENTIFIER = dev.jetcad.floorPlanner.RunnerTests;
++				PRODUCT_NAME = "$(TARGET_NAME)";
++				SWIFT_VERSION = 5.0;
++				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/floor_planner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/floor_planner";
++			};
++			name = Release;
++		};
++		331C80DD294CF71000263BE5 /* Profile */ = {
++			isa = XCBuildConfiguration;
++			buildSettings = {
++				BUNDLE_LOADER = "$(TEST_HOST)";
++				CURRENT_PROJECT_VERSION = 1;
++				GENERATE_INFOPLIST_FILE = YES;
++				MARKETING_VERSION = 1.0;
++				PRODUCT_BUNDLE_IDENTIFIER = dev.jetcad.floorPlanner.RunnerTests;
++				PRODUCT_NAME = "$(TARGET_NAME)";
++				SWIFT_VERSION = 5.0;
++				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/floor_planner.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/floor_planner";
++			};
++			name = Profile;
++		};
++		338D0CE9231458BD00FA5F75 /* Profile */ = {
++			isa = XCBuildConfiguration;
++			baseConfigurationReference = 7AFA3C8E1D35360C0083082E /* Release.xcconfig */;
++			buildSettings = {
++				ALWAYS_SEARCH_USER_PATHS = NO;
++				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
++				CLANG_ANALYZER_NONNULL = YES;
++				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
++				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
++				CLANG_CXX_LIBRARY = "libc++";
++				CLANG_ENABLE_MODULES = YES;
++				CLANG_ENABLE_OBJC_ARC = YES;
++				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
++				CLANG_WARN_BOOL_CONVERSION = YES;
++				CLANG_WARN_CONSTANT_CONVERSION = YES;
++				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
++				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
++				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
++				CLANG_WARN_EMPTY_BODY = YES;
++				CLANG_WARN_ENUM_CONVERSION = YES;
++				CLANG_WARN_INFINITE_RECURSION = YES;
++				CLANG_WARN_INT_CONVERSION = YES;
++				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
++				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
++				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
++				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
++				CLANG_WARN_SUSPICIOUS_MOVE = YES;
++				CODE_SIGN_IDENTITY = "-";
++				COPY_PHASE_STRIP = NO;
++				DEAD_CODE_STRIPPING = YES;
++				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
++				ENABLE_NS_ASSERTIONS = NO;
++				ENABLE_STRICT_OBJC_MSGSEND = YES;
++				ENABLE_USER_SCRIPT_SANDBOXING = NO;
++				GCC_C_LANGUAGE_STANDARD = gnu11;
++				GCC_NO_COMMON_BLOCKS = YES;
++				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
++				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
++				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
++				GCC_WARN_UNUSED_FUNCTION = YES;
++				GCC_WARN_UNUSED_VARIABLE = YES;
++				MACOSX_DEPLOYMENT_TARGET = 12.0;
++				MTL_ENABLE_DEBUG_INFO = NO;
++				SDKROOT = macosx;
++				SWIFT_COMPILATION_MODE = wholemodule;
++				SWIFT_OPTIMIZATION_LEVEL = "-O";
++			};
++			name = Profile;
++		};
++		338D0CEA231458BD00FA5F75 /* Profile */ = {
++			isa = XCBuildConfiguration;
++			baseConfigurationReference = 33E5194F232828860026EE4D /* AppInfo.xcconfig */;
++			buildSettings = {
++				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
++				CLANG_ENABLE_MODULES = YES;
++				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
++				CODE_SIGN_STYLE = Automatic;
++				COMBINE_HIDPI_IMAGES = YES;
++				INFOPLIST_FILE = Runner/Info.plist;
++				LD_RUNPATH_SEARCH_PATHS = (
++					"$(inherited)",
++					"@executable_path/../Frameworks",
++				);
++				PROVISIONING_PROFILE_SPECIFIER = "";
++				SWIFT_VERSION = 5.0;
++			};
++			name = Profile;
++		};
++		338D0CEB231458BD00FA5F75 /* Profile */ = {
++			isa = XCBuildConfiguration;
++			buildSettings = {
++				CODE_SIGN_STYLE = Manual;
++				PRODUCT_NAME = "$(TARGET_NAME)";
++			};
++			name = Profile;
++		};
++		33CC10F92044A3C60003C045 /* Debug */ = {
++			isa = XCBuildConfiguration;
++			baseConfigurationReference = 9740EEB21CF90195004384FC /* Debug.xcconfig */;
++			buildSettings = {
++				ALWAYS_SEARCH_USER_PATHS = NO;
++				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
++				CLANG_ANALYZER_NONNULL = YES;
++				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
++				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
++				CLANG_CXX_LIBRARY = "libc++";
++				CLANG_ENABLE_MODULES = YES;
++				CLANG_ENABLE_OBJC_ARC = YES;
++				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
++				CLANG_WARN_BOOL_CONVERSION = YES;
++				CLANG_WARN_CONSTANT_CONVERSION = YES;
++				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
++				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
++				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
++				CLANG_WARN_EMPTY_BODY = YES;
++				CLANG_WARN_ENUM_CONVERSION = YES;
++				CLANG_WARN_INFINITE_RECURSION = YES;
++				CLANG_WARN_INT_CONVERSION = YES;
++				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
++				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
++				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
++				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
++				CLANG_WARN_SUSPICIOUS_MOVE = YES;
++				CODE_SIGN_IDENTITY = "-";
++				COPY_PHASE_STRIP = NO;
++				DEAD_CODE_STRIPPING = YES;
++				DEBUG_INFORMATION_FORMAT = dwarf;
++				ENABLE_STRICT_OBJC_MSGSEND = YES;
++				ENABLE_TESTABILITY = YES;
++				ENABLE_USER_SCRIPT_SANDBOXING = NO;
++				GCC_C_LANGUAGE_STANDARD = gnu11;
++				GCC_DYNAMIC_NO_PIC = NO;
++				GCC_NO_COMMON_BLOCKS = YES;
++				GCC_OPTIMIZATION_LEVEL = 0;
++				GCC_PREPROCESSOR_DEFINITIONS = (
++					"DEBUG=1",
++					"$(inherited)",
++				);
++				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
++				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
++				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
++				GCC_WARN_UNUSED_FUNCTION = YES;
++				GCC_WARN_UNUSED_VARIABLE = YES;
++				MACOSX_DEPLOYMENT_TARGET = 12.0;
++				MTL_ENABLE_DEBUG_INFO = YES;
++				ONLY_ACTIVE_ARCH = YES;
++				SDKROOT = macosx;
++				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
++				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
++			};
++			name = Debug;
++		};
++		33CC10FA2044A3C60003C045 /* Release */ = {
++			isa = XCBuildConfiguration;
++			baseConfigurationReference = 7AFA3C8E1D35360C0083082E /* Release.xcconfig */;
++			buildSettings = {
++				ALWAYS_SEARCH_USER_PATHS = NO;
++				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
++				CLANG_ANALYZER_NONNULL = YES;
++				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
++				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
++				CLANG_CXX_LIBRARY = "libc++";
++				CLANG_ENABLE_MODULES = YES;
++				CLANG_ENABLE_OBJC_ARC = YES;
++				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
++				CLANG_WARN_BOOL_CONVERSION = YES;
++				CLANG_WARN_CONSTANT_CONVERSION = YES;
++				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
++				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
++				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
++				CLANG_WARN_EMPTY_BODY = YES;
++				CLANG_WARN_ENUM_CONVERSION = YES;
++				CLANG_WARN_INFINITE_RECURSION = YES;
++				CLANG_WARN_INT_CONVERSION = YES;
++				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
++				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
++				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
++				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
++				CLANG_WARN_SUSPICIOUS_MOVE = YES;
++				CODE_SIGN_IDENTITY = "-";
++				COPY_PHASE_STRIP = NO;
++				DEAD_CODE_STRIPPING = YES;
++				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
++				ENABLE_NS_ASSERTIONS = NO;
++				ENABLE_STRICT_OBJC_MSGSEND = YES;
++				ENABLE_USER_SCRIPT_SANDBOXING = NO;
++				GCC_C_LANGUAGE_STANDARD = gnu11;
++				GCC_NO_COMMON_BLOCKS = YES;
++				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
++				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
++				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
++				GCC_WARN_UNUSED_FUNCTION = YES;
++				GCC_WARN_UNUSED_VARIABLE = YES;
++				MACOSX_DEPLOYMENT_TARGET = 12.0;
++				MTL_ENABLE_DEBUG_INFO = NO;
++				SDKROOT = macosx;
++				SWIFT_COMPILATION_MODE = wholemodule;
++				SWIFT_OPTIMIZATION_LEVEL = "-O";
++			};
++			name = Release;
++		};
++		33CC10FC2044A3C60003C045 /* Debug */ = {
++			isa = XCBuildConfiguration;
++			baseConfigurationReference = 33E5194F232828860026EE4D /* AppInfo.xcconfig */;
++			buildSettings = {
++				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
++				CLANG_ENABLE_MODULES = YES;
++				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
++				CODE_SIGN_STYLE = Automatic;
++				COMBINE_HIDPI_IMAGES = YES;
++				INFOPLIST_FILE = Runner/Info.plist;
++				LD_RUNPATH_SEARCH_PATHS = (
++					"$(inherited)",
++					"@executable_path/../Frameworks",
++				);
++				PROVISIONING_PROFILE_SPECIFIER = "";
++				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
++				SWIFT_VERSION = 5.0;
++			};
++			name = Debug;
++		};
++		33CC10FD2044A3C60003C045 /* Release */ = {
++			isa = XCBuildConfiguration;
++			baseConfigurationReference = 33E5194F232828860026EE4D /* AppInfo.xcconfig */;
++			buildSettings = {
++				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
++				CLANG_ENABLE_MODULES = YES;
++				CODE_SIGN_ENTITLEMENTS = Runner/Release.entitlements;
++				CODE_SIGN_STYLE = Automatic;
++				COMBINE_HIDPI_IMAGES = YES;
++				INFOPLIST_FILE = Runner/Info.plist;
++				LD_RUNPATH_SEARCH_PATHS = (
++					"$(inherited)",
++					"@executable_path/../Frameworks",
++				);
++				PROVISIONING_PROFILE_SPECIFIER = "";
++				SWIFT_VERSION = 5.0;
++			};
++			name = Release;
++		};
++		33CC111C2044C6BA0003C045 /* Debug */ = {
++			isa = XCBuildConfiguration;
++			buildSettings = {
++				CODE_SIGN_STYLE = Manual;
++				PRODUCT_NAME = "$(TARGET_NAME)";
++			};
++			name = Debug;
++		};
++		33CC111D2044C6BA0003C045 /* Release */ = {
++			isa = XCBuildConfiguration;
++			buildSettings = {
++				CODE_SIGN_STYLE = Automatic;
++				PRODUCT_NAME = "$(TARGET_NAME)";
++			};
++			name = Release;
++		};
++/* End XCBuildConfiguration section */
++
++/* Begin XCConfigurationList section */
++		331C80DE294CF71000263BE5 /* Build configuration list for PBXNativeTarget "RunnerTests" */ = {
++			isa = XCConfigurationList;
++			buildConfigurations = (
++				331C80DB294CF71000263BE5 /* Debug */,
++				331C80DC294CF71000263BE5 /* Release */,
++				331C80DD294CF71000263BE5 /* Profile */,
++			);
++			defaultConfigurationIsVisible = 0;
++			defaultConfigurationName = Release;
++		};
++		33CC10E82044A3C60003C045 /* Build configuration list for PBXProject "Runner" */ = {
++			isa = XCConfigurationList;
++			buildConfigurations = (
++				33CC10F92044A3C60003C045 /* Debug */,
++				33CC10FA2044A3C60003C045 /* Release */,
++				338D0CE9231458BD00FA5F75 /* Profile */,
++			);
++			defaultConfigurationIsVisible = 0;
++			defaultConfigurationName = Release;
++		};
++		33CC10FB2044A3C60003C045 /* Build configuration list for PBXNativeTarget "Runner" */ = {
++			isa = XCConfigurationList;
++			buildConfigurations = (
++				33CC10FC2044A3C60003C045 /* Debug */,
++				33CC10FD2044A3C60003C045 /* Release */,
++				338D0CEA231458BD00FA5F75 /* Profile */,
++			);
++			defaultConfigurationIsVisible = 0;
++			defaultConfigurationName = Release;
++		};
++		33CC111B2044C6BA0003C045 /* Build configuration list for PBXAggregateTarget "Flutter Assemble" */ = {
++			isa = XCConfigurationList;
++			buildConfigurations = (
++				33CC111C2044C6BA0003C045 /* Debug */,
++				33CC111D2044C6BA0003C045 /* Release */,
++				338D0CEB231458BD00FA5F75 /* Profile */,
++			);
++			defaultConfigurationIsVisible = 0;
++			defaultConfigurationName = Release;
++		};
++/* End XCConfigurationList section */
++
++/* Begin XCLocalSwiftPackageReference section */
++		781AD8BC2B33823900A9FFBB /* XCLocalSwiftPackageReference "Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage" */ = {
++			isa = XCLocalSwiftPackageReference;
++			relativePath = Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage;
++		};
++/* End XCLocalSwiftPackageReference section */
++
++/* Begin XCSwiftPackageProductDependency section */
++		78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */ = {
++			isa = XCSwiftPackageProductDependency;
++			productName = FlutterGeneratedPluginSwiftPackage;
++		};
++/* End XCSwiftPackageProductDependency section */
++	};
++	rootObject = 33CC10E52044A3C60003C045 /* Project object */;
++}
+diff --git a/apps/floor_planner/macos/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist b/apps/floor_planner/macos/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+new file mode 100644
+index 0000000..18d9810
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>IDEDidComputeMac32BitWarning</key>
++	<true/>
++</dict>
++</plist>
+diff --git a/apps/floor_planner/macos/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme b/apps/floor_planner/macos/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme
+new file mode 100644
+index 0000000..e116046
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme
+@@ -0,0 +1,117 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<Scheme
++   LastUpgradeVersion = "1510"
++   version = "1.3">
++   <BuildAction
++      parallelizeBuildables = "YES"
++      buildImplicitDependencies = "YES">
++      <PreActions>
++         <ExecutionAction
++            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
++            <ActionContent
++               title = "Run Prepare Flutter Framework Script"
++               scriptText = "&quot;$FLUTTER_ROOT&quot;/packages/flutter_tools/bin/macos_assemble.sh prepare&#10;">
++               <EnvironmentBuildable>
++                  <BuildableReference
++                     BuildableIdentifier = "primary"
++                     BlueprintIdentifier = "33CC10EC2044A3C60003C045"
++                     BuildableName = "floor_planner.app"
++                     BlueprintName = "Runner"
++                     ReferencedContainer = "container:Runner.xcodeproj">
++                  </BuildableReference>
++               </EnvironmentBuildable>
++            </ActionContent>
++         </ExecutionAction>
++      </PreActions>
++      <BuildActionEntries>
++         <BuildActionEntry
++            buildForTesting = "YES"
++            buildForRunning = "YES"
++            buildForProfiling = "YES"
++            buildForArchiving = "YES"
++            buildForAnalyzing = "YES">
++            <BuildableReference
++               BuildableIdentifier = "primary"
++               BlueprintIdentifier = "33CC10EC2044A3C60003C045"
++               BuildableName = "floor_planner.app"
++               BlueprintName = "Runner"
++               ReferencedContainer = "container:Runner.xcodeproj">
++            </BuildableReference>
++         </BuildActionEntry>
++      </BuildActionEntries>
++   </BuildAction>
++   <TestAction
++      buildConfiguration = "Debug"
++      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
++      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
++      shouldUseLaunchSchemeArgsEnv = "YES">
++      <MacroExpansion>
++         <BuildableReference
++            BuildableIdentifier = "primary"
++            BlueprintIdentifier = "33CC10EC2044A3C60003C045"
++            BuildableName = "floor_planner.app"
++            BlueprintName = "Runner"
++            ReferencedContainer = "container:Runner.xcodeproj">
++         </BuildableReference>
++      </MacroExpansion>
++      <Testables>
++         <TestableReference
++            skipped = "NO"
++            parallelizable = "YES">
++            <BuildableReference
++               BuildableIdentifier = "primary"
++               BlueprintIdentifier = "331C80D4294CF70F00263BE5"
++               BuildableName = "RunnerTests.xctest"
++               BlueprintName = "RunnerTests"
++               ReferencedContainer = "container:Runner.xcodeproj">
++            </BuildableReference>
++         </TestableReference>
++      </Testables>
++   </TestAction>
++   <LaunchAction
++      buildConfiguration = "Debug"
++      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
++      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
++      launchStyle = "0"
++      useCustomWorkingDirectory = "NO"
++      ignoresPersistentStateOnLaunch = "NO"
++      debugDocumentVersioning = "YES"
++      debugServiceExtension = "internal"
++      enableGPUValidationMode = "1"
++      allowLocationSimulation = "YES">
++      <BuildableProductRunnable
++         runnableDebuggingMode = "0">
++         <BuildableReference
++            BuildableIdentifier = "primary"
++            BlueprintIdentifier = "33CC10EC2044A3C60003C045"
++            BuildableName = "floor_planner.app"
++            BlueprintName = "Runner"
++            ReferencedContainer = "container:Runner.xcodeproj">
++         </BuildableReference>
++      </BuildableProductRunnable>
++   </LaunchAction>
++   <ProfileAction
++      buildConfiguration = "Profile"
++      shouldUseLaunchSchemeArgsEnv = "YES"
++      savedToolIdentifier = ""
++      useCustomWorkingDirectory = "NO"
++      debugDocumentVersioning = "YES">
++      <BuildableProductRunnable
++         runnableDebuggingMode = "0">
++         <BuildableReference
++            BuildableIdentifier = "primary"
++            BlueprintIdentifier = "33CC10EC2044A3C60003C045"
++            BuildableName = "floor_planner.app"
++            BlueprintName = "Runner"
++            ReferencedContainer = "container:Runner.xcodeproj">
++         </BuildableReference>
++      </BuildableProductRunnable>
++   </ProfileAction>
++   <AnalyzeAction
++      buildConfiguration = "Debug">
++   </AnalyzeAction>
++   <ArchiveAction
++      buildConfiguration = "Release"
++      revealArchiveInOrganizer = "YES">
++   </ArchiveAction>
++</Scheme>
+diff --git a/apps/floor_planner/macos/Runner.xcworkspace/contents.xcworkspacedata b/apps/floor_planner/macos/Runner.xcworkspace/contents.xcworkspacedata
+new file mode 100644
+index 0000000..1d526a1
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner.xcworkspace/contents.xcworkspacedata
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<Workspace
++   version = "1.0">
++   <FileRef
++      location = "group:Runner.xcodeproj">
++   </FileRef>
++</Workspace>
+diff --git a/apps/floor_planner/macos/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist b/apps/floor_planner/macos/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+new file mode 100644
+index 0000000..18d9810
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>IDEDidComputeMac32BitWarning</key>
++	<true/>
++</dict>
++</plist>
+diff --git a/apps/floor_planner/macos/Runner/AppDelegate.swift b/apps/floor_planner/macos/Runner/AppDelegate.swift
+new file mode 100644
+index 0000000..b3c1761
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner/AppDelegate.swift
+@@ -0,0 +1,13 @@
++import Cocoa
++import FlutterMacOS
++
++@main
++class AppDelegate: FlutterAppDelegate {
++  override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
++    return true
++  }
++
++  override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
++    return true
++  }
++}
+diff --git a/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json
+new file mode 100644
+index 0000000..a2ec33f
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json
+@@ -0,0 +1,68 @@
++{
++  "images" : [
++    {
++      "size" : "16x16",
++      "idiom" : "mac",
++      "filename" : "app_icon_16.png",
++      "scale" : "1x"
++    },
++    {
++      "size" : "16x16",
++      "idiom" : "mac",
++      "filename" : "app_icon_32.png",
++      "scale" : "2x"
++    },
++    {
++      "size" : "32x32",
++      "idiom" : "mac",
++      "filename" : "app_icon_32.png",
++      "scale" : "1x"
++    },
++    {
++      "size" : "32x32",
++      "idiom" : "mac",
++      "filename" : "app_icon_64.png",
++      "scale" : "2x"
++    },
++    {
++      "size" : "128x128",
++      "idiom" : "mac",
++      "filename" : "app_icon_128.png",
++      "scale" : "1x"
++    },
++    {
++      "size" : "128x128",
++      "idiom" : "mac",
++      "filename" : "app_icon_256.png",
++      "scale" : "2x"
++    },
++    {
++      "size" : "256x256",
++      "idiom" : "mac",
++      "filename" : "app_icon_256.png",
++      "scale" : "1x"
++    },
++    {
++      "size" : "256x256",
++      "idiom" : "mac",
++      "filename" : "app_icon_512.png",
++      "scale" : "2x"
++    },
++    {
++      "size" : "512x512",
++      "idiom" : "mac",
++      "filename" : "app_icon_512.png",
++      "scale" : "1x"
++    },
++    {
++      "size" : "512x512",
++      "idiom" : "mac",
++      "filename" : "app_icon_1024.png",
++      "scale" : "2x"
++    }
++  ],
++  "info" : {
++    "version" : 1,
++    "author" : "xcode"
++  }
++}
+diff --git a/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png
+new file mode 100644
+index 0000000..82b6f9d
+Binary files /dev/null and b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png differ
+diff --git a/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_128.png b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_128.png
+new file mode 100644
+index 0000000..13b35eb
+Binary files /dev/null and b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_128.png differ
+diff --git a/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_16.png b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_16.png
+new file mode 100644
+index 0000000..0a3f5fa
+Binary files /dev/null and b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_16.png differ
+diff --git a/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png
+new file mode 100644
+index 0000000..bdb5722
+Binary files /dev/null and b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png differ
+diff --git a/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_32.png b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_32.png
+new file mode 100644
+index 0000000..f083318
+Binary files /dev/null and b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_32.png differ
+diff --git a/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png
+new file mode 100644
+index 0000000..326c0e7
+Binary files /dev/null and b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png differ
+diff --git a/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_64.png b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_64.png
+new file mode 100644
+index 0000000..2f1632c
+Binary files /dev/null and b/apps/floor_planner/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_64.png differ
+diff --git a/apps/floor_planner/macos/Runner/Base.lproj/MainMenu.xib b/apps/floor_planner/macos/Runner/Base.lproj/MainMenu.xib
+new file mode 100644
+index 0000000..1cf7982
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner/Base.lproj/MainMenu.xib
+@@ -0,0 +1,343 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="14490.70" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES" customObjectInstantitationMethod="direct">
++    <dependencies>
++        <deployment identifier="macosx"/>
++        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="14490.70"/>
++        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
++    </dependencies>
++    <objects>
++        <customObject id="-2" userLabel="File's Owner" customClass="NSApplication">
++            <connections>
++                <outlet property="delegate" destination="Voe-Tx-rLC" id="GzC-gU-4Uq"/>
++            </connections>
++        </customObject>
++        <customObject id="-1" userLabel="First Responder" customClass="FirstResponder"/>
++        <customObject id="-3" userLabel="Application" customClass="NSObject"/>
++        <customObject id="Voe-Tx-rLC" customClass="AppDelegate" customModule="Runner" customModuleProvider="target">
++            <connections>
++                <outlet property="applicationMenu" destination="uQy-DD-JDr" id="XBo-yE-nKs"/>
++                <outlet property="mainFlutterWindow" destination="QvC-M9-y7g" id="gIp-Ho-8D9"/>
++            </connections>
++        </customObject>
++        <customObject id="YLy-65-1bz" customClass="NSFontManager"/>
++        <menu title="Main Menu" systemMenu="main" id="AYu-sK-qS6">
++            <items>
++                <menuItem title="APP_NAME" id="1Xt-HY-uBw">
++                    <modifierMask key="keyEquivalentModifierMask"/>
++                    <menu key="submenu" title="APP_NAME" systemMenu="apple" id="uQy-DD-JDr">
++                        <items>
++                            <menuItem title="About APP_NAME" id="5kV-Vb-QxS">
++                                <modifierMask key="keyEquivalentModifierMask"/>
++                                <connections>
++                                    <action selector="orderFrontStandardAboutPanel:" target="-1" id="Exp-CZ-Vem"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem isSeparatorItem="YES" id="VOq-y0-SEH"/>
++                            <menuItem title="Preferences…" keyEquivalent="," id="BOF-NM-1cW"/>
++                            <menuItem isSeparatorItem="YES" id="wFC-TO-SCJ"/>
++                            <menuItem title="Services" id="NMo-om-nkz">
++                                <modifierMask key="keyEquivalentModifierMask"/>
++                                <menu key="submenu" title="Services" systemMenu="services" id="hz9-B4-Xy5"/>
++                            </menuItem>
++                            <menuItem isSeparatorItem="YES" id="4je-JR-u6R"/>
++                            <menuItem title="Hide APP_NAME" keyEquivalent="h" id="Olw-nP-bQN">
++                                <connections>
++                                    <action selector="hide:" target="-1" id="PnN-Uc-m68"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem title="Hide Others" keyEquivalent="h" id="Vdr-fp-XzO">
++                                <modifierMask key="keyEquivalentModifierMask" option="YES" command="YES"/>
++                                <connections>
++                                    <action selector="hideOtherApplications:" target="-1" id="VT4-aY-XCT"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem title="Show All" id="Kd2-mp-pUS">
++                                <modifierMask key="keyEquivalentModifierMask"/>
++                                <connections>
++                                    <action selector="unhideAllApplications:" target="-1" id="Dhg-Le-xox"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem isSeparatorItem="YES" id="kCx-OE-vgT"/>
++                            <menuItem title="Quit APP_NAME" keyEquivalent="q" id="4sb-4s-VLi">
++                                <connections>
++                                    <action selector="terminate:" target="-1" id="Te7-pn-YzF"/>
++                                </connections>
++                            </menuItem>
++                        </items>
++                    </menu>
++                </menuItem>
++                <menuItem title="Edit" id="5QF-Oa-p0T">
++                    <modifierMask key="keyEquivalentModifierMask"/>
++                    <menu key="submenu" title="Edit" id="W48-6f-4Dl">
++                        <items>
++                            <menuItem title="Undo" keyEquivalent="z" id="dRJ-4n-Yzg">
++                                <connections>
++                                    <action selector="undo:" target="-1" id="M6e-cu-g7V"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem title="Redo" keyEquivalent="Z" id="6dh-zS-Vam">
++                                <connections>
++                                    <action selector="redo:" target="-1" id="oIA-Rs-6OD"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem isSeparatorItem="YES" id="WRV-NI-Exz"/>
++                            <menuItem title="Cut" keyEquivalent="x" id="uRl-iY-unG">
++                                <connections>
++                                    <action selector="cut:" target="-1" id="YJe-68-I9s"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem title="Copy" keyEquivalent="c" id="x3v-GG-iWU">
++                                <connections>
++                                    <action selector="copy:" target="-1" id="G1f-GL-Joy"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem title="Paste" keyEquivalent="v" id="gVA-U4-sdL">
++                                <connections>
++                                    <action selector="paste:" target="-1" id="UvS-8e-Qdg"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem title="Paste and Match Style" keyEquivalent="V" id="WeT-3V-zwk">
++                                <modifierMask key="keyEquivalentModifierMask" option="YES" command="YES"/>
++                                <connections>
++                                    <action selector="pasteAsPlainText:" target="-1" id="cEh-KX-wJQ"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem title="Delete" id="pa3-QI-u2k">
++                                <modifierMask key="keyEquivalentModifierMask"/>
++                                <connections>
++                                    <action selector="delete:" target="-1" id="0Mk-Ml-PaM"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem title="Select All" keyEquivalent="a" id="Ruw-6m-B2m">
++                                <connections>
++                                    <action selector="selectAll:" target="-1" id="VNm-Mi-diN"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem isSeparatorItem="YES" id="uyl-h8-XO2"/>
++                            <menuItem title="Find" id="4EN-yA-p0u">
++                                <modifierMask key="keyEquivalentModifierMask"/>
++                                <menu key="submenu" title="Find" id="1b7-l0-nxx">
++                                    <items>
++                                        <menuItem title="Find…" tag="1" keyEquivalent="f" id="Xz5-n4-O0W">
++                                            <connections>
++                                                <action selector="performFindPanelAction:" target="-1" id="cD7-Qs-BN4"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Find and Replace…" tag="12" keyEquivalent="f" id="YEy-JH-Tfz">
++                                            <modifierMask key="keyEquivalentModifierMask" option="YES" command="YES"/>
++                                            <connections>
++                                                <action selector="performFindPanelAction:" target="-1" id="WD3-Gg-5AJ"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Find Next" tag="2" keyEquivalent="g" id="q09-fT-Sye">
++                                            <connections>
++                                                <action selector="performFindPanelAction:" target="-1" id="NDo-RZ-v9R"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Find Previous" tag="3" keyEquivalent="G" id="OwM-mh-QMV">
++                                            <connections>
++                                                <action selector="performFindPanelAction:" target="-1" id="HOh-sY-3ay"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Use Selection for Find" tag="7" keyEquivalent="e" id="buJ-ug-pKt">
++                                            <connections>
++                                                <action selector="performFindPanelAction:" target="-1" id="U76-nv-p5D"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Jump to Selection" keyEquivalent="j" id="S0p-oC-mLd">
++                                            <connections>
++                                                <action selector="centerSelectionInVisibleArea:" target="-1" id="IOG-6D-g5B"/>
++                                            </connections>
++                                        </menuItem>
++                                    </items>
++                                </menu>
++                            </menuItem>
++                            <menuItem title="Spelling and Grammar" id="Dv1-io-Yv7">
++                                <modifierMask key="keyEquivalentModifierMask"/>
++                                <menu key="submenu" title="Spelling" id="3IN-sU-3Bg">
++                                    <items>
++                                        <menuItem title="Show Spelling and Grammar" keyEquivalent=":" id="HFo-cy-zxI">
++                                            <connections>
++                                                <action selector="showGuessPanel:" target="-1" id="vFj-Ks-hy3"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Check Document Now" keyEquivalent=";" id="hz2-CU-CR7">
++                                            <connections>
++                                                <action selector="checkSpelling:" target="-1" id="fz7-VC-reM"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem isSeparatorItem="YES" id="bNw-od-mp5"/>
++                                        <menuItem title="Check Spelling While Typing" id="rbD-Rh-wIN">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="toggleContinuousSpellChecking:" target="-1" id="7w6-Qz-0kB"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Check Grammar With Spelling" id="mK6-2p-4JG">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="toggleGrammarChecking:" target="-1" id="muD-Qn-j4w"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Correct Spelling Automatically" id="78Y-hA-62v">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="toggleAutomaticSpellingCorrection:" target="-1" id="2lM-Qi-WAP"/>
++                                            </connections>
++                                        </menuItem>
++                                    </items>
++                                </menu>
++                            </menuItem>
++                            <menuItem title="Substitutions" id="9ic-FL-obx">
++                                <modifierMask key="keyEquivalentModifierMask"/>
++                                <menu key="submenu" title="Substitutions" id="FeM-D8-WVr">
++                                    <items>
++                                        <menuItem title="Show Substitutions" id="z6F-FW-3nz">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="orderFrontSubstitutionsPanel:" target="-1" id="oku-mr-iSq"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem isSeparatorItem="YES" id="gPx-C9-uUO"/>
++                                        <menuItem title="Smart Copy/Paste" id="9yt-4B-nSM">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="toggleSmartInsertDelete:" target="-1" id="3IJ-Se-DZD"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Smart Quotes" id="hQb-2v-fYv">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="toggleAutomaticQuoteSubstitution:" target="-1" id="ptq-xd-QOA"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Smart Dashes" id="rgM-f4-ycn">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="toggleAutomaticDashSubstitution:" target="-1" id="oCt-pO-9gS"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Smart Links" id="cwL-P1-jid">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="toggleAutomaticLinkDetection:" target="-1" id="Gip-E3-Fov"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Data Detectors" id="tRr-pd-1PS">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="toggleAutomaticDataDetection:" target="-1" id="R1I-Nq-Kbl"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Text Replacement" id="HFQ-gK-NFA">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="toggleAutomaticTextReplacement:" target="-1" id="DvP-Fe-Py6"/>
++                                            </connections>
++                                        </menuItem>
++                                    </items>
++                                </menu>
++                            </menuItem>
++                            <menuItem title="Transformations" id="2oI-Rn-ZJC">
++                                <modifierMask key="keyEquivalentModifierMask"/>
++                                <menu key="submenu" title="Transformations" id="c8a-y6-VQd">
++                                    <items>
++                                        <menuItem title="Make Upper Case" id="vmV-6d-7jI">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="uppercaseWord:" target="-1" id="sPh-Tk-edu"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Make Lower Case" id="d9M-CD-aMd">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="lowercaseWord:" target="-1" id="iUZ-b5-hil"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Capitalize" id="UEZ-Bs-lqG">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="capitalizeWord:" target="-1" id="26H-TL-nsh"/>
++                                            </connections>
++                                        </menuItem>
++                                    </items>
++                                </menu>
++                            </menuItem>
++                            <menuItem title="Speech" id="xrE-MZ-jX0">
++                                <modifierMask key="keyEquivalentModifierMask"/>
++                                <menu key="submenu" title="Speech" id="3rS-ZA-NoH">
++                                    <items>
++                                        <menuItem title="Start Speaking" id="Ynk-f8-cLZ">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="startSpeaking:" target="-1" id="654-Ng-kyl"/>
++                                            </connections>
++                                        </menuItem>
++                                        <menuItem title="Stop Speaking" id="Oyz-dy-DGm">
++                                            <modifierMask key="keyEquivalentModifierMask"/>
++                                            <connections>
++                                                <action selector="stopSpeaking:" target="-1" id="dX8-6p-jy9"/>
++                                            </connections>
++                                        </menuItem>
++                                    </items>
++                                </menu>
++                            </menuItem>
++                        </items>
++                    </menu>
++                </menuItem>
++                <menuItem title="View" id="H8h-7b-M4v">
++                    <modifierMask key="keyEquivalentModifierMask"/>
++                    <menu key="submenu" title="View" id="HyV-fh-RgO">
++                        <items>
++                            <menuItem title="Enter Full Screen" keyEquivalent="f" id="4J7-dP-txa">
++                                <modifierMask key="keyEquivalentModifierMask" control="YES" command="YES"/>
++                                <connections>
++                                    <action selector="toggleFullScreen:" target="-1" id="dU3-MA-1Rq"/>
++                                </connections>
++                            </menuItem>
++                        </items>
++                    </menu>
++                </menuItem>
++                <menuItem title="Window" id="aUF-d1-5bR">
++                    <modifierMask key="keyEquivalentModifierMask"/>
++                    <menu key="submenu" title="Window" systemMenu="window" id="Td7-aD-5lo">
++                        <items>
++                            <menuItem title="Minimize" keyEquivalent="m" id="OY7-WF-poV">
++                                <connections>
++                                    <action selector="performMiniaturize:" target="-1" id="VwT-WD-YPe"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem title="Zoom" id="R4o-n2-Eq4">
++                                <modifierMask key="keyEquivalentModifierMask"/>
++                                <connections>
++                                    <action selector="performZoom:" target="-1" id="DIl-cC-cCs"/>
++                                </connections>
++                            </menuItem>
++                            <menuItem isSeparatorItem="YES" id="eu3-7i-yIM"/>
++                            <menuItem title="Bring All to Front" id="LE2-aR-0XJ">
++                                <modifierMask key="keyEquivalentModifierMask"/>
++                                <connections>
++                                    <action selector="arrangeInFront:" target="-1" id="DRN-fu-gQh"/>
++                                </connections>
++                            </menuItem>
++                        </items>
++                    </menu>
++                </menuItem>
++                <menuItem title="Help" id="EPT-qC-fAb">
++                    <modifierMask key="keyEquivalentModifierMask"/>
++                    <menu key="submenu" title="Help" systemMenu="help" id="rJ0-wn-3NY"/>
++                </menuItem>
++            </items>
++            <point key="canvasLocation" x="142" y="-258"/>
++        </menu>
++        <window title="APP_NAME" allowsToolTipsWhenApplicationIsInactive="NO" autorecalculatesKeyViewLoop="NO" releasedWhenClosed="NO" animationBehavior="default" id="QvC-M9-y7g" customClass="MainFlutterWindow" customModule="Runner" customModuleProvider="target">
++            <windowStyleMask key="styleMask" titled="YES" closable="YES" miniaturizable="YES" resizable="YES"/>
++            <rect key="contentRect" x="335" y="390" width="1440" height="900"/>
++            <rect key="screenRect" x="0.0" y="0.0" width="2560" height="1577"/>
++            <view key="contentView" wantsLayer="YES" id="EiT-Mj-1SZ">
++                <rect key="frame" x="0.0" y="0.0" width="800" height="600"/>
++                <autoresizingMask key="autoresizingMask"/>
++            </view>
++        </window>
++    </objects>
++</document>
+diff --git a/apps/floor_planner/macos/Runner/Configs/AppInfo.xcconfig b/apps/floor_planner/macos/Runner/Configs/AppInfo.xcconfig
+new file mode 100644
+index 0000000..e0f2a2c
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner/Configs/AppInfo.xcconfig
+@@ -0,0 +1,14 @@
++// Application-level settings for the Runner target.
++//
++// This may be replaced with something auto-generated from metadata (e.g., pubspec.yaml) in the
++// future. If not, the values below would default to using the project name when this becomes a
++// 'flutter create' template.
++
++// The application's name. By default this is also the title of the Flutter window.
++PRODUCT_NAME = floor_planner
++
++// The application's bundle identifier
++PRODUCT_BUNDLE_IDENTIFIER = dev.jetcad.floorPlanner
++
++// The copyright displayed in application information
++PRODUCT_COPYRIGHT = Copyright © 2026 dev.jetcad. All rights reserved.
+diff --git a/apps/floor_planner/macos/Runner/Configs/Debug.xcconfig b/apps/floor_planner/macos/Runner/Configs/Debug.xcconfig
+new file mode 100644
+index 0000000..36b0fd9
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner/Configs/Debug.xcconfig
+@@ -0,0 +1,2 @@
++#include "../../Flutter/Flutter-Debug.xcconfig"
++#include "Warnings.xcconfig"
+diff --git a/apps/floor_planner/macos/Runner/Configs/Release.xcconfig b/apps/floor_planner/macos/Runner/Configs/Release.xcconfig
+new file mode 100644
+index 0000000..dff4f49
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner/Configs/Release.xcconfig
+@@ -0,0 +1,2 @@
++#include "../../Flutter/Flutter-Release.xcconfig"
++#include "Warnings.xcconfig"
+diff --git a/apps/floor_planner/macos/Runner/Configs/Warnings.xcconfig b/apps/floor_planner/macos/Runner/Configs/Warnings.xcconfig
+new file mode 100644
+index 0000000..42bcbf4
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner/Configs/Warnings.xcconfig
+@@ -0,0 +1,13 @@
++WARNING_CFLAGS = -Wall -Wconditional-uninitialized -Wnullable-to-nonnull-conversion -Wmissing-method-return-type -Woverlength-strings
++GCC_WARN_UNDECLARED_SELECTOR = YES
++CLANG_UNDEFINED_BEHAVIOR_SANITIZER_NULLABILITY = YES
++CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE
++CLANG_WARN__DUPLICATE_METHOD_MATCH = YES
++CLANG_WARN_PRAGMA_PACK = YES
++CLANG_WARN_STRICT_PROTOTYPES = YES
++CLANG_WARN_COMMA = YES
++GCC_WARN_STRICT_SELECTOR_MATCH = YES
++CLANG_WARN_OBJC_REPEATED_USE_OF_WEAK = YES
++CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES
++GCC_WARN_SHADOW = YES
++CLANG_WARN_UNREACHABLE_CODE = YES
+diff --git a/apps/floor_planner/macos/Runner/DebugProfile.entitlements b/apps/floor_planner/macos/Runner/DebugProfile.entitlements
+new file mode 100644
+index 0000000..dddb8a3
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner/DebugProfile.entitlements
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>com.apple.security.app-sandbox</key>
++	<true/>
++	<key>com.apple.security.cs.allow-jit</key>
++	<true/>
++	<key>com.apple.security.network.server</key>
++	<true/>
++</dict>
++</plist>
+diff --git a/apps/floor_planner/macos/Runner/Info.plist b/apps/floor_planner/macos/Runner/Info.plist
+new file mode 100644
+index 0000000..4789daa
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner/Info.plist
+@@ -0,0 +1,32 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>CFBundleDevelopmentRegion</key>
++	<string>$(DEVELOPMENT_LANGUAGE)</string>
++	<key>CFBundleExecutable</key>
++	<string>$(EXECUTABLE_NAME)</string>
++	<key>CFBundleIconFile</key>
++	<string></string>
++	<key>CFBundleIdentifier</key>
++	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
++	<key>CFBundleInfoDictionaryVersion</key>
++	<string>6.0</string>
++	<key>CFBundleName</key>
++	<string>$(PRODUCT_NAME)</string>
++	<key>CFBundlePackageType</key>
++	<string>APPL</string>
++	<key>CFBundleShortVersionString</key>
++	<string>$(FLUTTER_BUILD_NAME)</string>
++	<key>CFBundleVersion</key>
++	<string>$(FLUTTER_BUILD_NUMBER)</string>
++	<key>LSMinimumSystemVersion</key>
++	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
++	<key>NSHumanReadableCopyright</key>
++	<string>$(PRODUCT_COPYRIGHT)</string>
++	<key>NSMainNibFile</key>
++	<string>MainMenu</string>
++	<key>NSPrincipalClass</key>
++	<string>NSApplication</string>
++</dict>
++</plist>
+diff --git a/apps/floor_planner/macos/Runner/MainFlutterWindow.swift b/apps/floor_planner/macos/Runner/MainFlutterWindow.swift
+new file mode 100644
+index 0000000..3cc05eb
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner/MainFlutterWindow.swift
+@@ -0,0 +1,15 @@
++import Cocoa
++import FlutterMacOS
++
++class MainFlutterWindow: NSWindow {
++  override func awakeFromNib() {
++    let flutterViewController = FlutterViewController()
++    let windowFrame = self.frame
++    self.contentViewController = flutterViewController
++    self.setFrame(windowFrame, display: true)
++
++    RegisterGeneratedPlugins(registry: flutterViewController)
++
++    super.awakeFromNib()
++  }
++}
+diff --git a/apps/floor_planner/macos/Runner/Release.entitlements b/apps/floor_planner/macos/Runner/Release.entitlements
+new file mode 100644
+index 0000000..852fa1a
+--- /dev/null
++++ b/apps/floor_planner/macos/Runner/Release.entitlements
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
++<plist version="1.0">
++<dict>
++	<key>com.apple.security.app-sandbox</key>
++	<true/>
++</dict>
++</plist>
+diff --git a/apps/floor_planner/macos/RunnerTests/RunnerTests.swift b/apps/floor_planner/macos/RunnerTests/RunnerTests.swift
+new file mode 100644
+index 0000000..61f3bd1
+--- /dev/null
++++ b/apps/floor_planner/macos/RunnerTests/RunnerTests.swift
+@@ -0,0 +1,12 @@
++import Cocoa
++import FlutterMacOS
++import XCTest
++
++class RunnerTests: XCTestCase {
++
++  func testExample() {
++    // If you add code to the Runner application, consider adding tests here.
++    // See https://developer.apple.com/documentation/xctest for more information about using XCTest.
++  }
++
++}
+diff --git a/apps/floor_planner/pubspec.yaml b/apps/floor_planner/pubspec.yaml
+new file mode 100644
+index 0000000..aacfba0
+--- /dev/null
++++ b/apps/floor_planner/pubspec.yaml
+@@ -0,0 +1,29 @@
++name: floor_planner
++description: >-
++  The floor planner product application. Hosts a DraftCanvas behind a
++  CameraGestureDetector, with empty chrome slots that later sub-projects
++  fill. Not an instrument: the measurement harness is apps/dev_harness_2d.
++publish_to: none
++version: 0.0.1
++resolution: workspace
++
++environment:
++  sdk: ^3.5.0
++  flutter: ">=3.24.0"
++
++dependencies:
++  flutter:
++    sdk: flutter
++  jet_cad_2d:
++    path: ../../packages/jet_cad_2d
++  jet_cad_2d_flutter:
++    path: ../../packages/jet_cad_2d_flutter
++  vector_math: ^2.2.0
++
++dev_dependencies:
++  flutter_test:
++    sdk: flutter
++  flutter_lints: ^6.0.0
++
++flutter:
++  uses-material-design: true
+diff --git a/apps/floor_planner/web/favicon.png b/apps/floor_planner/web/favicon.png
+new file mode 100644
+index 0000000..8aaa46a
+Binary files /dev/null and b/apps/floor_planner/web/favicon.png differ
+diff --git a/apps/floor_planner/web/icons/Icon-192.png b/apps/floor_planner/web/icons/Icon-192.png
+new file mode 100644
+index 0000000..b749bfe
+Binary files /dev/null and b/apps/floor_planner/web/icons/Icon-192.png differ
+diff --git a/apps/floor_planner/web/icons/Icon-512.png b/apps/floor_planner/web/icons/Icon-512.png
+new file mode 100644
+index 0000000..88cfd48
+Binary files /dev/null and b/apps/floor_planner/web/icons/Icon-512.png differ
+diff --git a/apps/floor_planner/web/icons/Icon-maskable-192.png b/apps/floor_planner/web/icons/Icon-maskable-192.png
+new file mode 100644
+index 0000000..eb9b4d7
+Binary files /dev/null and b/apps/floor_planner/web/icons/Icon-maskable-192.png differ
+diff --git a/apps/floor_planner/web/icons/Icon-maskable-512.png b/apps/floor_planner/web/icons/Icon-maskable-512.png
+new file mode 100644
+index 0000000..d69c566
+Binary files /dev/null and b/apps/floor_planner/web/icons/Icon-maskable-512.png differ
+diff --git a/apps/floor_planner/web/index.html b/apps/floor_planner/web/index.html
+new file mode 100644
+index 0000000..d3399ed
+--- /dev/null
++++ b/apps/floor_planner/web/index.html
+@@ -0,0 +1,46 @@
++<!DOCTYPE html>
++<html>
++<head>
++  <!--
++    If you are serving your web app in a path other than the root, change the
++    href value below to reflect the base path you are serving from.
++
++    The path provided below has to start and end with a slash "/" in order for
++    it to work correctly.
++
++    For more details:
++    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
++
++    This is a placeholder for base href that will be replaced by the value of
++    the `--base-href` argument provided to `flutter build`.
++  -->
++  <base href="$FLUTTER_BASE_HREF">
++
++  <meta charset="UTF-8">
++  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
++  <meta name="description" content="A new Flutter project.">
++
++  <!-- iOS meta tags & icons -->
++  <meta name="mobile-web-app-capable" content="yes">
++  <meta name="apple-mobile-web-app-status-bar-style" content="black">
++  <meta name="apple-mobile-web-app-title" content="floor_planner">
++  <link rel="apple-touch-icon" href="icons/Icon-192.png">
++
++  <!-- Favicon -->
++  <link rel="icon" type="image/png" href="favicon.png"/>
++
++  <title>floor_planner</title>
++  <link rel="manifest" href="manifest.json">
++</head>
++<body>
++  <!--
++    You can customize the "flutter_bootstrap.js" script.
++    This is useful to provide a custom configuration to the Flutter loader
++    or to give the user feedback during the initialization process.
++
++    For more details:
++    * https://docs.flutter.dev/platform-integration/web/initialization
++  -->
++  <script src="flutter_bootstrap.js" async></script>
++</body>
++</html>
+diff --git a/apps/floor_planner/web/manifest.json b/apps/floor_planner/web/manifest.json
+new file mode 100644
+index 0000000..07be553
+--- /dev/null
++++ b/apps/floor_planner/web/manifest.json
+@@ -0,0 +1,35 @@
++{
++    "name": "floor_planner",
++    "short_name": "floor_planner",
++    "start_url": ".",
++    "display": "standalone",
++    "background_color": "#0175C2",
++    "theme_color": "#0175C2",
++    "description": "A new Flutter project.",
++    "orientation": "portrait-primary",
++    "prefer_related_applications": false,
++    "icons": [
++        {
++            "src": "icons/Icon-192.png",
++            "sizes": "192x192",
++            "type": "image/png"
++        },
++        {
++            "src": "icons/Icon-512.png",
++            "sizes": "512x512",
++            "type": "image/png"
++        },
++        {
++            "src": "icons/Icon-maskable-192.png",
++            "sizes": "192x192",
++            "type": "image/png",
++            "purpose": "maskable"
++        },
++        {
++            "src": "icons/Icon-maskable-512.png",
++            "sizes": "512x512",
++            "type": "image/png",
++            "purpose": "maskable"
++        }
++    ]
++}
+diff --git a/pubspec.yaml b/pubspec.yaml
+index 5fbe664..5634640 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -1,10 +1,11 @@
+ name: jet_cad_workspace
+ publish_to: none
+ environment:
+   sdk: ^3.5.0
+ workspace:
+   - packages/jet_cad
+   - packages/jet_cad_2d
+   - packages/jet_cad_2d_flutter
+   - apps/dev_harness
+   - apps/dev_harness_2d
++  - apps/floor_planner

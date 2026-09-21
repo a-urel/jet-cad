@@ -1,0 +1,33 @@
+# Review package: 38d8c9b..5dadd17
+
+## Commits
+5dadd17 test(floor_planner): drop the interpolation braces the analyzer flags
+
+## Files changed
+ apps/floor_planner/test/startup_plan_test.dart | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/apps/floor_planner/test/startup_plan_test.dart b/apps/floor_planner/test/startup_plan_test.dart
+index 5ca6f58..6ecd855 100644
+--- a/apps/floor_planner/test/startup_plan_test.dart
++++ b/apps/floor_planner/test/startup_plan_test.dart
+@@ -42,16 +42,16 @@ void main() {
+   // Spec D4's owed check: the constants against the document's own units.
+   // At 1440 x 900 the fit scale is 0.95 * min(1440 / 14000, 900 / 9000) --
+   // 0.095 px/mm -- so kMinScale allows ~95x further out and kMaxScale
+   // ~1000x further in. Both decades are needed by a CAD user; neither is
+   // absurd. The numbers are printed so the results note can quote them.
+   test('the clamp constants bracket the fitted scale by decades', () {
+     final doc = startupPlan(measurer);
+     final fit = ViewportTransform.fit(doc.extents, const Size(1440, 900));
+     // ignore: avoid_print
+     print('STARTUP fit scale ${fit.scale} px/mm; '
+-        'min ${kMinScale} (${fit.scale / kMinScale}x out), '
+-        'max ${kMaxScale} (${kMaxScale / fit.scale}x in)');
++        'min $kMinScale (${fit.scale / kMinScale}x out), '
++        'max $kMaxScale (${kMaxScale / fit.scale}x in)');
+     expect(fit.scale / kMinScale, greaterThan(10));
+     expect(kMaxScale / fit.scale, greaterThan(100));
+   });
+ }

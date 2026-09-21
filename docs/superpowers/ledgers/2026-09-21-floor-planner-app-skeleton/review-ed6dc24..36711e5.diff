@@ -1,0 +1,173 @@
+# Review package: ed6dc24..36711e5
+
+## Commits
+36711e5 refactor(gestures): rename ScrollAction to ScrollSignalAction, clear of Flutter's class
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/camera_gesture_detector.dart | 13 +++++--------
+ packages/jet_cad_2d_flutter/lib/src/gesture_policy.dart     |  8 ++++----
+ packages/jet_cad_2d_flutter/test/gesture_policy_test.dart   |  4 ++--
+ 3 files changed, 11 insertions(+), 14 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/camera_gesture_detector.dart b/packages/jet_cad_2d_flutter/lib/src/camera_gesture_detector.dart
+index 4adcc46..e01d882 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/camera_gesture_detector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/camera_gesture_detector.dart
+@@ -1,16 +1,13 @@
+ import 'package:flutter/gestures.dart';
+ import 'package:flutter/services.dart' show HardwareKeyboard;
+-// `widgets.dart` exports its own `ScrollAction` (an `Action<ScrollIntent>`
+-// for keyboard scrolling), which collides with `GesturePolicy`'s
+-// `ScrollAction` enum used unqualified below.
+-import 'package:flutter/widgets.dart' hide ScrollAction;
++import 'package:flutter/widgets.dart';
+ 
+ import 'camera_controller.dart';
+ import 'gesture_policy.dart';
+ 
+ /// Pans and zooms a [CameraController] from pointer input, wrapping the
+ /// view it drives.
+ ///
+ /// A `Listener`, not a `GestureDetector`: the events this needs
+ /// (`onPointerSignal`, `onPointerPanZoomStart/Update`) are `Listener`'s, and
+ /// the arena a `GestureDetector` joins would have to be fought for nothing.
+@@ -87,33 +84,33 @@ class _CameraGestureDetectorState extends State<CameraGestureDetector> {
+   void _onSignal(PointerSignalEvent event) {
+     final camera = widget.camera;
+     if (event is PointerScaleEvent) {
+       camera.zoomAt(event.localPosition, event.scale);
+       return;
+     }
+     if (event is! PointerScrollEvent) return;
+     final policy = widget.policy;
+     final keyboard = HardwareKeyboard.instance;
+     final action = keyboard.isControlPressed || keyboard.isMetaPressed
+-        ? ScrollAction.zoom
++        ? ScrollSignalAction.zoom
+         : event.kind == PointerDeviceKind.trackpad
+-            ? ScrollAction.pan
++            ? ScrollSignalAction.pan
+             : policy.mouseWheel;
+     switch (action) {
+-      case ScrollAction.zoom:
++      case ScrollSignalAction.zoom:
+         // Scroll up is negative dy on every platform Flutter reports.
+         camera.zoomAt(
+             event.localPosition,
+             event.scrollDelta.dy < 0
+                 ? policy.wheelZoomStep
+                 : 1 / policy.wheelZoomStep);
+-      case ScrollAction.pan:
++      case ScrollSignalAction.pan:
+         // `scrollDelta` is content-scroll: positive dy is "scroll down", the
+         // content moves up, so the camera pans by the negation.
+         camera.panBy(-event.scrollDelta);
+     }
+   }
+ 
+   @override
+   Widget build(BuildContext context) => Listener(
+         behavior: HitTestBehavior.opaque,
+         onPointerPanZoomStart: _onPanZoomStart,
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gesture_policy.dart b/packages/jet_cad_2d_flutter/lib/src/gesture_policy.dart
+index 5f7ef51..9c1a517 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gesture_policy.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gesture_policy.dart
+@@ -1,18 +1,18 @@
+ import 'package:flutter/foundation.dart' show immutable, kIsWeb;
+ import 'package:flutter/gestures.dart' show kMiddleMouseButton;
+ 
+ import 'gesture_policy_platform_stub.dart'
+     if (dart.library.js_interop) 'gesture_policy_platform_web.dart';
+ 
+ /// What a bare scroll signal does to the camera.
+-enum ScrollAction { pan, zoom }
++enum ScrollSignalAction { pan, zoom }
+ 
+ /// The per-platform half of camera gestures, as a value the widget is given
+ /// rather than a `kIsWeb` it reads.
+ ///
+ /// `kIsWeb` is a compile-time constant: a widget that branched on it inline
+ /// could never run its web arm under a `flutter test` on macOS, and no
+ /// mutation planted there could go red. So the widget takes one of these,
+ /// tests pass [wheelZooms] and [wheelPans] explicitly, and [forPlatform] is
+ /// the one place the constant appears.
+ ///
+@@ -26,41 +26,41 @@ enum ScrollAction { pan, zoom }
+ @immutable
+ class GesturePolicy {
+   const GesturePolicy({
+     required this.mouseWheel,
+     this.wheelZoomStep = 1.1,
+     this.panButtons = kMiddleMouseButton,
+   });
+ 
+   /// What a `PointerScrollEvent` of any kind other than trackpad, with no
+   /// modifier held, means.
+-  final ScrollAction mouseWheel;
++  final ScrollSignalAction mouseWheel;
+ 
+   /// Multiplicative step per wheel notch on the `PointerScrollEvent` zoom
+   /// path. A `PointerScaleEvent` carries its own factor and ignores this.
+   final double wheelZoomStep;
+ 
+   /// The `PointerEvent.buttons` mask a drag must intersect to pan.
+   final int panButtons;
+ 
+   /// Desktop embedders and Chromium/WebKit browsers: the wheel zooms.
+   ///
+   /// On desktop the trackpad never arrives as a scroll signal (it is a
+   /// `PointerPanZoom*` sequence), so a scroll signal is a wheel. In a
+   /// Chromium or WebKit browser the engine tags a trackpad scroll
+   /// `kind: trackpad` and the widget pans it before this field is consulted.
+-  static const wheelZooms = GesturePolicy(mouseWheel: ScrollAction.zoom);
++  static const wheelZooms = GesturePolicy(mouseWheel: ScrollSignalAction.zoom);
+ 
+   /// Firefox: every wheel event is `kind: mouse` because the engine's
+   /// heuristic cannot tell a trackpad there, so the wheel pans -- zooming on
+   /// it would take pan-by-scroll away from every Firefox trackpad user.
+-  static const wheelPans = GesturePolicy(mouseWheel: ScrollAction.pan);
++  static const wheelPans = GesturePolicy(mouseWheel: ScrollSignalAction.pan);
+ 
+   /// The browser question, answered. Pure, and tested on the VM.
+   static GesturePolicy forBrowser({required bool firefox}) =>
+       firefox ? wheelPans : wheelZooms;
+ 
+   /// The policy for the platform this code is running on.
+   ///
+   /// **The only place `kIsWeb` appears in this package's gesture code.**
+   /// `isFirefoxBrowser` comes from a conditional import: `dart:ui_web` on
+   /// web, `false` elsewhere.
+diff --git a/packages/jet_cad_2d_flutter/test/gesture_policy_test.dart b/packages/jet_cad_2d_flutter/test/gesture_policy_test.dart
+index d953fce..d8741c8 100644
+--- a/packages/jet_cad_2d_flutter/test/gesture_policy_test.dart
++++ b/packages/jet_cad_2d_flutter/test/gesture_policy_test.dart
+@@ -1,25 +1,25 @@
+ import 'package:flutter/gestures.dart' show kMiddleMouseButton;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ void main() {
+   test('wheelZooms: a mouse-kind scroll zooms, 1.1 per notch, middle drag', () {
+     const p = GesturePolicy.wheelZooms;
+-    expect(p.mouseWheel, ScrollAction.zoom);
++    expect(p.mouseWheel, ScrollSignalAction.zoom);
+     expect(p.wheelZoomStep, 1.1);
+     expect(p.panButtons, kMiddleMouseButton);
+   });
+ 
+   test('wheelPans: a mouse-kind scroll pans; the rest is the same', () {
+     const p = GesturePolicy.wheelPans;
+-    expect(p.mouseWheel, ScrollAction.pan);
++    expect(p.mouseWheel, ScrollSignalAction.pan);
+     expect(p.wheelZoomStep, GesturePolicy.wheelZooms.wheelZoomStep);
+     expect(p.panButtons, GesturePolicy.wheelZooms.panButtons);
+   });
+ 
+   // The half of `forPlatform()` the VM can reach (spec, M-01q). The other
+   // half -- `kIsWeb` and the `dart:ui_web` import -- is compile-time and is
+   // covered by criterion 12's look in Chrome/Safari and in Firefox.
+   test('forBrowser: Firefox gets wheelPans, every other engine wheelZooms', () {
+     expect(
+         GesturePolicy.forBrowser(firefox: true), same(GesturePolicy.wheelPans));

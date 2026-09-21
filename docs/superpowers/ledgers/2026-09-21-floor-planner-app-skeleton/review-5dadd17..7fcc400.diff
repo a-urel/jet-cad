@@ -1,0 +1,235 @@
+# Review package: 5dadd17..7fcc400
+
+## Commits
+7fcc400 feat(floor_planner): the shell, the view, three empty chrome slots; builds for macOS and web
+
+## Files changed
+ apps/floor_planner/lib/main.dart                | 90 +++++++++++++++++++++++--
+ apps/floor_planner/lib/planner_view.dart        | 56 +++++++++++++++
+ apps/floor_planner/test/planner_shell_test.dart | 49 ++++++++++++++
+ 3 files changed, 189 insertions(+), 6 deletions(-)
+
+## Diff
+diff --git a/apps/floor_planner/lib/main.dart b/apps/floor_planner/lib/main.dart
+index ab97320..adcaf7a 100644
+--- a/apps/floor_planner/lib/main.dart
++++ b/apps/floor_planner/lib/main.dart
+@@ -1,17 +1,95 @@
+ import 'package:flutter/material.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import 'planner_view.dart';
++import 'startup_plan.dart';
+ 
+-// Scaffold placeholder. Task 8 replaces this file with the real shell; it
+-// exists only so the generated project builds under the workspace's
+-// `sdk: ^3.5.0` floor, which the generator's own dot-shorthand syntax
+-// does not.
+ void main() => runApp(const FloorPlannerApp());
+ 
+ class FloorPlannerApp extends StatelessWidget {
+   const FloorPlannerApp({super.key});
+ 
+   @override
+-  Widget build(BuildContext context) => const MaterialApp(
++  Widget build(BuildContext context) => MaterialApp(
+         title: 'Floor planner',
+-        home: Scaffold(body: Center(child: Text('floor_planner'))),
++        debugShowCheckedModeBanner: false,
++        theme: ThemeData(colorSchemeSeed: const Color(0xFF2266CC)),
++        home: const PlannerShell(),
+       );
+ }
++
++/// Owns the document, the index and the camera for the window's lifetime,
++/// and lays out the chrome slots -- a top bar, a left panel and a right
++/// panel, sized and empty -- so sub-projects 04, 05 and 12 add to a layout
++/// rather than invent one.
++class PlannerShell extends StatefulWidget {
++  const PlannerShell({super.key});
++
++  @override
++  State<PlannerShell> createState() => _PlannerShellState();
++}
++
++class _PlannerShellState extends State<PlannerShell> {
++  final FlutterTextMeasurer _measurer = FlutterTextMeasurer();
++  late final DraftDocument _document = startupPlan(_measurer);
++  late final SpatialIndex _index = SpatialIndex(_document);
++  // Fitted to the nominal window; PlannerView re-fits once at the real size.
++  late final CameraController _camera = CameraController(
++    ViewportTransform.fit(_document.extents, const Size(1440, 900)),
++    minScale: kMinScale,
++    maxScale: kMaxScale,
++  );
++  final GesturePolicy _policy = GesturePolicy.forPlatform();
++
++  @override
++  void dispose() {
++    _camera.dispose();
++    _index.dispose();
++    _measurer.clear();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final scheme = Theme.of(context).colorScheme;
++    return Scaffold(
++      body: Column(
++        children: [
++          Container(
++            key: const Key('chrome-top'),
++            height: 44,
++            color: scheme.surfaceContainer,
++          ),
++          Expanded(
++            child: Row(
++              children: [
++                Container(
++                  key: const Key('chrome-left'),
++                  width: 240,
++                  color: scheme.surfaceContainerLow,
++                ),
++                Expanded(
++                  child: ColoredBox(
++                    color: scheme.surface,
++                    child: PlannerView(
++                      document: _document,
++                      index: _index,
++                      camera: _camera,
++                      policy: _policy,
++                    ),
++                  ),
++                ),
++                Container(
++                  key: const Key('chrome-right'),
++                  width: 280,
++                  color: scheme.surfaceContainerLow,
++                ),
++              ],
++            ),
++          ),
++        ],
++      ),
++    );
++  }
++}
+diff --git a/apps/floor_planner/lib/planner_view.dart b/apps/floor_planner/lib/planner_view.dart
+new file mode 100644
+index 0000000..7a905c2
+--- /dev/null
++++ b/apps/floor_planner/lib/planner_view.dart
+@@ -0,0 +1,56 @@
++import 'package:flutter/widgets.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++/// The drawing area: a [CameraGestureDetector] over a [DraftCanvas].
++///
++/// Tiles off, `backend` unset (spec D6): a floor plan is 500-5,000
++/// entities, and the resident backend cannot run on web, which this product
++/// targets. Neither is a default a later sub-project may flip without a
++/// measurement.
++class PlannerView extends StatefulWidget {
++  const PlannerView({
++    super.key,
++    required this.document,
++    required this.index,
++    required this.camera,
++    required this.policy,
++  });
++
++  final DraftDocument document;
++  final SpatialIndex index;
++  final CameraController camera;
++  final GesturePolicy policy;
++
++  @override
++  State<PlannerView> createState() => _PlannerViewState();
++}
++
++class _PlannerViewState extends State<PlannerView> {
++  /// Ruling 01-2: the camera is fitted once, to the size the view really
++  /// got, before the canvas under it has listened to anything.
++  bool _fitted = false;
++
++  @override
++  Widget build(BuildContext context) => LayoutBuilder(
++        builder: (context, constraints) {
++          if (!_fitted &&
++              constraints.biggest.width > 0 &&
++              constraints.biggest.height > 0) {
++            _fitted = true;
++            widget.camera.value = ViewportTransform.fit(
++                widget.document.extents, constraints.biggest);
++          }
++          return CameraGestureDetector(
++            camera: widget.camera,
++            policy: widget.policy,
++            child: DraftCanvas(
++              document: widget.document,
++              index: widget.index,
++              camera: widget.camera,
++              tiles: false,
++            ),
++          );
++        },
++      );
++}
+diff --git a/apps/floor_planner/test/planner_shell_test.dart b/apps/floor_planner/test/planner_shell_test.dart
+new file mode 100644
+index 0000000..d00ba88
+--- /dev/null
++++ b/apps/floor_planner/test/planner_shell_test.dart
+@@ -0,0 +1,49 @@
++import 'package:floor_planner/main.dart';
++import 'package:floor_planner/planner_view.dart';
++import 'package:floor_planner/startup_plan.dart';
++import 'package:flutter/widgets.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++void main() {
++  testWidgets('the shell shows a canvas over a non-empty, off-origin plan',
++      (tester) async {
++    await tester.pumpWidget(const FloorPlannerApp());
++    await tester.pump();
++
++    expect(find.byType(DraftCanvas), findsOneWidget);
++    expect(find.byType(CameraGestureDetector), findsOneWidget);
++    final view = tester.widget<PlannerView>(find.byType(PlannerView));
++    expect(view.document.entities.liveCount, greaterThanOrEqualTo(500));
++    expect(view.document.extents.minX, greaterThan(0));
++    expect(view.camera.minScale, kMinScale);
++    expect(view.camera.maxScale, kMaxScale);
++  });
++
++  // Ruling 01-2: fitted once to the size the view actually got, so the plan
++  // is fully visible and the camera is not the nominal 1440 x 900 fit.
++  testWidgets('the camera is fitted to the real viewport on first layout',
++      (tester) async {
++    await tester.pumpWidget(const FloorPlannerApp());
++    await tester.pump();
++    final view = tester.widget<PlannerView>(find.byType(PlannerView));
++    final size = tester.getSize(find.byType(DraftCanvas));
++    final expected = ViewportTransform.fit(view.document.extents, size);
++    expect(view.camera.value.scale, closeTo(expected.scale, 1e-9));
++    expect(view.camera.value.worldToScreenMatrix.e,
++        closeTo(expected.worldToScreenMatrix.e, 1e-6));
++  });
++
++  testWidgets('the three chrome slots are laid out and empty', (tester) async {
++    await tester.pumpWidget(const FloorPlannerApp());
++    await tester.pump();
++    for (final key in const [
++      Key('chrome-top'),
++      Key('chrome-left'),
++      Key('chrome-right')
++    ]) {
++      expect(find.byKey(key), findsOneWidget);
++      expect(tester.getSize(find.byKey(key)).width, greaterThan(0));
++    }
++  });
++}

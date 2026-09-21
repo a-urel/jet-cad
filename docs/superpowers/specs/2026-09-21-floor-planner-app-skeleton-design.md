@@ -207,7 +207,7 @@ from `gpu_facade.dart`. A policy value is the same move, made at design time
 rather than retrofitted.
 
 ```dart
-enum ScrollAction { pan, zoom }
+enum ScrollSignalAction { pan, zoom }
 
 @immutable
 class GesturePolicy {
@@ -220,7 +220,7 @@ class GesturePolicy {
   /// What a `PointerScrollEvent` of `kind: mouse` (or any kind other than
   /// trackpad) with no modifier means. A trackpad-kind scroll signal pans
   /// under every policy; it is not a field.
-  final ScrollAction mouseWheel;
+  final ScrollSignalAction mouseWheel;
 
   /// Multiplicative step per wheel notch on the `PointerScrollEvent` zoom
   /// path. A `PointerScaleEvent` carries its own factor and ignores this.
@@ -228,10 +228,10 @@ class GesturePolicy {
   final int panButtons;
 
   /// Desktop embedders and Chromium/WebKit browsers: the wheel zooms.
-  static const wheelZooms = GesturePolicy(mouseWheel: ScrollAction.zoom);
+  static const wheelZooms = GesturePolicy(mouseWheel: ScrollSignalAction.zoom);
 
   /// Firefox: every wheel event is `kind: mouse`, so the wheel pans.
-  static const wheelPans = GesturePolicy(mouseWheel: ScrollAction.pan);
+  static const wheelPans = GesturePolicy(mouseWheel: ScrollSignalAction.pan);
 
   /// Pure, VM-testable: the browser question, answered.
   static GesturePolicy forBrowser({required bool firefox}) =>
@@ -244,6 +244,10 @@ class GesturePolicy {
       kIsWeb ? forBrowser(firefox: isFirefoxBrowser()) : wheelZooms;
 }
 ```
+
+Named `ScrollSignalAction`, not `ScrollAction`: Flutter's `widgets.dart`
+exports a class of that name and a consumer importing both could not name
+the enum (execution ruling, Task 4).
 
 **Why `dart:ui_web` and not a user-agent string.** The heuristic that tags a
 scroll event `kind: trackpad` gives up on Firefox by asking
@@ -293,6 +297,11 @@ held (`HardwareKeyboard` ctrl or meta) → zoom by `wheelZoomStep`; else
 pans under every policy, and only Firefox never produces one. A
 `PointerScaleEvent` zooms and a `PointerPanZoom*` sequence pans-and-zooms
 under every policy.
+
+**A scroll signal with `dy == 0` has no zoom direction.** A tilt wheel or a
+horizontal mouse scroll reports it; on the zoom arm it does nothing (it is
+not an unmarked zoom-out), on the pan arm it pans by `-dx` like any other.
+Found by the final review; mutant M-01r.
 
 **Misclassification is the engine's, accepted and named.** The heuristic can
 tag a trackpad flick `mouse` (a delta that happens to be a multiple of 120
@@ -406,6 +415,11 @@ units before freezing them** and record the check; a number chosen in a spec
 and never looked at through the window is exactly the kind of constant this
 repo has been burned by.
 
+The check was done 2026-09-21 in `startup_plan_test.dart`: at a 1440×900
+viewport the startup document fits at **0.095 px/mm**, with **95.0×**
+headroom out to `kMinScale = 0.001` and **1052.6×** headroom in to
+`kMaxScale = 100.0`. Both constants are unchanged.
+
 `zoomAt`'s existing guard — a non-finite or non-positive factor is ignored
 rather than applied, because it would make the matrix singular and `invert()`
 would throw inside the frame — stays, and the clamp is layered after it.
@@ -494,7 +508,7 @@ apps/floor_planner
   macos/                 generated; MainMenu.xib contentRect → 1440×900 (D7)
   web/                   generated, untouched (criterion 2)
   test/                  the startup document's off-origin / non-empty test
-  analysis_options.yaml  generated and NOT committed (CLAUDE.md)
+  analysis_options.yaml  generated, committed once at scaffold, never a rewrite (plan Ruling 01-1)
 
 packages/jet_cad_2d_flutter
   lib/src/camera_gesture_detector.dart          the widget          (new, exported)
@@ -561,8 +575,12 @@ The four from the roadmap, carried unchanged:
   cumulative value) where `event.localPanDelta` is meant. A three-update
   desktop scroll test goes red: the camera moves by the running sum's sum,
   not the sum.
-- **M-01b** — replace `factor / _gestureZoom` with `factor`. The pinch test
-  goes red.
+- **M-01b** — replace `factor / _gestureZoom` with `factor`. The pinch test —
+  which ramps the cumulative scale 1.2 → 1.5 → 2.0 and expects 2.0 — goes red
+  at 3.6. *(A constant-scale fixture cannot kill this one: the widget skips
+  an update whose scale equals the running value, so only the first of three
+  identical updates ever reaches `zoomAt`. Found by the mutant surviving on
+  its first shot.)*
 - **M-01c** — zoom about the viewport centre instead of `event.localPosition`.
   The wheel test goes red. Requires an off-centre focus.
 - **M-01d** — drop `onPointerPanZoomUpdate` entirely, keeping
@@ -620,6 +638,8 @@ New, and all of them exist because of the two findings above:
 - **M-01q** — make `GesturePolicy.forBrowser` return `wheelZooms` for
   `firefox: true`. The pure `forBrowser` test goes red. *(The half of
   `forPlatform()` the VM can reach.)*
+- **M-01r** — delete the `dy == 0` guard on the zoom arm. The
+  horizontal-notch test goes red.
 
 ### Cross-policy consistency, and what it cannot see
 
@@ -687,9 +707,10 @@ left open for this brainstorm, and closes it without owing a number.
 
 Two remain open, and neither blocks the plan:
 
-- **The exact clamp constants.** `0.001` and `100` are chosen against a CAD
-  range in the abstract. They are checked against the startup document's units
-  during execution and the check is recorded (D4).
+- ~~STRUCK~~ — **The exact clamp constants.** `0.001` and `100` are chosen
+  against a CAD range in the abstract. They are checked against the startup
+  document's units during execution and the check is recorded (D4). checked;
+  see the results note.
 - **Windows and Linux.** Both are desktop embedders and take
   `GesturePolicy.wheelZooms`, so nothing in the design is specific to macOS. But
   neither is built or looked at in this sub-project, and a trackpad on
