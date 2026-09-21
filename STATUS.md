@@ -882,11 +882,35 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 — has six of seven plans merged and Plan G (web) unwritten; its open items
 are below. The **product line** — a parametric floor planner, decomposed in
 [roadmap/00-README.md](roadmap/00-README.md) into thirteen sub-projects, each
-a brainstorm input, not a plan — has **nothing started**; its first is
-[roadmap/01-app-skeleton.md](roadmap/01-app-skeleton.md), and the README's
-"Since this folder was written" section says what Plans A–F changed for it.
-Nothing on either line blocks the other; the one coupling is that Plan G
-matters only if the product targets web.
+a brainstorm input, not a plan — **has started**: sub-project 01 was
+brainstormed with the human on 2026-09-21 and has a spec,
+[2026-09-21-floor-planner-app-skeleton-design.md](docs/superpowers/specs/2026-09-21-floor-planner-app-skeleton-design.md),
+**reviewed the same day by three independent reviewers (Claude, Codex, Copilot
+CLI) and revised to revision 2** — the review is
+[2026-09-21-app-skeleton-spec-review-r1.md](docs/superpowers/notes/2026-09-21-app-skeleton-spec-review-r1.md).
+The review's one blocker that reopened a decision (the web scroll rule: the
+engine *does* tag browser wheel events trackpad-vs-mouse by a heuristic,
+except on Firefox) was re-decided by the human as "wheel zooms and trackpad
+scroll pans on desktop and Chromium/WebKit; everything pans on Firefox". No
+plan yet. The other twelve have not started.
+
+**The web coupling is resolved and it went the expensive way.** This section
+used to say "Plan G matters only if the product targets web". **The human
+decided on 2026-09-21 that it does**, so **Plan G is on the critical path**:
+it is the seventh of the GPU-resident spec's seven plans, it is unwritten, and
+its web arm has never been run. It does not block 01 — 01's spec puts the
+product on the `vertices` sink, which `resolveBackend` already forces on web —
+but it blocks ever shipping `residentGpu` on any platform, because a product
+that must run on web cannot default to a backend that cannot compile there.
+
+01's spec also found two things worth carrying here. The harness **zooms** on
+two-finger scroll (`apps/dev_harness_2d/lib/main.dart:1228`) while the
+roadmap's exit criteria want it to **pan**, so 01 is not the pure lift the
+roadmap file calls it; and **Flutter web never emits `PointerPanZoom*` events
+at all** — a browser trackpad scroll and a mouse-wheel notch arrive as the
+same `PointerScrollEvent`, with `deltaMode` normalised away inside the engine,
+which makes "scroll pans, wheel zooms" unimplementable on web and inverts the
+macOS `fc05076` trap. Both are decided in the spec.
 
 **Plan F (rebuild triggers and the band) is MERGED, all ten tasks,
 `c5b8ee8..2535dce` merged `--no-ff` at `a8208d1` on 2026-09-06 — the human

@@ -248,7 +248,7 @@ cheap; learning it from a half-executed Plan is not.
 
 | # | Sub-project | Spec | Plan | Executed |
 |---|---|---|---|---|
-| 01 | app skeleton | — | — | — |
+| 01 | app skeleton | [2026-09-21](../docs/superpowers/specs/2026-09-21-floor-planner-app-skeleton-design.md) | — | — |
 | 02 | interaction core | — | — | — |
 | 03 | grips and transform | — | — | — |
 | 04 | page, grid, rulers | — | — | — |
@@ -262,14 +262,19 @@ cheap; learning it from a half-executed Plan is not.
 | 12 | app shell | — | — | — |
 | 13 | export and print | — | — | — |
 
-**Nothing has started** on these thirteen — still true on 2026-09-21. Update
+**01 has a spec as of 2026-09-21**; the other twelve have not started. Update
 this table as specs and plans land; `STATUS.md` at the repo root stays the
 authority on what is in flight. The render line's own plan table lives there,
 not here: six of seven merged, Plan G (web) unwritten, see the section above.
 
-**Two lines, one choice.** Nothing on the render line blocks 01, and 01 blocks
-nothing on the render line. The order between them is the human's call, with
-one coupling: Plan G matters only if the product targets web.
+**Two lines, and the choice between them is now partly made.** Nothing on the
+render line blocks 01, and 01 blocks nothing on the render line. But **the
+human decided on 2026-09-21 that the product targets web**, which resolves the
+one coupling in the render line's favour of urgency: **Plan G is on the
+critical path.** 01's spec closes the `residentGpu` question this file left
+open for its brainstorm — the product runs on the `vertices` sink, which is
+already the web default, so Plan G does not block 01; it blocks ever shipping
+`residentGpu` anywhere.
 
 ---
 
