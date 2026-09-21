@@ -119,7 +119,7 @@ class _CameraGestureDetectorState extends State<CameraGestureDetector> {
   /// learned behaviour later.
   void _onMove(PointerMoveEvent event) {
     if (event.buttons & widget.policy.panButtons != 0) {
-      widget.camera.panBy(event.delta);
+      widget.camera.panBy(event.localDelta);
     }
   }
 
