@@ -13,6 +13,11 @@ import 'tool.dart';
 /// Draws the selected and hovered outlines, then lets the active tool draw
 /// its own overlay — and never touches the drawing underneath.
 ///
+/// Named `…Painter` rather than the spec's `SelectionOverlay`: Flutter's own
+/// `SelectionOverlay` (text selection) is exported from
+/// `package:flutter/widgets.dart`, so an app that imports Material and this
+/// package's barrel would have to `hide` one of them at every consumer.
+///
 /// The overlay is a **second** `CustomPaint` inside its own
 /// `RepaintBoundary`, over `Listenable.merge([selection, tools, camera])`.
 /// That is the whole point of the split (spec criterion 6): a hover at
@@ -27,8 +32,8 @@ import 'tool.dart';
 /// by is carried by the matrix rather than by the paths, so no absolute world
 /// coordinate reaches `dart:ui`: at the generated corpus's x = 4.5e6 a
 /// float32 `ui.Path` would sit visibly beside the entity it outlines.
-class SelectionOverlay extends CustomPainter {
-  SelectionOverlay({
+class SelectionOverlayPainter extends CustomPainter {
+  SelectionOverlayPainter({
     required this.selection,
     required this.tools,
     required this.camera,
@@ -62,6 +67,15 @@ class SelectionOverlay extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     onPaintForTest?.call();
+    // A zero-size paint is a real state, not a theoretical one — see
+    // `ViewportTransform.fit`'s note on the layout passes that produce it.
+    // It must return *before* the rebase, because `visibleWorld(Size.zero)`
+    // collapses to a point, `rebaseOriginFor` answers the origin for a zero
+    // span, and `pathFor(key, zero)` would then rebuild every cached path in
+    // **absolute** world space and hand x = 4.5e6 to float32 `ui.Path` —
+    // undoing the rebase the cache exists for, and re-doing the rebuild on
+    // the next real frame.
+    if (size.isEmpty) return;
     final cam = camera.value;
     final origin = rebaseOriginFor(cam.visibleWorld(size));
     final m = cam.worldToScreenMatrix;
@@ -97,12 +111,19 @@ class SelectionOverlay extends CustomPainter {
     }
     canvas.restore();
 
-    // Back in screen space. A `point` entity has no extent, so its path is a
-    // lone `moveTo` and strokes nothing; its marker is a cross whose size is
-    // in pixels and therefore cannot live in the world-space cache. The two
-    // paints are re-stroked rather than replaced — `Canvas` serialises a
-    // paint at call time, so the world-space strokes above are already
-    // recorded at their own widths.
+    // Back in screen space, under its **own** clip: `restore` above popped
+    // the first one, and neither the point crosses nor the tool's overlay is
+    // bounded by the viewport on its own — a selected point just off screen
+    // puts its cross over whatever sibling widget sits beside the canvas.
+    //
+    // A `point` entity has no extent, so its path is a lone `moveTo` and
+    // strokes nothing; its marker is a cross whose size is in pixels and
+    // therefore cannot live in the world-space cache. The two paints are
+    // re-stroked rather than replaced — `Canvas` serialises a paint at call
+    // time, so the world-space strokes above are already recorded at their
+    // own widths.
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
     _selected.strokeWidth = kSelectionStrokePixels;
     _hover.strokeWidth = kHoverStrokePixels;
     for (final key in selection.keys) {
@@ -111,8 +132,8 @@ class SelectionOverlay extends CustomPainter {
     if (hoverOnly != null) {
       _drawPointCross(canvas, hoverOnly, m, _hover, 3 * kHoverStrokePixels);
     }
-
     tools.active.paintOverlay(canvas, cam, size);
+    canvas.restore();
   }
 
   /// A cross of half-length [half] **screen pixels** centred on [key]'s world
@@ -120,8 +141,8 @@ class SelectionOverlay extends CustomPainter {
   ///
   /// [worldToScreen] is the camera's own matrix, not [_matrix]: the position
   /// [OutlineCache.worldPointOf] hands back is absolute world, and this pass
-  /// runs after `restore()`. It never reaches `dart:ui` — only the screen
-  /// coordinates derived from it do.
+  /// runs after the rebased transform has been popped. It never reaches
+  /// `dart:ui` — only the screen coordinates derived from it do.
   void _drawPointCross(Canvas canvas, SelectionKey key,
       Transform2 worldToScreen, Paint paint, double half) {
     final p = outlines.worldPointOf(key);
@@ -136,5 +157,5 @@ class SelectionOverlay extends CustomPainter {
   /// caller merged. Answering true would repaint on every ancestor rebuild,
   /// which is exactly the cost the boundary split exists to avoid.
   @override
-  bool shouldRepaint(covariant SelectionOverlay oldDelegate) => false;
+  bool shouldRepaint(covariant SelectionOverlayPainter oldDelegate) => false;
 }

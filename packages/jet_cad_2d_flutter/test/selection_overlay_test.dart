@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart' show kPrimaryButton;
-import 'package:flutter/widgets.dart' hide SelectionOverlay;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart' show kDefaultOriginX;
@@ -47,8 +47,8 @@ final class Rig {
   late final ToolContext context;
   late final ToolController tools;
 
-  SelectionOverlay overlay({void Function()? onPaintForTest}) =>
-      SelectionOverlay(
+  SelectionOverlayPainter overlay({void Function()? onPaintForTest}) =>
+      SelectionOverlayPainter(
         selection: selection,
         tools: tools,
         camera: camera,
@@ -88,6 +88,16 @@ ToolPointerEvent ev(CameraController camera, Offset screen,
     );
 
 Paint paintOf(RecordedCall call) => call.args.whereType<Paint>().single;
+
+/// The `transform` matrix the painter pushed, **copied**: the spy records the
+/// argument by reference and the painter refills that same `Float64List` on
+/// its next frame, so a held reference would report the wrong frame.
+Float64List matrixOf(SpyCanvas spy) =>
+    Float64List.fromList(spy.named('transform').single.args[0] as Float64List);
+
+/// `(x, y)` mapped through a recorded column-major 4x4.
+Offset through(Float64List m, double x, double y) =>
+    Offset(m[0] * x + m[4] * y + m[12], m[1] * x + m[5] * y + m[13]);
 
 void main() {
   testWidgets('a selection change repaints the overlay and not the canvas',
@@ -130,7 +140,7 @@ void main() {
     ));
 
     final overlayPaint = find.byWidgetPredicate(
-        (w) => w is CustomPaint && w.painter is SelectionOverlay);
+        (w) => w is CustomPaint && w.painter is SelectionOverlayPainter);
     expect(tester.getSize(overlayPaint), kViewport,
         reason: 'the overlay must be laid out at the viewport size, not at '
             'zero — a zero-sized painter would pass every paint assertion '
@@ -139,6 +149,9 @@ void main() {
     final canvasBefore = canvasPaints;
     final overlayBefore = overlayPaints;
     expect(overlayBefore, greaterThan(0));
+    expect(canvasBefore, greaterThan(0),
+        reason: 'a canvas that never painted at all would satisfy the '
+            '"unchanged" assertion below for the wrong reason');
 
     r.selection.replace([SelectionKey.root(line)]);
     await tester.pump();
@@ -232,36 +245,87 @@ void main() {
 
   test('the outline coincides with the drawn line at 4.5e6', () {
     // Criterion 14 / M-02v. The path is rebased, so it only lands on the
-    // entity once the painter's matrix carries the origin back.
+    // entity once the painter's matrix carries the origin back. The
+    // fractional offset keeps the 0.01 px tolerance honest — a whole number
+    // at 4.5e6 could land on a float32 value exactly.
     final doc = DraftDocument.empty();
-    final line = addEntity(doc, doc.rootHandle, EntityKind.line,
-        [kDefaultOriginX + 10, 20, kDefaultOriginX + 110, 20], []);
+    final x0 = kDefaultOriginX + 10.37;
+    final line = addEntity(
+        doc, doc.rootHandle, EntityKind.line, [x0, 20, x0 + 100, 20], []);
     final r = rig(doc);
     r.selection.replace([SelectionKey.root(line)]);
 
     final spy = SpyCanvas();
     r.overlay().paint(spy, kViewport);
 
-    final m = spy.named('transform').single.args[0] as Float64List;
+    final m = matrixOf(spy);
     final path = spy.named('drawPath').single.args[0] as Path;
     // A straight horizontal segment: `getBounds` is exact for it.
     final bounds = path.getBounds();
-    Offset through(double x, double y) =>
-        Offset(m[0] * x + m[4] * y + m[12], m[1] * x + m[5] * y + m[13]);
-
-    final left = through(bounds.left, bounds.top);
-    final right = through(bounds.right, bounds.top);
-    final start =
-        r.camera.value.worldToScreen(Vector2(kDefaultOriginX + 10, 20));
-    final end =
-        r.camera.value.worldToScreen(Vector2(kDefaultOriginX + 110, 20));
+    final left = through(m, bounds.left, bounds.top);
+    final right = through(m, bounds.right, bounds.top);
+    final start = r.camera.value.worldToScreen(Vector2(x0, 20));
+    final end = r.camera.value.worldToScreen(Vector2(x0 + 100, 20));
 
     expect(left.dx, closeTo(start.x, 0.01));
     expect(left.dy, closeTo(start.y, 0.01));
     expect(right.dx, closeTo(end.x, 0.01));
     expect(right.dy, closeTo(end.y, 0.01));
     // The rebase is load-bearing: the path itself is nowhere near 4.5e6.
-    expect(bounds.left.abs(), lessThan(kDefaultOriginX / 2));
+    expect(bounds.left.abs(), lessThan(1e4));
+  });
+
+  test('the outline coincides under a rotated, non-uniform camera', () {
+    // Every other camera in this file is axis-aligned, so `m.b` and `m.c` are
+    // both zero and the matrix's off-diagonal entries could be transposed,
+    // swapped or dropped without a single test noticing. This one rotates and
+    // scales the two axes differently, which makes `b != c`.
+    final doc = DraftDocument.empty();
+    final x0 = kDefaultOriginX + 10.37;
+    final line = addEntity(
+        doc, doc.rootHandle, EntityKind.line, [x0, 20, x0 + 100, 20], []);
+    final r = rig(doc);
+
+    const s = 1.5;
+    final linear =
+        Transform2.rotation(0.3).multiply(Transform2.scale(s, -2.4 * s));
+    // Place the line's midpoint at the centre of the viewport, so the rebase
+    // origin lands beside the geometry the way it does in a real frame.
+    final mid = linear.transformPoint(Vector2(x0 + 50, 20));
+    final w2s =
+        Transform2.translation(200 - mid.x, 150 - mid.y).multiply(linear);
+    expect((w2s.b - w2s.c).abs(), greaterThan(0.5),
+        reason: 'the fixture is worthless unless the off-diagonal entries '
+            'differ: a rotation composed with a *uniform* mirror-scale is '
+            'symmetric (b == c), and a transposed matrix paints identically '
+            'under it. At this asymmetry a transpose moves the outline by '
+            'tens of pixels.');
+    r.camera.value = ViewportTransform(worldToScreenMatrix: w2s);
+    r.selection.replace([SelectionKey.root(line)]);
+
+    final spy = SpyCanvas();
+    r.overlay().paint(spy, kViewport);
+
+    final m = matrixOf(spy);
+    expect(m[1], isNot(closeTo(0, 1e-9)));
+    expect(m[4], isNot(closeTo(0, 1e-9)));
+
+    // The rotation lives in `m`, not in the path: in rebased space the
+    // segment is still axis-aligned, so its bounds' two ends are exactly its
+    // two endpoints and the comparison stays a point-to-point one.
+    final path = spy.named('drawPath').single.args[0] as Path;
+    final bounds = path.getBounds();
+    expect(bounds.height, closeTo(0, 1e-6),
+        reason: 'the rebased segment is horizontal; the camera is what tilts');
+    final left = through(m, bounds.left, bounds.top);
+    final right = through(m, bounds.right, bounds.top);
+    final start = r.camera.value.worldToScreen(Vector2(x0, 20));
+    final end = r.camera.value.worldToScreen(Vector2(x0 + 100, 20));
+
+    expect(left.dx, closeTo(start.x, 0.01));
+    expect(left.dy, closeTo(start.y, 0.01));
+    expect(right.dx, closeTo(end.x, 0.01));
+    expect(right.dy, closeTo(end.y, 0.01));
   });
 
   test("the tool's band is painted after the outlines, in screen space", () {
@@ -322,6 +386,72 @@ void main() {
             .abs();
     expect(span, closeTo(6 * kSelectionStrokePixels, 1e-9));
     expect(lines.first.strokeWidth, closeTo(kSelectionStrokePixels, 1e-12));
+  });
+
+  test('the screen-space pass is clipped to the viewport', () {
+    // The world pass's `restore()` pops its clip. Without a second one, a
+    // selected point just off screen paints its cross — and the active tool
+    // paints its overlay — over whatever sibling widget sits beside the
+    // canvas, outside the bounds the overlay was given.
+    final doc = DraftDocument.empty();
+    final group = addGroup(doc, doc.rootHandle, kPlacement);
+    addEntity(doc, group, EntityKind.point, [13, -7], []);
+    final r = rig(doc);
+    r.camera.value = cameraAt(3.0, const Offset(-600, 900)).value;
+    final k = SelectionKey.root(group);
+    r.selection.replace([k]);
+
+    const small = Size(40, 30);
+    final centre = r.camera.value.worldToScreen(r.outlines.worldPointOf(k)!);
+    expect(
+        centre.x < 0 ||
+            centre.y < 0 ||
+            centre.x > small.width ||
+            centre.y > small.height,
+        isTrue,
+        reason: 'the fixture only proves anything if the cross lands outside '
+            'the painter’s own bounds');
+
+    final spy = SpyCanvas();
+    r.overlay().paint(spy, small);
+
+    final names = [for (final c in spy.calls) c.name];
+    final firstLine = names.indexOf('drawLine');
+    expect(firstLine, greaterThanOrEqualTo(0), reason: 'the cross is drawn');
+    final clipBefore = names.sublist(0, firstLine).lastIndexOf('clipRect');
+    expect(clipBefore, greaterThanOrEqualTo(0));
+    expect(names.sublist(clipBefore, firstLine), isNot(contains('restore')),
+        reason: 'the clip must still be in effect when the cross is drawn');
+    expect(spy.calls[clipBefore].args[0], Offset.zero & small);
+  });
+
+  test('a zero-size paint draws nothing and leaves the cache rebased', () {
+    // `ViewportTransform.fit` documents the zero-size layout passes that
+    // produce this. `visibleWorld(Size.zero)` collapses to a point, so
+    // `rebaseOriginFor` answers the origin — and a `pathFor(key, zero)` would
+    // rebuild every cached path in **absolute** world space, putting x = 4.5e6
+    // into float32 `ui.Path` and forcing another full rebuild next frame.
+    final doc = DraftDocument.empty();
+    final line = addEntity(doc, doc.rootHandle, EntityKind.line,
+        [kDefaultOriginX + 10.37, 20, kDefaultOriginX + 110.37, 20], []);
+    final r = rig(doc);
+    r.selection.replace([SelectionKey.root(line)]);
+    expect(r.outlines.debugRebuilds, 0,
+        reason: 'nothing has asked the cache for a path yet');
+
+    final spy = SpyCanvas();
+    r.overlay().paint(spy, Size.zero);
+
+    expect(spy.named('drawPath'), isEmpty);
+    expect(spy.named('transform'), isEmpty);
+    expect(r.outlines.debugRebuilds, 0,
+        reason: 'and the cache was never asked to rebase by the origin');
+
+    // Not a painter that has simply stopped drawing.
+    final real = SpyCanvas();
+    r.overlay().paint(real, kViewport);
+    expect(real.named('drawPath'), hasLength(1));
+    expect(r.outlines.debugRebuilds, 1);
   });
 
   test('shouldRepaint is false', () {
