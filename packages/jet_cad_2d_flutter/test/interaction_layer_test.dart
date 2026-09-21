@@ -3,7 +3,8 @@ import 'package:flutter/gestures.dart'
         PointerDeviceKind,
         PointerMoveEvent,
         kMiddleMouseButton,
-        kPrimaryButton;
+        kPrimaryButton,
+        kSecondaryButton;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter/widgets.dart'
     show Focus, FocusManager, FocusNode, Offset, Rect;
@@ -141,6 +142,10 @@ void main() {
             '`end.dx >= start.dx`, so a purely vertical drag is a window');
     await vertical.up();
     await tester.pump();
+    expect(rig.selection.isEmpty, isTrue,
+        reason: 'the vertical band is the world box [90, 90] x [990, 1010] — '
+            'zero width, so a window band encloses nothing; the mode is a '
+            'window all the same, which is what the assertion above pins');
   });
 
   testWidgets('exiting the layer clears hover', (tester) async {
@@ -324,5 +329,88 @@ void main() {
     expect(rig.selection.length, 1);
     expect(rig.selection.contains(SelectionKey.root(lines.inside)), isTrue,
         reason: 'the band completed as though the middle move never arrived');
+  });
+
+  testWidgets('the primary disappearing from a move is an up', (tester) async {
+    // The other half of the mask rules: a move that loses the primary while
+    // gaining a button the camera does **not** own is an up, at the position
+    // that move reports. A secondary press is the realistic way for a mouse
+    // to produce one.
+    final doc = document();
+    final lines = addBandLines(doc);
+    final rig =
+        await pumpInteraction(tester, document: doc, camera: bandCamera());
+
+    final gesture = await primary(tester, pointer: 5);
+    await gesture.down(at(tester, kBandA));
+    await gesture.moveTo(at(tester, kBandB));
+    expect(rig.tools.active.phase, ToolPhase.dragging);
+
+    // Local (350, 140) is world (235, 990) — a band corner that encloses the
+    // straddler as well, which local (300, 140) does not. So this asserts the
+    // up landed at the *synthesised move's* position, not at the last real
+    // move's.
+    await tester.sendEventToBinding(PointerMoveEvent(
+      viewId: tester.view.viewId,
+      pointer: 5,
+      kind: PointerDeviceKind.mouse,
+      position: at(tester, const Offset(350, 140)),
+      buttons: kSecondaryButton,
+    ));
+    await tester.pump();
+
+    expect(rig.tools.active.phase, ToolPhase.idle);
+    expect(rig.selection.length, 2);
+    expect(rig.selection.contains(SelectionKey.root(lines.inside)), isTrue);
+    expect(rig.selection.contains(SelectionKey.root(lines.straddling)), isTrue,
+        reason: 'the world band [90, 235] x [990, 1010] encloses it, which '
+            'the band that ended at local 300 would not have');
+
+    // The active pointer is already cleared, so the gesture's own up is a
+    // stray: dropped, not thrown on, and it does not re-run the band.
+    await gesture.up();
+    await tester.pump();
+
+    expect(rig.tools.active.phase, ToolPhase.idle);
+    expect(rig.selection.length, 2);
+  });
+
+  testWidgets('a drag that leaves the box keeps its captured pointer',
+      (tester) async {
+    // A pointer that went down inside the layer is captured: its moves and
+    // its up keep arriving wherever it goes. `MouseRegion.onExit` must not
+    // hand that crossing to the tool — `SelectTool.onPointerExit` cancels a
+    // live drag, and a band the user drags past the canvas edge would vanish.
+    final doc = document();
+    final lines = addBandLines(doc);
+    final rig =
+        await pumpInteraction(tester, document: doc, camera: bandCamera());
+
+    final gesture = await primary(tester, pointer: 6);
+    await gesture.down(at(tester, kBandA));
+    await gesture.moveTo(at(tester, kBandB));
+    expect(rig.tools.active.phase, ToolPhase.dragging);
+
+    // Global (700, 300): past the centred box's right edge at global x = 600,
+    // so local (500, 150) — world (310, 985).
+    await gesture.moveTo(const Offset(700, 300));
+    await tester.pump();
+
+    expect(rig.tools.active.phase, ToolPhase.dragging,
+        reason: 'leaving the box is not the end of a captured drag');
+    expect(rig.tool.bandScreen, Rect.fromPoints(kBandA, const Offset(500, 150)),
+        reason: "and the band's end followed the pointer out");
+
+    await gesture.up();
+    await tester.pump();
+
+    expect(rig.tools.active.phase, ToolPhase.idle);
+    // The world band [90, 310] x [985, 1010] encloses `inside` and
+    // `straddling` and cuts `outside` (world x 300..320), which a window band
+    // leaves out.
+    expect(rig.selection.length, 2);
+    expect(rig.selection.contains(SelectionKey.root(lines.inside)), isTrue);
+    expect(rig.selection.contains(SelectionKey.root(lines.straddling)), isTrue);
+    expect(rig.selection.contains(SelectionKey.root(lines.outside)), isFalse);
   });
 }

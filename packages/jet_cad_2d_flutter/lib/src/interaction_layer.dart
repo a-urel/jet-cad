@@ -1,5 +1,9 @@
 import 'package:flutter/gestures.dart'
-    show PointerHoverEvent, kMiddleMouseButton, kPrimaryButton;
+    show
+        PointerExitEvent,
+        PointerHoverEvent,
+        kMiddleMouseButton,
+        kPrimaryButton;
 import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter/widgets.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -37,7 +41,9 @@ const double kPickRadiusPixels = 6.0;
 /// pointer while none is active is treated as a down, because a pointer that
 /// was already on screen when the button went down reaches a `Listener` as a
 /// move, not as a down. A hover carries `buttons == 0` and is a move with no
-/// press behind it.
+/// press behind it, and `MouseRegion.onExit` reaches the tool only while no
+/// pointer is active — a captured pointer's drag is allowed to leave the box
+/// and come back, and ends on its own up.
 class InteractionLayer extends StatefulWidget {
   const InteractionLayer({
     super.key,
@@ -114,6 +120,8 @@ class _InteractionLayerState extends State<InteractionLayer> {
       return;
     }
     if (_activePointer == -1 && hasPrimary) {
+      // Treated as a down in every respect, focus included.
+      _focus.requestFocus();
       _activePointer = e.pointer;
       _lastButtons = e.buttons;
       _tool.onPointerDown(_wrap(e), _ctx);
@@ -137,6 +145,18 @@ class _InteractionLayerState extends State<InteractionLayer> {
   void _onHover(PointerHoverEvent e) {
     if (_activePointer != -1) return;
     _tool.onPointerMove(_wrap(e), _ctx);
+  }
+
+  /// Exit is a hover statement, so it is only a statement while nothing is
+  /// pressed. A pointer that went down inside the layer is **captured**: its
+  /// moves and its up keep arriving wherever it goes, and the gesture ends on
+  /// that up. Handing the exit to the tool anyway would drop a live band the
+  /// moment the drag crossed the layer's edge — which is precisely the drag
+  /// that wants to reach past it. [SelectTool.onPointerExit] is left cancelling
+  /// a drag, for a future caller that means it.
+  void _onExit(PointerExitEvent e) {
+    if (_activePointer != -1) return;
+    _tool.onPointerExit(_ctx);
   }
 
   /// Both halves are idempotent — `setHover(null)` on a null hover and
@@ -167,7 +187,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
         autofocus: true,
         onKeyEvent: (_, event) => _tool.onKey(event, _ctx),
         child: MouseRegion(
-          onExit: (_) => _tool.onPointerExit(_ctx),
+          onExit: _onExit,
           child: Listener(
             behavior: HitTestBehavior.opaque,
             onPointerDown: _onDown,
