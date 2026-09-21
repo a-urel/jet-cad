@@ -134,9 +134,13 @@ five failures and no other.
 | the window | **all twelve macOS/browser checks OWED — not looked at; the human looks after this branch is presented** |
 
 **Exit gate: 11 of 12.** Criteria 1–11 PASS, each with its witness (build
-tails, the four widget-test files, the mutation log, the empty harness diff,
-the eleven green gate commands); criterion 12 (a human looks, on macOS and in
-both browser families) is **OWED**, in those words, not PASS and not a MISS —
+tails, the four widget-test files, the mutation log, the empty harness diff);
+criterion 11 is PASS with one recorded exception — ten of the eleven gate
+commands exit 0, and `jet_cad_2d_flutter`'s `flutter test` exits 1 on the
+five pre-existing `text_ladder_golden_test.dart` failures, per the baseline
+ruling (golden drift from 2026-08-24, SDK 3.47.2), and on nothing else;
+criterion 12 (a human looks, on macOS and in both browser families) is
+**OWED**, in those words, not PASS and not a MISS —
 no device run or visual judgement was simulated to fill it in. Full account:
 [2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
 

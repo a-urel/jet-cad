@@ -350,7 +350,7 @@ pass.
 | 8 | Camera rests on `minScale`/`maxScale` within `Tolerance` from one oversized zoom each way; a second push notifies no listener | **PASS** — `camera_controller_test.dart` green, M-01j/M-01k/M-01l/M-01o killed |
 | 9 | All sixteen mutants fired and killed, E-01e′ fired and recorded equivalent | **PASS** — 16 killed (M-01b after round-1), E-01e′ equivalent (mutation log) |
 | 10 | Harness passes at its branch-point count; `git diff --stat main..HEAD -- apps/dev_harness_2d` empty | **PASS** — 82 at branch point, 82 at head; diff empty (verified in this task) |
-| 11 | All eleven gate commands exit 0; no `analysis_options.yaml` rewrite after Task 6's | **PASS** — Task 9 report's four gate blocks, all exit 0; `git status --short` clean in this task except the five files this commit carries |
+| 11 | All eleven gate commands exit 0; no `analysis_options.yaml` rewrite after Task 6's | **PASS with one recorded exception** — ten commands exit 0; `jet_cad_2d_flutter`'s `flutter test` exits 1 on the five pre-existing `text_ladder_golden_test.dart` failures, per the baseline ruling (golden drift from 2026-08-24, SDK 3.47.2), and on nothing else; `git status --short` clean in this task except the five files this commit carries |
 | 12 | A human looked, on macOS and in both browser families, and each item recorded seen/not seen/could not judge | **OWED — not looked at; the human looks after this branch is presented** |
 
 **11 of 12 PASS, 1 OWED (criterion 12).** No criterion is a MISS.
