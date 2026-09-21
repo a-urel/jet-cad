@@ -1201,6 +1201,87 @@ by `1 / wheelZoomStep` on a signal that carries no zoom direction.
 
 ---
 
+## M-01s — no `_fitted` latch (app)
+
+Added by the final review, against `apps/floor_planner`, not the sixteen
+`jet_cad_2d_flutter` mutants: Ruling 01-2's `_fitted` guard in
+`PlannerView` fits the camera once, on the first non-empty layout. Removing
+the guard leaves every test the plan wrote green, because none of them ever
+drives a second layout; a real window resize after the user has moved the
+camera would silently throw their view away and re-fit to the new size. A
+witness, `planner_shell_test.dart`'s `'a resize after the first layout does
+not re-fit the camera'`, resizes the test surface after the first pump and
+after the user has zoomed and panned, and asserts the matrix is unchanged.
+
+**File:** `apps/floor_planner/lib/planner_view.dart`, `_PlannerViewState.build`
+
+**Diff applied:**
+
+```diff
+   Widget build(BuildContext context) => LayoutBuilder(
+         builder: (context, constraints) {
+-          if (!_fitted &&
+-              constraints.biggest.width > 0 &&
+-              constraints.biggest.height > 0) {
+-            _fitted = true;
++          if (constraints.biggest.width > 0 &&
++              constraints.biggest.height > 0) {
+             widget.camera.value = ViewportTransform.fit(
+                 widget.document.extents, constraints.biggest);
+           }
+           return CameraGestureDetector(
+```
+
+**Command:** `CI=true flutter test test/planner_shell_test.dart` (run from `apps/floor_planner`)
+
+**Verbatim output (tail):**
+
+```
+00:00 +0: loading /Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-01-app-skeleton/apps/floor_planner/test/planner_shell_test.dart
+00:00 +0: the shell shows a canvas over a non-empty, off-origin plan
+00:00 +1: the camera is fitted to the real viewport on first layout
+00:00 +2: the three chrome slots are laid out and empty
+00:00 +3: a resize after the first layout does not re-fit the camera
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: same instance as Transform2:<Transform2(0.032299999999999995, 0.0, 0.0,
+-0.032299999999999995, -545.7, 711.35)>
+  Actual: Transform2:<Transform2(0.039357142857142854, 0.0, 0.0, -0.039357142857142854,
+-457.7857142857142, 844.9642857142857)>
+
+When the exception was thrown, this was the stack:
+#4      main.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-01-app-skeleton/apps/floor_planner/test/planner_shell_test.dart:67:5)
+<asynchronous suspension>
+#5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+This was caught by the test expectation on the following line:
+  file:///Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-01-app-skeleton/apps/floor_planner/test/planner_shell_test.dart line 67
+The test description was:
+  a resize after the first layout does not re-fit the camera
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:00 +3 -1: a resize after the first layout does not re-fit the camera [E]
+  Test failed. See exception logs above.
+  The test description was: a resize after the first layout does not re-fit the camera
+  
+00:00 +3 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-01-app-skeleton/apps/floor_planner/test/planner_shell_test.dart: a resize after the first layout does not re-fit the camera
+```
+
+**Restore:** `cp /tmp/mut_planner.bak lib/planner_view.dart` — `git status --short` clean apart from the intended `planner_shell_test.dart` change.
+
+**Verdict: KILLED** — without the latch, the second layout re-fits the
+camera to the new surface size, overwriting the user's zoom and pan; the
+matrix is no longer `same`.
+
+---
+
 ## E-01e′ — `forPlatform` ignores `kIsWeb` (declared EQUIVALENT, spec D2)
 
 **File:** `lib/src/gesture_policy.dart`, `forPlatform`
@@ -1283,14 +1364,14 @@ call sites; the only executable uses are the `import` and the ternary at
 
 ## Summary
 
-**Seventeen named mutations (M-01a..M-01q, M-01h struck, plus M-01r added by
-the final review) fired: 17 killed, 0 survived. M-01b survived on the first
-shot (degenerate fixture: the witness repeated the same cumulative `scale`,
-and the widget's own exact-equality coalescing guard let only the first
-update reach `zoomAt`), and was killed after a fixture fix in its own commit
-(round 1) that ramps the pinch witness through three different cumulative
-values. One spec-declared-equivalent mutation (E-01e′) fired and its green
-run recorded.**
+**Eighteen named mutations (M-01a..M-01q, M-01h struck, plus M-01r and M-01s
+added by the final review) fired: 18 killed, 0 survived. M-01b survived on
+the first shot (degenerate fixture: the witness repeated the same cumulative
+`scale`, and the widget's own exact-equality coalescing guard let only the
+first update reach `zoomAt`), and was killed after a fixture fix in its own
+commit (round 1) that ramps the pinch witness through three different
+cumulative values. One spec-declared-equivalent mutation (E-01e′) fired and
+its green run recorded.**
 
 | id | verdict |
 |---|---|
@@ -1311,6 +1392,7 @@ run recorded.**
 | M-01p | KILLED — trackpad-kind scroll zooms under wheelZooms instead of panning |
 | M-01q | KILLED — `forBrowser(firefox: true)` no longer `same(wheelPans)` |
 | M-01r | KILLED — matrix not `same`: a horizontal-only notch (`dy == 0`) zoomed out |
+| M-01s | KILLED (app) — matrix not `same`: a resize after the first layout re-fit the camera, discarding the user's zoom and pan |
 | E-01e′ | EQUIVALENT (spec-declared, D2) — fired, green run recorded; only the five pre-existing golden failures survive the run |
 
 ### M-01b, resolved in round 1

@@ -46,4 +46,26 @@ void main() {
       expect(tester.getSize(find.byKey(key)).width, greaterThan(0));
     }
   });
+
+  // Ruling 01-2's latch: the fit happens once. A resize after the user has
+  // moved the camera must not re-fit and throw their view away.
+  testWidgets('a resize after the first layout does not re-fit the camera',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(const FloorPlannerApp());
+    await tester.pump();
+    final view = tester.widget<PlannerView>(find.byType(PlannerView));
+    view.camera.zoomAt(const Offset(300, 200), 1.7);
+    view.camera.panBy(const Offset(40, -25));
+    final moved = view.camera.value.worldToScreenMatrix;
+
+    await tester.binding.setSurfaceSize(const Size(1100, 750));
+    await tester.pump();
+    await tester.pump();
+
+    expect(view.camera.value.worldToScreenMatrix, same(moved));
+    expect(tester.getSize(find.byType(DraftCanvas)).width, greaterThan(500),
+        reason: 'the canvas really did get a new size');
+  });
 }
