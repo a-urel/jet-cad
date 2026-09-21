@@ -528,17 +528,37 @@ class SpatialIndex {
       BandMode mode, Aabb2 world, QueryFilter filter, int depth) {
     _ensurePathCapacity(depth);
     _containerPath[depth] = index.container.value;
-    final Transform2 toLocal;
-    try {
-      toLocal = toWorld.invert();
-    } on SingularTransformError {
-      // Collapsed to nothing in world space: nothing to enclose and nothing
-      // to touch, the same answer [_descend] gives.
-      return _BandVerdict.empty;
+    // **A singular container transform is not refused here**, deliberately,
+    // and this is where band selection parts company with [_descend]. A pick
+    // asks "is this point within `radius` of the entity", which a collapsed
+    // container answers by having nothing drawn to measure against; a band
+    // asks "is the entity's *image* inside this rectangle", and a collapsed
+    // instance has an image — a segment, or a point — that a band can
+    // perfectly well enclose or cross. Spec D8 selects it, and the
+    // differential's brute-force arm, which composes forward only, would
+    // disagree with any answer that did not.
+    //
+    // So the inverse is taken only where it is actually needed. Window never
+    // needs it: it walks the whole container ([_kAllBox]) and lifts each
+    // stored box *forward* by [toWorld] in [_leafPasses]. Crossing needs it
+    // only to pull the band back into this container's space as a broad
+    // phase, and when that inverse does not exist it falls back to walking
+    // the whole container — slower, never wrong, and the narrow phase behind
+    // it is the same forward `leafTouchedByBand` either way.
+    final Aabb2 localQuery;
+    if (mode == BandMode.window) {
+      localQuery = _kAllBox;
+    } else {
+      Transform2? toLocal;
+      try {
+        toLocal = toWorld.invert();
+      } on SingularTransformError {
+        toLocal = null;
+      }
+      localQuery = toLocal == null
+          ? _kAllBox
+          : _localBandBox(toLocal, world.expandedBy(_broadPhaseMargin().pick));
     }
-    final localQuery = mode == BandMode.window
-        ? _kAllBox
-        : _localBandBox(toLocal, world.expandedBy(_broadPhaseMargin().pick));
     var anyLeaf = false;
     var allPass = true;
     var anyPass = false;
