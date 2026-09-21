@@ -35,15 +35,19 @@ final Transform2 kPlacement = Transform2.translation(300, -200)
     .multiply(Transform2.scale(1.5, 1.5));
 
 /// Copied from `pick_test.dart`, never imported from a test file.
+///
+/// [layer] defaults to layer zero; pass a handle from [addLayer] to put the
+/// leaf on a hidden or locked layer.
 Handle addEntity(DraftDocument doc, Handle owner, EntityKind kind,
-    List<double> coords, List<double> scalars) {
+    List<double> coords, List<double> scalars,
+    {Handle? layer}) {
   final handle = doc.handleSeed.next();
   doc.commands.execute(AddEntityCommand(
     record: EntityRecord(
       handle: handle,
       owner: owner,
       kind: kind,
-      layer: ReservedHandles.layerZero,
+      layer: layer ?? ReservedHandles.layerZero,
       linetype: ReservedHandles.byLayerLinetype,
       linetypeScale: 1.0,
       geomIndex: 0,
@@ -56,6 +60,24 @@ Handle addEntity(DraftDocument doc, Handle owner, EntityKind kind,
       coords: Float64List.fromList(coords),
       scalars: Float64List.fromList(scalars),
     ),
+  ));
+  return handle;
+}
+
+/// A layer record with a non-default colour and lineweight, so a leaf placed
+/// on it differs from layer zero in more than the bit under test.
+Handle addLayer(DraftDocument doc, String name,
+    {bool visible = true, bool locked = false}) {
+  final handle = doc.handleSeed.next();
+  doc.tables.layers.add(LayerRecord(
+    handle: handle,
+    name: name,
+    color: const TrueColor(0x8844AA),
+    linetype: ReservedHandles.byLayerLinetype,
+    lineweight: 35,
+    transparency: 0,
+    visible: visible,
+    locked: locked,
   ));
   return handle;
 }
@@ -217,7 +239,7 @@ Future<InteractionRig> pumpInteraction(
                     camera: rig.camera,
                     outlines: rig.outlines,
                     repaint: Listenable.merge(
-                        [rig.selection, rig.tools, rig.camera]),
+                        [rig.selection, rig.tools, rig.camera, rig.outlines]),
                   ),
                   size: Size.infinite,
                 ),

@@ -29,7 +29,6 @@ class SelectTool extends Tool {
 
   final HitPath _hit = HitPath();
   Offset _start = Offset.zero;
-  final Vector2 _startWorld = Vector2.zero();
   SelectionKey? _downKey;
   bool _downHit = false;
   Offset _end = Offset.zero;
@@ -60,7 +59,6 @@ class SelectTool extends Tool {
     _phase = ToolPhase.pressed;
     _pointer = e.pointer;
     _start = e.screen;
-    _startWorld.setFrom(e.world);
     _downKey = _pick(e, ctx);
     _downHit = _downKey != null;
     notifyListeners();
@@ -113,9 +111,15 @@ class SelectTool extends Tool {
   /// Every root-level key the band selects: root entities, groups (spec D8,
   /// Ruling 02-2 — decided here from the passing-slot set, once per band)
   /// and instances.
+  ///
+  /// **Both corners are converted here, at release** (spec D8): the camera
+  /// may have moved between the press and the up — a trackpad zoom during a
+  /// band drag — and the band the user is looking at is the one their two
+  /// *screen* corners name under the camera they are looking through now.
   List<SelectionKey> _bandKeys(ToolContext ctx, ToolPointerEvent e) {
     final mode = _bandMode!;
-    final a = _startWorld, b = e.world;
+    final a = ctx.camera.value.screenToWorld(Vector2(_start.dx, _start.dy));
+    final b = e.world;
     final band = Aabb2.raw(math.min(a.x, b.x), math.min(a.y, b.y),
         math.max(a.x, b.x), math.max(a.y, b.y));
     final passing = <int>{};
@@ -125,6 +129,7 @@ class SelectTool extends Tool {
     final seenGroups = <Handle>{};
     final doc = ctx.document;
     Map<Handle, List<int>>? byOwner;
+    FilterEvaluator? evaluator;
     for (final slot in passing) {
       final owner = doc.entities.ownerAt(slot);
       if (owner == doc.rootHandle) {
@@ -134,8 +139,9 @@ class SelectTool extends Tool {
       final top = _topmostGroup(doc, owner);
       if (top == null || !seenGroups.add(top)) continue;
       byOwner ??= doc.leavesByOwner();
+      evaluator ??= FilterEvaluator(doc);
       if (mode == BandMode.crossing ||
-          _everyLeafIn(doc, top, byOwner, passing)) {
+          _everyLeafIn(doc, top, byOwner, passing, evaluator)) {
         keys.add(SelectionKey.root(top));
       }
     }
@@ -147,14 +153,23 @@ class SelectTool extends Tool {
   /// Ledger Ruling P-1: every leaf owned by [group] or a group nested in it
   /// is in [passing], and there is at least one. A child *instance*'s leaves
   /// do not enter this rule — the stack only ever pushes nested groups.
+  ///
+  /// A leaf the picking filter rejects — hidden, or on a locked layer — is
+  /// **skipped**, not failed on: `leavesByOwner()` is unfiltered while
+  /// [passing] only ever holds accepted slots, so counting such a leaf as a
+  /// member would make a group with one locked leaf unselectable by any
+  /// window band. This matches the engine's own `_bandDescend`, which applies
+  /// `acceptsEntity` before it counts a member. A group whose leaves are all
+  /// rejected has no members at all and is not selected.
   bool _everyLeafIn(DraftDocument doc, Handle group,
-      Map<Handle, List<int>> byOwner, Set<int> passing) {
+      Map<Handle, List<int>> byOwner, Set<int> passing, FilterEvaluator f) {
     var any = false;
     final stack = <Handle>[group];
     while (stack.isNotEmpty) {
       final g = stack.removeLast();
       for (final slot in byOwner[g] ?? const <int>[]) {
         if (doc.entities.kindAt(slot) == EntityKind.fill) continue;
+        if (!f.acceptsEntity(slot, const QueryFilter.picking())) continue;
         any = true;
         if (!passing.contains(slot)) return false;
       }
@@ -267,6 +282,11 @@ class SelectTool extends Tool {
     final skip = <Handle>{for (final b in boundaries) ...doc.fills.fillsOf(b)};
     for (final slot in leaves) {
       final h = doc.entities.handleAt(slot);
+      // `byOwner` is scanned once per Delete and the keys are executed one
+      // after another, so by the time a later key's cascade is built an
+      // earlier one may already have removed this leaf; its slot would then
+      // name whatever has since been compacted into it.
+      if (doc.entities.slotOf(h) == null) continue;
       if (skip.contains(h)) continue;
       out.add(RemoveEntityCommand(h));
     }

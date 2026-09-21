@@ -154,6 +154,50 @@ void main() {
     expect((segments[0] - unplaced.x).abs(), greaterThan(1.0));
   });
 
+  test('a leaf the rendering filter rejects is left out of the outline', () {
+    // A2. The outline is a statement about what is drawn, so it follows the
+    // canvas's own filter: `QueryFilter.rendering()` — hidden out, locked
+    // still drawn. A hidden leaf otherwise gets a selection outline with no
+    // geometry under it.
+    final doc = DraftDocument.empty();
+    final group = addGroup(
+        doc,
+        doc.rootHandle,
+        Transform2.translation(-17, 23)
+            .multiply(Transform2.rotation(-math.pi / 5)));
+    addEntity(doc, group, EntityKind.line, [3, 1, 9, 4], []);
+    addEntity(doc, group, EntityKind.line, [40, 60, 44, 70], [],
+        layer: addLayer(doc, 'Hidden', visible: false));
+    // A locked-but-visible leaf still draws, so it stays in the outline.
+    addEntity(doc, group, EntityKind.line, [70, 80, 74, 90], [],
+        layer: addLayer(doc, 'Locked', locked: true));
+    final (selection, cache) = wire(doc);
+    final key = SelectionKey.root(group);
+    selection.replace([key]);
+
+    final toWorld = doc.tree.accumulatedTransform(group);
+    final segments = cache.debugWorldSegmentsOf(key);
+    expect(segments, isNotNull);
+    expect(segments!.length, 8,
+        reason: 'the visible leaf and the locked one, not the hidden one');
+    for (final (i, local) in [
+      Vector2(3, 1),
+      Vector2(9, 4),
+      Vector2(70, 80),
+      Vector2(74, 90),
+    ].indexed) {
+      final p = toWorld.transformPoint(local);
+      expect(segments[i * 2], closeTo(p.x, 1e-9));
+      expect(segments[i * 2 + 1], closeTo(p.y, 1e-9));
+    }
+    // The discriminating half: the hidden leaf's world x is far from both of
+    // the recorded chains, so its absence cannot be a rounding accident.
+    final hidden = toWorld.transformPoint(Vector2(40, 60));
+    for (var i = 0; i < segments.length; i += 2) {
+      expect((segments[i] - hidden.x).abs(), greaterThan(1.0));
+    }
+  });
+
   test(
       'a circle under a non-uniform instance scale is emitted with the '
       'geometric-mean radius', () {

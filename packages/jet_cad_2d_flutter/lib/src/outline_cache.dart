@@ -53,7 +53,15 @@ final class _Point extends _Outline {
 ///
 /// The document walk happens at selection-change, hover-change and
 /// `DocChange` rate — never per frame.
-class OutlineCache {
+///
+/// **A [ChangeNotifier], and a member of the overlay's repaint merge.** A
+/// `DocChange` rebuilds the outlines, and nothing else in that merge hears a
+/// `DocChange`: without this the new outline would sit in the cache while the
+/// stale one stayed on screen until the next selection, hover or camera
+/// change. A *selection*-driven rebuild is deliberately silent — the
+/// selection controller has already notified the same merge, and notifying
+/// again would cost a second repaint for one change.
+class OutlineCache extends ChangeNotifier {
   OutlineCache(this.document, this.selection) {
     _subscription = document.changes.listen(_onChange);
     selection.addListener(_onSelection);
@@ -109,8 +117,8 @@ class OutlineCache {
   /// vanished. The marker a point deserves is a screen-space cross, whose
   /// size is in pixels and therefore cannot live in a world-space cache; the
   /// painter reads the position here and sizes the cross itself. The value is
-  /// **absolute world**, so the caller must rebase it — subtract [origin] —
-  /// before it reaches `dart:ui`.
+  /// an absolute world position; map it to screen with `worldToScreen` (or
+  /// rebase it) before it reaches `dart:ui`.
   Vector2? worldPointOf(SelectionKey key) {
     final outlines = _world[key];
     if (outlines == null || outlines.length != 1) return null;
@@ -163,11 +171,13 @@ class OutlineCache {
     return out;
   }
 
+  @override
   void dispose() {
     _subscription.cancel();
     selection.removeListener(_onSelection);
     _world.clear();
     _paths.clear();
+    super.dispose();
   }
 
   // --- keys in, keys out -------------------------------------------------
@@ -195,10 +205,12 @@ class OutlineCache {
   /// the document may have changed since the last one.
   void _walk(Iterable<SelectionKey> keys) {
     _byOwner = null;
+    _filters = null;
     for (final key in keys) {
       _world[key] = _outlinesFor(key);
     }
     _byOwner = null;
+    _filters = null;
   }
 
   /// Spec D9: **every** `DocChange` rebuilds **every** cached outline. A leaf
@@ -210,11 +222,13 @@ class OutlineCache {
       // D11 drops the keys first; this clears whatever is left either way.
       _world.clear();
       _invalidatePaths();
+      notifyListeners();
       return;
     }
     if (_world.isEmpty) return;
     _walk(_world.keys.toList());
     _invalidatePaths();
+    notifyListeners();
   }
 
   void _invalidatePaths() {
@@ -323,7 +337,17 @@ class OutlineCache {
   /// `document.leavesByOwner()` is a full entity-store scan; one per walk.
   Map<Handle, List<int>>? _byOwner;
 
+  /// The filter's layer and container answers are memoised, and a layer
+  /// record or a node's visibility may have changed since the last walk, so
+  /// the evaluator is built once per walk and dropped with it.
+  FilterEvaluator? _filters;
+
   void _addLeaf(List<_Outline> out, int slot, Transform2 t) {
+    // Spec D9, amended at execution: the outline is a statement about what is
+    // drawn, so it skips exactly what the canvas skips — `rendering()`, which
+    // drops a hidden leaf and keeps a locked one.
+    final filters = _filters ??= FilterEvaluator(document);
+    if (!filters.acceptsEntity(slot, const QueryFilter.rendering())) return;
     final kind = document.entities.kindAt(slot);
     if (kind == EntityKind.fill) return; // a fill has no coordinates (D8)
     final payload = document.geometry.peek(document.entities.geomIndexAt(slot));

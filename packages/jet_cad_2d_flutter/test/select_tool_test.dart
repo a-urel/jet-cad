@@ -335,6 +335,103 @@ void main() {
             'outside the band');
   });
 
+  test('a leaf the picking filter rejects is skipped by the group every-rule',
+      () {
+    // A1. `_bandDescend` in the engine applies the filter before counting a
+    // member; the tool's every-rule must agree, or a group with one locked
+    // leaf could never be window-selected at all.
+    //
+    // Camera: `sx = 2*wx - 600`, `sy = -2*wy + 900`, so the band's world
+    // corners (486,280) and (510,320) land at screen (372,340) and (420,260).
+    // The band encloses the first leaf only.
+    (DraftDocument, Handle) fixture({required bool locked}) {
+      final doc = DraftDocument.empty();
+      final group =
+          addGroup(doc, doc.rootHandle, Transform2.translation(500, 300));
+      addEntity(doc, group, EntityKind.line, [0, 0, 2, 0],
+          []); // world (500,300)-(502,300), inside the band
+      final layer = addLayer(doc, locked ? 'Locked' : 'Free', locked: locked);
+      addEntity(doc, group, EntityKind.line, [20, 0, 22, 0], [],
+          layer: layer); // world (520,300)-(522,300), outside the band
+      return (doc, group);
+    }
+
+    List<SelectionKey> band(DraftDocument doc) {
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final camera = cameraAt(2.0, const Offset(-600, 900));
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      final tool = SelectTool();
+      tool.onPointerDown(ev(camera, const Offset(372, 340)), ctx);
+      tool.onPointerMove(ev(camera, const Offset(420, 260)), ctx);
+      expect(tool.bandMode, BandMode.window);
+      tool.onPointerUp(ev(camera, const Offset(420, 260)), ctx);
+      return selection.keys.toList();
+    }
+
+    final (lockedDoc, lockedGroup) = fixture(locked: true);
+    expect(band(lockedDoc), [SelectionKey.root(lockedGroup)],
+        reason: 'the locked leaf is not a member the every-rule can fail on');
+
+    final (freeDoc, freeGroup) = fixture(locked: false);
+    expect(band(freeDoc), isEmpty,
+        reason: 'the same leaf, visible and unlocked, is outside the band, '
+            'so the group is missing a member and window takes nothing');
+  });
+
+  test('both band corners are converted at release, not at press', () {
+    // A3 / spec D8. The camera moves between press and release (a trackpad
+    // zoom during a band drag), so a world corner captured on press names a
+    // different point than the screen corner the user is still holding.
+    final doc = DraftDocument.empty();
+    // Inside the band the *release-time* camera computes, outside the one a
+    // press-time corner would build.
+    final right = addEntity(
+        doc, doc.rootHandle, EntityKind.line, [420, 245, 428, 255], []);
+    // The exact opposite: inside the press-time band, outside the correct one.
+    final wrong = addEntity(
+        doc, doc.rootHandle, EntityKind.line, [440, 265, 460, 275], []);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final selection = SelectionController(doc);
+    addTearDown(selection.dispose);
+    // `sx = 2*wx - 600`, `sy = -2*wy + 900`.
+    final camera = cameraAt(2.0, const Offset(-600, 900));
+    final ctx = ToolContext(
+        document: doc, index: index, camera: camera, selection: selection);
+    final tool = SelectTool();
+
+    tool.onPointerDown(ev(camera, const Offset(372, 340)), ctx);
+    tool.onPointerMove(ev(camera, const Offset(420, 260)), ctx);
+    expect(tool.bandMode, BandMode.window);
+
+    // Zoom about a focus that is neither corner, so *both* screen corners
+    // name different world points afterwards.
+    camera.zoomAt(const Offset(100, 500), 2.0);
+    expect(camera.value.scale, closeTo(4.0, 1e-12));
+
+    // Post-zoom the two screen corners are world (418,240) and (430,260);
+    // pre-zoom the press corner was world (486,280).
+    final a = camera.value.screenToWorld(Vector2(372, 340));
+    final b = camera.value.screenToWorld(Vector2(420, 260));
+    expect(a.x, closeTo(418, 1e-9));
+    expect(a.y, closeTo(240, 1e-9));
+    expect(b.x, closeTo(430, 1e-9));
+    expect(b.y, closeTo(260, 1e-9));
+
+    tool.onPointerUp(ev(camera, const Offset(420, 260)), ctx);
+
+    expect(selection.keys.toList(), [SelectionKey.root(right)],
+        reason: 'the band is the world box of both screen corners under the '
+            'camera at release');
+    expect(selection.contains(SelectionKey.root(wrong)), isFalse,
+        reason: 'a press-time world corner would build [430,486] x [260,280] '
+            'and take this one instead');
+  });
+
   test('shift-band toggles', () {
     final doc = DraftDocument.empty();
     final lineA = addEntity(

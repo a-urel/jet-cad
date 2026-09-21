@@ -55,7 +55,7 @@ final class Rig {
         tools: tools,
         camera: camera,
         outlines: outlines,
-        repaint: Listenable.merge([selection, tools, camera]),
+        repaint: Listenable.merge([selection, tools, camera, outlines]),
         onPaintForTest: onPaintForTest,
       );
 
@@ -162,6 +162,84 @@ void main() {
         reason: 'the selection is in the overlay\'s repaint merge');
     expect(canvasPaints, canvasBefore,
         reason: 'the drawing does not know the selection exists');
+  });
+
+  testWidgets('a DocChange under a selected instance repaints the overlay',
+      (tester) async {
+    // A4. The cache rebuilds on every `DocChange`, but a rebuild that nothing
+    // is listening to leaves the old outline on screen until the next
+    // selection, hover or camera change. The cache is a `ChangeNotifier` in
+    // the overlay's repaint merge; the canvas has its own document listener,
+    // so both counts move — which is what separates this from M-02e', where
+    // only the overlay does.
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final doc = DraftDocument.empty(measurer: measurer);
+    final def = addDefinition(doc, 'Def');
+    final leaf = addEntity(doc, def, EntityKind.line, [3, 1, 9, 4], []);
+    final instance = addInstance(doc, def, kPlacement);
+    final r = rig(doc);
+
+    var canvasPaints = 0;
+    var overlayPaints = 0;
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: Center(
+        child: SizedBox(
+          width: 400,
+          height: 300,
+          child: Stack(children: [
+            RepaintBoundary(
+                child: DraftCanvas(
+              document: doc,
+              index: r.index,
+              camera: r.camera,
+              onPaintForTest: () => canvasPaints++,
+            )),
+            Positioned.fill(
+                child: RepaintBoundary(
+                    child: CustomPaint(
+              painter: r.overlay(onPaintForTest: () => overlayPaints++),
+              size: Size.infinite,
+            ))),
+          ]),
+        ),
+      ),
+    ));
+
+    final key = SelectionKey.root(instance);
+    r.selection.replace([key]);
+    await tester.pump();
+    final before = r.outlines.debugWorldSegmentsOf(key);
+    expect(before, isNotNull);
+    expect(before!.length, 4);
+    final canvasBefore = canvasPaints;
+    final overlayBefore = overlayPaints;
+    expect(canvasBefore, greaterThan(0));
+    expect(overlayBefore, greaterThan(0));
+
+    doc.commands.execute(SetEntityGeometryCommand(
+        leaf,
+        GeometryPayload(
+          coords: Float64List.fromList([3, 1, 9, 40]),
+          scalars: Float64List(0),
+        )));
+    // `document.changes` delivers on a microtask; `idle` drains those inside
+    // the test's fake-async zone (an awaited `Future.delayed` would deadlock
+    // there), and the pump is the frame that repaints.
+    await tester.idle();
+    await tester.pump();
+
+    expect(overlayPaints, overlayBefore + 1,
+        reason: 'the cache notified, so the overlay repainted');
+    expect(canvasPaints, canvasBefore + 1,
+        reason: 'the canvas listens to the document itself — both move here, '
+            'unlike a selection change');
+    final after = r.outlines.debugWorldSegmentsOf(key);
+    final moved = kPlacement.transformPoint(Vector2(9, 40));
+    expect(after![3], closeTo(moved.y, 1e-9));
+    expect((after[3] - before[3]).abs(), greaterThan(1.0),
+        reason: 'the outline the repaint carried is the new one');
   });
 
   test('stroke width is 2 px at any zoom', () {

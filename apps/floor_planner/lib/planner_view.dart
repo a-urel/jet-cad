@@ -39,8 +39,11 @@ class _PlannerViewState extends State<PlannerView> {
   // keys before this cache walks them (listener order on `document.changes`).
   late final OutlineCache _outlines =
       OutlineCache(widget.document, widget.selection);
-  late final Listenable _repaint =
-      Listenable.merge([widget.selection, widget.tools, widget.camera]);
+  // The cache is in the merge because it is the only member that hears a
+  // `DocChange`: an edit under a selected instance rebuilds the outline and
+  // nothing else in here would ask for the frame that draws it.
+  late final Listenable _repaint = Listenable.merge(
+      [widget.selection, widget.tools, widget.camera, _outlines]);
 
   @override
   void dispose() {

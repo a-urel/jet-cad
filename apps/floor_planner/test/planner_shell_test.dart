@@ -2,6 +2,7 @@ import 'package:floor_planner/main.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:floor_planner/startup_plan.dart';
 import 'package:flutter/rendering.dart' show RenderCustomPaint;
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -128,5 +129,48 @@ void main() {
     await tester.pump();
 
     expect(view.selection.length, 1);
+  });
+
+  // A5 / spec D12: the look asks the human to delete a wall and put it back,
+  // and until this binding existed the shell had no way to put it back.
+  testWidgets('cmd+Z undoes a Delete through the command log', (tester) async {
+    await tester.pumpWidget(const FloorPlannerApp());
+    await tester.pump();
+
+    final view = tester.widget<PlannerView>(find.byType(PlannerView));
+    final world = Vector2(kPlanOriginX + 100, kPlanOriginY);
+    final screen = view.camera.value.worldToScreen(world);
+    final topLeft = tester.getTopLeft(find.byType(InteractionLayer));
+    await tester.tapAt(topLeft + Offset(screen.x, screen.y));
+    await tester.pump();
+
+    expect(view.selection.length, 1);
+    final handle = view.selection.keys.single.target;
+    expect(view.document.entities.slotOf(handle), isNotNull);
+    // The startup plan is itself built through the log, so the counts below
+    // are what pin the undo to exactly one command: the Delete.
+    final liveBefore = view.document.entities.liveCount;
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+
+    expect(view.document.entities.slotOf(handle), isNull);
+    expect(view.document.entities.liveCount, liveBefore - 1);
+    expect(view.selection.isEmpty, isTrue);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+
+    expect(view.document.entities.slotOf(handle), isNotNull,
+        reason: 'the wall is back');
+    expect(view.document.entities.liveCount, liveBefore,
+        reason: 'exactly one command came off the log, not the plan under it');
+    expect(view.selection.isEmpty, isTrue,
+        reason: 'undo replays the command log; it never restores the '
+            "selection controller's own state");
   });
 }
