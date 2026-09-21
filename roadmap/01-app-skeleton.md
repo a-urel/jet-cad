@@ -1,6 +1,6 @@
 # 01 — App skeleton
 
-**Status:** spec 2026-09-21 (rev 2), plan 2026-09-21, executed on plan-01/app-skeleton, the human's look OWED
+**Status:** spec 2026-09-21 (rev 2), plan 2026-09-21, executed and MERGED at `bae5f73` (2026-09-21), the human's look OWED
 **Depends on:** nothing
 **Blocks:** everything
 **Size:** S

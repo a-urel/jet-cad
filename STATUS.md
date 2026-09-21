@@ -1,8 +1,11 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-21 (docs only — `roadmap/` cross-linked and brought
-up to date with Plans A–F; no code changed since Plan F's merge)
-**Verified against:** `main` at `a8208d1`. **Plan F is MERGED** — `--no-ff`
+**Last updated:** 2026-09-21 — **Plan 01 (the floor planner app skeleton) is
+MERGED at `bae5f73`**, the product line's first code on `main`; its human look
+is OWED. See [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73)
+and [Resume here](#resume-here).
+**Verified against:** `main` at `bae5f73` for Plan 01's gate lines; the
+paragraphs below about Plan F were verified at `a8208d1`. **Plan F is MERGED** — `--no-ff`
 at `a8208d1` on 2026-09-06, on the human's decision, with its exit gate at
 7 of 14 and the window still OWED; branch and worktree deleted, ledger
 archived at `2535dce`. See [Plan F](#plan-f--rebuild-triggers-and-the-band-merged-into-main-at-a8208d1)
@@ -74,7 +77,7 @@ Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01
 
 ---
 
-## Plan 01 — the app skeleton (on `plan-01/app-skeleton`, not merged)
+## Plan 01 — the app skeleton (MERGED into `main` at `bae5f73`)
 
 **Plan 01 gave the product line its first sub-project** — `apps/floor_planner`,
 a real product application that opens a resizable 1440×900 window, shows a
@@ -82,11 +85,14 @@ hand-written 523-entity floor plan on a `DraftCanvas`, and pans and zooms with
 a trackpad and a mouse, on macOS and (its first-ever web build)
 `jet_cad_2d_flutter` compiled for a browser. Ten tasks,
 `717b9cd..b6d64a9` (Tasks 1–9 at `..5cab91a`; Task 10, the results note, at
-`b6d64a9` and its fix) on branch `plan-01/app-skeleton`, worktree
-`.claude/worktrees/plan-01-app-skeleton` (cut from `main` at `717b9cd`). **NOT
-merged — the exit gate is 11 of 12 and the twelfth (a human's look, on macOS
-and in two browser families) is OWED; the merge is the human's decision after
-that look.** Spec:
+`b6d64a9` and its fix, then a five-commit final-review fix wave to `29b75cd`)
+on branch `plan-01/app-skeleton`, cut from `main` at `717b9cd`. **MERGED
+`--no-ff` at `bae5f73` on 2026-09-21, on the human's decision, with the exit
+gate at 11 of 12 and the twelfth (a human's look, on macOS and in two browser
+families) still OWED**; branch and worktree deleted, ledger archived at
+`79b0333`. The merged tree was re-gated on `main`: `jet_cad_2d` 798,
+`jet_cad_2d_flutter` 704 pass / 1 skip / the same five pre-existing text-golden
+failures, `dev_harness_2d` 82, `floor_planner` 8 and both builds. Spec:
 [2026-09-21-floor-planner-app-skeleton-design.md](docs/superpowers/specs/2026-09-21-floor-planner-app-skeleton-design.md)
 (revision 2). Plan:
 [2026-09-21-floor-planner-app-skeleton.md](docs/superpowers/plans/2026-09-21-floor-planner-app-skeleton.md).
@@ -966,12 +972,13 @@ except on Firefox) was re-decided by the human as "wheel zooms and trackpad
 scroll pans on desktop and Chromium/WebKit; everything pans on Firefox". **Its
 plan was written**, ten tasks:
 [2026-09-21-floor-planner-app-skeleton.md](docs/superpowers/plans/2026-09-21-floor-planner-app-skeleton.md),
-**and has now executed on `plan-01/app-skeleton` in its own worktree, all ten
-tasks, `717b9cd..b6d64a9` (Tasks 1–9 at `..5cab91a`; Task 10 at `b6d64a9` and
-its fix). The exit gate is 11 of 12, with the twelfth — a
-human's look, on macOS and in both browser families — OWED; merging is the
-human's call after that look.** See
-[Plan 01](#plan-01--the-app-skeleton-on-plan-01app-skeleton-not-merged) and
+**executed on `plan-01/app-skeleton`, all ten tasks plus a final-review fix
+wave, and is MERGED into `main` at `bae5f73` on 2026-09-21.** The exit gate is
+11 of 12, with the twelfth — a human's look, on macOS and in both browser
+families — **still OWED after the merge**: run the `floor_planner: macOS`
+launch entry, then Chrome or Safari and Firefox on `build/web`, and judge the
+thirteen items in the results note. See
+[Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73) and
 [2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
 The other twelve sub-projects have not started.
 

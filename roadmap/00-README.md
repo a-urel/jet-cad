@@ -248,7 +248,7 @@ cheap; learning it from a half-executed Plan is not.
 
 | # | Sub-project | Spec | Plan | Executed |
 |---|---|---|---|---|
-| 01 | app skeleton | [2026-09-21](../docs/superpowers/specs/2026-09-21-floor-planner-app-skeleton-design.md) (rev 2) | [2026-09-21](../docs/superpowers/plans/2026-09-21-floor-planner-app-skeleton.md) | [2026-09-21](../docs/superpowers/notes/2026-09-21-plan-01-results.md) (branch, look OWED) |
+| 01 | app skeleton | [2026-09-21](../docs/superpowers/specs/2026-09-21-floor-planner-app-skeleton-design.md) (rev 2) | [2026-09-21](../docs/superpowers/plans/2026-09-21-floor-planner-app-skeleton.md) | [2026-09-21](../docs/superpowers/notes/2026-09-21-plan-01-results.md) (merged `bae5f73`, look OWED) |
 | 02 | interaction core | — | — | — |
 | 03 | grips and transform | — | — | — |
 | 04 | page, grid, rulers | — | — | — |
