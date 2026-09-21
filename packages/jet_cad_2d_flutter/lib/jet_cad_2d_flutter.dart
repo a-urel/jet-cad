@@ -2,6 +2,7 @@
 library;
 
 export 'src/camera_controller.dart';
+export 'src/camera_gesture_detector.dart';
 export 'src/canvas_draw_sink.dart';
 export 'src/vertices_draw_sink.dart';
 export 'src/draft_canvas.dart';
