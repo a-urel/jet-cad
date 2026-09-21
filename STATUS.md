@@ -891,8 +891,11 @@ CLI) and revised to revision 2** — the review is
 The review's one blocker that reopened a decision (the web scroll rule: the
 engine *does* tag browser wheel events trackpad-vs-mouse by a heuristic,
 except on Firefox) was re-decided by the human as "wheel zooms and trackpad
-scroll pans on desktop and Chromium/WebKit; everything pans on Firefox". No
-plan yet. The other twelve have not started.
+scroll pans on desktop and Chromium/WebKit; everything pans on Firefox". **Its
+plan is written**, ten tasks:
+[2026-09-21-floor-planner-app-skeleton.md](docs/superpowers/plans/2026-09-21-floor-planner-app-skeleton.md),
+not yet executed; it runs on `plan-01/app-skeleton` in its own worktree
+when it starts. The other twelve have not started.
 
 **The web coupling is resolved and it went the expensive way.** This section
 used to say "Plan G matters only if the product targets web". **The human
