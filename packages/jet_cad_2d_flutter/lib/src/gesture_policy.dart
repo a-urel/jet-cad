@@ -5,7 +5,7 @@ import 'gesture_policy_platform_stub.dart'
     if (dart.library.js_interop) 'gesture_policy_platform_web.dart';
 
 /// What a bare scroll signal does to the camera.
-enum ScrollAction { pan, zoom }
+enum ScrollSignalAction { pan, zoom }
 
 /// The per-platform half of camera gestures, as a value the widget is given
 /// rather than a `kIsWeb` it reads.
@@ -33,7 +33,7 @@ class GesturePolicy {
 
   /// What a `PointerScrollEvent` of any kind other than trackpad, with no
   /// modifier held, means.
-  final ScrollAction mouseWheel;
+  final ScrollSignalAction mouseWheel;
 
   /// Multiplicative step per wheel notch on the `PointerScrollEvent` zoom
   /// path. A `PointerScaleEvent` carries its own factor and ignores this.
@@ -48,12 +48,12 @@ class GesturePolicy {
   /// `PointerPanZoom*` sequence), so a scroll signal is a wheel. In a
   /// Chromium or WebKit browser the engine tags a trackpad scroll
   /// `kind: trackpad` and the widget pans it before this field is consulted.
-  static const wheelZooms = GesturePolicy(mouseWheel: ScrollAction.zoom);
+  static const wheelZooms = GesturePolicy(mouseWheel: ScrollSignalAction.zoom);
 
   /// Firefox: every wheel event is `kind: mouse` because the engine's
   /// heuristic cannot tell a trackpad there, so the wheel pans -- zooming on
   /// it would take pan-by-scroll away from every Firefox trackpad user.
-  static const wheelPans = GesturePolicy(mouseWheel: ScrollAction.pan);
+  static const wheelPans = GesturePolicy(mouseWheel: ScrollSignalAction.pan);
 
   /// The browser question, answered. Pure, and tested on the VM.
   static GesturePolicy forBrowser({required bool firefox}) =>

@@ -1,9 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart' show HardwareKeyboard;
-// `widgets.dart` exports its own `ScrollAction` (an `Action<ScrollIntent>`
-// for keyboard scrolling), which collides with `GesturePolicy`'s
-// `ScrollAction` enum used unqualified below.
-import 'package:flutter/widgets.dart' hide ScrollAction;
+import 'package:flutter/widgets.dart';
 
 import 'camera_controller.dart';
 import 'gesture_policy.dart';
@@ -94,19 +91,19 @@ class _CameraGestureDetectorState extends State<CameraGestureDetector> {
     final policy = widget.policy;
     final keyboard = HardwareKeyboard.instance;
     final action = keyboard.isControlPressed || keyboard.isMetaPressed
-        ? ScrollAction.zoom
+        ? ScrollSignalAction.zoom
         : event.kind == PointerDeviceKind.trackpad
-            ? ScrollAction.pan
+            ? ScrollSignalAction.pan
             : policy.mouseWheel;
     switch (action) {
-      case ScrollAction.zoom:
+      case ScrollSignalAction.zoom:
         // Scroll up is negative dy on every platform Flutter reports.
         camera.zoomAt(
             event.localPosition,
             event.scrollDelta.dy < 0
                 ? policy.wheelZoomStep
                 : 1 / policy.wheelZoomStep);
-      case ScrollAction.pan:
+      case ScrollSignalAction.pan:
         // `scrollDelta` is content-scroll: positive dy is "scroll down", the
         // content moves up, so the camera pans by the negation.
         camera.panBy(-event.scrollDelta);

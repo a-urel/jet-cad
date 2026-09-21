@@ -5,14 +5,14 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 void main() {
   test('wheelZooms: a mouse-kind scroll zooms, 1.1 per notch, middle drag', () {
     const p = GesturePolicy.wheelZooms;
-    expect(p.mouseWheel, ScrollAction.zoom);
+    expect(p.mouseWheel, ScrollSignalAction.zoom);
     expect(p.wheelZoomStep, 1.1);
     expect(p.panButtons, kMiddleMouseButton);
   });
 
   test('wheelPans: a mouse-kind scroll pans; the rest is the same', () {
     const p = GesturePolicy.wheelPans;
-    expect(p.mouseWheel, ScrollAction.pan);
+    expect(p.mouseWheel, ScrollSignalAction.pan);
     expect(p.wheelZoomStep, GesturePolicy.wheelZooms.wheelZoomStep);
     expect(p.panButtons, GesturePolicy.wheelZooms.panButtons);
   });
