@@ -110,12 +110,23 @@ class _CameraGestureDetectorState extends State<CameraGestureDetector> {
     }
   }
 
+  /// A drag with a pan button held pans by the pointer's own delta. Any
+  /// other button does nothing here: the left button belongs to selection
+  /// (sub-project 02), and leaving it free now is cheaper than unpicking a
+  /// learned behaviour later.
+  void _onMove(PointerMoveEvent event) {
+    if (event.buttons & widget.policy.panButtons != 0) {
+      widget.camera.panBy(event.delta);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Listener(
         behavior: HitTestBehavior.opaque,
         onPointerPanZoomStart: _onPanZoomStart,
         onPointerPanZoomUpdate: _onPanZoomUpdate,
         onPointerSignal: _onSignal,
+        onPointerMove: _onMove,
         child: widget.child,
       );
 }
