@@ -49,8 +49,8 @@ void main() {
     final fit = ViewportTransform.fit(doc.extents, const Size(1440, 900));
     // ignore: avoid_print
     print('STARTUP fit scale ${fit.scale} px/mm; '
-        'min ${kMinScale} (${fit.scale / kMinScale}x out), '
-        'max ${kMaxScale} (${kMaxScale / fit.scale}x in)');
+        'min $kMinScale (${fit.scale / kMinScale}x out), '
+        'max $kMaxScale (${kMaxScale / fit.scale}x in)');
     expect(fit.scale / kMinScale, greaterThan(10));
     expect(kMaxScale / fit.scale, greaterThan(100));
   });
