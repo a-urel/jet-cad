@@ -74,6 +74,73 @@ Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01
 
 ---
 
+## Plan 01 — the app skeleton (on `plan-01/app-skeleton`, not merged)
+
+**Plan 01 gave the product line its first sub-project** — `apps/floor_planner`,
+a real product application that opens a resizable 1440×900 window, shows a
+hand-written 523-entity floor plan on a `DraftCanvas`, and pans and zooms with
+a trackpad and a mouse, on macOS and (its first-ever web build)
+`jet_cad_2d_flutter` compiled for a browser. Ten tasks,
+`717b9cd..5cab91a` on branch `plan-01/app-skeleton`, worktree
+`.claude/worktrees/plan-01-app-skeleton` (cut from `main` at `717b9cd`). **NOT
+merged — the exit gate is 11 of 12 and the twelfth (a human's look, on macOS
+and in two browser families) is OWED; the merge is the human's decision after
+that look.** Spec:
+[2026-09-21-floor-planner-app-skeleton-design.md](docs/superpowers/specs/2026-09-21-floor-planner-app-skeleton-design.md)
+(revision 2). Plan:
+[2026-09-21-floor-planner-app-skeleton.md](docs/superpowers/plans/2026-09-21-floor-planner-app-skeleton.md).
+Results:
+[2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
+Mutation log:
+[plan-01-mutation-log.md](docs/superpowers/notes/plan-01-mutation-log.md) —
+sixteen named mutations, 16 killed (M-01b survived a degenerate pinch
+fixture on the first shot and was killed after the fixture was fixed to
+ramp its cumulative scale), one declared equivalent (E-01e′, the
+`forPlatform` mutant — `kIsWeb` is compile-time `false` under `flutter
+test`), **zero true survivors.**
+
+**Delivered:** `CameraController` bounds (`minScale`/`maxScale`, landing on
+the bound and resting silently), `GesturePolicy` (`wheelZooms`/`wheelPans`,
+`forBrowser`, `forPlatform`), `CameraGestureDetector` — all three new in
+`packages/jet_cad_2d_flutter` — and the product app itself:
+`apps/floor_planner`'s shell, `PlannerView`, the startup document and three
+empty chrome slots.
+
+**Three rulings a reader must know.** The spec's `enum ScrollAction` collided
+with Flutter's own exported `class ScrollAction`
+(`widgets/scrollable_helpers.dart:410`) and was renamed to
+`ScrollSignalAction` throughout the package, the widget and the tests (Task
+4). `flutter create`'s generated `lib/main.dart` used dot-shorthand syntax
+needing Dart 3.13, above this workspace's `sdk: ^3.5.0` floor, so Task 6's
+placeholder is a minimal hand-written `main.dart` at language 3.5 rather than
+raising every workspace member's floor; Task 8 overwrote it anyway. And the
+five text-golden failures in `jet_cad_2d_flutter` are the same pre-existing
+Skia/SDK drift `STATUS.md` already tracked (goldens from 2026-08-24, SDK
+3.47.2) — this plan's flutter-package bar is 702 pass, 1 skip, those same
+five failures and no other.
+
+### What Plan 01 measured
+
+| quantity | value |
+|---|---|
+| `apps/dev_harness_2d` | **82** at the branch point, **82** at the head — unedited (`git diff --stat 717b9cd..HEAD -- apps/dev_harness_2d` is empty) |
+| `jet_cad_2d` | **798** pass |
+| `jet_cad_2d_flutter` | **702** pass, 1 skip, the same five pre-existing golden failures |
+| `apps/floor_planner` | **7** tests; `flutter build macos --debug` and `flutter build web` both `✓ Built` — the package's first-ever web build |
+| the startup document | **523** entities, off-origin, within the 500–1,000 target band |
+| the clamp check (D4) | `STARTUP fit scale 0.095 px/mm; min 0.001 (95.0x out), max 100.0 (1052.6315789473683x in)` — both constants unchanged |
+| mutations | **16 killed** (M-01b after a fixture fix), **1 equivalent** (E-01e′, declared), **zero survivors** |
+| the window | **all twelve macOS/browser checks OWED — not looked at; the human looks after this branch is presented** |
+
+**Exit gate: 11 of 12.** Criteria 1–11 PASS, each with its witness (build
+tails, the four widget-test files, the mutation log, the empty harness diff,
+the eleven green gate commands); criterion 12 (a human looks, on macOS and in
+both browser families) is **OWED**, in those words, not PASS and not a MISS —
+no device run or visual judgement was simulated to fill it in. Full account:
+[2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
+
+---
+
 ## Plan F — rebuild triggers and the band (MERGED into `main` at `a8208d1`)
 
 **Plan F gave the GPU-resident backend its rebuild triggers, the watermark
@@ -892,10 +959,15 @@ The review's one blocker that reopened a decision (the web scroll rule: the
 engine *does* tag browser wheel events trackpad-vs-mouse by a heuristic,
 except on Firefox) was re-decided by the human as "wheel zooms and trackpad
 scroll pans on desktop and Chromium/WebKit; everything pans on Firefox". **Its
-plan is written**, ten tasks:
+plan was written**, ten tasks:
 [2026-09-21-floor-planner-app-skeleton.md](docs/superpowers/plans/2026-09-21-floor-planner-app-skeleton.md),
-not yet executed; it runs on `plan-01/app-skeleton` in its own worktree
-when it starts. The other twelve have not started.
+**and has now executed on `plan-01/app-skeleton` in its own worktree, all ten
+tasks, `717b9cd..5cab91a`. The exit gate is 11 of 12, with the twelfth — a
+human's look, on macOS and in both browser families — OWED; merging is the
+human's call after that look.** See
+[Plan 01](#plan-01--the-app-skeleton-on-plan-01app-skeleton-not-merged) and
+[2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
+The other twelve sub-projects have not started.
 
 **The web coupling is resolved and it went the expensive way.** This section
 used to say "Plan G matters only if the product targets web". **The human

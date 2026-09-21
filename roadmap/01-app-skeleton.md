@@ -1,6 +1,6 @@
 # 01 — App skeleton
 
-**Status:** not started
+**Status:** spec 2026-09-21 (rev 2), plan 2026-09-21, executed on plan-01/app-skeleton, the human's look OWED
 **Depends on:** nothing
 **Blocks:** everything
 **Size:** S
