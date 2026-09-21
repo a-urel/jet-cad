@@ -1127,6 +1127,80 @@ no longer returns `same(GesturePolicy.wheelPans)`.
 
 ---
 
+## M-01r — no `dy == 0` guard on the zoom arm
+
+Added by the final review (whole-branch, post-Task-10 fix wave), not the
+original sixteen: a horizontal-only wheel notch (a tilt wheel, or a
+horizontal mouse scroll) reports `scrollDelta.dy == 0`, and the zoom arm's
+`dy < 0 ? wheelZoomStep : 1 / wheelZoomStep` took the `else` branch for it,
+zooming out on a signal with no zoom direction. Fixed with a guard, witnessed
+in `camera_gesture_signal_test.dart`'s `'mouse-kind scroll, no modifier'`
+group.
+
+**File:** `lib/src/camera_gesture_detector.dart`, `_onSignal`,
+`ScrollSignalAction.zoom` case
+
+**Diff applied:**
+
+```diff
+       case ScrollSignalAction.zoom:
+-        // A horizontal-only signal has no zoom direction; it is not an
+-        // unmarked zoom-out.
+-        if (event.scrollDelta.dy == 0) return;
+         // Scroll up is negative dy on every platform Flutter reports.
+         camera.zoomAt(
+```
+
+**Command:** `CI=true flutter test test/camera_gesture_signal_test.dart`
+
+**Verbatim output (tail):**
+
+```
+  Actual: Transform2:<Transform2(3.454545454545454, 0.0, 0.0, -3.454545454545454,
+-3439.090909090909, 7152.727272727273)>
+
+When the exception was thrown, this was the stack:
+#4      main.<anonymous closure>.<anonymous closure> (file:///Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-01-app-skeleton/packages/jet_cad_2d_flutter/test/camera_gesture_signal_test.dart:86:7)
+<asynchronous suspension>
+#5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1953:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+This was caught by the test expectation on the following line:
+  file:///Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-01-app-skeleton/packages/jet_cad_2d_flutter/test/camera_gesture_signal_test.dart line 86
+The test description was:
+  wheelZooms: a horizontal-only notch does nothing
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:00 +3 -1: mouse-kind scroll, no modifier wheelZooms: a horizontal-only notch does nothing [E]
+  Test failed. See exception logs above.
+  The test description was: wheelZooms: a horizontal-only notch does nothing
+  
+00:00 +3 -1: trackpad-kind scroll (a Chromium/WebKit browser trackpad) pans by -scrollDelta under wheelZooms
+00:00 +4 -1: trackpad-kind scroll (a Chromium/WebKit browser trackpad) pans by -scrollDelta under wheelPans
+00:00 +5 -1: modifier held Control Left + mouse scroll zooms about the pointer under wheelZooms
+00:00 +6 -1: modifier held Control Left + mouse scroll zooms about the pointer under wheelPans
+00:00 +7 -1: modifier held Meta Left + mouse scroll zooms about the pointer under wheelZooms
+00:00 +8 -1: modifier held Meta Left + mouse scroll zooms about the pointer under wheelPans
+00:00 +9 -1: PointerScaleEvent (browser pinch, ctrl+wheel on Windows/Linux) zooms by the event scale about the pointer, compounding, under wheelZooms
+00:00 +10 -1: PointerScaleEvent (browser pinch, ctrl+wheel on Windows/Linux) zooms by the event scale about the pointer, compounding, under wheelPans
+00:00 +11 -1: PointerScaleEvent (browser pinch, ctrl+wheel on Windows/Linux) a scale below 1 zooms out
+00:00 +12 -1: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-01-app-skeleton/packages/jet_cad_2d_flutter/test/camera_gesture_signal_test.dart: mouse-kind scroll, no modifier wheelZooms: a horizontal-only notch does nothing
+```
+
+**Restore:** `cp /tmp/mut.bak lib/src/camera_gesture_detector.dart` — `git status --short` clean apart from the intended `camera_gesture_detector.dart` and `camera_gesture_signal_test.dart` changes.
+
+**Verdict: KILLED** — without the guard, `camera.value.worldToScreenMatrix`
+is no longer `same` as before the horizontal-only notch: the mutant zooms out
+by `1 / wheelZoomStep` on a signal that carries no zoom direction.
+
+---
+
 ## E-01e′ — `forPlatform` ignores `kIsWeb` (declared EQUIVALENT, spec D2)
 
 **File:** `lib/src/gesture_policy.dart`, `forPlatform`
@@ -1209,14 +1283,14 @@ call sites; the only executable uses are the `import` and the ternary at
 
 ## Summary
 
-**Sixteen named mutations (M-01a..M-01q, M-01h struck) fired: 16 killed,
-0 survived. M-01b survived on the first shot (degenerate fixture: the
-witness repeated the same cumulative `scale`, and the widget's own
-exact-equality coalescing guard let only the first update reach `zoomAt`),
-and was killed after a fixture fix in its own commit (round 1) that ramps
-the pinch witness through three different cumulative values. One
-spec-declared-equivalent mutation (E-01e′) fired and its green run
-recorded.**
+**Seventeen named mutations (M-01a..M-01q, M-01h struck, plus M-01r added by
+the final review) fired: 17 killed, 0 survived. M-01b survived on the first
+shot (degenerate fixture: the witness repeated the same cumulative `scale`,
+and the widget's own exact-equality coalescing guard let only the first
+update reach `zoomAt`), and was killed after a fixture fix in its own commit
+(round 1) that ramps the pinch witness through three different cumulative
+values. One spec-declared-equivalent mutation (E-01e′) fired and its green
+run recorded.**
 
 | id | verdict |
 |---|---|
@@ -1236,6 +1310,7 @@ recorded.**
 | M-01o | KILLED — notifications 2 where 0 at rest on a bound |
 | M-01p | KILLED — trackpad-kind scroll zooms under wheelZooms instead of panning |
 | M-01q | KILLED — `forBrowser(firefox: true)` no longer `same(wheelPans)` |
+| M-01r | KILLED — matrix not `same`: a horizontal-only notch (`dy == 0`) zoomed out |
 | E-01e′ | EQUIVALENT (spec-declared, D2) — fired, green run recorded; only the five pre-existing golden failures survive the run |
 
 ### M-01b, resolved in round 1

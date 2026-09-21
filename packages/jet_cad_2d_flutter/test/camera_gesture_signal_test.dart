@@ -74,6 +74,17 @@ void main() {
       expect(after.dx - before.dx, closeTo(0, 1e-9));
       expect(camera.value.scale, scaleBefore);
     });
+
+    // A tilt wheel or a horizontal mouse scroll reports dy == 0. It has no
+    // zoom direction; treating it as "not up" would zoom out on every tick.
+    testWidgets('wheelZooms: a horizontal-only notch does nothing',
+        (tester) async {
+      final camera = fitOffOrigin();
+      await pumpDetector(tester, camera, GesturePolicy.wheelZooms);
+      final before = camera.value.worldToScreenMatrix;
+      await sendScroll(tester, PointerDeviceKind.mouse, const Offset(120, 0));
+      expect(camera.value.worldToScreenMatrix, same(before));
+    });
   });
 
   group('trackpad-kind scroll (a Chromium/WebKit browser trackpad)', () {

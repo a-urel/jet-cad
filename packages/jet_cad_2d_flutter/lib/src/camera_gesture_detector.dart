@@ -97,6 +97,9 @@ class _CameraGestureDetectorState extends State<CameraGestureDetector> {
             : policy.mouseWheel;
     switch (action) {
       case ScrollSignalAction.zoom:
+        // A horizontal-only signal has no zoom direction; it is not an
+        // unmarked zoom-out.
+        if (event.scrollDelta.dy == 0) return;
         // Scroll up is negative dy on every platform Flutter reports.
         camera.zoomAt(
             event.localPosition,

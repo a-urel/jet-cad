@@ -298,6 +298,11 @@ pans under every policy, and only Firefox never produces one. A
 `PointerScaleEvent` zooms and a `PointerPanZoom*` sequence pans-and-zooms
 under every policy.
 
+**A scroll signal with `dy == 0` has no zoom direction.** A tilt wheel or a
+horizontal mouse scroll reports it; on the zoom arm it does nothing (it is
+not an unmarked zoom-out), on the pan arm it pans by `-dx` like any other.
+Found by the final review; mutant M-01r.
+
 **Misclassification is the engine's, accepted and named.** The heuristic can
 tag a trackpad flick `mouse` (a delta that happens to be a multiple of 120
 with no trackpad event in the last 50 ms) or an accelerated wheel `trackpad`;
@@ -633,6 +638,8 @@ New, and all of them exist because of the two findings above:
 - **M-01q** — make `GesturePolicy.forBrowser` return `wheelZooms` for
   `firefox: true`. The pure `forBrowser` test goes red. *(The half of
   `forPlatform()` the VM can reach.)*
+- **M-01r** — delete the `dy == 0` guard on the zoom arm. The
+  horizontal-notch test goes red.
 
 ### Cross-policy consistency, and what it cannot see
 
