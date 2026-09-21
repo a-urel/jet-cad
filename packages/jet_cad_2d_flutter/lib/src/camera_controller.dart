@@ -34,8 +34,28 @@ Vector2 rebaseOriginFor(Aabb2 visibleWorld) {
 
 /// The camera. A `ValueNotifier` so a change repaints inside a
 /// `RepaintBoundary` without rebuilding the widget tree.
+///
+/// [minScale] and [maxScale] bound [ViewportTransform.scale] — the geometric
+/// mean of the axis scales, the number stroke widths divide by. They default
+/// to unbounded so a caller that passes nothing (the measurement harness) is
+/// unaffected. The clamp lives here, not in a gesture widget, because a
+/// keyboard zoom, a zoom-to-fit and a zoom-to-selection all pass through
+/// [zoomAt] and a clamp in a widget guards only one of them.
 class CameraController extends ValueNotifier<ViewportTransform> {
-  CameraController(super.initial);
+  CameraController(
+    super.initial, {
+    this.minScale = 0.0,
+    this.maxScale = double.infinity,
+  })  : assert(minScale >= 0.0),
+        assert(maxScale > minScale);
+
+  final double minScale;
+  final double maxScale;
+
+  /// The bound decisions compare a *derived* scale — `sqrt(|det|)` after a
+  /// three-matrix product — against a bound, so they are geometric decisions
+  /// and use a tolerance, not `==` (spec invariant 6).
+  static const Tolerance _tolerance = Tolerance.standard;
 
   void panBy(Offset screenDelta) {
     final m = value.worldToScreenMatrix;
@@ -52,14 +72,29 @@ class CameraController extends ValueNotifier<ViewportTransform> {
   /// [ViewportTransform] constructor would throw there, taking the gesture and
   /// the frame with it. Holding the camera still is the only meaning a
   /// zero-scale zoom could have.
+  ///
+  /// A result past a bound **lands on the bound**: the factor is reduced so
+  /// the resulting scale is the bound, and the zoom still happens about
+  /// [screenFocus]. Rejecting the gesture instead would make the view stick
+  /// and jump. A gesture that pushes against a bound the camera already rests
+  /// on returns before assigning, so nothing is notified and nothing repaints.
   void zoomAt(Offset screenFocus, double factor) {
     if (!factor.isFinite || factor <= 0) return;
+    final current = value.scale;
+    var f = factor;
+    if (f > 1.0) {
+      if (_tolerance.compare(current, maxScale) >= 0) return;
+      if (_tolerance.compare(current * f, maxScale) > 0) f = maxScale / current;
+    } else if (f < 1.0) {
+      if (_tolerance.compare(current, minScale) <= 0) return;
+      if (_tolerance.compare(current * f, minScale) < 0) f = minScale / current;
+    }
     final m = value.worldToScreenMatrix;
     // The argument of `multiply` is applied first, so this scales in screen
     // space *after* the camera. Reversed, it would scale in world space and
     // the point under the cursor would drift.
     final about = Transform2.translation(screenFocus.dx, screenFocus.dy)
-        .multiply(Transform2.scale(factor, factor))
+        .multiply(Transform2.scale(f, f))
         .multiply(Transform2.translation(-screenFocus.dx, -screenFocus.dy));
     value = ViewportTransform(worldToScreenMatrix: about.multiply(m));
   }

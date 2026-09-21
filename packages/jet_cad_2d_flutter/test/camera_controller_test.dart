@@ -145,6 +145,82 @@ void main() {
       }
     });
   });
+
+  group('CameraController bounds', () {
+    // Off-origin world, non-identity fit: 100 x 50 into 800 x 600 gives a
+    // scale of 0.95 * min(8, 12) = 7.6. A fixture at scale 1.0 could not
+    // tell "clamp the factor" from "clamp the result" (spec, M-01l).
+    CameraController bounded({double minScale = 0.5, double maxScale = 12.0}) =>
+        CameraController(
+          ViewportTransform.fit(Aabb2(Vector2(1000, 2000), Vector2(1100, 2050)),
+              const Size(800, 600)),
+          minScale: minScale,
+          maxScale: maxScale,
+        );
+    const focus = Offset(130, 470);
+    const tol = Tolerance.standard;
+
+    test('defaults are unbounded, so an unbounded caller is unchanged', () {
+      final camera = CameraController(ViewportTransform.fit(
+          Aabb2(Vector2(0, 0), Vector2(100, 100)), const Size(800, 600)));
+      expect(camera.minScale, 0.0);
+      expect(camera.maxScale, double.infinity);
+      final before = camera.value.scale;
+      camera.zoomAt(focus, 1e6);
+      expect(camera.value.scale, closeTo(before * 1e6, before * 1e6 * 1e-12));
+    });
+
+    test('an oversized zoom in lands on maxScale, not past it', () {
+      final camera = bounded();
+      expect(camera.value.scale, closeTo(7.6, 1e-9), reason: 'fixture');
+      final under = camera.value.screenToWorld(Vector2(focus.dx, focus.dy));
+      camera.zoomAt(focus, 10.0);
+      expect(tol.eq(camera.value.scale, 12.0), isTrue,
+          reason: 'landed on the bound: ${camera.value.scale}');
+      final after = camera.value.screenToWorld(Vector2(focus.dx, focus.dy));
+      expect(after.x, closeTo(under.x, 1e-9));
+      expect(after.y, closeTo(under.y, 1e-9),
+          reason: 'the clamp still zooms about the focus');
+    });
+
+    test('an oversized zoom out lands on minScale', () {
+      final camera = bounded();
+      camera.zoomAt(focus, 0.01);
+      expect(tol.eq(camera.value.scale, 0.5), isTrue,
+          reason: 'landed on the bound: ${camera.value.scale}');
+    });
+
+    test('a zoom that stays inside the bounds is not clamped', () {
+      final camera = bounded();
+      camera.zoomAt(focus, 1.5);
+      expect(camera.value.scale, closeTo(7.6 * 1.5, 1e-9));
+    });
+
+    test('at a bound, pushing further does not notify', () {
+      final camera = bounded();
+      camera.zoomAt(focus, 10.0);
+      var notifications = 0;
+      camera.addListener(() => notifications++);
+      camera.zoomAt(focus, 10.0);
+      camera.zoomAt(focus, 1.0001);
+      expect(notifications, 0, reason: 'at rest on maxScale');
+
+      camera.zoomAt(focus, 0.001);
+      expect(notifications, 1, reason: 'zooming back out is a real change');
+      notifications = 0;
+      camera.zoomAt(focus, 0.5);
+      expect(notifications, 0, reason: 'at rest on minScale');
+    });
+
+    test('zoomAt still ignores a singular factor with bounds set', () {
+      final camera = bounded();
+      final before = camera.value.worldToScreenMatrix;
+      for (final f in [0.0, -1.0, double.nan, double.infinity]) {
+        camera.zoomAt(focus, f);
+      }
+      expect(camera.value.worldToScreenMatrix, same(before));
+    });
+  });
 }
 
 double _toFloat32(double v) => (Float32List(1)..[0] = v)[0];
