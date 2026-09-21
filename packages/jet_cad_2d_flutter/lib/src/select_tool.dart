@@ -1,7 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui' show Canvas, Offset, Paint, Path, PaintingStyle, Rect, Size;
 
-import 'package:flutter/services.dart' show KeyEvent;
+import 'package:flutter/services.dart'
+    show KeyDownEvent, KeyEvent, LogicalKeyboardKey;
 import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -20,8 +21,7 @@ const double kPickRadiusPixels = 6.0;
 const double kBandSlopPixels = 4.0;
 
 /// Hover, click, shift-click and rubber-band selection (spec D1, D2, D7,
-/// D8). Keyboard handling (Delete, Escape) is Task 6's; [onKey] is a no-op
-/// here.
+/// D8), plus Escape and Delete/Backspace (spec D3, D10).
 class SelectTool extends Tool {
   SelectTool();
 
@@ -204,8 +204,87 @@ class SelectTool extends Tool {
   }
 
   @override
-  KeyEventResult onKey(KeyEvent event, ToolContext ctx) =>
-      KeyEventResult.ignored;
+  KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape) {
+      if (_phase == ToolPhase.dragging) {
+        cancel(ctx);
+      } else if (_phase == ToolPhase.idle) {
+        ctx.selection.clear();
+      }
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.delete ||
+        key == LogicalKeyboardKey.backspace) {
+      if (_phase != ToolPhase.idle) return KeyEventResult.ignored;
+      _deleteSelection(ctx);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// Per selected key, in ascending `target` order: builds the object's full
+  /// command list, checks every command against [DraftPermissions] before
+  /// executing any of them, and only removes the selection entry once the
+  /// whole list has run. A refused object is skipped whole — it stays
+  /// selected and untouched — never partially deleted.
+  void _deleteSelection(ToolContext ctx) {
+    final doc = ctx.document;
+    final permissions = doc.commands.permissions;
+    final keys = ctx.selection.keys.toList()
+      ..sort((a, b) => a.target.value.compareTo(b.target.value));
+    Map<Handle, List<int>>? byOwner;
+    for (final key in keys) {
+      final List<DraftCommand> list;
+      final node = doc.tree[key.target];
+      if (node is GroupNode) {
+        byOwner ??= doc.leavesByOwner();
+        list = _groupCascade(doc, node, byOwner);
+      } else if (node is InstanceNode) {
+        list = [RemoveNodeCommand(key.target)];
+      } else if (doc.entities.slotOf(key.target) != null) {
+        list = [RemoveEntityCommand(key.target)];
+      } else {
+        continue;
+      }
+      if (!list.every((c) => permissions.allows(c.capability))) continue;
+      for (final c in list) {
+        ctx.execute(c);
+      }
+      ctx.selection.remove([key]);
+    }
+  }
+
+  /// Leaves first (fills whose boundary is here skipped), child instances,
+  /// nested groups recursively, the group last.
+  List<DraftCommand> _groupCascade(
+      DraftDocument doc, GroupNode group, Map<Handle, List<int>> byOwner) {
+    final out = <DraftCommand>[];
+    final leaves = byOwner[group.handle] ?? const <int>[];
+    final boundaries = <Handle>{};
+    for (final slot in leaves) {
+      if (doc.entities.kindAt(slot) != EntityKind.fill) {
+        boundaries.add(doc.entities.handleAt(slot));
+      }
+    }
+    final skip = <Handle>{for (final b in boundaries) ...doc.fills.fillsOf(b)};
+    for (final slot in leaves) {
+      final h = doc.entities.handleAt(slot);
+      if (skip.contains(h)) continue;
+      out.add(RemoveEntityCommand(h));
+    }
+    for (final child in doc.tree.childNodesOf(group.children)) {
+      final n = doc.tree[child];
+      if (n is GroupNode) {
+        out.addAll(_groupCascade(doc, n, byOwner));
+      } else if (n is InstanceNode) {
+        out.add(RemoveNodeCommand(child));
+      }
+    }
+    out.add(RemoveNodeCommand(group.handle));
+    return out;
+  }
 
   @override
   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {

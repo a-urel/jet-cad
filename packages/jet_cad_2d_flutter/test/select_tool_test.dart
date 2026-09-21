@@ -1,8 +1,15 @@
+import 'dart:typed_data';
 import 'dart:ui' show Offset, Rect;
 
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/services.dart'
-    show KeyDownEvent, LogicalKeyboardKey, PhysicalKeyboardKey;
+    show
+        KeyDownEvent,
+        KeyRepeatEvent,
+        KeyUpEvent,
+        LogicalKeyboardKey,
+        PhysicalKeyboardKey;
+import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart';
@@ -12,6 +19,29 @@ import 'package:jet_cad_2d_flutter/src/tool.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import 'support/selection_fixture.dart';
+
+KeyDownEvent _deleteDown() => const KeyDownEvent(
+    physicalKey: PhysicalKeyboardKey.delete,
+    logicalKey: LogicalKeyboardKey.delete,
+    timeStamp: Duration.zero);
+KeyUpEvent _deleteUp() => const KeyUpEvent(
+    physicalKey: PhysicalKeyboardKey.delete,
+    logicalKey: LogicalKeyboardKey.delete,
+    timeStamp: Duration.zero);
+KeyRepeatEvent _deleteRepeat() => const KeyRepeatEvent(
+    physicalKey: PhysicalKeyboardKey.delete,
+    logicalKey: LogicalKeyboardKey.delete,
+    timeStamp: Duration.zero);
+KeyDownEvent _escapeDown() => const KeyDownEvent(
+    physicalKey: PhysicalKeyboardKey.escape,
+    logicalKey: LogicalKeyboardKey.escape,
+    timeStamp: Duration.zero);
+
+/// Copied from `region_command_test.dart`'s `squareLoop()`, never imported
+/// from a test file.
+GeometryPayload _squareLoop() => GeometryPayload(
+    coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
+    scalars: Float64List(0));
 
 /// A synthetic pointer sample: `screen` converted through [camera] into
 /// world space and a pick radius of [kPickRadiusPixels] screen pixels
@@ -394,5 +424,217 @@ void main() {
     expect(tool.bandScreen, isNull);
     expect(selection.length, 1);
     expect(selection.contains(SelectionKey.root(lineA)), isTrue);
+  });
+
+  group('keys and delete', () {
+    test('Escape when idle clears', () {
+      final doc = DraftDocument.empty();
+      final lineA = addEntity(
+          doc, doc.rootHandle, EntityKind.line, [990, 500, 1010, 500], []);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final camera = cameraAt(2.0, const Offset(-1600, 1300));
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      final tool = SelectTool();
+      selection.replace([SelectionKey.root(lineA)]);
+
+      final result = tool.onKey(_escapeDown(), ctx);
+
+      expect(result, KeyEventResult.handled);
+      expect(selection.isEmpty, isTrue);
+      expect(tool.phase, ToolPhase.idle);
+    });
+
+    test('a KeyUpEvent and a KeyRepeatEvent do nothing', () {
+      // M-02x at tool level.
+      final doc = DraftDocument.empty();
+      final lineA = addEntity(
+          doc, doc.rootHandle, EntityKind.line, [990, 500, 1010, 500], []);
+      final lineB = addEntity(
+          doc, doc.rootHandle, EntityKind.line, [990, 650, 1010, 650], []);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final camera = cameraAt(2.0, const Offset(-1600, 1300));
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      final tool = SelectTool();
+      selection.replace([SelectionKey.root(lineA), SelectionKey.root(lineB)]);
+
+      final upResult = tool.onKey(_deleteUp(), ctx);
+      final repeatResult = tool.onKey(_deleteRepeat(), ctx);
+
+      expect(upResult, KeyEventResult.ignored);
+      expect(repeatResult, KeyEventResult.ignored);
+      expect(doc.entities.slotOf(lineA), isNotNull);
+      expect(doc.entities.slotOf(lineB), isNotNull);
+      expect(selection.length, 2);
+    });
+
+    test(
+        'Delete removes a leaf and an instance through the log; undo '
+        'restores geometry, not selection', () {
+      final doc = DraftDocument.empty();
+      final leaf = addEntity(
+          doc, doc.rootHandle, EntityKind.line, [990, 500, 1010, 500], []);
+      final def = addDefinition(doc, 'Def');
+      addEntity(doc, def, EntityKind.line, [0, 0, 2, 0], []);
+      final instance = addInstance(doc, def, kPlacement);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final camera = cameraAt(2.0, const Offset(-1600, 1300));
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      final tool = SelectTool();
+      selection.replace([SelectionKey.root(leaf), SelectionKey.root(instance)]);
+
+      final result = tool.onKey(_deleteDown(), ctx);
+
+      expect(result, KeyEventResult.handled);
+      expect(doc.entities.slotOf(leaf), isNull);
+      expect(doc.tree[instance], isNull);
+      expect(selection.isEmpty, isTrue);
+
+      doc.commands.undo();
+      doc.commands.undo();
+
+      expect(doc.entities.slotOf(leaf), isNotNull);
+      expect(doc.tree[instance], isNotNull);
+      expect(selection.isEmpty, isTrue,
+          reason: 'undo replays the command log; it never restores the '
+              "selection controller's own state");
+    });
+
+    test(
+        'Delete cascades a group: leaves, child instance, nested group, '
+        'then the group', () {
+      // M-02j.
+      final doc = DraftDocument.empty();
+      final group =
+          addGroup(doc, doc.rootHandle, Transform2.translation(500, 300));
+      final leafA = addEntity(doc, group, EntityKind.line, [0, 0, 2, 0], []);
+      final leafB = addEntity(doc, group, EntityKind.line, [5, 0, 7, 0], []);
+      final def = addDefinition(doc, 'Def');
+      addEntity(doc, def, EntityKind.line, [0, 0, 1, 0], []);
+      final childInstance = addInstance(doc, def, kPlacement, parent: group);
+      final nestedGroup = addGroup(doc, group, Transform2.translation(20, 0));
+      final nestedLeaf =
+          addEntity(doc, nestedGroup, EntityKind.line, [0, 0, 1, 0], []);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final camera = cameraAt(2.0, const Offset(-1600, 1300));
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      final tool = SelectTool();
+      selection.replace([SelectionKey.root(group)]);
+
+      final result = tool.onKey(_deleteDown(), ctx);
+
+      expect(result, KeyEventResult.handled);
+      expect(doc.entities.slotOf(leafA), isNull);
+      expect(doc.entities.slotOf(leafB), isNull);
+      expect(doc.entities.slotOf(nestedLeaf), isNull);
+      expect(doc.tree[childInstance], isNull);
+      expect(doc.tree[nestedGroup], isNull);
+      expect(doc.tree[group], isNull);
+      expect(doc.commands.canUndo, isTrue);
+    });
+
+    test(
+        "a region inside a group is deleted once: the boundary's command "
+        'takes the fill', () {
+      final doc = DraftDocument.empty();
+      final group =
+          addGroup(doc, doc.rootHandle, Transform2.translation(200, 100));
+      final region = AddRegionCommand.allocate(
+        seed: doc.handleSeed,
+        owner: group,
+        boundaryKind: EntityKind.polyline,
+        boundaryPayload: _squareLoop(),
+        layer: ReservedHandles.layerZero,
+        fillColor: const TrueColor(0x3366CC),
+        boundaryColor: const TrueColor(0x000000),
+      );
+      doc.commands.execute(region);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final camera = cameraAt(2.0, const Offset(-1600, 1300));
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      final tool = SelectTool();
+      selection.replace([SelectionKey.root(group)]);
+
+      expect(() => tool.onKey(_deleteDown(), ctx), returnsNormally);
+      expect(doc.entities.slotOf(region.fill.handle), isNull);
+      expect(doc.entities.slotOf(region.boundary.handle), isNull);
+      expect(doc.tree[group], isNull);
+    });
+
+    test('a read-only document is selectable and Delete is a no-op', () {
+      // M-02n.
+      final doc = DraftDocument.empty(permissions: DraftPermissions.readOnly);
+      // The document is read-only from construction; permissions is a
+      // mutable field on the dispatcher (see `command_test.dart`'s own
+      // `dispatcher.permissions = ...` idiom), flipped here only long enough
+      // to seed the fixture, then restored before the Delete under test.
+      doc.commands.permissions = DraftPermissions.all;
+      final leaf = addEntity(
+          doc, doc.rootHandle, EntityKind.line, [990, 500, 1010, 500], []);
+      doc.commands.permissions = DraftPermissions.readOnly;
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final camera = cameraAt(2.0, const Offset(-1600, 1300));
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      final tool = SelectTool();
+      selection.replace([SelectionKey.root(leaf)]);
+
+      expect(() => tool.onKey(_deleteDown(), ctx), returnsNormally);
+      expect(doc.entities.slotOf(leaf), isNotNull);
+      expect(selection.contains(SelectionKey.root(leaf)), isTrue);
+    });
+
+    test('a refused object stays selected, a permitted one goes', () {
+      final doc = DraftDocument.empty();
+      final leaf = addEntity(
+          doc, doc.rootHandle, EntityKind.line, [990, 500, 1010, 500], []);
+      final def = addDefinition(doc, 'Def');
+      addEntity(doc, def, EntityKind.line, [0, 0, 2, 0], []);
+      final instance = addInstance(doc, def, kPlacement);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final camera = cameraAt(2.0, const Offset(-1600, 1300));
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      final tool = SelectTool();
+      selection.replace([SelectionKey.root(leaf), SelectionKey.root(instance)]);
+      doc.commands.permissions = const DraftPermissions(
+          transform: false,
+          components: false,
+          geometry: true,
+          structure: false);
+
+      final result = tool.onKey(_deleteDown(), ctx);
+
+      expect(result, KeyEventResult.handled);
+      expect(doc.entities.slotOf(leaf), isNull);
+      expect(doc.tree[instance], isNotNull);
+      expect(selection.contains(SelectionKey.root(instance)), isTrue);
+      expect(selection.contains(SelectionKey.root(leaf)), isFalse);
+    });
   });
 }
