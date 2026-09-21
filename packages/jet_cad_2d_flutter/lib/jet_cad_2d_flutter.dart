@@ -8,6 +8,7 @@ export 'src/draft_canvas.dart';
 export 'src/draft_painter.dart';
 export 'src/draw_sink.dart';
 export 'src/flutter_text_measurer.dart';
+export 'src/gesture_policy.dart';
 // The resident-GPU backend's own public surface. `gpu_facade.dart` stays
 // unexported -- it is the one file allowed to import a GPU package, and it
 // carries more than the two small functions (`gpuAvailable`,
