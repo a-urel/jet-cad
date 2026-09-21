@@ -12,10 +12,6 @@ import 'selection_style.dart';
 import 'tool.dart';
 import 'viewport_transform.dart';
 
-/// Pick radius in **screen** pixels (spec D7); `ToolPointerEvent.pickRadiusWorld`
-/// is this converted per event. Moves to `interaction_style.dart` in Task 9.
-const double kPickRadiusPixels = 6.0;
-
 /// A press that moves less than this many screen pixels stays a click
 /// (M-02f); past it, a press that started on empty space becomes a band.
 const double kBandSlopPixels = 4.0;

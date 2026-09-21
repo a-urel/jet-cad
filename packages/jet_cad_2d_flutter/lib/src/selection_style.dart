@@ -8,7 +8,7 @@ const Color kSelectionColor = Color(0xFF1E6FE8);
 const Color kHoverColor = Color(0x991E6FE8);
 
 /// The band overlay's colours (spec D1). `SelectTool` paints its own preview
-/// with these; the selected/hover outline is `SelectionOverlay`'s.
+/// with these; the selected/hover outline is `SelectionOverlayPainter`'s.
 const Color kWindowBandColor = Color(0xFF1E6FE8);
 const Color kCrossingBandColor = Color(0xFF2E9E5B);
 

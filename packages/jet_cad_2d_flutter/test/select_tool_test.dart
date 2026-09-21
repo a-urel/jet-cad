@@ -13,6 +13,8 @@ import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart';
+import 'package:jet_cad_2d_flutter/src/interaction_layer.dart'
+    show kPickRadiusPixels;
 import 'package:jet_cad_2d_flutter/src/select_tool.dart';
 import 'package:jet_cad_2d_flutter/src/selection.dart';
 import 'package:jet_cad_2d_flutter/src/tool.dart';
