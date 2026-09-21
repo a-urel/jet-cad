@@ -1,9 +1,12 @@
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:floor_planner/startup_plan.dart';
+import 'package:flutter/rendering.dart' show RenderCustomPaint;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 void main() {
   testWidgets('the shell shows a canvas over a non-empty, off-origin plan',
@@ -67,5 +70,63 @@ void main() {
     expect(view.camera.value.worldToScreenMatrix, same(moved));
     expect(tester.getSize(find.byType(DraftCanvas)).width, greaterThan(500),
         reason: 'the canvas really did get a new size');
+  });
+
+  testWidgets('the status text shows the tool name and follows the selection',
+      (tester) async {
+    await tester.pumpWidget(const FloorPlannerApp());
+    await tester.pump();
+
+    final view = tester.widget<PlannerView>(find.byType(PlannerView));
+    final statusFinder = find.byKey(const Key('status-text'));
+    expect(tester.widget<Text>(statusFinder).data, 'Select');
+
+    // kPlanOriginX + 100, kPlanOriginY sits on the outer wall's top edge
+    // (startup_plan.dart's first `rect`, from (x0, y0) to (x1, y0)).
+    final world = Vector2(kPlanOriginX + 100, kPlanOriginY);
+    final hit = HitPath();
+    final hitFound =
+        view.index.pickInto(world, 5.0, const QueryFilter.picking(), hit);
+    expect(hitFound, isTrue, reason: 'the probe point must sit on a wall');
+    final key = resolveHit(hit, view.document);
+    expect(key, isNotNull);
+
+    view.selection.replace([key!]);
+    await tester.pump();
+
+    expect(tester.widget<Text>(statusFinder).data, 'Select — 1 selected');
+  });
+
+  testWidgets('the interaction tree is in place', (tester) async {
+    await tester.pumpWidget(const FloorPlannerApp());
+    await tester.pump();
+
+    expect(find.byType(InteractionLayer), findsOneWidget);
+    final overlayFinder = find.byWidgetPredicate(
+        (w) => w is CustomPaint && w.painter is SelectionOverlayPainter);
+    expect(overlayFinder, findsOneWidget);
+
+    final overlaySize =
+        tester.renderObject<RenderCustomPaint>(overlayFinder).size;
+    expect(overlaySize, tester.getSize(find.byType(DraftCanvas)));
+  });
+
+  testWidgets('a click on a wall selects it in the running shell',
+      (tester) async {
+    await tester.pumpWidget(const FloorPlannerApp());
+    await tester.pump();
+
+    final view = tester.widget<PlannerView>(find.byType(PlannerView));
+    final world = Vector2(kPlanOriginX + 100, kPlanOriginY);
+    final screen = view.camera.value.worldToScreen(world);
+    final viewportSize = tester.getSize(find.byType(InteractionLayer));
+    expect(screen.x, inInclusiveRange(0, viewportSize.width));
+    expect(screen.y, inInclusiveRange(0, viewportSize.height));
+
+    final topLeft = tester.getTopLeft(find.byType(InteractionLayer));
+    await tester.tapAt(topLeft + Offset(screen.x, screen.y));
+    await tester.pump();
+
+    expect(view.selection.length, 1);
   });
 }
