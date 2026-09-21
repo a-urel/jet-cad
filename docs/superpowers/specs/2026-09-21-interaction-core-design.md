@@ -268,6 +268,10 @@ resolved by the tool from the leaves the leaf walk reports (D2), and the tool
 applies the same every/any rule over the group's owned leaves, nested groups
 included, using `leavesByOwner()` once per band.
 
+**Amended at execution (Plan 02, 2026-09-22):** a group's member leaves are
+its own and its nested groups'; an instance placed inside a group does not
+enter the group's every/any rule (Ruling P-1).
+
 | mode | a leaf |
 |---|---|
 | **window** | its world AABB ⊆ band, read as `boxOfLeaf(slot) ?? dirty.boxOf(slot)` — `boxOfLeaf` alone is null for a leaf live only on the dirty overlay, which is every leaf edited since the last rebuild. Tight for point, line, polyline, circle and arc (`arcBounds`); **conservative for rotated text** — the AABB of an oriented box is looser than the box, so a rotated text near the band edge may be missed. Documented, accepted. |
@@ -293,6 +297,10 @@ handle order is the property that touches the draw-order non-negotiable, and
 M-02z guards it. They run at pointer-up rate, off the frame path; they may
 allocate O(results) but must not walk the whole document — the broad phase
 is the R-tree search, as for `forEachInRect`.
+
+**Amended at execution (Plan 02, 2026-09-22):** a singular instance transform
+is judged forward rather than refused; crossing falls back to the container's
+all box for that instance (Task 2 ruling).
 
 ### D9 — The overlay: a sibling painter over a rebased outline cache
 
@@ -347,6 +355,22 @@ narrows it with a measurement if its drag needs to. `DocumentLoaded` and
 Band paint (the tool's): window = solid 1 px stroke in `kWindowBandColor`
 with a `kBandFillAlpha` fill; crossing = dashed 1 px stroke in
 `kCrossingBandColor` with the same fill. Screen space, no camera transform.
+
+**Amended at execution (Plan 02, 2026-09-22):** the painter class is named
+`SelectionOverlayPainter`, not `SelectionOverlay` — Flutter's widgets library
+already exports a `SelectionOverlay`, and the spec's name would force a
+`hide` at every app import (Task 8 ruling); the Files list below is amended
+the same way.
+
+**Amended at execution (Plan 02, 2026-09-22):** a point key is drawn as a
+screen-space cross of half-length 3 × the stroke width, centred at
+`worldToScreen(worldPointOf(key))` (Task 7/8 ruling).
+
+**Amended at execution (Plan 02, 2026-09-22):** `ui.Path.getBounds` returns
+the conic control-point hull, not the curve's own bound (measured: 19.1 vs.
+17.0 for a 2.6 rad sweep of radius 7), so an arc or circle outline is pinned
+on the cache's world record (`debugWorldArcsOf`) to tight tolerance, and only
+a containment bound is asserted on the `ui.Path` itself (Task 7 ruling).
 
 ### D10 — Delete: preflight per object, permission-checked, cascading through groups
 
@@ -505,6 +529,12 @@ class ToolController extends ChangeNotifier {
 | any | repeat or up key event | ignored |
 | any | pointer cancel, `cancel()`, exit while dragging | → idle; hover cleared |
 
+**Amended at execution (Plan 02, 2026-09-22):** the "exit while dragging"
+clause of the row above is superseded — exit with no active pointer clears
+hover; a band drag past the layer's edge continues (Flutter keeps delivering
+the captured pointer's moves and up) and its own `up` event ends it, not the
+`onExit` (Task 9 ruling).
+
 `paintOverlay` draws the band while dragging and nothing otherwise.
 
 ### Files
@@ -521,7 +551,7 @@ packages/jet_cad_2d_flutter/lib/src/selection_style.dart    the constants
 packages/jet_cad_2d_flutter/lib/src/tool.dart               Tool, ToolContext, ToolPointerEvent, ToolPhase, ToolController
 packages/jet_cad_2d_flutter/lib/src/select_tool.dart        SelectTool, kBandSlopPixels, the delete preflight
 packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart  InteractionLayer, kPickRadiusPixels, the pointer routing table
-packages/jet_cad_2d_flutter/lib/src/selection_overlay.dart  SelectionOverlay
+packages/jet_cad_2d_flutter/lib/src/selection_overlay.dart  SelectionOverlayPainter (amended at execution, Plan 02: SelectionOverlay collides with Flutter's own export)
 packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart     exports for all of the above
 packages/jet_cad_2d_flutter/test/selection_test.dart
 packages/jet_cad_2d_flutter/test/outline_cache_test.dart

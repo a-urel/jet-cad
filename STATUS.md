@@ -1,6 +1,10 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-21 — **Plan 01 (the floor planner app skeleton) is
+**Last updated:** 2026-09-22 — **Plan 02 (interaction core) is executed on
+`plan-02/interaction-core`, `3fedeb9..HEAD`, exit gate 14 of 15 — criterion 15
+(the human's look, on macOS, in Chrome and in Firefox) is OWED, and the merge
+is the human's decision.** See [Plan 02](#plan-02--interaction-core-executed-on-plan-02interaction-core-not-merged)
+and [Resume here](#resume-here). **Plan 01 (the floor planner app skeleton) is
 MERGED at `bae5f73`**, the product line's first code on `main`; its human look
 is done (macOS, Chrome, Firefox: LGTM), exit gate 12 of 12. See [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73)
 and [Resume here](#resume-here).
@@ -74,6 +78,91 @@ method and both reproduction commands.
 Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
 Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
 Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
+
+---
+
+## Plan 02 — interaction core (executed on `plan-02/interaction-core`, NOT merged)
+
+**Plan 02 gave the product line its selection substrate** — clicking an
+entity selects it, dragging a rubber band from empty space selects what it
+encloses (window) or crosses (crossing), hovering highlights what would be
+picked, a `Tool` state machine carries `SelectTool` as its first tool, and
+the top bar shows the tool name and the selection count. Twelve tasks,
+`3fedeb9..afe7d64` (Tasks 1–11; Task 12, this results note and the spec/
+STATUS/roadmap updates, on top) on branch `plan-02/interaction-core`, cut
+from `main` at `3fedeb9`. **Executed, NOT merged — the exit gate is 14 of 15,
+with the fifteenth (a human's look, on macOS, in Chrome and in Firefox from
+`build/web`) OWED, and the merge itself is the human's decision.** Spec:
+[2026-09-21-interaction-core-design.md](docs/superpowers/specs/2026-09-21-interaction-core-design.md)
+(revision 2, amended at execution 2026-09-22 — six amendments, none
+rewriting the original text). Plan:
+[2026-09-21-interaction-core.md](docs/superpowers/plans/2026-09-21-interaction-core.md).
+Results:
+[2026-09-21-plan-02-results.md](docs/superpowers/notes/2026-09-21-plan-02-results.md).
+Mutation log:
+[plan-02-mutation-log.md](docs/superpowers/notes/plan-02-mutation-log.md) —
+thirty named mutants, 28 fired, 28 killed, 0 survived, 2 declared equivalent
+by construction (M-02c, M-02e), **zero true survivors.**
+
+**Delivered:** `forEachLeafInBand` / `forEachInstanceInBand` and their band
+predicates in `jet_cad_2d`'s spatial index; `SelectionKey` / `SelectionController`
+/ `resolveHit`, `OutlineCache`, `Tool` / `ToolContext` / `ToolController`,
+`SelectTool`, `InteractionLayer` and `SelectionOverlayPainter` in
+`jet_cad_2d_flutter`; the app's status text and interaction wiring in
+`apps/floor_planner`.
+
+**Task list**, each task's head commit:
+
+| task | what | head |
+|---|---|---|
+| 1 | band predicates (pure functions) | `0ca5ca0` |
+| 2 | `forEachLeafInBand` / `forEachInstanceInBand`, the differential | `b5e7a0a` |
+| 3 | `SelectionKey`, `SelectionController`, `resolveHit`, pruning (D11) | `a864a8b` |
+| 4 | `Tool`, `ToolContext`, `ToolController` | `fae61c4` |
+| 5 | `SelectTool`: hover, click, shift, the band phases | `6fdfe91` |
+| 6 | Delete preflight and cascade (D10) | `24e09d8` |
+| 7 | `OutlineCache`: world-space records, rebase | `17d36e2` |
+| 8 | `SelectionOverlayPainter`: paint, band paint, point cross | `531c91f` |
+| 9 | `InteractionLayer`: pointer routing, keys, focus | `9722287` |
+| 10 | app wiring: `PlannerShell`, status text | `e6eb713` |
+| 11 | mutation sweep and the differential's own log | `afe7d64` |
+| 12 | this task: gate, results note, spec amendments, STATUS, roadmap | (this commit) |
+
+**Four rulings a reader must know.** A group's band membership counts its
+owned leaves and its nested groups' leaves only; an instance placed inside a
+group never enters the group's every/any verdict (Ruling P-1) — a group made
+only of instances cannot be band-selected until a later plan decides
+instances-in-groups. The painter class is `SelectionOverlayPainter`, not the
+spec's `SelectionOverlay` — Flutter's widgets library already exports a
+`SelectionOverlay` (Task 8). Exiting the interaction layer during a drag no
+longer cancels it: a band dragged past the edge continues, and its own `up`
+event ends it, not `onExit` (Task 9; the spec's `SelectTool` row is amended).
+And a delete of N objects is N undo steps, with a partial undo of a group's
+cascade restoring leaves under an owner that is still gone — the concrete
+problem statement 06's compound undo inherits (D10). Full account, plus the
+`worldPointOf` allocation acceptance, the band-edge clip and the
+`ui.Path.getBounds` conic-hull note: the results note's "Debt and rulings"
+section.
+
+### What Plan 02 measured
+
+| quantity | value |
+|---|---|
+| `packages/jet_cad_2d` | **820** pass, analyze/format clean |
+| `packages/jet_cad_2d_flutter` | **765** pass, 1 skip, the same five pre-existing `text_ladder_golden_test.dart` failures Plan 01 recorded — analyze/format clean |
+| `apps/dev_harness_2d` | **82** — unchanged from the branch point (`git diff --stat main..HEAD -- apps/dev_harness_2d` empty), analyze/format clean |
+| `apps/floor_planner` | **12** tests; `flutter build macos --debug` and `flutter build web` both `✓ Built` |
+| mutations | **28 fired, 28 killed**, **2 equivalent** (M-02c, M-02e, declared by construction), **zero true survivors** |
+| the differential (criterion 9) | **52 bands** (12 random + one per root instance), **104 comparisons** (both `BandMode`s), all agree with the brute-force arm |
+| the two allocation invariants | `query_allocation_test.dart` and `paint_allocation_test.dart` both green, unchanged |
+| the window | **fourteen checks OWED — not looked at by a human** (seven per platform: macOS, and Chrome/Firefox from `build/web`) |
+
+**Exit gate: 14 of 15.** Criteria 1–14 all PASS, each with its witness (test
+file and test name, the mutation log, or the pasted gate line); criterion 15
+(a human looks, on macOS, in Chrome and in Firefox) is **OWED**, in those
+words — no device run or visual judgement was simulated to fill it in. Full
+account:
+[2026-09-21-plan-02-results.md](docs/superpowers/notes/2026-09-21-plan-02-results.md).
 
 ---
 
@@ -983,7 +1072,25 @@ macOS, in Chrome and in Firefox and judged each LGTM, so the gate stands at
 12 of 12. Nothing of Plan 01 is owed. See
 [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73) and
 [2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
-The other twelve sub-projects have not started.
+
+**Sub-project 02 (interaction core) is executed and awaits the human's look
+and the merge decision.** Its spec,
+[2026-09-21-interaction-core-design.md](docs/superpowers/specs/2026-09-21-interaction-core-design.md)
+(revision 2), and plan,
+[2026-09-21-interaction-core.md](docs/superpowers/plans/2026-09-21-interaction-core.md),
+were both written 2026-09-21; **all twelve tasks ran on
+`plan-02/interaction-core`, cut from `main` at `3fedeb9`, through
+`afe7d64` plus this results-note task, and the branch is NOT merged.** The
+exit gate is **14 of 15** — criterion 15 (a human looks, on macOS, in Chrome
+and in Firefox from `build/web`, at click, shift-click, both bands, hover,
+Escape, Delete and undo) is **OWED**, and the merge itself is the human's
+decision, exactly as Plan 01's twelfth criterion was before its own human
+look. Spec amended at execution in six places (none rewriting the original
+text), none of them changing a passing criterion into a failing one. See
+[Plan 02](#plan-02--interaction-core-executed-on-plan-02interaction-core-not-merged)
+and
+[2026-09-21-plan-02-results.md](docs/superpowers/notes/2026-09-21-plan-02-results.md).
+The other eleven sub-projects have not started.
 
 **The web coupling is resolved and it went the expensive way.** This section
 used to say "Plan G matters only if the product targets web". **The human
