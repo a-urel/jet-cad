@@ -1,6 +1,6 @@
 # 01 — App skeleton
 
-**Status:** spec 2026-09-21 (rev 2), plan 2026-09-21, executed and MERGED at `bae5f73` (2026-09-21), macOS look LGTM, browser look OWED
+**Status:** spec 2026-09-21 (rev 2), plan 2026-09-21, executed and MERGED at `bae5f73` (2026-09-21), look done (macOS, Chrome, Firefox: LGTM), gate 12 of 12
 **Depends on:** nothing
 **Blocks:** everything
 **Size:** S

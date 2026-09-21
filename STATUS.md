@@ -1,8 +1,8 @@
 # jet-cad — project status
 
 **Last updated:** 2026-09-21 — **Plan 01 (the floor planner app skeleton) is
-MERGED at `bae5f73`**, the product line's first code on `main`; its macOS look
-was taken (LGTM), its browser look is OWED. See [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73)
+MERGED at `bae5f73`**, the product line's first code on `main`; its human look
+is done (macOS, Chrome, Firefox: LGTM), exit gate 12 of 12. See [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73)
 and [Resume here](#resume-here).
 **Verified against:** `main` at `bae5f73` for Plan 01's gate lines; the
 paragraphs below about Plan F were verified at `a8208d1`. **Plan F is MERGED** — `--no-ff`
@@ -90,8 +90,9 @@ on branch `plan-01/app-skeleton`, cut from `main` at `717b9cd`. **MERGED
 `--no-ff` at `bae5f73` on 2026-09-21, on the human's decision, with the exit
 gate at 11 of 12 and the twelfth (a human's look, on macOS and in two browser
 families) still OWED**; branch and worktree deleted, ledger archived at
-`79b0333`. After the merge, on 2026-09-21, the human ran the app on macOS
-from `main` and judged it LGTM; the browser half of the look is still OWED. The merged tree was re-gated on `main`: `jet_cad_2d` 798,
+`79b0333`. After the merge, on 2026-09-21, the human ran the app from `main`
+on macOS, in Chrome and in Firefox and judged each LGTM: **the exit gate is
+12 of 12**. The merged tree was re-gated on `main`: `jet_cad_2d` 798,
 `jet_cad_2d_flutter` 704 pass / 1 skip / the same five pre-existing text-golden
 failures, `dev_harness_2d` 82, `floor_planner` 8 and both builds. Spec:
 [2026-09-21-floor-planner-app-skeleton-design.md](docs/superpowers/specs/2026-09-21-floor-planner-app-skeleton-design.md)
@@ -138,17 +139,18 @@ five failures and no other.
 | the startup document | **523** entities, off-origin, within the 500–1,000 target band |
 | the clamp check (D4) | `STARTUP fit scale 0.095 px/mm; min 0.001 (95.0x out), max 100.0 (1052.6315789473683x in)` — both constants unchanged |
 | mutations | **16 killed** (M-01b after a fixture fix), **1 equivalent** (E-01e′, declared), **zero survivors** |
-| the window | **all twelve macOS/browser checks OWED — not looked at; the human looks after this branch is presented** |
+| the window | **all thirteen macOS/browser checks OWED at merge time; discharged 2026-09-21 after the merge — macOS, Chrome and Firefox each LGTM as a whole, items not itemised** |
 
-**Exit gate: 11 of 12.** Criteria 1–11 PASS, each with its witness (build
+**Exit gate: 11 of 12 at merge time, 12 of 12 after the human's look the same day.** Criteria 1–11 PASS, each with its witness (build
 tails, the four widget-test files, the mutation log, the empty harness diff);
 criterion 11 is PASS with one recorded exception — ten of the eleven gate
 commands exit 0, and `jet_cad_2d_flutter`'s `flutter test` exits 1 on the
 five pre-existing `text_ladder_golden_test.dart` failures, per the baseline
 ruling (golden drift from 2026-08-24, SDK 3.47.2), and on nothing else;
-criterion 12 (a human looks, on macOS and in both browser families) is
-**OWED**, in those words, not PASS and not a MISS —
-no device run or visual judgement was simulated to fill it in. Full account:
+criterion 12 (a human looks, on macOS and in both browser families) was
+**OWED** at the merge, in those words — no device run or visual judgement
+was simulated to fill it in — and was discharged after the merge on
+2026-09-21 by the human's own look (macOS, Chrome, Firefox: LGTM). Full account:
 [2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
 
 ---
@@ -976,9 +978,9 @@ plan was written**, ten tasks:
 **executed on `plan-01/app-skeleton`, all ten tasks plus a final-review fix
 wave, and is MERGED into `main` at `bae5f73` on 2026-09-21.** The exit gate is
 11 of 12, with the twelfth — a human's look, on macOS and in both browser
-families — **half discharged after the merge**: the macOS look was taken on
-2026-09-21 (LGTM); still owed is Chrome or Safari and then Firefox on
-`build/web`, judging the six browser items in the results note. See
+families — **discharged after the merge**: on 2026-09-21 the human looked on
+macOS, in Chrome and in Firefox and judged each LGTM, so the gate stands at
+12 of 12. Nothing of Plan 01 is owed. See
 [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73) and
 [2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
 The other twelve sub-projects have not started.
