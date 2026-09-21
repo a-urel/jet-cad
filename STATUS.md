@@ -81,7 +81,8 @@ a real product application that opens a resizable 1440×900 window, shows a
 hand-written 523-entity floor plan on a `DraftCanvas`, and pans and zooms with
 a trackpad and a mouse, on macOS and (its first-ever web build)
 `jet_cad_2d_flutter` compiled for a browser. Ten tasks,
-`717b9cd..5cab91a` on branch `plan-01/app-skeleton`, worktree
+`717b9cd..b6d64a9` (Tasks 1–9 at `..5cab91a`; Task 10, the results note, at
+`b6d64a9` and its fix) on branch `plan-01/app-skeleton`, worktree
 `.claude/worktrees/plan-01-app-skeleton` (cut from `main` at `717b9cd`). **NOT
 merged — the exit gate is 11 of 12 and the twelfth (a human's look, on macOS
 and in two browser families) is OWED; the merge is the human's decision after
@@ -962,7 +963,8 @@ scroll pans on desktop and Chromium/WebKit; everything pans on Firefox". **Its
 plan was written**, ten tasks:
 [2026-09-21-floor-planner-app-skeleton.md](docs/superpowers/plans/2026-09-21-floor-planner-app-skeleton.md),
 **and has now executed on `plan-01/app-skeleton` in its own worktree, all ten
-tasks, `717b9cd..5cab91a`. The exit gate is 11 of 12, with the twelfth — a
+tasks, `717b9cd..b6d64a9` (Tasks 1–9 at `..5cab91a`; Task 10 at `b6d64a9` and
+its fix). The exit gate is 11 of 12, with the twelfth — a
 human's look, on macOS and in both browser families — OWED; merging is the
 human's call after that look.** See
 [Plan 01](#plan-01--the-app-skeleton-on-plan-01app-skeleton-not-merged) and

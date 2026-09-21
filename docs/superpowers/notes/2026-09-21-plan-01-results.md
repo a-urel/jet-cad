@@ -7,7 +7,8 @@ window, the eleven gate commands, all sixteen named mutants and E-01e′.
 **Mutation log:** [plan-01-mutation-log.md](plan-01-mutation-log.md).
 **Branch:** `plan-01/app-skeleton`, worktree
 `.claude/worktrees/plan-01-app-skeleton`, cut from `main` at `717b9cd`. **Ten
-tasks done, `717b9cd..5cab91a`. NOT merged — the merge is the human's
+tasks done, `717b9cd..b6d64a9` (Tasks 1–9 at `..5cab91a`; Task 10, this note,
+at `b6d64a9` and its fix). NOT merged — the merge is the human's
 decision, after the look this note leaves OWED.**
 **Ledger (per-task briefs, reports, review diffs, every ruling):**
 `.superpowers/sdd/2026-09-21-floor-planner-app-skeleton/`.
@@ -231,24 +232,29 @@ the Task 9 report.)
 Every ruling made on this plan, verbatim from the ledger and the plan
 document.
 
-**The plan's own rulings.**
+**The plan's own rulings**, from the plan document's "Rulings made here
+rather than left to an implementer" section, quoted.
 
-- **Ruling 01-1** — `analysis_options.yaml` is generated and committed once
-  at scaffold (Task 6), never rewritten after. `CLAUDE.md`'s "never commit
-  `analysis_options.yaml`" rule is about the workspace's *other* packages,
-  whose files `flutter pub get` rewrites; the app's own is scaffold-once.
-- **Ruling 01-2** — `PlannerView` fits the camera once to the real viewport
-  size on first non-zero layout, not only to the nominal 1440×900 the shell
-  constructs it with.
-- **Ruling 01-3** — the harness's `exp(pan.dy / -200)` two-finger-scroll-to-
-  zoom conversion does not lift into the package; the product's two-finger
-  scroll pans (the human's decision), and only the cumulative-`scale`
-  running-division handling lifts, because pan uses `localPanDelta` and
-  needs no running state.
-- **Ruling 01-4** — `_onPanZoomUpdate` coalesces on exact equality
-  (`if (scale == _gestureZoom) return;`), which is why a repeated,
-  non-rising `scale` witness cannot observe a mutation on the running
-  division (this is the fixture Task 9's fix round 1 corrected).
+- **Ruling 01-1** — the app's `analysis_options.yaml` is committed once, at
+  scaffold, and never again. The spec's architecture block says "generated
+  and NOT committed"; what `CLAUDE.md`'s "never commit
+  `analysis_options.yaml`" has always meant in this repo is never commit
+  the rewrite `flutter pub get` makes to a tracked one.
+- **Ruling 01-2** — the first fit happens at the real viewport, once. The
+  spec says the app "shows the startup plan"; it does not say who fits the
+  camera — `PlannerShell` constructs the camera fitted to a nominal
+  1440×900, and `PlannerView` re-fits it once, on its first layout, to the
+  size it actually got.
+- **Ruling 01-3** — the bound decisions use `Tolerance.standard` (linear
+  `1e-9`), a `static const` in `camera_controller.dart`, not a constructor
+  parameter. The spec says `Tolerance`; it does not say which, and a scale
+  between `0.001` and `100` sits where `1e-9` is many ulps wide and far
+  below anything a gesture produces.
+- **Ruling 01-4** — a `PointerPanZoomUpdate` whose `scale` equals the
+  running value does not call `zoomAt`. A two-finger scroll reports
+  `scale == 1.0` on every update; calling `zoomAt(anchor, 1.0)` would build
+  a new transform and notify for nothing — the check is exact `==` on a
+  stored event field (spec invariant 6).
 
 **Rulings made during execution.**
 
