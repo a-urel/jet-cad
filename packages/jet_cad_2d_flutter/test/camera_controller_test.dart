@@ -220,6 +220,13 @@ void main() {
       }
       expect(camera.value.worldToScreenMatrix, same(before));
     });
+
+    test('unbounded, a camera already below the tolerance still zooms out', () {
+      final camera = CameraController(ViewportTransform(
+          worldToScreenMatrix: const Transform2(1e-10, 0, 0, -1e-10, 5, 7)));
+      camera.zoomAt(focus, 0.5);
+      expect(camera.value.scale, closeTo(5e-11, 1e-20));
+    });
   });
 }
 

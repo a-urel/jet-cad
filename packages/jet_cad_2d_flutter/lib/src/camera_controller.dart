@@ -86,7 +86,8 @@ class CameraController extends ValueNotifier<ViewportTransform> {
       if (_tolerance.compare(current, maxScale) >= 0) return;
       if (_tolerance.compare(current * f, maxScale) > 0) f = maxScale / current;
     } else if (f < 1.0) {
-      if (_tolerance.compare(current, minScale) <= 0) return;
+      // With no lower bound there is nothing to rest on.
+      if (minScale > 0.0 && _tolerance.compare(current, minScale) <= 0) return;
       if (_tolerance.compare(current * f, minScale) < 0) f = minScale / current;
     }
     final m = value.worldToScreenMatrix;
