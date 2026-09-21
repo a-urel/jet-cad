@@ -1,0 +1,187 @@
+# Review package: 717b9cd..8b6194d
+
+## Commits
+8b6194d feat(camera): minScale/maxScale bounds that land on the bound and rest silently
+
+## Files changed
+ .../lib/src/camera_controller.dart                 | 39 ++++++++++-
+ .../test/camera_controller_test.dart               | 76 ++++++++++++++++++++++
+ 2 files changed, 113 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/camera_controller.dart b/packages/jet_cad_2d_flutter/lib/src/camera_controller.dart
+index 87a8bfa..d3190d9 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/camera_controller.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/camera_controller.dart
+@@ -27,40 +27,75 @@ Vector2 rebaseOriginFor(Aabb2 visibleWorld) {
+   final cy = (visibleWorld.minY + visibleWorld.maxY) / 2;
+   // Floor, not truncate: truncation rounds toward zero, which on the negative
+   // side puts the origin above the view and flips the sign of every residual
+   // as the camera crosses zero.
+   return Vector2(
+       (cx / step).floorToDouble() * step, (cy / step).floorToDouble() * step);
+ }
+ 
+ /// The camera. A `ValueNotifier` so a change repaints inside a
+ /// `RepaintBoundary` without rebuilding the widget tree.
++///
++/// [minScale] and [maxScale] bound [ViewportTransform.scale] — the geometric
++/// mean of the axis scales, the number stroke widths divide by. They default
++/// to unbounded so a caller that passes nothing (the measurement harness) is
++/// unaffected. The clamp lives here, not in a gesture widget, because a
++/// keyboard zoom, a zoom-to-fit and a zoom-to-selection all pass through
++/// [zoomAt] and a clamp in a widget guards only one of them.
+ class CameraController extends ValueNotifier<ViewportTransform> {
+-  CameraController(super.initial);
++  CameraController(
++    super.initial, {
++    this.minScale = 0.0,
++    this.maxScale = double.infinity,
++  })  : assert(minScale >= 0.0),
++        assert(maxScale > minScale);
++
++  final double minScale;
++  final double maxScale;
++
++  /// The bound decisions compare a *derived* scale — `sqrt(|det|)` after a
++  /// three-matrix product — against a bound, so they are geometric decisions
++  /// and use a tolerance, not `==` (spec invariant 6).
++  static const Tolerance _tolerance = Tolerance.standard;
+ 
+   void panBy(Offset screenDelta) {
+     final m = value.worldToScreenMatrix;
+     value = ViewportTransform(
+       worldToScreenMatrix: Transform2(
+           m.a, m.b, m.c, m.d, m.e + screenDelta.dx, m.f + screenDelta.dy),
+     );
+   }
+ 
+   /// Scales about a screen point, keeping the world point under it fixed.
+   ///
+   /// A factor that is not finite and positive is ignored rather than applied:
+   /// it would make the matrix singular, and `invert()` in the
+   /// [ViewportTransform] constructor would throw there, taking the gesture and
+   /// the frame with it. Holding the camera still is the only meaning a
+   /// zero-scale zoom could have.
++  ///
++  /// A result past a bound **lands on the bound**: the factor is reduced so
++  /// the resulting scale is the bound, and the zoom still happens about
++  /// [screenFocus]. Rejecting the gesture instead would make the view stick
++  /// and jump. A gesture that pushes against a bound the camera already rests
++  /// on returns before assigning, so nothing is notified and nothing repaints.
+   void zoomAt(Offset screenFocus, double factor) {
+     if (!factor.isFinite || factor <= 0) return;
++    final current = value.scale;
++    var f = factor;
++    if (f > 1.0) {
++      if (_tolerance.compare(current, maxScale) >= 0) return;
++      if (_tolerance.compare(current * f, maxScale) > 0) f = maxScale / current;
++    } else if (f < 1.0) {
++      if (_tolerance.compare(current, minScale) <= 0) return;
++      if (_tolerance.compare(current * f, minScale) < 0) f = minScale / current;
++    }
+     final m = value.worldToScreenMatrix;
+     // The argument of `multiply` is applied first, so this scales in screen
+     // space *after* the camera. Reversed, it would scale in world space and
+     // the point under the cursor would drift.
+     final about = Transform2.translation(screenFocus.dx, screenFocus.dy)
+-        .multiply(Transform2.scale(factor, factor))
++        .multiply(Transform2.scale(f, f))
+         .multiply(Transform2.translation(-screenFocus.dx, -screenFocus.dy));
+     value = ViewportTransform(worldToScreenMatrix: about.multiply(m));
+   }
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/camera_controller_test.dart b/packages/jet_cad_2d_flutter/test/camera_controller_test.dart
+index 41b44ee..353c4e6 100644
+--- a/packages/jet_cad_2d_flutter/test/camera_controller_test.dart
++++ b/packages/jet_cad_2d_flutter/test/camera_controller_test.dart
+@@ -138,13 +138,89 @@ void main() {
+       // meaning a zero-scale zoom could have.
+       for (final factor in [0.0, -1.0, double.nan, double.infinity]) {
+         final camera = fresh();
+         final before = camera.value.worldToScreenMatrix;
+         camera.zoomAt(const Offset(320, 210), factor);
+         expect(camera.value.worldToScreenMatrix, same(before),
+             reason: 'factor $factor must be a no-op');
+       }
+     });
+   });
++
++  group('CameraController bounds', () {
++    // Off-origin world, non-identity fit: 100 x 50 into 800 x 600 gives a
++    // scale of 0.95 * min(8, 12) = 7.6. A fixture at scale 1.0 could not
++    // tell "clamp the factor" from "clamp the result" (spec, M-01l).
++    CameraController bounded({double minScale = 0.5, double maxScale = 12.0}) =>
++        CameraController(
++          ViewportTransform.fit(Aabb2(Vector2(1000, 2000), Vector2(1100, 2050)),
++              const Size(800, 600)),
++          minScale: minScale,
++          maxScale: maxScale,
++        );
++    const focus = Offset(130, 470);
++    const tol = Tolerance.standard;
++
++    test('defaults are unbounded, so an unbounded caller is unchanged', () {
++      final camera = CameraController(ViewportTransform.fit(
++          Aabb2(Vector2(0, 0), Vector2(100, 100)), const Size(800, 600)));
++      expect(camera.minScale, 0.0);
++      expect(camera.maxScale, double.infinity);
++      final before = camera.value.scale;
++      camera.zoomAt(focus, 1e6);
++      expect(camera.value.scale, closeTo(before * 1e6, before * 1e6 * 1e-12));
++    });
++
++    test('an oversized zoom in lands on maxScale, not past it', () {
++      final camera = bounded();
++      expect(camera.value.scale, closeTo(7.6, 1e-9), reason: 'fixture');
++      final under = camera.value.screenToWorld(Vector2(focus.dx, focus.dy));
++      camera.zoomAt(focus, 10.0);
++      expect(tol.eq(camera.value.scale, 12.0), isTrue,
++          reason: 'landed on the bound: ${camera.value.scale}');
++      final after = camera.value.screenToWorld(Vector2(focus.dx, focus.dy));
++      expect(after.x, closeTo(under.x, 1e-9));
++      expect(after.y, closeTo(under.y, 1e-9),
++          reason: 'the clamp still zooms about the focus');
++    });
++
++    test('an oversized zoom out lands on minScale', () {
++      final camera = bounded();
++      camera.zoomAt(focus, 0.01);
++      expect(tol.eq(camera.value.scale, 0.5), isTrue,
++          reason: 'landed on the bound: ${camera.value.scale}');
++    });
++
++    test('a zoom that stays inside the bounds is not clamped', () {
++      final camera = bounded();
++      camera.zoomAt(focus, 1.5);
++      expect(camera.value.scale, closeTo(7.6 * 1.5, 1e-9));
++    });
++
++    test('at a bound, pushing further does not notify', () {
++      final camera = bounded();
++      camera.zoomAt(focus, 10.0);
++      var notifications = 0;
++      camera.addListener(() => notifications++);
++      camera.zoomAt(focus, 10.0);
++      camera.zoomAt(focus, 1.0001);
++      expect(notifications, 0, reason: 'at rest on maxScale');
++
++      camera.zoomAt(focus, 0.001);
++      expect(notifications, 1, reason: 'zooming back out is a real change');
++      notifications = 0;
++      camera.zoomAt(focus, 0.5);
++      expect(notifications, 0, reason: 'at rest on minScale');
++    });
++
++    test('zoomAt still ignores a singular factor with bounds set', () {
++      final camera = bounded();
++      final before = camera.value.worldToScreenMatrix;
++      for (final f in [0.0, -1.0, double.nan, double.infinity]) {
++        camera.zoomAt(focus, f);
++      }
++      expect(camera.value.worldToScreenMatrix, same(before));
++    });
++  });
+ }
+ 
+ double _toFloat32(double v) => (Float32List(1)..[0] = v)[0];

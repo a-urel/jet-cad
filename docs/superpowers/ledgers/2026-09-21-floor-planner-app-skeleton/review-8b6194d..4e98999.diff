@@ -1,0 +1,179 @@
+# Review package: 8b6194d..4e98999
+
+## Commits
+4e98999 feat(gestures): GesturePolicy -- one field, two values, the browser question behind dart:ui_web
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart |  1 +
+ .../jet_cad_2d_flutter/lib/src/gesture_policy.dart | 69 ++++++++++++++++++++++
+ .../lib/src/gesture_policy_platform_stub.dart      |  2 +
+ .../lib/src/gesture_policy_platform_web.dart       | 11 ++++
+ .../test/gesture_policy_test.dart                  | 33 +++++++++++
+ 5 files changed, 116 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+index 0635838..4036e65 100644
+--- a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
++++ b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+@@ -1,20 +1,21 @@
+ /// Flutter rendering layer for the `jet_cad_2d` engine.
+ library;
+ 
+ export 'src/camera_controller.dart';
+ export 'src/canvas_draw_sink.dart';
+ export 'src/vertices_draw_sink.dart';
+ export 'src/draft_canvas.dart';
+ export 'src/draft_painter.dart';
+ export 'src/draw_sink.dart';
+ export 'src/flutter_text_measurer.dart';
++export 'src/gesture_policy.dart';
+ // The resident-GPU backend's own public surface. `gpu_facade.dart` stays
+ // unexported -- it is the one file allowed to import a GPU package, and it
+ // carries more than the two small functions (`gpuAvailable`,
+ // `debugSetGpuFactory`) and the public typedef `GpuContextFactory` an app
+ // assembling a frame might want: its
+ // `export 'package:flutter_scene/src/gpu/gpu.dart';` republishes that
+ // package's *entire* internal GPU shim -- an off-contract, pre-1.0 `lib/src/`
+ // API this package depends on but does not control. Exporting
+ // `gpu_facade.dart` from this barrel would republish all of that through
+ // `jet_cad_2d_flutter`'s own public API, which is the thing this barrel
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gesture_policy.dart b/packages/jet_cad_2d_flutter/lib/src/gesture_policy.dart
+new file mode 100644
+index 0000000..5f7ef51
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/gesture_policy.dart
+@@ -0,0 +1,69 @@
++import 'package:flutter/foundation.dart' show immutable, kIsWeb;
++import 'package:flutter/gestures.dart' show kMiddleMouseButton;
++
++import 'gesture_policy_platform_stub.dart'
++    if (dart.library.js_interop) 'gesture_policy_platform_web.dart';
++
++/// What a bare scroll signal does to the camera.
++enum ScrollAction { pan, zoom }
++
++/// The per-platform half of camera gestures, as a value the widget is given
++/// rather than a `kIsWeb` it reads.
++///
++/// `kIsWeb` is a compile-time constant: a widget that branched on it inline
++/// could never run its web arm under a `flutter test` on macOS, and no
++/// mutation planted there could go red. So the widget takes one of these,
++/// tests pass [wheelZooms] and [wheelPans] explicitly, and [forPlatform] is
++/// the one place the constant appears.
++///
++/// There is exactly one behavioural field. A `PointerPanZoom*` sequence
++/// (desktop trackpads) pans and zooms under every policy; a
++/// `PointerScaleEvent` (browser pinch, ctrl+wheel on Windows and Linux
++/// browsers) zooms under every policy; a `PointerScrollEvent` of
++/// `kind: trackpad` (Chromium and WebKit browsers, by the engine's
++/// heuristic) pans under every policy. Only a `kind: mouse` scroll signal
++/// with no modifier is a question, and [mouseWheel] answers it.
++@immutable
++class GesturePolicy {
++  const GesturePolicy({
++    required this.mouseWheel,
++    this.wheelZoomStep = 1.1,
++    this.panButtons = kMiddleMouseButton,
++  });
++
++  /// What a `PointerScrollEvent` of any kind other than trackpad, with no
++  /// modifier held, means.
++  final ScrollAction mouseWheel;
++
++  /// Multiplicative step per wheel notch on the `PointerScrollEvent` zoom
++  /// path. A `PointerScaleEvent` carries its own factor and ignores this.
++  final double wheelZoomStep;
++
++  /// The `PointerEvent.buttons` mask a drag must intersect to pan.
++  final int panButtons;
++
++  /// Desktop embedders and Chromium/WebKit browsers: the wheel zooms.
++  ///
++  /// On desktop the trackpad never arrives as a scroll signal (it is a
++  /// `PointerPanZoom*` sequence), so a scroll signal is a wheel. In a
++  /// Chromium or WebKit browser the engine tags a trackpad scroll
++  /// `kind: trackpad` and the widget pans it before this field is consulted.
++  static const wheelZooms = GesturePolicy(mouseWheel: ScrollAction.zoom);
++
++  /// Firefox: every wheel event is `kind: mouse` because the engine's
++  /// heuristic cannot tell a trackpad there, so the wheel pans -- zooming on
++  /// it would take pan-by-scroll away from every Firefox trackpad user.
++  static const wheelPans = GesturePolicy(mouseWheel: ScrollAction.pan);
++
++  /// The browser question, answered. Pure, and tested on the VM.
++  static GesturePolicy forBrowser({required bool firefox}) =>
++      firefox ? wheelPans : wheelZooms;
++
++  /// The policy for the platform this code is running on.
++  ///
++  /// **The only place `kIsWeb` appears in this package's gesture code.**
++  /// `isFirefoxBrowser` comes from a conditional import: `dart:ui_web` on
++  /// web, `false` elsewhere.
++  factory GesturePolicy.forPlatform() =>
++      kIsWeb ? forBrowser(firefox: isFirefoxBrowser()) : wheelZooms;
++}
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gesture_policy_platform_stub.dart b/packages/jet_cad_2d_flutter/lib/src/gesture_policy_platform_stub.dart
+new file mode 100644
+index 0000000..8068223
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/gesture_policy_platform_stub.dart
+@@ -0,0 +1,2 @@
++/// Everywhere that is not a browser. See `gesture_policy.dart`.
++bool isFirefoxBrowser() => false;
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gesture_policy_platform_web.dart b/packages/jet_cad_2d_flutter/lib/src/gesture_policy_platform_web.dart
+new file mode 100644
+index 0000000..95569b7
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/gesture_policy_platform_web.dart
+@@ -0,0 +1,11 @@
++import 'dart:ui_web' as ui_web;
++
++/// **The only `dart:ui_web` import in this package.**
++///
++/// The engine's wheel heuristic gives up on Firefox by asking
++/// `ui_web.browser.browserEngine == BrowserEngine.firefox`
++/// (`engine/src/flutter/lib/web_ui/lib/src/engine/pointer_binding.dart:689`).
++/// Asking the same object the same question is what keeps the policy and
++/// the heuristic from disagreeing about which browser they are in; a
++/// user-agent string parsed here could.
++bool isFirefoxBrowser() => ui_web.browser.isFirefox;
+diff --git a/packages/jet_cad_2d_flutter/test/gesture_policy_test.dart b/packages/jet_cad_2d_flutter/test/gesture_policy_test.dart
+new file mode 100644
+index 0000000..d953fce
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/gesture_policy_test.dart
+@@ -0,0 +1,33 @@
++import 'package:flutter/gestures.dart' show kMiddleMouseButton;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++void main() {
++  test('wheelZooms: a mouse-kind scroll zooms, 1.1 per notch, middle drag', () {
++    const p = GesturePolicy.wheelZooms;
++    expect(p.mouseWheel, ScrollAction.zoom);
++    expect(p.wheelZoomStep, 1.1);
++    expect(p.panButtons, kMiddleMouseButton);
++  });
++
++  test('wheelPans: a mouse-kind scroll pans; the rest is the same', () {
++    const p = GesturePolicy.wheelPans;
++    expect(p.mouseWheel, ScrollAction.pan);
++    expect(p.wheelZoomStep, GesturePolicy.wheelZooms.wheelZoomStep);
++    expect(p.panButtons, GesturePolicy.wheelZooms.panButtons);
++  });
++
++  // The half of `forPlatform()` the VM can reach (spec, M-01q). The other
++  // half -- `kIsWeb` and the `dart:ui_web` import -- is compile-time and is
++  // covered by criterion 12's look in Chrome/Safari and in Firefox.
++  test('forBrowser: Firefox gets wheelPans, every other engine wheelZooms', () {
++    expect(
++        GesturePolicy.forBrowser(firefox: true), same(GesturePolicy.wheelPans));
++    expect(GesturePolicy.forBrowser(firefox: false),
++        same(GesturePolicy.wheelZooms));
++  });
++
++  test('forPlatform on the VM is wheelZooms', () {
++    expect(GesturePolicy.forPlatform(), same(GesturePolicy.wheelZooms));
++  });
++}
