@@ -107,12 +107,16 @@ class SelectionController extends ChangeNotifier {
   }
 
   void toggle(Iterable<SelectionKey> keys) {
-    var changed = false;
+    // A net-change check, not a per-key flag: a duplicate key in [keys]
+    // toggles itself back to its starting membership (add then remove, or
+    // remove then add), and a flag set unconditionally on loop entry would
+    // still fire — violating "none when nothing changed" for an input as
+    // small as `toggle([k, k])` on an empty selection.
+    final before = Set<SelectionKey>.of(_keys);
     for (final k in keys) {
-      changed = true;
       if (!_keys.remove(k)) _keys.add(k);
     }
-    if (changed) notifyListeners();
+    if (!setEquals(before, _keys)) notifyListeners();
   }
 
   void remove(Iterable<SelectionKey> keys) {

@@ -168,6 +168,29 @@ void main() {
     expect(selection.contains(k), isFalse);
   });
 
+  test('toggle with a self-cancelling duplicate does not notify', () {
+    final doc = DraftDocument.empty();
+    final leaf =
+        addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 1, 0], []);
+    final selection = SelectionController(doc);
+    addTearDown(selection.dispose);
+    final k = SelectionKey.root(leaf);
+
+    var count = 0;
+    selection.addListener(() => count++);
+
+    selection.toggle([k, k]);
+    expect(selection.isEmpty, isTrue,
+        reason: 'add then remove of the same key nets out to no change');
+    expect(count, 0,
+        reason: 'a duplicate that cancels itself out must not notify');
+
+    selection.toggle([k, k, k]);
+    expect(selection.contains(k), isTrue,
+        reason: 'add, remove, add nets out to selected');
+    expect(count, 1);
+  });
+
   test('remove drops only what it names', () {
     final doc = DraftDocument.empty();
     final leafA =
