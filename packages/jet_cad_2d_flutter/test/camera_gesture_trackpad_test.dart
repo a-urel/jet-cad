@@ -39,9 +39,11 @@ void main() {
       });
 
       // Pinch: `scale` is cumulative and has no per-event delta, so each
-      // update applies scale / running (spec, M-01b). Three updates
-      // reporting 1.5 zoom by 1.5, not 1.5^3. The anchor is where the
-      // gesture started, not the viewport centre.
+      // update applies scale / running (spec, M-01b). A rising ramp of
+      // cumulative values (1.2, 1.5, 2.0) lands the gesture on 2.0, not on
+      // the product 3.6 a mutant that dropped the running division would
+      // reach. The anchor is where the gesture started, not the viewport
+      // centre.
       testWidgets('pinch zooms by the cumulative ratio about the anchor',
           (tester) async {
         final camera = fitOffOrigin();
@@ -52,14 +54,18 @@ void main() {
 
         final p = TestPointer(1, PointerDeviceKind.trackpad);
         await tester.sendEventToBinding(p.panZoomStart(globalFocus()));
-        for (var i = 0; i < 3; i++) {
-          await tester
-              .sendEventToBinding(p.panZoomUpdate(globalFocus(), scale: 1.5));
+        // A real pinch reports a rising cumulative scale. With the running
+        // division each update applies only its increment (1.2, then 1.25,
+        // then 1.333…) and the gesture lands on 2.0; applying the raw value
+        // compounds to 1.2 × 1.5 × 2.0 = 3.6 (M-01b).
+        for (final cumulative in const [1.2, 1.5, 2.0]) {
+          await tester.sendEventToBinding(
+              p.panZoomUpdate(globalFocus(), scale: cumulative));
         }
         await tester.sendEventToBinding(p.panZoomEnd());
         await tester.pump();
 
-        expect(camera.value.scale / scaleBefore, closeTo(1.5, 1e-9));
+        expect(camera.value.scale / scaleBefore, closeTo(2.0, 1e-9));
         final still =
             camera.value.screenToWorld(Vector2(kLocalFocus.dx, kLocalFocus.dy));
         expect(still.x, closeTo(under.x, 1e-9));
