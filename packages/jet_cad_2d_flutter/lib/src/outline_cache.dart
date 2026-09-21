@@ -27,6 +27,18 @@ final class _Arc extends _Outline {
   final double cx, cy, r, start, sweep;
 }
 
+/// A lone world position — a `point` entity.
+///
+/// Its own variant rather than a one-pair [_Segments], because a path of a
+/// single `moveTo` draws nothing and is indistinguishable from a vanished
+/// target. The overlay reads it through [OutlineCache.worldPointOf] and
+/// draws its own screen-space marker; a world-space cache cannot hold one,
+/// since a marker's size is in pixels.
+final class _Point extends _Outline {
+  const _Point(this.x, this.y);
+  final double x, y;
+}
+
 /// The overlay's outlines: world geometry in `Float64List`s, `ui.Path`s in
 /// the space rebased by the frame's origin (spec D9, review ruling B2).
 ///
@@ -62,12 +74,18 @@ class OutlineCache {
   bool _stale = true;
 
   /// The origin the current paths are rebased by.
+  ///
+  /// **Do not mutate; a mutated tag desyncs the rebased paths.** The live
+  /// field is handed out rather than a copy because the overlay reads it once
+  /// per frame and a copy would allocate at frame rate.
   Vector2 get origin => _origin;
+
+  int _debugRebuilds = 0;
 
   /// How many times every path has been rebuilt. Test-only: the point of the
   /// tag is that two `pathFor` calls at one origin cost one rebuild, not two.
   @visibleForTesting
-  int debugRebuilds = 0;
+  int get debugRebuilds => _debugRebuilds;
 
   /// The path for [key] in the space rebased by [origin], or null when [key]
   /// is neither selected nor hovered.
@@ -80,6 +98,24 @@ class OutlineCache {
       _rebuildPaths();
     }
     return _paths[key];
+  }
+
+  /// The world position of [key] when its whole outline is a single `point`
+  /// entity; null for every other key, and for a key that is not cached.
+  ///
+  /// **The overlay's affordance for drawing a point key** (Task 8). A point
+  /// has no extent, so its `ui.Path` would be a lone `moveTo` — it draws
+  /// nothing, and an empty path cannot be told apart from a target that has
+  /// vanished. The marker a point deserves is a screen-space cross, whose
+  /// size is in pixels and therefore cannot live in a world-space cache; the
+  /// painter reads the position here and sizes the cross itself. The value is
+  /// **absolute world**, so the caller must rebase it — subtract [origin] —
+  /// before it reaches `dart:ui`.
+  Vector2? worldPointOf(SelectionKey key) {
+    final outlines = _world[key];
+    if (outlines == null || outlines.length != 1) return null;
+    final only = outlines.first;
+    return only is _Point ? Vector2(only.x, only.y) : null;
   }
 
   /// **Test-only.** Every `_Segments` outline of [key], concatenated in
@@ -98,6 +134,31 @@ class OutlineCache {
       if (o is! _Segments) continue;
       out.setRange(at, at + o.coords.length, o.coords);
       at += o.coords.length;
+    }
+    return out;
+  }
+
+  /// **Test-only.** Every `_Arc` outline of [key] as five world doubles —
+  /// `cx, cy, r, start, sweep` — in order; null when [key] is not cached.
+  ///
+  /// `ui.Path.getBounds` cannot stand in for this: it returns the bounds of
+  /// the conic **control points**, which for a partial sweep lie outside the
+  /// curve (measured: a 2.6 rad sweep of radius 7 reads `maxX = 19.1` where
+  /// the arc's own bound is 17.0), so a bounds comparison can neither pin the
+  /// start angle nor the sweep's sign.
+  @visibleForTesting
+  Float64List? debugWorldArcsOf(SelectionKey key) {
+    final outlines = _world[key];
+    if (outlines == null) return null;
+    final arcs = outlines.whereType<_Arc>().toList();
+    final out = Float64List(arcs.length * 5);
+    for (var i = 0; i < arcs.length; i++) {
+      final a = arcs[i];
+      out[i * 5] = a.cx;
+      out[i * 5 + 1] = a.cy;
+      out[i * 5 + 2] = a.r;
+      out[i * 5 + 3] = a.start;
+      out[i * 5 + 4] = a.sweep;
     }
     return out;
   }
@@ -182,12 +243,16 @@ class OutlineCache {
               start,
               sweep,
             );
+          case _Point():
+            // No extent, so nothing to stroke: the overlay draws a point key
+            // from `worldPointOf` as a screen-space marker instead.
+            continue;
         }
       }
       _paths[entry.key] = path;
     }
     _stale = false;
-    debugRebuilds++;
+    _debugRebuilds++;
   }
 
   // --- the world record --------------------------------------------------
@@ -264,6 +329,9 @@ class OutlineCache {
     final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
     switch (kind) {
       case EntityKind.point:
+        if (payload.pointCount == 0) return;
+        final p = t.transformPoint(payload.pointAt(0));
+        out.add(_Point(p.x, p.y));
       case EntityKind.line:
       case EntityKind.polyline:
         final n = payload.pointCount;
