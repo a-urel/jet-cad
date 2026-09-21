@@ -17,12 +17,20 @@ M-01c, M-01d, M-01e, M-01f, M-01g, M-01i, M-01m, M-01n, M-01p),
 `lib/src/camera_controller.dart` (`cc`: M-01j, M-01k, M-01l, M-01o),
 `lib/src/gesture_policy.dart` (`gp`: M-01q, E-01e′).
 
-One mutation, **M-01b, SURVIVED** its named witness and is recorded as a
-plan defect below, in full, with the green run pasted rather than a red one.
-No production code or test file was changed to chase it — per this task's
-charter, a survivor is reported, not fixed here. `ScrollAction` in the
-brief's table is `ScrollSignalAction` throughout (Task 4 rename); the M-01e
-edit is `policy.mouseWheel` → `GesturePolicy.wheelZooms.mouseWheel`.
+One mutation, **M-01b, SURVIVED** its named witness on the first shot: the
+witness sent the same `scale: 1.5` three times, and the widget's exact-
+equality coalescing guard (`if (scale == _gestureZoom) return;`, Ruling
+01-4) meant only the first update ever reached `zoomAt`, where the running
+denominator is always `1.0` by construction — a degenerate fixture, in the
+sense `CLAUDE.md` warns about, not a defect in `zoomAt`'s caller. Fix round
+1 (controller's ruling) changed the *test*, not the widget: the pinch
+witness now ramps the cumulative `scale` through three different values
+(`1.2`, `1.5`, `2.0`), which a rising real pinch would report, and asserts
+the ramp's landing ratio (`2.0`) rather than the repeated value's own
+product (`3.6`). M-01b was re-fired against the fixed test and is now
+KILLED — see its section below for both runs. `ScrollAction` in the brief's
+table is `ScrollSignalAction` throughout (Task 4 rename); the M-01e edit is
+`policy.mouseWheel` → `GesturePolicy.wheelZooms.mouseWheel`.
 
 ---
 
@@ -122,7 +130,8 @@ EXIT=0
 
 **Restore:** `cp /tmp/mut.bak lib/src/camera_gesture_detector.dart` — `git status --short` clean.
 
-**Verdict: SURVIVED — a plan defect, reported here, not fixed.**
+**Verdict (first shot): SURVIVED — a plan defect, reported here, not fixed
+yet.** See "Re-fired after the fixture fix" below for the fix and the kill.
 
 `_onPanZoomUpdate` guards every application with
 `if (scale == _gestureZoom) return;` right before the mutated line, and
@@ -155,6 +164,123 @@ mutant). This is not a coincidental miss on a secondary witness (Plan F's
 M-F5 pattern) — it is the *only* named witness for this row, and it cannot
 distinguish the mutation as currently written. Reported per this task's
 charter: no test or production change was made to chase it.
+
+### Re-fired after the fixture fix
+
+**Controller's ruling:** the pinch witness was a degenerate fixture (repeats
+the same cumulative `scale`, and the widget's own exact-equality coalescing
+guard, Ruling 01-4, only ever lets the first update reach `zoomAt`). Fix the
+test, not the widget: a real pinch reports a *rising* cumulative scale.
+
+**Test diff applied** (`test/camera_gesture_trackpad_test.dart`, inside the
+per-policy `group`, in `'pinch zooms by the cumulative ratio about the
+anchor'`):
+
+```diff
+       // Pinch: `scale` is cumulative and has no per-event delta, so each
+       // update applies scale / running (spec, M-01b). Three updates
+-      // reporting 1.5 zoom by 1.5, not 1.5^3. The anchor is where the
+-      // gesture started, not the viewport centre.
++      // A rising ramp of cumulative values (1.2, 1.5, 2.0) lands the
++      // gesture on 2.0, not on the product 3.6 a mutant that dropped the
++      // running division would reach. The anchor is where the gesture
++      // started, not the viewport centre.
+       testWidgets('pinch zooms by the cumulative ratio about the anchor',
+           (tester) async {
+         final camera = fitOffOrigin();
+         await pumpDetector(tester, camera, policy);
+         final scaleBefore = camera.value.scale;
+         final under =
+             camera.value.screenToWorld(Vector2(kLocalFocus.dx, kLocalFocus.dy));
+
+         final p = TestPointer(1, PointerDeviceKind.trackpad);
+         await tester.sendEventToBinding(p.panZoomStart(globalFocus()));
+-        for (var i = 0; i < 3; i++) {
+-          await tester
+-              .sendEventToBinding(p.panZoomUpdate(globalFocus(), scale: 1.5));
+-        }
++        // A real pinch reports a rising cumulative scale. With the running
++        // division each update applies only its increment (1.2, then 1.25,
++        // then 1.333…) and the gesture lands on 2.0; applying the raw value
++        // compounds to 1.2 × 1.5 × 2.0 = 3.6 (M-01b).
++        for (final cumulative in const [1.2, 1.5, 2.0]) {
++          await tester.sendEventToBinding(
++              p.panZoomUpdate(globalFocus(), scale: cumulative));
++        }
+         await tester.sendEventToBinding(p.panZoomEnd());
+         await tester.pump();
+
+-        expect(camera.value.scale / scaleBefore, closeTo(1.5, 1e-9));
++        expect(camera.value.scale / scaleBefore, closeTo(2.0, 1e-9));
+```
+
+**GREEN on the fixed test, unmutated code** —
+`CI=true flutter test test/camera_gesture_trackpad_test.dart`:
+
+```
+00:00 +0: PointerPanZoom under wheelZooms two-finger scroll pans by the delta and does not zoom
+00:00 +1: PointerPanZoom under wheelZooms pinch zooms by the cumulative ratio about the anchor
+00:00 +2: PointerPanZoom under wheelZooms a drifting pinch pans by the delta and zooms by the ratio
+00:00 +3: PointerPanZoom under wheelZooms a second gesture starts from a clean running scale
+00:00 +4: PointerPanZoom under wheelZooms a two-finger scroll does not notify for its unchanged scale
+00:00 +5: PointerPanZoom under wheelPans two-finger scroll pans by the delta and does not zoom
+00:00 +6: PointerPanZoom under wheelPans pinch zooms by the cumulative ratio about the anchor
+00:00 +7: PointerPanZoom under wheelPans a drifting pinch pans by the delta and zooms by the ratio
+00:00 +8: PointerPanZoom under wheelPans a second gesture starts from a clean running scale
+00:00 +9: PointerPanZoom under wheelPans a two-finger scroll does not notify for its unchanged scale
+00:00 +10: All tests passed!
+EXIT=0
+```
+
+**Re-fire command:** `cp lib/src/camera_gesture_detector.dart /tmp/mut.bak`,
+then the same M-01b edit (`camera.zoomAt(_gestureAnchor, scale /
+_gestureZoom);` → `camera.zoomAt(_gestureAnchor, scale);`), then
+`CI=true flutter test test/camera_gesture_trackpad_test.dart`:
+
+**Verbatim output (tail — RED, now):**
+
+```
+00:00 +1 -1: PointerPanZoom under wheelZooms pinch zooms by the cumulative ratio about the anchor [E]
+  Test failed. See exception logs above.
+  The test description was: pinch zooms by the cumulative ratio about the anchor
+  
+00:00 +1 -1: PointerPanZoom under wheelZooms a drifting pinch pans by the delta and zooms by the ratio
+00:00 +2 -1: PointerPanZoom under wheelZooms a second gesture starts from a clean running scale
+00:00 +3 -1: PointerPanZoom under wheelZooms a two-finger scroll does not notify for its unchanged scale
+00:00 +4 -1: PointerPanZoom under wheelPans two-finger scroll pans by the delta and does not zoom
+00:00 +5 -1: PointerPanZoom under wheelPans pinch zooms by the cumulative ratio about the anchor
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: a numeric value within <1e-9> of <2.0>
+  Actual: <3.6>
+   Which:  differs by <1.6>
+...
+This was caught by the test expectation on the following line:
+  .../test/camera_gesture_trackpad_test.dart line 68
+The test description was:
+  pinch zooms by the cumulative ratio about the anchor
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:00 +5 -2: PointerPanZoom under wheelPans pinch zooms by the cumulative ratio about the anchor [E]
+  Test failed. See exception logs above.
+  The test description was: pinch zooms by the cumulative ratio about the anchor
+  
+00:00 +5 -2: PointerPanZoom under wheelPans a drifting pinch pans by the delta and zooms by the ratio
+00:00 +6 -2: PointerPanZoom under wheelPans a second gesture starts from a clean running scale
+00:00 +7 -2: PointerPanZoom under wheelPans a two-finger scroll does not notify for its unchanged scale
+00:00 +8 -2: Some tests failed.
+
+Failing tests:
+  .../test/camera_gesture_trackpad_test.dart: PointerPanZoom under wheelPans pinch zooms by the cumulative ratio about the anchor
+  .../test/camera_gesture_trackpad_test.dart: PointerPanZoom under wheelZooms pinch zooms by the cumulative ratio about the anchor
+EXIT=1
+```
+
+**Restore:** `cp /tmp/mut.bak lib/src/camera_gesture_detector.dart` — `git status --short` clean (apart from the intended test-fixture edit).
+
+**Verdict (re-fired): KILLED.** Both policies now fail with `Actual: 3.6`
+where `2.0` is expected — the ramp's compounded product under the mutant
+(`1.2 × 1.5 × 2.0`) versus the ramp's landing ratio (`2.0`) under the running
+division. M-01b is closed.
 
 ---
 
@@ -1083,14 +1209,19 @@ call sites; the only executable uses are the `import` and the ternary at
 
 ## Summary
 
-**Sixteen named mutations (M-01a..M-01q, M-01h struck) fired: 15 killed,
-1 survived (M-01b — reported above, not fixed here). One spec-declared-
-equivalent mutation (E-01e′) fired and its green run recorded.**
+**Sixteen named mutations (M-01a..M-01q, M-01h struck) fired: 16 killed,
+0 survived. M-01b survived on the first shot (degenerate fixture: the
+witness repeated the same cumulative `scale`, and the widget's own
+exact-equality coalescing guard let only the first update reach `zoomAt`),
+and was killed after a fixture fix in its own commit (round 1) that ramps
+the pinch witness through three different cumulative values. One
+spec-declared-equivalent mutation (E-01e′) fired and its green run
+recorded.**
 
 | id | verdict |
 |---|---|
 | M-01a | KILLED — dx off by 600 at the prior assertion (line 34), not the dy the brief named (line 35); both would catch it |
-| M-01b | **SURVIVED** — the named witness never sends two different non-1.0 cumulative `scale` values in one gesture, so `scale / _gestureZoom` and raw `scale` are indistinguishable under it |
+| M-01b | KILLED (after fixture fix, round 1) — SURVIVED on the first shot (degenerate fixture: repeated `scale: 1.5` never exercised the running division); re-fired against the ramped witness, `Actual: 3.6` where `2.0` is expected |
 | M-01c | KILLED — `still.x` (1018.9) off `under.x` (1015.8) |
 | M-01d | KILLED — all 10 trackpad tests fail; camera unmoved |
 | M-01e | KILLED — `wheelPans` mouse scroll zooms (dy 3.82) instead of panning (-120) |
@@ -1107,10 +1238,12 @@ equivalent mutation (E-01e′) fired and its green run recorded.**
 | M-01q | KILLED — `forBrowser(firefox: true)` no longer `same(wheelPans)` |
 | E-01e′ | EQUIVALENT (spec-declared, D2) — fired, green run recorded; only the five pre-existing golden failures survive the run |
 
-### M-01b, in full, is the concern this task reports
+### M-01b, resolved in round 1
 
-See the M-01b section above for the complete trace of why the witness
-cannot observe the mutation as currently written, the diff, the command, and
-the full green (unexpectedly passing) run. No test or production file was
-edited to chase this — that fix belongs to its own commit, per this task's
-charter.
+See the M-01b section above for the complete trace: why the original
+witness could not observe the mutation (a degenerate fixture — repeated,
+non-rising cumulative `scale`, and the coalescing guard from Ruling 01-4),
+the fixture fix (a rising ramp of cumulative values), and the re-fire that
+now kills it (`Actual: 3.6` where `2.0` is expected). The fixture fix landed
+in its own commit, separate from this log's update, per the controller's
+instructions.
