@@ -1,5 +1,9 @@
 import 'package:flutter/gestures.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart' show HardwareKeyboard;
+// `widgets.dart` exports its own `ScrollAction` (an `Action<ScrollIntent>`
+// for keyboard scrolling), which collides with `GesturePolicy`'s
+// `ScrollAction` enum used unqualified below.
+import 'package:flutter/widgets.dart' hide ScrollAction;
 
 import 'camera_controller.dart';
 import 'gesture_policy.dart';
@@ -67,11 +71,54 @@ class _CameraGestureDetectorState extends State<CameraGestureDetector> {
     _gestureZoom = scale;
   }
 
+  /// The scroll-signal rule, in the spec's order: a modifier held zooms; a
+  /// trackpad-kind scroll pans; otherwise the policy decides.
+  ///
+  /// `PointerScrollEvent` carries no modifier fields, so the keyboard state
+  /// is read from [HardwareKeyboard]. On a macOS browser a real ctrl+wheel
+  /// reaches here as a plain scroll signal (the engine reserves the DOM
+  /// `ctrlKey` for a synthesised pinch when the physical key is up); on a
+  /// Windows or Linux browser it arrives as a [PointerScaleEvent] instead.
+  /// Cmd+wheel is a plain scroll signal everywhere.
+  ///
+  /// A [PointerScaleEvent]'s `scale` is per-event -- the engine computes
+  /// `exp(-deltaY / 200)` from each DOM event on its own -- so it is applied
+  /// raw and **not** divided by the running trackpad value.
+  void _onSignal(PointerSignalEvent event) {
+    final camera = widget.camera;
+    if (event is PointerScaleEvent) {
+      camera.zoomAt(event.localPosition, event.scale);
+      return;
+    }
+    if (event is! PointerScrollEvent) return;
+    final policy = widget.policy;
+    final keyboard = HardwareKeyboard.instance;
+    final action = keyboard.isControlPressed || keyboard.isMetaPressed
+        ? ScrollAction.zoom
+        : event.kind == PointerDeviceKind.trackpad
+            ? ScrollAction.pan
+            : policy.mouseWheel;
+    switch (action) {
+      case ScrollAction.zoom:
+        // Scroll up is negative dy on every platform Flutter reports.
+        camera.zoomAt(
+            event.localPosition,
+            event.scrollDelta.dy < 0
+                ? policy.wheelZoomStep
+                : 1 / policy.wheelZoomStep);
+      case ScrollAction.pan:
+        // `scrollDelta` is content-scroll: positive dy is "scroll down", the
+        // content moves up, so the camera pans by the negation.
+        camera.panBy(-event.scrollDelta);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Listener(
         behavior: HitTestBehavior.opaque,
         onPointerPanZoomStart: _onPanZoomStart,
         onPointerPanZoomUpdate: _onPanZoomUpdate,
+        onPointerSignal: _onSignal,
         child: widget.child,
       );
 }
