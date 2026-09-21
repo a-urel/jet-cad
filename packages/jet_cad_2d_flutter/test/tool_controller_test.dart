@@ -9,7 +9,7 @@ import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
 import 'support/selection_fixture.dart';
 
 class _CountingTool extends Tool {
-  _CountingTool(this.name);
+  _CountingTool(this.name, {this.notifyOnCancel = false});
 
   @override
   final String name;
@@ -18,6 +18,12 @@ class _CountingTool extends Tool {
   ToolPhase phase = ToolPhase.idle;
 
   int cancelCount = 0;
+
+  /// When set, `cancel` notifies its own listeners in addition to
+  /// incrementing [cancelCount] — the shape of a real tool that clears its
+  /// own overlay state on cancel (Task 5's `SelectTool`). `ToolController`
+  /// must not let this leak into a second controller notification.
+  final bool notifyOnCancel;
 
   @override
   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {}
@@ -36,7 +42,10 @@ class _CountingTool extends Tool {
       KeyEventResult.ignored;
 
   @override
-  void cancel(ToolContext ctx) => cancelCount++;
+  void cancel(ToolContext ctx) {
+    cancelCount++;
+    if (notifyOnCancel) notifyListeners();
+  }
 
   @override
   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
@@ -55,7 +64,7 @@ void main() {
     addTearDown(index.dispose);
     final selection = SelectionController(doc);
     addTearDown(selection.dispose);
-    final camera = cameraAt(1, Offset.zero);
+    final camera = cameraAt(1.5, const Offset(40, -25));
     final ctx = ToolContext(
       document: doc,
       index: index,
@@ -97,5 +106,39 @@ void main() {
         reason: 'dispose removes the active listener; the tool itself '
             'still works, it is simply not forwarded any more');
     expect(notifyCount, 3);
+  });
+
+  test(
+      'activate notifies exactly once even when the outgoing tool notifies '
+      'its own listeners from cancel', () {
+    final doc = DraftDocument.empty();
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final selection = SelectionController(doc);
+    addTearDown(selection.dispose);
+    final camera = cameraAt(1.5, const Offset(40, -25));
+    final ctx = ToolContext(
+      document: doc,
+      index: index,
+      camera: camera,
+      selection: selection,
+    );
+
+    final a = _CountingTool('a', notifyOnCancel: true);
+    final b = _CountingTool('b');
+    final controller = ToolController(initial: a, context: ctx);
+
+    var notifyCount = 0;
+    controller.addListener(() => notifyCount++);
+
+    final before = notifyCount;
+    controller.activate(b);
+
+    expect(a.cancelCount, 1);
+    expect(controller.active, same(b));
+    expect(notifyCount, before + 1,
+        reason: 'cancel notifying its own (by-then-unhooked) listeners must '
+            'not add a second controller notification for one activate '
+            'call');
   });
 }

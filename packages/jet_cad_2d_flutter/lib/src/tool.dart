@@ -82,8 +82,12 @@ class ToolController extends ChangeNotifier {
 
   void activate(Tool next) {
     if (identical(next, _active)) return;
-    _active.cancel(context);
+    // Unhook the outgoing tool's listener before cancelling it: `cancel`
+    // may itself call `notifyListeners` (a tool that clears its own overlay
+    // on cancel, for instance), and that must not be forwarded — this
+    // `activate` call notifies exactly once, at the end, for the swap.
     _active.removeListener(_forward);
+    _active.cancel(context);
     _active = next;
     _active.addListener(_forward);
     notifyListeners();
