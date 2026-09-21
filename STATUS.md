@@ -88,14 +88,16 @@ entity selects it, dragging a rubber band from empty space selects what it
 encloses (window) or crosses (crossing), hovering highlights what would be
 picked, a `Tool` state machine carries `SelectTool` as its first tool, and
 the top bar shows the tool name and the selection count. Twelve tasks,
-`3fedeb9..afe7d64` (Tasks 1–11; Task 12, this results note and the spec/
-STATUS/roadmap updates, on top) on branch `plan-02/interaction-core`, cut
-from `main` at `3fedeb9`. **Executed, NOT merged — the exit gate is 14 of 15,
+`3fedeb9..afe7d64` (Tasks 1–11; Task 12, the results note and the spec/
+STATUS/roadmap updates, at `b02410a`), then a **final fix wave** at `0d69465`
+and this commit — on branch `plan-02/interaction-core`, cut from `main` at
+`3fedeb9`. **Executed, NOT merged — the exit gate is 14 of 15,
 with the fifteenth (a human's look, on macOS, in Chrome and in Firefox from
 `build/web`) OWED, and the merge itself is the human's decision.** Spec:
 [2026-09-21-interaction-core-design.md](docs/superpowers/specs/2026-09-21-interaction-core-design.md)
-(revision 2, amended at execution 2026-09-22 — six amendments, none
-rewriting the original text). Plan:
+(revision 2, amended at execution 2026-09-22 — ten amendments, six from the
+tasks and four from the final fix wave, none rewriting the original text).
+Plan:
 [2026-09-21-interaction-core.md](docs/superpowers/plans/2026-09-21-interaction-core.md).
 Results:
 [2026-09-21-plan-02-results.md](docs/superpowers/notes/2026-09-21-plan-02-results.md).
@@ -126,7 +128,8 @@ predicates in `jet_cad_2d`'s spatial index; `SelectionKey` / `SelectionControlle
 | 9 | `InteractionLayer`: pointer routing, keys, focus | `9722287` |
 | 10 | app wiring: `PlannerShell`, status text | `e6eb713` |
 | 11 | mutation sweep and the differential's own log | `afe7d64` |
-| 12 | this task: gate, results note, spec amendments, STATUS, roadmap | (this commit) |
+| 12 | gate, results note, spec amendments, STATUS, roadmap | `b02410a` |
+| — | **final fix wave**: every open finding of the whole-branch review and of Task 12's own review — A1-A7 (the picking filter in the tool's group rule, the rendering filter in the outline, both band corners at release, `OutlineCache` as a `ChangeNotifier` in the repaint merge, cmd/ctrl+Z undo in the shell, two doc/one-line fixes) and B1-B8 (this file, the results note, the spec) | `0d69465` + this commit |
 
 **Four rulings a reader must know.** A group's band membership counts its
 owned leaves and its nested groups' leaves only; an instance placed inside a
@@ -139,29 +142,33 @@ longer cancels it: a band dragged past the edge continues, and its own `up`
 event ends it, not `onExit` (Task 9; the spec's `SelectTool` row is amended).
 And a delete of N objects is N undo steps, with a partial undo of a group's
 cascade restoring leaves under an owner that is still gone — the concrete
-problem statement 06's compound undo inherits (D10). Full account, plus the
-`worldPointOf` allocation acceptance, the band-edge clip and the
-`ui.Path.getBounds` conic-hull note: the results note's "Debt and rulings"
-section.
+problem statement 06's compound undo inherits (D10). The final fix wave added a fifth a reader must know: **the four walks over a
+container's members differ on two axes** — whether child instances are
+followed and which `QueryFilter` applies — tabulated in the results note.
+Full account, plus the point-key allocation acceptance, the band-edge clip,
+the window band's root-level instance walk and the `ui.Path.getBounds`
+conic-hull note: the results note's "Debt and rulings" section.
 
 ### What Plan 02 measured
 
 | quantity | value |
 |---|---|
 | `packages/jet_cad_2d` | **820** pass, analyze/format clean |
-| `packages/jet_cad_2d_flutter` | **765** pass, 1 skip, the same five pre-existing `text_ladder_golden_test.dart` failures Plan 01 recorded — analyze/format clean |
+| `packages/jet_cad_2d_flutter` | **769** pass, 1 skip, the same five pre-existing `text_ladder_golden_test.dart` failures Plan 01 recorded — analyze/format clean |
 | `apps/dev_harness_2d` | **82** — unchanged from the branch point (`git diff --stat main..HEAD -- apps/dev_harness_2d` empty), analyze/format clean |
-| `apps/floor_planner` | **12** tests; `flutter build macos --debug` and `flutter build web` both `✓ Built` |
+| `apps/floor_planner` | **12** tests (eleven before the final fix wave, plus its cmd+Z shell test); `flutter build macos --debug` and `flutter build web` both `✓ Built` |
 | mutations | **28 fired, 28 killed**, **2 equivalent** (M-02c, M-02e, declared by construction), **zero true survivors** |
 | the differential (criterion 9) | **52 bands** (12 random + one per root instance), **104 comparisons** (both `BandMode`s), all agree with the brute-force arm |
 | the two allocation invariants | `query_allocation_test.dart` and `paint_allocation_test.dart` both green, unchanged |
 | the window | **fourteen checks OWED — not looked at by a human** (seven per platform: macOS, and Chrome/Firefox from `build/web`) |
 
-**Exit gate: 14 of 15.** Criteria 1–14 all PASS, each with its witness (test
-file and test name, the mutation log, or the pasted gate line); criterion 15
-(a human looks, on macOS, in Chrome and in Firefox) is **OWED**, in those
-words — no device run or visual judgement was simulated to fill it in. Full
-account:
+**Exit gate: 14 of 15**, re-measured after the final fix wave. Criteria
+1–14 all PASS, each with its witness (test file and test name, the mutation
+log, or the pasted gate line); criterion 15 (a human looks, on macOS, in
+Chrome and in Firefox) is **OWED**, in those words — no device run or visual
+judgement was simulated to fill it in, and **the merge is still the human's
+decision**. The shell now binds cmd+Z / ctrl+Z, so the look's undo checks
+have something to press; there is no redo in 02. Full account:
 [2026-09-21-plan-02-results.md](docs/superpowers/notes/2026-09-21-plan-02-results.md).
 
 ---
@@ -1080,12 +1087,15 @@ and the merge decision.** Its spec,
 [2026-09-21-interaction-core.md](docs/superpowers/plans/2026-09-21-interaction-core.md),
 were both written 2026-09-21; **all twelve tasks ran on
 `plan-02/interaction-core`, cut from `main` at `3fedeb9`, through
-`afe7d64` plus this results-note task, and the branch is NOT merged.** The
-exit gate is **14 of 15** — criterion 15 (a human looks, on macOS, in Chrome
-and in Firefox from `build/web`, at click, shift-click, both bands, hover,
-Escape, Delete and undo) is **OWED**, and the merge itself is the human's
+`afe7d64` plus the results-note task at `b02410a`, and then a final fix wave
+that closed every open finding of the whole-branch review and of Task 12's
+own review — and the branch is NOT merged.** The exit gate is **14 of 15** —
+criterion 15 (a human looks, on macOS, in Chrome and in Firefox from
+`build/web`, at click, shift-click, both bands, hover, Escape, Delete and
+undo — **cmd+Z on macOS, ctrl+Z in a browser**, which the fix wave's shell
+binding made possible) is **OWED**, and the merge itself is the human's
 decision, exactly as Plan 01's twelfth criterion was before its own human
-look. Spec amended at execution in six places (none rewriting the original
+look. Spec amended at execution in ten places (none rewriting the original
 text), none of them changing a passing criterion into a failing one. See
 [Plan 02](#plan-02--interaction-core-executed-on-plan-02interaction-core-not-merged)
 and
