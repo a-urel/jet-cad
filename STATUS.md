@@ -1,6 +1,7 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-06 (Plan F merged)
+**Last updated:** 2026-09-21 (docs only — `roadmap/` cross-linked and brought
+up to date with Plans A–F; no code changed since Plan F's merge)
 **Verified against:** `main` at `a8208d1`. **Plan F is MERGED** — `--no-ff`
 at `a8208d1` on 2026-09-06, on the human's decision, with its exit gate at
 7 of 14 and the window still OWED; branch and worktree deleted, ledger
@@ -296,6 +297,11 @@ Plan: [2026-08-31-gpu-backend-plan-c-shaded-dashes.md](docs/superpowers/plans/20
 ---
 
 ## TL;DR — where you left off
+
+> **Historical.** This section was written at Plan A's merge and is kept as
+> the record of that moment. The current resume point is
+> [Resume here](#resume-here); the current shape of the render line is under
+> [Plan F](#plan-f--rebuild-triggers-and-the-band-merged-into-main-at-a8208d1).
 
 **Plan A of the GPU-resident render backend is DONE and merged, nine tasks,
 `81529f0..cdf2a23`, merge `cd5bc98`.** A third `RenderBackend.residentGpu` draws
@@ -674,6 +680,8 @@ apps/
   dev_harness/          # DORMANT — manual harness for the jet_cad viewport
   dev_harness_2d/       # ACTIVE — measurement harness; exists so R2/R4a/R4b
                         #   run on a real device in profile mode
+roadmap/                # the PRODUCT target (parametric floor planner) decomposed
+                        #   into 13 sub-projects; brainstorm inputs, not plans
 docs/superpowers/
   specs/                # design specs — BINDING AUTHORITY
   plans/                # implementation plans — what the implementer follows
@@ -867,6 +875,18 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 ---
 
 ## Resume here
+
+**Two lines exist, and which one runs next is the human's choice.** The
+**render line** — the GPU-resident backend, spec
+[2026-08-29-gpu-resident-render-backend-design.md](docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md)
+— has six of seven plans merged and Plan G (web) unwritten; its open items
+are below. The **product line** — a parametric floor planner, decomposed in
+[roadmap/00-README.md](roadmap/00-README.md) into thirteen sub-projects, each
+a brainstorm input, not a plan — has **nothing started**; its first is
+[roadmap/01-app-skeleton.md](roadmap/01-app-skeleton.md), and the README's
+"Since this folder was written" section says what Plans A–F changed for it.
+Nothing on either line blocks the other; the one coupling is that Plan G
+matters only if the product targets web.
 
 **Plan F (rebuild triggers and the band) is MERGED, all ten tasks,
 `c5b8ee8..2535dce` merged `--no-ff` at `a8208d1` on 2026-09-06 — the human

@@ -1,6 +1,9 @@
 # jet-cad roadmap — the parametric floor planner
 
 **Created:** 2026-08-29, on `main` at `1d71d61`.
+**Last updated:** 2026-09-21, on `main` at `2bc80f6` — the GPU-resident render
+line (Plans A–F) ran after this folder was written; see
+[Since this folder was written](#since-this-folder-was-written-the-gpu-resident-line-plans-af).
 **Target chosen by the human on 2026-08-29: option B — a parametric floor
 planner.** Not a stencil diagramming tool. Walls have thickness and clean up
 at their corners, openings cut the walls that host them, rooms follow the
@@ -11,7 +14,7 @@ walls that enclose them, and dimensions follow the geometry they measure.
 ## What this folder is
 
 A **decomposition**, not a plan and not a spec. The target is far too large
-for one design document, so it is broken into fourteen sub-projects, each of
+for one design document, so it is broken into thirteen sub-projects, each of
 which gets its **own** brainstorm → spec → plan → execution cycle under the
 repo's normal SDD workflow.
 
@@ -36,7 +39,7 @@ spec in `docs/superpowers/specs/`, then a plan, then execute.
 | Commands with undo/redo (10 commands) | done |
 | Spatial index, hit-testing, 9 snap kinds | done |
 | Deterministic versioned JSON codec | done |
-| Rendering: two sinks, tile cache, text, dashes, fills | done, and over-built for this target |
+| Rendering: three backends (`vertices` default, `canvas`, `residentGpu`), tile cache, text, dashes, fills | done, and over-built for this target |
 | **Interaction: selection, grips, tools** | **does not exist** |
 | **Any product UI at all** | **does not exist** |
 | **Parametric behaviour (walls, openings, rooms, dimensions)** | **does not exist** |
@@ -62,6 +65,61 @@ problem at this target's scale — the sub-projects below should default tiles
 The answer to "if C# can do this, Flutter should too" is yes, and the evidence
 is already in this repository. The engine is not the risk. The risk is the
 three unwritten layers.
+
+### Since this folder was written: the GPU-resident line (Plans A–F)
+
+This folder was written on 2026-08-29. Between then and 2026-09-06 the repo
+executed **six of the seven plans** of the GPU-resident render backend spec,
+[2026-08-29-gpu-resident-render-backend-design.md](../docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md),
+all merged `--no-ff` into `main`: A seam and strokes (`cd5bc98`), B joins and
+hairlines (`72b162d`), C dashes in the shader (`3a61b45`), D fills
+(`de962bd`), E text as patches (`4921619`), F rebuild triggers and the band
+(`a8208d1`). **Plan G (web) is the seventh and is unwritten.** `STATUS.md`
+carries every number; this section carries only what a sub-project needs to
+know.
+
+**What exists now.** `RenderBackend` has three values
+(`packages/jet_cad_2d_flutter/lib/src/render_backend.dart`): `vertices` is the
+default on every platform, `canvas` is the fallback an explicit argument can
+choose, and **`residentGpu`** uploads the document's geometry once, keeps the
+camera as a uniform, and draws one instanced call per frame. It is **explicit
+only, never a default and never automatic**; `resolveBackend` routes it back
+to `vertices` where Flutter GPU is absent (web included — `flutter_gpu` cannot
+compile there). `DraftCanvas(backend: RenderBackend.residentGpu)` is real
+since Plan F: it collects over the document's whole extents at the live
+scale, rebuilds on the spec's five triggers (document change, table revision,
+device pixel ratio, band exit — **never on a pan**), and paints through the
+vertices sink until the first rebuild lands or if an upload fails.
+
+**What this changes for the sub-projects — one decision, moved to 01.** The
+"tiles off" default above now has a third option. The recommendation stands:
+**default `backend` unset (`vertices`) and tiles off**, and treat `residentGpu`
+as a measured choice at 01's brainstorm, for three reasons that a floor
+planner makes sharper than the harness did:
+
+- **It rebuilds on every document edit.** Plan F measured `CommandApplied` at
+  **26.93 ms** at 10,000 entities, and 6 of its 10 triggers over the 16.67 ms
+  frame budget. A planner edits constantly; a harness pans. At 500–5,000
+  entities the rebuild is unmeasured — it will be smaller, and a spec for 01
+  that wants `residentGpu` owes that number.
+- **The band is `[1.0, 1.0]`.** The spec's watermark band, which was to let
+  a zoom drift 2× before a rebuild, measured no width at all: criterion 2
+  MISSes by the spec's own design (two frozen rows — chord count and text
+  culling — step at every threshold). The decision on it is the human's and
+  still open; it does not block anything here.
+- **It does not run on web.** If the floor planner must ship on web, Plan G
+  is on the critical path and its web arm has never been run; if it must
+  not, Plan G can wait behind the product work indefinitely.
+
+**Still open on the render line, all the human's** (listed in `STATUS.md`'s
+"Resume here" with the launch entries): five looks at the running window
+(Plan F's four checks and Plan E's fifth), the criterion-2 design decision,
+and then Plan G itself.
+
+**The measurements above are still the right ones.** They were taken on the
+`vertices` sink, which is still the default, and nothing in Plans A–F changed
+that sink — `vertices_draw_sink.dart` and `canvas_draw_sink.dart` are the
+oracle every GPU differential is measured against and were never edited.
 
 ---
 
@@ -204,8 +262,14 @@ cheap; learning it from a half-executed Plan is not.
 | 12 | app shell | — | — | — |
 | 13 | export and print | — | — | — |
 
-**Nothing has started.** Update this table as specs and plans land; `STATUS.md`
-at the repo root stays the authority on what is in flight.
+**Nothing has started** on these thirteen — still true on 2026-09-21. Update
+this table as specs and plans land; `STATUS.md` at the repo root stays the
+authority on what is in flight. The render line's own plan table lives there,
+not here: six of seven merged, Plan G (web) unwritten, see the section above.
+
+**Two lines, one choice.** Nothing on the render line blocks 01, and 01 blocks
+nothing on the render line. The order between them is the human's call, with
+one coupling: Plan G matters only if the product targets web.
 
 ---
 
@@ -270,9 +334,16 @@ implementer and an independent reviewer per task.
 - `packages/jet_cad_2d` — the pure-Dart engine. **No Flutter, no `dart:ui`,
   ever.** Dependencies: `meta`, `vector_math`; dev: `test`, `vm_service`.
 - `packages/jet_cad_2d_flutter` — the Flutter render layer. In this package
-  `unused_import` and `unused_element` are **errors**, not warnings.
+  `unused_import` and `unused_element` are **errors**, not warnings. Depends
+  on `flutter_scene` **for its `flutter_gpu` shim only** (never its scene
+  graph); every GPU import is confined to `lib/src/gpu/gpu_facade.dart`, the
+  resident backend lives under `lib/src/gpu/`, and its shaders are
+  `shaders/cad_stroke.{vert,frag}` (GLSL ES 100, at most eight attributes,
+  bundled at `assets/shaders/cad.shaderbundle`).
 - `apps/dev_harness_2d` — the measurement harness. It is an instrument, not a
-  product. Do not grow the product inside it.
+  product. Do not grow the product inside it. Its GPU spike and its
+  `BACKEND=residentGpu` main view are launch entries in `.vscode/launch.json`;
+  `SPIKE_FILL_SCALE=20` is for the eye and is never used for a timing number.
 
 **Non-negotiables (`CLAUDE.md`):**
 
@@ -281,7 +352,8 @@ implementer and an independent reviewer per task.
   `packages/jet_cad_2d/test/invariants/query_allocation_test.dart` and
   `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`.
 - **Draw order is ascending handle value**, stable across undo, save, load and
-  purge.
+  purge. In the resident GPU buffer that is **emission order — never sort the
+  buffer**.
 - Geometric **decisions** use `Tolerance`; **stored value** comparisons are
   exact `==`.
 - **Never commit `analysis_options.yaml`** — `flutter pub get` rewrites three

@@ -66,8 +66,15 @@ by the widget suite.
    suite's mutation coverage, and every future host of a canvas wants it.
    Whether `DraftCanvas` gains it internally or it stays a separate wrapper is
    an open question below.
-3. **Tiles off.** `DraftCanvas(tiles: false)`. See the scale note in the
-   standing context. Turning them on is a measured decision, not a default.
+3. **Tiles off, backend unset.** `DraftCanvas(tiles: false)` with `backend`
+   left at its default (`RenderBackend.vertices`). See the scale note in the
+   standing context. Turning tiles on is a measured decision, not a default —
+   and so is `RenderBackend.residentGpu`, which exists since Plan F
+   (2026-09-06), is explicit-only, rebuilds on every document edit
+   (26.93 ms at 10,000 entities, unmeasured at floor-plan scale) and does not
+   run on web. Choosing it is a question for this sub-project's brainstorm,
+   with a number attached; see `00-README.md`, "Since this folder was
+   written".
 4. **Desktop first.** macOS is the machine the repo is measured on.
 
 ## Open questions — answer these in the spec

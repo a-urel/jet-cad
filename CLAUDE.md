@@ -1,7 +1,10 @@
 # jet-cad — project instructions
 
 Read [STATUS.md](STATUS.md) first. It carries where the project stands, what is
-done, what is in flight and the exact resume point.
+done, what is in flight and the exact resume point. Then
+[roadmap/00-README.md](roadmap/00-README.md): the product target (a parametric
+floor planner) decomposed into sub-projects. A roadmap file is an input to
+brainstorming, never something to implement from.
 
 ## Workflow
 
