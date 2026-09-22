@@ -145,7 +145,24 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
       x0 + 5000 + _partition, y0 + 3500 + _partition, x1 - _wall, y1 - _wall,
       strip: 150, plank: 900);
 
+  // Spec 04 D12 and Ruling 04-1: the page is document data, attached
+  // through the log like everything else, and then the history is cleared
+  // so a fresh document has none — as a loaded one has none.
+  PageComponent.register(doc.components);
+  doc.header.units = DrawingUnits.millimeters;
+  doc.commands.execute(SetComponentCommand<PageComponent>(
+      doc.rootHandle, startupPage(doc.extents)));
+  doc.commands.clearHistory();
   return doc;
+}
+
+/// A4 landscape at 1:50 in metres, centred on [extents] (spec D4).
+PageComponent startupPage(Aabb2 extents) {
+  final page = PageComponent();
+  final w = page.effectiveWidthMm * page.scaleDenominator;
+  final h = page.effectiveHeightMm * page.scaleDenominator;
+  return page.copyWith(
+      originX: extents.center.x - w / 2, originY: extents.center.y - h / 2);
 }
 
 /// The one way entities enter this document: `AddEntityCommand`, in source

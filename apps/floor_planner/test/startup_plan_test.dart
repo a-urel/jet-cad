@@ -2,6 +2,7 @@ import 'dart:ui' show Size;
 
 import 'package:floor_planner/startup_plan.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 void main() {
@@ -53,5 +54,24 @@ void main() {
         'max $kMaxScale (${kMaxScale / fit.scale}x in)');
     expect(fit.scale / kMinScale, greaterThan(10));
     expect(kMaxScale / fit.scale, greaterThan(100));
+  });
+
+  test(
+      'the startup plan carries an A4 landscape page at 1:50 centred on the '
+      'plan, in millimetres, with no history', () {
+    final doc = startupPlan(measurer);
+    final page = doc.components.get<PageComponent>(doc.rootHandle)!;
+    expect(page.preset, SheetSize.a4);
+    expect(page.orientation, PageOrientation.landscape);
+    expect(page.scaleDenominator, 50);
+    expect(page.displayUnit, DisplayUnit.meters);
+    final rect = sheetWorldRect(page);
+    final extents = doc.extents;
+    expect(rect.center.x, closeTo(extents.center.x, 1e-9));
+    expect(rect.center.y, closeTo(extents.center.y, 1e-9));
+    expect(rect.minX, lessThan(kPlanOriginX));
+    expect(rect.maxX, greaterThan(kPlanOriginX + kPlanWidth));
+    expect(doc.header.units, DrawingUnits.millimeters);
+    expect(doc.commands.canUndo, isFalse, reason: 'Ruling 04-1');
   });
 }

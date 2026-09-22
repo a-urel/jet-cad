@@ -5,6 +5,7 @@ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import '../core/handle.dart';
 import '../core/tolerance.dart';
+import '../document/command.dart';
 import '../document/doc_change.dart';
 import '../document/draft_document.dart';
 import '../document/extents.dart';
@@ -2586,6 +2587,11 @@ class SpatialIndex {
   /// indexed. An appearance edit finds the box unchanged and dirties nothing,
   /// which is what preserves the appearance-edits-do-not-touch-the-index
   /// guarantee by measurement rather than by a kind the stream cannot carry.
+  ///
+  /// Since Plan 04 the change *does* say one thing about itself — its
+  /// `capability` — and a components-only change returns before [_reconcile]
+  /// (spec D13); the re-derive-and-compare rule below applies to every other
+  /// kind.
   void _onChange(DocChange change) {
     switch (change) {
       case DocumentLoaded():
@@ -2595,9 +2601,14 @@ class SpatialIndex {
         // [_lastKnownSlot] — is invalid, and there is no incremental path
         // back.
         rebuildAll();
-      case CommandApplied(:final touched):
-      case CommandUndone(:final touched):
-      case CommandRedone(:final touched):
+      case CommandApplied(:final touched, :final capability):
+      case CommandUndone(:final touched, :final capability):
+      case CommandRedone(:final touched, :final capability):
+        // Spec D13. A components-only edit — a page setting on the root,
+        // say — names a handle the structural rule would otherwise treat
+        // as a node change and rebuild everything for. Components are data
+        // this index never reads.
+        if (capability == Capability.components) return;
         _reconcile(touched);
     }
   }

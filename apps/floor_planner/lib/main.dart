@@ -3,6 +3,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'page_panel.dart';
 import 'planner_view.dart';
 import 'startup_plan.dart';
 
@@ -34,10 +35,12 @@ class PlannerShell extends StatefulWidget {
 class _PlannerShellState extends State<PlannerShell> {
   final FlutterTextMeasurer _measurer = FlutterTextMeasurer();
   late final DraftDocument _document = startupPlan(_measurer);
+  late final PageNotifier _page = PageNotifier(_document);
   late final SpatialIndex _index = SpatialIndex(_document);
   // Fitted to the nominal window; PlannerView re-fits once at the real size.
   late final CameraController _camera = CameraController(
-    ViewportTransform.fit(_document.extents, const Size(1440, 900)),
+    fitToPage(_document.components.get<PageComponent>(_document.rootHandle)!,
+        const Size(1440, 900)),
     minScale: kMinScale,
     maxScale: kMaxScale,
   );
@@ -71,10 +74,21 @@ class _PlannerShellState extends State<PlannerShell> {
     return _selection.isEmpty ? base : '$base — ${_selection.length} selected';
   }
 
+  String _zoomLine() {
+    final page = _page.value;
+    if (page == null) return '';
+    final zoom = zoomOf(_camera.value.scale, page, kLogicalPixelsPerMm);
+    return '1:${_trimNumber(page.scaleDenominator)} · ${(zoom * 100).round()}%';
+  }
+
+  static String _trimNumber(double v) =>
+      v == v.roundToDouble() ? v.round().toString() : v.toString();
+
   @override
   void dispose() {
     _tools.dispose();
     _selection.dispose();
+    _page.dispose();
     _camera.dispose();
     _index.dispose();
     _measurer.clear();
@@ -96,15 +110,22 @@ class _PlannerShellState extends State<PlannerShell> {
               key: const Key('chrome-top'),
               height: 44,
               color: scheme.surfaceContainer,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: ListenableBuilder(
-                    listenable: _status,
-                    builder: (_, __) =>
-                        Text(_statusLine(), key: const Key('status-text')),
-                  ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    ListenableBuilder(
+                      listenable: _status,
+                      builder: (_, __) =>
+                          Text(_statusLine(), key: const Key('status-text')),
+                    ),
+                    const Spacer(),
+                    ListenableBuilder(
+                      listenable: Listenable.merge([_camera, _page]),
+                      builder: (_, __) =>
+                          Text(_zoomLine(), key: const Key('zoom-text')),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -123,6 +144,7 @@ class _PlannerShellState extends State<PlannerShell> {
                         document: _document,
                         index: _index,
                         camera: _camera,
+                        page: _page,
                         policy: _policy,
                         selection: _selection,
                         tools: _tools,
@@ -133,6 +155,7 @@ class _PlannerShellState extends State<PlannerShell> {
                     key: const Key('chrome-right'),
                     width: 280,
                     color: scheme.surfaceContainerLow,
+                    child: PagePanel(document: _document, page: _page),
                   ),
                 ],
               ),

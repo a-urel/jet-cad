@@ -1,0 +1,9 @@
+- T1 minor: page_component.dart toString "custom" vs SheetSize.name "Custom" (cosmetic).
+- T4: `_metricLadder`/`_imperialLadder` are shared mutable lists returned by `ladderFor`; wrap in `List.unmodifiable` (final wave).
+- T6: SpyCanvas records TypedData args by reference; a test inspecting a list after a second paint would read the later frame (copy TypedData in SpyCanvas, or keep counters the only cross-paint surface).
+- T6: bound rests on `cam.scale` (geometric mean); anisotropic camera would break it — no producer today; a doc line or assert(b == 0 && c == 0) on _lines.
+- T6: oracle assumes the metric, floor-less ladder; would diverge silently if the standard fixture's unit changed.
+- T6: `onPaintForTest` has no caller yet (Task 9 may wire it); bounded test uses 800 for both axes (looser, safe).
+- T8: RulerFrame `_repeat`/`_cornerRepaint` are `late final` over widget.camera/page; swapping the instance across rebuilds would orphan the merge (inert today).
+- T9: first frame paints at the nominal 1440x900 page fit (startup flash); a silent camera set + deferred notify would fix it, needs a CameraController API. Class doc of PlannerView says "a CameraGestureDetector over a DraftCanvas"; the two fit tests are near-duplicates; startup_plan_test still brackets kMin/MaxScale against the extents fit; `_trimNumber` non-integer branch unreachable until the scale is editable (Task 10 makes it so).
+- T10: PagePanel `_set` issues a command even when `next == page` (re-selecting the active value creates a no-op undo entry); guard with equality in the final wave.

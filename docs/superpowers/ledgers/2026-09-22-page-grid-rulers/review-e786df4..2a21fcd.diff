@@ -1,0 +1,171 @@
+# Review package: e786df4..2a21fcd
+
+## Commits
+2a21fcd fix(render): seeded sweep keeps the sheet on screen; majors read from the counter
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart |  2 +-
+ .../lib/src/page_chrome_painter.dart               | 14 +++++++----
+ .../test/page_chrome_painter_test.dart             | 27 +++++++++++++++++++---
+ 3 files changed, 35 insertions(+), 8 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+index 3ee3dd3..d16ec90 100644
+--- a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
++++ b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+@@ -39,22 +39,22 @@ export 'src/gpu/collection_frame.dart';
+ export 'src/gpu/geometry_collector.dart';
+ export 'src/gpu/gpu_draw_backend.dart';
+ export 'src/gpu/resident_collection.dart';
+ export 'src/gpu/resident_geometry.dart';
+ export 'src/gpu/resident_rebuilder.dart';
+ export 'src/gpu/resident_text.dart';
+ export 'src/gpu/text_compositor.dart';
+ export 'src/gpu/text_patches.dart';
+ export 'src/interaction_layer.dart';
+ export 'src/outline_cache.dart';
++export 'src/page_chrome_painter.dart';
+ export 'src/page_fit.dart';
+ export 'src/page_notifier.dart';
+-export 'src/page_chrome_painter.dart';
+ export 'src/reference_walk.dart';
+ export 'src/render_backend.dart';
+ export 'src/select_tool.dart';
+ export 'src/selection.dart';
+ export 'src/selection_overlay.dart';
+ export 'src/selection_style.dart';
+ export 'src/tile_cache.dart';
+ export 'src/tool.dart';
+ export 'src/viewport_transform.dart';
+diff --git a/packages/jet_cad_2d_flutter/lib/src/page_chrome_painter.dart b/packages/jet_cad_2d_flutter/lib/src/page_chrome_painter.dart
+index b0d3cb6..cb1d780 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/page_chrome_painter.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/page_chrome_painter.dart
+@@ -1,15 +1,16 @@
+ import 'dart:math' as math;
+ import 'dart:typed_data';
+ import 'dart:ui';
+ 
+-import 'package:flutter/foundation.dart' show ValueListenable;
++import 'package:flutter/foundation.dart'
++    show ValueListenable, visibleForTesting;
+ import 'package:flutter/rendering.dart' show CustomPainter;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'camera_controller.dart';
+ import 'chrome_style.dart';
+ import 'viewport_transform.dart';
+ 
+ /// The sheet, the grid and the page breaks, under `DraftCanvas` in its own
+ /// `RepaintBoundary` (spec D8). Everything it hands `dart:ui` is a screen
+@@ -21,30 +22,35 @@ class PageChromePainter extends CustomPainter {
+     required this.page,
+     super.repaint,
+     this.onPaintForTest,
+   });
+ 
+   final CameraController camera;
+   final ValueListenable<PageComponent?> page;
+   final void Function()? onPaintForTest;
+ 
+   /// Test-only, reset per paint.
++  @visibleForTesting
+   int debugLastMajorCount = 0;
++  @visibleForTesting
+   int debugLastMinorCount = 0;
++  @visibleForTesting
+   int debugLastBreakCount = 0;
+ 
+   /// Grown once to the bound, reused; `sublistView`s of it reach the canvas.
+   ///
+   /// Both grid passes of one paint write into *disjoint* spans of it: the
+-  /// majors start where the minors stopped. `drawRawPoints` takes the list by
+-  /// reference, so a second pass writing from index 0 would rewrite the list
+-  /// the first pass already handed over.
++  /// majors start where the minors stopped. That keeps each pass's list an
++  /// independently readable view for as long as the paint lasts — a second
++  /// pass writing from index 0 would rewrite the numbers the first one
++  /// produced, and a canvas that holds the list rather than copying it
++  /// (the test double does) would then see the wrong grid.
+   Float32List _buffer = Float32List(0);
+ 
+   final Paint _sheetFill = Paint();
+   final Paint _sheetEdge = Paint()
+     ..color = kSheetEdgeColor
+     ..style = PaintingStyle.stroke
+     ..strokeWidth = 1.0;
+   final Paint _minor = Paint()
+     ..color = kMinorGridColor
+     ..strokeWidth = 1.0;
+diff --git a/packages/jet_cad_2d_flutter/test/page_chrome_painter_test.dart b/packages/jet_cad_2d_flutter/test/page_chrome_painter_test.dart
+index adb50d6..e7560a8 100644
+--- a/packages/jet_cad_2d_flutter/test/page_chrome_painter_test.dart
++++ b/packages/jet_cad_2d_flutter/test/page_chrome_painter_test.dart
+@@ -94,41 +94,62 @@ void main() {
+     expect(majors.length, expected.length);
+     for (var i = 0; i < majors.length; i++) {
+       expect(majors[i], closeTo(expected[i], 1e-3));
+     }
+   });
+ 
+   test(
+       'differential: fifty seeded cameras agree with the literal-ladder oracle',
+       () {
+     final random = math.Random(0x5EED0004);
++    final sheet = sheetWorldRect(standardPage());
++    var trialsWithMajors = 0;
+     for (var trial = 0; trial < 50; trial++) {
+       // [1e-3, 1e2]
+       final scale = math.pow(10.0, -3 + random.nextDouble() * 5).toDouble();
+-      final tx = -5000 + random.nextDouble() * 10000;
+-      final ty = -5000 + random.nextDouble() * 10000;
++      // Ruling 04-13. A translation drawn uniformly in +-5000 px put the
++      // sheet off screen in all fifty trials, so every trial asserted
++      // 0 == 0. Instead: draw a world point uniformly inside the sheet and
++      // a screen point uniformly inside the viewport, and solve the
++      // translation that maps the one onto the other. With
++      // `Transform2(s, 0, 0, -s, tx, ty)`, `xs = s * wx + tx` and
++      // `ys = -s * wy + ty`, hence `tx = sx - s * wx` and `ty = sy + s * wy`
++      // -- a plus, because the y axis is flipped. That point is then in
++      // `visibleWorld` and in the sheet at every scale in the range.
++      final wx = sheet.minX + random.nextDouble() * (sheet.maxX - sheet.minX);
++      final wy = sheet.minY + random.nextDouble() * (sheet.maxY - sheet.minY);
++      final sx = random.nextDouble() * kChromeSize.width;
++      final sy = random.nextDouble() * kChromeSize.height;
++      final tx = sx - scale * wx;
++      final ty = sy + scale * wy;
+       final cam = CameraController(ViewportTransform(
+           worldToScreenMatrix: Transform2(scale, 0, 0, -scale, tx, ty)));
+       final (painter, _, _) = rig(camera: cam);
+       final canvas = SpyCanvas();
+       painter.paint(canvas, kChromeSize);
+       final raw = canvas.named('drawRawPoints').toList();
+-      final majors = raw.isEmpty
++      // Not `raw.isEmpty`: `_lines` skips `drawRawPoints` when it draws
++      // nothing, so a paint with minors but no major leaves the minors'
++      // list as `raw.last`.
++      final majors = painter.debugLastMajorCount == 0
+           ? const <double>[]
+           : verticalXs(raw.last.args[1]! as Float32List);
+       final expected = oracleMajorXs(cam.value, standardPage(), kChromeSize);
+       expect(majors.length, expected.length,
+           reason: 'trial $trial, scale $scale');
++      if (expected.isNotEmpty) trialsWithMajors++;
+       for (var i = 0; i < majors.length; i++) {
+         expect(majors[i], closeTo(expected[i], 1e-3), reason: 'trial $trial');
+       }
+     }
++    expect(trialsWithMajors, 50,
++        reason: 'a trial with no major line on screen asserts nothing');
+   });
+ 
+   test('the point list is exactly four numbers per line', () {
+     // M-04v.
+     final (painter, _, _) = rig();
+     final canvas = SpyCanvas();
+     painter.paint(canvas, kChromeSize);
+     for (final call in canvas.named('drawRawPoints')) {
+       final points = call.args[1]! as Float32List;
+       expect(points.length % 4, 0);

@@ -725,8 +725,10 @@ class RemoveRegionCommand extends DraftCommand {
 ///
 /// [capabilities] is the union of the children's, so a runtime document
 /// refuses a compound that removes geometry even when its first child is a
-/// permitted move. [capability] summarises it as the highest-ranked member
-/// and is informational only.
+/// permitted move. [capability] summarises it as the highest-ranked member,
+/// and is what `SpatialIndex` and `TileCache` read to skip a components-only
+/// compound (spec D13); it is `components` only when every member is, which
+/// is why `Capability.components` is declared first (A1, Ruling 04-19).
 class CompoundCommand extends DraftCommand {
   final List<DraftCommand> children;
 

@@ -1,4 +1,5 @@
 import '../core/handle.dart';
+import 'command.dart';
 
 /// Typed document events.
 ///
@@ -16,21 +17,46 @@ final class CommandApplied extends DocChange {
   final String label;
   @override
   final Set<Handle> touched;
-  const CommandApplied({required this.label, required this.touched});
+
+  /// What kind of edit this was — the command's [DraftCommand.capability],
+  /// a [CompoundCommand]'s summary. [Capability.components] means no
+  /// geometry and no structure moved: the spatial index and the tile cache
+  /// skip it (spec D13). Defaults to [Capability.geometry] so a change built
+  /// without it keeps the meaning every consumer gave it before.
+  final Capability capability;
+
+  const CommandApplied(
+      {required this.label,
+      required this.touched,
+      this.capability = Capability.geometry});
 }
 
 final class CommandUndone extends DocChange {
   final String label;
   @override
   final Set<Handle> touched;
-  const CommandUndone({required this.label, required this.touched});
+
+  /// See [CommandApplied.capability].
+  final Capability capability;
+
+  const CommandUndone(
+      {required this.label,
+      required this.touched,
+      this.capability = Capability.geometry});
 }
 
 final class CommandRedone extends DocChange {
   final String label;
   @override
   final Set<Handle> touched;
-  const CommandRedone({required this.label, required this.touched});
+
+  /// See [CommandApplied.capability].
+  final Capability capability;
+
+  const CommandRedone(
+      {required this.label,
+      required this.touched,
+      this.capability = Capability.geometry});
 }
 
 /// The whole document was replaced.

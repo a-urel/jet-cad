@@ -1,0 +1,249 @@
+# Review package: 6bc31eb..96c09d8
+
+## Commits
+96c09d8 feat(render): RulerFrame with a pointer notifier; exports
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart |   1 +
+ .../jet_cad_2d_flutter/lib/src/ruler_frame.dart    | 114 +++++++++++++++++++++
+ .../jet_cad_2d_flutter/test/ruler_frame_test.dart  |  88 ++++++++++++++++
+ 3 files changed, 203 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+index d47863b..0bcdb5e 100644
+--- a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
++++ b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+@@ -45,17 +45,18 @@ export 'src/gpu/resident_text.dart';
+ export 'src/gpu/text_compositor.dart';
+ export 'src/gpu/text_patches.dart';
+ export 'src/interaction_layer.dart';
+ export 'src/outline_cache.dart';
+ export 'src/page_chrome_painter.dart';
+ export 'src/page_fit.dart';
+ export 'src/page_notifier.dart';
+ export 'src/reference_walk.dart';
+ export 'src/render_backend.dart';
+ export 'src/ruler_painter.dart';
++export 'src/ruler_frame.dart';
+ export 'src/select_tool.dart';
+ export 'src/selection.dart';
+ export 'src/selection_overlay.dart';
+ export 'src/selection_style.dart';
+ export 'src/tile_cache.dart';
+ export 'src/tool.dart';
+ export 'src/viewport_transform.dart';
+diff --git a/packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart b/packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart
+new file mode 100644
+index 0000000..eb9f20e
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart
+@@ -0,0 +1,114 @@
++import 'package:flutter/foundation.dart';
++import 'package:flutter/widgets.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++
++import 'camera_controller.dart';
++import 'chrome_style.dart';
++import 'ruler_painter.dart';
++
++/// Two ruler bars and a corner around a drawing area (spec D11). Each bar
++/// is exactly co-extensive with the child on its own axis. A translucent
++/// `Listener` over the child feeds [RulerFrameState.pointer]; the child's
++/// own listeners still receive every event.
++class RulerFrame extends StatefulWidget {
++  const RulerFrame({
++    super.key,
++    required this.camera,
++    required this.page,
++    required this.child,
++  });
++
++  final CameraController camera;
++  final ValueListenable<PageComponent?> page;
++  final Widget child;
++
++  @override
++  State<RulerFrame> createState() => RulerFrameState();
++}
++
++class RulerFrameState extends State<RulerFrame> {
++  /// The pointer's position in the child's coordinates, or null.
++  final ValueNotifier<Offset?> pointer = ValueNotifier<Offset?>(null);
++  late final Listenable _repaint =
++      Listenable.merge([widget.camera, widget.page, pointer]);
++  late final Listenable _cornerRepaint = widget.page;
++
++  @override
++  void dispose() {
++    pointer.dispose();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) => Column(
++        children: [
++          SizedBox(
++            height: kRulerThickness,
++            child: Row(
++              crossAxisAlignment: CrossAxisAlignment.stretch,
++              children: [
++                SizedBox(
++                  width: kRulerThickness,
++                  height: kRulerThickness,
++                  child: RepaintBoundary(
++                    child: CustomPaint(
++                      key: const Key('ruler-corner'),
++                      painter: RulerCornerPainter(
++                          page: widget.page, repaint: _cornerRepaint),
++                    ),
++                  ),
++                ),
++                Expanded(
++                  child: RepaintBoundary(
++                    child: CustomPaint(
++                      key: const Key('ruler-top'),
++                      painter: RulerPainter(
++                        axis: RulerAxis.horizontal,
++                        camera: widget.camera,
++                        page: widget.page,
++                        pointer: pointer,
++                        repaint: _repaint,
++                      ),
++                    ),
++                  ),
++                ),
++              ],
++            ),
++          ),
++          Expanded(
++            child: Row(
++              crossAxisAlignment: CrossAxisAlignment.stretch,
++              children: [
++                SizedBox(
++                  width: kRulerThickness,
++                  child: RepaintBoundary(
++                    child: CustomPaint(
++                      key: const Key('ruler-left'),
++                      painter: RulerPainter(
++                        axis: RulerAxis.vertical,
++                        camera: widget.camera,
++                        page: widget.page,
++                        pointer: pointer,
++                        repaint: _repaint,
++                      ),
++                    ),
++                  ),
++                ),
++                Expanded(
++                  child: MouseRegion(
++                    onExit: (_) => pointer.value = null,
++                    child: Listener(
++                      behavior: HitTestBehavior.translucent,
++                      onPointerHover: (e) => pointer.value = e.localPosition,
++                      onPointerMove: (e) => pointer.value = e.localPosition,
++                      onPointerCancel: (_) => pointer.value = null,
++                      child: widget.child,
++                    ),
++                  ),
++                ),
++              ],
++            ),
++          ),
++        ],
++      );
++}
+diff --git a/packages/jet_cad_2d_flutter/test/ruler_frame_test.dart b/packages/jet_cad_2d_flutter/test/ruler_frame_test.dart
+new file mode 100644
+index 0000000..4b47ae9
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/ruler_frame_test.dart
+@@ -0,0 +1,88 @@
++import 'package:flutter/gestures.dart';
++import 'package:flutter/widgets.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2;
++
++import 'support/page_fixture.dart';
++
++void main() {
++  Future<(RulerFrameState, int Function())> pump(WidgetTester tester,
++      {CameraController? camera}) async {
++    var childHovers = 0;
++    final page = ValueNotifier<PageComponent?>(standardPage());
++    final key = GlobalKey<RulerFrameState>();
++    await tester.pumpWidget(Directionality(
++      textDirection: TextDirection.ltr,
++      child: Center(
++        child: SizedBox(
++          width: 424,
++          height: 324,
++          child: RulerFrame(
++            key: key,
++            camera: camera ?? standardCamera(),
++            page: page,
++            child: Listener(
++              behavior: HitTestBehavior.opaque,
++              onPointerHover: (_) => childHovers++,
++              child: const SizedBox.expand(key: Key('child')),
++            ),
++          ),
++        ),
++      ),
++    ));
++    return (key.currentState!, () => childHovers);
++  }
++
++  testWidgets(
++      'the bars are co-extensive with the child and the corner is 24 x 24',
++      (tester) async {
++    await pump(tester);
++    final child = tester.getRect(find.byKey(const Key('child')));
++    expect(child.size, const Size(400, 300));
++    final top = tester.getRect(find.byKey(const Key('ruler-top')));
++    final left = tester.getRect(find.byKey(const Key('ruler-left')));
++    final corner = tester.getRect(find.byKey(const Key('ruler-corner')));
++    expect(top.left, child.left);
++    expect(top.width, child.width);
++    expect(top.height, kRulerThickness);
++    expect(left.top, child.top);
++    expect(left.height, child.height);
++    expect(left.width, kRulerThickness);
++    expect(corner.size, const Size(kRulerThickness, kRulerThickness));
++  });
++
++  testWidgets(
++      'hover feeds the pointer in child coordinates; exit clears it; '
++      'the child still hears it', (tester) async {
++    final (state, hovers) = await pump(tester);
++    final child = tester.getRect(find.byKey(const Key('child')));
++    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
++    await gesture.addPointer(location: child.topLeft + const Offset(50, 40));
++    addTearDown(gesture.removePointer);
++    await tester.pump();
++    await gesture.moveTo(child.topLeft + const Offset(51, 41));
++    await tester.pump();
++    expect(state.pointer.value, const Offset(51, 41));
++    expect(hovers(), greaterThan(0));
++    await gesture.moveTo(const Offset(1, 1));
++    await tester.pump();
++    expect(state.pointer.value, isNull);
++  });
++
++  testWidgets(
++      'a major tick in the top bar sits at its world point\'s x in the child',
++      (tester) async {
++    // S10: the frame-level check the painter test cannot make.
++    final (state, _) = await pump(tester);
++    final painter = tester
++        .widget<CustomPaint>(find.byKey(const Key('ruler-top')))
++        .painter as RulerPainter;
++    final major = painter.debugLastTicks.firstWhere((t) => t.$2);
++    final pageX = (major.$1 + 611.5) / 0.137 - 7350;
++    final world = Vector2(7350 + pageX.roundToDouble(), 0);
++    final inChild = state.widget.camera.value.worldToScreen(world).x;
++    expect(major.$1, closeTo(inChild, 1e-6));
++  });
++}

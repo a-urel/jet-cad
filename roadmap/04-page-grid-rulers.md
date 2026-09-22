@@ -1,6 +1,8 @@
 # 04 — Page, grid and rulers
 
-**Status:** not started
+**Status:** executed on `plan-04/page-grid-rulers` — twelve tasks through
+`1618111`, then a final fix wave at `1fe1fcc` + the docs commit on top of it
+(2026-09-22), not merged; exit gate 15 of 16, the look owed
 **Depends on:** 01
 **Blocks:** 13
 **Size:** M

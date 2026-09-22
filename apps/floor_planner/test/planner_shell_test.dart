@@ -26,19 +26,71 @@ void main() {
 
   // Ruling 01-2: fitted once to the size the view actually got, so the plan
   // is fully visible and the camera is not the nominal 1440 x 900 fit.
+  //
+  // M-04k. The drawing area is the RulerFrame's child, not the view, so the
+  // camera fits the page to the DraftCanvas's own size, not the extents.
   testWidgets('the camera is fitted to the real viewport on first layout',
       (tester) async {
     await tester.pumpWidget(const FloorPlannerApp());
     await tester.pump();
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
     final size = tester.getSize(find.byType(DraftCanvas));
-    final expected = ViewportTransform.fit(view.document.extents, size);
+    final page =
+        view.document.components.get<PageComponent>(view.document.rootHandle)!;
+    final expected = fitToPage(page, size);
     expect(view.camera.value.scale, closeTo(expected.scale, 1e-9));
     expect(view.camera.value.worldToScreenMatrix.e,
         closeTo(expected.worldToScreenMatrix.e, 1e-6));
   });
 
-  testWidgets('the three chrome slots are laid out and empty', (tester) async {
+  testWidgets('the camera is fitted to the page at the drawing area\'s size',
+      (tester) async {
+    // M-04k. The drawing area is the RulerFrame's child, not the view.
+    await tester.pumpWidget(const FloorPlannerApp());
+    await tester.pump();
+    final view = tester.widget<PlannerView>(find.byType(PlannerView));
+    final size = tester.getSize(find.byType(DraftCanvas));
+    final page =
+        view.document.components.get<PageComponent>(view.document.rootHandle)!;
+    final expected = fitToPage(page, size);
+    expect(view.camera.value.scale, closeTo(expected.scale, 1e-9));
+    expect(view.camera.value.worldToScreenMatrix.e,
+        closeTo(expected.worldToScreenMatrix.e, 1e-6));
+    final extentsFit = ViewportTransform.fit(view.document.extents, size);
+    expect(view.camera.value.scale, isNot(closeTo(extentsFit.scale, 1e-9)));
+  });
+
+  testWidgets(
+      'the page chrome and the rulers are in the tree, under the canvas',
+      (tester) async {
+    await tester.pumpWidget(const FloorPlannerApp());
+    await tester.pump();
+    expect(find.byType(RulerFrame), findsOneWidget);
+    final chrome = find.byWidgetPredicate(
+        (w) => w is CustomPaint && w.painter is PageChromePainter);
+    expect(chrome, findsOneWidget);
+    expect(tester.getSize(chrome), tester.getSize(find.byType(DraftCanvas)));
+    final view = tester.widget<PlannerView>(find.byType(PlannerView));
+    expect(view.document.entities.liveCount, greaterThanOrEqualTo(500));
+  });
+
+  testWidgets('the zoom text reads the scale and the fitted zoom',
+      (tester) async {
+    await tester.pumpWidget(const FloorPlannerApp());
+    await tester.pump();
+    final view = tester.widget<PlannerView>(find.byType(PlannerView));
+    final page =
+        view.document.components.get<PageComponent>(view.document.rootHandle)!;
+    final zoom = zoomOf(view.camera.value.scale, page, kLogicalPixelsPerMm);
+    final text = tester.widget<Text>(find.byKey(const Key('zoom-text'))).data;
+    expect(text, '1:50 · ${(zoom * 100).round()}%');
+    view.camera.zoomAt(const Offset(100, 100), 2.0);
+    await tester.pump();
+    final after = tester.widget<Text>(find.byKey(const Key('zoom-text'))).data;
+    expect(after, '1:50 · ${(zoom * 2 * 100).round()}%');
+  });
+
+  testWidgets('the three chrome slots are laid out', (tester) async {
     await tester.pumpWidget(const FloorPlannerApp());
     await tester.pump();
     for (final key in const [
@@ -199,9 +251,9 @@ void main() {
 
     expect(view.selection.length, 2);
     final handles = [for (final k in view.selection.keys) k.target];
-    // The startup plan is built through the log and already fills the
-    // 200-entry undo stack, so `undoDepth` cannot count the Delete here; the
-    // live count after exactly one ctrl+Z is what pins it to one entry.
+    // Ruling 04-1: the history is cleared at startup, so `undoDepth` here
+    // would only count what happens from this point on; the live count
+    // after exactly one ctrl+Z is what pins it to one entry regardless.
     final liveBefore = view.document.entities.liveCount;
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);

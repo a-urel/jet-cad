@@ -201,6 +201,56 @@ void main() {
         reason: 'the counter reports what was actually dropped');
   });
 
+  test('a components-only change drops no tile', () async {
+    // D13 for the tile cache: the same skip as the index (M-04r's twin).
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final rig = rigOver(instancedFixture(measurer));
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    final before = rig.cache.liveTileCount;
+    expect(before, greaterThan(30),
+        reason: 'anti-degenerate clause 3: an empty viewport makes the '
+            'assertion below vacuous');
+    final invalidationsBefore = rig.cache.invalidationCount;
+
+    rig.cache.applyChange(
+        CommandApplied(
+            label: 'page',
+            touched: {rig.doc.rootHandle},
+            capability: Capability.components),
+        rig.doc);
+
+    expect(rig.cache.liveTileCount, before);
+    expect(rig.cache.invalidationCount, invalidationsBefore);
+  });
+
+  test('a transform change still invalidates', () async {
+    // Ruling 04-19 / M-04w's twin. The D13 skip is for `components` alone: a
+    // compound that moves something and edits the page summarises as
+    // `transform` once `components` ranks lowest, and must still drop tiles.
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final rig = rigOver(instancedFixture(measurer));
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    final before = rig.cache.liveTileCount;
+    expect(before, greaterThan(30),
+        reason: 'anti-degenerate clause 3: an empty viewport makes the '
+            'assertion below vacuous');
+    final invalidationsBefore = rig.cache.invalidationCount;
+
+    rig.cache.applyChange(
+        CommandApplied(
+            label: 'move and repage',
+            touched: {const Handle(1001), rig.doc.rootHandle},
+            capability: Capability.transform),
+        rig.doc);
+
+    expect(rig.cache.liveTileCount, lessThan(before));
+    expect(rig.cache.invalidationCount, greaterThan(invalidationsBefore));
+  });
+
   test('criterion 5: a dragged instance drops the tiles it left', () async {
     final measurer = FlutterTextMeasurer();
     addTearDown(measurer.clear);

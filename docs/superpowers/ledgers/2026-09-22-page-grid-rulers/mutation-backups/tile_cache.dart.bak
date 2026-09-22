@@ -1,0 +1,2472 @@
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui';
+
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:meta/meta.dart';
+import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
+
+import 'camera_controller.dart';
+import 'canvas_draw_sink.dart';
+import 'draft_painter.dart';
+import 'vertices_draw_sink.dart';
+import 'viewport_transform.dart';
+
+/// A tile's side, in **device** pixels.
+///
+/// **512, chosen by a device sweep, not by the area arithmetic below.**
+/// Task 11 measured at `ENTITIES=500000`, `BACKEND=vertices`, `RIG=pan`,
+/// `TILES=on`, on a machine verified `lowpowermode 0` on AC power, with the
+/// control run reproducing Plan 3d's clean row (full transcripts in
+/// `docs/superpowers/ledgers/2026-08-24-jet-cad-2d-plan-3g-tile-cache/task-11-report.md`):
+///
+/// | | 128 | 256 | **512** |
+/// |---|---|---|---|
+/// | blit per frame | 1.45 ms | 1.44 ms | 1.52 ms |
+/// | bake per tile | 5.70 ms | 7.23 ms | 12.56 ms |
+/// | whole-generation walk | 265.53 ms | 105.31 ms | **71.97 ms** |
+/// | pan `total` p95 | 65.19 ms | 47.42 ms | **2.31 ms** |
+/// | live-walk fallbacks during pan | 18 | 1 | **0** |
+/// | measured overdraw | 17.983 | 6.888 | 4.185 |
+///
+/// 512 is the only size whose pan p95 fits the 16.67 ms frame budget — by
+/// more than 20x, where 128 misses by 3.9x and 256 by 2.8x. **Blit cost is
+/// flat across the whole 16x range of tile count** (1.45 / 1.44 / 1.52 ms):
+/// it decides nothing on its own, which is why the sweep read the bake and
+/// overdraw columns too rather than stopping at the column that looked
+/// cheapest.
+///
+/// **The overdraw model below was wrong before this sweep, and the sweep is
+/// what caught it.** [kTileSlack] pads `_bake`'s cull, and the area factor it
+/// predicts — `((T/2 + 64) / (T/2))^2` at `dpr` 2 — is 4.000 / 2.250 / 1.563
+/// for 128 / 256 / 512, and matches what the tree does exactly. But measured
+/// leaf overdraw is 17.983 / 6.888 / 4.185 — a residue of 4.50x / 3.06x /
+/// 2.68x at each size that padding alone does not explain. **The larger term
+/// is crossing multiplicity: an entity larger than a tile is walked once for
+/// every tile it crosses**, independent of any pad, and it shrinks as tiles
+/// grow for the same reason a longer stroke crosses fewer of them. Padding is
+/// the smaller term at every size measured.
+///
+/// 1024 px was excluded before the sweep ran: its 80.0 MiB visible set (on
+/// the plan's 3200x2400 reference viewport) leaves no room under
+/// [kTileCacheBytes] for the carry-over composite, where 512's 48.0 MiB does
+/// (77.3 MiB together, against the 96 MiB cap).
+const int kTileDevicePixels = 512;
+
+/// The slack a tile's **arrival** rule and its **invalidation** rule share, in
+/// logical pixels.
+///
+/// **One constant, because they are one question asked from two sides.** A
+/// stroke is wider than its geometry: an entity whose centreline sits just
+/// outside a tile still inks pixels inside it. [DraftPainter] already knows
+/// this and inflates its *screen clip* by [kScreenClipInflate] — "half the
+/// widest stroke the frame can draw" in that constant's own words — but its
+/// index query carries no slack at all, and on a full frame that costs
+/// nothing because the missed entity is off-screen. A tile's edge is interior
+/// to the drawing, and there the two halves diverge:
+///
+/// * **Arrival.** [_bake] passes the tile as the viewport, so an unpadded
+///   query hands the painter nothing for a stroke whose centreline is 0.2
+///   device pixels the wrong side of the seam. A clip only *keeps*; it cannot
+///   return what the query never yielded, so the half of the stroke reaching
+///   back into the tile was drawn by nobody. That was defect F1: six of
+///   forty-one swept zoom factors lost a whole stroke column.
+/// * **Invalidation.** Direction two condemned the tiles whose *exact* world
+///   rect met a touched entity's *geometric* box, so the same stroke arriving
+///   from just outside left a tile inked and unconditioned. That was accepted
+///   gap G6.
+///
+/// Padding one alone makes them disagree: a tile's `_baked` record would list
+/// entities whose geometry never entered it while the geometry that condemns
+/// it stayed exact, and the arrival oracle would over-report against an
+/// invalidation rule that under-condemns. So both use this, and the number is
+/// [kScreenClipInflate] because that is the painter's *published* culling
+/// slack — the amount of extra ink the frame is entitled to draw.
+///
+/// **What it costs.** Invalidation now over-drops by a ring: at the production
+/// 512 device-pixel tile and a `dpr` of 2 the ring is an eighth of a tile
+/// wide, and at the 64-pixel tile the tests use it is a whole tile. That is a
+/// hit-rate cost, never a correctness one — a tile dropped that need not have
+/// been is rebaked, a tile kept that should have been dropped is a visible
+/// defect.
+const double kTileSlack = kScreenClipInflate;
+
+/// The rectangle the live fallback walks: [uncovered] grown by [kTileSlack] on
+/// every side, then clamped to [viewport].
+///
+/// **The pad**, for `_bake`'s reason: a stroke whose centreline is outside the
+/// rectangle still inks pixels inside it, and the painter's index query is a
+/// rect intersection on entity bounds. `_bake` states the rule at its own call
+/// site -- "The query is padded; the clip is not." Plan 3g's F1 is what an
+/// unpadded query cost, at six of forty-one swept zoom factors.
+///
+/// **The clamp**, and it was found by measuring rather than by reasoning.
+/// `uncovered` is a *bounding rectangle* (`paintFrame` accumulates it with
+/// `expandToInclude`), so an L-shaped uncovered set bounds to the whole frame;
+/// padding that asks for 464 x 364 logical pixels where the untiled path asks
+/// for 400 x 300. An unclamped arm doubled the vertex buffer's high-water mark
+/// from 192.00 MiB to 384.00 on a run whose every other counter matched.
+/// **The pad belongs on interior edges; on the viewport's own edge the
+/// full-frame walk is the ceiling.**
+///
+/// Pure, so the clamp has a unit witness. Nothing else in this plan can see
+/// it: the fallback's pixels are identical clamped or not, and only its cost
+/// moves.
+Rect stripFor(Rect uncovered, Size viewport) => Rect.fromLTRB(
+      math.max(0.0, uncovered.left - kTileSlack),
+      math.max(0.0, uncovered.top - kTileSlack),
+      math.min(viewport.width, uncovered.right + kTileSlack),
+      math.min(viewport.height, uncovered.bottom + kTileSlack),
+    );
+
+/// The device-pixel area a frame may spend baking tiles, while a generation
+/// fills in.
+///
+/// **Not a tile count, because a tile count stopped meaning anything once
+/// [kTileDevicePixels] became 512.** Eight tiles at 128 px was a modest
+/// strip; eight tiles at 512 px is `8 x 12.56 ms` of measured bake cost —
+/// roughly 100 ms in one frame, six times the 16.67 ms budget this plan
+/// exists to hold. Expressing the budget as an area in device pixels instead
+/// lets the number of tiles a frame bakes fall out of
+/// [TileCache.tileDevicePixels] — see [TileCache.bakeBudgetDevicePixels] —
+/// so a later change to the tile size does not silently multiply the frame
+/// cost again the way the tile-count budget just did.
+///
+/// **The arithmetic that picked 262,144.** One 512 px tile is
+/// `512 x 512 = 262,144` device pixels and measured **12.56 ms** to bake
+/// (Task 11's sweep, `ENTITIES=500000`, `RIG=pan`). One tile's bake plus the
+/// hold-frame blit cost (measured 1.52 ms at 512 px) is 14.08 ms, under the
+/// 16.67 ms frame budget; two tiles' bake alone is 25.12 ms and blows it
+/// outright. So one tile is the most this budget can afford at the
+/// production tile size, and 262,144 is exactly one tile's worth.
+///
+/// **12.56 ms rests on fourteen bake events, not a large sample.** The 512
+/// arm of the pan phase reported `bakes=14 perFrame=0.117` over 120 frames
+/// (Task 11's report, the `TILE_PX = 512` transcript) -- the repeat run that
+/// confirmed reproducibility was taken at 256, never at 512. The margin to
+/// the 16.67 ms budget is 2.59 ms, about 16%: not re-measured here, but
+/// worth knowing before leaning on that margin.
+///
+/// **This is pinned to the 512 px measurement, not derived from
+/// [kTileDevicePixels] at read time.** The next person who changes the tile
+/// size must re-check whether one tile still fits under 16.67 ms at the new
+/// size's own bake cost — this constant does not track that change for them.
+const int kBakeBudgetDevicePixels = 262144;
+
+/// The cache's byte ceiling, counting the carry-over composite and every
+/// generation's tiles together.
+///
+/// 96 MiB, not 64, for two reasons. A retired generation lives on as one
+/// viewport-sized composite (29.3 MiB on the reference viewport) beside the
+/// incoming generation's tiles (48.0 MiB at 512 px). And 96 MiB is the figure
+/// this cache may *replace*: the vertex buffer's high-water mark at 500,000
+/// entities, which falls to a single tile's geometry once bakes flush per tile.
+const int kTileCacheBytes = 96 * 1024 * 1024;
+
+/// Consecutive unchanged frames before a rest bake is permitted.
+///
+/// **Two, and the mouse wheel is why.** A wheel delivers isolated notches, so
+/// at one every notch would be a moving frame followed immediately by a
+/// resting frame: a full bake per notch, discarded by the next, and invisible
+/// to any criterion that only watches moving frames. Two costs one frame of
+/// latency (~16.7 ms) and makes a continuously spun wheel bake nothing.
+const int kRestGateFrames = 2;
+
+/// One tile's position in its generation's grid. Not world coordinates: the
+/// grid is anchored to the generation's own device-pixel lattice.
+@immutable
+class TileKey {
+  const TileKey(this.x, this.y);
+
+  final int x;
+  final int y;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TileKey && other.x == x && other.y == y;
+
+  @override
+  int get hashCode => Object.hash(x, y);
+
+  @override
+  String toString() => 'TileKey($x, $y)';
+}
+
+/// Snaps a camera's screen translation to whole device pixels.
+///
+/// **This is the whole of Plan 3g's exactness claim, and it belongs to the
+/// tiled path only.** A world-anchored tile lands at a fractional device
+/// offset after an arbitrary pan, and settling never returns the camera to the
+/// one the grid was anchored at — the tile key excludes translation by design,
+/// and a pan is required to invalidate nothing. Quantising puts every tile
+/// destination on whole device pixels at every camera, which is what lets the
+/// tiled frame be required to equal the live frame with zero differing pixels.
+///
+/// [DraftCanvas]'s default (non-tiled) path does **not** call this — see
+/// `draft_canvas.dart:392-402` for why not. The one production call site is
+/// inside the tiled branch, at this file's `paintFrame`. The comparison
+/// instrument that proves tiled equals live quantises its own live arm
+/// separately, at `test/support/tile_comparison.dart:81`, rather than relying
+/// on the widget to do it.
+///
+/// The cost is up to half a device pixel of global position error, uniform
+/// across the frame. Nothing on screen provides a reference against which it
+/// could read as jitter.
+ViewportTransform quantiseCamera(
+    ViewportTransform camera, double devicePixelRatio) {
+  final m = camera.worldToScreenMatrix;
+  final e = (m.e * devicePixelRatio).roundToDouble() / devicePixelRatio;
+  final f = (m.f * devicePixelRatio).roundToDouble() / devicePixelRatio;
+  // Returning the same instance matters: `ViewportTransform`'s constructor
+  // inverts the matrix, and this runs once per frame on the frame path.
+  if (e == m.e && f == m.f) return camera;
+  return ViewportTransform(
+      worldToScreenMatrix: Transform2(m.a, m.b, m.c, m.d, e, f));
+}
+
+/// Whether two quantised cameras describe the same view, field by field.
+///
+/// Not `operator ==` on [ViewportTransform]: that type is used as a map key
+/// and compared for identity elsewhere, and giving it value equality would
+/// change behaviour far outside this gate.
+///
+/// **Translation is compared, not only scale.** Immediately after a zoom the
+/// generation is empty, so a pan that follows keeps the scale and does not
+/// cover the viewport; a scale-only comparison would let two same-scale pan
+/// frames arm the rest gate and spend a full bake while the camera is still
+/// moving. These are stored values, so the comparison is exact `==` and not
+/// `Tolerance`.
+bool sameQuantisedCamera(ViewportTransform a, ViewportTransform b) {
+  final x = a.worldToScreenMatrix, y = b.worldToScreenMatrix;
+  return x.a == y.a &&
+      x.b == y.b &&
+      x.c == y.c &&
+      x.d == y.d &&
+      x.e == y.e &&
+      x.f == y.f;
+}
+
+/// One scale generation's lattice.
+///
+/// Tile `(x, y)` occupies device pixels `[x*T, (x+1)*T) x [y*T, (y+1)*T)` in
+/// the **anchor's** screen space. A later camera at the same scale differs from
+/// the anchor by a whole number of device pixels, so a tile's destination is
+/// that rect plus an integral offset — never a resample.
+@immutable
+class TileGrid {
+  const TileGrid({
+    required this.anchor,
+    required this.devicePixelRatio,
+    required this.tileDevicePixels,
+  });
+
+  /// The quantised camera this generation was baked against.
+  final ViewportTransform anchor;
+  final double devicePixelRatio;
+  final int tileDevicePixels;
+
+  /// A tile's side in logical pixels.
+  double get _tileLogical => tileDevicePixels / devicePixelRatio;
+
+  /// **Exact, not tolerant.** Stored-value comparisons in this repository are
+  /// exact `==`, and a tolerant test would replay a generation baked at a
+  /// different stroke width and a different dash phase.
+  bool matchesScale(ViewportTransform camera) {
+    final a = anchor.worldToScreenMatrix;
+    final b = camera.worldToScreenMatrix;
+    return a.a == b.a && a.b == b.b && a.c == b.c && a.d == b.d;
+  }
+
+  /// How far [camera] sits from the anchor, in device pixels.
+  ///
+  /// Integral whenever both cameras came through [quantiseCamera], which is
+  /// the invariant the whole grid rests on. `round` rather than a bare cast so
+  /// a `0.9999999` from the division does not truncate to a one-pixel shift.
+  (int, int) deviceDeltaFrom(ViewportTransform camera) {
+    final a = anchor.worldToScreenMatrix;
+    final b = camera.worldToScreenMatrix;
+    return (
+      ((b.e - a.e) * devicePixelRatio).round(),
+      ((b.f - a.f) * devicePixelRatio).round(),
+    );
+  }
+
+  /// Every key covering [viewport] at [camera], as a full rectangle.
+  Iterable<TileKey> visibleKeys(ViewportTransform camera, Size viewport) sync* {
+    final (dx, dy) = deviceDeltaFrom(camera);
+    final left = -dx;
+    final top = -dy;
+    final right = left + (viewport.width * devicePixelRatio).ceil();
+    final bottom = top + (viewport.height * devicePixelRatio).ceil();
+    final x0 = _floorDiv(left, tileDevicePixels);
+    final x1 = _floorDiv(right - 1, tileDevicePixels);
+    final y0 = _floorDiv(top, tileDevicePixels);
+    final y1 = _floorDiv(bottom - 1, tileDevicePixels);
+    for (var y = y0; y <= y1; y++) {
+      for (var x = x0; x <= x1; x++) {
+        yield TileKey(x, y);
+      }
+    }
+  }
+
+  /// The camera a bake uses, so the tile's top-left is the logical origin.
+  ///
+  /// Scale and skew come from the anchor untouched: the scale *is* the
+  /// generation.
+  ViewportTransform bakeCameraFor(TileKey key) {
+    final m = anchor.worldToScreenMatrix;
+    return ViewportTransform(
+        worldToScreenMatrix: Transform2(m.a, m.b, m.c, m.d,
+            m.e - key.x * _tileLogical, m.f - key.y * _tileLogical));
+  }
+
+  /// Where a tile blits, in logical pixels. Always a whole device pixel.
+  Rect destRectFor(TileKey key, ViewportTransform camera) {
+    final (dx, dy) = deviceDeltaFrom(camera);
+    return Rect.fromLTWH(
+      (key.x * tileDevicePixels + dx) / devicePixelRatio,
+      (key.y * tileDevicePixels + dy) / devicePixelRatio,
+      _tileLogical,
+      _tileLogical,
+    );
+  }
+
+  /// Where [key]'s pixels sit **inside** [band]'s image.
+  ///
+  /// Band-local, not grid-space. A key's device rectangle is measured from the
+  /// generation's anchor and goes negative as soon as a same-scale pan moves
+  /// the visible range; the band image starts at (0, 0) whatever the keys are
+  /// numbered. Integral by construction -- [deviceDeltaFrom] rounds, and a
+  /// tile side is `tileDevicePixels` exactly.
+  Rect sliceSourceRect(TileBand band, TileKey key) => Rect.fromLTWH(
+        key.x * tileDevicePixels.toDouble() - band.deviceRect.left,
+        0,
+        tileDevicePixels.toDouble(),
+        tileDevicePixels.toDouble(),
+      );
+
+  /// [visibleKeys] grouped into one band per tile row.
+  ///
+  /// **A band and not the whole union**, because the union has the tile set's
+  /// own area — `visibleKeys` yields a full rectangle — so one image for it
+  /// plus the tiles it is sliced into peaks at exactly `kTileCacheBytes` with
+  /// no headroom. One row at a time is 8 MiB at the reference viewport against
+  /// the union's 48.
+  List<TileBand> bandsFor(ViewportTransform camera, Size viewport) {
+    final byRow = <int, List<TileKey>>{};
+    for (final key in visibleKeys(camera, viewport)) {
+      (byRow[key.y] ??= <TileKey>[]).add(key);
+    }
+    final rows = byRow.keys.toList()..sort();
+    return [
+      for (final row in rows)
+        TileBand(
+          row: row,
+          keys: byRow[row]!..sort((a, b) => a.x.compareTo(b.x)),
+          deviceRect: Rect.fromLTWH(
+            byRow[row]!.first.x * tileDevicePixels.toDouble(),
+            row * tileDevicePixels.toDouble(),
+            byRow[row]!.length * tileDevicePixels.toDouble(),
+            tileDevicePixels.toDouble(),
+          ),
+        ),
+    ];
+  }
+
+  /// Floor division that stays correct for negative numerators.
+  ///
+  /// Dart's `~/` truncates toward zero, so `-1 ~/ 64` is `0` and the tile to
+  /// the left of the origin would share a key with the tile at it. A pan in
+  /// either direction reaches negative keys within one tile of the anchor.
+  static int _floorDiv(int a, int b) => (a / b).floor();
+}
+
+/// One tile row of the visible region: every key in it, and the device
+/// rectangle they span.
+class TileBand {
+  const TileBand(
+      {required this.row, required this.keys, required this.deviceRect});
+
+  final int row;
+  final List<TileKey> keys;
+
+  /// In the grid's device space — the space [TileGrid.deviceDeltaFrom]
+  /// returns, whose origin is the grid's anchor and not the viewport.
+  final Rect deviceRect;
+}
+
+/// A cache of rasterised viewport tiles.
+///
+/// **What it is for, in numbers.** Plan 3d's clean rows put a 500,000-entity
+/// frame at 17.79 ms of build and 22.40 ms of raster — 40.27 ms of `totalSpan`
+/// against a 16.67 ms budget. The 2026-08-23 spike's Probe D measured the same
+/// frame drawn from a rasterised blit at **1.61 ms**, and the blit is
+/// corpus-independent: 0.97 ms of raster at 50,000 entities and at 500,000
+/// alike. The margin therefore widens with the drawing.
+///
+/// **What it is not for.** Rebaking every frame — the zoom regime — was
+/// measured at 32.06 ms against the same 40.27, an 11-26% saving across the
+/// two corpus sizes. This is a pan-and-settle optimisation and nothing else.
+class TileCache {
+  TileCache({
+    this.tileDevicePixels = kTileDevicePixels,
+    this.bakeBudgetDevicePixels = kBakeBudgetDevicePixels,
+    this.cacheBytes = kTileCacheBytes,
+  });
+
+  final int tileDevicePixels;
+
+  /// The device-pixel budget a frame may spend baking tiles while a
+  /// generation fills in. See [kBakeBudgetDevicePixels] for the unit and the
+  /// arithmetic that picked its default.
+  ///
+  /// **Not a tile count** -- [budgetedTilesPerFrame] is, and it is what
+  /// [paintFrame] actually bakes against: this divided by the tile's own
+  /// device-pixel area, so the same budget bakes more small tiles or fewer
+  /// large ones as [tileDevicePixels] changes.
+  ///
+  /// **Not final, and the reason is a gate rather than a feature.** A cache
+  /// constructed with a budget of zero never bakes a first generation, so it
+  /// has nothing to retire, mints no composite, and reads zero on every
+  /// counter — green for the one reason that makes the measurement worthless.
+  /// The zoom-path tests warm a generation at a real budget and then take the
+  /// budget away, so a frame that still puts the outgoing pixels on screen can
+  /// only have blitted [_carryOver].
+  int bakeBudgetDevicePixels;
+
+  /// The byte ceiling, counting [liveBytes] whole.
+  ///
+  /// **Not final, and for [bakeBudgetDevicePixels]'s reason exactly.** A
+  /// composite is minted only from a generation that *covered* the viewport,
+  /// so any cap that permits one to exist is already larger than one
+  /// composite -- 130 tiles of coverage against a composite's 117 at the
+  /// test tile size. The state "a composite stands and the ceiling is
+  /// smaller than it" is therefore unreachable through the constructor, and
+  /// it is the one state where `_makeRoomForOneTile`'s "bakes nothing rather
+  /// than overrun" arm is the only thing running. Warming at a real ceiling
+  /// and then taking it away is how a test reaches it, the same manoeuvre
+  /// the zoom-path tests use on the bake budget.
+  int cacheBytes;
+
+  TileGrid? _grid;
+  final Map<TileKey, Image> _tiles = <TileKey, Image>{};
+
+  /// What each tile baked, ascending, for a binary search on change: every
+  /// handle the painter visited, **and every container node above it**.
+  ///
+  /// **The node half is not a refinement.** `TransformNodeCommand` reports only
+  /// the moved node's handle (`commands.dart:304`); the leaves it moved keep
+  /// their own and appear nowhere in `touched`. A tile recording leaves alone
+  /// cannot find the pixels a drag left behind.
+  ///
+  /// **And the painter alone does not supply the node half.**
+  /// `DraftPainter.debugOnVisit` fires for leaves and for `InstanceNode`s, and
+  /// both node call sites return early on `node is! InstanceNode`
+  /// (`draft_painter.dart:401`, `:485`), so **a group handle never reaches it**
+  /// — groups are flattened into their container's leaf list with a composed
+  /// transform, and the group itself is never "descended into" as far as the
+  /// callback is concerned. `TransformNodeCommand` takes a `GroupNode` as
+  /// readily as an `InstanceNode` (`commands.dart:297-300`), so a record built
+  /// from the callback alone loses every dragged group: direction one finds
+  /// nothing, direction two drops the arrival tiles, and the departure tiles
+  /// keep their pixels. That is why [_bake] walks each visited handle's owner
+  /// chain and records it here rather than trusting the callback to be
+  /// complete.
+  ///
+  /// Duplicates are left in. A handle drawn twice — the tree/overlay pair, or
+  /// one definition placed twice inside one tile — costs one extra slot, and
+  /// the binary search does not care. Deduplicating would be a sweep over a
+  /// list that is already the right answer. The owner chain is the one
+  /// exception, and only because the walk needs a visited set anyway to stay
+  /// linear: an ancestor already recorded stops the climb.
+  ///
+  /// Keyed identically to [_tiles] at every point where either is observable:
+  /// [_bake] writes here and its caller writes there, and nothing removes from
+  /// one without removing from the other.
+  final Map<TileKey, Uint32List> _baked = <TileKey, Uint32List>{};
+
+  /// The frame ordinal each live tile was last blitted on. The LRU order.
+  ///
+  /// Keyed identically to [_tiles], like [_baked]: [paintFrame] writes here
+  /// where it writes there, [_evict] and [_invalidateTouched] remove from both,
+  /// and [_disposeTiles] clears both. A tile missing from here would be
+  /// invisible to [_makeRoomForOneTile] and could never be reclaimed.
+  ///
+  /// **A parallel map rather than a reordered [_tiles].** The obvious LRU is
+  /// to `remove` and re-insert on use, since Dart's `Map` iterates in
+  /// insertion order — but that allocates a fresh entry per blit, every frame,
+  /// on the frame path. Assigning to a key that is already present does not,
+  /// and small integers are not boxed, so a warm frame's whole LRU bookkeeping
+  /// allocates nothing at all.
+  final Map<TileKey, int> _lastUsedFrame = <TileKey, int>{};
+
+  /// [paintFrame] calls since construction, used only to order [_lastUsedFrame].
+  ///
+  /// Starts at zero and is incremented *before* anything reads it, so no tile
+  /// can carry the current frame's ordinal before this frame put it there —
+  /// which is what makes "not blitted this frame" a decidable question in
+  /// [_makeRoomForOneTile].
+  int _frameSerial = 0;
+
+  /// One `Paint` for the life of the cache.
+  ///
+  /// `FilterQuality.none`: every blit is a 1:1 texel-to-pixel copy by
+  /// construction, so a filter has nothing to interpolate and would only cost
+  /// a sampler. The carry-over path in Task 9 is the one exception and states
+  /// its own.
+  final Paint _blitPaint = Paint()..filterQuality = FilterQuality.none;
+
+  /// The retired generation, flattened to one viewport-sized image.
+  ///
+  /// **One image, not the old tiles.** [quantiseCamera] makes tile
+  /// destinations exact only when they differ by whole multiples of the tile
+  /// size, which holds at the generation's own scale and fails under an
+  /// arbitrary zoom factor: snapped independently, adjacent scaled tiles leave
+  /// a background gap or double-composite translucent ink along every shared
+  /// edge. A composite has no internal edges. It also keeps the budget
+  /// honest — two live generations do not fit under [kTileCacheBytes], and LRU
+  /// would never reclaim the outgoing one because the frame path reads it
+  /// every frame.
+  ///
+  /// **Never a resample of a resample.** A composite is minted only from a
+  /// generation that covered the viewport ([_viewportCovered]), so a gesture
+  /// frame — which anchors a fresh generation and bakes nothing into it —
+  /// carries the *same* composite forward rather than re-flattening the
+  /// already-scaled one. Eight gesture frames therefore filter the original
+  /// pixels once, not eight times.
+  Image? _carryOver;
+
+  /// The band image the current rest bake is slicing, if one is resident.
+  ///
+  /// Null on every frame that is not inside a band's slice loop. Held as a
+  /// field rather than a local **so that [liveBytes] can see it**: the ceiling
+  /// is consulted per sliced tile, and a source image invisible to the meter
+  /// would let the peak run past `kTileCacheBytes` inside the one frame the
+  /// meter exists to bound.
+  Image? _band;
+
+  /// Test seam for the byte meter. See [_band].
+  @visibleForTesting
+  void debugSetBand(Image? band) => _band = band;
+
+  /// Called once per sliced tile, while the band image is resident.
+  ///
+  /// The only point at which the byte ceiling can be observed at its peak;
+  /// a check after the frame would always read the steady state.
+  @visibleForTesting
+  void Function()? debugOnSliceForTest;
+
+  /// The screen space [_carryOver] was recorded in: the quantised camera of
+  /// the last frame the retired generation covered.
+  ///
+  /// Not the grid's anchor. A generation outlives many pans, and the anchor
+  /// describes the camera the *first* of them ran at — its viewport rectangle
+  /// need not hold anything the user can currently see.
+  ViewportTransform? _carryOverAnchor;
+
+  /// [_carryOver]'s extent in [_carryOverAnchor]'s logical screen space.
+  ///
+  /// Kept rather than recomputed from `viewport` at blit time: the image's
+  /// device size is a `ceil`, so the logical rectangle it stands for is a hair
+  /// wider than the viewport, and the blit has to name the rectangle that was
+  /// actually recorded or it rescales by that hair.
+  Rect _carryOverRect = Rect.zero;
+
+  /// **The one blit that is not a 1:1 texel-to-pixel copy, and the one that
+  /// wants a filter.**
+  ///
+  /// Every tile blit lands on whole device pixels at its own scale, so
+  /// [_blitPaint]'s `FilterQuality.none` has nothing to interpolate and a
+  /// sampler would be pure cost. The carry-over is the opposite case by
+  /// construction: it is replayed at a scale it was never rasterised at, at an
+  /// arbitrary zoom factor and therefore at an arbitrary subpixel offset.
+  /// Nearest-neighbour there is not "exact", it is aliasing — stroke rows
+  /// dropped or doubled, and the drawing crawling as the factor sweeps.
+  /// `FilterQuality.low` is bilinear, which is the right cost for pixels that
+  /// are known to be stale and are about to be replaced by the settle.
+  final Paint _carryOverPaint = Paint()..filterQuality = FilterQuality.low;
+
+  /// Whether the previous frame's tiles covered the whole viewport.
+  ///
+  /// The precondition for minting a composite. A half-filled generation would
+  /// flatten to an image that is transparent wherever it never baked, and
+  /// blitting that in front of the live fallback would show a blank strip
+  /// instead of a stale one.
+  bool _viewportCovered = false;
+
+  /// Whether the last [paintFrame] owes the canvas another frame.
+  ///
+  /// Written on every exit from [paintFrame] and nowhere else, so it is a
+  /// property of the frame just drawn rather than of the cache's state. See
+  /// [settlePending] for why this is a second field and not a second reading
+  /// of [_viewportCovered].
+  ///
+  /// **True before the first frame**, so a canvas that is mounted and then
+  /// asked nothing still gets its first settle: the value read after a frame
+  /// is always one that frame wrote, and the initial value is only ever seen
+  /// by a caller polling before any painting has happened.
+  bool _settlePending = true;
+
+  /// The quantised camera of the last [paintFrame].
+  ViewportTransform? _lastCamera;
+
+  /// The previous frame's quantised camera, for the rest gate.
+  ViewportTransform? _lastQuantised;
+
+  /// Consecutive frames whose quantised camera did not change.
+  ///
+  /// Zero on the frame that changed. **One** is the frame in between, which
+  /// draws like a moving frame. **Two** arms the rest bake. The second frame
+  /// is the mouse wheel's: a wheel delivers isolated notches, so without it
+  /// every notch is one moving frame followed immediately by a resting frame,
+  /// a full bake per notch discarded by the next.
+  int _restGateSteps = 0;
+
+  /// The rest gate's counter, for tests. See [_restGateSteps].
+  int get debugRestGateSteps => _restGateSteps;
+
+  /// Whether the camera's **last actual change** moved the translation alone.
+  ///
+  /// **The one bit that tells the frame after a pan from the frame between two
+  /// wheel notches.** Both are frames whose camera repeated the previous one,
+  /// so [_restGateSteps] reads 1 on both and the count alone cannot separate
+  /// them — and they owe opposite frames. After a zoom, D1's two-frame clause
+  /// says the in-between frame must stay as cheap as a moving frame, or a
+  /// steadily spun wheel bakes once per notch; after a pan, the same frame owes
+  /// the bake-and-live-walk every pan frame before it paid, or the strip the
+  /// composite has slid off goes background for exactly one frame and comes
+  /// back — the flash D8 does not permit and D3 does not cover, because D3's
+  /// accepted ring is a zoom *out*'s and nothing else.
+  ///
+  /// Written only on a frame that changed something, so it remembers the last
+  /// change across any number of unchanged frames. **A scale change always
+  /// writes `false` here**, whether or not the quantised camera also moved, so
+  /// this can never be true on a moving frame and the disjunct it feeds needs
+  /// no `!scaleChanged` of its own.
+  bool _lastChangeWasPan = false;
+
+  /// **Suppresses the rest bake. A measurement switch, not a correctness
+  /// switch.**
+  ///
+  /// Set, the resting frame never calls `_restBake`, and the cache fills the
+  /// viewport the way it did before Plan 3i: the ordinary budgeted per-tile
+  /// path, `budgetedTilesPerFrame` tiles a frame, over as many frames as that
+  /// takes. That is not an alternative configuration of the rest bake — it is
+  /// an earlier revision of `paintFrame`, and it is **precisely how criterion
+  /// 4's denominator arm is defined**.
+  ///
+  /// **It exists so one binary can run both arms of criterion 4's ratio in a
+  /// single session, interleaved.** That is the only reason a production
+  /// field carries a measurement switch. The two alternatives are both worse
+  /// and both have been tried in this repository: two binaries cannot
+  /// interleave, so session drift and thermal drift concentrate on whichever
+  /// arm ran last (`docs/superpowers/notes/2026-08-25-plan-3h-results.md`
+  /// records exactly that happening); and a rig that reconstructed the
+  /// per-tile arm for itself would be measuring its own reimplementation
+  /// rather than the code that ships, which is the mistake Plan 3g's `_probeBake`
+  /// made and [debugLastStrip]'s doc comment exists to keep from recurring.
+  /// `runInterleaved` in `dev_harness_2d`'s `measurement_rig.dart` alternates
+  /// whole arms; this field is the half of that arrangement the cache owes.
+  ///
+  /// **Pixels are the same either way; only the number of frames coverage
+  /// takes changes.** Both paths walk the same painter over the same scene
+  /// and bake into the same tile lattice — the band path does one walk per
+  /// tile row and copies the result into tiles, the per-tile path does one
+  /// walk per tile. A viewport that settles in one resting frame with the
+  /// bake enabled settles in tens of frames with it disabled, which is the
+  /// whole quantity criterion 4 scores. `tile_measurement_seam_test.dart`
+  /// pins that reading: with the flag set the cache still reaches
+  /// [viewportCovered] and still bakes tiles, having sliced none.
+  ///
+  /// Defaults to `false`. No non-debug caller sets it — `DraftCanvas` never
+  /// touches it, and the writers are that test and the measurement rig.
+  bool debugRestBakeDisabled = false;
+
+  int _bakes = 0;
+  int _carryOverBlits = 0;
+  int _blits = 0;
+  int _liveDraws = 0;
+  int _generation = 0;
+  int _invalidations = 0;
+  int _evictions = 0;
+  int _blitDestinations = 0;
+  int _imagesAlive = 0;
+
+  /// `DocumentTables.mutationRevision` as of the last [paintFrame].
+  ///
+  /// **Negative before the first frame, and deliberately so.** A revision
+  /// starts at zero and only ever increases, so no document can present this
+  /// value and the first frame always takes the drop branch — over an empty
+  /// cache, where it costs nothing and asserts nothing. A sentinel of `0`
+  /// would instead make the first frame's behaviour depend on whether the
+  /// document had been given its standard tables yet.
+  int _tablesRevision = -1;
+
+  /// The number of tiles [bakeBudgetDevicePixels] permits [paintFrame] to
+  /// bake this frame, at the cache's current [tileDevicePixels].
+  ///
+  /// **The same division [paintFrame] itself performs**, exposed rather than
+  /// duplicated, so a caller reporting "the budget this run used" -- a rig
+  /// printing its configuration beside its counters, say -- reads the number
+  /// [paintFrame] actually acted on instead of a second computation of it
+  /// that could drift from the first.
+  ///
+  /// **Floored at one tile whenever the budget is nonzero.** A plain
+  /// truncating division silently disables tiling for any
+  /// [tileDevicePixels] whose area exceeds [bakeBudgetDevicePixels] --
+  /// `TILE_PX=1024` under the harness's default budget divides to `0` and
+  /// the run would spend its whole life on the live-walk fallback,
+  /// publishing the untiled baseline under a tiled heading, which is exactly
+  /// the failure `main.dart`'s defines throw to prevent for an unrecognised
+  /// *string*. One tile per frame is the minimum meaningful budget for any
+  /// configuration that asked to bake at all, so the floor applies whenever
+  /// [bakeBudgetDevicePixels] is positive. Zero stays zero -- that value is
+  /// the zoom-path tests' deliberate "bake nothing" configuration
+  /// ([bakeBudgetDevicePixels]'s own doc comment), and flooring it would
+  /// silence the one budget those tests exist to exercise.
+  int get budgetedTilesPerFrame {
+    final tiles = bakeBudgetDevicePixels ~/ _tileDevicePixelArea;
+    return bakeBudgetDevicePixels > 0 && tiles == 0 ? 1 : tiles;
+  }
+
+  /// Tiles rasterised since [resetCounters].
+  int get bakeCount => _bakes;
+
+  /// `drawImageRect` calls issued since [resetCounters].
+  int get blitCount => _blits;
+
+  /// Frames that fell back to a live walk for an uncovered region.
+  ///
+  /// **Not zero in normal operation**, and a design that expected it to be
+  /// would ship an intermittent blank strip: the fallback fires on the first
+  /// frame, on a pan past the retained ring, and after eviction reclaims tiles
+  /// the camera returns to.
+  int get liveDrawCount => _liveDraws;
+
+  int get liveTileCount => _tiles.length;
+
+  /// Every byte of native image memory this cache is holding open, against
+  /// which [cacheBytes] is the ceiling.
+  ///
+  /// **The composite counts, and a cap that ignored it would not be a cap.**
+  /// The carry-over is one *viewport-sized* image — 1.9 MB on the test
+  /// viewport, 29.3 MiB on the reference one, whatever the tile size — so it
+  /// is worth more than a hundred tiles on its own. [kTileCacheBytes] is 96
+  /// MiB rather than 64 precisely because it has to hold a generation *and* a
+  /// composite, and a `liveBytes` that summed only [_tiles] would report the
+  /// cache using a third of what it really holds. Measured from the image's
+  /// own `width` and `height` rather than from `viewport`, because the
+  /// composite's device size is a `ceil` of the viewport and it outlives the
+  /// camera it was recorded against.
+  ///
+  /// A tile is `tileDevicePixels` square, RGBA, one byte a channel: exactly
+  /// what `Picture.toImageSync` allocates in [_bake].
+  int get liveBytes {
+    final carryOver = _carryOver;
+    final band = _band;
+    return _tiles.length * _tileBytes +
+        (carryOver == null ? 0 : carryOver.width * carryOver.height * 4) +
+        (band == null ? 0 : band.width * band.height * 4);
+  }
+
+  /// Tiles the ceiling reclaimed over this cache's whole life.
+  ///
+  /// Not reset by [resetCounters], for [invalidationCount]'s reason: this
+  /// counts a cache-lifetime event, not a per-frame one. **Distinct from
+  /// [invalidationCount] deliberately** — an invalidated tile held wrong
+  /// pixels, an evicted one held perfectly good pixels there was no room for,
+  /// and a test that could not tell them apart would read a thrashing cap as a
+  /// busy editor.
+  int get evictionCount => _evictions;
+
+  /// Destination `Rect`s this frame computed for an image blit, since
+  /// [resetCounters]. Criterion 13's per-frame allocation quantity.
+  ///
+  /// Counted at the point of allocation rather than at `drawImageRect`, which
+  /// is the difference that makes it an allocation measurement: a visible tile
+  /// the budget could not bake still costs its destination rect, and it is
+  /// still bounded by the viewport over the tile size. The composite's
+  /// destination counts too.
+  ///
+  /// **A field read, not a heap measurement.** `STATUS.md` records trap 5:
+  /// there is no working Flutter-side allocation meter, and
+  /// `paint_allocation_test.dart` reads one field —
+  /// `VerticesDrawSink.debugCapacityVertices` — which can see neither a
+  /// `Paint` nor a `Rect`. This is the `Rect` half, the same shape
+  /// `VerticesDrawSink.debugPaint` uses for the other.
+  int get blitDestinationCount => _blitDestinations;
+
+  /// `ui.Image`s this cache has created and not yet disposed. Test-only.
+  ///
+  /// **The one instrument that can see a leaked image.** A `ui.Image` holds
+  /// native memory past its Dart object, so a path that drops a tile from
+  /// [_tiles] without disposing it frees nothing and no counter above would
+  /// notice: [liveTileCount] falls, [liveBytes] falls, [evictionCount] rises,
+  /// and the process grows. Eviction is where that mistake compounds, because
+  /// it is the only path that runs *per frame* forever. Held equal to
+  /// `liveTileCount + (hasCarryOver ? 1 : 0)` by construction, which is what a
+  /// test asserts.
+  int get debugImagesAlive => _imagesAlive;
+
+  int get generation => _generation;
+
+  /// Whether a retired generation is still standing in for the incoming one.
+  bool get hasCarryOver => _carryOver != null;
+
+  /// Whether the last [paintFrame] left every visible tile baked.
+  ///
+  /// False means the cache still owes work only another frame can do:
+  /// [budgetedTilesPerFrame] caps what one frame may bake, so a viewport of
+  /// many tiles fills over several frames.
+  ///
+  /// **A statement about tiles, and only about tiles.** It answers
+  /// "is the incoming generation complete", which is what [_retireGeneration]
+  /// needs and what every coverage assertion in the suite is written against.
+  /// It does *not* answer "may the canvas stop asking for frames" -- see
+  /// [settlePending], which does, and whose doc comment says why the two
+  /// cannot be one field.
+  bool get viewportCovered => _viewportCovered;
+
+  /// Whether the frame just painted left something on screen that a later
+  /// frame must replace.
+  ///
+  /// **This is not a diagnostic. The frame path reads it.** Flutter produces a
+  /// frame only when something asks for one, and the camera asks only while it
+  /// is moving, so a gesture that ends would end the settle with it.
+  /// `DraftCanvas` reads this after every tiled frame and asks for the next
+  /// one itself.
+  ///
+  /// **Why this is not [viewportCovered], which is what the canvas read until
+  /// the zoom-blur report.** The two answer different questions and disagree
+  /// on exactly the frame the user complained about. `paintFrame` blits the
+  /// outgoing composite *first and underneath everything*, before it decides
+  /// the frame is resting; the rest bake then fills the generation and calls
+  /// `_dropCarryOver`, but it cannot un-draw the blit this frame already
+  /// made. So the frame that completes a zoom's settle is `viewportCovered ==
+  /// true` -- every tile is baked, and that reading is correct -- while the
+  /// pixels on screen are the new tiles composited over the old generation
+  /// magnified and bilinearly filtered, showing through every transparent
+  /// pixel of the incoming tiles. Measured on the harness fixture: 29,815
+  /// device pixels differing from the live frame. Reading coverage as the
+  /// scheduling signal stopped the canvas there, and the drawing stayed blurry
+  /// until an unrelated camera change happened to produce one more frame --
+  /// which is precisely "it sharpens when I pan".
+  ///
+  /// And the meanings cannot simply be merged the other way either.
+  /// [_retireGeneration] reads [_viewportCovered] as the guard that decides
+  /// whether a composite is worth minting at all: a half-filled generation,
+  /// flattened, is transparent where it never baked, and a transparent
+  /// composite in front of the live fallback is a *blank* strip rather than a
+  /// stale one. Forcing that flag false to make a moving frame reschedule
+  /// would stop composites being minted and take the whole moving-frame regime
+  /// with it -- the zero gesture bakes, the gesture p95, and spec D3's
+  /// zoom-out ring all rest on that composite existing.
+  ///
+  /// So: coverage is about the tile set, and this is about the canvas. A frame
+  /// owes another when it drew the composite (its pixels are stale by
+  /// construction) or when it ended with visible keys unbaked (the ordinary
+  /// budgeted settle). It terminates because a composite that survives a
+  /// covered frame is dropped by the very next one -- `baked == 0` there --
+  /// and a frame with no composite and nothing uncovered owes nothing.
+  bool get settlePending => _settlePending;
+
+  /// Composite blits issued since [resetCounters]. One per gesture frame.
+  int get carryOverBlitCount => _carryOverBlits;
+
+  /// Tiles thrown away by [applyChange], or by a table revision that moved,
+  /// over this cache's whole life.
+  ///
+  /// Not reset by [resetCounters], which zeroes the three per-frame counters:
+  /// this one counts edits, not frames, and a caller reading it across a
+  /// frame boundary is asking a different question.
+  ///
+  /// The table arm is counted here rather than kept separate because it is the
+  /// same event seen through a different door: a table mutation reaches no
+  /// command and therefore no [DocChange], so [paintFrame] observes it as a
+  /// revision instead of being told. What was invalidated is identical.
+  int get invalidationCount => _invalidations;
+
+  /// Whether [key] is currently blittable. Test-only.
+  bool holds(TileKey key) => _tiles.containsKey(key);
+
+  /// Every live tile whose bake touched [handle]. Test-only.
+  List<TileKey> tilesHolding(Handle handle) => <TileKey>[
+        for (final entry in _baked.entries)
+          if (_contains(entry.value, handle.value)) entry.key
+      ];
+
+  /// The rectangle the fallback walked on the most recent frame, or `null` if
+  /// no fallback ran. Test-only, and **read-only**.
+  ///
+  /// Read from the shipped `paintFrame` rather than recomputed by a test, and
+  /// that is the whole point of it. Plan 3g's rig reimplemented the bake
+  /// geometry in `_probeBake` instead of calling `_bake`, so its overdraw
+  /// column described the reimplementation and not the code that ships. A
+  /// sweep that derived this rectangle from [TileGrid] would repeat that.
+  ///
+  /// **A getter, not a mutable field.** `TileCache` now carries four mutable
+  /// test-only fields (`debugOnSliceForTest`, `debugRestBakeDisabled`,
+  /// `debugFullViewportQuery`, `bakeBudgetDevicePixels`) -- the bar that a
+  /// third would trigger revisiting the design has already been crossed and
+  /// answered. The revisit is Ruling 14 in Plan 3i's progress ledger: Tasks
+  /// 12 and 13 each pin a measurement whose two arms are meant to interleave
+  /// inside one session, and interleaving requires switching behaviour at
+  /// runtime -- two binaries cannot interleave. `tilesHolding` remains the
+  /// precedent for reading state out without adding a way to write it.
+  Rect? get debugLastStrip => _lastStrip;
+
+  Rect? _lastStrip;
+
+  /// The rectangle the fallback clipped its drawing to on the most recent
+  /// frame, or `null` if no fallback ran. Test-only, and **read-only**, for
+  /// [debugLastStrip]'s own reasons — read from the shipped `paintFrame`
+  /// rather than recomputed by a test.
+  ///
+  /// **Distinct from [debugLastStrip] deliberately.** [debugFullViewportQuery]
+  /// widens the strip the fallback *walks* while `canvas.clipRect(uncovered,
+  /// ...)` above it stays narrow -- that is what makes the flag Plan 3h's M4
+  /// and not its M5, and nothing before this getter existed could see the
+  /// clip independently of the strip. A change that widened the clip under
+  /// the flag would keep the strip assertion green while publishing an "M4"
+  /// arm that is neither 3h's M4 nor its M5.
+  Rect? get debugLastClip => _lastClip;
+
+  Rect? _lastClip;
+
+  /// **Hands the live fallback's query the full viewport instead of the
+  /// strip. This field ships a known defect behind a flag, and that is what
+  /// it is for.**
+  ///
+  /// It reproduces **Plan 3h's mutant M4** at runtime — defined in
+  /// `docs/superpowers/notes/plan-3h-mutation-log.md`, §"M4 — narrow the clip
+  /// but not the query": keep the narrow clip, and hand the query — what is
+  /// *walked*, not what is *drawn* — the whole viewport. Every pixel still
+  /// lands where it belongs, because the clip discards the surplus; what
+  /// changes is how much geometry the frame tessellates to produce them. That
+  /// is why the gate which kills M4 counts triangles and not pixels — see
+  /// `kTriangleBudgetRatio` in `test/support/tile_comparison.dart`.
+  ///
+  /// **The clip stays narrow, and that is what makes this M4 and not M5.**
+  /// The `canvas.clipRect(uncovered, doAntiAlias: false)` immediately above
+  /// the query is outside this field's reach and must stay that way. M5, in
+  /// the same log, reaches the same end state from the other direction — it
+  /// grows the query and leaves the clip untouched — so widening the clip
+  /// here would be neither mutant, and the M4 arm of a published ratio would
+  /// not be M4.
+  ///
+  /// **It exists so criterion 8's two arms can interleave inside one
+  /// session**, at n=9 per arm. Plan 3h could only run "narrow" and "M4" as
+  /// two binaries, three-then-three, because M4 was a source edit with no
+  /// runtime switch; its own results
+  /// (`docs/superpowers/notes/2026-08-25-plan-3h-results.md`) record what that
+  /// cost — the M4 arm ran last, in a visibly noisier session, on a phase M4
+  /// is inert on, so the arm ordering and not the mutation moved the numbers.
+  /// Removing that bias is Plan 3i's Task 13, and it needs a runtime switch or
+  /// it needs two binaries again.
+  ///
+  /// **Not byte-identical to Plan 3h's M4, though everything measured agrees.**
+  /// 3h's M4 kept `_lastStrip` narrow and dropped `canvas.translate` outright;
+  /// this flag instead routes the full viewport *through* `_lastStrip` and
+  /// leaves `canvas.translate(strip.left, strip.top)` in place, evaluating to
+  /// `translate(0, 0)`. That is numerically inert (`q.e - 0.0` is exact) and
+  /// every measured quantity -- walk extent, triangle count, pixels -- is
+  /// equivalent, but it means a [debugLastStrip] reading taken from this
+  /// flag's M4 arm cannot be cross-read against Plan 3h's log, which recorded
+  /// a narrow `_lastStrip` on its own M4 arm.
+  ///
+  /// Defaults to `false`. No non-debug caller sets it: a frame that reaches
+  /// the fallback with this standing is doing measurably more work than it has
+  /// to, deliberately.
+  bool debugFullViewportQuery = false;
+
+  /// The blit `Paint`'s identity, for criterion 13.
+  ///
+  /// Exposed the way `VerticesDrawSink.debugPaint` is, and for the same
+  /// reason: `paint_allocation_test.dart` reads
+  /// `VerticesDrawSink.debugCapacityVertices` and that field can see neither a
+  /// `Paint` nor a `Rect`. `STATUS.md` records why there is no heap-level
+  /// instrument on this side — trap 5 — so the allocation criterion is a field
+  /// read or it is prose.
+  Paint get debugBlitPaint => _blitPaint;
+
+  /// The composite `Paint`'s identity, for the same criterion and the same
+  /// reason as [debugBlitPaint].
+  ///
+  /// Exposed in this fix round because criterion 13's `SpyCanvas` test could
+  /// not otherwise tell "the frame handed `drawImageRect` two long-lived
+  /// fields" from "the frame allocated a `Paint` at the call site": with a
+  /// composite standing there are legitimately two distinct `Paint` objects in
+  /// one frame, and the old assertion — every call gets the *same* object —
+  /// is false in that state rather than merely untested.
+  Paint get debugCarryOverPaint => _carryOverPaint;
+
+  void resetCounters() {
+    _bakes = 0;
+    _blits = 0;
+    _liveDraws = 0;
+    _carryOverBlits = 0;
+    _blitDestinations = 0;
+  }
+
+  void paintFrame({
+    required Canvas canvas,
+    required Size viewport,
+    required double devicePixelRatio,
+    required ViewportTransform camera,
+    required DraftPainter painter,
+    required CanvasDrawSink sink,
+    required VerticesDrawSink? vertices,
+    required int tablesRevision,
+  }) {
+    // **A table edit arrives as a number, not as a change.** `TableSection`
+    // mutates outside the command system, so `applyChange` never hears about a
+    // layer colour, a lineweight or a linetype pattern — every one of which
+    // every tile may have baked. It is pulled here, once per frame, so a
+    // document mutated between two frames still invalidates.
+    //
+    // **The tiles go and the lattice stays**, for exactly the reason
+    // `_dropGeneration` gives on a definition edit: a table edit is not a
+    // scale change, the anchor still describes the camera on screen, and
+    // clearing the grid would renumber every key and start a generation for
+    // nothing. Dropping the whole generation rather than a subset is the same
+    // trade too — a lineweight change moves a stroke's extent, so a tile that
+    // never baked the entity can still owe pixels for it.
+    if (tablesRevision != _tablesRevision) {
+      _tablesRevision = tablesRevision;
+      _dropGeneration();
+    }
+
+    // Before anything reads it, so no tile can be carrying this frame's
+    // ordinal before this frame blits it. `_makeRoomForOneTile` rests on that.
+    _frameSerial++;
+    _lastStrip = null;
+    _lastClip = null;
+
+    final quantised = quantiseCamera(camera, devicePixelRatio);
+    // Held across the call below because **`grid.matchesScale(quantised)` is
+    // true by construction once `_gridFor` has returned**: a scale change is
+    // exactly the case where it retires the generation and anchors a fresh
+    // grid *at this camera*. Spec D1 defines a *moving* frame as one whose
+    // quantised scale fails `matchesScale` against the current generation's
+    // anchor, and the only place that question can still be asked is here,
+    // against the generation the frame arrived at. Identity, not
+    // `matchesScale`, so a device-pixel-ratio or tile-size change -- which
+    // also re-anchors -- counts as the scale change it is.
+    final incoming = _grid;
+    // The viewport reaches `_gridFor` because retiring a generation is now a
+    // composite and not just a `dispose`: the outgoing tiles have to be
+    // flattened into one viewport-sized image *before* they go.
+    final grid = _gridFor(quantised, devicePixelRatio, viewport);
+    final scaleChanged = !identical(incoming, grid);
+    _lastCamera = quantised;
+
+    // **Three frame kinds, and only one of them bakes.** A frame whose
+    // *scale* changed is *moving* (spec D1). A frame that has matched once
+    // and not yet twice is the one in between. Both draw the composite and
+    // nothing else: no bake, and no live walk. A frame that changed only its
+    // translation is none of the three -- it is a pan, and D8 leaves the pan
+    // path exactly as it was.
+    //
+    // The live walk is excluded deliberately and the measurement is why. On a
+    // moving frame the new generation is empty, so every visible key misses
+    // and `uncovered` accumulates by `expandToInclude` into the **whole
+    // viewport** rather than a ring; `stripFor` then clamps to the viewport.
+    // "Walk the uncovered region" is therefore a full-viewport live walk --
+    // 31.5-41.6 ms at 500,000 entities -- on every zoom-out frame.
+    final previous = _lastQuantised;
+    final cameraHeld =
+        previous != null && sameQuantisedCamera(previous, quantised);
+    _restGateSteps = cameraHeld ? _restGateSteps + 1 : 0;
+    // **Only a frame that changed something writes the bit**, which is what
+    // makes it a memory rather than a second reading of this frame. A scale
+    // change writes `false` even when the quantised camera itself held --
+    // a device-pixel-ratio or tile-size change re-anchors the generation
+    // without moving the camera -- so [_lastChangeWasPan] is never true on a
+    // frame `resting` must treat as moving.
+    if (!cameraHeld || scaleChanged) _lastChangeWasPan = !scaleChanged;
+    _lastQuantised = quantised;
+    // **`previous == null` is not a moving frame.** It is the very first
+    // frame this cache has ever painted, with nothing behind it to have
+    // moved away from. Gating it on the literal `_restGateSteps >=
+    // kRestGateFrames` would leave a brand-new cache blank -- no bake, and
+    // since nothing has ever been retired -- until some later frame
+    // fortuitously repeated the same camera.
+    //
+    // **Not `&& !_viewportCovered` either.** A frame whose camera matches the
+    // last one but whose generation already covers the viewport still has to
+    // run the loop below: every visible key already holds an image, so the
+    // loop bakes nothing on its own, but it still has to *blit* those images
+    // onto this frame's canvas. `TileCache.paintFrame`'s only other exit from
+    // that loop is the coverage check inside it, which already makes baking
+    // a no-op once covered -- gating the loop itself here would additionally
+    // skip the blit, and a repeated call at an unchanged, already-settled
+    // camera would draw nothing at all.
+    //
+    // **Nor on a moving frame with no composite to fall back on.** The early
+    // return below is only honest when the carry-over blit just above it
+    // actually put something on screen. `_carryOver` is null on a moving
+    // frame in at least three real situations: the first frame this cache
+    // has ever painted (already exempted above); the outgoing generation
+    // never covered the viewport, so `_retireGeneration` minted nothing --
+    // which is exactly the state a second zoom reaches when it lands before
+    // the first one's settle completes; and any of `applyChange`,
+    // `_dropGeneration` or `_dropEverything` dropping a standing composite
+    // outright, if a camera change then lands before a rested frame. Gating
+    // a frame with no composite would paint nothing at all -- not a stale
+    // frame but a blank one -- for as long as the gesture continued. A blank
+    // viewport is worse than an expensive one, so this falls through to the
+    // ordinary bake-and-live-walk path instead: where there is nothing stale
+    // to show, drawing the real thing is the honest fallback.
+    //
+    // **Nor on a pan, and that is spec D8.** A *moving* frame is one whose
+    // scale changed (D1); a frame that changed only its translation is a pan,
+    // and D8 says the pan path is untouched by this plan. Without the last
+    // disjunct below it was not: `CameraController.panBy` copies `a, b, c, d`
+    // bit-identically, so `_gridFor` returns the standing grid without
+    // retiring, a composite minted by the *preceding* zoom survives the whole
+    // pan, and every pan frame took the early return -- blitting that
+    // composite at the panned position while the region it uncovers at the
+    // leading edge stayed background, and `_tiles` stayed empty, until the
+    // camera happened to hold still for [kRestGateFrames] frames. D3's
+    // accepted ring is a zoom-out's ring and nothing else; an unfilled pan is
+    // a regression against D8, and before this plan the same frame paid a
+    // live walk over the uncovered region and got the pixels right.
+    //
+    // **`_restGateSteps == 0` is what makes this the pan and not the frame
+    // *between* two zoom notches.** D1's third frame kind -- matched once, not
+    // yet twice -- draws what a moving frame draws, and it is a frame whose
+    // camera did *not* change, so it carries a count of at least one. A pan
+    // frame changed the camera and reset the count to zero. Reading the count
+    // rather than the camera keeps the wheel's in-between frame cheap, which
+    // is the whole of D1's two-frame clause.
+    //
+    // **And [_lastChangeWasPan] is what carries the pan one frame further.**
+    // The count alone stops at the frame the pan stops on: the *next* frame
+    // repeats the same camera, so the count reads 1 -- too late for the
+    // disjunct above, too early for the gate below -- and with the composite
+    // still standing the frame returned after the blit alone. The strip the
+    // composite has slid off was background for that one frame and correct
+    // again on the next: correct -> blank -> correct, on every pan tail. The
+    // bit says which kind of change the count is counting away from, so a pan
+    // tail keeps drawing what its pan frames drew while a wheel's in-between
+    // frame stays exactly as cheap as the notch before it.
+    final resting = previous == null ||
+        _carryOver == null ||
+        (!scaleChanged && _restGateSteps == 0) ||
+        _lastChangeWasPan ||
+        _restGateSteps >= kRestGateFrames;
+
+    // Derived once and handed to every bake. Rebasing is frame-global by
+    // construction; a per-tile origin would give each tile its own
+    // quantisation step and `float32` residuals the live frame does not have.
+    final origin = rebaseOriginFor(quantised.visibleWorld(viewport));
+
+    // The budget is device pixels; a tile costs its own area against it, so
+    // this is the number of *tiles* this frame may bake at the cache's
+    // current tile size. See [budgetedTilesPerFrame]'s own doc comment.
+    var budget = budgetedTilesPerFrame;
+    var baked = 0;
+    Rect? uncovered;
+
+    // **First, and underneath everything.** The composite is the outgoing
+    // generation, so an incoming tile blitted on top of it must win, and a
+    // live walk over an uncovered region must win too.
+    var carryOverCovers = false;
+    final carryOver = _carryOver;
+    if (carryOver != null) {
+      final dest = _carryOverDestRect(quantised);
+      _blitDestinations++;
+      canvas.drawImageRect(
+          carryOver,
+          Rect.fromLTWH(
+              0, 0, carryOver.width.toDouble(), carryOver.height.toDouble()),
+          dest,
+          _carryOverPaint);
+      _carryOverBlits++;
+      // A zoom *in* magnifies the composite past the viewport's edges and
+      // there is nothing left to fill; a zoom *out* shrinks it and leaves a
+      // genuine ring the live fallback owes. Asserting the containment rather
+      // than assuming the gesture's direction is the difference between a
+      // cheap gesture and a blank border.
+      carryOverCovers = dest.left <= 0 &&
+          dest.top <= 0 &&
+          dest.right >= viewport.width &&
+          dest.bottom >= viewport.height;
+    }
+
+    if (!resting) {
+      // Nothing else this frame. `resting` is false here only because the
+      // scale is moving, or moved one frame ago, and a composite is already
+      // down to show for it -- that is what the disjuncts in `resting`'s own
+      // definition above say, not an assumption made again here. A zoom out
+      // leaves that composite's ring as background until the gesture ends
+      // (spec D3); a *pan* does not reach this line at all (spec D8).
+      //
+      // **And it owes another frame.** Everything this frame put on screen
+      // came from the composite -- `resting`'s second disjunct means one was
+      // standing, and the blit above therefore ran -- so every pixel of it is
+      // the outgoing generation, replayed at a scale it was never rasterised
+      // at. The gesture produces the next frame while it lasts; the frame
+      // *after* the last gesture event has no other source, and it is the one
+      // the rest gate needs in order to advance. Without this the settle
+      // simply never started. See [settlePending].
+      _settlePending = true;
+      return;
+    }
+
+    // **The literal gate here, and not `resting`.** `resting` is true on three
+    // frames that are not at rest at all: the very first frame this cache
+    // paints, any moving frame with no composite to fall back on, and any pan
+    // frame. All three disjuncts exist to stop a frame painting *nothing* --
+    // the comment above says so in as many words: they "fall through to the
+    // ordinary bake-and-live-walk path". That path is budgeted and the band
+    // bake is not, so handing those frames to the band bake would spend a
+    // full-viewport walk on the first frame of a still-moving gesture, which
+    // is precisely the zoom-regime cost this cache exists to refuse -- and on
+    // a pan it would spend one per frame for the length of the gesture. A
+    // band is for a camera that has actually stopped, which is what the
+    // count, and only the count, says.
+    if (_restGateSteps >= kRestGateFrames && !debugRestBakeDisabled) {
+      _restBake(grid, quantised, viewport, painter, sink, vertices, origin);
+    }
+
+    for (final key in grid.visibleKeys(quantised, viewport)) {
+      var image = _tiles[key];
+      // **The ceiling is consulted before the bake, not after the frame.** A
+      // small cap against a viewport of many tiles means the visible set alone
+      // overruns it, so a sweep at the end of `paintFrame` would have nothing
+      // left to reclaim -- every tile it could take was blitted this frame --
+      // and `liveBytes` would settle wherever the visible set happened to put
+      // it. Asking first makes the ceiling hold at every point inside the
+      // frame as well as at its edges.
+      if (image == null && budget > 0 && _makeRoomForOneTile()) {
+        image = _bake(key, grid, painter, sink, vertices, origin);
+        _tiles[key] = image;
+        _lastUsedFrame[key] = _frameSerial;
+        budget--;
+        baked++;
+      }
+      final dest = grid.destRectFor(key, quantised);
+      _blitDestinations++;
+      if (image == null) {
+        uncovered = uncovered == null ? dest : uncovered.expandToInclude(dest);
+        continue;
+      }
+      // The recency the ceiling orders by, and the guard that stops a tile
+      // this frame is using from being reclaimed later in the same loop.
+      _lastUsedFrame[key] = _frameSerial;
+      canvas.drawImageRect(image, _tileSourceRect, dest, _blitPaint);
+      _blits++;
+    }
+
+    _viewportCovered = uncovered == null;
+    // **Coverage is not the whole of what this frame owes, and the difference
+    // is the frame a zoom stops on.** `carryOver` was read before the blit at
+    // the top of this method and is non-null exactly when that blit ran, so
+    // this frame is showing the outgoing generation under every transparent
+    // pixel of the incoming one -- stale and filtered -- however complete the
+    // tile set now is. The rest bake just above may have dropped the composite
+    // for later frames, but the pixels are already on this canvas. One more
+    // frame replaces them, and by then there is no composite left to blit.
+    // See [settlePending].
+    _settlePending = uncovered != null || carryOver != null;
+    if (uncovered == null) {
+      // The incoming generation now covers every pixel the composite served,
+      // so the composite is dead weight *and* a hazard: a tile's antialiased
+      // edge is translucent, and `srcOver` over stale ink is not the same
+      // pixel as `srcOver` over nothing. The next frame is a clean generation.
+      //
+      // **And not on the frame that finished the fill.** A generous budget
+      // fills a whole generation in the frame that anchors it, so dropping on
+      // coverage alone would mint a composite and destroy it inside one
+      // `paintFrame` — unobservable from outside, and leaving the *next* scale
+      // change of the same gesture with nothing to blit while its own
+      // generation is still empty. Surviving the frame that filled it costs
+      // one frame of stale ink under antialiased edges and buys a gesture that
+      // never blanks.
+      if (baked == 0) _dropCarryOver();
+      return;
+    }
+    // Stale scaled pixels rather than a live walk, deliberately: replaying the
+    // whole painter is the ~60 ms stall this cache exists to remove, and a
+    // gesture frame is precisely where it must not happen.
+    //
+    // **`carryOverCovers` was measured before [_restBake] may have dropped
+    // the composite, and that combination cannot leave this frame blank.**
+    // Read literally the pair is alarming: a `true` here plus a released
+    // composite plus an uncovered key would return with neither stale pixels
+    // nor a live walk -- blank, which is worse than either. It is
+    // unreachable, and the reason is [_restBake]'s own precondition rather
+    // than anything on this line. `_restBake` releases the composite only
+    // after pricing one band plus **every visible tile** against
+    // [cacheBytes], and `_makeRoomForOneTile` can then always find room,
+    // because the only tiles carrying this frame's serial are ones the same
+    // rest bake just cut. So a frame that dropped the composite is a frame
+    // that filled every visible key, `uncovered` is null, and control took
+    // the covered return above without ever reaching this line. The assert
+    // states it so a future change to that pricing fails loudly here instead
+    // of shipping an intermittently blank viewport.
+    assert(
+        !carryOverCovers || hasCarryOver,
+        'a frame that released the composite must have covered the viewport, '
+        'or this return leaves neither stale pixels nor a live walk');
+    if (carryOverCovers) return;
+    // One walk for the union, not one per tile: at 512 px a full visible set is
+    // about 48 tiles (see the 48.0 MiB figure above), and 48 painter invocations
+    // in one frame would be slower than the live path this cache exists to
+    // replace. Clipped, so the covered tiles keep the pixels they just blitted.
+    canvas.save();
+    // **The clip is unchanged, and that is a decision.** `_bake` states the
+    // rule for itself -- "The query is padded; the clip is not." Drop this
+    // line and the pad becomes overdraw onto tiles already blitted: the pixels
+    // stay correct, so the sweep still reads zero, and the cost this whole
+    // change exists to remove comes back silently.
+    canvas.clipRect(uncovered, doAntiAlias: false);
+    _lastClip = uncovered;
+    // **Walk the union, not the viewport.** The clip above only discards
+    // drawing; the walk below is what costs. `DraftPainter.paint` derives its
+    // index query from `camera.visibleWorld(viewport)`, so handing it the full
+    // viewport tessellates the whole frame and throws most of it away -- which
+    // is what every fallback did before this line, and why the frame's excess
+    // read as a full live walk.
+    final strip = debugFullViewportQuery
+        ? Offset.zero & viewport
+        : stripFor(uncovered, viewport);
+    _lastStrip = strip;
+    canvas.translate(strip.left, strip.top);
+    final q = quantised.worldToScreenMatrix;
+    _drawInto(
+        canvas,
+        Size(strip.width, strip.height),
+        ViewportTransform(
+            worldToScreenMatrix: Transform2(
+                q.a, q.b, q.c, q.d, q.e - strip.left, q.f - strip.top)),
+        painter,
+        sink,
+        vertices,
+        origin,
+        null);
+    canvas.restore();
+    _liveDraws++;
+  }
+
+  /// Fills the visible region a **tile row at a time**, on a resting frame.
+  ///
+  /// **One walk per band, not one per tile.** A 512-pixel tile costs 12.56 ms
+  /// to bake (see [kTileDevicePixels]) and two of them overrun the frame
+  /// budget, so the tiled fill baked one tile per frame: after a zoom that is
+  /// about forty frames of stale, magnified pixels. A band is one walk of the
+  /// painter for a whole row, rasterised once and then *copied* into its
+  /// tiles -- a texture copy, not a raster -- so a viewport fills in one
+  /// frame.
+  ///
+  /// **Only when a visible key is actually missing.** A resting frame is not
+  /// necessarily an unfilled one: `paintFrame` reaches here on every frame
+  /// whose camera has stood still, including ones that already hold every tile
+  /// they need. Rebaking those would replace good images with identical ones,
+  /// leak the images it overwrote, and pay a full walk for nothing. This is
+  /// the "viewport not covered" half of the resting regime, tested against the
+  /// tiles themselves rather than against [_viewportCovered], which is a
+  /// statement about the *previous* frame's camera.
+  void _restBake(
+    TileGrid grid,
+    ViewportTransform quantised,
+    Size viewport,
+    DraftPainter painter,
+    CanvasDrawSink sink,
+    VerticesDrawSink? vertices,
+    Vector2 origin,
+  ) {
+    // **Kept as a cheap frame-global early-out**, ahead of `bandsFor`'s
+    // allocation: a rest frame over a generation that is already whole is the
+    // common case (`paintFrame` reaches here on *every* frame whose camera has
+    // stood still), and this answers it without building the band list. It is
+    // not the probe that decides what gets baked -- that one is per band,
+    // inside the loop below.
+    var missing = false;
+    for (final key in grid.visibleKeys(quantised, viewport)) {
+      if (!_tiles.containsKey(key)) {
+        missing = true;
+        break;
+      }
+    }
+    if (!missing) return;
+
+    final bands = grid.bandsFor(quantised, viewport);
+    if (bands.isEmpty) return;
+    final bandBytes = _bandBytesOf(bands.first);
+    var visibleTiles = 0;
+    for (final band in bands) {
+      visibleTiles += band.keys.length;
+    }
+    // **The whole fill is priced before any of it happens, and that is what
+    // makes dropping the composite safe.** A rest bake is all-or-nothing by
+    // intent: it exists to replace every pixel the composite serves in one
+    // frame. Under a ceiling that cannot hold a band plus the visible set,
+    // it would instead evict its own output slice by slice, arrive covering
+    // nothing, and have thrown the composite away to do it -- replacing
+    // stale pixels with a live walk, forever, which is the state
+    // [_makeRoomForOneTile]'s "bakes nothing rather than overrun" arm exists
+    // to refuse. So a ceiling that small leaves the whole frame to the
+    // budgeted tile loop below, composite and all.
+    //
+    // The peak this prices is the one the design was costed against: one band
+    // plus a full generation, 8 + 48 MiB at the reference viewport, against a
+    // 96 MiB cap. The *source* picture is not in it and cannot be -- it is
+    // freed by `endRecording` inside [_bakeBand] before the image exists.
+    if (bandBytes + visibleTiles * _tileBytes > cacheBytes) return;
+
+    // **The composite goes first.** The frame is about to draw real content
+    // and does not need it: it was blitted onto this canvas already, and the
+    // tiles below land on the same pixels. At the reference viewport the
+    // source picture and the tile set are each about 48 MiB against a 96 MiB
+    // cap, so the composite's 29.3 MiB on top is exactly what banding exists
+    // to avoid -- dropping it before the bake is the other half of the same
+    // arithmetic, and it is what leaves the ceiling room for the band. It is
+    // the same rule the covered-frame drop below states ("the incoming
+    // generation now covers every pixel the composite served"), decided
+    // ahead of the fill rather than after it, which the check above is what
+    // licenses.
+    _dropCarryOver();
+
+    for (final band in bands) {
+      // **The probe is per band, and it has to be.** One missing key anywhere
+      // in the viewport used to commit *every* band to a full painter walk, a
+      // `_recordOwners` over its whole visit list, a `toImageSync` and a
+      // `_bakes++` -- and then to throw the image away, because the per-key
+      // `containsKey` below skips only the *slice*. That is the ordinary edit
+      // path, not an edge case: after an `applyChange` the camera has not
+      // moved, so the gate is still armed and the very next frame rest-bakes,
+      // while `_invalidateTouched` has typically condemned tiles in one band
+      // alone. A drag paid one whole-viewport walk a frame for it. This
+      // paragraph is the doc comment's own reasoning -- "rebaking those would
+      // replace good images with identical ones ... and pay a full walk for
+      // nothing" -- applied at the granularity the walk actually happens at.
+      //
+      // **The recency touch is not optional, and it is what keeps the ceiling
+      // proof intact.** The proof the up-front pricing rests on is that at
+      // band `i` the set `_makeRoomForBytes` may not evict is exactly the keys
+      // of bands `0..i-1`, which holds because every one of those keys was
+      // written with this frame's serial -- sliced, or already held and
+      // touched. A band skipped *without* the touch would leave its keys
+      // evictable by a later band's `_makeRoomForBytes`, and the frame would
+      // blit a hole it had already decided it owned. So a skipped band pays
+      // one map write per key and nothing else: no `_makeRoomForBytes`, no
+      // band image, no walk, no `_bakes++`.
+      var bandMissing = false;
+      for (final key in band.keys) {
+        if (!_tiles.containsKey(key)) {
+          bandMissing = true;
+          break;
+        }
+      }
+      if (!bandMissing) {
+        for (final key in band.keys) {
+          _lastUsedFrame[key] = _frameSerial;
+        }
+        continue;
+      }
+
+      // **Asked before the band is allocated, not after.** The ceiling is a
+      // ceiling and not a suggestion (see [_makeRoomForOneTile]), and a band
+      // is a whole row -- thirteen tiles' worth here, 8 MiB at the reference
+      // viewport. Baking one and discovering afterwards that nothing could be
+      // kept is the silent overrun that arm exists to refuse, so a ceiling
+      // that cannot hold a band leaves the whole rest bake to the ordinary
+      // budgeted tile loop and the live fallback below.
+      if (!_makeRoomForBytes(bandBytes + _tileBytes)) return;
+
+      final visited = <int>[];
+      final image = _bakeBand(
+          band, grid, quantised, painter, sink, vertices, origin, visited);
+      _band = image;
+      // **The band is released on every exit from here, including a throw.**
+      // `_band` is not a local: [liveBytes] counts it, so an image stranded in
+      // that field overstates the cache by a whole band for the rest of its
+      // life and `_makeRoomForBytes` over-evicts forever after -- a leaked
+      // image plus a permanently wrong meter, from one exception in
+      // [_recordOwners] or [_sliceTile]. No non-throwing path reaches it
+      // today; the `finally` is what keeps that true of paths added later.
+      try {
+        // [_bakeBand]'s `onVisit` records only what the painter visited
+        // directly; [_bake]'s climbs owners so that a *container's* transform
+        // reaches the tile through invalidation's direction one. This is where
+        // the band makes up the difference -- once per band rather than once
+        // per tile, which is the whole reason the band callback is the simpler
+        // one.
+        _recordOwners(visited, painter.document);
+        visited.sort();
+        // **One record per band, shared by reference.** `_invalidateTouched`
+        // condemns tiles by iterating `_baked`, and a sliced tile with no
+        // record is invisible to it: edit an entity after a settle and the
+        // stale tile keeps blitting over the corrected drawing. Sharing makes
+        // invalidation band-coarse, which is right because a band is exactly
+        // the unit a rebake walks.
+        final record = Uint32List.fromList(visited);
+        for (final key in band.keys) {
+          // A key this frame's tile map already serves keeps its own image and
+          // its own, narrower record. Overwriting it would leak the image it
+          // replaced -- `_tiles[key] = tile` disposes nothing -- and a pan
+          // within one generation reaches this loop with most of the row
+          // already held.
+          if (_tiles.containsKey(key)) {
+            _lastUsedFrame[key] = _frameSerial;
+            continue;
+          }
+          debugOnSliceForTest?.call();
+          // The ceiling is consulted before the write, not after the frame --
+          // the rule the tile loop already follows. The slice bypasses
+          // `budgetedTilesPerFrame`, which rations bakes; a slice is not a
+          // bake.
+          if (!_makeRoomForOneTile()) break;
+          final tile = _sliceTile(image, band, key, grid);
+          _tiles[key] = tile;
+          _baked[key] = record;
+          _lastUsedFrame[key] = _frameSerial;
+        }
+      } finally {
+        _band = null;
+        _disposeImage(image);
+      }
+      _bakes++;
+    }
+  }
+
+  /// [_bake]'s owner climb, applied once to a whole band's visit list.
+  ///
+  /// **Direction one of the invalidation rule, which the band walk cannot
+  /// record for itself.** A tile's `_baked` record has to name not only the
+  /// entities drawn on it but every container they hang under, or a transform
+  /// applied to a group never condemns the tiles its children inked and the
+  /// drawing goes stale after an edit. [_bake] does this inside its own
+  /// `onVisit`; a band's `onVisit` records the direct visit alone and this
+  /// closes the gap over the accumulated list.
+  ///
+  /// Only the prefix that was there on entry is read, so the owners appended
+  /// below are not themselves re-climbed -- they cannot add anything, because
+  /// [climb] already walks each chain to its root.
+  void _recordOwners(List<int> visited, DraftDocument document) {
+    // Container nodes already recorded. Both a memo and the termination
+    // guard, exactly as in [_bake]: once a node is in, every ancestor of it is
+    // in too, so the climb stops there -- which keeps the pass linear in
+    // visits rather than O(visits x depth), and makes a malformed cyclic
+    // parent chain terminate instead of hanging the bake.
+    final containers = <int>{};
+
+    void climb(Handle from) {
+      var current = from;
+      while (true) {
+        final node = document.tree[current];
+        // A definition handle lives outside the node map, and a definition is
+        // not a placement: an edit inside one takes the generation-drop path
+        // and never consults this list.
+        if (node == null) return;
+        if (!containers.add(current.value)) return;
+        visited.add(current.value);
+        if (node.parent.isNone) return;
+        current = node.parent;
+      }
+    }
+
+    final direct = visited.length;
+    for (var i = 0; i < direct; i++) {
+      final handle = Handle(visited[i]);
+      final slot = document.entities.slotOf(handle);
+      if (slot != null) {
+        // A leaf names its container by owner; the root is a `GroupNode` like
+        // any other and is recorded too, so a transform of the root reaches
+        // every tile through direction one.
+        climb(document.entities.ownerAt(slot));
+        continue;
+      }
+      // An instance node the painter descended into: it is already recorded
+      // by the direct visit, and what is missing is the groups it hangs under.
+      final node = document.tree[handle];
+      if (node != null && !node.parent.isNone) climb(node.parent);
+    }
+  }
+
+  /// One band image's footprint: RGBA over its device rectangle, exactly what
+  /// `Picture.toImageSync` allocates in [_bakeBand].
+  ///
+  /// Every band of one grid is the same height and the visible region is a
+  /// full rectangle, so [TileGrid.bandsFor] yields rows of equal width and one
+  /// band's size answers for all of them.
+  int _bandBytesOf(TileBand band) =>
+      band.deviceRect.width.round() * band.deviceRect.height.round() * 4;
+
+  /// Every tile is the same square, so this is built once rather than per
+  /// blit. It was a getter until Task 10, which allocated a fresh `Rect` on
+  /// each of a frame's ~48 blits — bounded by the viewport, so never a rule
+  /// break, but the wrong side of the criterion this task lands.
+  late final Rect _tileSourceRect = Rect.fromLTWH(
+      0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble());
+
+  /// Bytes one tile's image occupies: RGBA, one byte a channel, exactly what
+  /// `Picture.toImageSync` allocates in [_bake].
+  int get _tileBytes => tileDevicePixels * tileDevicePixels * 4;
+
+  /// One tile's footprint, in device pixels: its side squared. What
+  /// [bakeBudgetDevicePixels] is measured against, in [paintFrame].
+  int get _tileDevicePixelArea => tileDevicePixels * tileDevicePixels;
+
+  /// Reclaims least-recently-blitted tiles until one more will fit under
+  /// [cacheBytes], and reports whether it succeeded.
+  ///
+  /// **Never a tile this frame already blitted, and that guard is the whole
+  /// difference between a cap and a thrash.** A viewport holds far more tiles
+  /// than a small cap does, so without it the bake loop would evict the tile
+  /// it blitted two iterations ago to make room for the next one, walk the
+  /// entire visible set doing that, and arrive at the next frame with every
+  /// tile it needs already gone — evict, rebake, evict, forever, with the
+  /// frame path doing the evicting. With it, the loop simply runs out of room
+  /// and leaves the remainder to the live fallback, which is a bounded cost.
+  ///
+  /// **"Blitted", not "visible": the guard is weaker than a first reading
+  /// suggests, and deliberately.** A tile that is visible this frame but sits
+  /// later in [TileGrid.visibleKeys] than the miss being served still carries
+  /// the *previous* frame's serial, so it is a legal victim.
+  ///
+  /// **The bound, stated as the loop below actually behaves.** One call
+  /// reclaims **every** held tile whose serial is older than this frame's,
+  /// until either the ceiling admits one more tile or no such tile is left —
+  /// not one, and not one per bake. The only quantity it is bounded by is the
+  /// number of tiles this frame has not yet blitted, which is the whole cache
+  /// at the first miss of a frame. Measured rather than reasoned: the
+  /// sub-composite fixture in `tile_budget_test.dart` reads **119 evictions in
+  /// a single frame**, because there the ceiling cannot admit a tile at all
+  /// and the first miss empties everything the guard does not protect.
+  ///
+  /// What *is* exact is the guard itself: a tile already blitted this frame is
+  /// never reclaimed, whatever the ceiling demands, which is what stops the
+  /// evict-rebake-evict cycle above. And the case where on-screen tiles are
+  /// taken needs a ceiling **below the visible set** to arise at all — at a
+  /// `cacheBytes` that holds the working set, `bytes > ceiling` is false on
+  /// entry and the loop never runs, so there is no eviction of any kind to
+  /// choose a victim for.
+  ///
+  /// The cost is a hit rate, never a pixel. A victim taken before it is
+  /// reached becomes an ordinary miss: rebaked if the budget allows, otherwise
+  /// added to the frame's uncovered rectangle and drawn by the live fallback.
+  /// That is the path `tile_budget_test.dart`'s pixel comparison at the cap
+  /// exercises, and it reads zero differing pixels. Tightening the guard to
+  /// *visible* would mean sweeping `visibleKeys` once more before the bake
+  /// loop to mark the whole visible set, on every warm frame, to buy back
+  /// bakes only on frames that were already overrunning. Not worth a second
+  /// pass over the frame path.
+  ///
+  /// **The composite is never a candidate.** It is not in [_tiles] at all, and
+  /// deliberately: [paintFrame] reads it every frame it stands, so a
+  /// recency-ordered policy would never choose it anyway, and reclaiming it
+  /// would replace stale pixels with blank ones. It still *counts* against the
+  /// ceiling through [liveBytes] — so a cap smaller than one composite simply
+  /// bakes nothing, which is the honest answer rather than a silent overrun.
+  ///
+  /// Returning `false` rather than baking anyway is what keeps [liveBytes] a
+  /// ceiling and not a suggestion.
+  bool _makeRoomForOneTile() => _makeRoomForBytes(_tileBytes);
+
+  /// [_makeRoomForOneTile] generalised to an allocation that is not a tile.
+  ///
+  /// **A band is a whole tile row**, so the rest bake cannot ask this question
+  /// in units of one tile: it would be told yes, allocate thirteen tiles'
+  /// worth, and blow past [cacheBytes] before the first slice. Every word of
+  /// [_makeRoomForOneTile]'s doc comment applies unchanged -- the victim
+  /// policy, the blitted-this-frame guard, and the refusal to allocate at all
+  /// rather than overrun -- with only the size of the hole being made
+  /// different.
+  bool _makeRoomForBytes(int wanted) {
+    // Computed from `liveBytes` so the composite is counted, then tracked
+    // locally: the loop's only effect on it is one tile's worth per eviction.
+    var bytes = liveBytes;
+    final ceiling = cacheBytes - wanted;
+    while (bytes > ceiling) {
+      TileKey? victim;
+      var oldest = 0;
+      // A linear scan, not a heap. This runs only when the cache is full, the
+      // map it walks is bounded by the ceiling itself, and a priority queue
+      // would need per-blit maintenance on the frame path to save a scan that
+      // a warm frame never performs.
+      for (final entry in _lastUsedFrame.entries) {
+        if (entry.value == _frameSerial) continue;
+        if (victim == null || entry.value < oldest) {
+          victim = entry.key;
+          oldest = entry.value;
+        }
+      }
+      if (victim == null) return false;
+      _evict(victim);
+      bytes -= _tileBytes;
+    }
+    return true;
+  }
+
+  /// Reclaims one tile: its image, its bake record and its recency, together.
+  void _evict(TileKey key) {
+    _disposeImage(_tiles.remove(key));
+    _baked.remove(key);
+    _lastUsedFrame.remove(key);
+    _evictions++;
+  }
+
+  /// The single door every `ui.Image` this cache owns leaves by, so
+  /// [debugImagesAlive] can see one that never does.
+  void _disposeImage(Image? image) {
+    if (image == null) return;
+    image.dispose();
+    _imagesAlive--;
+  }
+
+  /// Where [_carryOver] lands under [camera].
+  ///
+  /// **Through the world, not through a scale ratio.** The composite's
+  /// rectangle is mapped out of [_carryOverAnchor]'s screen space into world
+  /// space and back in through the new camera, so a camera that also panned,
+  /// flipped or skewed between the two frames is carried correctly instead of
+  /// being assumed away. Two opposite corners suffice: the transform between
+  /// two cameras that differ in scale is axis-preserving, and a rotation
+  /// between them would need a `transform` rather than a `Rect` on either
+  /// reading. `Rect.fromPoints` normalises, which a y-flipped camera needs.
+  ///
+  /// **This one is not snapped.** Every other destination in this file is
+  /// rounded onto the device-pixel lattice because the copy is 1:1 and must be
+  /// exact. Here the source is stale by construction and the destination is a
+  /// fractional multiple of it; snapping would buy nothing and would make the
+  /// drawing jump by a pixel as the zoom factor swept.
+  Rect _carryOverDestRect(ViewportTransform camera) {
+    final anchor = _carryOverAnchor!;
+    final r = _carryOverRect;
+    final topLeft =
+        camera.worldToScreen(anchor.screenToWorld(Vector2(r.left, r.top)));
+    final bottomRight =
+        camera.worldToScreen(anchor.screenToWorld(Vector2(r.right, r.bottom)));
+    return Rect.fromPoints(
+        Offset(topLeft.x, topLeft.y), Offset(bottomRight.x, bottomRight.y));
+  }
+
+  TileGrid _gridFor(
+      ViewportTransform quantised, double devicePixelRatio, Size viewport) {
+    final grid = _grid;
+    if (grid != null &&
+        grid.devicePixelRatio == devicePixelRatio &&
+        grid.tileDevicePixels == tileDevicePixels &&
+        grid.matchesScale(quantised)) {
+      return grid;
+    }
+    _retireGeneration(viewport);
+    final fresh = TileGrid(
+        anchor: quantised,
+        devicePixelRatio: devicePixelRatio,
+        tileDevicePixels: tileDevicePixels);
+    _grid = fresh;
+    _generation++;
+    return fresh;
+  }
+
+  /// Flattens the outgoing generation into [_carryOver], then drops its tiles.
+  ///
+  /// **Only reached from [_gridFor]**, which is the only place a *scale*
+  /// changes. `_dropGeneration` throws tiles away for a definition or a table
+  /// edit, and those tiles hold wrong pixels rather than stale ones:
+  /// compositing them would put the pre-edit colour back on screen for the
+  /// whole of the refill, with `liveTileCount` reading zero the entire time.
+  ///
+  /// **Three guards, and each of them is a different way to mint nonsense.**
+  /// No grid or no camera is the first frame, where there is nothing to
+  /// flatten. No tiles is a gesture frame, whose fresh generation baked
+  /// nothing — and there the *existing* composite is kept, which is what stops
+  /// a sweep of the zoom factor filtering the same pixels once per frame.
+  /// [_viewportCovered] is the half-filled generation: flattened, it is
+  /// transparent wherever it never baked, and a transparent composite in front
+  /// of the live fallback is a blank strip rather than a stale one.
+  void _retireGeneration(Size viewport) {
+    final grid = _grid;
+    final camera = _lastCamera;
+    if (grid != null &&
+        camera != null &&
+        _viewportCovered &&
+        _tiles.isNotEmpty) {
+      final dpr = grid.devicePixelRatio;
+      final width = (viewport.width * dpr).ceil();
+      final height = (viewport.height * dpr).ceil();
+      final rect = Rect.fromLTWH(0, 0, width / dpr, height / dpr);
+      final recorder = PictureRecorder();
+      final into = Canvas(recorder);
+      into.scale(dpr);
+      // Hard, for `_bake`'s reason: an antialiased clip edge would leave the
+      // composite's own border at partial coverage.
+      into.clipRect(rect, doAntiAlias: false);
+      // Recorded against the *last* camera, so the composite is a picture of
+      // what the user was actually looking at rather than of the anchor's
+      // viewport, which many pans ago may have left the screen entirely.
+      for (final key in grid.visibleKeys(camera, viewport)) {
+        final image = _tiles[key];
+        if (image == null) continue;
+        into.drawImageRect(
+            image, _tileSourceRect, grid.destRectFor(key, camera), _blitPaint);
+      }
+      final picture = recorder.endRecording();
+      // The old composite goes first: it was fully hidden by the generation
+      // being retired -- that is what `_viewportCovered` means -- and it holds
+      // native memory past its Dart object.
+      _dropCarryOver();
+      _carryOver = picture.toImageSync(width, height);
+      _imagesAlive++;
+      _carryOverAnchor = camera;
+      _carryOverRect = rect;
+      picture.dispose();
+    }
+    _disposeTiles();
+  }
+
+  /// Disposes every tile image and forgets what they baked.
+  ///
+  /// Clears [_viewportCovered] with them: coverage is a statement about tiles
+  /// that exist, and leaving it standing would let the *next* scale change
+  /// composite an empty generation.
+  void _disposeTiles() {
+    for (final image in _tiles.values) {
+      _disposeImage(image);
+    }
+    _tiles.clear();
+    _baked.clear();
+    _lastUsedFrame.clear();
+    _viewportCovered = false;
+  }
+
+  /// Releases the composite's native memory. Idempotent.
+  void _dropCarryOver() {
+    _disposeImage(_carryOver);
+    _carryOver = null;
+    _carryOverAnchor = null;
+    _carryOverRect = Rect.zero;
+  }
+
+  /// Throws away whatever [change] made stale.
+  ///
+  /// **All five subclasses, exhaustively.** `DocChange` has five and five
+  /// emitters — `CommandApplied` (`undo.dart:112`), `CommandUndone` (`:140`),
+  /// `CommandRedone` (`:161`), `DocumentLoaded` (`:169`) and `DocumentPurged`
+  /// (`:178`). A cache that handles apply and undo and forgets redo shows
+  /// stale pixels after every redo while passing an undo-only gate. The switch
+  /// is written without a default so that a sixth subclass is a compile error
+  /// here rather than a silent omission, which is what
+  /// `SpatialIndex._onChange` does with the same stream.
+  void applyChange(DocChange change, DraftDocument document) {
+    // **Every arm, before the switch even runs.** `_dropGeneration` covers the
+    // definition arm and the table revision `paintFrame` reads for itself, but
+    // `_invalidateTouched`'s ordinary per-tile path removes tiles one at a
+    // time and never reaches it — so a leaf edit would leave the composite
+    // standing, and a composite covering the viewport suppresses the live
+    // fallback that would have repainted. Hoisted above the switch rather than
+    // repeated in each case for the reason the switch itself is exhaustive: a
+    // sixth `DocChange` subclass must not be able to arrive without this.
+    _dropCarryOver();
+    switch (change) {
+      // A purge rewrites the entity store's slots wholesale and a load
+      // replaces the document; neither leaves anything worth keeping, and
+      // neither leaves the anchor camera meaning what it meant.
+      case DocumentLoaded():
+      case DocumentPurged():
+        _dropEverything();
+      case CommandApplied(:final touched, :final capability):
+      case CommandUndone(:final touched, :final capability):
+      case CommandRedone(:final touched, :final capability):
+        // Spec D13: a components-only edit moved no pixels.
+        if (capability == Capability.components) return;
+        if (touched.isEmpty) {
+          // `DocChange.touched` is documented as empty when the whole document
+          // changed (`doc_change.dart:11-12`).
+          _dropEverything();
+          return;
+        }
+        _invalidateTouched(touched, document);
+    }
+  }
+
+  void _invalidateTouched(Set<Handle> touched, DraftDocument document) {
+    // **A definition edit drops the generation.** If a tile baked a definition
+    // and that definition changed, every instance of it in that tile changed,
+    // so invalidation by definition is exact at tile granularity. The one case
+    // it does not cover — a definition whose content bounds grew, spilling an
+    // instance into a tile that never baked it — is why this is a generation
+    // drop rather than a per-tile pass. A definition edit is a block edit, not
+    // ordinary drawing.
+    for (final handle in touched) {
+      if (_isDefinitionOwned(document, handle)) {
+        _dropGeneration();
+        return;
+      }
+    }
+
+    final grid = _grid;
+    if (grid == null) return;
+    final doomed = <TileKey>{};
+
+    // Direction one: the old position. `DocChange` carries no previous
+    // geometry, and this is why each tile records what it baked.
+    for (final entry in _baked.entries) {
+      for (final handle in touched) {
+        if (_contains(entry.value, handle.value)) {
+          doomed.add(entry.key);
+          break;
+        }
+      }
+    }
+
+    // Direction two: the new position. Both are needed, for the reason
+    // `_letBoundRecede` exists in the index — a handle that moved *out* of a
+    // tile is only findable from the tile's record, and a handle that moved
+    // *into* one appears in no record at all.
+    //
+    // The boxes are derived once, ahead of the tile sweep, rather than once
+    // per (handle, tile) pair: `_worldBoxOf` reads the entity store and may
+    // walk a definition, and `touched` is small while the tile set is not.
+    final boxes = <Aabb2>[];
+    // Derived at most once per change, and only when a node handle is actually
+    // in `touched`. `DraftDocument.definitionBounds` recomputes this map on
+    // every call it is not given one, and that is a full entity-store scan —
+    // `draft_document.dart:160-175` says so in as many words, and records the
+    // benchmark where not threading it cost seconds. Without this, invalidation
+    // would be O(live entities) *per touched node handle*.
+    Map<Handle, List<int>>? leavesByOwner;
+    for (final handle in touched) {
+      if (leavesByOwner == null && document.tree[handle] != null) {
+        leavesByOwner = document.leavesByOwner();
+      }
+      final box = _worldBoxOf(document, handle, leavesByOwner);
+      if (box != null && !box.isEmpty) boxes.add(box);
+    }
+    if (boxes.isNotEmpty) {
+      for (final key in _baked.keys) {
+        if (doomed.contains(key)) continue;
+        final rect = _worldRectOf(key, grid);
+        for (final box in boxes) {
+          if (rect.intersects(box)) {
+            doomed.add(key);
+            break;
+          }
+        }
+      }
+    }
+
+    for (final key in doomed) {
+      _disposeImage(_tiles.remove(key));
+      _baked.remove(key);
+      // Keyed identically to `_tiles`: a recency left behind here would name a
+      // tile that no longer exists, and `_makeRoomForOneTile` would pick it as
+      // its victim and free nothing.
+      _lastUsedFrame.remove(key);
+      _invalidations++;
+    }
+  }
+
+  /// Drops every tile and the lattice they were baked on.
+  ///
+  /// The carry-over composite is cleared here too — not uniquely, since
+  /// [_dropGeneration] and [applyChange]'s hoisted call clear it as well; the
+  /// call below is redundant with the one [_dropGeneration] already makes and
+  /// is kept because this method's contract is "nothing survives", not
+  /// "whatever the callee happens to do". It is anchored to a camera over a
+  /// document that no longer exists, so replaying it would show the previous
+  /// drawing scaled over the new one — and it holds native memory nothing else
+  /// would release.
+  void _dropEverything() {
+    _dropGeneration();
+    _dropCarryOver();
+    _grid = null;
+    _lastCamera = null;
+  }
+
+  /// Drops the tiles and **keeps the grid**, so the next frame rebakes into
+  /// the same lattice rather than anchoring a new generation.
+  ///
+  /// A definition edit is not a scale change. Clearing `_grid` here would
+  /// renumber every key for no reason, bump [generation], and throw away the
+  /// one thing — the anchor — that lets the refilled tiles blit at whole
+  /// device pixels against the cameras already on screen.
+  /// **And mints no carry-over.** [_retireGeneration] is the scale path; this
+  /// one runs for a definition or a table edit, whose tiles are wrong rather
+  /// than merely stale.
+  ///
+  /// **It destroys one, though, and that is not symmetry — it is the whole of
+  /// finding C1.** A composite is a picture of the document *before* the
+  /// edit, and [paintFrame] suppresses the live fallback outright whenever the
+  /// composite covers the viewport. An edit landing while one stands therefore
+  /// produced a frame that was nothing but pre-edit pixels, and kept producing
+  /// it: measured at `hasCarryOver=true, liveTileCount=0, liveDrawCount=0,
+  /// carryOverBlitCount=1` on the frame after a layer edit, and still
+  /// `liveDrawCount=0` eleven frames later — at a *real* bake budget too,
+  /// where the un-refilled remainder of the viewport showed the old colour for
+  /// the whole of the settle. Nothing else on this path would ever have
+  /// cleared it: the composite is not a tile, so [liveTileCount] read zero the
+  /// entire time and every invalidation gate in this plan stayed green.
+  void _dropGeneration() {
+    _invalidations += _tiles.length;
+    _disposeTiles();
+    _dropCarryOver();
+  }
+
+  /// Whether [handle] draws inside a block definition rather than at the
+  /// document root.
+  ///
+  /// **Not "is it owned by the root".** A leaf owned by a group is neither
+  /// root-owned nor definition-owned, and groups draw at root level, so the
+  /// test has to be for a definition. The walk climbs owners because a leaf
+  /// may sit under a group that is itself inside a definition, in which case
+  /// its own owner names no definition at all.
+  bool _isDefinitionOwned(DraftDocument document, Handle handle) {
+    final slot = document.entities.slotOf(handle);
+    if (slot != null) {
+      return _enclosingDefinition(
+              document.tree, document.entities.ownerAt(slot)) !=
+          null;
+    }
+    if (document.tree[handle] == null) return false;
+    return _enclosingDefinition(document.tree, handle) != null;
+  }
+
+  /// The definition [container] sits inside, or null if it sits at the root.
+  ///
+  /// `DocumentTree.ancestorsOf` walks `parent` while the parent is a *node*,
+  /// and a definition handle lives in the definition map rather than the node
+  /// map — so a definition never appears in the chain it returns. The
+  /// definition, when there is one, is therefore the `parent` of the chain's
+  /// last element, and that is the one place worth looking.
+  ///
+  /// **The climb past the first line is what handles a node nested inside a
+  /// prototype**, where [container] names neither a definition nor anything
+  /// whose own parent is one: a group inside a definition owning a leaf, and
+  /// an instance inside a definition placing another. `nestedFixture` in
+  /// `tile_invalidation_test.dart` builds both, and reducing this method to
+  /// its first line reddens that test on each. Nothing else in the repository
+  /// has that shape — `differentialFixture`'s `Handle(520)` is an
+  /// `InstanceNode` parented directly to the definition `outer`
+  /// (`fixtures.dart:88-97`), which the chain's own
+  /// `chain.isEmpty ? container : chain.last` already resolves.
+  static Handle? _enclosingDefinition(DocumentTree tree, Handle container) {
+    if (tree.definition(container) != null) return container;
+    if (tree[container] == null) return null;
+    final chain = tree.ancestorsOf(container);
+    final top = chain.isEmpty ? container : chain.last;
+    final parent = tree[top]!.parent;
+    return tree.definition(parent) != null ? parent : null;
+  }
+
+  /// Where [handle] draws **now**, in world coordinates, or null if it draws
+  /// nothing.
+  ///
+  /// Only ever called for handles [_isDefinitionOwned] has already rejected,
+  /// so the enclosing space is the document root and the accumulated transform
+  /// of the owner is the whole of the placement.
+  ///
+  /// **The bound is geometric, not rasterised, and that is why the *tile* box
+  /// is the padded one.** A stroke puts ink up to half its width beyond this
+  /// box, so a handle arriving at a position that misses a tile geometrically
+  /// can still clip into it — accepted gap G6, until Task 9a. The remedy is
+  /// not here: inflating this box by a resolved lineweight would need the
+  /// style resolution the caller does not have, and would be a *different*
+  /// number from the one [_bake] queries with. [_worldRectOf] grows the tile
+  /// instead, by [kTileSlack], which is the same slack the bake uses — so the
+  /// record of what a tile holds and the geometry that condemns it are one
+  /// rectangle rather than two that nearly agree.
+  Aabb2? _worldBoxOf(DraftDocument document, Handle handle,
+      Map<Handle, List<int>>? leavesByOwner) {
+    final tree = document.tree;
+    final node = tree[handle];
+    if (node != null) {
+      // `definitionBounds` is the public spelling of "union of everything a
+      // container holds, in its own space", and it takes a group handle as
+      // readily as a definition handle (`draft_document.dart:241-242`). An
+      // instance handle is the one thing it does *not* resolve — it holds no
+      // leaves and lists no children of its own — so the definition is named
+      // explicitly here.
+      final content = switch (node) {
+        InstanceNode(:final definition) =>
+          document.definitionBounds(definition, leavesByOwner),
+        GroupNode() => document.definitionBounds(handle, leavesByOwner),
+      };
+      if (content.isEmpty) return null;
+      return content.transformedBy(tree.accumulatedTransform(handle));
+    }
+    final slot = document.entities.slotOf(handle);
+    if (slot == null) return null; // deleted, or never a drawable at all
+    final record = document.entities.read(slot);
+    final payload = document.geometry.read(record.geomIndex);
+    // A fill's own payload names a boundary rather than carrying coordinates,
+    // so its bound is the boundary's. Copied from `container_index.dart:99-114`
+    // — the same boundary case, resolved the same way.
+    EntityKind? boundaryKind;
+    GeometryPayload? boundaryPayload;
+    if (record.kind == EntityKind.fill) {
+      final b = document.entities.slotOf(boundaryHandleOf(payload));
+      if (b != null) {
+        boundaryKind = document.entities.kindAt(b);
+        boundaryPayload =
+            document.geometry.read(document.entities.geomIndexAt(b));
+      }
+    }
+    final box = entityBounds(
+      kind: record.kind,
+      payload: payload,
+      measurer: document.textMeasurer,
+      textStyle: document.textStyleOf(record.textStyle),
+      textAttrs: record.textAttrs,
+      text: record.text,
+      boundaryKind: boundaryKind,
+      boundaryPayload: boundaryPayload,
+    );
+    if (box.isEmpty) return null;
+    return box.transformedBy(
+        tree.accumulatedTransform(document.entities.ownerAt(slot)));
+  }
+
+  /// The world-space box tile [key] can hold ink from, under [grid]'s anchor
+  /// camera: its own rectangle grown by [kTileSlack] on every side.
+  ///
+  /// **The slack is the same one [_bake] queries with, and that is the point.**
+  /// A tile's `_baked` record lists what the padded query yielded; this is the
+  /// geometry that condemns the tile. Inflate one and not the other and the
+  /// two halves of invalidation disagree by a ring — direction one drops tiles
+  /// whose record names a handle that direction two's box does not reach, and
+  /// a stroke arriving from just outside a tile leaves it stale. [kTileSlack]
+  /// carries the whole argument.
+  ///
+  /// **Grown in screen space, not in world units.** The pad is a fact about
+  /// stroke widths, which are a screen-space quantity, so it is applied to the
+  /// tile rectangle before the inversion. Adding a world-space margin
+  /// afterwards would be the wrong size by the camera's scale, and by
+  /// different amounts on the two axes under an anisotropic one.
+  ///
+  /// **All four corners, not two.** `ViewportTransform.visibleWorld` documents
+  /// the reason and this is the same inversion: under a rotated or skewed
+  /// camera the axis-aligned box of two opposite corners omits world that is
+  /// genuinely inside the tile, and the tiles it omits are the ones this
+  /// method exists to condemn.
+  Aabb2 _worldRectOf(TileKey key, TileGrid grid) {
+    const pad = kTileSlack;
+    final side = grid._tileLogical;
+    final left = key.x * side - pad;
+    final top = key.y * side - pad;
+    final span = side + 2 * pad;
+    var box = Aabb2.empty();
+    for (final p in <Vector2>[
+      Vector2(left, top),
+      Vector2(left + span, top),
+      Vector2(left, top + span),
+      Vector2(left + span, top + span),
+    ]) {
+      box = box.expandedToPoint(grid.anchor.screenToWorld(p));
+    }
+    return box;
+  }
+
+  /// Binary search over an ascending, possibly repeating, handle list.
+  static bool _contains(Uint32List sorted, int value) {
+    var lo = 0, hi = sorted.length - 1;
+    while (lo <= hi) {
+      final mid = (lo + hi) >> 1;
+      final at = sorted[mid];
+      if (at == value) return true;
+      if (at < value) {
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return false;
+  }
+
+  Image _bake(
+    TileKey key,
+    TileGrid grid,
+    DraftPainter painter,
+    CanvasDrawSink sink,
+    VerticesDrawSink? vertices,
+    Vector2 origin,
+  ) {
+    final side = tileDevicePixels / grid.devicePixelRatio;
+    final recorder = PictureRecorder();
+    final into = Canvas(recorder);
+    into.scale(grid.devicePixelRatio);
+    // **A hard clip on the pixel grid, and the flag is the point.** An entity
+    // crossing a tile boundary is drawn into both tiles. If the clip edge were
+    // antialiased, each tile would contribute partial coverage along the shared
+    // edge and their `source-over` would not reach full coverage: a seam. A
+    // hard clip is exact for strokes, fills and glyphs alike, because the
+    // geometry's own rasterisation is untouched and each tile keeps exactly
+    // the pixels it owns.
+    into.clipRect(Rect.fromLTWH(0, 0, side, side), doAntiAlias: false);
+    // The one place the frame path allocates per entity — and a bake is not a
+    // steady-state frame. `onVisit` is null at the only other call into
+    // `_drawInto`, the live fallback in `paintFrame`, so a warm frame that
+    // blits and bakes nothing never grows this list at all.
+    final visited = <int>[];
+    // Container nodes already recorded on this tile. Both a memo and the
+    // termination guard: once a node is in, every ancestor of it is in too, so
+    // the climb stops there — which is what keeps the whole pass linear in
+    // visits rather than O(visits x depth), and what makes a malformed cyclic
+    // parent chain terminate instead of hanging the bake.
+    final containers = <int>{};
+    final document = painter.document;
+
+    void recordOwners(Handle from) {
+      var current = from;
+      while (true) {
+        final node = document.tree[current];
+        // A definition handle lives outside the node map, and a definition is
+        // not a placement: an edit inside one takes the generation-drop path
+        // and never consults this list.
+        if (node == null) return;
+        if (!containers.add(current.value)) return;
+        visited.add(current.value);
+        if (node.parent.isNone) return;
+        current = node.parent;
+      }
+    }
+
+    // **The query is padded; the clip is not.** [kTileSlack] is why: the tile
+    // keeps exactly the pixels it owns (the hard clip above is untouched) but
+    // the painter is asked about a rectangle [kTileSlack] logical pixels
+    // larger on every side, so a stroke whose centreline is just outside still
+    // reaches the sink and contributes the part of itself that falls inside.
+    // The canvas is pulled back by the same amount, so the padded viewport's
+    // origin lands where the tile's origin was.
+    const pad = kTileSlack;
+    final bake = grid.bakeCameraFor(key).worldToScreenMatrix;
+    into.save();
+    into.translate(-pad, -pad);
+    _drawInto(
+        into,
+        Size(side + 2 * pad, side + 2 * pad),
+        ViewportTransform(
+            worldToScreenMatrix: Transform2(
+                bake.a, bake.b, bake.c, bake.d, bake.e + pad, bake.f + pad)),
+        painter,
+        sink,
+        vertices,
+        origin, (handle) {
+      visited.add(handle.value);
+      final slot = document.entities.slotOf(handle);
+      if (slot != null) {
+        // A leaf names its container by owner; the root is a `GroupNode` like
+        // any other and is recorded too, so a transform of the root reaches
+        // every tile through direction one.
+        recordOwners(document.entities.ownerAt(slot));
+        return;
+      }
+      // An instance node the painter descended into: it is already recorded
+      // above, and what is missing is the groups it hangs under.
+      final node = document.tree[handle];
+      if (node != null && !node.parent.isNone) recordOwners(node.parent);
+    });
+    into.restore();
+    visited.sort();
+    _baked[key] = Uint32List.fromList(visited);
+    final picture = recorder.endRecording();
+    final image = picture.toImageSync(tileDevicePixels, tileDevicePixels);
+    _imagesAlive++;
+    picture.dispose();
+    _bakes++;
+    return image;
+  }
+
+  /// Walks one band into one image.
+  ///
+  /// Modelled on [_bake] and sharing all three of its rules, at band scale.
+  ///
+  /// **The `onVisit` callback is deliberately simpler than [_bake]'s.**
+  /// `_bake` climbs owners so a container transform reaches the tile through
+  /// direction one. A band records the same information for a wider region,
+  /// and its caller shares one record across the band's tiles, so the owner
+  /// climb happens once there rather than once per tile.
+  Image _bakeBand(
+    TileBand band,
+    TileGrid grid,
+    ViewportTransform quantised,
+    DraftPainter painter,
+    CanvasDrawSink sink,
+    VerticesDrawSink? vertices,
+    Vector2 origin,
+    List<int> visitedInto,
+  ) {
+    // **The scale is the frame camera's; the translation is the anchor's.**
+    // [TileBand.deviceRect] lives in the grid's device space, whose origin is
+    // [TileGrid.anchor] and not this frame's camera -- exactly as a tile key
+    // does, and [TileGrid.bakeCameraFor] rebases a single tile off the anchor
+    // for the same reason. A generation outlives many pans, so at a rest bake
+    // the frame camera sits a whole number of device pixels away from the
+    // anchor; taking the translation from it would slide the band by that pan
+    // and the tiles cut out of it would not hold what [_bake] puts in the
+    // same keys. The frame camera is still required to belong to this
+    // generation, which is what the assert below states.
+    assert(
+        grid.matchesScale(quantised),
+        'a band belongs to one generation, so the frame camera and the grid '
+        'anchor must agree on scale');
+    final dpr = grid.devicePixelRatio;
+    final width = band.deviceRect.width / dpr;
+    final height = band.deviceRect.height / dpr;
+    final recorder = PictureRecorder();
+    final into = Canvas(recorder);
+    into.scale(dpr);
+    // **Hard, and for [_bake]'s reason.** An antialiased clip edge would make
+    // two adjacent bands' `source-over` fall short of full coverage along the
+    // row they share: a seam, in the one place this design exists to remove
+    // one.
+    into.clipRect(Rect.fromLTWH(0, 0, width, height), doAntiAlias: false);
+
+    // **The query is padded; the clip is not.** A stroke whose centreline lies
+    // just outside the band still inks inside it. [kTileSlack] is the same
+    // slack [_bake] queries with and the same slack the invalidation rule
+    // uses -- padding one alone makes them disagree. The canvas is pulled back
+    // by the same amount, so the padded viewport's origin lands where the
+    // band's own origin was.
+    const pad = kTileSlack;
+    into.save();
+    into.translate(-pad, -pad);
+
+    final m = grid.anchor.worldToScreenMatrix;
+    final bandCamera = ViewportTransform(
+      worldToScreenMatrix: Transform2(
+        m.a,
+        m.b,
+        m.c,
+        m.d,
+        m.e - band.deviceRect.left / dpr + pad,
+        m.f - band.deviceRect.top / dpr + pad,
+      ),
+    );
+
+    _drawInto(
+      into,
+      Size(width + 2 * pad, height + 2 * pad),
+      bandCamera,
+      painter,
+      sink,
+      vertices,
+      // **The viewport's origin, never the band's.** Rebasing is frame-global
+      // by construction: a per-band origin gives each band its own
+      // quantisation step and `float32` residuals the live frame does not
+      // have, and can cross a power-of-two step between one row and the next.
+      origin,
+      (handle) => visitedInto.add(handle.value),
+    );
+    into.restore();
+
+    final picture = recorder.endRecording();
+    final image = picture.toImageSync(
+        band.deviceRect.width.round(), band.deviceRect.height.round());
+    _imagesAlive++;
+    picture.dispose();
+    return image;
+  }
+
+  /// Test seam for [_bakeBand], which [_restBake] now also calls on the frame
+  /// path.
+  ///
+  /// **It was the only caller until Plan 3i Task 8 wired the band bake in**,
+  /// and it was introduced because `unused_element` is an error in this
+  /// package. That justification is gone; the wrapper stays because Task 6's
+  /// tests are written against it, and because what it lets them do is still
+  /// worth doing:
+  ///
+  /// What the band bake decides -- where the band camera puts a world point,
+  /// how far past the band's edge the query reaches, and which origin the walk
+  /// is rebased against -- is checkable without rasterising anything, and this
+  /// is what lets it be checked. The returned image is the caller's to
+  /// dispose.
+  @visibleForTesting
+  Image debugBakeBand(
+    TileBand band,
+    TileGrid grid,
+    ViewportTransform quantised,
+    DraftPainter painter,
+    CanvasDrawSink sink,
+    VerticesDrawSink? vertices,
+    Vector2 origin,
+    List<int> visitedInto,
+  ) =>
+      _bakeBand(
+          band, grid, quantised, painter, sink, vertices, origin, visitedInto);
+
+  /// Copies one tile's pixels out of a band image.
+  ///
+  /// A texture copy, not a geometry raster -- which is the whole difference
+  /// from the rejected Approach B. `FilterQuality.none`: the source rectangle
+  /// is integral and the destination is the same size, so there is nothing to
+  /// interpolate and a sampler would be pure cost.
+  Image _sliceTile(Image band, TileBand from, TileKey key, TileGrid grid) {
+    final recorder = PictureRecorder();
+    final into = Canvas(recorder);
+    into.drawImageRect(
+      band,
+      grid.sliceSourceRect(from, key),
+      Rect.fromLTWH(
+          0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble()),
+      _blitPaint,
+    );
+    final picture = recorder.endRecording();
+    final image = picture.toImageSync(tileDevicePixels, tileDevicePixels);
+    _imagesAlive++;
+    picture.dispose();
+    return image;
+  }
+
+  /// Test seam for [_sliceTile], which [_restBake] now also calls on the frame
+  /// path.
+  ///
+  /// Like [debugBakeBand] this existed because the slice had no production
+  /// caller until Plan 3i Task 8 and `unused_element` is an error in this
+  /// package. Kept because Task 7's tests call it directly, which is how they
+  /// slice a band they built themselves rather than one a whole frame
+  /// produced.
+  @visibleForTesting
+  Image debugSliceTile(Image band, TileBand from, TileKey key, TileGrid grid) =>
+      _sliceTile(band, from, key, grid);
+
+  void _drawInto(
+    Canvas canvas,
+    Size size,
+    ViewportTransform camera,
+    DraftPainter painter,
+    CanvasDrawSink sink,
+    VerticesDrawSink? vertices,
+    Vector2 origin,
+    void Function(Handle handle)? onVisit,
+  ) {
+    painter.debugRebaseOrigin = origin;
+    painter.debugOnVisit = onVisit;
+    try {
+      sink.canvas = canvas;
+      if (vertices == null) {
+        painter.paint(sink, camera, size);
+        return;
+      }
+      vertices.canvas = canvas;
+      painter.paint(vertices, camera, size);
+      // The flush is here for the reason `_DraftCustomPainter` puts it there:
+      // it is a fact about this sink, not about the walk.
+      vertices.flush();
+    } finally {
+      // Restored even on a throw: a painter left with a stale origin would
+      // draw the *next* frame against a tile's rebase point.
+      painter.debugRebaseOrigin = null;
+      painter.debugOnVisit = null;
+    }
+  }
+
+  void dispose() {
+    _disposeTiles();
+    _dropCarryOver();
+    _grid = null;
+    _lastCamera = null;
+    // A band never outlives its own iteration of [_restBake]'s loop -- the
+    // `finally` there disposes the image and clears this field on every exit,
+    // throw included -- so this is belt and braces rather than a release.
+    // It is here because [liveBytes] reads the field: leaving a disposed
+    // image's dimensions in it would let a disposed cache still report a
+    // band's worth of bytes.
+    _band = null;
+  }
+}
