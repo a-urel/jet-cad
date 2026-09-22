@@ -36,6 +36,20 @@ void main() {
       final s = GridScale.pick(DisplayUnit.feetInches, 0.137)!;
       expect(s.majorMm, closeTo(609.6, 1e-9));
       expect(s.minorMm, closeTo(152.4, 1e-9));
+      // Ruling 04-11: the minor must be the same double as the ladder's own
+      // 6" rung, not merely close to it — a foot-based major divided by 4
+      // has to coincide bit for bit with a rung built as a foot fraction.
+      expect(GridScale.ladderFor(DisplayUnit.feetInches).contains(s.minorMm),
+          isTrue,
+          reason: "the 2 ft major's minor is the 6 in rung, bit for bit");
+    });
+
+    test('imperial divisor is 4 even with a floor', () {
+      // Ruling 04-12: every imperial step divides by 4, floor or not.
+      final s = GridScale.pick(DisplayUnit.feetInches, 0.25, floorMm: 304.8)!;
+      expect(s.majorMm, 304.8);
+      expect(s.minorMm, 76.2);
+      expect(s.divisor, 4);
     });
 
     test('null past the top of the ladder, and for a bad scale', () {
@@ -65,6 +79,9 @@ void main() {
       final imperial = GridScale.ladderFor(DisplayUnit.inches);
       expect(imperial.first, closeTo(25.4 / 16, 1e-12));
       expect(imperial.contains(304.8), isTrue);
+      for (var i = 1; i < imperial.length; i++) {
+        expect(imperial[i], greaterThan(imperial[i - 1]));
+      }
     });
   });
 
@@ -81,6 +98,7 @@ void main() {
       expect(formatLength(-2000, DisplayUnit.meters), '-2 m');
       expect(formatLength(0, DisplayUnit.meters), '0 m');
       expect(formatLength(0, DisplayUnit.feetInches), '0\'-0"');
+      expect(formatLength(-0.5, DisplayUnit.feetInches), '0\'-0"');
     });
   });
 
@@ -102,8 +120,10 @@ void main() {
     test('an adaptive step lands on the drawn lattice', () {
       // Invariant 3's engine half: the step comes from pick.
       final s = GridScale.pick(DisplayUnit.meters, 0.137)!;
-      final p = snapToGrid(Vector2(8000, -230), s.minorMm ?? s.majorMm, page);
-      expect((p.x - page.originX) % (s.minorMm ?? s.majorMm), 0);
+      final step = s.minorMm ?? s.majorMm;
+      final p = snapToGrid(Vector2(8000, -230), step, page);
+      expect((p.x - page.originX) % step, 0);
+      expect((p.y - page.originY) % step, 0);
     });
 
     test('refuses a non-positive step', () {
