@@ -375,7 +375,7 @@ stack. Paints, in order:
    the half-pixel at the edge. Minors then majors as two
    `drawRawPoints(PointMode.lines, …)` calls; the list handed to `dart:ui`
    is **exactly `count · 4` long** — a `Float32List.sublistView` of a buffer
-   reused across frames and grown to the bound once — because
+   reused across frames, grown as needed and never shrunk — because
    `PointMode.lines` draws every pair in the list and a padded tail would
    draw segments through (0, 0). Screen coordinates, so no rebase is
    needed; the float32 hazard is a world-coordinate hazard.
@@ -404,7 +404,7 @@ major is drawn once — by the major pass — and not twice in two colours.
 after the minors' span** in the one reused buffer (Ruling 04-14): the
 plan's own code had both passes writing from index 0, so the major pass
 overwrote the bytes the minors' view still pointed at; `_lines(start:)`
-fixes it and the buffer is grown once to the sum of both bounds. **(3)**
+fixes it and the buffer is grown to the sum of both bounds. **(3)**
 The differential's camera is built so the sheet is on screen (Ruling
 04-13): as specified — translation uniform in ±5 000 px, independent of the
 sheet's position — the off-origin standard page fell outside the viewport
@@ -413,7 +413,13 @@ set and the check verified nothing about positions while still passing. The
 sweep now draws `tx = sx − s·wx`, `ty = sy + s·wy` with `(wx, wy)` uniform
 inside the sheet and `(sx, sy)` uniform in the viewport, and **asserts**
 that all 50 trials produce majors, 1 to 12 per trial. A seeded sweep over
-an off-origin fixture needs an anti-vacuity counter.
+an off-origin fixture needs an anti-vacuity counter. **(4)** The buffer is
+grown to *this pass's* need rather than to the decision's stated bound
+(review finding #10, 2026-09-22): it reaches the bound only when a frame
+actually asks for that many lines, and it is never shrunk, so the steady
+state is one allocation per high-water mark rather than one ever. The
+frame-path rule is unaffected — the growth is O(lines), not per entity, and
+a frame at the high-water mark allocates nothing.
 
 ### D9 — Codec: a registration hook on `decode` and `decodeString`
 
@@ -571,6 +577,23 @@ consumer, which the compound test's comment must say.
 Mutant M-04r: remove the skip in the index; `rebuildCount` grows on a page
 edit. M-04s: the dispatcher passes `Capability.geometry` regardless; same
 test. The tile cache gets the same test through its own handler.
+
+**Amended at execution (Plan 04, 2026-09-22, Ruling 04-19):** the sentence
+above — "a components-only compound skips, a compound with any geometry or
+structure member reconciles" — was true of the *intent* and false of the
+code, because `CompoundCommand.capability` is the highest-ranked member by
+**declaration order** and `Capability` declared `transform` before
+`components`. A compound of a `TransformNodeCommand` and a
+`SetComponentCommand` therefore summarised as `components`, and both the
+index and the tile cache skipped a move that had happened. The enum is
+reordered to `{ components, transform, geometry, structure }` and documents
+that its order is a ranking. The rule, stated so that it names the property
+it depends on: **a compound reconciles when any member is not
+`components`; the summary capability carries that because `components` is
+declared first.** Mutant M-04w reverts the order; the new case in
+`test/index/component_edit_skip_test.dart` — a moved group plus a page edit
+— goes red. Nothing serialises the ordinal (`DraftPermissions` is by name),
+so the order is free to express the ranking.
 
 ---
 

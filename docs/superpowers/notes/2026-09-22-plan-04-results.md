@@ -7,8 +7,10 @@
 **Branch:** `plan-04/page-grid-rulers`, worktree
 `.claude/worktrees/plan-04-page-grid-rulers`, cut from `main` at `1e5001d`.
 **Twelve tasks: Tasks 1–11 at `39ff5f2..563fdd4`; Task 12 (the gate lines,
-this note, the spec amendments, STATUS and the roadmap) on top. NOT merged —
-the merge is the human's decision, after the look this note leaves OWED.**
+this note, the spec amendments, STATUS and the roadmap) on top at `1618111`,
+and a **final fix wave** — every open finding of the whole-branch review,
+items A1–A9 (code) and B1–B5 (docs) — on top of that. NOT merged — the
+merge is the human's decision, after the look this note leaves OWED.**
 **Ledger (per-task briefs, reports, review diffs, every ruling):**
 `.superpowers/sdd/2026-09-22-page-grid-rulers/`.
 
@@ -18,13 +20,14 @@ the merge is the human's decision, after the look this note leaves OWED.**
 
 ### The four gate lines, pasted
 
-Run in this task, from each package directory, on the tree at `563fdd4`.
+**Re-run in full after the final fix wave** (items A1–A9), on the tree that
+commit leaves behind; these summaries replace the ones Task 12 recorded.
 Every summary line below is what the command printed, with its exit code.
 
 **`packages/jet_cad_2d`** — `CI=true dart test`:
 
 ```
-00:05 +860: All tests passed!
+00:04 +862: All tests passed!
 ```
 
 Exit 0. `dart analyze`:
@@ -35,12 +38,12 @@ No issues found!
 ```
 
 Exit 0. `dart format --output=none --set-exit-if-changed .`: `Formatted 125
-files (0 changed) in 0.39 seconds.` Exit 0.
+files (0 changed) in 0.29 seconds.` Exit 0.
 
 **`packages/jet_cad_2d_flutter`** — `CI=true flutter test`:
 
 ```
-00:29 +795 ~1 -5: Some tests failed.
+00:30 +797 ~1 -5: Some tests failed.
 
 Failing tests:
   .../test/golden/text_ladder_golden_test.dart: text ladder rung 1 (RenderBackend.canvas)
@@ -50,7 +53,7 @@ Failing tests:
   .../test/golden/text_ladder_golden_test.dart: text ladder rung 5 (RenderBackend.canvas)
 ```
 
-Exit 1 — **795 pass, 1 pre-existing skip, and exactly the same five
+Exit 1 — **797 pass, 1 pre-existing skip, and exactly the same five
 pre-existing `text_ladder_golden_test.dart` failures named above (`text
 ladder rung 1..5`, `RenderBackend.canvas`) and nothing else.** The Plan 01
 baseline ruling stands, carried through Plan 02: the goldens were recorded
@@ -59,11 +62,11 @@ this plan introduced. `flutter analyze`:
 
 ```
 Analyzing jet_cad_2d_flutter...
-No issues found! (ran in 3.0s)
+No issues found! (ran in 3.2s)
 ```
 
 Exit 0. `dart format --output=none --set-exit-if-changed .`: `Formatted 148
-files (0 changed) in 0.33 seconds.` Exit 0.
+files (0 changed) in 0.37 seconds.` Exit 0.
 
 **`apps/dev_harness_2d`** — `CI=true flutter test --concurrency=1`:
 
@@ -78,20 +81,20 @@ analyze`:
 
 ```
 Analyzing dev_harness_2d...
-No issues found! (ran in 3.2s)
+No issues found! (ran in 1.7s)
 ```
 
 Exit 0. `dart format --output=none --set-exit-if-changed .`: `Formatted 22
-files (0 changed) in 0.07 seconds.` Exit 0.
+files (0 changed) in 0.08 seconds.` Exit 0.
 
 **`apps/floor_planner`** — `CI=true flutter test`:
 
 ```
-00:02 +21: All tests passed!
+00:03 +21: All tests passed!
 ```
 
 Exit 0 — **21 tests** (13 at the branch point, plus Task 9's four and Task
-10's four). `flutter analyze`:
+10's four); the fix wave renamed one of them (A9) and added none. `flutter analyze`:
 
 ```
 Analyzing floor_planner...
@@ -114,7 +117,7 @@ Wasm dry run succeeded. Consider building and testing your application with the 
 Use --no-wasm-dry-run to disable these warnings.
 Expected to find fonts for (MaterialIcons, packages/cupertino_icons/CupertinoIcons), but found (MaterialIcons). This usually means you are referring to font families in an IconData class but not including them in the assets section of your pubspec.yaml, are missing the package that would include them, or are missing "uses-material-design: true".
 Font asset "MaterialIcons-Regular.otf" was tree-shaken, reducing it from 1645184 to 7736 bytes (99.5% reduction). Tree-shaking can be disabled by providing the --no-tree-shake-icons flag when building your app.
-Compiling lib/main.dart for the Web...                             31.8s
+Compiling lib/main.dart for the Web...                             24.7s
 ✓ Built build/web
 ```
 
@@ -124,7 +127,16 @@ fails the build.
 
 `git status --short` was clean before Step 1, after every gate line and
 after both builds: **no `analysis_options.yaml` was rewritten at any point
-in this task, so none needed restoring.**
+in this task or in the final fix wave, so none needed restoring.** After the
+wave's gate run the short status showed only the wave's own source files,
+and nothing after either of its two commits.
+
+The counts moved as the wave's items predicted: `jet_cad_2d` 860 → **862**
+(A1's mixed-compound case and A6's ladder-immutability case),
+`jet_cad_2d_flutter` 795 → **797** (A1's tile-cache twin and A7's
+empty-`touched` case — A2, A3 and A4 rewrote existing tests rather than
+adding any), `dev_harness_2d` **82** unchanged, `floor_planner` **21**
+unchanged.
 
 The startup clamp line, printed again on this run by
 `startup_plan_test.dart`'s `the clamp constants bracket the fitted scale by
@@ -144,13 +156,13 @@ The five `text_ladder_golden_test.dart` failures (`text ladder rung 1..5`,
 recorded and Plan 02 recorded again — measured once more in this task,
 identically named, nothing added and nothing healed. This plan's
 `jet_cad_2d_flutter` bar is therefore "795 pass, 1 skip, those same five
-failures and no other," as Plan 02's was "769 pass, 1 skip, those same
-five."
+failures and no other" — 797 after the final fix wave — as Plan 02's was
+"769 pass, 1 skip, those same five."
 
 ### Mutation summary
 
-**Twenty-two named mutants (M-04a … M-04v) plus the tile-cache twin of
-M-04r: 23 fired, 23 killed, 0 survived, 0 declared equivalent.** The spec
+**Twenty-three named mutants (M-04a … M-04w) plus the tile-cache twin of
+M-04r: 24 fired, 24 killed, 0 survived, 0 declared equivalent.** The spec
 claimed no equivalence and none was claimed at execution. Each mutant was
 a one-line edit to a production file that was `cp`-backed up first and
 restored from that copy afterwards, confirmed with `diff -q`; no
@@ -167,7 +179,15 @@ reach the null-minor branch from any rung of either ladder; **M-04q** as
 first written (`if (false)`) was a *compile* failure, not a behavioural
 kill — Ruling 04-18 re-fired it as a compiling mutant that drops the floor
 from the ladder's values, and the first attempt is **not counted** in the
-23.
+24.
+
+**M-04w is the final fix wave's own** (Ruling 04-19): the `Capability` enum
+order reverted so that `transform` is declared before `components` again.
+It is the mutant the branch shipped with until the whole-branch review
+found it, and it survived every one of the first 23 checks because no test
+built a compound of a move and a component edit. The new case in
+`test/index/component_edit_skip_test.dart` — "a compound with a transform
+member and a page edit still reconciles" — kills it.
 
 Both allocation gates are green and unchanged — `query_allocation_test.dart`
 (5 tests) and `paint_allocation_test.dart` (3 tests), transcripts pasted in
@@ -213,15 +233,15 @@ The spec's sixteen criteria, each with its witness.
 | 4 | Ruler tick positions and spacing are correct at a camera that is both zoomed and panned, over an off-origin page (M-04a, M-04b) | **PASS** | `ruler_painter_test.dart`: `major ticks sit at worldToScreen of the lattice, labelled in metres`, `minor ticks are shorter and unlabelled` — the standard fixture (page at (7350, −1230), camera at scale 0.137 translated by (−611.5, 412.25)); M-04a and M-04b both fired red on it |
 | 5 | The grid picks the documented ladder step at the documented thresholds; minors appear only at ≥ 8 px; nothing at all past the ladder's top (M-04c, M-04g) | **PASS** | `grid_scale_test.dart`: `metric: the smallest ladder step at or above 64 px`, `a mantissa-2 major divides by 4`, `minor is null under the minor threshold`, `null past the top of the ladder, and for a bad scale`; `page_chrome_painter_test.dart`: `minors that coincide with a major are not drawn twice` |
 | 6 | Line count is bounded over the intersection range at `kMinScale` and `kMaxScale`; breaks vanish below a 16 px sheet (M-04m, M-04t) | **PASS** | `page_chrome_painter_test.dart`: `bounded at kMinScale, kMaxScale, and the intersection is the range`, `page breaks tile outward and vanish under a 16 px sheet` |
-| 7 | Grid, rulers, sheet and breaks add zero entities; a page edit, its undo and its redo cause zero index rebuilds and zero tile drops (M-04r, M-04s) | **PASS** | `component_edit_skip_test.dart`: `a components-only edit on the root reconciles nothing`, `the change carries the capability of the command that made it`, `a compound with one geometry member still reconciles`, `the default capability is geometry, so old construction sites keep their meaning`; `tile_invalidation_test.dart`: `a components-only change drops no tile`; `page_chrome_painter_test.dart`: `a chrome toggle through the log adds no entity and rebuilds no index` |
-| 8 | `query_allocation_test.dart` and `paint_allocation_test.dart` pass unchanged | **PASS** | both green and unedited — transcripts in the mutation log's "Extra checks" section, and both are inside the 860 / 795 gate lines above |
+| 7 | Grid, rulers, sheet and breaks add zero entities; a page edit, its undo and its redo cause zero index rebuilds and zero tile drops (M-04r, M-04s) | **PASS** | `component_edit_skip_test.dart`: `a components-only edit on the root reconciles nothing`, `the change carries the capability of the command that made it`, `a compound with one geometry member still reconciles`, **`a compound with a transform member and a page edit still reconciles`** (the final fix wave's A1, Ruling 04-19 — the case that showed `components` had to rank lowest), `the default capability is geometry, so old construction sites keep their meaning`; `tile_invalidation_test.dart`: `a components-only change drops no tile`, **`a transform change still invalidates`**; `page_chrome_painter_test.dart`: `a chrome toggle through the log adds no entity and rebuilds no index` |
+| 8 | `query_allocation_test.dart` and `paint_allocation_test.dart` pass unchanged | **PASS** | both green and unedited — transcripts in the mutation log's "Extra checks" section, and both are inside the 862 / 797 gate lines above |
 | 9 | An adaptively snapped point inside the sheet lies on a drawn grid line; snap is nearest, anchored at the sheet corner, exact at `gridStepMm` (M-04f, M-04h) | **PASS** | `grid_scale_test.dart`: `nearest, anchored at the sheet origin, negative side too`, `an adaptive step lands on the drawn lattice`, `refuses a non-positive step`, `a floor is exact when it fits and the ladder climbs from it`; `page_chrome_painter_test.dart`: `major lines sit where the oracle says, anchored at the sheet corner` (M-04f) |
 | 10 | Labels are in the display unit (M-04i), the left ruler reads upward (M-04p) | **PASS** | `grid_scale_test.dart`: `formatLength per unit`; `ruler_painter_test.dart`: `the left ruler reads upward`, `the corner shows the unit symbol`, `past the ladder top, only the bar and the pointer` |
 | 11 | The camera fits the page at startup at the drawing area's size; 100 % ⇔ `scale = pixelsPerPaperMm / D` (M-04k, M-04n) | **PASS**, with Ruling 04-16 | `page_geometry_test.dart`: `100 % is pixelsPerPaperMm / D`, `the sheet rect is origin plus effective size times D`, `page space is world minus origin, and back`; `page_fit_test.dart`: `fitToPage fits the sheet rect, not the extents`; `planner_shell_test.dart`: `the camera is fitted to the page at the drawing area's size`, `a resize after the first layout does not re-fit the camera`, `the zoom text reads the scale and the fitted zoom`. **The fit lands in a post-frame callback (Ruling 04-16): the first frame paints at the shell's nominal 1440×900 page fit, the second at the real drawing-area size. It still happens exactly once.** |
 | 12 | The differential check passes for 50 seeded random cameras against an oracle that shares no code with `pick` | **PASS** | `page_chrome_painter_test.dart`: `differential: fifty seeded cameras agree with the literal-ladder oracle` — seed `0x5EED0004`, 50 trials, 1..12 majors each, pasted above (Ruling 04-13) |
 | 13 | The panel drives its eight controls with one command each; cmd/ctrl+Z reverts the control (M-04o) | **PASS** | `page_panel_test.dart`: `each toggle is exactly one command, and undo reverts the control`, `preset, orientation, unit and swatch each issue one command`, `the scale field commits on submit, refuses junk`, `a custom size shows Custom` |
-| 14 | Every named mutant (M-04a…v) fired, killed or declared equivalent with a reason, in `docs/superpowers/notes/plan-04-mutation-log.md` | **PASS** | [plan-04-mutation-log.md](plan-04-mutation-log.md) — 23 fired (22 named plus the tile-cache twin of M-04r), 23 killed, 0 survived, 0 equivalent |
-| 15 | The four gate lines — `CI=true` on every test command — are green, with the one standing exception carried from Plan 02 and no other; `analysis_options.yaml` untouched | **PASS with the one recorded exception** | pasted above: `jet_cad_2d` **860**; `jet_cad_2d_flutter` **795 pass, 1 skip, the same five `text_ladder_golden_test.dart` failures and nothing else**; `dev_harness_2d` **82**; `floor_planner` **21**, and `flutter build macos --release` and `flutter build web --release` both `✓ Built`. Every `analyze` and `format` exits 0; `git status --short` clean throughout, no `analysis_options.yaml` rewritten |
+| 14 | Every named mutant (M-04a…v) fired, killed or declared equivalent with a reason, in `docs/superpowers/notes/plan-04-mutation-log.md` | **PASS** | [plan-04-mutation-log.md](plan-04-mutation-log.md) — **24 fired** (23 named, M-04a…w, plus the tile-cache twin of M-04r), 24 killed, 0 survived, 0 equivalent. M-04w is the final fix wave's, added beyond the spec's list |
+| 15 | The four gate lines — `CI=true` on every test command — are green, with the one standing exception carried from Plan 02 and no other; `analysis_options.yaml` untouched | **PASS with the one recorded exception** | re-run in full after the final fix wave and pasted above: `jet_cad_2d` **862**; `jet_cad_2d_flutter` **797 pass, 1 skip, the same five `text_ladder_golden_test.dart` failures and nothing else**; `dev_harness_2d` **82**; `floor_planner` **21**, and `flutter build macos --release` and `flutter build web --release` both `✓ Built`. Every `analyze` and `format` exits 0; `git status --short` clean throughout, no `analysis_options.yaml` rewritten |
 | 16 | A human looked, on macOS, in Chrome and in Firefox from `build/web` | **OWED — not looked at; the human looks after this branch is presented** | the look section below, itemised per platform |
 
 **15 of 16 PASS.** No criterion is a MISS. Criterion 16 is **OWED**,
@@ -338,10 +358,11 @@ one sentence and the file it lives in.
 
 - `page_component.dart`'s `toString` prints `custom` where `SheetSize.name`
   prints `Custom` — cosmetic, two spellings of the same state (Task 1).
-- `grid_scale.dart`'s `_metricLadder` and `_imperialLadder` are `static
-  final` **mutable** lists handed straight back by `ladderFor`, so a caller
-  could scribble on the shared ladder; wrap them in `List.unmodifiable`
-  (Task 4).
+- ~~`grid_scale.dart`'s `_metricLadder` and `_imperialLadder` are `static
+  final` **mutable** lists handed straight back by `ladderFor`~~ — **taken
+  by the final fix wave (A6)**: both, and `ladderFor`'s floored list, are
+  now `List.unmodifiable`, pinned by `grid_scale_test.dart`'s `the ladder
+  is not writable by its callers` (Task 4).
 - `page_chrome_painter_test.dart`'s `SpyCanvas` records `TypedData`
   arguments **by reference**, so a test that inspected a recorded list
   after a second paint would read the later frame's bytes; copy the
@@ -371,6 +392,42 @@ one sentence and the file it lives in.
   `next == page`, so re-selecting the already-active preset, unit,
   orientation or swatch creates a no-op undo entry; guard it with an
   equality check (Task 10).
+
+**Left open by the final fix wave, with the reason each was not taken:**
+
+- **The floored ladder allocates per `pick`.** `ladderFor(unit, floorMm:)`
+  builds a fresh 24-rung list on every call, and `pick` runs per frame.
+  Unreachable from the app today — `gridStepMm` has no editor, so the
+  floor is always null and the cached ladders are what `pick` reads. It
+  becomes a frame-path item the day a grid-step field lands.
+- **The grid buffer grows to the pass's need, not to the decision's
+  stated bound.** Spec D8 said "grown to the bound once"; the code grows
+  it to what a frame actually asks for and never shrinks it, so the steady
+  state is one allocation per high-water mark. The spec sentence is
+  amended rather than the code (B1, review finding #10): the growth is
+  O(lines) and a frame at the high-water mark allocates nothing, so the
+  frame-path rule is intact either way.
+- **Metre labels collapse to `0 m` below a 0.5 mm major.** `formatLength`
+  rounds to one decimal in metres, so a 0.1 mm major would label every
+  tick `0 m`. Unreachable under `kMaxScale = 100`: the finest metric rung
+  the thresholds can select is far above that.
+- **`fitToPage`'s result bypasses the camera clamp.** Pre-existing from
+  Plan 01 and not this plan's to fix; `startup_plan_test` still brackets
+  `kMinScale`/`kMaxScale` against the *extents* fit, as noted above.
+- **The scale field resets on any page change.** `PagePanel`'s scale text
+  field re-seeds from the notifier, so an unrelated page edit while the
+  field is mid-edit discards what was typed. One `TextEditingController`
+  lifecycle question, not a correctness one.
+- **A future `open file` must pass `registerComponents:
+  PageComponent.register` to `decode`/`decodeString`.** Registering the
+  type *after* the decode does not rescue a page that has already landed
+  as unknown bytes — D9's second test says exactly that — and on that day
+  `main.dart`'s `get<PageComponent>(root)!` needs a null-safe path, because
+  a document opened without the hook has no typed page on its root.
+- **`OutlineCache._onChange` still rebuilds on every `DocChange`**, page
+  edits included. It is the obvious second consumer of `capability` — the
+  same one-line skip the index and the tile cache now have — and the right
+  moment to add it is when 06 asks, not on this branch.
 
 **Rulings a reader must know:**
 
@@ -419,6 +476,16 @@ one sentence and the file it lives in.
   mutant that compiles — the floor dropped from the ladder's values — and
   went red on `a floor is exact when it fits and the ladder climbs from
   it`.
+- **`components` is declared first in `Capability`, and the order is a
+  ranking (Ruling 04-19).** `CompoundCommand.capability` summarises a
+  compound as its highest-ranked member, so with `transform` declared
+  first a compound of a move and a page edit summarised as `components`
+  and **both the index and the tile cache skipped a move that happened**.
+  The whole-branch review found it; the enum is reordered to
+  `{ components, transform, geometry, structure }`, the rule is written on
+  the enum, and M-04w — the order reverted — is killed by the new
+  mixed-compound case. Nothing serialises the ordinal (`DraftPermissions`
+  is by name), so the reorder is behaviour-free apart from the fix.
 - **A comment-only fix round is verified by the controller reading the
   diff (Ruling 04-17)**, with no re-review seat; Task 9's fix round was one.
 - **Two accepted deviations in the app** (Task 10): the preset dropdown
@@ -448,12 +515,15 @@ nothing original was rewritten:
   1/48, 1/24, 1/12, 1/6, 1/2}` so a foot rung ÷ 4 is bit-equal to the
   quarter rung — the "× 25.4" wording is superseded) and Ruling 04-12
   (every imperial step divides by 4, floor or not).
-- **D8** gains three: Ruling 04-3 (a minor whose index is a multiple of the
+- **D8** gains four: Ruling 04-3 (a minor whose index is a multiple of the
   divisor is skipped in the minor pass), Ruling 04-14 (the major pass
   writes after the minors' span in the one buffer, so the two
-  `sublistView`s are disjoint) and Ruling 04-13 (the seeded sweep places
+  `sublistView`s are disjoint), Ruling 04-13 (the seeded sweep places
   the sheet on screen by construction; the ±5 000 px translation was
-  vacuous in all fifty trials).
+  vacuous in all fifty trials) and, from the final fix wave, the buffer
+  sentence: the buffer is **grown as needed and never shrunk**, not "grown
+  to the bound once" — the code was right and the spec's wording was not
+  (review finding #10).
 - **D10** gains Ruling 04-2: the shell owns `PageNotifier`.
 - **D11** gains Ruling 04-15 (the vertical bar iterates its lattice from
   the top of the bar downward, so the debug tick list is in bar order) and
@@ -465,6 +535,15 @@ nothing original was rewritten:
   `minorMinPixels`; M-04q is killed by dropping the floor from the
   ladder's values, the `if (false)` form being a compile failure rather
   than a behavioural kill (Ruling 04-18).
+- **D13** gains Ruling 04-19, from the final fix wave: its own sentence "a
+  components-only compound skips, a compound with any geometry or
+  structure member reconciles" was true of the intent and false of the
+  code, because the summary capability is the highest-ranked member by
+  **declaration order** and `components` was declared second. The rule is
+  restated so that it names what it depends on — "a compound reconciles
+  when any member is not `components`; the summary capability carries that
+  because `components` is declared first" — and M-04w is the mutant that
+  holds the order in place.
 
 ---
 
@@ -476,7 +555,14 @@ nothing original was rewritten:
 - `STATUS.md` — a Plan 04 section, the header's "Last updated" sentence and
   the "Resume here" section.
 - `roadmap/04-page-grid-rulers.md` — the status line.
-- `roadmap/00-README.md` — the 04 row in the execution-status table.
+- `roadmap/00-README.md` — the 04 row in the execution-status table, and
+  (final fix wave) the "01 has a spec" sentence, now that 01, 02 and 04 are
+  executed.
 
-No code was touched. The mutation log, the plan and the review notes are
-unchanged.
+Task 12 itself touched no code. **The final fix wave on top of it touched
+nine source files** — `command.dart`, `commands.dart`, `grid_scale.dart`
+and `spatial_index.dart` in the engine; `page_notifier.dart`,
+`tile_cache.dart` and the barrel in the render layer; plus six test files
+and `planner_shell_test.dart`'s one renamed test — and then this file, the
+spec, `STATUS.md`, the mutation log and the roadmap. The plan and the
+review notes are unchanged.

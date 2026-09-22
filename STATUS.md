@@ -2,12 +2,17 @@
 
 **Last updated:** 2026-09-22 — **Plan 04 (page, grid and rulers) is
 EXECUTED on `plan-04/page-grid-rulers` and NOT merged.** Twelve tasks,
-`39ff5f2..563fdd4` plus this commit, cut from `main` at `1e5001d`; the exit
+`39ff5f2..563fdd4` plus Task 12 at `1618111`, and then a **final fix wave**
+(every finding of the whole-branch review: A1–A9 code at `1fe1fcc`, B1–B5
+docs in this commit), cut from `main` at `1e5001d`; the exit
 gate is **15 of 16**, and the sixteenth — a human's look, on macOS, in
 Chrome and in Firefox from `build/web` — is **OWED: not looked at; the human
 looks after this branch is presented**. Nothing was simulated to fill it in.
-**The merge is the human's decision.** 23 mutants fired, 23 killed, 0
-survived. See [Plan 04](#plan-04--page-grid-and-rulers-executed-on-plan-04page-grid-rulers-not-merged)
+**The merge is the human's decision.** 24 mutants fired, 24 killed, 0
+survived — the last of them, M-04w, is the wave's own: **`Capability`
+declared `transform` before `components`, so a compound that moved a node
+*and* edited the page summarised as `components` and both the spatial index
+and the tile cache skipped a move that had happened** (Ruling 04-19). See [Plan 04](#plan-04--page-grid-and-rulers-executed-on-plan-04page-grid-rulers-not-merged)
 and [Resume here](#resume-here). **Plan 02 (interaction core) is MERGED at
 `8c62db3`**, `--no-ff` on the human's decision, and its exit gate is now
 **15 of 15**: the human looked on macOS, in Chrome and in Firefox the same
@@ -101,22 +106,23 @@ visibility flags; a zoom-adaptive grid on that sheet; rulers zeroed at the
 sheet's corner; dashed page breaks; a panel that edits all of it one undo
 step at a time; and a `1:50 · 100%` zoom readout in the top bar. Twelve
 tasks, `39ff5f2..563fdd4` (Tasks 1–11; Task 12, the gate lines, the results
-note and the spec/STATUS/roadmap updates, is this commit) — on branch
+note and the spec/STATUS/roadmap updates, at `1618111`), and a **final fix
+wave** on top — on branch
 `plan-04/page-grid-rulers`, cut from `main` at `1e5001d`. **NOT merged: the
 merge is the human's decision, and the exit gate stands at 15 of 16 with
 the sixteenth — a human's look, on macOS, in Chrome and in Firefox from
 `build/web` — OWED.** Branch and worktree are alive; the ledger is archived
 onto the branch before any merge, never deleted. Spec:
 [2026-09-22-page-grid-rulers-design.md](docs/superpowers/specs/2026-09-22-page-grid-rulers-design.md)
-(revision 2, amended at execution 2026-09-22 — seven amendments at D4, D7,
-D8, D10, D11, D12 and the Testing section, none rewriting the original
-text). Plan:
+(revision 2, amended at execution 2026-09-22 — nine amendments at D4, D7,
+D8 (two), D10, D11, D12, D13 and the Testing section, none rewriting the
+original text; D8's second and D13's are the final fix wave's). Plan:
 [2026-09-22-page-grid-rulers.md](docs/superpowers/plans/2026-09-22-page-grid-rulers.md).
 Results:
 [2026-09-22-plan-04-results.md](docs/superpowers/notes/2026-09-22-plan-04-results.md).
 Mutation log:
 [plan-04-mutation-log.md](docs/superpowers/notes/plan-04-mutation-log.md) —
-twenty-two named mutants plus the tile-cache twin of M-04r, **23 fired, 23
+twenty-three named mutants plus the tile-cache twin of M-04r, **24 fired, 24
 killed, 0 survived, 0 equivalent.**
 
 **Delivered:** `PageComponent`, `page_geometry.dart` (`sheetWorldRect`,
@@ -147,9 +153,19 @@ untouched; `TileCache` changes by exactly the D13 skip.
 | 9 | app: startup page, fit to page, the tree, the zoom text (+ comment fix `9f08c10`) | `9f08c10` |
 | 10 | `PagePanel`: one command per control | `39c88bd` |
 | 11 | the mutation sweep and its log (+ M-04q re-fired at `563fdd4`) | `563fdd4` |
-| 12 | gate lines, results note, spec amendments, STATUS, roadmap | this commit |
+| 12 | gate lines, results note, spec amendments, STATUS, roadmap | `1618111` |
+| — | **final fix wave**: every finding of the whole-branch review — A1–A9 (`components` ranked lowest in `Capability` so a mixed compound reconciles, the circular ruler-frame assertion replaced, the vacuous page-notifier load and dispose assertions made real, one literal label in the ruler painter test, two stale doc comments, the ladders made unmodifiable, an empty `touched` read as "everything changed", the D13 skip's placement documented, a test rename and the barrel's export order) and B1–B5 (the spec, this file, the results note, the mutation log, the roadmap) | `1fe1fcc` + this commit |
 
-**Five rulings a reader must know.** **The seeded differential was vacuous
+**Six rulings a reader must know.** **`components` is declared first in
+`Capability`, and the declaration order is a ranking** (Ruling 04-19):
+`CompoundCommand.capability` summarises a compound as its highest-ranked
+member, so with `transform` declared first, a compound of a
+`TransformNodeCommand` and a `SetComponentCommand` summarised as
+`components` — and the D13 skip then threw away a move that had really
+happened, in both the spatial index and the tile cache. The whole-branch
+review found it; the final fix wave reordered the enum, wrote the rule on
+it, and pinned it with M-04w and a mixed-compound test in each layer.
+**The seeded differential was vacuous
 as the spec wrote it** (Ruling 04-13): a translation uniform in ±5 000 px,
 independent of the sheet's position, put the off-origin standard page off
 screen in **all fifty trials**, so every trial compared the empty set to the
@@ -168,18 +184,19 @@ foot** (Ruling 04-11), `304.8 × {1/192, …, 1/2}` rather than the spec's
 not remove the page. **`pick` takes a `minorMinPixels` parameter** (Ruling
 04-7) because the shipped 64/8 threshold pair cannot reach the null-minor
 branch from any ladder rung, which left M-04g with no reachable kill. Full
-account, plus the ten deferred minors: the results note's "Debt and
-rulings" section.
+account, plus the deferred minors (one of which, the mutable ladders, the
+fix wave took) and the seven items the wave deliberately left open: the
+results note's "Debt and rulings" section.
 
 ### What Plan 04 measured
 
 | quantity | value |
 |---|---|
-| `packages/jet_cad_2d` | **860** pass (`00:05 +860: All tests passed!`, exit 0), analyze/format clean |
-| `packages/jet_cad_2d_flutter` | **795** pass, 1 skip, the same five pre-existing `text_ladder_golden_test.dart` failures Plan 01 recorded (`00:29 +795 ~1 -5: Some tests failed.`, exit 1) — analyze/format clean |
+| `packages/jet_cad_2d` | **862** pass (`00:04 +862: All tests passed!`, exit 0), analyze/format clean — re-run after the final fix wave |
+| `packages/jet_cad_2d_flutter` | **797** pass, 1 skip, the same five pre-existing `text_ladder_golden_test.dart` failures Plan 01 recorded (`00:30 +797 ~1 -5: Some tests failed.`, exit 1) — analyze/format clean |
 | `apps/dev_harness_2d` | **82** (`00:29 +82: All tests passed!`, exit 0) — unchanged from the branch point, the harness is untouched; analyze/format clean |
-| `apps/floor_planner` | **21** tests (`00:02 +21: All tests passed!`, exit 0) — 13 at the branch point plus four from Task 9 and four from Task 10; `flutter build macos --release` and `flutter build web --release` both `✓ Built` |
-| mutations | **23 fired, 23 killed**, **0 survived**, **0 equivalent** (22 named M-04a…v plus the tile-cache twin of M-04r; M-04q's first, non-compiling attempt is not counted — Ruling 04-18) |
+| `apps/floor_planner` | **21** tests (`00:03 +21: All tests passed!`, exit 0) — 13 at the branch point plus four from Task 9 and four from Task 10; `flutter build macos --release` and `flutter build web --release` both `✓ Built` |
+| mutations | **24 fired, 24 killed**, **0 survived**, **0 equivalent** (23 named M-04a…w plus the tile-cache twin of M-04r; M-04w is the final fix wave's, and M-04q's first, non-compiling attempt is not counted — Ruling 04-18) |
 | the differential (criterion 12) | seed **`0x5EED0004`**, **50 trials**, **1..12 majors each**, `SpyCanvas`-recorded major x positions against a literal-ladder oracle sharing no code with `pick`, to 1e−6 px |
 | the two allocation invariants | `query_allocation_test.dart` and `paint_allocation_test.dart` both green, unchanged |
 | the look | **eight items per platform, all OWED** — macOS, Chrome, Firefox from `build/web`; not looked at, nothing simulated |
@@ -1251,12 +1268,17 @@ and
 **Sub-project 04 (page, grid and rulers) is executed and awaits the human's
 look and the merge decision — this is the live front.** Its spec,
 [2026-09-22-page-grid-rulers-design.md](docs/superpowers/specs/2026-09-22-page-grid-rulers-design.md)
-(revision 2, amended at execution in seven places, none rewriting the
+(revision 2, amended at execution in nine places, none rewriting the
 original text), and plan,
 [2026-09-22-page-grid-rulers.md](docs/superpowers/plans/2026-09-22-page-grid-rulers.md),
 were both written 2026-09-22; **all twelve tasks ran on
 `plan-04/page-grid-rulers`, cut from `main` at `1e5001d`, through `563fdd4`
-plus the results-note task (this commit), and the branch is NOT merged.**
+plus the results-note task at `1618111` and a final fix wave (`1fe1fcc` +
+this commit) that closed every finding of the whole-branch review — the
+load-bearing one being Ruling 04-19, `components` ranked lowest in
+`Capability` so a compound that moves a node and edits the page is no
+longer skipped by the index and the tile cache. The branch is NOT
+merged.**
 The exit gate is **15 of 16**: criterion 16 (a human looks, on macOS, in
 Chrome and in Firefox from `build/web`, at the sheet under the plan, the
 grid at three zoom levels, the ruler zero at the sheet corner with labels in

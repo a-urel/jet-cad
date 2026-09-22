@@ -1,9 +1,10 @@
 # Plan 04 mutation log
 
 Branch: `plan-04/page-grid-rulers`
-HEAD: `39c88bd5a5ea34751a25fd0c5088864f977a4c4e`
+HEAD: `39c88bd5a5ea34751a25fd0c5088864f977a4c4e`; M-04w fired on the final
+fix wave's code commit (`fix(engine,render): components ranks lowest…`).
 Date: 2026-09-22
-Count: twenty-two named mutants (M-04a…v) plus the tile-cache twin of M-04r — 23 fired, 0 survived.
+Count: twenty-three named mutants (M-04a…w) plus the tile-cache twin of M-04r — 24 fired, 0 survived.
 
 Discipline: each production file was `cp`-backed up to
 `.superpowers/sdd/2026-09-22-page-grid-rulers/mutation-backups/` before the
@@ -334,11 +335,27 @@ Expected: <130>
 `00:00 +11 -1: Some tests failed.`
 restored: diff clean
 
+### M-04w — Capability enum order reverted (transform before components)
+file: `packages/jet_cad_2d/lib/src/document/command.dart:24-29`, the enum's first two members swapped back — `{ components, transform, geometry, structure }` → `{ transform, components, geometry, structure }`
+why: Ruling 04-19. `CompoundCommand.capability` is the highest-ranked member by declaration order, so with `transform` first a compound of a `TransformNodeCommand` and a `SetComponentCommand` summarises as `components`, and both `SpatialIndex._onChange` and `TileCache.applyChange` skip it (spec D13) — a move that happened, not reconciled and not invalidated. This is the state the branch shipped in until the whole-branch review found it; it survived the first 23 mutants because no test built a mixed compound.
+test: `CI=true dart test test/index/component_edit_skip_test.dart`
+result: FIRED — `a compound with a transform member and a page edit still reconciles` [E]
+```
+Expected: a value greater than <1>
+  Actual: <1>
+   Which: is not a value greater than <1>
+
+package:matcher                                 expect
+test/index/component_edit_skip_test.dart 119:5  main.<fn>
+```
+`00:00 +4 -1: Some tests failed.` EXIT: 1
+restored: `cp` from the backup, `diff -q` clean, short status clean
+
 ---
 
 ## Tally
 
-23 fired (22 named mutants M-04a…v plus the tile-cache twin of M-04r). 0 survived. All anchors from `task-11-anchors.md` were found exactly as given, at the line numbers stated (re-grepped before each edit; no drift since 9f08c10).
+24 fired (23 named mutants M-04a…w plus the tile-cache twin of M-04r). 0 survived. All anchors from `task-11-anchors.md` were found exactly as given, at the line numbers stated (re-grepped before each edit; no drift since 9f08c10).
 
 ## Extra checks
 
