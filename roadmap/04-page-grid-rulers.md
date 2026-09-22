@@ -1,6 +1,7 @@
 # 04 — Page, grid and rulers
 
-**Status:** not started
+**Status:** executed on `plan-04/page-grid-rulers` at `563fdd4`
+(2026-09-22), not merged; exit gate 15 of 16, the look owed
 **Depends on:** 01
 **Blocks:** 13
 **Size:** M

@@ -264,6 +264,18 @@ the target rectangle differs, and D11 says which size). Letter landscape at
 default, and Letter is one panel click away as a demonstration of page
 breaks.
 
+**Amended at execution (Plan 04, 2026-09-22):** the one-time fit is
+deferred to a post-frame callback (Ruling 04-16). Assigning `camera.value`
+during `PlannerView`'s `LayoutBuilder` build notifies the zoom text's
+`ListenableBuilder` — a sibling widget — and Flutter asserts, so the fit
+runs after the first frame instead of during its layout. **The first frame
+therefore paints at the shell's nominal `fitToPage(page, 1440×900)` and the
+second at the real drawing-area size**; Ruling 01-2's intent (fit to the
+real size, once) holds from frame two, and the latch still makes the fit
+happen exactly once. The alternative — a silent camera set with a deferred
+notify — needs a `CameraController` API and its own ruling, and is not in
+04.
+
 ### D5 — Rulers zeroed at the page corner (human)
 
 The rulers read `pageWorldOf(world)` in the display unit: zero at the sheet's
@@ -329,6 +341,23 @@ Formatting, `formatLength(double mm, DisplayUnit unit) → String`:
 
 Negative values carry a leading minus; zero is `0 m` / `0'-0"`.
 
+**Amended at execution (Plan 04, 2026-09-22):** three changes to this
+decision. **(1)** `pick` takes a `minorMinPixels` parameter defaulting to
+`kMinorMinPixels` (Ruling 04-7): with the shipped 64/8 threshold pair, no
+rung of either ladder can reach the null-minor branch — a major at 64 px
+divided by 4 is 16 px and divided by 5 is 12.8 px, both above 8 — so mutant
+M-04g had no reachable kill until the threshold became a parameter the test
+can raise. **(2)** The imperial inch rungs are written as fractions of a
+foot, `304.8 × {1/192, 1/96, 1/48, 1/24, 1/12, 1/6, 1/2}`, **not** as
+`{1/16, 1/8, 1/4, 1/2, 1, 2, 6} × 25.4` (Ruling 04-11): the two forms give
+the same lengths to 1e−13, but only the first makes a foot rung divided by
+4 **bit-equal** to the quarter rung, which is what an exact `==` comparison
+downstream needs; an exact `==` test pins it, and the "× 25.4" wording
+above is superseded. **(3)** Every imperial step divides by 4 (Ruling
+04-12), floor or not — the words above already say "for every imperial
+step", and the amendment records that a `floorMm`-derived imperial ladder
+divides by 4 too, rather than falling back to the metric mantissa rule.
+
 ### D8 — One chrome painter under the canvas
 
 `PageChromePainter` (render layer, `page_chrome_painter.dart`), a
@@ -367,6 +396,25 @@ Per-frame allocation is bounded and stated: two `sublistView`s for the
 grid, one `Path` for the breaks, no per-entity work. The frame-path rule is
 "nothing per entity"; this is chrome, O(lines), and lines are bounded.
 
+**Amended at execution (Plan 04, 2026-09-22):** three changes to this
+decision. **(1)** A minor whose index is a multiple of the divisor is
+skipped in the minor pass (Ruling 04-3), so a line that coincides with a
+major is drawn once — by the major pass — and not twice in two colours.
+**(2)** The two `sublistView`s are disjoint because the **major pass writes
+after the minors' span** in the one reused buffer (Ruling 04-14): the
+plan's own code had both passes writing from index 0, so the major pass
+overwrote the bytes the minors' view still pointed at; `_lines(start:)`
+fixes it and the buffer is grown once to the sum of both bounds. **(3)**
+The differential's camera is built so the sheet is on screen (Ruling
+04-13): as specified — translation uniform in ±5 000 px, independent of the
+sheet's position — the off-origin standard page fell outside the viewport
+in **all fifty trials**, so every trial compared the empty set to the empty
+set and the check verified nothing about positions while still passing. The
+sweep now draws `tx = sx − s·wx`, `ty = sy + s·wy` with `(wx, wy)` uniform
+inside the sheet and `(sx, sy)` uniform in the viewport, and **asserts**
+that all 50 trials produce majors, 1 to 12 per trial. A seeded sweep over
+an off-origin fixture needs an anti-vacuity counter.
+
 ### D9 — Codec: a registration hook on `decode` and `decodeString`
 
 `DraftDocumentCodec.decode(json, {…, void Function(ComponentRegistry)?
@@ -401,6 +449,14 @@ component and sets its value (`ValueNotifier` skips the notification when
 the value is `==`, so an unrelated root-touching edit does not repaint).
 Constructed by the view, disposed with it. Every chrome painter and the
 app's panel listen to it, never to the document directly.
+
+**Amended at execution (Plan 04, 2026-09-22):** the **shell** owns the
+`PageNotifier`, not `PlannerView` (Ruling 04-2). `PagePanel` lives in the
+`chrome-right` slot, outside `PlannerView`'s subtree, and the painters live
+inside it; one instance constructed and disposed by the shell is what makes
+the panel and the chrome read the same value. "Constructed by the view,
+disposed with it" above should be read as "by the widget that owns both
+consumers".
 
 ### D11 — Rulers: two bars and a corner, outside the drawing area
 
@@ -439,6 +495,18 @@ repaints on `Listenable.merge([camera, pageNotifier, pointer])`:
 Labels are `TextPainter`s laid out per frame, bounded by the major count
 (≤ viewport/64 + 2 per bar); that bound is the reason there is no cache.
 
+**Amended at execution (Plan 04, 2026-09-22):** two changes to this
+decision. **(1)** The vertical bar iterates its lattice **from the top of
+the bar downward** (Ruling 04-15), not from the lowest world y upward: the
+ascending-world loop produced a `debugLastTicks` record in descending
+screen y, so the test that reads tick order off the record had to reverse
+it. Iterating in bar order makes the debug record bar-ordered on both axes;
+what is drawn is unchanged, and the left ruler still **reads** upward
+(D5). **(2)** The frame's two `Row`s need `crossAxisAlignment:
+CrossAxisAlignment.stretch` — without it the top bar collapses to zero
+height and the left bar to zero width, since neither has an intrinsic
+cross-axis size.
+
 ### D12 — The app: register, place, panel, zoom readout
 
 - `startupPlan` registers `PageComponent` on the document (once), sets
@@ -464,6 +532,17 @@ Labels are `TextPainter`s laid out per frame, bounded by the major count
 - The top bar gains a `Text` keyed `zoom-text`: `1:50 · 100%` (scale, then
   zoom rounded to an integer percent), rebuilt on camera and page changes.
   The `status-text` string is unchanged.
+
+**Amended at execution (Plan 04, 2026-09-22):** two changes to this
+decision. **(1)** `startupPlan` **clears the history** after it attaches
+the page (Ruling 04-1). The page goes on through `SetComponentCommand` as
+written above, but a fresh document must start with no undo entries — as a
+loaded one does — or the first cmd+Z a user presses removes the page
+instead of undoing their own edit. **(2)** `PlannerView`'s one-time fit is
+deferred to a post-frame callback (Ruling 04-16), so the first frame paints
+at the shell's nominal `fitToPage(page, 1440×900)` and the second at the
+real drawing-area size; the latch still makes the fit happen exactly once.
+See the same amendment at D4.
 
 ### D13 — Component-only edits are invisible to the index and the tile cache
 
@@ -680,6 +759,24 @@ range is a genuine intersection.
 | M-04t | iterate the grid over the sheet rect instead of the intersection | `page_chrome_painter_test`: line count at `kMaxScale` over the standard page exceeds the bound |
 | M-04u | `PageNotifier` does not seed in its constructor | `page_notifier_test`: value non-null before any event |
 | M-04v | the point list is the whole buffer, not a `sublistView` | `page_chrome_painter_test`: recorded list length is `4 · lines` |
+
+**Amended at execution (Plan 04, 2026-09-22):** three rows above name a
+kill site that execution moved. **M-04c** is killed by `grid_scale_test`
+**and** by the differential, not by either alone — the continuous major
+makes seven of eight `pick`/`snapToGrid` tests red and the oracle disagree
+on the major count, and both transcripts are in the mutation log.
+**M-04g** fires through the `minorMinPixels` parameter Ruling 04-7 added to
+`pick` (D7's amendment): with the shipped 64/8 pair no ladder rung reaches
+the null-minor branch, so the test raises the threshold to reach it.
+**M-04q** as first written — `if (false)` on the floor branch — cost the
+compiler a null promotion and the file did not build; a compile failure is
+not a behavioural kill, so it was re-fired as a mutant that compiles, with
+the floor dropped from the ladder's values (`floorMm * m * pow(10, k)` →
+`m * pow(10, k)`), going red on `grid_scale_test`'s `a floor is exact when
+it fits and the ladder climbs from it`. The first attempt is **not
+counted** (Ruling 04-18); the plan's total is 23 fired — the twenty-two
+named mutants plus the tile-cache twin of M-04r — 23 killed, 0 survived, 0
+equivalent.
 
 ### Equivalence
 

@@ -251,7 +251,7 @@ cheap; learning it from a half-executed Plan is not.
 | 01 | app skeleton | [2026-09-21](../docs/superpowers/specs/2026-09-21-floor-planner-app-skeleton-design.md) (rev 2) | [2026-09-21](../docs/superpowers/plans/2026-09-21-floor-planner-app-skeleton.md) | [2026-09-21](../docs/superpowers/notes/2026-09-21-plan-01-results.md) (merged `bae5f73`, look done: macOS, Chrome, Firefox LGTM) |
 | 02 | interaction core | [2026-09-21](../docs/superpowers/specs/2026-09-21-interaction-core-design.md) (rev 2, amended at execution) | [2026-09-21](../docs/superpowers/plans/2026-09-21-interaction-core.md) | [2026-09-21](../docs/superpowers/notes/2026-09-21-plan-02-results.md) (merged `8c62db3`, 2026-09-22, gate 14/15, the human's look OWED) |
 | 03 | grips and transform | — | — | — |
-| 04 | page, grid, rulers | — | — | — |
+| 04 | page, grid, rulers | [2026-09-22](../docs/superpowers/specs/2026-09-22-page-grid-rulers-design.md) (rev 2, amended at execution) | [2026-09-22](../docs/superpowers/plans/2026-09-22-page-grid-rulers.md) | [2026-09-22](../docs/superpowers/notes/2026-09-22-plan-04-results.md) (executed on `plan-04/page-grid-rulers` at `563fdd4`, 2026-09-22, gate 15/16, the human's look OWED, not merged) |
 | 05 | drawing tools | — | — | — |
 | 06 | parametric layer | — | — | — |
 | 07 | walls | — | — | — |

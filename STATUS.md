@@ -1,6 +1,14 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-22 — **Plan 02 (interaction core) is MERGED at
+**Last updated:** 2026-09-22 — **Plan 04 (page, grid and rulers) is
+EXECUTED on `plan-04/page-grid-rulers` and NOT merged.** Twelve tasks,
+`39ff5f2..563fdd4` plus this commit, cut from `main` at `1e5001d`; the exit
+gate is **15 of 16**, and the sixteenth — a human's look, on macOS, in
+Chrome and in Firefox from `build/web` — is **OWED: not looked at; the human
+looks after this branch is presented**. Nothing was simulated to fill it in.
+**The merge is the human's decision.** 23 mutants fired, 23 killed, 0
+survived. See [Plan 04](#plan-04--page-grid-and-rulers-executed-on-plan-04page-grid-rulers-not-merged)
+and [Resume here](#resume-here). **Plan 02 (interaction core) is MERGED at
 `8c62db3`**, `--no-ff` on the human's decision, and its exit gate is now
 **15 of 15**: the human looked on macOS, in Chrome and in Firefox the same
 day (LGTM). The Chrome look found the one thing D10 had deferred — undo after
@@ -81,6 +89,131 @@ method and both reproduction commands.
 Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
 Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
 Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
+
+---
+
+## Plan 04 — page, grid and rulers (executed on `plan-04/page-grid-rulers`, NOT merged)
+
+**Plan 04 gave the product line its paper.** The drawing now sits on a
+sheet: a `PageComponent` on the root handle carrying origin, preset,
+orientation, scale denominator, display unit, background and the three
+visibility flags; a zoom-adaptive grid on that sheet; rulers zeroed at the
+sheet's corner; dashed page breaks; a panel that edits all of it one undo
+step at a time; and a `1:50 · 100%` zoom readout in the top bar. Twelve
+tasks, `39ff5f2..563fdd4` (Tasks 1–11; Task 12, the gate lines, the results
+note and the spec/STATUS/roadmap updates, is this commit) — on branch
+`plan-04/page-grid-rulers`, cut from `main` at `1e5001d`. **NOT merged: the
+merge is the human's decision, and the exit gate stands at 15 of 16 with
+the sixteenth — a human's look, on macOS, in Chrome and in Firefox from
+`build/web` — OWED.** Branch and worktree are alive; the ledger is archived
+onto the branch before any merge, never deleted. Spec:
+[2026-09-22-page-grid-rulers-design.md](docs/superpowers/specs/2026-09-22-page-grid-rulers-design.md)
+(revision 2, amended at execution 2026-09-22 — seven amendments at D4, D7,
+D8, D10, D11, D12 and the Testing section, none rewriting the original
+text). Plan:
+[2026-09-22-page-grid-rulers.md](docs/superpowers/plans/2026-09-22-page-grid-rulers.md).
+Results:
+[2026-09-22-plan-04-results.md](docs/superpowers/notes/2026-09-22-plan-04-results.md).
+Mutation log:
+[plan-04-mutation-log.md](docs/superpowers/notes/plan-04-mutation-log.md) —
+twenty-two named mutants plus the tile-cache twin of M-04r, **23 fired, 23
+killed, 0 survived, 0 equivalent.**
+
+**Delivered:** `PageComponent`, `page_geometry.dart` (`sheetWorldRect`,
+`zoomOf`, `pageWorldOf`, `worldOfPage`) and `grid_scale.dart`
+(`GridScale.pick`, `ladderFor`, `formatLength`, `snapToGrid`) in
+`jet_cad_2d`, with a `capability` field on `CommandApplied` /
+`CommandUndone` / `CommandRedone` and a `registerComponents` hook on
+`decode` / `decodeString`; `chrome_style.dart`, `page_fit.dart`,
+`PageNotifier`, `PageChromePainter`, `RulerPainter` /
+`RulerCornerPainter` and `RulerFrame` in `jet_cad_2d_flutter`; the startup
+page, the fit to page, the ruler frame in the tree, the zoom text and
+`PagePanel` in `apps/floor_planner`. `DraftCanvas`, `DraftPainter`,
+`CameraGestureDetector`, `InteractionLayer` and the selection overlay are
+untouched; `TileCache` changes by exactly the D13 skip.
+
+**Task list**, each task's head commit:
+
+| task | what | head |
+|---|---|---|
+| 1 | `PageComponent`: fields, `copyWith`, preset recognition, `register` | `39ff5f2` |
+| 2 | `DocChange.capability`, the index skip and the tile-cache skip (D13) | `362b422` |
+| 3 | the codec's `registerComponents` hook on `decode` / `decodeString` | `d182080` |
+| 4 | `page_geometry.dart` and `grid_scale.dart`: the ladder, `formatLength`, `snapToGrid` (+ fix round `93e58ea`) | `93e58ea` |
+| 5 | `chrome_style.dart`, `page_fit.dart`, `PageNotifier`, the shared fixture | `34e27ce` |
+| 6 | `PageChromePainter`: sheet, grid, breaks, and the seeded differential (+ fix round `2a21fcd`) | `2a21fcd` |
+| 7 | `RulerPainter` and `RulerCornerPainter` | `6bc31eb` |
+| 8 | `RulerFrame`, the pointer notifier, the exports | `96c09d8` |
+| 9 | app: startup page, fit to page, the tree, the zoom text (+ comment fix `9f08c10`) | `9f08c10` |
+| 10 | `PagePanel`: one command per control | `39c88bd` |
+| 11 | the mutation sweep and its log (+ M-04q re-fired at `563fdd4`) | `563fdd4` |
+| 12 | gate lines, results note, spec amendments, STATUS, roadmap | this commit |
+
+**Five rulings a reader must know.** **The seeded differential was vacuous
+as the spec wrote it** (Ruling 04-13): a translation uniform in ±5 000 px,
+independent of the sheet's position, put the off-origin standard page off
+screen in **all fifty trials**, so every trial compared the empty set to the
+empty set — and it passed. The camera is now built so the sheet is on screen
+by construction, and the test asserts all 50 trials produce 1 to 12 majors.
+**The startup fit lands one frame late** (Ruling 04-16): assigning
+`camera.value` during `PlannerView`'s `LayoutBuilder` build notifies the
+zoom text's sibling `ListenableBuilder` and Flutter asserts, so the fit
+moved into a post-frame callback — frame one paints at the shell's nominal
+`fitToPage(page, 1440×900)`, frame two at the real drawing-area size, and
+the latch still makes it once. Whether that jump is visible is the eighth
+item of the owed look. **The imperial ladder is written as fractions of a
+foot** (Ruling 04-11), `304.8 × {1/192, …, 1/2}` rather than the spec's
+`× 25.4`, so a foot rung divided by 4 is bit-equal to the quarter rung.
+**`startupPlan` clears the history** (Ruling 04-1) so the first cmd+Z does
+not remove the page. **`pick` takes a `minorMinPixels` parameter** (Ruling
+04-7) because the shipped 64/8 threshold pair cannot reach the null-minor
+branch from any ladder rung, which left M-04g with no reachable kill. Full
+account, plus the ten deferred minors: the results note's "Debt and
+rulings" section.
+
+### What Plan 04 measured
+
+| quantity | value |
+|---|---|
+| `packages/jet_cad_2d` | **860** pass (`00:05 +860: All tests passed!`, exit 0), analyze/format clean |
+| `packages/jet_cad_2d_flutter` | **795** pass, 1 skip, the same five pre-existing `text_ladder_golden_test.dart` failures Plan 01 recorded (`00:29 +795 ~1 -5: Some tests failed.`, exit 1) — analyze/format clean |
+| `apps/dev_harness_2d` | **82** (`00:29 +82: All tests passed!`, exit 0) — unchanged from the branch point, the harness is untouched; analyze/format clean |
+| `apps/floor_planner` | **21** tests (`00:02 +21: All tests passed!`, exit 0) — 13 at the branch point plus four from Task 9 and four from Task 10; `flutter build macos --release` and `flutter build web --release` both `✓ Built` |
+| mutations | **23 fired, 23 killed**, **0 survived**, **0 equivalent** (22 named M-04a…v plus the tile-cache twin of M-04r; M-04q's first, non-compiling attempt is not counted — Ruling 04-18) |
+| the differential (criterion 12) | seed **`0x5EED0004`**, **50 trials**, **1..12 majors each**, `SpyCanvas`-recorded major x positions against a literal-ladder oracle sharing no code with `pick`, to 1e−6 px |
+| the two allocation invariants | `query_allocation_test.dart` and `paint_allocation_test.dart` both green, unchanged |
+| the look | **eight items per platform, all OWED** — macOS, Chrome, Firefox from `build/web`; not looked at, nothing simulated |
+
+**Exit gate: 15 of 16.** Criteria 1–15 all PASS, each with its witness (test
+file and test name, the mutation log, or the pasted gate line); criterion 16
+(a human looks, on macOS, in Chrome and in Firefox from `build/web`) is
+**OWED — not looked at; the human looks after this branch is presented**, in
+those words. No device run and no visual judgement was simulated to fill it
+in. The eight items, itemised per platform, are in the results note: the
+sheet under the plan; the grid at three zoom levels; the ruler zero at the
+sheet corner and labels in metres; page breaks with Letter selected in the
+panel; a unit change to ft-in; one panel edit and its undo (cmd+Z on macOS,
+ctrl+Z in a browser); the pointer marker; and whether the first frame's
+flash at the nominal fit is visible. **Three things to know before looking:**
+`header.units` is set to millimetres and **never read to convert** — a
+non-goal, so a ruler label says nothing about it; the adaptive snap step
+**follows the zoom** unless `page.gridStepMm` is set, in which case that
+value is used exactly (spec D6); and the first frame paints at the nominal
+1440×900 page fit (Ruling 04-16). Full account:
+[2026-09-22-plan-04-results.md](docs/superpowers/notes/2026-09-22-plan-04-results.md).
+
+**Debt, in one line each:** `toString` says `custom` where `SheetSize.name`
+says `Custom`; the two ladders are shared **mutable** lists; `SpyCanvas`
+records `TypedData` by reference; the grid's line bound rests on
+`cam.scale`, which an anisotropic camera would break; the chrome test's
+oracle assumes the metric floor-less ladder; `onPaintForTest` has no caller
+yet; `RulerPainter` builds a per-frame debug tick list; `RulerFrame`'s
+`late final` merged listenables would go stale if a caller swapped the
+camera or page instance; `PlannerView`'s class doc is outgrown and
+`startup_plan_test` still brackets the clamps against the **extents** fit;
+and `PagePanel._set` issues a command even when the value is unchanged, so
+re-selecting the active preset makes a no-op undo entry. None is a defect in
+shipped behaviour; each is in the results note with its file.
 
 ---
 
@@ -1114,7 +1247,35 @@ text), none of them changing a passing criterion into a failing one. See
 [Plan 02](#plan-02--interaction-core-executed-on-plan-02interaction-core-not-merged)
 and
 [2026-09-21-plan-02-results.md](docs/superpowers/notes/2026-09-21-plan-02-results.md).
-The other eleven sub-projects have not started.
+
+**Sub-project 04 (page, grid and rulers) is executed and awaits the human's
+look and the merge decision — this is the live front.** Its spec,
+[2026-09-22-page-grid-rulers-design.md](docs/superpowers/specs/2026-09-22-page-grid-rulers-design.md)
+(revision 2, amended at execution in seven places, none rewriting the
+original text), and plan,
+[2026-09-22-page-grid-rulers.md](docs/superpowers/plans/2026-09-22-page-grid-rulers.md),
+were both written 2026-09-22; **all twelve tasks ran on
+`plan-04/page-grid-rulers`, cut from `main` at `1e5001d`, through `563fdd4`
+plus the results-note task (this commit), and the branch is NOT merged.**
+The exit gate is **15 of 16**: criterion 16 (a human looks, on macOS, in
+Chrome and in Firefox from `build/web`, at the sheet under the plan, the
+grid at three zoom levels, the ruler zero at the sheet corner with labels in
+metres, page breaks with Letter selected, a unit change to ft-in, one panel
+edit and its undo — **cmd+Z on macOS, ctrl+Z in a browser** — the pointer
+marker, and whether the first frame's flash at the nominal fit is visible)
+is **OWED — not looked at; the human looks after this branch is
+presented.** No device run and no visual judgement happened in that session,
+and none was simulated. **The merge is the human's decision**; the ledger at
+`.superpowers/sdd/2026-09-22-page-grid-rulers/` is archived onto the branch
+before any merge, never deleted. Three things the look should know going
+in: `header.units` is set to millimetres and never read to convert (a
+non-goal); the adaptive snap step follows the zoom unless `gridStepMm` is
+set (spec D6); and the first frame paints at the shell's nominal 1440×900
+page fit, the second at the real size (Ruling 04-16). See
+[Plan 04](#plan-04--page-grid-and-rulers-executed-on-plan-04page-grid-rulers-not-merged)
+and
+[2026-09-22-plan-04-results.md](docs/superpowers/notes/2026-09-22-plan-04-results.md).
+The other ten sub-projects have not started.
 
 **The web coupling is resolved and it went the expensive way.** This section
 used to say "Plan G matters only if the product targets web". **The human
