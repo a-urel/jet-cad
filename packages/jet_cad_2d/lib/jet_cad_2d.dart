@@ -21,6 +21,7 @@ export 'src/document/fill_index.dart';
 export 'src/document/header.dart';
 export 'src/document/node.dart';
 export 'src/document/origin_component.dart';
+export 'src/document/page_component.dart';
 export 'src/document/raw_data.dart';
 export 'src/document/resolved_style.dart';
 export 'src/document/style.dart';
