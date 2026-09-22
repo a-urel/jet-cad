@@ -2,7 +2,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, visibleForTesting;
 import 'package:flutter/rendering.dart' show CustomPainter;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -28,16 +29,21 @@ class PageChromePainter extends CustomPainter {
   final void Function()? onPaintForTest;
 
   /// Test-only, reset per paint.
+  @visibleForTesting
   int debugLastMajorCount = 0;
+  @visibleForTesting
   int debugLastMinorCount = 0;
+  @visibleForTesting
   int debugLastBreakCount = 0;
 
   /// Grown once to the bound, reused; `sublistView`s of it reach the canvas.
   ///
   /// Both grid passes of one paint write into *disjoint* spans of it: the
-  /// majors start where the minors stopped. `drawRawPoints` takes the list by
-  /// reference, so a second pass writing from index 0 would rewrite the list
-  /// the first pass already handed over.
+  /// majors start where the minors stopped. That keeps each pass's list an
+  /// independently readable view for as long as the paint lasts — a second
+  /// pass writing from index 0 would rewrite the numbers the first one
+  /// produced, and a canvas that holds the list rather than copying it
+  /// (the test double does) would then see the wrong grid.
   Float32List _buffer = Float32List(0);
 
   final Paint _sheetFill = Paint();

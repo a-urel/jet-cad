@@ -101,27 +101,48 @@ void main() {
       'differential: fifty seeded cameras agree with the literal-ladder oracle',
       () {
     final random = math.Random(0x5EED0004);
+    final sheet = sheetWorldRect(standardPage());
+    var trialsWithMajors = 0;
     for (var trial = 0; trial < 50; trial++) {
       // [1e-3, 1e2]
       final scale = math.pow(10.0, -3 + random.nextDouble() * 5).toDouble();
-      final tx = -5000 + random.nextDouble() * 10000;
-      final ty = -5000 + random.nextDouble() * 10000;
+      // Ruling 04-13. A translation drawn uniformly in +-5000 px put the
+      // sheet off screen in all fifty trials, so every trial asserted
+      // 0 == 0. Instead: draw a world point uniformly inside the sheet and
+      // a screen point uniformly inside the viewport, and solve the
+      // translation that maps the one onto the other. With
+      // `Transform2(s, 0, 0, -s, tx, ty)`, `xs = s * wx + tx` and
+      // `ys = -s * wy + ty`, hence `tx = sx - s * wx` and `ty = sy + s * wy`
+      // -- a plus, because the y axis is flipped. That point is then in
+      // `visibleWorld` and in the sheet at every scale in the range.
+      final wx = sheet.minX + random.nextDouble() * (sheet.maxX - sheet.minX);
+      final wy = sheet.minY + random.nextDouble() * (sheet.maxY - sheet.minY);
+      final sx = random.nextDouble() * kChromeSize.width;
+      final sy = random.nextDouble() * kChromeSize.height;
+      final tx = sx - scale * wx;
+      final ty = sy + scale * wy;
       final cam = CameraController(ViewportTransform(
           worldToScreenMatrix: Transform2(scale, 0, 0, -scale, tx, ty)));
       final (painter, _, _) = rig(camera: cam);
       final canvas = SpyCanvas();
       painter.paint(canvas, kChromeSize);
       final raw = canvas.named('drawRawPoints').toList();
-      final majors = raw.isEmpty
+      // Not `raw.isEmpty`: `_lines` skips `drawRawPoints` when it draws
+      // nothing, so a paint with minors but no major leaves the minors'
+      // list as `raw.last`.
+      final majors = painter.debugLastMajorCount == 0
           ? const <double>[]
           : verticalXs(raw.last.args[1]! as Float32List);
       final expected = oracleMajorXs(cam.value, standardPage(), kChromeSize);
       expect(majors.length, expected.length,
           reason: 'trial $trial, scale $scale');
+      if (expected.isNotEmpty) trialsWithMajors++;
       for (var i = 0; i < majors.length; i++) {
         expect(majors[i], closeTo(expected[i], 1e-3), reason: 'trial $trial');
       }
     }
+    expect(trialsWithMajors, 50,
+        reason: 'a trial with no major line on screen asserts nothing');
   });
 
   test('the point list is exactly four numbers per line', () {
