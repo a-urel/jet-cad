@@ -560,7 +560,7 @@ nothing original was rewritten:
   executed.
 
 Task 12 itself touched no code. **The final fix wave on top of it touched
-nine source files** — `command.dart`, `commands.dart`, `grid_scale.dart`
+seven source files** — `command.dart`, `commands.dart`, `grid_scale.dart`
 and `spatial_index.dart` in the engine; `page_notifier.dart`,
 `tile_cache.dart` and the barrel in the render layer; plus six test files
 and `planner_shell_test.dart`'s one renamed test — and then this file, the

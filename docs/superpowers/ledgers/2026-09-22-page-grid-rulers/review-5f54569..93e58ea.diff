@@ -1,0 +1,254 @@
+# Review package: 5f54569..93e58ea
+
+## Commits
+93e58ea fix(engine): imperial ladder as foot fractions, imperial divisor with a floor, ladder tests
+
+## Files changed
+ .../jet_cad_2d/lib/src/geometry/grid_scale.dart    | 62 ++++++++++++----------
+ .../jet_cad_2d/test/geometry/grid_scale_test.dart  | 24 ++++++++-
+ 2 files changed, 57 insertions(+), 29 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/geometry/grid_scale.dart b/packages/jet_cad_2d/lib/src/geometry/grid_scale.dart
+index fc3aa3f..4e05fa9 100644
+--- a/packages/jet_cad_2d/lib/src/geometry/grid_scale.dart
++++ b/packages/jet_cad_2d/lib/src/geometry/grid_scale.dart
+@@ -21,52 +21,57 @@ class GridScale {
+ 
+   /// Null when minors would be closer than the minor threshold.
+   final double? minorMm;
+   final DisplayUnit unit;
+ 
+   /// Minor lines per major, or 1 when there are no minors.
+   int get divisor => minorMm == null ? 1 : (majorMm / minorMm!).round();
+ 
+   static const List<double> _mantissas = [1, 2, 5];
+ 
++  /// Metric ladder, built once: mantissas 1-2-5 across the decades. `pick`
++  /// runs per frame, so this must not be rebuilt on every call.
++  static final List<double> _metricLadder = [
++    for (var k = -1; k <= 7; k++)
++      for (final m in _mantissas) m * math.pow(10.0, k),
++  ];
++
++  /// Imperial ladder, built once. The inch rungs (Ruling 04-11) are written
++  /// as fractions of a foot (`304.8 * f`) rather than as `inches * 25.4`, so
++  /// that a foot-based major's divisor-4 minor (`step / 4`, `step` itself a
++  /// multiple of 304.8) lands on the same double as the 6" rung bit for bit
++  /// — `6 * 25.4` and `609.6 / 4` are not the same double, but `304.8 * 0.5`
++  /// is exactly half of `304.8 * 1`.
++  static final List<double> _imperialLadder = [
++    for (final footFraction in const [
++      1 / 192, // 1/16"
++      1 / 96, // 1/8"
++      1 / 48, // 1/4"
++      1 / 24, // 1/2"
++      1 / 12, // 1"
++      1 / 6, // 2"
++      1 / 2, // 6"
++    ])
++      304.8 * footFraction,
++    for (final feet in const [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 5000])
++      feet * 304.8,
++  ];
++
+   /// Ascending steps in world millimetres.
+   static List<double> ladderFor(DisplayUnit unit, {double? floorMm}) {
+     if (floorMm != null) {
+       return [
+         for (var k = 0; k <= 7; k++)
+           for (final m in _mantissas) floorMm * m * math.pow(10.0, k),
+       ];
+     }
+-    if (unit.isImperial) {
+-      return [
+-        for (final inches in const [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 6])
+-          inches * 25.4,
+-        for (final feet in const [
+-          1,
+-          2,
+-          5,
+-          10,
+-          20,
+-          50,
+-          100,
+-          200,
+-          500,
+-          1000,
+-          5000
+-        ])
+-          feet * 304.8,
+-      ];
+-    }
+-    return [
+-      for (var k = -1; k <= 7; k++)
+-        for (final m in _mantissas) m * math.pow(10.0, k),
+-    ];
++    return unit.isImperial ? _imperialLadder : _metricLadder;
+   }
+ 
+   /// The smallest ladder step whose screen spacing is at least
+   /// [kMajorMinPixels], with its minor; null when no step reaches it (extreme
+   /// zoom-out) or the scale is not a positive finite number.
+   static GridScale? pick(
+     DisplayUnit unit,
+     double pxPerWorldMm, {
+     double? floorMm,
+     double minorMinPixels = kMinorMinPixels,
+@@ -79,23 +84,24 @@ class GridScale {
+         return GridScale(
+           majorMm: step,
+           minorMm: minor * pxPerWorldMm >= minorMinPixels ? minor : null,
+           unit: unit,
+         );
+       }
+     }
+     return null;
+   }
+ 
+-  /// 4 for a mantissa-2 metric step and for every imperial step, else 5.
++  /// 4 for a mantissa-2 metric step and for every imperial step (floor or
++  /// not, spec D7), else 5.
+   static int _divisorFor(double step, DisplayUnit unit, double? floorMm) {
+-    if (unit.isImperial && floorMm == null) return 4;
++    if (unit.isImperial) return 4;
+     final ratio = floorMm == null ? step : step / floorMm;
+     final exponent = (math.log(ratio) / math.ln10).floor();
+     final mantissa = (ratio / math.pow(10.0, exponent)).round();
+     return mantissa == 2 ? 4 : 5;
+   }
+ }
+ 
+ /// A length in the display unit, spec D7's table.
+ String formatLength(double mm, DisplayUnit unit) => switch (unit) {
+       DisplayUnit.millimeters => '${_trim(mm, 3)} mm',
+@@ -107,22 +113,24 @@ String formatLength(double mm, DisplayUnit unit) => switch (unit) {
+ 
+ String _trim(double value, int decimals) {
+   var s = value.toStringAsFixed(decimals);
+   if (s.contains('.')) {
+     s = s.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+   }
+   return s == '-0' ? '0' : s;
+ }
+ 
+ String _feetInches(double mm) {
+-  final sign = mm < 0 ? '-' : '';
+   final sixteenths = (mm.abs() / 25.4 * 16).round();
++  // Decide the sign after rounding: a value that rounds to zero (e.g. -0.5
++  // mm) is zero, not negative zero.
++  final sign = mm < 0 && sixteenths != 0 ? '-' : '';
+   final feet = sixteenths ~/ 192;
+   final rest = sixteenths % 192;
+   final inches = rest ~/ 16;
+   var numerator = rest % 16;
+   var denominator = 16;
+   while (numerator != 0 && numerator.isEven) {
+     numerator ~/= 2;
+     denominator ~/= 2;
+   }
+   final fraction = numerator == 0 ? '' : ' $numerator/$denominator';
+diff --git a/packages/jet_cad_2d/test/geometry/grid_scale_test.dart b/packages/jet_cad_2d/test/geometry/grid_scale_test.dart
+index cf8ef9c..8a1e702 100644
+--- a/packages/jet_cad_2d/test/geometry/grid_scale_test.dart
++++ b/packages/jet_cad_2d/test/geometry/grid_scale_test.dart
+@@ -29,20 +29,34 @@ void main() {
+       expect(s.majorMm, 500);
+       expect(s.minorMm, isNull);
+     });
+ 
+     test('imperial ladder in inches and feet', () {
+       // At 0.137 px/mm: 6" = 152.4 mm → 20.9 px; 1' = 304.8 → 41.8; 2' →
+       // 83.5 px. Major 2', minor 6" (divisor 4) → 20.9 px.
+       final s = GridScale.pick(DisplayUnit.feetInches, 0.137)!;
+       expect(s.majorMm, closeTo(609.6, 1e-9));
+       expect(s.minorMm, closeTo(152.4, 1e-9));
++      // Ruling 04-11: the minor must be the same double as the ladder's own
++      // 6" rung, not merely close to it — a foot-based major divided by 4
++      // has to coincide bit for bit with a rung built as a foot fraction.
++      expect(GridScale.ladderFor(DisplayUnit.feetInches).contains(s.minorMm),
++          isTrue,
++          reason: "the 2 ft major's minor is the 6 in rung, bit for bit");
++    });
++
++    test('imperial divisor is 4 even with a floor', () {
++      // Ruling 04-12: every imperial step divides by 4, floor or not.
++      final s = GridScale.pick(DisplayUnit.feetInches, 0.25, floorMm: 304.8)!;
++      expect(s.majorMm, 304.8);
++      expect(s.minorMm, 76.2);
++      expect(s.divisor, 4);
+     });
+ 
+     test('null past the top of the ladder, and for a bad scale', () {
+       expect(GridScale.pick(DisplayUnit.meters, 1e-9), isNull);
+       expect(GridScale.pick(DisplayUnit.meters, 0), isNull);
+       expect(GridScale.pick(DisplayUnit.meters, double.nan), isNull);
+     });
+ 
+     test('a floor is exact when it fits and the ladder climbs from it', () {
+       // M-04q. At 0.3 px/mm the metric ladder says 500 (150 px) … no: 200
+@@ -58,36 +72,40 @@ void main() {
+       final metric = GridScale.ladderFor(DisplayUnit.meters);
+       for (var i = 1; i < metric.length; i++) {
+         expect(metric[i], greaterThan(metric[i - 1]));
+       }
+       expect(metric.first, closeTo(0.1, 1e-12));
+       expect(metric.last, 5e7);
+       expect(metric.sublist(3, 6), [1, 2, 5]);
+       final imperial = GridScale.ladderFor(DisplayUnit.inches);
+       expect(imperial.first, closeTo(25.4 / 16, 1e-12));
+       expect(imperial.contains(304.8), isTrue);
++      for (var i = 1; i < imperial.length; i++) {
++        expect(imperial[i], greaterThan(imperial[i - 1]));
++      }
+     });
+   });
+ 
+   group('formatLength', () {
+     test('per unit', () {
+       // M-04i.
+       expect(formatLength(1500, DisplayUnit.millimeters), '1500 mm');
+       expect(formatLength(1500, DisplayUnit.centimeters), '150 cm');
+       expect(formatLength(1500, DisplayUnit.meters), '1.5 m');
+       expect(formatLength(311.15, DisplayUnit.inches), '12.25 in');
+       expect(formatLength(1066.8, DisplayUnit.feetInches), '3\'-6"');
+       expect(formatLength(1079.5, DisplayUnit.feetInches), '3\'-6 1/2"');
+       expect(formatLength(152.4, DisplayUnit.feetInches), '0\'-6"');
+       expect(formatLength(-2000, DisplayUnit.meters), '-2 m');
+       expect(formatLength(0, DisplayUnit.meters), '0 m');
+       expect(formatLength(0, DisplayUnit.feetInches), '0\'-0"');
++      expect(formatLength(-0.5, DisplayUnit.feetInches), '0\'-0"');
+     });
+   });
+ 
+   group('snapToGrid', () {
+     final page = PageComponent(originX: 7350, originY: -1230);
+ 
+     test('nearest, anchored at the sheet origin, negative side too', () {
+       // M-04h (truncate) and M-04f (world anchor).
+       final p =
+           snapToGrid(Vector2(7350 + 0.7 * 500, -1230 - 0.7 * 500), 500, page);
+@@ -95,19 +113,21 @@ void main() {
+       expect(p.y, -1230 - 500);
+       final q =
+           snapToGrid(Vector2(7350 + 0.3 * 500, -1230 + 0.3 * 500), 500, page);
+       expect(q.x, 7350);
+       expect(q.y, -1230);
+     });
+ 
+     test('an adaptive step lands on the drawn lattice', () {
+       // Invariant 3's engine half: the step comes from pick.
+       final s = GridScale.pick(DisplayUnit.meters, 0.137)!;
+-      final p = snapToGrid(Vector2(8000, -230), s.minorMm ?? s.majorMm, page);
+-      expect((p.x - page.originX) % (s.minorMm ?? s.majorMm), 0);
++      final step = s.minorMm ?? s.majorMm;
++      final p = snapToGrid(Vector2(8000, -230), step, page);
++      expect((p.x - page.originX) % step, 0);
++      expect((p.y - page.originY) % step, 0);
+     });
+ 
+     test('refuses a non-positive step', () {
+       expect(() => snapToGrid(Vector2.zero(), 0, page), throwsArgumentError);
+     });
+   });
+ }

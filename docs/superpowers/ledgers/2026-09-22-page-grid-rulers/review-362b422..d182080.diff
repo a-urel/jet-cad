@@ -1,0 +1,175 @@
+# Review package: 362b422..d182080
+
+## Commits
+d182080 feat(codec): registerComponents hook on decode and decodeString
+
+## Files changed
+ packages/jet_cad_2d/lib/src/codec/json_codec.dart  |  8 +++
+ .../test/codec/page_component_roundtrip_test.dart  | 65 ++++++++++++++++++++++
+ 2 files changed, 73 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/codec/json_codec.dart b/packages/jet_cad_2d/lib/src/codec/json_codec.dart
+index 6575312..0fd1ff9 100644
+--- a/packages/jet_cad_2d/lib/src/codec/json_codec.dart
++++ b/packages/jet_cad_2d/lib/src/codec/json_codec.dart
+@@ -1,16 +1,17 @@
+ import 'dart:convert';
+ 
+ import '../core/diagnostic.dart';
+ import '../core/handle.dart';
+ import '../document/command.dart';
+ import '../document/commands.dart';
++import '../document/component.dart';
+ import '../document/draft_document.dart';
+ import '../document/header.dart';
+ import '../document/node.dart';
+ import '../document/tables.dart';
+ import '../document/text_metrics.dart';
+ import '../store/entity_store.dart';
+ import '../store/geometry_store.dart';
+ import 'schema_version.dart';
+ 
+ /// Reads and writes the canonical document format.
+@@ -88,35 +89,40 @@ class DraftDocumentCodec {
+   /// currently only [DocumentTree.repairCycles]'s reports of a dropped
+   /// definition-cycle back edge. The repair itself always happens; passing no
+   /// list only means the caller is not told what was dropped, so a caller that
+   /// needs to surface data loss to a user must pass one.
+   static DraftDocument decode(
+     Map<String, Object?> json, {
+     TextMeasurer measurer = const InsertionPointMeasurer(),
+     DraftPermissions permissions = DraftPermissions.all,
+     int undoLimit = 200,
+     List<Diagnostic>? diagnostics,
++    void Function(ComponentRegistry registry)? registerComponents,
+   }) {
+     // Both ends, not just the future one. A declared `0`, or a negative
+     // version, is not a document this package ever wrote; accepting it would
+     // parse the file as v1 and only fail — if at all — somewhere deeper in,
+     // with a FormatException that names a field rather than the version.
+     final version = json['schemaVersion'];
+     if (version is! int || version < 1 || version > kSchemaVersion) {
+       throw SchemaVersionError(version);
+     }
+ 
+     final doc = DraftDocument.empty(
+       measurer: measurer,
+       permissions: permissions,
+       undoLimit: undoLimit,
+     );
++    // Before the components load, so an application type comes back typed
++    // rather than as preserve-unknown bytes (spec 04 D9). After it would be
++    // M-04d: the payload lands in `_unknown` and `get<T>` is null.
++    registerComponents?.call(doc.components);
+ 
+     for (final key in json.keys) {
+       if (!_knownKeys.contains(key)) doc.unknownDocumentFields[key] = json[key];
+     }
+ 
+     _loadHeader(doc, json['header']);
+     _loadTables(doc, json['tables']);
+     // Not `diagnostics?.addAll(_loadTree(...))`: `?.` short-circuits on the
+     // *receiver*, so with no diagnostics list that would skip calling
+     // _loadTree entirely rather than merely skip recording its result.
+@@ -142,27 +148,29 @@ class DraftDocumentCodec {
+     doc.commands.notifyLoaded();
+     return doc;
+   }
+ 
+   static DraftDocument decodeString(
+     String source, {
+     TextMeasurer measurer = const InsertionPointMeasurer(),
+     DraftPermissions permissions = DraftPermissions.all,
+     int undoLimit = 200,
+     List<Diagnostic>? diagnostics,
++    void Function(ComponentRegistry registry)? registerComponents,
+   }) =>
+       decode(
+         (jsonDecode(source) as Map).cast<String, Object?>(),
+         measurer: measurer,
+         permissions: permissions,
+         undoLimit: undoLimit,
+         diagnostics: diagnostics,
++        registerComponents: registerComponents,
+       );
+ 
+   static void _loadHeader(DraftDocument doc, Object? json) {
+     final header =
+         DocumentHeader.fromJson((json! as Map).cast<String, Object?>());
+     doc.header
+       ..units = header.units
+       ..scale = header.scale
+       ..globalLinetypeScale = header.globalLinetypeScale
+       ..importedExtents = header.importedExtents
+diff --git a/packages/jet_cad_2d/test/codec/page_component_roundtrip_test.dart b/packages/jet_cad_2d/test/codec/page_component_roundtrip_test.dart
+new file mode 100644
+index 0000000..48bcc4c
+--- /dev/null
++++ b/packages/jet_cad_2d/test/codec/page_component_roundtrip_test.dart
+@@ -0,0 +1,65 @@
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++
++DraftDocument withPage() {
++  final doc = DraftDocument.empty();
++  PageComponent.register(doc.components);
++  doc.header.units = DrawingUnits.millimeters;
++  doc.commands.execute(SetComponentCommand<PageComponent>(
++    doc.rootHandle,
++    PageComponent(
++        widthMm: 215.9,
++        heightMm: 279.4,
++        orientation: PageOrientation.portrait,
++        scaleDenominator: 48,
++        originX: 7350,
++        originY: -1230,
++        displayUnit: DisplayUnit.feetInches,
++        background: 0xFFFAF6EC,
++        gridStepMm: 152.4,
++        pageBreaks: true),
++  ));
++  return doc;
++}
++
++void main() {
++  test(
++      'the page round-trips typed when the load registers it, and the '
++      'bytes are stable', () {
++    // M-04d: registering after loadJson makes the typed value null.
++    final doc = withPage();
++    final original = doc.components.get<PageComponent>(doc.rootHandle)!;
++    final first = DraftDocumentCodec.encodeToString(doc);
++
++    final back = DraftDocumentCodec.decodeString(first,
++        registerComponents: PageComponent.register);
++
++    expect(back.components.get<PageComponent>(back.rootHandle), original);
++    expect(back.components.unknownOf(back.rootHandle), isEmpty);
++    expect(DraftDocumentCodec.encodeToString(back), first);
++  });
++
++  test(
++      'without registration the bytes survive but the type does not — '
++      'which is why the typed assertion above exists', () {
++    final doc = withPage();
++    final first = DraftDocumentCodec.encodeToString(doc);
++
++    final back = DraftDocumentCodec.decodeString(first);
++
++    expect(back.components.get<PageComponent>(back.rootHandle), isNull);
++    final unknown = back.components.unknownOf(back.rootHandle);
++    expect(unknown, hasLength(1));
++    expect(unknown.single['typeId'], PageComponent.componentTypeId);
++    expect(DraftDocumentCodec.encodeToString(back), first);
++  });
++
++  test('decode (the map form) takes the same hook', () {
++    final doc = withPage();
++    final json = DraftDocumentCodec.encode(doc);
++    final back = DraftDocumentCodec.decode(json,
++        registerComponents: PageComponent.register);
++    expect(back.components.get<PageComponent>(back.rootHandle),
++        doc.components.get<PageComponent>(doc.rootHandle));
++  });
++}

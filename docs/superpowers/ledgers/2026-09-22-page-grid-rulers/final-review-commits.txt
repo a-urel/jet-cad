@@ -1,0 +1,15 @@
+563fdd4 docs: mutation log — M-04q re-fired with a compiling mutant (Ruling 04-18)
+ba8d6ac docs: Plan 04 mutation log — twenty-two named mutants
+39c88bd feat(app): PagePanel — one command per control
+9f08c10 docs(app): the fit lands at the end of the first frame, not before it
+d4f0516 feat(app): the page under the plan — startup page, fit to page, rulers and chrome in the tree, zoom text
+96c09d8 feat(render): RulerFrame with a pointer notifier; exports
+6bc31eb feat(render): RulerPainter and the corner
+2a21fcd fix(render): seeded sweep keeps the sheet on screen; majors read from the counter
+e786df4 feat(render): PageChromePainter — sheet, grid over the visible intersection, page breaks
+34e27ce feat(render): chrome style, fitToPage, PageNotifier
+93e58ea fix(engine): imperial ladder as foot fractions, imperial divisor with a floor, ladder tests
+5f54569 feat(engine): page geometry, the grid ladder, formatLength, snapToGrid
+d182080 feat(codec): registerComponents hook on decode and decodeString
+362b422 feat(engine): DocChange carries the command's capability; index and tiles skip component edits
+39ff5f2 feat(engine): PageComponent

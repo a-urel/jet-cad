@@ -1,0 +1,273 @@
+# Review package: 93e58ea..34e27ce
+
+## Commits
+34e27ce feat(render): chrome style, fitToPage, PageNotifier
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart |  3 +
+ .../jet_cad_2d_flutter/lib/src/chrome_style.dart   | 19 ++++++
+ packages/jet_cad_2d_flutter/lib/src/page_fit.dart  |  9 +++
+ .../jet_cad_2d_flutter/lib/src/page_notifier.dart  | 36 ++++++++++++
+ .../jet_cad_2d_flutter/test/page_fit_test.dart     | 23 ++++++++
+ .../test/page_notifier_test.dart                   | 68 ++++++++++++++++++++++
+ .../test/support/page_fixture.dart                 | 22 +++++++
+ 7 files changed, 180 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+index 2607dba..9e063b6 100644
+--- a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
++++ b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+@@ -1,16 +1,17 @@
+ /// Flutter rendering layer for the `jet_cad_2d` engine.
+ library;
+ 
+ export 'src/camera_controller.dart';
+ export 'src/camera_gesture_detector.dart';
+ export 'src/canvas_draw_sink.dart';
++export 'src/chrome_style.dart';
+ export 'src/vertices_draw_sink.dart';
+ export 'src/draft_canvas.dart';
+ export 'src/draft_painter.dart';
+ export 'src/draw_sink.dart';
+ export 'src/flutter_text_measurer.dart';
+ export 'src/gesture_policy.dart';
+ // The resident-GPU backend's own public surface. `gpu_facade.dart` stays
+ // unexported -- it is the one file allowed to import a GPU package, and it
+ // carries more than the two small functions (`gpuAvailable`,
+ // `debugSetGpuFactory`) and the public typedef `GpuContextFactory` an app
+@@ -38,19 +39,21 @@ export 'src/gpu/collection_frame.dart';
+ export 'src/gpu/geometry_collector.dart';
+ export 'src/gpu/gpu_draw_backend.dart';
+ export 'src/gpu/resident_collection.dart';
+ export 'src/gpu/resident_geometry.dart';
+ export 'src/gpu/resident_rebuilder.dart';
+ export 'src/gpu/resident_text.dart';
+ export 'src/gpu/text_compositor.dart';
+ export 'src/gpu/text_patches.dart';
+ export 'src/interaction_layer.dart';
+ export 'src/outline_cache.dart';
++export 'src/page_fit.dart';
++export 'src/page_notifier.dart';
+ export 'src/reference_walk.dart';
+ export 'src/render_backend.dart';
+ export 'src/select_tool.dart';
+ export 'src/selection.dart';
+ export 'src/selection_overlay.dart';
+ export 'src/selection_style.dart';
+ export 'src/tile_cache.dart';
+ export 'src/tool.dart';
+ export 'src/viewport_transform.dart';
+diff --git a/packages/jet_cad_2d_flutter/lib/src/chrome_style.dart b/packages/jet_cad_2d_flutter/lib/src/chrome_style.dart
+new file mode 100644
+index 0000000..0231cf3
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/chrome_style.dart
+@@ -0,0 +1,19 @@
++import 'dart:ui' show Color;
++
++/// Thickness of each ruler bar and the corner box, logical pixels.
++const double kRulerThickness = 24.0;
++const double kMajorTickPixels = 12.0;
++const double kMinorTickPixels = 6.0;
++
++/// Below this on-screen sheet size the page-break tiling is not drawn: the
++/// bound at extreme zoom-out (spec D8).
++const double kBreaksMinSheetPixels = 16.0;
++
++const Color kSheetEdgeColor = Color(0xFF9E9E9E);
++const Color kMajorGridColor = Color(0x33000000);
++const Color kMinorGridColor = Color(0x14000000);
++const Color kPageBreakColor = Color(0xFF3366CC);
++const Color kRulerBackground = Color(0xFFF2F2F2);
++const Color kRulerInk = Color(0xFF444444);
++const Color kRulerPointer = Color(0xFFE53935);
++const double kRulerLabelSize = 10.0;
+diff --git a/packages/jet_cad_2d_flutter/lib/src/page_fit.dart b/packages/jet_cad_2d_flutter/lib/src/page_fit.dart
+new file mode 100644
+index 0000000..09786a9
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/page_fit.dart
+@@ -0,0 +1,9 @@
++import 'dart:ui' show Size;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++
++import 'viewport_transform.dart';
++
++/// The camera that shows the whole sheet with `fit`'s 5 % margin (spec D4).
++ViewportTransform fitToPage(PageComponent page, Size viewport) =>
++    ViewportTransform.fit(sheetWorldRect(page), viewport);
+diff --git a/packages/jet_cad_2d_flutter/lib/src/page_notifier.dart b/packages/jet_cad_2d_flutter/lib/src/page_notifier.dart
+new file mode 100644
+index 0000000..9d017a7
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/page_notifier.dart
+@@ -0,0 +1,36 @@
++import 'dart:async';
++
++import 'package:flutter/foundation.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++
++/// The document's page as a listenable (spec D10): seeded in the
++/// constructor, re-read on any change that touches the root, on a load and
++/// on a purge. `ValueNotifier` skips the notification when the value is
++/// `==`, so an unrelated root edit costs its listeners nothing.
++class PageNotifier extends ValueNotifier<PageComponent?> {
++  PageNotifier(this.document)
++      : super(document.components.get<PageComponent>(document.rootHandle)) {
++    _subscription = document.changes.listen(_onChange);
++  }
++
++  final DraftDocument document;
++  late final StreamSubscription<DocChange> _subscription;
++
++  void _onChange(DocChange change) {
++    final root = document.rootHandle;
++    final refresh = switch (change) {
++      CommandApplied(:final touched) ||
++      CommandUndone(:final touched) ||
++      CommandRedone(:final touched) =>
++        touched.contains(root),
++      DocumentLoaded() || DocumentPurged() => true,
++    };
++    if (refresh) value = document.components.get<PageComponent>(root);
++  }
++
++  @override
++  void dispose() {
++    unawaited(_subscription.cancel());
++    super.dispose();
++  }
++}
+diff --git a/packages/jet_cad_2d_flutter/test/page_fit_test.dart b/packages/jet_cad_2d_flutter/test/page_fit_test.dart
+new file mode 100644
+index 0000000..144b36e
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/page_fit_test.dart
+@@ -0,0 +1,23 @@
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2;
++
++import 'support/page_fixture.dart';
++
++void main() {
++  test('fitToPage fits the sheet rect, not the extents', () {
++    // M-04k's render half.
++    final page = standardPage();
++    final fitted = fitToPage(page, kChromeSize);
++    final expected = ViewportTransform.fit(sheetWorldRect(page), kChromeSize);
++    expect(fitted.scale, closeTo(expected.scale, 1e-12));
++    final centre = sheetWorldRect(page).center;
++    final s = fitted.worldToScreen(centre);
++    expect(s.x, closeTo(400, 1e-6));
++    expect(s.y, closeTo(300, 1e-6));
++    expect(fitted.worldToScreen(Vector2(page.originX, page.originY)).y,
++        greaterThan(300),
++        reason: 'y flips: the bottom-left is below centre');
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/page_notifier_test.dart b/packages/jet_cad_2d_flutter/test/page_notifier_test.dart
+new file mode 100644
+index 0000000..7f42319
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/page_notifier_test.dart
+@@ -0,0 +1,68 @@
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import 'support/page_fixture.dart';
++
++void main() {
++  test('seeds from the document before any event', () {
++    // M-04u.
++    final doc = documentWithPage();
++    final n = PageNotifier(doc);
++    addTearDown(n.dispose);
++    expect(n.value, standardPage());
++  });
++
++  test('follows apply, undo and redo through the stream', () async {
++    // M-04l (undo ignored).
++    final doc = documentWithPage();
++    final n = PageNotifier(doc);
++    addTearDown(n.dispose);
++    final seen = <PageComponent?>[];
++    n.addListener(() => seen.add(n.value));
++    final edited = standardPage().copyWith(pageBreaks: true);
++
++    doc.commands
++        .execute(SetComponentCommand<PageComponent>(doc.rootHandle, edited));
++    await Future<void>.delayed(Duration.zero);
++    doc.commands.undo();
++    await Future<void>.delayed(Duration.zero);
++    doc.commands.redo();
++    await Future<void>.delayed(Duration.zero);
++
++    expect(seen, [edited, standardPage(), edited]);
++  });
++
++  test('an unrelated edit and an equal value do not notify', () async {
++    final doc = documentWithPage();
++    final n = PageNotifier(doc);
++    addTearDown(n.dispose);
++    var notified = 0;
++    n.addListener(() => notified++);
++    doc.commands.execute(SetComponentCommand<PageComponent>(
++        doc.rootHandle, standardPage())); // equal value
++    doc.commands.execute(AddNodeCommand(GroupNode(
++        handle: doc.handleSeed.next(),
++        parent: doc.rootHandle,
++        transform: Transform2.translation(5, 5),
++        children: const [])));
++    await Future<void>.delayed(Duration.zero);
++    expect(notified, 0);
++  });
++
++  test('a load re-reads, and dispose stops listening', () async {
++    final doc = documentWithPage();
++    final n = PageNotifier(doc);
++    doc.commands.execute(SetComponentCommand<PageComponent>(
++        doc.rootHandle, standardPage().copyWith(gridVisible: false)));
++    await Future<void>.delayed(Duration.zero);
++    doc.commands.notifyLoaded();
++    await Future<void>.delayed(Duration.zero);
++    expect(n.value!.gridVisible, isFalse);
++    n.dispose();
++    expect(
++        () => doc.commands.execute(
++            SetComponentCommand<PageComponent>(doc.rootHandle, standardPage())),
++        returnsNormally);
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/support/page_fixture.dart b/packages/jet_cad_2d_flutter/test/support/page_fixture.dart
+new file mode 100644
+index 0000000..32d7247
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/support/page_fixture.dart
+@@ -0,0 +1,22 @@
++import 'dart:ui';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++/// The spec's standard fixture: an off-origin A4 landscape at 1:50 in
++/// metres, partly visible under a zoomed, panned camera.
++PageComponent standardPage() => PageComponent(originX: 7350, originY: -1230);
++
++CameraController standardCamera() => CameraController(ViewportTransform(
++    worldToScreenMatrix:
++        const Transform2(0.137, 0, 0, -0.137, -611.5, 412.25)));
++
++const Size kChromeSize = Size(800, 600);
++
++DraftDocument documentWithPage([PageComponent? page]) {
++  final doc = DraftDocument.empty();
++  PageComponent.register(doc.components);
++  doc.commands.execute(SetComponentCommand<PageComponent>(
++      doc.rootHandle, page ?? standardPage()));
++  return doc;
++}
