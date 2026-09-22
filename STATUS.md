@@ -1,9 +1,12 @@
 # jet-cad — project status
 
 **Last updated:** 2026-09-22 — **Plan 02 (interaction core) is MERGED at
-`8c62db3`**, `--no-ff` on the human's decision, with the exit gate at 14 of 15 —
-criterion 15 (the human's look, on macOS, in Chrome and in Firefox) is OWED
-after the merge. See [Plan 02](#plan-02--interaction-core-merged-into-main-at-8c62db3)
+`8c62db3`**, `--no-ff` on the human's decision, and its exit gate is now
+**15 of 15**: the human looked on macOS, in Chrome and in Firefox the same
+day (LGTM). The Chrome look found the one thing D10 had deferred — undo after
+a multi-object Delete came back one object at a time — and rejected it;
+**`CompoundCommand` landed in the engine on `fix/compound-delete`
+(`3f80080`) and Delete is one undo step.** See [Plan 02](#plan-02--interaction-core-merged-into-main-at-8c62db3)
 and [Resume here](#resume-here). **Plan 01 (the floor planner app skeleton) is
 MERGED at `bae5f73`**, the product line's first code on `main`; its human look
 is done (macOS, Chrome, Firefox: LGTM), exit gate 12 of 12. See [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73)
@@ -93,7 +96,8 @@ STATUS/roadmap updates, at `b02410a`), then a **final fix wave** at `0d69465`
 and this commit — on branch `plan-02/interaction-core`, cut from `main` at
 `3fedeb9`. **MERGED `--no-ff` at `8c62db3` on 2026-09-22, on the human's
 decision, with the exit gate at 14 of 15 and the fifteenth (a human's look,
-on macOS, in Chrome and in Firefox from `build/web`) still OWED**; branch and
+on macOS, in Chrome and in Firefox from `build/web`) still OWED — discharged
+the same day with one finding, see the header and the results note**; branch and
 worktree deleted, ledger archived at `2e60afa`. The merged tree was re-gated
 on `main`: `jet_cad_2d` 820, `jet_cad_2d_flutter` 769 pass / 1 skip / the
 same five pre-existing text-golden failures, `dev_harness_2d` 82,
@@ -166,9 +170,10 @@ conic-hull note: the results note's "Debt and rulings" section.
 | mutations | **28 fired, 28 killed**, **2 equivalent** (M-02c, M-02e, declared by construction), **zero true survivors** |
 | the differential (criterion 9) | **52 bands** (12 random + one per root instance), **104 comparisons** (both `BandMode`s), all agree with the brute-force arm |
 | the two allocation invariants | `query_allocation_test.dart` and `paint_allocation_test.dart` both green, unchanged |
-| the window | **fourteen checks OWED — not looked at by a human** (seven per platform: macOS, and Chrome/Firefox from `build/web`) |
+| the window | **fourteen checks OWED at the merge; discharged 2026-09-22 after it** — macOS, Chrome and Firefox each LGTM, with one finding: undo after a multi-object Delete was one object per step in Chrome, fixed by `CompoundCommand` (`fix/compound-delete`, `3f80080`) and re-verified in Firefox |
 
-**Exit gate: 14 of 15**, re-measured after the final fix wave. Criteria
+**Exit gate: 15 of 15** — 14 at the merge, re-measured after the final fix
+wave, and the fifteenth discharged by the human's look the same day. Criteria
 1–14 all PASS, each with its witness (test file and test name, the mutation
 log, or the pasted gate line); criterion 15 (a human looks, on macOS, in
 Chrome and in Firefox) is **OWED**, in those words — no device run or visual
@@ -1095,12 +1100,16 @@ were both written 2026-09-21; **all twelve tasks ran on
 `plan-02/interaction-core`, cut from `main` at `3fedeb9`, through
 `afe7d64` plus the results-note task at `b02410a`, and then a final fix wave
 that closed every open finding of the whole-branch review and of Task 12's
-own review — and is MERGED into `main` at `8c62db3` on 2026-09-22.** The exit gate is **14 of 15** —
+own review — and is MERGED into `main` at `8c62db3` on 2026-09-22.** The exit gate is **15 of 15**:
 criterion 15 (a human looks, on macOS, in Chrome and in Firefox from
 `build/web`, at click, shift-click, both bands, hover, Escape, Delete and
 undo — **cmd+Z on macOS, ctrl+Z in a browser**, which the fix wave's shell
-binding made possible) is **OWED**, and the merge at `8c62db3` did not discharge it, exactly as Plan 01's twelfth criterion was before its own human
-look. Spec amended at execution in ten places (none rewriting the original
+binding made possible) was OWED at the merge and discharged the same day.
+The Chrome look found undo after a multi-object Delete coming back one
+object per ctrl+Z — D10's deferred debt — and the human rejected it;
+`fix/compound-delete` (`3f80080`) put `CompoundCommand` in the engine so
+Delete is one undo step, with the look section and the debt section of the
+results note as the record. Spec amended at execution in ten places (none rewriting the original
 text), none of them changing a passing criterion into a failing one. See
 [Plan 02](#plan-02--interaction-core-executed-on-plan-02interaction-core-not-merged)
 and
