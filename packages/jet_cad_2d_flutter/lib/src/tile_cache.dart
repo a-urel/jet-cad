@@ -1873,6 +1873,12 @@ class TileCache {
       case CommandUndone(:final touched, :final capability):
       case CommandRedone(:final touched, :final capability):
         // Spec D13: a components-only edit moved no pixels.
+        //
+        // Deliberately *after* `_dropCarryOver()` above: the carry-over is a
+        // composite re-bake of what is already on screen, not a tile, so
+        // dropping it costs a composite and no cached pixels — and keeping it
+        // across an edit the cache declines to look at is the one way a
+        // components-only edit could still show stale pixels.
         if (capability == Capability.components) return;
         if (touched.isEmpty) {
           // `DocChange.touched` is documented as empty when the whole document

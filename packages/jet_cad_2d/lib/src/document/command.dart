@@ -12,12 +12,21 @@ import 'tree.dart';
 ///
 /// The split is only possible because leaves carry no transform: moving an
 /// instance and editing geometry are already distinct operations.
+///
+/// **Declaration order is a ranking.** [CompoundCommand.capability] summarises
+/// a compound as its highest-ranked member, so `components` is declared first:
+/// a compound's summary is `components` only when *every* member is — the
+/// property the spec's D13 skip relies on. Reversing that order makes a
+/// compound that moves a node and edits a component summarise as `components`,
+/// and both `SpatialIndex` and `TileCache` skip a move that really happened.
+/// Nothing serialises the ordinal — `DraftPermissions` is by name — so the
+/// order is free to express the ranking.
 enum Capability {
+  /// Edit component data. Ranked lowest: see the note above.
+  components,
+
   /// Move or rotate an instance or group.
   transform,
-
-  /// Edit component data.
-  components,
 
   /// Change coordinates, add or remove entities.
   geometry,

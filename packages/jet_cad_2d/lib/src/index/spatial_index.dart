@@ -2587,6 +2587,11 @@ class SpatialIndex {
   /// indexed. An appearance edit finds the box unchanged and dirties nothing,
   /// which is what preserves the appearance-edits-do-not-touch-the-index
   /// guarantee by measurement rather than by a kind the stream cannot carry.
+  ///
+  /// Since Plan 04 the change *does* say one thing about itself — its
+  /// `capability` — and a components-only change returns before [_reconcile]
+  /// (spec D13); the re-derive-and-compare rule below applies to every other
+  /// kind.
   void _onChange(DocChange change) {
     switch (change) {
       case DocumentLoaded():

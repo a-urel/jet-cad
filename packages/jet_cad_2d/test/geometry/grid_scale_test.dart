@@ -85,6 +85,13 @@ void main() {
     });
   });
 
+  test('the ladder is not writable by its callers', () {
+    // The ladder is a `static final` built once and handed out by reference:
+    // a caller that wrote into it would corrupt every later `pick`.
+    expect(() => GridScale.ladderFor(DisplayUnit.meters)[0] = 0,
+        throwsUnsupportedError);
+  });
+
   group('formatLength', () {
     test('per unit', () {
       // M-04i.

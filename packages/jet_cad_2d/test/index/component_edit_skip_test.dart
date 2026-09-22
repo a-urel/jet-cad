@@ -90,6 +90,35 @@ void main() {
     expect(index.rebuildCount, greaterThan(before));
   });
 
+  test('a compound with a transform member and a page edit still reconciles',
+      () {
+    // Ruling 04-19 / M-04w. The summary capability is the highest-ranked
+    // member, so `components` must rank lowest: a compound that moves a group
+    // *and* edits the page is not a components-only edit, and skipping it
+    // leaves the moved group's boxes stale in the index.
+    final doc = DraftDocument.empty();
+    PageComponent.register(doc.components);
+    addLine(doc, [990, 500, 1010, 500]);
+    final group = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(GroupNode(
+      handle: group,
+      parent: doc.rootHandle,
+      transform: Transform2.translation(310, -47),
+      children: const [],
+    )));
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final before = index.rebuildCount;
+
+    doc.commands.execute(CompoundCommand([
+      TransformNodeCommand(group, Transform2.translation(880, -412)),
+      SetComponentCommand<PageComponent>(
+          doc.rootHandle, PageComponent(originX: 7350, originY: -1230)),
+    ], label: 'move and repage'));
+
+    expect(index.rebuildCount, greaterThan(before));
+  });
+
   test(
       'the default capability is geometry, so old construction sites keep '
       'their meaning', () {

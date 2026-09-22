@@ -25,7 +25,10 @@ void main() {
 
   test('major ticks sit at worldToScreen of the lattice, labelled in metres',
       () {
-    // M-04a (translation dropped), M-04b (scale dropped), M-04i (unit).
+    // M-04a (translation dropped), M-04b (scale dropped). Not M-04i (unit):
+    // the loop's label expectation calls `formatLength`, the function a unit
+    // mutant would change, so it moves with the mutant. `grid_scale_test.dart`
+    // kills M-04i; the one literal below is what this test contributes.
     // At 0.137 px/mm the major is 500 mm (Task 4). Page x = k·500 is world
     // x = 7350 + k·500; screen x = 0.137·world − 611.5.
     final painter = make(RulerAxis.horizontal);
@@ -38,6 +41,13 @@ void main() {
           closeTo(pageX / 500 == 0 ? 0 : (pageX / 500).roundToDouble(), 1e-6));
       expect(tick.$3, formatLength(pageX.roundToDouble(), DisplayUnit.meters));
     }
+    // One literal, independent of `formatLength`: 500 mm at 1:50 in metres.
+    final atFiveHundred = majors.firstWhere(
+        (t) => ((t.$1 + 611.5) / 0.137 - 7350).roundToDouble() == 500,
+        orElse: () => throw StateError(
+            'no major at page x = 500 among ${majors.map((t) => t.$3)}'));
+    expect(atFiveHundred.$3, '0.5 m');
+
     final spacing = majors[1].$1 - majors[0].$1;
     expect(spacing, closeTo(500 * 0.137, 1e-6));
     expect(majors.first.$1, isNot(closeTo(0, 1)),

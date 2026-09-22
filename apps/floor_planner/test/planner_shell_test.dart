@@ -90,7 +90,7 @@ void main() {
     expect(after, '1:50 · ${(zoom * 2 * 100).round()}%');
   });
 
-  testWidgets('the three chrome slots are laid out and empty', (tester) async {
+  testWidgets('the three chrome slots are laid out', (tester) async {
     await tester.pumpWidget(const FloorPlannerApp());
     await tester.pump();
     for (final key in const [

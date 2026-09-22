@@ -19,10 +19,13 @@ class PageNotifier extends ValueNotifier<PageComponent?> {
   void _onChange(DocChange change) {
     final root = document.rootHandle;
     final refresh = switch (change) {
+      // An empty set means the whole document changed
+      // (`doc_change.dart:11-12`), which is how `SpatialIndex` and
+      // `TileCache` read it too; the page is part of "everything".
       CommandApplied(:final touched) ||
       CommandUndone(:final touched) ||
       CommandRedone(:final touched) =>
-        touched.contains(root),
+        touched.isEmpty || touched.contains(root),
       DocumentLoaded() || DocumentPurged() => true,
     };
     if (refresh) value = document.components.get<PageComponent>(root);

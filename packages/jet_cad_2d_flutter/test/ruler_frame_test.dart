@@ -72,17 +72,37 @@ void main() {
   });
 
   testWidgets(
-      'a major tick in the top bar sits at its world point\'s x in the child',
+      "the sheet corner's major tick sits at its screen x in the top bar",
       (tester) async {
     // S10: the frame-level check the painter test cannot make.
+    //
+    // The world point is the fixture's own sheet corner, not a value read back
+    // out of the tick under test: inverting the camera on the tick and
+    // re-applying it would assert only that the camera is invertible.
     final (state, _) = await pump(tester);
+    final child = tester.getRect(find.byKey(const Key('child')));
+    final topBar = tester.getRect(find.byKey(const Key('ruler-top')));
+    // The bar shares the child's horizontal span, so a screen x means the same
+    // thing in both and no offset has to be applied below.
+    expect(topBar.left, child.left);
+    expect(topBar.width, child.width);
+
     final painter = tester
         .widget<CustomPaint>(find.byKey(const Key('ruler-top')))
         .painter as RulerPainter;
-    final major = painter.debugLastTicks.firstWhere((t) => t.$2);
-    final pageX = (major.$1 + 611.5) / 0.137 - 7350;
-    final world = Vector2(7350 + pageX.roundToDouble(), 0);
-    final inChild = state.widget.camera.value.worldToScreen(world).x;
-    expect(major.$1, closeTo(inChild, 1e-6));
+    // Page x = 0 is a major tick by construction (the ladder is anchored on
+    // the page origin), and the sheet corner is at world (7350, -1230).
+    final cornerX = state.widget.camera.value.worldToScreen(Vector2(7350, 0)).x;
+    expect(cornerX, closeTo(395.45, 1e-9),
+        reason: 'fixture guard: the corner must land inside the 400 px bar, '
+            'not off its end where no tick is emitted');
+    expect(cornerX, inInclusiveRange(0, child.width));
+
+    final majors =
+        painter.debugLastTicks.where((t) => t.$2).map((t) => t.$1).toList();
+    expect(majors, isNotEmpty);
+    expect(majors.any((x) => (x - cornerX).abs() < 1e-6), isTrue,
+        reason: 'the top bar emits a major tick at the sheet corner: '
+            'majors were $majors, corner at $cornerX');
   });
 }

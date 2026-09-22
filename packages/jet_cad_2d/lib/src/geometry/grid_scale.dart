@@ -30,10 +30,14 @@ class GridScale {
 
   /// Metric ladder, built once: mantissas 1-2-5 across the decades. `pick`
   /// runs per frame, so this must not be rebuilt on every call.
-  static final List<double> _metricLadder = [
+  ///
+  /// Unmodifiable because [ladderFor] hands the list itself out: a caller that
+  /// wrote into it would corrupt every later `pick` in the process, and the
+  /// rung it overwrote would never come back.
+  static final List<double> _metricLadder = List.unmodifiable([
     for (var k = -1; k <= 7; k++)
       for (final m in _mantissas) m * math.pow(10.0, k),
-  ];
+  ]);
 
   /// Imperial ladder, built once. The inch rungs (Ruling 04-11) are written
   /// as fractions of a foot (`304.8 * f`) rather than as `inches * 25.4`, so
@@ -41,7 +45,8 @@ class GridScale {
   /// multiple of 304.8) lands on the same double as the 6" rung bit for bit
   /// — `6 * 25.4` and `609.6 / 4` are not the same double, but `304.8 * 0.5`
   /// is exactly half of `304.8 * 1`.
-  static final List<double> _imperialLadder = [
+  /// Unmodifiable for the reason given on [_metricLadder].
+  static final List<double> _imperialLadder = List.unmodifiable([
     for (final footFraction in const [
       1 / 192, // 1/16"
       1 / 96, // 1/8"
@@ -54,15 +59,17 @@ class GridScale {
       304.8 * footFraction,
     for (final feet in const [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 5000])
       feet * 304.8,
-  ];
+  ]);
 
-  /// Ascending steps in world millimetres.
+  /// Ascending steps in world millimetres. Unmodifiable on every path, so a
+  /// caller cannot tell the cached ladders from the floored one by whether it
+  /// may be written.
   static List<double> ladderFor(DisplayUnit unit, {double? floorMm}) {
     if (floorMm != null) {
-      return [
+      return List.unmodifiable([
         for (var k = 0; k <= 7; k++)
           for (final m in _mantissas) floorMm * m * math.pow(10.0, k),
-      ];
+      ]);
     }
     return unit.isImperial ? _imperialLadder : _metricLadder;
   }
