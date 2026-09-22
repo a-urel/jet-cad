@@ -48,6 +48,7 @@ export 'src/interaction_layer.dart';
 export 'src/outline_cache.dart';
 export 'src/page_fit.dart';
 export 'src/page_notifier.dart';
+export 'src/page_chrome_painter.dart';
 export 'src/reference_walk.dart';
 export 'src/render_backend.dart';
 export 'src/select_tool.dart';
