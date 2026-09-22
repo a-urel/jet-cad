@@ -1,7 +1,12 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-22 — **Plan 04 (page, grid and rulers) is
-EXECUTED on `plan-04/page-grid-rulers` and NOT merged.** Twelve tasks,
+**Last updated:** 2026-09-22 — **Plan 04 (page, grid and rulers) is MERGED
+into `main` at `e4e3f80`**, `--no-ff` on the human's decision, with the four
+gate lines re-run green on the merged tree (engine 862; render layer 797 +
+1 skip + the five standing text goldens; harness 82; app 21 + both builds);
+branch and worktree deleted, the ledger archived at `c42263c`. Criterion 16
+(the human's look) is **OWED after the merge**, exactly as Plans 01 and 02
+were before their looks. Twelve tasks,
 `39ff5f2..563fdd4` plus Task 12 at `1618111`, and then a **final fix wave**
 (every finding of the whole-branch review: A1–A9 code at `1fe1fcc`, B1–B5
 docs in this commit), cut from `main` at `1e5001d`; the exit
@@ -12,7 +17,7 @@ looks after this branch is presented**. Nothing was simulated to fill it in.
 survived — the last of them, M-04w, is the wave's own: **`Capability`
 declared `transform` before `components`, so a compound that moved a node
 *and* edited the page summarised as `components` and both the spatial index
-and the tile cache skipped a move that had happened** (Ruling 04-19). See [Plan 04](#plan-04--page-grid-and-rulers-executed-on-plan-04page-grid-rulers-not-merged)
+and the tile cache skipped a move that had happened** (Ruling 04-19). See [Plan 04](#plan-04--page-grid-and-rulers-merged-into-main-at-e4e3f80)
 and [Resume here](#resume-here). **Plan 02 (interaction core) is MERGED at
 `8c62db3`**, `--no-ff` on the human's decision, and its exit gate is now
 **15 of 15**: the human looked on macOS, in Chrome and in Firefox the same
@@ -97,7 +102,7 @@ Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01
 
 ---
 
-## Plan 04 — page, grid and rulers (executed on `plan-04/page-grid-rulers`, NOT merged)
+## Plan 04 — page, grid and rulers (MERGED into `main` at `e4e3f80`)
 
 **Plan 04 gave the product line its paper.** The drawing now sits on a
 sheet: a `PageComponent` on the root handle carrying origin, preset,
@@ -108,11 +113,12 @@ step at a time; and a `1:50 · 100%` zoom readout in the top bar. Twelve
 tasks, `39ff5f2..563fdd4` (Tasks 1–11; Task 12, the gate lines, the results
 note and the spec/STATUS/roadmap updates, at `1618111`), and a **final fix
 wave** on top — on branch
-`plan-04/page-grid-rulers`, cut from `main` at `1e5001d`. **NOT merged: the
-merge is the human's decision, and the exit gate stands at 15 of 16 with
-the sixteenth — a human's look, on macOS, in Chrome and in Firefox from
-`build/web` — OWED.** Branch and worktree are alive; the ledger is archived
-onto the branch before any merge, never deleted. Spec:
+`plan-04/page-grid-rulers`, cut from `main` at `1e5001d`. **MERGED `--no-ff`
+at `e4e3f80` on 2026-09-22, on the human's decision, with the exit gate at
+15 of 16 and the sixteenth — a human's look, on macOS, in Chrome and in
+Firefox from `build/web` — still OWED; the merge did not discharge it.**
+Branch and worktree deleted; the ledger was archived onto the branch at
+`c42263c` before the merge. Spec:
 [2026-09-22-page-grid-rulers-design.md](docs/superpowers/specs/2026-09-22-page-grid-rulers-design.md)
 (revision 2, amended at execution 2026-09-22 — nine amendments at D4, D7,
 D8 (two), D10, D11, D12, D13 and the Testing section, none rewriting the
@@ -1287,14 +1293,16 @@ edit and its undo — **cmd+Z on macOS, ctrl+Z in a browser** — the pointer
 marker, and whether the first frame's flash at the nominal fit is visible)
 is **OWED — not looked at; the human looks after this branch is
 presented.** No device run and no visual judgement happened in that session,
-and none was simulated. **The merge is the human's decision**; the ledger at
-`.superpowers/sdd/2026-09-22-page-grid-rulers/` is archived onto the branch
-before any merge, never deleted. Three things the look should know going
+and none was simulated. **The human decided the merge: `--no-ff` at
+`e4e3f80` on 2026-09-22**, the four gate lines green on the merged tree, the
+ledger archived at `c42263c` (`docs/superpowers/ledgers/2026-09-22-page-grid-rulers/`),
+branch and worktree deleted; the look is still owed and the merge did not
+discharge it. Three things the look should know going
 in: `header.units` is set to millimetres and never read to convert (a
 non-goal); the adaptive snap step follows the zoom unless `gridStepMm` is
 set (spec D6); and the first frame paints at the shell's nominal 1440×900
 page fit, the second at the real size (Ruling 04-16). See
-[Plan 04](#plan-04--page-grid-and-rulers-executed-on-plan-04page-grid-rulers-not-merged)
+[Plan 04](#plan-04--page-grid-and-rulers-merged-into-main-at-e4e3f80)
 and
 [2026-09-22-plan-04-results.md](docs/superpowers/notes/2026-09-22-plan-04-results.md).
 The other ten sub-projects have not started.

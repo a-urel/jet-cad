@@ -1,8 +1,9 @@
 # 04 — Page, grid and rulers
 
-**Status:** executed on `plan-04/page-grid-rulers` — twelve tasks through
-`1618111`, then a final fix wave at `1fe1fcc` + the docs commit on top of it
-(2026-09-22), not merged; exit gate 15 of 16, the look owed
+**Status:** MERGED into `main` at `e4e3f80` (2026-09-22) — twelve tasks
+through `1618111`, a final fix wave at `1fe1fcc` + `e6537dd`, the ledger
+archived at `c42263c`; exit gate 15 of 16, the human's look owed after the
+merge
 **Depends on:** 01
 **Blocks:** 13
 **Size:** M
