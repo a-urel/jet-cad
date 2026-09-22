@@ -1,0 +1,586 @@
+# Review package: 24e09d8..87bed32
+
+## Commits
+87bed32 feat(overlay): the rebased outline cache and the selection style constants
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/outline_cache.dart  | 329 +++++++++++++++++++++
+ .../lib/src/selection_style.dart                   |  15 +-
+ .../test/outline_cache_test.dart                   | 205 +++++++++++++
+ 3 files changed, 547 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/outline_cache.dart b/packages/jet_cad_2d_flutter/lib/src/outline_cache.dart
+new file mode 100644
+index 0000000..c0f8409
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/outline_cache.dart
+@@ -0,0 +1,329 @@
++import 'dart:async';
++import 'dart:math' as math;
++import 'dart:ui' show Offset, Path, Rect;
++
++import 'package:flutter/foundation.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2;
++
++import 'selection.dart';
++
++/// One piece of a selected object's outline, in **world** doubles.
++sealed class _Outline {
++  const _Outline();
++}
++
++/// A polyline chain: `moveTo` the first point, `lineTo` the rest.
++final class _Segments extends _Outline {
++  const _Segments(this.coords);
++
++  /// Interleaved world x, y pairs.
++  final Float64List coords;
++}
++
++/// A circular arc; a whole circle is `sweep = 2π`.
++final class _Arc extends _Outline {
++  const _Arc(this.cx, this.cy, this.r, this.start, this.sweep);
++  final double cx, cy, r, start, sweep;
++}
++
++/// The overlay's outlines: world geometry in `Float64List`s, `ui.Path`s in
++/// the space rebased by the frame's origin (spec D9, review ruling B2).
++///
++/// **No absolute world coordinate ever reaches `dart:ui` from here.**
++/// `ui.Path` stores float32; at the generated corpus's x = 4.5e6 the float32
++/// spacing is about half a unit, so a world-space path would sit visibly off
++/// the entity it outlines while the startup plan at x = 5e3 still looked
++/// fine. The world record is therefore kept in `Float64List`s and each
++/// `ui.Path` is built with the frame's rebase origin subtracted, tagged with
++/// that origin, and rebuilt only when the tag changes — the painter draws it
++/// under `worldToScreen ∘ translate(origin)`.
++///
++/// The document walk happens at selection-change, hover-change and
++/// `DocChange` rate — never per frame.
++class OutlineCache {
++  OutlineCache(this.document, this.selection) {
++    _subscription = document.changes.listen(_onChange);
++    selection.addListener(_onSelection);
++    _onSelection();
++  }
++
++  final DraftDocument document;
++  final SelectionController selection;
++  late final StreamSubscription<DocChange> _subscription;
++
++  final Map<SelectionKey, List<_Outline>> _world =
++      <SelectionKey, List<_Outline>>{};
++  final Map<SelectionKey, Path> _paths = <SelectionKey, Path>{};
++
++  final Vector2 _origin = Vector2.zero();
++
++  /// Set until the paths agree with both [_world] and [_origin].
++  bool _stale = true;
++
++  /// The origin the current paths are rebased by.
++  Vector2 get origin => _origin;
++
++  /// How many times every path has been rebuilt. Test-only: the point of the
++  /// tag is that two `pathFor` calls at one origin cost one rebuild, not two.
++  @visibleForTesting
++  int debugRebuilds = 0;
++
++  /// The path for [key] in the space rebased by [origin], or null when [key]
++  /// is neither selected nor hovered.
++  ///
++  /// Rebuilds every path — from the cached `Float64List`s, with no document
++  /// access — when [origin] differs from the tag, and retags.
++  Path? pathFor(SelectionKey key, Vector2 origin) {
++    if (_stale || origin != _origin) {
++      _origin.setFrom(origin);
++      _rebuildPaths();
++    }
++    return _paths[key];
++  }
++
++  /// **Test-only.** Every `_Segments` outline of [key], concatenated in
++  /// order, in world doubles; null when [key] is not cached.
++  @visibleForTesting
++  Float64List? debugWorldSegmentsOf(SelectionKey key) {
++    final outlines = _world[key];
++    if (outlines == null) return null;
++    var length = 0;
++    for (final o in outlines) {
++      if (o is _Segments) length += o.coords.length;
++    }
++    final out = Float64List(length);
++    var at = 0;
++    for (final o in outlines) {
++      if (o is! _Segments) continue;
++      out.setRange(at, at + o.coords.length, o.coords);
++      at += o.coords.length;
++    }
++    return out;
++  }
++
++  void dispose() {
++    _subscription.cancel();
++    selection.removeListener(_onSelection);
++    _world.clear();
++    _paths.clear();
++  }
++
++  // --- keys in, keys out -------------------------------------------------
++
++  /// Adds what entered the selection or the hover, drops what left.
++  void _onSelection() {
++    final live = <SelectionKey>{...selection.keys};
++    final hover = selection.hover;
++    if (hover != null) live.add(hover);
++    var changed = _world.keys.toSet().difference(live).isNotEmpty;
++    _world.removeWhere((k, _) => !live.contains(k));
++    final entering = [
++      for (final k in live)
++        if (!_world.containsKey(k)) k
++    ];
++    if (entering.isNotEmpty) {
++      _walk(entering);
++      changed = true;
++    }
++    if (changed) _invalidatePaths();
++  }
++
++  /// Records the world outline of each of [keys], sharing one
++  /// `leavesByOwner()` scan across the whole batch and never across batches —
++  /// the document may have changed since the last one.
++  void _walk(Iterable<SelectionKey> keys) {
++    _byOwner = null;
++    for (final key in keys) {
++      _world[key] = _outlinesFor(key);
++    }
++    _byOwner = null;
++  }
++
++  /// Spec D9: **every** `DocChange` rebuilds **every** cached outline. A leaf
++  /// edited inside a selected instance's definition or group touches neither
++  /// the instance nor the group handle, so an exact-handle rule never fires
++  /// for it; selection is small and commands arrive at command rate.
++  void _onChange(DocChange change) {
++    if (change is DocumentLoaded || change is DocumentPurged) {
++      // D11 drops the keys first; this clears whatever is left either way.
++      _world.clear();
++      _invalidatePaths();
++      return;
++    }
++    if (_world.isEmpty) return;
++    _walk(_world.keys.toList());
++    _invalidatePaths();
++  }
++
++  void _invalidatePaths() {
++    _paths.clear();
++    _stale = true;
++  }
++
++  void _rebuildPaths() {
++    _paths.clear();
++    final ox = _origin.x, oy = _origin.y;
++    for (final entry in _world.entries) {
++      final path = Path();
++      for (final outline in entry.value) {
++        switch (outline) {
++          case _Segments(:final coords):
++            if (coords.length < 2) continue;
++            path.moveTo(coords[0] - ox, coords[1] - oy);
++            for (var i = 2; i < coords.length; i += 2) {
++              path.lineTo(coords[i] - ox, coords[i + 1] - oy);
++            }
++          case _Arc(:final cx, :final cy, :final r, :final start, :final sweep):
++            // The painter applies the world→screen matrix — y-flip included
++            // — to the whole path, so the world angles go in unchanged.
++            path.addArc(
++              Rect.fromCircle(center: Offset(cx - ox, cy - oy), radius: r),
++              start,
++              sweep,
++            );
++        }
++      }
++      _paths[entry.key] = path;
++    }
++    _stale = false;
++    debugRebuilds++;
++  }
++
++  // --- the world record --------------------------------------------------
++
++  /// [key] is a leaf, a group or an instance (02 never produces a chain).
++  List<_Outline> _outlinesFor(SelectionKey key) {
++    final out = <_Outline>[];
++    final node = document.tree[key.target];
++    switch (node) {
++      case InstanceNode():
++        _addInstance(
++            out, node, document.tree.accumulatedTransform(key.target), null);
++      case GroupNode():
++        _addContainer(out, key.target, node.children,
++            document.tree.accumulatedTransform(key.target), null);
++      case null:
++        final slot = document.entities.slotOf(key.target);
++        if (slot == null) break;
++        final owner = document.entities.ownerAt(slot);
++        _addLeaf(
++            out,
++            slot,
++            owner == document.rootHandle
++                ? Transform2.identity()
++                : document.tree.accumulatedTransform(owner));
++    }
++    return out;
++  }
++
++  /// An instance's contents: its definition's leaves and child nodes, each
++  /// carried through [toWorld] (which already includes the instance's own
++  /// transform).
++  void _addInstance(List<_Outline> out, InstanceNode node, Transform2 toWorld,
++      Set<Handle>? visiting) {
++    final definition = document.tree.definition(node.definition);
++    if (definition == null) return;
++    final open = visiting ?? <Handle>{};
++    // A definition that reaches itself is rejected by `addNode`, but an
++    // imported document can carry one; an outline is not the place to throw.
++    if (!open.add(node.definition)) return;
++    _addContainer(out, node.definition, definition.children, toWorld, open);
++    open.remove(node.definition);
++  }
++
++  /// Every leaf owned by [container], then its child groups and instances.
++  ///
++  /// [toWorld] maps [container]'s own space to world.
++  void _addContainer(List<_Outline> out, Handle container,
++      List<Handle> children, Transform2 toWorld, Set<Handle>? visiting) {
++    final byOwner = _byOwner ??= document.leavesByOwner();
++    for (final slot in byOwner[container] ?? const <int>[]) {
++      _addLeaf(out, slot, toWorld);
++    }
++    for (final child in document.tree.childNodesOf(children)) {
++      final node = document.tree[child];
++      switch (node) {
++        case GroupNode():
++          _addContainer(out, child, node.children,
++              toWorld.multiply(node.transform), visiting);
++        case InstanceNode():
++          _addInstance(out, node, toWorld.multiply(node.transform), visiting);
++        case null:
++          break;
++      }
++    }
++  }
++
++  /// `document.leavesByOwner()` is a full entity-store scan; one per walk.
++  Map<Handle, List<int>>? _byOwner;
++
++  void _addLeaf(List<_Outline> out, int slot, Transform2 t) {
++    final kind = document.entities.kindAt(slot);
++    if (kind == EntityKind.fill) return; // a fill has no coordinates (D8)
++    final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
++    switch (kind) {
++      case EntityKind.point:
++      case EntityKind.line:
++      case EntityKind.polyline:
++        final n = payload.pointCount;
++        if (n == 0) return;
++        final coords = Float64List(n * 2);
++        final c = payload.coords;
++        for (var i = 0; i < n; i++) {
++          final x = c[i * 2], y = c[i * 2 + 1];
++          coords[i * 2] = t.a * x + t.c * y + t.e;
++          coords[i * 2 + 1] = t.b * x + t.d * y + t.f;
++        }
++        out.add(_Segments(coords));
++      case EntityKind.circle:
++        if (payload.pointCount == 0 || payload.scalars.isEmpty) return;
++        final centre = t.transformPoint(payload.pointAt(0));
++        out.add(_Arc(centre.x, centre.y, payload.scalars[0] * t.scaleMagnitude,
++            0, 2 * math.pi));
++      case EntityKind.arc:
++        if (payload.pointCount == 0 || payload.scalars.length < 3) return;
++        final r0 = payload.scalars[0];
++        final centre = t.transformPoint(payload.pointAt(0));
++        // The pick's rule (`spatial_index._considerLeaf`, `band_predicates`):
++        // the world start angle comes from the transformed start *point*, and
++        // a mirror — a negative determinant — flips the turning sense.
++        final local = payload.pointAt(0);
++        final start = t.transformPoint(Vector2(
++          local.x + r0 * math.cos(payload.scalars[1]),
++          local.y + r0 * math.sin(payload.scalars[1]),
++        ));
++        out.add(_Arc(
++          centre.x,
++          centre.y,
++          r0 * t.scaleMagnitude,
++          math.atan2(start.y - centre.y, start.x - centre.x),
++          t.determinant < 0 ? -payload.scalars[2] : payload.scalars[2],
++        ));
++      case EntityKind.text:
++      case EntityKind.attrib:
++        final style = document.textStyleOf(document.entities.textStyleAt(slot));
++        final box = textBoxOf(
++          payload,
++          document.entities.textAttrsAt(slot),
++          style,
++          document.textMeasurer
++              .measure(text: document.entities.textAt(slot), style: style),
++        );
++        if (box == null) return;
++        // Box space → leaf space → world, closed back on the first corner.
++        final m = t.multiply(box.local);
++        final xs = [box.minX, box.maxX, box.maxX, box.minX, box.minX];
++        final ys = [box.minY, box.minY, box.maxY, box.maxY, box.minY];
++        final coords = Float64List(10);
++        for (var i = 0; i < 5; i++) {
++          final p = m.transformPoint(Vector2(xs[i], ys[i]));
++          coords[i * 2] = p.x;
++          coords[i * 2 + 1] = p.y;
++        }
++        out.add(_Segments(coords));
++      case EntityKind.fill:
++        return;
++    }
++  }
++}
+diff --git a/packages/jet_cad_2d_flutter/lib/src/selection_style.dart b/packages/jet_cad_2d_flutter/lib/src/selection_style.dart
+index a73785e..ef181fa 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/selection_style.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/selection_style.dart
+@@ -1,10 +1,21 @@
+ import 'dart:ui' show Color;
+ 
++/// The selected outline's colour (spec D1, D9).
++const Color kSelectionColor = Color(0xFF1E6FE8);
++
++/// The hover outline's colour — the same hue, carried at 60% alpha so a
++/// hovered object reads as a weaker statement than a selected one.
++const Color kHoverColor = Color(0x991E6FE8);
++
+ /// The band overlay's colours (spec D1). `SelectTool` paints its own preview
+-/// with these; everything else selection-styled — the selected/hover outline
+-/// — is Task 7's.
++/// with these; the selected/hover outline is `SelectionOverlay`'s.
+ const Color kWindowBandColor = Color(0xFF1E6FE8);
+ const Color kCrossingBandColor = Color(0xFF2E9E5B);
+ 
+ /// Alpha of the band's fill, out of 255. The stroke stays fully opaque.
+ const int kBandFillAlpha = 0x22;
++
++/// Outline stroke widths in **screen** pixels. The overlay divides each by
++/// `camera.scale` per frame, so the width on screen holds at any zoom.
++const double kSelectionStrokePixels = 2.0;
++const double kHoverStrokePixels = 1.5;
+diff --git a/packages/jet_cad_2d_flutter/test/outline_cache_test.dart b/packages/jet_cad_2d_flutter/test/outline_cache_test.dart
+new file mode 100644
+index 0000000..92ae8c6
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/outline_cache_test.dart
+@@ -0,0 +1,205 @@
++import 'dart:math' as math;
++import 'dart:typed_data';
++import 'dart:ui' show Size;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d/testing.dart' show kDefaultOriginX;
++import 'package:jet_cad_2d_flutter/src/camera_controller.dart'
++    show rebaseOriginFor;
++import 'package:jet_cad_2d_flutter/src/outline_cache.dart';
++import 'package:jet_cad_2d_flutter/src/selection.dart';
++import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2;
++
++import 'support/selection_fixture.dart';
++
++/// A cache wired to a fresh controller, both torn down with the test.
++(SelectionController, OutlineCache) wire(DraftDocument doc) {
++  final selection = SelectionController(doc);
++  addTearDown(selection.dispose);
++  final cache = OutlineCache(doc, selection);
++  addTearDown(cache.dispose);
++  return (selection, cache);
++}
++
++GeometryPayload payload(List<double> coords, List<double> scalars) =>
++    GeometryPayload(
++      coords: Float64List.fromList(coords),
++      scalars: Float64List.fromList(scalars),
++    );
++
++void main() {
++  test('the path is built in rebased space', () {
++    // M-02v. The corpus this project generates sits at x = 4.5e6, where
++    // float32 spacing is about half a unit — a world-space `ui.Path` would
++    // land the outline off the entity it outlines.
++    final doc = DraftDocument.empty();
++    final leaf = addEntity(doc, doc.rootHandle, EntityKind.line,
++        [kDefaultOriginX + 10, 20, kDefaultOriginX + 110, 20], []);
++    final (selection, cache) = wire(doc);
++    final key = SelectionKey.root(leaf);
++    selection.replace([key]);
++
++    const size = Size(800, 600);
++    final camera = ViewportTransform.fit(
++        Aabb2.raw(kDefaultOriginX, 0, kDefaultOriginX + 120, 100), size);
++    final origin = rebaseOriginFor(camera.visibleWorld(size));
++    expect(origin.x, isNot(0.0), reason: 'the fixture must be off the origin');
++
++    final path = cache.pathFor(key, origin);
++    expect(path, isNotNull);
++    final left = path!.getBounds().left;
++    expect(left, closeTo(10 + (kDefaultOriginX - origin.x), 1e-6));
++    // The discriminating half: a world-space path would put the bound here,
++    // rounded to the nearest float32 — within a quarter unit at 4.5e6.
++    expect((left - (kDefaultOriginX + 10)).abs(), greaterThan(0.25),
++        reason: 'an absolute world coordinate reached dart:ui');
++  });
++
++  test('the origin tag rebuilds once per change, not per call', () {
++    final doc = DraftDocument.empty();
++    final leaf =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [40, 25, 90, 65], []);
++    final (selection, cache) = wire(doc);
++    final key = SelectionKey.root(leaf);
++    selection.replace([key]);
++
++    final first = Vector2(64.0, 32.0);
++    expect(cache.pathFor(key, first), isNotNull);
++    expect(cache.debugRebuilds, 1);
++    expect(cache.origin, equals(first));
++    expect(cache.pathFor(key, first), isNotNull);
++    expect(cache.debugRebuilds, 1, reason: 'the same origin must not rebuild');
++    expect(cache.pathFor(key, Vector2(128.0, 32.0)), isNotNull);
++    expect(cache.debugRebuilds, 2);
++  });
++
++  test('a DocChange inside a selected instance rebuilds the outline', () async {
++    // M-02w. The edit touches neither the instance handle nor the group
++    // handle, so an exact-handle rule never fires for it.
++    final doc = DraftDocument.empty();
++    final def = addDefinition(doc, 'Def');
++    final leaf = addEntity(doc, def, EntityKind.line, [3, 1, 9, 4], []);
++    final instance = addInstance(doc, def, kPlacement);
++    final (selection, cache) = wire(doc);
++    final key = SelectionKey.root(instance);
++    selection.replace([key]);
++
++    final before = cache.debugWorldSegmentsOf(key);
++    expect(before, isNotNull);
++    expect(before!.length, 4);
++
++    doc.commands
++        .execute(SetEntityGeometryCommand(leaf, payload([3, 1, 9, 40], [])));
++    await Future<void>.delayed(Duration.zero);
++
++    final after = cache.debugWorldSegmentsOf(key);
++    expect(after, isNotNull);
++    final moved = kPlacement.transformPoint(Vector2(9, 40));
++    expect(after![2], closeTo(moved.x, 1e-9));
++    expect(after[3], closeTo(moved.y, 1e-9));
++    expect((after[3] - before[3]).abs(), greaterThan(1.0),
++        reason: 'the stale world record survived the change');
++  });
++
++  test('an instance outline composes the placement', () {
++    final doc = DraftDocument.empty();
++    final def = addDefinition(doc, 'Def');
++    addEntity(doc, def, EntityKind.line, [3, 1, 9, 4], []);
++    final instance = addInstance(doc, def, kPlacement);
++    final (selection, cache) = wire(doc);
++    final key = SelectionKey.root(instance);
++    selection.replace([key]);
++
++    final segments = cache.debugWorldSegmentsOf(key);
++    expect(segments, isNotNull);
++    expect(segments!.length, 4);
++    final p0 = kPlacement.transformPoint(Vector2(3, 1));
++    final p1 = kPlacement.transformPoint(Vector2(9, 4));
++    expect(segments[0], closeTo(p0.x, 1e-9));
++    expect(segments[1], closeTo(p0.y, 1e-9));
++    expect(segments[2], closeTo(p1.x, 1e-9));
++    expect(segments[3], closeTo(p1.y, 1e-9));
++  });
++
++  test('a grouped leaf inside a definition composes the group transform too',
++      () {
++    final doc = DraftDocument.empty();
++    final def = addDefinition(doc, 'Def');
++    final group = addGroup(
++        doc,
++        def,
++        Transform2.translation(-17, 23)
++            .multiply(Transform2.rotation(-math.pi / 5)));
++    addEntity(doc, group, EntityKind.line, [3, 1, 9, 4], []);
++    final instance = addInstance(doc, def, kPlacement);
++    final (selection, cache) = wire(doc);
++    final key = SelectionKey.root(instance);
++    selection.replace([key]);
++
++    final composed = kPlacement.multiply(doc.tree.accumulatedTransform(group));
++    final segments = cache.debugWorldSegmentsOf(key);
++    expect(segments, isNotNull);
++    expect(segments!.length, 4);
++    final p0 = composed.transformPoint(Vector2(3, 1));
++    final p1 = composed.transformPoint(Vector2(9, 4));
++    expect(segments[0], closeTo(p0.x, 1e-9));
++    expect(segments[1], closeTo(p0.y, 1e-9));
++    expect(segments[2], closeTo(p1.x, 1e-9));
++    expect(segments[3], closeTo(p1.y, 1e-9));
++    // Dropping the group transform would leave the leaf at the placement
++    // alone; the fixture is built so the two are far apart.
++    final unplaced = kPlacement.transformPoint(Vector2(3, 1));
++    expect((segments[0] - unplaced.x).abs(), greaterThan(1.0));
++  });
++
++  test(
++      'a circle under a non-uniform instance scale is emitted with the '
++      'geometric-mean radius', () {
++    final doc = DraftDocument.empty();
++    final def = addDefinition(doc, 'Def');
++    addEntity(doc, def, EntityKind.circle, [5, 3], [2]);
++    // det = 16, so the world radius is 2 * 4 = 8 — neither 2 * 2 nor 2 * 8.
++    final placement = Transform2.translation(40, -25)
++        .multiply(Transform2.rotation(math.pi / 7))
++        .multiply(Transform2.scale(2, 8));
++    final instance = addInstance(doc, def, placement);
++    final (selection, cache) = wire(doc);
++    final key = SelectionKey.root(instance);
++    selection.replace([key]);
++
++    final origin = Vector2(32.0, -32.0);
++    final bounds = cache.pathFor(key, origin)!.getBounds();
++    expect(bounds.width, closeTo(16.0, 1e-3));
++    expect(bounds.height, closeTo(16.0, 1e-3));
++    final centre = placement.transformPoint(Vector2(5, 3));
++    expect(bounds.center.dx, closeTo(centre.x - origin.x, 1e-3));
++    expect(bounds.center.dy, closeTo(centre.y - origin.y, 1e-3));
++  });
++
++  test('keys dropped from the selection leave the cache', () {
++    final doc = DraftDocument.empty();
++    final a =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [40, 25, 90, 65], []);
++    final b =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [140, 25, 190, 65], []);
++    final (selection, cache) = wire(doc);
++    final ka = SelectionKey.root(a), kb = SelectionKey.root(b);
++    selection.replace([ka, kb]);
++    final origin = Vector2(64.0, 32.0);
++    expect(cache.pathFor(ka, origin), isNotNull);
++    expect(cache.pathFor(kb, origin), isNotNull);
++
++    selection.replace([ka]);
++    expect(cache.debugWorldSegmentsOf(kb), isNull);
++    expect(cache.pathFor(kb, origin), isNull);
++    expect(cache.debugWorldSegmentsOf(ka), isNotNull);
++
++    // The hover is cached beside the selection, and leaves with it.
++    selection.setHover(kb);
++    expect(cache.debugWorldSegmentsOf(kb), isNotNull);
++    selection.setHover(null);
++    expect(cache.debugWorldSegmentsOf(kb), isNull);
++  });
++}

@@ -1,0 +1,296 @@
+# Review package: 9722287..e6eb713
+
+## Commits
+e6eb713 feat(app): selection, hover and band in the floor planner; tool name and count in the top bar
+
+## Files changed
+ apps/floor_planner/lib/main.dart                | 33 +++++++++++++
+ apps/floor_planner/lib/planner_view.dart        | 48 +++++++++++++++++--
+ apps/floor_planner/test/planner_shell_test.dart | 61 +++++++++++++++++++++++++
+ 3 files changed, 137 insertions(+), 5 deletions(-)
+
+## Diff
+diff --git a/apps/floor_planner/lib/main.dart b/apps/floor_planner/lib/main.dart
+index adcaf7a..01668db 100644
+--- a/apps/floor_planner/lib/main.dart
++++ b/apps/floor_planner/lib/main.dart
+@@ -35,55 +35,88 @@ class _PlannerShellState extends State<PlannerShell> {
+   late final DraftDocument _document = startupPlan(_measurer);
+   late final SpatialIndex _index = SpatialIndex(_document);
+   // Fitted to the nominal window; PlannerView re-fits once at the real size.
+   late final CameraController _camera = CameraController(
+     ViewportTransform.fit(_document.extents, const Size(1440, 900)),
+     minScale: kMinScale,
+     maxScale: kMaxScale,
+   );
+   final GesturePolicy _policy = GesturePolicy.forPlatform();
+ 
++  // Constructed before the tool controller and its context: the selection
++  // controller's listener on `document.changes` must prune dead keys before
++  // anything downstream (the outline cache, in PlannerView) walks them.
++  late final SelectionController _selection = SelectionController(_document);
++  late final ToolContext _context = ToolContext(
++      document: _document,
++      index: _index,
++      camera: _camera,
++      selection: _selection);
++  late final ToolController _tools =
++      ToolController(initial: SelectTool(), context: _context);
++  late final Listenable _status = Listenable.merge([_selection, _tools]);
++
++  String _statusLine() {
++    final base = _tools.active.name;
++    return _selection.isEmpty ? base : '$base — ${_selection.length} selected';
++  }
++
+   @override
+   void dispose() {
++    _tools.dispose();
++    _selection.dispose();
+     _camera.dispose();
+     _index.dispose();
+     _measurer.clear();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+     final scheme = Theme.of(context).colorScheme;
+     return Scaffold(
+       body: Column(
+         children: [
+           Container(
+             key: const Key('chrome-top'),
+             height: 44,
+             color: scheme.surfaceContainer,
++            child: Align(
++              alignment: Alignment.centerLeft,
++              child: Padding(
++                padding: const EdgeInsets.symmetric(horizontal: 12),
++                child: ListenableBuilder(
++                  listenable: _status,
++                  builder: (_, __) =>
++                      Text(_statusLine(), key: const Key('status-text')),
++                ),
++              ),
++            ),
+           ),
+           Expanded(
+             child: Row(
+               children: [
+                 Container(
+                   key: const Key('chrome-left'),
+                   width: 240,
+                   color: scheme.surfaceContainerLow,
+                 ),
+                 Expanded(
+                   child: ColoredBox(
+                     color: scheme.surface,
+                     child: PlannerView(
+                       document: _document,
+                       index: _index,
+                       camera: _camera,
+                       policy: _policy,
++                      selection: _selection,
++                      tools: _tools,
+                     ),
+                   ),
+                 ),
+                 Container(
+                   key: const Key('chrome-right'),
+                   width: 280,
+                   color: scheme.surfaceContainerLow,
+                 ),
+               ],
+             ),
+diff --git a/apps/floor_planner/lib/planner_view.dart b/apps/floor_planner/lib/planner_view.dart
+index 7a905c2..5f50322 100644
+--- a/apps/floor_planner/lib/planner_view.dart
++++ b/apps/floor_planner/lib/planner_view.dart
+@@ -8,49 +8,87 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ /// entities, and the resident backend cannot run on web, which this product
+ /// targets. Neither is a default a later sub-project may flip without a
+ /// measurement.
+ class PlannerView extends StatefulWidget {
+   const PlannerView({
+     super.key,
+     required this.document,
+     required this.index,
+     required this.camera,
+     required this.policy,
++    required this.selection,
++    required this.tools,
+   });
+ 
+   final DraftDocument document;
+   final SpatialIndex index;
+   final CameraController camera;
+   final GesturePolicy policy;
++  final SelectionController selection;
++  final ToolController tools;
+ 
+   @override
+   State<PlannerView> createState() => _PlannerViewState();
+ }
+ 
+ class _PlannerViewState extends State<PlannerView> {
+   /// Ruling 01-2: the camera is fitted once, to the size the view really
+   /// got, before the canvas under it has listened to anything.
+   bool _fitted = false;
+ 
++  // Constructed after the shell's `SelectionController` so it prunes dead
++  // keys before this cache walks them (listener order on `document.changes`).
++  late final OutlineCache _outlines =
++      OutlineCache(widget.document, widget.selection);
++  late final Listenable _repaint =
++      Listenable.merge([widget.selection, widget.tools, widget.camera]);
++
++  @override
++  void dispose() {
++    _outlines.dispose();
++    super.dispose();
++  }
++
+   @override
+   Widget build(BuildContext context) => LayoutBuilder(
+         builder: (context, constraints) {
+           if (!_fitted &&
+               constraints.biggest.width > 0 &&
+               constraints.biggest.height > 0) {
+             _fitted = true;
+             widget.camera.value = ViewportTransform.fit(
+                 widget.document.extents, constraints.biggest);
+           }
+           return CameraGestureDetector(
+             camera: widget.camera,
+             policy: widget.policy,
+-            child: DraftCanvas(
+-              document: widget.document,
+-              index: widget.index,
+-              camera: widget.camera,
+-              tiles: false,
++            child: InteractionLayer(
++              tools: widget.tools,
++              child: Stack(
++                children: [
++                  DraftCanvas(
++                    document: widget.document,
++                    index: widget.index,
++                    camera: widget.camera,
++                    tiles: false,
++                  ), // already inside its own RepaintBoundary
++                  Positioned.fill(
++                    child: RepaintBoundary(
++                      child: CustomPaint(
++                        painter: SelectionOverlayPainter(
++                          selection: widget.selection,
++                          tools: widget.tools,
++                          camera: widget.camera,
++                          outlines: _outlines,
++                          repaint: _repaint,
++                        ),
++                        size: Size.infinite,
++                      ),
++                    ),
++                  ),
++                ],
++              ),
+             ),
+           );
+         },
+       );
+ }
+diff --git a/apps/floor_planner/test/planner_shell_test.dart b/apps/floor_planner/test/planner_shell_test.dart
+index c7b7f4f..ea9b074 100644
+--- a/apps/floor_planner/test/planner_shell_test.dart
++++ b/apps/floor_planner/test/planner_shell_test.dart
+@@ -1,16 +1,19 @@
+ import 'package:floor_planner/main.dart';
+ import 'package:floor_planner/planner_view.dart';
+ import 'package:floor_planner/startup_plan.dart';
++import 'package:flutter/rendering.dart' show RenderCustomPaint;
+ import 'package:flutter/widgets.dart';
+ import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ void main() {
+   testWidgets('the shell shows a canvas over a non-empty, off-origin plan',
+       (tester) async {
+     await tester.pumpWidget(const FloorPlannerApp());
+     await tester.pump();
+ 
+     expect(find.byType(DraftCanvas), findsOneWidget);
+     expect(find.byType(CameraGestureDetector), findsOneWidget);
+     final view = tester.widget<PlannerView>(find.byType(PlannerView));
+@@ -61,11 +64,69 @@ void main() {
+     final moved = view.camera.value.worldToScreenMatrix;
+ 
+     await tester.binding.setSurfaceSize(const Size(1100, 750));
+     await tester.pump();
+     await tester.pump();
+ 
+     expect(view.camera.value.worldToScreenMatrix, same(moved));
+     expect(tester.getSize(find.byType(DraftCanvas)).width, greaterThan(500),
+         reason: 'the canvas really did get a new size');
+   });
++
++  testWidgets('the status text shows the tool name and follows the selection',
++      (tester) async {
++    await tester.pumpWidget(const FloorPlannerApp());
++    await tester.pump();
++
++    final view = tester.widget<PlannerView>(find.byType(PlannerView));
++    final statusFinder = find.byKey(const Key('status-text'));
++    expect(tester.widget<Text>(statusFinder).data, 'Select');
++
++    // kPlanOriginX + 100, kPlanOriginY sits on the outer wall's top edge
++    // (startup_plan.dart's first `rect`, from (x0, y0) to (x1, y0)).
++    final world = Vector2(kPlanOriginX + 100, kPlanOriginY);
++    final hit = HitPath();
++    final hitFound =
++        view.index.pickInto(world, 5.0, const QueryFilter.picking(), hit);
++    expect(hitFound, isTrue, reason: 'the probe point must sit on a wall');
++    final key = resolveHit(hit, view.document);
++    expect(key, isNotNull);
++
++    view.selection.replace([key!]);
++    await tester.pump();
++
++    expect(tester.widget<Text>(statusFinder).data, 'Select — 1 selected');
++  });
++
++  testWidgets('the interaction tree is in place', (tester) async {
++    await tester.pumpWidget(const FloorPlannerApp());
++    await tester.pump();
++
++    expect(find.byType(InteractionLayer), findsOneWidget);
++    final overlayFinder = find.byWidgetPredicate(
++        (w) => w is CustomPaint && w.painter is SelectionOverlayPainter);
++    expect(overlayFinder, findsOneWidget);
++
++    final overlaySize =
++        tester.renderObject<RenderCustomPaint>(overlayFinder).size;
++    expect(overlaySize, tester.getSize(find.byType(DraftCanvas)));
++  });
++
++  testWidgets('a click on a wall selects it in the running shell',
++      (tester) async {
++    await tester.pumpWidget(const FloorPlannerApp());
++    await tester.pump();
++
++    final view = tester.widget<PlannerView>(find.byType(PlannerView));
++    final world = Vector2(kPlanOriginX + 100, kPlanOriginY);
++    final screen = view.camera.value.worldToScreen(world);
++    final viewportSize = tester.getSize(find.byType(InteractionLayer));
++    expect(screen.x, inInclusiveRange(0, viewportSize.width));
++    expect(screen.y, inInclusiveRange(0, viewportSize.height));
++
++    final topLeft = tester.getTopLeft(find.byType(InteractionLayer));
++    await tester.tapAt(topLeft + Offset(screen.x, screen.y));
++    await tester.pump();
++
++    expect(view.selection.length, 1);
++  });
+ }
