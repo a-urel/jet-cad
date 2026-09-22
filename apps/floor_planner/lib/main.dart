@@ -3,6 +3,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'page_panel.dart';
 import 'planner_view.dart';
 import 'startup_plan.dart';
 
@@ -154,6 +155,7 @@ class _PlannerShellState extends State<PlannerShell> {
                     key: const Key('chrome-right'),
                     width: 280,
                     color: scheme.surfaceContainerLow,
+                    child: PagePanel(document: _document, page: _page),
                   ),
                 ],
               ),
