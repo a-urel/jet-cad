@@ -1,0 +1,420 @@
+# Review package: 87bed32..17d36e2
+
+## Commits
+17d36e2 fix(overlay): worldPointOf, an immutable rebuild counter, and text and mirrored-arc fixtures
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/outline_cache.dart  |  72 +++++++-
+ .../test/outline_cache_test.dart                   | 189 +++++++++++++++++++++
+ 2 files changed, 259 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/outline_cache.dart b/packages/jet_cad_2d_flutter/lib/src/outline_cache.dart
+index c0f8409..92533bf 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/outline_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/outline_cache.dart
+@@ -20,20 +20,32 @@ final class _Segments extends _Outline {
+   /// Interleaved world x, y pairs.
+   final Float64List coords;
+ }
+ 
+ /// A circular arc; a whole circle is `sweep = 2π`.
+ final class _Arc extends _Outline {
+   const _Arc(this.cx, this.cy, this.r, this.start, this.sweep);
+   final double cx, cy, r, start, sweep;
+ }
+ 
++/// A lone world position — a `point` entity.
++///
++/// Its own variant rather than a one-pair [_Segments], because a path of a
++/// single `moveTo` draws nothing and is indistinguishable from a vanished
++/// target. The overlay reads it through [OutlineCache.worldPointOf] and
++/// draws its own screen-space marker; a world-space cache cannot hold one,
++/// since a marker's size is in pixels.
++final class _Point extends _Outline {
++  const _Point(this.x, this.y);
++  final double x, y;
++}
++
+ /// The overlay's outlines: world geometry in `Float64List`s, `ui.Path`s in
+ /// the space rebased by the frame's origin (spec D9, review ruling B2).
+ ///
+ /// **No absolute world coordinate ever reaches `dart:ui` from here.**
+ /// `ui.Path` stores float32; at the generated corpus's x = 4.5e6 the float32
+ /// spacing is about half a unit, so a world-space path would sit visibly off
+ /// the entity it outlines while the startup plan at x = 5e3 still looked
+ /// fine. The world record is therefore kept in `Float64List`s and each
+ /// `ui.Path` is built with the frame's rebase origin subtracted, tagged with
+ /// that origin, and rebuilt only when the tag changes — the painter draws it
+@@ -55,60 +67,109 @@ class OutlineCache {
+   final Map<SelectionKey, List<_Outline>> _world =
+       <SelectionKey, List<_Outline>>{};
+   final Map<SelectionKey, Path> _paths = <SelectionKey, Path>{};
+ 
+   final Vector2 _origin = Vector2.zero();
+ 
+   /// Set until the paths agree with both [_world] and [_origin].
+   bool _stale = true;
+ 
+   /// The origin the current paths are rebased by.
++  ///
++  /// **Do not mutate; a mutated tag desyncs the rebased paths.** The live
++  /// field is handed out rather than a copy because the overlay reads it once
++  /// per frame and a copy would allocate at frame rate.
+   Vector2 get origin => _origin;
+ 
++  int _debugRebuilds = 0;
++
+   /// How many times every path has been rebuilt. Test-only: the point of the
+   /// tag is that two `pathFor` calls at one origin cost one rebuild, not two.
+   @visibleForTesting
+-  int debugRebuilds = 0;
++  int get debugRebuilds => _debugRebuilds;
+ 
+   /// The path for [key] in the space rebased by [origin], or null when [key]
+   /// is neither selected nor hovered.
+   ///
+   /// Rebuilds every path — from the cached `Float64List`s, with no document
+   /// access — when [origin] differs from the tag, and retags.
+   Path? pathFor(SelectionKey key, Vector2 origin) {
+     if (_stale || origin != _origin) {
+       _origin.setFrom(origin);
+       _rebuildPaths();
+     }
+     return _paths[key];
+   }
+ 
++  /// The world position of [key] when its whole outline is a single `point`
++  /// entity; null for every other key, and for a key that is not cached.
++  ///
++  /// **The overlay's affordance for drawing a point key** (Task 8). A point
++  /// has no extent, so its `ui.Path` would be a lone `moveTo` — it draws
++  /// nothing, and an empty path cannot be told apart from a target that has
++  /// vanished. The marker a point deserves is a screen-space cross, whose
++  /// size is in pixels and therefore cannot live in a world-space cache; the
++  /// painter reads the position here and sizes the cross itself. The value is
++  /// **absolute world**, so the caller must rebase it — subtract [origin] —
++  /// before it reaches `dart:ui`.
++  Vector2? worldPointOf(SelectionKey key) {
++    final outlines = _world[key];
++    if (outlines == null || outlines.length != 1) return null;
++    final only = outlines.first;
++    return only is _Point ? Vector2(only.x, only.y) : null;
++  }
++
+   /// **Test-only.** Every `_Segments` outline of [key], concatenated in
+   /// order, in world doubles; null when [key] is not cached.
+   @visibleForTesting
+   Float64List? debugWorldSegmentsOf(SelectionKey key) {
+     final outlines = _world[key];
+     if (outlines == null) return null;
+     var length = 0;
+     for (final o in outlines) {
+       if (o is _Segments) length += o.coords.length;
+     }
+     final out = Float64List(length);
+     var at = 0;
+     for (final o in outlines) {
+       if (o is! _Segments) continue;
+       out.setRange(at, at + o.coords.length, o.coords);
+       at += o.coords.length;
+     }
+     return out;
+   }
+ 
++  /// **Test-only.** Every `_Arc` outline of [key] as five world doubles —
++  /// `cx, cy, r, start, sweep` — in order; null when [key] is not cached.
++  ///
++  /// `ui.Path.getBounds` cannot stand in for this: it returns the bounds of
++  /// the conic **control points**, which for a partial sweep lie outside the
++  /// curve (measured: a 2.6 rad sweep of radius 7 reads `maxX = 19.1` where
++  /// the arc's own bound is 17.0), so a bounds comparison can neither pin the
++  /// start angle nor the sweep's sign.
++  @visibleForTesting
++  Float64List? debugWorldArcsOf(SelectionKey key) {
++    final outlines = _world[key];
++    if (outlines == null) return null;
++    final arcs = outlines.whereType<_Arc>().toList();
++    final out = Float64List(arcs.length * 5);
++    for (var i = 0; i < arcs.length; i++) {
++      final a = arcs[i];
++      out[i * 5] = a.cx;
++      out[i * 5 + 1] = a.cy;
++      out[i * 5 + 2] = a.r;
++      out[i * 5 + 3] = a.start;
++      out[i * 5 + 4] = a.sweep;
++    }
++    return out;
++  }
++
+   void dispose() {
+     _subscription.cancel();
+     selection.removeListener(_onSelection);
+     _world.clear();
+     _paths.clear();
+   }
+ 
+   // --- keys in, keys out -------------------------------------------------
+ 
+   /// Adds what entered the selection or the hover, drops what left.
+@@ -175,26 +236,30 @@ class OutlineCache {
+               path.lineTo(coords[i] - ox, coords[i + 1] - oy);
+             }
+           case _Arc(:final cx, :final cy, :final r, :final start, :final sweep):
+             // The painter applies the world→screen matrix — y-flip included
+             // — to the whole path, so the world angles go in unchanged.
+             path.addArc(
+               Rect.fromCircle(center: Offset(cx - ox, cy - oy), radius: r),
+               start,
+               sweep,
+             );
++          case _Point():
++            // No extent, so nothing to stroke: the overlay draws a point key
++            // from `worldPointOf` as a screen-space marker instead.
++            continue;
+         }
+       }
+       _paths[entry.key] = path;
+     }
+     _stale = false;
+-    debugRebuilds++;
++    _debugRebuilds++;
+   }
+ 
+   // --- the world record --------------------------------------------------
+ 
+   /// [key] is a leaf, a group or an instance (02 never produces a chain).
+   List<_Outline> _outlinesFor(SelectionKey key) {
+     final out = <_Outline>[];
+     final node = document.tree[key.target];
+     switch (node) {
+       case InstanceNode():
+@@ -257,20 +322,23 @@ class OutlineCache {
+ 
+   /// `document.leavesByOwner()` is a full entity-store scan; one per walk.
+   Map<Handle, List<int>>? _byOwner;
+ 
+   void _addLeaf(List<_Outline> out, int slot, Transform2 t) {
+     final kind = document.entities.kindAt(slot);
+     if (kind == EntityKind.fill) return; // a fill has no coordinates (D8)
+     final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
+     switch (kind) {
+       case EntityKind.point:
++        if (payload.pointCount == 0) return;
++        final p = t.transformPoint(payload.pointAt(0));
++        out.add(_Point(p.x, p.y));
+       case EntityKind.line:
+       case EntityKind.polyline:
+         final n = payload.pointCount;
+         if (n == 0) return;
+         final coords = Float64List(n * 2);
+         final c = payload.coords;
+         for (var i = 0; i < n; i++) {
+           final x = c[i * 2], y = c[i * 2 + 1];
+           coords[i * 2] = t.a * x + t.c * y + t.e;
+           coords[i * 2 + 1] = t.b * x + t.d * y + t.f;
+diff --git a/packages/jet_cad_2d_flutter/test/outline_cache_test.dart b/packages/jet_cad_2d_flutter/test/outline_cache_test.dart
+index 92ae8c6..6a58b0b 100644
+--- a/packages/jet_cad_2d_flutter/test/outline_cache_test.dart
++++ b/packages/jet_cad_2d_flutter/test/outline_cache_test.dart
+@@ -195,11 +195,200 @@ void main() {
+     expect(cache.debugWorldSegmentsOf(kb), isNull);
+     expect(cache.pathFor(kb, origin), isNull);
+     expect(cache.debugWorldSegmentsOf(ka), isNotNull);
+ 
+     // The hover is cached beside the selection, and leaves with it.
+     selection.setHover(kb);
+     expect(cache.debugWorldSegmentsOf(kb), isNotNull);
+     selection.setHover(null);
+     expect(cache.debugWorldSegmentsOf(kb), isNull);
+   });
++
++  test('a point key answers its world position, a line key does not', () {
++    // The overlay's affordance: a point has no extent, so its path is a lone
++    // `moveTo` and draws nothing. The group carries the fixture off the
++    // identity as well as off the origin.
++    final doc = DraftDocument.empty();
++    final group = addGroup(doc, doc.rootHandle, kPlacement);
++    final dot = addEntity(doc, group, EntityKind.point, [13, -7], []);
++    final line =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [40, 25, 90, 65], []);
++    final (selection, cache) = wire(doc);
++    // A leaf owned by a group is selected through the group (spec D2).
++    final kDot = SelectionKey.root(group);
++    final kLine = SelectionKey.root(line);
++    selection.replace([kDot, kLine]);
++
++    final expected = kPlacement.transformPoint(Vector2(13, -7));
++    final actual = cache.worldPointOf(kDot);
++    expect(actual, isNotNull);
++    expect(actual!.x, closeTo(expected.x, 1e-9));
++    expect(actual.y, closeTo(expected.y, 1e-9));
++    // Not the untransformed point: the group placement is load-bearing here.
++    expect((actual.x - 13).abs(), greaterThan(1.0));
++
++    expect(cache.worldPointOf(kLine), isNull);
++    expect(cache.worldPointOf(SelectionKey.root(doc.handleSeed.next())), isNull,
++        reason: 'an unknown key has no point');
++
++    // The leaf key itself answers too, through the other branch of the walk:
++    // a leaf whose owner is a group carries that group's transform.
++    final kLeaf = SelectionKey.root(dot);
++    selection.replace([kLeaf]);
++    final viaLeaf = cache.worldPointOf(kLeaf);
++    expect(viaLeaf, isNotNull);
++    expect(viaLeaf!.x, closeTo(expected.x, 1e-9));
++    expect(viaLeaf.y, closeTo(expected.y, 1e-9));
++  });
++
++  test('a rotated text is recorded as its four oriented world corners', () {
++    final doc = DraftDocument.empty(measurer: const _FixedMeasurer());
++    final def = addDefinition(doc, 'Def');
++    // Height 40, rotated 0.4 rad, right/top justified — nothing here sits at
++    // a default, so a dropped attribute or a dropped `box.local` shows.
++    final attrs = packTextAttrs(h: TextJustifyH.right, v: TextJustifyV.top);
++    final text = addText(doc, def,
++        text: 'JET',
++        textStyle: ReservedHandles.standardTextStyle,
++        coords: [6, -2],
++        scalars: [40, 0.4, 0, 0],
++        textAttrs: attrs);
++    final instance = addInstance(doc, def, kPlacement);
++    final (selection, cache) = wire(doc);
++    final key = SelectionKey.root(instance);
++    selection.replace([key]);
++
++    final slot = doc.entities.slotOf(text)!;
++    final style = doc.textStyleOf(doc.entities.textStyleAt(slot));
++    final box = textBoxOf(
++      doc.geometry.peek(doc.entities.geomIndexAt(slot)),
++      attrs,
++      style,
++      doc.textMeasurer.measure(text: 'JET', style: style),
++    );
++    expect(box, isNotNull, reason: 'the fixture must not be a degenerate box');
++
++    // toWorld × box.local, applied to the four box corners, closed back on
++    // the first — five points, ten doubles.
++    final m = kPlacement.multiply(box!.local);
++    final xs = [box.minX, box.maxX, box.maxX, box.minX, box.minX];
++    final ys = [box.minY, box.minY, box.maxY, box.maxY, box.minY];
++    final segments = cache.debugWorldSegmentsOf(key);
++    expect(segments, isNotNull);
++    expect(segments!.length, 10,
++        reason: 'a closed quad, first corner repeated');
++    for (var i = 0; i < 5; i++) {
++      final p = m.transformPoint(Vector2(xs[i], ys[i]));
++      expect(segments[i * 2], closeTo(p.x, 1e-9));
++      expect(segments[i * 2 + 1], closeTo(p.y, 1e-9));
++    }
++    // The quad is genuinely oriented, not an axis-aligned box: no two
++    // adjacent corners share an ordinate.
++    expect((segments[0] - segments[2]).abs(), greaterThan(1e-6));
++    expect((segments[1] - segments[3]).abs(), greaterThan(1e-6));
++  });
++
++  test(
++      'a mirrored arc flips its sweep and takes its start from the '
++      'transformed start point', () {
++    final doc = DraftDocument.empty();
++    final def = addDefinition(doc, 'Def');
++    const cx = 5.0, cy = 3.0, r0 = 2.0, s0 = 0.9, sweep0 = 1.7;
++    addEntity(doc, def, EntityKind.arc, [cx, cy], [r0, s0, sweep0]);
++    // A negative determinant: the mirror flips the turning sense.
++    final placement = kPlacement.multiply(Transform2.scale(1, -1));
++    expect(placement.determinant, lessThan(0));
++    final instance = addInstance(doc, def, placement);
++    final (selection, cache) = wire(doc);
++    final key = SelectionKey.root(instance);
++    selection.replace([key]);
++
++    final centre = placement.transformPoint(Vector2(cx, cy));
++    final startPoint = placement.transformPoint(
++        Vector2(cx + r0 * math.cos(s0), cy + r0 * math.sin(s0)));
++    final start = math.atan2(startPoint.y - centre.y, startPoint.x - centre.x);
++    final radius = r0 * placement.scaleMagnitude;
++
++    final arcs = cache.debugWorldArcsOf(key);
++    expect(arcs, isNotNull);
++    expect(arcs!.length, 5);
++    expect(arcs[0], closeTo(centre.x, 1e-9));
++    expect(arcs[1], closeTo(centre.y, 1e-9));
++    expect(arcs[2], closeTo(radius, 1e-9));
++    expect(arcs[3], closeTo(start, 1e-9),
++        reason: 'the world start angle comes from the transformed start '
++            'point, never from the stored one');
++    expect(arcs[4], closeTo(-sweep0, 1e-9),
++        reason: 'a negative determinant flips the sweep');
++    // The stored start angle survives the mirror only by accident; this
++    // fixture is built so it does not.
++    expect((arcs[3] - s0).abs(), greaterThan(0.1));
++
++    // And the rebased path really covers that sweep. `getBounds` returns the
++    // conic control-point bound, which contains the curve but is wider than
++    // it, so containment is the exact statement available here.
++    final origin = Vector2(256.0, -128.0);
++    final bounds = cache.pathFor(key, origin)!.getBounds();
++    final exact = arcBounds(centre - origin, radius, start, -sweep0);
++    // `slack` is float32 headroom, not geometric slack: the path stores the
++    // rebased coordinates in float32, whose spacing at |x| ~ 73 is about
++    // 8e-6. It is three orders below the radius, so it cannot hide a wrong
++    // start angle or an unflipped sweep.
++    const slack = 1e-3;
++    expect(bounds.left, lessThanOrEqualTo(exact.minX + slack));
++    expect(bounds.top, lessThanOrEqualTo(exact.minY + slack));
++    expect(bounds.right, greaterThanOrEqualTo(exact.maxX - slack));
++    expect(bounds.bottom, greaterThanOrEqualTo(exact.maxY - slack));
++    // Not vacuous: the hull is at most a conic's bulge wider than the arc.
++    expect(bounds.width, lessThan(2 * radius * math.sqrt2 + slack));
++  });
++}
++
++/// Fixed, deliberately asymmetric metrics: a measurer whose ascent, descent
++/// and advance differ means a layout that swapped two of them would show.
++class _FixedMeasurer implements TextMeasurer {
++  const _FixedMeasurer();
++
++  @override
++  TextMetrics measure({required String text, required TextStyleRecord style}) =>
++      const TextMetrics(
++        advanceWidth: 260,
++        ascent: 78,
++        descent: 22,
++        capHeight: 70,
++      );
++}
++
++/// A text entity with a real string, style and packed attributes — the three
++/// things [addEntity] cannot carry. Mirrors the engine's own `pick_test.dart`
++/// helper rather than importing across packages.
++Handle addText(
++  DraftDocument doc,
++  Handle owner, {
++  required String text,
++  required Handle textStyle,
++  required List<double> coords,
++  required List<double> scalars,
++  int textAttrs = 0,
++}) {
++  final handle = doc.handleSeed.next();
++  doc.commands.execute(AddEntityCommand(
++    record: EntityRecord(
++      handle: handle,
++      owner: owner,
++      kind: EntityKind.text,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.byLayerLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: const ByLayerColor(),
++      lineweight: kByLayer,
++      transparency: kByLayer,
++      flags: 0,
++      text: text,
++      textStyle: textStyle,
++      textAttrs: textAttrs,
++    ),
++    payload: payload(coords, scalars),
++  ));
++  return handle;
+ }

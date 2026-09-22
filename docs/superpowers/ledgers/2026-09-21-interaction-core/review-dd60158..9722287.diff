@@ -1,0 +1,280 @@
+# Review package: dd60158..9722287
+
+## Commits
+9722287 fix(interaction): guard onExit behind the active pointer, pin the primary-disappeared row
+
+## Files changed
+ .../lib/src/interaction_layer.dart                 | 26 ++++++-
+ .../test/interaction_layer_test.dart               | 90 +++++++++++++++++++++-
+ 2 files changed, 112 insertions(+), 4 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart b/packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart
+index 5696710..3f7c533 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart
+@@ -1,12 +1,16 @@
+ import 'package:flutter/gestures.dart'
+-    show PointerHoverEvent, kMiddleMouseButton, kPrimaryButton;
++    show
++        PointerExitEvent,
++        PointerHoverEvent,
++        kMiddleMouseButton,
++        kPrimaryButton;
+ import 'package:flutter/services.dart' show HardwareKeyboard;
+ import 'package:flutter/widgets.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'tool.dart';
+ 
+ /// Pick radius in **screen** pixels (spec D7).
+ ///
+ /// A tool never sees this constant: [ToolPointerEvent.pickRadiusWorld] is it
+ /// divided by the camera's scale, per event, so a 6 px reach on screen stays
+@@ -30,21 +34,23 @@ const double kPickRadiusPixels = 6.0;
+ /// the drag as a synthesised up. The pointer's own [PointerUpEvent], whose
+ /// mask is empty, is what ends it.
+ ///
+ /// Everything else is a small state machine over one active pointer. A
+ /// primary down with no pointer active claims it; a move from that pointer
+ /// with the primary still set is a move; a move in which the primary
+ /// disappears, or an up, ends it. A move in which the primary *appears* on a
+ /// pointer while none is active is treated as a down, because a pointer that
+ /// was already on screen when the button went down reaches a `Listener` as a
+ /// move, not as a down. A hover carries `buttons == 0` and is a move with no
+-/// press behind it.
++/// press behind it, and `MouseRegion.onExit` reaches the tool only while no
++/// pointer is active — a captured pointer's drag is allowed to leave the box
++/// and come back, and ends on its own up.
+ class InteractionLayer extends StatefulWidget {
+   const InteractionLayer({
+     super.key,
+     required this.tools,
+     required this.child,
+   });
+ 
+   /// The controller whose `active` tool receives the events and whose
+   /// `context` carries the document, index, camera and selection.
+   final ToolController tools;
+@@ -107,20 +113,22 @@ class _InteractionLayerState extends State<InteractionLayer> {
+       _lastButtons = e.buttons;
+       if (hadPrimary && !hasPrimary) {
+         _activePointer = -1;
+         _tool.onPointerUp(_wrap(e), _ctx);
+       } else {
+         _tool.onPointerMove(_wrap(e), _ctx);
+       }
+       return;
+     }
+     if (_activePointer == -1 && hasPrimary) {
++      // Treated as a down in every respect, focus included.
++      _focus.requestFocus();
+       _activePointer = e.pointer;
+       _lastButtons = e.buttons;
+       _tool.onPointerDown(_wrap(e), _ctx);
+     }
+   }
+ 
+   void _onUp(PointerUpEvent e) {
+     if (e.pointer != _activePointer) return;
+     _activePointer = -1;
+     _lastButtons = 0;
+@@ -132,20 +140,32 @@ class _InteractionLayerState extends State<InteractionLayer> {
+     _activePointer = -1;
+     _lastButtons = 0;
+     _tool.cancel(_ctx);
+   }
+ 
+   void _onHover(PointerHoverEvent e) {
+     if (_activePointer != -1) return;
+     _tool.onPointerMove(_wrap(e), _ctx);
+   }
+ 
++  /// Exit is a hover statement, so it is only a statement while nothing is
++  /// pressed. A pointer that went down inside the layer is **captured**: its
++  /// moves and its up keep arriving wherever it goes, and the gesture ends on
++  /// that up. Handing the exit to the tool anyway would drop a live band the
++  /// moment the drag crossed the layer's edge — which is precisely the drag
++  /// that wants to reach past it. [SelectTool.onPointerExit] is left cancelling
++  /// a drag, for a future caller that means it.
++  void _onExit(PointerExitEvent e) {
++    if (_activePointer != -1) return;
++    _tool.onPointerExit(_ctx);
++  }
++
+   /// Both halves are idempotent — `setHover(null)` on a null hover and
+   /// `cancel` on an idle tool each return before notifying — so running this
+   /// on `deactivate` *and* on `dispose` costs two early returns and covers
+   /// the case where the layer leaves the tree without being disposed.
+   void _release() {
+     _ctx.selection.setHover(null);
+     _tool.cancel(_ctx);
+   }
+ 
+   @override
+@@ -160,21 +180,21 @@ class _InteractionLayerState extends State<InteractionLayer> {
+     _focus.dispose();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) => Focus(
+         focusNode: _focus,
+         autofocus: true,
+         onKeyEvent: (_, event) => _tool.onKey(event, _ctx),
+         child: MouseRegion(
+-          onExit: (_) => _tool.onPointerExit(_ctx),
++          onExit: _onExit,
+           child: Listener(
+             behavior: HitTestBehavior.opaque,
+             onPointerDown: _onDown,
+             onPointerMove: _onMove,
+             onPointerUp: _onUp,
+             onPointerCancel: _onCancel,
+             onPointerHover: _onHover,
+             child: widget.child,
+           ),
+         ),
+diff --git a/packages/jet_cad_2d_flutter/test/interaction_layer_test.dart b/packages/jet_cad_2d_flutter/test/interaction_layer_test.dart
+index 5ad5f09..451e26e 100644
+--- a/packages/jet_cad_2d_flutter/test/interaction_layer_test.dart
++++ b/packages/jet_cad_2d_flutter/test/interaction_layer_test.dart
+@@ -1,16 +1,17 @@
+ import 'package:flutter/gestures.dart'
+     show
+         PointerDeviceKind,
+         PointerMoveEvent,
+         kMiddleMouseButton,
+-        kPrimaryButton;
++        kPrimaryButton,
++        kSecondaryButton;
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter/widgets.dart'
+     show Focus, FocusManager, FocusNode, Offset, Rect;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/src/camera_controller.dart';
+ import 'package:jet_cad_2d_flutter/src/flutter_text_measurer.dart';
+ import 'package:jet_cad_2d_flutter/src/interaction_layer.dart';
+ import 'package:jet_cad_2d_flutter/src/selection.dart';
+ import 'package:jet_cad_2d_flutter/src/tool.dart';
+@@ -134,20 +135,24 @@ void main() {
+     rig.selection.clear();
+     final vertical = await primary(tester, pointer: 3);
+     await vertical.down(at(tester, kBandA));
+     await vertical.moveTo(at(tester, Offset(kBandA.dx, kBandB.dy)));
+     expect(rig.tool.phase, ToolPhase.dragging);
+     expect(rig.tool.bandMode, BandMode.window,
+         reason: 'end.dx == start.dx is not a right-to-left drag: the rule is '
+             '`end.dx >= start.dx`, so a purely vertical drag is a window');
+     await vertical.up();
+     await tester.pump();
++    expect(rig.selection.isEmpty, isTrue,
++        reason: 'the vertical band is the world box [90, 90] x [990, 1010] — '
++            'zero width, so a window band encloses nothing; the mode is a '
++            'window all the same, which is what the assertion above pins');
+   });
+ 
+   testWidgets('exiting the layer clears hover', (tester) async {
+     // M-02i.
+     final doc = document();
+     final line = addProbeLine(doc);
+     final rig =
+         await pumpInteraction(tester, document: doc, camera: lineCamera());
+ 
+     final mouse =
+@@ -318,11 +323,94 @@ void main() {
+         reason: 'and it did not move the band either');
+ 
+     await gesture.up();
+     await tester.pump();
+ 
+     expect(rig.tools.active.phase, ToolPhase.idle);
+     expect(rig.selection.length, 1);
+     expect(rig.selection.contains(SelectionKey.root(lines.inside)), isTrue,
+         reason: 'the band completed as though the middle move never arrived');
+   });
++
++  testWidgets('the primary disappearing from a move is an up', (tester) async {
++    // The other half of the mask rules: a move that loses the primary while
++    // gaining a button the camera does **not** own is an up, at the position
++    // that move reports. A secondary press is the realistic way for a mouse
++    // to produce one.
++    final doc = document();
++    final lines = addBandLines(doc);
++    final rig =
++        await pumpInteraction(tester, document: doc, camera: bandCamera());
++
++    final gesture = await primary(tester, pointer: 5);
++    await gesture.down(at(tester, kBandA));
++    await gesture.moveTo(at(tester, kBandB));
++    expect(rig.tools.active.phase, ToolPhase.dragging);
++
++    // Local (350, 140) is world (235, 990) — a band corner that encloses the
++    // straddler as well, which local (300, 140) does not. So this asserts the
++    // up landed at the *synthesised move's* position, not at the last real
++    // move's.
++    await tester.sendEventToBinding(PointerMoveEvent(
++      viewId: tester.view.viewId,
++      pointer: 5,
++      kind: PointerDeviceKind.mouse,
++      position: at(tester, const Offset(350, 140)),
++      buttons: kSecondaryButton,
++    ));
++    await tester.pump();
++
++    expect(rig.tools.active.phase, ToolPhase.idle);
++    expect(rig.selection.length, 2);
++    expect(rig.selection.contains(SelectionKey.root(lines.inside)), isTrue);
++    expect(rig.selection.contains(SelectionKey.root(lines.straddling)), isTrue,
++        reason: 'the world band [90, 235] x [990, 1010] encloses it, which '
++            'the band that ended at local 300 would not have');
++
++    // The active pointer is already cleared, so the gesture's own up is a
++    // stray: dropped, not thrown on, and it does not re-run the band.
++    await gesture.up();
++    await tester.pump();
++
++    expect(rig.tools.active.phase, ToolPhase.idle);
++    expect(rig.selection.length, 2);
++  });
++
++  testWidgets('a drag that leaves the box keeps its captured pointer',
++      (tester) async {
++    // A pointer that went down inside the layer is captured: its moves and
++    // its up keep arriving wherever it goes. `MouseRegion.onExit` must not
++    // hand that crossing to the tool — `SelectTool.onPointerExit` cancels a
++    // live drag, and a band the user drags past the canvas edge would vanish.
++    final doc = document();
++    final lines = addBandLines(doc);
++    final rig =
++        await pumpInteraction(tester, document: doc, camera: bandCamera());
++
++    final gesture = await primary(tester, pointer: 6);
++    await gesture.down(at(tester, kBandA));
++    await gesture.moveTo(at(tester, kBandB));
++    expect(rig.tools.active.phase, ToolPhase.dragging);
++
++    // Global (700, 300): past the centred box's right edge at global x = 600,
++    // so local (500, 150) — world (310, 985).
++    await gesture.moveTo(const Offset(700, 300));
++    await tester.pump();
++
++    expect(rig.tools.active.phase, ToolPhase.dragging,
++        reason: 'leaving the box is not the end of a captured drag');
++    expect(rig.tool.bandScreen, Rect.fromPoints(kBandA, const Offset(500, 150)),
++        reason: "and the band's end followed the pointer out");
++
++    await gesture.up();
++    await tester.pump();
++
++    expect(rig.tools.active.phase, ToolPhase.idle);
++    // The world band [90, 310] x [985, 1010] encloses `inside` and
++    // `straddling` and cuts `outside` (world x 300..320), which a window band
++    // leaves out.
++    expect(rig.selection.length, 2);
++    expect(rig.selection.contains(SelectionKey.root(lines.inside)), isTrue);
++    expect(rig.selection.contains(SelectionKey.root(lines.straddling)), isTrue);
++    expect(rig.selection.contains(SelectionKey.root(lines.outside)), isFalse);
++  });
+ }

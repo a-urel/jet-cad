@@ -1,0 +1,14 @@
+36:Task 1: minor (deferred): point branch duplicates containsPoint inline (brief's own sketch)
+37:Task 1: minor (deferred): no test for the one-point polyline branch
+46:Task 2: minor (deferred): M11 equivalence argument incomplete (dirty overlay case; holds via _growPlacements); M14 analysis vs the dedupe comment; _localBandBox duplicates _localQueryBox (plan-mandated placement, allocation reason undocumented); untested world.isEmpty/disposed order, fill under an instance, instances-only definition; spatial_index.dart +306 lines (plan-mandated location); report cites fff06e4, head is 29f2376 after the trailer amend
+55:Task 3: minor (deferred): no test for remove of an absent key or setHover of a selected key; report says prune on Command* only, code prunes on every non-load change (report wording); == compares target before chain (no behavioural effect)
+69:Task 4: minor (deferred): second controller test does not dispose its controller
+74:Task 5: minor (deferred): seenGroups dedupe unfalsifiable; paintOverlay/_drawDashedRect untested until Task 8; test 2's second line inert
+82:Task 6: minor (deferred): _groupCascade and _everyLeafIn walk the group subtree in two shapes; a shared visitor if a third consumer appears
+87:Task 7: minor (deferred): _byOwner batch-clearing has no direct witness (an added leaf would be one); text-corner branch and mirrored-arc sweep sign untested in this task
+91:Task 7: minor (deferred): two Sets per selection notify; third container walk of the same shape (a shared forEachLeafUnder if a fourth appears); _byOwner declared mid-class; unreachable fill case uncommented; text literals hoistable; zero-radius arc untested; M-02v's discriminating assertion never the one that fires; construct SelectionController before OutlineCache (Task 8/10 wiring note)
+95:Task 7: minor (deferred): worldPointOf returns null for a group holding a point plus other leaves
+104:Task 8: minor (deferred): four Offsets per point key per frame (drawRawPoints would remove them); selection.keys called twice per frame; worldPointOf doc says subtract origin, painter maps to screen instead — amend the doc; cross half-length derived from a stroke constant; SelectTool.paintOverlay allocates two Paints per frame while dragging (Task 5 note)
+119:Task 9: minor (deferred): no didUpdateWidget for a swapped ToolController (nothing swaps it in 02); deactivate + dispose both release, so a GlobalKey reparent cancels a live drag
+122:Task 9: minor (deferred): the synthesised-down branch is unreachable from a widget test (GestureBinding drops a move for a pointer with no recorded down); a state-object unit test would pin it
+127:Task 10: minor (deferred): the tap test reuses test 1's probe without re-asserting the pick; _statusLine re-runs per notify (negligible)

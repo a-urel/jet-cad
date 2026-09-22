@@ -15,12 +15,16 @@ class PlannerView extends StatefulWidget {
     required this.index,
     required this.camera,
     required this.policy,
+    required this.selection,
+    required this.tools,
   });
 
   final DraftDocument document;
   final SpatialIndex index;
   final CameraController camera;
   final GesturePolicy policy;
+  final SelectionController selection;
+  final ToolController tools;
 
   @override
   State<PlannerView> createState() => _PlannerViewState();
@@ -30,6 +34,22 @@ class _PlannerViewState extends State<PlannerView> {
   /// Ruling 01-2: the camera is fitted once, to the size the view really
   /// got, before the canvas under it has listened to anything.
   bool _fitted = false;
+
+  // Constructed after the shell's `SelectionController` so it prunes dead
+  // keys before this cache walks them (listener order on `document.changes`).
+  late final OutlineCache _outlines =
+      OutlineCache(widget.document, widget.selection);
+  // The cache is in the merge because it is the only member that hears a
+  // `DocChange`: an edit under a selected instance rebuilds the outline and
+  // nothing else in here would ask for the frame that draws it.
+  late final Listenable _repaint = Listenable.merge(
+      [widget.selection, widget.tools, widget.camera, _outlines]);
+
+  @override
+  void dispose() {
+    _outlines.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -44,11 +64,32 @@ class _PlannerViewState extends State<PlannerView> {
           return CameraGestureDetector(
             camera: widget.camera,
             policy: widget.policy,
-            child: DraftCanvas(
-              document: widget.document,
-              index: widget.index,
-              camera: widget.camera,
-              tiles: false,
+            child: InteractionLayer(
+              tools: widget.tools,
+              child: Stack(
+                children: [
+                  DraftCanvas(
+                    document: widget.document,
+                    index: widget.index,
+                    camera: widget.camera,
+                    tiles: false,
+                  ), // already inside its own RepaintBoundary
+                  Positioned.fill(
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        painter: SelectionOverlayPainter(
+                          selection: widget.selection,
+                          tools: widget.tools,
+                          camera: widget.camera,
+                          outlines: _outlines,
+                          repaint: _repaint,
+                        ),
+                        size: Size.infinite,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           );
         },

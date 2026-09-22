@@ -1,0 +1,173 @@
+# Review package: 4626779..fae61c4
+
+## Commits
+fae61c4 fix(tools): unhook the outgoing tool before cancel, not after
+
+## Files changed
+ packages/jet_cad_2d_flutter/lib/src/tool.dart      |  6 ++-
+ .../test/tool_controller_test.dart                 | 49 ++++++++++++++++++++--
+ 2 files changed, 51 insertions(+), 4 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tool.dart b/packages/jet_cad_2d_flutter/lib/src/tool.dart
+index 1edbf1e..ec0b4bf 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tool.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tool.dart
+@@ -75,22 +75,26 @@ class ToolController extends ChangeNotifier {
+       : _active = initial {
+     _active.addListener(_forward);
+   }
+ 
+   final ToolContext context;
+   Tool _active;
+   Tool get active => _active;
+ 
+   void activate(Tool next) {
+     if (identical(next, _active)) return;
+-    _active.cancel(context);
++    // Unhook the outgoing tool's listener before cancelling it: `cancel`
++    // may itself call `notifyListeners` (a tool that clears its own overlay
++    // on cancel, for instance), and that must not be forwarded — this
++    // `activate` call notifies exactly once, at the end, for the swap.
+     _active.removeListener(_forward);
++    _active.cancel(context);
+     _active = next;
+     _active.addListener(_forward);
+     notifyListeners();
+   }
+ 
+   void _forward() => notifyListeners();
+ 
+   @override
+   void dispose() {
+     _active.removeListener(_forward);
+diff --git a/packages/jet_cad_2d_flutter/test/tool_controller_test.dart b/packages/jet_cad_2d_flutter/test/tool_controller_test.dart
+index 4bbaaac..86ed570 100644
+--- a/packages/jet_cad_2d_flutter/test/tool_controller_test.dart
++++ b/packages/jet_cad_2d_flutter/test/tool_controller_test.dart
+@@ -2,67 +2,76 @@ import 'package:flutter/services.dart' show KeyEvent;
+ import 'package:flutter/widgets.dart' show Canvas, KeyEventResult, Offset, Size;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/src/selection.dart';
+ import 'package:jet_cad_2d_flutter/src/tool.dart';
+ import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
+ 
+ import 'support/selection_fixture.dart';
+ 
+ class _CountingTool extends Tool {
+-  _CountingTool(this.name);
++  _CountingTool(this.name, {this.notifyOnCancel = false});
+ 
+   @override
+   final String name;
+ 
+   @override
+   ToolPhase phase = ToolPhase.idle;
+ 
+   int cancelCount = 0;
+ 
++  /// When set, `cancel` notifies its own listeners in addition to
++  /// incrementing [cancelCount] — the shape of a real tool that clears its
++  /// own overlay state on cancel (Task 5's `SelectTool`). `ToolController`
++  /// must not let this leak into a second controller notification.
++  final bool notifyOnCancel;
++
+   @override
+   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {}
+ 
+   @override
+   void onPointerMove(ToolPointerEvent e, ToolContext ctx) {}
+ 
+   @override
+   void onPointerUp(ToolPointerEvent e, ToolContext ctx) {}
+ 
+   @override
+   void onPointerExit(ToolContext ctx) {}
+ 
+   @override
+   KeyEventResult onKey(KeyEvent event, ToolContext ctx) =>
+       KeyEventResult.ignored;
+ 
+   @override
+-  void cancel(ToolContext ctx) => cancelCount++;
++  void cancel(ToolContext ctx) {
++    cancelCount++;
++    if (notifyOnCancel) notifyListeners();
++  }
+ 
+   @override
+   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
+ 
+   /// `notifyListeners` is `@protected` on `ChangeNotifier`; this exposes it
+   /// so the test can simulate the tool announcing a change of its own.
+   void ping() => notifyListeners();
+ }
+ 
+ void main() {
+   test(
+       'ToolController forwards the active tool, swaps on activate, and '
+       'stops forwarding the outgoing tool', () {
+     final doc = DraftDocument.empty();
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+     final selection = SelectionController(doc);
+     addTearDown(selection.dispose);
+-    final camera = cameraAt(1, Offset.zero);
++    final camera = cameraAt(1.5, const Offset(40, -25));
+     final ctx = ToolContext(
+       document: doc,
+       index: index,
+       camera: camera,
+       selection: selection,
+     );
+ 
+     final a = _CountingTool('a');
+     final b = _CountingTool('b');
+     final controller = ToolController(initial: a, context: ctx);
+@@ -91,11 +100,45 @@ void main() {
+     controller.activate(b);
+     expect(b.cancelCount, 0);
+     expect(notifyCount, 3);
+ 
+     controller.dispose();
+     expect(() => b.ping(), returnsNormally,
+         reason: 'dispose removes the active listener; the tool itself '
+             'still works, it is simply not forwarded any more');
+     expect(notifyCount, 3);
+   });
++
++  test(
++      'activate notifies exactly once even when the outgoing tool notifies '
++      'its own listeners from cancel', () {
++    final doc = DraftDocument.empty();
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final selection = SelectionController(doc);
++    addTearDown(selection.dispose);
++    final camera = cameraAt(1.5, const Offset(40, -25));
++    final ctx = ToolContext(
++      document: doc,
++      index: index,
++      camera: camera,
++      selection: selection,
++    );
++
++    final a = _CountingTool('a', notifyOnCancel: true);
++    final b = _CountingTool('b');
++    final controller = ToolController(initial: a, context: ctx);
++
++    var notifyCount = 0;
++    controller.addListener(() => notifyCount++);
++
++    final before = notifyCount;
++    controller.activate(b);
++
++    expect(a.cancelCount, 1);
++    expect(controller.active, same(b));
++    expect(notifyCount, before + 1,
++        reason: 'cancel notifying its own (by-then-unhooked) listeners must '
++            'not add a second controller notification for one activate '
++            'call');
++  });
+ }

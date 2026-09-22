@@ -1,0 +1,566 @@
+# Review package: 29f2376..b5e7a0a
+
+## Commits
+b5e7a0a fix(index): judge a collapsed instance forward, and off-identity fixtures
+
+## Files changed
+ .../jet_cad_2d/lib/src/index/spatial_index.dart    |  40 ++-
+ .../jet_cad_2d/test/index/band_query_test.dart     | 313 +++++++++++++++++----
+ 2 files changed, 281 insertions(+), 72 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/index/spatial_index.dart b/packages/jet_cad_2d/lib/src/index/spatial_index.dart
+index 1ec6e87..320c551 100644
+--- a/packages/jet_cad_2d/lib/src/index/spatial_index.dart
++++ b/packages/jet_cad_2d/lib/src/index/spatial_index.dart
+@@ -521,31 +521,51 @@ class SpatialIndex {
+   ///
+   /// Collects instances into [_scratchForDepth] before recursing, never from
+   /// inside the visitor, for the reason [_descend]'s doc comment gives at
+   /// length. Reusing one scratch per depth is safe because this level's
+   /// buffer is fully consumed by the loop below before any call at
+   /// `depth + 1` touches its own.
+   _BandVerdict _bandDescend(ContainerIndex index, Transform2 toWorld,
+       BandMode mode, Aabb2 world, QueryFilter filter, int depth) {
+     _ensurePathCapacity(depth);
+     _containerPath[depth] = index.container.value;
+-    final Transform2 toLocal;
+-    try {
+-      toLocal = toWorld.invert();
+-    } on SingularTransformError {
+-      // Collapsed to nothing in world space: nothing to enclose and nothing
+-      // to touch, the same answer [_descend] gives.
+-      return _BandVerdict.empty;
++    // **A singular container transform is not refused here**, deliberately,
++    // and this is where band selection parts company with [_descend]. A pick
++    // asks "is this point within `radius` of the entity", which a collapsed
++    // container answers by having nothing drawn to measure against; a band
++    // asks "is the entity's *image* inside this rectangle", and a collapsed
++    // instance has an image — a segment, or a point — that a band can
++    // perfectly well enclose or cross. Spec D8 selects it, and the
++    // differential's brute-force arm, which composes forward only, would
++    // disagree with any answer that did not.
++    //
++    // So the inverse is taken only where it is actually needed. Window never
++    // needs it: it walks the whole container ([_kAllBox]) and lifts each
++    // stored box *forward* by [toWorld] in [_leafPasses]. Crossing needs it
++    // only to pull the band back into this container's space as a broad
++    // phase, and when that inverse does not exist it falls back to walking
++    // the whole container — slower, never wrong, and the narrow phase behind
++    // it is the same forward `leafTouchedByBand` either way.
++    final Aabb2 localQuery;
++    if (mode == BandMode.window) {
++      localQuery = _kAllBox;
++    } else {
++      Transform2? toLocal;
++      try {
++        toLocal = toWorld.invert();
++      } on SingularTransformError {
++        toLocal = null;
++      }
++      localQuery = toLocal == null
++          ? _kAllBox
++          : _localBandBox(toLocal, world.expandedBy(_broadPhaseMargin().pick));
+     }
+-    final localQuery = mode == BandMode.window
+-        ? _kAllBox
+-        : _localBandBox(toLocal, world.expandedBy(_broadPhaseMargin().pick));
+     var anyLeaf = false;
+     var allPass = true;
+     var anyPass = false;
+     index.searchLeaves(localQuery, (slot) {
+       if (mode == BandMode.crossing && anyPass) return;
+       if (!_filters.acceptsEntity(slot, filter)) return;
+       if (document.entities.kindAt(slot) == EntityKind.fill) return;
+       anyLeaf = true;
+       if (_leafPasses(index, toWorld, slot, mode, world)) {
+         anyPass = true;
+diff --git a/packages/jet_cad_2d/test/index/band_query_test.dart b/packages/jet_cad_2d/test/index/band_query_test.dart
+index 48cc719..2f7602f 100644
+--- a/packages/jet_cad_2d/test/index/band_query_test.dart
++++ b/packages/jet_cad_2d/test/index/band_query_test.dart
+@@ -46,35 +46,73 @@ GeometryPayload pl(List<double> coords, [List<double> scalars = const []]) =>
+ /// bar rules out.
+ final placement = Transform2.translation(300, -200)
+     .multiply(Transform2.rotation(math.pi / 6))
+     .multiply(Transform2.scale(1.5, 1.5));
+ 
+ /// A band around [centre] with half-size [h], in world space.
+ Aabb2 bandAt(Vector2 centre, double h) =>
+     Aabb2.raw(centre.x - h, centre.y - h, centre.x + h, centre.y + h);
+ 
+ /// Copied from `test/document/region_command_test.dart`, same reason as
+-/// [addEntity].
+-GeometryPayload squareLoop() => GeometryPayload(
+-    coords: Float64List.fromList([0, 0, 10, 0, 10, 10, 0, 10, 0, 0]),
++/// [addEntity], with the loop moved off the origin: a region sitting at
++/// `(0, 0)` is the degenerate fixture this plan's constraints rule out.
++GeometryPayload squareLoopAt(double x, double y) => GeometryPayload(
++    coords: Float64List.fromList([
++      x, y, //
++      x + 10, y,
++      x + 10, y + 10,
++      x, y + 10,
++      x, y,
++    ]),
+     scalars: Float64List(0));
+ 
+-AddRegionCommand region(DraftDocument doc) => AddRegionCommand.allocate(
++AddRegionCommand region(
++        DraftDocument doc, Handle owner, GeometryPayload loop) =>
++    AddRegionCommand.allocate(
+       seed: doc.handleSeed,
+-      owner: doc.rootHandle,
++      owner: owner,
+       boundaryKind: EntityKind.polyline,
+-      boundaryPayload: squareLoop(),
++      boundaryPayload: loop,
+       layer: ReservedHandles.layerZero,
+       fillColor: const TrueColor(0x3366CC),
+       boundaryColor: const TrueColor(0x000000),
+     );
+ 
++/// Adds a [GroupNode] under the root at [transform] and returns its handle.
++Handle addGroup(DraftDocument doc, Handle handle, Transform2 transform) {
++  doc.commands.execute(AddNodeCommand(GroupNode(
++    handle: handle,
++    parent: doc.rootHandle,
++    transform: transform,
++    children: const [],
++  )));
++  return handle;
++}
++
++/// The world box the index indexes [handle] by, given the composed transform
++/// [toWorld] that carries its stored coordinates into world space.
++///
++/// The same composition `ContainerIndex.build` performs, so a band built from
++/// this is a band expressed in the terms the window rule actually decides on
++/// — which is what lets a rotated fixture state an exact expectation instead
++/// of a hand-computed approximation.
++Aabb2 worldBoxOf(DraftDocument doc, Handle handle, Transform2 toWorld) =>
++    _ownerSpaceBox(doc, doc.entities.slotOf(handle)!).transformedBy(toWorld);
++
++Aabb2 unionOf(Iterable<Aabb2> boxes) {
++  var box = Aabb2.empty();
++  for (final b in boxes) {
++    box = box.union(b);
++  }
++  return box;
++}
++
+ List<int> leavesIn(SpatialIndex index, Aabb2 band, BandMode mode,
+     [QueryFilter filter = const QueryFilter.all()]) {
+   final out = <int>[];
+   index.forEachLeafInBand(band, mode, filter, out.add);
+   return out;
+ }
+ 
+ List<Handle> instancesIn(SpatialIndex index, Aabb2 band, BandMode mode,
+     [QueryFilter filter = const QueryFilter.all()]) {
+   final out = <Handle>[];
+@@ -486,197 +524,348 @@ void main() {
+     expect(
+         instancesIn(
+             index, band, BandMode.crossing, const QueryFilter.picking()),
+         isEmpty);
+   });
+ 
+   test(
+       'a circle is crossed outside its indexed box under a non-uniform group '
+       'scale', () {
+     // A circle of radius 2 under scale(2,5) is indexed by the exact
+-    // ellipse's box, which reaches x = 4, while the narrow phase
+-    // deliberately approximates it by the circle of radius
+-    // 2 * sqrt(10) ~= 6.3246 (see distance.dart). A broad phase that were
+-    // only the indexed box would reject the band below before
++    // ellipse's box, which reaches 4 units either side of the centre in x,
++    // while the narrow phase deliberately approximates it by the circle of
++    // radius 2 * sqrt(10) ~= 6.3246 (see distance.dart). A broad phase that
++    // were only the indexed box would reject the band below before
+     // `leafTouchedByBand`, which accepts it, ever ran -- which is what
+     // `_broadPhaseMargin().pick` is widened by.
++    //
++    // The group carries a translation as well as the non-uniform scale, and
++    // the circle sits at (17, 9) in the group's space, so neither the
++    // fixture nor its geometry is at the identity or the origin. A *rotation*
++    // is deliberately not added on top: `Aabb2.transformedBy` is
++    // conservative, so a rotated ellipse box swells past the approximated
++    // radius and the gap this test exists to measure closes.
+     final doc = DraftDocument.empty();
+-    const group = Handle(100);
+-    doc.commands.execute(AddNodeCommand(GroupNode(
+-      handle: group,
+-      parent: doc.rootHandle,
+-      transform: Transform2.scale(2, 5),
+-      children: const [],
+-    )));
+-    final circle = addEntity(doc, group, EntityKind.circle, [0, 0], [2.0]);
++    final groupAt =
++        Transform2.translation(700, -400).multiply(Transform2.scale(2, 5));
++    final group = addGroup(doc, const Handle(100), groupAt);
++    final circle = addEntity(doc, group, EntityKind.circle, [17, 9], [2.0]);
++    // Starts inside the window band below and runs far past it.
++    final straddler =
++        addEntity(doc, group, EntityKind.line, [17, 17, 60, 17], []);
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+ 
++    final centre = groupAt.transformPoint(Vector2(17, 9));
++    final circleBox = worldBoxOf(doc, circle, groupAt);
+     final rho = 2.0 * math.sqrt(10.0);
+-    expect(rho, greaterThan(4.0),
+-        reason: "the fixture is only meaningful past the ellipse box's x = 4");
++    expect(rho, greaterThan(centre.x - circleBox.minX),
++        reason: 'the fixture is only meaningful past the ellipse box, which '
++            'reaches ${centre.x - circleBox.minX} either side of the centre');
++
+     expect(
+-        handlesOf(doc,
+-            leavesIn(index, bandAt(Vector2(rho, 0), 0.3), BandMode.crossing)),
+-        [circle]);
+-    expect(leavesIn(index, bandAt(Vector2(rho + 3, 0), 0.3), BandMode.crossing),
++        handlesOf(
++            doc,
++            leavesIn(index, bandAt(Vector2(centre.x + rho, centre.y), 0.3),
++                BandMode.crossing)),
++        [circle],
++        reason: 'the approximated rim lies outside the indexed box');
++    expect(
++        leavesIn(index, bandAt(Vector2(centre.x + rho + 3, centre.y), 0.3),
++            BandMode.crossing),
+         isEmpty,
+         reason: 'and the margin must not make everything nearby a hit');
++
++    // The straddler makes the two modes disagree, per the plan's fixture
++    // constraint: its box runs far past the band, its stroke enters it.
++    final band = Aabb2.raw(circleBox.minX - 1, circleBox.minY - 1,
++        circleBox.maxX + 22, circleBox.maxY + 31);
++    expect(handlesOf(doc, leavesIn(index, band, BandMode.window)), [circle]);
++    expect(handlesOf(doc, leavesIn(index, band, BandMode.crossing)),
++        [circle, straddler]);
++  });
++
++  test('a collapsed instance is judged by its image, not refused', () {
++    // `Transform2.scale(0, 1)` is singular, so the definition's whole body
++    // collapses to one world point. A pick has nothing to measure there and
++    // `_descend` says so; a band has a perfectly good question to answer --
++    // is that point inside the rectangle -- and spec D8 answers yes. The
++    // walk must therefore not refuse a singular transform, and must not need
++    // its inverse to reach this verdict.
++    //
++    // `AddNodeCommand` accepts it: `commands.dart:340` checks only for a
++    // duplicate handle and delegates to `tree.addNode`, whose own guard is
++    // the definition-cycle check. Nothing anywhere rejects a singular
++    // `Transform2` on a node.
++    final doc = DraftDocument.empty();
++    const def = Handle(200);
++    const instance = Handle(400);
++    doc.tree.addDefinition(Definition(
++        handle: def,
++        name: 'Flat',
++        basePoint: Vector2.zero(),
++        children: const []));
++    addEntity(doc, def, EntityKind.line, [60, 80, 70, 80], []);
++    final collapsed = Transform2.translation(300, -200)
++        .multiply(Transform2.rotation(math.pi / 6))
++        .multiply(Transform2.scale(0, 1));
++    doc.commands.execute(AddNodeCommand(InstanceNode(
++      handle: instance,
++      parent: doc.rootHandle,
++      transform: collapsed,
++      definition: def,
++      layer: ReservedHandles.layerZero,
++    )));
++    final image = collapsed.transformPoint(Vector2(65, 80));
++    expect(collapsed.transformPoint(Vector2(60, 80)).x, closeTo(image.x, 1e-9),
++        reason: 'the fixture is only a fixture if the body really collapses');
++    expect(collapsed.transformPoint(Vector2(70, 80)).y, closeTo(image.y, 1e-9));
++
++    // The straddler keeps the two modes apart and gives the band fixture an
++    // entity that is crossed but not enclosed.
++    final straddler = addEntity(doc, doc.rootHandle, EntityKind.line,
++        [image.x - 1, image.y, image.x + 600, image.y], []);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final band = bandAt(image, 2);
++    expect(instancesIn(index, band, BandMode.window), [instance],
++        reason: 'the degenerate image is wholly inside the band');
++    expect(instancesIn(index, band, BandMode.crossing), [instance]);
++    expect(
++        instancesIn(
++            index, bandAt(Vector2(image.x + 50, image.y), 2), BandMode.window),
++        isEmpty,
++        reason: 'and a band that misses the image still selects nothing');
++
++    // The brute-force arm composes forward only and has no singular guard at
++    // all, so it is the independent check that the walk agrees with D8.
++    for (final mode in BandMode.values) {
++      final brute = bruteForce(doc, band, mode);
++      expect(instancesIn(index, band, mode).toSet(), brute.instances,
++          reason: '$mode');
++      expect(leavesIn(index, band, mode).toSet(), brute.leaves,
++          reason: '$mode');
++    }
++    expect(
++        handlesOf(doc, leavesIn(index, band, BandMode.crossing)), [straddler],
++        reason: 'the root straddler is crossed by the band');
++    expect(leavesIn(index, band, BandMode.window), isEmpty,
++        reason: 'and not enclosed by it');
+   });
+ 
+   test('a fill slot is never reported', () {
++    // The region lives at (40, 60) inside a group at [placement], so neither
++    // the fill's box nor the band that finds it is axis-aligned with the
++    // world or anchored at the origin.
+     final doc = DraftDocument.empty();
+-    final cmd = region(doc);
++    final group = addGroup(doc, const Handle(100), placement);
++    final cmd = region(doc, group, squareLoopAt(40, 60));
+     doc.commands.execute(cmd);
++    // Starts inside the square and runs far outside the window band.
++    final straddler =
++        addEntity(doc, group, EntityKind.line, [45, 65, 300, 65], []);
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+ 
+-    final fillSlot = doc.entities.slotOf(cmd.fill.handle)!;
+-    final boundarySlot = doc.entities.slotOf(cmd.boundary.handle)!;
+-    expect(doc.entities.kindAt(fillSlot), EntityKind.fill);
++    expect(doc.entities.kindAt(doc.entities.slotOf(cmd.fill.handle)!),
++        EntityKind.fill);
++    final boundary = cmd.boundary.handle;
+ 
+-    // Straddles the square's bottom edge, so the fill's box (which is the
+-    // boundary's box) is touched just as surely as the boundary itself.
+-    const edge = Aabb2.raw(4, -1, 6, 1);
+-    expect(leavesIn(index, edge, BandMode.crossing), [boundarySlot]);
++    // Straddles the square's bottom edge in the group's own space, so the
++    // fill's box (which is the boundary's box) is touched just as surely as
++    // the boundary itself -- and the fill is still not reported.
++    final edge = bandAt(placement.transformPoint(Vector2(45, 60)), 0.5);
++    expect(
++        handlesOf(doc, leavesIn(index, edge, BandMode.crossing)), [boundary]);
+ 
+-    const around = Aabb2.raw(-5, -5, 15, 15);
+-    expect(leavesIn(index, around, BandMode.window), [boundarySlot],
++    final around = worldBoxOf(doc, boundary, placement).expandedBy(2);
++    expect(handlesOf(doc, leavesIn(index, around, BandMode.window)), [boundary],
+         reason: 'a fill is not pickable and is not band-selectable either; '
+             'it follows its boundary');
++    expect(handlesOf(doc, leavesIn(index, around, BandMode.crossing)),
++        [boundary, straddler],
++        reason: 'the straddler separates the two modes, and the fill is '
++            'absent from both');
+   });
+ 
+   test('results are ascending by handle even when the tree order differs', () {
++    // Inside a group at [placement], at y = 500 in the group's space: the
++    // answer must be ascending by handle under a rotated, scaled, translated
++    // container just as it is at the identity.
+     final doc = DraftDocument.empty();
+-    // Three handles taken up front, then used out of order, so the R-tree's
++    final group = addGroup(doc, const Handle(100), placement);
++    // Four handles taken up front, then used out of order, so the R-tree's
+     // own leaf order (which follows insertion and x position) cannot be what
+     // produces an ascending answer.
+     final a = doc.handleSeed.next();
+     final b = doc.handleSeed.next();
+     final c = doc.handleSeed.next();
+-    void line(Handle handle, double x) {
++    final d = doc.handleSeed.next();
++    void line(Handle handle, double x0, double x1) {
+       doc.commands.execute(AddEntityCommand(
+         record: EntityRecord(
+           handle: handle,
+-          owner: doc.rootHandle,
++          owner: group,
+           kind: EntityKind.line,
+           layer: ReservedHandles.layerZero,
+           linetype: ReservedHandles.byLayerLinetype,
+           linetypeScale: 1.0,
+           geomIndex: 0,
+           color: const ByLayerColor(),
+           lineweight: kByLayer,
+           transparency: kByLayer,
+           flags: 0,
+         ),
+         payload: GeometryPayload(
+-          coords: Float64List.fromList([x, 0, x + 1, 0]),
++          coords: Float64List.fromList([x0, 500, x1, 500]),
+           scalars: Float64List(0),
+         ),
+       ));
+     }
+ 
+-    line(c, 0); // lowest x, highest handle
+-    line(a, 40);
+-    line(b, 20);
++    line(c, 100, 110); // lowest x, third handle
++    line(a, 140, 150);
++    line(b, 120, 130);
++    line(d, 105, 400); // the straddler, and the last handle
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+ 
+-    const band = Aabb2.raw(-5, -5, 50, 5);
+-    expect(handlesOf(doc, leavesIn(index, band, BandMode.window)), [a, b, c]);
+-    expect(handlesOf(doc, leavesIn(index, band, BandMode.crossing)), [a, b, c]);
++    final band = unionOf([
++      for (final h in [a, b, c]) worldBoxOf(doc, h, placement),
++    ]).expandedBy(1);
++    expect(handlesOf(doc, leavesIn(index, band, BandMode.window)), [a, b, c],
++        reason: 'ascending by handle, not by x and not by insertion');
++    expect(
++        handlesOf(doc, leavesIn(index, band, BandMode.crossing)), [a, b, c, d],
++        reason: "and the straddler's stroke enters the band its box leaves");
+   });
+ 
+   test('instances come back ascending even when the tree order differs', () {
+     final doc = DraftDocument.empty();
+-    const def = Handle(200);
+-    doc.tree.addDefinition(Definition(
+-        handle: def, name: 'D', basePoint: Vector2.zero(), children: const []));
+-    addEntity(doc, def, EntityKind.line, [0, 0, 10, 0], []);
++    const def = Handle(200), wide = Handle(201);
++    for (final (handle, name) in [(def, 'D'), (wide, 'W')]) {
++      doc.tree.addDefinition(Definition(
++          handle: handle,
++          name: name,
++          basePoint: Vector2.zero(),
++          children: const []));
++    }
++    final short = addEntity(doc, def, EntityKind.line, [60, 80, 70, 80], []);
++    addEntity(doc, wide, EntityKind.line, [60, 80, 400, 80], []);
+     // Handle order and x order deliberately disagree, so the instance tree's
+     // own spatial traversal order cannot be what produces an ascending answer.
+-    const a = Handle(400), b = Handle(401), c = Handle(402);
+-    for (final (handle, x) in [(a, 200.0), (b, 0.0), (c, 100.0)]) {
++    // Every placement is [placement] -- translation, rotation and scale all
++    // non-trivial -- with the per-instance offset applied inside it.
++    const a = Handle(400), b = Handle(401), c = Handle(402), d = Handle(403);
++    Transform2 at(double x) => placement.multiply(Transform2.translation(x, 0));
++    for (final (handle, definition, x) in [
++      (a, def, 200.0),
++      (b, def, 0.0),
++      (c, def, 100.0),
++      (d, wide, 0.0), // the straddler: one long leaf, the highest handle
++    ]) {
+       doc.commands.execute(AddNodeCommand(InstanceNode(
+         handle: handle,
+         parent: doc.rootHandle,
+-        transform: Transform2.translation(x, 0),
+-        definition: def,
++        transform: at(x),
++        definition: definition,
+         layer: ReservedHandles.layerZero,
+       )));
+     }
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+ 
+-    const band = Aabb2.raw(-5, -5, 215, 5);
+-    expect(instancesIn(index, band, BandMode.crossing), [a, b, c]);
++    // Exactly the three short instances' leaves, nothing more: `d`'s leaf runs
++    // straight through the band and far past it.
++    final band = unionOf([
++      for (final x in [0.0, 100.0, 200.0]) worldBoxOf(doc, short, at(x)),
++    ]).expandedBy(1);
+     expect(instancesIn(index, band, BandMode.window), [a, b, c]);
++    expect(instancesIn(index, band, BandMode.crossing), [a, b, c, d]);
+   });
+ 
+   test('a nested query inside the band visitor throws', () {
+     final doc = DraftDocument.empty();
+-    addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 10, 0], []);
++    final group = addGroup(doc, const Handle(100), placement);
++    final inside = addEntity(doc, group, EntityKind.line, [60, 80, 70, 80], []);
++    addEntity(doc, group, EntityKind.line, [65, 80, 400, 80], []);
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+ 
+-    const band = Aabb2.raw(-5, -5, 15, 5);
++    // Wide enough that the visitor certainly fires -- a guard that is never
++    // reached proves nothing -- and narrow enough that the second line
++    // straddles it rather than sitting inside.
++    final band = worldBoxOf(doc, inside, placement).expandedBy(1);
+     expect(
+         () => index.forEachLeafInBand(
+             band,
+             BandMode.crossing,
+             const QueryFilter.all(),
+             (slot) =>
+                 index.forEachInRect(band, const QueryFilter.all(), (_) {})),
+         throwsA(isA<QueryReentrancyError>()));
+     expect(
+         () => index.forEachInstanceInBand(
+             band, BandMode.window, const QueryFilter.all(), (_) {}),
+         returnsNormally,
+         reason: 'the guard must be lowered again after the throw');
++    expect(leavesIn(index, band, BandMode.crossing), hasLength(2),
++        reason: 'a guard that fires inside a visitor proves nothing unless '
++            'the visitor is actually reached');
++    expect(leavesIn(index, band, BandMode.window), hasLength(1),
++        reason: 'and the straddler keeps the two modes apart here too');
+   });
+ 
+   test('a locked layer is skipped under picking, kept under all', () {
+     final doc = DraftDocument.empty();
+     const locked = Handle(51);
+     doc.tables.layers.add(const LayerRecord(
+       handle: locked,
+       name: 'L',
+       color: IndexedColor(7),
+       linetype: ReservedHandles.continuousLinetype,
+       lineweight: kLineweightDefault,
+       transparency: 0,
+       visible: true,
+       locked: true,
+     ));
+-    final open =
+-        addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 10, 0], []);
+-    final shut = addEntity(
+-        doc, doc.rootHandle, EntityKind.line, [0, 5, 10, 5], [],
++    // All three leaves live in a group at [placement], off the origin.
++    final group = addGroup(doc, const Handle(100), placement);
++    final open = addEntity(doc, group, EntityKind.line, [60, 80, 70, 80], []);
++    final shut = addEntity(doc, group, EntityKind.line, [60, 90, 70, 90], [],
+         layer: locked);
++    final straddler =
++        addEntity(doc, group, EntityKind.line, [65, 85, 400, 85], []);
+     final index = SpatialIndex(doc);
+     addTearDown(index.dispose);
+ 
+-    const band = Aabb2.raw(-5, -5, 15, 10);
++    final band = unionOf([
++      for (final h in [open, shut]) worldBoxOf(doc, h, placement),
++    ]).expandedBy(1);
+     expect(
+         handlesOf(doc, leavesIn(index, band, BandMode.window)), [open, shut]);
+     expect(
+         handlesOf(
+             doc,
+             leavesIn(
+                 index, band, BandMode.window, const QueryFilter.picking())),
+         [open]);
++    expect(handlesOf(doc, leavesIn(index, band, BandMode.crossing)),
++        [open, shut, straddler],
++        reason: 'the straddler is crossed but not enclosed');
+     expect(
+         handlesOf(
+             doc,
+             leavesIn(
+                 index, band, BandMode.crossing, const QueryFilter.picking())),
+-        [open]);
++        [open, straddler]);
+   });
+ 
+   test(
+       'crossing and window agree with the brute-force arm on the generated '
+       'corpus', () {
+     final doc = generateDocument(400,
+         definitionCount: 8,
+         instanceCount: 40,
+         nestingDepth: 2,
+         mirroredFraction: 0.2,

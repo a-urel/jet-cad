@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
@@ -42,8 +43,38 @@ class _PlannerShellState extends State<PlannerShell> {
   );
   final GesturePolicy _policy = GesturePolicy.forPlatform();
 
+  // Constructed before the tool controller and its context: the selection
+  // controller's listener on `document.changes` must prune dead keys before
+  // anything downstream (the outline cache, in PlannerView) walks them.
+  late final SelectionController _selection = SelectionController(_document);
+  late final ToolContext _context = ToolContext(
+      document: _document,
+      index: _index,
+      camera: _camera,
+      selection: _selection);
+  late final ToolController _tools =
+      ToolController(initial: SelectTool(), context: _context);
+  late final Listenable _status = Listenable.merge([_selection, _tools]);
+
+  /// Spec D12, amended at execution: cmd+Z (macOS) / ctrl+Z (everywhere
+  /// else) undoes through the command log. There is no redo in 02.
+  ///
+  /// The binding sits above the [InteractionLayer]'s `Focus`, which returns
+  /// the active tool's own `KeyEventResult`; the tool ignores Z, so the event
+  /// keeps bubbling and arrives here.
+  void _undo() {
+    if (_document.commands.canUndo) _document.commands.undo();
+  }
+
+  String _statusLine() {
+    final base = _tools.active.name;
+    return _selection.isEmpty ? base : '$base — ${_selection.length} selected';
+  }
+
   @override
   void dispose() {
+    _tools.dispose();
+    _selection.dispose();
     _camera.dispose();
     _index.dispose();
     _measurer.clear();
@@ -54,41 +85,60 @@ class _PlannerShellState extends State<PlannerShell> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      body: Column(
-        children: [
-          Container(
-            key: const Key('chrome-top'),
-            height: 44,
-            color: scheme.surfaceContainer,
-          ),
-          Expanded(
-            child: Row(
-              children: [
-                Container(
-                  key: const Key('chrome-left'),
-                  width: 240,
-                  color: scheme.surfaceContainerLow,
-                ),
-                Expanded(
-                  child: ColoredBox(
-                    color: scheme.surface,
-                    child: PlannerView(
-                      document: _document,
-                      index: _index,
-                      camera: _camera,
-                      policy: _policy,
-                    ),
+      body: CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _undo,
+          const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
+        },
+        child: Column(
+          children: [
+            Container(
+              key: const Key('chrome-top'),
+              height: 44,
+              color: scheme.surfaceContainer,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: ListenableBuilder(
+                    listenable: _status,
+                    builder: (_, __) =>
+                        Text(_statusLine(), key: const Key('status-text')),
                   ),
                 ),
-                Container(
-                  key: const Key('chrome-right'),
-                  width: 280,
-                  color: scheme.surfaceContainerLow,
-                ),
-              ],
+              ),
             ),
-          ),
-        ],
+            Expanded(
+              child: Row(
+                children: [
+                  Container(
+                    key: const Key('chrome-left'),
+                    width: 240,
+                    color: scheme.surfaceContainerLow,
+                  ),
+                  Expanded(
+                    child: ColoredBox(
+                      color: scheme.surface,
+                      child: PlannerView(
+                        document: _document,
+                        index: _index,
+                        camera: _camera,
+                        policy: _policy,
+                        selection: _selection,
+                        tools: _tools,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    key: const Key('chrome-right'),
+                    width: 280,
+                    color: scheme.surfaceContainerLow,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

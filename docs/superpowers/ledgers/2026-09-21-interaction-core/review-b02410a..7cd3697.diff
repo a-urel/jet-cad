@@ -1,0 +1,1608 @@
+# Review package: b02410a..7cd3697
+
+## Commits
+7cd3697 docs: Plan 02 final fix wave — results, spec amendments, STATUS
+0d69465 fix(interaction): filter the group rule and the outline, band at release, undo in the shell
+
+## Files changed
+ STATUS.md                                          |  54 ++++++-----
+ apps/floor_planner/lib/main.dart                   | 101 ++++++++++++---------
+ apps/floor_planner/lib/planner_view.dart           |   7 +-
+ apps/floor_planner/test/planner_shell_test.dart    |  44 +++++++++
+ .../notes/2026-09-21-plan-02-results.md            |  96 +++++++++++++++-----
+ .../specs/2026-09-21-interaction-core-design.md    |  40 +++++++-
+ .../jet_cad_2d_flutter/lib/src/outline_cache.dart  |  30 +++++-
+ .../jet_cad_2d_flutter/lib/src/select_tool.dart    |  30 +++++-
+ .../test/outline_cache_test.dart                   |  44 +++++++++
+ .../jet_cad_2d_flutter/test/select_tool_test.dart  |  97 ++++++++++++++++++++
+ .../test/selection_overlay_test.dart               |  80 +++++++++++++++-
+ .../test/support/selection_fixture.dart            |  28 +++++-
+ 12 files changed, 550 insertions(+), 101 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 3da24d7..34b973f 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -81,28 +81,30 @@ Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01
+ 
+ ---
+ 
+ ## Plan 02 — interaction core (executed on `plan-02/interaction-core`, NOT merged)
+ 
+ **Plan 02 gave the product line its selection substrate** — clicking an
+ entity selects it, dragging a rubber band from empty space selects what it
+ encloses (window) or crosses (crossing), hovering highlights what would be
+ picked, a `Tool` state machine carries `SelectTool` as its first tool, and
+ the top bar shows the tool name and the selection count. Twelve tasks,
+-`3fedeb9..afe7d64` (Tasks 1–11; Task 12, this results note and the spec/
+-STATUS/roadmap updates, on top) on branch `plan-02/interaction-core`, cut
+-from `main` at `3fedeb9`. **Executed, NOT merged — the exit gate is 14 of 15,
++`3fedeb9..afe7d64` (Tasks 1–11; Task 12, the results note and the spec/
++STATUS/roadmap updates, at `b02410a`), then a **final fix wave** at `0d69465`
++and this commit — on branch `plan-02/interaction-core`, cut from `main` at
++`3fedeb9`. **Executed, NOT merged — the exit gate is 14 of 15,
+ with the fifteenth (a human's look, on macOS, in Chrome and in Firefox from
+ `build/web`) OWED, and the merge itself is the human's decision.** Spec:
+ [2026-09-21-interaction-core-design.md](docs/superpowers/specs/2026-09-21-interaction-core-design.md)
+-(revision 2, amended at execution 2026-09-22 — six amendments, none
+-rewriting the original text). Plan:
++(revision 2, amended at execution 2026-09-22 — ten amendments, six from the
++tasks and four from the final fix wave, none rewriting the original text).
++Plan:
+ [2026-09-21-interaction-core.md](docs/superpowers/plans/2026-09-21-interaction-core.md).
+ Results:
+ [2026-09-21-plan-02-results.md](docs/superpowers/notes/2026-09-21-plan-02-results.md).
+ Mutation log:
+ [plan-02-mutation-log.md](docs/superpowers/notes/plan-02-mutation-log.md) —
+ thirty named mutants, 28 fired, 28 killed, 0 survived, 2 declared equivalent
+ by construction (M-02c, M-02e), **zero true survivors.**
+ 
+ **Delivered:** `forEachLeafInBand` / `forEachInstanceInBand` and their band
+ predicates in `jet_cad_2d`'s spatial index; `SelectionKey` / `SelectionController`
+@@ -119,56 +121,61 @@ predicates in `jet_cad_2d`'s spatial index; `SelectionKey` / `SelectionControlle
+ | 2 | `forEachLeafInBand` / `forEachInstanceInBand`, the differential | `b5e7a0a` |
+ | 3 | `SelectionKey`, `SelectionController`, `resolveHit`, pruning (D11) | `a864a8b` |
+ | 4 | `Tool`, `ToolContext`, `ToolController` | `fae61c4` |
+ | 5 | `SelectTool`: hover, click, shift, the band phases | `6fdfe91` |
+ | 6 | Delete preflight and cascade (D10) | `24e09d8` |
+ | 7 | `OutlineCache`: world-space records, rebase | `17d36e2` |
+ | 8 | `SelectionOverlayPainter`: paint, band paint, point cross | `531c91f` |
+ | 9 | `InteractionLayer`: pointer routing, keys, focus | `9722287` |
+ | 10 | app wiring: `PlannerShell`, status text | `e6eb713` |
+ | 11 | mutation sweep and the differential's own log | `afe7d64` |
+-| 12 | this task: gate, results note, spec amendments, STATUS, roadmap | (this commit) |
++| 12 | gate, results note, spec amendments, STATUS, roadmap | `b02410a` |
++| — | **final fix wave**: every open finding of the whole-branch review and of Task 12's own review — A1-A7 (the picking filter in the tool's group rule, the rendering filter in the outline, both band corners at release, `OutlineCache` as a `ChangeNotifier` in the repaint merge, cmd/ctrl+Z undo in the shell, two doc/one-line fixes) and B1-B8 (this file, the results note, the spec) | `0d69465` + this commit |
+ 
+ **Four rulings a reader must know.** A group's band membership counts its
+ owned leaves and its nested groups' leaves only; an instance placed inside a
+ group never enters the group's every/any verdict (Ruling P-1) — a group made
+ only of instances cannot be band-selected until a later plan decides
+ instances-in-groups. The painter class is `SelectionOverlayPainter`, not the
+ spec's `SelectionOverlay` — Flutter's widgets library already exports a
+ `SelectionOverlay` (Task 8). Exiting the interaction layer during a drag no
+ longer cancels it: a band dragged past the edge continues, and its own `up`
+ event ends it, not `onExit` (Task 9; the spec's `SelectTool` row is amended).
+ And a delete of N objects is N undo steps, with a partial undo of a group's
+ cascade restoring leaves under an owner that is still gone — the concrete
+-problem statement 06's compound undo inherits (D10). Full account, plus the
+-`worldPointOf` allocation acceptance, the band-edge clip and the
+-`ui.Path.getBounds` conic-hull note: the results note's "Debt and rulings"
+-section.
++problem statement 06's compound undo inherits (D10). The final fix wave added a fifth a reader must know: **the four walks over a
++container's members differ on two axes** — whether child instances are
++followed and which `QueryFilter` applies — tabulated in the results note.
++Full account, plus the point-key allocation acceptance, the band-edge clip,
++the window band's root-level instance walk and the `ui.Path.getBounds`
++conic-hull note: the results note's "Debt and rulings" section.
+ 
+ ### What Plan 02 measured
+ 
+ | quantity | value |
+ |---|---|
+ | `packages/jet_cad_2d` | **820** pass, analyze/format clean |
+-| `packages/jet_cad_2d_flutter` | **765** pass, 1 skip, the same five pre-existing `text_ladder_golden_test.dart` failures Plan 01 recorded — analyze/format clean |
++| `packages/jet_cad_2d_flutter` | **769** pass, 1 skip, the same five pre-existing `text_ladder_golden_test.dart` failures Plan 01 recorded — analyze/format clean |
+ | `apps/dev_harness_2d` | **82** — unchanged from the branch point (`git diff --stat main..HEAD -- apps/dev_harness_2d` empty), analyze/format clean |
+-| `apps/floor_planner` | **12** tests; `flutter build macos --debug` and `flutter build web` both `✓ Built` |
++| `apps/floor_planner` | **12** tests (eleven before the final fix wave, plus its cmd+Z shell test); `flutter build macos --debug` and `flutter build web` both `✓ Built` |
+ | mutations | **28 fired, 28 killed**, **2 equivalent** (M-02c, M-02e, declared by construction), **zero true survivors** |
+ | the differential (criterion 9) | **52 bands** (12 random + one per root instance), **104 comparisons** (both `BandMode`s), all agree with the brute-force arm |
+ | the two allocation invariants | `query_allocation_test.dart` and `paint_allocation_test.dart` both green, unchanged |
+ | the window | **fourteen checks OWED — not looked at by a human** (seven per platform: macOS, and Chrome/Firefox from `build/web`) |
+ 
+-**Exit gate: 14 of 15.** Criteria 1–14 all PASS, each with its witness (test
+-file and test name, the mutation log, or the pasted gate line); criterion 15
+-(a human looks, on macOS, in Chrome and in Firefox) is **OWED**, in those
+-words — no device run or visual judgement was simulated to fill it in. Full
+-account:
++**Exit gate: 14 of 15**, re-measured after the final fix wave. Criteria
++1–14 all PASS, each with its witness (test file and test name, the mutation
++log, or the pasted gate line); criterion 15 (a human looks, on macOS, in
++Chrome and in Firefox) is **OWED**, in those words — no device run or visual
++judgement was simulated to fill it in, and **the merge is still the human's
++decision**. The shell now binds cmd+Z / ctrl+Z, so the look's undo checks
++have something to press; there is no redo in 02. Full account:
+ [2026-09-21-plan-02-results.md](docs/superpowers/notes/2026-09-21-plan-02-results.md).
+ 
+ ---
+ 
+ ## Plan 01 — the app skeleton (MERGED into `main` at `bae5f73`)
+ 
+ **Plan 01 gave the product line its first sub-project** — `apps/floor_planner`,
+ a real product application that opens a resizable 1440×900 window, shows a
+ hand-written 523-entity floor plan on a `DraftCanvas`, and pans and zooms with
+ a trackpad and a mouse, on macOS and (its first-ever web build)
+@@ -1073,26 +1080,29 @@ macOS, in Chrome and in Firefox and judged each LGTM, so the gate stands at
+ [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73) and
+ [2026-09-21-plan-01-results.md](docs/superpowers/notes/2026-09-21-plan-01-results.md).
+ 
+ **Sub-project 02 (interaction core) is executed and awaits the human's look
+ and the merge decision.** Its spec,
+ [2026-09-21-interaction-core-design.md](docs/superpowers/specs/2026-09-21-interaction-core-design.md)
+ (revision 2), and plan,
+ [2026-09-21-interaction-core.md](docs/superpowers/plans/2026-09-21-interaction-core.md),
+ were both written 2026-09-21; **all twelve tasks ran on
+ `plan-02/interaction-core`, cut from `main` at `3fedeb9`, through
+-`afe7d64` plus this results-note task, and the branch is NOT merged.** The
+-exit gate is **14 of 15** — criterion 15 (a human looks, on macOS, in Chrome
+-and in Firefox from `build/web`, at click, shift-click, both bands, hover,
+-Escape, Delete and undo) is **OWED**, and the merge itself is the human's
++`afe7d64` plus the results-note task at `b02410a`, and then a final fix wave
++that closed every open finding of the whole-branch review and of Task 12's
++own review — and the branch is NOT merged.** The exit gate is **14 of 15** —
++criterion 15 (a human looks, on macOS, in Chrome and in Firefox from
++`build/web`, at click, shift-click, both bands, hover, Escape, Delete and
++undo — **cmd+Z on macOS, ctrl+Z in a browser**, which the fix wave's shell
++binding made possible) is **OWED**, and the merge itself is the human's
+ decision, exactly as Plan 01's twelfth criterion was before its own human
+-look. Spec amended at execution in six places (none rewriting the original
++look. Spec amended at execution in ten places (none rewriting the original
+ text), none of them changing a passing criterion into a failing one. See
+ [Plan 02](#plan-02--interaction-core-executed-on-plan-02interaction-core-not-merged)
+ and
+ [2026-09-21-plan-02-results.md](docs/superpowers/notes/2026-09-21-plan-02-results.md).
+ The other eleven sub-projects have not started.
+ 
+ **The web coupling is resolved and it went the expensive way.** This section
+ used to say "Plan G matters only if the product targets web". **The human
+ decided on 2026-09-21 that it does**, so **Plan G is on the critical path**:
+ it is the seventh of the GPU-resident spec's seven plans, it is unwritten, and
+diff --git a/apps/floor_planner/lib/main.dart b/apps/floor_planner/lib/main.dart
+index 01668db..8683415 100644
+--- a/apps/floor_planner/lib/main.dart
++++ b/apps/floor_planner/lib/main.dart
+@@ -1,11 +1,12 @@
+ import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'planner_view.dart';
+ import 'startup_plan.dart';
+ 
+ void main() => runApp(const FloorPlannerApp());
+ 
+ class FloorPlannerApp extends StatelessWidget {
+   const FloorPlannerApp({super.key});
+@@ -48,81 +49,97 @@ class _PlannerShellState extends State<PlannerShell> {
+   late final SelectionController _selection = SelectionController(_document);
+   late final ToolContext _context = ToolContext(
+       document: _document,
+       index: _index,
+       camera: _camera,
+       selection: _selection);
+   late final ToolController _tools =
+       ToolController(initial: SelectTool(), context: _context);
+   late final Listenable _status = Listenable.merge([_selection, _tools]);
+ 
++  /// Spec D12, amended at execution: cmd+Z (macOS) / ctrl+Z (everywhere
++  /// else) undoes through the command log. There is no redo in 02.
++  ///
++  /// The binding sits above the [InteractionLayer]'s `Focus`, which returns
++  /// the active tool's own `KeyEventResult`; the tool ignores Z, so the event
++  /// keeps bubbling and arrives here.
++  void _undo() {
++    if (_document.commands.canUndo) _document.commands.undo();
++  }
++
+   String _statusLine() {
+     final base = _tools.active.name;
+     return _selection.isEmpty ? base : '$base — ${_selection.length} selected';
+   }
+ 
+   @override
+   void dispose() {
+     _tools.dispose();
+     _selection.dispose();
+     _camera.dispose();
+     _index.dispose();
+     _measurer.clear();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+     final scheme = Theme.of(context).colorScheme;
+     return Scaffold(
+-      body: Column(
+-        children: [
+-          Container(
+-            key: const Key('chrome-top'),
+-            height: 44,
+-            color: scheme.surfaceContainer,
+-            child: Align(
+-              alignment: Alignment.centerLeft,
+-              child: Padding(
+-                padding: const EdgeInsets.symmetric(horizontal: 12),
+-                child: ListenableBuilder(
+-                  listenable: _status,
+-                  builder: (_, __) =>
+-                      Text(_statusLine(), key: const Key('status-text')),
++      body: CallbackShortcuts(
++        bindings: <ShortcutActivator, VoidCallback>{
++          const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _undo,
++          const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
++        },
++        child: Column(
++          children: [
++            Container(
++              key: const Key('chrome-top'),
++              height: 44,
++              color: scheme.surfaceContainer,
++              child: Align(
++                alignment: Alignment.centerLeft,
++                child: Padding(
++                  padding: const EdgeInsets.symmetric(horizontal: 12),
++                  child: ListenableBuilder(
++                    listenable: _status,
++                    builder: (_, __) =>
++                        Text(_statusLine(), key: const Key('status-text')),
++                  ),
+                 ),
+               ),
+             ),
+-          ),
+-          Expanded(
+-            child: Row(
+-              children: [
+-                Container(
+-                  key: const Key('chrome-left'),
+-                  width: 240,
+-                  color: scheme.surfaceContainerLow,
+-                ),
+-                Expanded(
+-                  child: ColoredBox(
+-                    color: scheme.surface,
+-                    child: PlannerView(
+-                      document: _document,
+-                      index: _index,
+-                      camera: _camera,
+-                      policy: _policy,
+-                      selection: _selection,
+-                      tools: _tools,
++            Expanded(
++              child: Row(
++                children: [
++                  Container(
++                    key: const Key('chrome-left'),
++                    width: 240,
++                    color: scheme.surfaceContainerLow,
++                  ),
++                  Expanded(
++                    child: ColoredBox(
++                      color: scheme.surface,
++                      child: PlannerView(
++                        document: _document,
++                        index: _index,
++                        camera: _camera,
++                        policy: _policy,
++                        selection: _selection,
++                        tools: _tools,
++                      ),
+                     ),
+                   ),
+-                ),
+-                Container(
+-                  key: const Key('chrome-right'),
+-                  width: 280,
+-                  color: scheme.surfaceContainerLow,
+-                ),
+-              ],
++                  Container(
++                    key: const Key('chrome-right'),
++                    width: 280,
++                    color: scheme.surfaceContainerLow,
++                  ),
++                ],
++              ),
+             ),
+-          ),
+-        ],
++          ],
++        ),
+       ),
+     );
+   }
+ }
+diff --git a/apps/floor_planner/lib/planner_view.dart b/apps/floor_planner/lib/planner_view.dart
+index 5f50322..c5a5ab9 100644
+--- a/apps/floor_planner/lib/planner_view.dart
++++ b/apps/floor_planner/lib/planner_view.dart
+@@ -32,22 +32,25 @@ class PlannerView extends StatefulWidget {
+ 
+ class _PlannerViewState extends State<PlannerView> {
+   /// Ruling 01-2: the camera is fitted once, to the size the view really
+   /// got, before the canvas under it has listened to anything.
+   bool _fitted = false;
+ 
+   // Constructed after the shell's `SelectionController` so it prunes dead
+   // keys before this cache walks them (listener order on `document.changes`).
+   late final OutlineCache _outlines =
+       OutlineCache(widget.document, widget.selection);
+-  late final Listenable _repaint =
+-      Listenable.merge([widget.selection, widget.tools, widget.camera]);
++  // The cache is in the merge because it is the only member that hears a
++  // `DocChange`: an edit under a selected instance rebuilds the outline and
++  // nothing else in here would ask for the frame that draws it.
++  late final Listenable _repaint = Listenable.merge(
++      [widget.selection, widget.tools, widget.camera, _outlines]);
+ 
+   @override
+   void dispose() {
+     _outlines.dispose();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) => LayoutBuilder(
+         builder: (context, constraints) {
+diff --git a/apps/floor_planner/test/planner_shell_test.dart b/apps/floor_planner/test/planner_shell_test.dart
+index ea9b074..4efcbed 100644
+--- a/apps/floor_planner/test/planner_shell_test.dart
++++ b/apps/floor_planner/test/planner_shell_test.dart
+@@ -1,14 +1,15 @@
+ import 'package:floor_planner/main.dart';
+ import 'package:floor_planner/planner_view.dart';
+ import 'package:floor_planner/startup_plan.dart';
+ import 'package:flutter/rendering.dart' show RenderCustomPaint;
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter/widgets.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ void main() {
+   testWidgets('the shell shows a canvas over a non-empty, off-origin plan',
+       (tester) async {
+     await tester.pumpWidget(const FloorPlannerApp());
+@@ -122,11 +123,54 @@ void main() {
+     final viewportSize = tester.getSize(find.byType(InteractionLayer));
+     expect(screen.x, inInclusiveRange(0, viewportSize.width));
+     expect(screen.y, inInclusiveRange(0, viewportSize.height));
+ 
+     final topLeft = tester.getTopLeft(find.byType(InteractionLayer));
+     await tester.tapAt(topLeft + Offset(screen.x, screen.y));
+     await tester.pump();
+ 
+     expect(view.selection.length, 1);
+   });
++
++  // A5 / spec D12: the look asks the human to delete a wall and put it back,
++  // and until this binding existed the shell had no way to put it back.
++  testWidgets('cmd+Z undoes a Delete through the command log', (tester) async {
++    await tester.pumpWidget(const FloorPlannerApp());
++    await tester.pump();
++
++    final view = tester.widget<PlannerView>(find.byType(PlannerView));
++    final world = Vector2(kPlanOriginX + 100, kPlanOriginY);
++    final screen = view.camera.value.worldToScreen(world);
++    final topLeft = tester.getTopLeft(find.byType(InteractionLayer));
++    await tester.tapAt(topLeft + Offset(screen.x, screen.y));
++    await tester.pump();
++
++    expect(view.selection.length, 1);
++    final handle = view.selection.keys.single.target;
++    expect(view.document.entities.slotOf(handle), isNotNull);
++    // The startup plan is itself built through the log, so the counts below
++    // are what pin the undo to exactly one command: the Delete.
++    final liveBefore = view.document.entities.liveCount;
++
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
++    await tester.pump();
++
++    expect(view.document.entities.slotOf(handle), isNull);
++    expect(view.document.entities.liveCount, liveBefore - 1);
++    expect(view.selection.isEmpty, isTrue);
++
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
++    await tester.pump();
++
++    expect(view.document.entities.slotOf(handle), isNotNull,
++        reason: 'the wall is back');
++    expect(view.document.entities.liveCount, liveBefore,
++        reason: 'exactly one command came off the log, not the plan under it');
++    expect(view.selection.isEmpty, isTrue,
++        reason: 'undo replays the command log; it never restores the '
++            "selection controller's own state");
++  });
+ }
+diff --git a/docs/superpowers/notes/2026-09-21-plan-02-results.md b/docs/superpowers/notes/2026-09-21-plan-02-results.md
+index 3059bec..282d4d7 100644
+--- a/docs/superpowers/notes/2026-09-21-plan-02-results.md
++++ b/docs/superpowers/notes/2026-09-21-plan-02-results.md
+@@ -1,81 +1,90 @@
+ # Plan 02 — interaction core: results
+ 
+ **Plan:** [2026-09-21-interaction-core.md](../plans/2026-09-21-interaction-core.md).
+ **Spec:** [2026-09-21-interaction-core-design.md](../specs/2026-09-21-interaction-core-design.md)
+ (revision 2, amended at execution 2026-09-22 — see "Spec amendments" below).
+ **Mutation log:** [plan-02-mutation-log.md](plan-02-mutation-log.md).
+ **Branch:** `plan-02/interaction-core`, worktree
+ `.claude/worktrees/plan-02-interaction-core`, cut from `main` at `3fedeb9`.
+-**Twelve tasks done, `3fedeb9..afe7d64` (Tasks 1–11); this task (the results
+-note, spec amendments, STATUS and the roadmap) lands on top. NOT merged — the
+-merge is the human's decision, after the look this note leaves OWED.**
++**Twelve tasks done, `3fedeb9..afe7d64` (Tasks 1–11); Task 12 (the results
++note, spec amendments, STATUS and the roadmap) landed on top at `b02410a`,
++and a **final fix wave** — every open finding of the whole-branch review and
++of Task 12's own review, items A1-A7 (code) and B1-B8 (docs) — on top of
++that. NOT merged — the merge is the human's decision, after the look this
++note leaves OWED.**
+ **Ledger (per-task briefs, reports, review diffs, every ruling):**
+ `.superpowers/sdd/2026-09-21-interaction-core/`.
+ 
+ ---
+ 
+ ## What was measured
+ 
+ ### The four gate lines, pasted
+ 
++**Re-run in full after the final fix wave** (items A1-A7), on the tree that
++commit leaves behind; these summaries replace the ones Task 12 recorded.
++
+ **`packages/jet_cad_2d`** — `CI=true dart test`:
+ 
+ ```
+ 00:03 +820: All tests passed!
+ ```
+ Exit 0. `dart analyze`: `Analyzing jet_cad_2d... No issues found!` Exit 0.
+ `dart format --output=none --set-exit-if-changed .`: `Formatted 116 files (0
+ changed) in 0.21 seconds.` Exit 0. `git status --short` clean after the line.
+ 
+ **`packages/jet_cad_2d_flutter`** — `CI=true flutter test`:
+ 
+ ```
+-00:10 +765 ~1 -5: Some tests failed.
++00:11 +769 ~1 -5: Some tests failed.
+ 
+ Failing tests:
+   .../test/golden/text_ladder_golden_test.dart: text ladder rung 1 (RenderBackend.canvas)
+   .../test/golden/text_ladder_golden_test.dart: text ladder rung 2 (RenderBackend.canvas)
+   .../test/golden/text_ladder_golden_test.dart: text ladder rung 3 (RenderBackend.canvas)
+   .../test/golden/text_ladder_golden_test.dart: text ladder rung 4 (RenderBackend.canvas)
+   .../test/golden/text_ladder_golden_test.dart: text ladder rung 5 (RenderBackend.canvas)
+ ```
+ 
+-Exit 1 — **765 pass, 1 pre-existing skip, and exactly the same five
++Exit 1 — **769 pass, 1 pre-existing skip, and exactly the same five
+ pre-existing `text_ladder_golden_test.dart` failures named above (`text
+ ladder rung 1..5`, `RenderBackend.canvas`) and nothing else** — the Plan 01
+ baseline ruling stands (goldens recorded 2026-08-24, SDK 3.47.2; pixel drift,
+ not a regression this plan introduced). `flutter analyze`: `Analyzing
+ jet_cad_2d_flutter... No issues found!` Exit 0. `dart format --output=none
+---set-exit-if-changed .`: `Formatted 136 files (0 changed) in 0.25 seconds.`
++--set-exit-if-changed .`: `Formatted 136 files (0 changed) in 0.26 seconds.`
+ Exit 0. `git status --short` clean after the line; no `analysis_options.yaml`
+ rewrite this run.
+ 
+ **`apps/dev_harness_2d`** — `CI=true flutter test --concurrency=1`:
+ 
+ ```
+ 00:20 +82: All tests passed!
+ ```
+ 
+ Exit 0 — **82 tests**, matching the branch-point count (`git diff --stat
+ main..HEAD -- apps/dev_harness_2d` empty, spec criterion 11). `flutter
+ analyze`: `Analyzing dev_harness_2d... No issues found!` Exit 0. `dart format
+ --output=none --set-exit-if-changed .`: `Formatted 22 files (0 changed) in
+ 0.05 seconds.` Exit 0. `git status --short` clean after the line.
+ 
+ **`apps/floor_planner`** — `CI=true flutter test`:
+ 
+ ```
+-00:00 +11: All tests passed!
++00:00 +12: All tests passed!
+ ```
+ 
+-12 tests (indices 0–11), including
++**12 tests** — eleven before this wave, plus A5's
++`planner_shell_test.dart`: `cmd+Z undoes a Delete through the command log`.
++(Task 12's note read the old `+11` as twelve; `+N` counts tests **passed**,
++so the app had eleven then and has twelve now.) Including
+ `startup_plan_test.dart`'s clamp line, pasted again below. `flutter analyze`:
+ `Analyzing floor_planner... No issues found!` Exit 0. `dart format
+ --output=none --set-exit-if-changed .`: `Formatted 5 files (0 changed) in
+ 0.02 seconds.` Exit 0. `flutter build macos --debug`:
+ 
+ ```
+ Building macOS application...
+ ✓ Built build/macos/Build/Products/Debug/floor_planner.app
+ ```
+ 
+@@ -100,21 +109,21 @@ this plan's `planner_shell_test.dart`:
+ ```
+ STARTUP fit scale 0.095 px/mm; min 0.001 (95.0x out), max 100.0 (1052.6315789473683x in)
+ ```
+ 
+ ### The Plan 01 baseline, recorded again
+ 
+ The five `text_ladder_golden_test.dart` failures (`text ladder rung 1..5`,
+ `RenderBackend.canvas`) are the same pre-existing Skia/SDK drift Plan 01
+ recorded (goldens from 2026-08-24, SDK 3.47.2) — measured again in this task,
+ identically named, nothing added and nothing healed. This plan's
+-`jet_cad_2d_flutter` bar is therefore "765 pass, 1 skip, those same five
++`jet_cad_2d_flutter` bar is therefore "769 pass, 1 skip, those same five
+ failures and no other," exactly as Plan 01's was "702 pass, 1 skip, those
+ same five failures."
+ 
+ ### Mutation summary
+ 
+ **Thirty named mutants (M-02a … M-02p, M-02r … M-02ac, plus M-02c′ and
+ M-02e′; there is no M-02q). 28 fired, 28 killed, 0 survived, 2 declared
+ equivalent by construction** (M-02c — key equality by bare handle, every
+ chain is empty under this task's D2; M-02e — `shouldRepaint` specified
+ `false`, no alternate boolean could differ under the contract). One fix round
+@@ -148,28 +157,28 @@ not a second geometry implementation (Task 2 report).
+ ## Exit gate
+ 
+ The spec's fifteen criteria, each with its witness.
+ 
+ | # | criterion | verdict | witness |
+ |---|---|---|---|
+ | 1 | Click selects exactly one; empty-space click clears; both from a non-identity camera | **PASS** | `interaction_layer_test.dart`: `a click selects; the layer took focus`; `select_tool_test.dart`: `click on empty space clears; shift-click on empty space does nothing` — camera at scale 1.5, non-zero translation |
+ | 2 | Window/crossing select the D8 sets; the straddling fixture distinguishes them; both drag directions and a vertical drag tested | **PASS** | `select_tool_test.dart`: `left-to-right encloses, right-to-left touches`, `a group is window-selected only when every leaf is enclosed`; `interaction_layer_test.dart`: `drag direction selects the mode; a vertical drag is a window` (M-02g's discriminating fixture) |
+ | 3 | The same leaf under two instances yields two keys; two leaves of one instance yield one | **PASS** | `selection_test.dart`: `two instances of one definition are two keys; two leaves of one instance are one` |
+ | 4 | Hover follows the pointer, clears on exit, never drawn for an already-selected key | **PASS** | `select_tool_test.dart`: `hover sets the controller's hover and clears on a miss`; `interaction_layer_test.dart`: `exiting the layer clears hover`; `selection_overlay_test.dart`: `hover on a selected key draws once` |
+-| 5 | Shift toggles; Escape cancels a band or clears; Delete removes through the command log on one key-down; undo restores geometry, not selection | **PASS** | `select_tool_test.dart`: `click replaces, shift-click toggles`, `Escape during a band drops it, selection untouched; cancel returns to idle`; `interaction_layer_test.dart`: `one Delete press is one remove` |
++| 5 | Shift toggles; Escape cancels a band or clears; Delete removes through the command log on one key-down; undo restores geometry, not selection | **PASS** | `select_tool_test.dart`: `Delete removes a leaf and an instance through the log; undo restores geometry, not selection`; `planner_shell_test.dart`: `cmd+Z undoes a Delete through the command log` (A5 — the shell's own binding, driven end to end); `interaction_layer_test.dart`: `one Delete press is one remove` |
+ | 6 | Selection change repaints the overlay and not the canvas | **PASS** | `selection_overlay_test.dart`: `a selection change repaints the overlay and not the canvas` — `DraftCanvas.onPaintForTest` unchanged, overlay count +1 |
+ | 7 | `SelectTool` implements `Tool`; `ToolController.activate` cancels the outgoing tool and re-points its listener; a second tool proves the interface is not `SelectTool`-shaped | **PASS** | `tool_controller_test.dart`: `ToolController forwards the active tool, swaps on activate, and stops forwarding the outgoing tool`, `activate notifies exactly once even when the outgoing tool notifies its own listeners from cancel` (uses `_CountingTool`, a second, trivial `Tool`) |
+ | 8 | All thirty mutants killed or declared equivalent, in the mutation log | **PASS** | [plan-02-mutation-log.md](plan-02-mutation-log.md) — 28 fired/28 killed, 2 equivalent, thirty accounted for |
+ | 9 | The differential band test passes on the generated corpus | **PASS** | `band_query_test.dart`: `crossing and window agree with the brute-force arm on the generated corpus` — 52 bands, 104 comparisons, pasted above |
+ | 10 | `query_allocation_test` and `paint_allocation_test` pass unchanged | **PASS** | mutation log's "Allocation gates" section, pasted transcripts, both green |
+ | 11 | Harness untouched; its 82 tests pass | **PASS** | `git diff --stat main..HEAD -- apps/dev_harness_2d` empty (verified in this task); 82 tests, gate line 3 above |
+-| 12 | All eleven gate commands exit 0, except `jet_cad_2d_flutter`'s `flutter test` on the same five pre-existing golden failures and nothing else; no `analysis_options.yaml` in the diff | **PASS with the one recorded exception** | gate lines above; `git status --short` clean after every line in this task, no rewritten `analysis_options.yaml` at any point |
++| 12 | All eleven gate commands exit 0, except `jet_cad_2d_flutter`'s `flutter test` on the same five pre-existing golden failures and nothing else; no `analysis_options.yaml` in the diff | **PASS with the one recorded exception** | re-run in full after the final fix wave and pasted above: `jet_cad_2d` **820**; `jet_cad_2d_flutter` **769 pass, 1 skip, the same five `text_ladder_golden_test.dart` failures and nothing else**; `dev_harness_2d` **82**; `floor_planner` **12** and both `✓ Built`. Every `analyze` and `format` exits 0; the short status after every line showed only the wave's own source files, and no `analysis_options.yaml` was rewritten at any point |
+ | 13 | The top bar shows the tool name and selection count; a widget test drives it | **PASS** | `planner_shell_test.dart`: `the status text shows the tool name and follows the selection` |
+ | 14 | The overlay outline coincides with the drawn entity at `kDefaultOriginX` to 0.01 px | **PASS** | `selection_overlay_test.dart`: `the outline coincides with the drawn line at 4.5e6`, `the outline coincides under a rotated, non-uniform camera` |
+ | 15 | A human looked, on macOS, in Chrome and in Firefox from `build/web`: click, shift-click, both bands, hover, Escape, Delete, undo; each recorded seen/not seen/could not judge | **OWED — not looked at; the human looks after this branch is presented** | this note |
+ 
+ **14 of 15 PASS.** No criterion is a MISS. Criterion 15 is OWED, itemised
+ below.
+ 
+ ---
+ 
+ ## The look — OWED, itemised
+@@ -191,44 +200,48 @@ matching this task's build).
+    dropping the first. **OWED — not looked at; the human looks after this
+    branch is presented.**
+ 3. Both bands: a left-to-right drag (window) selects only what is fully
+    enclosed; a right-to-left drag (crossing) also selects what the band only
+    touches. **OWED — not looked at; the human looks after this branch is
+    presented.**
+ 4. Hover highlights what the pointer is over, and follows it. **OWED — not
+    looked at; the human looks after this branch is presented.**
+ 5. Escape cancels a band in progress, or clears the selection when idle.
+    **OWED — not looked at; the human looks after this branch is presented.**
+-6. Delete removes the selection, and undo brings the geometry back. **OWED —
+-   not looked at; the human looks after this branch is presented.**
+-7. Undo after Delete restores what was removed, not what was selected.
+-   **OWED — not looked at; the human looks after this branch is presented.**
++6. Delete removes the selection, and undo — **cmd+Z (macOS) / ctrl+Z
++   (browsers)** — brings the geometry back. **OWED — not looked at; the
++   human looks after this branch is presented.**
++7. Undo after Delete — **cmd+Z (macOS) / ctrl+Z (browsers)** — restores what
++   was removed, not what was selected. **OWED — not looked at; the human
++   looks after this branch is presented.**
+ 
+ ### Browser — Chrome, then Firefox from `build/web`
+ 
+ `cd apps/floor_planner && flutter run -d chrome --release`, then the same
+ `flutter build web` served from `build/web` and opened in Firefox.
+ 
+ 1. Click selects exactly one entity, in both browsers. **OWED — not looked
+    at; the human looks after this branch is presented.**
+ 2. Shift-click toggles a second entity, in both browsers. **OWED — not
+    looked at; the human looks after this branch is presented.**
+ 3. Both bands (window and crossing), in both browsers. **OWED — not looked
+    at; the human looks after this branch is presented.**
+ 4. Hover follows the pointer, in both browsers. **OWED — not looked at; the
+    human looks after this branch is presented.**
+ 5. Escape cancels a band or clears, in both browsers. **OWED — not looked
+    at; the human looks after this branch is presented.**
+-6. Delete removes and undo restores the geometry, in both browsers. **OWED —
+-   not looked at; the human looks after this branch is presented.**
+-7. Undo restores geometry, not selection, in both browsers. **OWED — not
+-   looked at; the human looks after this branch is presented.**
++6. Delete removes and undo — **ctrl+Z (browsers), cmd+Z on macOS** —
++   restores the geometry, in both browsers. **OWED — not looked at; the
++   human looks after this branch is presented.**
++7. Undo — **ctrl+Z (browsers), cmd+Z on macOS** — restores geometry, not
++   selection, in both browsers. **OWED — not looked at; the human looks
++   after this branch is presented.**
+ 
+ Exit-gate criterion 15 is therefore **OWED**, not PASS — fourteen items in
+ total (seven per platform, macOS and the two browsers sharing the same seven
+ kinds of check), none looked at.
+ 
+ ---
+ 
+ ## Debt and rulings the human should know
+ 
+ - **A delete of N objects is N undo steps** (more for a group, D10). A
+@@ -237,31 +250,49 @@ kinds of check), none looked at.
+   Neither is a defect in 02's own scope; both are recorded here because the
+   human will meet them the first time they undo a group delete.
+ - **The group band rule counts leaves only.** An instance placed inside a
+   group never enters the group's every/any band verdict (Ruling P-1) — a
+   group made only of instances cannot be band-selected until a later plan
+   decides instances-in-groups. Meanwhile a group's **outline** (D9's overlay)
+   does descend into its child instances, because the outline shows what
+   Delete would remove (Task 6's cascade) — an asymmetry between what a band
+   selects and what the outline draws, both intentional, recorded together so
+   neither reads as an oversight of the other.
++- **Four walks over a container's members, and they differ on two axes** —
++  whether a child *instance* is followed, and which `QueryFilter` is applied.
++  All four are intentional; the table is here so no reader has to rediscover
++  which is which:
++
++  | walk | child instances | query filter |
++  |---|---|---|
++  | engine band walk (`forEachLeafInBand` / `forEachInstanceInBand`) | descend | applied — `_bandDescend` calls `acceptsEntity` before it counts a member |
++  | tool group every/any rule (`SelectTool._everyLeafIn`) | **excluded** — the stack only pushes nested groups (Ruling P-1) | applied after A1 — a rejected leaf is skipped, not failed on |
++  | outline cache (`OutlineCache._addContainer`) | descend — the outline shows what Delete would remove | applied after A2, but `rendering()`: hidden out, **locked still drawn**, as the canvas does |
++  | delete cascade (`SelectTool._groupCascade`) | descend — each child instance gets its own `RemoveNodeCommand` | **none** — hidden and locked leaves are deleted with their group, which mirrors what `RemoveNodeCommand` would otherwise orphan: the node goes and its leaves would be left owned by a handle that no longer exists |
++- **In window mode `forEachInstanceInBand` enumerates and descends every
++  root-level instance** (`_kAllBox` at the root, plan-mandated), which the
++  spec's "must not walk the whole document" did not anticipate; a band-box
++  prefilter at the root is safe (an instance whose box misses the band fails
++  window) and is left for 03 with a measurement.
+ - **A band dragged past the viewport edge is clipped at the edge** (Task 8's
+   screen-space paint pass is clipped to the overlay's own bounds), not drawn
+   past it.
+ - **Exiting the layer during a drag no longer cancels it** (Task 9 ruling,
+   spec row amended). Exit with no active pointer still clears hover, but the
+   layer's edge no longer cancels the drag; the band continues (Flutter keeps
+   delivering the captured pointer's moves and up) and the drag's own `up`
+   event ends it, not `onExit`.
+-- **`worldPointOf` allocates one `Vector2` per selected point per frame**
+-  (accepted, Task 8 ruling) — points are rare in a floor plan and the
+-  per-entity allocation rule is about entities walked, not keys selected.
++- **A selected point key allocates one `Vector2` and four `Offset`s per
++  frame** — `worldPointOf` returns a fresh `Vector2`, and `_drawPointCross`
++  builds two `Offset`s per `drawLine` for the cross's two strokes (accepted,
++  Task 8 ruling) — points are rare in a floor plan and the per-entity
++  allocation rule is about entities walked, not keys selected.
+ - **The painter class is `SelectionOverlayPainter`, not the spec's
+   `SelectionOverlay`** — Flutter's widgets library already exports a
+   `SelectionOverlay`, and the spec's name would force a `hide` at every app
+   import (Task 8 ruling; spec amended).
+ - **M-02c and M-02e are equivalent by construction**, not merely hard to
+   reach: M-02c because every `SelectionKey` chain is empty under this task's
+   D2, so a bare-handle comparison cannot be distinguished from the real
+   `(chain, target)` comparison by any input this scope can construct; M-02e
+   because `shouldRepaint` is specified `false` and the merged `repaint`
+   listenable already drives every repaint regardless of its answer.
+@@ -290,20 +321,41 @@ appended after the original text (nothing original was rewritten):
+ - D9 gains the point-key paint rule: a screen-space cross of half-length 3 ×
+   the stroke width at `worldToScreen(worldPointOf(key))` (Task 7/8 ruling).
+ - D9 gains the `ui.Path.getBounds` note: it returns the conic control-point
+   hull, not the curve's own bound, so arc and circle outlines are pinned on
+   the cache's world record and only a containment bound is asserted on the
+   `ui.Path` itself (Task 7 ruling).
+ - The `SelectTool` table's "exit while dragging" clause is superseded: exit
+   with no active pointer clears hover; a band drag past the layer's edge
+   continues and its own `up` ends it, not `onExit` (Task 9 ruling).
+ 
++Four more were appended by the final fix wave (A1-A5), the same way:
++
++- D8 gains the picking-filter rule: the tool's group every-rule **skips** a
++  leaf the picking filter rejects rather than failing the group on it (A1).
++- D8 gains the band-corner rule: **both** corners are converted from screen
++  to world at release, so a camera move mid-drag cannot leave the band behind
++  the cursor (A3).
++- D9 gains two: the outline skips a leaf the **rendering** filter rejects
++  (A2), and `OutlineCache` is a `ChangeNotifier` in the overlay's repaint
++  merge, notifying on a `DocChange` rebuild and a load/purge clear and silent
++  on a selection-driven one (A4).
++- D12 gains the undo binding: cmd/ctrl+Z undoes through the command log from
++  a `CallbackShortcuts` above the interaction layer's `Focus`; **no redo in
++  02**, and the look checklist stands as written (A5).
++
+ ---
+ 
+ ## Files this task touched
+ 
+ - `docs/superpowers/notes/2026-09-21-plan-02-results.md` — this file.
+ - `docs/superpowers/specs/2026-09-21-interaction-core-design.md` — the six
+   amendments above.
+ - `STATUS.md` — a Plan 02 section and the header/Resume-here update.
+ - `roadmap/02-interaction-core.md` — the status line.
+ - `roadmap/00-README.md` — the 02 row.
++
++The final fix wave on top of it touched
++`packages/jet_cad_2d_flutter/lib/src/select_tool.dart` and
++`outline_cache.dart`, `apps/floor_planner/lib/main.dart` and
++`planner_view.dart`, four test files and `test/support/selection_fixture.dart`,
++then this note, the spec and `STATUS.md` again.
+diff --git a/docs/superpowers/specs/2026-09-21-interaction-core-design.md b/docs/superpowers/specs/2026-09-21-interaction-core-design.md
+index 89a3e73..e7ccbd7 100644
+--- a/docs/superpowers/specs/2026-09-21-interaction-core-design.md
++++ b/docs/superpowers/specs/2026-09-21-interaction-core-design.md
+@@ -265,20 +265,35 @@ when **every** member leaf passes the window test; crossing when **any**
+ member leaf passes the crossing test. A container with no member leaves is
+ never band-selected. Instances descend (`forEachInstanceInBand`); groups are
+ resolved by the tool from the leaves the leaf walk reports (D2), and the tool
+ applies the same every/any rule over the group's owned leaves, nested groups
+ included, using `leavesByOwner()` once per band.
+ 
+ **Amended at execution (Plan 02, 2026-09-22):** a group's member leaves are
+ its own and its nested groups'; an instance placed inside a group does not
+ enter the group's every/any rule (Ruling P-1).
+ 
++**Amended at execution (Plan 02, 2026-09-22):** the tool's group every-rule
++skips a leaf the picking filter rejects — hidden, or on a locked layer —
++rather than failing the group on it. `leavesByOwner()` is unfiltered while
++the walk's passing set holds only accepted slots, so counting such a leaf
++would make a group with one locked leaf unselectable by any window band; the
++engine's own `_bandDescend` already applies `acceptsEntity` before it counts
++a member. A group whose leaves are all rejected has no members and is not
++selected.
++
++**Amended at execution (Plan 02, 2026-09-22):** both band corners are
++converted from screen to world **at release**, not one of them at press. The
++camera may move between the two — a trackpad zoom mid-drag — and the band the
++user is looking at is the one their two screen corners name under the camera
++they are looking through at the moment they let go.
++
+ | mode | a leaf |
+ |---|---|
+ | **window** | its world AABB ⊆ band, read as `boxOfLeaf(slot) ?? dirty.boxOf(slot)` — `boxOfLeaf` alone is null for a leaf live only on the dirty overlay, which is every leaf edited since the last rebuild. Tight for point, line, polyline, circle and arc (`arcBounds`); **conservative for rotated text** — the AABB of an oriented box is looser than the box, so a rotated text near the band edge may be missed. Documented, accepted. |
+ | **crossing** | broad phase: AABB overlaps the band **widened by `_broadPhaseMargin().pick`**, the margin `pickInto` uses for the same reason (a circle under a non-conformal transform may be accepted outside its exact box). Exact phase: **some point of the stroke lies inside the band.** Line and polyline segments: `clipSegment` returns true. Circle: `circleClipWindows` returns non-zero (or −1, fully inside). Arc: a clip window intersects the sweep (`angleInSweep`). Text and attrib: the oriented box's four edges as segments (`textLocalTransform` × `textLocalBounds`). Point: `containsPoint`. Enclosed ⇒ touched, so no second case. **A band lying wholly inside a closed shape touches no stroke and selects nothing** — CAD behaviour. |
+ 
+ Fills carry no coordinates and are never picked (`_considerLeaf` returns
+ before kind dispatch); both walks skip `EntityKind.fill`, and a region is
+ selected through its boundary, the way `pickInto` already answers.
+ 
+ Inside an instance, a leaf's world transform is the per-level product
+@@ -365,20 +380,33 @@ the same way.
+ **Amended at execution (Plan 02, 2026-09-22):** a point key is drawn as a
+ screen-space cross of half-length 3 × the stroke width, centred at
+ `worldToScreen(worldPointOf(key))` (Task 7/8 ruling).
+ 
+ **Amended at execution (Plan 02, 2026-09-22):** `ui.Path.getBounds` returns
+ the conic control-point hull, not the curve's own bound (measured: 19.1 vs.
+ 17.0 for a 2.6 rad sweep of radius 7), so an arc or circle outline is pinned
+ on the cache's world record (`debugWorldArcsOf`) to tight tolerance, and only
+ a containment bound is asserted on the `ui.Path` itself (Task 7 ruling).
+ 
++**Amended at execution (Plan 02, 2026-09-22):** the outline skips a leaf the
++**rendering** filter rejects (`QueryFilter.rendering()`: hidden out, a locked
++leaf still drawn, exactly as the canvas does), so a selected group never gets
++an outline over geometry nothing draws.
++
++**Amended at execution (Plan 02, 2026-09-22):** `OutlineCache` is a
++`ChangeNotifier` and a member of the overlay's repaint merge
++(`Listenable.merge([selection, toolController, camera, outlines])`). It
++notifies after a `DocChange` rebuild and after a load/purge clear, and is
++silent on a selection-driven rebuild — the selection controller has already
++notified the same merge. Without it a `DocChange` under a selected instance
++rebuilt the cache and asked nobody for the frame that would draw the result.
++
+ ### D10 — Delete: preflight per object, permission-checked, cascading through groups
+ 
+ For each selected key, in ascending handle order of `target`, the tool builds
+ that object's **command list**, checks it, and only then executes it:
+ 
+ | selected | command list | capability of each |
+ |---|---|---|
+ | loose leaf | `RemoveEntityCommand(target)` | `geometry` |
+ | root-level instance | `RemoveNodeCommand(target)` | `structure` |
+ | group | its owned leaves (`leavesByOwner()`, one linear pass per Delete, bucketed by owner), its child nodes (`childNodesOf(group.children)`): instances → `RemoveNodeCommand`, nested groups → recursively the same list, then `RemoveNodeCommand(group)` last. **A fill slot whose boundary is in the same list is skipped**: removing the boundary removes its dependent fill in the same command, and naming it twice would throw on the second. | `geometry` for the leaves, `structure` for the nodes |
+@@ -418,20 +446,30 @@ undoable (roadmap decision 1).
+ 
+ `chrome-top` gains one `Text` at its left: `"Select — 3 selected"`, `"Select"`
+ when empty. `_PlannerShellState` owns `SelectionController`,
+ `ToolController` and the `ToolContext` for the window's lifetime, disposes
+ them in `dispose` beside the camera and the index, passes them into
+ `PlannerView`, and holds the status text's `Listenable.merge([selection,
+ tools])` as a `late final` field — not a fresh merge per build, which would
+ churn `ListenableBuilder`'s subscription. Keyed `status-text` for the widget
+ test. That is all the UI 02 adds; 12 consolidates.
+ 
++**Amended at execution (Plan 02, 2026-09-22):** the shell also binds undo.
++`SingleActivator(LogicalKeyboardKey.keyZ, meta: true)` and its `control: true`
++twin — cmd+Z on macOS, ctrl+Z in a browser — run
++`if (_document.commands.canUndo) _document.commands.undo()` from a
++`CallbackShortcuts` wrapping the `Scaffold` body. The binding sits above the
++`InteractionLayer`'s `Focus`, which returns the active tool's own
++`KeyEventResult`, so a key the tool ignores bubbles up to it. **No redo in
++02.** The look checklist stands as written: it asks the human to delete and
++undo, and until this binding existed the app had no way to undo at all.
++
+ ---
+ 
+ ## Architecture
+ 
+ Widget tree in `planner_view.dart`, outside in:
+ 
+ ```
+ CameraGestureDetector            01, unchanged: middle drag, wheel, trackpad
+   InteractionLayer               Focus(autofocus) + MouseRegion(onExit) + Listener(behavior: HitTestBehavior.opaque)
+     Stack
+@@ -544,21 +582,21 @@ packages/jet_cad_2d/lib/src/index/spatial_index.dart       BandMode; forEachLeaf
+ packages/jet_cad_2d/lib/src/index/band_predicates.dart     leafEnclosedBy, leafTouchedBy — pure functions over a payload, a composed transform and a band
+ packages/jet_cad_2d/test/index/band_query_test.dart
+ packages/jet_cad_2d/test/index/band_predicates_test.dart
+ 
+ packages/jet_cad_2d_flutter/lib/src/selection.dart          SelectionKey, SelectionController, resolveHit(HitPath, DraftDocument) → SelectionKey?
+ packages/jet_cad_2d_flutter/lib/src/outline_cache.dart      world-space Float64List outlines per key; rebased ui.Path per origin tag
+ packages/jet_cad_2d_flutter/lib/src/selection_style.dart    the constants
+ packages/jet_cad_2d_flutter/lib/src/tool.dart               Tool, ToolContext, ToolPointerEvent, ToolPhase, ToolController
+ packages/jet_cad_2d_flutter/lib/src/select_tool.dart        SelectTool, kBandSlopPixels, the delete preflight
+ packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart  InteractionLayer, kPickRadiusPixels, the pointer routing table
+-packages/jet_cad_2d_flutter/lib/src/selection_overlay.dart  SelectionOverlayPainter (amended at execution, Plan 02: SelectionOverlay collides with Flutter's own export)
++packages/jet_cad_2d_flutter/lib/src/selection_overlay.dart  SelectionOverlay — amended at execution (Plan 02): the class is SelectionOverlayPainter, Flutter's widgets library exports a SelectionOverlay
+ packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart     exports for all of the above
+ packages/jet_cad_2d_flutter/test/selection_test.dart
+ packages/jet_cad_2d_flutter/test/outline_cache_test.dart
+ packages/jet_cad_2d_flutter/test/select_tool_test.dart       tool driven with synthetic ToolPointerEvents, no widgets
+ packages/jet_cad_2d_flutter/test/interaction_layer_test.dart widget-driven: click, shift, band, keys, focus, multi-button, cancel
+ packages/jet_cad_2d_flutter/test/selection_overlay_test.dart SpyCanvas, paint counters, the 4.5e6 fixture
+ packages/jet_cad_2d_flutter/test/support/selection_fixture.dart
+ 
+ apps/floor_planner/lib/main.dart                             controllers owned by the shell; status text in chrome-top
+ apps/floor_planner/lib/planner_view.dart                     the tree above
+diff --git a/packages/jet_cad_2d_flutter/lib/src/outline_cache.dart b/packages/jet_cad_2d_flutter/lib/src/outline_cache.dart
+index 92533bf..c7ccc42 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/outline_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/outline_cache.dart
+@@ -46,21 +46,29 @@ final class _Point extends _Outline {
+ /// `ui.Path` stores float32; at the generated corpus's x = 4.5e6 the float32
+ /// spacing is about half a unit, so a world-space path would sit visibly off
+ /// the entity it outlines while the startup plan at x = 5e3 still looked
+ /// fine. The world record is therefore kept in `Float64List`s and each
+ /// `ui.Path` is built with the frame's rebase origin subtracted, tagged with
+ /// that origin, and rebuilt only when the tag changes — the painter draws it
+ /// under `worldToScreen ∘ translate(origin)`.
+ ///
+ /// The document walk happens at selection-change, hover-change and
+ /// `DocChange` rate — never per frame.
+-class OutlineCache {
++///
++/// **A [ChangeNotifier], and a member of the overlay's repaint merge.** A
++/// `DocChange` rebuilds the outlines, and nothing else in that merge hears a
++/// `DocChange`: without this the new outline would sit in the cache while the
++/// stale one stayed on screen until the next selection, hover or camera
++/// change. A *selection*-driven rebuild is deliberately silent — the
++/// selection controller has already notified the same merge, and notifying
++/// again would cost a second repaint for one change.
++class OutlineCache extends ChangeNotifier {
+   OutlineCache(this.document, this.selection) {
+     _subscription = document.changes.listen(_onChange);
+     selection.addListener(_onSelection);
+     _onSelection();
+   }
+ 
+   final DraftDocument document;
+   final SelectionController selection;
+   late final StreamSubscription<DocChange> _subscription;
+ 
+@@ -102,22 +110,22 @@ class OutlineCache {
+ 
+   /// The world position of [key] when its whole outline is a single `point`
+   /// entity; null for every other key, and for a key that is not cached.
+   ///
+   /// **The overlay's affordance for drawing a point key** (Task 8). A point
+   /// has no extent, so its `ui.Path` would be a lone `moveTo` — it draws
+   /// nothing, and an empty path cannot be told apart from a target that has
+   /// vanished. The marker a point deserves is a screen-space cross, whose
+   /// size is in pixels and therefore cannot live in a world-space cache; the
+   /// painter reads the position here and sizes the cross itself. The value is
+-  /// **absolute world**, so the caller must rebase it — subtract [origin] —
+-  /// before it reaches `dart:ui`.
++  /// an absolute world position; map it to screen with `worldToScreen` (or
++  /// rebase it) before it reaches `dart:ui`.
+   Vector2? worldPointOf(SelectionKey key) {
+     final outlines = _world[key];
+     if (outlines == null || outlines.length != 1) return null;
+     final only = outlines.first;
+     return only is _Point ? Vector2(only.x, only.y) : null;
+   }
+ 
+   /// **Test-only.** Every `_Segments` outline of [key], concatenated in
+   /// order, in world doubles; null when [key] is not cached.
+   @visibleForTesting
+@@ -156,25 +164,27 @@ class OutlineCache {
+       final a = arcs[i];
+       out[i * 5] = a.cx;
+       out[i * 5 + 1] = a.cy;
+       out[i * 5 + 2] = a.r;
+       out[i * 5 + 3] = a.start;
+       out[i * 5 + 4] = a.sweep;
+     }
+     return out;
+   }
+ 
++  @override
+   void dispose() {
+     _subscription.cancel();
+     selection.removeListener(_onSelection);
+     _world.clear();
+     _paths.clear();
++    super.dispose();
+   }
+ 
+   // --- keys in, keys out -------------------------------------------------
+ 
+   /// Adds what entered the selection or the hover, drops what left.
+   void _onSelection() {
+     final live = <SelectionKey>{...selection.keys};
+     final hover = selection.hover;
+     if (hover != null) live.add(hover);
+     var changed = _world.keys.toSet().difference(live).isNotEmpty;
+@@ -188,40 +198,44 @@ class OutlineCache {
+       changed = true;
+     }
+     if (changed) _invalidatePaths();
+   }
+ 
+   /// Records the world outline of each of [keys], sharing one
+   /// `leavesByOwner()` scan across the whole batch and never across batches —
+   /// the document may have changed since the last one.
+   void _walk(Iterable<SelectionKey> keys) {
+     _byOwner = null;
++    _filters = null;
+     for (final key in keys) {
+       _world[key] = _outlinesFor(key);
+     }
+     _byOwner = null;
++    _filters = null;
+   }
+ 
+   /// Spec D9: **every** `DocChange` rebuilds **every** cached outline. A leaf
+   /// edited inside a selected instance's definition or group touches neither
+   /// the instance nor the group handle, so an exact-handle rule never fires
+   /// for it; selection is small and commands arrive at command rate.
+   void _onChange(DocChange change) {
+     if (change is DocumentLoaded || change is DocumentPurged) {
+       // D11 drops the keys first; this clears whatever is left either way.
+       _world.clear();
+       _invalidatePaths();
++      notifyListeners();
+       return;
+     }
+     if (_world.isEmpty) return;
+     _walk(_world.keys.toList());
+     _invalidatePaths();
++    notifyListeners();
+   }
+ 
+   void _invalidatePaths() {
+     _paths.clear();
+     _stale = true;
+   }
+ 
+   void _rebuildPaths() {
+     _paths.clear();
+     final ox = _origin.x, oy = _origin.y;
+@@ -316,21 +330,31 @@ class OutlineCache {
+           _addInstance(out, node, toWorld.multiply(node.transform), visiting);
+         case null:
+           break;
+       }
+     }
+   }
+ 
+   /// `document.leavesByOwner()` is a full entity-store scan; one per walk.
+   Map<Handle, List<int>>? _byOwner;
+ 
++  /// The filter's layer and container answers are memoised, and a layer
++  /// record or a node's visibility may have changed since the last walk, so
++  /// the evaluator is built once per walk and dropped with it.
++  FilterEvaluator? _filters;
++
+   void _addLeaf(List<_Outline> out, int slot, Transform2 t) {
++    // Spec D9, amended at execution: the outline is a statement about what is
++    // drawn, so it skips exactly what the canvas skips — `rendering()`, which
++    // drops a hidden leaf and keeps a locked one.
++    final filters = _filters ??= FilterEvaluator(document);
++    if (!filters.acceptsEntity(slot, const QueryFilter.rendering())) return;
+     final kind = document.entities.kindAt(slot);
+     if (kind == EntityKind.fill) return; // a fill has no coordinates (D8)
+     final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
+     switch (kind) {
+       case EntityKind.point:
+         if (payload.pointCount == 0) return;
+         final p = t.transformPoint(payload.pointAt(0));
+         out.add(_Point(p.x, p.y));
+       case EntityKind.line:
+       case EntityKind.polyline:
+diff --git a/packages/jet_cad_2d_flutter/lib/src/select_tool.dart b/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
+index 6ca5897..0711562 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
+@@ -22,21 +22,20 @@ class SelectTool extends Tool {
+   SelectTool();
+ 
+   @override
+   String get name => 'Select';
+   ToolPhase _phase = ToolPhase.idle;
+   @override
+   ToolPhase get phase => _phase;
+ 
+   final HitPath _hit = HitPath();
+   Offset _start = Offset.zero;
+-  final Vector2 _startWorld = Vector2.zero();
+   SelectionKey? _downKey;
+   bool _downHit = false;
+   Offset _end = Offset.zero;
+   BandMode? _bandMode;
+   int _pointer = -1;
+ 
+   /// Non-null only while a band drag is in progress, for the overlay.
+   BandMode? get bandMode => _phase == ToolPhase.dragging ? _bandMode : null;
+ 
+   /// The band rectangle in screen space, for the overlay test.
+@@ -53,21 +52,20 @@ class SelectTool extends Tool {
+     }
+     return resolveHit(_hit, ctx.document);
+   }
+ 
+   @override
+   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
+     if (_phase != ToolPhase.idle) return;
+     _phase = ToolPhase.pressed;
+     _pointer = e.pointer;
+     _start = e.screen;
+-    _startWorld.setFrom(e.world);
+     _downKey = _pick(e, ctx);
+     _downHit = _downKey != null;
+     notifyListeners();
+   }
+ 
+   @override
+   void onPointerMove(ToolPointerEvent e, ToolContext ctx) {
+     switch (_phase) {
+       case ToolPhase.idle:
+         if (e.buttons != 0) return;
+@@ -106,62 +104,79 @@ class SelectTool extends Tool {
+         final keys = _bandKeys(ctx, e);
+         e.shift ? ctx.selection.toggle(keys) : ctx.selection.replace(keys);
+     }
+     _reset();
+     notifyListeners();
+   }
+ 
+   /// Every root-level key the band selects: root entities, groups (spec D8,
+   /// Ruling 02-2 — decided here from the passing-slot set, once per band)
+   /// and instances.
++  ///
++  /// **Both corners are converted here, at release** (spec D8): the camera
++  /// may have moved between the press and the up — a trackpad zoom during a
++  /// band drag — and the band the user is looking at is the one their two
++  /// *screen* corners name under the camera they are looking through now.
+   List<SelectionKey> _bandKeys(ToolContext ctx, ToolPointerEvent e) {
+     final mode = _bandMode!;
+-    final a = _startWorld, b = e.world;
++    final a = ctx.camera.value.screenToWorld(Vector2(_start.dx, _start.dy));
++    final b = e.world;
+     final band = Aabb2.raw(math.min(a.x, b.x), math.min(a.y, b.y),
+         math.max(a.x, b.x), math.max(a.y, b.y));
+     final passing = <int>{};
+     ctx.index.forEachLeafInBand(
+         band, mode, const QueryFilter.picking(), passing.add);
+     final keys = <SelectionKey>[];
+     final seenGroups = <Handle>{};
+     final doc = ctx.document;
+     Map<Handle, List<int>>? byOwner;
++    FilterEvaluator? evaluator;
+     for (final slot in passing) {
+       final owner = doc.entities.ownerAt(slot);
+       if (owner == doc.rootHandle) {
+         keys.add(SelectionKey.root(doc.entities.handleAt(slot)));
+         continue;
+       }
+       final top = _topmostGroup(doc, owner);
+       if (top == null || !seenGroups.add(top)) continue;
+       byOwner ??= doc.leavesByOwner();
++      evaluator ??= FilterEvaluator(doc);
+       if (mode == BandMode.crossing ||
+-          _everyLeafIn(doc, top, byOwner, passing)) {
++          _everyLeafIn(doc, top, byOwner, passing, evaluator)) {
+         keys.add(SelectionKey.root(top));
+       }
+     }
+     ctx.index.forEachInstanceInBand(band, mode, const QueryFilter.picking(),
+         (h) => keys.add(SelectionKey.root(h)));
+     return keys;
+   }
+ 
+   /// Ledger Ruling P-1: every leaf owned by [group] or a group nested in it
+   /// is in [passing], and there is at least one. A child *instance*'s leaves
+   /// do not enter this rule — the stack only ever pushes nested groups.
++  ///
++  /// A leaf the picking filter rejects — hidden, or on a locked layer — is
++  /// **skipped**, not failed on: `leavesByOwner()` is unfiltered while
++  /// [passing] only ever holds accepted slots, so counting such a leaf as a
++  /// member would make a group with one locked leaf unselectable by any
++  /// window band. This matches the engine's own `_bandDescend`, which applies
++  /// `acceptsEntity` before it counts a member. A group whose leaves are all
++  /// rejected has no members at all and is not selected.
+   bool _everyLeafIn(DraftDocument doc, Handle group,
+-      Map<Handle, List<int>> byOwner, Set<int> passing) {
++      Map<Handle, List<int>> byOwner, Set<int> passing, FilterEvaluator f) {
+     var any = false;
+     final stack = <Handle>[group];
+     while (stack.isNotEmpty) {
+       final g = stack.removeLast();
+       for (final slot in byOwner[g] ?? const <int>[]) {
+         if (doc.entities.kindAt(slot) == EntityKind.fill) continue;
++        if (!f.acceptsEntity(slot, const QueryFilter.picking())) continue;
+         any = true;
+         if (!passing.contains(slot)) return false;
+       }
+       final node = doc.tree[g];
+       if (node is GroupNode) {
+         for (final child in doc.tree.childNodesOf(node.children)) {
+           if (doc.tree[child] is GroupNode) stack.add(child);
+         }
+       }
+     }
+@@ -260,20 +275,25 @@ class SelectTool extends Tool {
+     final leaves = byOwner[group.handle] ?? const <int>[];
+     final boundaries = <Handle>{};
+     for (final slot in leaves) {
+       if (doc.entities.kindAt(slot) != EntityKind.fill) {
+         boundaries.add(doc.entities.handleAt(slot));
+       }
+     }
+     final skip = <Handle>{for (final b in boundaries) ...doc.fills.fillsOf(b)};
+     for (final slot in leaves) {
+       final h = doc.entities.handleAt(slot);
++      // `byOwner` is scanned once per Delete and the keys are executed one
++      // after another, so by the time a later key's cascade is built an
++      // earlier one may already have removed this leaf; its slot would then
++      // name whatever has since been compacted into it.
++      if (doc.entities.slotOf(h) == null) continue;
+       if (skip.contains(h)) continue;
+       out.add(RemoveEntityCommand(h));
+     }
+     for (final child in doc.tree.childNodesOf(group.children)) {
+       final n = doc.tree[child];
+       if (n is GroupNode) {
+         out.addAll(_groupCascade(doc, n, byOwner));
+       } else if (n is InstanceNode) {
+         out.add(RemoveNodeCommand(child));
+       }
+diff --git a/packages/jet_cad_2d_flutter/test/outline_cache_test.dart b/packages/jet_cad_2d_flutter/test/outline_cache_test.dart
+index 6a58b0b..20e005b 100644
+--- a/packages/jet_cad_2d_flutter/test/outline_cache_test.dart
++++ b/packages/jet_cad_2d_flutter/test/outline_cache_test.dart
+@@ -147,20 +147,64 @@ void main() {
+     expect(segments[0], closeTo(p0.x, 1e-9));
+     expect(segments[1], closeTo(p0.y, 1e-9));
+     expect(segments[2], closeTo(p1.x, 1e-9));
+     expect(segments[3], closeTo(p1.y, 1e-9));
+     // Dropping the group transform would leave the leaf at the placement
+     // alone; the fixture is built so the two are far apart.
+     final unplaced = kPlacement.transformPoint(Vector2(3, 1));
+     expect((segments[0] - unplaced.x).abs(), greaterThan(1.0));
+   });
+ 
++  test('a leaf the rendering filter rejects is left out of the outline', () {
++    // A2. The outline is a statement about what is drawn, so it follows the
++    // canvas's own filter: `QueryFilter.rendering()` — hidden out, locked
++    // still drawn. A hidden leaf otherwise gets a selection outline with no
++    // geometry under it.
++    final doc = DraftDocument.empty();
++    final group = addGroup(
++        doc,
++        doc.rootHandle,
++        Transform2.translation(-17, 23)
++            .multiply(Transform2.rotation(-math.pi / 5)));
++    addEntity(doc, group, EntityKind.line, [3, 1, 9, 4], []);
++    addEntity(doc, group, EntityKind.line, [40, 60, 44, 70], [],
++        layer: addLayer(doc, 'Hidden', visible: false));
++    // A locked-but-visible leaf still draws, so it stays in the outline.
++    addEntity(doc, group, EntityKind.line, [70, 80, 74, 90], [],
++        layer: addLayer(doc, 'Locked', locked: true));
++    final (selection, cache) = wire(doc);
++    final key = SelectionKey.root(group);
++    selection.replace([key]);
++
++    final toWorld = doc.tree.accumulatedTransform(group);
++    final segments = cache.debugWorldSegmentsOf(key);
++    expect(segments, isNotNull);
++    expect(segments!.length, 8,
++        reason: 'the visible leaf and the locked one, not the hidden one');
++    for (final (i, local) in [
++      Vector2(3, 1),
++      Vector2(9, 4),
++      Vector2(70, 80),
++      Vector2(74, 90),
++    ].indexed) {
++      final p = toWorld.transformPoint(local);
++      expect(segments[i * 2], closeTo(p.x, 1e-9));
++      expect(segments[i * 2 + 1], closeTo(p.y, 1e-9));
++    }
++    // The discriminating half: the hidden leaf's world x is far from both of
++    // the recorded chains, so its absence cannot be a rounding accident.
++    final hidden = toWorld.transformPoint(Vector2(40, 60));
++    for (var i = 0; i < segments.length; i += 2) {
++      expect((segments[i] - hidden.x).abs(), greaterThan(1.0));
++    }
++  });
++
+   test(
+       'a circle under a non-uniform instance scale is emitted with the '
+       'geometric-mean radius', () {
+     final doc = DraftDocument.empty();
+     final def = addDefinition(doc, 'Def');
+     addEntity(doc, def, EntityKind.circle, [5, 3], [2]);
+     // det = 16, so the world radius is 2 * 4 = 8 — neither 2 * 2 nor 2 * 8.
+     final placement = Transform2.translation(40, -25)
+         .multiply(Transform2.rotation(math.pi / 7))
+         .multiply(Transform2.scale(2, 8));
+diff --git a/packages/jet_cad_2d_flutter/test/select_tool_test.dart b/packages/jet_cad_2d_flutter/test/select_tool_test.dart
+index 788d8d8..d002062 100644
+--- a/packages/jet_cad_2d_flutter/test/select_tool_test.dart
++++ b/packages/jet_cad_2d_flutter/test/select_tool_test.dart
+@@ -328,20 +328,117 @@ void main() {
+     crossing.onPointerMove(ev(camera, const Offset(372, 340)), ctx);
+     expect(crossing.bandMode, BandMode.crossing);
+     crossing.onPointerUp(ev(camera, const Offset(372, 340)), ctx);
+     expect(selection.length, 2);
+     expect(selection.contains(SelectionKey.root(group)), isTrue);
+     expect(selection.contains(SelectionKey.root(straddler)), isTrue,
+         reason: 'crossing takes the straddler even though it reaches '
+             'outside the band');
+   });
+ 
++  test('a leaf the picking filter rejects is skipped by the group every-rule',
++      () {
++    // A1. `_bandDescend` in the engine applies the filter before counting a
++    // member; the tool's every-rule must agree, or a group with one locked
++    // leaf could never be window-selected at all.
++    //
++    // Camera: `sx = 2*wx - 600`, `sy = -2*wy + 900`, so the band's world
++    // corners (486,280) and (510,320) land at screen (372,340) and (420,260).
++    // The band encloses the first leaf only.
++    (DraftDocument, Handle) fixture({required bool locked}) {
++      final doc = DraftDocument.empty();
++      final group =
++          addGroup(doc, doc.rootHandle, Transform2.translation(500, 300));
++      addEntity(doc, group, EntityKind.line, [0, 0, 2, 0],
++          []); // world (500,300)-(502,300), inside the band
++      final layer = addLayer(doc, locked ? 'Locked' : 'Free', locked: locked);
++      addEntity(doc, group, EntityKind.line, [20, 0, 22, 0], [],
++          layer: layer); // world (520,300)-(522,300), outside the band
++      return (doc, group);
++    }
++
++    List<SelectionKey> band(DraftDocument doc) {
++      final index = SpatialIndex(doc);
++      addTearDown(index.dispose);
++      final selection = SelectionController(doc);
++      addTearDown(selection.dispose);
++      final camera = cameraAt(2.0, const Offset(-600, 900));
++      final ctx = ToolContext(
++          document: doc, index: index, camera: camera, selection: selection);
++      final tool = SelectTool();
++      tool.onPointerDown(ev(camera, const Offset(372, 340)), ctx);
++      tool.onPointerMove(ev(camera, const Offset(420, 260)), ctx);
++      expect(tool.bandMode, BandMode.window);
++      tool.onPointerUp(ev(camera, const Offset(420, 260)), ctx);
++      return selection.keys.toList();
++    }
++
++    final (lockedDoc, lockedGroup) = fixture(locked: true);
++    expect(band(lockedDoc), [SelectionKey.root(lockedGroup)],
++        reason: 'the locked leaf is not a member the every-rule can fail on');
++
++    final (freeDoc, freeGroup) = fixture(locked: false);
++    expect(band(freeDoc), isEmpty,
++        reason: 'the same leaf, visible and unlocked, is outside the band, '
++            'so the group is missing a member and window takes nothing');
++  });
++
++  test('both band corners are converted at release, not at press', () {
++    // A3 / spec D8. The camera moves between press and release (a trackpad
++    // zoom during a band drag), so a world corner captured on press names a
++    // different point than the screen corner the user is still holding.
++    final doc = DraftDocument.empty();
++    // Inside the band the *release-time* camera computes, outside the one a
++    // press-time corner would build.
++    final right = addEntity(
++        doc, doc.rootHandle, EntityKind.line, [420, 245, 428, 255], []);
++    // The exact opposite: inside the press-time band, outside the correct one.
++    final wrong = addEntity(
++        doc, doc.rootHandle, EntityKind.line, [440, 265, 460, 275], []);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++    final selection = SelectionController(doc);
++    addTearDown(selection.dispose);
++    // `sx = 2*wx - 600`, `sy = -2*wy + 900`.
++    final camera = cameraAt(2.0, const Offset(-600, 900));
++    final ctx = ToolContext(
++        document: doc, index: index, camera: camera, selection: selection);
++    final tool = SelectTool();
++
++    tool.onPointerDown(ev(camera, const Offset(372, 340)), ctx);
++    tool.onPointerMove(ev(camera, const Offset(420, 260)), ctx);
++    expect(tool.bandMode, BandMode.window);
++
++    // Zoom about a focus that is neither corner, so *both* screen corners
++    // name different world points afterwards.
++    camera.zoomAt(const Offset(100, 500), 2.0);
++    expect(camera.value.scale, closeTo(4.0, 1e-12));
++
++    // Post-zoom the two screen corners are world (418,240) and (430,260);
++    // pre-zoom the press corner was world (486,280).
++    final a = camera.value.screenToWorld(Vector2(372, 340));
++    final b = camera.value.screenToWorld(Vector2(420, 260));
++    expect(a.x, closeTo(418, 1e-9));
++    expect(a.y, closeTo(240, 1e-9));
++    expect(b.x, closeTo(430, 1e-9));
++    expect(b.y, closeTo(260, 1e-9));
++
++    tool.onPointerUp(ev(camera, const Offset(420, 260)), ctx);
++
++    expect(selection.keys.toList(), [SelectionKey.root(right)],
++        reason: 'the band is the world box of both screen corners under the '
++            'camera at release');
++    expect(selection.contains(SelectionKey.root(wrong)), isFalse,
++        reason: 'a press-time world corner would build [430,486] x [260,280] '
++            'and take this one instead');
++  });
++
+   test('shift-band toggles', () {
+     final doc = DraftDocument.empty();
+     final lineA = addEntity(
+         doc, doc.rootHandle, EntityKind.line, [100, 1000, 120, 1000], []);
+     final lineB = addEntity(
+         doc, doc.rootHandle, EntityKind.line, [300, 1000, 320, 1000], []);
+     // Straddles the band's right edge (world x 330): 325 is inside the
+     // box, 340 is outside it — present under crossing, absent under
+     // window, checked below in both directions.
+     final lineC = addEntity(
+diff --git a/packages/jet_cad_2d_flutter/test/selection_overlay_test.dart b/packages/jet_cad_2d_flutter/test/selection_overlay_test.dart
+index fcb415d..79ce08d 100644
+--- a/packages/jet_cad_2d_flutter/test/selection_overlay_test.dart
++++ b/packages/jet_cad_2d_flutter/test/selection_overlay_test.dart
+@@ -48,21 +48,21 @@ final class Rig {
+   late final SelectTool tool;
+   late final ToolContext context;
+   late final ToolController tools;
+ 
+   SelectionOverlayPainter overlay({void Function()? onPaintForTest}) =>
+       SelectionOverlayPainter(
+         selection: selection,
+         tools: tools,
+         camera: camera,
+         outlines: outlines,
+-        repaint: Listenable.merge([selection, tools, camera]),
++        repaint: Listenable.merge([selection, tools, camera, outlines]),
+         onPaintForTest: onPaintForTest,
+       );
+ 
+   void dispose() {
+     tools.dispose();
+     outlines.dispose();
+     camera.dispose();
+     selection.dispose();
+     index.dispose();
+   }
+@@ -157,20 +157,98 @@ void main() {
+ 
+     r.selection.replace([SelectionKey.root(line)]);
+     await tester.pump();
+ 
+     expect(overlayPaints, overlayBefore + 1,
+         reason: 'the selection is in the overlay\'s repaint merge');
+     expect(canvasPaints, canvasBefore,
+         reason: 'the drawing does not know the selection exists');
+   });
+ 
++  testWidgets('a DocChange under a selected instance repaints the overlay',
++      (tester) async {
++    // A4. The cache rebuilds on every `DocChange`, but a rebuild that nothing
++    // is listening to leaves the old outline on screen until the next
++    // selection, hover or camera change. The cache is a `ChangeNotifier` in
++    // the overlay's repaint merge; the canvas has its own document listener,
++    // so both counts move — which is what separates this from M-02e', where
++    // only the overlay does.
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final doc = DraftDocument.empty(measurer: measurer);
++    final def = addDefinition(doc, 'Def');
++    final leaf = addEntity(doc, def, EntityKind.line, [3, 1, 9, 4], []);
++    final instance = addInstance(doc, def, kPlacement);
++    final r = rig(doc);
++
++    var canvasPaints = 0;
++    var overlayPaints = 0;
++    await tester.pumpWidget(Directionality(
++      textDirection: TextDirection.ltr,
++      child: Center(
++        child: SizedBox(
++          width: 400,
++          height: 300,
++          child: Stack(children: [
++            RepaintBoundary(
++                child: DraftCanvas(
++              document: doc,
++              index: r.index,
++              camera: r.camera,
++              onPaintForTest: () => canvasPaints++,
++            )),
++            Positioned.fill(
++                child: RepaintBoundary(
++                    child: CustomPaint(
++              painter: r.overlay(onPaintForTest: () => overlayPaints++),
++              size: Size.infinite,
++            ))),
++          ]),
++        ),
++      ),
++    ));
++
++    final key = SelectionKey.root(instance);
++    r.selection.replace([key]);
++    await tester.pump();
++    final before = r.outlines.debugWorldSegmentsOf(key);
++    expect(before, isNotNull);
++    expect(before!.length, 4);
++    final canvasBefore = canvasPaints;
++    final overlayBefore = overlayPaints;
++    expect(canvasBefore, greaterThan(0));
++    expect(overlayBefore, greaterThan(0));
++
++    doc.commands.execute(SetEntityGeometryCommand(
++        leaf,
++        GeometryPayload(
++          coords: Float64List.fromList([3, 1, 9, 40]),
++          scalars: Float64List(0),
++        )));
++    // `document.changes` delivers on a microtask; `idle` drains those inside
++    // the test's fake-async zone (an awaited `Future.delayed` would deadlock
++    // there), and the pump is the frame that repaints.
++    await tester.idle();
++    await tester.pump();
++
++    expect(overlayPaints, overlayBefore + 1,
++        reason: 'the cache notified, so the overlay repainted');
++    expect(canvasPaints, canvasBefore + 1,
++        reason: 'the canvas listens to the document itself — both move here, '
++            'unlike a selection change');
++    final after = r.outlines.debugWorldSegmentsOf(key);
++    final moved = kPlacement.transformPoint(Vector2(9, 40));
++    expect(after![3], closeTo(moved.y, 1e-9));
++    expect((after[3] - before[3]).abs(), greaterThan(1.0),
++        reason: 'the outline the repaint carried is the new one');
++  });
++
+   test('stroke width is 2 px at any zoom', () {
+     // M-02m: the outline is stroked under the world→screen transform, so the
+     // world width must be the screen width divided by the camera scale.
+     final doc = DraftDocument.empty();
+     final line = addEntity(
+         doc, doc.rootHandle, EntityKind.line, [990, 500, 1010, 520], []);
+     final r = rig(doc);
+     r.camera.value = cameraAt(4.0, const Offset(-3900, 2100)).value;
+     r.selection.replace([SelectionKey.root(line)]);
+ 
+diff --git a/packages/jet_cad_2d_flutter/test/support/selection_fixture.dart b/packages/jet_cad_2d_flutter/test/support/selection_fixture.dart
+index 87a0971..0659acb 100644
+--- a/packages/jet_cad_2d_flutter/test/support/selection_fixture.dart
++++ b/packages/jet_cad_2d_flutter/test/support/selection_fixture.dart
+@@ -28,45 +28,67 @@ import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
+ /// Translate, then rotate, then scale — non-commuting, so a test built on it
+ /// would not pass under a bug that drops or reorders one of the three
+ /// components the way an identity-transform fixture could not catch.
+ final Transform2 kPlacement = Transform2.translation(300, -200)
+     .multiply(Transform2.rotation(math.pi / 6))
+     .multiply(Transform2.scale(1.5, 1.5));
+ 
+ /// Copied from `pick_test.dart`, never imported from a test file.
++///
++/// [layer] defaults to layer zero; pass a handle from [addLayer] to put the
++/// leaf on a hidden or locked layer.
+ Handle addEntity(DraftDocument doc, Handle owner, EntityKind kind,
+-    List<double> coords, List<double> scalars) {
++    List<double> coords, List<double> scalars,
++    {Handle? layer}) {
+   final handle = doc.handleSeed.next();
+   doc.commands.execute(AddEntityCommand(
+     record: EntityRecord(
+       handle: handle,
+       owner: owner,
+       kind: kind,
+-      layer: ReservedHandles.layerZero,
++      layer: layer ?? ReservedHandles.layerZero,
+       linetype: ReservedHandles.byLayerLinetype,
+       linetypeScale: 1.0,
+       geomIndex: 0,
+       color: const ByLayerColor(),
+       lineweight: kByLayer,
+       transparency: kByLayer,
+       flags: 0,
+     ),
+     payload: GeometryPayload(
+       coords: Float64List.fromList(coords),
+       scalars: Float64List.fromList(scalars),
+     ),
+   ));
+   return handle;
+ }
+ 
++/// A layer record with a non-default colour and lineweight, so a leaf placed
++/// on it differs from layer zero in more than the bit under test.
++Handle addLayer(DraftDocument doc, String name,
++    {bool visible = true, bool locked = false}) {
++  final handle = doc.handleSeed.next();
++  doc.tables.layers.add(LayerRecord(
++    handle: handle,
++    name: name,
++    color: const TrueColor(0x8844AA),
++    linetype: ReservedHandles.byLayerLinetype,
++    lineweight: 35,
++    transparency: 0,
++    visible: visible,
++    locked: locked,
++  ));
++  return handle;
++}
++
+ Handle addDefinition(DraftDocument doc, String name) {
+   final handle = doc.handleSeed.next();
+   doc.tree.addDefinition(Definition(
+     handle: handle,
+     name: name,
+     basePoint: Vector2.zero(),
+     children: const [],
+   ));
+   return handle;
+ }
+@@ -210,21 +232,21 @@ Future<InteractionRig> pumpInteraction(
+             ),
+             Positioned.fill(
+               child: RepaintBoundary(
+                 child: CustomPaint(
+                   painter: SelectionOverlayPainter(
+                     selection: rig.selection,
+                     tools: rig.tools,
+                     camera: rig.camera,
+                     outlines: rig.outlines,
+                     repaint: Listenable.merge(
+-                        [rig.selection, rig.tools, rig.camera]),
++                        [rig.selection, rig.tools, rig.camera, rig.outlines]),
+                   ),
+                   size: Size.infinite,
+                 ),
+               ),
+             ),
+           ]),
+         ),
+       ),
+     ),
+   ));

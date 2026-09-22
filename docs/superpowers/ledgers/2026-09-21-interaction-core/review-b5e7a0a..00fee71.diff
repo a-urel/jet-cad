@@ -1,0 +1,554 @@
+# Review package: b5e7a0a..00fee71
+
+## Commits
+00fee71 feat(selection): SelectionKey, resolveHit and SelectionController
+
+## Files changed
+ packages/jet_cad_2d_flutter/lib/src/selection.dart | 173 +++++++++++++++
+ .../jet_cad_2d_flutter/test/selection_test.dart    | 238 +++++++++++++++++++++
+ .../test/support/selection_fixture.dart            | 113 ++++++++++
+ 3 files changed, 524 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/selection.dart b/packages/jet_cad_2d_flutter/lib/src/selection.dart
+new file mode 100644
+index 0000000..ac71e0e
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/selection.dart
+@@ -0,0 +1,173 @@
++import 'dart:async';
++import 'dart:collection';
++import 'dart:typed_data';
++
++import 'package:flutter/foundation.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++
++/// A selectable object, identified by the chain of instances a viewer
++/// descended through to reach it plus the handle it bottoms out on.
++///
++/// `chain` is empty for anything selected at the root level: a root-level
++/// entity, a root-level group (spec D2's "topmost group"), or a root-level
++/// instance. It is non-empty only when a tool has descended *into* an
++/// instance and is naming something inside it — no task before this one
++/// produces such a key, but the shape is here from the start so a later task
++/// does not have to widen it.
++final class SelectionKey {
++  SelectionKey(
++      {required Uint32List chain,
++      required int chainLength,
++      required this.target})
++      : chain =
++            Uint32List.fromList(Uint32List.sublistView(chain, 0, chainLength));
++
++  SelectionKey.root(this.target) : chain = Uint32List(0);
++
++  final Uint32List chain;
++  final Handle target;
++
++  @override
++  bool operator ==(Object other) {
++    if (other is! SelectionKey || other.target != target) return false;
++    if (other.chain.length != chain.length) return false;
++    for (var i = 0; i < chain.length; i++) {
++      if (other.chain[i] != chain[i]) return false;
++    }
++    return true;
++  }
++
++  @override
++  int get hashCode => Object.hash(Object.hashAll(chain), target);
++
++  @override
++  String toString() => 'SelectionKey(${chain.join('>')} ${target.toHex()})';
++}
++
++/// Spec D2: the root-level object under a hit, or null for a miss or a
++/// truncated chain. Never throws at hover rate.
++SelectionKey? resolveHit(HitPath hit, DraftDocument document) {
++  if (hit.entity.isNone || hit.truncated) return null;
++  if (hit.chainLength > 0) return SelectionKey.root(Handle(hit.chain[0]));
++  final slot = document.entities.slotOf(hit.entity);
++  if (slot == null) return null;
++  final owner = document.entities.ownerAt(slot);
++  if (owner == document.rootHandle) return SelectionKey.root(hit.entity);
++  final List<Handle> ancestors;
++  try {
++    ancestors = document.tree.ancestorsOf(owner);
++  } on NodeCycleError {
++    return SelectionKey.root(hit.entity);
++  }
++  return SelectionKey.root(
++      topmostGroupOf(document, owner, ancestors) ?? hit.entity);
++}
++
++/// The last group in `[owner, ...ancestors]` before the root, or null when
++/// none is a group. [ancestors] is `tree.ancestorsOf(owner)`, nearest first.
++Handle? topmostGroupOf(
++    DraftDocument document, Handle owner, List<Handle> ancestors) {
++  Handle? topmost;
++  for (final h in [owner, ...ancestors]) {
++    if (h == document.rootHandle) break;
++    if (document.tree[h] is GroupNode) topmost = h;
++  }
++  return topmost;
++}
++
++/// Application-only selection state (spec D6, D11).
++///
++/// Deliberately not part of [DraftDocument]: never serialised, never
++/// undone. A document change can still invalidate a selected object — an
++/// external undo, redo, or remove — so this listens to [DraftDocument.changes]
++/// and prunes dead keys rather than letting the UI hold a dangling handle.
++class SelectionController extends ChangeNotifier {
++  SelectionController(this.document) {
++    _subscription = document.changes.listen(_onChange);
++  }
++
++  final DraftDocument document;
++  final Set<SelectionKey> _keys = <SelectionKey>{};
++  SelectionKey? _hover;
++  late final StreamSubscription<DocChange> _subscription;
++
++  Set<SelectionKey> get keys => UnmodifiableSetView(_keys);
++  int get length => _keys.length;
++  bool get isEmpty => _keys.isEmpty;
++  bool contains(SelectionKey key) => _keys.contains(key);
++  SelectionKey? get hover => _hover;
++
++  void replace(Iterable<SelectionKey> next) {
++    final incoming = next.toSet();
++    if (setEquals(incoming, _keys)) return;
++    _keys
++      ..clear()
++      ..addAll(incoming);
++    notifyListeners();
++  }
++
++  void toggle(Iterable<SelectionKey> keys) {
++    var changed = false;
++    for (final k in keys) {
++      changed = true;
++      if (!_keys.remove(k)) _keys.add(k);
++    }
++    if (changed) notifyListeners();
++  }
++
++  void remove(Iterable<SelectionKey> keys) {
++    var changed = false;
++    for (final k in keys) {
++      changed = _keys.remove(k) || changed;
++    }
++    if (changed) notifyListeners();
++  }
++
++  void clear() {
++    if (_keys.isEmpty && _hover == null) return;
++    _keys.clear();
++    _hover = null;
++    notifyListeners();
++  }
++
++  void setHover(SelectionKey? key) {
++    if (key == _hover) return;
++    _hover = key;
++    notifyListeners();
++  }
++
++  @visibleForTesting
++  void debugOnChange(DocChange change) => _onChange(change);
++
++  void _onChange(DocChange change) {
++    if (change is DocumentLoaded || change is DocumentPurged) {
++      clear();
++      return;
++    }
++    var changed = false;
++    _keys.removeWhere((k) {
++      final dead = !_resolves(k);
++      changed = changed || dead;
++      return dead;
++    });
++    if (_hover != null && !_resolves(_hover!)) {
++      _hover = null;
++      changed = true;
++    }
++    if (changed) notifyListeners();
++  }
++
++  bool _resolves(SelectionKey k) {
++    for (final h in k.chain) {
++      if (document.tree[Handle(h)] is! InstanceNode) return false;
++    }
++    return document.entities.slotOf(k.target) != null ||
++        document.tree[k.target] != null;
++  }
++
++  @override
++  void dispose() {
++    _subscription.cancel();
++    super.dispose();
++  }
++}
+diff --git a/packages/jet_cad_2d_flutter/test/selection_test.dart b/packages/jet_cad_2d_flutter/test/selection_test.dart
+new file mode 100644
+index 0000000..25f95a2
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/selection_test.dart
+@@ -0,0 +1,238 @@
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/src/selection.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2;
++
++import 'support/selection_fixture.dart';
++
++void main() {
++  test(
++      'two instances of one definition are two keys; two leaves of one '
++      'instance are one', () {
++    final doc = DraftDocument.empty();
++    final (def, a, b, _) = twoInstancesOfOneDefinition(doc);
++    // A second leaf in the same definition, well clear of the first once
++    // placed, so a radius that hits one never accidentally hits the other.
++    addEntity(doc, def, EntityKind.line, [5, 0, 7, 0], []);
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final hit = HitPath();
++    final worldA =
++        doc.tree.accumulatedTransform(a).transformPoint(Vector2(1, 0));
++    expect(index.pickInto(worldA, 0.5, const QueryFilter.all(), hit), isTrue);
++    final ka = resolveHit(hit, doc);
++    expect(ka, isNotNull);
++    expect(doc.tree[ka!.target], isA<InstanceNode>());
++    expect(ka.target, a);
++
++    final worldB =
++        doc.tree.accumulatedTransform(b).transformPoint(Vector2(1, 0));
++    expect(index.pickInto(worldB, 0.5, const QueryFilter.all(), hit), isTrue);
++    final kb = resolveHit(hit, doc);
++    expect(kb, isNotNull);
++    expect(doc.tree[kb!.target], isA<InstanceNode>());
++    expect(kb.target, b);
++
++    final selection = SelectionController(doc);
++    addTearDown(selection.dispose);
++    selection.replace([ka]);
++    selection.toggle([kb]);
++    expect(selection.length, 2);
++
++    final worldLeaf2 =
++        doc.tree.accumulatedTransform(a).transformPoint(Vector2(6, 0));
++    expect(
++        index.pickInto(worldLeaf2, 0.5, const QueryFilter.all(), hit), isTrue);
++    final ka2 = resolveHit(hit, doc);
++    expect(ka2, equals(ka),
++        reason: 'a second leaf of the same instance resolves to the same '
++            'selection key as the first');
++  });
++
++  test(
++      'a leaf owned by a nested group resolves to the outer group; a '
++      'single-level group to itself', () {
++    final doc = DraftDocument.empty();
++    final outer = addGroup(doc, doc.rootHandle, kPlacement);
++    final inner = addGroup(doc, outer, Transform2.translation(10, 10));
++    final nestedLeaf = addEntity(doc, inner, EntityKind.line, [0, 0, 1, 0], []);
++
++    final single =
++        addGroup(doc, doc.rootHandle, Transform2.translation(-500, -500));
++    final singleLeaf =
++        addEntity(doc, single, EntityKind.line, [0, 0, 1, 0], []);
++
++    final index = SpatialIndex(doc);
++    addTearDown(index.dispose);
++
++    final hit = HitPath();
++    final worldNested =
++        doc.tree.accumulatedTransform(inner).transformPoint(Vector2(0.5, 0));
++    expect(
++        index.pickInto(worldNested, 0.5, const QueryFilter.all(), hit), isTrue);
++    expect(hit.entity, nestedLeaf);
++    final nestedKey = resolveHit(hit, doc);
++    expect(nestedKey, isNotNull);
++    expect(nestedKey!.target, outer,
++        reason: 'a leaf owned by a nested group selects the outermost group');
++
++    final worldSingle =
++        doc.tree.accumulatedTransform(single).transformPoint(Vector2(0.5, 0));
++    expect(
++        index.pickInto(worldSingle, 0.5, const QueryFilter.all(), hit), isTrue);
++    expect(hit.entity, singleLeaf);
++    final singleKey = resolveHit(hit, doc);
++    expect(singleKey, isNotNull);
++    expect(singleKey!.target, single,
++        reason: 'a leaf owned by a single-level group selects that group');
++  });
++
++  test('a truncated hit is a miss', () {
++    final doc = DraftDocument.empty();
++    final leaf =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 1, 0], []);
++
++    final hit = HitPath(2)
++      ..entity = leaf
++      ..chainLength = 2
++      ..truncated = true;
++
++    expect(resolveHit(hit, doc), isNull);
++  });
++
++  test('an external remove prunes; an unrelated add does not', () async {
++    final doc = DraftDocument.empty();
++    final leaf =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 1, 0], []);
++    final def = addDefinition(doc, 'Def');
++    final instance = addInstance(doc, def, kPlacement);
++
++    final selection = SelectionController(doc);
++    addTearDown(selection.dispose);
++    final leafKey = SelectionKey.root(leaf);
++    final instanceKey = SelectionKey.root(instance);
++    selection.replace([leafKey, instanceKey]);
++    expect(selection.length, 2);
++
++    doc.commands.execute(RemoveEntityCommand(leaf));
++    await Future<void>.delayed(Duration.zero);
++
++    expect(selection.length, 1);
++    expect(selection.contains(instanceKey), isTrue);
++    expect(selection.contains(leafKey), isFalse);
++
++    addEntity(doc, doc.rootHandle, EntityKind.line, [50, 50, 60, 50], []);
++    await Future<void>.delayed(Duration.zero);
++
++    expect(selection.length, 1,
++        reason: 'an add unrelated to the current selection must not prune '
++            'anything');
++    expect(selection.contains(instanceKey), isTrue);
++  });
++
++  test('replace with the same set does not notify', () {
++    final doc = DraftDocument.empty();
++    final leaf =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 1, 0], []);
++    final selection = SelectionController(doc);
++    addTearDown(selection.dispose);
++    final k = SelectionKey.root(leaf);
++
++    var count = 0;
++    selection.addListener(() => count++);
++
++    selection.replace([k]);
++    selection.replace([k]);
++    expect(count, 1, reason: 'the second replace names the same set');
++
++    selection.setHover(k);
++    selection.setHover(k);
++    expect(count, 2, reason: 'the second setHover names the same key');
++  });
++
++  test('toggle adds then removes', () {
++    final doc = DraftDocument.empty();
++    final leaf =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 1, 0], []);
++    final selection = SelectionController(doc);
++    addTearDown(selection.dispose);
++    final k = SelectionKey.root(leaf);
++
++    selection.toggle([k]);
++    expect(selection.contains(k), isTrue);
++
++    selection.toggle([k]);
++    expect(selection.contains(k), isFalse);
++  });
++
++  test('remove drops only what it names', () {
++    final doc = DraftDocument.empty();
++    final leafA =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 1, 0], []);
++    final leafB =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [2, 0, 3, 0], []);
++    final selection = SelectionController(doc);
++    addTearDown(selection.dispose);
++    final ka = SelectionKey.root(leafA);
++    final kb = SelectionKey.root(leafB);
++
++    selection.replace([ka, kb]);
++    selection.remove([ka]);
++
++    expect(selection.contains(ka), isFalse);
++    expect(selection.contains(kb), isTrue);
++    expect(selection.length, 1);
++  });
++
++  test('clear drops hover too', () {
++    final doc = DraftDocument.empty();
++    final leaf =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 1, 0], []);
++    final selection = SelectionController(doc);
++    addTearDown(selection.dispose);
++    final k = SelectionKey.root(leaf);
++
++    selection.replace([k]);
++    selection.setHover(k);
++    selection.clear();
++
++    expect(selection.isEmpty, isTrue);
++    expect(selection.hover, isNull);
++  });
++
++  test('DocumentLoaded clears everything', () {
++    final doc = DraftDocument.empty();
++    final leaf =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 1, 0], []);
++    final selection = SelectionController(doc);
++    addTearDown(selection.dispose);
++    final k = SelectionKey.root(leaf);
++
++    selection.replace([k]);
++    selection.setHover(k);
++
++    var count = 0;
++    selection.addListener(() => count++);
++    selection.debugOnChange(const DocumentLoaded());
++
++    expect(selection.isEmpty, isTrue);
++    expect(selection.hover, isNull);
++    expect(count, 1);
++  });
++
++  test('equality is by chain and target, not identity', () {
++    final chainA = Uint32List.fromList([7, 9, 0, 0]);
++    final chainB = Uint32List.fromList([7, 9, 0, 0]);
++    final ka =
++        SelectionKey(chain: chainA, chainLength: 2, target: const Handle(42));
++    final kb =
++        SelectionKey(chain: chainB, chainLength: 2, target: const Handle(42));
++
++    expect(identical(ka.chain, kb.chain), isFalse);
++    expect(ka, equals(kb));
++    expect(ka.hashCode, kb.hashCode);
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/support/selection_fixture.dart b/packages/jet_cad_2d_flutter/test/support/selection_fixture.dart
+new file mode 100644
+index 0000000..98ca63b
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/support/selection_fixture.dart
+@@ -0,0 +1,113 @@
++import 'dart:math' as math;
++import 'dart:typed_data';
++import 'dart:ui' show Offset;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/src/camera_controller.dart';
++import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2;
++
++/// Translate, then rotate, then scale — non-commuting, so a test built on it
++/// would not pass under a bug that drops or reorders one of the three
++/// components the way an identity-transform fixture could not catch.
++final Transform2 kPlacement = Transform2.translation(300, -200)
++    .multiply(Transform2.rotation(math.pi / 6))
++    .multiply(Transform2.scale(1.5, 1.5));
++
++/// Copied from `pick_test.dart`, never imported from a test file.
++Handle addEntity(DraftDocument doc, Handle owner, EntityKind kind,
++    List<double> coords, List<double> scalars) {
++  final handle = doc.handleSeed.next();
++  doc.commands.execute(AddEntityCommand(
++    record: EntityRecord(
++      handle: handle,
++      owner: owner,
++      kind: kind,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.byLayerLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: const ByLayerColor(),
++      lineweight: kByLayer,
++      transparency: kByLayer,
++      flags: 0,
++    ),
++    payload: GeometryPayload(
++      coords: Float64List.fromList(coords),
++      scalars: Float64List.fromList(scalars),
++    ),
++  ));
++  return handle;
++}
++
++Handle addDefinition(DraftDocument doc, String name) {
++  final handle = doc.handleSeed.next();
++  doc.tree.addDefinition(Definition(
++    handle: handle,
++    name: name,
++    basePoint: Vector2.zero(),
++    children: const [],
++  ));
++  return handle;
++}
++
++Handle addInstance(DraftDocument doc, Handle def, Transform2 transform,
++    {Handle? parent}) {
++  final handle = doc.handleSeed.next();
++  doc.commands.execute(AddNodeCommand(
++    InstanceNode(
++      handle: handle,
++      parent: parent ?? doc.rootHandle,
++      transform: transform,
++      definition: def,
++      layer: ReservedHandles.layerZero,
++    ),
++  ));
++  return handle;
++}
++
++Handle addGroup(DraftDocument doc, Handle parent, Transform2 transform) {
++  final handle = doc.handleSeed.next();
++  doc.commands.execute(AddNodeCommand(
++    GroupNode(
++      handle: handle,
++      parent: parent,
++      transform: transform,
++      children: const [],
++    ),
++  ));
++  return handle;
++}
++
++CameraController cameraAt(double scale, Offset translation) {
++  return CameraController(
++    ViewportTransform(
++      worldToScreenMatrix: Transform2(
++        scale,
++        0,
++        0,
++        -scale,
++        translation.dx,
++        translation.dy,
++      ),
++    ),
++  );
++}
++
++/// Two instances of one definition: `a` at [kPlacement], `b` at a different
++/// non-commuting placement, so a bug that keys selection off the definition
++/// rather than the instance cannot pass M-02c′.
++(Handle def, Handle a, Handle b, Handle leaf) twoInstancesOfOneDefinition(
++    DraftDocument doc) {
++  final def = addDefinition(doc, 'Def');
++  final leaf = addEntity(doc, def, EntityKind.line, [0, 0, 2, 0], []);
++  final a = addInstance(doc, def, kPlacement);
++  final b = addInstance(
++    doc,
++    def,
++    Transform2.translation(900, 400)
++        .multiply(Transform2.rotation(-math.pi / 4))
++        .multiply(Transform2.scale(0.8, 0.8)),
++  );
++  return (def, a, b, leaf);
++}

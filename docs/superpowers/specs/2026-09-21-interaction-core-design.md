@@ -268,6 +268,25 @@ resolved by the tool from the leaves the leaf walk reports (D2), and the tool
 applies the same every/any rule over the group's owned leaves, nested groups
 included, using `leavesByOwner()` once per band.
 
+**Amended at execution (Plan 02, 2026-09-22):** a group's member leaves are
+its own and its nested groups'; an instance placed inside a group does not
+enter the group's every/any rule (Ruling P-1).
+
+**Amended at execution (Plan 02, 2026-09-22):** the tool's group every-rule
+skips a leaf the picking filter rejects — hidden, or on a locked layer —
+rather than failing the group on it. `leavesByOwner()` is unfiltered while
+the walk's passing set holds only accepted slots, so counting such a leaf
+would make a group with one locked leaf unselectable by any window band; the
+engine's own `_bandDescend` already applies `acceptsEntity` before it counts
+a member. A group whose leaves are all rejected has no members and is not
+selected.
+
+**Amended at execution (Plan 02, 2026-09-22):** both band corners are
+converted from screen to world **at release**, not one of them at press. The
+camera may move between the two — a trackpad zoom mid-drag — and the band the
+user is looking at is the one their two screen corners name under the camera
+they are looking through at the moment they let go.
+
 | mode | a leaf |
 |---|---|
 | **window** | its world AABB ⊆ band, read as `boxOfLeaf(slot) ?? dirty.boxOf(slot)` — `boxOfLeaf` alone is null for a leaf live only on the dirty overlay, which is every leaf edited since the last rebuild. Tight for point, line, polyline, circle and arc (`arcBounds`); **conservative for rotated text** — the AABB of an oriented box is looser than the box, so a rotated text near the band edge may be missed. Documented, accepted. |
@@ -293,6 +312,10 @@ handle order is the property that touches the draw-order non-negotiable, and
 M-02z guards it. They run at pointer-up rate, off the frame path; they may
 allocate O(results) but must not walk the whole document — the broad phase
 is the R-tree search, as for `forEachInRect`.
+
+**Amended at execution (Plan 02, 2026-09-22):** a singular instance transform
+is judged forward rather than refused; crossing falls back to the container's
+all box for that instance (Task 2 ruling).
 
 ### D9 — The overlay: a sibling painter over a rebased outline cache
 
@@ -348,6 +371,35 @@ Band paint (the tool's): window = solid 1 px stroke in `kWindowBandColor`
 with a `kBandFillAlpha` fill; crossing = dashed 1 px stroke in
 `kCrossingBandColor` with the same fill. Screen space, no camera transform.
 
+**Amended at execution (Plan 02, 2026-09-22):** the painter class is named
+`SelectionOverlayPainter`, not `SelectionOverlay` — Flutter's widgets library
+already exports a `SelectionOverlay`, and the spec's name would force a
+`hide` at every app import (Task 8 ruling); the Files list below is amended
+the same way.
+
+**Amended at execution (Plan 02, 2026-09-22):** a point key is drawn as a
+screen-space cross of half-length 3 × the stroke width, centred at
+`worldToScreen(worldPointOf(key))` (Task 7/8 ruling).
+
+**Amended at execution (Plan 02, 2026-09-22):** `ui.Path.getBounds` returns
+the conic control-point hull, not the curve's own bound (measured: 19.1 vs.
+17.0 for a 2.6 rad sweep of radius 7), so an arc or circle outline is pinned
+on the cache's world record (`debugWorldArcsOf`) to tight tolerance, and only
+a containment bound is asserted on the `ui.Path` itself (Task 7 ruling).
+
+**Amended at execution (Plan 02, 2026-09-22):** the outline skips a leaf the
+**rendering** filter rejects (`QueryFilter.rendering()`: hidden out, a locked
+leaf still drawn, exactly as the canvas does), so a selected group never gets
+an outline over geometry nothing draws.
+
+**Amended at execution (Plan 02, 2026-09-22):** `OutlineCache` is a
+`ChangeNotifier` and a member of the overlay's repaint merge
+(`Listenable.merge([selection, toolController, camera, outlines])`). It
+notifies after a `DocChange` rebuild and after a load/purge clear, and is
+silent on a selection-driven rebuild — the selection controller has already
+notified the same merge. Without it a `DocChange` under a selected instance
+rebuilt the cache and asked nobody for the frame that would draw the result.
+
 ### D10 — Delete: preflight per object, permission-checked, cascading through groups
 
 For each selected key, in ascending handle order of `target`, the tool builds
@@ -400,6 +452,16 @@ them in `dispose` beside the camera and the index, passes them into
 tools])` as a `late final` field — not a fresh merge per build, which would
 churn `ListenableBuilder`'s subscription. Keyed `status-text` for the widget
 test. That is all the UI 02 adds; 12 consolidates.
+
+**Amended at execution (Plan 02, 2026-09-22):** the shell also binds undo.
+`SingleActivator(LogicalKeyboardKey.keyZ, meta: true)` and its `control: true`
+twin — cmd+Z on macOS, ctrl+Z in a browser — run
+`if (_document.commands.canUndo) _document.commands.undo()` from a
+`CallbackShortcuts` wrapping the `Scaffold` body. The binding sits above the
+`InteractionLayer`'s `Focus`, which returns the active tool's own
+`KeyEventResult`, so a key the tool ignores bubbles up to it. **No redo in
+02.** The look checklist stands as written: it asks the human to delete and
+undo, and until this binding existed the app had no way to undo at all.
 
 ---
 
@@ -505,6 +567,12 @@ class ToolController extends ChangeNotifier {
 | any | repeat or up key event | ignored |
 | any | pointer cancel, `cancel()`, exit while dragging | → idle; hover cleared |
 
+**Amended at execution (Plan 02, 2026-09-22):** the "exit while dragging"
+clause of the row above is superseded — exit with no active pointer clears
+hover; a band drag past the layer's edge continues (Flutter keeps delivering
+the captured pointer's moves and up) and its own `up` event ends it, not the
+`onExit` (Task 9 ruling).
+
 `paintOverlay` draws the band while dragging and nothing otherwise.
 
 ### Files
@@ -521,7 +589,7 @@ packages/jet_cad_2d_flutter/lib/src/selection_style.dart    the constants
 packages/jet_cad_2d_flutter/lib/src/tool.dart               Tool, ToolContext, ToolPointerEvent, ToolPhase, ToolController
 packages/jet_cad_2d_flutter/lib/src/select_tool.dart        SelectTool, kBandSlopPixels, the delete preflight
 packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart  InteractionLayer, kPickRadiusPixels, the pointer routing table
-packages/jet_cad_2d_flutter/lib/src/selection_overlay.dart  SelectionOverlay
+packages/jet_cad_2d_flutter/lib/src/selection_overlay.dart  SelectionOverlay — amended at execution (Plan 02): the class is SelectionOverlayPainter, Flutter's widgets library exports a SelectionOverlay
 packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart     exports for all of the above
 packages/jet_cad_2d_flutter/test/selection_test.dart
 packages/jet_cad_2d_flutter/test/outline_cache_test.dart

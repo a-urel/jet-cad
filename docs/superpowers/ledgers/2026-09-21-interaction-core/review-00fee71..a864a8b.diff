@@ -1,0 +1,97 @@
+# Review package: 00fee71..a864a8b
+
+## Commits
+a864a8b fix(selection): notify toggle only on a net change
+
+## Files changed
+ packages/jet_cad_2d_flutter/lib/src/selection.dart | 10 +++++++---
+ .../jet_cad_2d_flutter/test/selection_test.dart    | 23 ++++++++++++++++++++++
+ 2 files changed, 30 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/selection.dart b/packages/jet_cad_2d_flutter/lib/src/selection.dart
+index ac71e0e..0c9f2fe 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/selection.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/selection.dart
+@@ -100,26 +100,30 @@ class SelectionController extends ChangeNotifier {
+   void replace(Iterable<SelectionKey> next) {
+     final incoming = next.toSet();
+     if (setEquals(incoming, _keys)) return;
+     _keys
+       ..clear()
+       ..addAll(incoming);
+     notifyListeners();
+   }
+ 
+   void toggle(Iterable<SelectionKey> keys) {
+-    var changed = false;
++    // A net-change check, not a per-key flag: a duplicate key in [keys]
++    // toggles itself back to its starting membership (add then remove, or
++    // remove then add), and a flag set unconditionally on loop entry would
++    // still fire — violating "none when nothing changed" for an input as
++    // small as `toggle([k, k])` on an empty selection.
++    final before = Set<SelectionKey>.of(_keys);
+     for (final k in keys) {
+-      changed = true;
+       if (!_keys.remove(k)) _keys.add(k);
+     }
+-    if (changed) notifyListeners();
++    if (!setEquals(before, _keys)) notifyListeners();
+   }
+ 
+   void remove(Iterable<SelectionKey> keys) {
+     var changed = false;
+     for (final k in keys) {
+       changed = _keys.remove(k) || changed;
+     }
+     if (changed) notifyListeners();
+   }
+ 
+diff --git a/packages/jet_cad_2d_flutter/test/selection_test.dart b/packages/jet_cad_2d_flutter/test/selection_test.dart
+index 25f95a2..75793f3 100644
+--- a/packages/jet_cad_2d_flutter/test/selection_test.dart
++++ b/packages/jet_cad_2d_flutter/test/selection_test.dart
+@@ -161,20 +161,43 @@ void main() {
+     addTearDown(selection.dispose);
+     final k = SelectionKey.root(leaf);
+ 
+     selection.toggle([k]);
+     expect(selection.contains(k), isTrue);
+ 
+     selection.toggle([k]);
+     expect(selection.contains(k), isFalse);
+   });
+ 
++  test('toggle with a self-cancelling duplicate does not notify', () {
++    final doc = DraftDocument.empty();
++    final leaf =
++        addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 1, 0], []);
++    final selection = SelectionController(doc);
++    addTearDown(selection.dispose);
++    final k = SelectionKey.root(leaf);
++
++    var count = 0;
++    selection.addListener(() => count++);
++
++    selection.toggle([k, k]);
++    expect(selection.isEmpty, isTrue,
++        reason: 'add then remove of the same key nets out to no change');
++    expect(count, 0,
++        reason: 'a duplicate that cancels itself out must not notify');
++
++    selection.toggle([k, k, k]);
++    expect(selection.contains(k), isTrue,
++        reason: 'add, remove, add nets out to selected');
++    expect(count, 1);
++  });
++
+   test('remove drops only what it names', () {
+     final doc = DraftDocument.empty();
+     final leafA =
+         addEntity(doc, doc.rootHandle, EntityKind.line, [0, 0, 1, 0], []);
+     final leafB =
+         addEntity(doc, doc.rootHandle, EntityKind.line, [2, 0, 3, 0], []);
+     final selection = SelectionController(doc);
+     addTearDown(selection.dispose);
+     final ka = SelectionKey.root(leafA);
+     final kb = SelectionKey.root(leafB);

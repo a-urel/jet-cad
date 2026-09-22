@@ -11,6 +11,7 @@ import '../document/extents.dart';
 import '../document/node.dart';
 import '../document/text_geometry.dart';
 import '../geometry/aabb2.dart';
+import '../geometry/band_predicates.dart';
 import '../geometry/distance.dart';
 import '../geometry/primitives.dart';
 import '../geometry/transform2.dart';
@@ -79,6 +80,27 @@ const int kIntersectionCandidateCap = 64;
 /// [SnapMask.cheap]'s doc comment describes guarding against.
 final int _kLeafProducedSnapKinds = SnapMask.all.bits &
     ~((1 << SnapKind.center.index) | (1 << SnapKind.intersection.index));
+
+/// How a rubber-band rectangle decides what it has selected (spec 02, D8).
+///
+/// * [window] — only what lies **entirely** inside the band. A leaf qualifies
+///   when its whole world box is enclosed; an instance qualifies when every
+///   member leaf below it does and there is at least one.
+/// * [crossing] — anything the band **touches**. A leaf qualifies when some
+///   point of its stroke lies inside; an instance qualifies when any member
+///   leaf below it does.
+///
+/// Both are exact in world space, and neither consults [Tolerance]: a band is
+/// a region the user dragged, not a distance comparison.
+enum BandMode { window, crossing }
+
+/// What one container answered for a band, as [SpatialIndex._bandDescend]
+/// reports it upward.
+///
+/// [empty] is not [fail]: a container with no member leaves at all is never
+/// band-selected (spec D8), but it must not *veto* a parent that has leaves
+/// of its own either, which is exactly what returning [fail] would do.
+enum _BandVerdict { pass, fail, empty }
 
 /// One placement of a definition: the container that places it, the instance
 /// node that does the placing, and that node's composed transform into the
@@ -318,6 +340,282 @@ class SpatialIndex {
     } finally {
       _endQuery();
     }
+  }
+
+  // --- band selection (spec 02, D8) ----------------------------------
+
+  /// Every container-space box there is; window mode walks a whole container.
+  ///
+  /// Finite extremes rather than infinities, deliberately: this box is handed
+  /// to [ContainerIndex.searchLeaves] and [ContainerIndex.searchInstances],
+  /// and the moment anything widens it or pulls it back through a transform
+  /// an infinity turns into a NaN, which compares false against everything
+  /// and silently empties the walk.
+  static const Aabb2 _kAllBox = Aabb2.raw(
+      -double.maxFinite, -double.maxFinite, double.maxFinite, double.maxFinite);
+
+  /// Visits the slot of every root-level leaf the band [world] selects, in
+  /// ascending handle order, each slot once, fills never.
+  ///
+  /// [BandMode.window] takes a leaf whose world box — the indexed one, or the
+  /// dirty overlay's when the leaf has been edited since the last rebuild —
+  /// is enclosed. [BandMode.crossing] takes a leaf some point of whose
+  /// stroke lies inside, measured exactly by `leafTouchedByBand` after a
+  /// broad phase widened by the pick margin (see [_broadPhaseMargin]).
+  ///
+  /// **Does not descend into instances**, the same rule and for the same
+  /// reason as [forEachInRect]; [forEachInstanceInBand] is the other half.
+  ///
+  /// **Not reentrant**, and allocates O(results) rather than nothing: this
+  /// runs at pointer-*up* rate, not frame rate, so it is deliberately outside
+  /// the zero-allocation guarantee [forEachInRect] and [pickInto] carry.
+  void forEachLeafInBand(Aabb2 world, BandMode mode, QueryFilter filter,
+      void Function(int slot) visit) {
+    final root = rootIndex; // throws if disposed, even for an empty band
+    if (world.isEmpty) return;
+    _beginQuery();
+    // Guard body inlined, not passed to a closure-taking helper — see the
+    // doc comment on [_beginQuery].
+    try {
+      _scratch.reset();
+      // Window needs no widening: a leaf whose box is enclosed by the band
+      // necessarily overlaps it, so the band itself is already a complete
+      // broad phase. Crossing's narrow phase reaches outside an indexed box
+      // for a round leaf under a non-conformal transform, which is exactly
+      // what the pick margin bounds.
+      final query = mode == BandMode.crossing
+          ? world.expandedBy(_broadPhaseMargin().pick)
+          : world;
+      root.searchLeaves(query, (slot) {
+        if (!_filters.acceptsEntity(slot, filter)) return;
+        if (document.entities.kindAt(slot) == EntityKind.fill) return;
+        if (_leafPasses(root, Transform2.identity(), slot, mode, world)) {
+          _scratch.add(slot);
+        }
+      });
+      _scratch.sortByHandle(document.entities);
+      // The tree and the dirty overlay may both report the same slot (see
+      // [ContainerIndex.searchLeaves]), and [_leafPasses] is a pure function
+      // of the slot, so a duplicate arrives twice with the same verdict.
+      // Dropped after the sort, where duplicates are adjacent, rather than
+      // by scanning the buffer on every add: a window over a whole drawing
+      // has as many results as the drawing has entities, and the scan would
+      // make this quadratic in exactly that case.
+      var previous = -1;
+      for (var i = 0; i < _scratch.length; i++) {
+        final slot = _scratch[i];
+        if (slot == previous) continue;
+        previous = slot;
+        visit(slot);
+      }
+    } finally {
+      _endQuery();
+    }
+  }
+
+  /// Visits every root-level instance the band [world] selects, ascending.
+  ///
+  /// Descends into the definition, unlike [forEachInstanceInRect]: an
+  /// instance's indexed box is its definition's bound, and selecting on that
+  /// box would take an L-shaped block by the empty quadrant of its bound —
+  /// the exact complaint band selection exists to avoid. [BandMode.window]
+  /// passes when every member leaf below the instance is enclosed and there
+  /// is at least one; [BandMode.crossing] passes on the first member leaf the
+  /// band touches.
+  ///
+  /// **Not reentrant**, and allocates O(results); see [forEachLeafInBand].
+  void forEachInstanceInBand(Aabb2 world, BandMode mode, QueryFilter filter,
+      void Function(Handle instance) visit) {
+    final root = rootIndex; // throws if disposed, even for an empty band
+    if (world.isEmpty) return;
+    _beginQuery();
+    try {
+      _instanceScratch.reset();
+      // Window must consider every root instance, not only those whose box
+      // meets the band: an instance straddling the band's edge fails on its
+      // own leaves, and one wholly inside is found either way — but an
+      // every-leaf rule that only saw the leaves the band's own box reaches
+      // would pass a block half outside it. The all box keeps both walks on
+      // one rule; see [_bandDescend].
+      final query = mode == BandMode.crossing
+          ? world.expandedBy(_broadPhaseMargin().pick)
+          : _kAllBox;
+      final level = _scratchForDepth(0)..reset();
+      root.searchInstances(query, (node) {
+        if (_filters.acceptsNode(node, filter)) level.add(node.value);
+      });
+      // Depth 0 of the cycle guard's path is the root container itself; every
+      // descent below starts at depth 1. Written once, outside the loop: the
+      // value does not change between instances.
+      _ensurePathCapacity(0);
+      _containerPath[0] = root.container.value;
+      for (var i = 0; i < level.length; i++) {
+        final node = Handle(level[i]);
+        final resolved = document.tree[node];
+        if (resolved is! InstanceNode) continue;
+        final child = _byContainer[resolved.definition];
+        if (child == null) continue;
+        final verdict = _bandDescend(
+            child, root.transformOfInstance(node), mode, world, filter, 1);
+        if (verdict == _BandVerdict.pass) _instanceScratch.add(node.value);
+      }
+      _instanceScratch.sortByValue();
+      for (var i = 0; i < _instanceScratch.length; i++) {
+        visit(Handle(_instanceScratch[i]));
+      }
+    } finally {
+      _endQuery();
+    }
+  }
+
+  /// One leaf against the band, in world space. [toWorld] is the container's
+  /// placement; the leaf's own flattened-group transform is composed on top,
+  /// exactly as [_descend] does at its leaf visitor.
+  ///
+  /// Pure: called twice for the same slot — which [ContainerIndex.searchLeaves]
+  /// can do when the tree and the dirty overlay both hold it — it answers the
+  /// same both times, which is what lets [forEachLeafInBand] deduplicate
+  /// after the fact instead of before the test.
+  bool _leafPasses(ContainerIndex index, Transform2 toWorld, int slot,
+      BandMode mode, Aabb2 world) {
+    final kind = document.entities.kindAt(slot);
+    if (mode == BandMode.window) {
+      // `boxOfLeaf` is null for a leaf whose tree entry reconciliation
+      // marked dead, which is exactly the leaf that is live on the overlay —
+      // the same pairing `_reconcileEntity` maintains and `_reconcile` already
+      // reads this way.
+      final local = index.boxOfLeaf(slot) ?? index.dirty.boxOf(slot);
+      if (local == null || local.isEmpty) return false;
+      // Indexed boxes are stored in the container's own space, with any
+      // group transform already folded in, so lifting by [toWorld] alone is
+      // the whole journey to world space.
+      final box = toWorld.isIdentity ? local : local.transformedBy(toWorld);
+      return boxEnclosedByBand(box, world);
+    }
+    _composeLeafTransform(toWorld, index.transformOfLeaf(slot));
+    final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
+    TextBox? textBox;
+    if (kind == EntityKind.text || kind == EntityKind.attrib) {
+      final style = document.textStyleOf(document.entities.textStyleAt(slot));
+      final metrics = document.textMeasurer
+          .measure(text: document.entities.textAt(slot), style: style);
+      textBox = textBoxOf(
+          payload, document.entities.textAttrsAt(slot), style, metrics);
+    }
+    return leafTouchedByBand(
+        kind, payload, _lta, _ltb, _ltc, _ltd, _lte, _ltf, world,
+        textBox: textBox);
+  }
+
+  /// One container against the band, with every instance below it.
+  ///
+  /// Window returns [_BandVerdict.pass] only when every member leaf under
+  /// this container is enclosed and at least one exists — a nested instance
+  /// must pass too, and one that fails fails the whole container. Crossing
+  /// returns [_BandVerdict.pass] on the first leaf the band touches.
+  ///
+  /// **Window walks the whole container, not the band's local box.** A leaf
+  /// the local box does not find lies outside the band and therefore fails
+  /// window on its own; an every-leaf rule that only saw the box's subset
+  /// would pass a container half outside the band.
+  ///
+  /// Collects instances into [_scratchForDepth] before recursing, never from
+  /// inside the visitor, for the reason [_descend]'s doc comment gives at
+  /// length. Reusing one scratch per depth is safe because this level's
+  /// buffer is fully consumed by the loop below before any call at
+  /// `depth + 1` touches its own.
+  _BandVerdict _bandDescend(ContainerIndex index, Transform2 toWorld,
+      BandMode mode, Aabb2 world, QueryFilter filter, int depth) {
+    _ensurePathCapacity(depth);
+    _containerPath[depth] = index.container.value;
+    // **A singular container transform is not refused here**, deliberately,
+    // and this is where band selection parts company with [_descend]. A pick
+    // asks "is this point within `radius` of the entity", which a collapsed
+    // container answers by having nothing drawn to measure against; a band
+    // asks "is the entity's *image* inside this rectangle", and a collapsed
+    // instance has an image — a segment, or a point — that a band can
+    // perfectly well enclose or cross. Spec D8 selects it, and the
+    // differential's brute-force arm, which composes forward only, would
+    // disagree with any answer that did not.
+    //
+    // So the inverse is taken only where it is actually needed. Window never
+    // needs it: it walks the whole container ([_kAllBox]) and lifts each
+    // stored box *forward* by [toWorld] in [_leafPasses]. Crossing needs it
+    // only to pull the band back into this container's space as a broad
+    // phase, and when that inverse does not exist it falls back to walking
+    // the whole container — slower, never wrong, and the narrow phase behind
+    // it is the same forward `leafTouchedByBand` either way.
+    final Aabb2 localQuery;
+    if (mode == BandMode.window) {
+      localQuery = _kAllBox;
+    } else {
+      Transform2? toLocal;
+      try {
+        toLocal = toWorld.invert();
+      } on SingularTransformError {
+        toLocal = null;
+      }
+      localQuery = toLocal == null
+          ? _kAllBox
+          : _localBandBox(toLocal, world.expandedBy(_broadPhaseMargin().pick));
+    }
+    var anyLeaf = false;
+    var allPass = true;
+    var anyPass = false;
+    index.searchLeaves(localQuery, (slot) {
+      if (mode == BandMode.crossing && anyPass) return;
+      if (!_filters.acceptsEntity(slot, filter)) return;
+      if (document.entities.kindAt(slot) == EntityKind.fill) return;
+      anyLeaf = true;
+      if (_leafPasses(index, toWorld, slot, mode, world)) {
+        anyPass = true;
+      } else {
+        allPass = false;
+      }
+    });
+    if (mode == BandMode.crossing && anyPass) return _BandVerdict.pass;
+    if (mode == BandMode.window && anyLeaf && !allPass) {
+      return _BandVerdict.fail;
+    }
+
+    final level = _scratchForDepth(depth)..reset();
+    index.searchInstances(localQuery, (node) {
+      if (_filters.acceptsNode(node, filter)) level.add(node.value);
+    });
+    var childPass = false;
+    for (var i = 0; i < level.length; i++) {
+      final node = Handle(level[i]);
+      final resolved = document.tree[node];
+      if (resolved is! InstanceNode) continue;
+      final child = _byContainer[resolved.definition];
+      if (child == null) continue;
+      // Cycle guard, identical in kind and reasoning to [_descend]'s.
+      var cyclic = false;
+      for (var d = 0; d <= depth; d++) {
+        if (_containerPath[d] == child.container.value) {
+          cyclic = true;
+          break;
+        }
+      }
+      if (cyclic) continue;
+      final verdict = _bandDescend(
+          child,
+          toWorld.multiply(index.transformOfInstance(node)),
+          mode,
+          world,
+          filter,
+          depth + 1);
+      if (mode == BandMode.crossing) {
+        if (verdict == _BandVerdict.pass) return _BandVerdict.pass;
+      } else {
+        if (verdict == _BandVerdict.fail) return _BandVerdict.fail;
+        if (verdict == _BandVerdict.pass) childPass = true;
+      }
+    }
+    if (mode == BandMode.crossing) return _BandVerdict.fail;
+    return (anyLeaf && allPass) || childPass
+        ? _BandVerdict.pass
+        : _BandVerdict.empty;
   }
 
   // --- pickInto ------------------------------------------------------
@@ -676,6 +974,34 @@ class SpatialIndex {
     for (var i = 1; i < 4; i++) {
       final cx = (i & 1) == 0 ? wMinX : wMaxX;
       final cy = (i & 2) == 0 ? wMinY : wMaxY;
+      final lx = la * cx + lc * cy + le;
+      final ly = lb * cx + ld * cy + lf;
+      if (lx < qMinX) qMinX = lx;
+      if (lx > qMaxX) qMaxX = lx;
+      if (ly < qMinY) qMinY = ly;
+      if (ly > qMaxY) qMaxY = ly;
+    }
+    return Aabb2.raw(qMinX, qMinY, qMaxX, qMaxY);
+  }
+
+  /// The AABB, in the local space [toLocal] maps world space into, of the
+  /// world rectangle [world].
+  ///
+  /// [_localQueryBox]'s four-corner pullback over a rectangle instead of a
+  /// point plus a half-size, and built from raw doubles for the same reason:
+  /// `Aabb2.transformedBy` would allocate roughly ten intermediate objects
+  /// per call. Same conservative-under-rotation contract — every corner is
+  /// mapped and bounded, so the result contains the mapped rectangle rather
+  /// than approximating it.
+  Aabb2 _localBandBox(Transform2 toLocal, Aabb2 world) {
+    final la = toLocal.a, lb = toLocal.b, lc = toLocal.c;
+    final ld = toLocal.d, le = toLocal.e, lf = toLocal.f;
+    var qMinX = la * world.minX + lc * world.minY + le;
+    var qMinY = lb * world.minX + ld * world.minY + lf;
+    var qMaxX = qMinX, qMaxY = qMinY;
+    for (var i = 1; i < 4; i++) {
+      final cx = (i & 1) == 0 ? world.minX : world.maxX;
+      final cy = (i & 2) == 0 ? world.minY : world.maxY;
       final lx = la * cx + lc * cy + le;
       final ly = lb * cx + ld * cy + lf;
       if (lx < qMinX) qMinX = lx;

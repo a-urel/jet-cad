@@ -1,6 +1,7 @@
 # 02 — Interaction core
 
-**Status:** not started
+**Status:** spec 2026-09-21 (rev 2, amended at execution), plan 2026-09-21,
+executed on `plan-02/interaction-core` (2026-09-22), the human's look OWED
 **Depends on:** 01
 **Blocks:** 03, 05, 06, 09, 12 — everything with a user in it
 **Size:** L
