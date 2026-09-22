@@ -225,17 +225,35 @@ ticks ordered down the bar
 restored: diff clean
 
 ### M-04q — floorMm ignored by pick
-file: `packages/jet_cad_2d/lib/src/geometry/grid_scale.dart:61`, `if (floorMm != null) {` → `if (false) {`
+file: `packages/jet_cad_2d/lib/src/geometry/grid_scale.dart`, inside `ladderFor`'s `if (floorMm != null)` block, the element expression `floorMm * m * math.pow(10.0, k)` → `m * math.pow(10.0, k)` (the floor is no longer used; the branch still runs)
 test: `CI=true dart test test/geometry/grid_scale_test.dart`
-result: FIRED — the mutation breaks null-safety flow analysis inside `ladderFor` (the branch body still reads `floorMm` unpromoted), so the suite fails at load rather than at an assertion:
+result: FIRED — `pick a floor is exact when it fits and the ladder climbs from it` [E]
+```
+Expected: <250>
+  Actual: <500.0>
+```
+also failed `pick imperial divisor is 4 even with a floor` [E]
+```
+Expected: <304.8>
+  Actual: <500.0>
+```
+`00:00 +10 -2: Some tests failed.`
+restored: diff clean
+
+First attempt failed to compile — not counted; Ruling 04-18. The original
+edit at `grid_scale.dart:61`, `if (floorMm != null) {` → `if (false) {`,
+does not behaviourally kill anything: it breaks null-safety flow analysis
+inside `ladderFor` (the branch body still reads `floorMm` unpromoted), so
+the suite fails to *load* rather than fails an assertion:
 ```
 Failed to load "test/geometry/grid_scale_test.dart":
 lib/src/geometry/grid_scale.dart:64:47: Error: Operator '*' cannot be called on 'double?' because it is potentially null.
           for (final m in _mantissas) floorMm * m * math.pow(10.0, k),
                                               ^
 ```
-`00:00 +0 -1: Some tests failed.`
-restored: diff clean
+`00:00 +0 -1: Some tests failed.` A compile failure is not evidence the
+test suite behaviourally distinguishes the mutant from the original, so
+this attempt is not counted toward the fired tally.
 
 ### M-04r — remove the components skip in SpatialIndex._onChange
 file: `packages/jet_cad_2d/lib/src/index/spatial_index.dart:2606`, `if (capability == Capability.components) return;` deleted
