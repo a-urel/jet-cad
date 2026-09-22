@@ -173,4 +173,54 @@ void main() {
         reason: 'undo replays the command log; it never restores the '
             "selection controller's own state");
   });
+
+  testWidgets('ctrl+Z after deleting two walls brings both back in one step',
+      (tester) async {
+    await tester.pumpWidget(const FloorPlannerApp());
+    await tester.pump();
+
+    final view = tester.widget<PlannerView>(find.byType(PlannerView));
+    final topLeft = tester.getTopLeft(find.byType(InteractionLayer));
+    Offset at(Vector2 world) {
+      final s = view.camera.value.worldToScreen(world);
+      return topLeft + Offset(s.x, s.y);
+    }
+
+    // The outer rectangle is four lines: its bottom edge and its left edge
+    // are two entities. Both points sit mid-edge, well past the pick radius
+    // of the corner, the door (x0 + 6000..7000) and the left-wall windows
+    // (y0 + 1700..2700, y0 + 5900..7300), so each tap can only mean one wall.
+    await tester.tapAt(at(Vector2(kPlanOriginX + 3000, kPlanOriginY)));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.tapAt(at(Vector2(kPlanOriginX, kPlanOriginY + 3000)));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+
+    expect(view.selection.length, 2);
+    final handles = [for (final k in view.selection.keys) k.target];
+    // The startup plan is built through the log and already fills the
+    // 200-entry undo stack, so `undoDepth` cannot count the Delete here; the
+    // live count after exactly one ctrl+Z is what pins it to one entry.
+    final liveBefore = view.document.entities.liveCount;
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+
+    expect(view.document.entities.liveCount, liveBefore - 2);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+
+    expect(view.document.entities.liveCount, liveBefore,
+        reason: 'one ctrl+Z restores both walls, not one');
+    for (final h in handles) {
+      expect(view.document.entities.slotOf(h), isNotNull);
+    }
+    expect(view.selection.isEmpty, isTrue);
+  });
 }

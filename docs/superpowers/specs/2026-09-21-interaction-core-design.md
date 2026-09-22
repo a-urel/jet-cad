@@ -106,7 +106,9 @@ active tool's name and the selection count.
   [Open questions](#open-questions). 02 selects **root-level objects** only.
 - Compound (single-step) undo for a multi-object delete — 06's spike. A
   delete of N objects is N undo steps in 02, and the spec says so where it
-  happens (D10).
+  happens (D10). **Amended after the look (2026-09-22):** the human's Chrome
+  look rejected N-step undo, so `CompoundCommand` landed in the engine and
+  Delete is one undo step; see D10's amendment.
 - Any drawing tool, property panel, layer panel, or persistence of
   selection. Selection is never serialised (roadmap decision 1).
 - Touch. Desktop mouse and trackpad; a touch pointer is treated as the primary
@@ -429,6 +431,20 @@ and an undo of part of a cascade restores leaves under an owner that is still
 gone; both are recorded here as the concrete problem statement 06's compound
 undo inherits, and the results note must say so in as many words.
 
+**Amended after the look (2026-09-22):** superseded. Delete builds every
+key's commands first and executes them as one `CompoundCommand`
+(`document/commands.dart`): one history entry, one `DocChange` whose
+`touched` is the union, an inverse that is the children's inverses in reverse
+order, and a child that throws rolls the earlier children back before the
+error leaves `execute`. A delete of N objects, or of a group's whole cascade,
+is **one** undo step and the partial-undo hazard no longer exists. Permission
+preflight per key is unchanged in effect: a refused key stays selected and
+untouched while the permitted keys go together, and a key's handles join
+the dedupe set only after its preflight passes, so a refused group does not
+hide a permitted key inside it. `CommandDispatcher` now checks a command's
+`capabilities` set rather than its single `capability`, so a compound is
+refused when any member is; the tool's preflight reads the same set.
+
 ### D11 — Pruning listens to `document.changes`
 
 `SelectionController` subscribes to `document.changes` (an async broadcast
@@ -746,8 +762,10 @@ Deferred, not unanswered:
   leaf selected inside instance A becomes `(chain: [A], target: leaf)`, a
   policy change in `resolveHit`, not a type change. 03 or 05 decides when it
   is needed.
-- **Compound undo.** D10's N-step delete and the partial-undo hazard are the
-  first concrete cases for 06's spike.
+- **Compound undo.** Closed after the look: `CompoundCommand` exists (D10's
+  amendment). 06's spike inherits its shape — reverse-order inverse, union
+  of capabilities, rollback on a throwing child — and asks only whether
+  regeneration folds into the same compound as the edit that triggered it.
 - **Selection after undo.** 02 says "not restored". Most CAD tools agree; a
   later sub-project may reselect what an undo brought back.
 - **Rotated text under a window band.** D8 accepts the AABB's looseness.

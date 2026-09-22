@@ -2334,6 +2334,12 @@ class SpatialIndex {
   int _rebuildCount = 0;
   int _dirtyCount = 0;
 
+  /// Full rebuilds only, unlike [_rebuildCount], which a container rebuild
+  /// also bumps. [_reconcile] reads it to stop after the first full rebuild
+  /// a touched set causes: that rebuild already reflects every handle in
+  /// the set.
+  int _fullRebuilds = 0;
+
   /// How many full container rebuilds have happened. Test-visible because the
   /// load-bearing guarantee is that certain edits cause *none*.
   int get rebuildCount => _rebuildCount;
@@ -2360,6 +2366,7 @@ class SpatialIndex {
   /// O(containers x entities).
   void rebuildAll() {
     _rebuildCount++;
+    _fullRebuilds++;
     _margin = null;
     _centreMargin = null;
     final byOwner = ContainerIndex.leavesByOwner(document);
@@ -2638,6 +2645,7 @@ class SpatialIndex {
     // today, so that saving is unexercised — kept for the shape of a
     // future command that touches several nodes in one edit, not because a
     // test proves it pays for itself yet.
+    final fullRebuildsBefore = _fullRebuilds;
     var structural = false;
     for (final handle in ordered) {
       if (document.tree.definition(handle) != null) {
@@ -2649,6 +2657,12 @@ class SpatialIndex {
         continue;
       }
       _reconcileEntity(handle);
+      // A removed node or leaf falls to `_reconcileEntity`'s full-rebuild
+      // fallback, and that rebuild reads the document as it now is — every
+      // remaining handle in this set included. Without stopping here a
+      // `CompoundCommand` removing a group and its N leaves is N + 1 full
+      // rebuilds (M-C8 in `compound_command_test.dart`).
+      if (_fullRebuilds != fullRebuildsBefore) return;
     }
 
     if (structural) {

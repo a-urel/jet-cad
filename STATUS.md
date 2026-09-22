@@ -144,9 +144,11 @@ spec's `SelectionOverlay` — Flutter's widgets library already exports a
 `SelectionOverlay` (Task 8). Exiting the interaction layer during a drag no
 longer cancels it: a band dragged past the edge continues, and its own `up`
 event ends it, not `onExit` (Task 9; the spec's `SelectTool` row is amended).
-And a delete of N objects is N undo steps, with a partial undo of a group's
-cascade restoring leaves under an owner that is still gone — the concrete
-problem statement 06's compound undo inherits (D10). The final fix wave added a fifth a reader must know: **the four walks over a
+And a delete of N objects was N undo steps, with a partial undo of a group's
+cascade restoring leaves under an owner that is still gone (D10) — **closed
+after the look**: the human met it in Chrome, and `CompoundCommand` landed in
+the engine so Delete is one undo step (spec D10 amended, results note's debt
+section, roadmap 06 §1). The final fix wave added a fifth a reader must know: **the four walks over a
 container's members differ on two axes** — whether child instances are
 followed and which `QueryFilter` applies — tabulated in the results note.
 Full account, plus the point-key allocation acceptance, the band-edge clip,

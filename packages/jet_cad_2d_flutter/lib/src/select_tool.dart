@@ -246,31 +246,62 @@ class SelectTool extends Tool {
     final keys = ctx.selection.keys.toList()
       ..sort((a, b) => a.target.value.compareTo(b.target.value));
     Map<Handle, List<int>>? byOwner;
+    // Every key's commands are built first and executed together as one
+    // `CompoundCommand`: a delete of N objects is one undo step, and a
+    // failure anywhere in the cascade leaves the document as it was.
+    // `named` is every handle the commands so far will remove — including
+    // the fills a boundary's removal takes with it — so a key that an
+    // earlier key's cascade already covers emits nothing; a second removal
+    // would throw and roll the whole delete back. A key's own handles join
+    // `named` only after its permission preflight passes, so a refused
+    // group (which stays, spec D10) does not hide the keys inside it.
+    final commands = <DraftCommand>[];
+    final named = <Handle>{};
+    final removed = <SelectionKey>[];
     for (final key in keys) {
+      if (named.contains(key.target)) {
+        // An earlier key's cascade removes it; deselect it with that key
+        // rather than leaving it to the async prune (D11).
+        removed.add(key);
+        continue;
+      }
       final List<DraftCommand> list;
+      final Set<Handle> names;
       final node = doc.tree[key.target];
       if (node is GroupNode) {
         byOwner ??= doc.leavesByOwner();
-        list = _groupCascade(doc, node, byOwner);
+        names = Set.of(named);
+        list = _groupCascade(doc, node, byOwner, names);
       } else if (node is InstanceNode) {
+        names = {key.target};
         list = [RemoveNodeCommand(key.target)];
       } else if (doc.entities.slotOf(key.target) != null) {
+        names = {key.target, ...doc.fills.fillsOf(key.target)};
         list = [RemoveEntityCommand(key.target)];
       } else {
         continue;
       }
-      if (!list.every((c) => permissions.allows(c.capability))) continue;
-      for (final c in list) {
-        ctx.execute(c);
+      // A refused key stays selected and untouched (spec D10); the others
+      // still go. The set, not the summary capability: a compound member
+      // is refused when any of its own is.
+      if (!list.every((c) => c.capabilities.every(permissions.allows))) {
+        continue;
       }
-      ctx.selection.remove([key]);
+      commands.addAll(list);
+      named.addAll(names);
+      removed.add(key);
     }
+    if (commands.isEmpty) return;
+    ctx.execute(CompoundCommand(commands, label: 'Delete'));
+    ctx.selection.remove(removed);
   }
 
   /// Leaves first (fills whose boundary is here skipped), child instances,
-  /// nested groups recursively, the group last.
-  List<DraftCommand> _groupCascade(
-      DraftDocument doc, GroupNode group, Map<Handle, List<int>> byOwner) {
+  /// nested groups recursively, the group last. Handles already in [named]
+  /// are skipped, and every handle the returned commands will remove —
+  /// including the fills that go with a boundary — is added to it.
+  List<DraftCommand> _groupCascade(DraftDocument doc, GroupNode group,
+      Map<Handle, List<int>> byOwner, Set<Handle> named) {
     final out = <DraftCommand>[];
     final leaves = byOwner[group.handle] ?? const <int>[];
     final boundaries = <Handle>{};
@@ -282,23 +313,20 @@ class SelectTool extends Tool {
     final skip = <Handle>{for (final b in boundaries) ...doc.fills.fillsOf(b)};
     for (final slot in leaves) {
       final h = doc.entities.handleAt(slot);
-      // `byOwner` is scanned once per Delete and the keys are executed one
-      // after another, so by the time a later key's cascade is built an
-      // earlier one may already have removed this leaf; its slot would then
-      // name whatever has since been compacted into it.
-      if (doc.entities.slotOf(h) == null) continue;
       if (skip.contains(h)) continue;
+      if (!named.add(h)) continue;
+      named.addAll(doc.fills.fillsOf(h));
       out.add(RemoveEntityCommand(h));
     }
     for (final child in doc.tree.childNodesOf(group.children)) {
       final n = doc.tree[child];
       if (n is GroupNode) {
-        out.addAll(_groupCascade(doc, n, byOwner));
+        out.addAll(_groupCascade(doc, n, byOwner, named));
       } else if (n is InstanceNode) {
-        out.add(RemoveNodeCommand(child));
+        if (named.add(child)) out.add(RemoveNodeCommand(child));
       }
     }
-    out.add(RemoveNodeCommand(group.handle));
+    if (named.add(group.handle)) out.add(RemoveNodeCommand(group.handle));
     return out;
   }
 

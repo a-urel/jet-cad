@@ -698,3 +698,87 @@ class RemoveRegionCommand extends DraftCommand {
     );
   }
 }
+
+/// Several commands applied as one: one history entry, one [DocChange].
+///
+/// A multi-object delete is the first user. Without this, removing N objects
+/// was N undo steps, and undoing part of a group's cascade restored leaves
+/// under an owner that was still gone. 06's regeneration is the next user.
+///
+/// **The inverse is the children's inverses in reverse order.** A child may
+/// depend on the one before it — a node is added, then moved — and its
+/// inverse must run before that dependency is undone.
+///
+/// **All-or-nothing, like every command.** A child that throws has the
+/// children before it rolled back by applying the inverses collected so far,
+/// in reverse, before the error propagates. `DraftCommand.apply`'s contract
+/// says a throwing child mutated nothing, so the rollback restores exactly
+/// the state before this compound began — **provided the rollback itself
+/// completes.** An inverse that has just been produced by a successful
+/// `apply` is expected to replay, and every shipped inverse does; if one
+/// nevertheless throws, the rollback stops there, and a [StateError] naming
+/// both failures replaces the original error, because the target is then
+/// partially mutated with nothing in history to describe it and the caller
+/// must know that rather than see the child's own exception and conclude
+/// nothing happened. The dispatcher pushes no history and emits no
+/// [DocChange] on either path.
+///
+/// [capabilities] is the union of the children's, so a runtime document
+/// refuses a compound that removes geometry even when its first child is a
+/// permitted move. [capability] summarises it as the highest-ranked member
+/// and is informational only.
+class CompoundCommand extends DraftCommand {
+  final List<DraftCommand> children;
+
+  @override
+  final String label;
+
+  CompoundCommand(List<DraftCommand> children, {required this.label})
+      : children = List.unmodifiable(children) {
+    if (children.isEmpty) {
+      throw ArgumentError.value(children, 'children', 'must not be empty');
+    }
+  }
+
+  @override
+  Capability get capability {
+    var highest = children.first.capability;
+    for (final child in children) {
+      if (child.capability.index > highest.index) highest = child.capability;
+    }
+    return highest;
+  }
+
+  @override
+  Set<Capability> get capabilities =>
+      {for (final child in children) ...child.capabilities};
+
+  @override
+  CommandResult apply(CommandTarget target) {
+    final inverses = <DraftCommand>[];
+    final touched = <Handle>{};
+    for (final child in children) {
+      final CommandResult result;
+      try {
+        result = child.apply(target);
+      } catch (error) {
+        try {
+          for (final inverse in inverses.reversed) {
+            inverse.apply(target);
+          }
+        } catch (rollbackError) {
+          throw StateError('"$label": child ${inverses.length} threw ($error) '
+              'and the rollback then threw ($rollbackError); the target is '
+              'partially mutated and nothing was recorded in history');
+        }
+        rethrow;
+      }
+      inverses.add(result.inverse);
+      touched.addAll(result.touched);
+    }
+    return CommandResult(
+      inverse: CompoundCommand(inverses.reversed.toList(), label: label),
+      touched: touched,
+    );
+  }
+}

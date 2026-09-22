@@ -592,6 +592,7 @@ void main() {
           document: doc, index: index, camera: camera, selection: selection);
       final tool = SelectTool();
       selection.replace([SelectionKey.root(leaf), SelectionKey.root(instance)]);
+      final depthBefore = doc.commands.undoDepth;
 
       final result = tool.onKey(_deleteDown(), ctx);
 
@@ -599,11 +600,13 @@ void main() {
       expect(doc.entities.slotOf(leaf), isNull);
       expect(doc.tree[instance], isNull);
       expect(selection.isEmpty, isTrue);
+      expect(doc.commands.undoDepth, depthBefore + 1,
+          reason: 'two objects, one Delete, one undo step');
 
       doc.commands.undo();
-      doc.commands.undo();
 
-      expect(doc.entities.slotOf(leaf), isNotNull);
+      expect(doc.entities.slotOf(leaf), isNotNull,
+          reason: 'one undo brings back everything the Delete removed');
       expect(doc.tree[instance], isNotNull);
       expect(selection.isEmpty, isTrue,
           reason: 'undo replays the command log; it never restores the '
@@ -634,6 +637,7 @@ void main() {
           document: doc, index: index, camera: camera, selection: selection);
       final tool = SelectTool();
       selection.replace([SelectionKey.root(group)]);
+      final depthBefore = doc.commands.undoDepth;
 
       final result = tool.onKey(_deleteDown(), ctx);
 
@@ -644,7 +648,21 @@ void main() {
       expect(doc.tree[childInstance], isNull);
       expect(doc.tree[nestedGroup], isNull);
       expect(doc.tree[group], isNull);
-      expect(doc.commands.canUndo, isTrue);
+      expect(doc.commands.undoDepth, depthBefore + 1,
+          reason: 'the whole cascade is one undo step');
+
+      doc.commands.undo();
+
+      expect(doc.tree[group], isNotNull);
+      expect(doc.tree[nestedGroup], isNotNull);
+      expect(doc.tree[childInstance], isNotNull);
+      expect(doc.entities.slotOf(leafA), isNotNull);
+      expect(doc.entities.slotOf(leafB), isNotNull);
+      expect(doc.entities.slotOf(nestedLeaf), isNotNull);
+      expect(doc.entities.read(doc.entities.slotOf(nestedLeaf)!).owner,
+          nestedGroup,
+          reason: 'the leaf comes back under its owner, which is back too: '
+              'the partial-undo hazard spec D10 recorded is closed');
     });
 
     test(
@@ -677,6 +695,80 @@ void main() {
       expect(doc.entities.slotOf(region.fill.handle), isNull);
       expect(doc.entities.slotOf(region.boundary.handle), isNull);
       expect(doc.tree[group], isNull);
+    });
+
+    test(
+        'a fill selected alongside the group that owns its boundary is '
+        'removed once, by the boundary', () {
+      // M-S3: the boundary's command takes the fill with it (D10's cascade),
+      // so the fill's own key must emit nothing. A second removal would
+      // throw at execute time and roll the whole Delete back. Only
+      // reachable through `replace` today — 02 selects root objects — but
+      // 03/05's enter-a-container work makes it a click.
+      final doc = DraftDocument.empty();
+      final group =
+          addGroup(doc, doc.rootHandle, Transform2.translation(200, 100));
+      final region = AddRegionCommand.allocate(
+        seed: doc.handleSeed,
+        owner: group,
+        boundaryKind: EntityKind.polyline,
+        boundaryPayload: _squareLoop(),
+        layer: ReservedHandles.layerZero,
+        fillColor: const TrueColor(0x3366CC),
+        boundaryColor: const TrueColor(0x000000),
+      );
+      doc.commands.execute(region);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final camera = cameraAt(2.0, const Offset(-1600, 1300));
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      final tool = SelectTool();
+      selection.replace(
+          [SelectionKey.root(group), SelectionKey.root(region.fill.handle)]);
+      final depthBefore = doc.commands.undoDepth;
+
+      expect(() => tool.onKey(_deleteDown(), ctx), returnsNormally);
+
+      expect(doc.entities.slotOf(region.fill.handle), isNull);
+      expect(doc.entities.slotOf(region.boundary.handle), isNull);
+      expect(doc.tree[group], isNull);
+      expect(doc.commands.undoDepth, depthBefore + 1);
+      expect(selection.isEmpty, isTrue);
+    });
+
+    test('a refused group does not hide a permitted key inside it', () {
+      // M-S2: the group's cascade names every handle under it. If those
+      // names were recorded before the group's own permission preflight
+      // refused it, the leaf's key would find itself already named, emit
+      // nothing, and still be deselected — gone from the selection, still in
+      // the document. Structure denied, geometry allowed, is the permission
+      // set that separates the two.
+      final doc = DraftDocument.empty();
+      final group =
+          addGroup(doc, doc.rootHandle, Transform2.translation(500, 300));
+      final leaf = addEntity(doc, group, EntityKind.line, [0, 0, 2, 0], []);
+      doc.commands.permissions = const DraftPermissions(
+          transform: true, components: true, geometry: true, structure: false);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final camera = cameraAt(2.0, const Offset(-1600, 1300));
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      final tool = SelectTool();
+      selection.replace([SelectionKey.root(group), SelectionKey.root(leaf)]);
+
+      final result = tool.onKey(_deleteDown(), ctx);
+
+      expect(result, KeyEventResult.handled);
+      expect(doc.tree[group], isNotNull, reason: 'refused, so untouched');
+      expect(doc.entities.slotOf(leaf), isNull, reason: 'permitted, so gone');
+      expect(selection.keys, [SelectionKey.root(group)],
+          reason: 'the refused key stays selected; the removed one does not');
     });
 
     test('a read-only document is selectable and Delete is a no-op', () {

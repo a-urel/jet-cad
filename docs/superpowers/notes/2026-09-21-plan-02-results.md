@@ -244,11 +244,19 @@ kinds of check), none looked at.
 
 ## Debt and rulings the human should know
 
-- **A delete of N objects is N undo steps** (more for a group, D10). A
-  partial undo of a group's cascade restores leaves under an owner that is
-  still gone — the concrete problem statement 06's compound undo inherits.
-  Neither is a defect in 02's own scope; both are recorded here because the
-  human will meet them the first time they undo a group delete.
+- **A delete of N objects was N undo steps** (more for a group, D10), and a
+  partial undo of a group's cascade restored leaves under an owner that was
+  still gone. **Closed after the look (2026-09-22):** the human met exactly
+  this in Chrome and rejected it, so `CompoundCommand` landed in the engine
+  (`document/commands.dart`, its own test file; eight named mutants
+  M-C1..M-C8 fired and killed, the last of them in the index's reconcile
+  path, which now stops after the first full rebuild a compound causes) and
+  Delete executes every key's commands as one compound: one undo step, one
+  `DocChange`, rollback on a failing child. The select-tool tests undo once
+  and assert the whole cascade returns under its owner, and three tool
+  mutants (per-command execute; a refused group poisoning the dedupe set; a
+  boundary's fills not named) are killed; the shell test deletes two walls
+  and brings both back with one ctrl+Z. Spec D10 carries the amendment.
 - **The group band rule counts leaves only.** An instance placed inside a
   group never enters the group's every/any band verdict (Ruling P-1) — a
   group made only of instances cannot be band-selected until a later plan
