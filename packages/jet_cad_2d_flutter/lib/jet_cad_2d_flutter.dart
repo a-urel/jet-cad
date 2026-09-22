@@ -51,6 +51,7 @@ export 'src/page_fit.dart';
 export 'src/page_notifier.dart';
 export 'src/reference_walk.dart';
 export 'src/render_backend.dart';
+export 'src/ruler_painter.dart';
 export 'src/select_tool.dart';
 export 'src/selection.dart';
 export 'src/selection_overlay.dart';
