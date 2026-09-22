@@ -2,7 +2,9 @@ import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
-/// The drawing area: a [CameraGestureDetector] over a [DraftCanvas].
+/// The rulers around the drawing area: a [RulerFrame] whose child is a
+/// [CameraGestureDetector] over the page chrome, the [DraftCanvas] and the
+/// selection overlay.
 ///
 /// Tiles off, `backend` unset (spec D6): a floor plan is 500-5,000
 /// entities, and the resident backend cannot run on web, which this product
@@ -33,8 +35,9 @@ class PlannerView extends StatefulWidget {
 }
 
 class _PlannerViewState extends State<PlannerView> {
-  /// Ruling 01-2: the camera is fitted once, to the size the view really
-  /// got, before the canvas under it has listened to anything.
+  /// Ruling 01-2: the camera is fitted once, to the size the drawing area
+  /// really got; since Plan 04 the fit lands at the end of the first frame
+  /// (Ruling 04-16).
   bool _fitted = false;
 
   // Constructed after the shell's `SelectionController` so it prunes dead
@@ -66,15 +69,13 @@ class _PlannerViewState extends State<PlannerView> {
                 constraints.biggest.height > 0) {
               _fitted = true;
               final size = constraints.biggest;
-              // `CameraController` is a `ValueNotifier` meant to drive paint
-              // via a `RepaintBoundary`, not to rebuild widgets (its own
-              // doc comment) -- but the zoom text (main.dart) does exactly
-              // that, outside this subtree. Setting it synchronously here,
-              // inside this `LayoutBuilder`'s own build, would notify that
-              // widget while the framework is mid-build for a sibling
-              // subtree, which throws. Posting it defers the notification to
-              // just after this frame, still before the canvas underneath
-              // has had a frame to listen on anything (Ruling 01-2).
+              // Assigning `camera.value` during layout would notify the
+              // zoom text's builder mid-build, which Flutter forbids
+              // (Ruling 04-16). Posting it defers the notification to the
+              // end of this frame: the first frame paints at the shell's
+              // nominal fit, the second at the real size. The latch is set
+              // synchronously, so the fit still happens exactly once
+              // (Ruling 01-2).
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (!mounted) return;
                 final page = widget.page.value;
