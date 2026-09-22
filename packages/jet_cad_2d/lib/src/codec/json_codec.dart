@@ -4,6 +4,7 @@ import '../core/diagnostic.dart';
 import '../core/handle.dart';
 import '../document/command.dart';
 import '../document/commands.dart';
+import '../document/component.dart';
 import '../document/draft_document.dart';
 import '../document/header.dart';
 import '../document/node.dart';
@@ -95,6 +96,7 @@ class DraftDocumentCodec {
     DraftPermissions permissions = DraftPermissions.all,
     int undoLimit = 200,
     List<Diagnostic>? diagnostics,
+    void Function(ComponentRegistry registry)? registerComponents,
   }) {
     // Both ends, not just the future one. A declared `0`, or a negative
     // version, is not a document this package ever wrote; accepting it would
@@ -110,6 +112,10 @@ class DraftDocumentCodec {
       permissions: permissions,
       undoLimit: undoLimit,
     );
+    // Before the components load, so an application type comes back typed
+    // rather than as preserve-unknown bytes (spec 04 D9). After it would be
+    // M-04d: the payload lands in `_unknown` and `get<T>` is null.
+    registerComponents?.call(doc.components);
 
     for (final key in json.keys) {
       if (!_knownKeys.contains(key)) doc.unknownDocumentFields[key] = json[key];
@@ -149,6 +155,7 @@ class DraftDocumentCodec {
     DraftPermissions permissions = DraftPermissions.all,
     int undoLimit = 200,
     List<Diagnostic>? diagnostics,
+    void Function(ComponentRegistry registry)? registerComponents,
   }) =>
       decode(
         (jsonDecode(source) as Map).cast<String, Object?>(),
@@ -156,6 +163,7 @@ class DraftDocumentCodec {
         permissions: permissions,
         undoLimit: undoLimit,
         diagnostics: diagnostics,
+        registerComponents: registerComponents,
       );
 
   static void _loadHeader(DraftDocument doc, Object? json) {
