@@ -201,6 +201,30 @@ void main() {
         reason: 'the counter reports what was actually dropped');
   });
 
+  test('a components-only change drops no tile', () async {
+    // D13 for the tile cache: the same skip as the index (M-04r's twin).
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final rig = rigOver(instancedFixture(measurer));
+    addTearDown(rig.dispose);
+    rig.paintOnce();
+    final before = rig.cache.liveTileCount;
+    expect(before, greaterThan(30),
+        reason: 'anti-degenerate clause 3: an empty viewport makes the '
+            'assertion below vacuous');
+    final invalidationsBefore = rig.cache.invalidationCount;
+
+    rig.cache.applyChange(
+        CommandApplied(
+            label: 'page',
+            touched: {rig.doc.rootHandle},
+            capability: Capability.components),
+        rig.doc);
+
+    expect(rig.cache.liveTileCount, before);
+    expect(rig.cache.invalidationCount, invalidationsBefore);
+  });
+
   test('criterion 5: a dragged instance drops the tiles it left', () async {
     final measurer = FlutterTextMeasurer();
     addTearDown(measurer.clear);

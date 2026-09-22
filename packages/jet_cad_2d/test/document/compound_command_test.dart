@@ -305,9 +305,9 @@ void main() {
     ], label: 'Delete');
     expect(compound.capabilities,
         {Capability.transform, Capability.geometry, Capability.structure});
-    // "Highest-ranked" is the declaration order of `enum Capability`
-    // (transform, components, geometry, structure); the getter is
-    // informational and nothing in the repo dispatches on it.
+    // "Highest-ranked" is the declaration order of enum Capability; the
+    // spatial index and the tile cache read it to skip components-only
+    // compounds (spec 04 D13).
     expect(compound.capability, Capability.structure,
         reason: 'the summary capability is the highest-ranked child');
   });

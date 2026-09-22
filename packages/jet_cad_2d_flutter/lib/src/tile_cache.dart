@@ -1869,9 +1869,11 @@ class TileCache {
       case DocumentLoaded():
       case DocumentPurged():
         _dropEverything();
-      case CommandApplied(:final touched):
-      case CommandUndone(:final touched):
-      case CommandRedone(:final touched):
+      case CommandApplied(:final touched, :final capability):
+      case CommandUndone(:final touched, :final capability):
+      case CommandRedone(:final touched, :final capability):
+        // Spec D13: a components-only edit moved no pixels.
+        if (capability == Capability.components) return;
         if (touched.isEmpty) {
           // `DocChange.touched` is documented as empty when the whole document
           // changed (`doc_change.dart:11-12`).

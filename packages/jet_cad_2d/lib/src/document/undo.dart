@@ -111,8 +111,10 @@ class CommandDispatcher {
     // mutated the target, never what merely attempted to.
     final result = command.apply(target);
     _history.push(result.inverse);
-    final change =
-        CommandApplied(label: command.label, touched: result.touched);
+    final change = CommandApplied(
+        label: command.label,
+        touched: result.touched,
+        capability: command.capability);
     _changes.add(change);
     onAfterMutate?.call(change);
   }
@@ -140,7 +142,10 @@ class CommandDispatcher {
       rethrow;
     }
     _history.pushRedo(result.inverse);
-    final change = CommandUndone(label: inverse.label, touched: result.touched);
+    final change = CommandUndone(
+        label: inverse.label,
+        touched: result.touched,
+        capability: inverse.capability);
     _changes.add(change);
     onAfterMutate?.call(change);
   }
@@ -161,7 +166,10 @@ class CommandDispatcher {
       rethrow;
     }
     _history.pushUndoOnly(result.inverse);
-    final change = CommandRedone(label: inverse.label, touched: result.touched);
+    final change = CommandRedone(
+        label: inverse.label,
+        touched: result.touched,
+        capability: inverse.capability);
     _changes.add(change);
     onAfterMutate?.call(change);
   }
