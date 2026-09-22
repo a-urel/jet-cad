@@ -14,6 +14,7 @@ class PlannerView extends StatefulWidget {
     required this.document,
     required this.index,
     required this.camera,
+    required this.page,
     required this.policy,
     required this.selection,
     required this.tools,
@@ -22,6 +23,7 @@ class PlannerView extends StatefulWidget {
   final DraftDocument document;
   final SpatialIndex index;
   final CameraController camera;
+  final PageNotifier page;
   final GesturePolicy policy;
   final SelectionController selection;
   final ToolController tools;
@@ -44,6 +46,8 @@ class _PlannerViewState extends State<PlannerView> {
   // nothing else in here would ask for the frame that draws it.
   late final Listenable _repaint = Listenable.merge(
       [widget.selection, widget.tools, widget.camera, _outlines]);
+  late final Listenable _chromeRepaint =
+      Listenable.merge([widget.camera, widget.page]);
 
   @override
   void dispose() {
@@ -52,46 +56,78 @@ class _PlannerViewState extends State<PlannerView> {
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-        builder: (context, constraints) {
-          if (!_fitted &&
-              constraints.biggest.width > 0 &&
-              constraints.biggest.height > 0) {
-            _fitted = true;
-            widget.camera.value = ViewportTransform.fit(
-                widget.document.extents, constraints.biggest);
-          }
-          return CameraGestureDetector(
-            camera: widget.camera,
-            policy: widget.policy,
-            child: InteractionLayer(
-              tools: widget.tools,
-              child: Stack(
-                children: [
-                  DraftCanvas(
-                    document: widget.document,
-                    index: widget.index,
-                    camera: widget.camera,
-                    tiles: false,
-                  ), // already inside its own RepaintBoundary
-                  Positioned.fill(
-                    child: RepaintBoundary(
-                      child: CustomPaint(
-                        painter: SelectionOverlayPainter(
-                          selection: widget.selection,
-                          tools: widget.tools,
-                          camera: widget.camera,
-                          outlines: _outlines,
-                          repaint: _repaint,
+  Widget build(BuildContext context) => RulerFrame(
+        camera: widget.camera,
+        page: widget.page,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            if (!_fitted &&
+                constraints.biggest.width > 0 &&
+                constraints.biggest.height > 0) {
+              _fitted = true;
+              final size = constraints.biggest;
+              // `CameraController` is a `ValueNotifier` meant to drive paint
+              // via a `RepaintBoundary`, not to rebuild widgets (its own
+              // doc comment) -- but the zoom text (main.dart) does exactly
+              // that, outside this subtree. Setting it synchronously here,
+              // inside this `LayoutBuilder`'s own build, would notify that
+              // widget while the framework is mid-build for a sibling
+              // subtree, which throws. Posting it defers the notification to
+              // just after this frame, still before the canvas underneath
+              // has had a frame to listen on anything (Ruling 01-2).
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                final page = widget.page.value;
+                // Spec D4/D11: the page when there is one, at the drawing
+                // area's size — inside the frame, so the bars are excluded.
+                widget.camera.value = page != null
+                    ? fitToPage(page, size)
+                    : ViewportTransform.fit(widget.document.extents, size);
+              });
+            }
+            return CameraGestureDetector(
+              camera: widget.camera,
+              policy: widget.policy,
+              child: InteractionLayer(
+                tools: widget.tools,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          painter: PageChromePainter(
+                            camera: widget.camera,
+                            page: widget.page,
+                            repaint: _chromeRepaint,
+                          ),
                         ),
-                        size: Size.infinite,
                       ),
                     ),
-                  ),
-                ],
+                    DraftCanvas(
+                      document: widget.document,
+                      index: widget.index,
+                      camera: widget.camera,
+                      tiles: false,
+                    ), // already inside its own RepaintBoundary
+                    Positioned.fill(
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          painter: SelectionOverlayPainter(
+                            selection: widget.selection,
+                            tools: widget.tools,
+                            camera: widget.camera,
+                            outlines: _outlines,
+                            repaint: _repaint,
+                          ),
+                          size: Size.infinite,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       );
 }
