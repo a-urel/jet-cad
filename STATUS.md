@@ -1,9 +1,9 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-22 — **Plan 02 (interaction core) is executed on
-`plan-02/interaction-core`, `3fedeb9..HEAD`, exit gate 14 of 15 — criterion 15
-(the human's look, on macOS, in Chrome and in Firefox) is OWED, and the merge
-is the human's decision.** See [Plan 02](#plan-02--interaction-core-executed-on-plan-02interaction-core-not-merged)
+**Last updated:** 2026-09-22 — **Plan 02 (interaction core) is MERGED at
+`8c62db3`**, `--no-ff` on the human's decision, with the exit gate at 14 of 15 —
+criterion 15 (the human's look, on macOS, in Chrome and in Firefox) is OWED
+after the merge. See [Plan 02](#plan-02--interaction-core-merged-into-main-at-8c62db3)
 and [Resume here](#resume-here). **Plan 01 (the floor planner app skeleton) is
 MERGED at `bae5f73`**, the product line's first code on `main`; its human look
 is done (macOS, Chrome, Firefox: LGTM), exit gate 12 of 12. See [Plan 01](#plan-01--the-app-skeleton-merged-into-main-at-bae5f73)
@@ -81,7 +81,7 @@ Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01
 
 ---
 
-## Plan 02 — interaction core (executed on `plan-02/interaction-core`, NOT merged)
+## Plan 02 — interaction core (MERGED into `main` at `8c62db3`)
 
 **Plan 02 gave the product line its selection substrate** — clicking an
 entity selects it, dragging a rubber band from empty space selects what it
@@ -91,9 +91,13 @@ the top bar shows the tool name and the selection count. Twelve tasks,
 `3fedeb9..afe7d64` (Tasks 1–11; Task 12, the results note and the spec/
 STATUS/roadmap updates, at `b02410a`), then a **final fix wave** at `0d69465`
 and this commit — on branch `plan-02/interaction-core`, cut from `main` at
-`3fedeb9`. **Executed, NOT merged — the exit gate is 14 of 15,
-with the fifteenth (a human's look, on macOS, in Chrome and in Firefox from
-`build/web`) OWED, and the merge itself is the human's decision.** Spec:
+`3fedeb9`. **MERGED `--no-ff` at `8c62db3` on 2026-09-22, on the human's
+decision, with the exit gate at 14 of 15 and the fifteenth (a human's look,
+on macOS, in Chrome and in Firefox from `build/web`) still OWED**; branch and
+worktree deleted, ledger archived at `2e60afa`. The merged tree was re-gated
+on `main`: `jet_cad_2d` 820, `jet_cad_2d_flutter` 769 pass / 1 skip / the
+same five pre-existing text-golden failures, `dev_harness_2d` 82,
+`floor_planner` 12 and both builds. Spec:
 [2026-09-21-interaction-core-design.md](docs/superpowers/specs/2026-09-21-interaction-core-design.md)
 (revision 2, amended at execution 2026-09-22 — ten amendments, six from the
 tasks and four from the final fix wave, none rewriting the original text).
@@ -166,8 +170,8 @@ conic-hull note: the results note's "Debt and rulings" section.
 1–14 all PASS, each with its witness (test file and test name, the mutation
 log, or the pasted gate line); criterion 15 (a human looks, on macOS, in
 Chrome and in Firefox) is **OWED**, in those words — no device run or visual
-judgement was simulated to fill it in, and **the merge is still the human's
-decision**. The shell now binds cmd+Z / ctrl+Z, so the look's undo checks
+judgement was simulated to fill it in, and **the merge did not discharge
+it**. The shell now binds cmd+Z / ctrl+Z, so the look's undo checks
 have something to press; there is no redo in 02. Full account:
 [2026-09-21-plan-02-results.md](docs/superpowers/notes/2026-09-21-plan-02-results.md).
 
@@ -1089,12 +1093,11 @@ were both written 2026-09-21; **all twelve tasks ran on
 `plan-02/interaction-core`, cut from `main` at `3fedeb9`, through
 `afe7d64` plus the results-note task at `b02410a`, and then a final fix wave
 that closed every open finding of the whole-branch review and of Task 12's
-own review — and the branch is NOT merged.** The exit gate is **14 of 15** —
+own review — and is MERGED into `main` at `8c62db3` on 2026-09-22.** The exit gate is **14 of 15** —
 criterion 15 (a human looks, on macOS, in Chrome and in Firefox from
 `build/web`, at click, shift-click, both bands, hover, Escape, Delete and
 undo — **cmd+Z on macOS, ctrl+Z in a browser**, which the fix wave's shell
-binding made possible) is **OWED**, and the merge itself is the human's
-decision, exactly as Plan 01's twelfth criterion was before its own human
+binding made possible) is **OWED**, and the merge at `8c62db3` did not discharge it, exactly as Plan 01's twelfth criterion was before its own human
 look. Spec amended at execution in ten places (none rewriting the original
 text), none of them changing a passing criterion into a failing one. See
 [Plan 02](#plan-02--interaction-core-executed-on-plan-02interaction-core-not-merged)
