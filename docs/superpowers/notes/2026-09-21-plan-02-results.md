@@ -174,7 +174,7 @@ The spec's fifteen criteria, each with its witness.
 | 12 | All eleven gate commands exit 0, except `jet_cad_2d_flutter`'s `flutter test` on the same five pre-existing golden failures and nothing else; no `analysis_options.yaml` in the diff | **PASS with the one recorded exception** | re-run in full after the final fix wave and pasted above: `jet_cad_2d` **820**; `jet_cad_2d_flutter` **769 pass, 1 skip, the same five `text_ladder_golden_test.dart` failures and nothing else**; `dev_harness_2d` **82**; `floor_planner` **12** and both `✓ Built`. Every `analyze` and `format` exits 0; the short status after every line showed only the wave's own source files, and no `analysis_options.yaml` was rewritten at any point |
 | 13 | The top bar shows the tool name and selection count; a widget test drives it | **PASS** | `planner_shell_test.dart`: `the status text shows the tool name and follows the selection` |
 | 14 | The overlay outline coincides with the drawn entity at `kDefaultOriginX` to 0.01 px | **PASS** | `selection_overlay_test.dart`: `the outline coincides with the drawn line at 4.5e6`, `the outline coincides under a rotated, non-uniform camera` |
-| 15 | A human looked, on macOS, in Chrome and in Firefox from `build/web`: click, shift-click, both bands, hover, Escape, Delete, undo; each recorded seen/not seen/could not judge | **OWED — not looked at; the human looks after this branch is presented** | this note |
+| 15 | A human looked, on macOS, in Chrome and in Firefox from `build/web`: click, shift-click, both bands, hover, Escape, Delete, undo; each recorded seen/not seen/could not judge | **PASS** — looked at 2026-09-22 after the merge; one finding (N-step undo in Chrome), fixed by `CompoundCommand` at `3f80080` and re-verified in Firefox | the look section of this note |
 
 **14 of 15 PASS.** No criterion is a MISS. Criterion 15 is OWED, itemised
 below.
@@ -183,72 +183,73 @@ below.
 
 ## The look — OWED, itemised
 
-**No human looked at the running app in this session.** This task ran in a
-headless sandbox, as a subagent, with no display, no `flutter run`, no
-browser. Every item below is listed from the spec's criterion 15 and the
-task brief's Step 2, and marked as its controller ruled: **OWED — not looked
-at; the human looks after this branch is presented.**
+**The human looked on 2026-09-22, after the merge at `8c62db3`.** macOS
+from `flutter run -d macos --release`; Chrome from
+`flutter run -d chrome --release`; Firefox from the fix branch's
+`build/web` served statically, after the one finding below was fixed. The
+finding: in Chrome, item 7 showed that undo after a multi-object Delete
+came back **one object per ctrl+Z**, exactly the N-step behaviour D10
+recorded as 06's debt. The human rejected it; `CompoundCommand` landed
+(`3f80080`, see the debt section) and the Firefox look verified three walls
+returning on one ctrl+Z. Chrome and macOS were not re-looked at after the
+fix; the shell test pins the fixed behaviour on all three platforms.
 
 ### macOS
 
-`cd apps/floor_planner && flutter run -d macos --profile` (or `--debug`,
-matching this task's build).
+`cd apps/floor_planner && flutter run -d macos --release`. LGTM as a whole:
 
-1. Click selects exactly one entity. **OWED — not looked at; the human looks
-   after this branch is presented.**
+1. Click selects exactly one entity. **seen.**
 2. Shift-click toggles a second entity into the selection without
-   dropping the first. **OWED — not looked at; the human looks after this
-   branch is presented.**
+   dropping the first. **seen.**
 3. Both bands: a left-to-right drag (window) selects only what is fully
    enclosed; a right-to-left drag (crossing) also selects what the band only
-   touches. **OWED — not looked at; the human looks after this branch is
-   presented.**
-4. Hover highlights what the pointer is over, and follows it. **OWED — not
-   looked at; the human looks after this branch is presented.**
+   touches. **seen.**
+4. Hover highlights what the pointer is over, and follows it. **seen.**
 5. Escape cancels a band in progress, or clears the selection when idle.
-   **OWED — not looked at; the human looks after this branch is presented.**
-6. Delete removes the selection, and undo — **cmd+Z (macOS) / ctrl+Z
-   (browsers)** — brings the geometry back. **OWED — not looked at; the
-   human looks after this branch is presented.**
-7. Undo after Delete — **cmd+Z (macOS) / ctrl+Z (browsers)** — restores what
-   was removed, not what was selected. **OWED — not looked at; the human
-   looks after this branch is presented.**
+   **seen.**
+6. Delete removes the selection, and undo — **cmd+Z** — brings the geometry
+   back. **seen** (pre-fix build: one object per cmd+Z).
+7. Undo after Delete restores what was removed, not what was selected.
+   **seen.**
 
 ### Browser — Chrome, then Firefox from `build/web`
 
-`cd apps/floor_planner && flutter run -d chrome --release`, then the same
-`flutter build web` served from `build/web` and opened in Firefox.
+Chrome from `flutter run -d chrome --release` on the pre-fix build; Firefox
+from the fix branch's `build/web` served with `python3 -m http.server`.
 
-1. Click selects exactly one entity, in both browsers. **OWED — not looked
-   at; the human looks after this branch is presented.**
-2. Shift-click toggles a second entity, in both browsers. **OWED — not
-   looked at; the human looks after this branch is presented.**
-3. Both bands (window and crossing), in both browsers. **OWED — not looked
-   at; the human looks after this branch is presented.**
-4. Hover follows the pointer, in both browsers. **OWED — not looked at; the
-   human looks after this branch is presented.**
-5. Escape cancels a band or clears, in both browsers. **OWED — not looked
-   at; the human looks after this branch is presented.**
-6. Delete removes and undo — **ctrl+Z (browsers), cmd+Z on macOS** —
-   restores the geometry, in both browsers. **OWED — not looked at; the
-   human looks after this branch is presented.**
-7. Undo — **ctrl+Z (browsers), cmd+Z on macOS** — restores geometry, not
-   selection, in both browsers. **OWED — not looked at; the human looks
-   after this branch is presented.**
+1. Click selects exactly one entity. **seen, both browsers.**
+2. Shift-click toggles a second entity. **seen, both browsers.**
+3. Both bands (window and crossing). **seen, both browsers.**
+4. Hover follows the pointer. **seen, both browsers.**
+5. Escape cancels a band or clears. **seen, both browsers.**
+6. Delete removes and undo — **ctrl+Z** — restores the geometry. **seen,
+   both browsers.**
+7. Undo restores geometry, not selection. **seen, both browsers** — and in
+   Chrome, **one object per ctrl+Z after a multi-object Delete** (the
+   finding above); in Firefox on the fixed build, **all of them on one
+   ctrl+Z**.
 
-Exit-gate criterion 15 is therefore **OWED**, not PASS — fourteen items in
-total (seven per platform, macOS and the two browsers sharing the same seven
-kinds of check), none looked at.
+Exit-gate criterion 15 is therefore **PASS** — fourteen items looked at
+(seven per platform), one finding, fixed and re-verified before the fix
+branch was merged.
 
 ---
 
 ## Debt and rulings the human should know
 
-- **A delete of N objects is N undo steps** (more for a group, D10). A
-  partial undo of a group's cascade restores leaves under an owner that is
-  still gone — the concrete problem statement 06's compound undo inherits.
-  Neither is a defect in 02's own scope; both are recorded here because the
-  human will meet them the first time they undo a group delete.
+- **A delete of N objects was N undo steps** (more for a group, D10), and a
+  partial undo of a group's cascade restored leaves under an owner that was
+  still gone. **Closed after the look (2026-09-22):** the human met exactly
+  this in Chrome and rejected it, so `CompoundCommand` landed in the engine
+  (`document/commands.dart`, its own test file; eight named mutants
+  M-C1..M-C8 fired and killed, the last of them in the index's reconcile
+  path, which now stops after the first full rebuild a compound causes) and
+  Delete executes every key's commands as one compound: one undo step, one
+  `DocChange`, rollback on a failing child. The select-tool tests undo once
+  and assert the whole cascade returns under its owner, and three tool
+  mutants (per-command execute; a refused group poisoning the dedupe set; a
+  boundary's fills not named) are killed; the shell test deletes two walls
+  and brings both back with one ctrl+Z. Spec D10 carries the amendment.
 - **The group band rule counts leaves only.** An instance placed inside a
   group never enters the group's every/any band verdict (Ruling P-1) — a
   group made only of instances cannot be band-selected until a later plan

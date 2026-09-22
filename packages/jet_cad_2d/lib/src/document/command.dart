@@ -108,6 +108,12 @@ class CommandResult {
 abstract class DraftCommand {
   Capability get capability;
 
+  /// Every capability this command needs. [CommandDispatcher] checks this
+  /// set, not [capability], so a command that spans several — a
+  /// [CompoundCommand] — is refused when *any* of them is denied. A plain
+  /// command needs exactly the one it names.
+  Set<Capability> get capabilities => {capability};
+
   /// Short, human-readable, and used in [DocChange] events.
   String get label;
 

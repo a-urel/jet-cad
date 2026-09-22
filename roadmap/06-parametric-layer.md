@@ -74,21 +74,29 @@ foreign-format story, and put behaviour in the engine. Instead:
 
 ## What does not exist — and this is the hard part
 
-### 1. There is no compound command. This is the central problem.
+### 1. There is a compound command now — but only the primitive.
 
 `UndoStack` (`undo.dart:10`) is a flat `List<DraftCommand>`. `push` appends
-one inverse; `takeUndo` removes one. **One command is one undo step.** There is
-no macro, batch, transaction or group anywhere in
-`packages/jet_cad_2d/lib/src/document/` — grep confirms it.
+one inverse; `takeUndo` removes one. **One command is one undo step.** Since
+2026-09-22 that one command may be a `CompoundCommand`
+(`packages/jet_cad_2d/lib/src/document/commands.dart`, landed after Plan
+02's look when the human rejected an N-step undo of a multi-object delete):
+children applied in order, inverse in reverse order, `touched` the union,
+`capabilities` the union (the dispatcher checks the set, not the single
+`capability`), and a throwing child rolls the earlier ones back. Its first
+user is the select tool's Delete; its tests fire M-06a already.
 
-So a regeneration that emits N commands creates N undo steps, and undoing one
-of them leaves the parameters describing one thing and the geometry showing
+What still does not exist is everything *around* it: nothing opens a compound
+across two dispatches, so a regeneration that runs as an `onAfterMutate` pass
+and emits its own command is still a second undo step, and undoing one of
+them leaves the parameters describing one thing and the geometry showing
 another. **The document would be internally inconsistent in a state the user
 can reach with one keystroke.**
 
-This must be solved in this sub-project. It is also 03's multi-selection drag
-problem and 07's "move one wall, three neighbours regenerate" problem. Solve it
-once, here.
+This must be solved in this sub-project: fold the regeneration into the
+compound that carries the edit, or give the dispatcher a way to group two
+dispatches. It is also 03's multi-selection drag problem and 07's "move one
+wall, three neighbours regenerate" problem. Solve it once, here.
 
 ### 2. There is no dependency graph.
 

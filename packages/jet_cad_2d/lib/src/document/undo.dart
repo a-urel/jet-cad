@@ -99,6 +99,9 @@ class CommandDispatcher {
   bool get canUndo => _history.canUndo;
   bool get canRedo => _history.canRedo;
 
+  /// How many entries `undo()` could pop. One [CompoundCommand] is one.
+  int get undoDepth => _history.undoDepth;
+
   void execute(DraftCommand command) {
     onBeforeMutate?.call();
     _checkNotDisposed();
@@ -191,8 +194,10 @@ class CommandDispatcher {
   bool get isDisposed => _changes.isClosed;
 
   void _require(DraftCommand command) {
-    if (!permissions.allows(command.capability)) {
-      throw PermissionDeniedError(command.capability, command.label);
+    for (final capability in command.capabilities) {
+      if (!permissions.allows(capability)) {
+        throw PermissionDeniedError(capability, command.label);
+      }
     }
   }
 
