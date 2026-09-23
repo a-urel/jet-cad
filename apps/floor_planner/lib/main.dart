@@ -21,12 +21,22 @@ class FloorPlannerApp extends StatelessWidget {
       );
 }
 
-/// Owns the document, the index and the camera for the window's lifetime,
-/// and lays out the chrome slots -- a top bar, a left panel and a right
-/// panel, sized and empty -- so sub-projects 04, 05 and 12 add to a layout
-/// rather than invent one.
+/// Owns the document, the index, the camera and -- since 03 -- the outline
+/// cache, the grip cache and the snap settings for the window's lifetime.
+/// It lays out the chrome slots.
+///
+/// [document] and [initialCamera] are a test seam (spec 03, Architecture;
+/// Ruling 03-18).
+/// - [document] replaces the startup plan, and must carry a
+///   `FlutterTextMeasurer`.
+/// - [initialCamera] replaces the nominal fit.
+/// - `PlannerView` still fits once after its first frame, so a test sets a
+///   camera of its own after the first pump.
 class PlannerShell extends StatefulWidget {
-  const PlannerShell({super.key});
+  const PlannerShell({super.key, this.document, this.initialCamera});
+
+  final DraftDocument? document;
+  final ViewportTransform? initialCamera;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -34,30 +44,51 @@ class PlannerShell extends StatefulWidget {
 
 class _PlannerShellState extends State<PlannerShell> {
   final FlutterTextMeasurer _measurer = FlutterTextMeasurer();
-  late final DraftDocument _document = startupPlan(_measurer);
+  late final DraftDocument _document =
+      widget.document ?? startupPlan(_measurer);
   late final PageNotifier _page = PageNotifier(_document);
   late final SpatialIndex _index = SpatialIndex(_document);
-  // Fitted to the nominal window; PlannerView re-fits once at the real size.
   late final CameraController _camera = CameraController(
-    fitToPage(_document.components.get<PageComponent>(_document.rootHandle)!,
-        const Size(1440, 900)),
+    widget.initialCamera ?? _nominalFit(),
     minScale: kMinScale,
     maxScale: kMaxScale,
   );
   final GesturePolicy _policy = GesturePolicy.forPlatform();
+  final SnapSettings _snap = SnapSettings();
 
   // Constructed before the tool controller and its context: the selection
   // controller's listener on `document.changes` must prune dead keys before
   // anything downstream (the outline cache, in PlannerView) walks them.
   late final SelectionController _selection = SelectionController(_document);
+
+  // Spec 03 D6, moved from PlannerView. The order is load-bearing.
+  // - The outline cache is built after the selection controller, so the
+  //   controller prunes a dead key before the cache walks it.
+  // - The grip cache is built after the outline cache, so on a selection
+  //   change its listener runs after the outlines have been rebuilt.
+  late final OutlineCache _outlines = OutlineCache(_document, _selection);
+  late final GripCache _grips = GripCache(_document, _selection, _outlines);
+
   late final ToolContext _context = ToolContext(
       document: _document,
       index: _index,
       camera: _camera,
-      selection: _selection);
+      selection: _selection,
+      page: _page,
+      snap: _snap,
+      grips: _grips);
   late final ToolController _tools =
       ToolController(initial: SelectTool(), context: _context);
   late final Listenable _status = Listenable.merge([_selection, _tools]);
+
+  /// Fitted to the nominal window; PlannerView re-fits once at the real
+  /// size. A document without a page fits its extents.
+  ViewportTransform _nominalFit() {
+    final page = _page.value;
+    return page != null
+        ? fitToPage(page, const Size(1440, 900))
+        : ViewportTransform.fit(_document.extents, const Size(1440, 900));
+  }
 
   /// Spec D12, amended at execution: cmd+Z (macOS) / ctrl+Z (everywhere
   /// else) undoes through the command log. There is no redo in 02.
@@ -87,7 +118,10 @@ class _PlannerShellState extends State<PlannerShell> {
   @override
   void dispose() {
     _tools.dispose();
+    _grips.dispose();
+    _outlines.dispose();
     _selection.dispose();
+    _snap.dispose();
     _page.dispose();
     _camera.dispose();
     _index.dispose();
@@ -103,6 +137,9 @@ class _PlannerShellState extends State<PlannerShell> {
         bindings: <ShortcutActivator, VoidCallback>{
           const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _undo,
           const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
+          // Spec 03 D10: one toggle per press, never per key repeat.
+          const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false):
+              _snap.toggleObjectSnap,
         },
         child: Column(
           children: [
@@ -120,6 +157,13 @@ class _PlannerShellState extends State<PlannerShell> {
                           Text(_statusLine(), key: const Key('status-text')),
                     ),
                     const Spacer(),
+                    ListenableBuilder(
+                      listenable: _snap,
+                      builder: (_, __) => Text(
+                          _snap.objectSnap ? 'OSNAP' : 'osnap off',
+                          key: const Key('osnap-text')),
+                    ),
+                    const SizedBox(width: 16),
                     ListenableBuilder(
                       listenable: Listenable.merge([_camera, _page]),
                       builder: (_, __) =>
@@ -148,6 +192,8 @@ class _PlannerShellState extends State<PlannerShell> {
                         policy: _policy,
                         selection: _selection,
                         tools: _tools,
+                        outlines: _outlines,
+                        grips: _grips,
                       ),
                     ),
                   ),
