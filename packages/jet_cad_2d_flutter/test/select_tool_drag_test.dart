@@ -18,6 +18,7 @@ import 'package:jet_cad_2d_flutter/src/grip_cache.dart';
 import 'package:jet_cad_2d_flutter/src/grip_drag.dart';
 import 'package:jet_cad_2d_flutter/src/select_tool.dart';
 import 'package:jet_cad_2d_flutter/src/selection.dart';
+import 'package:jet_cad_2d_flutter/src/selection_style.dart';
 import 'package:jet_cad_2d_flutter/src/tool.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -42,6 +43,19 @@ void expectMovedBy(
 Vector2 rotatedAbout(double x, double y, Vector2 p, double theta) => Vector2(
     p.x + math.cos(theta) * (x - p.x) - math.sin(theta) * (y - p.y),
     p.y + math.sin(theta) * (x - p.x) + math.cos(theta) * (y - p.y));
+
+/// Exact: a box is a stored value (CLAUDE.md), and `Aabb2` has no `==`.
+void expectBox(Aabb2 got, Aabb2 want, String reason) => expect([
+      got.minX,
+      got.minY,
+      got.maxX,
+      got.maxY
+    ], [
+      want.minX,
+      want.minY,
+      want.maxX,
+      want.maxY
+    ], reason: reason);
 
 double normalised(double a) =>
     a > math.pi ? a - 2 * math.pi : (a <= -math.pi ? a + 2 * math.pi : a);
@@ -691,5 +705,175 @@ void main() {
     // The captured pointer's up still reaches the unmounted layer's
     // Listener callback; the idle tool ignores it.
     await gesture.up();
+  });
+
+  group('the oriented selection box (spec D6, amended after the look)', () {
+    test(
+        'two rotations equal one of their sum: the pivot does not drift '
+        '(M-RFa)', () async {
+      // A re-wrapped world box's centre moves under a rotation of this
+      // triangle, so a second rotation about it lands elsewhere.
+      for (final (t1, t2) in const [(0.5, 0.5), (-0.9, 0.4), (1.2, 1.5)]) {
+        final (twice, h1) = triangleDoc();
+        final a = gripRig(twice);
+        a.selection.replace([k(h1)]);
+        rotateBy(a, t1);
+        // The DocChange reaches the caches a microtask later; a user's
+        // second press always comes after it.
+        await Future<void>.delayed(Duration.zero);
+        rotateBy(a, t2);
+        final (once, h2) = triangleDoc();
+        final b = gripRig(once);
+        b.selection.replace([k(h2)]);
+        rotateBy(b, t1 + t2);
+        final pa = payloadOf(twice, h1), pb = payloadOf(once, h2);
+        for (var i = 0; i < pa.coords.length; i++) {
+          expect(pa.coords[i], closeTo(pb.coords[i], 1e-9),
+              reason: '$t1 + $t2, coordinate $i');
+        }
+      }
+    });
+
+    test(
+        'after a rotation the grip rides the frame, under both cameras '
+        '(M-RFc, M-RFd, M-RFe, M-RFn)', () async {
+      // The unflipped camera exposes an `m.b`/`m.c` transposition that the
+      // flipped one's `b == c` hides, and puts the top edge at local minY.
+      for (final flipY in const [true, false]) {
+        final (doc, h) = triangleDoc();
+        final rig = gripRig(doc, camera: gripCamera(flipY: flipY));
+        rig.selection.replace([k(h)]);
+        final before = rig.grips.box!;
+        final pivot = rig.grips.pivot!.clone();
+        rotateBy(rig, 0.7);
+        await Future<void>.delayed(Duration.zero);
+        final frame = rig.grips.frame;
+        expect(frame.isIdentity, isFalse, reason: 'flipY $flipY');
+        expectBox(rig.grips.box!, before,
+            'the box is carried, not re-wrapped (flipY $flipY)');
+        expect(rig.grips.pivot!.x, closeTo(pivot.x, 1e-9));
+        expect(rig.grips.pivot!.y, closeTo(pivot.y, 1e-9));
+        final want = orientedGripOracle(rig.camera, before, frame);
+        final got = rotationGripOf(
+            rig.grips.box!, rig.camera.value.worldToScreenMatrix, frame);
+        for (final (g, w) in [
+          (got.anchor, want.anchor),
+          (got.centre, want.centre),
+          (got.stem, want.stem),
+        ]) {
+          expect(g.dx, closeTo(w.dx, 1e-9), reason: 'flipY $flipY');
+          expect(g.dy, closeTo(w.dy, 1e-9), reason: 'flipY $flipY');
+        }
+        final screenUp = (want.centre - want.anchor) / kRotationGripOffset;
+        expect(screenUp.dy, greaterThan(-0.99),
+            reason: 'not screen-up: the frame turned (flipY $flipY)');
+        expect(
+            rig.grips.hitsRotationGrip(
+                want.centre, rig.camera.value.worldToScreenMatrix),
+            isTrue);
+      }
+    });
+
+    test(
+        'a move carries the rotated frame along, and the pivot with it '
+        '(M-RFb, M-RFf, M-RFr)', () async {
+      // A pure rotation fixes its own pivot, so only a move can tell the
+      // frame's centre from the untransformed box's.
+      final (doc, h) = triangleDoc();
+      final rig = gripRig(doc);
+      rig.selection.replace([k(h)]);
+      rotateBy(rig, 0.7);
+      await Future<void>.delayed(Duration.zero);
+      final pivot = rig.grips.pivot!.clone();
+      final grip = rotationGripNow(rig);
+      // 30% along the rotated triangle's first edge: its body, and no snap
+      // point (object snap is off in the rig anyway).
+      final c = payloadOf(doc, h).coords;
+      final on = screenOf(
+          rig.camera, c[0] + 0.3 * (c[2] - c[0]), c[1] + 0.3 * (c[3] - c[1]));
+      const delta = Offset(37, -21);
+      // Ruling 03-13: the up carries the final position, so it lands away
+      // from the last move and the carried `T` must be the up's.
+      pressAndMove(rig, on, on + const Offset(20, -5));
+      expect(rig.tool.dragKind, DragKind.move);
+      release(rig, on + delta);
+      await Future<void>.delayed(Duration.zero);
+      final d = worldOf(rig, on + delta) - worldOf(rig, on);
+      expect(rig.grips.frame.isIdentity, isFalse);
+      expect(rig.grips.pivot!.x, closeTo(pivot.x + d.x, 1e-9));
+      expect(rig.grips.pivot!.y, closeTo(pivot.y + d.y, 1e-9));
+      final moved = rotationGripNow(rig);
+      expect(moved.dx, closeTo(grip.dx + delta.dx, 1e-9));
+      expect(moved.dy, closeTo(grip.dy + delta.dy, 1e-9));
+    });
+
+    test(
+        'undo, a reshape and a new selection fold the frame back into the '
+        'world box (M-RFg)', () async {
+      final (doc, h) = triangleDoc();
+      final other = addEntity(
+          doc, doc.rootHandle, EntityKind.line, [7300, 3300, 7350, 3320], []);
+      final rig = gripRig(doc);
+      rig.selection.replace([k(h)]);
+      final world = rig.grips.box!;
+
+      rotateBy(rig, 0.7);
+      await Future<void>.delayed(Duration.zero);
+      expect(rig.grips.frame.isIdentity, isFalse);
+      doc.commands.undo();
+      await Future<void>.delayed(Duration.zero);
+      expect(rig.grips.frame.isIdentity, isTrue, reason: 'undo');
+      expectBox(rig.grips.box!, world, 'undo');
+
+      rotateBy(rig, 0.7);
+      await Future<void>.delayed(Duration.zero);
+      rig.selection.replace([k(other)]);
+      rig.selection.replace([k(h)]);
+      expect(rig.grips.frame.isIdentity, isTrue, reason: 'a new selection');
+
+      rotateBy(rig, 0.7);
+      await Future<void>.delayed(Duration.zero);
+      final c = payloadOf(doc, h).coords;
+      final vertex = screenOf(rig.camera, c[2], c[3]);
+      pressAndMove(rig, vertex, vertex + const Offset(15, 9));
+      expect(rig.tool.dragKind, DragKind.reshape);
+      release(rig, vertex + const Offset(15, 9));
+      await Future<void>.delayed(Duration.zero);
+      expect(rig.grips.frame.isIdentity, isTrue, reason: 'a reshape');
+      expectBox(rig.grips.box!, rig.outlines.worldBoundsOf(k(h))!, 'a reshape');
+    });
+
+    test(
+        'a move of an unrotated selection keeps the world box, not a '
+        'translated frame (M-RFh)', () async {
+      final (doc, h) = triangleDoc();
+      final rig = gripRig(doc);
+      rig.selection.replace([k(h)]);
+      final on = screenOf(rig.camera, 7010 + 0.3 * 120, 3020);
+      pressAndMove(rig, on, on + const Offset(40, 25));
+      release(rig, on + const Offset(40, 25));
+      await Future<void>.delayed(Duration.zero);
+      expect(rig.grips.frame.isIdentity, isTrue);
+      expectBox(rig.grips.box!, rig.outlines.worldBoundsOf(k(h))!, 'a move');
+    });
+
+    test(
+        'a carry whose command throws is dropped: the next undo still '
+        'folds back (M-RFq)', () async {
+      final (doc, h) = triangleDoc();
+      final rig = gripRig(doc);
+      rig.selection.replace([k(h)]);
+      rotateBy(rig, 0.7);
+      await Future<void>.delayed(Duration.zero);
+      final guard = doc.commands.onBeforeMutate;
+      doc.commands.onBeforeMutate = () => throw StateError('refused');
+      expect(() => rotateBy(rig, 0.4), throwsStateError);
+      doc.commands.onBeforeMutate = guard;
+      await Future<void>.delayed(Duration.zero);
+      doc.commands.undo();
+      await Future<void>.delayed(Duration.zero);
+      expect(rig.grips.frame.isIdentity, isTrue);
+      expectBox(rig.grips.box!, rig.outlines.worldBoundsOf(k(h))!, 'undo');
+    });
   });
 }

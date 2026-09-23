@@ -258,14 +258,14 @@ class SelectTool extends Tool {
         grips.hot = index;
         _enter(drag, e, ctx);
       case PressClass.rotationGrip:
-        final box = ctx.grips!.box;
-        if (box == null) {
+        // The oriented box's centre, so consecutive rotations share a
+        // pivot (spec D6, amended after the look).
+        final pivot = ctx.grips!.pivot;
+        if (pivot == null) {
           // The selection emptied inside the slop: nothing to rotate.
           _clickOnly = true;
           return;
         }
-        final pivot =
-            Vector2((box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2);
         final drag = GripDrag.rotate(
             ctx.document, ctx.selection.keys, pivot, _pressWorld);
         if (!_permitted(drag, ctx)) {
@@ -399,12 +399,23 @@ class SelectTool extends Tool {
           // Ruling 03-13: the up carries the final position.
           _follow(e, ctx);
           final command = _drag!.command(ctx.document.commands.permissions);
+          final t = _drag!.transform;
           _endDrag(ctx);
           _reset();
           notifyListeners();
           // Spec D4: one command or none — never one per move
           // (invariant 1).
-          if (command != null) ctx.execute(command);
+          if (command != null) {
+            // A move or rotate carries the oriented box along (spec D6,
+            // amended after the look); a reshape's `transform` is null.
+            if (t != null) ctx.grips?.carry(t);
+            try {
+              ctx.execute(command);
+            } catch (_) {
+              ctx.grips?.dropCarry();
+              rethrow;
+            }
+          }
           return;
         }
     }

@@ -258,4 +258,34 @@ void main() {
     expect(g.centre.dx, closeTo(g.anchor.dx, 1e-12));
     expect(g.centre.dy, closeTo(minY - kRotationGripOffset, 1e-9));
   });
+
+  test(
+      'a carry pending when the selection changes is dropped, not applied '
+      'to the new selection (M-RFk)', () {
+    final s = gripScene();
+    final doc = s.document;
+    final (selection, outlines, grips) = wire(doc);
+    selection.replace([k(s.line)]);
+    grips.carry(Transform2.rotation(0.4));
+    selection.replace([k(s.room)]);
+    expect(grips.frame.isIdentity, isTrue);
+    final room = outlines.worldBoundsOf(k(s.room))!;
+    expect([grips.box!.minX, grips.box!.maxY], [room.minX, room.maxY]);
+  });
+
+  test(
+      'an unrotated frame places the grip exactly as D6 does, with the '
+      "stem to the disc's rim (M-RFl)", () {
+    final camera = gripCamera(flipY: false);
+    addTearDown(camera.dispose);
+    final m = camera.value.worldToScreenMatrix;
+    const box = Aabb2.raw(7010, 3020, 7130, 3060);
+    final plain = rotationGripOf(box, m);
+    final moved = rotationGripOf(const Aabb2.raw(6970, 3000, 7090, 3040), m,
+        Transform2.translation(40, 20));
+    expect(moved.centre.dx, closeTo(plain.centre.dx, 1e-9));
+    expect(moved.centre.dy, closeTo(plain.centre.dy, 1e-9));
+    expect(plain.stem.dx, plain.centre.dx);
+    expect(plain.stem.dy, plain.centre.dy + kRotationGripPixels / 2);
+  });
 }
