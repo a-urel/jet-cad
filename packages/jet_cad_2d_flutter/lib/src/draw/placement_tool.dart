@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/services.dart'
     show
+        HardwareKeyboard,
         KeyDownEvent,
         KeyEvent,
         KeyRepeatEvent,
@@ -179,10 +180,25 @@ abstract class PlacementTool extends Tool {
         notifyListeners();
         return KeyEventResult.handled;
       }
+      // Ruling F-2 (spec 05 D3, amended at execution): F3 (object snap) and
+      // F (Fill), with no modifier held, bubble to the shell even mid-shape.
+      // Neither ever touches the document, so the reason D3 swallows every
+      // other key-down -- keeping undo and redo off a half-placed shape --
+      // does not apply to them, and F3 is otherwise unreachable while a
+      // polyline is pending.
+      if ((key == LogicalKeyboardKey.f3 || key == LogicalKeyboardKey.keyF) &&
+          !_hasModifier()) {
+        return KeyEventResult.ignored;
+      }
     }
     // Every other key-down and repeat mid-shape: undo and redo never land
     // on a half-placed shape (spec 05 D3, as 03 D5 during a drag).
     return KeyEventResult.handled;
+  }
+
+  static bool _hasModifier() {
+    final hw = HardwareKeyboard.instance;
+    return hw.isControlPressed || hw.isMetaPressed || hw.isAltPressed;
   }
 
   /// Every cancel path (Escape, `ToolController.activate`, the layer's

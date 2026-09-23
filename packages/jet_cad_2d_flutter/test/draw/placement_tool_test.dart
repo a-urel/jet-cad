@@ -25,6 +25,10 @@ Handle newest(DraftDocument doc) =>
             : b));
 
 void main() {
+  // B10 reads HardwareKeyboard.instance (Ruling F-2), which needs a bound
+  // ServicesBinding even though every test here is a plain unit test.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   for (final flipY in const [true, false]) {
     group('flipY $flipY', () {
       test('B1 a point is the layer\'s world point, not the screen (M-05a)',
@@ -196,6 +200,24 @@ void main() {
         worldToScreenMatrix: Transform2.translation(5, 5)
             .multiply(rig.camera.value.worldToScreenMatrix));
     expect(notified, 0, reason: 'the camera listener is detached');
+  });
+
+  test(
+      'B10 F3 and F bubble to the shell mid-shape; the shape stays '
+      'pending (Ruling F-2)', () {
+    final s = drawScene();
+    final rig = drawRig(s.document, LineTool());
+    clickAt(rig, screenOf(rig.camera, 7010, 3020));
+    expect(rig.tool.isPending, isTrue);
+    expect(keyDown(rig, LogicalKeyboardKey.f3, PhysicalKeyboardKey.f3),
+        KeyEventResult.ignored);
+    expect(rig.tool.isPending, isTrue);
+    expect(keyDown(rig, LogicalKeyboardKey.keyF, PhysicalKeyboardKey.keyF),
+        KeyEventResult.ignored);
+    expect(rig.tool.isPending, isTrue);
+    // Every other key-down mid-shape still stays swallowed (B5).
+    expect(keyDown(rig, LogicalKeyboardKey.keyZ, PhysicalKeyboardKey.keyZ),
+        KeyEventResult.handled);
   });
 
   test(

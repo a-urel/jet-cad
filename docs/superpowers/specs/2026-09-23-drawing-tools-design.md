@@ -308,6 +308,18 @@ class PlacementTool extends Tool`.
    false, the shape is dropped and nothing is dispatched.
 2. Otherwise the command goes to `ctx.execute`.
 
+**Amended at execution (Plan 05, final review):** Ruling F-2. A key-down
+of `LogicalKeyboardKey.f3` or `LogicalKeyboardKey.keyF`, with no control,
+meta or alt modifier held (`HardwareKeyboard.instance`), returns
+`KeyEventResult.ignored` even while a shape is pending, instead of the
+`handled` this section's "every other key-down" rule would otherwise give
+it. Both bubble to the shell, which toggles object snap (F3) or Fill (F);
+neither ever touches the document, so the reason the rule swallows every
+other key-down — keeping undo and redo off a half-placed shape — does not
+apply to them. Without this, F3 (the only object-snap toggle) was
+unreachable while a polyline was pending. Every other key-down mid-shape,
+and both undo keys, stay swallowed exactly as this section says.
+
 ### D4 — Resolving a point
 
 A raw world point `raw` from a `ToolPointerEvent` resolves **in exactly

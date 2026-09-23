@@ -389,4 +389,24 @@ void main() {
     expect((view.tools.active as TextTool).pending.value, isNull);
     expect(bytes(view), before);
   });
+
+  testWidgets(
+      'A16 F3 mid-polyline flips OSNAP and keeps the shape pending '
+      '(Ruling F-2)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    await press(tester, LogicalKeyboardKey.keyP);
+    await tester.tapAt(globalOf(tester, view, 7010, 3020));
+    await tester.tapAt(globalOf(tester, view, 7060, 3090));
+    await tester.pump();
+    final polyline = view.tools.active as PolylineTool;
+    expect(polyline.isPending, isTrue);
+    String osnapText() =>
+        tester.widget<Text>(find.byKey(const Key('osnap-text'))).data!;
+    expect(osnapText(), 'OSNAP');
+    await press(tester, LogicalKeyboardKey.f3);
+    expect(osnapText(), 'osnap off',
+        reason: 'the tool ignores F3, so it reaches the shell');
+    expect(status(tester), 'Polyline');
+    expect(polyline.isPending, isTrue);
+  });
 }
