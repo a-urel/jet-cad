@@ -1267,9 +1267,10 @@ into a standing test. Full account:
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and **GPU Plans A, B, C and D** merged |
 | `.claude/worktrees/plan-03-grips-and-transform` | `plan-03/grips-and-transform` | **this plan (sub-project 03)**, cut from `main` at `e376ced`: executed, final fix wave on top, awaiting its re-review, the ledger archive and the human's merge decision |
 | `.claude/worktrees/focused-nightingale-510bd1` | `fix/page-copywith-num` | head `8385753`, cut from `main` at `e376ced`: the `PageComponent.copyWith(gridStepMm: <int>)` fix. Committed, not merged. Another session's work |
+| `.claude/worktrees/quizzical-jemison-7537de` | `fix/grip-camera-bc-swap` | cut from `plan-03/grips-and-transform` at `66ed4c2`, so it merges after Plan 03. It gives six grip/overlay tests a `gripCamera(flipY: false)` pass and gives P4 an independent oracle. Seven b/c-transposition mutants were fired, M-03bm … M-03bs, and all were killed ([log](docs/superpowers/notes/2026-09-23-grip-camera-bc-swap-mutation-log.md)). Tests and docs only. Committed, not merged |
 | `.claude/worktrees/hungry-haibt-cf67c0` | `fix/root-transform-identity` | head `776f201`, cut from `main` at `c09b747`, before the Plan 03 plan commit: pins the root's transform to the identity. Committed, not merged. Another session's work |
 
-**Three worktrees are in flight** (checked with `git worktree list` and
+**Four worktrees are in flight** (checked with `git worktree list` and
 `git log --oneline -1 <branch>` on 2026-09-23). Plan 03 neither merges nor
 touches the two fix branches (Ruling F-b).
 
