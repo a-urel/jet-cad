@@ -36,6 +36,10 @@ void main() {
     expect(BoxParams.fromJson(p.toJson()), p);
     expect(p.copyWith(height: 5), const BoxParams(1200, 5));
     expect(p.typeId, 'floor_planner.box');
+    expect(const BoxParams(1200, 800) == const BoxParams(1200, 801), isFalse);
+    expect(const BoxParams(1200, 800) == const BoxParams(1201, 800), isFalse);
+    expect(const BoxParams(1200, 800).hashCode,
+        const BoxParams(1200, 800).hashCode);
   });
 
   test('BT2 an isolated box is four lines at its corners', () {
