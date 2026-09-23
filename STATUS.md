@@ -4,17 +4,20 @@
 `plan-05/drawing-tools`, cut from `main` at `7dac3b5`, and NOT MERGED.**
 Eleven tasks: Tasks 1–8 at `7dac3b5..c4fcac4`, Task 9 at `6d98d72..5c55000`,
 Task 10 (the mutation sweep's invariants and greps) at `3957d52`, and Task
-11 (Ruling T11-a) runs
-in two parts — Steps 1–4 (the results note, the spec amendments, this file
-and the roadmap) land in this commit; the final whole-branch review and its
-fix wave come next, and the ledger archive is deferred to the branch's last
-commit before the merge. The exit gate is **13 of 14**: the four gate lines
-are green (engine 911; render layer 911 + 1 skip + the five standing text
-goldens; harness 82; app 43; both release builds `✓ Built`), 27 mutants
-fired and 27 killed (26 named plus M-05w′), and criterion 14 — a human's
-look, on macOS, in Chrome and in Firefox from `build/web` — is **OWED: not
-looked at; the human looks after this branch is presented.** Nothing was
-simulated to fill it in. **No merge decision has been made.** See
+11 (Ruling T11-a) runs in two parts — Steps 1–4 landed at `d45b5d7`. **The
+final whole-branch review then ran and returned "With fixes"; its fix
+wave** (Rulings F-1, F-2, F-3 and F-6, all four confirmed addressed by a
+scoped re-review) **landed at `1d80caf..f8b4269`, and this closing docs
+commit (Ruling F-7) records the gate at that final tree.** The ledger
+archive is the branch's last commit, next. The exit gate is **13 of 14**:
+the four gate lines are green (engine 911; render layer 913 + 1 skip + the
+five standing text goldens; harness 82; app 45; both release builds
+`✓ Built`), 30 mutants fired and 30 killed (26 named plus M-05w′, M-05aa,
+M-05ab and the F-3 kill), and criterion 14 — a human's look, on macOS, in
+Chrome and in Firefox from `build/web` — is **OWED: not looked at; the
+human looks after this branch is presented.** Nothing was simulated to
+fill it in. **The final review and its fix wave are done; next are the
+human's look and the merge decision.** See
 [Plan 05](#plan-05--drawing-tools-executed-on-plan-05drawing-tools-not-merged)
 and [Resume here](#resume-here).
 Earlier the same day: **Plan 03 (grips and transform) is MERGED
@@ -198,23 +201,27 @@ app.
 - Task 10 (the mutation sweep's invariants and greps, appended to the
   mutation log) is at `3957d52`;
 - Task 11 runs in two parts (Ruling T11-a): Steps 1–4 (this section, the
-  results note, the spec amendments and the roadmap) land now; the final
-  whole-branch review and its fix wave come next, and the ledger archive
-  is the branch's last commit before the merge.
+  results note, the spec amendments and the roadmap) landed at `d45b5d7`;
+  the final whole-branch review then ran and returned "With fixes", and
+  its fix wave (Rulings F-1, F-2, F-3 and F-6) landed at
+  `1d80caf..f8b4269`; this closing docs commit (Ruling F-7) records the
+  gate at that final tree, and the ledger archive is the branch's last
+  commit, next.
 
-**EXECUTED, NOT MERGED.** No human's look has happened and no merge
-decision has been made.
+**EXECUTED, NOT MERGED.** The final review and its fix wave are done. No
+human's look has happened and no merge decision has been made.
 
 **Documents:**
 - Spec: [2026-09-23-drawing-tools-design.md](docs/superpowers/specs/2026-09-23-drawing-tools-design.md),
-  revision 2, amended at execution in five places (D4, D5, D8/the
+  revision 2, amended at execution in six places (D3, D4, D5, D8/the
   differential, D9, Testing), none rewriting the original text.
 - Plan: [2026-09-23-drawing-tools.md](docs/superpowers/plans/2026-09-23-drawing-tools.md).
 - Results: [2026-09-23-plan-05-results.md](docs/superpowers/notes/2026-09-23-plan-05-results.md).
 - Mutation log: [plan-05-mutation-log.md](docs/superpowers/notes/plan-05-mutation-log.md).
-  **27 fired, 27 killed, 0 survived, 0 equivalent** — 26 named mutants plus
+  **30 fired, 30 killed, 0 survived, 0 equivalent** — 26 named mutants plus
   M-05w′, a reviewer-noted second form of M-05w that first survived and
-  was killed after a test-only fixture fix (Ruling T9-a).
+  was killed after a test-only fixture fix (Ruling T9-a), plus M-05aa,
+  M-05ab and the F-3 kill from the final whole-branch review's fix wave.
 
 **Delivered:**
 - **In `jet_cad_2d`:** `document/drafting.dart`'s builders
@@ -251,7 +258,9 @@ interaction_layer.dart`, empty.
 | 8 | the sample plan's furniture as filled regions | `c4fcac4` |
 | 9 | the mutation sweep (+ fix round `5c55000`: PL8's fixture, M-05w′ killed) | `5c55000` |
 | 10 | the invariants and the greps | `3957d52` |
-| 11 (Steps 1–4) | gate lines, results note, spec amendments, STATUS, roadmap | this commit |
+| 11 (Steps 1–4) | gate lines, results note, spec amendments, STATUS, roadmap | `d45b5d7` |
+| final fix wave | the final whole-branch review's findings: furniture moved clear of every door's leaf and swing (F-1, `1d80caf`), F3/F bubble to the shell mid-shape (F-2, `eb6efba`), a returning tool no longer paints a stale snap marker (F-3, `89c8051`), and doc slips fixed (F-6, `f8b4269`) | `1d80caf..f8b4269` |
+| 11 (this commit) | the closing gate at the final tree, the results note, STATUS and the roadmap (Ruling F-7) | this commit |
 
 **Rulings a reader must know.**
 - **`SweepTracker`'s accumulated travel is never clamped** (Ruling 05-1);
@@ -261,7 +270,9 @@ interaction_layer.dart`, empty.
   endpoint marker (Ruling 05-2).
 - **Every key-down mid-shape is swallowed** (Ruling T7-a): a tool
   shortcut does not switch tools while a shape is pending; Escape or the
-  palette does.
+  palette does. **F3 and F are the exception** (Ruling F-2, final review):
+  with no modifier held, both return `ignored` mid-shape and bubble to the
+  shell, since neither ever touches the document (spec D3 amended).
 - **A loss of focus cancels a pending text only when it happens inside
   the app** (Ruling T7-b): a window switch does not, because a `null`
   lifecycle state (before the first lifecycle message, and what
@@ -273,21 +284,22 @@ interaction_layer.dart`, empty.
 - **Commit trailers name the model that actually wrote the commit**
   (Ruling P-6, inherited from Plan 03's T2-a).
 
-The full list, 05-1…05-15 and every controller ruling, each with its cost
-if wrong, is in the results note.
+The full list, 05-1…05-15, every controller ruling, and the final
+whole-branch review's F-1…F-10, each with its cost if wrong, is in the
+results note.
 
 ### What Plan 05 measured
 
 | quantity | value |
 |---|---|
 | `packages/jet_cad_2d` | **911** pass (`00:03 +911: All tests passed!`, exit 0), analyze and format clean. 894 at the branch point, `+10` (E) `+7` (S), exactly the plan's own sum |
-| `packages/jet_cad_2d_flutter` | **911** pass, 1 skip, and only the five pre-existing `text_ladder_golden_test.dart` failures (`00:12 +911 ~1 -5: Some tests failed.`, exit 1), analyze and format clean. 854 at the branch point, `+57` net across Tasks 3–6 (the plan did not sum this suite in advance) |
+| `packages/jet_cad_2d_flutter` | **913** pass, 1 skip, and only the five pre-existing `text_ladder_golden_test.dart` failures (`00:13 +913 ~1 -5: Some tests failed.`, exit 1), analyze and format clean. 854 at the branch point, `+57` net across Tasks 3–6, `+2` from the final fix wave (`B10`, `B11`) |
 | `apps/dev_harness_2d` | **82** (`00:19 +82: All tests passed!`, exit 0), unchanged — no task touches the harness; analyze and format clean |
-| `apps/floor_planner` | **43** (`00:03 +43: All tests passed!`, exit 0). 26 at the branch point, `+15` (Task 7's A1–A15, 3 over the plan's 12 because A13–A15 were added in review) `+2` (Task 8's SP1–SP2). `flutter build macos --release` and `flutter build web --release` both `✓ Built` |
-| mutations | **27 fired, 27 killed, 0 survived, 0 equivalent** — 26 named (M-05a…M-05z) plus M-05w′, killed after Task 9's fix round changed PL8's fixture (Ruling T9-a) |
+| `apps/floor_planner` | **45** (`00:03 +45: All tests passed!`, exit 0). 26 at the branch point, `+15` (Task 7's A1–A15, 3 over the plan's 12 because A13–A15 were added in review) `+2` (Task 8's SP1–SP2), `+2` from the final fix wave (`A16`, `SP3`). `flutter build macos --release` and `flutter build web --release` both `✓ Built` |
+| mutations | **30 fired, 30 killed, 0 survived, 0 equivalent** — 26 named (M-05a…M-05z) plus M-05w′, killed after Task 9's fix round changed PL8's fixture (Ruling T9-a), plus M-05aa, M-05ab and the F-3 kill from the final fix wave |
 | the differential (criterion 8) | `SWEEP differential: checked 500, skipped 0` — seed `0x5EED0005`, 500 trials, sign exact, magnitude within `Tolerance.standard.angular` |
 | the two allocation invariants | `query_allocation_test.dart` and `paint_allocation_test.dart` are green and unedited (Task 10) |
-| the look | **ten items per platform, OWED — not looked at.** The results note itemises them for macOS, Chrome and Firefox |
+| the look | **fourteen items per platform, OWED — not looked at.** The results note itemises them for macOS, Chrome and Firefox |
 
 **Exit gate: 13 of 14.** Criteria 1–13 all PASS, each with its witness in
 the results note. Criterion 14 is OWED and this task does not mark it
@@ -298,7 +310,14 @@ done.
 - no fill preview — the rubber band shows the outline only, by spec D13;
 - the app camera in `planner_grips_test.dart` is still a reflection,
   inherited unchanged from Plan 03;
-- the sample-plan count's margin is 9 above the 500 floor (Ruling 05-12).
+- the sample-plan count's margin is 9 above the 500 floor (Ruling 05-12);
+- a platform pointer-cancel drops the whole pending shape through 02's
+  frozen API (Ruling F-4, final review);
+- the counter's new top leg sits across the kitchen/living doorway (Ruling
+  F-8, final review; look item 14; suggested fix in the results note);
+- the modifier guard in `PlacementTool.onKey` (F3/F, Ruling F-2) is
+  untested — a mutant dropping `&& !_hasModifier()` survives (Ruling F-9,
+  final review).
 
 ---
 
@@ -1434,7 +1453,7 @@ into a standing test. Full account:
 | Location | Branch | State |
 |---|---|---|
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i, **GPU Plans A, B, C and D**, and product Plans 01/02/03/04 merged |
-| `.claude/worktrees/quizzical-jemison-7537de` | `plan-05/drawing-tools` | **EXECUTED, NOT MERGED.** Cut from `main` at `7dac3b5`. Tasks 1–10 at `7dac3b5..3957d52`; Task 11 Steps 1–4 on top. The final whole-branch review is next, then the ledger archive, then the human's merge decision. This worktree previously hosted `fix/grip-camera-bc-swap` (Ruling P-1: this session's worktree hosts whatever branch it is dispatched to work on), which is merged at `9212793` and whose local branch can be deleted once no longer wanted |
+| `.claude/worktrees/quizzical-jemison-7537de` | `plan-05/drawing-tools` | **EXECUTED, NOT MERGED.** Cut from `main` at `7dac3b5`. Tasks 1–10 at `7dac3b5..3957d52`; Task 11 Steps 1–4 at `d45b5d7`; the final whole-branch review returned "With fixes" and its fix wave landed at `1d80caf..f8b4269`; this closing docs commit records the gate at that final tree. The ledger archive is the branch's last commit, next, then the human's look and the merge decision. This worktree previously hosted `fix/grip-camera-bc-swap` (Ruling P-1: this session's worktree hosts whatever branch it is dispatched to work on), which is merged at `9212793` and whose local branch can be deleted once no longer wanted |
 
 **Plan 05 is in flight, on the branch and worktree above.** Plan 03
 (`c5173e0`) and its three fix branches (`59e3811`, `9212793`, `7c96e11`)
@@ -1588,17 +1607,18 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: Plan 05 (drawing tools).** Steps 1–4 of Task 11 are
-done (this section, the results note, the spec amendments and the
-roadmap), on `plan-05/drawing-tools`, cut from `main` at `7dac3b5`, at
-`3957d52` plus this commit. **What resumes here is the final whole-branch
-review**, over the whole diff `7dac3b5..HEAD`; its fix wave (if any) comes
-next; then the ledger archive
+**Immediate next step: Plan 05 (drawing tools).** All eleven tasks are done
+on `plan-05/drawing-tools`, cut from `main` at `7dac3b5`: Task 11's Steps
+1–4 landed at `d45b5d7`, **the final whole-branch review then ran and
+returned "With fixes"**, and its fix wave — Rulings F-1, F-2, F-3 and F-6,
+all four confirmed addressed by a scoped re-review — landed at
+`1d80caf..f8b4269`. This closing docs commit (Ruling F-7) records the gate
+at that final tree. **What resumes here is the ledger archive**
 (`docs/superpowers/ledgers/2026-09-23-drawing-tools/`) as the branch's last
-commit before the merge (Ruling T11-a, following Plan 03's own order).
-**The merge is the human's decision**, and criterion 14 (a human's look, on
-macOS, in Chrome and in Firefox from `build/web`) is still OWED after that
-— nothing was simulated to fill it in. See
+commit (Ruling T11-a, following Plan 03's own order); **then the human's
+look and the merge decision**. Criterion 14 (a human's look, on macOS, in
+Chrome and in Firefox from `build/web`, fourteen items per platform) is
+still OWED — nothing was simulated to fill it in. See
 [Plan 05](#plan-05--drawing-tools-executed-on-plan-05drawing-tools-not-merged)
 and [2026-09-23-plan-05-results.md](docs/superpowers/notes/2026-09-23-plan-05-results.md).
 

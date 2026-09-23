@@ -8,16 +8,17 @@
 `.claude/worktrees/quizzical-jemison-7537de`, cut from `main` at `7dac3b5`.
 **Eleven tasks: Tasks 1–8 at `7dac3b5..c4fcac4`; Task 9 at
 `6d98d72..5c55000`; Task 10 (the mutation sweep's invariants and greps,
-appended to the mutation log) at `3957d52`;
-Task 11 runs in two parts (Ruling T11-a) — Steps 1–4 (this note, the spec
-amendments, STATUS and the roadmap) are this commit, and the ledger archive
-is deferred to after the final whole-branch review and its fix wave, as the
-branch's last commit before the merge.**
+appended to the mutation log) at `3957d52`; Task 11 runs in two parts
+(Ruling T11-a) — Steps 1–4 landed at `d45b5d7`. The final whole-branch
+review then ran and returned "With fixes"; its fix wave — Rulings F-1,
+F-2, F-3 and F-6, all four confirmed addressed by a scoped re-review —
+landed at `1d80caf..f8b4269`. This closing docs commit (Ruling F-7)
+records the gate at that final tree.**
 **Ledger (per-task briefs, reports, mutation backups, every ruling):**
 `.superpowers/sdd/2026-09-23-drawing-tools/` (git-ignored while the plan is
 in flight; archived to
-`docs/superpowers/ledgers/2026-09-23-drawing-tools/` before the merge,
-Ruling T11-a).
+`docs/superpowers/ledgers/2026-09-23-drawing-tools/` as the branch's last
+commit, Ruling T11-a).
 
 ---
 
@@ -131,20 +132,109 @@ step. The branch's commit trailers were also checked in the same run
 log --format=%B 7dac3b5..HEAD | grep -c "Co-Authored-By: Claude"` also
 printed **13** — one trailer per commit, none missing.
 
+### Gate lines on the final tree (after the final fix wave, `f8b4269`)
+
+Run in full on `f8b4269`, `git status --short` clean before and after, for
+this closing docs commit (Ruling F-7). This is the tree exit criterion 13
+is witnessed against — Task 10's run above, on `3957d52`, is kept as
+history and predates the final review's fix wave. Every summary line below
+is what the command printed.
+
+**`packages/jet_cad_2d`**: `CI=true dart test`:
+
+```
+00:03 +911: test/invariants/query_allocation_test.dart: (tearDownAll)
+00:03 +911: All tests passed!
+```
+
+Exit 0. `dart analyze`: `Analyzing jet_cad_2d... No issues found!` Exit 0.
+`dart format --output=none --set-exit-if-changed .`: `Formatted 133 files
+(0 changed) in 0.24 seconds.` Exit 0.
+
+**`packages/jet_cad_2d_flutter`**: `CI=true flutter test`:
+
+```
+00:13 +913 ~1 -5: Some tests failed.
+
+Failing tests:
+  .../test/golden/text_ladder_golden_test.dart: text ladder rung 1 (RenderBackend.canvas)
+  .../test/golden/text_ladder_golden_test.dart: text ladder rung 2 (RenderBackend.canvas)
+  .../test/golden/text_ladder_golden_test.dart: text ladder rung 3 (RenderBackend.canvas)
+  .../test/golden/text_ladder_golden_test.dart: text ladder rung 4 (RenderBackend.canvas)
+  .../test/golden/text_ladder_golden_test.dart: text ladder rung 5 (RenderBackend.canvas)
+```
+
+Exit 1. **913 pass, 1 pre-existing skip, and exactly the five pre-existing
+`text_ladder_golden_test.dart` failures named above, and nothing else** —
++2 over Task 10's 911 (`B10`, Ruling F-2's shell-bubbling test, and `B11`,
+Ruling F-3's stale-marker test). `flutter analyze`: `Analyzing
+jet_cad_2d_flutter... No issues found! (ran in 1.5s)` Exit 0. `dart format
+--output=none --set-exit-if-changed .`: `Formatted 175 files (0 changed) in
+0.32 seconds.` Exit 0.
+
+**`apps/dev_harness_2d`**: `CI=true flutter test --concurrency=1`:
+
+```
+00:19 +82: All tests passed!
+```
+
+Exit 0: **82 tests, unchanged.** `flutter analyze`: `Analyzing
+dev_harness_2d... No issues found! (ran in 1.0s)` Exit 0. `dart format
+--output=none --set-exit-if-changed .`: `Formatted 22 files (0 changed) in
+0.05 seconds.` Exit 0.
+
+**`apps/floor_planner`**: `CI=true flutter test`:
+
+```
+00:03 +45: All tests passed!
+```
+
+Exit 0: **45 tests** — +2 over Task 10's 43 (`A16`, Ruling F-2's app-level
+F3-mid-polyline test, and `SP3`, Ruling F-1's door-clearance test).
+`flutter analyze`: `Analyzing floor_planner... No issues found! (ran in
+1.1s)` Exit 0. `dart format --output=none --set-exit-if-changed .`:
+`Formatted 12 files (0 changed) in 0.04 seconds.` Exit 0. `flutter build
+macos --release`:
+
+```
+✓ Built build/macos/Build/Products/Release/floor_planner.app (51.3MB)
+```
+
+Exit 0. `flutter build web --release`:
+
+```
+Compiling lib/main.dart for the Web...                             24.9s
+✓ Built build/web
+```
+
+Exit 0. **Both builds printed `✓ Built`.**
+
+`git status --short` was clean before this run and clean after it; no
+`analysis_options.yaml` was rewritten by any `flutter analyze`/`pub get`
+step.
+
 ### Where the counts differ from the plan's arithmetic, and why
 
 The plan predicted each count as the branch point (`7dac3b5`: engine 894,
 render layer 854 + 1 skip + the five goldens, harness 82, app 26) plus the
 tests this plan lands. **Report what ran, not the sums** — three of the four
 suites landed exactly on the plan's own prediction; the fourth, the app, did
-not, and the difference is explained below.
+not, and the difference is explained below. The **final tree** column
+(`f8b4269`, after the final review's fix wave) is the headline; **Task 10's
+run** (`3957d52`, before the fix wave) is kept alongside as history.
 
-| suite | branch point | planned additions | planned total | ran | difference |
-|---|---|---|---|---|---|
-| `jet_cad_2d` | 894 | +10 (E) +7 (S) | 911 | **911** | **0** |
-| `jet_cad_2d_flutter` | 854 | not summed by the plan (`test/draw/`, counted from the run) | — | **911** | — |
-| `dev_harness_2d` | 82 | 0 | 82 | **82** | **0** |
-| `apps/floor_planner` | 26 | +12 (A) +2 (SP) | 40 | **43** | **+3** |
+| suite | branch point | planned additions | planned total | Task 10 (`3957d52`) | final tree (`f8b4269`) | difference from plan |
+|---|---|---|---|---|---|---|
+| `jet_cad_2d` | 894 | +10 (E) +7 (S) | 911 | 911 | **911** | **0** |
+| `jet_cad_2d_flutter` | 854 | not summed by the plan (`test/draw/`, counted from the run) | — | 911 | **913** | — |
+| `dev_harness_2d` | 82 | 0 | 82 | 82 | **82** | **0** |
+| `apps/floor_planner` | 26 | +12 (A) +2 (SP) | 40 | 43 | **45** | **+5** |
+
+**The fix wave's own additions, on top of Task 10's counts:** render layer
++2 (`B10`, Ruling F-2's F3/F-bubble-mid-shape test; `B11`, Ruling F-3's
+stale-hover-marker test), 911 → 913; app +2 (`A16`, Ruling F-2's app-level
+F3-mid-polyline test; `SP3`, Ruling F-1's door-clearance test), 43 → 45.
+Engine and harness are untouched by the fix wave.
 
 - **Engine: exact match.** Task 1's `drafting.dart` builders and
   `SweepTracker` added **E1–E10** (894 → 904), and Task 2's
@@ -158,9 +248,12 @@ not, and the difference is explained below.
   rectangle and overlay series) → **903** (Task 5, `+11`: circle and arc,
   net of Ruling T5-a's AR5 replacement) → **911** (Task 6, `+8`: the text
   tool). Tasks 7–9 add nothing here — they touch only `apps/floor_planner`.
-  Net: **+57** over the branch point.
-- **App, +3 over the plan's sum: Task 7's fix round added A13, A14 and
-  A15.** The plan wrote 12 tests for Task 7 (A1–A12); the task's own review
+  Net: **+57** over the branch point at Task 10 (854 → 911). The final
+  review's fix wave then added `B10` (Ruling F-2) and `B11` (Ruling F-3),
+  911 → 913.
+- **App, +5 over the plan's sum at the final tree (+3 at Task 10): Task
+  7's fix round added A13, A14 and A15.** The plan wrote 12 tests for Task
+  7 (A1–A12); the task's own review
   found two gaps the plan itself implied but did not test —
   Ruling T7-b (a window switch must not cancel a pending text) and Ruling
   T7-c (Escape must reach the shortcut guard's map, not just the letters
@@ -172,7 +265,9 @@ not, and the difference is explained below.
   change). A10, already in the plan's 12, was **amended** in place for
   Ruling T7-a rather than added. So Task 7 alone landed 15 tests (A1–A15,
   26 → 41), not the plan's 12, and Task 8 added the sample-plan pair
-  (SP1, SP2; 41 → 43) exactly as planned. `26 + 15 + 2 = 43`.
+  (SP1, SP2; 41 → 43) exactly as planned. `26 + 15 + 2 = 43` at Task 10.
+  The final review's fix wave then added `A16` (Ruling F-2) and `SP3`
+  (Ruling F-1), `43 → 45`.
 - **Harness: exact match, by construction.** No task's file list touches
   `apps/dev_harness_2d`, and `git diff --stat 7dac3b5..HEAD --
   apps/dev_harness_2d` is empty.
@@ -236,7 +331,7 @@ The spec's fourteen criteria and where each is witnessed:
 | 10 | the sample plan's furniture is filled over the finishes | SP1, SP2, SP3 |
 | 11 | every mutant killed | [plan-05-mutation-log.md](plan-05-mutation-log.md): 30 fired, 30 killed |
 | 12 | the allocation invariants unedited; the overlay's structural test | Task 10's greps (invariant 4 and the allocation tests unedited), OV1, OV2 |
-| 13 | the four gate lines, the five goldens only, both builds | above, from Task 10's run |
+| 13 | the four gate lines, the five goldens only, both builds | "Gate lines on the final tree (after the final fix wave, `f8b4269`)" above |
 | 14 | the human's look | **OWED (this task): not looked at; the human looks after this branch is presented** |
 
 **13 of 14 PASS.** Criteria 1–13 are PASS, each with its witness above.
@@ -309,6 +404,22 @@ with the test in the task that owns the code:
   capture, mid-polyline loses every vertex placed so far, not just the one
   in flight. Not fixed in this fix wave: the controller ruled it debt, to
   be picked up if 02's API is ever reopened.
+- **The counter's new top leg sits across the kitchen/living doorway
+  (Ruling F-8, final review).** The F-1 fix moved the kitchen counter onto
+  the north and east walls; its new top leg crosses the doorway between the
+  kitchen and the living room. Not a leaf/swing overlap, so `SP3` stays
+  clean — it is a sample-plan layout judgement, not a code defect, and the
+  skill allows no second code wave for it. Parked as debt and added to look
+  item 14. **Suggested fix, for a `fix/` branch if the human's look
+  agrees:** a south leg at x 7200..9100, y 400..1000, plus the east leg at
+  x 8500..9100 up to y 3100.
+- **The modifier guard in `PlacementTool.onKey` is untested (Ruling F-9,
+  final review).** A mutant dropping `&& !_hasModifier()` from the F3/F
+  exception (Ruling F-2) survives: no test pins that Cmd+F3, Ctrl+F3,
+  Cmd+F or Ctrl+F mid-shape stay `handled` rather than bubbling. The code
+  is correct as written; only a test is missing. Cost if wrong: a later
+  regression would let Cmd+F or Ctrl+F reach the browser's find on the web,
+  unnoticed.
 
 ---
 
@@ -323,8 +434,9 @@ each platform:
 - **Firefox:** `build/web`, served statically (`cd
   apps/floor_planner/build/web && python3 -m http.server`).
 
-Thirteen items per platform (the final review added 11–13, Rulings F-1,
-F-2 and F-5). Record each as **seen / not seen / could not judge**.
+Fourteen items per platform (the final review added 11–13, Rulings F-1,
+F-2 and F-5; this closing commit adds 14, Ruling F-8). Record each as
+**seen / not seen / could not judge**.
 
 ### macOS: `flutter run -d macos --release`
 
@@ -357,6 +469,9 @@ F-2 and F-5). Record each as **seen / not seen / could not judge**.
     stays pending (Ruling F-2). ☐ seen ☐ not seen ☐ could not judge
 13. A text placed near the canvas's top and right edges: whether the
     field clips (Ruling F-5). ☐ seen ☐ not seen ☐ could not judge
+14. The kitchen/living doorway, clear of the counter's new top leg — or, if
+    not, whether it reads as a defect (Ruling F-8, debt). ☐ seen ☐ not seen
+    ☐ could not judge
 
 ### Chrome: `flutter run -d chrome --release`
 
@@ -389,6 +504,9 @@ F-2 and F-5). Record each as **seen / not seen / could not judge**.
     stays pending (Ruling F-2). ☐ seen ☐ not seen ☐ could not judge
 13. A text placed near the canvas's top and right edges: whether the
     field clips (Ruling F-5). ☐ seen ☐ not seen ☐ could not judge
+14. The kitchen/living doorway, clear of the counter's new top leg — or, if
+    not, whether it reads as a defect (Ruling F-8, debt). ☐ seen ☐ not seen
+    ☐ could not judge
 
 ### Firefox: `build/web`, served statically
 
@@ -418,6 +536,9 @@ F-2 and F-5). Record each as **seen / not seen / could not judge**.
     stays pending (Ruling F-2). ☐ seen ☐ not seen ☐ could not judge
 13. A text placed near the canvas's top and right edges: whether the
     field clips (Ruling F-5). ☐ seen ☐ not seen ☐ could not judge
+14. The kitchen/living doorway, clear of the counter's new top leg — or, if
+    not, whether it reads as a defect (Ruling F-8, debt). ☐ seen ☐ not seen
+    ☐ could not judge
 
 **Nothing above is ticked on the human's behalf.** No finding, no verdict
 and no `fix/` branch exists for Plan 05's look, because it has not
@@ -565,6 +686,57 @@ Each ruling is one line, with what it costs if it is wrong. The ones marked
   review; the ledger archive comes after that review and its fix wave, as
   the branch's last commit, exactly as Plan 03 did. Cost if wrong: none.
 
+### The final whole-branch review, F-1…F-10
+
+**Final review (`7dac3b5..d45b5d7`, opus): "With fixes"; Critical none.**
+The fix wave (`1d80caf..f8b4269`) closed F-1, F-2, F-3 and F-6; a scoped
+re-review confirmed all four addressed. The controller's own run on the fix
+wave's tree: render 913, app 45.
+
+- **F-1 (fixed):** four doors' leaves and swings sat under opaque furniture
+  fills (the counter, bed 2, the sofa), breaking spec D14's "doors keep
+  their look." Fixed by moving the pieces clear of the swings, witnessed by
+  a new `SP3` and its named mutant M-05aa. Cost if wrong: the sample plan's
+  layout changes slightly.
+- **F-2 (fixed):** F3 (object snap) and F (Fill), with no modifier held,
+  returned `handled` mid-shape instead of bubbling to the shell, so F3 —
+  the only object-snap toggle — was unusable mid-polyline; spec D3 is
+  amended. Cost if wrong: two keys act mid-shape — reversible, and flagged
+  to the human.
+- **F-3 (fixed):** `PlacementTool.cancel` left the stale hover marker
+  painted on a tool that lost focus and came back. A one-liner, witnessed
+  by `B11`. Cost if wrong: none.
+- **F-4 (debt, unchanged):** a platform pointer-cancel drops the whole
+  pending shape through 02's frozen `InteractionLayer` API. Cost if wrong:
+  none.
+- **F-5 (look item 13):** the text field can clip near the canvas's top and
+  right edges. Cost if wrong: a cosmetic clip.
+- **F-6 (fixed):** doc slips — the task-range split (`c4fcac4` is Task 8's
+  head, not Task 9's), witness slips in this note, and the mutation log's
+  M-05x heading — are corrected, and the flipY-coverage note is added to
+  Deviations. Cost if wrong: none.
+- **F-7 (this commit):** the stale Task 10 counts in STATUS.md and this
+  note (render 911, app 43, 27/27 mutants, five spec amendments, ten look
+  items) are replaced by the final tree's gate: engine 911, render 913 + 1
+  skip + the five goldens, harness 82, app 45, both builds, mutants 30/30,
+  six spec amendments, fourteen look items (with F-8's). Cost if wrong:
+  none — docs only, and part of finishing.
+- **F-8 (debt, look item 14):** the counter's new top leg (from the F-1
+  fix) sits across the kitchen/living doorway. Not a leaf/swing overlap, so
+  `SP3` stays clean — this is a sample-plan layout judgement, and the
+  skill allows no second code wave. Suggested fix, for a `fix/` branch if
+  the human's look agrees: a south leg at x 7200..9100, y 400..1000, plus
+  the east leg at x 8500..9100 up to y 3100. Cost if wrong: the sample plan
+  shows a doorway opening onto a counter until then.
+- **F-9 (debt, untested):** a mutant dropping `&& !_hasModifier()` from
+  `PlacementTool.onKey` survives untested. Cmd+F or Ctrl+F mid-shape would
+  then reach the browser's find on the web. The code is correct as
+  written; only a test is missing. Cost if wrong: a later regression of
+  the guard would go unnoticed.
+- **F-10 (recorded, not fixed):** Escape mid-shape now also hides the
+  marker until the next move (a side effect of F-3), and `SP3` samples 5
+  points per door shape. Cost if wrong: cosmetic.
+
 ---
 
 ## Deviations from the plan
@@ -681,18 +853,29 @@ relevant section. Nothing original is rewritten.
 
 ---
 
-## Files this task touched (Steps 1–4)
+## Files this task touched
 
+**Steps 1–4 (`d45b5d7`):**
 - `docs/superpowers/notes/2026-09-23-plan-05-results.md`: this file.
-- `docs/superpowers/specs/2026-09-23-drawing-tools-design.md`: the six
-  "Amended at execution" paragraphs above (five from Steps 1–4, plus D3's
-  from the final whole-branch review's fix wave), appended. Nothing was
-  rewritten.
+- `docs/superpowers/specs/2026-09-23-drawing-tools-design.md`: five
+  "Amended at execution" paragraphs, appended. Nothing was rewritten.
 - `STATUS.md`: a Plan 05 section, the header, and the "Resume here"
   paragraph.
 - `roadmap/05-drawing-tools.md`: the status line.
 - `roadmap/00-README.md`: the 05 row in the status table.
 
-Task 11 touched no code. The ledger archive (Step 5's second commit) is
-deferred to after the final whole-branch review and its fix wave
-(Ruling T11-a).
+**The final whole-branch review's fix wave (`1d80caf..f8b4269`):** code
+fixes for F-1, F-2 and F-3, plus D3's spec amendment (F-2) and doc-slip
+fixes (F-6) — see the fix wave's own commits for their files.
+
+**This closing docs commit (Ruling F-7):**
+- `docs/superpowers/notes/2026-09-23-plan-05-results.md`: this file — the
+  final-tree gate section, the counts table, the "Final whole-branch
+  review, F-1…F-10" rulings, the F-8/F-9 debt entries, and look item 14.
+- `STATUS.md`: the header's counts and status, the Plan 05 section's
+  counts and gate, and the "Resume here" paragraph.
+- `roadmap/05-drawing-tools.md` and `roadmap/00-README.md`: checked for
+  consistency with the final tree.
+
+Task 11 touched no code. The ledger archive is the branch's last commit,
+after this one (Ruling T11-a).
