@@ -22,11 +22,29 @@ before the worktree was removed.
 - **Mutants:** **68 exercised: 65 killed, 1 designed survivor (M-03e), 2
   equivalent (M-03ai's ordinal clause; `GripDrag._capture`'s `read` →
   `peek`).**
-- **Three fix branches** are committed and not merged:
-  `fix/page-copywith-num`, `fix/root-transform-identity` and
-  `fix/grip-camera-bc-swap`. The last is cut from Plan 03's tip and closes
-  its parked b/c-transposition finding. It changes tests and docs only.
-  See the [Branch and worktree map](#branch-and-worktree-map).
+- **Three fix branches were MERGED after it**, on the human's decision,
+  `--no-ff` in this order:
+  - `fix/page-copywith-num` at `59e3811`;
+  - `fix/grip-camera-bc-swap` at `9212793`, which closes Plan 03's parked
+    b/c-transposition finding (tests and docs only);
+  - `fix/root-transform-identity` at `7c96e11`, which pins the root's
+    transform to the identity. `TransformNodeCommand` refuses the root,
+    and `validate()` reports a loaded root that is not the identity; 5
+    mutants were fired and all 5 killed
+    ([note](docs/superpowers/notes/2026-09-23-root-transform-pinned.md)).
+
+  Its `STATUS.md` header conflict was resolved to `main`'s side, and this
+  paragraph now carries it. The four gate lines were re-run green on
+  `7c96e11`:
+  - engine **894** (890 + the two engine fixes' tests);
+  - render layer 854 + 1 skip + the five standing text goldens;
+  - harness 82;
+  - app 26;
+  - both release builds printed `✓ Built`.
+
+  All three branches and their worktrees are deleted. The exception is
+  `fix/grip-camera-bc-swap`, whose worktree is the session that did the
+  merges; it goes when that session closes.
 - **The differential:** seed `0x5EED0003`, 200 trials, worst residual
   4.66e-10.
 - **Exit gate: 16 of 16.** Criterion 16, the human's look, was discharged
@@ -282,9 +300,9 @@ The look covers thirteen items:
 - grips and drags with 04's page grid visible underneath.
 
 **Debt, in one line each:**
-- the root-transform disagreement (spec, Open questions): its fix, pinning
-  the root's transform to the identity, is committed on
-  `fix/root-transform-identity` at `776f201`, not merged;
+- the root-transform disagreement (spec, Open questions): **closed**. The
+  root's transform is pinned to the identity, merged at `7c96e11`
+  (`fix/root-transform-identity`);
 - grips as widgets (accessibility, for 12);
 - snapping to the dragged object's ghost;
 - move exactness is within one rounding;
@@ -1275,24 +1293,15 @@ into a standing test. Full account:
 | Location | Branch | State |
 |---|---|---|
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and **GPU Plans A, B, C and D** merged |
-| `.claude/worktrees/quizzical-jemison-7537de` | `fix/grip-camera-bc-swap` | head `031bf42`, cut from `plan-03/grips-and-transform` at `66ed4c2`. It gives six grip/overlay tests a `gripCamera(flipY: false)` pass and gives P4 an independent oracle. Seven b/c-transposition mutants were fired, M-03bm … M-03bs, and all were killed ([log](docs/superpowers/notes/2026-09-23-grip-camera-bc-swap-mutation-log.md)). Tests and docs only. Committed, not merged |
-| `.claude/worktrees/focused-nightingale-510bd1` | `fix/page-copywith-num` | head `8385753`, cut from `main` at `e376ced`: the `PageComponent.copyWith(gridStepMm: <int>)` fix. Committed, not merged. Another session's work |
-| `.claude/worktrees/hungry-haibt-cf67c0` | `fix/root-transform-identity` | head `776f201`, cut from `main` at `c09b747`, before the Plan 03 plan commit: pins the root's transform to the identity. Committed, not merged. Another session's work |
+| `.claude/worktrees/quizzical-jemison-7537de` | `fix/grip-camera-bc-swap` | **MERGED at `9212793`**. Its worktree is the session that did the merges. Remove it and `git branch -d` the branch when that session closes |
 
-**Three fix worktrees are in flight** (checked with `git worktree list` on
-2026-09-23, after Plan 03's merge at `c5173e0`). `plan-03/grips-and-transform`
-is merged and deleted.
-
-`fix/root-transform-identity` edits Plan 03's spec
-(`2026-09-23-grips-and-transform-design.md`) and this file. It predates the
-merge, so it is expected to conflict with `main` in `STATUS.md`; the spec
-auto-merged in a pre-merge dry run. It closes Plan 03's "root transform"
-debt item. `fix/grip-camera-bc-swap` also edits this file; it has
-`main` (at `49a4625`) merged in, so it merges cleanly unless another branch
-lands on `main` first. **The merge order is the human's decision. Each
-branch that merges after another resolves the `STATUS.md` conflict.**
-`fix/page-copywith-num` touches only `page_component.dart` and its test, so
-it should not conflict.
+**No work is in flight** (checked with `git worktree list` on 2026-09-23
+after `7c96e11`). Plan 03 (`c5173e0`) and its three fix branches
+(`59e3811`, `9212793`, `7c96e11`) are merged. Every branch except
+`fix/grip-camera-bc-swap` is deleted; that one waits for its session to
+close. The local branches `claude/focused-nightingale-510bd1` and
+`claude/quizzical-jemison-7537de` are empty session branches, and deleting
+them is the human's call.
 
 `plan-d/fills` was merged `--no-ff` at `de962bd` and deleted (it was at
 `27b2122`), after the full three-package gate was re-run on the merged tree.
@@ -1541,19 +1550,18 @@ and
   fixes"), and its fix wave is on top: `722904b`, `0cac4f4`, `509b9f3` and
   a docs commit.
 - **What resumes here:**
-  1. the three fix branches' merge decisions, in the human's order (see
-     the [Branch and worktree map](#branch-and-worktree-map));
-  2. then sub-project 05 (drawing tools), from a brainstorm.
-- **The gate lines** are green on the merged tree: engine 890; render
-  layer 854 + 1 skip + the five standing text goldens; harness 82; app 26.
-  Both release builds printed `✓ Built`.
+  sub-project 05 (drawing tools), from a brainstorm. Plan 03's three fix
+  branches are merged (`59e3811`, `9212793`, `7c96e11`).
+- **The gate lines** are green on `main` at `7c96e11`, after the fix
+  merges: engine 894; render layer 854 + 1 skip + the five standing text
+  goldens; harness 82; app 26. Both release builds printed `✓ Built`.
 - **Exit gate: 16 of 16.** Criterion 16, the human's look, was discharged
   on 2026-09-23 after the merge: LGTM as a whole, no findings, so F3 stands.
   What was run is recorded in
   [2026-09-23-plan-03-results.md](docs/superpowers/notes/2026-09-23-plan-03-results.md).
 - **Out of scope, fixed by another session:** the pre-existing Plan 04 bug
-  `PageComponent.copyWith(gridStepMm: <int>)` throws. The fix is committed
-  on `fix/page-copywith-num` at `8385753`, not merged.
+  `PageComponent.copyWith(gridStepMm: <int>)` threw. Its fix,
+  `fix/page-copywith-num`, is merged at `59e3811`.
 
 See [Plan 03](#plan-03--grips-and-transform-merged-into-main-at-c5173e0).
 The other nine sub-projects have not started.

@@ -647,20 +647,20 @@ Each ruling is one line, with what it costs if it is wrong. The ones marked
 
 **Named by the plan:**
 
-- **The root-transform disagreement** (spec, Open questions; still open).
+- **The root-transform disagreement** (spec, Open questions). **Closed:
+  `fix/root-transform-identity` merged at `7c96e11` on 2026-09-23.**
   `OutlineCache` and `TileCache` apply the root's transform to root-level
   nodes. The canvas, the index and the oracle do not. It is harmless while
   nothing writes the root's transform. The fix is to pin it to the identity,
   with a `validate` check or by refusing `TransformNodeCommand` on the root,
   or else to make every walk apply it. That is its own task. **Its fix is
   committed on `fix/root-transform-identity` at `776f201`** (another
-  session's, cut from `main` at `c09b747`), **not merged.** It pins the
-  root's transform to the identity. It edits this plan's spec and
-  `STATUS.md`, so whichever of the two branches merges second resolves the
-  doc conflict; the order is the human's decision.
+  session's, cut from `main` at `c09b747`). It pins the root's transform to
+  the identity. It merged after Plan 03, and its `STATUS.md` conflict was
+  resolved at the merge.
 - **b/c-transposition blindness under the reflecting test cameras**
   (parked by the fix wave's re-review; M-03bh). **Closed for the render
-  layer on `fix/grip-camera-bc-swap`, not merged.** Six more tests gained a
+  layer on `fix/grip-camera-bc-swap`, merged at `9212793`.** Six more tests gained a
   `gripCamera(flipY: false)` pass, and P4's oracle no longer calls
   `rotationGripOf`. Seven transposition mutants were fired, M-03bm …
   M-03bs, and all seven were killed. See
@@ -692,7 +692,7 @@ Each ruling is one line, with what it costs if it is wrong. The ones marked
   (`page_component.dart` 168–170 casts with `as double?`). It is a
   pre-existing Plan 04 bug, found by the Task 3 review. **Its fix is
   committed on `fix/page-copywith-num` at `8385753`** (another session's,
-  cut from `main` at `e376ced`), **not merged.**
+  cut from `main` at `e376ced`). **Closed: merged at `59e3811`.**
 
 **Deferred minors that no later task closed**, grouped by task, one line
 each:
