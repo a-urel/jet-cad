@@ -15,6 +15,7 @@ export 'src/draw/placement_tool.dart';
 export 'src/draw/line_tool.dart';
 export 'src/draw/polyline_tool.dart';
 export 'src/draw/rectangle_tool.dart';
+export 'src/draw/text_tool.dart';
 export 'src/flutter_text_measurer.dart';
 export 'src/gesture_policy.dart';
 // The resident-GPU backend's own public surface. `gpu_facade.dart` stays
