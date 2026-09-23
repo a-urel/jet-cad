@@ -272,8 +272,8 @@ void main() {
   });
 
   testWidgets(
-      'A10 a tool shortcut mid-polyline cancels it byte-identically '
-      '(Review Focus 2)', (tester) async {
+      'A10 a shortcut mid-polyline is swallowed; a palette switch cancels '
+      'byte-identically (Review Focus 2, Ruling T7-a)', (tester) async {
     final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
     final before = bytes(view);
     await press(tester, LogicalKeyboardKey.keyP);
@@ -284,6 +284,7 @@ void main() {
     // key-down, so the shell's L never arrives. The palette is the switch.
     await press(tester, LogicalKeyboardKey.keyL);
     expect(status(tester), 'Polyline');
+    expect((view.tools.active as PolylineTool).isPending, isTrue);
     await tester.tap(find.byKey(const Key('tool-line')));
     await tester.pump();
     expect(status(tester), 'Line');
@@ -320,5 +321,72 @@ void main() {
         isTrue);
     await press(tester, LogicalKeyboardKey.keyL);
     expect(status(tester), 'Select');
+  });
+
+  testWidgets(
+      'A13 a window switch with text pending keeps the field, its text '
+      'and its focus (Ruling T7-b)', (tester) async {
+    // The focus manager follows the app lifecycle on desktop and web only,
+    // hence the macOS variant.
+    FocusManager.instance.listenToApplicationLifecycleChangesIfSupported();
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tapAt(globalOf(tester, view, 7100, 3050));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('text-entry')), 'x');
+    final placed = view.tools.active as TextTool;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus,
+        same(FocusManager.instance.rootScope),
+        reason: 'the window switch moved focus off the field');
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(find.byKey(const Key('text-entry')), findsOneWidget);
+    expect(placed.controller.text, 'x');
+    expect(
+        tester
+            .state<EditableTextState>(entryEditable)
+            .widget
+            .focusNode
+            .hasFocus,
+        isTrue);
+    await press(tester, LogicalKeyboardKey.escape);
+    await press(tester, LogicalKeyboardKey.keyL);
+    expect(status(tester), 'Line');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+  testWidgets(
+      'A14 Escape in the page panel\'s scale field keeps a pending '
+      'polyline (spec 05 D9: the guard covers the shell\'s Escape)',
+      (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    await press(tester, LogicalKeyboardKey.keyP);
+    await tester.tapAt(globalOf(tester, view, 7010, 3020));
+    await tester.tapAt(globalOf(tester, view, 7060, 3090));
+    await tester.pump();
+    final polyline = view.tools.active as PolylineTool;
+    expect(polyline.isPending, isTrue);
+    await tester.tap(find.byKey(const Key('page-scale')));
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(status(tester), 'Polyline');
+    expect(polyline.isPending, isTrue);
+  });
+
+  testWidgets(
+      'A15 a click into the page panel\'s field cancels a pending text '
+      'byte-identically (spec 05 D9: any other loss of focus)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final before = bytes(view);
+    await press(tester, LogicalKeyboardKey.keyT);
+    await tester.tapAt(globalOf(tester, view, 7100, 3050));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('text-entry')), 'x');
+    await tester.tap(find.byKey(const Key('page-scale')));
+    await tester.pump();
+    expect(find.byKey(const Key('text-entry')), findsNothing);
+    expect((view.tools.active as TextTool).pending.value, isNull);
+    expect(bytes(view), before);
   });
 }

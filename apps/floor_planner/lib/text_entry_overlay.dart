@@ -63,7 +63,15 @@ class _TextEntryOverlayState extends State<TextEntryOverlay> {
     }
   }
 
+  /// Spec 05 D9's "any other loss of focus" means one inside the app
+  /// (Ruling T7-b). A window switch moves primary focus to the root scope on
+  /// `inactive`, and the focus manager restores it on `resumed`; cancelling
+  /// here would detach the field and leave the shell's shortcuts dead. The
+  /// state is null until the first lifecycle message (and in tests), which
+  /// is not a window switch.
   void _onFocus() {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
     if (!_focus.hasFocus && widget.tool.pending.value != null) {
       widget.tool.cancelText(widget.tools.context);
     }
