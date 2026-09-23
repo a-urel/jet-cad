@@ -90,13 +90,22 @@ void main() {
     expect(linesOf(s.document, s.anchor), isEmpty);
   });
 
-  test('L5 a zero-length segment is refused under Tolerance', () {
-    final s = drawScene(snapToGrid: true);
+  test(
+      'L5 a zero-length segment is refused under Tolerance, not under =='
+      ' (M-05?)', () {
+    final s = drawScene();
     final rig = drawRig(s.document, LineTool(), objectSnap: false);
     final a = screenOf(rig.camera, 7010.02, 3020.01);
+    final b = a + const Offset(4e-10, 0);
+    final wa = worldAt(rig, a), wb = worldAt(rig, b);
+    // Distinct stored values, closer than Tolerance.standard.linear: if the
+    // fixture ever landed the two clicks bit-identical, `isDegenerateSegment`
+    // and a bare `==` mutant would agree and this test would prove nothing.
+    expect(wa, isNot(wb), reason: 'not a degenerate, bit-identical fixture');
+    expect(wa.distanceTo(wb), lessThan(Tolerance.standard.linear));
     clickAt(rig, a);
     final before = snapshot(s.document);
-    clickAt(rig, a + const Offset(0.5, 0.5)); // same lattice point
+    clickAt(rig, b);
     expect(snapshot(s.document), before);
     expect(rig.tool.isPending, isTrue);
   });

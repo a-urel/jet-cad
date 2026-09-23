@@ -127,9 +127,14 @@ void main() {
             .multiply(rig.camera.value.worldToScreenMatrix));
     expect(notified, greaterThan(0), reason: 'the camera listener fired');
     expect(rig.tool.hoverPoint, isNot(before));
+    final w = worldAt(rig, screen);
+    expect(rig.tool.hoverPoint.x, w.x,
+        reason: 'the re-resolved hover is exactly the new camera\'s world '
+            'point, not merely different from the stale one (a screen-as-'
+            'world mutant in _reresolve would still satisfy isNot(before))');
+    expect(rig.tool.hoverPoint.y, w.y);
     downAt(rig, screen);
     final p = payloadOf(s.document, newest(s.document));
-    final w = worldAt(rig, screen);
     expect(p.coords[2], w.x);
     expect(p.coords[3], w.y);
   });
@@ -141,7 +146,8 @@ void main() {
     final rig = drawRig(s.document, LineTool());
     clickAt(rig, screenOf(rig.camera, 7010.5, 3020.25));
     final first = Vector2.copy(rig.tool.points.last);
-    hoverAt(rig, screenOf(rig.camera, 7090, 3031));
+    final hoverScreen = screenOf(rig.camera, 7090, 3031);
+    hoverAt(rig, hoverScreen);
     expect(rig.tool.hoverPoint.y, isNot(first.y));
     rig.tool.onKey(
         const KeyDownEvent(
@@ -151,6 +157,10 @@ void main() {
         rig.context);
     expect(rig.tool.hoverPoint.y, first.y,
         reason: '|dx| > |dy|: y pinned to the base, exactly');
+    final w = worldAt(rig, hoverScreen);
+    expect(rig.tool.hoverPoint.x, w.x,
+        reason: 'only y is pinned; x stays the raw resolved value, exact '
+            '(a screen-as-world mutant in _reresolve would move x too)');
   });
 
   test('B8 a denied commit drops the shape and allocates no handle', () {
