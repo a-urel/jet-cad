@@ -200,6 +200,32 @@ void main() {
   });
 
   test(
+      'hitTest picks the nearer object, not the greater handle '
+      '(M-03bb)', () {
+    final doc = DraftDocument.empty();
+    // Added in this order so `far`'s handle is the *lower* one: a distance
+    // bug that always prefers the earlier-seen candidate would pick `far`,
+    // not the object whose grip is actually nearer the probe.
+    final far = addEntity(
+        doc, doc.rootHandle, EntityKind.line, [7604, 3400, 7654, 3450], []);
+    final near = addEntity(
+        doc, doc.rootHandle, EntityKind.line, [7600, 3400, 7650, 3450], []);
+    final (selection, _, grips) = wire(doc);
+    selection.replace([k(far), k(near)]);
+    final camera = gripCamera();
+    addTearDown(camera.dispose);
+    final m = camera.value.worldToScreenMatrix;
+    // The probe sits exactly on `near`'s vertex and about 4.4 screen px
+    // (world 4 * scale 1.1) from `far`'s -- both inside kGripHitPixels (7),
+    // at different distances.
+    final probe = screenOf(camera, 7600, 3400);
+    final hit = grips.hitTest(probe, m);
+    expect(grips.grips[hit].key.target, near,
+        reason: 'near is 0 px from the probe, far is about 4.4 px away: '
+            'distance decides, not which handle is greater');
+  });
+
+  test(
       'the rotation grip hangs 24 px above the screen box, screen-up '
       '(M-03ak)', () {
     final camera = gripCamera();
