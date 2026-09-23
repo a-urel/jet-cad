@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -138,3 +139,49 @@ bool isDegenerateRectangle(Vector2 c1, Vector2 c2) =>
     (c2.y - c1.y).abs() <= Tolerance.standard.linear;
 
 bool isDegenerateRadius(double r) => r <= Tolerance.standard.linear;
+
+const double _tau = 2 * math.pi;
+
+/// [a] mapped into (−π, π].
+double wrapAngle(double a) {
+  final w = a % _tau; // Dart's % is non-negative for a positive divisor
+  return w > math.pi ? w - _tau : w;
+}
+
+/// Spec 05 D8: the angle the pointer has travelled around an arc's centre
+/// since its start, and the signed sweep that direction implies.
+///
+/// `τ` accumulates **unbounded**: a clamp would lose the winding and flip
+/// the sign on an out-and-back beyond a full turn (Ruling 05-1). Only its
+/// sign is read; the magnitude of a sweep comes from the end angle alone.
+final class SweepTracker {
+  double _start = 0;
+  double _previous = 0;
+  double _travel = 0;
+
+  double get start => _start;
+  double get travel => _travel;
+
+  void begin(double start) {
+    _start = start;
+    _previous = start;
+    _travel = 0;
+  }
+
+  /// One pointer sample's angle. Each step is wrapped into (−π, π], so no
+  /// single step jumps the seam.
+  void track(double angle) {
+    _travel += wrapAngle(angle - _previous);
+    _previous = angle;
+  }
+
+  /// The signed sweep from the start to [end], or 0 to refuse (the end is on
+  /// the start: a full circle is not an arc). Counter-clockwise when the
+  /// travel is **>= 0**; that tie-break is deliberate (spec D8).
+  double sweepTo(double end) {
+    final delta = (end - _start) % _tau;
+    final eps = Tolerance.standard.angular;
+    if (delta <= eps || _tau - delta <= eps) return 0;
+    return _travel >= 0 ? delta : delta - _tau;
+  }
+}
