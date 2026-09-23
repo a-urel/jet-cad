@@ -496,3 +496,179 @@ and M-05w′ were re-fired with fresh `cp` backups and both now go red
 against this fixture (see their entries above for the exact RED output);
 both were restored and diffed empty. `git status --short` now shows only
 the test file changed, no `.dart` under `lib/`.
+
+## Invariants and greps (Task 10)
+
+`main` here is the local branch `main` at `7dac3b5` (the branch point); every
+`git diff main -- ...` below compares against it.
+
+```
+$ git diff main -- packages/jet_cad_2d_flutter/lib/src/tool.dart packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart | wc -l
+       0
+```
+Invariant 4 holds: 02's API (`tool.dart`, `interaction_layer.dart`) is
+byte-identical to `main`.
+
+```
+$ git diff main -- packages/jet_cad_2d/test/invariants packages/jet_cad_2d_flutter/test/invariants | wc -l
+       0
+```
+The allocation invariant tests are unedited.
+
+```
+$ grep -rn "package:flutter\|dart:ui" packages/jet_cad_2d/lib | wc -l
+3
+```
+3 hits, all doc comments that *name* the pure-Dart constraint rather than
+violate it -- no `import` of either:
+- `packages/jet_cad_2d/lib/src/document/tables.dart:38` -- "`package:jet_cad_2d`
+  is pure Dart on purpose -- no `dart:ui`, no Flutter --"
+- `packages/jet_cad_2d/lib/src/document/text_metrics.dart:16` -- "the em size.
+  `dart:ui` exposes no cap height -- `computeLineMetrics` gives"
+- `packages/jet_cad_2d/lib/src/geometry/dasher.dart:47` -- "Pure geometry: no
+  `dart:ui`, no document access, no allocation per call. The"
+
+The engine stays pure Dart; the raw grep count of 3 is prose, not code.
+
+```
+$ grep -rn "Path()" packages/jet_cad_2d_flutter/lib/src/draw
+packages/jet_cad_2d_flutter/lib/src/draw/placement_tool.dart:47:  final Path band = Path();
+```
+Exactly one hit, the expected one: `placement_tool.dart`'s reused `band`
+field (D12). No `Path()` is constructed on the paint path.
+
+```
+$ grep -rn "handleSeed" packages/jet_cad_2d_flutter/lib/src/draw apps/floor_planner/lib
+apps/floor_planner/lib/startup_plan.dart:178:        handle: doc.handleSeed.next(),
+```
+One hit, and it is the pre-existing sample-plan construction the dispatch
+flagged in advance, not a tool: `startup_plan.dart:178` is inside `_Pen._add`,
+the sample plan's own line builder (predates this plan). There are no hits
+under `packages/jet_cad_2d_flutter/lib/src/draw` or in the app's tool/overlay
+code -- every handle a drawing tool allocates goes through the drafting
+builders (Ruling 05-3), never `handleSeed` directly.
+
+```
+$ grep -rn "Transform2.*==" packages/jet_cad_2d_flutter/test/draw apps/floor_planner/test/planner_draw_test.dart
+```
+No hits. `Transform2` is never compared with `==` in the new tests.
+
+### Gate lines
+
+`main` is at `7dac3b5`; branch-point counts from the plan: engine 894,
+render layer 854 + 1 skip + 5 goldens, harness 82, app 26.
+
+**`packages/jet_cad_2d`:**
+```
+$ CI=true dart test
+...
+00:03 +911: test/invariants/query_allocation_test.dart: (tearDownAll)
+00:03 +911: All tests passed!
+```
+Exit code 0. 911 passed (matches the expected engine count).
+```
+$ dart analyze
+Analyzing jet_cad_2d...
+No issues found!
+```
+Exit code 0.
+```
+$ dart format --output=none --set-exit-if-changed .
+Formatted 133 files (0 changed) in 0.23 seconds.
+```
+Exit code 0.
+
+**`packages/jet_cad_2d_flutter`:**
+```
+$ CI=true flutter test
+...
+00:12 +911 ~1 -5: Some tests failed.
+
+Failing tests:
+  .../test/golden/text_ladder_golden_test.dart: text ladder rung 1 (RenderBackend.canvas)
+  .../test/golden/text_ladder_golden_test.dart: text ladder rung 2 (RenderBackend.canvas)
+  .../test/golden/text_ladder_golden_test.dart: text ladder rung 3 (RenderBackend.canvas)
+  .../test/golden/text_ladder_golden_test.dart: text ladder rung 4 (RenderBackend.canvas)
+  .../test/golden/text_ladder_golden_test.dart: text ladder rung 5 (RenderBackend.canvas)
+```
+Exit code 1 -- the standing exception, exactly the five
+`text_ladder_golden_test.dart` rung failures (rungs 1-5, `RenderBackend.canvas`)
+and nothing else. Summary `+911 ~1 -5` matches the expected 911 pass + 1 skip
++ 5 goldens.
+```
+$ flutter analyze
+Analyzing jet_cad_2d_flutter...
+No issues found! (ran in 1.7s)
+```
+Exit code 0.
+```
+$ dart format --output=none --set-exit-if-changed .
+Formatted 175 files (0 changed) in 0.32 seconds.
+```
+Exit code 0.
+
+**`apps/dev_harness_2d`:**
+```
+$ CI=true flutter test --concurrency=1
+...
+00:19 +82: All tests passed!
+```
+Exit code 0. 82 passed (matches the expected harness count).
+```
+$ flutter analyze
+Analyzing dev_harness_2d...
+No issues found! (ran in 1.0s)
+```
+Exit code 0.
+```
+$ dart format --output=none --set-exit-if-changed .
+Formatted 22 files (0 changed) in 0.05 seconds.
+```
+Exit code 0.
+
+**`apps/floor_planner`:**
+```
+$ CI=true flutter test
+...
+00:03 +43: All tests passed!
+```
+Exit code 0. 43 passed (matches the expected app count; up from the
+branch-point 26 per Task 7-9's new drawing-tool tests).
+```
+$ flutter analyze
+Analyzing floor_planner...
+No issues found! (ran in 1.2s)
+```
+Exit code 0.
+```
+$ dart format --output=none --set-exit-if-changed .
+Formatted 12 files (0 changed) in 0.04 seconds.
+```
+Exit code 0.
+```
+$ flutter build macos --release
+Building macOS application...
+✓ Built build/macos/Build/Products/Release/floor_planner.app (51.3MB)
+```
+Exit code 0.
+```
+$ flutter build web --release
+Compiling lib/main.dart for the Web...                             25.6s
+✓ Built build/web
+```
+Exit code 0.
+
+`git status --short` printed nothing after each of the four gate lines
+(three `flutter analyze`/`flutter pub get` runs touched no
+`analysis_options.yaml`).
+
+### Branch commit trailers (Ruling P-6)
+
+```
+$ git rev-list --count 7dac3b5..HEAD
+13
+$ git log --format=%B 7dac3b5..HEAD | grep -c "Co-Authored-By: Claude"
+13
+```
+13 commits on the branch, 13 `Co-Authored-By: Claude` trailers -- one per
+commit.
