@@ -1,6 +1,18 @@
 # Drawing tools — design
 
-**Date:** 2026-09-23. **Status:** design, **revision 1**, not yet a plan.
+**Date:** 2026-09-23. **Status:** design, **revision 2**, not yet a plan.
+Revision 1 (`f71f469`) was reviewed the same day by two independent
+reviewers, Codex CLI (`gpt-5.5`) and Copilot CLI. Every finding was
+re-checked against the tree and is recorded, with its ruling, in
+[2026-09-23-drawing-tools-spec-review-r1.md](../notes/2026-09-23-drawing-tools-spec-review-r1.md).
+Revision 2 applies them all. Three were blockers:
+- **Shell shortcuts above a `TextField` take its letters.** D9 now guards
+  the field with `DoNothingAndStopPropagationTextIntent` and moves it out
+  of the `InteractionLayer`.
+- **A self-intersecting polyline triangulates to an *empty* list, not
+  null.** D11 now treats an empty polyline triangulation as "cannot fill".
+- **The text field's commit and cancel rules contradicted each other.** D9
+  now owns the controller in the tool and fixes one rule.
 **Sub-project:** `roadmap/05-drawing-tools.md`. **Size:** M.
 **Brainstormed with the human on 2026-09-23**, on `main` at `703bffe`. By
 then Plan 03 was merged at `c5173e0` and its look had closed 16 of 16. Its
@@ -63,9 +75,15 @@ the tree at `703bffe` on 2026-09-23.
     so the fill draws under its boundary, and it lets the caller set the
     fill colour, fill transparency, boundary colour and boundary
     lineweight. It hard-codes the continuous linetype on both halves.
-  - **`triangulationFor` 652** decides what can be filled: a circle with
-    `r > 0`, or a polyline that is closed and simple
-    (`triangulateSimplePolygon`). Anything else is refused.
+  - **`triangulationFor` 652** returns null, which `refusalReason`
+    (602) refuses, for anything that is not a circle with `r > 0` or a
+    **closed** polyline. For a closed polyline it returns
+    `triangulateSimplePolygon`, which returns an **empty** list, never
+    null, when the loop is self-intersecting or degenerate
+    (`geometry/triangulate.dart:10-13, 39`). `AddRegionCommand` accepts
+    that empty list, and the result is a region whose fill has no
+    triangles. A circle's triangulation is **also** empty by design
+    (`Int32List(0)`, 655).
 - **Closedness is not a flag.** `isClosedPolyline`
   (`document/grips.dart:50`) calls a polyline closed when its first and
   last coordinate pairs are equal under `==`, with three or more points.
@@ -79,7 +97,11 @@ the tree at `703bffe` on 2026-09-23.
     widthFactor, oblique]` (`document/text_geometry.dart:189-196`).
   - The string is `EntityRecord.text`.
   - `textStyle` defaults to `ReservedHandles.standardTextStyle` (5).
-  - `textAttrs` is `packTextAttrs` (33), where 0 means left and baseline.
+  - `textAttrs` is `packTextAttrs` (33), where 0 means left and baseline
+    **with no override bits**. Scalars 2 and 3 (width factor and oblique)
+    are read **only** when override bits 8 and 9 are set. Otherwise the
+    style's `widthFactor` and `obliqueAngle` apply
+    (`text_geometry.dart:191-196`).
   - **The height is in model units, as cap height.** The scale is
     `height / metrics.capHeight`, and `kCapHeightRatio = 0.7`
     (`text_metrics.dart:19`).
@@ -99,6 +121,27 @@ the tree at `703bffe` on 2026-09-23.
     redo) and F3.
   - The top bar shows the active tool's `name`.
   - **No tool other than `SelectTool` exists.**
+- **Flutter** (SDK 3.27.3, `widgets/editable_text.dart:726-737`):
+  "Shortcuts prevent text input fields from receiving their keystrokes as
+  text input." A raw key goes to the focused node and then bubbles to its
+  ancestors before it is offered as text input. The shell's
+  `CallbackShortcuts`, an ancestor of anything in the planner view, would
+  therefore take a bound letter from a focused `TextField`. The documented
+  remedy is a nearer `Shortcuts` that maps the letter to
+  `DoNothingAndStopPropagationTextIntent`
+  (`default_text_editing_shortcuts.dart:328`).
+- `packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart:129-131`: a
+  primary pointer-down anywhere in the layer's subtree calls
+  `_focus.requestFocus()` and then forwards the event to the tool. A focus
+  change is applied later, not synchronously.
+- `packages/jet_cad_2d_flutter/lib/src/selection_overlay.dart`: the
+  overlay paints the selection outlines, then the tool's
+  `paintWorldOverlay`, the grips, and the tool's `paintOverlay`, **for
+  whichever tool is active**.
+- `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`
+  constructs only `DraftPainter` and `VerticesDrawSink` (140, 147). **It
+  does not exercise `SelectionOverlayPainter`**, and so none of a tool's
+  overlay.
 - `apps/floor_planner/lib/startup_plan.dart`:
   - **Furniture (114-132):** seven rectangles, each drawn as four separate
     lines (the two kitchen counters overlap to form an L), and two
@@ -131,8 +174,8 @@ a filled region instead.
 
 Every tool:
 - shows a live rubber band;
-- snaps each point through 03's `resolveDragPoint`: object snap, then
-  shift-ortho, then grid;
+- snaps each point through its own placed points first, then through 03's
+  `resolveDragPoint`, exactly as it stands. D4 gives the order.
 - shows the snap marker while hovering;
 - commits exactly one command per finished shape;
 - stays armed for the next shape.
@@ -191,7 +234,8 @@ changes:
 - `flags`: 0.
 
 A text also gets `textStyle: ReservedHandles.standardTextStyle` and
-`textAttrs: 0`.
+`textAttrs: 0`: left and baseline, with no override bits. It therefore
+**inherits** the width factor and the oblique angle from its style (D9).
 
 **The handle** comes from `doc.handleSeed.next()` at the moment the command
 is built, when the shape finishes:
@@ -266,13 +310,20 @@ class PlacementTool extends Tool`.
 
 ### D4 — Resolving a point
 
-A raw world point `raw` from a `ToolPointerEvent` resolves as follows:
+A raw world point `raw` from a `ToolPointerEvent` resolves **in exactly
+this order**. The first step that produces a point wins.
 1. **`selfSnap`.** Call `selfSnap(raw, kSnapAperturePixels /
    camera.scale)`. A non-null result is a stored placed point, returned
-   itself. It carries **no marker kind**; the tool paints its own endpoint
-   square for it.
-2. **Otherwise, `resolveDragPoint`,** exactly as `SelectTool._resolve`
-   does:
+   itself. **It beats object snap**, even when an existing entity's
+   endpoint is also inside the aperture and nearer. It carries **no marker
+   kind**; the tool paints its own endpoint square for it.
+2. **Otherwise, `resolveDragPoint`, unchanged**, exactly as
+   `SelectTool._resolve` calls it. Its own order is:
+   - ortho pins the minor axis from `orthoBase`;
+   - `snapInto` at the **raw** point wins and overrides ortho;
+   - otherwise the grid snap re-pins the ortho axis.
+
+   The call is:
 
    ```
    resolveDragPoint(raw: raw, orthoBase: shift ? orthoBase : null,
@@ -312,15 +363,26 @@ existing `chrome-left` panel:
   Ruling 03-5), so D3's commit check is the backstop.
 
 **Shortcuts:** `V`, `L`, `P`, `R`, `C`, `A`, `T` and `F` (Fill), added to
-the shell's `CallbackShortcuts` with `includeRepeats: false`. They never
-fire while the text field has focus, because the `TextField` consumes the
-character keys first.
+the shell's `CallbackShortcuts` with `includeRepeats: false`.
+- **A shell shortcut would win over a focused `TextField`** (see the
+  evidence). The text field therefore carries its own guard (D9), so these
+  letters reach the field as text.
+- **The widget test must drive the field with real key events**
+  (`sendKeyEvent` / `sendKeyDownEvent`), not `enterText`, which bypasses
+  key dispatch and would hide the defect (M-05v).
 
-**The shell owns the seven tool instances** for its lifetime. Activating a
-drawing tool does three things:
-1. it clears the selection, so no grips show while drawing;
+**The shell owns the seven tool instances** for its lifetime. **Every
+activation goes through one shell method, `_activate(Tool)`**: the palette,
+the shortcuts and the Escape binding all call it, and nothing else calls
+`tools.activate`. Activating a drawing tool does three things:
+1. it clears the selection. `SelectionOverlayPainter` paints the selection
+   outlines and grips for whichever tool is active, so this step is what
+   keeps grips from showing while drawing;
 2. it calls `tools.activate(tool)`;
 3. it puts focus back on the canvas.
+
+The render-layer tool tests don't depend on selection: their fixture
+starts with an empty selection.
 
 **Escape returns to Select.** An idle drawing tool leaves Escape as
 `ignored`. It bubbles up to a shell-level `SingleActivator(escape)` binding,
@@ -341,32 +403,46 @@ the same tool with no points placed.
   an end and commits one line `[start, end]`. That end becomes the next
   segment's start: **the same stored `Vector2` values, not re-resolved**
   (M-05k).
-- **Clicking the current start again ends the chain.** `selfSnap` returns
-  the current start when the pointer is within the aperture of it, and
-  `accept` treats receiving the current start as "finish".
+- **Clicking the current start again ends the chain, but only once the
+  chain has committed at least one segment.**
+  - `selfSnap` returns the current start when the pointer is within the
+    aperture of it **and** the chain has committed at least one segment.
+    `accept` treats receiving it as "finish".
+  - **Before the first segment**, `selfSnap` returns null, so a second
+    click on the start is resolved normally. It lands within
+    `Tolerance.standard.linear` of the start, becomes a zero-length
+    segment, and is **refused**; the tool keeps waiting. A first-point
+    double-click therefore never exits the tool.
 - **Enter or Escape** also ends the chain. Segments already committed
   stay; only the rubber band is dropped.
-- **A zero-length segment** (length `<= Tolerance.standard.linear`) is
-  refused, and the tool keeps waiting.
+- **Any other zero-length segment** (length `<= Tolerance.standard.linear`)
+  is refused, and the tool keeps waiting.
 - **Fill** does not apply.
 
 **Polyline** (`polyline_tool.dart`):
 - **Each click** appends a vertex.
-- **`selfSnap`** returns the **first** vertex when the pointer is within
-  the aperture of it and at least three vertices are placed. Otherwise it
-  returns the **last** vertex when the pointer is within the aperture of
-  that.
+- **`selfSnap`** runs its checks in this order:
+  1. the **first** vertex, when the pointer is within the aperture of it
+     and at least three vertices are placed;
+  2. otherwise the **last** vertex, when the pointer is within the aperture
+     of it and at least two vertices are placed;
+  3. otherwise null.
+
+  So with one vertex placed, a second click on it is resolved normally. It
+  is **ignored** as coincident (below), not a finish.
 - **Receiving the first vertex closes the polyline.** It commits with the
   first point appended again: **the stored `Vector2` itself**, so
   `isClosedPolyline` holds under `==` (M-05i).
   - **With Fill on,** a closed polyline commits as a region (D13).
-  - **If `triangulationFor` refuses it** (it self-intersects), it commits
-    as a plain closed polyline instead, and the tool paints nothing extra.
-- **Receiving the last vertex again, or Enter,** finishes it open. That
-  needs at least two vertices; with fewer, the click is ignored. An open
+  - **When the fill is impossible,** meaning `addDraftedRegion` returns
+    null because the loop self-intersects (D11), it commits as a plain
+    closed polyline instead, and the tool paints nothing extra.
+- **Receiving the last vertex (from `selfSnap`), or Enter with at least two
+  vertices,** finishes it open. Enter with fewer is ignored. An open
   polyline ignores Fill.
-- **A click coincident with the previous vertex** (within
-  `Tolerance.standard.linear`) is ignored.
+- **A resolved click within `Tolerance.standard.linear` of the previous
+  vertex** is ignored. `selfSnap` has already turned the "last vertex
+  again" case into a finish before this check runs.
 - **The rubber band** is the placed vertices plus a segment to the hover
   point, drawn as **one `Path`** with no `close()`.
 
@@ -420,6 +496,16 @@ the same tool with no points placed.
 
   The magnitude is always in `(0, 2π)`, and the sign is the direction
   travelled.
+- **The tie-breaks are decisions, not accidents:**
+  - **`τ == 0` exactly is counter-clockwise.** That covers an end click
+    with no hover recorded after the start, and an out-and-back that
+    cancels exactly. This matches AutoCAD's default direction. The sign
+    comes from the **cumulative** `τ`, never from the last movement.
+  - **A full circle is not an arc.** An end angle equal to the start
+    gives `δ == 0`, and the arc is refused; the circle tool exists for
+    that.
+  - Both cases get **deterministic tests** of their own, because the
+    differential check skips the travel near multiples of 2π.
 
 **How the tool feeds it:**
 - after the start click, `track` receives the **raw** pointer angle on
@@ -445,32 +531,65 @@ start first (M-05e). **Fill does not apply.**
   `TextPlacement(p, heightMm)`.
 - **`heightMm`** is `textHeightMm(ctx.page?.value)`: `2.5 ×
   scaleDenominator` with a page, and 2.5 with none.
+- **The tool owns the text.** `TextTool` holds `final
+  TextEditingController controller`, created once for the tool's lifetime
+  and cleared whenever `pending` is set or cleared. The field (below)
+  edits this controller; it does not own it.
 - **While `pending` is set,** the tool paints a small insertion cross at
-  `p`. A canvas click commits the current string if it is non-empty and
-  clears `pending`. It does **not** start a new text in the same click.
+  `p`.
+- **A canvas click while `pending` is set commits.** `onPointerDown` calls
+  `commitText(controller.text, ctx)` **synchronously**. It runs before the
+  `InteractionLayer`'s `requestFocus` takes effect, because a focus change
+  is applied later. The click does **not** start a new text.
 - **`commitText(String s, ctx)`:** an empty `s` cancels. Otherwise it
   commits one text:
   - `text: s`, stored exactly as typed with no trimming;
   - `textStyle: standardTextStyle`, `textAttrs: 0`;
   - payload `[p.x, p.y]`, scalars `[heightMm, 0, 1, 0]`.
+
+  Either way it clears `pending`.
+- **Scalars 2 and 3 are padding.** With `textAttrs: 0` the width factor and
+  the oblique angle come from the style, not from the payload (see the
+  evidence). The `1` and `0` are written only so that the four-scalar
+  layout is complete for a later editor. A test with a Standard style
+  whose `widthFactor` is 0.8 proves the inheritance (M-05t).
 - **`cancelText(ctx)`** clears `pending`, and so do `cancel` and a tool
   switch.
 - **Fill** does not apply.
+
+**The rule, stated once.** **Enter or a canvas click commits** a non-empty
+string. **Escape, a tool switch, or any other loss of focus cancels.** The
+field's blur handler cancels only when `pending` is still set. After a
+canvas-click commit it is already clear, so the later blur finds nothing to
+cancel.
 
 **The stored height is a plain model height and the cap height.** Changing
 the page scale later does not resize existing text; annotation scaling is
 out of scope. It is the cap height, as DXF defines it (M-05c).
 
-**The field** is `apps/floor_planner/lib/text_entry_overlay.dart`, a widget
-in the planner view's `Stack` above the overlay painter:
-- It listens to the text tool's `pending` and to the camera.
-- While `pending` is set, it shows a single-line `TextField`, keyed
-  `text-entry`, with autofocus. Its baseline-left sits at
-  `camera.value.worldToScreen(p)` (M-05n), and it follows a pan or zoom.
-- **Enter** (`onSubmitted`) calls `commitText`.
-- **Escape** (a `CallbackShortcuts` on the field) calls `cancelText`, and
-  so does losing focus by any route other than submitting.
-- Afterwards, focus returns to the canvas.
+**The field** is `apps/floor_planner/lib/text_entry_overlay.dart`.
+- **It sits outside the `InteractionLayer`.** The planner view's root
+  becomes `Stack[CameraGestureDetector(… InteractionLayer …),
+  TextEntryOverlay]`. So a click on the field is not a canvas click, and
+  it never calls the layer's `requestFocus`.
+- **It listens** to the text tool's `pending` and to the camera.
+- **While `pending` is set,** it shows a single-line `TextField`, keyed
+  `text-entry`, with autofocus, bound to `TextTool.controller`.
+  - **Its baseline-left sits at `camera.value.worldToScreen(p)`** (M-05n).
+  - **It is a stable `Positioned` child.** On a pan or zoom only its
+    `left` and `top` are recomputed. The `TextField` element (its own
+    `FocusNode`, its composing state) is **never rebuilt** by a camera
+    change (M-05u).
+- **The shortcut guard.** The field is wrapped in `Shortcuts` that maps
+  every shell letter (`V L P R C A T F`, and Escape and Enter as the shell
+  binds them) to `DoNothingAndStopPropagationTextIntent`. The letters stop
+  there and reach the field as text input; they never reach the shell's
+  `CallbackShortcuts` (M-05v).
+- **Enter** (`onSubmitted`) calls `commitText(controller.text)`.
+- **Escape**, from an `Actions`/`CallbackShortcuts` on the field, calls
+  `cancelText`.
+- **On blur** it calls `cancelText` if `pending` is still set.
+- **Afterwards,** focus returns to the canvas.
 
 ### D10 — Escape, tool switches and edge cases
 
@@ -502,8 +621,15 @@ in the planner view's `Stack` above the overlay painter:
   boundaryKind, GeometryPayload boundaryPayload, {DraftColor fillColor =
   kDraftFillColor, DraftColor boundaryColor = const ByLayerColor(), int
   boundaryLineweight = kLineweightDefault})`:**
-  - It returns **null**, and allocates nothing, when
-    `triangulationFor(boundaryKind, boundaryPayload)` is null.
+  - It returns **null**, and allocates nothing, when **either** of these
+    holds:
+    - `triangulationFor(boundaryKind, boundaryPayload)` is null;
+    - `boundaryKind` is `polyline` **and** that triangulation is
+      **empty**, meaning the loop self-intersects or is degenerate (see
+      the evidence).
+
+    A circle's empty triangulation is its normal case and is **not** a
+    refusal.
   - Otherwise it returns `AddRegionCommand.allocate(seed: doc.handleSeed,
     owner: root, layer: layerZero, fillTransparency: 0, …)`.
   - The sample plan passes its own boundary colour and lineweight (D14).
@@ -530,7 +656,16 @@ holds an `EntityRecord`, which is a view.
 - **The hover marker and the insertion cross** use the reused buffers and
   `Paint`s of 03's `drawSnapMarker` idiom.
 - **Nothing is allocated per entity.** `query_allocation_test.dart` and
-  `paint_allocation_test.dart` stay **unedited and green**.
+  `paint_allocation_test.dart` stay **unedited and green**. They do **not**
+  cover the overlay (see the evidence), so the overlay has its own
+  structural gate:
+  - **the same calls regardless of document size:** a tool's overlay draw
+    calls (their names, in order) are identical for a 10-entity and a
+    1,000-entity document with the same pending shape;
+  - **one rubber-band path:** a 5-vertex pending polyline is exactly **one**
+    `drawPath` in the preview colour.
+
+  That is 03's invariant-6 pattern, and M-05s must turn it red.
 
 ### D13 — Fill: one toggle, one colour, one region command (human)
 
@@ -551,9 +686,10 @@ holds an `EntityRecord`, which is a view.
 2. It asks `addDraftedRegion(doc, kind, payload)`:
    - **A command:** commit that **one `AddRegionCommand`**. That is one undo
      step, and undo removes both halves.
-   - **Null** (a self-intersecting closed polyline): commit the plain
-     `addDrafted` boundary instead. **The shape is never lost** because the
-     fill is impossible.
+   - **Null** (a closed polyline whose triangulation is empty, because it
+     self-intersects or is degenerate): commit the plain `addDrafted`
+     boundary instead. **The shape is never lost** because the fill is
+     impossible.
 
 **What a region is:**
 - the fill carries `kDraftFillColor` (`TrueColor(0xE6E1D8)`), opaque;
@@ -615,9 +751,11 @@ In `apps/floor_planner/lib/startup_plan.dart`:
   `gripCamera` and `pointerAt`, with a `fill` notifier.
 - `apps/floor_planner/lib/tool_palette.dart` and `text_entry_overlay.dart`
   (new).
-- `apps/floor_planner/lib/main.dart` and `planner_view.dart` (edited): the
-  tools, the fill notifier, the shortcuts, the palette in `chrome-left`,
-  and the overlay in the stack.
+- `apps/floor_planner/lib/main.dart` (edited): the tools, the fill
+  notifier, `_activate`, the shortcuts, and the palette in `chrome-left`.
+- `apps/floor_planner/lib/planner_view.dart` (edited): the root becomes a
+  `Stack` with the `CameraGestureDetector` subtree plus a
+  `TextEntryOverlay` outside the `InteractionLayer` (D9).
 - `apps/floor_planner/lib/startup_plan.dart` (edited, D14).
 - `apps/floor_planner/test/planner_draw_test.dart` (new) and
   `startup_plan_test.dart` (extended).
@@ -633,6 +771,8 @@ In `apps/floor_planner/lib/startup_plan.dart`:
 4. **02's API is unchanged:** `tool.dart`, `interaction_layer.dart` and
    `ToolController`.
 5. **The frame path is O(1) per frame and allocates nothing per entity.**
+   The overlay's part of it is gated by D12's structural test, not by the
+   allocation tests.
 6. **A fill never draws over its own boundary.** Its handle is lower.
 
 ## Testing
@@ -660,7 +800,7 @@ checked clean. **Never `git checkout --` a `.dart` file.**
 | M-05a | a tool makes its point from `event.screen` instead of `event.world` | every tool's geometry test, under the non-identity camera |
 | M-05b | `rectanglePayload` drops the closing pair | the rectangle's codec round trip as closed: `isClosedPolyline`, and the coordinates `==` |
 | M-05c | `textPayload` stores `heightMm * kCapHeightRatio` | placed text renders at the requested cap height: `text_geometry` scale × `metrics.capHeight` equals `heightMm` within 1e-9 |
-| M-05d | `addDrafted` derives the handle from `doc.entities.length + firstFree` instead of `handleSeed.next()` | (1) draw A, undo, draw B: B's handle is not A's, because handles are never reissued; (2) draw A and B, undo both, redo both: each comes back with its original handle |
+| M-05d | `addDrafted` derives the handle from `doc.entities.length + firstFree` instead of `handleSeed.next()` | draw A, undo, draw B: B's handle is not A's, because handles are never reissued. (The redo-stability test belongs to exit criterion 2. It cannot tell this mutant apart, because a baked handle replays either way.) |
 | M-05e | the arc commits `[r, end, −sweep]`: start and end swapped | the asymmetric arc's stored start and sweep |
 | M-05f | `SweepTracker.track` adds `a − previous` unwrapped | the seam-crossing arc |
 | M-05g | `sweepTo` ignores the sign of `τ` and always returns `δ` | the clockwise arc |
@@ -673,8 +813,16 @@ checked clean. **Never `git checkout --` a `.dart` file.**
 | M-05n | `TextEntryOverlay` treats `p` as screen coordinates, without the camera | the overlay widget test under the non-identity camera |
 | M-05o | the rectangle tool ignores `fill` and always commits `addDrafted` | with Fill on: one fill linked to the new boundary, and its colour `kDraftFillColor` |
 | M-05p | a filled shape commits as two commands, `AddEntityCommand` for the boundary then one for the fill | with Fill on: one undo removes both halves; `undoDepth` is 1 |
-| M-05q | a refused fill (self-intersecting closed polyline) commits nothing | with Fill on, a bow-tie closed polyline still commits as a plain boundary |
+| M-05q | `addDraftedRegion` drops the empty-polyline-triangulation refusal (null only when `triangulationFor` is null) | with Fill on, a bow-tie closed polyline commits as a **plain** boundary: no fill is linked, and `doc.fills` is unchanged |
 | M-05r | `startup_plan.dart` emits the furniture before the finishes | `startup_plan_test`: every fill's handle is above every finish line's |
+| M-05s | the polyline rubber band draws one `drawLine` per placed segment instead of one `Path` | the overlay structural test: a 5-vertex pending polyline is one `drawPath` |
+| M-05t | `commitText` sets the width-factor and oblique override bits | with a Standard style of `widthFactor` 0.8, the placed text's `text_geometry` width factor is 0.8 |
+| M-05u | the overlay keys the `TextField` by the camera value, so it rebuilds on a pan | a widget test pans mid-typing: the field keeps focus and the typed string |
+| M-05v | the field's `Shortcuts` guard is removed | a widget test types `l`, `a`, `t` and `e` into the field with real key events: the field reads "late" and the active tool is still Text |
+| M-05w | `selfSnap` runs after `resolveDragPoint` instead of before | a polyline closed where its first vertex has an existing entity's endpoint nearer inside the aperture: the last pair `==` the polyline's own first vertex |
+| M-05x | the line's `selfSnap` returns the start before any segment is committed | a second click on the start keeps the line tool pending: no command, and the tool is still Line |
+| M-05y | a canvas click while text is pending cancels instead of committing | tool test: type into `controller`, click the canvas, and one text exists with the string |
+| M-05z | `sweepTo` uses `τ > 0` for counter-clockwise (so `τ == 0` goes clockwise) | the no-hover arc test: centre, start, and an end click with no hover in between commit a positive sweep |
 
 ### Differential check
 
@@ -692,12 +840,20 @@ checked clean. **Never `git checkout --` a `.dart` file.**
 - **The palette:** each button and each shortcut activates its tool, and
   the top bar shows the tool's name.
 - **Escape:** an idle Escape returns to Select.
-- **Shortcuts and the text field:** the shortcuts don't fire while the
-  field has focus.
+- **Shortcuts and the text field:** every shell letter, typed into the
+  focused field with **real key events** (`sendKeyEvent`, never
+  `enterText`), arrives as text, and the active tool does not change
+  (M-05v).
+- **A pan and a zoom mid-typing** keep the field's focus and its string
+  (M-05u).
+- **Activation:** activating a drawing tool from the palette or a shortcut
+  clears the selection.
 - **Fill:** `F` and the checkbox toggle it.
-- **The text flow end to end:** `T`, click, type, Enter, and exactly one
-  text exists with the string and the height. The same flow ending in
-  Escape leaves the snapshot byte-identical.
+- **The text flow end to end:** `T`, click, type with key events, Enter,
+  and exactly one text exists with the string and the height. The same
+  flow ending in Escape, and one ending in a click on the palette, each
+  leave the snapshot byte-identical. The flow ending in a canvas click
+  commits.
 - **Permissions:** under `DraftPermissions.runtime`, the drawing tools and
   Fill are disabled.
 
@@ -726,9 +882,10 @@ checked clean. **Never `git checkout --` a `.dart` file.**
    - the line, the open polyline, the arc and the text ignore Fill.
 10. The sample plan's furniture is filled regions, drawn over the floor
     finishes (D14), and `startup_plan_test` is green.
-11. Every named mutant, M-05a…r, is fired, killed and logged in
+11. Every named mutant, M-05a…z, is fired, killed and logged in
     `docs/superpowers/notes/plan-05-mutation-log.md`.
-12. The allocation invariants pass unedited.
+12. The allocation invariants pass unedited, and the overlay's structural
+    test (D12) is green.
 13. The four gate lines are green with `CI=true`:
     - the render layer shows only the five standing
       `text_ladder_golden_test.dart` failures;
