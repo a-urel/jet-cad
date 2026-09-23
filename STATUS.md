@@ -12,8 +12,9 @@
 - **The look is still OWED after the merge** (criterion 14), as it was for
   Plans 01–04.
 
-**Look finding, fixed on `fix/rotation-frame` (2026-09-24), awaiting the
-human's merge.** The human found that the rotation grip went back to
+**Look finding, fixed on `fix/rotation-frame` (2026-09-24), MERGED into
+`main` at `ede7cad`**, `--no-ff` on the human's decision. The four gate
+lines were re-run green on the merged tree, with the same counts as below. The human found that the rotation grip went back to
 screen-up after every rotate. That is Plan 03's D6 behaviour, not Plan 05's.
 The next rotate then pivoted about the re-wrapped world box's centre, so
 consecutive rotations drifted.
