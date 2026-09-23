@@ -83,3 +83,14 @@ List<Handle> boxKids(DraftDocument doc, Handle box) => [
 /// (`ComponentStore.handles` is already sorted).
 List<Handle> boxes(DraftDocument doc) =>
     doc.components.withComponent<BoxParams>().toList();
+
+/// Draws two overlapping boxes: B, then BX4's four clicks, then a pump.
+/// Copied from `planner_box_test.dart`'s BX4.
+Future<void> drawTwoBoxes(WidgetTester tester, PlannerView view) async {
+  await press(tester, LogicalKeyboardKey.keyB);
+  await tester.tapAt(globalOf(tester, view, 7010, 3020));
+  await tester.tapAt(globalOf(tester, view, 7130, 3090));
+  await tester.tapAt(globalOf(tester, view, 7100, 3060));
+  await tester.tapAt(globalOf(tester, view, 7190, 3120));
+  await tester.pump();
+}

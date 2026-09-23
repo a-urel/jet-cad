@@ -7,6 +7,7 @@ import 'page_panel.dart';
 import 'parametric/box.dart';
 import 'parametric/box_tool.dart';
 import 'planner_view.dart';
+import 'selection_panel.dart';
 import 'shortcut_guard.dart';
 import 'startup_plan.dart';
 import 'tool_palette.dart';
@@ -329,7 +330,15 @@ class _PlannerShellState extends State<PlannerShell> {
                     width: 280,
                     color: scheme.surfaceContainerLow,
                     child: ShellShortcutGuard(
-                      child: PagePanel(document: _document, page: _page),
+                      child: Column(
+                        children: [
+                          SelectionPanel(
+                              document: _document, selection: _selection),
+                          Expanded(
+                            child: PagePanel(document: _document, page: _page),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
