@@ -13,6 +13,7 @@ import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart';
+import 'package:jet_cad_2d_flutter/src/grip_drag.dart' show DragKind;
 import 'package:jet_cad_2d_flutter/src/interaction_layer.dart'
     show kPickRadiusPixels;
 import 'package:jet_cad_2d_flutter/src/select_tool.dart';
@@ -217,10 +218,12 @@ void main() {
     expect(selection.isEmpty, isTrue);
   });
 
-  test('a 5 px move from empty space starts a band; from a hit it does not',
-      () {
+  test(
+      'a 5 px move from empty space starts a band; from an unselected hit it '
+      'now selects and moves the object (spec 03 D12)', () {
     final doc = DraftDocument.empty();
-    addEntity(doc, doc.rootHandle, EntityKind.line, [990, 500, 1010, 500], []);
+    final line = addEntity(
+        doc, doc.rootHandle, EntityKind.line, [990, 500, 1010, 500], []);
     final index = SpatialIndex(doc);
     addTearDown(index.dispose);
     final selection = SelectionController(doc);
@@ -233,11 +236,21 @@ void main() {
     fromEmpty.onPointerDown(ev(camera, const Offset(50, 50)), ctx);
     fromEmpty.onPointerMove(ev(camera, const Offset(55, 50)), ctx);
     expect(fromEmpty.phase, ToolPhase.dragging);
+    expect(fromEmpty.dragKind, DragKind.band);
 
+    // 02 pinned "from a hit it does not" (select_tool.dart line 76). Spec 03
+    // D12: past the slop, a press on an unselected body selects it and
+    // moves the selection.
     final fromHit = SelectTool();
     fromHit.onPointerDown(ev(camera, const Offset(400, 300)), ctx);
     fromHit.onPointerMove(ev(camera, const Offset(405, 300)), ctx);
-    expect(fromHit.phase, ToolPhase.pressed);
+    expect(fromHit.phase, ToolPhase.dragging);
+    expect(fromHit.dragKind, DragKind.move);
+    expect(selection.keys, [SelectionKey.root(line)]);
+    fromHit.cancel(ctx);
+    expect(doc.commands.undoDepth, 1,
+        reason: "only the fixture's own AddEntityCommand; the cancelled move "
+            'dispatched nothing');
   });
 
   test('left-to-right encloses, right-to-left touches', () {

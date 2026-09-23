@@ -1,0 +1,288 @@
+# Review package: 70bdde1..8ea39b3
+
+## Commits
+8ea39b3 feat(render): Tool cursor and preview hooks, ToolContext page/snap/grips
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart |  1 +
+ .../lib/src/interaction_layer.dart                 | 12 +++-
+ .../jet_cad_2d_flutter/lib/src/snap_settings.dart  | 15 ++++
+ packages/jet_cad_2d_flutter/lib/src/tool.dart      | 35 +++++++++-
+ .../test/interaction_cursor_test.dart              | 80 ++++++++++++++++++++++
+ 5 files changed, 139 insertions(+), 4 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+index 1c00ddf..68d049d 100644
+--- a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
++++ b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+@@ -51,13 +51,14 @@ export 'src/page_chrome_painter.dart';
+ export 'src/page_fit.dart';
+ export 'src/page_notifier.dart';
+ export 'src/reference_walk.dart';
+ export 'src/render_backend.dart';
+ export 'src/ruler_frame.dart';
+ export 'src/ruler_painter.dart';
+ export 'src/select_tool.dart';
+ export 'src/selection.dart';
+ export 'src/selection_overlay.dart';
+ export 'src/selection_style.dart';
++export 'src/snap_settings.dart';
+ export 'src/tile_cache.dart';
+ export 'src/tool.dart';
+ export 'src/viewport_transform.dart';
+diff --git a/packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart b/packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart
+index 3f7c533..93e9727 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart
+@@ -179,22 +179,30 @@ class _InteractionLayerState extends State<InteractionLayer> {
+     _release();
+     _focus.dispose();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) => Focus(
+         focusNode: _focus,
+         autofocus: true,
+         onKeyEvent: (_, event) => _tool.onKey(event, _ctx),
+-        child: MouseRegion(
+-          onExit: _onExit,
++        // Spec 03 D5: a cursor is a widget parameter, so it needs a
++        // rebuild. Only the MouseRegion is rebuilt, and only when the tool
++        // (or a swap) notifies; the Listener subtree is the cached child.
++        child: ListenableBuilder(
++          listenable: widget.tools,
++          builder: (context, child) => MouseRegion(
++            cursor: _tool.cursor,
++            onExit: _onExit,
++            child: child,
++          ),
+           child: Listener(
+             behavior: HitTestBehavior.opaque,
+             onPointerDown: _onDown,
+             onPointerMove: _onMove,
+             onPointerUp: _onUp,
+             onPointerCancel: _onCancel,
+             onPointerHover: _onHover,
+             child: widget.child,
+           ),
+         ),
+diff --git a/packages/jet_cad_2d_flutter/lib/src/snap_settings.dart b/packages/jet_cad_2d_flutter/lib/src/snap_settings.dart
+new file mode 100644
+index 0000000..45d1826
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/snap_settings.dart
+@@ -0,0 +1,15 @@
++import 'package:flutter/foundation.dart';
++
++/// F3's object-snap toggle (spec D10). The shell owns it; a drag reads it
++/// per event through `ToolContext.snap`.
++class SnapSettings extends ChangeNotifier {
++  SnapSettings({bool objectSnap = true}) : _objectSnap = objectSnap;
++
++  bool _objectSnap;
++  bool get objectSnap => _objectSnap;
++
++  void toggleObjectSnap() {
++    _objectSnap = !_objectSnap;
++    notifyListeners();
++  }
++}
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tool.dart b/packages/jet_cad_2d_flutter/lib/src/tool.dart
+index ec0b4bf..f546a51 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tool.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tool.dart
+@@ -1,20 +1,23 @@
+ import 'dart:ui' show Canvas, Offset, Size;
+ 
+ import 'package:flutter/foundation.dart';
+-import 'package:flutter/services.dart' show KeyEvent;
++import 'package:flutter/services.dart' show KeyEvent, MouseCursor;
+ import 'package:flutter/widgets.dart' show KeyEventResult;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'camera_controller.dart';
++import 'grip_cache.dart';
++import 'page_notifier.dart';
+ import 'selection.dart';
++import 'snap_settings.dart';
+ import 'viewport_transform.dart';
+ 
+ /// One pointer sample handed to a [Tool], already resolved into both screen
+ /// and world space so a tool never has to invert the camera itself.
+ final class ToolPointerEvent {
+   const ToolPointerEvent({
+     required this.screen,
+     required this.world,
+     required this.pointer,
+     required this.buttons,
+@@ -27,52 +30,80 @@ final class ToolPointerEvent {
+ 
+   final Offset screen;
+   final Vector2 world;
+   final int pointer;
+   final int buttons;
+   final bool shift, control, meta, alt;
+   final double pickRadiusWorld;
+ }
+ 
+ /// Everything a [Tool] needs to act: the document to mutate, the index to
+-/// query, the camera to read, and the selection to update.
++/// query, the camera to read, the selection to update — and, since 03, the
++/// page, the snap settings and the grips, each optional so every 02 call
++/// site still compiles (spec D10).
+ final class ToolContext {
+   const ToolContext({
+     required this.document,
+     required this.index,
+     required this.camera,
+     required this.selection,
++    this.page,
++    this.snap,
++    this.grips,
+   });
+ 
+   final DraftDocument document;
+   final SpatialIndex index;
+   final CameraController camera;
+   final SelectionController selection;
+ 
++  /// The page, for the drag's grid snap; null: no grid snap.
++  final PageNotifier? page;
++
++  /// F3's toggle; null: object snap is on.
++  final SnapSettings? snap;
++
++  /// The selection's grips and box; null: no grip or rotation grip is drawn
++  /// or hit.
++  final GripCache? grips;
++
+   void execute(DraftCommand command) => document.commands.execute(command);
+ }
+ 
+ enum ToolPhase { idle, pressed, dragging }
+ 
+ /// The interface every interactive tool implements. A `ChangeNotifier` so
+ /// [ToolController] can forward a tool's own notifications (an overlay
+ /// change, a phase change) without polling.
+ abstract class Tool extends ChangeNotifier {
+   String get name;
+   ToolPhase get phase;
+   void onPointerDown(ToolPointerEvent e, ToolContext ctx);
+   void onPointerMove(ToolPointerEvent e, ToolContext ctx);
+   void onPointerUp(ToolPointerEvent e, ToolContext ctx);
+   void onPointerExit(ToolContext ctx);
+   KeyEventResult onKey(KeyEvent event, ToolContext ctx);
+   void cancel(ToolContext ctx);
+   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport);
++
++  /// The pointer's cursor over the layer (spec 03 D5). `InteractionLayer`
++  /// rebuilds its `MouseRegion` when the tool notifies.
++  MouseCursor get cursor => MouseCursor.defer;
++
++  /// The world transform a live move or rotate would apply, for the
++  /// overlay's preview (spec 03 D7); null otherwise.
++  Transform2? get selectionPreviewTransform => null;
++
++  /// Paints under the overlay's rebased world matrix, `worldToScreen ∘
++  /// translate(origin)`, so coordinates handed to [canvas] must be `world −
++  /// origin` (Ruling 03-3). [scale] is the camera's, for stroke widths.
++  void paintWorldOverlay(Canvas canvas, Vector2 origin, double scale) {}
+ }
+ 
+ /// Holds the active [Tool] and forwards its notifications, so a widget can
+ /// listen to the controller alone rather than re-subscribing on every swap.
+ class ToolController extends ChangeNotifier {
+   ToolController({required Tool initial, required this.context})
+       : _active = initial {
+     _active.addListener(_forward);
+   }
+ 
+diff --git a/packages/jet_cad_2d_flutter/test/interaction_cursor_test.dart b/packages/jet_cad_2d_flutter/test/interaction_cursor_test.dart
+new file mode 100644
+index 0000000..0fc30b9
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/interaction_cursor_test.dart
+@@ -0,0 +1,80 @@
++import 'dart:ui' show Canvas, Size;
++
++import 'package:flutter/services.dart'
++    show KeyEvent, MouseCursor, SystemMouseCursors;
++import 'package:flutter/widgets.dart' show KeyEventResult, MouseRegion, Offset;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/src/flutter_text_measurer.dart';
++import 'package:jet_cad_2d_flutter/src/interaction_layer.dart';
++import 'package:jet_cad_2d_flutter/src/tool.dart';
++import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
++
++import 'support/selection_fixture.dart';
++
++/// A tool that has only a cursor, and says when it changes.
++class _CursorTool extends Tool {
++  MouseCursor _cursor = MouseCursor.defer;
++
++  @override
++  MouseCursor get cursor => _cursor;
++
++  void show(MouseCursor next) {
++    _cursor = next;
++    notifyListeners();
++  }
++
++  @override
++  String get name => 'Cursor';
++  @override
++  ToolPhase get phase => ToolPhase.idle;
++  @override
++  void onPointerDown(ToolPointerEvent e, ToolContext ctx) {}
++  @override
++  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {}
++  @override
++  void onPointerUp(ToolPointerEvent e, ToolContext ctx) {}
++  @override
++  void onPointerExit(ToolContext ctx) {}
++  @override
++  KeyEventResult onKey(KeyEvent event, ToolContext ctx) =>
++      KeyEventResult.ignored;
++  @override
++  void cancel(ToolContext ctx) {}
++  @override
++  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
++}
++
++void main() {
++  testWidgets(
++      "the MouseRegion follows the active tool's cursor (spec D5, "
++      'M-03ab)', (tester) async {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final doc = DraftDocument.empty(measurer: measurer);
++    final rig = await pumpInteraction(tester,
++        document: doc, camera: cameraAt(2.0, const Offset(-1850, 1120)));
++    MouseCursor current() => tester
++        .widget<MouseRegion>(find
++            .descendant(
++                of: find.byType(InteractionLayer),
++                matching: find.byType(MouseRegion))
++            .first)
++        .cursor;
++
++    expect(current(), MouseCursor.defer, reason: 'SelectTool, idle');
++    final probe = _CursorTool();
++    addTearDown(probe.dispose);
++    rig.tools.activate(probe);
++    probe.show(SystemMouseCursors.move);
++    await tester.pump();
++    expect(current(), SystemMouseCursors.move,
++        reason: 'a notification rebuilds the MouseRegion');
++    probe.show(SystemMouseCursors.grabbing);
++    await tester.pump();
++    expect(current(), SystemMouseCursors.grabbing);
++    rig.tools.activate(rig.tool);
++    await tester.pump();
++    expect(current(), MouseCursor.defer);
++  });
++}

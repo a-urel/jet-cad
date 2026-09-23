@@ -1,0 +1,553 @@
+# Review package: f6810fb..32fa2cd
+
+## Commits
+32fa2cd feat(app): grips in the shell -- caches, F3, osnap-text, test seam
+
+## Files changed
+ apps/floor_planner/lib/main.dart                |  66 ++++++-
+ apps/floor_planner/lib/planner_view.dart        |  36 ++--
+ apps/floor_planner/test/planner_grips_test.dart | 236 ++++++++++++++++++++++++
+ 3 files changed, 312 insertions(+), 26 deletions(-)
+
+## Diff
+diff --git a/apps/floor_planner/lib/main.dart b/apps/floor_planner/lib/main.dart
+index 5f4233f..646211e 100644
+--- a/apps/floor_planner/lib/main.dart
++++ b/apps/floor_planner/lib/main.dart
+@@ -14,58 +14,89 @@ class FloorPlannerApp extends StatelessWidget {
+ 
+   @override
+   Widget build(BuildContext context) => MaterialApp(
+         title: 'Floor planner',
+         debugShowCheckedModeBanner: false,
+         theme: ThemeData(colorSchemeSeed: const Color(0xFF2266CC)),
+         home: const PlannerShell(),
+       );
+ }
+ 
+-/// Owns the document, the index and the camera for the window's lifetime,
+-/// and lays out the chrome slots -- a top bar, a left panel and a right
+-/// panel, sized and empty -- so sub-projects 04, 05 and 12 add to a layout
+-/// rather than invent one.
++/// Owns the document, the index, the camera and -- since 03 -- the outline
++/// cache, the grip cache and the snap settings for the window's lifetime.
++/// It lays out the chrome slots.
++///
++/// [document] and [initialCamera] are a test seam (spec 03, Architecture;
++/// Ruling 03-18).
++/// - [document] replaces the startup plan, and must carry a
++///   `FlutterTextMeasurer`.
++/// - [initialCamera] replaces the nominal fit.
++/// - `PlannerView` still fits once after its first frame, so a test sets a
++///   camera of its own after the first pump.
+ class PlannerShell extends StatefulWidget {
+-  const PlannerShell({super.key});
++  const PlannerShell({super.key, this.document, this.initialCamera});
++
++  final DraftDocument? document;
++  final ViewportTransform? initialCamera;
+ 
+   @override
+   State<PlannerShell> createState() => _PlannerShellState();
+ }
+ 
+ class _PlannerShellState extends State<PlannerShell> {
+   final FlutterTextMeasurer _measurer = FlutterTextMeasurer();
+-  late final DraftDocument _document = startupPlan(_measurer);
++  late final DraftDocument _document =
++      widget.document ?? startupPlan(_measurer);
+   late final PageNotifier _page = PageNotifier(_document);
+   late final SpatialIndex _index = SpatialIndex(_document);
+-  // Fitted to the nominal window; PlannerView re-fits once at the real size.
+   late final CameraController _camera = CameraController(
+-    fitToPage(_document.components.get<PageComponent>(_document.rootHandle)!,
+-        const Size(1440, 900)),
++    widget.initialCamera ?? _nominalFit(),
+     minScale: kMinScale,
+     maxScale: kMaxScale,
+   );
+   final GesturePolicy _policy = GesturePolicy.forPlatform();
++  final SnapSettings _snap = SnapSettings();
+ 
+   // Constructed before the tool controller and its context: the selection
+   // controller's listener on `document.changes` must prune dead keys before
+   // anything downstream (the outline cache, in PlannerView) walks them.
+   late final SelectionController _selection = SelectionController(_document);
++
++  // Spec 03 D6, moved from PlannerView. The order is load-bearing.
++  // - The outline cache is built after the selection controller, so the
++  //   controller prunes a dead key before the cache walks it.
++  // - The grip cache is built after the outline cache, so on a selection
++  //   change its listener runs after the outlines have been rebuilt.
++  late final OutlineCache _outlines = OutlineCache(_document, _selection);
++  late final GripCache _grips = GripCache(_document, _selection, _outlines);
++
+   late final ToolContext _context = ToolContext(
+       document: _document,
+       index: _index,
+       camera: _camera,
+-      selection: _selection);
++      selection: _selection,
++      page: _page,
++      snap: _snap,
++      grips: _grips);
+   late final ToolController _tools =
+       ToolController(initial: SelectTool(), context: _context);
+   late final Listenable _status = Listenable.merge([_selection, _tools]);
+ 
++  /// Fitted to the nominal window; PlannerView re-fits once at the real
++  /// size. A document without a page fits its extents.
++  ViewportTransform _nominalFit() {
++    final page = _page.value;
++    return page != null
++        ? fitToPage(page, const Size(1440, 900))
++        : ViewportTransform.fit(_document.extents, const Size(1440, 900));
++  }
++
+   /// Spec D12, amended at execution: cmd+Z (macOS) / ctrl+Z (everywhere
+   /// else) undoes through the command log. There is no redo in 02.
+   ///
+   /// The binding sits above the [InteractionLayer]'s `Focus`, which returns
+   /// the active tool's own `KeyEventResult`; the tool ignores Z, so the event
+   /// keeps bubbling and arrives here.
+   void _undo() {
+     if (_document.commands.canUndo) _document.commands.undo();
+   }
+ 
+@@ -80,53 +111,66 @@ class _PlannerShellState extends State<PlannerShell> {
+     final zoom = zoomOf(_camera.value.scale, page, kLogicalPixelsPerMm);
+     return '1:${_trimNumber(page.scaleDenominator)} · ${(zoom * 100).round()}%';
+   }
+ 
+   static String _trimNumber(double v) =>
+       v == v.roundToDouble() ? v.round().toString() : v.toString();
+ 
+   @override
+   void dispose() {
+     _tools.dispose();
++    _grips.dispose();
++    _outlines.dispose();
+     _selection.dispose();
++    _snap.dispose();
+     _page.dispose();
+     _camera.dispose();
+     _index.dispose();
+     _measurer.clear();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+     final scheme = Theme.of(context).colorScheme;
+     return Scaffold(
+       body: CallbackShortcuts(
+         bindings: <ShortcutActivator, VoidCallback>{
+           const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _undo,
+           const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
++          // Spec 03 D10: one toggle per press, never per key repeat.
++          const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false):
++              _snap.toggleObjectSnap,
+         },
+         child: Column(
+           children: [
+             Container(
+               key: const Key('chrome-top'),
+               height: 44,
+               color: scheme.surfaceContainer,
+               child: Padding(
+                 padding: const EdgeInsets.symmetric(horizontal: 12),
+                 child: Row(
+                   children: [
+                     ListenableBuilder(
+                       listenable: _status,
+                       builder: (_, __) =>
+                           Text(_statusLine(), key: const Key('status-text')),
+                     ),
+                     const Spacer(),
++                    ListenableBuilder(
++                      listenable: _snap,
++                      builder: (_, __) => Text(
++                          _snap.objectSnap ? 'OSNAP' : 'osnap off',
++                          key: const Key('osnap-text')),
++                    ),
++                    const SizedBox(width: 16),
+                     ListenableBuilder(
+                       listenable: Listenable.merge([_camera, _page]),
+                       builder: (_, __) =>
+                           Text(_zoomLine(), key: const Key('zoom-text')),
+                     ),
+                   ],
+                 ),
+               ),
+             ),
+             Expanded(
+@@ -141,20 +185,22 @@ class _PlannerShellState extends State<PlannerShell> {
+                     child: ColoredBox(
+                       color: scheme.surface,
+                       child: PlannerView(
+                         document: _document,
+                         index: _index,
+                         camera: _camera,
+                         page: _page,
+                         policy: _policy,
+                         selection: _selection,
+                         tools: _tools,
++                        outlines: _outlines,
++                        grips: _grips,
+                       ),
+                     ),
+                   ),
+                   Container(
+                     key: const Key('chrome-right'),
+                     width: 280,
+                     color: scheme.surfaceContainerLow,
+                     child: PagePanel(document: _document, page: _page),
+                   ),
+                 ],
+diff --git a/apps/floor_planner/lib/planner_view.dart b/apps/floor_planner/lib/planner_view.dart
+index 1e1ac52..c2c5558 100644
+--- a/apps/floor_planner/lib/planner_view.dart
++++ b/apps/floor_planner/lib/planner_view.dart
+@@ -13,58 +13,62 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ class PlannerView extends StatefulWidget {
+   const PlannerView({
+     super.key,
+     required this.document,
+     required this.index,
+     required this.camera,
+     required this.page,
+     required this.policy,
+     required this.selection,
+     required this.tools,
++    required this.outlines,
++    required this.grips,
+   });
+ 
+   final DraftDocument document;
+   final SpatialIndex index;
+   final CameraController camera;
+   final PageNotifier page;
+   final GesturePolicy policy;
+   final SelectionController selection;
+   final ToolController tools;
+ 
++  /// Owned by the shell since 03 (spec D6).
++  final OutlineCache outlines;
++
++  /// The selection's grips. A member of the overlay's repaint merge.
++  final GripCache grips;
++
+   @override
+   State<PlannerView> createState() => _PlannerViewState();
+ }
+ 
+ class _PlannerViewState extends State<PlannerView> {
+   /// Ruling 01-2: the camera is fitted once, to the size the drawing area
+   /// really got; since Plan 04 the fit lands at the end of the first frame
+   /// (Ruling 04-16).
+   bool _fitted = false;
+ 
+-  // Constructed after the shell's `SelectionController` so it prunes dead
+-  // keys before this cache walks them (listener order on `document.changes`).
+-  late final OutlineCache _outlines =
+-      OutlineCache(widget.document, widget.selection);
+-  // The cache is in the merge because it is the only member that hears a
+-  // `DocChange`: an edit under a selected instance rebuilds the outline and
+-  // nothing else in here would ask for the frame that draws it.
+-  late final Listenable _repaint = Listenable.merge(
+-      [widget.selection, widget.tools, widget.camera, _outlines]);
++  // The two caches are in the merge because they are the members that hear
++  // a `DocChange`: an edit under a selected instance rebuilds the outline
++  // and the grips, and nothing else in here would ask for the frame that
++  // draws them.
++  late final Listenable _repaint = Listenable.merge([
++    widget.selection,
++    widget.tools,
++    widget.camera,
++    widget.outlines,
++    widget.grips,
++  ]);
+   late final Listenable _chromeRepaint =
+       Listenable.merge([widget.camera, widget.page]);
+ 
+-  @override
+-  void dispose() {
+-    _outlines.dispose();
+-    super.dispose();
+-  }
+-
+   @override
+   Widget build(BuildContext context) => RulerFrame(
+         camera: widget.camera,
+         page: widget.page,
+         child: LayoutBuilder(
+           builder: (context, constraints) {
+             if (!_fitted &&
+                 constraints.biggest.width > 0 &&
+                 constraints.biggest.height > 0) {
+               _fitted = true;
+@@ -110,21 +114,21 @@ class _PlannerViewState extends State<PlannerView> {
+                       camera: widget.camera,
+                       tiles: false,
+                     ), // already inside its own RepaintBoundary
+                     Positioned.fill(
+                       child: RepaintBoundary(
+                         child: CustomPaint(
+                           painter: SelectionOverlayPainter(
+                             selection: widget.selection,
+                             tools: widget.tools,
+                             camera: widget.camera,
+-                            outlines: _outlines,
++                            outlines: widget.outlines,
+                             repaint: _repaint,
+                           ),
+                           size: Size.infinite,
+                         ),
+                       ),
+                     ),
+                   ],
+                 ),
+               ),
+             );
+diff --git a/apps/floor_planner/test/planner_grips_test.dart b/apps/floor_planner/test/planner_grips_test.dart
+new file mode 100644
+index 0000000..9dbbaee
+--- /dev/null
++++ b/apps/floor_planner/test/planner_grips_test.dart
+@@ -0,0 +1,236 @@
++import 'dart:typed_data';
++
++import 'package:floor_planner/main.dart';
++import 'package:floor_planner/planner_view.dart';
++import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++Handle addLine(DraftDocument doc, List<double> coords) {
++  final handle = doc.handleSeed.next();
++  doc.commands.execute(AddEntityCommand(
++    record: EntityRecord(
++      handle: handle,
++      owner: doc.rootHandle,
++      kind: EntityKind.line,
++      layer: ReservedHandles.layerZero,
++      linetype: ReservedHandles.byLayerLinetype,
++      linetypeScale: 1.0,
++      geomIndex: 0,
++      color: const ByLayerColor(),
++      lineweight: kByLayer,
++      transparency: kByLayer,
++      flags: 0,
++    ),
++    payload: GeometryPayload(
++        coords: Float64List.fromList(coords), scalars: Float64List(0)),
++  ));
++  return handle;
++}
++
++/// Two lines off the origin on a page whose grid is a fixed 100 mm anchored
++/// at (7000, 3000). `other`'s start is off the lattice, so an object snap
++/// and a grid snap land in different places.
++({DraftDocument doc, Handle line, Handle other}) shellScene(
++    FlutterTextMeasurer measurer) {
++  final doc = DraftDocument.empty(measurer: measurer);
++  PageComponent.register(doc.components);
++  doc.commands.execute(SetComponentCommand<PageComponent>(doc.rootHandle,
++      PageComponent(originX: 7000, originY: 3000, gridStepMm: 100)));
++  final line = addLine(doc, [7010, 3020, 7130, 3060]);
++  final other = addLine(doc, [7137.3, 3161.7, 7300.9, 3190.1]);
++  doc.commands.clearHistory();
++  return (doc: doc, line: line, other: other);
++}
++
++GeometryPayload payloadOf(DraftDocument doc, Handle h) =>
++    doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(h)!));
++
++/// Pumps the shell through its test seam on a 1440 × 900 surface, then
++/// sets a zoomed, panned, rotated camera.
++Future<PlannerView> pumpShell(WidgetTester tester, DraftDocument doc) async {
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester.pumpWidget(MaterialApp(home: PlannerShell(document: doc)));
++  await tester.pump();
++  // Set after the first pump: PlannerView fits the camera once, at the end
++  // of its first frame (Ruling 04-16), and would overwrite one set before.
++  final view = tester.widget<PlannerView>(find.byType(PlannerView));
++  final size = tester.getSize(find.byType(InteractionLayer));
++  final linear =
++      Transform2.rotation(0.35).multiply(Transform2.scale(2.0, -2.0));
++  final mid = linear.transformPoint(Vector2(7150, 3110));
++  view.camera.value = ViewportTransform(
++      worldToScreenMatrix: Transform2.translation(
++              size.width / 2 - mid.x, size.height / 2 - mid.y)
++          .multiply(linear));
++  await tester.pump();
++  return view;
++}
++
++Offset globalOf(WidgetTester tester, PlannerView view, double x, double y) {
++  final s = view.camera.value.worldToScreen(Vector2(x, y));
++  return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
++}
++
++Future<void> mouseDrag(WidgetTester tester, Offset from, Offset to) async {
++  final gesture = await tester.createGesture(
++      kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++  await gesture.down(from);
++  await gesture.moveTo(from + const Offset(12, 0));
++  await gesture.moveTo(to);
++  await gesture.up();
++  await gesture.removePointer();
++  await tester.pump();
++}
++
++Future<void> cmdZ(WidgetTester tester) async {
++  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
++  await tester.sendKeyDownEvent(LogicalKeyboardKey.keyZ);
++  await tester.sendKeyUpEvent(LogicalKeyboardKey.keyZ);
++  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
++  await tester.pump();
++}
++
++String osnapText(WidgetTester tester) =>
++    tester.widget<Text>(find.byKey(const Key('osnap-text'))).data!;
++
++/// Selects the line with a click on its body, a third of the way along.
++Future<void> selectLine(WidgetTester tester, PlannerView view) async {
++  await tester.tapAt(globalOf(tester, view, 7050, 3020 + 40 / 3));
++  await tester.pump();
++}
++
++void main() {
++  testWidgets(
++      'a stretch through the shell lands exactly on an endpoint, and '
++      'cmd+Z restores it with == (A1, M-03au)', (tester) async {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final s = shellScene(measurer);
++    final view = await pumpShell(tester, s.doc);
++    final before = payloadOf(s.doc, s.line);
++    await selectLine(tester, view);
++    expect(view.selection.keys, [SelectionKey.root(s.line)]);
++
++    // Grab vertex 1; drop it 3 px from the other line's start. Object snap
++    // is on by default, so it lands there exactly (spec D8).
++    await mouseDrag(tester, globalOf(tester, view, 7130, 3060),
++        globalOf(tester, view, 7137.3, 3161.7) + const Offset(3, -2));
++    final after = payloadOf(s.doc, s.line);
++    expect([after.coords[2], after.coords[3]], [7137.3, 3161.7]);
++    expect([after.coords[0], after.coords[1]], [7010, 3020]);
++    expect(s.doc.commands.undoDepth, 1);
++
++    await cmdZ(tester);
++    expect(payloadOf(s.doc, s.line), before,
++        reason: 'undo restores the stored payload with == (spec D11)');
++    expect(s.doc.commands.undoDepth, 0);
++  });
++
++  testWidgets(
++      'F3 turns object snap off: osnap-text says so and the drag '
++      'lands on the grid (A2, M-03x)', (tester) async {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final s = shellScene(measurer);
++    final view = await pumpShell(tester, s.doc);
++    expect(osnapText(tester), 'OSNAP');
++    await tester.sendKeyEvent(LogicalKeyboardKey.f3);
++    await tester.pump();
++    expect(osnapText(tester), 'osnap off');
++
++    await selectLine(tester, view);
++    await mouseDrag(tester, globalOf(tester, view, 7130, 3060),
++        globalOf(tester, view, 7137.3, 3161.7) + const Offset(3, -2));
++    final after = payloadOf(s.doc, s.line);
++    expect([after.coords[2], after.coords[3]], [7100, 3200],
++        reason: 'the nearest lattice point of the fixed 100 mm grid');
++  });
++
++  testWidgets('F3 held down toggles once (A3, M-03af)', (tester) async {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final s = shellScene(measurer);
++    await pumpShell(tester, s.doc);
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.f3);
++    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.f3);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.f3);
++    await tester.pump();
++    expect(osnapText(tester), 'osnap off',
++        reason: 'includeRepeats: false — a repeat would have toggled it back');
++  });
++
++  testWidgets(
++      "cmd+Z pressed mid-drag is the drag's, not the shell's (A4, "
++      'M-03aa)', (tester) async {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final s = shellScene(measurer);
++    final view = await pumpShell(tester, s.doc);
++    // One finished drag first, so a stray undo would have something to take.
++    await selectLine(tester, view);
++    await mouseDrag(tester, globalOf(tester, view, 7130, 3060),
++        globalOf(tester, view, 7137.3, 3161.7) + const Offset(3, -2));
++    expect(s.doc.commands.undoDepth, 1);
++    final landed = payloadOf(s.doc, s.line);
++
++    final gesture = await tester.createGesture(
++        kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++    final from = globalOf(tester, view, 7137.3, 3161.7);
++    await gesture.down(from);
++    await gesture.moveTo(from + const Offset(20, 10));
++    await gesture.moveTo(from + const Offset(35, 18));
++    expect(view.tools.active.phase, ToolPhase.dragging);
++
++    await cmdZ(tester);
++    expect(s.doc.commands.undoDepth, 1,
++        reason: 'the Z never reached the shell (spec D5)');
++    expect(payloadOf(s.doc, s.line), landed);
++    expect(view.tools.active.phase, ToolPhase.dragging,
++        reason: 'the drag is still live');
++
++    await gesture.up();
++    await gesture.removePointer();
++    await tester.pump();
++    expect(s.doc.commands.undoDepth, 2);
++  });
++
++  // Controller note (Task 7): removing InteractionLayer mid-drag must not
++  // assert `markNeedsBuild` during build. That fix is proven at the render
++  // layer already; this proves it holds when the *whole shell* — with its
++  // caches and controllers in their construction order — leaves the tree
++  // mid-drag, not only the interaction widget in isolation.
++  testWidgets(
++      'replacing the shell mid-drag disposes cleanly, no exception '
++      '(M-03ao, shell)', (tester) async {
++    final measurer = FlutterTextMeasurer();
++    addTearDown(measurer.clear);
++    final s = shellScene(measurer);
++    final view = await pumpShell(tester, s.doc);
++    await selectLine(tester, view);
++    final before = payloadOf(s.doc, s.line);
++
++    final gesture = await tester.createGesture(
++        kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
++    final from = globalOf(tester, view, 7130, 3060);
++    await gesture.down(from);
++    await gesture.moveTo(from + const Offset(20, 10));
++    expect(view.tools.active.phase, ToolPhase.dragging);
++
++    // Tears down the whole PlannerShell -- document, controllers and caches
++    // included -- while the pointer is still captured by the drag.
++    await tester.pumpWidget(const SizedBox.shrink());
++
++    expect(payloadOf(s.doc, s.line), before,
++        reason: 'the drag never committed a command');
++    // The captured pointer's up still reaches the unmounted tree; nothing
++    // should throw handling it.
++    await gesture.up();
++    await gesture.removePointer();
++  });
++}

@@ -20,6 +20,8 @@ class PlannerView extends StatefulWidget {
     required this.policy,
     required this.selection,
     required this.tools,
+    required this.outlines,
+    required this.grips,
   });
 
   final DraftDocument document;
@@ -29,6 +31,12 @@ class PlannerView extends StatefulWidget {
   final GesturePolicy policy;
   final SelectionController selection;
   final ToolController tools;
+
+  /// Owned by the shell since 03 (spec D6).
+  final OutlineCache outlines;
+
+  /// The selection's grips. A member of the overlay's repaint merge.
+  final GripCache grips;
 
   @override
   State<PlannerView> createState() => _PlannerViewState();
@@ -40,23 +48,19 @@ class _PlannerViewState extends State<PlannerView> {
   /// (Ruling 04-16).
   bool _fitted = false;
 
-  // Constructed after the shell's `SelectionController` so it prunes dead
-  // keys before this cache walks them (listener order on `document.changes`).
-  late final OutlineCache _outlines =
-      OutlineCache(widget.document, widget.selection);
-  // The cache is in the merge because it is the only member that hears a
-  // `DocChange`: an edit under a selected instance rebuilds the outline and
-  // nothing else in here would ask for the frame that draws it.
-  late final Listenable _repaint = Listenable.merge(
-      [widget.selection, widget.tools, widget.camera, _outlines]);
+  // The two caches are in the merge because they are the members that hear
+  // a `DocChange`: an edit under a selected instance rebuilds the outline
+  // and the grips, and nothing else in here would ask for the frame that
+  // draws them.
+  late final Listenable _repaint = Listenable.merge([
+    widget.selection,
+    widget.tools,
+    widget.camera,
+    widget.outlines,
+    widget.grips,
+  ]);
   late final Listenable _chromeRepaint =
       Listenable.merge([widget.camera, widget.page]);
-
-  @override
-  void dispose() {
-    _outlines.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) => RulerFrame(
@@ -117,7 +121,7 @@ class _PlannerViewState extends State<PlannerView> {
                             selection: widget.selection,
                             tools: widget.tools,
                             camera: widget.camera,
-                            outlines: _outlines,
+                            outlines: widget.outlines,
                             repaint: _repaint,
                           ),
                           size: Size.infinite,

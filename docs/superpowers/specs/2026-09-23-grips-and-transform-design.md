@@ -214,6 +214,28 @@ instance needs `transform`. When `document.commands.permissions` denies it:
 Under `DraftPermissions.runtime` a table instance can still be moved while a
 wall cannot.
 
+**Amended at execution (Plan 03, 2026-09-23):** two rulings.
+
+**(1) Ruling 03-6.** The capability check "at press" runs when the press
+crosses the slop, before any drag starts.
+- For class 3b, the selection the drag would move is only known at that
+  point: the current selection plus the key under a shift press, or that
+  key alone.
+- A refused check makes the press click-only. Later moves do nothing, and
+  release acts as the 02 click.
+- For class 3b, the selection is **not** changed at the slop crossing when
+  the check refuses. The toggle runs once, at release, as the click.
+- The rotation grip is drawn and hit under any permissions; this decision
+  hides only leaf grips. A refused rotate simply never starts.
+
+Permissions cannot change between a press and a 4 px move except by a test,
+and D4's release check covers that case.
+
+**(2) Ruling 03-9.** A centre grip moves the **whole selection**, not only
+its own object. This follows exit criterion 4 ("a centre grip does the
+same" as a body drag) rather than "What this delivers". The base is the
+grip's own world point, exactly (D8), never the resolved press point.
+
 ### D3 — The grip set, per kind, in the engine
 
 The grip set is defined in `packages/jet_cad_2d/lib/src/document/grips.dart`,
@@ -302,6 +324,22 @@ b·c − 1|` and the column-orthonormality residuals must be within
 
 A pure translation `(1, 0, 0, 1, dx, dy)` gives `x + dx` exactly for every
 coordinate, since `0·y` is `0` for any finite `y`.
+
+**Amended at execution (Plan 03, 2026-09-23):** an arc's derived end angle
+is compared **modulo 2π** (Ruling 03-1). "`s' + sweep'` equals the old `s +
+sweep` within `Tolerance`" cannot hold literally. `s' = atan2(…)` lies in
+`(−π, π]`, and a stored `s` need not. For example, with `s = 4.0` and `sweep
+= 1.0`, dragged to the direction `4.1`:
+- `s' = 4.1 − 2π`;
+- `sweep' = 0.9`;
+- so `s' + sweep' = 5.0 − 2π`.
+
+That is the same angle, but not the same double within 1e-9. The tests
+therefore compare the `cos` and `sin` of the two angles within
+`Tolerance.standard.angular`, and `grips_test.dart` carries this example.
+Exit criterion 2's "an arc's derived end angle is equal within `Tolerance`"
+means the same: the untouched end keeps its **direction**, which is what
+"the end stays" means geometrically.
 
 ### D4 — What release dispatches
 
@@ -403,6 +441,46 @@ compound's label is `Move`, `Rotate` or `Stretch`.
 - **Hover** of a grip marks it (D6). Object hover (02) is suppressed during
   a drag.
 
+**Amended at execution (Plan 03, 2026-09-23):** three changes to this
+decision.
+
+**(1) Ruling 03-8: `KeyRepeatEvent` is consumed during a drag too.**
+"Every key-down" includes key repeats.
+- A held cmd+Z auto-repeats as `KeyRepeatEvent`s, which are not
+  `KeyDownEvent`s.
+- The shell's `SingleActivator(keyZ, meta: true)` keeps the default
+  `includeRepeats: true`, so a repeat that was not consumed would bubble up
+  and undo mid-drag.
+- Key-ups pass through: no shortcut acts on them.
+
+**(2) The cursor is a mirror, not a builder on the `ToolController`**
+(Task 7's fix round).
+- `InteractionLayer` keeps a `ValueNotifier<MouseCursor>` that mirrors
+  `tools.active.cursor`. A `ValueListenableBuilder<MouseCursor>` around only
+  the `MouseRegion` renders it.
+- **Why:** the layer's `deactivate` cancels a live drag, and the cancel makes
+  the tool notify. A `ListenableBuilder` on the `ToolController` then asked
+  for a rebuild of a subtree that was leaving the tree, and Flutter asserted
+  (`markNeedsBuild` during build) when the layer was removed mid-drag.
+- The mirror **goes quiet while the layer leaves the tree**: `deactivate`
+  and `dispose` set a leaving flag, and `activate` clears it and re-reads
+  the cursor. `didUpdateWidget` moves the listener when the
+  `ToolController` instance changes.
+- It still rebuilds only the `MouseRegion`, and only when the cursor value
+  changes, as this decision intends.
+
+**(3) The press-time grip is found again at the slop** (Task 7's fix
+round).
+- The press records a `GripRef` (key, grip, ordinal), not a list index.
+- When the press crosses the slop, the grip is looked up again in the
+  current `GripCache`. It matches only on the same key, the same ordinal and
+  an equal `Grip` (exact `==`).
+- For a rotation-grip press, a null box counts as no match.
+- If there is no match, the press becomes a click. An undo inside the slop
+  can remove or change the grabbed object, and a stale index would then name
+  another object's grip or throw a `RangeError`. With this rule the press
+  does nothing: no throw, no drag, no command.
+
 ### D6 — Grip rendering and the selection box
 
 `GripCache` (render layer) is a `ChangeNotifier` built from the document,
@@ -453,6 +531,27 @@ The overlay painter draws, in screen space, after the outlines:
   - Drawn only when `ctx.grips` is non-null and the selection holds at
     least one non-fill key.
 
+**Amended at execution (Plan 03, 2026-09-23):** two rulings.
+
+**(1) Ruling 03-10: the grip point buffers are sized exactly** and are
+reallocated only when the count changes. "Grown only when the grip count
+grows" is superseded.
+- `drawRawPoints` draws its whole list. A capacity-grown buffer would need a
+  `sublistView` per frame, which is one allocation per draw call. It would
+  also draw stale grips if it were used whole.
+- Exact sizing reallocates only at selection-change rate, so steady frames
+  allocate nothing.
+- "Rebased by the frame origin before narrowing" is met differently: grips
+  are projected world → screen in doubles, and only the screen coordinates,
+  which are small, are narrowed to float32. No world coordinate reaches
+  float32, and that is the property the sentence protects.
+
+**(2) Ruling 03-15: `GripCache.rotatable` is `box != null`.**
+- A fill has no outline of its own (`OutlineCache._addLeaf` returns for a
+  fill), so a fills-only selection has no box.
+- "At least one non-fill key" is therefore implied by a non-null box.
+- A separate non-fill flag would be an equivalent, unkillable mutant.
+
 ### D7 — Preview
 
 The canvas keeps drawing the original, because nothing in the document
@@ -478,6 +577,20 @@ top:
   `SelectTool.paintOverlay`, which receives the origin through the painter.
 - A 1 px line from the base point to the snapped target, and the snap
   marker (D9) at the target.
+
+**Amended at execution (Plan 03, 2026-09-23):** the reshape preview is drawn
+through a new hook, **`Tool.paintWorldOverlay(Canvas canvas, Vector2 origin,
+double scale)`**, with a no-op default (Ruling 03-3).
+- "`SelectTool.paintOverlay`, which receives the origin through the
+  painter" could not be built. `paintOverlay(Canvas, ViewportTransform,
+  Size)` has no origin parameter, and `tool_controller_test.dart`'s
+  `_CountingTool` implements that exact signature.
+- The overlay calls the new hook inside its existing `save … transform(_matrix)
+  … restore` block, and hands it the frame's origin and scale.
+- `SelectTool` builds the path in `world − origin` under the overlay's own
+  matrix, as this decision intends.
+
+No existing implementer changes.
 
 ### D8 — Snap during a drag: object, then ortho-overridden, then grid
 
@@ -563,6 +676,16 @@ atan2(press − p)`. With shift, `θ` rounds to the nearest multiple of `π/12`
 snaps to `gridStepMm` exactly, while the drawn grid's minor lines sit at a
 fifth or a quarter of it. The snap therefore skips minor lines. That is
 04's rule, kept, and recorded as an item for the look.
+
+**Amended at execution (Plan 03, 2026-09-23):** the step has one home
+(Ruling 03-11). `double? dragGridStepMm(PageComponent? page, double
+pxPerWorldMm)` lives in `drag_snap.dart`, next to `resolveDragPoint`.
+- It returns `page.gridStepMm` **exactly** when that is set.
+- Otherwise it returns the adaptive `GridScale.pick(...)`'s `minorMm ??
+  majorMm` at the current zoom.
+
+That is 04's D6 rule, stated once. `resolveDragPoint`'s `gridStepMm`
+parameter is fed from it, and sub-project 05 inherits both together.
 
 ### D9 — Snap markers
 
@@ -687,6 +810,21 @@ camera **after the first `pump`**, and the test says so in a comment.
    rigidity check, the move test's landing check, and the arc's derived end
    angle.
 
+**Amended at execution (Plan 03, 2026-09-23), invariant 5:** the per-move
+cost names three more O(1) allocations (Ruling 03-12).
+- `snapToGrid` returns a fresh `Vector2`.
+- `GridScale.pick`, reached through `dragGridStepMm`, returns a fresh
+  `GridScale`.
+- The camera listener's `screenToWorld` returns a fresh `Vector2`.
+
+All three happen once per pointer event or camera notification, never per
+entity. The frame path (paint) of a move or rotate preview allocates nothing
+beyond 02's overlay, and a reshape frame builds its one preview `Path`. So
+"one `snapInto` … and, for a reshape only, one preview path" reads: one
+`snapInto`, at most these three O(1) objects, and, for a reshape only, one
+preview path. `query_allocation_test.dart` and `paint_allocation_test.dart`
+pass unchanged.
+
 ---
 
 ## Testing
@@ -742,6 +880,86 @@ Every mutant is fired by a `cp`-backed scratch script, then restored and
 checked with `diff`. The log is
 `docs/superpowers/notes/plan-03-mutation-log.md`.
 
+**Amended at execution (Plan 03, 2026-09-23):** two tables join the one
+above.
+
+**The plan's mutants, M-03ab…M-03ax (Ruling 03-17).** `CLAUDE.md` lands a
+test only if a named mutation turns it red. Twenty-three tests guard spec
+behaviour that the table above names no mutant for, so the plan named one
+for each. M-03ah fires twice (`ah′`). The test ids are the plan's. The
+render layer's files are relative to `packages/jet_cad_2d_flutter`, and the
+engine's and the app's are marked. All were killed. M-03ai's ordinal clause,
+dropped on its own, is **equivalent** by construction: the candidates are
+built in ascending ordinal within each key, so the clause can never be true
+where it is tested. The log records it as such.
+
+| id | mutation | must go red |
+|---|---|---|
+| M-03ab | the cursor rendered straight off the tool, with no rebuild seam (re-expressed against D5's amended mirror: `MouseRegion(cursor: _tool.cursor, …)` with no `ValueListenableBuilder`) | `test/interaction_cursor_test.dart` I1: the `MouseRegion` follows the tool's cursor |
+| M-03ac | `_enter` never adds the camera listener | `test/select_tool_drag_test.dart` T14: a camera change mid-drag re-resolves the target |
+| M-03ad | `leafGripsLive` always true | `test/grip_cache_test.dart` C5; `test/select_tool_drag_test.dart` T13; `test/selection_overlay_grips_test.dart` P4 |
+| M-03ae | the point cross ignores the preview transform | `test/selection_overlay_grips_test.dart` P5: the cross sits at `T(p)` |
+| M-03af | F3 bound without `includeRepeats: false` | app `test/planner_grips_test.dart` A3: F3 held down toggles once |
+| M-03ag | the endpoint and midpoint markers swap shapes | `test/snap_marker_test.dart` K1 |
+| M-03ah | `worldBoundsOf`'s arc uses the full circle's square, not `arcBounds` | `test/outline_cache_test.dart` O1 (C2 compares against the same mutated `worldBoundsOf` and stays green) |
+| M-03ah′ | `worldBoundsOf`'s point case contributes nothing | `test/outline_cache_test.dart` O1; `test/grip_cache_test.dart` C2 |
+| M-03ai | the coincident-grip tie picks the lesser handle | `test/grip_cache_test.dart` C6; `test/select_tool_drag_test.dart` T10 |
+| M-03aj | the reshape preview path built in absolute world, not rebased | `test/selection_overlay_grips_test.dart` P6 |
+| M-03ak | the rotation grip hangs below the box | `test/grip_cache_test.dart` C7 |
+| M-03al | `GripCache` never listens to the `OutlineCache` | `test/grip_cache_test.dart` C3 |
+| M-03am | a fill is captured in a move | `test/grip_drag_test.dart` D9 |
+| M-03an | the members keep the selection's order, not ascending handle | `test/grip_drag_test.dart` D1 |
+| M-03ao | `cancel` dispatches the pending command | `test/select_tool_drag_test.dart` T16, W1, W3 (and T15) |
+| M-03ap | a pointer exit cancels a captured drag | `test/select_tool_drag_test.dart` W2; 02's `interaction_layer_test.dart` "a drag that leaves the box keeps its captured pointer" |
+| M-03aq | the hot grip is never drawn | `test/selection_overlay_grips_test.dart` P2 |
+| M-03ar | the snap marker drawn at the last screen point, not the target | `test/selection_overlay_grips_test.dart` P8 |
+| M-03as | a grip hit is recorded but the class falls through to the pick (re-expressed against the `GripRef` of D5's amendment) | `test/select_tool_drag_test.dart` T1 |
+| M-03at | a centre grip moves only its own object | `test/select_tool_drag_test.dart` T8 |
+| M-03au | a reshape ignores the snap and takes the raw point | `test/select_tool_drag_test.dart` T9; app `test/planner_grips_test.dart` A1 |
+| M-03av | a drag starts without its capability check | `test/select_tool_drag_test.dart` T13 |
+| M-03aw | `dragGridStepMm` ignores the page's fixed step | engine `test/index/drag_snap_test.dart` S8 |
+| M-03ax | `rigidTransformLeaf` applies a non-rigid transform | engine `test/document/rigid_transform_test.dart` R5 |
+
+**The controller's mutants, M-03ay…M-03bg, from the task reviews.** Each
+review finding that named an unguarded behaviour got a mutant. Seven new
+tests landed for them, each in its own commit. M-03bc and M-03bd were
+already guarded. All were killed.
+
+| id | mutation | must go red |
+|---|---|---|
+| M-03ay | `_degenerateSweep` drops its near-2π branch | engine `test/document/grips_test.dart`: an arc end stretch landing within tolerance of a full turn is degenerate (new) |
+| M-03az | `resolveDragPoint` no longer resets `objectKind` and `grid` | engine `test/index/drag_snap_test.dart`: a reused `DragPoint` clears them between calls (new) |
+| M-03ba | `GripCache` rebuilds on a hover-only selection notification | `test/grip_cache_test.dart`: a hover change does not reset `hot` (new; Ruling 03-19) |
+| M-03bb | `hitTest` keeps the farther grip (`d > bestDistance`) | `test/grip_cache_test.dart`: `hitTest` picks the nearer object (new) |
+| M-03bc | `_endDrag` never removes the camera listener | `test/select_tool_drag_test.dart` T14, extended: one camera listener per live drag (Ruling 03-7) |
+| M-03bd | a centre grip's base is the resolved press point, not the grip | `test/select_tool_drag_test.dart` T8, pressed 5 px off the grip |
+| M-03be | class 3b toggles the selection before the capability check | `test/select_tool_drag_test.dart`: a refused 3b move toggles once, at release (new; Ruling 03-6) |
+| M-03bf | the grip buffer is reallocated every frame | `test/selection_overlay_grips_test.dart`: the buffer is reallocated only when the count changes (new; Ruling 03-10) |
+| M-03bf′ | the grip buffer only grows (`<` for `!=`) | the same test: 300 grips then 10 draws 10, not 300 stale points |
+| M-03bg | the arc reshape preview drops the origin from its centre | `test/selection_overlay_grips_test.dart`: an arc reshape preview is rebased too (new) |
+
+**Amended at execution (Plan 03, 2026-09-23), final fix wave:** the final
+whole-branch review found five more unguarded behaviours, M-03bh…M-03bl.
+All five were killed. M-03bl guards a production fix: a shift key-down or
+key-up mid-drag now re-targets from the last screen point at once, where it
+used to wait for the next pointer move. `GripDrag._capture`'s `read` →
+`peek` was fired too and is **equivalent** by construction:
+`GeometryStore.replace` installs fresh buffers, so a captured view never
+sees a later edit. The tally is 68 exercised: 65 killed, M-03e the designed
+survivor, and 2 equivalent.
+
+A y-flipped rotation is a reflection, so `gripCamera`'s matrix has `b == c`
+bit for bit, and an `m.b`/`m.c` transposition cannot be seen under it.
+M-03bh's test therefore also runs under `gripCamera(flipY: false)`.
+
+| id | mutation | must go red |
+|---|---|---|
+| M-03bh | `_paintGrips` projects x with `m.b` for `m.c` | `test/selection_overlay_grips_test.dart` P2, extended: every drawn grip pair equals its grip's screen point, under both cameras |
+| M-03bi | the rotation disc is drawn at its anchor, not its centre | `test/selection_overlay_grips_test.dart` P4, extended: the disc's centre and 4 px radius |
+| M-03bj | the circle reshape preview drops the origin from its centre | `test/selection_overlay_grips_test.dart`: a circle reshape preview is rebased too (new) |
+| M-03bk | a hover from grip to grip of one object does not notify | `test/select_tool_drag_test.dart`: grip-to-grip hover repaints once (new) |
+| M-03bl | a shift key mid-drag sets `_lastShift` but does not re-target | `test/select_tool_drag_test.dart`: shift pressed or released mid-drag re-targets at once (new) |
+
 ### Differential check
 
 `rigidTransformLeaf` is checked against an oracle that shares no code with
@@ -761,6 +979,20 @@ it:
 
 The trial count, the seed and the worst residual per kind are pasted into
 the results note.
+
+**Amended at execution (Plan 03, 2026-09-23):** the tolerance's scale is
+**`max(2e6, |a|, |b|)`**, not `max(|a|, |b|)` (Ruling 03-16). The bound is
+`|a − b| <= max(1e-12, 256 · 2⁻⁵² · max(2e6, |a|, |b|))`.
+- A rotated sample can land near zero while its operands sit near 2e6.
+  Cancellation then leaves about 1e-10 of absolute error against a 1e-12
+  floor, and at 200 trials that failed spuriously a few times per run.
+- `2e6` is the trial range this section already names, so the bound becomes
+  the "about 1.1e-7" stated above everywhere.
+- It still cannot hide an angle error: the smallest mutated error is `r·θ ≥
+  1 × 1.5e-3`.
+
+The run recorded worst residuals of 0.0 (point), 2.9e-10 (line) and 4.7e-10
+(polyline, circle, arc, text) in the Plan 03 results note.
 
 ### Widget tests
 

@@ -1,0 +1,616 @@
+### Task 6: `GripDrag` — captures, `T`, the one command, revalidation, permissions
+
+**Files:**
+- Create: `lib/src/grip_drag.dart`
+- Modify: `lib/jet_cad_2d_flutter.dart`: add `export 'src/grip_drag.dart';`
+  after `src/grip_cache.dart`.
+- Test: `test/grip_drag_test.dart` (D1–D11)
+
+**Interfaces:**
+- Consumes: `leafGrips`, `reshapeLeaf`, `rigidTransformLeaf` and `Grip`
+  (Tasks 1–2); `SetEntityGeometryCommand`, `TransformNodeCommand`,
+  `CompoundCommand`, `DraftPermissions` and `Capability`; `Node ==`;
+  `GeometryPayload ==`; `SelectionKey`.
+- Produces:
+  - `enum DragKind { band, move, rotate, reshape }`
+  - `const double kRotationStep = math.pi / 12;`
+  - `final class GripDrag`:
+    - `static GripDrag? move(DraftDocument, Iterable<SelectionKey>)`
+    - `static GripDrag? rotate(DraftDocument, Iterable<SelectionKey>, Vector2 pivot, Vector2 press)`
+    - `static GripDrag? reshape(DraftDocument, SelectionKey, Grip)`
+    - fields `kind`, `grip`, `base`, `target`
+    - getters `theta`, `transform`, `previewPayload`, `leafKind`,
+      `capabilities`
+    - `bool permittedBy(DraftPermissions)`
+    - `void moveTo(Vector2 world)` (move and reshape)
+    - `void rotateTo(Vector2 pointer, {required bool step})` (rotate)
+    - `DraftCommand? command(DraftPermissions permissions)`
+
+- [ ] **Step 1: Write the failing test.**
+
+```dart
+// test/grip_drag_test.dart
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/src/grip_drag.dart';
+import 'package:jet_cad_2d_flutter/src/selection.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import 'support/grip_fixture.dart';
+
+SelectionKey k(Handle h) => SelectionKey.root(h);
+
+Handle targetOf(DraftCommand c) => switch (c) {
+      SetEntityGeometryCommand(:final handle) => handle,
+      TransformNodeCommand(:final handle) => handle,
+      _ => throw StateError('unexpected member $c'),
+    };
+
+/// The next double above a positive [x].
+double nextUp(double x) {
+  final b = ByteData(8)..setFloat64(0, x);
+  b.setInt64(0, b.getInt64(0) + 1);
+  return b.getFloat64(0);
+}
+
+/// A *decision*-style comparison — what M-03e swaps the undo assertion to.
+bool payloadsClose(GeometryPayload a, GeometryPayload b) {
+  if (a.coords.length != b.coords.length ||
+      a.scalars.length != b.scalars.length) {
+    return false;
+  }
+  for (var i = 0; i < a.coords.length; i++) {
+    if (!Tolerance.standard.eq(a.coords[i], b.coords[i])) return false;
+  }
+  for (var i = 0; i < a.scalars.length; i++) {
+    if (!Tolerance.standard.eq(a.scalars[i], b.scalars[i])) return false;
+  }
+  return true;
+}
+
+/// A rotate of a leaf, an arc, the rotated group and an instance, executed
+/// and then undone. Returns what was stored before.
+(Map<Handle, GeometryPayload>, Map<Handle, Node>) rotateAndUndo(GripScene s) {
+  final doc = s.document;
+  final payloads = {for (final h in [s.line, s.arcNeg]) h: payloadOf(doc, h)};
+  final nodes = {for (final h in [s.group, s.instA]) h: doc.tree[h]!};
+  final drag = GripDrag.rotate(doc,
+      [k(s.line), k(s.arcNeg), k(s.group), k(s.instA)],
+      Vector2(7200, 3150), Vector2(7300, 3150))!;
+  drag.rotateTo(Vector2(7250, 3240), step: false);
+  doc.commands.execute(drag.command(DraftPermissions.all)!);
+  expect(payloadOf(doc, s.line), isNot(payloads[s.line]),
+      reason: 'the fixture really moved');
+  doc.commands.undo();
+  return (payloads, nodes);
+}
+
+void main() {
+  test('a move is one CompoundCommand labelled Move, members in ascending '
+      'handle order (M-03an)', () {
+    final s = gripScene();
+    final drag = GripDrag.move(
+        s.document, [k(s.instA), k(s.group), k(s.arcNeg), k(s.line)])!;
+    expect(drag.kind, DragKind.move);
+    drag.base.setValues(7046, 3032);
+    drag.moveTo(Vector2(7083.5, 3013.25));
+    expect(drag.transform!.e, 37.5);
+    expect(drag.transform!.f, -18.75);
+    final command = drag.command(DraftPermissions.all)! as CompoundCommand;
+    expect(command.label, 'Move');
+    expect([for (final c in command.children) targetOf(c)],
+        [s.line, s.arcNeg, s.group, s.instA]);
+    expect([for (final c in command.children) c.runtimeType], [
+      SetEntityGeometryCommand,
+      SetEntityGeometryCommand,
+      TransformNodeCommand,
+      TransformNodeCommand,
+    ]);
+  });
+
+  test('a rotated group moves by T.multiply(node.transform) (M-03i)', () {
+    final s = gripScene();
+    final doc = s.document;
+    final g0 = doc.tree[s.group]! as GroupNode;
+    expect(g0.transform.b, isNot(0.0), reason: "the fixture's group is rotated");
+    final leaf0 = payloadOf(doc, s.groupLeaf);
+    final drag = GripDrag.move(doc, [k(s.group)])!..base.setValues(7400, 3300);
+    drag.moveTo(Vector2(7437.5, 3281.25));
+    doc.commands.execute(drag.command(DraftPermissions.all)!);
+    final g1 = doc.tree[s.group]! as GroupNode;
+    final want = Transform2.translation(37.5, -18.75).multiply(g0.transform);
+    final got = g1.transform;
+    for (final (a, b) in [
+      (got.a, want.a),
+      (got.b, want.b),
+      (got.c, want.c),
+      (got.d, want.d),
+      (got.e, want.e),
+      (got.f, want.f),
+    ]) {
+      expect(a, closeTo(b, 1e-9));
+    }
+    expect(g1.children, g0.children);
+    expect(payloadOf(doc, s.groupLeaf), leaf0,
+        reason: "the group's leaf lives in the group's space; only the node "
+            'moves');
+  });
+
+  test('an instance move rewrites the instance node, never the definition '
+      '(M-03c)', () {
+    final s = gripScene();
+    final doc = s.document;
+    final a0 = doc.tree[s.instA]! as InstanceNode;
+    final b0 = doc.tree[s.instB]!;
+    final leaf0 = payloadOf(doc, s.defLeaf);
+    final drag = GripDrag.move(doc, [k(s.instA)])!..base.setValues(7460, 3055);
+    drag.moveTo(Vector2(7431.25, 3102.5));
+    doc.commands.execute(drag.command(DraftPermissions.all)!);
+    final a1 = doc.tree[s.instA]! as InstanceNode;
+    expect(a1.transform.e, closeTo(a0.transform.e - 28.75, 1e-9));
+    expect(a1.transform.f, closeTo(a0.transform.f + 47.5, 1e-9));
+    expect(a1.definition, a0.definition);
+    expect(doc.tree[s.instB], b0, reason: 'the other instance is untouched');
+    expect(payloadOf(doc, s.defLeaf), leaf0, reason: 'so is the definition');
+  });
+
+  test("a rotate is labelled Rotate and turns an arc's start angle (M-03h)",
+      () {
+    final s = gripScene();
+    final doc = s.document;
+    final drag = GripDrag.rotate(
+        doc, [k(s.arcPos)], Vector2(7100, 3100), Vector2(7200, 3100))!;
+    drag.rotateTo(
+        Vector2(7100 + 100 * math.cos(0.7), 3100 + 100 * math.sin(0.7)),
+        step: false);
+    expect(drag.theta, closeTo(0.7, 1e-12));
+    final command = drag.command(DraftPermissions.all)! as CompoundCommand;
+    expect(command.label, 'Rotate');
+    doc.commands.execute(command);
+    final arc = payloadOf(doc, s.arcPos);
+    expect(arc.scalars[0], 40);
+    expect(arc.scalars[1], closeTo(1.0, 1e-12));
+    expect(arc.scalars[2], 1.9);
+    // The centre (7050, 3200) is (−50, 100) from the pivot.
+    expect(arc.coords[0],
+        closeTo(7100 + math.cos(0.7) * -50 - math.sin(0.7) * 100, 1e-9));
+    expect(arc.coords[1],
+        closeTo(3100 + math.sin(0.7) * -50 + math.cos(0.7) * 100, 1e-9));
+  });
+
+  test('a reshape is one CompoundCommand labelled Stretch', () {
+    final s = gripScene();
+    final doc = s.document;
+    final grip = leafGrips(EntityKind.line, payloadOf(doc, s.line))[1];
+    final drag = GripDrag.reshape(doc, k(s.line), grip)!;
+    expect(drag.kind, DragKind.reshape);
+    expect(drag.leafKind, EntityKind.line);
+    expect([drag.base.x, drag.base.y], [7130, 3060]);
+    drag.moveTo(Vector2(7150.5, 3070.25));
+    expect(drag.previewPayload!.coords, [7010, 3020, 7150.5, 3070.25]);
+    final command = drag.command(DraftPermissions.all)! as CompoundCommand;
+    expect(command.label, 'Stretch');
+    expect(command.children, hasLength(1));
+    doc.commands.execute(command);
+    expect(payloadOf(doc, s.line).coords, [7010, 3020, 7150.5, 3070.25]);
+  });
+
+  test('a drag that changes nothing builds no command (M-03p)', () {
+    final s = gripScene();
+    final doc = s.document;
+    final move = GripDrag.move(doc, [k(s.line)])!..base.setValues(7046, 3032);
+    move.moveTo(Vector2(7046, 3032));
+    expect(move.command(DraftPermissions.all), isNull,
+        reason: 'Δ == (0, 0) exactly');
+    final rotate = GripDrag.rotate(
+        doc, [k(s.line)], Vector2(7070, 3040), Vector2(7100, 3080))!;
+    rotate.rotateTo(Vector2(7100, 3080), step: false);
+    expect(rotate.command(DraftPermissions.all), isNull,
+        reason: 'θ == 0 exactly');
+    final end = leafGrips(EntityKind.line, payloadOf(doc, s.line))[1];
+    final same = GripDrag.reshape(doc, k(s.line), end)!
+      ..moveTo(Vector2(7130, 3060));
+    expect(same.command(DraftPermissions.all), isNull,
+        reason: 'a payload == the stored one');
+    final radius = leafGrips(EntityKind.circle, payloadOf(doc, s.circle))[1];
+    final flat = GripDrag.reshape(doc, k(s.circle), radius)!
+      ..moveTo(Vector2(7300, 3250));
+    expect(flat.previewPayload, isNull);
+    expect(flat.command(DraftPermissions.all), isNull,
+        reason: 'a degenerate reshape');
+    expect(doc.commands.undoDepth, 0);
+  });
+
+  test('release revalidates against the press-time captures (M-03t)', () {
+    final s = gripScene();
+    final doc = s.document;
+    final drag = GripDrag.move(doc, [k(s.line), k(s.instA)])!
+      ..base.setValues(7046, 3032);
+    drag.moveTo(Vector2(7080, 3010));
+    expect(drag.command(DraftPermissions.all), isNotNull);
+    doc.commands.execute(SetEntityGeometryCommand(
+        s.line,
+        GeometryPayload(
+            coords: Float64List.fromList([7010, 3020, 7140, 3080]),
+            scalars: Float64List(0))));
+    expect(drag.command(DraftPermissions.all), isNull,
+        reason: 'the leaf is not == its capture');
+    doc.commands.undo();
+    expect(drag.command(DraftPermissions.all), isNotNull,
+        reason: 'undo restored it exactly, so the capture matches again');
+    doc.commands
+        .execute(TransformNodeCommand(s.instA, Transform2.translation(1, 2)));
+    expect(drag.command(DraftPermissions.all), isNull,
+        reason: 'the node is not == its capture');
+    doc.commands.undo();
+    doc.commands.execute(RemoveEntityCommand(s.line));
+    expect(drag.command(DraftPermissions.all), isNull,
+        reason: 'a target that is gone, with no throw');
+  });
+
+  test('a refused member cancels the whole drag (M-03k)', () {
+    final s = gripScene();
+    final doc = s.document;
+    final drag = GripDrag.move(doc, [k(s.line), k(s.instA)])!
+      ..base.setValues(7046, 3032);
+    drag.moveTo(Vector2(7080, 3010));
+    expect(drag.capabilities, {Capability.geometry, Capability.transform});
+    expect(drag.permittedBy(DraftPermissions.all), isTrue);
+    expect(drag.permittedBy(DraftPermissions.runtime), isFalse);
+    expect(drag.command(DraftPermissions.runtime), isNull,
+        reason: 'all or nothing: the instance is permitted, the line is not');
+    final table = GripDrag.move(doc, [k(s.instA)])!;
+    expect(table.capabilities, {Capability.transform});
+    expect(table.permittedBy(DraftPermissions.runtime), isTrue);
+  });
+
+  test('fills are skipped; a fills-only selection has no drag (M-03am)', () {
+    final s = gripScene();
+    final doc = s.document;
+    final region = AddRegionCommand.allocate(
+      seed: doc.handleSeed,
+      owner: doc.rootHandle,
+      boundaryKind: EntityKind.polyline,
+      boundaryPayload: GeometryPayload(
+          coords: Float64List.fromList(
+              [7600, 3000, 7700, 3000, 7700, 3100, 7600, 3000]),
+          scalars: Float64List(0)),
+      layer: ReservedHandles.layerZero,
+      fillColor: const TrueColor(0x8844AA),
+      boundaryColor: const ByLayerColor(),
+    );
+    doc.commands.execute(region);
+    expect(GripDrag.move(doc, [k(region.fill.handle)]), isNull);
+    final drag = GripDrag.move(doc, [k(region.fill.handle), k(s.line)])!
+      ..base.setValues(7046, 3032);
+    drag.moveTo(Vector2(7080, 3010));
+    final command = drag.command(DraftPermissions.all)! as CompoundCommand;
+    expect([for (final c in command.children) targetOf(c)], [s.line]);
+  });
+
+  test('undo restores every stored value with == (spec D11; M-03e is the '
+      'designed survivor)', () {
+    final s = gripScene();
+    final doc = s.document;
+    final (payloads, nodes) = rotateAndUndo(s);
+    // GeometryPayload == is exact per double. Transform2 is never compared
+    // with == (object identity); the nodes are compared by value.
+    expect(payloadOf(doc, s.line), payloads[s.line]);
+    expect(payloadOf(doc, s.arcNeg), payloads[s.arcNeg]);
+    expect(doc.tree[s.group], nodes[s.group]);
+    expect(doc.tree[s.instA], nodes[s.instA]);
+  });
+
+  test('the undo assertion enforces ==: one ulp is caught (M-03e '
+      'companion, Ruling 03-20)', () {
+    final s = gripScene();
+    final doc = s.document;
+    final (payloads, _) = rotateAndUndo(s);
+    final restored = payloadOf(doc, s.line);
+    final original = payloads[s.line]!;
+    final nudged = GeometryPayload(
+        coords: Float64List.fromList(restored.coords)
+          ..[0] = nextUp(restored.coords[0]),
+        scalars: Float64List.fromList(restored.scalars));
+    expect(nudged.coords[0], isNot(restored.coords[0]));
+    expect(nudged == original, isFalse,
+        reason: '== sees one ulp: the undo test above would go red on it');
+    expect(payloadsClose(nudged, original), isTrue,
+        reason: 'Tolerance does not — which is why M-03e survives');
+  });
+}
+```
+
+- [ ] **Step 2: Run it to fail.** `CI=true flutter test
+  test/grip_drag_test.dart` → compile error: `grip_drag.dart` does not
+  exist.
+
+- [ ] **Step 3: Implement.**
+
+```dart
+// lib/src/grip_drag.dart
+import 'dart:math' as math;
+
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import 'selection.dart';
+
+/// What a `SelectTool` drag is doing (spec D5).
+enum DragKind { band, move, rotate, reshape }
+
+/// Shift's rotation step (spec D8): 15°.
+const double kRotationStep = math.pi / 12;
+
+/// What release will rewrite, read at press (spec D4).
+sealed class _Capture {
+  const _Capture(this.handle);
+  final Handle handle;
+}
+
+final class _LeafCapture extends _Capture {
+  const _LeafCapture(super.handle, this.entityKind, this.payload);
+  final EntityKind entityKind;
+
+  /// A `read` copy, never a `peek`: the store's own buffer changes under an
+  /// edit.
+  final GeometryPayload payload;
+}
+
+final class _NodeCapture extends _Capture {
+  const _NodeCapture(super.handle, this.node);
+
+  /// `GroupNode`/`InstanceNode ==` is exact component equality.
+  final Node node;
+}
+
+/// One drag's state and its one command (spec D2, D4).
+///
+/// Nothing is dispatched while the drag lives. [command] builds a single
+/// [CompoundCommand], even for one member, so the undo label says `Move`,
+/// `Rotate` or `Stretch`. It returns null — dispatch nothing — when:
+/// - a target is gone or changed since press (revalidation);
+/// - a member's capability is refused (all or nothing);
+/// - the drag changes nothing.
+final class GripDrag {
+  GripDrag._(this.document, this.kind, this._captures, [this.grip]);
+
+  /// A move of every movable key in [keys]. A fill follows its boundary and
+  /// an attrib is never root-level, so both are skipped (D4). Null when
+  /// nothing is left.
+  static GripDrag? move(DraftDocument document, Iterable<SelectionKey> keys) {
+    final captures = _capture(document, keys);
+    return captures.isEmpty
+        ? null
+        : GripDrag._(document, DragKind.move, captures);
+  }
+
+  /// A rotate of [keys] about [pivot], measured from the press at [press].
+  static GripDrag? rotate(DraftDocument document, Iterable<SelectionKey> keys,
+      Vector2 pivot, Vector2 press) {
+    final captures = _capture(document, keys);
+    if (captures.isEmpty) return null;
+    final drag = GripDrag._(document, DragKind.rotate, captures);
+    drag.base.setFrom(pivot);
+    drag.target.setFrom(press);
+    drag._pressAngle = math.atan2(press.y - pivot.y, press.x - pivot.x);
+    return drag;
+  }
+
+  /// A reshape of [key]'s leaf by [grip]; its base is the grip, exactly.
+  static GripDrag? reshape(
+      DraftDocument document, SelectionKey key, Grip grip) {
+    if (grip.role == GripRole.move) return null;
+    final slot = document.entities.slotOf(key.target);
+    if (slot == null) return null;
+    final kind = document.entities.kindAt(slot);
+    if (kind == EntityKind.fill || kind == EntityKind.attrib) return null;
+    final capture = _LeafCapture(key.target, kind,
+        document.geometry.read(document.entities.geomIndexAt(slot)));
+    final drag = GripDrag._(document, DragKind.reshape, [capture], grip);
+    drag.base.setValues(grip.x, grip.y);
+    drag.target.setValues(grip.x, grip.y);
+    return drag;
+  }
+
+  /// In ascending target handle order: that is the members' order (D4).
+  static List<_Capture> _capture(
+      DraftDocument document, Iterable<SelectionKey> keys) {
+    final sorted = keys.toList()
+      ..sort((a, b) => a.target.value.compareTo(b.target.value));
+    final out = <_Capture>[];
+    for (final key in sorted) {
+      final node = document.tree[key.target];
+      if (node != null) {
+        out.add(_NodeCapture(key.target, node));
+        continue;
+      }
+      final slot = document.entities.slotOf(key.target);
+      if (slot == null) continue;
+      final kind = document.entities.kindAt(slot);
+      if (kind == EntityKind.fill || kind == EntityKind.attrib) continue;
+      out.add(_LeafCapture(key.target, kind,
+          document.geometry.read(document.entities.geomIndexAt(slot))));
+    }
+    return out;
+  }
+
+  final DraftDocument document;
+  final DragKind kind;
+  final List<_Capture> _captures;
+
+  /// The grabbed grip; non-null only for a reshape.
+  final Grip? grip;
+
+  /// World. A move's or a reshape's base point; a rotate's pivot.
+  final Vector2 base = Vector2.zero();
+
+  /// World. The resolved target; for a rotate, the pointer.
+  final Vector2 target = Vector2.zero();
+
+  double _pressAngle = 0;
+  double _theta = 0;
+  Transform2? _transform;
+  GeometryPayload? _preview;
+
+  /// A rotate's angle, radians, in (−π, π] (Ruling 03-14).
+  double get theta => _theta;
+
+  /// A move's or a rotate's world `T`; cached per event, so a painter's
+  /// per-frame read allocates nothing.
+  Transform2? get transform => _transform;
+
+  /// A reshape's payload at the current target; null when degenerate.
+  GeometryPayload? get previewPayload => _preview;
+
+  /// A reshape's entity kind; null otherwise.
+  EntityKind? get leafKind => kind == DragKind.reshape
+      ? (_captures.single as _LeafCapture).entityKind
+      : null;
+
+  /// A leaf needs `geometry`; a group or an instance needs `transform`
+  /// (D2).
+  Set<Capability> get capabilities => {
+        for (final c in _captures)
+          c is _NodeCapture ? Capability.transform : Capability.geometry,
+      };
+
+  bool permittedBy(DraftPermissions permissions) =>
+      capabilities.every(permissions.allows);
+
+  /// A move or a reshape follows [world].
+  void moveTo(Vector2 world) {
+    target.setFrom(world);
+    switch (kind) {
+      case DragKind.move:
+        _transform = Transform2.translation(target.x - base.x, target.y - base.y);
+      case DragKind.reshape:
+        final c = _captures.single as _LeafCapture;
+        _preview = reshapeLeaf(c.entityKind, c.payload, grip!, target);
+      case DragKind.rotate:
+      case DragKind.band:
+        throw StateError('moveTo on a ${kind.name} drag');
+    }
+  }
+
+  /// A rotate follows [pointer]. With [step], θ rounds to the nearest
+  /// multiple of [kRotationStep] (D8).
+  void rotateTo(Vector2 pointer, {required bool step}) {
+    if (kind != DragKind.rotate) {
+      throw StateError('rotateTo on a ${kind.name} drag');
+    }
+    target.setFrom(pointer);
+    var theta =
+        math.atan2(pointer.y - base.y, pointer.x - base.x) - _pressAngle;
+    if (theta > math.pi) {
+      theta -= 2 * math.pi;
+    } else if (theta <= -math.pi) {
+      theta += 2 * math.pi;
+    }
+    if (step) theta = (theta / kRotationStep).roundToDouble() * kRotationStep;
+    _theta = theta;
+    _transform = Transform2.translation(base.x, base.y)
+        .multiply(Transform2.rotation(theta))
+        .multiply(Transform2.translation(-base.x, -base.y));
+  }
+
+  /// The one command release dispatches, or null for none (spec D4).
+  DraftCommand? command(DraftPermissions permissions) {
+    // The backstop for any document change mid-drag, whatever its source.
+    if (!_revalidate()) return null;
+    final members = <DraftCommand>[];
+    switch (kind) {
+      case DragKind.reshape:
+        final c = _captures.single as _LeafCapture;
+        final next = _preview;
+        if (next == null || next == c.payload) return null;
+        members.add(SetEntityGeometryCommand(c.handle, next));
+      case DragKind.move:
+      case DragKind.rotate:
+        final t = _transform;
+        if (t == null) return null;
+        if (kind == DragKind.move &&
+            target.x - base.x == 0 &&
+            target.y - base.y == 0) {
+          return null;
+        }
+        if (kind == DragKind.rotate && _theta == 0) return null;
+        for (final c in _captures) {
+          switch (c) {
+            case _LeafCapture(:final handle, :final entityKind, :final payload):
+              members.add(SetEntityGeometryCommand(
+                  handle, rigidTransformLeaf(entityKind, payload, t)));
+            case _NodeCapture(:final handle, :final node):
+              // After the node's own transform (D4); world is root space,
+              // so there is no conjugation.
+              members.add(TransformNodeCommand(handle, t.multiply(node.transform)));
+          }
+        }
+      case DragKind.band:
+        throw StateError('a band has no command');
+    }
+    // All or nothing: a move that leaves some objects behind breaks the
+    // alignment the user was dragging for (D4).
+    if (members.any((m) => !m.capabilities.every(permissions.allows))) {
+      return null;
+    }
+    return CompoundCommand(members,
+        label: switch (kind) {
+          DragKind.move => 'Move',
+          DragKind.rotate => 'Rotate',
+          DragKind.reshape || DragKind.band => 'Stretch',
+        });
+  }
+
+  bool _revalidate() {
+    for (final c in _captures) {
+      switch (c) {
+        case _LeafCapture(:final handle, :final entityKind, :final payload):
+          final slot = document.entities.slotOf(handle);
+          if (slot == null || document.entities.kindAt(slot) != entityKind) {
+            return false;
+          }
+          if (document.geometry.peek(document.entities.geomIndexAt(slot)) !=
+              payload) {
+            return false;
+          }
+        case _NodeCapture(:final handle, :final node):
+          if (document.tree[handle] != node) return false;
+      }
+    }
+    return true;
+  }
+}
+```
+
+Add the export to `lib/jet_cad_2d_flutter.dart`, after
+`src/grip_cache.dart`:
+
+```dart
+export 'src/grip_drag.dart';
+```
+
+- [ ] **Step 4: Run it to pass.** `CI=true flutter test
+  test/grip_drag_test.dart` → all tests pass. Then run the
+  `jet_cad_2d_flutter` gate line.
+- [ ] **Step 5: Commit.**
+
+```bash
+git add packages/jet_cad_2d_flutter/lib/src/grip_drag.dart packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart packages/jet_cad_2d_flutter/test/grip_drag_test.dart
+git commit -m "$(cat <<'EOF'
+feat(render): GripDrag -- captures, T, one CompoundCommand, revalidation
+
+Spec 03 D4: one CompoundCommand labelled Move, Rotate or Stretch, members in
+ascending handle order; leaves by rigidTransformLeaf, nodes by
+T.multiply(node.transform); fills skipped; press-time captures revalidated
+at release; permissions all or nothing; no-op drags dispatch nothing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---

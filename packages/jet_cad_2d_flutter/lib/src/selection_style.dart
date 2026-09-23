@@ -19,3 +19,31 @@ const int kBandFillAlpha = 0x22;
 /// `camera.scale` per frame, so the width on screen holds at any zoom.
 const double kSelectionStrokePixels = 2.0;
 const double kHoverStrokePixels = 1.5;
+
+/// Grip squares (spec D6): side in screen pixels, drawn by `drawRawPoints`
+/// with a square cap at this stroke width.
+const double kGripPixels = 8.0;
+
+/// Stretch and radius grips.
+const Color kGripColor = Color(0xFF1E6FE8);
+
+/// Move (centre) grips.
+const Color kGripMoveColor = Color(0xFF7A3FD1);
+
+/// The hovered grip, and the grabbed one during a drag.
+const Color kGripHotColor = Color(0xFFE8541E);
+
+/// The rotation grip: a disc of this diameter, [kRotationGripOffset] screen
+/// pixels above the top-centre of the selection's screen box (spec D6).
+const double kRotationGripPixels = 8.0;
+const double kRotationGripOffset = 24.0;
+
+/// The drag preview and its guide line (spec D7).
+const Color kPreviewColor = Color(0xFFE8A11E);
+const double kPreviewStrokePixels = 1.5;
+
+/// Snap markers (spec D9).
+const Color kSnapMarkerColor = Color(0xFF2E9E5B);
+const double kSnapMarkerPixels = 10.0;
+const double kSnapMarkerStrokePixels = 1.5;
+const double kGridMarkerPixels = 6.0;

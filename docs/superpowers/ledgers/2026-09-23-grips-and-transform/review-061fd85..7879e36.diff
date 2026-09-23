@@ -1,0 +1,130 @@
+# Review package: 061fd85..7879e36
+
+## Commits
+7879e36 docs: Plan 03 allocation gates and greps
+
+## Files changed
+ docs/superpowers/notes/plan-03-mutation-log.md | 105 +++++++++++++++++++++++++
+ 1 file changed, 105 insertions(+)
+
+## Diff
+diff --git a/docs/superpowers/notes/plan-03-mutation-log.md b/docs/superpowers/notes/plan-03-mutation-log.md
+index d9e2976..a47924b 100644
+--- a/docs/superpowers/notes/plan-03-mutation-log.md
++++ b/docs/superpowers/notes/plan-03-mutation-log.md
+@@ -475,10 +475,115 @@ RED (M-03bf'): CI=true flutter test test/selection_overlay_grips_test.dart -> th
+ restored: diff clean
+ GREEN (restored): CI=true flutter test test/selection_overlay_grips_test.dart -> 7 tests, All tests passed.
+ 
+ ### M-03bg - reshape preview arc, origin subtraction on the centre (Task 8 review; new test)
+ New test: packages/jet_cad_2d_flutter/test/selection_overlay_grips_test.dart, "an arc reshape preview's radius grip is rebased by origin too (M-03bg)" -- reshape-drags arcPos's radius grip under a non-zero rebase origin, then reads the drawn preview Path's exact start point via Path.computeMetrics().single.getTangentForOffset(0) (exact, unlike Path.getBounds()'s conic control-point approximation for a partial sweep) and compares it to the analytically expected rebased start point.
+ GREEN (unmutated): CI=true flutter test test/selection_overlay_grips_test.dart -> 8 tests, All tests passed.
+ edit (mutant): select_tool.dart, _reshapePath, arc case: Offset(c[0] - ox, c[1] - oy) -> Offset(c[0], c[1]) (drops the origin subtraction on the centre)
+ RED (mutant): CI=true flutter test test/selection_overlay_grips_test.dart -> M-03bg test [E] -- Expected: -62.57, Actual: 7105.43, differs by 7168.0 (the origin's own magnitude); 7 passed, 1 failed
+ restored: diff clean
+ GREEN (restored): CI=true flutter test test/selection_overlay_grips_test.dart -> 8 tests, All tests passed.
++
++## Invariants and greps
++
++### Step 1: the two allocation gates, unchanged
++
++```
++$ cd packages/jet_cad_2d && CI=true dart test test/invariants/query_allocation_test.dart
++00:00 +0: loading test/invariants/query_allocation_test.dart
++00:00 +0: (setUpAll)
++00:00 +0: forEachInRect does not allocate in steady state
++00:01 +1: forEachInstanceInRect does not allocate in steady state
++00:01 +2: pickInto does not allocate in steady state, three instances deep
++00:02 +3: snapInto does not allocate in steady state, three instances deep
++00:02 +4: pickInto stays local: an over-wide broad phase would blow the time budget
++00:02 +5: (tearDownAll)
++00:02 +5: All tests passed!
++```
++
++```
++$ cd packages/jet_cad_2d_flutter && CI=true flutter test test/invariants/paint_allocation_test.dart
++00:00 +0: loading .../test/invariants/paint_allocation_test.dart
++00:00 +0: a steady-state frame allocates O(1) per flush, not O(entities)
++00:00 +1: flush hands drawVertices the same Paint object every time, not a call-site-local one
++00:00 +2: load-time triangulation cost, recorded
++LOAD fills=5000 elapsed=64ms
++00:00 +3: All tests passed!
++```
++
++Both invariants pass unchanged. `flutter pub get` ran as part of this
++`flutter test` invocation (dependency resolution banner); `git status --short`
++from the worktree root afterward showed a clean tree, so no
++`analysis_options.yaml` was rewritten and none needed to be checked out.
++
++### Step 2: the greps
++
++```
++$ git diff --stat main..HEAD -- packages/jet_cad_2d/test/invariants packages/jet_cad_2d_flutter/test/invariants
++(no output)
++```
++Empty, as required — the invariants' tests are unedited.
++
++```
++$ git diff --stat main..HEAD -- apps/dev_harness_2d packages/jet_cad_2d/lib/src/index/spatial_index.dart \
++  packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart packages/jet_cad_2d_flutter/lib/src/draft_painter.dart \
++  packages/jet_cad_2d_flutter/lib/src/camera_gesture_detector.dart packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++(no output)
++```
++Empty, as required — the frame path's files and the harness are untouched.
++(`interaction_layer.dart`, changed in Task 7 for the cursor mirror, is not in
++this list per the Task 7 note — it is not a frame-path file for the canvas.)
++
++```
++$ grep -n "dart:ui\|package:flutter" packages/jet_cad_2d/lib/src/document/grips.dart packages/jet_cad_2d/lib/src/index/drag_snap.dart
++(no matches, exit 1)
++```
++Nothing, as required — the engine stays pure Dart.
++
++```
++$ grep -n "rootHandle\|accumulatedTransform" packages/jet_cad_2d_flutter/lib/src/grip_drag.dart
++(no matches, exit 1)
++```
++Nothing, as required — the drag path never reads the root's transform.
++
++```
++$ grep -n "accumulatedTransform" packages/jet_cad_2d_flutter/lib/src/select_tool.dart packages/jet_cad_2d_flutter/lib/src/grip_cache.dart
++(no matches, exit 1)
++```
++Nothing, as required.
++
++```
++$ awk '/void _paintGrips/,/^  }$/' packages/jet_cad_2d_flutter/lib/src/selection_overlay.dart | grep -n "drawRect\|Rect\.\|drawRawPoints"
++24:        canvas.drawRawPoints(PointMode.points, _stretchPoints, _gripPaint);
++27:        canvas.drawRawPoints(PointMode.points, _movePoints, _gripMovePaint);
++34:        canvas.drawRawPoints(PointMode.points, _hotPoint, _gripHotPaint);
++```
++Three `drawRawPoints`, no `Rect`, as required.
++
++```
++$ grep -n "scratch.point" packages/jet_cad_2d/lib/src/index/drag_snap.dart
++70:  //    because the next query rewrites `scratch.point` (invariant 7).
++74:      out.point.setFrom(scratch.point);
++```
++Two lines matched, not the one the brief's annotation names — but line 70 is
++the comment explaining the invariant (it names `scratch.point` in prose), and
++line 74 is the sole line of code holding it, via `setFrom`. Read in context
++(`packages/jet_cad_2d/lib/src/index/drag_snap.dart:68-78`), the invariant
++holds: `SnapResult.point` is copied immediately into `out.point` and never
++retained past the next query. No production code changed.
++
++```
++$ grep -n "transform ==\|transform, same\|\.transform)\s*;\s*$" packages/jet_cad_2d_flutter/test/grip_drag_test.dart packages/jet_cad_2d_flutter/test/select_tool_drag_test.dart
++packages/jet_cad_2d_flutter/test/grip_drag_test.dart:102:    final want = Transform2.translation(37.5, -18.75).multiply(g0.transform);
++```
++One match, where the brief's annotation says "nothing" — but it is a false
++positive of the pattern, not a `==` comparison. Line 102
++(`packages/jet_cad_2d_flutter/test/grip_drag_test.dart:91-114`) builds the
++expected transform via `.multiply(g0.transform)`; the actual comparison two
++lines later destructures both transforms into their six components (`a`..`f`)
++and asserts each with `closeTo(..., 1e-9)` — a tolerance comparison, never
++`Transform2 ==`. No production code changed.
++
++Both deviations above are grep-pattern false positives (a comment and a
++`.multiply(...)` call, respectively, both coincidentally matching the text
++pattern) — not violations of the invariants they were written to catch. Read
++in context, both files comply with their respective rules.
