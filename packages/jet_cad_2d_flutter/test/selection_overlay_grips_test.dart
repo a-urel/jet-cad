@@ -131,6 +131,55 @@ void main() {
   });
 
   test(
+      'the stretch buffer is reallocated only when the count changes, and '
+      "never draws a stale grip (Ruling 03-10; M-03bf, M-03bf')", () {
+    final doc = DraftDocument.empty();
+    List<double> zigzag(int n) => [
+          for (var i = 0; i < n; i++) ...[
+            7000.0 + i * 0.5,
+            i.isEven ? 3000.0 : 3002.0,
+          ],
+        ];
+    final big =
+        addEntity(doc, doc.rootHandle, EntityKind.polyline, zigzag(300), []);
+    final small =
+        addEntity(doc, doc.rootHandle, EntityKind.polyline, zigzag(10), []);
+    final rig = gripRig(doc, camera: gripCamera(centre: Vector2(7050, 3010)));
+    rig.selection.replace([k(big)]);
+    // ONE painter instance across every frame: the buffer field lives on
+    // the painter, not on GripCache.
+    final painter = overlayOf(rig);
+
+    Float32List stretchOf(SpyCanvas spy) {
+      final raw = [
+        for (final c in spy.calls)
+          if (c.name == 'drawRawPoints') c,
+      ];
+      return raw[0].args[1] as Float32List;
+    }
+
+    final spy1 = SpyCanvas();
+    painter.paint(spy1, kView);
+    final first = stretchOf(spy1);
+    expect(first.length, 2 * 300);
+
+    rig.selection.replace([k(small)]);
+    final spy2 = SpyCanvas();
+    painter.paint(spy2, kView);
+    final second = stretchOf(spy2);
+    expect(second.length, 2 * 10,
+        reason: 'the buffer must shrink to the new count, not keep drawing '
+            "300 grips' worth of stale points (M-03bf')");
+
+    final spy3 = SpyCanvas();
+    painter.paint(spy3, kView);
+    final third = stretchOf(spy3);
+    expect(identical(second, third), isTrue,
+        reason: 'the count did not change between these two frames: the '
+            'same Float32List instance is reused, not reallocated (M-03bf)');
+  });
+
+  test(
       'no leaf grips are drawn under a geometry denial; the rotation grip '
       'still is (M-03ad)', () {
     final s = gripScene();
