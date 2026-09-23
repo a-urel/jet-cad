@@ -169,34 +169,40 @@ void main() {
   test(
       'hitTest: the nearest, then the greater handle, then the lower '
       'ordinal (M-03ai)', () {
-    final doc = DraftDocument.empty();
-    final wallA = addEntity(
-        doc, doc.rootHandle, EntityKind.line, [7600, 3400, 7650, 3400], []);
-    final wallB = addEntity(
-        doc, doc.rootHandle, EntityKind.line, [7650, 3400, 7650, 3450], []);
-    final twin = addEntity(doc, doc.rootHandle, EntityKind.polyline,
-        [7800, 3400, 7800, 3400, 7850, 3420], []);
-    final (selection, _, grips) = wire(doc);
-    selection.replace([k(wallA), k(wallB), k(twin)]);
-    final camera = gripCamera(centre: Vector2(7700, 3420));
-    addTearDown(camera.dispose);
-    final m = camera.value.worldToScreenMatrix;
+    // The unflipped camera exposes an `m.b`/`m.c` transposition in the
+    // hit projection that the flipped one's `b == c` hides.
+    for (final flipY in const [true, false]) {
+      final doc = DraftDocument.empty();
+      final wallA = addEntity(
+          doc, doc.rootHandle, EntityKind.line, [7600, 3400, 7650, 3400], []);
+      final wallB = addEntity(
+          doc, doc.rootHandle, EntityKind.line, [7650, 3400, 7650, 3450], []);
+      final twin = addEntity(doc, doc.rootHandle, EntityKind.polyline,
+          [7800, 3400, 7800, 3400, 7850, 3420], []);
+      final (selection, _, grips) = wire(doc);
+      selection.replace([k(wallA), k(wallB), k(twin)]);
+      final camera = gripCamera(centre: Vector2(7700, 3420), flipY: flipY);
+      addTearDown(camera.dispose);
+      final m = camera.value.worldToScreenMatrix;
 
-    final corner =
-        grips.hitTest(screenOf(camera, 7650, 3400) + const Offset(2, 1), m);
-    expect(grips.grips[corner].key.target, wallB,
-        reason: 'coincident grips of two objects: the greater handle moves');
-    expect(grips.grips[corner].ordinal, 0);
-    final dup = grips.hitTest(screenOf(camera, 7800, 3400), m);
-    expect(grips.grips[dup].key.target, twin);
-    expect(grips.grips[dup].ordinal, 0,
-        reason: "one object's coincident grips: the lower ordinal");
-    final near =
-        grips.hitTest(screenOf(camera, 7600, 3400) + const Offset(5, 0), m);
-    expect(grips.grips[near].key.target, wallA);
-    expect(
-        grips.hitTest(screenOf(camera, 7600, 3400) + const Offset(8, 0), m), -1,
-        reason: 'kGripHitPixels is 7');
+      final corner =
+          grips.hitTest(screenOf(camera, 7650, 3400) + const Offset(2, 1), m);
+      expect(corner, isNonNegative, reason: 'flipY $flipY: a grip is hit');
+      expect(grips.grips[corner].key.target, wallB,
+          reason: 'coincident grips of two objects: the greater handle moves');
+      expect(grips.grips[corner].ordinal, 0);
+      final dup = grips.hitTest(screenOf(camera, 7800, 3400), m);
+      expect(grips.grips[dup].key.target, twin);
+      expect(grips.grips[dup].ordinal, 0,
+          reason: "one object's coincident grips: the lower ordinal");
+      final near =
+          grips.hitTest(screenOf(camera, 7600, 3400) + const Offset(5, 0), m);
+      expect(grips.grips[near].key.target, wallA);
+      expect(
+          grips.hitTest(screenOf(camera, 7600, 3400) + const Offset(8, 0), m),
+          -1,
+          reason: 'kGripHitPixels is 7');
+    }
   });
 
   test(

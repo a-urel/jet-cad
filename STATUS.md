@@ -1275,7 +1275,7 @@ into a standing test. Full account:
 | Location | Branch | State |
 |---|---|---|
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and **GPU Plans A, B, C and D** merged |
-| `.claude/worktrees/quizzical-jemison-7537de` | `fix/grip-camera-bc-swap` | head `031bf42`, cut from `plan-03/grips-and-transform` at `66ed4c2`. It gives six grip/overlay tests a `gripCamera(flipY: false)` pass and gives P4 an independent oracle. Seven b/c-transposition mutants were fired, M-03bm … M-03bs, and all were killed. Tests and docs only. Committed, not merged |
+| `.claude/worktrees/quizzical-jemison-7537de` | `fix/grip-camera-bc-swap` | head `031bf42`, cut from `plan-03/grips-and-transform` at `66ed4c2`. It gives six grip/overlay tests a `gripCamera(flipY: false)` pass and gives P4 an independent oracle. Seven b/c-transposition mutants were fired, M-03bm … M-03bs, and all were killed ([log](docs/superpowers/notes/2026-09-23-grip-camera-bc-swap-mutation-log.md)). Tests and docs only. Committed, not merged |
 | `.claude/worktrees/focused-nightingale-510bd1` | `fix/page-copywith-num` | head `8385753`, cut from `main` at `e376ced`: the `PageComponent.copyWith(gridStepMm: <int>)` fix. Committed, not merged. Another session's work |
 | `.claude/worktrees/hungry-haibt-cf67c0` | `fix/root-transform-identity` | head `776f201`, cut from `main` at `c09b747`, before the Plan 03 plan commit: pins the root's transform to the identity. Committed, not merged. Another session's work |
 
@@ -1287,9 +1287,10 @@ is merged and deleted.
 (`2026-09-23-grips-and-transform-design.md`) and this file. It predates the
 merge, so it is expected to conflict with `main` in `STATUS.md`; the spec
 auto-merged in a pre-merge dry run. It closes Plan 03's "root transform"
-debt item. `fix/grip-camera-bc-swap` also edits this file (the branch map
-and the header). **The merge order is the human's decision. Each branch
-that merges after another resolves the `STATUS.md` conflict.**
+debt item. `fix/grip-camera-bc-swap` also edits this file; it has
+`main` (at `49a4625`) merged in, so it merges cleanly unless another branch
+lands on `main` first. **The merge order is the human's decision. Each
+branch that merges after another resolves the `STATUS.md` conflict.**
 `fix/page-copywith-num` touches only `page_component.dart` and its test, so
 it should not conflict.
 

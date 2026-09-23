@@ -658,6 +658,14 @@ Each ruling is one line, with what it costs if it is wrong. The ones marked
   root's transform to the identity. It edits this plan's spec and
   `STATUS.md`, so whichever of the two branches merges second resolves the
   doc conflict; the order is the human's decision.
+- **b/c-transposition blindness under the reflecting test cameras**
+  (parked by the fix wave's re-review; M-03bh). **Closed for the render
+  layer on `fix/grip-camera-bc-swap`, not merged.** Six more tests gained a
+  `gripCamera(flipY: false)` pass, and P4's oracle no longer calls
+  `rotationGripOf`. Seven transposition mutants were fired, M-03bm …
+  M-03bs, and all seven were killed. See
+  [the mutation log](2026-09-23-grip-camera-bc-swap-mutation-log.md). The
+  app's test camera in `planner_grips_test.dart` is still a reflection.
 - **Grips as widgets** give up screen-reader and keyboard access. This is
   recorded for 12 (the app shell), which owns accessibility.
 - **Snapping to the dragged object's ghost** is kept (D8). If the look finds

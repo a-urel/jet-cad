@@ -44,35 +44,46 @@ void main() {
   test(
       'the move/rotate preview is drawn through worldToScreen ∘ T ∘ '
       'translate(origin) (M-03u)', () {
-    final s = gripScene();
-    final rig = gripRig(s.document);
-    rig.selection.replace([k(s.line)]);
-    final grip = rotationGripCentre(rig);
-    pressAndMove(rig, grip, grip + const Offset(-45, 38));
-    final t = rig.tool.selectionPreviewTransform!;
-    expect(t.b.abs(), greaterThan(1e-3),
-        reason: 'a rotation: a translation commutes with the rebase and '
-            'could not tell the two orders apart');
-    final spy = SpyCanvas();
-    overlayOf(rig).paint(spy, kView);
-    final origin = rebaseOriginFor(rig.camera.value.visibleWorld(kView));
-    expect(origin.x, isNot(0.0), reason: 'the rebase origin is non-zero');
-    final transforms = spy.named('transform').toList();
-    expect(transforms, hasLength(2),
-        reason: 'the outline pass, then the preview pass');
-    final preview = Float64List.fromList(transforms[1].args[0] as Float64List);
-    for (final (x, y) in const [(7010.0, 3020.0), (7130.0, 3060.0)]) {
-      final expected =
-          rig.camera.value.worldToScreen(t.transformPoint(Vector2(x, y)));
-      final got = through(preview, x - origin.x, y - origin.y);
-      expect(got.dx, closeTo(expected.x, 1e-6));
-      expect(got.dy, closeTo(expected.y, 1e-6));
+    // The flipped camera's `b == c` hides an `m.b`/`m.c` transposition in
+    // either composition, so the unflipped one runs too.
+    for (final flipY in const [true, false]) {
+      final s = gripScene();
+      final rig = gripRig(s.document, camera: gripCamera(flipY: flipY));
+      rig.selection.replace([k(s.line)]);
+      final grip = rotationGripCentre(rig);
+      pressAndMove(rig, grip, grip + const Offset(-45, 38));
+      final t = rig.tool.selectionPreviewTransform!;
+      expect(t.b.abs(), greaterThan(1e-3),
+          reason: 'a rotation: a translation commutes with the rebase and '
+              'could not tell the two orders apart');
+      final spy = SpyCanvas();
+      overlayOf(rig).paint(spy, kView);
+      final origin = rebaseOriginFor(rig.camera.value.visibleWorld(kView));
+      expect(origin.x, isNot(0.0), reason: 'the rebase origin is non-zero');
+      final transforms = spy.named('transform').toList();
+      expect(transforms, hasLength(2),
+          reason: 'the outline pass, then the preview pass');
+      final outline =
+          Float64List.fromList(transforms[0].args[0] as Float64List);
+      final preview =
+          Float64List.fromList(transforms[1].args[0] as Float64List);
+      for (final (x, y) in const [(7010.0, 3020.0), (7130.0, 3060.0)]) {
+        final still = rig.camera.value.worldToScreen(Vector2(x, y));
+        final kept = through(outline, x - origin.x, y - origin.y);
+        expect(kept.dx, closeTo(still.x, 1e-6), reason: 'flipY $flipY');
+        expect(kept.dy, closeTo(still.y, 1e-6), reason: 'flipY $flipY');
+        final expected =
+            rig.camera.value.worldToScreen(t.transformPoint(Vector2(x, y)));
+        final got = through(preview, x - origin.x, y - origin.y);
+        expect(got.dx, closeTo(expected.x, 1e-6), reason: 'flipY $flipY');
+        expect(got.dy, closeTo(expected.y, 1e-6), reason: 'flipY $flipY');
+      }
+      expect(
+          spy
+              .named('drawPath')
+              .where((c) => c.color?.toARGB32() == kPreviewColor.toARGB32()),
+          hasLength(1));
     }
-    expect(
-        spy
-            .named('drawPath')
-            .where((c) => c.color?.toARGB32() == kPreviewColor.toARGB32()),
-        hasLength(1));
   });
 
   test(
@@ -120,17 +131,19 @@ void main() {
     expect((raw[1].args[1] as Float32List).length, 2, reason: 'one centre');
     expect(raw[1].color?.toARGB32(), kGripMoveColor.toARGB32());
 
-    final (hot, rig) = frame(5, hot: 2);
-    final hotCalls = [
-      for (final c in hot)
-        if (c.name == 'drawRawPoints') c,
-    ];
-    expect(hotCalls, hasLength(3));
-    expect(hotCalls[2].color?.toARGB32(), kGripHotColor.toARGB32());
-    final pts = hotCalls[2].args[1] as Float32List;
-    final third = screenOf(rig.camera, 7001, 3000); // the polyline's vertex 2
-    expect(pts[0], closeTo(third.dx, 1e-3));
-    expect(pts[1], closeTo(third.dy, 1e-3));
+    for (final flipY in const [true, false]) {
+      final (hot, rig) = frame(5, hot: 2, flipY: flipY);
+      final hotCalls = [
+        for (final c in hot)
+          if (c.name == 'drawRawPoints') c,
+      ];
+      expect(hotCalls, hasLength(3));
+      expect(hotCalls[2].color?.toARGB32(), kGripHotColor.toARGB32());
+      final pts = hotCalls[2].args[1] as Float32List;
+      final third = screenOf(rig.camera, 7001, 3000); // polyline vertex 2
+      expect(pts[0], closeTo(third.dx, 1e-3), reason: 'flipY $flipY');
+      expect(pts[1], closeTo(third.dy, 1e-3), reason: 'flipY $flipY');
+    }
 
     // Every drawn pair is its grip's screen point — the point
     // `GripCache.hitTest` hits, projected by a separate expression (M-03bh).
@@ -218,49 +231,75 @@ void main() {
   test(
       'no leaf grips are drawn under a geometry denial; the rotation grip '
       'still is, at its centre (M-03ad, M-03bi)', () {
-    final s = gripScene();
-    final rig = gripRig(s.document);
-    rig.selection.replace([k(s.line), k(s.circle)]);
-    s.document.commands.permissions = DraftPermissions.runtime;
-    final spy = SpyCanvas();
-    overlayOf(rig).paint(spy, kView);
-    expect(spy.named('drawRawPoints'), isEmpty);
-    expect(spy.named('drawCircle'), hasLength(1), reason: 'the rotation grip');
-    // The disc is drawn where `hitsRotationGrip` hits it (spec D6): an
-    // 8 px disc, 24 px above the box's top-centre anchor (M-03bi).
-    final disc = spy.named('drawCircle').single;
-    final centre = rotationGripCentre(rig);
-    expect((disc.args[0] as Offset).dx, closeTo(centre.dx, 1e-9));
-    expect((disc.args[0] as Offset).dy, closeTo(centre.dy, 1e-9));
-    expect(disc.args[1], 4.0, reason: 'an 8 px diameter');
+    // The oracle projects the box's corners through `screenOf`, not through
+    // `rotationGripOf`: a self-referential oracle would move with a defect
+    // in it. The unflipped camera exposes an `m.b`/`m.c` transposition that
+    // the flipped one's `b == c` hides.
+    for (final flipY in const [true, false]) {
+      final s = gripScene();
+      final rig = gripRig(s.document, camera: gripCamera(flipY: flipY));
+      rig.selection.replace([k(s.line), k(s.circle)]);
+      s.document.commands.permissions = DraftPermissions.runtime;
+      final spy = SpyCanvas();
+      overlayOf(rig).paint(spy, kView);
+      expect(spy.named('drawRawPoints'), isEmpty);
+      expect(spy.named('drawCircle'), hasLength(1),
+          reason: 'the rotation grip');
+      // The disc is drawn where `hitsRotationGrip` hits it (spec D6): an
+      // 8 px disc, 24 px above the screen box's top-centre (M-03bi).
+      final box = rig.grips.box!;
+      final corners = [
+        for (final (x, y) in [
+          (box.minX, box.minY),
+          (box.maxX, box.minY),
+          (box.minX, box.maxY),
+          (box.maxX, box.maxY),
+        ])
+          screenOf(rig.camera, x, y),
+      ];
+      final minX = corners.map((c) => c.dx).reduce(math.min);
+      final maxX = corners.map((c) => c.dx).reduce(math.max);
+      final minY = corners.map((c) => c.dy).reduce(math.min);
+      final disc = spy.named('drawCircle').single;
+      expect((disc.args[0] as Offset).dx, closeTo((minX + maxX) / 2, 1e-9),
+          reason: 'flipY $flipY');
+      expect((disc.args[0] as Offset).dy,
+          closeTo(minY - kRotationGripOffset, 1e-9),
+          reason: 'flipY $flipY');
+      expect(disc.args[1], 4.0, reason: 'an 8 px diameter');
+    }
   });
 
   test("a selected point's preview cross sits at T(p) (M-03ae)", () {
-    final s = gripScene();
-    final rig = gripRig(s.document);
-    rig.selection.replace([k(s.point), k(s.line)]);
-    final grip = rotationGripCentre(rig);
-    pressAndMove(rig, grip, grip + const Offset(-60, 30));
-    final t = rig.tool.selectionPreviewTransform!;
-    final spy = SpyCanvas();
-    overlayOf(rig).paint(spy, kView);
-    // The cross's arms are 6 · kSelectionStrokePixels = 12 px long; the
-    // guide line in the same colour is not.
-    final arms = [
-      for (final c in spy.named('drawLine'))
-        if (c.color?.toARGB32() == kPreviewColor.toARGB32() &&
-            (((c.args[1] as Offset) - (c.args[0] as Offset)).distance - 12)
-                    .abs() <
-                1e-6)
-          c,
-    ];
-    expect(arms, hasLength(2));
-    final moved =
-        rig.camera.value.worldToScreen(t.transformPoint(Vector2(7250, 3300)));
-    for (final arm in arms) {
-      final mid = ((arm.args[0] as Offset) + (arm.args[1] as Offset)) / 2;
-      expect(mid.dx, closeTo(moved.x, 1e-6));
-      expect(mid.dy, closeTo(moved.y, 1e-6));
+    // The unflipped camera exposes an `m.b`/`m.c` transposition in the
+    // cross's projection that the flipped one's `b == c` hides.
+    for (final flipY in const [true, false]) {
+      final s = gripScene();
+      final rig = gripRig(s.document, camera: gripCamera(flipY: flipY));
+      rig.selection.replace([k(s.point), k(s.line)]);
+      final grip = rotationGripCentre(rig);
+      pressAndMove(rig, grip, grip + const Offset(-60, 30));
+      final t = rig.tool.selectionPreviewTransform!;
+      final spy = SpyCanvas();
+      overlayOf(rig).paint(spy, kView);
+      // The cross's arms are 6 · kSelectionStrokePixels = 12 px long; the
+      // guide line in the same colour is not.
+      final arms = [
+        for (final c in spy.named('drawLine'))
+          if (c.color?.toARGB32() == kPreviewColor.toARGB32() &&
+              (((c.args[1] as Offset) - (c.args[0] as Offset)).distance - 12)
+                      .abs() <
+                  1e-6)
+            c,
+      ];
+      expect(arms, hasLength(2), reason: 'flipY $flipY');
+      final moved =
+          rig.camera.value.worldToScreen(t.transformPoint(Vector2(7250, 3300)));
+      for (final arm in arms) {
+        final mid = ((arm.args[0] as Offset) + (arm.args[1] as Offset)) / 2;
+        expect(mid.dx, closeTo(moved.x, 1e-6), reason: 'flipY $flipY');
+        expect(mid.dy, closeTo(moved.y, 1e-6), reason: 'flipY $flipY');
+      }
     }
   });
 
@@ -384,29 +423,36 @@ void main() {
   test(
       'a stretch draws its guide and the snap marker at the resolved '
       'target (spec D7, D9, M-03ar)', () {
-    final s = gripScene();
-    final rig = gripRig(s.document, objectSnap: true);
-    rig.selection.replace([k(s.line)]);
-    final vertex = screenOf(rig.camera, 7130, 3060);
-    final endpoint = screenOf(rig.camera, 7130, 3100);
-    final drop = endpoint + const Offset(3, -2);
-    pressAndMove(rig, vertex, drop);
-    final spy = SpyCanvas();
-    overlayOf(rig).paint(spy, kView);
-    final markers = [
-      for (final c in spy.named('drawRect'))
-        if (c.color?.toARGB32() == kSnapMarkerColor.toARGB32()) c,
-    ];
-    expect(markers, hasLength(1), reason: 'an endpoint won: a square');
-    final r = markers.single.args[0] as Rect;
-    expect(r.center.dx, closeTo(endpoint.dx, 1e-6));
-    expect(r.center.dy, closeTo(endpoint.dy, 1e-6));
-    expect(r.width, kSnapMarkerPixels);
-    final guide = spy
-        .named('drawLine')
-        .where((c) => c.color?.toARGB32() == kPreviewColor.toARGB32());
-    expect(guide, hasLength(1));
-    expect((guide.single.args[0] as Offset).dx, closeTo(vertex.dx, 1e-6));
-    expect((guide.single.args[1] as Offset).dx, closeTo(endpoint.dx, 1e-6));
+    // The unflipped camera exposes an `m.b`/`m.c` transposition in the
+    // guide's projection that the flipped one's `b == c` hides.
+    for (final flipY in const [true, false]) {
+      final s = gripScene();
+      final rig = gripRig(s.document,
+          camera: gripCamera(flipY: flipY), objectSnap: true);
+      rig.selection.replace([k(s.line)]);
+      final vertex = screenOf(rig.camera, 7130, 3060);
+      final endpoint = screenOf(rig.camera, 7130, 3100);
+      final drop = endpoint + const Offset(3, -2);
+      pressAndMove(rig, vertex, drop);
+      final spy = SpyCanvas();
+      overlayOf(rig).paint(spy, kView);
+      final markers = [
+        for (final c in spy.named('drawRect'))
+          if (c.color?.toARGB32() == kSnapMarkerColor.toARGB32()) c,
+      ];
+      expect(markers, hasLength(1), reason: 'an endpoint won: a square');
+      final r = markers.single.args[0] as Rect;
+      expect(r.center.dx, closeTo(endpoint.dx, 1e-6), reason: 'flipY $flipY');
+      expect(r.center.dy, closeTo(endpoint.dy, 1e-6), reason: 'flipY $flipY');
+      expect(r.width, kSnapMarkerPixels);
+      final guide = spy
+          .named('drawLine')
+          .where((c) => c.color?.toARGB32() == kPreviewColor.toARGB32());
+      expect(guide, hasLength(1));
+      expect((guide.single.args[0] as Offset).dx, closeTo(vertex.dx, 1e-6),
+          reason: 'flipY $flipY');
+      expect((guide.single.args[1] as Offset).dx, closeTo(endpoint.dx, 1e-6),
+          reason: 'flipY $flipY');
+    }
   });
 }
