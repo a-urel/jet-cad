@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/widgets.dart'
     show
@@ -23,6 +25,7 @@ import 'package:jet_cad_2d_flutter/src/page_notifier.dart';
 import 'package:jet_cad_2d_flutter/src/select_tool.dart';
 import 'package:jet_cad_2d_flutter/src/selection.dart';
 import 'package:jet_cad_2d_flutter/src/selection_overlay.dart';
+import 'package:jet_cad_2d_flutter/src/selection_style.dart';
 import 'package:jet_cad_2d_flutter/src/snap_settings.dart';
 import 'package:jet_cad_2d_flutter/src/tool.dart';
 import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
@@ -270,3 +273,62 @@ Future<void> pumpGripLayer(WidgetTester tester, GripRig rig) async {
 /// [local] in the layer's box, in the surface's global coordinates.
 Offset globalAt(WidgetTester tester, Offset local) =>
     tester.getTopLeft(find.byType(InteractionLayer)) + local;
+
+// ---- After the look: the oriented selection box -------------------------
+
+/// Where the rotation grip of [box] under the rigid [frame] sits once a
+/// rotation is carried (spec D6, amended after the look), by an oracle
+/// that never calls `rotationGripOf`: world points through [screenOf].
+///
+/// The grip hangs from the middle of the frame's top edge — local `maxY`
+/// under a y-flipped camera, `minY` otherwise — and its direction is the
+/// frame's up vector as the camera draws it.
+({Offset anchor, Offset centre, Offset stem}) orientedGripOracle(
+    CameraController camera, Aabb2 box, Transform2 frame) {
+  final flipped = camera.value.worldToScreenMatrix.determinant < 0;
+  final local =
+      Vector2((box.minX + box.maxX) / 2, flipped ? box.maxY : box.minY);
+  final a = frame.transformPoint(local);
+  final tip = frame.transformPoint(local + Vector2(0, flipped ? 1 : -1));
+  final sa = screenOf(camera, a.x, a.y);
+  final st = screenOf(camera, tip.x, tip.y);
+  final dir = (st - sa) / (st - sa).distance;
+  final centre = sa + dir * kRotationGripOffset;
+  return (
+    anchor: sa,
+    centre: centre,
+    stem: centre - dir * (kRotationGripPixels / 2),
+  );
+}
+
+/// A right triangle with no symmetry, alone in its document: its world
+/// box's centre moves under a rotation, so a pivot taken from a re-wrapped
+/// world box drifts where the carried frame's does not.
+(DraftDocument, Handle) triangleDoc() {
+  final doc = DraftDocument.empty();
+  final h = addEntity(doc, doc.rootHandle, EntityKind.polyline,
+      [7010, 3020, 7130, 3020, 7030, 3090, 7010, 3020], []);
+  doc.commands.clearHistory();
+  return (doc, h);
+}
+
+/// The rotation grip's centre as the cache places it now.
+Offset rotationGripNow(GripRig rig) => rotationGripOf(
+        rig.grips.box!, rig.camera.value.worldToScreenMatrix, rig.grips.frame)
+    .centre;
+
+/// One rotate drag of [theta] radians from the rotation grip, about the
+/// cache's pivot: the pointer lands at the grip's world point turned by
+/// [theta].
+void rotateBy(GripRig rig, double theta) {
+  final grip = rotationGripNow(rig);
+  final p = rig.grips.pivot!;
+  final w = rig.camera.value.screenToWorld(Vector2(grip.dx, grip.dy)) - p;
+  final aim = p +
+      Vector2(math.cos(theta) * w.x - math.sin(theta) * w.y,
+          math.sin(theta) * w.x + math.cos(theta) * w.y);
+  final to = screenOf(rig.camera, aim.x, aim.y);
+  pressAndMove(rig, grip, to);
+  expect(rig.tool.pressClass, PressClass.rotationGrip);
+  release(rig, to);
+}

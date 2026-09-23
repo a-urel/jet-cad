@@ -554,6 +554,51 @@ grows" is superseded.
 - "At least one non-fill key" is therefore implied by a non-null box.
 - A separate non-fill flag would be an equivalent, unkillable mutant.
 
+**Amended after the look (2026-09-23, `fix/rotation-frame`): the selection
+box is oriented for the session.** The human's finding: the rotation grip
+went back to screen-up after every rotate, and the next rotate turned about
+the re-wrapped world box's centre, so consecutive rotations drifted.
+- `GripCache` keeps the box in a rigid **frame**: `box` in frame
+  coordinates, `frame` mapping them to world, and `pivot`, the frame's
+  centre in world. A fresh box is the world AABB under the identity frame,
+  exactly as above.
+- The select tool hands a committed move's or rotate's `T` to
+  `GripCache.carry` just before it executes the command. The rebuild that
+  command's `DocChange` causes moves the frame (`T · frame`) instead of
+  re-wrapping the geometry: a rigid `T` keeps a tight box tight, so no
+  bounds are recomputed in the rotated axes.
+- Every other rebuild resets to the world AABB: a selection change, undo,
+  redo, a reshape, any other edit, and a carried frame whose linear part
+  comes out as exactly the identity (a move of an unrotated selection).
+- A rotate turns about `pivot`. For an unrotated selection that is the
+  world box's centre, as before. **This supersedes D6's "The pivot is
+  always the world box's centre"** above.
+- `GripCache.box` (exported) changed meaning: it is in the frame's
+  coordinates, and it is the world AABB only while `frame` is the
+  identity.
+- The fold-back test and the placement's branch compare the frame's linear
+  part with the identity **exactly**. That is deliberate: they exist to
+  catch a pure translation, which is exact. A rotation by +θ then −θ leaves
+  a near-identity frame that stays oriented; under an unrotated camera it
+  places the grip where D6 would.
+- If `execute` throws, the select tool withdraws the carry
+  (`GripCache.dropCarry`), so no later, unrelated `DocChange` applies it.
+- The rotation grip: while the frame's linear part is the identity, the
+  placement above stands. Otherwise it hangs from the middle of the frame's
+  top edge (local `maxY` under a y-flipped camera, `minY` otherwise),
+  `kRotationGripOffset` px along the frame's up direction as the camera
+  draws it. During a move or rotate drag the grip is drawn through the
+  preview's `T`, composed inline so a drag's frames allocate no
+  `Transform2`. The leaf grips and the hot grip stay where they are during
+  a drag, as before; only the rotation grip follows the preview.
+- Costs, accepted: after an undo the box is axis-aligned again, not at the
+  undone angle; a reshape of a rotated selection re-aligns it; under a
+  rotated camera the grip steps once, from D6's screen-up placement to the
+  frame's, on the first frame of the first rotate drag. The step is about
+  30 px, so the disc leaves the pointer. No shipped gesture rotates the
+  camera, so the app never shows it.
+- Mutation note: `docs/superpowers/notes/2026-09-23-rotation-frame-mutation-log.md`.
+
 ### D7 — Preview
 
 The canvas keeps drawing the original, because nothing in the document

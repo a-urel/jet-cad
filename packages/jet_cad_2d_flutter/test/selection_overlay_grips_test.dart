@@ -455,4 +455,62 @@ void main() {
           reason: 'flipY $flipY');
     }
   });
+
+  test(
+      'during a rotate the grip and its stem turn with the preview '
+      '(M-RFi, M-RFj, M-RFm)', () {
+    // The oracle is `orientedGripOracle`, world points through `screenOf`;
+    // the unflipped camera exposes an `m.b`/`m.c` transposition.
+    for (final flipY in const [true, false]) {
+      final (doc, h) = triangleDoc();
+      final rig = gripRig(doc, camera: gripCamera(flipY: flipY));
+      rig.selection.replace([k(h)]);
+      final grip = rotationGripNow(rig);
+      pressAndMove(rig, grip, grip + const Offset(-45, 38));
+      final t = rig.tool.selectionPreviewTransform!;
+      expect(t.b.abs(), greaterThan(1e-3), reason: 'a rotation');
+      final spy = SpyCanvas();
+      overlayOf(rig).paint(spy, kView);
+      final want = orientedGripOracle(rig.camera, rig.grips.box!, t);
+      final disc = spy.named('drawCircle').single.args[0] as Offset;
+      expect(disc.dx, closeTo(want.centre.dx, 1e-9), reason: 'flipY $flipY');
+      expect(disc.dy, closeTo(want.centre.dy, 1e-9), reason: 'flipY $flipY');
+      final stems = [
+        for (final c in spy.named('drawLine'))
+          if (((c.args[0] as Offset) - want.anchor).distance < 1e-6) c,
+      ];
+      expect(stems, hasLength(1), reason: 'flipY $flipY');
+      final end = stems.single.args[1] as Offset;
+      expect(end.dx, closeTo(want.stem.dx, 1e-9), reason: 'flipY $flipY');
+      expect(end.dy, closeTo(want.stem.dy, 1e-9), reason: 'flipY $flipY');
+    }
+  });
+
+  test(
+      'a move of a rotated selection draws the grip through T · frame, '
+      'not frame · T (M-RFo, M-RFp)', () async {
+    // A rotated frame and a translating preview: the one pair whose two
+    // composition orders differ. A rotate about the frame's own pivot
+    // commutes with it.
+    for (final flipY in const [true, false]) {
+      final (doc, h) = triangleDoc();
+      final rig = gripRig(doc, camera: gripCamera(flipY: flipY));
+      rig.selection.replace([k(h)]);
+      rotateBy(rig, 0.7);
+      await Future<void>.delayed(Duration.zero);
+      final c = payloadOf(doc, h).coords;
+      final on = screenOf(
+          rig.camera, c[0] + 0.3 * (c[2] - c[0]), c[1] + 0.3 * (c[3] - c[1]));
+      pressAndMove(rig, on, on + const Offset(37, -21));
+      final t = rig.tool.selectionPreviewTransform!;
+      expect(t.a, 1, reason: 'a move');
+      final spy = SpyCanvas();
+      overlayOf(rig).paint(spy, kView);
+      final want = orientedGripOracle(
+          rig.camera, rig.grips.box!, t.multiply(rig.grips.frame));
+      final disc = spy.named('drawCircle').single.args[0] as Offset;
+      expect(disc.dx, closeTo(want.centre.dx, 1e-9), reason: 'flipY $flipY');
+      expect(disc.dy, closeTo(want.centre.dy, 1e-9), reason: 'flipY $flipY');
+    }
+  });
 }

@@ -199,7 +199,7 @@ class SelectionOverlayPainter extends CustomPainter {
       }
     }
     final grips = tools.context.grips;
-    if (grips != null) _paintGrips(canvas, grips, m);
+    if (grips != null) _paintGrips(canvas, grips, m, preview);
     tool.paintOverlay(canvas, cam, size);
     canvas.restore();
   }
@@ -231,7 +231,10 @@ class SelectionOverlayPainter extends CustomPainter {
   /// Spec D6: one `drawRawPoints` per colour, whatever the grip count;
   /// projected in doubles, and only screen coordinates are narrowed
   /// (Ruling 03-10).
-  void _paintGrips(Canvas canvas, GripCache grips, Transform2 m) {
+  ///
+  /// [preview] is the move's or rotate's `T` while one is dragging.
+  void _paintGrips(
+      Canvas canvas, GripCache grips, Transform2 m, Transform2? preview) {
     if (grips.leafGripsLive) {
       final list = grips.grips;
       if (_stretchPoints.length != 2 * grips.stretchCount) {
@@ -269,9 +272,10 @@ class SelectionOverlayPainter extends CustomPainter {
     }
     final box = grips.box;
     if (grips.rotatable && box != null) {
-      final g = rotationGripOf(box, m);
-      canvas.drawLine(
-          g.anchor, g.centre.translate(0, kRotationGripPixels / 2), _stem);
+      // During a move or rotate the grip follows the preview's `T`
+      // (spec D6, amended after the look).
+      final g = rotationGripOf(box, m, grips.frame, preview);
+      canvas.drawLine(g.anchor, g.stem, _stem);
       canvas.drawCircle(g.centre, kRotationGripPixels / 2, _gripPaint);
     }
   }

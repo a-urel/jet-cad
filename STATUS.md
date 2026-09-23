@@ -12,6 +12,27 @@
 - **The look is still OWED after the merge** (criterion 14), as it was for
   Plans 01–04.
 
+**Look finding, fixed on `fix/rotation-frame` (2026-09-24), awaiting the
+human's merge.** The human found that the rotation grip went back to
+screen-up after every rotate. That is Plan 03's D6 behaviour, not Plan 05's.
+The next rotate then pivoted about the re-wrapped world box's centre, so
+consecutive rotations drifted.
+- **The fix:** `GripCache` keeps an oriented frame for the session, carried
+  through the select tool's own move and rotate commits. The grip rides the
+  frame, and the pivot is the frame's centre. Every other change resets the
+  frame to the world AABB.
+- **The spec** carries it in 03 D6, "Amended after the look".
+- **Mutation testing:** 18 of 18 killed, logged in
+  `docs/superpowers/notes/2026-09-23-rotation-frame-mutation-log.md`.
+- **Review:** one Opus review came back "Ready with fixes" with 3 important
+  and 7 minor findings. All were addressed.
+- **The four gate lines are green:**
+  - engine 911;
+  - render layer 923 + 1 skip + the five standing text goldens;
+  - harness 82;
+  - app 45;
+  - both release builds `✓ Built`.
+
 **The branch's history, as it was before the merge:** `plan-05/drawing-tools`
 was cut from `main` at `7dac3b5`.
 Eleven tasks: Tasks 1–8 at `7dac3b5..c4fcac4`, Task 9 at `6d98d72..5c55000`,
