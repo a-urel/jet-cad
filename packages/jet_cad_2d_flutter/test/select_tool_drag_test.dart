@@ -365,6 +365,33 @@ void main() {
   });
 
   test(
+      'class 3b: a refused move never runs before the click toggles once, '
+      'net (Ruling 03-6; M-03be)', () {
+    final s = gripScene();
+    final rig = gripRig(s.document);
+    final doc = rig.document;
+    doc.commands.permissions = DraftPermissions.runtime;
+    // s.line starts unselected: a shift-press lands class 3b.
+    final vertex = screenOf(rig.camera, bodyX, bodyY);
+    rig.tool.onPointerDown(
+        pointerAt(rig.camera, vertex, shift: true), rig.context);
+    expect(rig.tool.pressClass, PressClass.unselectedBody);
+    final away = vertex + const Offset(30, 10);
+    rig.tool.onPointerMove(
+        pointerAt(rig.camera, away, shift: true), rig.context);
+    expect(rig.tool.phase, ToolPhase.pressed,
+        reason: 'geometry is refused under runtime; no drag starts past '
+            'the slop (Ruling 03-6)');
+    expect(rig.selection.keys, isEmpty,
+        reason: 'the class 3b toggle is release-time click state; it has '
+            'not run yet at the moment the slop is crossed');
+    release(rig, away, shift: true);
+    expect(rig.selection.keys, {k(s.line)},
+        reason: "the click's shift-toggle runs exactly once, net");
+    expect(doc.commands.undoDepth, 0, reason: 'no drag ran, so no command');
+  });
+
+  test(
       'a camera change mid-drag re-resolves the target from the last '
       'screen point (M-03ac)', () {
     final s = gripScene();
