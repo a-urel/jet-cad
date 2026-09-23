@@ -272,9 +272,16 @@ class SetEntityTextCommand extends DraftCommand {
 /// distinct operations. That separation is what lets a point-of-sale runtime
 /// move a table but not draw a wall.
 ///
-/// All-or-nothing: the missing-node check runs before anything is written, and
-/// [DocumentTree.replaceNode] runs its own cycle guard before it touches
-/// `_nodes`.
+/// **Never the root.** World is root space: the canvas, the spatial index and
+/// the reference walk descend from the identity and never read the root's
+/// transform, while `OutlineCache` and `TileCache` reach root-level nodes
+/// through [DocumentTree.accumulatedTransform], which does. The two readings
+/// agree only while the root stays the identity, so the root is refused here
+/// and `validate()` reports a file that carries anything else.
+///
+/// All-or-nothing: the missing-node and root checks run before anything is
+/// written, and [DocumentTree.replaceNode] runs its own cycle guard before it
+/// touches `_nodes`.
 class TransformNodeCommand extends DraftCommand {
   final Handle handle;
   final Transform2 transform;
@@ -292,6 +299,10 @@ class TransformNodeCommand extends DraftCommand {
     final node = target.tree[handle];
     if (node == null) {
       throw StateError('no node with handle ${handle.toHex()}');
+    }
+    if (handle == target.tree.root) {
+      throw StateError('${handle.toHex()} is the root, whose transform is '
+          'pinned to the identity');
     }
     final previous = node.transform;
     target.tree.replaceNode(switch (node) {
