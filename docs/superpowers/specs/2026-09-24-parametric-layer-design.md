@@ -1,6 +1,19 @@
 # The parametric layer — design
 
-**Date:** 2026-09-24. **Status:** design, **revision 1**, not yet a plan.
+**Date:** 2026-09-24. **Status:** design, **revision 2**, not yet a plan.
+Revision 1 (`dd0251e`) was reviewed the same day by Codex CLI (`gpt-5.5`)
+and Copilot CLI. Every finding was re-checked against the tree and is
+recorded, with its ruling, in
+[2026-09-24-parametric-layer-spec-review-r1.md](../notes/2026-09-24-parametric-layer-spec-review-r1.md).
+Revision 2 applies them all. The four blockers:
+- **B1: the first box was never wrapped.** The fast path now fires only
+  when no parametric component exists *and* the command sets none (D2).
+- **B2: a failed plan left the cleanup applied.** The cleanup and the
+  regeneration are now one compound, and every failure path is stated (D4).
+- **B3: planning burned handles.** Planning now reserves handles without
+  advancing the seed (D4).
+- **B4: `ParametricEdit.capability` is stateful.** It is now single-use by
+  contract (D9).
 **Sub-project:** `roadmap/06-parametric-layer.md`. **Size:** L.
 **Brainstormed with the human on 2026-09-24**, on `main` at `2565912`,
 after a throwaway spike whose findings are the evidence for most decisions
@@ -53,7 +66,7 @@ and line.
   its Q2.
 - **`ComponentStore.handles`** (`component.dart:43`) is ascending.
   `ComponentRegistry.loadJson` inserts in ascending order.
-- **The codec** (`json_codec.dart:67-78`):
+- **The codec** (`packages/jet_cad_2d/lib/src/codec/json_codec.dart:67-78`):
   - it writes entities in **slot order**;
   - freed slots are reused (`slot_allocator.dart:52`);
   - so the entity order is history, not state.
@@ -171,9 +184,17 @@ and line.
   - it may return the command unchanged.
 - **A slot, not a list.** One `ParametricSystem` per document. A second
   `install()` on the same document throws `StateError`.
-- **Fast path.** While the document holds no parametric component, the
-  expander returns the command itself: no wrapper, no scan. A plain line
-  edit in a plan with no boxes costs one store-length check.
+- **Fast path.** The expander returns the command itself, with no wrapper
+  and no scan, when both hold:
+  - the document holds no parametric component;
+  - the command, recursing into compounds, contains no
+    `SetComponentCommand` whose value type is parametric.
+
+  A plain line edit in a plan with no boxes costs one store-length check.
+  The first box's creation is wrapped (review B1).
+- **Re-entry is refused.** While a `ParametricEdit` is applying, the
+  expander throws `StateError`, and so does any other `execute`. A client's
+  `generate` that calls back into the dispatcher fails loudly (review I6).
 
 ### D3 — `ParametricType<T>` and what a client provides
 
@@ -210,6 +231,9 @@ final class Generated {
     on both axes. Touching boxes are not neighbours.
 - **Generated entities** carry D2 of spec 05's defaults: `draftRecord`
   with the group as owner.
+- **`Generated` refuses `EntityKind.fill`** with `ArgumentError`:
+  `SetEntityGeometryCommand` rejects a fill's payload, and regions are out
+  of scope (review m4).
 
 ### D4 — Regeneration: two-phase, parameters only, sorted (spike)
 
@@ -223,9 +247,12 @@ The wrapper `ParametricEdit(inner)` does this in `apply`:
    the parametric handles.
 2. **Apply `inner`.** It yields `r`.
 3. **Guard** (D6). If `inner` edited a generated child, apply `r.inverse`
-   and throw.
-4. **Clean up** (D8). A parametric group whose node no longer exists has
-   its component detached.
+   and throw. Nothing has been planned or reserved yet.
+4. **Clean up** (D8). Every parametric component whose group node no longer
+   exists gets a `SetComponentCommand<T>(h, null)`. This step is
+   **unconditional**: it runs for any command that removes such a node,
+   not only the select tool's delete (review m2). These commands are
+   planned here and applied in step 8.
 5. **Seeds.** Each handle in `r.touched` that is:
    - a parametric group; or
    - a child in `G`; or
@@ -245,21 +272,43 @@ The wrapper `ParametricEdit(inner)` does this in `apply`:
    - a match whose payload differs becomes `SetEntityGeometryCommand`;
    - an equal payload becomes nothing (exact `==` on the stored doubles);
    - a surplus child becomes `RemoveEntityCommand`;
-   - a missing child becomes `AddEntityCommand` with
-     `document.handleSeed.next()`.
+   - a missing child becomes `AddEntityCommand` with a **reserved**
+     handle: `handleSeed.current + 1`, `+ 2`, and so on, **without
+     advancing the seed**. `AddEntityCommand.apply` raises the seed when
+     the add actually lands (`commands.dart:58`). A plan that is never
+     applied costs no handle (review B3).
 
-   Handles are allocated in closure order, so the walk **must sort
+   Handles are reserved in closure order, so the walk **must sort
    itself**. It must not rely on `ComponentStore.handles` (spike finding
-   4).
-8. **Apply the plan** as a `CompoundCommand`, giving `g`. If the plan
-   throws, apply `r.inverse` and rethrow. Nothing is pushed.
+   4, M-06b′).
+
+   **A changed payload is always `SetEntityGeometryCommand`, never remove
+   plus add.** That keeps the child's slot, and the codec writes entities in
+   slot order, so the raw bytes of "same state plus same edit" depend on it
+   (D11, M-06p).
+8. **Apply** the cleanup commands followed by the regeneration plan as
+   **one** `CompoundCommand`, giving `g`. It is all-or-nothing through
+   `CompoundCommand`'s own rollback. A throw during planning (step 7, for
+   example from a client's `generate`) happens before anything but `r` has
+   applied: apply `r.inverse` and rethrow. On failure of `g`:
+   - `g` rolled itself back: apply `r.inverse`, then rethrow `g`'s error;
+   - `g` threw its own "partially mutated" `StateError`
+     (`commands.dart:776-788`): rethrow it as is; `r.inverse` is **not**
+     layered onto a target in an unknown state;
+   - `r.inverse` throws: throw a `StateError` naming both failures, the
+     same escalation `CompoundCommand` uses.
+
+   In every failure case the dispatcher pushes nothing and emits nothing. A
+   reserved add that applied before the failure leaves the seed raised, as
+   any engine `CompoundCommand` rollback does today (review B3).
 9. **Return** `CommandResult(inverse: ParametricReplay(Compound([g.inverse,
-   cleanup.inverse, r.inverse]), capabilities: this.capabilities),
-   touched: r ∪ cleanup ∪ g)`.
+   r.inverse]), capabilities: this.capabilities), touched: r ∪ g)`.
 
 **What undo and redo replay.** They replay `ParametricReplay`, a concrete
 compound. They never regenerate. The spike's Q2 showed the handles and the
-bytes restored.
+bytes restored. `ParametricReplay.apply` returns, as its own inverse,
+another `ParametricReplay` with the **same capability set**, so redo is
+authorised exactly as undo was (review I8).
 
 **If nothing parametric is touched** (no seeds and no cleanup), the wrapper
 returns `r` unchanged. A non-parametric edit is byte-for-byte the command it
@@ -312,20 +361,25 @@ was, and its inverse is the plain inverse.
   - A future type, such as a table's seat count, can declare `components`.
   - A move of a box under runtime (`transform`) regenerates its
     neighbours' geometry. That is allowed, since the move authorises it.
-- **`ParametricReplay`, the inverse, carries the same capability set.** The
-  concrete inverse alone would demand `geometry` because it holds
-  `SetEntityGeometryCommand`s, and a runtime user could then **not undo
-  their own edit**. The spike did not test undo under runtime; this is a
-  design catch. It is killed by M-06i.
+- **`ParametricReplay`, the inverse, carries the same capability set**, and
+  so does its own inverse, for redo. The concrete inverse alone would demand
+  `geometry` because it holds `SetEntityGeometryCommand`s, and a runtime
+  user could then **not undo their own edit**. The spike did not test undo
+  under runtime; this is a design catch. It is killed by M-06i, for undo
+  and for redo.
+- **A delete under runtime.** Delete needs `structure` and `geometry`,
+  which runtime denies, so it is refused at `_require` before anything
+  happens. A permitted delete's undo needs exactly the set the delete
+  needed, because the inverse carries the wrapper's own set (review I8).
 
 ### D8 — Deleting a parametric object
 
 - **Existing behaviour.** The select tool's delete cascade removes the
   children and then the node (`select_tool.dart:654-682`).
 - **What the wrapper adds (step 4).** For each parametric group handle
-  whose node is gone but whose component remains, it applies
-  `SetComponentCommand<T>(h, null)`. The type-specific closure comes from
-  the registration.
+  whose node is gone but whose component remains, it plans
+  `SetComponentCommand<T>(h, null)`, applied in step 8's compound. The
+  type-specific closure comes from the registration.
 - **Undo** restores the component, the node, the children and the
   neighbours' geometry, all through the concrete inverse.
 - **Neighbours regrow** because the removed group is a seed: its
@@ -343,6 +397,15 @@ was, and its inverse is the plain inverse.
   drawn and hit-tested from stale boxes. That is killed by M-06h.
 - **`ParametricReplay.capability`** is its compound's summary, and so is
   `geometry` whenever geometry was replayed.
+- **`ParametricEdit` is single-use** (review B4). Every other command's
+  `capability` is a function of its constructor state. This one depends on
+  its `apply`, and that is contained by contract:
+  - the expander creates one per `execute`;
+  - the dispatcher reads `capability` once, after `apply`, as it already
+    does (`undo.dart:113-119`);
+  - history never holds a `ParametricEdit`, only its `ParametricReplay`
+    inverse;
+  - a second `apply` of the same instance throws `StateError`.
 
 ### D10 — Load, and drift
 
@@ -350,6 +413,12 @@ was, and its inverse is the plain inverse.
   load changed nothing in the spike (Q4). The M-06f probe was answered:
   generation is a pure function of saved doubles, and doubles round-trip
   exactly.
+- **Typed components need registration first.** Components come back typed
+  only if their factory is registered before `loadJson` runs
+  (`json_codec.dart:115`); otherwise they are kept as unknown payloads.
+  `ParametricSystem.registerComponents(ComponentRegistry)` is the function
+  every decode passes as `registerComponents:`. The app has no open path
+  yet, so the round-trip tests decode with it (review I2).
 - **`ParametricSystem.drift()`** returns the handles whose regeneration
   would change anything: a dry-run plan over every parametric object.
 - **`ParametricSystem.diagnostics()`** returns one `Diagnostic` per
@@ -370,6 +439,12 @@ requires instead:
   whatever the in-memory insertion order of the component store. The spike's
   Q5b shape applies: a document and its reload, with an edit that makes two
   neighbours gain children at once. Killed by M-06b.
+- **Two seeds in one command give the same bytes in either child order.**
+  One compound moves boxes A and B, `[A, B]` or `[B, A]`, and each gains
+  children. Killed by M-06b′, the planner's sort alone (review I5).
+- **Raw bytes survive because slots do.** A changed payload is rewritten in
+  place (D4 step 7), so no slot is freed and reused. Killed by M-06p
+  (review I9).
 - **Per-object world geometry** is independent of creation order.
 - **Undo then redo** restores the post-edit state. It is compared in a
   canonical form (entities sorted by handle), because freed-slot reuse makes
@@ -409,6 +484,10 @@ requires instead:
   - it commits
     `Compound([AddNodeCommand(group at translation(min corner)),
     SetComponentCommand(BoxParams(|dx|, |dy|))])` through `commit(ctx, …)`;
+  - **`PlacementTool.commit` gains an optional `Set<Capability> needs`**,
+    default `{geometry}`, so 05's tools are unchanged. The Box tool passes
+    `{structure, components, geometry}`, checked before the group's handle
+    is allocated (review I1);
   - the expander regenerates it;
   - Fill does not apply;
   - B joins `kShellLetterKeys` and the palette.
@@ -423,8 +502,10 @@ requires instead:
   - under runtime permissions the fields are read-only (`editCapability`);
   - it is guarded like the page panel's fields: `shortcut_guard.dart`, so
     typing "B" in a field does not switch tools.
-- **Startup plan:** unchanged. The look starts from an empty spot and draws
-  boxes.
+- **Startup plan:** unchanged, and it holds no parametric object. The look
+  starts from an empty spot and draws boxes.
+- **`GeneratedGeometryError`** propagates like `PermissionDeniedError`.
+  The UI never offers the edit, so nothing catches it (review m5).
 
 ## Architecture
 
@@ -441,15 +522,18 @@ requires instead:
   - `lib/jet_cad_2d.dart`: exports;
   - `test/parametric/`: tests with a test-only rectangle client that has
     the spike's shape, including the mutual-clip fixture.
-- **The render layer:** no change. Group selection, move, rotate and the
-  delete cascade already work. The expander makes them regenerate.
+- **The render layer:** one change, the optional `needs` set on
+  `PlacementTool.commit` (`lib/src/draw/placement_tool.dart`, review I1).
+  Group selection, move, rotate and the delete cascade already work; the
+  expander makes them regenerate.
 - **The app, `apps/floor_planner`:**
   - `lib/parametric/box.dart` and `lib/parametric/box_tool.dart`;
   - `lib/selection_panel.dart`;
-  - `lib/main.dart`: build and install the system right after the
-    document exists, before any command runs (`startupPlan` included, so
-    the box type is registered first). Add the palette entry and the key,
-    and lay out the panel;
+  - `lib/main.dart`: build and install the system right after
+    `startupPlan` returns, before any tool can run. `startupPlan` builds and
+    fills its own document and creates no parametric object, so installing
+    after it is safe; the sample-plan test pins that (review I3). Add the
+    palette entry and the key, and lay out the panel;
   - `lib/shortcut_guard.dart`: add B;
   - `test/`: box, tool and panel tests.
 
@@ -474,7 +558,9 @@ requires instead:
 ## Testing
 
 The testing bar is CLAUDE.md's: a test lands only if a named mutant turns it
-red. Fixtures sit at non-identity, non-origin transforms. Every relational
+red. Fixtures sit at non-identity, non-origin transforms, and every
+relational fixture is **rotated**: translation alone would let a transposed
+local transform survive (review I7, M-06o). Every relational
 test uses **two or more objects that clip each other**, and asserts the
 clipped child counts (5 and 3 in the spike's pair), so the fixture cannot
 silently stop overlapping. The spike's first fixture did exactly that.
@@ -485,18 +571,25 @@ silently stop overlapping. The spike's first fixture did exactly that.
 |---|---|---|
 | M-06a | `CompoundCommand` inverse in forward order | the engine's existing `compound_command_test.dart`. It is not reachable from this design's compounds (spike finding 6); recorded as covered there |
 | M-06b | the planner walks the closure unsorted **and** `ComponentStore.handles` is unsorted (both, since either sort alone suffices) | D11's two-neighbours determinism test |
+| M-06b′ | the planner walks the closure unsorted, the store still sorted | D11's two-seeds test: one compound moves A and B, in both child orders, same bytes |
 | M-06c | the wrapper returns `r` and drops `g` from the inverse | one-undo-step test: undo restores parameters **and** geometry |
 | M-06d | the closure is the seeds only | the neighbour-changes test, and the move-away-restores test |
 | M-06e | — | N/A by construction (D4 step 6), recorded |
-| M-06f | regenerate on load | a probe that must stay green (D10): load, then `drift()` is empty |
+| M-06f | regenerate on load | **a probe, not a kill** (review I4): with it fired, load then `drift()` stays empty. The load decision is pinned instead by a file saved with deliberately stale geometry: load keeps it byte for byte, and `drift()` reports its handle |
 | M-06g | the group transform is dropped in `reach` and in the local transform | the two-object relation tests. **An isolated object cannot kill it** (spike finding 5) |
 | M-06h | `ParametricEdit.capability` returns `inner.capability` | a width edit with a live `SpatialIndex`: a hit test at a new child's midpoint finds it |
-| M-06i | `ParametricReplay.capabilities` is the concrete compound's | undo of a component-capability edit under a runtime-like permission set succeeds |
+| M-06i | `ParametricReplay.capabilities` is the concrete compound's, or its own inverse is a bare compound | undo **and then redo** of a component-capability edit under a runtime-like permission set both succeed |
 | M-06j | the D6 guard is skipped | `SetEntityGeometryCommand` on a generated child throws `GeneratedGeometryError`, and bytes and undo depth are unchanged |
 | M-06k | the D8 component detach is skipped | delete a box: its component is gone, and undo brings it back |
 | M-06l | old neighbours are left out of the closure (only after) | moving A off B restores B's full outline |
 | M-06m | children are matched by ordinal ignoring kind | a test type that generates a LINE and an ARC and swaps their order between two parameter values |
 | M-06n | the expander is called in `undo` too | undo of a width edit: the undo depth and redo stack behave, and no new handles are allocated |
+| M-06o | `toLocal` is the forward transform, not its inverse | the rotated two-object relation tests |
+| M-06p | a changed payload is planned as remove plus add | D11's same-state-same-edit test compares **raw** bytes, with a child whose slot otherwise stays put |
+| M-06q | the fast path ignores the command's own parametric `SetComponentCommand` | the first box in an empty document gets four children |
+| M-06r | the cleanup is applied at step 4, on its own, outside `g` (revision 1's shape) | a test client whose `generate` throws when a neighbour is deleted: after the refused delete, the bytes are unchanged and the deleted box's component is still attached |
+| M-06s | the re-entry guard is removed | a test client whose `generate` calls `execute` gets `StateError`, and history is unchanged |
+| M-06t | planning advances `handleSeed` | a refused plan (a throwing `generate`) leaves `handleSeed` unchanged |
 
 ### Differential check
 
@@ -541,7 +634,7 @@ silently stop overlapping. The spike's first fixture did exactly that.
    handles.
 10. A direct edit of a generated child is refused (D6).
 11. Delete detaches the component, and undo restores it (D8).
-12. The runtime inherit rule holds, including undo (D7).
+12. The runtime inherit rule holds, including undo and redo (D7).
 13. Every named mutant is killed, or recorded as N/A or covered, as the
     table says.
 14. **The human's look** at the Box tool and the Selection section, on
@@ -556,4 +649,6 @@ None blocking. Recorded for 07:
   hundred parametric objects.
 - **Whether `reach` needs to be richer than an AABB.** A long diagonal wall
   has a large AABB and would produce spurious neighbours. Those cost time,
-  not correctness: generation does the exact test.
+  not correctness: generation does the exact test. The per-axis tolerance
+  rule in D3 is a placeholder that 07 must re-derive for mitred corners,
+  not inherit (review m3).
