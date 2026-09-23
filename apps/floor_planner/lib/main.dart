@@ -5,7 +5,9 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'page_panel.dart';
 import 'planner_view.dart';
+import 'shortcut_guard.dart';
 import 'startup_plan.dart';
+import 'tool_palette.dart';
 
 void main() => runApp(const FloorPlannerApp());
 
@@ -22,7 +24,8 @@ class FloorPlannerApp extends StatelessWidget {
 }
 
 /// Owns the document, the index, the camera and -- since 03 -- the outline
-/// cache, the grip cache and the snap settings for the window's lifetime.
+/// cache, the grip cache and the snap settings for the window's lifetime;
+/// since 05, the tools and the Fill toggle.
 /// It lays out the chrome slots.
 ///
 /// [document] and [initialCamera] are a test seam (spec 03, Architecture;
@@ -56,6 +59,68 @@ class _PlannerShellState extends State<PlannerShell> {
   final GesturePolicy _policy = GesturePolicy.forPlatform();
   final SnapSettings _snap = SnapSettings();
 
+  // Spec 05 D5, D13: the shell owns the tools and the Fill toggle.
+  final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
+  final SelectTool _select = SelectTool();
+  final LineTool _line = LineTool();
+  late final PolylineTool _polyline = PolylineTool(fill: _fill);
+  late final RectangleTool _rectangle = RectangleTool(fill: _fill);
+  late final CircleTool _circle = CircleTool(fill: _fill);
+  final ArcTool _arc = ArcTool();
+  final TextTool _text = TextTool();
+
+  late final List<PaletteEntry> _entries = [
+    PaletteEntry(
+        keyName: 'tool-select',
+        label: 'Select',
+        shortcut: 'V',
+        logicalKey: LogicalKeyboardKey.keyV,
+        tool: _select,
+        drawing: false),
+    PaletteEntry(
+        keyName: 'tool-line',
+        label: 'Line',
+        shortcut: 'L',
+        logicalKey: LogicalKeyboardKey.keyL,
+        tool: _line,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-polyline',
+        label: 'Polyline',
+        shortcut: 'P',
+        logicalKey: LogicalKeyboardKey.keyP,
+        tool: _polyline,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-rectangle',
+        label: 'Rectangle',
+        shortcut: 'R',
+        logicalKey: LogicalKeyboardKey.keyR,
+        tool: _rectangle,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-circle',
+        label: 'Circle',
+        shortcut: 'C',
+        logicalKey: LogicalKeyboardKey.keyC,
+        tool: _circle,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-arc',
+        label: 'Arc',
+        shortcut: 'A',
+        logicalKey: LogicalKeyboardKey.keyA,
+        tool: _arc,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-text',
+        label: 'Text',
+        shortcut: 'T',
+        logicalKey: LogicalKeyboardKey.keyT,
+        tool: _text,
+        drawing: true),
+  ];
+
   // Constructed before the tool controller and its context: the selection
   // controller's listener on `document.changes` must prune dead keys before
   // anything downstream (the outline cache, in PlannerView) walks them.
@@ -78,7 +143,7 @@ class _PlannerShellState extends State<PlannerShell> {
       snap: _snap,
       grips: _grips);
   late final ToolController _tools =
-      ToolController(initial: SelectTool(), context: _context);
+      ToolController(initial: _select, context: _context);
   late final Listenable _status = Listenable.merge([_selection, _tools]);
 
   /// Fitted to the nominal window; PlannerView re-fits once at the real
@@ -100,6 +165,25 @@ class _PlannerShellState extends State<PlannerShell> {
     if (_document.commands.canUndo) _document.commands.undo();
   }
 
+  bool get _geometryAllowed =>
+      _document.commands.permissions.allows(Capability.geometry);
+
+  /// Spec 05 D5: the one way a tool becomes active. A drawing tool clears
+  /// the selection first, because the overlay paints the selection's
+  /// outlines and grips under any active tool. It is refused while geometry
+  /// is denied. Focus never leaves the canvas (Ruling 05-6).
+  void _activate(Tool tool) {
+    final drawing = !identical(tool, _select);
+    if (drawing && !_geometryAllowed) return;
+    if (drawing) _selection.clear();
+    _tools.activate(tool);
+  }
+
+  /// An idle drawing tool leaves Escape unhandled; it arrives here.
+  void _escape() {
+    if (!identical(_tools.active, _select)) _activate(_select);
+  }
+
   String _statusLine() {
     final base = _tools.active.name;
     return _selection.isEmpty ? base : '$base — ${_selection.length} selected';
@@ -118,6 +202,10 @@ class _PlannerShellState extends State<PlannerShell> {
   @override
   void dispose() {
     _tools.dispose();
+    for (final e in _entries) {
+      e.tool.dispose();
+    }
+    _fill.dispose();
     _grips.dispose();
     _outlines.dispose();
     _selection.dispose();
@@ -140,6 +228,15 @@ class _PlannerShellState extends State<PlannerShell> {
           // Spec 03 D10: one toggle per press, never per key repeat.
           const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false):
               _snap.toggleObjectSnap,
+          // Spec 05 D5: the tool letters, then Fill, then Escape.
+          for (final e in _entries)
+            SingleActivator(e.logicalKey, includeRepeats: false): () =>
+                _activate(e.tool),
+          const SingleActivator(LogicalKeyboardKey.keyF, includeRepeats: false):
+              () {
+            if (_geometryAllowed) _fill.value = !_fill.value;
+          },
+          const SingleActivator(LogicalKeyboardKey.escape): _escape,
         },
         child: Column(
           children: [
@@ -180,6 +277,13 @@ class _PlannerShellState extends State<PlannerShell> {
                     key: const Key('chrome-left'),
                     width: 240,
                     color: scheme.surfaceContainerLow,
+                    child: ToolPalette(
+                      entries: _entries,
+                      tools: _tools,
+                      fill: _fill,
+                      geometryAllowed: _geometryAllowed,
+                      onSelect: _activate,
+                    ),
                   ),
                   Expanded(
                     child: ColoredBox(
@@ -194,6 +298,7 @@ class _PlannerShellState extends State<PlannerShell> {
                         tools: _tools,
                         outlines: _outlines,
                         grips: _grips,
+                        textTool: _text,
                       ),
                     ),
                   ),
@@ -201,7 +306,9 @@ class _PlannerShellState extends State<PlannerShell> {
                     key: const Key('chrome-right'),
                     width: 280,
                     color: scheme.surfaceContainerLow,
-                    child: PagePanel(document: _document, page: _page),
+                    child: ShellShortcutGuard(
+                      child: PagePanel(document: _document, page: _page),
+                    ),
                   ),
                 ],
               ),
