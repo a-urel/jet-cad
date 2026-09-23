@@ -224,7 +224,9 @@ bool isRigidTransform(Transform2 t, [Tolerance tol = Tolerance.standard]) =>
 /// text keeps its height.
 ///
 /// A pure translation `(1, 0, 0, 1, dx, dy)` gives `x + dx` exactly for
-/// every coordinate, and θ = 0 leaves every scalar bit for bit.
+/// every coordinate, and θ = 0 leaves every stored scalar bit for bit. The
+/// exception is a height-only text: it gains a rotation scalar, so even a
+/// translation writes a `0` it did not store.
 GeometryPayload rigidTransformLeaf(
     EntityKind kind, GeometryPayload payload, Transform2 t) {
   if (!isRigidTransform(t)) {
