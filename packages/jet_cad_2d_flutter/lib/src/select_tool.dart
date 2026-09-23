@@ -17,6 +17,7 @@ import 'grip_cache.dart' show GripCache, GripRef;
 import 'grip_drag.dart';
 import 'selection.dart';
 import 'selection_style.dart';
+import 'snap_marker.dart';
 import 'tool.dart';
 import 'viewport_transform.dart';
 
@@ -64,6 +65,17 @@ class SelectTool extends Tool {
   final DragPoint _dragPoint = DragPoint();
   final SnapResult _snapScratch = SnapResult();
   MouseCursor _cursor = MouseCursor.defer;
+  final Paint _guidePaint = Paint()
+    ..color = kPreviewColor
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1.0;
+  final Paint _markerPaint = Paint()
+    ..color = kSnapMarkerColor
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = kSnapMarkerStrokePixels;
+  final Paint _previewPaint = Paint()
+    ..color = kPreviewColor
+    ..style = PaintingStyle.stroke;
 
   /// What the press landed on; null while idle.
   PressClass? get pressClass => _phase == ToolPhase.idle ? null : _class;
@@ -648,6 +660,11 @@ class SelectTool extends Tool {
 
   @override
   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {
+    final drag = _drag;
+    if (drag != null && _phase == ToolPhase.dragging) {
+      _paintGuide(canvas, camera.worldToScreenMatrix, drag);
+      return;
+    }
     final rect = bandScreen;
     if (rect == null) return;
     final crossing = _bandMode == BandMode.crossing;
@@ -698,5 +715,68 @@ class SelectTool extends Tool {
       }
     }
     canvas.drawPath(path, stroke);
+  }
+
+  /// Spec D7: a 1 px line from the base (a rotate's pivot) to the target,
+  /// and D9's marker at the target. A rotate snaps to nothing, so it has no
+  /// marker.
+  void _paintGuide(Canvas canvas, Transform2 m, GripDrag drag) {
+    final from = drag.base, to = drag.target;
+    final a = Offset(
+        m.a * from.x + m.c * from.y + m.e, m.b * from.x + m.d * from.y + m.f);
+    final b =
+        Offset(m.a * to.x + m.c * to.y + m.e, m.b * to.x + m.d * to.y + m.f);
+    canvas.drawLine(a, b, _guidePaint);
+    if (drag.kind == DragKind.rotate) return;
+    drawSnapMarker(canvas, b, _dragPoint.objectKind,
+        grid: _dragPoint.grid, paint: _markerPaint);
+  }
+
+  /// Spec D7: the reshape preview, drawn by the overlay under its rebased
+  /// world matrix (Ruling 03-3). One path per frame, independent of the
+  /// document and the selection size.
+  @override
+  void paintWorldOverlay(Canvas canvas, Vector2 origin, double scale) {
+    final drag = _drag;
+    if (drag == null || drag.kind != DragKind.reshape) return;
+    final payload = drag.previewPayload;
+    final kind = drag.leafKind;
+    // A degenerate reshape: the canvas still shows the object unchanged.
+    if (payload == null || kind == null) return;
+    _previewPaint.strokeWidth = kPreviewStrokePixels / scale;
+    canvas.drawPath(_reshapePath(kind, payload, origin), _previewPaint);
+  }
+
+  /// [p] in rebased world, `world − origin`: no absolute world coordinate
+  /// reaches float32. Arc angles go in unchanged, because the camera's
+  /// y-flip and rotation are the matrix's business.
+  static Path _reshapePath(EntityKind kind, GeometryPayload p, Vector2 origin) {
+    final path = Path();
+    final c = p.coords;
+    final ox = origin.x, oy = origin.y;
+    switch (kind) {
+      case EntityKind.line:
+      case EntityKind.polyline:
+        if (c.length < 2) return path;
+        path.moveTo(c[0] - ox, c[1] - oy);
+        for (var i = 2; i + 1 < c.length; i += 2) {
+          path.lineTo(c[i] - ox, c[i + 1] - oy);
+        }
+      case EntityKind.circle:
+        path.addOval(Rect.fromCircle(
+            center: Offset(c[0] - ox, c[1] - oy), radius: p.scalars[0]));
+      case EntityKind.arc:
+        path.addArc(
+            Rect.fromCircle(
+                center: Offset(c[0] - ox, c[1] - oy), radius: p.scalars[0]),
+            p.scalars[1],
+            p.scalars[2]);
+      case EntityKind.point:
+      case EntityKind.text:
+      case EntityKind.attrib:
+      case EntityKind.fill:
+        break;
+    }
+    return path;
   }
 }
