@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/src/draw/arc_tool.dart';
@@ -98,17 +97,20 @@ void main() {
     expect(p.scalars[2], closeTo(2 * math.pi - 1.3, 1e-6));
   });
 
-  test('AR5 Fill does not apply to an arc', () {
+  // Fill does not apply to an arc by construction: ArcTool takes no fill
+  // (spec D13).
+  test(
+      'AR5 an arc whose start is on the centre is refused and the tool '
+      'waits', () {
     final s = drawScene();
-    final fill = ValueNotifier<bool>(true);
-    addTearDown(fill.dispose);
     final rig = drawRig(s.document, ArcTool(), objectSnap: false);
-    clickAt(rig, screenOf(rig.camera, cx, cy));
-    at(rig, 0.3, 40, click: true);
-    at(rig, 1.0, 40);
-    at(rig, 1.2, 40, click: true);
-    expect(s.document.fills.fillsOf(arcOf(s.document)), isEmpty);
-    expect(fill.value, isTrue);
+    final c = screenOf(rig.camera, cx, cy);
+    clickAt(rig, c);
+    final before = snapshot(s.document);
+    clickAt(rig, c);
+    expect(snapshot(s.document), before);
+    expect(rig.tool.isPending, isTrue);
+    expect(rig.tool.points, hasLength(1));
   });
 
   test('AR6 an end on the start ray is refused and the tool waits', () {
