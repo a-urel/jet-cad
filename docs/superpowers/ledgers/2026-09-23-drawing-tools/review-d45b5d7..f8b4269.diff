@@ -1,0 +1,900 @@
+# Review package: d45b5d7..HEAD
+
+## Commits
+f8b4269 docs: fix task ranges, witness slips, and the fix wave's tally (F-6)
+eb6efba fix(draw): F3 and F bubble to the shell mid-shape (Ruling F-2)
+89c8051 fix(draw): a returning tool no longer paints a stale snap marker (F-3)
+1d80caf fix(app): move furniture clear of every door's leaf and swing (Ruling F-1)
+
+## Files changed
+ STATUS.md                                          |  7 +-
+ apps/floor_planner/lib/startup_plan.dart           | 26 ++++--
+ apps/floor_planner/test/planner_draw_test.dart     | 20 +++++
+ apps/floor_planner/test/startup_plan_test.dart     | 99 ++++++++++++++++++++++
+ .../notes/2026-09-23-plan-05-results.md            | 99 +++++++++++++++++-----
+ docs/superpowers/notes/plan-05-mutation-log.md     | 61 ++++++++++++-
+ .../specs/2026-09-23-drawing-tools-design.md       | 12 +++
+ .../lib/src/draw/placement_tool.dart               | 19 +++++
+ .../test/draw/placement_tool_test.dart             | 44 ++++++++++
+ 9 files changed, 350 insertions(+), 37 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 3385794..2d935aa 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,16 +1,17 @@
+ # jet-cad — project status
+ 
+ **Last updated:** 2026-09-23. **Plan 05 (drawing tools) is EXECUTED on
+ `plan-05/drawing-tools`, cut from `main` at `7dac3b5`, and NOT MERGED.**
+-Eleven tasks: Tasks 1–9 at `7dac3b5..c4fcac4`, Task 10 (the mutation
+-sweep's invariants and greps) at `3957d52`, and Task 11 (Ruling T11-a) runs
++Eleven tasks: Tasks 1–8 at `7dac3b5..c4fcac4`, Task 9 at `6d98d72..5c55000`,
++Task 10 (the mutation sweep's invariants and greps) at `3957d52`, and Task
++11 (Ruling T11-a) runs
+ in two parts — Steps 1–4 (the results note, the spec amendments, this file
+ and the roadmap) land in this commit; the final whole-branch review and its
+ fix wave come next, and the ledger archive is deferred to the branch's last
+ commit before the merge. The exit gate is **13 of 14**: the four gate lines
+ are green (engine 911; render layer 911 + 1 skip + the five standing text
+ goldens; harness 82; app 43; both release builds `✓ Built`), 27 mutants
+ fired and 27 killed (26 named plus M-05w′), and criterion 14 — a human's
+ look, on macOS, in Chrome and in Firefox from `build/web` — is **OWED: not
+ looked at; the human looks after this branch is presented.** Nothing was
+ simulated to fill it in. **No merge decision has been made.** See
+@@ -186,21 +187,21 @@ snapping while placing (03's `resolveDragPoint`, plus a tool-local
+ self-snap that beats it), and one `AddEntityCommand` (or one
+ `AddRegionCommand` with Fill on) per completed shape, so one shape is one
+ undo step. A palette and seven shortcuts (`V L P R C A T`, plus `F` for
+ Fill) reach every tool from the shell, Escape returns to Select, and text
+ is an inline field bound to the tool's own controller, committed by Enter
+ or a canvas click and cancelled by Escape or any loss of focus inside the
+ app.
+ 
+ **Where it stands.** Eleven tasks on `plan-05/drawing-tools`, cut from
+ `main` at `7dac3b5`:
+-- Tasks 1–9 are at `7dac3b5..c4fcac4`;
++- Tasks 1–8 are at `7dac3b5..c4fcac4`; Task 9 is at `6d98d72..5c55000`;
+ - Task 10 (the mutation sweep's invariants and greps, appended to the
+   mutation log) is at `3957d52`;
+ - Task 11 runs in two parts (Ruling T11-a): Steps 1–4 (this section, the
+   results note, the spec amendments and the roadmap) land now; the final
+   whole-branch review and its fix wave come next, and the ledger archive
+   is the branch's last commit before the merge.
+ 
+ **EXECUTED, NOT MERGED.** No human's look has happened and no merge
+ decision has been made.
+ 
+diff --git a/apps/floor_planner/lib/startup_plan.dart b/apps/floor_planner/lib/startup_plan.dart
+index 6f5fdf3..2e336b4 100644
+--- a/apps/floor_planner/lib/startup_plan.dart
++++ b/apps/floor_planner/lib/startup_plan.dart
+@@ -122,31 +122,41 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
+       pitch: 150, both: true);
+   // Living room parquet: 150 mm strips running in x, with staggered joints
+   // every 900 mm.
+   p.parquet(
+       x0 + 5000 + _partition, y0 + 3500 + _partition, x1 - _wall, y1 - _wall,
+       strip: 150, plank: 900);
+ 
+   // --- Furniture: filled regions (spec 05 D14), after the finishes so
+   // their fills draw over the tile and parquet lines. ---
+   p.rectRegion(x0 + 400, y0 + 6600, x0 + 2200, y0 + 8600); // bed
+-  p.rectRegion(x0 + 2900, y0 + 6800, x0 + 4500, y0 + 8600); // bed
+-  p.rectRegion(x0 + 6000, y0 + 4200, x0 + 9000, y0 + 5100); // sofa
++  // Bed 2, clear of both of bedroom 2's door swings (Ruling F-1): the
++  // bedroom-1/2 door's swing starts at y0 + 7400, and the hall/living
++  // partition door's swing starts at x0 + 4100, so the bed (ending at
++  // x0 + 4000, y0 + 7200) sits below-left of both, clear by 100 mm each.
++  p.rectRegion(x0 + 2750, y0 + 5200, x0 + 4000, y0 + 7200); // bed
++  // The sofa, moved off the kitchen/bath-living partition door's swing
++  // (Ruling F-1): that arc's far edge is y0 + 4300, so the sofa starts at
++  // y0 + 4500, clear by 200 mm.
++  p.rectRegion(x0 + 6000, y0 + 4500, x0 + 9000, y0 + 5400); // sofa
+   p.rectRegion(x0 + 6400, y0 + 5600, x0 + 8600, y0 + 6800); // table
+-  // The kitchen counter: one L, so its fill has no seam.
++  // The kitchen counter: one L along the kitchen's north and east walls
++  // (Ruling F-1), clear of the hall/kitchen door's swing (bottom-left
++  // corner) and the front door's swing (bottom-middle), which the old
++  // south/west-wall L sat on top of.
+   p.polygonRegion([
+-    x0 + 5400, y0 + 400, //
+-    x0 + 9100, y0 + 400,
+-    x0 + 9100, y0 + 1000,
+-    x0 + 6000, y0 + 1000,
+-    x0 + 6000, y0 + 3100,
++    x0 + 9100, y0 + 3100, //
+     x0 + 5400, y0 + 3100,
++    x0 + 5400, y0 + 2500,
++    x0 + 8500, y0 + 2500,
++    x0 + 8500, y0 + 400,
++    x0 + 9100, y0 + 400,
+   ]);
+   p.rectRegion(x0 + 12200, y0 + 400, x0 + 13500, y0 + 2000); // bath
+   p.circleRegion(x0 + 7600, y0 + 6200, 350); // lamp, after the table
+   p.circleRegion(x0 + 10300, y0 + 1200, 220); // basin
+ 
+   // Spec 04 D12 and Ruling 04-1: the page is document data, attached
+   // through the log like everything else, and then the history is cleared
+   // so a fresh document has none — as a loaded one has none.
+   PageComponent.register(doc.components);
+   doc.header.units = DrawingUnits.millimeters;
+diff --git a/apps/floor_planner/test/planner_draw_test.dart b/apps/floor_planner/test/planner_draw_test.dart
+index f4e77d1..ecacf6e 100644
+--- a/apps/floor_planner/test/planner_draw_test.dart
++++ b/apps/floor_planner/test/planner_draw_test.dart
+@@ -382,11 +382,31 @@ void main() {
+     await press(tester, LogicalKeyboardKey.keyT);
+     await tester.tapAt(globalOf(tester, view, 7100, 3050));
+     await tester.pump();
+     await tester.enterText(find.byKey(const Key('text-entry')), 'x');
+     await tester.tap(find.byKey(const Key('page-scale')));
+     await tester.pump();
+     expect(find.byKey(const Key('text-entry')), findsNothing);
+     expect((view.tools.active as TextTool).pending.value, isNull);
+     expect(bytes(view), before);
+   });
++
++  testWidgets(
++      'A16 F3 mid-polyline flips OSNAP and keeps the shape pending '
++      '(Ruling F-2)', (tester) async {
++    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
++    await press(tester, LogicalKeyboardKey.keyP);
++    await tester.tapAt(globalOf(tester, view, 7010, 3020));
++    await tester.tapAt(globalOf(tester, view, 7060, 3090));
++    await tester.pump();
++    final polyline = view.tools.active as PolylineTool;
++    expect(polyline.isPending, isTrue);
++    String osnapText() =>
++        tester.widget<Text>(find.byKey(const Key('osnap-text'))).data!;
++    expect(osnapText(), 'OSNAP');
++    await press(tester, LogicalKeyboardKey.f3);
++    expect(osnapText(), 'osnap off',
++        reason: 'the tool ignores F3, so it reaches the shell');
++    expect(status(tester), 'Polyline');
++    expect(polyline.isPending, isTrue);
++  });
+ }
+diff --git a/apps/floor_planner/test/startup_plan_test.dart b/apps/floor_planner/test/startup_plan_test.dart
+index b9810e9..ec02afc 100644
+--- a/apps/floor_planner/test/startup_plan_test.dart
++++ b/apps/floor_planner/test/startup_plan_test.dart
+@@ -1,16 +1,32 @@
++import 'dart:math' as math;
+ import 'dart:ui' show Size;
+ 
+ import 'package:floor_planner/startup_plan.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// Even-odd ray casting: a geometric decision (Tolerance is not needed --
++/// the boundary case never arises for the sampled points below).
++bool _pointInPolygon(Vector2 p, List<Vector2> poly) {
++  var inside = false;
++  for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
++    final pi = poly[i], pj = poly[j];
++    final crosses = (pi.y > p.y) != (pj.y > p.y);
++    if (crosses && p.x < (pj.x - pi.x) * (p.y - pi.y) / (pj.y - pi.y) + pi.x) {
++      inside = !inside;
++    }
++  }
++  return inside;
++}
+ 
+ void main() {
+   late FlutterTextMeasurer measurer;
+   setUp(() {
+     measurer = FlutterTextMeasurer();
+     addTearDown(measurer.clear);
+   });
+ 
+   test('is at the target scale: between 500 and 1,000 entities', () {
+     final doc = startupPlan(measurer);
+@@ -106,11 +122,94 @@ void main() {
+       }
+       if (r.kind == EntityKind.line &&
+           r.color == const TrueColor(0xBBBBBB) &&
+           r.handle.value > maxFinish) {
+         maxFinish = r.handle.value;
+       }
+     }
+     expect(maxFinish, greaterThan(0));
+     expect(minFill, greaterThan(maxFinish));
+   });
++
++  test(
++      'SP3 no door leaf or swing lies under a furniture fill (Ruling F-1, '
++      'M-05aa)', () {
++    final doc = startupPlan(measurer);
++
++    // Every furniture boundary (SP1's eight), as a polygon or a circle.
++    final polygons = <List<Vector2>>[];
++    final circles = <(Vector2, double)>[];
++    for (final slot in doc.entities.liveSlots) {
++      final h = doc.entities.handleAt(slot);
++      if (doc.fills.fillsOf(h).isEmpty) continue;
++      final kind = doc.entities.kindAt(slot);
++      final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
++      if (kind == EntityKind.circle) {
++        circles.add((payload.pointAt(0), payload.scalars[0]));
++      } else {
++        polygons.add([
++          for (var i = 0; i < payload.pointCount; i++) payload.pointAt(i),
++        ]);
++      }
++    }
++    bool insideFurniture(Vector2 p) {
++      for (final (c, r) in circles) {
++        if ((p - c).length <= r) return true;
++      }
++      for (final poly in polygons) {
++        if (_pointInPolygon(p, poly)) return true;
++      }
++      return false;
++    }
++
++    // Every arc is a door swing (nothing else in the plan emits one); every
++    // door leaf is a line entity with one endpoint exactly on the arc's
++    // centre and its far endpoint the arc's radius away (Tolerance: which
++    // line is the leaf is a geometric decision; the endpoints themselves
++    // are the stored values, compared exactly).
++    const tol = Tolerance.standard;
++    final arcs = <GeometryPayload>[];
++    final lines = <GeometryPayload>[];
++    for (final slot in doc.entities.liveSlots) {
++      final kind = doc.entities.kindAt(slot);
++      if (kind != EntityKind.arc && kind != EntityKind.line) continue;
++      final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
++      (kind == EntityKind.arc ? arcs : lines).add(payload);
++    }
++    expect(arcs, hasLength(7), reason: 'one swing per door');
++
++    final samples = <Vector2>[];
++    for (final arc in arcs) {
++      final c = arc.pointAt(0);
++      final radius = arc.scalars[0];
++      final start = arc.scalars[1];
++      final sweep = arc.scalars[2];
++      for (final t in const [0.0, 0.25, 0.5, 0.75, 1.0]) {
++        final a = start + sweep * t;
++        samples.add(
++            Vector2(c.x + radius * math.cos(a), c.y + radius * math.sin(a)));
++      }
++      final leaf = lines.firstWhere((l) {
++        final a = l.pointAt(0), b = l.pointAt(1);
++        final Vector2 far;
++        if (a.x == c.x && a.y == c.y) {
++          far = b;
++        } else if (b.x == c.x && b.y == c.y) {
++          far = a;
++        } else {
++          return false;
++        }
++        return tol.eq((far - c).length, radius);
++      }, orElse: () => throw StateError('no leaf found for arc at $c'));
++      final a = leaf.pointAt(0), b = leaf.pointAt(1);
++      for (final t in const [0.0, 0.25, 0.5, 0.75, 1.0]) {
++        samples.add(Vector2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t));
++      }
++    }
++    expect(samples, hasLength(70));
++
++    for (final p in samples) {
++      expect(insideFurniture(p), isFalse,
++          reason: 'door point $p lies under a furniture fill');
++    }
++  });
+ }
+diff --git a/docs/superpowers/notes/2026-09-23-plan-05-results.md b/docs/superpowers/notes/2026-09-23-plan-05-results.md
+index 4ac8242..0df7fc9 100644
+--- a/docs/superpowers/notes/2026-09-23-plan-05-results.md
++++ b/docs/superpowers/notes/2026-09-23-plan-05-results.md
+@@ -1,20 +1,21 @@
+ # Plan 05 — drawing tools: results
+ 
+ **Plan:** [2026-09-23-drawing-tools.md](../plans/2026-09-23-drawing-tools.md).
+ **Spec:** [2026-09-23-drawing-tools-design.md](../specs/2026-09-23-drawing-tools-design.md)
+ (revision 2, amended at execution — see "Spec amendments" below).
+ **Mutation log:** [plan-05-mutation-log.md](plan-05-mutation-log.md).
+ **Branch:** `plan-05/drawing-tools`, worktree
+ `.claude/worktrees/quizzical-jemison-7537de`, cut from `main` at `7dac3b5`.
+-**Eleven tasks: Tasks 1–9 at `7dac3b5..c4fcac4`; Task 10 (the mutation
+-sweep's invariants and greps, appended to the mutation log) at `3957d52`;
++**Eleven tasks: Tasks 1–8 at `7dac3b5..c4fcac4`; Task 9 at
++`6d98d72..5c55000`; Task 10 (the mutation sweep's invariants and greps,
++appended to the mutation log) at `3957d52`;
+ Task 11 runs in two parts (Ruling T11-a) — Steps 1–4 (this note, the spec
+ amendments, STATUS and the roadmap) are this commit, and the ledger archive
+ is deferred to after the final whole-branch review and its fix wave, as the
+ branch's last commit before the merge.**
+ **Ledger (per-task briefs, reports, mutation backups, every ruling):**
+ `.superpowers/sdd/2026-09-23-drawing-tools/` (git-ignored while the plan is
+ in flight; archived to
+ `docs/superpowers/ledgers/2026-09-23-drawing-tools/` before the merge,
+ Ruling T11-a).
+ 
+@@ -187,51 +188,60 @@ gate run above):
+ ```
+ SWEEP differential: checked 500, skipped 0
+ ```
+ 
+ 500 checked, 0 skipped — no trial in this seeded run landed close enough to
+ a multiple of `2π` to need the skip rule. This is the same test named as
+ `AR1–AR4`'s and `S2–S6`'s differential witness for exit criterion 8 below.
+ 
+ ### Mutation tally
+ 
+-From [plan-05-mutation-log.md](plan-05-mutation-log.md): **27 fired, 27
++From [plan-05-mutation-log.md](plan-05-mutation-log.md): **30 fired, 30
+ killed, 0 survived, 0 equivalent** — 26 named mutants (M-05a…M-05z) plus
+-M-05w′, the reviewer-noted second form of M-05w. M-05w′ first fired as a
+-**survivor** against the original PL8 fixture (Task 9); fix round 1
+-(Ruling T9-a) changed PL8's fixture geometry only (test-only: the first
+-vertex moved to `anchor + Offset(13, 0)`, the close click to `anchor +
+-Offset(5, 0)`), and both M-05w and M-05w′ were re-fired against the new
+-fixture and both now go red. Task 10's own review independently re-fired
+-five of the twenty-seven (M-05a, M-05i, M-05u — by test-name analogy to
+-Plan 03's practice — the exact re-fired set is Task 10's own report) and
+-got the same failures each time.
++M-05w′, the reviewer-noted second form of M-05w, from the original sweep
++(Task 9), plus M-05aa, M-05ab and the F-3 kill from the final
++whole-branch review's fix wave. M-05w′ first fired as a **survivor**
++against the original PL8 fixture (Task 9); fix round 1 (Ruling T9-a)
++changed PL8's fixture geometry only (test-only: the first vertex moved to
++`anchor + Offset(13, 0)`, the close click to `anchor + Offset(5, 0)`), and
++both M-05w and M-05w′ were re-fired against the new fixture and both now
++go red. Task 10's own review independently re-fired five of the
++twenty-seven (M-05a, M-05i, M-05u — by test-name analogy to Plan 03's
++practice — the exact re-fired set is Task 10's own report) and got the
++same failures each time.
++
++**The final fix wave's three mutants** (Rulings F-1, F-2, F-3): M-05aa
++(the kitchen counter moved back to its old, colliding coordinates — killed
++by `SP3`), M-05ab (the F3/F mid-shape exception dropped from
++`PlacementTool.onKey` — killed by `B10` and `A16`), and the F-3 kill (the
++returning tool's `_hoverVisible = false` dropped from `cancel` — killed by
++`B11`). Detail in the mutation log's "Final fix wave" section.
+ 
+ ---
+ 
+ ## Exit gate
+ 
+ The spec's fourteen criteria and where each is witnessed:
+ 
+ | # | criterion | witness |
+ |---|---|---|
+-| 1 | each tool, documented geometry, both cameras | B1, L1, PL1, PL3, R1, C1, AR1, TX1–TX2 |
++| 1 | each tool, documented geometry, both cameras | B1, L1, PL1, PL3, R1, C1, AR1, TX1 |
+ | 2 | one shape, one undo step; redo, same handles | E4, L1, L4, PL1, PL4, R3, C2, TX2, A11 |
+ | 3 | a snapped start is exact | B2, L1 |
+ | 4 | Escape, tool switch, dispose: byte-identical | B4, B9, PL9, TX5, A6, A10 |
+ | 5 | a rectangle round-trips closed, plain and filled | E5, R5 |
+ | 6 | text at the requested cap height | E7 |
+ | 7 | the palette and shortcuts reach all seven tools and Fill; an idle Escape returns | A1, A2, A4 |
+ | 8 | the arc's direction follows the pointer; the differential | S2–S6, AR1–AR4, the differential (`SWEEP differential: checked 500, skipped 0`) |
+ | 9 | Fill: regions, the fallback, the kinds that ignore it | E9, PL4, PL5, R3, R4, C2, AR5 |
+-| 10 | the sample plan's furniture is filled over the finishes | SP1, SP2 |
+-| 11 | every mutant killed | [plan-05-mutation-log.md](plan-05-mutation-log.md): 27 fired, 27 killed |
++| 10 | the sample plan's furniture is filled over the finishes | SP1, SP2, SP3 |
++| 11 | every mutant killed | [plan-05-mutation-log.md](plan-05-mutation-log.md): 30 fired, 30 killed |
+ | 12 | the allocation invariants unedited; the overlay's structural test | Task 10's greps (invariant 4 and the allocation tests unedited), OV1, OV2 |
+ | 13 | the four gate lines, the five goldens only, both builds | above, from Task 10's run |
+ | 14 | the human's look | **OWED (this task): not looked at; the human looks after this branch is presented** |
+ 
+ **13 of 14 PASS.** Criteria 1–13 are PASS, each with its witness above.
+ Criterion 14 is OWED, itemised per platform below, and is never marked done
+ by this task.
+ 
+ ### Review Focus items and their tests
+ 
+@@ -279,41 +289,49 @@ with the test in the task that owns the code:
+ - **The app camera in `planner_grips_test.dart` is still a reflection.**
+   Plan 03's b/c-transposition finding was closed for the render layer on
+   `fix/grip-camera-bc-swap` (six render-layer test files gained an
+   unflipped `gripCamera(flipY: false)` pass), but the app-level grips test
+   fixture was never touched by that fix and still uses a reflecting
+   camera. Plan 05 does not touch `planner_grips_test.dart` and inherits
+   this exactly as Plan 03 left it.
+ - **The sample-plan count margin (Ruling 05-12).** The rebuild turns 30
+   furniture entities into 8 filled regions (16 entities: 8 boundaries + 8
+   fills), dropping the sample plan's live count from 523 (measured at
+-  `5ea98dd`) to **509** (`A9` in `startup_plan_test.dart`, exactly
++  `5ea98dd`) to **509** (`SP1` in `startup_plan_test.dart`, exactly
+   `523 − 14`). `startup_plan_test`'s `[500, 1000]` bound and
+   `planner_shell_test`'s `>= 500` bound both still pass, with a margin of
+   **9** entities. A later cut to the sample plan that removes ten or more
+   entities would need to re-check both bounds.
++- **A platform pointer-cancel drops the whole pending shape (Ruling F-4,
++  final review).** `InteractionLayer._onCancel` (02, frozen by invariant 4)
++  maps every `PointerCancelEvent` straight to `tool.cancel(ctx)` --
++  the same call Escape makes. For a `PlacementTool` that means
++  `clearShape()`: a system gesture taking over, or a window losing pointer
++  capture, mid-polyline loses every vertex placed so far, not just the one
++  in flight. Not fixed in this fix wave: the controller ruled it debt, to
++  be picked up if 02's API is ever reopened.
+ 
+ ---
+ 
+ ## Criterion 14: the human's look — OWED
+ 
+ **Not looked at. The human looks after this branch is presented.** No
+ device run and no visual judgement was simulated to fill it in. Run it on
+ each platform:
+ 
+ - **macOS:** `cd apps/floor_planner && flutter run -d macos --release`;
+ - **Chrome:** `cd apps/floor_planner && flutter run -d chrome --release`;
+ - **Firefox:** `build/web`, served statically (`cd
+   apps/floor_planner/build/web && python3 -m http.server`).
+ 
+-Ten items per platform. Record each as **seen / not seen / could not
+-judge**.
++Thirteen items per platform (the final review added 11–13, Rulings F-1,
++F-2 and F-5). Record each as **seen / not seen / could not judge**.
+ 
+ ### macOS: `flutter run -d macos --release`
+ 
+ 1. Every tool once. The palette highlights the active tool, and the top
+    bar names it. ☐ seen ☐ not seen ☐ could not judge
+ 2. A line chain snapped onto a wall end, and ended by clicking its start.
+    ☐ seen ☐ not seen ☐ could not judge
+ 3. A polyline closed by clicking its first vertex, with Fill on and then
+    off. ☐ seen ☐ not seen ☐ could not judge
+ 4. A rectangle and a circle with Fill on: grey fills under their outlines.
+@@ -326,20 +344,26 @@ judge**.
+ 7. Escape mid-shape and then undo: one step per shape.
+    ☐ seen ☐ not seen ☐ could not judge
+ 8. The filled furniture over the tiles and the parquet.
+    ☐ seen ☐ not seen ☐ could not judge
+ 9. Whether the browser also takes any single letter, or F. **Not
+    applicable on macOS** — recorded here only to keep the item numbering
+    aligned with Chrome and Firefox below.
+    ☐ not applicable
+ 10. Whether the text field's position and font jump on commit are
+     acceptable. ☐ seen ☐ not seen ☐ could not judge
++11. Every door's leaf and swing arc, clear of the counter, the beds and
++    the sofa (Ruling F-1). ☐ seen ☐ not seen ☐ could not judge
++12. F3 pressed mid-polyline: the OSNAP indicator flips and the polyline
++    stays pending (Ruling F-2). ☐ seen ☐ not seen ☐ could not judge
++13. A text placed near the canvas's top and right edges: whether the
++    field clips (Ruling F-5). ☐ seen ☐ not seen ☐ could not judge
+ 
+ ### Chrome: `flutter run -d chrome --release`
+ 
+ 1. Every tool once. The palette highlights the active tool, and the top
+    bar names it. ☐ seen ☐ not seen ☐ could not judge
+ 2. A line chain snapped onto a wall end, and ended by clicking its start.
+    ☐ seen ☐ not seen ☐ could not judge
+ 3. A polyline closed by clicking its first vertex, with Fill on and then
+    off. ☐ seen ☐ not seen ☐ could not judge
+ 4. A rectangle and a circle with Fill on: grey fills under their outlines.
+@@ -352,20 +376,26 @@ judge**.
+    ☐ seen ☐ not seen ☐ could not judge
+ 8. The filled furniture over the tiles and the parquet.
+    ☐ seen ☐ not seen ☐ could not judge
+ 9. Whether the browser also takes any single letter, or F — Chrome binds
+    F3 to find-next (Plan 03's debt); the shell here does not bind F3, but
+    the shortcut letters (`V L P R C A T F`) and Escape/Enter are worth
+    watching for a browser default action stealing one.
+    ☐ seen ☐ not seen ☐ could not judge
+ 10. Whether the text field's position and font jump on commit are
+     acceptable. ☐ seen ☐ not seen ☐ could not judge
++11. Every door's leaf and swing arc, clear of the counter, the beds and
++    the sofa (Ruling F-1). ☐ seen ☐ not seen ☐ could not judge
++12. F3 pressed mid-polyline: the OSNAP indicator flips and the polyline
++    stays pending (Ruling F-2). ☐ seen ☐ not seen ☐ could not judge
++13. A text placed near the canvas's top and right edges: whether the
++    field clips (Ruling F-5). ☐ seen ☐ not seen ☐ could not judge
+ 
+ ### Firefox: `build/web`, served statically
+ 
+ 1. Every tool once. The palette highlights the active tool, and the top
+    bar names it. ☐ seen ☐ not seen ☐ could not judge
+ 2. A line chain snapped onto a wall end, and ended by clicking its start.
+    ☐ seen ☐ not seen ☐ could not judge
+ 3. A polyline closed by clicking its first vertex, with Fill on and then
+    off. ☐ seen ☐ not seen ☐ could not judge
+ 4. A rectangle and a circle with Fill on: grey fills under their outlines.
+@@ -375,20 +405,26 @@ judge**.
+ 6. Text: T, click, type "Living room", Enter. Then Escape on a second one,
+    and a canvas click on a third. ☐ seen ☐ not seen ☐ could not judge
+ 7. Escape mid-shape and then undo: one step per shape.
+    ☐ seen ☐ not seen ☐ could not judge
+ 8. The filled furniture over the tiles and the parquet.
+    ☐ seen ☐ not seen ☐ could not judge
+ 9. Whether the browser also takes any single letter, or F.
+    ☐ seen ☐ not seen ☐ could not judge
+ 10. Whether the text field's position and font jump on commit are
+     acceptable. ☐ seen ☐ not seen ☐ could not judge
++11. Every door's leaf and swing arc, clear of the counter, the beds and
++    the sofa (Ruling F-1). ☐ seen ☐ not seen ☐ could not judge
++12. F3 pressed mid-polyline: the OSNAP indicator flips and the polyline
++    stays pending (Ruling F-2). ☐ seen ☐ not seen ☐ could not judge
++13. A text placed near the canvas's top and right edges: whether the
++    field clips (Ruling F-5). ☐ seen ☐ not seen ☐ could not judge
+ 
+ **Nothing above is ticked on the human's behalf.** No finding, no verdict
+ and no `fix/` branch exists for Plan 05's look, because it has not
+ happened.
+ 
+ ---
+ 
+ ## Rulings
+ 
+ ### The plan's rulings, 05-1…05-15
+@@ -572,29 +608,45 @@ the production code does. The task's review replaced it with a test of
+ mutant (dropping `isDegenerateRadius`).
+ 
+ **PL8's fixture** (Task 9, Ruling T9-a above): moved the polyline's first
+ vertex from its original position to `anchor + Offset(13, 0)` (outside the
+ 10 px snap aperture from the anchor) and the closing click to `anchor +
+ Offset(5, 0)`, because the original geometry left M-05w′ an undetected
+ survivor — the anchor's object-snapped endpoint sat close enough to the
+ polyline's own first vertex, by coincidence, that self-snap still found
+ the right point even when applied to the wrong (already-resolved) input.
+ 
++**Only the first test or group in each draw test file loops over both
++`flipY` values.** `placement_tool_test.dart`'s B1–B3 (inside the `for
++(flipY in ...)` loop) and each tool's first test (`L1`, `PL1`/`PL3`, `R1`,
++`C1`, `AR1`, `TX1`) run at both cameras; every later test in the same file
++(B4 onward, L2 onward, and so on) runs once, at the file's default
++camera. This was true of the branch before this fix wave and stays true
++of the tests this wave adds (`B10`, `B11`, `A16` each run once).
++
+ ---
+ 
+ ## Spec amendments
+ 
+ Recorded where each applies, in
+ [2026-09-23-drawing-tools-design.md](../specs/2026-09-23-drawing-tools-design.md).
+-Each is a paragraph beginning "**Amended at execution (Plan 05):**",
+-appended at the end of the relevant section. Nothing original is rewritten.
+-
++Each is a paragraph beginning "**Amended at execution (Plan 05):**" (D3's,
++added by the final whole-branch review's fix wave, "**Amended at
++execution (Plan 05, final review):**"), appended at the end of the
++relevant section. Nothing original is rewritten.
++
++- **D3:** Ruling F-2 (final whole-branch review) — a key-down of F3 or F,
++  with no control/meta/alt modifier held, returns `ignored` even mid-shape
++  instead of the section's "every other key-down" `handled`, so both
++  bubble to the shell (object snap and Fill); neither ever touches the
++  document, so D3's reason for swallowing every other key-down does not
++  apply to them.
+ - **D4:** Ruling 05-2 — the self-snap hover marker is drawn through the
+   engine's own `drawSnapMarker(..., SnapKind.endpoint, ...)`, which *is*
+   the "own endpoint square" D4 calls for, rather than a second, bespoke
+   square.
+ - **D5:** Ruling 05-6 (the palette and Fill checkbox take no focus at all,
+   via `ExcludeFocus`, rather than acting on `InteractionLayer`'s private
+   focus node) and Ruling 05-8 (the guard also wraps the page panel and
+   maps the undo keys). Plus two findings from Task 7's fix round:
+   Ruling T7-a (spec D3 outranks this plan's own Review Focus 2 — every
+   key-down mid-shape is swallowed, so switching tools mid-shape needs
+@@ -625,21 +677,22 @@ appended at the end of the relevant section. Nothing original is rewritten.
+   survive `inactive` → `resumed`), A14 (Escape typed into the page-scale
+   field reaches the field, not the shell — the polyline stays pending),
+   and A15 (an ordinary in-app blur, the null-lifecycle case excluded,
+   still cancels a pending text, per D9's original rule).
+ 
+ ---
+ 
+ ## Files this task touched (Steps 1–4)
+ 
+ - `docs/superpowers/notes/2026-09-23-plan-05-results.md`: this file.
+-- `docs/superpowers/specs/2026-09-23-drawing-tools-design.md`: the five
+-  "Amended at execution" paragraphs above, appended. Nothing was
++- `docs/superpowers/specs/2026-09-23-drawing-tools-design.md`: the six
++  "Amended at execution" paragraphs above (five from Steps 1–4, plus D3's
++  from the final whole-branch review's fix wave), appended. Nothing was
+   rewritten.
+ - `STATUS.md`: a Plan 05 section, the header, and the "Resume here"
+   paragraph.
+ - `roadmap/05-drawing-tools.md`: the status line.
+ - `roadmap/00-README.md`: the 05 row in the status table.
+ 
+ Task 11 touched no code. The ledger archive (Step 5's second commit) is
+ deferred to after the final whole-branch review and its fix wave
+ (Ruling T11-a).
+diff --git a/docs/superpowers/notes/plan-05-mutation-log.md b/docs/superpowers/notes/plan-05-mutation-log.md
+index 64fc63f..6df3102 100644
+--- a/docs/superpowers/notes/plan-05-mutation-log.md
++++ b/docs/superpowers/notes/plan-05-mutation-log.md
+@@ -1,13 +1,15 @@
+-# Plan 05 mutation log — M-05a..z
++# Plan 05 mutation log — M-05a..z, plus the final fix wave (M-05aa, M-05ab)
+ 
+-27 fired: 27 killed, 0 survived, 0 equivalent.
++30 fired: 30 killed, 0 survived, 0 equivalent. (27 from the original sweep,
++plus M-05aa, M-05ab and the F-3 kill from the final whole-branch review's
++fix wave -- see "Final fix wave" below.)
+ 
+ **Fix round 1 (Ruling T9-a).** M-05w′ first fired as a survivor against
+ PL8; Task 9 fix round 1 changed PL8's fixture geometry (test-only) so both
+ forms of M-05w are killed, then re-fired both mutants to confirm. See the
+ M-05w and M-05w′ entries below for the before/after detail.
+ 
+ Procedure, per mutant: `cp` the target file to
+ `.superpowers/sdd/2026-09-23-drawing-tools/mutation-backups/<basename>.<id>`,
+ apply the one edit by hand, run only the named test file(s) with `CI=true`,
+ paste the failing test names and the summary line, restore with `cp` from the
+@@ -433,21 +435,21 @@ first (`00:00 +11: All tests passed!`). Re-fired this mutant:
+ `resolveDragPoint` still resolves the click to the anchor's endpoint
+ (nearer, object-snapped); this mutant then calls `selfSnap(_hover.point,
+ aperture)`, i.e. checks whether the anchor's endpoint is within the
+ aperture of the polyline's own first vertex — and now it is not (13 px >
+ 10 px), so `selfSnap` returns null and the polyline never closes. KILLED --
+ `PL8`; "Bad state: No element" at `test/draw/polyline_tool_test.dart
+ 172:71`, the same failure shape as M-05w's re-fire above. Summary `+9 -1`.
+ Restored and diffed empty against the fresh backup
+ `placement_tool.dart.M-05w-prime-refire`.
+ 
+-### M-05x — a zero-length first segment refused only by `==`, not by distance
++### M-05x — dropping the `_segments > 0` guard self-snaps before any segment commits
+ 
+ - **file:** `packages/jet_cad_2d_flutter/lib/src/draw/line_tool.dart`,
+   `selfSnap`
+ - **edit:** dropped the `_segments > 0 &&` clause
+ - **test:** `packages/jet_cad_2d_flutter/test/draw/line_tool_test.dart` (L3)
+ - **result:** KILLED -- `L3` (target: expected `isPending == true`, got
+   `false` — the tool now treats the very first click-on-itself as a valid
+   self-snap and clears the shape instead of refusing), plus collateral
+   `L5`. Summary `+4 -2`.
+ 
+@@ -665,10 +667,63 @@ Exit code 0.
+ ### Branch commit trailers (Ruling P-6)
+ 
+ ```
+ $ git rev-list --count 7dac3b5..HEAD
+ 13
+ $ git log --format=%B 7dac3b5..HEAD | grep -c "Co-Authored-By: Claude"
+ 13
+ ```
+ 13 commits on the branch, 13 `Co-Authored-By: Claude` trailers -- one per
+ commit.
++
++## Final fix wave (Rulings F-1, F-2, F-3)
++
++Three mutants fired against the final whole-branch review's fixes. Same
++procedure as above: `cp` the target to the mutation-backups directory,
++apply the one edit by hand, run only the named test file(s) with
++`CI=true`, paste the failing names and the summary line, restore with
++`cp`, then `diff` and confirm empty.
++
++### M-05aa — the L counter moved back to its old, colliding coordinates
++
++- **file:** `apps/floor_planner/lib/startup_plan.dart`, the kitchen
++  counter's `polygonRegion` call
++- **edit:** restored the pre-fix vertex list (the south/west-wall L,
++  hugging the bottom-left corner)
++- **test:** `apps/floor_planner/test/startup_plan_test.dart` (SP3)
++- **result:** KILLED -- `SP3` (target): "Expected: false / Actual: <true>
++  / door point [17900.0,9050.0] lies under a furniture fill" -- the
++  hall/kitchen door's swing again lands on the counter's old footprint.
++  Summary `+7 -1`. Restored and diffed empty.
++
++### M-05ab — the F3/F mid-shape exception dropped
++
++- **file:** `packages/jet_cad_2d_flutter/lib/src/draw/placement_tool.dart`,
++  `onKey`
++- **edit:** removed the `if ((key == LogicalKeyboardKey.f3 || key ==
++  LogicalKeyboardKey.keyF) && !_hasModifier()) return
++  KeyEventResult.ignored;` block, so every key-down mid-shape falls
++  through to `KeyEventResult.handled` again
++- **test:** `packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart`
++  (B10) and `apps/floor_planner/test/planner_draw_test.dart` (A16)
++- **result:** KILLED in both.
++  - `placement_tool_test.dart` B10: expected `KeyEventResult.ignored`, got
++    `KeyEventResult.handled` for F3 mid-shape. Summary `+12 -1`.
++  - `planner_draw_test.dart` A16: expected the `osnap-text` to read
++    `osnap off` after F3 mid-polyline, still read `OSNAP` (the tool
++    swallowed the key before the shell's `CallbackShortcuts` ever saw
++    it). Summary `+15 -1`.
++  - Both restored and diffed empty.
++
++### The F-3 kill — the stale hover marker's `_hoverVisible = false` dropped
++
++- **file:** `packages/jet_cad_2d_flutter/lib/src/draw/placement_tool.dart`,
++  `cancel`
++- **edit:** removed the `_hoverVisible = false;` line, so a tool
++  reactivated after a switch away repaints its last hover marker before
++  the next pointer move
++- **test:** `packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart`
++  (B11)
++- **result:** KILLED -- `B11` (target): "Expected: empty / Actual:
++  [Instance of 'RecordedCall']" -- `paintOverlay` drew the stale marker
++  immediately after the tool returned, before any new hover. Summary
++  `+13 -1`. Restored and diffed empty.
+diff --git a/docs/superpowers/specs/2026-09-23-drawing-tools-design.md b/docs/superpowers/specs/2026-09-23-drawing-tools-design.md
+index 9d60f51..aeb992d 100644
+--- a/docs/superpowers/specs/2026-09-23-drawing-tools-design.md
++++ b/docs/superpowers/specs/2026-09-23-drawing-tools-design.md
+@@ -301,20 +301,32 @@ class PlacementTool extends Tool`.
+   (D6);
+ - `void accept(Vector2 point, ToolContext ctx)`;
+ - `void finish(ToolContext ctx)`;
+ - `void paintRubberBand(Canvas, Vector2 origin, double scale)`.
+ 
+ **Committing** goes through `commit(ctx, DraftCommand)`:
+ 1. If `ctx.document.commands.permissions.allows(Capability.geometry)` is
+    false, the shape is dropped and nothing is dispatched.
+ 2. Otherwise the command goes to `ctx.execute`.
+ 
++**Amended at execution (Plan 05, final review):** Ruling F-2. A key-down
++of `LogicalKeyboardKey.f3` or `LogicalKeyboardKey.keyF`, with no control,
++meta or alt modifier held (`HardwareKeyboard.instance`), returns
++`KeyEventResult.ignored` even while a shape is pending, instead of the
++`handled` this section's "every other key-down" rule would otherwise give
++it. Both bubble to the shell, which toggles object snap (F3) or Fill (F);
++neither ever touches the document, so the reason the rule swallows every
++other key-down — keeping undo and redo off a half-placed shape — does not
++apply to them. Without this, F3 (the only object-snap toggle) was
++unreachable while a polyline was pending. Every other key-down mid-shape,
++and both undo keys, stay swallowed exactly as this section says.
++
+ ### D4 — Resolving a point
+ 
+ A raw world point `raw` from a `ToolPointerEvent` resolves **in exactly
+ this order**. The first step that produces a point wins.
+ 1. **`selfSnap`.** Call `selfSnap(raw, kSnapAperturePixels /
+    camera.scale)`. A non-null result is a stored placed point, returned
+    itself. **It beats object snap**, even when an existing entity's
+    endpoint is also inside the aperture and nearer. It carries **no marker
+    kind**; the tool paints its own endpoint square for it.
+ 2. **Otherwise, `resolveDragPoint`, unchanged**, exactly as
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draw/placement_tool.dart b/packages/jet_cad_2d_flutter/lib/src/draw/placement_tool.dart
+index 9f9b581..d1793ac 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/draw/placement_tool.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/draw/placement_tool.dart
+@@ -1,16 +1,17 @@
+ import 'dart:ui' show Canvas, Offset, Paint, PaintingStyle, Path, Size;
+ 
+ import 'package:flutter/foundation.dart' show ValueListenable;
+ import 'package:flutter/gestures.dart' show kPrimaryButton;
+ import 'package:flutter/services.dart'
+     show
++        HardwareKeyboard,
+         KeyDownEvent,
+         KeyEvent,
+         KeyRepeatEvent,
+         KeyUpEvent,
+         LogicalKeyboardKey,
+         MouseCursor,
+         SystemMouseCursors;
+ import 'package:flutter/widgets.dart' show KeyEventResult;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+@@ -172,32 +173,50 @@ abstract class PlacementTool extends Tool {
+         cancel(ctx);
+         return KeyEventResult.handled;
+       }
+       if (key == LogicalKeyboardKey.enter ||
+           key == LogicalKeyboardKey.numpadEnter) {
+         finish(ctx);
+         _syncCamera(ctx);
+         notifyListeners();
+         return KeyEventResult.handled;
+       }
++      // Ruling F-2 (spec 05 D3, amended at execution): F3 (object snap) and
++      // F (Fill), with no modifier held, bubble to the shell even mid-shape.
++      // Neither ever touches the document, so the reason D3 swallows every
++      // other key-down -- keeping undo and redo off a half-placed shape --
++      // does not apply to them, and F3 is otherwise unreachable while a
++      // polyline is pending.
++      if ((key == LogicalKeyboardKey.f3 || key == LogicalKeyboardKey.keyF) &&
++          !_hasModifier()) {
++        return KeyEventResult.ignored;
++      }
+     }
+     // Every other key-down and repeat mid-shape: undo and redo never land
+     // on a half-placed shape (spec 05 D3, as 03 D5 during a drag).
+     return KeyEventResult.handled;
+   }
+ 
++  static bool _hasModifier() {
++    final hw = HardwareKeyboard.instance;
++    return hw.isControlPressed || hw.isMetaPressed || hw.isAltPressed;
++  }
++
+   /// Every cancel path (Escape, `ToolController.activate`, the layer's
+   /// deactivate and dispose) drops the pending shape and never touches the
+   /// document (invariant 3).
+   @override
+   void cancel(ToolContext ctx) {
+     clearShape();
++    // Ruling F-3: a tool that returns after a switch away paints no stale
++    // snap marker; the next pointer move resolves a fresh one.
++    _hoverVisible = false;
+     _syncCamera(ctx);
+     notifyListeners();
+   }
+ 
+   /// Ruling 05-3: the permission check runs before [build], so a denied
+   /// shape allocates no handle. Returns whether the command ran.
+   bool commit(ToolContext ctx, DraftCommand Function() build) {
+     if (!ctx.document.commands.permissions.allows(Capability.geometry)) {
+       return false;
+     }
+diff --git a/packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart b/packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart
+index ffc4c59..47f40e2 100644
+--- a/packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart
++++ b/packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart
+@@ -18,20 +18,24 @@ GeometryPayload payloadOf(DraftDocument doc, Handle h) =>
+     doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(h)!));
+ 
+ /// The newest entity's handle: the tools allocate ascending.
+ Handle newest(DraftDocument doc) =>
+     doc.entities.handleAt(doc.entities.liveSlots.reduce((a, b) =>
+         doc.entities.handleAt(a).value > doc.entities.handleAt(b).value
+             ? a
+             : b));
+ 
+ void main() {
++  // B10 reads HardwareKeyboard.instance (Ruling F-2), which needs a bound
++  // ServicesBinding even though every test here is a plain unit test.
++  TestWidgetsFlutterBinding.ensureInitialized();
++
+   for (final flipY in const [true, false]) {
+     group('flipY $flipY', () {
+       test('B1 a point is the layer\'s world point, not the screen (M-05a)',
+           () {
+         final s = drawScene();
+         final rig = drawRig(s.document, LineTool(), flipY: flipY);
+         final a = screenOf(rig.camera, 7010.5, 3020.25);
+         final b = screenOf(rig.camera, 7090.75, 3070.5);
+         clickAt(rig, a);
+         clickAt(rig, b);
+@@ -190,11 +194,51 @@ void main() {
+     rig.tools.activate(SelectTool());
+     expect(line.isPending, isFalse);
+     expect(snapshot(s.document), before);
+     var notified = 0;
+     line.addListener(() => notified++);
+     rig.camera.value = ViewportTransform(
+         worldToScreenMatrix: Transform2.translation(5, 5)
+             .multiply(rig.camera.value.worldToScreenMatrix));
+     expect(notified, 0, reason: 'the camera listener is detached');
+   });
++
++  test(
++      'B10 F3 and F bubble to the shell mid-shape; the shape stays '
++      'pending (Ruling F-2)', () {
++    final s = drawScene();
++    final rig = drawRig(s.document, LineTool());
++    clickAt(rig, screenOf(rig.camera, 7010, 3020));
++    expect(rig.tool.isPending, isTrue);
++    expect(keyDown(rig, LogicalKeyboardKey.f3, PhysicalKeyboardKey.f3),
++        KeyEventResult.ignored);
++    expect(rig.tool.isPending, isTrue);
++    expect(keyDown(rig, LogicalKeyboardKey.keyF, PhysicalKeyboardKey.keyF),
++        KeyEventResult.ignored);
++    expect(rig.tool.isPending, isTrue);
++    // Every other key-down mid-shape still stays swallowed (B5).
++    expect(keyDown(rig, LogicalKeyboardKey.keyZ, PhysicalKeyboardKey.keyZ),
++        KeyEventResult.handled);
++  });
++
++  test(
++      'B11 a returning tool paints no stale snap marker until the next '
++      'hover (Ruling F-3)', () {
++    final s = drawScene();
++    final rig = drawRig(s.document, LineTool());
++    final at = screenOf(rig.camera, kAnchorX, kAnchorY);
++    hoverAt(rig, at + const Offset(2, 2));
++    expect(rig.tool.hoverVisible, isTrue);
++
++    rig.tools.activate(SelectTool());
++    rig.tools.activate(rig.tool);
++
++    final stale = SpyCanvas();
++    rig.tool.paintOverlay(stale, rig.camera.value, const Size(800, 600));
++    expect(stale.calls, isEmpty, reason: 'the old marker must not repaint');
++
++    hoverAt(rig, at + const Offset(2, 2));
++    final fresh = SpyCanvas();
++    rig.tool.paintOverlay(fresh, rig.camera.value, const Size(800, 600));
++    expect(fresh.named('drawRect'), hasLength(1));
++  });
+ }

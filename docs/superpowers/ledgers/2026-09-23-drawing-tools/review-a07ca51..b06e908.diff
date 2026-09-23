@@ -1,0 +1,1116 @@
+# Review package: a07ca51..HEAD
+
+## Commits
+b06e908 feat(app): the tool palette, shortcuts and the inline text field
+
+## Files changed
+ apps/floor_planner/lib/main.dart               | 113 ++++++++-
+ apps/floor_planner/lib/planner_view.dart       | 117 ++++++---
+ apps/floor_planner/lib/shortcut_guard.dart     |  48 ++++
+ apps/floor_planner/lib/text_entry_overlay.dart | 133 ++++++++++
+ apps/floor_planner/lib/tool_palette.dart       |  83 +++++++
+ apps/floor_planner/test/planner_draw_test.dart | 324 +++++++++++++++++++++++++
+ 6 files changed, 779 insertions(+), 39 deletions(-)
+
+## Diff
+diff --git a/apps/floor_planner/lib/main.dart b/apps/floor_planner/lib/main.dart
+index 646211e..16811d4 100644
+--- a/apps/floor_planner/lib/main.dart
++++ b/apps/floor_planner/lib/main.dart
+@@ -1,35 +1,38 @@
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'page_panel.dart';
+ import 'planner_view.dart';
++import 'shortcut_guard.dart';
+ import 'startup_plan.dart';
++import 'tool_palette.dart';
+ 
+ void main() => runApp(const FloorPlannerApp());
+ 
+ class FloorPlannerApp extends StatelessWidget {
+   const FloorPlannerApp({super.key});
+ 
+   @override
+   Widget build(BuildContext context) => MaterialApp(
+         title: 'Floor planner',
+         debugShowCheckedModeBanner: false,
+         theme: ThemeData(colorSchemeSeed: const Color(0xFF2266CC)),
+         home: const PlannerShell(),
+       );
+ }
+ 
+ /// Owns the document, the index, the camera and -- since 03 -- the outline
+-/// cache, the grip cache and the snap settings for the window's lifetime.
++/// cache, the grip cache and the snap settings for the window's lifetime;
++/// since 05, the tools and the Fill toggle.
+ /// It lays out the chrome slots.
+ ///
+ /// [document] and [initialCamera] are a test seam (spec 03, Architecture;
+ /// Ruling 03-18).
+ /// - [document] replaces the startup plan, and must carry a
+ ///   `FlutterTextMeasurer`.
+ /// - [initialCamera] replaces the nominal fit.
+ /// - `PlannerView` still fits once after its first frame, so a test sets a
+ ///   camera of its own after the first pump.
+ class PlannerShell extends StatefulWidget {
+@@ -49,20 +52,82 @@ class _PlannerShellState extends State<PlannerShell> {
+   late final PageNotifier _page = PageNotifier(_document);
+   late final SpatialIndex _index = SpatialIndex(_document);
+   late final CameraController _camera = CameraController(
+     widget.initialCamera ?? _nominalFit(),
+     minScale: kMinScale,
+     maxScale: kMaxScale,
+   );
+   final GesturePolicy _policy = GesturePolicy.forPlatform();
+   final SnapSettings _snap = SnapSettings();
+ 
++  // Spec 05 D5, D13: the shell owns the tools and the Fill toggle.
++  final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
++  final SelectTool _select = SelectTool();
++  final LineTool _line = LineTool();
++  late final PolylineTool _polyline = PolylineTool(fill: _fill);
++  late final RectangleTool _rectangle = RectangleTool(fill: _fill);
++  late final CircleTool _circle = CircleTool(fill: _fill);
++  final ArcTool _arc = ArcTool();
++  final TextTool _text = TextTool();
++
++  late final List<PaletteEntry> _entries = [
++    PaletteEntry(
++        keyName: 'tool-select',
++        label: 'Select',
++        shortcut: 'V',
++        logicalKey: LogicalKeyboardKey.keyV,
++        tool: _select,
++        drawing: false),
++    PaletteEntry(
++        keyName: 'tool-line',
++        label: 'Line',
++        shortcut: 'L',
++        logicalKey: LogicalKeyboardKey.keyL,
++        tool: _line,
++        drawing: true),
++    PaletteEntry(
++        keyName: 'tool-polyline',
++        label: 'Polyline',
++        shortcut: 'P',
++        logicalKey: LogicalKeyboardKey.keyP,
++        tool: _polyline,
++        drawing: true),
++    PaletteEntry(
++        keyName: 'tool-rectangle',
++        label: 'Rectangle',
++        shortcut: 'R',
++        logicalKey: LogicalKeyboardKey.keyR,
++        tool: _rectangle,
++        drawing: true),
++    PaletteEntry(
++        keyName: 'tool-circle',
++        label: 'Circle',
++        shortcut: 'C',
++        logicalKey: LogicalKeyboardKey.keyC,
++        tool: _circle,
++        drawing: true),
++    PaletteEntry(
++        keyName: 'tool-arc',
++        label: 'Arc',
++        shortcut: 'A',
++        logicalKey: LogicalKeyboardKey.keyA,
++        tool: _arc,
++        drawing: true),
++    PaletteEntry(
++        keyName: 'tool-text',
++        label: 'Text',
++        shortcut: 'T',
++        logicalKey: LogicalKeyboardKey.keyT,
++        tool: _text,
++        drawing: true),
++  ];
++
+   // Constructed before the tool controller and its context: the selection
+   // controller's listener on `document.changes` must prune dead keys before
+   // anything downstream (the outline cache, in PlannerView) walks them.
+   late final SelectionController _selection = SelectionController(_document);
+ 
+   // Spec 03 D6, moved from PlannerView. The order is load-bearing.
+   // - The outline cache is built after the selection controller, so the
+   //   controller prunes a dead key before the cache walks it.
+   // - The grip cache is built after the outline cache, so on a selection
+   //   change its listener runs after the outlines have been rebuilt.
+@@ -71,21 +136,21 @@ class _PlannerShellState extends State<PlannerShell> {
+ 
+   late final ToolContext _context = ToolContext(
+       document: _document,
+       index: _index,
+       camera: _camera,
+       selection: _selection,
+       page: _page,
+       snap: _snap,
+       grips: _grips);
+   late final ToolController _tools =
+-      ToolController(initial: SelectTool(), context: _context);
++      ToolController(initial: _select, context: _context);
+   late final Listenable _status = Listenable.merge([_selection, _tools]);
+ 
+   /// Fitted to the nominal window; PlannerView re-fits once at the real
+   /// size. A document without a page fits its extents.
+   ViewportTransform _nominalFit() {
+     final page = _page.value;
+     return page != null
+         ? fitToPage(page, const Size(1440, 900))
+         : ViewportTransform.fit(_document.extents, const Size(1440, 900));
+   }
+@@ -93,38 +158,61 @@ class _PlannerShellState extends State<PlannerShell> {
+   /// Spec D12, amended at execution: cmd+Z (macOS) / ctrl+Z (everywhere
+   /// else) undoes through the command log. There is no redo in 02.
+   ///
+   /// The binding sits above the [InteractionLayer]'s `Focus`, which returns
+   /// the active tool's own `KeyEventResult`; the tool ignores Z, so the event
+   /// keeps bubbling and arrives here.
+   void _undo() {
+     if (_document.commands.canUndo) _document.commands.undo();
+   }
+ 
++  bool get _geometryAllowed =>
++      _document.commands.permissions.allows(Capability.geometry);
++
++  /// Spec 05 D5: the one way a tool becomes active. A drawing tool clears
++  /// the selection first, because the overlay paints the selection's
++  /// outlines and grips under any active tool. It is refused while geometry
++  /// is denied. Focus never leaves the canvas (Ruling 05-6).
++  void _activate(Tool tool) {
++    final drawing = !identical(tool, _select);
++    if (drawing && !_geometryAllowed) return;
++    if (drawing) _selection.clear();
++    _tools.activate(tool);
++  }
++
++  /// An idle drawing tool leaves Escape unhandled; it arrives here.
++  void _escape() {
++    if (!identical(_tools.active, _select)) _activate(_select);
++  }
++
+   String _statusLine() {
+     final base = _tools.active.name;
+     return _selection.isEmpty ? base : '$base — ${_selection.length} selected';
+   }
+ 
+   String _zoomLine() {
+     final page = _page.value;
+     if (page == null) return '';
+     final zoom = zoomOf(_camera.value.scale, page, kLogicalPixelsPerMm);
+     return '1:${_trimNumber(page.scaleDenominator)} · ${(zoom * 100).round()}%';
+   }
+ 
+   static String _trimNumber(double v) =>
+       v == v.roundToDouble() ? v.round().toString() : v.toString();
+ 
+   @override
+   void dispose() {
+     _tools.dispose();
++    for (final e in _entries) {
++      e.tool.dispose();
++    }
++    _fill.dispose();
+     _grips.dispose();
+     _outlines.dispose();
+     _selection.dispose();
+     _snap.dispose();
+     _page.dispose();
+     _camera.dispose();
+     _index.dispose();
+     _measurer.clear();
+     super.dispose();
+   }
+@@ -133,20 +221,29 @@ class _PlannerShellState extends State<PlannerShell> {
+   Widget build(BuildContext context) {
+     final scheme = Theme.of(context).colorScheme;
+     return Scaffold(
+       body: CallbackShortcuts(
+         bindings: <ShortcutActivator, VoidCallback>{
+           const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _undo,
+           const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
+           // Spec 03 D10: one toggle per press, never per key repeat.
+           const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false):
+               _snap.toggleObjectSnap,
++          // Spec 05 D5: the tool letters, then Fill, then Escape.
++          for (final e in _entries)
++            SingleActivator(e.logicalKey, includeRepeats: false): () =>
++                _activate(e.tool),
++          const SingleActivator(LogicalKeyboardKey.keyF, includeRepeats: false):
++              () {
++            if (_geometryAllowed) _fill.value = !_fill.value;
++          },
++          const SingleActivator(LogicalKeyboardKey.escape): _escape,
+         },
+         child: Column(
+           children: [
+             Container(
+               key: const Key('chrome-top'),
+               height: 44,
+               color: scheme.surfaceContainer,
+               child: Padding(
+                 padding: const EdgeInsets.symmetric(horizontal: 12),
+                 child: Row(
+@@ -173,42 +270,52 @@ class _PlannerShellState extends State<PlannerShell> {
+                 ),
+               ),
+             ),
+             Expanded(
+               child: Row(
+                 children: [
+                   Container(
+                     key: const Key('chrome-left'),
+                     width: 240,
+                     color: scheme.surfaceContainerLow,
++                    child: ToolPalette(
++                      entries: _entries,
++                      tools: _tools,
++                      fill: _fill,
++                      geometryAllowed: _geometryAllowed,
++                      onSelect: _activate,
++                    ),
+                   ),
+                   Expanded(
+                     child: ColoredBox(
+                       color: scheme.surface,
+                       child: PlannerView(
+                         document: _document,
+                         index: _index,
+                         camera: _camera,
+                         page: _page,
+                         policy: _policy,
+                         selection: _selection,
+                         tools: _tools,
+                         outlines: _outlines,
+                         grips: _grips,
++                        textTool: _text,
+                       ),
+                     ),
+                   ),
+                   Container(
+                     key: const Key('chrome-right'),
+                     width: 280,
+                     color: scheme.surfaceContainerLow,
+-                    child: PagePanel(document: _document, page: _page),
++                    child: ShellShortcutGuard(
++                      child: PagePanel(document: _document, page: _page),
++                    ),
+                   ),
+                 ],
+               ),
+             ),
+           ],
+         ),
+       ),
+     );
+   }
+ }
+diff --git a/apps/floor_planner/lib/planner_view.dart b/apps/floor_planner/lib/planner_view.dart
+index c2c5558..f75fa02 100644
+--- a/apps/floor_planner/lib/planner_view.dart
++++ b/apps/floor_planner/lib/planner_view.dart
+@@ -1,50 +1,58 @@
+ import 'package:flutter/widgets.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
++import 'text_entry_overlay.dart';
++
+ /// The rulers around the drawing area: a [RulerFrame] whose child is a
+ /// [CameraGestureDetector] over the page chrome, the [DraftCanvas] and the
+-/// selection overlay.
++/// selection overlay, with -- since 05 -- the text tool's inline field
++/// painted above it.
+ ///
+ /// Tiles off, `backend` unset (spec D6): a floor plan is 500-5,000
+ /// entities, and the resident backend cannot run on web, which this product
+ /// targets. Neither is a default a later sub-project may flip without a
+ /// measurement.
+ class PlannerView extends StatefulWidget {
+   const PlannerView({
+     super.key,
+     required this.document,
+     required this.index,
+     required this.camera,
+     required this.page,
+     required this.policy,
+     required this.selection,
+     required this.tools,
+     required this.outlines,
+     required this.grips,
++    required this.textTool,
+   });
+ 
+   final DraftDocument document;
+   final SpatialIndex index;
+   final CameraController camera;
+   final PageNotifier page;
+   final GesturePolicy policy;
+   final SelectionController selection;
+   final ToolController tools;
+ 
+   /// Owned by the shell since 03 (spec D6).
+   final OutlineCache outlines;
+ 
+   /// The selection's grips. A member of the overlay's repaint merge.
+   final GripCache grips;
+ 
++  /// The shell's text tool, whose inline field sits over the canvas
++  /// (spec 05 D9).
++  final TextTool textTool;
++
+   @override
+   State<PlannerView> createState() => _PlannerViewState();
+ }
+ 
+ class _PlannerViewState extends State<PlannerView> {
+   /// Ruling 01-2: the camera is fitted once, to the size the drawing area
+   /// really got; since Plan 04 the fit lands at the end of the first frame
+   /// (Ruling 04-16).
+   bool _fitted = false;
+ 
+@@ -83,56 +91,93 @@ class _PlannerViewState extends State<PlannerView> {
+               WidgetsBinding.instance.addPostFrameCallback((_) {
+                 if (!mounted) return;
+                 final page = widget.page.value;
+                 // Spec D4/D11: the page when there is one, at the drawing
+                 // area's size — inside the frame, so the bars are excluded.
+                 widget.camera.value = page != null
+                     ? fitToPage(page, size)
+                     : ViewportTransform.fit(widget.document.extents, size);
+               });
+             }
+-            return CameraGestureDetector(
+-              camera: widget.camera,
+-              policy: widget.policy,
+-              child: InteractionLayer(
+-                tools: widget.tools,
+-                child: Stack(
+-                  children: [
+-                    Positioned.fill(
+-                      child: RepaintBoundary(
+-                        child: CustomPaint(
+-                          painter: PageChromePainter(
+-                            camera: widget.camera,
+-                            page: widget.page,
+-                            repaint: _chromeRepaint,
++            // Spec 05 D9: the field sits outside the InteractionLayer, so a
++            // click on it is not a canvas click.
++            //
++            // A `Flow`, not a `Stack`: the field paints and hit-tests above
++            // the canvas (`_FieldAboveCanvas`), yet it is the first child,
++            // so it leaves the tree first. The layer's `deactivate` cancels
++            // the active tool; with a text pending, that notifies the
++            // field's builders and its `EditableText`, which must already be
++            // inactive, or Flutter asserts "markNeedsBuild() called during
++            // build".
++            return Flow(
++              delegate: const _FieldAboveCanvas(),
++              children: [
++                TextEntryOverlay(
++                  tool: widget.textTool,
++                  tools: widget.tools,
++                  camera: widget.camera,
++                ),
++                CameraGestureDetector(
++                  camera: widget.camera,
++                  policy: widget.policy,
++                  child: InteractionLayer(
++                    tools: widget.tools,
++                    child: Stack(
++                      children: [
++                        Positioned.fill(
++                          child: RepaintBoundary(
++                            child: CustomPaint(
++                              painter: PageChromePainter(
++                                camera: widget.camera,
++                                page: widget.page,
++                                repaint: _chromeRepaint,
++                              ),
++                            ),
+                           ),
+                         ),
+-                      ),
+-                    ),
+-                    DraftCanvas(
+-                      document: widget.document,
+-                      index: widget.index,
+-                      camera: widget.camera,
+-                      tiles: false,
+-                    ), // already inside its own RepaintBoundary
+-                    Positioned.fill(
+-                      child: RepaintBoundary(
+-                        child: CustomPaint(
+-                          painter: SelectionOverlayPainter(
+-                            selection: widget.selection,
+-                            tools: widget.tools,
+-                            camera: widget.camera,
+-                            outlines: widget.outlines,
+-                            repaint: _repaint,
++                        DraftCanvas(
++                          document: widget.document,
++                          index: widget.index,
++                          camera: widget.camera,
++                          tiles: false,
++                        ), // already inside its own RepaintBoundary
++                        Positioned.fill(
++                          child: RepaintBoundary(
++                            child: CustomPaint(
++                              painter: SelectionOverlayPainter(
++                                selection: widget.selection,
++                                tools: widget.tools,
++                                camera: widget.camera,
++                                outlines: widget.outlines,
++                                repaint: _repaint,
++                              ),
++                              size: Size.infinite,
++                            ),
+                           ),
+-                          size: Size.infinite,
+                         ),
+-                      ),
++                      ],
+                     ),
+-                  ],
++                  ),
+                 ),
+-              ),
++              ],
+             );
+           },
+         ),
+       );
+ }
++
++/// Paints child 1, the canvas, and then child 0, the text field, above it.
++/// `RenderFlow` hit-tests in reverse paint order, so the field wins a hit on
++/// itself, and an empty region falls through to the canvas.
++class _FieldAboveCanvas extends FlowDelegate {
++  const _FieldAboveCanvas();
++
++  @override
++  void paintChildren(FlowPaintingContext context) {
++    context
++      ..paintChild(1)
++      ..paintChild(0);
++  }
++
++  @override
++  bool shouldRepaint(_FieldAboveCanvas oldDelegate) => false;
++}
+diff --git a/apps/floor_planner/lib/shortcut_guard.dart b/apps/floor_planner/lib/shortcut_guard.dart
+new file mode 100644
+index 0000000..69d966c
+--- /dev/null
++++ b/apps/floor_planner/lib/shortcut_guard.dart
+@@ -0,0 +1,48 @@
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter/widgets.dart';
++
++/// The shell's single-letter tool shortcuts (spec 05 D5).
++const List<LogicalKeyboardKey> kShellLetterKeys = [
++  LogicalKeyboardKey.keyV,
++  LogicalKeyboardKey.keyL,
++  LogicalKeyboardKey.keyP,
++  LogicalKeyboardKey.keyR,
++  LogicalKeyboardKey.keyC,
++  LogicalKeyboardKey.keyA,
++  LogicalKeyboardKey.keyT,
++  LogicalKeyboardKey.keyF,
++];
++
++/// Spec 05 D9 and Ruling 05-8.
++///
++/// **Why this exists.** A `Shortcuts` or `CallbackShortcuts` above a text
++/// field takes the field's keystrokes ("Shortcuts prevent text input fields
++/// from receiving their keystrokes as text input", Flutter's
++/// `editable_text.dart`). The shell's tool letters and its cmd/ctrl+Z are
++/// such shortcuts.
++///
++/// **What it does.** It maps each of them, **nearer** the field, to
++/// `DoNothingAndStopPropagationTextIntent`. `EditableText` answers that
++/// intent with `DoNothingAction(consumesKey: false)`, so the key stops here
++/// and reaches the field as text.
++///
++/// **Elsewhere it is inert.** With focus anywhere other than a text field,
++/// no action is found, and the key bubbles up to the shell as before.
++class ShellShortcutGuard extends StatelessWidget {
++  const ShellShortcutGuard({super.key, required this.child});
++
++  final Widget child;
++
++  @override
++  Widget build(BuildContext context) => Shortcuts(
++        shortcuts: <ShortcutActivator, Intent>{
++          for (final key in kShellLetterKeys)
++            SingleActivator(key): const DoNothingAndStopPropagationTextIntent(),
++          const SingleActivator(LogicalKeyboardKey.keyZ, meta: true):
++              const DoNothingAndStopPropagationTextIntent(),
++          const SingleActivator(LogicalKeyboardKey.keyZ, control: true):
++              const DoNothingAndStopPropagationTextIntent(),
++        },
++        child: child,
++      );
++}
+diff --git a/apps/floor_planner/lib/text_entry_overlay.dart b/apps/floor_planner/lib/text_entry_overlay.dart
+new file mode 100644
+index 0000000..ed3a161
+--- /dev/null
++++ b/apps/floor_planner/lib/text_entry_overlay.dart
+@@ -0,0 +1,133 @@
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import 'shortcut_guard.dart';
++
++/// Ruling 05-11: the field's size. Its bottom-left sits at the insertion
++/// point's screen position.
++const Size kTextEntrySize = Size(240, 32);
++
++/// Spec 05 D9: the inline field for [TextTool].
++///
++/// **Where it sits.** Outside the `InteractionLayer`, so a click on it is
++/// not a canvas click.
++///
++/// **Keys.** The guard lets the shell's letters through as text, and
++/// Escape cancels.
++///
++/// **Rebuilds.** The field is a stable child of the camera builder, so a pan
++/// or zoom moves it and never rebuilds it (Ruling 05-10).
++///
++/// **Commit and cancel.** Enter commits. Any other loss of focus cancels
++/// if the placement is still pending. A canvas click has already committed
++/// synchronously in the tool, so its blur finds nothing to cancel.
++class TextEntryOverlay extends StatefulWidget {
++  const TextEntryOverlay({
++    super.key,
++    required this.tool,
++    required this.tools,
++    required this.camera,
++  });
++
++  final TextTool tool;
++  final ToolController tools;
++  final CameraController camera;
++
++  @override
++  State<TextEntryOverlay> createState() => _TextEntryOverlayState();
++}
++
++class _TextEntryOverlayState extends State<TextEntryOverlay> {
++  final FocusNode _focus = FocusNode(debugLabel: 'text-entry');
++
++  @override
++  void initState() {
++    super.initState();
++    widget.tool.pending.addListener(_onPending);
++    _focus.addListener(_onFocus);
++  }
++
++  /// A placement takes focus for the field; Ruling 05-7 hands it back to
++  /// the canvas, the scope's previous child, as soon as the placement ends.
++  ///
++  /// `autofocus` alone never fires here: the canvas already holds focus (the
++  /// layer requests it on the very click that placed the point), and
++  /// autofocus only acts on a scope with nothing focused. The field is not
++  /// built yet, so the request is deferred until its `Focus` attaches.
++  void _onPending() {
++    if (widget.tool.pending.value != null) {
++      _focus.requestFocus();
++    } else if (_focus.hasFocus) {
++      _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
++    }
++  }
++
++  void _onFocus() {
++    if (!_focus.hasFocus && widget.tool.pending.value != null) {
++      widget.tool.cancelText(widget.tools.context);
++    }
++  }
++
++  void _submit(String s) => widget.tool.commitText(s, widget.tools.context);
++
++  void _cancel() => widget.tool.cancelText(widget.tools.context);
++
++  @override
++  void dispose() {
++    widget.tool.pending.removeListener(_onPending);
++    _focus.removeListener(_onFocus);
++    _focus.dispose();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) => ValueListenableBuilder<TextPlacement?>(
++        valueListenable: widget.tool.pending,
++        builder: (context, placed, _) {
++          if (placed == null) return const SizedBox.shrink();
++          final field = SizedBox.fromSize(
++            key: const Key('text-entry-box'),
++            size: kTextEntrySize,
++            child: ShellShortcutGuard(
++              child: CallbackShortcuts(
++                bindings: <ShortcutActivator, VoidCallback>{
++                  const SingleActivator(LogicalKeyboardKey.escape): _cancel,
++                },
++                child: TextField(
++                  key: const Key('text-entry'),
++                  controller: widget.tool.controller,
++                  focusNode: _focus,
++                  autofocus: true,
++                  maxLines: 1,
++                  // Without this, `EditableText` unfocuses on submit with
++                  // `UnfocusDisposition.scope`, which clears the scope's
++                  // focus history before `_onPending` can hand focus back
++                  // to the canvas (Ruling 05-7).
++                  onEditingComplete: () {},
++                  onSubmitted: _submit,
++                  decoration: const InputDecoration(
++                      isDense: true, border: OutlineInputBorder()),
++                ),
++              ),
++            ),
++          );
++          return Stack(
++            children: [
++              ListenableBuilder(
++                listenable: widget.camera,
++                builder: (context, child) {
++                  final s = widget.camera.value.worldToScreen(placed.point);
++                  return Positioned(
++                    left: s.x,
++                    top: s.y - kTextEntrySize.height,
++                    child: child!,
++                  );
++                },
++                child: field,
++              ),
++            ],
++          );
++        },
++      );
++}
+diff --git a/apps/floor_planner/lib/tool_palette.dart b/apps/floor_planner/lib/tool_palette.dart
+new file mode 100644
+index 0000000..df9c6ea
+--- /dev/null
++++ b/apps/floor_planner/lib/tool_palette.dart
+@@ -0,0 +1,83 @@
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++/// One palette row and its shortcut (spec 05 D5).
++final class PaletteEntry {
++  const PaletteEntry({
++    required this.keyName,
++    required this.label,
++    required this.shortcut,
++    required this.logicalKey,
++    required this.tool,
++    required this.drawing,
++  });
++
++  final String keyName;
++  final String label;
++  final String shortcut;
++  final LogicalKeyboardKey logicalKey;
++  final Tool tool;
++
++  /// A drawing tool: disabled while geometry is denied.
++  final bool drawing;
++}
++
++/// Spec 05 D5, D13: the tools and the Fill toggle, in the left panel.
++///
++/// **It never takes focus** (`ExcludeFocus`, Ruling 05-6), so the canvas
++/// keeps it and the shell's shortcuts keep working after a click here.
++class ToolPalette extends StatelessWidget {
++  const ToolPalette({
++    super.key,
++    required this.entries,
++    required this.tools,
++    required this.fill,
++    required this.geometryAllowed,
++    required this.onSelect,
++  });
++
++  final List<PaletteEntry> entries;
++  final ToolController tools;
++  final ValueNotifier<bool> fill;
++  final bool geometryAllowed;
++  final void Function(Tool tool) onSelect;
++
++  @override
++  Widget build(BuildContext context) => ExcludeFocus(
++        // Like the page panel: the `chrome-left` slot paints its own
++        // background (a `ColoredBox`), so the tiles need a `Material` of
++        // their own in between to paint their ink on.
++        child: Material(
++          color: Colors.transparent,
++          child: ListenableBuilder(
++            listenable: Listenable.merge([tools, fill]),
++            builder: (context, _) => ListView(
++              padding: const EdgeInsets.symmetric(vertical: 8),
++              children: [
++                for (final e in entries)
++                  ListTile(
++                    key: Key(e.keyName),
++                    dense: true,
++                    selected: identical(tools.active, e.tool),
++                    enabled: !e.drawing || geometryAllowed,
++                    title: Text(e.label),
++                    trailing: Text(e.shortcut),
++                    onTap: () => onSelect(e.tool),
++                  ),
++                const Divider(),
++                CheckboxListTile(
++                  key: const Key('tool-fill'),
++                  dense: true,
++                  title: const Text('Fill'),
++                  secondary: const Text('F'),
++                  value: fill.value,
++                  onChanged:
++                      geometryAllowed ? (v) => fill.value = v ?? false : null,
++                ),
++              ],
++            ),
++          ),
++        ),
++      );
++}
+diff --git a/apps/floor_planner/test/planner_draw_test.dart b/apps/floor_planner/test/planner_draw_test.dart
+new file mode 100644
+index 0000000..bdcb043
+--- /dev/null
++++ b/apps/floor_planner/test/planner_draw_test.dart
+@@ -0,0 +1,324 @@
++import 'dart:convert' show jsonDecode;
++
++import 'package:floor_planner/main.dart';
++import 'package:floor_planner/planner_view.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// A 1:20 page anchored at (7000, 3000), grid snap off, and one line to
++/// select. `DraftCanvas` needs a `FlutterTextMeasurer`.
++({DraftDocument doc, Handle line}) drawDoc(FlutterTextMeasurer m) {
++  final doc = DraftDocument.empty(measurer: m);
++  PageComponent.register(doc.components);
++  doc.commands.execute(SetComponentCommand<PageComponent>(
++      doc.rootHandle,
++      PageComponent(
++          scaleDenominator: 20,
++          originX: 7000,
++          originY: 3000,
++          snapToGrid: false)));
++  final add = addDrafted(doc, EntityKind.line,
++      linePayload(Vector2(7137.3, 3161.7), Vector2(7300.9, 3190.1)));
++  doc.commands.execute(add);
++  doc.commands.clearHistory();
++  return (doc: doc, line: add.record.handle);
++}
++
++/// Pumps the shell, then sets a zoomed, rotated, **non-reflecting** camera:
++/// the app camera in `planner_grips_test.dart` is a reflection, whose
++/// `b == c` hides a transposition.
++Future<PlannerView> pumpDraw(WidgetTester tester, DraftDocument doc) async {
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester.pumpWidget(MaterialApp(home: PlannerShell(document: doc)));
++  await tester.pump();
++  final view = tester.widget<PlannerView>(find.byType(PlannerView));
++  final size = tester.getSize(find.byType(InteractionLayer));
++  final linear = Transform2.rotation(0.35).multiply(Transform2.scale(2.0, 2.0));
++  final mid = linear.transformPoint(Vector2(7150, 3110));
++  view.camera.value = ViewportTransform(
++      worldToScreenMatrix: Transform2.translation(
++              size.width / 2 - mid.x, size.height / 2 - mid.y)
++          .multiply(linear));
++  await tester.pump();
++  return view;
++}
++
++Offset globalOf(WidgetTester tester, PlannerView view, double x, double y) {
++  final s = view.camera.value.worldToScreen(Vector2(x, y));
++  return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
++}
++
++String status(WidgetTester tester) =>
++    tester.widget<Text>(find.byKey(const Key('status-text'))).data!;
++
++Future<bool> press(WidgetTester tester, LogicalKeyboardKey key) async {
++  final handled = await tester.sendKeyEvent(key);
++  await tester.pump();
++  return handled;
++}
++
++String bytes(PlannerView view) =>
++    DraftDocumentCodec.encodeToString(view.document);
++
++/// The snapshot less `handleSeed`: undo never lowers the seed (handles are
++/// never reused), so a commit and its undo differ from the start in it alone.
++Map<String, Object?> withoutSeed(PlannerView view) =>
++    (jsonDecode(bytes(view)) as Map<String, Object?>)..remove('handleSeed');
++
++/// The inline field's `EditableText`; the page panel's scale field has one
++/// too.
++final Finder entryEditable = find.descendant(
++    of: find.byKey(const Key('text-entry')),
++    matching: find.byType(EditableText));
++
++List<Handle> ofKind(DraftDocument doc, EntityKind kind) => [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.kindAt(slot) == kind) doc.entities.handleAt(slot),
++    ];
++
++void main() {
++  testWidgets('A1 each palette entry activates its tool', (tester) async {
++    await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
++    for (final (key, name) in const [
++      ('tool-line', 'Line'),
++      ('tool-polyline', 'Polyline'),
++      ('tool-rectangle', 'Rectangle'),
++      ('tool-circle', 'Circle'),
++      ('tool-arc', 'Arc'),
++      ('tool-text', 'Text'),
++      ('tool-select', 'Select'),
++    ]) {
++      await tester.tap(find.byKey(Key(key)));
++      await tester.pump();
++      expect(status(tester), name, reason: key);
++    }
++  });
++
++  testWidgets('A2 each shortcut activates its tool, and F toggles Fill',
++      (tester) async {
++    await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
++    for (final (key, name) in const [
++      (LogicalKeyboardKey.keyL, 'Line'),
++      (LogicalKeyboardKey.keyP, 'Polyline'),
++      (LogicalKeyboardKey.keyR, 'Rectangle'),
++      (LogicalKeyboardKey.keyC, 'Circle'),
++      (LogicalKeyboardKey.keyA, 'Arc'),
++      (LogicalKeyboardKey.keyT, 'Text'),
++      (LogicalKeyboardKey.keyV, 'Select'),
++    ]) {
++      await press(tester, key);
++      expect(status(tester), name);
++    }
++    bool fill() => tester
++        .widget<CheckboxListTile>(find.byKey(const Key('tool-fill')))
++        .value!;
++    expect(fill(), isFalse);
++    await press(tester, LogicalKeyboardKey.keyF);
++    expect(fill(), isTrue);
++    await tester.tap(find.byKey(const Key('tool-fill')));
++    await tester.pump();
++    expect(fill(), isFalse);
++  });
++
++  testWidgets('A3 activating a drawing tool clears the selection',
++      (tester) async {
++    final d = drawDoc(FlutterTextMeasurer());
++    final view = await pumpDraw(tester, d.doc);
++    view.selection.replace([SelectionKey.root(d.line)]);
++    await tester.pump();
++    expect(view.selection.isEmpty, isFalse);
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(view.selection.isEmpty, isTrue);
++  });
++
++  testWidgets('A4 an idle Escape returns to Select (M-05m)', (tester) async {
++    await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
++    await press(tester, LogicalKeyboardKey.keyL);
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(status(tester), 'Select');
++  });
++
++  testWidgets(
++      'A5 text end to end: T, click, type, Enter; then focus is back '
++      'on the canvas', (tester) async {
++    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
++    await press(tester, LogicalKeyboardKey.keyT);
++    await tester.tapAt(globalOf(tester, view, 7100.5, 3050.25));
++    await tester.pump();
++    expect(find.byKey(const Key('text-entry')), findsOneWidget);
++    await tester.enterText(find.byKey(const Key('text-entry')), 'Kitchen');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    final text = ofKind(view.document, EntityKind.text).single;
++    final slot = view.document.entities.slotOf(text)!;
++    expect(view.document.entities.read(slot).text, 'Kitchen');
++    expect(
++        view.document.geometry
++            .read(view.document.entities.geomIndexAt(slot))
++            .scalars[0],
++        50.0);
++    expect(find.byKey(const Key('text-entry')), findsNothing);
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(status(tester), 'Line', reason: 'Ruling 05-7: focus came back');
++  });
++
++  testWidgets(
++      'A6 text: Escape and a palette click cancel byte-identically; a '
++      'canvas click commits', (tester) async {
++    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
++    final before = bytes(view);
++    await press(tester, LogicalKeyboardKey.keyT);
++    await tester.tapAt(globalOf(tester, view, 7100, 3050));
++    await tester.pump();
++    await tester.enterText(find.byKey(const Key('text-entry')), 'x');
++    await press(tester, LogicalKeyboardKey.escape);
++    expect(bytes(view), before);
++    expect(find.byKey(const Key('text-entry')), findsNothing);
++
++    await tester.tapAt(globalOf(tester, view, 7100, 3050));
++    await tester.pump();
++    await tester.enterText(find.byKey(const Key('text-entry')), 'y');
++    await tester.tap(find.byKey(const Key('tool-select')));
++    await tester.pump();
++    expect(bytes(view), before);
++
++    await press(tester, LogicalKeyboardKey.keyT);
++    await tester.tapAt(globalOf(tester, view, 7100, 3050));
++    await tester.pump();
++    await tester.enterText(find.byKey(const Key('text-entry')), 'Hall');
++    // Spec 05 D9: a click on the field is not a canvas click.
++    await tester.tap(find.byKey(const Key('text-entry')));
++    await tester.pump();
++    expect(ofKind(view.document, EntityKind.text), isEmpty);
++    // Off the field: (7180, 3020) projects 171 px right of and 1.5 px above
++    // the anchor, inside the 240 x 32 field, so it would click the field.
++    await tester.tapAt(globalOf(tester, view, 7180, 3120));
++    await tester.pump();
++    expect(ofKind(view.document, EntityKind.text), hasLength(1));
++  });
++
++  testWidgets(
++      'A7 the field sits at the camera\'s point and survives a pan '
++      'with its state (M-05n, M-05u)', (tester) async {
++    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
++    await press(tester, LogicalKeyboardKey.keyT);
++    await tester.tapAt(globalOf(tester, view, 7100.5, 3050.25));
++    await tester.pump();
++    final field = find.byKey(const Key('text-entry'));
++    final placed = view.tools.active as TextTool;
++    final at = placed.pending.value!.point;
++    Offset corner() =>
++        tester.getBottomLeft(find.byKey(const Key('text-entry-box')));
++    final want = globalOf(tester, view, at.x, at.y);
++    expect((corner() - want).distance, lessThan(0.5));
++    await tester.enterText(field, 'abc');
++    final state = tester.state<EditableTextState>(entryEditable);
++    view.camera.value = ViewportTransform(
++        worldToScreenMatrix: Transform2.translation(40, -25)
++            .multiply(view.camera.value.worldToScreenMatrix));
++    await tester.pump();
++    expect((corner() - globalOf(tester, view, at.x, at.y)).distance,
++        lessThan(0.5));
++    expect(identical(tester.state<EditableTextState>(entryEditable), state),
++        isTrue,
++        reason: 'Ruling 05-10: never rebuilt by the camera');
++    expect(state.widget.focusNode.hasFocus, isTrue);
++    expect(placed.controller.text, 'abc');
++  });
++
++  testWidgets(
++      'A8 shell letters typed into the field are not consumed and do '
++      'not switch tools (M-05v)', (tester) async {
++    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
++    await press(tester, LogicalKeyboardKey.keyT);
++    await tester.tapAt(globalOf(tester, view, 7100, 3050));
++    await tester.pump();
++    for (final key in const [
++      LogicalKeyboardKey.keyL,
++      LogicalKeyboardKey.keyA,
++      LogicalKeyboardKey.keyT,
++      LogicalKeyboardKey.keyF,
++      LogicalKeyboardKey.keyV,
++    ]) {
++      expect(await press(tester, key), isFalse,
++          reason: '$key reaches the platform as text (Ruling 05-9)');
++      expect(status(tester), 'Text');
++    }
++  });
++
++  testWidgets(
++      'A9 letters and cmd+Z in the page panel\'s scale field neither '
++      'switch tools nor undo the document (Review Focus 1)', (tester) async {
++    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
++    await press(tester, LogicalKeyboardKey.keyR);
++    await tester.tapAt(globalOf(tester, view, 7010, 3020));
++    await tester.tapAt(globalOf(tester, view, 7090, 3070));
++    await tester.pump();
++    expect(view.document.commands.undoDepth, 1);
++    await tester.tap(find.byKey(const Key('page-scale')));
++    await tester.pump();
++    expect(await press(tester, LogicalKeyboardKey.keyL), isFalse);
++    expect(status(tester), 'Rectangle');
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
++    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
++    await tester.pump();
++    expect(view.document.commands.undoDepth, 1, reason: 'not undone');
++  });
++
++  testWidgets(
++      'A10 a tool shortcut mid-polyline cancels it byte-identically '
++      '(Review Focus 2)', (tester) async {
++    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
++    final before = bytes(view);
++    await press(tester, LogicalKeyboardKey.keyP);
++    await tester.tapAt(globalOf(tester, view, 7010, 3020));
++    await tester.tapAt(globalOf(tester, view, 7060, 3090));
++    await tester.pump();
++    // Spec 05 D3 (pinned by B5): mid-shape the tool handles every other
++    // key-down, so the shell's L never arrives. The palette is the switch.
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(status(tester), 'Polyline');
++    await tester.tap(find.byKey(const Key('tool-line')));
++    await tester.pump();
++    expect(status(tester), 'Line');
++    expect(bytes(view), before);
++  });
++
++  testWidgets(
++      'A11 cmd+Z after a commit, with the tool armed and idle, removes '
++      'exactly that shape (Review Focus 5)', (tester) async {
++    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
++    final before = withoutSeed(view);
++    await press(tester, LogicalKeyboardKey.keyR);
++    await tester.tapAt(globalOf(tester, view, 7010, 3020));
++    await tester.tapAt(globalOf(tester, view, 7090, 3070));
++    await tester.pump();
++    expect(ofKind(view.document, EntityKind.polyline), hasLength(1));
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
++    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
++    await tester.pump();
++    expect(withoutSeed(view), before);
++    expect(status(tester), 'Rectangle', reason: 'still armed');
++  });
++
++  testWidgets('A12 under runtime permissions the drawing tools are disabled',
++      (tester) async {
++    final d = drawDoc(FlutterTextMeasurer());
++    d.doc.commands.permissions = DraftPermissions.runtime;
++    await pumpDraw(tester, d.doc);
++    expect(tester.widget<ListTile>(find.byKey(const Key('tool-line'))).enabled,
++        isFalse);
++    expect(
++        tester.widget<ListTile>(find.byKey(const Key('tool-select'))).enabled,
++        isTrue);
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(status(tester), 'Select');
++  });
++}

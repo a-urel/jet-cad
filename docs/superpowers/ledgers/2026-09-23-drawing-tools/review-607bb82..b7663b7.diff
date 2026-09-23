@@ -1,0 +1,231 @@
+# Review package: 607bb82..HEAD
+
+## Commits
+b7663b7 feat(engine): SweepTracker, the arc's travelled angle
+
+## Files changed
+ packages/jet_cad_2d/lib/src/document/drafting.dart |  47 +++++++
+ .../test/document/sweep_tracker_test.dart          | 141 +++++++++++++++++++++
+ 2 files changed, 188 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/document/drafting.dart b/packages/jet_cad_2d/lib/src/document/drafting.dart
+index 014f24e..caa0872 100644
+--- a/packages/jet_cad_2d/lib/src/document/drafting.dart
++++ b/packages/jet_cad_2d/lib/src/document/drafting.dart
+@@ -1,10 +1,11 @@
++import 'dart:math' as math;
+ import 'dart:typed_data';
+ 
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../core/handle.dart';
+ import '../core/tolerance.dart';
+ import '../store/entity_store.dart';
+ import '../store/geometry_store.dart';
+ import 'commands.dart';
+ import 'draft_document.dart';
+@@ -131,10 +132,56 @@ double textHeightMm(PageComponent? page) => page == null
+     : kDraftTextPaperMm * page.scaleDenominator;
+ 
+ bool isDegenerateSegment(Vector2 a, Vector2 b) =>
+     a.distanceTo(b) <= Tolerance.standard.linear;
+ 
+ bool isDegenerateRectangle(Vector2 c1, Vector2 c2) =>
+     (c2.x - c1.x).abs() <= Tolerance.standard.linear ||
+     (c2.y - c1.y).abs() <= Tolerance.standard.linear;
+ 
+ bool isDegenerateRadius(double r) => r <= Tolerance.standard.linear;
++
++const double _tau = 2 * math.pi;
++
++/// [a] mapped into (−π, π].
++double wrapAngle(double a) {
++  final w = a % _tau; // Dart's % is non-negative for a positive divisor
++  return w > math.pi ? w - _tau : w;
++}
++
++/// Spec 05 D8: the angle the pointer has travelled around an arc's centre
++/// since its start, and the signed sweep that direction implies.
++///
++/// `τ` accumulates **unbounded**: a clamp would lose the winding and flip
++/// the sign on an out-and-back beyond a full turn (Ruling 05-1). Only its
++/// sign is read; the magnitude of a sweep comes from the end angle alone.
++final class SweepTracker {
++  double _start = 0;
++  double _previous = 0;
++  double _travel = 0;
++
++  double get start => _start;
++  double get travel => _travel;
++
++  void begin(double start) {
++    _start = start;
++    _previous = start;
++    _travel = 0;
++  }
++
++  /// One pointer sample's angle. Each step is wrapped into (−π, π], so no
++  /// single step jumps the seam.
++  void track(double angle) {
++    _travel += wrapAngle(angle - _previous);
++    _previous = angle;
++  }
++
++  /// The signed sweep from the start to [end], or 0 to refuse (the end is on
++  /// the start: a full circle is not an arc). Counter-clockwise when the
++  /// travel is **>= 0**; that tie-break is deliberate (spec D8).
++  double sweepTo(double end) {
++    final delta = (end - _start) % _tau;
++    final eps = Tolerance.standard.angular;
++    if (delta <= eps || _tau - delta <= eps) return 0;
++    return _travel >= 0 ? delta : delta - _tau;
++  }
++}
+diff --git a/packages/jet_cad_2d/test/document/sweep_tracker_test.dart b/packages/jet_cad_2d/test/document/sweep_tracker_test.dart
+new file mode 100644
+index 0000000..ea290f9
+--- /dev/null
++++ b/packages/jet_cad_2d/test/document/sweep_tracker_test.dart
+@@ -0,0 +1,141 @@
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++
++const double tau = 2 * math.pi;
++
++/// The reference (spec 05, Differential check): the true signed angle a
++/// straight pointer segment sweeps around (cx, cy), by summing 64
++/// sub-sample steps. Each sub-step is far below π, so wrapping it is exact.
++double segmentTravel(
++    double cx, double cy, double ax, double ay, double bx, double by) {
++  var total = 0.0;
++  var prev = math.atan2(ay - cy, ax - cx);
++  for (var k = 1; k <= 64; k++) {
++    final t = k / 64;
++    final a = math.atan2(ay + (by - ay) * t - cy, ax + (bx - ax) * t - cx);
++    total += wrapAngle(a - prev);
++    prev = a;
++  }
++  return total;
++}
++
++void main() {
++  test('S1 wrapAngle maps into (−π, π]', () {
++    expect(wrapAngle(0), 0);
++    expect(wrapAngle(math.pi), closeTo(math.pi, 1e-15));
++    expect(wrapAngle(-math.pi), closeTo(math.pi, 1e-15));
++    expect(wrapAngle(1.5 * math.pi), closeTo(-0.5 * math.pi, 1e-15));
++    expect(wrapAngle(-1.5 * math.pi), closeTo(0.5 * math.pi, 1e-15));
++    expect(wrapAngle(7.0), closeTo(7.0 - tau, 1e-15));
++  });
++
++  test('S2 counter-clockwise travel gives the positive sweep', () {
++    final t = SweepTracker()..begin(0.3);
++    t
++      ..track(0.8)
++      ..track(1.6)
++      ..track(2.2);
++    expect(t.sweepTo(2.2), closeTo(1.9, 1e-12));
++  });
++
++  test('S3 clockwise travel gives the negative sweep (M-05g)', () {
++    final t = SweepTracker()..begin(0.3);
++    t
++      ..track(-0.2)
++      ..track(-0.9);
++    // The same end angle a CCW path would reach the long way round.
++    expect(t.sweepTo(-0.9), closeTo(-1.2, 1e-12));
++    expect(t.sweepTo(2.2), closeTo(1.9 - tau, 1e-12),
++        reason: 'the direction is the travelled one, not the short way');
++  });
++
++  test('S4 travel across the ±π seam keeps its direction (M-05f)', () {
++    final t = SweepTracker()..begin(2.9);
++    t
++      ..track(3.1)
++      ..track(-3.1) // just past π: a raw difference would be −6.2
++      ..track(-2.8);
++    expect(t.travel, greaterThan(0));
++    expect(t.sweepTo(-2.8), closeTo(-2.8 + tau - 2.9, 1e-12));
++  });
++
++  test('S5 no travel at all is counter-clockwise (M-05z)', () {
++    final t = SweepTracker()..begin(0.3);
++    expect(t.travel, 0);
++    expect(t.sweepTo(1.4), closeTo(1.1, 1e-12),
++        reason: 'τ == 0 is the CCW tie-break (spec D8)');
++    t
++      ..track(0.9)
++      ..track(0.3); // out and back, cancelling exactly
++    // Deviation from the brief: exact 0 fails by 4.44e-16. Wrapping the
++    // negative leg through +τ then subtracting τ back out is not an exact
++    // round trip in double precision, unlike the positive leg (which needs
++    // no wrap at all). closeTo admits that residual without hiding a real
++    // accumulation bug (which would be orders of magnitude larger).
++    expect(t.travel, closeTo(0, 1e-15));
++    expect(t.sweepTo(1.4), greaterThan(0));
++  });
++
++  test('S6 an end on the start is refused, even after a full turn', () {
++    final t = SweepTracker()..begin(0.3);
++    for (var a = 0.3; a < 0.3 + tau; a += 0.5) {
++      t.track(a);
++    }
++    expect(t.sweepTo(0.3), 0, reason: 'a full circle is not an arc');
++    expect(t.sweepTo(0.3 + tau), 0);
++    // Wind past a full turn, then come back part way: the sign follows the
++    // cumulative travel, unclamped (Ruling 05-1).
++    final u = SweepTracker()..begin(0.0);
++    for (var a = 0.0; a <= 3 * math.pi; a += 0.4) {
++      u.track(a);
++    }
++    for (var a = 3 * math.pi; a >= math.pi; a -= 0.4) {
++      u.track(a);
++    }
++    expect(u.travel, greaterThan(0));
++    expect(u.sweepTo(math.pi), greaterThan(0));
++  });
++
++  test(
++      'differential: sweepTo matches the swept reference '
++      '(seed 0x5EED0005, 500 trials)', () {
++    final rng = math.Random(0x5EED0005);
++    var skipped = 0;
++    var checked = 0;
++    for (var trial = 0; trial < 500; trial++) {
++      final cx = 7000 + rng.nextDouble() * 400;
++      final cy = 3000 + rng.nextDouble() * 300;
++      final steps = 3 + rng.nextInt(18);
++      var px = cx + 50 + rng.nextDouble() * 100;
++      var py = cy + (rng.nextDouble() - 0.5) * 100;
++      final start = math.atan2(py - cy, px - cx);
++      final t = SweepTracker()..begin(start);
++      var truth = 0.0;
++      for (var s = 0; s < steps; s++) {
++        final nx = cx + (rng.nextDouble() - 0.5) * 400;
++        final ny = cy + (rng.nextDouble() - 0.5) * 400;
++        truth += segmentTravel(cx, cy, px, py, nx, ny);
++        t.track(math.atan2(ny - cy, nx - cx));
++        px = nx;
++        py = ny;
++      }
++      final end = math.atan2(py - cy, px - cx);
++      final delta = (end - start) % tau;
++      if (truth.abs() < 1e-6 || delta < 1e-6 || tau - delta < 1e-6) {
++        skipped++;
++        continue;
++      }
++      checked++;
++      final expected = truth >= 0 ? delta : delta - tau;
++      final got = t.sweepTo(end);
++      expect(got.sign, expected.sign, reason: 'trial $trial');
++      expect(got, closeTo(expected, Tolerance.standard.angular),
++          reason: 'trial $trial');
++    }
++    // ignore: avoid_print
++    print('SWEEP differential: checked $checked, skipped $skipped');
++    expect(checked, greaterThan(450));
++  });
++}
