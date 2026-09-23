@@ -8,13 +8,13 @@
 `.claude/worktrees/plan-03-grips-and-transform`, cut from `main` at `e376ced`.
 **Twelve tasks: Tasks 1–11 at `e376ced..7879e36`; Task 12 (the gate lines,
 this note, the spec amendments, STATUS and the roadmap) on top of them.
-Executed on `plan-03/grips-and-transform`, not merged — the merge is the
-human's decision. The final whole-branch review ran at `136af89` ("With
-fixes"); its fix wave is `722904b` (tests), `0cac4f4` (the shift mid-drag
-fix), `509b9f3` (a doc comment) and a docs commit. The ledger is archived
-after the fix wave's re-review, as the branch's last commit before the merge
-(Ruling T12-a). Exit gate 15 of 16; criterion 16, the human's look, is
-OWED.**
+The final whole-branch review ran at `136af89` ("With fixes"); its fix
+wave is `722904b` (tests), `0cac4f4` (the shift mid-drag fix), `509b9f3` (a
+doc comment) and a docs commit. The ledger was archived after the fix
+wave's re-review, as the branch's last commit (`66ed4c2`, Ruling T12-a).
+MERGED `--no-ff` into `main` at `c5173e0` on 2026-09-23, on the human's
+decision. The look was discharged after the merge, the same day: LGTM,
+recorded as the whole-build verdict. Exit gate 16 of 16.**
 **Ledger (per-task briefs, reports, review diffs, every ruling):**
 `.superpowers/sdd/2026-09-23-grips-and-transform/` (git-ignored while the
 plan is in flight; archived to
@@ -338,18 +338,47 @@ The spec's sixteen criteria, each with its witness.
 | 13 | Every named mutant fired and killed, except M-03e | **PASS** | [plan-03-mutation-log.md](plan-03-mutation-log.md): **68 exercised: 65 killed, 1 designed survivor (M-03e), 2 equivalent (M-03ai's ordinal clause; `GripDrag._capture`'s `read` → `peek`), both by construction**. That covers the spec's 27, `ah′`, the plan's 23, M-03ai's variant, the controller's 10, and the final review's 5 (M-03bh…M-03bl) with the `read` → `peek` equivalent |
 | 14 | The allocation invariants pass unchanged | **PASS**, with Ruling 03-12 | `query_allocation_test.dart` (5) and `paint_allocation_test.dart` (3) are green and unedited: Task 11's transcripts are in the mutation log, and both run inside the 890 and 851 above, and inside the fix wave's 890 and 854 |
 | 15 | The four gate lines, the five goldens only, both builds | **PASS with the one recorded exception** | pasted above, twice (Task 12's run, and the fix wave's): `jet_cad_2d` **890**; `jet_cad_2d_flutter` **851, then 854 after the fix wave, pass, 1 skip, and only the five `text_ladder_golden_test.dart` failures**; `dev_harness_2d` **82**; `floor_planner` **26**; `flutter build macos --release` and `flutter build web --release` both printed `✓ Built`. Every `analyze` and `format` exited 0, and no `analysis_options.yaml` was rewritten |
-| 16 | A human looked, on macOS, in Chrome and in Firefox from `build/web` | **OWED: not looked at; the human looks after this branch is presented** | the checklist below |
+| 16 | A human looked, on macOS, in Chrome and in Firefox from `build/web` | **PASS: discharged after the merge, 2026-09-23** | LGTM, recorded as the whole-build verdict at the human's choice; see the look section below for exactly what was and was not run |
 
-**15 of 16 PASS; criterion 16 is OWED.** No criterion is a MISS. No device
-run and no visual judgement happened in this session, and none was simulated
-to fill criterion 16 in.
+**16 of 16 PASS.** No criterion is a MISS. Criteria 1–15 were PASS at the
+merge. Criterion 16 was OWED at the merge and was discharged by the human's
+verdict on 2026-09-23.
 
 ---
 
-## The look: OWED, not looked at
+## The look: discharged 2026-09-23, LGTM
 
-**Not looked at. The human looks after this branch is presented, and the
-merge is theirs to decide.** Run it on each platform:
+**Verdict, recorded 2026-09-23 after the merge (`c5173e0`):** the human said "lgtm" in chat on 2026-09-23, after Claude had run the web release build from merged `main` in its in-app browser.
+Asked whether that counted as criterion 16, the human chose to record it as
+the whole-build verdict for macOS, Chrome and Firefox.
+
+**What was actually run, so a later reader does not over-read the verdict:**
+- Only the web release build (`build/web` from merged `main`, served
+  statically) was run in this session. It ran in the desktop app's
+  Chromium-based in-app browser, and Claude drove it:
+  - it loaded the sample plan;
+  - a click selected the table's edge and showed its grips;
+  - one grip drag was attempted during a pane resize, and its effect was
+    not observed.
+- Whether the human separately ran `flutter run -d macos`, Chrome or
+  Firefox is not recorded.
+- The verdict was given as a whole. The per-platform checklists below are
+  left unticked rather than ticked on the human's behalf.
+- No finding was raised, so there is no `fix/` branch. Item 7's browser
+  question (does F3 also fire find-next?) was not raised, so F3 stands as
+  shipped.
+
+**One unconfirmed observation, not a finding.** Twice, when the in-app
+pane shrank to about 408 × 344 CSS px (DPR 2), the canvas area went blank:
+no drawing and no rulers. The top bar and the page panel kept rendering.
+At 1236 × 769 it drew correctly. Claude could not tell whether this is the
+app's layout at narrow widths or the pane's resize timing. It is recorded
+here unconfirmed. To check it, open `build/web` in a desktop browser
+resized to about 400 px wide.
+
+*The checklist as it stood before the look:*
+
+Run it on each platform:
 - **macOS:** `cd apps/floor_planner && flutter run -d macos --release`;
 - **Chrome:** `cd apps/floor_planner && flutter run -d chrome --release`;
 - **Firefox:** `build/web`, served statically (`cd

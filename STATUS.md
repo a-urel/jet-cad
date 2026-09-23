@@ -29,9 +29,13 @@ before the worktree was removed.
   See the [Branch and worktree map](#branch-and-worktree-map).
 - **The differential:** seed `0x5EED0003`, 200 trials, worst residual
   4.66e-10.
-- **Exit gate: 15 of 16.** Criterion 16, the human's look on macOS, in
-  Chrome and in Firefox from `build/web`, is **OWED after the merge**, as
-  it was for Plans 01, 02 and 04. Nothing was simulated to fill it in.
+- **Exit gate: 16 of 16.** Criterion 16, the human's look, was discharged
+  after the merge on 2026-09-23: **LGTM**, recorded at the human's choice as
+  the whole-build verdict for macOS, Chrome and Firefox. Only the web
+  release build was run in the session, in the desktop app's in-app
+  browser. The per-item checklists stay unticked and there are no findings.
+  One narrow-width blank-canvas observation is recorded as unconfirmed in
+  the results note.
 
 See [Plan 03](#plan-03--grips-and-transform-merged-into-main-at-c5173e0)
 and [Resume here](#resume-here). Earlier the same day: **Plan 04's look is
@@ -255,13 +259,11 @@ if wrong, is in the results note.
 | mutations | **68 exercised: 65 killed, 1 designed survivor (M-03e, its 1-ulp companion green), 2 equivalent (M-03ai's ordinal clause; `GripDrag._capture`'s `read` → `peek`), both by construction**. The spec's 27, `ah′`, the plan's 23 (Ruling 03-17), the controller's 10 from the task reviews and the final review's 5 (M-03bh…M-03bl) |
 | the differential (criterion 3) | seed **`0x5EED0003`**, **200 trials**; worst residual per kind: point 0.0, line 2.91e-10, polyline, circle, arc and text 4.66e-10, against a bound of ~1.1e-7 (Ruling 03-16) |
 | the two allocation invariants | `query_allocation_test.dart` (5) and `paint_allocation_test.dart` (3) are green and unedited, and the frame-path files are untouched (Task 11) |
-| the look | **OWED: not looked at**. Thirteen items per platform (macOS, Chrome, Firefox from `build/web`), itemised in the results note |
+| the look | **thirteen items per platform, OWED at the merge; discharged 2026-09-23 after it**: LGTM as a whole, no findings. Only the web release build was run in the session, in the in-app browser (see the results note) |
 
-**Exit gate: 15 of 16.** Criteria 1–15 all PASS, each with its witness in
-the results note. Criterion 16 (a human looks, on macOS, in Chrome and in
-Firefox from `build/web`) is **OWED: not looked at; the human looks after
-this branch is presented**. No device run and no visual judgement was
-simulated to fill it in.
+**Exit gate: 16 of 16.** Criteria 1–15 all PASS, each with its witness in
+the results note. Criterion 16 was OWED at the merge and was discharged
+after it on 2026-09-23. The per-item checklists stay unticked.
 
 The look covers thirteen items:
 - grips on a wall, a room, an arc and the door swing;
@@ -1538,19 +1540,16 @@ and
   fixes"), and its fix wave is on top: `722904b`, `0cac4f4`, `509b9f3` and
   a docs commit.
 - **What resumes here:**
-  1. the human's look (criterion 16, below);
-  2. the three fix branches' merge decisions, in the human's order (see
-     the [Branch and worktree map](#branch-and-worktree-map)).
+  1. the three fix branches' merge decisions, in the human's order (see
+     the [Branch and worktree map](#branch-and-worktree-map));
+  2. then sub-project 05 (drawing tools), from a brainstorm.
 - **The gate lines** are green on the merged tree: engine 890; render
   layer 854 + 1 skip + the five standing text goldens; harness 82; app 26.
   Both release builds printed `✓ Built`.
-- **Exit gate: 15 of 16.** Criterion 16, a human's look on macOS, in Chrome
-  and in Firefox from `build/web`, is **OWED after the merge**. It has
-  thirteen items per platform,
-  itemised in
+- **Exit gate: 16 of 16.** Criterion 16, the human's look, was discharged
+  on 2026-09-23 after the merge: LGTM as a whole, no findings, so F3 stands.
+  What was run is recorded in
   [2026-09-23-plan-03-results.md](docs/superpowers/notes/2026-09-23-plan-03-results.md).
-  The one with a consequence: if a browser's find-next also fires on F3,
-  the finding picks another key.
 - **Out of scope, fixed by another session:** the pre-existing Plan 04 bug
   `PageComponent.copyWith(gridStepMm: <int>)` throws. The fix is committed
   on `fix/page-copywith-num` at `8385753`, not merged.
