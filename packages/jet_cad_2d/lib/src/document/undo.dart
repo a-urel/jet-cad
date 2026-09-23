@@ -88,6 +88,15 @@ class CommandDispatcher {
   /// way.
   void Function()? onBeforeMutate;
 
+  /// Spec 06 D2: wraps every command [execute] runs — never [undo] or
+  /// [redo], which replay concrete inverses. The parametric system takes
+  /// this slot to fold a regeneration into the same undo step.
+  ///
+  /// Contract: a pure wrapper. It may return [command] unchanged, and it
+  /// must not mutate anything itself. One slot, one owner: whoever takes it
+  /// releases it only if it is still their own tear-off.
+  DraftCommand Function(DraftCommand command)? expander;
+
   CommandDispatcher({
     required this.target,
     this.permissions = DraftPermissions.all,
@@ -105,16 +114,17 @@ class CommandDispatcher {
   void execute(DraftCommand command) {
     onBeforeMutate?.call();
     _checkNotDisposed();
-    _require(command);
+    final effective = expander?.call(command) ?? command;
+    _require(effective);
     // The inverse is pushed only after apply returns, so a command that
     // throws leaves no history behind: history matches what actually
     // mutated the target, never what merely attempted to.
-    final result = command.apply(target);
+    final result = effective.apply(target);
     _history.push(result.inverse);
     final change = CommandApplied(
-        label: command.label,
+        label: effective.label,
         touched: result.touched,
-        capability: command.capability);
+        capability: effective.capability);
     _changes.add(change);
     onAfterMutate?.call(change);
   }
