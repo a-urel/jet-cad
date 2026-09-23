@@ -129,17 +129,27 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   // --- Furniture: filled regions (spec 05 D14), after the finishes so
   // their fills draw over the tile and parquet lines. ---
   p.rectRegion(x0 + 400, y0 + 6600, x0 + 2200, y0 + 8600); // bed
-  p.rectRegion(x0 + 2900, y0 + 6800, x0 + 4500, y0 + 8600); // bed
-  p.rectRegion(x0 + 6000, y0 + 4200, x0 + 9000, y0 + 5100); // sofa
+  // Bed 2, clear of both of bedroom 2's door swings (Ruling F-1): the
+  // bedroom-1/2 door's swing starts at y0 + 7400, and the hall/living
+  // partition door's swing starts at x0 + 4100, so the bed (ending at
+  // x0 + 4000, y0 + 7200) sits below-left of both, clear by 100 mm each.
+  p.rectRegion(x0 + 2750, y0 + 5200, x0 + 4000, y0 + 7200); // bed
+  // The sofa, moved off the kitchen/bath-living partition door's swing
+  // (Ruling F-1): that arc's far edge is y0 + 4300, so the sofa starts at
+  // y0 + 4500, clear by 200 mm.
+  p.rectRegion(x0 + 6000, y0 + 4500, x0 + 9000, y0 + 5400); // sofa
   p.rectRegion(x0 + 6400, y0 + 5600, x0 + 8600, y0 + 6800); // table
-  // The kitchen counter: one L, so its fill has no seam.
+  // The kitchen counter: one L along the kitchen's north and east walls
+  // (Ruling F-1), clear of the hall/kitchen door's swing (bottom-left
+  // corner) and the front door's swing (bottom-middle), which the old
+  // south/west-wall L sat on top of.
   p.polygonRegion([
-    x0 + 5400, y0 + 400, //
-    x0 + 9100, y0 + 400,
-    x0 + 9100, y0 + 1000,
-    x0 + 6000, y0 + 1000,
-    x0 + 6000, y0 + 3100,
+    x0 + 9100, y0 + 3100, //
     x0 + 5400, y0 + 3100,
+    x0 + 5400, y0 + 2500,
+    x0 + 8500, y0 + 2500,
+    x0 + 8500, y0 + 400,
+    x0 + 9100, y0 + 400,
   ]);
   p.rectRegion(x0 + 12200, y0 + 400, x0 + 13500, y0 + 2000); // bath
   p.circleRegion(x0 + 7600, y0 + 6200, 350); // lamp, after the table
