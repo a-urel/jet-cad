@@ -9,8 +9,10 @@
 **Twelve tasks: Tasks 1–11 at `39ff5f2..563fdd4`; Task 12 (the gate lines,
 this note, the spec amendments, STATUS and the roadmap) on top at `1618111`,
 and a **final fix wave** — every open finding of the whole-branch review,
-items A1–A9 (code) and B1–B5 (docs) — on top of that. NOT merged — the
-merge is the human's decision, after the look this note leaves OWED.**
+items A1–A9 (code) and B1–B5 (docs) — on top of that. MERGED `--no-ff`
+into `main` at `e4e3f80` on 2026-09-22, on the human's decision; the look
+was discharged after the merge, on 2026-09-23 — LGTM on macOS, in Chrome
+and in Firefox. Exit gate 16 of 16.**
 **Ledger (per-task briefs, reports, review diffs, every ruling):**
 `.superpowers/sdd/2026-09-22-page-grid-rulers/`.
 
@@ -242,14 +244,28 @@ The spec's sixteen criteria, each with its witness.
 | 13 | The panel drives its eight controls with one command each; cmd/ctrl+Z reverts the control (M-04o) | **PASS** | `page_panel_test.dart`: `each toggle is exactly one command, and undo reverts the control`, `preset, orientation, unit and swatch each issue one command`, `the scale field commits on submit, refuses junk`, `a custom size shows Custom` |
 | 14 | Every named mutant (M-04a…v) fired, killed or declared equivalent with a reason, in `docs/superpowers/notes/plan-04-mutation-log.md` | **PASS** | [plan-04-mutation-log.md](plan-04-mutation-log.md) — **24 fired** (23 named, M-04a…w, plus the tile-cache twin of M-04r), 24 killed, 0 survived, 0 equivalent. M-04w is the final fix wave's, added beyond the spec's list |
 | 15 | The four gate lines — `CI=true` on every test command — are green, with the one standing exception carried from Plan 02 and no other; `analysis_options.yaml` untouched | **PASS with the one recorded exception** | re-run in full after the final fix wave and pasted above: `jet_cad_2d` **862**; `jet_cad_2d_flutter` **797 pass, 1 skip, the same five `text_ladder_golden_test.dart` failures and nothing else**; `dev_harness_2d` **82**; `floor_planner` **21**, and `flutter build macos --release` and `flutter build web --release` both `✓ Built`. Every `analyze` and `format` exits 0; `git status --short` clean throughout, no `analysis_options.yaml` rewritten |
-| 16 | A human looked, on macOS, in Chrome and in Firefox from `build/web` | **OWED — not looked at; the human looks after this branch is presented** | the look section below, itemised per platform |
+| 16 | A human looked, on macOS, in Chrome and in Firefox from `build/web` | **PASS — discharged after the merge, 2026-09-23** | the human ran the release build on macOS, in Chrome and in Firefox (`build/web`, served statically) from merged `main` and judged it LGTM, no findings — see the look section below |
 
-**15 of 16 PASS.** No criterion is a MISS. Criterion 16 is **OWED**,
-itemised below.
+**16 of 16 PASS.** No criterion is a MISS. Criteria 1–15 were PASS at the
+merge; criterion 16, OWED at the merge, was discharged by the human's look
+on 2026-09-23.
 
 ---
 
-## The look — OWED, itemised
+## The look — discharged 2026-09-23, LGTM
+
+**Verdict, recorded 2026-09-23 after the merge:** the human ran the release
+build from merged `main` (`e4e3f80`, docs-only `0cadacc` on top) on macOS
+(`flutter run -d macos --release`), in Chrome (`flutter run -d chrome
+--release`) and in Firefox (`build/web` served on `127.0.0.1:8090`) and
+judged it **LGTM** — no findings, so no `fix/` branch. The verdict was given
+for the whole, not item by item; the per-platform checklists below are left
+unticked rather than ticked on the human's behalf. Item 8 in particular was
+not raised, so Ruling 04-16's one-frame startup jump stands as shipped and
+its deferred fix (a silent camera set plus a deferred notify) stays
+deferred.
+
+*The checklist as it stood before the look:*
 
 **Not looked at. No device run and no visual judgement happened in this
 session, and none was simulated.** The human looks after this branch is

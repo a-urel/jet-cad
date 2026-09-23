@@ -2,8 +2,8 @@
 
 **Status:** MERGED into `main` at `e4e3f80` (2026-09-22) — twelve tasks
 through `1618111`, a final fix wave at `1fe1fcc` + `e6537dd`, the ledger
-archived at `c42263c`; exit gate 15 of 16, the human's look owed after the
-merge
+archived at `c42263c`; exit gate 16 of 16 — the human's look discharged
+after the merge, 2026-09-23, LGTM on macOS, Chrome and Firefox
 **Depends on:** 01
 **Blocks:** 13
 **Size:** M

@@ -1,6 +1,9 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-22 — **Plan 04 (page, grid and rulers) is MERGED
+**Last updated:** 2026-09-23 — **Plan 04's look is discharged: the human
+judged it LGTM on macOS, in Chrome and in Firefox, no findings, so its exit
+gate is 16 of 16 and nothing of Plan 04 is owed.** Next per the roadmap is
+sub-project 03 (grips and transform). Recorded 2026-09-22: **Plan 04 (page, grid and rulers) is MERGED
 into `main` at `e4e3f80`**, `--no-ff` on the human's decision, with the four
 gate lines re-run green on the merged tree (engine 862; render layer 797 +
 1 skip + the five standing text goldens; harness 82; app 21 + both builds);
@@ -116,7 +119,8 @@ wave** on top — on branch
 `plan-04/page-grid-rulers`, cut from `main` at `1e5001d`. **MERGED `--no-ff`
 at `e4e3f80` on 2026-09-22, on the human's decision, with the exit gate at
 15 of 16 and the sixteenth — a human's look, on macOS, in Chrome and in
-Firefox from `build/web` — still OWED; the merge did not discharge it.**
+Firefox from `build/web` — OWED at the merge and discharged after it, on
+2026-09-23: LGTM on all three, no findings; the gate is 16 of 16.**
 Branch and worktree deleted; the ledger was archived onto the branch at
 `c42263c` before the merge. Spec:
 [2026-09-22-page-grid-rulers-design.md](docs/superpowers/specs/2026-09-22-page-grid-rulers-design.md)
@@ -205,9 +209,10 @@ results note's "Debt and rulings" section.
 | mutations | **24 fired, 24 killed**, **0 survived**, **0 equivalent** (23 named M-04a…w plus the tile-cache twin of M-04r; M-04w is the final fix wave's, and M-04q's first, non-compiling attempt is not counted — Ruling 04-18) |
 | the differential (criterion 12) | seed **`0x5EED0004`**, **50 trials**, **1..12 majors each**, `SpyCanvas`-recorded major x positions against a literal-ladder oracle sharing no code with `pick`, to 1e−6 px |
 | the two allocation invariants | `query_allocation_test.dart` and `paint_allocation_test.dart` both green, unchanged |
-| the look | **eight items per platform, all OWED** — macOS, Chrome, Firefox from `build/web`; not looked at, nothing simulated |
+| the look | **eight items per platform, OWED at the merge; discharged 2026-09-23 after it** — macOS, Chrome and Firefox from `build/web`, LGTM as a whole, no findings |
 
-**Exit gate: 15 of 16.** Criteria 1–15 all PASS, each with its witness (test
+**Exit gate: 16 of 16** — 15 at the merge, the sixteenth discharged by the
+human's look on 2026-09-23 (LGTM, no findings). At the merge it read: **15 of 16.** Criteria 1–15 all PASS, each with its witness (test
 file and test name, the mutation log, or the pasted gate line); criterion 16
 (a human looks, on macOS, in Chrome and in Firefox from `build/web`) is
 **OWED — not looked at; the human looks after this branch is presented**, in
@@ -1271,8 +1276,10 @@ text), none of them changing a passing criterion into a failing one. See
 and
 [2026-09-21-plan-02-results.md](docs/superpowers/notes/2026-09-21-plan-02-results.md).
 
-**Sub-project 04 (page, grid and rulers) is executed and awaits the human's
-look and the merge decision — this is the live front.** Its spec,
+**Sub-project 04 (page, grid and rulers) is MERGED and its look is done —
+exit gate 16 of 16, nothing owed.** The next sub-project per the roadmap is
+**03 (grips and transform)**, which inherits `snapToGrid` and D6's
+precedence rule. Its spec,
 [2026-09-22-page-grid-rulers-design.md](docs/superpowers/specs/2026-09-22-page-grid-rulers-design.md)
 (revision 2, amended at execution in nine places, none rewriting the
 original text), and plan,
@@ -1296,8 +1303,9 @@ presented.** No device run and no visual judgement happened in that session,
 and none was simulated. **The human decided the merge: `--no-ff` at
 `e4e3f80` on 2026-09-22**, the four gate lines green on the merged tree, the
 ledger archived at `c42263c` (`docs/superpowers/ledgers/2026-09-22-page-grid-rulers/`),
-branch and worktree deleted; the look is still owed and the merge did not
-discharge it. Three things the look should know going
+branch and worktree deleted. **The look, owed at the merge, was discharged
+on 2026-09-23: the human judged the release build LGTM on macOS, in Chrome
+and in Firefox, with no findings.** Three things the look should know going
 in: `header.units` is set to millimetres and never read to convert (a
 non-goal); the adaptive snap step follows the zoom unless `gridStepMm` is
 set (spec D6); and the first frame paints at the shell's nominal 1440×900
