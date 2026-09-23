@@ -111,6 +111,44 @@ void main() {
         reason: 'no SnapResult.point is held past the call that filled it');
   });
 
+  test(
+      'a reused DragPoint clears objectKind and grid between calls '
+      '(M-03az)', () {
+    final index = indexOver([
+      [7093, 3004, 7093, 3304],
+    ]);
+    final out = DragPoint();
+    resolveDragPoint(
+      raw: Vector2(7094.5, 3006.0),
+      orthoBase: null,
+      index: index,
+      apertureWorld: 10,
+      objectSnap: true,
+      page: null,
+      gridStepMm: null,
+      scratch: SnapResult(),
+      out: out,
+    );
+    expect(out.objectKind, SnapKind.endpoint,
+        reason: 'the first call lands an object snap');
+    // Second call, same DragPoint: nothing in the aperture and no grid --
+    // a stale objectKind or grid from the first call must not survive.
+    resolveDragPoint(
+      raw: Vector2(7500, 3500),
+      orthoBase: null,
+      index: index,
+      apertureWorld: 10,
+      objectSnap: true,
+      page: null,
+      gridStepMm: null,
+      scratch: SnapResult(),
+      out: out,
+    );
+    expect(out.objectKind, isNull,
+        reason: 'a reused DragPoint is reset at the top of every call');
+    expect(out.grid, isFalse);
+  });
+
   test('an object snap beats a nearer grid point (M-03g)', () {
     final index = indexOver([
       [7093, 3004, 7093, 3304],
