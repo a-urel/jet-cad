@@ -1,7 +1,8 @@
 # 05 — Drawing tools
 
-**Status:** MERGED into `main` at `fb0f87d` on 2026-09-23. Exit gate 13 of
-14; criterion 14, the human's look, is OWED after the merge.
+**Status:** DONE. MERGED into `main` at `fb0f87d` on 2026-09-23. Exit gate
+14 of 14: the human's look was LGTM on 2026-09-24, after `fix/counter-doorway`
+(F-8) merged at `1a352cc`.
 **Depends on:** 02, 03
 **Blocks:** 09
 **Size:** M

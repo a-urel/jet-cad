@@ -332,7 +332,7 @@ The spec's fourteen criteria and where each is witnessed:
 | 11 | every mutant killed | [plan-05-mutation-log.md](plan-05-mutation-log.md): 30 fired, 30 killed |
 | 12 | the allocation invariants unedited; the overlay's structural test | Task 10's greps (invariant 4 and the allocation tests unedited), OV1, OV2 |
 | 13 | the four gate lines, the five goldens only, both builds | "Gate lines on the final tree (after the final fix wave, `f8b4269`)" above |
-| 14 | the human's look | **OWED (this task): not looked at; the human looks after this branch is presented** |
+| 14 | the human's look | **PASS: discharged after the merge, 2026-09-24.** LGTM on all three platforms, as the human stated; see the look section below |
 
 **13 of 14 PASS.** Criteria 1–13 are PASS, each with its witness above.
 Criterion 14 is OWED, itemised per platform below, and is never marked done
@@ -433,7 +433,29 @@ with the test in the task that owns the code:
 
 ---
 
-## Criterion 14: the human's look — OWED
+## Criterion 14: the human's look — discharged 2026-09-24, LGTM
+
+**The verdict, recorded 2026-09-24 after the merge (`fb0f87d`) and after
+`fix/counter-doorway` (`1a352cc`).** It came from the human's answers to
+three multiple-choice questions in chat:
+- **The look:** "lgtm (tüm platformlar)", meaning macOS, Chrome and
+  Firefox. It is recorded as the whole-build verdict.
+- **What Claude saw:** the human's macOS run (a `flutter run -d macos` from
+  the main checkout), through screenshots of the Select tool rotating a
+  door's arc. Claude did not see the Chrome or Firefox runs; those rest on
+  the human's own statement.
+- **Item 12 (F-2):** "Kalsın" (keep it). F and F3 keep bubbling to the
+  shell mid-shape, and spec D3's amendment stands.
+- **Item 14 (F-8):** "fix/ dalında taşı" (move it on a fix branch). It is a
+  defect. It was fixed on `fix/counter-doorway` and merged at `1a352cc`;
+  the debt entry above says closed.
+- **The checklist:** the per-item boxes below stay unticked. A whole-build
+  LGTM is not ticked item by item on the human's behalf.
+- **A related finding during the look:** the rotation grip snapped back to
+  screen-up after every rotate. That is Plan 03's D6, not this plan's. It
+  was fixed on `fix/rotation-frame` and merged at `ede7cad`.
+
+*Before the look, this section read:*
 
 **Not looked at. The human looks after this branch is presented.** No
 device run and no visual judgement was simulated to fill it in. Run it on
@@ -550,9 +572,9 @@ F-2 and F-5; this closing commit adds 14, Ruling F-8). Record each as
     not, whether it reads as a defect (Ruling F-8, debt). ☐ seen ☐ not seen
     ☐ could not judge
 
-**Nothing above is ticked on the human's behalf.** No finding, no verdict
-and no `fix/` branch exists for Plan 05's look, because it has not
-happened.
+**Nothing above is ticked on the human's behalf.** Before the look, no
+finding, no verdict and no `fix/` branch existed for Plan 05's look. The
+verdict at the top of this section supersedes that.
 
 ---
 

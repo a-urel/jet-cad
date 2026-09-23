@@ -1,6 +1,25 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-23. **Plan 05 (drawing tools) is MERGED into
+**Last updated:** 2026-09-24. **Plan 05 (drawing tools) is DONE: exit gate
+14 of 14.** The human's look was LGTM on all three platforms, as the human
+stated. Claude saw only the macOS run.
+- **Item 12 (F-2):** kept.
+- **Item 14 (F-8):** a defect. It was fixed on `fix/counter-doorway`, merged
+  at `1a352cc`: the kitchen counter moved to the south and east walls, and
+  bed 1 became a 1400 mm double. `SP4` pins 900 mm of approach on both sides
+  of every doorway.
+- **Gates on the merged tree:**
+  - engine 911;
+  - render layer 923 + 1 skip + the five standing text goldens;
+  - harness 82;
+  - app 46;
+  - both release builds `✓ Built`.
+- **Next:** sub-project 06 (the parametric layer), from a brainstorm. The
+  roadmap suggests a throwaway spike first.
+
+*Before the look:*
+
+**Earlier, 2026-09-23:** **Plan 05 (drawing tools) is MERGED into
 `main` at `fb0f87d`**, `--no-ff` on the human's decision.
 - **The four gate lines were re-run green on the merged tree:**
   - engine 911;
@@ -1645,10 +1664,14 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's look at Plan 05**, merged at `fb0f87d`.
-It covers macOS, Chrome and Firefox from `build/web`, fourteen items per
-platform, from the results note. After it comes sub-project 06, from a
-brainstorm.
+**Immediate next step: sub-project 06 (the parametric layer), from a
+brainstorm.** Its roadmap file suggests a throwaway spike before the spec.
+Plan 05 is done: its look was LGTM on 2026-09-24 (see the header).
+
+*Before the look, this paragraph read:* **Immediate next step: the human's
+look at Plan 05**, merged at `fb0f87d`. It covers macOS, Chrome and Firefox
+from `build/web`, fourteen items per platform, from the results note. After
+it comes sub-project 06, from a brainstorm.
 
 *Before the merge, this paragraph read:* All eleven tasks are done
 on `plan-05/drawing-tools`, cut from `main` at `7dac3b5`: Task 11's Steps

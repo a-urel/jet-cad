@@ -252,7 +252,7 @@ cheap; learning it from a half-executed Plan is not.
 | 02 | interaction core | [2026-09-21](../docs/superpowers/specs/2026-09-21-interaction-core-design.md) (rev 2, amended at execution) | [2026-09-21](../docs/superpowers/plans/2026-09-21-interaction-core.md) | [2026-09-21](../docs/superpowers/notes/2026-09-21-plan-02-results.md) (merged `8c62db3`, 2026-09-22, gate 15/15, look done: macOS, Chrome, Firefox LGTM after the `CompoundCommand` fix) |
 | 03 | grips and transform | [2026-09-23](../docs/superpowers/specs/2026-09-23-grips-and-transform-design.md) (rev 2, amended at execution) | [2026-09-23](../docs/superpowers/plans/2026-09-23-grips-and-transform.md) | [2026-09-23](../docs/superpowers/notes/2026-09-23-plan-03-results.md) (MERGED into `main` at `c5173e0`. Gate 16/16: the look was LGTM on 2026-09-23) |
 | 04 | page, grid, rulers | [2026-09-22](../docs/superpowers/specs/2026-09-22-page-grid-rulers-design.md) (rev 2, amended at execution) | [2026-09-22](../docs/superpowers/plans/2026-09-22-page-grid-rulers.md) | [2026-09-22](../docs/superpowers/notes/2026-09-22-plan-04-results.md) (merged `e4e3f80`, 2026-09-22, gate 16/16, look done 2026-09-23: macOS, Chrome, Firefox LGTM) |
-| 05 | drawing tools | [2026-09-23](../docs/superpowers/specs/2026-09-23-drawing-tools-design.md) (rev 2, amended at execution) | [2026-09-23](../docs/superpowers/plans/2026-09-23-drawing-tools.md) | [2026-09-23](../docs/superpowers/notes/2026-09-23-plan-05-results.md) (MERGED into `main` at `fb0f87d`; gate 13/14, look OWED) |
+| 05 | drawing tools | [2026-09-23](../docs/superpowers/specs/2026-09-23-drawing-tools-design.md) (rev 2, amended at execution) | [2026-09-23](../docs/superpowers/plans/2026-09-23-drawing-tools.md) | [2026-09-23](../docs/superpowers/notes/2026-09-23-plan-05-results.md) (MERGED into `main` at `fb0f87d`. Gate 14/14: the look was LGTM on 2026-09-24, after `fix/counter-doorway`, `1a352cc`) |
 | 06 | parametric layer | — | — | — |
 | 07 | walls | — | — | — |
 | 08 | openings | — | — | — |
@@ -262,7 +262,7 @@ cheap; learning it from a half-executed Plan is not.
 | 12 | app shell | — | — | — |
 | 13 | export and print | — | — | — |
 
-**01, 02 and 04 are executed (02 merged)**; the other ten have not started. Update
+**01–05 are executed, merged and looked at**; the other eight have not started. Update
 this table as specs and plans land; `STATUS.md` at the repo root stays the
 authority on what is in flight. The render line's own plan table lives there,
 not here: six of seven merged, Plan G (web) unwritten, see the section above.

@@ -320,6 +320,8 @@ apply to them. Without this, F3 (the only object-snap toggle) was
 unreachable while a polyline was pending. Every other key-down mid-shape,
 and both undo keys, stay swallowed exactly as this section says.
 
+**Confirmed by the human's look (2026-09-24):** kept.
+
 ### D4 — Resolving a point
 
 A raw world point `raw` from a `ToolPointerEvent` resolves **in exactly
