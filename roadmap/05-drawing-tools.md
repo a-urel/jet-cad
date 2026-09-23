@@ -1,8 +1,7 @@
 # 05 — Drawing tools
 
-**Status:** executed on `plan-05/drawing-tools`, not merged; the final
-whole-branch review ran "With fixes" and its fix wave is done at `f8b4269`;
-exit gate 13 of 14, the human's look OWED
+**Status:** MERGED into `main` at `fb0f87d` on 2026-09-23. Exit gate 13 of
+14; criterion 14, the human's look, is OWED after the merge.
 **Depends on:** 02, 03
 **Blocks:** 09
 **Size:** M

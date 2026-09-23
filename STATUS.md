@@ -1,7 +1,19 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-23. **Plan 05 (drawing tools) is EXECUTED on
-`plan-05/drawing-tools`, cut from `main` at `7dac3b5`, and NOT MERGED.**
+**Last updated:** 2026-09-23. **Plan 05 (drawing tools) is MERGED into
+`main` at `fb0f87d`**, `--no-ff` on the human's decision.
+- **The four gate lines were re-run green on the merged tree:**
+  - engine 911;
+  - render layer 913 + 1 skip + the five standing text goldens;
+  - harness 82;
+  - app 45;
+  - both release builds `✓ Built`.
+- **The ledger is archived** at `2c0bd98`, the branch's last commit.
+- **The look is still OWED after the merge** (criterion 14), as it was for
+  Plans 01–04.
+
+**The branch's history, as it was before the merge:** `plan-05/drawing-tools`
+was cut from `main` at `7dac3b5`.
 Eleven tasks: Tasks 1–8 at `7dac3b5..c4fcac4`, Task 9 at `6d98d72..5c55000`,
 Task 10 (the mutation sweep's invariants and greps) at `3957d52`, and Task
 11 (Ruling T11-a) runs in two parts — Steps 1–4 landed at `d45b5d7`. **The
@@ -16,9 +28,8 @@ five standing text goldens; harness 82; app 45; both release builds
 M-05ab and the F-3 kill), and criterion 14 — a human's look, on macOS, in
 Chrome and in Firefox from `build/web` — is **OWED: not looked at; the
 human looks after this branch is presented.** Nothing was simulated to
-fill it in. **The final review and its fix wave are done; next are the
-human's look and the merge decision.** See
-[Plan 05](#plan-05--drawing-tools-executed-on-plan-05drawing-tools-not-merged)
+fill it in. **Merged at `fb0f87d`; next is the human's look.** See
+[Plan 05](#plan-05--drawing-tools-merged-into-main-at-fb0f87d)
 and [Resume here](#resume-here).
 Earlier the same day: **Plan 03 (grips and transform) is MERGED
 into `main` at `c5173e0`**, `--no-ff` on the human's decision. The four
@@ -181,7 +192,7 @@ Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01
 
 ---
 
-## Plan 05 — drawing tools (executed on `plan-05/drawing-tools`, not merged)
+## Plan 05 — drawing tools (merged into `main` at `fb0f87d`)
 
 **Plan 05 gives the product line its drawing tools.** Six tools — line,
 polyline, rectangle, circle, arc and text — each as a state in 02's tool
@@ -208,8 +219,12 @@ app.
   gate at that final tree, and the ledger archive is the branch's last
   commit, next.
 
-**EXECUTED, NOT MERGED.** The final review and its fix wave are done. No
-human's look has happened and no merge decision has been made.
+**MERGED into `main` at `fb0f87d`** (2026-09-23, `--no-ff`, on the human's
+decision), with the four gate lines re-run green on the merged tree. The
+ledger is archived at `2c0bd98`. **The human's look (criterion 14) is OWED
+after the merge.** Two items are parked for it:
+- the counter across the kitchen/living doorway (Ruling F-8);
+- F/F3 mid-shape (Ruling F-2's spec amendment).
 
 **Documents:**
 - Spec: [2026-09-23-drawing-tools-design.md](docs/superpowers/specs/2026-09-23-drawing-tools-design.md),
@@ -1453,9 +1468,10 @@ into a standing test. Full account:
 | Location | Branch | State |
 |---|---|---|
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i, **GPU Plans A, B, C and D**, and product Plans 01/02/03/04 merged |
-| `.claude/worktrees/quizzical-jemison-7537de` | `plan-05/drawing-tools` | **EXECUTED, NOT MERGED.** Cut from `main` at `7dac3b5`. Tasks 1–10 at `7dac3b5..3957d52`; Task 11 Steps 1–4 at `d45b5d7`; the final whole-branch review returned "With fixes" and its fix wave landed at `1d80caf..f8b4269`; this closing docs commit records the gate at that final tree. The ledger archive is the branch's last commit, next, then the human's look and the merge decision. This worktree previously hosted `fix/grip-camera-bc-swap` (Ruling P-1: this session's worktree hosts whatever branch it is dispatched to work on), which is merged at `9212793` and whose local branch can be deleted once no longer wanted |
+| `.claude/worktrees/quizzical-jemison-7537de` | `plan-05/drawing-tools` | **MERGED at `fb0f87d`.** The worktree is the session that ran the plan; remove it and `git branch -d plan-05/drawing-tools` when that session closes. The pre-merge state, for the record: **EXECUTED, NOT MERGED.** Cut from `main` at `7dac3b5`. Tasks 1–10 at `7dac3b5..3957d52`; Task 11 Steps 1–4 at `d45b5d7`; the final whole-branch review returned "With fixes" and its fix wave landed at `1d80caf..f8b4269`; this closing docs commit records the gate at that final tree. The ledger archive is the branch's last commit, next, then the human's look and the merge decision. This worktree previously hosted `fix/grip-camera-bc-swap` (Ruling P-1: this session's worktree hosts whatever branch it is dispatched to work on), which is merged at `9212793` and whose local branch can be deleted once no longer wanted |
 
-**Plan 05 is in flight, on the branch and worktree above.** Plan 03
+**Nothing is in flight.** Plan 05 is merged at `fb0f87d`; its branch
+waits only for its session's worktree to close. Plan 03
 (`c5173e0`) and its three fix branches (`59e3811`, `9212793`, `7c96e11`)
 are merged and deleted; `fix/grip-camera-bc-swap`'s local branch is the one
 exception left over from before Plan 05 started, and deleting it is the
@@ -1607,7 +1623,12 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: Plan 05 (drawing tools).** All eleven tasks are done
+**Immediate next step: the human's look at Plan 05**, merged at `fb0f87d`.
+It covers macOS, Chrome and Firefox from `build/web`, fourteen items per
+platform, from the results note. After it comes sub-project 06, from a
+brainstorm.
+
+*Before the merge, this paragraph read:* All eleven tasks are done
 on `plan-05/drawing-tools`, cut from `main` at `7dac3b5`: Task 11's Steps
 1–4 landed at `d45b5d7`, **the final whole-branch review then ran and
 returned "With fixes"**, and its fix wave — Rulings F-1, F-2, F-3 and F-6,
@@ -1619,7 +1640,7 @@ commit (Ruling T11-a, following Plan 03's own order); **then the human's
 look and the merge decision**. Criterion 14 (a human's look, on macOS, in
 Chrome and in Firefox from `build/web`, fourteen items per platform) is
 still OWED — nothing was simulated to fill it in. See
-[Plan 05](#plan-05--drawing-tools-executed-on-plan-05drawing-tools-not-merged)
+[Plan 05](#plan-05--drawing-tools-merged-into-main-at-fb0f87d)
 and [2026-09-23-plan-05-results.md](docs/superpowers/notes/2026-09-23-plan-05-results.md).
 
 **Two lines exist, and which one runs next is the human's choice.** The
@@ -1727,7 +1748,7 @@ and
 - **What resumes here:**
   sub-project 05 (drawing tools) was brainstormed, specced, planned and
   executed on `plan-05/drawing-tools` — see
-  [Plan 05](#plan-05--drawing-tools-executed-on-plan-05drawing-tools-not-merged)
+  [Plan 05](#plan-05--drawing-tools-merged-into-main-at-fb0f87d)
   above; its final whole-branch review is next. Plan 03's three fix
   branches are merged (`59e3811`, `9212793`, `7c96e11`).
 - **The gate lines** are green on `main` at `7c96e11`, after the fix
