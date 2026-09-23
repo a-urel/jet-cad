@@ -9,6 +9,8 @@ export 'src/vertices_draw_sink.dart';
 export 'src/draft_canvas.dart';
 export 'src/draft_painter.dart';
 export 'src/draw_sink.dart';
+export 'src/draw/arc_tool.dart';
+export 'src/draw/circle_tool.dart';
 export 'src/draw/placement_tool.dart';
 export 'src/draw/line_tool.dart';
 export 'src/draw/polyline_tool.dart';
