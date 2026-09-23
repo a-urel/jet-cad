@@ -215,11 +215,13 @@ abstract class PlacementTool extends Tool {
   }
 
   /// Ruling 05-3: the permission check runs before [build], so a denied
-  /// shape allocates no handle. Returns whether the command ran.
-  bool commit(ToolContext ctx, DraftCommand Function() build) {
-    if (!ctx.document.commands.permissions.allows(Capability.geometry)) {
-      return false;
-    }
+  /// shape allocates no handle. [needs] is every capability the built
+  /// command will need (spec 06 D13, Ruling 06-10); 05's shapes need
+  /// geometry alone. Returns whether the command ran.
+  bool commit(ToolContext ctx, DraftCommand Function() build,
+      {Set<Capability> needs = const {Capability.geometry}}) {
+    final permissions = ctx.document.commands.permissions;
+    if (!needs.every(permissions.allows)) return false;
     ctx.execute(build());
     return true;
   }
