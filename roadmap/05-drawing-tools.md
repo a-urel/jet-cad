@@ -1,6 +1,6 @@
 # 05 — Drawing tools
 
-**Status:** not started
+**Status:** executed on `plan-05/drawing-tools`, not merged
 **Depends on:** 02, 03
 **Blocks:** 09
 **Size:** M

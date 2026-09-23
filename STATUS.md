@@ -1,6 +1,22 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-23. **Plan 03 (grips and transform) is MERGED
+**Last updated:** 2026-09-23. **Plan 05 (drawing tools) is EXECUTED on
+`plan-05/drawing-tools`, cut from `main` at `7dac3b5`, and NOT MERGED.**
+Eleven tasks: Tasks 1–9 at `7dac3b5..c4fcac4`, Task 10 (the mutation
+sweep's invariants and greps) at `3957d52`, and Task 11 (Ruling T11-a) runs
+in two parts — Steps 1–4 (the results note, the spec amendments, this file
+and the roadmap) land in this commit; the final whole-branch review and its
+fix wave come next, and the ledger archive is deferred to the branch's last
+commit before the merge. The exit gate is **13 of 14**: the four gate lines
+are green (engine 911; render layer 911 + 1 skip + the five standing text
+goldens; harness 82; app 43; both release builds `✓ Built`), 27 mutants
+fired and 27 killed (26 named plus M-05w′), and criterion 14 — a human's
+look, on macOS, in Chrome and in Firefox from `build/web` — is **OWED: not
+looked at; the human looks after this branch is presented.** Nothing was
+simulated to fill it in. **No merge decision has been made.** See
+[Plan 05](#plan-05--drawing-tools-executed-on-plan-05drawing-tools-not-merged)
+and [Resume here](#resume-here).
+Earlier the same day: **Plan 03 (grips and transform) is MERGED
 into `main` at `c5173e0`**, `--no-ff` on the human's decision. The four
 gate lines were re-run green on the merged tree: engine 890; render layer
 854 + 1 skip + the five standing text goldens; harness 82; app 26.
@@ -158,6 +174,130 @@ method and both reproduction commands.
 Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
 Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
 Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
+
+---
+
+## Plan 05 — drawing tools (executed on `plan-05/drawing-tools`, not merged)
+
+**Plan 05 gives the product line its drawing tools.** Six tools — line,
+polyline, rectangle, circle, arc and text — each as a state in 02's tool
+state machine, each with a live rubber-band preview through 02's overlay,
+snapping while placing (03's `resolveDragPoint`, plus a tool-local
+self-snap that beats it), and one `AddEntityCommand` (or one
+`AddRegionCommand` with Fill on) per completed shape, so one shape is one
+undo step. A palette and seven shortcuts (`V L P R C A T`, plus `F` for
+Fill) reach every tool from the shell, Escape returns to Select, and text
+is an inline field bound to the tool's own controller, committed by Enter
+or a canvas click and cancelled by Escape or any loss of focus inside the
+app.
+
+**Where it stands.** Eleven tasks on `plan-05/drawing-tools`, cut from
+`main` at `7dac3b5`:
+- Tasks 1–9 are at `7dac3b5..c4fcac4`;
+- Task 10 (the mutation sweep's invariants and greps, appended to the
+  mutation log) is at `3957d52`;
+- Task 11 runs in two parts (Ruling T11-a): Steps 1–4 (this section, the
+  results note, the spec amendments and the roadmap) land now; the final
+  whole-branch review and its fix wave come next, and the ledger archive
+  is the branch's last commit before the merge.
+
+**EXECUTED, NOT MERGED.** No human's look has happened and no merge
+decision has been made.
+
+**Documents:**
+- Spec: [2026-09-23-drawing-tools-design.md](docs/superpowers/specs/2026-09-23-drawing-tools-design.md),
+  revision 2, amended at execution in five places (D4, D5, D8/the
+  differential, D9, Testing), none rewriting the original text.
+- Plan: [2026-09-23-drawing-tools.md](docs/superpowers/plans/2026-09-23-drawing-tools.md).
+- Results: [2026-09-23-plan-05-results.md](docs/superpowers/notes/2026-09-23-plan-05-results.md).
+- Mutation log: [plan-05-mutation-log.md](docs/superpowers/notes/plan-05-mutation-log.md).
+  **27 fired, 27 killed, 0 survived, 0 equivalent** — 26 named mutants plus
+  M-05w′, a reviewer-noted second form of M-05w that first survived and
+  was killed after a test-only fixture fix (Ruling T9-a).
+
+**Delivered:**
+- **In `jet_cad_2d`:** `document/drafting.dart`'s builders
+  (`draftRecord`, `addDrafted`, `addDraftedRegion`, `rectanglePayload`,
+  `textPayload`, `textHeightMm`, `kDraftFillColor`) and `SweepTracker`
+  (`begin`, `track`, `sweepTo`).
+- **In `jet_cad_2d_flutter`:** `lib/src/draw/`'s `PlacementTool` (the
+  shared base: `commit`, `commitShape`, `acceptingSelf`, `band`,
+  `bandPaint`, `hoverPoint`, `hoverVisible`, `isPending`, `clearShape`,
+  `hovered`), `LineTool`, `PolylineTool`, `RectangleTool`, `CircleTool`,
+  `ArcTool` and `TextTool` (`pending`, `controller`, `commitText`,
+  `cancelText`).
+- **In `apps/floor_planner`:** `tool_palette.dart` (`ToolPalette`,
+  `PaletteEntry`), `text_entry_overlay.dart` (`TextEntryOverlay`,
+  `kTextEntrySize`), `shortcut_guard.dart` (`ShellShortcutGuard`), the
+  shell's `_activate(Tool)` and Fill notifier, and the sample plan's
+  furniture rebuilt as filled regions (D14).
+
+`Tool`, `ToolContext`, `ToolController` and `InteractionLayer` (02's API)
+are untouched — checked by Task 10's `git diff main -- tool.dart
+interaction_layer.dart`, empty.
+
+**Task list**, each task's head commit:
+
+| task | what | head |
+|---|---|---|
+| 1 | engine: the drafting builders, `SweepTracker` | `607bb82` |
+| 2 | engine: `SweepTracker`'s seeded differential | `b7663b7` |
+| 3 | `PlacementTool` and the chained `LineTool` (+ fix round `beb892a`: B6/B7's hover exactness, L5's Tolerance fixture) | `beb892a` |
+| 4 | `PolylineTool`, `RectangleTool`, Fill, the overlay | `0ae93ae` |
+| 5 | `CircleTool` and `ArcTool` (+ fix round `26722a5`: AR5 replaced) | `26722a5` |
+| 6 | `TextTool` owns its text, commits on a canvas click | `a07ca51` |
+| 7 | the palette, shortcuts, the inline text field (+ fix round `1445f9e`: the lifecycle guard, the Escape guard, A13–A15) | `1445f9e` |
+| 8 | the sample plan's furniture as filled regions | `c4fcac4` |
+| 9 | the mutation sweep (+ fix round `5c55000`: PL8's fixture, M-05w′ killed) | `5c55000` |
+| 10 | the invariants and the greps | `3957d52` |
+| 11 (Steps 1–4) | gate lines, results note, spec amendments, STATUS, roadmap | this commit |
+
+**Rulings a reader must know.**
+- **`SweepTracker`'s accumulated travel is never clamped** (Ruling 05-1);
+  only its sign is read, and the swept magnitude already comes from
+  `δ ∈ (0, 2π)`.
+- **A self-snap beats object snap**, and paints through the engine's own
+  endpoint marker (Ruling 05-2).
+- **Every key-down mid-shape is swallowed** (Ruling T7-a): a tool
+  shortcut does not switch tools while a shape is pending; Escape or the
+  palette does.
+- **A loss of focus cancels a pending text only when it happens inside
+  the app** (Ruling T7-b): a window switch does not, because a `null`
+  lifecycle state (before the first lifecycle message, and what
+  `flutter_test` resets it to) counts as resumed.
+- **The planner view's root is a `Flow`, not a `Stack`** (Ruling T7-d): a
+  `Stack` asserted on a mid-build removal with text pending.
+- **The sample plan's live count is 509, not 523** (Ruling 05-12): 30
+  furniture entities became 8 filled regions.
+- **Commit trailers name the model that actually wrote the commit**
+  (Ruling P-6, inherited from Plan 03's T2-a).
+
+The full list, 05-1…05-15 and every controller ruling, each with its cost
+if wrong, is in the results note.
+
+### What Plan 05 measured
+
+| quantity | value |
+|---|---|
+| `packages/jet_cad_2d` | **911** pass (`00:03 +911: All tests passed!`, exit 0), analyze and format clean. 894 at the branch point, `+10` (E) `+7` (S), exactly the plan's own sum |
+| `packages/jet_cad_2d_flutter` | **911** pass, 1 skip, and only the five pre-existing `text_ladder_golden_test.dart` failures (`00:12 +911 ~1 -5: Some tests failed.`, exit 1), analyze and format clean. 854 at the branch point, `+57` net across Tasks 3–6 (the plan did not sum this suite in advance) |
+| `apps/dev_harness_2d` | **82** (`00:19 +82: All tests passed!`, exit 0), unchanged — no task touches the harness; analyze and format clean |
+| `apps/floor_planner` | **43** (`00:03 +43: All tests passed!`, exit 0). 26 at the branch point, `+15` (Task 7's A1–A15, 3 over the plan's 12 because A13–A15 were added in review) `+2` (Task 8's SP1–SP2). `flutter build macos --release` and `flutter build web --release` both `✓ Built` |
+| mutations | **27 fired, 27 killed, 0 survived, 0 equivalent** — 26 named (M-05a…M-05z) plus M-05w′, killed after Task 9's fix round changed PL8's fixture (Ruling T9-a) |
+| the differential (criterion 8) | `SWEEP differential: checked 500, skipped 0` — seed `0x5EED0005`, 500 trials, sign exact, magnitude within `Tolerance.standard.angular` |
+| the two allocation invariants | `query_allocation_test.dart` and `paint_allocation_test.dart` are green and unedited (Task 10) |
+| the look | **ten items per platform, OWED — not looked at.** The results note itemises them for macOS, Chrome and Firefox |
+
+**Exit gate: 13 of 14.** Criteria 1–13 all PASS, each with its witness in
+the results note. Criterion 14 is OWED and this task does not mark it
+done.
+
+**Debt, in one line each:**
+- the text field's font jump on commit (look item 10);
+- no fill preview — the rubber band shows the outline only, by spec D13;
+- the app camera in `planner_grips_test.dart` is still a reflection,
+  inherited unchanged from Plan 03;
+- the sample-plan count's margin is 9 above the 500 floor (Ruling 05-12).
 
 ---
 
@@ -1292,14 +1432,14 @@ into a standing test. Full account:
 
 | Location | Branch | State |
 |---|---|---|
-| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and **GPU Plans A, B, C and D** merged |
-| `.claude/worktrees/quizzical-jemison-7537de` | `fix/grip-camera-bc-swap` | **MERGED at `9212793`**. Its worktree is the session that did the merges. Remove it and `git branch -d` the branch when that session closes |
+| `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i, **GPU Plans A, B, C and D**, and product Plans 01/02/03/04 merged |
+| `.claude/worktrees/quizzical-jemison-7537de` | `plan-05/drawing-tools` | **EXECUTED, NOT MERGED.** Cut from `main` at `7dac3b5`. Tasks 1–10 at `7dac3b5..3957d52`; Task 11 Steps 1–4 on top. The final whole-branch review is next, then the ledger archive, then the human's merge decision. This worktree previously hosted `fix/grip-camera-bc-swap` (Ruling P-1: this session's worktree hosts whatever branch it is dispatched to work on), which is merged at `9212793` and whose local branch can be deleted once no longer wanted |
 
-**No work is in flight** (checked with `git worktree list` on 2026-09-23
-after `7c96e11`). Plan 03 (`c5173e0`) and its three fix branches
-(`59e3811`, `9212793`, `7c96e11`) are merged. Every branch except
-`fix/grip-camera-bc-swap` is deleted; that one waits for its session to
-close. The local branches `claude/focused-nightingale-510bd1` and
+**Plan 05 is in flight, on the branch and worktree above.** Plan 03
+(`c5173e0`) and its three fix branches (`59e3811`, `9212793`, `7c96e11`)
+are merged and deleted; `fix/grip-camera-bc-swap`'s local branch is the one
+exception left over from before Plan 05 started, and deleting it is the
+human's call. The local branches `claude/focused-nightingale-510bd1` and
 `claude/quizzical-jemison-7537de` are empty session branches, and deleting
 them is the human's call.
 
@@ -1447,6 +1587,20 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
+**Immediate next step: Plan 05 (drawing tools).** Steps 1–4 of Task 11 are
+done (this section, the results note, the spec amendments and the
+roadmap), on `plan-05/drawing-tools`, cut from `main` at `7dac3b5`, at
+`3957d52` plus this commit. **What resumes here is the final whole-branch
+review**, over the whole diff `7dac3b5..HEAD`; its fix wave (if any) comes
+next; then the ledger archive
+(`docs/superpowers/ledgers/2026-09-23-drawing-tools/`) as the branch's last
+commit before the merge (Ruling T11-a, following Plan 03's own order).
+**The merge is the human's decision**, and criterion 14 (a human's look, on
+macOS, in Chrome and in Firefox from `build/web`) is still OWED after that
+— nothing was simulated to fill it in. See
+[Plan 05](#plan-05--drawing-tools-executed-on-plan-05drawing-tools-not-merged)
+and [2026-09-23-plan-05-results.md](docs/superpowers/notes/2026-09-23-plan-05-results.md).
+
 **Two lines exist, and which one runs next is the human's choice.** The
 **render line** — the GPU-resident backend, spec
 [2026-08-29-gpu-resident-render-backend-design.md](docs/superpowers/specs/2026-08-29-gpu-resident-render-backend-design.md)
@@ -1550,7 +1704,10 @@ and
   fixes"), and its fix wave is on top: `722904b`, `0cac4f4`, `509b9f3` and
   a docs commit.
 - **What resumes here:**
-  sub-project 05 (drawing tools), from a brainstorm. Plan 03's three fix
+  sub-project 05 (drawing tools) was brainstormed, specced, planned and
+  executed on `plan-05/drawing-tools` — see
+  [Plan 05](#plan-05--drawing-tools-executed-on-plan-05drawing-tools-not-merged)
+  above; its final whole-branch review is next. Plan 03's three fix
   branches are merged (`59e3811`, `9212793`, `7c96e11`).
 - **The gate lines** are green on `main` at `7c96e11`, after the fix
   merges: engine 894; render layer 854 + 1 skip + the five standing text
