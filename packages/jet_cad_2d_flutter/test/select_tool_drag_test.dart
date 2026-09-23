@@ -217,9 +217,12 @@ void main() {
     rig.selection.replace([k(s.circle), k(s.line)]);
     final circle0 = payloadOf(rig.document, s.circle);
     final line0 = payloadOf(rig.document, s.line);
-    final centre = screenOf(rig.camera, 7300, 3250);
-    final to = centre + const Offset(-31, 17);
-    pressAndMove(rig, centre, to);
+    // 5 px off the grip's centre, inside kGripHitPixels: the press point
+    // and the grip differ, so the base must be the grip's world point
+    // (spec D8), not the resolved press point.
+    final press = screenOf(rig.camera, 7300, 3250) + const Offset(3, -4);
+    final to = press + const Offset(-31, 17);
+    pressAndMove(rig, press, to);
     expect(rig.tool.pressClass, PressClass.grip);
     expect(rig.tool.dragKind, DragKind.move);
     release(rig, to);
@@ -381,6 +384,23 @@ void main() {
     rig.camera.panBy(const Offset(7, 7));
     expect(rig.tool.selectionPreviewTransform, isNull,
         reason: 'the listener left with the drag (Ruling 03-7)');
+
+    // A second drag on the moved line's body. A listener leaked by the
+    // first drag would re-resolve this one twice per camera change.
+    final c = payloadOf(rig.document, s.line).coords;
+    final again = screenOf(
+        rig.camera, c[0] + 0.3 * (c[2] - c[0]), c[1] + 0.3 * (c[3] - c[1]));
+    pressAndMove(rig, again, again + const Offset(20, 10));
+    expect(rig.tool.dragKind, DragKind.move);
+    var notified = 0;
+    void count() => notified++;
+    rig.tool.addListener(count);
+    rig.camera.panBy(const Offset(-5, 3));
+    rig.tool.removeListener(count);
+    expect(notified, 1,
+        reason: 'one camera listener per live drag: _endDrag removed the '
+            "first drag's (Ruling 03-7)");
+    rig.tool.cancel(rig.context);
   });
 
   test(
@@ -451,6 +471,49 @@ void main() {
     expect(rig.document.commands.undoDepth, 1,
         reason: 'the external edit only');
     expect(payloadOf(rig.document, s.line), edited);
+  });
+
+  test(
+      'a grip or a box gone between the press and the slop leaves the press '
+      'a click: no throw, no drag, no command', () async {
+    final s = gripScene();
+    final rig = gripRig(s.document);
+    final doc = rig.document;
+
+    // The line's end grip is ordinal 1 of the first object; once the line
+    // is gone, index 1 of the rebuilt list is the polyline's vertex 1.
+    rig.selection.replace([k(s.line), k(s.polyline)]);
+    final vertex = screenOf(rig.camera, 7130, 3060);
+    rig.tool.onPointerDown(pointerAt(rig.camera, vertex), rig.context);
+    expect(rig.tool.pressClass, PressClass.grip);
+    // A cmd+Z inside the slop reaches the shell: keys are the drag's only
+    // while dragging.
+    doc.commands.execute(RemoveEntityCommand(s.line));
+    await Future<void>.delayed(Duration.zero);
+    expect(rig.grips.grips.any((r) => r.key == k(s.line)), isFalse,
+        reason: 'the grip cache rebuilt without the line');
+    final away = vertex + const Offset(30, 10);
+    rig.tool.onPointerMove(pointerAt(rig.camera, away), rig.context);
+    expect(rig.tool.phase, ToolPhase.pressed,
+        reason: 'the pressed grip is gone: the press stays a click');
+    release(rig, away);
+    expect(doc.commands.undoDepth, 1, reason: 'the removal only');
+
+    // The rotation grip over a selection that empties: no box, no rotate.
+    rig.selection.replace([k(s.circle)]);
+    final rotation =
+        rotationGripOf(rig.grips.box!, rig.camera.value.worldToScreenMatrix)
+            .centre;
+    rig.tool.onPointerDown(pointerAt(rig.camera, rotation), rig.context);
+    expect(rig.tool.pressClass, PressClass.rotationGrip);
+    doc.commands.execute(RemoveEntityCommand(s.circle));
+    await Future<void>.delayed(Duration.zero);
+    expect(rig.grips.box, isNull);
+    rig.tool.onPointerMove(
+        pointerAt(rig.camera, rotation + const Offset(-30, 20)), rig.context);
+    expect(rig.tool.phase, ToolPhase.pressed);
+    release(rig, rotation + const Offset(-30, 20));
+    expect(doc.commands.undoDepth, 2, reason: 'the two removals only');
   });
 
   testWidgets('a pointer cancel leaves the document byte-identical (M-03ao)',

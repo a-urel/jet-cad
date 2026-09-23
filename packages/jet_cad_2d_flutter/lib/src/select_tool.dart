@@ -13,6 +13,7 @@ import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'grip_cache.dart' show GripCache, GripRef;
 import 'grip_drag.dart';
 import 'selection.dart';
 import 'selection_style.dart';
@@ -46,7 +47,7 @@ class SelectTool extends Tool {
   bool _pressShift = false;
   PressClass _class = PressClass.empty;
   SelectionKey? _downKey;
-  int _pressGrip = -1;
+  GripRef? _pressRef;
 
   /// Set when a drag was refused at the slop (Ruling 03-6): the press stays
   /// a click, and later moves do nothing.
@@ -115,14 +116,14 @@ class SelectTool extends Tool {
   /// (selected or not), then empty space.
   PressClass _classify(ToolPointerEvent e, ToolContext ctx) {
     _downKey = null;
-    _pressGrip = -1;
+    _pressRef = null;
     final grips = ctx.grips;
     if (grips != null) {
       final m = ctx.camera.value.worldToScreenMatrix;
       if (grips.hitsRotationGrip(e.screen, m)) return PressClass.rotationGrip;
       final i = grips.hitTest(e.screen, m);
       if (i >= 0) {
-        _pressGrip = i;
+        _pressRef = grips.grips[i];
         return PressClass.grip;
       }
     }
@@ -226,7 +227,12 @@ class SelectTool extends Tool {
         _enter(drag, e, ctx);
       case PressClass.grip:
         final grips = ctx.grips!;
-        final ref = grips.grips[_pressGrip];
+        final index = _liveIndexOf(grips, _pressRef!);
+        if (index < 0) {
+          _clickOnly = true;
+          return;
+        }
+        final ref = grips.grips[index];
         // Ruling 03-9: a centre grip moves the whole selection.
         final drag = ref.grip.role == GripRole.move
             ? GripDrag.move(ctx.document, ctx.selection.keys)
@@ -237,10 +243,15 @@ class SelectTool extends Tool {
         }
         // Spec D8: a grip's base is the grip's own world point, exactly.
         drag!.base.setValues(ref.grip.x, ref.grip.y);
-        grips.hot = _pressGrip;
+        grips.hot = index;
         _enter(drag, e, ctx);
       case PressClass.rotationGrip:
-        final box = ctx.grips!.box!;
+        final box = ctx.grips!.box;
+        if (box == null) {
+          // The selection emptied inside the slop: nothing to rotate.
+          _clickOnly = true;
+          return;
+        }
         final pivot =
             Vector2((box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2);
         final drag = GripDrag.rotate(
@@ -251,6 +262,25 @@ class SelectTool extends Tool {
         }
         _enter(drag!, e, ctx);
     }
+  }
+
+  /// The pressed grip's index in the current list, or -1 when it is gone.
+  ///
+  /// Keys reach the shell until a drag starts, so a cmd+Z inside the slop
+  /// can rebuild the cache: the press-time index may then be out of range
+  /// or name another object's grip. The same key, ordinal and grip (exact
+  /// `==`) is the same grip.
+  static int _liveIndexOf(GripCache grips, GripRef pressed) {
+    final list = grips.grips;
+    for (var i = 0; i < list.length; i++) {
+      final r = list[i];
+      if (r.key == pressed.key &&
+          r.ordinal == pressed.ordinal &&
+          r.grip == pressed.grip) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   /// Spec D2: a drag needs its capability before it starts.
@@ -460,7 +490,7 @@ class SelectTool extends Tool {
     _pointer = -1;
     _class = PressClass.empty;
     _downKey = null;
-    _pressGrip = -1;
+    _pressRef = null;
     _clickOnly = false;
     _bandMode = null;
     _dragKind = null;
