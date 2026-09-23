@@ -137,11 +137,18 @@ List<DraftCommand> _plan(
 
 /// The first touched handle that edits a generated entity, removes one
 /// while its group lives, or adds one into a live object (spec D6).
+///
+/// For `h` in `G` (before.owned[h] != null): refused if `h` **still
+/// exists** — a direct edit of a generated entity, regardless of what else
+/// the same command did to its owner — or, when `h` was removed, if the
+/// owner is still a live parametric object. Only a child removed *together
+/// with* its owning group is allowed.
 Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
     _Survey before, Set<Handle> touched) {
   for (final h in touched.toList()..sort(_byValue)) {
     final owner = before.owned[h];
     if (owner != null) {
+      if (t.entities.slotOf(h) != null) return h;
       if (_isObject(t, types, owner)) return h;
       continue;
     }
@@ -177,25 +184,32 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
     throw GeneratedGeometryError(refused);
   }
 
-  final after = _survey(t, types);
-  // Ruling 06-3: only objects that were live before the edit.
-  final lost = [
-    for (final h in before.objects.keys)
-      if (!after.objects.containsKey(h) && t.tree[h] == null) h,
-  ];
-  final cleanup = [for (final h in lost) before.objects[h]!.detach(h)];
-  final seeds = <Handle>{
-    for (final h in r.touched) ...[
-      // Ruling 06-4: a handle that was an object seeds too.
-      if (after.objects.containsKey(h) || before.objects.containsKey(h)) h,
-      if (before.owned[h] case final owner?) owner,
-    ],
-    ...lost,
-  };
-  if (seeds.isEmpty && cleanup.isEmpty) return r;
-
+  // The after-survey calls every registered type's `reach` again, with
+  // whatever `inner` just wrote — a client's `reach` can throw on the new
+  // parameters (a negative width, say). `inner` has already applied at
+  // this point, so that throw, `lost`/`cleanup`'s own computation, and
+  // `_plan`'s call into `generate` all share one try: any of them failing
+  // must still undo `inner` and leave nothing in history (spec D4 step 8).
+  final _Survey after;
+  final List<DraftCommand> cleanup;
   final List<DraftCommand> plan;
   try {
+    after = _survey(t, types);
+    // Ruling 06-3: only objects that were live before the edit.
+    final lost = [
+      for (final h in before.objects.keys)
+        if (!after.objects.containsKey(h) && t.tree[h] == null) h,
+    ];
+    cleanup = [for (final h in lost) before.objects[h]!.detach(h)];
+    final seeds = <Handle>{
+      for (final h in r.touched) ...[
+        // Ruling 06-4: a handle that was an object seeds too.
+        if (after.objects.containsKey(h) || before.objects.containsKey(h)) h,
+        if (before.owned[h] case final owner?) owner,
+      ],
+      ...lost,
+    };
+    if (seeds.isEmpty && cleanup.isEmpty) return r;
     plan = _plan(t, _closure(seeds, before, after), after,
         ParametricView._(t, after.neighbours));
   } catch (error) {

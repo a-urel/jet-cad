@@ -21,6 +21,11 @@ void expectWorld(
 }
 
 void main() {
+  tearDown(() {
+    Trip.mode = TripMode.off;
+    Trip.document = null;
+  });
+
   test('P1 the first object in an empty document generates (M-06q)', () {
     final doc = paramDoc();
     doc.commands.execute(create(doc, hA, parked, const ClipRect(2000, 1000)));
@@ -160,6 +165,44 @@ void main() {
     final second = ParametricSystem(doc, catalog);
     expect(doc.components.get<ClipRect>(hA), const ClipRect(2000, 1000));
     expect(second.drift(), isEmpty);
+    expect(enc(doc), before);
+  });
+
+  test(
+      'P11 a throwing reach on the after-survey rolls inner back and leaves '
+      'nothing in history (M-06w: after-survey outside the try)', () {
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hA, parked, const Trip(10, 10)));
+    final before = enc(doc);
+    final depth = doc.commands.undoDepth;
+    Trip.mode = TripMode.throwingReach;
+    expect(
+        () => doc.commands
+            .execute(SetComponentCommand<Trip>(hA, const Trip(-1, 10))),
+        throwsStateError);
+    expect(doc.commands.undoDepth, depth);
+    expect(doc.components.get<Trip>(hA), const Trip(10, 10));
+    expect(enc(doc), before);
+  });
+
+  test(
+      'P12 a direct edit of a generated child is refused even when the same '
+      'command first detaches its owner\'s parametric component (spec D6)', () {
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hA, parked, const ClipRect(2000, 1000)));
+    final child = kids(doc, hA).first;
+    final childSlot = doc.entities.slotOf(child)!;
+    final payload = doc.geometry.read(doc.entities.geomIndexAt(childSlot));
+    final before = enc(doc);
+    final depth = doc.commands.undoDepth;
+    expect(
+        () => doc.commands.execute(CompoundCommand([
+              SetComponentCommand<ClipRect>(hA, null),
+              SetEntityGeometryCommand(child, payload),
+            ], label: 'Detach then edit')),
+        throwsA(isA<GeneratedGeometryError>()));
+    expect(doc.commands.undoDepth, depth);
+    expect(doc.components.get<ClipRect>(hA), const ClipRect(2000, 1000));
     expect(enc(doc), before);
   });
 }

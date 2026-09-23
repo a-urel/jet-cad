@@ -52,7 +52,7 @@ final class SoftRect implements RectParams {
   int get hashCode => Object.hash(width, height);
 }
 
-enum TripMode { off, throwing, reentrant }
+enum TripMode { off, throwing, reentrant, throwingReach }
 
 /// A rectangle whose generation can be made to throw, or to call back into
 /// the dispatcher (G6-G8).
@@ -178,11 +178,21 @@ final class TripType extends ParametricType<Trip> {
   @override
   Capability get editCapability => Capability.geometry;
   @override
-  Aabb2 reach(Trip params, Transform2 toWorld) => rectReach(params, toWorld);
+  Aabb2 reach(Trip params, Transform2 toWorld) {
+    // M-06w: a client's `reach` throwing on the *new* parameters, exercised
+    // only for a non-positive width so the pre-edit survey (still the old
+    // parameters) never trips it.
+    if (Trip.mode == TripMode.throwingReach && params.width <= 0) {
+      throw StateError('tripwire reach');
+    }
+    return rectReach(params, toWorld);
+  }
+
   @override
   List<Generated> generate(ParametricView view, Handle self) {
     switch (Trip.mode) {
       case TripMode.off:
+      case TripMode.throwingReach:
         break;
       case TripMode.throwing:
         throw StateError('tripwire');
