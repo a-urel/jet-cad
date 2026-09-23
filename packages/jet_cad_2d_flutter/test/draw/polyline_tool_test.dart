@@ -156,16 +156,18 @@ void main() {
   test('PL8 its own first vertex beats a nearer entity endpoint (M-05w)', () {
     final s = drawScene();
     final rig = drawRig(s.document, PolylineTool());
-    // The first vertex sits 6 px from the anchor's start on screen.
+    // The first vertex sits 13 px from the anchor's start on screen --
+    // outside the 10 px aperture, so a selfSnap applied to the resolved
+    // (anchor) point cannot reach it (Ruling T9-a).
     final anchor = screenOf(rig.camera, kAnchorX, kAnchorY);
-    final first = anchor + const Offset(6, 0);
+    final first = anchor + const Offset(13, 0);
     rig.snap.toggleObjectSnap(); // off: place the first vertex raw
     clickAt(rig, first);
     rig.snap.toggleObjectSnap(); // back on
     clickAt(rig, screenOf(rig.camera, 7060, 3090));
     clickAt(rig, screenOf(rig.camera, 7120, 3030));
-    // 4 px from the first vertex and 2 px from the anchor: both inside.
-    clickAt(rig, anchor + const Offset(2, 0));
+    // 8 px from the first vertex and 5 px from the anchor: both inside.
+    clickAt(rig, anchor + const Offset(5, 0));
     final p =
         payloadOf(s.document, ofKind(s.document, EntityKind.polyline).single);
     expect(isClosedPolyline(p), isTrue);

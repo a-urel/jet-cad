@@ -1,6 +1,11 @@
 # Plan 05 mutation log — M-05a..z
 
-27 fired: 26 killed, 1 survived, 0 equivalent.
+27 fired: 27 killed, 0 survived, 0 equivalent.
+
+**Fix round 1 (Ruling T9-a).** M-05w′ first fired as a survivor against
+PL8; Task 9 fix round 1 changed PL8's fixture geometry (test-only) so both
+forms of M-05w are killed, then re-fired both mutants to confirm. See the
+M-05w and M-05w′ entries below for the before/after detail.
 
 Procedure, per mutant: `cp` the target file to
 `.superpowers/sdd/2026-09-23-drawing-tools/mutation-backups/<basename>.<id>`,
@@ -359,6 +364,15 @@ log readable, but every single one was run and was empty at the time.
   the mutant's guard then skips `selfSnap` entirely. The polyline never
   closes (`ofKind(...).single` throws "Bad state: No element"). Summary
   `+9 -1`.
+- **Re-fire (fix round 1, Ruling T9-a), after PL8's fixture changed** (see
+  M-05w′ below for why the change was needed): re-applied the identical
+  edit against the new PL8 geometry (first vertex at `anchor + Offset(13,
+  0)`, close click at `anchor + Offset(5, 0)`). Still KILLED -- `PL8`, same
+  failure shape, "Bad state: No element" at
+  `test/draw/polyline_tool_test.dart 172:71` (line number only changed
+  because the fixture's comments grew by two lines). Summary `+9 -1`.
+  Restored and diffed empty against the fresh backup
+  `placement_tool.dart.M-05w-refire`.
 
 ### M-05w′ — self-snap applied to the resolved point (reviewer-noted second form)
 
@@ -391,26 +405,40 @@ log readable, but every single one was run and was empty at the time.
   ```
 - **test:** `packages/jet_cad_2d_flutter/test/draw/polyline_tool_test.dart`
   (all 11 tests, including PL8)
-- **result:** **SURVIVED.** `flutter test test/draw/polyline_tool_test.dart`
-  printed `00:00 +11: All tests passed!` — PL8 does not kill this form.
-  **Why, concretely (not fixed in this task; not a designed survivor —
-  flagged per the dispatch note, no test change made):** in PL8 the click
-  lands 2 px from the anchor's entity endpoint and 4 px from the polyline's
-  own first vertex, both inside the aperture. `resolveDragPoint` runs
-  first and snaps `_hover.point` to the *nearer* target, the anchor's
-  entity endpoint (2 px). This mutant then calls `selfSnap(_hover.point,
-  aperture)` — i.e. it asks whether the **anchor's endpoint** (not the raw
-  click) is itself within the aperture of the polyline's own first vertex.
-  Because the fixture places the first vertex only 6 px (screen) from the
-  anchor's endpoint, and the aperture is 10 px, that check *also*
-  succeeds, so `selfSnap` still returns the polyline's own first vertex
-  and the assertion `p.coords[6] is not kAnchorX` still holds by
-  coincidence of this fixture's exact distances. A fixture where the
-  polyline's own vertex sits *outside* the aperture of the nearer entity
-  endpoint (while the raw click stays inside the aperture of both) would
-  be needed to distinguish the two forms; PL8 does not currently do that.
-  This is recorded as a finding for a follow-up fixture change, not
-  reworked here per the task's "no code change survives this task" scope.
+
+**First fire (Task 9, original PL8 fixture): SURVIVED.**
+`flutter test test/draw/polyline_tool_test.dart` printed `00:00 +11: All
+tests passed!` — PL8 did not kill this form. **Why, concretely:** in the
+original PL8 the click landed 2 px from the anchor's entity endpoint and
+4 px from the polyline's own first vertex, both inside the aperture.
+`resolveDragPoint` ran first and snapped `_hover.point` to the *nearer*
+target, the anchor's entity endpoint (2 px). This mutant then calls
+`selfSnap(_hover.point, aperture)` — i.e. it asks whether the **anchor's
+endpoint** (not the raw click) is itself within the aperture of the
+polyline's own first vertex. Because the original fixture placed the first
+vertex only 6 px (screen) from the anchor's endpoint, and the aperture is
+10 px, that check *also* succeeded, so `selfSnap` still returned the
+polyline's own first vertex and the assertion `p.coords[6] is not
+kAnchorX` still held by coincidence of that fixture's exact distances.
+Recorded as a finding, not fixed in Task 9 itself (a test change was out
+of scope there).
+
+**Fix round 1 (Ruling T9-a): fixture changed, re-fired, KILLED.** PL8's
+geometry in `packages/jet_cad_2d_flutter/test/draw/polyline_tool_test.dart`
+was changed (test-only) so the first vertex sits at `anchor + Offset(13,
+0)` — 13 px from the anchor, **outside** the 10 px aperture — and the close
+click sits at `anchor + Offset(5, 0)`, 8 px from the first vertex and 5 px
+from the anchor, both inside the aperture. Confirmed green on clean code
+first (`00:00 +11: All tests passed!`). Re-fired this mutant:
+`resolveDragPoint` still resolves the click to the anchor's endpoint
+(nearer, object-snapped); this mutant then calls `selfSnap(_hover.point,
+aperture)`, i.e. checks whether the anchor's endpoint is within the
+aperture of the polyline's own first vertex — and now it is not (13 px >
+10 px), so `selfSnap` returns null and the polyline never closes. KILLED --
+`PL8`; "Bad state: No element" at `test/draw/polyline_tool_test.dart
+172:71`, the same failure shape as M-05w's re-fire above. Summary `+9 -1`.
+Restored and diffed empty against the fresh backup
+`placement_tool.dart.M-05w-prime-refire`.
 
 ### M-05x — a zero-length first segment refused only by `==`, not by distance
 
@@ -453,6 +481,18 @@ log readable, but every single one was run and was empty at the time.
 
 ## Verification
 
-- `git status --short` after every restore in this run printed nothing.
-- After the last restore, `git status --short` and `git diff --stat` were
-  both empty (confirmed immediately before writing this log).
+- `git status --short` after every restore in this run printed nothing
+  for the `.dart` files under `packages/` and `apps/`.
+- After the last restore, `git diff --stat` showed no `.dart` change.
+
+## Fix round 1 (Ruling T9-a)
+
+`packages/jet_cad_2d_flutter/test/draw/polyline_tool_test.dart`'s PL8 was
+changed (test-only) to place the first vertex at `anchor + Offset(13, 0)`
+(outside the 10 px aperture from the anchor) and the closing click at
+`anchor + Offset(5, 0)` (8 px from the first vertex, 5 px from the anchor,
+both inside the aperture). Confirmed green on clean code, then both M-05w
+and M-05w′ were re-fired with fresh `cp` backups and both now go red
+against this fixture (see their entries above for the exact RED output);
+both were restored and diffed empty. `git status --short` now shows only
+the test file changed, no `.dart` under `lib/`.
