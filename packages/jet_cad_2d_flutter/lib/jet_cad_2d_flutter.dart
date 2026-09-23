@@ -45,6 +45,7 @@ export 'src/gpu/resident_text.dart';
 export 'src/gpu/text_compositor.dart';
 export 'src/gpu/text_patches.dart';
 export 'src/grip_cache.dart';
+export 'src/grip_drag.dart';
 export 'src/interaction_layer.dart';
 export 'src/outline_cache.dart';
 export 'src/page_chrome_painter.dart';
