@@ -88,6 +88,76 @@ void main() {
     expect(rig.document.commands.undoDepth, 0);
   });
 
+  test(
+      'hovering from one grip to another of the same object repaints once '
+      '(spec D5; M-03bk)', () {
+    final s = gripScene();
+    final rig = gripRig(s.document);
+    rig.selection.replace([k(s.line)]);
+    final start = screenOf(rig.camera, 7010, 3020);
+    final end = screenOf(rig.camera, 7130, 3060);
+    rig.tool
+        .onPointerMove(pointerAt(rig.camera, start, buttons: 0), rig.context);
+    final first = rig.grips.hot;
+    expect(first, isNonNegative);
+    expect(rig.tool.cursor, SystemMouseCursors.precise);
+    expect(rig.selection.hover, k(s.line));
+
+    var notified = 0;
+    void count() => notified++;
+    rig.tool.addListener(count);
+    rig.tool.onPointerMove(pointerAt(rig.camera, end, buttons: 0), rig.context);
+    rig.tool.removeListener(count);
+    expect(rig.grips.hot, isNonNegative);
+    expect(rig.grips.hot, isNot(first), reason: 'another grip is hot');
+    expect(rig.tool.cursor, SystemMouseCursors.precise,
+        reason: 'the same cursor');
+    expect(rig.selection.hover, k(s.line), reason: 'the same object hover');
+    expect(notified, 1,
+        reason: 'only the hot grip changed, and the overlay must repaint it');
+  });
+
+  test(
+      'shift pressed or released mid-drag re-targets at once, with no '
+      'pointer move (spec D8; M-03bl)', () {
+    final s = gripScene();
+    final rig = gripRig(s.document);
+    rig.selection.replace([k(s.line)]);
+    final from = screenOf(rig.camera, bodyX, bodyY);
+    final to = screenOf(rig.camera, bodyX + 40, bodyY + 7);
+    pressAndMove(rig, from, to);
+    expect(rig.tool.dragKind, DragKind.move);
+    final free = rig.tool.selectionPreviewTransform!;
+    expect(free.f.abs(), greaterThan(1), reason: 'unconstrained');
+
+    const shiftDown = KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.shiftLeft,
+        logicalKey: LogicalKeyboardKey.shiftLeft,
+        timeStamp: Duration.zero);
+    const shiftUp = KeyUpEvent(
+        physicalKey: PhysicalKeyboardKey.shiftLeft,
+        logicalKey: LogicalKeyboardKey.shiftLeft,
+        timeStamp: Duration.zero);
+    var notified = 0;
+    void count() => notified++;
+    rig.tool.addListener(count);
+    expect(rig.tool.onKey(shiftDown, rig.context), KeyEventResult.handled,
+        reason: 'a key-down during a drag is still consumed (D5)');
+    final ortho = rig.tool.selectionPreviewTransform!;
+    expect(ortho.f, 0.0,
+        reason: 'ortho in world axes: the minor axis is pinned to the base');
+    expect(ortho.e, closeTo(free.e, 1e-9));
+    expect(notified, 1);
+
+    rig.tool.onKey(shiftUp, rig.context);
+    final again = rig.tool.selectionPreviewTransform!;
+    expect(again.e, closeTo(free.e, 1e-9));
+    expect(again.f, closeTo(free.f, 1e-9), reason: 'unconstrained again');
+    expect(notified, 2);
+    rig.tool.removeListener(count);
+    rig.tool.cancel(rig.context);
+  });
+
   test('a body drag moves the selection under a rotated camera (M-03a)', () {
     final s = gripScene();
     final rig = gripRig(s.document);

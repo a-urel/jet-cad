@@ -519,6 +519,8 @@ class SelectTool extends Tool {
     _cursor = MouseCursor.defer;
   }
 
+  /// The host (`InteractionLayer`) never forwards an exit while a pointer
+  /// is captured, so this cancel is unreachable mid-drag (02's amended rule).
   @override
   void onPointerExit(ToolContext ctx) {
     ctx.selection.setHover(null);
@@ -538,6 +540,16 @@ class SelectTool extends Tool {
 
   @override
   KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
+    if (_drag != null &&
+        event is! KeyRepeatEvent &&
+        (event.logicalKey == LogicalKeyboardKey.shiftLeft ||
+            event.logicalKey == LogicalKeyboardKey.shiftRight)) {
+      // Spec D8: shift is ortho, or the rotation's 15° step. Pressing or
+      // releasing it re-targets from the last screen point at once, as a
+      // camera change does, rather than at the next pointer move.
+      _lastShift = event is KeyDownEvent;
+      _onCamera();
+    }
     if (_phase == ToolPhase.dragging &&
         (event is KeyDownEvent || event is KeyRepeatEvent)) {
       if (event is KeyDownEvent &&
