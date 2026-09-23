@@ -167,10 +167,18 @@ class PageComponent implements Component {
         gridVisible: gridVisible ?? this.gridVisible,
         gridStepMm: identical(gridStepMm, _keep)
             ? this.gridStepMm
-            : gridStepMm as double?,
+            : _gridStepArgument(gridStepMm),
         snapToGrid: snapToGrid ?? this.snapToGrid,
         pageBreaks: pageBreaks ?? this.pageBreaks,
       );
+
+  /// `copyWith`'s `gridStepMm` is `Object?` for the sentinel, so an int
+  /// literal arrives as an `int`: take any [num], refuse anything else.
+  static double? _gridStepArgument(Object? value) => switch (value) {
+        null => null,
+        final num n => n.toDouble(),
+        _ => throw ArgumentError.value(value, 'gridStepMm', 'must be a num'),
+      };
 
   @override
   String get typeId => componentTypeId;

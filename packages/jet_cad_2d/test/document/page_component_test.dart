@@ -83,6 +83,29 @@ void main() {
     expect(letterPortrait.copyWith(), letterPortrait);
   });
 
+  test('copyWith takes any num for gridStepMm and refuses anything else', () {
+    // M-page-num: `gridStepMm as double?` throws a TypeError on an int.
+    // `gridStepMm` is `Object?` (the sentinel), so an int literal is not
+    // promoted to double at compile time.
+    final stepped = letterPortrait.copyWith(gridStepMm: 250);
+    expect(stepped.gridStepMm, 250.0);
+    expect(stepped.gridStepMm, isA<double>());
+    expect(stepped.copyWith(gridStepMm: null).gridStepMm, isNull);
+    final fromCleared =
+        letterPortrait.copyWith(gridStepMm: null).copyWith(gridStepMm: 300);
+    expect(fromCleared.gridStepMm, 300.0);
+    expect(letterPortrait.copyWith(gridStepMm: 76.2).gridStepMm, 76.2);
+    expect(
+        () => letterPortrait.copyWith(gridStepMm: '250'),
+        throwsA(
+            isA<ArgumentError>().having((e) => e.name, 'name', 'gridStepMm')));
+    // The num path still validates: an int zero is refused like 0.0.
+    expect(
+        () => letterPortrait.copyWith(gridStepMm: 0),
+        throwsA(
+            isA<ArgumentError>().having((e) => e.name, 'name', 'gridStepMm')));
+  });
+
   test('validation refuses non-finite and non-positive values', () {
     expect(() => PageComponent(widthMm: 0), throwsArgumentError);
     expect(() => PageComponent(heightMm: double.nan), throwsArgumentError);
