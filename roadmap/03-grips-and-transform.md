@@ -1,7 +1,6 @@
 # 03 — Grips and transform
 
-**Status:** executed on `plan-03/grips-and-transform`, not merged; the
-merge is the human's decision. Twelve tasks, cut from `main` at `e376ced`:
+**Status:** MERGED into `main` at `c5173e0` on 2026-09-23. Twelve tasks, cut from `main` at `e376ced`:
 Tasks 1–11 at `e376ced..7879e36`, Task 12 on top. Exit gate 15 of 16;
 criterion 16, the human's look on macOS, Chrome and Firefox, is OWED.
 Spec: [2026-09-23-grips-and-transform-design.md](../docs/superpowers/specs/2026-09-23-grips-and-transform-design.md)
