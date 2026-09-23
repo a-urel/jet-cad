@@ -128,7 +128,11 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
 
   // --- Furniture: filled regions (spec 05 D14), after the finishes so
   // their fills draw over the tile and parquet lines. ---
-  p.rectRegion(x0 + 400, y0 + 6600, x0 + 2200, y0 + 8600); // bed
+  // Bed 1, a 1400 mm double, clear of the bedroom-1/2 doorway's approach
+  // (Ruling F-8): that door's opening is y0 + 7400..8200 on the partition at
+  // x0 + 2600, and a person needs 900 mm in front of it, so the bed ends at
+  // x0 + 1700. The old 1800 mm bed left 340 mm.
+  p.rectRegion(x0 + 300, y0 + 6600, x0 + 1700, y0 + 8600); // bed
   // Bed 2, clear of both of bedroom 2's door swings (Ruling F-1): the
   // bedroom-1/2 door's swing starts at y0 + 7400, and the hall/living
   // partition door's swing starts at x0 + 4100, so the bed (ending at
@@ -139,17 +143,20 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   // y0 + 4500, clear by 200 mm.
   p.rectRegion(x0 + 6000, y0 + 4500, x0 + 9000, y0 + 5400); // sofa
   p.rectRegion(x0 + 6400, y0 + 5600, x0 + 8600, y0 + 6800); // table
-  // The kitchen counter: one L along the kitchen's north and east walls
-  // (Ruling F-1), clear of the hall/kitchen door's swing (bottom-left
-  // corner) and the front door's swing (bottom-middle), which the old
-  // south/west-wall L sat on top of.
+  // The kitchen counter: one L along the kitchen's south and east walls.
+  // Ruling F-1 moved it off the hall/kitchen door's swing (x0 + 5000..5900)
+  // and the front door's (x0 + 6000..7000); Ruling F-8 then moved its north
+  // leg out of the kitchen/living doorway (x0 + 6600..7400 at y0 + 3500),
+  // which it faced from 350 mm away. The south leg starts 200 mm east of
+  // the front door's swing, and the east leg stops 400 mm short of the
+  // north wall, both clear of every doorway's 900 mm approach.
   p.polygonRegion([
-    x0 + 9100, y0 + 3100, //
-    x0 + 5400, y0 + 3100,
-    x0 + 5400, y0 + 2500,
-    x0 + 8500, y0 + 2500,
-    x0 + 8500, y0 + 400,
+    x0 + 7200, y0 + 400, //
     x0 + 9100, y0 + 400,
+    x0 + 9100, y0 + 3100,
+    x0 + 8500, y0 + 3100,
+    x0 + 8500, y0 + 1000,
+    x0 + 7200, y0 + 1000,
   ]);
   p.rectRegion(x0 + 12200, y0 + 400, x0 + 13500, y0 + 2000); // bath
   p.circleRegion(x0 + 7600, y0 + 6200, 350); // lamp, after the table
