@@ -5,7 +5,7 @@ equivalent 2 (M-03ai's ordinal tie-break clause, and `GripDrag._capture`'s
 `read` → `peek`, both by construction).**
 
 The final fix wave (after the final whole-branch review at `136af89`) added
-seven to the 62 below: M-03bh … M-03bl, 5 killed, and the `read` → `peek`
+six to the 62 below: M-03bh … M-03bl, 5 killed, and the `read` → `peek`
 equivalent, logged under "Final-review mutants" at the end. Before it, the
 head line read "62 exercised — fired 60, killed 60, survived 1, equivalent
 1", which did not add up (60 + 1 + 1 = 62 counts the survivor and the

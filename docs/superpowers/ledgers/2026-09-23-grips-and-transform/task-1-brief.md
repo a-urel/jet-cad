@@ -1,0 +1,531 @@
+### Task 1: The branch point, and `grips.dart` — the grip set, closedness, reshape
+
+**Files:**
+- Create: `lib/src/document/grips.dart`
+- Modify: `lib/jet_cad_2d.dart` (add `export 'src/document/grips.dart';`
+  between `extents.dart` and `fill_index.dart`)
+- Test: `test/document/grips_test.dart`
+
+**Interfaces:**
+- Consumes: `GeometryPayload` (`coords`, `scalars`, `pointCount`) from
+  `store/geometry_store.dart`; `EntityKind` from `store/entity_store.dart`;
+  `Tolerance.standard` from `core/tolerance.dart`; `Vector2`.
+- Produces:
+  - `enum GripRole { stretch, radius, move }`
+  - `final class Grip { const Grip(GripRole role, int index, double x, double y); … }`
+    with exact `==` and `hashCode`.
+  - `bool isClosedPolyline(GeometryPayload payload)`
+  - `List<Grip> leafGrips(EntityKind kind, GeometryPayload payload)`: the
+    list order is the grip's ordinal (Ruling 03-2).
+  - `GeometryPayload? reshapeLeaf(EntityKind kind, GeometryPayload payload, Grip grip, Vector2 localTarget)`
+
+- [ ] **Step 1: The branch point.** In the worktree:
+  - Run `git log --oneline -1` and check it is `c09b747` or later.
+  - Run `flutter pub get` at the worktree root.
+  - Run the four gate lines once and paste the four summary lines into the
+    ledger's `progress.md`. At the Plan 04 merge they were: engine 862;
+    render layer 797 + 1 skip + the five goldens; harness 82; app 21 with
+    both builds. If they differ, record what they are — do not assume.
+  - `git checkout --` the three `analysis_options.yaml` files that `pub
+    get` rewrote.
+
+- [ ] **Step 2: Write the failing test.**
+
+```dart
+// test/document/grips_test.dart
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:test/test.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+GeometryPayload payload(List<double> coords, List<double> scalars) =>
+    GeometryPayload(
+        coords: Float64List.fromList(coords),
+        scalars: Float64List.fromList(scalars));
+
+// The spec's fixture rules: off the origin, a closed room, arcs with a
+// non-zero start and one negative sweep.
+final GeometryPayload line = payload([7010, 3020, 7130, 3060], []);
+final GeometryPayload open5 = payload(
+    [7010, 3100, 7040, 3130, 7070, 3100, 7100, 3130, 7130, 3100], []);
+final GeometryPayload room = payload(
+    [7200, 3000, 7400, 3000, 7400, 3150, 7200, 3150, 7200, 3000], []);
+final GeometryPayload circle = payload([7300, 3250], [25]);
+final GeometryPayload arcPos = payload([7050, 3200], [40, 0.3, 1.9]);
+final GeometryPayload arcNeg = payload([7150, 3250], [30, 2.2, -1.4]);
+
+/// Ruling 03-1: two angles are the same angle when their unit vectors
+/// agree; a derived angle may differ from a stored one by a whole turn.
+void expectSameDirection(double actual, double expected) {
+  expect(math.cos(actual),
+      closeTo(math.cos(expected), Tolerance.standard.angular));
+  expect(math.sin(actual),
+      closeTo(math.sin(expected), Tolerance.standard.angular));
+}
+
+/// A point at [angle] and [radius] about [arc]'s centre.
+Vector2 at(GeometryPayload arc, double angle, double radius) => Vector2(
+    arc.coords[0] + radius * math.cos(angle),
+    arc.coords[1] + radius * math.sin(angle));
+
+void main() {
+  group('leafGrips', () {
+    test('the grip set per kind, in owner space (M-03y)', () {
+      expect(leafGrips(EntityKind.line, line), const [
+        Grip(GripRole.stretch, 0, 7010, 3020),
+        Grip(GripRole.stretch, 1, 7130, 3060),
+      ]);
+      final open = leafGrips(EntityKind.polyline, open5);
+      expect([for (final g in open) g.index], [0, 1, 2, 3, 4]);
+      expect(open[2], const Grip(GripRole.stretch, 2, 7070, 3100));
+      // Closed: vertex 0 stands for the repeated last vertex (spec D3).
+      expect(leafGrips(EntityKind.polyline, room), const [
+        Grip(GripRole.stretch, 0, 7200, 3000),
+        Grip(GripRole.stretch, 1, 7400, 3000),
+        Grip(GripRole.stretch, 2, 7400, 3150),
+        Grip(GripRole.stretch, 3, 7200, 3150),
+      ]);
+      final c = leafGrips(EntityKind.circle, circle);
+      expect(c, hasLength(5));
+      expect(c[0], const Grip(GripRole.move, 0, 7300, 3250));
+      const quadrants = [
+        [7325.0, 3250.0],
+        [7300.0, 3275.0],
+        [7275.0, 3250.0],
+        [7300.0, 3225.0],
+      ];
+      for (var q = 0; q < 4; q++) {
+        expect(c[q + 1].role, GripRole.radius);
+        expect(c[q + 1].index, q);
+        expect(c[q + 1].x, closeTo(quadrants[q][0], 1e-9));
+        expect(c[q + 1].y, closeTo(quadrants[q][1], 1e-9));
+      }
+      final a = leafGrips(EntityKind.arc, arcNeg);
+      expect([for (final g in a) (g.role, g.index)], [
+        (GripRole.move, 0),
+        (GripRole.stretch, 0),
+        (GripRole.stretch, 1),
+        (GripRole.radius, 0),
+      ]);
+      expect(a[0].x, 7150);
+      expect(a[0].y, 3250);
+      for (final (g, angle) in [
+        (a[1], 2.2),
+        (a[2], 2.2 - 1.4),
+        (a[3], 2.2 - 0.7),
+      ]) {
+        final p = at(arcNeg, angle, 30);
+        expect(g.x, closeTo(p.x, 1e-9));
+        expect(g.y, closeTo(p.y, 1e-9));
+      }
+      for (final kind in [
+        EntityKind.point,
+        EntityKind.text,
+        EntityKind.attrib,
+        EntityKind.fill,
+      ]) {
+        expect(leafGrips(kind, payload([7250, 3300], [12])), isEmpty,
+            reason: kind.name);
+      }
+    });
+
+    test('isClosedPolyline is an exact stored-value test', () {
+      expect(isClosedPolyline(room), isTrue);
+      expect(isClosedPolyline(open5), isFalse);
+      expect(
+          isClosedPolyline(payload([7010, 3020, 7100, 3090, 7010, 3020], [])),
+          isTrue);
+      expect(isClosedPolyline(payload([7010, 3020, 7010, 3020], [])), isFalse,
+          reason: 'two points are a segment, not a loop');
+      final nudged = Float64List.fromList(room.coords)..[8] = 7200.000000000001;
+      expect(nudged[8], isNot(7200.0));
+      expect(
+          isClosedPolyline(
+              GeometryPayload(coords: nudged, scalars: Float64List(0))),
+          isFalse,
+          reason: 'closedness is ==, not Tolerance');
+    });
+  });
+
+  group('reshapeLeaf', () {
+    test('a line stretch writes the grabbed pair and copies the rest', () {
+      final grips = leafGrips(EntityKind.line, line);
+      final out = reshapeLeaf(
+          EntityKind.line, line, grips[1], Vector2(7151.125, 3077.375))!;
+      expect(out.coords, [7010, 3020, 7151.125, 3077.375]);
+      expect(out.scalars, isEmpty);
+      // A zero-length segment is legal geometry, never degenerate.
+      expect(
+          reshapeLeaf(EntityKind.line, line, grips[1], Vector2(7010, 3020)),
+          isNotNull);
+    });
+
+    test('a polyline middle-vertex stretch moves that vertex and nothing '
+        'else (M-03o)', () {
+      final grip = leafGrips(EntityKind.polyline, open5)[2];
+      final out = reshapeLeaf(
+          EntityKind.polyline, open5, grip, Vector2(7066.5, 3088.25))!;
+      final expected = Float64List.fromList(open5.coords)
+        ..[4] = 7066.5
+        ..[5] = 3088.25;
+      expect(out.coords, expected);
+    });
+
+    test('a closed room corner moves as one: first and last pairs stay == '
+        '(M-03r)', () {
+      final grips = leafGrips(EntityKind.polyline, room);
+      final out = reshapeLeaf(
+          EntityKind.polyline, room, grips[0], Vector2(7188.5, 2990.25))!;
+      expect(out.coords,
+          [7188.5, 2990.25, 7400, 3000, 7400, 3150, 7200, 3150, 7188.5, 2990.25]);
+      expect(isClosedPolyline(out), isTrue);
+      final other = reshapeLeaf(
+          EntityKind.polyline, room, grips[2], Vector2(7410, 3160))!;
+      expect(other.coords,
+          [7200, 3000, 7400, 3000, 7410, 3160, 7200, 3150, 7200, 3000]);
+    });
+
+    test('a circle radius grip sets r = |target − centre|; degenerate is '
+        'null', () {
+      final q = leafGrips(EntityKind.circle, circle)[2];
+      final out =
+          reshapeLeaf(EntityKind.circle, circle, q, Vector2(7330, 3290))!;
+      expect(out.coords, circle.coords);
+      expect(out.scalars, [50]);
+      expect(reshapeLeaf(EntityKind.circle, circle, q, Vector2(7300, 3250)),
+          isNull);
+      expect(
+          reshapeLeaf(
+              EntityKind.circle, circle, q, Vector2(7300 + 1e-10, 3250)),
+          isNull);
+    });
+
+    test('an arc start stretch keeps the sweep direction and the end, both '
+        'signs (Ruling 03-1)', () {
+      final start = leafGrips(EntityKind.arc, arcPos)[1];
+      final out =
+          reshapeLeaf(EntityKind.arc, arcPos, start, at(arcPos, 0.1, 55))!;
+      expect(out.coords, arcPos.coords);
+      expect(out.scalars[0], 40);
+      expect(out.scalars[1], closeTo(0.1, 1e-12));
+      expect(out.scalars[2], closeTo(2.1, 1e-12));
+      expectSameDirection(out.scalars[1] + out.scalars[2], 0.3 + 1.9);
+
+      final negStart = leafGrips(EntityKind.arc, arcNeg)[1];
+      final neg =
+          reshapeLeaf(EntityKind.arc, arcNeg, negStart, at(arcNeg, 2.5, 18))!;
+      expect(neg.scalars[1], closeTo(2.5, 1e-12));
+      expect(neg.scalars[2], closeTo(-1.7, 1e-12));
+      expectSameDirection(neg.scalars[1] + neg.scalars[2], 2.2 - 1.4);
+
+      // Ruling 03-1's witness: atan2 answers in (−π, π], so the derived end
+      // differs from the stored 5.0 by a whole turn — and is the same angle.
+      final wide = payload([7050, 3200], [40, 4.0, 1.0]);
+      final w = reshapeLeaf(EntityKind.arc, wide,
+          leafGrips(EntityKind.arc, wide)[1], at(wide, 4.1, 40))!;
+      expect(w.scalars[1], closeTo(4.1 - 2 * math.pi, 1e-12));
+      expect(w.scalars[2], closeTo(0.9, 1e-12));
+      expect((w.scalars[1] + w.scalars[2] - 5.0).abs(),
+          closeTo(2 * math.pi, 1e-9));
+      expectSameDirection(w.scalars[1] + w.scalars[2], 5.0);
+    });
+
+    test('an arc end stretch on a negative sweep stays negative (M-03n)', () {
+      final end = leafGrips(EntityKind.arc, arcNeg)[2];
+      final out = reshapeLeaf(EntityKind.arc, arcNeg, end, at(arcNeg, 0.5, 30))!;
+      expect(out.scalars[1], 2.2, reason: 'the start is copied bit for bit');
+      expect(out.scalars[2], closeTo(-1.7, 1e-12));
+      final past =
+          reshapeLeaf(EntityKind.arc, arcNeg, end, at(arcNeg, 2.9, 30))!;
+      expect(past.scalars[2], closeTo(0.7 - 2 * math.pi, 1e-12),
+          reason: 'past the start the other way, still clockwise');
+      final pos = reshapeLeaf(EntityKind.arc, arcPos,
+          leafGrips(EntityKind.arc, arcPos)[2], at(arcPos, 2.6, 40))!;
+      expect(pos.scalars[1], 0.3);
+      expect(pos.scalars[2], closeTo(2.3, 1e-12));
+    });
+
+    test('an arc radius grip copies the angles', () {
+      final mid = leafGrips(EntityKind.arc, arcPos)[3];
+      final out = reshapeLeaf(
+          EntityKind.arc, arcPos, mid, Vector2(7050 + 36, 3200 + 48))!;
+      expect(out.scalars, [60, 0.3, 1.9]);
+      expect(out.coords, arcPos.coords);
+    });
+
+    test('an arc stretch to a zero or a full sweep is null', () {
+      final grips = leafGrips(EntityKind.arc, arcPos);
+      expect(
+          reshapeLeaf(
+              EntityKind.arc, arcPos, grips[1], at(arcPos, 0.3 + 1.9, 40)),
+          isNull,
+          reason: 'the start dragged onto the end');
+      expect(reshapeLeaf(EntityKind.arc, arcPos, grips[2], at(arcPos, 0.3, 40)),
+          isNull,
+          reason: 'the end dragged onto the start');
+    });
+
+    test('a move grip is not a reshape, and a kind without grips throws', () {
+      expect(
+          () => reshapeLeaf(EntityKind.circle, circle,
+              leafGrips(EntityKind.circle, circle)[0], Vector2(7400, 3300)),
+          throwsArgumentError);
+      expect(
+          () => reshapeLeaf(EntityKind.text, payload([7020, 3300], [12]),
+              const Grip(GripRole.stretch, 0, 7020, 3300), Vector2(7030, 3300)),
+          throwsArgumentError);
+    });
+  });
+}
+```
+
+- [ ] **Step 3: Run it to fail.** `cd packages/jet_cad_2d && CI=true dart
+  test test/document/grips_test.dart` → compile error: `leafGrips`, `Grip`
+  and `GripRole` are undefined.
+
+- [ ] **Step 4: Implement.**
+
+```dart
+// lib/src/document/grips.dart
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import '../core/tolerance.dart';
+import '../store/entity_store.dart';
+import '../store/geometry_store.dart';
+
+/// What dragging a grip does (spec D3).
+enum GripRole { stretch, radius, move }
+
+/// One grip of one leaf, in the leaf's **owner** space (spec D3).
+///
+/// For a root-level leaf that is root space, which is world: the canvas, the
+/// index and the oracle all descend from the identity and never apply the
+/// root node's own transform (spec preamble, review finding #1).
+final class Grip {
+  const Grip(this.role, this.index, this.x, this.y);
+
+  final GripRole role;
+
+  /// Vertex index; quadrant 0..3; arc end 0 (start) or 1 (end); else 0.
+  /// Not unique across roles — the tie-break uses the list ordinal
+  /// (Ruling 03-2).
+  final int index;
+
+  final double x, y;
+
+  /// Exact: a grip's position is a stored coordinate, not a decision.
+  @override
+  bool operator ==(Object other) =>
+      other is Grip &&
+      other.role == role &&
+      other.index == index &&
+      other.x == x &&
+      other.y == y;
+
+  @override
+  int get hashCode => Object.hash(role, index, x, y);
+
+  @override
+  String toString() => 'Grip(${role.name} $index @ $x, $y)';
+}
+
+/// First and last coordinate pairs equal, on three or more points — the
+/// rule `triangulate.dart` closes a boundary by. A stored-value test, so `==`.
+bool isClosedPolyline(GeometryPayload payload) {
+  final n = payload.pointCount;
+  if (n < 3) return false;
+  final c = payload.coords;
+  return c[0] == c[(n - 1) * 2] && c[1] == c[(n - 1) * 2 + 1];
+}
+
+/// Spec D3's grip set, in owner space. The list order is each grip's
+/// ordinal, which D2's tie-break reads (Ruling 03-2).
+List<Grip> leafGrips(EntityKind kind, GeometryPayload payload) {
+  final c = payload.coords;
+  switch (kind) {
+    case EntityKind.line:
+    case EntityKind.polyline:
+      final n = payload.pointCount;
+      // A closed polyline's last vertex *is* its first: vertex 0 stands for
+      // both, so the shared corner has one grip and moves as one (D3).
+      final count =
+          kind == EntityKind.polyline && isClosedPolyline(payload) ? n - 1 : n;
+      return [
+        for (var i = 0; i < count; i++)
+          Grip(GripRole.stretch, i, c[i * 2], c[i * 2 + 1]),
+      ];
+    case EntityKind.circle:
+      if (payload.pointCount == 0 || payload.scalars.isEmpty) return const [];
+      final cx = c[0], cy = c[1], r = payload.scalars[0];
+      return [
+        Grip(GripRole.move, 0, cx, cy),
+        // The snap engine's own quadrant expression (`_considerSnapLeaf`),
+        // so a radius grip sits bit for bit where a quadrant snap lands.
+        for (var q = 0; q < 4; q++)
+          Grip(GripRole.radius, q, cx + r * math.cos(q * (math.pi / 2)),
+              cy + r * math.sin(q * (math.pi / 2))),
+      ];
+    case EntityKind.arc:
+      if (payload.pointCount == 0 || payload.scalars.length < 3) {
+        return const [];
+      }
+      final cx = c[0], cy = c[1];
+      final r = payload.scalars[0];
+      final start = payload.scalars[1];
+      final sweep = payload.scalars[2];
+      final end = start + sweep;
+      final mid = start + sweep / 2;
+      return [
+        Grip(GripRole.move, 0, cx, cy),
+        Grip(GripRole.stretch, 0, cx + r * math.cos(start),
+            cy + r * math.sin(start)),
+        Grip(GripRole.stretch, 1, cx + r * math.cos(end),
+            cy + r * math.sin(end)),
+        Grip(GripRole.radius, 0, cx + r * math.cos(mid),
+            cy + r * math.sin(mid)),
+      ];
+    case EntityKind.point:
+    case EntityKind.text:
+    case EntityKind.attrib:
+    case EntityKind.fill:
+      // A point and a text move by their body; an attrib is never
+      // root-level; a fill follows its boundary (D3).
+      return const [];
+  }
+}
+
+/// The payload [grip] dragged to [localTarget] (owner space), or null when
+/// the result is degenerate — the preview then shows the object unchanged
+/// and release dispatches nothing (spec D3).
+///
+/// Every coordinate and scalar the grip does not own is the stored double,
+/// copied, never recomputed. Throws [ArgumentError] for a move grip (the
+/// tool routes a centre grip to a move) and for a kind without grips.
+GeometryPayload? reshapeLeaf(EntityKind kind, GeometryPayload payload,
+    Grip grip, Vector2 localTarget) {
+  if (grip.role == GripRole.move) {
+    throw ArgumentError.value(
+        grip, 'grip', 'a move grip is routed to a move, not a reshape');
+  }
+  final c = payload.coords;
+  switch (kind) {
+    case EntityKind.line:
+    case EntityKind.polyline:
+      final n = payload.pointCount;
+      final i = grip.index;
+      if (grip.role != GripRole.stretch || i < 0 || i >= n) {
+        throw ArgumentError.value(grip, 'grip', 'not a vertex of this ${kind.name}');
+      }
+      final coords = Float64List.fromList(c);
+      coords[i * 2] = localTarget.x;
+      coords[i * 2 + 1] = localTarget.y;
+      // The loop stays closed: the shared corner is written twice (M-03r).
+      if (i == 0 && kind == EntityKind.polyline && isClosedPolyline(payload)) {
+        coords[(n - 1) * 2] = localTarget.x;
+        coords[(n - 1) * 2 + 1] = localTarget.y;
+      }
+      // Never degenerate: a zero-length segment is legal geometry. An
+      // unfillable result is `SetEntityGeometryCommand`'s to drop.
+      return GeometryPayload(
+          coords: coords, scalars: Float64List.fromList(payload.scalars));
+    case EntityKind.circle:
+      if (grip.role != GripRole.radius) {
+        throw ArgumentError.value(grip, 'grip', 'a circle reshapes by radius');
+      }
+      final r = _distance(localTarget, c[0], c[1]);
+      if (r <= Tolerance.standard.linear) return null;
+      final scalars = Float64List.fromList(payload.scalars)..[0] = r;
+      return GeometryPayload(coords: Float64List.fromList(c), scalars: scalars);
+    case EntityKind.arc:
+      final s = payload.scalars;
+      final scalars = Float64List.fromList(s);
+      if (grip.role == GripRole.radius) {
+        final r = _distance(localTarget, c[0], c[1]);
+        if (r <= Tolerance.standard.linear) return null;
+        scalars[0] = r;
+      } else {
+        if (grip.index != 0 && grip.index != 1) {
+          throw ArgumentError.value(grip, 'grip', 'an arc has ends 0 and 1');
+        }
+        final start = s[1], sweep = s[2];
+        final a = math.atan2(localTarget.y - c[1], localTarget.x - c[0]);
+        final double nextStart;
+        final double nextSweep;
+        if (grip.index == 0) {
+          // The end angle e = start + sweep stays; the sweep turns the
+          // same way it did (D3).
+          nextStart = a;
+          nextSweep = _wrapSweep(start + sweep - a, sweep);
+        } else {
+          nextStart = start;
+          nextSweep = _wrapSweep(a - start, sweep);
+        }
+        if (_degenerateSweep(nextSweep)) return null;
+        scalars[1] = nextStart;
+        scalars[2] = nextSweep;
+      }
+      return GeometryPayload(coords: Float64List.fromList(c), scalars: scalars);
+    case EntityKind.point:
+    case EntityKind.text:
+    case EntityKind.attrib:
+    case EntityKind.fill:
+      throw ArgumentError.value(kind, 'kind', 'has no grips (spec D3)');
+  }
+}
+
+double _distance(Vector2 p, double cx, double cy) {
+  final dx = p.x - cx, dy = p.y - cy;
+  return math.sqrt(dx * dx + dy * dy);
+}
+
+/// The value congruent to [raw] mod 2π that turns the way [direction] does:
+/// in [0, 2π) for a positive sweep, (−2π, 0] for a negative one. The two
+/// closed ends are [_degenerateSweep]'s business.
+double _wrapSweep(double raw, double direction) {
+  const twoPi = 2 * math.pi;
+  final w = raw % twoPi; // Dart's % is Euclidean: w is in [0, 2π).
+  return direction < 0 && w != 0 ? w - twoPi : w;
+}
+
+/// A decision, so `Tolerance` (spec D3, invariant 8).
+bool _degenerateSweep(double sweep) {
+  final a = sweep.abs();
+  return a <= Tolerance.standard.angular ||
+      (2 * math.pi - a) <= Tolerance.standard.angular;
+}
+```
+
+Add the export to `lib/jet_cad_2d.dart`, between `extents.dart` and
+`fill_index.dart`:
+
+```dart
+export 'src/document/grips.dart';
+```
+
+- [ ] **Step 5: Run it to pass.** `CI=true dart test
+  test/document/grips_test.dart` → all tests pass. Then run the
+  `jet_cad_2d` gate line.
+- [ ] **Step 6: Commit.**
+
+```bash
+git add packages/jet_cad_2d/lib/src/document/grips.dart packages/jet_cad_2d/lib/jet_cad_2d.dart packages/jet_cad_2d/test/document/grips_test.dart
+git commit -m "$(cat <<'EOF'
+feat(engine): grips -- leafGrips, isClosedPolyline, reshapeLeaf
+
+Spec 03 D3: the grip set per kind in owner space, the closed-polyline rule
+(vertex 0 stands for the repeated last vertex and a stretch writes both),
+and reshape with the degenerate rule. Ruling 03-1: an arc's derived end
+angle is compared modulo 2 pi.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+

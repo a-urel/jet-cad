@@ -1,0 +1,469 @@
+# Review package: 433fe9c..b7de33a
+
+## Commits
+b7de33a fix(render): SelectTool stale grip at the slop; kill listener mutants
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/select_tool.dart    | 44 ++++++++++--
+ .../test/interaction_cursor_test.dart              | 82 +++++++++++++++++++++-
+ .../test/select_tool_drag_test.dart                | 69 +++++++++++++++++-
+ 3 files changed, 184 insertions(+), 11 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/select_tool.dart b/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
+index 6171e86..ef40906 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
+@@ -6,20 +6,21 @@ import 'package:flutter/services.dart'
+         KeyDownEvent,
+         KeyEvent,
+         KeyRepeatEvent,
+         LogicalKeyboardKey,
+         MouseCursor,
+         SystemMouseCursors;
+ import 'package:flutter/widgets.dart' show KeyEventResult;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
++import 'grip_cache.dart' show GripCache, GripRef;
+ import 'grip_drag.dart';
+ import 'selection.dart';
+ import 'selection_style.dart';
+ import 'tool.dart';
+ import 'viewport_transform.dart';
+ 
+ /// A press that moves less than this many screen pixels stays a click
+ /// (M-02f); past it, a press becomes the drag its class names (spec 03 D2).
+ const double kBandSlopPixels = 4.0;
+ 
+@@ -39,21 +40,21 @@ class SelectTool extends Tool {
+   ToolPhase _phase = ToolPhase.idle;
+   @override
+   ToolPhase get phase => _phase;
+ 
+   final HitPath _hit = HitPath();
+   Offset _start = Offset.zero;
+   final Vector2 _pressWorld = Vector2.zero();
+   bool _pressShift = false;
+   PressClass _class = PressClass.empty;
+   SelectionKey? _downKey;
+-  int _pressGrip = -1;
++  GripRef? _pressRef;
+ 
+   /// Set when a drag was refused at the slop (Ruling 03-6): the press stays
+   /// a click, and later moves do nothing.
+   bool _clickOnly = false;
+   Offset _end = Offset.zero;
+   BandMode? _bandMode;
+   int _pointer = -1;
+ 
+   DragKind? _dragKind;
+   GripDrag? _drag;
+@@ -108,28 +109,28 @@ class SelectTool extends Tool {
+     _pressWorld.setFrom(e.world);
+     _pressShift = e.shift;
+     _class = _classify(e, ctx);
+     notifyListeners();
+   }
+ 
+   /// Spec D2: the rotation grip, then a grip, then the single pick
+   /// (selected or not), then empty space.
+   PressClass _classify(ToolPointerEvent e, ToolContext ctx) {
+     _downKey = null;
+-    _pressGrip = -1;
++    _pressRef = null;
+     final grips = ctx.grips;
+     if (grips != null) {
+       final m = ctx.camera.value.worldToScreenMatrix;
+       if (grips.hitsRotationGrip(e.screen, m)) return PressClass.rotationGrip;
+       final i = grips.hitTest(e.screen, m);
+       if (i >= 0) {
+-        _pressGrip = i;
++        _pressRef = grips.grips[i];
+         return PressClass.grip;
+       }
+     }
+     final key = _pick(e, ctx);
+     _downKey = key;
+     if (key == null) return PressClass.empty;
+     // The single pick decides: an unselected object drawn above a selected
+     // one wins the press, exactly as it wins a click in 02.
+     return ctx.selection.contains(key)
+         ? PressClass.selectedBody
+@@ -219,47 +220,76 @@ class SelectTool extends Tool {
+         }
+         // Class 3b: select (shift at the press toggles in), then move. The
+         // selection change is selection state; it stands after a cancel.
+         _pressShift
+             ? ctx.selection.toggle([key])
+             : ctx.selection.replace([key]);
+         _moveBase(ctx, drag!);
+         _enter(drag, e, ctx);
+       case PressClass.grip:
+         final grips = ctx.grips!;
+-        final ref = grips.grips[_pressGrip];
++        final index = _liveIndexOf(grips, _pressRef!);
++        if (index < 0) {
++          _clickOnly = true;
++          return;
++        }
++        final ref = grips.grips[index];
+         // Ruling 03-9: a centre grip moves the whole selection.
+         final drag = ref.grip.role == GripRole.move
+             ? GripDrag.move(ctx.document, ctx.selection.keys)
+             : GripDrag.reshape(ctx.document, ref.key, ref.grip);
+         if (!_permitted(drag, ctx)) {
+           _clickOnly = true;
+           return;
+         }
+         // Spec D8: a grip's base is the grip's own world point, exactly.
+         drag!.base.setValues(ref.grip.x, ref.grip.y);
+-        grips.hot = _pressGrip;
++        grips.hot = index;
+         _enter(drag, e, ctx);
+       case PressClass.rotationGrip:
+-        final box = ctx.grips!.box!;
++        final box = ctx.grips!.box;
++        if (box == null) {
++          // The selection emptied inside the slop: nothing to rotate.
++          _clickOnly = true;
++          return;
++        }
+         final pivot =
+             Vector2((box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2);
+         final drag = GripDrag.rotate(
+             ctx.document, ctx.selection.keys, pivot, _pressWorld);
+         if (!_permitted(drag, ctx)) {
+           _clickOnly = true;
+           return;
+         }
+         _enter(drag!, e, ctx);
+     }
+   }
+ 
++  /// The pressed grip's index in the current list, or -1 when it is gone.
++  ///
++  /// Keys reach the shell until a drag starts, so a cmd+Z inside the slop
++  /// can rebuild the cache: the press-time index may then be out of range
++  /// or name another object's grip. The same key, ordinal and grip (exact
++  /// `==`) is the same grip.
++  static int _liveIndexOf(GripCache grips, GripRef pressed) {
++    final list = grips.grips;
++    for (var i = 0; i < list.length; i++) {
++      final r = list[i];
++      if (r.key == pressed.key &&
++          r.ordinal == pressed.ordinal &&
++          r.grip == pressed.grip) {
++        return i;
++      }
++    }
++    return -1;
++  }
++
+   /// Spec D2: a drag needs its capability before it starts.
+   static bool _permitted(GripDrag? drag, ToolContext ctx) =>
+       drag != null && drag.permittedBy(ctx.document.commands.permissions);
+ 
+   /// Spec D8: a body drag's base is the press point, resolved by the same
+   /// chain as the target but without ortho. With grid snap on, a move from
+   /// on-grid geometry is then a lattice vector (M-03s).
+   void _moveBase(ToolContext ctx, GripDrag drag) {
+     _resolve(ctx, _pressWorld, null);
+     drag.base.setFrom(_dragPoint.point);
+@@ -453,21 +483,21 @@ class SelectTool extends Tool {
+       return null;
+     }
+     return topmostGroupOf(doc, owner, ancestors); // selection.dart
+   }
+ 
+   void _reset() {
+     _phase = ToolPhase.idle;
+     _pointer = -1;
+     _class = PressClass.empty;
+     _downKey = null;
+-    _pressGrip = -1;
++    _pressRef = null;
+     _clickOnly = false;
+     _bandMode = null;
+     _dragKind = null;
+   }
+ 
+   /// The single way out of a move, rotate or reshape (Ruling 03-7).
+   void _endDrag(ToolContext ctx) {
+     if (_drag == null) return;
+     (_dragCtx ?? ctx).camera.removeListener(_onCamera);
+     ctx.grips?.hot = -1;
+diff --git a/packages/jet_cad_2d_flutter/test/interaction_cursor_test.dart b/packages/jet_cad_2d_flutter/test/interaction_cursor_test.dart
+index 0fc30b9..c08500a 100644
+--- a/packages/jet_cad_2d_flutter/test/interaction_cursor_test.dart
++++ b/packages/jet_cad_2d_flutter/test/interaction_cursor_test.dart
+@@ -1,19 +1,30 @@
+ import 'dart:ui' show Canvas, Size;
+ 
+ import 'package:flutter/services.dart'
+     show KeyEvent, MouseCursor, SystemMouseCursors;
+-import 'package:flutter/widgets.dart' show KeyEventResult, MouseRegion, Offset;
++import 'package:flutter/widgets.dart'
++    show
++        Align,
++        EdgeInsets,
++        GlobalKey,
++        KeyEventResult,
++        MouseRegion,
++        Offset,
++        Padding,
++        SizedBox,
++        Widget;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/src/flutter_text_measurer.dart';
+ import 'package:jet_cad_2d_flutter/src/interaction_layer.dart';
++import 'package:jet_cad_2d_flutter/src/selection.dart';
+ import 'package:jet_cad_2d_flutter/src/tool.dart';
+ import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
+ 
+ import 'support/selection_fixture.dart';
+ 
+ /// A tool that has only a cursor, and says when it changes.
+ class _CursorTool extends Tool {
+   MouseCursor _cursor = MouseCursor.defer;
+ 
+   @override
+@@ -38,20 +49,50 @@ class _CursorTool extends Tool {
+   void onPointerExit(ToolContext ctx) {}
+   @override
+   KeyEventResult onKey(KeyEvent event, ToolContext ctx) =>
+       KeyEventResult.ignored;
+   @override
+   void cancel(ToolContext ctx) {}
+   @override
+   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
+ }
+ 
++/// A [ToolController] whose active tool is a fresh [_CursorTool], over a
++/// bare context; everything is disposed at tear-down.
++({ToolController tools, _CursorTool probe}) _cursorController() {
++  final doc = DraftDocument.empty();
++  final index = SpatialIndex(doc);
++  final selection = SelectionController(doc);
++  final camera = cameraAt(2.0, const Offset(-1850, 1120));
++  final probe = _CursorTool();
++  final tools = ToolController(
++      initial: probe,
++      context: ToolContext(
++          document: doc, index: index, camera: camera, selection: selection));
++  addTearDown(() {
++    tools.dispose();
++    probe.dispose();
++    camera.dispose();
++    selection.dispose();
++    index.dispose();
++  });
++  return (tools: tools, probe: probe);
++}
++
++MouseCursor _shown(WidgetTester tester) => tester
++    .widget<MouseRegion>(find
++        .descendant(
++            of: find.byType(InteractionLayer),
++            matching: find.byType(MouseRegion))
++        .first)
++    .cursor;
++
+ void main() {
+   testWidgets(
+       "the MouseRegion follows the active tool's cursor (spec D5, "
+       'M-03ab)', (tester) async {
+     final measurer = FlutterTextMeasurer();
+     addTearDown(measurer.clear);
+     final doc = DraftDocument.empty(measurer: measurer);
+     final rig = await pumpInteraction(tester,
+         document: doc, camera: cameraAt(2.0, const Offset(-1850, 1120)));
+     MouseCursor current() => tester
+@@ -70,11 +111,50 @@ void main() {
+     await tester.pump();
+     expect(current(), SystemMouseCursors.move,
+         reason: 'a notification rebuilds the MouseRegion');
+     probe.show(SystemMouseCursors.grabbing);
+     await tester.pump();
+     expect(current(), SystemMouseCursors.grabbing);
+     rig.tools.activate(rig.tool);
+     await tester.pump();
+     expect(current(), MouseCursor.defer);
+   });
++  testWidgets(
++      'a layer re-pumped with another ToolController follows the new '
++      "controller's cursor, not the old one's (didUpdateWidget)",
++      (tester) async {
++    final a = _cursorController();
++    final b = _cursorController();
++    addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
++    await tester.pumpWidget(
++        InteractionLayer(tools: a.tools, child: const SizedBox.expand()));
++    await tester.pumpWidget(
++        InteractionLayer(tools: b.tools, child: const SizedBox.expand()));
++    b.probe.show(SystemMouseCursors.grabbing);
++    await tester.pump();
++    expect(_shown(tester), SystemMouseCursors.grabbing,
++        reason: 'the layer listens to the controller it now holds');
++    a.probe.show(SystemMouseCursors.move);
++    await tester.pump();
++    expect(_shown(tester), SystemMouseCursors.grabbing,
++        reason: 'and no longer to the one it held before');
++  });
++
++  testWidgets(
++      'a layer reparented through a GlobalKey still follows the cursor '
++      '(activate unmutes what deactivate muted)', (tester) async {
++    final c = _cursorController();
++    addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
++    final key = GlobalKey();
++    Widget layer() => InteractionLayer(
++        key: key, tools: c.tools, child: const SizedBox.expand());
++    await tester.pumpWidget(Padding(padding: EdgeInsets.zero, child: layer()));
++    final state = tester.state(find.byType(InteractionLayer));
++    await tester.pumpWidget(Align(child: layer()));
++    expect(
++        identical(tester.state(find.byType(InteractionLayer)), state), isTrue,
++        reason: 'reparented, not rebuilt: deactivate then activate ran');
++    c.probe.show(SystemMouseCursors.move);
++    await tester.pump();
++    expect(_shown(tester), SystemMouseCursors.move);
++  });
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/select_tool_drag_test.dart b/packages/jet_cad_2d_flutter/test/select_tool_drag_test.dart
+index 70abfb8..05491b6 100644
+--- a/packages/jet_cad_2d_flutter/test/select_tool_drag_test.dart
++++ b/packages/jet_cad_2d_flutter/test/select_tool_drag_test.dart
+@@ -210,23 +210,26 @@ void main() {
+   });
+ 
+   test(
+       'a centre grip moves the whole selection from the grip itself '
+       '(M-03at, Ruling 03-9)', () {
+     final s = gripScene();
+     final rig = gripRig(s.document);
+     rig.selection.replace([k(s.circle), k(s.line)]);
+     final circle0 = payloadOf(rig.document, s.circle);
+     final line0 = payloadOf(rig.document, s.line);
+-    final centre = screenOf(rig.camera, 7300, 3250);
+-    final to = centre + const Offset(-31, 17);
+-    pressAndMove(rig, centre, to);
++    // 5 px off the grip's centre, inside kGripHitPixels: the press point
++    // and the grip differ, so the base must be the grip's world point
++    // (spec D8), not the resolved press point.
++    final press = screenOf(rig.camera, 7300, 3250) + const Offset(3, -4);
++    final to = press + const Offset(-31, 17);
++    pressAndMove(rig, press, to);
+     expect(rig.tool.pressClass, PressClass.grip);
+     expect(rig.tool.dragKind, DragKind.move);
+     release(rig, to);
+     final delta = worldOf(rig, to) - Vector2(7300, 3250);
+     expectMovedBy(payloadOf(rig.document, s.circle), circle0, delta);
+     expectMovedBy(payloadOf(rig.document, s.line), line0, delta);
+     expect(payloadOf(rig.document, s.circle).scalars, [25]);
+   });
+ 
+   test('a stretch released near an endpoint lands on it exactly (M-03au)', () {
+@@ -374,20 +377,37 @@ void main() {
+     // A trackpad zoom about another point: no pointer event arrives.
+     rig.camera.zoomAt(const Offset(10, 10), 1.5);
+     final target = worldOf(rig, to);
+     final t = rig.tool.selectionPreviewTransform!;
+     expect(t.e, closeTo(target.x - base.x, 1e-9));
+     expect(t.f, closeTo(target.y - base.y, 1e-9));
+     release(rig, to);
+     rig.camera.panBy(const Offset(7, 7));
+     expect(rig.tool.selectionPreviewTransform, isNull,
+         reason: 'the listener left with the drag (Ruling 03-7)');
++
++    // A second drag on the moved line's body. A listener leaked by the
++    // first drag would re-resolve this one twice per camera change.
++    final c = payloadOf(rig.document, s.line).coords;
++    final again = screenOf(
++        rig.camera, c[0] + 0.3 * (c[2] - c[0]), c[1] + 0.3 * (c[3] - c[1]));
++    pressAndMove(rig, again, again + const Offset(20, 10));
++    expect(rig.tool.dragKind, DragKind.move);
++    var notified = 0;
++    void count() => notified++;
++    rig.tool.addListener(count);
++    rig.camera.panBy(const Offset(-5, 3));
++    rig.tool.removeListener(count);
++    expect(notified, 1,
++        reason: 'one camera listener per live drag: _endDrag removed the '
++            "first drag's (Ruling 03-7)");
++    rig.tool.cancel(rig.context);
+   });
+ 
+   test(
+       "every key-down and repeat is the drag's; Escape cancels "
+       'byte-identically (M-03aa, M-03l)', () {
+     final s = gripScene();
+     final rig = gripRig(s.document);
+     rig.selection.replace([k(s.line), k(s.instA)]);
+     final bytes = snapshot(rig.document);
+     final from = screenOf(rig.camera, bodyX, bodyY);
+@@ -446,20 +466,63 @@ void main() {
+     final edited = GeometryPayload(
+         coords: Float64List.fromList([7010, 3020, 7140, 3080]),
+         scalars: Float64List(0));
+     rig.document.commands.execute(SetEntityGeometryCommand(s.line, edited));
+     release(rig, to);
+     expect(rig.document.commands.undoDepth, 1,
+         reason: 'the external edit only');
+     expect(payloadOf(rig.document, s.line), edited);
+   });
+ 
++  test(
++      'a grip or a box gone between the press and the slop leaves the press '
++      'a click: no throw, no drag, no command', () async {
++    final s = gripScene();
++    final rig = gripRig(s.document);
++    final doc = rig.document;
++
++    // The line's end grip is ordinal 1 of the first object; once the line
++    // is gone, index 1 of the rebuilt list is the polyline's vertex 1.
++    rig.selection.replace([k(s.line), k(s.polyline)]);
++    final vertex = screenOf(rig.camera, 7130, 3060);
++    rig.tool.onPointerDown(pointerAt(rig.camera, vertex), rig.context);
++    expect(rig.tool.pressClass, PressClass.grip);
++    // A cmd+Z inside the slop reaches the shell: keys are the drag's only
++    // while dragging.
++    doc.commands.execute(RemoveEntityCommand(s.line));
++    await Future<void>.delayed(Duration.zero);
++    expect(rig.grips.grips.any((r) => r.key == k(s.line)), isFalse,
++        reason: 'the grip cache rebuilt without the line');
++    final away = vertex + const Offset(30, 10);
++    rig.tool.onPointerMove(pointerAt(rig.camera, away), rig.context);
++    expect(rig.tool.phase, ToolPhase.pressed,
++        reason: 'the pressed grip is gone: the press stays a click');
++    release(rig, away);
++    expect(doc.commands.undoDepth, 1, reason: 'the removal only');
++
++    // The rotation grip over a selection that empties: no box, no rotate.
++    rig.selection.replace([k(s.circle)]);
++    final rotation =
++        rotationGripOf(rig.grips.box!, rig.camera.value.worldToScreenMatrix)
++            .centre;
++    rig.tool.onPointerDown(pointerAt(rig.camera, rotation), rig.context);
++    expect(rig.tool.pressClass, PressClass.rotationGrip);
++    doc.commands.execute(RemoveEntityCommand(s.circle));
++    await Future<void>.delayed(Duration.zero);
++    expect(rig.grips.box, isNull);
++    rig.tool.onPointerMove(
++        pointerAt(rig.camera, rotation + const Offset(-30, 20)), rig.context);
++    expect(rig.tool.phase, ToolPhase.pressed);
++    release(rig, rotation + const Offset(-30, 20));
++    expect(doc.commands.undoDepth, 2, reason: 'the two removals only');
++  });
++
+   testWidgets('a pointer cancel leaves the document byte-identical (M-03ao)',
+       (tester) async {
+     final measurer = FlutterTextMeasurer();
+     addTearDown(measurer.clear);
+     final s = gripScene(measurer: measurer);
+     final rig = gripRig(s.document,
+         camera:
+             gripCamera(viewport: kGripLayerSize, centre: Vector2(7070, 3040)));
+     await pumpGripLayer(tester, rig);
+     rig.selection.replace([k(s.line)]);
