@@ -186,8 +186,16 @@ class _InteractionLayerState extends State<InteractionLayer> {
         focusNode: _focus,
         autofocus: true,
         onKeyEvent: (_, event) => _tool.onKey(event, _ctx),
-        child: MouseRegion(
-          onExit: _onExit,
+        // Spec 03 D5: a cursor is a widget parameter, so it needs a
+        // rebuild. Only the MouseRegion is rebuilt, and only when the tool
+        // (or a swap) notifies; the Listener subtree is the cached child.
+        child: ListenableBuilder(
+          listenable: widget.tools,
+          builder: (context, child) => MouseRegion(
+            cursor: _tool.cursor,
+            onExit: _onExit,
+            child: child,
+          ),
           child: Listener(
             behavior: HitTestBehavior.opaque,
             onPointerDown: _onDown,
