@@ -213,6 +213,22 @@ void main() {
     expect(target.tree[node.handle]!.transform.isIdentity, isTrue);
   });
 
+  test('TransformNodeCommand refuses the root before writing anything', () {
+    // World is root space: the canvas, the index and the reference walk all
+    // descend from the identity and never read the root's transform, while
+    // OutlineCache and TileCache do. Writing it would split them.
+    final doc = DraftDocument.empty();
+    final root = doc.rootHandle;
+
+    expect(
+      () => doc.commands.execute(
+          TransformNodeCommand(root, Transform2.translation(240, 190))),
+      throwsStateError,
+    );
+    expect(doc.tree[root]!.transform.isIdentity, isTrue);
+    expect(doc.commands.undoDepth, 0);
+  });
+
   test('AddNodeCommand and RemoveNodeCommand need the structure capability',
       () {
     final target = TestTarget();

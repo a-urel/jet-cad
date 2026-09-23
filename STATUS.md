@@ -3,7 +3,12 @@
 **Last updated:** 2026-09-23 — **Plan 04's look is discharged: the human
 judged it LGTM on macOS, in Chrome and in Firefox, no findings, so its exit
 gate is 16 of 16 and nothing of Plan 04 is owed.** Next per the roadmap is
-sub-project 03 (grips and transform). Recorded 2026-09-22: **Plan 04 (page, grid and rulers) is MERGED
+sub-project 03 (grips and transform). **The root's transform is pinned to
+the identity** on `fix/root-transform-identity` (not yet merged — the merge
+is the human's decision): `TransformNodeCommand` refuses the root and
+`validate()` reports a loaded root that is not the identity, closing the
+03 spec review's row 1 debt; 5 mutants fired, 5 killed. See
+[the note](docs/superpowers/notes/2026-09-23-root-transform-pinned.md). Recorded 2026-09-22: **Plan 04 (page, grid and rulers) is MERGED
 into `main` at `e4e3f80`**, `--no-ff` on the human's decision, with the four
 gate lines re-run green on the merged tree (engine 862; render layer 797 +
 1 skip + the five standing text goldens; harness 82; app 21 + both builds);

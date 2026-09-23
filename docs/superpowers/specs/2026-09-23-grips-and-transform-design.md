@@ -95,8 +95,10 @@ groups and instances through `tree.accumulatedTransform`, which includes the
 root's transform. The canvas, the index and the oracle do not. Nothing
 writes the root's transform today, so the two readings agree only because
 it is the identity. This spec treats **world as root space** throughout and
-never writes the root's transform. The disagreement is recorded as debt
-(Open questions).
+never writes the root's transform. The disagreement is now closed by pinning
+the root to the identity: `TransformNodeCommand` refuses the root handle
+before it writes, and `validate()` reports a loaded root that is not the
+identity as `tree.root_transform_not_identity` (Open questions).
 
 ---
 
@@ -815,12 +817,17 @@ The camera is set after the first `pump`.
 
 ## Open questions
 
-- **The root's transform (debt, pre-existing).** `OutlineCache` and
-  `TileCache` apply it to root-level nodes, while the canvas, the index and
-  the oracle do not. It is harmless while nothing writes it. The fix is to
-  pin it to the identity, with a `validate` check or by refusing
-  `TransformNodeCommand` on the root, or to make every walk apply it. That
-  is its own task, not this plan's.
+- **The root's transform (debt, pre-existing) — resolved, pinned to the
+  identity.** `OutlineCache` and `TileCache` apply it to root-level nodes,
+  while the canvas, the index and the oracle do not. Fixed on its own
+  branch, `fix/root-transform-identity`, not by this plan: the rule is that
+  the root's transform is the identity, enforced at both places a node
+  transform can be written — `TransformNodeCommand` throws `StateError` on
+  the root handle before any write, and `validate()` reports a loaded
+  document whose root is not a bit-exact identity
+  (`ValidationCodes.rootTransformNotIdentity`). Making every walk apply it
+  was rejected: it widens the hot path for a transform nothing needs. See
+  [the note](../notes/2026-09-23-root-transform-pinned.md).
 - **F3 in a browser.** Chrome binds F3 to find-next. If the framework's
   handled key does not suppress it, the look picks another key.
 - **Grips as widgets.** Painted grips give up screen-reader and keyboard

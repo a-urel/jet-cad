@@ -12,6 +12,8 @@ import 'tree.dart';
 /// compiler checks, instead of a string it does not.
 abstract final class ValidationCodes {
   static const String rootMissing = 'tree.root_missing';
+  static const String rootTransformNotIdentity =
+      'tree.root_transform_not_identity';
   static const String parentChildMismatch = 'tree.parent_child_mismatch';
   static const String danglingChild = 'tree.dangling_child';
   static const String leafInChildren = 'tree.leaf_in_children';
@@ -48,10 +50,23 @@ extension DocumentValidation on DraftDocument {
           handles: handles,
         );
 
-    // 1. The root must resolve.
-    if (tree[tree.root] == null) {
+    // 1. The root must resolve, and its transform must be the identity.
+    //    World is root space: the canvas, the index and the reference walk
+    //    descend from the identity and never read the root's transform, so a
+    //    non-identity one would place root-level nodes differently in the
+    //    caches that do read it. TransformNodeCommand refuses to write it; a
+    //    file is the only way in. Exact, not under Tolerance: this compares a
+    //    stored value.
+    final rootNode = tree[tree.root];
+    if (rootNode == null) {
       out.add(error(ValidationCodes.rootMissing,
           'The tree root ${tree.root.value} names no node.', [tree.root]));
+    } else if (!rootNode.transform.isIdentity) {
+      out.add(error(
+          ValidationCodes.rootTransformNotIdentity,
+          'The tree root ${tree.root.value} carries transform '
+          '${rootNode.transform.toJson()}; the root must be the identity.',
+          [tree.root]));
     }
 
     // Containers are nodes plus definitions; an entity's owner may be either,

@@ -451,7 +451,19 @@ void main() {
       )),
       throwsA(isA<PermissionDeniedError>()),
     );
+    // A child group, not the root: the root's transform is pinned to the
+    // identity. Added on the tree directly because `runtime` denies the
+    // structure capability AddNodeCommand needs.
+    final group = GroupNode(
+      handle: doc.handleSeed.next(),
+      parent: doc.rootHandle,
+      transform: Transform2.identity(),
+      children: const [],
+    );
+    doc.tree.addNode(group);
     doc.commands.execute(
-        TransformNodeCommand(doc.rootHandle, Transform2.translation(1, 1)));
+        TransformNodeCommand(group.handle, Transform2.translation(1, 1)));
+    expect(doc.tree[group.handle]!.transform.transformPoint(Vector2.zero()),
+        Vector2(1, 1));
   });
 }

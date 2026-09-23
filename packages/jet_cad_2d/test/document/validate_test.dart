@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -110,6 +111,40 @@ void main() {
     ]);
     expect(result[0].handles, [const Handle(999)]);
     expect(result[1].handles, [oldRoot, Handle.none]);
+  });
+
+  test('reports a loaded root whose transform is not the identity', () {
+    // A file is the one way a non-identity root gets in: the command refuses
+    // it. Each transform is non-identity in a different way — a translation,
+    // a pure linear part, and a sub-tolerance offset that a tolerance-based
+    // check would wave through as identity.
+    for (final stored in [
+      [1.0, 0.0, 0.0, 1.0, 240.0, 190.0],
+      [0.0, 1.0, -1.0, 0.0, 0.0, 0.0],
+      [1.0, 0.0, 0.0, 1.0, 0.0, 1e-12],
+    ]) {
+      final json = DraftDocumentCodec.encode(DraftDocument.empty());
+      final rootHex = json['root'];
+      for (final node in json['nodes']! as List) {
+        final map = node as Map<String, Object?>;
+        if (map['handle'] == rootHex) map['transform'] = stored;
+      }
+      final doc = DraftDocumentCodec.decodeString(jsonEncode(json));
+
+      final result = doc.validate();
+      expect([
+        for (final d in result) d.code
+      ], [
+        ValidationCodes.rootTransformNotIdentity
+      ], reason: 'root transform $stored');
+      expect(result.single.handles, [doc.rootHandle]);
+    }
+  });
+
+  test('an identity root survives save and load and validates clean', () {
+    final doc = DraftDocumentCodec.decodeString(
+        DraftDocumentCodec.encodeToString(DraftDocument.empty()));
+    expect(doc.validate(), isEmpty);
   });
 
   test('reports an entity whose owner names no container', () {
