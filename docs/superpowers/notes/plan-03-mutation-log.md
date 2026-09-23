@@ -11,13 +11,16 @@ construction).**
   does not count against the "only M-03e survives" rule.
 - The plan's 23 (M-03ab … M-03ax, Ruling 03-17): 23 killed.
 - The controller's 10 (review findings, M-03ay … M-03bg, including
-  M-03bf′): 10 killed, each behind a new test landed in its own commit.
+  M-03bf′): 10 killed. Seven new tests landed for them, each in its own
+  commit (M-03bf and M-03bf′ share one). M-03bc and M-03bd were already
+  guarded, by the extended T14 and by the M-03at test, and needed none.
 
-26 + 1 + 23 + 10 = 61 mutants killed by name, but M-03ai counts once for
-its main edit and once more for the equivalent variant, and M-03bf/M-03bf′
-share one heading for two edits — the arithmetic above (60 killed, 1
-survived, 1 equivalent = 62 total) is the one that reconciles against
-every heading in this file.
+26 + 1 + 23 + 10 = 60 mutants killed. Add M-03e, the designed survivor, and
+M-03ai's equivalent ordinal-clause variant, and 62 were exercised. M-03ai
+counts once among the plan's 23 for its main edit (killed) and once more for
+the equivalent variant. M-03bf/M-03bf′ share one heading for two edits. With
+those two readings, 60 killed + 1 survived + 1 equivalent = 62 reconciles
+against every heading in this file.
 
 `git status --short` at the end of this task lists only this log and the
 seven new test files (Tasks 1, 3, 4 ×2, 7, 8 ×2) touched for the

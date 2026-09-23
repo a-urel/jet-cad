@@ -1,9 +1,30 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-23 — **Plan 04's look is discharged: the human
-judged it LGTM on macOS, in Chrome and in Firefox, no findings, so its exit
-gate is 16 of 16 and nothing of Plan 04 is owed.** Next per the roadmap is
-sub-project 03 (grips and transform). Recorded 2026-09-22: **Plan 04 (page, grid and rulers) is MERGED
+**Last updated:** 2026-09-23. **Plan 03 (grips and transform) is executed
+on `plan-03/grips-and-transform`, not merged. The merge is the human's
+decision.**
+- **What it ran:** twelve tasks, cut from `main` at `e376ced`. Tasks 1–11
+  are at `e376ced..7879e36`, and Task 12 (the gate lines, the results note,
+  the spec amendments, this file and the roadmap) is on top.
+- **What comes next:** the final whole-branch review and its fix wave. The
+  ledger is archived after them, as the branch's last commit before the
+  merge (Ruling T12-a).
+- **The gate lines**, all green on the final tree: engine **890**; render
+  layer **851** + 1 skip + the five standing text goldens; harness **82**;
+  app **26**; both release builds `✓ Built`.
+- **Mutants:** **62 exercised: 60 killed, 1 designed survivor (M-03e), 1
+  equivalent (M-03ai's ordinal clause).**
+- **The differential:** seed `0x5EED0003`, 200 trials, worst residual
+  4.66e-10.
+- **Exit gate: 15 of 16.** Criterion 16, the human's look on macOS, in
+  Chrome and in Firefox from `build/web`, is **OWED: not looked at; the
+  human looks after this branch is presented.**
+
+See [Plan 03](#plan-03--grips-and-transform-executed-on-plan-03grips-and-transform-not-merged)
+and [Resume here](#resume-here). Earlier the same day: **Plan 04's look is
+discharged: the human judged it LGTM on macOS, in Chrome and in Firefox, no
+findings, so its exit gate is 16 of 16 and nothing of Plan 04 is owed.**
+Recorded 2026-09-22: **Plan 04 (page, grid and rulers) is MERGED
 into `main` at `e4e3f80`**, `--no-ff` on the human's decision, with the four
 gate lines re-run green on the merged tree (engine 862; render layer 797 +
 1 skip + the five standing text goldens; harness 82; app 21 + both builds);
@@ -102,6 +123,155 @@ method and both reproduction commands.
 Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
 Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
 Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
+
+---
+
+## Plan 03 — grips and transform (executed on `plan-03/grips-and-transform`, not merged)
+
+**Plan 03 lets the user change the drawing.** A selected object shows grips,
+and five drags work:
+- dragging a grip stretches a line end or a polyline vertex (a closed room's
+  shared corner moves as one);
+- it also sets a circle's radius, or an arc's end or radius;
+- dragging a selected body or a centre grip moves the whole selection;
+- a rotation grip above the selection box turns it;
+- shift gives ortho, or 15° steps while rotating.
+
+Each drag previews live in the overlay. It object-snaps, with markers, and
+falls back to the grid. Release dispatches exactly one `CompoundCommand`
+labelled `Move`, `Rotate` or `Stretch`, so one drag is one undo step.
+Escape, pointer cancel, tool activation and the release revalidation each
+leave the document byte-identical. F3 toggles object snap, and the top bar
+shows it (`osnap-text`).
+
+**Where it stands.** Twelve tasks on `plan-03/grips-and-transform`, cut from
+`main` at `e376ced`:
+- Tasks 1–11 are at `e376ced..7879e36`;
+- Task 12 (the gate lines, the results note, the spec amendments, this
+  section and the roadmap) is on top.
+
+**Executed, not merged. The merge is the human's decision.** The final
+whole-branch review and its fix wave come first. The ledger is then archived
+to `docs/superpowers/ledgers/2026-09-23-grips-and-transform/` as the
+branch's last commit before the merge (Ruling T12-a).
+
+**Documents:**
+- Spec: [2026-09-23-grips-and-transform-design.md](docs/superpowers/specs/2026-09-23-grips-and-transform-design.md),
+  revision 2, amended at execution 2026-09-23 in eight places: D2, D3, D5,
+  D6, D7, D8, invariant 5 and Testing. None rewrites the original text.
+- Plan: [2026-09-23-grips-and-transform.md](docs/superpowers/plans/2026-09-23-grips-and-transform.md).
+- Results: [2026-09-23-plan-03-results.md](docs/superpowers/notes/2026-09-23-plan-03-results.md).
+- Mutation log: [plan-03-mutation-log.md](docs/superpowers/notes/plan-03-mutation-log.md).
+  **62 exercised: 60 killed, 1 designed survivor (M-03e), 1 equivalent
+  (M-03ai's ordinal clause).**
+
+**Delivered:**
+- **In `jet_cad_2d`:**
+  - `document/grips.dart`: `Grip`, `leafGrips`, `isClosedPolyline`,
+    `reshapeLeaf`, `rigidTransformLeaf` and `isRigidTransform`;
+  - `index/drag_snap.dart`: `resolveDragPoint`, `DragPoint` and
+    `dragGridStepMm`.
+- **In `jet_cad_2d_flutter`:**
+  - `OutlineCache.worldBoundsOf`;
+  - `GripCache`, `GripDrag`, `SnapSettings` and `drawSnapMarker`;
+  - `Tool.cursor`, `selectionPreviewTransform` and `paintWorldOverlay`;
+  - `ToolContext.page`, `snap` and `grips`;
+  - `SelectTool`'s press classes, drag kinds, camera listener and key rule;
+  - `InteractionLayer`'s cursor mirror;
+  - the overlay's grips, rotation grip, preview, guide and snap markers.
+- **In `apps/floor_planner`:** the shell owns `OutlineCache`, `GripCache`
+  and `SnapSettings`, binds F3, shows `osnap-text`, and has a
+  two-parameter test seam.
+
+`DraftCanvas`, `DraftPainter`, `SpatialIndex`, `TileCache`,
+`CameraGestureDetector` and the harness are untouched.
+
+**Task list**, each task's head commit:
+
+| task | what | head |
+|---|---|---|
+| 1 | engine: `leafGrips`, `isClosedPolyline`, `reshapeLeaf` | `abd0d28` |
+| 2 | engine: `rigidTransformLeaf` and its seeded differential | `2612233` |
+| 3 | engine: `resolveDragPoint`: object snap, ortho, then the grid | `7258df6` |
+| 4 | `worldBoundsOf` and `GripCache`: grips, box, cap, hit test | `70bdde1` |
+| 5 | `Tool` cursor and preview hooks; `ToolContext` page, snap, grips | `8ea39b3` |
+| 6 | `GripDrag`: captures, `T`, one `CompoundCommand`, revalidation | `2f2bab3` |
+| 7 | `SelectTool` drags: press classes, move, rotate, reshape (`433fe9c`, + fix round `b7de33a`: the listener-leak and centre-grip kills, the layer lifecycle tests, the stale press grip found again at the slop) | `b7de33a` |
+| 8 | overlay: grips, rotation grip, preview, snap markers | `f6810fb` |
+| 9 | app: the caches in the shell, F3, `osnap-text`, the test seam | `32fa2cd` |
+| 10 | the mutation sweep: seven review-driven tests `301d613..7dcb36a`, then the log | `061fd85` |
+| 11 | the allocation gates and the greps | `7879e36` |
+| 12 | gate lines, results note, spec amendments, STATUS, roadmap | this commit |
+
+**Rulings a reader must know.**
+- **World is root space.** The drag never reads or writes the root's
+  transform. A root leaf's coordinates and a root-level node's `transform`
+  take `T` directly, and a group or an instance composes
+  `T.multiply(node.transform)` (M-03i).
+- **The capability check runs at the slop crossing** (Ruling 03-6). A
+  refused class 3b press leaves the selection alone until the release's
+  click.
+- **A centre grip moves the whole selection**, from the grip's exact world
+  point (Ruling 03-9).
+- **The grip buffers are exact-size** (Ruling 03-10), and M-03bf′ holds that
+  in place.
+- **The cursor is a `ValueNotifier` mirror that goes quiet while the layer
+  leaves the tree.** Task 7's fix: a `ListenableBuilder` on the
+  `ToolController` asserted when the layer was removed mid-drag.
+- **The press-time `GripRef` is found again at the slop.** An undo inside
+  the slop used to leave a stale index that named another object's grip.
+- **Commit trailers name the model that actually wrote the commit**
+  (Ruling T2-a).
+
+The full list, 03-1…03-21 and every controller ruling, each with its cost
+if wrong, is in the results note.
+
+### What Plan 03 measured
+
+| quantity | value |
+|---|---|
+| `packages/jet_cad_2d` | **890** pass (`00:03 +890: All tests passed!`, exit 0), analyze and format clean. 862 at the branch point, +26 planned, +2 from Task 10's addendum (M-03ay, M-03az) |
+| `packages/jet_cad_2d_flutter` | **851** pass, 1 skip, and only the five pre-existing `text_ladder_golden_test.dart` failures (`00:12 +851 ~1 -5: Some tests failed.`, exit 1), analyze and format clean. 797 at the branch point, +46 planned, +3 from Task 7's fix round, +5 from Task 10's addendum |
+| `apps/dev_harness_2d` | **82** (`00:20 +82: All tests passed!`, exit 0), unchanged, because the harness is untouched; analyze and format clean |
+| `apps/floor_planner` | **26** (`00:01 +26: All tests passed!`, exit 0). 21 at the branch point, +4 planned, +1 (Task 9's shell mid-drag removal test). `flutter build macos --release` and `flutter build web --release` both `✓ Built` |
+| mutations | **62 exercised: 60 killed, 1 designed survivor (M-03e, its 1-ulp companion green), 1 equivalent (M-03ai's ordinal clause, by construction)**. The spec's 27, `ah′`, the plan's 23 (Ruling 03-17) and the controller's 10 from the reviews |
+| the differential (criterion 3) | seed **`0x5EED0003`**, **200 trials**; worst residual per kind: point 0.0, line 2.91e-10, polyline, circle, arc and text 4.66e-10, against a bound of ~1.1e-7 (Ruling 03-16) |
+| the two allocation invariants | `query_allocation_test.dart` (5) and `paint_allocation_test.dart` (3) are green and unedited, and the frame-path files are untouched (Task 11) |
+| the look | **OWED: not looked at**. Thirteen items per platform (macOS, Chrome, Firefox from `build/web`), itemised in the results note |
+
+**Exit gate: 15 of 16.** Criteria 1–15 all PASS, each with its witness in
+the results note. Criterion 16 (a human looks, on macOS, in Chrome and in
+Firefox from `build/web`) is **OWED: not looked at; the human looks after
+this branch is presented**. No device run and no visual judgement was
+simulated to fill it in.
+
+The look covers thirteen items:
+- grips on a wall, a room, an arc and the door swing;
+- a wall end stretched onto another's end, with the marker;
+- a three-object move with grid snap;
+- the rotation grip, with a 15° shift rotate;
+- Escape mid-drag;
+- one undo per drag (cmd+Z on macOS, ctrl+Z in a browser);
+- F3 and `osnap-text`, and **whether the browser's find-next also fires**;
+- the four cursors;
+- a self-intersecting room corner;
+- whether snapping to the dragged object's ghost feels sticky;
+- a drag past the canvas edge;
+- a fixed `gridStepMm`, which is **not reachable from the app**, so it is
+  recorded and not looked at;
+- grips and drags with 04's page grid visible underneath.
+
+**Debt, in one line each:**
+- the root-transform disagreement (spec, Open questions);
+- grips as widgets (accessibility, for 12);
+- snapping to the dragged object's ghost;
+- move exactness is within one rounding;
+- the unfillable room's preview;
+- F3 in a browser;
+- `PageComponent.copyWith(gridStepMm: <int>)` throws, a pre-existing Plan 04
+  bug offered as a separate fix task;
+- the deferred minors of Tasks 1, 2, 4, 6, 7, 8 and 9, listed by task in
+  the results note.
 
 ---
 
@@ -1313,7 +1483,43 @@ page fit, the second at the real size (Ruling 04-16). See
 [Plan 04](#plan-04--page-grid-and-rulers-merged-into-main-at-e4e3f80)
 and
 [2026-09-22-plan-04-results.md](docs/superpowers/notes/2026-09-22-plan-04-results.md).
-The other ten sub-projects have not started.
+
+**Sub-project 03 (grips and transform) is executed on
+`plan-03/grips-and-transform`, not merged. The merge is the human's
+decision.**
+- **Documents:** its spec,
+  [2026-09-23-grips-and-transform-design.md](docs/superpowers/specs/2026-09-23-grips-and-transform-design.md),
+  is revision 2. It was reviewed by Codex and an Opus subagent and amended
+  at execution in eight places, none rewriting the original text. Its plan,
+  [2026-09-23-grips-and-transform.md](docs/superpowers/plans/2026-09-23-grips-and-transform.md),
+  was written the same day, 2026-09-23.
+- **Where it stands:** all twelve tasks ran on the branch, cut from `main`
+  at `e376ced`: Tasks 1–11 at `e376ced..7879e36`, and Task 12's results
+  note on top.
+- **What resumes here:**
+  1. the final whole-branch review;
+  2. its fix wave;
+  3. the ledger archive, `.superpowers/sdd/2026-09-23-grips-and-transform/`
+     → `docs/superpowers/ledgers/2026-09-23-grips-and-transform/`, as the
+     branch's last commit (Ruling T12-a);
+  4. the human's merge decision. If the auto-mode classifier refuses the
+     merge, try once from the main checkout, then hand the human the exact
+     command.
+- **The gate lines** are green on the final tree: engine 890; render layer
+  851 + 1 skip + the five standing text goldens; harness 82; app 26; both
+  builds.
+- **Exit gate: 15 of 16.** Criterion 16, a human's look on macOS, in Chrome
+  and in Firefox from `build/web`, is **OWED: not looked at; the human looks
+  after this branch is presented**. It has thirteen items per platform,
+  itemised in
+  [2026-09-23-plan-03-results.md](docs/superpowers/notes/2026-09-23-plan-03-results.md).
+  The one with a consequence: if a browser's find-next also fires on F3,
+  the finding picks another key.
+- **Out of scope, offered to the human as its own fix:** the pre-existing
+  Plan 04 bug `PageComponent.copyWith(gridStepMm: <int>)` throws.
+
+See [Plan 03](#plan-03--grips-and-transform-executed-on-plan-03grips-and-transform-not-merged).
+The other nine sub-projects have not started.
 
 **The web coupling is resolved and it went the expensive way.** This section
 used to say "Plan G matters only if the product targets web". **The human
