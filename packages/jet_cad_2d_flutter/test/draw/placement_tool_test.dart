@@ -197,4 +197,26 @@ void main() {
             .multiply(rig.camera.value.worldToScreenMatrix));
     expect(notified, 0, reason: 'the camera listener is detached');
   });
+
+  test(
+      'B11 a returning tool paints no stale snap marker until the next '
+      'hover (Ruling F-3)', () {
+    final s = drawScene();
+    final rig = drawRig(s.document, LineTool());
+    final at = screenOf(rig.camera, kAnchorX, kAnchorY);
+    hoverAt(rig, at + const Offset(2, 2));
+    expect(rig.tool.hoverVisible, isTrue);
+
+    rig.tools.activate(SelectTool());
+    rig.tools.activate(rig.tool);
+
+    final stale = SpyCanvas();
+    rig.tool.paintOverlay(stale, rig.camera.value, const Size(800, 600));
+    expect(stale.calls, isEmpty, reason: 'the old marker must not repaint');
+
+    hoverAt(rig, at + const Offset(2, 2));
+    final fresh = SpyCanvas();
+    rig.tool.paintOverlay(fresh, rig.camera.value, const Size(800, 600));
+    expect(fresh.named('drawRect'), hasLength(1));
+  });
 }

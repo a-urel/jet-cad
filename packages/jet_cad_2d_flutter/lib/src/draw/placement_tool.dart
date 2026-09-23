@@ -191,6 +191,9 @@ abstract class PlacementTool extends Tool {
   @override
   void cancel(ToolContext ctx) {
     clearShape();
+    // Ruling F-3: a tool that returns after a switch away paints no stale
+    // snap marker; the next pointer move resolves a fresh one.
+    _hoverVisible = false;
     _syncCamera(ctx);
     notifyListeners();
   }
