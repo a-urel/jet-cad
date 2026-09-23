@@ -256,6 +256,50 @@ void main() {
   });
 
   test(
+      "an arc reshape preview's radius grip is rebased by origin too "
+      '(M-03bg)', () {
+    final s = gripScene();
+    final rig = gripRig(s.document);
+    rig.selection.replace([k(s.arcPos)]);
+    final radiusGrip =
+        leafGrips(EntityKind.arc, payloadOf(rig.document, s.arcPos))[3];
+    final press = screenOf(rig.camera, radiusGrip.x, radiusGrip.y);
+    final to = press + const Offset(22, -6);
+    pressAndMove(rig, press, to);
+    expect(rig.tool.dragKind, DragKind.reshape);
+    // No snap and no ortho are active (a plain move, shift not held), so
+    // the resolved target is the raw world point under `to`.
+    final target = rig.camera.value.screenToWorld(Vector2(to.dx, to.dy));
+    final centre = Vector2(7050, 3200); // arcPos's stored centre (Ruling)
+    final newRadius = (target - centre).length;
+    const start = 0.3; // arcPos's stored start angle, unchanged by radius
+
+    final spy = SpyCanvas();
+    overlayOf(rig).paint(spy, kView);
+    final origin = rebaseOriginFor(rig.camera.value.visibleWorld(kView));
+    final drawn = spy
+        .named('drawPath')
+        .where((c) => c.color?.toARGB32() == kPreviewColor.toARGB32())
+        .toList();
+    expect(drawn, hasLength(1));
+    final path = drawn.single.args[0] as Path;
+    // `Path.addArc`'s first point is exactly the arc's start point: an
+    // exact check of the origin subtraction, not an approximate one —
+    // `Path.getBounds()` answers the conic *control-point* bounds, which
+    // for a partial sweep lie outside the curve (see `outline_cache.dart`'s
+    // own note on this), so it cannot pin the centre to the tight tolerance
+    // an origin-drop bug — off by the origin's whole magnitude — needs.
+    final startPoint =
+        path.computeMetrics().single.getTangentForOffset(0)!.position;
+    final expected = Offset(
+      centre.x - origin.x + newRadius * math.cos(start),
+      centre.y - origin.y + newRadius * math.sin(start),
+    );
+    expect(startPoint.dx, closeTo(expected.dx, 1e-3));
+    expect(startPoint.dy, closeTo(expected.dy, 1e-3));
+  });
+
+  test(
       'a stretch draws its guide and the snap marker at the resolved '
       'target (spec D7, D9, M-03ar)', () {
     final s = gripScene();
