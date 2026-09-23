@@ -1,12 +1,36 @@
-import 'dart:ui' show Offset, Size;
-
+import 'package:flutter/gestures.dart' show kPrimaryButton;
+import 'package:flutter/widgets.dart'
+    show
+        Center,
+        CustomPaint,
+        Directionality,
+        Listenable,
+        Offset,
+        Positioned,
+        RepaintBoundary,
+        Size,
+        SizedBox,
+        Stack,
+        TextDirection;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart';
+import 'package:jet_cad_2d_flutter/src/draft_canvas.dart';
+import 'package:jet_cad_2d_flutter/src/grip_cache.dart';
+import 'package:jet_cad_2d_flutter/src/interaction_layer.dart';
+import 'package:jet_cad_2d_flutter/src/outline_cache.dart';
+import 'package:jet_cad_2d_flutter/src/page_notifier.dart';
+import 'package:jet_cad_2d_flutter/src/select_tool.dart';
+import 'package:jet_cad_2d_flutter/src/selection.dart';
+import 'package:jet_cad_2d_flutter/src/selection_overlay.dart';
+import 'package:jet_cad_2d_flutter/src/snap_settings.dart';
+import 'package:jet_cad_2d_flutter/src/tool.dart';
 import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'selection_fixture.dart';
+
+// ---- Task 4: the scene, the camera, the readers -------------------------
 
 /// The spec's standard 03 fixture (Testing).
 ///
@@ -91,3 +115,152 @@ GeometryPayload payloadOf(DraftDocument doc, Handle h) =>
 /// The codec's output: equal strings are a byte-identical document
 /// (invariant 2).
 String snapshot(DraftDocument doc) => DraftDocumentCodec.encodeToString(doc);
+
+// ---- Task 7: the rig, the pointer, the layer ----------------------------
+
+/// Everything a `SelectTool` grip test drives, wired in the shell's order:
+/// the selection controller, then the outline cache, then the grip cache
+/// (spec D6, Ruling 03-19). Object snap is off unless asked for, so a test
+/// that is not about snapping lands on the raw pointer.
+final class GripRig {
+  GripRig(this.document, {CameraController? camera, bool objectSnap = false})
+      : index = SpatialIndex(document),
+        selection = SelectionController(document),
+        camera = camera ?? gripCamera() {
+    outlines = OutlineCache(document, selection);
+    grips = GripCache(document, selection, outlines);
+    snap = SnapSettings(objectSnap: objectSnap);
+    page = PageNotifier(document);
+    tool = SelectTool();
+    context = ToolContext(
+        document: document,
+        index: index,
+        camera: this.camera,
+        selection: selection,
+        page: page,
+        snap: snap,
+        grips: grips);
+    tools = ToolController(initial: tool, context: context);
+  }
+
+  final DraftDocument document;
+  final SpatialIndex index;
+  final SelectionController selection;
+  final CameraController camera;
+  late final OutlineCache outlines;
+  late final GripCache grips;
+  late final SnapSettings snap;
+  late final PageNotifier page;
+  late final SelectTool tool;
+  late final ToolContext context;
+  late final ToolController tools;
+
+  void dispose() {
+    tools.dispose();
+    grips.dispose();
+    outlines.dispose();
+    page.dispose();
+    snap.dispose();
+    camera.dispose();
+    selection.dispose();
+    index.dispose();
+  }
+}
+
+GripRig gripRig(DraftDocument document,
+    {CameraController? camera, bool objectSnap = false}) {
+  final rig = GripRig(document, camera: camera, objectSnap: objectSnap);
+  addTearDown(rig.dispose);
+  return rig;
+}
+
+/// A pointer sample at [screen], resolved through [camera] exactly as
+/// `InteractionLayer` does it.
+ToolPointerEvent pointerAt(CameraController camera, Offset screen,
+        {int buttons = kPrimaryButton, bool shift = false, int pointer = 1}) =>
+    ToolPointerEvent(
+      screen: screen,
+      world: camera.value.screenToWorld(Vector2(screen.dx, screen.dy)),
+      pointer: pointer,
+      buttons: buttons,
+      shift: shift,
+      control: false,
+      meta: false,
+      alt: false,
+      pickRadiusWorld: kPickRadiusPixels / camera.value.scale,
+    );
+
+/// Press at [from], then one move to [to]: past the slop in one event.
+void pressAndMove(GripRig rig, Offset from, Offset to, {bool shift = false}) {
+  rig.tool
+      .onPointerDown(pointerAt(rig.camera, from, shift: shift), rig.context);
+  rig.tool.onPointerMove(pointerAt(rig.camera, to, shift: shift), rig.context);
+}
+
+void release(GripRig rig, Offset at, {bool shift = false}) =>
+    rig.tool.onPointerUp(
+        pointerAt(rig.camera, at, shift: shift, buttons: 0), rig.context);
+
+void click(GripRig rig, Offset at, {bool shift = false}) {
+  rig.tool.onPointerDown(pointerAt(rig.camera, at, shift: shift), rig.context);
+  release(rig, at, shift: shift);
+}
+
+/// The layer's box under test, centred in the 800 × 600 surface so a drag
+/// can leave it and stay on the surface (W2).
+const Size kGripLayerSize = Size(600, 450);
+
+/// Pumps an `InteractionLayer` over the canvas and the overlay, both driven
+/// by [rig].
+///
+/// Teardown order: build [rig] (which registers its dispose) **before**
+/// calling this. The empty pump registered here then runs first, while the
+/// rig is still live.
+Future<void> pumpGripLayer(WidgetTester tester, GripRig rig) async {
+  addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
+  await tester.pumpWidget(Directionality(
+    textDirection: TextDirection.ltr,
+    child: Center(
+      child: SizedBox(
+        width: kGripLayerSize.width,
+        height: kGripLayerSize.height,
+        child: InteractionLayer(
+          tools: rig.tools,
+          child: Stack(children: [
+            RepaintBoundary(
+              child: DraftCanvas(
+                  document: rig.document, index: rig.index, camera: rig.camera),
+            ),
+            Positioned.fill(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: SelectionOverlayPainter(
+                    selection: rig.selection,
+                    tools: rig.tools,
+                    camera: rig.camera,
+                    outlines: rig.outlines,
+                    repaint: Listenable.merge([
+                      rig.selection,
+                      rig.tools,
+                      rig.camera,
+                      rig.outlines,
+                      rig.grips,
+                    ]),
+                  ),
+                  size: Size.infinite,
+                ),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    ),
+  ));
+  await tester.pump();
+  expect(tester.getSize(find.byType(InteractionLayer)), kGripLayerSize,
+      reason: 'a zero-sized layer would receive no pointer events');
+}
+
+/// [local] in the layer's box, in the surface's global coordinates.
+Offset globalAt(WidgetTester tester, Offset local) =>
+    tester.getTopLeft(find.byType(InteractionLayer)) + local;

@@ -2,22 +2,35 @@ import 'dart:math' as math;
 import 'dart:ui' show Canvas, Offset, Paint, Path, PaintingStyle, Rect, Size;
 
 import 'package:flutter/services.dart'
-    show KeyDownEvent, KeyEvent, LogicalKeyboardKey;
+    show
+        KeyDownEvent,
+        KeyEvent,
+        KeyRepeatEvent,
+        LogicalKeyboardKey,
+        MouseCursor,
+        SystemMouseCursors;
 import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'grip_drag.dart';
 import 'selection.dart';
 import 'selection_style.dart';
 import 'tool.dart';
 import 'viewport_transform.dart';
 
 /// A press that moves less than this many screen pixels stays a click
-/// (M-02f); past it, a press that started on empty space becomes a band.
+/// (M-02f); past it, a press becomes the drag its class names (spec 03 D2).
 const double kBandSlopPixels = 4.0;
 
-/// Hover, click, shift-click and rubber-band selection (spec D1, D2, D7,
-/// D8), plus Escape and Delete/Backspace (spec D3, D10).
+/// What a press landed on (spec 03 D2). The first class that hits wins.
+enum PressClass { rotationGrip, grip, selectedBody, unselectedBody, empty }
+
+/// Hover, click, shift-click and rubber-band selection (spec 02 D1, D2, D7,
+/// D8), Escape and Delete/Backspace (02 D3, D10) — and, since 03, grips:
+/// - press classes;
+/// - move, rotate and reshape drags with object and grid snap;
+/// - one command on release (spec 03 D2, D4, D5).
 class SelectTool extends Tool {
   SelectTool();
 
@@ -29,21 +42,54 @@ class SelectTool extends Tool {
 
   final HitPath _hit = HitPath();
   Offset _start = Offset.zero;
+  final Vector2 _pressWorld = Vector2.zero();
+  bool _pressShift = false;
+  PressClass _class = PressClass.empty;
   SelectionKey? _downKey;
-  bool _downHit = false;
+  int _pressGrip = -1;
+
+  /// Set when a drag was refused at the slop (Ruling 03-6): the press stays
+  /// a click, and later moves do nothing.
+  bool _clickOnly = false;
   Offset _end = Offset.zero;
   BandMode? _bandMode;
   int _pointer = -1;
 
+  DragKind? _dragKind;
+  GripDrag? _drag;
+  ToolContext? _dragCtx;
+  Offset _lastScreen = Offset.zero;
+  bool _lastShift = false;
+  final DragPoint _dragPoint = DragPoint();
+  final SnapResult _snapScratch = SnapResult();
+  MouseCursor _cursor = MouseCursor.defer;
+
+  /// What the press landed on; null while idle.
+  PressClass? get pressClass => _phase == ToolPhase.idle ? null : _class;
+
+  /// The live drag's kind; null unless dragging.
+  DragKind? get dragKind => _phase == ToolPhase.dragging ? _dragKind : null;
+
   /// Non-null only while a band drag is in progress, for the overlay.
-  BandMode? get bandMode => _phase == ToolPhase.dragging ? _bandMode : null;
+  BandMode? get bandMode => dragKind == DragKind.band ? _bandMode : null;
 
   /// The band rectangle in screen space, for the overlay test.
   Rect? get bandScreen =>
-      _phase == ToolPhase.dragging ? Rect.fromPoints(_start, _end) : null;
+      dragKind == DragKind.band ? Rect.fromPoints(_start, _end) : null;
 
   /// The band's drag-start corner, for the overlay.
-  Offset? get bandStart => _phase == ToolPhase.dragging ? _start : null;
+  Offset? get bandStart => dragKind == DragKind.band ? _start : null;
+
+  @override
+  MouseCursor get cursor => _cursor;
+
+  @override
+  Transform2? get selectionPreviewTransform {
+    final kind = dragKind;
+    return kind == DragKind.move || kind == DragKind.rotate
+        ? _drag?.transform
+        : null;
+  }
 
   SelectionKey? _pick(ToolPointerEvent e, ToolContext ctx) {
     if (!ctx.index.pickInto(
@@ -59,9 +105,35 @@ class SelectTool extends Tool {
     _phase = ToolPhase.pressed;
     _pointer = e.pointer;
     _start = e.screen;
-    _downKey = _pick(e, ctx);
-    _downHit = _downKey != null;
+    _pressWorld.setFrom(e.world);
+    _pressShift = e.shift;
+    _class = _classify(e, ctx);
     notifyListeners();
+  }
+
+  /// Spec D2: the rotation grip, then a grip, then the single pick
+  /// (selected or not), then empty space.
+  PressClass _classify(ToolPointerEvent e, ToolContext ctx) {
+    _downKey = null;
+    _pressGrip = -1;
+    final grips = ctx.grips;
+    if (grips != null) {
+      final m = ctx.camera.value.worldToScreenMatrix;
+      if (grips.hitsRotationGrip(e.screen, m)) return PressClass.rotationGrip;
+      final i = grips.hitTest(e.screen, m);
+      if (i >= 0) {
+        _pressGrip = i;
+        return PressClass.grip;
+      }
+    }
+    final key = _pick(e, ctx);
+    _downKey = key;
+    if (key == null) return PressClass.empty;
+    // The single pick decides: an unselected object drawn above a selected
+    // one wins the press, exactly as it wins a click in 02.
+    return ctx.selection.contains(key)
+        ? PressClass.selectedBody
+        : PressClass.unselectedBody;
   }
 
   @override
@@ -69,22 +141,190 @@ class SelectTool extends Tool {
     switch (_phase) {
       case ToolPhase.idle:
         if (e.buttons != 0) return;
-        ctx.selection.setHover(_pick(e, ctx));
+        _hoverAt(e, ctx);
       case ToolPhase.pressed:
-        if (e.pointer != _pointer) return;
+        if (e.pointer != _pointer || _clickOnly) return;
         if ((e.screen - _start).distance < kBandSlopPixels) return;
-        if (_downHit) return;
+        _beginDrag(e, ctx);
+      case ToolPhase.dragging:
+        if (e.pointer != _pointer) return;
+        if (_dragKind == DragKind.band) {
+          _end = e.screen;
+          _bandMode =
+              _end.dx >= _start.dx ? BandMode.window : BandMode.crossing;
+        } else {
+          _follow(e, ctx);
+        }
+        notifyListeners();
+    }
+  }
+
+  /// 02's object hover, plus the hot grip and the cursor (spec 03 D5).
+  /// Notifies only when the cursor or the hot grip changed.
+  void _hoverAt(ToolPointerEvent e, ToolContext ctx) {
+    final key = _pick(e, ctx);
+    ctx.selection.setHover(key);
+    var cursor = MouseCursor.defer;
+    var hot = -1;
+    final grips = ctx.grips;
+    if (grips != null) {
+      final m = ctx.camera.value.worldToScreenMatrix;
+      if (grips.hitsRotationGrip(e.screen, m)) {
+        cursor = SystemMouseCursors.grab;
+      } else {
+        hot = grips.hitTest(e.screen, m);
+        if (hot >= 0) cursor = SystemMouseCursors.precise;
+      }
+    }
+    if (cursor == MouseCursor.defer &&
+        key != null &&
+        ctx.selection.contains(key)) {
+      cursor = SystemMouseCursors.move;
+    }
+    final hotChanged = grips != null && grips.hot != hot;
+    if (grips != null) grips.hot = hot;
+    if (cursor == _cursor && !hotChanged) return;
+    _cursor = cursor;
+    notifyListeners();
+  }
+
+  /// Spec D2, past the slop. A drag whose capability is refused never
+  /// starts; the press stays a click (Ruling 03-6).
+  void _beginDrag(ToolPointerEvent e, ToolContext ctx) {
+    switch (_class) {
+      case PressClass.empty:
         _phase = ToolPhase.dragging;
+        _dragKind = DragKind.band;
         ctx.selection.setHover(null);
         _end = e.screen;
         _bandMode = _end.dx >= _start.dx ? BandMode.window : BandMode.crossing;
         notifyListeners();
-      case ToolPhase.dragging:
-        if (e.pointer != _pointer) return;
-        _end = e.screen;
-        _bandMode = _end.dx >= _start.dx ? BandMode.window : BandMode.crossing;
-        notifyListeners();
+      case PressClass.selectedBody:
+        final drag = GripDrag.move(ctx.document, ctx.selection.keys);
+        if (!_permitted(drag, ctx)) {
+          _clickOnly = true;
+          return;
+        }
+        _moveBase(ctx, drag!);
+        _enter(drag, e, ctx);
+      case PressClass.unselectedBody:
+        final key = _downKey!;
+        final next = _pressShift
+            ? <SelectionKey>{...ctx.selection.keys, key}
+            : <SelectionKey>{key};
+        final drag = GripDrag.move(ctx.document, next);
+        if (!_permitted(drag, ctx)) {
+          _clickOnly = true;
+          return;
+        }
+        // Class 3b: select (shift at the press toggles in), then move. The
+        // selection change is selection state; it stands after a cancel.
+        _pressShift
+            ? ctx.selection.toggle([key])
+            : ctx.selection.replace([key]);
+        _moveBase(ctx, drag!);
+        _enter(drag, e, ctx);
+      case PressClass.grip:
+        final grips = ctx.grips!;
+        final ref = grips.grips[_pressGrip];
+        // Ruling 03-9: a centre grip moves the whole selection.
+        final drag = ref.grip.role == GripRole.move
+            ? GripDrag.move(ctx.document, ctx.selection.keys)
+            : GripDrag.reshape(ctx.document, ref.key, ref.grip);
+        if (!_permitted(drag, ctx)) {
+          _clickOnly = true;
+          return;
+        }
+        // Spec D8: a grip's base is the grip's own world point, exactly.
+        drag!.base.setValues(ref.grip.x, ref.grip.y);
+        grips.hot = _pressGrip;
+        _enter(drag, e, ctx);
+      case PressClass.rotationGrip:
+        final box = ctx.grips!.box!;
+        final pivot =
+            Vector2((box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2);
+        final drag = GripDrag.rotate(
+            ctx.document, ctx.selection.keys, pivot, _pressWorld);
+        if (!_permitted(drag, ctx)) {
+          _clickOnly = true;
+          return;
+        }
+        _enter(drag!, e, ctx);
     }
+  }
+
+  /// Spec D2: a drag needs its capability before it starts.
+  static bool _permitted(GripDrag? drag, ToolContext ctx) =>
+      drag != null && drag.permittedBy(ctx.document.commands.permissions);
+
+  /// Spec D8: a body drag's base is the press point, resolved by the same
+  /// chain as the target but without ortho. With grid snap on, a move from
+  /// on-grid geometry is then a lattice vector (M-03s).
+  void _moveBase(ToolContext ctx, GripDrag drag) {
+    _resolve(ctx, _pressWorld, null);
+    drag.base.setFrom(_dragPoint.point);
+  }
+
+  void _enter(GripDrag drag, ToolPointerEvent e, ToolContext ctx) {
+    _drag = drag;
+    _dragKind = drag.kind;
+    _dragCtx = ctx;
+    _phase = ToolPhase.dragging;
+    ctx.selection.setHover(null);
+    // Ruling 03-7: a trackpad zoom or a middle-button pan moves the camera
+    // with no pointer event; the target follows from the last screen point.
+    ctx.camera.addListener(_onCamera);
+    _cursor = switch (drag.kind) {
+      DragKind.move => SystemMouseCursors.move,
+      DragKind.rotate => SystemMouseCursors.grabbing,
+      DragKind.reshape || DragKind.band => SystemMouseCursors.precise,
+    };
+    _follow(e, ctx);
+    notifyListeners();
+  }
+
+  /// Spec D5: world from screen, every event — `e.world` is the layer's
+  /// inverse camera at this event, never a scaled screen delta.
+  void _follow(ToolPointerEvent e, ToolContext ctx) {
+    _lastScreen = e.screen;
+    _lastShift = e.shift;
+    _retarget(ctx, e.world, e.shift);
+  }
+
+  void _retarget(ToolContext ctx, Vector2 world, bool shift) {
+    final drag = _drag!;
+    if (drag.kind == DragKind.rotate) {
+      // Spec D8: a rotate snaps to nothing; shift steps it by 15°.
+      drag.rotateTo(world, step: shift);
+      return;
+    }
+    _resolve(ctx, world, shift ? drag.base : null);
+    drag.moveTo(_dragPoint.point);
+  }
+
+  void _resolve(ToolContext ctx, Vector2 raw, Vector2? orthoBase) {
+    final cam = ctx.camera.value;
+    final page = ctx.page?.value;
+    resolveDragPoint(
+      raw: raw,
+      orthoBase: orthoBase,
+      index: ctx.index,
+      apertureWorld: kSnapAperturePixels / cam.scale,
+      objectSnap: ctx.snap?.objectSnap ?? true,
+      page: page,
+      gridStepMm: dragGridStepMm(page, cam.scale),
+      scratch: _snapScratch,
+      out: _dragPoint,
+    );
+  }
+
+  void _onCamera() {
+    final ctx = _dragCtx;
+    if (ctx == null || _drag == null) return;
+    final world =
+        ctx.camera.value.screenToWorld(Vector2(_lastScreen.dx, _lastScreen.dy));
+    _retarget(ctx, world, _lastShift);
+    notifyListeners();
   }
 
   @override
@@ -94,15 +334,37 @@ class SelectTool extends Tool {
       case ToolPhase.idle:
         return;
       case ToolPhase.pressed:
-        final key = _downKey;
-        if (key != null) {
-          e.shift ? ctx.selection.toggle([key]) : ctx.selection.replace([key]);
-        } else if (!e.shift) {
-          ctx.selection.clear();
+        // A press that never left the slop is a click. On a grip or on the
+        // rotation grip it does nothing (spec 03 D2, D12).
+        switch (_class) {
+          case PressClass.selectedBody:
+          case PressClass.unselectedBody:
+            final key = _downKey!;
+            e.shift
+                ? ctx.selection.toggle([key])
+                : ctx.selection.replace([key]);
+          case PressClass.empty:
+            if (!e.shift) ctx.selection.clear();
+          case PressClass.grip:
+          case PressClass.rotationGrip:
+            break;
         }
       case ToolPhase.dragging:
-        final keys = _bandKeys(ctx, e);
-        e.shift ? ctx.selection.toggle(keys) : ctx.selection.replace(keys);
+        if (_dragKind == DragKind.band) {
+          final keys = _bandKeys(ctx, e);
+          e.shift ? ctx.selection.toggle(keys) : ctx.selection.replace(keys);
+        } else {
+          // Ruling 03-13: the up carries the final position.
+          _follow(e, ctx);
+          final command = _drag!.command(ctx.document.commands.permissions);
+          _endDrag(ctx);
+          _reset();
+          notifyListeners();
+          // Spec D4: one command or none — never one per move
+          // (invariant 1).
+          if (command != null) ctx.execute(command);
+          return;
+        }
     }
     _reset();
     notifyListeners();
@@ -196,9 +458,23 @@ class SelectTool extends Tool {
   void _reset() {
     _phase = ToolPhase.idle;
     _pointer = -1;
+    _class = PressClass.empty;
     _downKey = null;
-    _downHit = false;
+    _pressGrip = -1;
+    _clickOnly = false;
     _bandMode = null;
+    _dragKind = null;
+  }
+
+  /// The single way out of a move, rotate or reshape (Ruling 03-7).
+  void _endDrag(ToolContext ctx) {
+    if (_drag == null) return;
+    (_dragCtx ?? ctx).camera.removeListener(_onCamera);
+    ctx.grips?.hot = -1;
+    _drag = null;
+    _dragCtx = null;
+    _dragPoint.reset();
+    _cursor = MouseCursor.defer;
   }
 
   @override
@@ -207,23 +483,33 @@ class SelectTool extends Tool {
     if (_phase == ToolPhase.dragging) cancel(ctx);
   }
 
+  /// Every cancel path — Escape, pointer cancel, `ToolController.activate`,
+  /// the layer's deactivate/dispose — leaves the document byte-identical
+  /// (spec D5, invariant 2). A selection change made at drag start stands.
   @override
   void cancel(ToolContext ctx) {
     if (_phase == ToolPhase.idle) return;
+    _endDrag(ctx);
     _reset();
     notifyListeners();
   }
 
   @override
   KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
+    if (_phase == ToolPhase.dragging &&
+        (event is KeyDownEvent || event is KeyRepeatEvent)) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.escape) {
+        cancel(ctx);
+      }
+      // Spec D5 and Ruling 03-8: every key-down and repeat is the drag's,
+      // so the shell's cmd+Z never lands mid-drag.
+      return KeyEventResult.handled;
+    }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.escape) {
-      if (_phase == ToolPhase.dragging) {
-        cancel(ctx);
-      } else if (_phase == ToolPhase.idle) {
-        ctx.selection.clear();
-      }
+      if (_phase == ToolPhase.idle) ctx.selection.clear();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.delete ||

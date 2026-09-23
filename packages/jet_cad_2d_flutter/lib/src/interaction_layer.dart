@@ -75,6 +75,36 @@ class _InteractionLayerState extends State<InteractionLayer> {
   ToolContext get _ctx => widget.tools.context;
   Tool get _tool => widget.tools.active;
 
+  /// The active tool's cursor, mirrored for the `MouseRegion`'s builder.
+  ///
+  /// Not a builder on [widget.tools] itself: [_release] runs in
+  /// [deactivate], where cancelling a live drag makes the tool notify, and a
+  /// rebuild request from this subtree while it leaves the tree asserts
+  /// (`markNeedsBuild` during build). [_leaving] mutes the mirror from then
+  /// on; [activate] unmutes it.
+  late final ValueNotifier<MouseCursor> _cursor =
+      ValueNotifier<MouseCursor>(_tool.cursor);
+  bool _leaving = false;
+
+  void _onTools() {
+    if (!_leaving) _cursor.value = _tool.cursor;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.tools.addListener(_onTools);
+  }
+
+  @override
+  void didUpdateWidget(InteractionLayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.tools, widget.tools)) return;
+    oldWidget.tools.removeListener(_onTools);
+    widget.tools.addListener(_onTools);
+    _onTools();
+  }
+
   /// Resolves one pointer sample into both spaces and snapshots the modifier
   /// state, so a tool never inverts the camera or reads the keyboard itself.
   ToolPointerEvent _wrap(PointerEvent e) {
@@ -164,6 +194,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
   /// on `deactivate` *and* on `dispose` costs two early returns and covers
   /// the case where the layer leaves the tree without being disposed.
   void _release() {
+    _leaving = true;
     _ctx.selection.setHover(null);
     _tool.cancel(_ctx);
   }
@@ -175,8 +206,17 @@ class _InteractionLayerState extends State<InteractionLayer> {
   }
 
   @override
+  void activate() {
+    super.activate();
+    _leaving = false;
+    _onTools();
+  }
+
+  @override
   void dispose() {
     _release();
+    widget.tools.removeListener(_onTools);
+    _cursor.dispose();
     _focus.dispose();
     super.dispose();
   }
@@ -188,11 +228,12 @@ class _InteractionLayerState extends State<InteractionLayer> {
         onKeyEvent: (_, event) => _tool.onKey(event, _ctx),
         // Spec 03 D5: a cursor is a widget parameter, so it needs a
         // rebuild. Only the MouseRegion is rebuilt, and only when the tool
-        // (or a swap) notifies; the Listener subtree is the cached child.
-        child: ListenableBuilder(
-          listenable: widget.tools,
-          builder: (context, child) => MouseRegion(
-            cursor: _tool.cursor,
+        // (or a swap) changes the cursor; the Listener subtree is the cached
+        // child.
+        child: ValueListenableBuilder<MouseCursor>(
+          valueListenable: _cursor,
+          builder: (context, cursor, child) => MouseRegion(
+            cursor: cursor,
             onExit: _onExit,
             child: child,
           ),
