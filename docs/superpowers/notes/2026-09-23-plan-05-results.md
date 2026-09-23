@@ -6,8 +6,9 @@
 **Mutation log:** [plan-05-mutation-log.md](plan-05-mutation-log.md).
 **Branch:** `plan-05/drawing-tools`, worktree
 `.claude/worktrees/quizzical-jemison-7537de`, cut from `main` at `7dac3b5`.
-**Eleven tasks: Tasks 1–9 at `7dac3b5..c4fcac4`; Task 10 (the mutation
-sweep's invariants and greps, appended to the mutation log) at `3957d52`;
+**Eleven tasks: Tasks 1–8 at `7dac3b5..c4fcac4`; Task 9 at
+`6d98d72..5c55000`; Task 10 (the mutation sweep's invariants and greps,
+appended to the mutation log) at `3957d52`;
 Task 11 runs in two parts (Ruling T11-a) — Steps 1–4 (this note, the spec
 amendments, STATUS and the roadmap) are this commit, and the ledger archive
 is deferred to after the final whole-branch review and its fix wave, as the
@@ -194,17 +195,26 @@ a multiple of `2π` to need the skip rule. This is the same test named as
 
 ### Mutation tally
 
-From [plan-05-mutation-log.md](plan-05-mutation-log.md): **27 fired, 27
+From [plan-05-mutation-log.md](plan-05-mutation-log.md): **30 fired, 30
 killed, 0 survived, 0 equivalent** — 26 named mutants (M-05a…M-05z) plus
-M-05w′, the reviewer-noted second form of M-05w. M-05w′ first fired as a
-**survivor** against the original PL8 fixture (Task 9); fix round 1
-(Ruling T9-a) changed PL8's fixture geometry only (test-only: the first
-vertex moved to `anchor + Offset(13, 0)`, the close click to `anchor +
-Offset(5, 0)`), and both M-05w and M-05w′ were re-fired against the new
-fixture and both now go red. Task 10's own review independently re-fired
-five of the twenty-seven (M-05a, M-05i, M-05u — by test-name analogy to
-Plan 03's practice — the exact re-fired set is Task 10's own report) and
-got the same failures each time.
+M-05w′, the reviewer-noted second form of M-05w, from the original sweep
+(Task 9), plus M-05aa, M-05ab and the F-3 kill from the final
+whole-branch review's fix wave. M-05w′ first fired as a **survivor**
+against the original PL8 fixture (Task 9); fix round 1 (Ruling T9-a)
+changed PL8's fixture geometry only (test-only: the first vertex moved to
+`anchor + Offset(13, 0)`, the close click to `anchor + Offset(5, 0)`), and
+both M-05w and M-05w′ were re-fired against the new fixture and both now
+go red. Task 10's own review independently re-fired five of the
+twenty-seven (M-05a, M-05i, M-05u — by test-name analogy to Plan 03's
+practice — the exact re-fired set is Task 10's own report) and got the
+same failures each time.
+
+**The final fix wave's three mutants** (Rulings F-1, F-2, F-3): M-05aa
+(the kitchen counter moved back to its old, colliding coordinates — killed
+by `SP3`), M-05ab (the F3/F mid-shape exception dropped from
+`PlacementTool.onKey` — killed by `B10` and `A16`), and the F-3 kill (the
+returning tool's `_hoverVisible = false` dropped from `cancel` — killed by
+`B11`). Detail in the mutation log's "Final fix wave" section.
 
 ---
 
@@ -214,7 +224,7 @@ The spec's fourteen criteria and where each is witnessed:
 
 | # | criterion | witness |
 |---|---|---|
-| 1 | each tool, documented geometry, both cameras | B1, L1, PL1, PL3, R1, C1, AR1, TX1–TX2 |
+| 1 | each tool, documented geometry, both cameras | B1, L1, PL1, PL3, R1, C1, AR1, TX1 |
 | 2 | one shape, one undo step; redo, same handles | E4, L1, L4, PL1, PL4, R3, C2, TX2, A11 |
 | 3 | a snapped start is exact | B2, L1 |
 | 4 | Escape, tool switch, dispose: byte-identical | B4, B9, PL9, TX5, A6, A10 |
@@ -223,8 +233,8 @@ The spec's fourteen criteria and where each is witnessed:
 | 7 | the palette and shortcuts reach all seven tools and Fill; an idle Escape returns | A1, A2, A4 |
 | 8 | the arc's direction follows the pointer; the differential | S2–S6, AR1–AR4, the differential (`SWEEP differential: checked 500, skipped 0`) |
 | 9 | Fill: regions, the fallback, the kinds that ignore it | E9, PL4, PL5, R3, R4, C2, AR5 |
-| 10 | the sample plan's furniture is filled over the finishes | SP1, SP2 |
-| 11 | every mutant killed | [plan-05-mutation-log.md](plan-05-mutation-log.md): 27 fired, 27 killed |
+| 10 | the sample plan's furniture is filled over the finishes | SP1, SP2, SP3 |
+| 11 | every mutant killed | [plan-05-mutation-log.md](plan-05-mutation-log.md): 30 fired, 30 killed |
 | 12 | the allocation invariants unedited; the overlay's structural test | Task 10's greps (invariant 4 and the allocation tests unedited), OV1, OV2 |
 | 13 | the four gate lines, the five goldens only, both builds | above, from Task 10's run |
 | 14 | the human's look | **OWED (this task): not looked at; the human looks after this branch is presented** |
@@ -286,11 +296,19 @@ with the test in the task that owns the code:
 - **The sample-plan count margin (Ruling 05-12).** The rebuild turns 30
   furniture entities into 8 filled regions (16 entities: 8 boundaries + 8
   fills), dropping the sample plan's live count from 523 (measured at
-  `5ea98dd`) to **509** (`A9` in `startup_plan_test.dart`, exactly
+  `5ea98dd`) to **509** (`SP1` in `startup_plan_test.dart`, exactly
   `523 − 14`). `startup_plan_test`'s `[500, 1000]` bound and
   `planner_shell_test`'s `>= 500` bound both still pass, with a margin of
   **9** entities. A later cut to the sample plan that removes ten or more
   entities would need to re-check both bounds.
+- **A platform pointer-cancel drops the whole pending shape (Ruling F-4,
+  final review).** `InteractionLayer._onCancel` (02, frozen by invariant 4)
+  maps every `PointerCancelEvent` straight to `tool.cancel(ctx)` --
+  the same call Escape makes. For a `PlacementTool` that means
+  `clearShape()`: a system gesture taking over, or a window losing pointer
+  capture, mid-polyline loses every vertex placed so far, not just the one
+  in flight. Not fixed in this fix wave: the controller ruled it debt, to
+  be picked up if 02's API is ever reopened.
 
 ---
 
@@ -305,8 +323,8 @@ each platform:
 - **Firefox:** `build/web`, served statically (`cd
   apps/floor_planner/build/web && python3 -m http.server`).
 
-Ten items per platform. Record each as **seen / not seen / could not
-judge**.
+Thirteen items per platform (the final review added 11–13, Rulings F-1,
+F-2 and F-5). Record each as **seen / not seen / could not judge**.
 
 ### macOS: `flutter run -d macos --release`
 
@@ -333,6 +351,12 @@ judge**.
    ☐ not applicable
 10. Whether the text field's position and font jump on commit are
     acceptable. ☐ seen ☐ not seen ☐ could not judge
+11. Every door's leaf and swing arc, clear of the counter, the beds and
+    the sofa (Ruling F-1). ☐ seen ☐ not seen ☐ could not judge
+12. F3 pressed mid-polyline: the OSNAP indicator flips and the polyline
+    stays pending (Ruling F-2). ☐ seen ☐ not seen ☐ could not judge
+13. A text placed near the canvas's top and right edges: whether the
+    field clips (Ruling F-5). ☐ seen ☐ not seen ☐ could not judge
 
 ### Chrome: `flutter run -d chrome --release`
 
@@ -359,6 +383,12 @@ judge**.
    ☐ seen ☐ not seen ☐ could not judge
 10. Whether the text field's position and font jump on commit are
     acceptable. ☐ seen ☐ not seen ☐ could not judge
+11. Every door's leaf and swing arc, clear of the counter, the beds and
+    the sofa (Ruling F-1). ☐ seen ☐ not seen ☐ could not judge
+12. F3 pressed mid-polyline: the OSNAP indicator flips and the polyline
+    stays pending (Ruling F-2). ☐ seen ☐ not seen ☐ could not judge
+13. A text placed near the canvas's top and right edges: whether the
+    field clips (Ruling F-5). ☐ seen ☐ not seen ☐ could not judge
 
 ### Firefox: `build/web`, served statically
 
@@ -382,6 +412,12 @@ judge**.
    ☐ seen ☐ not seen ☐ could not judge
 10. Whether the text field's position and font jump on commit are
     acceptable. ☐ seen ☐ not seen ☐ could not judge
+11. Every door's leaf and swing arc, clear of the counter, the beds and
+    the sofa (Ruling F-1). ☐ seen ☐ not seen ☐ could not judge
+12. F3 pressed mid-polyline: the OSNAP indicator flips and the polyline
+    stays pending (Ruling F-2). ☐ seen ☐ not seen ☐ could not judge
+13. A text placed near the canvas's top and right edges: whether the
+    field clips (Ruling F-5). ☐ seen ☐ not seen ☐ could not judge
 
 **Nothing above is ticked on the human's behalf.** No finding, no verdict
 and no `fix/` branch exists for Plan 05's look, because it has not
@@ -579,15 +615,31 @@ survivor — the anchor's object-snapped endpoint sat close enough to the
 polyline's own first vertex, by coincidence, that self-snap still found
 the right point even when applied to the wrong (already-resolved) input.
 
+**Only the first test or group in each draw test file loops over both
+`flipY` values.** `placement_tool_test.dart`'s B1–B3 (inside the `for
+(flipY in ...)` loop) and each tool's first test (`L1`, `PL1`/`PL3`, `R1`,
+`C1`, `AR1`, `TX1`) run at both cameras; every later test in the same file
+(B4 onward, L2 onward, and so on) runs once, at the file's default
+camera. This was true of the branch before this fix wave and stays true
+of the tests this wave adds (`B10`, `B11`, `A16` each run once).
+
 ---
 
 ## Spec amendments
 
 Recorded where each applies, in
 [2026-09-23-drawing-tools-design.md](../specs/2026-09-23-drawing-tools-design.md).
-Each is a paragraph beginning "**Amended at execution (Plan 05):**",
-appended at the end of the relevant section. Nothing original is rewritten.
+Each is a paragraph beginning "**Amended at execution (Plan 05):**" (D3's,
+added by the final whole-branch review's fix wave, "**Amended at
+execution (Plan 05, final review):**"), appended at the end of the
+relevant section. Nothing original is rewritten.
 
+- **D3:** Ruling F-2 (final whole-branch review) — a key-down of F3 or F,
+  with no control/meta/alt modifier held, returns `ignored` even mid-shape
+  instead of the section's "every other key-down" `handled`, so both
+  bubble to the shell (object snap and Fill); neither ever touches the
+  document, so D3's reason for swallowing every other key-down does not
+  apply to them.
 - **D4:** Ruling 05-2 — the self-snap hover marker is drawn through the
   engine's own `drawSnapMarker(..., SnapKind.endpoint, ...)`, which *is*
   the "own endpoint square" D4 calls for, rather than a second, bespoke
@@ -632,8 +684,9 @@ appended at the end of the relevant section. Nothing original is rewritten.
 ## Files this task touched (Steps 1–4)
 
 - `docs/superpowers/notes/2026-09-23-plan-05-results.md`: this file.
-- `docs/superpowers/specs/2026-09-23-drawing-tools-design.md`: the five
-  "Amended at execution" paragraphs above, appended. Nothing was
+- `docs/superpowers/specs/2026-09-23-drawing-tools-design.md`: the six
+  "Amended at execution" paragraphs above (five from Steps 1–4, plus D3's
+  from the final whole-branch review's fix wave), appended. Nothing was
   rewritten.
 - `STATUS.md`: a Plan 05 section, the header, and the "Resume here"
   paragraph.

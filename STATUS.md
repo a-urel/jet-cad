@@ -2,8 +2,9 @@
 
 **Last updated:** 2026-09-23. **Plan 05 (drawing tools) is EXECUTED on
 `plan-05/drawing-tools`, cut from `main` at `7dac3b5`, and NOT MERGED.**
-Eleven tasks: Tasks 1–9 at `7dac3b5..c4fcac4`, Task 10 (the mutation
-sweep's invariants and greps) at `3957d52`, and Task 11 (Ruling T11-a) runs
+Eleven tasks: Tasks 1–8 at `7dac3b5..c4fcac4`, Task 9 at `6d98d72..5c55000`,
+Task 10 (the mutation sweep's invariants and greps) at `3957d52`, and Task
+11 (Ruling T11-a) runs
 in two parts — Steps 1–4 (the results note, the spec amendments, this file
 and the roadmap) land in this commit; the final whole-branch review and its
 fix wave come next, and the ledger archive is deferred to the branch's last
@@ -193,7 +194,7 @@ app.
 
 **Where it stands.** Eleven tasks on `plan-05/drawing-tools`, cut from
 `main` at `7dac3b5`:
-- Tasks 1–9 are at `7dac3b5..c4fcac4`;
+- Tasks 1–8 are at `7dac3b5..c4fcac4`; Task 9 is at `6d98d72..5c55000`;
 - Task 10 (the mutation sweep's invariants and greps, appended to the
   mutation log) is at `3957d52`;
 - Task 11 runs in two parts (Ruling T11-a): Steps 1–4 (this section, the

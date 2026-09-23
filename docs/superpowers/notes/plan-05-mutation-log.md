@@ -1,6 +1,8 @@
-# Plan 05 mutation log — M-05a..z
+# Plan 05 mutation log — M-05a..z, plus the final fix wave (M-05aa, M-05ab)
 
-27 fired: 27 killed, 0 survived, 0 equivalent.
+30 fired: 30 killed, 0 survived, 0 equivalent. (27 from the original sweep,
+plus M-05aa, M-05ab and the F-3 kill from the final whole-branch review's
+fix wave -- see "Final fix wave" below.)
 
 **Fix round 1 (Ruling T9-a).** M-05w′ first fired as a survivor against
 PL8; Task 9 fix round 1 changed PL8's fixture geometry (test-only) so both
@@ -440,7 +442,7 @@ aperture of the polyline's own first vertex — and now it is not (13 px >
 Restored and diffed empty against the fresh backup
 `placement_tool.dart.M-05w-prime-refire`.
 
-### M-05x — a zero-length first segment refused only by `==`, not by distance
+### M-05x — dropping the `_segments > 0` guard self-snaps before any segment commits
 
 - **file:** `packages/jet_cad_2d_flutter/lib/src/draw/line_tool.dart`,
   `selfSnap`
@@ -672,3 +674,56 @@ $ git log --format=%B 7dac3b5..HEAD | grep -c "Co-Authored-By: Claude"
 ```
 13 commits on the branch, 13 `Co-Authored-By: Claude` trailers -- one per
 commit.
+
+## Final fix wave (Rulings F-1, F-2, F-3)
+
+Three mutants fired against the final whole-branch review's fixes. Same
+procedure as above: `cp` the target to the mutation-backups directory,
+apply the one edit by hand, run only the named test file(s) with
+`CI=true`, paste the failing names and the summary line, restore with
+`cp`, then `diff` and confirm empty.
+
+### M-05aa — the L counter moved back to its old, colliding coordinates
+
+- **file:** `apps/floor_planner/lib/startup_plan.dart`, the kitchen
+  counter's `polygonRegion` call
+- **edit:** restored the pre-fix vertex list (the south/west-wall L,
+  hugging the bottom-left corner)
+- **test:** `apps/floor_planner/test/startup_plan_test.dart` (SP3)
+- **result:** KILLED -- `SP3` (target): "Expected: false / Actual: <true>
+  / door point [17900.0,9050.0] lies under a furniture fill" -- the
+  hall/kitchen door's swing again lands on the counter's old footprint.
+  Summary `+7 -1`. Restored and diffed empty.
+
+### M-05ab — the F3/F mid-shape exception dropped
+
+- **file:** `packages/jet_cad_2d_flutter/lib/src/draw/placement_tool.dart`,
+  `onKey`
+- **edit:** removed the `if ((key == LogicalKeyboardKey.f3 || key ==
+  LogicalKeyboardKey.keyF) && !_hasModifier()) return
+  KeyEventResult.ignored;` block, so every key-down mid-shape falls
+  through to `KeyEventResult.handled` again
+- **test:** `packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart`
+  (B10) and `apps/floor_planner/test/planner_draw_test.dart` (A16)
+- **result:** KILLED in both.
+  - `placement_tool_test.dart` B10: expected `KeyEventResult.ignored`, got
+    `KeyEventResult.handled` for F3 mid-shape. Summary `+12 -1`.
+  - `planner_draw_test.dart` A16: expected the `osnap-text` to read
+    `osnap off` after F3 mid-polyline, still read `OSNAP` (the tool
+    swallowed the key before the shell's `CallbackShortcuts` ever saw
+    it). Summary `+15 -1`.
+  - Both restored and diffed empty.
+
+### The F-3 kill — the stale hover marker's `_hoverVisible = false` dropped
+
+- **file:** `packages/jet_cad_2d_flutter/lib/src/draw/placement_tool.dart`,
+  `cancel`
+- **edit:** removed the `_hoverVisible = false;` line, so a tool
+  reactivated after a switch away repaints its last hover marker before
+  the next pointer move
+- **test:** `packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart`
+  (B11)
+- **result:** KILLED -- `B11` (target): "Expected: empty / Actual:
+  [Instance of 'RecordedCall']" -- `paintOverlay` drew the stale marker
+  immediately after the tool returned, before any new hover. Summary
+  `+13 -1`. Restored and diffed empty.
