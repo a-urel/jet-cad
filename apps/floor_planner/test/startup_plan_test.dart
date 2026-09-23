@@ -74,4 +74,43 @@ void main() {
     expect(doc.header.units, DrawingUnits.millimeters);
     expect(doc.commands.canUndo, isFalse, reason: 'Ruling 04-1');
   });
+
+  test(
+      'SP1 the furniture is eight filled regions with the furniture '
+      'outline', () {
+    final doc = startupPlan(measurer);
+    final boundaries = <Handle>[];
+    for (final slot in doc.entities.liveSlots) {
+      final h = doc.entities.handleAt(slot);
+      if (doc.fills.fillsOf(h).isNotEmpty) boundaries.add(h);
+    }
+    expect(boundaries, hasLength(8));
+    for (final b in boundaries) {
+      final r = doc.entities.read(doc.entities.slotOf(b)!);
+      expect(r.color, const TrueColor(0x8A6D3B));
+      expect(r.lineweight, 25);
+      final fill = doc.fills.fillsOf(b).single;
+      expect(
+          doc.entities.read(doc.entities.slotOf(fill)!).color, kDraftFillColor);
+    }
+    expect(doc.entities.liveCount, 509, reason: 'Ruling 05-12: 523 − 14');
+  });
+
+  test('SP2 every fill draws over every floor-finish line (M-05r)', () {
+    final doc = startupPlan(measurer);
+    var maxFinish = 0, minFill = 1 << 62;
+    for (final slot in doc.entities.liveSlots) {
+      final r = doc.entities.read(slot);
+      if (r.kind == EntityKind.fill && r.handle.value < minFill) {
+        minFill = r.handle.value;
+      }
+      if (r.kind == EntityKind.line &&
+          r.color == const TrueColor(0xBBBBBB) &&
+          r.handle.value > maxFinish) {
+        maxFinish = r.handle.value;
+      }
+    }
+    expect(maxFinish, greaterThan(0));
+    expect(minFill, greaterThan(maxFinish));
+  });
 }

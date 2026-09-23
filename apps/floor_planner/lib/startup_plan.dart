@@ -15,6 +15,7 @@ import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 /// Zoom bounds for the product camera, in logical pixels per world unit
 /// (millimetre). Spec D4; checked against this document in
@@ -111,26 +112,6 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   p.window(x: x0 + _wall / 2, y: y0 + 2200, width: 1000, vertical: true);
   p.window(x: x0 + _wall / 2, y: y0 + 6600, width: 1400, vertical: true);
 
-  // --- Furniture: rectangles, one L. ---
-  p.rect(x0 + 400, y0 + 6600, x0 + 2200, y0 + 8600,
-      lineweight: 25, color: _furnitureColor); // bed
-  p.rect(x0 + 2900, y0 + 6800, x0 + 4500, y0 + 8600,
-      lineweight: 25, color: _furnitureColor); // bed
-  p.rect(x0 + 6000, y0 + 4200, x0 + 9000, y0 + 5100,
-      lineweight: 25, color: _furnitureColor); // sofa
-  p.rect(x0 + 6400, y0 + 5600, x0 + 8600, y0 + 6800,
-      lineweight: 25, color: _furnitureColor); // table
-  p.rect(x0 + 5400, y0 + 400, x0 + 6000, y0 + 3100,
-      lineweight: 25, color: _furnitureColor); // counter
-  p.rect(x0 + 5400, y0 + 400, x0 + 9100, y0 + 1000,
-      lineweight: 25, color: _furnitureColor); // counter L
-  p.rect(x0 + 12200, y0 + 400, x0 + 13500, y0 + 2000,
-      lineweight: 25, color: _furnitureColor); // bath
-  p.circle(x0 + 7600, y0 + 6200, 350,
-      lineweight: 25, color: _furnitureColor); // lamp
-  p.circle(x0 + 10300, y0 + 1200, 220,
-      lineweight: 25, color: _furnitureColor); // basin
-
   // --- Floor finishes: what carries the count. ---
   // Kitchen tiles, 200 mm, both ways: x 5000+p..9500-p, y wall..3500-p.
   p.grid(x0 + 5000 + _partition, y0 + _wall, x0 + 9500 - _partition,
@@ -144,6 +125,25 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   p.parquet(
       x0 + 5000 + _partition, y0 + 3500 + _partition, x1 - _wall, y1 - _wall,
       strip: 150, plank: 900);
+
+  // --- Furniture: filled regions (spec 05 D14), after the finishes so
+  // their fills draw over the tile and parquet lines. ---
+  p.rectRegion(x0 + 400, y0 + 6600, x0 + 2200, y0 + 8600); // bed
+  p.rectRegion(x0 + 2900, y0 + 6800, x0 + 4500, y0 + 8600); // bed
+  p.rectRegion(x0 + 6000, y0 + 4200, x0 + 9000, y0 + 5100); // sofa
+  p.rectRegion(x0 + 6400, y0 + 5600, x0 + 8600, y0 + 6800); // table
+  // The kitchen counter: one L, so its fill has no seam.
+  p.polygonRegion([
+    x0 + 5400, y0 + 400, //
+    x0 + 9100, y0 + 400,
+    x0 + 9100, y0 + 1000,
+    x0 + 6000, y0 + 1000,
+    x0 + 6000, y0 + 3100,
+    x0 + 5400, y0 + 3100,
+  ]);
+  p.rectRegion(x0 + 12200, y0 + 400, x0 + 13500, y0 + 2000); // bath
+  p.circleRegion(x0 + 7600, y0 + 6200, 350); // lamp, after the table
+  p.circleRegion(x0 + 10300, y0 + 1200, 220); // basin
 
   // Spec 04 D12 and Ruling 04-1: the page is document data, attached
   // through the log like everything else, and then the history is cleared
@@ -211,6 +211,24 @@ class _Pen {
           {required int lineweight, required DraftColor color}) =>
       _add(EntityKind.circle, [cx, cy], [r],
           lineweight: lineweight, color: color);
+
+  /// Spec 05 D14: a furniture piece as one region, the fill under its
+  /// boundary, the boundary keeping today's colour and weight.
+  void _region(EntityKind kind, GeometryPayload payload) =>
+      doc.commands.execute(addDraftedRegion(doc, kind, payload,
+          boundaryColor: _furnitureColor, boundaryLineweight: 25)!);
+
+  void rectRegion(double ax, double ay, double bx, double by) => _region(
+      EntityKind.polyline, rectanglePayload(Vector2(ax, ay), Vector2(bx, by)));
+
+  void polygonRegion(List<double> xy) => _region(
+      EntityKind.polyline,
+      polylinePayload([
+        for (var i = 0; i < xy.length; i += 2) Vector2(xy[i], xy[i + 1]),
+      ], closed: true));
+
+  void circleRegion(double cx, double cy, double r) =>
+      _region(EntityKind.circle, circlePayload(Vector2(cx, cy), r));
 
   void arc(double cx, double cy, double r, double start, double sweep,
           {required int lineweight, required DraftColor color}) =>
