@@ -248,6 +248,19 @@ void main() {
           reason: 'the end dragged onto the start');
     });
 
+    test(
+        'an arc end stretch landing within tolerance of a full turn is '
+        'degenerate (M-03ay)', () {
+      final end = leafGrips(EntityKind.arc, arcPos)[2];
+      // The end dragged to just short of the start the *positive* way
+      // around: the resulting sweep is 2*pi - 1e-12, within
+      // Tolerance.standard.angular of a full turn -- not within it of zero.
+      final target = at(arcPos, 0.3 - 1e-12, 40);
+      expect(reshapeLeaf(EntityKind.arc, arcPos, end, target), isNull,
+          reason: 'a sweep within tolerance of 2*pi is as degenerate as one '
+              'within tolerance of zero');
+    });
+
     test('a move grip is not a reshape, and a kind without grips throws', () {
       expect(
           () => reshapeLeaf(EntityKind.circle, circle,
