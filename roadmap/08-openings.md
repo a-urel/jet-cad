@@ -68,6 +68,19 @@ children of it.
 - **Does an opening cut a poché fill** as well as face lines? If 07 chose
   fills, this is a boolean subtraction, which is substantially harder than
   trimming two lines. Price it before committing.
+- **From the human's look, 2026-09-24.** In the sample plan today a door is
+  two separate entities, an arc and a leaf line. The human selected only the
+  arc and rotated it, so the leaf stayed behind. Two needs came out of that:
+  - **A door is one object:** its leaf and its swing select, move and rotate
+    together. A parametric opening (a group from 06) gives this for free.
+    Check that the sample plan's doors become openings, not loose
+    arc-and-line pairs.
+  - **Rotate about a chosen point.** The human asked about rotating a door
+    about its hinge. Today a rotate turns about the selection box's centre
+    (spec 03 D1 and D6). A user-chosen base point, like CAD's ROTATE base
+    point or a hinge pivot for an opening, is a general transform feature,
+    not only a door one. Decide whether it lands here, as an opening's
+    hand/swing parameter, or as its own follow-up to 03.
 
 ## Exit criteria sketch
 
