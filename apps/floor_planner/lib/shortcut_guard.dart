@@ -7,6 +7,7 @@ const List<LogicalKeyboardKey> kShellLetterKeys = [
   LogicalKeyboardKey.keyL,
   LogicalKeyboardKey.keyP,
   LogicalKeyboardKey.keyR,
+  LogicalKeyboardKey.keyB,
   LogicalKeyboardKey.keyC,
   LogicalKeyboardKey.keyA,
   LogicalKeyboardKey.keyT,
