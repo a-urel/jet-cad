@@ -56,6 +56,7 @@ export 'src/index/query_filter.dart';
 export 'src/index/query_scratch.dart';
 export 'src/index/snap.dart';
 export 'src/index/spatial_index.dart';
+export 'src/parametric/parametric_system.dart';
 export 'src/store/entity_store.dart';
 export 'src/store/geometry_store.dart';
 export 'src/store/slot_allocator.dart';

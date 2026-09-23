@@ -76,6 +76,13 @@ class ComponentRegistry {
     if (internal) _internal.add(typeId);
   }
 
+  /// Whether `T` already has a store. `register` replaces the store
+  /// unconditionally, wiping every component of `T` in the process, so a
+  /// caller that must not clobber an already-loaded document — a second
+  /// `ParametricSystem` over the same document, for instance (Ruling
+  /// 06-13) — checks this first.
+  bool isRegistered<T extends Component>() => _stores.containsKey(T);
+
   /// Registers the component types the engine owns.
   void registerBuiltIns() {
     register<OriginComponent>(
