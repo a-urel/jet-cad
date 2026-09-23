@@ -413,6 +413,16 @@ with the test in the task that owns the code:
   item 14. **Suggested fix, for a `fix/` branch if the human's look
   agrees:** a south leg at x 7200..9100, y 400..1000, plus the east leg at
   x 8500..9100 up to y 3100.
+  **Closed on 2026-09-24 on `fix/counter-doorway`.**
+  - **The human's verdict:** the look agreed it is a defect.
+  - **The counter:** it now takes the suggested layout. The north leg had
+    faced the doorway from 350 mm away.
+  - **The new test:** `SP4` checks that every doorway keeps a zone clear of
+    furniture 900 mm deep on both sides of the wall's centreline.
+  - **A second defect `SP4` found:** bed 1 sat 340 mm from the bedroom-1/2
+    doorway. It is now a 1400 mm double, at x 300..1700.
+  - **Mutants:** M-F8a (the old counter) and M-F8b (the old bed) were both
+    killed by `SP4`, using a cp backup and restore.
 - **The modifier guard in `PlacementTool.onKey` is untested (Ruling F-9,
   final review).** A mutant dropping `&& !_hasModifier()` from the F3/F
   exception (Ruling F-2) survives: no test pins that Cmd+F3, Ctrl+F3,

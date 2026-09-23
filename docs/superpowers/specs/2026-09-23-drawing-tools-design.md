@@ -793,6 +793,16 @@ In `apps/floor_planner/lib/startup_plan.dart`:
 - **Nothing else changes**: the walls, doors, windows and finishes keep
   their current order and look.
 
+**Amended after the look (2026-09-24, `fix/counter-doorway`, Ruling F-8).**
+The human's look agreed that the counter's north leg blocked the
+kitchen/living doorway, at 350 mm. The fix:
+- The counter is now an L on the kitchen's **south and east** walls.
+- Bed 1 is now a **1400 mm double**. At 1800 mm it left 340 mm before the
+  bedroom-1/2 doorway, which the new test caught.
+- `startup_plan_test.dart` gains `SP4`: every doorway keeps a zone clear of
+  furniture 900 mm deep on **both** sides of the wall's centreline, across
+  the full opening.
+
 **What `startup_plan_test.dart` checks:**
 - **Unchanged:**
   - the extents are still the outer rectangle;

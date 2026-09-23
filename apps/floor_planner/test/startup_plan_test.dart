@@ -212,4 +212,76 @@ void main() {
           reason: 'door point $p lies under a furniture fill');
     }
   });
+
+  test(
+      'SP4 every doorway is clear of furniture for 900 mm on both sides '
+      '(Ruling F-8)', () {
+    final doc = startupPlan(measurer);
+
+    final polygons = <List<Vector2>>[];
+    final circles = <(Vector2, double)>[];
+    for (final slot in doc.entities.liveSlots) {
+      final h = doc.entities.handleAt(slot);
+      if (doc.fills.fillsOf(h).isEmpty) continue;
+      final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
+      if (doc.entities.kindAt(slot) == EntityKind.circle) {
+        circles.add((payload.pointAt(0), payload.scalars[0]));
+      } else {
+        polygons.add([
+          for (var i = 0; i < payload.pointCount; i++) payload.pointAt(i),
+        ]);
+      }
+    }
+    bool insideFurniture(Vector2 p) =>
+        circles.any((c) => (p - c.$1).length <= c.$2) ||
+        polygons.any((poly) => _pointInPolygon(p, poly));
+
+    // Each door's swing is a quarter arc about the hinge. One end of it is
+    // the leaf's far end (perpendicular to the wall); the other is the far
+    // jamb, so hinge → far jamb spans the opening along the wall. The
+    // approach zone is that span swept 900 mm to either side of the wall's
+    // centreline: where a person stands to walk through.
+    const tol = Tolerance.standard;
+    const depth = 900.0;
+    final lines = <GeometryPayload>[];
+    final arcs = <GeometryPayload>[];
+    for (final slot in doc.entities.liveSlots) {
+      final kind = doc.entities.kindAt(slot);
+      if (kind != EntityKind.arc && kind != EntityKind.line) continue;
+      final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
+      (kind == EntityKind.arc ? arcs : lines).add(payload);
+    }
+    expect(arcs, hasLength(7), reason: 'one swing per door');
+    var sampled = 0;
+    for (final arc in arcs) {
+      final c = arc.pointAt(0);
+      final r = arc.scalars[0];
+      Vector2 end(double a) =>
+          Vector2(c.x + r * math.cos(a), c.y + r * math.sin(a));
+      final e0 = end(arc.scalars[1]);
+      final e1 = end(arc.scalars[1] + arc.scalars[2]);
+      // The leaf starts exactly at the hinge; its far end is on the arc.
+      bool isLeafEnd(Vector2 e) => lines.any((l) {
+            final a = l.pointAt(0), b = l.pointAt(1);
+            final far = a.x == c.x && a.y == c.y
+                ? b
+                : (b.x == c.x && b.y == c.y ? a : null);
+            return far != null && tol.eq((far - e).length, 0);
+          });
+      final leafEnd = isLeafEnd(e0) ? e0 : e1;
+      final jamb = identical(leafEnd, e0) ? e1 : e0;
+      expect(isLeafEnd(jamb), isFalse, reason: 'door at $c: one leaf');
+      final along = (jamb - c) / r;
+      final across = (leafEnd - c) / r;
+      for (var i = 0; i <= 20; i++) {
+        for (var j = -18; j <= 18; j++) {
+          final p = c + along * (r * i / 20) + across * (depth * j / 18);
+          sampled++;
+          expect(insideFurniture(p), isFalse,
+              reason: 'the doorway at $c is blocked at $p');
+        }
+      }
+    }
+    expect(sampled, 7 * 21 * 37);
+  });
 }
