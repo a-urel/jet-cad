@@ -373,12 +373,12 @@ void main() {
     doc.commands.permissions = DraftPermissions.runtime;
     // s.line starts unselected: a shift-press lands class 3b.
     final vertex = screenOf(rig.camera, bodyX, bodyY);
-    rig.tool.onPointerDown(
-        pointerAt(rig.camera, vertex, shift: true), rig.context);
+    rig.tool
+        .onPointerDown(pointerAt(rig.camera, vertex, shift: true), rig.context);
     expect(rig.tool.pressClass, PressClass.unselectedBody);
     final away = vertex + const Offset(30, 10);
-    rig.tool.onPointerMove(
-        pointerAt(rig.camera, away, shift: true), rig.context);
+    rig.tool
+        .onPointerMove(pointerAt(rig.camera, away, shift: true), rig.context);
     expect(rig.tool.phase, ToolPhase.pressed,
         reason: 'geometry is refused under runtime; no drag starts past '
             'the slop (Ruling 03-6)');
