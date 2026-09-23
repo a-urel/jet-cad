@@ -4,8 +4,10 @@ import 'dart:typed_data';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../core/tolerance.dart';
+import '../geometry/transform2.dart';
 import '../store/entity_store.dart';
 import '../store/geometry_store.dart';
+import 'text_scalars.dart';
 
 /// What dragging a grip does (spec D3).
 enum GripRole { stretch, radius, move }
@@ -207,4 +209,53 @@ bool _degenerateSweep(double sweep) {
   final a = sweep.abs();
   return a <= Tolerance.standard.angular ||
       (2 * math.pi - a) <= Tolerance.standard.angular;
+}
+
+/// `det = +1` and orthonormal columns, within [tol]. A decision, so
+/// `Tolerance` (spec D3, invariant 8); the residuals are dimensionless.
+bool isRigidTransform(Transform2 t, [Tolerance tol = Tolerance.standard]) =>
+    tol.eq(t.a * t.d - t.b * t.c, 1) &&
+    tol.eq(t.a * t.a + t.b * t.b, 1) &&
+    tol.eq(t.c * t.c + t.d * t.d, 1) &&
+    tol.isZero(t.a * t.c + t.b * t.d);
+
+/// [payload] moved by the rigid [t], given in the leaf's owner space (spec
+/// D3). A circle stays a circle, an arc keeps its sweep's sign, and a
+/// text keeps its height.
+///
+/// A pure translation `(1, 0, 0, 1, dx, dy)` gives `x + dx` exactly for
+/// every coordinate, and θ = 0 leaves every scalar bit for bit.
+GeometryPayload rigidTransformLeaf(
+    EntityKind kind, GeometryPayload payload, Transform2 t) {
+  if (!isRigidTransform(t)) {
+    throw ArgumentError.value(
+        t, 't', 'not rigid: a move or rotate is det = +1 and orthonormal');
+  }
+  final theta = math.atan2(t.b, t.a);
+  switch (kind) {
+    case EntityKind.point:
+    case EntityKind.line:
+    case EntityKind.polyline:
+    case EntityKind.circle:
+      // `transformedBy` moves the coordinates and copies the scalars — for
+      // a circle, the centre moves and the radius is copied.
+      return payload.transformedBy(t);
+    case EntityKind.arc:
+      final moved = payload.transformedBy(t);
+      final scalars = Float64List.fromList(payload.scalars);
+      if (scalars.length >= 2) scalars[1] = scalars[1] + theta;
+      return GeometryPayload(coords: moved.coords, scalars: scalars);
+    case EntityKind.text:
+      final moved = payload.transformedBy(t);
+      // A schema-3 text holds only its height; writing its rotation is a
+      // real edit of that entity, not padding on load (spec D3).
+      final scalars = Float64List(math.max(2, payload.scalars.length))
+        ..setRange(0, payload.scalars.length, payload.scalars);
+      scalars[1] = scalarOr(payload, 1, 0) + theta;
+      return GeometryPayload(coords: moved.coords, scalars: scalars);
+    case EntityKind.attrib:
+    case EntityKind.fill:
+      throw ArgumentError.value(kind, 'kind',
+          'a fill follows its boundary; an attrib is never root-level');
+  }
 }
