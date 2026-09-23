@@ -134,6 +134,20 @@ void main() {
         reason: 'body move and rotate still work over the cap (spec D6)');
   });
 
+  test(
+      'a hover change does not rebuild or reset hot (Ruling 03-19; '
+      'M-03ba)', () {
+    final s = gripScene();
+    final doc = s.document;
+    final (selection, _, grips) = wire(doc);
+    selection.replace([k(s.line)]);
+    grips.hot = 1;
+    selection.setHover(k(s.circle));
+    expect(grips.hot, 1,
+        reason: 'a hover change is not a selection-key change: rebuilding '
+            'for it would reset hot under the pointer');
+  });
+
   test('leaf grips are not live under a geometry denial (M-03ad)', () {
     final s = gripScene();
     final doc = s.document;
