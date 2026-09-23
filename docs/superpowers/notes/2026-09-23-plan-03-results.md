@@ -9,10 +9,12 @@
 **Twelve tasks: Tasks 1–11 at `e376ced..7879e36`; Task 12 (the gate lines,
 this note, the spec amendments, STATUS and the roadmap) on top of them.
 Executed on `plan-03/grips-and-transform`, not merged — the merge is the
-human's decision. The final whole-branch review and its fix wave come after
-this task, and the ledger is archived after that, as the branch's last
-commit before the merge (Ruling T12-a). Exit gate 15 of 16; criterion 16,
-the human's look, is OWED.**
+human's decision. The final whole-branch review ran at `136af89` ("With
+fixes"); its fix wave is `722904b` (tests), `0cac4f4` (the shift mid-drag
+fix), `509b9f3` (a doc comment) and a docs commit. The ledger is archived
+after the fix wave's re-review, as the branch's last commit before the merge
+(Ruling T12-a). Exit gate 15 of 16; criterion 16, the human's look, is
+OWED.**
 **Ledger (per-task briefs, reports, review diffs, every ruling):**
 `.superpowers/sdd/2026-09-23-grips-and-transform/` (git-ignored while the
 plan is in flight; archived to
@@ -27,7 +29,8 @@ plan is in flight; archived to
 Run once, in full, on the final tree of Tasks 1–11 (HEAD `7879e36`, `git
 status --short` clean), by one script that ran each command in its package
 directory and appended its exit code. Ruling T11-a moved Task 11's gate run
-here, so this is the only full four-line run on the finished branch. Every
+here, so this was the only full four-line run on the branch until the final
+fix wave's, pasted in the next subsection. Every
 summary line below is what the command printed.
 
 **`packages/jet_cad_2d`**: `CI=true dart test`:
@@ -144,6 +147,33 @@ Plans 01, 02 and 04:
 STARTUP fit scale 0.095 px/mm; min 0.001 (95.0x out), max 100.0 (1052.6315789473683x in)
 ```
 
+### The four gate lines again, after the final fix wave
+
+Run in full on HEAD `509b9f3` (the fix wave's last code commit; only docs
+follow it), `git status --short` clean before and after, one package at a
+time, each command's exit code captured. The summary lines, as printed:
+
+- **`packages/jet_cad_2d`**: `00:03 +890: All tests passed!` (exit 0);
+  `dart analyze`: `No issues found!` (exit 0); `dart format`: `Formatted 130
+  files (0 changed) in 0.23 seconds.` (exit 0).
+- **`packages/jet_cad_2d_flutter`**: `00:12 +854 ~1 -5: Some tests failed.`
+  (exit 1), the failing list being exactly `text ladder rung 1` … `rung 5`
+  `(RenderBackend.canvas)` in `test/golden/text_ladder_golden_test.dart`;
+  `flutter analyze`: `No issues found! (ran in 1.4s)` (exit 0); `dart
+  format`: `Formatted 159 files (0 changed) in 0.30 seconds.` (exit 0).
+  **854 = 851 + the fix wave's three new tests** (M-03bj, M-03bk, M-03bl);
+  M-03bh and M-03bi extended P2 and P4 in place.
+- **`apps/dev_harness_2d`**: `00:19 +82: All tests passed!` (exit 0);
+  `No issues found! (ran in 1.0s)` (exit 0); `Formatted 22 files (0
+  changed) in 0.05 seconds.` (exit 0).
+- **`apps/floor_planner`**: `00:01 +26: All tests passed!` (exit 0); `No
+  issues found! (ran in 0.9s)` (exit 0); `Formatted 8 files (0 changed) in
+  0.03 seconds.` (exit 0); `✓ Built
+  build/macos/Build/Products/Release/floor_planner.app (51.1MB)` (exit 0);
+  `✓ Built build/web` (exit 0).
+
+No `analysis_options.yaml` was rewritten.
+
 ### Where the counts differ from the plan's sums, and why
 
 The plan's Task 12 predicted each count as the branch point plus the tests
@@ -208,7 +238,7 @@ The test's printed line from the gate run above, pasted:
 03 differential: seed 0x5EED0003, 200 trials, worst residual per kind: {point: 0.0, line: 2.9103830456733704e-10, polyline: 4.656612873077393e-10, circle: 4.656612873077393e-10, arc: 4.656612873077393e-10, text: 4.656612873077393e-10}
 ```
 
-The worst residual per kind:
+The worst residual per kind, transcribed from that line:
 
 | kind | worst |
 |---|---|
@@ -219,7 +249,9 @@ The worst residual per kind:
 | arc | 4.66e-10 |
 | text | 4.66e-10 |
 
-Every residual is at most 2⁻³¹ ≈ 4.66e-10: two ulps of a coordinate just
+**Derived reasoning, not pasted output.** The paragraph below is this
+note's arithmetic about the pasted line; no command printed it. Every
+residual is at most 2⁻³¹ ≈ 4.66e-10: two ulps of a coordinate just
 under 2e6, one ulp of a coordinate above 2²¹ ≈ 2.1e6, the magnitudes the
 trials reach. That is about 240 times inside the ~1.1e-7 bound. The smallest
 angle error the mutants make, `r·θ ≥ 1.5e-3`, is 10⁴ times larger than the
@@ -227,8 +259,10 @@ bound.
 
 ### Mutation summary
 
-**62 exercised: 60 killed, 1 designed survivor (M-03e), 1 equivalent
-(M-03ai's ordinal clause, by construction).**
+**68 exercised: 65 killed, 1 designed survivor (M-03e), 2 equivalent
+(M-03ai's ordinal clause; `GripDrag._capture`'s `read` → `peek`), both by
+construction.** Task 10's sweep exercised 62 (60 killed, M-03e, M-03ai's
+variant); the final fix wave added six.
 - **The spec's 27 (M-03a…M-03aa):** 26 killed, and M-03e survived as
   designed. Its standing 1-ulp companion (Ruling 03-20) is green in the same
   run: `==` catches one ulp and `Tolerance` does not.
@@ -244,6 +278,18 @@ bound.
   - Seven new tests landed for them, each in its own commit.
   - M-03bc and M-03bd were already guarded, by the extended T14 and by T8
     pressed 5 px off the grip.
+- **The final review's 5 (M-03bh…M-03bl):** 5 killed.
+  - M-03bh (the grip x projection's `m.c` → `m.b`) and M-03bi (the rotation
+    disc at its anchor) extended P2 and P4 in place. M-03bh survives under
+    `gripCamera` alone: a y-flipped rotation has `b == c` bit for bit. P2
+    also runs under `gripCamera(flipY: false)`, and that iteration kills it.
+  - M-03bj (the circle reshape preview's origin), M-03bk (grip-to-grip hover
+    repaint) and M-03bl (shift mid-drag re-targets at once, a production
+    fix in `0cac4f4`) each got a new test.
+- **`GripDrag._capture`'s `read` → `peek`:** equivalent. `GeometryStore`
+  installs fresh buffers on `replace`, so a captured view never sees a later
+  edit. The whole render suite stayed at its standing five golden failures
+  under it.
 
 Each mutant followed the same procedure:
 1. a `cp`-backed one-edit change to a production file (M-03e edits a test's
@@ -258,7 +304,7 @@ failures each time.
 **Both allocation gates are green and unedited.** `query_allocation_test.dart`
 (5 tests) and `paint_allocation_test.dart` (3 tests) were pasted by Task 11
 in the mutation log's "Invariants and greps" section. Both run again inside
-the 890 and 851 above. Task 11's greps are pasted there too, and each came
+the 890 and 851 above, and in the 890 and 854 of the fix wave's run. Task 11's greps are pasted there too, and each came
 back as required:
 - the invariants' tests are unedited;
 - the frame-path files and the harness are untouched;
@@ -287,11 +333,11 @@ The spec's sixteen criteria, each with its witness.
 | 8 | Undo restores with `==`; M-03e is the designed survivor with its 1-ulp check | **PASS**, with Ruling 03-20 | `grip_drag_test.dart`: `undo restores every stored value with == (spec D11; M-03e is the designed survivor)` (D10), `the undo assertion enforces ==: one ulp is caught (M-03e companion, Ruling 03-20)` (D11); the mutation log's M-03e entry |
 | 9 | Escape, pointer cancel, activation and revalidation are byte-identical; a drag past the edge continues | **PASS** | `select_tool_drag_test.dart`: `every key-down and repeat is the drag's; Escape cancels byte-identically (M-03aa, M-03l)` (T15), `a pointer cancel leaves the document byte-identical (M-03ao)` (W1), `tool activation cancels a drag byte-identically (M-03ao)` (T16), `removing the layer mid-drag cancels byte-identically (M-03ao)` (W3), `a document change mid-drag: release dispatches nothing (M-03t)` (T17), `a move dragged past the layer's edge continues and lands (M-03ap)` (W2); app: `replacing the shell mid-drag disposes cleanly, no exception (M-03ao, shell)` |
 | 10 | A stretch lands exactly on an endpoint; object beats grid; ortho overridden and re-pinned; F3 off | **PASS** | `drag_snap_test.dart`: `an object snap overrides ortho, and is copied out of the scratch (invariant 7)` (S3), `an object snap beats a nearer grid point (M-03g)` (S4), `a grid snap re-pins the ortho axis afterwards (M-03q)` (S6), `object snap off never snaps to an object: the grid wins (M-03x)` (S7); `select_tool_drag_test.dart`: `a stretch released near an endpoint lands on it exactly (M-03au)` (T9); `planner_grips_test.dart`: `a stretch through the shell lands exactly on an endpoint, and cmd+Z restores it with == (A1, M-03au)`, `F3 turns object snap off: osnap-text says so and the drag lands on the grid (A2, M-03x)` |
-| 11 | Permissions at press, and all-or-nothing at release | **PASS**, with Rulings 03-5 and 03-6 | `grip_cache_test.dart` (C5): `leaf grips are not live under a geometry denial (M-03ad)`; `select_tool_drag_test.dart`: `permissions at press: no leaf grips, a refused move stays a click, an instance still moves (M-03ad, M-03av)` (T13), `class 3b: a refused move never runs before the click toggles once, net (Ruling 03-6; M-03be)`; `selection_overlay_grips_test.dart` (P4): `no leaf grips are drawn under a geometry denial; the rotation grip still is (M-03ad)`; `grip_drag_test.dart` (D8): `a refused member cancels the whole drag (M-03k)` |
-| 12 | Grips in O(1) draw calls; the cap at `kMaxGrips` | **PASS**, with Ruling 03-10 | `selection_overlay_grips_test.dart` (P2): `grips are one drawRawPoints per colour at 10 grips and at 300, and the hot grip one more (invariant 6, M-03v, M-03aq)`, and `the stretch buffer is reallocated only when the count changes, and never draws a stale grip (Ruling 03-10; M-03bf, M-03bf')`; `grip_cache_test.dart` (C4): `the cap: kMaxGrips grips are kept, kMaxGrips + 1 keep none (M-03z)` |
-| 13 | Every named mutant fired and killed, except M-03e | **PASS** | [plan-03-mutation-log.md](plan-03-mutation-log.md): **62 exercised: 60 killed, 1 designed survivor (M-03e), 1 equivalent (M-03ai's ordinal clause, by construction)**. That covers the spec's 27, `ah′`, the plan's 23, M-03ai's variant and the controller's 10 |
-| 14 | The allocation invariants pass unchanged | **PASS**, with Ruling 03-12 | `query_allocation_test.dart` (5) and `paint_allocation_test.dart` (3) are green and unedited: Task 11's transcripts are in the mutation log, and both run inside the 890 and 851 above |
-| 15 | The four gate lines, the five goldens only, both builds | **PASS with the one recorded exception** | pasted above: `jet_cad_2d` **890**; `jet_cad_2d_flutter` **851 pass, 1 skip, and only the five `text_ladder_golden_test.dart` failures**; `dev_harness_2d` **82**; `floor_planner` **26**; `flutter build macos --release` and `flutter build web --release` both printed `✓ Built`. Every `analyze` and `format` exited 0, and no `analysis_options.yaml` was rewritten |
+| 11 | Permissions at press, and all-or-nothing at release | **PASS**, with Rulings 03-5 and 03-6 | `grip_cache_test.dart` (C5): `leaf grips are not live under a geometry denial (M-03ad)`; `select_tool_drag_test.dart`: `permissions at press: no leaf grips, a refused move stays a click, an instance still moves (M-03ad, M-03av)` (T13), `class 3b: a refused move never runs before the click toggles once, net (Ruling 03-6; M-03be)`; `selection_overlay_grips_test.dart` (P4): `no leaf grips are drawn under a geometry denial; the rotation grip still is, at its centre (M-03ad, M-03bi)`; `grip_drag_test.dart` (D8): `a refused member cancels the whole drag (M-03k)` |
+| 12 | Grips in O(1) draw calls; the cap at `kMaxGrips` | **PASS**, with Ruling 03-10 | `selection_overlay_grips_test.dart` (P2): `grips are one drawRawPoints per colour at 10 grips and at 300, and the hot grip one more, each at its grip (invariant 6, M-03v, M-03aq, M-03bh)`, and `the stretch buffer is reallocated only when the count changes, and never draws a stale grip (Ruling 03-10; M-03bf, M-03bf')`; `grip_cache_test.dart` (C4): `the cap: kMaxGrips grips are kept, kMaxGrips + 1 keep none (M-03z)` |
+| 13 | Every named mutant fired and killed, except M-03e | **PASS** | [plan-03-mutation-log.md](plan-03-mutation-log.md): **68 exercised: 65 killed, 1 designed survivor (M-03e), 2 equivalent (M-03ai's ordinal clause; `GripDrag._capture`'s `read` → `peek`), both by construction**. That covers the spec's 27, `ah′`, the plan's 23, M-03ai's variant, the controller's 10, and the final review's 5 (M-03bh…M-03bl) with the `read` → `peek` equivalent |
+| 14 | The allocation invariants pass unchanged | **PASS**, with Ruling 03-12 | `query_allocation_test.dart` (5) and `paint_allocation_test.dart` (3) are green and unedited: Task 11's transcripts are in the mutation log, and both run inside the 890 and 851 above, and inside the fix wave's 890 and 854 |
+| 15 | The four gate lines, the five goldens only, both builds | **PASS with the one recorded exception** | pasted above, twice (Task 12's run, and the fix wave's): `jet_cad_2d` **890**; `jet_cad_2d_flutter` **851, then 854 after the fix wave, pass, 1 skip, and only the five `text_ladder_golden_test.dart` failures**; `dev_harness_2d` **82**; `floor_planner` **26**; `flutter build macos --release` and `flutter build web --release` both printed `✓ Built`. Every `analyze` and `format` exited 0, and no `analysis_options.yaml` was rewritten |
 | 16 | A human looked, on macOS, in Chrome and in Firefox from `build/web` | **OWED: not looked at; the human looks after this branch is presented** | the checklist below |
 
 **15 of 16 PASS; criterion 16 is OWED.** No criterion is a MISS. No device
@@ -556,6 +602,15 @@ Each ruling is one line, with what it costs if it is wrong. The ones marked
 - **T12-a:** Task 12 does Steps 1–4 only. Step 5's ledger archive runs after
   the final whole-branch review and its fix wave, so the archive stays the
   last commit before the merge. Cost if wrong: none.
+- **F-a:** one fix wave carries the final review's full list, Task 12's
+  Important (the STATUS branch map) and the reviewer's fix-before-merge
+  triage. The shift-mid-drag minor is fixed rather than deferred: it is a
+  small, user-visible interaction bug in this plan's own feature. Cost if
+  wrong: a small extra production diff, covered by a named mutant (M-03bl).
+- **F-b:** the two other sessions' fix branches are recorded in STATUS, not
+  merged or touched by this plan. Their merge order relative to this branch
+  is the human's decision. Cost if wrong: a doc conflict at merge time,
+  resolved by whichever merges second.
 
 ---
 
@@ -568,7 +623,12 @@ Each ruling is one line, with what it costs if it is wrong. The ones marked
   nodes. The canvas, the index and the oracle do not. It is harmless while
   nothing writes the root's transform. The fix is to pin it to the identity,
   with a `validate` check or by refusing `TransformNodeCommand` on the root,
-  or else to make every walk apply it. That is its own task.
+  or else to make every walk apply it. That is its own task. **Its fix is
+  committed on `fix/root-transform-identity` at `776f201`** (another
+  session's, cut from `main` at `c09b747`), **not merged.** It pins the
+  root's transform to the identity. It edits this plan's spec and
+  `STATUS.md`, so whichever of the two branches merges second resolves the
+  doc conflict; the order is the human's decision.
 - **Grips as widgets** give up screen-reader and keyboard access. This is
   recorded for 12 (the app shell), which owns accessibility.
 - **Snapping to the dragged object's ghost** is kept (D8). If the look finds
@@ -581,12 +641,21 @@ Each ruling is one line, with what it costs if it is wrong. The ones marked
 - **F3 in a browser.** Chrome binds F3 to find-next. It is item 7 of the
   look; if the browser acts on it, the finding picks another key.
 
+**Named by the final review:**
+
+- **The move/rotate preview's point crosses allocate** four `Offset`s per
+  selected point per frame. That is 02's existing cross pattern, which the
+  Task 8 brief mandated. It breaches the frame-path rule ("nothing per
+  entity in steady state") for point keys, and `paint_allocation_test` does
+  not gate it.
+
 **Out of scope, from the ledger:**
 
 - **`PageComponent.copyWith(gridStepMm: <int>)` throws**
   (`page_component.dart` 168–170 casts with `as double?`). It is a
-  pre-existing Plan 04 bug, found by the Task 3 review, and offered to the
-  human as a separate fix task.
+  pre-existing Plan 04 bug, found by the Task 3 review. **Its fix is
+  committed on `fix/page-copywith-num` at `8385753`** (another session's,
+  cut from `main` at `e376ced`), **not merged.**
 
 **Deferred minors that no later task closed**, grouped by task, one line
 each:
@@ -596,8 +665,6 @@ each:
     are untested.
   - The radius-or-null sequence is duplicated between the circle and arc
     radius cases.
-  - The barrel's export order is not alphabetical; the brief mandated the
-    placement.
 - **Task 2:**
   - `rigidTransformLeaf`'s arc and text branches discard `transformedBy`'s
     scalars copy: one throwaway `Float64List` per call, at release rate only.
@@ -613,9 +680,6 @@ each:
   - `selection.keys.toSet()` and `worldBoundsOf`'s per-vertex allocations
     happen at event and rebuild rate, not on the frame path.
 - **Task 6:**
-  - The `read → peek` swap in `GripDrag._capture` is an equivalent mutant
-    today (`GeometryStore.replace` swaps objects). It was not fired or
-    logged.
   - M-03t's "gone" assertion lacks an `isNotNull` re-assert after the
     `instA` undo.
   - M-03p's `undoDepth == 0` assertion is vacuous at the `GripDrag` level.
@@ -625,18 +689,12 @@ each:
   - The leaf-capture sequence is duplicated between the reshape and
     `_capture`.
 - **Task 7:**
-  - `SelectTool.onPointerExit` still cancels a live drag. Only the layer's
-    capture guard prevents it. Document it or drop it in the final wave.
   - M-03s's fixture page origin (7000, 3000) sits on the absolute lattice,
     so an origin-ignoring grid would pass T5.
   - `_endDrag` resets the cursor to `defer` until the next hover.
   - A stale-body click release still uses the press-time `_downKey` (02's
     behaviour).
 - **Task 8:**
-  - The reshape preview's circle branch of `_reshapePath` has no dedicated
-    test. The arc branch is covered by M-03bg.
-  - The preview cross allocates four `Offset`s per selected point per frame
-    (02's pattern, mandated by the brief).
   - The snap marker's insertion, intersection and grid geometry is only
     partly asserted. The rotation grip's stem and radius, and the guide's
     1.0 and the marker's 1.5 strokes, are unasserted.
@@ -662,7 +720,21 @@ each:
 - Task 8's buffer rule (M-03bf, M-03bf′);
 - Task 8's arc preview branch (M-03bg);
 - Task 8's production repaint merge (Task 9, `PlannerView._repaint` includes
-  `grips`).
+  `grips`);
+- **closed by the final fix wave:**
+  - Task 1's barrel order: `lib/jet_cad_2d.dart`'s exports are in sorted
+    order, `grips.dart` and `drag_snap.dart` included (checked with `sort
+    -c`), so the line is dropped. The render barrel's four Plan 03 exports
+    sit in sorted position too. That barrel as a whole is not sorted
+    (`vertices_draw_sink.dart` at line 8, and `gpu/gpu_facade.dart`'s
+    commented `show` export ahead of the rest of the `gpu/` block), but
+    that ordering predates this plan, which added four lines and moved
+    none;
+  - Task 6's `read → peek` swap, fired and logged as equivalent;
+  - Task 7's `onPointerExit`, documented at the method as unreachable
+    mid-drag (the host never forwards an exit while a pointer is captured);
+  - Task 8's circle preview branch (M-03bj);
+  - Task 8's preview-cross allocation, promoted to named debt above.
 
 ---
 
@@ -697,7 +769,10 @@ original was rewritten.
 - **Invariant 5:** Ruling 03-12 (the three per-event O(1) allocations).
 - **Testing:** Ruling 03-16 (the differential's scale), Ruling 03-17's
   M-03ab…M-03ax table with ids, mutations and tests, and the
-  controller-added M-03ay…M-03bg from the task reviews.
+  controller-added M-03ay…M-03bg from the task reviews. The final fix wave
+  appended one more paragraph: M-03bh…M-03bl, the `read` → `peek`
+  equivalent, the 68-mutant tally, and why M-03bh's test also runs under an
+  unflipped camera.
 
 ---
 
@@ -716,3 +791,20 @@ original was rewritten.
 - `roadmap/00-README.md`: the 03 row in the status table.
 
 Task 12 touched no code.
+
+## Files the final fix wave touched
+
+- `packages/jet_cad_2d_flutter/test/selection_overlay_grips_test.dart`: P2
+  and P4 extended (M-03bh, M-03bi), and the circle preview test (M-03bj).
+- `packages/jet_cad_2d_flutter/test/support/grip_fixture.dart`:
+  `gripCamera` gained `flipY` (default `true`).
+- `packages/jet_cad_2d_flutter/test/select_tool_drag_test.dart`: the
+  grip-to-grip hover test (M-03bk) and the shift mid-drag test (M-03bl).
+- `packages/jet_cad_2d_flutter/lib/src/select_tool.dart`: `onKey`
+  re-targets on a shift key-down or key-up mid-drag; a doc comment on
+  `onPointerExit`.
+- `packages/jet_cad_2d/lib/src/document/grips.dart`: the θ = 0 doc comment,
+  qualified for a height-only text.
+- This note, the mutation log, the spec's Testing section (appended) and
+  `STATUS.md` (the branch map, the fix branches, Plan 04's merged state, and
+  the counts).

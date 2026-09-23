@@ -938,6 +938,28 @@ already guarded. All were killed.
 | M-03bf′ | the grip buffer only grows (`<` for `!=`) | the same test: 300 grips then 10 draws 10, not 300 stale points |
 | M-03bg | the arc reshape preview drops the origin from its centre | `test/selection_overlay_grips_test.dart`: an arc reshape preview is rebased too (new) |
 
+**Amended at execution (Plan 03, 2026-09-23), final fix wave:** the final
+whole-branch review found five more unguarded behaviours, M-03bh…M-03bl.
+All five were killed. M-03bl guards a production fix: a shift key-down or
+key-up mid-drag now re-targets from the last screen point at once, where it
+used to wait for the next pointer move. `GripDrag._capture`'s `read` →
+`peek` was fired too and is **equivalent** by construction:
+`GeometryStore.replace` installs fresh buffers, so a captured view never
+sees a later edit. The tally is 68 exercised: 65 killed, M-03e the designed
+survivor, and 2 equivalent.
+
+A y-flipped rotation is a reflection, so `gripCamera`'s matrix has `b == c`
+bit for bit, and an `m.b`/`m.c` transposition cannot be seen under it.
+M-03bh's test therefore also runs under `gripCamera(flipY: false)`.
+
+| id | mutation | must go red |
+|---|---|---|
+| M-03bh | `_paintGrips` projects x with `m.b` for `m.c` | `test/selection_overlay_grips_test.dart` P2, extended: every drawn grip pair equals its grip's screen point, under both cameras |
+| M-03bi | the rotation disc is drawn at its anchor, not its centre | `test/selection_overlay_grips_test.dart` P4, extended: the disc's centre and 4 px radius |
+| M-03bj | the circle reshape preview drops the origin from its centre | `test/selection_overlay_grips_test.dart`: a circle reshape preview is rebased too (new) |
+| M-03bk | a hover from grip to grip of one object does not notify | `test/select_tool_drag_test.dart`: grip-to-grip hover repaints once (new) |
+| M-03bl | a shift key mid-drag sets `_lastShift` but does not re-target | `test/select_tool_drag_test.dart`: shift pressed or released mid-drag re-targets at once (new) |
+
 ### Differential check
 
 `rigidTransformLeaf` is checked against an oracle that shares no code with

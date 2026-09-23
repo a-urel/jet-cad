@@ -1,8 +1,21 @@
 # Plan 03 (grips-and-transform) — mutation log
 
-**Tally: 62 mutants exercised — fired 60, killed 60, survived 1 (M-03e,
-designed), equivalent 1 (M-03ai's ordinal tie-break clause, by
-construction).**
+**Tally: 68 mutants exercised — killed 65, survived 1 (M-03e, designed),
+equivalent 2 (M-03ai's ordinal tie-break clause, and `GripDrag._capture`'s
+`read` → `peek`, both by construction).**
+
+The final fix wave (after the final whole-branch review at `136af89`) added
+seven to the 62 below: M-03bh … M-03bl, 5 killed, and the `read` → `peek`
+equivalent, logged under "Final-review mutants" at the end. Before it, the
+head line read "62 exercised — fired 60, killed 60, survived 1, equivalent
+1", which did not add up (60 + 1 + 1 = 62 counts the survivor and the
+equivalent as fired too); the paragraphs below keep the 62-mutant account of
+Task 10 as it was, and the sum is carried to 68 here:
+
+62 + 5 killed + 1 equivalent = 68 exercised; 60 + 5 = 65 killed; 65 killed
++ 1 survived + 2 equivalent = 68.
+
+The Task 10 account follows.
 
 - The spec's 27 (M-03a … M-03aa): 26 killed, 1 designed survivor (M-03e).
 - Plus M-03ah′ (Ruling from the addendum, a second worldBoundsOf case): 1
@@ -485,6 +498,62 @@ edit (mutant): select_tool.dart, _reshapePath, arc case: Offset(c[0] - ox, c[1] 
 RED (mutant): CI=true flutter test test/selection_overlay_grips_test.dart -> M-03bg test [E] -- Expected: -62.57, Actual: 7105.43, differs by 7168.0 (the origin's own magnitude); 7 passed, 1 failed
 restored: diff clean
 GREEN (restored): CI=true flutter test test/selection_overlay_grips_test.dart -> 8 tests, All tests passed.
+
+## Final-review mutants (M-03bh … M-03bl, and the read → peek equivalent)
+
+Fired by the final fix wave, after the final whole-branch review at
+`136af89`. Same method: `cp` to `mutation-backups/<basename>.<id>`, one edit,
+the named file run with `CI=true`, restore from the copy, `diff` clean. The
+tests landed in `722904b` (M-03bh, bi, bj) and `0cac4f4` (M-03bk, bl, with
+the shift fix). M-03bk and M-03bl were fired on `select_tool.dart` with the
+shift fix already applied, the content committed in `0cac4f4`.
+
+### M-03bh - grip draw positions: `m.c` -> `m.b` in the x projection (final review; P2 extended)
+Test: packages/jet_cad_2d_flutter/test/selection_overlay_grips_test.dart, P2, now "grips are one drawRawPoints per colour at 10 grips and at 300, and the hot grip one more, each at its grip (invariant 6, M-03v, M-03aq, M-03bh)" -- every drawn stretch/radius pair and centre pair equals `screenOf(camera, g.x, g.y)` for the corresponding `rig.grips.grips` entry (stretch and radius in list order, then the centres), within 1e-3 px, under `gripCamera` and under `gripCamera(flipY: false)`.
+Why the second camera: `gripCamera`'s linear part is `rotation(0.35) * scale(1.1, -1.1)`, a reflection, so its `b` and `c` are bit-identical (`sin * 1.1` and `(-sin) * (-1.1)`). Under it the mutant is invisible, which is why the reviewer saw it survive. The fixture gained a `flipY` parameter (default `true`, every existing caller unchanged).
+GREEN (unmutated): CI=true flutter test test/selection_overlay_grips_test.dart -> 9 tests, All tests passed!
+edit (mutant): selection_overlay.dart `_paintGrips`: `final x = m.a * g.x + m.c * g.y + m.e;` -> `final x = m.a * g.x + m.b * g.y + m.e;`
+RED (mutant): P2 [E] -- `Expected: a numeric value within <0.001> of <352.1063766754032>` `Actual: <2615.23193359375>` `Which: differs by <2263.125556918347>` "flipY false, grip 0, x". The flipped iteration runs first and passed all its assertions; the unflipped one caught it. +8 -1: Some tests failed.
+restored: diff clean
+
+### M-03bi - the rotation disc drawn at its anchor, not its centre (final review; P4 extended)
+Test: selection_overlay_grips_test.dart, P4, now "no leaf grips are drawn under a geometry denial; the rotation grip still is, at its centre (M-03ad, M-03bi)" -- the one `drawCircle` has centre `rotationGripOf(box, m).centre` (1e-9) and radius 4.0 (spec D6: an 8 px disc).
+GREEN (unmutated): CI=true flutter test test/selection_overlay_grips_test.dart -> 9 tests, All tests passed!
+edit (mutant): selection_overlay.dart `_paintGrips`: `canvas.drawCircle(g.centre, kRotationGripPixels / 2, _gripPaint);` -> `canvas.drawCircle(g.anchor, kRotationGripPixels / 2, _gripPaint);`
+RED (mutant): P4 [E] -- `Expected: a numeric value within <1e-9> of <60.13388887667952>` `Actual: <84.13388887667952>` `Which: differs by <24.0>` (kRotationGripOffset); +8 -1: Some tests failed.
+restored: diff clean
+
+### M-03bj - circle reshape preview, origin subtraction on the centre (final review; new test)
+New test: selection_overlay_grips_test.dart, "a circle reshape preview's centre is rebased by origin too (M-03bj)" -- the circle twin of M-03bg: reshape-drags `s.circle`'s radius grip (q = 0) under `gripCamera` (non-zero rebase origin), then checks the preview path's bounds (a full oval's bounds are tight) against the rebased centre and the new diameter, within 1e-3.
+GREEN (unmutated): CI=true flutter test test/selection_overlay_grips_test.dart -> 9 tests, All tests passed!
+edit (mutant): select_tool.dart `_reshapePath`, circle case: `center: Offset(c[0] - ox, c[1] - oy)` -> `center: Offset(c[0], c[1])`
+RED (mutant): M-03bj test [E] -- `Expected: a numeric value within <0.001> of <132.0>` `Actual: <7300.0>` `Which: differs by <7168.0>` (the origin's own magnitude); +8 -1: Some tests failed.
+restored: diff clean
+
+### M-03bk - a grip-to-grip hover does not repaint (final review; new test)
+New test: packages/jet_cad_2d_flutter/test/select_tool_drag_test.dart, "hovering from one grip to another of the same object repaints once (spec D5; M-03bk)" -- a selected line; hover its start grip, then its end grip: same cursor (`precise`), same object hover. Asserts `grips.hot` changed and the tool notified exactly once for that move.
+GREEN (unmutated): CI=true flutter test test/select_tool_drag_test.dart -> 23 tests, All tests passed!
+edit (mutant): select_tool.dart `_hoverAt`: `if (cursor == _cursor && !hotChanged) return;` -> `if (cursor == _cursor) return;`
+RED (mutant): M-03bk test [E] -- `Expected: <1>` `Actual: <0>` "only the hot grip changed, and the overlay must repaint it"; +22 -1: Some tests failed.
+restored: diff clean
+
+### M-03bl - shift mid-drag waits for the next pointer move (final review; production fix + new test)
+Production fix (`0cac4f4`): `SelectTool.onKey` -- a shift key-down or key-up (`shiftLeft`/`shiftRight`, not a repeat) while a move, rotate or reshape is live sets `_lastShift` and re-targets from the last screen point (the camera listener's own path), notifying. Key-downs are still consumed (D5).
+New test: select_tool_drag_test.dart, "shift pressed or released mid-drag re-targets at once, with no pointer move (spec D8; M-03bl)" -- a body move to a point 40 world units right and 7 up; shift key-down with no pointer move pins the preview's `f` to exactly 0.0 (ortho in world axes) and keeps `e`; shift key-up restores the unconstrained `f`; one notification each.
+RED (before the fix): CI=true flutter test test/select_tool_drag_test.dart -> the new test [E] -- `Expected: <0.0>` `Actual: <7.0>`; +22 -1: Some tests failed.
+GREEN (with the fix): CI=true flutter test test/select_tool_drag_test.dart -> 23 tests, All tests passed!
+edit (mutant): select_tool.dart `onKey`: delete the `_onCamera();` line inside the shift branch (the `_lastShift` write stays)
+RED (mutant): M-03bl test [E] -- `Expected: <0.0>` `Actual: <7.0>` "ortho in world axes: the minor axis is pinned to the base"; +22 -1: Some tests failed.
+restored: diff clean
+
+### GripDrag._capture read -> peek (Task 6 review; equivalent)
+file: packages/jet_cad_2d_flutter/lib/src/grip_drag.dart, `_capture`
+edit: `document.geometry.read(document.entities.geomIndexAt(slot))` -> `document.geometry.peek(document.entities.geomIndexAt(slot))` (the leaf capture holds the store's own payload instead of a copy)
+test: CI=true flutter test test/grip_drag_test.dart test/select_tool_drag_test.dart -> +34: All tests passed! Then the whole render suite, CI=true flutter test -> `00:12 +854 ~1 -5: Some tests failed.`, the five failures being exactly the standing `text_ladder_golden_test.dart` rungs 1-5 (`RenderBackend.canvas`).
+result: SURVIVED -- EQUIVALENT, by construction. `GeometryStore.replace` installs a fresh `GeometryPayload` with fresh buffers (`_payloads[slot] = GeometryPayload(coords: Float64List.fromList(...), ...)`) and `remove` installs empty ones; nothing writes a stored payload's buffers in place. So a `peek` view taken at capture is never changed by a later edit to its slot, and it answers exactly what the `read` copy would. It stays `read` in production: `peek`'s contract forbids holding the result, and the equivalence rests on a store implementation detail, not on that contract. Does not count against the "only M-03e survives" rule.
+restored: diff clean
+
+**Final-review tally:** 6 exercised -- 5 killed (M-03bh, M-03bi, M-03bj, M-03bk, M-03bl), 1 equivalent (read -> peek). With the 62 above: 68 exercised, 65 killed, 1 survived (M-03e), 2 equivalent.
 
 ## Invariants and greps
 

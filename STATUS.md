@@ -6,14 +6,20 @@ decision.**
 - **What it ran:** twelve tasks, cut from `main` at `e376ced`. Tasks 1–11
   are at `e376ced..7879e36`, and Task 12 (the gate lines, the results note,
   the spec amendments, this file and the roadmap) is on top.
-- **What comes next:** the final whole-branch review and its fix wave. The
-  ledger is archived after them, as the branch's last commit before the
-  merge (Ruling T12-a).
-- **The gate lines**, all green on the final tree: engine **890**; render
-  layer **851** + 1 skip + the five standing text goldens; harness **82**;
-  app **26**; both release builds `✓ Built`.
-- **Mutants:** **62 exercised: 60 killed, 1 designed survivor (M-03e), 1
-  equivalent (M-03ai's ordinal clause).**
+- **The final whole-branch review** ran at `136af89` ("With fixes"). Its
+  fix wave is on top: `722904b` (tests), `0cac4f4` (the shift mid-drag fix),
+  `509b9f3` (a doc comment) and a docs commit.
+- **What comes next:** the re-review of the fix wave. The ledger is then
+  archived, as the branch's last commit before the merge (Ruling T12-a).
+- **The gate lines**, all green on the fix wave's tree: engine **890**;
+  render layer **854** + 1 skip + the five standing text goldens; harness
+  **82**; app **26**; both release builds `✓ Built`.
+- **Mutants:** **68 exercised: 65 killed, 1 designed survivor (M-03e), 2
+  equivalent (M-03ai's ordinal clause; `GripDrag._capture`'s `read` →
+  `peek`).**
+- **Two other sessions' fix branches** are committed and not merged:
+  `fix/page-copywith-num` and `fix/root-transform-identity`. See the
+  [Branch and worktree map](#branch-and-worktree-map).
 - **The differential:** seed `0x5EED0003`, 200 trials, worst residual
   4.66e-10.
 - **Exit gate: 15 of 16.** Criterion 16, the human's look on macOS, in
@@ -151,19 +157,22 @@ shows it (`osnap-text`).
   section and the roadmap) is on top.
 
 **Executed, not merged. The merge is the human's decision.** The final
-whole-branch review and its fix wave come first. The ledger is then archived
-to `docs/superpowers/ledgers/2026-09-23-grips-and-transform/` as the
-branch's last commit before the merge (Ruling T12-a).
+whole-branch review ran at `136af89` and returned "With fixes". Its fix
+wave (`722904b`, `0cac4f4`, `509b9f3` and a docs commit) is on top, and its
+re-review comes next. The ledger is then archived to
+`docs/superpowers/ledgers/2026-09-23-grips-and-transform/` as the branch's
+last commit before the merge (Ruling T12-a).
 
 **Documents:**
 - Spec: [2026-09-23-grips-and-transform-design.md](docs/superpowers/specs/2026-09-23-grips-and-transform-design.md),
   revision 2, amended at execution 2026-09-23 in eight places: D2, D3, D5,
   D6, D7, D8, invariant 5 and Testing. None rewrites the original text.
+  The final fix wave appended one more Testing paragraph (M-03bh…M-03bl).
 - Plan: [2026-09-23-grips-and-transform.md](docs/superpowers/plans/2026-09-23-grips-and-transform.md).
 - Results: [2026-09-23-plan-03-results.md](docs/superpowers/notes/2026-09-23-plan-03-results.md).
 - Mutation log: [plan-03-mutation-log.md](docs/superpowers/notes/plan-03-mutation-log.md).
-  **62 exercised: 60 killed, 1 designed survivor (M-03e), 1 equivalent
-  (M-03ai's ordinal clause).**
+  **68 exercised: 65 killed, 1 designed survivor (M-03e), 2 equivalent
+  (M-03ai's ordinal clause; `GripDrag._capture`'s `read` → `peek`).**
 
 **Delivered:**
 - **In `jet_cad_2d`:**
@@ -201,7 +210,8 @@ branch's last commit before the merge (Ruling T12-a).
 | 9 | app: the caches in the shell, F3, `osnap-text`, the test seam | `32fa2cd` |
 | 10 | the mutation sweep: seven review-driven tests `301d613..7dcb36a`, then the log | `061fd85` |
 | 11 | the allocation gates and the greps | `7879e36` |
-| 12 | gate lines, results note, spec amendments, STATUS, roadmap | this commit |
+| 12 | gate lines, results note, spec amendments, STATUS, roadmap | `136af89` |
+| final fix wave | the final review's findings: grip draw positions, the rotation disc, the circle preview, grip-to-grip hover (tests, `722904b`); shift mid-drag re-targets at once (`0cac4f4`); two doc comments; STATUS, the results note, the log and the spec | the docs commit on top of `509b9f3` |
 
 **Rulings a reader must know.**
 - **World is root space.** The drag never reads or writes the root's
@@ -231,10 +241,10 @@ if wrong, is in the results note.
 | quantity | value |
 |---|---|
 | `packages/jet_cad_2d` | **890** pass (`00:03 +890: All tests passed!`, exit 0), analyze and format clean. 862 at the branch point, +26 planned, +2 from Task 10's addendum (M-03ay, M-03az) |
-| `packages/jet_cad_2d_flutter` | **851** pass, 1 skip, and only the five pre-existing `text_ladder_golden_test.dart` failures (`00:12 +851 ~1 -5: Some tests failed.`, exit 1), analyze and format clean. 797 at the branch point, +46 planned, +3 from Task 7's fix round, +5 from Task 10's addendum |
+| `packages/jet_cad_2d_flutter` | **854** pass, 1 skip, and only the five pre-existing `text_ladder_golden_test.dart` failures (`00:12 +854 ~1 -5: Some tests failed.`, exit 1), analyze and format clean. 797 at the branch point, +46 planned, +3 from Task 7's fix round, +5 from Task 10's addendum, +3 from the final fix wave (851 at Task 12) |
 | `apps/dev_harness_2d` | **82** (`00:20 +82: All tests passed!`, exit 0), unchanged, because the harness is untouched; analyze and format clean |
 | `apps/floor_planner` | **26** (`00:01 +26: All tests passed!`, exit 0). 21 at the branch point, +4 planned, +1 (Task 9's shell mid-drag removal test). `flutter build macos --release` and `flutter build web --release` both `✓ Built` |
-| mutations | **62 exercised: 60 killed, 1 designed survivor (M-03e, its 1-ulp companion green), 1 equivalent (M-03ai's ordinal clause, by construction)**. The spec's 27, `ah′`, the plan's 23 (Ruling 03-17) and the controller's 10 from the reviews |
+| mutations | **68 exercised: 65 killed, 1 designed survivor (M-03e, its 1-ulp companion green), 2 equivalent (M-03ai's ordinal clause; `GripDrag._capture`'s `read` → `peek`), both by construction**. The spec's 27, `ah′`, the plan's 23 (Ruling 03-17), the controller's 10 from the task reviews and the final review's 5 (M-03bh…M-03bl) |
 | the differential (criterion 3) | seed **`0x5EED0003`**, **200 trials**; worst residual per kind: point 0.0, line 2.91e-10, polyline, circle, arc and text 4.66e-10, against a bound of ~1.1e-7 (Ruling 03-16) |
 | the two allocation invariants | `query_allocation_test.dart` (5) and `paint_allocation_test.dart` (3) are green and unedited, and the frame-path files are untouched (Task 11) |
 | the look | **OWED: not looked at**. Thirteen items per platform (macOS, Chrome, Firefox from `build/web`), itemised in the results note |
@@ -262,14 +272,21 @@ The look covers thirteen items:
 - grips and drags with 04's page grid visible underneath.
 
 **Debt, in one line each:**
-- the root-transform disagreement (spec, Open questions);
+- the root-transform disagreement (spec, Open questions): its fix, pinning
+  the root's transform to the identity, is committed on
+  `fix/root-transform-identity` at `776f201`, not merged;
 - grips as widgets (accessibility, for 12);
 - snapping to the dragged object's ghost;
 - move exactness is within one rounding;
 - the unfillable room's preview;
 - F3 in a browser;
 - `PageComponent.copyWith(gridStepMm: <int>)` throws, a pre-existing Plan 04
-  bug offered as a separate fix task;
+  bug: its fix is committed on `fix/page-copywith-num` at `8385753`, not
+  merged;
+- the move/rotate preview's point crosses allocate four `Offset`s per
+  selected point per frame (02's cross pattern), which breaches the
+  frame-path rule for point keys and is not gated by
+  `paint_allocation_test`;
 - the deferred minors of Tasks 1, 2, 4, 6, 7, 8 and 9, listed by task in
   the results note.
 
@@ -1248,8 +1265,22 @@ into a standing test. Full account:
 | Location | Branch | State |
 |---|---|---|
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i and **GPU Plans A, B, C and D** merged |
+| `.claude/worktrees/plan-03-grips-and-transform` | `plan-03/grips-and-transform` | **this plan (sub-project 03)**, cut from `main` at `e376ced`: executed, final fix wave on top, awaiting its re-review, the ledger archive and the human's merge decision |
+| `.claude/worktrees/focused-nightingale-510bd1` | `fix/page-copywith-num` | head `8385753`, cut from `main` at `e376ced`: the `PageComponent.copyWith(gridStepMm: <int>)` fix. Committed, not merged. Another session's work |
+| `.claude/worktrees/hungry-haibt-cf67c0` | `fix/root-transform-identity` | head `776f201`, cut from `main` at `c09b747`, before the Plan 03 plan commit: pins the root's transform to the identity. Committed, not merged. Another session's work |
 
-**No worktrees. Nothing is in flight.**
+**Three worktrees are in flight** (checked with `git worktree list` and
+`git log --oneline -1 <branch>` on 2026-09-23). Plan 03 neither merges nor
+touches the two fix branches (Ruling F-b).
+
+`fix/root-transform-identity` edits this plan's spec
+(`2026-09-23-grips-and-transform-design.md`) and this file, so it
+conflicts with `plan-03/grips-and-transform` in the docs: a `git
+merge-tree` dry run of the two reports a content conflict in `STATUS.md`,
+while the spec auto-merges. **The merge order is the human's decision.
+Whichever branch merges second resolves the doc conflict.** That fix closes this plan's "root transform" debt item.
+`fix/page-copywith-num` touches only `page_component.dart` and its test, so
+it should not conflict with this branch.
 
 `plan-d/fills` was merged `--no-ff` at `de962bd` and deleted (it was at
 `27b2122`), after the full three-package gate was re-run on the merged tree.
@@ -1460,8 +1491,8 @@ plus the results-note task at `1618111` and a final fix wave (`1fe1fcc` +
 this commit) that closed every finding of the whole-branch review — the
 load-bearing one being Ruling 04-19, `components` ranked lowest in
 `Capability` so a compound that moves a node and edits the page is no
-longer skipped by the index and the tile cache. The branch is NOT
-merged.**
+longer skipped by the index and the tile cache. The branch was merged
+afterwards, at `e4e3f80`.**
 The exit gate is **15 of 16**: criterion 16 (a human looks, on macOS, in
 Chrome and in Firefox from `build/web`, at the sheet under the plan, the
 grid at three zoom levels, the ruler zero at the sheet corner with labels in
@@ -1495,19 +1526,22 @@ decision.**
   was written the same day, 2026-09-23.
 - **Where it stands:** all twelve tasks ran on the branch, cut from `main`
   at `e376ced`: Tasks 1–11 at `e376ced..7879e36`, and Task 12's results
-  note on top.
+  note at `136af89`. The final whole-branch review ran at `136af89` ("With
+  fixes"), and its fix wave is on top: `722904b`, `0cac4f4`, `509b9f3` and
+  a docs commit.
 - **What resumes here:**
-  1. the final whole-branch review;
-  2. its fix wave;
-  3. the ledger archive, `.superpowers/sdd/2026-09-23-grips-and-transform/`
+  1. the re-review of the final fix wave;
+  2. the ledger archive, `.superpowers/sdd/2026-09-23-grips-and-transform/`
      → `docs/superpowers/ledgers/2026-09-23-grips-and-transform/`, as the
      branch's last commit (Ruling T12-a);
-  4. the human's merge decision. If the auto-mode classifier refuses the
+  3. the human's merge decision. If the auto-mode classifier refuses the
      merge, try once from the main checkout, then hand the human the exact
-     command.
-- **The gate lines** are green on the final tree: engine 890; render layer
-  851 + 1 skip + the five standing text goldens; harness 82; app 26; both
-  builds.
+     command. `fix/root-transform-identity` edits this plan's spec and this
+     file, and the two conflict in `STATUS.md` whichever order they merge
+     in (see the [Branch and worktree map](#branch-and-worktree-map)).
+- **The gate lines** are green on the fix wave's tree: engine 890; render
+  layer 854 + 1 skip + the five standing text goldens; harness 82; app 26;
+  both builds.
 - **Exit gate: 15 of 16.** Criterion 16, a human's look on macOS, in Chrome
   and in Firefox from `build/web`, is **OWED: not looked at; the human looks
   after this branch is presented**. It has thirteen items per platform,
@@ -1515,8 +1549,9 @@ decision.**
   [2026-09-23-plan-03-results.md](docs/superpowers/notes/2026-09-23-plan-03-results.md).
   The one with a consequence: if a browser's find-next also fires on F3,
   the finding picks another key.
-- **Out of scope, offered to the human as its own fix:** the pre-existing
-  Plan 04 bug `PageComponent.copyWith(gridStepMm: <int>)` throws.
+- **Out of scope, fixed by another session:** the pre-existing Plan 04 bug
+  `PageComponent.copyWith(gridStepMm: <int>)` throws. The fix is committed
+  on `fix/page-copywith-num` at `8385753`, not merged.
 
 See [Plan 03](#plan-03--grips-and-transform-executed-on-plan-03grips-and-transform-not-merged).
 The other nine sub-projects have not started.
