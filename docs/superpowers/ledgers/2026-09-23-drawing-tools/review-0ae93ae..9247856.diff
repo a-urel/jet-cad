@@ -1,0 +1,370 @@
+# Review package: 0ae93ae..HEAD
+
+## Commits
+9247856 feat(draw): circle and centre-start-end arc tools
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart |   2 +
+ .../jet_cad_2d_flutter/lib/src/draw/arc_tool.dart  |  78 +++++++++++++
+ .../lib/src/draw/circle_tool.dart                  |  45 ++++++++
+ .../test/draw/arc_tool_test.dart                   | 125 +++++++++++++++++++++
+ .../test/draw/circle_tool_test.dart                |  57 ++++++++++
+ 5 files changed, 307 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+index f7abd79..1209256 100644
+--- a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
++++ b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+@@ -2,20 +2,22 @@
+ library;
+ 
+ export 'src/camera_controller.dart';
+ export 'src/camera_gesture_detector.dart';
+ export 'src/canvas_draw_sink.dart';
+ export 'src/chrome_style.dart';
+ export 'src/vertices_draw_sink.dart';
+ export 'src/draft_canvas.dart';
+ export 'src/draft_painter.dart';
+ export 'src/draw_sink.dart';
++export 'src/draw/arc_tool.dart';
++export 'src/draw/circle_tool.dart';
+ export 'src/draw/placement_tool.dart';
+ export 'src/draw/line_tool.dart';
+ export 'src/draw/polyline_tool.dart';
+ export 'src/draw/rectangle_tool.dart';
+ export 'src/flutter_text_measurer.dart';
+ export 'src/gesture_policy.dart';
+ // The resident-GPU backend's own public surface. `gpu_facade.dart` stays
+ // unexported -- it is the one file allowed to import a GPU package, and it
+ // carries more than the two small functions (`gpuAvailable`,
+ // `debugSetGpuFactory`) and the public typedef `GpuContextFactory` an app
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draw/arc_tool.dart b/packages/jet_cad_2d_flutter/lib/src/draw/arc_tool.dart
+new file mode 100644
+index 0000000..d21330f
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/draw/arc_tool.dart
+@@ -0,0 +1,78 @@
++import 'dart:math' as math;
++import 'dart:ui' show Canvas, Offset, Rect;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../tool.dart';
++import 'placement_tool.dart';
++
++/// Spec 05 D8: centre, start, end. The start sets the radius and the start
++/// angle; the end sets only the end angle. The sweep follows the angle the
++/// pointer travelled around the centre ([SweepTracker]). Fill does not
++/// apply.
++class ArcTool extends PlacementTool {
++  ArcTool();
++
++  final SweepTracker _tracker = SweepTracker();
++  double _r = 0;
++
++  @override
++  String get name => 'Arc';
++
++  @override
++  Vector2? get orthoBase => points.isEmpty ? null : points.first;
++
++  double _angleOf(Vector2 p) =>
++      math.atan2(p.y - points.first.y, p.x - points.first.x);
++
++  @override
++  void hovered(Vector2 raw) {
++    if (points.length == 2) _tracker.track(_angleOf(raw));
++  }
++
++  @override
++  void accept(Vector2 point, ToolContext ctx) {
++    switch (points.length) {
++      case 0:
++        points.add(point);
++      case 1:
++        final r = points.first.distanceTo(point);
++        if (isDegenerateRadius(r)) return;
++        _r = r;
++        _tracker.begin(_angleOf(point));
++        points.add(point);
++      default:
++        final sweep = _tracker.sweepTo(_angleOf(point));
++        if (sweep == 0) return;
++        commitShape(ctx, EntityKind.arc,
++            arcPayload(points.first, _r, _tracker.start, sweep));
++        clearShape();
++    }
++  }
++
++  @override
++  void paintRubberBand(Canvas canvas, Vector2 origin, double scale) {
++    if (points.isEmpty || !hoverVisible) return;
++    final c = points.first;
++    final co = Offset(c.x - origin.x, c.y - origin.y);
++    final h = hoverPoint;
++    band.reset();
++    if (points.length == 1) {
++      band
++        ..moveTo(co.dx, co.dy)
++        ..lineTo(h.x - origin.x, h.y - origin.y);
++    } else {
++      final sweep = _tracker.sweepTo(_angleOf(h));
++      final start = _tracker.start;
++      band
++        ..addArc(Rect.fromCircle(center: co, radius: _r), start, sweep)
++        ..moveTo(co.dx, co.dy)
++        ..lineTo(co.dx + _r * math.cos(start), co.dy + _r * math.sin(start))
++        ..moveTo(co.dx, co.dy)
++        ..lineTo(co.dx + _r * math.cos(start + sweep),
++            co.dy + _r * math.sin(start + sweep));
++    }
++    canvas.drawPath(band, bandPaint);
++  }
++}
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draw/circle_tool.dart b/packages/jet_cad_2d_flutter/lib/src/draw/circle_tool.dart
+new file mode 100644
+index 0000000..c6365d6
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/draw/circle_tool.dart
+@@ -0,0 +1,45 @@
++import 'dart:ui' show Canvas, Offset, Rect;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../tool.dart';
++import 'placement_tool.dart';
++
++/// Spec 05 D7: the centre, then a point on the circle.
++class CircleTool extends PlacementTool {
++  CircleTool({super.fill});
++
++  @override
++  String get name => 'Circle';
++
++  @override
++  Vector2? get orthoBase => points.isEmpty ? null : points.first;
++
++  @override
++  void accept(Vector2 point, ToolContext ctx) {
++    if (points.isEmpty) {
++      points.add(point);
++      return;
++    }
++    final c = points.first;
++    final r = c.distanceTo(point);
++    if (isDegenerateRadius(r)) return;
++    commitShape(ctx, EntityKind.circle, circlePayload(c, r), fillable: true);
++    clearShape();
++  }
++
++  @override
++  void paintRubberBand(Canvas canvas, Vector2 origin, double scale) {
++    if (points.isEmpty || !hoverVisible) return;
++    final c = points.first, h = hoverPoint;
++    final r = c.distanceTo(h);
++    band
++      ..reset()
++      ..addOval(Rect.fromCircle(
++          center: Offset(c.x - origin.x, c.y - origin.y), radius: r))
++      ..moveTo(c.x - origin.x, c.y - origin.y)
++      ..lineTo(h.x - origin.x, h.y - origin.y);
++    canvas.drawPath(band, bandPaint);
++  }
++}
+diff --git a/packages/jet_cad_2d_flutter/test/draw/arc_tool_test.dart b/packages/jet_cad_2d_flutter/test/draw/arc_tool_test.dart
+new file mode 100644
+index 0000000..0a145c8
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/draw/arc_tool_test.dart
+@@ -0,0 +1,125 @@
++import 'dart:math' as math;
++
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/src/draw/arc_tool.dart';
++
++import '../support/draw_fixture.dart';
++import '../support/grip_fixture.dart' show screenOf, snapshot;
++
++GeometryPayload payloadOf(DraftDocument doc, Handle h) =>
++    doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(h)!));
++
++Handle arcOf(DraftDocument doc) => [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.kindAt(slot) == EntityKind.arc)
++          doc.entities.handleAt(slot),
++    ].single;
++
++const double cx = 7150.5, cy = 3120.25;
++
++/// The pointer at [angle] on a circle of [r] around the centre.
++void at(DrawRig rig, double angle, double r,
++        {bool click = false, bool down = false}) =>
++    down
++        ? downAt(
++            rig,
++            screenOf(
++                rig.camera, cx + r * math.cos(angle), cy + r * math.sin(angle)))
++        : click
++            ? clickAt(
++                rig,
++                screenOf(rig.camera, cx + r * math.cos(angle),
++                    cy + r * math.sin(angle)))
++            : hoverAt(
++                rig,
++                screenOf(rig.camera, cx + r * math.cos(angle),
++                    cy + r * math.sin(angle)));
++
++void main() {
++  for (final flipY in const [true, false]) {
++    test(
++        'AR1 flipY $flipY: an asymmetric CCW arc stores start then sweep '
++        '(M-05e)', () {
++      final s = drawScene();
++      final rig =
++          drawRig(s.document, ArcTool(), flipY: flipY, objectSnap: false);
++      clickAt(rig, screenOf(rig.camera, cx, cy));
++      at(rig, 0.3, 40, click: true);
++      for (final a in const [0.8, 1.4, 2.0]) {
++        at(rig, a, 40);
++      }
++      at(rig, 2.2, 55, click: true); // the end need not be on the circle
++      final p = payloadOf(s.document, arcOf(s.document));
++      final start = p.scalars[1], sweep = p.scalars[2];
++      expect(start, closeTo(0.3, 1e-6));
++      expect(sweep, closeTo(1.9, 1e-6));
++      expect(p.scalars[0], closeTo(40, 1e-6));
++      expect(rig.tool.points, isEmpty, reason: 'cleared after the commit');
++    });
++  }
++
++  test('AR2 a clockwise path gives a negative sweep (M-05g)', () {
++    final s = drawScene();
++    final rig = drawRig(s.document, ArcTool(), objectSnap: false);
++    clickAt(rig, screenOf(rig.camera, cx, cy));
++    at(rig, 0.3, 40, click: true);
++    for (final a in const [0.0, -0.5, -1.0]) {
++      at(rig, a, 40);
++    }
++    at(rig, -1.2, 40, click: true);
++    final p = payloadOf(s.document, arcOf(s.document));
++    expect(p.scalars[2], closeTo(-1.5, 1e-6));
++  });
++
++  test('AR3 a path across the ±π seam keeps its direction (M-05f)', () {
++    final s = drawScene();
++    final rig = drawRig(s.document, ArcTool(), objectSnap: false);
++    clickAt(rig, screenOf(rig.camera, cx, cy));
++    at(rig, 2.9, 40, click: true);
++    for (final a in const [3.05, -3.05, -2.9]) {
++      at(rig, a, 40);
++    }
++    at(rig, -2.8, 40, click: true);
++    final p = payloadOf(s.document, arcOf(s.document));
++    expect(p.scalars[2], greaterThan(0));
++    expect(p.scalars[2], closeTo(-2.8 + 2 * math.pi - 2.9, 1e-6));
++  });
++
++  test('AR4 an end press with no hover after the start is CCW (M-05z)', () {
++    final s = drawScene();
++    final rig = drawRig(s.document, ArcTool(), objectSnap: false);
++    downAt(rig, screenOf(rig.camera, cx, cy));
++    at(rig, 0.3, 40, down: true);
++    at(rig, -1.0, 40, down: true);
++    final p = payloadOf(s.document, arcOf(s.document));
++    expect(p.scalars[2], greaterThan(0), reason: 'τ == 0 is CCW');
++    expect(p.scalars[2], closeTo(2 * math.pi - 1.3, 1e-6));
++  });
++
++  test('AR5 Fill does not apply to an arc', () {
++    final s = drawScene();
++    final fill = ValueNotifier<bool>(true);
++    addTearDown(fill.dispose);
++    final rig = drawRig(s.document, ArcTool(), objectSnap: false);
++    clickAt(rig, screenOf(rig.camera, cx, cy));
++    at(rig, 0.3, 40, click: true);
++    at(rig, 1.0, 40);
++    at(rig, 1.2, 40, click: true);
++    expect(s.document.fills.fillsOf(arcOf(s.document)), isEmpty);
++    expect(fill.value, isTrue);
++  });
++
++  test('AR6 an end on the start ray is refused and the tool waits', () {
++    final s = drawScene();
++    final rig = drawRig(s.document, ArcTool(), objectSnap: false);
++    clickAt(rig, screenOf(rig.camera, cx, cy));
++    at(rig, 0.3, 40, click: true);
++    final before = snapshot(s.document);
++    downAt(rig,
++        screenOf(rig.camera, cx + 70 * math.cos(0.3), cy + 70 * math.sin(0.3)));
++    expect(snapshot(s.document), before);
++    expect(rig.tool.isPending, isTrue);
++  });
++}
+diff --git a/packages/jet_cad_2d_flutter/test/draw/circle_tool_test.dart b/packages/jet_cad_2d_flutter/test/draw/circle_tool_test.dart
+new file mode 100644
+index 0000000..3af937f
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/draw/circle_tool_test.dart
+@@ -0,0 +1,57 @@
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/src/draw/circle_tool.dart';
++
++import '../support/draw_fixture.dart';
++import '../support/grip_fixture.dart' show screenOf, snapshot;
++
++GeometryPayload payloadOf(DraftDocument doc, Handle h) =>
++    doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(h)!));
++
++List<Handle> ofKind(DraftDocument doc, EntityKind kind) => [
++      for (final slot in doc.entities.liveSlots)
++        if (doc.entities.kindAt(slot) == kind) doc.entities.handleAt(slot),
++    ];
++
++void main() {
++  for (final flipY in const [true, false]) {
++    test('C1 flipY $flipY: centre and a point on the circle', () {
++      final s = drawScene();
++      final rig =
++          drawRig(s.document, CircleTool(), flipY: flipY, objectSnap: false);
++      final c = screenOf(rig.camera, 7050.5, 3080.25);
++      final r = screenOf(rig.camera, 7091.75, 3102.5);
++      clickAt(rig, c);
++      clickAt(rig, r);
++      final p =
++          payloadOf(s.document, ofKind(s.document, EntityKind.circle).single);
++      final wc = worldAt(rig, c), wr = worldAt(rig, r);
++      expect(p.coords.toList(), [wc.x, wc.y]);
++      expect(p.scalars.toList(), [wc.distanceTo(wr)]);
++    });
++  }
++
++  test('C2 with Fill on, a circle commits as one region', () {
++    final s = drawScene();
++    final fill = ValueNotifier<bool>(true);
++    addTearDown(fill.dispose);
++    final rig = drawRig(s.document, CircleTool(fill: fill), objectSnap: false);
++    clickAt(rig, screenOf(rig.camera, 7050, 3080));
++    clickAt(rig, screenOf(rig.camera, 7090, 3100));
++    final circle = ofKind(s.document, EntityKind.circle).single;
++    expect(s.document.fills.fillsOf(circle), hasLength(1));
++    expect(s.document.commands.undoDepth, 1);
++  });
++
++  test('C3 a zero radius is refused', () {
++    final s = drawScene();
++    final rig = drawRig(s.document, CircleTool(), objectSnap: false);
++    final c = screenOf(rig.camera, 7050, 3080);
++    clickAt(rig, c);
++    final before = snapshot(s.document);
++    clickAt(rig, c);
++    expect(snapshot(s.document), before);
++    expect(rig.tool.isPending, isTrue);
++  });
++}

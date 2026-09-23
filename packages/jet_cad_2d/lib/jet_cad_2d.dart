@@ -16,6 +16,7 @@ export 'src/document/commands.dart';
 export 'src/document/component.dart';
 export 'src/document/doc_change.dart';
 export 'src/document/draft_document.dart';
+export 'src/document/drafting.dart';
 export 'src/document/extents.dart';
 export 'src/document/fill_index.dart';
 export 'src/document/grips.dart';

@@ -308,6 +308,18 @@ class PlacementTool extends Tool`.
    false, the shape is dropped and nothing is dispatched.
 2. Otherwise the command goes to `ctx.execute`.
 
+**Amended at execution (Plan 05, final review):** Ruling F-2. A key-down
+of `LogicalKeyboardKey.f3` or `LogicalKeyboardKey.keyF`, with no control,
+meta or alt modifier held (`HardwareKeyboard.instance`), returns
+`KeyEventResult.ignored` even while a shape is pending, instead of the
+`handled` this section's "every other key-down" rule would otherwise give
+it. Both bubble to the shell, which toggles object snap (F3) or Fill (F);
+neither ever touches the document, so the reason the rule swallows every
+other key-down — keeping undo and redo off a half-placed shape — does not
+apply to them. Without this, F3 (the only object-snap toggle) was
+unreachable while a polyline was pending. Every other key-down mid-shape,
+and both undo keys, stay swallowed exactly as this section says.
+
 ### D4 — Resolving a point
 
 A raw world point `raw` from a `ToolPointerEvent` resolves **in exactly
@@ -347,6 +359,14 @@ this order**. The first step that produces a point wins.
 has already resolved through the inverse camera. **A tool never makes a
 point from `event.screen`** (M-05a). It keeps the screen point only to
 re-resolve a hover.
+
+**Amended at execution (Plan 05):** Ruling 05-2. A self-snap's hover
+marker is drawn through `drawSnapMarker(..., SnapKind.endpoint, ...)`,
+the same function object snap itself uses, rather than a bespoke square
+painted by the tool. The engine's own endpoint marker *is* the "own
+endpoint square" this section calls for, so the base sets
+`_hover.objectKind = SnapKind.endpoint` for a self-snap and draws through
+the one marker function.
 
 ### D5 — Palette, shortcuts, and returning to Select (human)
 
@@ -395,6 +415,24 @@ reaches the shell.
 
 **Tools stay armed after each shape (human).** Finishing a shape re-arms
 the same tool with no points placed.
+
+**Amended at execution (Plan 05):** Ruling 05-6 (the palette and the Fill
+checkbox are wrapped in `ExcludeFocus` and never take focus at all, rather
+than acting on `InteractionLayer`'s focus node, which is private —
+"focus stays on the canvas" holds because the canvas is `autofocus: true`
+and re-takes focus on every pointer-down) and Ruling 05-8 (the shortcut
+guard also wraps the page panel's scale field, and it also maps meta+Z
+and ctrl+Z, so cmd+Z typed into either field never reaches the document).
+Two findings from Task 7's fix round narrow this section further:
+**Ruling T7-a**, spec D3 wins over this plan's own Review Focus 2 — every
+key-down mid-shape is swallowed, so a tool shortcut does not switch tools
+mid-polyline; switching mid-shape needs Escape first, or the palette, and
+`ToolController.activate` cancels byte-identically either way. **Ruling
+T7-c**, Escape joins the shortcut guard's map alongside the letters and
+the undo keys, exactly as "Escape … as the shell binds them" requires —
+without it, Escape typed into a focused field (the page-scale field, or
+the text field of D9) dropped a pending shape at the shell instead of
+being handled by the field itself.
 
 ### D6 — Line and polyline (human)
 
@@ -523,6 +561,17 @@ start first (M-05e). **Fill does not apply.**
 - after the start, the arc from `start` through `sweepTo(hover angle)`,
   plus two 1 px radius lines.
 
+**Amended at execution (Plan 05):** Ruling 05-1. `SweepTracker`'s
+accumulated travel `τ` is never clamped — only its sign is read, and
+`sweepTo`'s magnitude already comes from `δ ∈ (0, 2π)`, never from `τ`, so
+a clamp would bound nothing that needs bounding while losing the winding
+(a clamped `τ` flips the sign on an out-and-back beyond a full turn: wind
+`+3π`, the clamp holds `τ ≈ 2π`; come back `−2π`, `τ ≈ 0⁻`, reading
+clockwise, when the true travel is `+π`, counter-clockwise). The
+differential's skip rule follows from this: a trial is skipped when its
+true travel is within `1e-6` of 0, or when `δ` is within `1e-6` of 0 or of
+`2π` — the only cases where the sign or the zero-sweep refusal is a tie.
+
 ### D9 — Text: an inline field, 2.5 paper mm (human)
 
 **`TextTool`** (`text_tool.dart`, extends `PlacementTool`):
@@ -590,6 +639,28 @@ out of scope. It is the cap height, as DXF defines it (M-05c).
   `cancelText`.
 - **On blur** it calls `cancelText` if `pending` is still set.
 - **Afterwards,** focus returns to the canvas.
+
+**Amended at execution (Plan 05):** Ruling 05-8 (the shortcut guard above
+also covers the text field, so cmd+Z / ctrl+Z typed there never reaches
+the document — it maps to `DoNothingAndStopPropagationTextIntent`, which
+only `EditableText` registers an action for) and Ruling 05-11 (the field
+is 240×32 logical px, and "baseline-left" is approximated by the field's
+bottom-left, which sits at the insertion point's screen position within
+0.5 px). Two findings from Task 7's fix round narrow "any other loss of
+focus cancels" above: **Ruling T7-b**, that phrase means a loss of focus
+*inside* the app — while the app is not `resumed` the field ignores its
+blur, and the focus manager restores it on resume with the text intact; a
+`null` `WidgetsBinding.instance.lifecycleState` (its value before the
+first lifecycle message arrives, and what `flutter_test` resets it to
+before every test) counts as resumed, not as a cancelling loss of focus.
+**Ruling T7-d**, the planner view's root is a `Flow`, not the `Stack`
+named above (`Stack[CameraGestureDetector(… InteractionLayer …),
+TextEntryOverlay]`) — with a literal `Stack`, removing the text overlay
+mid-build while a text was pending raised "markNeedsBuild() called during
+build"; a `Flow` orders the overlay's deactivation first, at the same
+paint and hit order (`RenderFlow` hit-tests in reverse child order like
+`Stack`, and is a repaint boundary that clips to its bounds the same
+way).
 
 ### D10 — Escape, tool switches and edge cases
 
@@ -856,6 +927,21 @@ checked clean. **Never `git checkout --` a `.dart` file.**
   commits.
 - **Permissions:** under `DraftPermissions.runtime`, the drawing tools and
   Fill are disabled.
+
+**Amended at execution (Plan 05):** Ruling 05-9. `flutter_test` does not
+turn a raw key event into `EditableText` input, so "the field reads late"
+above cannot itself be observed under `sendKeyEvent`; M-05v's test instead
+asserts that the key event returns `false` (not consumed by the shell) and
+that the active tool is unchanged, which is what the guard actually
+guarantees and is what lets the platform, outside a test harness, deliver
+the key to the field as text. Three widget tests were added in Task 7's
+fix round for the D5/D9 findings above: **A13**, a window switch with a
+text pending (`inactive` then `resumed`): the field, its controller and
+its typed string all survive, and a shell shortcut works again afterward;
+**A14**, Escape typed into the page-scale field reaches the field's own
+handling rather than the shell's guard dropping a pending shape; and
+**A15**, an ordinary in-app blur (the null-lifecycle case excluded) still
+cancels a pending text, per D9's original rule.
 
 ## Exit gate
 

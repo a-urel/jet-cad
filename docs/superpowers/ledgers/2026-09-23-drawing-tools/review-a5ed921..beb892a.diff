@@ -1,0 +1,116 @@
+# Review package: a5ed921..HEAD
+
+## Commits
+beb892a fix(draw): close two mutant gaps in B6/B7 and L5 (review round 1)
+
+## Files changed
+ packages/jet_cad_2d_flutter/test/draw/line_tool_test.dart | 15 ++++++++++++---
+ .../jet_cad_2d_flutter/test/draw/placement_tool_test.dart | 14 ++++++++++++--
+ 2 files changed, 24 insertions(+), 5 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/test/draw/line_tool_test.dart b/packages/jet_cad_2d_flutter/test/draw/line_tool_test.dart
+index 4690db7..c7ebdf1 100644
+--- a/packages/jet_cad_2d_flutter/test/draw/line_tool_test.dart
++++ b/packages/jet_cad_2d_flutter/test/draw/line_tool_test.dart
+@@ -83,27 +83,36 @@ void main() {
+     clickAt(rig, screenOf(rig.camera, 7090, 3020));
+     keyDown(rig, LogicalKeyboardKey.enter, PhysicalKeyboardKey.enter);
+     expect(rig.tool.isPending, isFalse);
+     expect(linesOf(s.document, s.anchor), hasLength(2));
+     s.document.commands.undo();
+     expect(linesOf(s.document, s.anchor), hasLength(1));
+     s.document.commands.undo();
+     expect(linesOf(s.document, s.anchor), isEmpty);
+   });
+ 
+-  test('L5 a zero-length segment is refused under Tolerance', () {
+-    final s = drawScene(snapToGrid: true);
++  test(
++      'L5 a zero-length segment is refused under Tolerance, not under =='
++      ' (M-05?)', () {
++    final s = drawScene();
+     final rig = drawRig(s.document, LineTool(), objectSnap: false);
+     final a = screenOf(rig.camera, 7010.02, 3020.01);
++    final b = a + const Offset(4e-10, 0);
++    final wa = worldAt(rig, a), wb = worldAt(rig, b);
++    // Distinct stored values, closer than Tolerance.standard.linear: if the
++    // fixture ever landed the two clicks bit-identical, `isDegenerateSegment`
++    // and a bare `==` mutant would agree and this test would prove nothing.
++    expect(wa, isNot(wb), reason: 'not a degenerate, bit-identical fixture');
++    expect(wa.distanceTo(wb), lessThan(Tolerance.standard.linear));
+     clickAt(rig, a);
+     final before = snapshot(s.document);
+-    clickAt(rig, a + const Offset(0.5, 0.5)); // same lattice point
++    clickAt(rig, b);
+     expect(snapshot(s.document), before);
+     expect(rig.tool.isPending, isTrue);
+   });
+ 
+   test('L6 the rubber band is one path from the start to the hover', () {
+     final s = drawScene();
+     final rig = drawRig(s.document, LineTool());
+     clickAt(rig, screenOf(rig.camera, 7010, 3020));
+     hoverAt(rig, screenOf(rig.camera, 7090, 3060));
+     final origin = Vector2(7000, 3000);
+diff --git a/packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart b/packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart
+index acab655..ffc4c59 100644
+--- a/packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart
++++ b/packages/jet_cad_2d_flutter/test/draw/placement_tool_test.dart
+@@ -120,44 +120,54 @@ void main() {
+     final screen = screenOf(rig.camera, 7060, 3040);
+     hoverAt(rig, screen);
+     final before = Vector2.copy(rig.tool.hoverPoint);
+     var notified = 0;
+     rig.tool.addListener(() => notified++);
+     rig.camera.value = ViewportTransform(
+         worldToScreenMatrix: Transform2.translation(37, -21)
+             .multiply(rig.camera.value.worldToScreenMatrix));
+     expect(notified, greaterThan(0), reason: 'the camera listener fired');
+     expect(rig.tool.hoverPoint, isNot(before));
++    final w = worldAt(rig, screen);
++    expect(rig.tool.hoverPoint.x, w.x,
++        reason: 'the re-resolved hover is exactly the new camera\'s world '
++            'point, not merely different from the stale one (a screen-as-'
++            'world mutant in _reresolve would still satisfy isNot(before))');
++    expect(rig.tool.hoverPoint.y, w.y);
+     downAt(rig, screen);
+     final p = payloadOf(s.document, newest(s.document));
+-    final w = worldAt(rig, screen);
+     expect(p.coords[2], w.x);
+     expect(p.coords[3], w.y);
+   });
+ 
+   test(
+       'B7 shift pins the ortho axis from the last point, and a shift press '
+       're-resolves at once', () {
+     final s = drawScene();
+     final rig = drawRig(s.document, LineTool());
+     clickAt(rig, screenOf(rig.camera, 7010.5, 3020.25));
+     final first = Vector2.copy(rig.tool.points.last);
+-    hoverAt(rig, screenOf(rig.camera, 7090, 3031));
++    final hoverScreen = screenOf(rig.camera, 7090, 3031);
++    hoverAt(rig, hoverScreen);
+     expect(rig.tool.hoverPoint.y, isNot(first.y));
+     rig.tool.onKey(
+         const KeyDownEvent(
+             physicalKey: PhysicalKeyboardKey.shiftLeft,
+             logicalKey: LogicalKeyboardKey.shiftLeft,
+             timeStamp: Duration.zero),
+         rig.context);
+     expect(rig.tool.hoverPoint.y, first.y,
+         reason: '|dx| > |dy|: y pinned to the base, exactly');
++    final w = worldAt(rig, hoverScreen);
++    expect(rig.tool.hoverPoint.x, w.x,
++        reason: 'only y is pinned; x stays the raw resolved value, exact '
++            '(a screen-as-world mutant in _reresolve would move x too)');
+   });
+ 
+   test('B8 a denied commit drops the shape and allocates no handle', () {
+     final s = drawScene();
+     final rig = drawRig(s.document, LineTool());
+     clickAt(rig, screenOf(rig.camera, 7010, 3020));
+     s.document.commands.permissions = DraftPermissions.runtime;
+     final seed = s.document.handleSeed.current;
+     final before = snapshot(s.document);
+     clickAt(rig, screenOf(rig.camera, 7090, 3050));

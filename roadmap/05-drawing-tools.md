@@ -1,6 +1,8 @@
 # 05 — Drawing tools
 
-**Status:** not started
+**Status:** executed on `plan-05/drawing-tools`, not merged; the final
+whole-branch review ran "With fixes" and its fix wave is done at `f8b4269`;
+exit gate 13 of 14, the human's look OWED
 **Depends on:** 02, 03
 **Blocks:** 09
 **Size:** M
