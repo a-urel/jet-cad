@@ -87,14 +87,20 @@ GripScene gripScene(
 
 /// Zoomed (scale ≠ 1), rotated (not 0°, not 90°), y flipped, and panned so
 /// [centre] sits in the middle of [viewport].
+///
+/// A y-flipped rotation is a reflection, whose linear part is symmetric:
+/// the matrix's `b` and `c` are bit-identical. A test about a projection
+/// expression passes `flipY: false` too, or an `m.b`/`m.c` transposition
+/// is invisible to it.
 CameraController gripCamera(
     {Vector2? centre,
     Size viewport = const Size(800, 600),
     double scale = 1.1,
-    double rotation = 0.35}) {
+    double rotation = 0.35,
+    bool flipY = true}) {
   final c = centre ?? Vector2(7270, 3161);
-  final linear =
-      Transform2.rotation(rotation).multiply(Transform2.scale(scale, -scale));
+  final linear = Transform2.rotation(rotation)
+      .multiply(Transform2.scale(scale, flipY ? -scale : scale));
   final mid = linear.transformPoint(c);
   return CameraController(ViewportTransform(
       worldToScreenMatrix: Transform2.translation(

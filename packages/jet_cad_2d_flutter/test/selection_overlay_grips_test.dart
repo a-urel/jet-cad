@@ -77,8 +77,10 @@ void main() {
 
   test(
       'grips are one drawRawPoints per colour at 10 grips and at 300, and '
-      'the hot grip one more (invariant 6, M-03v, M-03aq)', () {
-    (List<RecordedCall>, GripRig) frame(int vertices, {int hot = -1}) {
+      'the hot grip one more, each at its grip (invariant 6, M-03v, M-03aq, '
+      'M-03bh)', () {
+    (List<RecordedCall>, GripRig) frame(int vertices,
+        {int hot = -1, bool flipY = true}) {
       final doc = DraftDocument.empty();
       final poly = addEntity(doc, doc.rootHandle, EntityKind.polyline, [
         for (var i = 0; i < vertices; i++) ...[
@@ -88,7 +90,8 @@ void main() {
       ], []);
       final circle =
           addEntity(doc, doc.rootHandle, EntityKind.circle, [7060, 3030], [8]);
-      final rig = gripRig(doc, camera: gripCamera(centre: Vector2(7050, 3010)));
+      final rig = gripRig(doc,
+          camera: gripCamera(centre: Vector2(7050, 3010), flipY: flipY));
       rig.selection.replace([k(poly), k(circle)]);
       rig.grips.hot = hot;
       final spy = SpyCanvas();
@@ -128,6 +131,39 @@ void main() {
     final third = screenOf(rig.camera, 7001, 3000); // the polyline's vertex 2
     expect(pts[0], closeTo(third.dx, 1e-3));
     expect(pts[1], closeTo(third.dy, 1e-3));
+
+    // Every drawn pair is its grip's screen point — the point
+    // `GripCache.hitTest` hits, projected by a separate expression (M-03bh).
+    // The stretch and radius grips in list order, then the centres. The
+    // flipped camera's `b == c` hides an `m.b`/`m.c` transposition, so the
+    // unflipped one is checked too. Float32, so 1e-3 px.
+    for (final flipY in const [true, false]) {
+      final (calls, at) = frame(5, flipY: flipY);
+      final raw = [
+        for (final c in calls)
+          if (c.name == 'drawRawPoints') c,
+      ];
+      final drawn = [
+        ...raw[0].args[1] as Float32List,
+        ...raw[1].args[1] as Float32List,
+      ];
+      final list = at.grips.grips;
+      final want = [
+        for (final r in list)
+          if (r.grip.role != GripRole.move) r.grip,
+        for (final r in list)
+          if (r.grip.role == GripRole.move) r.grip,
+      ];
+      expect(want, hasLength(10));
+      expect(drawn, hasLength(2 * want.length));
+      for (var i = 0; i < want.length; i++) {
+        final p = screenOf(at.camera, want[i].x, want[i].y);
+        expect(drawn[2 * i], closeTo(p.dx, 1e-3),
+            reason: 'flipY $flipY, grip $i, x');
+        expect(drawn[2 * i + 1], closeTo(p.dy, 1e-3),
+            reason: 'flipY $flipY, grip $i, y');
+      }
+    }
   });
 
   test(
@@ -181,7 +217,7 @@ void main() {
 
   test(
       'no leaf grips are drawn under a geometry denial; the rotation grip '
-      'still is (M-03ad)', () {
+      'still is, at its centre (M-03ad, M-03bi)', () {
     final s = gripScene();
     final rig = gripRig(s.document);
     rig.selection.replace([k(s.line), k(s.circle)]);
@@ -190,6 +226,13 @@ void main() {
     overlayOf(rig).paint(spy, kView);
     expect(spy.named('drawRawPoints'), isEmpty);
     expect(spy.named('drawCircle'), hasLength(1), reason: 'the rotation grip');
+    // The disc is drawn where `hitsRotationGrip` hits it (spec D6): an
+    // 8 px disc, 24 px above the box's top-centre anchor (M-03bi).
+    final disc = spy.named('drawCircle').single;
+    final centre = rotationGripCentre(rig);
+    expect((disc.args[0] as Offset).dx, closeTo(centre.dx, 1e-9));
+    expect((disc.args[0] as Offset).dy, closeTo(centre.dy, 1e-9));
+    expect(disc.args[1], 4.0, reason: 'an 8 px diameter');
   });
 
   test("a selected point's preview cross sits at T(p) (M-03ae)", () {
@@ -297,6 +340,45 @@ void main() {
     );
     expect(startPoint.dx, closeTo(expected.dx, 1e-3));
     expect(startPoint.dy, closeTo(expected.dy, 1e-3));
+  });
+
+  test(
+      "a circle reshape preview's centre is rebased by origin too "
+      '(M-03bj)', () {
+    final s = gripScene();
+    final rig = gripRig(s.document);
+    rig.selection.replace([k(s.circle)]);
+    final radiusGrip =
+        leafGrips(EntityKind.circle, payloadOf(rig.document, s.circle))[1];
+    expect(radiusGrip.role, GripRole.radius);
+    final press = screenOf(rig.camera, radiusGrip.x, radiusGrip.y);
+    final to = press + const Offset(22, -6);
+    pressAndMove(rig, press, to);
+    expect(rig.tool.dragKind, DragKind.reshape);
+    // No snap and no ortho are active, so the target is the raw world
+    // point under `to`.
+    final target = rig.camera.value.screenToWorld(Vector2(to.dx, to.dy));
+    final centre = Vector2(7300, 3250); // the circle's stored centre
+    final newRadius = (target - centre).length;
+    expect((newRadius - 25).abs(), greaterThan(1),
+        reason: 'the radius really changed');
+
+    final spy = SpyCanvas();
+    overlayOf(rig).paint(spy, kView);
+    final origin = rebaseOriginFor(rig.camera.value.visibleWorld(kView));
+    expect(origin.x, isNot(0.0));
+    final drawn = spy
+        .named('drawPath')
+        .where((c) => c.color?.toARGB32() == kPreviewColor.toARGB32())
+        .toList();
+    expect(drawn, hasLength(1));
+    // A full oval's bounds are tight: its conic control points lie on the
+    // bounding square.
+    final bounds = (drawn.single.args[0] as Path).getBounds();
+    expect(bounds.center.dx, closeTo(centre.x - origin.x, 1e-3));
+    expect(bounds.center.dy, closeTo(centre.y - origin.y, 1e-3));
+    expect(bounds.width, closeTo(2 * newRadius, 1e-3));
+    expect(bounds.height, closeTo(2 * newRadius, 1e-3));
   });
 
   test(
