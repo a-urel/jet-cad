@@ -385,6 +385,40 @@ void main() {
     // Not vacuous: the hull is at most a conic's bulge wider than the arc.
     expect(bounds.width, lessThan(2 * radius * math.sqrt2 + slack));
   });
+
+  test(
+      'worldBoundsOf: an arc by arcBounds, a point by its position '
+      '(M-03ah)', () {
+    final doc = DraftDocument.empty();
+    // Start 2.9, sweep −1.6: clockwise to 1.3, through the top extreme
+    // (π/2) and no other.
+    final arc = addEntity(
+        doc, doc.rootHandle, EntityKind.arc, [7050, 3200], [40, 2.9, -1.6]);
+    final dot =
+        addEntity(doc, doc.rootHandle, EntityKind.point, [7250, 3300], []);
+    final line = addEntity(
+        doc, doc.rootHandle, EntityKind.line, [7010, 3020, 7130, 3060], []);
+    final (selection, cache) = wire(doc);
+    selection.replace([
+      SelectionKey.root(arc),
+      SelectionKey.root(dot),
+      SelectionKey.root(line),
+    ]);
+
+    final a = cache.worldBoundsOf(SelectionKey.root(arc))!;
+    expect(a.minX, closeTo(7050 + 40 * math.cos(2.9), 1e-9));
+    expect(a.maxX, closeTo(7050 + 40 * math.cos(2.9 - 1.6), 1e-9));
+    expect(a.minY, closeTo(3200 + 40 * math.sin(2.9), 1e-9));
+    expect(a.maxY, closeTo(3240, 1e-9),
+        reason: 'the top extreme is inside the sweep; a control-point box '
+            'or a full circle would say otherwise');
+    final p = cache.worldBoundsOf(SelectionKey.root(dot))!;
+    expect([p.minX, p.minY, p.maxX, p.maxY], [7250, 3300, 7250, 3300],
+        reason: 'a point is its position, never Rect.zero');
+    expect(cache.worldBoundsOf(SelectionKey.root(line))!.maxY, 3060);
+    expect(
+        cache.worldBoundsOf(SelectionKey.root(const Handle(999999))), isNull);
+  });
 }
 
 /// Fixed, deliberately asymmetric metrics: a measurer whose ascent, descent

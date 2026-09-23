@@ -126,6 +126,33 @@ class OutlineCache extends ChangeNotifier {
     return only is _Point ? Vector2(only.x, only.y) : null;
   }
 
+  /// The world AABB of [key]'s outline, in doubles (spec D6); null when
+  /// [key] is not cached or its outline is empty (a fill, a hidden leaf).
+  ///
+  /// Computed from the world records, **never** from a `ui.Path`. The
+  /// reason: `Path.getBounds` answers an arc's control-point bounds (see
+  /// [debugWorldArcsOf]) and `Rect.zero` for a lone point, and a path is
+  /// float32, rebased by whatever origin it was last built at (review
+  /// finding #3).
+  Aabb2? worldBoundsOf(SelectionKey key) {
+    final outlines = _world[key];
+    if (outlines == null) return null;
+    var box = Aabb2.empty();
+    for (final outline in outlines) {
+      switch (outline) {
+        case _Segments(:final coords):
+          for (var i = 0; i + 1 < coords.length; i += 2) {
+            box = box.expandedToPoint(Vector2(coords[i], coords[i + 1]));
+          }
+        case _Arc(:final cx, :final cy, :final r, :final start, :final sweep):
+          box = box.union(arcBounds(Vector2(cx, cy), r, start, sweep));
+        case _Point(:final x, :final y):
+          box = box.expandedToPoint(Vector2(x, y));
+      }
+    }
+    return box.isEmpty ? null : box;
+  }
+
   /// **Test-only.** Every `_Segments` outline of [key], concatenated in
   /// order, in world doubles; null when [key] is not cached.
   @visibleForTesting
