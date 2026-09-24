@@ -141,15 +141,18 @@ List<DraftCommand> _plan(
 /// For `h` in `G` (before.owned[h] != null): refused if `h` **still
 /// exists** — a direct edit of a generated entity, regardless of what else
 /// the same command did to its owner — or, when `h` was removed, if the
-/// owner is still a live parametric object. Only a child removed *together
-/// with* its owning group is allowed.
+/// owner's group node still exists (spec D6's amendment for F4: whatever
+/// its component now is, not only while it is still a live parametric
+/// object -- a compound that detaches the component and then removes one
+/// of its still-live children in the same command must still be refused).
+/// Only a child removed *together with* its owning group is allowed.
 Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
     _Survey before, Set<Handle> touched) {
   for (final h in touched.toList()..sort(_byValue)) {
     final owner = before.owned[h];
     if (owner != null) {
       if (t.entities.slotOf(h) != null) return h;
-      if (_isObject(t, types, owner)) return h;
+      if (t.tree[owner] != null) return h;
       continue;
     }
     final slot = t.entities.slotOf(h);

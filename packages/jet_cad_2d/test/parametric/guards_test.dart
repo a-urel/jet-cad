@@ -15,6 +15,54 @@ DraftCommand deleteObject(DraftDocument doc, Handle g) => CompoundCommand([
 
 const DraftPermissions runtime = DraftPermissions.runtime;
 
+/// G10's probe: a minimal parametric type whose `generate` can attempt one
+/// reentrant `execute`, on a command unrelated to any parametric closure --
+/// a geometry edit of a plain line owned by the root, not by [self] or any
+/// of its neighbours. That is deliberate: unlike `Trip.reentrant` (which
+/// sets a `Trip` on itself and so re-triggers its own regeneration, tripping
+/// the *existing* `apply()` guard one level down, whether or not `drift()`
+/// guards itself), this reentrant edit touches nothing the planner tracks,
+/// so `_run` finds an empty seed set and returns without planning again. A
+/// successful reentrant execute here would therefore actually land -- and
+/// stay landed -- unless `drift()` itself is guarded (spec 06 D2, F5).
+DraftDocument? _probeDoc;
+Handle? _probeTarget;
+bool _probeArmed = false;
+
+final class ReentrantProbe implements Component {
+  const ReentrantProbe(this.n);
+  static const String id = 'test.reentrantProbe';
+  final int n;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'n': n};
+  static ReentrantProbe fromJson(Map<String, Object?> j) =>
+      ReentrantProbe(j['n']! as int);
+  @override
+  bool operator ==(Object o) => o is ReentrantProbe && o.n == n;
+  @override
+  int get hashCode => n.hashCode;
+}
+
+final class ReentrantProbeType extends ParametricType<ReentrantProbe> {
+  const ReentrantProbeType();
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(ReentrantProbe params, Transform2 toWorld) =>
+      Aabb2.fromPoints([toWorld.transformPoint(Vector2(0, 0))]);
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    if (_probeArmed) {
+      _probeArmed = false;
+      _probeDoc!.commands.execute(SetEntityGeometryCommand(
+          _probeTarget!, linePayload(Vector2(9, 9), Vector2(8, 8))));
+    }
+    return const [];
+  }
+}
+
 /// A `GroupNode`'s `children` is draw order, but draw order *is* ascending
 /// handle value (D12; `tree.dart:586`'s own append-only `_link`), never the
 /// list position. `RemoveNodeCommand`'s inverse (`AddNodeCommand`) re-links a
@@ -201,5 +249,31 @@ void main() {
     doc.commands.execute(SetComponentCommand<ClipRect>(hA, null));
     expect(kids(doc, hB), hasLength(4));
     expect(kids(doc, hA), hasLength(5), reason: 'A is plain lines now');
+  });
+
+  test(
+      'G10 drift() guards re-entry like apply() does: a client generate '
+      'calling execute during the dry run throws, and nothing is mutated '
+      '(F5)', () {
+    final doc = DraftDocument.empty();
+    final probeCatalog = ParametricCatalog()
+      ..register<ReentrantProbe>(ReentrantProbe.id, ReentrantProbe.fromJson,
+          const ReentrantProbeType());
+    final system = ParametricSystem(doc, probeCatalog)..install();
+    _probeDoc = doc;
+    doc.commands.execute(create(doc, hA, parked, const ReentrantProbe(1)));
+    final plainLine = addDrafted(
+        doc, EntityKind.line, linePayload(Vector2(1, 2), Vector2(3, 4)));
+    doc.commands.execute(plainLine);
+    _probeTarget = plainLine.record.handle;
+    final before = enc(doc);
+    _probeArmed = true;
+    expect(() => system.drift(), throwsStateError);
+    expect(_probeArmed, isFalse,
+        reason: "generate() never ran, so this doesn't probe anything");
+    expect(enc(doc), before);
+    system.dispose();
+    _probeDoc = null;
+    _probeTarget = null;
   });
 }

@@ -205,4 +205,63 @@ void main() {
     expect(doc.components.get<ClipRect>(hA), const ClipRect(2000, 1000));
     expect(enc(doc), before);
   });
+
+  test(
+      'P13 undo and redo keep a live SpatialIndex fresh (F3: index '
+      'freshness is not incidental)', () {
+    final doc = paramDoc();
+    final index = SpatialIndex(doc);
+    // A at width 500 does not reach B; at 2000 it does, and both re-clip
+    // (P4's shape).
+    doc.commands.execute(create(doc, hA, atA, const ClipRect(500, 1000)));
+    doc.commands.execute(create(doc, hB, atB, const ClipRect(400, 900)));
+    expect(kids(doc, hA), hasLength(4));
+    doc.commands
+        .execute(SetComponentCommand<ClipRect>(hA, const ClipRect(2000, 1000)));
+    expect(kids(doc, hA), hasLength(5));
+
+    void expectFresh() {
+      for (final g in [hA, hB]) {
+        for (final s in worldSegments(doc, g)) {
+          final mid = Vector2((s[0] + s[2]) / 2, (s[1] + s[3]) / 2);
+          final found = <Handle>{};
+          index.forEachInRect(
+              Aabb2(mid - Vector2(0.5, 0.5), mid + Vector2(0.5, 0.5)),
+              const QueryFilter.all(),
+              (slot) => found.add(doc.entities.handleAt(slot)));
+          expect(found.intersection(kids(doc, g).toSet()), isNotEmpty,
+              reason: 'a child of ${g.toHex()} at $mid');
+        }
+      }
+    }
+
+    doc.commands.undo();
+    expect(kids(doc, hA), hasLength(4));
+    expectFresh();
+
+    doc.commands.redo();
+    expect(kids(doc, hA), hasLength(5));
+    expectFresh();
+
+    index.dispose();
+  });
+
+  test(
+      'P14 removing a generated child is refused while its owner\'s group '
+      'node still exists, even with the component already detached in the '
+      'same command (spec D6\'s amendment for F4)', () {
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hA, parked, const ClipRect(2000, 1000)));
+    final firstChildOfA = kids(doc, hA).first;
+    final before = enc(doc);
+    final depth = doc.commands.undoDepth;
+    expect(
+        () => doc.commands.execute(CompoundCommand([
+              SetComponentCommand<ClipRect>(hA, null),
+              RemoveEntityCommand(firstChildOfA),
+            ], label: 'Detach then remove a child')),
+        throwsA(isA<GeneratedGeometryError>()));
+    expect(doc.commands.undoDepth, depth);
+    expect(enc(doc), before);
+  });
 }

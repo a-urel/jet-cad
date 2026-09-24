@@ -122,13 +122,23 @@ class ParametricSystem {
 
   /// Handles whose regeneration would change anything (spec D10). A dry
   /// run: reserves no handle, mutates nothing.
+  ///
+  /// Guarded the same way [apply] is (F5): a client `generate` must not
+  /// mutate, and a dry run is exactly where a client could try to call
+  /// `execute` and have it actually land, since nothing else here applies
+  /// anything. Re-entry through the dispatcher throws instead.
   List<Handle> drift() {
-    final s = _survey(document, _types);
-    final view = ParametricView._(document, s.neighbours);
-    return [
-      for (final h in s.objects.keys)
-        if (_plan(document, [h], s, view).isNotEmpty) h,
-    ];
+    _applying = true;
+    try {
+      final s = _survey(document, _types);
+      final view = ParametricView._(document, s.neighbours);
+      return [
+        for (final h in s.objects.keys)
+          if (_plan(document, [h], s, view).isNotEmpty) h,
+      ];
+    } finally {
+      _applying = false;
+    }
   }
 
   /// One diagnostic per parametric component on a holder that is not a
