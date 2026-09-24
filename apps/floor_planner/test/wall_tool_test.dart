@@ -499,6 +499,28 @@ void main() {
   });
 
   testWidgets(
+      'WT9 with object snap off, a click in a wall\'s band joins nothing: it '
+      'stays where it was clicked', (tester) async {
+    final view = await pumpWalls(tester, wallShellDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    await press(tester, LogicalKeyboardKey.keyW);
+    final h = await drawWall(tester, view, c0, c1);
+    await press(tester, LogicalKeyboardKey.f3);
+    expect(tester.widget<Text>(find.byKey(const Key('osnap-text'))).data,
+        'osnap off');
+    final nH = leftOf(c0, c1);
+    final inSign = nH.dot(s0 - c0) > 0 ? 1.0 : -1.0;
+    final target = c0 + (c1 - c0) * 0.6 + nH * (95 * inSign);
+    final t = await drawWall(tester, view, plan(2300, 1000), target);
+    final pt = doc.components.get<WallParams>(t)!;
+    expect(distToLine(pt.end, c0, c1), closeTo(95, 1e-3));
+    expect((pt.end - target).length, lessThan(1e-3),
+        reason: 'the raw point: the grid is off');
+    expect(classify(worldWallOf(doc, t), 1, [worldWallOf(doc, h)]),
+        isNot(isA<Tee>()));
+  });
+
+  testWidgets(
       'RF2 in the shell: draw an L, select one wall, Delete: the survivor\'s '
       'end squares; cmd+Z restores the mitre (Review Focus 2)', (tester) async {
     final view = await pumpWalls(tester, wallShellDoc(FlutterTextMeasurer()));

@@ -76,8 +76,8 @@ class WallTool extends PlacementTool {
   /// lies in one's band. Reused, never reallocated.
   final Vector2 _bandEnd = Vector2.zero();
 
-  /// The document of the last hover, for [hovered], which has no context.
-  DraftDocument? _document;
+  /// The context of the last hover, for [hovered], which has none.
+  ToolContext? _context;
 
   @override
   String get name => 'Wall';
@@ -98,7 +98,7 @@ class WallTool extends PlacementTool {
 
   @override
   void onPointerMove(ToolPointerEvent e, ToolContext ctx) {
-    _document = ctx.document;
+    _context = ctx;
     super.onPointerMove(e, ctx);
   }
 
@@ -106,14 +106,15 @@ class WallTool extends PlacementTool {
   /// [hoverPoint] is already the resolved point.
   @override
   void hovered(Vector2 raw) {
-    final doc = _document;
+    final ctx = _context;
     _bandEnd.setFrom(
-        (doc == null ? null : _joinBand(doc, hoverPoint)) ?? hoverPoint);
+        (ctx == null ? null : _joinBandIfSnapping(ctx, hoverPoint)) ??
+            hoverPoint);
   }
 
   @override
   void accept(Vector2 point, ToolContext ctx) {
-    if (!acceptingSelf) point = _joinBand(ctx.document, point) ?? point;
+    if (!acceptingSelf) point = _joinBandIfSnapping(ctx, point) ?? point;
     if (points.isEmpty) {
       points.add(point);
       return;
@@ -148,6 +149,11 @@ class WallTool extends PlacementTool {
     super.clearShape();
     _walls = 0;
   }
+
+  /// [_joinBand] while object snap is on, as `PlacementTool` reads it; with
+  /// object snap off (F3) nothing is joined, like every other snap.
+  static Vector2? _joinBandIfSnapping(ToolContext ctx, Vector2 p) =>
+      (ctx.snap?.objectSnap ?? true) ? _joinBand(ctx.document, p) : null;
 
   /// Spec 07 D11: the Wall tool joins a wall wherever its band is clicked.
   ///
