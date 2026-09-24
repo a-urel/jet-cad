@@ -6,15 +6,17 @@ fired); 1 N/A.**
 - **The spec's named mutants, M-07a..M-07s:** 19, plus 6 variants at a
   second site or in a second form (M-07e', M-07h's two halves, M-07i's
   node-cap site, M-07k's "no owner" and "highest owner"). All 25 killed.
-- **One finding:** M-07i's node-cap site is killed in the named file, but
-  by `WG8`, not by the spec's own fixture for it. The spec's fixture is "a
-  three-way node under mixed justification", which is `WG6`, and `WG6`
-  passes under this mutant. `WG6` is a degenerate fixture for this
-  mutant. In it, two walls have a face through the node point, so the
-  insertion mostly repeats an existing vertex. Where it does add one, it
-  falls outside what `WG6` samples. A fixture that kills it was measured
-  with a probe, but **not landed**: the controller rules first. See the
-  M-07i entry.
+- **One finding, now fixed:** the spec's fixture for M-07i's node-cap
+  site is "a three-way node under mixed justification". That is `WG6`,
+  and `WG6` passes under this mutant; in the file, only `WG8` killed it.
+  `WG6` is a degenerate fixture for this mutant. In it, two walls have a
+  face through the node point, so the insertion mostly repeats an
+  existing vertex. Where it does add one, it falls outside what `WG6`
+  samples.
+
+  The controller ruled the fixture in. It landed as `WG21`: a three-way
+  node under mixed justification with no face through the node point. The
+  site was re-fired against `WG21`, which kills it. See the M-07i entry.
 - **The tasks' extras:** 26 fired, all killed:
   - geometry: 8;
   - band joining: 6;
@@ -41,7 +43,7 @@ For each mutant it does the following, in order:
 4. Run the narrowed command with `CI=true`: `flutter test` for
    `apps/floor_planner` and `packages/jet_cad_2d_flutter`, `dart test` for
    `packages/jet_cad_2d`. The command names one test file and one test by
-   `--plain-name`. The exceptions are the two re-fires of M-07i's node-cap
+   `--plain-name`. The exceptions are two re-fires of M-07i's node-cap
    site, which run whole files or the probe; see that entry.
 5. Save the whole output to `t9-<id>-run<n>.log`.
 6. `cp` the backup back, then `diff` the backup against the file.
@@ -448,8 +450,9 @@ Each half alone:
   notch).
 
 **Site 2, a node's non-owner cap** (the spec's "three-way node under mixed
-justification", `WG6`). The same insertion, in the straight cap every
-non-owner returns:
+justification"). The named test is now **`WG21`**; it was `WG6` when this
+sweep began. The same insertion, in the straight cap every non-owner
+returns. The first run, against `WG6`:
 
 - **file:** `apps/floor_planner/lib/parametric/wall_geometry.dart`; backup `t9-M-07i-node-wall_geometry.dart`
 - **edit** (`diff <backup> <file>`):
@@ -521,7 +524,7 @@ The mutant is still killed in the named file. The whole of
 path. The inserted node point overlaps the owner's walk: 287 samples
 covered twice. `wall_regen_test.dart` stays green.
 
-**Proposed fixture, measured, not landed.** A three-way node under mixed
+**The fixture, first as a probe.** A three-way node under mixed
 justification with no face through the node point:
 
 - w1: 200 centre, from the node at 10°;
@@ -575,8 +578,45 @@ printed `00:00 +1: All tests passed!`, exit 0. Under the mutant:
   ```
 - **restore:** `cp t9-M-07i-node-probe-wall_geometry.dart apps/floor_planner/lib/parametric/wall_geometry.dart`; `diff` exit 0.
 
-If the controller rules it in, the case belongs in `WG6`, or beside it as
-a `WG6` sibling, and M-07i's node-cap site is re-fired against it.
+**Landed as `WG21`, on the controller's ruling.** It is the probe's
+fixture, in `apps/floor_planner/test/wall_geometry_test.dart`:
+
+- the far origin (`plan(0, 0)`), with the file's 23° turn (`rot`);
+- each wall in its own rotated group (`worldWall`);
+- `classify` confirms a node.
+
+Every ring must be sound (`expectSound`: simple, triangulating, no
+fallback, no hole). That keeps the fixture non-degenerate. The node point
+must be on no ring, and the overlap census must be 0.
+
+On the clean tree,
+`cd apps/floor_planner && CI=true flutter test test/wall_geometry_test.dart --plain-name 'WG21 a three-way node'`
+printed `00:00 +1: All tests passed!`.
+
+Re-fire of M-07i at `wall_geometry.dart:326` against `WG21`:
+
+- **file:** `apps/floor_planner/lib/parametric/wall_geometry.dart`; backup `t9-M-07i-WG21-wall_geometry.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  326c326
+  <       return (points: [left, right], ownsHole: false);
+  ---
+  >       return (points: [left, hub, right], ownsHole: false);
+  ```
+- **command:** `cd apps/floor_planner && CI=true flutter test test/wall_geometry_test.dart --plain-name 'WG21 a three-way node'` (exit 1)
+
+  ```
+  00:00 +0 -1: WG21 a three-way node with no face through the node point: the node point is on no ring (M-07i at a node cap) [E]
+    Expected: false
+      Actual: <true>
+    test/wall_geometry_test.dart 719:7                  main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp t9-M-07i-WG21-wall_geometry.dart apps/floor_planner/lib/parametric/wall_geometry.dart`; `diff` exit 0.
+- **result:** KILLED by `WG21`. Line 719 is the "node point is on no ring"
+  check. The test fails there, not in `expectSound`, which runs first for
+  each ring.
 
 ### M-07j — acute wedges clamped too
 
@@ -1623,5 +1663,14 @@ apps/dev_harness_2d          flutter test --concurrency=1  00:33 +82: All tests 
 apps/floor_planner           flutter test       00:22 +137: All tests passed!        (exit 0)
                              flutter analyze    No issues found! (ran in 0.8s)       (exit 0)
                              dart format        Formatted 32 files (0 changed) in 0.14 seconds.   (exit 0)
+                             flutter build web --release   ✓ Built build/web        (exit 0)
+```
+
+After `WG21` landed, the app line was re-run on the tree with it:
+
+```
+apps/floor_planner           flutter test       00:23 +138: All tests passed!        (exit 0)
+                             flutter analyze    No issues found! (ran in 1.0s)       (exit 0)
+                             dart format        Formatted 32 files (0 changed) in 0.15 seconds.   (exit 0)
                              flutter build web --release   ✓ Built build/web        (exit 0)
 ```

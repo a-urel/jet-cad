@@ -699,4 +699,26 @@ void main() {
       }
     }
   });
+
+  test(
+      'WG21 a three-way node with no face through the node point: the node '
+      'point is on no ring (M-07i at a node cap)', () {
+    // WG6's w2 and w3 each have a face through the node point, so a node
+    // cap that inserts it mostly repeats a vertex already there. Here only
+    // w2 (left) has a zero face, and its wedge with w3 (120°, corner
+    // ~87 mm out) is not clamped: the node point is a vertex of nothing.
+    final h = plan(0, 0);
+    final w1 = worldWall(11, h, polar(h, 10 + rot, 3000), 200, centre);
+    final w2 = worldWall(12, polar(h, 130 + rot, 2000), h, 115, left);
+    final w3 = worldWall(13, h, polar(h, 250 + rot, 2500), 150, centre);
+    final all = [w1, w2, w3];
+    expect(classify(w1, 0, [w2, w3]), isA<NodeJoint>());
+    final rings = [for (final w in all) ringOf(w, all)];
+    for (final o in rings) {
+      expectSound(o);
+      expect(o.ring.any((p) => (p - h).length < 1e-3), isFalse,
+          reason: 'the node point is on no ring');
+    }
+    expect(overlapCensus([for (final o in rings) o.ring], h, 400), 0);
+  });
 }
