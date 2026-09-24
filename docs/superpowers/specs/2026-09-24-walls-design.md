@@ -480,9 +480,9 @@ than a single speed-up factor.
   centreline (a node), else onto the centreline (a T). Several bands: the
   lowest handle. Band joining is object snapping, so it is **gated on
   object snap** (F3). It runs over a cache of world walls. The cache is
-  rebuilt only on a document change, or marked stale by the tool's own
-  commit, and a hover scan allocates nothing in steady state. With no chain
-  pending, a hover scans nothing. `WT3`, `WT9`–`WT13`, `WT15`.
+  marked stale on a document change, by the tool's own commit and at
+  every click, and is rebuilt at the next scan; a hover scan allocates
+  nothing in steady state. With no chain pending, a hover scans nothing. `WT3`, `WT9`–`WT13`, `WT15`.
 - **The Wall tool never snaps `nearest`.** "Snapping onto its `nearest`
   point makes a T" is replaced by band joining. A widened `nearest` also
   snapped to outline faces and to unrelated lines (a sample plan's hatch),

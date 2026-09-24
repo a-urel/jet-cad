@@ -429,7 +429,9 @@ One line each, from the ledger. None is fixed by this task.
   re-subscribe is untested. The UI cannot reach it (`late final`
   document).
 
-**Found and deferred to a post-07 `fix/` branch (the human's decision):**
+**Found and deferred to a post-07 `fix/` branch.** The human deferred the
+white ByLayer defect (ledger); the controller ruled the Page panel's focus
+(Task 8, problem 1) and Box m3 (Task 8 m3) onto the same branch:
 
 - **ByLayer drafting on layer 0 renders white:** Plan 05's tools (L and the
   rest) and 06's boxes. It is barely visible off the page and invisible on
@@ -474,6 +476,9 @@ One line each, from the ledger. None is fixed by this task.
   D8 amended). Cost: cosmetic.
 - **T1:** `RG7`'s added-region case runs on an existing object. Cost: none.
 - **T1:** `RG2` checks re-triangulation by equality and by area. Cost: none.
+- **T2:** `debugOverlapTests` stays exported through the package barrel
+  (precedent `EntityStore.debugRawTextAt`; `@visibleForTesting` guards its
+  use). Cost: none.
 - **T3:** all four review minors were taken at once, including the nested
   `_applying` guard bug inherited from 06. Cost: none.
 - **T3:** the `apply()` save/restore is defensive and unpinned; its mutant

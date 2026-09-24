@@ -34,7 +34,9 @@ and the four lines on macOS) and criterion 13 (the look) are OWED.**
     undo; end grips; the Wall section, including tool mode; the pinned
     target). The human pulled `dcbc831` on macOS: the app runs and the Wall
     panel shows up. That is a partial look only.
-- **Found and deferred to a post-07 `fix/` branch** (the human's decision):
+- **Found and deferred to a post-07 `fix/` branch.** The human deferred
+  the white ByLayer defect; the controller ruled the other two onto the
+  same branch (Task 8, problem 1 and m3):
   - ByLayer drafting on layer 0 renders white (Plan 05's tools, 06's
     boxes);
   - the Page panel's field keeps focus after Enter;
@@ -492,7 +494,9 @@ Plans 01–05.
   `needs` parameter (`draw/placement_tool.dart`), the only file this plan
   touches in the render layer.
 - **In `apps/floor_planner`:** `lib/parametric/box.dart` (`BoxParams`,
-  `BoxType`, `boxCatalog`, `installBoxes`), `lib/parametric/box_tool.dart`
+  `BoxType`, `boxCatalog`, `installBoxes` — renamed by Plan 07 to
+  `catalog.dart`'s `parametricCatalog` / `installParametric`),
+  `lib/parametric/box_tool.dart`
   (`BoxTool`), the shell's `ParametricSystem` install/dispose in
   `initState`/`dispose`, and the Selection panel's Width/Height section.
 
