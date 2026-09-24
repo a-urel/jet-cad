@@ -6,6 +6,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'page_panel.dart';
 import 'parametric/box_tool.dart';
 import 'parametric/catalog.dart';
+import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
 import 'selection_panel.dart';
 import 'shortcut_guard.dart';
@@ -72,6 +73,11 @@ class _PlannerShellState extends State<PlannerShell> {
   late final PolylineTool _polyline = PolylineTool(fill: _fill);
   late final RectangleTool _rectangle = RectangleTool(fill: _fill);
   final BoxTool _box = BoxTool();
+  // Spec 07 D11: the shell owns the Wall tool's settings; the panel edits
+  // them (Task 8).
+  final ValueNotifier<WallSettings> _wallSettings =
+      ValueNotifier<WallSettings>(const WallSettings());
+  late final WallTool _wall = WallTool(_wallSettings);
   late final CircleTool _circle = CircleTool(fill: _fill);
   final ArcTool _arc = ArcTool();
   final TextTool _text = TextTool();
@@ -111,6 +117,13 @@ class _PlannerShellState extends State<PlannerShell> {
         shortcut: 'B',
         logicalKey: LogicalKeyboardKey.keyB,
         tool: _box,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-wall',
+        label: 'Wall',
+        shortcut: 'W',
+        logicalKey: LogicalKeyboardKey.keyW,
+        tool: _wall,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-circle',
@@ -228,6 +241,7 @@ class _PlannerShellState extends State<PlannerShell> {
       e.tool.dispose();
     }
     _fill.dispose();
+    _wallSettings.dispose();
     _grips.dispose();
     _outlines.dispose();
     _selection.dispose();
