@@ -147,6 +147,50 @@ void expectSquare(DraftDocument doc, Handle h) {
       reason: '${h.toHex()} is square at both ends');
 }
 
+/// The unit left normal of the line from [a] to [b].
+Vector2 leftOf(Vector2 a, Vector2 b) {
+  final d = (b - a).normalized();
+  return Vector2(-d.y, d.x);
+}
+
+/// Wall [stem]'s end (index 1) is a T on [host], coming from the side of
+/// [host]'s left normal given by [fromSign] (+1 left, -1 right): the stem
+/// ends on the centreline, and its two cap corners lie on the host's face
+/// on that side, far from the other face (WG4's property, in the
+/// document).
+void expectTee(DraftDocument doc, Handle host, Handle stem,
+    {required double fromSign}) {
+  final ph = doc.components.get<WallParams>(host)!;
+  final ps = doc.components.get<WallParams>(stem)!;
+  final wh = worldWallOf(doc, host);
+  expect(distToLine(ps.end, wh.s, wh.e), lessThan(wallJoin.linear),
+      reason: '${stem.toHex()} ends on the centreline');
+  expect(classify(worldWallOf(doc, stem), 1, [wh]), isA<Tee>(),
+      reason: stem.toHex());
+  final (l, r) = facesOf(ph);
+  final (n1, n2) = face(wh, fromSign > 0 ? l : r);
+  final (f1, f2) = face(wh, fromSign > 0 ? r : l);
+  final cap = [
+    for (final q in worldOutline(doc, stem))
+      if ((q - ps.end).length < 500) q
+  ];
+  expect(cap, hasLength(2), reason: stem.toHex());
+  for (final q in cap) {
+    expect(distToLine(q, n1, n2), lessThan(1e-6), reason: stem.toHex());
+    expect(distToLine(q, f1, f2), greaterThan(150), reason: stem.toHex());
+  }
+}
+
+/// Draws one wall from world [a] to world [b] by two clicks (at those
+/// points exactly, plus the raw offsets) and Enter; returns it.
+Future<Handle> drawWall(
+    WidgetTester tester, PlannerView view, Vector2 a, Vector2 b) async {
+  await clickAt(tester, view, a);
+  await clickAt(tester, view, b);
+  await press(tester, LogicalKeyboardKey.enter);
+  return walls(view.document).last;
+}
+
 void main() {
   testWidgets(
       'WT1 two clicks make one wall at the snapped points, stored exactly, '
@@ -176,15 +220,17 @@ void main() {
   });
 
   testWidgets(
-      'WT2 three clicks and Enter: two walls in the current settings, '
-      'joined bit for bit and mitred, two undo steps', (tester) async {
+      'WT2 three clicks and Enter: two walls, each in the settings current '
+      'at its click, joined bit for bit and mitred, two undo steps',
+      (tester) async {
     final view = await pumpWalls(tester, wallShellDoc(FlutterTextMeasurer()));
     final doc = view.document;
     await press(tester, LogicalKeyboardKey.keyW);
-    wallTool(tester).settings.value =
-        const WallSettings(thickness: 115, justification: Justification.left);
     await clickNear(tester, view, c0);
     await clickNear(tester, view, c1);
+    // Mid-chain: the next wall takes the new settings, the first keeps its.
+    wallTool(tester).settings.value =
+        const WallSettings(thickness: 115, justification: Justification.left);
     await clickNear(tester, view, c2);
     await press(tester, LogicalKeyboardKey.enter);
     expect(wallTool(tester).isPending, isFalse);
@@ -194,9 +240,8 @@ void main() {
     expect([xy(pa.start), xy(pa.end)], [xy(c0), xy(c1)]);
     expect([xy(pb.start), xy(pb.end)], [xy(c1), xy(c2)]);
     expect(pa.ex == pb.sx && pa.ey == pb.sy, isTrue, reason: 'bit for bit');
-    for (final p in [pa, pb]) {
-      expect([p.thickness, p.justification], [115, Justification.left]);
-    }
+    expect([pa.thickness, pa.justification], [200, Justification.centre]);
+    expect([pb.thickness, pb.justification], [115, Justification.left]);
     expectMitre(doc, a, b);
     expect(driftOf(doc), isEmpty);
     expect(doc.commands.undoDepth, 2);
@@ -248,6 +293,53 @@ void main() {
       expect(distToLine(q, f1, f2), greaterThan(150));
     }
     expectSquare(doc, h);
+
+    // D11: the tool joins a wall wherever its band is clicked. On H (200,
+    // centre), clicks nearer a face than the centreline, on both sides:
+    // with `nearest` alone each would land on the face.
+    wallTool(tester).settings.value = const WallSettings();
+    final nH = leftOf(c0, c1);
+    final inSign = nH.dot(s0 - c0) > 0 ? 1.0 : -1.0; // the room's side
+    final t1 = await drawWall(tester, view, plan(2300, 1000),
+        c0 + (c1 - c0) * 0.6 + nH * (95 * inSign));
+    expectTee(doc, h, t1, fromSign: inSign);
+    final t2 = await drawWall(tester, view, plan(3100, -1300),
+        c0 + (c1 - c0) * 0.8 - nH * (60 * inSign));
+    expectTee(doc, h, t2, fromSign: -inSign);
+    // Inside H's band within one thickness of its end: the new wall starts
+    // at H's end, bit for bit, and the two make a node.
+    final len = c0.distanceTo(c1);
+    final n = await drawWall(
+        tester,
+        view,
+        c0 + (c1 - c0) * ((len - 120) / len) + nH * (70 * inSign),
+        plan(5200, 1100));
+    expect(xy(doc.components.get<WallParams>(n)!.start), xy(c1));
+    expect(classify(worldWallOf(doc, n), 0, [worldWallOf(doc, h)]),
+        isA<NodeJoint>());
+    expectMitre(doc, h, n);
+
+    // H2 (240, left) from c3 to c2: its band lies on its left only. From
+    // the room (its right), a click in the band beyond the centreline makes
+    // a T that butts the centreline face; a click as far off on the right
+    // is outside the band and stays where it is.
+    wallTool(tester).settings.value =
+        const WallSettings(thickness: 240, justification: Justification.left);
+    final h2 = await drawWall(tester, view, c3, c2);
+    final nH2 = leftOf(c3, c2);
+    expect(nH2.dot(s0 - c3), lessThan(0), reason: 'the room is on the right');
+    wallTool(tester).settings.value = const WallSettings();
+    final t3 = await drawWall(
+        tester, view, plan(1500, 2200), c3 + (c2 - c3) * 0.4 + nH2 * 180);
+    expectTee(doc, h2, t3, fromSign: -1);
+    final t4 = await drawWall(
+        tester, view, plan(2500, 2100), c3 + (c2 - c3) * 0.7 - nH2 * 150);
+    final p4 = doc.components.get<WallParams>(t4)!;
+    expect(distToLine(p4.end, c3, c2), closeTo(150, 1e-3),
+        reason: 'outside the band: not joined');
+    expect(
+        classify(worldWallOf(doc, t4), 1, [worldWallOf(doc, h2)]), isA<Free>());
+    expect(driftOf(doc), isEmpty);
 
     // A free wall X from two raw points, then a chain whose first click
     // lands on X's end: the new wall Y starts there bit for bit.
@@ -377,6 +469,33 @@ void main() {
     await tester.pump();
     await press(tester, LogicalKeyboardKey.keyW);
     expect(status(tester), 'Select');
+  });
+
+  testWidgets(
+      'WT8 a denied wall allocates no handle, changes nothing and ends the '
+      'chain; structure alone is enough to deny it', (tester) async {
+    final view = await pumpWalls(tester, wallShellDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    await press(tester, LogicalKeyboardKey.keyW);
+    for (final denied in const [
+      DraftPermissions.runtime,
+      DraftPermissions(
+          transform: true, components: true, geometry: true, structure: false),
+    ]) {
+      doc.commands.permissions = DraftPermissions.all;
+      await clickNear(tester, view, c0);
+      await clickNear(tester, view, c1);
+      expect(wallTool(tester).isPending, isTrue);
+      doc.commands.permissions = denied;
+      final seed = doc.handleSeed.current;
+      final before = enc(doc);
+      final count = walls(doc).length;
+      await clickNear(tester, view, c2);
+      expect(doc.handleSeed.current, seed);
+      expect(enc(doc), before);
+      expect(walls(doc), hasLength(count));
+      expect(wallTool(tester).isPending, isFalse, reason: 'the chain ends');
+    }
   });
 
   testWidgets(

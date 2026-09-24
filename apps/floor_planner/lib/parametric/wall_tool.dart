@@ -7,6 +7,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'wall.dart';
+import 'wall_geometry.dart';
 
 /// The Wall tool's settings (spec 07 D11): what the next wall is drawn
 /// with. The shell owns them; the panel edits them (Task 8).
@@ -53,6 +54,10 @@ final SnapMask kWallSnapMask = kDragSnapMask.with_(SnapKind.nearest);
 ///   a wall is down, ends it (so a double click is harmless). Before that, a
 ///   click on the start is a zero-length wall and is refused, as the Line
 ///   tool refuses one (M-05x).
+/// - **It joins a wall wherever its band is clicked** (D11): an accepted
+///   point, and the rubber band's end, that lies in a wall's band is moved
+///   onto that wall (see [_joinBand]), so a click nearer a face than the
+///   centreline still makes a T or a node.
 /// - Enter and Escape end the chain. Every other key-down is swallowed
 ///   while it is pending (05 D3): undo never lands mid-chain (Ruling 07-1).
 ///
@@ -66,6 +71,13 @@ class WallTool extends PlacementTool {
   final ValueNotifier<WallSettings> settings;
 
   int _walls = 0;
+
+  /// The rubber band's far end: the hover point, joined to a wall when it
+  /// lies in one's band. Reused, never reallocated.
+  final Vector2 _bandEnd = Vector2.zero();
+
+  /// The document of the last hover, for [hovered], which has no context.
+  DraftDocument? _document;
 
   @override
   String get name => 'Wall';
@@ -85,7 +97,23 @@ class WallTool extends PlacementTool {
   }
 
   @override
+  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {
+    _document = ctx.document;
+    super.onPointerMove(e, ctx);
+  }
+
+  /// Runs after every hover's resolution (and re-resolution), so
+  /// [hoverPoint] is already the resolved point.
+  @override
+  void hovered(Vector2 raw) {
+    final doc = _document;
+    _bandEnd.setFrom(
+        (doc == null ? null : _joinBand(doc, hoverPoint)) ?? hoverPoint);
+  }
+
+  @override
   void accept(Vector2 point, ToolContext ctx) {
+    if (!acceptingSelf) point = _joinBand(ctx.document, point) ?? point;
     if (points.isEmpty) {
       points.add(point);
       return;
@@ -121,6 +149,46 @@ class WallTool extends PlacementTool {
     _walls = 0;
   }
 
+  /// Spec 07 D11: the Wall tool joins a wall wherever its band is clicked.
+  ///
+  /// [p] is in a wall's band when it lies between the wall's two faces (by
+  /// its justification) and its projection lies within the centreline's
+  /// length, both within `wallJoin.linear`. Then:
+  /// - within one thickness of a centreline end, along the centreline, it
+  ///   joins that end: bitwise the world endpoint, computed as `WallType`
+  ///   computes it (`WorldWall` of the params and the group's transform),
+  ///   so the two walls make a node;
+  /// - otherwise it joins the projection onto the centreline: a T.
+  ///
+  /// When several walls qualify, the lowest handle wins. Null when [p] is
+  /// in no wall's band. O(walls), per click and per hover: never on the
+  /// frame path.
+  static Vector2? _joinBand(DraftDocument doc, Vector2 p) {
+    final tol = wallJoin.linear;
+    for (final h in doc.components.withComponent<WallParams>()) {
+      final w = WorldWall(h, doc.components.get<WallParams>(h)!,
+          doc.tree.accumulatedTransform(h));
+      if (w.degenerate) continue;
+      final d = w.d;
+      final vx = p.x - w.s.x, vy = p.y - w.s.y;
+      final along = vx * d.x + vy * d.y;
+      // Along the left normal (-d.y, d.x), as the face offsets are.
+      final across = vy * d.x - vx * d.y;
+      final (left, right) = w.offsets;
+      final length = w.s.distanceTo(w.e);
+      if (across > left + tol ||
+          across < right - tol ||
+          along < -tol ||
+          along > length + tol) {
+        continue;
+      }
+      final toEnd = length - along;
+      if (along <= w.t || toEnd <= w.t) return along <= toEnd ? w.s : w.e;
+      return Vector2(w.s.x + d.x * along, w.s.y + d.y * along);
+    }
+    return null;
+  }
+
   /// Spec 07 D2: a wall no longer than `wallJoin.linear` is degenerate.
   static bool _tooShort(Vector2 s, Vector2 e) =>
       !(s.distanceTo(e) > wallJoin.linear);
@@ -154,7 +222,7 @@ class WallTool extends PlacementTool {
   @override
   void paintRubberBand(Canvas canvas, Vector2 origin, double scale) {
     if (points.isEmpty || !hoverVisible) return;
-    final a = points.last, b = hoverPoint;
+    final a = points.last, b = _bandEnd;
     final ax = a.x - origin.x, ay = a.y - origin.y;
     final bx = b.x - origin.x, by = b.y - origin.y;
     band
