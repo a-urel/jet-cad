@@ -110,4 +110,30 @@ void main() {
     await press(tester, LogicalKeyboardKey.keyB);
     expect(status(tester), isNot('Box'));
   });
+
+  testWidgets('SE8 a tap outside the width field commits it, with no Enter',
+      (tester) async {
+    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
+    await drawTwoBoxes(tester, view);
+    final b = boxes(view.document).first;
+    view.selection.replace([SelectionKey.root(b)]);
+    await tester.pump();
+    final depth = view.document.commands.undoDepth;
+    await tester.enterText(width, '150');
+    await tester.pump();
+    // No TextInputAction.done: the commit must come from the tap below.
+    // Not a tap on the Height field: `TextField`'s default `groupId` is
+    // `EditableText`, so every plain `TextField` shares it, and a tap on
+    // another one counts as *inside* the group, never outside -- this
+    // would fail to exercise `onTapOutside` at all. The panel's "Box"
+    // label is a plain `Text`, genuinely outside every field's tap region
+    // (`find.descendant` because the status bar has its own "Box" text
+    // while the Box tool is armed).
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('selection-panel')),
+        matching: find.text('Box')));
+    await tester.pump();
+    expect(view.document.components.get<BoxParams>(b)!.width, 150);
+    expect(view.document.commands.undoDepth, depth + 1);
+  });
 }

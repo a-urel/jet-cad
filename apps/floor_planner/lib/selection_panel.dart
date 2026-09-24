@@ -10,10 +10,8 @@ import 'parametric/box.dart';
 /// `SetComponentCommand<BoxParams>`, which the parametric system turns into
 /// one undo step with its regeneration. 12 builds the real inspector.
 ///
-/// Ruling 06-14: Enter commits; focus-out reverts to the model value. An
-/// `onTapOutside` handler would also fire on the test's own tap on the field
-/// (SE4/SE7), so this panel commits on `onSubmitted` only -- the spec's D13
-/// gets amended in Task 11.
+/// Enter or a tap outside the field commits (spec 06 D13); an invalid value
+/// reverts the field to the model's current value instead.
 class SelectionPanel extends StatefulWidget {
   const SelectionPanel(
       {super.key, required this.document, required this.selection});
