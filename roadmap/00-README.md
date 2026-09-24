@@ -262,7 +262,7 @@ cheap; learning it from a half-executed Plan is not.
 | 12 | app shell | — | — | — |
 | 13 | export and print | — | — | — |
 
-**01–05 are executed, merged and looked at**; the other eight have not started. Update
+**01–05 are executed, merged and looked at; 06 is merged (`a6837d0`) with its look OWED**; the other seven have not started. Update
 this table as specs and plans land; `STATUS.md` at the repo root stays the
 authority on what is in flight. The render line's own plan table lives there,
 not here: six of seven merged, Plan G (web) unwritten, see the section above.

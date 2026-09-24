@@ -1,8 +1,8 @@
 # 06 — The parametric layer
 
-**Status:** executed on `plan-06/parametric-layer`, not merged. Exit gate 13
-of 14; criterion 14 (the human's look) is OWED; the final whole-branch
-review is pending. See
+**Status:** MERGED into `main` at `a6837d0` (2026-09-24). Exit gate 13 of 14;
+criterion 14 (the human's look) is OWED. The final whole-branch review ran
+and its fix wave landed before the merge. See
 [STATUS.md](../STATUS.md#plan-06--the-parametric-layer-executed-on-plan-06parametric-layer-not-merged)
 and the results note,
 [2026-09-24-plan-06-results.md](../docs/superpowers/notes/2026-09-24-plan-06-results.md).
