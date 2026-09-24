@@ -1,6 +1,7 @@
 // Generated regions in the planner (spec 07 D8): a fill and the closed
 // POLYLINE it names, matched through the fill, rewritten in place, added
 // fill first and removed through the boundary.
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -32,6 +33,8 @@ Float64List loopCoords(RegionRect p, int i) =>
 Float64List diagonal(RegionRect p) =>
     linePayload(Vector2(0, 0), Vector2(p.width, p.height)).coords;
 
+Float64List centreline(RegionRect p) => regionRectCentreline(p).coords;
+
 /// The area the cached triangulation of [boundary] covers, from the
 /// boundary's current coordinates.
 double triangleArea(DraftDocument doc, Handle boundary) {
@@ -54,8 +57,9 @@ List<(EntityKind, int)> shape(DraftDocument doc, Handle g) => [
     ];
 
 /// Asserts every region of [g] is whole: each fill names a live polyline
-/// child of [g] that names it back, and every polyline child is some
-/// fill's boundary. Returns the boundaries in fill order.
+/// child of [g] that names it back, and every polyline child but the one
+/// open centreline is some fill's boundary. Returns the boundaries in fill
+/// order.
 List<Handle> expectRegionsWhole(DraftDocument doc, Handle g) {
   final ks = kids(doc, g);
   final fills = [
@@ -70,11 +74,13 @@ List<Handle> expectRegionsWhole(DraftDocument doc, Handle g) {
     expect(fills[i].value, lessThan(boundaries[i].value),
         reason: 'a region\'s fill draws beneath its boundary');
   }
-  for (final k in ks) {
-    if (kindOf(doc, k) == EntityKind.polyline) {
-      expect(boundaries, contains(k), reason: '${k.toHex()} is no orphan');
-    }
-  }
+  final plain = [
+    for (final k in ks)
+      if (kindOf(doc, k) == EntityKind.polyline && !boundaries.contains(k)) k
+  ];
+  expect(plain, hasLength(1), reason: 'no orphan boundary: $plain');
+  expect(payloadOf(doc, plain.single).pointCount, 2,
+      reason: 'the one plain POLYLINE is the open centreline');
   return boundaries;
 }
 
@@ -89,8 +95,8 @@ DraftCommand deleteLikeSelectTool(DraftDocument doc, Handle g) =>
 
 void main() {
   test(
-      'RG1 a new object gets fill < boundary < line, and the fill names '
-      'its boundary', () {
+      'RG1 a new object gets fill < boundary < line < centreline, and the '
+      'fill names its boundary', () {
     final doc = paramDoc();
     const p = RegionRect(2000, 1000, 1);
     doc.commands.execute(create(doc, hA, atA, p));
@@ -99,12 +105,15 @@ void main() {
       (EntityKind.fill, base + 1),
       (EntityKind.polyline, base + 2),
       (EntityKind.line, base + 3),
+      (EntityKind.polyline, base + 4),
     ]);
-    final [fill, boundary, line] = kids(doc, hA);
+    final [fill, boundary, line, centre] = kids(doc, hA);
     expect(boundaryOf(doc, fill), boundary);
     expect(doc.fills.fillsOf(boundary), [fill]);
     expect(payloadOf(doc, boundary).coords, loopCoords(p, 0));
     expect(payloadOf(doc, line).coords, diagonal(p));
+    expect(payloadOf(doc, centre).coords, centreline(p));
+    expect(doc.fills.fillsOf(centre), isEmpty);
     expect(triangleArea(doc, boundary), closeTo(2000 * 1000, 1e-6));
     // In world space the boundary sits on A's rotated, off-origin frame.
     final m = doc.tree.accumulatedTransform(hA);
@@ -153,8 +162,13 @@ void main() {
       expect(triangleArea(doc, boundaries[i]),
           closeTo((2600 - d) * (1400 - d), 1e-6));
     }
-    final line = kids(doc, hA).last;
-    expect(payloadOf(doc, line).coords, diagonal(p1));
+    // Plain children, the POLYLINE included, never match a boundary.
+    expect(shape(doc, hA).sublist(4), [
+      (EntityKind.line, handles[4].value),
+      (EntityKind.polyline, handles[5].value)
+    ]);
+    expect(payloadOf(doc, handles[4]).coords, diagonal(p1));
+    expect(payloadOf(doc, handles[5]).coords, centreline(p1));
     expect(ParametricSystem(doc, catalog).drift(), isEmpty);
 
     final after = canon(doc);
@@ -174,7 +188,7 @@ void main() {
     const p1 = RegionRect(2000, 1000, 1);
     const p2 = RegionRect(2000, 1000, 2);
     doc.commands.execute(create(doc, hA, atA, p1));
-    final [f1, b1, line] = kids(doc, hA);
+    final [f1, b1, line, centre] = kids(doc, hA);
     final seed = doc.handleSeed.current.value;
 
     doc.commands.execute(SetComponentCommand<RegionRect>(hA, p2));
@@ -182,17 +196,20 @@ void main() {
       (EntityKind.fill, f1.value),
       (EntityKind.polyline, b1.value),
       (EntityKind.line, line.value),
+      (EntityKind.polyline, centre.value),
       (EntityKind.fill, seed + 1),
       (EntityKind.polyline, seed + 2),
     ]);
     expect(expectRegionsWhole(doc, hA), [b1, Handle(seed + 2)]);
     expect(payloadOf(doc, b1).coords, loopCoords(p2, 0));
     expect(payloadOf(doc, Handle(seed + 2)).coords, loopCoords(p2, 1));
+    expect(payloadOf(doc, centre).coords, centreline(p2));
     expect(triangleArea(doc, Handle(seed + 2)), closeTo(1980 * 980, 1e-6));
     final two = canon(doc);
 
     doc.commands.execute(SetComponentCommand<RegionRect>(hA, p1));
-    expect(kids(doc, hA), [f1, b1, line]);
+    expect(kids(doc, hA), [f1, b1, line, centre]);
+    expect(payloadOf(doc, centre).coords, centreline(p1));
     expect(expectRegionsWhole(doc, hA), [b1]);
     expect(doc.entities.slotOf(Handle(seed + 1)), isNull);
     expect(doc.entities.slotOf(Handle(seed + 2)), isNull);
@@ -231,7 +248,7 @@ void main() {
       'changes', () {
     final doc = paramDoc();
     doc.commands.execute(create(doc, hA, atA, const RegionRect(2000, 1000, 1)));
-    final [fill, boundary, _] = kids(doc, hA);
+    final [fill, boundary, _, _] = kids(doc, hA);
     final before = enc(doc);
     final depth = doc.commands.undoDepth;
     final other = polylinePayload(
@@ -255,11 +272,12 @@ void main() {
 
   test(
       'RG6 the select tool\'s delete (boundaries, not fills, then the node) '
-      'detaches the component; undo restores the three children', () {
+      'detaches the component; undo restores the four children', () {
     final doc = paramDoc();
     const p = RegionRect(2000, 1000, 1);
     doc.commands.execute(create(doc, hA, atA, p));
     final handles = kids(doc, hA);
+    expect(handles, hasLength(4));
     final before = canon(doc);
     doc.commands.execute(deleteLikeSelectTool(doc, hA));
     expect(doc.components.get<RegionRect>(hA), isNull);
@@ -319,5 +337,70 @@ void main() {
         [Vector2(0, 0), Vector2(5, 0), Vector2(5, 5)],
         closed: true));
     expect((r.kind, r.filled), (EntityKind.polyline, true));
+  });
+
+  test(
+      'RG9 a loaded fill naming a foreign or missing boundary: an edit '
+      'throws StateError and nothing changes', () {
+    for (final foreign in [true, false]) {
+      final doc = paramDoc();
+      doc.commands
+          .execute(create(doc, hA, atA, const RegionRect(2000, 1000, 1)));
+      doc.commands
+          .execute(create(doc, hB, parked, const RegionRect(700, 900, 1)));
+      final [aFill, _, _, _] = kids(doc, hA);
+      final [_, bBoundary, _, _] = kids(doc, hB);
+      // 1500 is below the seed and names no entity.
+      final named = foreign ? bBoundary.value : 1500;
+      expect(doc.entities.slotOf(const Handle(1500)), isNull);
+      final j = jsonDecode(enc(doc)) as Map<String, Object?>;
+      for (final e in j['entities']! as List) {
+        final entity = e as Map<String, Object?>;
+        if ((entity['record']! as Map)['handle'] == aFill.value) {
+          (entity['geometry']! as Map)['scalars'] = [named.toDouble()];
+        }
+      }
+      final loaded = reload(jsonEncode(j));
+      expect(boundaryOf(loaded, aFill).value, named);
+      final bPayload = payloadOf(loaded, bBoundary).coords;
+      final before = enc(loaded);
+      expect(
+          () => loaded.commands.execute(SetComponentCommand<RegionRect>(
+              hA, const RegionRect(2100, 1000, 1))),
+          throwsStateError,
+          reason: foreign ? 'foreign' : 'dangling');
+      expect(enc(loaded), before);
+      expect(loaded.commands.undoDepth, 0);
+      expect(payloadOf(loaded, bBoundary).coords, bPayload);
+    }
+  });
+
+  test(
+      'RG10 two region objects raised in one command: either child order, '
+      'same bytes (06 D11)', () {
+    String run(bool bFirst) {
+      final d = paramDoc();
+      d.commands.execute(create(d, hA, atA, const RegionRect(2000, 1000, 1)));
+      d.commands.execute(
+          create(d, hB, onA(2600, -400, 0.4), const RegionRect(700, 900, 1)));
+      final seed = d.handleSeed.current.value;
+      final edits = [
+        SetComponentCommand<RegionRect>(hA, const RegionRect(2000, 1000, 2)),
+        SetComponentCommand<RegionRect>(hB, const RegionRect(700, 900, 2)),
+      ];
+      d.commands.execute(CompoundCommand(
+          bFirst ? edits.reversed.toList() : edits,
+          label: 'Edit'));
+      // The closure is planned ascending: A reserves first.
+      expect(shape(d, hA).sublist(4),
+          [(EntityKind.fill, seed + 1), (EntityKind.polyline, seed + 2)]);
+      expect(shape(d, hB).sublist(4),
+          [(EntityKind.fill, seed + 3), (EntityKind.polyline, seed + 4)]);
+      expect(payloadOf(d, Handle(seed + 4)).coords,
+          loopCoords(const RegionRect(700, 900, 2), 1));
+      return enc(d);
+    }
+
+    expect(run(true), run(false));
   });
 }

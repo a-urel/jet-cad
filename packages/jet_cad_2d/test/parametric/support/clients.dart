@@ -243,7 +243,8 @@ final class HingeType extends ParametricType<Hinge> {
 /// planner must refuse, whether that region is matched or added.
 enum RegionFault { none, open, crossed }
 
-/// A rectangle generating [count] regions and one LINE (Ruling 07-8): the
+/// A rectangle generating [count] regions, one LINE and one open two-point
+/// POLYLINE, like a wall's centreline (Ruling 07-8): the
 /// planner's region handling, tested without wall geometry.
 final class RegionRect implements Component {
   const RegionRect(this.width, this.height, this.count,
@@ -289,6 +290,10 @@ List<Vector2> regionRectLoop(RegionRect p, int i) {
   ];
 }
 
+/// A [RegionRect]'s plain POLYLINE child: open, two points, at mid height.
+GeometryPayload regionRectCentreline(RegionRect p) =>
+    polylinePayload([Vector2(0, p.height / 2), Vector2(p.width, p.height / 2)]);
+
 final class RegionRectType extends ParametricType<RegionRect> {
   const RegionRectType();
   @override
@@ -299,7 +304,10 @@ final class RegionRectType extends ParametricType<RegionRect> {
       ]);
 
   /// The diagonal LINE comes **first** on purpose: the planner, not the
-  /// client, puts regions ahead of plain children (spec 07 D8).
+  /// client, puts regions ahead of plain children (spec 07 D8). The open
+  /// POLYLINE (the mid-height centreline) comes last: a plain child of the
+  /// same kind as a region's boundary, which the planner must never match
+  /// against a boundary.
   @override
   List<Generated> generate(ParametricView view, Handle self) {
     final p = view.paramsOf<RegionRect>(self)!;
@@ -314,6 +322,7 @@ final class RegionRectType extends ParametricType<RegionRect> {
             ], closed: true),
           _ => polylinePayload(regionRectLoop(p, i), closed: true),
         }),
+      Generated(EntityKind.polyline, regionRectCentreline(p)),
     ];
   }
 }

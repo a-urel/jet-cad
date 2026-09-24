@@ -144,6 +144,12 @@ class ParametricSystem {
   /// mutate, and a dry run is exactly where a client could try to call
   /// `execute` and have it actually land, since nothing else here applies
   /// anything. Re-entry through the dispatcher throws instead.
+  ///
+  /// Throws what the plan throws (spec 07 D8): `ArgumentError` when a
+  /// client generates a region that is not a closed, triangulable
+  /// polyline, and `StateError` when an object's fill names a boundary that
+  /// is missing or not a child of the same object (a malformed load). Like
+  /// an edit, a dry run cannot plan around either.
   List<Handle> drift() {
     _applying = true;
     try {
