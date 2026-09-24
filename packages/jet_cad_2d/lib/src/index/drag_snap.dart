@@ -36,6 +36,10 @@ final class DragPoint {
 ///
 /// Object snap always beats the grid, whatever the two distances (04 D6).
 /// Between object-snap kinds, the engine's kind-first order decides.
+///
+/// [mask] is the object-snap kinds considered: [kDragSnapMask] unless a
+/// caller widens it (spec 07 D11: the Wall tool adds `nearest`, so a click
+/// on a centreline's body lands on it).
 void resolveDragPoint({
   required Vector2 raw,
   required Vector2? orthoBase,
@@ -46,6 +50,7 @@ void resolveDragPoint({
   required double? gridStepMm,
   required SnapResult scratch,
   required DragPoint out,
+  SnapMask mask = kDragSnapMask,
 }) {
   out.objectKind = null;
   out.grid = false;
@@ -69,7 +74,7 @@ void resolveDragPoint({
   //    under it. It wins outright and overrides ortho. Copied at once,
   //    because the next query rewrites `scratch.point` (invariant 7).
   if (objectSnap) {
-    index.snapInto(raw, apertureWorld, kDragSnapMask, scratch);
+    index.snapInto(raw, apertureWorld, mask, scratch);
     if (scratch.found) {
       out.point.setFrom(scratch.point);
       out.objectKind = scratch.kind;

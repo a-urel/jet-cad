@@ -47,7 +47,8 @@ DragPoint resolve(SpatialIndex index, Vector2 raw,
     {Vector2? orthoBase,
     bool objectSnap = true,
     PageComponent? page,
-    SnapResult? scratch}) {
+    SnapResult? scratch,
+    SnapMask mask = kDragSnapMask}) {
   final out = DragPoint();
   resolveDragPoint(
     raw: raw,
@@ -59,6 +60,7 @@ DragPoint resolve(SpatialIndex index, Vector2 raw,
     gridStepMm: page?.gridStepMm,
     scratch: scratch ?? SnapResult(),
     out: out,
+    mask: mask,
   );
   return out;
 }
@@ -67,6 +69,23 @@ void main() {
   test('kDragSnapMask is the cheap kinds plus intersection', () {
     expect(
         kDragSnapMask.bits, SnapMask.cheap.with_(SnapKind.intersection).bits);
+  });
+
+  test(
+      'mask widens the object-snap kinds: nearest lands on a body the '
+      'default passes over, over the grid (spec 07 D11)', () {
+    final index = indexOver([
+      [7093, 3004, 7093, 3304],
+    ]);
+    final raw = Vector2(7095.5, 3221.25);
+    final plain = resolve(index, raw, page: grid100);
+    expect(plain.objectKind, isNull, reason: 'nearest is not a drag kind');
+    expect([plain.point.x, plain.point.y], [7100, 3200]);
+    final near = resolve(index, raw,
+        page: grid100, mask: kDragSnapMask.with_(SnapKind.nearest));
+    expect(near.objectKind, SnapKind.nearest);
+    expect(near.grid, isFalse);
+    expect([near.point.x, near.point.y], [7093, 3221.25]);
   });
 
   test('the raw point passes through when nothing snaps', () {
