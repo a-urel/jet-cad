@@ -1,8 +1,8 @@
 # Plan 07 mutation log -- M-07a..s and the tasks' extras
 
-**Tally: 57 fired, 57 killed, 0 survived; 4 equivalent (recorded, not
+**Tally: 58 fired, 58 killed, 0 survived; 4 equivalent (recorded, not
 fired); 1 N/A.** Tasks 1-10: 51 fired, 51 killed. The final-review fix
-wave: 6 more fired, 6 killed, and two named mutants re-fired at the sites
+wave: 7 more fired (FW-toggle-catch included), 7 killed, and two named mutants re-fired at the sites
 the wave moved (M-07h's local half, M-07m), both killed; see "The
 final-review fix wave" below.
 
@@ -1963,3 +1963,18 @@ apps/floor_planner           flutter test       00:22 +142: All tests passed!   
                              dart format        Formatted 32 files (0 changed) in 0.14 seconds.   (exit 0)
                              flutter build web --release   ✓ Built build/web        (exit 0)
 ```
+
+### FW-toggle-catch — `_setJustification` lets a refused edit escape
+
+- **file:** `apps/floor_planner/lib/selection_panel.dart`; backup `fw-FW-toggle-catch-selection_panel.dart` (commit `55b55cb`, the controller's ruling on the fix wave's deviation 5).
+- **edit:** the `try … on ArgumentError / on StateError` around `_setJustification`'s `execute` removed.
+- **command:** `cd apps/floor_planner && CI=true flutter test test/selection_panel_test.dart --plain-name 'WS9 an edit the document refuses'` (exit 1; the clean tree gave `00:01 +1: All tests passed!`).
+- **red:**
+  ```
+  00:02 +0 -1: WS9 an edit the document refuses (a loaded fill naming another wall's outline) reverts the field and re-pins it: no exception escapes Enter, the focus loss or the justification toggle (final review m1) [E]
+  Expected: null
+    Actual: StateError:<Bad state: fill 515 of 514 names A2A, which is not a child of the same object>
+  00:02 +0 -1: Some tests failed.
+  ```
+  Re-fired independently by the final reviewer's scoped re-review: `WS9 … [E]`, same `Actual`, line 726.
+- **restore:** `cp fw-FW-toggle-catch-selection_panel.dart apps/floor_planner/lib/selection_panel.dart`; `diff` exit 0.

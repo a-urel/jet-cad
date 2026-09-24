@@ -22,10 +22,14 @@ and the four lines on macOS) and criterion 13 (the look) are OWED.**
   - render layer 931 + 1 skip + 7 standing goldens (`text_ladder` 1–5,
     and the Linux-only `text_lod_ladder` 1–2);
   - harness 82;
-  - app 138;
+  - app 142;
   - `flutter build web --release` `✓ Built`.
-- **Mutants:** 51 fired, 51 killed, 0 survived; 4 equivalent recorded; 1
+- **Mutants:** 58 fired, 58 killed, 0 survived; 4 equivalent recorded; 1
   N/A.
+- **Final whole-branch review (opus):** "With fixes" — one Important
+  (an acute corner rotated in its group could make an edit refuse with an
+  `ArgumentError`) and five Minors, all taken in one fix wave
+  (`d9c8609`, `b201296`, `55b55cb`); its re-review: **Ready to merge**.
 - **Owed:**
   - `flutter build macos --release` and the gate lines on macOS: the
     human's machine;
@@ -41,9 +45,10 @@ and the four lines on macOS) and criterion 13 (the look) are OWED.**
     boxes);
   - the Page panel's field keeps focus after Enter;
   - Box m3: tapping the panel background refocuses Width.
-- **Next:** the final whole-branch review; its fix wave, if any; the ledger
-  archive as the branch's last commit; the human's macOS build and look;
-  the merge; then the `fix/` branch above.
+- **Next:** the human's macOS build and look; the merge (`--no-ff`, from
+  the main checkout); then the `fix/` branch above. The ledger is
+  archived at `docs/superpowers/ledgers/2026-09-24-walls/` as the branch's
+  last commit.
 
 See [Plan 07](#plan-07--walls-executed-on-plan-07walls-not-merged)
 and [Resume here](#resume-here).
@@ -2028,7 +2033,26 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the final whole-branch review of Plan 07 (walls), on
+**Immediate next step: the human's look at Plan 07 (walls), on
+`plan-07/walls`, then the merge.** All eleven tasks are done
+(`f2daba5..330797c`), the final whole-branch review ran ("With fixes"), its
+fix wave landed at `d9c8609..55b55cb`, and the re-review returned **"Ready
+to merge"**. The four gate lines are green on Linux (engine 972 + 2
+standing; render layer 931 + 1 skip + 7 standing; harness 82; app 142; web
+`✓ Built`), and 58 mutants were fired and 58 killed. The ledger is archived
+at `docs/superpowers/ledgers/2026-09-24-walls/` as the branch's last
+commit. **What resumes here, in order:**
+1. the human's `flutter build macos --release` and the look (six items per
+   platform, from
+   [2026-09-24-plan-07-results.md](docs/superpowers/notes/2026-09-24-plan-07-results.md));
+2. the merge, the human's decision, `--no-ff`, from the main checkout;
+3. the post-07 `fix/` branch: white ByLayer drafting, the Page panel's
+   focus after Enter, and Box m3.
+
+Plan 06's look is still OWED as well. Nothing was simulated to fill in
+either look. See [Plan 07](#plan-07--walls-executed-on-plan-07walls-not-merged).
+
+*Before the final review, this paragraph read:* **Immediate next step: the final whole-branch review of Plan 07 (walls), on
 `plan-07/walls`.** Tasks 1–10 are done at `f2daba5..330797c`, and Task 11
 is the commit that writes this paragraph. The four gate lines are green on
 Linux (engine 972 + 2 standing; render layer 931 + 1 skip + 7 standing;

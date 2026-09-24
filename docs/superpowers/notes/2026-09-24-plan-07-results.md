@@ -239,9 +239,10 @@ That bound would not catch a regression to the spike's rule. `WG12` does.
 
 ### Mutation tally
 
-From [plan-07-mutation-log.md](plan-07-mutation-log.md): **57 fired, 57
+From [plan-07-mutation-log.md](plan-07-mutation-log.md): **58 fired, 58
 killed, 0 survived; 4 equivalent (recorded, not fired); 1 N/A.** Tasks
-1–10 fired 51; the final-review fix wave fired 6 more and re-fired M-07h's
+1–10 fired 51; the final-review fix wave fired 7 more (with `55b55cb`'s
+FW-toggle-catch) and re-fired M-07h's
 local half and M-07m at the sites it moved (see "Final review").
 
 - **The spec's named mutants:** 19 (M-07a…M-07s), plus 6 variants at a
@@ -444,6 +445,12 @@ One line each, from the ledger. None is fixed by this task.
   re-subscribe is untested. The UI cannot reach it (`late final`
   document).
 
+- **Final re-review, optional minor:** `_commit` and `_setJustification`
+  catch every `StateError`, including `_run`'s double-failure one ("the
+  target is partially mutated"), so the field reverts silently in that
+  case. Reachable only after two failures in a row. A fix would rethrow a
+  non-refusal `StateError`.
+
 **Found and deferred to a post-07 `fix/` branch.** The human deferred the
 white ByLayer defect (ledger); the controller ruled the Page panel's focus
 (Task 8, problem 1) and Box m3 (Task 8 m3) onto the same branch:
@@ -625,6 +632,34 @@ Exit 0.
 - `docs/superpowers/notes/2026-09-24-plan-07-results.md` (this file)
 
 ---
+
+### The fix wave's re-review: Ready to merge
+
+The final reviewer (opus, the same one) re-reviewed `5cda53d..55b55cb`
+(`d9c8609`, `b201296`, and `55b55cb`, the controller's ruling that the
+justification toggle catches a refused edit as `_commit` does). **Verdict:
+Ready to merge.** From its report (ledger):
+
+- **Gates** at `55b55cb`: engine `00:15 +972 -2` (the two standing
+  Linux-only hash tests), render `00:46 +931 ~1 -7` (the seven standing
+  goldens), harness `00:35 +82: All tests passed!`, app `00:22 +142: All
+  tests passed!`, analyze and format clean, `✓ Built build/web`.
+- **I1:** its reproduction lands (`undoDepth 1 drift [] diags
+  [wall.fallback [100], wall.fallback [200]]`), and throws with the local
+  check removed. Its 10,530-case acute-L sweep: 0 throws after, 6 with the
+  check removed (its first review's figure). About 9,400 dense grid-fuzz
+  edits in four configurations: 0 throws, 0 drift, 0 generate/diagnose
+  disagreements, 0 undo/redo mismatches.
+- **Mutants re-fired red:** local check removed (`WR13`), diagnose on the
+  world outline only (`WR13`), the thickness floor (`WT18`, `WS3`), both
+  catches (`WS9`, lines 709 and 726), the components check (`WS8`).
+- **m3 withdrawn as a data-loss finding:** the reviewer confirmed that at
+  `5cda53d` `RemoveEntityCommand` already refused the removal and `_run`
+  rolled back; the new check refuses earlier with a clearer message, as the
+  log and the D8 amendment say.
+- **One optional Minor, recorded as debt:** the panel's `on StateError`
+  also swallows `_run`'s own double-failure `StateError` (the target
+  partially mutated); reachable only after two failures in a row.
 
 ## Rulings
 
