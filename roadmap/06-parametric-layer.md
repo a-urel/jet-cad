@@ -1,6 +1,11 @@
 # 06 — The parametric layer
 
-**Status:** not started
+**Status:** executed on `plan-06/parametric-layer`, not merged. Exit gate 13
+of 14; criterion 14 (the human's look) is OWED; the final whole-branch
+review is pending. See
+[STATUS.md](../STATUS.md#plan-06--the-parametric-layer-executed-on-plan-06parametric-layer-not-merged)
+and the results note,
+[2026-09-24-plan-06-results.md](../docs/superpowers/notes/2026-09-24-plan-06-results.md).
 **Depends on:** 02
 **Blocks:** 07, 08, 10, 11 — the entire parametric half of the target
 **Size:** L

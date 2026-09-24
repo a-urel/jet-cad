@@ -153,6 +153,17 @@ and line.
   - `dispose()` releases it, if it is still its own tear-off, the way
     `SpatialIndex.dispose` does (`spatial_index.dart:3010-3019`).
 
+**Amended at execution (Plan 06):** Ruling 06-13 — `ComponentRegistry`
+gains `bool isRegistered<T extends Component>()`. `register<T>` replaces
+`T`'s store unconditionally, wiping every component of that type
+(`component.dart:74`); without this check, a second `ParametricSystem`
+constructed over an already-loaded document — which the catalog's own
+`registerInto` does on every construction (D3, Ruling 06-1) — would wipe
+every live component of a type it re-registers. The catalog now calls
+`register<T>` only when `isRegistered<T>()` is false. Pinned by `P10` and
+`M-06v`. This is the one addition outside `parametric/` besides the
+dispatcher's expander slot (D2).
+
 ### D2 — The dispatcher's expander slot (spike: approach A2)
 
 - **The slot.** `CommandDispatcher` gains
@@ -235,6 +246,18 @@ final class Generated {
   `SetEntityGeometryCommand` rejects a fill's payload, and regions are out
   of scope (review m4).
 
+**Amended at execution (Plan 06):** Ruling 06-1 — types live in a
+document-free `ParametricCatalog`, not on `ParametricSystem` as first
+written. `DraftDocumentCodec.decode` creates the document and needs the
+component factories *before* it loads components
+(`json_codec.dart:115`), so a per-document `ParametricSystem` cannot exist
+yet at that point. `catalog.register<T>(typeId, factory, type)` adds one
+type; `catalog.registerComponents` is the function every decode passes as
+`registerComponents:` (D10); `ParametricSystem(document, catalog)`
+registers the catalog's components into that document (subject to Ruling
+06-13's `isRegistered` check) and reads its types from it. Cost: one
+indirection.
+
 ### D4 — Regeneration: two-phase, parameters only, sorted (spike)
 
 The wrapper `ParametricEdit(inner)` does this in `apply`:
@@ -304,6 +327,34 @@ The wrapper `ParametricEdit(inner)` does this in `apply`:
 9. **Return** `CommandResult(inverse: ParametricReplay(Compound([g.inverse,
    r.inverse]), capabilities: this.capabilities), touched: r ∪ g)`.
 
+**Amended at execution (Plan 06):**
+
+- **Step 4, ruling 06-3.** "Every parametric component whose group node no
+  longer exists" is narrowed to components of objects that were **live
+  before the edit**. Taken literally, the step would also detach a
+  *misplaced* component on a leaf handle (D5) on every edit — a leaf has no
+  tree node either, so it would always read as "gone". Cost if wrong: a
+  misplaced component survives a delete; it is already reported by
+  `diagnostics()`.
+- **Step 5, ruling 06-4.** A touched handle that *was* an object is a seed
+  too, not only one that still is. An explicit
+  `SetComponentCommand<T>(h, null)` turns a box back into a plain group, and
+  its old neighbours must regrow — so both `before.objects` handles and
+  `after.objects` handles seed the closure.
+- **Step 8, review-found hardening (P11, M-06w).** The after-survey
+  (`after = _survey(...)`), the `lost` list, `cleanup` and `seeds` are
+  computed **inside** the same `try` that guards step 7's planning, not
+  ahead of it. A `reach` that throws while surveying the *new* parameters
+  (a live possibility: `reach` is client code, D3) must roll `r` back the
+  same way a throwing `generate` does — spec text ("in every failure case
+  the dispatcher pushes nothing") already required this; moving these
+  computations outside the `try` was a review-found gap, not a design
+  change. Killed by `M-06w`.
+
+Both mutants, `M-06w` (this hardening) and `M-06x` (D6's, below), were
+added to the mutant table by the fix round that closed them, and are fired
+in the mutation log alongside the spec's own M-06a…M-06t.
+
 **What undo and redo replay.** They replay `ParametricReplay`, a concrete
 compound. They never regenerate. The spike's Q2 showed the handles and the
 bytes restored. `ParametricReplay.apply` returns, as its own inverse,
@@ -345,6 +396,19 @@ was, and its inverse is the plain inverse.
 
   So the guard is the engine-level backstop that a future tool cannot
   bypass.
+
+**Amended at execution (Plan 06):** the guard is tightened to the spec text
+above — a touched handle in `G` is refused if it **still exists**, whatever
+its owner now is, not only while its owner is still a live parametric
+object. The looser rule (refuse only while the owner is still "an object")
+let a bundled command detach a box's component and then, in the same
+compound, directly edit one of its still-live generated children, sidestepping
+the backstop. The reviewer graded the original gap Minor; the controller
+ruled the spec binding and required the fix, since a compound that detaches
+an owner and edits its old child in one command must still be refused. Cost
+if wrong: such a compound is refused even though no tool in this plan issues
+one. Killed by `P12`, mutant `M-06x` (dropping the "still exists" check from
+the `owner != null` arm, leaving only the "is a live object" check).
 
 ### D7 — Permissions: derived geometry inherits (human)
 
@@ -426,6 +490,15 @@ was, and its inverse is the plain inverse.
   `drift()` and `diagnostics()` in a test over the sample document.
 - **The codec needs no change.** Unknown components are already preserved
   verbatim.
+
+**Amended at execution (Plan 06):** Ruling 06-1 — `registerComponents` is
+`ParametricCatalog.registerComponents`, not a `ParametricSystem` method
+(D3's amendment gives the reason: the document does not exist yet when the
+codec needs the factories). A test decoding with it, then constructing a
+`ParametricSystem(document, catalog)` over the freshly-loaded document, is
+safe only because of Ruling 06-13's `isRegistered` guard — otherwise the
+system's own construction would re-register every type and wipe the
+components `decode` just loaded.
 
 ### D11 — Determinism and byte identity (spike finding 3)
 
@@ -565,6 +638,18 @@ test uses **two or more objects that clip each other**, and asserts the
 clipped child counts (5 and 3 in the spike's pair), so the fixture cannot
 silently stop overlapping. The spike's first fixture did exactly that.
 
+**Amended at execution (Plan 06):** `G3` and `G6` compare state with the
+root's child order **normalised**, and `G3` without `handleSeed` (Task 4's
+ruling). This is pre-existing engine behaviour, not a Plan 06 defect:
+`RemoveNodeCommand`'s inverse re-links a removed node at the **end** of its
+parent's children (`tree.dart`, `_link`), and `HandleSeed` never moves back
+on undo. A rolled-back or undone delete is therefore state-equal, not
+byte-equal, and this spec's earlier "bytes unchanged" wording for `G6`
+overstated what the engine can give. Cost if wrong: a real ordering
+regression in a rollback would hide behind the normalisation; the
+component, node, entity and geometry assertions in `G3`/`G6` still stand on
+their own.
+
 ### Named mutants
 
 | Mutant | What it breaks | Must be killed by |
@@ -590,6 +675,40 @@ silently stop overlapping. The spike's first fixture did exactly that.
 | M-06r | the cleanup is applied at step 4, on its own, outside `g` (revision 1's shape) | a test client whose `generate` throws when a neighbour is deleted: after the refused delete, the bytes are unchanged and the deleted box's component is still attached |
 | M-06s | the re-entry guard is removed | a test client whose `generate` calls `execute` gets `StateError`, and history is unchanged |
 | M-06t | planning advances `handleSeed` | a refused plan (a throwing `generate`) leaves `handleSeed` unchanged |
+
+**Amended at execution (Plan 06):** five additions and clarifications, all
+recorded in [plan-06-mutation-log.md](../notes/plan-06-mutation-log.md):
+
+- **M-06u (Ruling 06-10):** `PlacementTool.commit` ignores its own `needs`
+  argument (D13), checking only `Capability.geometry`. Killed by `CN1`
+  (Task 5).
+- **M-06v (Ruling 06-13):** `_Registration.registerInto` re-registers a type
+  unconditionally, wiping an already-loaded store. Killed by `P10`.
+- **M-06w (D4 step 8's amendment above):** the after-survey, `lost`,
+  `cleanup` and `seeds` are computed outside step 7's rollback `try`. Killed
+  by `P11`.
+- **M-06x (D6's amendment above):** the D6 guard refuses a touched generated
+  child only while its owner is still a live parametric object, dropping
+  the "still exists" check. Killed by `P12`.
+- **M-06y:** `onTapOutside` is removed from the Selection section's field
+  builder (D13). Killed by `SE8`.
+
+Two clarifications to the table above, found while firing it:
+
+- **M-06g (app):** in `apps/floor_planner`, this mutant (dropping
+  `BoxType.reach`'s `toWorld` transform) is killed by `BT6`, a direct
+  assertion on `reach`'s output, not by `BT3`'s clipped-outline test. With
+  untransformed corners, every box's reach contains its own local origin
+  region, so every pair still counts as neighbours and `generate`'s exact
+  inside test still produces the right 5/3 split — the mutant costs
+  correctness of *which* boxes regenerate needlessly, not the outcome this
+  fixture can observe (the spec's own open question on `reach`, below).
+- **M-06b′:** first fired against `N6`'s original pierce-and-swallow fixture
+  and **survived** — a degenerate fixture (CLAUDE.md's dominant failure
+  mode): only one side of the move reserved a new handle, so an unsorted
+  closure had nothing to disturb. `N6`'s geometry was rewritten, test-only,
+  to a cross overlap where both objects gain children in the same `_plan`
+  call; re-fired, killed.
 
 ### Differential check
 
