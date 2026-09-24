@@ -295,7 +295,14 @@ GeometryPayload regionRectCentreline(RegionRect p) =>
     polylinePayload([Vector2(0, p.height / 2), Vector2(p.width, p.height / 2)]);
 
 final class RegionRectType extends ParametricType<RegionRect> {
-  const RegionRectType();
+  const RegionRectType(
+      {this.regionColor = const ByLayerColor(),
+      this.plainColor = const ByLayerColor()});
+
+  /// The colour of every region (fill and boundary), and of every plain
+  /// child, handed to [Generated] (spec 07 D3; RG11).
+  final DraftColor regionColor, plainColor;
+
   @override
   Capability get editCapability => Capability.geometry;
   @override
@@ -313,16 +320,20 @@ final class RegionRectType extends ParametricType<RegionRect> {
     final p = view.paramsOf<RegionRect>(self)!;
     return [
       Generated(EntityKind.line,
-          linePayload(Vector2(0, 0), Vector2(p.width, p.height))),
+          linePayload(Vector2(0, 0), Vector2(p.width, p.height)),
+          color: plainColor),
       for (var i = 0; i < p.count; i++)
-        Generated.region(switch (i == p.count - 1 ? p.fault : null) {
-          RegionFault.open => polylinePayload(regionRectLoop(p, i)),
-          RegionFault.crossed => polylinePayload([
-              for (final k in [0, 2, 1, 3]) regionRectLoop(p, i)[k],
-            ], closed: true),
-          _ => polylinePayload(regionRectLoop(p, i), closed: true),
-        }),
-      Generated(EntityKind.polyline, regionRectCentreline(p)),
+        Generated.region(
+            switch (i == p.count - 1 ? p.fault : null) {
+              RegionFault.open => polylinePayload(regionRectLoop(p, i)),
+              RegionFault.crossed => polylinePayload([
+                  for (final k in [0, 2, 1, 3]) regionRectLoop(p, i)[k],
+                ], closed: true),
+              _ => polylinePayload(regionRectLoop(p, i), closed: true),
+            },
+            color: regionColor),
+      Generated(EntityKind.polyline, regionRectCentreline(p),
+          color: plainColor),
     ];
   }
 }

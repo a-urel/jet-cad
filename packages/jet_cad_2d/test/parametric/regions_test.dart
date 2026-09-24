@@ -403,4 +403,44 @@ void main() {
 
     expect(run(true), run(false));
   });
+
+  test(
+      'RG11 a generated child is added in its Generated colour, region '
+      'halves alike, and a regeneration never rewrites it; ByLayer by '
+      'default (07 D3)', () {
+    const regionColor = TrueColor(0x123456), plainColor = TrueColor(0x654321);
+    final painted = ParametricCatalog()
+      ..register<RegionRect>(
+          RegionRect.id,
+          RegionRect.fromJson,
+          const RegionRectType(
+              regionColor: regionColor, plainColor: plainColor));
+    final doc = DraftDocument.empty();
+    ParametricSystem(doc, painted).install();
+    int colourOf(Handle h) => doc.entities.colorAt(doc.entities.slotOf(h)!);
+    List<int> colours() => [for (final k in kids(doc, hA)) colourOf(k)];
+    final region = encodeColor(regionColor), plain = encodeColor(plainColor);
+
+    doc.commands.execute(create(doc, hA, atA, const RegionRect(2000, 1000, 1)));
+    // fill, boundary, diagonal, centreline.
+    expect(colours(), [region, region, plain, plain]);
+    final boundary = kids(doc, hA)[1];
+    final before = payloadOf(doc, boundary).coords.toList();
+    doc.commands.execute(
+        SetComponentCommand<RegionRect>(hA, const RegionRect(2600, 1000, 1)));
+    expect(payloadOf(doc, boundary).coords, isNot(before), reason: 'rewritten');
+    expect(colours(), [region, region, plain, plain]);
+    doc.commands.execute(
+        SetComponentCommand<RegionRect>(hA, const RegionRect(2600, 1000, 2)));
+    expect(colours(), [region, region, plain, plain, region, region]);
+
+    // The default client, through the default catalog: ByLayer throughout.
+    final plainDoc = paramDoc();
+    plainDoc.commands
+        .execute(create(plainDoc, hA, atA, const RegionRect(2000, 1000, 2)));
+    expect([
+      for (final k in kids(plainDoc, hA))
+        plainDoc.entities.colorAt(plainDoc.entities.slotOf(k)!)
+    ], List.filled(6, kByLayer));
+  });
 }

@@ -20,6 +20,12 @@ const Tolerance wallJoin = Tolerance(linear: 1e-6, angular: 1e-9);
 /// wall from the node is clamped (spec 07 D6).
 const double mitreLimit = 4;
 
+/// Every wall child's colour (spec 07 D3): a black band on light paper,
+/// fill, outline and centreline alike. Concrete, not ByLayer: layer 0 is
+/// ACI 7, which resolves to white (`aciToRgb(7)`), and nothing in the
+/// renderer contrasts it with the paper, so a ByLayer band is paper-white.
+const DraftColor kWallColor = TrueColor(0x000000);
+
 /// A wall's parameters (spec 07 D2): both centreline endpoints in
 /// group-local space, the thickness and the justification, in mm.
 ///
@@ -131,20 +137,22 @@ final class WallType extends ParametricType<WallParams> {
   /// outline is computed in world space and taken to group-local space
   /// through `toWorld(self).invert()`, then the open centreline from
   /// `start` to `end`, the stored values themselves. A degenerate wall (D2)
-  /// generates the centreline alone.
+  /// generates the centreline alone. Every child is [kWallColor].
   @override
   List<Generated> generate(ParametricView view, Handle self) {
     final p = view.paramsOf<WallParams>(self)!;
-    final centreline =
-        Generated(EntityKind.polyline, polylinePayload([p.start, p.end]));
+    final centreline = Generated(
+        EntityKind.polyline, polylinePayload([p.start, p.end]),
+        color: kWallColor);
     final me = _worldWall(view, self)!;
     final ring = _outlineOf(view, me).ring;
     if (ring.isEmpty) return [centreline];
     final toLocal = view.toWorld(self).invert();
     return [
-      Generated.region(polylinePayload(
-          [for (final q in ring) toLocal.transformPoint(q)],
-          closed: true)),
+      Generated.region(
+          polylinePayload([for (final q in ring) toLocal.transformPoint(q)],
+              closed: true),
+          color: kWallColor),
       centreline,
     ];
   }

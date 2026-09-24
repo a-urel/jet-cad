@@ -188,9 +188,11 @@ List<DraftCommand> _plan(
       } else {
         // Fill first: `AddRegionCommand` requires the lower handle on it.
         out.add(AddRegionCommand(
-            fill: draftRecord(Handle.checked(++reserved), h, EntityKind.fill),
-            boundary:
-                draftRecord(Handle.checked(++reserved), h, EntityKind.polyline),
+            fill: draftRecord(Handle.checked(++reserved), h, EntityKind.fill,
+                color: g.color),
+            boundary: draftRecord(
+                Handle.checked(++reserved), h, EntityKind.polyline,
+                color: g.color),
             boundaryPayload: g.payload));
       }
     }
@@ -207,7 +209,8 @@ List<DraftCommand> _plan(
         }
       } else {
         out.add(AddEntityCommand(
-            record: draftRecord(Handle.checked(++reserved), h, g.kind),
+            record: draftRecord(Handle.checked(++reserved), h, g.kind,
+                color: g.color),
             payload: g.payload));
       }
     }

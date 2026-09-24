@@ -9,6 +9,7 @@ import '../document/component.dart';
 import '../document/draft_document.dart';
 import '../document/drafting.dart';
 import '../document/node.dart';
+import '../document/style.dart';
 import '../geometry/aabb2.dart';
 import '../geometry/transform2.dart';
 import '../store/entity_store.dart';
@@ -45,8 +46,14 @@ abstract class ParametricType<T extends Component> {
 /// The plain form is never a fill: a fill's payload is a reference to its
 /// boundary, not geometry, and `SetEntityGeometryCommand` refuses it. A
 /// filled area is generated with [Generated.region] instead.
+///
+/// [color] is written into the record when the child is **added**, and
+/// only then: a regeneration rewrites a matched child's payload in place
+/// and never its record (06 D11), so a client must keep its colours fixed
+/// for an object's life. ByLayer by default.
 final class Generated {
-  Generated(this.kind, this.payload) : filled = false {
+  Generated(this.kind, this.payload, {this.color = const ByLayerColor()})
+      : filled = false {
     if (kind == EntityKind.fill) {
       throw ArgumentError.value(
           kind, 'kind', 'a fill cannot be generated (spec 06 D3)');
@@ -59,7 +66,9 @@ final class Generated {
   /// payload is the boundary's handle, is never rewritten. [payload] must
   /// be a closed polyline with a non-empty triangulation, or the edit that
   /// generates it throws `ArgumentError` and is rolled back.
-  Generated.region(this.payload)
+  ///
+  /// [color] is the fill's and the boundary's both.
+  Generated.region(this.payload, {this.color = const ByLayerColor()})
       : kind = EntityKind.polyline,
         filled = true;
 
@@ -69,6 +78,9 @@ final class Generated {
 
   /// True for a region: [payload] is the boundary of a generated fill.
   final bool filled;
+
+  /// The colour an added child's record gets (both records of a region).
+  final DraftColor color;
 }
 
 /// A direct edit of a generated entity (spec D6). Propagates like
