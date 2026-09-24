@@ -6,6 +6,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'page_panel.dart';
 import 'parametric/box_tool.dart';
 import 'parametric/catalog.dart';
+import 'parametric/wall_grips.dart';
 import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
 import 'selection_panel.dart';
@@ -158,8 +159,10 @@ class _PlannerShellState extends State<PlannerShell> {
   //   controller prunes a dead key before the cache walks it.
   // - The grip cache is built after the outline cache, so on a selection
   //   change its listener runs after the outlines have been rebuilt.
+  // - Spec 07 D11: a selected wall's end grips come from `WallGrips`.
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
-  late final GripCache _grips = GripCache(_document, _selection, _outlines);
+  late final GripCache _grips =
+      GripCache(_document, _selection, _outlines, objects: WallGrips());
 
   late final ToolContext _context = ToolContext(
       document: _document,
