@@ -4,6 +4,7 @@ import 'package:floor_planner/parametric/wall_geometry.dart';
 import 'package:floor_planner/parametric/wall_tool.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:floor_planner/tool_palette.dart';
+import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -190,6 +191,50 @@ Future<Handle> drawWall(
   await press(tester, LogicalKeyboardKey.enter);
   return walls(view.document).last;
 }
+
+/// The Wall tool driven directly, wired as the shell wires it, over [doc]:
+/// a unit camera (a 10 mm aperture), object snap on, no page (no grid).
+({WallTool tool, ToolContext ctx}) directRig(DraftDocument doc) {
+  final index = SpatialIndex(doc);
+  final camera = CameraController(
+      ViewportTransform(worldToScreenMatrix: Transform2.identity()));
+  final selection = SelectionController(doc);
+  final settings = ValueNotifier<WallSettings>(const WallSettings());
+  final tool = WallTool(settings);
+  addTearDown(() {
+    tool.dispose();
+    settings.dispose();
+    selection.dispose();
+    camera.dispose();
+    index.dispose();
+  });
+  return (
+    tool: tool,
+    ctx: ToolContext(
+        document: doc, index: index, camera: camera, selection: selection),
+  );
+}
+
+ToolPointerEvent pointerAt(Vector2 world, {int buttons = 0}) =>
+    ToolPointerEvent(
+        screen: Offset.zero,
+        world: world,
+        pointer: 1,
+        buttons: buttons,
+        shift: false,
+        control: false,
+        meta: false,
+        alt: false,
+        pickRadiusWorld: 1);
+
+void hoverTo(({WallTool tool, ToolContext ctx}) rig, Vector2 world) =>
+    rig.tool.onPointerMove(pointerAt(world), rig.ctx);
+
+void pressAt(({WallTool tool, ToolContext ctx}) rig, Vector2 world) =>
+    rig.tool.onPointerDown(pointerAt(world, buttons: kPrimaryButton), rig.ctx);
+
+/// Median of [xs].
+double median(List<double> xs) => (xs.toList()..sort())[xs.length ~/ 2];
 
 void main() {
   testWidgets(
@@ -518,6 +563,124 @@ void main() {
         reason: 'the raw point: the grid is off');
     expect(classify(worldWallOf(doc, t), 1, [worldWallOf(doc, h)]),
         isNot(isA<Tee>()));
+  });
+
+  test(
+      'WT10 a hover with no chain pending scans no wall band and leaves the '
+      'rubber band alone (review round 2, I2)', () {
+    final doc = wallDoc();
+    doc.commands.execute(addWall(doc, const Handle(1300), plan(0, 0),
+        plan(4000, 0), 200, Justification.centre));
+    final rig = directRig(doc);
+    final inBand = plan(1200, 60);
+    hoverTo(rig, inBand);
+    expect(rig.tool.debugBandScans, 0);
+    expect(xy(rig.tool.debugBandEnd), [0, 0]);
+    pressAt(rig, plan(1500, 1500));
+    final scans = rig.tool.debugBandScans;
+    hoverTo(rig, inBand);
+    expect(rig.tool.debugBandScans, scans + 1);
+    expect(distToLine(rig.tool.debugBandEnd, plan(0, 0), plan(4000, 0)),
+        lessThan(1e-6));
+  });
+
+  test(
+      'WT11 after a wall moves, a hover joins its band where it is now, not '
+      'where it was: the cache follows the document (review round 2, I2)',
+      () async {
+    final doc = wallDoc();
+    const h = Handle(1300);
+    doc.commands.execute(
+        addWall(doc, h, plan(0, 0), plan(4000, 0), 200, Justification.centre));
+    final rig = directRig(doc);
+    pressAt(rig, plan(1500, 2500));
+    hoverTo(rig, plan(1200, 60));
+    expect(distToLine(rig.tool.debugBandEnd, plan(0, 0), plan(4000, 0)),
+        lessThan(1e-6));
+    // Move H 700 mm across itself, in world.
+    final shift = plan(0, 700) - plan(0, 0);
+    doc.commands.execute(TransformNodeCommand(
+        h,
+        Transform2.translation(shift.x, shift.y)
+            .multiply(doc.tree.accumulatedTransform(h))));
+    await Future<void>.delayed(Duration.zero);
+    final w = worldWallOf(doc, h);
+    hoverTo(rig, plan(1200, 760));
+    expect(distToLine(rig.tool.debugBandEnd, w.s, w.e), lessThan(1e-6),
+        reason: 'joined onto the moved wall');
+    final old = plan(1200, 60);
+    hoverTo(rig, old);
+    expect((rig.tool.debugBandEnd - old).length, lessThan(1e-6),
+        reason: 'the old band is empty now');
+    // A click there joins the moved wall too.
+    pressAt(rig, plan(2600, 640));
+    final stem = walls(doc).last;
+    expect(distToLine(doc.components.get<WallParams>(stem)!.end, w.s, w.e),
+        lessThan(wallJoin.linear));
+  });
+
+  test(
+      'WT12 the per-hover cost at 600 walls, printed, not asserted (review '
+      'round 2, I2)', () {
+    final doc = wallDoc();
+    var next = 1000;
+    doc.commands.execute(CompoundCommand([
+      for (var i = 0; i < 30; i++)
+        for (var j = 0; j < 20; j++)
+          addWall(doc, Handle(next += 10), plan(i * 3000.0, j * 3000.0),
+              plan(i * 3000.0 + 1000, j * 3000.0), 200, Justification.centre),
+    ], label: 'Add 600 walls'));
+    expect(walls(doc), hasLength(600));
+    final rig = directRig(doc);
+    pressAt(rig, plan(-5000, -5000));
+    // Between the walls: in no band, so every hover scans all 600.
+    final p = plan(1500, 1500);
+    final raw = Vector2.zero();
+    final hover = <double>[], scan = <double>[];
+    const batch = 50;
+    for (var k = 0; k < 200; k++) {
+      final sw = Stopwatch()..start();
+      for (var i = 0; i < batch; i++) {
+        hoverTo(rig, p);
+      }
+      hover.add(sw.elapsedMicroseconds / batch);
+      sw
+        ..reset()
+        ..start();
+      for (var i = 0; i < batch; i++) {
+        rig.tool.hovered(raw);
+      }
+      scan.add(sw.elapsedMicroseconds / batch);
+    }
+    expect(xy(rig.tool.debugBandEnd), xy(p), reason: 'in no band');
+    // ignore: avoid_print
+    print('WT12 n=600: median per hover ${median(hover).toStringAsFixed(2)} '
+        'us (whole pointer move), band scan alone '
+        '${median(scan).toStringAsFixed(2)} us');
+  });
+
+  test(
+      'WT13 a click inside two crossing bands joins the lower handle '
+      '(review round 2, m4)', () {
+    final doc = wallDoc();
+    final c = plan(0, 0);
+    // Lower handle X1 along the plan's x; X2 crosses it at 60 degrees.
+    doc.commands.execute(addWall(doc, const Handle(1300), plan(-2000, 0),
+        plan(2000, 0), 200, Justification.centre));
+    doc.commands.execute(addWall(doc, const Handle(2600), polar(c, 83, -2000),
+        polar(c, 83, 2000), 200, Justification.centre));
+    final x1 = worldWallOf(doc, const Handle(1300));
+    final x2 = worldWallOf(doc, const Handle(2600));
+    final rig = directRig(doc);
+    pressAt(rig, plan(-1500, 1500));
+    // 40 along X1 and 30 off it: about 20 off X2, inside both bands and
+    // outside the 10 mm aperture of either centreline.
+    final p = plan(40, 30);
+    expect(distToLine(p, x2.s, x2.e), inInclusiveRange(15, 25));
+    pressAt(rig, p);
+    final end = doc.components.get<WallParams>(walls(doc).last)!.end;
+    expect(distToLine(end, x1.s, x1.e), lessThan(wallJoin.linear));
+    expect(distToLine(end, x2.s, x2.e), greaterThan(30));
   });
 
   testWidgets(

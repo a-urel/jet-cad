@@ -1,7 +1,10 @@
+import 'dart:async' show StreamSubscription, unawaited;
 import 'dart:math' as math;
+import 'dart:typed_data' show Float64List;
 import 'dart:ui' show Canvas;
 
-import 'package:flutter/foundation.dart' show ValueNotifier, immutable;
+import 'package:flutter/foundation.dart'
+    show ValueNotifier, immutable, visibleForTesting;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -79,6 +82,26 @@ class WallTool extends PlacementTool {
   /// The context of the last hover, for [hovered], which has none.
   ToolContext? _context;
 
+  /// The band scan's cache (see [_joinBandInto]): per non-degenerate wall,
+  /// ascending by handle, [_stride] doubles -- the world start and end
+  /// (`WorldWall`'s own `s` and `e`, so bitwise what `WallType` builds),
+  /// the unit direction, the length, the left and right face offsets and
+  /// the thickness. Rebuilt only when [_cachedDocument] reports a change.
+  static const int _stride = 10;
+  Float64List _cache = Float64List(_stride * 16);
+  int _cachedWalls = 0;
+  bool _cacheStale = true;
+  DraftDocument? _cachedDocument;
+  StreamSubscription<DocChange>? _changes;
+
+  /// How many band scans have run: a test seam for the early return.
+  @visibleForTesting
+  int debugBandScans = 0;
+
+  /// The rubber band's far end, for tests.
+  @visibleForTesting
+  Vector2 get debugBandEnd => _bandEnd;
+
   @override
   String get name => 'Wall';
 
@@ -103,18 +126,26 @@ class WallTool extends PlacementTool {
   }
 
   /// Runs after every hover's resolution (and re-resolution), so
-  /// [hoverPoint] is already the resolved point.
+  /// [hoverPoint] is already the resolved point. With no chain pending
+  /// there is no rubber band, and nothing to scan.
   @override
   void hovered(Vector2 raw) {
+    if (points.isEmpty) return;
     final ctx = _context;
-    _bandEnd.setFrom(
-        (ctx == null ? null : _joinBandIfSnapping(ctx, hoverPoint)) ??
-            hoverPoint);
+    final p = hoverPoint;
+    if (ctx == null || !_joinBandInto(ctx, p.x, p.y, _bandEnd)) {
+      _bandEnd.setFrom(p);
+    }
   }
 
   @override
   void accept(Vector2 point, ToolContext ctx) {
-    if (!acceptingSelf) point = _joinBandIfSnapping(ctx, point) ?? point;
+    if (!acceptingSelf) {
+      final joined = Vector2.zero();
+      if (_joinBandInto(ctx, point.x, point.y, joined)) point = joined;
+    }
+    // Until the next hover, the band ends where this click landed.
+    _bandEnd.setFrom(point);
     if (points.isEmpty) {
       points.add(point);
       return;
@@ -150,49 +181,87 @@ class WallTool extends PlacementTool {
     _walls = 0;
   }
 
-  /// [_joinBand] while object snap is on, as `PlacementTool` reads it; with
-  /// object snap off (F3) nothing is joined, like every other snap.
-  static Vector2? _joinBandIfSnapping(ToolContext ctx, Vector2 p) =>
-      (ctx.snap?.objectSnap ?? true) ? _joinBand(ctx.document, p) : null;
-
   /// Spec 07 D11: the Wall tool joins a wall wherever its band is clicked.
   ///
-  /// [p] is in a wall's band when it lies between the wall's two faces (by
-  /// its justification) and its projection lies within the centreline's
-  /// length, both within `wallJoin.linear`. Then:
-  /// - within one thickness of a centreline end, along the centreline, it
-  ///   joins that end: bitwise the world endpoint, computed as `WallType`
-  ///   computes it (`WorldWall` of the params and the group's transform),
-  ///   so the two walls make a node;
-  /// - otherwise it joins the projection onto the centreline: a T.
+  /// With object snap off (F3) nothing is joined, like every other snap
+  /// (`PlacementTool` reads the same setting). Otherwise `(px, py)` is in a
+  /// wall's band when it lies between the wall's two faces (by its
+  /// justification) and its projection lies within the centreline's
+  /// length, both within `wallJoin.linear`. Then [out] is set to:
+  /// - within one thickness of a centreline end, along the centreline, that
+  ///   end: bitwise the world endpoint `WallType` builds (`WorldWall` of the
+  ///   params and the group's transform), so the two walls make a node;
+  /// - otherwise the projection onto the centreline: a T.
   ///
-  /// When several walls qualify, the lowest handle wins. Null when [p] is
-  /// in no wall's band. O(walls), per click and per hover: never on the
-  /// frame path.
-  static Vector2? _joinBand(DraftDocument doc, Vector2 p) {
+  /// When several walls qualify, the lowest handle wins. Returns false, and
+  /// leaves [out] alone, when the point is in no wall's band.
+  ///
+  /// It runs on every pointer move while a chain is pending: an O(walls)
+  /// scan over cached doubles that allocates nothing in steady state. The
+  /// cache is rebuilt after the document changes (its `changes` stream,
+  /// which delivers before the next pointer event) and after this tool's
+  /// own commit.
+  bool _joinBandInto(ToolContext ctx, double px, double py, Vector2 out) {
+    if (!(ctx.snap?.objectSnap ?? true)) return false;
+    _refreshCache(ctx.document);
+    debugBandScans++;
     final tol = wallJoin.linear;
-    for (final h in doc.components.withComponent<WallParams>()) {
-      final w = WorldWall(h, doc.components.get<WallParams>(h)!,
-          doc.tree.accumulatedTransform(h));
-      if (w.degenerate) continue;
-      final d = w.d;
-      final vx = p.x - w.s.x, vy = p.y - w.s.y;
-      final along = vx * d.x + vy * d.y;
-      // Along the left normal (-d.y, d.x), as the face offsets are.
-      final across = vy * d.x - vx * d.y;
-      final (left, right) = w.offsets;
-      final length = w.s.distanceTo(w.e);
-      if (across > left + tol ||
-          across < right - tol ||
+    final c = _cache;
+    for (var i = 0, o = 0; i < _cachedWalls; i++, o += _stride) {
+      final sx = c[o], sy = c[o + 1];
+      final dx = c[o + 4], dy = c[o + 5];
+      final length = c[o + 6];
+      final vx = px - sx, vy = py - sy;
+      final along = vx * dx + vy * dy;
+      // Along the left normal (-dy, dx), as the face offsets are.
+      final across = vy * dx - vx * dy;
+      if (across > c[o + 7] + tol ||
+          across < c[o + 8] - tol ||
           along < -tol ||
           along > length + tol) {
         continue;
       }
+      final t = c[o + 9];
       final toEnd = length - along;
-      if (along <= w.t || toEnd <= w.t) return along <= toEnd ? w.s : w.e;
-      return Vector2(w.s.x + d.x * along, w.s.y + d.y * along);
+      if (along <= t || toEnd <= t) {
+        if (along <= toEnd) {
+          out.setValues(sx, sy);
+        } else {
+          out.setValues(c[o + 2], c[o + 3]);
+        }
+      } else {
+        out.setValues(sx + dx * along, sy + dy * along);
+      }
+      return true;
     }
-    return null;
+    return false;
+  }
+
+  void _refreshCache(DraftDocument doc) {
+    if (!identical(doc, _cachedDocument)) {
+      final old = _changes;
+      if (old != null) unawaited(old.cancel());
+      _cachedDocument = doc;
+      _changes = doc.changes.listen((_) => _cacheStale = true);
+      _cacheStale = true;
+    }
+    if (!_cacheStale) return;
+    _cacheStale = false;
+    _cachedWalls = 0;
+    for (final h in doc.components.withComponent<WallParams>()) {
+      final w = WorldWall(h, doc.components.get<WallParams>(h)!,
+          doc.tree.accumulatedTransform(h));
+      if (w.degenerate) continue;
+      if ((_cachedWalls + 1) * _stride > _cache.length) {
+        _cache = Float64List(_cache.length * 2)..setAll(0, _cache);
+      }
+      final (left, right) = w.offsets;
+      _cache.setAll(_cachedWalls * _stride, [
+        w.s.x, w.s.y, w.e.x, w.e.y, w.d.x, w.d.y, //
+        w.s.distanceTo(w.e), left, right, w.t,
+      ]);
+      _cachedWalls++;
+    }
   }
 
   /// Spec 07 D2: a wall no longer than `wallJoin.linear` is degenerate.
@@ -204,6 +273,7 @@ class WallTool extends PlacementTool {
   bool _addWall(ToolContext ctx, Vector2 s, Vector2 e) {
     if (_tooShort(s, e)) return false;
     final w = settings.value;
+    _cacheStale = true;
     return commit(ctx, () {
       final doc = ctx.document;
       final h = doc.handleSeed.next();
@@ -221,6 +291,14 @@ class WallTool extends PlacementTool {
       Capability.components,
       Capability.geometry,
     });
+  }
+
+  @override
+  void dispose() {
+    final changes = _changes;
+    if (changes != null) unawaited(changes.cancel());
+    _changes = null;
+    super.dispose();
   }
 
   /// The next wall's centreline and its band at the current thickness and
