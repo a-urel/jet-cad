@@ -31,18 +31,35 @@ abstract class ParametricType<T extends Component> {
   List<Generated> generate(ParametricView view, Handle self);
 }
 
-/// One generated entity (spec D3). Never a fill: `SetEntityGeometryCommand`
-/// rejects a fill's payload, and regions are out of scope.
+/// One generated entity (spec D3), or one generated region (spec 07 D8).
+///
+/// The plain form is never a fill: a fill's payload is a reference to its
+/// boundary, not geometry, and `SetEntityGeometryCommand` refuses it. A
+/// filled area is generated with [Generated.region] instead.
 final class Generated {
-  Generated(this.kind, this.payload) {
+  Generated(this.kind, this.payload) : filled = false {
     if (kind == EntityKind.fill) {
       throw ArgumentError.value(
           kind, 'kind', 'a fill cannot be generated (spec 06 D3)');
     }
   }
 
+  /// A region (spec 07 D8): a closed POLYLINE [payload] and the FILL that
+  /// names it. The planner matches it through the object's fill children
+  /// and rewrites only the boundary, in place; the fill record, whose
+  /// payload is the boundary's handle, is never rewritten. [payload] must
+  /// be a closed polyline with a non-empty triangulation, or the edit that
+  /// generates it throws `ArgumentError` and is rolled back.
+  Generated.region(this.payload)
+      : kind = EntityKind.polyline,
+        filled = true;
+
+  /// [EntityKind.polyline] for a region: the kind of its boundary.
   final EntityKind kind;
   final GeometryPayload payload;
+
+  /// True for a region: [payload] is the boundary of a generated fill.
+  final bool filled;
 }
 
 /// A direct edit of a generated entity (spec D6). Propagates like

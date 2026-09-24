@@ -94,22 +94,81 @@ bool _samePayload(GeometryPayload a, GeometryPayload b) {
   return true;
 }
 
+/// The boundary a fill child names: its payload's one scalar (spec 07 D8).
+Handle _boundaryOf(CommandTarget t, Handle fill) => Handle.checked(t.geometry
+    .peek(t.entities.geomIndexAt(t.entities.slotOf(fill)!))
+    .scalars[0]
+    .toInt());
+
+/// A generated region whose boundary is not a closed polyline with a
+/// non-empty triangulation is a client bug (spec 07 D8): `AddRegionCommand`
+/// would refuse the open one and fill nothing for the other. Thrown from
+/// the plan, before anything applies, so `_run` rolls the edit back.
+void _checkRegion(Handle h, GeometryPayload boundary) {
+  final triangles = triangulationFor(EntityKind.polyline, boundary);
+  if (triangles == null || triangles.isEmpty) {
+    throw ArgumentError('${h.toHex()} generated a region whose boundary is '
+        'not a closed polyline with a non-empty triangulation (spec 07 D8)');
+  }
+}
+
 /// Plans, and does not apply, the commands that bring [closure] up to date
 /// (spec D4 step 7). New children get **reserved** handles above the seed,
 /// which is not advanced: `AddEntityCommand.apply` raises it when the add
 /// lands.
+///
+/// Regions (spec 07 D8) are planned before plain children, in generation
+/// order, so a new object's handles run fill < boundary < later children.
+/// A fill child and the boundary it names are one region, matched through
+/// the fill; the boundary is never matched as a plain POLYLINE.
 List<DraftCommand> _plan(
     CommandTarget t, List<Handle> closure, _Survey s, ParametricView view) {
   var reserved = t.handleSeed.current.value;
   final out = <DraftCommand>[];
   for (final h in closure) {
     final generated = s.objects[h]!.generate(view, h);
+    final children = s.children[h] ?? const <Handle>[];
+    final boundaries = <Handle>{
+      for (final c in children)
+        if (t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill)
+          _boundaryOf(t, c),
+    };
     final byKind = <EntityKind, List<Handle>>{};
-    for (final c in s.children[h] ?? const <Handle>[]) {
+    for (final c in children) {
+      if (boundaries.contains(c)) continue;
       (byKind[t.entities.kindAt(t.entities.slotOf(c)!)] ??= []).add(c);
     }
     final used = <EntityKind, int>{};
     for (final g in generated) {
+      if (!g.filled) continue;
+      _checkRegion(h, g.payload);
+      final i = used[EntityKind.fill] ?? 0;
+      used[EntityKind.fill] = i + 1;
+      final fills = byKind[EntityKind.fill];
+      if (fills != null && i < fills.length) {
+        final boundary = _boundaryOf(t, fills[i]);
+        final slot = t.entities.slotOf(boundary);
+        if (slot == null || t.entities.ownerAt(slot) != h) {
+          throw StateError('fill ${fills[i].toHex()} of ${h.toHex()} names '
+              '${boundary.toHex()}, which is not a child of the same object');
+        }
+        // The fill record is never rewritten: rewriting the boundary
+        // re-triangulates the fill (`SetEntityGeometryCommand`).
+        if (!_samePayload(
+            t.geometry.peek(t.entities.geomIndexAt(slot)), g.payload)) {
+          out.add(SetEntityGeometryCommand(boundary, g.payload));
+        }
+      } else {
+        // Fill first: `AddRegionCommand` requires the lower handle on it.
+        out.add(AddRegionCommand(
+            fill: draftRecord(Handle.checked(++reserved), h, EntityKind.fill),
+            boundary:
+                draftRecord(Handle.checked(++reserved), h, EntityKind.polyline),
+            boundaryPayload: g.payload));
+      }
+    }
+    for (final g in generated) {
+      if (g.filled) continue;
       final i = used[g.kind] ?? 0;
       used[g.kind] = i + 1;
       final existing = byKind[g.kind];
@@ -125,8 +184,12 @@ List<DraftCommand> _plan(
             payload: g.payload));
       }
     }
+    // A surplus region is removed through its boundary, whose removal takes
+    // the fill with it; removing the fill alone would orphan the boundary.
     final surplus = [
-      for (final e in byKind.entries) ...e.value.skip(used[e.key] ?? 0),
+      for (final e in byKind.entries)
+        for (final c in e.value.skip(used[e.key] ?? 0))
+          e.key == EntityKind.fill ? _boundaryOf(t, c) : c,
     ]..sort(_byValue);
     for (final c in surplus) {
       out.add(RemoveEntityCommand(c));
