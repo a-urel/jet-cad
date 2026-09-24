@@ -194,6 +194,13 @@ affects ByLayer drafting on layer 0 (Plan 05's tools, 06's boxes). That was
 found here and deferred to a post-07 `fix/` branch on the human's decision;
 07 does not change it.
 
+**Amended at execution (Plan 07, final review):** "Handles at creation are
+fill < outline < centreline" holds for every wall created whole. A
+**loaded** degenerate wall (D2) has only its centreline; made whole by an
+edit, it gets its region above it: centreline < fill < outline. Invisible,
+since all three are black. Only a loaded file reaches it: the panel and the
+Wall tool refuse a thickness ≤ `wallJoin.linear` (D11's amendment).
+
 ### D4 — Joints, derived in `generate`
 
 Amends **roadmap decision 4**: connectivity is geometric, as decided, but
@@ -325,6 +332,16 @@ ring (M-07n; see the mutant table's amendment). The hole rate measured on
 this branch is 0.76% (`WG14`, 152 of 20,000 nodes); the spike's was 0.78%.
 Both are accepted.
 
+**Amended at execution (Plan 07, final review):** the short-wall rule and
+the invariant are judged **in group-local space**, where the outline is
+stored. `outline()` judges its world ring; `WallType` then maps it to local
+space, and that rounding can make a folded mitre spike that cleared a
+crossing by ~1e-10 in world cross in local (final review I1: 41 of 8,892
+acute-L rotations threw before the fix, 0 after). A local ring that is not
+simple and anticlockwise is replaced by the wall's free rectangle computed
+in local space, and `diagnose` reports `wall.fallback` for it: one
+decision, `_localOutlineOf`, for both. `WR13`.
+
 ### D7 — The join tolerance
 
 - **`const wallJoin = Tolerance(linear: 1e-6, angular: 1e-9)`**, in
@@ -372,6 +389,14 @@ Both are accepted.
   written into a record **only when the child is added**. Rewriting an
   existing child changes its geometry, never its colour (D3's amendment).
   `draftRecord` gains an optional colour. `RG11`.
+
+**Amended at execution (Plan 07, final review):** a **surplus** fill's
+boundary gets the same owner check as a matched one: it must be a live
+child of the same object, or the plan throws `StateError` before anything
+applies. Without it the document still ended unchanged —
+`RemoveEntityCommand` refuses a boundary whose fill has another owner, or
+that carries two fills, and `_run` rolls back — but with a message about
+the boundary, not the malformed fill. `RG9`.
 
 ### D9 — Draw order
 
@@ -522,6 +547,17 @@ than a single speed-up factor.
 - **A pinned field re-pins after its commit,** so Enter then blur does not
   commit twice. A pinned target that is no longer a live object of its type
   discards the typed text. `WS7`.
+
+**Amended at execution (Plan 07, final review):**
+- **Thickness must exceed `wallJoin.linear`,** not merely 0
+  (`isWallThickness`), in the Wall section for a wall and for the tool's
+  settings, keystroke writes included; the Wall tool commits no wall with
+  such a setting and ends the chain. `WS3`, `WT18`.
+- **A refused edit reverts the field.** An `ArgumentError` or `StateError`
+  from `execute` (a malformed loaded file) is caught in the commit; the
+  field shows the model's value and re-pins. `WS9`.
+- **Read-only unless both `components` and the type's `editCapability` are
+  allowed:** a commit is a `SetComponentCommand`. `WS8`.
 
 ### D12 — Diagnostics
 

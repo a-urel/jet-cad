@@ -1,7 +1,10 @@
 # Plan 07 mutation log -- M-07a..s and the tasks' extras
 
-**Tally: 51 fired, 51 killed, 0 survived; 4 equivalent (recorded, not
-fired); 1 N/A.**
+**Tally: 57 fired, 57 killed, 0 survived; 4 equivalent (recorded, not
+fired); 1 N/A.** Tasks 1-10: 51 fired, 51 killed. The final-review fix
+wave: 6 more fired, 6 killed, and two named mutants re-fired at the sites
+the wave moved (M-07h's local half, M-07m), both killed; see "The
+final-review fix wave" below.
 
 - **The spec's named mutants, M-07a..M-07s:** 19, plus 6 variants at a
   second site or in a second form (M-07e', M-07h's two halves, M-07i's
@@ -1629,6 +1632,262 @@ target:
 
 ---
 
+## The final-review fix wave
+
+**Tree.** Fired on `plan-07/walls` with the fix wave applied, the tree
+committed as `d9c8609` (every `lib/` file and every test file identical
+to it when each mutant ran, except as noted under FW-m3). The driver is
+`fw-fire.py` in the session scratchpad, `t9-fire.py`'s procedure with the
+prefix `fw-`: backup `fw-<id>-<basename>`, the edit, the narrowed command
+with `CI=true`, the log `fw-<id>-run<n>.log`, `cp` back, `diff`. Every
+`diff` after a restore exited 0; `git status --short` showed only the
+wave's own changes before and after the batch.
+
+**Baselines** (`fw-baseline.txt`): each narrowed command below, on the
+clean tree, printed `+1: All tests passed!`, one test each.
+
+### FW-I1-localcheck — the local check removed
+
+- **file:** `apps/floor_planner/lib/parametric/wall.dart`; backup `fw-FW-I1-localcheck-wall.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  144c144
+  <   if (isSimpleCcw(local)) {
+  ---
+  >   if (true) {
+  ```
+- **command:** `cd apps/floor_planner && CI=true flutter test test/wall_regen_test.dart --plain-name 'WR13 an acute L'` (exit 1)
+
+  ```
+  00:00 +0 -1: WR13 an acute L rotated about its node: an outline simple in world but not in group-local space falls back in local space; the edit lands and diagnose agrees (final review I1) [E]
+    Invalid argument(s): 514 generated a region whose boundary is not a closed polyline with a non-empty triangulation (spec 07 D8)
+    test/wall_regen_test.dart 704:18                                 main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp fw-FW-I1-localcheck-wall.dart apps/floor_planner/lib/parametric/wall.dart`; `diff` exit 0.
+- **result:** KILLED by `WR13`: the reviewer's rotate throws from
+  `_checkRegion` for A (`0x514`), as it did at `5cda53d`.
+
+### FW-I1-diagnose — `diagnose` judges the world outline only
+
+- **file:** `apps/floor_planner/lib/parametric/wall.dart`; backup `fw-FW-I1-diagnose-wall.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  216c216
+  <     final o = _localOutlineOf(view, self, view.paramsOf<WallParams>(self)!);
+  ---
+  >     final o = _outlineOf(view, me);
+  ```
+- **command:** `cd apps/floor_planner && CI=true flutter test test/wall_regen_test.dart --plain-name 'WR13 an acute L'` (exit 1)
+
+  ```
+  00:00 +0 -1: WR13 an acute L rotated about its node: an outline simple in world but not in group-local space falls back in local space; the edit lands and diagnose agrees (final review I1) [E]
+    Expected: ['wall.fallback 1300', 'wall.fallback 2600']
+      Actual: ['wall.fallback 2600']
+       Which: at location [0] is 'wall.fallback 2600' instead of 'wall.fallback 1300'
+    test/wall_regen_test.dart 716:5                     main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp fw-FW-I1-diagnose-wall.dart apps/floor_planner/lib/parametric/wall.dart`; `diff` exit 0.
+- **result:** KILLED by `WR13`: A stores its local free rectangle, but
+  `diagnostics()` no longer names it.
+
+### M-07h, the local half, re-fired at its new site
+
+The wave moved `toLocal` from `generate` into `_localOutlineOf`.
+
+- **file:** `apps/floor_planner/lib/parametric/wall.dart`; backup `fw-M-07h-local-refire-wall.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  142c142
+  <   final toLocal = view.toWorld(self).invert();
+  ---
+  >   final toLocal = Transform2.identity();
+  ```
+- **command:** `cd apps/floor_planner && CI=true flutter test test/wall_regen_test.dart --plain-name 'WR2 the 67'` (exit 1)
+
+  ```
+  00:00 +0 -1: WR2 the 67° L, each wall in its own group: two corners shared in world, each equal to the oracle; also with a joint one ulp apart (M-07h, M-07d) [E]
+    Expected: an object with length of <2>
+      Actual: []
+       Which: has length of <0>
+    test/wall_regen_test.dart 96:3                      expectMitre
+    test/wall_regen_test.dart 291:5                     main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp fw-M-07h-local-refire-wall.dart apps/floor_planner/lib/parametric/wall.dart`; `diff` exit 0.
+- **result:** KILLED by `WR2`, as at its old site. (With the local
+  check, a world ring left unmapped is still simple, so it is stored
+  as is and misses the oracle by the group transform.)
+
+### FW-m1-floor — `> 0` instead of `> wallJoin.linear`
+
+- **file:** `apps/floor_planner/lib/parametric/wall.dart`; backup `fw-FW-m1-floor-wall.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  26c26
+  < bool isWallThickness(double t) => t.isFinite && t > wallJoin.linear;
+  ---
+  > bool isWallThickness(double t) => t.isFinite && t > 0;
+  ```
+- **command 1:** `cd apps/floor_planner && CI=true flutter test test/selection_panel_test.dart --plain-name 'WS3 a thickness'` (exit 1)
+
+  ```
+  00:02 +0 -1: WS3 a thickness <= wallJoin.linear or unparseable reverts and commits nothing, for a wall and for the tool settings (final review m1) [E]
+  Expected: '150'
+    Actual: '1e-12'
+     Which: is different.
+            Expected: 150
+              Actual: 1e-12
+    file:///home/user/jet-cad/.claude/worktrees/walls/apps/floor_planner/test/selection_panel_test.dart line 380
+  00:02 +0 -1: Some tests failed.
+  ```
+- **command 2:** `cd apps/floor_planner && CI=true flutter test test/wall_tool_test.dart --plain-name 'WT18 settings holding'` (exit 1)
+
+  ```
+  00:00 +0 -1: WT18 settings holding a thickness at or below wallJoin.linear commit no wall and end the chain; just above it, a wall lands (final review m1) [E]
+    Invalid argument(s): 12 generated a region whose boundary is not a closed polyline with a non-empty triangulation (spec 07 D8)
+    test/wall_tool_test.dart 206:14                                  pressAt
+    test/wall_tool_test.dart 813:7                                   main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp fw-FW-m1-floor-wall.dart apps/floor_planner/lib/parametric/wall.dart`; `diff` exit 0.
+- **result:** KILLED by `WS3` (wall C stores 1e-12; its local outline
+  triangulates, so only the floor refuses it) and by `WT18` (a 1e-12 wall
+  drawn at the identity near the far origin has no triangulable outline in
+  any space, and the tool's commit throws).
+
+### FW-m1-catch — `_commit` without its catch
+
+- **file:** `apps/floor_planner/lib/selection_panel.dart`; backup `fw-FW-m1-catch-selection_panel.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  268,274c268
+  <         try {
+  <           _write(f.kind, target, value);
+  <         } on ArgumentError {
+  <           // Refused: nothing changed; the field reverts below.
+  <         } on StateError {
+  <           // Refused: nothing changed; the field reverts below.
+  <         }
+  ---
+  >         _write(f.kind, target, value);
+  ```
+- **command:** `cd apps/floor_planner && CI=true flutter test test/selection_panel_test.dart --plain-name 'WS9 an edit the document refuses'` (exit 1)
+
+  ```
+  00:02 +0 -1: WS9 an edit the document refuses (a loaded fill naming another wall's outline) reverts the field and re-pins it: no exception escapes Enter or the focus loss (final review m1) [E]
+  Bad state: fill 515 of 514 names A2A, which is not a child of the same object
+  Bad state: fill 515 of 514 names A2A, which is not a child of the same object
+  Expected: null
+    Actual: 'Multiple exceptions (2) were detected during the running of the current test, and at
+    file:///home/user/jet-cad/.claude/worktrees/walls/apps/floor_planner/test/selection_panel_test.dart line 708
+  00:02 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp fw-FW-m1-catch-selection_panel.dart apps/floor_planner/lib/selection_panel.dart`; `diff` exit 0.
+- **result:** KILLED by `WS9`: the refusal escapes Enter's `onSubmitted`
+  and the focus listener (two exceptions).
+
+### FW-m3-surplus — the owner check dropped on surplus
+
+- **file:** `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; backup `fw-FW-m3-surplus-regeneration.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  235c235
+  <           e.key == EntityKind.fill ? _ownBoundaryOf(t, h, c) : c,
+  ---
+  >           e.key == EntityKind.fill ? _boundaryOf(t, c) : c,
+  ```
+- **command:** `cd packages/jet_cad_2d && CI=true dart test test/parametric/regions_test.dart --plain-name 'RG9 a loaded fill'` (exit 1)
+
+  ```
+  00:00 +0 -1: RG9 a loaded fill naming a foreign or missing boundary: an edit throws StateError and nothing changes; also a surplus fill, when the client generates fewer regions (final review m3) [E]
+    Expected: throws <Instance of 'StateError'> with `message`: 'fill 3EB of 3E8 names 7D2, which is not a child of the same object'
+      Actual: <Closure: () => void>
+       Which: threw StateError:<Bad state: 7D2 carries 2 fills; remove them before removing the boundary>
+    test/parametric/regions_test.dart 404:7  main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp fw-FW-m3-surplus-regeneration.dart packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; `diff` exit 0.
+- **result:** KILLED by `RG9`, **by the refusal's message only.** It
+  **survived** its first two firings (`fw-FW-m3-surplus-survived-run1.log`,
+  `fw-FW-m3-surplus-survived2-run1.log`), against RG9 drafts that asserted
+  `throwsStateError`, unchanged bytes and an untouched foreign boundary:
+  the surplus fill naming B's boundary, then also B's centreline and a
+  closed POLYLINE drafted at the root. All three pass without the check.
+  **The review's premise does not hold at `5cda53d`:** a malformed load
+  cannot remove a foreign boundary. `RemoveEntityCommand` refuses a
+  boundary that carries two fills, and one whose single fill has another
+  owner (`AddRegionCommand.refusalReason`: "a region's two halves must
+  share one owner"); both throw `StateError`, and `_run` rolls the edit
+  back. So for the document the mutant is equivalent. What the check adds
+  is the refusal in the plan, before any command applies, naming the
+  malformed fill. RG9 now pins that message for every case, which is what
+  kills the mutant. Recorded as killed; the controller may prefer to count
+  it equivalent for the document.
+
+### M-07m re-fired at its new site
+
+- **file:** `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; backup `fw-M-07m-refire-regeneration.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  235c235
+  <           e.key == EntityKind.fill ? _ownBoundaryOf(t, h, c) : c,
+  ---
+  >           c,
+  ```
+- **command:** `cd packages/jet_cad_2d && CI=true dart test test/parametric/regions_test.dart --plain-name 'RG3 count'` (exit 1)
+
+  ```
+  00:00 +0 -1: RG3 count 1 -> 2 adds one region above the seed, fill first; 2 -> 1 removes the surplus pair, leaving no orphan (M-07m) [E]
+    Expected: [1001, 1002, 1003, 1004]
+      Actual: [1001, 1002, 1003, 1004, 1006]
+       Which: at location [4] is [1001, 1002, 1003, 1004, 1006] which longer than expected
+    test/parametric/regions_test.dart 211:5  main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp fw-M-07m-refire-regeneration.dart packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; `diff` exit 0.
+- **result:** KILLED by `RG3`, as before.
+
+### FW-m4-components — `_editable` checks only `editCapability`
+
+- **file:** `apps/floor_planner/lib/selection_panel.dart`; backup `fw-FW-m4-components-selection_panel.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  145,146c145
+  <     return permissions.allows(Capability.components) &&
+  <         permissions.allows(kind == _Kind.thickness
+  ---
+  >     return permissions.allows(kind == _Kind.thickness
+  ```
+- **command:** `cd apps/floor_planner && CI=true flutter test test/selection_panel_test.dart --plain-name 'WS8 with geometry allowed'` (exit 1)
+
+  ```
+  00:01 +0 -1: WS8 with geometry allowed and components denied, the Wall and Box fields are read-only: a commit is a SetComponentCommand (final review m4) [E]
+  Expected: true
+    Actual: <false>
+    file:///home/user/jet-cad/.claude/worktrees/walls/apps/floor_planner/test/selection_panel_test.dart line 659
+  00:01 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp fw-FW-m4-components-selection_panel.dart apps/floor_planner/lib/selection_panel.dart`; `diff` exit 0.
+- **result:** KILLED by `WS8`: the Thickness field is editable with
+  components denied.
+
+**Not fired: m5.** `GripDrag.reshapeObject`'s root-level guard is
+documented as defence in depth, unpinned by design: `GripCache` never
+gives it anything but a selected root-level group (the review's X8b
+survivor stands, by ruling).
+
+---
+
 ## Equivalent mutants (recorded, not fired)
 
 - **M-07n at `outline`'s call site** (`simplifyRing([...])` →
@@ -1683,5 +1942,24 @@ After `WG21` landed, the app line was re-run on the tree with it:
 apps/floor_planner           flutter test       00:23 +138: All tests passed!        (exit 0)
                              flutter analyze    No issues found! (ran in 1.0s)       (exit 0)
                              dart format        Formatted 32 files (0 changed) in 0.15 seconds.   (exit 0)
+                             flutter build web --release   ✓ Built build/web        (exit 0)
+```
+
+After the final-review fix wave, on the tree committed as `d9c8609`, with
+every fix-wave mutant restored:
+
+```
+packages/jet_cad_2d          dart test          00:12 +972 -2: Some tests failed.   (exit 1; the two Linux-only hash tests in generate_document_test.dart, standing)
+                             dart analyze       No issues found!                     (exit 0)
+                             dart format        Formatted 144 files (0 changed) in 0.51 seconds.  (exit 0)
+packages/jet_cad_2d_flutter  flutter test       00:45 +931 ~1 -7: Some tests failed. (exit 1; text_ladder rungs 1-5 and text_lod_ladder rungs 1-2, standing)
+                             flutter analyze    No issues found! (ran in 1.3s)       (exit 0)
+                             dart format        Formatted 177 files (0 changed) in 0.61 seconds.  (exit 0)
+apps/dev_harness_2d          flutter test --concurrency=1  00:35 +82: All tests passed!  (exit 0)
+                             flutter analyze    No issues found! (ran in 0.8s)       (exit 0)
+                             dart format        Formatted 22 files (0 changed) in 0.09 seconds.   (exit 0)
+apps/floor_planner           flutter test       00:22 +142: All tests passed!        (exit 0)
+                             flutter analyze    No issues found! (ran in 1.3s)       (exit 0)
+                             dart format        Formatted 32 files (0 changed) in 0.14 seconds.   (exit 0)
                              flutter build web --release   ✓ Built build/web        (exit 0)
 ```

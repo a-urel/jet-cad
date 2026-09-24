@@ -9,10 +9,11 @@
 **Branch:** `plan-07/walls`, cut from `spec-07/walls` at `f2daba5` (`main`
 `22957d1` + spec `dfb6969` + plan `f2daba5`), in the session worktree
 `.claude/worktrees/walls`.
-**Tasks 1–10 are at `f2daba5..330797c`. Task 11, this note, is the next
-commit.** The final whole-branch review comes after it. The ledger archive
-(`docs/superpowers/ledgers/2026-09-24-walls/`) is the branch's last commit,
-after that review.
+**Tasks 1–10 are at `f2daba5..330797c`. Task 11, this note, is
+`a582de3` and `5cda53d`.** The final whole-branch review came after it; its
+fix wave is `d9c8609` (code and tests) plus the commit that updates this
+note (see "Final review"). The ledger archive
+(`docs/superpowers/ledgers/2026-09-24-walls/`) is the branch's last commit.
 **Ledger:** `.superpowers/sdd/2026-09-24-walls/progress.md` (git-ignored
 while in flight). It is the source for every ruling, deferral and
 measurement quoted below that this task did not run itself. Each such
@@ -144,6 +145,18 @@ The plan named `WG1`–`WG15`, `WR1`–`WR12`, `WT1`–`WT7`, `EG1`–`EG5`,
 that came from review rounds, each pinned by a mutant in the log or the
 ledger.
 
+**A further shift, from the final-review fix wave** (see "Final review"):
+the app **+138 → +142** (`WR13`, `WT18`, `WS8`, `WS9`); the engine stays
++972 -2 (`RG9` is extended, not added); the render layer and the harness
+are unchanged. `WS3` is extended too.
+
+| suite | after Task 11 | after the fix wave | moved |
+|---|---|---|---|
+| `jet_cad_2d` | +972 -2 | **+972 -2** | 0 |
+| `jet_cad_2d_flutter` | +931 ~1 -7 | **+931 ~1 -7** | 0 |
+| `dev_harness_2d` | +82 | **+82** | 0 |
+| `apps/floor_planner` | +138 | **+142** | +4 |
+
 ### NC4 — the neighbour search's cost, before and after (Ruling 07-5)
 
 JIT, in a container, median of five runs, printed and not asserted. **The
@@ -226,8 +239,10 @@ That bound would not catch a regression to the spike's rule. `WG12` does.
 
 ### Mutation tally
 
-From [plan-07-mutation-log.md](plan-07-mutation-log.md): **51 fired, 51
-killed, 0 survived; 4 equivalent (recorded, not fired); 1 N/A.**
+From [plan-07-mutation-log.md](plan-07-mutation-log.md): **57 fired, 57
+killed, 0 survived; 4 equivalent (recorded, not fired); 1 N/A.** Tasks
+1–10 fired 51; the final-review fix wave fired 6 more and re-fired M-07h's
+local half and M-07m at the sites it moved (see "Final review").
 
 - **The spec's named mutants:** 19 (M-07a…M-07s), plus 6 variants at a
   second site or in a second form: M-07e′ (the planner's payload
@@ -324,13 +339,13 @@ The spec's thirteen criteria and where each is witnessed:
 | 3 | L mitres asymmetrically at a non-right angle; T butts; X crosses; three-way closes, by coordinates | `WG2`, `WR2` (67° L, oracle corners); `WG4`, `WG19`, `WR5` (T); `WG5`, `WR5` (X); `WG6`, `WG21` (three-way) | PASS |
 | 4 | move or delete regenerates neighbours in one undo step; undo/redo exact | `WR3`, `WR4`, `WR7`, `RF2`, `EG3`, `WS2`, `WS4` | PASS |
 | 5 | load → save byte-identical; `drift()` empty after load | `WR6` (with the one-ulp control, M-07e), `RG4` | PASS |
-| 6 | every stored outline triangulates | `WG13` (10,000 random nodes), `WG7`, `WG12`, `WG14` | PASS |
+| 6 | every stored outline triangulates | `WG13` (10,000 random nodes), `WG7`, `WG12`, `WG14`; after the final review, `WR13`. **The final review found I1:** `outline()` judged simplicity in world space, and the ring's mapping to group-local space could make a folded mitre spike self-cross, so `_checkRegion` threw and the edit (rotate, grip, panel) was refused with an uncaught `ArgumentError`; the document was untouched. **Fixed in `d9c8609`:** `WallType` checks the local ring and falls back to the free rectangle computed in local space, and `diagnose` reports `wall.fallback` for it. A fix-wave sweep of 8,892 acute-L rotations threw 41 times with `5cda53d`'s `wall.dart` and 0 times after | PASS |
 | 7 | `diagnostics()` names D6's accepted cases, and only those | `WR9`, `WG14` (one reporter per hole, naming every member), `DG1`–`DG5` | PASS |
 | 8 | the neighbour search is O(k·n), measured and pinned | `NC1`–`NC3` (counter), `NC4` (times above) | PASS |
 | 9 | the allocation invariants pass unchanged | the invariant tests' diff against `f2daba5` is empty; both pass in the gates | PASS |
 | 10 | draw order ascending; a wall's children keep their handles | `RG1`, `RG2`, `WR1`, `WR3`, `WR4` | PASS |
 | 11 | the pinned panel target holds (M-07p) | `WS7 (Wall)`, `WS7 (Box)` | PASS |
-| 12 | every named mutant killed, logged | the mutation log: 51 fired, 51 killed | PASS |
+| 12 | every named mutant killed, logged | the mutation log: 57 fired, 57 killed (51 in Tasks 1–10, 6 in the final-review fix wave) | PASS |
 | 13 | the human's look: Wall tool, joints, end grips, Wall section; macOS, Chrome, Firefox | see below | **OWED** |
 
 **11 of 13 PASS; criteria 1 and 13 are OWED.** Criterion 1's Linux half is
@@ -441,6 +456,173 @@ white ByLayer defect (ledger); the controller ruled the Page panel's focus
   fields were fixed in 07 (`dcbc831`).
 - **Box m3:** after both Box fields, tapping the panel background
   refocuses Width (Task 8 m3 above).
+
+## Final review
+
+**Verdict: With fixes** (opus, ledger). The reviewer ran the four gate
+lines (engine +972 -2, render +931 ~1 -7, harness +82, app +138, web ✓)
+and a differential fuzz of about 11,700 edits (grids, rotated groups, T,
+X, nodes, clamps, short walls): 0 drift, 0 undo/redo mismatches. The
+reviewer re-fired M-07g, M-07m, M-07p, M-07q and M-07r red, and fired
+cross-cutting mutants X1, X2, X3, X15 and X8 red; X8b survived (m5 below).
+One Important and five Minor findings. The controller's ruling took all
+six into one fix wave; each has a test that goes red against its mutant
+(the log's "The final-review fix wave"), except m5, which is documentation
+by ruling.
+
+- **I1 (Important) — an outline simple in world could cross in local
+  space.** `outline()` judges simplicity on the world ring; `generate` then
+  mapped the ring to group-local space, where the rotation's rounding can
+  make a folded mitre spike that cleared a crossing by ~1e-10 self-cross.
+  `_checkRegion` threw `ArgumentError` and the edit was refused with an
+  uncaught exception, the document untouched. The reviewer measured 6 of
+  10,530 acute-L rotations and 1 of 2,346 fuzz edits. **Fixed:**
+  `_localOutlineOf` in `wall.dart` maps the ring to local space and, if it
+  is not simple and anticlockwise, uses the wall's free rectangle computed
+  in local space (the wall at the identity with no neighbours) and counts
+  it as a fallback. `generate` and `diagnose` both go through it, so they
+  agree. **`WR13`:** the reviewer's reproduction (hub `far(1234.5,
+  678.25)`; A 200 right-justified into it; B 200 left-justified out of it
+  at 178°, 600 long; both at the identity; turned 133° about the hub as
+  the select tool's rotate does) lands, A stores its local free rectangle
+  bitwise, `diagnostics()` names A and B (B is D6's short wall in world
+  already), every outline triangulates, `drift()` is empty, and undo and
+  redo are exact. A sweep in the same test (acute Ls of 2°, 3°, 4.5° and
+  5°; A and B justified right and left, left and right, or right and
+  right; turns of 17°, 133°, 211.5° and 299°) asserts the same for 48 more
+  edits, plus agreement: a wall not
+  named `wall.fallback` stores the local image of its joined world
+  outline. Mutants: the local check removed, and `diagnose` on the world
+  outline only, both red on `WR13`. **Evidence, not committed:** a sweep
+  of 8,892 rotations (acute Ls of 1°–10° in 0.5° steps, all nine
+  justification pairs, turns of 1° to 358° in 7° steps; the session
+  scratchpad's `fw-sweep_test.dart`) threw 41 times with `5cda53d`'s
+  `wall.dart` swapped in and 0 times after, with 0 drift and 0 undo
+  mismatches.
+- **m1 — a sub-ulp thickness.** The panel and the tool accepted any
+  thickness > 0, so 1e-12 could reach an edit that throws, and the
+  `ArgumentError` escaped a focus listener or `onSubmitted`. **Fixed:**
+  `isWallThickness` (finite and > `wallJoin.linear`) gates the Wall
+  section for a wall and for the tool's settings (keystrokes included),
+  and the Wall tool commits no wall with such a setting (the chain ends,
+  as for a denied wall). `_commit` also catches an `ArgumentError` or
+  `StateError` from `execute`, shows the model's value and re-pins.
+  **`WS3`** now also types `1e-12` and `0.000001` in both modes; **`WT18`**
+  sets the settings to 1e-12 and to `wallJoin.linear` (no wall, no handle,
+  same bytes, the chain ends) and to twice it (a wall lands); **`WS9`**
+  loads a file whose wall A's fill names B's outline, so every edit of A
+  is refused with `StateError`: Enter and a focus loss each revert the
+  field with no exception, and an edit of the free wall C still lands.
+  Mutants: `> 0` for the floor (red on `WS3` and `WT18`) and the catch
+  removed (red on `WS9`).
+- **m2 — a loaded degenerate wall made whole** gets its region above its
+  centreline (centreline < fill < outline), against D3's creation order.
+  Invisible (all black), and only a loaded file reaches it. **Ruled:** a
+  spec D3 amendment only.
+- **m3 — surplus-fill removal lacked the matched path's owner check.**
+  **Fixed:** both paths go through `_ownBoundaryOf`, which throws
+  `StateError` from the plan when a fill names anything but a live child
+  of its own object. **`RG9`** gains three surplus cases: A's second fill
+  names B's outline, B's centreline, or a closed POLYLINE drafted at the
+  root, and the edit takes A from two regions to one. **A finding on the
+  review's premise:** the mutant (the check dropped on surplus) survived
+  two drafts of `RG9` that asserted a `StateError`, unchanged bytes and an
+  untouched foreign boundary. At `5cda53d` a malformed load could not
+  remove a foreign boundary: `RemoveEntityCommand` refuses a boundary
+  that carries two fills, and one whose single fill has another owner,
+  and `_run` rolls back. The check refuses earlier, in the plan, and names
+  the malformed fill. `RG9` pins that message, which kills the mutant;
+  for the document it is equivalent (the log's FW-m3 entry).
+- **m4 — `_editable` checked only the type's `editCapability`,** while a
+  commit is a `SetComponentCommand`, which needs `components`. **Fixed:**
+  both are required. **`WS8`:** with geometry allowed and components
+  denied, the Thickness field and the justification toggle (a wall) and
+  Width and Height (a box) are read-only. Mutant: the components check
+  dropped, red on `WS8`.
+- **m5 — `GripDrag.reshapeObject`'s root-level guard is unpinned** (the
+  review's X8b survivor). Unreachable: `GripCache` gives provider grips
+  only to a selected root-level group. **Ruled:** a comment says it is
+  defence in depth, unpinned by design; no test.
+
+**The fix wave also re-fired two named mutants at sites it moved:** M-07h's
+local half (`toLocal` is now in `_localOutlineOf`), red on `WR2`; M-07m
+(the surplus line now calls `_ownBoundaryOf`), red on `RG3`.
+
+### The four gate lines, re-run after the final-review fix wave
+
+Run in full, with `CI=true`, on the tree committed as `d9c8609`, each
+command separately. `git status --short` showed no `analysis_options.yaml`.
+
+**`packages/jet_cad_2d`**: `CI=true dart test`:
+
+```
+00:12 +972 -2: Some tests failed.
+
+Failing tests:
+  test/testing/generate_document_test.dart: both text fractions default to zero and change nothing
+  test/testing/generate_document_test.dart: the default document is the one Plan 2 measured, byte for byte
+```
+
+Exit 1: the two standing Linux-only hash tests. `dart analyze`:
+`No issues found!`, exit 0. `dart format --output=none
+--set-exit-if-changed .`: `Formatted 144 files (0 changed) in 0.51
+seconds.`, exit 0.
+
+**`packages/jet_cad_2d_flutter`**: `CI=true flutter test`:
+
+```
+00:45 +931 ~1 -7: Some tests failed.
+```
+
+Exit 1. Its `[E]` lines name exactly the seven standing failures:
+`text_ladder_golden_test.dart` rungs 1–5 and `text_lod_ladder_golden_test.dart`
+rungs 1–2 (RenderBackend.canvas). `flutter analyze`: `No issues found!
+(ran in 1.3s)`, exit 0. `dart format`: `Formatted 177 files (0 changed) in
+0.61 seconds.`, exit 0.
+
+**`apps/dev_harness_2d`**: `CI=true flutter test --concurrency=1`:
+
+```
+00:35 +82: All tests passed!
+```
+
+Exit 0. `flutter analyze`: `No issues found! (ran in 0.8s)`, exit 0. `dart
+format`: `Formatted 22 files (0 changed) in 0.09 seconds.`, exit 0.
+
+**`apps/floor_planner`**: `CI=true flutter test`:
+
+```
+00:22 +142: All tests passed!
+```
+
+Exit 0. `flutter analyze`: `No issues found! (ran in 1.3s)`, exit 0. `dart
+format`: `Formatted 32 files (0 changed) in 0.14 seconds.`, exit 0.
+`flutter build web --release`:
+
+```
+Compiling lib/main.dart for the Web...                             39.2s
+✓ Built build/web
+```
+
+Exit 0.
+
+**Files touched by the fix wave:**
+- `apps/floor_planner/lib/parametric/wall.dart` (I1: `_localOutlineOf`;
+  m1: `isWallThickness`)
+- `apps/floor_planner/lib/parametric/wall_tool.dart` (m1)
+- `apps/floor_planner/lib/selection_panel.dart` (m1, m4)
+- `packages/jet_cad_2d/lib/src/parametric/regeneration.dart` (m3:
+  `_ownBoundaryOf`)
+- `packages/jet_cad_2d_flutter/lib/src/grip_drag.dart` (m5: a comment)
+- `apps/floor_planner/test/wall_regen_test.dart` (`WR13`),
+  `wall_tool_test.dart` (`WT18`), `selection_panel_test.dart` (`WS3`
+  extended, `WS8`, `WS9`), `packages/jet_cad_2d/test/parametric/regions_test.dart`
+  (`RG9` extended)
+- `docs/superpowers/specs/2026-09-24-walls-design.md` (final-review
+  amendments to D3, D6, D8 and D11)
+- `docs/superpowers/notes/plan-07-mutation-log.md` (the fix wave's
+  mutants, tally, gate)
+- `docs/superpowers/notes/2026-09-24-plan-07-results.md` (this file)
 
 ---
 
@@ -568,6 +750,20 @@ of the section it amends. Nothing original is rewritten.
 - **The mutant table:** M-07i's named test is `WG2`/`WG21`; M-07l is
   defined at the view level; M-07n is fired in `simplifyRing`, and its call
   site is equivalent.
+
+**After the final review**, each a paragraph beginning "**Amended at
+execution (Plan 07, final review)**":
+
+- **D3:** a loaded degenerate wall made whole gets its region above its
+  centreline; invisible; only a loaded file reaches it (m2).
+- **D6:** the short-wall rule and the invariant are judged in group-local
+  space; `_localOutlineOf` is the one decision for `generate` and
+  `diagnose` (I1).
+- **D8:** a surplus fill's boundary gets the owner check; the document
+  ended the same without it (m3).
+- **D11:** thickness > `wallJoin.linear`; a refused edit reverts the
+  field; read-only unless `components` and `editCapability` are both
+  allowed (m1, m4).
 
 The plan carries three "Amended at execution" notes: Ruling 07-3's bound,
 Task 6's chain points and band joining, and Task 10's corrected greps.
