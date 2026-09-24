@@ -1,6 +1,54 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-24. **Plan 06 (the parametric layer) is MERGED
+**Last updated:** 2026-09-24. **Plan 07 (walls) is EXECUTED on
+`plan-07/walls`, NOT MERGED.** The merge is the human's, `--no-ff`. **Exit
+gate 11 of 13: criterion 1's macOS half (`flutter build macos --release`
+and the four lines on macOS) and criterion 13 (the look) are OWED.**
+- **What landed:**
+  - walls in the floor planner: a straight centreline with a thickness and
+    a justification, drawn as a solid black band that mitres at an L, butts
+    at a T, crosses at an X and closes at three or more ends, regenerated
+    inside the edit that changes it;
+  - the chained Wall tool on W. It joins a wall wherever that wall's band is
+    clicked;
+  - end grips whose joined ends follow, through a new render-layer seam,
+    `ObjectGripProvider`;
+  - a Wall section in the Selection panel, with commit targets pinned at
+    focus for the Box and Wall sections (06's parked defect, fixed);
+  - in the engine: generated regions (a fill and its boundary), an
+    on-demand O(k·n) neighbour search, and `ParametricType.diagnose`.
+- **Gates on the final tree (Linux container):**
+  - engine 972 (+ the two standing Linux-only hash tests);
+  - render layer 931 + 1 skip + 7 standing goldens (`text_ladder` 1–5,
+    and the Linux-only `text_lod_ladder` 1–2);
+  - harness 82;
+  - app 138;
+  - `flutter build web --release` `✓ Built`.
+- **Mutants:** 51 fired, 51 killed, 0 survived; 4 equivalent recorded; 1
+  N/A.
+- **Owed:**
+  - `flutter build macos --release` and the gate lines on macOS: the
+    human's machine;
+  - the look: six items per platform on macOS, in Chrome and in Firefox
+    (the Wall tool's chain and close; L/T/X/three-way joints; delete and
+    undo; end grips; the Wall section, including tool mode; the pinned
+    target). The human pulled `dcbc831` on macOS: the app runs and the Wall
+    panel shows up. That is a partial look only.
+- **Found and deferred to a post-07 `fix/` branch** (the human's decision):
+  - ByLayer drafting on layer 0 renders white (Plan 05's tools, 06's
+    boxes);
+  - the Page panel's field keeps focus after Enter;
+  - Box m3: tapping the panel background refocuses Width.
+- **Next:** the final whole-branch review; its fix wave, if any; the ledger
+  archive as the branch's last commit; the human's macOS build and look;
+  the merge; then the `fix/` branch above.
+
+See [Plan 07](#plan-07--walls-executed-on-plan-07walls-not-merged)
+and [Resume here](#resume-here).
+
+*Earlier, 2026-09-24:*
+
+**Plan 06 (the parametric layer) is MERGED
 into `main` at `a6837d0`**, `--no-ff` on the human's decision. **Exit gate
 13 of 14: the look (criterion 14) is OWED.**
 - **What landed:**
@@ -279,6 +327,115 @@ method and both reproduction commands.
 Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
 Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
 Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
+
+---
+
+## Plan 07 — walls (executed on `plan-07/walls`, not merged)
+
+**Plan 07 gives the floor planner its walls, the parametric layer's first
+real client.** A wall is a group carrying `WallParams` (both endpoints in
+group-local space, a thickness, a justification). It generates three
+children: a fill, its closed outline, and the centreline. Joints are derived
+in `generate` from the neighbours' parameters and never cached. The node
+rule comes from the spike: one shared corner per wedge, lobes owned by the
+lowest handle, a mitre limit of 4, a bevel or a step, and a short wall
+squaring only itself.
+
+**Where it stands.** `plan-07/walls` was cut from `spec-07/walls` at
+`f2daba5` (`main` `22957d1` + spec `dfb6969` + plan `f2daba5`), in the
+session worktree `.claude/worktrees/walls`:
+- Tasks 1–9 are at `f2daba5..330797c`;
+- Task 10 (invariants and greps) needed no commit;
+- Task 11 (gates, the results note, the spec amendments, this section, the
+  roadmap) is the commit that adds this section.
+
+**NOT MERGED.** Next come the final whole-branch review, its fix wave if
+any, and the ledger archive
+(`docs/superpowers/ledgers/2026-09-24-walls/`) as the branch's last commit.
+**The merge is the human's decision, `--no-ff`.** The human authorised
+pushing this branch, and only this branch, to GitHub. It was pushed at
+`c234103` and `dcbc831`.
+
+**Documents:**
+- Spec: [2026-09-24-walls-design.md](docs/superpowers/specs/2026-09-24-walls-design.md),
+  revision 1. It is amended at execution in D1, D3, D4, D5.2, D5.3, D6, D8,
+  D10, D11, D12 and the mutant table; no original text is rewritten.
+- Plan: [2026-09-24-walls.md](docs/superpowers/plans/2026-09-24-walls.md),
+  with three "Amended at execution" notes (Ruling 07-3's bound, Task 6,
+  Task 10's greps).
+- Results: [2026-09-24-plan-07-results.md](docs/superpowers/notes/2026-09-24-plan-07-results.md).
+- Mutation log: [plan-07-mutation-log.md](docs/superpowers/notes/plan-07-mutation-log.md).
+  **51 fired, 51 killed, 0 survived; 4 equivalent; 1 N/A.** One finding:
+  `WG6` was a degenerate fixture for M-07i's node-cap site, and `WG21` was
+  added to kill it.
+- Spike: [2026-09-24-walls-spike-findings.md](docs/superpowers/notes/2026-09-24-walls-spike-findings.md)
+  (`spike/07-walls` at `45aecb6`, kept as the record, never to be merged).
+
+**Delivered:**
+- **In `jet_cad_2d`:** `Generated.region` and `Generated`'s `color`;
+  regions in `_plan`; neighbours on demand (O(k·n) per edit, zero for an
+  edit that touches no object); the `_run` loop's comment;
+  `ParametricType.diagnose`; a nested-safe `_applying` guard;
+  `draftRecord`'s optional colour.
+- **In `jet_cad_2d_flutter`:** `ObjectGripProvider` (`gripsOf`, `drag`,
+  `preview`) on `GripCache`, `GripDrag`'s object reshape, and the select
+  tool's object preview. Only `grip_cache.dart`, `grip_drag.dart` and
+  `select_tool.dart` change.
+- **In `apps/floor_planner`:** `lib/parametric/wall.dart` (`WallParams`,
+  `WallType`, `wallJoin`, `mitreLimit`, `kWallColor`), `wall_geometry.dart`
+  (pure Dart), `wall_tool.dart`, `wall_grips.dart`, and `catalog.dart`
+  (`parametricCatalog`, `installParametric`). These replace 06's
+  `boxCatalog` and `installBoxes`, which `box.dart` no longer declares.
+  Also the Selection panel's Wall section and pinned targets, and W in the
+  shell.
+
+**Rulings a reader must know** (all of them, with costs, are in the results
+note):
+- **Undo mid-chain is swallowed** (Ruling 07-1). Esc or Enter ends the
+  chain, and then cmd+Z removes the last wall.
+- **The Wall tool joins by band, never by `nearest`.** A click inside a
+  wall's band goes to the nearer endpoint within one thickness, else onto
+  the centreline (a T). The lowest handle wins, and band joining is gated
+  on object snap. A grip drag does not band-join.
+- **Walls are explicitly black** (`kWallColor`). ByLayer on layer 0 is
+  white, and there is no ACI-7 contrast rule. The planner never rewrites a
+  record's colour.
+- **Wedge corners are computed through the node's reference point** (spec
+  D5.2 amended): 0.76% holes, against 1.19% through each end's own point.
+- **D12 is one diagnostic per code per wall.**
+
+### What Plan 07 measured
+
+| quantity | value |
+|---|---|
+| `packages/jet_cad_2d` | **972** pass and the 2 standing Linux-only hash tests (`00:12 +972 -2`, exit 1); analyze and format clean. 951 at the branch point |
+| `packages/jet_cad_2d_flutter` | **931** pass, 1 skip, 7 standing goldens (`00:45 +931 ~1 -7`, exit 1); analyze and format clean. 923 at the branch point |
+| `apps/dev_harness_2d` | **82** (`00:38 +82: All tests passed!`, exit 0), unchanged |
+| `apps/floor_planner` | **138** (`00:22 +138: All tests passed!`, exit 0); analyze and format clean; `flutter build web --release` `✓ Built`. 69 at the branch point |
+| neighbour cost (`NC4`, JIT) | before, on 06's `lib`: n=600 about 19 ms per line draw or move (implementer), 12.6 ms (reviewer's M-07o stand-in); after, about 2–3.5 ms. The counter is pinned: 0 overlap tests for a line draw, exactly `(1 + closure)(n − 1)` for a move |
+| Wall tool hover at 600 walls (`WT12`) | 214 µs before the fix; about 5.4–5.7 µs after, allocation-free |
+| accepted holes / fallbacks (`WG14`) | 0.76% of 20,000 plausible nodes / 0.11% of 49,887 walls |
+| mutations | **51 fired, 51 killed** |
+| the allocation invariants | green and unedited since `f2daba5` |
+| the look | **OWED** (six items per platform); the human's macOS run at `dcbc831` shows the app and the Wall panel only |
+
+**Exit gate: 11 of 13.** Criteria 2–12 PASS. Criterion 1 is green on Linux,
+and its macOS half is OWED. Criterion 13 is OWED.
+
+**Debt, one line each** (full list in the results note):
+- Task 2's touching-neighbour mutant T survives (06 debt);
+- the snap marker sits at the raw point while the band and the commit go to
+  the centreline (cosmetic);
+- a click near an X crossing tees onto the lower handle, with the stem
+  about 50 mm inside the other band;
+- a grip drag makes no T;
+- record colours are never rewritten, so a `kWallColor` change needs a
+  migration;
+- the accepted hole (0.76% here, 0.78% in the spike), reported by
+  `wall.hole`;
+- for 08, a neighbour's fill can cover an opening near a joint; for 10,
+  derive rooms from faces and centrelines;
+- Box m3's refocus (deferred to the `fix/` branch).
 
 ---
 
@@ -1708,7 +1865,13 @@ into a standing test. Full account:
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i, **GPU Plans A, B, C and D**, and product Plans 01/02/03/04 merged |
 | `.claude/worktrees/quizzical-jemison-7537de` | `plan-05/drawing-tools` | **MERGED at `fb0f87d`.** The worktree is the session that ran the plan; remove it and `git branch -d plan-05/drawing-tools` when that session closes. The pre-merge state, for the record: **EXECUTED, NOT MERGED.** Cut from `main` at `7dac3b5`. Tasks 1–10 at `7dac3b5..3957d52`; Task 11 Steps 1–4 at `d45b5d7`; the final whole-branch review returned "With fixes" and its fix wave landed at `1d80caf..f8b4269`; this closing docs commit records the gate at that final tree. The ledger archive is the branch's last commit, next, then the human's look and the merge decision. This worktree previously hosted `fix/grip-camera-bc-swap` (Ruling P-1: this session's worktree hosts whatever branch it is dispatched to work on), which is merged at `9212793` and whose local branch can be deleted once no longer wanted |
 
-**Nothing is in flight.** Plan 05 is merged at `fb0f87d`; its branch
+**In flight: `plan-07/walls`** (Plan 07, walls), in the session worktree
+`.claude/worktrees/walls`, cut from `spec-07/walls` at `f2daba5`. It is
+executed and not merged; see [Plan 07](#plan-07--walls-executed-on-plan-07walls-not-merged).
+`spec-07/walls` holds the spec and plan commits, and `spike/07-walls`
+(`45aecb6`) is the spike's record, never to be merged.
+
+**Before Plan 07, nothing was in flight.** Plan 05 is merged at `fb0f87d`; its branch
 waits only for its session's worktree to close. Plan 03
 (`c5173e0`) and its three fix branches (`59e3811`, `9212793`, `7c96e11`)
 are merged and deleted; `fix/grip-camera-bc-swap`'s local branch is the one
@@ -1861,7 +2024,26 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's look at Plan 06 (the parametric layer),
+**Immediate next step: the final whole-branch review of Plan 07 (walls), on
+`plan-07/walls`.** Tasks 1–10 are done at `f2daba5..330797c`, and Task 11
+is the commit that writes this paragraph. The four gate lines are green on
+Linux (engine 972 + 2 standing; render layer 931 + 1 skip + 7 standing;
+harness 82; app 138; web `✓ Built`), and 51 mutants were fired and 51
+killed. **What resumes here, in order:**
+1. the final whole-branch review, and its fix wave if any;
+2. the ledger archive (`docs/superpowers/ledgers/2026-09-24-walls/`) as the
+   branch's last commit;
+3. the human's `flutter build macos --release` and the look (six items per
+   platform, from
+   [2026-09-24-plan-07-results.md](docs/superpowers/notes/2026-09-24-plan-07-results.md));
+4. the merge, the human's decision, `--no-ff`;
+5. the post-07 `fix/` branch: white ByLayer drafting, the Page panel's
+   focus after Enter, and Box m3.
+
+Plan 06's look is still OWED as well. Nothing was simulated to fill in
+either look. See [Plan 07](#plan-07--walls-executed-on-plan-07walls-not-merged).
+
+*Before Plan 07 ran, this paragraph read:* **Immediate next step: the human's look at Plan 06 (the parametric layer),
 merged into `main` at `a6837d0`.**
 - **What to look at:** six items per platform, on macOS, in Chrome and in
   Firefox from `build/web`, listed in

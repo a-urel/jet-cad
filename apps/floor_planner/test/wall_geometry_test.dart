@@ -701,8 +701,8 @@ void main() {
   });
 
   test(
-      'WG21 a three-way node with no face through the node point: the node '
-      'point is on no ring (M-07i at a node cap)', () {
+      'WG21 a three-way node under mixed justification: the node point is '
+      'on no ring (M-07i at a node cap)', () {
     // WG6's w2 and w3 each have a face through the node point, so a node
     // cap that inserts it mostly repeats a vertex already there. Here only
     // w2 (left) has a zero face, and its wedge with w3 (120°, corner

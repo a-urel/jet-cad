@@ -15,7 +15,7 @@ fired); 1 N/A.**
   samples.
 
   The controller ruled the fixture in. It landed as `WG21`: a three-way
-  node under mixed justification with no face through the node point. The
+  node under mixed justification where the node point is on no ring. The
   site was re-fired against `WG21`, which kills it. See the M-07i entry.
 - **The tasks' extras:** 26 fired, all killed:
   - geometry: 8;
@@ -28,7 +28,10 @@ fired); 1 N/A.**
 - **N/A:** 1. No snap-mask mutant exists, because Task 6c removed the
   `nearest` snap.
 
-**Tree.** Every mutant was fired against `plan-07/walls` at `dcbc831`.
+**Tree.** Every mutant was fired against `plan-07/walls` at `dcbc831`. The
+one exception is M-07i's re-fire against `WG21`, which ran on `dcbc831`
+with `WG21` added to the test file, the tree committed as `330797c`;
+`lib/` is identical between the two (Task 9 review, minor m2).
 `git status --short` was empty between batches.
 
 **Procedure, per mutant.** The driver is
@@ -525,7 +528,7 @@ path. The inserted node point overlaps the owner's walk: 287 samples
 covered twice. `wall_regen_test.dart` stays green.
 
 **The fixture, first as a probe.** A three-way node under mixed
-justification with no face through the node point:
+justification where the node point is on no ring:
 
 - w1: 200 centre, from the node at 10°;
 - w2: 115 left, into the node from 130°;
@@ -617,6 +620,14 @@ Re-fire of M-07i at `wall_geometry.dart:326` against `WG21`:
 - **result:** KILLED by `WG21`. Line 719 is the "node point is on no ring"
   check. The test fails there, not in `expectSound`, which runs first for
   each ring.
+- **title (Task 11):** the red line above is pasted as it ran, under
+  `WG21`'s first title, "with no face through the node point". That
+  wording was wrong: w2 is left-justified, so its zero face does run
+  through the node. Task 11 renamed the test "WG21 a three-way node under
+  mixed justification: the node point is on no ring (M-07i at a node
+  cap)". The probe's title in its own transcript above is left as it ran
+  too. Title only; no behaviour changed, and `--plain-name 'WG21 a
+  three-way node'` still matches it.
 
 ### M-07j — acute wedges clamped too
 

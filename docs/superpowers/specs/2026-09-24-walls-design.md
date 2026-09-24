@@ -2,6 +2,10 @@
 
 **Date:** 2026-09-24. **Status:** design, **revision 1**, not yet reviewed.
 **Sub-project:** `roadmap/07-walls.md`. **Size:** L.
+**Executed** on `plan-07/walls` (Plan 07): the paragraphs marked
+"**Amended at execution (Plan 07)**" record where the build departed from
+this text. Nothing original below is rewritten. Results:
+[2026-09-24-plan-07-results.md](../notes/2026-09-24-plan-07-results.md).
 **Depends on:** 06 (merged at `a6837d0`): the parametric layer. 07 is its
 first real client.
 **Blocks:** 08 (openings), 10 (rooms and area).
@@ -74,6 +78,12 @@ at `22957d1` on 2026-09-24. Each item gives its file and line.
   (`apps/floor_planner/lib/main.dart:221`, `parametric/box.dart:127-133`).
   Tool keys V L P R B C A T are taken; **W is free** (`main.dart:83-133`).
 
+**Amended at execution (Plan 07):** the `boxCatalog` item above is
+evidence of the tree at `22957d1` and stays true of it. Plan 07 replaced
+`boxCatalog` and `installBoxes` with `catalog.dart`'s `parametricCatalog`
+and `installParametric(doc)` (D1), in Task 5 (`26f634e`); `box.dart` no
+longer declares either.
+
 ## What this delivers
 
 1. **Walls in the floor planner.** A wall is a straight centreline with a
@@ -123,6 +133,12 @@ at `22957d1` on 2026-09-24. Each item gives its file and line.
 - **Walls and boxes coexist.** They can be neighbours, which costs time
   only: each type's `generate` ignores the other's parameters.
 
+**Amended at execution (Plan 07):** as built, `catalog.dart` declares
+`parametricCatalog` (the Box and the Wall) and `installParametric(doc)`;
+`box.dart` lost `boxCatalog` and `installBoxes`, and `main.dart` and the box
+tests use `catalog.dart` (Task 5, `26f634e`, a rename with no behaviour
+change). No `installBoxes` or `boxCatalog` remains in the app.
+
 ### D2 — `WallParams`
 
 - **Fields:** `start` and `end` (group-local, two doubles each),
@@ -162,6 +178,22 @@ at `22957d1` on 2026-09-24. Each item gives its file and line.
   **generated** from `WallParams`, because 06's planner treats every child
   of a parametric group as generated and would remove any other.
 
+**Amended at execution (Plan 07):** "All on layer 0, ByLayer … a black
+band on white paper" was false as built. Layer 0 is `IndexedColor(7)`, and
+`aciToRgb(7)` is `0xFFFFFF`. **No ACI-7 contrast-with-paper rule exists**
+anywhere in the render layer; `style_resolver_test` and 3f's text spec pin
+the white. So a ByLayer band painted white on white paper. The controller's
+Chromium smoke test after Task 6 found it. **Walls carry an explicit
+colour:** `kWallColor = TrueColor(0x000000)` in `wall.dart`, given to all
+three children through `Generated`'s new `color` argument (D8's
+amendment). The planner writes a colour only when it **adds** a child. It
+never rewrites a record's colour, so a later change to `kWallColor` reaches
+existing walls only through a migration. Pinned by `RG11` (engine) and
+`WP5`, a pixel check in the shell (`e13d2cb`). The same white-on-white
+affects ByLayer drafting on layer 0 (Plan 05's tools, 06's boxes). That was
+found here and deferred to a post-07 `fix/` branch on the human's decision;
+07 does not change it.
+
 ### D4 — Joints, derived in `generate`
 
 Amends **roadmap decision 4**: connectivity is geometric, as decided, but
@@ -191,6 +223,18 @@ state in the file that can drift and must be undone.
   m3). A long diagonal wall still has a large AABB: spurious neighbours cost
   time, never correctness.
 
+**Amended at execution (Plan 07):** the membership rule as built (Ruling
+07-3). The **candidates** are this end and every other wall's end within
+`wallJoin.linear` of it. The **anchor** is the lowest `(handle, end index)`
+among them. The **members** are every end, this wall's included, within
+`wallJoin.linear` of the anchor's endpoint. **Its true bound:** every member
+computes the same set whenever the anchor end lies within `wallJoin.linear`
+of every other member. The plan's "unless ends spread beyond
+`2 × wallJoin.linear`" is wrong. Counterexample (Task 4): ends at 0, 0.9 and
+1.8 × `wallJoin.linear` along a line, in handle order. The first two see two
+members; the third anchors on the middle end and sees three. Snapping never
+produces such a cluster. `WG16` pins the anchor rule.
+
 ### D5 — The node rule (spike: "the node rule that survived")
 
 1. **Ends at a node** are sorted anticlockwise by the angle of their
@@ -215,6 +259,26 @@ state in the file that can drift and must be undone.
 6. **A lobe that is folded** (signed area ≤ 0) **or crosses itself** is
    dropped: every wall keeps its straight cap. A folded lobe means the caps
    already meet. A crossing lobe with positive area leaves a hole — D6.
+
+**Amended at execution (Plan 07), D5.2:** a wedge's corner intersects the
+two faces placed through the node's **reference point**, not through each
+end's own endpoint. The reference point (`nodeHub`) is the endpoint of the
+node's lowest `(handle, end)`, so it is the same bits for every member, and
+bitwise agreement holds. Members' endpoints can differ by up to
+`wallJoin.linear`. Through the reference point, a face at offset 0 passes
+exactly through the node, and a corner and a foot on it coincide bitwise, so
+the lobes split there (D5.5). Measured on spike Q5b's generator with every
+wall in its own rotated group: through each end's own point, 1.19% of nodes
+leave a hole and 0.17% of walls fall back; through the reference point,
+0.76% and 0.11% (`WG14`). Clamps (D6) are measured from the same point. Cost
+if wrong: corners shift by at most `wallJoin.linear`.
+
+**Amended at execution (Plan 07), D5.3:** "the node point is never an
+outline vertex" means the node point is never **inserted** as a cap vertex.
+A corner or a foot on a zero-offset face (a left- or right-justified wall)
+can coincide with the node point, and then it is a vertex. `WG2` and `WG21`
+pin the rule: `WG21` is a three-way node where the node point is on no
+ring, so an inserted node point shows (M-07i).
 
 ### D6 — Clamps, and what is accepted
 
@@ -249,6 +313,18 @@ state in the file that can drift and must be undone.
     bands, invisibly in an opaque one-colour band. Recorded for 08: a
     neighbour's fill can cover an opening cut near a joint.
 
+**Amended at execution (Plan 07):** "Without it the triangulator refuses
+a pinched outline (spike: 485 refusals before, 0 after)" credits the wrong
+step. The spike's lobe split, at exactly repeated vertices (D5.5), is what
+removed those refusals. `simplifyRing` stays as a **guard**. It removes
+duplicates that do occur: the Task 4 reviewer's probe found it changed 567
+of 700,076 raw rings. No measured triangulation depended on it: it never
+changed a triangulation outcome. After D5.2's amendment, the pinched-node
+path is unreachable. `WG12` pins `simplifyRing` directly, on a spliced
+ring (M-07n; see the mutant table's amendment). The hole rate measured on
+this branch is 0.76% (`WG14`, 152 of 20,000 nodes); the spike's was 0.78%.
+Both are accepted.
+
 ### D7 — The join tolerance
 
 - **`const wallJoin = Tolerance(linear: 1e-6, angular: 1e-9)`**, in
@@ -282,6 +358,21 @@ state in the file that can drift and must be undone.
 - **D11 (06) holds:** a changed outline is rewritten in place, no slot
   freed or reused.
 
+**Amended at execution (Plan 07):** three details of the build.
+- **A direct edit of a region's fill** (`SetEntityGeometryCommand` on the
+  fill) throws the command's **own `StateError`**, not
+  `GeneratedGeometryError`. The command refuses a fill before 06's D6 guard
+  runs, and changing that is out of scope. Cost if wrong: a caller that
+  catches only `GeneratedGeometryError` sees a `StateError`. The UI never
+  offers the edit. `RG5`.
+- **A direct edit of a region's boundary** throws `GeneratedGeometryError`
+  **naming the fill**. 06 D6 reports the lowest touched generated handle,
+  and a boundary edit touches its fill. Cosmetic. `RG5`.
+- **`Generated` and `Generated.region` gain `color`** (default ByLayer),
+  written into a record **only when the child is added**. Rewriting an
+  existing child changes its geometry, never its colour (D3's amendment).
+  `draftRecord` gains an optional colour. `RG11`.
+
 ### D9 — Draw order
 
 - **Ascending handle value, unchanged.** Within a wall: fill, outline,
@@ -310,6 +401,14 @@ state in the file that can drift and must be undone.
 - **The `_run` loop gains its comment** (06 debt): it duplicates
   `CompoundCommand`'s rollback because it must tell its own rollback
   failure apart from a child's `StateError`.
+
+**Amended at execution (Plan 07):** `NC2` asserts more than `< 10 × n`: it
+also asserts the exact count, `(1 + closure) × (n − 1)`, which kills a
+disabled memo (Task 3). `< 10 × n` holds only for a small closure. A move
+that changes eight or more neighbours would exceed it, and it is still
+O(k·n). The before and after times are in the results note. They are JIT
+times from a container, so the note states how each was measured rather
+than a single speed-up factor.
 
 ### D11 — Tool, grips and panel (app and render layer)
 
@@ -367,6 +466,63 @@ state in the file that can drift and must be undone.
 - Guarded by `shortcut_guard.dart`, so typing "W" in a field does not switch
   tools.
 
+**Amended at execution (Plan 07):** D11 as built.
+- **Undo mid-chain is swallowed (Ruling 07-1).** `PlacementTool` swallows
+  every key-down while a shape is pending (05 D3), so undo never lands
+  mid-chain. **Esc or Enter ends the chain**; cmd+Z then removes the last
+  wall. A click on the chain's **last** point also ends it, once a wall is
+  down (M-05x's rule), so a double click is harmless. Cost if wrong: one
+  extra Esc. `WT6`.
+- **The Wall tool joins a wall wherever its band is clicked.** An accepted
+  point, and the rubber band's hover end, that lies inside a wall's band
+  (between its faces, within its length) moves onto that wall. It goes onto
+  the nearer centreline endpoint when within one thickness of it along the
+  centreline (a node), else onto the centreline (a T). Several bands: the
+  lowest handle. Band joining is object snapping, so it is **gated on
+  object snap** (F3). It runs over a cache of world walls. The cache is
+  rebuilt only on a document change, or marked stale by the tool's own
+  commit, and a hover scan allocates nothing in steady state. With no chain
+  pending, a hover scans nothing. `WT3`, `WT9`–`WT13`, `WT15`.
+- **The Wall tool never snaps `nearest`.** "Snapping onto its `nearest`
+  point makes a T" is replaced by band joining. A widened `nearest` also
+  snapped to outline faces and to unrelated lines (a sample plan's hatch),
+  beating the grid. The tool uses the drawing tools' default mask (03 D8),
+  and the per-tool mask plumbing was removed (`f751d4a`). `WT14`.
+- **A click near an X crossing** tees onto the lower handle, with the stem's
+  end about 50 mm inside the other wall's band. `drift()` and
+  `diagnostics()` stay empty. Recorded, not changed.
+- **A grip drag does not band-join.** A grip dropped inside another wall's
+  band makes no T; endpoint snap still makes nodes. Sharing the tool's
+  band cache would need the moving walls excluded and F3 passed through the
+  provider. Cost if wrong: a T is made with the Wall tool, not by dragging
+  a grip.
+- **`ObjectGripProvider` has a third method,** `List<(EntityKind,
+  GeometryPayload)> preview(DraftDocument, Handle group, Grip, Vector2
+  world)`. The select tool paints it in world space like a leaf preview.
+  `WallGrips` caches the joined-end set per grip for the preview; `drag`
+  recomputes it at release.
+- **An object's `stretch` grips need `components` and `geometry`.** With
+  geometry allowed and components denied, the grip is drawn and hit, but
+  the drag never starts and the press stays a click. Under runtime
+  permissions no object grip is hit. `OG5`.
+- **In tool mode the Thickness field writes each valid keystroke** into
+  the tool's settings (`onChanged`). Without it, a thickness typed and then
+  a mid-chain canvas click without Enter built the wall with the old
+  thickness: the canvas accepts on pointer-down, and the focus-loss commit
+  lands later. Side effect: erasing leaves the last valid prefix, not a
+  revert. `WS6`.
+- **While the Wall tool is active, the Wall section edits the tool's
+  settings,** even when one wall is selected.
+- **Enter and a tap outside return focus to the canvas** in the Selection
+  panel's fields (`unfocus(previouslyFocusedChild)`). Without this, the
+  shell's letter shortcuts, Esc included, were dead after Enter until the
+  canvas was clicked, and in the Wall tool that click adds a wall. The Page
+  panel's field has the same pre-existing defect. It is deferred to the
+  post-07 `fix/` branch.
+- **A pinned field re-pins after its commit,** so Enter then blur does not
+  commit twice. A pinned target that is no longer a live object of its type
+  discards the typed text. `WS7`.
+
 ### D12 — Diagnostics
 
 - **`ParametricType` gains `List<Diagnostic> diagnose(ParametricView view,
@@ -378,6 +534,14 @@ state in the file that can drift and must be undone.
   - `wall.fallback` — a wall squared by D6's short-wall rule;
   - `wall.degenerate` — D2's degenerate wall.
 - **Deterministic:** one entry per node, reported once, by its owner.
+
+**Amended at execution (Plan 07):** "one entry per node" as built is **one
+diagnostic per code per wall**. `wall.hole` is reported by the wall that
+owns the dropped lobe, naming every member. A wall that owns dropped lobes
+at **both** ends reports one `wall.hole` naming the union of both nodes'
+members. `WG14` pins at most one reporter per hole, naming every member;
+`WR9` pins one entry for a hole node. Cost if wrong: one entry for two rare
+nodes, not observed.
 
 ### D13 — Load, save, determinism
 
@@ -482,6 +646,22 @@ edges.
 | M-07q | an end drag moves only the dragged wall | drag a node's shared end: every member's end follows, one undo step |
 | M-07r | the T's far face chosen | the T test's cap-on-near-face assertion |
 | M-07s | `reach` not expanded (an axis-aligned wall has a zero-height box) | an axis-aligned L: the two walls are neighbours and mitre |
+
+**Amended at execution (Plan 07):** three changes to the table, all
+recorded in [plan-07-mutation-log.md](../notes/plan-07-mutation-log.md)
+(51 fired, 51 killed).
+- **M-07i** is killed by `WG2` (the 67° L's notch) and by **`WG21`**, not
+  `WG6`. `WG6` is the "three-way node under mixed justification", but it
+  is a degenerate fixture for this mutant: two of its walls have a face
+  through the node point, so an inserted node point mostly repeats a
+  vertex. `WG21` is a three-way node where the node point is on no ring
+  (Task 9).
+- **M-07l** is defined **at the view level**: a wall squares its end where
+  a neighbour's own outline falls back. `outline()` alone cannot express
+  it. It is killed by `WR8`'s `drift()` check (Task 5).
+- **M-07n** is fired **in `simplifyRing`** and killed by `WG12`'s spliced
+  ring. Removing the call in `outline` is equivalent for triangulation, not
+  for stored bits (D6's amendment).
 
 ### Differential check
 
