@@ -6,8 +6,15 @@
 **Mutation log:** [plan-06-mutation-log.md](plan-06-mutation-log.md).
 **Branch:** `plan-06/parametric-layer`, worktree
 `.claude/worktrees/quizzical-jemison-7537de`, cut from local `main` at
-`6adf03d`.
-**Eleven tasks: Tasks 1–9 at `6adf03d..7b31030`; Task 10 (the mutation
+`6a279b3` (`058918d`'s sole parent, `docs(plan): 06 the parametric layer,
+eleven tasks`). **Correction:** an earlier draft of this note, of the
+mutation log and of STATUS.md named the fork point as `6adf03d`, one commit
+earlier — that is spec revision 2's own commit
+(`docs(spec): 06 revision 2 applies the r1 review`), which the plan's own
+constraints text mislabelled as the branch point. Both commits are
+docs-only, so every count below is unaffected by the correction; only the
+SHA is.
+**Eleven tasks: Tasks 1–9 at `6a279b3..7b31030`; Task 10 (the mutation
 sweep's invariants and greps, appended to the mutation log) at `fbc6fba`;
 Task 11 runs in two parts (the controller's own ruling, following Plan 05's
 Ruling T11-a) — Steps 1–4 land at this commit. The ledger archive is
@@ -26,7 +33,7 @@ after the final review).
 ### The four gate lines, pasted with exit codes
 
 Run in full, with `CI=true`, on the tree of Tasks 1–10 (`git status --short`
-clean before and after each line). Branch-point counts at `6adf03d`: engine
+clean before and after each line). Branch-point counts at `6a279b3`: engine
 911; render layer 923 + 1 skip + the five goldens; harness 82; app 46.
 
 **`packages/jet_cad_2d`**: `CI=true dart test`:
@@ -81,7 +88,7 @@ files (0 changed) in 0.33 seconds.` Exit 0.
 ```
 
 Exit 0: **82 tests, unchanged from the branch point** (`git diff --stat
-6adf03d..HEAD -- apps/dev_harness_2d` is empty — this plan touches nothing
+6a279b3..HEAD -- apps/dev_harness_2d` is empty — this plan touches nothing
 under the harness). `flutter analyze`:
 
 ```
@@ -128,15 +135,19 @@ the six commands above; no `analysis_options.yaml` was rewritten by any
 
 ### Branch commit trailers
 
+This count must include the fix commit that corrects the fork point used
+here, so it cannot be measured before that commit exists. **Measured
+immediately after that commit landed, against its own SHA** (not a bare
+`HEAD`, since `HEAD` keeps moving and this figure must not), and recorded
+in a small follow-up commit that touches only this paragraph:
+
 ```
-$ git rev-list --count 6adf03d..HEAD
-13
-$ git log --format=%B 6adf03d..HEAD | grep -c "Co-Authored-By: Claude"
-13
+$ git rev-list --count 6a279b3..<fix-commit-sha>
+$ git log --format=%B 6a279b3..<fix-commit-sha> | grep -c "Co-Authored-By: Claude Opus 5.5"
 ```
 
-13 commits on the branch (Tasks 1–10), 13 `Co-Authored-By: Claude` trailers
-— one per commit, all `Claude Opus 5.5 <noreply@anthropic.com>`.
+*(Filled in by the follow-up commit below, with the real SHA and the two
+measured counts.)*
 
 ### Where the counts differ from the plan's arithmetic, and why
 
@@ -145,7 +156,7 @@ exactly on the branch point plus their planned additions; the engine did
 not, and the difference is fully accounted for by a review-driven fix
 round.
 
-| suite | branch point (`6adf03d`) | planned additions | planned total | actual (`7b31030`/`fbc6fba`) | difference |
+| suite | branch point (`6a279b3`) | planned additions | planned total | actual (`7b31030`/`fbc6fba`) | difference |
 |---|---|---|---|---|---|
 | `jet_cad_2d` | 911 | +37 (X4, P10, N14, G9) | 948 | **950** | **+2** |
 | `jet_cad_2d_flutter` | 923 + 1 skip + 5 goldens | +2 (CN1, CN2) | 925 + 1 skip + 5 goldens | **925 + 1 skip + 5 goldens** | **0** |

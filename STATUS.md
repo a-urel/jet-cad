@@ -281,8 +281,11 @@ trivial client, `BoxParams`/`BoxType` (a world-axis-aligned rectangle with
 a Selection section with Width/Height fields.
 
 **Where it stands.** Eleven tasks on `plan-06/parametric-layer`, cut from
-local `main` at `6adf03d`:
-- Tasks 1–9 are at `6adf03d..7b31030`;
+local `main` at `6a279b3` (`058918d`'s sole parent — the plan's own
+constraints text mislabelled the fork point as `6adf03d`, one commit
+earlier and docs-only, so every count is unaffected; see the results
+note's own correction):
+- Tasks 1–9 are at `6a279b3..7b31030`;
 - Task 10 (the mutation sweep's invariants and greps, appended to the
   mutation log) is at `fbc6fba`;
 - Task 11 runs in two parts (following Plan 05's own Ruling T11-a): Steps
@@ -1845,7 +1848,7 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 **Immediate next step: the final whole-branch review of Plan 06 (the
 parametric layer), on `plan-06/parametric-layer`.** Eleven tasks are done —
-Tasks 1–9 at `6adf03d..7b31030`, Task 10 at `fbc6fba`, Task 11's Steps 1–4
+Tasks 1–9 at `6a279b3..7b31030`, Task 10 at `fbc6fba`, Task 11's Steps 1–4
 at this commit — with the four gate lines green (engine 950; render layer
 925 + 1 skip + the five standing text goldens; harness 82; app 67; both
 release builds `✓ Built`) and 26 mutants fired, 26 killed (`M-06e` N/A by

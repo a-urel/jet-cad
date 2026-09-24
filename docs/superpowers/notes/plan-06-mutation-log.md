@@ -502,10 +502,17 @@ fixture; no `analysis_options.yaml` and no `.dart` production file.
 
 ## Invariants and greps (Task 10)
 
-`main` here is the local branch `main` at `6adf03d` (the branch point);
-every `git diff main -- ...` below compares against it. Run after Task 9's
-fix round, on the fully-restored tree (`7b31030`), `git status --short`
-clean before and after.
+`main` here is the local branch `main` at `6a279b3` (the branch point --
+`058918d`'s sole parent); every `git diff main -- ...` below compares
+against it. **Correction:** an earlier draft of this section named the fork
+point as `6adf03d`, one commit earlier -- that is spec revision 2's own
+commit (`docs(spec): 06 revision 2 applies the r1 review`), which the
+plan's own constraints text mislabelled as the branch point. `6a279b3`
+(`docs(plan): 06 the parametric layer, eleven tasks`) is the actual parent
+of the branch's first task commit, `058918d`. Both commits are docs-only,
+so every count below is unaffected. Run after Task 9's fix round, on the
+fully-restored tree (`7b31030`), `git status --short` clean before and
+after.
 
 ```
 $ git diff main -- packages/jet_cad_2d/test/invariants packages/jet_cad_2d_flutter/test/invariants | wc -l
@@ -571,9 +578,12 @@ D4 step 7) and never advances `handleSeed` directly (pinned by M-06t).
 
 ### Gate lines
 
-Branch-point counts from the plan (at `6adf03d`): engine 911, render layer
-923 + 1 skip + 5 goldens, harness 82, app 46. Run on the fully-restored
-tree, `7b31030`, `git status --short` clean before and after every line.
+Branch-point counts from the plan (at `6a279b3`, the branch's real fork
+point -- the plan's own constraints text labelled these at `6adf03d`, one
+commit earlier and docs-only, so the counts are identical either way):
+engine 911, render layer 923 + 1 skip + 5 goldens, harness 82, app 46. Run
+on the fully-restored tree, `7b31030`, `git status --short` clean before
+and after every line.
 
 **`packages/jet_cad_2d`:**
 ```
@@ -633,7 +643,7 @@ $ CI=true flutter test --concurrency=1
 00:22 +82: All tests passed!
 ```
 Exit code 0. 82 passed, unchanged from the branch point -- no task touches
-the harness (`git diff --stat 6adf03d..HEAD -- apps/dev_harness_2d` is
+the harness (`git diff --stat 6a279b3..HEAD -- apps/dev_harness_2d` is
 empty).
 ```
 $ flutter analyze
@@ -686,10 +696,11 @@ after both release builds; no `analysis_options.yaml` was rewritten by any
 ### Branch commit trailers
 
 ```
-$ git rev-list --count 6adf03d..HEAD
+$ git rev-list --count 6a279b3..fbc6fba
 13
-$ git log --format=%B 6adf03d..HEAD | grep -c "Co-Authored-By: Claude"
+$ git log --format=%B 6a279b3..fbc6fba | grep -c "Co-Authored-By: Claude Opus 5.5"
 13
 ```
-13 commits on the branch, 13 `Co-Authored-By: Claude` trailers -- one per
-commit, all `Claude Opus 5.5 <noreply@anthropic.com>`.
+13 commits from the branch's real fork point (`6a279b3`) through this
+task's own commit (`fbc6fba`), 13 `Co-Authored-By: Claude Opus 5.5
+<noreply@anthropic.com>` trailers -- one per commit.
