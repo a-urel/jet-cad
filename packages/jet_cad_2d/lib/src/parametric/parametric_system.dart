@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart';
+
 import '../core/diagnostic.dart';
 import '../core/handle.dart';
 import '../core/tolerance.dart';
@@ -76,18 +78,19 @@ class GeneratedGeometryError implements Exception {
 
 /// Read-only access for [ParametricType.generate].
 final class ParametricView {
-  ParametricView._(this._target, this._neighbours);
+  ParametricView._(this._target, this._survey);
 
   final CommandTarget _target;
-  final Map<Handle, List<Handle>> _neighbours;
+  final _Survey _survey;
 
   U? paramsOf<U extends Component>(Handle h) => _target.components.get<U>(h);
 
   /// The accumulated transform: group-local to world.
   Transform2 toWorld(Handle h) => _worldOf(_target, h);
 
-  /// Ascending handles of the objects whose reach overlaps [h]'s.
-  List<Handle> neighbours(Handle h) => _neighbours[h] ?? const [];
+  /// Ascending handles of the objects whose reach overlaps [h]'s, computed
+  /// on the first call for [h] and memoised (spec 07 D10).
+  List<Handle> neighbours(Handle h) => _survey.neighboursOf(h);
 }
 
 /// The parametric types an application knows, independent of any document
@@ -154,7 +157,7 @@ class ParametricSystem {
     _applying = true;
     try {
       final s = _survey(document, _types);
-      final view = ParametricView._(document, s.neighbours);
+      final view = ParametricView._(document, s);
       return [
         for (final h in s.objects.keys)
           if (_plan(document, [h], s, view).isNotEmpty) h,

@@ -16,21 +16,57 @@ bool _isObject(
       types.any((r) => r.has(t, h));
 }
 
+/// Pairwise reach-overlap tests performed by the neighbour search (spec 07
+/// D10), for tests that pin its cost. Never reset by the library.
+@visibleForTesting
+int debugOverlapTests = 0;
+
 /// Everything the planner reads about the parametric objects at one moment.
+///
+/// Neighbours are not surveyed (spec 07 D10): [neighboursOf] computes one
+/// object's list on demand, against this survey's own [reach] snapshot, and
+/// memoises it. An edit asks only for its seeds and its closure, O(k·n);
+/// an edit with no seeds asks for none.
 final class _Survey {
-  _Survey(this.objects, this.neighbours, this.children, this.owned);
+  _Survey(this.objects, this.reach, this.children, this.owned);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
 
-  /// Each object's neighbours, ascending (spec D3).
-  final Map<Handle, List<Handle>> neighbours;
+  /// Each object's reach at this moment, one call per object.
+  final Map<Handle, Aabb2> reach;
 
   /// Each object's children, ascending.
   final Map<Handle, List<Handle>> children;
 
   /// Every child of a live object, to its owner: the set G of spec D4.
   final Map<Handle, Handle> owned;
+
+  final Map<Handle, List<Handle>> _neighbours = {};
+
+  /// [h]'s neighbours, ascending (spec 06 D3): the objects whose reach
+  /// overlaps [h]'s by more than `Tolerance.standard.linear` on both axes.
+  /// Empty for a handle that is not an object of this survey.
+  List<Handle> neighboursOf(Handle h) {
+    final cached = _neighbours[h];
+    if (cached != null) return cached;
+    final a = reach[h];
+    if (a == null) return const [];
+    const tol = Tolerance.standard;
+    final out = <Handle>[];
+    for (final e in reach.entries) {
+      if (e.key == h) continue;
+      debugOverlapTests++;
+      final b = e.value;
+      if (a.minX < b.maxX - tol.linear &&
+          b.minX < a.maxX - tol.linear &&
+          a.minY < b.maxY - tol.linear &&
+          b.minY < a.maxY - tol.linear) {
+        out.add(e.key);
+      }
+    }
+    return _neighbours[h] = out;
+  }
 }
 
 _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
@@ -42,20 +78,8 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
   }
   final order = found.keys.toList()..sort(_byValue);
   final objects = {for (final h in order) h: found[h]!};
+  // Ascending, like [objects]: `neighboursOf` walks it in handle order.
   final reach = {for (final h in order) h: objects[h]!.reachOf(t, h)};
-  const tol = Tolerance.standard;
-  bool overlap(Aabb2 a, Aabb2 b) =>
-      a.minX < b.maxX - tol.linear &&
-      b.minX < a.maxX - tol.linear &&
-      a.minY < b.maxY - tol.linear &&
-      b.minY < a.maxY - tol.linear;
-  final neighbours = {
-    for (final a in order)
-      a: [
-        for (final b in order)
-          if (b != a && overlap(reach[a]!, reach[b]!)) b,
-      ],
-  };
   final children = <Handle, List<Handle>>{};
   final owned = <Handle, Handle>{};
   for (final slot in t.entities.liveSlots) {
@@ -68,15 +92,16 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
   for (final list in children.values) {
     list.sort(_byValue);
   }
-  return _Survey(objects, neighbours, children, owned);
+  return _Survey(objects, reach, children, owned);
 }
 
 /// Seeds plus their neighbours before and after, as a sorted list of live
 /// objects (spec D4 step 6). One hop: generation reads parameters only.
+/// Neighbours are asked for the seeds only (spec 07 D10).
 List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) => {
       ...seeds,
-      for (final s in seeds) ...?before.neighbours[s],
-      for (final s in seeds) ...?after.neighbours[s],
+      for (final s in seeds) ...before.neighboursOf(s),
+      for (final s in seeds) ...after.neighboursOf(s),
     }.where(after.objects.containsKey).toList()
       ..sort(_byValue);
 
@@ -275,15 +300,27 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
       ],
       ...lost,
     };
+    // No neighbour has been computed up to here (spec 07 D10): an edit that
+    // touches no object, a plain line drawn among them, pays for the two
+    // surveys only and returns here.
     if (seeds.isEmpty && cleanup.isEmpty) return r;
-    plan = _plan(t, _closure(seeds, before, after), after,
-        ParametricView._(t, after.neighbours));
+    plan = _plan(
+        t, _closure(seeds, before, after), after, ParametricView._(t, after));
   } catch (error) {
     _undoInner(t, edit.label, r, error);
     rethrow;
   }
   edit._geometryChanged = plan.isNotEmpty;
 
+  // This loop is `CompoundCommand.apply` by hand, on purpose (06 debt). A
+  // compound reports its own rollback failure as a `StateError`, which is
+  // also what a child command throws when it refuses (a missing handle,
+  // say); behind one `CompoundCommand.apply` the two would reach this
+  // function as the same exception type. They need opposite handling: after
+  // a child's error the regeneration is fully undone, so `inner` is undone
+  // too and the error rethrown; after a failed rollback the target is in an
+  // unknown state, so `inner` is left alone and the partial mutation is
+  // reported. Applying the commands one by one keeps the two apart.
   final inverses = <DraftCommand>[];
   final touched = <Handle>{...r.touched};
   for (final c in [...cleanup, ...plan]) {
