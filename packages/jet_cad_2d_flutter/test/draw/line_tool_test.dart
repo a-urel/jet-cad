@@ -131,7 +131,7 @@ void main() {
 
   test(
       'L7 hovering over a line\'s body, grid off, snaps to nothing: nearest '
-      'is not a drawing tool\'s kind unless the tool adds it (07 D11)', () {
+      'is not a drawing tool\'s kind (03 D8; 07 D11 joins walls by band)', () {
     final s = drawScene();
     final rig = drawRig(s.document, LineTool());
     // 30% along the anchor line, 4 mm off its body: the body is within the

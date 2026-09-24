@@ -53,15 +53,10 @@ void drawSnapMarker(Canvas canvas, Offset at, SnapKind? kind,
     case SnapKind.intersection:
       canvas.drawLine(at.translate(-h, -h), at.translate(h, h), paint);
       canvas.drawLine(at.translate(-h, h), at.translate(h, -h), paint);
-    case SnapKind.nearest:
-      // An hourglass: only the Wall tool resolves `nearest` (spec 07 D11).
-      canvas.drawLine(at.translate(-h, -h), at.translate(h, -h), paint);
-      canvas.drawLine(at.translate(h, -h), at.translate(-h, h), paint);
-      canvas.drawLine(at.translate(-h, h), at.translate(h, h), paint);
-      canvas.drawLine(at.translate(h, h), at.translate(-h, -h), paint);
     case SnapKind.perpendicular:
     case SnapKind.tangent:
-      // In no tool's snap mask: a drag never produces them.
+    case SnapKind.nearest:
+      // Not in kDragSnapMask: a drag never produces them.
       return;
   }
 }

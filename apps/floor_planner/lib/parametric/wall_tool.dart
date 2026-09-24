@@ -41,10 +41,6 @@ final class WallSettings {
   String toString() => 'WallSettings($thickness, ${justification.name})';
 }
 
-/// The Wall tool's object-snap kinds: the drag kinds plus `nearest`, so a
-/// click on a centreline's body lands on it and makes a T (spec 07 D11).
-final SnapMask kWallSnapMask = kDragSnapMask.with_(SnapKind.nearest);
-
 /// Spec 07 D11, Ruling 07-1: a chain of walls, like AutoCAD's LINE.
 ///
 /// - The first click sets the chain's start; each later click commits
@@ -59,8 +55,10 @@ final SnapMask kWallSnapMask = kDragSnapMask.with_(SnapKind.nearest);
 ///   tool refuses one (M-05x).
 /// - **It joins a wall wherever its band is clicked** (D11): an accepted
 ///   point, and the rubber band's end, that lies in a wall's band is moved
-///   onto that wall (see [_joinBand]), so a click nearer a face than the
-///   centreline still makes a T or a node.
+///   onto that wall (see [_joinBandInto]): a T, or a node near an end.
+///   This is the only way it makes a joint; it snaps with the drawing
+///   tools' own kinds (03 D8), never `nearest`, which would pull a click
+///   onto any unrelated line near it and away from the grid.
 /// - Enter and Escape end the chain. Every other key-down is swallowed
 ///   while it is pending (05 D3): undo never lands mid-chain (Ruling 07-1).
 ///
@@ -104,9 +102,6 @@ class WallTool extends PlacementTool {
 
   @override
   String get name => 'Wall';
-
-  @override
-  SnapMask get snapMask => kWallSnapMask;
 
   @override
   Vector2? selfSnap(Vector2 raw, double apertureWorld) {

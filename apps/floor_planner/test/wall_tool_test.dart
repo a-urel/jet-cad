@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/parametric/wall_geometry.dart';
@@ -28,11 +30,16 @@ final Vector2 _centre = plan(1850, 1500);
 /// snap aperture is 10 / 0.15 ≈ 66.7 mm.
 const double _scale = 0.15;
 
-/// A 1:20 page near the far origin, grid snap off, and one survey tick per
-/// point of [c0]..[c3] and [s0]: a root LINE from the point, 400 mm
-/// outward. A click near a point snaps onto the tick's endpoint, so the
-/// snapped point is known exactly and differs from the raw pointer point.
-DraftDocument wallShellDoc(FlutterTextMeasurer m) {
+/// The page's fixed grid step: fine enough that a grid point is within
+/// ~7 mm of the click, coarse enough to move every click off its raw point.
+const double gridStep = 10;
+
+/// A 1:20 page near the far origin, **grid snap on** at [gridStep], and
+/// (with [ticks]) one survey tick per point of [c0]..[c3] and [s0]: a root
+/// LINE from the point, 400 mm outward. A click near a point snaps onto the
+/// tick's endpoint (object snap beats the grid), so the snapped point is
+/// known exactly and differs from the raw pointer point.
+DraftDocument wallShellDoc(FlutterTextMeasurer m, {bool ticks = true}) {
   final doc = DraftDocument.empty(measurer: m);
   PageComponent.register(doc.components);
   doc.commands.execute(SetComponentCommand<PageComponent>(
@@ -41,8 +48,10 @@ DraftDocument wallShellDoc(FlutterTextMeasurer m) {
           scaleDenominator: 20,
           originX: ox - 2000,
           originY: oy - 2000,
-          snapToGrid: false)));
-  for (final p in [c0, c1, c2, c3, s0]) {
+          gridStepMm: gridStep)));
+  for (final p in [
+    if (ticks) ...[c0, c1, c2, c3, s0]
+  ]) {
     final out = (p - _centre).normalized() * 400;
     doc.commands
         .execute(addDrafted(doc, EntityKind.line, linePayload(p, p + out)));
@@ -105,6 +114,10 @@ WallTool wallTool(WidgetTester tester) => tester
     .entries
     .firstWhere((e) => e.keyName == 'tool-wall')
     .tool as WallTool;
+
+/// The page grid's point nearest [p], as the drag chain computes it.
+Vector2 gridOf(DraftDocument doc, Vector2 p) =>
+    snapToGrid(p, gridStep, doc.components.get<PageComponent>(doc.rootHandle)!);
 
 /// Every wall, ascending by handle.
 List<Handle> walls(DraftDocument doc) =>
@@ -321,7 +334,8 @@ void main() {
     expect(xy(ps.start), xy(s0));
     expect(distToLine(ps.end, c0, c1), lessThan(wallJoin.linear),
         reason: 'the stem ends on the centreline, not at the raw point');
-    expect((ps.end - foot).length, lessThan(1e-6));
+    expect((ps.end - foot).length, lessThan(gridStep),
+        reason: 'the grid point near the click, joined onto the centreline');
     expect(classify(worldWallOf(doc, s), 1, [worldWallOf(doc, h)]), isA<Tee>());
     // WG4's property, in the document: the stem's cap corners lie on H's
     // near face (s0's side), far from its far face; H stays a rectangle.
@@ -339,14 +353,15 @@ void main() {
     }
     expectSquare(doc, h);
 
-    // D11: the tool joins a wall wherever its band is clicked. On H (200,
-    // centre), clicks nearer a face than the centreline, on both sides:
-    // with `nearest` alone each would land on the face.
+    // D11: the tool joins a wall wherever its band is clicked, and that is
+    // the only way it makes a joint. On H (200, centre), clicks nearer a
+    // face than the centreline, on both sides; each lands on a grid point
+    // first (within ~7 mm), which the band joins onto H.
     wallTool(tester).settings.value = const WallSettings();
     final nH = leftOf(c0, c1);
     final inSign = nH.dot(s0 - c0) > 0 ? 1.0 : -1.0; // the room's side
     final t1 = await drawWall(tester, view, plan(2300, 1000),
-        c0 + (c1 - c0) * 0.6 + nH * (95 * inSign));
+        c0 + (c1 - c0) * 0.6 + nH * (90 * inSign));
     expectTee(doc, h, t1, fromSign: inSign);
     final t2 = await drawWall(tester, view, plan(3100, -1300),
         c0 + (c1 - c0) * 0.8 - nH * (60 * inSign));
@@ -380,8 +395,9 @@ void main() {
     final t4 = await drawWall(
         tester, view, plan(2500, 2100), c3 + (c2 - c3) * 0.7 - nH2 * 150);
     final p4 = doc.components.get<WallParams>(t4)!;
-    expect(distToLine(p4.end, c3, c2), closeTo(150, 1e-3),
+    expect(distToLine(p4.end, c3, c2), closeTo(150, gridStep),
         reason: 'outside the band: not joined');
+    expect(xy(p4.end), xy(gridOf(doc, p4.end)), reason: 'a grid point');
     expect(
         classify(worldWallOf(doc, t4), 1, [worldWallOf(doc, h2)]), isA<Free>());
     expect(driftOf(doc), isEmpty);
@@ -555,12 +571,12 @@ void main() {
         'osnap off');
     final nH = leftOf(c0, c1);
     final inSign = nH.dot(s0 - c0) > 0 ? 1.0 : -1.0;
-    final target = c0 + (c1 - c0) * 0.6 + nH * (95 * inSign);
+    final target = c0 + (c1 - c0) * 0.6 + nH * (90 * inSign);
     final t = await drawWall(tester, view, plan(2300, 1000), target);
     final pt = doc.components.get<WallParams>(t)!;
-    expect(distToLine(pt.end, c0, c1), closeTo(95, 1e-3));
-    expect((pt.end - target).length, lessThan(1e-3),
-        reason: 'the raw point: the grid is off');
+    expect(distToLine(pt.end, c0, c1), closeTo(90, gridStep));
+    expect(xy(pt.end), xy(gridOf(doc, target)),
+        reason: 'the grid point of the click, not joined');
     expect(classify(worldWallOf(doc, t), 1, [worldWallOf(doc, h)]),
         isNot(isA<Tee>()));
   });
@@ -681,6 +697,43 @@ void main() {
     final end = doc.components.get<WallParams>(walls(doc).last)!.end;
     expect(distToLine(end, x1.s, x1.e), lessThan(wallJoin.linear));
     expect(distToLine(end, x2.s, x2.e), greaterThan(30));
+  });
+
+  testWidgets(
+      'WT14 with grid snap on and unrelated lines 4-7 mm from every click, a '
+      'chain lands bitwise on the grid points (smoke test)', (tester) async {
+    final doc = wallShellDoc(FlutterTextMeasurer(), ticks: false);
+    // Grid points of the page (origin ox - 2000, step 10): exact doubles.
+    final g = [
+      Vector2(ox - 500, oy + 600),
+      Vector2(ox + 2500, oy + 500),
+      Vector2(ox + 2700, oy + 3300),
+      Vector2(ox - 300, oy + 3500),
+    ];
+    // Hatch-like clutter: two long parallel lines beside each point, 4 and
+    // 7 mm off it, all parallel (no intersections), their ends and
+    // midpoints far outside the aperture.
+    final u = Vector2(math.cos(0.4), math.sin(0.4)), n = Vector2(-u.y, u.x);
+    for (final p in g) {
+      for (final off in const [4.0, -7.0]) {
+        final a = p + n * off - u * 300, b = p + n * off + u * 1700;
+        doc.commands
+            .execute(addDrafted(doc, EntityKind.line, linePayload(a, b)));
+      }
+    }
+    doc.commands.clearHistory();
+    final view = await pumpWalls(tester, doc);
+    await press(tester, LogicalKeyboardKey.keyW);
+    for (final p in g) {
+      await clickAt(tester, view, p, 2.5, -3.5);
+    }
+    await press(tester, LogicalKeyboardKey.enter);
+    final ws = walls(doc);
+    expect(ws, hasLength(3));
+    for (var i = 0; i < 3; i++) {
+      final p = doc.components.get<WallParams>(ws[i])!;
+      expect([xy(p.start), xy(p.end)], [xy(g[i]), xy(g[i + 1])]);
+    }
   });
 
   testWidgets(

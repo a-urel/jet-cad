@@ -58,21 +58,13 @@ void main() {
         6.0);
 
     expect(draw(null), isEmpty, reason: 'nothing when the raw point won');
-    // The Wall tool's `nearest` (spec 07 D11): an hourglass, its two
-    // horizontal edges joined by the two diagonals.
-    final nearest = draw(SnapKind.nearest);
-    expect(names(nearest), ['drawLine', 'drawLine', 'drawLine', 'drawLine']);
-    expect([
-      for (final c in nearest) (c.args[0], c.args[1])
-    ], [
-      (at + const Offset(-5, -5), at + const Offset(5, -5)),
-      (at + const Offset(5, -5), at + const Offset(-5, 5)),
-      (at + const Offset(-5, 5), at + const Offset(5, 5)),
-      (at + const Offset(5, 5), at + const Offset(-5, -5)),
-    ]);
-
-    for (final kind in [SnapKind.perpendicular, SnapKind.tangent]) {
-      expect(draw(kind), isEmpty, reason: '${kind.name} is in no snap mask');
+    for (final kind in [
+      SnapKind.perpendicular,
+      SnapKind.tangent,
+      SnapKind.nearest,
+    ]) {
+      expect(draw(kind), isEmpty,
+          reason: '${kind.name} is not in kDragSnapMask');
     }
   });
 }

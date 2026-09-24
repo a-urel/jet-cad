@@ -75,11 +75,6 @@ abstract class PlacementTool extends Tool {
   /// Spec 05 D4: the last placed point, or none.
   Vector2? get orthoBase => points.isEmpty ? null : points.last;
 
-  /// The object-snap kinds this tool resolves points with: 03 D8's drag
-  /// kinds unless a tool widens them (spec 07 D11: the Wall tool adds
-  /// `nearest`).
-  SnapMask get snapMask => kDragSnapMask;
-
   /// A stored placed point this raw point should land on exactly, or null.
   Vector2? selfSnap(Vector2 raw, double apertureWorld) => null;
 
@@ -120,7 +115,6 @@ abstract class PlacementTool extends Tool {
       gridStepMm: dragGridStepMm(page, cam.scale),
       scratch: _scratch,
       out: _hover,
-      mask: snapMask,
     );
     return null;
   }
