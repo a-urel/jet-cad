@@ -410,6 +410,17 @@ if wrong: such a compound is refused even though no tool in this plan issues
 one. Killed by `P12`, mutant `M-06x` (dropping the "still exists" check from
 the `owner != null` arm, leaving only the "is a live object" check).
 
+**Amended at execution (Plan 06, final-review fix wave, F4):** the *removed*
+arm is tightened the same way. A removed child in `G` is refused when the
+owner's group node still exists (`t.tree[owner] != null`), whatever the
+owner's component now is — not only while the owner is still recognised as
+"a live parametric object" (a node **and** a registered component). The
+looser check let a compound that first detaches the owner's component and
+then removes one of its still-live children, in the same command, slip past
+the backstop, exactly mirroring the *edit* arm's own gap above. Cost if
+wrong: such a compound is refused even though no tool in this plan issues
+one. Killed by `P14`.
+
 ### D7 — Permissions: derived geometry inherits (human)
 
 - **The wrapper's `capabilities`, checked by `_require` before `apply`:**
@@ -579,6 +590,28 @@ requires instead:
   starts from an empty spot and draws boxes.
 - **`GeneratedGeometryError`** propagates like `PermissionDeniedError`.
   The UI never offers the edit, so nothing catches it (review m5).
+
+**Amended at execution (Plan 06, final-review fix wave, F1/F2):** "Enter or
+focus-out commits" above is tightened to what it actually takes to hold in a
+two-field panel:
+
+- **Each field commits on its own focus loss**, not on a shared
+  `onTapOutside`. A plain `TextField`'s default `onTapOutside` groups every
+  field under one `groupId`, so moving focus from Width straight to Height
+  is *inside* that group, not outside it — nothing would commit Width. Each
+  field owns its own `FocusNode`, whose listener commits that field the
+  moment it loses focus, whatever took the focus: the other field, a tap
+  outside both, or Enter (which unfocuses before `onSubmitted` runs).
+  `onTapOutside` itself does nothing but unfocus. Killed by removing the
+  focus-loss listener: `SE8` and `SE10` both go red.
+- **A reload never overwrites a focused field.** The panel reloads a field
+  from the model on every `SelectionController` and document-change
+  notification, but hovering different geometry and an unrelated document
+  edit both notify without changing the selected box or its stored values —
+  the original code reloaded anyway, silently dropping whatever the user
+  had typed but not yet committed. The fix reloads only when the selected
+  box or its stored values actually changed since the last load, and never
+  writes into a field that currently has focus. Pinned by `SE9`.
 
 ## Architecture
 

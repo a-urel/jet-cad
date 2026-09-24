@@ -133,6 +133,96 @@ Exit 0. **Both builds printed `✓ Built`.**
 the six commands above; no `analysis_options.yaml` was rewritten by any
 `flutter analyze` / `flutter pub get` step.
 
+### The four gate lines, re-run after the final-review fix wave
+
+The section above is Task 11's own run, before the final whole-branch review
+and its fix wave (see "Final review"). Re-run in full, with `CI=true`, after
+`P13`, `P14`, `G10`, `SE9` and `SE10` landed:
+
+**`packages/jet_cad_2d`**: `CI=true dart test`:
+
+```
+00:03 +953: test/invariants/query_allocation_test.dart: (tearDownAll)
+00:03 +953: All tests passed!
+```
+
+Exit 0: **953, up 3 from 950** (`P13`, `P14`, `G10`). `dart analyze`:
+
+```
+Analyzing jet_cad_2d...
+No issues found!
+```
+
+Exit 0. `dart format --output=none --set-exit-if-changed .`: `Formatted 141
+files (0 changed) in 0.25 seconds.` Exit 0.
+
+**`packages/jet_cad_2d_flutter`**: `CI=true flutter test`:
+
+```
+00:12 +925 ~1 -5: Some tests failed.
+```
+
+Exit 1: **unchanged — 925 pass, 1 skip, and exactly the same five standing
+`text_ladder_golden_test.dart` failures** (this fix wave touches nothing
+under `jet_cad_2d_flutter`). `flutter analyze`:
+
+```
+Analyzing jet_cad_2d_flutter...
+No issues found! (ran in 1.3s)
+```
+
+Exit 0. `dart format --output=none --set-exit-if-changed .`: `Formatted 176
+files (0 changed) in 0.33 seconds.` Exit 0.
+
+**`apps/dev_harness_2d`**: `CI=true flutter test --concurrency=1`:
+
+```
+00:19 +82: All tests passed!
+```
+
+Exit 0: **unchanged, 82** (untouched by this fix wave). `flutter analyze`:
+
+```
+Analyzing dev_harness_2d...
+No issues found! (ran in 1.0s)
+```
+
+Exit 0. `dart format --output=none --set-exit-if-changed .`: `Formatted 22
+files (0 changed) in 0.05 seconds.` Exit 0.
+
+**`apps/floor_planner`**: `CI=true flutter test`:
+
+```
+00:03 +69: All tests passed!
+```
+
+Exit 0: **69, up 2 from 67** (`SE9`, `SE10`). `flutter analyze`:
+
+```
+Analyzing floor_planner...
+No issues found! (ran in 1.4s)
+```
+
+Exit 0. `dart format --output=none --set-exit-if-changed .`: `Formatted 19
+files (0 changed) in 0.05 seconds.` Exit 0. `flutter build macos --release`:
+
+```
+Building macOS application...
+✓ Built build/macos/Build/Products/Release/floor_planner.app (51.4MB)
+```
+
+Exit 0. `flutter build web --release`:
+
+```
+Compiling lib/main.dart for the Web...                             23.7s
+✓ Built build/web
+```
+
+Exit 0. **Both builds printed `✓ Built`.**
+
+`git status --short` was clean before this re-run and clean after every one
+of the six commands above.
+
 ### Branch commit trailers
 
 This count had to include the fix commit that corrects the fork point used
@@ -193,6 +283,14 @@ round.
   written and ruled the panel's tests `SE1`–`SE8` instead — names only, no
   test lost or gained, recorded in `plan-rulings.md`'s pre-flight table and
   `progress.md`'s top-level ruling.
+
+**A further shift, from the final-review fix wave (see "Final review"):**
+`jet_cad_2d` gains three more tests (`P13`, `P14`, `G10`: `950 → 953`) and
+`apps/floor_planner` gains two (`SE9`, `SE10`: `67 → 69`). `jet_cad_2d_flutter`
+and `dev_harness_2d` are untouched. **The running total after the fix wave
+is `jet_cad_2d` 953, `jet_cad_2d_flutter` 925 + 1 skip + 5 goldens,
+`dev_harness_2d` 82, `apps/floor_planner` 69** — see "The four gate lines,
+re-run after the final-review fix wave" above for the transcripts.
 
 ### Mutation tally
 
@@ -279,15 +377,14 @@ questions. One line each; none is fixed by this task.
 **The most user-visible item, flagged for the look and for the final
 review:**
 
-- **`onTapOutside` is not real focus-out (Task 8).** Flutter groups every
-  plain `TextField` under the same shared `groupId`, so moving focus from
-  Width to Height fires no tap-outside at all — nothing commits. A
-  document change that lands while the user is mid-keystroke (from an
-  unrelated edit, undo, or another user in a future multi-client setting)
-  then runs `_sync`, which reloads Width from the model and silently drops
-  the typed value. A real `FocusNode` listener would give true focus-out
-  and close this gap. Not fixed in this plan; flagged for the final review
-  to triage.
+- **`onTapOutside` is not real focus-out (Task 8) — fixed in the
+  final-review fix wave (F2).** Flutter groups every plain `TextField`
+  under the same shared `groupId`, so moving focus from Width to Height
+  fired no tap-outside at all — nothing committed. Each field now owns its
+  own `FocusNode`, whose listener commits on that field's own focus loss;
+  `onTapOutside` only unfocuses. `SE8` is re-pointed at the focus-loss
+  commit and `SE10` (Width → Height, no Enter) is new; both go red against
+  the removed listener.
 
 **Every other deferred item, one line each:**
 
@@ -296,9 +393,11 @@ review:**
   when the slot is already taken (Task 2, `P8`).
 - Task 2: `found[h]` keeps one registration per handle, so a holder with two
   parametric components would get only one detached on delete.
-- Task 2: `drift()` does not set `_applying`, so a `generate()` that calls
+- Task 2: `drift()` did not set `_applying`, so a `generate()` that calls
   `execute` during a dry run would mutate the document instead of being
-  refused.
+  refused — **fixed in the final-review fix wave (F5)**. `drift()` now sets
+  `_applying` in a try/finally around its survey and plan, exactly as
+  `apply()` already does. Pinned by `G10`.
 - Task 2: the fast path sorts every store via `withComponent<T>()`; the spec
   asked for a store-length check instead (this is off the frame path either
   way).
@@ -332,8 +431,12 @@ review:**
 - Task 7: `BX4` checks `drift()` with a fresh `ParametricSystem`, not the
   shell's own installed one — equivalent by Ruling 06-13's `isRegistered`
   guard, but worth a second look if that guard ever changes.
-- Task 8: `_sync` reloads both fields on every document change, overwriting
-  uncommitted keystrokes when an unrelated edit lands mid-typing.
+- Task 8: `_sync` reloaded both fields on every document change, overwriting
+  uncommitted keystrokes when an unrelated edit lands mid-typing — **fixed
+  in the final-review fix wave (F1)**. `_load` now reloads a field only
+  when the selected box or its stored values actually changed since the
+  last load, and never overwrites a field that currently has focus. Pinned
+  by `SE9` (hover, then an unrelated edit, then a commit).
 - The naming ruling: Task 8's selection-panel tests are `SE1`–`SE8`, not the
   plan text's `SP1`–`SP7` — `SP1`–`SP5` already name `startup_plan_test.dart`
   tests, and the plan used `SP` for both. Names only; nothing lost.
@@ -350,10 +453,28 @@ review:**
   regeneration takes a fresh, higher handle and draws above older content.
   A box's outline is lines on layer 0, so nothing visible depends on it
   here, but 07's walls with fills may need a per-object draw pass.
-- **The O(n²) neighbour search.** `ParametricView.neighbours` compares every
-  parametric object's `reach` against every other's. A broad phase is only
-  needed past a few hundred parametric objects — this plan's scale (a
-  handful of boxes) never approaches it.
+- **The O(n²) neighbour search, and it runs twice per edit.** `_survey`
+  compares every parametric object's `reach` against every other's, and
+  `_run` calls `_survey` twice — once before `inner.apply`, once after —
+  so every edit pays the full O(n²) cost twice once *any* box exists in the
+  document, including a plain line draw that touches no box at all. The
+  final reviewer measured 0.7 ms at 100 boxes, 4.3 ms at 300, and 16 ms at
+  600 (JIT). Computing neighbours only for the edited objects (and reusing
+  the untouched half of the pair-wise comparison across the two surveys)
+  would make this near-linear. This plan's own scale (a handful of boxes)
+  never approaches it; flagged for 07, whose walls are expected to run
+  into the hundreds.
+- **A box swallowed whole inside another cannot be selected or deleted
+  until the outer box moves.** `N14` already pins the regeneration side of
+  this (0 children while swallowed, a full count with new handles once it
+  is exposed again), but the consequence for the UI was not spelled out: a
+  parametric group with zero generated children has no geometry for
+  `resolveHit` to hit, so the swallowed box is invisible to a click — it
+  cannot be selected, and therefore cannot be deleted or edited through the
+  Selection section — until the box that swallows it moves away and its
+  outline regrows. 07 needs either a way to select a zero-child parametric
+  object directly (e.g. a bounding-box or tree pick) or to treat this as
+  accepted behaviour for boxes that are fully contained.
 - **Whether `reach` needs to be richer than an AABB.** A long diagonal
   object has a large AABB and produces spurious neighbours, which cost
   regeneration time, not correctness — `generate`'s own exact test still
@@ -424,6 +545,84 @@ not seen / could not judge**.
 
 **Nothing above is ticked on the human's behalf.** No finding, no verdict
 and no `fix/` branch exist yet for Plan 06's look.
+
+---
+
+## Final review
+
+**Verdict: With fixes.** The final whole-branch review found two Important
+and three Minor findings; all five are fixed in this one fix-wave dispatch,
+each with a new test that goes red against the unfixed code and green
+against the fix, and each Minor's mutant fired and killed with a `cp`
+backup, restored and diffed clean.
+
+- **F1 (Important) — hovering the canvas wiped a typed value.** `_sync` ran
+  `_load` on every `SelectionController` notification, including a hover
+  change, and `_load` overwrote the field from the model unconditionally.
+  Fixed: `_load` reloads a field only when the selected box or its stored
+  values changed since the last load, and never overwrites a field that
+  currently has focus. Pinned by `SE9` (select, type, hover, an unrelated
+  edit, then commit — the typed value survives all of it).
+- **F2 (Important) — `onTapOutside` is not focus-out.** Plain `TextField`s
+  share one tap-region group, so moving focus from Width to Height fired no
+  tap-outside and committed nothing; overriding `onTapOutside` also
+  swallowed Flutter's own default unfocus-on-outside-click. Fixed: each
+  field owns a `FocusNode` whose listener commits on that field's own focus
+  loss; `onTapOutside` now only unfocuses. `SE8` is re-pointed at the
+  focus-loss commit; `SE10` (Width → Height, no Enter) is new. The mutant
+  (removing the focus-loss listener) sends both `SE8` and `SE10` red.
+- **F3 (Minor) — undo/redo index freshness was only incidentally tested.**
+  With `ParametricReplay.capability` forced to `Capability.components`,
+  every existing engine test still passed. Fixed by adding a test, not by
+  changing production code: `P13` (`packages/jet_cad_2d/test/parametric/regeneration_test.dart`)
+  builds on `P4`'s live-`SpatialIndex` shape, undoes and redoes a
+  regenerating edit, and checks every child midpoint of both objects is
+  still found by `index.forEachInRect` after each. The mutant sends `P13`
+  red (the index misses a child at the restored geometry).
+- **F4 (Minor) — the D6 guard's removal arm was looser than the spec.** A
+  removed generated child was refused only while its owner was still
+  recognised as a live parametric object (node **and** component), so a
+  compound that first detached the owner's component and then removed one
+  of its still-live children slipped past the backstop. Fixed: the removal
+  arm now refuses whenever the owner's group node still exists, whatever
+  its component. Pinned by `P14`; `G3` (the delete cascade, which removes a
+  parametric group's children *together with* the node) still passes,
+  confirming the allowed case is unaffected.
+- **F5 (Minor) — `drift()` did not guard re-entry.** `apply()` sets
+  `_applying` around its dry run so a client `generate()` that calls
+  `execute` fails loudly instead of mutating (spec 06 D2); `drift()`, a dry
+  run in its own right, did not. Fixed: `drift()` sets `_applying` in a
+  try/finally around its survey and plan. Pinned by `G10`
+  (`packages/jet_cad_2d/test/parametric/guards_test.dart`), which uses a
+  reentrant edit unrelated to any parametric closure (so the *existing*
+  `apply()` guard cannot catch it one level down the way `Trip.reentrant`'s
+  self-referential case does) — against the unfixed `drift()` this edit
+  actually lands, and the test's byte-comparison catches it.
+
+**What changed the counts.** `packages/jet_cad_2d` grows by three tests
+(`P13`, `P14`, `G10`): 950 → 953. `apps/floor_planner` grows by two
+(`SE9`, `SE10`): 67 → 69. `packages/jet_cad_2d_flutter` and
+`apps/dev_harness_2d` are unchanged. See "The four gate lines" above for
+the re-run transcripts and "Where the counts differ" for the running total.
+
+**Files touched by this fix wave:**
+- `apps/floor_planner/lib/selection_panel.dart` (F1, F2)
+- `apps/floor_planner/test/selection_panel_test.dart` (F1, F2: `SE8`
+  re-pointed, `SE9`/`SE10` added)
+- `packages/jet_cad_2d/lib/src/parametric/regeneration.dart` (F4)
+- `packages/jet_cad_2d/lib/src/parametric/parametric_system.dart` (F5)
+- `packages/jet_cad_2d/test/parametric/regeneration_test.dart` (F3: `P13`;
+  F4: `P14`)
+- `packages/jet_cad_2d/test/parametric/guards_test.dart` (F5: `G10`, plus
+  its local `ReentrantProbe` test fixture)
+- `docs/superpowers/specs/2026-09-24-parametric-layer-design.md` (D6 and
+  D13 amendments)
+- `docs/superpowers/notes/2026-09-24-plan-06-results.md` (this file)
+
+**Concerns carried forward, not fixed here:** the two sub-project-07 debt
+items added above (the swallowed-box selection gap and the doubled O(n²)
+neighbour search) are correctness- and performance-adjacent but out of this
+plan's scope; the human's look (Criterion 14) is still owed.
 
 ---
 
@@ -553,11 +752,19 @@ appended at the end of the relevant section. Nothing original is rewritten.
   `cleanup` and `seeds` moved inside the rollback `try`; `P11`, `M-06w`).
 - **D6:** the guard tightened to the spec's literal text — refused whenever
   the touched handle still exists, not only while its owner is still "an
-  object" — closing a bundled-detach loophole; `P12`, `M-06x`.
+  object" — closing a bundled-detach loophole; `P12`, `M-06x`. **Final-review
+  fix wave (F4):** the *removed* arm tightened the same way — refused
+  whenever the owner's group node still exists, whatever its component;
+  `P14`.
 - **D10:** Ruling 06-1's consequence for load — `registerComponents` is on
   the catalog, and a test that decodes and then constructs a
   `ParametricSystem` over the same document relies on Ruling 06-13's
   `isRegistered` guard.
+- **D13 (final-review fix wave, F1/F2):** each Selection-section field
+  commits on its own focus loss, via its own `FocusNode`, not on a shared
+  `onTapOutside` — `SE8`, `SE10`; a reload never overwrites a focused field,
+  and only reloads when the selected box or its stored values actually
+  changed — `SE9`.
 - **The mutant table:** `M-06u`, `M-06v`, `M-06w`, `M-06x` and `M-06y`
   added; `M-06g` (app)'s kill location clarified (`BT6`, not `BT3`); `M-06b′`'s
   survive-then-fixture-fix-then-kill history recorded.
@@ -565,10 +772,11 @@ appended at the end of the relevant section. Nothing original is rewritten.
   child order normalised, because `RemoveNodeCommand`'s inverse re-links at
   the end and `HandleSeed` never moves back (Task 4's ruling).
 
-**D13 is not amended.** Ruling 06-14 was not made — the reviewer's finding
-was a doc-comment slip, not a behaviour change, and the controller's
-instruction for this dispatch is explicit that no D13 amendment is written
-for it.
+**D13's amendment above supersedes this note's earlier "D13 is not
+amended."** That line was correct at Task 11: Ruling 06-14 was a
+doc-comment slip, not a behaviour change, and no D13 amendment was written
+for it. The final whole-branch review found a real behaviour gap in the
+same section (F1, F2), which *is* now amended, above.
 
 ---
 
