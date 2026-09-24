@@ -270,10 +270,13 @@ class WallTool extends PlacementTool {
       !(s.distanceTo(e) > wallJoin.linear);
 
   /// One wall from [s] to [e] in world, which is its group's local space:
-  /// the group sits at the identity.
+  /// the group sits at the identity. None, like a denied one, when the
+  /// settings hold a thickness no wall may have (`isWallThickness`): the
+  /// panel never writes one, but the settings are a public notifier.
   bool _addWall(ToolContext ctx, Vector2 s, Vector2 e) {
     if (_tooShort(s, e)) return false;
     final w = settings.value;
+    if (!isWallThickness(w.thickness)) return false;
     _cacheStale = true;
     return commit(ctx, () {
       final doc = ctx.document;

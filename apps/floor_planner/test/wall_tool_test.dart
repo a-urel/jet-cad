@@ -797,4 +797,31 @@ void main() {
     expect(distToLine(rig.tool.debugBandEnd, wa.s, wa.e), lessThan(1e-6),
         reason: "the rubber band ends on A's centreline");
   });
+
+  test(
+      'WT18 settings holding a thickness at or below wallJoin.linear commit '
+      'no wall and end the chain; just above it, a wall lands (final review '
+      'm1)', () {
+    final doc = wallDoc();
+    final rig = directRig(doc);
+    for (final t in [1e-12, wallJoin.linear]) {
+      rig.tool.settings.value = WallSettings(thickness: t);
+      final seed = doc.handleSeed.current;
+      final before = enc(doc);
+      pressAt(rig, plan(0, 0));
+      expect(rig.tool.isPending, isTrue, reason: '$t');
+      pressAt(rig, plan(3000, 0));
+      expect(walls(doc), isEmpty, reason: '$t');
+      expect(doc.handleSeed.current, seed, reason: '$t');
+      expect(enc(doc), before, reason: '$t');
+      expect(doc.commands.undoDepth, 0, reason: '$t');
+      expect(rig.tool.isPending, isFalse, reason: '$t: the chain ends');
+    }
+    rig.tool.settings.value = WallSettings(thickness: 2 * wallJoin.linear);
+    pressAt(rig, plan(0, 0));
+    pressAt(rig, plan(3000, 0));
+    final h = walls(doc).single;
+    expect(doc.components.get<WallParams>(h)!.thickness, 2 * wallJoin.linear);
+    expect(driftOf(doc), isEmpty);
+  });
 }

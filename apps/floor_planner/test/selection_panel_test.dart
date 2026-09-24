@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/wall.dart';
+import 'package:floor_planner/parametric/wall_tool.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -363,13 +366,16 @@ void main() {
   });
 
   testWidgets(
-      'WS3 a thickness <= 0 or unparseable reverts and commits nothing, for '
-      'a wall and for the tool settings', (tester) async {
+      'WS3 a thickness <= wallJoin.linear or unparseable reverts and commits '
+      'nothing, for a wall and for the tool settings (final review m1)',
+      (tester) async {
     final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
     final doc = view.document;
     final pc = doc.components.get<WallParams>(wc)!;
     await select(tester, view, [wc]);
-    for (final bad in ['0', '-40', '-0', 'abc', '']) {
+    // 1e-12 and wallJoin.linear itself are positive: the model would store
+    // either (C's local outline triangulates), so only the floor refuses.
+    for (final bad in ['0', '-40', '-0', 'abc', '', '1e-12', '0.000001']) {
       await enterAndSubmit(tester, thickness, bad);
       expect(textOf(tester, thickness), '150', reason: bad);
     }
@@ -379,9 +385,11 @@ void main() {
     await press(tester, LogicalKeyboardKey.keyW);
     expect(status(tester), 'Wall');
     expect(textOf(tester, thickness), '200');
-    for (final bad in ['0', '-40']) {
+    for (final bad in ['0', '-40', '1e-12', '0.000001']) {
       await enterAndSubmit(tester, thickness, bad);
       expect(textOf(tester, thickness), '200', reason: bad);
+      expect((view.tools.active as WallTool).settings.value.thickness, 200,
+          reason: bad);
     }
     await clickWorld(tester, view, plan(400, 900));
     await clickWorld(tester, view, plan(1900, 800));
@@ -636,5 +644,86 @@ void main() {
     expect(sizeOf(bs[0]), [150, b0.height]);
     expect(sizeOf(bs[1]), [b1.width, b1.height]);
     expect(textOf(tester, width), '90');
+  });
+
+  testWidgets(
+      'WS8 with geometry allowed and components denied, the Wall and Box '
+      'fields are read-only: a commit is a SetComponentCommand (final '
+      'review m4)', (tester) async {
+    final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    final pa = doc.components.get<WallParams>(wa)!;
+    doc.commands.permissions = const DraftPermissions(
+        transform: true, components: false, geometry: true, structure: true);
+    await select(tester, view, [wa]);
+    expect(tester.widget<TextField>(thickness).readOnly, isTrue);
+    expect(
+        tester
+            .widget<SegmentedButton<Justification>>(
+                find.byKey(const Key('wall-justification')))
+            .onSelectionChanged,
+        isNull);
+    await tapKey(tester, 'wall-right');
+    expect(doc.components.get<WallParams>(wa), pa);
+    await select(tester, view, [bx]);
+    expect(tester.widget<TextField>(width).readOnly, isTrue);
+    expect(tester.widget<TextField>(height).readOnly, isTrue);
+    expect(doc.commands.undoDepth, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'WS9 an edit the document refuses (a loaded fill naming another '
+      "wall's outline) reverts the field and re-pins it: no exception "
+      'escapes Enter or the focus loss (final review m1)', (tester) async {
+    final j = DraftDocumentCodec.encode(panelDoc(FlutterTextMeasurer()));
+    // A's fill names B's outline: a malformed file the planner refuses
+    // to regenerate (spec 07 D8).
+    final src = panelDoc(FlutterTextMeasurer());
+    final aFill =
+        kids(src, wa).firstWhere((k) => kindOf(src, k) == EntityKind.fill);
+    final bFill =
+        kids(src, wb).firstWhere((k) => kindOf(src, k) == EntityKind.fill);
+    final bOutline = payloadOf(src, bFill).scalars[0];
+    for (final e in j['entities']! as List) {
+      final entity = e as Map<String, Object?>;
+      if ((entity['record']! as Map)['handle'] == aFill.value) {
+        (entity['geometry']! as Map)['scalars'] = [bOutline];
+      }
+    }
+    final doc = DraftDocumentCodec.decode(
+        jsonDecode(jsonEncode(j)) as Map<String, Object?>,
+        measurer: FlutterTextMeasurer(), registerComponents: (r) {
+      PageComponent.register(r);
+      parametricCatalog.registerComponents(r);
+    });
+    final view = await pumpPanel(tester, doc);
+    final pa = doc.components.get<WallParams>(wa)!;
+    final before = enc(doc);
+    await select(tester, view, [wa]);
+    await tester.tap(thickness);
+    await tester.pump();
+    await enterAndSubmit(tester, thickness, '250');
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(textOf(tester, thickness), '200', reason: 'reverted');
+    expect(doc.components.get<WallParams>(wa), pa);
+    expect(enc(doc), before);
+    expect(doc.commands.undoDepth, 0);
+    // The focus loss alone: typed, then a tap outside.
+    await tester.tap(thickness);
+    await tester.pump();
+    await tester.enterText(thickness, '260');
+    await tester.pump();
+    await tester.tap(wallSection);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(textOf(tester, thickness), '200');
+    expect(enc(doc), before);
+    // C, no neighbour of A's, is sound: its edit lands.
+    await select(tester, view, [wc]);
+    await enterAndSubmit(tester, thickness, '120');
+    expect(doc.components.get<WallParams>(wc)!.thickness, 120);
+    expect(doc.commands.undoDepth, 1);
   });
 }

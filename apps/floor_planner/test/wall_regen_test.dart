@@ -165,6 +165,80 @@ bool overlaps(Aabb2 a, Aabb2 b) =>
 Aabb2 wallReach(DraftDocument doc, Handle h) => const WallType().reach(
     doc.components.get<WallParams>(h)!, doc.tree.accumulatedTransform(h));
 
+/// The select tool's rotate (`GripDrag.rotateTo`): every object in [hs]
+/// turned [deg] degrees about [pivot], each node's transform premultiplied
+/// by `T(pivot)·R·T(-pivot)`, in one command.
+DraftCommand rotateAbout(
+    DraftDocument doc, List<Handle> hs, Vector2 pivot, double deg) {
+  final t = Transform2.translation(pivot.x, pivot.y)
+      .multiply(Transform2.rotation(deg * math.pi / 180))
+      .multiply(Transform2.translation(-pivot.x, -pivot.y));
+  return CompoundCommand([
+    for (final h in hs)
+      TransformNodeCommand(h, t.multiply(doc.tree[h]!.transform)),
+  ], label: 'Rotate');
+}
+
+/// [h]'s outline boundary: the polyline its one fill names.
+Handle boundaryOfWall(DraftDocument doc, Handle h) {
+  final fill =
+      kids(doc, h).firstWhere((k) => kindOf(doc, k) == EntityKind.fill);
+  return Handle(payloadOf(doc, fill).scalars[0].toInt());
+}
+
+/// Whether [a] and [b] hold the same points, bitwise.
+bool sameRing(List<Vector2> a, List<Vector2> b) =>
+    a.length == b.length &&
+    [for (var i = 0; i < a.length; i++) a[i].x == b[i].x && a[i].y == b[i].y]
+        .every((x) => x);
+
+/// An acute L drawn at the identity, A into [hub] and B out of it at [deg],
+/// then both rotated about [hub] by [turn]: the edit must land, every
+/// stored outline must triangulate, nothing drifts, and undo is exact.
+///
+/// And `diagnose` agrees with `generate`: a wall not named `wall.fallback`
+/// stores the local image of its joined world outline, and a named one
+/// fell back in world or stores its free rectangle in local space because
+/// that image is not simple.
+void expectAcuteLRotates(
+    Vector2 hub, double deg, double turn, Justification ja, Justification jb) {
+  final doc = wallDoc();
+  final id = Transform2.identity();
+  final why = 'L at $deg°, $ja/$jb, turned $turn°';
+  run(
+      doc,
+      CompoundCommand([
+        addWall(doc, hA, polar(hub, 180, 3734.5), hub, 200, ja, at: id),
+        addWall(doc, hB, hub, polar(hub, 180 - deg, 600), 200, jb, at: id),
+      ], label: 'Add L'));
+  final before = canon(doc);
+  doc.commands.execute(rotateAbout(doc, [hA, hB], hub, turn));
+  expect(driftOf(doc), isEmpty, reason: why);
+  final fellBack = {
+    for (final d in diagnosticsOf(doc))
+      if (d.code == 'wall.fallback') d.handles.single
+  };
+  for (final (h, other) in [(hA, hB), (hB, hA)]) {
+    final boundary = boundaryOfWall(doc, h);
+    expect(doc.fills.trianglesFor(boundary), isNotEmpty, reason: '$why $h');
+    final stored = pointsOf(payloadOf(doc, boundary), closed: true);
+    final world = outline(worldWallOf(doc, h), [worldWallOf(doc, other)]);
+    final toLocal = doc.tree.accumulatedTransform(h).invert();
+    final image = [for (final q in world.ring) toLocal.transformPoint(q)];
+    if (!fellBack.contains(h)) {
+      expect(world.fellBack, isFalse, reason: '$why $h');
+      expect(sameRing(stored, image), isTrue, reason: '$why $h');
+    } else if (!world.fellBack) {
+      expect(isSimpleCcw(image), isFalse, reason: '$why $h');
+      final free = outline(
+          WorldWall(h, doc.components.get<WallParams>(h)!, id), const []);
+      expect(sameRing(stored, free.ring), isTrue, reason: '$why $h');
+    }
+  }
+  doc.commands.undo();
+  expect(canon(doc), before, reason: why);
+}
+
 void main() {
   test(
       'WR1 one wall: fill < outline < centreline; the fill names the closed '
@@ -606,6 +680,65 @@ void main() {
       // build order leaves no trace in the bits.
       for (var i = 0; i < a.length; i++) {
         expect([a[i].x, a[i].y], [b[i].x, b[i].y], reason: '${h.toHex()} $i');
+      }
+    }
+  });
+
+  test(
+      'WR13 an acute L rotated about its node: an outline simple in world '
+      'but not in group-local space falls back in local space; the edit '
+      'lands and diagnose agrees (final review I1)', () {
+    // The reviewer's reproduction: A 200 right into the hub, B 200 left out
+    // of it at 178°, both at the identity, turned 133° about the hub.
+    final hub = far(1234.5, 678.25);
+    final doc = wallDoc();
+    final id = Transform2.identity();
+    run(
+        doc,
+        CompoundCommand([
+          addWall(doc, hA, far(-2500, 678.25), hub, 200, right, at: id),
+          addWall(doc, hB, hub, polar(hub, 178, 600), 200, left, at: id),
+        ], label: 'Add L'));
+    final before = canon(doc);
+    final depth = doc.commands.undoDepth;
+    doc.commands.execute(rotateAbout(doc, [hA, hB], hub, 133));
+    expect(doc.commands.undoDepth, depth + 1, reason: 'the rotate landed');
+    expect(driftOf(doc), isEmpty);
+    // A's world outline is simple, its local image is not: A falls back.
+    final a = worldWallOf(doc, hA);
+    final world = outline(a, [worldWallOf(doc, hB)]);
+    expect(world.fellBack, isFalse);
+    final toLocal = doc.tree.accumulatedTransform(hA).invert();
+    expect(isSimpleCcw([for (final q in world.ring) toLocal.transformPoint(q)]),
+        isFalse);
+    // B, 600 long at 2° to A, is D6's short wall in world already.
+    expect(outline(worldWallOf(doc, hB), [a]).fellBack, isTrue);
+    expect(summary(diagnosticsOf(doc)),
+        ['wall.fallback ${hA.value}', 'wall.fallback ${hB.value}']);
+    // A's stored outline is its free rectangle in local space, bitwise.
+    expect(
+        pointsOf(payloadOf(doc, boundaryOfWall(doc, hA)), closed: true)
+            .map((q) => [q.x, q.y]),
+        outline(
+            WorldWall(
+                hA, doc.components.get<WallParams>(hA)!, Transform2.identity()),
+            const []).ring.map((q) => [q.x, q.y]));
+    for (final h in [hA, hB]) {
+      expect(doc.fills.trianglesFor(boundaryOfWall(doc, h)), isNotEmpty);
+    }
+    final after = canon(doc);
+    doc.commands.undo();
+    expect(canon(doc), before);
+    doc.commands.redo();
+    expect(canon(doc), after);
+
+    // A small sweep: acute Ls of 2-5°, every justification pair of A right
+    // or left with B left or right, a handful of turns.
+    for (final deg in [2.0, 3.0, 4.5, 5.0]) {
+      for (final (ja, jb) in [(right, left), (left, right), (right, right)]) {
+        for (final turn in [17.0, 133.0, 211.5, 299.0]) {
+          expectAcuteLRotates(hub, deg, turn, ja, jb);
+        }
       }
     }
   });

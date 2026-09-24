@@ -108,6 +108,9 @@ final class GripDrag {
       Grip grip, ObjectGripProvider provider) {
     if (grip.role == GripRole.move) return null;
     final node = document.tree[key.target];
+    // Defence in depth, unpinned by design (final review m5): `GripCache`
+    // gives provider grips only to a selected root-level group, so no
+    // caller reaches this with anything else, and no test can.
     if (node is! GroupNode || node.parent != document.rootHandle) return null;
     final capture =
         _ObjectCapture(key.target, node, provider, _leavesOf(document, node));

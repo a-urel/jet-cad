@@ -341,37 +341,83 @@ void main() {
 
   test(
       'RG9 a loaded fill naming a foreign or missing boundary: an edit '
-      'throws StateError and nothing changes', () {
-    for (final foreign in [true, false]) {
+      'throws StateError and nothing changes; also a surplus fill, when the '
+      'client generates fewer regions (final review m3)', () {
+    // The fill corrupted is A's first, matched by an edit that keeps two
+    // regions, or -- surplus -- its second, left over by an edit down to
+    // one. It names B's boundary, a missing handle, B's centreline, or a
+    // closed POLYLINE drafted at the root.
+    //
+    // Without the owner check on the surplus path the document ends the
+    // same: `RemoveEntityCommand` refuses a boundary whose fill has another
+    // owner (or that carries two fills), and `_run` rolls back. The check
+    // refuses in the plan, before anything applies, and names the
+    // malformed fill; the message is what tells the two apart.
+    for (final (named, surplus) in [
+      ('B boundary', false),
+      ('missing', false),
+      ('B boundary', true),
+      ('B centreline', true),
+      ('drafted', true),
+    ]) {
+      final why = '$named${surplus ? ', surplus' : ''}';
       final doc = paramDoc();
       doc.commands
-          .execute(create(doc, hA, atA, const RegionRect(2000, 1000, 1)));
+          .execute(create(doc, hA, atA, const RegionRect(2000, 1000, 2)));
       doc.commands
           .execute(create(doc, hB, parked, const RegionRect(700, 900, 1)));
-      final [aFill, _, _, _] = kids(doc, hA);
-      final [_, bBoundary, _, _] = kids(doc, hB);
+      final drafted = addDrafted(
+          doc,
+          EntityKind.polyline,
+          polylinePayload(
+              [Vector2(-500, -500), Vector2(-100, -500), Vector2(-100, -200)],
+              closed: true));
+      doc.commands.execute(drafted);
+      final [aFill0, _, aFill1, _, _, _] = kids(doc, hA);
+      expect(kindOf(doc, aFill1), EntityKind.fill);
+      final [_, bBoundary, _, bCentreline] = kids(doc, hB);
+      final corrupted = surplus ? aFill1 : aFill0;
       // 1500 is below the seed and names no entity.
-      final named = foreign ? bBoundary.value : 1500;
       expect(doc.entities.slotOf(const Handle(1500)), isNull);
+      final foreign = switch (named) {
+        'B boundary' => bBoundary,
+        'B centreline' => bCentreline,
+        'drafted' => drafted.record.handle,
+        _ => const Handle(1500),
+      };
       final j = jsonDecode(enc(doc)) as Map<String, Object?>;
       for (final e in j['entities']! as List) {
         final entity = e as Map<String, Object?>;
-        if ((entity['record']! as Map)['handle'] == aFill.value) {
-          (entity['geometry']! as Map)['scalars'] = [named.toDouble()];
+        if ((entity['record']! as Map)['handle'] == corrupted.value) {
+          (entity['geometry']! as Map)['scalars'] = [foreign.value.toDouble()];
         }
       }
       final loaded = reload(jsonEncode(j));
-      expect(boundaryOf(loaded, aFill).value, named);
-      final bPayload = payloadOf(loaded, bBoundary).coords;
+      expect(boundaryOf(loaded, corrupted), foreign);
       final before = enc(loaded);
+      final kept = foreign.value == 1500
+          ? null
+          : (
+              payloadOf(loaded, foreign).coords,
+              loaded.fills.fillsOf(foreign),
+            );
       expect(
           () => loaded.commands.execute(SetComponentCommand<RegionRect>(
-              hA, const RegionRect(2100, 1000, 1))),
-          throwsStateError,
-          reason: foreign ? 'foreign' : 'dangling');
-      expect(enc(loaded), before);
-      expect(loaded.commands.undoDepth, 0);
-      expect(payloadOf(loaded, bBoundary).coords, bPayload);
+              hA, RegionRect(surplus ? 2000 : 2100, 1000, surplus ? 1 : 2))),
+          throwsA(isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              'fill ${corrupted.toHex()} of ${hA.toHex()} names '
+                  '${foreign.toHex()}, which is not a child of the same '
+                  'object')),
+          reason: why);
+      expect(enc(loaded), before, reason: why);
+      expect(loaded.commands.undoDepth, 0, reason: why);
+      if (kept case (final coords, final fills)) {
+        expect(loaded.entities.slotOf(foreign), isNotNull, reason: why);
+        expect(payloadOf(loaded, foreign).coords, coords, reason: why);
+        expect(loaded.fills.fillsOf(foreign), fills, reason: why);
+      }
     }
   });
 

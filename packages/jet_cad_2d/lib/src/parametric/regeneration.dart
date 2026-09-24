@@ -127,6 +127,21 @@ Handle _boundaryOf(CommandTarget t, Handle fill) => Handle.checked(t.geometry
     .scalars[0]
     .toInt());
 
+/// The boundary [fill] names, which must be a live child of [owner], the
+/// object [fill] belongs to: a loaded file can name any handle (spec 07
+/// D8). Anything else throws `StateError` from the plan, before anything
+/// applies, so `_run` rolls the edit back. Every use of a fill's boundary
+/// in the plan -- matched or surplus -- goes through here.
+Handle _ownBoundaryOf(CommandTarget t, Handle owner, Handle fill) {
+  final boundary = _boundaryOf(t, fill);
+  final slot = t.entities.slotOf(boundary);
+  if (slot == null || t.entities.ownerAt(slot) != owner) {
+    throw StateError('fill ${fill.toHex()} of ${owner.toHex()} names '
+        '${boundary.toHex()}, which is not a child of the same object');
+  }
+  return boundary;
+}
+
 /// A generated region whose boundary is not a closed polyline with a
 /// non-empty triangulation is a client bug (spec 07 D8): `AddRegionCommand`
 /// would refuse the open one and fill nothing for the other. Thrown from
@@ -173,12 +188,8 @@ List<DraftCommand> _plan(
       used[EntityKind.fill] = i + 1;
       final fills = byKind[EntityKind.fill];
       if (fills != null && i < fills.length) {
-        final boundary = _boundaryOf(t, fills[i]);
-        final slot = t.entities.slotOf(boundary);
-        if (slot == null || t.entities.ownerAt(slot) != h) {
-          throw StateError('fill ${fills[i].toHex()} of ${h.toHex()} names '
-              '${boundary.toHex()}, which is not a child of the same object');
-        }
+        final boundary = _ownBoundaryOf(t, h, fills[i]);
+        final slot = t.entities.slotOf(boundary)!;
         // The fill record is never rewritten: rewriting the boundary
         // re-triangulates the fill (`SetEntityGeometryCommand`).
         if (!_samePayload(
@@ -216,10 +227,12 @@ List<DraftCommand> _plan(
     }
     // A surplus region is removed through its boundary, whose removal takes
     // the fill with it; removing the fill alone would orphan the boundary.
+    // The boundary is checked as a matched one is: a malformed load whose
+    // surplus fill names another object's boundary must not remove it.
     final surplus = [
       for (final e in byKind.entries)
         for (final c in e.value.skip(used[e.key] ?? 0))
-          e.key == EntityKind.fill ? _boundaryOf(t, c) : c,
+          e.key == EntityKind.fill ? _ownBoundaryOf(t, h, c) : c,
     ]..sort(_byValue);
     for (final c in surplus) {
       out.add(RemoveEntityCommand(c));

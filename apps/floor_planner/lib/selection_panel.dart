@@ -137,11 +137,22 @@ class _SelectionPanelState extends State<SelectionPanel> {
   }
 
   /// Under runtime permissions both sections are read-only (06 D13, 07
-  /// D11): each type's `editCapability`.
-  bool _editable(_Kind kind) =>
-      widget.document.commands.permissions.allows(kind == _Kind.thickness
-          ? const WallType().editCapability
-          : const BoxType().editCapability);
+  /// D11): a commit is a `SetComponentCommand`, which needs
+  /// `Capability.components`, and its regeneration needs the type's
+  /// `editCapability` (final review m4).
+  bool _editable(_Kind kind) {
+    final permissions = widget.document.commands.permissions;
+    return permissions.allows(Capability.components) &&
+        permissions.allows(kind == _Kind.thickness
+            ? const WallType().editCapability
+            : const BoxType().editCapability);
+  }
+
+  /// Whether [value] may be committed as [kind]: a thickness is
+  /// `isWallThickness` (final review m1), a box side is finite and > 0.
+  static bool _valid(_Kind kind, double value) => kind == _Kind.thickness
+      ? isWallThickness(value)
+      : value.isFinite && value > 0;
 
   /// [h] is a live root-level group carrying a [T].
   bool _isObject<T extends Component>(Handle h) {
@@ -235,10 +246,14 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// current target's value in it.
   ///
   /// The text is discarded when the pinned target is no longer a live
-  /// object of the field's type, and reverted when it is not a number > 0
-  /// or the edit is not allowed. Enter commits here and then, once focus
-  /// has moved, focus loss commits again: the field is re-pinned to what it
-  /// now shows, so that second commit is a no-op.
+  /// object of the field's type, and reverted when it is not a valid value
+  /// ([_valid]), the edit is not allowed, or the document refuses the edit
+  /// (an `ArgumentError` or `StateError` from `execute` -- a loaded file
+  /// the regeneration cannot honour, say -- which rolled the edit back and
+  /// must not escape a focus listener or `onSubmitted`; final review m1).
+  /// Enter commits here and then, once focus has moved, focus loss commits
+  /// again: the field is re-pinned to what it now shows, so that second
+  /// commit is a no-op.
   ///
   /// A live pinned target's typed text is also dropped if its section
   /// hides while the field keeps focus: the field unmounts, and its commit
@@ -249,8 +264,14 @@ class _SelectionPanelState extends State<SelectionPanel> {
     final target = f.pinned;
     if (target != null && _read(f.kind, target) != null && _editable(f.kind)) {
       final value = double.tryParse(f.text.text.trim());
-      if (value != null && value.isFinite && value > 0) {
-        _write(f.kind, target, value);
+      if (value != null && _valid(f.kind, value)) {
+        try {
+          _write(f.kind, target, value);
+        } on ArgumentError {
+          // Refused: nothing changed; the field reverts below.
+        } on StateError {
+          // Refused: nothing changed; the field reverts below.
+        }
       }
     }
     _show(f);
@@ -330,7 +351,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
         onChanged: (t) {
           if (f.pinned != _toolSettings) return;
           final v = double.tryParse(t.trim());
-          if (v != null && v.isFinite && v > 0) {
+          if (v != null && isWallThickness(v)) {
             _write(f.kind, _toolSettings, v);
           }
         },
