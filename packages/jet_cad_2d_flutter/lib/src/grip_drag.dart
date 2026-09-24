@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'grip_cache.dart' show ObjectGripProvider;
 import 'selection.dart';
 
 /// What a `SelectTool` drag is doing (spec D5).
@@ -33,11 +34,24 @@ final class _NodeCapture extends _Capture {
   final Node node;
 }
 
+/// A reshape of a root-level group through its [provider] (spec 07 D11):
+/// the group's node and every leaf it owns, as they were at press.
+final class _ObjectCapture extends _Capture {
+  const _ObjectCapture(super.handle, this.node, this.provider, this.leaves);
+
+  final GroupNode node;
+  final ObjectGripProvider provider;
+
+  /// The group's own leaves, each a `read` copy.
+  final List<(Handle, EntityKind, GeometryPayload)> leaves;
+}
+
 /// One drag's state and its one command (spec D2, D4).
 ///
 /// Nothing is dispatched while the drag lives. [command] builds a single
 /// [CompoundCommand], even for one member, so the undo label says `Move`,
-/// `Rotate` or `Stretch`. It returns null — dispatch nothing — when:
+/// `Rotate` or `Stretch`; an object reshape's one member is its provider's
+/// command (spec 07 D11). It returns null — dispatch nothing — when:
 /// - a target is gone or changed since press (revalidation);
 /// - a member's capability is refused (all or nothing);
 /// - the drag changes nothing.
@@ -82,6 +96,42 @@ final class GripDrag {
     return drag;
   }
 
+  /// A reshape of the root-level group [key] by its [provider]'s [grip]
+  /// (spec 07 D11); its base is the grip, exactly. Null for a `move` grip,
+  /// which moves the selection instead, and for anything but a root-level
+  /// group.
+  ///
+  /// Captures the group's node and a copy of every leaf it owns, so a
+  /// document change to either before release cancels it, as a leaf
+  /// reshape's does.
+  static GripDrag? reshapeObject(DraftDocument document, SelectionKey key,
+      Grip grip, ObjectGripProvider provider) {
+    if (grip.role == GripRole.move) return null;
+    final node = document.tree[key.target];
+    if (node is! GroupNode || node.parent != document.rootHandle) return null;
+    final capture =
+        _ObjectCapture(key.target, node, provider, _leavesOf(document, node));
+    final drag = GripDrag._(document, DragKind.reshape, [capture], grip);
+    drag.base.setValues(grip.x, grip.y);
+    drag.target.setValues(grip.x, grip.y);
+    return drag;
+  }
+
+  /// Every leaf [group] owns directly, in slot order, each a `read` copy.
+  static List<(Handle, EntityKind, GeometryPayload)> _leavesOf(
+      DraftDocument document, GroupNode group) {
+    final e = document.entities;
+    return [
+      for (final slot in e.liveSlots)
+        if (e.ownerAt(slot) == group.handle)
+          (
+            e.handleAt(slot),
+            e.kindAt(slot),
+            document.geometry.read(e.geomIndexAt(slot)),
+          ),
+    ];
+  }
+
   /// In ascending target handle order: that is the members' order (D4).
   static List<_Capture> _capture(
       DraftDocument document, Iterable<SelectionKey> keys) {
@@ -121,6 +171,7 @@ final class GripDrag {
   double _theta = 0;
   Transform2? _transform;
   GeometryPayload? _preview;
+  List<(EntityKind, GeometryPayload)>? _objectPreview;
 
   /// A rotate's angle, radians, in (−π, π] (Ruling 03-14).
   double get theta => _theta;
@@ -132,16 +183,30 @@ final class GripDrag {
   /// A reshape's payload at the current target; null when degenerate.
   GeometryPayload? get previewPayload => _preview;
 
-  /// A reshape's entity kind; null otherwise.
+  /// A leaf reshape's entity kind; null otherwise.
   EntityKind? get leafKind => kind == DragKind.reshape
-      ? (_captures.single as _LeafCapture).entityKind
+      ? switch (_captures.single) {
+          _LeafCapture(:final entityKind) => entityKind,
+          _ => null,
+        }
       : null;
 
+  /// An object reshape's preview at the current target, in world: the
+  /// provider's, computed at each [moveTo]. Null for any other drag.
+  List<(EntityKind, GeometryPayload)>? get objectPreview => _objectPreview;
+
   /// A leaf needs `geometry`; a group or an instance needs `transform`
-  /// (D2).
+  /// (D2). An object reshape needs `components` and `geometry` (07 D11).
   Set<Capability> get capabilities => {
         for (final c in _captures)
-          c is _NodeCapture ? Capability.transform : Capability.geometry,
+          ...switch (c) {
+            _NodeCapture() => const [Capability.transform],
+            _LeafCapture() => const [Capability.geometry],
+            _ObjectCapture() => const [
+                Capability.components,
+                Capability.geometry,
+              ],
+          },
       };
 
   bool permittedBy(DraftPermissions permissions) =>
@@ -155,8 +220,15 @@ final class GripDrag {
         _transform =
             Transform2.translation(target.x - base.x, target.y - base.y);
       case DragKind.reshape:
-        final c = _captures.single as _LeafCapture;
-        _preview = reshapeLeaf(c.entityKind, c.payload, grip!, target);
+        switch (_captures.single) {
+          case final _LeafCapture c:
+            _preview = reshapeLeaf(c.entityKind, c.payload, grip!, target);
+          case final _ObjectCapture c:
+            _objectPreview =
+                c.provider.preview(document, c.handle, grip!, target.clone());
+          case _NodeCapture():
+            throw StateError('a node is never reshaped');
+        }
       case DragKind.rotate:
       case DragKind.band:
         throw StateError('moveTo on a ${kind.name} drag');
@@ -191,10 +263,23 @@ final class GripDrag {
     final members = <DraftCommand>[];
     switch (kind) {
       case DragKind.reshape:
-        final c = _captures.single as _LeafCapture;
-        final next = _preview;
-        if (next == null || next == c.payload) return null;
-        members.add(SetEntityGeometryCommand(c.handle, next));
+        switch (_captures.single) {
+          case final _LeafCapture c:
+            final next = _preview;
+            if (next == null || next == c.payload) return null;
+            members.add(SetEntityGeometryCommand(c.handle, next));
+          case final _ObjectCapture c:
+            // The grip's own needs first: the provider's command may name
+            // fewer capabilities than the regeneration it causes (07 D11).
+            if (!permittedBy(permissions)) return null;
+            if (target.x == base.x && target.y == base.y) return null;
+            final inner =
+                c.provider.drag(document, c.handle, grip!, target.clone());
+            if (inner == null) return null;
+            members.add(inner);
+          case _NodeCapture():
+            throw StateError('a node is never reshaped');
+        }
       case DragKind.move:
       case DragKind.rotate:
         final t = _transform;
@@ -215,6 +300,8 @@ final class GripDrag {
               // so there is no conjugation.
               members.add(
                   TransformNodeCommand(handle, t.multiply(node.transform)));
+            case _ObjectCapture():
+              throw StateError('an object capture is only ever reshaped');
           }
         }
       case DragKind.band:
@@ -247,6 +334,23 @@ final class GripDrag {
           }
         case _NodeCapture(:final handle, :final node):
           if (document.tree[handle] != node) return false;
+        case _ObjectCapture(:final handle, :final node, :final leaves):
+          if (document.tree[handle] != node) return false;
+          final e = document.entities;
+          var owned = 0;
+          for (final slot in e.liveSlots) {
+            if (e.ownerAt(slot) == handle) owned++;
+          }
+          if (owned != leaves.length) return false;
+          for (final (h, entityKind, payload) in leaves) {
+            final slot = e.slotOf(h);
+            if (slot == null ||
+                e.ownerAt(slot) != handle ||
+                e.kindAt(slot) != entityKind ||
+                document.geometry.peek(e.geomIndexAt(slot)) != payload) {
+              return false;
+            }
+          }
       }
     }
     return true;

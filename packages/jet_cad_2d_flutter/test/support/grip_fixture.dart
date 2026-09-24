@@ -130,14 +130,18 @@ String snapshot(DraftDocument doc) => DraftDocumentCodec.encodeToString(doc);
 /// Everything a `SelectTool` grip test drives, wired in the shell's order:
 /// the selection controller, then the outline cache, then the grip cache
 /// (spec D6, Ruling 03-19). Object snap is off unless asked for, so a test
-/// that is not about snapping lands on the raw pointer.
+/// that is not about snapping lands on the raw pointer. [objects] is the
+/// grip cache's object grip provider (07 D11); none by default.
 final class GripRig {
-  GripRig(this.document, {CameraController? camera, bool objectSnap = false})
+  GripRig(this.document,
+      {CameraController? camera,
+      bool objectSnap = false,
+      ObjectGripProvider? objects})
       : index = SpatialIndex(document),
         selection = SelectionController(document),
         camera = camera ?? gripCamera() {
     outlines = OutlineCache(document, selection);
-    grips = GripCache(document, selection, outlines);
+    grips = GripCache(document, selection, outlines, objects: objects);
     snap = SnapSettings(objectSnap: objectSnap);
     page = PageNotifier(document);
     tool = SelectTool();
@@ -177,8 +181,11 @@ final class GripRig {
 }
 
 GripRig gripRig(DraftDocument document,
-    {CameraController? camera, bool objectSnap = false}) {
-  final rig = GripRig(document, camera: camera, objectSnap: objectSnap);
+    {CameraController? camera,
+    bool objectSnap = false,
+    ObjectGripProvider? objects}) {
+  final rig = GripRig(document,
+      camera: camera, objectSnap: objectSnap, objects: objects);
   addTearDown(rig.dispose);
   return rig;
 }
