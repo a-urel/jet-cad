@@ -260,12 +260,16 @@ void main() {
     final doc = wallDoc();
     addL(doc);
     final ringA = worldOutline(doc, hA);
+    final aKids = kids(doc, hA), bKids = kids(doc, hB);
     final before = canon(doc);
     final depth = doc.commands.undoDepth;
     final p = doc.components.get<WallParams>(hB)!;
     run(doc, SetComponentCommand<WallParams>(hB, p.copyWith(thickness: 180)));
     expect(doc.commands.undoDepth, depth + 1);
     expectMitre(doc, bThickness: 180);
+    // Rewritten in place (spec 07 D3): no child added, removed or renamed.
+    expect(kids(doc, hA), aKids);
+    expect(kids(doc, hB), bKids);
     // B is left-justified: its face at offset 0 stays put, so A's corner
     // on it and A's far end do not move; the corner on B's thicker face
     // does.
@@ -273,6 +277,8 @@ void main() {
     doc.commands.undo();
     expect(canon(doc), before);
     expectMitre(doc, bThickness: 115);
+    expect(kids(doc, hA), aKids);
+    expect(kids(doc, hB), bKids);
   });
 
   test(
@@ -596,8 +602,10 @@ void main() {
       final a = worldOutline(incremental, h), b = worldOutline(fresh, h);
       expect(a, hasLength(b.length), reason: h.toHex());
       expect(a.length, greaterThanOrEqualTo(4), reason: h.toHex());
+      // Exact: every outline is a function of the parameters alone, so the
+      // build order leaves no trace in the bits.
       for (var i = 0; i < a.length; i++) {
-        expect((a[i] - b[i]).length, lessThan(1e-6), reason: '${h.toHex()} $i');
+        expect([a[i].x, a[i].y], [b[i].x, b[i].y], reason: '${h.toHex()} $i');
       }
     }
   });

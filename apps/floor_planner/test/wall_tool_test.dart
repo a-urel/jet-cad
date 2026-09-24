@@ -378,4 +378,34 @@ void main() {
     await press(tester, LogicalKeyboardKey.keyW);
     expect(status(tester), 'Select');
   });
+
+  testWidgets(
+      'RF2 in the shell: draw an L, select one wall, Delete: the survivor\'s '
+      'end squares; cmd+Z restores the mitre (Review Focus 2)', (tester) async {
+    final view = await pumpWalls(tester, wallShellDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    await press(tester, LogicalKeyboardKey.keyW);
+    await clickNear(tester, view, c0);
+    await clickNear(tester, view, c1);
+    await clickNear(tester, view, c2);
+    await press(tester, LogicalKeyboardKey.enter);
+    final [a, b] = walls(doc);
+    expectMitre(doc, a, b);
+    await press(tester, LogicalKeyboardKey.keyV);
+    // Inside A's band, 40% along it and 30 mm off its centreline.
+    final side = (c2 - project(c2, c0, c1)).normalized();
+    await clickAt(tester, view, c0 + (c1 - c0) * 0.4 + side * 30);
+    expect(status(tester), 'Select — 1 selected');
+    await press(tester, LogicalKeyboardKey.delete);
+    expect(walls(doc), [b]);
+    expect(doc.tree[a], isNull);
+    expect(kids(doc, a), isEmpty);
+    expectSquare(doc, b);
+    expect(driftOf(doc), isEmpty);
+    await undoKey(tester);
+    expect(walls(doc), [a, b]);
+    expect(kids(doc, a), hasLength(3));
+    expectMitre(doc, a, b);
+    expect(driftOf(doc), isEmpty);
+  });
 }
