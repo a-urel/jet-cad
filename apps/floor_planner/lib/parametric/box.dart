@@ -122,12 +122,3 @@ final class BoxType extends ParametricType<BoxParams> {
   }
   return (hi - lo) * d.length > tol.linear ? (lo, hi) : null;
 }
-
-/// The floor planner's parametric types.
-final ParametricCatalog boxCatalog = ParametricCatalog()
-  ..register<BoxParams>(
-      BoxParams.componentTypeId, BoxParams.fromJson, const BoxType());
-
-/// Builds and installs the document's parametric system.
-ParametricSystem installBoxes(DraftDocument doc) =>
-    ParametricSystem(doc, boxCatalog)..install();

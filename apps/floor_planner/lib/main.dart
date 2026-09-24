@@ -4,8 +4,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'page_panel.dart';
-import 'parametric/box.dart';
 import 'parametric/box_tool.dart';
+import 'parametric/catalog.dart';
 import 'planner_view.dart';
 import 'selection_panel.dart';
 import 'shortcut_guard.dart';
@@ -218,7 +218,7 @@ class _PlannerShellState extends State<PlannerShell> {
     super.initState();
     // Spec 06 D13, Ruling 06-12: startupPlan builds its document with no
     // parametric object, so installing after it is safe.
-    _parametric = installBoxes(_document);
+    _parametric = installParametric(_document);
   }
 
   @override

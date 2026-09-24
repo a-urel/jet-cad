@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/parametric/wall_geometry.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -162,3 +164,150 @@ bool triangulates(List<Vector2> ring) {
 /// The smallest distance from [p] to any point of [ring].
 double nearestIn(List<Vector2> ring, Vector2 p) =>
     ring.map((q) => (q - p).length).reduce(math.min);
+
+// ---------------------------------------------------------------------------
+// Documents: walls through the parametric system (Task 5 onwards).
+
+/// An empty document with the floor planner's parametric system installed.
+DraftDocument wallDoc() {
+  final doc = DraftDocument.empty();
+  installParametric(doc);
+  return doc;
+}
+
+/// Creates wall [h] in its own group [at] with the local parameters [p]:
+/// one command, as the Wall tool and 06's fixtures create an object.
+DraftCommand addWallLocal(
+        DraftDocument doc, Handle h, WallParams p, Transform2 at) =>
+    CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: h,
+          parent: doc.rootHandle,
+          transform: at,
+          children: const [])),
+      SetComponentCommand<WallParams>(h, p),
+    ], label: 'Add wall');
+
+/// Creates wall [h] from world [s] to world [e] in group [at] (default
+/// [groupAt]`(h)`): its stored endpoints are [s] and [e] taken back through
+/// [at], so a joint drawn at one world point meets within rounding, not
+/// bitwise.
+DraftCommand addWall(DraftDocument doc, Handle h, Vector2 s, Vector2 e,
+    double t, Justification j,
+    {Transform2? at}) {
+  final g = at ?? groupAt(h.value);
+  final inv = g.invert();
+  final ls = inv.transformPoint(s), le = inv.transformPoint(e);
+  return addWallLocal(doc, h, WallParams(ls.x, ls.y, le.x, le.y, t, j), g);
+}
+
+/// [spoke]'s document form: wall [h] between [hub] and the point [len]
+/// along [deg], in a group at [hub] whose hub end is local `(0, 0)`, so its
+/// world hub end is **bitwise** [hub].
+DraftCommand addSpoke(DraftDocument doc, Handle h, Vector2 hub, double deg,
+    double len, double t, Justification j,
+    {required bool fromHub}) {
+  final g = Transform2.translation(hub.x, hub.y)
+      .multiply(Transform2.rotation(0.3 + 0.7 * (h.value % 9)));
+  final tip = g.invert().transformPoint(polar(hub, deg, len));
+  return addWallLocal(
+      doc,
+      h,
+      fromHub
+          ? WallParams(0, 0, tip.x, tip.y, t, j)
+          : WallParams(tip.x, tip.y, 0, 0, t, j),
+      g);
+}
+
+/// [group]'s children, ascending.
+List<Handle> kids(DraftDocument doc, Handle group) => [
+      for (final slot in doc.entities.liveSlots)
+        if (doc.entities.ownerAt(slot) == group) doc.entities.handleAt(slot),
+    ]..sort((a, b) => a.value.compareTo(b.value));
+
+EntityKind kindOf(DraftDocument doc, Handle h) =>
+    doc.entities.kindAt(doc.entities.slotOf(h)!);
+
+GeometryPayload payloadOf(DraftDocument doc, Handle h) =>
+    doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(h)!));
+
+/// The points of a polyline payload, less a closed one's repeated first
+/// point.
+List<Vector2> pointsOf(GeometryPayload p, {bool closed = false}) {
+  final c = p.coords;
+  final n = c.length ~/ 2 - (closed ? 1 : 0);
+  return [for (var i = 0; i < n; i++) Vector2(c[2 * i], c[2 * i + 1])];
+}
+
+/// Wall [h] as the geometry reads it: its stored parameters under its
+/// group's accumulated transform.
+WorldWall worldWallOf(DraftDocument doc, Handle h) => WorldWall(
+    h, doc.components.get<WallParams>(h)!, doc.tree.accumulatedTransform(h));
+
+/// Wall [h]'s stored outline (the boundary its fill names), read back to
+/// world through its group's transform. Empty when it has no fill.
+List<Vector2> worldOutline(DraftDocument doc, Handle h) {
+  final fills = [
+    for (final k in kids(doc, h))
+      if (kindOf(doc, k) == EntityKind.fill) k
+  ];
+  if (fills.isEmpty) return const [];
+  final boundary = Handle(payloadOf(doc, fills.single).scalars[0].toInt());
+  final m = doc.tree.accumulatedTransform(h);
+  return [
+    for (final q in pointsOf(payloadOf(doc, boundary), closed: true))
+      m.transformPoint(q),
+  ];
+}
+
+/// The points of [a] within [tol] of some point of [b].
+List<Vector2> sharedNear(List<Vector2> a, List<Vector2> b,
+        [double tol = 1e-6]) =>
+    [
+      for (final p in a)
+        if (b.any((q) => (q - p).length < tol)) p
+    ];
+
+/// Whether [ring] has exactly four points, one within 1e-6 of each of
+/// [want].
+bool isRectNear(List<Vector2> ring, List<Vector2> want) =>
+    ring.length == 4 && want.every((p) => nearestIn(ring, p) < 1e-6);
+
+/// `drift()` of [doc] under the floor planner's catalog.
+List<Handle> driftOf(DraftDocument doc) =>
+    ParametricSystem(doc, parametricCatalog).drift();
+
+/// `diagnostics()` of [doc] under the floor planner's catalog.
+List<Diagnostic> diagnosticsOf(DraftDocument doc) =>
+    ParametricSystem(doc, parametricCatalog).diagnostics();
+
+String enc(DraftDocument d) => DraftDocumentCodec.encodeToString(d);
+
+/// Entities sorted by handle: slot order is history, not state (06 D11).
+/// [sortNodes] also sorts every node's child list: `RemoveNodeCommand`'s
+/// inverse re-links a restored node at the end of its parent, so a
+/// delete-then-undo reorders the root's children without changing draw
+/// order, which is ascending handle value (06's `encNodesSorted`).
+String canon(DraftDocument d, {bool sortNodes = false}) {
+  final j = DraftDocumentCodec.encode(d);
+  j['entities'] = List<Map<String, Object?>>.from(j['entities']! as List)
+    ..sort((a, b) => ((a['record']! as Map)['handle']! as int)
+        .compareTo((b['record']! as Map)['handle']! as int));
+  if (sortNodes) {
+    for (final n in j['nodes']! as List) {
+      final children = (n as Map)['children'];
+      if (children is List) {
+        children.sort((a, b) => (a as int).compareTo(b as int));
+      }
+    }
+  }
+  return jsonEncode(j);
+}
+
+/// Decodes [s] with the floor planner's factories and installs its system.
+DraftDocument reload(String s) {
+  final doc = DraftDocumentCodec.decode(jsonDecode(s) as Map<String, Object?>,
+      registerComponents: parametricCatalog.registerComponents);
+  installParametric(doc);
+  return doc;
+}

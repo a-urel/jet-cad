@@ -1,4 +1,5 @@
 import 'package:floor_planner/parametric/box.dart';
+import 'package:floor_planner/parametric/catalog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -53,7 +54,7 @@ void main() {
     await tester.pump();
     expect(view.document.components.get<BoxParams>(b)!.width, 150);
     expect(view.document.commands.undoDepth, depth + 1);
-    expect(ParametricSystem(view.document, boxCatalog).drift(), isEmpty);
+    expect(ParametricSystem(view.document, parametricCatalog).drift(), isEmpty);
   });
 
   testWidgets('SE4 an invalid value reverts and commits nothing',

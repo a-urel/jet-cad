@@ -1,4 +1,5 @@
 import 'package:floor_planner/parametric/box.dart';
+import 'package:floor_planner/parametric/catalog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -96,7 +97,7 @@ void main() {
     // piece apiece: four children each.
     expect(boxKids(doc, bs[0]), hasLength(4));
     expect(boxKids(doc, bs[1]), hasLength(4));
-    expect(ParametricSystem(doc, boxCatalog).drift(), isEmpty);
+    expect(ParametricSystem(doc, parametricCatalog).drift(), isEmpty);
     // Every child midpoint lies outside the other box's interior.
     for (final child in boxKids(doc, bs[0])) {
       final mid = _childMidpoint(doc, bs[0], child);
