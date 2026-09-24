@@ -728,4 +728,73 @@ void main() {
     expectMitre(doc, a, b);
     expect(driftOf(doc), isEmpty);
   });
+
+  test(
+      'WT15 a click in the same synchronous task as an edit joins the band '
+      'where the wall is now: a move, then an undo, each with no await '
+      '(Task 6 review, m1)', () async {
+    final doc = wallDoc();
+    const h = Handle(1300);
+    doc.commands.execute(
+        addWall(doc, h, plan(0, 0), plan(4000, 0), 200, Justification.centre));
+    final rig = directRig(doc);
+    // The chain's start builds the band cache with H where it is.
+    pressAt(rig, plan(1500, 2500));
+    // Move H 700 mm across itself, in world, and click in its old band
+    // before the change stream has delivered.
+    final shift = plan(0, 700) - plan(0, 0);
+    doc.commands.execute(TransformNodeCommand(
+        h,
+        Transform2.translation(shift.x, shift.y)
+            .multiply(doc.tree.accumulatedTransform(h))));
+    final old = plan(1200, 60);
+    pressAt(rig, old);
+    final first = walls(doc).last;
+    expect(first, isNot(h));
+    final end = doc.components.get<WallParams>(first)!.end;
+    expect(xy(end), xy(old), reason: 'the old band is empty: not joined');
+    // Let the stream deliver, and a hover rebuild the cache with H moved.
+    // Then undo that wall and the move and click in the moved band: H is
+    // back where it was, so the click stays where it landed.
+    await Future<void>.delayed(Duration.zero);
+    hoverTo(rig, plan(2000, 2000));
+    doc.commands.undo();
+    doc.commands.undo();
+    final moved = plan(1300, 760);
+    pressAt(rig, moved);
+    final second = walls(doc).last;
+    expect(xy(doc.components.get<WallParams>(second)!.end), xy(moved),
+        reason: 'the moved band is gone again: not joined');
+    expect(distToLine(moved, plan(0, 0), plan(4000, 0)), greaterThan(700));
+  });
+
+  test(
+      "WT16 a click right after the tool's own commit, with no await, joins "
+      "the new wall's band (Task 6 review, m2)", () {
+    final doc = wallDoc();
+    final rig = directRig(doc);
+    pressAt(rig, plan(0, 0));
+    hoverTo(rig, plan(2000, 900));
+    pressAt(rig, plan(3000, 0));
+    final a = walls(doc).single;
+    final wa = worldWallOf(doc, a);
+    pressAt(rig, plan(1500, 70));
+    final end = doc.components.get<WallParams>(walls(doc).last)!.end;
+    expect(distToLine(end, wa.s, wa.e), lessThan(wallJoin.linear),
+        reason: "on A's centreline");
+  });
+
+  test(
+      "WT17 a hover right after the tool's own commit, with no await, joins "
+      "the new wall's band (Task 6 review, m2)", () {
+    final doc = wallDoc();
+    final rig = directRig(doc);
+    pressAt(rig, plan(0, 0));
+    hoverTo(rig, plan(2000, 900));
+    pressAt(rig, plan(3000, 0));
+    final wa = worldWallOf(doc, walls(doc).single);
+    hoverTo(rig, plan(1500, 70));
+    expect(distToLine(rig.tool.debugBandEnd, wa.s, wa.e), lessThan(1e-6),
+        reason: "the rubber band ends on A's centreline");
+  });
 }

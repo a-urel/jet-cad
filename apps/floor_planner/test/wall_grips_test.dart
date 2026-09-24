@@ -144,8 +144,8 @@ void addL(DraftDocument doc, {bool withC = true}) {
 void main() {
   testWidgets(
       'EG1 a free end drags to the resolved point, stored in its own group, '
-      'the other end untouched; one undo step; a degenerate drop is refused',
-      (tester) async {
+      'the other end untouched; one undo step; a degenerate drop is refused, '
+      'and a drag back onto the grip dispatches nothing', (tester) async {
     final doc = gripDoc(FlutterTextMeasurer(), (doc) {
       doc.commands.execute(addWall(
           doc, wa, plan(0, 0), plan(3000, 400), 200, Justification.centre));
@@ -172,6 +172,23 @@ void main() {
     // would be degenerate, so the drag is refused and nothing changes.
     await dragWorld(
         tester, view, endOf(doc, wa, 1), endOf(doc, wa, 0) + Vector2(4, -3));
+    expect(doc.commands.undoDepth, 0);
+    expect(canon(doc), before);
+    // Dragged out and back onto itself: the release resolves onto the
+    // grip's own point, so the drag is a no-op and dispatches nothing
+    // (Task 7 review, m1).
+    final end = endOf(doc, wa, 1);
+    final a = globalOf(tester, view, end);
+    final gesture = await tester.createGesture(
+        kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
+    await gesture.down(a);
+    await gesture.moveTo(a + const Offset(12, 0));
+    await gesture.moveTo(globalOf(tester, view, plan(3600, 1500)));
+    await tester.pump();
+    await gesture.moveTo(a);
+    await gesture.up();
+    await gesture.removePointer();
+    await tester.pump();
     expect(doc.commands.undoDepth, 0);
     expect(canon(doc), before);
     final g = WallGrips().gripsOf(doc, wa)[1];

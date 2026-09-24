@@ -773,7 +773,9 @@ class SelectTool extends Tool {
       if (pieces.isEmpty) return;
       _previewPaint.strokeWidth = kPreviewStrokePixels / scale;
       final path = Path();
-      for (final (kind, payload) in pieces) {
+      // Indexed: no iterator per frame.
+      for (var i = 0; i < pieces.length; i++) {
+        final (kind, payload) = pieces[i];
         _addReshapePath(path, kind, payload, origin);
       }
       canvas.drawPath(path, _previewPaint);

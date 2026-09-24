@@ -137,6 +137,10 @@ class WallTool extends PlacementTool {
   @override
   void accept(Vector2 point, ToolContext ctx) {
     if (!acceptingSelf) {
+      // Rebuilt once per click: the change stream delivers after the
+      // current task, so an edit in the same synchronous task as this
+      // click would otherwise leave the scan on the old bands.
+      _cacheStale = true;
       final joined = Vector2.zero();
       if (_joinBandInto(ctx, point.x, point.y, joined)) point = joined;
     }
@@ -195,8 +199,9 @@ class WallTool extends PlacementTool {
   /// It runs on every pointer move while a chain is pending: an O(walls)
   /// scan over cached doubles that allocates nothing in steady state. The
   /// cache is rebuilt after the document changes (its `changes` stream,
-  /// which delivers before the next pointer event) and after this tool's
-  /// own commit.
+  /// which delivers after the task that made the change), after this
+  /// tool's own commit, and at every click, which must never join a band
+  /// the document no longer has.
   bool _joinBandInto(ToolContext ctx, double px, double py, Vector2 out) {
     if (!(ctx.snap?.objectSnap ?? true)) return false;
     _refreshCache(ctx.document);
