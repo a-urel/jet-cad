@@ -79,6 +79,19 @@ void main() {
   test(
       'N6 two seeds in one command: either child order, same bytes '
       '(M-06b\')', () {
+    // A cross overlap, not the usual pierce-and-swallow pair: B (200 x
+    // 1600, A-local x:[900,1100], y:[-300,1300]) passes fully through A
+    // (2000 x 1000) top to bottom, so *both* objects' boundaries are split
+    // by the other and neither swallows a child (4 -> 6 each). That matters
+    // because the closure's own sort (M-06b') is the only thing standing
+    // between "either order, same bytes" and a real difference: with both
+    // seeds needing new handles in the same `_plan` call, an unsorted
+    // closure hands the first two reserved handles to whichever object the
+    // compound happened to touch first, so hA and hB trade owners on a
+    // fixed handle value depending on `bFirst`. The old A-5/B-3 pierce
+    // fixture could not see this: only one side ever reserved a handle, so
+    // the order of the other, loss-only side never mattered.
+    final bAt = onA(900, -300, 0);
     String run(bool bFirst) {
       final d = paramDoc();
       d.commands.execute(create(d, hA, parked, const ClipRect(2000, 1000)));
@@ -87,15 +100,16 @@ void main() {
           hB,
           Transform2.translation(-9000, -4000)
               .multiply(Transform2.rotation(0.9)),
-          const ClipRect(400, 900)));
+          const ClipRect(200, 1600)));
       final moves = [
         TransformNodeCommand(hA, atA),
-        TransformNodeCommand(hB, atB),
+        TransformNodeCommand(hB, bAt),
       ];
       d.commands.execute(CompoundCommand(
           bFirst ? moves.reversed.toList() : moves,
           label: 'Move'));
-      expect(kids(d, hA), hasLength(5));
+      expect(kids(d, hA), hasLength(6));
+      expect(kids(d, hB), hasLength(6));
       return enc(d);
     }
 
