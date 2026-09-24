@@ -375,9 +375,8 @@ void main() {
     }
     expect(doc.commands.undoDepth, 0);
     expect(doc.components.get<WallParams>(wc), pc);
-    // The palette, not W: Enter left the focus in no field and not on the
-    // canvas either, so the shell's letters do not reach it.
-    await tapKey(tester, 'tool-wall');
+    // W itself: Enter handed focus back to the canvas.
+    await press(tester, LogicalKeyboardKey.keyW);
     expect(status(tester), 'Wall');
     expect(textOf(tester, thickness), '200');
     for (final bad in ['0', '-40']) {
@@ -484,6 +483,42 @@ void main() {
     expect([p.thickness, p.justification], [115, Justification.left]);
     expect(textOf(tester, thickness), '115');
     expect(shownJustification(tester), {Justification.left});
+    PlacementTool tool() => view.tools.active as PlacementTool;
+
+    // Typed with no Enter, then a click mid-chain: the keystrokes already
+    // reached the settings, so that click's wall has them (review round 1,
+    // I1).
+    await clickWorld(tester, view, plan(1500, -900));
+    await tester.tap(thickness);
+    await tester.pump();
+    await tester.enterText(thickness, '400');
+    await tester.pump();
+    await clickWorld(tester, view, plan(2800, -1000));
+    final w400 = walls(doc).last;
+    expect(w400, isNot(w));
+    expect(doc.components.get<WallParams>(w400)!.thickness, 400);
+    expect(tool().isPending, isTrue);
+
+    // Mid-chain, Enter in the field hands focus back to the canvas: Escape
+    // ends the chain with no extra wall, and the letters work again.
+    final count = walls(doc).length;
+    await tester.tap(thickness);
+    await tester.pump();
+    await enterAndSubmit(tester, thickness, '90');
+    expect(tool().isPending, isTrue);
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(tool().isPending, isFalse);
+    expect(walls(doc), hasLength(count));
+    expect(status(tester), 'Wall');
+    await tester.tap(thickness);
+    await tester.pump();
+    await enterAndSubmit(tester, thickness, '95');
+    await press(tester, LogicalKeyboardKey.keyV);
+    expect(status(tester), 'Select');
+    await press(tester, LogicalKeyboardKey.keyW);
+    expect(status(tester), 'Wall');
+    expect(textOf(tester, thickness), '95');
+
     // Back to Select: the section follows the selection again.
     await press(tester, LogicalKeyboardKey.keyV);
     expect(wallSection, findsNothing);
@@ -514,6 +549,41 @@ void main() {
     expect(doc.commands.undoDepth, 1);
     expect(textOf(tester, thickness), '150', reason: "now C's");
 
+    // Enter after the selection change: the value still lands on A, once,
+    // and the field then shows C (review round 1, I3).
+    await select(tester, view, [wa]);
+    await tester.tap(thickness);
+    await tester.pump();
+    await tester.enterText(thickness, '275');
+    await select(tester, view, [wc]);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await tester.pump();
+    expect(doc.components.get<WallParams>(wa), pa.copyWith(thickness: 275));
+    expect(doc.components.get<WallParams>(wc), pc);
+    expect(doc.commands.undoDepth, 2);
+    expect(textOf(tester, thickness), '150');
+
+    // The pinned wall dies while another wall is shown, so the field stays
+    // mounted: blurring drops the text (review round 1, I2).
+    const we = Handle(7800);
+    doc.commands.execute(addWall(
+        doc, we, plan(0, -900), plan(1400, -1300), 90, Justification.left));
+    await select(tester, view, [we]);
+    await tester.tap(thickness);
+    await tester.pump();
+    await tester.enterText(thickness, '333');
+    await select(tester, view, [wc]);
+    doc.commands.undo();
+    await tester.pump();
+    expect(doc.tree[we], isNull);
+    expect(wallSection, findsOneWidget);
+    await tester.tap(wallSection);
+    await tester.pump();
+    expect(doc.components.get<WallParams>(wc), pc);
+    expect(doc.commands.canRedo, isTrue, reason: 'nothing was executed');
+    expect(textOf(tester, thickness), '150');
+
     // The pinned wall dies while the field has focus: the section hides,
     // the field loses focus, and the text is dropped.
     const wd = Handle(6500);
@@ -529,11 +599,11 @@ void main() {
     expect(doc.tree[wd], isNull);
     expect(wallSection, findsNothing);
     expect(doc.commands.canRedo, isTrue, reason: 'nothing was executed');
-    expect(doc.commands.undoDepth, 1);
+    expect(doc.commands.undoDepth, 2);
     expect([
       for (final h in walls(doc)) doc.components.get<WallParams>(h)!.thickness
     ], [
-      260,
+      275,
       115,
       150
     ]);

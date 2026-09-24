@@ -180,9 +180,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
     switch (kind) {
       case _Kind.width:
       case _Kind.height:
-        if (target == _toolSettings || !_isObject<BoxParams>(target)) {
-          return null;
-        }
+        if (!_isObject<BoxParams>(target)) return null;
         final p = widget.document.components.get<BoxParams>(target)!;
         return kind == _Kind.width ? p.width : p.height;
       case _Kind.thickness:
@@ -241,6 +239,12 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// or the edit is not allowed. Enter commits here and then, once focus
   /// has moved, focus loss commits again: the field is re-pinned to what it
   /// now shows, so that second commit is a no-op.
+  ///
+  /// A live pinned target's typed text is also dropped if its section
+  /// hides while the field keeps focus: the field unmounts, and its commit
+  /// finds it no longer shows. The UI never reaches this -- a click on the
+  /// canvas, the only way to change the selection by hand, unfocuses the
+  /// field first.
   void _commit(_Field f) {
     final target = f.pinned;
     if (target != null && _read(f.kind, target) != null && _editable(f.kind)) {
@@ -317,12 +321,34 @@ class _SelectionPanelState extends State<SelectionPanel> {
         readOnly: !editable,
         decoration: InputDecoration(labelText: label, suffixText: 'mm'),
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        // While the Wall tool is active every valid keystroke reaches its
+        // settings at once (07 D11, review round 1): a canvas click
+        // accepts its point before the field's focus-loss commit runs, so
+        // a value typed without Enter would otherwise miss that click's
+        // wall. Erasing back leaves the last valid prefix in the settings
+        // until the field commits.
+        onChanged: (t) {
+          if (f.pinned != _toolSettings) return;
+          final v = double.tryParse(t.trim());
+          if (v != null && v.isFinite && v > 0) {
+            _write(f.kind, _toolSettings, v);
+          }
+        },
         onSubmitted: (_) => _commit(f),
+        // Enter hands focus back to what had it before the field -- the
+        // canvas -- so the shell's letters and Escape work again at once.
+        // `onSubmitted` still runs after it.
+        onEditingComplete: () => f.focus
+            .unfocus(disposition: UnfocusDisposition.previouslyFocusedChild),
         // Only unfocuses (spec 06 D13's amendment for F2): the commit
         // itself happens in `_onFocusChange`, which fires for this too, so
         // every way of losing focus -- Enter, moving to another field, or a
-        // tap outside -- commits.
-        onTapOutside: (_) => f.focus.unfocus(),
+        // tap outside -- commits. Like Enter, it hands focus back to the
+        // previously focused node: the plain `unfocus()` clears the scope's
+        // focus history and takes the focus to the scope itself, even from
+        // a canvas click that has just requested it.
+        onTapOutside: (_) => f.focus
+            .unfocus(disposition: UnfocusDisposition.previouslyFocusedChild),
       );
 
   @override
