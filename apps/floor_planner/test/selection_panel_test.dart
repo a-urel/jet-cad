@@ -675,7 +675,8 @@ void main() {
   testWidgets(
       'WS9 an edit the document refuses (a loaded fill naming another '
       "wall's outline) reverts the field and re-pins it: no exception "
-      'escapes Enter or the focus loss (final review m1)', (tester) async {
+      'escapes Enter, the focus loss or the justification toggle (final '
+      'review m1)', (tester) async {
     final j = DraftDocumentCodec.encode(panelDoc(FlutterTextMeasurer()));
     // A's fill names B's outline: a malformed file the planner refuses
     // to regenerate (spec 07 D8).
@@ -720,6 +721,13 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(textOf(tester, thickness), '200');
     expect(enc(doc), before);
+    // The justification toggle: refused alike, and it keeps showing A's.
+    await tapKey(tester, 'wall-left');
+    expect(tester.takeException(), isNull);
+    expect(shownJustification(tester), {Justification.centre});
+    expect(doc.components.get<WallParams>(wa), pa);
+    expect(enc(doc), before);
+    expect(doc.commands.undoDepth, 0);
     // C, no neighbour of A's, is sound: its edit lands.
     await select(tester, view, [wc]);
     await enterAndSubmit(tester, thickness, '120');

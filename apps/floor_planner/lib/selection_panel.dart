@@ -319,7 +319,9 @@ class _SelectionPanelState extends State<SelectionPanel> {
   }
 
   /// One step for a wall, the settings for the tool (07 D11). The toggle
-  /// is a click, not a text entry: it acts on the target shown now.
+  /// is a click, not a text entry: it acts on the target shown now. An
+  /// edit the document refuses is caught as `_commit` catches one (final
+  /// review): nothing changed, so the toggle keeps showing the model.
   void _setJustification(Justification j) {
     final target = _wall;
     if (target == null || !_editable(_Kind.thickness)) return;
@@ -331,8 +333,14 @@ class _SelectionPanelState extends State<SelectionPanel> {
     final p = widget.document.components.get<WallParams>(target)!;
     final next = p.copyWith(justification: j);
     if (next == p) return;
-    widget.document.commands
-        .execute(SetComponentCommand<WallParams>(target, next));
+    try {
+      widget.document.commands
+          .execute(SetComponentCommand<WallParams>(target, next));
+    } on ArgumentError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    }
   }
 
   Widget _field(String key, String label, _Field f, bool editable) => TextField(
