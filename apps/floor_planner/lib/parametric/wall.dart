@@ -8,7 +8,7 @@ enum Justification { left, centre, right }
 /// Every "do these join" decision for walls (spec 07 D7): endpoint
 /// coincidence, a point on a centreline, parallel faces. Absolute, in mm.
 ///
-/// Not `Tolerance.standard`: at the far origin one ulp is ~9.3e-10, and two
+/// Not the engine's standard tolerance (1e-9): at the far origin one ulp is ~9.3e-10, and two
 /// rotated groups leave a snapped joint up to ~4.7e-10 apart; 1e-6 is about a
 /// thousand ulps there and far below anything drawn on purpose. Stored values
 /// are still compared with exact `==`.

@@ -369,8 +369,10 @@ int nodeOwner(List<End> ends) {
 /// foot on it coincide bitwise and the lobes split there (D5.5). Measured on
 /// spike Q5b's generator with every wall in its own rotated group: through
 /// each end's own point, 1.19% of nodes leave a hole and 0.17% of walls fall
-/// back; through [hub], 0.76% and 0.11%, as with bitwise joints. A wedge narrower than 90° is never clamped: its long inner mitre is
-/// real geometry. A wider wedge whose faces are parallel, or whose corner lies
+/// back; through [hub], 0.76% and 0.11%, as with bitwise joints.
+///
+/// A wedge narrower than 90° is never clamped: its long inner mitre is real
+/// geometry. A wider wedge whose faces are parallel, or whose corner lies
 /// farther than `mitreLimit / 2 ×` the thicker wall from [hub], is clamped to
 /// two feet: end `w`'s left face point at [hub], then end `w + 1`'s right
 /// face point at [hub].
@@ -405,11 +407,13 @@ double sweep(End x, End y) {
 ///   If both ends own one, it lists both nodes' members, ascending, once each.
 ///
 /// The ring is simplified (D6): exact consecutive duplicates and zero-width
-/// spikes are removed. Since lobes split at exactly repeated vertices and
-/// corners are taken through the node, no measured outline has needed it
-/// (none of 10,000 random nodes, nor 20,000 plausible ones); it stays as D6's
-/// guard. [fallback] false returns the joined ring even when it
-/// is not simple — a measurement hook, never used to store an outline.
+/// spikes, which do occur (a closing duplicate at some right-angle Ls of
+/// round sizes), are removed. No measured triangulation outcome has depended
+/// on it, since lobes split at exactly repeated vertices and the triangulator
+/// tolerates consecutive duplicates; it stays as D6's guard.
+///
+/// [fallback] false returns the joined ring even when it is not simple — a
+/// measurement hook, never used to store an outline.
 ({List<Vector2> ring, bool fellBack, List<Handle>? hole}) outline(
     WorldWall w, List<WorldWall> others,
     {bool fallback = true}) {

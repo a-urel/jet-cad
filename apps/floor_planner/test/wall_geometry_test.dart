@@ -149,41 +149,47 @@ void main() {
   test(
       'WG6 a three-way node, 200 centre / 115 left / 150 right: every ring '
       'simple, the central polygon covered exactly once (M-07k)', () {
-    final h = plan(0, 0);
-    final w1 = worldWall(11, h, polar(h, 10 + rot, 3000), 200, centre);
-    final w2 = worldWall(12, polar(h, 50 + rot, 2000), h, 115, left);
-    final w3 = worldWall(13, h, polar(h, 200 + rot, 2500), 150, right);
-    final all = [w1, w2, w3];
-    final rings = [for (final w in all) ringOf(w, all)];
-    for (final o in rings) {
-      expectSound(o);
+    // Twice: turned so that the lowest handle (w1) sorts second by angle,
+    // and so that it sorts first — ownership must not depend on either.
+    for (final (turn, firstIsLowest) in const [(rot, false), (-53.0, true)]) {
+      final h = plan(0, 0);
+      final w1 = worldWall(11, h, polar(h, 10 + turn, 3000), 200, centre);
+      final w2 = worldWall(12, polar(h, 50 + turn, 2000), h, 115, left);
+      final w3 = worldWall(13, h, polar(h, 200 + turn, 2500), 150, right);
+      final all = [w1, w2, w3];
+      final rings = [for (final w in all) ringOf(w, all)];
+      for (final o in rings) {
+        expectSound(o);
+      }
+      // The central polygon, from the oracle. The node point is the lowest
+      // handle's endpoint; w3 (right-justified, from the node) and w2
+      // (left-justified, into the node) each have a face through it, and their
+      // wide wedges are clamped to feet there, so the node point is one vertex.
+      // w1's right foot, and the corner of w1's left face with w2's left face.
+      final hub = w1.s;
+      final (r1, r2) = face(w1, -100);
+      final foot = project(hub, r1, r2);
+      final (a1, a2) = face(w1, 100);
+      final (b1, b2) = face(w2, 115);
+      final corner = oracleMeet(a1, a2, b1, b2);
+      final central = [hub, foot, corner];
+      expect(signedArea(central), greaterThan(1000));
+      for (final v in central) {
+        expect(nearestIn(rings[0].ring, v), lessThan(1e-6));
+      }
+      final inside = [
+        for (final p in diskSamples(hub, 400))
+          if (insideRing(p, central)) p
+      ];
+      expect(inside.length, greaterThan(300));
+      final covered = [
+        for (final p in inside) rings.where((o) => insideRing(p, o.ring)).length
+      ];
+      expect(covered.where((c) => c >= 2), isEmpty, reason: 'overlap');
+      expect(covered.every((c) => c == 1), isTrue, reason: 'gap');
+      final node = classify(w1, 0, [w2, w3]) as NodeJoint;
+      expect(node.ends.first.wall.handle == w1.handle, firstIsLowest);
     }
-    // The central polygon, from the oracle. The node point is the lowest
-    // handle's endpoint; w3 (right-justified, from the node) and w2
-    // (left-justified, into the node) each have a face through it, and their
-    // wide wedges are clamped to feet there, so the node point is one vertex.
-    // w1's right foot, and the corner of w1's left face with w2's left face.
-    final hub = w1.s;
-    final (r1, r2) = face(w1, -100);
-    final foot = project(hub, r1, r2);
-    final (a1, a2) = face(w1, 100);
-    final (b1, b2) = face(w2, 115);
-    final corner = oracleMeet(a1, a2, b1, b2);
-    final central = [hub, foot, corner];
-    expect(signedArea(central), greaterThan(1000));
-    for (final v in central) {
-      expect(nearestIn(rings[0].ring, v), lessThan(1e-6));
-    }
-    final inside = [
-      for (final p in diskSamples(hub, 400))
-        if (insideRing(p, central)) p
-    ];
-    expect(inside.length, greaterThan(300));
-    final covered = [
-      for (final p in inside) rings.where((o) => insideRing(p, o.ring)).length
-    ];
-    expect(covered.where((c) => c >= 2), isEmpty, reason: 'overlap');
-    expect(covered.every((c) => c == 1), isTrue, reason: 'gap');
   });
 
   test(
@@ -332,9 +338,8 @@ void main() {
     for (final n in [l, r]) {
       final o = ringOf(n, all);
       expectSound(o);
-      // The same as with the short wall's fallback out of the picture: the
-      // neighbour's corners are the ones the short wall's joined ring holds.
-      expect(o.ring, ringOf(n, all, fallback: false).ring);
+      // The short wall's fallback does not reach its neighbours: each still
+      // mitres against the corners the short wall's joined ring holds.
       expect(sharedBitwise(o.ring, raw.ring), hasLength(2));
     }
   });
@@ -629,5 +634,69 @@ void main() {
     expect(ringOf(b, all).ring, ringOf(b, [a, b]).ring);
     expect(
         sharedBitwise(ringOf(a, all).ring, ringOf(b, all).ring), hasLength(2));
+  });
+
+  test(
+      'WG19 a shallow T squares its stem at its own end; a steeper one butts '
+      'the near face (spec 07 D6: the limit is on the thicker wall)', () {
+    final b = worldWall(95, plan(-2000, 0), plan(3000, 0), 300, centre);
+    final p = plan(700, 0);
+    for (final deg in const [10.0, 25.0]) {
+      final a = worldWall(96, polar(p, deg + rot, 2400), p, 115, centre);
+      final ra = ringOf(a, [a, b]);
+      expectSound(ra, reason: '$deg°');
+      final capPoints = [
+        for (final q in ra.ring)
+          if ((q - p).length < 1500) q
+      ];
+      expect(capPoints, hasLength(2), reason: '$deg°');
+      final (l1, l2) = face(a, 57.5);
+      final (r1, r2) = face(a, -57.5);
+      final square = [project(p, l1, l2), project(p, r1, r2)];
+      final (n1, n2) = face(b, 150);
+      if (deg == 10) {
+        // The corners on the near face lie beyond 4 × 150 of the end point.
+        for (final q in square) {
+          expect(nearestIn(capPoints, q), lessThan(1e-6), reason: '10°');
+        }
+      } else {
+        // Within 4 × 150 (the thicker wall), though beyond 4 × 57.5.
+        for (final q in capPoints) {
+          expect(distToLine(q, n1, n2), lessThan(1e-6), reason: '25°');
+          expect(nearestIn(square, q), greaterThan(100), reason: '25°');
+        }
+      }
+    }
+  });
+
+  test(
+      'WG20 an end strictly inside two centrelines (an X) tees onto the '
+      'lower handle, whatever the order of the neighbours', () {
+    final p = plan(0, 0);
+    final lo = worldWall(97, plan(-2000, 0), plan(2000, 0), 200, right);
+    final hi = worldWall(98, plan(0, -2000), plan(0, 2000), 240, centre);
+    final stem = worldWall(99, polar(p, 60 + rot, 2400), p, 115, centre);
+    for (final others in [
+      [hi, lo],
+      [lo, hi],
+    ]) {
+      final j = classify(stem, 1, others);
+      expect(j, isA<Tee>());
+      expect((j as Tee).through.handle, lo.handle);
+      final ring = ringOf(stem, [stem, ...others]).ring;
+      final capPoints = [
+        for (final q in ring)
+          if ((q - p).length < 1500) q
+      ];
+      expect(capPoints, hasLength(2));
+      // lo's body lies right of its centreline: the stem, from its left,
+      // butts the centreline itself; hi's near face would be x = +120.
+      final (n1, n2) = face(lo, 0);
+      final (h1, h2) = face(hi, -120);
+      for (final q in capPoints) {
+        expect(distToLine(q, n1, n2), lessThan(1e-6));
+        expect(distToLine(q, h1, h2), greaterThan(1));
+      }
+    }
   });
 }
