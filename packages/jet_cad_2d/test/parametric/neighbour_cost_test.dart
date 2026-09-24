@@ -114,17 +114,29 @@ void main() {
     expect(doc.commands.undoDepth, depth + 1);
   });
 
-  test('NC2 moving one of 300 objects performs fewer than 10 × n tests', () {
+  test(
+      'NC2 moving one of 300 objects performs fewer than 10 × n tests: '
+      'exactly one search per closure member, plus the seed\'s before', () {
     final doc = gridDoc(testCatalog());
     final objects = grid(doc, n);
     final moved = objects[150];
+    final before = oracle(doc, objects);
     debugOverlapTests = 0;
     doc.commands.execute(TransformNodeCommand(
         moved, cell(150).multiply(Transform2.translation(50, 0))));
     final tests = debugOverlapTests;
+    final after = oracle(doc, objects);
+    final closure = {moved, ...before[moved]!, ...after[moved]!};
+    // Not degenerate: the seed has neighbours, so the closure members'
+    // own searches are part of the exact count below.
+    expect(closure.length, greaterThan(2));
     // At least the seed's own search, before and after: it did search.
     expect(tests, greaterThanOrEqualTo(2 * (n - 1)));
     expect(tests, lessThan(10 * n));
+    // Each search tests every other object once: the seed before, and each
+    // closure member after, the seed's after-search memoised for its own
+    // generate.
+    expect(tests, (1 + closure.length) * (n - 1));
     expect(ParametricSystem(doc, testCatalog()).drift(), isEmpty);
   });
 
@@ -146,6 +158,12 @@ void main() {
     expect(before[moved], isNotEmpty);
     expect(after[moved], isNotEmpty);
     expect(after[moved], isNot(before[moved]));
+    // Both lost and gained: a closure of `after` alone, or of `before`
+    // alone, would miss a member.
+    expect(
+        before[moved]!.toSet().difference(after[moved]!.toSet()), isNotEmpty);
+    expect(
+        after[moved]!.toSet().difference(before[moved]!.toSet()), isNotEmpty);
     final closure = {moved, ...before[moved]!, ...after[moved]!}.toList()
       ..sort((a, b) => a.value.compareTo(b.value));
     expect(
