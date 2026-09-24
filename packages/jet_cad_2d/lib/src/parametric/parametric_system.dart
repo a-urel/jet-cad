@@ -34,15 +34,23 @@ abstract class ParametricType<T extends Component> {
 /// One generated entity (spec D3). Never a fill: `SetEntityGeometryCommand`
 /// rejects a fill's payload, and regions are out of scope.
 final class Generated {
-  Generated(this.kind, this.payload) {
+  Generated(this.kind, this.payload) : filled = false {
     if (kind == EntityKind.fill) {
       throw ArgumentError.value(
           kind, 'kind', 'a fill cannot be generated (spec 06 D3)');
     }
   }
 
+  /// SPIKE 07: a closed POLYLINE boundary plus the FILL that names it. The
+  /// planner matches it to an existing fill child and rewrites only the
+  /// boundary; the fill's payload (a reference) never changes.
+  Generated.region(this.payload)
+      : kind = EntityKind.polyline,
+        filled = true;
+
   final EntityKind kind;
   final GeometryPayload payload;
+  final bool filled;
 }
 
 /// A direct edit of a generated entity (spec D6). Propagates like

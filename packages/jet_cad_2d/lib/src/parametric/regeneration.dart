@@ -105,11 +105,45 @@ List<DraftCommand> _plan(
   for (final h in closure) {
     final generated = s.objects[h]!.generate(view, h);
     final byKind = <EntityKind, List<Handle>>{};
+    // SPIKE 07: a fill child and the boundary it names are one region; the
+    // boundary is matched through its fill, never as a plain POLYLINE.
+    final boundaries = <Handle>{};
     for (final c in s.children[h] ?? const <Handle>[]) {
+      final slot = t.entities.slotOf(c)!;
+      if (t.entities.kindAt(slot) == EntityKind.fill) {
+        boundaries.add(Handle.checked(
+            t.geometry.peek(t.entities.geomIndexAt(slot)).scalars[0].toInt()));
+      }
+    }
+    for (final c in s.children[h] ?? const <Handle>[]) {
+      if (boundaries.contains(c)) continue;
       (byKind[t.entities.kindAt(t.entities.slotOf(c)!)] ??= []).add(c);
     }
     final used = <EntityKind, int>{};
-    for (final g in generated) {
+    for (final g in generated.where((g) => g.filled)) {
+      final i = used[EntityKind.fill] ?? 0;
+      used[EntityKind.fill] = i + 1;
+      final fills = byKind[EntityKind.fill];
+      if (fills != null && i < fills.length) {
+        final fillSlot = t.entities.slotOf(fills[i])!;
+        final boundary = Handle.checked(t.geometry
+            .peek(t.entities.geomIndexAt(fillSlot))
+            .scalars[0]
+            .toInt());
+        final slot = t.entities.slotOf(boundary)!;
+        if (!_samePayload(
+            t.geometry.peek(t.entities.geomIndexAt(slot)), g.payload)) {
+          out.add(SetEntityGeometryCommand(boundary, g.payload));
+        }
+      } else {
+        out.add(AddRegionCommand(
+            fill: draftRecord(Handle.checked(++reserved), h, EntityKind.fill),
+            boundary:
+                draftRecord(Handle.checked(++reserved), h, EntityKind.polyline),
+            boundaryPayload: g.payload));
+      }
+    }
+    for (final g in generated.where((g) => !g.filled)) {
       final i = used[g.kind] ?? 0;
       used[g.kind] = i + 1;
       final existing = byKind[g.kind];
@@ -125,8 +159,17 @@ List<DraftCommand> _plan(
             payload: g.payload));
       }
     }
+    // SPIKE 07: a surplus fill goes through its boundary, whose removal takes
+    // the fill with it (`RemoveEntityCommand`'s cascade).
     final surplus = [
-      for (final e in byKind.entries) ...e.value.skip(used[e.key] ?? 0),
+      for (final e in byKind.entries)
+        for (final c in e.value.skip(used[e.key] ?? 0))
+          e.key == EntityKind.fill
+              ? Handle.checked(t.geometry
+                  .peek(t.entities.geomIndexAt(t.entities.slotOf(c)!))
+                  .scalars[0]
+                  .toInt())
+              : c,
     ]..sort(_byValue);
     for (final c in surplus) {
       out.add(RemoveEntityCommand(c));
