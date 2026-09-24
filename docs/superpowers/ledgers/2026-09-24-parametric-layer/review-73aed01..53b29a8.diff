@@ -1,0 +1,39 @@
+# Review package: 73aed01..HEAD
+
+## Commits
+53b29a8 test(floor_planner): BT1 pins per-field BoxParams equality (review r1)
+
+## Files changed
+ apps/floor_planner/test/box_test.dart | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+## Diff
+diff --git a/apps/floor_planner/test/box_test.dart b/apps/floor_planner/test/box_test.dart
+index e420741..571d40574 100644
+--- a/apps/floor_planner/test/box_test.dart
++++ b/apps/floor_planner/test/box_test.dart
+@@ -29,20 +29,24 @@ List<Handle> kids(DraftDocument doc, Handle g) => [
+ 
+ void main() {
+   const a = Handle(1000), b = Handle(2000);
+ 
+   test('BT1 BoxParams: value equality, key order, round trip', () {
+     const p = BoxParams(1200, 800);
+     expect(p.toJson().keys.toList(), ['width', 'height']);
+     expect(BoxParams.fromJson(p.toJson()), p);
+     expect(p.copyWith(height: 5), const BoxParams(1200, 5));
+     expect(p.typeId, 'floor_planner.box');
++    expect(const BoxParams(1200, 800) == const BoxParams(1200, 801), isFalse);
++    expect(const BoxParams(1200, 800) == const BoxParams(1201, 800), isFalse);
++    expect(const BoxParams(1200, 800).hashCode,
++        const BoxParams(1200, 800).hashCode);
+   });
+ 
+   test('BT2 an isolated box is four lines at its corners', () {
+     final doc = DraftDocument.empty();
+     installBoxes(doc);
+     doc.commands.execute(box(doc, a, atA, 1200, 800));
+     expect(kids(doc, a), hasLength(4));
+   });
+ 
+   test(

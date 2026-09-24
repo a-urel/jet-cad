@@ -1,0 +1,1094 @@
+# Review package: af4149d..HEAD
+
+## Commits
+81389ac docs: Plan 06 final-review fix wave -- spec amendments, results, debt (F6)
+e5cfc78 fix(engine): tighten D6's removal arm and guard drift()'s re-entry (F4, F5)
+19edb8a fix(panel): commit on real focus loss, never reload a focused field (F1, F2)
+
+## Files changed
+ apps/floor_planner/lib/selection_panel.dart        |  78 ++++++-
+ apps/floor_planner/test/selection_panel_test.dart  |  82 ++++++-
+ .../notes/2026-09-24-plan-06-results.md            | 252 +++++++++++++++++++--
+ .../specs/2026-09-24-parametric-layer-design.md    |  33 +++
+ .../lib/src/parametric/parametric_system.dart      |  22 +-
+ .../lib/src/parametric/regeneration.dart           |   9 +-
+ .../jet_cad_2d/test/parametric/guards_test.dart    |  74 ++++++
+ .../test/parametric/regeneration_test.dart         |  59 +++++
+ 8 files changed, 561 insertions(+), 48 deletions(-)
+
+## Diff
+diff --git a/apps/floor_planner/lib/selection_panel.dart b/apps/floor_planner/lib/selection_panel.dart
+index 38fa4fa..b47d24b 100644
+--- a/apps/floor_planner/lib/selection_panel.dart
++++ b/apps/floor_planner/lib/selection_panel.dart
+@@ -3,115 +3,179 @@ import 'dart:async';
+ import 'package:flutter/material.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'parametric/box.dart';
+ 
+ /// Spec 06 D13: one selected box's width and height. Each commit is one
+ /// `SetComponentCommand<BoxParams>`, which the parametric system turns into
+ /// one undo step with its regeneration. 12 builds the real inspector.
+ ///
+-/// Enter or a tap outside the field commits (spec 06 D13); an invalid value
+-/// reverts the field to the model's current value instead.
++/// Enter or losing focus commits (spec 06 D13) -- each field owns a
++/// `FocusNode`, so moving between Width and Height, or tapping outside both,
++/// always commits whichever field was left; an invalid value reverts the
++/// field to the model's current value instead.
+ class SelectionPanel extends StatefulWidget {
+   const SelectionPanel(
+       {super.key, required this.document, required this.selection});
+ 
+   final DraftDocument document;
+   final SelectionController selection;
+ 
+   @override
+   State<SelectionPanel> createState() => _SelectionPanelState();
+ }
+ 
+ class _SelectionPanelState extends State<SelectionPanel> {
+   final TextEditingController _width = TextEditingController();
+   final TextEditingController _height = TextEditingController();
++  final FocusNode _widthFocus = FocusNode();
++  final FocusNode _heightFocus = FocusNode();
+   late final StreamSubscription<DocChange> _changes;
+ 
++  /// The box and the values last copied into the fields, so [_load] can
++  /// tell a real model change from a notification that carries none (spec
++  /// 06 D13's amendment for F1): hover and unrelated edits both notify, but
++  /// neither one changes the selected box or its stored parameters.
++  Handle? _loadedBox;
++  BoxParams? _loadedParams;
++
+   @override
+   void initState() {
+     super.initState();
+     widget.selection.addListener(_sync);
+     _changes = widget.document.commands.changes.listen((_) => _sync());
++    _widthFocus.addListener(() => _onFocusChange(_widthFocus, isWidth: true));
++    _heightFocus
++        .addListener(() => _onFocusChange(_heightFocus, isWidth: false));
+     _load();
+   }
+ 
+   @override
+   void dispose() {
+     widget.selection.removeListener(_sync);
+     _changes.cancel();
+     _width.dispose();
+     _height.dispose();
++    _widthFocus.dispose();
++    _heightFocus.dispose();
+     super.dispose();
+   }
+ 
++  /// Commits the field's current text when it just lost focus (spec 06
++  /// D13's amendment for F2): each field has its own node, so moving focus
++  /// from one to the other commits the one that was left, and a tap
++  /// anywhere outside both -- via `onTapOutside`'s explicit unfocus below --
++  /// commits whichever field had it.
++  void _onFocusChange(FocusNode node, {required bool isWidth}) {
++    if (node.hasFocus) return;
++    final h = _box;
++    if (h == null) return;
++    _submit(h, isWidth ? _width.text : _height.text, isWidth: isWidth);
++  }
++
+   /// The one selected box, or null.
+   Handle? get _box {
+     final keys = widget.selection.keys;
+     if (keys.length != 1) return null;
+     final key = keys.single;
+     if (key.chain.isNotEmpty) return null;
+     final h = key.target;
+     final node = widget.document.tree[h];
+     if (node is! GroupNode || node.parent != widget.document.rootHandle) {
+       return null;
+     }
+     return widget.document.components.get<BoxParams>(h) == null ? null : h;
+   }
+ 
+   static String _number(double v) =>
+       v == v.roundToDouble() ? v.round().toString() : v.toString();
+ 
+   /// Copies the model into the fields; no rebuild.
++  ///
++  /// Reloads only when the selected box, or its stored values, changed
++  /// since the last load -- a hover change or an unrelated document edit
++  /// notifies but changes neither, so it must not touch the fields (F1).
++  /// Even then, a field that currently has focus keeps its own text: the
++  /// user may be mid-edit, and a reload must never overwrite what they
++  /// typed before they commit it.
+   void _load() {
+     final h = _box;
+-    if (h == null) return;
++    if (h == null) {
++      _loadedBox = null;
++      _loadedParams = null;
++      return;
++    }
+     final p = widget.document.components.get<BoxParams>(h)!;
++    if (h == _loadedBox && p == _loadedParams) return;
++    _loadedBox = h;
++    _loadedParams = p;
+     final w = _number(p.width), hh = _number(p.height);
+-    if (_width.text != w) _width.text = w;
+-    if (_height.text != hh) _height.text = hh;
++    if (!_widthFocus.hasFocus && _width.text != w) _width.text = w;
++    if (!_heightFocus.hasFocus && _height.text != hh) _height.text = hh;
+   }
+ 
+   /// A selection or document change: reload and rebuild.
+   void _sync() {
+     _load();
+     if (mounted) setState(() {});
+   }
+ 
+   void _submit(Handle h, String text, {required bool isWidth}) {
+     final value = double.tryParse(text.trim());
+     final p = widget.document.components.get<BoxParams>(h)!;
+     if (value == null || !value.isFinite || value <= 0) {
+-      _sync();
++      _revertInvalid(h, isWidth, p);
+       return;
+     }
+     final next = isWidth ? p.copyWith(width: value) : p.copyWith(height: value);
+     if (next == p) return;
+     widget.document.commands.execute(SetComponentCommand<BoxParams>(h, next));
+   }
+ 
++  /// An invalid submit: puts the model's current value back in the one
++  /// field that was rejected. Unconditional, unlike [_load]'s "changed
++  /// since the last load" guard -- the model did not change, but the
++  /// field's own bad text still has to go, and the field is not being
++  /// typed into any more at this point (it just lost, or is losing,
++  /// focus).
++  void _revertInvalid(Handle h, bool isWidth, BoxParams p) {
++    _loadedBox = h;
++    _loadedParams = p;
++    if (isWidth) {
++      _width.text = _number(p.width);
++    } else {
++      _height.text = _number(p.height);
++    }
++    if (mounted) setState(() {});
++  }
++
+   @override
+   Widget build(BuildContext context) {
+     final h = _box;
+     if (h == null) return const SizedBox.shrink();
+     final editable = widget.document.commands.permissions
+         .allows(const BoxType().editCapability);
+     Widget field(String label, TextEditingController c, bool isWidth) =>
+         TextField(
+           key: Key(isWidth ? 'box-width' : 'box-height'),
+           controller: c,
++          focusNode: isWidth ? _widthFocus : _heightFocus,
+           readOnly: !editable,
+           decoration: InputDecoration(labelText: label, suffixText: 'mm'),
+           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+           onSubmitted: (t) => _submit(h, t, isWidth: isWidth),
+-          onTapOutside: (_) => _submit(h, c.text, isWidth: isWidth),
++          // Only unfocuses (spec 06 D13's amendment for F2): the commit
++          // itself happens in `_onFocusChange`, which fires for this too,
++          // so every way of losing focus -- Enter, moving to the other
++          // field, or a tap outside both -- commits exactly once.
++          onTapOutside: (_) => (isWidth ? _widthFocus : _heightFocus).unfocus(),
+         );
+     return Material(
+       key: const Key('selection-panel'),
+       color: Colors.transparent,
+       child: Padding(
+         padding: const EdgeInsets.all(12),
+         child: Column(
+           crossAxisAlignment: CrossAxisAlignment.stretch,
+           mainAxisSize: MainAxisSize.min,
+           children: [
+diff --git a/apps/floor_planner/test/selection_panel_test.dart b/apps/floor_planner/test/selection_panel_test.dart
+index 9f68565..96a66ea 100644
+--- a/apps/floor_planner/test/selection_panel_test.dart
++++ b/apps/floor_planner/test/selection_panel_test.dart
+@@ -104,36 +104,98 @@ void main() {
+     await drawTwoBoxes(tester, view);
+     await press(tester, LogicalKeyboardKey.keyV);
+     view.selection.replace([SelectionKey.root(boxes(view.document).first)]);
+     await tester.pump();
+     await tester.tap(width);
+     await tester.pump();
+     await press(tester, LogicalKeyboardKey.keyB);
+     expect(status(tester), isNot('Box'));
+   });
+ 
+-  testWidgets('SE8 a tap outside the width field commits it, with no Enter',
+-      (tester) async {
++  testWidgets(
++      'SE8 a tap outside the width field commits it via focus loss, '
++      'with no Enter', (tester) async {
+     final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
+     await drawTwoBoxes(tester, view);
+     final b = boxes(view.document).first;
+     view.selection.replace([SelectionKey.root(b)]);
+     await tester.pump();
+     final depth = view.document.commands.undoDepth;
+     await tester.enterText(width, '150');
+     await tester.pump();
+-    // No TextInputAction.done: the commit must come from the tap below.
+-    // Not a tap on the Height field: `TextField`'s default `groupId` is
+-    // `EditableText`, so every plain `TextField` shares it, and a tap on
+-    // another one counts as *inside* the group, never outside -- this
+-    // would fail to exercise `onTapOutside` at all. The panel's "Box"
+-    // label is a plain `Text`, genuinely outside every field's tap region
+-    // (`find.descendant` because the status bar has its own "Box" text
+-    // while the Box tool is armed).
++    // No TextInputAction.done: the commit must come from the field's own
++    // `FocusNode` losing focus, which `onTapOutside` triggers by unfocusing
++    // -- not from a tap-outside handler that submits directly. Not a tap on
++    // the Height field: `TextField`'s default `groupId` is `EditableText`,
++    // so every plain `TextField` shares it, and a tap on another one counts
++    // as *inside* the group, never outside -- this would fail to exercise
++    // `onTapOutside` at all. The panel's "Box" label is a plain `Text`,
++    // genuinely outside every field's tap region (`find.descendant` because
++    // the status bar has its own "Box" text while the Box tool is armed).
+     await tester.tap(find.descendant(
+         of: find.byKey(const Key('selection-panel')),
+         matching: find.text('Box')));
+     await tester.pump();
+     expect(view.document.components.get<BoxParams>(b)!.width, 150);
+     expect(view.document.commands.undoDepth, depth + 1);
+   });
++
++  testWidgets(
++      'SE9 hovering geometry, or an unrelated edit, does not wipe an '
++      'uncommitted value; a later commit still stores it', (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    await drawTwoBoxes(tester, view);
++    final bs = boxes(view.document);
++    final b = bs.first;
++    view.selection.replace([SelectionKey.root(b)]);
++    await tester.pump();
++    final depth = view.document.commands.undoDepth;
++    await tester.enterText(width, '150');
++    await tester.pump();
++    // The real hover API (packages/jet_cad_2d_flutter/lib/src/selection.dart):
++    // hovering different geometry notifies `SelectionController`'s
++    // listeners exactly like a selection change would.
++    view.selection.setHover(SelectionKey.root(bs[1]));
++    await tester.pump();
++    expect(tester.widget<TextField>(width).controller!.text, '150');
++    // Clears the hover again, in the test, rather than leaving that to
++    // `InteractionLayer._release`'s own teardown-time clear
++    // (packages/jet_cad_2d_flutter/lib/src/interaction_layer.dart): a real
++    // (non-idempotent) hover change happening as an unmanaged side effect
++    // of the widget tree tearing down is unrelated noise this test does not
++    // want to depend on.
++    view.selection.setHover(null);
++    await tester.pump();
++    // An unrelated document edit: drawing a plain line notifies the
++    // panel's document-change listener too, and must not touch the field
++    // either.
++    final line = addDrafted(view.document, EntityKind.line,
++        linePayload(Vector2(7300, 3300), Vector2(7400, 3350)));
++    view.document.commands.execute(line);
++    await tester.pump();
++    expect(tester.widget<TextField>(width).controller!.text, '150');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    expect(view.document.components.get<BoxParams>(b)!.width, 150);
++    expect(view.document.commands.undoDepth, depth + 2);
++  });
++
++  testWidgets(
++      'SE10 moving focus from Width to Height commits Width, with no '
++      'Enter', (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    await drawTwoBoxes(tester, view);
++    final b = boxes(view.document).first;
++    view.selection.replace([SelectionKey.root(b)]);
++    await tester.pump();
++    await tester.enterText(width, '150');
++    await tester.pump();
++    await tester.tap(height);
++    await tester.pump();
++    await tester.enterText(height, '90');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    final p = view.document.components.get<BoxParams>(b)!;
++    expect(p.width, 150);
++    expect(p.height, 90);
++  });
+ }
+diff --git a/docs/superpowers/notes/2026-09-24-plan-06-results.md b/docs/superpowers/notes/2026-09-24-plan-06-results.md
+index ada0a39..b474347 100644
+--- a/docs/superpowers/notes/2026-09-24-plan-06-results.md
++++ b/docs/superpowers/notes/2026-09-24-plan-06-results.md
+@@ -126,20 +126,110 @@ Exit 0. `flutter build web --release`:
+ Compiling lib/main.dart for the Web...                             26.0s
+ ✓ Built build/web
+ ```
+ 
+ Exit 0. **Both builds printed `✓ Built`.**
+ 
+ `git status --short` was clean before this run and clean after every one of
+ the six commands above; no `analysis_options.yaml` was rewritten by any
+ `flutter analyze` / `flutter pub get` step.
+ 
++### The four gate lines, re-run after the final-review fix wave
++
++The section above is Task 11's own run, before the final whole-branch review
++and its fix wave (see "Final review"). Re-run in full, with `CI=true`, after
++`P13`, `P14`, `G10`, `SE9` and `SE10` landed:
++
++**`packages/jet_cad_2d`**: `CI=true dart test`:
++
++```
++00:03 +953: test/invariants/query_allocation_test.dart: (tearDownAll)
++00:03 +953: All tests passed!
++```
++
++Exit 0: **953, up 3 from 950** (`P13`, `P14`, `G10`). `dart analyze`:
++
++```
++Analyzing jet_cad_2d...
++No issues found!
++```
++
++Exit 0. `dart format --output=none --set-exit-if-changed .`: `Formatted 141
++files (0 changed) in 0.25 seconds.` Exit 0.
++
++**`packages/jet_cad_2d_flutter`**: `CI=true flutter test`:
++
++```
++00:12 +925 ~1 -5: Some tests failed.
++```
++
++Exit 1: **unchanged — 925 pass, 1 skip, and exactly the same five standing
++`text_ladder_golden_test.dart` failures** (this fix wave touches nothing
++under `jet_cad_2d_flutter`). `flutter analyze`:
++
++```
++Analyzing jet_cad_2d_flutter...
++No issues found! (ran in 1.3s)
++```
++
++Exit 0. `dart format --output=none --set-exit-if-changed .`: `Formatted 176
++files (0 changed) in 0.33 seconds.` Exit 0.
++
++**`apps/dev_harness_2d`**: `CI=true flutter test --concurrency=1`:
++
++```
++00:19 +82: All tests passed!
++```
++
++Exit 0: **unchanged, 82** (untouched by this fix wave). `flutter analyze`:
++
++```
++Analyzing dev_harness_2d...
++No issues found! (ran in 1.0s)
++```
++
++Exit 0. `dart format --output=none --set-exit-if-changed .`: `Formatted 22
++files (0 changed) in 0.05 seconds.` Exit 0.
++
++**`apps/floor_planner`**: `CI=true flutter test`:
++
++```
++00:03 +69: All tests passed!
++```
++
++Exit 0: **69, up 2 from 67** (`SE9`, `SE10`). `flutter analyze`:
++
++```
++Analyzing floor_planner...
++No issues found! (ran in 1.4s)
++```
++
++Exit 0. `dart format --output=none --set-exit-if-changed .`: `Formatted 19
++files (0 changed) in 0.05 seconds.` Exit 0. `flutter build macos --release`:
++
++```
++Building macOS application...
++✓ Built build/macos/Build/Products/Release/floor_planner.app (51.4MB)
++```
++
++Exit 0. `flutter build web --release`:
++
++```
++Compiling lib/main.dart for the Web...                             23.7s
++✓ Built build/web
++```
++
++Exit 0. **Both builds printed `✓ Built`.**
++
++`git status --short` was clean before this re-run and clean after every one
++of the six commands above.
++
+ ### Branch commit trailers
+ 
+ This count had to include the fix commit that corrects the fork point used
+ here, so it could not be measured before that commit existed. **Measured
+ immediately after that commit landed, against its own SHA** (not a bare
+ `HEAD`, since `HEAD` keeps moving and this figure must not):
+ 
+ ```
+ $ git rev-list --count 6a279b3..01defe5
+ 15
+@@ -187,20 +277,28 @@ round.
+   mutation sweep (`plan-06-mutation-log.md`) and Task 10's own gate run both
+   already recorded.
+ - **The app series is `SE`, not the plan's own `SP`.** The plan's task text
+   named Task 8's selection-panel tests `SP1`–`SP7`, but `startup_plan_test.dart`
+   already uses `SP1`–`SP5` for a different feature (Task 7's sample-plan
+   test). The pre-flight scan caught the collision before any code was
+   written and ruled the panel's tests `SE1`–`SE8` instead — names only, no
+   test lost or gained, recorded in `plan-rulings.md`'s pre-flight table and
+   `progress.md`'s top-level ruling.
+ 
++**A further shift, from the final-review fix wave (see "Final review"):**
++`jet_cad_2d` gains three more tests (`P13`, `P14`, `G10`: `950 → 953`) and
++`apps/floor_planner` gains two (`SE9`, `SE10`: `67 → 69`). `jet_cad_2d_flutter`
++and `dev_harness_2d` are untouched. **The running total after the fix wave
++is `jet_cad_2d` 953, `jet_cad_2d_flutter` 925 + 1 skip + 5 goldens,
++`dev_harness_2d` 82, `apps/floor_planner` 69** — see "The four gate lines,
++re-run after the final-review fix wave" above for the transcripts.
++
+ ### Mutation tally
+ 
+ From [plan-06-mutation-log.md](plan-06-mutation-log.md): **26 fired, 26
+ killed, 0 survived, M-06e recorded N/A by construction** (spec D4 step 6 is
+ a fixed one-hop closure, not a loop — there is no "drop the loop" edit to
+ make). One mutant, `M-06b′`, first fired as a **survivor** against
+ `neighbourhood_test.dart`'s original `N6` fixture — a degenerate fixture
+ (only one side of the move ever reserved a new handle, so an unsorted
+ closure had nothing to disturb) — was fixed test-only (the fixture's
+ geometry changed to a cross overlap where both objects gain children at
+@@ -272,40 +370,41 @@ itself, each with the test in the task that owns the code:
+ ### Debt
+ 
+ Every `minor (deferred)` line and every controller `Ruling:` line from the
+ ledger (`.superpowers/sdd/2026-09-24-parametric-layer/progress.md`) that is
+ not already written into the spec as an amendment, plus the spec's own open
+ questions. One line each; none is fixed by this task.
+ 
+ **The most user-visible item, flagged for the look and for the final
+ review:**
+ 
+-- **`onTapOutside` is not real focus-out (Task 8).** Flutter groups every
+-  plain `TextField` under the same shared `groupId`, so moving focus from
+-  Width to Height fires no tap-outside at all — nothing commits. A
+-  document change that lands while the user is mid-keystroke (from an
+-  unrelated edit, undo, or another user in a future multi-client setting)
+-  then runs `_sync`, which reloads Width from the model and silently drops
+-  the typed value. A real `FocusNode` listener would give true focus-out
+-  and close this gap. Not fixed in this plan; flagged for the final review
+-  to triage.
++- **`onTapOutside` is not real focus-out (Task 8) — fixed in the
++  final-review fix wave (F2).** Flutter groups every plain `TextField`
++  under the same shared `groupId`, so moving focus from Width to Height
++  fired no tap-outside at all — nothing committed. Each field now owns its
++  own `FocusNode`, whose listener commits on that field's own focus loss;
++  `onTapOutside` only unfocuses. `SE8` is re-pointed at the focus-loss
++  commit and `SE10` (Width → Height, no Enter) is new; both go red against
++  the removed listener.
+ 
+ **Every other deferred item, one line each:**
+ 
+ - Task 1: the expander's "one slot, one owner" rule is doc-only in the
+   dispatcher; the owner-side guard is `ParametricSystem.install()` throwing
+   when the slot is already taken (Task 2, `P8`).
+ - Task 2: `found[h]` keeps one registration per handle, so a holder with two
+   parametric components would get only one detached on delete.
+-- Task 2: `drift()` does not set `_applying`, so a `generate()` that calls
++- Task 2: `drift()` did not set `_applying`, so a `generate()` that calls
+   `execute` during a dry run would mutate the document instead of being
+-  refused.
++  refused — **fixed in the final-review fix wave (F5)**. `drift()` now sets
++  `_applying` in a try/finally around its survey and plan, exactly as
++  `apply()` already does. Pinned by `G10`.
+ - Task 2: the fast path sorts every store via `withComponent<T>()`; the spec
+   asked for a store-length check instead (this is off the frame path either
+   way).
+ - Task 2: the hand-rolled regeneration loop in `_run` duplicates
+   `CompoundCommand.apply`'s own rollback logic; it deserves a comment
+   explaining why (it must tell its own rollback failure apart from a
+   child's `StateError`).
+ - Task 2: `P4` asserts A's child count after the edit but not B's.
+ - Task 2: `Trip.mode` / `Trip.document` are static test-fixture state; later
+   tests must reset them in `tearDown` (Task 4's `guards_test.dart` does).
+@@ -325,42 +424,64 @@ review:**
+ - Task 6: the report described `_insideInterval` as a character-for-character
+   copy of the engine's own helper; one token differs (`tol.linear` vs.
+   `Tolerance.standard.linear`), same value either way.
+ - Task 7: RED was captured after the commit landed (`box_tool.dart` emptied,
+   backed up with `cp` and restored via `git show HEAD:…`, tree verified
+   clean) — not a `git checkout --`, which is forbidden, but not
+   test-first order either.
+ - Task 7: `BX4` checks `drift()` with a fresh `ParametricSystem`, not the
+   shell's own installed one — equivalent by Ruling 06-13's `isRegistered`
+   guard, but worth a second look if that guard ever changes.
+-- Task 8: `_sync` reloads both fields on every document change, overwriting
+-  uncommitted keystrokes when an unrelated edit lands mid-typing.
++- Task 8: `_sync` reloaded both fields on every document change, overwriting
++  uncommitted keystrokes when an unrelated edit lands mid-typing — **fixed
++  in the final-review fix wave (F1)**. `_load` now reloads a field only
++  when the selected box or its stored values actually changed since the
++  last load, and never overwrites a field that currently has focus. Pinned
++  by `SE9` (hover, then an unrelated edit, then a commit).
+ - The naming ruling: Task 8's selection-panel tests are `SE1`–`SE8`, not the
+   plan text's `SP1`–`SP7` — `SP1`–`SP5` already name `startup_plan_test.dart`
+   tests, and the plan used `SP` for both. Names only; nothing lost.
+ - The ledger-archive ruling: Tasks 10 and 11 (Steps 1–4) run in one
+   dispatch; the ledger archive is deliberately withheld until after the
+   final whole-branch review and its fix wave, following Plan 05's Ruling
+   T11-a — so the archive holds the final review, not a stale mid-review
+   snapshot.
+ 
+ **The spec's own open questions, carried forward (not blocking, recorded for
+ 07):**
+ 
+ - **Draw order of added children (D12).** A child added by a later
+   regeneration takes a fresh, higher handle and draws above older content.
+   A box's outline is lines on layer 0, so nothing visible depends on it
+   here, but 07's walls with fills may need a per-object draw pass.
+-- **The O(n²) neighbour search.** `ParametricView.neighbours` compares every
+-  parametric object's `reach` against every other's. A broad phase is only
+-  needed past a few hundred parametric objects — this plan's scale (a
+-  handful of boxes) never approaches it.
++- **The O(n²) neighbour search, and it runs twice per edit.** `_survey`
++  compares every parametric object's `reach` against every other's, and
++  `_run` calls `_survey` twice — once before `inner.apply`, once after —
++  so every edit pays the full O(n²) cost twice once *any* box exists in the
++  document, including a plain line draw that touches no box at all. The
++  final reviewer measured 0.7 ms at 100 boxes, 4.3 ms at 300, and 16 ms at
++  600 (JIT). Computing neighbours only for the edited objects (and reusing
++  the untouched half of the pair-wise comparison across the two surveys)
++  would make this near-linear. This plan's own scale (a handful of boxes)
++  never approaches it; flagged for 07, whose walls are expected to run
++  into the hundreds.
++- **A box swallowed whole inside another cannot be selected or deleted
++  until the outer box moves.** `N14` already pins the regeneration side of
++  this (0 children while swallowed, a full count with new handles once it
++  is exposed again), but the consequence for the UI was not spelled out: a
++  parametric group with zero generated children has no geometry for
++  `resolveHit` to hit, so the swallowed box is invisible to a click — it
++  cannot be selected, and therefore cannot be deleted or edited through the
++  Selection section — until the box that swallows it moves away and its
++  outline regrows. 07 needs either a way to select a zero-child parametric
++  object directly (e.g. a bounding-box or tree pick) or to treat this as
++  accepted behaviour for boxes that are fully contained.
+ - **Whether `reach` needs to be richer than an AABB.** A long diagonal
+   object has a large AABB and produces spurious neighbours, which cost
+   regeneration time, not correctness — `generate`'s own exact test still
+   produces the right geometry (see `M-06g (app)`'s note in the mutation
+   log's spec amendment). The per-axis tolerance rule in D3 is a placeholder
+   that 07 must re-derive for mitred wall corners.
+ 
+ ---
+ 
+ ## Criterion 14: the human's look — OWED
+@@ -420,20 +541,98 @@ not seen / could not judge**.
+ 5. Delete a box. The other regrows, and ctrl+Z brings it back. ☐ seen
+    ☐ not seen ☐ could not judge
+ 6. Typing B or V in the fields does not switch tools. ☐ seen ☐ not seen
+    ☐ could not judge
+ 
+ **Nothing above is ticked on the human's behalf.** No finding, no verdict
+ and no `fix/` branch exist yet for Plan 06's look.
+ 
+ ---
+ 
++## Final review
++
++**Verdict: With fixes.** The final whole-branch review found two Important
++and three Minor findings; all five are fixed in this one fix-wave dispatch,
++each with a new test that goes red against the unfixed code and green
++against the fix, and each Minor's mutant fired and killed with a `cp`
++backup, restored and diffed clean.
++
++- **F1 (Important) — hovering the canvas wiped a typed value.** `_sync` ran
++  `_load` on every `SelectionController` notification, including a hover
++  change, and `_load` overwrote the field from the model unconditionally.
++  Fixed: `_load` reloads a field only when the selected box or its stored
++  values changed since the last load, and never overwrites a field that
++  currently has focus. Pinned by `SE9` (select, type, hover, an unrelated
++  edit, then commit — the typed value survives all of it).
++- **F2 (Important) — `onTapOutside` is not focus-out.** Plain `TextField`s
++  share one tap-region group, so moving focus from Width to Height fired no
++  tap-outside and committed nothing; overriding `onTapOutside` also
++  swallowed Flutter's own default unfocus-on-outside-click. Fixed: each
++  field owns a `FocusNode` whose listener commits on that field's own focus
++  loss; `onTapOutside` now only unfocuses. `SE8` is re-pointed at the
++  focus-loss commit; `SE10` (Width → Height, no Enter) is new. The mutant
++  (removing the focus-loss listener) sends both `SE8` and `SE10` red.
++- **F3 (Minor) — undo/redo index freshness was only incidentally tested.**
++  With `ParametricReplay.capability` forced to `Capability.components`,
++  every existing engine test still passed. Fixed by adding a test, not by
++  changing production code: `P13` (`packages/jet_cad_2d/test/parametric/regeneration_test.dart`)
++  builds on `P4`'s live-`SpatialIndex` shape, undoes and redoes a
++  regenerating edit, and checks every child midpoint of both objects is
++  still found by `index.forEachInRect` after each. The mutant sends `P13`
++  red (the index misses a child at the restored geometry).
++- **F4 (Minor) — the D6 guard's removal arm was looser than the spec.** A
++  removed generated child was refused only while its owner was still
++  recognised as a live parametric object (node **and** component), so a
++  compound that first detached the owner's component and then removed one
++  of its still-live children slipped past the backstop. Fixed: the removal
++  arm now refuses whenever the owner's group node still exists, whatever
++  its component. Pinned by `P14`; `G3` (the delete cascade, which removes a
++  parametric group's children *together with* the node) still passes,
++  confirming the allowed case is unaffected.
++- **F5 (Minor) — `drift()` did not guard re-entry.** `apply()` sets
++  `_applying` around its dry run so a client `generate()` that calls
++  `execute` fails loudly instead of mutating (spec 06 D2); `drift()`, a dry
++  run in its own right, did not. Fixed: `drift()` sets `_applying` in a
++  try/finally around its survey and plan. Pinned by `G10`
++  (`packages/jet_cad_2d/test/parametric/guards_test.dart`), which uses a
++  reentrant edit unrelated to any parametric closure (so the *existing*
++  `apply()` guard cannot catch it one level down the way `Trip.reentrant`'s
++  self-referential case does) — against the unfixed `drift()` this edit
++  actually lands, and the test's byte-comparison catches it.
++
++**What changed the counts.** `packages/jet_cad_2d` grows by three tests
++(`P13`, `P14`, `G10`): 950 → 953. `apps/floor_planner` grows by two
++(`SE9`, `SE10`): 67 → 69. `packages/jet_cad_2d_flutter` and
++`apps/dev_harness_2d` are unchanged. See "The four gate lines" above for
++the re-run transcripts and "Where the counts differ" for the running total.
++
++**Files touched by this fix wave:**
++- `apps/floor_planner/lib/selection_panel.dart` (F1, F2)
++- `apps/floor_planner/test/selection_panel_test.dart` (F1, F2: `SE8`
++  re-pointed, `SE9`/`SE10` added)
++- `packages/jet_cad_2d/lib/src/parametric/regeneration.dart` (F4)
++- `packages/jet_cad_2d/lib/src/parametric/parametric_system.dart` (F5)
++- `packages/jet_cad_2d/test/parametric/regeneration_test.dart` (F3: `P13`;
++  F4: `P14`)
++- `packages/jet_cad_2d/test/parametric/guards_test.dart` (F5: `G10`, plus
++  its local `ReentrantProbe` test fixture)
++- `docs/superpowers/specs/2026-09-24-parametric-layer-design.md` (D6 and
++  D13 amendments)
++- `docs/superpowers/notes/2026-09-24-plan-06-results.md` (this file)
++
++**Concerns carried forward, not fixed here:** the two sub-project-07 debt
++items added above (the swallowed-box selection gap and the doubled O(n²)
++neighbour search) are correctness- and performance-adjacent but out of this
++plan's scope; the human's look (Criterion 14) is still owed.
++
++---
++
+ ## Rulings
+ 
+ ### The plan's rulings, 06-1…06-13 (06-14 not made)
+ 
+ Each ruling is one line, with what it costs if it is wrong. The ones marked
+ **(spec amended)** are written into the spec (see "Spec amendments" below).
+ 
+ - **06-1 (spec amended, D3 and D10):** types live in a document-free
+   `ParametricCatalog`, not on `ParametricSystem`, because the codec creates
+   the document and needs the factories before it loads components. Cost:
+@@ -546,36 +745,45 @@ appended at the end of the relevant section. Nothing original is rewritten.
+ - **D3:** Ruling 06-1 — types live in a document-free `ParametricCatalog`,
+   not on `ParametricSystem`, because `DraftDocumentCodec.decode` needs the
+   factories before the document (and therefore any per-document system)
+   exists.
+ - **D4:** Ruling 06-3 (step 4, narrowed to previously-live objects) and
+   Ruling 06-4 (step 5, a handle that *was* an object seeds the closure too),
+   plus the review-found hardening at step 8 (the after-survey, `lost`,
+   `cleanup` and `seeds` moved inside the rollback `try`; `P11`, `M-06w`).
+ - **D6:** the guard tightened to the spec's literal text — refused whenever
+   the touched handle still exists, not only while its owner is still "an
+-  object" — closing a bundled-detach loophole; `P12`, `M-06x`.
++  object" — closing a bundled-detach loophole; `P12`, `M-06x`. **Final-review
++  fix wave (F4):** the *removed* arm tightened the same way — refused
++  whenever the owner's group node still exists, whatever its component;
++  `P14`.
+ - **D10:** Ruling 06-1's consequence for load — `registerComponents` is on
+   the catalog, and a test that decodes and then constructs a
+   `ParametricSystem` over the same document relies on Ruling 06-13's
+   `isRegistered` guard.
++- **D13 (final-review fix wave, F1/F2):** each Selection-section field
++  commits on its own focus loss, via its own `FocusNode`, not on a shared
++  `onTapOutside` — `SE8`, `SE10`; a reload never overwrites a focused field,
++  and only reloads when the selected box or its stored values actually
++  changed — `SE9`.
+ - **The mutant table:** `M-06u`, `M-06v`, `M-06w`, `M-06x` and `M-06y`
+   added; `M-06g` (app)'s kill location clarified (`BT6`, not `BT3`); `M-06b′`'s
+   survive-then-fixture-fix-then-kill history recorded.
+ - **The Testing section:** `G3` and `G6` compare state with the root's
+   child order normalised, because `RemoveNodeCommand`'s inverse re-links at
+   the end and `HandleSeed` never moves back (Task 4's ruling).
+ 
+-**D13 is not amended.** Ruling 06-14 was not made — the reviewer's finding
+-was a doc-comment slip, not a behaviour change, and the controller's
+-instruction for this dispatch is explicit that no D13 amendment is written
+-for it.
++**D13's amendment above supersedes this note's earlier "D13 is not
++amended."** That line was correct at Task 11: Ruling 06-14 was a
++doc-comment slip, not a behaviour change, and no D13 amendment was written
++for it. The final whole-branch review found a real behaviour gap in the
++same section (F1, F2), which *is* now amended, above.
+ 
+ ---
+ 
+ ## Files this task touched
+ 
+ **Task 10 (`fbc6fba`):**
+ - `docs/superpowers/notes/plan-06-mutation-log.md`: the "Invariants and
+   greps (Task 10)" section appended — the six greps, the four gate lines,
+   the branch commit-trailer check.
+ 
+diff --git a/docs/superpowers/specs/2026-09-24-parametric-layer-design.md b/docs/superpowers/specs/2026-09-24-parametric-layer-design.md
+index 1eaaa1a..073a257 100644
+--- a/docs/superpowers/specs/2026-09-24-parametric-layer-design.md
++++ b/docs/superpowers/specs/2026-09-24-parametric-layer-design.md
+@@ -403,20 +403,31 @@ its owner now is, not only while its owner is still a live parametric
+ object. The looser rule (refuse only while the owner is still "an object")
+ let a bundled command detach a box's component and then, in the same
+ compound, directly edit one of its still-live generated children, sidestepping
+ the backstop. The reviewer graded the original gap Minor; the controller
+ ruled the spec binding and required the fix, since a compound that detaches
+ an owner and edits its old child in one command must still be refused. Cost
+ if wrong: such a compound is refused even though no tool in this plan issues
+ one. Killed by `P12`, mutant `M-06x` (dropping the "still exists" check from
+ the `owner != null` arm, leaving only the "is a live object" check).
+ 
++**Amended at execution (Plan 06, final-review fix wave, F4):** the *removed*
++arm is tightened the same way. A removed child in `G` is refused when the
++owner's group node still exists (`t.tree[owner] != null`), whatever the
++owner's component now is — not only while the owner is still recognised as
++"a live parametric object" (a node **and** a registered component). The
++looser check let a compound that first detaches the owner's component and
++then removes one of its still-live children, in the same command, slip past
++the backstop, exactly mirroring the *edit* arm's own gap above. Cost if
++wrong: such a compound is refused even though no tool in this plan issues
++one. Killed by `P14`.
++
+ ### D7 — Permissions: derived geometry inherits (human)
+ 
+ - **The wrapper's `capabilities`, checked by `_require` before `apply`:**
+   - `inner.capabilities`;
+   - plus `type.editCapability` for every `SetComponentCommand` in `inner`,
+     recursing into compounds, whose component type is parametric.
+ 
+   Regeneration adds no capability of its own. The edit that caused it
+   authorises it.
+ - **Consequences:**
+@@ -573,20 +584,42 @@ requires instead:
+     is one undo step;
+   - a value ≤ 0 or unparseable is rejected, and the field reverts;
+   - under runtime permissions the fields are read-only (`editCapability`);
+   - it is guarded like the page panel's fields: `shortcut_guard.dart`, so
+     typing "B" in a field does not switch tools.
+ - **Startup plan:** unchanged, and it holds no parametric object. The look
+   starts from an empty spot and draws boxes.
+ - **`GeneratedGeometryError`** propagates like `PermissionDeniedError`.
+   The UI never offers the edit, so nothing catches it (review m5).
+ 
++**Amended at execution (Plan 06, final-review fix wave, F1/F2):** "Enter or
++focus-out commits" above is tightened to what it actually takes to hold in a
++two-field panel:
++
++- **Each field commits on its own focus loss**, not on a shared
++  `onTapOutside`. A plain `TextField`'s default `onTapOutside` groups every
++  field under one `groupId`, so moving focus from Width straight to Height
++  is *inside* that group, not outside it — nothing would commit Width. Each
++  field owns its own `FocusNode`, whose listener commits that field the
++  moment it loses focus, whatever took the focus: the other field, a tap
++  outside both, or Enter (which unfocuses before `onSubmitted` runs).
++  `onTapOutside` itself does nothing but unfocus. Killed by removing the
++  focus-loss listener: `SE8` and `SE10` both go red.
++- **A reload never overwrites a focused field.** The panel reloads a field
++  from the model on every `SelectionController` and document-change
++  notification, but hovering different geometry and an unrelated document
++  edit both notify without changing the selected box or its stored values —
++  the original code reloaded anyway, silently dropping whatever the user
++  had typed but not yet committed. The fix reloads only when the selected
++  box or its stored values actually changed since the last load, and never
++  writes into a field that currently has focus. Pinned by `SE9`.
++
+ ## Architecture
+ 
+ ### Files
+ 
+ - **The engine, `packages/jet_cad_2d`:**
+   - `lib/src/document/undo.dart`: the `expander` slot (D2);
+   - `lib/src/parametric/parametric_system.dart`:
+     - `ParametricSystem`, `ParametricType`, `Generated`, `ParametricView`;
+     - `ParametricEdit`, `ParametricReplay`;
+     - `GeneratedGeometryError`;
+diff --git a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+index c6d3ee6..9b6157b 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+@@ -115,27 +115,37 @@ class ParametricSystem {
+ 
+   /// Releases the slot only if it is still this system's own tear-off.
+   void dispose() {
+     if (document.commands.expander == _expand) {
+       document.commands.expander = null;
+     }
+   }
+ 
+   /// Handles whose regeneration would change anything (spec D10). A dry
+   /// run: reserves no handle, mutates nothing.
++  ///
++  /// Guarded the same way [apply] is (F5): a client `generate` must not
++  /// mutate, and a dry run is exactly where a client could try to call
++  /// `execute` and have it actually land, since nothing else here applies
++  /// anything. Re-entry through the dispatcher throws instead.
+   List<Handle> drift() {
+-    final s = _survey(document, _types);
+-    final view = ParametricView._(document, s.neighbours);
+-    return [
+-      for (final h in s.objects.keys)
+-        if (_plan(document, [h], s, view).isNotEmpty) h,
+-    ];
++    _applying = true;
++    try {
++      final s = _survey(document, _types);
++      final view = ParametricView._(document, s.neighbours);
++      return [
++        for (final h in s.objects.keys)
++          if (_plan(document, [h], s, view).isNotEmpty) h,
++      ];
++    } finally {
++      _applying = false;
++    }
+   }
+ 
+   /// One diagnostic per parametric component on a holder that is not a
+   /// root-level group: it is not regenerated (spec D5).
+   List<Diagnostic> diagnostics() => [
+         for (final t in _types)
+           for (final h in t.handles(document))
+             if (!_isObject(document, _types, h))
+               Diagnostic(
+                 severity: DiagnosticSeverity.warning,
+diff --git a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+index 04ccdf2..fc96145 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+@@ -134,29 +134,32 @@ List<DraftCommand> _plan(
+   }
+   return out;
+ }
+ 
+ /// The first touched handle that edits a generated entity, removes one
+ /// while its group lives, or adds one into a live object (spec D6).
+ ///
+ /// For `h` in `G` (before.owned[h] != null): refused if `h` **still
+ /// exists** — a direct edit of a generated entity, regardless of what else
+ /// the same command did to its owner — or, when `h` was removed, if the
+-/// owner is still a live parametric object. Only a child removed *together
+-/// with* its owning group is allowed.
++/// owner's group node still exists (spec D6's amendment for F4: whatever
++/// its component now is, not only while it is still a live parametric
++/// object -- a compound that detaches the component and then removes one
++/// of its still-live children in the same command must still be refused).
++/// Only a child removed *together with* its owning group is allowed.
+ Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
+     _Survey before, Set<Handle> touched) {
+   for (final h in touched.toList()..sort(_byValue)) {
+     final owner = before.owned[h];
+     if (owner != null) {
+       if (t.entities.slotOf(h) != null) return h;
+-      if (_isObject(t, types, owner)) return h;
++      if (t.tree[owner] != null) return h;
+       continue;
+     }
+     final slot = t.entities.slotOf(h);
+     if (slot != null && _isObject(t, types, t.entities.ownerAt(slot))) {
+       return h;
+     }
+   }
+   return null;
+ }
+ 
+diff --git a/packages/jet_cad_2d/test/parametric/guards_test.dart b/packages/jet_cad_2d/test/parametric/guards_test.dart
+index fe9a1ac..63525bb 100644
+--- a/packages/jet_cad_2d/test/parametric/guards_test.dart
++++ b/packages/jet_cad_2d/test/parametric/guards_test.dart
+@@ -8,20 +8,68 @@ import 'support/clients.dart';
+ import 'support/fixture.dart';
+ 
+ /// The select tool's delete cascade for one group (select_tool.dart:654-682).
+ DraftCommand deleteObject(DraftDocument doc, Handle g) => CompoundCommand([
+       for (final k in kids(doc, g)) RemoveEntityCommand(k),
+       RemoveNodeCommand(g),
+     ], label: 'Delete');
+ 
+ const DraftPermissions runtime = DraftPermissions.runtime;
+ 
++/// G10's probe: a minimal parametric type whose `generate` can attempt one
++/// reentrant `execute`, on a command unrelated to any parametric closure --
++/// a geometry edit of a plain line owned by the root, not by [self] or any
++/// of its neighbours. That is deliberate: unlike `Trip.reentrant` (which
++/// sets a `Trip` on itself and so re-triggers its own regeneration, tripping
++/// the *existing* `apply()` guard one level down, whether or not `drift()`
++/// guards itself), this reentrant edit touches nothing the planner tracks,
++/// so `_run` finds an empty seed set and returns without planning again. A
++/// successful reentrant execute here would therefore actually land -- and
++/// stay landed -- unless `drift()` itself is guarded (spec 06 D2, F5).
++DraftDocument? _probeDoc;
++Handle? _probeTarget;
++bool _probeArmed = false;
++
++final class ReentrantProbe implements Component {
++  const ReentrantProbe(this.n);
++  static const String id = 'test.reentrantProbe';
++  final int n;
++  @override
++  String get typeId => id;
++  @override
++  Map<String, Object?> toJson() => {'n': n};
++  static ReentrantProbe fromJson(Map<String, Object?> j) =>
++      ReentrantProbe(j['n']! as int);
++  @override
++  bool operator ==(Object o) => o is ReentrantProbe && o.n == n;
++  @override
++  int get hashCode => n.hashCode;
++}
++
++final class ReentrantProbeType extends ParametricType<ReentrantProbe> {
++  const ReentrantProbeType();
++  @override
++  Capability get editCapability => Capability.geometry;
++  @override
++  Aabb2 reach(ReentrantProbe params, Transform2 toWorld) =>
++      Aabb2.fromPoints([toWorld.transformPoint(Vector2(0, 0))]);
++  @override
++  List<Generated> generate(ParametricView view, Handle self) {
++    if (_probeArmed) {
++      _probeArmed = false;
++      _probeDoc!.commands.execute(SetEntityGeometryCommand(
++          _probeTarget!, linePayload(Vector2(9, 9), Vector2(8, 8))));
++    }
++    return const [];
++  }
++}
++
+ /// A `GroupNode`'s `children` is draw order, but draw order *is* ascending
+ /// handle value (D12; `tree.dart:586`'s own append-only `_link`), never the
+ /// list position. `RemoveNodeCommand`'s inverse (`AddNodeCommand`) re-links a
+ /// restored node at the *end* of its parent's `children` rather than back at
+ /// its old index (`tree.dart:557`) -- that is documented, pre-existing engine
+ /// behaviour, not something the parametric wrapper does. A delete-then-undo
+ /// round trip through the root therefore reorders the root's `children`
+ /// without changing anything observable. `enc`/`canon` (support/fixture.dart)
+ /// compare raw bytes and do not account for it, so it is normalised here,
+ /// once, for the two guards that undo a `RemoveNodeCommand`.
+@@ -195,11 +243,37 @@ void main() {
+ 
+   test(
+       'G9 un-parametric: detaching the component regrows old neighbours '
+       '(Ruling 06-4)', () {
+     final doc = paramDoc();
+     pair(doc);
+     doc.commands.execute(SetComponentCommand<ClipRect>(hA, null));
+     expect(kids(doc, hB), hasLength(4));
+     expect(kids(doc, hA), hasLength(5), reason: 'A is plain lines now');
+   });
++
++  test(
++      'G10 drift() guards re-entry like apply() does: a client generate '
++      'calling execute during the dry run throws, and nothing is mutated '
++      '(F5)', () {
++    final doc = DraftDocument.empty();
++    final probeCatalog = ParametricCatalog()
++      ..register<ReentrantProbe>(ReentrantProbe.id, ReentrantProbe.fromJson,
++          const ReentrantProbeType());
++    final system = ParametricSystem(doc, probeCatalog)..install();
++    _probeDoc = doc;
++    doc.commands.execute(create(doc, hA, parked, const ReentrantProbe(1)));
++    final plainLine = addDrafted(
++        doc, EntityKind.line, linePayload(Vector2(1, 2), Vector2(3, 4)));
++    doc.commands.execute(plainLine);
++    _probeTarget = plainLine.record.handle;
++    final before = enc(doc);
++    _probeArmed = true;
++    expect(() => system.drift(), throwsStateError);
++    expect(_probeArmed, isFalse,
++        reason: "generate() never ran, so this doesn't probe anything");
++    expect(enc(doc), before);
++    system.dispose();
++    _probeDoc = null;
++    _probeTarget = null;
++  });
+ }
+diff --git a/packages/jet_cad_2d/test/parametric/regeneration_test.dart b/packages/jet_cad_2d/test/parametric/regeneration_test.dart
+index 82c1b63..bc8fa1e 100644
+--- a/packages/jet_cad_2d/test/parametric/regeneration_test.dart
++++ b/packages/jet_cad_2d/test/parametric/regeneration_test.dart
+@@ -198,11 +198,70 @@ void main() {
+     expect(
+         () => doc.commands.execute(CompoundCommand([
+               SetComponentCommand<ClipRect>(hA, null),
+               SetEntityGeometryCommand(child, payload),
+             ], label: 'Detach then edit')),
+         throwsA(isA<GeneratedGeometryError>()));
+     expect(doc.commands.undoDepth, depth);
+     expect(doc.components.get<ClipRect>(hA), const ClipRect(2000, 1000));
+     expect(enc(doc), before);
+   });
++
++  test(
++      'P13 undo and redo keep a live SpatialIndex fresh (F3: index '
++      'freshness is not incidental)', () {
++    final doc = paramDoc();
++    final index = SpatialIndex(doc);
++    // A at width 500 does not reach B; at 2000 it does, and both re-clip
++    // (P4's shape).
++    doc.commands.execute(create(doc, hA, atA, const ClipRect(500, 1000)));
++    doc.commands.execute(create(doc, hB, atB, const ClipRect(400, 900)));
++    expect(kids(doc, hA), hasLength(4));
++    doc.commands
++        .execute(SetComponentCommand<ClipRect>(hA, const ClipRect(2000, 1000)));
++    expect(kids(doc, hA), hasLength(5));
++
++    void expectFresh() {
++      for (final g in [hA, hB]) {
++        for (final s in worldSegments(doc, g)) {
++          final mid = Vector2((s[0] + s[2]) / 2, (s[1] + s[3]) / 2);
++          final found = <Handle>{};
++          index.forEachInRect(
++              Aabb2(mid - Vector2(0.5, 0.5), mid + Vector2(0.5, 0.5)),
++              const QueryFilter.all(),
++              (slot) => found.add(doc.entities.handleAt(slot)));
++          expect(found.intersection(kids(doc, g).toSet()), isNotEmpty,
++              reason: 'a child of ${g.toHex()} at $mid');
++        }
++      }
++    }
++
++    doc.commands.undo();
++    expect(kids(doc, hA), hasLength(4));
++    expectFresh();
++
++    doc.commands.redo();
++    expect(kids(doc, hA), hasLength(5));
++    expectFresh();
++
++    index.dispose();
++  });
++
++  test(
++      'P14 removing a generated child is refused while its owner\'s group '
++      'node still exists, even with the component already detached in the '
++      'same command (spec D6\'s amendment for F4)', () {
++    final doc = paramDoc();
++    doc.commands.execute(create(doc, hA, parked, const ClipRect(2000, 1000)));
++    final firstChildOfA = kids(doc, hA).first;
++    final before = enc(doc);
++    final depth = doc.commands.undoDepth;
++    expect(
++        () => doc.commands.execute(CompoundCommand([
++              SetComponentCommand<ClipRect>(hA, null),
++              RemoveEntityCommand(firstChildOfA),
++            ], label: 'Detach then remove a child')),
++        throwsA(isA<GeneratedGeometryError>()));
++    expect(doc.commands.undoDepth, depth);
++    expect(enc(doc), before);
++  });
+ }

@@ -1,0 +1,348 @@
+# Review package: dcced6a..HEAD
+
+## Commits
+38af6db feat(floor_planner): the Selection panel edits one box's width and height (spec 06 D13)
+
+## Files changed
+ apps/floor_planner/lib/main.dart                  |  11 +-
+ apps/floor_planner/lib/selection_panel.dart       | 128 ++++++++++++++++++++++
+ apps/floor_planner/test/selection_panel_test.dart | 113 +++++++++++++++++++
+ apps/floor_planner/test/support/box_rig.dart      |  11 ++
+ 4 files changed, 262 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/apps/floor_planner/lib/main.dart b/apps/floor_planner/lib/main.dart
+index e230417..502b72e 100644
+--- a/apps/floor_planner/lib/main.dart
++++ b/apps/floor_planner/lib/main.dart
+@@ -1,19 +1,20 @@
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'page_panel.dart';
+ import 'parametric/box.dart';
+ import 'parametric/box_tool.dart';
+ import 'planner_view.dart';
++import 'selection_panel.dart';
+ import 'shortcut_guard.dart';
+ import 'startup_plan.dart';
+ import 'tool_palette.dart';
+ 
+ void main() => runApp(const FloorPlannerApp());
+ 
+ class FloorPlannerApp extends StatelessWidget {
+   const FloorPlannerApp({super.key});
+ 
+   @override
+@@ -322,21 +323,29 @@ class _PlannerShellState extends State<PlannerShell> {
+                         grips: _grips,
+                         textTool: _text,
+                       ),
+                     ),
+                   ),
+                   Container(
+                     key: const Key('chrome-right'),
+                     width: 280,
+                     color: scheme.surfaceContainerLow,
+                     child: ShellShortcutGuard(
+-                      child: PagePanel(document: _document, page: _page),
++                      child: Column(
++                        children: [
++                          SelectionPanel(
++                              document: _document, selection: _selection),
++                          Expanded(
++                            child: PagePanel(document: _document, page: _page),
++                          ),
++                        ],
++                      ),
+                     ),
+                   ),
+                 ],
+               ),
+             ),
+           ],
+         ),
+       ),
+     );
+   }
+diff --git a/apps/floor_planner/lib/selection_panel.dart b/apps/floor_planner/lib/selection_panel.dart
+new file mode 100644
+index 0000000..53acecf
+--- /dev/null
++++ b/apps/floor_planner/lib/selection_panel.dart
+@@ -0,0 +1,128 @@
++import 'dart:async';
++
++import 'package:flutter/material.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import 'parametric/box.dart';
++
++/// Spec 06 D13: one selected box's width and height. Each commit is one
++/// `SetComponentCommand<BoxParams>`, which the parametric system turns into
++/// one undo step with its regeneration. 12 builds the real inspector.
++///
++/// Ruling 06-14: Enter commits; focus-out reverts to the model value. An
++/// `onTapOutside` handler would also fire on the test's own tap on the field
++/// (SE4/SE7), so this panel commits on `onSubmitted` only -- the spec's D13
++/// gets amended in Task 11.
++class SelectionPanel extends StatefulWidget {
++  const SelectionPanel(
++      {super.key, required this.document, required this.selection});
++
++  final DraftDocument document;
++  final SelectionController selection;
++
++  @override
++  State<SelectionPanel> createState() => _SelectionPanelState();
++}
++
++class _SelectionPanelState extends State<SelectionPanel> {
++  final TextEditingController _width = TextEditingController();
++  final TextEditingController _height = TextEditingController();
++  late final StreamSubscription<DocChange> _changes;
++
++  @override
++  void initState() {
++    super.initState();
++    widget.selection.addListener(_sync);
++    _changes = widget.document.commands.changes.listen((_) => _sync());
++    _load();
++  }
++
++  @override
++  void dispose() {
++    widget.selection.removeListener(_sync);
++    _changes.cancel();
++    _width.dispose();
++    _height.dispose();
++    super.dispose();
++  }
++
++  /// The one selected box, or null.
++  Handle? get _box {
++    final keys = widget.selection.keys;
++    if (keys.length != 1) return null;
++    final key = keys.single;
++    if (key.chain.isNotEmpty) return null;
++    final h = key.target;
++    final node = widget.document.tree[h];
++    if (node is! GroupNode || node.parent != widget.document.rootHandle) {
++      return null;
++    }
++    return widget.document.components.get<BoxParams>(h) == null ? null : h;
++  }
++
++  static String _number(double v) =>
++      v == v.roundToDouble() ? v.round().toString() : v.toString();
++
++  /// Copies the model into the fields; no rebuild.
++  void _load() {
++    final h = _box;
++    if (h == null) return;
++    final p = widget.document.components.get<BoxParams>(h)!;
++    final w = _number(p.width), hh = _number(p.height);
++    if (_width.text != w) _width.text = w;
++    if (_height.text != hh) _height.text = hh;
++  }
++
++  /// A selection or document change: reload and rebuild.
++  void _sync() {
++    _load();
++    if (mounted) setState(() {});
++  }
++
++  void _submit(Handle h, String text, {required bool isWidth}) {
++    final value = double.tryParse(text.trim());
++    final p = widget.document.components.get<BoxParams>(h)!;
++    if (value == null || !value.isFinite || value <= 0) {
++      _sync();
++      return;
++    }
++    final next = isWidth ? p.copyWith(width: value) : p.copyWith(height: value);
++    if (next == p) return;
++    widget.document.commands.execute(SetComponentCommand<BoxParams>(h, next));
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final h = _box;
++    if (h == null) return const SizedBox.shrink();
++    final editable = widget.document.commands.permissions
++        .allows(const BoxType().editCapability);
++    Widget field(String label, TextEditingController c, bool isWidth) =>
++        TextField(
++          key: Key(isWidth ? 'box-width' : 'box-height'),
++          controller: c,
++          readOnly: !editable,
++          decoration: InputDecoration(labelText: label, suffixText: 'mm'),
++          keyboardType: const TextInputType.numberWithOptions(decimal: true),
++          onSubmitted: (t) => _submit(h, t, isWidth: isWidth),
++          onTapOutside: (_) => _submit(h, c.text, isWidth: isWidth),
++        );
++    return Material(
++      key: const Key('selection-panel'),
++      color: Colors.transparent,
++      child: Padding(
++        padding: const EdgeInsets.all(12),
++        child: Column(
++          crossAxisAlignment: CrossAxisAlignment.stretch,
++          mainAxisSize: MainAxisSize.min,
++          children: [
++            Text('Box', style: Theme.of(context).textTheme.titleSmall),
++            field('Width', _width, true),
++            field('Height', _height, false),
++          ],
++        ),
++      ),
++    );
++  }
++}
+diff --git a/apps/floor_planner/test/selection_panel_test.dart b/apps/floor_planner/test/selection_panel_test.dart
+new file mode 100644
+index 0000000..5f01e13
+--- /dev/null
++++ b/apps/floor_planner/test/selection_panel_test.dart
+@@ -0,0 +1,113 @@
++import 'package:floor_planner/parametric/box.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/box_rig.dart';
++
++// Named SE1-SE7, not SP1-SP7 as the task brief has it: `startup_plan_test.dart`
++// already uses SP1-SP5 (controller ruling for Task 8).
++
++Finder get width => find.byKey(const Key('box-width'));
++Finder get height => find.byKey(const Key('box-height'));
++
++void main() {
++  testWidgets('SE1 shown for exactly one selected box', (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    await drawTwoBoxes(tester, view);
++    final bs = boxes(view.document);
++    expect(width, findsNothing);
++    view.selection.replace([SelectionKey.root(bs.first)]);
++    await tester.pump();
++    expect(width, findsOneWidget);
++    expect(tester.widget<TextField>(width).controller!.text, '120');
++  });
++
++  testWidgets('SE2 hidden for none, two, and a non-box', (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    await drawTwoBoxes(tester, view);
++    final bs = boxes(view.document);
++    view.selection.replace([for (final b in bs) SelectionKey.root(b)]);
++    await tester.pump();
++    expect(width, findsNothing);
++    final line = addDrafted(view.document, EntityKind.line,
++        linePayload(Vector2(7300, 3300), Vector2(7400, 3350)));
++    view.document.commands.execute(line);
++    view.selection.replace([SelectionKey.root(line.record.handle)]);
++    await tester.pump();
++    expect(width, findsNothing);
++  });
++
++  testWidgets('SE3 Enter commits one step and regenerates', (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    await drawTwoBoxes(tester, view);
++    final b = boxes(view.document).first;
++    view.selection.replace([SelectionKey.root(b)]);
++    await tester.pump();
++    final depth = view.document.commands.undoDepth;
++    await tester.enterText(width, '150');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    expect(view.document.components.get<BoxParams>(b)!.width, 150);
++    expect(view.document.commands.undoDepth, depth + 1);
++    expect(ParametricSystem(view.document, boxCatalog).drift(), isEmpty);
++  });
++
++  testWidgets('SE4 an invalid value reverts and commits nothing',
++      (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    await drawTwoBoxes(tester, view);
++    final b = boxes(view.document).first;
++    view.selection.replace([SelectionKey.root(b)]);
++    await tester.pump();
++    final depth = view.document.commands.undoDepth;
++    for (final bad in ['0', '-3', 'abc']) {
++      await tester.enterText(height, bad);
++      await tester.testTextInput.receiveAction(TextInputAction.done);
++      await tester.pump();
++      expect(tester.widget<TextField>(height).controller!.text, '70');
++    }
++    expect(view.document.commands.undoDepth, depth);
++  });
++
++  testWidgets('SE5 under runtime the fields are read-only', (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    await drawTwoBoxes(tester, view);
++    view.document.commands.permissions = DraftPermissions.runtime;
++    view.selection.replace([SelectionKey.root(boxes(view.document).first)]);
++    await tester.pump();
++    expect(tester.widget<TextField>(width).readOnly, isTrue);
++  });
++
++  testWidgets(
++      'SE6 undo after a panel edit shows the old width '
++      '(Review Focus 4)', (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    await drawTwoBoxes(tester, view);
++    final b = boxes(view.document).first;
++    view.selection.replace([SelectionKey.root(b)]);
++    await tester.pump();
++    await tester.enterText(width, '150');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    view.document.commands.undo();
++    await tester.pump();
++    expect(tester.widget<TextField>(width).controller!.text, '120');
++  });
++
++  testWidgets('SE7 typing B in the width field does not switch tools',
++      (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    await drawTwoBoxes(tester, view);
++    await press(tester, LogicalKeyboardKey.keyV);
++    view.selection.replace([SelectionKey.root(boxes(view.document).first)]);
++    await tester.pump();
++    await tester.tap(width);
++    await tester.pump();
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), isNot('Box'));
++  });
++}
+diff --git a/apps/floor_planner/test/support/box_rig.dart b/apps/floor_planner/test/support/box_rig.dart
+index 4048050..3b0f22b 100644
+--- a/apps/floor_planner/test/support/box_rig.dart
++++ b/apps/floor_planner/test/support/box_rig.dart
+@@ -76,10 +76,21 @@ String bytes(PlannerView view) =>
+ /// parametric mechanism never populates for a leaf it generates.
+ List<Handle> boxKids(DraftDocument doc, Handle box) => [
+       for (final slot in doc.leavesByOwner()[box] ?? const <int>[])
+         doc.entities.handleAt(slot),
+     ];
+ 
+ /// Every handle carrying a `BoxParams` component, ascending
+ /// (`ComponentStore.handles` is already sorted).
+ List<Handle> boxes(DraftDocument doc) =>
+     doc.components.withComponent<BoxParams>().toList();
++
++/// Draws two overlapping boxes: B, then BX4's four clicks, then a pump.
++/// Copied from `planner_box_test.dart`'s BX4.
++Future<void> drawTwoBoxes(WidgetTester tester, PlannerView view) async {
++  await press(tester, LogicalKeyboardKey.keyB);
++  await tester.tapAt(globalOf(tester, view, 7010, 3020));
++  await tester.tapAt(globalOf(tester, view, 7130, 3090));
++  await tester.tapAt(globalOf(tester, view, 7100, 3060));
++  await tester.tapAt(globalOf(tester, view, 7190, 3120));
++  await tester.pump();
++}

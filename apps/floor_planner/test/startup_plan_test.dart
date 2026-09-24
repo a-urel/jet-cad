@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' show Size;
 
+import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/startup_plan.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -283,5 +284,13 @@ void main() {
       }
     }
     expect(sampled, 7 * 21 * 37);
+  });
+
+  test('SP5 the sample plan holds no parametric object (spec 06 D13)', () {
+    final doc = startupPlan(measurer);
+    final system = ParametricSystem(doc, boxCatalog);
+    expect(system.drift(), isEmpty);
+    expect(system.diagnostics(), isEmpty);
+    expect(doc.components.withComponent<BoxParams>(), isEmpty);
   });
 }

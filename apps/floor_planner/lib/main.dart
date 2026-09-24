@@ -4,7 +4,10 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'page_panel.dart';
+import 'parametric/box.dart';
+import 'parametric/box_tool.dart';
 import 'planner_view.dart';
+import 'selection_panel.dart';
 import 'shortcut_guard.dart';
 import 'startup_plan.dart';
 import 'tool_palette.dart';
@@ -59,12 +62,16 @@ class _PlannerShellState extends State<PlannerShell> {
   final GesturePolicy _policy = GesturePolicy.forPlatform();
   final SnapSettings _snap = SnapSettings();
 
+  // Spec 06 D13, Ruling 06-12: installed in initState, disposed in dispose.
+  late final ParametricSystem _parametric;
+
   // Spec 05 D5, D13: the shell owns the tools and the Fill toggle.
   final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
   final SelectTool _select = SelectTool();
   final LineTool _line = LineTool();
   late final PolylineTool _polyline = PolylineTool(fill: _fill);
   late final RectangleTool _rectangle = RectangleTool(fill: _fill);
+  final BoxTool _box = BoxTool();
   late final CircleTool _circle = CircleTool(fill: _fill);
   final ArcTool _arc = ArcTool();
   final TextTool _text = TextTool();
@@ -97,6 +104,13 @@ class _PlannerShellState extends State<PlannerShell> {
         shortcut: 'R',
         logicalKey: LogicalKeyboardKey.keyR,
         tool: _rectangle,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-box',
+        label: 'Box',
+        shortcut: 'B',
+        logicalKey: LogicalKeyboardKey.keyB,
+        tool: _box,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-circle',
@@ -200,6 +214,14 @@ class _PlannerShellState extends State<PlannerShell> {
       v == v.roundToDouble() ? v.round().toString() : v.toString();
 
   @override
+  void initState() {
+    super.initState();
+    // Spec 06 D13, Ruling 06-12: startupPlan builds its document with no
+    // parametric object, so installing after it is safe.
+    _parametric = installBoxes(_document);
+  }
+
+  @override
   void dispose() {
     _tools.dispose();
     for (final e in _entries) {
@@ -212,6 +234,7 @@ class _PlannerShellState extends State<PlannerShell> {
     _snap.dispose();
     _page.dispose();
     _camera.dispose();
+    _parametric.dispose();
     _index.dispose();
     _measurer.clear();
     super.dispose();
@@ -307,7 +330,15 @@ class _PlannerShellState extends State<PlannerShell> {
                     width: 280,
                     color: scheme.surfaceContainerLow,
                     child: ShellShortcutGuard(
-                      child: PagePanel(document: _document, page: _page),
+                      child: Column(
+                        children: [
+                          SelectionPanel(
+                              document: _document, selection: _selection),
+                          Expanded(
+                            child: PagePanel(document: _document, page: _page),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],

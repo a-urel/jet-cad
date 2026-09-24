@@ -1,6 +1,39 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-24. **Plan 05 (drawing tools) is DONE: exit gate
+**Last updated:** 2026-09-24. **Plan 06 (the parametric layer) is executed
+on `plan-06/parametric-layer`, not merged. Exit gate: 13 of 14; the look
+(criterion 14) is OWED; the final whole-branch review is pending.** Eleven
+tasks land the mechanism — a document-free `ParametricCatalog`, a
+`ParametricSystem` per document, the dispatcher's expander slot, the
+two-phase regeneration planner (survey, guard, clean-up, closure, plan,
+apply, replay) — and a demo client (`BoxParams`/`BoxType`, the Box tool on
+`B`, and the Selection section's Width/Height fields), proving a parameter
+edit regenerates geometry, in exactly one undo step, with undo, redo, save,
+load and the allocation invariants all unchanged.
+- **Gates on the branch tip (`fbc6fba`):**
+  - engine 950;
+  - render layer 925 + 1 skip + the five standing text goldens;
+  - harness 82;
+  - app 67;
+  - both release builds `✓ Built`.
+- **Mutants:** 26 fired, 26 killed, 0 survived, `M-06e` recorded N/A by
+  construction (no iteration exists to mutate). One mutant, `M-06b′`, first
+  survived a degenerate fixture and was killed after a test-only fixture
+  fix.
+- **Criterion 14 (the look) is OWED: not looked at.** No device run and no
+  visual judgement was simulated to fill it in. Six items per platform, on
+  macOS, in Chrome and in Firefox from `build/web`.
+- **The final whole-branch review has not run yet.** The ledger archive
+  waits for it, per Plan 05's own precedent (Ruling T11-a).
+- **Next:** the final whole-branch review, then the human's look, then the
+  merge is the human's decision. After that: sub-project 07 (walls).
+
+See [Plan 06](#plan-06--the-parametric-layer-executed-on-plan-06parametric-layer-not-merged)
+and [Resume here](#resume-here).
+
+*Earlier, 2026-09-24:*
+
+**Plan 05 (drawing tools) is DONE: exit gate
 14 of 14.** The human's look was LGTM on all three platforms, as the human
 stated. Claude saw only the macOS run.
 - **Item 12 (F-2):** kept.
@@ -14,8 +47,9 @@ stated. Claude saw only the macOS run.
   - harness 82;
   - app 46;
   - both release builds `✓ Built`.
-- **Next:** sub-project 06 (the parametric layer), from a brainstorm. The
-  roadmap suggests a throwaway spike first.
+- **Next (superseded above):** sub-project 06 (the parametric layer), from a
+  brainstorm. The roadmap suggested a throwaway spike first; the plan below
+  records what the spike found and what the spec decided instead.
 
 *Before the look:*
 
@@ -230,6 +264,154 @@ method and both reproduction commands.
 Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
 Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
 Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
+
+---
+
+## Plan 06 — the parametric layer (executed on `plan-06/parametric-layer`, not merged)
+
+**Plan 06 gives the product line its keystone mechanism.** A parametric
+object is a `GroupNode` whose handle carries a registered `Component`
+holding parameters; an application-side `ParametricSystem` regenerates its
+children whenever the parameters or a neighbour change, folded into the
+same undo step as the edit that caused it. The document stays data only —
+`document/` imports nothing from `parametric/` — and undo, redo, save, load,
+rendering, hit-testing and snapping all continue to work unchanged. A
+trivial client, `BoxParams`/`BoxType` (a world-axis-aligned rectangle with
+`width` and `height`), proves the mechanism through the Box tool (`B`) and
+a Selection section with Width/Height fields.
+
+**Where it stands.** Eleven tasks on `plan-06/parametric-layer`, cut from
+local `main` at `6a279b3` (`058918d`'s sole parent — the plan's own
+constraints text mislabelled the fork point as `6adf03d`, one commit
+earlier and docs-only, so every count is unaffected; see the results
+note's own correction):
+- Tasks 1–9 are at `6a279b3..7b31030`;
+- Task 10 (the mutation sweep's invariants and greps, appended to the
+  mutation log) is at `fbc6fba`;
+- Task 11 runs in two parts (following Plan 05's own Ruling T11-a): Steps
+  1–4 (this section, the results note, the spec amendments and the
+  roadmap) land at this commit; **the final whole-branch review has not run
+  yet**, and the ledger archive waits for it.
+
+**NOT MERGED.** The final whole-branch review and its fix wave (if any)
+come first; **the merge is the human's decision**, exactly as it was for
+Plans 01–05.
+
+**Documents:**
+- Spec: [2026-09-24-parametric-layer-design.md](docs/superpowers/specs/2026-09-24-parametric-layer-design.md),
+  revision 2, amended at execution in seven places (D1, D3, D4, D6, D10, the
+  mutant table, the Testing section), none rewriting the original text.
+- Plan: [2026-09-24-parametric-layer.md](docs/superpowers/plans/2026-09-24-parametric-layer.md).
+- Results: [2026-09-24-plan-06-results.md](docs/superpowers/notes/2026-09-24-plan-06-results.md).
+- Mutation log: [plan-06-mutation-log.md](docs/superpowers/notes/plan-06-mutation-log.md).
+  **26 fired, 26 killed, 0 survived, `M-06e` N/A by construction** (spec D4
+  step 6 is a fixed one-hop closure, not a loop). One mutant, `M-06b′`,
+  first survived a degenerate `neighbourhood_test.dart` fixture and was
+  killed after a test-only fixture fix.
+
+**Delivered:**
+- **In `jet_cad_2d`:** `parametric/` (`ParametricCatalog`,
+  `ParametricSystem`, `ParametricType<T>`, `ParametricView`, `Generated`,
+  `ParametricEdit`, `ParametricReplay`, `GeneratedGeometryError`, the
+  two-phase planner), `CommandDispatcher.expander` (`document/undo.dart`),
+  and `ComponentRegistry.isRegistered<T>()` (`document/component.dart`,
+  Ruling 06-13) — the only two engine additions outside `parametric/`.
+- **In `jet_cad_2d_flutter`:** `PlacementTool.commit` gains an optional
+  `needs` parameter (`draw/placement_tool.dart`), the only file this plan
+  touches in the render layer.
+- **In `apps/floor_planner`:** `lib/parametric/box.dart` (`BoxParams`,
+  `BoxType`, `boxCatalog`, `installBoxes`), `lib/parametric/box_tool.dart`
+  (`BoxTool`), the shell's `ParametricSystem` install/dispose in
+  `initState`/`dispose`, and the Selection panel's Width/Height section.
+
+`document/`, `tool.dart` and `interaction_layer.dart` are untouched by
+import — checked by Task 10's greps (`git diff main -- ...` and
+`grep -rn "parametric" packages/jet_cad_2d/lib/src/document`, one doc-comment
+hit, no import).
+
+**Task list**, each task's head commit:
+
+| task | what | head |
+|---|---|---|
+| 1 | engine: `CommandDispatcher.expander`, called in `execute` only (D2) | `058918d` |
+| 2 | engine: the parametric system and planner (D1–D9) (+ fix round `9e5c2dd`: the after-survey hardening, the D6 tightening) | `9e5c2dd` |
+| 3 | engine: parametric neighbourhood, determinism, load and drift (D4, D10, D11) | `7504ece` |
+| 4 | engine: parametric guards — refusal, delete, runtime, failures, re-entry (D6–D8) | `ee7bd80` |
+| 5 | render: `PlacementTool.commit` checks a capability set (D13) | `8676163` |
+| 6 | app: `BoxParams` and `BoxType`, the parametric demo (D13) (+ fix round `53b29a8`: `BT1` pins per-field equality) | `53b29a8` |
+| 7 | app: the Box tool on `B`, and the parametric system in the shell (D13) | `dcced6a` |
+| 8 | app: the Selection panel edits one box's width and height (D13) (+ fix round `563844b`: the `onTapOutside` doc corrected, `SE8` added) | `563844b` |
+| 9 | the mutation sweep (26 fired, 26 killed; `M-06b′` re-fired after a fixture fix) | `7b31030` |
+| 10 | the invariants and the greps | `fbc6fba` |
+| 11 (Steps 1–4) | gate lines, results note, spec amendments, STATUS, roadmap | this commit |
+
+**Rulings a reader must know.**
+- **Types live in a document-free `ParametricCatalog`, not on
+  `ParametricSystem`** (Ruling 06-1): the codec creates the document and
+  needs the component factories before it loads components, so a
+  per-document system cannot exist at that point.
+- **`ComponentRegistry.isRegistered<T>()`** (Ruling 06-13): `register<T>`
+  replaces a type's store unconditionally, so the catalog registers a type
+  into a document only once, guarding against a second `ParametricSystem`
+  wiping an already-loaded document's components.
+- **The wrapper's after-survey and clean-up run inside the same rollback
+  `try` as planning** (D4 step 8's amendment): a `reach` that throws on the
+  *new* parameters must roll the original edit back, exactly as a throwing
+  `generate` does.
+- **The D6 guard is refused whenever the touched handle still exists**, not
+  only while its owner is still a live parametric object — closing a
+  bundled-detach loophole.
+- **`G3` and `G6` compare state with the root's child order normalised**:
+  `RemoveNodeCommand`'s inverse re-links a node at the end of its parent's
+  children, and `HandleSeed` never moves back, so a rolled-back or undone
+  delete is state-equal, not byte-equal — pre-existing engine behaviour, not
+  a Plan 06 defect.
+- **`onTapOutside` is kept as the panel's focus-out commit** (spec D13:
+  "Enter or focus-out commits"); it is not true focus-out (Flutter groups
+  every plain `TextField` under one `groupId`), so moving between the two
+  fields commits nothing and a mid-typing document change can silently drop
+  a keystroke — flagged as the most user-visible debt item for the final
+  review.
+- **Commit trailers name the model that actually wrote the commit**
+  (`Claude Opus 5.5`, inherited from Plan 03's Ruling T2-a): 13 commits, 13
+  trailers.
+
+The full list, 06-1…06-13 (06-14 not made), every controller ruling, and
+the spec amendments, each with its cost if wrong, is in the results note.
+
+### What Plan 06 measured
+
+| quantity | value |
+|---|---|
+| `packages/jet_cad_2d` | **950** pass (`00:03 +950: All tests passed!`, exit 0), analyze and format clean. 911 at the branch point, `+37` planned (X4, P10, N14, G9), `+2` from Task 2's review round (`P11`, `P12`) |
+| `packages/jet_cad_2d_flutter` | **925** pass, 1 skip, and only the five pre-existing `text_ladder_golden_test.dart` failures (`00:13 +925: Some tests failed.`, exit 1), analyze and format clean. 923 at the branch point, `+2` (`CN1`, `CN2`), exactly the plan's own sum |
+| `apps/dev_harness_2d` | **82** (`00:22 +82: All tests passed!`, exit 0), unchanged — no task touches the harness; analyze and format clean |
+| `apps/floor_planner` | **67** (`00:04 +67: All tests passed!`, exit 0). 46 at the branch point, `+6` (`BT`) `+6` (`BX`) `+1` (`SP5`) `+8` (`SE`, renamed from the plan's own `SP` to avoid a collision with `startup_plan_test.dart`'s `SP1`–`SP5`). `flutter build macos --release` and `flutter build web --release` both `✓ Built` |
+| mutations | **26 fired, 26 killed, 0 survived** — 21 fired forms of the spec's own M-06a…M-06t (`M-06b`/`M-06b′` and `M-06g` engine/app counted separately; `M-06e` recorded N/A) plus five added during execution (`M-06u`, `M-06v`, `M-06w`, `M-06x`, `M-06y`) |
+| the allocation invariants | `query_allocation_test.dart` and `paint_allocation_test.dart` are green and unedited (Task 10's greps) |
+| the look | **six items per platform, OWED — not looked at.** The results note itemises them for macOS, Chrome and Firefox |
+
+**Exit gate: 13 of 14.** Criteria 1–13 all PASS, each with its witness in
+the results note. Criterion 14 is OWED and this task does not mark it
+done. **The final whole-branch review has not run.**
+
+**Debt, in one line each** (full detail, plus the ledger's every deferred
+minor and controller ruling, in the results note):
+- `onTapOutside` is not true focus-out, so moving between the Width and
+  Height fields commits nothing and a mid-typing document change can
+  silently drop a keystroke (flagged as the most user-visible item);
+- a refused or rolled-back delete of a group leaves the root's own children
+  list reordered (pre-existing `RemoveNodeCommand` inverse behaviour, now
+  normalised for in `G3`/`G6`);
+- `BoxParams` does not itself enforce `width`/`height` > 0; the tool and the
+  panel are the gatekeepers, and `fromJson` accepts anything;
+- the draw order of a regeneration's added children (spec D12, open
+  question);
+- the O(n²) neighbour search, fine at this plan's scale;
+- whether `reach` needs to be richer than an AABB (spec open question, for
+  07's mitred wall corners);
+- eleven smaller deferred items from Tasks 1, 2, 4, 6 and 7, listed by task
+  in the results note.
 
 ---
 
@@ -1664,9 +1846,27 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: sub-project 06 (the parametric layer), from a
-brainstorm.** Its roadmap file suggests a throwaway spike before the spec.
-Plan 05 is done: its look was LGTM on 2026-09-24 (see the header).
+**Immediate next step: the final whole-branch review of Plan 06 (the
+parametric layer), on `plan-06/parametric-layer`.** Eleven tasks are done —
+Tasks 1–9 at `6a279b3..7b31030`, Task 10 at `fbc6fba`, Task 11's Steps 1–4
+at this commit — with the four gate lines green (engine 950; render layer
+925 + 1 skip + the five standing text goldens; harness 82; app 67; both
+release builds `✓ Built`) and 26 mutants fired, 26 killed (`M-06e` N/A by
+construction). **What resumes here, in order:** the final whole-branch
+review; its fix wave, if any; the ledger archive
+(`docs/superpowers/ledgers/2026-09-24-parametric-layer/`) as the branch's
+last commit (following Plan 05's own Ruling T11-a); the human's look
+(criterion 14 — six items per platform, on macOS, in Chrome and in Firefox
+from `build/web`, from the results note); then the merge, which is the
+human's decision. Nothing was simulated to fill in either the review or the
+look. See
+[Plan 06](#plan-06--the-parametric-layer-executed-on-plan-06parametric-layer-not-merged)
+and [2026-09-24-plan-06-results.md](docs/superpowers/notes/2026-09-24-plan-06-results.md).
+
+*Before Plan 06's tasks ran, this paragraph read:* **Immediate next step:
+sub-project 06 (the parametric layer), from a brainstorm.** Its roadmap file
+suggests a throwaway spike before the spec. Plan 05 is done: its look was
+LGTM on 2026-09-24 (see the header).
 
 *Before the look, this paragraph read:* **Immediate next step: the human's
 look at Plan 05**, merged at `fb0f87d`. It covers macOS, Chrome and Firefox

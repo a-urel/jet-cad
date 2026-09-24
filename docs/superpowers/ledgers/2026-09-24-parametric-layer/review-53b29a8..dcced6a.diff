@@ -1,0 +1,502 @@
+# Review package: 53b29a8..HEAD
+
+## Commits
+dcced6a feat(floor_planner): the Box tool on B, and the parametric system in the shell (spec 06 D13)
+
+## Files changed
+ apps/floor_planner/lib/main.dart                |  22 ++++
+ apps/floor_planner/lib/parametric/box_tool.dart |  45 +++++++
+ apps/floor_planner/lib/shortcut_guard.dart      |   1 +
+ apps/floor_planner/test/planner_box_test.dart   | 150 ++++++++++++++++++++++++
+ apps/floor_planner/test/startup_plan_test.dart  |   9 ++
+ apps/floor_planner/test/support/box_rig.dart    |  85 ++++++++++++++
+ 6 files changed, 312 insertions(+)
+
+## Diff
+diff --git a/apps/floor_planner/lib/main.dart b/apps/floor_planner/lib/main.dart
+index 16811d4..e230417 100644
+--- a/apps/floor_planner/lib/main.dart
++++ b/apps/floor_planner/lib/main.dart
+@@ -1,16 +1,18 @@
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'page_panel.dart';
++import 'parametric/box.dart';
++import 'parametric/box_tool.dart';
+ import 'planner_view.dart';
+ import 'shortcut_guard.dart';
+ import 'startup_plan.dart';
+ import 'tool_palette.dart';
+ 
+ void main() => runApp(const FloorPlannerApp());
+ 
+ class FloorPlannerApp extends StatelessWidget {
+   const FloorPlannerApp({super.key});
+ 
+@@ -52,26 +54,30 @@ class _PlannerShellState extends State<PlannerShell> {
+   late final PageNotifier _page = PageNotifier(_document);
+   late final SpatialIndex _index = SpatialIndex(_document);
+   late final CameraController _camera = CameraController(
+     widget.initialCamera ?? _nominalFit(),
+     minScale: kMinScale,
+     maxScale: kMaxScale,
+   );
+   final GesturePolicy _policy = GesturePolicy.forPlatform();
+   final SnapSettings _snap = SnapSettings();
+ 
++  // Spec 06 D13, Ruling 06-12: installed in initState, disposed in dispose.
++  late final ParametricSystem _parametric;
++
+   // Spec 05 D5, D13: the shell owns the tools and the Fill toggle.
+   final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
+   final SelectTool _select = SelectTool();
+   final LineTool _line = LineTool();
+   late final PolylineTool _polyline = PolylineTool(fill: _fill);
+   late final RectangleTool _rectangle = RectangleTool(fill: _fill);
++  final BoxTool _box = BoxTool();
+   late final CircleTool _circle = CircleTool(fill: _fill);
+   final ArcTool _arc = ArcTool();
+   final TextTool _text = TextTool();
+ 
+   late final List<PaletteEntry> _entries = [
+     PaletteEntry(
+         keyName: 'tool-select',
+         label: 'Select',
+         shortcut: 'V',
+         logicalKey: LogicalKeyboardKey.keyV,
+@@ -91,20 +97,27 @@ class _PlannerShellState extends State<PlannerShell> {
+         logicalKey: LogicalKeyboardKey.keyP,
+         tool: _polyline,
+         drawing: true),
+     PaletteEntry(
+         keyName: 'tool-rectangle',
+         label: 'Rectangle',
+         shortcut: 'R',
+         logicalKey: LogicalKeyboardKey.keyR,
+         tool: _rectangle,
+         drawing: true),
++    PaletteEntry(
++        keyName: 'tool-box',
++        label: 'Box',
++        shortcut: 'B',
++        logicalKey: LogicalKeyboardKey.keyB,
++        tool: _box,
++        drawing: true),
+     PaletteEntry(
+         keyName: 'tool-circle',
+         label: 'Circle',
+         shortcut: 'C',
+         logicalKey: LogicalKeyboardKey.keyC,
+         tool: _circle,
+         drawing: true),
+     PaletteEntry(
+         keyName: 'tool-arc',
+         label: 'Arc',
+@@ -192,33 +205,42 @@ class _PlannerShellState extends State<PlannerShell> {
+   String _zoomLine() {
+     final page = _page.value;
+     if (page == null) return '';
+     final zoom = zoomOf(_camera.value.scale, page, kLogicalPixelsPerMm);
+     return '1:${_trimNumber(page.scaleDenominator)} · ${(zoom * 100).round()}%';
+   }
+ 
+   static String _trimNumber(double v) =>
+       v == v.roundToDouble() ? v.round().toString() : v.toString();
+ 
++  @override
++  void initState() {
++    super.initState();
++    // Spec 06 D13, Ruling 06-12: startupPlan builds its document with no
++    // parametric object, so installing after it is safe.
++    _parametric = installBoxes(_document);
++  }
++
+   @override
+   void dispose() {
+     _tools.dispose();
+     for (final e in _entries) {
+       e.tool.dispose();
+     }
+     _fill.dispose();
+     _grips.dispose();
+     _outlines.dispose();
+     _selection.dispose();
+     _snap.dispose();
+     _page.dispose();
+     _camera.dispose();
++    _parametric.dispose();
+     _index.dispose();
+     _measurer.clear();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+     final scheme = Theme.of(context).colorScheme;
+     return Scaffold(
+       body: CallbackShortcuts(
+diff --git a/apps/floor_planner/lib/parametric/box_tool.dart b/apps/floor_planner/lib/parametric/box_tool.dart
+new file mode 100644
+index 0000000..90141f0
+--- /dev/null
++++ b/apps/floor_planner/lib/parametric/box_tool.dart
+@@ -0,0 +1,45 @@
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'box.dart';
++
++/// Spec 06 D13: two opposite corners, world-axis aligned, committed as a
++/// parametric box — a group at the lower-left corner carrying [BoxParams].
++/// The expander generates its lines. Fill does not apply.
++class BoxTool extends RectangleTool {
++  BoxTool();
++
++  @override
++  String get name => 'Box';
++
++  @override
++  void accept(Vector2 point, ToolContext ctx) {
++    if (points.isEmpty) {
++      points.add(point);
++      return;
++    }
++    final c1 = points.first;
++    if (isDegenerateRectangle(c1, point)) return;
++    commit(ctx, () {
++      final doc = ctx.document;
++      final h = doc.handleSeed.next();
++      final minX = c1.x < point.x ? c1.x : point.x;
++      final minY = c1.y < point.y ? c1.y : point.y;
++      return CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: h,
++            parent: doc.rootHandle,
++            transform: Transform2.translation(minX, minY),
++            children: const [])),
++        SetComponentCommand<BoxParams>(
++            h, BoxParams((point.x - c1.x).abs(), (point.y - c1.y).abs())),
++      ], label: 'Add box');
++    }, needs: const {
++      Capability.structure,
++      Capability.components,
++      Capability.geometry,
++    });
++    clearShape();
++  }
++}
+diff --git a/apps/floor_planner/lib/shortcut_guard.dart b/apps/floor_planner/lib/shortcut_guard.dart
+index 0d52d1d..21855fb 100644
+--- a/apps/floor_planner/lib/shortcut_guard.dart
++++ b/apps/floor_planner/lib/shortcut_guard.dart
+@@ -1,19 +1,20 @@
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter/widgets.dart';
+ 
+ /// The shell's single-letter tool shortcuts (spec 05 D5).
+ const List<LogicalKeyboardKey> kShellLetterKeys = [
+   LogicalKeyboardKey.keyV,
+   LogicalKeyboardKey.keyL,
+   LogicalKeyboardKey.keyP,
+   LogicalKeyboardKey.keyR,
++  LogicalKeyboardKey.keyB,
+   LogicalKeyboardKey.keyC,
+   LogicalKeyboardKey.keyA,
+   LogicalKeyboardKey.keyT,
+   LogicalKeyboardKey.keyF,
+ ];
+ 
+ /// Spec 05 D9 and Ruling 05-8.
+ ///
+ /// **Why this exists.** A `Shortcuts` or `CallbackShortcuts` above a text
+ /// field takes the field's keystrokes ("Shortcuts prevent text input fields
+diff --git a/apps/floor_planner/test/planner_box_test.dart b/apps/floor_planner/test/planner_box_test.dart
+new file mode 100644
+index 0000000..5e8aeeb
+--- /dev/null
++++ b/apps/floor_planner/test/planner_box_test.dart
+@@ -0,0 +1,150 @@
++import 'package:floor_planner/parametric/box.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/box_rig.dart';
++
++/// World coordinates of a box's local point (the box's own transform is a
++/// pure translation -- spec 06 D13's Box tool is world-axis aligned, never
++/// rotated).
++Vector2 _worldOf(DraftDocument doc, Handle box, Vector2 local) =>
++    doc.tree.accumulatedTransform(box).transformPoint(local);
++
++/// A generated child's world midpoint, from its (local) line payload.
++Vector2 _childMidpoint(DraftDocument doc, Handle box, Handle child) {
++  final slot = doc.entities.slotOf(child)!;
++  final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
++  final mid = (payload.pointAt(0) + payload.pointAt(1)) * 0.5;
++  return _worldOf(doc, box, mid);
++}
++
++/// Strictly inside the world-axis-aligned rectangle `(minX,minY)-(maxX,maxY)`
++/// spanned by [box]'s own `BoxParams` (Tolerance is not needed: the sampled
++/// midpoints below never sit on a boundary).
++bool _strictlyInside(DraftDocument doc, Handle box, Vector2 p) {
++  final params = doc.components.get<BoxParams>(box)!;
++  final origin = _worldOf(doc, box, Vector2.zero());
++  return p.x > origin.x &&
++      p.x < origin.x + params.width &&
++      p.y > origin.y &&
++      p.y < origin.y + params.height;
++}
++
++void main() {
++  testWidgets('BX1 B and the palette entry activate the Box tool',
++      (tester) async {
++    await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), 'Box');
++    await press(tester, LogicalKeyboardKey.keyV);
++    await tester.tap(find.byKey(const Key('tool-box')));
++    await tester.pump();
++    expect(status(tester), 'Box');
++  });
++
++  testWidgets('BX2 two clicks: one box, four lines, one undo step',
++      (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    final doc = view.document;
++    await press(tester, LogicalKeyboardKey.keyB);
++    await tester.tapAt(globalOf(tester, view, 7010, 3020));
++    await tester.tapAt(globalOf(tester, view, 7130, 3090));
++    await tester.pump();
++    final b = boxes(doc).single;
++    expect(doc.components.get<BoxParams>(b)!.width, closeTo(120, 1e-6));
++    expect(doc.components.get<BoxParams>(b)!.height, closeTo(70, 1e-6));
++    expect(boxKids(doc, b), hasLength(4));
++    expect(doc.commands.undoDepth, 1);
++    doc.commands.undo();
++    await tester.pump();
++    expect(boxes(doc), isEmpty);
++    expect(doc.entities.liveSlots, isEmpty);
++  });
++
++  testWidgets('BX3 Fill does not apply to a box', (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    await press(tester, LogicalKeyboardKey.keyF);
++    await press(tester, LogicalKeyboardKey.keyB);
++    await tester.tapAt(globalOf(tester, view, 7010, 3020));
++    await tester.tapAt(globalOf(tester, view, 7130, 3090));
++    await tester.pump();
++    for (final s in view.document.entities.liveSlots) {
++      expect(view.document.entities.kindAt(s), EntityKind.line);
++    }
++  });
++
++  testWidgets('BX4 two overlapping boxes read as one outline', (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    final doc = view.document;
++    await press(tester, LogicalKeyboardKey.keyB);
++    await tester.tapAt(globalOf(tester, view, 7010, 3020));
++    await tester.tapAt(globalOf(tester, view, 7130, 3090));
++    await tester.tapAt(globalOf(tester, view, 7100, 3060));
++    await tester.tapAt(globalOf(tester, view, 7190, 3120));
++    await tester.pump();
++    final bs = boxes(doc);
++    expect(bs, hasLength(2));
++    // Box A: (7010,3020)-(7130,3090); Box B: (7100,3060)-(7190,3120). They
++    // overlap in the corner rectangle (7100,3060)-(7130,3090): A's east and
++    // north edges each lose the segment running through that corner, and
++    // B's west and south edges each lose the same. Each box keeps its two
++    // untouched edges whole and its two touched edges as one shortened
++    // piece apiece: four children each.
++    expect(boxKids(doc, bs[0]), hasLength(4));
++    expect(boxKids(doc, bs[1]), hasLength(4));
++    expect(ParametricSystem(doc, boxCatalog).drift(), isEmpty);
++    // Every child midpoint lies outside the other box's interior.
++    for (final child in boxKids(doc, bs[0])) {
++      final mid = _childMidpoint(doc, bs[0], child);
++      expect(_strictlyInside(doc, bs[1], mid), isFalse,
++          reason: 'box A child $child at $mid lies inside box B');
++    }
++    for (final child in boxKids(doc, bs[1])) {
++      final mid = _childMidpoint(doc, bs[1], child);
++      expect(_strictlyInside(doc, bs[0], mid), isFalse,
++          reason: 'box B child $child at $mid lies inside box A');
++    }
++  });
++
++  testWidgets(
++      'BX5 click a box, Delete: gone with its component; cmd+Z '
++      'brings both back (Review Focus 2)', (tester) async {
++    final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    final doc = view.document;
++    await press(tester, LogicalKeyboardKey.keyB);
++    await tester.tapAt(globalOf(tester, view, 7010, 3020));
++    await tester.tapAt(globalOf(tester, view, 7130, 3090));
++    await tester.tapAt(globalOf(tester, view, 7100, 3060));
++    await tester.tapAt(globalOf(tester, view, 7190, 3120));
++    await press(tester, LogicalKeyboardKey.keyV);
++    final first = boxes(doc).first;
++    // The first box's bottom edge, away from the second box.
++    await tester.tapAt(globalOf(tester, view, 7040, 3020));
++    await tester.pump();
++    await press(tester, LogicalKeyboardKey.delete);
++    expect(doc.tree[first], isNull);
++    expect(doc.components.get<BoxParams>(first), isNull);
++    expect(boxKids(doc, boxes(doc).single), hasLength(4));
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
++    await press(tester, LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
++    expect(doc.components.get<BoxParams>(first), isNotNull);
++    expect(boxes(doc), hasLength(2));
++  });
++
++  testWidgets('BX6 typing B in the page panel field does not switch tools',
++      (tester) async {
++    await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
++    final field = find.descendant(
++        of: find.byKey(const Key('chrome-right')),
++        matching: find.byType(EditableText));
++    await tester.tap(field.first);
++    await tester.pump();
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), isNot('Box'));
++  });
++}
+diff --git a/apps/floor_planner/test/startup_plan_test.dart b/apps/floor_planner/test/startup_plan_test.dart
+index 02b9509..13176df 100644
+--- a/apps/floor_planner/test/startup_plan_test.dart
++++ b/apps/floor_planner/test/startup_plan_test.dart
+@@ -1,13 +1,14 @@
+ import 'dart:math' as math;
+ import 'dart:ui' show Size;
+ 
++import 'package:floor_planner/parametric/box.dart';
+ import 'package:floor_planner/startup_plan.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ /// Even-odd ray casting: a geometric decision (Tolerance is not needed --
+ /// the boundary case never arises for the sampled points below).
+ bool _pointInPolygon(Vector2 p, List<Vector2> poly) {
+   var inside = false;
+@@ -277,11 +278,19 @@ void main() {
+         for (var j = -18; j <= 18; j++) {
+           final p = c + along * (r * i / 20) + across * (depth * j / 18);
+           sampled++;
+           expect(insideFurniture(p), isFalse,
+               reason: 'the doorway at $c is blocked at $p');
+         }
+       }
+     }
+     expect(sampled, 7 * 21 * 37);
+   });
++
++  test('SP5 the sample plan holds no parametric object (spec 06 D13)', () {
++    final doc = startupPlan(measurer);
++    final system = ParametricSystem(doc, boxCatalog);
++    expect(system.drift(), isEmpty);
++    expect(system.diagnostics(), isEmpty);
++    expect(doc.components.withComponent<BoxParams>(), isEmpty);
++  });
+ }
+diff --git a/apps/floor_planner/test/support/box_rig.dart b/apps/floor_planner/test/support/box_rig.dart
+new file mode 100644
+index 0000000..4048050
+--- /dev/null
++++ b/apps/floor_planner/test/support/box_rig.dart
+@@ -0,0 +1,85 @@
++import 'package:floor_planner/main.dart';
++import 'package:floor_planner/parametric/box.dart';
++import 'package:floor_planner/planner_view.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// A 1:20 page anchored at (7000, 3000), grid snap off, and no entities.
++/// `DraftCanvas` needs a `FlutterTextMeasurer`.
++///
++/// Copied from `planner_draw_test.dart`'s `drawDoc` (never import a test
++/// file), less the seed line: the Box tool tests start from an empty page.
++DraftDocument boxDoc(FlutterTextMeasurer m) {
++  final doc = DraftDocument.empty(measurer: m);
++  PageComponent.register(doc.components);
++  doc.commands.execute(SetComponentCommand<PageComponent>(
++      doc.rootHandle,
++      PageComponent(
++          scaleDenominator: 20,
++          originX: 7000,
++          originY: 3000,
++          snapToGrid: false)));
++  doc.commands.clearHistory();
++  return doc;
++}
++
++/// Pumps the shell, then sets a zoomed, rotated, **non-reflecting** camera:
++/// the app camera in `planner_grips_test.dart` is a reflection, whose
++/// `b == c` hides a transposition.
++///
++/// Copied from `planner_draw_test.dart`'s `pumpDraw` (never import a test
++/// file).
++Future<PlannerView> pumpDraw(WidgetTester tester, DraftDocument doc) async {
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester.pumpWidget(MaterialApp(home: PlannerShell(document: doc)));
++  await tester.pump();
++  final view = tester.widget<PlannerView>(find.byType(PlannerView));
++  final size = tester.getSize(find.byType(InteractionLayer));
++  final linear = Transform2.rotation(0.35).multiply(Transform2.scale(2.0, 2.0));
++  final mid = linear.transformPoint(Vector2(7150, 3110));
++  view.camera.value = ViewportTransform(
++      worldToScreenMatrix: Transform2.translation(
++              size.width / 2 - mid.x, size.height / 2 - mid.y)
++          .multiply(linear));
++  await tester.pump();
++  return view;
++}
++
++/// Copied from `planner_draw_test.dart`'s `globalOf`.
++Offset globalOf(WidgetTester tester, PlannerView view, double x, double y) {
++  final s = view.camera.value.worldToScreen(Vector2(x, y));
++  return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
++}
++
++/// Copied from `planner_draw_test.dart`'s `status`.
++String status(WidgetTester tester) =>
++    tester.widget<Text>(find.byKey(const Key('status-text'))).data!;
++
++/// Copied from `planner_draw_test.dart`'s `press`.
++Future<bool> press(WidgetTester tester, LogicalKeyboardKey key) async {
++  final handled = await tester.sendKeyEvent(key);
++  await tester.pump();
++  return handled;
++}
++
++/// Copied from `planner_draw_test.dart`'s `bytes`.
++String bytes(PlannerView view) =>
++    DraftDocumentCodec.encodeToString(view.document);
++
++/// [box]'s generated children, ascending: the group's own leaves, found by
++/// owner (spec 06 D3) -- never by walking `GroupNode.children`, which the
++/// parametric mechanism never populates for a leaf it generates.
++List<Handle> boxKids(DraftDocument doc, Handle box) => [
++      for (final slot in doc.leavesByOwner()[box] ?? const <int>[])
++        doc.entities.handleAt(slot),
++    ];
++
++/// Every handle carrying a `BoxParams` component, ascending
++/// (`ComponentStore.handles` is already sorted).
++List<Handle> boxes(DraftDocument doc) =>
++    doc.components.withComponent<BoxParams>().toList();
