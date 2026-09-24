@@ -1,32 +1,47 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-24. **Plan 06 (the parametric layer) is executed
-on `plan-06/parametric-layer`, not merged. Exit gate: 13 of 14; the look
-(criterion 14) is OWED; the final whole-branch review is pending.** Eleven
-tasks land the mechanism — a document-free `ParametricCatalog`, a
-`ParametricSystem` per document, the dispatcher's expander slot, the
-two-phase regeneration planner (survey, guard, clean-up, closure, plan,
-apply, replay) — and a demo client (`BoxParams`/`BoxType`, the Box tool on
-`B`, and the Selection section's Width/Height fields), proving a parameter
-edit regenerates geometry, in exactly one undo step, with undo, redo, save,
-load and the allocation invariants all unchanged.
-- **Gates on the branch tip (`fbc6fba`):**
-  - engine 950;
+**Last updated:** 2026-09-24. **Plan 06 (the parametric layer) is MERGED
+into `main` at `a6837d0`**, `--no-ff` on the human's decision. **Exit gate
+13 of 14: the look (criterion 14) is OWED.**
+- **What landed:**
+  - a document-free `ParametricCatalog`;
+  - a `ParametricSystem` per document, holding the dispatcher's `expander`
+    slot;
+  - the two-phase regeneration planner inside a single-use
+    `ParametricEdit`;
+  - the concrete `ParametricReplay` inverse: undo and redo never
+    regenerate;
+  - the D6 refusal of direct edits to generated geometry;
+  - the D8 component clean-up on delete;
+  - a demo: the Box tool on `B` and the Selection panel's Width/Height
+    fields.
+- **Gates re-run on the merged tree:**
+  - engine 953;
   - render layer 925 + 1 skip + the five standing text goldens;
   - harness 82;
-  - app 67;
+  - app 69;
   - both release builds `✓ Built`.
-- **Mutants:** 26 fired, 26 killed, 0 survived, `M-06e` recorded N/A by
-  construction (no iteration exists to mutate). One mutant, `M-06b′`, first
-  survived a degenerate fixture and was killed after a test-only fixture
-  fix.
-- **Criterion 14 (the look) is OWED: not looked at.** No device run and no
-  visual judgement was simulated to fill it in. Six items per platform, on
-  macOS, in Chrome and in Firefox from `build/web`.
-- **The final whole-branch review has not run yet.** The ledger archive
-  waits for it, per Plan 05's own precedent (Ruling T11-a).
-- **Next:** the final whole-branch review, then the human's look, then the
-  merge is the human's decision. After that: sub-project 07 (walls).
+- **Mutants:** 26 fired, 26 killed, `M-06e` N/A (there is no iteration).
+- **Final whole-branch review (Opus):** "With fixes". It found two
+  Selection-panel defects, fixed in one wave:
+  - a hover wiped typed text;
+  - `onTapOutside` was not focus-out.
+
+  It also raised three small engine items, all fixed, and two items
+  recorded as debt for 07: the swallowed "ghost" box, and the neighbour
+  search running twice per edit.
+- **Parked:** a focused field's uncommitted text commits onto whichever box
+  is selected when focus is lost. No shipped gesture reaches it today.
+  Details are in the results note.
+- **The look is OWED.** Six items per platform, on macOS, in Chrome and in
+  Firefox from `build/web`; see
+  `docs/superpowers/notes/2026-09-24-plan-06-results.md`. Restart the
+  running app to get the Box tool.
+- **Branches:** `plan-06/parametric-layer` and `spec-06/parametric` are
+  deleted. `spike/06-parametric` is kept as the spike's record and is never
+  to be merged.
+- **Next:** the human's look at 06, then sub-project 07 (walls), from a
+  brainstorm.
 
 See [Plan 06](#plan-06--the-parametric-layer-executed-on-plan-06parametric-layer-not-merged)
 and [Resume here](#resume-here).
@@ -1846,7 +1861,19 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the final whole-branch review of Plan 06 (the
+**Immediate next step: the human's look at Plan 06 (the parametric layer),
+merged into `main` at `a6837d0`.**
+- **What to look at:** six items per platform, on macOS, in Chrome and in
+  Firefox from `build/web`, listed in
+  [2026-09-24-plan-06-results.md](docs/superpowers/notes/2026-09-24-plan-06-results.md).
+- **Before the look:** restart the running app, so that the Box tool (`B`)
+  and the Selection panel appear.
+- **After the look:** sub-project 07 (walls), from a brainstorm. Read 06's
+  debt list first: the ghost box, the neighbour search running twice per
+  edit, the added children's draw order, the parked wrong-box commit and
+  the per-axis AABB reach.
+
+*Before the merge, this paragraph read:* **Immediate next step: the final whole-branch review of Plan 06 (the
 parametric layer), on `plan-06/parametric-layer`.** Eleven tasks are done —
 Tasks 1–9 at `6a279b3..7b31030`, Task 10 at `fbc6fba`, Task 11's Steps 1–4
 at this commit — with the four gate lines green (engine 950; render layer
