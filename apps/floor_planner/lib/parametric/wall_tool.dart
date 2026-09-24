@@ -13,7 +13,8 @@ import 'wall.dart';
 import 'wall_geometry.dart';
 
 /// The Wall tool's settings (spec 07 D11): what the next wall is drawn
-/// with. The shell owns them; the panel edits them (Task 8).
+/// with. The shell owns them; the Selection panel's Wall section edits
+/// them while the tool is active.
 @immutable
 final class WallSettings {
   const WallSettings(
@@ -67,7 +68,7 @@ final class WallSettings {
 class WallTool extends PlacementTool {
   WallTool(this.settings);
 
-  /// Owned by the shell and shared with the panel, which edits it (Task 8);
+  /// Owned by the shell and shared with the Selection panel, which edits it;
   /// the tool only reads it, at each commit and each paint.
   final ValueNotifier<WallSettings> settings;
 

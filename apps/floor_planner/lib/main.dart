@@ -74,8 +74,8 @@ class _PlannerShellState extends State<PlannerShell> {
   late final PolylineTool _polyline = PolylineTool(fill: _fill);
   late final RectangleTool _rectangle = RectangleTool(fill: _fill);
   final BoxTool _box = BoxTool();
-  // Spec 07 D11: the shell owns the Wall tool's settings; the panel edits
-  // them (Task 8).
+  // Spec 07 D11: the shell owns the Wall tool's settings; the Selection
+  // panel's Wall section edits them while the tool is active.
   final ValueNotifier<WallSettings> _wallSettings =
       ValueNotifier<WallSettings>(const WallSettings());
   late final WallTool _wall = WallTool(_wallSettings);
@@ -349,8 +349,14 @@ class _PlannerShellState extends State<PlannerShell> {
                     child: ShellShortcutGuard(
                       child: Column(
                         children: [
+                          // Spec 07 D11: while the Wall tool is active,
+                          // the panel edits its settings.
                           SelectionPanel(
-                              document: _document, selection: _selection),
+                              document: _document,
+                              selection: _selection,
+                              tools: _tools,
+                              wallTool: _wall,
+                              wallSettings: _wallSettings),
                           Expanded(
                             child: PagePanel(document: _document, page: _page),
                           ),

@@ -1,5 +1,8 @@
+import 'package:floor_planner/main.dart';
 import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/parametric/catalog.dart';
+import 'package:floor_planner/parametric/wall.dart';
+import 'package:floor_planner/planner_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -8,12 +11,126 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'support/box_rig.dart';
+import 'support/wall_fixture.dart';
+import 'support/wall_shell.dart';
 
 // Named SE1-SE7, not SP1-SP7 as the task brief has it: `startup_plan_test.dart`
 // already uses SP1-SP5 (controller ruling for Task 8).
 
 Finder get width => find.byKey(const Key('box-width'));
 Finder get height => find.byKey(const Key('box-height'));
+Finder get thickness => find.byKey(const Key('wall-thickness'));
+Finder get wallSection => find.byKey(const Key('wall-section'));
+
+String textOf(WidgetTester tester, Finder f) =>
+    tester.widget<TextField>(f).controller!.text;
+
+/// The justification segment's selection.
+Set<Justification> shownJustification(WidgetTester tester) => tester
+    .widget<SegmentedButton<Justification>>(
+        find.byKey(const Key('wall-justification')))
+    .selected;
+
+Future<void> tapKey(WidgetTester tester, String key) async {
+  await tester.tap(find.byKey(Key(key)));
+  await tester.pump();
+}
+
+// Spec 07 D11's Wall section. Every wall sits at the far origin in its own
+// rotated group (`groupAt`), the plan is turned 23 degrees, and the camera
+// is rotated.
+
+const Handle wa = Handle(1300), wb = Handle(2600), wc = Handle(3900);
+const Handle bx = Handle(5200);
+
+/// An L at the far origin: A (200, centre) runs into [lCorner] and B (115,
+/// left) runs out of it at 110 degrees, each in its own rotated group.
+final Vector2 lStart = plan(0, 0), lCorner = plan(3000, 0);
+final Vector2 lEnd = polar(lCorner, 23 + 110, 2500);
+
+/// A 1:20 page near the far origin, grid snap on at 10 mm; the L, a free
+/// wall C (150, right) and a box in its own rotated group; no history.
+DraftDocument panelDoc(FlutterTextMeasurer m) {
+  final doc = DraftDocument.empty(measurer: m);
+  PageComponent.register(doc.components);
+  doc.commands.execute(SetComponentCommand<PageComponent>(
+      doc.rootHandle,
+      PageComponent(
+          scaleDenominator: 20,
+          originX: ox - 2000,
+          originY: oy - 2000,
+          gridStepMm: 10)));
+  // The shell installs the parametric system itself; the objects are added
+  // through a temporary one, which regenerates them as they are created.
+  final system = installParametric(doc);
+  doc.commands
+      .execute(addWall(doc, wa, lStart, lCorner, 200, Justification.centre));
+  doc.commands
+      .execute(addWall(doc, wb, lCorner, lEnd, 115, Justification.left));
+  doc.commands.execute(addWall(
+      doc, wc, plan(500, 1500), plan(2500, 1900), 150, Justification.right));
+  doc.commands.execute(CompoundCommand([
+    AddNodeCommand(GroupNode(
+        handle: bx,
+        parent: doc.rootHandle,
+        transform: groupAt(bx.value),
+        children: const [])),
+    SetComponentCommand<BoxParams>(bx, const BoxParams(120, 70)),
+  ], label: 'Add box'));
+  system.dispose();
+  doc.commands.clearHistory();
+  return doc;
+}
+
+/// Pumps the shell over [doc], then sets a rotated, non-reflecting camera
+/// centred on the L's corner.
+Future<PlannerView> pumpPanel(WidgetTester tester, DraftDocument doc) async {
+  await tester.binding.setSurfaceSize(const Size(1440, 900));
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.pumpWidget(MaterialApp(home: PlannerShell(document: doc)));
+  await tester.pump();
+  final view = tester.widget<PlannerView>(find.byType(PlannerView));
+  final size = tester.getSize(find.byType(InteractionLayer));
+  final linear =
+      Transform2.rotation(0.35).multiply(Transform2.scale(0.15, 0.15));
+  final mid = linear.transformPoint(lCorner);
+  view.camera.value = ViewportTransform(
+      worldToScreenMatrix: Transform2.translation(
+              size.width / 2 - mid.x, size.height / 2 - mid.y)
+          .multiply(linear));
+  await tester.pump();
+  return view;
+}
+
+Future<void> select(
+    WidgetTester tester, PlannerView view, List<Handle> hs) async {
+  view.selection.replace([for (final h in hs) SelectionKey.root(h)]);
+  await tester.pump();
+}
+
+/// A primary click at world [p].
+Future<void> clickWorld(
+    WidgetTester tester, PlannerView view, Vector2 p) async {
+  final s = view.camera.value.worldToScreen(p);
+  await tester.tapAt(
+      tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y));
+  await tester.pump();
+}
+
+/// A fresh shell with SE's two boxes drawn, selection empty.
+Future<PlannerView> pumpBoxes(WidgetTester tester) async {
+  final view = await pumpDraw(tester, boxDoc(FlutterTextMeasurer()));
+  await drawTwoBoxes(tester, view);
+  await press(tester, LogicalKeyboardKey.keyV);
+  return view;
+}
+
+Future<void> enterAndSubmit(
+    WidgetTester tester, Finder field, String text) async {
+  await tester.enterText(field, text);
+  await tester.testTextInput.receiveAction(TextInputAction.done);
+  await tester.pump();
+}
 
 void main() {
   testWidgets('SE1 shown for exactly one selected box', (tester) async {
@@ -198,5 +315,256 @@ void main() {
     final p = view.document.components.get<BoxParams>(b)!;
     expect(p.width, 150);
     expect(p.height, 90);
+  });
+
+  testWidgets(
+      'WS1 the Wall section shows for exactly one selected wall; hidden for '
+      'none, two, and a box (which shows the Box section)', (tester) async {
+    final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+    expect(wallSection, findsNothing);
+    await select(tester, view, [wb]);
+    expect(wallSection, findsOneWidget);
+    expect(width, findsNothing);
+    expect(textOf(tester, thickness), '115');
+    expect(shownJustification(tester), {Justification.left});
+    await select(tester, view, [wc]);
+    expect(textOf(tester, thickness), '150');
+    expect(shownJustification(tester), {Justification.right});
+    await select(tester, view, [wa, wb]);
+    expect(wallSection, findsNothing);
+    await select(tester, view, [bx]);
+    expect(wallSection, findsNothing);
+    expect(textOf(tester, width), '120');
+    await select(tester, view, []);
+    expect(wallSection, findsNothing);
+    expect(width, findsNothing);
+  });
+
+  testWidgets(
+      'WS2 Enter commits the thickness in one undo step; the joined L '
+      'regenerates, still mitred; undo shows the old value', (tester) async {
+    final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    final pa = doc.components.get<WallParams>(wa)!;
+    final pb = doc.components.get<WallParams>(wb)!;
+    await select(tester, view, [wa]);
+    await enterAndSubmit(tester, thickness, '262.5');
+    expect(doc.commands.undoDepth, 1);
+    expect(doc.components.get<WallParams>(wa), pa.copyWith(thickness: 262.5),
+        reason: 'only the thickness, exactly');
+    expect(doc.components.get<WallParams>(wb), pb);
+    expectMitre(doc, wa, wb);
+    expect(driftOf(doc), isEmpty);
+    expect(textOf(tester, thickness), '262.5');
+    doc.commands.undo();
+    await tester.pump();
+    expect(textOf(tester, thickness), '200');
+    expect(doc.components.get<WallParams>(wa), pa);
+  });
+
+  testWidgets(
+      'WS3 a thickness <= 0 or unparseable reverts and commits nothing, for '
+      'a wall and for the tool settings', (tester) async {
+    final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    final pc = doc.components.get<WallParams>(wc)!;
+    await select(tester, view, [wc]);
+    for (final bad in ['0', '-40', '-0', 'abc', '']) {
+      await enterAndSubmit(tester, thickness, bad);
+      expect(textOf(tester, thickness), '150', reason: bad);
+    }
+    expect(doc.commands.undoDepth, 0);
+    expect(doc.components.get<WallParams>(wc), pc);
+    // The palette, not W: Enter left the focus in no field and not on the
+    // canvas either, so the shell's letters do not reach it.
+    await tapKey(tester, 'tool-wall');
+    expect(status(tester), 'Wall');
+    expect(textOf(tester, thickness), '200');
+    for (final bad in ['0', '-40']) {
+      await enterAndSubmit(tester, thickness, bad);
+      expect(textOf(tester, thickness), '200', reason: bad);
+    }
+    await clickWorld(tester, view, plan(400, 900));
+    await clickWorld(tester, view, plan(1900, 800));
+    final w = walls(doc).last;
+    expect(w, isNot(wc));
+    expect(doc.components.get<WallParams>(w)!.thickness, 200);
+  });
+
+  testWidgets(
+      "WS4 a justification change on a joined wall moves both walls' "
+      'corners, in one undo step (Review Focus 4)', (tester) async {
+    final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    expectMitre(doc, wa, wb);
+    final ra0 = worldOutline(doc, wa), rb0 = worldOutline(doc, wb);
+    final shared0 = sharedNear(ra0, rb0);
+    final pa = doc.components.get<WallParams>(wa)!;
+    await select(tester, view, [wa]);
+    expect(shownJustification(tester), {Justification.centre});
+    await tapKey(tester, 'wall-left');
+    expect(doc.commands.undoDepth, 1);
+    expect(doc.components.get<WallParams>(wa),
+        pa.copyWith(justification: Justification.left));
+    expect(shownJustification(tester), {Justification.left});
+    // The corners: A's two faces now sit at (200, 0), so both mitre
+    // corners are the oracle meets of the new faces with B's.
+    expectMitre(doc, wa, wb);
+    final ra1 = worldOutline(doc, wa), rb1 = worldOutline(doc, wb);
+    final shared1 = sharedNear(ra1, rb1);
+    for (final p in shared0) {
+      expect(nearestIn(shared1, p), greaterThan(50),
+          reason: 'every shared corner moved');
+    }
+    // B's corners at the joint moved; its two at the far end did not.
+    expect(sharedNear(rb0, rb1), hasLength(2));
+    expect([for (final p in sharedNear(rb0, rb1)) nearestIn(shared0, p)],
+        everyElement(greaterThan(1000)));
+    // A's start is free: its square end moved by the face shift alone.
+    expect(sharedNear(ra0, ra1), isEmpty);
+    expect(driftOf(doc), isEmpty);
+    await tapKey(tester, 'wall-left');
+    expect(doc.commands.undoDepth, 1, reason: 'the same value is no step');
+    doc.commands.undo();
+    await tester.pump();
+    expect(shownJustification(tester), {Justification.centre});
+    expect(sharedNear(worldOutline(doc, wa), ra0), hasLength(4));
+    expectMitre(doc, wa, wb);
+  });
+
+  testWidgets(
+      'WS5 under runtime the Wall section is read-only: the field and the '
+      'toggle', (tester) async {
+    final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    final pa = doc.components.get<WallParams>(wa)!;
+    doc.commands.permissions = DraftPermissions.runtime;
+    await select(tester, view, [wa]);
+    expect(tester.widget<TextField>(thickness).readOnly, isTrue);
+    expect(
+        tester
+            .widget<SegmentedButton<Justification>>(
+                find.byKey(const Key('wall-justification')))
+            .onSelectionChanged,
+        isNull);
+    await tapKey(tester, 'wall-right');
+    expect(doc.components.get<WallParams>(wa), pa);
+    expect(doc.commands.undoDepth, 0);
+    doc.commands.permissions = DraftPermissions.all;
+    await select(tester, view, [wb]);
+    expect(tester.widget<TextField>(thickness).readOnly, isFalse);
+  });
+
+  testWidgets(
+      "WS6 with the Wall tool active the section edits the tool's settings "
+      '(no undo step) and the next wall uses them; tool letters typed in '
+      'the field do not switch tools', (tester) async {
+    final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    await press(tester, LogicalKeyboardKey.keyW);
+    expect(status(tester), 'Wall');
+    expect(wallSection, findsOneWidget);
+    expect(textOf(tester, thickness), '200');
+    expect(shownJustification(tester), {Justification.centre});
+    await enterAndSubmit(tester, thickness, '115');
+    await tapKey(tester, 'wall-left');
+    expect(doc.commands.undoDepth, 0, reason: 'settings are not the model');
+    await tester.tap(thickness);
+    await tester.pump();
+    for (final k in [LogicalKeyboardKey.keyV, LogicalKeyboardKey.keyB]) {
+      await press(tester, k);
+      expect(status(tester), 'Wall');
+    }
+    await clickWorld(tester, view, plan(400, 900));
+    await clickWorld(tester, view, plan(1900, 800));
+    await press(tester, LogicalKeyboardKey.enter);
+    final w = walls(doc).last;
+    expect(w, isNot(wc));
+    final p = doc.components.get<WallParams>(w)!;
+    expect([p.thickness, p.justification], [115, Justification.left]);
+    expect(textOf(tester, thickness), '115');
+    expect(shownJustification(tester), {Justification.left});
+    // Back to Select: the section follows the selection again.
+    await press(tester, LogicalKeyboardKey.keyV);
+    expect(wallSection, findsNothing);
+    await select(tester, view, [wa]);
+    expect(textOf(tester, thickness), '200');
+  });
+
+  testWidgets(
+      'WS7 (Wall) the commit target is pinned at focus gain: a selection '
+      'change while a field has focus does not redirect its commit (M-07p); '
+      'a pinned wall that dies drops the text', (tester) async {
+    final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    final pa = doc.components.get<WallParams>(wa)!;
+    final pc = doc.components.get<WallParams>(wc)!;
+    await select(tester, view, [wa]);
+    await tester.tap(thickness);
+    await tester.pump();
+    await tester.enterText(thickness, '260');
+    await tester.pump();
+    await select(tester, view, [wc]);
+    expect(textOf(tester, thickness), '260', reason: 'focused: not reloaded');
+    // Blur: a tap outside the field, on the section's title.
+    await tester.tap(wallSection);
+    await tester.pump();
+    expect(doc.components.get<WallParams>(wa), pa.copyWith(thickness: 260));
+    expect(doc.components.get<WallParams>(wc), pc);
+    expect(doc.commands.undoDepth, 1);
+    expect(textOf(tester, thickness), '150', reason: "now C's");
+
+    // The pinned wall dies while the field has focus: the section hides,
+    // the field loses focus, and the text is dropped.
+    const wd = Handle(6500);
+    doc.commands.execute(addWall(
+        doc, wd, plan(0, -900), plan(1400, -1300), 90, Justification.left));
+    await select(tester, view, [wd]);
+    await tester.tap(thickness);
+    await tester.pump();
+    await tester.enterText(thickness, '333');
+    await tester.pump();
+    doc.commands.undo();
+    await tester.pump();
+    expect(doc.tree[wd], isNull);
+    expect(wallSection, findsNothing);
+    expect(doc.commands.canRedo, isTrue, reason: 'nothing was executed');
+    expect(doc.commands.undoDepth, 1);
+    expect([
+      for (final h in walls(doc)) doc.components.get<WallParams>(h)!.thickness
+    ], [
+      260,
+      115,
+      150
+    ]);
+  });
+
+  testWidgets(
+      'WS7 (Box) the commit target is pinned at focus gain: a selection '
+      'change while a field has focus does not redirect its commit (M-07p)',
+      (tester) async {
+    final box = await pumpBoxes(tester);
+    final bs = boxes(box.document);
+    final b0 = box.document.components.get<BoxParams>(bs[0])!;
+    final b1 = box.document.components.get<BoxParams>(bs[1])!;
+    await select(tester, box, [bs[0]]);
+    await tester.tap(width);
+    await tester.pump();
+    await tester.enterText(width, '150');
+    await tester.pump();
+    await select(tester, box, [bs[1]]);
+    expect(textOf(tester, width), '150');
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('selection-panel')),
+        matching: find.text('Box')));
+    await tester.pump();
+    List<double> sizeOf(Handle h) {
+      final p = box.document.components.get<BoxParams>(h)!;
+      return [p.width, p.height];
+    }
+
+    expect(sizeOf(bs[0]), [150, b0.height]);
+    expect(sizeOf(bs[1]), [b1.width, b1.height]);
+    expect(textOf(tester, width), '90');
   });
 }
