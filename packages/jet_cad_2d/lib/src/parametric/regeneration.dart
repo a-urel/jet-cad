@@ -46,7 +46,8 @@ final class _Survey {
 
   /// [h]'s neighbours, ascending (spec 06 D3): the objects whose reach
   /// overlaps [h]'s by more than `Tolerance.standard.linear` on both axes.
-  /// Empty for a handle that is not an object of this survey.
+  /// Empty for a handle that is not an object of this survey. The list is
+  /// unmodifiable: it is the memo itself.
   List<Handle> neighboursOf(Handle h) {
     final cached = _neighbours[h];
     if (cached != null) return cached;
@@ -65,7 +66,8 @@ final class _Survey {
         out.add(e.key);
       }
     }
-    return _neighbours[h] = out;
+    // Unmodifiable: the memo is shared by every caller of this survey.
+    return _neighbours[h] = List.unmodifiable(out);
   }
 }
 

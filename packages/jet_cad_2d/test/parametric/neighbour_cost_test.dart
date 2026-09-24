@@ -55,6 +55,9 @@ DraftCommand line(DraftDocument doc, int k) => AddEntityCommand(
 final class RecordingType extends ParametricType<ClipRect> {
   RecordingType();
   final Map<Handle, List<Handle>> seen = {};
+
+  /// The list `view.neighbours` itself returned, not a copy.
+  final Map<Handle, List<Handle>> returned = {};
   @override
   Capability get editCapability => Capability.geometry;
   @override
@@ -62,7 +65,7 @@ final class RecordingType extends ParametricType<ClipRect> {
       rectReach(params, toWorld);
   @override
   List<Generated> generate(ParametricView view, Handle self) {
-    seen[self] = List.of(view.neighbours(self));
+    seen[self] = List.of(returned[self] = view.neighbours(self));
     return clippedRect(view, self);
   }
 }
@@ -172,6 +175,9 @@ void main() {
         closure);
     for (final h in closure) {
       expect(recording.seen[h], after[h], reason: h.toHex());
+      // The memo is handed out, so it must not be writable.
+      expect(() => recording.returned[h]!.add(h), throwsUnsupportedError,
+          reason: h.toHex());
     }
     expect(ParametricSystem(doc, catalog).drift(), isEmpty);
   });

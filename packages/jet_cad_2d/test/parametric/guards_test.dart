@@ -63,6 +63,32 @@ final class ReentrantProbeType extends ParametricType<ReentrantProbe> {
   }
 }
 
+/// G11's probe: during an edit's regeneration, a `generate` that runs a
+/// whole nested `drift()` and then, after that dry run has ended, calls
+/// `execute` on the same plain root line as G10. The edit's own guard must
+/// survive the nested pass (Task 3 review).
+ParametricSystem? _nestSystem;
+bool _nestArmed = false;
+
+final class DriftThenExecuteType extends ParametricType<ReentrantProbe> {
+  const DriftThenExecuteType();
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(ReentrantProbe params, Transform2 toWorld) =>
+      Aabb2.fromPoints([toWorld.transformPoint(Vector2(0, 0))]);
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    if (_nestArmed) {
+      _nestArmed = false;
+      _nestSystem!.drift();
+      _probeDoc!.commands.execute(SetEntityGeometryCommand(
+          _probeTarget!, linePayload(Vector2(9, 9), Vector2(8, 8))));
+    }
+    return const [];
+  }
+}
+
 /// A `GroupNode`'s `children` is draw order, but draw order *is* ascending
 /// handle value (D12; `tree.dart:586`'s own append-only `_link`), never the
 /// list position. `RemoveNodeCommand`'s inverse (`AddNodeCommand`) re-links a
@@ -273,6 +299,37 @@ void main() {
         reason: "generate() never ran, so this doesn't probe anything");
     expect(enc(doc), before);
     system.dispose();
+    _probeDoc = null;
+    _probeTarget = null;
+  });
+
+  test(
+      'G11 a generate that runs drift() and then calls execute during an '
+      'edit throws StateError: the nested dry run leaves the edit guarded, '
+      'and nothing lands', () {
+    final doc = DraftDocument.empty();
+    final probeCatalog = ParametricCatalog()
+      ..register<ReentrantProbe>(ReentrantProbe.id, ReentrantProbe.fromJson,
+          const DriftThenExecuteType());
+    final system = _nestSystem = ParametricSystem(doc, probeCatalog)..install();
+    _probeDoc = doc;
+    doc.commands.execute(create(doc, hA, atA, const ReentrantProbe(1)));
+    final plainLine = addDrafted(doc, EntityKind.line,
+        linePayload(Vector2(7001.5, 3002.25), Vector2(7044.5, 3090)));
+    doc.commands.execute(plainLine);
+    _probeTarget = plainLine.record.handle;
+    final before = enc(doc);
+    final depth = doc.commands.undoDepth;
+    _nestArmed = true;
+    expect(
+        () => doc.commands.execute(
+            SetComponentCommand<ReentrantProbe>(hA, const ReentrantProbe(2))),
+        throwsStateError);
+    expect(_nestArmed, isFalse, reason: 'generate() never ran armed');
+    expect(enc(doc), before);
+    expect(doc.commands.undoDepth, depth);
+    system.dispose();
+    _nestSystem = null;
     _probeDoc = null;
     _probeTarget = null;
   });

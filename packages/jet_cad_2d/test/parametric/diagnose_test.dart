@@ -97,8 +97,48 @@ DraftDocument? _probeDoc;
 Handle? _probeTarget;
 bool _probeArmed = false;
 
+/// DG4: the same edit, from the probe's `reach`, which `diagnostics()` runs
+/// through its survey.
+bool _reachArmed = false;
+
+void _probeEdit() => _probeDoc!.commands.execute(SetEntityGeometryCommand(
+    _probeTarget!,
+    linePayload(Vector2(19009.5, 11008.25), Vector2(19108.75, 11031))));
+
 final class ProbeType extends ParametricType<Tag> {
   const ProbeType();
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(Tag params, Transform2 toWorld) {
+    if (_reachArmed) {
+      _reachArmed = false;
+      _probeEdit();
+    }
+    return Aabb2.fromPoints([toWorld.transformPoint(Vector2(0, 0))]);
+  }
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) => const [];
+  @override
+  List<Diagnostic> diagnose(ParametricView view, Handle self) {
+    if (_probeArmed) {
+      _probeArmed = false;
+      _probeEdit();
+    }
+    return const [];
+  }
+}
+
+/// DG5's client (the Task 3 review's scenario): the lower object's
+/// `diagnose` runs a whole nested `diagnostics()` pass; the higher one's
+/// then calls `execute` in the outer pass, after the inner pass has ended.
+ParametricSystem? _nestSystem;
+bool _nestArmed = false;
+bool _nestDone = false;
+
+final class NestType extends ParametricType<Tag> {
+  const NestType();
   @override
   Capability get editCapability => Capability.geometry;
   @override
@@ -108,10 +148,13 @@ final class ProbeType extends ParametricType<Tag> {
   List<Generated> generate(ParametricView view, Handle self) => const [];
   @override
   List<Diagnostic> diagnose(ParametricView view, Handle self) {
-    if (_probeArmed) {
-      _probeArmed = false;
-      _probeDoc!.commands.execute(SetEntityGeometryCommand(_probeTarget!,
-          linePayload(Vector2(19009.5, 11008.25), Vector2(19108.75, 11031))));
+    if (self == hA && _nestArmed) {
+      _nestArmed = false;
+      _nestSystem!.diagnostics();
+      _nestDone = true;
+    } else if (self == hB && _nestDone) {
+      _nestDone = false;
+      _probeEdit();
     }
     return const [];
   }
@@ -213,6 +256,62 @@ void main() {
         linePayload(Vector2(19003.5, 11004.25), Vector2(19050.5, 11070))));
     expect(doc.commands.undoDepth, depth + 1);
     system.dispose();
+    _probeDoc = null;
+    _probeTarget = null;
+  });
+
+  /// A catalog of [type] on [Tag], a document with one plain root line
+  /// (the probe's target) and objects at [hA] and [hB], both rotated.
+  (DraftDocument, ParametricSystem) probeDoc(ParametricType<Tag> type) {
+    final doc = DraftDocument.empty();
+    final catalog = ParametricCatalog()
+      ..register<Tag>(Tag.id, Tag.fromJson, type);
+    final system = ParametricSystem(doc, catalog)..install();
+    _probeDoc = doc;
+    final plainLine = addDrafted(doc, EntityKind.line,
+        linePayload(Vector2(19001.5, 11002.25), Vector2(19044.5, 11090)));
+    doc.commands.execute(plainLine);
+    _probeTarget = plainLine.record.handle;
+    doc.commands.execute(create(doc, hA, parked, const Tag(1)));
+    doc.commands.execute(create(doc, hB, atA, const Tag(2)));
+    return (doc, system);
+  }
+
+  test(
+      'DG4 a reach that calls execute during diagnostics() throws StateError '
+      'and changes nothing: the survey is inside the guard', () {
+    final (doc, system) = probeDoc(const ProbeType());
+    final before = enc(doc);
+    final depth = doc.commands.undoDepth;
+    _reachArmed = true;
+    expect(system.diagnostics, throwsStateError);
+    expect(_reachArmed, isFalse,
+        reason: 'reach() never ran armed, so this probes nothing');
+    expect(enc(doc), before);
+    expect(doc.commands.undoDepth, depth);
+    system.dispose();
+    _probeDoc = null;
+    _probeTarget = null;
+  });
+
+  test(
+      'DG5 a nested diagnostics() from a diagnose leaves the outer pass '
+      'guarded: a later diagnose calling execute throws, nothing lands', () {
+    final (doc, system) = probeDoc(const NestType());
+    _nestSystem = system;
+    final before = enc(doc);
+    final depth = doc.commands.undoDepth;
+    _nestArmed = true;
+    expect(system.diagnostics, throwsStateError);
+    expect(_nestArmed, isFalse, reason: 'the inner pass never ran');
+    expect(enc(doc), before);
+    expect(doc.commands.undoDepth, depth);
+    // Released once the outer pass ends: an ordinary edit still lands.
+    _probeEdit();
+    expect(doc.commands.undoDepth, depth + 1);
+    system.dispose();
+    _nestSystem = null;
+    _nestDone = false;
     _probeDoc = null;
     _probeTarget = null;
   });

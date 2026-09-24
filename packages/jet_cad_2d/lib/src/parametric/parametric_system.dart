@@ -97,7 +97,7 @@ final class ParametricView {
   Transform2 toWorld(Handle h) => _worldOf(_target, h);
 
   /// Ascending handles of the objects whose reach overlaps [h]'s, computed
-  /// on the first call for [h] and memoised (spec 07 D10).
+  /// on the first call for [h] and memoised (spec 07 D10). Unmodifiable.
   List<Handle> neighbours(Handle h) => _survey.neighboursOf(h);
 }
 
@@ -130,6 +130,11 @@ class ParametricSystem {
   final DraftDocument document;
   final ParametricCatalog catalog;
 
+  /// True while this system runs client code: an edit's regeneration, a
+  /// dry run, a diagnostics pass. Nested-safe: each entry restores the
+  /// value it found, so an inner pass ending (a client `diagnose` calling
+  /// [diagnostics], a `generate` calling [drift]) never clears an outer
+  /// pass's guard.
   bool _applying = false;
 
   List<_Registration<Component>> get _types => catalog._types;
@@ -162,6 +167,7 @@ class ParametricSystem {
   /// is missing or not a child of the same object (a malformed load). Like
   /// an edit, a dry run cannot plan around either.
   List<Handle> drift() {
+    final was = _applying;
     _applying = true;
     try {
       final s = _survey(document, _types);
@@ -171,7 +177,7 @@ class ParametricSystem {
           if (_plan(document, [h], s, view).isNotEmpty) h,
       ];
     } finally {
-      _applying = false;
+      _applying = was;
     }
   }
 
@@ -181,8 +187,10 @@ class ParametricSystem {
   /// the types' registration order (spec 07 D12), over one full survey;
   /// neighbours are computed only for the objects a client asks about.
   ///
-  /// Guarded like [drift]: a client `diagnose` that calls `execute` throws
-  /// `StateError` out of this call, and nothing lands.
+  /// Guarded like [drift], survey included: a client `reach` or `diagnose`
+  /// that calls `execute` throws `StateError` out of this call, and nothing
+  /// lands. Any other exception a client's `reach` or `diagnose` throws
+  /// propagates too; there is no partial report.
   List<Diagnostic> diagnostics() {
     final misplaced = [
       for (final t in _types)
@@ -196,6 +204,7 @@ class ParametricSystem {
               handles: [h],
             ),
     ];
+    final was = _applying;
     _applying = true;
     try {
       final s = _survey(document, _types);
@@ -205,7 +214,7 @@ class ParametricSystem {
         for (final h in s.objects.keys) ...s.objects[h]!.diagnose(view, h),
       ];
     } finally {
-      _applying = false;
+      _applying = was;
     }
   }
 
@@ -266,11 +275,12 @@ final class ParametricEdit extends DraftCommand {
       throw StateError('a ParametricEdit applies once (spec 06 D9)');
     }
     _applied = true;
+    final was = _system._applying;
     _system._applying = true;
     try {
       return _run(this, target);
     } finally {
-      _system._applying = false;
+      _system._applying = was;
     }
   }
 }
