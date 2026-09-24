@@ -135,19 +135,27 @@ the six commands above; no `analysis_options.yaml` was rewritten by any
 
 ### Branch commit trailers
 
-This count must include the fix commit that corrects the fork point used
-here, so it cannot be measured before that commit exists. **Measured
+This count had to include the fix commit that corrects the fork point used
+here, so it could not be measured before that commit existed. **Measured
 immediately after that commit landed, against its own SHA** (not a bare
-`HEAD`, since `HEAD` keeps moving and this figure must not), and recorded
-in a small follow-up commit that touches only this paragraph:
+`HEAD`, since `HEAD` keeps moving and this figure must not):
 
 ```
-$ git rev-list --count 6a279b3..<fix-commit-sha>
-$ git log --format=%B 6a279b3..<fix-commit-sha> | grep -c "Co-Authored-By: Claude Opus 5.5"
+$ git rev-list --count 6a279b3..01defe5
+15
+$ git log --format=%B 6a279b3..01defe5 | grep -c "Co-Authored-By: Claude Opus 5.5"
+15
 ```
 
-*(Filled in by the follow-up commit below, with the real SHA and the two
-measured counts.)*
+**Measured at `01defe5`** (`fix(docs): correct Plan 06's fork point to
+6a279b3 (review r1)`, the commit that made this very correction): 15
+commits from the branch's real fork point (`6a279b3`) through `01defe5`, 15
+`Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` trailers — one
+per commit. That is Tasks 1–10 (13, per the mutation log's own count at
+`fbc6fba`) plus this note's own Task 11 commit (`7ce1e21`) plus this
+fork-point fix commit itself: `13 + 1 + 1 = 15`. A later commit (the
+ledger archive, or any further fix round) will raise this count again; it
+is not re-measured retroactively here.
 
 ### Where the counts differ from the plan's arithmetic, and why
 
