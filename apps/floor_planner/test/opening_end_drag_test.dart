@@ -11,6 +11,7 @@
 import 'dart:math' as math;
 
 import 'package:floor_planner/parametric/opening.dart';
+import 'package:floor_planner/parametric/opening_geometry.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/parametric/wall_grips.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -552,5 +553,78 @@ void main() {
         reason: 'the nested stray is unchanged');
     expect(doc.components.get<OpeningParams>(bare), loose,
         reason: 'the node-less stray is unchanged');
+  });
+
+  test(
+      'EP7 (t12-keptOld) 200 free walls, each with a door flush against its '
+      'far end (stored with storedCentreOf, undiagnosed), each start grip '
+      'dragged once: no door is left opening.clamped; a re-seated door is '
+      'within wallJoin.linear of L′ − (L − p), which would have been '
+      'clamped (Task 11 review I1)', () {
+    final doc = wallDoc();
+    final grips = WallGrips();
+    final hosts = <Handle>[], doors = <Handle>[];
+    for (var i = 0; i < 200; i++) {
+      final a = doc.handleSeed.next();
+      final len = 3000 + 13.37 * i, deg = 0.9 * (i % 7);
+      final s = plan(311.5 * (i % 3), 1000.0 * i);
+      run(doc, addWall(doc, a, s, polar(s, 23 + deg, len), 200, left));
+      final door = doc.handleSeed.next();
+      final w = 700 + 3.3 * i;
+      final stretches = layoutInDocument(doc, a)!.stretches;
+      final (_, end) = stretches.last;
+      final c =
+          storedCentreOf(stretches, (a: end - w, b: end, clamped: true), w);
+      run(
+          doc,
+          addOpening(doc, door,
+              OpeningParams(a, c, w, OpeningKind.door, hinge: HingeEnd.end),
+              at: i.isEven ? ownGroup : null));
+      hosts.add(a);
+      doors.add(door);
+    }
+    expect(diagnosticsOf(doc), isEmpty, reason: 'placed flush, unclamped');
+
+    final oldRule = <Handle, double>{};
+    for (final (i, a) in hosts.indexed) {
+      final f = oracleFrameOf(doc, a);
+      final was = doc.components.get<WallParams>(a)!;
+      final p = positionOf(doc, doors[i]);
+      // Lengthened or shortened along the line, and off it on odd walls.
+      final u = i.isEven ? -417.3 - 3.1 * i : 211.7 + 2.9 * i;
+      final g = grips.gripsOf(doc, a)[0];
+      run(doc, grips.drag(doc, a, g, oracleAt(f, u, i.isEven ? 0 : 37.5))!);
+      final now = doc.components.get<WallParams>(a)!;
+      oldRule[doors[i]] = localLength(now) - (localLength(was) - p);
+    }
+    final clamped = [
+      for (final d in diagnosticsOf(doc))
+        if (d.code == 'opening.clamped') d,
+    ];
+    expect(clamped, hasLength(0), reason: 'no door left clamped by rounding');
+
+    var reseated = 0;
+    for (final door in doors) {
+      final kept = positionOf(doc, door), old = oldRule[door]!;
+      expect(kept, closeTo(old, wallJoin.linear),
+          reason: 'door $door: L′ − (L − p)');
+      if (kept == old) continue;
+      reseated++;
+      // The old rule's value is clamped: it was re-seated for a reason.
+      final params = doc.components.get<OpeningParams>(door)!;
+      run(
+          doc,
+          SetComponentCommand<OpeningParams>(
+              door, params.copyWith(position: old)));
+      expect(
+          diagnosticsOf(doc).where(
+              (d) => d.code == 'opening.clamped' && d.handles.contains(door)),
+          isNotEmpty,
+          reason: 'door $door: L′ − (L − p) is clamped');
+      doc.commands.undo();
+    }
+    // ignore: avoid_print
+    print('EP7: $reseated of ${doors.length} doors re-seated');
+    expect(reseated, greaterThan(20), reason: 'the fixture is not degenerate');
   });
 }

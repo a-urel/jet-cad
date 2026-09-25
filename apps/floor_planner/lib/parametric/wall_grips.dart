@@ -3,6 +3,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'opening.dart';
+import 'opening_geometry.dart';
 import 'wall.dart';
 import 'wall_geometry.dart';
 
@@ -20,7 +21,9 @@ import 'wall_geometry.dart';
 /// - **Openings stay put** (spec 08 D13): in the same compound, after the
 ///   walls' own commands, one `SetComponentCommand<OpeningParams>` per
 ///   opening of each wall whose stored `start` moved and whose `end` did
-///   not, keeping its distance from that end ([_keptPut]). Openings on a
+///   not, keeping its distance from that end ([_keptPut]); one that would
+///   then be clamped by rounding alone is stored where it is drawn
+///   ([_seated]). Openings on a
 ///   wall whose end alone moved, or both ends, keep their positions.
 /// - **Preview:** the moved centrelines, in world; openings regenerate on
 ///   release.
@@ -81,19 +84,42 @@ final class WallGrips implements ObjectGripProvider {
       if (!rewrite.containsKey(params.host)) continue;
       byHost.putIfAbsent(params.host, () => []).add((o, params));
     }
+    final now = {for (final (h, _, w) in moved) h: w};
     final out = <DraftCommand>[];
     for (final (h, _, _) in moved) {
       final lengths = rewrite[h];
       final openings = byHost[h];
       if (lengths == null || openings == null) continue;
       final (l, l2) = lengths;
+      final stretches = layoutInDocument(d, h, moved: now)?.stretches;
       openings.sort((a, b) => a.$1.value.compareTo(b.$1.value));
       for (final (o, params) in openings) {
+        final p = l2 - (l - params.position);
         out.add(SetComponentCommand<OpeningParams>(
-            o, params.copyWith(position: l2 - (l - params.position))));
+            o,
+            params.copyWith(
+                position: stretches == null
+                    ? p
+                    : _seated(stretches, p, params.width))));
       }
     }
     return out;
+  }
+
+  /// [c], the rewritten centre of an opening [w] wide, unless the host's new
+  /// [stretches] would clamp it by no more than `wallJoin.linear`: rounding
+  /// alone (`L′ − (L − p)` for an opening flush against a stretch end lands
+  /// an ulp outside it half the time). Then the centre of the cut it gets
+  /// there, which [storedCentreOf] places unclamped, so the drag leaves it
+  /// stored where it is drawn (spec 08 D13, D14's rule; Task 11 review I1).
+  static double _seated(List<(double, double)> stretches, double c, double w) {
+    final cut = placeCut(stretches, c, w);
+    if (cut == null ||
+        !cut.clamped ||
+        !((cut.a - (c - w / 2)).abs() <= wallJoin.linear)) {
+      return c;
+    }
+    return storedCentreOf(stretches, cut, w);
   }
 
   @override

@@ -4,12 +4,15 @@
 // is rotated, and the door's own group is off the identity. Expected
 // positions come from `support/opening_fixture.dart`'s oracles, which never
 // call `opening_geometry.dart`.
+import 'dart:typed_data';
+
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/object_grips.dart';
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/opening_geometry.dart';
 import 'package:floor_planner/parametric/wall.dart';
+import 'package:floor_planner/parametric/wall_grips.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
 import 'package:flutter/material.dart';
@@ -155,14 +158,19 @@ List<Grip> objectGripsOf(PlannerView view, Handle h) => [
         if (r.object && r.key == k(h)) r.grip,
     ];
 
+/// Whether [h] is diagnosed `opening.clamped`.
+bool clamped(DraftDocument doc, Handle h) => diagnosticsOf(doc)
+    .any((d) => d.code == 'opening.clamped' && d.handles.contains(h));
+
 void main() {
   test(
-      'SG1 (X11-stored, M-08sn, M-08b) the provider: a clamped door\'s grip '
+      'SG1 (X11-stored, M-08sn, M-08b, rv11-selfCand) the provider: a '
+      'clamped door\'s grip '
       'sits at its cut\'s centre, a no-fit\'s at its stored centre; a drag '
       'projects, edge-snaps to an obstacle edge, and stores the placed '
       'centre, the clamped one where it is drawn and a no-fit one clamped '
       'to the wall; with no aperture there is no edge snap; a drag back to '
-      'the start is null', () {
+      'the start is null; a 30 mm nudge inside the aperture moves it', () {
     final doc = wallDoc();
     final (:a, :door, :nofit, :o1, :o2) = addClampedDoor(doc);
     final f = oracleFrameOf(doc, a);
@@ -257,6 +265,17 @@ void main() {
           reason: 'no-fit at $u');
       doc.commands.undo();
     }
+
+    // A 30 mm nudge inside the aperture moves the door: its own edges are
+    // never candidates (Task 11 review m1).
+    doc.commands.execute(SetComponentCommand<OpeningParams>(
+        door, paramsOf(doc, door).copyWith(position: 1000)));
+    aperture = 67;
+    final at1000 = objects.gripsOf(doc, door).single;
+    final nudge = objects.drag(doc, door, at1000, oracleAt(f, 1030, 20));
+    expect(nudge, isNotNull, reason: 'the nudge moves it');
+    doc.commands.execute(nudge!);
+    expect(paramsOf(doc, door).position, closeTo(1030, 1e-6));
   });
 
   testWidgets(
@@ -384,5 +403,126 @@ void main() {
       }
     }
     expect(driftOf(doc), isEmpty);
+  });
+
+  test(
+      'SG3 (t12-gripOld) a door drawn clamped by 1e-7 (by hand) is re-seated '
+      'by a drag onto its own edge: after it, it is stored where it is drawn '
+      'and not diagnosed (Task 11 review I1)', () {
+    // By hand: 1e-7 below the obstacle's far edge, which it is drawn on.
+    final doc = wallDoc();
+    final (:a, :door, :nofit, :o1, :o2) = addClampedDoor(doc);
+    final f = oracleFrameOf(doc, a);
+    final edge = layoutInDocument(doc, a)!.stretches[1].$1;
+    expect(edge, closeTo(o2, 1e-6));
+    doc.commands.execute(SetComponentCommand<OpeningParams>(
+        door, paramsOf(doc, door).copyWith(position: edge + 450 - 1e-7)));
+    doc.commands.clearHistory();
+    expect(clamped(doc, door), isTrue, reason: 'clamped by 1e-7');
+    final objects = ObjectGrips(edgeAperture: () => 20);
+    final g = objects.gripsOf(doc, door).single;
+    final c = objects.drag(doc, door, g, oracleAt(f, edge + 450 + 5, 30));
+    expect(c, isNotNull, reason: 'the drag re-seats it');
+    doc.commands.execute(c!);
+    expect(doc.commands.undoDepth, 1);
+    expect(clamped(doc, door), isFalse, reason: 'stored where it is drawn');
+    expect(paramsOf(doc, door).position, closeTo(edge + 450, 1e-9));
+  });
+
+  test(
+      'SG3 (t12-gripOld, old D13) a door left an ulp outside its stretch by '
+      'the old D13 rewrite L′ − (L − p) is re-seated by a drag onto its own '
+      'edge: after it, it is stored where it is drawn and not diagnosed '
+      '(Task 11 review I1)', () {
+    final objects = ObjectGrips(edgeAperture: () => 20);
+    // The old D13 rewrite: a door flush against a free wall's far end, the
+    // start dragged, and the door stored at L′ − (L − p), as a file saved
+    // before the fix holds it. The first wall where that is clamped.
+    for (var i = 0; i < 40; i++) {
+      final doc = wallDoc();
+      final a = doc.handleSeed.next();
+      final s = plan(0, 0);
+      final len = 3000 + 13.37 * i, w = 700 + 3.3 * i;
+      doc.commands.execute(addWall(doc, a, s, polar(s, 23 + 0.9 * (i % 7), len),
+          200, Justification.left));
+      final stretches = layoutInDocument(doc, a)!.stretches;
+      final (_, end) = stretches.last;
+      final door = doc.handleSeed.next();
+      doc.commands.execute(addOpening(
+          doc,
+          door,
+          OpeningParams(
+              a,
+              storedCentreOf(stretches, (a: end - w, b: end, clamped: true), w),
+              w,
+              OpeningKind.door),
+          at: doorGroup));
+      final was = doc.components.get<WallParams>(a)!;
+      final p = paramsOf(doc, door).position;
+      final walls = WallGrips();
+      doc.commands.execute(walls.drag(doc, a, walls.gripsOf(doc, a)[0],
+          oracleAt(oracleFrameOf(doc, a), -417.3 - 3.1 * i, 0))!);
+      final now = doc.components.get<WallParams>(a)!;
+      final old =
+          (now.end - now.start).length - ((was.end - was.start).length - p);
+      doc.commands.execute(SetComponentCommand<OpeningParams>(
+          door, paramsOf(doc, door).copyWith(position: old)));
+      doc.commands.clearHistory();
+      if (!clamped(doc, door)) continue;
+
+      // Onto its own right edge, 3 mm along from where it is drawn.
+      final f = oracleFrameOf(doc, a);
+      final g = objects.gripsOf(doc, door).single;
+      final u = oracleU(f, Vector2(g.x, g.y));
+      final c = objects.drag(doc, door, g, oracleAt(f, u + 3, -40));
+      expect(c, isNotNull, reason: 'wall $i: the drag re-seats it');
+      doc.commands.execute(c!);
+      expect(clamped(doc, door), isFalse, reason: 'wall $i: re-seated');
+      expect(paramsOf(doc, door).position, closeTo(old, wallJoin.linear));
+      expect(paramsOf(doc, door).position, isNot(old));
+      return;
+    }
+    fail('no wall of the 40 is left clamped by L′ − (L − p)');
+  });
+
+  testWidgets(
+      'SG4 (rv11-fillMovable) a root fill and a door selected together draw '
+      'no rotation grip: a fill has no outline, so it is not the movable key '
+      'the grip needs; a fill and a wall do (Task 11 review m2)',
+      (tester) async {
+    late Handle a, door, fill;
+    final doc = shellDoc(FlutterTextMeasurer(), (d) {
+      a = d.handleSeed.next();
+      d.commands.execute(
+          addWall(d, a, plan(0, 0), plan(5000, 0), 200, Justification.right));
+      door = d.handleSeed.next();
+      d.commands.execute(addOpening(
+          d, door, OpeningParams(a, 1730, 900, OpeningKind.door),
+          at: doorGroup));
+      final ring = [plan(0, 2000), plan(900, 2000), plan(900, 2700)];
+      final region = AddRegionCommand.allocate(
+          seed: d.handleSeed,
+          owner: d.rootHandle,
+          boundaryKind: EntityKind.polyline,
+          boundaryPayload: GeometryPayload(
+              coords: Float64List.fromList([
+                for (final q in [...ring, ring.first]) ...[q.x, q.y]
+              ]),
+              scalars: Float64List(0)),
+          layer: ReservedHandles.layerZero,
+          fillColor: const ByLayerColor(),
+          boundaryColor: const ByLayerColor());
+      fill = region.fill.handle;
+      d.commands.execute(region);
+    });
+    final view = await pumpShell(tester, doc, plan(2500, 0));
+    view.selection.replace([k(fill), k(door)]);
+    await tester.pump();
+    expect(view.grips.box, isNotNull, reason: 'the door has an outline');
+    expect(view.grips.rotatable, isFalse, reason: 'a fill and a door');
+    view.selection.replace([k(fill), k(a)]);
+    await tester.pump();
+    expect(view.grips.rotatable, isTrue,
+        reason: 'the control: a fill and a wall');
   });
 }

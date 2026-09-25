@@ -610,17 +610,23 @@ bool _isLiveGroup(DraftDocument doc, Handle h) {
 /// ignore a wall that does not join [host], so the extra walls change
 /// nothing (`HF7` pins that both give the same bits). Null when [host] is
 /// not a live wall.
+///
+/// [moved] stands in for the walls it names (an end drag's walls before it
+/// is executed, spec 08 D13): each is read from it instead of [doc].
 ({WorldWall host, List<WorldWall> walls})? wallsInDocument(
-    DraftDocument doc, Handle host) {
+    DraftDocument doc, Handle host,
+    {Map<Handle, WorldWall> moved = const {}}) {
   final p = doc.components.get<WallParams>(host);
   if (p == null || !_isLiveGroup(doc, host)) return null;
   return (
-    host: WorldWall(host, p, doc.tree.accumulatedTransform(host)),
+    host:
+        moved[host] ?? WorldWall(host, p, doc.tree.accumulatedTransform(host)),
     walls: [
       for (final h in doc.components.withComponent<WallParams>())
         if (h != host && _isLiveGroup(doc, h))
-          WorldWall(h, doc.components.get<WallParams>(h)!,
-              doc.tree.accumulatedTransform(h)),
+          moved[h] ??
+              WorldWall(h, doc.components.get<WallParams>(h)!,
+                  doc.tree.accumulatedTransform(h)),
     ],
   );
 }
@@ -633,10 +639,11 @@ HostFrame? hostFrameInDocument(DraftDocument doc, Handle host) {
 }
 
 /// [host]'s layout (frame, obstacles, stretches) through the document
-/// adapter ([wallsInDocument]). Null when [host] is not a live wall or is
-/// degenerate.
-HostLayout? layoutInDocument(DraftDocument doc, Handle host) {
-  final w = wallsInDocument(doc, host);
+/// adapter ([wallsInDocument], with [moved] standing in for the walls it
+/// names). Null when [host] is not a live wall or is degenerate.
+HostLayout? layoutInDocument(DraftDocument doc, Handle host,
+    {Map<Handle, WorldWall> moved = const {}}) {
+  final w = wallsInDocument(doc, host, moved: moved);
   return w == null ? null : layoutOf(w.host, w.walls);
 }
 

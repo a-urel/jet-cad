@@ -24,7 +24,10 @@ import 'wall.dart';
 ///      [storedCentreOf] where it had to be clamped into a stretch, and the
 ///      projection clamped to `[0, L]` where it fits nowhere;
 ///   4. returns one `SetComponentCommand<OpeningParams>`, or null when the
-///      opening would not move (within `wallJoin.linear`).
+///      centre to store is the stored one, or within `wallJoin.linear` of
+///      it while the opening is not drawn clamped now. A clamped one (by an
+///      ulp, from a file or an older rewrite) is re-seated where it is
+///      drawn by any drag, even onto its own edge (Task 11 review I1).
 /// - **The preview:** the would-be cut's two jamb lines across the band, in
 ///   world; nothing when it would be no-fit.
 /// - **Not movable** (D16): the select tool neither moves nor rotates an
@@ -63,7 +66,13 @@ final class OpeningGrips implements ObjectGripProvider {
     if (s == null) return null;
     final placed = s.place(world, edgeAperture());
     final p = s.params;
-    if ((placed.centre - p.position).abs() <= wallJoin.linear) return null;
+    if (placed.centre == p.position) return null;
+    // Within the tolerance a drag changes nothing, unless the opening is
+    // drawn clamped now: then the drag re-seats it where it is drawn.
+    if ((placed.centre - p.position).abs() <= wallJoin.linear &&
+        s.cut?.clamped != true) {
+      return null;
+    }
     return SetComponentCommand<OpeningParams>(
         group, p.copyWith(position: placed.centre));
   }
