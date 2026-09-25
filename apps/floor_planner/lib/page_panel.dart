@@ -63,8 +63,10 @@ class _PagePanelState extends State<PagePanel> {
   ///
   /// Only a pointer down outside the field's tap region calls this, and the
   /// field arms it from its focus at its last build. A window blur never
-  /// does. On web the focused `<input>` blurs first, with no element to take
-  /// the focus, so the engine closes the text input connection;
+  /// does. On web (Chromium; on Safari desktop the engine listens for no
+  /// input blur, and only the window's blur arrives) the focused `<input>`
+  /// blurs first, with no element to take the focus, so the engine closes
+  /// the text input connection;
   /// `EditableText.connectionClosed` then unfocuses the field while the app
   /// is still `resumed`, and the window's own blur, which makes the app
   /// `inactive`, comes after that (the F2F3c review saw this order in

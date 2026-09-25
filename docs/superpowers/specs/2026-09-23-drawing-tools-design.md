@@ -271,7 +271,7 @@ Drafting is black on White, Ivory and Grey and white on Blueprint; a
 document without a page counts as white paper. Walls are not drafting:
 they keep `kWallColor`, concrete black (07 D3). Pinned by the `ACI 7 is the
 foreground` and `foregroundFor` groups in `style_resolver_test` and by
-`A17`, `A20` and `A21` in `planner_draw_test`.
+`A17`, `A20`, `A21` and `A22` in `planner_draw_test`.
 
 ### D3 — `PlacementTool`: the shared base
 
