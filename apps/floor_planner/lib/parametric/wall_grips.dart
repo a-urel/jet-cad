@@ -2,6 +2,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'opening.dart';
 import 'wall.dart';
 import 'wall_geometry.dart';
 
@@ -16,7 +17,13 @@ import 'wall_geometry.dart';
 ///   it in world, ascending by handle, each written back in its own group's
 ///   local space. Joined ends follow, in one undo step. A drag that would
 ///   leave any of those walls no longer than `wallJoin.linear` is refused.
-/// - **Preview:** the moved centrelines, in world.
+/// - **Openings stay put** (spec 08 D13): in the same compound, after the
+///   walls' own commands, one `SetComponentCommand<OpeningParams>` per
+///   opening of each wall whose stored `start` moved and whose `end` did
+///   not, keeping its distance from that end ([_keptPut]). Openings on a
+///   wall whose end alone moved, or both ends, keep their positions.
+/// - **Preview:** the moved centrelines, in world; openings regenerate on
+///   release.
 ///
 /// The dragged point is where the select tool's snap chain resolves it; it
 /// is not band-joined onto another wall as the Wall tool's clicks are.
@@ -44,7 +51,47 @@ final class WallGrips implements ObjectGripProvider {
     if (moved == null) return null;
     return CompoundCommand([
       for (final (h, p, _) in moved) SetComponentCommand<WallParams>(h, p),
+      ..._keptPut(d, moved),
     ], label: 'Move wall ends');
+  }
+
+  /// Spec 08 D13: for each wall of [moved] (ascending by handle) whose
+  /// stored `start` changed and whose `end` did not (exact `==`, stored
+  /// values), each of its live openings, ascending, rewritten to
+  /// `p′ = L′ − (L − p)`: its distance from the end that did not move is
+  /// kept. `L` and `L′` are the centreline's group-local lengths before
+  /// and after. The document's openings are read once: O(openings).
+  static List<DraftCommand> _keptPut(
+      DraftDocument d, List<(Handle, WallParams, WorldWall)> moved) {
+    final rewrite = <Handle, (double, double)>{};
+    for (final (h, p, _) in moved) {
+      final old = d.components.get<WallParams>(h)!;
+      if (p.start != old.start && p.end == old.end) {
+        rewrite[h] = ((old.end - old.start).length, (p.end - p.start).length);
+      }
+    }
+    if (rewrite.isEmpty) return const [];
+    final byHost = <Handle, List<(Handle, OpeningParams)>>{};
+    for (final o in d.components.withComponent<OpeningParams>()) {
+      final node = d.tree[o];
+      if (node is! GroupNode || node.parent != d.tree.root) continue;
+      final params = d.components.get<OpeningParams>(o)!;
+      if (!rewrite.containsKey(params.host)) continue;
+      byHost.putIfAbsent(params.host, () => []).add((o, params));
+    }
+    final out = <DraftCommand>[];
+    for (final (h, _, _) in moved) {
+      final lengths = rewrite[h];
+      final openings = byHost[h];
+      if (lengths == null || openings == null) continue;
+      final (l, l2) = lengths;
+      openings.sort((a, b) => a.$1.value.compareTo(b.$1.value));
+      for (final (o, params) in openings) {
+        out.add(SetComponentCommand<OpeningParams>(
+            o, params.copyWith(position: l2 - (l - params.position))));
+      }
+    }
+    return out;
   }
 
   @override
