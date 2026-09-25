@@ -6,10 +6,10 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'page_panel.dart';
 import 'parametric/box_tool.dart';
 import 'parametric/catalog.dart';
+import 'parametric/object_grips.dart';
 import 'parametric/opening.dart';
 import 'parametric/opening_tool.dart';
 import 'parametric/wall_bands.dart';
-import 'parametric/wall_grips.dart';
 import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
 import 'selection_panel.dart';
@@ -223,10 +223,16 @@ class _PlannerShellState extends State<PlannerShell> {
   //   controller prunes a dead key before the cache walks it.
   // - The grip cache is built after the outline cache, so on a selection
   //   change its listener runs after the outlines have been rebuilt.
-  // - Spec 07 D11: a selected wall's end grips come from `WallGrips`.
+  // - Spec 07 D11, 08 D16: a selected wall's end grips and an opening's
+  //   slide grip come from `ObjectGrips`, which also tells the select tool
+  //   not to move or rotate an opening. The slide grip's edge snaps follow
+  //   object snap (F3) at the camera's current aperture (Ruling 08-15).
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
-  late final GripCache _grips =
-      GripCache(_document, _selection, _outlines, objects: WallGrips());
+  late final GripCache _grips = GripCache(_document, _selection, _outlines,
+      objects: ObjectGrips(
+          edgeAperture: () => _snap.objectSnap
+              ? kSnapAperturePixels / _camera.value.scale
+              : null));
 
   late final ToolContext _context = ToolContext(
       document: _document,

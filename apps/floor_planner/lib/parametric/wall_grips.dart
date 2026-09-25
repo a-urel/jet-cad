@@ -27,6 +27,8 @@ import 'wall_geometry.dart';
 ///
 /// The dragged point is where the select tool's snap chain resolves it; it
 /// is not band-joined onto another wall as the Wall tool's clicks are.
+///
+/// A wall is [movable]: the select tool moves and rotates it (spec 08 D16).
 final class WallGrips implements ObjectGripProvider {
   /// The ends [preview] moves, per grip: computed once for the grip being
   /// dragged. The grip cache hands out new grips whenever the selected
@@ -108,6 +110,9 @@ final class WallGrips implements ObjectGripProvider {
       for (final (_, _, w) in moved) (EntityKind.line, linePayload(w.s, w.e)),
     ];
   }
+
+  @override
+  bool movable(DraftDocument d, Handle group) => true;
 
   /// [h] as the geometry reads it; null when it is not a wall.
   static WorldWall? _world(DraftDocument d, Handle h) {

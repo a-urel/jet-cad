@@ -41,6 +41,24 @@ abstract interface class ObjectGripProvider {
   /// nothing to show. [world] is only read during the call.
   List<(EntityKind, GeometryPayload)> preview(
       DraftDocument d, Handle group, Grip grip, Vector2 world);
+
+  /// False when the select tool must not move or rotate the root-level
+  /// [group] (spec 08 D16): a move or rotate skips it, as it skips a fill,
+  /// the rotation grip needs some other movable key, and its body shows no
+  /// move cursor. True for any group this provider does not own.
+  bool movable(DraftDocument d, Handle group);
+}
+
+/// Whether the select tool may move or rotate [key] (spec 08 D16): false
+/// only for a root-level group that [objects] calls immovable. Everything
+/// else is decided where it always was (a fill or an attrib is skipped by
+/// the capture itself, spec 03 D4).
+bool movableKey(
+    DraftDocument d, SelectionKey key, ObjectGripProvider? objects) {
+  if (objects == null) return true;
+  final node = d.tree[key.target];
+  if (node is! GroupNode || node.parent != d.rootHandle) return true;
+  return objects.movable(d, key.target);
 }
 
 /// One grip of one selected root leaf, or — with [object] — one grip an
@@ -187,6 +205,9 @@ class GripCache extends ChangeNotifier {
   Set<SelectionKey> _built = const {};
   int _moveCount = 0;
   Aabb2? _box;
+
+  /// Some selected key with an outline is [movableKey]; set per rebuild.
+  bool _movable = false;
   Transform2 _frame = const Transform2(1, 0, 0, 1, 0, 0);
   Vector2? _pivot;
   Transform2? _carry;
@@ -222,8 +243,10 @@ class GripCache extends ChangeNotifier {
 
   /// A rotation grip is drawn and hit (spec D6). A fill has no outline of
   /// its own, so a non-null box already means a non-fill key
-  /// (Ruling 03-15).
-  bool get rotatable => _box != null;
+  /// (Ruling 03-15). Some key with an outline must also be movable
+  /// ([movableKey], spec 08 D16): a selection of openings alone has nothing
+  /// to rotate.
+  bool get rotatable => _box != null && _movable;
 
   /// Index into [grips] of the hovered or grabbed grip, or -1.
   ///
@@ -270,10 +293,11 @@ class GripCache extends ChangeNotifier {
     return best;
   }
 
-  /// Whether [screen] is within [kGripHitPixels] of the rotation grip.
+  /// Whether [screen] is within [kGripHitPixels] of the rotation grip;
+  /// never while it is not [rotatable].
   bool hitsRotationGrip(Offset screen, Transform2 worldToScreen) {
-    final b = _box;
-    if (b == null) return false;
+    if (!rotatable) return false;
+    final b = _box!;
     return (rotationGripOf(b, worldToScreen, _frame).centre - screen)
             .distance <=
         kGripHitPixels;
@@ -291,12 +315,16 @@ class GripCache extends ChangeNotifier {
     _grips.clear();
     _moveCount = 0;
     hot = -1;
+    _movable = false;
     var box = Aabb2.empty();
     final keys = selection.keys.toList()
       ..sort((a, b) => a.target.value.compareTo(b.target.value));
     for (final key in keys) {
       final bounds = outlines.worldBoundsOf(key);
-      if (bounds != null) box = box.union(bounds);
+      if (bounds != null) {
+        box = box.union(bounds);
+        if (!_movable) _movable = movableKey(document, key, objects);
+      }
       final slot = document.entities.slotOf(key.target);
       if (slot == null) {
         // A group or an instance: no leaf grips (D3). A root-level group's

@@ -13,7 +13,7 @@ import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import 'grip_cache.dart' show GripCache, GripRef;
+import 'grip_cache.dart' show GripCache, GripRef, movableKey;
 import 'grip_drag.dart';
 import 'selection.dart';
 import 'selection_style.dart';
@@ -189,9 +189,12 @@ class SelectTool extends Tool {
         if (hot >= 0) cursor = SystemMouseCursors.precise;
       }
     }
+    // A body the select tool will not move shows no move cursor (spec 08
+    // D16).
     if (cursor == MouseCursor.defer &&
         key != null &&
-        ctx.selection.contains(key)) {
+        ctx.selection.contains(key) &&
+        movableKey(ctx.document, key, grips?.objects)) {
       cursor = SystemMouseCursors.move;
     }
     final hotChanged = grips != null && grips.hot != hot;
@@ -213,7 +216,8 @@ class SelectTool extends Tool {
         _bandMode = _end.dx >= _start.dx ? BandMode.window : BandMode.crossing;
         notifyListeners();
       case PressClass.selectedBody:
-        final drag = GripDrag.move(ctx.document, ctx.selection.keys);
+        final drag = GripDrag.move(ctx.document, ctx.selection.keys,
+            objects: ctx.grips?.objects);
         if (!_permitted(drag, ctx)) {
           _clickOnly = true;
           return;
@@ -225,7 +229,8 @@ class SelectTool extends Tool {
         final next = _pressShift
             ? <SelectionKey>{...ctx.selection.keys, key}
             : <SelectionKey>{key};
-        final drag = GripDrag.move(ctx.document, next);
+        final drag =
+            GripDrag.move(ctx.document, next, objects: ctx.grips?.objects);
         if (!_permitted(drag, ctx)) {
           _clickOnly = true;
           return;
@@ -249,7 +254,7 @@ class SelectTool extends Tool {
         // Ruling 03-9: a centre grip moves the whole selection. An object
         // grip reshapes through its provider (07 D11).
         final drag = ref.grip.role == GripRole.move
-            ? GripDrag.move(ctx.document, ctx.selection.keys)
+            ? GripDrag.move(ctx.document, ctx.selection.keys, objects: objects)
             : ref.object && objects != null
                 ? GripDrag.reshapeObject(
                     ctx.document, ref.key, ref.grip, objects)
@@ -272,7 +277,8 @@ class SelectTool extends Tool {
           return;
         }
         final drag = GripDrag.rotate(
-            ctx.document, ctx.selection.keys, pivot, _pressWorld);
+            ctx.document, ctx.selection.keys, pivot, _pressWorld,
+            objects: ctx.grips?.objects);
         if (!_permitted(drag, ctx)) {
           _clickOnly = true;
           return;
