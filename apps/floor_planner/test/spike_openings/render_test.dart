@@ -160,7 +160,7 @@ void main() {
     // ignore: avoid_print
     print('R3: wall children ${kids(doc, hA)}, window children '
         '${kids(doc, const Handle(5000))}');
-    await snap(tester, 'r3_blueprint_nofit', doc, plan(400, 0), 0.9);
+    await snap(tester, 'r3_blueprint_nofit', doc, plan(0, 0), 0.55);
   });
 
   test('Q6 picks: the leaf, the arc, the gap, the hinge vertex', () {
