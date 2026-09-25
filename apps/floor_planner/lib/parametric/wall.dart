@@ -30,9 +30,12 @@ bool isWallThickness(double t) => t.isFinite && t > wallJoin.linear;
 const double mitreLimit = 4;
 
 /// Every wall child's colour (spec 07 D3): a black band on light paper,
-/// fill, outline and centreline alike. Concrete, not ByLayer: layer 0 is
-/// ACI 7, which resolves to white (`aciToRgb(7)`), and nothing in the
-/// renderer contrasts it with the paper, so a ByLayer band is paper-white.
+/// fill, outline and centreline alike. Concrete, not ByLayer. When 07
+/// landed, layer 0's ACI 7 resolved to white (`aciToRgb(7)`) and a ByLayer
+/// band was paper-white; since fix/post-07 the shell's resolver draws ACI 7
+/// in a foreground of black, so ByLayer would now be black too. The
+/// concrete colour stays: walls are out of that fix's scope, and a wall
+/// keeps its colour whatever resolver draws it.
 const DraftColor kWallColor = TrueColor(0x000000);
 
 /// A wall's parameters (spec 07 D2): both centreline endpoints in

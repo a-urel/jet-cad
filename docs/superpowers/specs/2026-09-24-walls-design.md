@@ -194,6 +194,12 @@ affects ByLayer drafting on layer 0 (Plan 05's tools, 06's boxes). That was
 found here and deferred to a post-07 `fix/` branch on the human's decision;
 07 does not change it.
 
+**Amended by fix/post-07:** the contrast rule now exists. ACI 7 resolves to
+the foreground `DocumentStyleResolver` is given (default `0xFFFFFF`), and
+the floor planner gives it black, so ByLayer drafting on layer 0 is black
+on the paper (05 D2's amendment). Walls keep `kWallColor`: they are out of
+that fix's scope, and a concrete colour does not depend on the resolver.
+
 **Amended at execution (Plan 07, final review):** "Handles at creation are
 fill < outline < centreline" holds for every wall created whole. A
 **loaded** degenerate wall (D2) has only its centreline; made whole by an

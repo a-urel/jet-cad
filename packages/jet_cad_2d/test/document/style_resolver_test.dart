@@ -354,6 +354,146 @@ void main() {
     });
   });
 
+  group('ACI 7 is the foreground (fix/post-07)', () {
+    // 0x123456 is neither black nor white: a foreground of 0x000000 would
+    // pass a resolver that zeroed the RGB, and 0xFFFFFF is the value the
+    // resolver gave before the foreground existed.
+    const fg = 0x123456;
+    late DraftDocument doc;
+    late DocumentStyleResolver resolver;
+    // A non-zero layer whose own colour is ACI 7, so the ByLayer route is
+    // exercised off layer 0 too.
+    const inkLayer = Handle(100), redLayer = Handle(101);
+
+    setUp(() {
+      doc = DraftDocument.empty();
+      addLayer(doc, inkLayer, 'ink', color: const IndexedColor(7));
+      addLayer(doc, redLayer, 'red', color: const IndexedColor(1));
+      resolver = DocumentStyleResolver(doc, foreground: fg);
+    });
+
+    int argbOf(Handle h, [StyleContext ctx = StyleContext.documentRoot]) =>
+        resolver.styleFor(doc.entities.slotOf(h)!, ctx).argb;
+
+    test("an entity's own IndexedColor(7) draws in the foreground", () {
+      final h = addLine(doc, doc.rootHandle,
+          layer: redLayer, color: const IndexedColor(7));
+      expect(argbOf(h), 0xFF123456);
+    });
+
+    test('ByLayer on layer 0 (ACI 7) draws in the foreground', () {
+      // What every drafting tool writes (spec 05 D2).
+      final h = addLine(doc, doc.rootHandle,
+          layer: ReservedHandles.layerZero, color: const ByLayerColor());
+      expect(argbOf(h), 0xFF123456);
+    });
+
+    test('ByLayer on a non-zero ACI 7 layer draws in the foreground', () {
+      final h = addLine(doc, doc.rootHandle,
+          layer: inkLayer, color: const ByLayerColor());
+      expect(argbOf(h), 0xFF123456);
+    });
+
+    test('ByBlock at the document root (ACI 7) draws in the foreground', () {
+      final h = addLine(doc, doc.rootHandle,
+          layer: redLayer, color: const ByBlockColor());
+      expect(argbOf(h), 0xFF123456);
+    });
+
+    test('ByBlock under an ACI 7 instance draws in the foreground', () {
+      final def = addDefinition(doc, const Handle(200), 'sym');
+      final h = addLine(doc, def,
+          layer: ReservedHandles.layerZero, color: const ByBlockColor());
+      const instance = Handle(201);
+      doc.commands.execute(AddNodeCommand(InstanceNode(
+        handle: instance,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(5, 7),
+        definition: def,
+        layer: redLayer,
+        color: const IndexedColor(7),
+      )));
+      final ctx = resolver.contextFor(instance, StyleContext.documentRoot);
+      expect(ctx.color, 7, reason: 'the context stays encoded, not RGB');
+      expect(argbOf(h, ctx), 0xFF123456);
+    });
+
+    test(
+        'a layer-0 ByLayer entity placed onto an ACI 7 layer draws in the '
+        'foreground, and onto an ACI 1 layer in red', () {
+      final def = addDefinition(doc, const Handle(200), 'sym');
+      final h = addLine(doc, def,
+          layer: ReservedHandles.layerZero, color: const ByLayerColor());
+      for (final (layer, instance, want) in const [
+        (inkLayer, Handle(201), 0xFF123456),
+        (redLayer, Handle(202), 0xFFFF0000),
+      ]) {
+        doc.commands.execute(AddNodeCommand(InstanceNode(
+          handle: instance,
+          parent: doc.rootHandle,
+          transform: Transform2.translation(5, 7),
+          definition: def,
+          layer: layer,
+          color: const IndexedColor(3),
+        )));
+        final ctx = resolver.contextFor(instance, StyleContext.documentRoot);
+        expect(argbOf(h, ctx), want, reason: 'placed on $layer');
+      }
+    });
+
+    test('the foreground keeps the alpha transparency gives it', () {
+      final h = addLine(doc, doc.rootHandle,
+          layer: redLayer, color: const IndexedColor(7), transparency: 64);
+      expect(argbOf(h), 0xBF123456);
+    });
+
+    test(
+        'TrueColor(0xFFFFFF) stays white: the test is on the index, not the '
+        'value', () {
+      final h = addLine(doc, doc.rootHandle,
+          layer: ReservedHandles.layerZero, color: const TrueColor(0xFFFFFF));
+      expect(argbOf(h), 0xFFFFFFFF);
+    });
+
+    test('other indices and true colours are untouched', () {
+      for (final (color, want) in const [
+        (IndexedColor(1), 0xFFFF0000),
+        (IndexedColor(6), 0xFFFF00FF),
+        (IndexedColor(8), 0xFF808080),
+        (IndexedColor(250), 0xFF333333),
+        (TrueColor(0x000007), 0xFF000007),
+        (TrueColor(0xABCDEF), 0xFFABCDEF),
+      ]) {
+        final h = addLine(doc, doc.rootHandle,
+            layer: ReservedHandles.layerZero, color: color);
+        expect(argbOf(h), want, reason: '$color');
+      }
+      final h = addLine(doc, doc.rootHandle,
+          layer: redLayer, color: const ByLayerColor());
+      expect(argbOf(h), 0xFFFF0000, reason: 'ByLayer onto ACI 1');
+    });
+
+    test('the default foreground is white, as aciToRgb(7) was', () {
+      final h = addLine(doc, doc.rootHandle,
+          layer: ReservedHandles.layerZero, color: const ByLayerColor());
+      expect(
+          DocumentStyleResolver(doc)
+              .styleFor(doc.entities.slotOf(h)!, StyleContext.documentRoot)
+              .argb,
+          0xFFFFFFFF);
+    });
+
+    test('an ARGB foreground is rejected, not ORed over the alpha', () {
+      expect(() => DocumentStyleResolver(doc, foreground: 0xFF000000),
+          throwsArgumentError);
+      expect(() => DocumentStyleResolver(doc, foreground: -1),
+          throwsArgumentError);
+      expect(DocumentStyleResolver(doc, foreground: 0xFFFFFF).foreground,
+          0xFFFFFF);
+      expect(DocumentStyleResolver(doc, foreground: 0).foreground, 0);
+    });
+  });
+
   group('aciToRgb', () {
     test('the nine fixed colours are exact', () {
       expect(aciToRgb(1), 0xFF0000, reason: 'red');

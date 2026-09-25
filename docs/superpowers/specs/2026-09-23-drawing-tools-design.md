@@ -252,6 +252,18 @@ is built, when the shape finishes:
 
 The line chain commits each segment as its own command.
 
+**Amended by fix/post-07:** drafting stays ByLayer on layer 0, and layer 0
+is ACI 7, which `aciToRgb(7)` makes `0xFFFFFF`: every drafted shape (and
+06's boxes) painted white on white paper. AutoCAD's rule is now the
+engine's: ACI 7 is the **foreground**. `DocumentStyleResolver` takes an
+optional `foreground` (`0xRRGGBB`, default `0xFFFFFF`, so nothing that does
+not pass one moves) and draws ACI 7 in it by every route: the entity's own
+colour, ByLayer, ByBlock, the document root. `TrueColor(0xFFFFFF)` stays
+white; `aciToRgb` is unchanged. The floor planner's shell holds one
+resolver per document with `foreground: 0x000000`, so drafting is black.
+Pinned by the `ACI 7 is the foreground` group in `style_resolver_test` and
+`A17` in `planner_draw_test`.
+
 ### D3 — `PlacementTool`: the shared base
 
 `packages/jet_cad_2d_flutter/lib/src/draw/placement_tool.dart`, `abstract

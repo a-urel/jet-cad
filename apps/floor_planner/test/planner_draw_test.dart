@@ -409,4 +409,42 @@ void main() {
     expect(status(tester), 'Polyline');
     expect(polyline.isPending, isTrue);
   });
+
+  testWidgets(
+      'A17 a line drafted with L is ByLayer on layer 0 and resolves black '
+      "through the canvas's own resolver, which survives a rebuild "
+      '(fix/post-07)', (tester) async {
+    final seeded = drawDoc(FlutterTextMeasurer());
+    final view = await pumpDraw(tester, seeded.doc);
+    await press(tester, LogicalKeyboardKey.keyL);
+    await tester.tapAt(globalOf(tester, view, 7010, 3020));
+    await tester.pump();
+    await tester.tapAt(globalOf(tester, view, 7060, 3090));
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.escape);
+    final doc = view.document;
+    final drafted =
+        ofKind(doc, EntityKind.line).where((h) => h != seeded.line).single;
+    final slot = doc.entities.slotOf(drafted)!;
+    // The fixture is the defect's own: nothing concrete to fall back on.
+    expect(doc.entities.colorAt(slot), kByLayer);
+    expect(doc.entities.layerAt(slot), ReservedHandles.layerZero);
+    expect(doc.tables.layers[ReservedHandles.layerZero]!.color,
+        const IndexedColor(7));
+
+    DraftCanvasState canvas() =>
+        tester.state<DraftCanvasState>(find.byType(DraftCanvas));
+    final painter = canvas().painter;
+    expect(painter.resolver.styleFor(slot, StyleContext.documentRoot).argb,
+        0xFF000000,
+        reason: 'ACI 7 is the foreground, black on the paper');
+
+    // A rebuild of the shell and the view must hand the canvas the same
+    // resolver: a different one makes `didUpdateWidget` rebuild the painter.
+    tester.element(find.byType(PlannerShell)).markNeedsBuild();
+    tester.element(find.byType(PlannerView)).markNeedsBuild();
+    await tester.pump();
+    expect(identical(canvas().painter, painter), isTrue,
+        reason: 'one resolver per document, not one per build');
+  });
 }

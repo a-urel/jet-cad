@@ -18,6 +18,7 @@ class PlannerView extends StatefulWidget {
     super.key,
     required this.document,
     required this.index,
+    required this.resolver,
     required this.camera,
     required this.page,
     required this.policy,
@@ -30,6 +31,10 @@ class PlannerView extends StatefulWidget {
 
   final DraftDocument document;
   final SpatialIndex index;
+
+  /// Owned by the shell, one per document: [DraftCanvas] rebuilds its
+  /// painter when handed a different resolver (fix/post-07).
+  final StyleResolver resolver;
   final CameraController camera;
   final PageNotifier page;
   final GesturePolicy policy;
@@ -138,6 +143,7 @@ class _PlannerViewState extends State<PlannerView> {
                           document: widget.document,
                           index: widget.index,
                           camera: widget.camera,
+                          resolver: widget.resolver,
                           tiles: false,
                         ), // already inside its own RepaintBoundary
                         Positioned.fill(

@@ -19,9 +19,41 @@ abstract class StyleResolver {
 }
 
 class DocumentStyleResolver implements StyleResolver {
-  DocumentStyleResolver(this.document);
+  DocumentStyleResolver(this.document, {this.foreground = 0xFFFFFF}) {
+    // Rejected rather than masked: Flutter colours are ARGB, and an opaque
+    // black passed as 0xFF000000 would otherwise OR its alpha byte over the
+    // one [styleFor] computes from transparency.
+    if (foreground < 0 || foreground > 0xFFFFFF) {
+      throw ArgumentError.value(
+          foreground, 'foreground', 'must be 0..0xFFFFFF');
+    }
+  }
 
   final DraftDocument document;
+
+  /// The RGB (`0xRRGGBB`) that ACI 7 draws in.
+  ///
+  /// AutoCAD's rule: ACI 7 is not a colour but the *foreground* — black on a
+  /// light background, white on a dark one. [aciToRgb] answers 0xFFFFFF for
+  /// it, which is right on a dark model space and invisible on white paper;
+  /// only the host knows which it draws on, so the host says. Layer 0 is
+  /// ACI 7, so everything drafted ByLayer on it arrives here.
+  ///
+  /// Applies to ACI 7 by whichever route it is reached — the entity's own
+  /// colour, ByLayer onto an ACI 7 layer, ByBlock from an ACI 7 context, or
+  /// [StyleContext.documentRoot] itself — because every route ends in one
+  /// encoded colour before it is turned into RGB. A [TrueColor] is never
+  /// substituted, including `TrueColor(0xFFFFFF)`: the test is on the index,
+  /// not on the RGB value.
+  ///
+  /// Defaults to 0xFFFFFF, the value [aciToRgb] gives, so a caller that does
+  /// not pass one draws exactly as before.
+  final int foreground;
+
+  /// The encoded form of `IndexedColor(7)`: [encodeColor] stores an index as
+  /// itself. Compared before decoding, so the substitution costs one integer
+  /// comparison per entity and allocates nothing.
+  static const int _kAci7 = 7;
 
   @override
   StyleContext contextFor(Handle instance, StyleContext inherited) {
@@ -162,10 +194,12 @@ class DocumentStyleResolver implements StyleResolver {
     return (encoded == kByLayer || encoded == kByBlock) ? ctx.color : encoded;
   }
 
-  int _rgbOf(int encoded) => switch (decodeColor(encoded)) {
-        IndexedColor(:final aci) => aciToRgb(aci),
-        TrueColor(:final rgb) => rgb,
-        // Unreachable: both branches resolve to a concrete value above.
-        _ => aciToRgb(7),
-      };
+  int _rgbOf(int encoded) => encoded == _kAci7
+      ? foreground
+      : switch (decodeColor(encoded)) {
+          IndexedColor(:final aci) => aciToRgb(aci),
+          TrueColor(:final rgb) => rgb,
+          // Unreachable: both branches resolve to a concrete value above.
+          _ => foreground,
+        };
 }

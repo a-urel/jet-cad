@@ -56,6 +56,14 @@ class _PlannerShellState extends State<PlannerShell> {
       widget.document ?? startupPlan(_measurer);
   late final PageNotifier _page = PageNotifier(_document);
   late final SpatialIndex _index = SpatialIndex(_document);
+
+  /// ACI 7 draws black (fix/post-07): the app drafts ByLayer on layer 0,
+  /// which is ACI 7, onto light paper. One instance for the document's
+  /// lifetime: `DraftCanvas` rebuilds its painter whenever the resolver it
+  /// is handed is a different object, so a resolver built per build would
+  /// cost that on every rebuild of the shell.
+  late final DocumentStyleResolver _resolver =
+      DocumentStyleResolver(_document, foreground: 0x000000);
   late final CameraController _camera = CameraController(
     widget.initialCamera ?? _nominalFit(),
     minScale: kMinScale,
@@ -331,6 +339,7 @@ class _PlannerShellState extends State<PlannerShell> {
                       child: PlannerView(
                         document: _document,
                         index: _index,
+                        resolver: _resolver,
                         camera: _camera,
                         page: _page,
                         policy: _policy,
