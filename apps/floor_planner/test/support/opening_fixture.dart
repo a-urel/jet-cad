@@ -590,10 +590,12 @@ final class OpeningOracle {
   }
 }
 
-/// Opening [h]'s door symbol, by [OpeningOracle.door].
+/// Opening [h]'s door symbol, by [OpeningOracle.door]; by [oracle] when
+/// given, which must be built over [doc] as it is now.
 ({Vector2 hinge, Vector2 tip, Vector2 shut}) doorOracle(
-        DraftDocument doc, Handle h) =>
-    OpeningOracle(doc).door(h);
+        DraftDocument doc, Handle h,
+        {OpeningOracle? oracle}) =>
+    (oracle ?? OpeningOracle(doc)).door(h);
 
 /// [h]'s LINE children, ascending, each read back to world as its two ends.
 List<(Vector2, Vector2)> worldLines(DraftDocument doc, Handle h) {
@@ -649,8 +651,10 @@ WorldArc worldArc(DraftDocument doc, Handle h) {
 /// on [OpeningOracle.door], in world within 1e-6 (spec 08 D10): the leaf
 /// from the hinge to the tip; the arc about the hinge, of radius the width,
 /// sweeping +π/2 anticlockwise between the tip and the shut jamb, its
-/// middle on their bisector.
-void expectDoorOnOracle(DraftDocument doc, Handle h, {String? reason}) {
+/// middle on their bisector. [oracle], when given, must be built over [doc]
+/// as it is now.
+void expectDoorOnOracle(DraftDocument doc, Handle h,
+    {String? reason, OpeningOracle? oracle}) {
   final why = reason ?? 'door ${h.toHex()}';
   final ks = kids(doc, h);
   expect(
@@ -660,7 +664,7 @@ void expectDoorOnOracle(DraftDocument doc, Handle h, {String? reason}) {
     expect(doc.entities.colorAt(doc.entities.slotOf(k)!), kByLayer,
         reason: '$why: ByLayer');
   }
-  final want = doorOracle(doc, h);
+  final want = doorOracle(doc, h, oracle: oracle);
   final w = doc.components.get<OpeningParams>(h)!.width;
   final (from, to) = worldLines(doc, h).single;
   expect((from - want.hinge).length, lessThan(1e-6), reason: '$why: hinge');
@@ -684,8 +688,10 @@ void expectDoorOnOracle(DraftDocument doc, Handle h, {String? reason}) {
 }
 
 /// Window or gap [h]'s LINE children lie on [OpeningOracle.lines], in
-/// order, in world within 1e-6, and are ByLayer.
-void expectLinesOnOracle(DraftDocument doc, Handle h, {String? reason}) {
+/// order, in world within 1e-6, and are ByLayer. [oracle], when given, must
+/// be built over [doc] as it is now.
+void expectLinesOnOracle(DraftDocument doc, Handle h,
+    {String? reason, OpeningOracle? oracle}) {
   final why = reason ?? 'opening ${h.toHex()}';
   final ks = kids(doc, h);
   expect([for (final k in ks) kindOf(doc, k)], everyElement(EntityKind.line),
@@ -694,7 +700,7 @@ void expectLinesOnOracle(DraftDocument doc, Handle h, {String? reason}) {
     expect(doc.entities.colorAt(doc.entities.slotOf(k)!), kByLayer,
         reason: '$why: ByLayer');
   }
-  final want = OpeningOracle(doc).lines(h);
+  final want = (oracle ?? OpeningOracle(doc)).lines(h);
   final got = worldLines(doc, h);
   expect(got, hasLength(want.length), reason: why);
   for (var i = 0; i < want.length; i++) {
@@ -704,6 +710,63 @@ void expectLinesOnOracle(DraftDocument doc, Handle h, {String? reason}) {
         reason: '$why: line $i to');
   }
 }
+
+/// The distance from [p] to the segment [a]–[b].
+double distToSegment(Vector2 p, Vector2 a, Vector2 b) {
+  final d = b - a;
+  final t = ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0);
+  return (p - (a + d * t)).length;
+}
+
+/// Whether [p] lies inside [ring] farther than 1e-6 from its edges: a point
+/// on a face of the band is not strictly inside it.
+bool strictlyInsideRing(Vector2 p, List<Vector2> ring) {
+  if (!insideRing(p, ring)) return false;
+  for (var i = 0; i < ring.length; i++) {
+    if (distToSegment(p, ring[i], ring[(i + 1) % ring.length]) <= 1e-6) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Opening [h]'s symbol sampled in world: 65 points along each LINE, and
+/// along its ARC, if any, from its start angle to its end.
+List<Vector2> symbolSamples(DraftDocument doc, Handle h) {
+  final out = <Vector2>[
+    for (final (a, b) in worldLines(doc, h))
+      for (var i = 0; i <= 64; i++) a + (b - a) * (i / 64),
+  ];
+  if (kids(doc, h).any((k) => kindOf(doc, k) == EntityKind.arc)) {
+    final arc = worldArc(doc, h);
+    final a0 = math.atan2(arc.from.y - arc.centre.y, arc.from.x - arc.centre.x);
+    for (var i = 0; i <= 64; i++) {
+      final a = a0 + arc.sweep * i / 64;
+      out.add(arc.centre + Vector2(math.cos(a), math.sin(a)) * arc.radius);
+    }
+  }
+  return out;
+}
+
+/// Opening [h]'s symbol in world, as a flat list of numbers: each LINE's
+/// ends, then its ARC's centre, radius, ends and sweep.
+List<double> worldSymbol(DraftDocument doc, Handle h) => [
+      for (final (a, b) in worldLines(doc, h)) ...[a.x, a.y, b.x, b.y],
+      if (kids(doc, h).any((k) => kindOf(doc, k) == EntityKind.arc))
+        ...() {
+          final arc = worldArc(doc, h);
+          return [
+            arc.centre.x,
+            arc.centre.y,
+            arc.radius,
+            arc.from.x,
+            arc.from.y,
+            arc.to.x,
+            arc.to.y,
+            arc.sweep,
+          ];
+        }(),
+    ];
 
 /// Wall [h]'s straight span, by [OpeningOracle.span].
 (double, double) oracleSpan(DraftDocument doc, Handle h) =>

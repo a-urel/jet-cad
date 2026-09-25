@@ -318,8 +318,10 @@ void main() {
       'crossing wall, 0–3 openings per wall, every wall in its own rotated '
       'group at the far origin: 0 refused, 0 tiling violations, drift() '
       'empty, every stored piece triangulates and is simple and '
-      'anticlockwise, centreline ends at the stored endpoints exactly, and '
-      'diagnostics() reports what the oracle does', () {
+      'anticlockwise, centreline ends at the stored endpoints exactly, '
+      'diagnostics() reports what the oracle does, every symbol is on the '
+      'oracle, and no fitting symbol lies strictly inside its host\'s pieces '
+      '(D12)', () {
     final sw = Stopwatch()..start();
     final rnd = math.Random(808);
     // The keep-a-piece cases draw from their own stream, so the walls and
@@ -330,6 +332,14 @@ void main() {
     var notCcw = 0, exactEnds = 0, inexactEnds = 0, keptPiece = 0;
     var mismatched = 0, coveringOpenings = 0, unexplained = 0, childless = 0;
     var tees = 0, crossings = 0, obstacles = 0;
+    // Symbols (D10-D12, Task 6 review m-2): per kind, how many were
+    // compared with the oracle and how many are off it; of the fitting ones,
+    // how many have a sample strictly inside one of their host's pieces
+    // (D12's rule); of the no-fit ones, the same count, printed only: D12's
+    // recorded limit exempts them.
+    final symbols = {for (final k in OpeningKind.values) k: 0};
+    var offOracle = 0, fittingSymbols = 0, fittingInside = 0;
+    var nofitSymbols = 0, nofitInside = 0, samples = 0;
     final failures = <String>[];
     for (var trial = 0; trial < 300; trial++) {
       final doc = wallDoc();
@@ -554,6 +564,40 @@ void main() {
                 'corner: ${why.corner}');
           }
         }
+        // Every opening's drawn symbol against the oracle's, over the
+        // oracle's own cut (fitting) or stored interval (no-fit).
+        final ring = worldPieces(doc, h);
+        for (final (o, c) in placed) {
+          final kind = doc.components.get<OpeningParams>(o)!.kind;
+          symbols[kind] = symbols[kind]! + 1;
+          try {
+            if (kind == OpeningKind.door) {
+              expectDoorOnOracle(doc, o, oracle: oracle);
+            } else {
+              expectLinesOnOracle(doc, o, oracle: oracle);
+            }
+          } on TestFailure catch (e) {
+            offOracle++;
+            failures.add('trial $trial opening ${o.value} (${kind.name}, '
+                '${c == null ? 'no-fit' : 'fitting'}): off the oracle: '
+                '${e.message?.split('\n').where((l) => l.trim().isNotEmpty).take(4).join(' / ')}');
+          }
+          final pts = symbolSamples(doc, o);
+          samples += pts.length;
+          final inside =
+              pts.any((q) => ring.any((r) => strictlyInsideRing(q, r)));
+          if (c != null) {
+            fittingSymbols++;
+            if (inside) {
+              fittingInside++;
+              failures.add('trial $trial opening ${o.value} (${kind.name}): '
+                  'a fitting symbol lies inside wall ${h.value}\'s pieces');
+            }
+          } else {
+            nofitSymbols++;
+            if (inside) nofitInside++;
+          }
+        }
         final fit = [
           for (final (o, c) in placed)
             if (c != null) (o, c)
@@ -593,7 +637,13 @@ void main() {
         'with a piece that does not triangulate, $notCcw with a piece not '
         'simple and anticlockwise, $exactEnds cut-wall centreline ends at a '
         'stored endpoint ($inexactEnds inexact), $mismatched trials whose '
-        'diagnostics differ from the oracle, ${sw.elapsedMilliseconds} ms');
+        'diagnostics differ from the oracle; symbols: '
+        '${symbols[OpeningKind.door]} doors, ${symbols[OpeningKind.window]} '
+        'windows, ${symbols[OpeningKind.gap]} gaps, $offOracle off the '
+        'oracle; $fittingSymbols fitting, $fittingInside strictly inside '
+        'their host\'s pieces; $nofitSymbols no-fit, $nofitInside of them '
+        'inside their host\'s pieces (exempt, D12\'s limit); $samples '
+        'samples; ${sw.elapsedMilliseconds} ms');
     final first = failures.take(10).join('\n');
     expect(childless, 0, reason: first);
     expect(refused, 0, reason: first);
@@ -604,6 +654,10 @@ void main() {
     expect(exactEnds, greaterThan(100), reason: 'not vacuous');
     expect(mismatched, 0, reason: first);
     expect(unexplained, 0, reason: first);
+    expect(fittingInside, 0, reason: first);
+    expect(offOracle, 0, reason: first);
+    expect(fittingSymbols, greaterThan(1000), reason: 'not vacuous');
+    expect(nofitSymbols, greaterThan(100), reason: 'not vacuous');
     expect(keptPiece, greaterThan(50), reason: 'keep-a-piece cases');
   }, timeout: const Timeout(Duration(minutes: 10)));
 

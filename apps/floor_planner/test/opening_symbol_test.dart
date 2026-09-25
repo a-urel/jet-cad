@@ -41,63 +41,6 @@ void run(DraftDocument doc, DraftCommand c) {
 double offsetOf(OracleFrame f, Vector2 q) =>
     (q.x - f.s.x) * f.n.x + (q.y - f.s.y) * f.n.y;
 
-/// The distance from [p] to the segment [a]–[b].
-double distToSegment(Vector2 p, Vector2 a, Vector2 b) {
-  final d = b - a;
-  final t = ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0);
-  return (p - (a + d * t)).length;
-}
-
-/// Whether [p] lies inside [ring] farther than 1e-6 from its edges: a point
-/// on a face of the band is not strictly inside it.
-bool strictlyInsideRing(Vector2 p, List<Vector2> ring) {
-  if (!insideRing(p, ring)) return false;
-  for (var i = 0; i < ring.length; i++) {
-    if (distToSegment(p, ring[i], ring[(i + 1) % ring.length]) <= 1e-6) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/// Opening [h]'s symbol sampled in world: 65 points along each LINE, and
-/// along its ARC, if any, from its start angle to its end.
-List<Vector2> symbolSamples(DraftDocument doc, Handle h) {
-  final out = <Vector2>[
-    for (final (a, b) in worldLines(doc, h))
-      for (var i = 0; i <= 64; i++) a + (b - a) * (i / 64),
-  ];
-  if (kids(doc, h).any((k) => kindOf(doc, k) == EntityKind.arc)) {
-    final arc = worldArc(doc, h);
-    final a0 = math.atan2(arc.from.y - arc.centre.y, arc.from.x - arc.centre.x);
-    for (var i = 0; i <= 64; i++) {
-      final a = a0 + arc.sweep * i / 64;
-      out.add(arc.centre + Vector2(math.cos(a), math.sin(a)) * arc.radius);
-    }
-  }
-  return out;
-}
-
-/// Opening [h]'s symbol in world, as a flat list of numbers: each LINE's
-/// ends, then its ARC's centre, radius, ends and sweep.
-List<double> worldSymbol(DraftDocument doc, Handle h) => [
-      for (final (a, b) in worldLines(doc, h)) ...[a.x, a.y, b.x, b.y],
-      if (kids(doc, h).any((k) => kindOf(doc, k) == EntityKind.arc))
-        ...() {
-          final arc = worldArc(doc, h);
-          return [
-            arc.centre.x,
-            arc.centre.y,
-            arc.radius,
-            arc.from.x,
-            arc.from.y,
-            arc.to.x,
-            arc.to.y,
-            arc.sweep,
-          ];
-        }(),
-    ];
-
 /// Wall [h]'s three children are 07's (fill, boundary, centreline), and
 /// each payload is, bit for bit, what 07 stores for it in [uncutTwin].
 void expectUncutLikeTwin(DraftDocument doc, Handle h, {String? reason}) {
