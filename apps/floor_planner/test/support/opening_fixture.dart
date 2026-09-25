@@ -13,6 +13,7 @@ import 'dart:math' as math;
 
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/wall.dart';
+import 'package:floor_planner/parametric/wall_geometry.dart' show isSimpleCcw;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -208,6 +209,13 @@ bool storedPiecesTriangulate(DraftDocument doc, Handle h) =>
     fillsOf(doc, h).every(
         (f) => doc.fills.trianglesFor(boundaryOf(doc, f))?.isNotEmpty ?? false);
 
+/// Whether every region of [h] is stored simple and anticlockwise, in its
+/// own stored (group-local) coordinates: 07 D6's invariant, per piece (spec
+/// 08 D9). A triangulation alone accepts a clockwise ring.
+bool storedPiecesSimpleCcw(DraftDocument doc, Handle h) =>
+    fillsOf(doc, h).every((f) => isSimpleCcw(
+        pointsOf(payloadOf(doc, boundaryOf(doc, f)), closed: true)));
+
 /// The world rectangle of wall [h] between `u = a` and `u = b`, face to
 /// face, by [oracleFrameOf].
 List<Vector2> gapRect(DraftDocument doc, Handle h, double a, double b) {
@@ -298,15 +306,15 @@ final class OpeningOracle {
   /// Wall [h]'s uncut world outline, as 07 stores it in [twin].
   List<Vector2> outline(Handle h) => worldOutline(twin, h);
 
-  /// Wall [h]'s straight span `[uS, uE]`, read off its stored uncut outline.
-  /// 07's ring is anticlockwise: the end cap (right face to left face), the
-  /// left face back towards the start, the start cap (left face to right
-  /// face), the right face forward to the end. The two face edges are the
-  /// longest ring edges lying on each face line, running `−d` on the left
-  /// and `+d` on the right; the start cap is every vertex from the left
-  /// edge's end to the right edge's start, the end cap the rest. `uS` is the
-  /// start cap's largest `u`, `uE` the end cap's smallest.
-  (double, double) span(Handle h) {
+  /// The `u` of every vertex of wall [h]'s start cap and of its end cap,
+  /// read off its stored uncut outline. 07's ring is anticlockwise: the end
+  /// cap (right face to left face), the left face back towards the start,
+  /// the start cap (left face to right face), the right face forward to the
+  /// end. The two face edges are the longest ring edges lying on each face
+  /// line, running `−d` on the left and `+d` on the right; the start cap is
+  /// every vertex from the left edge's end to the right edge's start, the
+  /// end cap the rest.
+  ({List<double> start, List<double> end}) capUs(Handle h) {
     final f = oracleFrameOf(doc, h);
     final ring = outline(h);
     final n = ring.length;
@@ -329,20 +337,24 @@ final class OpeningOracle {
     if (le == null || re == null) {
       throw StateError('wall ${h.toHex()}: no face edges in $ring');
     }
-    final startCap = <Vector2>[];
+    final start = <double>[];
     for (var i = (le + 1) % n;; i = (i + 1) % n) {
-      startCap.add(ring[i]);
+      start.add(oracleU(f, ring[i]));
       if (i == re) break;
     }
-    final endCap = <Vector2>[];
+    final end = <double>[];
     for (var i = (re + 1) % n;; i = (i + 1) % n) {
-      endCap.add(ring[i]);
+      end.add(oracleU(f, ring[i]));
       if (i == le) break;
     }
-    return (
-      startCap.map((q) => oracleU(f, q)).reduce(math.max),
-      endCap.map((q) => oracleU(f, q)).reduce(math.min),
-    );
+    return (start: start, end: end);
+  }
+
+  /// Wall [h]'s straight span `[uS, uE]`: its start cap's largest `u` and
+  /// its end cap's smallest ([capUs]).
+  (double, double) span(Handle h) {
+    final caps = capUs(h);
+    return (caps.start.reduce(math.max), caps.end.reduce(math.min));
   }
 
   /// The obstacles other walls make in wall [h]'s band (spec 08 D7, as
@@ -425,15 +437,12 @@ final class OpeningOracle {
           if (doc.components.get<OpeningParams>(o)!.host == h) o
       ]..sort((x, y) => x.value.compareTo(y.value));
 
-  /// Wall [h]'s gaps: its openings' [cut]s, sorted and merged when one
-  /// starts within 1e-6 of the previous one's end.
-  List<(double, double)> gaps(Handle h) {
-    final cuts = [
-      for (final o in openingsOn(h))
-        if (cut(doc.components.get<OpeningParams>(o)!) case final c?) (c.a, c.b)
-    ]..sort((x, y) => x.$1.compareTo(y.$1));
+  /// [cuts] sorted by start and merged when one starts within 1e-6 of the
+  /// previous one's end.
+  static List<(double, double)> _merge(Iterable<(double, double)> cuts) {
+    final sorted = [...cuts]..sort((x, y) => x.$1.compareTo(y.$1));
     final out = <(double, double)>[];
-    for (final c in cuts) {
+    for (final c in sorted) {
       if (out.isNotEmpty && c.$1 <= out.last.$2 + _tol) {
         out.last = (out.last.$1, math.max(out.last.$2, c.$2));
       } else {
@@ -442,6 +451,47 @@ final class OpeningOracle {
     }
     return out;
   }
+
+  /// Wall [h]'s openings, ascending, each with the cut the wall draws for
+  /// it: its [cut], then D8's "a wall keeps a piece" (as amended at
+  /// execution): while the merged cuts leave no piece longer than 1e-6 --
+  /// the start piece from the start cap's smallest `u` to the first gap,
+  /// each middle piece between two gaps, the end piece from the last gap
+  /// to the end cap's largest `u` -- the fitting opening with the highest
+  /// handle is made no-fit (null).
+  List<(Handle, OracleCut?)> cutsOn(Handle h) {
+    final openings = openingsOn(h);
+    final cuts = [
+      for (final o in openings) cut(doc.components.get<OpeningParams>(o)!)
+    ];
+    final caps = capUs(h);
+    final from = caps.start.reduce(math.min), to = caps.end.reduce(math.max);
+    while (true) {
+      final merged = _merge([
+        for (final c in cuts)
+          if (c != null) (c.a, c.b)
+      ]);
+      if (merged.isEmpty) break;
+      final ends = [
+        from,
+        for (final (a, b) in merged) ...[a, b],
+        to
+      ];
+      var piece = false;
+      for (var i = 0; i < ends.length; i += 2) {
+        if (ends[i + 1] - ends[i] > _tol) piece = true;
+      }
+      if (piece) break;
+      cuts[cuts.lastIndexWhere((c) => c != null)] = null;
+    }
+    return [for (var i = 0; i < openings.length; i++) (openings[i], cuts[i])];
+  }
+
+  /// Wall [h]'s gaps: the fitting cuts of [cutsOn], merged.
+  List<(double, double)> gaps(Handle h) => _merge([
+        for (final (_, c) in cutsOn(h))
+          if (c != null) (c.a, c.b)
+      ]);
 
   /// [tiling] of wall [h]'s stored pieces against its stored uncut band and
   /// its oracle [gaps].

@@ -9,12 +9,14 @@
 // `apps/floor_planner/lib/parametric/opening.dart`): `hostFrame`, `cutOf`,
 // `mergeCuts` and `piecesOf` with its cap-vertex snap. The spike had no
 // obstacles and clamped into the whole straight span; D7's obstacles and
-// stretches, D8's candidate rule and D9's split centreline are new.
+// stretches, D8's candidate rule and its "a wall keeps a piece" (amended at
+// execution), and D9's split centreline are new.
 import 'dart:math' as math;
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'opening.dart';
 import 'wall.dart';
 import 'wall_geometry.dart';
 
@@ -193,6 +195,10 @@ List<(double, double)> stretchesOf(HostFrame frame, List<Obstacle> obstacles) {
   return out;
 }
 
+/// One opening's cut (spec 08 D8): `[a, b]` along its host's centreline, and
+/// whether the clamp moved it off its stored interval.
+typedef Cut = ({double a, double b, bool clamped});
+
 /// Where an opening centred at [c] with width [w] cuts (spec 08 D8), among
 /// [stretches] (sorted, as [stretchesOf] gives them):
 ///
@@ -206,8 +212,7 @@ List<(double, double)> stretchesOf(HostFrame frame, List<Obstacle> obstacles) {
 ///
 /// Null too for a degenerate opening (D6): a width not greater than
 /// `wallJoin.linear`, or a non-finite width or centre.
-({double a, double b, bool clamped})? placeCut(
-    List<(double, double)> stretches, double c, double w) {
+Cut? placeCut(List<(double, double)> stretches, double c, double w) {
   if (!c.isFinite || !w.isFinite || !(w > wallJoin.linear)) return null;
   (double, double)? best;
   var bestDistance = double.infinity;
@@ -244,6 +249,36 @@ List<(double, double)> mergeCuts(List<(double, double)> cuts) {
     }
   }
   return out;
+}
+
+/// Where each of one host's openings cuts, and the host's merged cuts (spec
+/// 08 D8). [openings] are `(centre, width)` in **ascending handle order**;
+/// [stretches] and [frame] are the host's.
+///
+/// Each opening is placed on its own ([placeCut]): no opening's placement
+/// depends on another's. The fitting cuts are merged ([mergeCuts]). Then
+/// **a wall keeps a piece** (D8 as amended at execution): while the merged
+/// cuts would leave [frame] no piece longer than `wallJoin.linear` (a cut
+/// spanning the whole span, merged cuts covering it, or cuts leaving only
+/// slivers), the fitting opening with the highest handle, the last fitting
+/// entry, is made no-fit and the others are merged again. So a cut wall
+/// always generates a piece, and the choice is deterministic.
+///
+/// `cuts[i]` is null when opening `i` does not fit, from the start or by
+/// that rule; `merged` is empty when nothing cuts the host.
+({List<Cut?> cuts, List<(double, double)> merged}) cutsOf(HostFrame frame,
+    List<(double, double)> stretches, List<(double, double)> openings) {
+  final cuts = [for (final (c, w) in openings) placeCut(stretches, c, w)];
+  while (true) {
+    final merged = mergeCuts([
+      for (final c in cuts)
+        if (c != null) (c.a, c.b),
+    ]);
+    if (merged.isEmpty || _pieces(frame, merged).isNotEmpty) {
+      return (cuts: cuts, merged: merged);
+    }
+    cuts[cuts.lastIndexWhere((c) => c != null)] = null;
+  }
 }
 
 /// Whether two fitting cuts of one host overlap (spec 08 D8, for D17): each
@@ -359,4 +394,46 @@ HostLayout? layoutOf(WorldWall host, List<WorldWall> walls) {
 HostLayout? layoutInView(ParametricView view, Handle host) {
   final w = wallsInView(view, host);
   return w == null ? null : layoutOf(w.host, w.walls);
+}
+
+/// [host]'s openings in [view]: its referrers carrying `OpeningParams` whose
+/// host is [host], ascending by handle, with their parameters.
+List<(Handle, OpeningParams)> openingsInView(
+        ParametricView view, Handle host) =>
+    [
+      for (final h in view.referrers(host))
+        if (view.paramsOf<OpeningParams>(h) case final o? when o.host == host)
+          (h, o),
+    ];
+
+/// Everything D7 and D8 decide for one host: its [HostLayout], its openings
+/// (ascending) with their parameters, each one's cut (null: no fit, D8), and
+/// the merged cuts.
+typedef HostCuts = ({
+  HostLayout layout,
+  List<Handle> openings,
+  List<OpeningParams> params,
+  List<Cut?> cuts,
+  List<(double, double)> merged,
+});
+
+/// [host]'s cuts through the view adapter: one computation, made by the wall
+/// for its pieces and by each of its openings for its diagnostics, so both
+/// see the same decision. Null when [host] has no openings, is not a live
+/// wall, or is degenerate (07 D2: no frame).
+HostCuts? hostCutsInView(ParametricView view, Handle host) {
+  final openings = openingsInView(view, host);
+  if (openings.isEmpty) return null;
+  final layout = layoutInView(view, host);
+  if (layout == null) return null;
+  final placed = cutsOf(layout.frame, layout.stretches, [
+    for (final (_, o) in openings) (o.position, o.width),
+  ]);
+  return (
+    layout: layout,
+    openings: [for (final (h, _) in openings) h],
+    params: [for (final (_, o) in openings) o],
+    cuts: placed.cuts,
+    merged: placed.merged,
+  );
 }

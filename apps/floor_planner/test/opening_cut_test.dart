@@ -120,6 +120,7 @@ void main() {
     expect(usOf(f, end).reduce(math.min), greaterThan(1850 - 1e-6));
     expect(oracle.tilingOf(hA), noViolations);
     expect(storedPiecesTriangulate(doc, hA), isTrue);
+    expect(storedPiecesSimpleCcw(doc, hA), isTrue);
 
     // A window at 3,600 (1,200): gaps [950, 1850] and [3000, 4200].
     run(
@@ -142,6 +143,7 @@ void main() {
     expect(OpeningOracle(doc).gaps(hA).length, 2);
     expect(OpeningOracle(doc).tilingOf(hA), noViolations);
     expect(storedPiecesTriangulate(doc, hA), isTrue);
+    expect(storedPiecesSimpleCcw(doc, hA), isTrue);
 
     // A gap stored at 300 (1,000) on a 4,000 wall: [−200, 800], clamped
     // against the free start cap to [0, 1000]; the start piece is no longer
@@ -163,13 +165,15 @@ void main() {
     expect(worldCentrelines(doc, hB), hasLength(1));
     expect(OpeningOracle(doc).tilingOf(hB), noViolations);
     expect(storedPiecesTriangulate(doc, hB), isTrue);
+    expect(storedPiecesSimpleCcw(doc, hB), isTrue);
   });
 
   test(
       'OG2 the 67° L (A 200, B 115), all nine justification pairs: two '
       'openings in A, one stored past the node and clamped at the mitre, one '
-      'in B: 0 tiling violations, every piece triangulates, three pieces and '
-      'two', () {
+      'in B: 0 tiling violations, every piece triangulates and is simple and '
+      'anticlockwise, three pieces and two; opening.clamped names exactly '
+      'the clamped door, by a corner', () {
     for (final ja in Justification.values) {
       for (final jb in Justification.values) {
         final why = '${ja.name}/${jb.name}';
@@ -202,14 +206,27 @@ void main() {
         for (final w in [hA, hB]) {
           expect(oracle.tilingOf(w), noViolations, reason: '$why $w');
           expect(storedPiecesTriangulate(doc, w), isTrue, reason: '$why $w');
+          expect(storedPiecesSimpleCcw(doc, w), isTrue, reason: '$why $w');
         }
+        // D17: exactly the door clamped at the mitre is reported, by a
+        // corner, and nothing else is clamped.
+        final clampedReports = [
+          for (final d in diagnosticsOf(doc))
+            if (d.code == 'opening.clamped') d
+        ];
+        expect(clampedReports, hasLength(1), reason: why);
+        expect(clampedReports.single.handles, [hG], reason: why);
+        expect(clampedReports.single.severity, DiagnosticSeverity.warning,
+            reason: why);
+        expect(clampedReports.single.message, contains('corner'), reason: why);
       }
     }
   });
 
   test(
       'OG8 the split centreline: one open two-point polyline per piece, at '
-      '[0, a₀] and [b₀, L]; none enters the gap; a pick in the doorway on '
+      '[0, a₀] and [b₀, L], from the stored start and to the stored end '
+      'exactly; none enters the gap; a pick in the doorway on '
       'the centreline misses the wall, the same pick in a piece hits it', () {
     final doc = doorWall();
     final f = oracleFrameOf(doc, hA);
@@ -221,6 +238,13 @@ void main() {
       expect(c, hasLength(4), reason: 'two points, open');
       expect(c[0] == c[2] && c[1] == c[3], isFalse);
     }
+    // The first piece starts, and the last ends, at the stored endpoints
+    // themselves, bit for bit (D9): not a point recomputed along the frame.
+    final p = doc.components.get<WallParams>(hA)!;
+    final firstCoords = payloadOf(doc, lines.first).coords;
+    final lastCoords = payloadOf(doc, lines.last).coords;
+    expect([firstCoords[0], firstCoords[1]], [p.sx, p.sy]);
+    expect([lastCoords[2], lastCoords[3]], [p.ex, p.ey]);
     final [first, second] = worldCentrelines(doc, hA);
     expect((first[0] - f.s).length, lessThan(1e-6));
     expect((first[1] - oracleAt(f, 950, 0)).length, lessThan(1e-6));
@@ -257,11 +281,15 @@ void main() {
       'OG9 the random property run: 2–4-way nodes, a T stem and an X '
       'crossing wall, 0–3 openings per wall, every wall in its own rotated '
       'group at the far origin: 0 refused, 0 tiling violations, drift() '
-      'empty, every stored piece triangulates', () {
+      'empty, every stored piece triangulates and is simple and '
+      'anticlockwise, centreline ends at the stored endpoints exactly, and '
+      'diagnostics() reports what the oracle does', () {
     final sw = Stopwatch()..start();
     final rnd = math.Random(808);
     var walls = 0, openings = 0, pieces = 0, clamped = 0, nofit = 0;
     var overlapping = 0, refused = 0, bad = 0, untriangulated = 0;
+    var notCcw = 0, exactEnds = 0, inexactEnds = 0, keptPiece = 0;
+    var mismatched = 0;
     var tees = 0, crossings = 0, obstacles = 0;
     final failures = <String>[];
     for (var trial = 0; trial < 300; trial++) {
@@ -359,6 +387,10 @@ void main() {
       expect(driftOf(doc), isEmpty, reason: 'trial $trial');
 
       final oracle = OpeningOracle(doc);
+      // The oracle's D17 reports, to compare with diagnostics(): each code
+      // and its handles (a clamped report by its opening only; its walls
+      // are OG3's and OG4's).
+      final expected = <String>[];
       for (final h in all) {
         walls++;
         pieces += worldPieces(doc, h).length;
@@ -370,41 +402,88 @@ void main() {
           untriangulated++;
           failures.add('trial $trial wall ${h.value}: a piece fails');
         }
-        final cuts = [
-          for (final o in oracle.openingsOn(h))
-            oracle.cut(doc.components.get<OpeningParams>(o)!)
-        ];
-        for (final c in cuts) {
+        if (!storedPiecesSimpleCcw(doc, h)) {
+          notCcw++;
+          failures.add('trial $trial wall ${h.value}: a piece is not ccw');
+        }
+        // A centreline piece that ends at a stored endpoint ends there bit
+        // for bit (D9).
+        final p = doc.components.get<WallParams>(h)!;
+        final lines = centrelineHandles(doc, h);
+        final cut = oracle.gaps(h).isNotEmpty;
+        for (final (k, i, x, y) in [
+          (lines.first, 0, p.sx, p.sy),
+          (lines.last, 2, p.ex, p.ey),
+        ]) {
+          final c = payloadOf(doc, k).coords;
+          final dx = c[i] - x, dy = c[i + 1] - y;
+          if (dx * dx + dy * dy > 1e-12) continue;
+          if (cut) exactEnds++;
+          if (c[i] != x || c[i + 1] != y) {
+            inexactEnds++;
+            failures.add('trial $trial wall ${h.value}: a centreline end is '
+                '(${c[i]}, ${c[i + 1]}), not the stored ($x, $y)');
+          }
+        }
+        final placed = oracle.cutsOn(h);
+        for (final (o, c) in placed) {
           if (c == null) {
             nofit++;
+            if (oracle.cut(doc.components.get<OpeningParams>(o)!) != null) {
+              keptPiece++;
+            }
+            expected.add('opening.nofit [$o]');
           } else if (c.clamped) {
             clamped++;
+            expected.add('opening.clamped $o');
           }
         }
         final fit = [
-          for (final c in cuts)
-            if (c != null) c
+          for (final (o, c) in placed)
+            if (c != null) (o, c)
         ];
         for (var i = 0; i < fit.length; i++) {
           for (var j = i + 1; j < fit.length; j++) {
-            if (fit[i].a < fit[j].b - 1e-6 && fit[j].a < fit[i].b - 1e-6) {
+            final (x, cx) = fit[i];
+            final (y, cy) = fit[j];
+            if (cx.a < cy.b - 1e-6 && cy.a < cx.b - 1e-6) {
               overlapping++;
+              expected.add('opening.overlap [$x, $y]');
             }
           }
         }
+      }
+      final got = [
+        for (final d in diagnosticsOf(doc))
+          if (d.code == 'opening.clamped')
+            '${d.code} ${d.handles.first}'
+          else if (d.code.startsWith('opening.'))
+            '${d.code} ${d.handles}'
+      ]..sort();
+      expected.sort();
+      if (got.join('\n') != expected.join('\n')) {
+        mismatched++;
+        failures.add('trial $trial: diagnostics $got, oracle $expected');
       }
     }
     // ignore: avoid_print
     print('OG9: $walls walls ($tees T stems, $crossings X walls, '
         '$obstacles obstacles), '
         '$openings openings ($refused refused), $pieces pieces, $clamped '
-        'clamped, $nofit no-fit, $overlapping overlapping pairs, $bad tiling '
-        'violations, $untriangulated walls with a piece that does not '
-        'triangulate, ${sw.elapsedMilliseconds} ms');
+        'clamped, $nofit no-fit ($keptPiece to keep a piece), $overlapping '
+        'overlapping pairs, $bad tiling violations, $untriangulated walls '
+        'with a piece that does not triangulate, $notCcw with a piece not '
+        'simple and anticlockwise, $exactEnds cut-wall centreline ends at a '
+        'stored endpoint ($inexactEnds inexact), $mismatched trials whose '
+        'diagnostics differ from the oracle, ${sw.elapsedMilliseconds} ms');
     final first = failures.take(10).join('\n');
     expect(refused, 0, reason: first);
     expect(bad, 0, reason: first);
     expect(untriangulated, 0, reason: first);
+    expect(notCcw, 0, reason: first);
+    expect(inexactEnds, 0, reason: first);
+    expect(exactEnds, greaterThan(100), reason: 'not vacuous');
+    expect(mismatched, 0, reason: first);
   }, timeout: const Timeout(Duration(minutes: 10)));
 
   test(

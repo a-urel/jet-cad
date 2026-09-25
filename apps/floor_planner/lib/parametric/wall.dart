@@ -1,7 +1,6 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import 'opening.dart';
 import 'opening_geometry.dart';
 import 'wall_geometry.dart';
 
@@ -201,35 +200,25 @@ final class WallType extends ParametricType<WallParams> {
   }
 
   /// [self] split at its openings (spec 08 D9), or null when nothing cuts
-  /// it. Its openings are its referrers carrying `OpeningParams` hosted by
-  /// [self]; each one's cut is placed ([placeCut], D8) in the stretches of
-  /// the layout the view adapter gives ([layoutInView], D7), and the fitting
-  /// cuts are merged ([mergeCuts]). Then, in `u` order, start piece first:
-  /// one region per piece ([piecesOf]), then one open two-point centreline
-  /// per piece ([centrelinePieces]), all [kWallColor]. The planner rewrites
-  /// the i-th piece into the i-th existing region or centreline in handle
-  /// order; an added piece takes fresh handles, a removed one is the
-  /// highest-handle surplus (D9).
+  /// it. Its openings, their cuts and the merged cuts are
+  /// [hostCutsInView]'s: each opening placed ([placeCut], D8) in the
+  /// stretches of the layout the view adapter gives (D7), the fitting cuts
+  /// merged, and D8's "a wall keeps a piece" applied, so a cut wall always
+  /// has a piece. Each opening's `diagnose` reads the same decision. Then,
+  /// in `u` order, start piece first: one region per piece ([piecesOf]),
+  /// then one open two-point centreline per piece ([centrelinePieces]), all
+  /// [kWallColor]. The planner rewrites the i-th piece into the i-th
+  /// existing region or centreline in handle order; an added piece takes
+  /// fresh handles, a removed one is the highest-handle surplus (D9).
   static List<Generated>? _cut(ParametricView view, Handle self) {
-    final openings = [
-      for (final h in view.referrers(self))
-        if (view.paramsOf<OpeningParams>(h) case final o? when o.host == self)
-          o,
-    ];
-    if (openings.isEmpty) return null;
-    final layout = layoutInView(view, self);
-    if (layout == null) return null;
-    final merged = mergeCuts([
-      for (final o in openings)
-        if (placeCut(layout.stretches, o.position, o.width) case final c?)
-          (c.a, c.b),
-    ]);
-    if (merged.isEmpty) return null;
+    final cuts = hostCutsInView(view, self);
+    if (cuts == null || cuts.merged.isEmpty) return null;
+    final frame = cuts.layout.frame;
     return [
-      for (final ring in piecesOf(layout.frame, merged))
+      for (final ring in piecesOf(frame, cuts.merged))
         Generated.region(polylinePayload(ring, closed: true),
             color: kWallColor),
-      for (final line in centrelinePieces(layout.frame, merged))
+      for (final line in centrelinePieces(frame, cuts.merged))
         Generated(EntityKind.polyline, polylinePayload(line),
             color: kWallColor),
     ];

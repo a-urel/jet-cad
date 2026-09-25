@@ -3,6 +3,7 @@
 // `opening_geometry.dart`.
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
+import 'opening_geometry.dart';
 import 'wall.dart';
 
 /// What an opening is (spec 08 D6), fixed at creation.
@@ -108,7 +109,8 @@ final class OpeningParams implements Component {
 /// - [generate] draws nothing yet: the symbols come with Task 6 (Ruling
 ///   08-7), so until then an opening is a childless group whose only effect
 ///   is the cut it makes in its host (D9, `WallType`);
-/// - [diagnose] reports nothing yet: D17's codes come with Task 5.
+/// - [diagnose] reports D17's codes, from the same decision the host's cut
+///   takes ([hostCutsInView]).
 final class OpeningType extends ParametricType<OpeningParams> {
   const OpeningType();
 
@@ -124,8 +126,106 @@ final class OpeningType extends ParametricType<OpeningParams> {
   @override
   List<Generated> generate(ParametricView view, Handle self) => const [];
 
+  /// At most one entry of each code for [self] (spec 08 D17), warnings
+  /// unless stated, except `opening.overlap`, one per overlapping pair:
+  ///
+  /// - `opening.degenerate`, severity error: D6's degenerate opening (a
+  ///   width not greater than `wallJoin.linear`, a non-finite position or
+  ///   width). It cuts nothing, and nothing else is reported for it.
+  /// - `opening.orphan`: the host is a live object that is not a wall (a
+  ///   box): handles `[self, host]`. A host that is not a live object at
+  ///   all is the engine's `parametric.dangling` (D5), not reported here.
+  ///   The host is live exactly when [self] is among its referrers: the
+  ///   engine's survey relates only live objects.
+  /// - `opening.nofit`: no stretch holds it (D8), or D8's "a wall keeps a
+  ///   piece" made it no-fit, or its host is a degenerate wall, which has
+  ///   no stretch at all: handles `[self]`. Never also `opening.clamped`.
+  /// - `opening.clamped`: drawn off its stored interval (D8): handles
+  ///   `[self]`, then every wall whose obstacle interval overlaps the
+  ///   **unclamped** interval, ascending. The message says whether a corner
+  ///   (the unclamped interval leaves the straight span, or no obstacle is
+  ///   in the way) or a wall (an obstacle) moved it.
+  /// - `opening.overlap`: [self]'s cut overlaps a fitting cut of a
+  ///   higher-handle opening of the same host (D8's [overlaps]): one entry
+  ///   per such opening, handles `[self, higher]`. Reported by the lower
+  ///   handle only, so once per pair (R2).
   @override
-  List<Diagnostic> diagnose(ParametricView view, Handle self) => const [];
+  List<Diagnostic> diagnose(ParametricView view, Handle self) {
+    final o = view.paramsOf<OpeningParams>(self)!;
+    if (!o.position.isFinite ||
+        !o.width.isFinite ||
+        !(o.width > wallJoin.linear)) {
+      return [
+        Diagnostic(
+          severity: DiagnosticSeverity.error,
+          code: 'opening.degenerate',
+          message: 'opening ${self.toHex()} has width ${o.width} at '
+              '${o.position}: it cuts and draws nothing',
+          handles: [self],
+        ),
+      ];
+    }
+    final host = o.host;
+    if (view.paramsOf<WallParams>(host) == null) {
+      if (host != self && !view.referrers(host).contains(self)) {
+        return const [];
+      }
+      return [
+        Diagnostic(
+          severity: DiagnosticSeverity.warning,
+          code: 'opening.orphan',
+          message: 'opening ${self.toHex()} is hosted by ${host.toHex()}, '
+              'which is not a wall: it draws nothing',
+          handles: [self, host],
+        ),
+      ];
+    }
+    final nofit = Diagnostic(
+      severity: DiagnosticSeverity.warning,
+      code: 'opening.nofit',
+      message: 'opening ${self.toHex()} does not fit in wall '
+          '${host.toHex()}: it cuts nothing and is drawn outside the wall',
+      handles: [self],
+    );
+    final all = hostCutsInView(view, host);
+    if (all == null) return [nofit];
+    final i = all.openings.indexOf(self);
+    final cut = all.cuts[i];
+    if (cut == null) return [nofit];
+    final lo = o.position - o.width / 2, hi = o.position + o.width / 2;
+    final frame = all.layout.frame;
+    final walls = {
+      for (final ob in all.layout.obstacles)
+        if (overlaps((lo, hi), (ob.a, ob.b))) ob.wall,
+    }.toList()
+      ..sort((x, y) => x.value.compareTo(y.value));
+    final byCorner = walls.isEmpty || lo < frame.uS || hi > frame.uE;
+    final cause = [
+      if (byCorner) 'a corner of wall ${host.toHex()}',
+      if (walls.isNotEmpty)
+        'wall ${[for (final w in walls) w.toHex()].join(', ')}',
+    ].join(' and ');
+    return [
+      if (cut.clamped)
+        Diagnostic(
+          severity: DiagnosticSeverity.warning,
+          code: 'opening.clamped',
+          message: 'opening ${self.toHex()} is drawn off its stored '
+              'position: $cause moved it',
+          handles: [self, ...walls],
+        ),
+      for (var j = i + 1; j < all.openings.length; j++)
+        if (all.cuts[j] case final other?
+            when overlaps((cut.a, cut.b), (other.a, other.b)))
+          Diagnostic(
+            severity: DiagnosticSeverity.warning,
+            code: 'opening.overlap',
+            message: 'openings ${self.toHex()} and '
+                '${all.openings[j].toHex()} overlap in wall ${host.toHex()}',
+            handles: [self, all.openings[j]],
+          ),
+    ];
+  }
 }
 
 /// Whether [w] is a width the tools and the panel may give an opening of
