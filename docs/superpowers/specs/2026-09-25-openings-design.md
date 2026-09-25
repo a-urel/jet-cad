@@ -521,10 +521,21 @@ its openings, so both get the same bits (spike: `hostFrame`).
     of the host's centreline, strictly inside it (07 D4.1's
     `_strictlyInside`, with the host as the through wall). The interval is
     the `u`-range of `cap(End(B, k), Tee(host))`'s points — 07's own T
-    cap, on the host's near face, or B's own square end inside the host's
-    body when the mitre limit clamps it. It is judged against the host only,
-    whichever wall 07 picks as B's through wall when several centrelines
-    pass there: B's band covers that interval either way;
+    cap, on the host's near face — **together with** the points where B's
+    two faces cross the host's near face. When the mitre limit clamps the
+    T, 07 squares B at its own endpoint inside the host's body, and B's
+    band then runs through the host's band from that end until its faces
+    leave the near face: the interval covers that whole footprint, not
+    only the square end. It is judged against the host only, whichever
+    wall 07 picks as B's through wall when several centrelines pass there;
+
+    > **Amended at execution (controller, 2026-09-25, Task 3 review S1).**
+    > Revision 1 took only the u-range of the cap's points; for a clamped
+    > T that is B's square end (≈20 mm on HF3's 10° fixture) while B's
+    > band crosses 1,192 mm of the host's band, so a door could be placed
+    > under B. The face crossings with the near face close the gap; the
+    > unclamped T is unchanged (its cap points already lie on the near
+    > face).
   - **a crossing (X):** a neighbour B whose centreline crosses the host's
     centreline strictly inside both (07 D4's X). The interval is the
     `u`-range of the four points where B's two faces cross the host's two
