@@ -427,14 +427,17 @@ class _PlannerShellState extends State<PlannerShell> {
                     child: ShellShortcutGuard(
                       child: Column(
                         children: [
-                          // Spec 07 D11: while the Wall tool is active,
-                          // the panel edits its settings.
+                          // Spec 07 D11, 08 D16: while the Wall tool or
+                          // an opening tool is active, the panel edits its
+                          // settings.
                           SelectionPanel(
                               document: _document,
                               selection: _selection,
                               tools: _tools,
                               wallTool: _wall,
-                              wallSettings: _wallSettings),
+                              wallSettings: _wallSettings,
+                              openingTools: _openingTools,
+                              openingSettings: _openingSettings),
                           Expanded(
                             child: PagePanel(document: _document, page: _page),
                           ),

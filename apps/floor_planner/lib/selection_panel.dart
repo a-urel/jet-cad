@@ -6,14 +6,20 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'panel_focus.dart';
 import 'parametric/box.dart';
+import 'parametric/opening.dart';
+import 'parametric/opening_tool.dart';
 import 'parametric/wall.dart';
 import 'parametric/wall_tool.dart';
 
-/// Spec 06 D13 and 07 D11: the right panel's parametric sections.
+/// Spec 06 D13, 07 D11 and 08 D16: the right panel's parametric sections.
 ///
 /// - **Box:** one selected box's width and height.
 /// - **Wall:** one selected wall's thickness and justification, or -- while
 ///   the Wall tool is active -- the tool's [WallSettings] for the next wall.
+/// - **Opening:** one selected opening's width and position, and a door's
+///   Flip hinge and Flip swing; or -- while the Door, Window or Gap tool is
+///   active, even with an opening selected -- that tool's [OpeningSettings]
+///   (its width only) for the next opening.
 ///
 /// Each commit to an object is one `SetComponentCommand`, which the
 /// parametric system turns into one undo step with its regeneration. 12
@@ -36,7 +42,9 @@ class SelectionPanel extends StatefulWidget {
       required this.selection,
       this.tools,
       this.wallTool,
-      this.wallSettings});
+      this.wallSettings,
+      this.openingTools,
+      this.openingSettings});
 
   final DraftDocument document;
   final SelectionController selection;
@@ -50,17 +58,25 @@ class SelectionPanel extends StatefulWidget {
   /// each commit (07 D11).
   final ValueNotifier<WallSettings>? wallSettings;
 
+  /// The shell's Door, Window and Gap tools, and their settings (spec 08
+  /// D16, Ruling 08-17): while the tool of a kind is active, the Opening
+  /// section edits that kind's settings, which the tool reads at each hover
+  /// and click. Both, with [tools], or neither.
+  final Map<OpeningKind, Tool>? openingTools;
+  final Map<OpeningKind, ValueNotifier<OpeningSettings>>? openingSettings;
+
   @override
   State<SelectionPanel> createState() => _SelectionPanelState();
 }
 
 /// Which quantity a numeric field edits.
-enum _Kind { width, height, thickness }
+enum _Kind { width, height, thickness, openingWidth, position }
 
 /// One numeric field's state.
 ///
-/// A target is a `Handle`: a box or a wall, or [_toolSettings] for the Wall
-/// tool's settings. [pinned] is the target recorded at focus gain (07 D11);
+/// A target is a `Handle`: a box, a wall or an opening, [_toolSettings] for
+/// the Wall tool's settings, or [_openingToolSettings] for an opening tool's.
+/// [pinned] is the target recorded at focus gain (07 D11);
 /// [loadedTarget] and [loadedValue] are what the field last showed, so a
 /// reload can tell a real model change from a notification that carries
 /// none (06 D13's F1: hover and unrelated edits both notify).
@@ -84,17 +100,41 @@ final class _Field {
 /// Handle 0 is never an object's handle.
 const Handle _toolSettings = Handle.none;
 
+/// The Opening section's target while the tool of [kind] is active: its
+/// settings (Ruling 08-17). A negative value is never an object's handle,
+/// and each kind has its own, so a field pinned to the Door tool's settings
+/// never writes the Window tool's.
+Handle _openingToolSettings(OpeningKind kind) => Handle(-1 - kind.index);
+
+/// The kind whose tool settings [h] is ([_openingToolSettings]), or null.
+OpeningKind? _openingToolKind(Handle h) =>
+    h.value < 0 && h.value >= -OpeningKind.values.length
+        ? OpeningKind.values[-1 - h.value]
+        : null;
+
 class _SelectionPanelState extends State<SelectionPanel> {
   final _Field _width = _Field(_Kind.width);
   final _Field _height = _Field(_Kind.height);
   final _Field _thickness = _Field(_Kind.thickness);
-  late final List<_Field> _fields = [_width, _height, _thickness];
+  final _Field _openingWidth = _Field(_Kind.openingWidth);
+  final _Field _position = _Field(_Kind.position);
+  late final List<_Field> _fields = [
+    _width,
+    _height,
+    _thickness,
+    _openingWidth,
+    _position,
+  ];
   late final StreamSubscription<DocChange> _changes;
 
   /// Whether the Wall tool was active at the last check: the tool
   /// controller forwards every hover of the active tool, and only a switch
   /// in or out of the Wall tool concerns the panel.
   bool _toolMode = false;
+
+  /// The kind of the opening tool that was active at the last check, or
+  /// null: likewise, only a switch in or out of one concerns the panel.
+  OpeningKind? _openingToolMode;
 
   @override
   void initState() {
@@ -103,10 +143,14 @@ class _SelectionPanelState extends State<SelectionPanel> {
     _changes = widget.document.commands.changes.listen((_) => _sync());
     widget.tools?.addListener(_onTools);
     widget.wallSettings?.addListener(_sync);
+    for (final s in _openingSettingsList) {
+      s.addListener(_sync);
+    }
     for (final f in _fields) {
       f.focus.addListener(() => _onFocusChange(f));
     }
     _toolMode = _wallToolActive;
+    _openingToolMode = _activeOpeningTool;
     _load();
   }
 
@@ -116,11 +160,17 @@ class _SelectionPanelState extends State<SelectionPanel> {
     _changes.cancel();
     widget.tools?.removeListener(_onTools);
     widget.wallSettings?.removeListener(_sync);
+    for (final s in _openingSettingsList) {
+      s.removeListener(_sync);
+    }
     for (final f in _fields) {
       f.dispose();
     }
     super.dispose();
   }
+
+  List<ValueNotifier<OpeningSettings>> get _openingSettingsList =>
+      widget.openingSettings?.values.toList() ?? const [];
 
   bool get _wallToolActive {
     final tools = widget.tools, wall = widget.wallTool;
@@ -130,30 +180,68 @@ class _SelectionPanelState extends State<SelectionPanel> {
         identical(tools.active, wall);
   }
 
+  /// The kind of the active opening tool, when it has settings here.
+  OpeningKind? get _activeOpeningTool {
+    final tools = widget.tools, openings = widget.openingTools;
+    if (tools == null || openings == null) return null;
+    for (final MapEntry(:key, :value) in openings.entries) {
+      if (identical(tools.active, value) &&
+          widget.openingSettings?[key] != null) {
+        return key;
+      }
+    }
+    return null;
+  }
+
   void _onTools() {
-    final mode = _wallToolActive;
-    if (mode == _toolMode) return;
+    final mode = _wallToolActive, opening = _activeOpeningTool;
+    if (mode == _toolMode && opening == _openingToolMode) return;
     _toolMode = mode;
+    _openingToolMode = opening;
     _sync();
   }
 
-  /// Under runtime permissions both sections are read-only (06 D13, 07
-  /// D11): a commit is a `SetComponentCommand`, which needs
+  /// Under runtime permissions every section is read-only (06 D13, 07
+  /// D11, 08 D16): a commit is a `SetComponentCommand`, which needs
   /// `Capability.components`, and its regeneration needs the type's
   /// `editCapability` (final review m4).
   bool _editable(_Kind kind) {
     final permissions = widget.document.commands.permissions;
     return permissions.allows(Capability.components) &&
-        permissions.allows(kind == _Kind.thickness
-            ? const WallType().editCapability
-            : const BoxType().editCapability);
+        permissions.allows(switch (kind) {
+          _Kind.thickness => const WallType().editCapability,
+          _Kind.openingWidth ||
+          _Kind.position =>
+            const OpeningType().editCapability,
+          _Kind.width || _Kind.height => const BoxType().editCapability,
+        });
   }
 
-  /// Whether [value] may be committed as [kind]: a thickness is
-  /// `isWallThickness` (final review m1), a box side is finite and > 0.
-  static bool _valid(_Kind kind, double value) => kind == _Kind.thickness
-      ? isWallThickness(value)
-      : value.isFinite && value > 0;
+  /// Whether [value] may be committed as [kind] at [target], which [_read]
+  /// just found live: a thickness is `isWallThickness` (final review m1), a
+  /// box side is finite and > 0, an opening's width is `isOpeningWidth` for
+  /// its kind (spec 08 D6: a gap's must exceed `4 × wallJoin.linear`), and
+  /// its position is finite and within `[0, L]`, `L` its host's centreline
+  /// length (none when the host is not a wall).
+  bool _valid(_Kind kind, Handle target, double value) {
+    switch (kind) {
+      case _Kind.thickness:
+        return isWallThickness(value);
+      case _Kind.width:
+      case _Kind.height:
+        return value.isFinite && value > 0;
+      case _Kind.openingWidth:
+        final k = _openingToolKind(target) ??
+            widget.document.components.get<OpeningParams>(target)!.kind;
+        return isOpeningWidth(k, value);
+      case _Kind.position:
+        final o = widget.document.components.get<OpeningParams>(target)!;
+        final host = widget.document.components.get<WallParams>(o.host);
+        if (host == null) return false;
+        final l = (host.end - host.start).length;
+        return value.isFinite && value >= 0 && value <= l;
+    }
+  }
 
   /// [h] is a live root-level group carrying a [T].
   bool _isObject<T extends Component>(Handle h) {
@@ -180,10 +268,22 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// selection when it activates), else the one selected wall.
   Handle? get _wall => _toolMode ? _toolSettings : _selected<WallParams>();
 
-  /// The target [kind]'s section shows now, or null.
+  /// The Opening section's target, or null when it is hidden: the active
+  /// opening tool's settings (spec 08 D16: even with an opening selected),
+  /// else the one selected opening.
+  Handle? get _opening => switch (_openingToolMode) {
+        final k? => _openingToolSettings(k),
+        null => _selected<OpeningParams>(),
+      };
+
+  /// The target [kind]'s section shows now, or null. The position has none
+  /// in tool mode: the tools place at the click.
   Handle? _targetOf(_Kind kind) => switch (kind) {
         _Kind.width || _Kind.height => _box,
         _Kind.thickness => _wall,
+        _Kind.openingWidth => _opening,
+        _Kind.position =>
+          _openingToolMode == null ? _selected<OpeningParams>() : null,
       };
 
   /// [kind]'s value at [target], or null when [target] is no longer a live
@@ -201,6 +301,15 @@ class _SelectionPanelState extends State<SelectionPanel> {
         }
         if (!_isObject<WallParams>(target)) return null;
         return widget.document.components.get<WallParams>(target)!.thickness;
+      case _Kind.openingWidth:
+      case _Kind.position:
+        if (_openingToolKind(target) case final k?) {
+          final settings = widget.openingSettings?[k];
+          return kind == _Kind.openingWidth ? settings?.value.width : null;
+        }
+        if (!_isObject<OpeningParams>(target)) return null;
+        final o = widget.document.components.get<OpeningParams>(target)!;
+        return kind == _Kind.openingWidth ? o.width : o.position;
     }
   }
 
@@ -227,8 +336,32 @@ class _SelectionPanelState extends State<SelectionPanel> {
         final next = p.copyWith(thickness: value);
         if (next == p) return;
         doc.commands.execute(SetComponentCommand<WallParams>(target, next));
+      case _Kind.openingWidth:
+      case _Kind.position:
+        if (_openingToolKind(target) case final k?) {
+          final s = widget.openingSettings![k]!;
+          s.value = s.value.copyWith(width: value);
+          return;
+        }
+        final p = doc.components.get<OpeningParams>(target)!;
+        final next = kind == _Kind.openingWidth
+            ? p.copyWith(width: value)
+            : p.copyWith(position: value);
+        if (next == p) return;
+        doc.commands.execute(SetComponentCommand<OpeningParams>(target, next));
     }
   }
+
+  /// Whether [target] is a tool's settings rather than an object.
+  static bool _isToolTarget(Handle? target) =>
+      target == _toolSettings ||
+      (target != null && _openingToolKind(target) != null);
+
+  static String _titleOf(OpeningKind k) => switch (k) {
+        OpeningKind.door => 'Door',
+        OpeningKind.window => 'Window',
+        OpeningKind.gap => 'Gap',
+      };
 
   static String _number(double v) =>
       v == v.roundToDouble() ? v.round().toString() : v.toString();
@@ -250,8 +383,10 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// object of the field's type, and reverted when it is not a valid value
   /// ([_valid]), the edit is not allowed, or the document refuses the edit
   /// (an `ArgumentError` or `StateError` from `execute` -- a loaded file
-  /// the regeneration cannot honour, say -- which rolled the edit back and
-  /// must not escape a focus listener or `onSubmitted`; final review m1).
+  /// the regeneration cannot honour, say -- or, spec 08 D5, a
+  /// `DanglingReferenceError` for a loaded opening whose host is gone;
+  /// the edit was rolled back, and must not escape a focus listener or
+  /// `onSubmitted`; final review m1).
   /// Enter commits here and then, once focus has moved, focus loss commits
   /// again: the field is re-pinned to what it now shows, so that second
   /// commit is a no-op.
@@ -265,13 +400,15 @@ class _SelectionPanelState extends State<SelectionPanel> {
     final target = f.pinned;
     if (target != null && _read(f.kind, target) != null && _editable(f.kind)) {
       final value = double.tryParse(f.text.text.trim());
-      if (value != null && _valid(f.kind, value)) {
+      if (value != null && _valid(f.kind, target, value)) {
         try {
           _write(f.kind, target, value);
         } on ArgumentError {
           // Refused: nothing changed; the field reverts below.
         } on StateError {
           // Refused: nothing changed; the field reverts below.
+        } on DanglingReferenceError {
+          // Refused (spec 08 D5): nothing changed; the field reverts below.
         }
       }
     }
@@ -344,6 +481,40 @@ class _SelectionPanelState extends State<SelectionPanel> {
     }
   }
 
+  /// Spec 08 D16: Flip hinge or Flip swing, one step for the one selected
+  /// door. Like the justification toggle, a click that acts on the target
+  /// shown now, and a refused edit is caught: nothing changed.
+  void _flip({required bool hinge}) {
+    final target = _openingToolMode == null ? _selected<OpeningParams>() : null;
+    if (target == null || !_editable(_Kind.openingWidth)) return;
+    final p = widget.document.components.get<OpeningParams>(target)!;
+    if (p.kind != OpeningKind.door) return;
+    final next = hinge
+        ? p.copyWith(
+            hinge: p.hinge == HingeEnd.start ? HingeEnd.end : HingeEnd.start)
+        : p.copyWith(
+            swing:
+                p.swing == SwingSide.left ? SwingSide.right : SwingSide.left);
+    try {
+      widget.document.commands
+          .execute(SetComponentCommand<OpeningParams>(target, next));
+    } on ArgumentError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    } on DanglingReferenceError {
+      // Refused: nothing changed.
+    }
+  }
+
+  /// Whether [v] is a valid keystroke for the tool settings [target]:
+  /// written at once in tool mode (07 D11, 08 D16).
+  bool _validSetting(_Kind kind, Handle target, double v) =>
+      switch (_openingToolKind(target)) {
+        final k? => kind == _Kind.openingWidth && isOpeningWidth(k, v),
+        null => kind == _Kind.thickness && isWallThickness(v),
+      };
+
   Widget _field(String key, String label, _Field f, bool editable) => TextField(
         key: Key(key),
         controller: f.text,
@@ -357,11 +528,15 @@ class _SelectionPanelState extends State<SelectionPanel> {
         // a value typed without Enter would otherwise miss that click's
         // wall. Erasing back leaves the last valid prefix in the settings
         // until the field commits.
+        //
+        // The same for an opening tool's width (08 D16): a width typed
+        // with D active and no Enter places the next door at that width.
         onChanged: (t) {
-          if (f.pinned != _toolSettings) return;
+          final target = f.pinned;
+          if (target == null || !_isToolTarget(target)) return;
           final v = double.tryParse(t.trim());
-          if (v != null && isWallThickness(v)) {
-            _write(f.kind, _toolSettings, v);
+          if (v != null && _validSetting(f.kind, target, v)) {
+            _write(f.kind, target, v);
           }
         },
         onSubmitted: (_) => _commit(f),
@@ -381,11 +556,21 @@ class _SelectionPanelState extends State<SelectionPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final box = _box, wall = _wall;
-    if (box == null && wall == null) return const SizedBox.shrink();
+    final box = _box, wall = _wall, opening = _opening;
+    if (box == null && wall == null && opening == null) {
+      return const SizedBox.shrink();
+    }
     final title = Theme.of(context).textTheme.titleSmall;
     final boxEditable = _editable(_Kind.width);
     final wallEditable = _editable(_Kind.thickness);
+    final openingEditable = _editable(_Kind.openingWidth);
+    final OpeningParams? openingParams = opening == null
+        ? null
+        : widget.document.components.get<OpeningParams>(opening);
+    final openingKind = switch (opening) {
+      null => null,
+      final h => _openingToolKind(h) ?? openingParams!.kind,
+    };
     final Justification? justification = switch (wall) {
       null => null,
       _toolSettings => widget.wallSettings!.value.justification,
@@ -427,6 +612,41 @@ class _SelectionPanelState extends State<SelectionPanel> {
                 onSelectionChanged:
                     wallEditable ? (s) => _setJustification(s.single) : null,
               ),
+            ],
+            if (opening != null) ...[
+              if (box != null || wall != null) const SizedBox(height: 12),
+              Text(_titleOf(openingKind!),
+                  key: const Key('opening-section'), style: title),
+              _field('opening-width', 'Width', _openingWidth, openingEditable),
+              // The position, from the host's start to the centre, is the
+              // stored one; a tool places at the click, so it has none.
+              if (openingParams != null)
+                _field(
+                    'opening-position', 'Position', _position, openingEditable),
+              if (openingParams?.kind == OpeningKind.door) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        key: const Key('opening-flip-hinge'),
+                        onPressed:
+                            openingEditable ? () => _flip(hinge: true) : null,
+                        child: const Text('Flip hinge'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        key: const Key('opening-flip-swing'),
+                        onPressed:
+                            openingEditable ? () => _flip(hinge: false) : null,
+                        child: const Text('Flip swing'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ],
         ),
