@@ -618,10 +618,25 @@ void main() {
   });
 
   test(
-      'CS11 (Task 2 review m-3) the cascade removes a referrer\'s subtree '
-      'as the select tool does: a nested group under P1, with its own leaf, '
-      'goes too; validate() stays clean; undo is exact', () {
+      'CS11 (Task 2 review m-3; Task 2 re-review m1) the cascade removes a '
+      'referrer\'s subtree as the select tool does: a nested group under P1, '
+      'with its own leaf, and an instance under P1 go too; validate() stays '
+      'clean; undo is exact', () {
     final doc = scene();
+    final definition = doc.handleSeed.next();
+    doc.tree.addDefinition(Definition(
+        handle: definition,
+        name: 'Stool',
+        basePoint: Vector2(35.5, -12.25),
+        children: const []));
+    final instance = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+        handle: instance,
+        parent: hP1,
+        transform: Transform2.translation(-240, 95)
+            .multiply(Transform2.rotation(-0.35)),
+        definition: definition,
+        layer: ReservedHandles.layerZero)));
     final nested = doc.handleSeed.next();
     doc.commands.execute(AddNodeCommand(GroupNode(
         handle: nested,
@@ -641,13 +656,67 @@ void main() {
     doc.commands.execute(deleteObject(doc, hA));
     expectGone(doc, hP1);
     expect(doc.tree[nested], isNull);
+    expect(doc.tree[instance], isNull);
     expect(doc.entities.slotOf(leaf), isNull);
     expect(doc.validate(), isEmpty);
     expect(doc.commands.undoDepth, depth + 1);
     doc.commands.undo();
     expect(state(doc), before);
     expect(doc.tree[nested]!.parent, hP1);
+    expect(doc.tree[instance]!.parent, hP1);
     expect(doc.entities.ownerAt(doc.entities.slotOf(leaf)!), nested);
+  });
+
+  test(
+      'CS12 (Task 2 re-review m2) a loaded region whose fill sits in a group '
+      'nested under P2 and whose boundary is P2\'s own: every fill of the '
+      'doomed subtree goes before any boundary, so deleting A lands in one '
+      'step, validate() shows nothing new, undo and redo are exact', () {
+    final doc = loadedScene((j, entities) {
+      final seed = j['handleSeed']! as int;
+      final nested = seed + 1;
+      final nodes = j['nodes']! as List;
+      final p2 = nodes
+          .cast<Map<String, Object?>>()
+          .firstWhere((n) => n['handle'] == hP2.value);
+      (p2['children']! as List).add(nested);
+      nodes.add({
+        'type': 'group',
+        'handle': nested,
+        'parent': hP2.value,
+        'transform': [0.8, 0.6, -0.6, 0.8, 140.5, -65.25],
+        'visible': true,
+        'children': <int>[],
+        'exportAsDxfGroup': false,
+      });
+      recordOf(p2Region(entities, 'fill'))['owner'] = nested;
+      j['handleSeed'] = nested;
+    });
+    final fill = doc.entities.handleAt(doc.entities.liveSlots
+        .firstWhere((s) => doc.entities.kindAt(s) == EntityKind.fill));
+    final nested = doc.entities.ownerAt(doc.entities.slotOf(fill)!);
+    expect(doc.tree[nested]!.parent, hP2);
+    expect(hasFill(doc, hP2), isFalse);
+    expect(kids(doc, hP2), isNotEmpty, reason: 'the boundary stays in P2');
+    final diagnosed = {for (final d in doc.validate()) d.code};
+    final before = state(doc);
+    final depth = doc.commands.undoDepth;
+
+    doc.commands.execute(deleteObject(doc, hA));
+    for (final h in [hA, hP1, hP2]) {
+      expectGone(doc, h);
+    }
+    expect(doc.tree[nested], isNull);
+    expect(doc.entities.slotOf(fill), isNull);
+    expect({for (final d in doc.validate()) d.code}.difference(diagnosed),
+        isEmpty);
+    expect(doc.commands.undoDepth, depth + 1);
+    final after = state(doc);
+    doc.commands.undo();
+    expect(state(doc), before);
+    expect(doc.entities.ownerAt(doc.entities.slotOf(fill)!), nested);
+    doc.commands.redo();
+    expect(state(doc), after);
   });
 
   test(

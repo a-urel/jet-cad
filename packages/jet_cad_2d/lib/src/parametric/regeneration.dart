@@ -426,12 +426,14 @@ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
 /// tool's `_groupCascade` does: a group's leaves, then its child instances
 /// and nested groups (recursively) in its listed order, then the group.
 ///
-/// A group's **fills go before its other leaves**, so a region's fill is
-/// removed before its boundary: `RemoveEntityCommand` on a fill is always
-/// available and undoes exactly, whereas removing a boundary takes its fill
-/// with it only when the pair could be rebuilt, and refuses a loaded,
-/// unfillable one (an open boundary, say), which would refuse the whole
-/// edit.
+/// **Every fill of the whole subtree goes first** (the doomed group's and
+/// each nested group's, in that listed order), before any other leaf, so a
+/// region's fill is removed before its boundary wherever each of the two
+/// lives: `RemoveEntityCommand` on a fill is always available and undoes
+/// exactly, whereas removing a boundary takes its fill with it only when
+/// the pair could be rebuilt, and refuses a loaded, unfillable one (an open
+/// boundary, or a fill in a nested group naming a boundary in [d], say),
+/// which would refuse the whole edit.
 ///
 /// [d]'s own leaves are the survey's (an edit cannot add into a live
 /// object, 06 D6); a nested group's are found by one scan of the live
@@ -466,15 +468,15 @@ List<DraftCommand> _subtreeRemoval(CommandTarget t, _Survey before, Handle d) {
       list.sort(_byValue);
     }
   }
-  final out = <DraftCommand>[];
+  bool isFill(Handle c) =>
+      t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill;
+  final out = <DraftCommand>[
+    for (final g in groups)
+      for (final c in leaves[g] ?? const <Handle>[])
+        if (isFill(c)) RemoveEntityCommand(c),
+  ];
   void remove(Handle g) {
-    final own = leaves[g] ?? const <Handle>[];
-    bool isFill(Handle c) =>
-        t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill;
-    for (final c in own) {
-      if (isFill(c)) out.add(RemoveEntityCommand(c));
-    }
-    for (final c in own) {
+    for (final c in leaves[g] ?? const <Handle>[]) {
       if (!isFill(c)) out.add(RemoveEntityCommand(c));
     }
     final node = t.tree[g];
