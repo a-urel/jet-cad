@@ -1,7 +1,9 @@
 import 'dart:convert' show jsonDecode;
 
 import 'package:floor_planner/main.dart';
+import 'package:floor_planner/page_panel.dart';
 import 'package:floor_planner/planner_view.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -446,5 +448,75 @@ void main() {
     await tester.pump();
     expect(identical(canvas().painter, painter), isTrue,
         reason: 'one resolver per document, not one per build');
+  });
+
+  /// The canvas's own focus node: the `Focus` the `InteractionLayer` builds.
+  FocusNode canvasFocus(WidgetTester tester) => tester
+      .widget<Focus>(find
+          .descendant(
+              of: find.byType(InteractionLayer), matching: find.byType(Focus))
+          .first)
+      .focusNode!;
+
+  Finder scale() => find.byKey(const Key('page-scale'));
+
+  testWidgets(
+      "A18 Enter in the page panel's scale field commits it and hands focus "
+      "back to the canvas: the tool's Escape and the shell's letters work at "
+      'once (fix/post-07 F2)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    await press(tester, LogicalKeyboardKey.keyP);
+    await tester.tapAt(globalOf(tester, view, 7010, 3020));
+    await tester.tapAt(globalOf(tester, view, 7060, 3090));
+    await tester.pump();
+    final polyline = view.tools.active as PolylineTool;
+    expect(polyline.isPending, isTrue);
+    final depth = doc.commands.undoDepth;
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.enterText(scale(), '50');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
+        50);
+    expect(doc.commands.undoDepth, depth + 1);
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(polyline.isPending, isFalse, reason: "Escape reached the tool");
+    expect(status(tester), 'Polyline');
+    await press(tester, LogicalKeyboardKey.keyL);
+    expect(status(tester), 'Line');
+  });
+
+  testWidgets(
+      "A19 a mouse click outside the page panel's scale field, on the "
+      "panel's title or on the canvas, hands focus back to the canvas "
+      '(fix/post-07 F2)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    // A mouse: the field's default tap-outside unfocuses only for one here.
+    Future<void> clickAt(Offset at) async {
+      await tester.tapAt(at, kind: PointerDeviceKind.mouse);
+      await tester.pump();
+    }
+
+    await tester.tap(scale());
+    await tester.pump();
+    await clickAt(tester.getCenter(find.descendant(
+        of: find.byType(PagePanel), matching: find.text('Page'))));
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await press(tester, LogicalKeyboardKey.keyR);
+    expect(status(tester), 'Rectangle');
+    await press(tester, LogicalKeyboardKey.keyV);
+    expect(status(tester), 'Select');
+
+    // The canvas click requests the focus itself: the hand-back must not
+    // take it away again.
+    await tester.tap(scale());
+    await tester.pump();
+    await clickAt(globalOf(tester, view, 7150, 3250));
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await press(tester, LogicalKeyboardKey.keyL);
+    expect(status(tester), 'Line');
   });
 }

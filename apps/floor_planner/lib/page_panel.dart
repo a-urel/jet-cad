@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'panel_focus.dart';
+
 /// The smallest panel that lets a human change the page (spec D12). Every
 /// control executes one `SetComponentCommand`; the panel rebuilds from the
 /// notifier, so undo moves the controls back. 12 replaces this.
@@ -17,6 +19,7 @@ class PagePanel extends StatefulWidget {
 
 class _PagePanelState extends State<PagePanel> {
   final TextEditingController _scale = TextEditingController();
+  final PanelFieldFocusNode _scaleFocus = PanelFieldFocusNode();
 
   static const List<(String, int)> _swatches = [
     ('White', 0xFFFFFFFF),
@@ -36,6 +39,7 @@ class _PagePanelState extends State<PagePanel> {
   void dispose() {
     widget.page.removeListener(_syncScale);
     _scale.dispose();
+    _scaleFocus.dispose();
     super.dispose();
   }
 
@@ -124,11 +128,20 @@ class _PagePanelState extends State<PagePanel> {
                 TextField(
                   key: const Key('page-scale'),
                   controller: _scale,
+                  focusNode: _scaleFocus,
                   decoration: const InputDecoration(
                       prefixText: '1:', labelText: 'Scale'),
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   onSubmitted: (text) => _submitScale(page, text),
+                  // Enter and a tap outside hand focus back to the canvas
+                  // (fix/post-07 F2), so the shell's letters and Escape work
+                  // again at once. `onSubmitted` still runs after Enter's.
+                  // Without these, Enter and a mouse click outside take the
+                  // focus to the route's scope, where no key reaches the
+                  // shell -- even from a canvas click.
+                  onEditingComplete: _scaleFocus.handBack,
+                  onTapOutside: (_) => _scaleFocus.handBack(),
                 ),
                 const SizedBox(height: 8),
                 DropdownButton<DisplayUnit>(
