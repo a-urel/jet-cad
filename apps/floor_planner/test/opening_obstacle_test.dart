@@ -24,6 +24,7 @@ const right = Justification.right;
 
 const hA = Handle(1300), hB = Handle(2600);
 const hD = Handle(4000), hM = Handle(4050), hW = Handle(4100);
+const hC = Handle(4200), hE = Handle(4300);
 
 const Map<String, int> noViolations = {
   'overlap': 0,
@@ -154,6 +155,23 @@ void main() {
     expect(d.severity, DiagnosticSeverity.warning);
     expect(d.message, contains('wall ${hB.toHex()}'));
     expect(d.message, isNot(contains('corner')));
+
+    // Task 5 review m-2: a door whose stored interval ends 5e-7 into the
+    // stem's interval (less than the tolerance) is clamped by 5e-7, and it
+    // is the stem that moved it: walls are named by exact overlap.
+    final probe = wallDoc();
+    run(probe, addWall(probe, hA, plan(-2000, 0), plan(3000, 0), 200, right));
+    run(probe, addWall(probe, hB, polar(p, 58 + 23, 2400), p, 115, centre));
+    run(
+        probe,
+        addOpening(probe, hD,
+            OpeningParams(hA, o1 + 5e-7 - 450, 900, OpeningKind.door)));
+    final into =
+        OpeningOracle(probe).cut(probe.components.get<OpeningParams>(hD)!)!;
+    expect(into.clamped, isTrue);
+    expect(o1 + 5e-7 - into.b, closeTo(5e-7, 1e-8), reason: 'moved 5e-7');
+    expect(reports(probe), ['opening.clamped [$hD, $hB]']);
+    expect(only(probe, 'opening.clamped').message, isNot(contains('corner')));
   });
 
   test(
@@ -268,9 +286,10 @@ void main() {
     }
   });
 
-  // D8 as amended at execution: after merging, a wall with no piece longer
-  // than wallJoin.linear makes its highest-handle fitting opening no-fit,
-  // and cuts again. Each case below cut its wall into nothing before.
+  // D8 as amended at execution (revised after Task 5's review): the fitting
+  // openings are admitted in ascending handle order, and one whose cut would
+  // leave the wall no piece longer than wallJoin.linear is no-fit. Each case
+  // below cut its wall into nothing before Task 5.
   test(
       'OG11 (a) a wall keeps a piece: a gap 2e-7 shorter than a free wall\'s '
       'whole span is no-fit (opening.nofit, not clamped); the wall is uncut',
@@ -367,7 +386,8 @@ void main() {
   test(
       'OD1 only the accepted cases are reported: a clean L with fitting '
       'openings reports nothing; OG5\'s no-fit exactly opening.nofit; a host '
-      'that is a box opening.orphan; a loaded width 0 only '
+      'that is a box opening.orphan; a degenerate host opening.nofit, drawing '
+      'nothing; a loaded width 0 only '
       'opening.degenerate; a loaded missing host only parametric.dangling', () {
     // A clean L: A 200 centre into the node, B 115 left out of it, a door
     // in A and a window in B, neither clamped.
@@ -437,6 +457,25 @@ void main() {
           boxKids);
     }
 
+    // A degenerate host (thickness 0, 07 D2): it has no frame, so its
+    // opening cuts nothing, draws nothing, and is no-fit, saying why.
+    {
+      final doc = wallDoc();
+      run(doc, addWall(doc, hA, plan(-2000, 1900), plan(2000, 1900), 0, left));
+      run(
+          doc,
+          addOpening(
+              doc, hD, const OpeningParams(hA, 1300, 900, OpeningKind.door)));
+      expect([
+        for (final k in kids(doc, hA)) kindOf(doc, k)
+      ], [
+        EntityKind.polyline
+      ], reason: '07 D2: the centreline alone');
+      expect(kids(doc, hD), isEmpty);
+      expect(reports(doc), ['wall.degenerate [$hA]', 'opening.nofit [$hD]']);
+      expect(only(doc, 'opening.nofit').message, contains('degenerate'));
+    }
+
     // A loaded opening of width 0: only opening.degenerate, an error; its
     // host is uncut.
     {
@@ -468,6 +507,75 @@ void main() {
       expect(loaded.tree[missing], isNull);
       expectUncut(loaded, hA);
       expect(reports(loaded), ['parametric.dangling [$hD, $missing]']);
+    }
+  });
+
+  test(
+      'OG11 (d) a wall keeps a piece, admitted in handle order: a whole-span '
+      'gap then a 300 window: the gap is no-fit and the window cuts; windows '
+      '[0, 1000] and [1000, 2000] then a door nested in the first: the '
+      'second window is no-fit and the door is kept; a later covering gap '
+      'is a second yield', () {
+    // A whole-span gap (low handle) and a 300 window at 700 (high handle).
+    {
+      final doc = wallDoc();
+      run(doc,
+          addWall(doc, hA, plan(-1500, -700), plan(1500, -700), 150, left));
+      final (uS, uE) = oracleSpan(doc, hA);
+      run(
+          doc,
+          addOpening(
+              doc,
+              hD,
+              OpeningParams(
+                  hA, (uS + uE) / 2, uE - uS - 2e-7, OpeningKind.gap)));
+      run(
+          doc,
+          addOpening(
+              doc, hW, const OpeningParams(hA, 700, 300, OpeningKind.window)));
+      final oracle = OpeningOracle(doc);
+      expect([for (final (h, c) in oracle.cutsOn(hA)) (h, c != null)],
+          [(hD, false), (hW, true)]);
+      expect(worldPieces(doc, hA), hasLength(2));
+      expectGapAt(doc, hA, 550, 850);
+      expect(oracle.tilingOf(hA), noViolations);
+      expect(reports(doc), ['opening.nofit [$hD]']);
+    }
+
+    // Windows A [0, 1000] and B [1000, 2000] on a free 2,000 wall, then a
+    // door C [400, 800] nested in A, then (second case) a gap E over B.
+    const a = OpeningParams(hA, 500, 1000, OpeningKind.window);
+    const b = OpeningParams(hA, 1500, 1000, OpeningKind.window);
+    const c = OpeningParams(hA, 600, 400, OpeningKind.door);
+    const e = OpeningParams(hA, 1500, 1000, OpeningKind.gap);
+    for (final (name, openings, nofit) in [
+      ('A, B, C', [(hD, a), (hW, b), (hC, c)], [hW]),
+      ('A, B, C, E', [(hD, a), (hW, b), (hC, c), (hE, e)], [hW, hE]),
+    ]) {
+      final doc = wallDoc();
+      run(doc,
+          addWall(doc, hA, plan(-1000, 2600), plan(1000, 2600), 200, centre));
+      for (final (h, o) in openings) {
+        run(doc, addOpening(doc, h, o));
+      }
+      final f = oracleFrameOf(doc, hA);
+      final oracle = OpeningOracle(doc);
+      expect([
+        for (final (h, cut) in oracle.cutsOn(hA))
+          if (cut == null) h
+      ], nofit, reason: name);
+      final [piece] = worldPieces(doc, hA);
+      expect(hasVertex(piece, oracleAt(f, 1000, f.lo)), isTrue, reason: name);
+      expect(usOf(f, piece).reduce(math.min), greaterThan(1000 - 1e-6),
+          reason: name);
+      expect(oracle.tilingOf(hA), noViolations, reason: name);
+      expect([
+        for (final r in reports(doc))
+          if (!r.startsWith('opening.clamped [$hD]')) r
+      ], [
+        'opening.overlap [$hD, $hC]',
+        for (final h in nofit) 'opening.nofit [$h]',
+      ], reason: name);
     }
   });
 }

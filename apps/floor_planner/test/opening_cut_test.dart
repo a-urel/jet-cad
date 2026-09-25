@@ -286,10 +286,13 @@ void main() {
       'diagnostics() reports what the oracle does', () {
     final sw = Stopwatch()..start();
     final rnd = math.Random(808);
+    // The keep-a-piece cases draw from their own stream, so the walls and
+    // the random openings are the same as without them.
+    final cover = math.Random(809);
     var walls = 0, openings = 0, pieces = 0, clamped = 0, nofit = 0;
     var overlapping = 0, refused = 0, bad = 0, untriangulated = 0;
     var notCcw = 0, exactEnds = 0, inexactEnds = 0, keptPiece = 0;
-    var mismatched = 0;
+    var mismatched = 0, coveringOpenings = 0, unexplained = 0, childless = 0;
     var tees = 0, crossings = 0, obstacles = 0;
     final failures = <String>[];
     for (var trial = 0; trial < 300; trial++) {
@@ -374,8 +377,43 @@ void main() {
 
       final all = [...hs, ...extra];
       var oh = 5000;
+      // Keep-a-piece cases (D8 as amended), from their own stream: a gap
+      // 1e-7 to 5e-7 short of a span, or two openings that touch and cover
+      // it but for 2e-7 slivers, before or after the random openings (so
+      // with lower or higher handles than theirs).
+      List<OpeningParams> covering(Handle h, double s, double e) {
+        if (cover.nextBool()) {
+          final d = 1e-7 + cover.nextDouble() * 4e-7;
+          return [OpeningParams(h, (s + e) / 2, e - s - d, OpeningKind.gap)];
+        }
+        final m = s + (e - s) * (0.3 + 0.4 * cover.nextDouble());
+        return [
+          OpeningParams(
+              h, (s + m) / 2 + 1e-7, m - s - 2e-7, OpeningKind.window),
+          OpeningParams(h, (m + e) / 2 - 1e-7, e - m - 2e-7, OpeningKind.door),
+        ];
+      }
+
+      void addAll(List<OpeningParams> os, {bool covers = false}) {
+        for (final o in os) {
+          if (attempt(addOpening(doc, Handle(oh += 10), o))) {
+            openings++;
+            if (covers) coveringOpenings++;
+          }
+        }
+      }
+
+      // On a quarter of the node's walls whose span is one stretch. A
+      // mitred end keeps its corner as a piece, so these rarely yield.
+      final pre = OpeningOracle(doc);
       for (final h in all) {
         final len = oracleFrameOf(doc, h).len;
+        final st = pre.stretches(h);
+        final cases = st.length == 1 && cover.nextDouble() < 0.25
+            ? covering(h, st.single.$1, st.single.$2)
+            : const <OpeningParams>[];
+        final coverFirst = cover.nextBool();
+        if (coverFirst) addAll(cases, covers: true);
         for (var k = rnd.nextInt(4); k > 0; k--) {
           final o = OpeningParams(h, rnd.nextDouble() * len,
               300 + rnd.nextDouble() * 1200, OpeningKind.values[rnd.nextInt(3)],
@@ -383,15 +421,46 @@ void main() {
               swing: SwingSide.values[rnd.nextInt(2)]);
           if (attempt(addOpening(doc, Handle(oh += 10), o))) openings++;
         }
+        if (!coverFirst) addAll(cases, covers: true);
+      }
+
+      // A free wall 12 m from the node, square at both ends, so covering
+      // its span empties it: it always carries a covering case, and 0-2
+      // random openings before or after it.
+      const hF = Handle(1700);
+      final checked = [...all];
+      final fp = polar(hub, cover.nextDouble() * 360, 12000);
+      if (attempt(addWall(
+          doc,
+          hF,
+          fp,
+          polar(fp, cover.nextDouble() * 360, 800 + cover.nextDouble() * 3000),
+          [115.0, 150.0, 200.0, 300.0][cover.nextInt(4)],
+          Justification.values[cover.nextInt(3)]))) {
+        checked.add(hF);
+        final len = oracleFrameOf(doc, hF).len;
+        final (s, e) = OpeningOracle(doc).span(hF);
+        final cases = covering(hF, s, e);
+        final others = [
+          for (var k = cover.nextInt(3); k > 0; k--)
+            OpeningParams(hF, cover.nextDouble() * len,
+                300 + cover.nextDouble() * 1200, OpeningKind.window),
+        ];
+        if (cover.nextBool()) {
+          addAll(cases, covers: true);
+          addAll(others);
+        } else {
+          addAll(others);
+          addAll(cases, covers: true);
+        }
       }
       expect(driftOf(doc), isEmpty, reason: 'trial $trial');
 
       final oracle = OpeningOracle(doc);
       // The oracle's D17 reports, to compare with diagnostics(): each code
-      // and its handles (a clamped report by its opening only; its walls
-      // are OG3's and OG4's).
+      // and its handles, and for a clamped report whether it names a corner.
       final expected = <String>[];
-      for (final h in all) {
+      for (final h in checked) {
         walls++;
         pieces += worldPieces(doc, h).length;
         obstacles += oracle.obstacles(h).length;
@@ -406,14 +475,21 @@ void main() {
           notCcw++;
           failures.add('trial $trial wall ${h.value}: a piece is not ccw');
         }
-        // A centreline piece that ends at a stored endpoint ends there bit
-        // for bit (D9).
+        // A wall always keeps a piece (D8): it has a centreline child.
         final p = doc.components.get<WallParams>(h)!;
         final lines = centrelineHandles(doc, h);
+        if (lines.isEmpty) {
+          childless++;
+          failures.add('trial $trial wall ${h.value}: no children');
+        }
+        // A centreline piece that ends at a stored endpoint ends there bit
+        // for bit (D9).
         final cut = oracle.gaps(h).isNotEmpty;
         for (final (k, i, x, y) in [
-          (lines.first, 0, p.sx, p.sy),
-          (lines.last, 2, p.ex, p.ey),
+          if (lines.isNotEmpty) ...[
+            (lines.first, 0, p.sx, p.sy),
+            (lines.last, 2, p.ex, p.ey),
+          ],
         ]) {
           final c = payloadOf(doc, k).coords;
           final dx = c[i] - x, dy = c[i + 1] - y;
@@ -435,7 +511,11 @@ void main() {
             expected.add('opening.nofit [$o]');
           } else if (c.clamped) {
             clamped++;
-            expected.add('opening.clamped $o');
+            final why =
+                oracle.clampCause(doc.components.get<OpeningParams>(o)!);
+            if (why.walls.isEmpty && !why.corner) unexplained++;
+            expected.add('opening.clamped ${[o, ...why.walls]} '
+                'corner: ${why.corner}');
           }
         }
         final fit = [
@@ -456,7 +536,7 @@ void main() {
       final got = [
         for (final d in diagnosticsOf(doc))
           if (d.code == 'opening.clamped')
-            '${d.code} ${d.handles.first}'
+            '${d.code} ${d.handles} corner: ${d.message.contains('corner')}'
           else if (d.code.startsWith('opening.'))
             '${d.code} ${d.handles}'
       ]..sort();
@@ -470,13 +550,16 @@ void main() {
     print('OG9: $walls walls ($tees T stems, $crossings X walls, '
         '$obstacles obstacles), '
         '$openings openings ($refused refused), $pieces pieces, $clamped '
-        'clamped, $nofit no-fit ($keptPiece to keep a piece), $overlapping '
-        'overlapping pairs, $bad tiling violations, $untriangulated walls '
+        'clamped ($unexplained by neither a corner nor a wall), $nofit '
+        'no-fit ($keptPiece to keep a piece; $coveringOpenings covering '
+        'openings added), $overlapping '
+        'overlapping pairs, $childless childless walls, $bad tiling violations, $untriangulated walls '
         'with a piece that does not triangulate, $notCcw with a piece not '
         'simple and anticlockwise, $exactEnds cut-wall centreline ends at a '
         'stored endpoint ($inexactEnds inexact), $mismatched trials whose '
         'diagnostics differ from the oracle, ${sw.elapsedMilliseconds} ms');
     final first = failures.take(10).join('\n');
+    expect(childless, 0, reason: first);
     expect(refused, 0, reason: first);
     expect(bad, 0, reason: first);
     expect(untriangulated, 0, reason: first);
@@ -484,6 +567,8 @@ void main() {
     expect(inexactEnds, 0, reason: first);
     expect(exactEnds, greaterThan(100), reason: 'not vacuous');
     expect(mismatched, 0, reason: first);
+    expect(unexplained, 0, reason: first);
+    expect(keptPiece, greaterThan(50), reason: 'keep-a-piece cases');
   }, timeout: const Timeout(Duration(minutes: 10)));
 
   test(

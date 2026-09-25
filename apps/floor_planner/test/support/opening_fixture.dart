@@ -366,9 +366,13 @@ final class OpeningOracle {
   ///   both: the `u`-range of the four [oracleCrossings].
   ///
   /// Walls parallel to [h] make none.
-  List<(double, double)> obstacles(Handle h) {
+  List<(double, double)> obstacles(Handle h) =>
+      [for (final (a, b, _) in obstacleWalls(h)) (a, b)];
+
+  /// [obstacles], each with the wall that makes it.
+  List<(double, double, Handle)> obstacleWalls(Handle h) {
     final f = oracleFrameOf(doc, h);
-    final out = <(double, double)>[];
+    final out = <(double, double, Handle)>[];
     for (final b in doc.components.withComponent<WallParams>()) {
       if (b == h) continue;
       final g = oracleFrameOf(doc, b);
@@ -381,14 +385,16 @@ final class OpeningOracle {
         final v = (p.x - f.s.x) * f.n.x + (p.y - f.s.y) * f.n.y;
         if (u > _tol && u < f.len - _tol && v.abs() <= _tol) {
           tee = true;
-          out.add(oracleRange(f, oracleTeeFootprint(f, g, k)));
+          final (a, c) = oracleRange(f, oracleTeeFootprint(f, g, k));
+          out.add((a, c, b));
         }
       }
       if (tee) continue;
       final hit = oracleMeet(f.s, oracleEnd(f, 1), g.s, oracleEnd(g, 1));
       final uh = oracleU(f, hit), ub = oracleU(g, hit);
       if (uh > _tol && uh < f.len - _tol && ub > _tol && ub < g.len - _tol) {
-        out.add(oracleRange(f, oracleCrossings(f, g)));
+        final (a, c) = oracleRange(f, oracleCrossings(f, g));
+        out.add((a, c, b));
       }
     }
     return out..sort((x, y) => x.$1.compareTo(y.$1));
@@ -454,24 +460,24 @@ final class OpeningOracle {
 
   /// Wall [h]'s openings, ascending, each with the cut the wall draws for
   /// it: its [cut], then D8's "a wall keeps a piece" (as amended at
-  /// execution): while the merged cuts leave no piece longer than 1e-6 --
-  /// the start piece from the start cap's smallest `u` to the first gap,
-  /// each middle piece between two gaps, the end piece from the last gap
-  /// to the end cap's largest `u` -- the fitting opening with the highest
-  /// handle is made no-fit (null).
+  /// execution and revised after Task 5's review): the fitting openings are
+  /// admitted in ascending handle order, and one whose cut, merged with the
+  /// admitted ones, would leave no piece longer than 1e-6 -- the start
+  /// piece from the start cap's smallest `u` to the first gap, each middle
+  /// piece between two gaps, the end piece from the last gap to the end
+  /// cap's largest `u` -- is made no-fit (null) and left out.
   List<(Handle, OracleCut?)> cutsOn(Handle h) {
-    final openings = openingsOn(h);
-    final cuts = [
-      for (final o in openings) cut(doc.components.get<OpeningParams>(o)!)
-    ];
     final caps = capUs(h);
     final from = caps.start.reduce(math.min), to = caps.end.reduce(math.max);
-    while (true) {
-      final merged = _merge([
-        for (final c in cuts)
-          if (c != null) (c.a, c.b)
-      ]);
-      if (merged.isEmpty) break;
+    final admitted = <(double, double)>[];
+    final out = <(Handle, OracleCut?)>[];
+    for (final o in openingsOn(h)) {
+      final c = cut(doc.components.get<OpeningParams>(o)!);
+      if (c == null) {
+        out.add((o, null));
+        continue;
+      }
+      final merged = _merge([...admitted, (c.a, c.b)]);
       final ends = [
         from,
         for (final (a, b) in merged) ...[a, b],
@@ -481,10 +487,29 @@ final class OpeningOracle {
       for (var i = 0; i < ends.length; i += 2) {
         if (ends[i + 1] - ends[i] > _tol) piece = true;
       }
-      if (piece) break;
-      cuts[cuts.lastIndexWhere((c) => c != null)] = null;
+      if (piece) {
+        admitted.add((c.a, c.b));
+        out.add((o, c));
+      } else {
+        out.add((o, null));
+      }
     }
-    return [for (var i = 0; i < openings.length; i++) (openings[i], cuts[i])];
+    return out;
+  }
+
+  /// The walls D17's `opening.clamped` names for opening [o] (as amended
+  /// after Task 5's review): those whose [obstacleWalls] interval overlaps
+  /// its unclamped interval `[lo, hi]` exactly, ascending; and whether that
+  /// interval leaves the [span] (a corner).
+  ({List<Handle> walls, bool corner}) clampCause(OpeningParams o) {
+    final lo = o.position - o.width / 2, hi = o.position + o.width / 2;
+    final (s, e) = span(o.host);
+    final walls = {
+      for (final (a, b, w) in obstacleWalls(o.host))
+        if (lo < b && a < hi) w
+    }.toList()
+      ..sort((x, y) => x.value.compareTo(y.value));
+    return (walls: walls, corner: lo < s || hi > e);
   }
 
   /// Wall [h]'s gaps: the fitting cuts of [cutsOn], merged.

@@ -256,29 +256,36 @@ List<(double, double)> mergeCuts(List<(double, double)> cuts) {
 /// [stretches] and [frame] are the host's.
 ///
 /// Each opening is placed on its own ([placeCut]): no opening's placement
-/// depends on another's. The fitting cuts are merged ([mergeCuts]). Then
-/// **a wall keeps a piece** (D8 as amended at execution): while the merged
-/// cuts would leave [frame] no piece longer than `wallJoin.linear` (a cut
-/// spanning the whole span, merged cuts covering it, or cuts leaving only
-/// slivers), the fitting opening with the highest handle, the last fitting
-/// entry, is made no-fit and the others are merged again. So a cut wall
-/// always generates a piece, and the choice is deterministic.
+/// depends on another's. Then **a wall keeps a piece** (D8 as amended at
+/// execution, revised after Task 5's review): the fitting openings are
+/// admitted in ascending handle order; each one's cut is added to the
+/// admitted cuts and merged ([mergeCuts]), and if that would leave [frame]
+/// no piece longer than `wallJoin.linear` (a cut spanning the whole span,
+/// cuts covering it together, or cuts leaving only slivers), this opening
+/// is made no-fit and left out; otherwise it is kept. So a cut wall always
+/// generates a piece, the outcome is deterministic, and an opening yields
+/// only when admitting it is what would empty the wall.
 ///
 /// `cuts[i]` is null when opening `i` does not fit, from the start or by
-/// that rule; `merged` is empty when nothing cuts the host.
+/// that rule; `merged` is the admitted cuts merged, empty when nothing cuts
+/// the host.
 ({List<Cut?> cuts, List<(double, double)> merged}) cutsOf(HostFrame frame,
     List<(double, double)> stretches, List<(double, double)> openings) {
   final cuts = [for (final (c, w) in openings) placeCut(stretches, c, w)];
-  while (true) {
-    final merged = mergeCuts([
-      for (final c in cuts)
-        if (c != null) (c.a, c.b),
-    ]);
-    if (merged.isEmpty || _pieces(frame, merged).isNotEmpty) {
-      return (cuts: cuts, merged: merged);
+  final admitted = <(double, double)>[];
+  var merged = const <(double, double)>[];
+  for (var i = 0; i < cuts.length; i++) {
+    final c = cuts[i];
+    if (c == null) continue;
+    final trial = mergeCuts([...admitted, (c.a, c.b)]);
+    if (_pieces(frame, trial).isEmpty) {
+      cuts[i] = null;
+    } else {
+      admitted.add((c.a, c.b));
+      merged = trial;
     }
-    cuts[cuts.lastIndexWhere((c) => c != null)] = null;
   }
+  return (cuts: cuts, merged: merged);
 }
 
 /// Whether two fitting cuts of one host overlap (spec 08 D8, for D17): each

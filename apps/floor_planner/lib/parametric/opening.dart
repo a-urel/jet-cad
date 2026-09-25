@@ -138,13 +138,15 @@ final class OpeningType extends ParametricType<OpeningParams> {
   ///   The host is live exactly when [self] is among its referrers: the
   ///   engine's survey relates only live objects.
   /// - `opening.nofit`: no stretch holds it (D8), or D8's "a wall keeps a
-  ///   piece" made it no-fit, or its host is a degenerate wall, which has
-  ///   no stretch at all: handles `[self]`. Never also `opening.clamped`.
+  ///   piece" made it no-fit: handles `[self]`. Never also
+  ///   `opening.clamped`. Also for every opening of a degenerate host (07
+  ///   D2), which has no frame: the message says so.
   /// - `opening.clamped`: drawn off its stored interval (D8): handles
   ///   `[self]`, then every wall whose obstacle interval overlaps the
-  ///   **unclamped** interval, ascending. The message says whether a corner
-  ///   (the unclamped interval leaves the straight span, or no obstacle is
-  ///   in the way) or a wall (an obstacle) moved it.
+  ///   **unclamped** interval `[lo, hi]` exactly (`lo < o.b && o.a < hi`),
+  ///   ascending. The message names the walls when any overlap, and "a
+  ///   corner" when the unclamped interval leaves the straight span (D17 as
+  ///   amended after Task 5's review).
   /// - `opening.overlap`: [self]'s cut overlaps a fitting cut of a
   ///   higher-handle opening of the same host (D8's [overlaps]): one entry
   ///   per such opening, handles `[self, higher]`. Reported by the lower
@@ -180,38 +182,45 @@ final class OpeningType extends ParametricType<OpeningParams> {
         ),
       ];
     }
-    final nofit = Diagnostic(
-      severity: DiagnosticSeverity.warning,
-      code: 'opening.nofit',
-      message: 'opening ${self.toHex()} does not fit in wall '
-          '${host.toHex()}: it cuts nothing and is drawn outside the wall',
-      handles: [self],
-    );
+    Diagnostic nofit(String why) => Diagnostic(
+          severity: DiagnosticSeverity.warning,
+          code: 'opening.nofit',
+          message: 'opening ${self.toHex()} does not fit in wall '
+              '${host.toHex()}: $why',
+          handles: [self],
+        );
     final all = hostCutsInView(view, host);
-    if (all == null) return [nofit];
+    if (all == null) {
+      return [
+        nofit('the wall is degenerate (no longer than the join tolerance or '
+            'not thicker than zero), so it cuts and draws nothing'),
+      ];
+    }
     final i = all.openings.indexOf(self);
     final cut = all.cuts[i];
-    if (cut == null) return [nofit];
+    if (cut == null) {
+      return [nofit('it cuts nothing and is drawn outside the wall')];
+    }
     final lo = o.position - o.width / 2, hi = o.position + o.width / 2;
     final frame = all.layout.frame;
     final walls = {
       for (final ob in all.layout.obstacles)
-        if (overlaps((lo, hi), (ob.a, ob.b))) ob.wall,
+        if (lo < ob.b && ob.a < hi) ob.wall,
     }.toList()
       ..sort((x, y) => x.value.compareTo(y.value));
-    final byCorner = walls.isEmpty || lo < frame.uS || hi > frame.uE;
     final cause = [
-      if (byCorner) 'a corner of wall ${host.toHex()}',
+      if (lo < frame.uS || hi > frame.uE) 'a corner of wall ${host.toHex()}',
       if (walls.isNotEmpty)
         'wall ${[for (final w in walls) w.toHex()].join(', ')}',
-    ].join(' and ');
+    ];
     return [
       if (cut.clamped)
         Diagnostic(
           severity: DiagnosticSeverity.warning,
           code: 'opening.clamped',
           message: 'opening ${self.toHex()} is drawn off its stored '
-              'position: $cause moved it',
+              'position: ${cause.isEmpty ? 'its stretch' : cause.join(' and ')} '
+              'moved it',
           handles: [self, ...walls],
         ),
       for (var j = i + 1; j < all.openings.length; j++)
