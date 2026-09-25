@@ -7,7 +7,6 @@ import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/wall_fixture.dart';
 import 'support.dart';

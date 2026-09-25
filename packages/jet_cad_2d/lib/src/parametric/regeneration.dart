@@ -28,8 +28,8 @@ int debugOverlapTests = 0;
 /// memoises it. An edit asks only for its seeds and its closure, O(k·n);
 /// an edit with no seeds asks for none.
 final class _Survey {
-  _Survey(this.objects, this.reach, this.children, this.owned,
-      this.references, this.referrers);
+  _Survey(this.objects, this.reach, this.children, this.owned, this.references,
+      this.referrers);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
@@ -117,9 +117,8 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
       (referrers[x] ??= []).add(h); // ascending: `order` is
     }
   }
-  return _Survey(objects, reach, children, owned, references, {
-    for (final e in referrers.entries) e.key: List.unmodifiable(e.value)
-  });
+  return _Survey(objects, reach, children, owned, references,
+      {for (final e in referrers.entries) e.key: List.unmodifiable(e.value)});
 }
 
 /// Seeds plus their neighbours before and after, as a sorted list of live
