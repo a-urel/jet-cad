@@ -63,6 +63,21 @@ void main() {
     final h = Handle(seed + 1);
     expect(doc.entities.ownerAt(doc.entities.slotOf(h)!), doc.rootHandle);
     expect(doc.commands.undoDepth, depth + 1);
+
+    // Nor does an edit of a referrer, whose seed the dangling-reference
+    // check reads (spec 08 D5, Ruling 08-3): still two surveys' worth.
+    final pin = doc.components.withComponent<Pin>().first;
+    final was = doc.components.get<Pin>(pin)!;
+    final edited = debugReferenceCalls;
+    doc.commands
+        .execute(SetComponentCommand<Pin>(pin, Pin(was.host, was.offset + 25)));
+    expect(debugReferenceCalls - edited, 2 * 2 * n);
+    expect(doc.commands.undoDepth, depth + 2);
+
+    // And `diagnostics()`'s reference entries read its one survey.
+    final diagnosed = debugReferenceCalls;
+    ParametricSystem(doc, testCatalog()).diagnostics();
+    expect(debugReferenceCalls - diagnosed, 2 * n);
   });
 
   test(
@@ -83,9 +98,10 @@ void main() {
 
       DraftCommand move(int k) =>
           TransformNodeCommand(moved, k.isEven ? away : home);
-      // Untimed warm-ups for the JIT: two of each, so the Post moves away
-      // and back and every timed move is a real one.
-      for (final k in [-2, -1]) {
+      // Untimed warm-ups for the JIT: four of each (fewer left the medians
+      // JIT noise, Task 1's review m-3), an even number, so the Post ends
+      // back home and every timed move is a real one.
+      for (final k in [-4, -3, -2, -1]) {
         time((k) => line(doc, k), k);
         time(move, k);
       }

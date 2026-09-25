@@ -54,45 +54,6 @@ Map<Handle, List<double>> stored(DraftDocument doc, Handle group) => {
             .toList(),
     };
 
-/// RF1's second referrer type. Registered after [Pin], so a survey that
-/// walked the objects type by type, rather than by handle, would list a
-/// Peg after every Pin whatever their handles.
-final class Peg implements Component {
-  const Peg(this.host);
-  static const String id = 'test.peg';
-  final Handle host;
-  @override
-  String get typeId => id;
-  @override
-  Map<String, Object?> toJson() => {'host': host.toJson()};
-  static Peg fromJson(Map<String, Object?> j) =>
-      Peg(Handle.fromJson(j['host']));
-  @override
-  bool operator ==(Object o) => o is Peg && o.host == host;
-  @override
-  int get hashCode => host.hashCode;
-}
-
-final class PegType extends ParametricType<Peg> {
-  const PegType();
-  @override
-  Capability get editCapability => Capability.geometry;
-  @override
-  Aabb2 reach(Peg params, Transform2 toWorld) => Aabb2.empty();
-  @override
-  Iterable<Handle> references(Peg params) => [params.host];
-  @override
-  List<Generated> generate(ParametricView view, Handle self) => const [];
-}
-
-final ParametricCatalog pegCatalog = testCatalog()
-  ..register<Peg>(Peg.id, Peg.fromJson, const PegType());
-
-DraftDocument pegDoc(DraftDocument doc) {
-  ParametricSystem(doc, pegCatalog).install();
-  return doc;
-}
-
 /// A, B over its corner, and P on A: the two-hop shape.
 DraftDocument twoHop() {
   final doc = paramDoc();
@@ -113,7 +74,7 @@ void main() {
       'RF1 the survey\'s maps: referrers ascending and unmodifiable; a '
       'reference to a plain group, a root LINE, itself or nothing relates '
       'nothing', () {
-    final doc = pegDoc(DraftDocument.empty());
+    final doc = paramDoc();
     doc.commands.execute(create(doc, hA, atA, postA));
     final pins = [const Handle(5300), const Handle(5100), const Handle(5200)];
     for (final (i, h) in pins.indexed) {
@@ -124,14 +85,18 @@ void main() {
               .multiply(Transform2.rotation(0.4 + 0.5 * i)),
           Pin(hA, 300.0 + 500 * i)));
     }
-    const peg = Handle(5150);
+    // A Tag, registered after Pin: a survey that walked the objects type by
+    // type, rather than by handle, would list it after every Pin. It
+    // declares A twice: the survey lists it once.
+    const tag = Handle(5150);
     doc.commands.execute(create(
         doc,
-        peg,
+        tag,
         Transform2.translation(8100, 2600).multiply(Transform2.rotation(-2.2)),
-        const Peg(hA)));
-    const ascending = [Handle(5100), peg, Handle(5200), Handle(5300)];
-    expect(reported(doc, pegCatalog)[hA], ascending);
+        const Tag(hA)));
+    expect(const TagType().references(const Tag(hA)), [hA, hA]);
+    const ascending = [Handle(5100), tag, Handle(5200), Handle(5300)];
+    expect(reported(doc, catalog)[hA], ascending);
     expect(Post.seen[hA], ascending);
     expect(() => Post.seen[hA]!.add(hA), throwsUnsupportedError);
 
@@ -163,8 +128,7 @@ void main() {
     for (final (i, h) in bad.indexed) {
       (pinJson['${h.value}']! as Map)['host'] = targets[i].value;
     }
-    final loaded = pegDoc(DraftDocumentCodec.decode(j,
-        registerComponents: pegCatalog.registerComponents));
+    final loaded = reload(jsonEncode(j));
     for (final (i, h) in bad.indexed) {
       expect(loaded.components.get<Pin>(h)!.host, targets[i]);
     }
@@ -172,7 +136,7 @@ void main() {
     expect(loaded.entities.slotOf(leaf), isNotNull);
 
     Post.watch = [group, leaf, ...bad, missing];
-    final got = reported(loaded, pegCatalog);
+    final got = reported(loaded, catalog);
     expect(got[hA], ascending);
     for (final h in Post.watch) {
       expect(got[h], isEmpty, reason: h.toHex());
@@ -279,5 +243,97 @@ void main() {
     expect(stored(doc, hB), bBefore);
     expect(drift(doc), isEmpty);
     expect(hasSegment(worldSegments(doc, hA), worldTick(atA, 1250)), isTrue);
+  });
+
+  test(
+      'RF6 deleting a Pin regenerates its Post in the same edit: the Pin\'s '
+      'tick goes, the other Pin\'s stays', () {
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hA, atA, postA));
+    doc.commands.execute(create(doc, hP, pinAt, const Pin(hA, 700)));
+    doc.commands.execute(create(
+        doc,
+        const Handle(3100),
+        pinAt.multiply(Transform2.translation(-900, 350)),
+        const Pin(hA, 1500)));
+    expect(hasSegment(worldSegments(doc, hA), worldTick(atA, 700)), isTrue);
+    final depth = doc.commands.undoDepth;
+
+    doc.commands.execute(CompoundCommand([
+      for (final k in kids(doc, hP)) RemoveEntityCommand(k),
+      RemoveNodeCommand(hP),
+    ], label: 'Delete'));
+    expect(drift(doc), isEmpty);
+    expect(doc.commands.undoDepth, depth + 1);
+    final a = worldSegments(doc, hA);
+    expect(hasSegment(a, worldTick(atA, 700)), isFalse);
+    expect(hasSegment(a, worldTick(atA, 1500)), isTrue);
+  });
+
+  test(
+      'RF7 re-pointing a Pin from Post A to Post C regenerates both in the '
+      'same edit: the tick leaves A and appears on C', () {
+    const hC = Handle(4000);
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hA, atA, postA));
+    doc.commands.execute(create(doc, hC, parked, const Post(1600, 800)));
+    doc.commands.execute(create(doc, hP, pinAt, const Pin(hA, 700)));
+    expect(hasSegment(worldSegments(doc, hA), worldTick(atA, 700)), isTrue);
+    expect(hasSegment(worldSegments(doc, hC), worldTick(parked, 700)), isFalse);
+
+    doc.commands.execute(SetComponentCommand<Pin>(hP, const Pin(hC, 700)));
+    expect(drift(doc), isEmpty);
+    expect(hasSegment(worldSegments(doc, hA), worldTick(atA, 700)), isFalse);
+    expect(hasSegment(worldSegments(doc, hC), worldTick(parked, 700)), isTrue);
+    // P now copies C's bottom edge.
+    expect(
+        hasSegment(
+            worldSegments(doc, hP),
+            seg(parked.transformPoint(Vector2(0, 0)),
+                parked.transformPoint(Vector2(1600, 0)))),
+        isTrue);
+  });
+
+  test(
+      'RF8 a loaded Pin names a plain group; the group then becomes a Post, '
+      'and the Pin regenerates in the same edit as the Post\'s referrer', () {
+    // P hangs off Pin P0, which reads no referrers, so nothing else stores
+    // anything of P's.
+    const hP0 = Handle(2500);
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hA, atA, postA));
+    doc.commands.execute(create(
+        doc,
+        hP0,
+        Transform2.translation(5200, 800).multiply(Transform2.rotation(1.9)),
+        const Pin(hA, 300)));
+    doc.commands.execute(create(doc, hP, pinAt, const Pin(hP0, 700)));
+    final group = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(GroupNode(
+        handle: group,
+        parent: doc.rootHandle,
+        transform: parked,
+        children: const [])));
+    final j = jsonDecode(enc(doc)) as Map<String, Object?>;
+    ((j['components']! as Map)[Pin.id]! as Map)['${hP.value}'] =
+        Pin(group, 700).toJson();
+    final loaded = reload(jsonEncode(j));
+    expect(loaded.components.get<Pin>(hP), Pin(group, 700));
+    // P still stores its line to P0; regenerated, it would draw nothing.
+    expect(drift(loaded), [hP]);
+
+    loaded.commands
+        .execute(SetComponentCommand<Post>(group, const Post(1600, 800)));
+    expect(drift(loaded), isEmpty);
+    final p = worldSegments(loaded, hP);
+    expect(p, hasLength(1));
+    expect(
+        hasSegment(
+            p,
+            seg(parked.transformPoint(Vector2(0, 0)),
+                parked.transformPoint(Vector2(1600, 0)))),
+        isTrue);
+    expect(hasSegment(worldSegments(loaded, group), worldTick(parked, 700)),
+        isTrue);
   });
 }

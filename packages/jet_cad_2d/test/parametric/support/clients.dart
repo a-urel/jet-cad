@@ -84,8 +84,8 @@ RectParams? rectOf(ParametricView v, Handle h) =>
     v.paramsOf<Trip>(h) ??
     v.paramsOf<Post>(h);
 
-/// `generate` calls per handle, counted by [RectType], [PostType] and
-/// [PinType] (Ruling 08-2). Tests clear it.
+/// `generate` calls per handle, counted by [RectType], [PostType],
+/// [PinType] and [TagType] (Ruling 08-2). Tests clear it.
 final Map<Handle, int> generateCalls = {};
 
 void _counted(Handle h) => generateCalls[h] = (generateCalls[h] ?? 0) + 1;
@@ -480,23 +480,84 @@ final class PinType extends ParametricType<Pin> {
     _counted(self);
     final p = view.paramsOf<Pin>(self)!;
     final host = p.host;
-    // Host-local to own local; asked only for a host that exists.
-    Transform2 toOwn() =>
-        view.toWorld(self).invert().multiply(view.toWorld(host));
     final out = <Generated>[];
     if (view.paramsOf<Post>(host) != null) {
-      final m = toOwn();
-      for (final (a, b) in clippedEdges(view, host)[0]) {
-        out.add(Generated(EntityKind.line,
-            linePayload(m.transformPoint(a), m.transformPoint(b))));
-      }
+      out.addAll(hostEdge(view, self, host));
     } else if (host != self && view.paramsOf<Pin>(host) != null) {
       // Not on itself: that line would have no length.
-      out.add(Generated(EntityKind.line,
-          linePayload(Vector2(0, 0), toOwn().transformPoint(Vector2(0, 0)))));
+      out.add(Generated(
+          EntityKind.line,
+          linePayload(Vector2(0, 0),
+              hostToOwn(view, self, host).transformPoint(Vector2(0, 0)))));
     }
     if (p.region) out.add(Generated.region(pinRegion));
     return out;
+  }
+}
+
+/// [host]'s local space to [self]'s; asked only for a host that is live.
+Transform2 hostToOwn(ParametricView view, Handle self, Handle host) =>
+    view.toWorld(self).invert().multiply(view.toWorld(host));
+
+/// The Post [host]'s **clipped** bottom edge, host-local to world to
+/// [self]'s local: one LINE per piece.
+List<Generated> hostEdge(ParametricView view, Handle self, Handle host) {
+  final m = hostToOwn(view, self, host);
+  return [
+    for (final (a, b) in clippedEdges(view, host)[0])
+      Generated(EntityKind.line,
+          linePayload(m.transformPoint(a), m.transformPoint(b))),
+  ];
+}
+
+/// An `orphan`-policy referrer (Ruling 08-2, spec 08 D4): like [Pin] on a
+/// live Post, and kept when its host goes. It declares its host **twice**,
+/// so the survey's and `diagnostics()`'s deduplication are both exercised.
+final class Tag implements Component {
+  const Tag(this.host);
+  static const String id = 'test.orphanTag';
+  final Handle host;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'host': host.toJson()};
+  static Tag fromJson(Map<String, Object?> j) =>
+      Tag(Handle.fromJson(j['host']));
+  @override
+  bool operator ==(Object o) => o is Tag && o.host == host;
+  @override
+  int get hashCode => host.hashCode;
+
+  /// The orphan marker's length, up the Tag's own local y axis.
+  static const double marker = 250;
+}
+
+/// What a [Tag] draws with no live Post: one fixed LINE at its own origin.
+final GeometryPayload tagMarker =
+    linePayload(Vector2(0, 0), Vector2(0, Tag.marker));
+
+final class TagType extends ParametricType<Tag> {
+  const TagType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  @override
+  ReferencePolicy get referencePolicy => ReferencePolicy.orphan;
+
+  @override
+  Aabb2 reach(Tag params, Transform2 toWorld) => Aabb2.empty();
+
+  @override
+  Iterable<Handle> references(Tag params) => [params.host, params.host];
+
+  /// On a live [Post]: the host's clipped bottom edge, as a [Pin] draws it.
+  /// Otherwise the orphan marker.
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final host = view.paramsOf<Tag>(self)!.host;
+    if (view.paramsOf<Post>(host) != null) return hostEdge(view, self, host);
+    return [Generated(EntityKind.line, tagMarker)];
   }
 }
 
@@ -510,4 +571,5 @@ ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<RegionRect>(
       RegionRect.id, RegionRect.fromJson, const RegionRectType())
   ..register<Post>(Post.id, Post.fromJson, const PostType())
-  ..register<Pin>(Pin.id, Pin.fromJson, const PinType());
+  ..register<Pin>(Pin.id, Pin.fromJson, const PinType())
+  ..register<Tag>(Tag.id, Tag.fromJson, const TagType());

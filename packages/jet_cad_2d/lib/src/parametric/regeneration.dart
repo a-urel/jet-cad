@@ -355,24 +355,147 @@ void _undoInner(CommandTarget t, String label, CommandResult r, Object cause) {
   }
 }
 
-/// Spec D4 steps 1-9.
+/// Spec 08 D4 step 4: deletes, in the edit, every `cascade`-policy referrer
+/// of an object that stopped being a live object, and returns [r0] extended
+/// by the removals. [r0] itself is returned when nothing is doomed.
+///
+/// Rounds (Ruling 08-4): the doomed objects are the still-live `cascade`
+/// referrers, before the edit, of each `before.referrers` key that is no
+/// longer an object (06's `_isObject` on the current tree, so a removed
+/// node, a detached component and a group that is no longer root-level
+/// alike), in ascending order. Each loses its present children, leaves
+/// first (a fill whose boundary goes too is skipped: the boundary's removal
+/// takes it), then its node. A doomed object is then no longer an object
+/// itself, so the next round picks up its own `cascade` referrers. Each
+/// round costs O(referents).
+///
+/// The commands are applied one at a time, like `_run`'s regeneration loop
+/// and for the same reason: a child's refusal undoes what the cascade
+/// applied, then [r0], and rethrows; a failed rollback throws 06's
+/// "partially mutated" `StateError` and undoes nothing more.
+CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
+    _Survey before, CommandResult r0, String label) {
+  if (before.referrers.isEmpty) return r0;
+  final inverses = <DraftCommand>[];
+  final touched = <Handle>{...r0.touched};
+  void apply(DraftCommand c) {
+    final CommandResult applied;
+    try {
+      applied = c.apply(t);
+    } catch (error) {
+      try {
+        for (final i in inverses.reversed) {
+          i.apply(t);
+        }
+      } catch (rollbackError) {
+        throw StateError('"$label": the reference cascade threw ($error) and '
+            'its rollback threw ($rollbackError); the target is partially '
+            'mutated and nothing was recorded in history');
+      }
+      _undoInner(t, label, r0, error);
+      rethrow;
+    }
+    inverses.add(applied.inverse);
+    touched.addAll(applied.touched);
+  }
+
+  while (true) {
+    final doomed = <Handle>{
+      for (final e in before.referrers.entries)
+        if (!_isObject(t, types, e.key))
+          for (final d in e.value)
+            if (before.objects[d]!.type.referencePolicy ==
+                    ReferencePolicy.cascade &&
+                _isObject(t, types, d))
+              d,
+    }.toList()
+      ..sort(_byValue);
+    if (doomed.isEmpty) break;
+    for (final d in doomed) {
+      final present = {
+        for (final c in before.children[d] ?? const <Handle>[])
+          if (t.entities.slotOf(c) != null) c,
+      };
+      for (final c in present) {
+        if (t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill &&
+            present.contains(_boundaryOf(t, c))) {
+          continue;
+        }
+        apply(RemoveEntityCommand(c));
+      }
+      apply(RemoveNodeCommand(d));
+    }
+  }
+  if (inverses.isEmpty) return r0;
+  return CommandResult(
+    inverse: CompoundCommand([...inverses.reversed, r0.inverse],
+        label: r0.inverse.label),
+    touched: touched,
+  );
+}
+
+/// Spec 08 D5, Ruling 08-5: every seed that is a live `cascade`-policy
+/// object after the edit must name only live objects. The first failure, in
+/// ascending (seed, referent) order, is thrown. Reads the survey's declared
+/// lists and never calls `references` again (Ruling 08-3). Only seeds are
+/// checked, so an unrelated edit never trips over a bad object elsewhere.
+void _checkDangling(Set<Handle> seeds, _Survey after) {
+  if (seeds.isEmpty || after.declared.isEmpty) return;
+  for (final s in seeds.toList()..sort(_byValue)) {
+    final declared = after.declared[s];
+    if (declared == null ||
+        after.objects[s]!.type.referencePolicy != ReferencePolicy.cascade) {
+      continue;
+    }
+    Handle? first;
+    for (final x in declared) {
+      if (!after.objects.containsKey(x) &&
+          (first == null || x.value < first.value)) {
+        first = x;
+      }
+    }
+    if (first != null) throw DanglingReferenceError(s, first);
+  }
+}
+
+/// Spec 06 D4 steps 1-9, in spec 08 D4's order:
+///
+/// 1. `before`, the survey, with references and referrers;
+/// 2. `r0`, the edit;
+/// 3. 06 D6's guard on `r0.touched`: a refusal undoes `r0`;
+/// 4. the reference cascade ([_cascade]), which returns `r`: `r0` extended
+///    by the removals, its inverse included;
+/// 5. inside one `try`: the after-survey, `lost`, 06 D8's cleanup, the
+///    seeds, the dangling-reference check ([_checkDangling]), the early
+///    return, the closure and the plan. Any failure applies `r.inverse`,
+///    the cascade's included, so a refused edit leaves the document byte
+///    for byte as it was;
+/// 6. the apply loop, whose inverse wraps `r.inverse`.
+///
+/// The after-survey never sees a doomed referrer, so the plan never
+/// generates it; `lost` picks each one up by itself (its node is gone), so
+/// the cleanup detaches its component and it seeds the closure like any
+/// deleted object.
 CommandResult _run(ParametricEdit edit, CommandTarget t) {
   final types = edit._system._types;
   final before = _survey(t, types);
-  final r = edit.inner.apply(t);
+  final r0 = edit.inner.apply(t);
 
-  final refused = _refused(t, types, before, r.touched);
+  final refused = _refused(t, types, before, r0.touched);
   if (refused != null) {
-    _undoInner(t, edit.label, r, GeneratedGeometryError(refused));
+    _undoInner(t, edit.label, r0, GeneratedGeometryError(refused));
     throw GeneratedGeometryError(refused);
   }
+
+  final r = _cascade(t, types, before, r0, edit.label);
 
   // The after-survey calls every registered type's `reach` again, with
   // whatever `inner` just wrote — a client's `reach` can throw on the new
   // parameters (a negative width, say). `inner` has already applied at
-  // this point, so that throw, `lost`/`cleanup`'s own computation, and
-  // `_plan`'s call into `generate` all share one try: any of them failing
-  // must still undo `inner` and leave nothing in history (spec D4 step 8).
+  // this point, so that throw, `lost`/`cleanup`'s own computation, the
+  // dangling-reference check and `_plan`'s call into `generate` all share
+  // one try: any of them failing must still undo `inner` and the cascade
+  // and leave nothing in history (spec D4 step 8).
   final _Survey after;
   final List<DraftCommand> cleanup;
   final List<DraftCommand> plan;
@@ -392,12 +515,13 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
       ],
       ...lost,
     };
+    _checkDangling(seeds, after);
     // No neighbour has been computed up to here (spec 07 D10): an edit that
     // touches no object, a plain line drawn among them, pays for the two
     // surveys only and returns here.
     if (seeds.isEmpty && cleanup.isEmpty) return r;
-    plan = _plan(
-        t, _closure(seeds, before, after), after, ParametricView._(t, after));
+    plan = _plan(t, _closure(seeds, before, after), after,
+        ParametricView._(t, after, before));
   } catch (error) {
     _undoInner(t, edit.label, r, error);
     rethrow;
