@@ -194,11 +194,17 @@ affects ByLayer drafting on layer 0 (Plan 05's tools, 06's boxes). That was
 found here and deferred to a post-07 `fix/` branch on the human's decision;
 07 does not change it.
 
-**Amended by fix/post-07:** the contrast rule now exists. ACI 7 resolves to
-the foreground `DocumentStyleResolver` is given (default `0xFFFFFF`), and
-the floor planner gives it black, so ByLayer drafting on layer 0 is black
-on the paper (05 D2's amendment). Walls keep `kWallColor`: they are out of
-that fix's scope, and a concrete colour does not depend on the resolver.
+**Amended by fix/post-07:** the renderer still applies no contrast rule
+by itself; the host chooses the foreground. ACI 7 resolves to the
+foreground `DocumentStyleResolver` is given (`0xRRGGBB`, default
+`0xFFFFFF`). The floor planner derives it from the paper: the engine's
+`foregroundFor(page.background)` picks black or white, whichever has the
+higher WCAG contrast ratio, and the shell builds a new resolver whenever
+the paper changes that choice. So ByLayer drafting on layer 0 is black on
+White, Ivory and Grey and white on Blueprint (05 D2's amendment). Walls
+keep `kWallColor`, concrete black, unchanged and on the human's decision:
+a concrete colour does not depend on the resolver, so on Blueprint a wall
+is black while drafting is white.
 
 **Amended at execution (Plan 07, final review):** "Handles at creation are
 fill < outline < centreline" holds for every wall created whole. A

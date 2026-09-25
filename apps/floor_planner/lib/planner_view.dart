@@ -32,8 +32,9 @@ class PlannerView extends StatefulWidget {
   final DraftDocument document;
   final SpatialIndex index;
 
-  /// Owned by the shell, one per document: [DraftCanvas] rebuilds its
-  /// painter when handed a different resolver (fix/post-07).
+  /// Owned by the shell, and replaced only when the paper's foreground
+  /// changes: [DraftCanvas] rebuilds its painter when handed a different
+  /// resolver (fix/post-07).
   final StyleResolver resolver;
   final CameraController camera;
   final PageNotifier page;

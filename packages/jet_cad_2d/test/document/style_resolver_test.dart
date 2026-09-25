@@ -494,6 +494,41 @@ void main() {
     });
   });
 
+  group('foregroundFor: black or white by contrast (fix/post-07 F1b)', () {
+    test("the floor planner's four papers", () {
+      for (final (name, paper, want) in const [
+        ('White', 0xFFFFFFFF, 0x000000),
+        ('Ivory', 0xFFFAF6EC, 0x000000),
+        ('Grey', 0xFFEDEDED, 0x000000),
+        ('Blueprint', 0xFF1F3A5F, 0xFFFFFF),
+      ]) {
+        expect(foregroundFor(paper), want, reason: name);
+      }
+    });
+
+    test('a grey either side of the linearised crossover', () {
+      // The crossover is at luminance sqrt(0.0525) - 0.05 ~ 0.1791. Byte 118
+      // linearises to 0.1812 (black 4.62:1 beats white 4.54:1); byte 117 to
+      // 0.1779 (white 4.61:1 beats black 4.56:1). Both sit below 128, so a
+      // threshold of 0.5 on the raw byte calls 118 white.
+      expect(foregroundFor(0xFF767676), 0x000000, reason: 'byte 118');
+      expect(foregroundFor(0xFF757575), 0xFFFFFF, reason: 'byte 117');
+    });
+
+    test('each channel carries its own weight', () {
+      // Red's 0.2126 is above the crossover, blue's 0.0722 below it; a grey
+      // cannot tell the weights apart, since they sum to 1 on any grey.
+      expect(foregroundFor(0xFFFF0000), 0x000000, reason: 'pure red');
+      expect(foregroundFor(0xFF0000FF), 0xFFFFFF, reason: 'pure blue');
+    });
+
+    test('the alpha byte is ignored', () {
+      expect(foregroundFor(0x00FFFFFF), 0x000000);
+      expect(foregroundFor(0x001F3A5F), 0xFFFFFF);
+      expect(foregroundFor(0x7F767676), 0x000000);
+    });
+  });
+
   group('aciToRgb', () {
     test('the nine fixed colours are exact', () {
       expect(aciToRgb(1), 0xFF0000, reason: 'red');

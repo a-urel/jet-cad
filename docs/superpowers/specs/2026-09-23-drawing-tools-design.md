@@ -255,14 +255,23 @@ The line chain commits each segment as its own command.
 **Amended by fix/post-07:** drafting stays ByLayer on layer 0, and layer 0
 is ACI 7, which `aciToRgb(7)` makes `0xFFFFFF`: every drafted shape (and
 06's boxes) painted white on white paper. AutoCAD's rule is now the
-engine's: ACI 7 is the **foreground**. `DocumentStyleResolver` takes an
-optional `foreground` (`0xRRGGBB`, default `0xFFFFFF`, so nothing that does
-not pass one moves) and draws ACI 7 in it by every route: the entity's own
-colour, ByLayer, ByBlock, the document root. `TrueColor(0xFFFFFF)` stays
-white; `aciToRgb` is unchanged. The floor planner's shell holds one
-resolver per document with `foreground: 0x000000`, so drafting is black.
-Pinned by the `ACI 7 is the foreground` group in `style_resolver_test` and
-`A17` in `planner_draw_test`.
+engine's: ACI 7 is the **foreground**, black on a light background and
+white on a dark one, and only the host knows the background, so the host
+gives it. `DocumentStyleResolver` takes an optional `foreground`
+(`0xRRGGBB`, default `0xFFFFFF`, so nothing that does not pass one moves)
+and draws ACI 7 in it by every route: the entity's own colour, ByLayer,
+ByBlock, the document root. `TrueColor(0xFFFFFF)` stays white; `aciToRgb`
+is unchanged. Beside it, `foregroundFor(argb)` picks black or white for a
+background, whichever has the higher WCAG contrast ratio (relative
+luminance, sRGB linearised; alpha ignored; a tie goes to black). The floor
+planner's shell derives the foreground from the page's `background`: at
+startup, and again whenever the page changes (a swatch, its undo or redo,
+a load), building a new resolver only when the chosen foreground changes.
+Drafting is black on White, Ivory and Grey and white on Blueprint; a
+document without a page counts as white paper. Walls are not drafting:
+they keep `kWallColor`, concrete black (07 D3). Pinned by the `ACI 7 is the
+foreground` and `foregroundFor` groups in `style_resolver_test` and by
+`A17`, `A20` and `A21` in `planner_draw_test`.
 
 ### D3 — `PlacementTool`: the shared base
 

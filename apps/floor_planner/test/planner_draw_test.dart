@@ -447,7 +447,7 @@ void main() {
     tester.element(find.byType(PlannerView)).markNeedsBuild();
     await tester.pump();
     expect(identical(canvas().painter, painter), isTrue,
-        reason: 'one resolver per document, not one per build');
+        reason: 'one resolver per paper foreground, not one per build');
   });
 
   /// The canvas's own focus node: the `Focus` the `InteractionLayer` builds.
@@ -518,5 +518,116 @@ void main() {
     expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
     await press(tester, LogicalKeyboardKey.keyL);
     expect(status(tester), 'Line');
+  });
+
+  /// Drafts one line with L on [view] and returns its slot: ByLayer on
+  /// layer 0, which is ACI 7.
+  Future<int> draftLine(WidgetTester tester, PlannerView view) async {
+    final doc = view.document;
+    final before = ofKind(doc, EntityKind.line).toSet();
+    await press(tester, LogicalKeyboardKey.keyL);
+    await tester.tapAt(globalOf(tester, view, 7010, 3020));
+    await tester.pump();
+    await tester.tapAt(globalOf(tester, view, 7060, 3090));
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.escape);
+    final drafted =
+        ofKind(doc, EntityKind.line).where((h) => !before.contains(h)).single;
+    final slot = doc.entities.slotOf(drafted)!;
+    expect(doc.entities.colorAt(slot), kByLayer);
+    expect(doc.entities.layerAt(slot), ReservedHandles.layerZero);
+    return slot;
+  }
+
+  /// The slot's colour through the canvas's own painter's resolver.
+  int argbOnCanvas(WidgetTester tester, int slot) => tester
+      .state<DraftCanvasState>(find.byType(DraftCanvas))
+      .painter
+      .resolver
+      .styleFor(slot, StyleContext.documentRoot)
+      .argb;
+
+  Future<void> tapSwatch(WidgetTester tester, int i) async {
+    final swatch = find.byKey(Key('page-swatch-$i'));
+    await tester.ensureVisible(swatch);
+    await tester.tap(swatch);
+    await tester.pump();
+  }
+
+  testWidgets(
+      'A20 the foreground follows the paper: black on White, white on '
+      'Blueprint picked in the Page panel, back by undo and redo; White to '
+      'Ivory keeps the resolver (fix/post-07 F1b)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    PageComponent page() => doc.components.get<PageComponent>(doc.rootHandle)!;
+    DraftCanvasState canvas() =>
+        tester.state<DraftCanvasState>(find.byType(DraftCanvas));
+    expect(page().background, 0xFFFFFFFF, reason: 'starts on White');
+    final slot = await draftLine(tester, view);
+    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'White');
+
+    await tapSwatch(tester, 3);
+    expect(page().background, 0xFF1F3A5F);
+    expect(argbOnCanvas(tester, slot), 0xFFFFFFFF, reason: 'Blueprint');
+
+    doc.commands.undo();
+    await tester.pump();
+    expect(page().background, 0xFFFFFFFF);
+    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'undo to White');
+
+    doc.commands.redo();
+    await tester.pump();
+    expect(page().background, 0xFF1F3A5F);
+    expect(argbOnCanvas(tester, slot), 0xFFFFFFFF, reason: 'redo Blueprint');
+
+    doc.commands.undo();
+    await tester.pump();
+    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'undo again');
+
+    // White to Ivory: the page changes, the foreground does not, so the
+    // canvas keeps its painter (a new resolver would rebuild it).
+    final painter = canvas().painter;
+    await tapSwatch(tester, 1);
+    expect(page().background, 0xFFFAF6EC);
+    expect(identical(canvas().painter, painter), isTrue,
+        reason: 'same foreground, same resolver');
+    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'Ivory');
+  });
+
+  testWidgets(
+      'A21 a document that opens on Blueprint drafts white from the start, '
+      'and a load onto White turns it black (fix/post-07 F1b)', (tester) async {
+    final doc = drawDoc(FlutterTextMeasurer()).doc;
+    doc.commands.execute(SetComponentCommand<PageComponent>(
+        doc.rootHandle,
+        doc.components
+            .get<PageComponent>(doc.rootHandle)!
+            .copyWith(background: 0xFF1F3A5F)));
+    doc.commands.clearHistory();
+    final view = await pumpDraw(tester, doc);
+    final slot = await draftLine(tester, view);
+    expect(argbOnCanvas(tester, slot), 0xFFFFFFFF, reason: 'at startup');
+
+    // Out of band, as a decode writes the registry before `notifyLoaded`.
+    doc.components.attach<PageComponent>(
+        doc.rootHandle,
+        doc.components
+            .get<PageComponent>(doc.rootHandle)!
+            .copyWith(background: 0xFFFFFFFF));
+    doc.commands.notifyLoaded();
+    await tester.pump();
+    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'after the load');
+  });
+
+  testWidgets(
+      'A22 a document without a page drafts black: no sheet is painted, so '
+      "the drafting lies on the shell's light surface (fix/post-07 F1b)",
+      (tester) async {
+    final doc = DraftDocument.empty(measurer: FlutterTextMeasurer());
+    expect(doc.components.get<PageComponent>(doc.rootHandle), isNull);
+    final view = await pumpDraw(tester, doc);
+    final slot = await draftLine(tester, view);
+    expect(argbOnCanvas(tester, slot), 0xFF000000);
   });
 }

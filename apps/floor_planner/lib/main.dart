@@ -57,13 +57,33 @@ class _PlannerShellState extends State<PlannerShell> {
   late final PageNotifier _page = PageNotifier(_document);
   late final SpatialIndex _index = SpatialIndex(_document);
 
-  /// ACI 7 draws black (fix/post-07): the app drafts ByLayer on layer 0,
-  /// which is ACI 7, onto light paper. One instance for the document's
-  /// lifetime: `DraftCanvas` rebuilds its painter whenever the resolver it
-  /// is handed is a different object, so a resolver built per build would
-  /// cost that on every rebuild of the shell.
-  late final DocumentStyleResolver _resolver =
-      DocumentStyleResolver(_document, foreground: 0x000000);
+  /// ACI 7's foreground follows the paper (fix/post-07): the app drafts
+  /// ByLayer on layer 0, which is ACI 7, so drafting is black on a light
+  /// paper and white on a dark one ([foregroundFor]). [_onPage] keeps it in
+  /// step with the page by every route that changes it. Replaced only when
+  /// the chosen foreground changes: `DraftCanvas` rebuilds its painter
+  /// whenever the resolver it is handed is a different object, so White to
+  /// Ivory, or a scale edit, must not build a new one.
+  late DocumentStyleResolver _resolver =
+      DocumentStyleResolver(_document, foreground: _foregroundOn(_page.value));
+
+  /// A document without a page has no sheet to draw on: the chrome paints
+  /// none, and the drafting lies on the shell's light surface, so it is
+  /// read as white paper.
+  static int _foregroundOn(PageComponent? page) =>
+      foregroundFor(page?.background ?? 0xFFFFFFFF);
+
+  /// The page notifier re-reads the page on a command that touches the
+  /// root, its undo and redo, a load and a purge, and notifies only when
+  /// the page is a different value; a swatch, an undo of one and a loaded
+  /// document all arrive here.
+  void _onPage() {
+    final foreground = _foregroundOn(_page.value);
+    if (foreground == _resolver.foreground) return;
+    setState(() =>
+        _resolver = DocumentStyleResolver(_document, foreground: foreground));
+  }
+
   late final CameraController _camera = CameraController(
     widget.initialCamera ?? _nominalFit(),
     minScale: kMinScale,
@@ -243,6 +263,7 @@ class _PlannerShellState extends State<PlannerShell> {
     // Spec 06 D13, Ruling 06-12: startupPlan builds its document with no
     // parametric object, so installing after it is safe.
     _parametric = installParametric(_document);
+    _page.addListener(_onPage);
   }
 
   @override
@@ -257,7 +278,9 @@ class _PlannerShellState extends State<PlannerShell> {
     _outlines.dispose();
     _selection.dispose();
     _snap.dispose();
-    _page.dispose();
+    _page
+      ..removeListener(_onPage)
+      ..dispose();
     _camera.dispose();
     _parametric.dispose();
     _index.dispose();

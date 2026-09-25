@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../core/handle.dart';
 import 'draft_document.dart';
 import 'node.dart';
@@ -5,6 +7,40 @@ import 'resolved_style.dart';
 import 'style.dart';
 import 'style_context.dart';
 import 'tables.dart';
+
+/// The foreground ([DocumentStyleResolver.foreground], `0xRRGGBB`) for
+/// drawing on a [background] (`0xAARRGGBB`; the alpha byte is ignored):
+/// black (`0x000000`) or white (`0xFFFFFF`), whichever contrasts more.
+///
+/// ACI 7 is black on a light background and white on a dark one
+/// (AutoCAD's rule). The resolver applies the foreground it is given; this
+/// picks one from what the host draws on. It lives here, beside the
+/// resolver, rather than in an app because it is the other half of that
+/// same rule and nothing in it belongs to one host.
+///
+/// "Contrasts more" is WCAG 2's contrast ratio, `(L1 + 0.05) / (L2 + 0.05)`,
+/// on relative luminance: each sRGB channel linearised, then weighted
+/// 0.2126, 0.7152, 0.0722. Linearisation matters: the crossover is at a
+/// luminance of `sqrt(0.0525) - 0.05` ≈ 0.179, which a grey reaches between
+/// bytes 117 and 118 (a 0x767676 paper takes black, 0x757575 white), not
+/// at the 128 a threshold on the raw bytes would put it. A tie goes to
+/// black.
+int foregroundFor(int background) {
+  double linear(int shift) {
+    final c = ((background >> shift) & 0xFF) / 255;
+    return c <= 0.04045
+        ? c / 12.92
+        : math.pow((c + 0.055) / 1.055, 2.4).toDouble();
+  }
+
+  final luminance =
+      0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0);
+  // The ratio of each ink against the paper: black's luminance is 0,
+  // white's is 1.
+  final black = (luminance + 0.05) / 0.05;
+  final white = 1.05 / (luminance + 0.05);
+  return black >= white ? 0x000000 : 0xFFFFFF;
+}
 
 abstract class StyleResolver {
   /// The context an instance imposes on its definition's contents.
