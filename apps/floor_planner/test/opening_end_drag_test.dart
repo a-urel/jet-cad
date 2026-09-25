@@ -172,8 +172,7 @@ void main() {
           positionOf(doc, o), localLength(now) - (localLength(was) - old[o]!),
           reason: 'opening $o: L′ − (L − p)');
     }
-    expect(sets, openings,
-        reason: 'A\'s openings, then C\'s, ascending, after the walls');
+    expect(sets, openings, reason: 'A\'s openings, then C\'s, ascending');
     expect(diagnosticsOf(doc), isEmpty, reason: 'still nothing clamped');
     expectOnOracles(doc, 'dragged');
     final after = canon(doc);
@@ -441,5 +440,117 @@ void main() {
     expect(positionOf(doc, hD), 4000.25);
     expect(childBytes(doc, hD), children);
     expect(diagnosticsOf(doc), isEmpty);
+  });
+  test(
+      'EP5 (start) a 5,000 wall shortened from its start to 1,500, with a door '
+      'at 600.5 and a window at 3,900: nothing is refused, the positions are '
+      'L′ − (L − p) (the door\'s negative: legal, D6), both are clamped and '
+      'overlap, the wall keeps a piece; dragging the start back restores the '
+      'positions and the wall exactly (Task 8 review m2)', () {
+    final doc = wallDoc();
+    run(doc, addWall(doc, hA, plan(-2500, 0), plan(2500, 0), 200, centre));
+    run(
+        doc,
+        addOpening(
+            doc,
+            hD,
+            const OpeningParams(hA, 600.5, 900, OpeningKind.door,
+                hinge: HingeEnd.end),
+            at: ownGroup));
+    run(
+        doc,
+        addOpening(
+            doc, hW, const OpeningParams(hA, 3900, 1200, OpeningKind.window)));
+    expect(diagnosticsOf(doc), isEmpty);
+    final wall = doc.components.get<WallParams>(hA)!;
+    final l = localLength(wall);
+    final depth = doc.commands.undoDepth;
+    final grips = WallGrips();
+
+    final shorter =
+        grips.drag(doc, hA, grips.gripsOf(doc, hA)[0], plan(2500 - 1500, 0));
+    expect(shorter, isNotNull, reason: 'nothing is refused');
+    run(doc, shorter!);
+    expect(doc.commands.undoDepth, depth + 1);
+    final now = doc.components.get<WallParams>(hA)!;
+    expect(now.end, wall.end, reason: 'the end did not move');
+    final l2 = localLength(now);
+    expect(l2, closeTo(1500, 1e-6));
+    expect(positionOf(doc, hD), l2 - (l - 600.5));
+    expect(positionOf(doc, hW), l2 - (l - 3900));
+    expect(positionOf(doc, hD), lessThan(0), reason: 'before the start');
+    expect([
+      for (final d in diagnosticsOf(doc)) '${d.code} ${d.handles}'
+    ], [
+      'opening.clamped [$hD]',
+      'opening.overlap [$hD, $hW]',
+      'opening.clamped [$hW]',
+    ]);
+    expect(centrelineHandles(doc, hA), isNotEmpty, reason: 'a piece is kept');
+    expectOnOracles(doc, 'shortened from the start');
+
+    // Back to the world point the wall was drawn from (see EP5).
+    run(doc, grips.drag(doc, hA, grips.gripsOf(doc, hA)[0], plan(-2500, 0))!);
+    expect(doc.commands.undoDepth, depth + 2);
+    expect(doc.components.get<WallParams>(hA), wall,
+        reason: 'the stored start comes back exactly');
+    expect(positionOf(doc, hD), 600.5);
+    expect(positionOf(doc, hW), 3900.0);
+    expect(diagnosticsOf(doc), isEmpty);
+    expectOnOracles(doc, 'dragged back');
+  });
+
+  test(
+      'EP6 (rv8-noLive) a start drag rewrites only live openings: a stray '
+      'OpeningParams naming the wall on a group nested under a plain root '
+      'group, and one on a handle with no node, are left alone (Task 8 '
+      'review m1)', () {
+    final doc = wallDoc();
+    run(doc, addWall(doc, hA, plan(-2500, 0), plan(2500, 0), 200, left));
+    run(
+        doc,
+        addOpening(
+            doc,
+            hD,
+            const OpeningParams(hA, 1400.5, 900, OpeningKind.door,
+                hinge: HingeEnd.end)));
+    // Built by hand: no tool or file path makes these.
+    const plain = Handle(5000), nested = Handle(5100), bare = Handle(5200);
+    const stray = OpeningParams(hA, 2600.25, 700, OpeningKind.window);
+    const loose = OpeningParams(hA, 3300.75, 600, OpeningKind.gap);
+    run(
+        doc,
+        CompoundCommand([
+          AddNodeCommand(GroupNode(
+              handle: plain,
+              parent: doc.rootHandle,
+              transform: Transform2.identity(),
+              children: const [])),
+          AddNodeCommand(GroupNode(
+              handle: nested,
+              parent: plain,
+              transform: Transform2.identity(),
+              children: const [])),
+          SetComponentCommand<OpeningParams>(nested, stray),
+          SetComponentCommand<OpeningParams>(bare, loose),
+        ], label: 'Add strays'));
+    expect(doc.tree[nested], isA<GroupNode>());
+    expect(doc.tree[bare], isNull, reason: 'no node');
+    expect(doc.components.get<OpeningParams>(nested), stray);
+    expect(doc.components.get<OpeningParams>(bare), loose);
+    final old = positionOf(doc, hD);
+    final l = localLength(doc.components.get<WallParams>(hA)!);
+
+    final grips = WallGrips();
+    final c = grips.drag(doc, hA, grips.gripsOf(doc, hA)[0], plan(-2000, 0))!;
+    expect([for (final m in openingSets(c)) m.handle], [hD],
+        reason: 'the live door only');
+    run(doc, c);
+    final l2 = localLength(doc.components.get<WallParams>(hA)!);
+    expect(positionOf(doc, hD), l2 - (l - old));
+    expect(doc.components.get<OpeningParams>(nested), stray,
+        reason: 'the nested stray is unchanged');
+    expect(doc.components.get<OpeningParams>(bare), loose,
+        reason: 'the node-less stray is unchanged');
   });
 }
