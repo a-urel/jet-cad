@@ -856,9 +856,17 @@ per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
 > The same rule applies to the slide grip (D16). See Open question 5.
 
 - **Door hinge and swing on placement:**
-  - **swing side** = the side of the host's centreline the **raw** click
-    lies on: `left` when `(p − s)·n ≥ 0` in local space, `right`
-    otherwise (a click exactly on the centreline swings left);
+  - **swing side** = the side of the host band's **midline** the **raw**
+    click lies on: `left` when `(p − s)·n − (lOff + rOff)/2 ≥ 0` in local
+    space, `right` otherwise (a click exactly on the midline swings
+    left). On a centre-justified wall the midline is the centreline.
+
+> **Amended at planning (controller, 2026-09-25, plan finding 2).**
+> Revision 1 used the side of the host's **centreline**. On a left- or
+> right-justified wall the centreline is a face (07 D2), so the whole band
+> lies on one side of it and every click gave the same swing. The
+> midline realises decision 8 ("the clicked side of the wall") on every
+> justification.
   - **hinge** = the jamb **nearer the host's nearer end**: `start` when
     the stored centre is at most `L/2`, `end` otherwise. The door then
     opens towards the nearby corner, against the wall.
@@ -886,7 +894,7 @@ per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
   tool does.
 
 **Costs:** a band cache shared by four tools. **Pinned by:** `OT1`, `OT2`
-(M-08z, M-08z2), `OT4`.
+(M-08z, M-08z2, M-08z3), `OT4`.
 
 ### D15 — Snapping
 
@@ -1449,6 +1457,7 @@ the backup and `git diff --quiet` (never `git checkout`), and logged in
 | M-08i | `movable` ignored: an opening is captured by move and rotate | `SG2` |
 | M-08z | the door's swing side from the opposite side of the click | `OT2` |
 | M-08z2 | the hinge on the farther end's jamb | `OT2` |
+| M-08z3 | the swing side from the centreline, not the band's midline (D14 amendment) | `OT2`, right-justified case |
 | M-08sn | edge snaps removed | `OT3` |
 | M-08pin | the Opening section's target read at focus loss | `OS2` |
 
