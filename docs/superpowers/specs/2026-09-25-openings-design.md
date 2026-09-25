@@ -1,7 +1,10 @@
 # Openings — design
 
 **Date:** 2026-09-25. **Status:** design, **revision 1**. Not reviewed: the
-human skipped the spec review, as for 07 (decision 14).
+human skipped the spec review, as for 07 (decision 14). **Amended the same
+day by the controller's ruling on open question 1** (R1: a gap's threshold
+line replaces its jamb lines; D10, D11, D12, the tests and the mutant
+table). The other thirteen open questions were accepted as written.
 **Sub-project:** `roadmap/08-openings.md`. **Size:** M.
 **Branch:** `spec-08/openings`, cut from `main` at `357bea6`; this revision
 is written on top of `11f26bc` (the spike's findings note).
@@ -31,7 +34,8 @@ the fix/post-07 note
 
 **Decisions the human made on 2026-09-25**, numbered as in the brainstorm
 record (1–14 before the spike, 15–19 after it), and the controller's
-technical rulings R1–R4:
+technical rulings R1–R4 (R1 as amended by the controller on 2026-09-25, on
+this spec's open question 1):
 
 | # | Question | Answer | Here |
 |---|---|---|---|
@@ -54,7 +58,7 @@ technical rulings R1–R4:
 | 17 | The no-fit symbol | **Drawn just outside the wall's face,** never over the band; `diagnostics()` names it | D11 |
 | 18 | Obstacles | Another wall's **T butt or crossing** inside the straight part **splits it into stretches;** an opening clamps into the stretch nearest its position; if none is wide enough it is no-fit | D7, D8 |
 | 19 | What a deleted referent does to its referrers | **A policy per type:** `cascade` (openings) or `orphan` (kept, regenerated, reported; for 10's rooms) | D4 |
-| R1 | Gap selectability | A gap generates **two jamb lines** (ByLayer), so it is selectable and deletable; doors and windows need none | D10 (and Open question 1) |
+| R1 | Gap selectability | **Amended** (controller, 2026-09-25, spec open question 1). Was: two jamb lines. Now: a gap generates **one threshold line** (ByLayer, layer 0) along the host's centreline inside the gap, **inset from each jamb**, so it never touches a piece; a no-fit gap draws it outside the left face like a no-fit window. Doors and windows need no extra child | D10, D11, D12 |
 | R2 | Overlap reporting | `opening.overlap` **once per pair, by the lower handle** | D17 |
 | R3 | M-08a | **Structural:** a parameter-type swap fired on a scratch copy against the far-move test | Mutant table |
 | R4 | Debt from the spike | A bare `RemoveNodeCommand` of a wall's node leaves its leaves with a dead owner (06, pre-existing); paste/import must remap stored handles; the references map costs O(n) per survey and is **measured** | D2, Non-goals |
@@ -139,7 +143,7 @@ line.
    parametric object that stores its host wall's handle and a position
    along the host's centreline. It cuts the host's band and centreline, and
    draws its symbol: a leaf and a quarter swing for a door, three lines for
-   a window, two jamb lines for a gap. It moves with its wall, is deleted
+   a window, an inset threshold line for a gap. It moves with its wall, is deleted
    with it, and stays out of the wall's corners and out of other walls'
    T butts and crossings.
 2. **Three tools:** Door (**D**), Window (**N**) and Gap (**G**). One click
@@ -475,7 +479,8 @@ not a live parametric object.
   the opening and its wall compute the cut from the same numbers. The cost —
   the start grip moving doors (spike finding 4) — is paid by D13.
 - **Validation ranges:**
-  - **width** must exceed `wallJoin.linear` in the tools and the panel;
+  - **width** must exceed `wallJoin.linear` in the tools and the panel,
+    and `4 × wallJoin.linear` for a gap (D10's inset);
   - **position** must be finite and within `[0, L]` (`L` the host's
     centreline length) in the panel; the tools and the slide grip only
     produce values in that range;
@@ -610,7 +615,7 @@ narrow stretch holds it; `opening.clamped` says so. **Pinned by:** `OG2`,
   piece's corner and the recomputed point is left out. 0 refused after.
 - **Every stored piece is simple, anticlockwise and triangulable** — 07
   D6's invariant, now per piece. `simplifyRing` still guards each ring.
-- **The jambs are the pieces' own edges.** Doors and windows need no jamb
+- **The jambs are the pieces' own edges.** No opening generates a jamb
   child.
 - **Why split the centreline** (spike finding 1): 07 D3 generates it in
   `kWallColor`, invisible inside the band, but in a doorway it is a black
@@ -654,9 +659,29 @@ the uncut path.
   - **Window** (three LINEs): the left face, the midline
     (`(lOff + rOff)/2`) and the right face, each from `x₁` to `x₂`, in that
     order.
-  - **Gap** (two LINEs, R1): the two **jamb lines**, face to face at `x₁`
-    then at `x₂`. They make a gap selectable and deletable, which the
-    spike's childless gap was not (spike Q6: `miss`, 06's ghost).
+  - **Gap** (one LINE, R1 as amended): a **threshold line** on the host's
+    centreline (offset 0), from `x₁ + m` to `x₂ − m`, with the **inset**
+    `m = min(t/4, w/4)` (`t` the host's thickness, `w` the width). It makes
+    a gap selectable and deletable, which the spike's childless gap was not
+    (spike Q6: `miss`, 06's ghost), and it lies where D9 leaves nothing
+    else: a click in the doorway picks the gap.
+    - **Why `t/4`:** the inset scales with the wall, so the line reads as a
+      threshold, clearly apart from the jamb strokes at any zoom where the
+      wall itself reads: 30 mm for a 120 mm partition and 62.5 mm for a
+      250 mm wall, 0.6 mm and 1.25 mm on paper at 1:50.
+    - **Why capped at `w/4`:** the line keeps at least half the gap's
+      width, `w − 2m ≥ w/2 > 0`, however narrow the gap or thick the wall.
+    - **Why it clears `wallJoin.linear`:** `m > wallJoin.linear` whenever
+      both `t` and `w` exceed `4 × wallJoin.linear` (4e-6 mm). For a gap,
+      the tools and the panel therefore require `w > 4 × wallJoin.linear`
+      (D6's minimum, raised for this kind only); a wall that thin is not
+      drawable (07 requires `t > wallJoin.linear`; nothing draws one below
+      4e-6 mm). A loaded file below either bound still gets a line of
+      positive length; it may lie within `wallJoin.linear` of a piece.
+      Recorded.
+    - For a left- or right-justified host the centreline is one of the
+      face lines (07 D2); inside the gap there is no piece on it, so the
+      rule holds there too.
 - **Child counts are fixed by kind** and never change for an object's life
   (`kind` is fixed at creation). So an opening's children keep their
   handles across every regeneration, no-fit included.
@@ -679,13 +704,13 @@ the uncut path.
   - **picking** is unaffected: it goes through the spatial index over the
     opening's children, never through `reach`; a door picks by its leaf or
     its arc (spike Q6: `5003 (edge) -> 5000`), a window by its lines, a gap
-    by its jamb lines (at creation; see D12 and Open question 1);
+    by its threshold line, whatever the wall's piece handles are (D12);
   - **neighbour tests** still count an empty reach once per pair in
     `debugOverlapTests` (07 D10's `n` includes openings); none passes.
 
-**Costs:** R1's jamb lines are the one symbol that shares an edge with a
-piece (D12). **Pinned by:** `OG10`, `OR1` (M-08h), `OR7` (M-08g), `OR8`
-(M-08j).
+**Costs:** a gap's threshold line is a drawing convention, not a physical
+element; a user who wants jamb marks gets none. **Pinned by:** `OG10`, `OR1`
+(M-08h), `OR7` (M-08g), `OR8` (M-08j, M-08j2).
 
 ### D11 — The no-fit symbol (decision 17)
 
@@ -699,8 +724,11 @@ A no-fit opening (D8 step 2) draws its symbol over its **stored** interval
   **translated by the wall's thickness `t` along the left normal**, so they
   lie in the band's image placed against its left face, outside the band:
   the window's three lines at offsets `lOff`, `lOff + t/2` and `lOff + t`
-  (from the left face outwards); a gap's two jamb lines from `lOff` to
-  `lOff + t`, one at each end of the stored interval.
+  (from the left face outwards); a gap's threshold line at offset
+  `lOff + t/2`, the image's midline, where the no-fit window draws its
+  midline, over the stored interval inset by D10's `m` at each end.
+  (Translating the centreline by `t` would not do: for a left-justified
+  wall it would land on the left face itself.)
 
 > **Interpretation.** Decision 17 says "just outside the wall's face" and
 > not which face. A door has an obvious side (its swing); a window and a
@@ -729,6 +757,8 @@ A no-fit opening (D8 step 2) draws its symbol over its **stored** interval
     and touch it at two points on the face;
   - a fitting window's lines lie inside the gap rectangle and touch the
     pieces at their jamb edges' points only;
+  - a fitting gap's threshold line lies inside the gap, `m` from each
+    jamb (D10), and touches nothing;
   - a no-fit symbol lies outside the band (D11);
   - centreline pieces are `kWallColor` inside the band.
 
@@ -736,24 +766,20 @@ A no-fit opening (D8 step 2) draws its symbol over its **stored** interval
   for a stroke's width at a touching point. The spike rendered it at 8 px/mm
   on Blueprint (white symbol, black wall): nothing covered
   (`r2_blueprint_hinge.png`).
-- **The exception, R1's gap:** a gap's jamb lines **coincide** with the
-  jamb edges of the pieces beside it. Whichever is drawn later covers the
-  other along that edge, and a click exactly on it picks the later drawn
-  (pick ties go to the greater handle). At placement the gap's lines are
-  drawn later: the host plans first in the ascending closure, so its new
-  pieces reserve lower handles. A later regeneration of the host can add a
-  piece, with a fresh handle, beside the gap. Then that jamb reads as the
-  wall's on Blueprint, and a click on it picks the wall. Invisible on light
-  paper (black on black). Band selection always selects the gap. **Accepted
-  for R1 and raised as Open question 1.**
+- **No exception.** Revision 1 had one: R1's original two jamb lines
+  coincided with the pieces' jamb edges, so a piece added later beside a
+  gap covered its jamb on Blueprint and won a click on it (pick ties go to
+  the greater handle). The controller amended R1 (2026-09-25, this spec's
+  open question 1): the inset threshold line (D10) shares no point with a
+  piece, so the pieces' handle history is invisible for every opening.
 - **Other walls' bands are not covered by the rule.** A door near an acute
   corner can swing into the other wall's band, and a no-fit symbol can lie
   over a neighbour's band. Whichever is drawn later shows. Visible on
   Blueprint only. Recorded, not changed.
 
-**Costs:** a gap's jamb can read as the wall's, on Blueprint and for a click
-exactly on it, after a later regeneration adds a piece beside it. **Pinned
-by:** `RD1`; `OR8` for the gap at creation.
+**Costs:** a symbol that could not keep off its host's pieces would need
+a per-object draw pass; none of 08's does. **Pinned by:** `RD1`; `OR8`
+(M-08j2) for the gap after a later piece is added beside it.
 
 ### D13 — Where an opening goes when its host changes
 
@@ -850,7 +876,8 @@ per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
   SetComponentCommand<OpeningParams>(…)])` through `commit(ctx, …, needs:
   {structure, components, geometry})`: one undo step, in which the host
   regenerates (D3).
-- **Hover preview:** the would-be symbol and the gap's two jamb lines, in
+- **Hover preview:** the would-be symbol and the would-be cut's two jamb
+  lines (a preview only, never generated), in
   world, computed on each pointer move from the shared frame function and
   painted from the cached payloads. Nothing is computed per frame, so the
   frame path gains no allocation.
@@ -896,8 +923,8 @@ per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
   mode it edits **that tool's** `OpeningSettings` (width only), even when an
   opening is selected (07 D11's amendment for the Wall section).
 - **Fields and controls:**
-  - **Width** (mm; must exceed `wallJoin.linear`; otherwise or
-    unparseable, the field reverts);
+  - **Width** (mm; must exceed `wallJoin.linear`, or `4 × wallJoin.linear`
+    for a gap (D6); otherwise or unparseable, the field reverts);
   - **Position** (mm, from the wall's start to the centre; finite and in
     `[0, L]`, else it reverts). Not shown in tool mode;
   - **Flip hinge** and **Flip swing**, for a door only; each is one
@@ -938,7 +965,8 @@ per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
   opening is not drawn at, unless the opening is no-fit everywhere, when
   the projection is clamped to `[0, L]`. One undo step. A drag that changes
   nothing returns null.
-- `preview` draws the gap's two jamb lines at the would-be cut, in world.
+- `preview` draws the would-be cut's two jamb lines, in world (a preview
+  only; no opening generates jamb lines).
 - It needs `components` and `geometry` (07 `OG5`): under runtime it is not
   hit.
 
@@ -1167,7 +1195,7 @@ up to 60 mm. **Pinned by:** D18's carried-over tests and the replaced `SP5`.
 | 07: a neighbour's fill can cover a cut near a joint | Cuts never enter the caps (the straight span, D7) or another wall's T butt or crossing (obstacles, D7) |
 | 07: the fixed-three-children draw-order argument breaks if regions split | It does; D12 replaces it with "a symbol never overlaps its host's pieces" |
 | 07: rooms should derive from faces and centrelines | Restated for 10: from the **uncut** faces and centrelines (Non-goals) |
-| 06: draw order of added children (D12) | D12: accepted, and invisible for fitting and no-fit symbols; R1's gap is the exception (Open question 1) |
+| 06: draw order of added children (D12) | D12: accepted, and invisible for every symbol, fitting or no-fit (R1 as amended: the gap's inset threshold line) |
 
 ## Architecture
 
@@ -1316,8 +1344,8 @@ kills.
   - `OG6` two overlapping openings: one merged gap, both symbols, one
     `opening.overlap` from the lower handle naming both;
   - `OG7` no-fit: the wall is uncut (07's three children, equal to the
-    twin's); the window's lines lie outside the band on the left, the
-    door's on its swing side;
+    twin's); the window's lines and the gap's threshold line lie outside
+    the band on the left, the door's on its swing side;
   - `OG8` the split centreline: one polyline per piece, none enters a gap;
     a pick in the doorway misses the wall;
   - `OG9` the random property run (spike Q3f's generator plus T and X
@@ -1340,8 +1368,12 @@ kills.
   - `OR7` the opening's own group at a rotated, translated transform: the
     symbol is on the oracle; a `TransformNodeCommand` on it leaves the
     world symbol unchanged and is one undo step;
-  - `OR8` a gap: two ByLayer jamb lines; at creation a click on a jamb
-    line selects the gap; a band selection selects it;
+  - `OR8` a gap: one ByLayer threshold line on the centreline, `m` from
+    each jamb by coordinates (a 250 mm wall and a gap narrower than `t`, so
+    both arms of `min(t/4, w/4)` are exercised); a click on it selects the
+    gap; then a second opening is added on the host's start side, so a
+    piece with a fresh handle is added (D9), and the click still selects
+    the gap; a band selection selects it;
   - `RD1` a render on Blueprint (the spike's R2 method: the shell rendered
     in `flutter_test`): a fitting door hinged on a piece added later is not
     covered.
@@ -1401,7 +1433,7 @@ the backup and `git diff --quiet` (never `git checkout`), and logged in
 | M-08p | the end grip does not rewrite openings' positions | `EG1` |
 | M-08p2 | the anchored end reversed: positions rewritten when the end moves, kept when the start moves | `EG1`, `EG2` |
 | M-08k | the centreline not split (one centreline across the gap) | `OG8` |
-| M-08u | the no-fit window and gap drawn over the band (not translated) | `OG7` |
+| M-08u | the no-fit window and gap drawn over the band (not translated) | `OG7`, on the window and on the gap |
 | M-08o | T obstacles ignored | `OG3` |
 | M-08x | crossings ignored | `OG4` |
 | M-08w | the nearest stretch chosen without regard to width | `OG5` |
@@ -1412,7 +1444,8 @@ the backup and `git diff --quiet` (never `git checkout`), and logged in
 | M-08l | the dangling-reference refusal removed | `DR1` |
 | M-08y | `parametric.dangling` not reported | `DR2` |
 | M-08n | `referrers` built by a scan over every object per referent (O(n²)) | `RC1`: the `references` call count exceeds 2n |
-| M-08j | the gap generates no jamb lines | `OR8`: the gap cannot be picked |
+| M-08j | the gap generates no line (R1 as amended) | `OR8`: the gap cannot be picked |
+| M-08j2 | the threshold line not inset (`m = 0`: jamb to jamb, touching the pieces) | `OR8`: the endpoints' coordinates, and the click after a later piece picks the wall |
 | M-08i | `movable` ignored: an opening is captured by move and rotate | `SG2` |
 | M-08z | the door's swing side from the opposite side of the click | `OT2` |
 | M-08z2 | the hinge on the farther end's jamb | `OT2` |
@@ -1481,20 +1514,17 @@ the backup and `git diff --quiet` (never `git checkout`), and logged in
 
 ## Open questions
 
-None blocks writing the plan. Each is a place where this spec interpreted
+None blocks writing the plan. Question 1 is resolved; the other thirteen
+were accepted as written by the controller on 2026-09-25. Each is a place where this spec interpreted
 a decision or found a consequence the decisions did not settle; each has a
 default above that the plan follows unless the human or the controller
 rules otherwise.
 
-1. **R1's gap jamb lines coincide with the pieces' jamb edges** (D12). A
-   piece added to the host later is drawn over the adjacent jamb line, so
-   on Blueprint that jamb shows black, and a click exactly on it picks the
-   wall (pick ties go to the later drawn). A band selection always works.
-   Options: (a) accept, as this spec does; (b) a gap generates one
-   **threshold line** along the centreline inside the gap instead (the
-   spike's option 5.1's alternative), which overlaps no piece and is
-   pickable in the doorway, where D9 leaves nothing else; (c) keep the jamb
-   lines and also add the threshold line. (b) would amend R1.
+1. **Resolved (controller, 2026-09-25).** R1's gap jamb lines coincided
+   with the pieces' jamb edges, so a later piece covered one on Blueprint
+   and won a click on it. R1 is amended: one threshold line on the
+   centreline, inset from each jamb (D10), outside the left face when
+   no-fit (D11). D12 now has no exception.
 2. **"Hinge = the nearer end"** (decision 8) is read as the jamb nearer the
    host wall's nearer end (D14), because the click is at the opening's
    centre. The alternative, the jamb nearer the click, is undefined for a
