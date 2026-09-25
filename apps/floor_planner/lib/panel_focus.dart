@@ -22,14 +22,17 @@ final class PanelFieldFocusNode extends FocusNode {
   /// and the scope itself takes the focus. Every step removes a node, and
   /// `seen` bounds the walk by the number of panel fields anyway.
   ///
-  /// A canvas click that has just requested the focus is already the
-  /// scope's most recent child when its tap-outside arrives, so the walk
-  /// stops at it at once. A plain `unfocus()` would not do: it clears the
-  /// scope's history and takes the focus to the scope itself, even from
-  /// that click, and with the focus on the route's scope no key reaches the
-  /// shell's shortcuts.
+  /// A canvas click requests the focus itself, and the walk leaves that
+  /// request alone: if it came first, the canvas is the scope's most recent
+  /// child and the walk stops at it at once; if not, it lands after the
+  /// walk. A plain `unfocus()` would not do: it clears the scope's history
+  /// and takes the focus to the scope itself, even from that click, and
+  /// with the focus on the route's scope no key reaches the shell's
+  /// shortcuts.
+  ///
+  /// Only a focused field calls it: Enter, and `onTapOutside`, which a
+  /// text field arms only while it has the focus.
   void handBack() {
-    if (!hasFocus) return;
     final seen = <FocusNode>{};
     FocusNode? node = this;
     while (node is PanelFieldFocusNode && seen.add(node)) {

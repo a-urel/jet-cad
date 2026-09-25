@@ -734,4 +734,111 @@ void main() {
     expect(doc.components.get<WallParams>(wc)!.thickness, 120);
     expect(doc.commands.undoDepth, 1);
   });
+
+  /// The canvas's own focus node: the `Focus` the `InteractionLayer` builds.
+  FocusNode canvasFocus(WidgetTester tester) => tester
+      .widget<Focus>(find
+          .descendant(
+              of: find.byType(InteractionLayer), matching: find.byType(Focus))
+          .first)
+      .focusNode!;
+
+  Finder pageScale() => find.byKey(const Key('page-scale'));
+
+  /// Selects the first of SE's boxes (120 x 70), types 150 into Width and
+  /// then 90 into Height, with no Enter: both fields are now in the scope's
+  /// focus history, Width before Height. Returns the box.
+  Future<Handle> typeWidthThenHeight(
+      WidgetTester tester, PlannerView view) async {
+    final b = boxes(view.document).first;
+    await select(tester, view, [b]);
+    expect([textOf(tester, width), textOf(tester, height)], ['120', '70']);
+    await tester.tap(width);
+    await tester.pump();
+    await tester.enterText(width, '150');
+    await tester.pump();
+    await tester.tap(height);
+    await tester.pump();
+    await tester.enterText(height, '90');
+    await tester.pump();
+    return b;
+  }
+
+  List<double> sizeOf(PlannerView view, Handle b) {
+    final p = view.document.components.get<BoxParams>(b)!;
+    return [p.width, p.height];
+  }
+
+  testWidgets(
+      'SE11 a tap on the panel after Width then Height commits both and '
+      'hands focus back to the canvas, not to Width (fix/post-07 F3, B7)',
+      (tester) async {
+    final view = await pumpBoxes(tester);
+    final depth = view.document.commands.undoDepth;
+    final b = await typeWidthThenHeight(tester, view);
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('selection-panel')),
+        matching: find.text('Box')));
+    await tester.pump();
+    expect(sizeOf(view, b), [150, 90]);
+    expect(view.document.commands.undoDepth, depth + 2);
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await press(tester, LogicalKeyboardKey.keyW);
+    expect(status(tester), 'Wall');
+  });
+
+  testWidgets(
+      'SE12 Enter in Height after Width commits both and hands focus back to '
+      'the canvas, not to Width (fix/post-07 F3)', (tester) async {
+    final view = await pumpBoxes(tester);
+    final depth = view.document.commands.undoDepth;
+    final b = await typeWidthThenHeight(tester, view);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(sizeOf(view, b), [150, 90]);
+    expect(view.document.commands.undoDepth, depth + 2);
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await press(tester, LogicalKeyboardKey.keyW);
+    expect(status(tester), 'Wall');
+  });
+
+  testWidgets(
+      "SE13 Enter in the page panel's scale after Width then Height commits "
+      'all three and hands focus back to the canvas, past both Selection '
+      'panel fields (fix/post-07 F3)', (tester) async {
+    final view = await pumpBoxes(tester);
+    final doc = view.document;
+    final depth = doc.commands.undoDepth;
+    final b = await typeWidthThenHeight(tester, view);
+    await tester.tap(pageScale());
+    await tester.pump();
+    await tester.enterText(pageScale(), '50');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(sizeOf(view, b), [150, 90]);
+    expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
+        50);
+    expect(doc.commands.undoDepth, depth + 3);
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await press(tester, LogicalKeyboardKey.keyW);
+    expect(status(tester), 'Wall');
+  });
+
+  testWidgets(
+      'SE14 a canvas click after Width then Height commits both and leaves '
+      "the canvas's own focus request alone (fix/post-07 F3)", (tester) async {
+    final view = await pumpBoxes(tester);
+    final depth = view.document.commands.undoDepth;
+    final b = await typeWidthThenHeight(tester, view);
+    // Empty paper, clear of both boxes: the click also clears the
+    // selection, which unmounts the fields.
+    await tester.tapAt(globalOf(tester, view, 7150, 3250));
+    await tester.pump();
+    expect(sizeOf(view, b), [150, 90]);
+    expect(view.document.commands.undoDepth, depth + 2);
+    expect(width, findsNothing);
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await press(tester, LogicalKeyboardKey.keyL);
+    expect(status(tester), 'Line');
+  });
 }
