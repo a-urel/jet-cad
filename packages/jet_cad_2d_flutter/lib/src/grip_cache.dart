@@ -18,17 +18,47 @@ const int kMaxGrips = 400;
 /// it (spec D2).
 const double kGripHitPixels = 7.0;
 
-/// One grip of one selected root leaf. For a root leaf, owner space is
-/// world, so [grip]'s coordinates are world.
+/// Grips for a selected **root-level group** that an application object
+/// type owns — a parametric object, whose own leaves are generated and
+/// carry none (spec 07 D11). `GripCache` consults it; `GripDrag` builds a
+/// reshape's command through it.
+///
+/// Every coordinate is world. A `stretch` or `radius` grip it returns is
+/// reshaped through [drag] and needs `components` and `geometry`; a `move`
+/// grip moves the whole selection, as a leaf's centre grip does.
+abstract interface class ObjectGripProvider {
+  /// [group]'s grips, in world; empty when [group] is not one of this
+  /// provider's objects. The list order is each grip's ordinal.
+  List<Grip> gripsOf(DraftDocument d, Handle group);
+
+  /// The one command that moves [grip] of [group] to [world], or null when
+  /// that drag is refused (a degenerate result, say). [world] is only read
+  /// during the call.
+  DraftCommand? drag(DraftDocument d, Handle group, Grip grip, Vector2 world);
+
+  /// What [drag] would draw, in world: the pieces a reshape preview paints,
+  /// computed once per pointer move, never per frame. Empty when there is
+  /// nothing to show. [world] is only read during the call.
+  List<(EntityKind, GeometryPayload)> preview(
+      DraftDocument d, Handle group, Grip grip, Vector2 world);
+}
+
+/// One grip of one selected root leaf, or — with [object] — one grip an
+/// [ObjectGripProvider] gives a selected root-level group. For a root leaf,
+/// owner space is world, so [grip]'s coordinates are world; a provider's
+/// grips are world too.
 final class GripRef {
-  const GripRef(this.key, this.grip, this.ordinal);
+  const GripRef(this.key, this.grip, this.ordinal, {this.object = false});
 
   final SelectionKey key;
   final Grip grip;
 
-  /// The grip's position in `leafGrips`' list — D2's tie-break "grip index"
-  /// (Ruling 03-2).
+  /// The grip's position in `leafGrips`' list (or the provider's) — D2's
+  /// tie-break "grip index" (Ruling 03-2).
   final int ordinal;
+
+  /// The grip came from [GripCache.objects], and [key] names a group.
+  final bool object;
 }
 
 /// Where the rotation grip sits (spec D6). [box] is in [frame]'s
@@ -129,8 +159,12 @@ final class GripRef {
 /// outline cache's world records, so it must rebuild after them. The shell
 /// constructs this after the outline cache, so on a selection change the
 /// cache's listener has already run.
+///
+/// With [objects], a selected root-level group also shows the grips that
+/// provider gives it (spec 07 D11). Without one, a group has no grips, as
+/// before.
 class GripCache extends ChangeNotifier {
-  GripCache(this.document, this.selection, this.outlines) {
+  GripCache(this.document, this.selection, this.outlines, {this.objects}) {
     selection.addListener(_onSelection);
     outlines.addListener(_rebuild);
     _rebuild();
@@ -139,6 +173,9 @@ class GripCache extends ChangeNotifier {
   final DraftDocument document;
   final SelectionController selection;
   final OutlineCache outlines;
+
+  /// The object grip seam (spec 07 D11); null: groups have no grips.
+  final ObjectGripProvider? objects;
 
   final List<GripRef> _grips = <GripRef>[];
 
@@ -261,7 +298,23 @@ class GripCache extends ChangeNotifier {
       final bounds = outlines.worldBoundsOf(key);
       if (bounds != null) box = box.union(bounds);
       final slot = document.entities.slotOf(key.target);
-      if (slot == null) continue; // a group or an instance: no grips (D3)
+      if (slot == null) {
+        // A group or an instance: no leaf grips (D3). A root-level group's
+        // grips are its provider's, when there is one (07 D11).
+        final provider = objects;
+        final node = document.tree[key.target];
+        if (provider == null ||
+            node is! GroupNode ||
+            node.parent != document.rootHandle) {
+          continue;
+        }
+        final list = provider.gripsOf(document, key.target);
+        for (var i = 0; i < list.length; i++) {
+          _grips.add(GripRef(key, list[i], i, object: true));
+          if (list[i].role == GripRole.move) _moveCount++;
+        }
+        continue;
+      }
       if (document.entities.ownerAt(slot) != document.rootHandle) continue;
       final list = leafGrips(document.entities.kindAt(slot),
           document.geometry.peek(document.entities.geomIndexAt(slot)));

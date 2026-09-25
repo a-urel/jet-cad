@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:floor_planner/parametric/box.dart';
+import 'package:floor_planner/parametric/catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -44,7 +45,7 @@ void main() {
 
   test('BT2 an isolated box is four lines at its corners', () {
     final doc = DraftDocument.empty();
-    installBoxes(doc);
+    installParametric(doc);
     doc.commands.execute(box(doc, a, atA, 1200, 800));
     expect(kids(doc, a), hasLength(4));
   });
@@ -53,19 +54,19 @@ void main() {
       'BT3 a rotated overlapping pair clips each other: A 5, B 3 '
       '(M-06g app, M-06o)', () {
     final doc = DraftDocument.empty();
-    installBoxes(doc);
+    installParametric(doc);
     doc.commands.execute(box(doc, a, atA, 2000, 1000));
     doc.commands.execute(box(doc, b, onA(800, 700, 0.3), 400, 900));
     expect(kids(doc, a), hasLength(5));
     expect(kids(doc, b), hasLength(3));
-    expect(ParametricSystem(doc, boxCatalog).drift(), isEmpty);
+    expect(ParametricSystem(doc, parametricCatalog).drift(), isEmpty);
   });
 
   test(
       'BT4 two boxes sharing an edge exactly are not neighbours '
       '(Review Focus 5)', () {
     final doc = DraftDocument.empty();
-    installBoxes(doc);
+    installParametric(doc);
     doc.commands.execute(box(doc, a, atA, 1000, 1000));
     doc.commands.execute(box(doc, b, onA(1000, 0, 0), 1000, 1000));
     expect(kids(doc, a), hasLength(4));

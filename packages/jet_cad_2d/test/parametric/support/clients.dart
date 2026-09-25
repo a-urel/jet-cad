@@ -239,10 +239,111 @@ final class HingeType extends ParametricType<Hinge> {
   }
 }
 
+/// How [RegionRectType] breaks its **last** region (RG7): a client bug the
+/// planner must refuse, whether that region is matched or added.
+enum RegionFault { none, open, crossed }
+
+/// A rectangle generating [count] regions, one LINE and one open two-point
+/// POLYLINE, like a wall's centreline (Ruling 07-8): the
+/// planner's region handling, tested without wall geometry.
+final class RegionRect implements Component {
+  const RegionRect(this.width, this.height, this.count,
+      {this.fault = RegionFault.none});
+  static const String id = 'test.regionRect';
+  final double width;
+  final double height;
+  final int count;
+  final RegionFault fault;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {
+        'width': width,
+        'height': height,
+        'count': count,
+        'fault': fault.name,
+      };
+  static RegionRect fromJson(Map<String, Object?> j) => RegionRect(
+      (j['width']! as num).toDouble(),
+      (j['height']! as num).toDouble(),
+      j['count']! as int,
+      fault: RegionFault.values.byName(j['fault']! as String));
+  @override
+  bool operator ==(Object o) =>
+      o is RegionRect &&
+      o.width == width &&
+      o.height == height &&
+      o.count == count &&
+      o.fault == fault;
+  @override
+  int get hashCode => Object.hash(width, height, count, fault);
+}
+
+/// Region [i] of a [RegionRect]: the rectangle inset by 10·i, closed.
+List<Vector2> regionRectLoop(RegionRect p, int i) {
+  final d = 10.0 * i;
+  return [
+    Vector2(d, d),
+    Vector2(p.width - d, d),
+    Vector2(p.width - d, p.height - d),
+    Vector2(d, p.height - d),
+  ];
+}
+
+/// A [RegionRect]'s plain POLYLINE child: open, two points, at mid height.
+GeometryPayload regionRectCentreline(RegionRect p) =>
+    polylinePayload([Vector2(0, p.height / 2), Vector2(p.width, p.height / 2)]);
+
+final class RegionRectType extends ParametricType<RegionRect> {
+  const RegionRectType(
+      {this.regionColor = const ByLayerColor(),
+      this.plainColor = const ByLayerColor()});
+
+  /// The colour of every region (fill and boundary), and of every plain
+  /// child, handed to [Generated] (spec 07 D3; RG11).
+  final DraftColor regionColor, plainColor;
+
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(RegionRect params, Transform2 toWorld) => Aabb2.fromPoints([
+        for (final c in regionRectLoop(params, 0)) toWorld.transformPoint(c),
+      ]);
+
+  /// The diagonal LINE comes **first** on purpose: the planner, not the
+  /// client, puts regions ahead of plain children (spec 07 D8). The open
+  /// POLYLINE (the mid-height centreline) comes last: a plain child of the
+  /// same kind as a region's boundary, which the planner must never match
+  /// against a boundary.
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    final p = view.paramsOf<RegionRect>(self)!;
+    return [
+      Generated(EntityKind.line,
+          linePayload(Vector2(0, 0), Vector2(p.width, p.height)),
+          color: plainColor),
+      for (var i = 0; i < p.count; i++)
+        Generated.region(
+            switch (i == p.count - 1 ? p.fault : null) {
+              RegionFault.open => polylinePayload(regionRectLoop(p, i)),
+              RegionFault.crossed => polylinePayload([
+                  for (final k in [0, 2, 1, 3]) regionRectLoop(p, i)[k],
+                ], closed: true),
+              _ => polylinePayload(regionRectLoop(p, i), closed: true),
+            },
+            color: regionColor),
+      Generated(EntityKind.polyline, regionRectCentreline(p),
+          color: plainColor),
+    ];
+  }
+}
+
 ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<ClipRect>(ClipRect.id, ClipRect.fromJson,
       const RectType<ClipRect>(Capability.geometry))
   ..register<SoftRect>(SoftRect.id, SoftRect.fromJson,
       const RectType<SoftRect>(Capability.components))
   ..register<Trip>(Trip.id, Trip.fromJson, const TripType())
-  ..register<Hinge>(Hinge.id, Hinge.fromJson, const HingeType());
+  ..register<Hinge>(Hinge.id, Hinge.fromJson, const HingeType())
+  ..register<RegionRect>(
+      RegionRect.id, RegionRect.fromJson, const RegionRectType());

@@ -21,9 +21,11 @@ const double kDraftTextPaperMm = 2.5;
 
 /// Spec 05 D2: a root-level entity on layer 0, ByLayer everything. A text
 /// takes the Standard style, left and baseline, with **no** override bits,
-/// so its width factor and oblique angle come from the style.
+/// so its width factor and oblique angle come from the style. [color]
+/// defaults to ByLayer; a parametric client may give its children a
+/// concrete one (spec 07 D3).
 EntityRecord draftRecord(Handle handle, Handle owner, EntityKind kind,
-        {String text = ''}) =>
+        {String text = '', DraftColor color = const ByLayerColor()}) =>
     EntityRecord(
       handle: handle,
       owner: owner,
@@ -32,7 +34,7 @@ EntityRecord draftRecord(Handle handle, Handle owner, EntityKind kind,
       linetype: ReservedHandles.byLayerLinetype,
       linetypeScale: 1.0,
       geomIndex: 0,
-      color: const ByLayerColor(),
+      color: color,
       lineweight: kByLayer,
       transparency: kByLayer,
       flags: 0,

@@ -245,10 +245,15 @@ class SelectTool extends Tool {
           return;
         }
         final ref = grips.grips[index];
-        // Ruling 03-9: a centre grip moves the whole selection.
+        final objects = grips.objects;
+        // Ruling 03-9: a centre grip moves the whole selection. An object
+        // grip reshapes through its provider (07 D11).
         final drag = ref.grip.role == GripRole.move
             ? GripDrag.move(ctx.document, ctx.selection.keys)
-            : GripDrag.reshape(ctx.document, ref.key, ref.grip);
+            : ref.object && objects != null
+                ? GripDrag.reshapeObject(
+                    ctx.document, ref.key, ref.grip, objects)
+                : GripDrag.reshape(ctx.document, ref.key, ref.grip);
         if (!_permitted(drag, ctx)) {
           _clickOnly = true;
           return;
@@ -757,11 +762,25 @@ class SelectTool extends Tool {
 
   /// Spec D7: the reshape preview, drawn by the overlay under its rebased
   /// world matrix (Ruling 03-3). One path per frame, independent of the
-  /// document and the selection size.
+  /// document and the selection size. An object reshape's preview is its
+  /// provider's pieces, in the same one path (07 D11).
   @override
   void paintWorldOverlay(Canvas canvas, Vector2 origin, double scale) {
     final drag = _drag;
     if (drag == null || drag.kind != DragKind.reshape) return;
+    final pieces = drag.objectPreview;
+    if (pieces != null) {
+      if (pieces.isEmpty) return;
+      _previewPaint.strokeWidth = kPreviewStrokePixels / scale;
+      final path = Path();
+      // Indexed: no iterator per frame.
+      for (var i = 0; i < pieces.length; i++) {
+        final (kind, payload) = pieces[i];
+        _addReshapePath(path, kind, payload, origin);
+      }
+      canvas.drawPath(path, _previewPaint);
+      return;
+    }
     final payload = drag.previewPayload;
     final kind = drag.leafKind;
     // A degenerate reshape: the canvas still shows the object unchanged.
@@ -773,8 +792,12 @@ class SelectTool extends Tool {
   /// [p] in rebased world, `world − origin`: no absolute world coordinate
   /// reaches float32. Arc angles go in unchanged, because the camera's
   /// y-flip and rotation are the matrix's business.
-  static Path _reshapePath(EntityKind kind, GeometryPayload p, Vector2 origin) {
-    final path = Path();
+  static Path _reshapePath(
+          EntityKind kind, GeometryPayload p, Vector2 origin) =>
+      _addReshapePath(Path(), kind, p, origin);
+
+  static Path _addReshapePath(
+      Path path, EntityKind kind, GeometryPayload p, Vector2 origin) {
     final c = p.coords;
     final ox = origin.x, oy = origin.y;
     switch (kind) {

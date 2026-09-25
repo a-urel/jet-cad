@@ -4,8 +4,10 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'page_panel.dart';
-import 'parametric/box.dart';
 import 'parametric/box_tool.dart';
+import 'parametric/catalog.dart';
+import 'parametric/wall_grips.dart';
+import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
 import 'selection_panel.dart';
 import 'shortcut_guard.dart';
@@ -72,6 +74,11 @@ class _PlannerShellState extends State<PlannerShell> {
   late final PolylineTool _polyline = PolylineTool(fill: _fill);
   late final RectangleTool _rectangle = RectangleTool(fill: _fill);
   final BoxTool _box = BoxTool();
+  // Spec 07 D11: the shell owns the Wall tool's settings; the Selection
+  // panel's Wall section edits them while the tool is active.
+  final ValueNotifier<WallSettings> _wallSettings =
+      ValueNotifier<WallSettings>(const WallSettings());
+  late final WallTool _wall = WallTool(_wallSettings);
   late final CircleTool _circle = CircleTool(fill: _fill);
   final ArcTool _arc = ArcTool();
   final TextTool _text = TextTool();
@@ -113,6 +120,13 @@ class _PlannerShellState extends State<PlannerShell> {
         tool: _box,
         drawing: true),
     PaletteEntry(
+        keyName: 'tool-wall',
+        label: 'Wall',
+        shortcut: 'W',
+        logicalKey: LogicalKeyboardKey.keyW,
+        tool: _wall,
+        drawing: true),
+    PaletteEntry(
         keyName: 'tool-circle',
         label: 'Circle',
         shortcut: 'C',
@@ -145,8 +159,10 @@ class _PlannerShellState extends State<PlannerShell> {
   //   controller prunes a dead key before the cache walks it.
   // - The grip cache is built after the outline cache, so on a selection
   //   change its listener runs after the outlines have been rebuilt.
+  // - Spec 07 D11: a selected wall's end grips come from `WallGrips`.
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
-  late final GripCache _grips = GripCache(_document, _selection, _outlines);
+  late final GripCache _grips =
+      GripCache(_document, _selection, _outlines, objects: WallGrips());
 
   late final ToolContext _context = ToolContext(
       document: _document,
@@ -218,7 +234,7 @@ class _PlannerShellState extends State<PlannerShell> {
     super.initState();
     // Spec 06 D13, Ruling 06-12: startupPlan builds its document with no
     // parametric object, so installing after it is safe.
-    _parametric = installBoxes(_document);
+    _parametric = installParametric(_document);
   }
 
   @override
@@ -228,6 +244,7 @@ class _PlannerShellState extends State<PlannerShell> {
       e.tool.dispose();
     }
     _fill.dispose();
+    _wallSettings.dispose();
     _grips.dispose();
     _outlines.dispose();
     _selection.dispose();
@@ -332,8 +349,14 @@ class _PlannerShellState extends State<PlannerShell> {
                     child: ShellShortcutGuard(
                       child: Column(
                         children: [
+                          // Spec 07 D11: while the Wall tool is active,
+                          // the panel edits its settings.
                           SelectionPanel(
-                              document: _document, selection: _selection),
+                              document: _document,
+                              selection: _selection,
+                              tools: _tools,
+                              wallTool: _wall,
+                              wallSettings: _wallSettings),
                           Expanded(
                             child: PagePanel(document: _document, page: _page),
                           ),

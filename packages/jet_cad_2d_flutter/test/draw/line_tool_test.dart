@@ -128,4 +128,21 @@ void main() {
     expect(bounds.left, closeTo(want.left, 1e-3));
     expect(bounds.bottom, closeTo(want.bottom, 1e-3));
   });
+
+  test(
+      'L7 hovering over a line\'s body, grid off, snaps to nothing: nearest '
+      'is not a drawing tool\'s kind (03 D8; 07 D11 joins walls by band)', () {
+    final s = drawScene();
+    final rig = drawRig(s.document, LineTool());
+    // 30% along the anchor line, 4 mm off its body: the body is within the
+    // aperture, its endpoints and midpoint are not.
+    final a = Vector2(kAnchorX, kAnchorY), b = Vector2(7300.9, 3190.1);
+    final d = (b - a).normalized();
+    final p = a + (b - a) * 0.3 + Vector2(-d.y, d.x) * 4;
+    final screen = screenOf(rig.camera, p.x, p.y);
+    hoverAt(rig, screen);
+    expect(rig.tool.hoverKind, isNull);
+    final raw = worldAt(rig, screen);
+    expect([rig.tool.hoverPoint.x, rig.tool.hoverPoint.y], [raw.x, raw.y]);
+  });
 }

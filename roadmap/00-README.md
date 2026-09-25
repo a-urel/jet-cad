@@ -254,7 +254,7 @@ cheap; learning it from a half-executed Plan is not.
 | 04 | page, grid, rulers | [2026-09-22](../docs/superpowers/specs/2026-09-22-page-grid-rulers-design.md) (rev 2, amended at execution) | [2026-09-22](../docs/superpowers/plans/2026-09-22-page-grid-rulers.md) | [2026-09-22](../docs/superpowers/notes/2026-09-22-plan-04-results.md) (merged `e4e3f80`, 2026-09-22, gate 16/16, look done 2026-09-23: macOS, Chrome, Firefox LGTM) |
 | 05 | drawing tools | [2026-09-23](../docs/superpowers/specs/2026-09-23-drawing-tools-design.md) (rev 2, amended at execution) | [2026-09-23](../docs/superpowers/plans/2026-09-23-drawing-tools.md) | [2026-09-23](../docs/superpowers/notes/2026-09-23-plan-05-results.md) (MERGED into `main` at `fb0f87d`. Gate 14/14: the look was LGTM on 2026-09-24, after `fix/counter-doorway`, `1a352cc`) |
 | 06 | parametric layer | [2026-09-24](../docs/superpowers/specs/2026-09-24-parametric-layer-design.md) (rev 2, amended at execution) | [2026-09-24](../docs/superpowers/plans/2026-09-24-parametric-layer.md) | [2026-09-24](../docs/superpowers/notes/2026-09-24-plan-06-results.md) (MERGED at `a6837d0`; gate 13/14; look OWED) |
-| 07 | walls | — | — | — |
+| 07 | walls | [2026-09-24](../docs/superpowers/specs/2026-09-24-walls-design.md) (rev 1, amended at execution) | [2026-09-24](../docs/superpowers/plans/2026-09-24-walls.md) | [2026-09-24](../docs/superpowers/notes/2026-09-24-plan-07-results.md) (executed on `plan-07/walls`, NOT merged; gate 11/13: macOS build and look OWED) |
 | 08 | openings | — | — | — |
 | 09 | symbol library | — | — | — |
 | 10 | rooms and area | — | — | — |
@@ -262,7 +262,7 @@ cheap; learning it from a half-executed Plan is not.
 | 12 | app shell | — | — | — |
 | 13 | export and print | — | — | — |
 
-**01–05 are executed, merged and looked at; 06 is merged (`a6837d0`) with its look OWED**; the other seven have not started. Update
+**01–05 are executed, merged and looked at; 06 is merged (`a6837d0`) with its look OWED; 07 is executed on `plan-07/walls`, not merged, with its macOS build and look OWED**; the other six have not started. Update
 this table as specs and plans land; `STATUS.md` at the repo root stays the
 authority on what is in flight. The render line's own plan table lives there,
 not here: six of seven merged, Plan G (web) unwritten, see the section above.
