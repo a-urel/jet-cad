@@ -1,5 +1,38 @@
 # jet-cad — project status
 
+**Last updated:** 2026-09-25. **Plan 07 (walls) is MERGED into `main` at
+`63c3878`, and `fix/post-07` at `1ae83f9`**, both `--no-ff` on the human's
+decision and pushed by the human. The human's report on 07: "it works,
+merged" (2026-09-25). No itemised look was recorded, and nothing was
+simulated to fill one in.
+- **What `fix/post-07` fixed** (the three defects 07 deferred; see
+  [2026-09-25-fix-post-07.md](docs/superpowers/notes/2026-09-25-fix-post-07.md)):
+  - ByLayer drafting on layer 0 rendered white. ACI 7 now resolves to a
+    foreground colour, which the floor planner derives from the paper:
+    black on White, Ivory and Grey, white on Blueprint. Walls stay black;
+  - the Page panel's Scale field kept focus after Enter. It now hands the
+    focus back. A tap elsewhere in the app without Enter shows the page's
+    scale again; a window blur keeps the typed text;
+  - Box m3: tapping the panel background refocused Width. Every panel field
+    now hands back past the others, in both panels.
+- **Gates on `fix/post-07` (Linux container):** engine 987 (+ 2 standing),
+  render layer 931 + 1 skip + 7 standing, app 157, web `✓ Built`.
+- **Debt the reviews found (in the note):**
+  - a resolver swap without a document edit does not repaint (render
+    layer; the app never does it);
+  - clicking or Tabbing from Scale into another text field keeps the
+    unsubmitted text;
+  - after a web alt-tab mid-edit, letters are dead until a canvas click;
+  - a pending Text-tool entry is lost on a web alt-tab (the same lifecycle
+    guard the Scale field dropped; breaks Ruling T7-b on web);
+  - on Blueprint: off-sheet drafting is white on the light surround, the
+    grid is nearly invisible, and the startup plan's colours stay dark.
+- **Next:** the human's choice. Either a `fix/` branch for the Text-tool
+  web alt-tab, or sub-project 08 (openings) from a brainstorm. See
+  [Resume here](#resume-here).
+
+*Earlier, 2026-09-24:*
+
 **Last updated:** 2026-09-24. **Plan 07 (walls) is EXECUTED on
 `plan-07/walls`, NOT MERGED.** The merge is the human's, `--no-ff`. **Exit
 gate 11 of 13: criterion 1's macOS half (`flutter build macos --release`
@@ -2033,7 +2066,21 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's look at Plan 07 (walls), on
+**Immediate next step: the human's choice of what comes after 07.**
+`main` is at `1ae83f9`: Plan 07 (walls) merged at `63c3878`, `fix/post-07`
+at `1ae83f9`, both pushed. **The options:**
+1. a `fix/` branch for the Text tool's pending entry, which is lost on a
+   web alt-tab (`text_entry_overlay.dart` uses the lifecycle guard the
+   Scale field dropped in `e0336f8`). The same branch could hand the focus
+   back to the canvas after an alt-tab mid-edit;
+2. sub-project 08 (openings), from a brainstorm. Read 07's consequences
+   for 08 first: a neighbour's fill can cover an opening cut close to a
+   joint ([the spike findings](docs/superpowers/notes/2026-09-24-walls-spike-findings.md)).
+
+Plan 06's itemised look is still OWED. For Plan 07 the human reported
+"it works"; no itemised look was recorded.
+
+*Before the merges, this paragraph read:* **Immediate next step: the human's look at Plan 07 (walls), on
 `plan-07/walls`, then the merge.** All eleven tasks are done
 (`f2daba5..330797c`), the final whole-branch review ran ("With fixes"), its
 fix wave landed at `d9c8609..55b55cb`, and the re-review returned **"Ready

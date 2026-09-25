@@ -1,9 +1,9 @@
 # 07 — Walls
 
-**Status:** EXECUTED on `plan-07/walls` (2026-09-24), NOT MERGED. Exit gate
-11 of 13: `flutter build macos --release` (criterion 1's macOS half) and the
-human's look (criterion 13) are OWED. The final whole-branch review and the
-merge (the human's, `--no-ff`) come next. Spec
+**Status:** MERGED into `main` at `63c3878` (2026-09-25), `--no-ff`; the
+three defects it deferred were fixed on `fix/post-07`, merged at `1ae83f9`
+([2026-09-25-fix-post-07.md](../docs/superpowers/notes/2026-09-25-fix-post-07.md)).
+The human reported "it works". Spec
 [2026-09-24-walls-design.md](../docs/superpowers/specs/2026-09-24-walls-design.md)
 (rev 1, amended at execution), plan
 [2026-09-24-walls.md](../docs/superpowers/plans/2026-09-24-walls.md), results
