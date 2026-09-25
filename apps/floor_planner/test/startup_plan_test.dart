@@ -3,6 +3,8 @@ import 'dart:ui' show Size;
 
 import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/parametric/catalog.dart';
+import 'package:floor_planner/parametric/opening.dart';
+import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/startup_plan.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -22,6 +24,15 @@ bool _pointInPolygon(Vector2 p, List<Vector2> poly) {
   }
   return inside;
 }
+
+/// The furniture: the root-owned regions' boundaries, ascending (spec 08
+/// D18). Wall pieces are regions too, but each belongs to its wall's group.
+List<Handle> furnitureOf(DraftDocument doc) => [
+      for (final slot in doc.entities.liveSlots)
+        if (doc.entities.ownerAt(slot) == doc.rootHandle &&
+            doc.fills.fillsOf(doc.entities.handleAt(slot)).isNotEmpty)
+          doc.entities.handleAt(slot),
+    ]..sort((a, b) => a.value.compareTo(b.value));
 
 void main() {
   late FlutterTextMeasurer measurer;
@@ -94,32 +105,39 @@ void main() {
   });
 
   test(
-      'SP1 the furniture is eight filled regions with the furniture '
-      'outline', () {
+      'SP1 the furniture is eight root-owned filled regions with the '
+      'furniture outline; the plan holds 549 entities', () {
     final doc = startupPlan(measurer);
-    final boundaries = <Handle>[];
-    for (final slot in doc.entities.liveSlots) {
-      final h = doc.entities.handleAt(slot);
-      if (doc.fills.fillsOf(h).isNotEmpty) boundaries.add(h);
-    }
+    final boundaries = furnitureOf(doc);
     expect(boundaries, hasLength(8));
     for (final b in boundaries) {
       final r = doc.entities.read(doc.entities.slotOf(b)!);
       expect(r.color, const TrueColor(0x8A6D3B));
       expect(r.lineweight, 25);
       final fill = doc.fills.fillsOf(b).single;
-      expect(
-          doc.entities.read(doc.entities.slotOf(fill)!).color, kDraftFillColor);
+      final f = doc.entities.read(doc.entities.slotOf(fill)!);
+      expect(f.color, kDraftFillColor);
+      expect(f.owner, doc.rootHandle);
     }
-    expect(doc.entities.liveCount, 509, reason: 'Ruling 05-12: 523 − 14');
+    // Spec 08 D18: 509 (Ruling 05-12: 523 − 14) − 70 hand-drawn entities
+    // (8 exterior and 10 partition lines, 7 doors × 4, 8 windows × 3) + 110
+    // parametric children: 72 for the walls (3 per piece: 2 + 3 + 5 + 3
+    // pieces for E1–E4, 3 + 2 + 3 + 2 + 1 for P1–P5, one more than each
+    // wall's openings), 14 for the doors (2 each) and 24 for the windows
+    // (3 each). Measured (Task 13, Ruling 08-18), not assumed.
+    expect(doc.entities.liveCount, 549);
   });
 
-  test('SP2 every fill draws over every floor-finish line (M-05r)', () {
+  test(
+      'SP2 every furniture fill draws over every floor-finish line (M-05r); '
+      'the walls\' pieces are built first, below both (08 D18)', () {
     final doc = startupPlan(measurer);
-    var maxFinish = 0, minFill = 1 << 62;
+    var maxFinish = 0, minFill = 1 << 62, maxWallChild = 0;
     for (final slot in doc.entities.liveSlots) {
       final r = doc.entities.read(slot);
-      if (r.kind == EntityKind.fill && r.handle.value < minFill) {
+      if (r.kind == EntityKind.fill &&
+          r.owner == doc.rootHandle &&
+          r.handle.value < minFill) {
         minFill = r.handle.value;
       }
       if (r.kind == EntityKind.line &&
@@ -127,9 +145,16 @@ void main() {
           r.handle.value > maxFinish) {
         maxFinish = r.handle.value;
       }
+      if (doc.components.get<WallParams>(r.owner) != null &&
+          r.handle.value > maxWallChild) {
+        maxWallChild = r.handle.value;
+      }
     }
     expect(maxFinish, greaterThan(0));
     expect(minFill, greaterThan(maxFinish));
+    expect(maxWallChild, greaterThan(0));
+    expect(maxWallChild, lessThan(maxFinish),
+        reason: 'the walls\' first children lie below the finishes');
   });
 
   test(
@@ -140,9 +165,8 @@ void main() {
     // Every furniture boundary (SP1's eight), as a polygon or a circle.
     final polygons = <List<Vector2>>[];
     final circles = <(Vector2, double)>[];
-    for (final slot in doc.entities.liveSlots) {
-      final h = doc.entities.handleAt(slot);
-      if (doc.fills.fillsOf(h).isEmpty) continue;
+    for (final h in furnitureOf(doc)) {
+      final slot = doc.entities.slotOf(h)!;
       final kind = doc.entities.kindAt(slot);
       final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
       if (kind == EntityKind.circle) {
@@ -222,9 +246,8 @@ void main() {
 
     final polygons = <List<Vector2>>[];
     final circles = <(Vector2, double)>[];
-    for (final slot in doc.entities.liveSlots) {
-      final h = doc.entities.handleAt(slot);
-      if (doc.fills.fillsOf(h).isEmpty) continue;
+    for (final h in furnitureOf(doc)) {
+      final slot = doc.entities.slotOf(h)!;
       final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
       if (doc.entities.kindAt(slot) == EntityKind.circle) {
         circles.add((payload.pointAt(0), payload.scalars[0]));
@@ -287,11 +310,94 @@ void main() {
     expect(sampled, 7 * 21 * 37);
   });
 
-  test('SP5 the sample plan holds no parametric object (spec 06 D13)', () {
+  test(
+      'SP5 the sample plan is nine walls, seven doors and eight windows, '
+      'exactly as spec 08 D18\'s tables say; no gap, no box; drift() and '
+      'diagnostics() are empty', () {
     final doc = startupPlan(measurer);
+    const x0 = kPlanOriginX, y0 = kPlanOriginY;
+    const x1 = kPlanOriginX + kPlanWidth, y1 = kPlanOriginY + kPlanHeight;
+    const c = Justification.centre;
+    // E1–E4, P1–P5, in the table's order, which is the build order.
+    const walls = [
+      WallParams(x0 + 125, y0 + 125, x1 - 125, y0 + 125, 250, c),
+      WallParams(x1 - 125, y0 + 125, x1 - 125, y1 - 125, 250, c),
+      WallParams(x1 - 125, y1 - 125, x0 + 125, y1 - 125, 250, c),
+      WallParams(x0 + 125, y1 - 125, x0 + 125, y0 + 125, 250, c),
+      WallParams(x0 + 5000, y0 + 125, x0 + 5000, y1 - 125, 120, c),
+      WallParams(x0 + 125, y0 + 5000, x0 + 5000, y0 + 5000, 120, c),
+      WallParams(x0 + 5000, y0 + 3500, x1 - 125, y0 + 3500, 120, c),
+      WallParams(x0 + 2600, y0 + 5000, x0 + 2600, y1 - 125, 120, c),
+      WallParams(x0 + 9500, y0 + 125, x0 + 9500, y0 + 3500, 120, c),
+    ];
+    final ws = doc.components.withComponent<WallParams>().toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    expect([for (final w in ws) doc.components.get<WallParams>(w)], walls);
+    for (final w in ws) {
+      expect(doc.tree[w], isA<GroupNode>());
+      expect(doc.tree[w]!.parent, doc.rootHandle);
+      expect((doc.tree[w]! as GroupNode).transform, Transform2.identity());
+    }
+    final [e1, e2, e3, e4, p1, p2, p3, p4, _] = ws;
+    const start = HingeEnd.start;
+    const left = SwingSide.left, right = SwingSide.right;
+    const door = OpeningKind.door, window = OpeningKind.window;
+    final openings = [
+      OpeningParams(p1, 5875, 900, door, hinge: start, swing: left),
+      OpeningParams(p1, 1375, 900, door, hinge: start, swing: right),
+      OpeningParams(p4, 2800, 800, door, hinge: start, swing: right),
+      OpeningParams(p2, 1075, 800, door, hinge: start, swing: right),
+      OpeningParams(p3, 2000, 800, door, hinge: start, swing: left),
+      OpeningParams(p3, 6500, 700, door, hinge: start, swing: left),
+      OpeningParams(e1, 6375, 1000, door, hinge: start, swing: left),
+      OpeningParams(e3, 12575, 1200, window),
+      OpeningParams(e3, 9975, 1200, window),
+      OpeningParams(e3, 6675, 1200, window),
+      OpeningParams(e3, 3075, 1200, window),
+      OpeningParams(e2, 1675, 1200, window),
+      OpeningParams(e2, 6075, 1800, window),
+      OpeningParams(e4, 6675, 1000, window),
+      OpeningParams(e4, 2275, 1400, window),
+    ];
+    final os = doc.components.withComponent<OpeningParams>().toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    expect(
+        [for (final o in os) doc.components.get<OpeningParams>(o)], openings);
+    for (final o in os) {
+      expect(doc.tree[o]!.parent, doc.rootHandle);
+      expect((doc.tree[o]! as GroupNode).transform, Transform2.identity());
+    }
+    expect(os.first.value, greaterThan(ws.last.value),
+        reason: 'the walls, then the openings');
+    expect(doc.components.withComponent<BoxParams>(), isEmpty);
     final system = ParametricSystem(doc, parametricCatalog);
     expect(system.drift(), isEmpty);
+    expect(system.diagnostics(), isEmpty,
+        reason: 'no clamp, no overlap, no no-fit, no dangling reference');
+  });
+
+  test(
+      'SP6 the sample plan saves, loads and saves again byte for byte; the '
+      'loaded plan has no drift and no diagnostic (spec 08 D19)', () {
+    final doc = startupPlan(measurer);
+    final saved = DraftDocumentCodec.encodeToString(doc);
+    final loaded = DraftDocumentCodec.decodeString(saved, measurer: measurer,
+        registerComponents: (r) {
+      PageComponent.register(r);
+      parametricCatalog.registerComponents(r);
+    });
+    final system = installParametric(loaded);
+    expect(system.drift(), isEmpty);
     expect(system.diagnostics(), isEmpty);
-    expect(doc.components.withComponent<BoxParams>(), isEmpty);
+    expect(loaded.entities.liveCount, doc.entities.liveCount);
+    for (final o in doc.components.withComponent<OpeningParams>()) {
+      expect(loaded.components.get<OpeningParams>(o),
+          doc.components.get<OpeningParams>(o));
+    }
+    for (final w in doc.components.withComponent<WallParams>()) {
+      expect(loaded.components.get<WallParams>(w),
+          doc.components.get<WallParams>(w));
+    }
+    expect(DraftDocumentCodec.encodeToString(loaded), saved);
   });
 }
